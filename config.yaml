@@ -51,14 +51,18 @@ model:
   candidate_grid_goals: 6
   model_grid_goals: 10
   solver_grid_goals: 14
-  # Calibrated on free Football-Data Big Five h2h+totals odds, 2019/20-2024/25.
-  # This intentionally differs from config.example.yaml's World-Cup-validated
-  # defaults (devig_method: power, dixon_coles_rho: -0.04, odds-only). See README.
+  # The four calibration values below are managed by the profile system:
+  # calibration_profiles.yaml is the source of truth; run scripts/select_profile.py
+  # to switch. Do NOT hand-edit them or `copy config.example.yaml config.yaml` over
+  # them. Current = profile "big5_h2h_totals" (Football-Data Big Five h2h+totals,
+  # 2019/20-2024/25), aligned with the live h2h,totals market. Profile
+  # "worldcup_1x2" holds the World-Cup-validated power / -0.04 / odds-only values.
+  # Run scripts/calibrate_sweep.py to pick devig_method + dixon_coles_rho on data
+  # before changing them.
   dixon_coles_rho: -0.08
   devig_method: multiplicative
   # Set >0 only if your provider/plan returns a correct_score market.
   correct_score_blend_weight: 0.0
-  # Keep odds as the anchor; add a small ratings/form blend for current tournament state.
   odds_weight: 0.95
   ratings_weight: 0.05
   # Applied only when no market odds are available; odds already price venue/host effects.

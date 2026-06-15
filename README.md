@@ -6,18 +6,6 @@ The important bit: this is not a "most likely exact score" picker. The decision 
 
 ## Quick Start
 
-Linux / macOS (bash):
-
-```bash
-python -m venv .venv
-source .venv/bin/activate
-pip install -e .
-cp config.example.yaml config.yaml
-python -m superbru_score_engine predict --config config.yaml --fixtures examples/fixtures.csv --odds-json examples/odds_snapshot.json --out-dir outputs
-```
-
-Windows (PowerShell):
-
 ```powershell
 python -m venv .venv
 .\.venv\Scripts\Activate.ps1
@@ -25,8 +13,6 @@ pip install -e .
 copy config.example.yaml config.yaml
 python -m superbru_score_engine predict --config config.yaml --fixtures examples/fixtures.csv --odds-json examples/odds_snapshot.json --out-dir outputs
 ```
-
-`pip install -e .` also installs a `superbru-score` console script, so `superbru-score predict ...` is equivalent to `python -m superbru_score_engine predict ...`.
 
 The sample command uses the included offline odds snapshot so the app can be smoke-tested without API credentials.
 
@@ -40,8 +26,6 @@ Set API keys in `config.yaml` or environment variables:
 The live HTTP adapters use Python's standard-library `urllib`, so no separate `requests` or `httpx` dependency is required. The Oddspedia adapter verifies that the configured endpoint returns structured odds JSON. If it gets HTML, widget content, or fixture-only data, the CLI falls back to The Odds API when that provider is configured.
 
 Oddspedia's `getIdsFromMatchList` style responses are useful for fixture discovery and historical/completed results. They include fields such as `league_id`, `id`, `md`, `ht`, `at`, `hscore`, and `ascore`. They do not include bookmaker markets, so they are not enough for EV score prediction by themselves. For live predictions, use an Oddspedia endpoint that returns bookmaker odds, or use The Odds API as the odds source.
-
-Because of that split, `providers.oddspedia` (the odds source) and `providers.results.oddspedia` (the fixtures/results source) are configured separately. The shipped `config.yaml` leaves the odds `base_url` empty and uses The Odds API for odds, while pointing the results block at the Oddspedia fixtures widget. Do not copy the widget URL into the odds block: the adapter will reject it because it carries no markets.
 
 The Odds API v4 returns JSON bookmaker/event/market structures for sport odds, including `h2h` and `totals`; correct-score availability depends on plan/sport/market coverage. The default config requests `h2h,totals` only, so correct-score blending is disabled unless you explicitly request and receive a `correct_score`-style market. See:
 
@@ -134,5 +118,3 @@ Manual home/host advantage is applied only on the ratings-only fallback path. Wh
 The default de-vig method is `power`, and the default Dixon-Coles correction is `dixon_coles_rho: -0.04`, after a Football-Data 1X2-odds backtest on the 2014, 2018, and 2022 World Cups. In that sweep, `power` slightly beat additive and multiplicative de-vig. The backtest did not include Over/Under totals, so treat it as a useful calibration anchor rather than final proof for the live `h2h,totals` pipeline.
 
 The default odds/ratings blend is `odds_weight: 1.0` and `ratings_weight: 0.0` for market-backed matches after the same Football-Data grid search. Ratings are still used as the fallback when no usable 1X2 market exists, but they are not blended into bookmaker-backed rates by default.
-
-These World-Cup-validated values are what `config.example.yaml` ships. The bundled `config.yaml` instead carries a Football-Data Big Five league calibration (`devig_method: multiplicative`, `dixon_coles_rho: -0.08`, plus a small `ratings_weight: 0.05` form blend). That club-league sweep is only a proxy for World Cup matches, so treat the two configs as alternative calibration anchors and pick whichever you trust more for the fixtures you are predicting.

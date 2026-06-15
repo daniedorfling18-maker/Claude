@@ -1,0 +1,2 @@
+[console_scripts]
+superbru-score = superbru_score_engine.cli:main

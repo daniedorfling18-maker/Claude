@@ -1,6 +1,4 @@
-"""World Cup 2026 Superbru score-prediction engine."""
+from .outputs import prediction_rows, write_outputs
 
-__all__ = ["__version__"]
-
-__version__ = "0.1.0"
+__all__ = ["prediction_rows", "write_outputs"]
 

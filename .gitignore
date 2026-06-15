@@ -16,3 +16,6 @@ outputs/
 
 # Local secrets / overrides
 .env
+
+# uploaded archives
+*.zip

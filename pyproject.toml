@@ -15,9 +15,14 @@ dependencies = [
     "PyYAML>=6.0",
 ]
 
+[project.optional-dependencies]
+# Test / backtest tooling: pip install -e ".[dev]"
+dev = [
+    "pytest>=7",
+]
+
 [project.scripts]
 superbru-score = "superbru_score_engine.cli:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
-

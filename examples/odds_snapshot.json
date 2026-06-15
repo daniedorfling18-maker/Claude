@@ -1,0 +1,188 @@
+[
+  {
+    "id": "wc26-001",
+    "sport_key": "soccer_fifa_world_cup",
+    "commence_time": "2026-06-15T19:00:00Z",
+    "home_team": "Mexico",
+    "away_team": "South Africa",
+    "neutral": true,
+    "venue_country": "Mexico",
+    "stage": "Group A",
+    "bookmakers": [
+      {
+        "key": "samplebook_a",
+        "title": "SampleBook A",
+        "last_update": "2026-06-15T08:00:00Z",
+        "markets": [
+          {
+            "key": "h2h",
+            "outcomes": [
+              {"name": "Mexico", "price": 1.72},
+              {"name": "Draw", "price": 3.55},
+              {"name": "South Africa", "price": 5.40}
+            ]
+          },
+          {
+            "key": "totals",
+            "outcomes": [
+              {"name": "Over", "price": 1.95, "point": 2.5},
+              {"name": "Under", "price": 1.87, "point": 2.5}
+            ]
+          },
+          {
+            "key": "correct_score",
+            "outcomes": [
+              {"name": "0-0", "price": 8.5},
+              {"name": "1-0", "price": 6.2},
+              {"name": "1-1", "price": 6.8},
+              {"name": "2-0", "price": 7.4},
+              {"name": "2-1", "price": 8.0},
+              {"name": "0-1", "price": 14.0},
+              {"name": "0-2", "price": 31.0},
+              {"name": "1-2", "price": 19.0},
+              {"name": "2-2", "price": 15.0},
+              {"name": "3-0", "price": 13.0},
+              {"name": "3-1", "price": 14.0},
+              {"name": "3-2", "price": 26.0}
+            ]
+          }
+        ]
+      },
+      {
+        "key": "samplebook_b",
+        "title": "SampleBook B",
+        "last_update": "2026-06-15T08:05:00Z",
+        "markets": [
+          {
+            "key": "h2h",
+            "outcomes": [
+              {"name": "Mexico", "price": 1.76},
+              {"name": "Draw", "price": 3.45},
+              {"name": "South Africa", "price": 5.10}
+            ]
+          },
+          {
+            "key": "totals",
+            "outcomes": [
+              {"name": "Over", "price": 2.02, "point": 2.5},
+              {"name": "Under", "price": 1.82, "point": 2.5}
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "id": "wc26-002",
+    "sport_key": "soccer_fifa_world_cup",
+    "commence_time": "2026-06-16T00:00:00Z",
+    "home_team": "Canada",
+    "away_team": "Japan",
+    "neutral": true,
+    "venue_country": "Canada",
+    "stage": "Group B",
+    "bookmakers": [
+      {
+        "key": "samplebook_a",
+        "title": "SampleBook A",
+        "last_update": "2026-06-15T08:00:00Z",
+        "markets": [
+          {
+            "key": "h2h",
+            "outcomes": [
+              {"name": "Canada", "price": 2.62},
+              {"name": "Draw", "price": 3.20},
+              {"name": "Japan", "price": 2.82}
+            ]
+          },
+          {
+            "key": "totals",
+            "outcomes": [
+              {"name": "Over", "price": 2.08, "point": 2.5},
+              {"name": "Under", "price": 1.78, "point": 2.5}
+            ]
+          }
+        ]
+      },
+      {
+        "key": "samplebook_b",
+        "title": "SampleBook B",
+        "last_update": "2026-06-15T08:05:00Z",
+        "markets": [
+          {
+            "key": "h2h",
+            "outcomes": [
+              {"name": "Canada", "price": 2.58},
+              {"name": "Draw", "price": 3.25},
+              {"name": "Japan", "price": 2.90}
+            ]
+          },
+          {
+            "key": "totals",
+            "outcomes": [
+              {"name": "Over", "price": 2.05, "point": 2.5},
+              {"name": "Under", "price": 1.80, "point": 2.5}
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "id": "wc26-003",
+    "sport_key": "soccer_fifa_world_cup",
+    "commence_time": "2026-06-16T19:00:00Z",
+    "home_team": "Brazil",
+    "away_team": "Germany",
+    "neutral": true,
+    "venue_country": "United States",
+    "stage": "Group C",
+    "bookmakers": [
+      {
+        "key": "samplebook_a",
+        "title": "SampleBook A",
+        "last_update": "2026-06-15T08:00:00Z",
+        "markets": [
+          {
+            "key": "h2h",
+            "outcomes": [
+              {"name": "Brazil", "price": 2.34},
+              {"name": "Draw", "price": 3.28},
+              {"name": "Germany", "price": 3.10}
+            ]
+          },
+          {
+            "key": "totals",
+            "outcomes": [
+              {"name": "Over", "price": 1.88, "point": 2.5},
+              {"name": "Under", "price": 1.95, "point": 2.5}
+            ]
+          }
+        ]
+      },
+      {
+        "key": "samplebook_b",
+        "title": "SampleBook B",
+        "last_update": "2026-06-15T08:05:00Z",
+        "markets": [
+          {
+            "key": "h2h",
+            "outcomes": [
+              {"name": "Brazil", "price": 2.38},
+              {"name": "Draw", "price": 3.22},
+              {"name": "Germany", "price": 3.05}
+            ]
+          },
+          {
+            "key": "totals",
+            "outcomes": [
+              {"name": "Over", "price": 1.91, "point": 2.5},
+              {"name": "Under", "price": 1.91, "point": 2.5}
+            ]
+          }
+        ]
+      }
+    ]
+  }
+]
+

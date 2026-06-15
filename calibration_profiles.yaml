@@ -18,7 +18,9 @@ calibration_profiles:
 
   # Big-Five-league-validated: h2h + totals, 2019/20-2024/25. Right market
   # structure (matches the live h2h,totals feed), but club leagues, not the
-  # World Cup. Active until scripts/calibrate_sweep.py picks a data-backed winner.
+  # World Cup. OOS-validated 2026-06-15: #1 h2h_totals cell on held-out 2024/25,
+  # beats the naive baseline there; the -0.04 alternative overfits. Keep this.
+  # Evidence: calibration/ (train vs held-out validation).
   big5_h2h_totals:
     devig_method: multiplicative
     dixon_coles_rho: -0.08

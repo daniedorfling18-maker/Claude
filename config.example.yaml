@@ -1,6 +1,10 @@
 seed: 20260611
 
 providers:
+  # Odds providers (preferred / oddspedia / the_odds_api) must return bookmaker
+  # markets (h2h, totals, ...) for the EV model. Result providers
+  # (providers.results.*) only need fixtures + scores, so the Oddspedia widget
+  # is fine there but must NOT be used as an odds endpoint (it has no markets).
   preferred: oddspedia
   oddspedia:
     api_key_env: ODDSPEDIA_API_TOKEN

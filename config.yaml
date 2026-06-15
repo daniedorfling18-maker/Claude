@@ -1,0 +1,93 @@
+seed: 20260611
+
+providers:
+  # Odds providers (preferred / oddspedia / the_odds_api) must return bookmaker
+  # markets (h2h, totals, ...) for the EV model. Result providers
+  # (providers.results.*) only need fixtures + scores, so the Oddspedia widget
+  # is fine there but must NOT be used as an odds endpoint (it has no markets).
+  preferred: the_odds_api
+  oddspedia:
+    api_key_env: ODDSPEDIA_API_TOKEN
+    api_key_param: api_token
+    # Odds endpoint only. The fixtures widget used under providers.results does
+    # not return bookmaker markets, so leave this empty unless your Oddspedia
+    # plan provides a JSON odds feed. With preferred: the_odds_api this block is
+    # dormant and the model takes odds from The Odds API.
+    base_url: ""
+    params:
+      sport_id: 1
+    rate_limit_seconds: 1.0
+  the_odds_api:
+    api_key_env: THE_ODDS_API_KEY
+    sport_key: soccer_fifa_world_cup
+    regions: eu
+    markets: h2h,totals
+    odds_format: decimal
+    rate_limit_seconds: 1.0
+  results:
+    preferred: oddspedia
+    min_commence_time: "2026-06-11T00:00:00Z"
+    completed_statuses:
+      - 16
+      - finished
+      - complete
+      - completed
+      - full-time
+      - ft
+    oddspedia:
+      api_key_env: ODDSPEDIA_API_TOKEN
+      api_key_param: api_token
+      base_url: "https://widgets.oddspedia.com/api/matches"
+      params:
+        lang: en
+        sport_id: 1
+        category_id: 575
+        tournament_id: 3
+        type: list
+        top: ""
+      rate_limit_seconds: 1.0
+
+model:
+  candidate_grid_goals: 6
+  model_grid_goals: 10
+  solver_grid_goals: 14
+  # Calibrated on free Football-Data Big Five h2h+totals odds, 2019/20-2024/25.
+  # This intentionally differs from config.example.yaml's World-Cup-validated
+  # defaults (devig_method: power, dixon_coles_rho: -0.04, odds-only). See README.
+  dixon_coles_rho: -0.08
+  devig_method: multiplicative
+  # Set >0 only if your provider/plan returns a correct_score market.
+  correct_score_blend_weight: 0.0
+  # Keep odds as the anchor; add a small ratings/form blend for current tournament state.
+  odds_weight: 0.95
+  ratings_weight: 0.05
+  # Applied only when no market odds are available; odds already price venue/host effects.
+  home_advantage_goals: 0.18
+  host_teams:
+    - United States
+    - USA
+    - Canada
+    - Mexico
+  low_data_prior_sigma: 0.25
+
+superbru:
+  ci_cutoff: 1.5
+  tie_epsilon: 0.005
+  contrarian: false
+  contrarian_weight: 0.0
+  # Superbru scores 90 minutes unless drawn after 90; then it scores after extra time.
+  # Penalty shootouts are still scored as draws.
+  knockout_result_basis: regular_or_extra_time_if_drawn
+
+betting:
+  enabled: false
+  min_expected_return: 0.02
+  max_kelly_fraction: 0.02
+  min_model_probability: 0.55
+  max_decimal_odds: 2.10
+  match_winners_only: true
+  include_draws: false
+
+paths:
+  cache_dir: work/cache
+  ratings_store: work/ratings.json

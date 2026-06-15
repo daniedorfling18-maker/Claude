@@ -1,0 +1,28 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "superbru-score-engine"
+version = "0.1.0"
+description = "Expected-points score prediction engine for World Cup 2026 Superbru"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "numpy>=1.24",
+    "pandas>=2.0",
+    "scipy>=1.10",
+    "PyYAML>=6.0",
+]
+
+[project.optional-dependencies]
+# Test / backtest tooling: pip install -e ".[dev]"
+dev = [
+    "pytest>=7",
+]
+
+[project.scripts]
+superbru-score = "superbru_score_engine.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]

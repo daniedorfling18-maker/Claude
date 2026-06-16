@@ -5,10 +5,11 @@ import numpy as np
 from superbru_score_engine.config import ModelConfig, RatingsConfig
 from superbru_score_engine.ingest import MatchOdds, MarketOdds, OutcomeOdds
 from superbru_score_engine.model import OddsToScorelineModel
-from superbru_score_engine.model.devig import FairOutcomeMarket
+from superbru_score_engine.model.devig import FairAsianHandicapMarket, FairOutcomeMarket
 from superbru_score_engine.model.dixon_coles import apply_dixon_coles
 from superbru_score_engine.model.poisson import (
     independent_poisson_matrix,
+    matrix_asian_handicap_home_probability,
     matrix_over_probability,
     outcome_probabilities,
     solve_lambdas,
@@ -117,3 +118,60 @@ def test_build_distribution_fits_multiple_total_lines_end_to_end() -> None:
     assert distribution.fair_total is not None and distribution.fair_total.line == 2.5
     # All three lines are matched simultaneously to within a tight tolerance.
     assert distribution.diagnostics["model_over_rmse_across_lines"] < 0.01
+
+
+def test_asian_handicap_weight_zero_reproduces_existing_lambdas() -> None:
+    base_match = _market_match()
+    ah_match = MatchOdds(
+        match_id="m1-ah",
+        commence_time=base_match.commence_time,
+        home_team=base_match.home_team,
+        away_team=base_match.away_team,
+        markets={
+            **base_match.markets,
+            "spreads": (
+                MarketOdds(
+                    key="spreads",
+                    bookmaker="unit-test",
+                    outcomes=(
+                        OutcomeOdds("Brazil", 1.95, point=-0.5, description="home"),
+                        OutcomeOdds("Japan", 1.95, point=0.5, description="away"),
+                    ),
+                ),
+            ),
+        },
+    )
+    config = ModelConfig(odds_weight=1.0, ratings_weight=0.0, dixon_coles_rho=0.0, asian_handicap_weight=0.0)
+    ratings = RatingsStore(config=RatingsConfig(use_as_fallback_only=True))
+
+    base_distribution = OddsToScorelineModel(config, ratings).build_distribution(base_match)
+    ah_distribution = OddsToScorelineModel(config, ratings).build_distribution(ah_match)
+
+    assert ah_distribution.diagnostics["has_asian_handicap"] is True
+    assert ah_distribution.diagnostics["solver_asian_handicap_weight"] == 0.0
+    assert abs(base_distribution.lambda_home - ah_distribution.lambda_home) < 1e-9
+    assert abs(base_distribution.lambda_away - ah_distribution.lambda_away) < 1e-9
+
+
+def test_asian_handicap_constraint_is_reported_when_enabled() -> None:
+    target_matrix = independent_poisson_matrix(1.7, 0.9, 14)
+    target = outcome_probabilities(target_matrix)
+    fair = FairOutcomeMarket(home=float(target[0]), draw=float(target[1]), away=float(target[2]))
+    ah_home = matrix_asian_handicap_home_probability(target_matrix, -0.5)
+    fair_ah = FairAsianHandicapMarket(line=-0.5, home=ah_home, away=1.0 - ah_home, count=1)
+
+    lambda_home, lambda_away, diagnostics = solve_lambdas(
+        fair_1x2=fair,
+        fair_total=None,
+        solver_grid_goals=14,
+        initial_total_goals=2.6,
+        dixon_coles_rho=0.0,
+        fair_asian_handicap=fair_ah,
+        asian_handicap_weight=0.2,
+    )
+    fitted = independent_poisson_matrix(lambda_home, lambda_away, 14)
+    fitted_ah_home = matrix_asian_handicap_home_probability(fitted, -0.5)
+
+    assert diagnostics["solver_has_asian_handicap"] is True
+    assert diagnostics["solver_asian_handicap_weight"] == 0.2
+    assert abs(fitted_ah_home - ah_home) < 0.01

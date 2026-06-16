@@ -31,6 +31,7 @@ from .runner import naive_baseline_pick, reliability_cells
 
 
 FOOTBALL_DATA_BASE_URL = "https://www.football-data.co.uk/mmz4281"
+BestMode = tuple[float, str, float, float, float, pd.DataFrame]
 
 
 def run_football_data_league_backtest(args: argparse.Namespace, config: AppConfig) -> int:
@@ -50,14 +51,25 @@ def run_football_data_league_backtest(args: argparse.Namespace, config: AppConfi
     odds_path.write_text(json.dumps([event_row(match) for match in raw_matches], indent=2), encoding="utf-8")
 
     market_modes = _string_grid(args.market_mode_grid) or ["h2h", "h2h_totals"]
-    compare_on_totals_subset = "h2h_totals" in market_modes
+    compare_on_totals_subset = any(_mode_uses_totals(mode) for mode in market_modes)
+    compare_on_ah_subset = any(_mode_uses_asian_handicap(mode) for mode in market_modes)
     if compare_on_totals_subset:
         raw_matches = [match for match in raw_matches if match.get("over_25") and match.get("under_25")]
+    if compare_on_ah_subset:
+        raw_matches = [
+            match
+            for match in raw_matches
+            if match.get("ah_line") is not None and match.get("ah_home_price") and match.get("ah_away_price")
+        ]
 
     rho_grid = _float_grid(args.rho_grid) or [config.model.dixon_coles_rho]
     ci_grid = _float_grid(args.ci_grid) or [config.superbru.ci_cutoff]
     devig_methods = _string_grid(args.devig_method_grid) or [config.model.devig_method]
-    total_combinations = len(market_modes) * len(devig_methods) * len(rho_grid) * len(ci_grid)
+    ah_weight_grid = _float_grid(getattr(args, "asian_handicap_weight_grid", "")) or [config.model.asian_handicap_weight]
+    total_combinations = sum(
+        len(devig_methods) * len(rho_grid) * len(ci_grid) * (len(ah_weight_grid) if _mode_uses_asian_handicap(mode) else 1)
+        for mode in market_modes
+    )
     completed_combinations = 0
     _write_progress(
         progress_path,
@@ -71,52 +83,61 @@ def run_football_data_league_backtest(args: argparse.Namespace, config: AppConfi
     )
 
     calibration_rows: list[dict[str, Any]] = []
-    best_by_mode: dict[str, tuple[float, str, float, float, pd.DataFrame]] = {}
+    best_by_mode: dict[str, BestMode] = {}
     for market_mode in market_modes:
+        mode_ah_weights = ah_weight_grid if _mode_uses_asian_handicap(market_mode) else [0.0]
         for devig_method in devig_methods:
             for rho in rho_grid:
                 for ci_cutoff in ci_grid:
-                    trial_config = replace(
-                        config,
-                        model=replace(config.model, dixon_coles_rho=rho, devig_method=devig_method),
-                        superbru=replace(config.superbru, ci_cutoff=ci_cutoff),
-                    )
-                    frame = evaluate_league_matches(raw_matches, trial_config, market_mode, max_workers=int(args.max_workers))
-                    avg_model = float(frame["model_points"].mean()) if not frame.empty else 0.0
-                    avg_naive = float(frame["naive_points"].mean()) if not frame.empty else 0.0
-                    row = {
-                        "market_mode": market_mode,
-                        "devig_method": devig_method,
-                        "dixon_coles_rho": rho,
-                        "ci_cutoff": ci_cutoff,
-                        "matches": int(len(frame)),
-                        "avg_model_points": avg_model,
-                        "avg_naive_points": avg_naive,
-                        "edge_vs_naive": avg_model - avg_naive,
-                        "exact_hits": int((frame["model_points"] == 3.0).sum()) if not frame.empty else 0,
-                        "close_hits": int((frame["model_points"] == 1.5).sum()) if not frame.empty else 0,
-                        "outcome_only_hits": int((frame["model_points"] == 1.0).sum()) if not frame.empty else 0,
-                        "misses": int((frame["model_points"] == 0.0).sum()) if not frame.empty else 0,
-                    }
-                    calibration_rows.append(row)
-                    completed_combinations += 1
-                    pd.DataFrame(calibration_rows).sort_values("avg_model_points", ascending=False).to_csv(
-                        partial_calibration_path,
-                        index=False,
-                    )
-                    _write_progress(
-                        progress_path,
-                        {
-                            "status": "running",
-                            "completed_combinations": completed_combinations,
-                            "total_combinations": total_combinations,
+                    for ah_weight in mode_ah_weights:
+                        trial_config = replace(
+                            config,
+                            model=replace(
+                                config.model,
+                                dixon_coles_rho=rho,
+                                devig_method=devig_method,
+                                asian_handicap_weight=ah_weight,
+                            ),
+                            superbru=replace(config.superbru, ci_cutoff=ci_cutoff),
+                        )
+                        frame = evaluate_league_matches(raw_matches, trial_config, market_mode, max_workers=int(args.max_workers))
+                        avg_model = float(frame["model_points"].mean()) if not frame.empty else 0.0
+                        avg_naive = float(frame["naive_points"].mean()) if not frame.empty else 0.0
+                        row = {
+                            "market_mode": market_mode,
+                            "devig_method": devig_method,
+                            "dixon_coles_rho": rho,
+                            "ci_cutoff": ci_cutoff,
+                            "asian_handicap_weight": ah_weight,
                             "matches": int(len(frame)),
-                            "last_completed": row,
-                        },
-                    )
-                    current_best = best_by_mode.get(market_mode)
-                    if current_best is None or avg_model > current_best[0]:
-                        best_by_mode[market_mode] = (avg_model, devig_method, rho, ci_cutoff, frame)
+                            "avg_model_points": avg_model,
+                            "avg_naive_points": avg_naive,
+                            "edge_vs_naive": avg_model - avg_naive,
+                            "exact_hits": int((frame["model_points"] == 3.0).sum()) if not frame.empty else 0,
+                            "close_hits": int((frame["model_points"] == 1.5).sum()) if not frame.empty else 0,
+                            "outcome_only_hits": int((frame["model_points"] == 1.0).sum()) if not frame.empty else 0,
+                            "misses": int((frame["model_points"] == 0.0).sum()) if not frame.empty else 0,
+                            "has_asian_handicap": bool(_mode_uses_asian_handicap(market_mode)),
+                        }
+                        calibration_rows.append(row)
+                        completed_combinations += 1
+                        pd.DataFrame(calibration_rows).sort_values("avg_model_points", ascending=False).to_csv(
+                            partial_calibration_path,
+                            index=False,
+                        )
+                        _write_progress(
+                            progress_path,
+                            {
+                                "status": "running",
+                                "completed_combinations": completed_combinations,
+                                "total_combinations": total_combinations,
+                                "matches": int(len(frame)),
+                                "last_completed": row,
+                            },
+                        )
+                        current_best = best_by_mode.get(market_mode)
+                        if current_best is None or avg_model > current_best[0]:
+                            best_by_mode[market_mode] = (avg_model, devig_method, rho, ci_cutoff, ah_weight, frame)
 
     calibration = pd.DataFrame(calibration_rows).sort_values(["market_mode", "avg_model_points"], ascending=[True, False])
     calibration_path = out_dir / "football_data_league_calibration.csv"
@@ -124,14 +145,15 @@ def run_football_data_league_backtest(args: argparse.Namespace, config: AppConfi
 
     frames: list[pd.DataFrame] = []
     summaries: dict[str, dict[str, Any]] = {}
-    for market_mode, (_, devig_method, rho, ci_cutoff, frame) in best_by_mode.items():
+    for market_mode, (_, devig_method, rho, ci_cutoff, ah_weight, frame) in best_by_mode.items():
         labelled = frame.copy()
         labelled.insert(0, "market_mode", market_mode)
         labelled["devig_method"] = devig_method
         labelled["dixon_coles_rho"] = rho
         labelled["ci_cutoff"] = ci_cutoff
+        labelled["asian_handicap_weight"] = ah_weight
         frames.append(labelled)
-        summaries[market_mode] = summarize_mode(market_mode, frame, devig_method, rho, ci_cutoff)
+        summaries[market_mode] = summarize_mode(market_mode, frame, devig_method, rho, ci_cutoff, ah_weight)
 
     details = pd.concat(frames, ignore_index=True) if frames else pd.DataFrame()
     details_path = out_dir / "football_data_league_backtest_results.csv"
@@ -154,10 +176,12 @@ def run_football_data_league_backtest(args: argparse.Namespace, config: AppConfi
         "divisions": divisions,
         "odds_set": args.odds_set,
         "matches_loaded": int(len(raw_matches)),
-        "comparison_subset": "matches with both h2h and over/under 2.5 odds" if compare_on_totals_subset else "matches with h2h",
+        "comparison_subset": _comparison_subset_label(compare_on_totals_subset, compare_on_ah_subset),
         "market_modes": summaries,
         "totals_delta_vs_h2h": _mode_delta(summaries, "h2h_totals", "h2h"),
         "totals_delta_significance": paired_mode_significance(best_by_mode, "h2h_totals", "h2h"),
+        "asian_handicap_delta_vs_h2h_totals": _mode_delta(summaries, "h2h_totals_ah", "h2h_totals"),
+        "asian_handicap_delta_significance": paired_mode_significance(best_by_mode, "h2h_totals_ah", "h2h_totals"),
         "fixtures": str(fixtures_path),
         "odds_json": str(odds_path),
         "calibration_results": str(calibration_path),
@@ -251,47 +275,13 @@ def evaluate_league_matches(matches: list[dict[str, Any]], config: AppConfig, ma
     distributions: dict[str, DistributionResult] = {}
 
     for raw_match in matches:
-        match = match_odds(raw_match, include_totals=market_mode in {"h2h_totals", "h2h+totals", "h2h,totals"})
+        match = match_odds(raw_match, include_totals=_mode_uses_totals(market_mode), include_asian_handicap=_mode_uses_asian_handicap(market_mode))
         distribution = model.build_distribution(match)
         prediction = decision.predict(distribution)
         actual_home = int(raw_match["home_goals"])
         actual_away = int(raw_match["away_goals"])
         naive_home, naive_away = naive_baseline_pick(match, distribution)
-        rows.append(
-            {
-                "match_id": match.match_id,
-                "season": raw_match["season"],
-                "division": raw_match["division"],
-                "commence_time": match.commence_time,
-                "home_team": match.home_team,
-                "away_team": match.away_team,
-                "actual_scoreline": f"{actual_home}-{actual_away}",
-                "model_scoreline": prediction.recommended.scoreline,
-                "model_expected_points": prediction.recommended.expected_points,
-                "model_points": score_actual_prediction(
-                    prediction.recommended.home_goals,
-                    prediction.recommended.away_goals,
-                    actual_home,
-                    actual_away,
-                    config.superbru.ci_cutoff,
-                ),
-                "naive_scoreline": f"{naive_home}-{naive_away}",
-                "naive_points": score_actual_prediction(naive_home, naive_away, actual_home, actual_away, config.superbru.ci_cutoff),
-                "p_exact": prediction.recommended.p_exact,
-                "p_close": prediction.recommended.p_close,
-                "p_outcome": prediction.recommended.p_outcome,
-                "lambda_home": distribution.lambda_home,
-                "lambda_away": distribution.lambda_away,
-                "has_totals": distribution.fair_total is not None,
-                "fair_total_line": distribution.diagnostics.get("fair_total_line"),
-                "fair_over": distribution.diagnostics.get("fair_over"),
-                "model_over": distribution.diagnostics.get("model_over"),
-                "home_goals": actual_home,
-                "away_goals": actual_away,
-                "distribution": match.match_id,
-                **_scoring_fields(distribution, actual_home, actual_away),
-            }
-        )
+        rows.append(_evaluation_row(raw_match, match, distribution, prediction, naive_home, naive_away, actual_home, actual_away, config))
         distributions[match.match_id] = distribution
         ratings.update_results(
             [
@@ -315,12 +305,27 @@ def _evaluate_one_league_match(payload: tuple[dict[str, Any], AppConfig, str]) -
     raw_match, config, market_mode = payload
     model = OddsToScorelineModel(config.model, RatingsStore())
     decision = SuperbruDecisionEngine(config.superbru, config.model.candidate_grid_goals)
-    match = match_odds(raw_match, include_totals=market_mode in {"h2h_totals", "h2h+totals", "h2h,totals"})
+    match = match_odds(raw_match, include_totals=_mode_uses_totals(market_mode), include_asian_handicap=_mode_uses_asian_handicap(market_mode))
     distribution = model.build_distribution(match)
     prediction = decision.predict(distribution)
     actual_home = int(raw_match["home_goals"])
     actual_away = int(raw_match["away_goals"])
     naive_home, naive_away = naive_baseline_pick(match, distribution)
+    return _evaluation_row(raw_match, match, distribution, prediction, naive_home, naive_away, actual_home, actual_away, config)
+
+
+def _evaluation_row(
+    raw_match: dict[str, Any],
+    match: MatchOdds,
+    distribution: DistributionResult,
+    prediction: Any,
+    naive_home: int,
+    naive_away: int,
+    actual_home: int,
+    actual_away: int,
+    config: AppConfig,
+) -> dict[str, Any]:
+    diagnostics = distribution.diagnostics
     return {
         "match_id": match.match_id,
         "season": raw_match["season"],
@@ -346,9 +351,16 @@ def _evaluate_one_league_match(payload: tuple[dict[str, Any], AppConfig, str]) -
         "lambda_home": distribution.lambda_home,
         "lambda_away": distribution.lambda_away,
         "has_totals": distribution.fair_total is not None,
-        "fair_total_line": distribution.diagnostics.get("fair_total_line"),
-        "fair_over": distribution.diagnostics.get("fair_over"),
-        "model_over": distribution.diagnostics.get("model_over"),
+        "fair_total_line": diagnostics.get("fair_total_line"),
+        "fair_over": diagnostics.get("fair_over"),
+        "model_over": diagnostics.get("model_over"),
+        "has_asian_handicap": diagnostics.get("has_asian_handicap"),
+        "fair_ah_line": diagnostics.get("fair_ah_line"),
+        "fair_ah_home_cover": diagnostics.get("fair_ah_home_cover"),
+        "model_ah_home_cover": diagnostics.get("model_ah_home_cover"),
+        "model_ah_error": diagnostics.get("model_ah_error"),
+        "asian_handicap_weight": diagnostics.get("asian_handicap_weight"),
+        "raw_ah_line": raw_match.get("ah_line"),
         "home_goals": actual_home,
         "away_goals": actual_away,
         "distribution": match.match_id,
@@ -356,7 +368,7 @@ def _evaluate_one_league_match(payload: tuple[dict[str, Any], AppConfig, str]) -
     }
 
 
-def match_odds(raw_match: dict[str, Any], include_totals: bool) -> MatchOdds:
+def match_odds(raw_match: dict[str, Any], include_totals: bool, include_asian_handicap: bool = False) -> MatchOdds:
     markets = {
         "h2h": (
             MarketOdds(
@@ -383,6 +395,24 @@ def match_odds(raw_match: dict[str, Any], include_totals: bool) -> MatchOdds:
                 last_update=str(raw_match["commence_time"]),
             ),
         )
+    if (
+        include_asian_handicap
+        and raw_match.get("ah_line") is not None
+        and raw_match.get("ah_home_price")
+        and raw_match.get("ah_away_price")
+    ):
+        line = float(raw_match["ah_line"])
+        markets["spreads"] = (
+            MarketOdds(
+                key="spreads",
+                bookmaker="Football-Data Avg",
+                outcomes=(
+                    OutcomeOdds(name=raw_match["home_team"], price=float(raw_match["ah_home_price"]), point=line, description="home"),
+                    OutcomeOdds(name=raw_match["away_team"], price=float(raw_match["ah_away_price"]), point=-line, description="away"),
+                ),
+                last_update=str(raw_match["commence_time"]),
+            ),
+        )
     return MatchOdds(
         match_id=str(raw_match["match_id"]),
         commence_time=str(raw_match["commence_time"]),
@@ -405,7 +435,11 @@ def event_row(raw_match: dict[str, Any]) -> dict[str, Any]:
             {
                 "key": "football_data_avg",
                 "title": "Football-Data Avg",
-                "markets": [market_to_json(market) for markets in match_odds(raw_match, include_totals=True).markets.values() for market in markets],
+                "markets": [
+                    market_to_json(market)
+                    for markets in match_odds(raw_match, include_totals=True, include_asian_handicap=True).markets.values()
+                    for market in markets
+                ],
             }
         ],
     }
@@ -431,6 +465,7 @@ def fixture_row(raw_match: dict[str, Any]) -> dict[str, Any]:
         "away_goals": raw_match["away_goals"],
         "season": raw_match["season"],
         "division": raw_match["division"],
+        "ah_line": raw_match.get("ah_line"),
     }
 
 
@@ -459,13 +494,14 @@ def _mean_or_none(frame: pd.DataFrame, column: str) -> float | None:
     return float(frame[column].mean()) if column in frame.columns and not frame.empty else None
 
 
-def summarize_mode(market_mode: str, frame: pd.DataFrame, devig_method: str, rho: float, ci_cutoff: float) -> dict[str, Any]:
+def summarize_mode(market_mode: str, frame: pd.DataFrame, devig_method: str, rho: float, ci_cutoff: float, asian_handicap_weight: float) -> dict[str, Any]:
     if frame.empty:
         return {
             "market_mode": market_mode,
             "devig_method": devig_method,
             "dixon_coles_rho": rho,
             "ci_cutoff": ci_cutoff,
+            "asian_handicap_weight": asian_handicap_weight,
             "matches": 0,
             "avg_model_points": 0.0,
             "avg_naive_points": 0.0,
@@ -480,6 +516,7 @@ def summarize_mode(market_mode: str, frame: pd.DataFrame, devig_method: str, rho
         "devig_method": devig_method,
         "dixon_coles_rho": rho,
         "ci_cutoff": ci_cutoff,
+        "asian_handicap_weight": asian_handicap_weight,
         "matches": int(len(frame)),
         "avg_model_points": float(model_points.mean()),
         "avg_model_points_ci_low": points_ci["ci_low"],
@@ -495,6 +532,7 @@ def summarize_mode(market_mode: str, frame: pd.DataFrame, devig_method: str, rho
         "avg_rps_1x2": _mean_or_none(frame, "rps_1x2"),
         "avg_exact_log_loss": _mean_or_none(frame, "exact_log_loss"),
         "avg_total_goals_crps": _mean_or_none(frame, "total_goals_crps"),
+        "avg_model_ah_error": _mean_or_none(frame, "model_ah_error"),
         "exact_hits": int((frame["model_points"] == 3.0).sum()),
         "close_hits": int((frame["model_points"] == 1.5).sum()),
         "outcome_only_hits": int((frame["model_points"] == 1.0).sum()),
@@ -505,13 +543,13 @@ def summarize_mode(market_mode: str, frame: pd.DataFrame, devig_method: str, rho
 
 
 def paired_mode_significance(
-    best_by_mode: dict[str, Any], test_mode: str, baseline_mode: str, column: str = "model_points"
+    best_by_mode: dict[str, BestMode], test_mode: str, baseline_mode: str, column: str = "model_points"
 ) -> dict[str, object] | None:
     """Paired bootstrap of one mode's per-match points against another, matched on match_id."""
     if test_mode not in best_by_mode or baseline_mode not in best_by_mode:
         return None
-    test_frame = best_by_mode[test_mode][4][["match_id", column]].rename(columns={column: "test"})
-    base_frame = best_by_mode[baseline_mode][4][["match_id", column]].rename(columns={column: "base"})
+    test_frame = best_by_mode[test_mode][5][["match_id", column]].rename(columns={column: "test"})
+    base_frame = best_by_mode[baseline_mode][5][["match_id", column]].rename(columns={column: "base"})
     merged = test_frame.merge(base_frame, on="match_id", how="inner")
     if merged.empty:
         return None
@@ -530,14 +568,31 @@ def _odds_columns(row: pd.Series, odds_set: str) -> dict[str, float] | None:
         over = _float_value(row.get(f"{prefix}>2.5"))
         under = _float_value(row.get(f"{prefix}<2.5"))
         if home and draw and away:
-            return {
+            prices = {
                 "home_price": home,
                 "draw_price": draw,
                 "away_price": away,
                 "over_25": over,
                 "under_25": under,
             }
+            prices.update(_asian_handicap_columns(row, odds_set))
+            return prices
     return None
+
+
+def _asian_handicap_columns(row: pd.Series, odds_set: str) -> dict[str, float]:
+    candidates = (
+        [("AHCh", "AvgCAHH", "AvgCAHA"), ("AHh", "AvgAHH", "AvgAHA")]
+        if odds_set == "closing"
+        else [("AHh", "AvgAHH", "AvgAHA"), ("AHCh", "AvgCAHH", "AvgCAHA")]
+    )
+    for line_key, home_key, away_key in candidates:
+        line = _number_value(row.get(line_key))
+        home = _float_value(row.get(home_key))
+        away = _float_value(row.get(away_key))
+        if line is not None and home and away:
+            return {"ah_line": line, "ah_home_price": home, "ah_away_price": away}
+    return {"ah_line": None, "ah_home_price": None, "ah_away_price": None}
 
 
 def _looks_like_football_data_csv(path: Path) -> bool:
@@ -565,6 +620,25 @@ def _mode_delta(summaries: dict[str, dict[str, Any]], test_mode: str, baseline_m
     return float(summaries[test_mode]["avg_model_points"] - summaries[baseline_mode]["avg_model_points"])
 
 
+def _comparison_subset_label(requires_totals: bool, requires_asian_handicap: bool) -> str:
+    parts = ["h2h"]
+    if requires_totals:
+        parts.append("over/under 2.5")
+    if requires_asian_handicap:
+        parts.append("Asian handicap")
+    return "matches with " + " and ".join(parts) + " odds"
+
+
+def _mode_uses_totals(mode: str) -> bool:
+    return "totals" in (mode or "").lower()
+
+
+def _mode_uses_asian_handicap(mode: str) -> bool:
+    normalised = (mode or "").lower().replace("-", "_").replace("+", "_").replace(",", "_")
+    tokens = {token for token in normalised.split("_") if token}
+    return "ah" in tokens or "asian" in tokens or "handicap" in tokens
+
+
 def _float_value(value: Any) -> float | None:
     if value in ("", None):
         return None
@@ -573,6 +647,15 @@ def _float_value(value: Any) -> float | None:
     except (TypeError, ValueError):
         return None
     return parsed if parsed > 1.0 else None
+
+
+def _number_value(value: Any) -> float | None:
+    if value in ("", None):
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
 
 
 def _int_value(value: Any) -> int | None:

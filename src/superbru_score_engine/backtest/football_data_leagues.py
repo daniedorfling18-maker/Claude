@@ -18,6 +18,15 @@ from superbru_score_engine.ingest.base import MatchOdds, MarketOdds, OutcomeOdds
 from superbru_score_engine.model import DistributionResult, OddsToScorelineModel
 from superbru_score_engine.model.ratings import MatchResult, RatingsStore
 
+from .inference import bootstrap_mean_ci, paired_bootstrap_delta
+from .metrics import (
+    brier_score_1x2,
+    exact_score_log_loss,
+    log_loss_1x2,
+    outcome_label,
+    ranked_probability_score,
+    total_goals_crps,
+)
 from .runner import naive_baseline_pick, reliability_cells
 
 
@@ -148,6 +157,7 @@ def run_football_data_league_backtest(args: argparse.Namespace, config: AppConfi
         "comparison_subset": "matches with both h2h and over/under 2.5 odds" if compare_on_totals_subset else "matches with h2h",
         "market_modes": summaries,
         "totals_delta_vs_h2h": _mode_delta(summaries, "h2h_totals", "h2h"),
+        "totals_delta_significance": paired_mode_significance(best_by_mode, "h2h_totals", "h2h"),
         "fixtures": str(fixtures_path),
         "odds_json": str(odds_path),
         "calibration_results": str(calibration_path),
@@ -279,6 +289,7 @@ def evaluate_league_matches(matches: list[dict[str, Any]], config: AppConfig, ma
                 "home_goals": actual_home,
                 "away_goals": actual_away,
                 "distribution": match.match_id,
+                **_scoring_fields(distribution, actual_home, actual_away),
             }
         )
         distributions[match.match_id] = distribution
@@ -341,6 +352,7 @@ def _evaluate_one_league_match(payload: tuple[dict[str, Any], AppConfig, str]) -
         "home_goals": actual_home,
         "away_goals": actual_away,
         "distribution": match.match_id,
+        **_scoring_fields(distribution, actual_home, actual_away),
     }
 
 
@@ -422,6 +434,31 @@ def fixture_row(raw_match: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _scoring_fields(distribution: DistributionResult, actual_home: int, actual_away: int) -> dict[str, Any]:
+    """Per-match probabilistic scoring columns (1X2 + full-distribution proper scores)."""
+    model_probs = (
+        float(distribution.diagnostics.get("model_home_win", 0.0)),
+        float(distribution.diagnostics.get("model_draw", 0.0)),
+        float(distribution.diagnostics.get("model_away_win", 0.0)),
+    )
+    actual_result = outcome_label(actual_home, actual_away)
+    return {
+        "actual_result": actual_result,
+        "model_home_win": model_probs[0],
+        "model_draw": model_probs[1],
+        "model_away_win": model_probs[2],
+        "brier_1x2": brier_score_1x2(model_probs, actual_result),
+        "log_loss_1x2": log_loss_1x2(model_probs, actual_result),
+        "rps_1x2": ranked_probability_score(model_probs, actual_result),
+        "exact_log_loss": exact_score_log_loss(distribution.matrix, actual_home, actual_away),
+        "total_goals_crps": total_goals_crps(distribution.matrix, actual_home + actual_away),
+    }
+
+
+def _mean_or_none(frame: pd.DataFrame, column: str) -> float | None:
+    return float(frame[column].mean()) if column in frame.columns and not frame.empty else None
+
+
 def summarize_mode(market_mode: str, frame: pd.DataFrame, devig_method: str, rho: float, ci_cutoff: float) -> dict[str, Any]:
     if frame.empty:
         return {
@@ -434,15 +471,30 @@ def summarize_mode(market_mode: str, frame: pd.DataFrame, devig_method: str, rho
             "avg_naive_points": 0.0,
             "edge_vs_naive": 0.0,
         }
+    model_points = frame["model_points"].to_numpy(dtype=float)
+    naive_points = frame["naive_points"].to_numpy(dtype=float)
+    points_ci = bootstrap_mean_ci(model_points)
+    vs_naive = paired_bootstrap_delta(model_points, naive_points)
     return {
         "market_mode": market_mode,
         "devig_method": devig_method,
         "dixon_coles_rho": rho,
         "ci_cutoff": ci_cutoff,
         "matches": int(len(frame)),
-        "avg_model_points": float(frame["model_points"].mean()),
-        "avg_naive_points": float(frame["naive_points"].mean()),
-        "edge_vs_naive": float(frame["model_points"].mean() - frame["naive_points"].mean()),
+        "avg_model_points": float(model_points.mean()),
+        "avg_model_points_ci_low": points_ci["ci_low"],
+        "avg_model_points_ci_high": points_ci["ci_high"],
+        "avg_naive_points": float(naive_points.mean()),
+        "edge_vs_naive": float(model_points.mean() - naive_points.mean()),
+        "edge_vs_naive_ci_low": vs_naive["ci_low"],
+        "edge_vs_naive_ci_high": vs_naive["ci_high"],
+        "edge_vs_naive_p_value": vs_naive["p_value"],
+        "edge_vs_naive_significant": vs_naive["significant"],
+        "avg_brier_1x2": _mean_or_none(frame, "brier_1x2"),
+        "avg_log_loss_1x2": _mean_or_none(frame, "log_loss_1x2"),
+        "avg_rps_1x2": _mean_or_none(frame, "rps_1x2"),
+        "avg_exact_log_loss": _mean_or_none(frame, "exact_log_loss"),
+        "avg_total_goals_crps": _mean_or_none(frame, "total_goals_crps"),
         "exact_hits": int((frame["model_points"] == 3.0).sum()),
         "close_hits": int((frame["model_points"] == 1.5).sum()),
         "outcome_only_hits": int((frame["model_points"] == 1.0).sum()),
@@ -450,6 +502,23 @@ def summarize_mode(market_mode: str, frame: pd.DataFrame, devig_method: str, rho
         "outcome_accuracy": float((frame["model_points"] > 0.0).mean()),
         "exact_rate": float((frame["model_points"] == 3.0).mean()),
     }
+
+
+def paired_mode_significance(
+    best_by_mode: dict[str, Any], test_mode: str, baseline_mode: str, column: str = "model_points"
+) -> dict[str, object] | None:
+    """Paired bootstrap of one mode's per-match points against another, matched on match_id."""
+    if test_mode not in best_by_mode or baseline_mode not in best_by_mode:
+        return None
+    test_frame = best_by_mode[test_mode][4][["match_id", column]].rename(columns={column: "test"})
+    base_frame = best_by_mode[baseline_mode][4][["match_id", column]].rename(columns={column: "base"})
+    merged = test_frame.merge(base_frame, on="match_id", how="inner")
+    if merged.empty:
+        return None
+    result = paired_bootstrap_delta(merged["test"].to_numpy(float), merged["base"].to_numpy(float))
+    result["test_mode"] = test_mode
+    result["baseline_mode"] = baseline_mode
+    return result
 
 
 def _odds_columns(row: pd.Series, odds_set: str) -> dict[str, float] | None:

@@ -37,6 +37,68 @@ def log_loss_1x2(model_probs: Sequence[float], actual_result: str | tuple[int, i
     return float(-math.log(max(epsilon, min(1.0, probs[actual_idx]))))
 
 
+def ranked_probability_score(model_probs: Sequence[float], actual_result: str | tuple[int, int]) -> float:
+    """Epstein ranked probability score for the ordered 1X2 forecast (home<draw<away).
+
+    RPS = 1/(r-1) * sum_{i=1}^{r-1} ( sum_{j<=i} (p_j - e_j) )^2, lower is better. RPS is
+    the standard proper scoring rule for ordered football forecasts (Constantinou &
+    Fenton, 2012): unlike Brier it rewards probability mass placed *near* the outcome on
+    the home-draw-away spectrum, not only on the exact outcome.
+    """
+    probs = _normalise_probs(model_probs)
+    actual = _actual_label(actual_result)
+    observed = [1.0 if label == actual else 0.0 for label in RESULT_ORDER]
+    cumulative = 0.0
+    cumulative_observed = 0.0
+    total = 0.0
+    for index in range(len(RESULT_ORDER) - 1):
+        cumulative += probs[index]
+        cumulative_observed += observed[index]
+        total += (cumulative - cumulative_observed) ** 2
+    return float(total / (len(RESULT_ORDER) - 1))
+
+
+def total_goals_distribution(score_matrix: Sequence[Sequence[float]]) -> list[float]:
+    """Marginal probability of each total-goals count k from a home x away score matrix."""
+    rows = len(score_matrix)
+    cols = len(score_matrix[0]) if rows else 0
+    distribution = [0.0] * (rows + cols - 1) if rows and cols else []
+    for home in range(rows):
+        row = score_matrix[home]
+        for away in range(cols):
+            distribution[home + away] += float(row[away])
+    return distribution
+
+
+def exact_score_log_loss(
+    score_matrix: Sequence[Sequence[float]], actual_home: int, actual_away: int, epsilon: float = 1e-12
+) -> float:
+    """-log P(actual exact scoreline) under the full score matrix (mass outside the grid -> epsilon)."""
+    rows = len(score_matrix)
+    cols = len(score_matrix[0]) if rows else 0
+    if 0 <= actual_home < rows and 0 <= actual_away < cols:
+        probability = float(score_matrix[actual_home][actual_away])
+    else:
+        probability = 0.0
+    return float(-math.log(max(epsilon, min(1.0, probability))))
+
+
+def total_goals_crps(score_matrix: Sequence[Sequence[float]], actual_total: int) -> float:
+    """Discrete CRPS for the total-goals count distribution: sum_k (F(k) - 1{actual<=k})^2.
+
+    The ranked-probability-score generalisation to the (ordered) count of total goals;
+    rewards a total-goals distribution concentrated near the realised total. Lower is better.
+    """
+    distribution = total_goals_distribution(score_matrix)
+    cumulative = 0.0
+    total = 0.0
+    for goals, mass in enumerate(distribution):
+        cumulative += mass
+        indicator = 1.0 if actual_total <= goals else 0.0
+        total += (cumulative - indicator) ** 2
+    return float(total)
+
+
 def scoreline_hit(actual_home: int, actual_away: int, pred_home: int, pred_away: int) -> bool:
     return actual_home == pred_home and actual_away == pred_away
 
@@ -110,6 +172,15 @@ def summarise_validation(records: Iterable[Mapping[str, object]]) -> dict[str, o
     actual_points = _values(records_list, "model_points")
     briers = _values(records_list, "brier_1x2")
     log_losses = _values(records_list, "log_loss_1x2")
+    rps_values: list[float] = []
+    for record in records_list:
+        probs = _record_probs(record)
+        actual = record.get("actual_result")
+        if probs is None or actual is None:
+            continue
+        rps_values.append(ranked_probability_score(probs, str(actual)))
+    exact_log_losses = _values(records_list, "exact_log_loss")
+    total_goals_crps_values = _values(records_list, "total_goals_crps")
     draw_probs = _values(records_list, "model_draw")
     actual_draws = [1.0 if str(record.get("actual_result")) == "draw" else 0.0 for record in records_list if record.get("actual_result") is not None]
 
@@ -127,6 +198,9 @@ def summarise_validation(records: Iterable[Mapping[str, object]]) -> dict[str, o
         "expected_vs_actual_points_gap": _safe_subtract(_mean(expected_points), _mean(actual_points)),
         "brier_score_1x2": _mean(briers),
         "log_loss_1x2": _mean(log_losses),
+        "ranked_probability_score_1x2": _mean(rps_values),
+        "exact_score_log_loss": _mean(exact_log_losses),
+        "total_goals_crps": _mean(total_goals_crps_values),
         "draw_calibration": {
             "mean_predicted_draw_probability": _mean(draw_probs),
             "observed_draw_frequency": _mean(actual_draws),

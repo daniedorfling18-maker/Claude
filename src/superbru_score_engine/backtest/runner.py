@@ -10,11 +10,14 @@ import pandas as pd
 
 from superbru_score_engine.backtest.metrics import (
     brier_score_1x2,
+    exact_score_log_loss,
     log_loss_1x2,
     outcome_label,
+    ranked_probability_score,
     right_result_hit,
     scoreline_hit,
     summarise_validation,
+    total_goals_crps,
 )
 from superbru_score_engine.config import AppConfig
 from superbru_score_engine.decision import SuperbruDecisionEngine
@@ -62,6 +65,7 @@ def run_backtest(args: argparse.Namespace, config: AppConfig) -> int:
                     "right_result_accuracy": validation.get("right_result_accuracy"),
                     "brier_score_1x2": validation.get("brier_score_1x2"),
                     "log_loss_1x2": validation.get("log_loss_1x2"),
+                    "ranked_probability_score_1x2": validation.get("ranked_probability_score_1x2"),
                 }
             )
             if best is None or avg_model > best[0]:
@@ -155,6 +159,9 @@ def evaluate_backtest(fixtures_path: str | Path, odds_json: str | Path, config: 
             "model_away_win": model_probs[2],
             "brier_1x2": brier_score_1x2(model_probs, actual_result),
             "log_loss_1x2": log_loss_1x2(model_probs, actual_result),
+            "rps_1x2": ranked_probability_score(model_probs, actual_result),
+            "exact_log_loss": exact_score_log_loss(distribution.matrix, actual_home, actual_away),
+            "total_goals_crps": total_goals_crps(distribution.matrix, actual_home + actual_away),
             "p_exact": prediction.recommended.p_exact,
             "p_close": prediction.recommended.p_close,
             "p_outcome": prediction.recommended.p_outcome,

@@ -50,6 +50,8 @@ model:
   candidate_grid_goals: 6
   model_grid_goals: 10
   solver_grid_goals: 14
+  # Must match a key in calibration_profiles.yaml; run `superbru-score config-check`.
+  calibration_profile: worldcup_1x2
   # Calibrated on Football-Data 2014/2018/2022 World Cup 1X2 odds.
   dixon_coles_rho: -0.04
   devig_method: power

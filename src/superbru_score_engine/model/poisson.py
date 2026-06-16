@@ -36,6 +36,13 @@ def over_probability(total_lambda: float, line: float) -> float:
     return float(1.0 - poisson_cdf(threshold - 1, total_lambda))
 
 
+def matrix_over_probability(matrix: np.ndarray, line: float) -> float:
+    threshold = math.floor(line) + 1 if not float(line).is_integer() else int(line) + 1
+    home_goals = np.arange(matrix.shape[0])[:, None]
+    away_goals = np.arange(matrix.shape[1])[None, :]
+    return float(matrix[(home_goals + away_goals) >= threshold].sum())
+
+
 def solve_lambdas(
     fair_1x2: FairOutcomeMarket,
     fair_total: FairTotalMarket | None,
@@ -62,7 +69,7 @@ def solve_lambdas(
         model_outcomes = outcome_probabilities(matrix)
         loss = float(np.square(model_outcomes - target_outcomes).sum() * 8.0)
         if fair_total:
-            model_over = over_probability(home_rate + away_rate, fair_total.line)
+            model_over = matrix_over_probability(matrix, fair_total.line)
             loss += float((model_over - fair_total.over) ** 2 * 4.0)
         else:
             loss += float(((home_rate + away_rate) - initial_total_goals) ** 2 * 0.15)

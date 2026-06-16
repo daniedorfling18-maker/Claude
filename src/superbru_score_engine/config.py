@@ -31,6 +31,7 @@ class ModelConfig:
     correct_score_blend_weight: float = 0.0
     odds_weight: float = 1.0
     ratings_weight: float = 0.0
+    asian_handicap_weight: float = 0.0
     home_advantage_goals: float = 0.18
     host_teams: tuple[str, ...] = ("United States", "USA", "Canada", "Mexico")
     low_data_prior_sigma: float = 0.25
@@ -185,6 +186,7 @@ def load_config(path: str | Path | None) -> AppConfig:
             correct_score_blend_weight=float(model.get("correct_score_blend_weight", 0.0)),
             odds_weight=float(model.get("odds_weight", 1.0)),
             ratings_weight=float(model.get("ratings_weight", 0.0)),
+            asian_handicap_weight=float(model.get("asian_handicap_weight", 0.0)),
             home_advantage_goals=float(model.get("home_advantage_goals", 0.18)),
             host_teams=tuple(model.get("host_teams", ("United States", "USA", "Canada", "Mexico"))),
             low_data_prior_sigma=float(model.get("low_data_prior_sigma", 0.25)),
@@ -309,13 +311,13 @@ def validate_calibration_profile(
             active_profile=active_profile,
             profile_found=False,
             matches_config=False,
-            mismatches=(f"profile not found: {active_profile}",),
+            mismatches=(f"profile not found: {active_profile}"),
             profile_values={},
         )
 
     profile = dict(profiles[active_profile])
     evidence_note = str(profile.get("evidence_note", ""))
-    comparable_keys = ("devig_method", "dixon_coles_rho", "odds_weight", "ratings_weight")
+    comparable_keys = ("devig_method", "dixon_coles_rho", "odds_weight", "ratings_weight", "asian_handicap_weight")
     mismatches: list[str] = []
     for key in comparable_keys:
         if key not in profile:
@@ -345,7 +347,7 @@ def calibration_check_rows(check: CalibrationProfileCheck) -> list[dict[str, Any
         {"field": "profile_found", "value": check.profile_found},
         {"field": "matches_config", "value": check.matches_config},
     ]
-    for key in ("devig_method", "dixon_coles_rho", "odds_weight", "ratings_weight"):
+    for key in ("devig_method", "dixon_coles_rho", "odds_weight", "ratings_weight", "asian_handicap_weight"):
         if key in check.profile_values:
             rows.append({"field": f"profile.{key}", "value": check.profile_values[key]})
     if check.evidence_note:

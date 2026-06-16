@@ -8,7 +8,7 @@ from pathlib import Path
 import pandas as pd
 
 from superbru_score_engine.betting import BettingSuggestion, find_betting_suggestions
-from superbru_score_engine.config import AppConfig, load_config
+from superbru_score_engine.config import AppConfig, calibration_check_rows, load_config, validate_calibration_profile
 from superbru_score_engine.decision import Prediction, SuperbruDecisionEngine, score_prediction
 from superbru_score_engine.ingest import MatchOdds, ProviderUnavailable
 from superbru_score_engine.ingest.cache import JsonCache
@@ -34,6 +34,8 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     config = load_config(args.config)
 
+    if args.command == "config-check":
+        return run_config_check(args, config)
     if args.command == "predict":
         return run_predict(args, config)
     if args.command == "backtest":
@@ -65,6 +67,10 @@ def main(argv: list[str] | None = None) -> int:
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="World Cup 2026 Superbru score-prediction engine")
     subparsers = parser.add_subparsers(dest="command", required=True)
+
+    config_check = subparsers.add_parser("config-check", help="Validate active config against calibration_profiles.yaml")
+    config_check.add_argument("--config", default="config.yaml", help="Path to YAML/JSON config")
+    config_check.add_argument("--profiles", default="calibration_profiles.yaml", help="Path to calibration profile registry")
 
     predict = subparsers.add_parser("predict", help="Generate Superbru expected-points score predictions")
     predict.add_argument("--config", default="config.yaml", help="Path to YAML/JSON config")
@@ -196,6 +202,12 @@ def build_parser() -> argparse.ArgumentParser:
     league_data.add_argument("--ci-grid", default="", help="Comma-separated CI cutoffs for calibration")
     league_data.add_argument("--out-dir", default="outputs", help="Directory for backtest outputs")
     return parser
+
+
+def run_config_check(args: argparse.Namespace, config: AppConfig) -> int:
+    check = validate_calibration_profile(config, args.profiles)
+    print(pd.DataFrame(calibration_check_rows(check)).to_string(index=False))
+    return 0 if check.profile_found and check.matches_config else 1
 
 
 def run_predict(args: argparse.Namespace, config: AppConfig) -> int:

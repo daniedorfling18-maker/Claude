@@ -13,6 +13,17 @@ def test_active_config_matches_big5_profile() -> None:
     assert check.active_profile == "big5_h2h_totals"
 
 
+def test_active_config_loads_sensitivity_and_ratings_sections() -> None:
+    config = load_config("config.yaml")
+    assert config.sensitivity.enabled is True
+    assert config.sensitivity.lambda_pct == 0.05
+    assert config.sensitivity.exact_chase_weights == (1.0, 1.5, 2.0)
+    assert config.ratings.enabled is True
+    assert config.ratings.source == "internal_results_elo"
+    assert config.ratings.k_factor == 24.0
+    assert config.ratings.min_matches_full_confidence == 8
+
+
 def test_mismatched_profile_is_flagged(tmp_path: Path) -> None:
     config_path = tmp_path / "config.yaml"
     config_path.write_text(

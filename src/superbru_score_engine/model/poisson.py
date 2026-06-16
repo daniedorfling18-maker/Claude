@@ -12,6 +12,7 @@ except ImportError:  # pragma: no cover - used in minimal runtimes.
     poisson = None
 
 from .devig import FairOutcomeMarket, FairTotalMarket
+from .dixon_coles import apply_dixon_coles
 
 
 def independent_poisson_matrix(lambda_home: float, lambda_away: float, max_goals: int) -> np.ndarray:
@@ -40,8 +41,10 @@ def solve_lambdas(
     fair_total: FairTotalMarket | None,
     solver_grid_goals: int,
     initial_total_goals: float = 2.55,
+    dixon_coles_rho: float = 0.0,
 ) -> tuple[float, float, dict[str, float]]:
     target_outcomes = fair_1x2.as_array()
+    rho = float(dixon_coles_rho or 0.0)
 
     if fair_total:
         initial_total_goals = _solve_total_from_over(fair_total.line, fair_total.over, initial_total_goals)
@@ -54,6 +57,8 @@ def solve_lambdas(
         home_rate = float(np.exp(log_rates[0]))
         away_rate = float(np.exp(log_rates[1]))
         matrix = independent_poisson_matrix(home_rate, away_rate, solver_grid_goals)
+        if abs(rho) > 1e-12:
+            matrix = apply_dixon_coles(matrix, home_rate, away_rate, rho)
         model_outcomes = outcome_probabilities(matrix)
         loss = float(np.square(model_outcomes - target_outcomes).sum() * 8.0)
         if fair_total:
@@ -83,6 +88,8 @@ def solve_lambdas(
         "solver_success": float(success),
         "lambda_home_raw": float(rates[0]),
         "lambda_away_raw": float(rates[1]),
+        "solver_dixon_coles_rho": rho,
+        "solver_fitted_post_dixon_coles": abs(rho) > 1e-12,
     }
     return float(rates[0]), float(rates[1]), diagnostics
 

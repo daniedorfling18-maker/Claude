@@ -62,6 +62,7 @@ def prediction_rows(predictions: Iterable[Prediction]) -> list[dict]:
             "conservative_scoreline": prediction.conservative_pick.scoreline,
             "exact_chase_scoreline": prediction.exact_chase_pick.scoreline,
             "contrarian_scoreline": prediction.contrarian_pick.scoreline,
+            "risk_adjusted_scoreline": prediction.risk_adjusted_pick.scoreline,
             "recommended_public_pick_share": diagnostics.get("recommended_public_pick_share"),
             "recommended_ev_vs_field": diagnostics.get("recommended_ev_vs_field"),
             "recommended_risk_adjusted_score": diagnostics.get("recommended_risk_adjusted_score"),
@@ -74,6 +75,8 @@ def prediction_rows(predictions: Iterable[Prediction]) -> list[dict]:
             "ratings_source": diagnostics.get("ratings_source"),
             "ratings_updated_at": diagnostics.get("ratings_updated_at"),
             "ratings_number_of_applied_results": diagnostics.get("ratings_number_of_applied_results"),
+            "ratings_use_as_fallback_only": diagnostics.get("ratings_use_as_fallback_only"),
+            "ratings_weight_effective": diagnostics.get("ratings_weight_effective"),
         }
         for idx, candidate in enumerate(prediction.top_candidates, start=1):
             row[f"top{idx}_scoreline"] = candidate.scoreline
@@ -197,6 +200,7 @@ def _prediction_payload(prediction: Prediction) -> dict:
             "conservative": asdict(prediction.conservative_pick),
             "exact_chase": asdict(prediction.exact_chase_pick),
             "contrarian": asdict(prediction.contrarian_pick),
+            "risk_adjusted": asdict(prediction.risk_adjusted_pick),
         },
         "top_candidates": [asdict(candidate) for candidate in prediction.top_candidates],
         "diagnostics": prediction.diagnostics,

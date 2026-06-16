@@ -43,6 +43,14 @@ class SuperbruConfig:
     contrarian: bool = False
     contrarian_weight: float = 0.0
     knockout_result_basis: str = "regular_or_extra_time_if_drawn"
+    # Strategy layer. Defaults reproduce the raw expected-points pick exactly.
+    # modes: raw_ev | conservative | exact_chase | contrarian | risk_adjusted
+    strategy_mode: str = "raw_ev"
+    exact_chase_weight: float = 1.0       # >1 tilts toward the modal (high-P_exact) score
+    public_pick_weight: float = 0.0       # alpha: reward EV above the synthetic field EV
+    differentiation_weight: float = 0.0   # delta: reward low synthetic public-pick share
+    risk_aversion: float = 0.0            # beta: penalise P(zero points)
+    variance_penalty: float = 0.0         # gamma: penalise points variance
 
 
 @dataclass(frozen=True)
@@ -157,6 +165,12 @@ def load_config(path: str | Path | None) -> AppConfig:
             contrarian=bool(superbru.get("contrarian", False)),
             contrarian_weight=float(superbru.get("contrarian_weight", 0.0)),
             knockout_result_basis=str(superbru.get("knockout_result_basis", "regular_or_extra_time_if_drawn")),
+            strategy_mode=str(superbru.get("strategy_mode", "raw_ev")).strip().lower(),
+            exact_chase_weight=float(superbru.get("exact_chase_weight", 1.0)),
+            public_pick_weight=float(superbru.get("public_pick_weight", 0.0)),
+            differentiation_weight=float(superbru.get("differentiation_weight", 0.0)),
+            risk_aversion=float(superbru.get("risk_aversion", 0.0)),
+            variance_penalty=float(superbru.get("variance_penalty", 0.0)),
         ),
         betting=BettingConfig(
             enabled=bool(betting.get("enabled", False)),

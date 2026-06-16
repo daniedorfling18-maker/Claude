@@ -1,14 +1,17 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 import numpy as np
 
-from superbru_score_engine.config import SuperbruConfig
+from superbru_score_engine.config import PublicPickConfig, SuperbruConfig
+from superbru_score_engine.decision.public_pick import estimate_public_pick_shares
 from superbru_score_engine.model import DistributionResult
 
 
 Outcome = str
+
+STRATEGY_MODES = ("raw_ev", "conservative", "exact_chase", "contrarian", "risk_adjusted")
 
 
 @dataclass(frozen=True)
@@ -23,6 +26,13 @@ class CandidateEvaluation:
     p_outcome: float
     p_outcome_only: float
     outcome: Outcome
+    # risk diagnostics (per-candidate, context-free)
+    p_zero_points: float = 0.0
+    variance_points: float = 0.0
+    # strategic fields (contextual: filled once the full candidate set is known)
+    public_pick_share: float = 0.0  # SYNTHETIC estimate, never real pool data
+    ev_vs_field: float = 0.0
+    risk_adjusted_score: float = 0.0
 
     @property
     def scoreline(self) -> str:
@@ -36,50 +46,172 @@ class Prediction:
     away_team: str
     commence_time: str
     recommended: CandidateEvaluation
+    raw_ev_pick: CandidateEvaluation
+    modal_score_pick: CandidateEvaluation
+    conservative_pick: CandidateEvaluation
+    exact_chase_pick: CandidateEvaluation
+    contrarian_pick: CandidateEvaluation
+    strategy_mode: str
     top_candidates: tuple[CandidateEvaluation, ...]
     diagnostics: dict
 
 
 class SuperbruDecisionEngine:
-    def __init__(self, config: SuperbruConfig, candidate_grid_goals: int) -> None:
+    def __init__(
+        self,
+        config: SuperbruConfig,
+        candidate_grid_goals: int,
+        public_pick_config: PublicPickConfig | None = None,
+    ) -> None:
         self.config = config
         self.candidate_grid_goals = candidate_grid_goals
+        self.public_pick_config = public_pick_config or PublicPickConfig()
 
     def predict(self, distribution: DistributionResult) -> Prediction:
+        matrix = distribution.matrix
+        ci = self.config.ci_cutoff
         evaluations = [
-            score_prediction(
-                matrix=distribution.matrix,
-                pred_home=home_goals,
-                pred_away=away_goals,
-                ci_cutoff=self.config.ci_cutoff,
-                contrarian=self.config.contrarian,
-                contrarian_weight=self.config.contrarian_weight,
-            )
-            for home_goals in range(self.candidate_grid_goals + 1)
-            for away_goals in range(self.candidate_grid_goals + 1)
+            score_prediction(matrix, h, a, ci, self.config.contrarian, self.config.contrarian_weight)
+            for h in range(self.candidate_grid_goals + 1)
+            for a in range(self.candidate_grid_goals + 1)
         ]
-        max_ev = max(candidate.adjusted_expected_points for candidate in evaluations)
-        contenders = [
-            candidate
-            for candidate in evaluations
-            if max_ev - candidate.adjusted_expected_points <= self.config.tie_epsilon
-        ]
-        contenders.sort(key=lambda candidate: (candidate.p_close, candidate.p_exact, -candidate.home_goals - candidate.away_goals), reverse=True)
-        recommended = contenders[0]
-        top = tuple(
-            sorted(evaluations, key=lambda candidate: (candidate.adjusted_expected_points, candidate.p_close), reverse=True)[:3]
+
+        # Synthetic public-pick shares -> field EV -> per-candidate risk-adjusted score.
+        favourite = _favourite_outcome(matrix)
+        evaluations = _fill_strategic_fields(
+            evaluations,
+            favourite_outcome=favourite,
+            home_team=distribution.match.home_team,
+            away_team=distribution.match.away_team,
+            public_pick_config=self.public_pick_config,
+            superbru=self.config,
         )
+
+        # Pick types. With score=adjusted EV, _top_by reproduces the prior default
+        # recommendation exactly, so exact_chase (weight 1) and risk_adjusted (zero
+        # weights) collapse to raw_ev by construction.
+        tie = self.config.tie_epsilon
+        w = self.config.exact_chase_weight
+        raw_ev_pick = _top_by(evaluations, lambda c: c.adjusted_expected_points, tie)
+        modal_score_pick = max(evaluations, key=lambda c: (c.p_exact, -(c.home_goals + c.away_goals)))
+        conservative_pick = max(evaluations, key=lambda c: (c.p_outcome, c.expected_points, c.p_close))
+        exact_chase_pick = _top_by(evaluations, lambda c: c.expected_points + (w - 1.0) * 3.0 * c.p_exact, tie)
+        risk_adjusted_pick = _top_by(evaluations, lambda c: c.risk_adjusted_score, tie)
+        contrarian_pick = _contrarian_pick(evaluations, raw_ev_pick)
+
+        picks = {
+            "raw_ev": raw_ev_pick,
+            "conservative": conservative_pick,
+            "exact_chase": exact_chase_pick,
+            "contrarian": contrarian_pick,
+            "risk_adjusted": risk_adjusted_pick,
+        }
+        mode = self.config.strategy_mode if self.config.strategy_mode in picks else "raw_ev"
+        recommended = picks[mode]
+
+        top = tuple(sorted(evaluations, key=lambda c: (c.expected_points, c.p_close), reverse=True)[:3])
         diagnostics = dict(distribution.diagnostics)
-        diagnostics.update(decision_diagnostics(distribution.matrix, evaluations, recommended, self.config.ci_cutoff))
+        diagnostics.update(decision_diagnostics(matrix, evaluations, recommended, ci))
+        diagnostics.update(
+            {
+                "strategy_mode": mode,
+                "raw_ev_scoreline": raw_ev_pick.scoreline,
+                "modal_score_scoreline": modal_score_pick.scoreline,
+                "conservative_scoreline": conservative_pick.scoreline,
+                "exact_chase_scoreline": exact_chase_pick.scoreline,
+                "contrarian_scoreline": contrarian_pick.scoreline,
+                "public_pick_model": "synthetic" if self.public_pick_config.enabled else "disabled",
+                "recommended_public_pick_share": float(recommended.public_pick_share),
+                "recommended_ev_vs_field": float(recommended.ev_vs_field),
+                "recommended_risk_adjusted_score": float(recommended.risk_adjusted_score),
+            }
+        )
         return Prediction(
             match_id=distribution.match.match_id,
             home_team=distribution.match.home_team,
             away_team=distribution.match.away_team,
             commence_time=distribution.match.commence_time,
             recommended=recommended,
+            raw_ev_pick=raw_ev_pick,
+            modal_score_pick=modal_score_pick,
+            conservative_pick=conservative_pick,
+            exact_chase_pick=exact_chase_pick,
+            contrarian_pick=contrarian_pick,
+            strategy_mode=mode,
             top_candidates=top,
             diagnostics=diagnostics,
         )
+
+
+def _top_by(evaluations, score, tie_epsilon: float) -> CandidateEvaluation:
+    """Maximise ``score``; ties within ``tie_epsilon`` broken by close prob, then
+    exact prob, then preferring the lower-total scoreline. With
+    score=adjusted_expected_points this is the prior default recommendation, so
+    exact_chase (weight 1) and risk_adjusted (zero weights) reduce to it exactly."""
+    best = max(score(c) for c in evaluations)
+    contenders = [c for c in evaluations if best - score(c) <= tie_epsilon]
+    contenders.sort(key=lambda c: (c.p_close, c.p_exact, -(c.home_goals + c.away_goals)), reverse=True)
+    return contenders[0]
+
+
+def _contrarian_pick(evaluations: list[CandidateEvaluation], raw_ev_pick: CandidateEvaluation) -> CandidateEvaluation:
+    """Most field-beating + differentiated candidate, with an EV floor so it is never a joke pick."""
+    floor = 0.5 * raw_ev_pick.expected_points
+    eligible = [c for c in evaluations if c.expected_points >= floor] or list(evaluations)
+    return max(eligible, key=lambda c: (c.ev_vs_field + 0.75 * (1.0 - c.public_pick_share), c.expected_points))
+
+
+def _favourite_outcome(matrix: np.ndarray) -> Outcome:
+    home = float(np.tril(matrix, -1).sum())
+    draw = float(np.trace(matrix))
+    away = float(np.triu(matrix, 1).sum())
+    return {"home": home, "draw": draw, "away": away}
+
+
+def _fill_strategic_fields(
+    evaluations: list[CandidateEvaluation],
+    *,
+    favourite_outcome: dict,
+    home_team: str,
+    away_team: str,
+    public_pick_config: PublicPickConfig,
+    superbru: SuperbruConfig,
+) -> list[CandidateEvaluation]:
+    fav_label = max(favourite_outcome, key=favourite_outcome.get)
+    if public_pick_config.enabled:
+        shares = estimate_public_pick_shares(
+            [(c.home_goals, c.away_goals) for c in evaluations],
+            favourite_outcome=fav_label,
+            home_team=home_team,
+            away_team=away_team,
+            config=public_pick_config,
+        )
+        share_of = {k: v.public_pick_share for k, v in shares.items()}
+        field_ev = sum(share_of[(c.home_goals, c.away_goals)] * c.expected_points for c in evaluations)
+    else:
+        share_of = {(c.home_goals, c.away_goals): 0.0 for c in evaluations}
+        field_ev = 0.0
+
+    alpha = superbru.public_pick_weight
+    delta = superbru.differentiation_weight
+    beta = superbru.risk_aversion
+    gamma = superbru.variance_penalty
+
+    filled: list[CandidateEvaluation] = []
+    for c in evaluations:
+        share = share_of[(c.home_goals, c.away_goals)]
+        ev_vs_field = c.expected_points - field_ev if public_pick_config.enabled else 0.0
+        risk_adjusted = (
+            c.expected_points
+            + alpha * ev_vs_field
+            + delta * (1.0 - share)
+            - beta * c.p_zero_points
+            - gamma * c.variance_points
+        )
+        filled.append(
+            replace(c, public_pick_share=share, ev_vs_field=ev_vs_field, risk_adjusted_score=risk_adjusted)
+        )
+    return filled
 
 
 def decision_diagnostics(
@@ -130,6 +262,10 @@ def score_prediction(
     p_close_non_exact = max(0.0, p_close - p_exact)
     p_outcome_only = max(0.0, p_outcome - p_close)
     expected_points = 3.0 * p_exact + 1.5 * p_close_non_exact + 1.0 * p_outcome_only
+    # risk diagnostics
+    p_zero_points = max(0.0, 1.0 - p_outcome)
+    e_points_sq = 9.0 * p_exact + 2.25 * p_close_non_exact + 1.0 * p_outcome_only
+    variance_points = max(0.0, e_points_sq - expected_points ** 2)
     adjusted = expected_points
     if contrarian and contrarian_weight > 0:
         adjusted = expected_points - contrarian_weight * p_exact
@@ -145,6 +281,8 @@ def score_prediction(
         p_outcome=float(p_outcome),
         p_outcome_only=float(p_outcome_only),
         outcome=pred_outcome,
+        p_zero_points=float(p_zero_points),
+        variance_points=float(variance_points),
     )
 
 

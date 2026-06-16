@@ -55,6 +55,14 @@ def prediction_rows(predictions: Iterable[Prediction]) -> list[dict]:
             "probability_mass_outside_candidate_grid": diagnostics.get("probability_mass_outside_candidate_grid"),
             "solver_loss": diagnostics.get("solver_loss"),
             "solver_success": diagnostics.get("solver_success"),
+            "strategy_mode": prediction.strategy_mode,
+            "raw_ev_scoreline": prediction.raw_ev_pick.scoreline,
+            "conservative_scoreline": prediction.conservative_pick.scoreline,
+            "exact_chase_scoreline": prediction.exact_chase_pick.scoreline,
+            "contrarian_scoreline": prediction.contrarian_pick.scoreline,
+            "recommended_public_pick_share": diagnostics.get("recommended_public_pick_share"),
+            "recommended_ev_vs_field": diagnostics.get("recommended_ev_vs_field"),
+            "recommended_risk_adjusted_score": diagnostics.get("recommended_risk_adjusted_score"),
         }
         for idx, candidate in enumerate(prediction.top_candidates, start=1):
             row[f"top{idx}_scoreline"] = candidate.scoreline
@@ -169,9 +177,18 @@ def _prediction_payload(prediction: Prediction) -> dict:
         "commence_time": prediction.commence_time,
         "home_team": prediction.home_team,
         "away_team": prediction.away_team,
+        "strategy_mode": prediction.strategy_mode,
         "recommended": asdict(prediction.recommended),
+        "picks": {
+            "raw_ev": asdict(prediction.raw_ev_pick),
+            "modal_score": asdict(prediction.modal_score_pick),
+            "conservative": asdict(prediction.conservative_pick),
+            "exact_chase": asdict(prediction.exact_chase_pick),
+            "contrarian": asdict(prediction.contrarian_pick),
+        },
         "top_candidates": [asdict(candidate) for candidate in prediction.top_candidates],
         "diagnostics": prediction.diagnostics,
+        "public_pick_note": "public_pick_share is a SYNTHETIC estimate, not real Superbru pool data",
     }
 
 

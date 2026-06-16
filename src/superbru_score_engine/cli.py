@@ -224,7 +224,7 @@ def run_predict(args: argparse.Namespace, config: AppConfig) -> int:
         matches = merge_fixture_metadata(matches, args.fixtures)
 
     model = OddsToScorelineModel(config.model, ratings)
-    decision = SuperbruDecisionEngine(config.superbru, config.model.candidate_grid_goals)
+    decision = SuperbruDecisionEngine(config.superbru, config.model.candidate_grid_goals, config.public_pick)
     predictions: list[Prediction] = []
     betting_suggestions: list[BettingSuggestion] = []
     include_betting = args.include_betting or config.betting.enabled

@@ -78,6 +78,14 @@ superbru:
   # Superbru scores 90 minutes unless drawn after 90; then it scores after extra time.
   # Penalty shootouts are still scored as draws.
   knockout_result_basis: regular_or_extra_time_if_drawn
+  # Strategy layer. Defaults reproduce the raw expected-points pick exactly.
+  # strategy_mode: raw_ev | conservative | exact_chase | contrarian | risk_adjusted
+  strategy_mode: raw_ev
+  exact_chase_weight: 1.0      # >1 tilts the exact_chase pick toward the modal score
+  public_pick_weight: 0.0      # alpha: reward EV above the synthetic field EV
+  differentiation_weight: 0.0  # delta: reward low synthetic public-pick share
+  risk_aversion: 0.0           # beta: penalise P(zero points)
+  variance_penalty: 0.0        # gamma: penalise points variance
 
 betting:
   enabled: false

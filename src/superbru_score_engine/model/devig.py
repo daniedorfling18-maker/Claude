@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import re
 from collections import defaultdict
+from collections.abc import Sequence
 from dataclasses import dataclass
 
 import numpy as np
@@ -64,7 +65,14 @@ def extract_fair_1x2(match: MatchOdds, method: str = "power") -> FairOutcomeMark
     return FairOutcomeMarket(home=float(avg[0]), draw=float(avg[1]), away=float(avg[2]))
 
 
-def extract_fair_totals(match: MatchOdds, method: str = "power") -> FairTotalMarket | None:
+def extract_fair_totals_all(match: MatchOdds, method: str = "power") -> list[FairTotalMarket]:
+    """De-vig *every* viable over/under line (e.g. 1.5, 2.5, 3.5), one per distinct point.
+
+    Each line that has both an over and an under price from at least one bookmaker is
+    averaged across books and returned as its own ``FairTotalMarket``. Feeding several
+    lines into the lambda solver constrains the *shape* of the goal distribution more
+    tightly than a single line can. Markets are returned sorted by line ascending.
+    """
     by_line: dict[float, list[np.ndarray]] = defaultdict(list)
     for market in match.market("totals"):
         grouped: dict[float, dict[str, float]] = defaultdict(dict)
@@ -81,18 +89,26 @@ def extract_fair_totals(match: MatchOdds, method: str = "power") -> FairTotalMar
                 probs = decimal_implied_probabilities([prices["over"], prices["under"]], method)
                 by_line[line].append(probs)
 
-    if not by_line:
-        return None
+    markets: list[FairTotalMarket] = []
+    for line in sorted(by_line):
+        avg = np.vstack(by_line[line]).mean(axis=0)
+        avg = avg / avg.sum()
+        markets.append(
+            FairTotalMarket(line=float(line), over=float(avg[0]), under=float(avg[1]), count=len(by_line[line]))
+        )
+    return markets
 
-    selected_line = sorted(by_line, key=lambda line: (-len(by_line[line]), abs(line - 2.5), line))[0]
-    avg = np.vstack(by_line[selected_line]).mean(axis=0)
-    avg = avg / avg.sum()
-    return FairTotalMarket(
-        line=float(selected_line),
-        over=float(avg[0]),
-        under=float(avg[1]),
-        count=len(by_line[selected_line]),
-    )
+
+def primary_total_market(markets: Sequence[FairTotalMarket]) -> FairTotalMarket | None:
+    """The single most-reliable line: most books, then closest to the 2.5 main line."""
+    if not markets:
+        return None
+    return sorted(markets, key=lambda m: (-m.count, abs(m.line - 2.5), m.line))[0]
+
+
+def extract_fair_totals(match: MatchOdds, method: str = "power") -> FairTotalMarket | None:
+    """Backwards-compatible single-line accessor: the primary over/under line, or ``None``."""
+    return primary_total_market(extract_fair_totals_all(match, method))
 
 
 def extract_correct_score_matrix(match: MatchOdds, max_goals: int, method: str = "power") -> np.ndarray | None:

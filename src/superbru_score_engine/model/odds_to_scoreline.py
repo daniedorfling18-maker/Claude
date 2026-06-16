@@ -7,7 +7,14 @@ import numpy as np
 from superbru_score_engine.config import ModelConfig
 from superbru_score_engine.ingest import MatchOdds
 
-from .devig import FairOutcomeMarket, FairTotalMarket, extract_correct_score_matrix, extract_fair_1x2, extract_fair_totals
+from .devig import (
+    FairOutcomeMarket,
+    FairTotalMarket,
+    extract_correct_score_matrix,
+    extract_fair_1x2,
+    extract_fair_totals_all,
+    primary_total_market,
+)
 from .dixon_coles import apply_dixon_coles, geometric_blend
 from .poisson import independent_poisson_matrix, matrix_over_probability, outcome_probabilities, solve_lambdas
 from .ratings import RatingsStore
@@ -22,6 +29,7 @@ class DistributionResult:
     fair_1x2: FairOutcomeMarket | None
     fair_total: FairTotalMarket | None
     diagnostics: dict[str, object]
+    fair_totals: tuple[FairTotalMarket, ...] = ()
 
 
 class OddsToScorelineModel:
@@ -31,7 +39,8 @@ class OddsToScorelineModel:
 
     def build_distribution(self, match: MatchOdds) -> DistributionResult:
         fair_1x2 = extract_fair_1x2(match, self.config.devig_method)
-        fair_total = extract_fair_totals(match, self.config.devig_method)
+        fair_totals = extract_fair_totals_all(match, self.config.devig_method)
+        fair_total = primary_total_market(fair_totals)
         apply_manual_home_advantage = fair_1x2 is None
         prior_home, prior_away = self.ratings.prior_lambdas(
             match.home_team,
@@ -66,6 +75,7 @@ class OddsToScorelineModel:
             lambda_home, lambda_away, solver_diagnostics = solve_lambdas(
                 fair_1x2=fair_1x2,
                 fair_total=fair_total,
+                fair_totals=fair_totals,
                 solver_grid_goals=self.config.solver_grid_goals,
                 dixon_coles_rho=self.config.dixon_coles_rho,
             )
@@ -134,6 +144,15 @@ class OddsToScorelineModel:
                     "model_over": float(matrix_over_probability(matrix, fair_total.line)),
                 }
             )
+        if fair_totals:
+            line_errors = [matrix_over_probability(matrix, market.line) - market.over for market in fair_totals]
+            diagnostics.update(
+                {
+                    "fair_total_lines_count": len(fair_totals),
+                    "fair_total_lines": ",".join(f"{market.line:g}" for market in fair_totals),
+                    "model_over_rmse_across_lines": float(np.sqrt(np.mean(np.square(line_errors)))),
+                }
+            )
 
         return DistributionResult(
             match=match,
@@ -143,6 +162,7 @@ class OddsToScorelineModel:
             fair_1x2=fair_1x2,
             fair_total=fair_total,
             diagnostics=diagnostics,
+            fair_totals=tuple(fair_totals),
         )
 
 

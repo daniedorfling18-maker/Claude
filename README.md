@@ -87,6 +87,8 @@ Each candidate includes:
 
 The JSON diagnostics also include the active calibration profile, lambdas, model result probabilities, modal exact scoreline, EV gaps, candidate-grid probability mass, low-score probabilities for common scorelines, synthetic public-pick estimates, sensitivity stability, and ratings provenance.
 
+When a match quotes more than one over/under line (for example 1.5, 2.5 and 3.5), the lambda solver fits all of them simultaneously instead of only the main 2.5 line, which constrains the shape of the goal distribution more tightly. The lines are weighted by book count and share a fixed totals-fit budget, so a match that quotes a single line behaves exactly as before. The relevant diagnostics are `fair_total_lines` / `fair_total_lines_count` (lines used), `solver_total_lines_used`, and the fit-quality fields `solver_total_over_rmse` and `model_over_rmse_across_lines` (root-mean-square gap between model and fair over-probabilities across every quoted line).
+
 The CSV output surfaces the main sensitivity fields: `sensitivity_stability`, `sensitivity_changed_count`, `sensitivity_warning`, and `sensitivity_most_common_alternative`. A low stability value means the recommended scoreline changes under small lambda/rho/total-goals/public-pick perturbations, so treat the pick as fragile.
 
 Ratings metadata is saved in `work/ratings.json` under `_metadata`, including source, source URL, cutoff date, update method, k-factor, base rating, Elo goal scale, confidence threshold, and applied-result count. Ratings are lower-trust than market odds and should remain fallback-only unless a proper backtest validates blending them into market-backed fixtures.

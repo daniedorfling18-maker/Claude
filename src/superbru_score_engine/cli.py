@@ -28,6 +28,7 @@ from superbru_score_engine.model.devig import parse_scoreline_label
 from superbru_score_engine.model.ratings import MatchResult, RatingsStore
 from superbru_score_engine.model.team_names import canonical_team_key
 from superbru_score_engine.report.outputs import betting_console_table, console_table, write_betting_outputs, write_outputs
+from superbru_score_engine.tuning import run_tune
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -45,6 +46,8 @@ def main(argv: list[str] | None = None) -> int:
         from superbru_score_engine.backtest.runner import run_backtest
 
         return run_backtest(args, config)
+    if args.command == "tune":
+        return run_tune(args, config)
     if args.command == "results":
         return run_results(args, config)
     if args.command == "public-results-backtest":
@@ -110,6 +113,19 @@ def build_parser() -> argparse.ArgumentParser:
     backtest.add_argument("--out-dir", default="outputs", help="Directory for backtest outputs")
     backtest.add_argument("--rho-grid", default="", help="Comma-separated Dixon-Coles rho values for calibration")
     backtest.add_argument("--ci-grid", default="", help="Comma-separated CI cutoffs for calibration")
+
+    tune = subparsers.add_parser("tune", help="Grid-search tuning parameters against completed results and a frozen odds snapshot")
+    tune.add_argument("--config", default="config.yaml", help="Path to YAML/JSON config")
+    tune.add_argument("--fixtures", required=True, help="CSV with actual home_goals/away_goals and fixture metadata")
+    tune.add_argument("--odds-json", required=True, help="Frozen pre-match odds JSON snapshot")
+    tune.add_argument("--out-dir", default="outputs/tuning", help="Directory for tuning outputs")
+    tune.add_argument("--rho-grid", default="", help="Comma-separated Dixon-Coles rho values")
+    tune.add_argument("--ci-grid", default="", help="Comma-separated Superbru closeness-index cutoffs")
+    tune.add_argument("--odds-weight-grid", default="", help="Comma-separated model odds weights")
+    tune.add_argument("--ratings-weight-grid", default="", help="Optional comma-separated ratings weights; otherwise uses 1 - odds_weight")
+    tune.add_argument("--strategy-mode-grid", default="", help="Comma-separated modes, e.g. raw_ev,risk_adjusted,conservative")
+    tune.add_argument("--risk-aversion-grid", default="", help="Comma-separated risk-aversion values")
+    tune.add_argument("--variance-penalty-grid", default="", help="Comma-separated variance-penalty values")
 
     results = subparsers.add_parser("results", help="Fetch completed results without using odds quota")
     results.add_argument("--config", default="config.yaml", help="Path to YAML/JSON config")

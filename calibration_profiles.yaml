@@ -14,8 +14,8 @@ calibration_profiles:
     ratings_weight: 0.0
 
   big5_h2h_totals:
-    evidence_note: "Big-Five-league validated on h2h + totals, 2019/20-2024/25. Right market structure, but club leagues rather than World Cup matches. OOS-validated 2026-06-15 as the best held-out h2h_totals cell."
+    evidence_note: "Big-Five-league validated on h2h + totals, 2019/20-2024/25. Right market structure, but club leagues rather than World Cup matches. OOS-validated 2026-06-15 as the best held-out h2h_totals cell. Ratings remain fallback-only and are not blended into market-backed fixtures."
     devig_method: multiplicative
     dixon_coles_rho: -0.08
-    odds_weight: 0.95
-    ratings_weight: 0.05
+    odds_weight: 1.0
+    ratings_weight: 0.0

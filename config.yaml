@@ -47,8 +47,8 @@ model:
   dixon_coles_rho: -0.08
   devig_method: multiplicative
   correct_score_blend_weight: 0.0
-  odds_weight: 0.95
-  ratings_weight: 0.05
+  odds_weight: 1.0
+  ratings_weight: 0.0
   home_advantage_goals: 0.18
   host_teams:
     - United States

@@ -4,8 +4,9 @@ from dataclasses import dataclass, replace
 
 import numpy as np
 
-from superbru_score_engine.config import PublicPickConfig, SuperbruConfig
+from superbru_score_engine.config import PublicPickConfig, SensitivityConfig, SuperbruConfig
 from superbru_score_engine.decision.public_pick import estimate_public_pick_shares
+from superbru_score_engine.decision.sensitivity import build_sensitivity_scenarios, summarise_sensitivity
 from superbru_score_engine.model import DistributionResult
 
 
@@ -62,56 +63,28 @@ class SuperbruDecisionEngine:
         config: SuperbruConfig,
         candidate_grid_goals: int,
         public_pick_config: PublicPickConfig | None = None,
+        sensitivity_config: SensitivityConfig | None = None,
     ) -> None:
         self.config = config
         self.candidate_grid_goals = candidate_grid_goals
         self.public_pick_config = public_pick_config or PublicPickConfig()
+        self.sensitivity_config = sensitivity_config or SensitivityConfig()
 
     def predict(self, distribution: DistributionResult) -> Prediction:
         matrix = distribution.matrix
-        ci = self.config.ci_cutoff
-        evaluations = [
-            score_prediction(matrix, h, a, ci, self.config.contrarian, self.config.contrarian_weight)
-            for h in range(self.candidate_grid_goals + 1)
-            for a in range(self.candidate_grid_goals + 1)
-        ]
-
-        # Synthetic public-pick shares -> field EV -> per-candidate risk-adjusted score.
-        favourite = _favourite_outcome(matrix)
-        evaluations = _fill_strategic_fields(
-            evaluations,
-            favourite_outcome=favourite,
-            home_team=distribution.match.home_team,
-            away_team=distribution.match.away_team,
-            public_pick_config=self.public_pick_config,
-            superbru=self.config,
-        )
-
-        # Pick types. With score=adjusted EV, _top_by reproduces the prior default
-        # recommendation exactly, so exact_chase (weight 1) and risk_adjusted (zero
-        # weights) collapse to raw_ev by construction.
-        tie = self.config.tie_epsilon
-        w = self.config.exact_chase_weight
-        raw_ev_pick = _top_by(evaluations, lambda c: c.adjusted_expected_points, tie)
-        modal_score_pick = max(evaluations, key=lambda c: (c.p_exact, -(c.home_goals + c.away_goals)))
-        conservative_pick = max(evaluations, key=lambda c: (c.p_outcome, c.expected_points, c.p_close))
-        exact_chase_pick = _top_by(evaluations, lambda c: c.expected_points + (w - 1.0) * 3.0 * c.p_exact, tie)
-        risk_adjusted_pick = _top_by(evaluations, lambda c: c.risk_adjusted_score, tie)
-        contrarian_pick = _contrarian_pick(evaluations, raw_ev_pick)
-
-        picks = {
-            "raw_ev": raw_ev_pick,
-            "conservative": conservative_pick,
-            "exact_chase": exact_chase_pick,
-            "contrarian": contrarian_pick,
-            "risk_adjusted": risk_adjusted_pick,
-        }
-        mode = self.config.strategy_mode if self.config.strategy_mode in picks else "raw_ev"
-        recommended = picks[mode]
+        selections = self._select_for_matrix(matrix, self.config, self.public_pick_config, distribution.match.home_team, distribution.match.away_team)
+        evaluations = selections["evaluations"]
+        recommended = selections["recommended"]
+        raw_ev_pick = selections["raw_ev"]
+        modal_score_pick = selections["modal_score"]
+        conservative_pick = selections["conservative"]
+        exact_chase_pick = selections["exact_chase"]
+        contrarian_pick = selections["contrarian"]
+        mode = selections["mode"]
 
         top = tuple(sorted(evaluations, key=lambda c: (c.expected_points, c.p_close), reverse=True)[:3])
         diagnostics = dict(distribution.diagnostics)
-        diagnostics.update(decision_diagnostics(matrix, evaluations, recommended, ci))
+        diagnostics.update(decision_diagnostics(matrix, evaluations, recommended, self.config.ci_cutoff))
         diagnostics.update(
             {
                 "strategy_mode": mode,
@@ -126,6 +99,7 @@ class SuperbruDecisionEngine:
                 "recommended_risk_adjusted_score": float(recommended.risk_adjusted_score),
             }
         )
+        diagnostics.update(self._sensitivity_for_distribution(distribution, recommended.scoreline))
         return Prediction(
             match_id=distribution.match.match_id,
             home_team=distribution.match.home_team,
@@ -142,6 +116,108 @@ class SuperbruDecisionEngine:
             diagnostics=diagnostics,
         )
 
+    def _select_for_matrix(
+        self,
+        matrix: np.ndarray,
+        superbru: SuperbruConfig,
+        public_pick_config: PublicPickConfig,
+        home_team: str,
+        away_team: str,
+    ) -> dict[str, object]:
+        evaluations = _evaluate_candidates(matrix, superbru, self.candidate_grid_goals)
+        return _select_picks(
+            matrix=matrix,
+            evaluations=evaluations,
+            superbru=superbru,
+            public_pick_config=public_pick_config,
+            home_team=home_team,
+            away_team=away_team,
+        )
+
+    def _sensitivity_for_distribution(self, distribution: DistributionResult, base_scoreline: str) -> dict[str, object]:
+        if not self.sensitivity_config.enabled:
+            return {"sensitivity_enabled": False}
+        rho = float(distribution.diagnostics.get("dixon_coles_rho", distribution.diagnostics.get("rho", 0.0)) or 0.0)
+        scenarios = build_sensitivity_scenarios(
+            base_matrix=distribution.matrix,
+            lambda_home=distribution.lambda_home,
+            lambda_away=distribution.lambda_away,
+            rho=rho,
+            superbru=self.config,
+            public_pick=self.public_pick_config,
+            sensitivity=self.sensitivity_config,
+        )
+
+        def pick_fn(matrix: np.ndarray, superbru: SuperbruConfig, public_pick: PublicPickConfig) -> str:
+            selected = self._select_for_matrix(matrix, superbru, public_pick, distribution.match.home_team, distribution.match.away_team)
+            return selected["recommended"].scoreline
+
+        summary = summarise_sensitivity(
+            base_scoreline=base_scoreline,
+            scenarios=scenarios,
+            pick_fn=pick_fn,
+            warning_threshold=self.sensitivity_config.stability_warning_threshold,
+        )
+        summary["sensitivity_enabled"] = True
+        return summary
+
+
+def _evaluate_candidates(matrix: np.ndarray, superbru: SuperbruConfig, candidate_grid_goals: int) -> list[CandidateEvaluation]:
+    return [
+        score_prediction(matrix, h, a, superbru.ci_cutoff, superbru.contrarian, superbru.contrarian_weight)
+        for h in range(candidate_grid_goals + 1)
+        for a in range(candidate_grid_goals + 1)
+    ]
+
+
+def _select_picks(
+    *,
+    matrix: np.ndarray,
+    evaluations: list[CandidateEvaluation],
+    superbru: SuperbruConfig,
+    public_pick_config: PublicPickConfig,
+    home_team: str,
+    away_team: str,
+) -> dict[str, object]:
+    favourite = _favourite_outcome(matrix)
+    evaluations = _fill_strategic_fields(
+        evaluations,
+        favourite_outcome=favourite,
+        home_team=home_team,
+        away_team=away_team,
+        public_pick_config=public_pick_config,
+        superbru=superbru,
+    )
+
+    tie = superbru.tie_epsilon
+    w = superbru.exact_chase_weight
+    raw_ev_pick = _top_by(evaluations, lambda c: c.adjusted_expected_points, tie)
+    modal_score_pick = max(evaluations, key=lambda c: (c.p_exact, -(c.home_goals + c.away_goals)))
+    conservative_pick = max(evaluations, key=lambda c: (c.p_outcome, c.expected_points, c.p_close))
+    exact_chase_pick = _top_by(evaluations, lambda c: c.expected_points + (w - 1.0) * 3.0 * c.p_exact, tie)
+    risk_adjusted_pick = _top_by(evaluations, lambda c: c.risk_adjusted_score, tie)
+    contrarian_pick = _contrarian_pick(evaluations, raw_ev_pick)
+
+    picks = {
+        "raw_ev": raw_ev_pick,
+        "conservative": conservative_pick,
+        "exact_chase": exact_chase_pick,
+        "contrarian": contrarian_pick,
+        "risk_adjusted": risk_adjusted_pick,
+    }
+    mode = superbru.strategy_mode if superbru.strategy_mode in picks else "raw_ev"
+    return {
+        "evaluations": evaluations,
+        "recommended": picks[mode],
+        "raw_ev": raw_ev_pick,
+        "modal_score": modal_score_pick,
+        "conservative": conservative_pick,
+        "exact_chase": exact_chase_pick,
+        "contrarian": contrarian_pick,
+        "risk_adjusted": risk_adjusted_pick,
+        "mode": mode,
+    }
+
 
 def _top_by(evaluations, score, tie_epsilon: float) -> CandidateEvaluation:
     """Maximise ``score``; ties within ``tie_epsilon`` broken by close prob, then
@@ -155,17 +231,17 @@ def _top_by(evaluations, score, tie_epsilon: float) -> CandidateEvaluation:
 
 
 def _contrarian_pick(evaluations: list[CandidateEvaluation], raw_ev_pick: CandidateEvaluation) -> CandidateEvaluation:
-    """Most field-beating + differentiated candidate, with an EV floor so it is never a joke pick."""
     floor = 0.5 * raw_ev_pick.expected_points
     eligible = [c for c in evaluations if c.expected_points >= floor] or list(evaluations)
     return max(eligible, key=lambda c: (c.ev_vs_field + 0.75 * (1.0 - c.public_pick_share), c.expected_points))
 
 
-def _favourite_outcome(matrix: np.ndarray) -> Outcome:
-    home = float(np.tril(matrix, -1).sum())
-    draw = float(np.trace(matrix))
-    away = float(np.triu(matrix, 1).sum())
-    return {"home": home, "draw": draw, "away": away}
+def _favourite_outcome(matrix: np.ndarray) -> dict[str, float]:
+    return {
+        "home": float(np.tril(matrix, -1).sum()),
+        "draw": float(np.trace(matrix)),
+        "away": float(np.triu(matrix, 1).sum()),
+    }
 
 
 def _fill_strategic_fields(

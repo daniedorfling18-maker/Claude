@@ -29,6 +29,21 @@ class FairTotalMarket:
     count: int
 
 
+@dataclass(frozen=True)
+class FairAsianHandicapMarket:
+    """Two-sided Asian handicap market from the home team's line perspective.
+
+    ``line`` is the handicap applied to the home team's goal difference. For
+    example, ``-0.5`` means the home side must win, while ``+0.5`` means the
+    home side covers with a win or draw.
+    """
+
+    line: float
+    home: float
+    away: float
+    count: int
+
+
 def decimal_implied_probabilities(prices: list[float], method: str = "power") -> np.ndarray:
     implied = np.array([1.0 / price for price in prices], dtype=float)
     return devig_implied_probabilities(implied, method)
@@ -109,6 +124,43 @@ def primary_total_market(markets: Sequence[FairTotalMarket]) -> FairTotalMarket 
 def extract_fair_totals(match: MatchOdds, method: str = "power") -> FairTotalMarket | None:
     """Backwards-compatible single-line accessor: the primary over/under line, or ``None``."""
     return primary_total_market(extract_fair_totals_all(match, method))
+
+
+def extract_fair_asian_handicap(match: MatchOdds, method: str = "power") -> FairAsianHandicapMarket | None:
+    """De-vig a two-sided Asian handicap/spread market.
+
+    Markets are normalised to the home-team handicap line. Generic providers often
+    attach opposite points to the home and away outcomes. For example, home -0.5 and
+    away +0.5 are grouped under ``line=-0.5``.
+    """
+    home_key = canonical_team_key(match.home_team)
+    away_key = canonical_team_key(match.away_team)
+    by_line: dict[float, list[np.ndarray]] = defaultdict(list)
+
+    for key in ("spreads", "asian_handicap", "asian_handicap_spread"):
+        for market in match.market(key):
+            grouped: dict[float, dict[str, float]] = defaultdict(dict)
+            for outcome in market.outcomes:
+                if outcome.point is None:
+                    continue
+                name_key = canonical_team_key(outcome.name)
+                description = (outcome.description or "").strip().lower()
+                if name_key == home_key or description == "home":
+                    grouped[float(outcome.point)]["home"] = outcome.price
+                elif name_key == away_key or description == "away":
+                    grouped[-float(outcome.point)]["away"] = outcome.price
+            for line, prices in grouped.items():
+                if "home" in prices and "away" in prices:
+                    probs = decimal_implied_probabilities([prices["home"], prices["away"]], method)
+                    by_line[float(line)].append(probs)
+
+    if not by_line:
+        return None
+
+    line = sorted(by_line, key=lambda value: (-len(by_line[value]), abs(value), value))[0]
+    avg = np.vstack(by_line[line]).mean(axis=0)
+    avg = avg / avg.sum()
+    return FairAsianHandicapMarket(line=float(line), home=float(avg[0]), away=float(avg[1]), count=len(by_line[line]))
 
 
 def extract_correct_score_matrix(match: MatchOdds, max_goals: int, method: str = "power") -> np.ndarray | None:

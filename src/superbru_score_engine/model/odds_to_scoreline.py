@@ -42,6 +42,7 @@ class OddsToScorelineModel:
             home_advantage_goals=self.config.home_advantage_goals,
             apply_home_advantage=apply_manual_home_advantage,
         )
+        ratings_diagnostics = self.ratings.diagnostics()
 
         diagnostics: dict[str, object] = {
             "ratings_lambda_home": prior_home,
@@ -49,7 +50,15 @@ class OddsToScorelineModel:
             "distribution_source": "odds",
             "devig_method": self.config.devig_method,
             "calibration_profile": self.config.calibration_profile,
+            "dixon_coles_rho": self.config.dixon_coles_rho,
             "manual_home_advantage_applied": apply_manual_home_advantage,
+            "ratings_source": ratings_diagnostics.get("source"),
+            "ratings_source_url": ratings_diagnostics.get("source_url"),
+            "ratings_cutoff_date": ratings_diagnostics.get("cutoff_date"),
+            "ratings_update_method": ratings_diagnostics.get("update_method"),
+            "ratings_updated_at": ratings_diagnostics.get("updated_at"),
+            "ratings_number_of_applied_results": ratings_diagnostics.get("number_of_applied_results"),
+            "ratings_number_of_teams": ratings_diagnostics.get("number_of_teams"),
         }
 
         if fair_1x2:

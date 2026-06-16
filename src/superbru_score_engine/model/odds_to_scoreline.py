@@ -59,6 +59,7 @@ class OddsToScorelineModel:
             "ratings_updated_at": ratings_diagnostics.get("updated_at"),
             "ratings_number_of_applied_results": ratings_diagnostics.get("number_of_applied_results"),
             "ratings_number_of_teams": ratings_diagnostics.get("number_of_teams"),
+            "ratings_use_as_fallback_only": self.ratings.config.use_as_fallback_only,
         }
 
         if fair_1x2:
@@ -66,13 +67,20 @@ class OddsToScorelineModel:
                 fair_1x2=fair_1x2,
                 fair_total=fair_total,
                 solver_grid_goals=self.config.solver_grid_goals,
+                dixon_coles_rho=self.config.dixon_coles_rho,
             )
             diagnostics.update(solver_diagnostics)
             odds_weight = min(1.0, max(0.0, self.config.odds_weight))
             ratings_weight = min(1.0, max(0.0, self.config.ratings_weight))
-            total_weight = odds_weight + ratings_weight
             diagnostics["odds_weight_configured"] = self.config.odds_weight
             diagnostics["ratings_weight_configured"] = self.config.ratings_weight
+
+            if self.ratings.config.use_as_fallback_only and ratings_weight > 0:
+                diagnostics["ratings_blend_skipped_reason"] = "ratings.use_as_fallback_only is true for market-backed match"
+                ratings_weight = 0.0
+                odds_weight = 1.0
+
+            total_weight = odds_weight + ratings_weight
             if total_weight > 0:
                 odds_weight /= total_weight
                 ratings_weight /= total_weight
@@ -84,6 +92,10 @@ class OddsToScorelineModel:
             lambda_home, lambda_away = prior_home, prior_away
             diagnostics["distribution_source"] = "ratings_prior"
             diagnostics["ratings_only_warning"] = "No usable 1X2 market; ratings-only score distribution is lower confidence."
+            diagnostics["odds_weight_configured"] = self.config.odds_weight
+            diagnostics["ratings_weight_configured"] = self.config.ratings_weight
+            diagnostics["odds_weight_effective"] = 0.0
+            diagnostics["ratings_weight_effective"] = 1.0
 
         matrix = independent_poisson_matrix(lambda_home, lambda_away, self.config.model_grid_goals)
         matrix = apply_dixon_coles(matrix, lambda_home, lambda_away, self.config.dixon_coles_rho)

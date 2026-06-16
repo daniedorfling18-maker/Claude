@@ -214,7 +214,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     league_data = subparsers.add_parser(
         "football-data-league-backtest",
-        help="Free Football-Data league proxy test comparing h2h-only against h2h+totals",
+        help="Free Football-Data league proxy test comparing h2h-only, h2h+totals, and optional Asian handicap",
     )
     league_data.add_argument("--config", default="config.yaml", help="Path to YAML/JSON config")
     league_data.add_argument("--seasons", default="2223", help="Comma-separated Football-Data season codes, e.g. 2122,2223")
@@ -227,7 +227,7 @@ def build_parser() -> argparse.ArgumentParser:
     league_data.add_argument(
         "--market-mode-grid",
         default="h2h,h2h_totals",
-        help="Comma-separated modes to compare: h2h,h2h_totals",
+        help="Comma-separated modes to compare: h2h,h2h_totals,h2h_totals_ah",
     )
     league_data.add_argument(
         "--devig-method-grid",
@@ -236,6 +236,11 @@ def build_parser() -> argparse.ArgumentParser:
     )
     league_data.add_argument("--rho-grid", default="", help="Comma-separated Dixon-Coles rho values for calibration")
     league_data.add_argument("--ci-grid", default="", help="Comma-separated CI cutoffs for calibration")
+    league_data.add_argument(
+        "--asian-handicap-weight-grid",
+        default="",
+        help="Comma-separated Asian handicap objective weights, e.g. 0,0.05,0.10,0.15,0.20",
+    )
     league_data.add_argument("--out-dir", default="outputs", help="Directory for backtest outputs")
     return parser
 

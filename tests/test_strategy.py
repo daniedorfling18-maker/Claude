@@ -23,11 +23,13 @@ class _Dist:
     matrix: object
     match: _Match
     diagnostics: dict
+    lambda_home: float
+    lambda_away: float
 
 
 def _dist(lh=1.6, la=1.0, rho=-0.08, grid=10):
     m = apply_dixon_coles(independent_poisson_matrix(lh, la, grid), lh, la, rho)
-    return _Dist(matrix=m, match=_Match(), diagnostics={})
+    return _Dist(matrix=m, match=_Match(), diagnostics={"dixon_coles_rho": rho}, lambda_home=lh, lambda_away=la)
 
 
 def _engine(**superbru):
@@ -74,6 +76,12 @@ def test_risk_adjusted_zero_weights_equals_raw_ev():
     # all strategic weights default to 0 -> risk_adjusted_score == adjusted EV
     p = _engine(strategy_mode="risk_adjusted").predict(_dist())
     assert p.recommended.scoreline == p.raw_ev_pick.scoreline
+
+
+def test_risk_adjusted_pick_is_exposed_as_first_class_pick():
+    p = _engine(strategy_mode="risk_adjusted", risk_aversion=0.1).predict(_dist())
+    assert p.recommended.scoreline == p.risk_adjusted_pick.scoreline
+    assert p.diagnostics["risk_adjusted_scoreline"] == p.risk_adjusted_pick.scoreline
 
 
 def test_contrarian_pick_is_not_a_joke_pick():

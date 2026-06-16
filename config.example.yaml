@@ -57,7 +57,6 @@ model:
   devig_method: power
   # Set >0 only if your provider/plan returns a correct_score market.
   correct_score_blend_weight: 0.0
-  # Calibrated on Football-Data 2014/2018/2022 World Cup 1X2 odds.
   # Ratings still fill gaps when market odds are missing.
   odds_weight: 1.0
   ratings_weight: 0.0
@@ -86,6 +85,36 @@ superbru:
   differentiation_weight: 0.0  # delta: reward low synthetic public-pick share
   risk_aversion: 0.0           # beta: penalise P(zero points)
   variance_penalty: 0.0        # gamma: penalise points variance
+
+# Decision-level stress test. These perturb the already-built scoreline matrix
+# and strategic decision settings to show how stable the recommended pick is.
+sensitivity:
+  enabled: true
+  lambda_pct: 0.05
+  rho_delta: 0.02
+  total_goals_delta: 0.15
+  public_bias_pct: 0.20
+  exact_chase_weights:
+    - 1.0
+    - 1.5
+    - 2.0
+  stability_warning_threshold: 0.70
+
+# Ratings/Elo governance. Ratings are intentionally auditable and lower-trust
+# than market odds. Keep use_as_fallback_only true unless you have validated the
+# blend in a proper backtest.
+ratings:
+  enabled: true
+  source: internal_results_elo
+  source_url: ""
+  cutoff_date: ""
+  update_method: elo_margin_log_multiplier
+  k_factor: 24.0
+  base_rating: 1500.0
+  base_total_goals: 2.45
+  elo_goal_scale: 650.0
+  min_matches_full_confidence: 8
+  use_as_fallback_only: true
 
 betting:
   enabled: false

@@ -89,7 +89,7 @@ The JSON diagnostics also include the active calibration profile, lambdas, model
 
 The CSV output surfaces the main sensitivity fields: `sensitivity_stability`, `sensitivity_changed_count`, `sensitivity_warning`, and `sensitivity_most_common_alternative`. A low stability value means the recommended scoreline changes under small lambda/rho/total-goals/public-pick perturbations, so treat the pick as fragile.
 
-Ratings metadata is saved in `work/ratings.json` under `_metadata`, including source, source URL, cutoff date, update method, k-factor, base rating, Elo goal scale, confidence threshold, and applied-result count. Ratings are lower-trust than market odds and should be treated as a fallback or explicitly validated blend.
+Ratings metadata is saved in `work/ratings.json` under `_metadata`, including source, source URL, cutoff date, update method, k-factor, base rating, Elo goal scale, confidence threshold, and applied-result count. Ratings are lower-trust than market odds and should remain fallback-only unless a proper backtest validates blending them into market-backed fixtures.
 
 ## Betting Report
 
@@ -143,8 +143,4 @@ Fixture metadata joins fail loudly when a row cannot be matched to an odds event
 
 Manual home/host advantage is applied only on the ratings-only fallback path. When bookmaker 1X2 odds are available, the market is assumed to have already priced venue and host effects, so the manual `home_advantage_goals` term is not blended into the odds-derived rates. For host fallback matches, the bump is venue-conditioned: the United States only receives the host bump in the United States, Canada in Canada, and Mexico in Mexico.
 
-The default de-vig method is `power`, and the default Dixon-Coles correction is `dixon_coles_rho: -0.04`, after a Football-Data 1X2-odds backtest on the 2014, 2018, and 2022 World Cups. In that sweep, `power` slightly beat additive and multiplicative de-vig. The backtest did not include Over/Under totals, so treat it as a useful calibration anchor rather than final proof for the live `h2h,totals` pipeline.
-
-The default odds/ratings blend is `odds_weight: 1.0` and `ratings_weight: 0.0` for market-backed matches after the same Football-Data grid search. Ratings are still used as the fallback when no usable 1X2 market exists, but they are not blended into bookmaker-backed rates by default.
-
-These World-Cup-validated values are what `config.example.yaml` ships. The bundled `config.yaml` instead carries a Football-Data Big Five league calibration (`devig_method: multiplicative`, `dixon_coles_rho: -0.08`, plus a small `ratings_weight: 0.05` form blend). That club-league sweep is only a proxy for World Cup matches, so treat the two configs as alternative calibration anchors and pick whichever you trust more for the fixtures you are predicting.
+The default `big5_h2h_totals` profile uses `devig_method: multiplicative`, `dixon_coles_rho: -0.08`, `odds_weight: 1.0`, and `ratings_weight: 0.0`. It is a Football-Data Big Five league proxy calibration for the live `h2h,totals` market structure. The alternative `worldcup_1x2` profile uses `power`, `-0.04`, and odds-only, based on Football-Data 2014/2018/2022 World Cup 1X2 odds. Treat the two configs as alternative calibration anchors and pick whichever evidence base you trust more for the fixtures you are predicting.

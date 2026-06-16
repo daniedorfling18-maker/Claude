@@ -69,6 +69,8 @@ class SuperbruDecisionEngine:
         top = tuple(
             sorted(evaluations, key=lambda candidate: (candidate.adjusted_expected_points, candidate.p_close), reverse=True)[:3]
         )
+        diagnostics = dict(distribution.diagnostics)
+        diagnostics.update(decision_diagnostics(distribution.matrix, evaluations, recommended, self.config.ci_cutoff))
         return Prediction(
             match_id=distribution.match.match_id,
             home_team=distribution.match.home_team,
@@ -76,8 +78,31 @@ class SuperbruDecisionEngine:
             commence_time=distribution.match.commence_time,
             recommended=recommended,
             top_candidates=top,
-            diagnostics=distribution.diagnostics,
+            diagnostics=diagnostics,
         )
+
+
+def decision_diagnostics(
+    matrix: np.ndarray,
+    evaluations: list[CandidateEvaluation],
+    recommended: CandidateEvaluation,
+    ci_cutoff: float,
+) -> dict[str, float | str]:
+    modal_home, modal_away = (int(value) for value in np.unravel_index(np.argmax(matrix), matrix.shape))
+    modal_candidate = score_prediction(matrix, modal_home, modal_away, ci_cutoff)
+    top_raw_ev = max(evaluations, key=lambda candidate: candidate.expected_points)
+    second_ev = sorted((candidate.expected_points for candidate in evaluations), reverse=True)[1] if len(evaluations) > 1 else 0.0
+    return {
+        "recommended_scoreline": recommended.scoreline,
+        "recommended_expected_points": float(recommended.expected_points),
+        "recommended_adjusted_expected_points": float(recommended.adjusted_expected_points),
+        "raw_ev_scoreline": top_raw_ev.scoreline,
+        "raw_ev_expected_points": float(top_raw_ev.expected_points),
+        "modal_scoreline_ev": modal_candidate.scoreline,
+        "modal_scoreline_expected_points": float(modal_candidate.expected_points),
+        "ev_gap_recommended_to_modal": float(recommended.expected_points - modal_candidate.expected_points),
+        "ev_gap_to_second": float(max(0.0, recommended.expected_points - second_ev)),
+    }
 
 
 def score_prediction(
@@ -147,4 +172,3 @@ def score_actual_prediction(pred_home: int, pred_away: int, actual_home: int, ac
     if closeness_index(pred_home, pred_away, actual_home, actual_away) <= ci_cutoff:
         return 1.5
     return 1.0
-

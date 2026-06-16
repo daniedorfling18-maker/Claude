@@ -47,7 +47,7 @@ def run_backtest(args: argparse.Namespace, config: AppConfig) -> int:
                 superbru=replace(config.superbru, ci_cutoff=ci_cutoff),
             )
             frame = evaluate_backtest(args.fixtures, args.odds_json, trial_config)
-            validation = summarise_validation(frame.to_dict(orient="records")) if not frame.empty else {}
+            validation = _clean_validation_metrics(summarise_validation(frame.to_dict(orient="records"))) if not frame.empty else {}
             avg_model = float(frame["model_points"].mean()) if not frame.empty else 0.0
             avg_naive = float(frame["naive_points"].mean()) if not frame.empty else 0.0
             calibration_rows.append(
@@ -79,7 +79,7 @@ def run_backtest(args: argparse.Namespace, config: AppConfig) -> int:
     reliability_cells(best_frame).to_csv(reliability_path, index=False)
     _try_plot_reliability(reliability_path, out_dir / "reliability_cells.png")
 
-    validation_metrics = summarise_validation(best_frame.to_dict(orient="records")) if not best_frame.empty else {}
+    validation_metrics = _clean_validation_metrics(summarise_validation(best_frame.to_dict(orient="records"))) if not best_frame.empty else {}
     low_score_path = out_dir / "low_score_calibration.csv"
     favourite_band_path = out_dir / "favourite_band_calibration.csv"
     baseline_path = out_dir / "baseline_metrics.json"
@@ -268,6 +268,14 @@ def reliability_cells(frame: pd.DataFrame, bins: int = 10) -> pd.DataFrame:
         .reset_index()
         .assign(bin=lambda df: df["bin"].astype(str))
     )
+
+
+def _clean_validation_metrics(metrics: dict) -> dict:
+    baseline_metrics = dict(metrics.get("baseline_metrics") or {})
+    baseline_metrics.pop("model_expected", None)
+    cleaned = dict(metrics)
+    cleaned["baseline_metrics"] = baseline_metrics
+    return cleaned
 
 
 def _try_plot_reliability(csv_path: Path, png_path: Path) -> None:

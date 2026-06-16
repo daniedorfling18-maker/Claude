@@ -12,6 +12,7 @@ from superbru_score_engine.backtest.metrics import (
     scoreline_hit,
     summarise_validation,
 )
+from superbru_score_engine.backtest.runner import _clean_validation_metrics
 
 
 def test_result_helpers() -> None:
@@ -46,7 +47,27 @@ def test_low_score_calibration_counts_observed_scores() -> None:
 
 
 def test_summarise_validation_reports_core_metrics() -> None:
-    records = [
+    records = _sample_records()
+    summary = summarise_validation(records)
+    assert summary["matches_scored"] == 2
+    assert summary["average_model_points"] == 1.5
+    assert summary["average_naive_points"] == 1.5
+    assert summary["exact_score_hit_rate"] == 0.5
+    assert summary["right_result_accuracy"] == 0.5
+    assert summary["draw_calibration"]["observed_draw_frequency"] == 0.5
+    assert "naive" in summary["baseline_metrics"]
+
+
+def test_clean_validation_metrics_removes_model_expected_baseline() -> None:
+    summary = summarise_validation(_sample_records())
+    assert "model_expected" in summary["baseline_metrics"]
+    cleaned = _clean_validation_metrics(summary)
+    assert "model_expected" not in cleaned["baseline_metrics"]
+    assert "naive" in cleaned["baseline_metrics"]
+
+
+def _sample_records() -> list[dict]:
+    return [
         {
             "actual_scoreline": "1-0",
             "actual_result": "home",
@@ -86,11 +107,3 @@ def test_summarise_validation_reports_core_metrics() -> None:
             "p_score_1_0": 0.15,
         },
     ]
-    summary = summarise_validation(records)
-    assert summary["matches_scored"] == 2
-    assert summary["average_model_points"] == 1.5
-    assert summary["average_naive_points"] == 1.5
-    assert summary["exact_score_hit_rate"] == 0.5
-    assert summary["right_result_accuracy"] == 0.5
-    assert summary["draw_calibration"]["observed_draw_frequency"] == 0.5
-    assert "naive" in summary["baseline_metrics"]

@@ -85,7 +85,11 @@ Each candidate includes:
 - `P(outcome)`
 - expected Superbru points
 
-The JSON diagnostics also include the active calibration profile, lambdas, model result probabilities, modal exact scoreline, EV gaps, candidate-grid probability mass, and low-score probabilities for common scorelines such as 0-0, 1-0, 0-1, 1-1, 2-1, and 1-2.
+The JSON diagnostics also include the active calibration profile, lambdas, model result probabilities, modal exact scoreline, EV gaps, candidate-grid probability mass, low-score probabilities for common scorelines, synthetic public-pick estimates, sensitivity stability, and ratings provenance.
+
+The CSV output surfaces the main sensitivity fields: `sensitivity_stability`, `sensitivity_changed_count`, `sensitivity_warning`, and `sensitivity_most_common_alternative`. A low stability value means the recommended scoreline changes under small lambda/rho/total-goals/public-pick perturbations, so treat the pick as fragile.
+
+Ratings metadata is saved in `work/ratings.json` under `_metadata`, including source, source URL, cutoff date, update method, k-factor, base rating, Elo goal scale, confidence threshold, and applied-result count. Ratings are lower-trust than market odds and should be treated as a fallback or explicitly validated blend.
 
 ## Betting Report
 
@@ -129,7 +133,7 @@ Before trusting production picks, verify:
 
 - Historical odds coverage is large enough before treating any backtest calibration as stable.
 - `config-check` passes against the calibration profile you intend to use.
-- The JSON diagnostics look sensible for lambdas, result probabilities, modal scoreline, EV gaps, and candidate-grid probability mass.
+- The JSON diagnostics look sensible for lambdas, result probabilities, modal scoreline, EV gaps, sensitivity stability, and candidate-grid probability mass.
 
 Superbru's World Cup scoring is configured as 3 points for an exact score, 1.5 for a close score with the right outcome, 1 for the right outcome only, and 0 for the wrong outcome. Its close rule is equivalent to `ci_cutoff: 1.5`: the pick must have the right outcome and be either one goal out, or two goals out with the correct goal difference. Knockout scoring uses the regular-time score unless the match is drawn after regular time; in that case it is scored after extra time, and penalty shootouts remain draws.
 

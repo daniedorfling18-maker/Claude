@@ -21,7 +21,7 @@ class DistributionResult:
     lambda_away: float
     fair_1x2: FairOutcomeMarket | None
     fair_total: FairTotalMarket | None
-    diagnostics: dict[str, float | str | bool]
+    diagnostics: dict[str, object]
 
 
 class OddsToScorelineModel:
@@ -43,11 +43,12 @@ class OddsToScorelineModel:
             apply_home_advantage=apply_manual_home_advantage,
         )
 
-        diagnostics: dict[str, float | str | bool] = {
+        diagnostics: dict[str, object] = {
             "ratings_lambda_home": prior_home,
             "ratings_lambda_away": prior_away,
             "distribution_source": "odds",
             "devig_method": self.config.devig_method,
+            "calibration_profile": self.config.calibration_profile,
             "manual_home_advantage_applied": apply_manual_home_advantage,
         }
 
@@ -61,14 +62,19 @@ class OddsToScorelineModel:
             odds_weight = min(1.0, max(0.0, self.config.odds_weight))
             ratings_weight = min(1.0, max(0.0, self.config.ratings_weight))
             total_weight = odds_weight + ratings_weight
+            diagnostics["odds_weight_configured"] = self.config.odds_weight
+            diagnostics["ratings_weight_configured"] = self.config.ratings_weight
             if total_weight > 0:
                 odds_weight /= total_weight
                 ratings_weight /= total_weight
+                diagnostics["odds_weight_effective"] = odds_weight
+                diagnostics["ratings_weight_effective"] = ratings_weight
                 lambda_home = odds_weight * lambda_home + ratings_weight * prior_home
                 lambda_away = odds_weight * lambda_away + ratings_weight * prior_away
         else:
             lambda_home, lambda_away = prior_home, prior_away
             diagnostics["distribution_source"] = "ratings_prior"
+            diagnostics["ratings_only_warning"] = "No usable 1X2 market; ratings-only score distribution is lower confidence."
 
         matrix = independent_poisson_matrix(lambda_home, lambda_away, self.config.model_grid_goals)
         matrix = apply_dixon_coles(matrix, lambda_home, lambda_away, self.config.dixon_coles_rho)
@@ -90,6 +96,7 @@ class OddsToScorelineModel:
                 "model_away_win": float(model_outcomes[2]),
             }
         )
+        diagnostics.update(scoreline_distribution_diagnostics(matrix, self.config.candidate_grid_goals))
         if fair_1x2:
             diagnostics.update(
                 {
@@ -116,3 +123,37 @@ class OddsToScorelineModel:
             fair_total=fair_total,
             diagnostics=diagnostics,
         )
+
+
+def scoreline_distribution_diagnostics(matrix: np.ndarray, candidate_grid_goals: int) -> dict[str, object]:
+    max_home, max_away = matrix.shape[0] - 1, matrix.shape[1] - 1
+    home_goals = np.arange(matrix.shape[0], dtype=float)
+    away_goals = np.arange(matrix.shape[1], dtype=float)
+    home_grid = home_goals[:, None]
+    away_grid = away_goals[None, :]
+
+    modal_idx = tuple(int(value) for value in np.unravel_index(np.argmax(matrix), matrix.shape))
+    total_goals_mean = float(((home_grid + away_grid) * matrix).sum())
+    expected_goal_difference = float(((home_grid - away_grid) * matrix).sum())
+
+    candidate_limit = min(candidate_grid_goals, max_home, max_away)
+    candidate_mass = float(matrix[: candidate_limit + 1, : candidate_limit + 1].sum())
+
+    diagnostics: dict[str, object] = {
+        "total_goals_mean": total_goals_mean,
+        "expected_goal_difference": expected_goal_difference,
+        "modal_scoreline": f"{modal_idx[0]}-{modal_idx[1]}",
+        "modal_scoreline_probability": float(matrix[modal_idx]),
+        "top_exact_scoreline": f"{modal_idx[0]}-{modal_idx[1]}",
+        "top_exact_scoreline_probability": float(matrix[modal_idx]),
+        "score_matrix_max_goals": int(max_home),
+        "score_matrix_truncated_and_renormalised": True,
+        "probability_mass_inside_model_grid": float(matrix.sum()),
+        "probability_mass_outside_model_grid_estimated": None,
+        "candidate_grid_goals": int(candidate_grid_goals),
+        "probability_mass_inside_candidate_grid": candidate_mass,
+        "probability_mass_outside_candidate_grid": max(0.0, 1.0 - candidate_mass),
+    }
+    for home, away in ((0, 0), (1, 0), (0, 1), (1, 1), (2, 1), (1, 2)):
+        diagnostics[f"p_score_{home}_{away}"] = float(matrix[home, away]) if home <= max_home and away <= max_away else 0.0
+    return diagnostics

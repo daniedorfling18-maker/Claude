@@ -30,6 +30,8 @@ def prediction_rows(predictions: Iterable[Prediction]) -> list[dict]:
             "p_close_non_exact": rec.p_close_non_exact,
             "p_outcome": rec.p_outcome,
             "p_miss": max(0.0, 1.0 - rec.p_outcome),
+            "p_zero_points": rec.p_zero_points,
+            "variance_points": rec.variance_points,
             "confidence_tier": _confidence_tier(prediction),
             "risk_tier": _risk_tier(rec.p_outcome),
             "calibration_profile": diagnostics.get("calibration_profile"),
@@ -63,6 +65,15 @@ def prediction_rows(predictions: Iterable[Prediction]) -> list[dict]:
             "recommended_public_pick_share": diagnostics.get("recommended_public_pick_share"),
             "recommended_ev_vs_field": diagnostics.get("recommended_ev_vs_field"),
             "recommended_risk_adjusted_score": diagnostics.get("recommended_risk_adjusted_score"),
+            "sensitivity_enabled": diagnostics.get("sensitivity_enabled"),
+            "sensitivity_scenario_count": diagnostics.get("sensitivity_scenario_count"),
+            "sensitivity_changed_count": diagnostics.get("sensitivity_changed_count"),
+            "sensitivity_stability": diagnostics.get("sensitivity_stability"),
+            "sensitivity_warning": diagnostics.get("sensitivity_warning"),
+            "sensitivity_most_common_alternative": diagnostics.get("sensitivity_most_common_alternative"),
+            "ratings_source": diagnostics.get("ratings_source"),
+            "ratings_updated_at": diagnostics.get("ratings_updated_at"),
+            "ratings_number_of_applied_results": diagnostics.get("ratings_number_of_applied_results"),
         }
         for idx, candidate in enumerate(prediction.top_candidates, start=1):
             row[f"top{idx}_scoreline"] = candidate.scoreline
@@ -157,6 +168,7 @@ def console_table(predictions: list[Prediction]) -> str:
             "p_close",
             "p_outcome",
             "ev_gap_to_second",
+            "sensitivity_stability",
             "modal_scoreline",
             "confidence_tier",
             "risk_tier",
@@ -165,9 +177,9 @@ def console_table(predictions: list[Prediction]) -> str:
             "top3_scoreline",
         ]
     ]
-    numeric_cols = ["expected_points", "p_exact", "p_close", "p_outcome", "ev_gap_to_second"]
+    numeric_cols = ["expected_points", "p_exact", "p_close", "p_outcome", "ev_gap_to_second", "sensitivity_stability"]
     for col in numeric_cols:
-        table[col] = table[col].map(lambda value: f"{float(value):.3f}")
+        table[col] = table[col].map(lambda value: "" if pd.isna(value) else f"{float(value):.3f}")
     return table.to_string(index=False)
 
 

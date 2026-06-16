@@ -9,7 +9,7 @@ from superbru_score_engine.ingest import MatchOdds
 
 from .devig import FairOutcomeMarket, FairTotalMarket, extract_correct_score_matrix, extract_fair_1x2, extract_fair_totals
 from .dixon_coles import apply_dixon_coles, geometric_blend
-from .poisson import independent_poisson_matrix, outcome_probabilities, over_probability, solve_lambdas
+from .poisson import independent_poisson_matrix, matrix_over_probability, outcome_probabilities, solve_lambdas
 from .ratings import RatingsStore
 
 
@@ -131,7 +131,7 @@ class OddsToScorelineModel:
                 {
                     "fair_total_line": float(fair_total.line),
                     "fair_over": float(fair_total.over),
-                    "model_over": float(over_probability(lambda_home + lambda_away, fair_total.line)),
+                    "model_over": float(matrix_over_probability(matrix, fair_total.line)),
                 }
             )
 

@@ -1,8 +1,8 @@
 # Calibration record — 2026-06-15
 
 **Decision: keep the `big5_h2h_totals` profile — `devig_method: multiplicative`,
-`dixon_coles_rho: -0.08`, market `h2h,totals`.** No change was made; the active
-config was already optimal, and this run confirms it out-of-sample.
+`dixon_coles_rho: -0.08`, market `h2h,totals`, and no ratings blend for market-backed
+fixtures.** The active config now matches that calibration anchor directly.
 
 ## Method
 Football-Data Big Five leagues (E0, D1, SP1, I1, F1) as a free proxy for World
@@ -44,8 +44,9 @@ football-data-league-backtest --seasons <set> --divisions E0,D1,SP1,I1,F1 \
    consistent with the larger pooled grid under `outputs/` (10,706 matches) on
    the source project.
 
-`ratings_weight: 0.05` is not exercised here — this harness is odds-only; the
-ratings blend only affects the no-odds fallback path, which does not occur when
-bookmaker odds are present (i.e. all World Cup matches).
+Ratings are deliberately fallback-only. `ratings_weight: 0.0` for market-backed
+fixtures keeps the live profile aligned with the odds-only calibration above. If
+no usable 1X2 market exists, the ratings prior still supplies a lower-confidence
+fallback distribution.
 
 Raw per-cell output: `oos_train_calibration.csv`, `oos_val_calibration.csv`.

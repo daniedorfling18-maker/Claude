@@ -12,7 +12,7 @@ except ImportError:  # pragma: no cover - used in minimal runtimes.
     minimize = None
     poisson = None
 
-from .devig import FairOutcomeMarket, FairTotalMarket
+from .devig import FairAsianHandicapMarket, FairOutcomeMarket, FairTotalMarket
 from .dixon_coles import apply_dixon_coles
 
 
@@ -44,6 +44,31 @@ def matrix_over_probability(matrix: np.ndarray, line: float) -> float:
     return float(matrix[(home_goals + away_goals) >= threshold].sum())
 
 
+def matrix_asian_handicap_home_probability(matrix: np.ndarray, line: float) -> float:
+    """Probability-equivalent that the home side covers an Asian handicap line.
+
+    Integer Asian handicap lines can push. Quarter lines split into two half-stakes.
+    For odds-comparison purposes, pushes are excluded from the denominator because a
+    pushed stake is returned rather than won or lost.
+    """
+    components = _asian_handicap_components(float(line))
+    home_goals = np.arange(matrix.shape[0])[:, None]
+    away_goals = np.arange(matrix.shape[1])[None, :]
+    goal_diff = home_goals - away_goals
+
+    win_mass = 0.0
+    loss_mass = 0.0
+    for component in components:
+        adjusted = goal_diff + component
+        win_mass += float(matrix[adjusted > 0].sum()) / len(components)
+        loss_mass += float(matrix[adjusted < 0].sum()) / len(components)
+
+    decisive = win_mass + loss_mass
+    if decisive <= 1e-12:
+        return 0.5
+    return float(win_mass / decisive)
+
+
 def solve_lambdas(
     fair_1x2: FairOutcomeMarket,
     fair_total: FairTotalMarket | None,
@@ -51,9 +76,12 @@ def solve_lambdas(
     initial_total_goals: float = 2.55,
     dixon_coles_rho: float = 0.0,
     fair_totals: Sequence[FairTotalMarket] | None = None,
+    fair_asian_handicap: FairAsianHandicapMarket | None = None,
+    asian_handicap_weight: float = 0.0,
 ) -> tuple[float, float, dict[str, object]]:
     target_outcomes = fair_1x2.as_array()
     rho = float(dixon_coles_rho or 0.0)
+    ah_weight = max(0.0, float(asian_handicap_weight or 0.0))
 
     # Working set of over/under lines: prefer the explicit multi-line set, fall back to
     # the single primary line, else fit only the 1X2 with a soft total-goals prior.
@@ -96,6 +124,9 @@ def solve_lambdas(
                 loss += float((model_over - market.over) ** 2 * weight)
         else:
             loss += float(((home_rate + away_rate) - initial_total_goals) ** 2 * 0.15)
+        if fair_asian_handicap is not None and ah_weight > 0:
+            model_ah = matrix_asian_handicap_home_probability(matrix, fair_asian_handicap.line)
+            loss += float((model_ah - fair_asian_handicap.home) ** 2 * ah_weight)
         return loss
 
     x0 = np.log([initial_home, initial_away])
@@ -115,13 +146,20 @@ def solve_lambdas(
     rates = np.exp(x)
 
     # Report how well every line is simultaneously matched at the solution.
+    fitted = independent_poisson_matrix(float(rates[0]), float(rates[1]), solver_grid_goals)
+    if abs(rho) > 1e-12:
+        fitted = apply_dixon_coles(fitted, float(rates[0]), float(rates[1]), rho)
+
     over_rmse: float | None = None
     if lines:
-        fitted = independent_poisson_matrix(float(rates[0]), float(rates[1]), solver_grid_goals)
-        if abs(rho) > 1e-12:
-            fitted = apply_dixon_coles(fitted, float(rates[0]), float(rates[1]), rho)
         errors = [matrix_over_probability(fitted, market.line) - market.over for market in lines]
         over_rmse = float(np.sqrt(np.mean(np.square(errors))))
+
+    ah_model: float | None = None
+    ah_error: float | None = None
+    if fair_asian_handicap is not None:
+        ah_model = matrix_asian_handicap_home_probability(fitted, fair_asian_handicap.line)
+        ah_error = float(ah_model - fair_asian_handicap.home)
 
     diagnostics: dict[str, object] = {
         "solver_loss": loss,
@@ -133,8 +171,21 @@ def solve_lambdas(
         "solver_total_lines_used": len(lines),
         "solver_total_lines": ",".join(f"{market.line:g}" for market in sorted(lines, key=lambda m: m.line)),
         "solver_total_over_rmse": over_rmse,
+        "solver_has_asian_handicap": fair_asian_handicap is not None,
+        "solver_asian_handicap_weight": ah_weight,
+        "solver_asian_handicap_model_home_cover": ah_model,
+        "solver_asian_handicap_error": ah_error,
     }
     return float(rates[0]), float(rates[1]), diagnostics
+
+
+def _asian_handicap_components(line: float) -> tuple[float, ...]:
+    doubled = line * 2.0
+    if abs(doubled - round(doubled)) < 1e-9:
+        return (float(round(doubled) / 2.0),)
+    lower = math.floor(doubled) / 2.0
+    upper = math.ceil(doubled) / 2.0
+    return (float(lower), float(upper))
 
 
 def _solve_total_from_over(line: float, target_over: float, fallback: float) -> float:
@@ -178,7 +229,7 @@ def poisson_cdf(goal: int, rate: float) -> float:
         return float(poisson.cdf(goal, rate))
     if goal < 0:
         return 0.0
-    pmf = math.exp(-rate)
+    pmf = math.exp(rate * 0.0 - rate)
     total = pmf
     for idx in range(1, goal + 1):
         pmf *= rate / idx

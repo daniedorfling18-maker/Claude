@@ -9,16 +9,23 @@ from urllib.request import urlretrieve
 
 import pandas as pd
 
+from superbru_score_engine.backtest.metrics import brier_score_1x2, log_loss_1x2, outcome_label, summarise_validation
 from superbru_score_engine.config import AppConfig
 from superbru_score_engine.decision import SuperbruDecisionEngine
-from superbru_score_engine.decision.superbru import score_actual_prediction
 from superbru_score_engine.ingest.base import MatchOdds, MarketOdds, OutcomeOdds
 from superbru_score_engine.model import DistributionResult, OddsToScorelineModel
-from superbru_score_engine.model.devig import extract_fair_1x2
 from superbru_score_engine.model.ratings import MatchResult, RatingsStore
 from superbru_score_engine.model.team_names import canonical_team_name, team_key
 
-from .runner import naive_baseline_pick, reliability_cells
+from .runner import (
+    VALIDATION_TIMING_NOTE,
+    _clean_validation_metrics,
+    _low_score_probabilities,
+    _score_pick,
+    baseline_picks,
+    naive_baseline_pick,
+    reliability_cells,
+)
 
 
 FOOTBALL_DATA_WORLDCUP_URL = "https://www.football-data.co.uk/WorldCup2026.xlsx"
@@ -71,6 +78,7 @@ def run_football_data_backtest(args: argparse.Namespace, config: AppConfig) -> i
                         superbru=replace(config.superbru, ci_cutoff=ci_cutoff),
                     )
                     frame = evaluate_football_data_matches(matches, trial_config)
+                    validation = _clean_validation_metrics(summarise_validation(frame.to_dict(orient="records"))) if not frame.empty else {}
                     avg_model = float(frame["model_points"].mean()) if not frame.empty else 0.0
                     avg_naive = float(frame["naive_points"].mean()) if not frame.empty else 0.0
                     calibration_rows.append(
@@ -84,6 +92,10 @@ def run_football_data_backtest(args: argparse.Namespace, config: AppConfig) -> i
                             "avg_model_points": avg_model,
                             "avg_naive_points": avg_naive,
                             "edge_vs_naive": avg_model - avg_naive,
+                            "exact_score_hit_rate": validation.get("exact_score_hit_rate"),
+                            "right_result_accuracy": validation.get("right_result_accuracy"),
+                            "brier_score_1x2": validation.get("brier_score_1x2"),
+                            "log_loss_1x2": validation.get("log_loss_1x2"),
                             "exact_hits": int((frame["model_points"] == 3.0).sum()) if not frame.empty else 0,
                             "close_hits": int((frame["model_points"] == 1.5).sum()) if not frame.empty else 0,
                             "outcome_only_hits": int((frame["model_points"] == 1.0).sum()) if not frame.empty else 0,
@@ -104,6 +116,14 @@ def run_football_data_backtest(args: argparse.Namespace, config: AppConfig) -> i
     reliability_path = out_dir / "football_data_reliability_cells.csv"
     reliability_cells(best_frame).to_csv(reliability_path, index=False)
 
+    validation_metrics = _clean_validation_metrics(summarise_validation(best_frame.to_dict(orient="records"))) if not best_frame.empty else {}
+    low_score_path = out_dir / "football_data_low_score_calibration.csv"
+    favourite_band_path = out_dir / "football_data_favourite_band_calibration.csv"
+    baseline_path = out_dir / "football_data_baseline_metrics.json"
+    pd.DataFrame(validation_metrics.get("low_score_calibration", [])).to_csv(low_score_path, index=False)
+    pd.DataFrame(validation_metrics.get("favourite_band_calibration", [])).to_csv(favourite_band_path, index=False)
+    baseline_path.write_text(json.dumps(validation_metrics.get("baseline_metrics", {}), indent=2), encoding="utf-8")
+
     summary = summarize_backtest(best_frame, best_devig_method, best_rho, best_ci, best_odds_weight, best_ratings_weight)
     summary.update(
         {
@@ -112,11 +132,16 @@ def run_football_data_backtest(args: argparse.Namespace, config: AppConfig) -> i
             "years": years,
             "odds_market": "H-Avg/D-Avg/A-Avg",
             "totals_market": "not_available",
+            "validation_timing_note": VALIDATION_TIMING_NOTE,
+            "validation_metrics": validation_metrics,
             "fixtures": str(fixtures_path),
             "odds_json": str(odds_path),
             "calibration_results": str(calibration_path),
             "backtest_results": str(details_path),
             "reliability_cells": str(reliability_path),
+            "low_score_calibration": str(low_score_path),
+            "favourite_band_calibration": str(favourite_band_path),
+            "baseline_metrics": str(baseline_path),
         }
     )
     summary_path = out_dir / "football_data_summary.json"
@@ -235,9 +260,9 @@ def football_data_fixtures(matches: list[dict[str, Any]]) -> pd.DataFrame:
 
 
 def evaluate_football_data_matches(matches: list[dict[str, Any]], config: AppConfig) -> pd.DataFrame:
-    ratings = RatingsStore()
+    ratings = RatingsStore(config=config.ratings)
     model = OddsToScorelineModel(config.model, ratings)
-    decision = SuperbruDecisionEngine(config.superbru, config.model.candidate_grid_goals)
+    decision = SuperbruDecisionEngine(config.superbru, config.model.candidate_grid_goals, config.public_pick, config.sensitivity)
     rows: list[dict[str, Any]] = []
     distributions: dict[str, DistributionResult] = {}
 
@@ -247,39 +272,47 @@ def evaluate_football_data_matches(matches: list[dict[str, Any]], config: AppCon
         prediction = decision.predict(distribution)
         actual_home = int(raw_match["home_goals"])
         actual_away = int(raw_match["away_goals"])
-        naive_home, naive_away = naive_baseline_pick(match, distribution)
-        rows.append(
-            {
-                "match_id": match.match_id,
-                "year": raw_match["year"],
-                "commence_time": match.commence_time,
-                "home_team": match.home_team,
-                "away_team": match.away_team,
-                "actual_scoreline": f"{actual_home}-{actual_away}",
-                "model_scoreline": prediction.recommended.scoreline,
-                "model_expected_points": prediction.recommended.expected_points,
-                "model_points": score_actual_prediction(
-                    prediction.recommended.home_goals,
-                    prediction.recommended.away_goals,
-                    actual_home,
-                    actual_away,
-                    config.superbru.ci_cutoff,
-                ),
-                "naive_scoreline": f"{naive_home}-{naive_away}",
-                "naive_points": score_actual_prediction(naive_home, naive_away, actual_home, actual_away, config.superbru.ci_cutoff),
-                "p_exact": prediction.recommended.p_exact,
-                "p_close": prediction.recommended.p_close,
-                "p_outcome": prediction.recommended.p_outcome,
-                "lambda_home": distribution.lambda_home,
-                "lambda_away": distribution.lambda_away,
-                "fair_home_win": distribution.diagnostics.get("fair_home_win"),
-                "fair_draw": distribution.diagnostics.get("fair_draw"),
-                "fair_away_win": distribution.diagnostics.get("fair_away_win"),
-                "home_goals": actual_home,
-                "away_goals": actual_away,
-                "distribution": match.match_id,
-            }
+        actual_result = outcome_label(actual_home, actual_away)
+        model_probs = (
+            float(distribution.diagnostics.get("model_home_win", 0.0)),
+            float(distribution.diagnostics.get("model_draw", 0.0)),
+            float(distribution.diagnostics.get("model_away_win", 0.0)),
         )
+        naive_home, naive_away = naive_baseline_pick(match, distribution)
+        baselines = baseline_picks(match, distribution, naive_home, naive_away)
+        row = {
+            "match_id": match.match_id,
+            "year": raw_match["year"],
+            "commence_time": match.commence_time,
+            "home_team": match.home_team,
+            "away_team": match.away_team,
+            "actual_scoreline": f"{actual_home}-{actual_away}",
+            "actual_result": actual_result,
+            "model_scoreline": prediction.recommended.scoreline,
+            "model_expected_points": prediction.recommended.expected_points,
+            "model_home_win": model_probs[0],
+            "model_draw": model_probs[1],
+            "model_away_win": model_probs[2],
+            "brier_1x2": brier_score_1x2(model_probs, actual_result),
+            "log_loss_1x2": log_loss_1x2(model_probs, actual_result),
+            "p_exact": prediction.recommended.p_exact,
+            "p_close": prediction.recommended.p_close,
+            "p_outcome": prediction.recommended.p_outcome,
+            "lambda_home": distribution.lambda_home,
+            "lambda_away": distribution.lambda_away,
+            "fair_home_win": distribution.diagnostics.get("fair_home_win"),
+            "fair_draw": distribution.diagnostics.get("fair_draw"),
+            "fair_away_win": distribution.diagnostics.get("fair_away_win"),
+            "home_goals": actual_home,
+            "away_goals": actual_away,
+            "distribution": match.match_id,
+        }
+        row.update(_score_pick("model", prediction.recommended.home_goals, prediction.recommended.away_goals, actual_home, actual_away, config.superbru.ci_cutoff))
+        for name, (pred_home, pred_away) in baselines.items():
+            row.update(_score_pick(name, pred_home, pred_away, actual_home, actual_away, config.superbru.ci_cutoff))
+            row[f"{name}_scoreline"] = f"{pred_home}-{pred_away}"
+        row.update(_low_score_probabilities(distribution))
+        rows.append(row)
         distributions[match.match_id] = distribution
         ratings.update_results(
             [

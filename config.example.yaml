@@ -60,6 +60,8 @@ model:
   # Ratings still fill gaps when market odds are missing.
   odds_weight: 1.0
   ratings_weight: 0.0
+  # Disabled until h2h_totals_ah is validated out of sample.
+  asian_handicap_weight: 0.0
   # Applied only when no market odds are available; odds already price venue/host effects.
   home_advantage_goals: 0.18
   host_teams:

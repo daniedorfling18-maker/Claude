@@ -43,6 +43,7 @@ model:
   candidate_grid_goals: 6
   model_grid_goals: 10
   solver_grid_goals: 14
+  calibration_profile: big5_h2h_totals
   dixon_coles_rho: -0.08
   devig_method: multiplicative
   correct_score_blend_weight: 0.0

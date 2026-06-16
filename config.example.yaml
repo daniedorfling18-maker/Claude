@@ -88,6 +88,41 @@ betting:
   match_winners_only: true
   include_draws: false
 
+# SYNTHETIC model of how a Superbru pool likely picks (real picks are never
+# visible before lock). Used only by strategic/contrarian overlays, never by the
+# default raw-EV pick. Estimates only - not real pool data.
+public_pick:
+  enabled: true
+  favourite_bias: 1.25
+  famous_team_bias: 1.15
+  clean_sheet_win_bias: 1.10
+  draw_penalty: 0.75
+  nil_nil_penalty: 0.65
+  underdog_penalty: 0.80
+  default_template_weight: 0.45
+  common_scoreline_weights:
+    "1-0": 1.15
+    "2-0": 1.30
+    "2-1": 1.25
+    "1-1": 0.85
+    "0-0": 0.60
+    "3-0": 1.15
+    "0-1": 0.85
+    "0-2": 0.75
+    "1-2": 0.80
+  famous_teams:
+    - Brazil
+    - Argentina
+    - France
+    - England
+    - Germany
+    - Spain
+    - Portugal
+    - Netherlands
+    - Italy
+    - United States
+    - Mexico
+
 paths:
   cache_dir: work/cache
   ratings_store: work/ratings.json

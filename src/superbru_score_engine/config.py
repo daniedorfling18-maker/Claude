@@ -62,6 +62,38 @@ class PathConfig:
     ratings_store: Path = Path("work/ratings.json")
 
 
+_DEFAULT_COMMON_SCORELINE_WEIGHTS = {
+    "1-0": 1.15, "2-0": 1.30, "2-1": 1.25, "1-1": 0.85, "0-0": 0.60,
+    "3-0": 1.15, "0-1": 0.85, "0-2": 0.75, "1-2": 0.80, "3-1": 0.95, "0-3": 0.70,
+}
+_DEFAULT_FAMOUS_TEAMS = (
+    "Brazil", "Argentina", "France", "England", "Germany", "Spain",
+    "Portugal", "Netherlands", "Italy", "United States", "Mexico",
+)
+
+
+@dataclass(frozen=True)
+class PublicPickConfig:
+    """Heuristic, transparent model of how a Superbru pool *probably* picks.
+
+    SYNTHETIC: real pool picks are never visible before lock. Outputs are
+    estimates only and are labelled as such; the default raw-EV pick never uses them.
+    """
+
+    enabled: bool = True
+    favourite_bias: float = 1.25
+    famous_team_bias: float = 1.15
+    clean_sheet_win_bias: float = 1.10
+    draw_penalty: float = 0.75
+    nil_nil_penalty: float = 0.65
+    underdog_penalty: float = 0.80
+    default_template_weight: float = 0.45
+    common_scoreline_weights: dict[str, float] = field(
+        default_factory=lambda: dict(_DEFAULT_COMMON_SCORELINE_WEIGHTS)
+    )
+    famous_teams: tuple[str, ...] = _DEFAULT_FAMOUS_TEAMS
+
+
 @dataclass(frozen=True)
 class AppConfig:
     seed: int = 20260611
@@ -70,6 +102,7 @@ class AppConfig:
     superbru: SuperbruConfig = field(default_factory=SuperbruConfig)
     betting: BettingConfig = field(default_factory=BettingConfig)
     paths: PathConfig = field(default_factory=PathConfig)
+    public_pick: PublicPickConfig = field(default_factory=PublicPickConfig)
 
 
 @dataclass(frozen=True)
@@ -94,6 +127,7 @@ def load_config(path: str | Path | None) -> AppConfig:
     superbru = raw.get("superbru", {})
     betting = raw.get("betting", {})
     paths = raw.get("paths", {})
+    public_pick = raw.get("public_pick", {})
 
     return AppConfig(
         seed=int(raw.get("seed", 20260611)),
@@ -136,6 +170,21 @@ def load_config(path: str | Path | None) -> AppConfig:
         paths=PathConfig(
             cache_dir=Path(paths.get("cache_dir", "work/cache")),
             ratings_store=Path(paths.get("ratings_store", "work/ratings.json")),
+        ),
+        public_pick=PublicPickConfig(
+            enabled=bool(public_pick.get("enabled", True)),
+            favourite_bias=float(public_pick.get("favourite_bias", 1.25)),
+            famous_team_bias=float(public_pick.get("famous_team_bias", 1.15)),
+            clean_sheet_win_bias=float(public_pick.get("clean_sheet_win_bias", 1.10)),
+            draw_penalty=float(public_pick.get("draw_penalty", 0.75)),
+            nil_nil_penalty=float(public_pick.get("nil_nil_penalty", 0.65)),
+            underdog_penalty=float(public_pick.get("underdog_penalty", 0.80)),
+            default_template_weight=float(public_pick.get("default_template_weight", 0.45)),
+            common_scoreline_weights={
+                str(k): float(v)
+                for k, v in (public_pick.get("common_scoreline_weights") or _DEFAULT_COMMON_SCORELINE_WEIGHTS).items()
+            },
+            famous_teams=tuple(public_pick.get("famous_teams", _DEFAULT_FAMOUS_TEAMS)),
         ),
     )
 

@@ -211,7 +211,7 @@ def run_config_check(args: argparse.Namespace, config: AppConfig) -> int:
 
 
 def run_predict(args: argparse.Namespace, config: AppConfig) -> int:
-    ratings = RatingsStore(config.paths.ratings_store)
+    ratings = RatingsStore(config.paths.ratings_store, config.ratings)
     completed_results = collect_results(args, config)
     if completed_results:
         applied, skipped = ratings.update_results(completed_results)
@@ -224,7 +224,7 @@ def run_predict(args: argparse.Namespace, config: AppConfig) -> int:
         matches = merge_fixture_metadata(matches, args.fixtures)
 
     model = OddsToScorelineModel(config.model, ratings)
-    decision = SuperbruDecisionEngine(config.superbru, config.model.candidate_grid_goals, config.public_pick)
+    decision = SuperbruDecisionEngine(config.superbru, config.model.candidate_grid_goals, config.public_pick, config.sensitivity)
     predictions: list[Prediction] = []
     betting_suggestions: list[BettingSuggestion] = []
     include_betting = args.include_betting or config.betting.enabled
@@ -252,7 +252,7 @@ def run_predict(args: argparse.Namespace, config: AppConfig) -> int:
 
 
 def run_results(args: argparse.Namespace, config: AppConfig) -> int:
-    ratings = RatingsStore(config.paths.ratings_store)
+    ratings = RatingsStore(config.paths.ratings_store, config.ratings)
     completed_results = fetch_results_snapshot(args, config)
     applied, skipped = ratings.update_results(completed_results)
     if not args.no_save_ratings:

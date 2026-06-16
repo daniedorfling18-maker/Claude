@@ -54,6 +54,32 @@ class SuperbruConfig:
 
 
 @dataclass(frozen=True)
+class SensitivityConfig:
+    enabled: bool = True
+    lambda_pct: float = 0.05
+    rho_delta: float = 0.02
+    total_goals_delta: float = 0.15
+    public_bias_pct: float = 0.20
+    exact_chase_weights: tuple[float, ...] = (1.0, 1.5, 2.0)
+    stability_warning_threshold: float = 0.70
+
+
+@dataclass(frozen=True)
+class RatingsConfig:
+    enabled: bool = True
+    source: str = "internal_results_elo"
+    source_url: str = ""
+    cutoff_date: str = ""
+    update_method: str = "elo_margin_log_multiplier"
+    k_factor: float = 24.0
+    base_rating: float = 1500.0
+    base_total_goals: float = 2.45
+    elo_goal_scale: float = 650.0
+    min_matches_full_confidence: int = 8
+    use_as_fallback_only: bool = True
+
+
+@dataclass(frozen=True)
 class BettingConfig:
     enabled: bool = False
     min_expected_return: float = 0.02
@@ -108,6 +134,8 @@ class AppConfig:
     providers: ProviderConfig = field(default_factory=ProviderConfig)
     model: ModelConfig = field(default_factory=ModelConfig)
     superbru: SuperbruConfig = field(default_factory=SuperbruConfig)
+    sensitivity: SensitivityConfig = field(default_factory=SensitivityConfig)
+    ratings: RatingsConfig = field(default_factory=RatingsConfig)
     betting: BettingConfig = field(default_factory=BettingConfig)
     paths: PathConfig = field(default_factory=PathConfig)
     public_pick: PublicPickConfig = field(default_factory=PublicPickConfig)
@@ -133,6 +161,8 @@ def load_config(path: str | Path | None) -> AppConfig:
     providers = raw.get("providers", {})
     model = raw.get("model", {})
     superbru = raw.get("superbru", {})
+    sensitivity = raw.get("sensitivity", {})
+    ratings = raw.get("ratings", {})
     betting = raw.get("betting", {})
     paths = raw.get("paths", {})
     public_pick = raw.get("public_pick", {})
@@ -171,6 +201,28 @@ def load_config(path: str | Path | None) -> AppConfig:
             differentiation_weight=float(superbru.get("differentiation_weight", 0.0)),
             risk_aversion=float(superbru.get("risk_aversion", 0.0)),
             variance_penalty=float(superbru.get("variance_penalty", 0.0)),
+        ),
+        sensitivity=SensitivityConfig(
+            enabled=bool(sensitivity.get("enabled", True)),
+            lambda_pct=float(sensitivity.get("lambda_pct", 0.05)),
+            rho_delta=float(sensitivity.get("rho_delta", 0.02)),
+            total_goals_delta=float(sensitivity.get("total_goals_delta", 0.15)),
+            public_bias_pct=float(sensitivity.get("public_bias_pct", 0.20)),
+            exact_chase_weights=tuple(float(v) for v in sensitivity.get("exact_chase_weights", (1.0, 1.5, 2.0))),
+            stability_warning_threshold=float(sensitivity.get("stability_warning_threshold", 0.70)),
+        ),
+        ratings=RatingsConfig(
+            enabled=bool(ratings.get("enabled", True)),
+            source=str(ratings.get("source", "internal_results_elo")),
+            source_url=str(ratings.get("source_url", "")),
+            cutoff_date=str(ratings.get("cutoff_date", "")),
+            update_method=str(ratings.get("update_method", "elo_margin_log_multiplier")),
+            k_factor=float(ratings.get("k_factor", 24.0)),
+            base_rating=float(ratings.get("base_rating", 1500.0)),
+            base_total_goals=float(ratings.get("base_total_goals", 2.45)),
+            elo_goal_scale=float(ratings.get("elo_goal_scale", 650.0)),
+            min_matches_full_confidence=int(ratings.get("min_matches_full_confidence", 8)),
+            use_as_fallback_only=bool(ratings.get("use_as_fallback_only", True)),
         ),
         betting=BettingConfig(
             enabled=bool(betting.get("enabled", False)),

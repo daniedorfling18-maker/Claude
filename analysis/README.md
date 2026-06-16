@@ -46,6 +46,16 @@ the EV cost of going contrarian. Tool: `scripts/ev_contrarian.py`
   Cape Verde -> Saudi (0.045). Cape Verde-Saudi is cheap in *both* lenses — the
   market treats it as a coin-flip.
 
+## 4. Exact-score chasing (variance tilt)
+`scripts/exact_chase.py` over-weights the exact term in the decision objective
+(`EV + (w-1)*3*P(exact)`) to bias toward the modal scoreline. **Finding: it's a
+weak lever** — even `w=3` lifts average `P(exact)` only 12.0% -> 13.0% (you can't
+tilt your way to a lucky exact haul), at an EV cost. At a moderate `w~1.5-2` it's
+near-free (-0.005 EV) and shifts ~14/56 picks toward lower modal scores (`1-0`
+over `2-0`). Its biggest gains are the `1-1` picks in tight games — the *same*
+picks the contrarian tool surfaces — so exact-chasing and contrarian draws
+converge on modal draws. Report: `analysis/exact_chase_report.csv`.
+
 ## How to use it (you're chasing rank from behind)
 - Spend contrarian bullets where the **EV cost is smallest** (top of the draw
   list). Play the **consensus** everywhere else to protect position.
@@ -57,6 +67,7 @@ the EV cost of going contrarian. Tool: `scripts/ev_contrarian.py`
 python scripts/independent_vs_market.py work/football-data-leagues
 python scripts/differentiation_overlay.py <wc_odds_snapshot.json>
 python scripts/ev_contrarian.py <predictions.json>
+python scripts/exact_chase.py <predictions.json> --weight 2.0
 ```
 These tools run inside the full engine project (they import `superbru_score_engine`
 and read `work/`, `outputs/`, `work/international_results.csv`). They are committed

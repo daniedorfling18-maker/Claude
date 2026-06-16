@@ -52,6 +52,7 @@ class Prediction:
     conservative_pick: CandidateEvaluation
     exact_chase_pick: CandidateEvaluation
     contrarian_pick: CandidateEvaluation
+    risk_adjusted_pick: CandidateEvaluation
     strategy_mode: str
     top_candidates: tuple[CandidateEvaluation, ...]
     diagnostics: dict
@@ -80,6 +81,7 @@ class SuperbruDecisionEngine:
         conservative_pick = selections["conservative"]
         exact_chase_pick = selections["exact_chase"]
         contrarian_pick = selections["contrarian"]
+        risk_adjusted_pick = selections["risk_adjusted"]
         mode = selections["mode"]
 
         top = tuple(sorted(evaluations, key=lambda c: (c.expected_points, c.p_close), reverse=True)[:3])
@@ -93,6 +95,7 @@ class SuperbruDecisionEngine:
                 "conservative_scoreline": conservative_pick.scoreline,
                 "exact_chase_scoreline": exact_chase_pick.scoreline,
                 "contrarian_scoreline": contrarian_pick.scoreline,
+                "risk_adjusted_scoreline": risk_adjusted_pick.scoreline,
                 "public_pick_model": "synthetic" if self.public_pick_config.enabled else "disabled",
                 "recommended_public_pick_share": float(recommended.public_pick_share),
                 "recommended_ev_vs_field": float(recommended.ev_vs_field),
@@ -111,6 +114,7 @@ class SuperbruDecisionEngine:
             conservative_pick=conservative_pick,
             exact_chase_pick=exact_chase_pick,
             contrarian_pick=contrarian_pick,
+            risk_adjusted_pick=risk_adjusted_pick,
             strategy_mode=mode,
             top_candidates=top,
             diagnostics=diagnostics,
@@ -347,6 +351,7 @@ def decision_diagnostics(matrix: np.ndarray, evaluations: list[CandidateEvaluati
     modal_idx = np.unravel_index(np.argmax(matrix), matrix.shape)
     modal_eval = next((c for c in evaluations if (c.home_goals, c.away_goals) == modal_idx), None)
     raw = max(evaluations, key=lambda c: (c.adjusted_expected_points, c.p_close))
+    modal_expected = modal_eval.expected_points if modal_eval else None
     return {
         "recommended_scoreline": recommended.scoreline,
         "recommended_expected_points": recommended.expected_points,
@@ -358,9 +363,10 @@ def decision_diagnostics(matrix: np.ndarray, evaluations: list[CandidateEvaluati
         "recommended_points_variance": recommended.variance_points,
         "raw_ev_scoreline": raw.scoreline,
         "raw_ev_expected_points": raw.expected_points,
-        "modal_scoreline_ev": modal_eval.expected_points if modal_eval else None,
+        "modal_scoreline_ev": modal_expected,
+        "modal_scoreline_expected_points": modal_expected,
         "modal_scoreline_probability": float(matrix[modal_idx]),
-        "ev_gap_recommended_to_modal": (recommended.expected_points - modal_eval.expected_points) if modal_eval else None,
+        "ev_gap_recommended_to_modal": (recommended.expected_points - modal_expected) if modal_expected is not None else None,
         "ci_cutoff": ci_cutoff,
     }
 

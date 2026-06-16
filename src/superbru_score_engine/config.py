@@ -25,6 +25,7 @@ class ModelConfig:
     candidate_grid_goals: int = 6
     model_grid_goals: int = 10
     solver_grid_goals: int = 14
+    calibration_profile: str = ""
     dixon_coles_rho: float = -0.04
     devig_method: str = "power"
     correct_score_blend_weight: float = 0.0
@@ -71,18 +72,22 @@ class AppConfig:
     paths: PathConfig = field(default_factory=PathConfig)
 
 
+@dataclass(frozen=True)
+class CalibrationProfileCheck:
+    active_profile: str
+    profile_found: bool
+    matches_config: bool
+    mismatches: tuple[str, ...]
+    profile_values: dict[str, Any]
+    evidence_note: str = ""
+
+
 def load_config(path: str | Path | None) -> AppConfig:
     raw: dict[str, Any] = {}
     if path:
         config_path = Path(path)
         if config_path.exists():
-            text = config_path.read_text(encoding="utf-8")
-            if config_path.suffix.lower() == ".json":
-                raw = json.loads(text)
-            elif yaml is None:
-                raw = minimal_yaml_load(text)
-            else:
-                raw = yaml.safe_load(text) or {}
+            raw = load_mapping_file(config_path)
 
     providers = raw.get("providers", {})
     model = raw.get("model", {})
@@ -102,6 +107,7 @@ def load_config(path: str | Path | None) -> AppConfig:
             candidate_grid_goals=int(model.get("candidate_grid_goals", 6)),
             model_grid_goals=int(model.get("model_grid_goals", 10)),
             solver_grid_goals=int(model.get("solver_grid_goals", 14)),
+            calibration_profile=str(model.get("calibration_profile", raw.get("active_calibration_profile", ""))),
             dixon_coles_rho=float(model.get("dixon_coles_rho", -0.04)),
             devig_method=str(model.get("devig_method", "power")).lower(),
             correct_score_blend_weight=float(model.get("correct_score_blend_weight", 0.0)),
@@ -132,6 +138,106 @@ def load_config(path: str | Path | None) -> AppConfig:
             ratings_store=Path(paths.get("ratings_store", "work/ratings.json")),
         ),
     )
+
+
+def load_mapping_file(path: str | Path) -> dict[str, Any]:
+    file_path = Path(path)
+    text = file_path.read_text(encoding="utf-8-sig")
+    if file_path.suffix.lower() == ".json":
+        payload = json.loads(text)
+    elif yaml is None:
+        payload = minimal_yaml_load(text)
+    else:
+        payload = yaml.safe_load(text) or {}
+    if not isinstance(payload, dict):
+        raise ValueError(f"Expected a mapping in {file_path}")
+    return payload
+
+
+def validate_calibration_profile(
+    config: AppConfig,
+    profiles_path: str | Path = "calibration_profiles.yaml",
+    *,
+    tolerance: float = 1e-9,
+) -> CalibrationProfileCheck:
+    """Compare the loaded model config with the named calibration profile.
+
+    This is deliberately a governance check, not a modelling transform: the engine
+    still reads the flat config values, but this check prevents silent drift from
+    the documented calibration profile.
+    """
+
+    active_profile = config.model.calibration_profile
+    if not active_profile:
+        return CalibrationProfileCheck(
+            active_profile="",
+            profile_found=False,
+            matches_config=False,
+            mismatches=("model.calibration_profile is not set",),
+            profile_values={},
+        )
+
+    path = Path(profiles_path)
+    if not path.exists():
+        return CalibrationProfileCheck(
+            active_profile=active_profile,
+            profile_found=False,
+            matches_config=False,
+            mismatches=(f"calibration profile file not found: {path}",),
+            profile_values={},
+        )
+
+    payload = load_mapping_file(path)
+    profiles = payload.get("calibration_profiles", {})
+    if not isinstance(profiles, dict) or active_profile not in profiles:
+        return CalibrationProfileCheck(
+            active_profile=active_profile,
+            profile_found=False,
+            matches_config=False,
+            mismatches=(f"profile not found: {active_profile}",),
+            profile_values={},
+        )
+
+    profile = dict(profiles[active_profile])
+    evidence_note = str(profile.get("evidence_note", ""))
+    comparable_keys = ("devig_method", "dixon_coles_rho", "odds_weight", "ratings_weight")
+    mismatches: list[str] = []
+    for key in comparable_keys:
+        if key not in profile:
+            mismatches.append(f"{key}: missing from profile")
+            continue
+        config_value = getattr(config.model, key)
+        profile_value = profile[key]
+        if isinstance(config_value, float) or isinstance(profile_value, float):
+            if abs(float(config_value) - float(profile_value)) > tolerance:
+                mismatches.append(f"{key}: config={config_value!r}, profile={profile_value!r}")
+        elif str(config_value).lower() != str(profile_value).lower():
+            mismatches.append(f"{key}: config={config_value!r}, profile={profile_value!r}")
+
+    return CalibrationProfileCheck(
+        active_profile=active_profile,
+        profile_found=True,
+        matches_config=not mismatches,
+        mismatches=tuple(mismatches),
+        profile_values=profile,
+        evidence_note=evidence_note,
+    )
+
+
+def calibration_check_rows(check: CalibrationProfileCheck) -> list[dict[str, Any]]:
+    rows = [
+        {"field": "active_profile", "value": check.active_profile},
+        {"field": "profile_found", "value": check.profile_found},
+        {"field": "matches_config", "value": check.matches_config},
+    ]
+    for key in ("devig_method", "dixon_coles_rho", "odds_weight", "ratings_weight"):
+        if key in check.profile_values:
+            rows.append({"field": f"profile.{key}", "value": check.profile_values[key]})
+    if check.evidence_note:
+        rows.append({"field": "evidence_note", "value": check.evidence_note})
+    for mismatch in check.mismatches:
+        rows.append({"field": "mismatch", "value": mismatch})
+    return rows
 
 
 def env_value(config: dict[str, Any], key_name: str = "api_key") -> str | None:

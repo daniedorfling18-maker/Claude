@@ -262,13 +262,14 @@ def _fill_strategic_fields(
 ) -> list[CandidateEvaluation]:
     fav_label = max(favourite_outcome, key=favourite_outcome.get)
     if public_pick_config.enabled:
-        shares = estimate_public_pick_shares(
+        estimates = estimate_public_pick_shares(
             [(c.home_goals, c.away_goals) for c in evaluations],
             favourite_outcome=fav_label,
             home_team=home_team,
             away_team=away_team,
             config=public_pick_config,
         )
+        shares = {key: estimate.public_pick_share for key, estimate in estimates.items()}
     else:
         equal = 1.0 / max(len(evaluations), 1)
         shares = {(c.home_goals, c.away_goals): equal for c in evaluations}

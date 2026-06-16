@@ -137,11 +137,18 @@ class SuperbruDecisionEngine:
     def _sensitivity_for_distribution(self, distribution: DistributionResult, base_scoreline: str) -> dict[str, object]:
         if not self.sensitivity_config.enabled:
             return {"sensitivity_enabled": False}
+        lambda_home = getattr(distribution, "lambda_home", None)
+        lambda_away = getattr(distribution, "lambda_away", None)
+        if lambda_home is None or lambda_away is None:
+            return {
+                "sensitivity_enabled": False,
+                "sensitivity_skip_reason": "lambda_home/lambda_away unavailable on distribution",
+            }
         rho = float(distribution.diagnostics.get("dixon_coles_rho", distribution.diagnostics.get("rho", 0.0)) or 0.0)
         scenarios = build_sensitivity_scenarios(
             base_matrix=distribution.matrix,
-            lambda_home=distribution.lambda_home,
-            lambda_away=distribution.lambda_away,
+            lambda_home=float(lambda_home),
+            lambda_away=float(lambda_away),
             rho=rho,
             superbru=self.config,
             public_pick=self.public_pick_config,
@@ -262,55 +269,25 @@ def _fill_strategic_fields(
             away_team=away_team,
             config=public_pick_config,
         )
-        share_of = {k: v.public_pick_share for k, v in shares.items()}
-        field_ev = sum(share_of[(c.home_goals, c.away_goals)] * c.expected_points for c in evaluations)
     else:
-        share_of = {(c.home_goals, c.away_goals): 0.0 for c in evaluations}
-        field_ev = 0.0
-
-    alpha = superbru.public_pick_weight
-    delta = superbru.differentiation_weight
-    beta = superbru.risk_aversion
-    gamma = superbru.variance_penalty
-
-    filled: list[CandidateEvaluation] = []
-    for c in evaluations:
-        share = share_of[(c.home_goals, c.away_goals)]
-        ev_vs_field = c.expected_points - field_ev if public_pick_config.enabled else 0.0
-        risk_adjusted = (
-            c.expected_points
-            + alpha * ev_vs_field
-            + delta * (1.0 - share)
-            - beta * c.p_zero_points
-            - gamma * c.variance_points
+        equal = 1.0 / max(len(evaluations), 1)
+        shares = {(c.home_goals, c.away_goals): equal for c in evaluations}
+    field_ev = sum(shares[(c.home_goals, c.away_goals)] * c.expected_points for c in evaluations)
+    return tuple(
+        replace(
+            c,
+            public_pick_share=float(shares[(c.home_goals, c.away_goals)]),
+            ev_vs_field=float(c.expected_points - field_ev),
+            risk_adjusted_score=float(
+                c.adjusted_expected_points
+                + superbru.public_pick_weight * (c.expected_points - field_ev)
+                + superbru.differentiation_weight * (1.0 - shares[(c.home_goals, c.away_goals)])
+                - superbru.risk_aversion * c.p_zero_points
+                - superbru.variance_penalty * c.variance_points
+            ),
         )
-        filled.append(
-            replace(c, public_pick_share=share, ev_vs_field=ev_vs_field, risk_adjusted_score=risk_adjusted)
-        )
-    return filled
-
-
-def decision_diagnostics(
-    matrix: np.ndarray,
-    evaluations: list[CandidateEvaluation],
-    recommended: CandidateEvaluation,
-    ci_cutoff: float,
-) -> dict[str, float | str]:
-    modal_home, modal_away = (int(value) for value in np.unravel_index(np.argmax(matrix), matrix.shape))
-    modal_candidate = score_prediction(matrix, modal_home, modal_away, ci_cutoff)
-    top_raw_ev = max(evaluations, key=lambda candidate: candidate.expected_points)
-    second_ev = sorted((candidate.expected_points for candidate in evaluations), reverse=True)[1] if len(evaluations) > 1 else 0.0
-    return {
-        "recommended_scoreline": recommended.scoreline,
-        "recommended_expected_points": float(recommended.expected_points),
-        "recommended_adjusted_expected_points": float(recommended.adjusted_expected_points),
-        "raw_ev_scoreline": top_raw_ev.scoreline,
-        "raw_ev_expected_points": float(top_raw_ev.expected_points),
-        "modal_scoreline_ev": modal_candidate.scoreline,
-        "modal_scoreline_expected_points": float(modal_candidate.expected_points),
-        "ev_gap_recommended_to_modal": float(recommended.expected_points - modal_candidate.expected_points),
-        "ev_gap_to_second": float(max(0.0, recommended.expected_points - second_ev)),
-    }
+        for c in evaluations
+    )
 
 
 def score_prediction(
@@ -321,68 +298,87 @@ def score_prediction(
     contrarian: bool = False,
     contrarian_weight: float = 0.0,
 ) -> CandidateEvaluation:
-    pred_outcome = outcome(pred_home, pred_away)
     p_exact = float(matrix[pred_home, pred_away]) if pred_home < matrix.shape[0] and pred_away < matrix.shape[1] else 0.0
     p_close = 0.0
     p_outcome = 0.0
-
-    for actual_home in range(matrix.shape[0]):
-        for actual_away in range(matrix.shape[1]):
-            prob = float(matrix[actual_home, actual_away])
-            if outcome(actual_home, actual_away) != pred_outcome:
+    p_close_non_exact = 0.0
+    p_outcome_only = 0.0
+    for home_goals in range(matrix.shape[0]):
+        for away_goals in range(matrix.shape[1]):
+            prob = float(matrix[home_goals, away_goals])
+            if prob <= 0:
                 continue
-            p_outcome += prob
-            if closeness_index(pred_home, pred_away, actual_home, actual_away) <= ci_cutoff:
+            points = score_actual_prediction(pred_home, pred_away, home_goals, away_goals, ci_cutoff)
+            if points == 3.0:
+                p_exact += 0.0  # already counted directly
+            elif points == 1.5:
                 p_close += prob
-
-    p_close_non_exact = max(0.0, p_close - p_exact)
-    p_outcome_only = max(0.0, p_outcome - p_close)
-    expected_points = 3.0 * p_exact + 1.5 * p_close_non_exact + 1.0 * p_outcome_only
-    # risk diagnostics
-    p_zero_points = max(0.0, 1.0 - p_outcome)
-    e_points_sq = 9.0 * p_exact + 2.25 * p_close_non_exact + 1.0 * p_outcome_only
-    variance_points = max(0.0, e_points_sq - expected_points ** 2)
-    adjusted = expected_points
-    if contrarian and contrarian_weight > 0:
-        adjusted = expected_points - contrarian_weight * p_exact
-
+                p_close_non_exact += prob
+            elif points == 1.0:
+                p_outcome += prob
+                p_outcome_only += prob
+    p_close += p_exact
+    p_outcome += p_close
+    expected = 3.0 * p_exact + 1.5 * p_close_non_exact + 1.0 * p_outcome_only
+    p_zero = max(0.0, 1.0 - p_outcome)
+    second_moment = 9.0 * p_exact + 2.25 * p_close_non_exact + 1.0 * p_outcome_only
+    variance = max(0.0, second_moment - expected**2)
+    adjusted = expected
+    if contrarian:
+        adjusted += contrarian_weight * (p_exact - float(matrix.max()))
     return CandidateEvaluation(
         home_goals=pred_home,
         away_goals=pred_away,
-        expected_points=float(expected_points),
-        adjusted_expected_points=float(adjusted),
+        expected_points=expected,
+        adjusted_expected_points=adjusted,
         p_exact=p_exact,
-        p_close=float(p_close),
-        p_close_non_exact=float(p_close_non_exact),
-        p_outcome=float(p_outcome),
-        p_outcome_only=float(p_outcome_only),
-        outcome=pred_outcome,
-        p_zero_points=float(p_zero_points),
-        variance_points=float(variance_points),
+        p_close=p_close,
+        p_close_non_exact=p_close_non_exact,
+        p_outcome=p_outcome,
+        p_outcome_only=p_outcome_only,
+        p_zero_points=p_zero,
+        variance_points=variance,
+        outcome=_outcome(pred_home, pred_away),
     )
 
 
-def outcome(home_goals: int, away_goals: int) -> Outcome:
-    if home_goals > away_goals:
-        return "home"
-    if home_goals < away_goals:
-        return "away"
-    return "draw"
-
-
-def closeness_index(pred_home: int, pred_away: int, actual_home: int, actual_away: int) -> float:
-    pred_goal_diff = pred_home - pred_away
-    actual_goal_diff = actual_home - actual_away
-    pred_total = pred_home + pred_away
-    actual_total = actual_home + actual_away
-    return abs(pred_goal_diff - actual_goal_diff) + abs(pred_total - actual_total) / 2.0
+def decision_diagnostics(matrix: np.ndarray, evaluations: list[CandidateEvaluation], recommended: CandidateEvaluation, ci_cutoff: float) -> dict[str, float | str]:
+    modal_idx = np.unravel_index(np.argmax(matrix), matrix.shape)
+    modal_eval = next((c for c in evaluations if (c.home_goals, c.away_goals) == modal_idx), None)
+    raw = max(evaluations, key=lambda c: (c.adjusted_expected_points, c.p_close))
+    return {
+        "recommended_scoreline": recommended.scoreline,
+        "recommended_expected_points": recommended.expected_points,
+        "recommended_adjusted_expected_points": recommended.adjusted_expected_points,
+        "recommended_p_exact": recommended.p_exact,
+        "recommended_p_close": recommended.p_close,
+        "recommended_p_outcome": recommended.p_outcome,
+        "recommended_p_zero_points": recommended.p_zero_points,
+        "recommended_points_variance": recommended.variance_points,
+        "raw_ev_scoreline": raw.scoreline,
+        "raw_ev_expected_points": raw.expected_points,
+        "modal_scoreline_ev": modal_eval.expected_points if modal_eval else None,
+        "modal_scoreline_probability": float(matrix[modal_idx]),
+        "ev_gap_recommended_to_modal": (recommended.expected_points - modal_eval.expected_points) if modal_eval else None,
+        "ci_cutoff": ci_cutoff,
+    }
 
 
 def score_actual_prediction(pred_home: int, pred_away: int, actual_home: int, actual_away: int, ci_cutoff: float) -> float:
     if pred_home == actual_home and pred_away == actual_away:
         return 3.0
-    if outcome(pred_home, pred_away) != outcome(actual_home, actual_away):
-        return 0.0
-    if closeness_index(pred_home, pred_away, actual_home, actual_away) <= ci_cutoff:
-        return 1.5
-    return 1.0
+    if _outcome(pred_home, pred_away) == _outcome(actual_home, actual_away):
+        pred_margin = pred_home - pred_away
+        actual_margin = actual_home - actual_away
+        if abs(pred_margin - actual_margin) <= ci_cutoff:
+            return 1.5
+        return 1.0
+    return 0.0
+
+
+def _outcome(home: int, away: int) -> Outcome:
+    if home > away:
+        return "home"
+    if home < away:
+        return "away"
+    return "draw"

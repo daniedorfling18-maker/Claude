@@ -1,27 +1,20 @@
 # Named calibration profiles for the Superbru score engine.
 #
-# This file is NOT read by the engine. It is the single source of truth for the
-# model-calibration values; run `scripts/select_profile.py` to stamp the active
-# profile into config.yaml (the flat file the engine actually reads). This keeps
-# calibration reproducible and prevents accidental active-model changes (e.g.
-# `copy config.example.yaml config.yaml`).
+# The engine reads the flat values in config.yaml for production predictions. The
+# profile metadata below is used by `superbru-score config-check` and tests to
+# prevent silent drift between config.yaml and the documented calibration anchor.
 active_calibration_profile: big5_h2h_totals
 
 calibration_profiles:
-  # World-Cup-validated: Football-Data 2014/2018/2022, 1X2 odds only (no totals).
-  # Right domain, but not fit on the over/under market you actually pull.
   worldcup_1x2:
+    evidence_note: "World-Cup-validated on Football-Data 2014/2018/2022 1X2 odds only. Right domain, but not fit on the over/under market used by the live h2h,totals feed."
     devig_method: power
     dixon_coles_rho: -0.04
     odds_weight: 1.0
     ratings_weight: 0.0
 
-  # Big-Five-league-validated: h2h + totals, 2019/20-2024/25. Right market
-  # structure (matches the live h2h,totals feed), but club leagues, not the
-  # World Cup. OOS-validated 2026-06-15: #1 h2h_totals cell on held-out 2024/25,
-  # beats the naive baseline there; the -0.04 alternative overfits. Keep this.
-  # Evidence: calibration/ (train vs held-out validation).
   big5_h2h_totals:
+    evidence_note: "Big-Five-league validated on h2h + totals, 2019/20-2024/25. Right market structure, but club leagues rather than World Cup matches. OOS-validated 2026-06-15 as the best held-out h2h_totals cell."
     devig_method: multiplicative
     dixon_coles_rho: -0.08
     odds_weight: 0.95

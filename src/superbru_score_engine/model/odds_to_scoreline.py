@@ -8,15 +8,23 @@ from superbru_score_engine.config import ModelConfig
 from superbru_score_engine.ingest import MatchOdds
 
 from .devig import (
+    FairAsianHandicapMarket,
     FairOutcomeMarket,
     FairTotalMarket,
     extract_correct_score_matrix,
     extract_fair_1x2,
+    extract_fair_asian_handicap,
     extract_fair_totals_all,
     primary_total_market,
 )
 from .dixon_coles import apply_dixon_coles, geometric_blend
-from .poisson import independent_poisson_matrix, matrix_over_probability, outcome_probabilities, solve_lambdas
+from .poisson import (
+    independent_poisson_matrix,
+    matrix_asian_handicap_home_probability,
+    matrix_over_probability,
+    outcome_probabilities,
+    solve_lambdas,
+)
 from .ratings import RatingsStore
 
 
@@ -30,6 +38,7 @@ class DistributionResult:
     fair_total: FairTotalMarket | None
     diagnostics: dict[str, object]
     fair_totals: tuple[FairTotalMarket, ...] = ()
+    fair_asian_handicap: FairAsianHandicapMarket | None = None
 
 
 class OddsToScorelineModel:
@@ -41,6 +50,7 @@ class OddsToScorelineModel:
         fair_1x2 = extract_fair_1x2(match, self.config.devig_method)
         fair_totals = extract_fair_totals_all(match, self.config.devig_method)
         fair_total = primary_total_market(fair_totals)
+        fair_asian_handicap = extract_fair_asian_handicap(match, self.config.devig_method)
         apply_manual_home_advantage = fair_1x2 is None
         prior_home, prior_away = self.ratings.prior_lambdas(
             match.home_team,
@@ -69,6 +79,7 @@ class OddsToScorelineModel:
             "ratings_number_of_applied_results": ratings_diagnostics.get("number_of_applied_results"),
             "ratings_number_of_teams": ratings_diagnostics.get("number_of_teams"),
             "ratings_use_as_fallback_only": self.ratings.config.use_as_fallback_only,
+            "asian_handicap_weight": self.config.asian_handicap_weight,
         }
 
         if fair_1x2:
@@ -78,6 +89,8 @@ class OddsToScorelineModel:
                 fair_totals=fair_totals,
                 solver_grid_goals=self.config.solver_grid_goals,
                 dixon_coles_rho=self.config.dixon_coles_rho,
+                fair_asian_handicap=fair_asian_handicap,
+                asian_handicap_weight=self.config.asian_handicap_weight,
             )
             diagnostics.update(solver_diagnostics)
             odds_weight = min(1.0, max(0.0, self.config.odds_weight))
@@ -153,6 +166,21 @@ class OddsToScorelineModel:
                     "model_over_rmse_across_lines": float(np.sqrt(np.mean(np.square(line_errors)))),
                 }
             )
+        if fair_asian_handicap:
+            model_ah_home_cover = matrix_asian_handicap_home_probability(matrix, fair_asian_handicap.line)
+            diagnostics.update(
+                {
+                    "has_asian_handicap": True,
+                    "fair_ah_line": float(fair_asian_handicap.line),
+                    "fair_ah_home_cover": float(fair_asian_handicap.home),
+                    "fair_ah_away_cover": float(fair_asian_handicap.away),
+                    "fair_ah_count": int(fair_asian_handicap.count),
+                    "model_ah_home_cover": float(model_ah_home_cover),
+                    "model_ah_error": float(model_ah_home_cover - fair_asian_handicap.home),
+                }
+            )
+        else:
+            diagnostics["has_asian_handicap"] = False
 
         return DistributionResult(
             match=match,
@@ -163,6 +191,7 @@ class OddsToScorelineModel:
             fair_total=fair_total,
             diagnostics=diagnostics,
             fair_totals=tuple(fair_totals),
+            fair_asian_handicap=fair_asian_handicap,
         )
 
 

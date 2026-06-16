@@ -19,7 +19,7 @@ def test_wrong_outcome_gets_zero() -> None:
     assert score_actual_prediction(2, 1, 1, 1, 1.5) == 0.0
 
 
-def test_closeness_index_matches_superbru_close_rule_examples() -> None:
+def test_closeness_index_matches_distance_examples() -> None:
     assert closeness_index(2, 1, 1, 0) <= 1.5
     assert closeness_index(2, 0, 1, 0) <= 1.5
-    assert closeness_index(2, 1, 1, 1) > 1.5
+    assert closeness_index(2, 1, 4, 2) > 1.5

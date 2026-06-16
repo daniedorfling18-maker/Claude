@@ -13,6 +13,7 @@ python -m venv .venv
 source .venv/bin/activate
 pip install -e .
 cp config.example.yaml config.yaml
+python -m superbru_score_engine config-check --config config.yaml --profiles calibration_profiles.yaml
 python -m superbru_score_engine predict --config config.yaml --fixtures examples/fixtures.csv --odds-json examples/odds_snapshot.json --out-dir outputs
 ```
 
@@ -23,12 +24,15 @@ python -m venv .venv
 .\.venv\Scripts\Activate.ps1
 pip install -e .
 copy config.example.yaml config.yaml
+python -m superbru_score_engine config-check --config config.yaml --profiles calibration_profiles.yaml
 python -m superbru_score_engine predict --config config.yaml --fixtures examples/fixtures.csv --odds-json examples/odds_snapshot.json --out-dir outputs
 ```
 
 `pip install -e .` also installs a `superbru-score` console script, so `superbru-score predict ...` is equivalent to `python -m superbru_score_engine predict ...`.
 
 The sample command uses the included offline odds snapshot so the app can be smoke-tested without API credentials.
+
+Run `python -m superbru_score_engine config-check --config config.yaml --profiles calibration_profiles.yaml` before production predictions. It validates that the active flat config matches the named calibration profile and exits non-zero when model settings have drifted.
 
 ## Live Odds
 
@@ -81,6 +85,8 @@ Each candidate includes:
 - `P(outcome)`
 - expected Superbru points
 
+The JSON diagnostics also include the active calibration profile, lambdas, model result probabilities, modal exact scoreline, EV gaps, candidate-grid probability mass, and low-score probabilities for common scorelines such as 0-0, 1-0, 0-1, 1-1, 2-1, and 1-2.
+
 ## Betting Report
 
 The optional betting report is disabled by default because this project is a Superbru decision engine, not an independent bookmaker-beating model. The odds-implied distribution is anchored to the same market prices you would bet into, so any betting screen is circular unless you add an independent probability source or compare against a different bookmaker universe.
@@ -122,6 +128,8 @@ This does not replace a World Cup-specific historical test, but it does answer w
 Before trusting production picks, verify:
 
 - Historical odds coverage is large enough before treating any backtest calibration as stable.
+- `config-check` passes against the calibration profile you intend to use.
+- The JSON diagnostics look sensible for lambdas, result probabilities, modal scoreline, EV gaps, and candidate-grid probability mass.
 
 Superbru's World Cup scoring is configured as 3 points for an exact score, 1.5 for a close score with the right outcome, 1 for the right outcome only, and 0 for the wrong outcome. Its close rule is equivalent to `ci_cutoff: 1.5`: the pick must have the right outcome and be either one goal out, or two goals out with the correct goal difference. Knockout scoring uses the regular-time score unless the match is drawn after regular time; in that case it is scored after extra time, and penalty shootouts remain draws.
 

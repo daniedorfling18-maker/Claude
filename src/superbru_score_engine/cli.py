@@ -12,6 +12,7 @@ from superbru_score_engine.config import AppConfig, calibration_check_rows, load
 from superbru_score_engine.decision import Prediction, SuperbruDecisionEngine, score_prediction
 from superbru_score_engine.ingest import MatchOdds, ProviderUnavailable
 from superbru_score_engine.ingest.cache import JsonCache
+from superbru_score_engine.ingest.fetch_odds import run_fetch_odds
 from superbru_score_engine.ingest.offline import OfflineJsonProvider
 from superbru_score_engine.ingest.oddspedia import OddspediaProvider
 from superbru_score_engine.ingest.results import (
@@ -36,6 +37,8 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.command == "config-check":
         return run_config_check(args, config)
+    if args.command == "fetch-odds":
+        return run_fetch_odds(args, config)
     if args.command == "predict":
         return run_predict(args, config)
     if args.command == "backtest":
@@ -71,6 +74,23 @@ def build_parser() -> argparse.ArgumentParser:
     config_check = subparsers.add_parser("config-check", help="Validate active config against calibration_profiles.yaml")
     config_check.add_argument("--config", default="config.yaml", help="Path to YAML/JSON config")
     config_check.add_argument("--profiles", default="calibration_profiles.yaml", help="Path to calibration profile registry")
+
+    fetch_odds = subparsers.add_parser("fetch-odds", help="Fetch live odds from The Odds API and write prediction inputs")
+    fetch_odds.add_argument("--config", default="config.yaml", help="Path to YAML/JSON config")
+    fetch_odds.add_argument("--sport", default="", help="The Odds API sport key; defaults to config providers.the_odds_api.sport_key")
+    fetch_odds.add_argument("--regions", default="", help="Comma-separated bookmaker regions, e.g. uk,eu,us")
+    fetch_odds.add_argument("--markets", default="", help="Comma-separated markets, usually h2h,totals")
+    fetch_odds.add_argument("--bookmakers", default="", help="Optional comma-separated bookmaker keys")
+    fetch_odds.add_argument("--commence-time-from", default="", help="Optional ISO8601 lower kickoff bound")
+    fetch_odds.add_argument("--commence-time-to", default="", help="Optional ISO8601 upper kickoff bound")
+    fetch_odds.add_argument("--odds-format", default="", help="decimal or american; defaults to config, usually decimal")
+    fetch_odds.add_argument("--api-key", default="", help="Optional API key override; prefer THE_ODDS_API_KEY env var")
+    fetch_odds.add_argument("--out-fixtures", default="data/fixtures_real.csv", help="Path to write generated fixtures CSV")
+    fetch_odds.add_argument("--out-odds", default="data/odds_snapshot_real.json", help="Path to write raw odds JSON snapshot")
+    fetch_odds.add_argument("--venue-country", default="", help="Optional venue country to stamp into fixtures")
+    fetch_odds.add_argument("--stage", default="", help="Optional stage label to stamp into fixtures")
+    fetch_odds.add_argument("--neutral", action=argparse.BooleanOptionalAction, default=True, help="Whether fixtures should be marked neutral")
+    fetch_odds.add_argument("--no-cache", action="store_true", help="Bypass the local JSON cache for this fetch")
 
     predict = subparsers.add_parser("predict", help="Generate Superbru expected-points score predictions")
     predict.add_argument("--config", default="config.yaml", help="Path to YAML/JSON config")

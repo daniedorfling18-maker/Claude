@@ -70,6 +70,9 @@ superbru:
   differentiation_weight: 0.0
   risk_aversion: 0.0
   variance_penalty: 0.0
+  private_chase_max_ev_loss: 0.05
+  private_chase_exact_weight: 1.0
+  private_chase_differentiation_weight: 1.0
 
 sensitivity:
   enabled: true

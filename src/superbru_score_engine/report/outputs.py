@@ -63,6 +63,13 @@ def prediction_rows(predictions: Iterable[Prediction]) -> list[dict]:
             "exact_chase_scoreline": prediction.exact_chase_pick.scoreline,
             "contrarian_scoreline": prediction.contrarian_pick.scoreline,
             "risk_adjusted_scoreline": prediction.risk_adjusted_pick.scoreline,
+            "private_chase_scoreline": prediction.private_chase_pick.scoreline,
+            "private_chase_expected_points": prediction.private_chase_pick.expected_points,
+            "private_chase_ev_loss": diagnostics.get("private_chase_ev_loss"),
+            "private_chase_p_exact": prediction.private_chase_pick.p_exact,
+            "private_chase_p_close": prediction.private_chase_pick.p_close,
+            "private_chase_p_outcome": prediction.private_chase_pick.p_outcome,
+            "private_chase_public_pick_share": diagnostics.get("private_chase_public_pick_share"),
             "recommended_public_pick_share": diagnostics.get("recommended_public_pick_share"),
             "recommended_ev_vs_field": diagnostics.get("recommended_ev_vs_field"),
             "recommended_risk_adjusted_score": diagnostics.get("recommended_risk_adjusted_score"),
@@ -175,12 +182,22 @@ def console_table(predictions: list[Prediction]) -> str:
             "modal_scoreline",
             "confidence_tier",
             "risk_tier",
+            "private_chase_scoreline",
+            "private_chase_ev_loss",
             "top1_scoreline",
             "top2_scoreline",
             "top3_scoreline",
         ]
     ]
-    numeric_cols = ["expected_points", "p_exact", "p_close", "p_outcome", "ev_gap_to_second", "sensitivity_stability"]
+    numeric_cols = [
+        "expected_points",
+        "p_exact",
+        "p_close",
+        "p_outcome",
+        "ev_gap_to_second",
+        "sensitivity_stability",
+        "private_chase_ev_loss",
+    ]
     for col in numeric_cols:
         table[col] = table[col].map(lambda value: "" if pd.isna(value) else f"{float(value):.3f}")
     return table.to_string(index=False)
@@ -201,6 +218,7 @@ def _prediction_payload(prediction: Prediction) -> dict:
             "exact_chase": asdict(prediction.exact_chase_pick),
             "contrarian": asdict(prediction.contrarian_pick),
             "risk_adjusted": asdict(prediction.risk_adjusted_pick),
+            "private_chase": asdict(prediction.private_chase_pick),
         },
         "top_candidates": [asdict(candidate) for candidate in prediction.top_candidates],
         "diagnostics": prediction.diagnostics,

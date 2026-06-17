@@ -4,6 +4,8 @@ The overriding contract: default strategy preserves the raw expected-points pick
 """
 from dataclasses import dataclass
 
+import numpy as np
+
 from superbru_score_engine.config import PublicPickConfig, SuperbruConfig
 from superbru_score_engine.decision.superbru import SuperbruDecisionEngine, score_prediction
 from superbru_score_engine.model.dixon_coles import apply_dixon_coles
@@ -34,6 +36,12 @@ def _dist(lh=1.6, la=1.0, rho=-0.08, grid=10):
 
 def _engine(**superbru):
     return SuperbruDecisionEngine(SuperbruConfig(**superbru), 6, PublicPickConfig())
+
+
+def _manual_dist(matrix):
+    matrix = np.asarray(matrix, dtype=float)
+    matrix = matrix / matrix.sum()
+    return _Dist(matrix=matrix, match=_Match(), diagnostics={"dixon_coles_rho": 0.0}, lambda_home=1.0, lambda_away=1.0)
 
 
 def test_default_mode_recommends_raw_ev():
@@ -82,6 +90,29 @@ def test_risk_adjusted_pick_is_exposed_as_first_class_pick():
     p = _engine(strategy_mode="risk_adjusted", risk_aversion=0.1).predict(_dist())
     assert p.recommended.scoreline == p.risk_adjusted_pick.scoreline
     assert p.diagnostics["risk_adjusted_scoreline"] == p.risk_adjusted_pick.scoreline
+
+
+def test_private_chase_pick_is_ev_capped_and_exposed():
+    matrix = [
+        [0.029330271370256244, 0.010491929049973842, 0.0521012379001362, 0.05341123879599326],
+        [0.0717435549525183, 0.010330830768131722, 0.14948826677753432, 0.10714590378393628],
+        [0.027917605664044793, 0.03699852894806276, 0.20134151575164974, 0.040561350351612444],
+        [0.02508528701167184, 0.0176093174952106, 0.07125574661746364, 0.09518741476180383],
+    ]
+    p = _engine(private_chase_max_ev_loss=0.05).predict(_manual_dist(matrix))
+
+    assert p.raw_ev_pick.scoreline == "1-2"
+    assert p.private_chase_pick.scoreline == "2-2"
+    assert p.raw_ev_pick.expected_points - p.private_chase_pick.expected_points <= 0.05
+    assert p.private_chase_pick.p_exact > p.raw_ev_pick.p_exact
+    assert p.diagnostics["private_chase_scoreline"] == "2-2"
+
+
+def test_private_chase_strategy_can_be_selected_explicitly():
+    p = _engine(strategy_mode="private_chase", private_chase_max_ev_loss=0.05).predict(_dist())
+
+    assert p.strategy_mode == "private_chase"
+    assert p.recommended.scoreline == p.private_chase_pick.scoreline
 
 
 def test_contrarian_pick_is_not_a_joke_pick():

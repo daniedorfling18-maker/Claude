@@ -12,7 +12,7 @@ from superbru_score_engine.model import DistributionResult
 
 Outcome = str
 
-STRATEGY_MODES = ("raw_ev", "conservative", "exact_chase", "contrarian", "risk_adjusted")
+STRATEGY_MODES = ("raw_ev", "conservative", "exact_chase", "contrarian", "risk_adjusted", "private_chase")
 
 
 @dataclass(frozen=True)
@@ -53,6 +53,7 @@ class Prediction:
     exact_chase_pick: CandidateEvaluation
     contrarian_pick: CandidateEvaluation
     risk_adjusted_pick: CandidateEvaluation
+    private_chase_pick: CandidateEvaluation
     strategy_mode: str
     top_candidates: tuple[CandidateEvaluation, ...]
     diagnostics: dict
@@ -82,6 +83,7 @@ class SuperbruDecisionEngine:
         exact_chase_pick = selections["exact_chase"]
         contrarian_pick = selections["contrarian"]
         risk_adjusted_pick = selections["risk_adjusted"]
+        private_chase_pick = selections["private_chase"]
         mode = selections["mode"]
 
         top = tuple(sorted(evaluations, key=lambda c: (c.expected_points, c.p_close), reverse=True)[:3])
@@ -96,6 +98,12 @@ class SuperbruDecisionEngine:
                 "exact_chase_scoreline": exact_chase_pick.scoreline,
                 "contrarian_scoreline": contrarian_pick.scoreline,
                 "risk_adjusted_scoreline": risk_adjusted_pick.scoreline,
+                "private_chase_scoreline": private_chase_pick.scoreline,
+                "private_chase_expected_points": float(private_chase_pick.expected_points),
+                "private_chase_ev_loss": float(max(0.0, raw_ev_pick.expected_points - private_chase_pick.expected_points)),
+                "private_chase_p_exact": float(private_chase_pick.p_exact),
+                "private_chase_public_pick_share": float(private_chase_pick.public_pick_share),
+                "private_chase_max_ev_loss": float(self.config.private_chase_max_ev_loss),
                 "public_pick_model": "synthetic" if self.public_pick_config.enabled else "disabled",
                 "recommended_public_pick_share": float(recommended.public_pick_share),
                 "recommended_ev_vs_field": float(recommended.ev_vs_field),
@@ -115,6 +123,7 @@ class SuperbruDecisionEngine:
             exact_chase_pick=exact_chase_pick,
             contrarian_pick=contrarian_pick,
             risk_adjusted_pick=risk_adjusted_pick,
+            private_chase_pick=private_chase_pick,
             strategy_mode=mode,
             top_candidates=top,
             diagnostics=diagnostics,
@@ -208,6 +217,7 @@ def _select_picks(
     exact_chase_pick = _top_by(evaluations, lambda c: c.expected_points + (w - 1.0) * 3.0 * c.p_exact, tie)
     risk_adjusted_pick = _top_by(evaluations, lambda c: c.risk_adjusted_score, tie)
     contrarian_pick = _contrarian_pick(evaluations, raw_ev_pick)
+    private_chase_pick = _private_chase_pick(evaluations, raw_ev_pick, superbru)
 
     picks = {
         "raw_ev": raw_ev_pick,
@@ -215,6 +225,7 @@ def _select_picks(
         "exact_chase": exact_chase_pick,
         "contrarian": contrarian_pick,
         "risk_adjusted": risk_adjusted_pick,
+        "private_chase": private_chase_pick,
     }
     mode = superbru.strategy_mode if superbru.strategy_mode in picks else "raw_ev"
     return {
@@ -226,6 +237,7 @@ def _select_picks(
         "exact_chase": exact_chase_pick,
         "contrarian": contrarian_pick,
         "risk_adjusted": risk_adjusted_pick,
+        "private_chase": private_chase_pick,
         "mode": mode,
     }
 
@@ -245,6 +257,33 @@ def _contrarian_pick(evaluations: list[CandidateEvaluation], raw_ev_pick: Candid
     floor = 0.5 * raw_ev_pick.expected_points
     eligible = [c for c in evaluations if c.expected_points >= floor] or list(evaluations)
     return max(eligible, key=lambda c: (c.ev_vs_field + 0.75 * (1.0 - c.public_pick_share), c.expected_points))
+
+
+def _private_chase_pick(evaluations: list[CandidateEvaluation], raw_ev_pick: CandidateEvaluation, superbru: SuperbruConfig) -> CandidateEvaluation:
+    max_loss = max(0.0, float(superbru.private_chase_max_ev_loss))
+    eligible = [c for c in evaluations if raw_ev_pick.expected_points - c.expected_points <= max_loss] or [raw_ev_pick]
+
+    def score(candidate: CandidateEvaluation) -> float:
+        ev_loss = raw_ev_pick.expected_points - candidate.expected_points
+        exact_gain = candidate.p_exact - raw_ev_pick.p_exact
+        public_gain = raw_ev_pick.public_pick_share - candidate.public_pick_share
+        return (
+            -ev_loss
+            + superbru.private_chase_exact_weight * exact_gain
+            + superbru.private_chase_differentiation_weight * public_gain
+        )
+
+    return max(
+        eligible,
+        key=lambda c: (
+            score(c),
+            c.p_exact,
+            -c.public_pick_share,
+            c.p_close,
+            c.expected_points,
+            -(c.home_goals + c.away_goals),
+        ),
+    )
 
 
 def _favourite_outcome(matrix: np.ndarray) -> dict[str, float]:

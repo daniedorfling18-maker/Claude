@@ -45,13 +45,16 @@ class SuperbruConfig:
     contrarian_weight: float = 0.0
     knockout_result_basis: str = "regular_or_extra_time_if_drawn"
     # Strategy layer. Defaults reproduce the raw expected-points pick exactly.
-    # modes: raw_ev | conservative | exact_chase | contrarian | risk_adjusted
+    # modes: raw_ev | conservative | exact_chase | contrarian | risk_adjusted | private_chase
     strategy_mode: str = "raw_ev"
     exact_chase_weight: float = 1.0       # >1 tilts toward the modal (high-P_exact) score
     public_pick_weight: float = 0.0       # alpha: reward EV above the synthetic field EV
     differentiation_weight: float = 0.0   # delta: reward low synthetic public-pick share
     risk_aversion: float = 0.0            # beta: penalise P(zero points)
     variance_penalty: float = 0.0         # gamma: penalise points variance
+    private_chase_max_ev_loss: float = 0.05
+    private_chase_exact_weight: float = 1.0
+    private_chase_differentiation_weight: float = 1.0
 
 
 @dataclass(frozen=True)
@@ -203,6 +206,9 @@ def load_config(path: str | Path | None) -> AppConfig:
             differentiation_weight=float(superbru.get("differentiation_weight", 0.0)),
             risk_aversion=float(superbru.get("risk_aversion", 0.0)),
             variance_penalty=float(superbru.get("variance_penalty", 0.0)),
+            private_chase_max_ev_loss=float(superbru.get("private_chase_max_ev_loss", 0.05)),
+            private_chase_exact_weight=float(superbru.get("private_chase_exact_weight", 1.0)),
+            private_chase_differentiation_weight=float(superbru.get("private_chase_differentiation_weight", 1.0)),
         ),
         sensitivity=SensitivityConfig(
             enabled=bool(sensitivity.get("enabled", True)),

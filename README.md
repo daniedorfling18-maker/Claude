@@ -93,6 +93,8 @@ When a `correct_score` market is present (e.g. an Oddspedia score grid fed throu
 
 The CSV output surfaces the main sensitivity fields: `sensitivity_stability`, `sensitivity_changed_count`, `sensitivity_warning`, and `sensitivity_most_common_alternative`. A low stability value means the recommended scoreline changes under small lambda/rho/total-goals/public-pick perturbations, so treat the pick as fragile.
 
+The CSV also includes a `private_chase_scoreline`. This is a controlled small-pool/chasing option: it only considers scorelines within `superbru.private_chase_max_ev_loss` of the raw expected-points pick, then prefers more exact-score upside and lower synthetic public-pick share. The default `strategy_mode: raw_ev` still keeps the public/global recommendation pure EV. Set `strategy_mode: private_chase` only if you want the chase pick to become the main recommendation.
+
 Ratings metadata is saved in `work/ratings.json` under `_metadata`, including source, source URL, cutoff date, update method, k-factor, base rating, Elo goal scale, confidence threshold, and applied-result count. Ratings are lower-trust than market odds and should remain fallback-only unless a proper backtest validates blending them into market-backed fixtures.
 
 ## Betting Report

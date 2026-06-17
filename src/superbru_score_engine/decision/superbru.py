@@ -372,7 +372,11 @@ def decision_diagnostics(matrix: np.ndarray, evaluations: list[CandidateEvaluati
 
 
 def closeness_index(pred_home: int, pred_away: int, actual_home: int, actual_away: int) -> float:
-    return float(((pred_home - actual_home) ** 2 + (pred_away - actual_away) ** 2) ** 0.5)
+    predicted_goal_difference = pred_home - pred_away
+    actual_goal_difference = actual_home - actual_away
+    predicted_total_goals = pred_home + pred_away
+    actual_total_goals = actual_home + actual_away
+    return float(abs(predicted_goal_difference - actual_goal_difference) + abs(predicted_total_goals - actual_total_goals) / 2.0)
 
 
 def score_actual_prediction(pred_home: int, pred_away: int, actual_home: int, actual_away: int, ci_cutoff: float) -> float:

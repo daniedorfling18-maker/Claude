@@ -13,6 +13,7 @@ from .devig import (
     FairTotalMarket,
     extract_correct_score_matrix,
     extract_fair_1x2,
+    extract_fair_1x2_book_level,
     extract_fair_asian_handicap,
     extract_fair_totals_all,
     primary_total_market,
@@ -26,6 +27,7 @@ from .poisson import (
     solve_lambdas,
 )
 from .ratings import RatingsStore
+from .uncertainty import market_disagreement_1x2
 
 
 @dataclass(frozen=True)
@@ -47,10 +49,12 @@ class OddsToScorelineModel:
         self.ratings = ratings or RatingsStore()
 
     def build_distribution(self, match: MatchOdds) -> DistributionResult:
+        fair_books = extract_fair_1x2_book_level(match, self.config.devig_method)
         fair_1x2 = extract_fair_1x2(match, self.config.devig_method)
         fair_totals = extract_fair_totals_all(match, self.config.devig_method)
         fair_total = primary_total_market(fair_totals)
         fair_asian_handicap = extract_fair_asian_handicap(match, self.config.devig_method)
+        disagreement = market_disagreement_1x2(fair_books)
         apply_manual_home_advantage = fair_1x2 is None
         prior_home, prior_away = self.ratings.prior_lambdas(
             match.home_team,
@@ -80,6 +84,12 @@ class OddsToScorelineModel:
             "ratings_number_of_teams": ratings_diagnostics.get("number_of_teams"),
             "ratings_use_as_fallback_only": self.ratings.config.use_as_fallback_only,
             "asian_handicap_weight": self.config.asian_handicap_weight,
+            "market_n_books": disagreement["n_books"],
+            "market_disagreement_index": disagreement["disagreement_index"],
+            "market_max_book_spread": disagreement["max_book_spread"],
+            "market_home_prob_std": disagreement["home_std"],
+            "market_draw_prob_std": disagreement["draw_std"],
+            "market_away_prob_std": disagreement["away_std"],
         }
 
         if fair_1x2:

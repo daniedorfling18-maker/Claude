@@ -67,15 +67,26 @@ def devig_implied_probabilities(implied: np.ndarray, method: str = "power") -> n
     raise ValueError(f"Unsupported de-vig method: {method}")
 
 
-def extract_fair_1x2(match: MatchOdds, method: str = "power") -> FairOutcomeMarket | None:
-    rows: list[np.ndarray] = []
+def extract_fair_1x2_book_level(match: MatchOdds, method: str = "power") -> list[FairOutcomeMarket]:
+    """One de-vigged fair 1X2 estimate per bookmaker h2h market, before averaging.
+
+    The spread of these per-book estimates is the raw material for market-disagreement
+    based uncertainty: when books disagree, the consensus lambda (and the pick it
+    implies) rests on weaker ground.
+    """
+    books: list[FairOutcomeMarket] = []
     for market in match.market("h2h"):
         mapped = _map_1x2_market(match, market, method)
         if mapped is not None:
-            rows.append(mapped)
-    if not rows:
+            books.append(FairOutcomeMarket(home=float(mapped[0]), draw=float(mapped[1]), away=float(mapped[2])))
+    return books
+
+
+def extract_fair_1x2(match: MatchOdds, method: str = "power") -> FairOutcomeMarket | None:
+    books = extract_fair_1x2_book_level(match, method)
+    if not books:
         return None
-    avg = np.vstack(rows).mean(axis=0)
+    avg = np.vstack([book.as_array() for book in books]).mean(axis=0)
     avg = avg / avg.sum()
     return FairOutcomeMarket(home=float(avg[0]), draw=float(avg[1]), away=float(avg[2]))
 

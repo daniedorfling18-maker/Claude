@@ -11,7 +11,7 @@ from .devig import (
     FairAsianHandicapMarket,
     FairOutcomeMarket,
     FairTotalMarket,
-    extract_correct_score_matrix,
+    extract_correct_score_market,
     extract_fair_1x2,
     extract_fair_1x2_book_level,
     extract_fair_asian_handicap,
@@ -133,12 +133,19 @@ class OddsToScorelineModel:
         matrix = independent_poisson_matrix(lambda_home, lambda_away, self.config.model_grid_goals)
         matrix = apply_dixon_coles(matrix, lambda_home, lambda_away, self.config.dixon_coles_rho)
 
-        correct_score_matrix = extract_correct_score_matrix(match, self.config.model_grid_goals, self.config.devig_method)
-        if correct_score_matrix is not None and self.config.correct_score_blend_weight > 0:
-            matrix = geometric_blend(matrix, correct_score_matrix, self.config.correct_score_blend_weight)
+        correct_score_market = extract_correct_score_market(match, self.config.model_grid_goals, self.config.devig_method)
+        if correct_score_market is not None and self.config.correct_score_blend_weight > 0:
+            weight = self.config.correct_score_blend_weight
+            correct_score_matrix = correct_score_market.to_matrix(self.config.model_grid_goals, model_matrix=matrix)
+            pre_blend = matrix
+            matrix = geometric_blend(matrix, correct_score_matrix, weight)
             diagnostics["correct_score_blended"] = True
+            diagnostics.update(_correct_score_blend_diagnostics(pre_blend, matrix, correct_score_market, weight))
         else:
             diagnostics["correct_score_blended"] = False
+            if correct_score_market is not None:
+                diagnostics["correct_score_cells_quoted"] = len(correct_score_market.cell_probs)
+                diagnostics["correct_score_other_mass"] = float(correct_score_market.other_mass)
 
         model_outcomes = outcome_probabilities(matrix)
         diagnostics.update(
@@ -203,6 +210,21 @@ class OddsToScorelineModel:
             fair_totals=tuple(fair_totals),
             fair_asian_handicap=fair_asian_handicap,
         )
+
+
+def _correct_score_blend_diagnostics(pre: np.ndarray, post: np.ndarray, market, weight: float) -> dict[str, object]:
+    pre_modal = np.unravel_index(int(np.argmax(pre)), pre.shape)
+    post_modal = np.unravel_index(int(np.argmax(post)), post.shape)
+    return {
+        "correct_score_blend_weight": float(weight),
+        "correct_score_books": int(market.count),
+        "correct_score_cells_quoted": len(market.cell_probs),
+        "correct_score_other_mass": float(market.other_mass),
+        "correct_score_modal_before": f"{int(pre_modal[0])}-{int(pre_modal[1])}",
+        "correct_score_modal_after": f"{int(post_modal[0])}-{int(post_modal[1])}",
+        # Total-variation distance: how far the blend moved the scoreline distribution.
+        "correct_score_total_variation_shift": float(0.5 * np.abs(post - pre).sum()),
+    }
 
 
 def scoreline_distribution_diagnostics(matrix: np.ndarray, candidate_grid_goals: int) -> dict[str, object]:

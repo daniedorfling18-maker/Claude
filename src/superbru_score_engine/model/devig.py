@@ -44,6 +44,45 @@ class FairAsianHandicapMarket:
     count: int
 
 
+@dataclass(frozen=True)
+class FairCorrectScoreMarket:
+    """De-vigged correct-score grid: fair probability per quoted scoreline plus the
+    residual ``other_mass`` for any 'Any Other Score'/field bucket.
+
+    ``to_matrix`` turns this into a full scoreline matrix, filling the unquoted tail from
+    a model prior so a sparse grid never asserts that unquoted scores are impossible.
+    """
+
+    cell_probs: dict[tuple[int, int], float]
+    other_mass: float
+    count: int
+
+    def to_matrix(self, max_goals: int, model_matrix: np.ndarray | None = None) -> np.ndarray:
+        size = max_goals + 1
+        matrix = np.zeros((size, size), dtype=float)
+        quoted_mask = np.zeros((size, size), dtype=bool)
+        for (home_goals, away_goals), prob in self.cell_probs.items():
+            if 0 <= home_goals <= max_goals and 0 <= away_goals <= max_goals:
+                matrix[home_goals, away_goals] = prob
+                quoted_mask[home_goals, away_goals] = True
+        unquoted = ~quoted_mask
+        use_model = model_matrix is not None and model_matrix.shape == matrix.shape
+        tail_weights = np.where(unquoted, np.clip(model_matrix, 0.0, None), 0.0) if use_model else unquoted.astype(float)
+        tail_total = float(tail_weights.sum())
+        residual = max(0.0, self.other_mass)
+        if residual <= 0.0 and use_model and tail_total > 0.0:
+            # No explicit 'Any Other Score' bucket: borrow the tail SIZE from the model so
+            # the grid does not assert P(unquoted) = 0, and keep the quoted cells' shape.
+            residual = tail_total
+            quoted_sum = float(matrix.sum())
+            if quoted_sum > 0.0 and 0.0 < residual < 1.0:
+                matrix = matrix * (1.0 - residual) / quoted_sum
+        if residual > 0.0 and tail_total > 0.0:
+            matrix = matrix + residual * tail_weights / tail_total
+        total = float(matrix.sum())
+        return matrix / total if total > 0.0 else matrix
+
+
 def decimal_implied_probabilities(prices: list[float], method: str = "power") -> np.ndarray:
     implied = np.array([1.0 / price for price in prices], dtype=float)
     return devig_implied_probabilities(implied, method)
@@ -174,29 +213,62 @@ def extract_fair_asian_handicap(match: MatchOdds, method: str = "power") -> Fair
     return FairAsianHandicapMarket(line=float(line), home=float(avg[0]), away=float(avg[1]), count=len(by_line[line]))
 
 
-def extract_correct_score_matrix(match: MatchOdds, max_goals: int, method: str = "power") -> np.ndarray | None:
-    matrices: list[np.ndarray] = []
+def extract_correct_score_market(match: MatchOdds, max_goals: int, method: str = "power") -> FairCorrectScoreMarket | None:
+    """De-vig a correct-score grid, keeping any 'Any Other Score'/field bucket as residual.
+
+    The implied probabilities of the quoted cells *and* the residual bucket are de-vigged
+    together, so the quoted cells are not inflated by the vig the residual would have
+    absorbed. Per-cell fair probabilities are averaged across books.
+    """
+    per_book_cells: list[dict[tuple[int, int], float]] = []
+    per_book_other: list[float] = []
     for market in match.market("correct_score"):
-        cells: dict[tuple[int, int], float] = {}
+        quoted_implied: dict[tuple[int, int], float] = {}
+        other_implied = 0.0
+        has_other = False
         for outcome in market.outcomes:
+            if not outcome.price or float(outcome.price) <= 0:
+                continue
             score = parse_scoreline_label(outcome.name)
             if score is None:
+                text = outcome.name.strip().lower()
+                if "other" in text or "field" in text:
+                    other_implied += 1.0 / float(outcome.price)
+                    has_other = True
                 continue
             home_goals, away_goals = score
             if home_goals <= max_goals and away_goals <= max_goals:
-                cells[(home_goals, away_goals)] = outcome.price
-        if not cells:
+                quoted_implied[(home_goals, away_goals)] = 1.0 / float(outcome.price)
+        if not quoted_implied:
             continue
-        probs = decimal_implied_probabilities(list(cells.values()), method)
-        matrix = np.zeros((max_goals + 1, max_goals + 1), dtype=float)
-        for (cell, prob) in zip(cells.keys(), probs):
-            matrix[cell] = prob
-        if matrix.sum() > 0:
-            matrices.append(matrix / matrix.sum())
-    if not matrices:
+        cells = list(quoted_implied)
+        implied = np.array([quoted_implied[cell] for cell in cells] + ([other_implied] if has_other else []), dtype=float)
+        fair = devig_implied_probabilities(implied, method)
+        per_book_cells.append({cell: float(fair[idx]) for idx, cell in enumerate(cells)})
+        per_book_other.append(float(fair[-1]) if has_other else 0.0)
+
+    if not per_book_cells:
         return None
-    blended = np.stack(matrices).mean(axis=0)
-    return blended / blended.sum()
+
+    all_cells = set().union(*(set(book) for book in per_book_cells))
+    averaged = {cell: float(np.mean([book[cell] for book in per_book_cells if cell in book])) for cell in all_cells}
+    other_mass = float(np.mean(per_book_other))
+    total = sum(averaged.values()) + other_mass
+    if total <= 0:
+        return None
+    return FairCorrectScoreMarket(
+        cell_probs={cell: prob / total for cell, prob in averaged.items()},
+        other_mass=other_mass / total,
+        count=len(per_book_cells),
+    )
+
+
+def extract_correct_score_matrix(match: MatchOdds, max_goals: int, method: str = "power") -> np.ndarray | None:
+    """Backwards-compatible full matrix with a uniform tail (no model prior)."""
+    market = extract_correct_score_market(match, max_goals, method)
+    if market is None:
+        return None
+    return market.to_matrix(max_goals)
 
 
 def parse_scoreline_label(label: str) -> tuple[int, int] | None:

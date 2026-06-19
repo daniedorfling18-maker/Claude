@@ -120,6 +120,13 @@ OUTRIGHT_TERMS = (
 
 MATCH_RESULT_TERMS = (" beat ", " vs ", " vs. ", "defeat")
 
+# Completed WC 2026 results visible in the user's Superbru screenshots but not
+# part of the Oddspedia score-grid validation sample.
+KNOWN_EXTRA_RESULTS = (
+    ("CAN", "QAT", 6, 0),
+    ("MEX", "KOR", 1, 0),
+)
+
 
 @dataclass(frozen=True)
 class Fixture:
@@ -232,6 +239,11 @@ def load_fixtures(args: argparse.Namespace) -> list[Fixture]:
         from scripts.wc_grid_validation import MATCHES
 
         for home, away, actual_home, actual_away, *_ in MATCHES:
+            add_fixture(
+                fixtures,
+                Fixture(home=home, away=away, actual_home=int(actual_home), actual_away=int(actual_away)),
+            )
+        for home, away, actual_home, actual_away in KNOWN_EXTRA_RESULTS:
             add_fixture(
                 fixtures,
                 Fixture(home=home, away=away, actual_home=int(actual_home), actual_away=int(actual_away)),

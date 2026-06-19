@@ -52,6 +52,13 @@ MATCHES = [
     ("FRA", "SEN", 3, 1, 53, 23, 24, None),
     ("KSA", "URU", 1, 1, 25, 27, 48, (0, 1)),
     ("ESP", "CPV", 0, 0, 67, 21, 12, (1, 0)),
+    ("AUT", "JOR", 3, 1, 61, 21, 18, None),
+    ("POR", "COD", 1, 1, 61, 23, 17, (1, 0)),
+    ("ENG", "CRO", 4, 2, 48, 23, 29, (1, 1)),
+    ("GHA", "PAN", 1, 0, 30, 26, 44, (1, 1)),
+    ("UZB", "COL", 1, 3, 20, 26, 54, (0, 1)),
+    ("CZE", "RSA", 1, 1, 37, 27, 37, (1, 1)),
+    ("SUI", "BIH", 4, 1, 52, 26, 22, (1, 0)),
 ]
 
 _CANDIDATES = [(h, a) for h in range(CANDIDATE_GRID + 1) for a in range(CANDIDATE_GRID + 1)]

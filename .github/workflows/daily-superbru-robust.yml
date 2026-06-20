@@ -19,6 +19,7 @@ on:
 permissions:
   contents: write
   actions: read
+  issues: write
 
 concurrency:
   group: daily-superbru-robust-card
@@ -34,6 +35,16 @@ jobs:
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
+
+      - name: Capture previous robust card
+        run: |
+          mkdir -p outputs/daily_robust_card
+          if [ -f outputs/daily_robust_card/daily_robust_superbru_card.csv ]; then
+            cp outputs/daily_robust_card/daily_robust_superbru_card.csv outputs/daily_robust_card/previous_superbru_card.csv
+            echo "Previous robust card captured."
+          else
+            echo "No previous robust card found. First run will not notify score changes."
+          fi
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -62,6 +73,32 @@ jobs:
             python scripts/run_daily_robust_pipeline.py $SKIP_FLAG
           fi
 
+      - name: Check whether score changes are needed
+        id: score_changes
+        if: success()
+        run: |
+          python scripts/notify_score_changes.py \
+            --current-card-csv outputs/daily_robust_card/daily_robust_superbru_card.csv \
+            --previous-card-csv outputs/daily_robust_card/previous_superbru_card.csv \
+            --audit-csv outputs/daily_robust_card/daily_switch_audit.csv \
+            --out-md outputs/daily_robust_card/score_change_notification.md \
+            --github-output "$GITHUB_OUTPUT" \
+            --github-step-summary "$GITHUB_STEP_SUMMARY"
+
+      - name: Notify only when scores need changing
+        if: steps.score_changes.outputs.notify == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh issue create \
+            --title "Superbru score changes needed - $(date -u +%Y-%m-%d)" \
+            --body-file outputs/daily_robust_card/score_change_notification.md
+
+      - name: No score-change notification needed
+        if: steps.score_changes.outputs.notify != 'true'
+        run: |
+          echo "No score changes needed. No GitHub issue notification created."
+
       - name: Upload daily robust outputs
         uses: actions/upload-artifact@v4
         if: always()
@@ -80,6 +117,7 @@ jobs:
             outputs/final_locked_picks/*.json
             outputs/daily_robust_card/*.csv
             outputs/daily_robust_card/*.json
+            outputs/daily_robust_card/*.md
             outputs/final_leader_decision_daily_robust/**/*.csv
             outputs/final_leader_decision_daily_robust/**/*.json
           if-no-files-found: warn

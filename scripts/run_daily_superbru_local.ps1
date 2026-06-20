@@ -3,11 +3,13 @@ param(
   [string]$ChromeDebugPort = "9222",
   [string]$ChromeProfileDir = ".chrome-oddspedia-profile",
   [string]$SeedUrl = "https://oddspedia.com/football/world/world-cup",
+  [string]$SuperbruPoolUrl = "https://www.superbru.com/worldcup_predictor/pool.php?p=13236623&tab=matches#tab=matches",
   [string]$SnapshotId = "",
   [switch]$SkipFinalSimulation,
   [switch]$SkipOddspediaScrape,
   [switch]$SkipResultsBackfill,
   [switch]$SkipBacktest,
+  [switch]$SkipSuperbruPoolScrape,
   [switch]$ManualOnMissing,
   [switch]$NotifyOnFirstState,
   [switch]$CreateGitHubIssue,
@@ -49,7 +51,7 @@ function Ensure-ChromeCdp {
     Start-Sleep -Seconds 5
   }
   if (-not (Test-CdpPort $ChromeDebugPort)) {
-    throw "Chrome CDP port $ChromeDebugPort is not available. Close Chrome, then rerun this script after the Oddspedia page is accessible in Chrome."
+    throw "Chrome CDP port $ChromeDebugPort is not available. Close Chrome, then rerun this script after the browser page is accessible in Chrome."
   }
 }
 
@@ -81,12 +83,35 @@ function Show-LocalNotification {
 mkdir outputs\daily_robust_card -Force | Out-Null
 mkdir outputs\daily_notifications -Force | Out-Null
 mkdir outputs\backtesting -Force | Out-Null
+mkdir outputs\superbru_pool -Force | Out-Null
 
 if (Test-Path outputs\daily_robust_card\daily_robust_superbru_card.csv) {
   Copy-Item outputs\daily_robust_card\daily_robust_superbru_card.csv outputs\daily_robust_card\previous_superbru_card.csv -Force
   Write-Host "Previous robust card captured."
 } else {
   Write-Host "No previous robust card found. First run will only notify if -NotifyOnFirstState is used."
+}
+
+if (-not $SkipSuperbruPoolScrape) {
+  Ensure-ChromeCdp
+  Write-Host "Refreshing Superbru pool leaderboard via Chrome CDP..."
+  python scripts\scrape_superbru_pool_cdp_session.py `
+    --cdp-url "http://127.0.0.1:$ChromeDebugPort" `
+    --pool-url $SuperbruPoolUrl `
+    --out-dir outputs\superbru_pool `
+    --leaderboard-out inputs\pool_leaderboard_auto.csv `
+    --settle-ms 12000 `
+    --timeout-ms 90000
+
+  if (Test-Path inputs\pool_leaderboard_auto.csv) {
+    $leaderboardRows = (Import-Csv inputs\pool_leaderboard_auto.csv | Measure-Object).Count
+    if ($leaderboardRows -gt 0) {
+      Copy-Item inputs\pool_leaderboard_auto.csv inputs\pool_leaderboard.csv -Force
+      Write-Host "Superbru pool leaderboard refreshed: $leaderboardRows rows copied to inputs\pool_leaderboard.csv."
+    } else {
+      Write-Warning "Superbru pool scrape produced 0 leaderboard rows. Keeping existing inputs\pool_leaderboard.csv."
+    }
+  }
 }
 
 $pipelineArgs = @()
@@ -194,7 +219,7 @@ if ($notification.notify -eq $true) {
 
 if ($CommitAndPushOutputs) {
   Write-Host "Committing daily outputs..."
-  git add -f inputs\smartbet_grids outputs\market_odds outputs\market_odds_validation outputs\market_odds_history outputs\component_validation outputs\final_locked_picks outputs\daily_robust_card outputs\oddspedia_pick_validation outputs\daily_notifications outputs\final_leader_decision_daily_robust outputs\backtesting
+  git add -f inputs\pool_leaderboard.csv inputs\pool_leaderboard_auto.csv inputs\smartbet_grids outputs\superbru_pool outputs\market_odds outputs\market_odds_validation outputs\market_odds_history outputs\component_validation outputs\final_locked_picks outputs\daily_robust_card outputs\oddspedia_pick_validation outputs\daily_notifications outputs\final_leader_decision_daily_robust outputs\backtesting
   git diff --cached --quiet
   if ($LASTEXITCODE -eq 0) {
     Write-Host "No output changes to commit."

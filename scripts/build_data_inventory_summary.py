@@ -1,10 +1,11 @@
 from __future__ import annotations
 
-# Action trigger stamp: 2026-06-20T22:50:00+02:00
+# Action trigger stamp: 2026-06-20T22:58:00+02:00
 
 import argparse
 import importlib.util
 import json
+import re
 import shutil
 from datetime import datetime, timezone
 from pathlib import Path
@@ -122,11 +123,121 @@ def load_module_from_scripts(filename: str, function_name: str) -> Any:
     return getattr(module, function_name)
 
 
+def lower_cols(frame: pd.DataFrame) -> dict[str, str]:
+    return {str(c).lower(): str(c) for c in frame.columns}
+
+
+def cached_capture_kind(path: Path, frame: pd.DataFrame) -> str:
+    name = path.name.lower().replace("-", "_")
+    cols = " ".join(str(c).lower() for c in frame.columns)
+    haystack = f"{name} {cols}"
+    if "smartbet" in haystack or "smart_bet" in haystack:
+        return "smartbets"
+    if "probability_grid" in haystack or "probability grid" in haystack or "prob_grid" in haystack:
+        return "probability_grid"
+    if re.search(r"\bp_home\b|\bp_draw\b|\bp_away\b|home_probability|draw_probability|away_probability", haystack):
+        return "probability_grid"
+    if re.search(r"prob.*score|score.*prob|exact.*score|correct.*score", haystack):
+        return "score_probability_grid"
+    if "market_path" in frame.columns or "market_label" in frame.columns:
+        return "market_inventory"
+    if any(token in haystack for token in ["odds", "bookmaker", "probabilit", "market"]):
+        return "generic_market_like_csv"
+    return "unknown"
+
+
+def has_match_identity(frame: pd.DataFrame) -> bool:
+    cols = {str(c).lower() for c in frame.columns}
+    return bool(
+        "match_id" in cols
+        or {"home_team", "away_team"}.issubset(cols)
+        or {"home", "away"}.issubset(cols)
+        or {"team_home", "team_away"}.issubset(cols)
+    )
+
+
+def normalise_cached_oddspedia_capture(source: Path, target: Path, kind: str) -> dict[str, Any]:
+    frame = pd.read_csv(source).fillna("")
+    col_lookup = lower_cols(frame)
+    if "home_team" not in frame.columns:
+        for alt in ["home", "team_home", "home_name", "homeTeam", "home_team_name"]:
+            if alt.lower() in col_lookup:
+                frame["home_team"] = frame[col_lookup[alt.lower()]]
+                break
+    if "away_team" not in frame.columns:
+        for alt in ["away", "team_away", "away_name", "awayTeam", "away_team_name"]:
+            if alt.lower() in col_lookup:
+                frame["away_team"] = frame[col_lookup[alt.lower()]]
+                break
+    if "match_id" not in frame.columns:
+        if {"home_team", "away_team"}.issubset(frame.columns):
+            frame["match_id"] = (
+                frame["home_team"].astype(str).str.lower().str.replace(r"[^a-z0-9]+", "-", regex=True).str.strip("-")
+                + "-"
+                + frame["away_team"].astype(str).str.lower().str.replace(r"[^a-z0-9]+", "-", regex=True).str.strip("-")
+            )
+        else:
+            frame["match_id"] = "cached_unknown_match"
+    if "market_path" not in frame.columns:
+        if kind == "smartbets":
+            frame["market_path"] = "cached/smartbets/probability_grid"
+        elif kind == "score_probability_grid":
+            frame["market_path"] = "cached/probability_grid/correct_score"
+        elif kind == "probability_grid":
+            frame["market_path"] = "cached/probability_grid/result_probabilities"
+        else:
+            frame["market_path"] = "cached/generic_market_like"
+    if "market_label" not in frame.columns:
+        labels = {
+            "smartbets": "Smartbets probability grid",
+            "score_probability_grid": "Score probability grid",
+            "probability_grid": "Result probability grid",
+            "generic_market_like_csv": "Cached market-like capture",
+            "market_inventory": "Cached market inventory",
+        }
+        frame["market_label"] = labels.get(kind, "Cached Oddspedia capture")
+    if "source_name" not in frame.columns:
+        frame["source_name"] = f"cached_{kind}"
+    probability_cols = [c for c in frame.columns if re.search(r"prob|^p_|_p$|chance", str(c), re.IGNORECASE)]
+    odds_cols = [c for c in frame.columns if re.search(r"odds|price|decimal", str(c), re.IGNORECASE)]
+    bookmaker_cols = [c for c in frame.columns if re.search(r"book|provider|sportsbook", str(c), re.IGNORECASE)]
+    outcome_cols = [c for c in frame.columns if re.search(r"outcome|selection|score|home|draw|away", str(c), re.IGNORECASE)]
+    if "object_keys" not in frame.columns:
+        useful_cols = sorted(set(probability_cols + odds_cols + bookmaker_cols + outcome_cols))[:80]
+        frame["object_keys"] = ";".join(useful_cols)
+    if "probabilities_count" not in frame.columns:
+        frame["probabilities_count"] = len(probability_cols)
+    if "odds_count" not in frame.columns:
+        frame["odds_count"] = len(odds_cols)
+    if "bookmakers_count" not in frame.columns:
+        frame["bookmakers_count"] = max(1, len(bookmaker_cols)) if odds_cols else len(bookmaker_cols)
+    if "outcomes_count" not in frame.columns:
+        frame["outcomes_count"] = max(0, len(outcome_cols))
+    if "markets_count" not in frame.columns:
+        frame["markets_count"] = frame["market_path"].astype(str).replace("", pd.NA).notna().astype(int)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    frame.to_csv(target, index=False)
+    return {
+        "normalised": True,
+        "kind": kind,
+        "row_count": int(len(frame)),
+        "probability_column_count": len(probability_cols),
+        "odds_column_count": len(odds_cols),
+        "market_path_count": int(frame["market_path"].astype(str).nunique()),
+    }
+
+
 def find_cached_oddspedia_market_capture(inv: Path, live_markets: Path) -> dict[str, Any]:
     candidates: list[dict[str, Any]] = []
     repo_root = Path.cwd()
     excluded_parts = {".git", "raw_diagnostics", "node_modules", ".venv", "venv"}
     priority_patterns = [
+        "**/*smartbet*.csv",
+        "**/*smart_bet*.csv",
+        "**/*probability*grid*.csv",
+        "**/*prob*grid*.csv",
+        "**/*score*prob*.csv",
+        "**/*prob*score*.csv",
         "**/*oddspedia*available*markets*.csv",
         "**/*oddspedia*markets*.csv",
         "**/*oddspedia*market*.csv",
@@ -157,28 +268,29 @@ def find_cached_oddspedia_market_capture(inv: Path, live_markets: Path) -> dict[
                 frame = pd.read_csv(path, nrows=3000).fillna("")
             except Exception:
                 continue
-            cols = set(frame.columns)
-            has_market_cols = "market_path" in cols or "market_label" in cols
-            has_match_cols = "match_id" in cols or {"home_team", "away_team"}.issubset(cols)
-            has_market_content = False
-            if not has_market_cols and len(frame.columns) <= 80:
-                text_sample = " ".join(str(col) for col in frame.columns).lower()
-                if any(token in text_sample for token in ["market", "odds", "bookmaker", "probabilit"]):
-                    has_market_content = True
-            if not (has_market_cols or has_market_content) or not has_match_cols:
+            kind = cached_capture_kind(path, frame)
+            if kind == "unknown" or not has_match_identity(frame):
                 continue
             row_count = csv_count(path)
             if row_count <= 0:
                 continue
-            market_paths = int(frame.get("market_path", pd.Series(dtype=str)).astype(str).replace("", pd.NA).dropna().nunique()) if "market_path" in frame.columns else 0
+            market_paths = int(frame.get("market_path", pd.Series(dtype=str)).astype(str).replace("", pd.NA).dropna().nunique()) if "market_path" in frame.columns else 1
+            kind_priority = {
+                "smartbets": 100,
+                "probability_grid": 90,
+                "score_probability_grid": 95,
+                "market_inventory": 80,
+                "generic_market_like_csv": 50,
+            }.get(kind, 0)
             candidates.append({
                 "path": str(path),
                 "row_count": row_count,
                 "sampled_unique_market_paths": market_paths,
-                "columns": sorted(cols),
-                "matched_by": "market_columns" if has_market_cols else "market_content_header_scan",
+                "columns": sorted(str(c) for c in frame.columns),
+                "matched_by": kind,
+                "kind_priority": kind_priority,
             })
-    candidates = sorted(candidates, key=lambda r: (int(r["row_count"]), int(r["sampled_unique_market_paths"])), reverse=True)
+    candidates = sorted(candidates, key=lambda r: (int(r["kind_priority"]), int(r["row_count"]), int(r["sampled_unique_market_paths"])), reverse=True)
     return candidates[0] if candidates else {"path": "", "row_count": 0, "sampled_unique_market_paths": 0, "columns": []}
 
 
@@ -194,11 +306,14 @@ def apply_oddspedia_cached_fallback(inv: Path, odd_status: dict[str, Any]) -> di
 
     best = find_cached_oddspedia_market_capture(inv, markets_path)
     if not best.get("path"):
-        return {"status": "missing", "reason": "no_valid_cached_oddspedia_market_capture_found"}
+        return {"status": "missing", "reason": "no_valid_cached_oddspedia_or_probability_grid_capture_found"}
 
     source = Path(str(best["path"]))
-    markets_path.parent.mkdir(parents=True, exist_ok=True)
-    shutil.copyfile(source, markets_path)
+    try:
+        normalised = normalise_cached_oddspedia_capture(source, markets_path, str(best.get("matched_by") or "generic_market_like_csv"))
+    except Exception:
+        shutil.copyfile(source, markets_path)
+        normalised = {"normalised": False}
 
     try:
         summarise_markets = load_module_from_scripts("filter_oddspedia_high_value_market_paths.py", "summarise_markets")
@@ -224,12 +339,13 @@ def apply_oddspedia_cached_fallback(inv: Path, odd_status: dict[str, Any]) -> di
             "high_value_network_candidates": summarise_network(network),
             "outputs": {"out_csv": str(ranked_path), "out_json": str(ranked_json_path)},
             "fallback_source": best,
-            "note": "Ranked using cached Oddspedia capture because the GitHub-hosted live scrape was Cloudflare-blocked.",
+            "normalisation": normalised,
+            "note": "Ranked using cached Oddspedia/smartbets/probability-grid capture because the GitHub-hosted live scrape was Cloudflare-blocked.",
         }
         ranked_json_path.write_text(json.dumps(payload, indent=2, default=str), encoding="utf-8")
-        return {"status": "applied", "source": best, "ranked_market_path_count": int(len(ranked))}
+        return {"status": "applied", "source": best, "normalisation": normalised, "ranked_market_path_count": int(len(ranked))}
     except Exception as exc:
-        return {"status": "applied_copy_only", "source": best, "error": str(exc)}
+        return {"status": "applied_copy_only", "source": best, "normalisation": normalised, "error": str(exc)}
 
 
 def run_superbru_abbreviation_enhancement(inv: Path) -> dict[str, Any]:
@@ -318,8 +434,8 @@ def main() -> int:
         },
         "interpretation": {
             "status": "inventory_plus_ranked_feature_candidates",
-            "note": "This summary reports browser-exposed data, Superbru abbreviation-mapped fixture coverage, Oddspedia access status, and cached Oddspedia fallback usage when Actions are Cloudflare-blocked.",
-            "next_step": "Use Superbru detected match controls and cached Oddspedia high-value market paths as pool-intelligence/model feature candidates.",
+            "note": "This summary reports browser-exposed data, Superbru abbreviation-mapped fixture coverage, Oddspedia access status, and cached Oddspedia/smartbets/probability-grid fallback usage when Actions are Cloudflare-blocked.",
+            "next_step": "Use Superbru detected match controls and cached Oddspedia/smartbets probability-grid paths as pool-intelligence/model feature candidates.",
         },
     }
     out_json.write_text(json.dumps(payload, indent=2, default=str), encoding="utf-8")

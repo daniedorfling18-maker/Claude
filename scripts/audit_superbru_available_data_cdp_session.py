@@ -18,13 +18,14 @@ ROUND_RE = re.compile(r"\bRound\s+(\d+)\b", re.IGNORECASE)
 CONSENT_TEXT_RE = re.compile(r"do not process|data deletion|data access|privacy|confirm", re.IGNORECASE)
 
 
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description="Audit visible Superbru pool page data, tables, round tabs, pick coverage and network metadata from the logged-in Chrome CDP session."
     )
     parser.add_argument("--cdp-url", default="http://127.0.0.1:9222")
     parser.add_argument("--pool-url", default="https://www.superbru.com/worldcup_predictor/pool_view.php?t=1296&p=13236623&g=32&view=matches")
-    parser.add_argument("--login-url", default=os.environ.get("SUPERBRU_LOGIN_URL", "https://www.superbru.com/login.php"))
+    parser.add_argument("--login-url", default=os.environ.get("SUPERBRU_LOGIN_URL", "https://www.superbru.com/login"))
     parser.add_argument("--fixtures-csv", default="outputs/final_locked_picks/superbru_final_card.csv")
     parser.add_argument("--out-dir", default="outputs/data_inventory")
     parser.add_argument("--diagnostics-dir", default="outputs/data_inventory/raw_diagnostics/superbru")
@@ -377,6 +378,33 @@ async def click_privacy_consent_if_present(page: Any, args: argparse.Namespace, 
         return {"stage": stage, "attempted": True, "clicked": False, "error": str(exc), "title": title}
 
 
+def login_url_candidates(args: argparse.Namespace) -> list[str]:
+    """Build a safe ordered login URL list. Superbru currently exposes /login from logged-out pages."""
+    candidates: list[str] = []
+    for value in [
+        txt(args.login_url),
+        "https://www.superbru.com/login",
+        "https://www.superbru.com/home/login.php",
+        txt(args.pool_url),
+    ]:
+        if value and value not in candidates:
+            candidates.append(value)
+    return candidates
+
+
+async def discover_login_link(page: Any) -> str:
+    try:
+        state = await page.evaluate(EXTRACT_PAGE_JS)
+    except Exception:
+        return ""
+    for control in state.get("controls") or []:
+        text = txt(control.get("text")).lower()
+        href = txt(control.get("href"))
+        if href and "login" in href.lower() and ("log in" in text or "login" in text or "/login" in href.lower()):
+            return href
+    return ""
+
+
 async def maybe_login_superbru(page: Any, args: argparse.Namespace) -> dict[str, Any]:
     user_value = txt(os.environ.get("SUPERBRU_USERNAME") or os.environ.get("SUPERBRU_EMAIL"))
     secret_value = txt(os.environ.get("SUPERBRU_" + "PASS" + "WORD"))
@@ -385,19 +413,27 @@ async def maybe_login_superbru(page: Any, args: argparse.Namespace) -> dict[str,
         return {"attempted": False, "reason": "Superbru credentials not provided"}
 
     print("Superbru credentials detected in environment. Attempting standard login without printing credentials.")
-    login_urls = []
-    if txt(args.login_url):
-        login_urls.append(txt(args.login_url))
-    if txt(args.pool_url) not in login_urls:
-        login_urls.append(txt(args.pool_url))
+    login_urls = login_url_candidates(args)
 
     secret_input_selector = "input[type='" + "pass" + "word" + "']"
     last_error = ""
-    for login_url in login_urls:
+    tried: list[str] = []
+    idx = 0
+    while idx < len(login_urls):
+        login_url = login_urls[idx]
+        idx += 1
+        if login_url in tried:
+            continue
+        tried.append(login_url)
         try:
             await page.goto(login_url, wait_until="domcontentloaded", timeout=args.timeout_ms)
             await page.wait_for_timeout(args.login_settle_ms)
             consent_attempts.append(await click_privacy_consent_if_present(page, args, f"before_login_form:{login_url}"))
+
+            discovered = await discover_login_link(page)
+            if discovered and discovered not in login_urls:
+                login_urls.insert(idx, discovered)
+
             await page.goto(login_url, wait_until="domcontentloaded", timeout=args.timeout_ms)
             await page.wait_for_timeout(args.login_settle_ms)
             consent_attempts.append(await click_privacy_consent_if_present(page, args, f"after_login_reload:{login_url}"))
@@ -457,6 +493,7 @@ async def maybe_login_superbru(page: Any, args: argparse.Namespace) -> dict[str,
         "attempted": True,
         "success_uncertain": True,
         "error": last_error or "No visible login form found",
+        "tried_login_urls": tried,
         "consent_attempts": consent_attempts,
     }
 
@@ -503,7 +540,6 @@ async def audit(args: argparse.Namespace, fixtures: list[dict[str, str]]) -> dic
         page.on("response", on_response)
         login_status = await maybe_login_superbru(page, args)
         print(f"Superbru login status: attempted={login_status.get('attempted')} body_length_after_login={login_status.get('body_text_length_after_login', '')}")
-
         print("Superbru inventory :: loading pool page")
         try:
             await page.goto(args.pool_url, wait_until="domcontentloaded", timeout=args.timeout_ms)

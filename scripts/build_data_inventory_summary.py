@@ -1,8 +1,9 @@
 from __future__ import annotations
 
-# Action trigger stamp: 2026-06-20T22:28:00+02:00
+# Action trigger stamp: 2026-06-20T22:31:00+02:00
 
 import argparse
+import importlib.util
 import json
 from datetime import datetime, timezone
 from pathlib import Path
@@ -110,9 +111,19 @@ def oddspedia_access_status(page_csv: Path, odd_fields: dict[str, Any]) -> dict[
     }
 
 
+def load_enhancer() -> Any:
+    module_path = Path(__file__).resolve().with_name("enhance_superbru_fixture_coverage.py")
+    spec = importlib.util.spec_from_file_location("enhance_superbru_fixture_coverage", module_path)
+    if spec is None or spec.loader is None:
+        raise ImportError(f"Could not import enhancer from {module_path}")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module.enhance_coverage
+
+
 def run_superbru_abbreviation_enhancement(inv: Path) -> dict[str, Any]:
     try:
-        from scripts.enhance_superbru_fixture_coverage import enhance_coverage
+        enhance_coverage = load_enhancer()
     except Exception as exc:
         return {"status": "enhancer_import_failed", "error": str(exc)}
 

@@ -2,12 +2,13 @@ param(
   [string]$RepoRoot = (Get-Location).Path,
   [string]$ChromeDebugPort = "9222",
   [string]$ChromeProfileDir = ".chrome-oddspedia-profile",
-  [string]$SeedUrl = "https://oddspedia.com/football/world/world-cup",
+  [string]$SeedUrl = "https://www.superbru.com/worldcup_predictor/pool.php?p=13236623&tab=matches#tab=matches",
   [string]$SuperbruPoolUrl = "https://www.superbru.com/worldcup_predictor/pool.php?p=13236623&tab=matches#tab=matches",
   [string]$SnapshotId = "",
   [switch]$SkipFinalSimulation,
   [switch]$SkipOddspediaScrape,
   [switch]$SkipResultsBackfill,
+  [switch]$UseOddspediaResultsBackfill,
   [switch]$SkipBacktest,
   [switch]$SkipSuperbruPoolScrape,
   [switch]$ManualOnMissing,
@@ -53,6 +54,12 @@ function Ensure-ChromeCdp {
   if (-not (Test-CdpPort $ChromeDebugPort)) {
     throw "Chrome CDP port $ChromeDebugPort is not available. Close Chrome, then rerun this script after the browser page is accessible in Chrome."
   }
+}
+
+function Get-CsvRowCount {
+  param([string]$Path)
+  if (!(Test-Path $Path)) { return 0 }
+  return (Import-Csv $Path | Measure-Object).Count
 }
 
 function Invoke-GitHubIssueIfAvailable {
@@ -104,7 +111,7 @@ if (-not $SkipSuperbruPoolScrape) {
     --timeout-ms 90000
 
   if (Test-Path inputs\pool_leaderboard_auto.csv) {
-    $leaderboardRows = (Import-Csv inputs\pool_leaderboard_auto.csv | Measure-Object).Count
+    $leaderboardRows = Get-CsvRowCount -Path inputs\pool_leaderboard_auto.csv
     if ($leaderboardRows -gt 0) {
       Copy-Item inputs\pool_leaderboard_auto.csv inputs\pool_leaderboard.csv -Force
       Write-Host "Superbru pool leaderboard refreshed: $leaderboardRows rows copied to inputs\pool_leaderboard.csv."
@@ -112,6 +119,22 @@ if (-not $SkipSuperbruPoolScrape) {
       Write-Warning "Superbru pool scrape produced 0 leaderboard rows. Keeping existing inputs\pool_leaderboard.csv."
     }
   }
+}
+
+if (-not $SkipResultsBackfill) {
+  Ensure-ChromeCdp
+  Write-Host "Backfilling Superbru prior match results via Chrome CDP..."
+  python scripts\scrape_superbru_results_cdp_session.py `
+    --cdp-url "http://127.0.0.1:$ChromeDebugPort" `
+    --pool-url $SuperbruPoolUrl `
+    --out-csv outputs\superbru_pool\superbru_match_results_auto.csv `
+    --out-summary-json outputs\superbru_pool\superbru_match_results_summary.json `
+    --diagnostics-dir outputs\superbru_pool\results_diagnostics `
+    --settle-ms 9000 `
+    --timeout-ms 90000
+
+  $superbruResultRows = Get-CsvRowCount -Path outputs\superbru_pool\superbru_match_results_auto.csv
+  Write-Host "Superbru match-results backfill rows: $superbruResultRows"
 }
 
 $pipelineArgs = @()
@@ -142,10 +165,10 @@ if (-not $SkipOddspediaScrape) {
     @manualFlag
 }
 
-if (-not $SkipResultsBackfill) {
+if ($UseOddspediaResultsBackfill -and (-not $SkipResultsBackfill)) {
   if (Test-Path inputs\oddspedia_match_urls.csv) {
     Ensure-ChromeCdp
-    Write-Host "Backfilling Oddspedia final results via Chrome CDP..."
+    Write-Host "Backfilling Oddspedia final results via Chrome CDP as secondary/fallback source..."
     python scripts\scrape_oddspedia_results_cdp_session.py `
       --cdp-url "http://127.0.0.1:$ChromeDebugPort" `
       --urls-csv inputs\oddspedia_match_urls.csv `
@@ -172,16 +195,26 @@ if ((Test-Path inputs\smartbet_grids\oddspedia_probability_grids_auto.csv) -and 
 }
 
 if (-not $SkipBacktest) {
-  if (Test-Path outputs\backtesting\oddspedia_results_backfill.csv) {
-    Write-Host "Building Superbru backtest from Oddspedia results..."
+  $resultsCsv = ""
+  $superbruRows = Get-CsvRowCount -Path outputs\superbru_pool\superbru_match_results_auto.csv
+  if ($superbruRows -gt 0) {
+    $resultsCsv = "outputs\superbru_pool\superbru_match_results_auto.csv"
+    Write-Host "Using Superbru match results for backtest: $resultsCsv"
+  } elseif (Test-Path outputs\backtesting\oddspedia_results_backfill.csv) {
+    $resultsCsv = "outputs\backtesting\oddspedia_results_backfill.csv"
+    Write-Warning "Superbru results unavailable. Falling back to Oddspedia results: $resultsCsv"
+  }
+
+  if ($resultsCsv -ne "") {
+    Write-Host "Building Superbru backtest from $resultsCsv..."
     python scripts\build_superbru_backtest_from_results.py `
-      --results-csv outputs\backtesting\oddspedia_results_backfill.csv `
+      --results-csv $resultsCsv `
       --picks-csv outputs\final_locked_picks\superbru_final_card.csv `
       --oddspedia-comparison-csv outputs\oddspedia_pick_validation\oddspedia_pick_comparison.csv `
       --out-csv outputs\backtesting\superbru_pick_backtest.csv `
       --out-summary-json outputs\backtesting\backtest_summary.json
   } else {
-    Write-Warning "Oddspedia results backfill missing. Backtest skipped."
+    Write-Warning "No match results source available. Backtest skipped."
   }
 }
 

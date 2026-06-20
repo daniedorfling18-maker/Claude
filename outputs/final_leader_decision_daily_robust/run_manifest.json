@@ -1,5 +1,5 @@
 {
-  "generated_at_utc": "2026-06-20T13:22:04.676380+00:00",
+  "generated_at_utc": "2026-06-20T13:45:29.512806+00:00",
   "python": "3.12.10 (tags/v3.12.10:0cc8128, Apr  8 2025, 12:21:36) [MSC v.1943 64 bit (AMD64)]",
   "command": "scripts/run_final_leader_decision.py --predictions-csv outputs/daily_robust_card/predictions_for_final_simulation.csv --out-dir outputs/final_leader_decision_daily_robust --reuse-existing",
   "args": {
@@ -27,10 +27,10 @@
     "reuse_existing": true
   },
   "git": {
-    "commit_sha": "aba4ffaca45164568005183deef3fc69feb32d01",
+    "commit_sha": "d7eee42d0c5583f5ce983d8f792c963a504a28b8",
     "branch": "claude/bold-ride-n3n1ti",
     "working_tree_clean": false,
-    "status_porcelain": "M scripts/build_oddspedia_match_urls_from_nuxt.py\n M scripts/debug_oddspedia_page_state.py\n M scripts/discover_oddspedia_probability_api.py\n?? .chrome-oddspedia-profile/\n?? .playwright-oddspedia-profile/\n?? inputs/oddspedia_match_urls.csv\n?? inputs/oddspedia_match_urls_alt_test.csv\n?? inputs/oddspedia_match_urls_test.csv"
+    "status_porcelain": "M outputs/component_validation/component_validation_report.csv\n M outputs/component_validation/review_rescore_summary.json\n M outputs/daily_robust_card/daily_robust_summary.json\n M outputs/final_leader_decision_daily_robust/final_decision_report.json\n M outputs/final_leader_decision_daily_robust/final_decision_report.md\n M outputs/final_locked_picks/final_picks_locked_summary.json\n M outputs/market_odds/worldcup_market_odds_flat.csv\n M outputs/market_odds/worldcup_market_odds_raw.json\n M outputs/market_odds_history/market_odds_history.csv\n M outputs/market_odds_history/market_odds_history_summary.json\n M outputs/market_odds_history/market_odds_movement_report.csv\n M outputs/market_odds_history/market_odds_snapshot_current.csv\n M outputs/market_odds_validation/market_odds_validation_report.csv\n M outputs/market_odds_validation/market_odds_validation_summary.json\n M scripts/build_oddspedia_match_urls_from_nuxt.py\n M scripts/debug_oddspedia_page_state.py\n M scripts/discover_oddspedia_probability_api.py\n?? .chrome-oddspedia-profile/\n?? .playwright-oddspedia-profile/\n?? inputs/oddspedia_match_urls.csv\n?? inputs/oddspedia_match_urls_alt_test.csv\n?? inputs/oddspedia_match_urls_test.csv"
   },
   "inputs": {
     "config": {
@@ -60,10 +60,10 @@
   },
   "outputs": {
     "outputs\\final_leader_decision_daily_robust\\final_picks.csv": "a4c785aef08b1cceff5c44acc8832b054873e249456ee886eebbaf5407f109b6",
-    "outputs\\final_leader_decision_daily_robust\\final_decision_report.json": "10a473ee44d2e73195add2e5a66f4e4121f010f4040d7e0c79eab5b415522cf0",
-    "outputs\\final_leader_decision_daily_robust\\final_decision_report.md": "abf5b1d7f521c4db1a7580f6bc15413839a75d82ebceeb10365320f8476b978d",
+    "outputs\\final_leader_decision_daily_robust\\final_decision_report.json": "24413dd516779e35fd75237660b3f738ea7afe6b5601847474c4c20c323deea6",
+    "outputs\\final_leader_decision_daily_robust\\final_decision_report.md": "0b8596862500fc4df6c9880f0162d1cfc76866c5ef5379750a57ca120e98e765",
     "outputs\\final_leader_decision_daily_robust\\quality_gates.json": "5ee1f147ea3229a63b3efc291d9664ff4a177f9999d695854e0853c9d9449000",
-    "outputs\\final_leader_decision_daily_robust\\run_manifest.json": "cd40ff065dde51ab63398ef9002ce303c560733051e0c158541228782ee1cc6a",
+    "outputs\\final_leader_decision_daily_robust\\run_manifest.json": "6a69f35e7f2d79f7cf4510bb5294d5680f04f23a299955aa64d427e23730f3b5",
     "outputs\\final_leader_decision_daily_robust\\base_mc\\leader_mc_picks.csv": "e33c5227bf38ff072a5613464861fd1dfa253da1cbf9c34c84040aa5a857cdc0",
     "outputs\\final_leader_decision_daily_robust\\base_mc\\leader_mc_candidate_tests.csv": "c67e153e21e9433c7b77adde408ebcf486e83b96695963f33f8cc4c78fa41c44",
     "outputs\\final_leader_decision_daily_robust\\base_mc\\leader_mc_summary.json": "1822cc76850e49d29b884f58280eed41e02d931f820d13cd74ce2b633bd3be41",

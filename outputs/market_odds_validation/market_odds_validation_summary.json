@@ -1,5 +1,5 @@
 {
-  "generated_at_utc": "2026-06-20T13:22:00.256366+00:00",
+  "generated_at_utc": "2026-06-20T13:45:22.754881+00:00",
   "pick_count": 40,
   "market_available_count": 37,
   "totals_available_count": 37,
@@ -14,9 +14,9 @@
       "home_team": "Paraguay",
       "away_team": "Australia",
       "final_pick": "1-0",
-      "market_alignment_score": 0.455287,
+      "market_alignment_score": 0.354964,
       "market_alignment_label": "market_conflict",
-      "market_alignment_reasons": "pick outcome opposes market favourite; goal total agrees with market lean; spread market near even"
+      "market_alignment_reasons": "pick outcome opposes market favourite; market gives selected outcome weak support; goal total agrees with market lean; spread market near even"
     },
     {
       "home_team": "Ecuador",
@@ -70,7 +70,7 @@
       "home_team": "Norway",
       "away_team": "Senegal",
       "final_pick": "2-1",
-      "market_alignment_score": 0.842042,
+      "market_alignment_score": 0.845131,
       "market_alignment_label": "market_aligned",
       "market_alignment_reasons": "pick outcome agrees with market favourite; score margin direction agrees with spread"
     },
@@ -78,7 +78,7 @@
       "home_team": "Netherlands",
       "away_team": "Sweden",
       "final_pick": "2-0",
-      "market_alignment_score": 0.849295,
+      "market_alignment_score": 0.84928,
       "market_alignment_label": "market_aligned",
       "market_alignment_reasons": "pick outcome agrees with market favourite; market gives selected outcome strong support; goal total conflicts with market lean; score margin direction agrees with spread"
     },

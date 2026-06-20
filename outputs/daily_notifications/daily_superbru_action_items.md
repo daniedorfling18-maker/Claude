@@ -1,9 +1,9 @@
 # Daily Superbru action items
 
-Generated: `2026-06-20T13:26:20.326384+00:00`
+Generated: `2026-06-20T13:49:50.416528+00:00`
 
-Notify: **yes**
-State changed: **yes**
+Notify: **no**
+State changed: **no**
 
 Score-change items: **0**
 Oddspedia review items: **8**
@@ -23,4 +23,4 @@ These are review flags, not automatic switches. Make changes only after checking
 | colombia-dr-congo | 2-0 | 10.68 | 1-0 | 14.03 | 3.35 | same_outcome_review |
 | tunisia-japan | 0-2 | 10.66 | 0-1 | 12.81 | 2.1500000000000004 | same_outcome_review |
 
-Review the items above and update only the scores that survive final judgement.
+The same action set was already reported previously, so this run is suppressed to avoid repeated notifications.

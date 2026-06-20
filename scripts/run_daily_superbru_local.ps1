@@ -6,6 +6,8 @@ param(
   [string]$SnapshotId = "",
   [switch]$SkipFinalSimulation,
   [switch]$SkipOddspediaScrape,
+  [switch]$SkipResultsBackfill,
+  [switch]$SkipBacktest,
   [switch]$ManualOnMissing,
   [switch]$NotifyOnFirstState,
   [switch]$CreateGitHubIssue,
@@ -40,6 +42,17 @@ function Start-ChromeDebug {
   )
 }
 
+function Ensure-ChromeCdp {
+  if (-not (Test-CdpPort $ChromeDebugPort)) {
+    Write-Host "Starting Chrome with remote debugging on port $ChromeDebugPort..."
+    Start-ChromeDebug -Port $ChromeDebugPort -ProfileDir $ChromeProfileDir -Url $SeedUrl
+    Start-Sleep -Seconds 5
+  }
+  if (-not (Test-CdpPort $ChromeDebugPort)) {
+    throw "Chrome CDP port $ChromeDebugPort is not available. Close Chrome, then rerun this script after the Oddspedia page is accessible in Chrome."
+  }
+}
+
 function Invoke-GitHubIssueIfAvailable {
   param([string]$BodyFile, [string]$Title)
   $gh = Get-Command gh -ErrorAction SilentlyContinue
@@ -67,6 +80,7 @@ function Show-LocalNotification {
 
 mkdir outputs\daily_robust_card -Force | Out-Null
 mkdir outputs\daily_notifications -Force | Out-Null
+mkdir outputs\backtesting -Force | Out-Null
 
 if (Test-Path outputs\daily_robust_card\daily_robust_superbru_card.csv) {
   Copy-Item outputs\daily_robust_card\daily_robust_superbru_card.csv outputs\daily_robust_card\previous_superbru_card.csv -Force
@@ -84,15 +98,7 @@ $env:PYTHONPATH = "src"
 python scripts\run_daily_robust_pipeline.py @pipelineArgs
 
 if (-not $SkipOddspediaScrape) {
-  if (-not (Test-CdpPort $ChromeDebugPort)) {
-    Write-Host "Starting Chrome with remote debugging on port $ChromeDebugPort..."
-    Start-ChromeDebug -Port $ChromeDebugPort -ProfileDir $ChromeProfileDir -Url $SeedUrl
-    Start-Sleep -Seconds 5
-  }
-
-  if (-not (Test-CdpPort $ChromeDebugPort)) {
-    throw "Chrome CDP port $ChromeDebugPort is not available. Close Chrome, rerun this script, and clear Cloudflare if prompted."
-  }
+  Ensure-ChromeCdp
 
   $manualFlag = @()
   if ($ManualOnMissing) { $manualFlag += "--manual-on-missing" }
@@ -111,6 +117,23 @@ if (-not $SkipOddspediaScrape) {
     @manualFlag
 }
 
+if (-not $SkipResultsBackfill) {
+  if (Test-Path inputs\oddspedia_match_urls.csv) {
+    Ensure-ChromeCdp
+    Write-Host "Backfilling Oddspedia final results via Chrome CDP..."
+    python scripts\scrape_oddspedia_results_cdp_session.py `
+      --cdp-url "http://127.0.0.1:$ChromeDebugPort" `
+      --urls-csv inputs\oddspedia_match_urls.csv `
+      --out-csv outputs\backtesting\oddspedia_results_backfill.csv `
+      --out-json outputs\backtesting\oddspedia_results_backfill_summary.json `
+      --diagnostics-dir outputs\backtesting\oddspedia_results_diagnostics `
+      --settle-ms 9000 `
+      --timeout-ms 90000
+  } else {
+    Write-Warning "inputs\oddspedia_match_urls.csv missing. Oddspedia results backfill skipped."
+  }
+}
+
 if ((Test-Path inputs\smartbet_grids\oddspedia_probability_grids_auto.csv) -and (Test-Path inputs\smartbet_grids\oddspedia_probability_summary_auto.csv)) {
   Write-Host "Running Oddspedia overlay comparison..."
   python scripts\compare_locked_picks_to_oddspedia.py `
@@ -121,6 +144,20 @@ if ((Test-Path inputs\smartbet_grids\oddspedia_probability_grids_auto.csv) -and 
     --out-json outputs\oddspedia_pick_validation\oddspedia_pick_comparison_summary.json
 } else {
   Write-Warning "Oddspedia grid CSV missing. Overlay comparison skipped."
+}
+
+if (-not $SkipBacktest) {
+  if (Test-Path outputs\backtesting\oddspedia_results_backfill.csv) {
+    Write-Host "Building Superbru backtest from Oddspedia results..."
+    python scripts\build_superbru_backtest_from_results.py `
+      --results-csv outputs\backtesting\oddspedia_results_backfill.csv `
+      --picks-csv outputs\final_locked_picks\superbru_final_card.csv `
+      --oddspedia-comparison-csv outputs\oddspedia_pick_validation\oddspedia_pick_comparison.csv `
+      --out-csv outputs\backtesting\superbru_pick_backtest.csv `
+      --out-summary-json outputs\backtesting\backtest_summary.json
+  } else {
+    Write-Warning "Oddspedia results backfill missing. Backtest skipped."
+  }
 }
 
 Write-Host "Checking robust-card score changes..."
@@ -157,7 +194,7 @@ if ($notification.notify -eq $true) {
 
 if ($CommitAndPushOutputs) {
   Write-Host "Committing daily outputs..."
-  git add -f inputs\smartbet_grids outputs\market_odds outputs\market_odds_validation outputs\market_odds_history outputs\component_validation outputs\final_locked_picks outputs\daily_robust_card outputs\oddspedia_pick_validation outputs\daily_notifications outputs\final_leader_decision_daily_robust
+  git add -f inputs\smartbet_grids outputs\market_odds outputs\market_odds_validation outputs\market_odds_history outputs\component_validation outputs\final_locked_picks outputs\daily_robust_card outputs\oddspedia_pick_validation outputs\daily_notifications outputs\final_leader_decision_daily_robust outputs\backtesting
   git diff --cached --quiet
   if ($LASTEXITCODE -eq 0) {
     Write-Host "No output changes to commit."

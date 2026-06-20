@@ -41,7 +41,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--diagnostics-dir", default="outputs/superbru_pool/results_diagnostics")
     parser.add_argument("--settle-ms", type=int, default=9000)
     parser.add_argument("--timeout-ms", type=int, default=90000)
-    parser.add_argument("--max-pages", type=int, default=80)
+    parser.add_argument("--max-pages", type=int, default=160)
     return parser
 
 
@@ -63,10 +63,39 @@ def match_key(home: Any, away: Any) -> str:
     return f"{slugify(home)}-{slugify(away)}"
 
 
+def url_key(url: str) -> str:
+    # Superbru often uses hash fragments or broad client-side state for the Matches tab.
+    # Keep the fragment so separate hash-driven match views are not collapsed into one URL.
+    return urlparse(url).geturl()
+
+
 EXTRACT_JS = r"""
 () => {
   function clean(text) {
     return (text || '').replace(/\s+/g, ' ').trim();
+  }
+  function cssPath(el) {
+    if (!el || !el.tagName) return '';
+    const parts = [];
+    let node = el;
+    while (node && node.nodeType === 1 && parts.length < 6) {
+      let part = node.tagName.toLowerCase();
+      if (node.id) {
+        part += '#' + CSS.escape(node.id);
+        parts.unshift(part);
+        break;
+      }
+      const cls = Array.from(node.classList || []).slice(0, 3).map(c => '.' + CSS.escape(c)).join('');
+      part += cls;
+      const parent = node.parentElement;
+      if (parent) {
+        const siblings = Array.from(parent.children).filter(x => x.tagName === node.tagName);
+        if (siblings.length > 1) part += `:nth-of-type(${siblings.indexOf(node) + 1})`;
+      }
+      parts.unshift(part);
+      node = parent;
+    }
+    return parts.join(' > ');
   }
   const tables = Array.from(document.querySelectorAll('table')).map((table, idx) => {
     const matrix = Array.from(table.querySelectorAll('tr')).map(row =>
@@ -87,15 +116,25 @@ EXTRACT_JS = r"""
     className: a.className || '',
     id: a.id || ''
   }));
-  const bodyText = document.body ? document.body.innerText.slice(0, 100000) : '';
+  const clickables = Array.from(document.querySelectorAll('a,button,[role="button"],[onclick],.match,.fixture,.game,.swiper-slide,.roundmatch')).map((el, idx) => ({
+    index: idx,
+    text: clean(el.innerText || el.textContent),
+    className: el.className || '',
+    id: el.id || '',
+    href: el.href || '',
+    selector: cssPath(el)
+  })).filter(x => x.text || x.href || x.id || x.className);
+  const bodyText = document.body ? document.body.innerText.slice(0, 140000) : '';
   return {
     currentUrl: window.location.href,
     title: document.title || '',
     bodyText,
     tables,
     links,
+    clickables,
     tableCount: tables.length,
     linkCount: links.length,
+    clickableCount: clickables.length,
     scrapedAtUtc: new Date().toISOString()
   };
 }
@@ -193,21 +232,29 @@ def candidate_links(state: dict[str, Any], base_url: str, pool_id: str) -> list[
         low = f"{url} {text}".lower()
         if any(skip in low for skip in ["tab=chat", "tab=invite", "tab=players", "tab=rules", "tab=news", "tab=leaderboard"]):
             continue
-        # Keep likely match/round links and same matches-tab links. Superbru varies its query names,
-        # so this intentionally keeps broad same-pool match URLs while excluding non-match tabs above.
         if "tab=matches" in low or any(token in low for token in ["match", "round", "fixture", "game", "result"]):
             candidates.append(url)
-    # preserve order, drop duplicates/fragments that only differ by hash
     seen: set[str] = set()
     out: list[str] = []
     for url in candidates:
-        parsed = urlparse(url)
-        key = parsed._replace(fragment="").geturl()
+        key = url_key(url)
         if key in seen:
             continue
         seen.add(key)
         out.append(url)
     return out
+
+
+def clickable_score(text: str) -> int:
+    low = text.lower()
+    score = 0
+    if SCORE_RE.search(text):
+        score += 5
+    if any(code.lower() in low for code in TEAM_BY_CODE):
+        score += 1
+    if any(token in low for token in ["exact", "close", "wrong", "result"]):
+        score += 1
+    return score
 
 
 async def load_state(page: Any, url: str, args: argparse.Namespace) -> dict[str, Any]:
@@ -218,6 +265,17 @@ async def load_state(page: Any, url: str, args: argparse.Namespace) -> dict[str,
         print(f"Timeout loading {url}; checking current page state.")
     await page.wait_for_timeout(args.settle_ms)
     return await page.evaluate(EXTRACT_JS)
+
+
+async def click_candidate(page: Any, selector: str, args: argparse.Namespace) -> dict[str, Any] | None:
+    try:
+        loc = page.locator(selector).first
+        await loc.scroll_into_view_if_needed(timeout=5000)
+        await loc.click(timeout=5000)
+        await page.wait_for_timeout(args.settle_ms)
+        return await page.evaluate(EXTRACT_JS)
+    except Exception:
+        return None
 
 
 async def scrape(args: argparse.Namespace) -> tuple[list[dict[str, Any]], dict[str, Any]]:
@@ -233,6 +291,7 @@ async def scrape(args: argparse.Namespace) -> tuple[list[dict[str, Any]], dict[s
     results: list[dict[str, Any]] = []
     visited: set[str] = set()
     queue: list[str] = [args.pool_url]
+    click_states = 0
 
     async with async_playwright() as p:
         browser = await p.chromium.connect_over_cdp(args.cdp_url)
@@ -241,7 +300,7 @@ async def scrape(args: argparse.Namespace) -> tuple[list[dict[str, Any]], dict[s
 
         while queue and len(visited) < args.max_pages:
             url = queue.pop(0)
-            key = urlparse(url)._replace(fragment="").geturl()
+            key = url_key(url)
             if key in visited:
                 continue
             visited.add(key)
@@ -251,14 +310,40 @@ async def scrape(args: argparse.Namespace) -> tuple[list[dict[str, Any]], dict[s
             result = extract_match_result(state)
             if result:
                 results.append(result)
+
+            # Follow URL-style navigation first.
             for candidate in candidate_links(state, args.pool_url, pool_id):
-                candidate_key = urlparse(candidate)._replace(fragment="").geturl()
+                candidate_key = url_key(candidate)
                 if candidate_key not in visited and candidate not in queue:
                     queue.append(candidate)
 
+            # Superbru also uses client-side clickable match rows. Click promising visible targets
+            # from the same page to reveal prior match detail panes, then extract each result.
+            ranked_clicks = sorted(
+                [c for c in state.get("clickables") or [] if txt(c.get("selector"))],
+                key=lambda c: clickable_score(txt(c.get("text"))),
+                reverse=True,
+            )[:40]
+            seen_selectors: set[str] = set()
+            for click in ranked_clicks:
+                selector = txt(click.get("selector"))
+                if selector in seen_selectors:
+                    continue
+                seen_selectors.add(selector)
+                if clickable_score(txt(click.get("text"))) <= 0:
+                    continue
+                clicked_state = await click_candidate(page, selector, args)
+                if not clicked_state:
+                    continue
+                click_states += 1
+                cdiag = diagnostics_dir / f"superbru_clicked_state_{len(visited):03d}_{click_states:03d}.json"
+                cdiag.write_text(json.dumps(clicked_state, indent=2, default=str), encoding="utf-8")
+                clicked_result = extract_match_result(clicked_state)
+                if clicked_result:
+                    results.append(clicked_result)
+
         await browser.close()
 
-    # De-duplicate by match_id; prefer completed rows with an actual score.
     by_match: dict[str, dict[str, Any]] = {}
     for row in results:
         mid = txt(row.get("match_id"))
@@ -272,10 +357,11 @@ async def scrape(args: argparse.Namespace) -> tuple[list[dict[str, Any]], dict[s
         "generated_at_utc": datetime.now(timezone.utc).isoformat(),
         "pool_url": args.pool_url,
         "visited_pages": len(visited),
+        "clicked_states": click_states,
         "raw_results_found": len(results),
         "deduped_results_found": len(final),
         "diagnostics_dir": str(diagnostics_dir),
-        "note": "Primary extraction uses the Superbru exact-score section. If a completed game has no exact picks, it may require a page-specific fallback.",
+        "note": "Primary extraction uses Superbru match detail panes. Diagnostics include pages and clicked states for tuning if rows are missing.",
     }
     return final, summary
 

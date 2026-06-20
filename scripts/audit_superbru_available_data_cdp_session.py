@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import json
 import math
+import os
 import re
 from collections import Counter
 from datetime import datetime, timezone
@@ -22,10 +23,12 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--cdp-url", default="http://127.0.0.1:9222")
     parser.add_argument("--pool-url", default="https://www.superbru.com/worldcup_predictor/pool_view.php?t=1296&p=13236623&g=32&view=matches")
+    parser.add_argument("--login-url", default=os.environ.get("SUPERBRU_LOGIN_URL", "https://www.superbru.com/login.php"))
     parser.add_argument("--fixtures-csv", default="outputs/final_locked_picks/superbru_final_card.csv")
     parser.add_argument("--out-dir", default="outputs/data_inventory")
     parser.add_argument("--diagnostics-dir", default="outputs/data_inventory/raw_diagnostics/superbru")
     parser.add_argument("--settle-ms", type=int, default=9000)
+    parser.add_argument("--login-settle-ms", type=int, default=6000)
     parser.add_argument("--timeout-ms", type=int, default=90000)
     parser.add_argument("--write-raw-state", action="store_true")
     parser.add_argument("--max-raw-chars", type=int, default=120000)
@@ -138,6 +141,7 @@ EXTRACT_PAGE_JS = r"""
     tables,
     controls,
     forms,
+    passwordInputCount: document.querySelectorAll('input[type="password"]').length,
     scrapedAtUtc: new Date().toISOString()
   };
 }
@@ -303,6 +307,7 @@ def state_summary_row(
         "table_count": state.get("tableCount", 0),
         "control_count": state.get("controlCount", 0),
         "form_count": state.get("formCount", 0),
+        "password_input_count": state.get("passwordInputCount", 0),
         "body_scoreline_count": count_scorelines(body),
         "table_scoreline_count": sum(int(row.get("scoreline_count_in_sample") or 0) for row in table_rows),
         "fixture_visible_count": visible_count,
@@ -314,6 +319,89 @@ def state_summary_row(
         "table_sample": " || ".join(txt(row.get("text_sample"))[:300] for row in table_rows[:5]),
         "body_sample": body[:1200],
     }
+
+
+async def first_visible_locator(page: Any, selectors: list[str]) -> Any | None:
+    for selector in selectors:
+        loc = page.locator(selector)
+        try:
+            count = min(await loc.count(), 8)
+        except Exception:
+            continue
+        for idx in range(count):
+            item = loc.nth(idx)
+            try:
+                if await item.is_visible():
+                    return item
+            except Exception:
+                continue
+    return None
+
+
+async def maybe_login_superbru(page: Any, args: argparse.Namespace) -> dict[str, Any]:
+    username = txt(os.environ.get("SUPERBRU_USERNAME") or os.environ.get("SUPERBRU_EMAIL"))
+    password = txt(os.environ.get("SUPERBRU_PASSWORD"))
+    if not username or not password:
+        return {"attempted": False, "reason": "SUPERBRU_USERNAME/SUPERBRU_PASSWORD secrets not provided"}
+
+    print("Superbru login credentials detected in environment. Attempting standard login without printing credentials.")
+    login_urls = []
+    if txt(args.login_url):
+        login_urls.append(txt(args.login_url))
+    if txt(args.pool_url) not in login_urls:
+        login_urls.append(txt(args.pool_url))
+
+    last_error = ""
+    for login_url in login_urls:
+        try:
+            await page.goto(login_url, wait_until="domcontentloaded", timeout=args.timeout_ms)
+            await page.wait_for_timeout(args.login_settle_ms)
+            password_input = await first_visible_locator(page, ["input[type='password']"])
+            if password_input is None:
+                continue
+            username_input = await first_visible_locator(page, [
+                "input[type='email']",
+                "input[name='email']",
+                "input[name='username']",
+                "input[name='login']",
+                "input[name='userid']",
+                "input[name='user']",
+                "input[type='text']",
+            ])
+            if username_input is None:
+                last_error = "No visible username/email input found"
+                continue
+            await username_input.fill(username)
+            await password_input.fill(password)
+            submit = await first_visible_locator(page, [
+                "button[type='submit']",
+                "input[type='submit']",
+                "button:has-text('Log in')",
+                "button:has-text('Login')",
+                "button:has-text('Sign in')",
+                "input[value*='Log']",
+                "input[value*='Sign']",
+            ])
+            if submit is not None:
+                await submit.click()
+            else:
+                await password_input.press("Enter")
+            await page.wait_for_timeout(args.login_settle_ms)
+            await page.goto(args.pool_url, wait_until="domcontentloaded", timeout=args.timeout_ms)
+            await page.wait_for_timeout(args.login_settle_ms)
+            state = await page.evaluate(EXTRACT_PAGE_JS)
+            return {
+                "attempted": True,
+                "login_url_used": login_url,
+                "current_url_after_login": txt(state.get("currentUrl")),
+                "password_input_count_after_login": int(state.get("passwordInputCount") or 0),
+                "body_text_length_after_login": int(state.get("bodyTextLength") or 0),
+            }
+        except Exception as exc:
+            last_error = str(exc)
+            continue
+
+    return {"attempted": True, "success_uncertain": True, "error": last_error or "No visible login form found"}
 
 
 async def audit(args: argparse.Namespace, fixtures: list[dict[str, str]]) -> dict[str, Any]:
@@ -331,6 +419,7 @@ async def audit(args: argparse.Namespace, fixtures: list[dict[str, str]]) -> dic
     network_rows: list[dict[str, Any]] = []
     states: list[tuple[str, int, dict[str, Any]]] = []
     current_round = {"label": "initial", "index": 0}
+    login_status: dict[str, Any] = {"attempted": False, "reason": "not_started"}
 
     async with async_playwright() as p:
         browser = await p.chromium.connect_over_cdp(args.cdp_url)
@@ -341,7 +430,7 @@ async def audit(args: argparse.Namespace, fixtures: list[dict[str, str]]) -> dic
             try:
                 headers = response.headers or {}
                 url = response.url
-                if not any(token in url.lower() for token in ["superbru", "pool", "predictor", "api", "ajax", "json"]):
+                if not any(token in url.lower() for token in ["superbru", "pool", "predictor", "api", "ajax", "json", "login"]):
                     return
                 network_rows.append({
                     "round_label": current_round["label"],
@@ -355,6 +444,9 @@ async def audit(args: argparse.Namespace, fixtures: list[dict[str, str]]) -> dic
                 return
 
         page.on("response", on_response)
+        login_status = await maybe_login_superbru(page, args)
+        print(f"Superbru login status: attempted={login_status.get('attempted')} password_fields_after_login={login_status.get('password_input_count_after_login', '')}")
+
         print("Superbru inventory :: loading pool page")
         try:
             await page.goto(args.pool_url, wait_until="domcontentloaded", timeout=args.timeout_ms)
@@ -422,6 +514,7 @@ async def audit(args: argparse.Namespace, fixtures: list[dict[str, str]]) -> dic
         "generated_at_utc": datetime.now(timezone.utc).isoformat(),
         "source": "superbru",
         "pool_url": args.pool_url,
+        "login_status": login_status,
         "round_state_count": len(states),
         "rounds_clicked": max(0, len(states) - 1),
         "round_labels": [label for label, _, _ in states],

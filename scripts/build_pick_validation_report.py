@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import argparse
 import json
@@ -98,6 +98,7 @@ def calibration_summary(calibration: dict[str, Any]) -> dict[str, Any]:
     if not calibration:
         return {
             "calibration_available": False,
+            "matched_matches": 0,
             "exact_hit_rate": None,
             "outcome_hit_rate": None,
             "exact_brier": None,
@@ -105,15 +106,21 @@ def calibration_summary(calibration: dict[str, Any]) -> dict[str, Any]:
             "calibration_haircut": 0.12,
         }
 
+    matched_matches = int(fnum(calibration.get("matched_matches"), 0.0))
     outcome_hit = fnum(calibration.get("outcome_hit_rate"), 0.0)
     exact_hit = fnum(calibration.get("exact_hit_rate"), 0.0)
     outcome_brier = calibration.get("outcome_brier")
     exact_brier = calibration.get("exact_brier")
 
+    # Conservative calibration penalty:
+    # poor calibration should not improve confidence versus missing calibration.
     haircut = 0.0
-    if outcome_hit and outcome_hit < 0.45:
+
+    if matched_matches < 25:
+        haircut += 0.04
+    if outcome_hit < 0.45:
         haircut += 0.08
-    if exact_hit and exact_hit < 0.08:
+    if exact_hit < 0.08:
         haircut += 0.04
     if outcome_brier is not None and fnum(outcome_brier) > 0.25:
         haircut += 0.08
@@ -122,6 +129,7 @@ def calibration_summary(calibration: dict[str, Any]) -> dict[str, Any]:
 
     return {
         "calibration_available": True,
+        "matched_matches": matched_matches,
         "exact_hit_rate": exact_hit,
         "outcome_hit_rate": outcome_hit,
         "exact_brier": exact_brier,
@@ -338,3 +346,4 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
+

@@ -1,9 +1,9 @@
-param(
+﻿param(
   [string]$RepoRoot = (Get-Location).Path,
   [string]$ChromeDebugPort = "9222",
   [string]$ChromeProfileDir = ".chrome-oddspedia-profile",
-  [string]$SeedUrl = "https://www.superbru.com/worldcup_predictor/pool.php?p=13236623&tab=matches#tab=matches",
-  [string]$SuperbruPoolUrl = "https://www.superbru.com/worldcup_predictor/pool.php?p=13236623&tab=matches#tab=matches",
+  [string]$SeedUrl = "https://www.superbru.com/worldcup_predictor/pool_view.php?t=1296&p=13236623&g=32&view=matches",
+  [string]$SuperbruPoolUrl = "https://www.superbru.com/worldcup_predictor/pool_view.php?t=1296&p=13236623&g=32&view=matches",
   [string]$SnapshotId = "",
   [switch]$SkipFinalSimulation,
   [switch]$SkipOddspediaScrape,
@@ -263,3 +263,4 @@ if ($CommitAndPushOutputs) {
 }
 
 Write-Host "Daily Superbru local automation complete."
+

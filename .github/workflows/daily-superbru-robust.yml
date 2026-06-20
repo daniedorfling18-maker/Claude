@@ -73,6 +73,39 @@ jobs:
             python scripts/run_daily_robust_pipeline.py $SKIP_FLAG
           fi
 
+      - name: Run Oddspedia SmartBet overlay validation
+        if: success()
+        run: |
+          if [ -f inputs/smartbet_grids/oddspedia_probability_grids_auto.csv ] && [ -f inputs/smartbet_grids/oddspedia_probability_summary_auto.csv ]; then
+            python scripts/compare_locked_picks_to_oddspedia.py \
+              --locked-picks-csv outputs/final_locked_picks/superbru_final_card.csv \
+              --oddspedia-grid-csv inputs/smartbet_grids/oddspedia_probability_grids_auto.csv \
+              --oddspedia-summary-csv inputs/smartbet_grids/oddspedia_probability_summary_auto.csv \
+              --out-csv outputs/oddspedia_pick_validation/oddspedia_pick_comparison.csv \
+              --out-json outputs/oddspedia_pick_validation/oddspedia_pick_comparison_summary.json
+          else
+            echo "Oddspedia SmartBet grid inputs not found. Skipping overlay validation."
+          fi
+
+      - name: Add Oddspedia overlay summary
+        if: success()
+        run: |
+          if [ -f outputs/oddspedia_pick_validation/oddspedia_pick_comparison.csv ]; then
+            echo "## Oddspedia SmartBet overlay" >> "$GITHUB_STEP_SUMMARY"
+            python - <<'PY' >> "$GITHUB_STEP_SUMMARY"
+          import pandas as pd
+          p = "outputs/oddspedia_pick_validation/oddspedia_pick_comparison.csv"
+          df = pd.read_csv(p).fillna("")
+          review = df[~df["action"].isin(["keep", "no_grid"])]
+          print(f"Matches compared: {len(df)}")
+          print(f"Review items: {len(review)}")
+          if len(review):
+              cols = ["match_id", "locked_pick", "locked_pick_probability_pct", "oddspedia_best_score", "oddspedia_best_probability_pct", "probability_gap_vs_locked_pct", "action"]
+              print("")
+              print(review[cols].to_markdown(index=False))
+          PY
+          fi
+
       - name: Check whether score changes are needed
         id: score_changes
         if: success()
@@ -118,6 +151,8 @@ jobs:
             outputs/daily_robust_card/*.csv
             outputs/daily_robust_card/*.json
             outputs/daily_robust_card/*.md
+            outputs/oddspedia_pick_validation/*.csv
+            outputs/oddspedia_pick_validation/*.json
             outputs/final_leader_decision_daily_robust/**/*.csv
             outputs/final_leader_decision_daily_robust/**/*.json
           if-no-files-found: warn
@@ -127,7 +162,7 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add -f outputs/market_odds outputs/market_odds_validation outputs/market_odds_history outputs/component_validation outputs/final_locked_picks outputs/daily_robust_card outputs/final_leader_decision_daily_robust || true
+          git add -f outputs/market_odds outputs/market_odds_validation outputs/market_odds_history outputs/component_validation outputs/final_locked_picks outputs/daily_robust_card outputs/oddspedia_pick_validation outputs/final_leader_decision_daily_robust || true
           if git diff --cached --quiet; then
             echo "No daily output changes to commit."
           else

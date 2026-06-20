@@ -69,6 +69,23 @@ def coverage_metrics(path: Path) -> dict[str, Any]:
     }
 
 
+def round_metrics(path: Path) -> dict[str, Any]:
+    if not path.exists():
+        return {"row_count": 0}
+    try:
+        frame = pd.read_csv(path).fillna("")
+    except Exception as exc:
+        return {"error": str(exc), "row_count": 0}
+    return {
+        "row_count": int(len(frame)),
+        "rounds_with_scorelines": int((pd.to_numeric(frame.get("body_scoreline_count", 0), errors="coerce").fillna(0) > 0).sum()) if not frame.empty else 0,
+        "rounds_with_fixture_visibility": int((pd.to_numeric(frame.get("fixture_visible_count", 0), errors="coerce").fillna(0) > 0).sum()) if not frame.empty else 0,
+        "total_body_scorelines": int(pd.to_numeric(frame.get("body_scoreline_count", 0), errors="coerce").fillna(0).sum()) if not frame.empty else 0,
+        "total_table_scorelines": int(pd.to_numeric(frame.get("table_scoreline_count", 0), errors="coerce").fillna(0).sum()) if not frame.empty else 0,
+        "total_xhr_fetch_urls": int(pd.to_numeric(frame.get("xhr_fetch_url_count", 0), errors="coerce").fillna(0).sum()) if not frame.empty else 0,
+    }
+
+
 def main() -> int:
     args = build_parser().parse_args()
     inv = Path(args.inventory_dir)
@@ -76,11 +93,14 @@ def main() -> int:
     out_json.parent.mkdir(parents=True, exist_ok=True)
 
     odd_fields = load_json(inv / "oddspedia_available_fields.json")
+    odd_high_value = load_json(inv / "oddspedia_high_value_market_paths_summary.json")
     superbru_fields = load_json(inv / "superbru_available_fields.json")
     odd_markets = inv / "oddspedia_available_markets.csv"
+    odd_high_value_csv = inv / "oddspedia_high_value_market_paths.csv"
     odd_network = inv / "oddspedia_network_inventory.csv"
     superbru_network = inv / "superbru_network_inventory.csv"
     superbru_tables = inv / "superbru_table_inventory.csv"
+    superbru_rounds = inv / "superbru_round_inventory.csv"
     superbru_coverage = inv / "superbru_visible_pick_coverage.csv"
 
     payload = {
@@ -91,10 +111,18 @@ def main() -> int:
             "field_row_count": odd_fields.get("field_row_count", 0),
             "market_like_row_count": odd_fields.get("market_like_row_count", csv_count(odd_markets)),
             "unique_market_path_count": csv_nunique(odd_markets, "market_path"),
+            "high_value_market_path_count": odd_high_value.get("ranked_market_path_count", csv_count(odd_high_value_csv)),
+            "feature_family_counts": odd_high_value.get("feature_family_counts", {}),
             "network_row_count": odd_fields.get("network_row_count", csv_count(odd_network)),
-            "outputs": odd_fields.get("outputs", {}),
+            "outputs": {
+                **odd_fields.get("outputs", {}),
+                **odd_high_value.get("outputs", {}),
+            },
         },
         "superbru": {
+            "round_state_count": superbru_fields.get("round_state_count", 0),
+            "rounds_clicked": superbru_fields.get("rounds_clicked", 0),
+            "round_inventory": round_metrics(superbru_rounds),
             "table_count": superbru_fields.get("table_count", 0),
             "control_count": superbru_fields.get("control_count", 0),
             "form_count": superbru_fields.get("form_count", 0),
@@ -105,9 +133,9 @@ def main() -> int:
             "outputs": superbru_fields.get("outputs", {}),
         },
         "interpretation": {
-            "status": "inventory_only",
-            "note": "This summary reports what the browser exposes. It does not yet promote newly discovered fields into the prediction model.",
-            "next_step": "Review high-value Oddspedia markets and Superbru coverage, then map stable fields into EV and pool-intelligence features.",
+            "status": "inventory_plus_ranked_feature_candidates",
+            "note": "This summary reports browser-exposed data and ranked Oddspedia feature candidates. It still does not promote newly discovered fields into the prediction model.",
+            "next_step": "Review high-value Oddspedia paths, confirm stable extraction paths from raw diagnostics, then map selected fields into EV and pool-intelligence features.",
         },
     }
     out_json.write_text(json.dumps(payload, indent=2, default=str), encoding="utf-8")

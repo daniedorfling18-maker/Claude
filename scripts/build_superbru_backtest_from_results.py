@@ -25,10 +25,10 @@ PICK_COLUMNS = [
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        description="Join Oddspedia final results to Superbru picks and produce backtest metrics."
+        description="Join final results to Superbru picks and produce backtest metrics."
     )
-    parser.add_argument("--results-csv", default="outputs/backtesting/oddspedia_results_backfill.csv")
-    parser.add_argument("--picks-csv", action="append", default=["outputs/final_locked_picks/superbru_final_card.csv"])
+    parser.add_argument("--results-csv", default="outputs/superbru_pool/superbru_match_results_auto.csv")
+    parser.add_argument("--picks-csv", action="append", default=None)
     parser.add_argument("--oddspedia-comparison-csv", default="outputs/oddspedia_pick_validation/oddspedia_pick_comparison.csv")
     parser.add_argument("--out-csv", default="outputs/backtesting/superbru_pick_backtest.csv")
     parser.add_argument("--out-summary-json", default="outputs/backtesting/backtest_summary.json")
@@ -272,6 +272,8 @@ def build_backtest(args: argparse.Namespace) -> tuple[pd.DataFrame, dict[str, An
 
 def main() -> int:
     args = build_parser().parse_args()
+    if args.picks_csv is None:
+        args.picks_csv = ["outputs/final_locked_picks/superbru_final_card.csv"]
     out, summary = build_backtest(args)
     out_csv = Path(args.out_csv)
     out_json = Path(args.out_summary_json)

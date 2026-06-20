@@ -12,9 +12,7 @@ import pandas as pd
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(
-        description="Add component-level market validation and rescore fragile/review picks."
-    )
+    parser = argparse.ArgumentParser(description="Add component-level market validation and rescore fragile/review picks.")
     parser.add_argument("--market-validation-csv", default="outputs/market_odds_validation/market_odds_validation_report.csv")
     parser.add_argument("--pick-validation-csv", default="outputs/pick_validation_report/pick_validation_report.csv")
     parser.add_argument("--candidate-alternatives-csv", default="outputs/pick_validation_report/review_candidate_alternatives.csv")
@@ -72,7 +70,9 @@ def score_outcome(score: tuple[int, int]) -> str:
     return "draw"
 
 
-def component_label(score: float) -> str:
+def component_label(score: float, unavailable_count: int = 0) -> str:
+    if unavailable_count == 3:
+        return "component_unavailable"
     if score >= 0.75:
         return "component_aligned"
     if score >= 0.55:
@@ -80,11 +80,11 @@ def component_label(score: float) -> str:
     return "component_conflict"
 
 
-def outcome_component(row: pd.Series, score: tuple[int, int]) -> tuple[float, str]:
+def outcome_component(row: pd.Series, score: tuple[int, int]) -> tuple[float, str, bool]:
     predicted = score_outcome(score)
     market_available = bval(row.get("market_available"))
     if not market_available:
-        return 0.50, "outcome market unavailable"
+        return 0.50, "outcome market unavailable", True
 
     selected_prob = fnum(row.get(f"market_p_{predicted}"), 0.0)
     favourite = txt(row.get("market_favourite"))
@@ -107,12 +107,12 @@ def outcome_component(row: pd.Series, score: tuple[int, int]) -> tuple[float, st
         base -= 0.10
         reason = "outcome does not match market favourite"
 
-    return max(0.0, min(1.0, base)), reason
+    return max(0.0, min(1.0, base)), reason, False
 
 
-def total_component(row: pd.Series, score: tuple[int, int]) -> tuple[float, str]:
+def total_component(row: pd.Series, score: tuple[int, int]) -> tuple[float, str, bool]:
     if not bval(row.get("totals_available")):
-        return 0.50, "totals market unavailable"
+        return 0.50, "totals market unavailable", True
 
     line = fnum(row.get("total_line"), 2.5)
     lean = txt(row.get("market_total_lean"))
@@ -121,34 +121,33 @@ def total_component(row: pd.Series, score: tuple[int, int]) -> tuple[float, str]
     pick_total = "over" if goals > line else "under"
 
     if pick_total == lean:
-        return (0.88 if lean_prob >= 0.55 else 0.74), "goal total agrees with market lean"
-    return (0.25 if lean_prob >= 0.57 else 0.45), "goal total conflicts with market lean"
+        return (0.88 if lean_prob >= 0.55 else 0.74), "goal total agrees with market lean", False
+    return (0.25 if lean_prob >= 0.57 else 0.45), "goal total conflicts with market lean", False
 
 
-def spread_component(row: pd.Series, score: tuple[int, int]) -> tuple[float, str]:
+def spread_component(row: pd.Series, score: tuple[int, int]) -> tuple[float, str, bool]:
     if not bval(row.get("spreads_available")):
-        return 0.50, "spread market unavailable"
+        return 0.50, "spread market unavailable", True
 
     home_spread = fnum(row.get("avg_home_spread"), 0.0)
-    # For conventional spreads, negative home spread means the home side is favoured.
     market_margin = -home_spread
     pick_margin = score[0] - score[1]
 
     if abs(market_margin) <= 0.25:
         if abs(pick_margin) <= 1:
-            return 0.68, "spread market near even and score margin modest"
-        return 0.48, "spread market near even but score margin is assertive"
+            return 0.68, "spread market near even and score margin modest", False
+        return 0.48, "spread market near even but score margin is assertive", False
 
     same_direction = (market_margin > 0 and pick_margin > 0) or (market_margin < 0 and pick_margin < 0)
     if not same_direction:
-        return 0.28, "score margin direction conflicts with spread"
+        return 0.28, "score margin direction conflicts with spread", False
 
     gap = abs(abs(pick_margin) - abs(market_margin))
     if gap <= 1.0:
-        return 0.88, "score margin direction and size agree with spread"
+        return 0.88, "score margin direction and size agree with spread", False
     if gap <= 1.75:
-        return 0.72, "score margin direction agrees with spread"
-    return 0.58, "score margin direction agrees but margin is stretched"
+        return 0.72, "score margin direction agrees with spread", False
+    return 0.58, "score margin direction agrees but margin is stretched", False
 
 
 def component_score(row: pd.Series, pick: Any) -> dict[str, Any]:
@@ -157,20 +156,26 @@ def component_score(row: pd.Series, pick: Any) -> dict[str, Any]:
         return {
             "component_score": 0.0,
             "component_label": "component_invalid",
+            "outcome_component_score": 0.0,
+            "total_component_score": 0.0,
+            "spread_component_score": 0.0,
+            "component_unavailable_count": 0,
             "component_reasons": "invalid scoreline",
         }
 
-    outcome_score, outcome_reason = outcome_component(row, score)
-    total_score, total_reason = total_component(row, score)
-    spread_score, spread_reason = spread_component(row, score)
+    outcome_score, outcome_reason, outcome_unavailable = outcome_component(row, score)
+    total_score, total_reason, total_unavailable = total_component(row, score)
+    spread_score, spread_reason, spread_unavailable = spread_component(row, score)
+    unavailable_count = int(outcome_unavailable) + int(total_unavailable) + int(spread_unavailable)
     combined = 0.45 * outcome_score + 0.30 * total_score + 0.25 * spread_score
 
     return {
         "component_score": round(combined, 6),
-        "component_label": component_label(combined),
+        "component_label": component_label(combined, unavailable_count),
         "outcome_component_score": round(outcome_score, 6),
         "total_component_score": round(total_score, 6),
         "spread_component_score": round(spread_score, 6),
+        "component_unavailable_count": unavailable_count,
         "component_reasons": "; ".join([outcome_reason, total_reason, spread_reason]),
     }
 
@@ -229,54 +234,55 @@ def build_review_rescore(
         current_component = fnum(market_row.get("component_score"), 0.0)
         candidate_components = component_score(market_row, cand.get("candidate_pick"))
         candidate_component = fnum(candidate_components.get("component_score"), 0.0)
-
         ev_loss = fnum(cand.get("ev_loss"), 999.0)
         delta_p = fnum(cand.get("delta_p_finish_first"), -999.0)
         stress_pass_rate = fnum(cand.get("stress_pass_rate"), 0.0)
 
+        market_depth_class = txt(market_row.get("market_depth_class"))
+        h2h_bookmaker_count = fnum(market_row.get("h2h_bookmaker_count"), 0.0)
+        market_unavailable = candidate_components.get("component_label") == "component_unavailable"
+
         low_cost = ev_loss <= low_ev_loss
         leader_safe = delta_p >= max_negative_leader_delta
-        market_supported = candidate_component >= min_component_score
+        market_supported = (not market_unavailable) and candidate_component >= min_component_score
         improves_market = candidate_component >= current_component + min_component_improvement
         switch_ok = bool(low_cost and leader_safe and market_supported and improves_market)
 
         reasons = []
         reasons.append("low EV cost" if low_cost else "EV cost too high")
         reasons.append("leader delta acceptable" if leader_safe else "leader delta too negative")
-        reasons.append("candidate component-supported" if market_supported else "candidate not component-supported")
+        reasons.append("candidate component-supported" if market_supported else "candidate not component-supported or market unavailable")
         reasons.append("candidate improves component validation" if improves_market else "candidate does not improve component validation enough")
-        if stress_pass_rate > 0:
-            reasons.append("stress support present")
-        else:
-            reasons.append("no stress-switch support")
+        reasons.append("stress support present" if stress_pass_rate > 0 else "no stress-switch support")
 
-        out = {
-            "home_team": txt(cand.get("home_team")),
-            "away_team": txt(cand.get("away_team")),
-            "current_pick": txt(cand.get("current_pick")),
-            "candidate_pick": txt(cand.get("candidate_pick")),
-            "recommendation": "switch_candidate" if switch_ok else "keep_current",
-            "current_component_score": round(current_component, 6),
-            "candidate_component_score": round(candidate_component, 6),
-            "component_improvement": round(candidate_component - current_component, 6),
-            "candidate_component_label": candidate_components.get("component_label"),
-            "candidate_component_reasons": candidate_components.get("component_reasons"),
-            "ev_loss": round(ev_loss, 6),
-            "delta_p_finish_first": round(delta_p, 6),
-            "stress_pass_rate": round(stress_pass_rate, 6),
-            "passes_hard_rule": txt(cand.get("passes_hard_rule")),
-            "decision_reasons": "; ".join(reasons),
-        }
-        rows.append(out)
+        rows.append(
+            {
+                "home_team": txt(cand.get("home_team")),
+                "away_team": txt(cand.get("away_team")),
+                "current_pick": txt(cand.get("current_pick")),
+                "candidate_pick": txt(cand.get("candidate_pick")),
+                "recommendation": "switch_candidate" if switch_ok else "keep_current",
+                "current_component_score": round(current_component, 6),
+                "candidate_component_score": round(candidate_component, 6),
+                "component_improvement": round(candidate_component - current_component, 6),
+                "candidate_component_label": candidate_components.get("component_label"),
+                "candidate_component_reasons": candidate_components.get("component_reasons"),
+                "candidate_component_unavailable_count": candidate_components.get("component_unavailable_count"),
+                "ev_loss": round(ev_loss, 6),
+                "delta_p_finish_first": round(delta_p, 6),
+                "stress_pass_rate": round(stress_pass_rate, 6),
+                "passes_hard_rule": txt(cand.get("passes_hard_rule")),
+                "market_depth_class": market_depth_class,
+                "h2h_bookmaker_count": int(h2h_bookmaker_count) if not math.isnan(h2h_bookmaker_count) else 0,
+                "decision_reasons": "; ".join(reasons),
+            }
+        )
 
     if not rows:
         return pd.DataFrame()
 
     result = pd.DataFrame(rows)
-    return result.sort_values(
-        ["recommendation", "component_improvement", "ev_loss"],
-        ascending=[True, False, True],
-    )
+    return result.sort_values(["recommendation", "component_improvement", "ev_loss"], ascending=[True, False, True])
 
 
 def main() -> int:
@@ -309,6 +315,9 @@ def main() -> int:
     component_report.to_csv(component_path, index=False)
     review_rescore.to_csv(rescore_path, index=False)
 
+    lowest_cols = ["home_team", "away_team", "final_pick", "validation_label", "market_alignment_label", "component_score", "component_label", "component_reasons"]
+    lowest_cols = [col for col in lowest_cols if col in component_report.columns]
+
     summary = {
         "generated_at_utc": datetime.now(timezone.utc).isoformat(),
         "component_pick_count": int(len(component_report)),
@@ -316,9 +325,7 @@ def main() -> int:
         "review_candidate_count": int(len(review_rescore)),
         "switch_recommendation_count": int((review_rescore.get("recommendation", pd.Series(dtype=str)) == "switch_candidate").sum()) if not review_rescore.empty else 0,
         "switch_recommendations": review_rescore[review_rescore["recommendation"].eq("switch_candidate")].to_dict(orient="records") if not review_rescore.empty else [],
-        "lowest_component_picks": component_report.sort_values("component_score").head(12)[
-            ["home_team", "away_team", "final_pick", "validation_label", "market_alignment_label", "component_score", "component_label", "component_reasons"]
-        ].to_dict(orient="records"),
+        "lowest_component_picks": component_report.sort_values("component_score").head(12)[lowest_cols].to_dict(orient="records"),
     }
     summary_path.write_text(json.dumps(summary, indent=2), encoding="utf-8")
 

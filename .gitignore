@@ -19,3 +19,5 @@ outputs/
 
 # uploaded archives
 *.zip
+.chrome-oddspedia-profile/
+.playwright-oddspedia-profile/

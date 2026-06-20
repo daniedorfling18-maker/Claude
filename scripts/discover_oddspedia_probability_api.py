@@ -125,7 +125,7 @@ async def run_browser(args: argparse.Namespace, rows: list[dict[str, str]], out_
         for row in rows:
             print(f"Opening {row['home_team']} vs {row['away_team']} :: {row['url']}")
             try:
-                await page.goto(row["url"], wait_until="networkidle", timeout=args.timeout_ms)
+                await page.goto(row["url"], wait_until="domcontentloaded", timeout=args.timeout_ms)
                 await page.wait_for_timeout(args.settle_ms)
             except Exception as exc:
                 discoveries.append(

@@ -177,7 +177,7 @@ async def fetch_nuxt(seed_url: str, headful: bool, timeout_ms: int, settle_ms: i
         context = await browser.new_context(user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/122 Safari/537.36")
         page = await context.new_page()
         print(f"Opening seed page: {seed_url}")
-        await page.goto(seed_url, wait_until="networkidle", timeout=timeout_ms)
+        await page.goto(seed_url, wait_until="domcontentloaded", timeout=timeout_ms)
         await page.wait_for_timeout(settle_ms)
         nuxt = await page.evaluate("() => window.__NUXT__ || null")
         await context.close()

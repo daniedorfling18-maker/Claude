@@ -129,7 +129,7 @@ async def run_debug(args: argparse.Namespace, rows: list[dict[str, str]], out_di
             resources_path = out_dir / f"{match_id}_resource_urls.txt"
             body_path = out_dir / f"{match_id}_body_text.txt"
             network_path = out_dir / f"{match_id}_network_summary.json"
-            state_path.write_text(json.dumps({"row": row, "nuxt": state.get("nuxt"), "store": state.get("store")}, indent=2), encoding="utf-8")
+            state_path.write_text(json.dumps({"row": row, "nuxt": state.get("nuxt"), "store": state.get("store")}, indent=2, default=str), encoding="utf-8")
             resources_path.write_text("\n".join(state.get("resources") or []), encoding="utf-8")
             body_path.write_text(state.get("bodyText") or "", encoding="utf-8")
             network_path.write_text(json.dumps(network_items, indent=2), encoding="utf-8")
@@ -179,3 +179,4 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
+

@@ -181,6 +181,39 @@ and edge only.
 - No combo reaches bootstrap significance (all p > 0.6; all CIs contain zero).
 - Active profile (`mult / −0.08`) is 2nd in validation by 0.0012 pts. Insufficient to trigger change.
 
+## Extended calibration — Big5 + N1 + B1, completed 2026-06-20
+
+Rerun with Netherlands (N1) and Belgium (B1) added to the division grid.
+Train: 7,246 matches, seasons 2021/22–2023/24, 7 divisions (E0, D1, SP1, I1, F1, N1, B1).
+Validation: 2,370 matches, season 2024/25, same 7 divisions.
+
+**Conclusion: no profile change.** Results are consistent with the Big5-only run.
+
+| market mode | devig | rho | train avg pts | train edge | validation avg pts | validation edge | validation RPS† | validation CRPS† |
+|---|---|---:|---:|---:|---:|---:|---:|---:|
+| h2h_totals | power | -0.08 | 0.8931 | +0.0057 | 0.9068 | +0.0017 | 0.1925 | 0.8907 |
+| h2h_totals | multiplicative | -0.08 | 0.8936 | +0.0061 | **0.9065** | +0.0008 | — | — |
+| h2h_totals | multiplicative | -0.04 | 0.8944 | +0.0099 | 0.9008 | −0.0034 | — | — |
+| h2h_totals | power | -0.04 | 0.8930 | +0.0068 | 0.9006 | −0.0042 | — | — |
+| h2h | multiplicative | -0.08 | 0.8913 | +0.0351 | 0.8962 | +0.0127 | 0.1926 | 0.9288 |
+| h2h | multiplicative | -0.04 | 0.8921 | +0.0421 | 0.8945 | +0.0224 | — | — |
+| h2h | power | -0.08 | 0.8904 | +0.0301 | 0.8943 | +0.0078 | — | — |
+| h2h | power | -0.04 | 0.8912 | +0.0405 | 0.8928 | +0.0200 | — | — |
+
+† Per-match data saved for the mode-representative combo (best validation pts per mode).
+
+**Key findings:**
+
+- `h2h_totals` beats `h2h` by +0.0106 avg pts and reduces total-goals CRPS from 0.929 → 0.891 on
+  validation. Both improvements are consistent with the Big5-only run (+0.018 pts, CRPS 0.916→0.877).
+- Within `h2h_totals`, all 4 combos span 0.0062 pts on validation. Totals delta p-value = 0.227
+  (non-significant; CI −0.007 to +0.028). Same noise pattern as before.
+- Active profile (`mult / −0.08`) is **2nd on validation by 0.0003 pts** — gap halved vs Big5-only
+  (was 0.0012 pts). Well inside uncertainty. No trigger for change.
+- Adding N1 and B1 does not change the calibration conclusion. The totals signal is domain-robust.
+
+Outputs in `outputs/calibration/extended-train/` and `outputs/calibration/extended-validation/`.
+
 ## Legacy 2026-06-15 results, retained for comparison only
 
 These numbers came from the previous calibration note. They should not be cited

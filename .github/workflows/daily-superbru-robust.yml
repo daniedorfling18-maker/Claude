@@ -87,6 +87,20 @@ jobs:
             echo "Oddspedia SmartBet grid inputs not found. Skipping overlay validation."
           fi
 
+      - name: Build Superbru backtest from committed Oddspedia results
+        if: success()
+        run: |
+          if [ -f outputs/backtesting/oddspedia_results_backfill.csv ]; then
+            python scripts/build_superbru_backtest_from_results.py \
+              --results-csv outputs/backtesting/oddspedia_results_backfill.csv \
+              --picks-csv outputs/final_locked_picks/superbru_final_card.csv \
+              --oddspedia-comparison-csv outputs/oddspedia_pick_validation/oddspedia_pick_comparison.csv \
+              --out-csv outputs/backtesting/superbru_pick_backtest.csv \
+              --out-summary-json outputs/backtesting/backtest_summary.json
+          else
+            echo "Committed Oddspedia results backfill not found. Skipping backtest."
+          fi
+
       - name: Check whether robust score changes are needed
         if: success()
         run: |
@@ -149,6 +163,8 @@ jobs:
             outputs/daily_notifications/*.csv
             outputs/daily_notifications/*.json
             outputs/daily_notifications/*.md
+            outputs/backtesting/*.csv
+            outputs/backtesting/*.json
             outputs/final_leader_decision_daily_robust/**/*.csv
             outputs/final_leader_decision_daily_robust/**/*.json
           if-no-files-found: warn
@@ -158,7 +174,7 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add -f outputs/market_odds outputs/market_odds_validation outputs/market_odds_history outputs/component_validation outputs/final_locked_picks outputs/daily_robust_card outputs/oddspedia_pick_validation outputs/daily_notifications outputs/final_leader_decision_daily_robust || true
+          git add -f outputs/market_odds outputs/market_odds_validation outputs/market_odds_history outputs/component_validation outputs/final_locked_picks outputs/daily_robust_card outputs/oddspedia_pick_validation outputs/daily_notifications outputs/backtesting outputs/final_leader_decision_daily_robust || true
           if git diff --cached --quiet; then
             echo "No daily output changes to commit."
           else

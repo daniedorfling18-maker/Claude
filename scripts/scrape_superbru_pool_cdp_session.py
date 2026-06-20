@@ -13,7 +13,7 @@ import pandas as pd
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        description="Attach to an already-open Chrome CDP session and capture Superbru pool tables from a logged-in session."
+        description="Attach to an already-open Chrome CDP session and capture Superbru pool data from a logged-in session."
     )
     parser.add_argument("--cdp-url", default="http://127.0.0.1:9222")
     parser.add_argument("--pool-url", default="https://www.superbru.com/worldcup_predictor/pool.php?p=13236623&tab=matches#tab=matches")
@@ -74,6 +74,15 @@ EXTRACT_JS = r"""
 """
 
 
+def is_leaderboard_data_row(row: list[str]) -> bool:
+    if len(row) < 3:
+        return False
+    rank_ok = bool(re.fullmatch(r"\d+", txt(row[0])))
+    points_ok = bool(re.fullmatch(r"\d+(?:\.\d+)?", txt(row[-1])))
+    has_player = any(bool(re.search(r"[A-Za-z]", txt(cell))) for cell in row[1:-1])
+    return rank_ok and points_ok and has_player
+
+
 def table_to_frame(item: dict[str, Any]) -> pd.DataFrame:
     matrix = item.get("matrix") or []
     rows = [list(map(txt, row)) for row in matrix if isinstance(row, list) and any(txt(c) for c in row)]
@@ -81,15 +90,19 @@ def table_to_frame(item: dict[str, Any]) -> pd.DataFrame:
         return pd.DataFrame()
     width = max(len(row) for row in rows)
     rows = [row + [""] * (width - len(row)) for row in rows]
-    header = rows[0]
-    data = rows[1:]
-    header_has_text = any(re.search(r"[A-Za-z]", cell) for cell in header)
-    if not data:
-        data = rows
+
+    # Superbru leaderboard tables often have no header row. The first visible row can be
+    # something like: ["1", "15", "Danie", "29.00"]. Treat those as data.
+    if is_leaderboard_data_row(rows[0]):
         header = [f"col_{i}" for i in range(width)]
-    elif not header_has_text:
         data = rows
-        header = [f"col_{i}" for i in range(width)]
+    else:
+        header = rows[0]
+        data = rows[1:]
+        if not data or not any(re.search(r"[A-Za-z]", cell) for cell in header):
+            header = [f"col_{i}" for i in range(width)]
+            data = rows
+
     deduped = []
     seen: dict[str, int] = {}
     for i, col in enumerate(header):
@@ -107,19 +120,19 @@ def table_score(frame: pd.DataFrame) -> int:
     if frame.empty:
         return -999
     cols = " ".join(map(str, frame.columns)).lower()
-    sample = " ".join(frame.astype(str).head(12).fillna("").values.ravel()).lower()
+    sample = " ".join(frame.astype(str).head(15).fillna("").values.ravel()).lower()
     score = 0
     for token in ["player", "name", "points", "pts", "rank", "position", "pos", "bru"]:
         if token in cols:
             score += 3
         if token in sample:
             score += 1
-    numeric_cols = 0
-    for col in frame.columns:
-        vals = pd.to_numeric(frame[col].astype(str).str.extract(r"(-?\d+(?:\.\d+)?)")[0], errors="coerce")
-        if vals.notna().mean() > 0.4:
-            numeric_cols += 1
-    score += numeric_cols
+    leaderboard_like_rows = 0
+    for _, row in frame.head(40).iterrows():
+        vals = [txt(v) for v in row.tolist()]
+        if is_leaderboard_data_row(vals):
+            leaderboard_like_rows += 1
+    score += leaderboard_like_rows * 5
     return score
 
 
@@ -129,6 +142,29 @@ def guess_leaderboard_table(tables: list[pd.DataFrame]) -> pd.DataFrame:
         return pd.DataFrame()
     ranked = sorted(candidates, key=table_score, reverse=True)
     return ranked[0].copy()
+
+
+def extract_leaderboard_from_raw_rows(frame: pd.DataFrame) -> pd.DataFrame:
+    rows: list[dict[str, Any]] = []
+    for _, raw_row in frame.iterrows():
+        vals = [txt(v) for v in raw_row.tolist()]
+        if not is_leaderboard_data_row(vals):
+            continue
+        rank = int(vals[0])
+        points = float(vals[-1])
+        player = ""
+        for cell in vals[1:-1]:
+            if re.search(r"[A-Za-z]", cell):
+                player = cell
+                break
+        movement = vals[1] if len(vals) > 3 else ""
+        rows.append({
+            "rank": rank,
+            "movement_or_yellow_caps": movement,
+            "player": flatten_text(player),
+            "current_points": points,
+        })
+    return pd.DataFrame(rows)
 
 
 def find_player_column(frame: pd.DataFrame) -> str | None:
@@ -165,17 +201,23 @@ def find_points_column(frame: pd.DataFrame) -> str | None:
 def leaderboard_from_tables(tables: list[pd.DataFrame]) -> pd.DataFrame:
     raw = guess_leaderboard_table(tables)
     if raw.empty:
-        return pd.DataFrame(columns=["player", "current_points"])
+        return pd.DataFrame(columns=["rank", "player", "current_points"])
+
+    direct = extract_leaderboard_from_raw_rows(raw)
+    if not direct.empty:
+        return direct.drop_duplicates("player")
+
     frame = normalise_columns(raw).fillna("")
     player_col = find_player_column(frame)
     points_col = find_points_column(frame)
     if not player_col or not points_col:
-        return pd.DataFrame(columns=["player", "current_points"])
+        return pd.DataFrame(columns=["rank", "player", "current_points"])
     out = pd.DataFrame({
         "player": frame[player_col].map(flatten_text),
         "current_points": pd.to_numeric(frame[points_col].astype(str).str.extract(r"(-?\d+(?:\.\d+)?)")[0], errors="coerce"),
     })
     out = out[(out["player"] != "") & out["current_points"].notna()].copy()
+    out.insert(0, "rank", range(1, len(out) + 1))
     out = out.drop_duplicates("player")
     return out
 

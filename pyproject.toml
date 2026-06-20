@@ -14,7 +14,7 @@ dependencies = [
     "scipy>=1.10",
     "PyYAML>=6.0",
     "openpyxl>=3.1",
-    "requests>=2.28",
+    "requests>=2.28",  # used by scripts/ (scrape_oddspedia_smartbet_text.py); not imported in src/
 ]
 
 [project.optional-dependencies]

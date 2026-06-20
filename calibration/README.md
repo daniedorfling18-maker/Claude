@@ -1,5 +1,12 @@
 # Calibration record - current engine note, 2026-06-16
 
+## Revalidation status: PENDING
+
+Fresh calibration rerun required before this profile is considered validated on the current engine.
+Run the train + held-out commands under **Current engine calibration protocol** below and fill in the TBD table.
+
+---
+
 ## Status
 
 This note has been regenerated for the current engine architecture, after the

@@ -1,5 +1,5 @@
 {
-  "generated_at_utc": "2026-06-20T16:13:04.468122+00:00",
+  "generated_at_utc": "2026-06-20T16:40:00.497762+00:00",
   "python": "3.12.10 (tags/v3.12.10:0cc8128, Apr  8 2025, 12:21:36) [MSC v.1943 64 bit (AMD64)]",
   "command": "scripts/run_final_leader_decision.py --predictions-csv outputs/daily_robust_card/predictions_for_final_simulation.csv --out-dir outputs/final_leader_decision_daily_robust --reuse-existing",
   "args": {
@@ -27,10 +27,10 @@
     "reuse_existing": true
   },
   "git": {
-    "commit_sha": "f0ec496eace12a8840d3e236562c143638dae293",
+    "commit_sha": "997997077093a9ca567f32da772d78ac1f74487b",
     "branch": "claude/bold-ride-n3n1ti",
     "working_tree_clean": false,
-    "status_porcelain": "M outputs/component_validation/component_validation_report.csv\n M outputs/component_validation/review_rescore_summary.json\n M outputs/daily_robust_card/daily_robust_summary.json\n M outputs/final_leader_decision_daily_robust/final_decision_report.json\n M outputs/final_leader_decision_daily_robust/final_decision_report.md\n M outputs/final_locked_picks/final_picks_locked_summary.json\n M outputs/market_odds/worldcup_market_odds_flat.csv\n M outputs/market_odds/worldcup_market_odds_raw.json\n M outputs/market_odds_history/market_odds_history.csv\n M outputs/market_odds_history/market_odds_history_summary.json\n M outputs/market_odds_history/market_odds_movement_report.csv\n M outputs/market_odds_history/market_odds_snapshot_current.csv\n M outputs/market_odds_validation/market_odds_validation_report.csv\n M outputs/market_odds_validation/market_odds_validation_summary.json\n M outputs/superbru_pool/results_diagnostics/superbru_round_state_01_Round_1_11_18_Jun.json\n M outputs/superbru_pool/results_diagnostics/superbru_round_state_02_Round_2_18_24_Jun.json\n M outputs/superbru_pool/results_diagnostics/superbru_round_state_03_Round_3_24_28_Jun.json\n M outputs/superbru_pool/results_diagnostics/superbru_round_state_initial.json\n M outputs/superbru_pool/superbru_match_results_summary.json\n M outputs/superbru_pool/superbru_pool_body_text.txt\n M outputs/superbru_pool/superbru_pool_capture.json\n M outputs/superbru_pool/superbru_pool_capture_summary.json\n M outputs/superbru_pool/tables/table_01.csv\n M scripts/build_oddspedia_match_urls_from_nuxt.py\n M scripts/debug_oddspedia_page_state.py\n M scripts/discover_oddspedia_probability_api.py\n?? .chrome-oddspedia-profile/\n?? .playwright-oddspedia-profile/\n?? inputs/oddspedia_match_urls.csv\n?? inputs/oddspedia_match_urls_alt_test.csv\n?? inputs/oddspedia_match_urls_test.csv\n?? scripts/run_daily_superbru_scheduled.ps1"
+    "status_porcelain": "M outputs/component_validation/component_validation_report.csv\n M outputs/component_validation/review_rescore_summary.json\n M outputs/daily_robust_card/daily_robust_summary.json\n M outputs/final_leader_decision_daily_robust/final_decision_report.json\n M outputs/final_leader_decision_daily_robust/final_decision_report.md\n M outputs/final_locked_picks/final_picks_locked_summary.json\n M outputs/market_odds/worldcup_market_odds_flat.csv\n M outputs/market_odds/worldcup_market_odds_raw.json\n M outputs/market_odds_history/market_odds_history.csv\n M outputs/market_odds_history/market_odds_history_summary.json\n M outputs/market_odds_history/market_odds_movement_report.csv\n M outputs/market_odds_history/market_odds_snapshot_current.csv\n M outputs/market_odds_validation/market_odds_validation_report.csv\n M outputs/market_odds_validation/market_odds_validation_summary.json\n M outputs/superbru_pool/results_diagnostics/superbru_round_state_01_Round_1_11_18_Jun.json\n M outputs/superbru_pool/results_diagnostics/superbru_round_state_02_Round_2_18_24_Jun.json\n M outputs/superbru_pool/results_diagnostics/superbru_round_state_03_Round_3_24_28_Jun.json\n M outputs/superbru_pool/results_diagnostics/superbru_round_state_initial.json\n M outputs/superbru_pool/superbru_match_results_auto.csv\n M outputs/superbru_pool/superbru_match_results_summary.json\n M outputs/superbru_pool/superbru_pool_capture.json\n M outputs/superbru_pool/superbru_pool_capture_summary.json\n M scripts/build_oddspedia_match_urls_from_nuxt.py\n M scripts/debug_oddspedia_page_state.py\n M scripts/discover_oddspedia_probability_api.py\n?? .chrome-oddspedia-profile/\n?? .playwright-oddspedia-profile/\n?? inputs/oddspedia_match_urls.csv\n?? inputs/oddspedia_match_urls_alt_test.csv\n?? inputs/oddspedia_match_urls_test.csv\n?? scripts/run_daily_superbru_scheduled.ps1"
   },
   "inputs": {
     "config": {
@@ -60,10 +60,10 @@
   },
   "outputs": {
     "outputs\\final_leader_decision_daily_robust\\final_picks.csv": "a4c785aef08b1cceff5c44acc8832b054873e249456ee886eebbaf5407f109b6",
-    "outputs\\final_leader_decision_daily_robust\\final_decision_report.json": "2a321760f14003ec81781b615d7f67439850d717d7ce823dbe8a80146685e97c",
-    "outputs\\final_leader_decision_daily_robust\\final_decision_report.md": "386ab0711cfed0f595abbea9ef55e27a443dfb888cade66ff7da7420d34d0079",
+    "outputs\\final_leader_decision_daily_robust\\final_decision_report.json": "c641fde801894a60277fa77ab09f07777ee7d0a74ff2b50ace938df130c28388",
+    "outputs\\final_leader_decision_daily_robust\\final_decision_report.md": "11ef6cecb111d05b3d8ed375039312752a2c454c41a5bbce1f8a884573da9ca3",
     "outputs\\final_leader_decision_daily_robust\\quality_gates.json": "5ee1f147ea3229a63b3efc291d9664ff4a177f9999d695854e0853c9d9449000",
-    "outputs\\final_leader_decision_daily_robust\\run_manifest.json": "121cd32683fb7409791eaaac8e2f1230a06b301a228d1b49a746327a94c329d7",
+    "outputs\\final_leader_decision_daily_robust\\run_manifest.json": "b9c1b759c36f32bb0489d20542020fe55ac662449c09bd5721aed3827a06a067",
     "outputs\\final_leader_decision_daily_robust\\base_mc\\leader_mc_picks.csv": "e33c5227bf38ff072a5613464861fd1dfa253da1cbf9c34c84040aa5a857cdc0",
     "outputs\\final_leader_decision_daily_robust\\base_mc\\leader_mc_candidate_tests.csv": "c67e153e21e9433c7b77adde408ebcf486e83b96695963f33f8cc4c78fa41c44",
     "outputs\\final_leader_decision_daily_robust\\base_mc\\leader_mc_summary.json": "1822cc76850e49d29b884f58280eed41e02d931f820d13cd74ce2b633bd3be41",

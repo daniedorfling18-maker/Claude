@@ -1,5 +1,5 @@
 {
-  "generated_at_utc": "2026-06-20T16:17:18.931620+00:00",
+  "generated_at_utc": "2026-06-20T16:44:11.166130+00:00",
   "results_csv": "outputs\\superbru_pool\\superbru_match_results_auto.csv",
   "picks_csv": [
     "outputs\\final_locked_picks\\superbru_final_card.csv"
@@ -11,7 +11,7 @@
     "result_points": 1.0,
     "note": "Configurable Superbru-style estimate: exact > same goal-difference outcome > outcome."
   },
-  "result_rows_available": 32,
+  "result_rows_available": 8,
   "pick_rows_available": 40,
   "completed_matches_with_picks": 0,
   "out_csv": "outputs\\backtesting\\superbru_pick_backtest.csv"

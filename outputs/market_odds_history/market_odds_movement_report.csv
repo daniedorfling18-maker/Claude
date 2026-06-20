@@ -1,41 +1,41 @@
 snapshot_id,previous_snapshot_id,home_team,away_team,final_pick,market_available,market_depth_class,h2h_bookmaker_count,totals_bookmaker_count,spreads_bookmaker_count,current_pick_market_prob,previous_pick_market_prob,pick_market_prob_delta,pick_market_movement,market_moving_against_pick,market_moving_towards_pick,current_market_favourite,previous_market_favourite,market_favourite_changed,current_total_lean,previous_total_lean,total_lean_changed,current_avg_home_spread,previous_avg_home_spread,spread_delta
-20260620T154433Z,20260620T145912Z,Netherlands,Sweden,2-0,True,strong,55,24,11,0.553706,0.55542,-0.001713,stable,False,False,home,home,False,over,over,False,-0.75,-0.795455,0.045455
-20260620T154433Z,20260620T145912Z,Germany,Ivory Coast,2-0,True,strong,56,26,11,0.641488,0.639997,0.001492,stable,False,False,home,home,False,over,over,False,-1.136364,-1.159091,0.022727
-20260620T154433Z,20260620T145912Z,Ecuador,Curacao,2-0,False,unavailable,0,0,0,,,,unavailable,False,False,,,False,,,False,,,
-20260620T154433Z,20260620T145912Z,Tunisia,Japan,0-2,True,strong,56,25,11,0.624369,0.623064,0.001305,stable,False,False,away,away,False,under,under,False,1.045455,1.045455,0.0
-20260620T154433Z,20260620T145912Z,Spain,Saudi Arabia,3-0,True,strong,56,26,11,0.851584,0.872633,-0.021049,stable,False,False,home,home,False,over,over,False,-2.5,-2.5,0.0
-20260620T154433Z,20260620T145912Z,Belgium,Iran,2-0,True,strong,56,26,11,0.667007,0.665991,0.001016,stable,False,False,home,home,False,over,over,False,-1.340909,-1.340909,0.0
-20260620T154433Z,20260620T145912Z,Uruguay,Cape Verde,2-0,True,strong,56,25,11,0.663695,0.664199,-0.000505,stable,False,False,home,home,False,under,under,False,-1.159091,-1.159091,0.0
-20260620T154433Z,20260620T145912Z,New Zealand,Egypt,0-2,True,strong,56,25,11,0.596179,0.596332,-0.000153,stable,False,False,away,away,False,under,under,False,0.886364,0.886364,0.0
-20260620T154433Z,20260620T145912Z,Argentina,Austria,2-0,True,strong,56,26,11,0.602168,0.602367,-0.0002,stable,False,False,home,home,False,under,under,False,-1.045455,-1.045455,0.0
-20260620T154433Z,20260620T145912Z,France,Iraq,3-0,True,strong,55,26,11,0.880707,0.880987,-0.00028,stable,False,False,home,home,False,over,over,False,-2.590909,-2.590909,0.0
-20260620T154433Z,20260620T145912Z,Norway,Senegal,2-1,True,strong,55,26,11,0.422102,0.422197,-9.5e-05,stable,False,False,home,home,False,under,under,False,-0.431818,-0.431818,0.0
-20260620T154433Z,20260620T145912Z,Jordan,Algeria,0-2,True,strong,55,26,11,0.609486,0.60947,1.7e-05,stable,False,False,away,away,False,under,under,False,1.045455,1.045455,0.0
-20260620T154433Z,20260620T145912Z,Portugal,Uzbekistan,2-0,True,strong,55,25,10,0.792886,0.792778,0.000108,stable,False,False,home,home,False,over,over,False,-1.775,-1.775,0.0
-20260620T154433Z,20260620T145912Z,England,Ghana,2-0,True,strong,55,25,10,0.784516,0.784624,-0.000109,stable,False,False,home,home,False,over,over,False,-1.65,-1.65,0.0
-20260620T154433Z,20260620T145912Z,Panama,Croatia,0-2,True,strong,55,26,11,0.618557,0.618744,-0.000187,stable,False,False,away,away,False,under,under,False,1.045455,1.045455,0.0
-20260620T154433Z,20260620T145912Z,Colombia,DR Congo,2-0,True,strong,53,23,11,0.635619,0.635619,0.0,stable,False,False,home,home,False,under,under,False,-1.136364,-1.136364,0.0
-20260620T154433Z,20260620T145912Z,Bosnia & Herzegovina,Qatar,2-0,True,strong,55,25,11,0.666121,0.665932,0.000189,stable,False,False,home,home,False,over,over,False,-1.25,-1.25,0.0
-20260620T154433Z,20260620T145912Z,Switzerland,Canada,2-1,True,strong,55,26,11,0.390859,0.390776,8.3e-05,stable,False,False,home,home,False,under,under,False,-0.318182,-0.35,0.031818
-20260620T154433Z,20260620T145912Z,Scotland,Brazil,0-2,True,strong,55,25,11,0.688859,0.688719,0.00014,stable,False,False,away,away,False,over,over,False,1.363636,1.4,-0.036364
-20260620T154433Z,20260620T145912Z,Morocco,Haiti,2-0,True,strong,55,25,11,0.79437,0.793744,0.000626,stable,False,False,home,home,False,over,over,False,-1.954545,-1.95,-0.004545
-20260620T154433Z,20260620T145912Z,Czech Republic,Mexico,0-2,True,strong,49,21,8,0.470938,0.470733,0.000205,stable,False,False,away,away,False,under,under,False,0.5625,0.55,0.0125
-20260620T154433Z,20260620T145912Z,South Africa,South Korea,0-2,True,strong,50,22,10,0.590414,0.590414,0.0,stable,False,False,away,away,False,under,under,False,0.975,0.975,0.0
-20260620T154433Z,20260620T145912Z,Curacao,Ivory Coast,0-2,False,unavailable,0,0,0,,,,unavailable,False,False,,,False,,,False,,,
-20260620T154433Z,20260620T145912Z,Ecuador,Germany,0-2,True,strong,49,21,10,0.560122,0.5602,-7.8e-05,stable,False,False,away,away,False,over,over,False,0.875,0.863636,0.011364
-20260620T154433Z,20260620T145912Z,Japan,Sweden,2-1,True,strong,49,21,10,0.436531,0.436585,-5.5e-05,stable,False,False,home,home,False,under,under,False,-0.475,-0.477273,0.002273
-20260620T154433Z,20260620T145912Z,Tunisia,Netherlands,0-2,True,strong,49,20,10,0.7264,0.726127,0.000272,stable,False,False,away,away,False,over,over,False,1.5,1.5,0.0
-20260620T154433Z,20260620T145912Z,Paraguay,Australia,1-0,True,strong,47,22,9,0.339358,0.339981,-0.000623,stable,False,False,draw,draw,False,under,under,False,-0.333333,-0.34375,0.010417
-20260620T154433Z,20260620T145912Z,Turkey,United States,1-2,False,unavailable,0,0,0,,,,unavailable,False,False,,,False,,,False,,,
-20260620T154433Z,20260620T145912Z,Norway,France,0-2,True,strong,49,21,10,0.524799,0.524799,0.0,stable,False,False,away,away,False,over,over,False,0.675,0.675,0.0
-20260620T154433Z,20260620T145912Z,Senegal,Iraq,2-0,True,strong,49,21,10,0.731347,0.731303,4.4e-05,stable,False,False,home,home,False,over,over,False,-1.5,-1.5,0.0
-20260620T154433Z,20260620T145912Z,Cape Verde,Saudi Arabia,1-2,True,strong,49,21,10,0.39168,0.39168,0.0,stable,False,False,away,away,False,under,under,False,0.225,0.2,0.025
-20260620T154433Z,20260620T145912Z,Uruguay,Spain,0-2,True,strong,49,21,10,0.611899,0.611924,-2.5e-05,stable,False,False,away,away,False,over,over,False,1.1,1.1,0.0
-20260620T154433Z,20260620T145912Z,New Zealand,Belgium,0-2,True,strong,49,20,10,0.769484,0.769815,-0.000331,stable,False,False,away,away,False,over,over,False,1.625,1.625,0.0
-20260620T154433Z,20260620T145912Z,Egypt,Iran,2-0,True,strong,49,20,10,0.453259,0.453504,-0.000245,stable,False,False,home,home,False,under,under,False,-0.525,-0.525,0.0
-20260620T154433Z,20260620T145912Z,Croatia,Ghana,2-0,True,strong,48,20,9,0.586366,0.586503,-0.000137,stable,False,False,home,home,False,under,under,False,-1.111111,-1.111111,0.0
-20260620T154433Z,20260620T145912Z,Panama,England,0-2,True,strong,48,20,9,0.762584,0.762584,0.0,stable,False,False,away,away,False,over,over,False,1.638889,1.638889,0.0
-20260620T154433Z,20260620T145912Z,Colombia,Portugal,0-2,True,strong,48,20,9,0.460367,0.460367,0.0,stable,False,False,away,away,False,under,under,False,0.611111,0.611111,0.0
-20260620T154433Z,20260620T145912Z,DR Congo,Uzbekistan,2-1,True,strong,48,20,9,0.454755,0.454755,0.0,stable,False,False,home,home,False,under,under,False,-0.472222,-0.472222,0.0
-20260620T154433Z,20260620T145912Z,Algeria,Austria,1-2,True,strong,48,20,8,0.382298,0.382368,-7e-05,stable,False,False,away,away,False,under,under,False,0.28125,0.40625,-0.125
-20260620T154433Z,20260620T145912Z,Jordan,Argentina,0-2,True,strong,48,20,9,0.78912,0.789065,5.5e-05,stable,False,False,away,away,False,over,over,False,1.888889,1.888889,0.0
+20260620T161254Z,20260620T154433Z,Netherlands,Sweden,2-0,True,strong,54,25,11,0.565435,0.553706,0.011728,stable,False,False,home,home,False,over,over,False,-0.795455,-0.75,-0.045455
+20260620T161254Z,20260620T154433Z,Germany,Ivory Coast,2-0,True,strong,56,26,11,0.644061,0.641488,0.002573,stable,False,False,home,home,False,over,over,False,-1.204545,-1.136364,-0.068182
+20260620T161254Z,20260620T154433Z,Ecuador,Curacao,2-0,False,unavailable,0,0,0,,,,unavailable,False,False,,,False,,,False,,,
+20260620T161254Z,20260620T154433Z,Tunisia,Japan,0-2,True,strong,56,25,11,0.624256,0.624369,-0.000113,stable,False,False,away,away,False,under,under,False,1.045455,1.045455,0.0
+20260620T161254Z,20260620T154433Z,Spain,Saudi Arabia,3-0,True,strong,56,26,11,0.872204,0.851584,0.02062,stable,False,False,home,home,False,over,over,False,-2.5,-2.5,0.0
+20260620T161254Z,20260620T154433Z,Belgium,Iran,2-0,True,strong,56,26,11,0.667718,0.667007,0.000711,stable,False,False,home,home,False,over,over,False,-1.340909,-1.340909,0.0
+20260620T161254Z,20260620T154433Z,Uruguay,Cape Verde,2-0,True,strong,56,25,11,0.663609,0.663695,-8.6e-05,stable,False,False,home,home,False,under,under,False,-1.136364,-1.159091,0.022727
+20260620T161254Z,20260620T154433Z,New Zealand,Egypt,0-2,True,strong,56,25,11,0.596498,0.596179,0.000319,stable,False,False,away,away,False,under,under,False,0.886364,0.886364,0.0
+20260620T161254Z,20260620T154433Z,Argentina,Austria,2-0,True,strong,56,26,11,0.602292,0.602168,0.000124,stable,False,False,home,home,False,under,under,False,-1.045455,-1.045455,0.0
+20260620T161254Z,20260620T154433Z,France,Iraq,3-0,True,strong,55,26,11,0.880707,0.880707,0.0,stable,False,False,home,home,False,over,over,False,-2.590909,-2.590909,0.0
+20260620T161254Z,20260620T154433Z,Norway,Senegal,2-1,True,strong,55,26,11,0.422443,0.422102,0.000341,stable,False,False,home,home,False,under,under,False,-0.431818,-0.431818,0.0
+20260620T161254Z,20260620T154433Z,Jordan,Algeria,0-2,True,strong,55,26,11,0.609611,0.609486,0.000125,stable,False,False,away,away,False,under,under,False,1.045455,1.045455,0.0
+20260620T161254Z,20260620T154433Z,Portugal,Uzbekistan,2-0,True,strong,55,25,10,0.792887,0.792886,1e-06,stable,False,False,home,home,False,over,over,False,-1.775,-1.775,0.0
+20260620T161254Z,20260620T154433Z,England,Ghana,2-0,True,strong,55,25,10,0.784516,0.784516,0.0,stable,False,False,home,home,False,over,over,False,-1.65,-1.65,0.0
+20260620T161254Z,20260620T154433Z,Panama,Croatia,0-2,True,strong,55,26,11,0.618557,0.618557,0.0,stable,False,False,away,away,False,under,under,False,1.045455,1.045455,0.0
+20260620T161254Z,20260620T154433Z,Colombia,DR Congo,2-0,True,strong,53,23,11,0.635619,0.635619,0.0,stable,False,False,home,home,False,under,under,False,-1.136364,-1.136364,0.0
+20260620T161254Z,20260620T154433Z,Bosnia & Herzegovina,Qatar,2-0,True,strong,55,25,11,0.666121,0.666121,0.0,stable,False,False,home,home,False,over,over,False,-1.25,-1.25,0.0
+20260620T161254Z,20260620T154433Z,Switzerland,Canada,2-1,True,strong,55,26,11,0.390859,0.390859,0.0,stable,False,False,home,home,False,under,under,False,-0.318182,-0.318182,0.0
+20260620T161254Z,20260620T154433Z,Scotland,Brazil,0-2,True,strong,55,25,11,0.688748,0.688859,-0.000111,stable,False,False,away,away,False,over,over,False,1.363636,1.363636,0.0
+20260620T161254Z,20260620T154433Z,Morocco,Haiti,2-0,True,strong,55,25,11,0.795373,0.79437,0.001003,stable,False,False,home,home,False,over,over,False,-1.954545,-1.954545,0.0
+20260620T161254Z,20260620T154433Z,Czech Republic,Mexico,0-2,True,strong,52,24,11,0.471617,0.470938,0.000679,stable,False,False,away,away,False,under,under,False,0.545455,0.5625,-0.017045
+20260620T161254Z,20260620T154433Z,South Africa,South Korea,0-2,True,strong,51,23,11,0.59052,0.590414,0.000106,stable,False,False,away,away,False,under,under,False,0.977273,0.975,0.002273
+20260620T161254Z,20260620T154433Z,Curacao,Ivory Coast,0-2,False,unavailable,0,0,0,,,,unavailable,False,False,,,False,,,False,,,
+20260620T161254Z,20260620T154433Z,Ecuador,Germany,0-2,True,strong,49,21,10,0.560122,0.560122,0.0,stable,False,False,away,away,False,over,over,False,0.875,0.875,0.0
+20260620T161254Z,20260620T154433Z,Japan,Sweden,2-1,True,strong,49,21,10,0.436565,0.436531,3.5e-05,stable,False,False,home,home,False,under,under,False,-0.375,-0.475,0.1
+20260620T161254Z,20260620T154433Z,Tunisia,Netherlands,0-2,True,strong,50,21,11,0.726461,0.7264,6.1e-05,stable,False,False,away,away,False,over,over,False,1.5,1.5,0.0
+20260620T161254Z,20260620T154433Z,Paraguay,Australia,1-0,True,strong,47,22,9,0.33866,0.339358,-0.000698,stable,False,False,draw,draw,False,under,under,False,-0.333333,-0.333333,0.0
+20260620T161254Z,20260620T154433Z,Turkey,United States,1-2,False,unavailable,0,0,0,,,,unavailable,False,False,,,False,,,False,,,
+20260620T161254Z,20260620T154433Z,Norway,France,0-2,True,strong,49,21,10,0.524799,0.524799,0.0,stable,False,False,away,away,False,over,over,False,0.675,0.675,0.0
+20260620T161254Z,20260620T154433Z,Senegal,Iraq,2-0,True,strong,49,21,10,0.731133,0.731347,-0.000214,stable,False,False,home,home,False,over,over,False,-1.5,-1.5,0.0
+20260620T161254Z,20260620T154433Z,Cape Verde,Saudi Arabia,1-2,True,strong,49,21,10,0.391735,0.39168,5.5e-05,stable,False,False,away,away,False,under,under,False,0.225,0.225,0.0
+20260620T161254Z,20260620T154433Z,Uruguay,Spain,0-2,True,strong,49,21,10,0.611899,0.611899,0.0,stable,False,False,away,away,False,over,over,False,1.1,1.1,0.0
+20260620T161254Z,20260620T154433Z,New Zealand,Belgium,0-2,True,strong,49,20,10,0.769862,0.769484,0.000378,stable,False,False,away,away,False,over,over,False,1.625,1.625,0.0
+20260620T161254Z,20260620T154433Z,Egypt,Iran,2-0,True,strong,49,20,10,0.453204,0.453259,-5.5e-05,stable,False,False,home,home,False,under,under,False,-0.525,-0.525,0.0
+20260620T161254Z,20260620T154433Z,Croatia,Ghana,2-0,True,strong,48,20,9,0.586366,0.586366,0.0,stable,False,False,home,home,False,under,under,False,-1.0,-1.111111,0.111111
+20260620T161254Z,20260620T154433Z,Panama,England,0-2,True,strong,48,20,9,0.762584,0.762584,0.0,stable,False,False,away,away,False,over,over,False,1.638889,1.638889,0.0
+20260620T161254Z,20260620T154433Z,Colombia,Portugal,0-2,True,strong,48,20,9,0.460367,0.460367,0.0,stable,False,False,away,away,False,under,under,False,0.611111,0.611111,0.0
+20260620T161254Z,20260620T154433Z,DR Congo,Uzbekistan,2-1,True,strong,48,20,9,0.454755,0.454755,0.0,stable,False,False,home,home,False,under,under,False,-0.472222,-0.472222,0.0
+20260620T161254Z,20260620T154433Z,Algeria,Austria,1-2,True,strong,48,20,8,0.382298,0.382298,0.0,stable,False,False,away,away,False,under,under,False,0.28125,0.28125,0.0
+20260620T161254Z,20260620T154433Z,Jordan,Argentina,0-2,True,strong,48,20,9,0.789065,0.78912,-5.5e-05,stable,False,False,away,away,False,over,over,False,1.888889,1.888889,0.0

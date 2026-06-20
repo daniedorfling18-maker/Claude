@@ -87,50 +87,43 @@ jobs:
             echo "Oddspedia SmartBet grid inputs not found. Skipping overlay validation."
           fi
 
-      - name: Add Oddspedia overlay summary
-        if: success()
-        run: |
-          if [ -f outputs/oddspedia_pick_validation/oddspedia_pick_comparison.csv ]; then
-            echo "## Oddspedia SmartBet overlay" >> "$GITHUB_STEP_SUMMARY"
-            python - <<'PY' >> "$GITHUB_STEP_SUMMARY"
-          import pandas as pd
-          p = "outputs/oddspedia_pick_validation/oddspedia_pick_comparison.csv"
-          df = pd.read_csv(p).fillna("")
-          review = df[~df["action"].isin(["keep", "no_grid"])]
-          print(f"Matches compared: {len(df)}")
-          print(f"Review items: {len(review)}")
-          if len(review):
-              cols = ["match_id", "locked_pick", "locked_pick_probability_pct", "oddspedia_best_score", "oddspedia_best_probability_pct", "probability_gap_vs_locked_pct", "action"]
-              print("")
-              print(review[cols].to_markdown(index=False))
-          PY
-          fi
-
-      - name: Check whether score changes are needed
-        id: score_changes
+      - name: Check whether robust score changes are needed
         if: success()
         run: |
           python scripts/notify_score_changes.py \
             --current-card-csv outputs/daily_robust_card/daily_robust_superbru_card.csv \
             --previous-card-csv outputs/daily_robust_card/previous_superbru_card.csv \
             --audit-csv outputs/daily_robust_card/daily_switch_audit.csv \
-            --out-md outputs/daily_robust_card/score_change_notification.md \
-            --github-output "$GITHUB_OUTPUT" \
-            --github-step-summary "$GITHUB_STEP_SUMMARY"
+            --out-md outputs/daily_robust_card/score_change_notification.md
 
-      - name: Notify only when scores need changing
-        if: steps.score_changes.outputs.notify == 'true'
+      - name: Build combined daily notification
+        id: action_items
+        if: success()
+        run: |
+          python scripts/notify_daily_superbru_action_items.py \
+            --score-change-json outputs/daily_robust_card/score_change_notification.json \
+            --oddspedia-comparison-csv outputs/oddspedia_pick_validation/oddspedia_pick_comparison.csv \
+            --out-md outputs/daily_notifications/daily_superbru_action_items.md \
+            --out-json outputs/daily_notifications/daily_superbru_action_items.json \
+            --state-json outputs/daily_notifications/daily_superbru_action_state.json \
+            --github-output "$GITHUB_OUTPUT" \
+            --github-step-summary "$GITHUB_STEP_SUMMARY" \
+            --update-state \
+            --notify-on-first-state
+
+      - name: Notify only when action items changed
+        if: steps.action_items.outputs.notify == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           gh issue create \
-            --title "Superbru score changes needed - $(date -u +%Y-%m-%d)" \
-            --body-file outputs/daily_robust_card/score_change_notification.md
+            --title "Superbru action items - $(date -u +%Y-%m-%d)" \
+            --body-file outputs/daily_notifications/daily_superbru_action_items.md
 
-      - name: No score-change notification needed
-        if: steps.score_changes.outputs.notify != 'true'
+      - name: No notification needed
+        if: steps.action_items.outputs.notify != 'true'
         run: |
-          echo "No score changes needed. No GitHub issue notification created."
+          echo "No new Superbru action items. No GitHub issue notification created."
 
       - name: Upload daily robust outputs
         uses: actions/upload-artifact@v4
@@ -153,6 +146,9 @@ jobs:
             outputs/daily_robust_card/*.md
             outputs/oddspedia_pick_validation/*.csv
             outputs/oddspedia_pick_validation/*.json
+            outputs/daily_notifications/*.csv
+            outputs/daily_notifications/*.json
+            outputs/daily_notifications/*.md
             outputs/final_leader_decision_daily_robust/**/*.csv
             outputs/final_leader_decision_daily_robust/**/*.json
           if-no-files-found: warn
@@ -162,7 +158,7 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add -f outputs/market_odds outputs/market_odds_validation outputs/market_odds_history outputs/component_validation outputs/final_locked_picks outputs/daily_robust_card outputs/oddspedia_pick_validation outputs/final_leader_decision_daily_robust || true
+          git add -f outputs/market_odds outputs/market_odds_validation outputs/market_odds_history outputs/component_validation outputs/final_locked_picks outputs/daily_robust_card outputs/oddspedia_pick_validation outputs/daily_notifications outputs/final_leader_decision_daily_robust || true
           if git diff --cached --quiet; then
             echo "No daily output changes to commit."
           else

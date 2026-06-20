@@ -1,4 +1,4 @@
-﻿param(
+param(
   [string]$RepoRoot = (Get-Location).Path,
   [string]$ChromeDebugPort = "9222",
   [string]$ChromeProfileDir = ".chrome-oddspedia-profile",
@@ -62,6 +62,17 @@ function Get-CsvRowCount {
   return (Import-Csv $Path | Measure-Object).Count
 }
 
+function Invoke-WarnOnlyStep {
+  param([string]$Name, [scriptblock]$Step)
+  Write-Host $Name
+  try {
+    & $Step
+    if ($LASTEXITCODE -ne 0) { Write-Warning "$Name exited with code $LASTEXITCODE. Continuing daily run." }
+  } catch {
+    Write-Warning "$Name failed. Continuing daily run. Error: $_"
+  }
+}
+
 function Invoke-GitHubIssueIfAvailable {
   param([string]$BodyFile, [string]$Title)
   $gh = Get-Command gh -ErrorAction SilentlyContinue
@@ -91,6 +102,9 @@ mkdir outputs\daily_robust_card -Force | Out-Null
 mkdir outputs\daily_notifications -Force | Out-Null
 mkdir outputs\backtesting -Force | Out-Null
 mkdir outputs\superbru_pool -Force | Out-Null
+mkdir outputs\oddspedia_probability_extract -Force | Out-Null
+mkdir outputs\oddspedia_pick_validation -Force | Out-Null
+mkdir inputs\smartbet_grids -Force | Out-Null
 
 if (Test-Path outputs\daily_robust_card\daily_robust_superbru_card.csv) {
   Copy-Item outputs\daily_robust_card\daily_robust_superbru_card.csv outputs\daily_robust_card\previous_superbru_card.csv -Force
@@ -119,6 +133,18 @@ if (-not $SkipSuperbruPoolScrape) {
       Write-Warning "Superbru pool scrape produced 0 leaderboard rows. Keeping existing inputs\pool_leaderboard.csv."
     }
   }
+
+  Invoke-WarnOnlyStep "Refreshing visible Superbru pool picks via Chrome CDP..." {
+    python scripts\scrape_superbru_pool_picks_cdp_session.py `
+      --cdp-url "http://127.0.0.1:$ChromeDebugPort" `
+      --pool-url $SuperbruPoolUrl `
+      --fixtures-csv outputs\final_locked_picks\superbru_final_card.csv `
+      --out-csv outputs\superbru_pool\superbru_pool_picks_auto.csv `
+      --out-summary-json outputs\superbru_pool\superbru_pool_picks_summary.json `
+      --diagnostics-dir outputs\superbru_pool\pick_diagnostics `
+      --settle-ms 12000 `
+      --timeout-ms 90000
+  }
 }
 
 if (-not $SkipResultsBackfill) {
@@ -137,6 +163,18 @@ if (-not $SkipResultsBackfill) {
   Write-Host "Superbru match-results backfill rows: $superbruResultRows"
 }
 
+Invoke-WarnOnlyStep "Building Superbru pool intelligence outputs..." {
+  python scripts\build_superbru_pool_intelligence.py `
+    --pool-picks-csv outputs\superbru_pool\superbru_pool_picks_auto.csv `
+    --leaderboard-csv inputs\pool_leaderboard.csv `
+    --locked-picks-csv outputs\final_locked_picks\superbru_final_card.csv `
+    --match-results-csv outputs\superbru_pool\superbru_match_results_auto.csv `
+    --oddspedia-comparison-csv outputs\oddspedia_pick_validation\oddspedia_pick_comparison.csv `
+    --oddspedia-ev-recommendations-csv outputs\oddspedia_pick_validation\oddspedia_ev_recommendations.csv `
+    --market-odds-csv outputs\market_odds_validation\market_odds_validation_report.csv `
+    --out-dir outputs\superbru_pool
+}
+
 $pipelineArgs = @()
 if ($SnapshotId -ne "") { $pipelineArgs += @("--snapshot-id", $SnapshotId) }
 if ($SkipFinalSimulation) { $pipelineArgs += "--skip-final-simulation" }
@@ -147,6 +185,10 @@ python scripts\run_daily_robust_pipeline.py @pipelineArgs
 
 if (-not $SkipOddspediaScrape) {
   Ensure-ChromeCdp
+
+  Invoke-WarnOnlyStep "Archiving previous Oddspedia probability snapshot..." {
+    python scripts\archive_oddspedia_snapshot.py --history-dir outputs\oddspedia_probability_extract\history
+  }
 
   $manualFlag = @()
   if ($ManualOnMissing) { $manualFlag += "--manual-on-missing" }
@@ -163,6 +205,16 @@ if (-not $SkipOddspediaScrape) {
     --post-click-ms 6000 `
     --timeout-ms 90000 `
     @manualFlag
+
+  Invoke-WarnOnlyStep "Exporting Oddspedia market catalogue diagnostics..." {
+    python scripts\export_oddspedia_market_catalogue_cdp_session.py `
+      --cdp-url "http://127.0.0.1:$ChromeDebugPort" `
+      --urls-csv inputs\oddspedia_match_urls.csv `
+      --out-csv outputs\oddspedia_probability_extract\oddspedia_market_catalogue.csv `
+      --out-summary-json outputs\oddspedia_probability_extract\oddspedia_market_catalogue_summary.json `
+      --settle-ms 8000 `
+      --timeout-ms 90000
+  }
 }
 
 if ($UseOddspediaResultsBackfill -and (-not $SkipResultsBackfill)) {
@@ -182,6 +234,23 @@ if ($UseOddspediaResultsBackfill -and (-not $SkipResultsBackfill)) {
   }
 }
 
+Invoke-WarnOnlyStep "Running Oddspedia grid quality checks..." {
+  python scripts\check_oddspedia_grid_quality.py `
+    --locked-picks-csv outputs\final_locked_picks\superbru_final_card.csv `
+    --oddspedia-grid-csv inputs\smartbet_grids\oddspedia_probability_grids_auto.csv `
+    --oddspedia-summary-csv inputs\smartbet_grids\oddspedia_probability_summary_auto.csv `
+    --urls-csv inputs\oddspedia_match_urls.csv `
+    --out-csv outputs\oddspedia_probability_extract\oddspedia_grid_quality.csv `
+    --out-summary-json outputs\oddspedia_probability_extract\oddspedia_grid_quality_summary.json
+}
+
+Invoke-WarnOnlyStep "Building Oddspedia score-shape features..." {
+  python scripts\build_oddspedia_score_shape_features.py `
+    --oddspedia-grid-csv inputs\smartbet_grids\oddspedia_probability_grids_auto.csv `
+    --out-csv inputs\smartbet_grids\oddspedia_score_shape_features.csv `
+    --out-summary-json outputs\oddspedia_probability_extract\oddspedia_score_shape_features_summary.json
+}
+
 if ((Test-Path inputs\smartbet_grids\oddspedia_probability_grids_auto.csv) -and (Test-Path inputs\smartbet_grids\oddspedia_probability_summary_auto.csv)) {
   Write-Host "Running Oddspedia overlay comparison..."
   python scripts\compare_locked_picks_to_oddspedia.py `
@@ -192,6 +261,71 @@ if ((Test-Path inputs\smartbet_grids\oddspedia_probability_grids_auto.csv) -and 
     --out-json outputs\oddspedia_pick_validation\oddspedia_pick_comparison_summary.json
 } else {
   Write-Warning "Oddspedia grid CSV missing. Overlay comparison skipped."
+}
+
+Invoke-WarnOnlyStep "Calculating Oddspedia Superbru EV recommendations..." {
+  python scripts\build_oddspedia_superbru_ev.py `
+    --locked-picks-csv outputs\final_locked_picks\superbru_final_card.csv `
+    --oddspedia-grid-csv inputs\smartbet_grids\oddspedia_probability_grids_auto.csv `
+    --out-by-score-csv outputs\oddspedia_pick_validation\oddspedia_superbru_ev_by_score.csv `
+    --out-recommendations-csv outputs\oddspedia_pick_validation\oddspedia_ev_recommendations.csv `
+    --out-summary-json outputs\oddspedia_pick_validation\oddspedia_superbru_ev_summary.json
+}
+
+Invoke-WarnOnlyStep "Comparing Oddspedia movement versus previous snapshot..." {
+  python scripts\compare_oddspedia_movement.py `
+    --history-dir outputs\oddspedia_probability_extract\history `
+    --summary-csv inputs\smartbet_grids\oddspedia_probability_summary_auto.csv `
+    --shape-csv inputs\smartbet_grids\oddspedia_score_shape_features.csv `
+    --comparison-csv outputs\oddspedia_pick_validation\oddspedia_pick_comparison.csv `
+    --ev-recommendations-csv outputs\oddspedia_pick_validation\oddspedia_ev_recommendations.csv `
+    --out-csv outputs\oddspedia_pick_validation\oddspedia_movement_vs_previous.csv `
+    --out-summary-json outputs\oddspedia_pick_validation\oddspedia_movement_summary.json
+}
+
+Invoke-WarnOnlyStep "Refreshing Superbru pool intelligence with current Oddspedia EV context..." {
+  python scripts\build_superbru_pool_intelligence.py `
+    --pool-picks-csv outputs\superbru_pool\superbru_pool_picks_auto.csv `
+    --leaderboard-csv inputs\pool_leaderboard.csv `
+    --locked-picks-csv outputs\final_locked_picks\superbru_final_card.csv `
+    --match-results-csv outputs\superbru_pool\superbru_match_results_auto.csv `
+    --oddspedia-comparison-csv outputs\oddspedia_pick_validation\oddspedia_pick_comparison.csv `
+    --oddspedia-ev-recommendations-csv outputs\oddspedia_pick_validation\oddspedia_ev_recommendations.csv `
+    --market-odds-csv outputs\market_odds_validation\market_odds_validation_report.csv `
+    --out-dir outputs\superbru_pool
+}
+
+Write-Host "Checking robust-card score changes..."
+python scripts\notify_score_changes.py `
+  --current-card-csv outputs\daily_robust_card\daily_robust_superbru_card.csv `
+  --previous-card-csv outputs\daily_robust_card\previous_superbru_card.csv `
+  --audit-csv outputs\daily_robust_card\daily_switch_audit.csv `
+  --out-md outputs\daily_robust_card\score_change_notification.md
+
+$firstFlag = @()
+if ($NotifyOnFirstState) { $firstFlag += "--notify-on-first-state" }
+
+Write-Host "Building combined daily notification..."
+python scripts\notify_daily_superbru_action_items.py `
+  --score-change-json outputs\daily_robust_card\score_change_notification.json `
+  --oddspedia-comparison-csv outputs\oddspedia_pick_validation\oddspedia_pick_comparison.csv `
+  --oddspedia-ev-recommendations-csv outputs\oddspedia_pick_validation\oddspedia_ev_recommendations.csv `
+  --out-md outputs\daily_notifications\daily_superbru_action_items.md `
+  --out-json outputs\daily_notifications\daily_superbru_action_items.json `
+  --state-json outputs\daily_notifications\daily_superbru_action_state.json `
+  --update-state `
+  @firstFlag
+
+$notification = Get-Content outputs\daily_notifications\daily_superbru_action_items.json -Raw | ConvertFrom-Json
+if ($notification.notify -eq $true) {
+  $msg = "Superbru action items found: $($notification.action_count) total ($($notification.score_change_count) score changes, $($notification.oddspedia_review_count) Oddspedia reviews)."
+  Show-LocalNotification -Message $msg -ReportPath "outputs\daily_notifications\daily_superbru_action_items.md"
+  if ($CreateGitHubIssue) {
+    $titleDate = (Get-Date).ToUniversalTime().ToString("yyyy-MM-dd")
+    Invoke-GitHubIssueIfAvailable -Title "Superbru action items - $titleDate" -BodyFile "outputs\daily_notifications\daily_superbru_action_items.md"
+  }
+} else {
+  Write-Host "No new Superbru action items. No notification created."
 }
 
 if (-not $SkipBacktest) {
@@ -218,43 +352,9 @@ if (-not $SkipBacktest) {
   }
 }
 
-Write-Host "Checking robust-card score changes..."
-python scripts\notify_score_changes.py `
-  --current-card-csv outputs\daily_robust_card\daily_robust_superbru_card.csv `
-  --previous-card-csv outputs\daily_robust_card\previous_superbru_card.csv `
-  --audit-csv outputs\daily_robust_card\daily_switch_audit.csv `
-  --out-md outputs\daily_robust_card\score_change_notification.md
-
-$firstFlag = @()
-if ($NotifyOnFirstState) { $firstFlag += "--notify-on-first-state" }
-
-Write-Host "Building combined daily notification..."
-python scripts\notify_daily_superbru_action_items.py `
-  --score-change-json outputs\daily_robust_card\score_change_notification.json `
-  --oddspedia-comparison-csv outputs\oddspedia_pick_validation\oddspedia_pick_comparison.csv `
-  --out-md outputs\daily_notifications\daily_superbru_action_items.md `
-  --out-json outputs\daily_notifications\daily_superbru_action_items.json `
-  --state-json outputs\daily_notifications\daily_superbru_action_state.json `
-  --update-state `
-  @firstFlag
-
-$notification = Get-Content outputs\daily_notifications\daily_superbru_action_items.json -Raw | ConvertFrom-Json
-if ($notification.notify -eq $true) {
-  $msg = "Superbru action items found: $($notification.action_count) total ($($notification.score_change_count) score changes, $($notification.oddspedia_review_count) Oddspedia reviews)."
-  Show-LocalNotification -Message $msg -ReportPath "outputs\daily_notifications\daily_superbru_action_items.md"
-  if ($CreateGitHubIssue) {
-    $titleDate = (Get-Date).ToUniversalTime().ToString("yyyy-MM-dd")
-    Invoke-GitHubIssueIfAvailable -Title "Superbru action items - $titleDate" -BodyFile "outputs\daily_notifications\daily_superbru_action_items.md"
-  }
-} else {
-  Write-Host "No new Superbru action items. No notification created."
-}
-
 if ($CommitAndPushOutputs) {
   Write-Host "Committing daily outputs..."
-  # Exclude bulky scraper click/page debug snapshots from the commit; they are local-only
-  # diagnostics that nothing in the pipeline reads (round_state diagnostics are still kept).
-  git add -f inputs\pool_leaderboard.csv inputs\pool_leaderboard_auto.csv inputs\smartbet_grids outputs\superbru_pool outputs\market_odds outputs\market_odds_validation outputs\market_odds_history outputs\component_validation outputs\final_locked_picks outputs\daily_robust_card outputs\oddspedia_pick_validation outputs\daily_notifications outputs\final_leader_decision_daily_robust outputs\backtesting ':(exclude)outputs/superbru_pool/results_diagnostics/superbru_clicked_state_*' ':(exclude)outputs/superbru_pool/results_diagnostics/superbru_result_page_*'
+  git add -f inputs\pool_leaderboard.csv inputs\pool_leaderboard_auto.csv inputs\smartbet_grids outputs\superbru_pool outputs\market_odds outputs\market_odds_validation outputs\market_odds_history outputs\component_validation outputs\final_locked_picks outputs\daily_robust_card outputs\oddspedia_probability_extract outputs\oddspedia_pick_validation outputs\daily_notifications outputs\final_leader_decision_daily_robust outputs\backtesting ':(exclude)outputs/superbru_pool/results_diagnostics/superbru_clicked_state_*' ':(exclude)outputs/superbru_pool/results_diagnostics/superbru_result_page_*' ':(exclude)outputs/superbru_pool/pick_diagnostics/*' ':(exclude)outputs/oddspedia_probability_extract/cdp_diagnostics/*' ':(exclude)outputs/backtesting/oddspedia_results_diagnostics/*'
   git diff --cached --quiet
   if ($LASTEXITCODE -eq 0) {
     Write-Host "No output changes to commit."
@@ -265,4 +365,3 @@ if ($CommitAndPushOutputs) {
 }
 
 Write-Host "Daily Superbru local automation complete."
-

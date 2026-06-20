@@ -69,6 +69,13 @@ if ($WriteRawState) { $oddArgs += "--write-raw-state" }
 Write-Host "Auditing Oddspedia available data..."
 python @oddArgs
 
+Write-Host "Filtering Oddspedia high-value market paths..."
+python scripts\filter_oddspedia_high_value_market_paths.py `
+  --markets-csv outputs\data_inventory\oddspedia_available_markets.csv `
+  --network-csv outputs\data_inventory\oddspedia_network_inventory.csv `
+  --out-csv outputs\data_inventory\oddspedia_high_value_market_paths.csv `
+  --out-json outputs\data_inventory\oddspedia_high_value_market_paths_summary.json
+
 $superbruArgs = @(
   "scripts\audit_superbru_available_data_cdp_session.py",
   "--cdp-url", "http://127.0.0.1:$ChromeDebugPort",

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-# Action trigger stamp: 2026-06-20T22:12:00+02:00
+# Action trigger stamp: 2026-06-20T22:28:00+02:00
 
 import argparse
 import json
@@ -88,11 +88,64 @@ def round_metrics(path: Path) -> dict[str, Any]:
     }
 
 
+def oddspedia_access_status(page_csv: Path, odd_fields: dict[str, Any]) -> dict[str, Any]:
+    if not page_csv.exists():
+        return {"status": "no_page_inventory"}
+    try:
+        pages = pd.read_csv(page_csv).fillna("")
+    except Exception as exc:
+        return {"status": "page_inventory_read_error", "error": str(exc)}
+    if pages.empty:
+        return {"status": "empty_page_inventory"}
+    titles = pages.get("title", pd.Series(dtype=str)).astype(str).str.lower()
+    cloudflare_pages = int(titles.str.contains("just a moment", na=False).sum())
+    candidate_count = int(pd.to_numeric(pages.get("app_state_candidate_count", 0), errors="coerce").fillna(0).sum())
+    blocked = cloudflare_pages > 0 and candidate_count == 0 and int(odd_fields.get("field_row_count", 0) or 0) == 0
+    return {
+        "status": "cloudflare_blocked" if blocked else "accessible_or_partial",
+        "cloudflare_page_count": cloudflare_pages,
+        "page_row_count": int(len(pages)),
+        "app_state_candidate_total": candidate_count,
+        "note": "GitHub-hosted browser reached Cloudflare challenge pages; use local/self-hosted capture or cached Oddspedia inventory for live market extraction." if blocked else "Oddspedia page inventory is not fully blocked.",
+    }
+
+
+def run_superbru_abbreviation_enhancement(inv: Path) -> dict[str, Any]:
+    try:
+        from scripts.enhance_superbru_fixture_coverage import enhance_coverage
+    except Exception as exc:
+        return {"status": "enhancer_import_failed", "error": str(exc)}
+
+    fixtures_path = Path("outputs/final_locked_picks/superbru_final_card.csv")
+    coverage_path = inv / "superbru_visible_pick_coverage.csv"
+    controls_path = inv / "superbru_control_inventory.csv"
+    detected_path = inv / "superbru_detected_match_controls.csv"
+    fields_path = inv / "superbru_available_fields.json"
+    try:
+        fixtures = pd.read_csv(fixtures_path).fillna("") if fixtures_path.exists() else pd.DataFrame()
+        coverage = pd.read_csv(coverage_path).fillna("") if coverage_path.exists() else pd.DataFrame()
+        controls = pd.read_csv(controls_path).fillna("") if controls_path.exists() else pd.DataFrame()
+        enhanced_coverage, detected, summary = enhance_coverage(coverage, controls, fixtures)
+        enhanced_coverage.to_csv(coverage_path, index=False)
+        detected.to_csv(detected_path, index=False)
+        fields = load_json(fields_path)
+        fields["abbreviation_enhancement"] = summary
+        fields["fixture_visible_count"] = summary.get("fixture_visible_count_after_enhancement", fields.get("fixture_visible_count", 0))
+        fields["likely_pick_data_visible_count"] = summary.get("likely_pick_data_visible_count_after_enhancement", fields.get("likely_pick_data_visible_count", 0))
+        fields.setdefault("outputs", {})["detected_match_controls_csv"] = str(detected_path)
+        fields_path.write_text(json.dumps(fields, indent=2, default=str), encoding="utf-8")
+        return {"status": "enhanced", **summary}
+    except Exception as exc:
+        return {"status": "enhancer_failed", "error": str(exc)}
+
+
 def main() -> int:
     args = build_parser().parse_args()
     inv = Path(args.inventory_dir)
     out_json = Path(args.out_json)
     out_json.parent.mkdir(parents=True, exist_ok=True)
+
+    superbru_enhancement = run_superbru_abbreviation_enhancement(inv)
 
     odd_fields = load_json(inv / "oddspedia_available_fields.json")
     odd_high_value = load_json(inv / "oddspedia_high_value_market_paths_summary.json")
@@ -100,15 +153,18 @@ def main() -> int:
     odd_markets = inv / "oddspedia_available_markets.csv"
     odd_high_value_csv = inv / "oddspedia_high_value_market_paths.csv"
     odd_network = inv / "oddspedia_network_inventory.csv"
+    odd_pages = inv / "oddspedia_page_inventory.csv"
     superbru_network = inv / "superbru_network_inventory.csv"
     superbru_tables = inv / "superbru_table_inventory.csv"
     superbru_rounds = inv / "superbru_round_inventory.csv"
     superbru_coverage = inv / "superbru_visible_pick_coverage.csv"
+    odd_status = oddspedia_access_status(odd_pages, odd_fields)
 
     payload = {
         "generated_at_utc": datetime.now(timezone.utc).isoformat(),
         "inventory_dir": str(inv),
         "oddspedia": {
+            "access_status": odd_status,
             "input_match_count": odd_fields.get("input_match_count", 0),
             "field_row_count": odd_fields.get("field_row_count", 0),
             "market_like_row_count": odd_fields.get("market_like_row_count", csv_count(odd_markets)),
@@ -122,6 +178,7 @@ def main() -> int:
             },
         },
         "superbru": {
+            "abbreviation_enhancement": superbru_enhancement,
             "round_state_count": superbru_fields.get("round_state_count", 0),
             "rounds_clicked": superbru_fields.get("rounds_clicked", 0),
             "round_inventory": round_metrics(superbru_rounds),
@@ -136,8 +193,8 @@ def main() -> int:
         },
         "interpretation": {
             "status": "inventory_plus_ranked_feature_candidates",
-            "note": "This summary reports browser-exposed data and ranked Oddspedia feature candidates. It still does not promote newly discovered fields into the prediction model.",
-            "next_step": "Review high-value Oddspedia paths, confirm stable extraction paths from raw diagnostics, then map selected fields into EV and pool-intelligence features.",
+            "note": "This summary reports browser-exposed data, Superbru abbreviation-mapped fixture coverage, and Oddspedia access status. It still does not promote newly discovered fields into the prediction model.",
+            "next_step": "Use Superbru detected match controls as pool-intelligence features. For Oddspedia, use local/self-hosted capture or cached inventory because GitHub-hosted Actions are Cloudflare-blocked.",
         },
     }
     out_json.write_text(json.dumps(payload, indent=2, default=str), encoding="utf-8")

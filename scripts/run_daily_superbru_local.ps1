@@ -252,7 +252,9 @@ if ($notification.notify -eq $true) {
 
 if ($CommitAndPushOutputs) {
   Write-Host "Committing daily outputs..."
-  git add -f inputs\pool_leaderboard.csv inputs\pool_leaderboard_auto.csv inputs\smartbet_grids outputs\superbru_pool outputs\market_odds outputs\market_odds_validation outputs\market_odds_history outputs\component_validation outputs\final_locked_picks outputs\daily_robust_card outputs\oddspedia_pick_validation outputs\daily_notifications outputs\final_leader_decision_daily_robust outputs\backtesting
+  # Exclude bulky scraper click/page debug snapshots from the commit; they are local-only
+  # diagnostics that nothing in the pipeline reads (round_state diagnostics are still kept).
+  git add -f inputs\pool_leaderboard.csv inputs\pool_leaderboard_auto.csv inputs\smartbet_grids outputs\superbru_pool outputs\market_odds outputs\market_odds_validation outputs\market_odds_history outputs\component_validation outputs\final_locked_picks outputs\daily_robust_card outputs\oddspedia_pick_validation outputs\daily_notifications outputs\final_leader_decision_daily_robust outputs\backtesting ':(exclude)outputs/superbru_pool/results_diagnostics/superbru_clicked_state_*' ':(exclude)outputs/superbru_pool/results_diagnostics/superbru_result_page_*'
   git diff --cached --quiet
   if ($LASTEXITCODE -eq 0) {
     Write-Host "No output changes to commit."

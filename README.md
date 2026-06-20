@@ -70,6 +70,137 @@ python -m superbru_score_engine predict --config config.yaml --live-results --od
 
 Repeated result refreshes are safe: the ratings store tracks applied match IDs/timestamps and skips results it has already applied.
 
+## Daily Production Workflow
+
+The GitHub Actions workflow `.github/workflows/daily-superbru-robust.yml` runs every day at **07:00 SAST** (`05:00 UTC`). It:
+
+1. fetches market odds from The Odds API;
+2. builds the daily robust Superbru card;
+3. runs the Oddspedia SmartBet overlay comparison if a captured Oddspedia grid exists;
+4. writes the score-change notification report;
+5. creates a GitHub issue only when the recommended Superbru scoreline has changed;
+6. uploads and commits the daily outputs.
+
+Required GitHub secret:
+
+```text
+THE_ODDS_API_KEY
+```
+
+The workflow intentionally does **not** scrape Oddspedia directly. Oddspedia is protected by Cloudflare and may only expose the SmartBet probability grid after a verified browser session has loaded the page. GitHub Actions cannot reliably complete that challenge. Instead, the repo uses a local Chrome/CDP capture step to refresh the Oddspedia grid, and the scheduled workflow consumes the latest committed grid.
+
+## Oddspedia SmartBet Grid Capture
+
+Oddspedia's useful SmartBet data lives in the rendered Nuxt page state:
+
+```text
+window.__NUXT__.state.event.probabilities.100
+window.__NUXT__.state.event.probabilities.800.probabilities
+```
+
+`100` is the match-winner probability vector and `800` is the correct-score grid. The grid is written to:
+
+```text
+inputs/smartbet_grids/oddspedia_probability_grids_auto.csv
+inputs/smartbet_grids/oddspedia_probability_summary_auto.csv
+```
+
+The reliable capture method is to use a normal Chrome session with remote debugging enabled, clear Cloudflare once in that browser, then attach the scraper to the verified session.
+
+### One-time Chrome/CDP setup
+
+Close all Chrome windows first, then start Chrome with remote debugging:
+
+```powershell
+taskkill /F /IM chrome.exe
+
+$chrome = "$env:ProgramFiles\Google\Chrome\Application\chrome.exe"
+if (!(Test-Path $chrome)) { $chrome = "${env:ProgramFiles(x86)}\Google\Chrome\Application\chrome.exe" }
+
+Start-Process -FilePath $chrome -ArgumentList @(
+  "--remote-debugging-port=9222",
+  "--user-data-dir=$PWD\.chrome-oddspedia-profile",
+  "--no-first-run",
+  "--no-default-browser-check",
+  "https://oddspedia.com/football/world/world-cup"
+)
+```
+
+Verify that Chrome exposes the debugging port:
+
+```powershell
+Invoke-RestMethod http://127.0.0.1:9222/json/version
+```
+
+If Oddspedia shows a Cloudflare check, complete it in the Chrome window and keep that browser open.
+
+### Refresh the grid
+
+```powershell
+python scripts\scrape_oddspedia_cdp_session.py `
+  --cdp-url http://127.0.0.1:9222 `
+  --urls-csv inputs\oddspedia_match_urls.csv `
+  --out-csv inputs\smartbet_grids\oddspedia_probability_grids_auto.csv `
+  --out-summary-csv inputs\smartbet_grids\oddspedia_probability_summary_auto.csv `
+  --out-json outputs\oddspedia_probability_extract\oddspedia_cdp_probability_extract_summary.json `
+  --diagnostics-dir outputs\oddspedia_probability_extract\cdp_diagnostics `
+  --manual-on-missing `
+  --settle-ms 12000 `
+  --post-click-ms 6000 `
+  --timeout-ms 90000
+```
+
+Expected success output is `matches_with_grid` equal to the number of input URLs and `correct_score_row_count` equal to `19 x matches_with_grid`.
+
+### Compare locked picks to Oddspedia
+
+```powershell
+python scripts\compare_locked_picks_to_oddspedia.py `
+  --locked-picks-csv outputs\final_locked_picks\superbru_final_card.csv `
+  --oddspedia-grid-csv inputs\smartbet_grids\oddspedia_probability_grids_auto.csv `
+  --oddspedia-summary-csv inputs\smartbet_grids\oddspedia_probability_summary_auto.csv `
+  --out-csv outputs\oddspedia_pick_validation\oddspedia_pick_comparison.csv `
+  --out-json outputs\oddspedia_pick_validation\oddspedia_pick_comparison_summary.json
+```
+
+Review only material differences:
+
+```powershell
+Import-Csv outputs\oddspedia_pick_validation\oddspedia_pick_comparison.csv |
+  Where-Object {$_.action -ne "keep" -and $_.action -ne "no_grid"} |
+  Sort-Object {[double]$_.probability_gap_vs_locked_pct} -Descending |
+  Format-Table match_id,locked_pick,locked_pick_probability_pct,oddspedia_best_score,oddspedia_best_probability_pct,probability_gap_vs_locked_pct,action -AutoSize
+```
+
+Inspect all compared picks:
+
+```powershell
+Import-Csv outputs\oddspedia_pick_validation\oddspedia_pick_comparison.csv |
+  Format-Table match_id,locked_pick,locked_pick_probability_pct,oddspedia_top1_score,oddspedia_top1_pct,oddspedia_top2_score,oddspedia_top2_pct,action -AutoSize
+```
+
+The comparison report is a review layer, not an automatic switch engine. A modal score such as `1-0` or `1-1` is not automatically accepted. The decision still needs to consider Superbru expected points, outcome points, leader/chaser position, and the existing robust policy.
+
+### Single-command local runner
+
+After the daily robust pipeline has produced `outputs/final_locked_picks/superbru_final_card.csv`, run:
+
+```powershell
+.\scripts\run_daily_oddspedia_overlay.ps1 -ManualOnMissing
+```
+
+This launches/uses Chrome CDP, refreshes the Oddspedia grid, and runs the comparison report. For a non-interactive scheduled run, omit `-ManualOnMissing`; if Cloudflare blocks the session, the diagnostics will show which matches failed.
+
+### Optional Windows Task Scheduler command
+
+Use this as the action command if scheduling the local Oddspedia overlay process:
+
+```text
+powershell.exe -ExecutionPolicy Bypass -File "C:\Users\DanieDörfling\Documents\Codex\superbru-engine-ah\scripts\run_daily_oddspedia_overlay.ps1"
+```
+
+Cloudflare can still require manual clearance. The safest operating rhythm is to keep `.chrome-oddspedia-profile` intact so the clearance cookie persists, then refresh the grid before the GitHub daily Action or before manually reviewing score changes.
+
 ## Outputs
 
 For each fixture the CLI writes:

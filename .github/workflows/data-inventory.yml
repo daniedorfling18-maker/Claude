@@ -1,5 +1,5 @@
 name: Data Inventory
-# Push-trigger stamp: 2026-06-20T21:25:00+02:00
+# Push-trigger stamp: 2026-06-20T21:34:00+02:00
 
 on:
   workflow_dispatch:
@@ -42,6 +42,9 @@ jobs:
       PYTHONPATH: src
       CHROME_DEBUG_PORT: "9222"
       SUPERBRU_POOL_URL: "https://www.superbru.com/worldcup_predictor/pool_view.php?t=1296&p=13236623&g=32&view=matches"
+      SUPERBRU_LOGIN_URL: ${{ secrets.SUPERBRU_LOGIN_URL }}
+      SUPERBRU_USERNAME: ${{ secrets.SUPERBRU_USERNAME }}
+      SUPERBRU_PASSWORD: ${{ secrets.SUPERBRU_PASSWORD }}
       MAX_ODDSPEDIA_MATCHES: ${{ github.event_name == 'workflow_dispatch' && inputs.max_oddspedia_matches || '0' }}
       TRY_ODDSPEDIA_ALT_URLS: ${{ github.event_name == 'workflow_dispatch' && inputs.try_oddspedia_alt_urls || 'true' }}
 

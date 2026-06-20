@@ -12,6 +12,7 @@ FILES = [
     "scripts/run_component_validation_rescore.py",
     "scripts/build_final_locked_picks.py",
     "scripts/build_daily_robust_card.py",
+    "scripts/build_predictions_from_locked_card.py",
     "scripts/build_pick_validation_report.py",
     "scripts/run_calibration_diagnostics.py",
     "scripts/run_final_leader_decision.py",

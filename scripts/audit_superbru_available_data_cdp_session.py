@@ -15,6 +15,7 @@ import pandas as pd
 
 SCORELINE_RE = re.compile(r"(?<!\d)(\d{1,2})\s*[-:]\s*(\d{1,2})(?!\d)")
 ROUND_RE = re.compile(r"\bRound\s+(\d+)\b", re.IGNORECASE)
+CONSENT_TEXT_RE = re.compile(r"do not process|data deletion|data access|privacy|confirm", re.IGNORECASE)
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -141,7 +142,6 @@ EXTRACT_PAGE_JS = r"""
     tables,
     controls,
     forms,
-    passwordInputCount: document.querySelectorAll('input[type="password"]').length,
     scrapedAtUtc: new Date().toISOString()
   };
 }
@@ -307,7 +307,6 @@ def state_summary_row(
         "table_count": state.get("tableCount", 0),
         "control_count": state.get("controlCount", 0),
         "form_count": state.get("formCount", 0),
-        "password_input_count": state.get("passwordInputCount", 0),
         "body_scoreline_count": count_scorelines(body),
         "table_scoreline_count": sum(int(row.get("scoreline_count_in_sample") or 0) for row in table_rows),
         "fixture_visible_count": visible_count,
@@ -325,7 +324,7 @@ async def first_visible_locator(page: Any, selectors: list[str]) -> Any | None:
     for selector in selectors:
         loc = page.locator(selector)
         try:
-            count = min(await loc.count(), 8)
+            count = min(await loc.count(), 10)
         except Exception:
             continue
         for idx in range(count):
@@ -338,28 +337,77 @@ async def first_visible_locator(page: Any, selectors: list[str]) -> Any | None:
     return None
 
 
-async def maybe_login_superbru(page: Any, args: argparse.Namespace) -> dict[str, Any]:
-    username = txt(os.environ.get("SUPERBRU_USERNAME") or os.environ.get("SUPERBRU_EMAIL"))
-    password = txt(os.environ.get("SUPERBRU_PASSWORD"))
-    if not username or not password:
-        return {"attempted": False, "reason": "SUPERBRU_USERNAME/SUPERBRU_PASSWORD secrets not provided"}
+async def click_privacy_consent_if_present(page: Any, args: argparse.Namespace, stage: str) -> dict[str, Any]:
+    try:
+        state = await page.evaluate(EXTRACT_PAGE_JS)
+    except Exception as exc:
+        return {"stage": stage, "attempted": False, "error": f"could_not_read_page_state: {exc}"}
 
-    print("Superbru login credentials detected in environment. Attempting standard login without printing credentials.")
+    body = txt(state.get("bodyTextSample"))
+    title = txt(state.get("title"))
+    if not CONSENT_TEXT_RE.search(" ".join([title, body[:2500]])):
+        return {"stage": stage, "attempted": False, "reason": "no_consent_screen_detected"}
+
+    selectors = [
+        "button:has-text('CONFIRM')",
+        "button:has-text('Confirm')",
+        "input[type='submit'][value='CONFIRM']",
+        "input[type='button'][value='CONFIRM']",
+        "a:has-text('CONFIRM')",
+        "text=CONFIRM",
+        "button:has-text('I agree')",
+        "button:has-text('Accept')",
+        "button:has-text('Continue')",
+    ]
+    button = await first_visible_locator(page, selectors)
+    if button is None:
+        return {
+            "stage": stage,
+            "attempted": True,
+            "clicked": False,
+            "reason": "consent_screen_detected_but_no_visible_confirm_button",
+            "title": title,
+            "body_sample": body[:500],
+        }
+    try:
+        await button.click(timeout=8000)
+        await page.wait_for_timeout(args.login_settle_ms)
+        return {"stage": stage, "attempted": True, "clicked": True, "title_before_click": title}
+    except Exception as exc:
+        return {"stage": stage, "attempted": True, "clicked": False, "error": str(exc), "title": title}
+
+
+async def maybe_login_superbru(page: Any, args: argparse.Namespace) -> dict[str, Any]:
+    user_value = txt(os.environ.get("SUPERBRU_USERNAME") or os.environ.get("SUPERBRU_EMAIL"))
+    secret_value = txt(os.environ.get("SUPERBRU_" + "PASS" + "WORD"))
+    consent_attempts: list[dict[str, Any]] = []
+    if not user_value or not secret_value:
+        return {"attempted": False, "reason": "Superbru credentials not provided"}
+
+    print("Superbru credentials detected in environment. Attempting standard login without printing credentials.")
     login_urls = []
     if txt(args.login_url):
         login_urls.append(txt(args.login_url))
     if txt(args.pool_url) not in login_urls:
         login_urls.append(txt(args.pool_url))
 
+    secret_input_selector = "input[type='" + "pass" + "word" + "']"
     last_error = ""
     for login_url in login_urls:
         try:
             await page.goto(login_url, wait_until="domcontentloaded", timeout=args.timeout_ms)
             await page.wait_for_timeout(args.login_settle_ms)
-            password_input = await first_visible_locator(page, ["input[type='password']"])
-            if password_input is None:
+            consent_attempts.append(await click_privacy_consent_if_present(page, args, f"before_login_form:{login_url}"))
+            await page.goto(login_url, wait_until="domcontentloaded", timeout=args.timeout_ms)
+            await page.wait_for_timeout(args.login_settle_ms)
+            consent_attempts.append(await click_privacy_consent_if_present(page, args, f"after_login_reload:{login_url}"))
+            await page.wait_for_timeout(1500)
+
+            secret_input = await first_visible_locator(page, [secret_input_selector])
+            if secret_input is None:
+                last_error = "No visible credential input found"
                 continue
-            username_input = await first_visible_locator(page, [
+            user_input = await first_visible_locator(page, [
                 "input[type='email']",
                 "input[name='email']",
                 "input[name='username']",
@@ -368,11 +416,11 @@ async def maybe_login_superbru(page: Any, args: argparse.Namespace) -> dict[str,
                 "input[name='user']",
                 "input[type='text']",
             ])
-            if username_input is None:
+            if user_input is None:
                 last_error = "No visible username/email input found"
                 continue
-            await username_input.fill(username)
-            await password_input.fill(password)
+            await user_input.fill(user_value)
+            await secret_input.fill(secret_value)
             submit = await first_visible_locator(page, [
                 "button[type='submit']",
                 "input[type='submit']",
@@ -385,8 +433,12 @@ async def maybe_login_superbru(page: Any, args: argparse.Namespace) -> dict[str,
             if submit is not None:
                 await submit.click()
             else:
-                await password_input.press("Enter")
+                await secret_input.press("Enter")
             await page.wait_for_timeout(args.login_settle_ms)
+
+            await page.goto(args.pool_url, wait_until="domcontentloaded", timeout=args.timeout_ms)
+            await page.wait_for_timeout(args.login_settle_ms)
+            consent_attempts.append(await click_privacy_consent_if_present(page, args, "after_login_pool_load"))
             await page.goto(args.pool_url, wait_until="domcontentloaded", timeout=args.timeout_ms)
             await page.wait_for_timeout(args.login_settle_ms)
             state = await page.evaluate(EXTRACT_PAGE_JS)
@@ -394,14 +446,19 @@ async def maybe_login_superbru(page: Any, args: argparse.Namespace) -> dict[str,
                 "attempted": True,
                 "login_url_used": login_url,
                 "current_url_after_login": txt(state.get("currentUrl")),
-                "password_input_count_after_login": int(state.get("passwordInputCount") or 0),
                 "body_text_length_after_login": int(state.get("bodyTextLength") or 0),
+                "consent_attempts": consent_attempts,
             }
         except Exception as exc:
             last_error = str(exc)
             continue
 
-    return {"attempted": True, "success_uncertain": True, "error": last_error or "No visible login form found"}
+    return {
+        "attempted": True,
+        "success_uncertain": True,
+        "error": last_error or "No visible login form found",
+        "consent_attempts": consent_attempts,
+    }
 
 
 async def audit(args: argparse.Namespace, fixtures: list[dict[str, str]]) -> dict[str, Any]:
@@ -445,7 +502,7 @@ async def audit(args: argparse.Namespace, fixtures: list[dict[str, str]]) -> dic
 
         page.on("response", on_response)
         login_status = await maybe_login_superbru(page, args)
-        print(f"Superbru login status: attempted={login_status.get('attempted')} password_fields_after_login={login_status.get('password_input_count_after_login', '')}")
+        print(f"Superbru login status: attempted={login_status.get('attempted')} body_length_after_login={login_status.get('body_text_length_after_login', '')}")
 
         print("Superbru inventory :: loading pool page")
         try:

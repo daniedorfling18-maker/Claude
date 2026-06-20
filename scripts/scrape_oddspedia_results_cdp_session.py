@@ -11,6 +11,14 @@ from typing import Any
 import pandas as pd
 
 
+RESULT_COLUMNS = [
+    "match_id", "commence_time", "home_team", "away_team", "actual_home_goals",
+    "actual_away_goals", "actual_score", "actual_outcome", "status", "is_completed",
+    "score_source", "source_url_type", "source_url", "current_url", "source_name",
+    "scraped_at_utc",
+]
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description="Attach to an already-open Chrome CDP session and extract Oddspedia final scores/results."
@@ -19,11 +27,13 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--urls-csv", default="inputs/oddspedia_match_urls.csv")
     parser.add_argument("--out-csv", default="outputs/backtesting/oddspedia_results_backfill.csv")
     parser.add_argument("--out-json", default="outputs/backtesting/oddspedia_results_backfill_summary.json")
+    parser.add_argument("--cache-csv", default="outputs/backtesting/oddspedia_results_backfill_cache.csv")
     parser.add_argument("--diagnostics-dir", default="outputs/backtesting/oddspedia_results_diagnostics")
     parser.add_argument("--settle-ms", type=int, default=9000)
     parser.add_argument("--timeout-ms", type=int, default=90000)
     parser.add_argument("--max-matches", type=int, default=0)
     parser.add_argument("--completed-only", action="store_true")
+    parser.add_argument("--force-full-refresh", action="store_true")
     return parser
 
 
@@ -33,6 +43,12 @@ def txt(value: Any) -> str:
     if isinstance(value, float) and math.isnan(value):
         return ""
     return str(value).strip()
+
+
+def boolish(value: Any) -> bool:
+    if isinstance(value, bool):
+        return value
+    return txt(value).lower() in {"true", "1", "yes", "y", "completed"}
 
 
 def slugify(value: Any) -> str:
@@ -60,6 +76,118 @@ def load_rows(path: Path, max_matches: int = 0) -> list[dict[str, str]]:
     return rows[:max_matches] if max_matches and max_matches > 0 else rows
 
 
+def load_cache(path: Path) -> pd.DataFrame:
+    if not path.exists():
+        return pd.DataFrame(columns=RESULT_COLUMNS)
+    try:
+        frame = pd.read_csv(path).fillna("")
+    except Exception:
+        return pd.DataFrame(columns=RESULT_COLUMNS)
+    for col in RESULT_COLUMNS:
+        if col not in frame.columns:
+            frame[col] = ""
+    return frame[RESULT_COLUMNS].copy()
+
+
+def row_identity(row: dict[str, Any]) -> str:
+    mid = txt(row.get("match_id"))
+    if mid:
+        return mid
+    return f"{slugify(row.get('home_team'))}-{slugify(row.get('away_team'))}"
+
+
+def row_rank(row: dict[str, Any]) -> tuple[int, str]:
+    score = 0
+    if boolish(row.get("is_completed")):
+        score += 100
+    if txt(row.get("actual_score")):
+        score += 20
+    if txt(row.get("score_source")):
+        score += 5
+    return score, txt(row.get("scraped_at_utc"))
+
+
+def normalise_result_row(row: dict[str, Any]) -> dict[str, Any]:
+    out = {col: row.get(col, "") for col in RESULT_COLUMNS}
+    if not txt(out.get("match_id")):
+        out["match_id"] = f"{slugify(out.get('home_team'))}-{slugify(out.get('away_team'))}"
+    out["is_completed"] = boolish(out.get("is_completed"))
+    return out
+
+
+def cache_to_map(frame: pd.DataFrame) -> dict[str, dict[str, Any]]:
+    out: dict[str, dict[str, Any]] = {}
+    for _, row in frame.iterrows():
+        norm = normalise_result_row({k: row.get(k, "") for k in frame.columns})
+        key = row_identity(norm)
+        if key:
+            out[key] = norm
+    return out
+
+
+def select_rows_for_scrape(
+    rows: list[dict[str, str]],
+    cache: dict[str, dict[str, Any]],
+    force_full_refresh: bool,
+) -> tuple[list[dict[str, str]], dict[str, Any]]:
+    if force_full_refresh or not cache:
+        return rows, {
+            "cache_mode": "force_full_refresh" if force_full_refresh else "cold_start",
+            "cached_completed_count": sum(1 for r in cache.values() if boolish(r.get("is_completed")) and txt(r.get("actual_score"))),
+            "skipped_completed_cached_count": 0,
+        }
+
+    selected: list[dict[str, str]] = []
+    skipped = 0
+    for row in rows:
+        key = row_identity(row)
+        cached = cache.get(key)
+        if cached and boolish(cached.get("is_completed")) and txt(cached.get("actual_score")):
+            skipped += 1
+            continue
+        selected.append(row)
+
+    return selected, {
+        "cache_mode": "incremental",
+        "cached_completed_count": sum(1 for r in cache.values() if boolish(r.get("is_completed")) and txt(r.get("actual_score"))),
+        "skipped_completed_cached_count": skipped,
+    }
+
+
+def merge_results(
+    cached: dict[str, dict[str, Any]],
+    scraped: list[dict[str, Any]],
+    completed_only: bool,
+) -> tuple[list[dict[str, Any]], int]:
+    merged = dict(cached)
+    changed = 0
+    for row in scraped:
+        norm = normalise_result_row(row)
+        if completed_only and not boolish(norm.get("is_completed")):
+            continue
+        key = row_identity(norm)
+        if not key:
+            continue
+        existing = merged.get(key)
+        if existing is None:
+            merged[key] = norm
+            changed += 1
+            continue
+        if row_rank(norm) >= row_rank(existing):
+            before_score = txt(existing.get("actual_score"))
+            before_status = txt(existing.get("status"))
+            after_score = txt(norm.get("actual_score"))
+            after_status = txt(norm.get("status"))
+            if before_score != after_score or before_status != after_status:
+                changed += 1
+            merged[key] = norm
+
+    rows = list(merged.values())
+    if completed_only:
+        rows = [r for r in rows if boolish(r.get("is_completed"))]
+    return rows, changed
+
+
 EXTRACT_RESULT_JS = r"""
 () => {
   const candidates = [];
@@ -82,7 +210,6 @@ EXTRACT_RESULT_JS = r"""
   };
 }
 """
-
 
 STATUS_WORDS_COMPLETE = {
     "complete", "completed", "finished", "ended", "ft", "full time", "full-time", "after penalties", "aet"
@@ -383,26 +510,60 @@ def main() -> int:
     rows = load_rows(Path(args.urls_csv), args.max_matches)
     if not rows:
         raise ValueError(f"No URL rows found in {args.urls_csv}")
-    import asyncio
-    results, diagnostics = asyncio.run(scrape(args, rows))
+
     out_csv = Path(args.out_csv)
     out_json = Path(args.out_json)
+    cache_csv = Path(args.cache_csv)
     out_csv.parent.mkdir(parents=True, exist_ok=True)
     out_json.parent.mkdir(parents=True, exist_ok=True)
-    pd.DataFrame(results).to_csv(out_csv, index=False)
+    cache_csv.parent.mkdir(parents=True, exist_ok=True)
+
+    cache_frame = load_cache(cache_csv)
+    if cache_frame.empty and out_csv.exists():
+        cache_frame = load_cache(out_csv)
+    cache = cache_to_map(cache_frame)
+
+    rows_to_scrape, cache_plan = select_rows_for_scrape(rows, cache, args.force_full_refresh)
+    if cache_plan["cache_mode"] == "incremental":
+        print(
+            f"Using cached Oddspedia results. Skipping {cache_plan['skipped_completed_cached_count']} completed matches; "
+            f"scraping {len(rows_to_scrape)} missing or incomplete matches."
+        )
+
+    import asyncio
+    results, diagnostics = asyncio.run(scrape(args, rows_to_scrape)) if rows_to_scrape else ([], [])
+    merged_rows, changed_count = merge_results(cache, results, args.completed_only)
+
+    out = pd.DataFrame([normalise_result_row(r) for r in merged_rows])
+    for col in RESULT_COLUMNS:
+        if col not in out.columns:
+            out[col] = ""
+    if not out.empty:
+        out = out[RESULT_COLUMNS].sort_values(["commence_time", "match_id"]).reset_index(drop=True)
+    else:
+        out = pd.DataFrame(columns=RESULT_COLUMNS)
+
+    out.to_csv(out_csv, index=False)
+    out.to_csv(cache_csv, index=False)
+
     payload = {
         "generated_at_utc": datetime.now(timezone.utc).isoformat(),
         "input_match_count": len(rows),
-        "result_row_count": len(results),
-        "completed_result_count": sum(1 for r in results if bool(r.get("is_completed"))),
-        "score_found_count": sum(1 for r in results if bool(r.get("actual_score"))),
+        "scrape_candidate_count": len(rows_to_scrape),
+        "result_row_count": len(out),
+        "completed_result_count": sum(1 for _, r in out.iterrows() if boolish(r.get("is_completed"))),
+        "score_found_count": sum(1 for _, r in out.iterrows() if bool(txt(r.get("actual_score")))),
+        "new_or_updated_result_count": changed_count,
         "diagnostic_count": len(diagnostics),
         "diagnostics": diagnostics,
         "out_csv": str(out_csv),
+        "cache_csv": str(cache_csv),
+        **cache_plan,
     }
     out_json.write_text(json.dumps(payload, indent=2, default=str), encoding="utf-8")
     print(json.dumps(payload, indent=2, default=str))
     print(f"Wrote {out_csv}")
+    print(f"Wrote {cache_csv}")
     print(f"Wrote {out_json}")
     return 0
 

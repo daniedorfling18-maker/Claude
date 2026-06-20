@@ -14,6 +14,11 @@ KEYWORD_WEIGHTS = [
     ("correct_score", 45),
     ("correct score", 45),
     ("exact score", 45),
+    ("actual_score", 45),
+    ("modal_score", 42),
+    ("home_goals", 36),
+    ("away_goals", 36),
+    ("smartbet_correct_score", 45),
     ("score", 18),
     ("1x2", 40),
     ("winner", 35),
@@ -34,12 +39,13 @@ KEYWORD_WEIGHTS = [
     ("winning margin", 18),
     ("margin", 16),
     ("probabilities", 12),
+    ("probability", 12),
     ("odds", 8),
     ("bookmaker", 6),
 ]
 
 NOISE_KEYWORDS = [
-    "breadcrumb", "modal", "tooltip", "alert", "cookie", "image", "comment", "auth",
+    "breadcrumb", "modal dialog", "tooltip", "alert", "cookie", "image", "comment", "auth",
     "geo", "experiment", "device", "banner", "navigation", "translation", "seo",
 ]
 
@@ -80,7 +86,10 @@ def keyword_score(text: str) -> tuple[int, list[str], list[str]]:
 
 def classify_feature_family(text: str) -> str:
     low = text.lower()
-    if any(token in low for token in ["correct_score", "correct score", "exact score"]):
+    if any(token in low for token in [
+        "correct_score", "correct score", "exact score", "actual_score", "modal_score",
+        "home_goals", "away_goals", "smartbet_correct_score", "score probability grid",
+    ]):
         return "correct_score"
     if any(token in low for token in ["1x2", "winner", "match winner", "full time result", "home draw away"]):
         return "result_probability"
@@ -128,7 +137,7 @@ def summarise_markets(markets: pd.DataFrame, min_coverage_rate: float, top_n: in
         labels = sorted({txt(v) for v in group["market_label"] if txt(v)})
         object_key_values = sorted({txt(v) for v in group["object_keys"] if txt(v)})
         source_names = sorted({txt(v) for v in group["source_name"] if txt(v)})
-        combined = " ".join([market_path, " ".join(labels), " ".join(object_key_values)])
+        combined = " ".join([market_path, " ".join(labels), " ".join(object_key_values), " ".join(source_names)])
         k_score, hits, noise_hits = keyword_score(combined)
         feature_family = classify_feature_family(combined)
 
@@ -260,7 +269,7 @@ def main() -> int:
             "out_csv": str(out_csv),
             "out_json": str(out_json),
         },
-        "note": "This ranks candidate Oddspedia paths only. It does not yet promote these paths into production model features.",
+        "note": "This ranks candidate Oddspedia/smartbet grid paths only. It does not yet promote these paths into production model features.",
     }
     out_json.write_text(json.dumps(payload, indent=2, default=str), encoding="utf-8")
     print(json.dumps(payload, indent=2, default=str))

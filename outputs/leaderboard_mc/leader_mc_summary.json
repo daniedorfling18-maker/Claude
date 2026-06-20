@@ -1,0 +1,41 @@
+{
+  "simulations": 100000,
+  "leader_player": "Danie",
+  "leader_start_points": 29.0,
+  "chasers": [
+    "Dheben",
+    "Bijal",
+    "Peter",
+    "rob87",
+    "Leonard",
+    "Kea"
+  ],
+  "baseline_p_finish_first": 0.29084,
+  "baseline_p_finish_first_or_tied": 0.36247,
+  "final_p_finish_first": 0.29602,
+  "final_p_finish_first_or_tied": 0.36405,
+  "delta_p_finish_first": 0.00518,
+  "accepted_switches": [
+    {
+      "commence_time": "2026-06-21T00:00:00Z",
+      "home_team": "Ecuador",
+      "away_team": "Curacao",
+      "raw_pick": "2-0",
+      "candidate_pick": "3-0",
+      "raw_ev_full_matrix": 1.324712,
+      "candidate_ev_full_matrix": 1.313581,
+      "ev_loss": 0.011131,
+      "baseline_p_finish_first": 0.29084,
+      "candidate_p_finish_first": 0.29602,
+      "candidate_p_finish_first_or_tied": 0.36405,
+      "delta_p_finish_first": 0.00518,
+      "paired_se": 0.00086,
+      "z_score": 6.021,
+      "risk_tier": "low",
+      "confidence_tier": "medium",
+      "passes_hard_rule": true,
+      "reject_reasons": ""
+    }
+  ],
+  "total_ev_loss": 0.011131
+}

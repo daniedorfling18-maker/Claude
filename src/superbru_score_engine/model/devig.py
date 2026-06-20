@@ -313,7 +313,8 @@ def _map_1x2_market(match: MatchOdds, market: MarketOdds, method: str) -> np.nda
 
 def _power_devig(implied: np.ndarray) -> np.ndarray:
     low, high = 0.01, 10.0
-    for _ in range(100):
+    # 60 bisections over a width-10 bracket already converges to float precision.
+    for _ in range(60):
         mid = (low + high) / 2.0
         total = float(np.power(implied, mid).sum())
         if total > 1.0:

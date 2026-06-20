@@ -24,6 +24,7 @@ from .poisson import (
     matrix_asian_handicap_home_probability,
     matrix_over_probability,
     outcome_probabilities,
+    poisson_cdf,
     solve_lambdas,
 )
 from .ratings import RatingsStore
@@ -158,6 +159,15 @@ class OddsToScorelineModel:
             }
         )
         diagnostics.update(scoreline_distribution_diagnostics(matrix, self.config.candidate_grid_goals))
+        # The score matrix is renormalised, so matrix.sum() is always ~1 and cannot report
+        # truncation loss. Estimate the true Poisson mass captured by the model grid from the
+        # (independent) tail product, which is what the grid actually truncates.
+        mass_inside_model_grid = float(
+            poisson_cdf(self.config.model_grid_goals, lambda_home)
+            * poisson_cdf(self.config.model_grid_goals, lambda_away)
+        )
+        diagnostics["probability_mass_inside_model_grid"] = mass_inside_model_grid
+        diagnostics["probability_mass_outside_model_grid_estimated"] = max(0.0, 1.0 - mass_inside_model_grid)
         if fair_1x2:
             diagnostics.update(
                 {

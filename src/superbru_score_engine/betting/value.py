@@ -7,7 +7,7 @@ import numpy as np
 from superbru_score_engine.config import BettingConfig
 from superbru_score_engine.ingest import MatchOdds, OutcomeOdds
 from superbru_score_engine.model import DistributionResult
-from superbru_score_engine.model.devig import parse_scoreline_label
+from superbru_score_engine.model.devig import FairOutcomeMarket, parse_scoreline_label
 from superbru_score_engine.model.team_names import canonical_team_key
 
 
@@ -30,15 +30,17 @@ class BettingSuggestion:
 def find_betting_suggestions(distribution: DistributionResult, config: BettingConfig) -> list[BettingSuggestion]:
     match = distribution.match
     suggestions: list[BettingSuggestion] = []
-    suggestions.extend(_h2h_suggestions(match, distribution.matrix, config))
+    suggestions.extend(_h2h_suggestions(match, distribution.matrix, config, distribution.fair_1x2))
     if not config.match_winners_only:
         suggestions.extend(_totals_suggestions(match, distribution.matrix, config))
         suggestions.extend(_correct_score_suggestions(match, distribution.matrix, config))
     return sorted(suggestions, key=lambda item: item.expected_return, reverse=True)
 
 
-def _h2h_suggestions(match: MatchOdds, matrix: np.ndarray, config: BettingConfig) -> list[BettingSuggestion]:
-    outcome_probabilities = _market_anchor_1x2(match, matrix)
+def _h2h_suggestions(
+    match: MatchOdds, matrix: np.ndarray, config: BettingConfig, fair_1x2: "FairOutcomeMarket | None" = None
+) -> list[BettingSuggestion]:
+    outcome_probabilities = _market_anchor_1x2(match, matrix, fair_1x2)
     rows: list[BettingSuggestion] = []
     for market in match.market("h2h"):
         for offered in market.outcomes:
@@ -168,10 +170,15 @@ def _map_h2h_outcome(match: MatchOdds, offered: OutcomeOdds) -> str | None:
     return None
 
 
-def _market_anchor_1x2(match: MatchOdds, matrix: np.ndarray) -> dict[str, float]:
-    from superbru_score_engine.model.devig import extract_fair_1x2
+def _market_anchor_1x2(
+    match: MatchOdds, matrix: np.ndarray, fair: "FairOutcomeMarket | None" = None
+) -> dict[str, float]:
+    # Prefer the consensus fair 1X2 already de-vigged with the model's configured method
+    # (passed in from the distribution); only re-extract for standalone callers.
+    if fair is None:
+        from superbru_score_engine.model.devig import extract_fair_1x2
 
-    fair = extract_fair_1x2(match)
+        fair = extract_fair_1x2(match)
     if fair is not None:
         return {"home": fair.home, "draw": fair.draw, "away": fair.away}
     return {

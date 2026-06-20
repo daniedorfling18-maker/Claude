@@ -80,6 +80,15 @@ class RatingsStore:
             self.teams[team] = TeamRating(elo=self.config.base_rating)
         return self.teams[team]
 
+    def peek(self, team: str) -> TeamRating:
+        """Read-only lookup used by queries such as ``prior_lambdas``.
+
+        Unlike ``get`` (which lazily inserts a baseline entry for ratings *updates*),
+        this never mutates the store, so querying an unknown team does not create a
+        phantom 1500-rated team or inflate ``number_of_teams``.
+        """
+        return self.teams.get(canonical_team_name(team), TeamRating(elo=self.config.base_rating))
+
     def load(self) -> None:
         assert self.path is not None
         payload = json.loads(self.path.read_text(encoding="utf-8"))
@@ -160,8 +169,8 @@ class RatingsStore:
         elo_goal_scale: float | None = None,
         min_matches_full_confidence: int | None = None,
     ) -> tuple[float, float]:
-        home = self.get(home_team)
-        away = self.get(away_team)
+        home = self.peek(home_team)
+        away = self.peek(away_team)
         full_confidence = max(1, int(min_matches_full_confidence or self.config.min_matches_full_confidence))
         confidence = min(1.0, (home.matches + away.matches) / float(full_confidence))
         elo_diff = (home.elo - away.elo) * confidence

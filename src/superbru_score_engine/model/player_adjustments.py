@@ -5,8 +5,12 @@ player-level data (xG/xA/minutes/lineups). So this is an extension point only:
 
 * The default adjustment for every team is ZERO.
 * No fake player metrics or hard-coded xG values are introduced.
-* Adjustments are only applied if the user explicitly supplies a CSV via
-  --player-adjustments, and even then they are shrunk by a stated confidence.
+
+NOTE: this module is a standalone extension point and is NOT yet wired into the
+CLI or ``OddsToScorelineModel`` — there is currently no ``--player-adjustments``
+flag and nothing consumes these adjustments in the prediction path. A caller can
+opt in directly via ``PlayerAdjustmentStore.from_csv`` and apply the effective
+adjustments themselves; values are shrunk by a stated confidence first.
 
 CSV columns: team, attack_adjustment_goals, defence_adjustment_goals,
 goalkeeper_adjustment_goals, confidence, source, source_timestamp, note.

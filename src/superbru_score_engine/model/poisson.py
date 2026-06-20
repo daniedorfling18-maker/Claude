@@ -229,7 +229,7 @@ def poisson_cdf(goal: int, rate: float) -> float:
         return float(poisson.cdf(goal, rate))
     if goal < 0:
         return 0.0
-    pmf = math.exp(rate * 0.0 - rate)
+    pmf = math.exp(-rate)
     total = pmf
     for idx in range(1, goal + 1):
         pmf *= rate / idx

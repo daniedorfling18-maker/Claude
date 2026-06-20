@@ -26,11 +26,23 @@ def normalise_market_key(key: str) -> str:
     return MARKET_ALIASES.get(key.strip().lower(), key.strip().lower())
 
 
+def _coalesce(*values: Any) -> Any:
+    """First value that is genuinely present (not None/empty string).
+
+    Unlike ``a or b``, this keeps a legitimate ``0`` — e.g. a level/pick'em Asian
+    handicap line of ``0`` must not be discarded as if it were missing.
+    """
+    for value in values:
+        if value is not None and value != "":
+            return value
+    return None
+
+
 def parse_outcome(outcome: dict[str, Any]) -> OutcomeOdds:
     return OutcomeOdds(
-        name=str(outcome.get("name") or outcome.get("label") or outcome.get("outcome")),
-        price=float(outcome.get("price") or outcome.get("odds") or outcome.get("decimal_odds")),
-        point=_optional_float(outcome.get("point") or outcome.get("line") or outcome.get("handicap")),
+        name=str(_coalesce(outcome.get("name"), outcome.get("label"), outcome.get("outcome"))),
+        price=float(_coalesce(outcome.get("price"), outcome.get("odds"), outcome.get("decimal_odds"))),
+        point=_optional_float(_coalesce(outcome.get("point"), outcome.get("line"), outcome.get("handicap"))),
         description=_optional_str(outcome.get("description")),
     )
 

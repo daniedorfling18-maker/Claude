@@ -27,7 +27,13 @@ from superbru_score_engine.model import OddsToScorelineModel
 from superbru_score_engine.model.devig import parse_scoreline_label
 from superbru_score_engine.model.ratings import MatchResult, RatingsStore
 from superbru_score_engine.model.team_names import canonical_team_key
-from superbru_score_engine.report.outputs import betting_console_table, console_table, write_betting_outputs, write_outputs
+from superbru_score_engine.report.outputs import (
+    betting_console_table,
+    console_table,
+    prediction_rows,
+    write_betting_outputs,
+    write_outputs,
+)
 from superbru_score_engine.tuning import run_tune
 
 
@@ -278,8 +284,9 @@ def run_predict(args: argparse.Namespace, config: AppConfig) -> int:
             betting_suggestions.extend(find_betting_suggestions(distribution, config.betting))
 
     predictions.sort(key=lambda item: item.commence_time)
-    csv_path, json_path = write_outputs(predictions, args.out_dir)
-    print(console_table(predictions))
+    rows = prediction_rows(predictions)
+    csv_path, json_path = write_outputs(predictions, args.out_dir, rows=rows)
+    print(console_table(predictions, rows=rows))
     print(f"\nWrote {csv_path}")
     print(f"Wrote {json_path}")
     if include_betting:

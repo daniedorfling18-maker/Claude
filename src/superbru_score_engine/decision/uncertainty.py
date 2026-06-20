@@ -23,6 +23,10 @@ def book_ensemble_uncertainty(match: MatchOdds, model, decision, disagreement_th
     Each book's h2h market is evaluated on its own (sharing the totals ladder), so the
     returned pick stability, lambda dispersion and expected-points range reflect real
     market disagreement rather than an assumed perturbation size.
+
+    This is an opt-in diagnostic: it is not run by the default ``predict`` pipeline
+    (which emits the deterministic sensitivity sweep). Call it explicitly when you want
+    the per-bookmaker fragility view.
     """
     books = match.market("h2h")
     n_books = len(books)

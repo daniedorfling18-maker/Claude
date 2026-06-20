@@ -95,10 +95,12 @@ def prediction_rows(predictions: Iterable[Prediction]) -> list[dict]:
     return rows
 
 
-def write_outputs(predictions: list[Prediction], out_dir: str | Path) -> tuple[Path, Path]:
+def write_outputs(
+    predictions: list[Prediction], out_dir: str | Path, rows: list[dict] | None = None
+) -> tuple[Path, Path]:
     output_dir = Path(out_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
-    rows = prediction_rows(predictions)
+    rows = prediction_rows(predictions) if rows is None else rows
     csv_path = output_dir / "predictions.csv"
     json_path = output_dir / "predictions.json"
     pd.DataFrame(rows).to_csv(csv_path, index=False)
@@ -163,8 +165,8 @@ def betting_console_table(suggestions: list[BettingSuggestion], limit: int = 20)
     return table.to_string(index=False)
 
 
-def console_table(predictions: list[Prediction]) -> str:
-    rows = prediction_rows(predictions)
+def console_table(predictions: list[Prediction], rows: list[dict] | None = None) -> str:
+    rows = prediction_rows(predictions) if rows is None else rows
     if not rows:
         return "No predictions."
     table = pd.DataFrame(rows)[

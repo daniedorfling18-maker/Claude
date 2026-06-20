@@ -247,8 +247,9 @@ def _top_by(evaluations, score, tie_epsilon: float) -> CandidateEvaluation:
     exact prob, then preferring the lower-total scoreline. With
     score=adjusted_expected_points this is the prior default recommendation, so
     exact_chase (weight 1) and risk_adjusted (zero weights) reduce to it exactly."""
-    best = max(score(c) for c in evaluations)
-    contenders = [c for c in evaluations if best - score(c) <= tie_epsilon]
+    scored = [(c, score(c)) for c in evaluations]
+    best = max(value for _, value in scored)
+    contenders = [c for c, value in scored if best - value <= tie_epsilon]
     contenders.sort(key=lambda c: (c.p_close, c.p_exact, -(c.home_goals + c.away_goals)), reverse=True)
     return contenders[0]
 
@@ -353,9 +354,8 @@ def score_prediction(
             if prob <= 0:
                 continue
             points = score_actual_prediction(pred_home, pred_away, home_goals, away_goals, ci_cutoff)
-            if points == 3.0:
-                p_exact += 0.0  # already counted directly
-            elif points == 1.5:
+            # points == 3.0 is the exact cell, already counted directly in p_exact above.
+            if points == 1.5:
                 p_close += prob
                 p_close_non_exact += prob
             elif points == 1.0:

@@ -19,8 +19,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--markets", default="h2h,spreads,totals")
     parser.add_argument("--out-root", default="outputs")
     parser.add_argument("--snapshot-id", default="", help="Optional snapshot id. Defaults to current UTC timestamp.")
-    parser.add_argument("--require-two-day-support", action="store_true", default=True)
-    parser.add_argument("--allow-first-snapshot", action="store_true", default=True)
+    parser.add_argument("--require-two-day-support", action=argparse.BooleanOptionalAction, default=True)
+    parser.add_argument("--allow-first-snapshot", action=argparse.BooleanOptionalAction, default=True)
     parser.add_argument("--skip-final-simulation", action="store_true")
     return parser
 

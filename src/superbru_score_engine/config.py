@@ -34,6 +34,7 @@ class ModelConfig:
     asian_handicap_weight: float = 0.0
     home_advantage_goals: float = 0.18
     host_teams: tuple[str, ...] = ("United States", "USA", "Canada", "Mexico")
+    # Reserved for a future low-data shrinkage prior; parsed but not yet applied by the model.
     low_data_prior_sigma: float = 0.25
 
 
@@ -43,6 +44,8 @@ class SuperbruConfig:
     tie_epsilon: float = 0.005
     contrarian: bool = False
     contrarian_weight: float = 0.0
+    # Reserved provenance label for how knockout results should be scored; parsed but not
+    # yet applied (the engine scores all matches on 90-minute scorelines).
     knockout_result_basis: str = "regular_or_extra_time_if_drawn"
     # Strategy layer. Defaults reproduce the raw expected-points pick exactly.
     # modes: raw_ev | conservative | exact_chase | contrarian | risk_adjusted | private_chase
@@ -317,7 +320,7 @@ def validate_calibration_profile(
             active_profile=active_profile,
             profile_found=False,
             matches_config=False,
-            mismatches=(f"profile not found: {active_profile}"),
+            mismatches=(f"profile not found: {active_profile}",),
             profile_values={},
         )
 

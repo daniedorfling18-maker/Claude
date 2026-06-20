@@ -1,0 +1,16 @@
+{
+  "generated_at_utc": "2026-06-20T13:26:19.117214+00:00",
+  "locked_picks_csv": "outputs\\final_locked_picks\\superbru_final_card.csv",
+  "pick_column": "locked_pick",
+  "oddspedia_grid_csv": "inputs\\smartbet_grids\\oddspedia_probability_grids_auto.csv",
+  "match_count": 40,
+  "matches_with_grid": 16,
+  "action_counts": {
+    "no_grid": 24,
+    "keep": 8,
+    "strong_same_outcome_review": 4,
+    "same_outcome_review": 3,
+    "market_outcome_conflict_review": 1
+  },
+  "out_csv": "outputs\\oddspedia_pick_validation\\oddspedia_pick_comparison.csv"
+}

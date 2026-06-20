@@ -1,0 +1,50 @@
+{
+  "generated_at_utc": "2026-06-20T13:22:02.611345+00:00",
+  "final_pick_count": 40,
+  "approved_switch_candidates": 3,
+  "applied_switch_count": 3,
+  "applied_switches": [
+    {
+      "home_team": "Switzerland",
+      "away_team": "Canada",
+      "original_pick": "2-1",
+      "locked_pick": "1-0",
+      "ev_loss": 0.004458,
+      "delta_p_finish_first": -1.6e-05,
+      "current_component_score": 0.724,
+      "candidate_component_score": 0.811,
+      "component_improvement": 0.087,
+      "decision_reasons": "low EV cost; leader delta acceptable; candidate component-supported; candidate improves component validation; no stress-switch support"
+    },
+    {
+      "home_team": "Norway",
+      "away_team": "France",
+      "original_pick": "0-2",
+      "locked_pick": "1-2",
+      "ev_loss": 0.006835,
+      "delta_p_finish_first": 0.000478,
+      "current_component_score": 0.7425,
+      "candidate_component_score": 0.8695,
+      "component_improvement": 0.127,
+      "decision_reasons": "low EV cost; leader delta acceptable; candidate component-supported; candidate improves component validation; no stress-switch support"
+    },
+    {
+      "home_team": "Algeria",
+      "away_team": "Austria",
+      "original_pick": "1-2",
+      "locked_pick": "0-1",
+      "ev_loss": 0.00495,
+      "delta_p_finish_first": -0.00038,
+      "current_component_score": 0.724,
+      "candidate_component_score": 0.853,
+      "component_improvement": 0.129,
+      "decision_reasons": "low EV cost; leader delta acceptable; candidate component-supported; candidate improves component validation; no stress-switch support"
+    }
+  ],
+  "warnings": [],
+  "outputs": {
+    "locked_picks": "outputs\\final_locked_picks\\final_picks_locked.csv",
+    "superbru_final_card": "outputs\\final_locked_picks\\superbru_final_card.csv",
+    "applied_switches": "outputs\\final_locked_picks\\applied_switches.csv"
+  }
+}

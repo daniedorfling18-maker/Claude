@@ -1,0 +1,399 @@
+{
+  "simulations_per_scenario": 100000,
+  "scenario_count": 11,
+  "support_threshold": 0.7,
+  "robust_switches": [],
+  "scenario_summaries": [
+    {
+      "simulations": 100000,
+      "leader_player": "Danie",
+      "leader_start_points": 29.0,
+      "chasers": [
+        "Dheben",
+        "Bijal",
+        "Peter",
+        "rob87",
+        "Leonard",
+        "Kea"
+      ],
+      "baseline_p_finish_first": 0.29024,
+      "baseline_p_finish_first_or_tied": 0.35911,
+      "final_p_finish_first": 0.29579,
+      "final_p_finish_first_or_tied": 0.36239,
+      "delta_p_finish_first": 0.00555,
+      "accepted_switches": [
+        {
+          "commence_time": "2026-06-21T16:00:00Z",
+          "home_team": "Spain",
+          "away_team": "Saudi Arabia",
+          "raw_pick": "3-0",
+          "candidate_pick": "2-0",
+          "raw_ev_full_matrix": 1.331779,
+          "candidate_ev_full_matrix": 1.327369,
+          "ev_loss": 0.00441,
+          "baseline_p_finish_first": 0.29024,
+          "candidate_p_finish_first": 0.29579,
+          "candidate_p_finish_first_or_tied": 0.36239,
+          "delta_p_finish_first": 0.00555,
+          "paired_se": 0.000852,
+          "z_score": 6.515,
+          "risk_tier": "low",
+          "confidence_tier": "medium",
+          "passes_hard_rule": true,
+          "reject_reasons": ""
+        }
+      ],
+      "total_ev_loss": 0.00441,
+      "scenario": "base",
+      "scenario_description": "Current Monte Carlo assumptions.",
+      "accepted_switch_labels": [
+        "Spain vs Saudi Arabia: 3-0 -> 2-0"
+      ]
+    },
+    {
+      "simulations": 100000,
+      "leader_player": "Danie",
+      "leader_start_points": 29.0,
+      "chasers": [
+        "Dheben",
+        "Bijal",
+        "Peter",
+        "rob87",
+        "Leonard",
+        "Kea"
+      ],
+      "baseline_p_finish_first": 0.29046,
+      "baseline_p_finish_first_or_tied": 0.36446,
+      "final_p_finish_first": 0.29046,
+      "final_p_finish_first_or_tied": 0.36446,
+      "delta_p_finish_first": 0.0,
+      "accepted_switches": [],
+      "total_ev_loss": 0.0,
+      "scenario": "chasers_conservative",
+      "scenario_description": "Chasers lean more towards raw, top1 and chalk picks.",
+      "accepted_switch_labels": []
+    },
+    {
+      "simulations": 100000,
+      "leader_player": "Danie",
+      "leader_start_points": 29.0,
+      "chasers": [
+        "Dheben",
+        "Bijal",
+        "Peter",
+        "rob87",
+        "Leonard",
+        "Kea"
+      ],
+      "baseline_p_finish_first": 0.30156,
+      "baseline_p_finish_first_or_tied": 0.3642,
+      "final_p_finish_first": 0.30156,
+      "final_p_finish_first_or_tied": 0.3642,
+      "delta_p_finish_first": 0.0,
+      "accepted_switches": [],
+      "total_ev_loss": 0.0,
+      "scenario": "chasers_aggressive",
+      "scenario_description": "Chasers chase exacts and differentials more aggressively.",
+      "accepted_switch_labels": []
+    },
+    {
+      "simulations": 100000,
+      "leader_player": "Danie",
+      "leader_start_points": 29.0,
+      "chasers": [
+        "Dheben",
+        "Bijal",
+        "Peter",
+        "rob87",
+        "Leonard",
+        "Kea"
+      ],
+      "baseline_p_finish_first": 0.2996,
+      "baseline_p_finish_first_or_tied": 0.37209,
+      "final_p_finish_first": 0.2996,
+      "final_p_finish_first_or_tied": 0.37209,
+      "delta_p_finish_first": 0.0,
+      "accepted_switches": [],
+      "total_ev_loss": 0.0,
+      "scenario": "favourite_heavy",
+      "scenario_description": "Chasers overweight favourite/chalk scorelines.",
+      "accepted_switch_labels": []
+    },
+    {
+      "simulations": 100000,
+      "leader_player": "Danie",
+      "leader_start_points": 29.0,
+      "chasers": [
+        "Dheben",
+        "Bijal",
+        "Peter",
+        "rob87",
+        "Leonard",
+        "Kea"
+      ],
+      "baseline_p_finish_first": 0.28769,
+      "baseline_p_finish_first_or_tied": 0.35347,
+      "final_p_finish_first": 0.2928,
+      "final_p_finish_first_or_tied": 0.35521,
+      "delta_p_finish_first": 0.00511,
+      "accepted_switches": [
+        {
+          "commence_time": "2026-06-21T16:00:00Z",
+          "home_team": "Spain",
+          "away_team": "Saudi Arabia",
+          "raw_pick": "3-0",
+          "candidate_pick": "2-0",
+          "raw_ev_full_matrix": 1.331779,
+          "candidate_ev_full_matrix": 1.327369,
+          "ev_loss": 0.00441,
+          "baseline_p_finish_first": 0.28769,
+          "candidate_p_finish_first": 0.2928,
+          "candidate_p_finish_first_or_tied": 0.35521,
+          "delta_p_finish_first": 0.00511,
+          "paired_se": 0.000824,
+          "z_score": 6.202,
+          "risk_tier": "low",
+          "confidence_tier": "medium",
+          "passes_hard_rule": true,
+          "reject_reasons": ""
+        }
+      ],
+      "total_ev_loss": 0.00441,
+      "scenario": "exact_chase_heavy",
+      "scenario_description": "Chasers overweight modal and top exact scorelines.",
+      "accepted_switch_labels": [
+        "Spain vs Saudi Arabia: 3-0 -> 2-0"
+      ]
+    },
+    {
+      "simulations": 100000,
+      "leader_player": "Danie",
+      "leader_start_points": 29.0,
+      "chasers": [
+        "Dheben",
+        "Bijal",
+        "Peter",
+        "rob87",
+        "Leonard",
+        "Kea"
+      ],
+      "baseline_p_finish_first": 0.29437,
+      "baseline_p_finish_first_or_tied": 0.36325,
+      "final_p_finish_first": 0.30002,
+      "final_p_finish_first_or_tied": 0.36715,
+      "delta_p_finish_first": 0.00565,
+      "accepted_switches": [
+        {
+          "commence_time": "2026-06-21T00:00:00Z",
+          "home_team": "Ecuador",
+          "away_team": "Curacao",
+          "raw_pick": "2-0",
+          "candidate_pick": "3-0",
+          "raw_ev_full_matrix": 1.307935,
+          "candidate_ev_full_matrix": 1.316092,
+          "ev_loss": 0.0,
+          "baseline_p_finish_first": 0.29437,
+          "candidate_p_finish_first": 0.30002,
+          "candidate_p_finish_first_or_tied": 0.36715,
+          "delta_p_finish_first": 0.00565,
+          "paired_se": 0.000844,
+          "z_score": 6.697,
+          "risk_tier": "low",
+          "confidence_tier": "medium",
+          "passes_hard_rule": true,
+          "reject_reasons": ""
+        }
+      ],
+      "total_ev_loss": 0.0,
+      "scenario": "goals_plus_5pct",
+      "scenario_description": "Model total-goals expectation tilted 5 percent higher.",
+      "accepted_switch_labels": [
+        "Ecuador vs Curacao: 2-0 -> 3-0"
+      ]
+    },
+    {
+      "simulations": 100000,
+      "leader_player": "Danie",
+      "leader_start_points": 29.0,
+      "chasers": [
+        "Dheben",
+        "Bijal",
+        "Peter",
+        "rob87",
+        "Leonard",
+        "Kea"
+      ],
+      "baseline_p_finish_first": 0.29355,
+      "baseline_p_finish_first_or_tied": 0.35964,
+      "final_p_finish_first": 0.30025,
+      "final_p_finish_first_or_tied": 0.36474,
+      "delta_p_finish_first": 0.0067,
+      "accepted_switches": [
+        {
+          "commence_time": "2026-06-21T16:00:00Z",
+          "home_team": "Spain",
+          "away_team": "Saudi Arabia",
+          "raw_pick": "3-0",
+          "candidate_pick": "2-0",
+          "raw_ev_full_matrix": 1.327952,
+          "candidate_ev_full_matrix": 1.344642,
+          "ev_loss": 0.0,
+          "baseline_p_finish_first": 0.29355,
+          "candidate_p_finish_first": 0.30025,
+          "candidate_p_finish_first_or_tied": 0.36474,
+          "delta_p_finish_first": 0.0067,
+          "paired_se": 0.000867,
+          "z_score": 7.725,
+          "risk_tier": "low",
+          "confidence_tier": "medium",
+          "passes_hard_rule": true,
+          "reject_reasons": ""
+        }
+      ],
+      "total_ev_loss": 0.0,
+      "scenario": "goals_minus_5pct",
+      "scenario_description": "Model total-goals expectation tilted 5 percent lower.",
+      "accepted_switch_labels": [
+        "Spain vs Saudi Arabia: 3-0 -> 2-0"
+      ]
+    },
+    {
+      "simulations": 100000,
+      "leader_player": "Danie",
+      "leader_start_points": 29.0,
+      "chasers": [
+        "Dheben",
+        "Bijal",
+        "Peter",
+        "rob87",
+        "Leonard",
+        "Kea"
+      ],
+      "baseline_p_finish_first": 0.29502,
+      "baseline_p_finish_first_or_tied": 0.36144,
+      "final_p_finish_first": 0.29502,
+      "final_p_finish_first_or_tied": 0.36144,
+      "delta_p_finish_first": 0.0,
+      "accepted_switches": [],
+      "total_ev_loss": 0.0,
+      "scenario": "rho_plus_0_02",
+      "scenario_description": "Dixon-Coles rho increased by 0.02.",
+      "accepted_switch_labels": []
+    },
+    {
+      "simulations": 100000,
+      "leader_player": "Danie",
+      "leader_start_points": 29.0,
+      "chasers": [
+        "Dheben",
+        "Bijal",
+        "Peter",
+        "rob87",
+        "Leonard",
+        "Kea"
+      ],
+      "baseline_p_finish_first": 0.29074,
+      "baseline_p_finish_first_or_tied": 0.35717,
+      "final_p_finish_first": 0.2959,
+      "final_p_finish_first_or_tied": 0.36091,
+      "delta_p_finish_first": 0.00516,
+      "accepted_switches": [
+        {
+          "commence_time": "2026-06-21T00:00:00Z",
+          "home_team": "Ecuador",
+          "away_team": "Curacao",
+          "raw_pick": "2-0",
+          "candidate_pick": "3-0",
+          "raw_ev_full_matrix": 1.324923,
+          "candidate_ev_full_matrix": 1.314999,
+          "ev_loss": 0.009924,
+          "baseline_p_finish_first": 0.29074,
+          "candidate_p_finish_first": 0.2959,
+          "candidate_p_finish_first_or_tied": 0.36091,
+          "delta_p_finish_first": 0.00516,
+          "paired_se": 0.000854,
+          "z_score": 6.045,
+          "risk_tier": "low",
+          "confidence_tier": "medium",
+          "passes_hard_rule": true,
+          "reject_reasons": ""
+        }
+      ],
+      "total_ev_loss": 0.009924,
+      "scenario": "rho_minus_0_02",
+      "scenario_description": "Dixon-Coles rho decreased by 0.02.",
+      "accepted_switch_labels": [
+        "Ecuador vs Curacao: 2-0 -> 3-0"
+      ]
+    },
+    {
+      "simulations": 100000,
+      "leader_player": "Danie",
+      "leader_start_points": 29.0,
+      "chasers": [
+        "Dheben",
+        "Bijal",
+        "Peter",
+        "rob87",
+        "Leonard",
+        "Kea"
+      ],
+      "baseline_p_finish_first": 0.27803,
+      "baseline_p_finish_first_or_tied": 0.34507,
+      "final_p_finish_first": 0.28322,
+      "final_p_finish_first_or_tied": 0.34854,
+      "delta_p_finish_first": 0.00519,
+      "accepted_switches": [
+        {
+          "commence_time": "2026-06-21T00:00:00Z",
+          "home_team": "Ecuador",
+          "away_team": "Curacao",
+          "raw_pick": "2-0",
+          "candidate_pick": "3-0",
+          "raw_ev_full_matrix": 1.313472,
+          "candidate_ev_full_matrix": 1.302435,
+          "ev_loss": 0.011037,
+          "baseline_p_finish_first": 0.27803,
+          "candidate_p_finish_first": 0.28322,
+          "candidate_p_finish_first_or_tied": 0.34854,
+          "delta_p_finish_first": 0.00519,
+          "paired_se": 0.000846,
+          "z_score": 6.138,
+          "risk_tier": "low",
+          "confidence_tier": "medium",
+          "passes_hard_rule": true,
+          "reject_reasons": ""
+        }
+      ],
+      "total_ev_loss": 0.011037,
+      "scenario": "draw_heavy",
+      "scenario_description": "Draw scorelines receive 8 percent more mass.",
+      "accepted_switch_labels": [
+        "Ecuador vs Curacao: 2-0 -> 3-0"
+      ]
+    },
+    {
+      "simulations": 100000,
+      "leader_player": "Danie",
+      "leader_start_points": 29.0,
+      "chasers": [
+        "Dheben",
+        "Bijal",
+        "Peter",
+        "rob87",
+        "Leonard",
+        "Kea"
+      ],
+      "baseline_p_finish_first": 0.30952,
+      "baseline_p_finish_first_or_tied": 0.37932,
+      "final_p_finish_first": 0.30952,
+      "final_p_finish_first_or_tied": 0.37932,
+      "delta_p_finish_first": 0.0,
+      "accepted_switches": [],
+      "total_ev_loss": 0.0,
+      "scenario": "draw_light",
+      "scenario_description": "Draw scorelines receive 8 percent less mass.",
+      "accepted_switch_labels": []
+    }
+  ]
+}

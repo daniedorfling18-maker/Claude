@@ -1,0 +1,4 @@
+home_team,away_team,current_pick,candidate_pick,apply_switch,blocked_by
+Switzerland,Canada,1-0,1-0,False,candidate current_pick mismatch: 2-1 vs card 1-0
+Norway,France,1-2,1-2,False,candidate current_pick mismatch: 0-2 vs card 1-2
+Algeria,Austria,0-1,0-1,False,candidate current_pick mismatch: 1-2 vs card 0-1

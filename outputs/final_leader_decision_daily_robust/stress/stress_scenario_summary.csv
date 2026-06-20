@@ -1,0 +1,12 @@
+scenario,description,baseline_p_finish_first,final_p_finish_first,delta_p_finish_first,baseline_p_finish_first_or_tied,final_p_finish_first_or_tied,total_ev_loss,accepted_switch_count,accepted_switch_labels
+base,Current Monte Carlo assumptions.,0.29024,0.29579,0.00555,0.35911,0.36239,0.00441,1,Spain vs Saudi Arabia: 3-0 -> 2-0
+chasers_conservative,"Chasers lean more towards raw, top1 and chalk picks.",0.29046,0.29046,0.0,0.36446,0.36446,0.0,0,
+chasers_aggressive,Chasers chase exacts and differentials more aggressively.,0.30156,0.30156,0.0,0.3642,0.3642,0.0,0,
+favourite_heavy,Chasers overweight favourite/chalk scorelines.,0.2996,0.2996,0.0,0.37209,0.37209,0.0,0,
+exact_chase_heavy,Chasers overweight modal and top exact scorelines.,0.28769,0.2928,0.00511,0.35347,0.35521,0.00441,1,Spain vs Saudi Arabia: 3-0 -> 2-0
+goals_plus_5pct,Model total-goals expectation tilted 5 percent higher.,0.29437,0.30002,0.00565,0.36325,0.36715,0.0,1,Ecuador vs Curacao: 2-0 -> 3-0
+goals_minus_5pct,Model total-goals expectation tilted 5 percent lower.,0.29355,0.30025,0.0067,0.35964,0.36474,0.0,1,Spain vs Saudi Arabia: 3-0 -> 2-0
+rho_plus_0_02,Dixon-Coles rho increased by 0.02.,0.29502,0.29502,0.0,0.36144,0.36144,0.0,0,
+rho_minus_0_02,Dixon-Coles rho decreased by 0.02.,0.29074,0.2959,0.00516,0.35717,0.36091,0.009924,1,Ecuador vs Curacao: 2-0 -> 3-0
+draw_heavy,Draw scorelines receive 8 percent more mass.,0.27803,0.28322,0.00519,0.34507,0.34854,0.011037,1,Ecuador vs Curacao: 2-0 -> 3-0
+draw_light,Draw scorelines receive 8 percent less mass.,0.30952,0.30952,0.0,0.37932,0.37932,0.0,0,

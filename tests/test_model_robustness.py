@@ -29,8 +29,11 @@ from superbru_score_engine.model.devig import (
     FairTotalMarket,
     decimal_implied_probabilities,
     devig_implied_probabilities,
+    extract_fair_1x2,
+    extract_fair_1x2_book_level,
     parse_scoreline_label,
 )
+from superbru_score_engine.ingest import MarketOdds, MatchOdds, OutcomeOdds
 from superbru_score_engine.model.dixon_coles import apply_dixon_coles, geometric_blend
 from superbru_score_engine.model.poisson import (
     _asian_handicap_components,
@@ -221,15 +224,16 @@ def test_correct_score_to_matrix_clips_cells_beyond_max_goals() -> None:
     assert np.allclose(matrix, 1.0 / 36.0, atol=1e-9)
 
 
-def test_correct_score_to_matrix_all_beyond_no_residual_returns_zeros() -> None:
-    """Degenerate: all cells out of range, no residual → zero matrix (caller must handle)."""
+def test_correct_score_to_matrix_all_beyond_no_residual_returns_uniform() -> None:
+    """Degenerate: all cells out of range, no residual → uniform distribution (not zeros)."""
     market = FairCorrectScoreMarket(
         cell_probs={(10, 10): 1.0},
         other_mass=0.0,
         count=1,
     )
     matrix = market.to_matrix(max_goals=5)
-    assert matrix.sum() == 0.0
+    assert np.isclose(matrix.sum(), 1.0, atol=1e-9)
+    assert np.allclose(matrix, 1.0 / 36.0, atol=1e-9)
 
 
 # ---------------------------------------------------------------------------
@@ -619,3 +623,88 @@ def test_rpo_away_advantage_reflected_in_lambda_ordering() -> None:
     line = FairTotalMarket(line=2.5, over=0.55, under=0.45, count=5)
     lh, la, _ = solve_lambdas(fair_1x2=fair_1x2, fair_total=line, solver_grid_goals=12)
     assert la > lh, f"Expected lambda_away > lambda_home, got {lh:.3f} vs {la:.3f}"
+
+
+# ---------------------------------------------------------------------------
+# SECTION 13: extract_fair_1x2_book_level (market-disagreement source)
+# ---------------------------------------------------------------------------
+
+def _h2h_match(book_a_prices: tuple, book_b_prices: tuple | None = None) -> MatchOdds:
+    """Build a minimal MatchOdds with one or two bookmakers for h2h."""
+    markets_list = [
+        MarketOdds(
+            key="h2h",
+            bookmaker="book-a",
+            outcomes=(
+                OutcomeOdds("Spain", book_a_prices[0]),
+                OutcomeOdds("Draw", book_a_prices[1]),
+                OutcomeOdds("Germany", book_a_prices[2]),
+            ),
+        )
+    ]
+    if book_b_prices is not None:
+        markets_list.append(
+            MarketOdds(
+                key="h2h",
+                bookmaker="book-b",
+                outcomes=(
+                    OutcomeOdds("Spain", book_b_prices[0]),
+                    OutcomeOdds("Draw", book_b_prices[1]),
+                    OutcomeOdds("Germany", book_b_prices[2]),
+                ),
+            )
+        )
+    return MatchOdds(
+        match_id="test-h2h",
+        commence_time="2026-06-20T18:00:00Z",
+        home_team="Spain",
+        away_team="Germany",
+        markets={"h2h": tuple(markets_list)},
+    )
+
+
+def test_extract_fair_1x2_book_level_one_book() -> None:
+    """Single bookmaker → one FairOutcomeMarket returned, probabilities valid."""
+    match = _h2h_match((1.80, 3.60, 4.50))
+    books = extract_fair_1x2_book_level(match, method="multiplicative")
+    assert len(books) == 1
+    book = books[0]
+    assert math.isclose(book.home + book.draw + book.away, 1.0, abs_tol=1e-9)
+    assert book.home > 0 and book.draw > 0 and book.away > 0
+    assert book.home > book.draw > book.away  # Spain favoured
+
+
+def test_extract_fair_1x2_book_level_two_books() -> None:
+    """Two bookmakers → two FairOutcomeMarkets, each independently de-vigged."""
+    match = _h2h_match((1.80, 3.60, 4.50), (1.85, 3.50, 4.40))
+    books = extract_fair_1x2_book_level(match, method="power")
+    assert len(books) == 2
+    for book in books:
+        assert math.isclose(book.home + book.draw + book.away, 1.0, abs_tol=1e-9)
+        assert book.home > 0 and book.draw > 0 and book.away > 0
+    # Books with different prices should give different fair probs
+    assert not math.isclose(books[0].home, books[1].home, abs_tol=1e-6)
+
+
+def test_extract_fair_1x2_book_level_no_h2h_returns_empty() -> None:
+    """Match with no h2h market → empty list."""
+    match = MatchOdds(
+        match_id="no-h2h",
+        commence_time="2026-06-20T18:00:00Z",
+        home_team="Spain",
+        away_team="Germany",
+        markets={},
+    )
+    assert extract_fair_1x2_book_level(match) == []
+
+
+def test_extract_fair_1x2_averages_books() -> None:
+    """extract_fair_1x2 average must lie between the two per-book estimates."""
+    match = _h2h_match((1.80, 3.60, 4.50), (1.90, 3.40, 4.30))
+    books = extract_fair_1x2_book_level(match, method="multiplicative")
+    avg = extract_fair_1x2(match, method="multiplicative")
+    assert avg is not None
+    lo = min(b.home for b in books)
+    hi = max(b.home for b in books)
+    assert lo <= avg.home <= hi
+    assert math.isclose(avg.home + avg.draw + avg.away, 1.0, abs_tol=1e-9)

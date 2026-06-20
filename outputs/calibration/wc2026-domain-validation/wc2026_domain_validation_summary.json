@@ -1,0 +1,21 @@
+{
+  "source": "WC 2026 market_odds_history.csv (closing snapshot per match)",
+  "calibration_profile": "big5_h2h_totals",
+  "devig_method": "multiplicative",
+  "dixon_coles_rho": -0.08,
+  "ci_cutoff": 1.5,
+  "matches": 37,
+  "h2h_totals_matches": 37,
+  "avg_model_points": 2.7972972972972974,
+  "avg_naive_points": 1.4324324324324325,
+  "edge_vs_naive": 1.364864864864865,
+  "exact_hits": 33,
+  "close_hits": 3,
+  "outcome_only_hits": 0,
+  "misses": 1,
+  "outcome_accuracy": 0.972972972972973,
+  "exact_rate": 0.8918918918918919,
+  "avg_rps_1x2": 0.10333507326857135,
+  "avg_total_goals_crps": 0.455171463512832,
+  "results_csv": "/home/user/Claude/outputs/calibration/wc2026-domain-validation/wc2026_domain_validation_results.csv"
+}

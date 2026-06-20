@@ -9,6 +9,7 @@ Covers:
 - Round summary scoring arithmetic
 - Football-Data backtest results per-match metric invariants
 - Oddspedia probability grids (alt source, same invariants as auto)
+- WC 2026 domain validation per-match invariants and summary
 """
 
 from __future__ import annotations
@@ -29,6 +30,8 @@ LEADER_MC_SUMMARY = REPO / "outputs" / "leaderboard_mc" / "leader_mc_summary.jso
 ROUND_BEHAVIOUR = REPO / "inputs" / "round_summary_behaviour.csv"
 BACKTEST_RESULTS = REPO / "outputs" / "calibration" / "current-engine-train" / "football_data_league_backtest_results.csv"
 SMARTBET_GRID_ALT = REPO / "inputs" / "smartbet_grids" / "oddspedia_probability_grids_alt.csv"
+WC2026_RESULTS = REPO / "outputs" / "calibration" / "wc2026-domain-validation" / "wc2026_domain_validation_results.csv"
+WC2026_SUMMARY = REPO / "outputs" / "calibration" / "wc2026-domain-validation" / "wc2026_domain_validation_summary.json"
 
 
 # ---------------------------------------------------------------------------
@@ -398,3 +401,101 @@ def test_alt_grid_team_names_nonempty(alt_grid_rows):
     for row in alt_grid_rows:
         assert row["home_team"].strip(), f"Empty home_team for match {row['match_id']}"
         assert row["away_team"].strip(), f"Empty away_team for match {row['match_id']}"
+
+
+# ---------------------------------------------------------------------------
+# 7. WC 2026 domain validation (37 completed matches vs active engine config)
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture(scope="module")
+def wc2026_rows():
+    with open(WC2026_RESULTS, newline="") as f:
+        return list(csv.DictReader(f))
+
+
+@pytest.fixture(scope="module")
+def wc2026_summary():
+    with open(WC2026_SUMMARY) as f:
+        return json.load(f)
+
+
+def test_wc2026_model_points_valid_values(wc2026_rows):
+    valid = {0.0, 1.0, 1.5, 3.0}
+    for row in wc2026_rows:
+        pts = float(row["model_points"])
+        assert pts in valid, f"model_points={pts}"
+
+
+def test_wc2026_rps_in_range(wc2026_rows):
+    for row in wc2026_rows:
+        rps = float(row["rps_1x2"])
+        assert 0.0 <= rps <= 1.0 + 1e-9, f"{row['home_team']} vs {row['away_team']}: rps_1x2={rps}"
+
+
+def test_wc2026_model_probs_sum_to_one(wc2026_rows):
+    for row in wc2026_rows:
+        total = float(row["model_home_win"]) + float(row["model_draw"]) + float(row["model_away_win"])
+        assert abs(total - 1.0) < 1e-4, (
+            f"{row['home_team']} vs {row['away_team']}: model probs sum to {total}"
+        )
+
+
+def test_wc2026_lambda_positive(wc2026_rows):
+    for row in wc2026_rows:
+        assert float(row["lambda_home"]) > 0, f"lambda_home={row['lambda_home']}"
+        assert float(row["lambda_away"]) > 0, f"lambda_away={row['lambda_away']}"
+
+
+def test_wc2026_exact_hit_scorelines_match(wc2026_rows):
+    """3.0 pts ↔ model scoreline equals actual scoreline."""
+    for row in wc2026_rows:
+        if float(row["model_points"]) == 3.0:
+            assert row["model_scoreline"] == row["actual_scoreline"], (
+                f"3.0 pts but model={row['model_scoreline']} actual={row['actual_scoreline']}"
+            )
+
+
+def test_wc2026_crps_nonnegative(wc2026_rows):
+    for row in wc2026_rows:
+        crps = float(row["total_goals_crps"])
+        assert crps >= 0.0, f"{row['home_team']}: crps={crps}"
+
+
+def test_wc2026_all_have_totals(wc2026_rows):
+    """All 37 WC 2026 market rows also have totals market data."""
+    for row in wc2026_rows:
+        assert row["has_totals"].lower() in ("true", "1"), (
+            f"{row['home_team']} vs {row['away_team']}: has_totals={row['has_totals']}"
+        )
+
+
+def test_wc2026_has_37_rows(wc2026_rows):
+    assert len(wc2026_rows) == 37
+
+
+def test_wc2026_summary_matches_count(wc2026_summary):
+    assert wc2026_summary["matches"] == 37
+
+
+def test_wc2026_summary_avg_points_in_range(wc2026_summary):
+    assert 0.0 <= wc2026_summary["avg_model_points"] <= 3.0
+    assert 0.0 <= wc2026_summary["avg_naive_points"] <= 3.0
+
+
+def test_wc2026_summary_rps_in_range(wc2026_summary):
+    assert 0.0 <= wc2026_summary["avg_rps_1x2"] <= 1.0
+
+
+def test_wc2026_summary_crps_positive(wc2026_summary):
+    assert wc2026_summary["avg_total_goals_crps"] >= 0.0
+
+
+def test_wc2026_summary_hit_counts_sum_to_matches(wc2026_summary):
+    total = (
+        wc2026_summary["exact_hits"]
+        + wc2026_summary["close_hits"]
+        + wc2026_summary["outcome_only_hits"]
+        + wc2026_summary["misses"]
+    )
+    assert total == wc2026_summary["matches"]

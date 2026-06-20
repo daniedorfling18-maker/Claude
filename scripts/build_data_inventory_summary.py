@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-# Action trigger stamp: 2026-06-20T22:41:00+02:00
+# Action trigger stamp: 2026-06-20T22:50:00+02:00
 
 import argparse
 import importlib.util
@@ -125,14 +125,20 @@ def load_module_from_scripts(filename: str, function_name: str) -> Any:
 def find_cached_oddspedia_market_capture(inv: Path, live_markets: Path) -> dict[str, Any]:
     candidates: list[dict[str, Any]] = []
     repo_root = Path.cwd()
-    patterns = [
+    excluded_parts = {".git", "raw_diagnostics", "node_modules", ".venv", "venv"}
+    priority_patterns = [
         "**/*oddspedia*available*markets*.csv",
         "**/*oddspedia*markets*.csv",
         "**/*oddspedia*market*.csv",
+        "**/*market*inventory*.csv",
+        "**/*.csv",
     ]
-    excluded_parts = {".git", "raw_diagnostics", "node_modules", ".venv", "venv"}
-    for pattern in patterns:
+    seen: set[Path] = set()
+    for pattern in priority_patterns:
         for path in repo_root.glob(pattern):
+            if path in seen:
+                continue
+            seen.add(path)
             if not path.is_file():
                 continue
             if any(part in excluded_parts for part in path.parts):
@@ -143,11 +149,23 @@ def find_cached_oddspedia_market_capture(inv: Path, live_markets: Path) -> dict[
             except Exception:
                 pass
             try:
-                frame = pd.read_csv(path, nrows=2000).fillna("")
+                if path.stat().st_size > 125_000_000:
+                    continue
+            except Exception:
+                continue
+            try:
+                frame = pd.read_csv(path, nrows=3000).fillna("")
             except Exception:
                 continue
             cols = set(frame.columns)
-            if "market_path" not in cols and "market_label" not in cols:
+            has_market_cols = "market_path" in cols or "market_label" in cols
+            has_match_cols = "match_id" in cols or {"home_team", "away_team"}.issubset(cols)
+            has_market_content = False
+            if not has_market_cols and len(frame.columns) <= 80:
+                text_sample = " ".join(str(col) for col in frame.columns).lower()
+                if any(token in text_sample for token in ["market", "odds", "bookmaker", "probabilit"]):
+                    has_market_content = True
+            if not (has_market_cols or has_market_content) or not has_match_cols:
                 continue
             row_count = csv_count(path)
             if row_count <= 0:
@@ -158,6 +176,7 @@ def find_cached_oddspedia_market_capture(inv: Path, live_markets: Path) -> dict[
                 "row_count": row_count,
                 "sampled_unique_market_paths": market_paths,
                 "columns": sorted(cols),
+                "matched_by": "market_columns" if has_market_cols else "market_content_header_scan",
             })
     candidates = sorted(candidates, key=lambda r: (int(r["row_count"]), int(r["sampled_unique_market_paths"])), reverse=True)
     return candidates[0] if candidates else {"path": "", "row_count": 0, "sampled_unique_market_paths": 0, "columns": []}

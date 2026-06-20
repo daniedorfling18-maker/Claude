@@ -44,14 +44,23 @@ def flatten_text(value: Any) -> str:
 
 EXTRACT_JS = r"""
 () => {
-  const tables = Array.from(document.querySelectorAll('table')).map((table, idx) => ({
-    index: idx,
-    id: table.id || '',
-    className: table.className || '',
-    caption: table.caption ? table.caption.innerText : '',
-    text: table.innerText.slice(0, 20000),
-    html: table.outerHTML
-  }));
+  function clean(text) {
+    return (text || '').replace(/\s+/g, ' ').trim();
+  }
+  const tables = Array.from(document.querySelectorAll('table')).map((table, idx) => {
+    const matrix = Array.from(table.querySelectorAll('tr')).map(row =>
+      Array.from(row.querySelectorAll('th,td')).map(cell => clean(cell.innerText || cell.textContent))
+    ).filter(row => row.length > 0);
+    return {
+      index: idx,
+      id: table.id || '',
+      className: table.className || '',
+      caption: table.caption ? clean(table.caption.innerText) : '',
+      text: clean(table.innerText).slice(0, 20000),
+      matrix,
+      html: table.outerHTML
+    };
+  });
   const bodyText = document.body ? document.body.innerText.slice(0, 80000) : '';
   return {
     currentUrl: window.location.href,
@@ -65,31 +74,68 @@ EXTRACT_JS = r"""
 """
 
 
+def table_to_frame(item: dict[str, Any]) -> pd.DataFrame:
+    matrix = item.get("matrix") or []
+    rows = [list(map(txt, row)) for row in matrix if isinstance(row, list) and any(txt(c) for c in row)]
+    if not rows:
+        return pd.DataFrame()
+    width = max(len(row) for row in rows)
+    rows = [row + [""] * (width - len(row)) for row in rows]
+    header = rows[0]
+    data = rows[1:]
+    header_has_text = any(re.search(r"[A-Za-z]", cell) for cell in header)
+    if not data:
+        data = rows
+        header = [f"col_{i}" for i in range(width)]
+    elif not header_has_text:
+        data = rows
+        header = [f"col_{i}" for i in range(width)]
+    deduped = []
+    seen: dict[str, int] = {}
+    for i, col in enumerate(header):
+        name = txt(col) or f"col_{i}"
+        norm = re.sub(r"\s+", "_", name.lower()).strip("_") or f"col_{i}"
+        count = seen.get(norm, 0)
+        seen[norm] = count + 1
+        if count:
+            norm = f"{norm}_{count}"
+        deduped.append(norm)
+    return pd.DataFrame(data, columns=deduped).fillna("")
+
+
 def table_score(frame: pd.DataFrame) -> int:
+    if frame.empty:
+        return -999
     cols = " ".join(map(str, frame.columns)).lower()
-    sample = " ".join(frame.astype(str).head(10).fillna("").values.ravel()).lower()
+    sample = " ".join(frame.astype(str).head(12).fillna("").values.ravel()).lower()
     score = 0
-    for token in ["player", "name", "points", "pts", "rank", "position", "pos"]:
+    for token in ["player", "name", "points", "pts", "rank", "position", "pos", "bru"]:
         if token in cols:
             score += 3
         if token in sample:
             score += 1
+    numeric_cols = 0
+    for col in frame.columns:
+        vals = pd.to_numeric(frame[col].astype(str).str.extract(r"(-?\d+(?:\.\d+)?)")[0], errors="coerce")
+        if vals.notna().mean() > 0.4:
+            numeric_cols += 1
+    score += numeric_cols
     return score
 
 
 def guess_leaderboard_table(tables: list[pd.DataFrame]) -> pd.DataFrame:
-    if not tables:
+    candidates = [t for t in tables if not t.empty]
+    if not candidates:
         return pd.DataFrame()
-    ranked = sorted(tables, key=table_score, reverse=True)
+    ranked = sorted(candidates, key=table_score, reverse=True)
     return ranked[0].copy()
 
 
 def find_player_column(frame: pd.DataFrame) -> str | None:
     for col in frame.columns:
         low = col.lower()
-        if any(token in low for token in ["player", "name", "member", "participant", "user"]):
+        if any(token in low for token in ["player", "name", "member", "participant", "user", "bru"]):
             return col
-    # fallback: first mostly text column
     for col in frame.columns:
         values = frame[col].map(txt)
         non_empty = values[values != ""]
@@ -173,16 +219,13 @@ def main() -> int:
 
     parsed_tables: list[pd.DataFrame] = []
     for item in state.get("tables", []):
-        html = txt(item.get("html"))
-        try:
-            frames = pd.read_html(html)
-        except Exception:
-            frames = []
-        for frame_idx, frame in enumerate(frames):
-            parsed = normalise_columns(frame).fillna("")
-            parsed_tables.append(parsed)
-            table_name = f"table_{int(item.get('index', len(parsed_tables))):02d}_{frame_idx:02d}.csv"
-            parsed.to_csv(tables_dir / table_name, index=False)
+        parsed = table_to_frame(item)
+        if parsed.empty:
+            continue
+        parsed = normalise_columns(parsed).fillna("")
+        parsed_tables.append(parsed)
+        table_name = f"table_{int(item.get('index', len(parsed_tables))):02d}.csv"
+        parsed.to_csv(tables_dir / table_name, index=False)
 
     leaderboard = leaderboard_from_tables(parsed_tables)
     leaderboard_path = Path(args.leaderboard_out)

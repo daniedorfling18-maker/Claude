@@ -347,16 +347,18 @@ def fetch_match_odds_snapshot(args: argparse.Namespace, entry: dict[str, Any], o
 
 
 async def login(page, args, diag_dir: Path | None = None) -> bool:
-    try:
-        await page.goto(args.login_url, wait_until="networkidle", timeout=45000)
-    except Exception:
-        await page.goto(args.login_url, wait_until="domcontentloaded", timeout=30000)
-    await page.wait_for_timeout(5000)
-
     if diag_dir:
         diag_dir.mkdir(parents=True, exist_ok=True)
-        await page.screenshot(path=str(diag_dir / "login_page.png"), full_page=True)
-        print(f"  page title: {await page.title()!r}  url: {page.url!r}")
+
+    try:
+        await page.goto(args.login_url, wait_until="domcontentloaded", timeout=45000)
+    except Exception:
+        await page.goto(args.login_url, wait_until="load", timeout=45000)
+
+    await page.wait_for_timeout(3000)
+
+    print(f"  login page title: {await page.title()!r}")
+    print(f"  login page url: {page.url!r}")
 
     for sel in [
         "button[aria-label='CONFIRM']", "button[aria-label='Accept All']",
@@ -369,38 +371,96 @@ async def login(page, args, diag_dir: Path | None = None) -> bool:
     ]:
         try:
             await page.click(sel, timeout=2000)
+            print(f"  consent dismissed via {sel}")
             await page.wait_for_timeout(2500)
             break
         except Exception:
             continue
 
-    for sel in ["input[type=email]", "input[name=email]", "input[name=username]", "input[id*=email]", "input[id*=user]", "input[name=login]", "input[name=user]"]:
+    try:
+        await page.click("button[aria-label='Close success modal']", timeout=2000)
+        await page.wait_for_timeout(1000)
+    except Exception:
+        pass
+
+    if diag_dir:
+        await page.screenshot(path=str(diag_dir / "login_before_submit.png"), full_page=True)
+        html = await page.content()
+        (diag_dir / "login_before_submit.html").write_text(html, encoding="utf-8")
+        inputs = await page.evaluate(
+            "() => Array.from(document.querySelectorAll('input')).map(e => ({type:e.type,name:e.name,id:e.id,placeholder:e.placeholder,visible:e.offsetParent!==null}))"
+        )
+        (diag_dir / "login_inputs.json").write_text(json.dumps(inputs, indent=2), encoding="utf-8")
+        print(f"  login inputs: {inputs}")
+
+    email_filled = False
+    for sel in [
+        "input[type=email]", "input[name=email]", "input[name=username]",
+        "input[id*=email]", "input[id*=user]", "input[name=login]", "input[name=user]"
+    ]:
         try:
             await page.fill(sel, args.email, timeout=3000)
+            print(f"  email filled via {sel}")
+            email_filled = True
             break
         except Exception:
             continue
 
+    password_filled = False
     for sel in ["input[type=password]", "input[name=password]", "input[id*=pass]"]:
         try:
             await page.fill(sel, args.password, timeout=3000)
+            print(f"  password filled via {sel}")
+            password_filled = True
             break
         except Exception:
             continue
 
+    if not email_filled or not password_filled:
+        print(f"  login form not found: email_filled={email_filled} password_filled={password_filled}")
+        if diag_dir:
+            await page.screenshot(path=str(diag_dir / "login_form_not_found.png"), full_page=True)
+        return False
+
     submitted = False
-    for sel in ["button[type=submit]", "input[type=submit]", "button:has-text('Log')", "button:has-text('Sign')"]:
+    for sel in [
+        "button[type=submit]", "input[type=submit]",
+        "button:has-text('Log in')", "button:has-text('Login')",
+        "button:has-text('Log')", "button:has-text('Sign in')", "button:has-text('Sign')"
+    ]:
         try:
             await page.click(sel, timeout=3000)
+            print(f"  submitted via {sel}")
             submitted = True
             break
         except Exception:
             continue
+
     if not submitted:
         await page.keyboard.press("Enter")
+        print("  submitted via Enter")
 
-    await page.wait_for_timeout(5000)
-    return "login" not in page.url.lower()
+    await page.wait_for_timeout(7000)
+
+    print(f"  post-login title: {await page.title()!r}")
+    print(f"  post-login url: {page.url!r}")
+
+    login_ok = "login" not in page.url.lower()
+
+    if not login_ok and diag_dir:
+        await page.screenshot(path=str(diag_dir / "login_failed_after_submit.png"), full_page=True)
+        html = await page.content()
+        (diag_dir / "login_failed_after_submit.html").write_text(html, encoding="utf-8")
+        state = {
+            "title": await page.title(),
+            "url": page.url,
+            "email_filled": email_filled,
+            "password_filled": password_filled,
+            "submitted": submitted,
+        }
+        (diag_dir / "login_failed_state.json").write_text(json.dumps(state, indent=2), encoding="utf-8")
+
+    return login_ok
 
 
 async def submit_pick(args, home_team: str, away_team: str, pick: str, out_dir: Path) -> dict[str, Any]:

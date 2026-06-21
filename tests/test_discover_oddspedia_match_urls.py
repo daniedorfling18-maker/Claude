@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib.util
+import sys
 from pathlib import Path
 
 import pandas as pd
@@ -9,6 +10,7 @@ MODULE_PATH = Path(__file__).resolve().parents[1] / "scripts" / "discover_oddspe
 spec = importlib.util.spec_from_file_location("discover_oddspedia_match_urls", MODULE_PATH)
 discover = importlib.util.module_from_spec(spec)
 assert spec.loader is not None
+sys.modules[spec.name] = discover
 spec.loader.exec_module(discover)
 
 

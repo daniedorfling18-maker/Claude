@@ -288,23 +288,8 @@ jobs:
             outputs/final_leader_decision_daily_robust/**/*.json
           if-no-files-found: warn
 
-      - name: Commit daily outputs
-        if: success() && github.event_name != 'push'
-        continue-on-error: true
+      - name: Skip committing daily outputs
+        if: success()
         run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add -f outputs/market_odds outputs/market_odds_validation outputs/market_odds_history outputs/component_validation outputs/final_locked_picks outputs/daily_robust_card outputs/oddspedia_pick_validation outputs/validation outputs/daily_notifications outputs/backtesting outputs/final_leader_decision_daily_robust || true
-          if git diff --cached --quiet; then
-            echo "No daily output changes to commit."
-          else
-            git commit -m "Update daily Superbru robust card"
-            BRANCH="${GITHUB_REF_NAME:-claude/bold-ride-n3n1ti}"
-            if git fetch origin "$BRANCH" && git pull --rebase --autostash origin "$BRANCH" && git push origin "HEAD:$BRANCH"; then
-              echo "Daily outputs committed and pushed."
-            else
-              echo "::warning::Daily output commit could not be pushed because the branch moved or a generated output conflict occurred. Artifact upload has already preserved the outputs."
-              git rebase --abort || true
-              exit 0
-            fi
-          fi
+          echo "Daily outputs are preserved in the workflow artifact."
+          echo "Skipping git commit/push of generated outputs to avoid non-fast-forward branch conflicts."

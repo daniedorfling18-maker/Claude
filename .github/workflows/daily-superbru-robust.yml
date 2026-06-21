@@ -6,7 +6,6 @@ on:
       - claude/repo-audit-vvb2ot
       - claude/bold-ride-n3n1ti
   schedule:
-    # 07:00 South Africa time (SAST, UTC+2) = 05:00 UTC.
     - cron: "0 5 * * *"
   workflow_dispatch:
     inputs:
@@ -19,10 +18,6 @@ on:
         type: string
         required: false
         default: ""
-      superbru_submit_dry_run:
-        description: "Run Superbru score submission dry-run only. Never submits real picks."
-        type: boolean
-        default: true
 
 permissions:
   contents: write
@@ -129,7 +124,7 @@ jobs:
             --audit-csv outputs/daily_robust_card/daily_switch_audit.csv \
             --out-md outputs/daily_robust_card/score_change_notification.md
 
-      - name: Superbru score submit dry-run manifest
+      - name: Superbru score submit manifest
         if: success()
         run: |
           mkdir -p outputs/superbru_submit_dry_run
@@ -137,34 +132,33 @@ jobs:
           import json
           from pathlib import Path
           src = Path('outputs/daily_robust_card/score_change_notification.json')
-          out = Path('outputs/superbru_submit_dry_run/superbru_submit_dry_run_manifest.json')
+          out = Path('outputs/superbru_submit_dry_run/superbru_submit_manifest.json')
           if not src.exists():
-              payload = {'dry_run': True, 'change_count': 0, 'changes': [], 'status': 'missing_score_change_json'}
+              payload = {'dry_run': False, 'change_count': 0, 'changes': [], 'status': 'missing_score_change_json'}
           else:
               data = json.loads(src.read_text(encoding='utf-8'))
               changes = data.get('changes', []) or []
               payload = {
-                  'dry_run': True,
-                  'real_submit_enabled': False,
+                  'dry_run': False,
+                  'live_submit_enabled': True,
                   'change_count': len(changes),
                   'changes': [
                       {
                           'home_team': c.get('home_team', ''),
                           'away_team': c.get('away_team', ''),
                           'new_pick': c.get('new_pick', ''),
-                          'previous_pick': c.get('previous_pick', ''),
-                          'action': 'would_run_submit_superbru_pick_cdp_with_dry_run'
+                          'previous_pick': c.get('previous_pick', '')
                       }
                       for c in changes
                   ],
-                  'status': 'manifest_only'
+                  'status': 'submit_manifest'
               }
           out.write_text(json.dumps(payload, indent=2), encoding='utf-8')
           print(json.dumps(payload, indent=2))
           PY
 
-      - name: Superbru browser dry-run
-        if: success() && (github.event_name != 'workflow_dispatch' || inputs.superbru_submit_dry_run == true)
+      - name: Superbru browser submit
+        if: success()
         env:
           SUPERBRU_EMAIL: ${{ secrets.SUPERBRU_USERNAME }}
           SUPERBRU_PASSWORD: ${{ secrets.SUPERBRU_PASSWORD }}
@@ -191,7 +185,7 @@ jobs:
           results = []
 
           if changes and (not email or not password):
-              raise SystemExit('SUPERBRU_USERNAME/SUPERBRU_PASSWORD secrets are required for browser dry-run.')
+              raise SystemExit('SUPERBRU_USERNAME/SUPERBRU_PASSWORD secrets are required.')
 
           for c in changes:
               home = c.get('home_team', '')
@@ -199,7 +193,7 @@ jobs:
               new_pick = c.get('new_pick', '')
               cmd = [
                   sys.executable, 'scripts/submit_superbru_pick_cdp.py',
-                  '--launch', '--headless', '--dry-run',
+                  '--launch', '--headless',
                   '--email', email,
                   '--password', password,
                   '--home-team', home,
@@ -207,7 +201,7 @@ jobs:
                   '--new-pick', new_pick,
                   '--diagnostics-dir', str(diag_dir),
               ]
-              print('$ python scripts/submit_superbru_pick_cdp.py --launch --headless --dry-run ' +
+              print('$ python scripts/submit_superbru_pick_cdp.py --launch --headless ' +
                     f'--home-team {home!r} --away-team {away!r} --new-pick {new_pick!r}')
               completed = subprocess.run(cmd, text=True, capture_output=True)
               results.append({
@@ -215,15 +209,15 @@ jobs:
                   'away_team': away,
                   'new_pick': new_pick,
                   'returncode': completed.returncode,
-                  'status': 'dry_run_ok' if completed.returncode == 0 else 'dry_run_failed',
+                  'status': 'submit_ok' if completed.returncode == 0 else 'submit_failed',
                   'stdout_tail': completed.stdout[-3000:],
                   'stderr_tail': completed.stderr[-3000:],
               })
               if completed.returncode != 0:
                   break
 
-          payload = {'dry_run': True, 'change_count': len(changes), 'results': results}
-          Path('outputs/superbru_submit_dry_run/superbru_browser_dry_run_summary.json').write_text(
+          payload = {'dry_run': False, 'live_submit_enabled': True, 'change_count': len(changes), 'results': results}
+          Path('outputs/superbru_submit_dry_run/superbru_browser_submit_summary.json').write_text(
               json.dumps(payload, indent=2), encoding='utf-8'
           )
           print(json.dumps(payload, indent=2))

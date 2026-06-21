@@ -1,0 +1,84 @@
+name: Auto Pick (Scheduled)
+
+on:
+  schedule:
+    # All times UTC; fires 10 min before each kickoff. window_minutes=20 covers cron delays.
+
+    # ── ROUND 3 (Jun 24-28) ──────────────────────────────────────────────────
+    - cron: '50 18 24 6 *'   # Jun 24 19:00 UTC (15:00 ET) – BHI/QAT, SUI/CAN
+    - cron: '50 21 24 6 *'   # Jun 24 22:00 UTC (18:00 ET) – MOR/HAI, SCO/BRA
+    - cron: '50 0 25 6 *'    # Jun 25 01:00 UTC (21:00 ET) – CZE/MEX, RSA/KOR
+    - cron: '50 19 25 6 *'   # Jun 25 20:00 UTC (16:00 ET) – ECU/GER, CUR/CIV
+    - cron: '50 22 25 6 *'   # Jun 25 23:00 UTC (19:00 ET) – JPN/SWE, TUN/NED
+    - cron: '50 1 26 6 *'    # Jun 26 02:00 UTC (22:00 ET) – TUR/USA, PAR/AUS
+    - cron: '50 18 26 6 *'   # Jun 26 19:00 UTC (15:00 ET) – NOR/FRA, SEN/IRQ
+    - cron: '50 23 26 6 *'   # Jun 27 00:00 UTC (20:00 ET) – CPV/KSA, URU/ESP
+    - cron: '50 2 27 6 *'    # Jun 27 03:00 UTC (23:00 ET) – EGY/IRN, NZL/BEL
+    - cron: '50 20 27 6 *'   # Jun 27 21:00 UTC (17:00 ET) – CRO/GHA, PAN/ENG
+    - cron: '20 23 27 6 *'   # Jun 27 23:30 UTC (19:30 ET) – COL/POR, DRC/UZB
+    - cron: '50 1 28 6 *'    # Jun 28 02:00 UTC (22:00 ET) – ALG/AUT, JOR/ARG
+
+    # ── ROUND OF 32 → FINAL (Jun 28 – Jul 19) ───────────────────────────────
+    # Standard knockout slots: 20:00, 23:00, 02:00 UTC (16:00/19:00/22:00 ET)
+    - cron: '50 19 28-30 6 *'   # Jun 28-30 20:00 UTC slot
+    - cron: '50 22 28-30 6 *'   # Jun 28-30 23:00 UTC slot
+    - cron: '50 1 29-31 6 *'    # Jun 29-30 02:00 UTC slot
+    - cron: '50 19 1-19 7 *'    # Jul 1-19 20:00 UTC slot
+    - cron: '50 22 1-19 7 *'    # Jul 1-19 23:00 UTC slot
+    - cron: '50 1 2-20 7 *'     # Jul 2-19 02:00 UTC slot
+  workflow_dispatch:
+    inputs:
+      window_minutes:
+        description: 'Submit picks for games kicking off within this many minutes'
+        required: false
+        default: '20'
+      dry_run:
+        description: 'Dry run only (predict but do not submit)'
+        required: false
+        default: 'false'
+      pool_url:
+        description: 'SuperBru pool URL'
+        required: false
+        default: 'https://www.superbru.com/worldcup_predictor/pool_view.php?t=1296&p=13236623&view=matches'
+
+jobs:
+  auto-pick:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          pip install -e .
+          pip install playwright pandas
+          python -m playwright install chromium --with-deps
+
+      - name: Run auto pick
+        env:
+          SUPERBRU_EMAIL: ${{ secrets.SUPERBRU_USERNAME }}
+          SUPERBRU_PASSWORD: ${{ secrets.SUPERBRU_PASSWORD }}
+        run: |
+          DRY_RUN_FLAG=""
+          if [ "${{ github.event.inputs.dry_run }}" = "true" ]; then
+            DRY_RUN_FLAG="--dry-run"
+          fi
+          python scripts/auto_pick.py \
+            --email "$SUPERBRU_EMAIL" \
+            --password "$SUPERBRU_PASSWORD" \
+            --pool-url "${{ github.event.inputs.pool_url || 'https://www.superbru.com/worldcup_predictor/pool_view.php?t=1296&p=13236623&view=matches' }}" \
+            --window-minutes "${{ github.event.inputs.window_minutes || '20' }}" \
+            --headless \
+            $DRY_RUN_FLAG \
+            --out-dir outputs/pregame_checks/auto_pick
+
+      - name: Upload results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: auto-pick-results-${{ github.run_number }}
+          path: outputs/pregame_checks/
+          retention-days: 7

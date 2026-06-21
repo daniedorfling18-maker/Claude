@@ -1,0 +1,302 @@
+name: Daily Superbru Robust Card
+
+on:
+  push:
+    branches:
+      - claude/repo-audit-vvb2ot
+      - claude/bold-ride-n3n1ti
+  schedule:
+    - cron: "0 5 * * *"
+  workflow_dispatch:
+    inputs:
+      skip_final_simulation:
+        description: "Skip final leader simulation"
+        type: boolean
+        default: false
+      snapshot_id:
+        description: "Optional snapshot id, e.g. 20260620T050000Z"
+        type: string
+        required: false
+        default: ""
+
+permissions:
+  contents: write
+  actions: read
+  issues: write
+
+concurrency:
+  group: daily-superbru-robust-card
+  cancel-in-progress: false
+
+jobs:
+  daily-robust-card:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Capture previous robust card
+        run: |
+          mkdir -p outputs/daily_robust_card
+          if [ -f outputs/daily_robust_card/daily_robust_superbru_card.csv ]; then
+            cp outputs/daily_robust_card/daily_robust_superbru_card.csv outputs/daily_robust_card/previous_superbru_card.csv
+            echo "Previous robust card captured."
+          else
+            echo "No previous robust card found. First run will not notify score changes."
+          fi
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e .
+
+      - name: Run daily robust odds pipeline
+        env:
+          THE_ODDS_API_KEY: ${{ secrets.THE_ODDS_API_KEY }}
+          PYTHONPATH: src
+        run: |
+          SNAPSHOT_ID="${{ inputs.snapshot_id }}"
+          SKIP_FLAG=""
+          if [ "${{ inputs.skip_final_simulation }}" = "true" ]; then
+            SKIP_FLAG="--skip-final-simulation"
+          fi
+          if [ -n "$SNAPSHOT_ID" ]; then
+            python scripts/run_daily_robust_pipeline.py --snapshot-id "$SNAPSHOT_ID" $SKIP_FLAG
+          else
+            python scripts/run_daily_robust_pipeline.py $SKIP_FLAG
+          fi
+
+      - name: Run Oddspedia SmartBet overlay validation
+        if: success()
+        run: |
+          if [ -f inputs/smartbet_grids/oddspedia_probability_grids_auto.csv ] && [ -f inputs/smartbet_grids/oddspedia_probability_summary_auto.csv ]; then
+            python scripts/compare_locked_picks_to_oddspedia.py \
+              --locked-picks-csv outputs/final_locked_picks/superbru_final_card.csv \
+              --oddspedia-grid-csv inputs/smartbet_grids/oddspedia_probability_grids_auto.csv \
+              --oddspedia-summary-csv inputs/smartbet_grids/oddspedia_probability_summary_auto.csv \
+              --out-csv outputs/oddspedia_pick_validation/oddspedia_pick_comparison.csv \
+              --out-json outputs/oddspedia_pick_validation/oddspedia_pick_comparison_summary.json
+          else
+            echo "Oddspedia SmartBet grid inputs not found. Skipping overlay validation."
+          fi
+
+      - name: Build pick validation overlay
+        if: success()
+        run: |
+          python scripts/build_pick_validation_overlay.py \
+            --locked-picks-csv outputs/final_locked_picks/superbru_final_card.csv \
+            --oddspedia-comparison-csv outputs/oddspedia_pick_validation/oddspedia_pick_comparison.csv \
+            --superbru-coverage-csv outputs/data_inventory/superbru_visible_pick_coverage.csv \
+            --superbru-detected-controls-csv outputs/data_inventory/superbru_detected_match_controls.csv \
+            --out-csv outputs/validation/pick_validation_overlay.csv \
+            --out-json outputs/validation/pick_validation_overlay_summary.json
+
+      - name: Build Superbru backtest from committed Oddspedia results
+        if: success()
+        run: |
+          if [ -f outputs/backtesting/oddspedia_results_backfill.csv ]; then
+            python scripts/build_superbru_backtest_from_results.py \
+              --results-csv outputs/backtesting/oddspedia_results_backfill.csv \
+              --picks-csv outputs/final_locked_picks/superbru_final_card.csv \
+              --oddspedia-comparison-csv outputs/oddspedia_pick_validation/oddspedia_pick_comparison.csv \
+              --out-csv outputs/backtesting/superbru_pick_backtest.csv \
+              --out-summary-json outputs/backtesting/backtest_summary.json
+          else
+            echo "Committed Oddspedia results backfill not found. Skipping backtest."
+          fi
+
+      - name: Check whether robust score changes are needed
+        if: success()
+        run: |
+          python scripts/notify_score_changes.py \
+            --current-card-csv outputs/daily_robust_card/daily_robust_superbru_card.csv \
+            --previous-card-csv outputs/daily_robust_card/previous_superbru_card.csv \
+            --audit-csv outputs/daily_robust_card/daily_switch_audit.csv \
+            --out-md outputs/daily_robust_card/score_change_notification.md
+
+      - name: Superbru score submit manifest
+        if: success()
+        run: |
+          mkdir -p outputs/superbru_submit_dry_run
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          src = Path('outputs/daily_robust_card/score_change_notification.json')
+          out = Path('outputs/superbru_submit_dry_run/superbru_submit_manifest.json')
+          if not src.exists():
+              payload = {'dry_run': False, 'change_count': 0, 'changes': [], 'status': 'missing_score_change_json'}
+          else:
+              data = json.loads(src.read_text(encoding='utf-8'))
+              changes = data.get('changes', []) or []
+              payload = {
+                  'dry_run': False,
+                  'live_submit_enabled': True,
+                  'change_count': len(changes),
+                  'changes': [
+                      {
+                          'home_team': c.get('home_team', ''),
+                          'away_team': c.get('away_team', ''),
+                          'new_pick': c.get('new_pick', ''),
+                          'previous_pick': c.get('previous_pick', '')
+                      }
+                      for c in changes
+                  ],
+                  'status': 'submit_manifest'
+              }
+          out.write_text(json.dumps(payload, indent=2), encoding='utf-8')
+          print(json.dumps(payload, indent=2))
+          PY
+
+      - name: Superbru browser submit
+        if: success()
+        env:
+          SUPERBRU_EMAIL: ${{ secrets.SUPERBRU_USERNAME }}
+          SUPERBRU_PASSWORD: ${{ secrets.SUPERBRU_PASSWORD }}
+        run: |
+          python -m pip install playwright
+          python -m playwright install chromium --with-deps
+          python - <<'PY'
+          import json
+          import os
+          import subprocess
+          import sys
+          from pathlib import Path
+
+          src = Path('outputs/daily_robust_card/score_change_notification.json')
+          out_dir = Path('outputs/superbru_submit_dry_run')
+          diag_dir = Path('outputs/pregame_checks/submit_diagnostics')
+          out_dir.mkdir(parents=True, exist_ok=True)
+          diag_dir.mkdir(parents=True, exist_ok=True)
+
+          email = os.environ.get('SUPERBRU_EMAIL', '')
+          password = os.environ.get('SUPERBRU_PASSWORD', '')
+          data = json.loads(src.read_text(encoding='utf-8')) if src.exists() else {'changes': []}
+          changes = data.get('changes', []) or []
+          results = []
+
+          if changes and (not email or not password):
+              raise SystemExit('SUPERBRU_USERNAME/SUPERBRU_PASSWORD secrets are required.')
+
+          for c in changes:
+              home = c.get('home_team', '')
+              away = c.get('away_team', '')
+              new_pick = c.get('new_pick', '')
+              cmd = [
+                  sys.executable, 'scripts/submit_superbru_pick_cdp.py',
+                  '--launch', '--headless',
+                  '--email', email,
+                  '--password', password,
+                  '--home-team', home,
+                  '--away-team', away,
+                  '--new-pick', new_pick,
+                  '--diagnostics-dir', str(diag_dir),
+              ]
+              print('$ python scripts/submit_superbru_pick_cdp.py --launch --headless ' +
+                    f'--home-team {home!r} --away-team {away!r} --new-pick {new_pick!r}')
+              completed = subprocess.run(cmd, text=True, capture_output=True)
+              results.append({
+                  'home_team': home,
+                  'away_team': away,
+                  'new_pick': new_pick,
+                  'returncode': completed.returncode,
+                  'status': 'submit_ok' if completed.returncode == 0 else 'submit_failed',
+                  'stdout_tail': completed.stdout[-3000:],
+                  'stderr_tail': completed.stderr[-3000:],
+              })
+              if completed.returncode != 0:
+                  break
+
+          payload = {'dry_run': False, 'live_submit_enabled': True, 'change_count': len(changes), 'results': results}
+          Path('outputs/superbru_submit_dry_run/superbru_browser_submit_summary.json').write_text(
+              json.dumps(payload, indent=2), encoding='utf-8'
+          )
+          print(json.dumps(payload, indent=2))
+          if any(r['returncode'] != 0 for r in results):
+              raise SystemExit(1)
+          PY
+
+      - name: Build combined daily notification
+        id: action_items
+        if: success()
+        run: |
+          python scripts/notify_daily_superbru_action_items.py \
+            --score-change-json outputs/daily_robust_card/score_change_notification.json \
+            --oddspedia-comparison-csv outputs/oddspedia_pick_validation/oddspedia_pick_comparison.csv \
+            --out-md outputs/daily_notifications/daily_superbru_action_items.md \
+            --out-json outputs/daily_notifications/daily_superbru_action_items.json \
+            --state-json outputs/daily_notifications/daily_superbru_action_state.json \
+            --github-output "$GITHUB_OUTPUT" \
+            --github-step-summary "$GITHUB_STEP_SUMMARY" \
+            --update-state \
+            --notify-on-first-state
+
+      - name: Notify only when action items changed
+        if: steps.action_items.outputs.notify == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh issue create \
+            --title "Superbru action items - $(date -u +%Y-%m-%d)" \
+            --body-file outputs/daily_notifications/daily_superbru_action_items.md
+
+      - name: No notification needed
+        if: steps.action_items.outputs.notify != 'true'
+        run: |
+          echo "No new Superbru action items. No GitHub issue notification created."
+
+      - name: Upload daily robust outputs
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: daily-superbru-robust-card
+          path: |
+            outputs/market_odds/*.csv
+            outputs/market_odds/*.json
+            outputs/market_odds_validation/*.csv
+            outputs/market_odds_validation/*.json
+            outputs/market_odds_history/*.csv
+            outputs/market_odds_history/*.json
+            outputs/component_validation/*.csv
+            outputs/component_validation/*.json
+            outputs/final_locked_picks/*.csv
+            outputs/final_locked_picks/*.json
+            outputs/daily_robust_card/*.csv
+            outputs/daily_robust_card/*.json
+            outputs/daily_robust_card/*.md
+            outputs/oddspedia_pick_validation/*.csv
+            outputs/oddspedia_pick_validation/*.json
+            outputs/validation/*.csv
+            outputs/validation/*.json
+            outputs/superbru_submit_dry_run/*.json
+            outputs/pregame_checks/submit_diagnostics/**
+            outputs/daily_notifications/*.csv
+            outputs/daily_notifications/*.json
+            outputs/daily_notifications/*.md
+            outputs/backtesting/*.csv
+            outputs/backtesting/*.json
+            outputs/final_leader_decision_daily_robust/**/*.csv
+            outputs/final_leader_decision_daily_robust/**/*.json
+          if-no-files-found: warn
+
+      - name: Commit daily outputs
+        if: success()
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add -f outputs/market_odds outputs/market_odds_validation outputs/market_odds_history outputs/component_validation outputs/final_locked_picks outputs/daily_robust_card outputs/oddspedia_pick_validation outputs/validation outputs/daily_notifications outputs/backtesting outputs/final_leader_decision_daily_robust || true
+          if git diff --cached --quiet; then
+            echo "No daily output changes to commit."
+          else
+            git commit -m "Update daily Superbru robust card"
+            git push
+          fi

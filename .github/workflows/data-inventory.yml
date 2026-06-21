@@ -1,0 +1,149 @@
+name: Data Inventory
+# Push-trigger stamp: 2026-06-20T21:34:00+02:00
+
+on:
+  workflow_dispatch:
+    inputs:
+      max_oddspedia_matches:
+        description: "Limit Oddspedia matches for a quicker audit. Use 0 for all matches."
+        required: false
+        default: "0"
+      try_oddspedia_alt_urls:
+        description: "Also inspect alt_url rows where available."
+        required: false
+        type: boolean
+        default: false
+  push:
+    branches:
+      - claude/bold-ride-n3n1ti
+    paths:
+      - ".github/workflows/data-inventory.yml"
+      - "scripts/audit_oddspedia_available_data_cdp_session.py"
+      - "scripts/audit_superbru_available_data_cdp_session.py"
+      - "scripts/filter_oddspedia_high_value_market_paths.py"
+      - "scripts/build_data_inventory_summary.py"
+      - "inputs/oddspedia_match_urls.csv"
+      - "outputs/final_locked_picks/superbru_final_card.csv"
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  data-inventory:
+    name: Run data inventory
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    env:
+      PYTHONPATH: src
+      CHROME_DEBUG_PORT: "9222"
+      SUPERBRU_POOL_URL: "https://www.superbru.com/worldcup_predictor/pool_view.php?t=1296&p=13236623&g=32&view=matches"
+      SUPERBRU_LOGIN_URL: ${{ secrets.SUPERBRU_LOGIN_URL }}
+      SUPERBRU_USERNAME: ${{ secrets.SUPERBRU_USERNAME }}
+      SUPERBRU_PASSWORD: ${{ secrets.SUPERBRU_PASSWORD }}
+      MAX_ODDSPEDIA_MATCHES: ${{ github.event_name == 'workflow_dispatch' && inputs.max_oddspedia_matches || '0' }}
+      TRY_ODDSPEDIA_ALT_URLS: ${{ github.event_name == 'workflow_dispatch' && inputs.try_oddspedia_alt_urls || 'true' }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install pandas playwright
+          python -m playwright install chromium --with-deps
+
+      - name: Start headless Chromium CDP
+        run: |
+          CHROMIUM_PATH=$(python - <<'PY'
+          from playwright.sync_api import sync_playwright
+          with sync_playwright() as p:
+              print(p.chromium.executable_path)
+          PY
+          )
+          echo "Chromium path: $CHROMIUM_PATH"
+          "$CHROMIUM_PATH" \
+            --headless=new \
+            --remote-debugging-address=127.0.0.1 \
+            --remote-debugging-port="$CHROME_DEBUG_PORT" \
+            --user-data-dir=/tmp/superbru-data-inventory-chrome-profile \
+            --no-sandbox \
+            --disable-dev-shm-usage \
+            about:blank > /tmp/chromium-cdp.log 2>&1 &
+          for i in {1..20}; do
+            if curl -fsS "http://127.0.0.1:$CHROME_DEBUG_PORT/json/version" >/dev/null; then
+              echo "Chrome CDP is available."
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "Chrome CDP did not start. Chromium log:"
+          cat /tmp/chromium-cdp.log || true
+          exit 1
+
+      - name: Run Oddspedia inventory audit
+        run: |
+          mkdir -p outputs/data_inventory outputs/data_inventory/raw_diagnostics/oddspedia
+          ODD_ARGS=(
+            "scripts/audit_oddspedia_available_data_cdp_session.py"
+            "--cdp-url" "http://127.0.0.1:$CHROME_DEBUG_PORT"
+            "--urls-csv" "inputs/oddspedia_match_urls.csv"
+            "--out-dir" "outputs/data_inventory"
+            "--diagnostics-dir" "outputs/data_inventory/raw_diagnostics/oddspedia"
+            "--settle-ms" "8000"
+            "--timeout-ms" "90000"
+          )
+          if [ "${MAX_ODDSPEDIA_MATCHES}" != "0" ]; then
+            ODD_ARGS+=("--max-matches" "${MAX_ODDSPEDIA_MATCHES}")
+          fi
+          if [ "${TRY_ODDSPEDIA_ALT_URLS}" = "true" ]; then
+            ODD_ARGS+=("--try-alt-urls")
+          fi
+          python "${ODD_ARGS[@]}"
+
+      - name: Filter Oddspedia high-value market paths
+        run: |
+          python scripts/filter_oddspedia_high_value_market_paths.py \
+            --markets-csv outputs/data_inventory/oddspedia_available_markets.csv \
+            --network-csv outputs/data_inventory/oddspedia_network_inventory.csv \
+            --out-csv outputs/data_inventory/oddspedia_high_value_market_paths.csv \
+            --out-json outputs/data_inventory/oddspedia_high_value_market_paths_summary.json
+
+      - name: Run Superbru round inventory audit
+        continue-on-error: true
+        run: |
+          mkdir -p outputs/data_inventory outputs/data_inventory/raw_diagnostics/superbru
+          python scripts/audit_superbru_available_data_cdp_session.py \
+            --cdp-url "http://127.0.0.1:$CHROME_DEBUG_PORT" \
+            --pool-url "$SUPERBRU_POOL_URL" \
+            --fixtures-csv outputs/final_locked_picks/superbru_final_card.csv \
+            --out-dir outputs/data_inventory \
+            --diagnostics-dir outputs/data_inventory/raw_diagnostics/superbru \
+            --settle-ms 9000 \
+            --timeout-ms 90000
+
+      - name: Build combined data coverage summary
+        run: |
+          python scripts/build_data_inventory_summary.py \
+            --inventory-dir outputs/data_inventory \
+            --out-json outputs/data_inventory/data_coverage_summary.json
+          cat outputs/data_inventory/data_coverage_summary.json
+
+      - name: Upload data inventory artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: data-inventory-${{ github.run_id }}
+          path: |
+            outputs/data_inventory/**
+          if-no-files-found: error
+          retention-days: 14

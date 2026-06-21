@@ -1,18 +1,10 @@
 seed: 20260611
 
 providers:
-  # Odds providers (preferred / oddspedia / the_odds_api) must return bookmaker
-  # markets (h2h, totals, ...) for the EV model. Result providers
-  # (providers.results.*) only need fixtures + scores, so the Oddspedia widget
-  # is fine there but must NOT be used as an odds endpoint (it has no markets).
   preferred: the_odds_api
   oddspedia:
     api_key_env: ODDSPEDIA_API_TOKEN
     api_key_param: api_token
-    # Odds endpoint only. The fixtures widget used under providers.results does
-    # not return bookmaker markets, so leave this empty unless your Oddspedia
-    # plan provides a JSON odds feed. With preferred: the_odds_api this block is
-    # dormant and the model takes odds from The Odds API.
     base_url: ""
     params:
       sport_id: 1
@@ -51,17 +43,13 @@ model:
   candidate_grid_goals: 6
   model_grid_goals: 10
   solver_grid_goals: 14
-  # Calibrated on free Football-Data Big Five h2h+totals odds, 2019/20-2024/25.
-  # This intentionally differs from config.example.yaml's World-Cup-validated
-  # defaults (devig_method: power, dixon_coles_rho: -0.04, odds-only). See README.
+  calibration_profile: big5_h2h_totals
   dixon_coles_rho: -0.08
   devig_method: multiplicative
-  # Set >0 only if your provider/plan returns a correct_score market.
   correct_score_blend_weight: 0.0
-  # Keep odds as the anchor; add a small ratings/form blend for current tournament state.
-  odds_weight: 0.95
-  ratings_weight: 0.05
-  # Applied only when no market odds are available; odds already price venue/host effects.
+  odds_weight: 1.0
+  ratings_weight: 0.0
+  asian_handicap_weight: 0.0
   home_advantage_goals: 0.18
   host_teams:
     - United States
@@ -75,9 +63,41 @@ superbru:
   tie_epsilon: 0.005
   contrarian: false
   contrarian_weight: 0.0
-  # Superbru scores 90 minutes unless drawn after 90; then it scores after extra time.
-  # Penalty shootouts are still scored as draws.
   knockout_result_basis: regular_or_extra_time_if_drawn
+  strategy_mode: raw_ev
+  exact_chase_weight: 1.0
+  public_pick_weight: 0.0
+  differentiation_weight: 0.0
+  risk_aversion: 0.0
+  variance_penalty: 0.0
+  private_chase_max_ev_loss: 0.05
+  private_chase_exact_weight: 1.0
+  private_chase_differentiation_weight: 1.0
+
+sensitivity:
+  enabled: true
+  lambda_pct: 0.05
+  rho_delta: 0.02
+  total_goals_delta: 0.15
+  public_bias_pct: 0.20
+  exact_chase_weights:
+    - 1.0
+    - 1.5
+    - 2.0
+  stability_warning_threshold: 0.70
+
+ratings:
+  enabled: true
+  source: internal_results_elo
+  source_url: ""
+  cutoff_date: ""
+  update_method: elo_margin_log_multiplier
+  k_factor: 24.0
+  base_rating: 1500.0
+  base_total_goals: 2.45
+  elo_goal_scale: 650.0
+  min_matches_full_confidence: 8
+  use_as_fallback_only: true
 
 betting:
   enabled: false
@@ -87,6 +107,38 @@ betting:
   max_decimal_odds: 2.10
   match_winners_only: true
   include_draws: false
+
+public_pick:
+  enabled: true
+  favourite_bias: 1.25
+  famous_team_bias: 1.15
+  clean_sheet_win_bias: 1.10
+  draw_penalty: 0.75
+  nil_nil_penalty: 0.65
+  underdog_penalty: 0.80
+  default_template_weight: 0.45
+  common_scoreline_weights:
+    "1-0": 1.15
+    "2-0": 1.30
+    "2-1": 1.25
+    "1-1": 0.85
+    "0-0": 0.60
+    "3-0": 1.15
+    "0-1": 0.85
+    "0-2": 0.75
+    "1-2": 0.80
+  famous_teams:
+    - Brazil
+    - Argentina
+    - France
+    - England
+    - Germany
+    - Spain
+    - Portugal
+    - Netherlands
+    - Italy
+    - United States
+    - Mexico
 
 paths:
   cache_dir: work/cache

@@ -1,0 +1,11 @@
+{
+  "generated_at_utc": "2026-06-21T08:20:48.098371+00:00",
+  "archive_date": "2026-06-21",
+  "snapshot_rows_written": 40,
+  "rolling_archive_total_rows": 40,
+  "rolling_archive_dates": [
+    "2026-06-21"
+  ],
+  "snapshot_csv": "outputs/backtesting/snapshots/signal_archive_2026-06-21.csv",
+  "rolling_csv": "outputs/backtesting/signal_archive_rolling.csv"
+}

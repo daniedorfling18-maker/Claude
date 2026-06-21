@@ -1,0 +1,23 @@
+# Named calibration profiles for the Superbru score engine.
+#
+# The engine reads the flat values in config.yaml for production predictions. The
+# profile metadata below is used by `superbru-score config-check` and tests to
+# prevent silent drift between config.yaml and the documented calibration anchor.
+active_calibration_profile: big5_h2h_totals
+
+calibration_profiles:
+  worldcup_1x2:
+    evidence_note: "World-Cup-validated on Football-Data 2014/2018/2022 1X2 odds only. Right domain, but not fit on the over/under market used by the live h2h,totals feed. Asian handicap remains disabled until validated."
+    devig_method: power
+    dixon_coles_rho: -0.04
+    odds_weight: 1.0
+    ratings_weight: 0.0
+    asian_handicap_weight: 0.0
+
+  big5_h2h_totals:
+    evidence_note: "Big-Five-league validated on h2h + totals, 2019/20-2024/25. Right market structure, but club leagues rather than World Cup matches. OOS-validated 2026-06-15 as the best held-out h2h_totals cell. Ratings remain fallback-only and are not blended into market-backed fixtures. Asian handicap remains disabled until h2h_totals_ah is rerun and validated."
+    devig_method: multiplicative
+    dixon_coles_rho: -0.08
+    odds_weight: 1.0
+    ratings_weight: 0.0
+    asian_handicap_weight: 0.0

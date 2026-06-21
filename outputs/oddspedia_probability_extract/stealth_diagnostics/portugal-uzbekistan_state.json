@@ -1,0 +1,23 @@
+{
+  "row": {
+    "match_id": "portugal-uzbekistan",
+    "commence_time": "2026-06-23T17:00:00Z",
+    "home_team": "Portugal",
+    "away_team": "Uzbekistan",
+    "url": "https://oddspedia.com/football/portugal-uzbekistan-1232",
+    "alt_url": "https://oddspedia.com/football/uzbekistan-portugal-1232",
+    "match_key": "1232",
+    "match_score": "100"
+  },
+  "last_state": {
+    "sourceName": "",
+    "probabilities": null,
+    "marketIds": [],
+    "hasCorrectScore": false,
+    "hasAnyProbs": false,
+    "eventId": null,
+    "currentUrl": "https://oddspedia.com/football/uzbekistan-portugal-1232",
+    "title": "Just a moment...",
+    "bodyText": "oddspedia.com\nPerforming security verification\n\nThis website uses a security service to protect against malicious bots. This page is displayed while the website verifies you are not a bot.\n\nRay ID: a0f0321f0c7815b6\nPerformance and Security by Cloudflare\nPrivacy"
+  }
+}

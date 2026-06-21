@@ -1,0 +1,2 @@
+scraped_at_utc,match_id,home_team,away_team,url,winner_home_pct,winner_draw_pct,winner_away_pct,smartbet_forecast_correct,correct_score_modal,correct_score_probability_tokens,correct_score_probability_count,correct_score_block,error
+2026-06-20T11:52:30.862591+00:00,mex-rsa,Mexico,South Africa,https://oddspedia.com/football/mexico-south-africa-1654545,,,,,,,0,,403 Client Error: Forbidden for url: https://oddspedia.com/football/mexico-south-africa-1654545

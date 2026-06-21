@@ -1,0 +1,23 @@
+{
+  "row": {
+    "match_id": "england-ghana",
+    "commence_time": "2026-06-23T20:00:00Z",
+    "home_team": "England",
+    "away_team": "Ghana",
+    "url": "https://oddspedia.com/football/england-ghana-1654594",
+    "alt_url": "https://oddspedia.com/football/ghana-england-1654594",
+    "match_key": "1654594",
+    "match_score": "100"
+  },
+  "last_state": {
+    "sourceName": "",
+    "probabilities": null,
+    "marketIds": [],
+    "hasCorrectScore": false,
+    "hasAnyProbs": false,
+    "eventId": null,
+    "currentUrl": "https://oddspedia.com/football/ghana-england-1654594",
+    "title": "Just a moment...",
+    "bodyText": "oddspedia.com\nPerforming security verification\n\nThis website uses a security service to protect against malicious bots. This page is displayed while the website verifies you are not a bot.\n\nRay ID: a0f0321f0c7d15b6\nPerformance and Security by Cloudflare\nPrivacy"
+  }
+}

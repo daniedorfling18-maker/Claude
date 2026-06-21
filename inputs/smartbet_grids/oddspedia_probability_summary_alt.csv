@@ -1,0 +1,16 @@
+match_id,home_team,away_team,source_url,winner_home_pct,winner_draw_pct,winner_away_pct,correct_score_count,modal_correct_score,modal_correct_score_pct,best_odds_value,best_odds_bookie,best_odds_scoreline,source_state_file
+argentina-austria,Argentina,Austria,https://oddspedia.com/football/austria-argentina-1654585,,,,0,,,,,,outputs\oddspedia_page_debug_alt\argentina-austria_page_state.json
+belgium-iran,Belgium,Iran,https://oddspedia.com/football/iran-belgium-1654569,,,,0,,,,,,outputs\oddspedia_page_debug_alt\belgium-iran_page_state.json
+colombia-dr-congo,Colombia,DR Congo,https://oddspedia.com/football/dr-congo-colombia-1869932,,,,0,,,,,,outputs\oddspedia_page_debug_alt\colombia-dr-congo_page_state.json
+ecuador-curacao,Ecuador,Curacao,https://oddspedia.com/football/curacao-ecuador-1654564,,,,0,,,,,,outputs\oddspedia_page_debug_alt\ecuador-curacao_page_state.json
+england-ghana,England,Ghana,https://oddspedia.com/football/ghana-england-1654594,,,,0,,,,,,outputs\oddspedia_page_debug_alt\england-ghana_page_state.json
+france-iraq,France,Iraq,https://oddspedia.com/football/iraq-france-1869928,,,,0,,,,,,outputs\oddspedia_page_debug_alt\france-iraq_page_state.json
+germany-ivory-coast,Germany,Ivory Coast,https://oddspedia.com/football/ivory-coast-germany-1654563,55.85,22.0,22.15,19,1-1,10.25,,,,outputs\oddspedia_page_debug_alt\germany-ivory-coast_page_state.json
+jordan-algeria,Jordan,Algeria,https://oddspedia.com/football/algeria-jordan-1654586,,,,0,,,,,,outputs\oddspedia_page_debug_alt\jordan-algeria_page_state.json
+new-zealand-egypt,New Zealand,Egypt,https://oddspedia.com/football/egypt-new-zealand-1295549,,,,0,,,,,,outputs\oddspedia_page_debug_alt\new-zealand-egypt_page_state.json
+norway-senegal,Norway,Senegal,https://oddspedia.com/football/senegal-norway-1654581,,,,0,,,,,,outputs\oddspedia_page_debug_alt\norway-senegal_page_state.json
+panama-croatia,Panama,Croatia,https://oddspedia.com/football/croatia-panama-1654595,,,,0,,,,,,outputs\oddspedia_page_debug_alt\panama-croatia_page_state.json
+portugal-uzbekistan,Portugal,Uzbekistan,https://oddspedia.com/football/uzbekistan-portugal-1232,,,,0,,,,,,outputs\oddspedia_page_debug_alt\portugal-uzbekistan_page_state.json
+spain-saudi-arabia,Spain,Saudi Arabia,https://oddspedia.com/football/saudi-arabia-spain-1654576,,,,0,,,,,,outputs\oddspedia_page_debug_alt\spain-saudi-arabia_page_state.json
+tunisia-japan,Tunisia,Japan,https://oddspedia.com/football/japan-tunisia-957,,,,0,,,,,,outputs\oddspedia_page_debug_alt\tunisia-japan_page_state.json
+uruguay-cape-verde,Uruguay,Cape Verde,https://oddspedia.com/football/cape-verde-uruguay-1654577,,,,0,,,,,,outputs\oddspedia_page_debug_alt\uruguay-cape-verde_page_state.json

@@ -1,0 +1,16 @@
+{
+  "generated_at_utc": "2026-06-21T08:20:46.371730+00:00",
+  "locked_picks_csv": "outputs/final_locked_picks/superbru_final_card.csv",
+  "oddspedia_grid_csv": "inputs/smartbet_grids/oddspedia_probability_grids_auto.csv",
+  "match_count": 40,
+  "score_candidate_count": 256,
+  "review_count": 1,
+  "review_level_counts": {
+    "no_grid": 24,
+    "none": 15,
+    "ev_review": 1
+  },
+  "close_score_rule": "same outcome and both team-goal estimates within one goal, excluding exact",
+  "out_by_score_csv": "outputs/oddspedia_pick_validation/oddspedia_superbru_ev_by_score.csv",
+  "out_recommendations_csv": "outputs/oddspedia_pick_validation/oddspedia_ev_recommendations.csv"
+}

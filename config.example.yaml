@@ -50,15 +50,18 @@ model:
   candidate_grid_goals: 6
   model_grid_goals: 10
   solver_grid_goals: 14
+  # Must match a key in calibration_profiles.yaml; run `superbru-score config-check`.
+  calibration_profile: worldcup_1x2
   # Calibrated on Football-Data 2014/2018/2022 World Cup 1X2 odds.
   dixon_coles_rho: -0.04
   devig_method: power
   # Set >0 only if your provider/plan returns a correct_score market.
   correct_score_blend_weight: 0.0
-  # Calibrated on Football-Data 2014/2018/2022 World Cup 1X2 odds.
   # Ratings still fill gaps when market odds are missing.
   odds_weight: 1.0
   ratings_weight: 0.0
+  # Disabled until h2h_totals_ah is validated out of sample.
+  asian_handicap_weight: 0.0
   # Applied only when no market odds are available; odds already price venue/host effects.
   home_advantage_goals: 0.18
   host_teams:
@@ -76,6 +79,47 @@ superbru:
   # Superbru scores 90 minutes unless drawn after 90; then it scores after extra time.
   # Penalty shootouts are still scored as draws.
   knockout_result_basis: regular_or_extra_time_if_drawn
+  # Strategy layer. Defaults reproduce the raw expected-points pick exactly.
+  # strategy_mode: raw_ev | conservative | exact_chase | contrarian | risk_adjusted | private_chase
+  strategy_mode: raw_ev
+  exact_chase_weight: 1.0      # >1 tilts the exact_chase pick toward the modal score
+  public_pick_weight: 0.0      # alpha: reward EV above the synthetic field EV
+  differentiation_weight: 0.0  # delta: reward low synthetic public-pick share
+  risk_aversion: 0.0           # beta: penalise P(zero points)
+  variance_penalty: 0.0        # gamma: penalise points variance
+  private_chase_max_ev_loss: 0.05
+  private_chase_exact_weight: 1.0
+  private_chase_differentiation_weight: 1.0
+
+# Decision-level stress test. These perturb the already-built scoreline matrix
+# and strategic decision settings to show how stable the recommended pick is.
+sensitivity:
+  enabled: true
+  lambda_pct: 0.05
+  rho_delta: 0.02
+  total_goals_delta: 0.15
+  public_bias_pct: 0.20
+  exact_chase_weights:
+    - 1.0
+    - 1.5
+    - 2.0
+  stability_warning_threshold: 0.70
+
+# Ratings/Elo governance. Ratings are intentionally auditable and lower-trust
+# than market odds. Keep use_as_fallback_only true unless you have validated the
+# blend in a proper backtest.
+ratings:
+  enabled: true
+  source: internal_results_elo
+  source_url: ""
+  cutoff_date: ""
+  update_method: elo_margin_log_multiplier
+  k_factor: 24.0
+  base_rating: 1500.0
+  base_total_goals: 2.45
+  elo_goal_scale: 650.0
+  min_matches_full_confidence: 8
+  use_as_fallback_only: true
 
 betting:
   enabled: false
@@ -85,6 +129,41 @@ betting:
   max_decimal_odds: 2.10
   match_winners_only: true
   include_draws: false
+
+# SYNTHETIC model of how a Superbru pool likely picks (real picks are never
+# visible before lock). Used only by strategic/contrarian overlays, never by the
+# default raw-EV pick. Estimates only - not real pool data.
+public_pick:
+  enabled: true
+  favourite_bias: 1.25
+  famous_team_bias: 1.15
+  clean_sheet_win_bias: 1.10
+  draw_penalty: 0.75
+  nil_nil_penalty: 0.65
+  underdog_penalty: 0.80
+  default_template_weight: 0.45
+  common_scoreline_weights:
+    "1-0": 1.15
+    "2-0": 1.30
+    "2-1": 1.25
+    "1-1": 0.85
+    "0-0": 0.60
+    "3-0": 1.15
+    "0-1": 0.85
+    "0-2": 0.75
+    "1-2": 0.80
+  famous_teams:
+    - Brazil
+    - Argentina
+    - France
+    - England
+    - Germany
+    - Spain
+    - Portugal
+    - Netherlands
+    - Italy
+    - United States
+    - Mexico
 
 paths:
   cache_dir: work/cache

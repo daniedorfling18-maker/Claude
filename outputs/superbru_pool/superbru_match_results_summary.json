@@ -1,0 +1,12 @@
+{
+  "generated_at_utc": "2026-06-20T16:39:46.611805+00:00",
+  "pool_url": "https://www.superbru.com/worldcup_predictor/pool_view.php?t=1296&p=13236623&g=32&view=matches",
+  "round_controls_found": 3,
+  "rounds_clicked": 3,
+  "raw_results_found": 66,
+  "deduped_results_found": 8,
+  "diagnostics_dir": "outputs\\superbru_pool\\results_diagnostics",
+  "note": "Extracts completed match result rows from each Superbru round tab, including Round 1.",
+  "out_csv": "outputs\\superbru_pool\\superbru_match_results_auto.csv",
+  "out_summary_json": "outputs\\superbru_pool\\superbru_match_results_summary.json"
+}

@@ -1,0 +1,5 @@
+match_id,commence_time,home_team,away_team,home_goals,away_goals,neutral,venue_country,stage
+wc26-001,2026-06-15T19:00:00Z,Mexico,South Africa,1,0,true,Mexico,Group A
+wc26-002,2026-06-16T00:00:00Z,Canada,Japan,1,1,true,Canada,Group B
+wc26-003,2026-06-16T19:00:00Z,Brazil,Germany,2,1,true,United States,Group C
+

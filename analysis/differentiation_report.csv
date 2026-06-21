@@ -1,0 +1,57 @@
+kickoff,home,away,mkt_pick,mkt_p,mdl_pick,mdl_p,mkt_on_mdlpick,opportunity,tier,elo_diff
+06-17 23:00Z,Ghana,Panama,Ghana,0.44,Panama,0.57,0.28,0.295,STRONG,-207
+06-19 19:00Z,USA,Australia,USA,0.59,Australia,0.38,0.18,0.204,STRONG,-62
+06-27 03:00Z,Egypt,Iran,Egypt,0.42,Iran,0.43,0.27,0.161,STRONG,-98
+06-28 02:00Z,Algeria,Austria,Austria,0.44,Algeria,0.42,0.26,0.151,STRONG,22
+06-26 02:00Z,Paraguay,Australia,Paraguay,0.44,Australia,0.4,0.27,0.127,STRONG,-78
+06-27 23:30Z,Colombia,Portugal,Portugal,0.44,Colombia,0.39,0.27,0.116,STRONG,0
+06-27 23:30Z,DR Congo,Uzbekistan,DR Congo,0.41,Uzbekistan,0.41,0.3,0.104,STRONG,-83
+06-26 02:00Z,Turkey,USA,USA,0.39,Turkey,0.42,0.34,0.076,LEAN,26
+06-27 00:00Z,Cape Verde,Saudi Arabia,Cape Verde,0.38,Saudi Arabia,0.39,0.35,0.04,slight,-70
+06-25 23:00Z,Japan,Sweden,Japan,0.45,Japan,0.66,0.45,0.214,CONSENSUS,215
+06-27 21:00Z,Croatia,Ghana,Croatia,0.57,Croatia,0.77,0.57,0.195,CONSENSUS,313
+06-22 17:00Z,Argentina,Austria,Argentina,0.59,Argentina,0.74,0.59,0.158,CONSENSUS,289
+06-23 20:00Z,England,Ghana,England,0.72,England,0.86,0.72,0.137,CONSENSUS,425
+06-18 19:00Z,Switzerland,Bosnia & Herzegovina,Switzerland,0.61,Switzerland,0.73,0.61,0.125,CONSENSUS,276
+06-21 22:00Z,Uruguay,Cape Verde,Uruguay,0.66,Uruguay,0.76,0.66,0.101,CONSENSUS,309
+06-20 17:00Z,Netherlands,Sweden,Netherlands,0.57,Netherlands,0.66,0.57,0.093,CONSENSUS,214
+06-24 02:00Z,Colombia,DR Congo,Colombia,0.65,Colombia,0.73,0.65,0.079,CONSENSUS,274
+06-17 01:00Z,Argentina,Algeria,Argentina,0.69,Argentina,0.72,0.69,0.036,CONSENSUS,266
+06-21 04:00Z,Tunisia,Japan,Japan,0.63,Japan,0.66,0.63,0.03,CONSENSUS,-277
+06-25 01:00Z,Czech Republic,Mexico,Mexico,0.52,Mexico,0.55,0.52,0.028,CONSENSUS,-192
+06-25 01:00Z,South Africa,South Korea,South Korea,0.59,South Korea,0.61,0.59,0.025,CONSENSUS,-241
+06-26 19:00Z,Norway,France,France,0.52,France,0.54,0.52,0.024,CONSENSUS,-185
+06-27 00:00Z,Uruguay,Spain,Spain,0.58,Spain,0.59,0.58,0.016,CONSENSUS,-226
+06-21 16:00Z,Spain,Saudi Arabia,Spain,0.87,Spain,0.88,0.87,0.013,CONSENSUS,465
+06-24 22:00Z,Morocco,Haiti,Morocco,0.73,Morocco,0.75,0.73,0.013,CONSENSUS,290
+06-20 20:00Z,Germany,Ivory Coast,Germany,0.62,Germany,0.61,0.62,-0.003,CONSENSUS,175
+06-24 19:00Z,Switzerland,Canada,Switzerland,0.45,Switzerland,0.44,0.45,-0.01,CONSENSUS,38
+06-17 17:00Z,Portugal,DR Congo,Portugal,0.75,Portugal,0.73,0.75,-0.017,CONSENSUS,274
+06-16 19:00Z,France,Senegal,France,0.65,France,0.63,0.65,-0.018,CONSENSUS,190
+06-17 20:00Z,England,Croatia,England,0.56,England,0.53,0.56,-0.025,CONSENSUS,112
+06-20 03:00Z,Turkey,Paraguay,Turkey,0.47,Turkey,0.44,0.47,-0.027,CONSENSUS,42
+06-28 02:00Z,Jordan,Argentina,Argentina,0.79,Argentina,0.75,0.79,-0.035,CONSENSUS,-365
+06-25 23:00Z,Tunisia,Netherlands,Netherlands,0.7,Netherlands,0.66,0.7,-0.042,CONSENSUS,-277
+06-18 16:00Z,Czech Republic,South Africa,Czech Republic,0.54,Czech Republic,0.49,0.54,-0.047,CONSENSUS,82
+06-23 00:00Z,Norway,Senegal,Norway,0.45,Norway,0.39,0.45,-0.053,CONSENSUS,5
+06-19 01:00Z,Mexico,South Korea,Mexico,0.48,Mexico,0.43,0.48,-0.054,CONSENSUS,33
+06-19 22:00Z,Scotland,Morocco,Morocco,0.55,Morocco,0.49,0.55,-0.056,CONSENSUS,-146
+06-18 22:00Z,Canada,Qatar,Canada,0.75,Canada,0.69,0.75,-0.057,CONSENSUS,242
+06-22 21:00Z,France,Iraq,France,0.86,France,0.79,0.86,-0.068,CONSENSUS,335
+06-21 00:00Z,Ecuador,Curaçao,Ecuador,0.87,Ecuador,0.8,0.87,-0.069,CONSENSUS,346
+06-20 01:00Z,Brazil,Haiti,Brazil,0.87,Brazil,0.8,0.87,-0.071,CONSENSUS,344
+06-26 19:00Z,Senegal,Iraq,Senegal,0.67,Senegal,0.58,0.67,-0.095,CONSENSUS,145
+06-24 22:00Z,Scotland,Brazil,Brazil,0.66,Brazil,0.56,0.66,-0.099,CONSENSUS,-200
+06-23 17:00Z,Portugal,Uzbekistan,Portugal,0.77,Portugal,0.63,0.77,-0.131,CONSENSUS,191
+06-18 02:00Z,Uzbekistan,Colombia,Colombia,0.69,Colombia,0.55,0.69,-0.141,CONSENSUS,-191
+06-27 21:00Z,Panama,England,England,0.74,England,0.58,0.74,-0.157,CONSENSUS,-217
+06-27 03:00Z,New Zealand,Belgium,Belgium,0.73,Belgium,0.56,0.73,-0.167,CONSENSUS,-199
+06-22 01:00Z,New Zealand,Egypt,Egypt,0.55,Egypt,0.38,0.55,-0.173,CONSENSUS,-58
+06-23 23:00Z,Panama,Croatia,Croatia,0.61,Croatia,0.44,0.61,-0.174,CONSENSUS,-106
+06-25 20:00Z,Ecuador,Germany,Germany,0.55,Germany,0.36,0.55,-0.185,CONSENSUS,-45
+06-23 03:00Z,Jordan,Algeria,Algeria,0.64,Algeria,0.43,0.64,-0.207,CONSENSUS,-99
+06-24 19:00Z,Bosnia & Herzegovina,Qatar,Bosnia & Herzegovina,0.61,Bosnia & Herzegovina,0.39,0.61,-0.216,CONSENSUS,4
+06-17 04:00Z,Austria,Jordan,Austria,0.72,Austria,0.49,0.72,-0.231,CONSENSUS,76
+06-25 20:00Z,Curaçao,Ivory Coast,Ivory Coast,0.81,Ivory Coast,0.58,0.81,-0.231,CONSENSUS,-216
+06-21 19:00Z,Belgium,Iran,Belgium,0.68,Belgium,0.44,0.68,-0.242,CONSENSUS,44
+06-16 22:00Z,Iraq,Norway,Norway,0.81,Norway,0.5,0.81,-0.313,CONSENSUS,-150

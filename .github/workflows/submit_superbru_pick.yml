@@ -1,0 +1,61 @@
+name: Submit SuperBru Pick
+
+on:
+  workflow_dispatch:
+    inputs:
+      home_team:
+        description: 'Home team name'
+        required: true
+        default: 'Spain'
+      away_team:
+        description: 'Away team name'
+        required: true
+        default: 'Saudi Arabia'
+      new_pick:
+        description: 'Pick to submit (H-A format, e.g. 2-1)'
+        required: true
+        default: '2-1'
+      pool_url:
+        description: 'SuperBru pool URL'
+        required: false
+        default: 'https://www.superbru.com/worldcup_predictor/pool_view.php?t=1296&p=13236623&g=37&view=matches'
+
+jobs:
+  submit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          pip install -e .
+          pip install playwright pandas
+          python -m playwright install chromium --with-deps
+
+      - name: Submit pick
+        env:
+          SUPERBRU_EMAIL: ${{ secrets.SUPERBRU_USERNAME }}
+          SUPERBRU_PASSWORD: ${{ secrets.SUPERBRU_PASSWORD }}
+        run: |
+          python scripts/submit_superbru_pick_cdp.py \
+            --launch \
+            --headless \
+            --email "$SUPERBRU_EMAIL" \
+            --password "$SUPERBRU_PASSWORD" \
+            --pool-url "${{ github.event.inputs.pool_url }}" \
+            --home-team "${{ github.event.inputs.home_team }}" \
+            --away-team "${{ github.event.inputs.away_team }}" \
+            --new-pick "${{ github.event.inputs.new_pick }}" \
+            --diagnostics-dir outputs/pregame_checks/submit_diagnostics
+
+      - name: Upload diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: submit-diagnostics
+          path: outputs/pregame_checks/submit_diagnostics/
+          retention-days: 7

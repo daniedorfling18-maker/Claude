@@ -1,0 +1,93 @@
+{
+  "generated_at_utc": "2026-06-21T08:20:48.481885+00:00",
+  "status": "valid",
+  "warning": "Only rows joined to trusted completed results are scored. Market-history home_goals/away_goals are never treated as actual results.",
+  "trusted_results_csv": "outputs/superbru_pool/superbru_match_results_auto.csv",
+  "market_history_csv": "outputs/market_odds_history/market_odds_history.csv",
+  "trusted_completed_match_count": 8,
+  "scored_policy_rows": 48,
+  "policy_summaries": [
+    {
+      "policy": "daily_robust_card",
+      "matches": 0,
+      "total_points": 0.0,
+      "avg_points": null,
+      "exact_hits": 0,
+      "close_hits": 0,
+      "result_only_hits": 0,
+      "misses": 0,
+      "invalid_or_blank_picks": 8
+    },
+    {
+      "policy": "final_leader_defence",
+      "matches": 0,
+      "total_points": 0.0,
+      "avg_points": null,
+      "exact_hits": 0,
+      "close_hits": 0,
+      "result_only_hits": 0,
+      "misses": 0,
+      "invalid_or_blank_picks": 8
+    },
+    {
+      "policy": "naive_favourite_low_score",
+      "matches": 0,
+      "total_points": 0.0,
+      "avg_points": null,
+      "exact_hits": 0,
+      "close_hits": 0,
+      "result_only_hits": 0,
+      "misses": 0,
+      "invalid_or_blank_picks": 8
+    },
+    {
+      "policy": "oddspedia_ev",
+      "matches": 0,
+      "total_points": 0.0,
+      "avg_points": null,
+      "exact_hits": 0,
+      "close_hits": 0,
+      "result_only_hits": 0,
+      "misses": 0,
+      "invalid_or_blank_picks": 8
+    },
+    {
+      "policy": "oddspedia_modal",
+      "matches": 0,
+      "total_points": 0.0,
+      "avg_points": null,
+      "exact_hits": 0,
+      "close_hits": 0,
+      "result_only_hits": 0,
+      "misses": 0,
+      "invalid_or_blank_picks": 8
+    },
+    {
+      "policy": "raw_ev_model",
+      "matches": 0,
+      "total_points": 0.0,
+      "avg_points": null,
+      "exact_hits": 0,
+      "close_hits": 0,
+      "result_only_hits": 0,
+      "misses": 0,
+      "invalid_or_blank_picks": 8
+    }
+  ],
+  "oddspedia_promotion_gate": {
+    "status": "not_promoted",
+    "reason": "Oddspedia remains advisory until coverage and trusted backtest evidence pass thresholds.",
+    "min_ok_coverage": 0.85,
+    "min_backtest_matches": 30,
+    "grid_match_count": 48,
+    "grid_ok_match_count": 24,
+    "grid_ok_coverage": 0.5,
+    "trusted_oddspedia_backtest_matches": 0,
+    "coverage_passed": false,
+    "backtest_volume_passed": false
+  },
+  "outputs": {
+    "rolling_csv": "outputs/backtesting/live_signal_backtest_rolling.csv",
+    "summary_json": "outputs/backtesting/live_signal_backtest_summary.json"
+  }
+}

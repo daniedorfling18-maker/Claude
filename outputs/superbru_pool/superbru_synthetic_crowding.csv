@@ -1,0 +1,41 @@
+match_id,commence_time,home_team,away_team,locked_pick,locked_pick_outcome,locked_pick_rank_in_grid,est_pool_pct_on_locked_pick,est_pool_players_on_locked_pick,modal_score_estimate,est_pool_pct_on_modal,top1_score,top1_grid_pct,top1_est_pool_pct,crowding_risk_flag,differentiation_flag,contrarian_premium_flag,crowding_signal
+netherlands-sweden,2026-06-20T17:00:00Z,Netherlands,Sweden,2-0,home,,0.0,0.0,1-1,40.0,1-1,10.85,40.0,False,True,False,contrarian
+germany-ivory-coast,2026-06-20T20:00:00Z,Germany,Ivory Coast,2-0,home,,0.0,0.0,1-1,40.0,1-1,10.25,40.0,False,True,False,contrarian
+ecuador-curacao,2026-06-21T00:00:00Z,Ecuador,Curacao,2-0,home,3.0,16.5,5.3,1-0,44.0,1-0,12.93,44.0,False,False,False,moderate
+tunisia-japan,2026-06-21T04:00:00Z,Tunisia,Japan,0-2,away,3.0,13.2,4.2,0-1,35.2,0-1,12.81,35.2,False,False,False,moderate
+spain-saudi-arabia,2026-06-21T16:00:00Z,Spain,Saudi Arabia,3-0,home,,0.0,0.0,1-0,44.0,1-0,14.26,44.0,False,True,False,contrarian
+belgium-iran,2026-06-21T19:00:00Z,Belgium,Iran,2-0,home,,0.0,0.0,1-1,40.0,1-1,11.24,40.0,False,True,False,contrarian
+uruguay-cape-verde,2026-06-21T22:00:00Z,Uruguay,Cape Verde,2-0,home,3.0,16.5,5.3,1-0,44.0,1-0,15.0,44.0,False,False,False,moderate
+new-zealand-egypt,2026-06-22T01:00:00Z,New Zealand,Egypt,0-2,away,,0.0,0.0,0-1,35.2,0-1,13.15,35.2,False,True,False,contrarian
+argentina-austria,2026-06-22T17:00:00Z,Argentina,Austria,2-0,home,,0.0,0.0,1-1,40.0,1-1,11.2,40.0,False,True,False,contrarian
+france-iraq,2026-06-22T21:00:00Z,France,Iraq,3-0,home,3.0,13.2,4.2,1-0,44.0,1-0,15.89,44.0,False,False,False,moderate
+norway-senegal,2026-06-23T00:00:00Z,Norway,Senegal,2-1,home,2.0,24.8,7.9,1-1,40.0,1-1,11.25,40.0,False,False,False,moderate
+jordan-algeria,2026-06-23T03:00:00Z,Jordan,Algeria,0-2,away,,0.0,0.0,1-1,40.0,1-1,11.26,40.0,False,True,False,contrarian
+portugal-uzbekistan,2026-06-23T17:00:00Z,Portugal,Uzbekistan,2-0,home,2.0,24.8,7.9,1-0,44.0,1-0,15.96,44.0,False,False,False,moderate
+england-ghana,2026-06-23T20:00:00Z,England,Ghana,2-0,home,2.0,24.8,7.9,1-0,44.0,1-0,14.22,44.0,False,False,False,moderate
+panama-croatia,2026-06-23T23:00:00Z,Panama,Croatia,0-2,away,,0.0,0.0,1-1,40.0,1-1,10.79,40.0,False,True,False,contrarian
+colombia-dr-congo,2026-06-24T02:00:00Z,Colombia,DR Congo,2-0,home,3.0,16.5,5.3,1-0,44.0,1-0,14.01,44.0,False,False,False,moderate
+bosnia-and-herzegovina-qatar,2026-06-24T19:00:00Z,Bosnia & Herzegovina,Qatar,2-0,home,,0.0,0.0,,0.0,,,,False,True,False,contrarian
+switzerland-canada,2026-06-24T19:00:00Z,Switzerland,Canada,1-0,home,,0.0,0.0,,0.0,,,,False,True,False,contrarian
+morocco-haiti,2026-06-24T22:00:00Z,Morocco,Haiti,2-0,home,,0.0,0.0,,0.0,,,,False,True,False,contrarian
+scotland-brazil,2026-06-24T22:00:00Z,Scotland,Brazil,0-2,away,,0.0,0.0,,0.0,,,,False,True,False,contrarian
+czech-republic-mexico,2026-06-25T01:00:00Z,Czech Republic,Mexico,0-2,away,,0.0,0.0,,0.0,,,,False,True,False,contrarian
+south-africa-south-korea,2026-06-25T01:00:00Z,South Africa,South Korea,0-2,away,,0.0,0.0,,0.0,,,,False,True,False,contrarian
+curacao-ivory-coast,2026-06-25T20:00:00Z,Curacao,Ivory Coast,0-2,away,,0.0,0.0,,0.0,,,,False,True,False,contrarian
+ecuador-germany,2026-06-25T20:00:00Z,Ecuador,Germany,0-2,away,,0.0,0.0,,0.0,,,,False,True,False,contrarian
+japan-sweden,2026-06-25T23:00:00Z,Japan,Sweden,2-1,home,,0.0,0.0,,0.0,,,,False,True,False,contrarian
+tunisia-netherlands,2026-06-25T23:00:00Z,Tunisia,Netherlands,0-2,away,,0.0,0.0,,0.0,,,,False,True,False,contrarian
+paraguay-australia,2026-06-26T02:00:00Z,Paraguay,Australia,1-0,home,,0.0,0.0,,0.0,,,,False,True,False,contrarian
+turkey-united-states,2026-06-26T02:00:00Z,Turkey,United States,1-2,away,,0.0,0.0,,0.0,,,,False,True,False,contrarian
+senegal-iraq,2026-06-26T19:00:00Z,Senegal,Iraq,2-0,home,,0.0,0.0,,0.0,,,,False,True,False,contrarian
+norway-france,2026-06-26T19:00:00Z,Norway,France,1-2,away,,0.0,0.0,,0.0,,,,False,True,False,contrarian
+cape-verde-saudi-arabia,2026-06-27T00:00:00Z,Cape Verde,Saudi Arabia,1-2,away,,0.0,0.0,,0.0,,,,False,True,False,contrarian
+uruguay-spain,2026-06-27T00:00:00Z,Uruguay,Spain,0-2,away,,0.0,0.0,,0.0,,,,False,True,False,contrarian
+new-zealand-belgium,2026-06-27T03:00:00Z,New Zealand,Belgium,0-2,away,,0.0,0.0,,0.0,,,,False,True,False,contrarian
+egypt-iran,2026-06-27T03:00:00Z,Egypt,Iran,2-0,home,,0.0,0.0,,0.0,,,,False,True,False,contrarian
+croatia-ghana,2026-06-27T21:00:00Z,Croatia,Ghana,2-0,home,,0.0,0.0,,0.0,,,,False,True,False,contrarian
+panama-england,2026-06-27T21:00:00Z,Panama,England,0-2,away,,0.0,0.0,,0.0,,,,False,True,False,contrarian
+colombia-portugal,2026-06-27T23:30:00Z,Colombia,Portugal,0-2,away,,0.0,0.0,,0.0,,,,False,True,False,contrarian
+dr-congo-uzbekistan,2026-06-27T23:30:00Z,DR Congo,Uzbekistan,2-1,home,,0.0,0.0,,0.0,,,,False,True,False,contrarian
+algeria-austria,2026-06-28T02:00:00Z,Algeria,Austria,0-1,away,,0.0,0.0,,0.0,,,,False,True,False,contrarian
+jordan-argentina,2026-06-28T02:00:00Z,Jordan,Argentina,0-2,away,,0.0,0.0,,0.0,,,,False,True,False,contrarian

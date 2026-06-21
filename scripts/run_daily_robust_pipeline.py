@@ -25,9 +25,15 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def run(cmd: list[str], env: dict[str, str] | None = None) -> None:
+def run(cmd: list[str], env: dict[str, str] | None = None, *, warn_only: bool = False) -> int:
     print("\n$ " + " ".join(cmd), flush=True)
-    subprocess.run(cmd, cwd=ROOT, env=env, check=True)
+    completed = subprocess.run(cmd, cwd=ROOT, env=env, check=False)
+    if completed.returncode != 0:
+        if warn_only:
+            print(f"warning: command exited with {completed.returncode}; continuing")
+            return completed.returncode
+        raise subprocess.CalledProcessError(completed.returncode, cmd)
+    return 0
 
 
 def require_file(path: str | Path, label: str) -> None:
@@ -47,18 +53,16 @@ def main() -> int:
     snapshot_id = args.snapshot_id or datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     env = os.environ.copy()
     env["PYTHONPATH"] = str(ROOT / "src")
+    final_simulation_skipped = bool(args.skip_final_simulation)
+    final_simulation_failed = False
 
     if not env.get("THE_ODDS_API_KEY"):
         raise EnvironmentError("THE_ODDS_API_KEY is not set. Add it as a GitHub Actions repository secret.")
 
-    # Required for the market-backed daily card.
-    # Older local-only validation artefacts are regenerated or treated as optional below.
     require_file("outputs/final_leader_decision_round_summary_profiles/final_picks.csv", "base final picks")
 
     run([sys.executable, "scripts/verify_validation_stack.py"], env=env)
 
-    # Rebuild the pick-validation report when possible. This script tolerates missing
-    # predictions/calibration files and produces a conservative validation report.
     run(
         [
             sys.executable,
@@ -176,6 +180,7 @@ def main() -> int:
     if not args.skip_final_simulation:
         if not file_exists("outputs/latest/predictions.csv"):
             print("outputs/latest/predictions.csv not found; skipping final leader simulation for this run.")
+            final_simulation_skipped = True
         else:
             run(
                 [
@@ -190,7 +195,7 @@ def main() -> int:
                 ],
                 env=env,
             )
-            run(
+            rc = run(
                 [
                     sys.executable,
                     "scripts/run_final_leader_decision.py",
@@ -201,7 +206,9 @@ def main() -> int:
                     "--reuse-existing",
                 ],
                 env=env,
+                warn_only=True,
             )
+            final_simulation_failed = rc != 0
 
     summary: dict[str, Any] = {
         "generated_at_utc": datetime.now(timezone.utc).isoformat(),
@@ -210,7 +217,8 @@ def main() -> int:
         "daily_summary": "outputs/daily_robust_card/daily_robust_summary.json",
         "market_history_summary": "outputs/market_odds_history/market_odds_history_summary.json",
         "final_simulation_dir": "outputs/final_leader_decision_daily_robust",
-        "final_simulation_skipped": bool(args.skip_final_simulation or not file_exists("outputs/latest/predictions.csv")),
+        "final_simulation_skipped": final_simulation_skipped,
+        "final_simulation_failed_non_blocking": final_simulation_failed,
     }
     out_path = ROOT / "outputs/daily_robust_card/daily_pipeline_summary.json"
     out_path.parent.mkdir(parents=True, exist_ok=True)

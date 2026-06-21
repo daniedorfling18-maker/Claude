@@ -34,7 +34,7 @@ jobs:
 
       - name: Run DOM inspector
         env:
-          SUPERBRU_EMAIL: ${{ secrets.SUPERBRU_EMAIL }}
+          SUPERBRU_EMAIL: ${{ secrets.SUPERBRU_USERNAME }}
           SUPERBRU_PASSWORD: ${{ secrets.SUPERBRU_PASSWORD }}
         run: |
           python scripts/inspect_superbru_dom_ci.py \

@@ -1,0 +1,2 @@
+Trigger full Daily Superbru Robust Card workflow after relaxing daily pipeline preconditions.
+Triggered at 2026-06-21T10:13:00Z

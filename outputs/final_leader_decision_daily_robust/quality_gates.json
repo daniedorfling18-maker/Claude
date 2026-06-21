@@ -6,28 +6,28 @@
   },
   {
     "gate": "input_exists:fixtures",
-    "passed": true,
-    "path": "data\\fixtures_real.csv"
+    "passed": false,
+    "path": "data/fixtures_real.csv"
   },
   {
     "gate": "input_exists:odds_json",
-    "passed": true,
-    "path": "data\\odds_snapshot_real.json"
+    "passed": false,
+    "path": "data/odds_snapshot_real.json"
   },
   {
     "gate": "input_exists:predictions_csv",
     "passed": true,
-    "path": "outputs\\daily_robust_card\\predictions_for_final_simulation.csv"
+    "path": "outputs/daily_robust_card/predictions_for_final_simulation.csv"
   },
   {
     "gate": "input_exists:leaderboard_csv",
     "passed": true,
-    "path": "inputs\\pool_leaderboard.csv"
+    "path": "inputs/pool_leaderboard.csv"
   },
   {
     "gate": "input_exists:chaser_profiles_csv",
     "passed": true,
-    "path": "inputs\\chaser_profiles.csv"
+    "path": "inputs/chaser_profiles.csv"
   },
   {
     "gate": "predictions_required_columns",

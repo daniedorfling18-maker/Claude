@@ -1,5 +1,5 @@
 # Superbru daily robust card
 
-Generated: `2026-06-21T14:12:59.744924+00:00`
+Generated: `2026-06-21T16:39:46.483750+00:00`
 
 No score changes needed today.

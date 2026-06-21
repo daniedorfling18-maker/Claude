@@ -1,0 +1,10 @@
+{
+  "generated_at_utc": "2026-06-21T16:39:41.322371+00:00",
+  "status": "fetch_failed",
+  "sport": "soccer_fifa_world_cup",
+  "regions": "uk,eu,us,au",
+  "markets": "h2h,spreads,totals",
+  "error": "HTTP 401 Unauthorized: {\"message\":\"Usage quota has been reached. See usage plans at https://the-odds-api.com\",\"error_code\":\"OUT_OF_USAGE_CREDITS\",\"details_url\":\"https://the-odds-api.com/liveapi/guides/v4/api-error-codes.html#out-of-usage-credits\"}\n",
+  "used_stale_fallback": true,
+  "used_empty_fallback": true
+}

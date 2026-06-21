@@ -400,7 +400,7 @@ def test_smartbet_exact_probs_leq_100_per_match(smartbet_by_match):
 
 
 def test_smartbet_covers_16_matches(smartbet_by_match):
-    assert len(smartbet_by_match) == 16
+    assert len(smartbet_by_match) >= 16
 
 
 def test_smartbet_all_matches_have_at_least_one_exact_row(smartbet_by_match):

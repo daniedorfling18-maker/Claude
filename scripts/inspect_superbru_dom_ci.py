@@ -52,7 +52,7 @@ INSPECT_INPUTS_JS = r"""
 """
 
 FIND_MATCH_ROW_JS = r"""
-(homeTeam, awayTeam) => {
+([homeTeam, awayTeam]) => {
   function norm(s) { return (s || '').toLowerCase().replace(/[^a-z0-9]/g, ''); }
   const hn = norm(homeTeam), an = norm(awayTeam);
   const candidates = Array.from(document.querySelectorAll('tr, li, div[class*=match], div[class*=fixture], div[class*=game], section'));
@@ -103,7 +103,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--pool-url", default="https://www.superbru.com/worldcup_predictor/pool_view.php?t=1296&p=13236623&g=32&view=matches")
     p.add_argument("--home-team", default="Spain")
     p.add_argument("--away-team", default="Saudi Arabia")
-    p.add_argument("--settle-ms", type=int, default=8000)
+    p.add_argument("--settle-ms", type=int, default=15000)
     p.add_argument("--out-dir", default="outputs/pregame_checks/submit_diagnostics")
     p.add_argument("--headless", action="store_true", default=True)
     p.add_argument("--headed", dest="headless", action="store_false")
@@ -242,6 +242,11 @@ async def run(args: argparse.Namespace) -> dict:
         print(f"Logged in. Navigating to pool: {args.pool_url}")
         await page.goto(args.pool_url, wait_until="domcontentloaded", timeout=30000)
         await page.wait_for_timeout(args.settle_ms)
+        # Scroll to bottom then back to top to trigger deferred/lazy rendering
+        await page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
+        await page.wait_for_timeout(2000)
+        await page.evaluate("window.scrollTo(0, 0)")
+        await page.wait_for_timeout(1000)
 
         await page.screenshot(path=str(out_dir / f"{ts}_pool_page.png"))
         pool_html = await page.content()
@@ -261,7 +266,7 @@ async def run(args: argparse.Namespace) -> dict:
 
         # ── Find match row ───────────────────────────────────────────────────
         print(f"\nSearching for match row: {args.home_team} vs {args.away_team}")
-        row = await page.evaluate(FIND_MATCH_ROW_JS, args.home_team, args.away_team)
+        row = await page.evaluate(FIND_MATCH_ROW_JS, [args.home_team, args.away_team])
         row_path = out_dir / f"{ts}_match_row.json"
         row_path.write_text(json.dumps(row, indent=2), encoding="utf-8")
 

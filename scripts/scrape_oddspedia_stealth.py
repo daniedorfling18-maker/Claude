@@ -419,8 +419,6 @@ def _extract_ou_btts_from_payload(payload: Any) -> dict[str, Any]:
     if not isinstance(payload, dict):
         return extras
 
-    blob = json.dumps(payload).lower()
-
     # Walk recursively looking for over/under line structures
     def walk(obj: Any, path: str = "") -> None:
         if isinstance(obj, dict):
@@ -790,7 +788,6 @@ async def scrape(
     list[dict[str, Any]],
 ]:
     try:
-        from playwright.async_api import TimeoutError as PlaywrightTimeoutError
         from playwright.async_api import async_playwright
     except Exception as exc:
         raise RuntimeError("Install: pip install playwright && python -m playwright install chrome") from exc

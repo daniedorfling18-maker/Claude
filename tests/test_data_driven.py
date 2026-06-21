@@ -9,14 +9,13 @@ pipeline against the same fixtures the production smoke run uses.
 from __future__ import annotations
 
 import csv
-import json
 from collections import defaultdict
 from pathlib import Path
 
 import numpy as np
 import pytest
 
-from superbru_score_engine.config import ModelConfig, SuperbruConfig
+from superbru_score_engine.config import ModelConfig
 from superbru_score_engine.decision.superbru import score_actual_prediction
 from superbru_score_engine.ingest.offline import OfflineJsonProvider
 from superbru_score_engine.model.devig import (

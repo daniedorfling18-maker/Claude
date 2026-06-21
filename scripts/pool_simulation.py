@@ -27,7 +27,7 @@ from dataclasses import dataclass, replace
 import numpy as np
 import pandas as pd
 
-from superbru_score_engine.config import PublicPickConfig, SensitivityConfig, load_config
+from superbru_score_engine.config import SensitivityConfig, load_config
 from superbru_score_engine.decision.public_pick import estimate_public_pick_shares
 from superbru_score_engine.decision.superbru import SuperbruDecisionEngine, score_actual_prediction
 from superbru_score_engine.model.dixon_coles import apply_dixon_coles

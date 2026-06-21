@@ -107,7 +107,6 @@ def main():
         val=Mt*Ot-1.0
         bet=val>thr
         stake=bet.sum()
-        win=(np.argmax(np.where(bet,1,0)*0+np.eye(3)[res_idx],1))  # placeholder
         # profit: for each (match,outcome) bet -> (odds-1) if hit else -1
         hit=np.eye(3)[res_idx].astype(bool)
         profit=np.where(bet, np.where(hit,Ot-1.0,-1.0),0.0).sum()

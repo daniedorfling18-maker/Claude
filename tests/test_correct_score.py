@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import numpy as np
 
 from superbru_score_engine.config import ModelConfig, RatingsConfig
 from superbru_score_engine.ingest import MarketOdds, MatchOdds, OutcomeOdds

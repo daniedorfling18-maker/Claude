@@ -3,8 +3,8 @@ auto_pick.py
 
 Runs on a schedule. Logs into SuperBru, scans every game tab for kickoff time
 and pick state, then for any game kicking off within WINDOW_MINUTES:
-  1. Calls Claude (Haiku) to predict the score.
-  2. Submits the pick via blur/change auto-save.
+  1. Calls Claude to predict the score.
+  2. Submits via submit_superbru_pick_cdp.run() — the tested submission script.
 
 Requires env vars: ANTHROPIC_API_KEY, SUPERBRU_EMAIL, SUPERBRU_PASSWORD
 (or pass via CLI args).
@@ -16,7 +16,7 @@ import asyncio
 import json
 import os
 import re
-import sys
+import types
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
 
@@ -81,19 +81,6 @@ EXTRACT_MATCH_JS = r"""
 }
 """
 
-SET_INPUT_JS = r"""
-([selector, value]) => {
-  const el = document.querySelector(selector);
-  if (!el) return { ok: false, reason: 'not found: ' + selector };
-  const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set;
-  setter.call(el, value);
-  el.dispatchEvent(new Event('input',  { bubbles: true }));
-  el.dispatchEvent(new Event('change', { bubbles: true }));
-  el.dispatchEvent(new Event('blur',   { bubbles: true }));
-  return { ok: true, value: el.value };
-}
-"""
-
 
 # ── Kickoff time parsing ───────────────────────────────────────────────────────────────────
 
@@ -127,7 +114,6 @@ def parse_kickoff(text: str | None, ts: str | None, ref: datetime) -> datetime |
             dt = datetime.strptime(text[:20], fmt)
             if dt.year == 1900:
                 dt = dt.replace(year=year)
-            # SuperBru times may be in a local TZ; assume UTC for now
             return dt.replace(tzinfo=timezone.utc)
         except Exception:
             continue
@@ -138,7 +124,7 @@ def parse_kickoff(text: str | None, ts: str | None, ref: datetime) -> datetime |
 # ── Claude prediction ─────────────────────────────────────────────────────────────────────────
 
 def predict_pick(home: str, away: str) -> str:
-    """Call Claude Haiku to predict the score. Returns 'H-A' string."""
+    """Call Claude to predict the score. Returns 'H-A' string."""
     try:
         import anthropic
     except ImportError:
@@ -150,14 +136,14 @@ def predict_pick(home: str, away: str) -> str:
 
     client = anthropic.Anthropic(api_key=key)
     msg = client.messages.create(
-        model="claude-haiku-4-5-20251001",
-        max_tokens=15,
+        model="claude-sonnet-4-6",
+        max_tokens=50,
         messages=[{
             "role": "user",
             "content": (
                 f"Predict a 2026 FIFA World Cup match score.\n"
                 f"Match: {home} vs {away}\n"
-                f"Use FIFA rankings, team quality, group stage dynamics.\n"
+                f"Consider FIFA rankings, recent form, head-to-head, group stage context.\n"
                 f"Reply with ONLY the score in H-A format (e.g. 2-1). Nothing else."
             )
         }]
@@ -204,6 +190,39 @@ async def login(page, args) -> bool:
     return "login" not in page.url.lower()
 
 
+# ── Submit via the tested submit script ───────────────────────────────────────────────────
+
+async def submit_pick(args, home_team: str, away_team: str, pick: str, out_dir: Path) -> dict:
+    """Load submit_superbru_pick_cdp and call its run() to submit a single pick."""
+    import importlib.util
+    import pathlib
+
+    submit_path = pathlib.Path(__file__).parent / "submit_superbru_pick_cdp.py"
+    spec = importlib.util.spec_from_file_location("submit_superbru_pick_cdp", submit_path)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+
+    submit_args = types.SimpleNamespace(
+        launch=True,
+        headless=args.headless,
+        email=args.email,
+        password=args.password,
+        login_url=args.login_url,
+        pool_url=args.pool_url,
+        home_team=home_team,
+        away_team=away_team,
+        new_pick=pick,
+        settle_ms=8000,
+        timeout_ms=60000,
+        dry_run=args.dry_run,
+        inspect_only=False,
+        diagnostics_dir=str(out_dir / "submit_diagnostics"),
+        cdp_url="http://127.0.0.1:9222",
+    )
+
+    return await mod.run(submit_args)
+
+
 # ── Main run ──────────────────────────────────────────────────────────────────────────────────
 
 async def run(args) -> dict:
@@ -215,20 +234,24 @@ async def run(args) -> dict:
     now    = datetime.now(timezone.utc)
     window = timedelta(minutes=args.window_minutes)
     results: list[dict] = []
+    subtabs: list = []
 
     out_dir = Path(args.out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
+
+    # ── Phase 1: scan all fixtures ─────────────────────────────────────────────────────────────
+    games_to_submit: list[dict] = []
 
     async with async_playwright() as pw:
         browser = await pw.chromium.launch(headless=args.headless)
         page    = await browser.new_page()
 
-        print("Logging in...")
+        print("Logging in (fixture scan)...")
         if not await login(page, args):
             await browser.close()
             return {"status": "login_failed", "run_at_utc": now.isoformat()}
 
-        print(f"Logged in. Navigating to pool...")
+        print("Navigating to pool...")
         await page.goto(args.pool_url, wait_until="domcontentloaded", timeout=30000)
         await page.wait_for_timeout(15000)
         await page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
@@ -241,13 +264,12 @@ async def run(args) -> dict:
 
         for tab in subtabs:
             game_id = tab["gameId"]
-            label   = tab["label"]  # e.g. "Spain v Saudi Arabia"
+            label   = tab["label"]
 
             if " v " not in label:
                 continue
             home_team, away_team = (s.strip() for s in label.split(" v ", 1))
 
-            # Click tab to load AJAX content
             clicked = await page.evaluate(CLICK_TAB_JS, [game_id])
             if not clicked:
                 print(f"[{game_id}] {label}: tab not found")
@@ -259,23 +281,23 @@ async def run(args) -> dict:
             time_until = (kickoff_dt - now) if kickoff_dt else None
             in_window  = time_until is not None and timedelta(0) <= time_until <= window
 
-            ko_str   = kickoff_dt.isoformat() if kickoff_dt else f"unknown ({info.get('kickoffText')!r})"
-            til_str  = f"{time_until.total_seconds()/60:.0f}min" if time_until is not None else "?"
+            ko_str  = kickoff_dt.isoformat() if kickoff_dt else f"unknown ({info.get('kickoffText')!r})"
+            til_str = f"{time_until.total_seconds()/60:.0f}min" if time_until is not None else "?"
             print(f"[{game_id}] {label}")
             print(f"  kickoff={ko_str}  in_window={in_window}  until={til_str}")
             print(f"  current={info.get('homeVal')}-{info.get('awayVal')}  "
                   f"locked={info.get('locked')}  inputs={info.get('inputsFound')}")
 
             entry: dict = {
-                "game_id":    game_id,
-                "game":       label,
-                "home_team":  home_team,
-                "away_team":  away_team,
-                "kickoff_utc": kickoff_dt.isoformat() if kickoff_dt else None,
-                "kickoff_raw": info.get("kickoffText"),
+                "game_id":       game_id,
+                "game":          label,
+                "home_team":     home_team,
+                "away_team":     away_team,
+                "kickoff_utc":   kickoff_dt.isoformat() if kickoff_dt else None,
+                "kickoff_raw":   info.get("kickoffText"),
                 "minutes_until": round(time_until.total_seconds()/60) if time_until else None,
-                "current_pick": f"{info.get('homeVal')}-{info.get('awayVal')}",
-                "locked": info.get("locked"),
+                "current_pick":  f"{info.get('homeVal')}-{info.get('awayVal')}",
+                "locked":        info.get("locked"),
             }
 
             if info.get("locked"):
@@ -296,39 +318,46 @@ async def run(args) -> dict:
                 print("  → skipped (not in window)\n")
                 continue
 
-            # Predict
-            try:
-                pick = predict_pick(home_team, away_team)
-                print(f"  → predicted: {pick}")
-            except Exception as exc:
-                entry["status"] = "prediction_failed"
-                entry["error"]  = str(exc)
-                results.append(entry)
-                print(f"  → prediction failed: {exc}\n")
-                continue
-
-            home_goals, away_goals = pick.split("-")
-            entry["predicted_pick"] = pick
-
-            if args.dry_run:
-                entry["status"] = "dry_run"
-                results.append(entry)
-                print("  → DRY RUN — not submitted\n")
-                continue
-
-            # Submit
-            r_h = await page.evaluate(SET_INPUT_JS, ["input.soccer-left-score",  home_goals])
-            await page.wait_for_timeout(500)
-            r_a = await page.evaluate(SET_INPUT_JS, ["input.soccer-right-score", away_goals])
-            await page.wait_for_timeout(3000)
-
-            entry["status"]   = "submitted"
-            entry["r_home"]   = r_h
-            entry["r_away"]   = r_a
-            results.append(entry)
-            print(f"  → submitted {pick}  (home={r_h}, away={r_a})\n")
+            games_to_submit.append(entry)
+            print("  → queued for prediction + submission\n")
 
         await browser.close()
+
+    # ── Phase 2: predict + submit each game ───────────────────────────────────────────
+    for entry in games_to_submit:
+        home_team = entry["home_team"]
+        away_team = entry["away_team"]
+
+        try:
+            pick = predict_pick(home_team, away_team)
+            print(f"[{entry['game_id']}] {entry['game']} → predicted: {pick}")
+        except Exception as exc:
+            entry["status"] = "prediction_failed"
+            entry["error"]  = str(exc)
+            results.append(entry)
+            print(f"[{entry['game_id']}] prediction failed: {exc}")
+            continue
+
+        entry["predicted_pick"] = pick
+
+        if args.dry_run:
+            entry["status"] = "dry_run"
+            results.append(entry)
+            print(f"[{entry['game_id']}] DRY RUN — not submitted")
+            continue
+
+        print(f"[{entry['game_id']}] Submitting {pick} via submit_superbru_pick_cdp...")
+        try:
+            submit_result = await submit_pick(args, home_team, away_team, pick, out_dir)
+            entry["status"]        = submit_result.get("status", "unknown")
+            entry["submit_result"] = submit_result
+            print(f"[{entry['game_id']}] → {entry['status']}")
+        except Exception as exc:
+            entry["status"] = "submit_failed"
+            entry["error"]  = str(exc)
+            print(f"[{entry['game_id']}] submit failed: {exc}")
+
+        results.append(entry)
 
     summary = {
         "run_at_utc":     now.isoformat(),
@@ -367,7 +396,7 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main() -> int:
-    args  = build_parser().parse_args()
+    args   = build_parser().parse_args()
     result = asyncio.run(run(args))
     print("\n" + json.dumps(result, indent=2, default=str))
     return 0 if result.get("status") != "login_failed" else 1

@@ -189,6 +189,7 @@ def build_parser() -> argparse.ArgumentParser:
                         "markets 100 (1X2) and 800 (Correct Score); other tabs return bookmaker "
                         "odds tables, not probability distributions.")
     p.add_argument("--no-chrome-channel", action="store_true", help="Use bundled Chromium instead of installed Chrome")
+    p.add_argument("--headless", action="store_true", help="Run browser in headless mode (required when no display is available)")
     p.add_argument("--manual-on-missing", action="store_true")
     return p
 
@@ -810,7 +811,7 @@ async def scrape(
     diag_dir.mkdir(parents=True, exist_ok=True)
 
     launch_kwargs: dict[str, Any] = {
-        "headless": False,
+        "headless": args.headless,
         "locale": "en-GB",
         "viewport": {"width": 1440, "height": 900},
         "ignore_https_errors": True,

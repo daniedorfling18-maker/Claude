@@ -1,0 +1,23 @@
+{
+  "row": {
+    "match_id": "colombia-dr-congo",
+    "commence_time": "2026-06-24T02:00:00Z",
+    "home_team": "Colombia",
+    "away_team": "DR Congo",
+    "url": "https://oddspedia.com/football/colombia-dr-congo-1869932",
+    "alt_url": "https://oddspedia.com/football/dr-congo-colombia-1869932",
+    "match_key": "1869932",
+    "match_score": "100"
+  },
+  "last_state": {
+    "sourceName": "",
+    "probabilities": null,
+    "marketIds": [],
+    "hasCorrectScore": false,
+    "hasAnyProbs": false,
+    "eventId": null,
+    "currentUrl": "https://oddspedia.com/football/dr-congo-colombia-1869932",
+    "title": "Just a moment...",
+    "bodyText": "oddspedia.com\nPerforming security verification\n\nThis website uses a security service to protect against malicious bots. This page is displayed while the website verifies you are not a bot.\n\nRay ID: a0f032f4cac215b6\nPerformance and Security by Cloudflare\nPrivacy"
+  }
+}

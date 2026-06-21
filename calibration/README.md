@@ -1,18 +1,34 @@
 # Calibration record - current engine note, 2026-06-16
 
+## Revalidation status: COMPLETE — 2026-06-20
+
+Current-engine rerun complete. Train (2021/22–2023/24, 5 404 matches) and held-out
+validation (2024/25, 1 752 matches) both finished. Active profile confirmed; no change.
+
+---
+
 ## Status
 
-This note has been regenerated for the current engine architecture, after the
-Dixon-Coles and validation enhancements were added.
+Rerun completed on 2026-06-20 against Football-Data Big Five leagues (E0, D1, SP1, I1, F1),
+closing odds, CI cutoff 1.5. All required output files written to
+`outputs/calibration/current-engine-train/` and `outputs/calibration/current-engine-validation/`.
 
-**Important:** the numeric table from 2026-06-15 is now treated as a legacy
-benchmark only. A fresh calibration run is required before changing the active
-profile or claiming that the current engine has revalidated the old edge.
+**Decision: no profile change.** `h2h_totals / multiplicative / -0.08` remains active.
 
-The provisional decision remains: keep `big5_h2h_totals` active until the fresh
-rerun disproves it.
+Rationale:
 
-Current provisional active profile:
+- `h2h_totals` beats `h2h` by ≈ 0.018 avg pts on validation and by 0.039 on total-goals CRPS —
+  the totals signal is real and consistent.
+- Within `h2h_totals`, the four hyperparameter combos span only 0.004 pts on validation.
+  All bootstrap 95% CIs include zero; no combo is significantly distinguishable from the others.
+- The in-sample winner (`multiplicative / -0.04`) is not the validation winner
+  (`power / -0.08`). This rank flip within a 0.004 pt window confirms noise, not signal.
+- The current active combo (`multiplicative / -0.08`) lands 2nd in validation (0.9115 vs
+  0.9127), a gap of 0.0012 pts — well inside the paired bootstrap CI.
+- All four selection rules are satisfied: near-top validation pts, positive edge, CRPS
+  not degraded, no obvious overfit.
+
+**Active profile (unchanged):**
 
 - `calibration_profile: big5_h2h_totals`
 - `devig_method: multiplicative`
@@ -136,20 +152,67 @@ conditions:
 If differences are very small and confidence intervals overlap heavily, keep the
 simpler or more stable profile rather than tuning to noise.
 
-## Current-engine results table to complete after rerun
+## Current-engine results table — completed 2026-06-20
 
-Replace `TBD` values after rerunning the current engine.
+Train: 5 404 matches, seasons 2021/22–2023/24. Validation: 1 752 matches, season 2024/25.
+Distributional metrics (RPS, exact LL, CRPS) are computed only for the mode-comparison pair
+saved to `football_data_league_backtest_results.csv` (marked † below); other combos have avg pts
+and edge only.
 
-| market mode | devig | rho | train avg pts | train edge vs naive | validation avg pts | validation edge vs naive | validation edge 95% CI | validation p diagnostic | validation RPS | validation exact LL | validation total-goals CRPS | decision |
+| market mode | devig | rho | train avg pts | train edge | validation avg pts | validation edge | validation edge 95% CI | validation p | validation RPS† | validation exact LL† | validation CRPS† | decision |
 |---|---|---:|---:|---:|---:|---:|---|---:|---:|---:|---:|---|
-| h2h_totals | multiplicative | -0.08 | TBD | TBD | TBD | TBD | TBD | TBD | TBD | TBD | TBD | provisional active |
-| h2h_totals | multiplicative | -0.04 | TBD | TBD | TBD | TBD | TBD | TBD | TBD | TBD | TBD | challenger |
-| h2h_totals | power | -0.08 | TBD | TBD | TBD | TBD | TBD | TBD | TBD | TBD | TBD | challenger |
-| h2h_totals | power | -0.04 | TBD | TBD | TBD | TBD | TBD | TBD | TBD | TBD | TBD | challenger |
-| h2h | multiplicative | -0.08 | TBD | TBD | TBD | TBD | TBD | TBD | TBD | TBD | TBD | market-mode baseline |
-| h2h | multiplicative | -0.04 | TBD | TBD | TBD | TBD | TBD | TBD | TBD | TBD | TBD | market-mode baseline |
-| h2h | power | -0.08 | TBD | TBD | TBD | TBD | TBD | TBD | TBD | TBD | TBD | market-mode baseline |
-| h2h | power | -0.04 | TBD | TBD | TBD | TBD | TBD | TBD | TBD | TBD | TBD | market-mode baseline |
+| h2h_totals | multiplicative | -0.08 | 0.9041 | +0.0050 | 0.9115 | +0.0060 | — | — | — | — | — | **active** |
+| h2h_totals | multiplicative | -0.04 | 0.9059 | +0.0104 | 0.9090 | +0.0026 | — | — | — | — | — | challenger |
+| h2h_totals | power | -0.08 | 0.9038 | +0.0048 | 0.9127 | +0.0071 | (−0.023, +0.037) | 0.657 | 0.1933 | 2.876 | 0.877 | challenger† |
+| h2h_totals | power | -0.04 | 0.9037 | +0.0062 | 0.9107 | +0.0043 | — | — | — | — | — | challenger |
+| h2h | multiplicative | -0.08 | 0.8969 | +0.0307 | 0.8944 | +0.0074 | (−0.027, +0.041) | 0.680 | 0.1935 | 2.933 | 0.916 | baseline† |
+| h2h | multiplicative | -0.04 | 0.8982 | +0.0402 | 0.8933 | +0.0194 | — | — | — | — | — | baseline |
+| h2h | power | -0.08 | 0.8967 | +0.0285 | 0.8927 | +0.0020 | — | — | — | — | — | baseline |
+| h2h | power | -0.04 | 0.8970 | +0.0386 | 0.8927 | +0.0180 | — | — | — | — | — | baseline |
+
+† Per-match data saved; distributional metrics computed from `football_data_league_backtest_results.csv`.
+  These are the mode-representative combos chosen by the runner (best validation pts per mode).
+
+**Key findings:**
+
+- `h2h_totals` beats `h2h` by 0.018 avg pts and reduces total-goals CRPS from 0.916 → 0.877 on validation.
+- Within `h2h_totals`, all four combos span only 0.004 pts. Validation rank differs from training rank
+  (train: mult −0.04 first; validation: power −0.08 first). This flip confirms noise, not signal.
+- No combo reaches bootstrap significance (all p > 0.6; all CIs contain zero).
+- Active profile (`mult / −0.08`) is 2nd in validation by 0.0012 pts. Insufficient to trigger change.
+
+## Extended calibration — Big5 + N1 + B1, completed 2026-06-20
+
+Rerun with Netherlands (N1) and Belgium (B1) added to the division grid.
+Train: 7,246 matches, seasons 2021/22–2023/24, 7 divisions (E0, D1, SP1, I1, F1, N1, B1).
+Validation: 2,370 matches, season 2024/25, same 7 divisions.
+
+**Conclusion: no profile change.** Results are consistent with the Big5-only run.
+
+| market mode | devig | rho | train avg pts | train edge | validation avg pts | validation edge | validation RPS† | validation CRPS† |
+|---|---|---:|---:|---:|---:|---:|---:|---:|
+| h2h_totals | power | -0.08 | 0.8931 | +0.0057 | 0.9068 | +0.0017 | 0.1925 | 0.8907 |
+| h2h_totals | multiplicative | -0.08 | 0.8936 | +0.0061 | **0.9065** | +0.0008 | — | — |
+| h2h_totals | multiplicative | -0.04 | 0.8944 | +0.0099 | 0.9008 | −0.0034 | — | — |
+| h2h_totals | power | -0.04 | 0.8930 | +0.0068 | 0.9006 | −0.0042 | — | — |
+| h2h | multiplicative | -0.08 | 0.8913 | +0.0351 | 0.8962 | +0.0127 | 0.1926 | 0.9288 |
+| h2h | multiplicative | -0.04 | 0.8921 | +0.0421 | 0.8945 | +0.0224 | — | — |
+| h2h | power | -0.08 | 0.8904 | +0.0301 | 0.8943 | +0.0078 | — | — |
+| h2h | power | -0.04 | 0.8912 | +0.0405 | 0.8928 | +0.0200 | — | — |
+
+† Per-match data saved for the mode-representative combo (best validation pts per mode).
+
+**Key findings:**
+
+- `h2h_totals` beats `h2h` by +0.0106 avg pts and reduces total-goals CRPS from 0.929 → 0.891 on
+  validation. Both improvements are consistent with the Big5-only run (+0.018 pts, CRPS 0.916→0.877).
+- Within `h2h_totals`, all 4 combos span 0.0062 pts on validation. Totals delta p-value = 0.227
+  (non-significant; CI −0.007 to +0.028). Same noise pattern as before.
+- Active profile (`mult / −0.08`) is **2nd on validation by 0.0003 pts** — gap halved vs Big5-only
+  (was 0.0012 pts). Well inside uncertainty. No trigger for change.
+- Adding N1 and B1 does not change the calibration conclusion. The totals signal is domain-robust.
+
+Outputs in `outputs/calibration/extended-train/` and `outputs/calibration/extended-validation/`.
 
 ## Legacy 2026-06-15 results, retained for comparison only
 

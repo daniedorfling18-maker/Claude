@@ -1,0 +1,12 @@
+{
+  "generated_at_utc": "2026-06-21T08:20:31.609768+00:00",
+  "seed_url": "https://oddspedia.com/football/world/world-cup",
+  "events_found": 24,
+  "fixtures_count": 40,
+  "matched_to_locked_picks": 16,
+  "new_events_not_yet_in_picks": 8,
+  "total_urls_written": 24,
+  "fixtures_not_on_oddspedia": 24,
+  "out_csv": "inputs/oddspedia_match_urls.csv",
+  "unmatched_csv": "outputs/oddspedia_url_discovery/oddspedia_url_unmatched.csv"
+}

@@ -80,7 +80,12 @@ class FairCorrectScoreMarket:
         if residual > 0.0 and tail_total > 0.0:
             matrix = matrix + residual * tail_weights / tail_total
         total = float(matrix.sum())
-        return matrix / total if total > 0.0 else matrix
+        if total > 0.0:
+            return matrix / total
+        # Degenerate: all quoted cells were out of range and there is no residual mass.
+        # Return a uniform distribution rather than an all-zero matrix so callers
+        # always receive a valid probability distribution.
+        return np.full_like(matrix, 1.0 / matrix.size)
 
 
 def decimal_implied_probabilities(prices: list[float], method: str = "power") -> np.ndarray:

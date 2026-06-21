@@ -1,0 +1,23 @@
+{
+  "row": {
+    "match_id": "netherlands-sweden",
+    "commence_time": "2026-06-20T17:00:00Z",
+    "home_team": "Netherlands",
+    "away_team": "Sweden",
+    "url": "https://oddspedia.com/football/netherlands-sweden-1529",
+    "alt_url": "https://oddspedia.com/football/sweden-netherlands-1529",
+    "match_key": "1529",
+    "match_score": "100"
+  },
+  "last_state": {
+    "sourceName": "",
+    "probabilities": null,
+    "marketIds": [],
+    "hasCorrectScore": false,
+    "hasAnyProbs": false,
+    "eventId": null,
+    "currentUrl": "https://oddspedia.com/football/sweden-netherlands-1529",
+    "title": "Just a moment...",
+    "bodyText": "oddspedia.com\nPerforming security verification\n\nThis website uses a security service to protect against malicious bots. This page is displayed while the website verifies you are not a bot.\n\nRay ID: a0f03988dfd2c5fe\nPerformance and Security by Cloudflare\nPrivacy"
+  }
+}

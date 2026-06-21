@@ -18,9 +18,12 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-# Test / backtest tooling: pip install -e ".[dev]"
 dev = [
     "pytest>=7",
+]
+scraper = [
+    "playwright>=1.44",
+    "playwright-stealth>=1.0",
 ]
 
 [project.scripts]

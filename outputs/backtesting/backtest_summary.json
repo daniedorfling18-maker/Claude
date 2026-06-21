@@ -1,10 +1,10 @@
 {
-  "generated_at_utc": "2026-06-20T16:44:11.166130+00:00",
-  "results_csv": "outputs\\superbru_pool\\superbru_match_results_auto.csv",
+  "generated_at_utc": "2026-06-21T08:20:46.748534+00:00",
+  "results_csv": "outputs/superbru_pool/superbru_match_results_auto.csv",
   "picks_csv": [
-    "outputs\\final_locked_picks\\superbru_final_card.csv"
+    "outputs/final_locked_picks/superbru_final_card.csv"
   ],
-  "oddspedia_comparison_csv": "outputs\\oddspedia_pick_validation\\oddspedia_pick_comparison.csv",
+  "oddspedia_comparison_csv": "outputs/oddspedia_pick_validation/oddspedia_pick_comparison.csv",
   "scoring": {
     "exact_points": 3.0,
     "margin_points": 1.5,
@@ -14,5 +14,5 @@
   "result_rows_available": 8,
   "pick_rows_available": 40,
   "completed_matches_with_picks": 0,
-  "out_csv": "outputs\\backtesting\\superbru_pick_backtest.csv"
+  "out_csv": "outputs/backtesting/superbru_pick_backtest.csv"
 }

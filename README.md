@@ -87,119 +87,97 @@ Required GitHub secret:
 THE_ODDS_API_KEY
 ```
 
-The workflow intentionally does **not** scrape Oddspedia directly. Oddspedia is protected by Cloudflare and may only expose the SmartBet probability grid after a verified browser session has loaded the page. GitHub Actions cannot reliably complete that challenge. Instead, the repo uses a local Chrome/CDP capture step to refresh the Oddspedia grid, and the scheduled workflow consumes the latest committed grid.
+The full local Oddspedia pipeline (steps 2–10 below) must be run locally each day to refresh the grid. The GitHub Action consumes the latest committed grid files rather than scraping Oddspedia itself.
 
-## Oddspedia SmartBet Grid Capture
+## Oddspedia SmartBet Pipeline
 
-Oddspedia's useful SmartBet data lives in the rendered Nuxt page state:
+The pipeline is a single 10-step orchestrator. Run it each day after confirming match URLs are up to date:
+
+```bash
+python scripts/run_oddspedia_pipeline.py
+```
+
+Skip the scrape step if the grid was already captured today:
+
+```bash
+python scripts/run_oddspedia_pipeline.py --skip-scrape
+```
+
+### What `run_oddspedia_pipeline.py` does
+
+| Step | Script | Output |
+|------|--------|--------|
+| 1 | `scrape_oddspedia_curl.py` | `inputs/smartbet_grids/oddspedia_probability_grids_auto.csv` |
+| 2 | `build_oddspedia_score_shape_features.py` | `inputs/smartbet_grids/oddspedia_score_shape_features.csv` |
+| 3 | `check_oddspedia_grid_quality.py` | `outputs/oddspedia_probability_extract/oddspedia_grid_quality.csv` |
+| 4 | `compare_locked_picks_to_oddspedia.py` | `outputs/oddspedia_pick_validation/oddspedia_pick_comparison.csv` |
+| 5 | `build_oddspedia_superbru_ev.py` | `outputs/oddspedia_pick_validation/oddspedia_ev_recommendations.csv` |
+| 6 | `build_superbru_backtest_from_results.py` | `outputs/backtesting/superbru_pick_backtest.csv` |
+| 7 | `build_oddspedia_model_independence.py` | `outputs/oddspedia_pick_validation/oddspedia_model_independence.csv` |
+| 8 | `build_oddspedia_synthetic_pool_crowding.py` | `outputs/superbru_pool/superbru_synthetic_crowding.csv` |
+| 9 | `build_superbru_pool_intelligence.py` | `outputs/superbru_pool/superbru_remaining_fixture_leverage.csv` |
+| 10 | `build_oddspedia_signal_archive.py` | `outputs/backtesting/signal_archive_rolling.csv` |
+
+### How the scraper works (no browser required)
+
+`scrape_oddspedia_curl.py` uses `curl_cffi` with `impersonate='chrome124'` to replicate Chrome's TLS fingerprint. This bypasses Cloudflare's Managed Challenge without needing a real browser or CDP session. Oddspedia's server-side rendered Nuxt state (`window.__NUXT__`) is embedded in the HTML response and contains the full correct-score probability grid (market 800) and 1X2 probabilities (market 100). A Node.js subprocess evaluates the obfuscated JS function to extract structured data. BTTS and over/under odds are fetched from the internal `getMatchMaxOddsByGroup` API using the session cookies established by the first page GET.
+
+Install the scraper dependency:
+
+```bash
+pip install curl_cffi
+```
+
+Node.js must be available (`node --version`) for the `window.__NUXT__` extraction step.
+
+### Key output files
 
 ```text
-window.__NUXT__.state.event.probabilities.100
-window.__NUXT__.state.event.probabilities.800.probabilities
+inputs/smartbet_grids/oddspedia_probability_grids_auto.csv   — raw CS probability grid (19 rows per match)
+inputs/smartbet_grids/oddspedia_markets_summary_auto.csv     — de-vigged 1X2, BTTS, OU2.5 per match
+inputs/smartbet_grids/oddspedia_score_shape_features.csv     — derived OU/BTTS/margin features + market diffs
+outputs/oddspedia_pick_validation/oddspedia_pick_comparison.csv    — locked pick vs Oddspedia modal
+outputs/oddspedia_pick_validation/oddspedia_ev_recommendations.csv — EV-ranked scorelines per match
+outputs/oddspedia_pick_validation/oddspedia_model_independence.csv — grid vs market independence class per match
+outputs/superbru_pool/superbru_synthetic_crowding.csv        — estimated pool pick crowding per match
+outputs/superbru_pool/superbru_remaining_fixture_leverage.csv — leaderboard leverage per remaining match
+outputs/backtesting/superbru_pick_backtest.csv               — scored picks vs completed results
+outputs/backtesting/signal_archive_rolling.csv               — daily signal snapshots for future backtesting
+outputs/backtesting/snapshots/signal_archive_YYYY-MM-DD.csv  — point-in-time snapshot per pipeline run
 ```
 
-`100` is the match-winner probability vector and `800` is the correct-score grid. The grid is written to:
+### Model independence (Step 7)
 
-```text
-inputs/smartbet_grids/oddspedia_probability_grids_auto.csv
-inputs/smartbet_grids/oddspedia_probability_summary_auto.csv
+The independence check compares the Oddspedia correct-score grid against bookmaker market signals on three dimensions:
+
+- **1X2 direction**: `market_vs_grid_{home,draw,away}_diff_pct`
+- **OU2.5**: `market_vs_grid_ou25_diff_pct`
+- **BTTS**: `market_vs_grid_btts_diff_pct`
+
+Each match is classified as `market_aligned` (all diffs < 2pp), `mildly_independent` (any diff 2–5pp), or `strongly_independent` (any diff ≥ 5pp). Signal consistency flags whether OU and BTTS divergences point the same direction. The 1X2 direction is almost always market-aligned because the CS grid is derived from the same bookmaker CS odds that imply the 1X2 split.
+
+### Synthetic pool crowding (Step 8)
+
+When live Superbru pool picks are not available, Step 8 estimates what fraction of the pool likely picks each scoreline based on Oddspedia probability rank and casual-player heuristics (players cluster on the highest-probability scoreline, with a boost for "clean" scores like 1-0, 1-1, 2-0). Outputs a crowding risk flag and a differentiation flag per match.
+
+### Signal archive (Step 10)
+
+Each pipeline run appends a row per match to `signal_archive_rolling.csv` capturing the day's locked pick, EV, grid signals, and independence class. When results arrive in later rounds, `build_superbru_backtest_from_results.py` can be joined against this archive to evaluate signal quality over time.
+
+### Compare locked picks (reviewing Step 4 output)
+
+Review only material differences (bash):
+
+```bash
+python -c "
+import pandas as pd
+df = pd.read_csv('outputs/oddspedia_pick_validation/oddspedia_pick_comparison.csv')
+review = df[~df['action'].isin(['keep','no_grid'])].sort_values('probability_gap_vs_locked_pct', ascending=False)
+print(review[['match_id','locked_pick','locked_pick_probability_pct','oddspedia_best_score','oddspedia_best_probability_pct','probability_gap_vs_locked_pct','action']].to_string(index=False))
+"
 ```
 
-The reliable capture method is to use a normal Chrome session with remote debugging enabled, clear Cloudflare once in that browser, then attach the scraper to the verified session.
-
-### One-time Chrome/CDP setup
-
-Close all Chrome windows first, then start Chrome with remote debugging:
-
-```powershell
-taskkill /F /IM chrome.exe
-
-$chrome = "$env:ProgramFiles\Google\Chrome\Application\chrome.exe"
-if (!(Test-Path $chrome)) { $chrome = "${env:ProgramFiles(x86)}\Google\Chrome\Application\chrome.exe" }
-
-Start-Process -FilePath $chrome -ArgumentList @(
-  "--remote-debugging-port=9222",
-  "--user-data-dir=$PWD\.chrome-oddspedia-profile",
-  "--no-first-run",
-  "--no-default-browser-check",
-  "https://oddspedia.com/football/world/world-cup"
-)
-```
-
-Verify that Chrome exposes the debugging port:
-
-```powershell
-Invoke-RestMethod http://127.0.0.1:9222/json/version
-```
-
-If Oddspedia shows a Cloudflare check, complete it in the Chrome window and keep that browser open.
-
-### Refresh the grid
-
-```powershell
-python scripts\scrape_oddspedia_cdp_session.py `
-  --cdp-url http://127.0.0.1:9222 `
-  --urls-csv inputs\oddspedia_match_urls.csv `
-  --out-csv inputs\smartbet_grids\oddspedia_probability_grids_auto.csv `
-  --out-summary-csv inputs\smartbet_grids\oddspedia_probability_summary_auto.csv `
-  --out-json outputs\oddspedia_probability_extract\oddspedia_cdp_probability_extract_summary.json `
-  --diagnostics-dir outputs\oddspedia_probability_extract\cdp_diagnostics `
-  --manual-on-missing `
-  --settle-ms 12000 `
-  --post-click-ms 6000 `
-  --timeout-ms 90000
-```
-
-Expected success output is `matches_with_grid` equal to the number of input URLs and `correct_score_row_count` equal to `19 x matches_with_grid`.
-
-### Compare locked picks to Oddspedia
-
-```powershell
-python scripts\compare_locked_picks_to_oddspedia.py `
-  --locked-picks-csv outputs\final_locked_picks\superbru_final_card.csv `
-  --oddspedia-grid-csv inputs\smartbet_grids\oddspedia_probability_grids_auto.csv `
-  --oddspedia-summary-csv inputs\smartbet_grids\oddspedia_probability_summary_auto.csv `
-  --out-csv outputs\oddspedia_pick_validation\oddspedia_pick_comparison.csv `
-  --out-json outputs\oddspedia_pick_validation\oddspedia_pick_comparison_summary.json
-```
-
-Review only material differences:
-
-```powershell
-Import-Csv outputs\oddspedia_pick_validation\oddspedia_pick_comparison.csv |
-  Where-Object {$_.action -ne "keep" -and $_.action -ne "no_grid"} |
-  Sort-Object {[double]$_.probability_gap_vs_locked_pct} -Descending |
-  Format-Table match_id,locked_pick,locked_pick_probability_pct,oddspedia_best_score,oddspedia_best_probability_pct,probability_gap_vs_locked_pct,action -AutoSize
-```
-
-Inspect all compared picks:
-
-```powershell
-Import-Csv outputs\oddspedia_pick_validation\oddspedia_pick_comparison.csv |
-  Format-Table match_id,locked_pick,locked_pick_probability_pct,oddspedia_top1_score,oddspedia_top1_pct,oddspedia_top2_score,oddspedia_top2_pct,action -AutoSize
-```
-
-The comparison report is a review layer, not an automatic switch engine. A modal score such as `1-0` or `1-1` is not automatically accepted. The decision still needs to consider Superbru expected points, outcome points, leader/chaser position, and the existing robust policy.
-
-### Single-command local runner
-
-After the daily robust pipeline has produced `outputs/final_locked_picks/superbru_final_card.csv`, run:
-
-```powershell
-.\scripts\run_daily_oddspedia_overlay.ps1 -ManualOnMissing
-```
-
-This launches/uses Chrome CDP, refreshes the Oddspedia grid, and runs the comparison report. For a non-interactive scheduled run, omit `-ManualOnMissing`; if Cloudflare blocks the session, the diagnostics will show which matches failed.
-
-### Optional Windows Task Scheduler command
-
-Use this as the action command if scheduling the local Oddspedia overlay process:
-
-```text
-powershell.exe -ExecutionPolicy Bypass -File "C:\Users\DanieDörfling\Documents\Codex\superbru-engine-ah\scripts\run_daily_oddspedia_overlay.ps1"
-```
-
-Cloudflare can still require manual clearance. The safest operating rhythm is to keep `.chrome-oddspedia-profile` intact so the clearance cookie persists, then refresh the grid before the GitHub daily Action or before manually reviewing score changes.
+The comparison report is a review layer, not an automatic switch engine. A higher-probability Oddspedia modal score does not automatically replace the locked pick. Any change must still pass Superbru expected-points logic, leader/chaser risk, and robust-policy checks.
 
 ## Outputs
 

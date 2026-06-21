@@ -1,0 +1,31 @@
+{
+  "generated_at_utc": "2026-06-21T08:20:47.082837+00:00",
+  "shape_features_csv": "inputs/smartbet_grids/oddspedia_score_shape_features.csv",
+  "ev_recommendations_csv": "outputs/oddspedia_pick_validation/oddspedia_ev_recommendations.csv",
+  "mild_threshold_pct": 2.0,
+  "strong_threshold_pct": 5.0,
+  "match_count": 24,
+  "out_csv": "outputs/oddspedia_pick_validation/oddspedia_model_independence.csv",
+  "independence_class_counts": {
+    "strongly_independent": 17,
+    "mildly_independent": 4,
+    "market_aligned": 3
+  },
+  "market_aligned_count": 3,
+  "mildly_independent_count": 4,
+  "strongly_independent_count": 17,
+  "grid_market_direction_disagree_count": 0,
+  "signal_consistency_counts": {
+    "inconsistent_ou_vs_btts": 11,
+    "consistent_grid_expects_fewer_goals": 10,
+    "consistent_grid_expects_more_goals": 2,
+    "both_neutral": 1
+  },
+  "pick_follows_counts": {
+    "n/a_grid_market_agree": 16,
+    "unknown": 8
+  },
+  "mean_max_1x2_abs_diff_pct": 0.01,
+  "mean_abs_ou25_diff_pct": 8.44,
+  "mean_abs_btts_diff_pct": 3.92
+}

@@ -346,6 +346,72 @@ def fetch_match_odds_snapshot(args: argparse.Namespace, entry: dict[str, Any], o
     return summary
 
 
+def load_engine_config(path: str) -> Any:
+    from superbru_score_engine.config import load_config
+
+    return load_config(path)
+
+
+def recompute_pick_from_snapshot(snapshot: dict[str, Any], entry: dict[str, Any], config: Any) -> dict[str, Any]:
+    """Recompute the recommended scoreline from freshly fetched single-match odds.
+
+    The returned scoreline is oriented to the Superbru tab's home/away order in
+    `entry`, so it can be submitted directly. Any failure returns a non-"ok"
+    status so the caller can fall back to the committed card pick.
+    """
+    if snapshot.get("status") != "fetched_single_match_odds":
+        return {"status": "skipped", "reason": snapshot.get("status")}
+    odds_path = snapshot.get("odds_json")
+    if not odds_path or not Path(odds_path).exists():
+        return {"status": "failed", "error": "odds_json_missing"}
+    try:
+        from superbru_score_engine.decision import SuperbruDecisionEngine
+        from superbru_score_engine.ingest.normalise import normalise_the_odds_api_events
+        from superbru_score_engine.model import OddsToScorelineModel
+        from superbru_score_engine.model.ratings import RatingsStore
+
+        odds_obj = json.loads(Path(odds_path).read_text(encoding="utf-8"))
+        matches = normalise_the_odds_api_events([odds_obj])
+        if not matches:
+            return {"status": "failed", "error": "no_normalised_match"}
+        match = matches[0]
+
+        ratings = RatingsStore(config.paths.ratings_store, config.ratings)
+        model = OddsToScorelineModel(config.model, ratings)
+        decision = SuperbruDecisionEngine(
+            config.superbru, config.model.candidate_grid_goals, config.public_pick, config.sensitivity
+        )
+        distribution = model.build_distribution(match)
+        prediction = decision.predict(distribution)
+        home_goals = int(prediction.recommended.home_goals)
+        away_goals = int(prediction.recommended.away_goals)
+
+        # The model scoreline is in the odds event's home/away order. Orient it to
+        # the Superbru tab order before submitting.
+        odds_home = norm_team(match.home_team)
+        if odds_home == norm_team(entry.get("home_team")):
+            scoreline = f"{home_goals}-{away_goals}"
+            orientation = "aligned"
+        elif odds_home == norm_team(entry.get("away_team")):
+            scoreline = f"{away_goals}-{home_goals}"
+            orientation = "swapped"
+        else:
+            # Cannot confirm orientation; fall back to the already-oriented card pick.
+            return {"status": "failed", "error": "orientation_unconfirmed"}
+
+        return {
+            "status": "ok",
+            "scoreline": scoreline,
+            "orientation": orientation,
+            "expected_points": float(prediction.recommended.expected_points),
+            "model_home_away_scoreline": f"{home_goals}-{away_goals}",
+            "odds_home_team": match.home_team,
+            "odds_away_team": match.away_team,
+        }
+    except Exception as exc:  # non-blocking: fall back to the committed card pick
+        return {"status": "failed", "error": f"{type(exc).__name__}: {exc}"}
+
+
 async def login(page, args, diag_dir: Path | None = None) -> bool:
     try:
         await page.goto(args.login_url, wait_until="networkidle", timeout=45000)
@@ -517,18 +583,41 @@ async def run(args: argparse.Namespace) -> dict[str, Any]:
     if scan_status == "login_failed":
         return {"status": "login_failed", "run_at_utc": now.isoformat(), "scan_results": scan_results}
 
+    config = None
+    config_error: str | None = None
+    try:
+        config = load_engine_config(args.config)
+    except Exception as exc:  # non-blocking: recompute is skipped, card pick is used
+        config_error = f"{type(exc).__name__}: {exc}"
+        print(f"warning: could not load engine config {args.config!r}: {config_error}. Falling back to committed card picks.")
+
     submitted_results: list[dict[str, Any]] = []
     for entry in queued:
         pick_lookup = find_pick_from_card(entry, args.pick_card_csv)
         entry["pick_lookup"] = pick_lookup
-        if pick_lookup.get("status") != "found" or not txt(pick_lookup.get("pick")):
-            entry["status"] = "pick_card_missing"
+        card_pick = txt(pick_lookup.get("pick")) if pick_lookup.get("status") == "found" else ""
+
+        # Pull this match's odds right before kickoff and recompute a fresh pick so a
+        # stale committed card cannot drive the submission. The fresh pick wins; the
+        # card pick is the fallback when the recompute is unavailable.
+        entry["match_odds"] = fetch_match_odds_snapshot(args, entry, out_dir)
+        fresh = recompute_pick_from_snapshot(entry["match_odds"], entry, config) if config is not None else {"status": "skipped", "reason": "config_unavailable", "error": config_error}
+        entry["fresh_pick"] = fresh
+
+        if fresh.get("status") == "ok" and txt(fresh.get("scoreline")):
+            pick = txt(fresh["scoreline"])
+            entry["pick_source"] = "live_odds_recompute"
+        elif card_pick:
+            pick = card_pick
+            entry["pick_source"] = "committed_card_fallback"
+        else:
+            entry["status"] = "no_pick_available"
             submitted_results.append(entry)
             continue
 
-        pick = txt(pick_lookup["pick"])
+        entry["card_pick"] = card_pick
         entry["selected_pick"] = pick
-        entry["match_odds"] = fetch_match_odds_snapshot(args, entry, out_dir)
+        entry["pick_changed_vs_card"] = bool(card_pick and pick != card_pick)
 
         if args.dry_run:
             entry["status"] = "dry_run"
@@ -555,8 +644,11 @@ async def run(args: argparse.Namespace) -> dict[str, Any]:
         "results": submitted_results,
         "submitted": sum(1 for item in submitted_results if item.get("status") == "submitted"),
         "dry_run_count": sum(1 for item in submitted_results if item.get("status") == "dry_run"),
-        "pick_card_missing": sum(1 for item in submitted_results if item.get("status") == "pick_card_missing"),
+        "no_pick_available": sum(1 for item in submitted_results if item.get("status") == "no_pick_available"),
         "submit_failed": sum(1 for item in submitted_results if item.get("status") == "submit_failed"),
+        "fresh_recompute_used": sum(1 for item in submitted_results if item.get("pick_source") == "live_odds_recompute"),
+        "card_fallback_used": sum(1 for item in submitted_results if item.get("pick_source") == "committed_card_fallback"),
+        "pick_changed_vs_card": sum(1 for item in submitted_results if item.get("pick_changed_vs_card")),
     }
 
     ts = now.strftime("%Y%m%dT%H%M%SZ")
@@ -576,6 +668,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--out-dir", default="outputs/pregame_checks/auto_pick")
     parser.add_argument("--pick-card-csv", default="outputs/final_locked_picks/superbru_final_card.csv")
+    parser.add_argument("--config", default="config.yaml", help="Engine config used to recompute the pick from fresh single-match odds.")
     parser.add_argument("--odds-api-key", default=os.environ.get("THE_ODDS_API_KEY", ""))
     parser.add_argument("--odds-sport", default="soccer_fifa_world_cup")
     parser.add_argument("--odds-regions", default="uk,eu,us,au")

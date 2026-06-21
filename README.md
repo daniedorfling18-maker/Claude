@@ -101,9 +101,9 @@ Repeated result refreshes are safe — the ratings store tracks applied match ID
 
 ## Daily Production Workflow
 
-The GitHub Actions workflow `.github/workflows/daily-superbru-robust.yml` runs at **07:00 SAST** (`05:00 UTC`) each day:
+The GitHub Actions workflow `.github/workflows/daily-superbru-robust.yml` runs **twice daily** — **07:00 SAST** (`05:00 UTC`, morning card) and **19:00 SAST** (`17:00 UTC`, evening refresh):
 
-1. Fetches market odds from The Odds API
+1. Fetches market odds from The Odds API (scheduled runs always fetch; manual runs use cached odds unless `refresh_market_odds=true`)
 2. Builds the daily Superbru card
 3. Runs the Oddspedia SmartBet overlay if a captured grid exists
 4. Writes the score-change notification report
@@ -113,6 +113,27 @@ The GitHub Actions workflow `.github/workflows/daily-superbru-robust.yml` runs a
 Required secret: `THE_ODDS_API_KEY`
 
 The full local Oddspedia pipeline must be run locally to refresh the grid. The GitHub Action consumes the latest committed grid files rather than scraping Oddspedia itself (Cloudflare protection prevents remote scraping).
+
+## Match-Scoped Auto-Pick
+
+`.github/workflows/auto_pick.yml` fires on a per-fixture cron schedule (~25 min before each kickoff, with a 40-minute window that absorbs GitHub's best-effort cron delays). For each match inside the window it:
+
+1. Logs into Superbru and locates the unlocked match tab
+2. Pulls **that match's** odds from The Odds API and **recomputes the recommended scoreline live** via the engine — so a stale committed card never drives the submission. The fresh pick is oriented to the Superbru home/away order before submitting.
+3. Falls back to the committed locked-card pick only if the live recompute is unavailable (no odds, API error, unconfirmable team orientation)
+4. Submits the pick via headless browser automation
+
+The run summary records `pick_source` (`live_odds_recompute` vs `committed_card_fallback`) and `pick_changed_vs_card` per match.
+
+Required secrets: `THE_ODDS_API_KEY`, `SUPERBRU_USERNAME`, `SUPERBRU_PASSWORD`.
+
+## Superbru Fixture Checker
+
+`.github/workflows/check_superbru_fixtures.yml` runs daily (06:00 UTC). It logs into Superbru, lists upcoming fixtures, and verifies each one inside the next 48 h is covered by an `auto_pick.yml` cron entry (a cron firing 1–45 min before kickoff). For any uncovered fixture it proposes a cron firing 25 min before kickoff and **opens a pull request** adding the entry to `auto_pick.yml` (de-duplicated). A full fixture/coverage report is always uploaded as an artifact.
+
+Because the PR edits a workflow file, it needs a personal access token with `repo` + `workflow` scope, exposed as the `WORKFLOW_PAT` secret. Without it the job still produces the report and suggested cron lines but cannot open the PR.
+
+Required secrets: `SUPERBRU_USERNAME`, `SUPERBRU_PASSWORD`, and `WORKFLOW_PAT` (for the auto-PR).
 
 ## Oddspedia SmartBet Pipeline
 

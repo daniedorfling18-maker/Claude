@@ -1,7 +1,11 @@
 name: Daily Superbru Robust Card
 
 on:
-  # schedule disabled: auto_pick.yml is the only scheduled workflow
+  schedule:
+    # Twice daily (UTC). 05:00 = 07:00 SAST morning card; 17:00 = 19:00 SAST evening refresh.
+    # Scheduled runs fetch fresh market odds; manual runs default to cached unless refresh_market_odds=true.
+    - cron: '0 5 * * *'
+    - cron: '0 17 * * *'
   workflow_dispatch:
     inputs:
       skip_final_simulation:
@@ -70,7 +74,7 @@ jobs:
           if [ "${{ inputs.skip_final_simulation }}" = "true" ]; then
             SKIP_FLAG="--skip-final-simulation"
           fi
-          if [ "${{ inputs.refresh_market_odds }}" = "true" ]; then
+          if [ "${{ inputs.refresh_market_odds }}" = "true" ] || [ "${{ github.event_name }}" = "schedule" ]; then
             MARKET_ODDS_FLAG=""
           fi
           if [ -n "$SNAPSHOT_ID" ]; then

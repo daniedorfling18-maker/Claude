@@ -52,10 +52,6 @@ def require_file(path: str | Path, label: str) -> None:
         )
 
 
-def file_exists(path: str | Path) -> bool:
-    return (ROOT / Path(path)).exists()
-
-
 def final_simulation_cache_complete(out_dir: str | Path = "outputs/final_leader_decision_daily_robust") -> bool:
     base = ROOT / Path(out_dir)
     required = [
@@ -114,6 +110,8 @@ def main() -> int:
             "outputs/market_odds/worldcup_market_odds_raw.json",
             "--out-csv",
             "outputs/market_odds/worldcup_market_odds_flat.csv",
+            "--allow-stale-on-failure",
+            "--allow-empty-on-failure",
         ],
         env=env,
     )

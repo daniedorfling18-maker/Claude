@@ -25,9 +25,15 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def run(cmd: list[str], env: dict[str, str] | None = None) -> None:
+def run(cmd: list[str], env: dict[str, str] | None = None, *, warn_only: bool = False) -> int:
     print("\n$ " + " ".join(cmd), flush=True)
-    subprocess.run(cmd, cwd=ROOT, env=env, check=True)
+    completed = subprocess.run(cmd, cwd=ROOT, env=env, check=False)
+    if completed.returncode != 0:
+        if warn_only:
+            print(f"warning: command exited with {completed.returncode}; continuing")
+            return completed.returncode
+        raise subprocess.CalledProcessError(completed.returncode, cmd)
+    return 0
 
 
 def require_file(path: str | Path, label: str) -> None:
@@ -38,22 +44,38 @@ def require_file(path: str | Path, label: str) -> None:
         )
 
 
+def file_exists(path: str | Path) -> bool:
+    return (ROOT / Path(path)).exists()
+
+
 def main() -> int:
     args = build_parser().parse_args()
     snapshot_id = args.snapshot_id or datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     env = os.environ.copy()
     env["PYTHONPATH"] = str(ROOT / "src")
+    final_simulation_skipped = bool(args.skip_final_simulation)
+    final_simulation_failed = False
 
     if not env.get("THE_ODDS_API_KEY"):
         raise EnvironmentError("THE_ODDS_API_KEY is not set. Add it as a GitHub Actions repository secret.")
 
-    # Static/generated inputs that must exist before an unattended run.
     require_file("outputs/final_leader_decision_round_summary_profiles/final_picks.csv", "base final picks")
-    require_file("outputs/pick_validation_report/pick_validation_report.csv", "pick validation report")
-    require_file("outputs/pick_validation_report/review_candidate_alternatives.csv", "review candidate alternatives")
-    require_file("outputs/latest/predictions.csv", "base predictions")
 
     run([sys.executable, "scripts/verify_validation_stack.py"], env=env)
+
+    run(
+        [
+            sys.executable,
+            "scripts/build_pick_validation_report.py",
+            "--final-picks-csv",
+            "outputs/final_leader_decision_round_summary_profiles/final_picks.csv",
+            "--final-report-json",
+            "outputs/final_leader_decision_round_summary_profiles/final_decision_report.json",
+            "--out-dir",
+            "outputs/pick_validation_report",
+        ],
+        env=env,
+    )
 
     run(
         [
@@ -155,33 +177,38 @@ def main() -> int:
         robust_cmd.append("--allow-first-snapshot")
     run(robust_cmd, env=env)
 
-    run(
-        [
-            sys.executable,
-            "scripts/build_predictions_from_locked_card.py",
-            "--base-predictions-csv",
-            "outputs/latest/predictions.csv",
-            "--locked-card-csv",
-            "outputs/daily_robust_card/daily_robust_superbru_card.csv",
-            "--out-csv",
-            "outputs/daily_robust_card/predictions_for_final_simulation.csv",
-        ],
-        env=env,
-    )
-
     if not args.skip_final_simulation:
-        run(
-            [
-                sys.executable,
-                "scripts/run_final_leader_decision.py",
-                "--predictions-csv",
-                "outputs/daily_robust_card/predictions_for_final_simulation.csv",
-                "--out-dir",
-                "outputs/final_leader_decision_daily_robust",
-                "--reuse-existing",
-            ],
-            env=env,
-        )
+        if not file_exists("outputs/latest/predictions.csv"):
+            print("outputs/latest/predictions.csv not found; skipping final leader simulation for this run.")
+            final_simulation_skipped = True
+        else:
+            run(
+                [
+                    sys.executable,
+                    "scripts/build_predictions_from_locked_card.py",
+                    "--base-predictions-csv",
+                    "outputs/latest/predictions.csv",
+                    "--locked-card-csv",
+                    "outputs/daily_robust_card/daily_robust_superbru_card.csv",
+                    "--out-csv",
+                    "outputs/daily_robust_card/predictions_for_final_simulation.csv",
+                ],
+                env=env,
+            )
+            rc = run(
+                [
+                    sys.executable,
+                    "scripts/run_final_leader_decision.py",
+                    "--predictions-csv",
+                    "outputs/daily_robust_card/predictions_for_final_simulation.csv",
+                    "--out-dir",
+                    "outputs/final_leader_decision_daily_robust",
+                    "--reuse-existing",
+                ],
+                env=env,
+                warn_only=True,
+            )
+            final_simulation_failed = rc != 0
 
     summary: dict[str, Any] = {
         "generated_at_utc": datetime.now(timezone.utc).isoformat(),
@@ -190,6 +217,8 @@ def main() -> int:
         "daily_summary": "outputs/daily_robust_card/daily_robust_summary.json",
         "market_history_summary": "outputs/market_odds_history/market_odds_history_summary.json",
         "final_simulation_dir": "outputs/final_leader_decision_daily_robust",
+        "final_simulation_skipped": final_simulation_skipped,
+        "final_simulation_failed_non_blocking": final_simulation_failed,
     }
     out_path = ROOT / "outputs/daily_robust_card/daily_pipeline_summary.json"
     out_path.parent.mkdir(parents=True, exist_ok=True)

@@ -1,0 +1,2 @@
+Trigger full Daily Superbru Robust Card workflow after making final simulation non-blocking.
+Triggered at 2026-06-21T10:24:00Z

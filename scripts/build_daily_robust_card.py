@@ -16,6 +16,16 @@ SEVERITY_BUMP = {
     "high": 0.05,
 }
 
+RESCORE_COLUMNS = [
+    "home_team",
+    "away_team",
+    "current_pick",
+    "candidate_pick",
+    "recommendation",
+    "component_improvement",
+    "ev_loss",
+]
+
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
@@ -88,11 +98,14 @@ def score_outcome(scoreline: Any) -> str:
     return "draw"
 
 
-def load_csv(path: str | Path) -> pd.DataFrame:
+def load_csv(path: str | Path, *, columns: list[str] | None = None) -> pd.DataFrame:
     p = Path(path)
     if not p.exists():
-        return pd.DataFrame()
-    return pd.read_csv(p).fillna("")
+        return pd.DataFrame(columns=columns or [])
+    try:
+        return pd.read_csv(p).fillna("")
+    except pd.errors.EmptyDataError:
+        return pd.DataFrame(columns=columns or [])
 
 
 def choose_pick_column(frame: pd.DataFrame) -> str:
@@ -155,15 +168,11 @@ def market_candidate_previous_supported(candidate_pick: str, movement: pd.Series
     previous_favourite = txt(movement.get("previous_market_favourite"))
     if not previous_favourite:
         return None
-    outcome = score_outcome(candidate_pick)
-    return outcome == previous_favourite
+    return score_outcome(candidate_pick) == previous_favourite
 
 
 def movement_lookup(movement: pd.DataFrame) -> dict[tuple[str, str], pd.Series]:
-    return {
-        match_key(row.get("home_team"), row.get("away_team")): row
-        for _, row in movement.iterrows()
-    }
+    return {match_key(row.get("home_team"), row.get("away_team")): row for _, row in movement.iterrows()}
 
 
 def evaluate_switch(
@@ -182,8 +191,7 @@ def evaluate_switch(
 
     manual = manual or {"severity": "", "flag_types": [], "notes": [], "block_switch": False}
     severity = txt(manual.get("severity")).lower()
-    manual_bump = SEVERITY_BUMP.get(severity, 0.0)
-    improvement_floor = args.min_component_improvement + manual_bump
+    improvement_floor = args.min_component_improvement + SEVERITY_BUMP.get(severity, 0.0)
 
     depth_count = 0
     depth_class = "unavailable"
@@ -205,21 +213,16 @@ def evaluate_switch(
         "component_improvement_sufficient": improvement >= improvement_floor,
         "market_depth_sufficient": depth_count >= args.min_bookmakers,
         "manual_not_blocking": not bool(manual.get("block_switch")),
-        "hard_rule_ok": (bval(candidate.get("passes_hard_rule")) if args.require_hard_rule else True),
+        "hard_rule_ok": bval(candidate.get("passes_hard_rule")) if args.require_hard_rule else True,
     }
-
-    if args.require_two_day_support:
-        if has_previous:
-            checks["two_day_support"] = bool(previous_supported)
-        else:
-            checks["two_day_support"] = bool(args.allow_first_snapshot)
-    else:
-        checks["two_day_support"] = True
+    checks["two_day_support"] = (
+        bool(previous_supported) if args.require_two_day_support and has_previous else bool(args.allow_first_snapshot)
+        if args.require_two_day_support else True
+    )
 
     decision = all(checks.values())
     reasons = [name for name, ok in checks.items() if ok]
     blockers = [name for name, ok in checks.items() if not ok]
-
     audit = {
         "home_team": txt(candidate.get("home_team")),
         "away_team": txt(candidate.get("away_team")),
@@ -251,12 +254,10 @@ def evaluate_switch(
 def main() -> int:
     args = build_parser().parse_args()
     locked = load_csv(args.locked_picks_csv)
-    rescore = load_csv(args.rescore_csv)
+    rescore = load_csv(args.rescore_csv, columns=RESCORE_COLUMNS)
     movement = load_csv(args.movement_csv)
     if locked.empty:
         raise FileNotFoundError(f"No locked/final picks found at {args.locked_picks_csv}")
-    if rescore.empty:
-        raise FileNotFoundError(f"No rescore rows found at {args.rescore_csv}")
 
     out_dir = Path(args.out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -270,13 +271,20 @@ def main() -> int:
     movement_by_match = movement_lookup(movement) if not movement.empty else {}
     manual_flags = load_manual_flags(args.manual_flags_csv)
 
-    candidates = rescore[rescore["recommendation"].astype(str).str.lower().eq("switch_candidate")].copy()
-    candidates = candidates.sort_values(["component_improvement", "ev_loss"], ascending=[False, True])
-    candidates["_key"] = candidates.apply(lambda row: match_key(row.get("home_team"), row.get("away_team")), axis=1)
-    candidates = candidates.drop_duplicates("_key", keep="first")
+    if "recommendation" in rescore.columns and not rescore.empty:
+        candidates = rescore[rescore["recommendation"].astype(str).str.lower().eq("switch_candidate")].copy()
+    else:
+        candidates = pd.DataFrame(columns=RESCORE_COLUMNS)
+    if not candidates.empty:
+        for col in ["component_improvement", "ev_loss"]:
+            if col not in candidates.columns:
+                candidates[col] = ""
+        candidates = candidates.sort_values(["component_improvement", "ev_loss"], ascending=[False, True])
+        candidates["_key"] = candidates.apply(lambda row: match_key(row.get("home_team"), row.get("away_team")), axis=1)
+        candidates = candidates.drop_duplicates("_key", keep="first")
 
     audits: list[dict[str, Any]] = []
-    switch_lookup = {row["_key"]: row for _, row in candidates.iterrows()}
+    switch_lookup = {row["_key"]: row for _, row in candidates.iterrows()} if not candidates.empty else {}
 
     for idx, row in locked.iterrows():
         key = match_key(row.get("home_team"), row.get("away_team"))
@@ -286,16 +294,14 @@ def main() -> int:
         current_pick = txt(candidate.get("current_pick"))
         card_pick = txt(row.get(pick_col))
         if current_pick and card_pick and current_pick != card_pick:
-            audits.append(
-                {
-                    "home_team": txt(row.get("home_team")),
-                    "away_team": txt(row.get("away_team")),
-                    "current_pick": card_pick,
-                    "candidate_pick": txt(candidate.get("candidate_pick")),
-                    "apply_switch": False,
-                    "blocked_by": f"candidate current_pick mismatch: {current_pick} vs card {card_pick}",
-                }
-            )
+            audits.append({
+                "home_team": txt(row.get("home_team")),
+                "away_team": txt(row.get("away_team")),
+                "current_pick": card_pick,
+                "candidate_pick": txt(candidate.get("candidate_pick")),
+                "apply_switch": False,
+                "blocked_by": f"candidate current_pick mismatch: {current_pick} vs card {card_pick}",
+            })
             continue
         apply, audit = evaluate_switch(args, candidate, row, movement_by_match.get(key), manual_flags.get(key))
         audits.append(audit)
@@ -320,6 +326,7 @@ def main() -> int:
     audit_df.to_csv(audit_path, index=False)
 
     applied = audit_df[audit_df.get("apply_switch", pd.Series(dtype=bool)).astype(str).str.lower().eq("true")] if not audit_df.empty else pd.DataFrame()
+    blocked = audit_df[audit_df.get("apply_switch", pd.Series(dtype=bool)).astype(str).str.lower().ne("true")] if not audit_df.empty else pd.DataFrame()
     summary = {
         "generated_at_utc": datetime.now(timezone.utc).isoformat(),
         "input_card_count": int(len(locked)),
@@ -328,7 +335,7 @@ def main() -> int:
         "require_two_day_support": bool(args.require_two_day_support),
         "allow_first_snapshot": bool(args.allow_first_snapshot),
         "applied_switches": applied.to_dict(orient="records") if not applied.empty else [],
-        "blocked_switches": audit_df[audit_df.get("apply_switch", pd.Series(dtype=bool)).astype(str).str.lower().ne("true")].to_dict(orient="records") if not audit_df.empty else [],
+        "blocked_switches": blocked.to_dict(orient="records") if not blocked.empty else [],
         "outputs": {
             "daily_robust_locked_picks": str(locked_path),
             "daily_robust_superbru_card": str(card_path),

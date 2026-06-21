@@ -10,6 +10,23 @@ from typing import Any
 import pandas as pd
 
 
+RESCORE_COLUMNS = [
+    "home_team",
+    "away_team",
+    "current_pick",
+    "candidate_pick",
+    "recommendation",
+    "current_component_score",
+    "candidate_component_score",
+    "component_improvement",
+    "ev_loss",
+    "delta_p_finish_first",
+    "stress_pass_rate",
+    "passes_hard_rule",
+    "decision_reasons",
+]
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description="Apply approved market/component switch candidates and write the final locked Superbru picks."
@@ -59,11 +76,18 @@ def match_key(home: Any, away: Any) -> tuple[str, str]:
     return norm_team(home), norm_team(away)
 
 
-def load_csv(path: str | Path, label: str) -> pd.DataFrame:
+def load_csv(path: str | Path, label: str, *, allow_empty: bool = False) -> pd.DataFrame:
     p = Path(path)
     if not p.exists():
+        if allow_empty:
+            return pd.DataFrame(columns=RESCORE_COLUMNS)
         raise FileNotFoundError(f"Missing {label}: {p}")
-    return pd.read_csv(p).fillna("")
+    try:
+        return pd.read_csv(p).fillna("")
+    except pd.errors.EmptyDataError:
+        if allow_empty:
+            return pd.DataFrame(columns=RESCORE_COLUMNS)
+        raise
 
 
 def pick_column(frame: pd.DataFrame) -> str:
@@ -78,6 +102,8 @@ def pick_column(frame: pd.DataFrame) -> str:
 
 def approved_switches(args: argparse.Namespace, rescore: pd.DataFrame) -> pd.DataFrame:
     required = {"home_team", "away_team", "current_pick", "candidate_pick", "recommendation"}
+    if rescore.empty:
+        return pd.DataFrame(columns=list(required))
     missing = required - set(rescore.columns)
     if missing:
         raise ValueError(f"Rescore CSV is missing required columns: {sorted(missing)}")
@@ -101,8 +127,6 @@ def approved_switches(args: argparse.Namespace, rescore: pd.DataFrame) -> pd.Dat
         mask = mask & approved.get("passes_hard_rule", pd.Series([False] * len(approved))).map(bval)
 
     approved = approved[mask].copy()
-
-    # If more than one candidate somehow survives for a match, use the strongest component improvement, then lowest EV loss.
     approved["_key"] = approved.apply(lambda row: match_key(row.get("home_team"), row.get("away_team")), axis=1)
     approved = approved.sort_values(["_improvement", "_ev_loss"], ascending=[False, True])
     approved = approved.drop_duplicates("_key", keep="first")
@@ -206,7 +230,7 @@ def write_outputs(out_dir: Path, locked: pd.DataFrame, applied: pd.DataFrame, wa
 def main() -> int:
     args = build_parser().parse_args()
     final_picks = load_csv(args.final_picks_csv, "final picks CSV")
-    rescore = load_csv(args.rescore_csv, "rescore CSV")
+    rescore = load_csv(args.rescore_csv, "rescore CSV", allow_empty=True)
     pick_col = pick_column(final_picks)
     switches = approved_switches(args, rescore)
     locked, applied, warnings = apply_switches(final_picks, switches, pick_col)

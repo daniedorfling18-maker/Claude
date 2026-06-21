@@ -52,7 +52,7 @@ INSPECT_INPUTS_JS = r"""
 """
 
 FIND_MATCH_ROW_JS = r"""
-(homeTeam, awayTeam) => {
+([homeTeam, awayTeam]) => {
   function norm(s) { return (s || '').toLowerCase().replace(/[^a-z0-9]/g, ''); }
   const hn = norm(homeTeam), an = norm(awayTeam);
   const candidates = Array.from(document.querySelectorAll('tr, li, div[class*=match], div[class*=fixture], div[class*=game], section'));
@@ -99,11 +99,11 @@ def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(description="Inspect SuperBru pick-entry DOM via Playwright (login-capable).")
     p.add_argument("--email", required=True, help="SuperBru login email")
     p.add_argument("--password", required=True, help="SuperBru login password")
-    p.add_argument("--login-url", default="https://www.superbru.com/login.php")
-    p.add_argument("--pool-url", default="https://www.superbru.com/worldcup_predictor/pool_view.php?t=1296&p=13236623&g=32&view=matches")
+    p.add_argument("--login-url", default="https://www.superbru.com/login")
+    p.add_argument("--pool-url", default="https://www.superbru.com/worldcup_predictor/pool_view.php?t=1296&p=13236623&g=37&view=matches")
     p.add_argument("--home-team", default="Spain")
     p.add_argument("--away-team", default="Saudi Arabia")
-    p.add_argument("--settle-ms", type=int, default=8000)
+    p.add_argument("--settle-ms", type=int, default=15000)
     p.add_argument("--out-dir", default="outputs/pregame_checks/submit_diagnostics")
     p.add_argument("--headless", action="store_true", default=True)
     p.add_argument("--headed", dest="headless", action="store_false")
@@ -131,16 +131,48 @@ async def run(args: argparse.Namespace) -> dict:
         browser = await pw.chromium.launch(headless=args.headless)
         page = await browser.new_page()
 
-        # ── Login ────────────────────────────────────────────────────────────
         print(f"Navigating to login: {args.login_url}")
         await page.goto(args.login_url, wait_until="domcontentloaded", timeout=30000)
         await page.wait_for_timeout(2000)
 
+        consent_selectors = [
+            "button[aria-label='CONFIRM']",
+            "button[aria-label='Accept All']",
+            "button[aria-label='Accept all']",
+            "button[aria-label='I Accept']",
+            "#qc-cmp2-container button[mode='primary']",
+            ".qc-cmp2-summary-buttons button:last-child",
+            "button:has-text('Accept')",
+            "button:has-text('Confirm')",
+            "button:has-text('I agree')",
+            "button:has-text('Agree')",
+            "#accept-cookie-policy",
+        ]
+        for sel in consent_selectors:
+            try:
+                await page.click(sel, timeout=2000)
+                print(f"  Dismissed consent overlay via: {sel}")
+                await page.wait_for_timeout(2500)
+                break
+            except Exception:
+                continue
+
+        try:
+            await page.click("button[aria-label='Close success modal']", timeout=2000)
+            print("  Dismissed consent success modal.")
+            await page.wait_for_timeout(1000)
+        except Exception:
+            pass
+
+        await page.screenshot(path=str(out_dir / f"{ts}_login_page.png"))
         login_html = await page.content()
         (out_dir / f"{ts}_login_page.html").write_text(login_html, encoding="utf-8")
 
-        # Try common email/password selectors
-        email_selectors = ["input[type=email]", "input[name=email]", "input[name=username]", "input[id*=email]", "input[id*=user]"]
+        pre_fill_inputs = await page.evaluate(INSPECT_INPUTS_JS)
+        (out_dir / f"{ts}_login_inputs.json").write_text(json.dumps(pre_fill_inputs, indent=2), encoding="utf-8")
+        print(f"  Inputs found after consent handling: {len(pre_fill_inputs)}")
+
+        email_selectors = ["input[type=email]", "input[name=email]", "input[name=username]", "input[id*=email]", "input[id*=user]", "input[name=login]", "input[name=user]"]
         password_selectors = ["input[type=password]", "input[name=password]", "input[id*=pass]"]
         submit_selectors = ["button[type=submit]", "input[type=submit]", "button:has-text('Log')", "button:has-text('Sign')", "a:has-text('Log')"]
 
@@ -165,13 +197,13 @@ async def run(args: argparse.Namespace) -> dict:
                 continue
 
         if not email_filled or not pass_filled:
-            # Dump inputs to help debug login form
-            all_inputs = await page.evaluate(INSPECT_INPUTS_JS)
-            dump = out_dir / f"{ts}_login_inputs.json"
-            dump.write_text(json.dumps(all_inputs, indent=2), encoding="utf-8")
             await page.screenshot(path=str(out_dir / f"{ts}_login_screenshot.png"))
             result["status"] = "login_form_not_found"
-            result["reason"] = f"email_filled={email_filled} pass_filled={pass_filled}. Check {dump} for input elements."
+            result["reason"] = (
+                f"email_filled={email_filled} pass_filled={pass_filled}. "
+                f"Check {ts}_login_inputs.json ({len(pre_fill_inputs)} inputs found) and "
+                f"{ts}_login_page.html for the actual DOM."
+            )
             print(f"ERROR: {result['reason']}")
             await browser.close()
             return result
@@ -205,13 +237,39 @@ async def run(args: argparse.Namespace) -> dict:
         print(f"Logged in. Navigating to pool: {args.pool_url}")
         await page.goto(args.pool_url, wait_until="domcontentloaded", timeout=30000)
         await page.wait_for_timeout(args.settle_ms)
+        await page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
+        await page.wait_for_timeout(2000)
+        await page.evaluate("window.scrollTo(0, 0)")
+        await page.wait_for_timeout(1000)
 
         await page.screenshot(path=str(out_dir / f"{ts}_pool_page.png"))
         pool_html = await page.content()
         (out_dir / f"{ts}_pool_page.html").write_text(pool_html, encoding="utf-8")
         print(f"  Pool URL: {page.url}")
 
-        # ── Dump all inputs ──────────────────────────────────────────────────
+        print(f"\nLooking for game subtab: {args.home_team} / {args.away_team}")
+        click_subtab_js = """
+([homeTeam, awayTeam]) => {
+  function norm(s) { return (s || '').toLowerCase().replace(/[^a-z]/g, ''); }
+  const hn = norm(homeTeam), an = norm(awayTeam);
+  const controls = Array.from(document.querySelectorAll('[data-brutip][data-bru-tab]'));
+  for (const c of controls) {
+    const tip = norm(c.getAttribute('data-brutip') || '');
+    if (tip.includes(hn) || tip.includes(an)) {
+      c.click();
+      return c.getAttribute('data-bru-tab') + ': ' + c.getAttribute('data-brutip');
+    }
+  }
+  return null;
+}
+"""
+        subtab_clicked = await page.evaluate(click_subtab_js, [args.home_team, args.away_team])
+        if subtab_clicked:
+            print(f"  Clicked subtab: {subtab_clicked}")
+            await page.wait_for_timeout(6000)
+        else:
+            print("  No matching subtab found; reading current active tab.")
+
         all_inputs = await page.evaluate(INSPECT_INPUTS_JS)
         inputs_path = out_dir / f"{ts}_all_inputs.json"
         inputs_path.write_text(json.dumps(all_inputs, indent=2), encoding="utf-8")
@@ -219,12 +277,10 @@ async def run(args: argparse.Namespace) -> dict:
         visible = [i for i in all_inputs if i.get("visible")]
         print(f"  {len(visible)} visible:")
         for inp in visible:
-            print(f"  [{inp['type']:10s}] id={inp['id']!r:30s} name={inp['name']!r:30s} "
-                  f"maxlen={str(inp['maxlength']):4s} val={inp['value']!r:8s}  ctx={inp['parentText'][:80]!r}")
+            print(f"  [{inp['type']:10s}] id={inp['id']!r:30s} name={inp['name']!r:30s} maxlen={str(inp['maxlength']):4s} val={inp['value']!r:8s}  ctx={inp['parentText'][:80]!r}")
 
-        # ── Find match row ───────────────────────────────────────────────────
         print(f"\nSearching for match row: {args.home_team} vs {args.away_team}")
-        row = await page.evaluate(FIND_MATCH_ROW_JS, args.home_team, args.away_team)
+        row = await page.evaluate(FIND_MATCH_ROW_JS, [args.home_team, args.away_team])
         row_path = out_dir / f"{ts}_match_row.json"
         row_path.write_text(json.dumps(row, indent=2), encoding="utf-8")
 

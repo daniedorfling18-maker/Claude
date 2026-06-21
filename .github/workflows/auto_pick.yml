@@ -76,6 +76,8 @@ jobs:
         env:
           SUPERBRU_EMAIL: ${{ secrets.SUPERBRU_USERNAME }}
           SUPERBRU_PASSWORD: ${{ secrets.SUPERBRU_PASSWORD }}
+          SUPERBRU_LOGIN_URL: ${{ secrets.SUPERBRU_LOGIN_URL }}
+          SUPERBRU_POOL_URL: ${{ secrets.SUPERBRU_POOL_URL }}
           THE_ODDS_API_KEY: ${{ secrets.THE_ODDS_API_KEY }}
         run: |
           DRY_RUN_FLAG=""
@@ -83,10 +85,21 @@ jobs:
             DRY_RUN_FLAG="--dry-run"
           fi
 
+          POOL_URL="${{ github.event.inputs.pool_url || '' }}"
+          if [ -z "$POOL_URL" ]; then
+            POOL_URL="$SUPERBRU_POOL_URL"
+          fi
+          if [ -z "$POOL_URL" ]; then
+            POOL_URL="https://www.superbru.com/worldcup_predictor/pool_view.php?t=1296&p=13236623&view=matches"
+          fi
+
+          LOGIN_URL="${SUPERBRU_LOGIN_URL:-https://www.superbru.com/login}"
+
           python scripts/auto_pick_match_scoped.py \
             --email "$SUPERBRU_EMAIL" \
             --password "$SUPERBRU_PASSWORD" \
-            --pool-url "${{ github.event.inputs.pool_url || 'https://www.superbru.com/worldcup_predictor/pool_view.php?t=1296&p=13236623&view=matches' }}" \
+            --login-url "$LOGIN_URL" \
+            --pool-url "$POOL_URL" \
             --window-minutes "${{ github.event.inputs.window_minutes || '20' }}" \
             --pick-card-csv outputs/final_locked_picks/superbru_final_card.csv \
             --odds-lookup-window-minutes 90 \

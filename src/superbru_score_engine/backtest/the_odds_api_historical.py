@@ -20,6 +20,7 @@ from superbru_score_engine.model.ratings import MatchResult, RatingsStore
 from superbru_score_engine.model.team_names import canonical_team_key
 
 from .runner import naive_baseline_pick, reliability_cells
+from .utils import mode_delta, parse_float_grid, parse_str_grid
 
 
 def run_the_odds_api_historical_backtest(args: argparse.Namespace, config: AppConfig) -> int:
@@ -38,16 +39,16 @@ def run_the_odds_api_historical_backtest(args: argparse.Namespace, config: AppCo
     matches = normalise_the_odds_api_events(events)
     matched = match_events_to_fixtures(matches, fixtures)
 
-    market_modes = _string_grid(args.market_mode_grid) or ["h2h", "h2h_totals"]
+    market_modes = parse_str_grid(args.market_mode_grid, lowercase=True) or ["h2h", "h2h_totals"]
     compare_on_totals_subset = "h2h_totals" in market_modes
     if compare_on_totals_subset:
         matched = [item for item in matched if _has_market(item["match"], "h2h") and _has_market(item["match"], "totals")]
     else:
         matched = [item for item in matched if _has_market(item["match"], "h2h")]
 
-    rho_grid = _float_grid(args.rho_grid) or [config.model.dixon_coles_rho]
-    ci_grid = _float_grid(args.ci_grid) or [config.superbru.ci_cutoff]
-    devig_methods = _string_grid(args.devig_method_grid) or [config.model.devig_method]
+    rho_grid = parse_float_grid(args.rho_grid) or [config.model.dixon_coles_rho]
+    ci_grid = parse_float_grid(args.ci_grid) or [config.superbru.ci_cutoff]
+    devig_methods = parse_str_grid(args.devig_method_grid, lowercase=True) or [config.model.devig_method]
 
     calibration_rows: list[dict[str, Any]] = []
     best_by_mode: dict[str, tuple[float, str, float, float, pd.DataFrame]] = {}
@@ -117,7 +118,7 @@ def run_the_odds_api_historical_backtest(args: argparse.Namespace, config: AppCo
         "matched_fixture_count": int(len(matched)),
         "comparison_subset": "matches with both h2h and totals" if compare_on_totals_subset else "matches with h2h",
         "market_modes": mode_summaries,
-        "totals_delta_vs_h2h": _mode_delta(mode_summaries, "h2h_totals", "h2h"),
+        "totals_delta_vs_h2h": mode_delta(mode_summaries, "h2h_totals", "h2h"),
         "calibration_results": str(calibration_path),
         "mode_comparison": str(comparison_path),
         "backtest_results": str(details_path),
@@ -133,7 +134,7 @@ def fetch_historical_snapshots(args: argparse.Namespace, config: AppConfig, out_
     api_key = env_value(config.providers.the_odds_api)
     if not api_key:
         raise ProviderUnavailable("The Odds API key is not configured")
-    dates = _string_grid(args.date_grid)
+    dates = parse_str_grid(args.date_grid)
     if not dates:
         raise ProviderUnavailable("--fetch requires --date-grid with one or more ISO8601 timestamps")
 
@@ -342,12 +343,6 @@ def summarize_mode(market_mode: str, frame: pd.DataFrame, devig_method: str, rho
     }
 
 
-def _mode_delta(summaries: dict[str, dict[str, Any]], test_mode: str, baseline_mode: str) -> float | None:
-    if test_mode not in summaries or baseline_mode not in summaries:
-        return None
-    return float(summaries[test_mode]["avg_model_points"] - summaries[baseline_mode]["avg_model_points"])
-
-
 def _has_market(match: MatchOdds, key: str) -> bool:
     return bool(match.markets.get(key))
 
@@ -371,13 +366,3 @@ def _date_only(value: Any) -> str:
     return parsed.date().isoformat()
 
 
-def _float_grid(raw: str) -> list[float]:
-    if not raw:
-        return []
-    return [float(item.strip()) for item in raw.split(",") if item.strip()]
-
-
-def _string_grid(raw: str) -> list[str]:
-    if not raw:
-        return []
-    return [item.strip().lower() for item in raw.split(",") if item.strip()]

@@ -1,12 +1,12 @@
 # World Cup 2026 Superbru Score-Prediction Engine
 
-Python engine for converting bookmaker odds into a calibrated scoreline distribution and choosing the score prediction that maximises expected Superbru points.
+Python engine that converts bookmaker odds into a calibrated scoreline distribution and selects the score prediction with the highest expected Superbru points.
 
-The important bit: this is not a "most likely exact score" picker. The decision layer evaluates every candidate scoreline against the Superbru payoff function and chooses the scoreline with the highest expected points.
+The key insight: this is not a "most likely exact score" picker. The decision layer evaluates every candidate scoreline against the Superbru payoff function (3 pts exact, 1.5 pts close, 1 pt right result) and picks the scoreline that maximises expected points — not the single most probable score.
 
 ## Quick Start
 
-Linux / macOS (bash):
+Linux / macOS:
 
 ```bash
 python -m venv .venv
@@ -32,66 +32,91 @@ python -m superbru_score_engine predict --config config.yaml --fixtures examples
 
 The sample command uses the included offline odds snapshot so the app can be smoke-tested without API credentials.
 
-Run `python -m superbru_score_engine config-check --config config.yaml --profiles calibration_profiles.yaml` before production predictions. It validates that the active flat config matches the named calibration profile and exits non-zero when model settings have drifted.
+Always run `config-check` before production predictions — it validates that the active config matches the named calibration profile and exits non-zero when model settings have drifted.
+
+## Architecture
+
+```
+ingest/          → Odds providers (The Odds API, Oddspedia, offline JSON)
+model/           → Poisson + Dixon-Coles scoreline distribution
+decision/        → EV maximisation, strategy modes, sensitivity analysis
+backtest/        → Calibration sweeps and historical evaluation harness
+game_theory/     → Leader/chaser defensive strategy overlay
+betting/         → Optional conservative match-winner screen
+report/          → CSV/JSON output formatting
+```
+
+**Active calibration profile:** `big5_h2h_totals` — Football-Data Big Five league proxy calibration using `h2h + totals` market structure, multiplicative devig, Dixon-Coles ρ = −0.08, odds weight = 1.0.
+
+**Alternative profile:** `worldcup_1x2` — Football-Data 2014/2018/2022 World Cup 1X2 odds, power devig, ρ = −0.04.
+
+## CLI Commands
+
+| Command | Purpose |
+|---------|---------|
+| `config-check` | Validate config against calibration profile |
+| `fetch-odds` | Fetch live odds, write fixtures/odds JSON |
+| `predict` | Run decision engine, output predictions |
+| `results` | Fetch completed scores, update ratings store |
+| `backtest` | Score predictions against historical results |
+| `tune` | Hyperparameter calibration sweep |
+| `football-data-backtest` | World Cup proxy calibration via Football-Data |
+| `football-data-league-backtest` | Big Five league calibration sweep |
+| `the-odds-api-historical-backtest` | Historical odds snapshot comparison |
+| `public-results-backtest` | Ratings-only backtest from public results CSV |
 
 ## Live Odds
 
-Set API keys in `config.yaml` or environment variables:
+Set API keys in `config.yaml` or as environment variables:
 
-- `THE_ODDS_API_KEY`
-- `ODDSPEDIA_API_TOKEN`
+```
+THE_ODDS_API_KEY          – The Odds API v4
+ODDSPEDIA_API_TOKEN       – Oddspedia (optional)
+```
 
-The live HTTP adapters use Python's standard-library `urllib`, so no separate `requests` or `httpx` dependency is required. The Oddspedia adapter verifies that the configured endpoint returns structured odds JSON. If it gets HTML, widget content, or fixture-only data, the CLI falls back to The Odds API when that provider is configured.
+The HTTP adapters use Python's standard-library `urllib` — no `requests` or `httpx` needed.
 
-Oddspedia's `getIdsFromMatchList` style responses are useful for fixture discovery and historical/completed results. They include fields such as `league_id`, `id`, `md`, `ht`, `at`, `hscore`, and `ascore`. They do not include bookmaker markets, so they are not enough for EV score prediction by themselves. For live predictions, use an Oddspedia endpoint that returns bookmaker odds, or use The Odds API as the odds source.
+The Odds API v4 returns `h2h` and `totals` markets (correct-score availability depends on plan). The default config requests `h2h,totals`. When a match quotes multiple over/under lines (e.g. 1.5, 2.5, 3.5), the lambda solver fits all simultaneously, weighted by book count, constraining the goal distribution more tightly.
 
-Because of that split, `providers.oddspedia` (the odds source) and `providers.results.oddspedia` (the fixtures/results source) are configured separately. The shipped `config.yaml` leaves the odds `base_url` empty and uses The Odds API for odds, while pointing the results block at the Oddspedia fixtures widget. Do not copy the widget URL into the odds block: the adapter will reject it because it carries no markets.
+When a `correct_score` market is present (e.g. from an Oddspedia grid), set `model.correct_score_blend_weight` above 0 to blend it into the scoreline matrix (default 0 = off). The grid is de-vigged together with any "Any Other Score" bucket; unquoted scores are filled from the model prior.
 
-The Odds API v4 returns JSON bookmaker/event/market structures for sport odds, including `h2h` and `totals`; correct-score availability depends on plan/sport/market coverage. The default config requests `h2h,totals` only, so correct-score blending is disabled unless you explicitly request and receive a `correct_score`-style market. See:
-
-- https://the-odds-api.com/liveapi/guides/v4/
-- https://the-odds-api.com/sports-odds-data/betting-markets.html
+The Odds API provider and the Oddspedia results provider are configured separately (`providers.the_odds_api` vs `providers.results.oddspedia`). Do not copy the Oddspedia fixture-widget URL into the odds block — the adapter will reject it because it carries no bookmaker markets.
 
 ## Results Without Odds Quota
 
-Results are handled separately from odds. The default config uses Oddspedia fixture/result JSON for completed scores, filtered from `2026-06-11T00:00:00Z`, so refreshing tournament state does not spend The Odds API quota.
+Completed scores are fetched separately from odds. The default config uses Oddspedia fixture JSON (filtered from `2026-06-11T00:00:00Z`), so refreshing results does not spend Odds API quota:
 
-Fetch and save completed results, then update the ratings store:
-
-```powershell
+```bash
 python -m superbru_score_engine results --config config.yaml --out-dir outputs
 ```
 
-Refresh results immediately before predicting while still using a cached odds snapshot:
+Refresh results immediately before predicting while using a cached odds snapshot:
 
-```powershell
-python -m superbru_score_engine predict --config config.yaml --live-results --odds-json work/cache/the_odds_api_54c50997058cf99e79adc2d73bba184f.json --out-dir outputs
+```bash
+python -m superbru_score_engine predict --config config.yaml --live-results \
+  --odds-json work/cache/the_odds_api_*.json --out-dir outputs
 ```
 
-Repeated result refreshes are safe: the ratings store tracks applied match IDs/timestamps and skips results it has already applied.
+Repeated result refreshes are safe — the ratings store tracks applied match IDs and skips duplicates.
 
 ## Daily Production Workflow
 
-The GitHub Actions workflow `.github/workflows/daily-superbru-robust.yml` runs every day at **07:00 SAST** (`05:00 UTC`). It:
+The GitHub Actions workflow `.github/workflows/daily-superbru-robust.yml` runs at **07:00 SAST** (`05:00 UTC`) each day:
 
-1. fetches market odds from The Odds API;
-2. builds the daily robust Superbru card;
-3. runs the Oddspedia SmartBet overlay comparison if a captured Oddspedia grid exists;
-4. writes the score-change notification report;
-5. creates a GitHub issue only when the recommended Superbru scoreline has changed;
-6. uploads and commits the daily outputs.
+1. Fetches market odds from The Odds API
+2. Builds the daily Superbru card
+3. Runs the Oddspedia SmartBet overlay if a captured grid exists
+4. Writes the score-change notification report
+5. Creates a GitHub issue only when the recommended scoreline has changed
+6. Uploads and commits daily outputs
 
-Required GitHub secret:
+Required secret: `THE_ODDS_API_KEY`
 
-```text
-THE_ODDS_API_KEY
-```
-
-The full local Oddspedia pipeline (steps 2–10 below) must be run locally each day to refresh the grid. The GitHub Action consumes the latest committed grid files rather than scraping Oddspedia itself.
+The full local Oddspedia pipeline must be run locally to refresh the grid. The GitHub Action consumes the latest committed grid files rather than scraping Oddspedia itself (Cloudflare protection prevents remote scraping).
 
 ## Oddspedia SmartBet Pipeline
 
-The pipeline is a single 10-step orchestrator. Run it each day after confirming match URLs are up to date:
+Run each day after confirming match URLs are up to date:
 
 ```bash
 python scripts/run_oddspedia_pipeline.py
@@ -103,7 +128,7 @@ Skip the scrape step if the grid was already captured today:
 python scripts/run_oddspedia_pipeline.py --skip-scrape
 ```
 
-### What `run_oddspedia_pipeline.py` does
+### Pipeline Steps
 
 | Step | Script | Output |
 |------|--------|--------|
@@ -118,55 +143,44 @@ python scripts/run_oddspedia_pipeline.py --skip-scrape
 | 9 | `build_superbru_pool_intelligence.py` | `outputs/superbru_pool/superbru_remaining_fixture_leverage.csv` |
 | 10 | `build_oddspedia_signal_archive.py` | `outputs/backtesting/signal_archive_rolling.csv` |
 
-### How the scraper works (no browser required)
+### Scraper Dependencies
 
-`scrape_oddspedia_curl.py` uses `curl_cffi` with `impersonate='chrome124'` to replicate Chrome's TLS fingerprint. This bypasses Cloudflare's Managed Challenge without needing a real browser or CDP session. Oddspedia's server-side rendered Nuxt state (`window.__NUXT__`) is embedded in the HTML response and contains the full correct-score probability grid (market 800) and 1X2 probabilities (market 100). A Node.js subprocess evaluates the obfuscated JS function to extract structured data. BTTS and over/under odds are fetched from the internal `getMatchMaxOddsByGroup` API using the session cookies established by the first page GET.
+`scrape_oddspedia_curl.py` uses `curl_cffi` with `impersonate='chrome124'` to replicate Chrome's TLS fingerprint, bypassing Cloudflare without a real browser. Oddspedia's server-side rendered Nuxt state (`window.__NUXT__`) is embedded in the HTML and contains the full correct-score probability grid (market 800) and 1X2 probabilities (market 100). A Node.js subprocess evaluates the obfuscated JS to extract structured data.
 
-Install the scraper dependency:
+Install dependencies:
 
 ```bash
 pip install curl_cffi
+node --version   # Node.js must be available
 ```
 
-Node.js must be available (`node --version`) for the `window.__NUXT__` extraction step.
+### Key Output Files
 
-### Key output files
-
-```text
-inputs/smartbet_grids/oddspedia_probability_grids_auto.csv   — raw CS probability grid (19 rows per match)
-inputs/smartbet_grids/oddspedia_markets_summary_auto.csv     — de-vigged 1X2, BTTS, OU2.5 per match
-inputs/smartbet_grids/oddspedia_score_shape_features.csv     — derived OU/BTTS/margin features + market diffs
-outputs/oddspedia_pick_validation/oddspedia_pick_comparison.csv    — locked pick vs Oddspedia modal
-outputs/oddspedia_pick_validation/oddspedia_ev_recommendations.csv — EV-ranked scorelines per match
-outputs/oddspedia_pick_validation/oddspedia_model_independence.csv — grid vs market independence class per match
-outputs/superbru_pool/superbru_synthetic_crowding.csv        — estimated pool pick crowding per match
-outputs/superbru_pool/superbru_remaining_fixture_leverage.csv — leaderboard leverage per remaining match
-outputs/backtesting/superbru_pick_backtest.csv               — scored picks vs completed results
-outputs/backtesting/signal_archive_rolling.csv               — daily signal snapshots for future backtesting
-outputs/backtesting/snapshots/signal_archive_YYYY-MM-DD.csv  — point-in-time snapshot per pipeline run
+```
+inputs/smartbet_grids/oddspedia_probability_grids_auto.csv   – raw CS probability grid (19 rows per match)
+inputs/smartbet_grids/oddspedia_markets_summary_auto.csv     – de-vigged 1X2, BTTS, OU2.5 per match
+inputs/smartbet_grids/oddspedia_score_shape_features.csv     – derived features + market diffs
+outputs/oddspedia_pick_validation/oddspedia_pick_comparison.csv    – locked pick vs Oddspedia modal
+outputs/oddspedia_pick_validation/oddspedia_ev_recommendations.csv – EV-ranked scorelines per match
+outputs/oddspedia_pick_validation/oddspedia_model_independence.csv – grid vs market independence class
+outputs/superbru_pool/superbru_synthetic_crowding.csv        – estimated pool pick crowding per match
+outputs/superbru_pool/superbru_remaining_fixture_leverage.csv – leaderboard leverage per remaining match
+outputs/backtesting/superbru_pick_backtest.csv               – scored picks vs completed results
+outputs/backtesting/signal_archive_rolling.csv               – daily signal snapshots
+outputs/backtesting/snapshots/signal_archive_YYYY-MM-DD.csv  – point-in-time snapshot per run
 ```
 
-### Model independence (Step 7)
+### Model Independence (Step 7)
 
-The independence check compares the Oddspedia correct-score grid against bookmaker market signals on three dimensions:
+Compares the Oddspedia CS grid against bookmaker market signals on three dimensions: 1X2 direction, OU2.5, and BTTS. Each match is classified as `market_aligned` (all diffs < 2pp), `mildly_independent` (any diff 2–5pp), or `strongly_independent` (any diff ≥ 5pp).
 
-- **1X2 direction**: `market_vs_grid_{home,draw,away}_diff_pct`
-- **OU2.5**: `market_vs_grid_ou25_diff_pct`
-- **BTTS**: `market_vs_grid_btts_diff_pct`
+### Synthetic Pool Crowding (Step 8)
 
-Each match is classified as `market_aligned` (all diffs < 2pp), `mildly_independent` (any diff 2–5pp), or `strongly_independent` (any diff ≥ 5pp). Signal consistency flags whether OU and BTTS divergences point the same direction. The 1X2 direction is almost always market-aligned because the CS grid is derived from the same bookmaker CS odds that imply the 1X2 split.
+Estimates what fraction of the pool likely picks each scoreline based on Oddspedia probability rank and casual-player heuristics. Outputs a crowding risk flag and differentiation flag per match. Real pool picks are never visible before lock — this is a synthetic model only.
 
-### Synthetic pool crowding (Step 8)
+### Reviewing Step 4 Output
 
-When live Superbru pool picks are not available, Step 8 estimates what fraction of the pool likely picks each scoreline based on Oddspedia probability rank and casual-player heuristics (players cluster on the highest-probability scoreline, with a boost for "clean" scores like 1-0, 1-1, 2-0). Outputs a crowding risk flag and a differentiation flag per match.
-
-### Signal archive (Step 10)
-
-Each pipeline run appends a row per match to `signal_archive_rolling.csv` capturing the day's locked pick, EV, grid signals, and independence class. When results arrive in later rounds, `build_superbru_backtest_from_results.py` can be joined against this archive to evaluate signal quality over time.
-
-### Compare locked picks (reviewing Step 4 output)
-
-Review only material differences (bash):
+Review material differences between locked picks and Oddspedia recommendations:
 
 ```bash
 python -c "
@@ -177,85 +191,141 @@ print(review[['match_id','locked_pick','locked_pick_probability_pct','oddspedia_
 "
 ```
 
-The comparison report is a review layer, not an automatic switch engine. A higher-probability Oddspedia modal score does not automatically replace the locked pick. Any change must still pass Superbru expected-points logic, leader/chaser risk, and robust-policy checks.
+The comparison report is a review layer, not an automatic switch engine. A higher-probability Oddspedia modal does not automatically replace the locked pick — any change must still pass Superbru EV logic, leader/chaser risk, and robust-policy checks.
 
 ## Outputs
 
-For each fixture the CLI writes:
+For each fixture the CLI writes `predictions.csv`, `predictions.json`, and a console table. Each candidate includes:
 
-- `predictions.csv`
-- `predictions.json`
-- a console table with the recommended pick, expected points, and top candidates
+- `P(exact)`, `P(close)`, `P(outcome)` — raw probabilities
+- Expected Superbru points — the optimisation target
+- `sensitivity_stability` — fraction of perturbations that kept the same pick (low = fragile)
+- `private_chase_scoreline` — best pick within `superbru.private_chase_max_ev_loss` of the raw EV pick that maximises upside and minimises synthetic crowding
+- `fair_total_lines` / `solver_total_over_rmse` — multi-line totals fit diagnostics
 
-Each candidate includes:
+## Strategy Modes
 
-- `P(exact)`
-- `P(close)`
-- `P(outcome)`
-- expected Superbru points
+Set `superbru.strategy_mode` in `config.yaml`:
 
-The JSON diagnostics also include the active calibration profile, lambdas, model result probabilities, modal exact scoreline, EV gaps, candidate-grid probability mass, low-score probabilities for common scorelines, synthetic public-pick estimates, sensitivity stability, and ratings provenance.
+| Mode | Behaviour |
+|------|-----------|
+| `raw_ev` | Pure expected points (default) |
+| `conservative` | Avoids low-probability exact scores |
+| `contrarian` | Prefers under-picked scorelines |
+| `exact_chase` | Maximises `P(exact)` |
+| `risk_adjusted` | Applies variance penalty |
+| `private_chase` | Uses the private chase scoreline as the main pick |
 
-When a match quotes more than one over/under line (for example 1.5, 2.5 and 3.5), the lambda solver fits all of them simultaneously instead of only the main 2.5 line, which constrains the shape of the goal distribution more tightly. The lines are weighted by book count and share a fixed totals-fit budget, so a match that quotes a single line behaves exactly as before. The relevant diagnostics are `fair_total_lines` / `fair_total_lines_count` (lines used), `solver_total_lines_used`, and the fit-quality fields `solver_total_over_rmse` and `model_over_rmse_across_lines` (root-mean-square gap between model and fair over-probabilities across every quoted line).
+## Ratings
 
-When a `correct_score` market is present (e.g. an Oddspedia score grid fed through the odds snapshot), it is the market's own full scoreline distribution and is the most direct input for the exact and close scoring bands. Set `model.correct_score_blend_weight` above 0 to geometrically blend it into the model's scoreline matrix (0 = off, the default, so production is unchanged unless you opt in; a value such as 0.5 leans the distribution toward the grid). The grid is de-vigged together with any "Any Other Score"/field bucket so the quoted cells are not inflated, and the unquoted tail is filled from the model prior — so a sparse grid never asserts that unquoted scores are impossible. Diagnostics: `correct_score_blended`, `correct_score_cells_quoted`, `correct_score_other_mass`, `correct_score_modal_before`/`_after`, and `correct_score_total_variation_shift` (how far the blend moved the distribution).
+Elo-based team ratings are stored in `work/ratings.json` and used as a fallback when market odds are missing. Ratings metadata (`_metadata` key) records source, update method, k-factor, base rating, and applied-result count.
 
-The CSV output surfaces the main sensitivity fields: `sensitivity_stability`, `sensitivity_changed_count`, `sensitivity_warning`, and `sensitivity_most_common_alternative`. A low stability value means the recommended scoreline changes under small lambda/rho/total-goals/public-pick perturbations, so treat the pick as fragile.
+Ratings are lower-trust than market odds and are kept at `ratings_weight: 0.0` by default. The active profile does not blend them into market-backed fixtures.
 
-The CSV also includes a `private_chase_scoreline`. This is a controlled small-pool/chasing option: it only considers scorelines within `superbru.private_chase_max_ev_loss` of the raw expected-points pick, then prefers more exact-score upside and lower synthetic public-pick share. The default `strategy_mode: raw_ev` still keeps the public/global recommendation pure EV. Set `strategy_mode: private_chase` only if you want the chase pick to become the main recommendation.
-
-Ratings metadata is saved in `work/ratings.json` under `_metadata`, including source, source URL, cutoff date, update method, k-factor, base rating, Elo goal scale, confidence threshold, and applied-result count. Ratings are lower-trust than market odds and should remain fallback-only unless a proper backtest validates blending them into market-backed fixtures.
+Manual home/host advantage is applied only on the ratings-only fallback path. When 1X2 odds are available, the market is assumed to have already priced venue effects. For multi-country host matches (USA / Canada / Mexico), the host bump is venue-conditioned per country.
 
 ## Betting Report
 
-The optional betting report is disabled by default because this project is a Superbru decision engine, not an independent bookmaker-beating model. The odds-implied distribution is anchored to the same market prices you would bet into, so any betting screen is circular unless you add an independent probability source or compare against a different bookmaker universe.
+Disabled by default because the odds-implied distribution is anchored to the same market prices you would bet into, making any edge screen circular. To emit the conservative match-winner screen anyway:
 
-To emit the conservative match-winner screen anyway:
-
-```powershell
+```bash
 python -m superbru_score_engine predict --config config.yaml --out-dir outputs --include-betting
 ```
 
-The report uses `P(win) * decimal_odds - 1`, not Superbru expected points.
+Uses `P(win) * decimal_odds - 1`, not Superbru expected points.
 
 ## Backtesting
 
-The backtest harness expects historical fixtures/results plus either historical odds JSON or a configured The Odds API historical endpoint. It scores the full decision pipeline against Superbru-style rules and compares it with the naive low-score favourite baseline.
+Score the full decision pipeline against Superbru-style rules:
 
-```powershell
-python -m superbru_score_engine backtest --config config.yaml --fixtures examples/backtest_matches.csv --odds-json examples/odds_snapshot.json
+```bash
+python -m superbru_score_engine backtest --config config.yaml \
+  --fixtures examples/backtest_matches.csv \
+  --odds-json examples/odds_snapshot.json
 ```
 
-Calibration sweeps are supported for Dixon-Coles `rho` and the closeness-index cutoff.
+### World Cup Proxy (Football-Data)
 
-To answer the specific live-model question, use the The Odds API historical harness to compare `h2h` against `h2h,totals` on the same matched fixtures:
-
-```powershell
-python -m superbru_score_engine the-odds-api-historical-backtest --config config.yaml --fixtures outputs/football-data-devig-calibration/football_data_worldcup_fixtures.csv --snapshots-json work/the_odds_api_historical_snapshots.json --out-dir outputs/the-odds-api-h2h-totals-backtest
+```bash
+python -m superbru_score_engine football-data-backtest --config config.yaml \
+  --out-dir outputs/football-data-calibration
 ```
 
-The command is cache/offline first. It only spends The Odds API quota when you explicitly pass `--fetch` and `--date-grid`. Historical odds are paid-plan data, and The Odds API prices historical odds at `10 x markets x regions` usage credits per snapshot, so use one region and a small date grid while testing.
+### Big Five League Calibration Sweep
 
-If historical World Cup totals are unavailable, Football-Data's free league CSVs can be used as a proxy check because they include 1X2 and total-goals odds for major leagues:
-
-```powershell
-python -m superbru_score_engine football-data-league-backtest --config config.yaml --seasons 2122,2223,2324,2425 --divisions E0,D1,SP1,I1,F1 --download --out-dir outputs/free-football-data-h2h-totals
+```bash
+python -m superbru_score_engine football-data-league-backtest --config config.yaml \
+  --seasons 2122,2223,2324,2425 --divisions E0,D1,SP1,I1,F1 \
+  --download --out-dir outputs/free-football-data-h2h-totals
 ```
 
-This does not replace a World Cup-specific historical test, but it does answer whether the current scoreline inversion tends to benefit from adding an over/under 2.5 market on a large free football sample.
+### Historical Odds Comparison (The Odds API)
+
+```bash
+python -m superbru_score_engine the-odds-api-historical-backtest --config config.yaml \
+  --fixtures outputs/football-data-calibration/football_data_worldcup_fixtures.csv \
+  --snapshots-json work/the_odds_api_historical_snapshots.json \
+  --out-dir outputs/the-odds-api-h2h-totals-backtest
+```
+
+Historical odds cost `10 × markets × regions` usage credits per snapshot. Use one region and a small date grid while testing.
+
+### Calibration Sweep (Tune)
+
+```bash
+python -m superbru_score_engine tune --config config.yaml \
+  --fixtures examples/backtest_matches.csv \
+  --odds-json examples/odds_snapshot.json \
+  --out-dir outputs/tuning
+```
 
 Before trusting production picks, verify:
+- `config-check` passes against the intended calibration profile
+- JSON diagnostics look sensible for lambdas, result probabilities, modal scoreline, EV gaps, sensitivity stability, and candidate-grid probability mass
+- Historical odds coverage is large enough to treat calibration results as stable
 
-- Historical odds coverage is large enough before treating any backtest calibration as stable.
-- `config-check` passes against the calibration profile you intend to use.
-- The JSON diagnostics look sensible for lambdas, result probabilities, modal scoreline, EV gaps, sensitivity stability, and candidate-grid probability mass.
+## Superbru Scoring Rules
 
-Superbru's World Cup scoring is configured as 3 points for an exact score, 1.5 for a close score with the right outcome, 1 for the right outcome only, and 0 for the wrong outcome. Its close rule is equivalent to `ci_cutoff: 1.5`: the pick must have the right outcome and be either one goal out, or two goals out with the correct goal difference. Knockout scoring uses the regular-time score unless the match is drawn after regular time; in that case it is scored after extra time, and penalty shootouts remain draws.
+| Result | Points |
+|--------|--------|
+| Exact score | 3.0 |
+| Close score (right outcome, off by ≤1 goal or ≤2 goals with correct goal difference) | 1.5 |
+| Right outcome only | 1.0 |
+| Wrong outcome | 0.0 |
 
-The app canonicalizes common national-team aliases such as `USA`/`United States`, `Korea Republic`/`South Korea`, `IR Iran`/`Iran`, and `Czechia`/`Czech Republic` before joining odds, fixtures, and ratings.
+`ci_cutoff: 1.5` in config corresponds to the close-score rule above. Knockout matches are scored on the 90-minute result unless drawn after regular time, in which case extra time is used (penalty shootouts remain draws).
 
-Fixture metadata joins fail loudly when a row cannot be matched to an odds event by match ID or canonical team pair. This is intentional: a stale fixture row or missing alias should be fixed instead of silently degrading ratings, overrides, or venue handling.
+## Team Name Aliases
 
-Manual home/host advantage is applied only on the ratings-only fallback path. When bookmaker 1X2 odds are available, the market is assumed to have already priced venue and host effects, so the manual `home_advantage_goals` term is not blended into the odds-derived rates. For host fallback matches, the bump is venue-conditioned: the United States only receives the host bump in the United States, Canada in Canada, and Mexico in Mexico.
+The engine canonicalises common national-team aliases before joining odds, fixtures, and ratings:
 
-The default `big5_h2h_totals` profile uses `devig_method: multiplicative`, `dixon_coles_rho: -0.08`, `odds_weight: 1.0`, and `ratings_weight: 0.0`. It is a Football-Data Big Five league proxy calibration for the live `h2h,totals` market structure. The alternative `worldcup_1x2` profile uses `power`, `-0.04`, and odds-only, based on Football-Data 2014/2018/2022 World Cup 1X2 odds. Treat the two configs as alternative calibration anchors and pick whichever evidence base you trust more for the fixtures you are predicting.
+- `USA` / `United States`
+- `Korea Republic` / `South Korea`
+- `IR Iran` / `Iran`
+- `Czechia` / `Czech Republic`
+
+Fixture metadata joins fail loudly when a row cannot be matched — a stale fixture row or missing alias should be fixed rather than silently degraded.
+
+## Known Limitations
+
+- Knockout result basis parsed but not applied — all matches scored on 90-minute result
+- `ratings.low_data_prior_sigma` parsed but not yet applied to the model
+- Asian handicap weight disabled until validated out-of-sample
+- Correct-score grid blending disabled by default (`correct_score_blend_weight: 0`)
+- Betting report is circular without an independent probability source
+- Oddspedia SmartBet scraper must run locally (Cloudflare); GitHub Actions does not scrape
+
+## Dependencies
+
+| Package | Role |
+|---------|------|
+| `numpy` | Scoreline matrix operations |
+| `pandas` | CSV I/O, backtest aggregation |
+| `scipy` | Poisson PDF/CDF, Nelder-Mead optimisation |
+| `PyYAML` | Config parsing |
+| `openpyxl` | Football-Data Excel workbook |
+| `curl_cffi` *(optional)* | Oddspedia scraper TLS fingerprinting |
+| `playwright` *(optional)* | Browser automation fallback |
+| `pytest` *(dev)* | Test runner |
+
+HTTP requests use Python's standard-library `urllib` — no `requests` or `httpx` needed.

@@ -15,5 +15,8 @@ class OfflineJsonProvider:
     name: str = "offline_json"
 
     def fetch_odds(self) -> list[MatchOdds]:
-        data = json.loads(Path(self.path).read_text(encoding="utf-8-sig"))
+        try:
+            data = json.loads(Path(self.path).read_text(encoding="utf-8-sig"))
+        except (OSError, json.JSONDecodeError) as exc:
+            raise ValueError(f"Failed to load offline odds from {self.path}: {exc}") from exc
         return normalise_generic_events(data)

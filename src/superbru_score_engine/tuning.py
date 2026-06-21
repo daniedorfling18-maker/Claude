@@ -13,6 +13,7 @@ from superbru_score_engine.backtest.runner import (
     _clean_validation_metrics,
     evaluate_backtest,
 )
+from superbru_score_engine.backtest.utils import parse_float_grid, parse_str_grid
 from superbru_score_engine.config import AppConfig
 
 
@@ -28,13 +29,13 @@ def run_tune(args, config: AppConfig) -> int:
     out_dir = Path(args.out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    rho_grid = _float_grid(args.rho_grid or DEFAULT_RHO_GRID)
-    ci_grid = _float_grid(args.ci_grid or DEFAULT_CI_GRID)
-    odds_weight_grid = _float_grid(args.odds_weight_grid or DEFAULT_ODDS_WEIGHT_GRID)
+    rho_grid = parse_float_grid(args.rho_grid or DEFAULT_RHO_GRID)
+    ci_grid = parse_float_grid(args.ci_grid or DEFAULT_CI_GRID)
+    odds_weight_grid = parse_float_grid(args.odds_weight_grid or DEFAULT_ODDS_WEIGHT_GRID)
     ratings_weight_grid = _optional_float_grid(args.ratings_weight_grid)
-    strategy_modes = _str_grid(args.strategy_mode_grid or DEFAULT_STRATEGY_MODE_GRID)
-    risk_aversion_grid = _float_grid(args.risk_aversion_grid or DEFAULT_RISK_AVERSION_GRID)
-    variance_penalty_grid = _float_grid(args.variance_penalty_grid or DEFAULT_VARIANCE_PENALTY_GRID)
+    strategy_modes = parse_str_grid(args.strategy_mode_grid or DEFAULT_STRATEGY_MODE_GRID, lowercase=True)
+    risk_aversion_grid = parse_float_grid(args.risk_aversion_grid or DEFAULT_RISK_AVERSION_GRID)
+    variance_penalty_grid = parse_float_grid(args.variance_penalty_grid or DEFAULT_VARIANCE_PENALTY_GRID)
 
     rows: list[dict[str, Any]] = []
     best: dict[str, Any] | None = None
@@ -218,13 +219,5 @@ def _write_json(path: Path, payload: dict[str, Any]) -> None:
     path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
 
 
-def _float_grid(raw: str) -> list[float]:
-    return [float(item.strip()) for item in raw.split(",") if item.strip()]
-
-
 def _optional_float_grid(raw: str) -> list[float]:
-    return _float_grid(raw) if raw else []
-
-
-def _str_grid(raw: str) -> list[str]:
-    return [item.strip().lower() for item in raw.split(",") if item.strip()]
+    return parse_float_grid(raw) if raw else []

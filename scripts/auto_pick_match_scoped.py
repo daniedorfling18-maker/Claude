@@ -591,6 +591,18 @@ async def run(args: argparse.Namespace) -> dict[str, Any]:
         config_error = f"{type(exc).__name__}: {exc}"
         print(f"warning: could not load engine config {args.config!r}: {config_error}. Falling back to committed card picks.")
 
+    # Resolve odds regions/markets from the engine config when not overridden, so the
+    # pre-kickoff single-match pull mirrors the configured book universe and stays
+    # quota-minimal (markets x regions credits per match) instead of a wide 4-region,
+    # 3-market pull. The model ignores spreads while Asian handicap is disabled.
+    provider = (getattr(config.providers, "the_odds_api", {}) or {}) if config is not None else {}
+    if not args.odds_regions:
+        args.odds_regions = provider.get("regions") or "eu"
+    if not args.odds_markets:
+        args.odds_markets = provider.get("markets") or "h2h,totals"
+    print(f"Odds pull scope: regions={args.odds_regions!r} markets={args.odds_markets!r} "
+          f"(~{len(args.odds_markets.split(',')) * len(args.odds_regions.split(','))} credits/match)")
+
     submitted_results: list[dict[str, Any]] = []
     for entry in queued:
         pick_lookup = find_pick_from_card(entry, args.pick_card_csv)
@@ -671,8 +683,11 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--config", default="config.yaml", help="Engine config used to recompute the pick from fresh single-match odds.")
     parser.add_argument("--odds-api-key", default=os.environ.get("THE_ODDS_API_KEY", ""))
     parser.add_argument("--odds-sport", default="soccer_fifa_world_cup")
-    parser.add_argument("--odds-regions", default="uk,eu,us,au")
-    parser.add_argument("--odds-markets", default="h2h,spreads,totals")
+    # Default regions/markets are resolved from the engine config's the_odds_api
+    # provider when left unset, so the pre-kickoff pull uses the same book universe
+    # and market structure the card was built on (cheaper and more comparable).
+    parser.add_argument("--odds-regions", default=None)
+    parser.add_argument("--odds-markets", default=None)
     parser.add_argument("--odds-lookup-window-minutes", type=int, default=90)
     parser.add_argument("--skip-match-odds", action="store_true")
     return parser

@@ -298,5 +298,12 @@ jobs:
             echo "No daily output changes to commit."
           else
             git commit -m "Update daily Superbru robust card"
-            git push
+            BRANCH="${GITHUB_REF_NAME:-claude/bold-ride-n3n1ti}"
+            if git fetch origin "$BRANCH" && git pull --rebase --autostash origin "$BRANCH" && git push origin "HEAD:$BRANCH"; then
+              echo "Daily outputs committed and pushed."
+            else
+              echo "::warning::Daily output commit could not be pushed because the branch moved or a generated output conflict occurred. Artifact upload has already preserved the outputs."
+              git rebase --abort || true
+              exit 0
+            fi
           fi

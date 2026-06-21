@@ -407,7 +407,7 @@ async def discover_login_link(page: Any) -> str:
 
 async def maybe_login_superbru(page: Any, args: argparse.Namespace) -> dict[str, Any]:
     user_value = txt(os.environ.get("SUPERBRU_USERNAME") or os.environ.get("SUPERBRU_EMAIL"))
-    secret_value = txt(os.environ.get("SUPERBRU_" + "PASS" + "WORD"))
+    secret_value = txt(os.environ.get("SUPERBRU_PASSWORD"))
     consent_attempts: list[dict[str, Any]] = []
     if not user_value or not secret_value:
         return {"attempted": False, "reason": "Superbru credentials not provided"}

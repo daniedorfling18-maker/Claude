@@ -14,17 +14,13 @@ dependencies = [
     "scipy>=1.10",
     "PyYAML>=6.0",
     "openpyxl>=3.1",
-    "requests>=2.28",  # used by scripts/ (scrape_oddspedia_smartbet_text.py); not imported in src/
-    "curl_cffi>=0.7",  # used by scripts/scrape_oddspedia_curl.py for TLS impersonation
+    "requests>=2.28",
 ]
 
 [project.optional-dependencies]
-# Test / backtest tooling: pip install -e ".[dev]"
 dev = [
     "pytest>=7",
 ]
-# Browser scraping extras: pip install -e ".[scraper]"
-# Then: python -m playwright install chrome
 scraper = [
     "playwright>=1.44",
     "playwright-stealth>=1.0",

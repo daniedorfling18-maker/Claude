@@ -23,7 +23,7 @@ jobs:
           python -m pip install -e ".[dev]"
 
       - name: Run tests
-        run: pytest tests/test_data_driven.py tests/test_model_robustness.py tests/test_discover_oddspedia_match_urls.py
+        run: pytest
 
       - name: Validate calibration profile
         run: python -m superbru_score_engine config-check --config config.yaml --profiles calibration_profiles.yaml

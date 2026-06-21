@@ -43,7 +43,10 @@ def load_csv(path: str | Path) -> pd.DataFrame:
     p = Path(path)
     if not p.exists():
         return pd.DataFrame()
-    return pd.read_csv(p).fillna("")
+    try:
+        return pd.read_csv(p).fillna("")
+    except pd.errors.EmptyDataError:
+        return pd.DataFrame()
 
 
 def pick_column(frame: pd.DataFrame) -> str:

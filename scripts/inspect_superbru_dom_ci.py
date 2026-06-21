@@ -100,7 +100,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--email", required=True, help="SuperBru login email")
     p.add_argument("--password", required=True, help="SuperBru login password")
     p.add_argument("--login-url", default="https://www.superbru.com/login")
-    p.add_argument("--pool-url", default="https://www.superbru.com/worldcup_predictor/pool_view.php?t=1296&p=13236623&g=32&view=matches")
+    p.add_argument("--pool-url", default="https://www.superbru.com/worldcup_predictor/pool_view.php?t=1296&p=13236623&g=37&view=matches")
     p.add_argument("--home-team", default="Spain")
     p.add_argument("--away-team", default="Saudi Arabia")
     p.add_argument("--settle-ms", type=int, default=15000)
@@ -131,7 +131,7 @@ async def run(args: argparse.Namespace) -> dict:
         browser = await pw.chromium.launch(headless=args.headless)
         page = await browser.new_page()
 
-        # ── Login ────────────────────────────────────────────────────────────
+        # ── Login ────────────────────────────────────────────────────────────────────
         print(f"Navigating to login: {args.login_url}")
         await page.goto(args.login_url, wait_until="domcontentloaded", timeout=30000)
         await page.wait_for_timeout(2000)
@@ -253,7 +253,31 @@ async def run(args: argparse.Namespace) -> dict:
         (out_dir / f"{ts}_pool_page.html").write_text(pool_html, encoding="utf-8")
         print(f"  Pool URL: {page.url}")
 
-        # ── Dump all inputs ──────────────────────────────────────────────────
+        # ── Click the matching game subtab to trigger AJAX load ──────────────────
+        print(f"\nLooking for game subtab: {args.home_team} / {args.away_team}")
+        CLICK_SUBTAB_JS = """
+([homeTeam, awayTeam]) => {
+  function norm(s) { return (s || '').toLowerCase().replace(/[^a-z]/g, ''); }
+  const hn = norm(homeTeam), an = norm(awayTeam);
+  const controls = Array.from(document.querySelectorAll('[data-brutip][data-bru-tab]'));
+  for (const c of controls) {
+    const tip = norm(c.getAttribute('data-brutip') || '');
+    if (tip.includes(hn) || tip.includes(an)) {
+      c.click();
+      return c.getAttribute('data-bru-tab') + ': ' + c.getAttribute('data-brutip');
+    }
+  }
+  return null;
+}
+"""
+        subtab_clicked = await page.evaluate(CLICK_SUBTAB_JS, [args.home_team, args.away_team])
+        if subtab_clicked:
+            print(f"  Clicked subtab: {subtab_clicked}")
+            await page.wait_for_timeout(6000)
+        else:
+            print(f"  No matching subtab found; reading current active tab.")
+
+        # ── Dump all inputs ───────────────────────────────────────────────────────
         all_inputs = await page.evaluate(INSPECT_INPUTS_JS)
         inputs_path = out_dir / f"{ts}_all_inputs.json"
         inputs_path.write_text(json.dumps(all_inputs, indent=2), encoding="utf-8")
@@ -264,7 +288,7 @@ async def run(args: argparse.Namespace) -> dict:
             print(f"  [{inp['type']:10s}] id={inp['id']!r:30s} name={inp['name']!r:30s} "
                   f"maxlen={str(inp['maxlength']):4s} val={inp['value']!r:8s}  ctx={inp['parentText'][:80]!r}")
 
-        # ── Find match row ───────────────────────────────────────────────────
+        # ── Find match row ────────────────────────────────────────────────────────────
         print(f"\nSearching for match row: {args.home_team} vs {args.away_team}")
         row = await page.evaluate(FIND_MATCH_ROW_JS, [args.home_team, args.away_team])
         row_path = out_dir / f"{ts}_match_row.json"

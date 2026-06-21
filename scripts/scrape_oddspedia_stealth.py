@@ -162,7 +162,11 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--timeout-ms", type=int, default=90000)
     p.add_argument("--cf-wait-ms", type=int, default=30000, help="Max wait for Cloudflare auto-resolve (ms)")
     p.add_argument("--max-matches", type=int, default=0)
-    p.add_argument("--market-tab-wait-ms", type=int, default=3000, help="Wait after clicking BTTS/OU market tabs (ms)")
+    p.add_argument("--market-tab-wait-ms", type=int, default=0,
+                   help="Wait (ms) after clicking goals/BTTS/AH tabs to capture XHR. "
+                        "Default 0 (disabled) — Oddspedia only publishes probability data for "
+                        "markets 100 (1X2) and 800 (Correct Score); other tabs return bookmaker "
+                        "odds tables, not probability distributions.")
     p.add_argument("--no-chrome-channel", action="store_true", help="Use bundled Chromium instead of installed Chrome")
     p.add_argument("--manual-on-missing", action="store_true")
     return p
@@ -596,15 +600,18 @@ async def scrape_match(
                     current_url = txt(state.get("currentUrl"))
                     source_name = txt(state.get("sourceName"))
 
-                    # Phase 2: click market tabs (Goals, BTTS, Over/Under) to trigger deferred XHR payloads
-                    xhr_count_before = len(_xhr_markets)
-                    clicked_tabs = await page.evaluate(_CLICK_MARKET_TABS_JS)
-                    if clicked_tabs:
-                        print(f"  {label}: market tabs clicked: {clicked_tabs[:3]}")
-                        await page.wait_for_timeout(args.market_tab_wait_ms)
-                        n_new_xhr = len(_xhr_markets) - xhr_count_before
-                        if n_new_xhr:
-                            print(f"  {label}: +{n_new_xhr} XHR payloads from market tabs")
+                    # Phase 2: click market tabs (Goals, BTTS, Over/Under) to capture deferred XHR.
+                    # Disabled by default (market_tab_wait_ms=0) because Oddspedia only publishes
+                    # probability data for markets 100 and 800; other tabs load bookmaker odds tables.
+                    if args.market_tab_wait_ms > 0:
+                        xhr_count_before = len(_xhr_markets)
+                        clicked_tabs = await page.evaluate(_CLICK_MARKET_TABS_JS)
+                        if clicked_tabs:
+                            print(f"  {label}: market tabs clicked: {clicked_tabs[:3]}")
+                            await page.wait_for_timeout(args.market_tab_wait_ms)
+                            n_new_xhr = len(_xhr_markets) - xhr_count_before
+                            if n_new_xhr:
+                                print(f"  {label}: +{n_new_xhr} XHR payloads from market tabs")
 
                     # Inject winner probs for correct-score parser
                     m100 = probs.get("100")

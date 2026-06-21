@@ -19,6 +19,10 @@ on:
         type: string
         required: false
         default: ""
+      superbru_submit_dry_run:
+        description: "Run Superbru score submission dry-run only. Never submits real picks."
+        type: boolean
+        default: true
 
 permissions:
   contents: write
@@ -125,6 +129,108 @@ jobs:
             --audit-csv outputs/daily_robust_card/daily_switch_audit.csv \
             --out-md outputs/daily_robust_card/score_change_notification.md
 
+      - name: Superbru score submit dry-run manifest
+        if: success()
+        run: |
+          mkdir -p outputs/superbru_submit_dry_run
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          src = Path('outputs/daily_robust_card/score_change_notification.json')
+          out = Path('outputs/superbru_submit_dry_run/superbru_submit_dry_run_manifest.json')
+          if not src.exists():
+              payload = {'dry_run': True, 'change_count': 0, 'changes': [], 'status': 'missing_score_change_json'}
+          else:
+              data = json.loads(src.read_text(encoding='utf-8'))
+              changes = data.get('changes', []) or []
+              payload = {
+                  'dry_run': True,
+                  'real_submit_enabled': False,
+                  'change_count': len(changes),
+                  'changes': [
+                      {
+                          'home_team': c.get('home_team', ''),
+                          'away_team': c.get('away_team', ''),
+                          'new_pick': c.get('new_pick', ''),
+                          'previous_pick': c.get('previous_pick', ''),
+                          'action': 'would_run_submit_superbru_pick_cdp_with_dry_run'
+                      }
+                      for c in changes
+                  ],
+                  'status': 'manifest_only'
+              }
+          out.write_text(json.dumps(payload, indent=2), encoding='utf-8')
+          print(json.dumps(payload, indent=2))
+          PY
+
+      - name: Superbru browser dry-run
+        if: success() && inputs.superbru_submit_dry_run == true
+        env:
+          SUPERBRU_EMAIL: ${{ secrets.SUPERBRU_USERNAME }}
+          SUPERBRU_PASSWORD: ${{ secrets.SUPERBRU_PASSWORD }}
+        run: |
+          python -m pip install playwright
+          python -m playwright install chromium --with-deps
+          python - <<'PY'
+          import json
+          import os
+          import subprocess
+          import sys
+          from pathlib import Path
+
+          src = Path('outputs/daily_robust_card/score_change_notification.json')
+          out_dir = Path('outputs/superbru_submit_dry_run')
+          diag_dir = Path('outputs/pregame_checks/submit_diagnostics')
+          out_dir.mkdir(parents=True, exist_ok=True)
+          diag_dir.mkdir(parents=True, exist_ok=True)
+
+          email = os.environ.get('SUPERBRU_EMAIL', '')
+          password = os.environ.get('SUPERBRU_PASSWORD', '')
+          data = json.loads(src.read_text(encoding='utf-8')) if src.exists() else {'changes': []}
+          changes = data.get('changes', []) or []
+          results = []
+
+          if changes and (not email or not password):
+              raise SystemExit('SUPERBRU_USERNAME/SUPERBRU_PASSWORD secrets are required for browser dry-run.')
+
+          for c in changes:
+              home = c.get('home_team', '')
+              away = c.get('away_team', '')
+              new_pick = c.get('new_pick', '')
+              cmd = [
+                  sys.executable, 'scripts/submit_superbru_pick_cdp.py',
+                  '--launch', '--headless', '--dry-run',
+                  '--email', email,
+                  '--password', password,
+                  '--home-team', home,
+                  '--away-team', away,
+                  '--new-pick', new_pick,
+                  '--diagnostics-dir', str(diag_dir),
+              ]
+              print('$ python scripts/submit_superbru_pick_cdp.py --launch --headless --dry-run ' +
+                    f'--home-team {home!r} --away-team {away!r} --new-pick {new_pick!r}')
+              completed = subprocess.run(cmd, text=True, capture_output=True)
+              results.append({
+                  'home_team': home,
+                  'away_team': away,
+                  'new_pick': new_pick,
+                  'returncode': completed.returncode,
+                  'status': 'dry_run_ok' if completed.returncode == 0 else 'dry_run_failed',
+                  'stdout_tail': completed.stdout[-3000:],
+                  'stderr_tail': completed.stderr[-3000:],
+              })
+              if completed.returncode != 0:
+                  break
+
+          payload = {'dry_run': True, 'change_count': len(changes), 'results': results}
+          Path('outputs/superbru_submit_dry_run/superbru_browser_dry_run_summary.json').write_text(
+              json.dumps(payload, indent=2), encoding='utf-8'
+          )
+          print(json.dumps(payload, indent=2))
+          if any(r['returncode'] != 0 for r in results):
+              raise SystemExit(1)
+          PY
+
       - name: Build combined daily notification
         id: action_items
         if: success()
@@ -177,6 +283,8 @@ jobs:
             outputs/oddspedia_pick_validation/*.json
             outputs/validation/*.csv
             outputs/validation/*.json
+            outputs/superbru_submit_dry_run/*.json
+            outputs/pregame_checks/submit_diagnostics/**
             outputs/daily_notifications/*.csv
             outputs/daily_notifications/*.json
             outputs/daily_notifications/*.md

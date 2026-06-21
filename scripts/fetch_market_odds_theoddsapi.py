@@ -4,7 +4,6 @@ import argparse
 import csv
 import json
 import os
-import shutil
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -46,13 +45,15 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--out-csv", default="outputs/market_odds/market_odds_flat.csv")
     parser.add_argument(
         "--allow-stale-on-failure",
-        action="store_true",
-        help="Keep using existing output files if The Odds API fetch fails.",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Keep using existing output files if The Odds API fetch fails. Defaults to true for scheduled runs.",
     )
     parser.add_argument(
         "--allow-empty-on-failure",
-        action="store_true",
-        help="Write empty, schema-valid outputs if the fetch fails and no stale outputs exist.",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Write empty, schema-valid outputs if the fetch fails and no stale outputs exist. Defaults to true for scheduled runs.",
     )
     return parser
 

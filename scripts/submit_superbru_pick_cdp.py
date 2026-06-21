@@ -13,6 +13,13 @@ Usage:
         --new-pick "2-0" \
         --dry-run          # inspect only, don't click submit
 
+    # CI / headless launch mode (no existing browser required):
+    python scripts/submit_superbru_pick_cdp.py \
+        --launch --headless \
+        --email you@example.com --password secret \
+        --home-team "Spain" --away-team "Saudi Arabia" \
+        --new-pick "2-1" --dry-run
+
     # Dump DOM to see what inputs exist (use when building/debugging):
     python scripts/submit_superbru_pick_cdp.py --inspect-only ...
 """
@@ -154,7 +161,7 @@ CLICK_SUBTAB_JS = r"""
 
 
 def build_parser() -> argparse.ArgumentParser:
-    p = argparse.ArgumentParser(description="Submit a SuperBru score pick via Chrome CDP.")
+    p = argparse.ArgumentParser(description="Submit a SuperBru score pick via Chrome CDP or headless launch.")
     p.add_argument("--cdp-url", default="http://127.0.0.1:9222")
     p.add_argument("--pool-url", default="https://www.superbru.com/worldcup_predictor/pool_view.php?t=1296&p=13236623&g=37&view=matches")
     p.add_argument("--home-team", required=True)
@@ -165,6 +172,13 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--dry-run", action="store_true", help="Inspect DOM only, do not set values or click submit")
     p.add_argument("--inspect-only", action="store_true", help="Dump all input elements and exit")
     p.add_argument("--diagnostics-dir", default=str(DIAGNOSTICS_DIR))
+    # Launch mode: use playwright launch() + login instead of attaching to existing CDP session
+    p.add_argument("--launch", action="store_true", help="Launch headless Chromium and log in (CI mode, no existing browser required)")
+    p.add_argument("--email", default="", help="SuperBru email (required for --launch)")
+    p.add_argument("--password", default="", help="SuperBru password (required for --launch)")
+    p.add_argument("--login-url", default="https://www.superbru.com/login")
+    p.add_argument("--headless", action="store_true", default=True)
+    p.add_argument("--headed", dest="headless", action="store_false")
     return p
 
 
@@ -228,9 +242,76 @@ async def run(args: argparse.Namespace) -> dict[str, Any]:
     }
 
     async with async_playwright() as pw:
-        browser = await pw.chromium.connect_over_cdp(args.cdp_url)
-        context = browser.contexts[0] if browser.contexts else await browser.new_context()
-        page = context.pages[0] if context.pages else await context.new_page()
+        if args.launch:
+            if not args.email or not args.password:
+                raise ValueError("--email and --password are required in --launch mode")
+            browser = await pw.chromium.launch(headless=args.headless)
+            page = await browser.new_page()
+
+            # Login flow (mirrors inspect_superbru_dom_ci.py)
+            print(f"Navigating to login: {args.login_url}")
+            await page.goto(args.login_url, wait_until="domcontentloaded", timeout=30000)
+            await page.wait_for_timeout(2000)
+
+            consent_selectors = [
+                "button[aria-label='CONFIRM']", "button[aria-label='Accept All']",
+                "button[aria-label='Accept all']", "button[aria-label='I Accept']",
+                "#qc-cmp2-container button[mode='primary']",
+                ".qc-cmp2-summary-buttons button:last-child",
+                "button:has-text('Accept')", "button:has-text('Confirm')",
+                "button:has-text('I agree')", "button:has-text('Agree')",
+                "#accept-cookie-policy",
+            ]
+            for sel in consent_selectors:
+                try:
+                    await page.click(sel, timeout=2000)
+                    print(f"  Dismissed consent overlay via: {sel}")
+                    await page.wait_for_timeout(2500)
+                    break
+                except Exception:
+                    continue
+            try:
+                await page.click("button[aria-label='Close success modal']", timeout=2000)
+                await page.wait_for_timeout(1000)
+            except Exception:
+                pass
+
+            for sel in ["input[type=email]", "input[name=email]", "input[name=username]", "input[id*=email]", "input[id*=user]"]:
+                try:
+                    await page.fill(sel, args.email, timeout=2000)
+                    print(f"  Filled email via: {sel}")
+                    break
+                except Exception:
+                    continue
+            for sel in ["input[type=password]", "input[name=password]", "input[id*=pass]"]:
+                try:
+                    await page.fill(sel, args.password, timeout=2000)
+                    print(f"  Filled password via: {sel}")
+                    break
+                except Exception:
+                    continue
+            submitted_login = False
+            for sel in ["button[type=submit]", "input[type=submit]", "button:has-text('Log')", "button:has-text('Sign')"]:
+                try:
+                    await page.click(sel, timeout=3000)
+                    submitted_login = True
+                    break
+                except Exception:
+                    continue
+            if not submitted_login:
+                await page.keyboard.press("Enter")
+            await page.wait_for_timeout(4000)
+            if "login" in page.url.lower():
+                result["status"] = "login_failed"
+                result["reason"] = f"Still on login page: {page.url}"
+                print(f"ERROR: {result['reason']}")
+                await browser.close()
+                return result
+            print(f"  Logged in. URL: {page.url}")
+        else:
+            browser = await pw.chromium.connect_over_cdp(args.cdp_url)
+            context = browser.contexts[0] if browser.contexts else await browser.new_context()
+            page = context.pages[0] if context.pages else await context.new_page()
 
         print(f"Navigating to pool URL: {args.pool_url}")
         try:

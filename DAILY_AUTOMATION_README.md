@@ -11,9 +11,13 @@ The goal each day is:
 ## Why the Oddspedia step is local
 
 Oddspedia is Cloudflare-protected. The scraper (`scrape_oddspedia_curl.py`) bypasses Cloudflare
-using `curl_cffi` with TLS fingerprint impersonation — no browser or Chrome CDP session required.
-The scraper runs locally and commits the grid files; GitHub Actions consumes the committed files
-rather than scraping Oddspedia itself.
+using `curl_cffi` with TLS fingerprint impersonation — no browser or Chrome CDP session required
+for the Oddspedia grid.
+
+Chrome CDP is still required for scraping Superbru directly (pool leaderboard, visible pool picks,
+and match results), because Superbru requires an authenticated browser session. The full local
+runner (`run_daily_superbru_local.ps1`) handles both: Chrome CDP for Superbru, curl_cffi via
+`run_oddspedia_pipeline.py` for Oddspedia.
 
 ## One-time setup
 

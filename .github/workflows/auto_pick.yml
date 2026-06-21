@@ -3,6 +3,7 @@ name: Auto Pick (Scheduled)
 on:
   schedule:
     # All times UTC; fires 20 and 10 min before each kickoff. window_minutes=25 covers cron delays.
+    # Scheduled runs skip match-odds snapshots to protect The Odds API quota.
 
     # ── ROUND 2 remaining (Jun 21-24) ────────────────────────────────────────
     - cron: '40 15 21 6 *'   # Jun 21 16:00 UTC (12:00 ET) – ESP/KSA, 20 min before
@@ -81,6 +82,10 @@ on:
         description: 'Dry run only (predict but do not submit)'
         required: false
         default: 'false'
+      fetch_match_odds:
+        description: 'Fetch a one-match odds snapshot during this run. Defaults to false to protect API quota.'
+        required: false
+        default: 'false'
       pool_url:
         description: 'SuperBru pool URL'
         required: false
@@ -115,6 +120,11 @@ jobs:
             DRY_RUN_FLAG="--dry-run"
           fi
 
+          MATCH_ODDS_FLAG="--skip-match-odds"
+          if [ "${{ github.event.inputs.fetch_match_odds }}" = "true" ]; then
+            MATCH_ODDS_FLAG=""
+          fi
+
           POOL_URL="${{ github.event.inputs.pool_url || '' }}"
           if [ -z "$POOL_URL" ]; then
             POOL_URL="$SUPERBRU_POOL_URL"
@@ -135,6 +145,7 @@ jobs:
             --odds-lookup-window-minutes 90 \
             --headless \
             $DRY_RUN_FLAG \
+            $MATCH_ODDS_FLAG \
             --out-dir outputs/pregame_checks/auto_pick
 
       - name: Upload results

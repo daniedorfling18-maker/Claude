@@ -1,8 +1,7 @@
 name: Daily Superbru Robust Card
 
 on:
-  schedule:
-    - cron: "0 5 * * *"
+  # schedule disabled: auto_pick.yml is the only scheduled workflow
   workflow_dispatch:
     inputs:
       skip_final_simulation:

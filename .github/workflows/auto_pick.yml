@@ -32,14 +32,13 @@ jobs:
       - name: Install dependencies
         run: |
           pip install -e .
-          pip install playwright anthropic pandas
+          pip install playwright pandas
           python -m playwright install chromium --with-deps
 
       - name: Run auto pick
         env:
           SUPERBRU_EMAIL: ${{ secrets.SUPERBRU_USERNAME }}
           SUPERBRU_PASSWORD: ${{ secrets.SUPERBRU_PASSWORD }}
-          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
         run: |
           DRY_RUN_FLAG=""
           if [ "${{ github.event.inputs.dry_run }}" = "true" ]; then

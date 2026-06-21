@@ -22,6 +22,14 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--require-two-day-support", action=argparse.BooleanOptionalAction, default=True)
     parser.add_argument("--allow-first-snapshot", action=argparse.BooleanOptionalAction, default=True)
     parser.add_argument("--skip-final-simulation", action="store_true")
+    parser.add_argument(
+        "--run-fresh-final-simulation",
+        action="store_true",
+        help=(
+            "Run the expensive fresh final-leader Monte Carlo simulation when cached outputs are incomplete. "
+            "Scheduled daily runs leave this off so the odds card still completes inside the CI timeout."
+        ),
+    )
     return parser
 
 
@@ -193,11 +201,6 @@ def main() -> int:
     run(robust_cmd, env=env)
 
     if not args.skip_final_simulation:
-        if not file_exists("outputs/latest/predictions.csv"):
-            print(
-                "outputs/latest/predictions.csv not found; building final-simulation predictions "
-                "from the current daily robust locked card."
-            )
         predictions_for_final_simulation = "outputs/daily_robust_card/predictions_for_final_simulation.csv"
         run(
             [
@@ -226,18 +229,25 @@ def main() -> int:
             final_decision_cmd.append("--reuse-existing")
             final_simulation_cache_reused = True
             print("Reusing cached final leader simulation outputs.")
-        else:
+            rc = run(final_decision_cmd, env=env, warn_only=True)
+            final_simulation_failed = rc != 0
+            final_simulation_skipped = False
+            final_simulation_dir = "outputs/final_leader_decision_daily_robust"
+            final_simulation_status = "failed_non_blocking" if final_simulation_failed else "completed"
+        elif args.run_fresh_final_simulation:
             print("Cached final leader simulation outputs are incomplete; running fresh final leader simulation.")
-
-        rc = run(
-            final_decision_cmd,
-            env=env,
-            warn_only=True,
-        )
-        final_simulation_failed = rc != 0
-        final_simulation_skipped = False
-        final_simulation_dir = "outputs/final_leader_decision_daily_robust"
-        final_simulation_status = "failed_non_blocking" if final_simulation_failed else "completed"
+            rc = run(final_decision_cmd, env=env, warn_only=True)
+            final_simulation_failed = rc != 0
+            final_simulation_skipped = False
+            final_simulation_dir = "outputs/final_leader_decision_daily_robust"
+            final_simulation_status = "failed_non_blocking" if final_simulation_failed else "completed"
+        else:
+            print(
+                "Cached final leader simulation outputs are incomplete; skipping expensive fresh final simulation. "
+                "Run with --run-fresh-final-simulation when you want to refresh Monte Carlo outputs."
+            )
+            final_simulation_skipped = True
+            final_simulation_status = "skipped_missing_cache"
 
     summary: dict[str, Any] = {
         "generated_at_utc": datetime.now(timezone.utc).isoformat(),

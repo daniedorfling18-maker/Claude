@@ -55,6 +55,9 @@ def main() -> int:
     env["PYTHONPATH"] = str(ROOT / "src")
     final_simulation_skipped = bool(args.skip_final_simulation)
     final_simulation_failed = False
+    final_simulation_status = "skipped_by_flag" if args.skip_final_simulation else "pending"
+    final_simulation_dir: str | None = None
+    predictions_for_final_simulation: str | None = None
 
     if not env.get("THE_ODDS_API_KEY"):
         raise EnvironmentError("THE_ODDS_API_KEY is not set. Add it as a GitHub Actions repository secret.")
@@ -179,36 +182,42 @@ def main() -> int:
 
     if not args.skip_final_simulation:
         if not file_exists("outputs/latest/predictions.csv"):
-            print("outputs/latest/predictions.csv not found; skipping final leader simulation for this run.")
-            final_simulation_skipped = True
-        else:
-            run(
-                [
-                    sys.executable,
-                    "scripts/build_predictions_from_locked_card.py",
-                    "--base-predictions-csv",
-                    "outputs/latest/predictions.csv",
-                    "--locked-card-csv",
-                    "outputs/daily_robust_card/daily_robust_superbru_card.csv",
-                    "--out-csv",
-                    "outputs/daily_robust_card/predictions_for_final_simulation.csv",
-                ],
-                env=env,
+            print(
+                "outputs/latest/predictions.csv not found; building final-simulation predictions "
+                "from the current daily robust locked card."
             )
-            rc = run(
-                [
-                    sys.executable,
-                    "scripts/run_final_leader_decision.py",
-                    "--predictions-csv",
-                    "outputs/daily_robust_card/predictions_for_final_simulation.csv",
-                    "--out-dir",
-                    "outputs/final_leader_decision_daily_robust",
-                    "--reuse-existing",
-                ],
-                env=env,
-                warn_only=True,
-            )
-            final_simulation_failed = rc != 0
+        predictions_for_final_simulation = "outputs/daily_robust_card/predictions_for_final_simulation.csv"
+        run(
+            [
+                sys.executable,
+                "scripts/build_predictions_from_locked_card.py",
+                "--base-predictions-csv",
+                "outputs/latest/predictions.csv",
+                "--locked-card-csv",
+                "outputs/daily_robust_card/daily_robust_locked_picks.csv",
+                "--out-csv",
+                predictions_for_final_simulation,
+                "--allow-card-only-fallback",
+            ],
+            env=env,
+        )
+        rc = run(
+            [
+                sys.executable,
+                "scripts/run_final_leader_decision.py",
+                "--predictions-csv",
+                predictions_for_final_simulation,
+                "--out-dir",
+                "outputs/final_leader_decision_daily_robust",
+                "--reuse-existing",
+            ],
+            env=env,
+            warn_only=True,
+        )
+        final_simulation_failed = rc != 0
+        final_simulation_skipped = False
+        final_simulation_dir = "outputs/final_leader_decision_daily_robust"
+        final_simulation_status = "failed_non_blocking" if final_simulation_failed else "completed"
 
     summary: dict[str, Any] = {
         "generated_at_utc": datetime.now(timezone.utc).isoformat(),
@@ -216,7 +225,9 @@ def main() -> int:
         "final_card": "outputs/daily_robust_card/daily_robust_superbru_card.csv",
         "daily_summary": "outputs/daily_robust_card/daily_robust_summary.json",
         "market_history_summary": "outputs/market_odds_history/market_odds_history_summary.json",
-        "final_simulation_dir": "outputs/final_leader_decision_daily_robust",
+        "final_simulation_dir": final_simulation_dir,
+        "predictions_for_final_simulation": predictions_for_final_simulation,
+        "final_simulation_status": final_simulation_status,
         "final_simulation_skipped": final_simulation_skipped,
         "final_simulation_failed_non_blocking": final_simulation_failed,
     }

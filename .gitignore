@@ -21,3 +21,4 @@ outputs/
 *.zip
 .chrome-oddspedia-profile/
 .playwright-oddspedia-profile/
+.playwright-oddspedia-stealth-profile/

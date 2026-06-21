@@ -3,16 +3,22 @@ run_oddspedia_pipeline.py
 
 Orchestrates the full Oddspedia correct-score pipeline in order:
 
-  1. scrape_oddspedia_curl.py       — fetch grids + BTTS/OU from Oddspedia
+  1. scrape_oddspedia_curl.py                — fetch grids + BTTS/OU from Oddspedia
   2. build_oddspedia_score_shape_features.py — shape features + market diffs
   3. check_oddspedia_grid_quality.py         — diagnostic validation
   4. compare_locked_picks_to_oddspedia.py    — flag picks worth reviewing
   5. build_oddspedia_superbru_ev.py          — EV-ranked candidate scorelines
+  6. build_superbru_backtest_from_results.py — score picks against completed results
+  7. build_oddspedia_model_independence.py   — grid vs market independence check
+  8. build_oddspedia_synthetic_pool_crowding.py — synthetic pool crowding estimate
+  9. build_superbru_pool_intelligence.py     — leaderboard leverage + chaser exposure
+ 10. build_oddspedia_signal_archive.py       — snapshot signals for future backtesting
 
 Usage:
     python scripts/run_oddspedia_pipeline.py
     python scripts/run_oddspedia_pipeline.py --max-matches 3
     python scripts/run_oddspedia_pipeline.py --max-workers 8
+    python scripts/run_oddspedia_pipeline.py --skip-scrape
 """
 from __future__ import annotations
 
@@ -93,6 +99,33 @@ def main() -> int:
          "--locked-picks-csv", args.locked_picks_csv],
     )
 
+    timings["backtest"] = run(
+        "STEP 6 — Backtest picks against completed results",
+        [py, "scripts/build_superbru_backtest_from_results.py",
+         "--picks-csv", args.locked_picks_csv],
+    )
+
+    timings["independence"] = run(
+        "STEP 7 — Model independence check (grid vs market)",
+        [py, "scripts/build_oddspedia_model_independence.py"],
+    )
+
+    timings["crowding"] = run(
+        "STEP 8 — Synthetic pool crowding estimate",
+        [py, "scripts/build_oddspedia_synthetic_pool_crowding.py"],
+    )
+
+    timings["pool"] = run(
+        "STEP 9 — Pool intelligence (leaderboard leverage)",
+        [py, "scripts/build_superbru_pool_intelligence.py",
+         "--locked-picks-csv", args.locked_picks_csv],
+    )
+
+    timings["archive"] = run(
+        "STEP 10 — Signal archive (snapshot for future backtesting)",
+        [py, "scripts/build_oddspedia_signal_archive.py"],
+    )
+
     total = round(time.time() - t_start, 1)
     payload = {
         "generated_at_utc": datetime.now(timezone.utc).isoformat(),
@@ -106,6 +139,12 @@ def main() -> int:
             "pick_comparison": "outputs/oddspedia_pick_validation/oddspedia_pick_comparison.csv",
             "ev_by_score": "outputs/oddspedia_pick_validation/oddspedia_superbru_ev_by_score.csv",
             "ev_recommendations": "outputs/oddspedia_pick_validation/oddspedia_ev_recommendations.csv",
+            "backtest": "outputs/backtesting/superbru_pick_backtest.csv",
+            "backtest_summary": "outputs/backtesting/backtest_summary.json",
+            "model_independence": "outputs/oddspedia_pick_validation/oddspedia_model_independence.csv",
+            "synthetic_crowding": "outputs/superbru_pool/superbru_synthetic_crowding.csv",
+            "pool_leverage": "outputs/superbru_pool/superbru_remaining_fixture_leverage.csv",
+            "signal_archive_rolling": "outputs/backtesting/signal_archive_rolling.csv",
         },
     }
     print(f"\n{'='*60}")

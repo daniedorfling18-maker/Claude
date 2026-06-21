@@ -3,7 +3,7 @@ name: Auto Pick (Scheduled)
 on:
   schedule:
     # All times UTC; fires 20 and 10 min before each kickoff. window_minutes=25 covers cron delays.
-    # Scheduled runs skip match-odds snapshots to protect The Odds API quota.
+    # Scheduled runs fetch match odds only when the visible SuperBru pick needs submission/change.
 
     # ── ROUND 2 remaining (Jun 21-24) ────────────────────────────────────────
     - cron: '40 15 21 6 *'   # Jun 21 16:00 UTC (12:00 ET) – ESP/KSA, 20 min before
@@ -83,9 +83,9 @@ on:
         required: false
         default: 'false'
       fetch_match_odds:
-        description: 'Fetch a one-match odds snapshot during this run. Defaults to false to protect API quota.'
+        description: 'Fetch a one-match odds snapshot only when the visible SuperBru pick does not match the locked card.'
         required: false
-        default: 'false'
+        default: 'true'
       pool_url:
         description: 'SuperBru pool URL'
         required: false
@@ -120,9 +120,9 @@ jobs:
             DRY_RUN_FLAG="--dry-run"
           fi
 
-          MATCH_ODDS_FLAG="--skip-match-odds"
-          if [ "${{ github.event.inputs.fetch_match_odds }}" = "true" ]; then
-            MATCH_ODDS_FLAG=""
+          MATCH_ODDS_FLAG=""
+          if [ "${{ github.event.inputs.fetch_match_odds }}" = "false" ]; then
+            MATCH_ODDS_FLAG="--skip-match-odds"
           fi
 
           POOL_URL="${{ github.event.inputs.pool_url || '' }}"
@@ -135,7 +135,7 @@ jobs:
 
           LOGIN_URL="${SUPERBRU_LOGIN_URL:-https://www.superbru.com/login}"
 
-          python scripts/auto_pick_match_scoped.py \
+          python scripts/auto_pick_match_scoped_smart_odds.py \
             --email "$SUPERBRU_EMAIL" \
             --password "$SUPERBRU_PASSWORD" \
             --login-url "$LOGIN_URL" \

@@ -22,6 +22,19 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--require-two-day-support", action=argparse.BooleanOptionalAction, default=True)
     parser.add_argument("--allow-first-snapshot", action=argparse.BooleanOptionalAction, default=True)
     parser.add_argument("--skip-final-simulation", action="store_true")
+    parser.add_argument(
+        "--skip-market-odds-fetch",
+        action="store_true",
+        help="Use committed/cached market odds files and do not call The Odds API.",
+    )
+    parser.add_argument(
+        "--run-fresh-final-simulation",
+        action="store_true",
+        help=(
+            "Run the expensive fresh final-leader Monte Carlo simulation when cached outputs are incomplete. "
+            "Scheduled daily runs leave this off so the odds card still completes inside the CI timeout."
+        ),
+    )
     return parser
 
 
@@ -44,8 +57,25 @@ def require_file(path: str | Path, label: str) -> None:
         )
 
 
-def file_exists(path: str | Path) -> bool:
-    return (ROOT / Path(path)).exists()
+def final_simulation_cache_complete(out_dir: str | Path = "outputs/final_leader_decision_daily_robust") -> bool:
+    base = ROOT / Path(out_dir)
+    required = [
+        base / "base_mc" / "leader_mc_summary.json",
+        base / "stress" / "stress_summary.json",
+        base / "confirmation_500k" / "leader_mc_summary.json",
+        base / "confirmation_500k" / "leader_mc_picks.csv",
+    ]
+    return all(path.exists() for path in required)
+
+
+def market_odds_cache_available() -> bool:
+    return all(
+        (ROOT / path).exists()
+        for path in [
+            "outputs/market_odds/worldcup_market_odds_raw.json",
+            "outputs/market_odds/worldcup_market_odds_flat.csv",
+        ]
+    )
 
 
 def main() -> int:
@@ -55,8 +85,12 @@ def main() -> int:
     env["PYTHONPATH"] = str(ROOT / "src")
     final_simulation_skipped = bool(args.skip_final_simulation)
     final_simulation_failed = False
+    final_simulation_status = "skipped_by_flag" if args.skip_final_simulation else "pending"
+    final_simulation_dir: str | None = None
+    final_simulation_cache_reused = False
+    predictions_for_final_simulation: str | None = None
 
-    if not env.get("THE_ODDS_API_KEY"):
+    if not args.skip_market_odds_fetch and not env.get("THE_ODDS_API_KEY"):
         raise EnvironmentError("THE_ODDS_API_KEY is not set. Add it as a GitHub Actions repository secret.")
 
     require_file("outputs/final_leader_decision_round_summary_profiles/final_picks.csv", "base final picks")
@@ -77,23 +111,34 @@ def main() -> int:
         env=env,
     )
 
-    run(
-        [
-            sys.executable,
-            "scripts/fetch_market_odds_theoddsapi.py",
-            "--sport",
-            args.sport,
-            "--regions",
-            args.regions,
-            "--markets",
-            args.markets,
-            "--out-json",
-            "outputs/market_odds/worldcup_market_odds_raw.json",
-            "--out-csv",
-            "outputs/market_odds/worldcup_market_odds_flat.csv",
-        ],
-        env=env,
-    )
+    if args.skip_market_odds_fetch:
+        if not market_odds_cache_available():
+            raise FileNotFoundError(
+                "--skip-market-odds-fetch was passed, but cached market odds files are missing. "
+                "Either commit outputs/market_odds/worldcup_market_odds_raw.json and "
+                "outputs/market_odds/worldcup_market_odds_flat.csv, or rerun without --skip-market-odds-fetch."
+            )
+        print("Skipping The Odds API fetch and using committed cached market odds files.")
+    else:
+        run(
+            [
+                sys.executable,
+                "scripts/fetch_market_odds_theoddsapi.py",
+                "--sport",
+                args.sport,
+                "--regions",
+                args.regions,
+                "--markets",
+                args.markets,
+                "--out-json",
+                "outputs/market_odds/worldcup_market_odds_raw.json",
+                "--out-csv",
+                "outputs/market_odds/worldcup_market_odds_flat.csv",
+                "--allow-stale-on-failure",
+                "--allow-empty-on-failure",
+            ],
+            env=env,
+        )
 
     run(
         [
@@ -178,37 +223,53 @@ def main() -> int:
     run(robust_cmd, env=env)
 
     if not args.skip_final_simulation:
-        if not file_exists("outputs/latest/predictions.csv"):
-            print("outputs/latest/predictions.csv not found; skipping final leader simulation for this run.")
-            final_simulation_skipped = True
-        else:
-            run(
-                [
-                    sys.executable,
-                    "scripts/build_predictions_from_locked_card.py",
-                    "--base-predictions-csv",
-                    "outputs/latest/predictions.csv",
-                    "--locked-card-csv",
-                    "outputs/daily_robust_card/daily_robust_superbru_card.csv",
-                    "--out-csv",
-                    "outputs/daily_robust_card/predictions_for_final_simulation.csv",
-                ],
-                env=env,
-            )
-            rc = run(
-                [
-                    sys.executable,
-                    "scripts/run_final_leader_decision.py",
-                    "--predictions-csv",
-                    "outputs/daily_robust_card/predictions_for_final_simulation.csv",
-                    "--out-dir",
-                    "outputs/final_leader_decision_daily_robust",
-                    "--reuse-existing",
-                ],
-                env=env,
-                warn_only=True,
-            )
+        predictions_for_final_simulation = "outputs/daily_robust_card/predictions_for_final_simulation.csv"
+        run(
+            [
+                sys.executable,
+                "scripts/build_predictions_from_locked_card.py",
+                "--base-predictions-csv",
+                "outputs/latest/predictions.csv",
+                "--locked-card-csv",
+                "outputs/daily_robust_card/daily_robust_locked_picks.csv",
+                "--out-csv",
+                predictions_for_final_simulation,
+                "--allow-card-only-fallback",
+            ],
+            env=env,
+        )
+
+        final_decision_cmd = [
+            sys.executable,
+            "scripts/run_final_leader_decision.py",
+            "--predictions-csv",
+            predictions_for_final_simulation,
+            "--out-dir",
+            "outputs/final_leader_decision_daily_robust",
+        ]
+        if final_simulation_cache_complete():
+            final_decision_cmd.append("--reuse-existing")
+            final_simulation_cache_reused = True
+            print("Reusing cached final leader simulation outputs.")
+            rc = run(final_decision_cmd, env=env, warn_only=True)
             final_simulation_failed = rc != 0
+            final_simulation_skipped = False
+            final_simulation_dir = "outputs/final_leader_decision_daily_robust"
+            final_simulation_status = "failed_non_blocking" if final_simulation_failed else "completed"
+        elif args.run_fresh_final_simulation:
+            print("Cached final leader simulation outputs are incomplete; running fresh final leader simulation.")
+            rc = run(final_decision_cmd, env=env, warn_only=True)
+            final_simulation_failed = rc != 0
+            final_simulation_skipped = False
+            final_simulation_dir = "outputs/final_leader_decision_daily_robust"
+            final_simulation_status = "failed_non_blocking" if final_simulation_failed else "completed"
+        else:
+            print(
+                "Cached final leader simulation outputs are incomplete; skipping expensive fresh final simulation. "
+                "Run with --run-fresh-final-simulation when you want to refresh Monte Carlo outputs."
+            )
+            final_simulation_skipped = True
+            final_simulation_status = "skipped_missing_cache"
 
     summary: dict[str, Any] = {
         "generated_at_utc": datetime.now(timezone.utc).isoformat(),
@@ -216,9 +277,13 @@ def main() -> int:
         "final_card": "outputs/daily_robust_card/daily_robust_superbru_card.csv",
         "daily_summary": "outputs/daily_robust_card/daily_robust_summary.json",
         "market_history_summary": "outputs/market_odds_history/market_odds_history_summary.json",
-        "final_simulation_dir": "outputs/final_leader_decision_daily_robust",
+        "market_odds_fetch_skipped": bool(args.skip_market_odds_fetch),
+        "final_simulation_dir": final_simulation_dir,
+        "predictions_for_final_simulation": predictions_for_final_simulation,
+        "final_simulation_status": final_simulation_status,
         "final_simulation_skipped": final_simulation_skipped,
         "final_simulation_failed_non_blocking": final_simulation_failed,
+        "final_simulation_cache_reused": final_simulation_cache_reused,
     }
     out_path = ROOT / "outputs/daily_robust_card/daily_pipeline_summary.json"
     out_path.parent.mkdir(parents=True, exist_ok=True)

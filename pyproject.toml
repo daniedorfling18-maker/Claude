@@ -22,6 +22,12 @@ dependencies = [
 dev = [
     "pytest>=7",
 ]
+# Browser scraping extras: pip install -e ".[scraper]"
+# Then: python -m playwright install chrome
+scraper = [
+    "playwright>=1.44",
+    "playwright-stealth>=1.0",
+]
 
 [project.scripts]
 superbru-score = "superbru_score_engine.cli:main"

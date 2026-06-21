@@ -2,184 +2,190 @@
 
 This is the production operating flow for the World Cup Superbru engine.
 
-The goal is simple:
+The goal each day is:
 
-1. refresh market odds;
-2. build the robust Superbru card;
-3. refresh the Oddspedia SmartBet correct-score grid through a verified local Chrome session;
-4. compare the locked picks against the Oddspedia grid;
-5. notify only when there are new action items.
+1. refresh market odds and build the robust Superbru card;
+2. run the full Oddspedia pipeline to refresh the correct-score grid, validate picks, and archive signals;
+3. review any action items and decide whether to switch picks.
 
-## Why this is local, not pure GitHub Actions
+## Why the Oddspedia step is local
 
-Oddspedia is Cloudflare-protected. GitHub Actions cannot reliably clear the Cloudflare browser challenge, so the Oddspedia grid capture must run locally through a normal Chrome profile.
-
-GitHub Actions still runs the daily robust pipeline and can consume committed Oddspedia grid files, but the reliable SmartBet refresh step is local.
+Oddspedia is Cloudflare-protected. The scraper (`scrape_oddspedia_curl.py`) bypasses Cloudflare
+using `curl_cffi` with TLS fingerprint impersonation — no browser or Chrome CDP session required.
+The scraper runs locally and commits the grid files; GitHub Actions consumes the committed files
+rather than scraping Oddspedia itself.
 
 ## One-time setup
 
-Install dependencies:
+Install Python dependencies:
 
-```powershell
-python -m pip install pandas numpy scipy pyyaml requests playwright tabulate
-python -m playwright install chromium
+```bash
+pip install -e .
+pip install curl_cffi pandas numpy scipy
 ```
 
-Set the odds API key in your environment or GitHub secret:
+Verify Node.js is available (required for parsing `window.__NUXT__` from Oddspedia HTML):
 
-```powershell
-$env:THE_ODDS_API_KEY = "YOUR_REAL_KEY"
+```bash
+node --version
 ```
 
-For GitHub issue notifications from the local task, install and authenticate GitHub CLI:
+Set the odds API key:
 
-```powershell
+```bash
+export THE_ODDS_API_KEY="YOUR_REAL_KEY"
+```
+
+For GitHub issue notifications, authenticate the GitHub CLI:
+
+```bash
 gh auth login
 ```
 
-## First verified Oddspedia run
+## Daily run
 
-Run this manually once so Chrome can clear Cloudflare and create a persistent profile:
+### Step 1 — Build the robust Superbru card
 
-```powershell
-.\scripts\run_daily_superbru_local.ps1 `
-  -ManualOnMissing `
-  -NotifyOnFirstState `
-  -CreateGitHubIssue `
-  -CommitAndPushOutputs
+```bash
+python scripts/run_daily_robust_pipeline.py
 ```
 
-If Chrome opens a Cloudflare check, complete it. Keep the Chrome profile folder `.chrome-oddspedia-profile` intact so future runs reuse the clearance cookie.
+This produces `outputs/final_locked_picks/superbru_final_card.csv`, which is the input for the
+Oddspedia pipeline.
 
-## Install the daily scheduled task
+### Step 2 — Run the full Oddspedia pipeline
 
-This installs a Windows Task Scheduler job that runs every day at 07:00 while you are logged in:
-
-```powershell
-.\scripts\install_daily_superbru_task.ps1 `
-  -At "07:00" `
-  -CreateGitHubIssue `
-  -CommitAndPushOutputs
+```bash
+python scripts/run_oddspedia_pipeline.py
 ```
 
-The task is installed as **Daily Superbru Local Automation**.
+This runs all 10 steps in order (~10–30 seconds depending on network speed):
 
-Test it immediately:
+| Step | What it does |
+|------|-------------|
+| 1 | Scrapes Oddspedia correct-score grids for all match URLs in `inputs/oddspedia_match_urls.csv` |
+| 2 | Builds score-shape features (OU, BTTS, margins, market diffs) |
+| 3 | Checks grid quality and coverage |
+| 4 | Compares locked picks to the Oddspedia modal score |
+| 5 | Calculates EV-ranked scorelines for each match |
+| 6 | Scores picks against any completed results (backtest) |
+| 7 | Classifies each match: grid independent from market or market-aligned |
+| 8 | Estimates synthetic pool crowding (which scores pool players likely cluster on) |
+| 9 | Runs pool intelligence: leaderboard leverage, chaser exposure |
+| 10 | Archives today's signals to `outputs/backtesting/signal_archive_rolling.csv` |
 
-```powershell
-Start-ScheduledTask -TaskName "Daily Superbru Local Automation"
+If the grid was already scraped today, skip step 1:
+
+```bash
+python scripts/run_oddspedia_pipeline.py --skip-scrape
 ```
 
-Check task history in Task Scheduler if it does not appear to run.
+### Step 3 — Review action items
 
-## What the daily task does
+Check which picks the pipeline flags for review:
 
-The task runs:
-
-```powershell
-.\scripts\run_daily_superbru_local.ps1 -CreateGitHubIssue -CommitAndPushOutputs
+```bash
+python -c "
+import pandas as pd
+df = pd.read_csv('outputs/oddspedia_pick_validation/oddspedia_pick_comparison.csv')
+review = df[~df['action'].isin(['keep','no_grid'])].sort_values('probability_gap_vs_locked_pct', ascending=False)
+print(review[['match_id','locked_pick','oddspedia_best_score','probability_gap_vs_locked_pct','action']].to_string(index=False))
+"
 ```
 
-It performs these steps:
+Check EV gaps for the flagged matches:
 
-1. captures the previous robust Superbru card;
-2. runs `scripts/run_daily_robust_pipeline.py`;
-3. starts or attaches to Chrome on CDP port 9222;
-4. runs `scripts/scrape_oddspedia_cdp_session.py`;
-5. writes:
-   - `inputs/smartbet_grids/oddspedia_probability_grids_auto.csv`
-   - `inputs/smartbet_grids/oddspedia_probability_summary_auto.csv`
-6. runs `scripts/compare_locked_picks_to_oddspedia.py`;
-7. runs `scripts/notify_score_changes.py`;
-8. runs `scripts/notify_daily_superbru_action_items.py`;
-9. creates a GitHub issue only if the action-item digest changed;
-10. commits and pushes refreshed outputs when `-CommitAndPushOutputs` is used.
-
-## Notification logic
-
-A notification is created only when the combined daily action set changes.
-
-The combined action set includes:
-
-- robust-card score changes versus the previous card; and
-- Oddspedia SmartBet review items where the locked score is materially weaker than a same-outcome alternative, or where Oddspedia creates a market-outcome conflict.
-
-The state file is:
-
-```text
-outputs/daily_notifications/daily_superbru_action_state.json
+```bash
+python -c "
+import pandas as pd
+df = pd.read_csv('outputs/oddspedia_pick_validation/oddspedia_ev_recommendations.csv')
+flagged = df[df['review_flag'] == True]
+print(flagged[['match_id','locked_pick','current_locked_pick_ev','best_ev_scoreline','best_ev_expected_points','ev_gap_vs_locked','review_level']].to_string(index=False))
+"
 ```
 
-If the same action set appears again tomorrow, the notifier suppresses the duplicate notification.
+Check model independence:
 
-The daily report is written to:
-
-```text
-outputs/daily_notifications/daily_superbru_action_items.md
-outputs/daily_notifications/daily_superbru_action_items.json
+```bash
+python -c "
+import pandas as pd
+df = pd.read_csv('outputs/oddspedia_pick_validation/oddspedia_model_independence.csv')
+print(df[['match_id','independence_class','signal_consistency','locked_pick','pick_follows']].to_string(index=False))
+"
 ```
 
-## Manual review command
+Check synthetic crowding:
 
-To inspect review items manually:
+```bash
+python -c "
+import pandas as pd
+df = pd.read_csv('outputs/superbru_pool/superbru_synthetic_crowding.csv')
+flagged = df[df['crowding_signal'] != 'contrarian']
+print(flagged[['match_id','locked_pick','crowding_signal','est_pool_pct_on_locked_pick']].to_string(index=False))
+"
+```
 
-```powershell
-Import-Csv outputs\oddspedia_pick_validation\oddspedia_pick_comparison.csv |
-  Where-Object {$_.action -ne "keep" -and $_.action -ne "no_grid"} |
-  Sort-Object {[double]$_.probability_gap_vs_locked_pct} -Descending |
-  Format-Table match_id,locked_pick,locked_pick_probability_pct,oddspedia_best_score,oddspedia_best_probability_pct,probability_gap_vs_locked_pct,action -AutoSize
+### Step 4 — Commit and push
+
+```bash
+git add -f outputs/backtesting/ outputs/oddspedia_pick_validation/ outputs/superbru_pool/ inputs/smartbet_grids/
+git add outputs/final_locked_picks/ outputs/daily_notifications/
+git commit -m "Daily pipeline run $(date -u +%Y-%m-%d)"
+git push
 ```
 
 ## Important operating rule
 
-Oddspedia SmartBet is a calibration and review layer. It is not an automatic switch engine.
+The Oddspedia pipeline is a calibration and review layer. A higher-probability Oddspedia modal
+score or higher-EV alternative does **not** automatically replace the locked pick. Any change
+must still pass:
 
-A higher-probability Oddspedia modal score does not automatically replace the Superbru pick. Any change must still pass:
-
-- Superbru expected-points logic;
+- Superbru expected-points logic (EV gap must be material);
 - leader/chaser risk logic;
 - robust-policy checks;
-- manual judgement where the market and model conflict.
+- manual judgement where market and model signals conflict.
+
+## Key output files
+
+```text
+outputs/final_locked_picks/superbru_final_card.csv           — locked picks (input to pipeline)
+inputs/smartbet_grids/oddspedia_probability_grids_auto.csv   — scraped CS grid (19 rows per match)
+inputs/smartbet_grids/oddspedia_score_shape_features.csv     — OU/BTTS/margin features
+outputs/oddspedia_pick_validation/oddspedia_pick_comparison.csv    — pick comparison + action flags
+outputs/oddspedia_pick_validation/oddspedia_ev_recommendations.csv — EV per match with review flags
+outputs/oddspedia_pick_validation/oddspedia_model_independence.csv — independence class per match
+outputs/superbru_pool/superbru_synthetic_crowding.csv        — crowding estimate per match
+outputs/superbru_pool/superbru_remaining_fixture_leverage.csv — chaser/leaderboard leverage
+outputs/backtesting/superbru_pick_backtest.csv               — scored picks vs completed results
+outputs/backtesting/signal_archive_rolling.csv               — daily signal archive (rolling)
+outputs/backtesting/snapshots/signal_archive_YYYY-MM-DD.csv  — point-in-time snapshot per run
+outputs/daily_notifications/daily_superbru_action_items.md   — action digest
+```
 
 ## Troubleshooting
 
-### Chrome CDP port not available
+### Scraper returns 0 matches
 
-Close all Chrome windows and kill background Chrome:
+Check that `inputs/oddspedia_match_urls.csv` contains the current round's match URLs. The URLs
+must point to the live match pages (e.g. `https://oddspedia.com/football/world/world-cup/...`).
 
-```powershell
-taskkill /F /IM chrome.exe
+Run a single-match test:
+
+```bash
+python scripts/run_oddspedia_pipeline.py --max-matches 1
 ```
 
-Then rerun the daily task or manual command.
+Check the diagnostic files in `outputs/oddspedia_probability_extract/stealth_diagnostics/` if a
+match fails — `_body.txt` contains the raw HTML response and `_state.json` the parsed Nuxt state.
 
-### Cloudflare blocks again
+### Node.js not found
 
-Run the manual mode:
+`scrape_oddspedia_curl.py` writes a temporary JS file and runs `node` to evaluate `window.__NUXT__`.
+Install Node.js from https://nodejs.org and ensure `node` is on your PATH.
 
-```powershell
-.\scripts\run_daily_superbru_local.ps1 -ManualOnMissing -CreateGitHubIssue -CommitAndPushOutputs
-```
+### Grid count is lower than expected
 
-Complete the Cloudflare challenge in the opened Chrome window.
-
-### Oddspedia grid count is low
-
-Check:
-
-```powershell
-Get-Content outputs\oddspedia_probability_extract\oddspedia_cdp_probability_extract_summary.json
-```
-
-Expected:
-
-```text
-matches_with_grid = number of input URLs
-correct_score_row_count = 19 x matches_with_grid
-```
-
-If not, inspect diagnostics:
-
-```powershell
-Get-ChildItem outputs\oddspedia_probability_extract\cdp_diagnostics
-```
+Some matches may not yet have a SmartBet correct-score market. Check
+`outputs/oddspedia_probability_extract/oddspedia_grid_quality.csv` for per-match diagnostics.
+Matches without a grid still get processed for picks — they are tagged `no_grid` in the comparison
+and EV outputs.

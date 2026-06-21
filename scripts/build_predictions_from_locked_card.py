@@ -10,6 +10,9 @@ from typing import Any
 import pandas as pd
 
 
+REQUIRED_PREDICTION_COLUMNS = {"commence_time", "home_team", "away_team", "recommended_scoreline"}
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description="Build a predictions CSV for leader simulation from a locked Superbru card."
@@ -21,7 +24,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--allow-card-only-fallback",
         action="store_true",
         help=(
-            "If the base predictions CSV is missing, synthesise the minimal leader-simulation "
+            "If the base predictions CSV is missing or malformed, synthesise the minimal leader-simulation "
             "predictions CSV directly from the locked card instead of failing."
         ),
     )
@@ -93,6 +96,22 @@ def synthesize_predictions_from_card(card: pd.DataFrame, pick_col: str, card_pat
     return predictions
 
 
+def load_base_predictions(base_path: Path) -> tuple[pd.DataFrame | None, str]:
+    if not base_path.exists():
+        return None, "base_missing"
+    try:
+        predictions = pd.read_csv(base_path).fillna("")
+    except Exception as exc:
+        return None, f"base_unreadable:{exc}"
+
+    missing = REQUIRED_PREDICTION_COLUMNS - set(predictions.columns)
+    if missing:
+        return None, f"base_missing_columns:{','.join(sorted(missing))}"
+    if predictions.empty:
+        return None, "base_empty"
+    return predictions, "base_predictions"
+
+
 def main() -> int:
     args = build_parser().parse_args()
     base_path = Path(args.base_predictions_csv)
@@ -105,21 +124,20 @@ def main() -> int:
     card = pd.read_csv(card_path).fillna("")
     pick_col = find_pick_column(card)
 
-    if base_path.exists():
-        predictions = pd.read_csv(base_path).fillna("")
-        source = "base_predictions"
-    elif args.allow_card_only_fallback:
+    predictions, source = load_base_predictions(base_path)
+    if predictions is None:
+        if not args.allow_card_only_fallback:
+            raise FileNotFoundError(
+                f"Could not use base predictions CSV {base_path}: {source}. Pass --allow-card-only-fallback "
+                "to build a minimal leader-simulation predictions file from the locked card."
+            )
+        print(f"Base predictions unavailable or invalid ({source}); using locked-card fallback.")
         predictions = synthesize_predictions_from_card(card, pick_col, card_path)
         source = "locked_card_fallback"
-    else:
-        raise FileNotFoundError(
-            f"Missing base predictions CSV: {base_path}. Pass --allow-card-only-fallback to build a minimal "
-            "leader-simulation predictions file from the locked card."
-        )
 
-    required_predictions = {"commence_time", "home_team", "away_team", "recommended_scoreline"}
-    if not required_predictions.issubset(predictions.columns):
-        raise ValueError(f"Base predictions missing columns: {sorted(required_predictions - set(predictions.columns))}")
+    missing_required = REQUIRED_PREDICTION_COLUMNS - set(predictions.columns)
+    if missing_required:
+        raise ValueError(f"Predictions missing columns after fallback: {sorted(missing_required)}")
 
     locked_lookup = {
         match_key(row.get("home_team"), row.get("away_team")): txt(row.get(pick_col))

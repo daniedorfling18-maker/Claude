@@ -2,14 +2,14 @@ name: Auto Pick (Scheduled)
 
 on:
   schedule:
-    # Every 30 minutes — catches any game kicking off within the 120-min window
-    - cron: '*/30 * * * *'
+    # Every 10 minutes — catches games kicking off within the 20-min window
+    - cron: '*/10 * * * *'
   workflow_dispatch:
     inputs:
       window_minutes:
         description: 'Submit picks for games kicking off within this many minutes'
         required: false
-        default: '120'
+        default: '20'
       dry_run:
         description: 'Dry run only (predict but do not submit)'
         required: false
@@ -48,7 +48,7 @@ jobs:
             --email "$SUPERBRU_EMAIL" \
             --password "$SUPERBRU_PASSWORD" \
             --pool-url "${{ github.event.inputs.pool_url || 'https://www.superbru.com/worldcup_predictor/pool_view.php?t=1296&p=13236623&view=matches' }}" \
-            --window-minutes "${{ github.event.inputs.window_minutes || '120' }}" \
+            --window-minutes "${{ github.event.inputs.window_minutes || '20' }}" \
             --headless \
             $DRY_RUN_FLAG \
             --out-dir outputs/pregame_checks/auto_pick

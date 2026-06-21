@@ -133,7 +133,7 @@ def scrape_match(url: str, impersonate: str, urls_csv: Path, match_id: str) -> b
             os.unlink(tmp_csv)
             # Write minimal csv
             with open(tmp_csv, "w", encoding="utf-8") as f:
-                f.write(f"match_id,commence_time,home_team,away_team,url,alt_url,match_key,match_score\n")
+                f.write("match_id,commence_time,home_team,away_team,url,alt_url,match_key,match_score\n")
                 f.write(f"{match_id},,,,{url},,0,0\n")
     except Exception:
         pass
@@ -264,12 +264,12 @@ def main() -> int:
 
         # Scrape fresh odds
         if not args.skip_scrape:
-            print(f"  Scraping fresh odds from Oddspedia...")
+            print("  Scraping fresh odds from Oddspedia...")
             ok = scrape_match(match["url"], args.impersonate, urls_csv, mid)
             if not ok:
-                print(f"  WARNING: scrape failed. Using cached grid if available.")
+                print("  WARNING: scrape failed. Using cached grid if available.")
         else:
-            print(f"  Skipping scrape (--skip-scrape).")
+            print("  Skipping scrape (--skip-scrape).")
 
         # Re-run EV analysis
         ev_df = run_ev_analysis(picks_csv)

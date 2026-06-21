@@ -14,7 +14,7 @@ import json, sys, argparse
 from datetime import datetime, timezone
 import numpy as np, pandas as pd
 sys.path.insert(0, "scripts")
-from ev_contrarian import dc_matrix, PTS, CAND, ocf
+from ev_contrarian import dc_matrix, PTS, CAND
 
 def decompose(M, ph, pa):
     P=PTS[(ph,pa)]

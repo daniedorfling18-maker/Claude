@@ -19,7 +19,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -275,7 +274,7 @@ async def run(args: argparse.Namespace) -> dict:
             print(f"  Clicked subtab: {subtab_clicked}")
             await page.wait_for_timeout(6000)
         else:
-            print(f"  No matching subtab found; reading current active tab.")
+            print("  No matching subtab found; reading current active tab.")
 
         # ── Dump all inputs ───────────────────────────────────────────────────────
         all_inputs = await page.evaluate(INSPECT_INPUTS_JS)

@@ -186,7 +186,7 @@ def main() -> int:
     summaries = build_1x2_summaries(rows)
     write_1x2_summaries(summary_path, summaries)
 
-    print(f"Polymarket WC retrospective audit")
+    print("Polymarket WC retrospective audit")
     print(f"fixtures checked: {len(fixtures)}")
     print(f"candidate match-result markets found: {len(rows)}")
     print(f"fixtures with usable 1X2 Polymarket snapshot: {len(summaries)}")

@@ -13,7 +13,7 @@ That trade is the point when you're chasing rank from behind.
 Usage:
   python scripts/differentiation_overlay.py <odds_snapshot.json> [--cutoff 2026-06-16]
 """
-import argparse, json, sys, math
+import argparse, json
 from datetime import datetime, timezone
 import numpy as np, pandas as pd
 from scipy.optimize import minimize
@@ -108,7 +108,7 @@ def main():
         rh=elo.get(ck(h)); ra=elo.get(ck(aw))
         if rh is None or ra is None: continue       # unrated team
         mdl=model_probs(rh-ra, p)                   # WC = neutral, HFA=0
-        lbl=["H","D","A"]; names=[h,"Draw",aw]
+        names=[h,"Draw",aw]
         mk=int(np.argmax(mkt)); md=int(np.argmax(mdl))
         agree = mk==md
         opp = float(mdl[md]-mkt[md])                # model's conviction of disagreement

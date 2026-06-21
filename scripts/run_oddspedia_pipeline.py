@@ -3,17 +3,18 @@ run_oddspedia_pipeline.py
 
 Orchestrates the Oddspedia correct-score pipeline in order:
 
-  1. scrape_oddspedia_curl.py                   - fetch grids + BTTS/OU from Oddspedia
-  2. build_oddspedia_score_shape_features.py    - shape features + market diffs
-  3. check_oddspedia_grid_quality.py            - diagnostic validation
-  4. compare_locked_picks_to_oddspedia.py       - flag picks worth reviewing
-  5. build_oddspedia_superbru_ev.py             - EV-ranked candidate scorelines
-  6. build_superbru_backtest_from_results.py    - legacy pick scoring against completed results
-  7. build_oddspedia_model_independence.py      - grid vs market independence check
-  8. build_oddspedia_synthetic_pool_crowding.py - synthetic pool crowding estimate
-  9. build_superbru_pool_intelligence.py        - leaderboard leverage + chaser exposure
- 10. build_oddspedia_signal_archive.py          - snapshot signals for future backtesting
- 11. build_live_signal_backtest.py              - trusted rolling signal/policy backtest ledger
+  0. discover_oddspedia_match_urls_curl.py      — refresh match URL list from WC listing page
+  1. scrape_oddspedia_curl.py                   — fetch grids + BTTS/OU from Oddspedia
+  2. build_oddspedia_score_shape_features.py    — shape features + market diffs
+  3. check_oddspedia_grid_quality.py            — diagnostic validation
+  4. compare_locked_picks_to_oddspedia.py       — flag picks worth reviewing
+  5. build_oddspedia_superbru_ev.py             — EV-ranked candidate scorelines
+  6. build_superbru_backtest_from_results.py    — legacy pick scoring against completed results
+  7. build_oddspedia_model_independence.py      — grid vs market independence check
+  8. build_oddspedia_synthetic_pool_crowding.py — synthetic pool crowding estimate
+  9. build_superbru_pool_intelligence.py        — leaderboard leverage + chaser exposure
+ 10. build_oddspedia_signal_archive.py          — snapshot signals for future backtesting
+ 11. build_live_signal_backtest.py              — trusted rolling signal/policy backtest ledger
 
 Usage:
     python scripts/run_oddspedia_pipeline.py
@@ -73,6 +74,13 @@ def main() -> int:
     py = sys.executable
 
     if not args.skip_scrape:
+        timings["discover"] = run(
+            "STEP 0 — Discover/refresh match URLs from Oddspedia listing page",
+            [py, "scripts/discover_oddspedia_match_urls_curl.py",
+             "--fixtures-csv", args.locked_picks_csv,
+             "--impersonate", args.impersonate],
+        )
+
         scrape_cmd = [
             py, "scripts/scrape_oddspedia_curl.py",
             "--urls-csv", args.urls_csv,

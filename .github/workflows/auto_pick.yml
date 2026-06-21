@@ -40,6 +40,7 @@ on:
     - cron: '50 19 1-19 7 *'    # Jul 1-19 20:00 UTC slot
     - cron: '50 22 1-19 7 *'    # Jul 1-19 23:00 UTC slot
     - cron: '50 1 2-20 7 *'     # Jul 2-19 02:00 UTC slot
+
   workflow_dispatch:
     inputs:
       window_minutes:
@@ -71,20 +72,24 @@ jobs:
           pip install -e ".[scraper]"
           python -m playwright install chromium --with-deps
 
-      - name: Run auto pick
+      - name: Run match-scoped auto pick
         env:
           SUPERBRU_EMAIL: ${{ secrets.SUPERBRU_USERNAME }}
           SUPERBRU_PASSWORD: ${{ secrets.SUPERBRU_PASSWORD }}
+          THE_ODDS_API_KEY: ${{ secrets.THE_ODDS_API_KEY }}
         run: |
           DRY_RUN_FLAG=""
           if [ "${{ github.event.inputs.dry_run }}" = "true" ]; then
             DRY_RUN_FLAG="--dry-run"
           fi
-          python scripts/auto_pick.py \
+
+          python scripts/auto_pick_match_scoped.py \
             --email "$SUPERBRU_EMAIL" \
             --password "$SUPERBRU_PASSWORD" \
             --pool-url "${{ github.event.inputs.pool_url || 'https://www.superbru.com/worldcup_predictor/pool_view.php?t=1296&p=13236623&view=matches' }}" \
             --window-minutes "${{ github.event.inputs.window_minutes || '20' }}" \
+            --pick-card-csv outputs/final_locked_picks/superbru_final_card.csv \
+            --odds-lookup-window-minutes 90 \
             --headless \
             $DRY_RUN_FLAG \
             --out-dir outputs/pregame_checks/auto_pick

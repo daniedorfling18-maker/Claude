@@ -17,6 +17,14 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--base-predictions-csv", default="outputs/latest/predictions.csv")
     parser.add_argument("--locked-card-csv", default="outputs/daily_robust_card/daily_robust_superbru_card.csv")
     parser.add_argument("--out-csv", default="outputs/daily_robust_card/predictions_for_final_simulation.csv")
+    parser.add_argument(
+        "--allow-card-only-fallback",
+        action="store_true",
+        help=(
+            "If the base predictions CSV is missing, synthesise the minimal leader-simulation "
+            "predictions CSV directly from the locked card instead of failing."
+        ),
+    )
     return parser
 
 
@@ -43,22 +51,73 @@ def find_pick_column(frame: pd.DataFrame) -> str:
     raise ValueError("Could not find a locked pick column in locked-card CSV.")
 
 
+def synthesize_predictions_from_card(card: pd.DataFrame, pick_col: str, card_path: Path) -> pd.DataFrame:
+    required_card = {"commence_time", "home_team", "away_team", pick_col}
+    missing = required_card - set(card.columns)
+    if missing:
+        raise ValueError(f"Locked card missing columns for card-only fallback: {sorted(missing)}")
+
+    predictions = pd.DataFrame(
+        {
+            "commence_time": card["commence_time"].map(txt),
+            "home_team": card["home_team"].map(txt),
+            "away_team": card["away_team"].map(txt),
+            "recommended_scoreline": card[pick_col].map(txt),
+        }
+    )
+
+    if "match_id" in card.columns:
+        predictions.insert(0, "match_id", card["match_id"].map(txt))
+
+    for column in [
+        "risk_tier",
+        "confidence_tier",
+        "raw_pick",
+        "top1_scoreline",
+        "top2_scoreline",
+        "top3_scoreline",
+        "modal_scoreline",
+        "private_chase_scoreline",
+        "conservative_scoreline",
+        "exact_chase_scoreline",
+    ]:
+        if column in card.columns and column not in predictions.columns:
+            predictions[column] = card[column].map(txt)
+
+    if "raw_ev_scoreline" not in predictions.columns:
+        source_col = "raw_pick" if "raw_pick" in predictions.columns else "recommended_scoreline"
+        predictions["raw_ev_scoreline"] = predictions[source_col].map(txt)
+
+    predictions["locked_card_source"] = str(card_path)
+    predictions["prediction_source"] = "locked_card_fallback"
+    return predictions
+
+
 def main() -> int:
     args = build_parser().parse_args()
     base_path = Path(args.base_predictions_csv)
     card_path = Path(args.locked_card_csv)
     out_path = Path(args.out_csv)
 
-    if not base_path.exists():
-        raise FileNotFoundError(f"Missing base predictions CSV: {base_path}")
     if not card_path.exists():
         raise FileNotFoundError(f"Missing locked card CSV: {card_path}")
 
-    predictions = pd.read_csv(base_path).fillna("")
     card = pd.read_csv(card_path).fillna("")
     pick_col = find_pick_column(card)
 
-    required_predictions = {"home_team", "away_team", "recommended_scoreline"}
+    if base_path.exists():
+        predictions = pd.read_csv(base_path).fillna("")
+        source = "base_predictions"
+    elif args.allow_card_only_fallback:
+        predictions = synthesize_predictions_from_card(card, pick_col, card_path)
+        source = "locked_card_fallback"
+    else:
+        raise FileNotFoundError(
+            f"Missing base predictions CSV: {base_path}. Pass --allow-card-only-fallback to build a minimal "
+            "leader-simulation predictions file from the locked card."
+        )
+
+    required_predictions = {"commence_time", "home_team", "away_team", "recommended_scoreline"}
     if not required_predictions.issubset(predictions.columns):
         raise ValueError(f"Base predictions missing columns: {sorted(required_predictions - set(predictions.columns))}")
 
@@ -88,6 +147,7 @@ def main() -> int:
         "base_predictions_csv": str(base_path),
         "locked_card_csv": str(card_path),
         "out_csv": str(out_path),
+        "source": source,
         "prediction_rows": int(len(predictions)),
         "locked_card_rows": int(len(card)),
         "changed_prediction_count": int(changed),

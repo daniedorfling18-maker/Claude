@@ -40,8 +40,8 @@ def test_discover_events_keeps_found_events_outside_locked_fixtures() -> None:
 
     assert len(discovered) == 2
     assert set(discovered["match_key"]) == {"1654576", "1654585"}
-    assert discovered.loc[discovered["match_key"].eq("1654576"), "is_fixture_match"].iloc[0] is True
-    assert discovered.loc[discovered["match_key"].eq("1654585"), "is_fixture_match"].iloc[0] is False
+    assert bool(discovered.loc[discovered["match_key"].eq("1654576"), "is_fixture_match"].iloc[0]) is True
+    assert bool(discovered.loc[discovered["match_key"].eq("1654585"), "is_fixture_match"].iloc[0]) is False
     assert unmatched.empty
     assert stats["oddspedia_event_count"] == 2
     assert stats["fixture_matched_event_count"] == 1

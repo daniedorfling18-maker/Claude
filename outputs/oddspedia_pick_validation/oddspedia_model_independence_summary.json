@@ -1,5 +1,5 @@
 {
-  "generated_at_utc": "2026-06-21T04:49:28.184163+00:00",
+  "generated_at_utc": "2026-06-21T04:56:36.906620+00:00",
   "shape_features_csv": "inputs/smartbet_grids/oddspedia_score_shape_features.csv",
   "ev_recommendations_csv": "outputs/oddspedia_pick_validation/oddspedia_ev_recommendations.csv",
   "mild_threshold_pct": 2.0,

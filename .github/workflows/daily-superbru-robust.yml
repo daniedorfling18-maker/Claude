@@ -164,7 +164,7 @@ jobs:
           PY
 
       - name: Superbru browser dry-run
-        if: success() && inputs.superbru_submit_dry_run == true
+        if: success() && (github.event_name != 'workflow_dispatch' || inputs.superbru_submit_dry_run == true)
         env:
           SUPERBRU_EMAIL: ${{ secrets.SUPERBRU_USERNAME }}
           SUPERBRU_PASSWORD: ${{ secrets.SUPERBRU_PASSWORD }}

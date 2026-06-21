@@ -1,11 +1,11 @@
 {
-  "generated_at_utc": "2026-06-21T04:49:26.138195+00:00",
-  "match_count": 40,
+  "generated_at_utc": "2026-06-21T08:16:05.053726+00:00",
+  "match_count": 48,
   "warning_match_count": 24,
-  "ok_match_count": 16,
+  "ok_match_count": 24,
   "failed_check_counts": {
-    "has_grid;row_count_usually_19;has_exact_0_0_to_3_3;has_other_rows;correct_score_probability_total_ok;winner_probability_total_ok;source_url_loaded_successfully;modal_score_present;locked_score_present_or_outside_grid": 24,
-    "": 16
+    "": 24,
+    "has_grid;row_count_usually_19;has_exact_0_0_to_3_3;has_other_rows;correct_score_probability_total_ok;winner_probability_total_ok;source_url_loaded_successfully;modal_score_present;locked_score_present_or_outside_grid": 24
   },
   "out_csv": "outputs/oddspedia_probability_extract/oddspedia_grid_quality.csv",
   "note": "Warnings are diagnostic only. This script exits 0 so the daily run can continue."

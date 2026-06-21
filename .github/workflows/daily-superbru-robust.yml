@@ -9,6 +9,10 @@ on:
         description: "Skip final leader simulation"
         type: boolean
         default: false
+      refresh_market_odds:
+        description: "Call The Odds API. Leave off while debugging to protect API credits."
+        type: boolean
+        default: false
       snapshot_id:
         description: "Optional snapshot id, e.g. 20260620T050000Z"
         type: string
@@ -63,13 +67,17 @@ jobs:
         run: |
           SNAPSHOT_ID="${{ inputs.snapshot_id }}"
           SKIP_FLAG=""
+          MARKET_ODDS_FLAG="--skip-market-odds-fetch"
           if [ "${{ inputs.skip_final_simulation }}" = "true" ]; then
             SKIP_FLAG="--skip-final-simulation"
           fi
+          if [ "${{ inputs.refresh_market_odds }}" = "true" ]; then
+            MARKET_ODDS_FLAG=""
+          fi
           if [ -n "$SNAPSHOT_ID" ]; then
-            python scripts/run_daily_robust_pipeline.py --snapshot-id "$SNAPSHOT_ID" $SKIP_FLAG
+            python scripts/run_daily_robust_pipeline.py --snapshot-id "$SNAPSHOT_ID" $SKIP_FLAG $MARKET_ODDS_FLAG
           else
-            python scripts/run_daily_robust_pipeline.py $SKIP_FLAG
+            python scripts/run_daily_robust_pipeline.py $SKIP_FLAG $MARKET_ODDS_FLAG
           fi
 
       - name: Run Oddspedia SmartBet overlay validation

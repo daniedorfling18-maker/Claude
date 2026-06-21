@@ -15,7 +15,10 @@ param(
   [switch]$ManualOnMissing,
   [switch]$NotifyOnFirstState,
   [switch]$CreateGitHubIssue,
-  [switch]$CommitAndPushOutputs
+  [switch]$CommitAndPushOutputs,
+  [switch]$StartPregameWatcher,
+  [decimal]$PregameEvThreshold = 0.15,
+  [switch]$PregameDryRun
 )
 
 $ErrorActionPreference = "Stop"
@@ -246,6 +249,29 @@ if ($notification.notify -eq $true) {
   }
 } else {
   Write-Host "No new Superbru action items. No notification created."
+}
+
+# Start the pre-game watcher in the background if requested.
+# It polls every 60 seconds and auto-submits pick changes via CDP
+# for any match kicking off within the next 5-15 minutes.
+if ($StartPregameWatcher) {
+  Ensure-ChromeCdp
+  Write-Host "Starting pre-game watcher in background..."
+  $watcherArgs = @(
+    "scripts\run_pregame_watcher.py",
+    "--cdp-url", "http://127.0.0.1:$ChromeDebugPort",
+    "--pool-url", $SuperbruPoolUrl,
+    "--locked-picks-csv", "outputs\final_locked_picks\superbru_final_card.csv",
+    "--urls-csv", "inputs\oddspedia_match_urls.csv",
+    "--ev-threshold", "$PregameEvThreshold"
+  )
+  if ($PregameDryRun) { $watcherArgs += "--dry-run" }
+  $watcherLog = "outputs\pregame_checks\watcher_stdout.log"
+  Start-Process -FilePath python -ArgumentList $watcherArgs `
+    -RedirectStandardOutput $watcherLog `
+    -RedirectStandardError "outputs\pregame_checks\watcher_stderr.log" `
+    -NoNewWindow -PassThru | Out-Null
+  Write-Host "Pre-game watcher started. Log: $watcherLog"
 }
 
 if ($CommitAndPushOutputs) {

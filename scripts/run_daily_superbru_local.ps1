@@ -4,11 +4,14 @@ param(
   [string]$ChromeProfileDir = ".chrome-oddspedia-profile",
   [string]$SeedUrl = "https://www.superbru.com/worldcup_predictor/pool_view.php?t=1296&p=13236623&g=32&view=matches",
   [string]$SuperbruPoolUrl = "https://www.superbru.com/worldcup_predictor/pool_view.php?t=1296&p=13236623&g=32&view=matches",
+  [string]$OddspediaSeedUrlsCsv = "inputs\oddspedia_seed_urls.csv",
   [string]$SnapshotId = "",
   [switch]$SkipFinalSimulation,
   [switch]$SkipOddspediaScrape,
+  [switch]$SkipOddspediaUrlDiscovery,
   [switch]$SkipResultsBackfill,
   [switch]$SkipSuperbruPoolScrape,
+  [switch]$HeadfulOddspediaDiscovery,
   [switch]$ManualOnMissing,
   [switch]$NotifyOnFirstState,
   [switch]$CreateGitHubIssue,
@@ -102,6 +105,7 @@ mkdir outputs\backtesting -Force | Out-Null
 mkdir outputs\superbru_pool -Force | Out-Null
 mkdir outputs\oddspedia_probability_extract -Force | Out-Null
 mkdir outputs\oddspedia_pick_validation -Force | Out-Null
+mkdir outputs\oddspedia_url_discovery -Force | Out-Null
 mkdir inputs\smartbet_grids -Force | Out-Null
 
 if (Test-Path outputs\daily_robust_card\daily_robust_superbru_card.csv) {
@@ -169,14 +173,27 @@ Write-Host "Running daily robust pipeline..."
 $env:PYTHONPATH = "src"
 python scripts\run_daily_robust_pipeline.py @pipelineArgs
 
-# Archive the previous Oddspedia probability snapshot before refreshing.
+if (-not $SkipOddspediaScrape -and -not $SkipOddspediaUrlDiscovery) {
+  $discoveryArgs = @(
+    "scripts\discover_oddspedia_match_urls.py",
+    "--fixtures-csv", "outputs\final_locked_picks\superbru_final_card.csv",
+    "--seed-urls-csv", $OddspediaSeedUrlsCsv,
+    "--out-csv", "inputs\oddspedia_match_urls.csv",
+    "--out-json", "outputs\oddspedia_url_discovery\oddspedia_url_discovery.json",
+    "--settle-ms", "8000",
+    "--timeout-ms", "60000"
+  )
+  if ($HeadfulOddspediaDiscovery) { $discoveryArgs += "--headful" }
+
+  Invoke-WarnOnlyStep "Refreshing Oddspedia event URL discovery..." {
+    python @discoveryArgs
+  }
+}
+
 Invoke-WarnOnlyStep "Archiving previous Oddspedia probability snapshot..." {
   python scripts\archive_oddspedia_snapshot.py --history-dir outputs\oddspedia_probability_extract\history
 }
 
-# Run the full 10-step Oddspedia pipeline (scrape → features → quality → compare →
-# EV → backtest → independence → crowding → pool intelligence → signal archive).
-# Uses curl_cffi TLS impersonation — no Chrome/CDP required for this step.
 $pipelineSkipFlag = @()
 if ($SkipOddspediaScrape) { $pipelineSkipFlag += "--skip-scrape" }
 
@@ -187,7 +204,6 @@ Invoke-WarnOnlyStep "Oddspedia full pipeline..." {
     @pipelineSkipFlag
 }
 
-# Compare to previous snapshot (runs after pipeline so new grid is available).
 Invoke-WarnOnlyStep "Comparing Oddspedia movement versus previous snapshot..." {
   python scripts\compare_oddspedia_movement.py `
     --history-dir outputs\oddspedia_probability_extract\history `
@@ -234,7 +250,7 @@ if ($notification.notify -eq $true) {
 
 if ($CommitAndPushOutputs) {
   Write-Host "Committing daily outputs..."
-  git add -f inputs\pool_leaderboard.csv inputs\pool_leaderboard_auto.csv inputs\smartbet_grids outputs\superbru_pool outputs\market_odds outputs\market_odds_validation outputs\market_odds_history outputs\component_validation outputs\final_locked_picks outputs\daily_robust_card outputs\oddspedia_probability_extract outputs\oddspedia_pick_validation outputs\daily_notifications outputs\final_leader_decision_daily_robust outputs\backtesting ':(exclude)outputs/superbru_pool/results_diagnostics/superbru_clicked_state_*' ':(exclude)outputs/superbru_pool/results_diagnostics/superbru_result_page_*' ':(exclude)outputs/superbru_pool/pick_diagnostics/*' ':(exclude)outputs/oddspedia_probability_extract/cdp_diagnostics/*' ':(exclude)outputs/backtesting/oddspedia_results_diagnostics/*'
+  git add -f inputs\pool_leaderboard.csv inputs\pool_leaderboard_auto.csv inputs\oddspedia_match_urls.csv inputs\smartbet_grids outputs\superbru_pool outputs\market_odds outputs\market_odds_validation outputs\market_odds_history outputs\component_validation outputs\final_locked_picks outputs\daily_robust_card outputs\oddspedia_url_discovery outputs\oddspedia_probability_extract outputs\oddspedia_pick_validation outputs\daily_notifications outputs\final_leader_decision_daily_robust outputs\backtesting ':(exclude)outputs/superbru_pool/results_diagnostics/superbru_clicked_state_*' ':(exclude)outputs/superbru_pool/results_diagnostics/superbru_result_page_*' ':(exclude)outputs/superbru_pool/pick_diagnostics/*' ':(exclude)outputs/oddspedia_probability_extract/cdp_diagnostics/*' ':(exclude)outputs/backtesting/oddspedia_results_diagnostics/*'
   git diff --cached --quiet
   if ($LASTEXITCODE -eq 0) {
     Write-Host "No output changes to commit."

@@ -14,7 +14,7 @@ on:
       pool_url:
         description: 'SuperBru pool URL (picks view)'
         required: false
-        default: 'https://www.superbru.com/worldcup_predictor/pool_view.php?t=1296&p=13236623&g=32&view=matches'
+        default: 'https://www.superbru.com/worldcup_predictor/pool_view.php?t=1296&p=13236623&g=37&view=matches'
 
 jobs:
   inspect:

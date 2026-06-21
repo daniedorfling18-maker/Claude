@@ -2,51 +2,81 @@ name: Auto Pick (Scheduled)
 
 on:
   schedule:
-    # All times UTC; fires 10 min before each kickoff. window_minutes=20 covers cron delays.
+    # All times UTC; fires 20 and 10 min before each kickoff. window_minutes=25 covers cron delays.
 
     # ── ROUND 2 remaining (Jun 21-24) ────────────────────────────────────────
-    - cron: '50 15 21 6 *'   # Jun 21 16:00 UTC (12:00 ET) – ESP/KSA
-    - cron: '50 18 21 6 *'   # Jun 21 19:00 UTC (15:00 ET) – BEL/IRN
-    - cron: '50 21 21 6 *'   # Jun 21 22:00 UTC (18:00 ET) – URU/CPV
-    - cron: '50 0 22 6 *'    # Jun 22 01:00 UTC (21:00 ET) – NZL/EGY
-    - cron: '50 16 22 6 *'   # Jun 22 17:00 UTC (13:00 ET) – ARG/AUT
-    - cron: '50 20 22 6 *'   # Jun 22 21:00 UTC (17:00 ET) – FRA/IRQ
-    - cron: '50 23 22 6 *'   # Jun 23 00:00 UTC (20:00 ET) – NOR/SEN
-    - cron: '50 2 23 6 *'    # Jun 23 03:00 UTC (23:00 ET) – JOR/ALG
-    - cron: '50 16 23 6 *'   # Jun 23 17:00 UTC (13:00 ET) – POR/UZB
-    - cron: '50 19 23 6 *'   # Jun 23 20:00 UTC (16:00 ET) – ENG/GHA
-    - cron: '50 22 23 6 *'   # Jun 23 23:00 UTC (19:00 ET) – PAN/CRO
-    - cron: '50 1 24 6 *'    # Jun 24 02:00 UTC (22:00 ET) – COL/DRC
+    - cron: '40 15 21 6 *'   # Jun 21 16:00 UTC (12:00 ET) – ESP/KSA, 20 min before
+    - cron: '50 15 21 6 *'   # Jun 21 16:00 UTC (12:00 ET) – ESP/KSA, 10 min before
+    - cron: '40 18 21 6 *'   # Jun 21 19:00 UTC (15:00 ET) – BEL/IRN, 20 min before
+    - cron: '50 18 21 6 *'   # Jun 21 19:00 UTC (15:00 ET) – BEL/IRN, 10 min before
+    - cron: '40 21 21 6 *'   # Jun 21 22:00 UTC (18:00 ET) – URU/CPV, 20 min before
+    - cron: '50 21 21 6 *'   # Jun 21 22:00 UTC (18:00 ET) – URU/CPV, 10 min before
+    - cron: '40 0 22 6 *'    # Jun 22 01:00 UTC (21:00 ET) – NZL/EGY, 20 min before
+    - cron: '50 0 22 6 *'    # Jun 22 01:00 UTC (21:00 ET) – NZL/EGY, 10 min before
+    - cron: '40 16 22 6 *'   # Jun 22 17:00 UTC (13:00 ET) – ARG/AUT, 20 min before
+    - cron: '50 16 22 6 *'   # Jun 22 17:00 UTC (13:00 ET) – ARG/AUT, 10 min before
+    - cron: '40 20 22 6 *'   # Jun 22 21:00 UTC (17:00 ET) – FRA/IRQ, 20 min before
+    - cron: '50 20 22 6 *'   # Jun 22 21:00 UTC (17:00 ET) – FRA/IRQ, 10 min before
+    - cron: '40 23 22 6 *'   # Jun 23 00:00 UTC (20:00 ET) – NOR/SEN, 20 min before
+    - cron: '50 23 22 6 *'   # Jun 23 00:00 UTC (20:00 ET) – NOR/SEN, 10 min before
+    - cron: '40 2 23 6 *'    # Jun 23 03:00 UTC (23:00 ET) – JOR/ALG, 20 min before
+    - cron: '50 2 23 6 *'    # Jun 23 03:00 UTC (23:00 ET) – JOR/ALG, 10 min before
+    - cron: '40 16 23 6 *'   # Jun 23 17:00 UTC (13:00 ET) – POR/UZB, 20 min before
+    - cron: '50 16 23 6 *'   # Jun 23 17:00 UTC (13:00 ET) – POR/UZB, 10 min before
+    - cron: '40 19 23 6 *'   # Jun 23 20:00 UTC (16:00 ET) – ENG/GHA, 20 min before
+    - cron: '50 19 23 6 *'   # Jun 23 20:00 UTC (16:00 ET) – ENG/GHA, 10 min before
+    - cron: '40 22 23 6 *'   # Jun 23 23:00 UTC (19:00 ET) – PAN/CRO, 20 min before
+    - cron: '50 22 23 6 *'   # Jun 23 23:00 UTC (19:00 ET) – PAN/CRO, 10 min before
+    - cron: '40 1 24 6 *'    # Jun 24 02:00 UTC (22:00 ET) – COL/DRC, 20 min before
+    - cron: '50 1 24 6 *'    # Jun 24 02:00 UTC (22:00 ET) – COL/DRC, 10 min before
 
     # ── ROUND 3 (Jun 24-28) ──────────────────────────────────────────────────
-    - cron: '50 18 24 6 *'   # Jun 24 19:00 UTC (15:00 ET) – BHI/QAT, SUI/CAN
-    - cron: '50 21 24 6 *'   # Jun 24 22:00 UTC (18:00 ET) – MOR/HAI, SCO/BRA
-    - cron: '50 0 25 6 *'    # Jun 25 01:00 UTC (21:00 ET) – CZE/MEX, RSA/KOR
-    - cron: '50 19 25 6 *'   # Jun 25 20:00 UTC (16:00 ET) – ECU/GER, CUR/CIV
-    - cron: '50 22 25 6 *'   # Jun 25 23:00 UTC (19:00 ET) – JPN/SWE, TUN/NED
-    - cron: '50 1 26 6 *'    # Jun 26 02:00 UTC (22:00 ET) – TUR/USA, PAR/AUS
-    - cron: '50 18 26 6 *'   # Jun 26 19:00 UTC (15:00 ET) – NOR/FRA, SEN/IRQ
-    - cron: '50 23 26 6 *'   # Jun 27 00:00 UTC (20:00 ET) – CPV/KSA, URU/ESP
-    - cron: '50 2 27 6 *'    # Jun 27 03:00 UTC (23:00 ET) – EGY/IRN, NZL/BEL
-    - cron: '50 20 27 6 *'   # Jun 27 21:00 UTC (17:00 ET) – CRO/GHA, PAN/ENG
-    - cron: '20 23 27 6 *'   # Jun 27 23:30 UTC (19:30 ET) – COL/POR, DRC/UZB
-    - cron: '50 1 28 6 *'    # Jun 28 02:00 UTC (22:00 ET) – ALG/AUT, JOR/ARG
+    - cron: '40 18 24 6 *'   # Jun 24 19:00 UTC (15:00 ET) – BHI/QAT, SUI/CAN, 20 min before
+    - cron: '50 18 24 6 *'   # Jun 24 19:00 UTC (15:00 ET) – BHI/QAT, SUI/CAN, 10 min before
+    - cron: '40 21 24 6 *'   # Jun 24 22:00 UTC (18:00 ET) – MOR/HAI, SCO/BRA, 20 min before
+    - cron: '50 21 24 6 *'   # Jun 24 22:00 UTC (18:00 ET) – MOR/HAI, SCO/BRA, 10 min before
+    - cron: '40 0 25 6 *'    # Jun 25 01:00 UTC (21:00 ET) – CZE/MEX, RSA/KOR, 20 min before
+    - cron: '50 0 25 6 *'    # Jun 25 01:00 UTC (21:00 ET) – CZE/MEX, RSA/KOR, 10 min before
+    - cron: '40 19 25 6 *'   # Jun 25 20:00 UTC (16:00 ET) – ECU/GER, CUR/CIV, 20 min before
+    - cron: '50 19 25 6 *'   # Jun 25 20:00 UTC (16:00 ET) – ECU/GER, CUR/CIV, 10 min before
+    - cron: '40 22 25 6 *'   # Jun 25 23:00 UTC (19:00 ET) – JPN/SWE, TUN/NED, 20 min before
+    - cron: '50 22 25 6 *'   # Jun 25 23:00 UTC (19:00 ET) – JPN/SWE, TUN/NED, 10 min before
+    - cron: '40 1 26 6 *'    # Jun 26 02:00 UTC (22:00 ET) – TUR/USA, PAR/AUS, 20 min before
+    - cron: '50 1 26 6 *'    # Jun 26 02:00 UTC (22:00 ET) – TUR/USA, PAR/AUS, 10 min before
+    - cron: '40 18 26 6 *'   # Jun 26 19:00 UTC (15:00 ET) – NOR/FRA, SEN/IRQ, 20 min before
+    - cron: '50 18 26 6 *'   # Jun 26 19:00 UTC (15:00 ET) – NOR/FRA, SEN/IRQ, 10 min before
+    - cron: '40 23 26 6 *'   # Jun 27 00:00 UTC (20:00 ET) – CPV/KSA, URU/ESP, 20 min before
+    - cron: '50 23 26 6 *'   # Jun 27 00:00 UTC (20:00 ET) – CPV/KSA, URU/ESP, 10 min before
+    - cron: '40 2 27 6 *'    # Jun 27 03:00 UTC (23:00 ET) – EGY/IRN, NZL/BEL, 20 min before
+    - cron: '50 2 27 6 *'    # Jun 27 03:00 UTC (23:00 ET) – EGY/IRN, NZL/BEL, 10 min before
+    - cron: '40 20 27 6 *'   # Jun 27 21:00 UTC (17:00 ET) – CRO/GHA, PAN/ENG, 20 min before
+    - cron: '50 20 27 6 *'   # Jun 27 21:00 UTC (17:00 ET) – CRO/GHA, PAN/ENG, 10 min before
+    - cron: '10 23 27 6 *'   # Jun 27 23:30 UTC (19:30 ET) – COL/POR, DRC/UZB, 20 min before
+    - cron: '20 23 27 6 *'   # Jun 27 23:30 UTC (19:30 ET) – COL/POR, DRC/UZB, 10 min before
+    - cron: '40 1 28 6 *'    # Jun 28 02:00 UTC (22:00 ET) – ALG/AUT, JOR/ARG, 20 min before
+    - cron: '50 1 28 6 *'    # Jun 28 02:00 UTC (22:00 ET) – ALG/AUT, JOR/ARG, 10 min before
 
     # ── ROUND OF 32 → FINAL (Jun 28 – Jul 19) ───────────────────────────────
     # Standard knockout slots: 20:00, 23:00, 02:00 UTC (16:00/19:00/22:00 ET)
-    - cron: '50 19 28-30 6 *'   # Jun 28-30 20:00 UTC slot
-    - cron: '50 22 28-30 6 *'   # Jun 28-30 23:00 UTC slot
-    - cron: '50 1 29-31 6 *'    # Jun 29-30 02:00 UTC slot
-    - cron: '50 19 1-19 7 *'    # Jul 1-19 20:00 UTC slot
-    - cron: '50 22 1-19 7 *'    # Jul 1-19 23:00 UTC slot
-    - cron: '50 1 2-20 7 *'     # Jul 2-19 02:00 UTC slot
+    - cron: '40 19 28-30 6 *'   # Jun 28-30 20:00 UTC slot, 20 min before
+    - cron: '50 19 28-30 6 *'   # Jun 28-30 20:00 UTC slot, 10 min before
+    - cron: '40 22 28-30 6 *'   # Jun 28-30 23:00 UTC slot, 20 min before
+    - cron: '50 22 28-30 6 *'   # Jun 28-30 23:00 UTC slot, 10 min before
+    - cron: '40 1 29-31 6 *'    # Jun 29-30 02:00 UTC slot, 20 min before
+    - cron: '50 1 29-31 6 *'    # Jun 29-30 02:00 UTC slot, 10 min before
+    - cron: '40 19 1-19 7 *'    # Jul 1-19 20:00 UTC slot, 20 min before
+    - cron: '50 19 1-19 7 *'    # Jul 1-19 20:00 UTC slot, 10 min before
+    - cron: '40 22 1-19 7 *'    # Jul 1-19 23:00 UTC slot, 20 min before
+    - cron: '50 22 1-19 7 *'    # Jul 1-19 23:00 UTC slot, 10 min before
+    - cron: '40 1 2-20 7 *'     # Jul 2-19 02:00 UTC slot, 20 min before
+    - cron: '50 1 2-20 7 *'     # Jul 2-19 02:00 UTC slot, 10 min before
 
   workflow_dispatch:
     inputs:
       window_minutes:
         description: 'Submit picks for games kicking off within this many minutes'
         required: false
-        default: '20'
+        default: '25'
       dry_run:
         description: 'Dry run only (predict but do not submit)'
         required: false
@@ -100,7 +130,7 @@ jobs:
             --password "$SUPERBRU_PASSWORD" \
             --login-url "$LOGIN_URL" \
             --pool-url "$POOL_URL" \
-            --window-minutes "${{ github.event.inputs.window_minutes || '20' }}" \
+            --window-minutes "${{ github.event.inputs.window_minutes || '25' }}" \
             --pick-card-csv outputs/final_locked_picks/superbru_final_card.csv \
             --odds-lookup-window-minutes 90 \
             --headless \

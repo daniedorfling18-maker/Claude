@@ -1,21 +1,13 @@
 # Daily Superbru action items
 
-Generated: `2026-06-21T11:41:15.869108+00:00`
+Generated: `2026-06-21T11:53:38.156857+00:00`
 
 Notify: **yes**
 State changed: **yes**
 
-Score-change items: **3**
+Score-change items: **0**
 Oddspedia probability review items: **8**
 Oddspedia Superbru EV review items: **1**
-
-## Score changes to make in Superbru
-
-| Kickoff UTC | Match | Previous | New | EV loss | Leader delta | Reason |
-|---|---|---:|---:|---:|---:|---|
-| 2026-06-24T19:00:00Z | Switzerland vs Canada | 1-0 | 2-1 |  |  | daily robust card changed |
-| 2026-06-26T19:00:00Z | Norway vs France | 1-2 | 0-2 |  |  | daily robust card changed |
-| 2026-06-28T02:00:00Z | Algeria vs Austria | 0-1 | 1-2 |  |  | daily robust card changed |
 
 ## Oddspedia SmartBet probability review items
 

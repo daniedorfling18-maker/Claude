@@ -267,14 +267,19 @@ async def scrape(
     except Exception as exc:
         raise RuntimeError("Install: pip install playwright && python -m playwright install chrome") from exc
 
-    # Optional playwright-stealth integration
-    _stealth_fn = None
+    # Optional playwright-stealth integration (supports both 1.x stealth_async and 2.x Stealth class)
+    _stealth_obj = None
     try:
-        from playwright_stealth import stealth_async as _stealth_fn  # type: ignore[import]
-        print("playwright-stealth available; stealth patches will be applied per page.")
+        from playwright_stealth import Stealth  # type: ignore[import]
+        _stealth_obj = Stealth()
+        print("playwright-stealth 2.x available; stealth patches will be applied to context.")
     except ImportError:
-        print("playwright-stealth not installed; using built-in patches only.")
-        print("  Optional install: pip install playwright-stealth")
+        try:
+            from playwright_stealth import stealth_async as _stealth_obj  # type: ignore[import]
+            print("playwright-stealth 1.x available; stealth patches will be applied per page.")
+        except ImportError:
+            print("playwright-stealth not installed; using built-in patches only.")
+            print("  Optional install: pip install playwright-stealth")
 
     diag_dir = Path(args.diagnostics_dir)
     diag_dir.mkdir(parents=True, exist_ok=True)
@@ -286,6 +291,7 @@ async def scrape(
         "headless": False,
         "locale": "en-GB",
         "viewport": {"width": 1440, "height": 900},
+        "ignore_https_errors": True,
         "user_agent": (
             "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
             "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
@@ -300,9 +306,18 @@ async def scrape(
         # Patch navigator.webdriver for all pages born in this context
         await context.add_init_script(_WEBDRIVER_PATCH)
 
+        # Apply playwright-stealth 2.x (context-level) or 1.x (page-level later)
+        if _stealth_obj is not None:
+            try:
+                await _stealth_obj.apply_stealth_async(context)
+                print("playwright-stealth applied to context.")
+            except AttributeError:
+                pass  # 1.x callable — will be applied per page below
+
         page = context.pages[0] if context.pages else await context.new_page()
-        if _stealth_fn:
-            await _stealth_fn(page)
+        # playwright-stealth 1.x fallback: apply per page
+        if _stealth_obj is not None and callable(_stealth_obj) and not hasattr(_stealth_obj, "apply_stealth_async"):
+            await _stealth_obj(page)
 
         print(f"Opening seed page: {args.seed_url}")
         try:

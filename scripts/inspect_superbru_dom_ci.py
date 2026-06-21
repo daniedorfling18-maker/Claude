@@ -99,7 +99,7 @@ def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(description="Inspect SuperBru pick-entry DOM via Playwright (login-capable).")
     p.add_argument("--email", required=True, help="SuperBru login email")
     p.add_argument("--password", required=True, help="SuperBru login password")
-    p.add_argument("--login-url", default="https://www.superbru.com/login.php")
+    p.add_argument("--login-url", default="https://www.superbru.com/login")
     p.add_argument("--pool-url", default="https://www.superbru.com/worldcup_predictor/pool_view.php?t=1296&p=13236623&g=32&view=matches")
     p.add_argument("--home-team", default="Spain")
     p.add_argument("--away-team", default="Saudi Arabia")
@@ -158,6 +158,14 @@ async def run(args: argparse.Namespace) -> dict:
                 break
             except Exception:
                 continue
+
+        # Dismiss the "Your privacy choices have been saved" success modal if it appeared
+        try:
+            await page.click("button[aria-label='Close success modal']", timeout=2000)
+            print("  Dismissed consent success modal.")
+            await page.wait_for_timeout(1000)
+        except Exception:
+            pass
 
         await page.screenshot(path=str(out_dir / f"{ts}_login_page.png"))
         login_html = await page.content()

@@ -4,6 +4,20 @@ on:
   schedule:
     # All times UTC; fires 10 min before each kickoff. window_minutes=20 covers cron delays.
 
+    # ── ROUND 2 remaining (Jun 21-24) ────────────────────────────────────────
+    - cron: '50 15 21 6 *'   # Jun 21 16:00 UTC (12:00 ET) – ESP/KSA
+    - cron: '50 18 21 6 *'   # Jun 21 19:00 UTC (15:00 ET) – BEL/IRN
+    - cron: '50 21 21 6 *'   # Jun 21 22:00 UTC (18:00 ET) – URU/CPV
+    - cron: '50 0 22 6 *'    # Jun 22 01:00 UTC (21:00 ET) – NZL/EGY
+    - cron: '50 16 22 6 *'   # Jun 22 17:00 UTC (13:00 ET) – ARG/AUT
+    - cron: '50 20 22 6 *'   # Jun 22 21:00 UTC (17:00 ET) – FRA/IRQ
+    - cron: '50 23 22 6 *'   # Jun 23 00:00 UTC (20:00 ET) – NOR/SEN
+    - cron: '50 2 23 6 *'    # Jun 23 03:00 UTC (23:00 ET) – JOR/ALG
+    - cron: '50 16 23 6 *'   # Jun 23 17:00 UTC (13:00 ET) – POR/UZB
+    - cron: '50 19 23 6 *'   # Jun 23 20:00 UTC (16:00 ET) – ENG/GHA
+    - cron: '50 22 23 6 *'   # Jun 23 23:00 UTC (19:00 ET) – PAN/CRO
+    - cron: '50 1 24 6 *'    # Jun 24 02:00 UTC (22:00 ET) – COL/DRC
+
     # ── ROUND 3 (Jun 24-28) ──────────────────────────────────────────────────
     - cron: '50 18 24 6 *'   # Jun 24 19:00 UTC (15:00 ET) – BHI/QAT, SUI/CAN
     - cron: '50 21 24 6 *'   # Jun 24 22:00 UTC (18:00 ET) – MOR/HAI, SCO/BRA

@@ -21,7 +21,7 @@ from datetime import datetime, timezone, timedelta
 from pathlib import Path
 
 
-# ── JavaScript helpers ────────────────────────────────────────────────────────────────────────────
+# ── JavaScript helpers ────────────────────────────────────────────────────────
 
 FIND_SUBTABS_JS = r"""
 () => Array.from(document.querySelectorAll('[data-brutip][data-bru-tab]')).map(el => ({
@@ -41,7 +41,7 @@ CLICK_TAB_JS = r"""
 
 EXTRACT_MATCH_JS = r"""
 () => {
-  // ── Kickoff time: try many selectors ─────────────────────────────────────────────────
+  // ── Kickoff time: try many selectors ──────────────────────────────────────
   let kickoffText = null, kickoffTs = null;
   const candidates = Array.from(document.querySelectorAll(
     '[class*=kickoff],[class*=kick-off],[class*=match-time],[class*=fixture-time],' +
@@ -66,7 +66,7 @@ EXTRACT_MATCH_JS = r"""
     if (m) kickoffText = m[0];
   }
 
-  // ── Score inputs ────────────────────────────────────────────────────────────────────
+  // ── Score inputs ──────────────────────────────────────────────────────────
   const hi = document.querySelector('input.soccer-left-score');
   const ai = document.querySelector('input.soccer-right-score');
 
@@ -82,7 +82,7 @@ EXTRACT_MATCH_JS = r"""
 """
 
 
-# ── Kickoff time parsing ───────────────────────────────────────────────────────────────────
+# ── Kickoff time parsing ──────────────────────────────────────────────────────
 
 def parse_kickoff(text: str | None, ts: str | None, ref: datetime) -> datetime | None:
     """Attempt to parse a kickoff datetime from SuperBru DOM text/timestamp into UTC."""
@@ -121,7 +121,7 @@ def parse_kickoff(text: str | None, ts: str | None, ref: datetime) -> datetime |
     return None
 
 
-# ── Claude prediction ─────────────────────────────────────────────────────────────────────────
+# ── Claude prediction ─────────────────────────────────────────────────────────
 
 def predict_pick(home: str, away: str) -> str:
     """Call Claude to predict the score. Returns 'H-A' string."""
@@ -155,7 +155,7 @@ def predict_pick(home: str, away: str) -> str:
     raise ValueError(f"Unexpected model response: {raw!r}")
 
 
-# ── SuperBru login ────────────────────────────────────────────────────────────────────────────
+# ── SuperBru login ────────────────────────────────────────────────────────────
 
 async def login(page, args) -> bool:
     await page.goto(args.login_url, wait_until="domcontentloaded", timeout=30000)
@@ -190,7 +190,7 @@ async def login(page, args) -> bool:
     return "login" not in page.url.lower()
 
 
-# ── Submit via the tested submit script ───────────────────────────────────────────────────
+# ── Submit via the tested submit script ───────────────────────────────────────
 
 async def submit_pick(args, home_team: str, away_team: str, pick: str, out_dir: Path) -> dict:
     """Load submit_superbru_pick_cdp and call its run() to submit a single pick."""
@@ -223,7 +223,7 @@ async def submit_pick(args, home_team: str, away_team: str, pick: str, out_dir: 
     return await mod.run(submit_args)
 
 
-# ── Main run ──────────────────────────────────────────────────────────────────────────────────
+# ── Main run ──────────────────────────────────────────────────────────────────
 
 async def run(args) -> dict:
     try:
@@ -239,7 +239,7 @@ async def run(args) -> dict:
     out_dir = Path(args.out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    # ── Phase 1: scan all fixtures ─────────────────────────────────────────────────────────────
+    # ── Phase 1: scan all fixtures ────────────────────────────────────────────
     games_to_submit: list[dict] = []
 
     async with async_playwright() as pw:
@@ -323,7 +323,7 @@ async def run(args) -> dict:
 
         await browser.close()
 
-    # ── Phase 2: predict + submit each game ───────────────────────────────────────────
+    # ── Phase 2: predict + submit each game ───────────────────────────────────
     for entry in games_to_submit:
         home_team = entry["home_team"]
         away_team = entry["away_team"]

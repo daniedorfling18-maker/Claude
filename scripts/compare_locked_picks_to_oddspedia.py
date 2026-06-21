@@ -28,6 +28,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--locked-picks-csv", default="outputs/final_locked_picks/superbru_final_card.csv")
     parser.add_argument("--oddspedia-grid-csv", default="inputs/smartbet_grids/oddspedia_probability_grids_auto.csv")
     parser.add_argument("--oddspedia-summary-csv", default="inputs/smartbet_grids/oddspedia_probability_summary_auto.csv")
+    parser.add_argument("--markets-summary-csv", default="inputs/smartbet_grids/oddspedia_markets_summary_auto.csv")
     parser.add_argument("--out-csv", default="outputs/oddspedia_pick_validation/oddspedia_pick_comparison.csv")
     parser.add_argument("--out-json", default="outputs/oddspedia_pick_validation/oddspedia_pick_comparison_summary.json")
     parser.add_argument("--min-prob-gap-review", type=float, default=2.0)
@@ -116,14 +117,25 @@ def load_locked(path: Path) -> pd.DataFrame:
     return frame
 
 
+def market_consensus_direction(p_home: float | None, p_draw: float | None, p_away: float | None) -> str:
+    vals = [(p_home, "home"), (p_draw, "draw"), (p_away, "away")]
+    valid = [(v, lbl) for v, lbl in vals if v is not None]
+    if not valid:
+        return "unknown"
+    return max(valid, key=lambda x: x[0])[1]
+
+
 def compare(args: argparse.Namespace) -> tuple[pd.DataFrame, dict[str, Any]]:
     locked = load_locked(Path(args.locked_picks_csv))
     grid = pd.read_csv(args.oddspedia_grid_csv).fillna("")
     summary = pd.read_csv(args.oddspedia_summary_csv).fillna("") if Path(args.oddspedia_summary_csv).exists() else pd.DataFrame()
+    markets = pd.read_csv(args.markets_summary_csv).fillna("") if Path(args.markets_summary_csv).exists() else pd.DataFrame()
     if "match_id" not in grid.columns:
         grid["match_id"] = grid.apply(lambda r: match_key(r.get("home_team"), r.get("away_team")), axis=1)
     if not summary.empty and "match_id" not in summary.columns:
         summary["match_id"] = summary.apply(lambda r: match_key(r.get("home_team"), r.get("away_team")), axis=1)
+    if not markets.empty and "match_id" not in markets.columns:
+        markets["match_id"] = markets.apply(lambda r: match_key(r.get("home_team"), r.get("away_team")), axis=1)
 
     pick_col = find_pick_column(locked)
     rows: list[dict[str, Any]] = []
@@ -137,6 +149,7 @@ def compare(args: argparse.Namespace) -> tuple[pd.DataFrame, dict[str, Any]]:
         if g.empty and home and away:
             g = grid[(grid.get("home_team", "").astype(str).eq(home)) & (grid.get("away_team", "").astype(str).eq(away))].copy()
         srow = summary[summary["match_id"].astype(str).eq(mid)].head(1) if not summary.empty else pd.DataFrame()
+        mrow = markets[markets["match_id"].astype(str).eq(mid)].head(1) if not markets.empty else pd.DataFrame()
 
         top = best_exact_rows(g, 3)
         p_locked = probability_for_score(g, locked_pick)
@@ -163,6 +176,16 @@ def compare(args: argparse.Namespace) -> tuple[pd.DataFrame, dict[str, Any]]:
             modal_score = txt(sr.get("modal_correct_score"))
             modal_prob = txt(sr.get("modal_correct_score_pct"))
 
+        # Market 100 (1X2) direct probabilities from markets summary
+        market_home = market_draw = market_away = None
+        market_consensus = "unknown"
+        if not mrow.empty:
+            mr = mrow.iloc[0]
+            market_home = to_float(mr.get("p_home_win"))
+            market_draw = to_float(mr.get("p_draw"))
+            market_away = to_float(mr.get("p_away_win"))
+            market_consensus = market_consensus_direction(market_home, market_draw, market_away)
+
         action = "keep"
         reason = "locked pick available in grid"
         if g.empty:
@@ -171,6 +194,13 @@ def compare(args: argparse.Namespace) -> tuple[pd.DataFrame, dict[str, Any]]:
         elif p_locked is None:
             action = "review_missing_locked_score"
             reason = "locked score not present in exact 0-3 grid"
+        elif (
+            market_consensus != "unknown"
+            and locked_outcome != "unknown"
+            and locked_outcome != market_consensus
+        ):
+            action = "market_1x2_conflict"
+            reason = f"locked pick outcome ({locked_outcome}) conflicts with 1X2 market consensus ({market_consensus})"
         elif prob_gap is not None and prob_gap >= args.min_prob_gap_strong and same_outcome:
             action = "strong_same_outcome_review"
             reason = "higher-probability same-outcome scoreline exists"
@@ -207,6 +237,10 @@ def compare(args: argparse.Namespace) -> tuple[pd.DataFrame, dict[str, Any]]:
                 "winner_away_pct": winner_away,
                 "modal_correct_score": modal_score,
                 "modal_correct_score_pct": modal_prob,
+                "market_p_home_win": market_home,
+                "market_p_draw": market_draw,
+                "market_p_away_win": market_away,
+                "market_consensus_direction": market_consensus,
                 "action": action,
                 "reason": reason,
             }

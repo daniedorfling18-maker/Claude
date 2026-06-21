@@ -14,6 +14,7 @@ import pandas as pd
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Build score-shape features from Oddspedia correct-score grids.")
     parser.add_argument("--oddspedia-grid-csv", default="inputs/smartbet_grids/oddspedia_probability_grids_auto.csv")
+    parser.add_argument("--markets-summary-csv", default="inputs/smartbet_grids/oddspedia_markets_summary_auto.csv")
     parser.add_argument("--out-csv", default="inputs/smartbet_grids/oddspedia_score_shape_features.csv")
     parser.add_argument("--out-summary-json", default="outputs/oddspedia_probability_extract/oddspedia_score_shape_features_summary.json")
     return parser
@@ -137,6 +138,28 @@ def main() -> int:
     args = build_parser().parse_args()
     grid = load_grid(args.oddspedia_grid_csv)
     features = build_features(grid)
+
+    # Join market 100 (1X2) direct probabilities and compare against grid-derived direction
+    markets_path = Path(args.markets_summary_csv)
+    if not features.empty and markets_path.exists():
+        try:
+            mkts = pd.read_csv(markets_path).fillna("")
+            if "match_id" not in mkts.columns:
+                mkts["match_id"] = mkts.apply(
+                    lambda r: f"{txt(r.get('home_team')).lower()}-{txt(r.get('away_team')).lower()}", axis=1
+                )
+            keep = ["match_id", "p_home_win", "p_draw", "p_away_win"]
+            mkts = mkts[[c for c in keep if c in mkts.columns]]
+            mkts = mkts.rename(columns={"p_home_win": "market_p_home_win", "p_draw": "market_p_draw", "p_away_win": "market_p_away_win"})
+            features = features.merge(mkts, on="match_id", how="left")
+            for col in ("market_p_home_win", "market_p_draw", "market_p_away_win"):
+                features[col] = pd.to_numeric(features[col], errors="coerce")
+            features["market_vs_grid_home_diff_pct"] = features["market_p_home_win"] - features["home_win_probability_from_grid_pct"]
+            features["market_vs_grid_draw_diff_pct"] = features["market_p_draw"] - features["draw_probability_from_grid_pct"]
+            features["market_vs_grid_away_diff_pct"] = features["market_p_away_win"] - features["away_win_probability_from_grid_pct"]
+        except Exception:
+            pass
+
     out_csv = Path(args.out_csv)
     out_json = Path(args.out_summary_json)
     out_csv.parent.mkdir(parents=True, exist_ok=True)
@@ -145,6 +168,7 @@ def main() -> int:
     payload = {
         "generated_at_utc": datetime.now(timezone.utc).isoformat(),
         "oddspedia_grid_csv": args.oddspedia_grid_csv,
+        "markets_summary_csv": args.markets_summary_csv,
         "match_count": int(len(features)),
         "out_csv": str(out_csv),
         "warning": "Missing or empty grid CSV. Wrote empty output." if grid.empty else "",

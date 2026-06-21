@@ -121,6 +121,29 @@ _CLICK_JS = r"""
 }
 """
 
+# Clicks "Goals", "Over/Under", "BTTS" tabs to trigger deferred XHR market payloads
+_CLICK_MARKET_TABS_JS = r"""
+() => {
+  const wanted = [
+    'goals', 'over/under', 'over under', 'both teams to score', 'btts',
+    'total goals', 'asian handicap', 'draw no bet', 'double chance'
+  ];
+  const selectors = 'a, button, [role="tab"], [role="button"], nav li, li, .tab, .tabs__item';
+  const nodes = Array.from(document.querySelectorAll(selectors));
+  const clicked = [];
+  const seen = new Set();
+  for (const node of nodes) {
+    const text = (node.innerText || node.textContent || '').toLowerCase().trim();
+    if (!text || text.length > 60 || seen.has(text)) continue;
+    if (wanted.some(w => text.includes(w))) {
+      seen.add(text);
+      try { node.scrollIntoView({block: 'center'}); node.click(); clicked.push(text); } catch(e) {}
+    }
+  }
+  return clicked.slice(0, 10);
+}
+"""
+
 
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -139,6 +162,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--timeout-ms", type=int, default=90000)
     p.add_argument("--cf-wait-ms", type=int, default=30000, help="Max wait for Cloudflare auto-resolve (ms)")
     p.add_argument("--max-matches", type=int, default=0)
+    p.add_argument("--market-tab-wait-ms", type=int, default=3000, help="Wait after clicking BTTS/OU market tabs (ms)")
     p.add_argument("--no-chrome-channel", action="store_true", help="Use bundled Chromium instead of installed Chrome")
     p.add_argument("--manual-on-missing", action="store_true")
     return p
@@ -571,6 +595,16 @@ async def scrape_match(
                 if state.get("hasCorrectScore") or state.get("hasAnyProbs"):
                     current_url = txt(state.get("currentUrl"))
                     source_name = txt(state.get("sourceName"))
+
+                    # Phase 2: click market tabs (Goals, BTTS, Over/Under) to trigger deferred XHR payloads
+                    xhr_count_before = len(_xhr_markets)
+                    clicked_tabs = await page.evaluate(_CLICK_MARKET_TABS_JS)
+                    if clicked_tabs:
+                        print(f"  {label}: market tabs clicked: {clicked_tabs[:3]}")
+                        await page.wait_for_timeout(args.market_tab_wait_ms)
+                        n_new_xhr = len(_xhr_markets) - xhr_count_before
+                        if n_new_xhr:
+                            print(f"  {label}: +{n_new_xhr} XHR payloads from market tabs")
 
                     # Inject winner probs for correct-score parser
                     m100 = probs.get("100")

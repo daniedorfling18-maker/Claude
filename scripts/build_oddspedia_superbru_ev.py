@@ -26,6 +26,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Calculate Superbru expected points for Oddspedia correct-score candidates.")
     parser.add_argument("--locked-picks-csv", default="outputs/final_locked_picks/superbru_final_card.csv")
     parser.add_argument("--oddspedia-grid-csv", default="inputs/smartbet_grids/oddspedia_probability_grids_auto.csv")
+    parser.add_argument("--markets-summary-csv", default="inputs/smartbet_grids/oddspedia_markets_summary_auto.csv")
     parser.add_argument("--out-by-score-csv", default="outputs/oddspedia_pick_validation/oddspedia_superbru_ev_by_score.csv")
     parser.add_argument("--out-recommendations-csv", default="outputs/oddspedia_pick_validation/oddspedia_ev_recommendations.csv")
     parser.add_argument("--out-summary-json", default="outputs/oddspedia_pick_validation/oddspedia_superbru_ev_summary.json")
@@ -220,9 +221,16 @@ def candidate_scores(grid: pd.DataFrame) -> list[str]:
     return [txt(v) for v in exact["score_key"].tolist() if re.fullmatch(r"\d+-\d+", txt(v))]
 
 
+def market_consensus_direction(p_home: float | None, p_draw: float | None, p_away: float | None) -> str:
+    vals = [(p_home, "home"), (p_draw, "draw"), (p_away, "away")]
+    valid = [(v, lbl) for v, lbl in vals if v is not None]
+    return max(valid, key=lambda x: x[0])[1] if valid else "unknown"
+
+
 def build_outputs(args: argparse.Namespace) -> tuple[pd.DataFrame, pd.DataFrame, dict[str, Any]]:
     locked = ensure_match_id(load_csv(args.locked_picks_csv))
     grid = ensure_match_id(load_csv(args.oddspedia_grid_csv))
+    markets = ensure_match_id(load_csv(args.markets_summary_csv))
     if locked.empty or grid.empty:
         payload = {
             "generated_at_utc": datetime.now(timezone.utc).isoformat(),
@@ -245,6 +253,14 @@ def build_outputs(args: argparse.Namespace) -> tuple[pd.DataFrame, pd.DataFrame,
         match_grid = grid[grid["match_id"].astype(str).eq(mid)].copy()
         if match_grid.empty and home and away:
             match_grid = grid[(grid.get("home_team", "").astype(str).eq(home)) & (grid.get("away_team", "").astype(str).eq(away))].copy()
+        mframe = markets[markets["match_id"].astype(str).eq(mid)] if not markets.empty else pd.DataFrame()
+        market_p_home = market_p_draw = market_p_away = None
+        if not mframe.empty:
+            mr = mframe.iloc[0]
+            market_p_home = to_float(mr.get("p_home_win"))
+            market_p_draw = to_float(mr.get("p_draw"))
+            market_p_away = to_float(mr.get("p_away_win"))
+        m_consensus = market_consensus_direction(market_p_home, market_p_draw, market_p_away)
 
         candidates = candidate_scores(match_grid)
         match_score_rows: list[dict[str, Any]] = []
@@ -314,6 +330,10 @@ def build_outputs(args: argparse.Namespace) -> tuple[pd.DataFrame, pd.DataFrame,
                 "best_ev_expected_points": best_ev,
                 "ev_gap_vs_locked": ev_gap,
                 "same_outcome_flag": same_outcome,
+                "market_p_home_win": market_p_home,
+                "market_p_draw": market_p_draw,
+                "market_p_away_win": market_p_away,
+                "market_consensus_direction": m_consensus,
                 "review_flag": review_flag,
                 "review_level": review_level,
                 "review_reason": review_reason,

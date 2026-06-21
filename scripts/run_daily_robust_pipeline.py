@@ -5,7 +5,7 @@ import json
 import os
 import subprocess
 import sys
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
@@ -27,6 +27,16 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Use committed/cached market odds files and do not call The Odds API.",
     )
+    parser.add_argument(
+        "--match-odds-only",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Fetch odds only for the immediate pre-match kickoff window. Defaults to true.",
+    )
+    parser.add_argument("--match-window-before-minutes", type=int, default=10)
+    parser.add_argument("--match-window-after-minutes", type=int, default=30)
+    parser.add_argument("--match-commence-from", default="")
+    parser.add_argument("--match-commence-to", default="")
     parser.add_argument(
         "--run-fresh-final-simulation",
         action="store_true",
@@ -78,6 +88,31 @@ def market_odds_cache_available() -> bool:
     )
 
 
+def iso_z(dt: datetime) -> str:
+    return dt.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
+
+
+def resolve_match_odds_scope(args: argparse.Namespace) -> dict[str, object]:
+    if not args.match_odds_only:
+        return {"mode": "full_tournament_odds", "commence_from": "", "commence_to": ""}
+
+    if args.match_commence_from and args.match_commence_to:
+        return {
+            "mode": "explicit_match_window",
+            "commence_from": args.match_commence_from,
+            "commence_to": args.match_commence_to,
+        }
+
+    now = datetime.now(timezone.utc)
+    return {
+        "mode": "rolling_pre_match_window",
+        "commence_from": iso_z(now - timedelta(minutes=args.match_window_before_minutes)),
+        "commence_to": iso_z(now + timedelta(minutes=args.match_window_after_minutes)),
+        "window_before_minutes": args.match_window_before_minutes,
+        "window_after_minutes": args.match_window_after_minutes,
+    }
+
+
 def main() -> int:
     args = build_parser().parse_args()
     snapshot_id = args.snapshot_id or datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
@@ -89,6 +124,7 @@ def main() -> int:
     final_simulation_dir: str | None = None
     final_simulation_cache_reused = False
     predictions_for_final_simulation: str | None = None
+    market_odds_scope = resolve_match_odds_scope(args)
 
     if not args.skip_market_odds_fetch and not env.get("THE_ODDS_API_KEY"):
         raise EnvironmentError("THE_ODDS_API_KEY is not set. Add it as a GitHub Actions repository secret.")
@@ -120,25 +156,25 @@ def main() -> int:
             )
         print("Skipping The Odds API fetch and using committed cached market odds files.")
     else:
-        run(
-            [
-                sys.executable,
-                "scripts/fetch_market_odds_theoddsapi.py",
-                "--sport",
-                args.sport,
-                "--regions",
-                args.regions,
-                "--markets",
-                args.markets,
-                "--out-json",
-                "outputs/market_odds/worldcup_market_odds_raw.json",
-                "--out-csv",
-                "outputs/market_odds/worldcup_market_odds_flat.csv",
-                "--allow-stale-on-failure",
-                "--allow-empty-on-failure",
-            ],
-            env=env,
-        )
+        fetch_cmd = [
+            sys.executable,
+            "scripts/fetch_market_odds_theoddsapi.py",
+            "--sport", args.sport,
+            "--regions", args.regions,
+            "--markets", args.markets,
+            "--out-json", "outputs/market_odds/worldcup_market_odds_raw.json",
+            "--out-csv", "outputs/market_odds/worldcup_market_odds_flat.csv",
+            "--allow-stale-on-failure",
+            "--allow-empty-on-failure",
+        ]
+        if args.match_odds_only:
+            fetch_cmd.extend(["--commence-from", str(market_odds_scope["commence_from"])])
+            fetch_cmd.extend(["--commence-to", str(market_odds_scope["commence_to"])])
+            print("Fetching market odds for pre-match window only:")
+            print(json.dumps(market_odds_scope, indent=2))
+        else:
+            print("Fetching full tournament odds because --no-match-odds-only was supplied.")
+        run(fetch_cmd, env=env)
 
     run(
         [
@@ -278,6 +314,7 @@ def main() -> int:
         "daily_summary": "outputs/daily_robust_card/daily_robust_summary.json",
         "market_history_summary": "outputs/market_odds_history/market_odds_history_summary.json",
         "market_odds_fetch_skipped": bool(args.skip_market_odds_fetch),
+        "market_odds_scope": market_odds_scope,
         "final_simulation_dir": final_simulation_dir,
         "predictions_for_final_simulation": predictions_for_final_simulation,
         "final_simulation_status": final_simulation_status,

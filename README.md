@@ -101,9 +101,14 @@ Repeated result refreshes are safe — the ratings store tracks applied match ID
 
 ## Daily Production Workflow
 
-The GitHub Actions workflow `.github/workflows/daily-superbru-robust.yml` runs **twice daily** — **07:00 SAST** (`05:00 UTC`, morning card) and **19:00 SAST** (`17:00 UTC`, evening refresh):
+Two workflows keep the committed card fresh:
 
-1. Fetches market odds from The Odds API (scheduled runs always fetch; manual runs use cached odds unless `refresh_market_odds=true`)
+- **`.github/workflows/refresh-locked-superbru-card.yml`** runs **twice daily** (06:05 and 14:05 UTC = 08:05 / 16:05 SAST). It rebuilds the committed locked-card CSV only, skipping the expensive final-leader simulation by default. This is the routine card refresh.
+- **`.github/workflows/daily-superbru-robust.yml`** is the full robust pipeline (market-odds validation, Oddspedia overlay, score-change notification, final-leader simulation). Its schedule is disabled — run it on demand via `workflow_dispatch` when you need the complete card rebuild. Scheduled refreshes go through the lighter workflow above.
+
+The full robust pipeline:
+
+1. Fetches market odds from The Odds API (uses cached odds unless `refresh_market_odds=true`)
 2. Builds the daily Superbru card
 3. Runs the Oddspedia SmartBet overlay if a captured grid exists
 4. Writes the score-change notification report

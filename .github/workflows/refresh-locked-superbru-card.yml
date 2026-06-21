@@ -1,0 +1,129 @@
+name: Refresh Locked Superbru Card
+
+on:
+  schedule:
+    # Twice daily UTC refresh. This updates the committed locked-card CSV only;
+    # Auto Pick remains the scheduled browser submitter.
+    - cron: '5 6 * * *'    # 08:05 SAST
+    - cron: '5 14 * * *'   # 16:05 SAST
+  workflow_dispatch:
+    inputs:
+      refresh_market_odds:
+        description: "Call The Odds API during refresh. Leave off by default to protect API credits."
+        type: boolean
+        default: false
+      skip_final_simulation:
+        description: "Skip expensive final leader simulation"
+        type: boolean
+        default: true
+      snapshot_id:
+        description: "Optional snapshot id, e.g. 20260621T060500Z"
+        type: string
+        required: false
+        default: ""
+
+permissions:
+  contents: write
+  actions: read
+
+concurrency:
+  group: refresh-locked-superbru-card
+  cancel-in-progress: false
+
+jobs:
+  refresh-locked-card:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Capture previous robust card
+        run: |
+          mkdir -p outputs/daily_robust_card
+          if [ -f outputs/daily_robust_card/daily_robust_superbru_card.csv ]; then
+            cp outputs/daily_robust_card/daily_robust_superbru_card.csv outputs/daily_robust_card/previous_superbru_card.csv
+          fi
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e .
+
+      - name: Refresh locked card outputs
+        env:
+          THE_ODDS_API_KEY: ${{ secrets.THE_ODDS_API_KEY }}
+          PYTHONPATH: src
+        run: |
+          SNAPSHOT_ID="${{ inputs.snapshot_id }}"
+          SKIP_FLAG="--skip-final-simulation"
+          MARKET_ODDS_FLAG="--skip-market-odds-fetch"
+
+          if [ "${{ inputs.skip_final_simulation }}" = "false" ]; then
+            SKIP_FLAG=""
+          fi
+          if [ "${{ inputs.refresh_market_odds }}" = "true" ]; then
+            MARKET_ODDS_FLAG=""
+          fi
+
+          if [ -n "$SNAPSHOT_ID" ]; then
+            python scripts/run_daily_robust_pipeline.py --snapshot-id "$SNAPSHOT_ID" $SKIP_FLAG $MARKET_ODDS_FLAG
+          else
+            python scripts/run_daily_robust_pipeline.py $SKIP_FLAG $MARKET_ODDS_FLAG
+          fi
+
+      - name: Validate locked card exists
+        run: |
+          test -s outputs/final_locked_picks/superbru_final_card.csv
+          python - <<'PY'
+          import csv
+          from pathlib import Path
+          path = Path('outputs/final_locked_picks/superbru_final_card.csv')
+          rows = list(csv.DictReader(path.open(encoding='utf-8-sig')))
+          if not rows:
+              raise SystemExit('Locked SuperBru card is empty.')
+          print(f'Locked SuperBru card rows: {len(rows)}')
+          print('Last fixture:', rows[-1])
+          PY
+
+      - name: Upload refresh outputs
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: refresh-locked-superbru-card
+          path: |
+            outputs/market_odds/*.csv
+            outputs/market_odds/*.json
+            outputs/market_odds_validation/*.csv
+            outputs/market_odds_validation/*.json
+            outputs/market_odds_history/*.csv
+            outputs/market_odds_history/*.json
+            outputs/component_validation/*.csv
+            outputs/component_validation/*.json
+            outputs/final_locked_picks/*.csv
+            outputs/final_locked_picks/*.json
+            outputs/daily_robust_card/*.csv
+            outputs/daily_robust_card/*.json
+            outputs/daily_robust_card/*.md
+            outputs/final_leader_decision_daily_robust/**/*.csv
+            outputs/final_leader_decision_daily_robust/**/*.json
+          if-no-files-found: warn
+          retention-days: 7
+
+      - name: Commit refreshed locked card outputs
+        uses: stefanzweifel/git-auto-commit-action@v5
+        with:
+          commit_message: Refresh locked SuperBru card
+          file_pattern: >-
+            outputs/market_odds outputs/market_odds_validation outputs/market_odds_history
+            outputs/component_validation outputs/final_locked_picks outputs/daily_robust_card
+            outputs/final_leader_decision_daily_robust

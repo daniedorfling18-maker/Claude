@@ -82,10 +82,13 @@ _EXTRACT_JS = r"""
     return null;
   }
   const found = getEvent();
+  // Extract event_id from state.event.event.id regardless of probabilities presence
+  let eventId = null;
+  try { eventId = window.__NUXT__?.state?.event?.event?.id || null; } catch(e) {}
   if (!found) {
     return {
       sourceName: '', probabilities: null, marketIds: [],
-      hasCorrectScore: false, hasAnyProbs: false,
+      hasCorrectScore: false, hasAnyProbs: false, eventId,
       currentUrl: window.location.href, title: document.title,
       bodyText: document.body ? document.body.innerText.slice(0, 1000) : ''
     };
@@ -98,10 +101,28 @@ _EXTRACT_JS = r"""
     marketIds: Object.keys(probs || {}),
     hasCorrectScore: !!(probs?.['800']?.probabilities),
     hasAnyProbs: !!(probs && Object.keys(probs).length > 0),
+    eventId,
     currentUrl: window.location.href,
     title: document.title,
     bodyText: document.body ? document.body.innerText.slice(0, 1000) : ''
   };
+}
+"""
+
+# Fetches BTTS (group 11) and Total Goals / OU (group 4) odds via browser fetch().
+# Called as: page.evaluate(_FETCH_ODDS_JS, event_id)
+_FETCH_ODDS_JS = """
+async (eventId) => {
+  async function fetchGroup(gid) {
+    try {
+      const url = `/api/v1/getMatchMaxOddsByGroup?matchId=${eventId}&inplay=0&marketGroupId=${gid}&geoCode=US&geoState=&language=en`;
+      const r = await fetch(url);
+      const j = await r.json();
+      return j?.data || null;
+    } catch(e) { return null; }
+  }
+  const [btts, ou] = await Promise.all([fetchGroup(11), fetchGroup(4)]);
+  return { btts, ou };
 }
 """
 
@@ -200,6 +221,73 @@ def slugify(v: Any) -> str:
 def safe_name(v: Any) -> str:
     t = re.sub(r"[^A-Za-z0-9_.-]+", "_", txt(v)).strip("_")
     return t[:120] or "match"
+
+
+def devig_two(o1: float | None, o2: float | None) -> tuple[float | None, float | None]:
+    """Multiplicative (normalise) de-vig of two decimal-odds values."""
+    if o1 is None or o2 is None or o1 <= 0 or o2 <= 0:
+        return None, None
+    p1, p2 = 1 / o1, 1 / o2
+    total = p1 + p2
+    if total <= 0:
+        return None, None
+    return round(p1 / total * 100, 2), round(p2 / total * 100, 2)
+
+
+def _odds_val(entry: dict, key: str) -> float | None:
+    return to_float((entry.get(key) or {}).get("odds_value"))
+
+
+def parse_odds_markets(raw: dict | None) -> dict[str, Any]:
+    """
+    Parse the raw response from _FETCH_ODDS_JS into a flat dict of de-vigged
+    probability fields.
+
+    BTTS keys:  p_btts_yes, p_btts_no
+    OU keys:    p_over_1_5, p_under_1_5, p_over_2_5, p_under_2_5,
+                p_over_3_5, p_under_3_5, p_over_4_5, p_under_4_5
+    """
+    if not raw:
+        return {}
+    result: dict[str, Any] = {}
+
+    # ---- BTTS (group 11, market 1100) ----
+    btts_data = raw.get("btts") or {}
+    btts_market = (btts_data.get("odds") or {}).get("1100") or {}
+    btts_odds = btts_market.get("odds") or {}
+    o1 = _odds_val(btts_odds, "o1")
+    o2 = _odds_val(btts_odds, "o2")
+    p_yes, p_no = devig_two(o1, o2)
+    if p_yes is not None:
+        result["p_btts_yes"] = p_yes
+        result["p_btts_no"] = p_no
+
+    # ---- Total Goals / OU (group 4, market 401) ----
+    ou_data = raw.get("ou") or {}
+    ou_market = (ou_data.get("odds") or {}).get("401") or {}
+    lines: list[dict] = []
+    if ou_market.get("main"):
+        lines.append(ou_market["main"])
+    if isinstance(ou_market.get("alternative"), list):
+        lines.extend(ou_market["alternative"])
+
+    for entry in lines:
+        line_name = txt(entry.get("name_en") or entry.get("name"))
+        if not re.fullmatch(r"\d+(\.\d+)?", line_name):
+            continue
+        line_float = to_float(line_name)
+        if line_float is None or line_float > 6.5:
+            continue
+        odds = entry.get("odds") or {}
+        o_over = _odds_val(odds, "o1")
+        o_under = _odds_val(odds, "o2")
+        p_over, p_under = devig_two(o_over, o_under)
+        if p_over is not None:
+            key = line_name.replace(".", "_")
+            result[f"p_over_{key}"] = p_over
+            result[f"p_under_{key}"] = p_under
+
+    return result
 
 
 def load_rows(path: Path, max_matches: int = 0) -> list[dict[str, str]]:
@@ -369,6 +457,7 @@ def parse_all_markets(
     current_url: str,
     source_name: str,
     xhr_markets: dict[str, Any] | None = None,
+    odds_markets: dict[str, Any] | None = None,
 ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
     """
     Extract every market ID from the Nuxt probabilities object, plus any extras
@@ -467,6 +556,11 @@ def parse_all_markets(
         for k, v in _extract_ou_btts_from_payload(xhr_payload).items():
             if k not in summary:
                 summary[k] = v
+
+    # Merge de-vigged odds-market probabilities (BTTS, OU) fetched via API
+    for k, v in (parse_odds_markets(odds_markets) if odds_markets else {}).items():
+        if k not in summary:
+            summary[k] = v
 
     return market_rows, summary
 
@@ -599,10 +693,20 @@ async def scrape_match(
                 if state.get("hasCorrectScore") or state.get("hasAnyProbs"):
                     current_url = txt(state.get("currentUrl"))
                     source_name = txt(state.get("sourceName"))
+                    event_id = state.get("eventId")
 
-                    # Phase 2: click market tabs (Goals, BTTS, Over/Under) to capture deferred XHR.
+                    # Phase 2: fetch BTTS and OU odds via API (group 11 and group 4).
+                    # Uses browser fetch() so Cloudflare session cookies are included.
+                    odds_raw: dict | None = None
+                    if event_id:
+                        try:
+                            odds_raw = await page.evaluate(_FETCH_ODDS_JS, event_id)
+                        except Exception:
+                            pass
+
+                    # Phase 3: click market tabs (Goals, BTTS, Over/Under) to capture deferred XHR.
                     # Disabled by default (market_tab_wait_ms=0) because Oddspedia only publishes
-                    # probability data for markets 100 and 800; other tabs load bookmaker odds tables.
+                    # probability data for markets 100 and 800; other tabs return bookmaker odds tables.
                     if args.market_tab_wait_ms > 0:
                         xhr_count_before = len(_xhr_markets)
                         clicked_tabs = await page.evaluate(_CLICK_MARKET_TABS_JS)
@@ -623,15 +727,18 @@ async def scrape_match(
                         row, probs.get("800"), url_type, url, current_url, source_name
                     )
                     market_rows, market_summary = parse_all_markets(
-                        row, probs, url, current_url, source_name, _xhr_markets
+                        row, probs, url, current_url, source_name, _xhr_markets, odds_raw
                     )
+                    if event_id:
+                        market_summary["event_id"] = event_id
 
                     n = len(grid_rows)
                     modal = summary_row.get("modal_correct_score", "")
                     modal_pct = summary_row.get("modal_correct_score_pct", "")
                     n_markets = market_summary.get("total_markets", 0)
-                    n_xhr = len(_xhr_markets)
-                    print(f"  {label}: OK  {n} score rows  modal={modal} {modal_pct}  markets={n_markets}  xhr={n_xhr}")
+                    btts_yes = market_summary.get("p_btts_yes", "—")
+                    ou25_over = market_summary.get("p_over_2_5", "—")
+                    print(f"  {label}: OK  {n} score rows  modal={modal} {modal_pct}  markets={n_markets}  btts_yes={btts_yes}  ou25_over={ou25_over}")
                     return grid_rows, summary_row, market_rows, market_summary, None
 
                 print(f"  {label}: no probabilities found on {url_type}")

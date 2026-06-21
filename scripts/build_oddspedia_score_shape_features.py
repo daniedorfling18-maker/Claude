@@ -111,11 +111,12 @@ def build_features(grid: pd.DataFrame) -> pd.DataFrame:
                 "btts_probability_pct": pct_sum(exact[(exact["_hg"] > 0) & (exact["_ag"] > 0)]),
                 "home_clean_sheet_probability_pct": pct_sum(exact[exact["_ag"] == 0]),
                 "away_clean_sheet_probability_pct": pct_sum(exact[exact["_hg"] == 0]),
-                "over_1_5_probability_pct": pct_sum(exact[exact["_total"] > 1.5]),
+                # over_N_5: exact rows + other_total (all "Other" games have ≥4 goals, so always over N.5 for N≤3)
+                "over_1_5_probability_pct": pct_sum(exact[exact["_total"] > 1.5]) + other_total,
                 "under_1_5_probability_pct": pct_sum(exact[exact["_total"] < 1.5]),
-                "over_2_5_probability_pct": pct_sum(exact[exact["_total"] > 2.5]),
+                "over_2_5_probability_pct": pct_sum(exact[exact["_total"] > 2.5]) + other_total,
                 "under_2_5_probability_pct": pct_sum(exact[exact["_total"] < 2.5]),
-                "over_3_5_probability_pct": pct_sum(exact[exact["_total"] > 3.5]),
+                "over_3_5_probability_pct": pct_sum(exact[exact["_total"] > 3.5]) + other_total,
                 "under_3_5_probability_pct": pct_sum(exact[exact["_total"] < 3.5]),
                 "draw_probability_from_grid_pct": pct_sum(g[g["_outcome"] == "draw"]),
                 "home_win_probability_from_grid_pct": pct_sum(g[g["_outcome"] == "home"]),
@@ -148,15 +149,25 @@ def main() -> int:
                 mkts["match_id"] = mkts.apply(
                     lambda r: f"{txt(r.get('home_team')).lower()}-{txt(r.get('away_team')).lower()}", axis=1
                 )
-            keep = ["match_id", "p_home_win", "p_draw", "p_away_win"]
+            keep = ["match_id", "p_home_win", "p_draw", "p_away_win", "p_btts_yes", "p_over_2_5", "p_under_2_5"]
             mkts = mkts[[c for c in keep if c in mkts.columns]]
-            mkts = mkts.rename(columns={"p_home_win": "market_p_home_win", "p_draw": "market_p_draw", "p_away_win": "market_p_away_win"})
+            mkts = mkts.rename(columns={
+                "p_home_win": "market_p_home_win",
+                "p_draw": "market_p_draw",
+                "p_away_win": "market_p_away_win",
+                "p_btts_yes": "market_p_btts_yes",
+                "p_over_2_5": "market_p_over_2_5",
+                "p_under_2_5": "market_p_under_2_5",
+            })
             features = features.merge(mkts, on="match_id", how="left")
-            for col in ("market_p_home_win", "market_p_draw", "market_p_away_win"):
+            for col in ("market_p_home_win", "market_p_draw", "market_p_away_win",
+                        "market_p_btts_yes", "market_p_over_2_5", "market_p_under_2_5"):
                 features[col] = pd.to_numeric(features[col], errors="coerce")
             features["market_vs_grid_home_diff_pct"] = features["market_p_home_win"] - features["home_win_probability_from_grid_pct"]
             features["market_vs_grid_draw_diff_pct"] = features["market_p_draw"] - features["draw_probability_from_grid_pct"]
             features["market_vs_grid_away_diff_pct"] = features["market_p_away_win"] - features["away_win_probability_from_grid_pct"]
+            features["market_vs_grid_btts_diff_pct"] = features["market_p_btts_yes"] - features["btts_probability_pct"]
+            features["market_vs_grid_ou25_diff_pct"] = features["market_p_over_2_5"] - features["over_2_5_probability_pct"]
         except Exception:
             pass
 

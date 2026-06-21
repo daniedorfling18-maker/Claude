@@ -147,9 +147,17 @@ def predict_pick(home: str, away: str) -> str:
 
 # ── SuperBru login ────────────────────────────────────────────────────────────
 
-async def login(page, args) -> bool:
-    await page.goto(args.login_url, wait_until="domcontentloaded", timeout=30000)
-    await page.wait_for_timeout(2000)
+async def login(page, args, diag_dir: Path | None = None) -> bool:
+    try:
+        await page.goto(args.login_url, wait_until="networkidle", timeout=45000)
+    except Exception:
+        await page.goto(args.login_url, wait_until="domcontentloaded", timeout=30000)
+    await page.wait_for_timeout(5000)
+
+    if diag_dir:
+        diag_dir.mkdir(parents=True, exist_ok=True)
+        await page.screenshot(path=str(diag_dir / "login_page.png"), full_page=True)
+        print(f"  page title: {await page.title()!r}  url: {page.url!r}")
 
     for sel in [
         "button[aria-label='CONFIRM']", "button[aria-label='Accept All']",
@@ -162,6 +170,7 @@ async def login(page, args) -> bool:
     ]:
         try:
             await page.click(sel, timeout=2000)
+            print(f"  consent dismissed via {sel}")
             await page.wait_for_timeout(2500)
             break
         except Exception:
@@ -173,11 +182,17 @@ async def login(page, args) -> bool:
     except Exception:
         pass
 
+    inputs = await page.evaluate(
+        "() => Array.from(document.querySelectorAll('input')).map(e => ({type:e.type,name:e.name,id:e.id,visible:e.offsetParent!==null}))"
+    )
+    print(f"  inputs on page: {inputs}")
+
     email_filled = False
     for sel in ["input[type=email]", "input[name=email]", "input[name=username]",
-                "input[id*=email]", "input[id*=user]", "input[name=login]"]:
+                "input[id*=email]", "input[id*=user]", "input[name=login]", "input[name=user]"]:
         try:
-            await page.fill(sel, args.email, timeout=2000)
+            await page.fill(sel, args.email, timeout=3000)
+            print(f"  email filled via {sel}")
             email_filled = True
             break
         except Exception:
@@ -186,13 +201,19 @@ async def login(page, args) -> bool:
     pass_filled = False
     for sel in ["input[type=password]", "input[name=password]", "input[id*=pass]"]:
         try:
-            await page.fill(sel, args.password, timeout=2000)
+            await page.fill(sel, args.password, timeout=3000)
+            print(f"  password filled via {sel}")
             pass_filled = True
             break
         except Exception:
             continue
 
     if not email_filled or not pass_filled:
+        if diag_dir:
+            await page.screenshot(path=str(diag_dir / "login_form_not_found.png"), full_page=True)
+            html = await page.content()
+            (diag_dir / "login_page.html").write_text(html, encoding="utf-8")
+        print(f"  login form not found: email_filled={email_filled} pass_filled={pass_filled}")
         return False
 
     submitted = False
@@ -201,14 +222,17 @@ async def login(page, args) -> bool:
         try:
             await page.click(sel, timeout=3000)
             submitted = True
+            print(f"  submitted via {sel}")
             break
         except Exception:
             continue
 
     if not submitted:
         await page.keyboard.press("Enter")
+        print("  submitted via Enter")
 
-    await page.wait_for_timeout(4000)
+    await page.wait_for_timeout(5000)
+    print(f"  post-login url: {page.url!r}")
     return "login" not in page.url.lower()
 
 
@@ -269,7 +293,8 @@ async def run(args) -> dict:
         page    = await browser.new_page()
 
         print("Logging in (fixture scan)...")
-        if not await login(page, args):
+        login_diag = out_dir / "login_diagnostics"
+        if not await login(page, args, diag_dir=login_diag):
             await browser.close()
             return {"status": "login_failed", "run_at_utc": now.isoformat()}
 

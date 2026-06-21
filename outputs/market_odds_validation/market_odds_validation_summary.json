@@ -1,5 +1,5 @@
 {
-  "generated_at_utc": "2026-06-21T11:53:34.353886+00:00",
+  "generated_at_utc": "2026-06-21T11:54:56.762464+00:00",
   "pick_count": 40,
   "market_available_count": 34,
   "totals_available_count": 34,
@@ -14,7 +14,7 @@
       "home_team": "Paraguay",
       "away_team": "Australia",
       "final_pick": "1-0",
-      "market_alignment_score": 0.433008,
+      "market_alignment_score": 0.432965,
       "market_alignment_label": "market_conflict",
       "market_alignment_reasons": "pick outcome opposes market favourite; market gives selected outcome weak support; goal total agrees with market lean; score margin direction agrees with spread"
     },
@@ -70,7 +70,7 @@
       "home_team": "Algeria",
       "away_team": "Austria",
       "final_pick": "1-2",
-      "market_alignment_score": 0.716442,
+      "market_alignment_score": 0.716496,
       "market_alignment_label": "market_mixed",
       "market_alignment_reasons": "pick outcome agrees with market favourite; goal total conflicts with market lean; score margin direction agrees with spread"
     },

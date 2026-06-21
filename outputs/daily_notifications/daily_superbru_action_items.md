@@ -1,9 +1,9 @@
 # Daily Superbru action items
 
-Generated: `2026-06-21T11:53:38.156857+00:00`
+Generated: `2026-06-21T11:55:26.541409+00:00`
 
-Notify: **yes**
-State changed: **yes**
+Notify: **no**
+State changed: **no**
 
 Score-change items: **0**
 Oddspedia probability review items: **8**
@@ -32,4 +32,4 @@ These compare expected Superbru points from the Oddspedia correct-score grid. Do
 |---|---:|---:|---:|---:|---:|---:|---|
 | france-iraq | 3-0 | 1.0860999999999998 | 2-0 | 1.24265 | 0.1565500000000002 | True | ev_review |
 
-Review the items above and update only the scores that survive final judgement.
+The same action set was already reported previously, so this run is suppressed to avoid repeated notifications.

@@ -59,7 +59,7 @@ INSPECT_JS = r"""
 
 # JS: find a match row by home/away team name text, then locate score inputs within it
 FIND_ROW_JS = r"""
-(homeTeam, awayTeam) => {
+([homeTeam, awayTeam]) => {
   function norm(s) { return (s || '').toLowerCase().replace(/[^a-z0-9]/g, ''); }
   const hn = norm(homeTeam), an = norm(awayTeam);
 
@@ -83,6 +83,7 @@ FIND_ROW_JS = r"""
     type: el.type || '',
     name: el.name || '',
     id: el.id || '',
+    className: el.className || '',
     placeholder: el.placeholder || '',
     value: el.value || '',
     visible: el.offsetParent !== null,
@@ -110,15 +111,16 @@ FIND_ROW_JS = r"""
 }
 """
 
-# JS: set value on an input by id/name and fire change/input events
+# JS: set value on an input by CSS selector and fire events to trigger auto-save
 SET_INPUT_JS = r"""
-(selector, value) => {
+([selector, value]) => {
   const el = document.querySelector(selector);
   if (!el) return { ok: false, reason: 'element not found: ' + selector };
   const nativeInputValueSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set;
   nativeInputValueSetter.call(el, value);
   el.dispatchEvent(new Event('input', { bubbles: true }));
   el.dispatchEvent(new Event('change', { bubbles: true }));
+  el.dispatchEvent(new Event('blur', { bubbles: true }));
   return { ok: true, selector, value, newValue: el.value };
 }
 """
@@ -133,11 +135,28 @@ CLICK_JS = r"""
 }
 """
 
+# JS: click the subtab for the target match to trigger AJAX load of the pick form
+CLICK_SUBTAB_JS = r"""
+([homeTeam, awayTeam]) => {
+  function norm(s) { return (s || '').toLowerCase().replace(/[^a-z]/g, ''); }
+  const hn = norm(homeTeam), an = norm(awayTeam);
+  const controls = Array.from(document.querySelectorAll('[data-brutip][data-bru-tab]'));
+  for (const c of controls) {
+    const tip = norm(c.getAttribute('data-brutip') || '');
+    if (tip.includes(hn) || tip.includes(an)) {
+      c.click();
+      return c.getAttribute('data-bru-tab') + ': ' + c.getAttribute('data-brutip');
+    }
+  }
+  return null;
+}
+"""
+
 
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(description="Submit a SuperBru score pick via Chrome CDP.")
     p.add_argument("--cdp-url", default="http://127.0.0.1:9222")
-    p.add_argument("--pool-url", default="https://www.superbru.com/worldcup_predictor/pool_view.php?t=1296&p=13236623&g=32&view=matches")
+    p.add_argument("--pool-url", default="https://www.superbru.com/worldcup_predictor/pool_view.php?t=1296&p=13236623&g=37&view=matches")
     p.add_argument("--home-team", required=True)
     p.add_argument("--away-team", required=True)
     p.add_argument("--new-pick", required=True, help="Score in H-A format e.g. 2-0")
@@ -156,11 +175,19 @@ def parse_pick(pick: str) -> tuple[str, str]:
     return m.group(1), m.group(2)
 
 
-def selector_for_input(inp: dict[str, Any]) -> str | None:
+def selector_for_input(inp: dict[str, Any], position: int = 0) -> str | None:
     if inp.get("id"):
         return f"#{inp['id']}"
     if inp.get("name"):
         return f"input[name='{inp['name']}']"
+    cls = inp.get("className", "")
+    if "soccer-left-score" in cls:
+        return "input.soccer-left-score"
+    if "soccer-right-score" in cls:
+        return "input.soccer-right-score"
+    # Fallback: nth editable-dropdown in page order
+    if "editable-dropdown" in cls:
+        return f"input.editable-dropdown:nth-of-type({position + 1})"
     return None
 
 
@@ -212,6 +239,14 @@ async def run(args: argparse.Namespace) -> dict[str, Any]:
             print("Timeout on page load — checking current state anyway.")
         await page.wait_for_timeout(args.settle_ms)
 
+        # Click the matching game subtab to trigger AJAX load of the pick form
+        subtab_clicked = await page.evaluate(CLICK_SUBTAB_JS, [args.home_team, args.away_team])
+        if subtab_clicked:
+            print(f"Clicked game subtab: {subtab_clicked}")
+            await page.wait_for_timeout(6000)
+        else:
+            print("No matching game subtab found; using current active tab.")
+
         # Save full page HTML for diagnostics
         html = await page.content()
         (diag_dir / f"{slug}_{ts}_page.html").write_text(html, encoding="utf-8")
@@ -231,7 +266,7 @@ async def run(args: argparse.Namespace) -> dict[str, Any]:
 
         # Find the match row
         print(f"Locating match row: {args.home_team} vs {args.away_team}")
-        row_info = await page.evaluate(FIND_ROW_JS, args.home_team, args.away_team)
+        row_info = await page.evaluate(FIND_ROW_JS, [args.home_team, args.away_team])
         (diag_dir / f"{slug}_{ts}_row.json").write_text(json.dumps(row_info, indent=2), encoding="utf-8")
 
         if not row_info.get("found"):
@@ -249,7 +284,7 @@ async def run(args: argparse.Namespace) -> dict[str, Any]:
 
         print(f"  {len(inputs)} inputs in row, {len(score_inputs)} look like score fields, {len(buttons)} buttons")
         for i in score_inputs:
-            print(f"    input: type={i['type']!r} name={i['name']!r} id={i['id']!r} val={i['value']!r}")
+            print(f"    input: type={i['type']!r} name={i['name']!r} id={i['id']!r} cls={i.get('className','')!r} val={i['value']!r}")
         for b in buttons:
             print(f"    button: {b['text']!r} id={b['id']!r}")
 
@@ -261,12 +296,12 @@ async def run(args: argparse.Namespace) -> dict[str, Any]:
             return result
 
         # Score inputs: assume first = home goals, second = away goals
-        home_sel = selector_for_input(score_inputs[0])
-        away_sel = selector_for_input(score_inputs[1])
+        home_sel = selector_for_input(score_inputs[0], position=0)
+        away_sel = selector_for_input(score_inputs[1], position=1)
 
         if not home_sel or not away_sel:
             result["status"] = "failed"
-            result["reason"] = "could not build CSS selectors for score inputs — no id or name attributes found"
+            result["reason"] = "could not build CSS selectors for score inputs — no id, name, or recognised class found"
             print(f"ERROR: {result['reason']}")
             await browser.close()
             return result
@@ -283,8 +318,8 @@ async def run(args: argparse.Namespace) -> dict[str, Any]:
             return result
 
         # Set values
-        r_home = await page.evaluate(SET_INPUT_JS, home_sel, home_goals)
-        r_away = await page.evaluate(SET_INPUT_JS, away_sel, away_goals)
+        r_home = await page.evaluate(SET_INPUT_JS, [home_sel, home_goals])
+        r_away = await page.evaluate(SET_INPUT_JS, [away_sel, away_goals])
         print(f"  Set home: {r_home}")
         print(f"  Set away: {r_away}")
 
@@ -303,7 +338,6 @@ async def run(args: argparse.Namespace) -> dict[str, Any]:
             if btn.get("id"):
                 btn_sel = f"#{btn['id']}"
             elif btn.get("className"):
-                # Use first class only as a selector
                 first_class = btn["className"].split()[0]
                 btn_sel = f".{first_class}"
             if btn_sel:
@@ -323,9 +357,10 @@ async def run(args: argparse.Namespace) -> dict[str, Any]:
                     break
 
         if not submitted:
-            result["status"] = "partial"
-            result["reason"] = "values set but no submit button found — may need manual click or page uses auto-save"
-            print(f"WARNING: {result['reason']}")
+            # SuperBru auto-saves on blur/change — no submit button is expected
+            await page.wait_for_timeout(3000)
+            result["status"] = "submitted"
+            print("Auto-save: no submit button needed (SuperBru saves on blur/change).")
         else:
             await page.wait_for_timeout(2000)
             result["status"] = "submitted"

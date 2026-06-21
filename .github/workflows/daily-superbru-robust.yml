@@ -1,10 +1,6 @@
 name: Daily Superbru Robust Card
 
 on:
-  push:
-    branches:
-      - claude/repo-audit-vvb2ot
-      - claude/bold-ride-n3n1ti
   schedule:
     - cron: "0 5 * * *"
   workflow_dispatch:

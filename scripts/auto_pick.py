@@ -12,9 +12,12 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import importlib.util
 import json
 import os
 import re
+import subprocess
+import sys
 import types
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
@@ -124,8 +127,6 @@ def parse_kickoff(text: str | None, ts: str | None, ref: datetime) -> datetime |
 
 def predict_pick(home: str, away: str) -> str:
     """Call the claude CLI to predict the score. Returns 'H-A' string."""
-    import subprocess
-
     prompt = (
         f"Predict a 2026 FIFA World Cup match score.\n"
         f"Match: {home} vs {away}\n"
@@ -240,10 +241,7 @@ async def login(page, args, diag_dir: Path | None = None) -> bool:
 
 async def submit_pick(args, home_team: str, away_team: str, pick: str, out_dir: Path) -> dict:
     """Load submit_superbru_pick_cdp and call its run() to submit a single pick."""
-    import importlib.util
-    import pathlib
-
-    submit_path = pathlib.Path(__file__).parent / "submit_superbru_pick_cdp.py"
+    submit_path = Path(__file__).parent / "submit_superbru_pick_cdp.py"
     spec = importlib.util.spec_from_file_location("submit_superbru_pick_cdp", submit_path)
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
@@ -273,7 +271,7 @@ async def submit_pick(args, home_team: str, away_team: str, pick: str, out_dir: 
 
 async def run(args) -> dict:
     try:
-        from playwright.async_api import async_playwright
+        from playwright.async_api import async_playwright  # noqa: PLC0415
     except ImportError:
         raise RuntimeError("pip install playwright && python -m playwright install chromium")
 
@@ -407,14 +405,17 @@ async def run(args) -> dict:
         results.append(entry)
 
     summary = {
-        "run_at_utc":     now.isoformat(),
-        "window_minutes": args.window_minutes,
-        "dry_run":        args.dry_run,
-        "total_games":    len(subtabs),
-        "results":        results,
-        "submitted":      sum(1 for r in results if r.get("status") == "submitted"),
-        "skipped":        sum(1 for r in results if r.get("status", "").endswith("skipped")),
-        "not_in_window":  sum(1 for r in results if r.get("status") == "not_in_window"),
+        "run_at_utc":          now.isoformat(),
+        "window_minutes":      args.window_minutes,
+        "dry_run":             args.dry_run,
+        "total_games":         len(subtabs),
+        "results":             results,
+        "submitted":           sum(1 for r in results if r.get("status") == "submitted"),
+        "dry_run_count":       sum(1 for r in results if r.get("status") == "dry_run"),
+        "skipped":             sum(1 for r in results if r.get("status", "").endswith("skipped")),
+        "not_in_window":       sum(1 for r in results if r.get("status") == "not_in_window"),
+        "prediction_failed":   sum(1 for r in results if r.get("status") == "prediction_failed"),
+        "submit_failed":       sum(1 for r in results if r.get("status") == "submit_failed"),
     }
 
     ts = now.strftime("%Y%m%dT%H%M%SZ")
@@ -435,7 +436,7 @@ def build_parser() -> argparse.ArgumentParser:
     ))
     p.add_argument("--window-minutes", type=int, default=120,
                    help="Submit for games kicking off within this many minutes from now")
-    p.add_argument("--headless", action="store_true", default=True)
+    p.add_argument("--headless", dest="headless", action="store_true", default=True)
     p.add_argument("--headed",   dest="headless", action="store_false")
     p.add_argument("--dry-run",  action="store_true")
     p.add_argument("--out-dir",  default="outputs/pregame_checks/auto_pick")
@@ -443,7 +444,10 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main() -> int:
-    args   = build_parser().parse_args()
+    args = build_parser().parse_args()
+    if not args.email or not args.password:
+        print("ERROR: SUPERBRU_EMAIL and SUPERBRU_PASSWORD must be set", file=sys.stderr)
+        return 1
     result = asyncio.run(run(args))
     print("\n" + json.dumps(result, indent=2, default=str))
     return 0 if result.get("status") != "login_failed" else 1

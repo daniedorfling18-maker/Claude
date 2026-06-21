@@ -1,22 +1,24 @@
 {
-  "generated_at_utc": "2026-06-20T16:39:56.204274+00:00",
-  "snapshot_id": "20260620T163947Z",
+  "generated_at_utc": "2026-06-21T11:41:13.112675+00:00",
+  "snapshot_id": "20260621T114109Z",
   "snapshot_rows": 40,
-  "history_rows": 440,
-  "previous_snapshot_id": "20260620T161254Z",
+  "history_rows": 480,
+  "previous_snapshot_id": "20260620T163947Z",
   "market_depth_counts": {
-    "strong": 37,
-    "unavailable": 3
+    "strong": 34,
+    "unavailable": 6
   },
   "movement_counts": {
-    "stable": 37,
-    "unavailable": 3
+    "stable": 31,
+    "unavailable": 6,
+    "up": 2,
+    "down": 1
   },
-  "moving_against_pick_count": 0,
-  "moving_towards_pick_count": 0,
+  "moving_against_pick_count": 1,
+  "moving_towards_pick_count": 2,
   "outputs": {
-    "history": "outputs\\market_odds_history\\market_odds_history.csv",
-    "current_snapshot": "outputs\\market_odds_history\\market_odds_snapshot_current.csv",
-    "movement_report": "outputs\\market_odds_history\\market_odds_movement_report.csv"
+    "history": "outputs/market_odds_history/market_odds_history.csv",
+    "current_snapshot": "outputs/market_odds_history/market_odds_snapshot_current.csv",
+    "movement_report": "outputs/market_odds_history/market_odds_movement_report.csv"
   }
 }

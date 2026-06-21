@@ -1,76 +1,35 @@
 {
-  "generated_at_utc": "2026-06-20T16:39:57.119553+00:00",
+  "generated_at_utc": "2026-06-21T11:41:13.443947+00:00",
   "component_pick_count": 40,
   "component_label_counts": {
     "component_aligned": 20,
-    "component_mixed": 17,
-    "component_unavailable": 3
+    "component_mixed": 14,
+    "component_unavailable": 6
   },
-  "review_candidate_count": 60,
-  "switch_recommendation_count": 3,
-  "switch_recommendations": [
-    {
-      "home_team": "Algeria",
-      "away_team": "Austria",
-      "current_pick": "1-2",
-      "candidate_pick": "0-1",
-      "recommendation": "switch_candidate",
-      "current_component_score": 0.724,
-      "candidate_component_score": 0.853,
-      "component_improvement": 0.129,
-      "candidate_component_label": "component_aligned",
-      "candidate_component_reasons": "outcome agrees with market favourite; goal total agrees with market lean; score margin direction and size agree with spread",
-      "candidate_component_unavailable_count": 0,
-      "ev_loss": 0.00495,
-      "delta_p_finish_first": -0.00038,
-      "stress_pass_rate": 0.0,
-      "passes_hard_rule": "False",
-      "market_depth_class": "",
-      "h2h_bookmaker_count": 0,
-      "decision_reasons": "low EV cost; leader delta acceptable; candidate component-supported; candidate improves component validation; no stress-switch support"
-    },
-    {
-      "home_team": "Norway",
-      "away_team": "France",
-      "current_pick": "0-2",
-      "candidate_pick": "1-2",
-      "recommendation": "switch_candidate",
-      "current_component_score": 0.7425,
-      "candidate_component_score": 0.8695,
-      "component_improvement": 0.127,
-      "candidate_component_label": "component_aligned",
-      "candidate_component_reasons": "outcome agrees with market favourite; goal total agrees with market lean; score margin direction and size agree with spread",
-      "candidate_component_unavailable_count": 0,
-      "ev_loss": 0.006835,
-      "delta_p_finish_first": 0.000478,
-      "stress_pass_rate": 0.0,
-      "passes_hard_rule": "False",
-      "market_depth_class": "",
-      "h2h_bookmaker_count": 0,
-      "decision_reasons": "low EV cost; leader delta acceptable; candidate component-supported; candidate improves component validation; no stress-switch support"
-    },
-    {
-      "home_team": "Switzerland",
-      "away_team": "Canada",
-      "current_pick": "2-1",
-      "candidate_pick": "1-0",
-      "recommendation": "switch_candidate",
-      "current_component_score": 0.724,
-      "candidate_component_score": 0.811,
-      "component_improvement": 0.087,
-      "candidate_component_label": "component_aligned",
-      "candidate_component_reasons": "outcome agrees with market favourite; goal total agrees with market lean; score margin direction and size agree with spread",
-      "candidate_component_unavailable_count": 0,
-      "ev_loss": 0.004458,
-      "delta_p_finish_first": -1.6e-05,
-      "stress_pass_rate": 0.0,
-      "passes_hard_rule": "False",
-      "market_depth_class": "",
-      "h2h_bookmaker_count": 0,
-      "decision_reasons": "low EV cost; leader delta acceptable; candidate component-supported; candidate improves component validation; no stress-switch support"
-    }
-  ],
+  "review_candidate_count": 0,
+  "switch_recommendation_count": 0,
+  "switch_recommendations": [],
   "lowest_component_picks": [
+    {
+      "home_team": "Netherlands",
+      "away_team": "Sweden",
+      "final_pick": "2-0",
+      "validation_label": "fragile",
+      "market_alignment_label": "market_mixed",
+      "component_score": 0.5,
+      "component_label": "component_unavailable",
+      "component_reasons": "outcome market unavailable; totals market unavailable; spread market unavailable"
+    },
+    {
+      "home_team": "Germany",
+      "away_team": "Ivory Coast",
+      "final_pick": "2-0",
+      "validation_label": "acceptable",
+      "market_alignment_label": "market_mixed",
+      "component_score": 0.5,
+      "component_label": "component_unavailable",
+      "component_reasons": "outcome market unavailable; totals market unavailable; spread market unavailable"
+    },
     {
       "home_team": "Ecuador",
       "away_team": "Curacao",
@@ -82,8 +41,8 @@
       "component_reasons": "outcome market unavailable; totals market unavailable; spread market unavailable"
     },
     {
-      "home_team": "Curacao",
-      "away_team": "Ivory Coast",
+      "home_team": "Tunisia",
+      "away_team": "Japan",
       "final_pick": "0-2",
       "validation_label": "acceptable",
       "market_alignment_label": "market_mixed",
@@ -96,6 +55,16 @@
       "away_team": "United States",
       "final_pick": "1-2",
       "validation_label": "fragile",
+      "market_alignment_label": "market_mixed",
+      "component_score": 0.5,
+      "component_label": "component_unavailable",
+      "component_reasons": "outcome market unavailable; totals market unavailable; spread market unavailable"
+    },
+    {
+      "home_team": "Curacao",
+      "away_team": "Ivory Coast",
+      "final_pick": "0-2",
+      "validation_label": "acceptable",
       "market_alignment_label": "market_mixed",
       "component_score": 0.5,
       "component_label": "component_unavailable",
@@ -122,36 +91,6 @@
       "component_reasons": "outcome does not match market favourite; goal total agrees with market lean; score margin direction and size agree with spread"
     },
     {
-      "home_team": "Netherlands",
-      "away_team": "Sweden",
-      "final_pick": "2-0",
-      "validation_label": "acceptable",
-      "market_alignment_label": "market_aligned",
-      "component_score": 0.705,
-      "component_label": "component_mixed",
-      "component_reasons": "outcome agrees with market favourite; goal total conflicts with market lean; score margin direction agrees with spread"
-    },
-    {
-      "home_team": "Norway",
-      "away_team": "Senegal",
-      "final_pick": "2-1",
-      "validation_label": "fragile",
-      "market_alignment_label": "market_aligned",
-      "component_score": 0.724,
-      "component_label": "component_mixed",
-      "component_reasons": "outcome agrees with market favourite; goal total conflicts with market lean; score margin direction and size agree with spread"
-    },
-    {
-      "home_team": "Japan",
-      "away_team": "Sweden",
-      "final_pick": "2-1",
-      "validation_label": "fragile",
-      "market_alignment_label": "market_aligned",
-      "component_score": 0.724,
-      "component_label": "component_mixed",
-      "component_reasons": "outcome agrees with market favourite; goal total conflicts with market lean; score margin direction and size agree with spread"
-    },
-    {
       "home_team": "Switzerland",
       "away_team": "Canada",
       "final_pick": "2-1",
@@ -172,6 +111,16 @@
       "component_reasons": "outcome agrees with market favourite; goal total conflicts with market lean; score margin direction and size agree with spread"
     },
     {
+      "home_team": "Ecuador",
+      "away_team": "Germany",
+      "final_pick": "0-2",
+      "validation_label": "acceptable",
+      "market_alignment_label": "market_aligned",
+      "component_score": 0.7425,
+      "component_label": "component_mixed",
+      "component_reasons": "outcome agrees with market favourite; goal total conflicts with market lean; score margin direction agrees with spread"
+    },
+    {
       "home_team": "Norway",
       "away_team": "France",
       "final_pick": "0-2",
@@ -180,16 +129,6 @@
       "component_score": 0.7425,
       "component_label": "component_mixed",
       "component_reasons": "outcome agrees with market favourite; goal total conflicts with market lean; score margin direction agrees with spread"
-    },
-    {
-      "home_team": "Morocco",
-      "away_team": "Haiti",
-      "final_pick": "2-0",
-      "validation_label": "validated",
-      "market_alignment_label": "market_aligned",
-      "component_score": 0.745,
-      "component_label": "component_mixed",
-      "component_reasons": "outcome agrees with market favourite; goal total conflicts with market lean; score margin direction and size agree with spread"
     }
   ]
 }

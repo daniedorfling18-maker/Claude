@@ -1,7 +1,9 @@
 {
-  "updated_at_utc": "2026-06-20T16:44:12.987670+00:00",
-  "digest": "c4ad838c8bed4574e8e5964881dc3f80a1b989c93e84da76e96b36d6993815c5",
-  "action_count": 8,
-  "score_change_count": 0,
-  "oddspedia_review_count": 8
+  "updated_at_utc": "2026-06-21T11:41:15.869876+00:00",
+  "digest": "7210a27dfe4e0e5c3d105113e1822be8d181d15621324d3a89a99cec0c8bcede",
+  "action_count": 12,
+  "score_change_count": 3,
+  "oddspedia_probability_review_count": 8,
+  "oddspedia_ev_review_count": 1,
+  "oddspedia_review_count": 9
 }

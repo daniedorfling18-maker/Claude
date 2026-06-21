@@ -1,0 +1,28 @@
+{
+  "generated_at_utc": "2026-06-21T11:41:15.084002+00:00",
+  "status": "validator_overlay_only_no_model_math_changed",
+  "locked_picks_csv": "outputs/final_locked_picks/superbru_final_card.csv",
+  "pick_column": "locked_pick",
+  "oddspedia_comparison_csv": "outputs/oddspedia_pick_validation/oddspedia_pick_comparison.csv",
+  "superbru_coverage_csv": "outputs/data_inventory/superbru_visible_pick_coverage.csv",
+  "superbru_detected_controls_csv": "outputs/data_inventory/superbru_detected_match_controls.csv",
+  "match_count": 40,
+  "final_review_action_counts": {
+    "keep_unvalidated": 24,
+    "keep": 8,
+    "watch": 7,
+    "manual_review": 1
+  },
+  "smartbet_validator_action_counts": {
+    "no_grid": 24,
+    "keep": 8,
+    "watch": 7,
+    "manual_review": 1
+  },
+  "superbru_game_theory_action_counts": {
+    "no_superbru_data": 40
+  },
+  "note": "This overlay validates locked model picks. It does not alter model calibration, scoreline probabilities, candidate EV, or locked picks.",
+  "out_csv": "outputs/validation/pick_validation_overlay.csv",
+  "out_json": "outputs/validation/pick_validation_overlay_summary.json"
+}

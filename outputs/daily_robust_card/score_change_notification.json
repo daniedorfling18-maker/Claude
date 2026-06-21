@@ -1,7 +1,44 @@
 {
-  "notify": false,
-  "change_count": 0,
+  "notify": true,
+  "change_count": 3,
   "first_run": false,
-  "changes": [],
-  "notification_markdown": "outputs\\daily_robust_card\\score_change_notification.md"
+  "changes": [
+    {
+      "commence_time": "2026-06-24T19:00:00Z",
+      "home_team": "Switzerland",
+      "away_team": "Canada",
+      "previous_pick": "1-0",
+      "new_pick": "2-1",
+      "reason": "daily robust card changed",
+      "blocked_by": "",
+      "component_improvement": "",
+      "ev_loss": "",
+      "delta_p_finish_first": ""
+    },
+    {
+      "commence_time": "2026-06-26T19:00:00Z",
+      "home_team": "Norway",
+      "away_team": "France",
+      "previous_pick": "1-2",
+      "new_pick": "0-2",
+      "reason": "daily robust card changed",
+      "blocked_by": "",
+      "component_improvement": "",
+      "ev_loss": "",
+      "delta_p_finish_first": ""
+    },
+    {
+      "commence_time": "2026-06-28T02:00:00Z",
+      "home_team": "Algeria",
+      "away_team": "Austria",
+      "previous_pick": "0-1",
+      "new_pick": "1-2",
+      "reason": "daily robust card changed",
+      "blocked_by": "",
+      "component_improvement": "",
+      "ev_loss": "",
+      "delta_p_finish_first": ""
+    }
+  ],
+  "notification_markdown": "outputs/daily_robust_card/score_change_notification.md"
 }

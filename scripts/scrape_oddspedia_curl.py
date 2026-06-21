@@ -272,7 +272,7 @@ def scrape_match(row: dict[str, Any], impersonate: str, timeout: int) -> dict[st
         else:
             m = re.fullmatch(r"(\d+)-(\d+)", score_key)
             if m:
-                hg, ag = int(m.group(1)), int(m.group(2))
+                hg, ag = m.group(1), m.group(2)  # keep as strings to match old scraper format
                 bucket = "exact"
             else:
                 hg, ag, bucket = None, None, "unknown"

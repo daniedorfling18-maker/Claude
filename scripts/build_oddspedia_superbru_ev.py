@@ -55,9 +55,16 @@ def to_float(value: Any) -> float | None:
 
 def to_int(value: Any) -> int | None:
     s = txt(value)
-    if not re.fullmatch(r"\d+", s):
-        return None
-    return int(s)
+    if re.fullmatch(r"\d+", s):
+        return int(s)
+    # Handle float strings like "1.0" written by pandas when ints mix with NaN
+    try:
+        f = float(s)
+        if f == int(f) and f >= 0:
+            return int(f)
+    except (ValueError, OverflowError):
+        pass
+    return None
 
 
 def slugify(value: Any) -> str:

@@ -1,0 +1,10 @@
+{
+  "generated_at_utc": "2026-06-21T04:49:28.847847+00:00",
+  "pool_pick_rows": 0,
+  "leaderboard_rows": 32,
+  "player_profile_rows": 0,
+  "distribution_rows": 0,
+  "chaser_exposure_rows": 0,
+  "remaining_leverage_rows": 0,
+  "warning": "Pool picks unavailable or empty. Downstream pool outputs were still written as empty files."
+}

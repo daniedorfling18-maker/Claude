@@ -1,0 +1,23 @@
+{
+  "row": {
+    "match_id": "norway-senegal",
+    "commence_time": "2026-06-23T00:00:00Z",
+    "home_team": "Norway",
+    "away_team": "Senegal",
+    "url": "https://oddspedia.com/football/norway-senegal-1654581",
+    "alt_url": "https://oddspedia.com/football/senegal-norway-1654581",
+    "match_key": "1654581",
+    "match_score": "100"
+  },
+  "last_state": {
+    "sourceName": "",
+    "probabilities": null,
+    "marketIds": [],
+    "hasCorrectScore": false,
+    "hasAnyProbs": false,
+    "eventId": null,
+    "currentUrl": "https://oddspedia.com/football/senegal-norway-1654581",
+    "title": "Just a moment...",
+    "bodyText": "oddspedia.com\nPerforming security verification\n\nThis website uses a security service to protect against malicious bots. This page is displayed while the website verifies you are not a bot.\n\nRay ID: a0f03148d95115b6\nPerformance and Security by Cloudflare\nPrivacy"
+  }
+}

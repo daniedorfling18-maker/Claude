@@ -1,0 +1,23 @@
+{
+  "row": {
+    "match_id": "argentina-austria",
+    "commence_time": "2026-06-22T17:00:00Z",
+    "home_team": "Argentina",
+    "away_team": "Austria",
+    "url": "https://oddspedia.com/football/argentina-austria-1654585",
+    "alt_url": "https://oddspedia.com/football/austria-argentina-1654585",
+    "match_key": "1654585",
+    "match_score": "100"
+  },
+  "last_state": {
+    "sourceName": "",
+    "probabilities": null,
+    "marketIds": [],
+    "hasCorrectScore": false,
+    "hasAnyProbs": false,
+    "eventId": null,
+    "currentUrl": "https://oddspedia.com/football/austria-argentina-1654585",
+    "title": "Just a moment...",
+    "bodyText": "oddspedia.com\nPerforming security verification\n\nThis website uses a security service to protect against malicious bots. This page is displayed while the website verifies you are not a bot.\n\nRay ID: a0f030742d2715b6\nPerformance and Security by Cloudflare\nPrivacy"
+  }
+}

@@ -1,5 +1,5 @@
 {
-  "generated_at_utc": "2026-06-21T08:16:08.740909+00:00",
+  "generated_at_utc": "2026-06-21T08:20:48.481885+00:00",
   "status": "valid",
   "warning": "Only rows joined to trusted completed results are scored. Market-history home_goals/away_goals are never treated as actual results.",
   "trusted_results_csv": "outputs/superbru_pool/superbru_match_results_auto.csv",

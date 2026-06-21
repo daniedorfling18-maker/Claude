@@ -287,12 +287,46 @@ jobs:
       - name: Commit daily outputs
         if: success()
         run: |
+          set -euo pipefail
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add -f outputs/market_odds outputs/market_odds_validation outputs/market_odds_history outputs/component_validation outputs/final_locked_picks outputs/daily_robust_card outputs/oddspedia_pick_validation outputs/validation outputs/daily_notifications outputs/backtesting outputs/final_leader_decision_daily_robust || true
+          BRANCH="${GITHUB_REF_NAME:-main}"
+          PATCH_FILE="/tmp/daily-output-changes.patch"
+          OUTPUT_PATHS="outputs/market_odds outputs/market_odds_validation outputs/market_odds_history outputs/component_validation outputs/final_locked_picks outputs/daily_robust_card outputs/oddspedia_pick_validation outputs/validation outputs/daily_notifications outputs/backtesting outputs/final_leader_decision_daily_robust"
+
+          git add -f $OUTPUT_PATHS || true
           if git diff --cached --quiet; then
             echo "No daily output changes to commit."
-          else
-            git commit -m "Update daily Superbru robust card"
-            git push
+            exit 0
           fi
+
+          git diff --cached --binary > "$PATCH_FILE"
+          git reset --hard
+          git clean -fd
+          git fetch origin "$BRANCH"
+          git checkout -B "$BRANCH" "origin/$BRANCH"
+
+          if ! git apply --index --3way "$PATCH_FILE"; then
+            echo "Generated outputs could not be applied cleanly after syncing $BRANCH. Artifact upload already preserved outputs."
+            exit 1
+          fi
+
+          if git diff --cached --quiet; then
+            echo "No daily output changes after syncing latest branch."
+            exit 0
+          fi
+
+          git commit -m "Update daily Superbru robust card"
+
+          for attempt in 1 2 3; do
+            if git push origin "HEAD:$BRANCH"; then
+              echo "Daily outputs committed and pushed on attempt $attempt."
+              exit 0
+            fi
+            echo "Push rejected on attempt $attempt; rebasing onto latest $BRANCH and retrying."
+            git fetch origin "$BRANCH"
+            git rebase "origin/$BRANCH"
+          done
+
+          echo "Failed to push daily outputs after syncing with latest $BRANCH."
+          exit 1

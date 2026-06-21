@@ -48,6 +48,17 @@ def file_exists(path: str | Path) -> bool:
     return (ROOT / Path(path)).exists()
 
 
+def final_simulation_cache_complete(out_dir: str | Path = "outputs/final_leader_decision_daily_robust") -> bool:
+    base = ROOT / Path(out_dir)
+    required = [
+        base / "base_mc" / "leader_mc_summary.json",
+        base / "stress" / "stress_summary.json",
+        base / "confirmation_500k" / "leader_mc_summary.json",
+        base / "confirmation_500k" / "leader_mc_picks.csv",
+    ]
+    return all(path.exists() for path in required)
+
+
 def main() -> int:
     args = build_parser().parse_args()
     snapshot_id = args.snapshot_id or datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
@@ -57,6 +68,7 @@ def main() -> int:
     final_simulation_failed = False
     final_simulation_status = "skipped_by_flag" if args.skip_final_simulation else "pending"
     final_simulation_dir: str | None = None
+    final_simulation_cache_reused = False
     predictions_for_final_simulation: str | None = None
 
     if not env.get("THE_ODDS_API_KEY"):
@@ -201,16 +213,24 @@ def main() -> int:
             ],
             env=env,
         )
+
+        final_decision_cmd = [
+            sys.executable,
+            "scripts/run_final_leader_decision.py",
+            "--predictions-csv",
+            predictions_for_final_simulation,
+            "--out-dir",
+            "outputs/final_leader_decision_daily_robust",
+        ]
+        if final_simulation_cache_complete():
+            final_decision_cmd.append("--reuse-existing")
+            final_simulation_cache_reused = True
+            print("Reusing cached final leader simulation outputs.")
+        else:
+            print("Cached final leader simulation outputs are incomplete; running fresh final leader simulation.")
+
         rc = run(
-            [
-                sys.executable,
-                "scripts/run_final_leader_decision.py",
-                "--predictions-csv",
-                predictions_for_final_simulation,
-                "--out-dir",
-                "outputs/final_leader_decision_daily_robust",
-                "--reuse-existing",
-            ],
+            final_decision_cmd,
             env=env,
             warn_only=True,
         )
@@ -230,6 +250,7 @@ def main() -> int:
         "final_simulation_status": final_simulation_status,
         "final_simulation_skipped": final_simulation_skipped,
         "final_simulation_failed_non_blocking": final_simulation_failed,
+        "final_simulation_cache_reused": final_simulation_cache_reused,
     }
     out_path = ROOT / "outputs/daily_robust_card/daily_pipeline_summary.json"
     out_path.parent.mkdir(parents=True, exist_ok=True)

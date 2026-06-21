@@ -303,7 +303,7 @@ def _fill_strategic_fields(
     away_team: str,
     public_pick_config: PublicPickConfig,
     superbru: SuperbruConfig,
-) -> list[CandidateEvaluation]:
+) -> tuple[CandidateEvaluation, ...]:
     fav_label = max(favourite_outcome, key=favourite_outcome.get)
     if public_pick_config.enabled:
         estimates = estimate_public_pick_shares(
@@ -402,7 +402,7 @@ def decision_diagnostics(matrix: np.ndarray, evaluations: list[CandidateEvaluati
         "recommended_points_variance": recommended.variance_points,
         "raw_ev_scoreline": raw.scoreline,
         "raw_ev_expected_points": raw.expected_points,
-        "modal_scoreline_ev": modal_expected,
+        "modal_scoreline": modal_eval.scoreline if modal_eval else None,
         "modal_scoreline_expected_points": modal_expected,
         "modal_scoreline_probability": float(matrix[modal_idx]),
         "ev_gap_recommended_to_modal": (recommended.expected_points - modal_expected) if modal_expected is not None else None,

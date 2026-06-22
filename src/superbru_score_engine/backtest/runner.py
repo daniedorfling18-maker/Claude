@@ -19,6 +19,7 @@ from superbru_score_engine.backtest.metrics import (
     summarise_validation,
     total_goals_crps,
 )
+from superbru_score_engine.backtest.utils import parse_float_grid
 from superbru_score_engine.config import AppConfig
 from superbru_score_engine.decision import SuperbruDecisionEngine
 from superbru_score_engine.decision.superbru import score_actual_prediction
@@ -35,8 +36,8 @@ VALIDATION_TIMING_NOTE = (
 
 
 def run_backtest(args: argparse.Namespace, config: AppConfig) -> int:
-    rho_grid = _float_grid(args.rho_grid) or [config.model.dixon_coles_rho]
-    ci_grid = _float_grid(args.ci_grid) or [config.superbru.ci_cutoff]
+    rho_grid = parse_float_grid(args.rho_grid) or [config.model.dixon_coles_rho]
+    ci_grid = parse_float_grid(args.ci_grid) or [config.superbru.ci_cutoff]
     out_dir = Path(args.out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
 
@@ -305,7 +306,3 @@ def _try_plot_reliability(csv_path: Path, png_path: Path) -> None:
     plt.close(fig)
 
 
-def _float_grid(raw: str) -> list[float]:
-    if not raw:
-        return []
-    return [float(item.strip()) for item in raw.split(",") if item.strip()]

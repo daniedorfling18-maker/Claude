@@ -34,6 +34,7 @@ from .runner import (
     naive_baseline_pick,
     reliability_cells,
 )
+from .utils import parse_float_grid, parse_int_grid, parse_str_grid
 
 
 FOOTBALL_DATA_WORLDCUP_URL = "https://www.football-data.co.uk/WorldCup2026.xlsx"
@@ -51,7 +52,7 @@ HOST_COUNTRIES = {
 
 def run_football_data_backtest(args: argparse.Namespace, config: AppConfig) -> int:
     workbook_path = ensure_workbook(args.workbook, args.download_url)
-    years = _int_grid(args.years) or [2014, 2018, 2022]
+    years = parse_int_grid(args.years) or [2014, 2018, 2022]
     out_dir = Path(args.out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
 
@@ -64,10 +65,10 @@ def run_football_data_backtest(args: argparse.Namespace, config: AppConfig) -> i
     fixtures.to_csv(fixtures_path, index=False)
     odds_path.write_text(json.dumps(odds, indent=2), encoding="utf-8")
 
-    rho_grid = _float_grid(args.rho_grid) or [config.model.dixon_coles_rho]
-    ci_grid = _float_grid(args.ci_grid) or [config.superbru.ci_cutoff]
+    rho_grid = parse_float_grid(args.rho_grid) or [config.model.dixon_coles_rho]
+    ci_grid = parse_float_grid(args.ci_grid) or [config.superbru.ci_cutoff]
     weight_grid = _weight_grid(args.odds_weight_grid, args.ratings_weight_grid, config)
-    devig_methods = _string_grid(args.devig_method_grid) or [config.model.devig_method]
+    devig_methods = parse_str_grid(args.devig_method_grid, lowercase=True) or [config.model.devig_method]
     calibration_rows: list[dict[str, Any]] = []
     best: tuple[float, str, float, float, float, float, pd.DataFrame] | None = None
     for devig_method in devig_methods:
@@ -431,27 +432,9 @@ def _int_value(value: Any) -> int | None:
         return None
 
 
-def _float_grid(raw: str) -> list[float]:
-    if not raw:
-        return []
-    return [float(item.strip()) for item in raw.split(",") if item.strip()]
-
-
-def _int_grid(raw: str) -> list[int]:
-    if not raw:
-        return []
-    return [int(item.strip()) for item in raw.split(",") if item.strip()]
-
-
-def _string_grid(raw: str) -> list[str]:
-    if not raw:
-        return []
-    return [item.strip().lower() for item in raw.split(",") if item.strip()]
-
-
 def _weight_grid(odds_raw: str, ratings_raw: str, config: AppConfig) -> list[tuple[float, float]]:
-    odds_values = _float_grid(odds_raw)
-    ratings_values = _float_grid(ratings_raw)
+    odds_values = parse_float_grid(odds_raw)
+    ratings_values = parse_float_grid(ratings_raw)
     if odds_values and not ratings_values:
         return [(odds, max(0.0, 1.0 - odds)) for odds in odds_values]
     if odds_values and ratings_values:

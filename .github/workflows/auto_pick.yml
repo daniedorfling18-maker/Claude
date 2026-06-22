@@ -66,6 +66,10 @@ on:
         required: false
         default: 'false'
 
+concurrency:
+  group: auto-pick-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
   auto-pick:
     runs-on: ubuntu-latest

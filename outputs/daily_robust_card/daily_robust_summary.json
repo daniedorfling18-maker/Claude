@@ -1,40 +1,15 @@
 {
-  "generated_at_utc": "2026-06-22T07:01:41.448119+00:00",
+  "generated_at_utc": "2026-06-22T18:26:06.948418+00:00",
   "input_card_count": 40,
-  "candidate_switch_count": 3,
+  "candidate_switch_count": 0,
   "applied_switch_count": 0,
   "require_two_day_support": true,
   "allow_first_snapshot": true,
   "applied_switches": [],
-  "blocked_switches": [
-    {
-      "home_team": "Switzerland",
-      "away_team": "Canada",
-      "current_pick": "1-0",
-      "candidate_pick": "1-0",
-      "apply_switch": false,
-      "blocked_by": "candidate current_pick mismatch: 2-1 vs card 1-0"
-    },
-    {
-      "home_team": "Norway",
-      "away_team": "France",
-      "current_pick": "1-2",
-      "candidate_pick": "1-2",
-      "apply_switch": false,
-      "blocked_by": "candidate current_pick mismatch: 0-2 vs card 1-2"
-    },
-    {
-      "home_team": "Algeria",
-      "away_team": "Austria",
-      "current_pick": "0-1",
-      "candidate_pick": "0-1",
-      "apply_switch": false,
-      "blocked_by": "candidate current_pick mismatch: 1-2 vs card 0-1"
-    }
-  ],
+  "blocked_switches": [],
   "outputs": {
-    "daily_robust_locked_picks": "outputs\\daily_robust_card\\daily_robust_locked_picks.csv",
-    "daily_robust_superbru_card": "outputs\\daily_robust_card\\daily_robust_superbru_card.csv",
-    "daily_switch_audit": "outputs\\daily_robust_card\\daily_switch_audit.csv"
+    "daily_robust_locked_picks": "outputs/daily_robust_card/daily_robust_locked_picks.csv",
+    "daily_robust_superbru_card": "outputs/daily_robust_card/daily_robust_superbru_card.csv",
+    "daily_switch_audit": "outputs/daily_robust_card/daily_switch_audit.csv"
   }
 }

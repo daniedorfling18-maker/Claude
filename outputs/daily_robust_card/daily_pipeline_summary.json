@@ -1,21 +1,21 @@
 {
-  "generated_at_utc": "2026-06-22T07:01:45.419423+00:00",
-  "snapshot_id": "20260622T070121Z",
+  "generated_at_utc": "2026-06-22T18:26:06.988913+00:00",
+  "snapshot_id": "20260622T182602Z",
   "final_card": "outputs/daily_robust_card/daily_robust_superbru_card.csv",
   "daily_summary": "outputs/daily_robust_card/daily_robust_summary.json",
   "market_history_summary": "outputs/market_odds_history/market_odds_history_summary.json",
-  "market_odds_fetch_skipped": false,
+  "market_odds_fetch_skipped": true,
   "market_odds_scope": {
     "mode": "rolling_pre_match_window",
-    "commence_from": "2026-06-22T06:51:21.652556Z",
-    "commence_to": "2026-06-22T07:31:21.652556Z",
+    "commence_from": "2026-06-22T18:16:02.933377Z",
+    "commence_to": "2026-06-22T18:56:02.933377Z",
     "window_before_minutes": 10,
     "window_after_minutes": 30
   },
-  "final_simulation_dir": "outputs/final_leader_decision_daily_robust",
-  "predictions_for_final_simulation": "outputs/daily_robust_card/predictions_for_final_simulation.csv",
-  "final_simulation_status": "completed",
-  "final_simulation_skipped": false,
+  "final_simulation_dir": null,
+  "predictions_for_final_simulation": null,
+  "final_simulation_status": "skipped_by_flag",
+  "final_simulation_skipped": true,
   "final_simulation_failed_non_blocking": false,
-  "final_simulation_cache_reused": true
+  "final_simulation_cache_reused": false
 }

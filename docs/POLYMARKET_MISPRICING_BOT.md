@@ -138,3 +138,43 @@ Do not increase order size until paper logs are stable and you have reconciled f
 3. Review artifacts over multiple days.
 4. Only then enable `POLYMARKET_MODE=live` and `POLYMARKET_EXECUTE_LIVE=true` with very small order size.
 5. Move to a VPS or self-hosted runner for production continuity.
+
+## Long/short trading engine
+
+`scripts/polymarket_long_short_engine.py` turns the bot's output into a long/short trading
+layer. It consumes the bot's live `outputs/polymarket/market_snapshot.csv` (per-token
+`best_bid` / `best_ask` / `fair_probability`) and, for every outcome token, evaluates:
+
+- **Directional (long/short)** — long (buy YES) when the model fair beats the ask, short
+  (buy the complementary NO) when it is below the bid. Paper only.
+- **Market-making** — a passive maker bid placed strictly inside the spread (never crosses,
+  so it is always a maker). This is the mode that can graduate to live.
+
+Run it after a bot scan so the book is fresh:
+
+```bash
+python scripts/polymarket_long_short_engine.py \
+  --market-snapshot outputs/polymarket/market_snapshot.csv
+```
+
+Output: `outputs/polymarket/long_short_intents.csv` (every intent is `DRY_RUN` by default).
+
+### Graduating market-making to live
+
+Live market-making reuses the bot's `BotConfig`, `check_geoblock`, and `LiveExecutor`, so
+**every existing guard applies** and order type is forced to `GTC` (resting maker limit,
+never a taker). It places passive maker **BUY** limits only, capped at
+`POLYMARKET_MAX_ORDER_USD` and `--max-live-orders` (default 3). It stays dry-run unless:
+
+```text
+PM_MODE=live
+POLYMARKET_EXECUTE_LIVE=true
+# plus POLYMARKET_PRIVATE_KEY (+ CLOB creds) and a non-geoblocked IP
+```
+
+Without all of these the engine reports `dry_run` / `live_error` and places nothing.
+
+Honest expectation: pre-match WC odds barely move, so the **directional** edge is ~nil;
+market-making the spread (+ Polymarket maker rebates) is the market-neutral capital engine.
+Graduate it only after the dry-run `long_short_intents.csv` looks sane for several sessions,
+and reconcile any live fills against your wallet before increasing size.

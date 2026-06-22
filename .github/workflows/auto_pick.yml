@@ -61,6 +61,10 @@ on:
         description: 'SuperBru pool URL'
         required: false
         default: 'https://www.superbru.com/worldcup_predictor/pool_view.php?t=1296&p=13236623&view=matches'
+      skip_leaderboard:
+        description: 'Skip leaderboard scrape and use configured strategy_mode (no pool-position intelligence)'
+        required: false
+        default: 'false'
 
 jobs:
   auto-pick:
@@ -85,6 +89,7 @@ jobs:
           SUPERBRU_LOGIN_URL: ${{ secrets.SUPERBRU_LOGIN_URL }}
           SUPERBRU_POOL_URL: ${{ secrets.SUPERBRU_POOL_URL }}
           THE_ODDS_API_KEY: ${{ secrets.THE_ODDS_API_KEY }}
+          SUPERBRU_PLAYER_NAME: ${{ secrets.SUPERBRU_PLAYER_NAME || 'Danie' }}
         run: |
           DRY_RUN_FLAG=""
           if [ "${{ github.event.inputs.dry_run }}" = "true" ]; then
@@ -96,6 +101,11 @@ jobs:
           MATCH_ODDS_FLAG=""
           if [ "${{ github.event.inputs.fetch_match_odds }}" = "false" ]; then
             MATCH_ODDS_FLAG="--skip-match-odds"
+          fi
+
+          SKIP_LEADERBOARD_FLAG=""
+          if [ "${{ github.event.inputs.skip_leaderboard }}" = "true" ]; then
+            SKIP_LEADERBOARD_FLAG="--skip-leaderboard"
           fi
 
           POOL_URL="${{ github.event.inputs.pool_url || '' }}"
@@ -117,9 +127,13 @@ jobs:
             --window-minutes "${{ github.event.inputs.window_minutes || '40' }}" \
             --pick-card-csv outputs/final_locked_picks/superbru_final_card.csv \
             --odds-lookup-window-minutes 90 \
+            --leader-player "${SUPERBRU_PLAYER_NAME:-Danie}" \
+            --leader-safe-buffer 5.0 \
+            --chaser-range 8.0 \
             --headless \
             $DRY_RUN_FLAG \
             $MATCH_ODDS_FLAG \
+            $SKIP_LEADERBOARD_FLAG \
             --out-dir outputs/pregame_checks/auto_pick
 
       - name: Upload results

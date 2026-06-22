@@ -5,6 +5,10 @@ This keeps the robust locked-card workflow as the source of truth, but spends
 The Odds API credits only when a SuperBru pick actually needs to be submitted
 or changed. Backup runs that find the locked-card score already visible on
 SuperBru skip both the odds snapshot and submit step.
+
+Team names are canonicalized with aliases before card/event matching, so a
+locked-card name such as "United States" can match SuperBru/Odds labels such as
+"USA".
 """
 from __future__ import annotations
 
@@ -14,9 +18,12 @@ import importlib.util
 import json
 import re
 import sys
+import types
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+
+from team_name_aliases import canonical_team_key
 
 
 def load_base_module():
@@ -31,6 +38,10 @@ def load_base_module():
 
 base = load_base_module()
 
+# Patch the base module's team normalization so card rows, SuperBru labels, and
+# one-match Odds API events all compare on canonical alias-aware keys.
+base.norm_team = canonical_team_key
+
 
 def normalized_score(value: Any) -> str:
     text = base.txt(value)
@@ -38,6 +49,35 @@ def normalized_score(value: Any) -> str:
     if len(numbers) < 2:
         return ""
     return f"{int(numbers[0])}-{int(numbers[1])}"
+
+
+async def submit_pick_alias_aware(args, home_team: str, away_team: str, pick: str, out_dir: Path) -> dict[str, Any]:
+    """Submit using alias-aware in-browser row and subtab matchers."""
+    submit_path = Path(__file__).parent / "submit_superbru_pick_cdp_aliases.py"
+    spec = importlib.util.spec_from_file_location("submit_superbru_pick_cdp_aliases", submit_path)
+    if not spec or not spec.loader:
+        raise RuntimeError(f"Could not load alias-aware submit script: {submit_path}")
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+
+    submit_args = types.SimpleNamespace(
+        launch=True,
+        headless=args.headless,
+        email=args.email,
+        password=args.password,
+        login_url=args.login_url,
+        pool_url=args.pool_url,
+        home_team=home_team,
+        away_team=away_team,
+        new_pick=pick,
+        settle_ms=8000,
+        timeout_ms=60000,
+        dry_run=args.dry_run,
+        inspect_only=False,
+        diagnostics_dir=str(out_dir / "submit_diagnostics"),
+        cdp_url="http://127.0.0.1:9222",
+    )
+    return await mod.run(submit_args)
 
 
 async def run(args: argparse.Namespace) -> dict[str, Any]:
@@ -60,6 +100,8 @@ async def run(args: argparse.Namespace) -> dict[str, Any]:
 
         pick = base.txt(pick_lookup["pick"])
         entry["selected_pick"] = pick
+        entry["home_team_key"] = canonical_team_key(entry.get("home_team"))
+        entry["away_team_key"] = canonical_team_key(entry.get("away_team"))
         entry["current_pick_normalized"] = normalized_score(entry.get("current_pick"))
         entry["selected_pick_normalized"] = normalized_score(pick)
 
@@ -77,7 +119,7 @@ async def run(args: argparse.Namespace) -> dict[str, Any]:
             continue
 
         try:
-            submit_result = await base.submit_pick(args, entry["home_team"], entry["away_team"], pick, out_dir)
+            submit_result = await submit_pick_alias_aware(args, entry["home_team"], entry["away_team"], pick, out_dir)
             entry["status"] = submit_result.get("status", "unknown")
             entry["submit_result"] = submit_result
         except Exception as exc:
@@ -87,7 +129,7 @@ async def run(args: argparse.Namespace) -> dict[str, Any]:
 
     summary = {
         "run_at_utc": now.isoformat(),
-        "mode": "match_scoped_locked_card_auto_pick_smart_odds",
+        "mode": "match_scoped_locked_card_auto_pick_smart_odds_aliases",
         "window_minutes": args.window_minutes,
         "dry_run": args.dry_run,
         "pick_card_csv": args.pick_card_csv,
@@ -102,7 +144,7 @@ async def run(args: argparse.Namespace) -> dict[str, Any]:
     }
 
     ts = now.strftime("%Y%m%dT%H%M%SZ")
-    (out_dir / f"{ts}_auto_pick_match_scoped_smart_odds.json").write_text(
+    (out_dir / f"{ts}_auto_pick_match_scoped_smart_odds_aliases.json").write_text(
         json.dumps(summary, indent=2, default=str),
         encoding="utf-8",
     )

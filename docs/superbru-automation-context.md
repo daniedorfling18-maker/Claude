@@ -7,19 +7,19 @@ This document records the current production automation setup for the World Cup 
 The automation is split into two separate responsibilities:
 
 1. **Refresh Locked Superbru Card** keeps the committed card fresh.
-2. **Auto Pick (Scheduled)** submits the latest locked-card scoreline to SuperBru before kickoff.
+2. **Auto Pick (Scheduled)** submits the latest scoreline to SuperBru before kickoff.
 
-This separation is intentional. The refresh workflow prepares the card; the auto-pick workflow submits from the card.
+This separation is intentional. The refresh workflow prepares the card; the auto-pick workflow submits from the card or from a live one-match recompute.
 
-## Source of truth
+## Source of truth and fallback
 
-The submitted scoreline comes from:
+The committed card is:
 
 ```text
 outputs/final_locked_picks/superbru_final_card.csv
 ```
 
-Auto Pick should not invent a pick. If the upcoming match is missing from this file, it should not submit.
+Auto Pick uses this card as the fallback/source-of-truth row set. When match odds are enabled, Auto Pick fetches only the imminent match's odds and recomputes a fresh pick before submission. If the fresh recompute is unavailable, it falls back to the committed card pick.
 
 ## Refresh Locked Superbru Card
 
@@ -59,11 +59,13 @@ Workflow:
 .github/workflows/auto_pick.yml
 ```
 
-Active runner:
+Active entrypoint:
 
 ```text
 scripts/auto_pick_match_scoped_smart_odds.py
 ```
+
+Important: despite the legacy filename, this entrypoint currently delegates to the full live runner in `scripts/auto_pick_match_scoped.py` after patching alias-aware team matching and alias-aware browser submission.
 
 Supporting alias files:
 
@@ -74,13 +76,37 @@ scripts/submit_superbru_pick_cdp_aliases.py
 
 Schedule:
 
-- runs 20 minutes before each configured kickoff;
-- runs again 10 minutes before each configured kickoff as a backup;
-- uses a default `window_minutes` value of 25 to tolerate GitHub cron delay.
+- runs once per configured kickoff, roughly 25 minutes before kickoff;
+- uses a default `window_minutes` value of 40 to tolerate GitHub cron delay;
+- does not use the older 20/10 double-fire design.
+
+## Odds API spending
+
+The scheduled Auto Pick run uses a match-scoped odds pull, not a whole-tournament pull.
+
+Default behaviour:
+
+1. Log in to SuperBru.
+2. Scan match tabs and queue only matches inside the pre-kickoff window.
+3. Fetch a one-match odds snapshot for the queued match when `fetch_match_odds=true`.
+4. Recompute a fresh pick from that one-match snapshot and the engine config.
+5. Apply pool-position intelligence if leaderboard scraping succeeds.
+6. Submit the recomputed pick; if recompute fails, submit the committed card fallback pick.
+
+Expected quota posture:
+
+```text
+Scheduled Auto Pick = about one match-scoped odds pull per kickoff, when fetch_match_odds=true.
+Refresh Locked Superbru Card = zero Odds API pulls by default.
+Manual refresh_market_odds=true = intentionally spends refresh credits.
+Manual fetch_match_odds=false = no match odds pull; submit card fallback only.
+```
+
+The workflow comments estimate match odds cost from the configured region and market scope. The base runner resolves unset `odds_regions` / `odds_markets` from `config.yaml`, defaulting to `eu` and `h2h,totals` when no config value exists.
 
 ## Team-name aliases
 
-Team-name matching is alias-aware across the card lookup, one-match Odds API event lookup, and in-browser SuperBru row/subtab matching.
+Team-name matching is alias-aware across the card lookup, one-match Odds API event lookup, orientation checks, and in-browser SuperBru row/subtab matching.
 
 Examples that should match each other:
 
@@ -95,32 +121,11 @@ Curacao / Curaçao / CUR / CUW
 Ivory Coast / Côte d'Ivoire / CIV
 ```
 
-The active smart runner patches the base team normalizer to use `canonical_team_key`, so a canonical locked-card row such as `United States` can match a SuperBru row or tab labelled `USA`.
+Alias implementation:
 
-The alias-aware submitter wrapper replaces the browser JavaScript row and subtab matchers so the in-browser submit step accepts canonical names plus all known aliases.
-
-## Smart Odds API spending
-
-The smart runner is designed to spend Odds API credits only when action is needed.
-
-For each queued match:
-
-1. Read the locked-card score from `superbru_final_card.csv`.
-2. Read the score currently visible in SuperBru's score inputs.
-3. If the visible score already matches the locked-card score:
-   - mark the match as `already_picked`;
-   - skip the one-match odds snapshot;
-   - skip submit.
-4. If the visible score is blank or different:
-   - fetch a one-match odds snapshot, unless explicitly disabled;
-   - submit the locked-card scoreline.
-
-Expected behaviour:
-
-```text
-20-minute run: spends credits only if the pick needs to be submitted or changed.
-10-minute backup: spends zero credits if the 20-minute run already saved the pick.
-```
+- `scripts/team_name_aliases.py` provides `canonical_team_key`.
+- `scripts/auto_pick_match_scoped_smart_odds.py` patches the base runner's `norm_team` to `canonical_team_key`.
+- `scripts/submit_superbru_pick_cdp_aliases.py` patches the browser JavaScript row and subtab matchers so SuperBru labels such as `USA` can match canonical card names such as `United States`.
 
 ## Manual dispatch controls
 
@@ -130,7 +135,7 @@ Auto Pick manual input:
 fetch_match_odds=true
 ```
 
-This is the normal smart-spend path. It only fetches one-match odds when the visible SuperBru score does not already match the locked card.
+This is the normal live-recompute path and spends one-match Odds API credits for a queued match.
 
 Use:
 
@@ -138,7 +143,7 @@ Use:
 fetch_match_odds=false
 ```
 
-only when you want a no-odds submit attempt from the locked card.
+when you want to avoid Odds API spend and submit only the committed card fallback pick.
 
 Refresh manual input:
 
@@ -151,14 +156,14 @@ spends The Odds API credits during card refresh. Leave it false unless intention
 ## Expected Auto Pick statuses
 
 ```text
-already_picked      SuperBru already shows the locked-card score; no odds and no submit.
-submitted           Locked-card score was submitted.
-dry_run             Run checked but did not submit.
-pick_card_missing   Match was in the window but missing from the locked card.
-locked_skipped      SuperBru inputs were locked.
-no_inputs_skipped   Score inputs were not found.
-not_in_window       Match was not inside the submission window.
-submit_failed       Submit attempt failed after queueing.
+submitted              Scoreline was submitted.
+dry_run                Run checked but did not submit.
+no_pick_available      Neither a live recompute nor committed-card fallback was available.
+pick_card_missing      Match was in the window but missing from the locked card.
+locked_skipped         SuperBru inputs were locked.
+no_inputs_skipped      Score inputs were not found.
+not_in_window          Match was not inside the submission window.
+submit_failed          Submit attempt failed after queueing.
 ```
 
 ## Important artifacts
@@ -171,19 +176,23 @@ outputs/daily_robust_card/
 outputs/final_locked_picks/
 ```
 
-The Auto Pick summary mode should be:
+The base Auto Pick summary mode remains:
 
 ```json
-"mode": "match_scoped_locked_card_auto_pick_smart_odds_aliases"
+"mode": "match_scoped_locked_card_auto_pick"
+```
+
+The alias-aware entrypoint adds this marker to the printed result:
+
+```json
+"alias_aware_entrypoint": true
 ```
 
 ## Final operational rule
 
-The automation should be treated as follows:
-
 ```text
-Refresh Locked Superbru Card = prepares the card.
-Auto Pick = submits from the card.
-Odds API = used only when the pick needs action or when a manual refresh explicitly asks for market odds.
-Team aliases = canonical card names and SuperBru/Odds short labels must resolve to the same team key.
+Refresh Locked Superbru Card = prepares the card and normally spends zero Odds API credits.
+Auto Pick = submits from a live one-match recompute, with committed-card fallback.
+Odds API = one match-scoped pull per scheduled kickoff by default, not a whole tournament pull.
+Team aliases = canonical card names and SuperBru/Odds short labels resolve to the same team key.
 ```

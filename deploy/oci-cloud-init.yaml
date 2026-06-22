@@ -1,0 +1,53 @@
+#cloud-config
+# First-boot bootstrap for the Polymarket dry-run monitor on an Oracle Ubuntu VM.
+#
+# Pass it to the retry launcher:
+#   export OCI_USER_DATA_FILE=deploy/oci-cloud-init.yaml
+#   bash scripts/oci_launch_a1_retry.sh
+#
+# It installs Docker, clones the repo, and starts the bot + converter + long/short engine
+# in DRY-RUN. No secrets are needed for dry-run, and you should NOT put trading keys here -
+# cloud-init user-data is readable from instance metadata. Add live keys to .env after you
+# SSH in (see docs/POLYMARKET_MISPRICING_BOT.md).
+#
+# Edit REPO_URL / REPO_REF below before launch. For a private repo, use a tokenised URL
+# (https://x-access-token:<TOKEN>@github.com/owner/repo.git) at your own risk, or clone by
+# hand after SSH instead.
+package_update: true
+packages:
+  - git
+  - ca-certificates
+  - curl
+write_files:
+  - path: /opt/polymarket-bootstrap.sh
+    permissions: "0755"
+    content: |
+      #!/usr/bin/env bash
+      set -euxo pipefail
+
+      REPO_URL="https://github.com/daniedorfling18-maker/Claude.git"
+      REPO_REF="claude/charming-ritchie-cklk7u"   # switch to main once PR #28 is merged
+      APP_USER="ubuntu"
+      APP_DIR="/home/${APP_USER}/Claude"
+
+      # Docker (the convenience script installs compose v2 too).
+      if ! command -v docker >/dev/null 2>&1; then
+        curl -fsSL https://get.docker.com | sh
+      fi
+      systemctl enable --now docker
+      usermod -aG docker "${APP_USER}" || true
+
+      # Repo.
+      if [ ! -d "${APP_DIR}/.git" ]; then
+        sudo -u "${APP_USER}" git clone --branch "${REPO_REF}" "${REPO_URL}" "${APP_DIR}" \
+          || sudo -u "${APP_USER}" git clone "${REPO_URL}" "${APP_DIR}"
+      fi
+      cd "${APP_DIR}"
+      [ -f .env ] || sudo -u "${APP_USER}" cp .env.example .env
+
+      # Dry-run monitor: bot + model-probabilities converter + long/short engine.
+      docker compose -f docker-compose.monitor.yml up -d --build
+      docker compose -f docker-compose.monitor.yml ps
+runcmd:
+  - bash /opt/polymarket-bootstrap.sh 2>&1 | tee /var/log/polymarket-bootstrap.log
+final_message: "Polymarket dry-run monitor bootstrap finished after $UPTIME s. Logs: /var/log/polymarket-bootstrap.log"

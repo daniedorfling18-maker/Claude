@@ -23,11 +23,25 @@ bash scripts/oci_launch_a1_retry.sh
 It retries only on capacity errors (cycling ADs, jittered backoff) and stops immediately on
 auth/quota errors. Fallback shape if A1 stays unavailable: `OCI_SHAPE=VM.Standard.E2.1.Micro`
 (x86, always available; 1 GB RAM, so add swap). Leave it running — it usually lands one within
-hours. See the script header for all options (cloud-init bootstrap, max tries, sleep range).
+hours.
+
+### Fully hands-off (cloud-init)
+
+Add the cloud-init file so the VM installs Docker, clones the repo, and starts the dry-run
+monitor (bot + converter + long/short engine) on first boot — no manual setup after it lands:
+
+```bash
+export OCI_USER_DATA_FILE=deploy/oci-cloud-init.yaml
+bash scripts/oci_launch_a1_retry.sh
+```
+
+Edit `REPO_URL` / `REPO_REF` in `deploy/oci-cloud-init.yaml` first. It runs **dry-run only** and
+needs no secrets — do NOT put trading keys in cloud-init (user-data is readable from instance
+metadata). Add live keys to `.env` after you SSH in. Bootstrap log: `/var/log/polymarket-bootstrap.log`.
 
 ## After the VM is provisioned
 
-Use this once the Oracle Always Free VM is provisioned.
+If you did not use cloud-init, do this once the Oracle Always Free VM is provisioned.
 
 1. SSH into the Ubuntu VM.
 2. Install Docker and Docker Compose.

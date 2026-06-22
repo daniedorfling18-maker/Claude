@@ -1120,6 +1120,7 @@ async def scan_superbru_matches(
                 "kickoff_utc": kickoff_dt.isoformat() if kickoff_dt else None,
                 "kickoff_raw": info.get("kickoffText"),
                 "kickoff_source": info.get("kickoffSource"),
+                "kickoff_source": info.get("kickoffSource"),
                 "minutes_until": round(time_until.total_seconds() / 60) if time_until else None,
                 "current_pick": f"{info.get('homeVal')}-{info.get('awayVal')}",
                 "locked": info.get("locked"),

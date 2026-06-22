@@ -1,1 +1,4 @@
-
+home_team,away_team,original_pick,locked_pick,ev_loss,delta_p_finish_first,current_component_score,candidate_component_score,component_improvement,decision_reasons
+Switzerland,Canada,2-1,1-0,0.004458,-1.6e-05,0.724,0.853,0.129,low EV cost; leader delta acceptable; candidate component-supported; candidate improves component validation; no stress-switch support
+Norway,France,0-2,1-2,0.006835,0.000478,0.7425,0.8695,0.127,low EV cost; leader delta acceptable; candidate component-supported; candidate improves component validation; no stress-switch support
+Algeria,Austria,1-2,0-1,0.00495,-0.00038,0.674,0.803,0.129,low EV cost; leader delta acceptable; candidate component-supported; candidate improves component validation; no stress-switch support

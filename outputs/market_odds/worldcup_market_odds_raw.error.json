@@ -1,0 +1,10 @@
+{
+  "generated_at_utc": "2026-06-22T07:01:30.696347+00:00",
+  "status": "fetch_failed",
+  "sport": "soccer_fifa_world_cup",
+  "regions": "uk,eu,us,au",
+  "markets": "h2h,spreads,totals",
+  "error": "HTTP 422 Unprocessable Entity: {\"message\":\"Invalid commenceTimeFrom parameter. The format must be YYYY-MM-DDTHH:MM:SSZ, for example 2020-11-24T16:05:00Z\",\"error_code\":\"INVALID_COMMENCE_TIME_FROM\",\"details_url\":\"https://the-odds-api.com/liveapi/guides/v4/api-error-codes.html#invalid-commence-time-from\"}\n",
+  "used_stale_fallback": true,
+  "used_empty_fallback": true
+}

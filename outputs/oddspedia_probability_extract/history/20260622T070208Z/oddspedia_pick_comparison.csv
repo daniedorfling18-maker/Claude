@@ -1,0 +1,41 @@
+match_id,commence_time,home_team,away_team,pick_column,locked_pick,locked_pick_probability_pct,locked_pick_outcome,oddspedia_best_score,oddspedia_best_probability_pct,oddspedia_best_outcome,probability_gap_vs_locked_pct,same_outcome_as_locked,oddspedia_top1_score,oddspedia_top1_pct,oddspedia_top2_score,oddspedia_top2_pct,oddspedia_top3_score,oddspedia_top3_pct,winner_home_pct,winner_draw_pct,winner_away_pct,modal_correct_score,modal_correct_score_pct,market_p_home_win,market_p_draw,market_p_away_win,market_consensus_direction,action,reason
+netherlands-sweden,2026-06-20T17:00:00Z,Netherlands,Sweden,locked_pick,2-0,8.05,home,1-1,10.85,draw,2.799999999999999,False,1-1,10.85,2-1,9.57,1-0,9.21,50.6,23.45,26.0,1-1,10.85,50.6,23.45,26.0,home,keep,locked pick available in grid
+germany-ivory-coast,2026-06-20T20:00:00Z,Germany,Ivory Coast,locked_pick,2-0,8.99,home,1-1,10.25,draw,1.2599999999999998,False,1-1,10.25,2-1,9.74,1-0,9.36,55.85,22.0,22.15,1-1,10.25,55.85,22.0,22.15,home,keep,locked pick available in grid
+ecuador-curacao,2026-06-21T00:00:00Z,Ecuador,Curacao,locked_pick,2-0,9.58,home,1-0,12.93,home,3.3499999999999996,True,1-0,12.93,1-1,11.99,2-0,9.58,49.1,26.05,24.85,1-0,12.93,49.1,26.05,24.85,home,same_outcome_review,moderately higher-probability same-outcome scoreline exists
+tunisia-japan,2026-06-21T04:00:00Z,Tunisia,Japan,locked_pick,0-2,10.66,away,0-1,12.81,away,2.1500000000000004,True,0-1,12.81,1-1,11.47,0-2,10.66,20.2,24.3,55.55,0-1,12.81,20.2,24.3,55.55,away,same_outcome_review,moderately higher-probability same-outcome scoreline exists
+spain-saudi-arabia,2026-06-21T16:00:00Z,Spain,Saudi Arabia,locked_pick,3-0,8.53,home,1-0,14.26,home,5.73,True,1-0,14.26,2-0,13.31,1-1,9.46,66.8,20.9,12.25,1-0,14.26,66.8,20.9,12.25,home,strong_same_outcome_review,higher-probability same-outcome scoreline exists
+belgium-iran,2026-06-21T19:00:00Z,Belgium,Iran,locked_pick,2-0,8.82,home,1-1,11.24,draw,2.42,False,1-1,11.24,1-0,10.26,2-1,9.63,51.9,23.85,24.3,1-1,11.24,51.9,23.85,24.3,home,keep,locked pick available in grid
+uruguay-cape-verde,2026-06-21T22:00:00Z,Uruguay,Cape Verde,locked_pick,2-0,10.9,home,1-0,15.0,home,4.1,True,1-0,15.0,1-1,12.06,2-0,10.9,52.2,26.6,21.2,1-0,15.0,52.2,26.6,21.2,home,strong_same_outcome_review,higher-probability same-outcome scoreline exists
+new-zealand-egypt,2026-06-22T01:00:00Z,New Zealand,Egypt,locked_pick,0-2,8.96,away,0-1,13.15,away,4.1899999999999995,True,0-1,13.15,1-1,12.6,0-0,9.71,26.85,27.35,45.8,0-1,13.15,26.85,27.35,45.8,away,strong_same_outcome_review,higher-probability same-outcome scoreline exists
+argentina-austria,2026-06-22T17:00:00Z,Argentina,Austria,locked_pick,2-0,6.2,home,1-1,11.2,draw,4.999999999999999,False,1-1,11.2,2-1,8.61,1-0,8.17,41.55,24.5,33.9,1-1,11.2,41.55,24.5,33.9,home,market_outcome_conflict_review,Oddspedia modal implies different result outcome
+france-iraq,2026-06-22T21:00:00Z,France,Iraq,locked_pick,3-0,10.5,home,1-0,15.89,home,5.390000000000001,True,1-0,15.89,2-0,15.64,3-0,10.5,72.95,18.7,8.31,1-0,15.89,72.95,18.7,8.31,home,strong_same_outcome_review,higher-probability same-outcome scoreline exists
+norway-senegal,2026-06-23T00:00:00Z,Norway,Senegal,locked_pick,2-1,8.69,home,1-1,11.25,draw,2.5600000000000005,False,1-1,11.25,2-1,8.69,1-0,8.46,41.55,24.6,33.85,1-1,11.25,41.55,24.6,33.85,home,keep,locked pick available in grid
+jordan-algeria,2026-06-23T03:00:00Z,Jordan,Algeria,locked_pick,0-2,8.55,away,1-1,11.26,draw,2.709999999999999,False,1-1,11.26,0-1,10.59,1-2,9.22,26.25,24.45,49.3,1-1,11.26,26.25,24.45,49.3,away,keep,locked pick available in grid
+portugal-uzbekistan,2026-06-23T17:00:00Z,Portugal,Uzbekistan,locked_pick,2-0,14.06,home,1-0,15.96,home,1.9000000000000004,True,1-0,15.96,2-0,14.06,1-1,9.17,65.85,21.9,12.26,1-0,15.96,65.85,21.9,12.26,home,keep,locked pick available in grid
+england-ghana,2026-06-23T20:00:00Z,England,Ghana,locked_pick,2-0,14.17,home,1-0,14.22,home,0.05000000000000071,True,1-0,14.22,2-0,14.17,3-0,9.57,69.8,19.5,10.74,1-0,14.22,69.8,19.5,10.74,home,keep,locked pick available in grid
+panama-croatia,2026-06-23T23:00:00Z,Panama,Croatia,locked_pick,0-2,8.61,away,1-1,10.79,draw,2.1799999999999997,False,1-1,10.79,0-1,9.75,1-2,9.58,24.4,23.3,52.25,1-1,10.79,24.4,23.3,52.25,away,keep,locked pick available in grid
+colombia-dr-congo,2026-06-24T02:00:00Z,Colombia,DR Congo,locked_pick,2-0,10.71,home,1-0,14.01,home,3.299999999999999,True,1-0,14.01,1-1,12.06,2-0,10.71,52.95,25.85,21.2,1-0,14.01,52.95,25.85,21.2,home,same_outcome_review,moderately higher-probability same-outcome scoreline exists
+bosnia-and-herzegovina-qatar,2026-06-24T19:00:00Z,Bosnia & Herzegovina,Qatar,locked_pick,2-0,,home,,,unknown,,False,,,,,,,,,,,,,,,unknown,no_grid,no Oddspedia grid for match
+switzerland-canada,2026-06-24T19:00:00Z,Switzerland,Canada,locked_pick,2-1,,home,,,unknown,,False,,,,,,,,,,,,,,,unknown,no_grid,no Oddspedia grid for match
+morocco-haiti,2026-06-24T22:00:00Z,Morocco,Haiti,locked_pick,2-0,,home,,,unknown,,False,,,,,,,,,,,,,,,unknown,no_grid,no Oddspedia grid for match
+scotland-brazil,2026-06-24T22:00:00Z,Scotland,Brazil,locked_pick,0-2,,away,,,unknown,,False,,,,,,,,,,,,,,,unknown,no_grid,no Oddspedia grid for match
+czech-republic-mexico,2026-06-25T01:00:00Z,Czech Republic,Mexico,locked_pick,0-2,,away,,,unknown,,False,,,,,,,,,,,,,,,unknown,no_grid,no Oddspedia grid for match
+south-africa-south-korea,2026-06-25T01:00:00Z,South Africa,South Korea,locked_pick,0-2,,away,,,unknown,,False,,,,,,,,,,,,,,,unknown,no_grid,no Oddspedia grid for match
+curacao-ivory-coast,2026-06-25T20:00:00Z,Curacao,Ivory Coast,locked_pick,0-2,,away,,,unknown,,False,,,,,,,,,,,,,,,unknown,no_grid,no Oddspedia grid for match
+ecuador-germany,2026-06-25T20:00:00Z,Ecuador,Germany,locked_pick,0-2,,away,,,unknown,,False,,,,,,,,,,,,,,,unknown,no_grid,no Oddspedia grid for match
+japan-sweden,2026-06-25T23:00:00Z,Japan,Sweden,locked_pick,2-1,,home,,,unknown,,False,,,,,,,,,,,,,,,unknown,no_grid,no Oddspedia grid for match
+tunisia-netherlands,2026-06-25T23:00:00Z,Tunisia,Netherlands,locked_pick,0-2,,away,,,unknown,,False,,,,,,,,,,,,,,,unknown,no_grid,no Oddspedia grid for match
+paraguay-australia,2026-06-26T02:00:00Z,Paraguay,Australia,locked_pick,1-0,,home,,,unknown,,False,,,,,,,,,,,,,,,unknown,no_grid,no Oddspedia grid for match
+turkey-united-states,2026-06-26T02:00:00Z,Turkey,United States,locked_pick,1-2,,away,,,unknown,,False,,,,,,,,,,,,,,,unknown,no_grid,no Oddspedia grid for match
+senegal-iraq,2026-06-26T19:00:00Z,Senegal,Iraq,locked_pick,2-0,,home,,,unknown,,False,,,,,,,,,,,,,,,unknown,no_grid,no Oddspedia grid for match
+norway-france,2026-06-26T19:00:00Z,Norway,France,locked_pick,0-2,,away,,,unknown,,False,,,,,,,,,,,,,,,unknown,no_grid,no Oddspedia grid for match
+cape-verde-saudi-arabia,2026-06-27T00:00:00Z,Cape Verde,Saudi Arabia,locked_pick,1-2,,away,,,unknown,,False,,,,,,,,,,,,,,,unknown,no_grid,no Oddspedia grid for match
+uruguay-spain,2026-06-27T00:00:00Z,Uruguay,Spain,locked_pick,0-2,,away,,,unknown,,False,,,,,,,,,,,,,,,unknown,no_grid,no Oddspedia grid for match
+new-zealand-belgium,2026-06-27T03:00:00Z,New Zealand,Belgium,locked_pick,0-2,,away,,,unknown,,False,,,,,,,,,,,,,,,unknown,no_grid,no Oddspedia grid for match
+egypt-iran,2026-06-27T03:00:00Z,Egypt,Iran,locked_pick,2-0,,home,,,unknown,,False,,,,,,,,,,,,,,,unknown,no_grid,no Oddspedia grid for match
+croatia-ghana,2026-06-27T21:00:00Z,Croatia,Ghana,locked_pick,2-0,,home,,,unknown,,False,,,,,,,,,,,,,,,unknown,no_grid,no Oddspedia grid for match
+panama-england,2026-06-27T21:00:00Z,Panama,England,locked_pick,0-2,,away,,,unknown,,False,,,,,,,,,,,,,,,unknown,no_grid,no Oddspedia grid for match
+colombia-portugal,2026-06-27T23:30:00Z,Colombia,Portugal,locked_pick,0-2,,away,,,unknown,,False,,,,,,,,,,,,,,,unknown,no_grid,no Oddspedia grid for match
+dr-congo-uzbekistan,2026-06-27T23:30:00Z,DR Congo,Uzbekistan,locked_pick,2-1,,home,,,unknown,,False,,,,,,,,,,,,,,,unknown,no_grid,no Oddspedia grid for match
+algeria-austria,2026-06-28T02:00:00Z,Algeria,Austria,locked_pick,1-2,,away,,,unknown,,False,,,,,,,,,,,,,,,unknown,no_grid,no Oddspedia grid for match
+jordan-argentina,2026-06-28T02:00:00Z,Jordan,Argentina,locked_pick,0-2,,away,,,unknown,,False,,,,,,,,,,,,,,,unknown,no_grid,no Oddspedia grid for match

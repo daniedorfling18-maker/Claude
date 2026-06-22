@@ -1,12 +1,2794 @@
 {
-  "generated_at_utc": "2026-06-21T08:20:31.609768+00:00",
-  "seed_url": "https://oddspedia.com/football/world/world-cup",
-  "events_found": 24,
-  "fixtures_count": 40,
-  "matched_to_locked_picks": 16,
-  "new_events_not_yet_in_picks": 8,
-  "total_urls_written": 24,
-  "fixtures_not_on_oddspedia": 24,
-  "out_csv": "inputs/oddspedia_match_urls.csv",
-  "unmatched_csv": "outputs/oddspedia_url_discovery/oddspedia_url_unmatched.csv"
+  "summary": {
+    "generated_at_utc": "2026-06-22T07:02:08.301219+00:00",
+    "seed_url_count": 1,
+    "link_count": 325,
+    "fixture_count": 40,
+    "out_csv": "inputs\\oddspedia_match_urls.csv",
+    "unmatched_csv": "outputs\\oddspedia_url_discovery\\oddspedia_url_discovery_unmatched.csv",
+    "oddspedia_event_count": 72,
+    "fixture_matched_event_count": 39,
+    "fixture_unmatched_count": 1
+  },
+  "links": [
+    {
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url": "https://oddspedia.com/",
+      "label": ""
+    },
+    {
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url": "https://oddspedia.com/football/world/world-cup",
+      "label": "WC 26"
+    },
+    {
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url": "https://oddspedia.com/",
+      "label": "SCORES"
+    },
+    {
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url": "https://oddspedia.com/",
+      "label": "All Live Scores"
+    },
+    {
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url": "https://oddspedia.com/football",
+      "label": "Football Scores"
+    },
+    {
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url": "https://oddspedia.com/cricket",
+      "label": "Cricket Scores"
+    },
+    {
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url": "https://oddspedia.com/football/europe/champions-league",
+      "label": "Champions League Scores"
+    },
+    {
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url": "https://oddspedia.com/football/england/premier-league",
+      "label": "Premier League Scores"
+    },
+    {
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url": "https://oddspedia.com/cricket/india/ipl",
+      "label": "IPL Scores"
+    },
+    {
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url": "https://oddspedia.com/insights",
+      "label": "INSIGHTS"
+    },
+    {
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url": "https://oddspedia.com/insights/latest",
+      "label": "Latest News"
+    },
+    {
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url": "https://oddspedia.com/insights/betting",
+      "label": "Betting"
+    },
+    {
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url": "https://oddspedia.com/insights/football",
+      "label": "Football"
+    },
+    {
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url": "https://oddspedia.com/insights/american-football",
+      "label": "American Football"
+    },
+    {
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url": "https://oddspedia.com/insights/basketball",
+      "label": "Basketball"
+    },
+    {
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url": "https://oddspedia.com/insights/baseball",
+      "label": "Baseball"
+    },
+    {
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url": "https://oddspedia.com/insights/hockey",
+      "label": "Hockey"
+    },
+    {
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url": "https://oddspedia.com/insights/features",
+      "label": "Oddspedia Features"
+    },
+    {
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url": "https://oddspedia.com/insights/guides",
+      "label": "Guides"
+    },
+    {
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url": "https://oddspedia.com/odds",
+      "label": "ODDS"
+    },
+    {
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url": "https://oddspedia.com/odds",
+      "label": "Odds Comparison"
+    },
+    {
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url": "https://oddspedia.com/football/odds",
+      "label": "Football Odds"
+    },
+    {
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url": "https://oddspedia.com/cricket/odds",
+      "label": "Cricket Odds"
+    },
+    {
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url": "https://oddspedia.com/tennis/odds",
+      "label": "Tennis Odds"
+    },
+    {
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url": "https://oddspedia.com/basketball/odds",
+      "label": "Basketball Odds"
+    },
+    {
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url": "https://oddspedia.com/football/england/premier-league/odds",
+      "label": "Premier League Odds"
+    },
+    {
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url": "https://oddspedia.com/football/world/world-cup",
+      "label": "World Cup Odds"
+    },
+    {
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url": "https://oddspedia.com/tips",
+      "label": "TIPS"
+    },
+    {
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url": "https://oddspedia.com/tips",
+      "label": "Latest Tips"
+    },
+    {
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url": "https://oddspedia.com/tips?tab=by-consensus",
+      "label": "Consensus Tips"
+    },
+    {
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url": "https://oddspedia.com/tips/tipsters-ranking",
+      "label": "Tipster Rankings"
+    },
+    {
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url": "https://oddspedia.com/tips/tipsters-ranking/leaderboards",
+      "label": "Leaderboards"
+    },
+    {
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url": "https://oddspedia.com/tips/competitions/wc2026-competition",
+      "label": "WC26 Tipster Competition"
+    },
+    {
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url": "https://oddspedia.com/tips/competitions/monthly",
+      "label": "Monthly Tipster Competition"
+    },
+    {
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url": "https://oddspedia.com/tips/competitions/yearly",
+      "label": "Yearly Tipster Competition"
+    },
+    {
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url": "https://oddspedia.com/tips/rivals",
+      "label": "Rivals: Create Your Own Tipster League"
+    },
+    {
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url": "https://oddspedia.com/football/tips",
+      "label": "Football Tips"
+    },
+    {
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url": "https://oddspedia.com/tennis/tips",
+      "label": "Tennis Tips"
+    },
+    {
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url": "https://oddspedia.com/cricket/tips",
+      "label": "Cricket Tips"
+    },
+    {
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url": "https://oddspedia.com/football/europe/champions-league/tips",
+      "label": "UCL Tips"
+    },
+    {
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url": "https://oddspedia.com/football/england/premier-league/tips",
+      "label": "Premier League Tips"
+    },
+    {
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url": "https://oddspedia.com/bookmakers",
+      "label": "BETTING SITES"
+    },
+    {
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url": "https://oddspedia.com/bookmakers",
+      "label": "Best Betting Sites"
+    },
+    {
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url": "https://oddspedia.com/football/world/world-cup",
+      "label": "Bookmaker Reviews"
+    },
+    {
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url": "https://oddspedia.com/bookmakers/betway",
+      "label": "Betway Review"
+    },
+    {
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url": "https://oddspedia.com/bookmakers/hollywoodbets",
+      "label": "Hollywoodbets Review"
+    },
+    {
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url": "https://oddspedia.com/bookmakers/10bet",
+      "label": "10bet Review"
+    },
+    {
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url": "https://oddspedia.com/bookmakers/betibet",
+      "label": "Betibet Review"
+    },
+    {
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url": "https://oddspedia.com/bookmakers/betting-apps",
+      "label": "Betting Apps"
+    },
+    {
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url": "https://oddspedia.com/football/world/world-cup",
+      "label": "Bookmakers by Sport"
+    },
+    {
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url": "https://oddspedia.com/bookmakers/football",
+      "label": "Best Football Betting Sites"
+    },
+    {
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url": "https://oddspedia.com/bookmakers/tennis",
+      "label": "Best Tennis Betting Sites"
+    },
+    {
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url": "https://oddspedia.com/bookmakers/cricket",
+      "label": "Best Cricket Betting Sites"
+    },
+    {
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url": "https://oddspedia.com/bookmakers/basketball",
+      "label": "Best Basketball Betting Sites"
+    },
+    {
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url": "https://oddspedia.com/football/world/world-cup",
+      "label": "Payment Methods"
+    },
+    {
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url": "https://oddspedia.com/bookmakers/fastest-withdrawals",
+      "label": "Fastest Withdrawals UK"
+    },
+    {
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url": "https://oddspedia.com/football/world/world-cup",
+      "label": "PROMOS"
+    },
+    {
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url": "https://oddspedia.com/bookmakers/betting-offers",
+      "label": "Top Betting Offers"
+    },
+    {
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url": "https://oddspedia.com/free-bets",
+      "label": "Free Bets"
+    },
+    {
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url": "https://oddspedia.com/football/world/world-cup",
+      "label": "Bookmaker Bonuses"
+    },
+    {
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url": "https://oddspedia.com/bookmakers/betway/bonus/south-africa",
+      "label": "Betway Promo Code South Africa"
+    },
+    {
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url": "https://oddspedia.com/bookmakers/hollywoodbets/bonus",
+      "label": "Hollywoodbets Promo Code"
+    },
+    {
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url": "https://oddspedia.com/bookmakers/10bet/bonus",
+      "label": "10bet Sign Up Offer UK"
+    },
+    {
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url": "https://oddspedia.com/bookmakers/betibet/bonus",
+      "label": "Betibet Promo Code"
+    },
+    {
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url": "https://oddspedia.com/bookmakers/betting-offers#no-deposit-free-bets",
+      "label": "No Deposit Offers"
+    },
+    {
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url": "https://oddspedia.com/bookmakers/betting-offers#promotions",
+      "label": "Enhanced Odds"
+    },
+    {
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url": "https://oddspedia.com/bookmakers/betting-offers#loyalty-bonuses",
+      "label": "Special Offers"
+    },
+    {
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url": "https://oddspedia.com/football/world/world-cup",
+      "label": "TOOLS"
+    },
+    {
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url": "https://oddspedia.com/surebets",
+      "label": "Sure Bets"
+    },
+    {
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url": "https://oddspedia.com/hot-bets",
+      "label": "Hot Bets"
+    },
+    {
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url": "https://oddspedia.com/dropping-odds",
+      "label": "Dropping Odds"
+    },
+    {
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url": "https://oddspedia.com/valuebets",
+      "label": "Value Bets"
+    },
+    {
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url": "https://oddspedia.com/blockedodds",
+      "label": "Blocked Odds"
+    },
+    {
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url": "https://oddspedia.com/betting",
+      "label": "Betting Guides"
+    },
+    {
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url": "https://oddspedia.com/football/world/world-cup",
+      "label": "Betting Calculators"
+    },
+    {
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url": "https://oddspedia.com/insights/betting/accumulator-calculator",
+      "label": "Accumulator Calculator"
+    },
+    {
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url": "https://oddspedia.com/insights/betting/odds-calculator",
+      "label": "Odds calculator"
+    },
+    {
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url": "https://oddspedia.com/insights/betting/bet-calculator",
+      "label": "Bet Calculator"
+    },
+    {
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url": "https://oddspedia.com/insights/betting/stake-monthly-bonus-calculator",
+      "label": "Stake Monthly Bonus Calculator"
+    },
+    {
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url": "https://oddspedia.com/insights/betting/stake-weekly-bonus-calculator",
+      "label": "Stake Weekly Bonus Calculator"
+    },
+    {
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url": "https://oddspedia.com/football/world/world-cup",
+      "label": ""
+    },
+    {
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url": "https://oddspedia.com/tips/competitions/wc2026-competition",
+      "label": ""
+    },
+    {
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url": "https://oddspedia.com/insights/betting/oddspedia-smartbet-explainer",
+      "label": ""
+    },
+    {
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url": "https://oddspedia.com/insights/guides/world-cup-2026-betting-guide",
+      "label": ""
+    },
+    {
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url": "https://oddspedia.com/football/world/world-cup",
+      "label": "Matches"
+    },
+    {
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url": "https://oddspedia.com/football/world/world-cup/predictions",
+      "label": "Predictions"
+    },
+    {
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url": "https://oddspedia.com/football/world/world-cup/outrights",
+      "label": "Outrights"
+    },
+    {
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url": "https://oddspedia.com/football/world/world-cup/player-props",
+      "label": "Player Props"
+    },
+    {
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url": "https://oddspedia.com/football/world/world-cup/news",
+      "label": "News"
+    },
+    {
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url": "https://oddspedia.com/football/czech-republic-south-africa-1869938",
+      "label": "Odds"
+    },
+    {
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url": "https://oddspedia.com/football/czech-republic-south-africa-1869938/predictions",
+      "label": "Predictions"
+    },
+    {
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url": "https://oddspedia.com/football/mexico-south-korea-465",
+      "label": "Odds"
+    },
+    {
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url": "https://oddspedia.com/football/mexico-south-korea-465/predictions",
+      "label": "Predictions"
+    },
+    {
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url": "https://oddspedia.com/football/switzerland-bosnia-herzegovina-1001",
+      "label": "Odds"
+    },
+    {
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url": "https://oddspedia.com/football/switzerland-bosnia-herzegovina-1001/predictions",
+      "label": "Predictions"
+    },
+    {
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url": "https://oddspedia.com/football/canada-qatar-1023867",
+      "label": "Odds"
+    },
+    {
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url": "https://oddspedia.com/football/canada-qatar-1023867/predictions",
+      "label": "Predictions"
+    },
+    {
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url": "https://oddspedia.com/football/scotland-morocco-1654557",
+      "label": "Odds"
+    },
+    {
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url": "https://oddspedia.com/football/scotland-morocco-1654557/predictions",
+      "label": "Predictions"
+    },
+    {
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url": "https://oddspedia.com/football/brazil-haiti-390",
+      "label": "Odds"
+    },
+    {
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url": "https://oddspedia.com/football/brazil-haiti-390/predictions",
+      "label": "Predictions"
+    },
+    {
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url": "https://oddspedia.com/football/australia-usa-1534707",
+      "label": "Odds"
+    },
+    {
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url": "https://oddspedia.com/football/australia-usa-1534707/predictions",
+      "label": "Predictions"
+    },
+    {
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url": "https://oddspedia.com/football/turkey-paraguay-1869941",
+      "label": "Odds"
+    },
+    {
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url": "https://oddspedia.com/football/turkey-paraguay-1869941/predictions",
+      "label": "Predictions"
+    },
+    {
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url": "https://oddspedia.com/football/ivory-coast-germany-1654563",
+      "label": "Odds"
+    },
+    {
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url": "https://oddspedia.com/football/ivory-coast-germany-1654563/predictions",
+      "label": "Predictions"
+    },
+    {
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url": "https://oddspedia.com/football/ecuador-curacao-1654564",
+      "label": "Odds"
+    },
+    {
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url": "https://oddspedia.com/football/ecuador-curacao-1654564/predictions",
+      "label": "Predictions"
+    },
+    {
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url": "https://oddspedia.com/football/netherlands-sweden-1529",
+      "label": "Odds"
+    },
+    {
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url": "https://oddspedia.com/football/netherlands-sweden-1529/predictions",
+      "label": "Predictions"
+    },
+    {
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url": "https://oddspedia.com/football/japan-tunisia-957",
+      "label": "Odds"
+    },
+    {
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url": "https://oddspedia.com/football/japan-tunisia-957/predictions",
+      "label": "Predictions"
+    },
+    {
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url": "https://oddspedia.com/football/iran-belgium-1654569",
+      "label": "Odds"
+    },
+    {
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url": "https://oddspedia.com/football/iran-belgium-1654569/predictions",
+      "label": "Predictions"
+    },
+    {
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url": "https://oddspedia.com/football/egypt-new-zealand-1295549",
+      "label": "Odds"
+    },
+    {
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url": "https://oddspedia.com/football/egypt-new-zealand-1295549/predictions",
+      "label": "Predictions"
+    },
+    {
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url": "https://oddspedia.com/football/spain-saudi-arabia-1654576",
+      "label": "Odds"
+    },
+    {
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url": "https://oddspedia.com/football/spain-saudi-arabia-1654576/predictions",
+      "label": "Predictions"
+    },
+    {
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url": "https://oddspedia.com/football/uruguay-cape-verde-1654577",
+      "label": "Odds"
+    },
+    {
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url": "https://oddspedia.com/football/uruguay-cape-verde-1654577/predictions",
+      "label": "Predictions"
+    },
+    {
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url": "https://oddspedia.com/football/france-iraq-1869928",
+      "label": "Odds"
+    },
+    {
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url": "https://oddspedia.com/football/france-iraq-1869928/predictions",
+      "label": "Predictions"
+    },
+    {
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url": "https://oddspedia.com/football/france-iraq-1869928",
+      "label": "23:00\n\nFrance\nIraq\nTOTAL GOALS: UNDER 3.5\n2.00\nHOME\nDRAW\nAWAY\n1.07\n12.00\n31.00"
+    },
+    {
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url": "https://oddspedia.com/football/norway-senegal-1654581",
+      "label": "Odds"
+    },
+    {
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url": "https://oddspedia.com/football/norway-senegal-1654581/predictions",
+      "label": "Predictions"
+    },
+    {
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url": "https://oddspedia.com/football/norway-senegal-1654581",
+      "label": "23 Jun 02:00\n\nNorway\nSenegal\nDOUBLE CHANCE: DRAW OR SENEGAL\n1.67\nHOME\nDRAW\nAWAY\n2.23\n3.45\n3.23"
+    },
+    {
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url": "https://oddspedia.com/football/argentina-austria-1654585",
+      "label": "Odds"
+    },
+    {
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url": "https://oddspedia.com/football/argentina-austria-1654585/predictions",
+      "label": "Predictions"
+    },
+    {
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url": "https://oddspedia.com/football/argentina-austria-1654585",
+      "label": "19:00\n\nArgentina\nAustria\nDOUBLE CHANCE: DRAW OR AUSTRIA\n2.75\nHOME\nDRAW\nAWAY\n1.50\n4.30\n6.80"
+    },
+    {
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url": "https://oddspedia.com/football/algeria-jordan-1654586",
+      "label": "Odds"
+    },
+    {
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url": "https://oddspedia.com/football/algeria-jordan-1654586/predictions",
+      "label": "Predictions"
+    },
+    {
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url": "https://oddspedia.com/football/algeria-jordan-1654586",
+      "label": "23 Jun 05:00\n\nJordan\nAlgeria\nDOUBLE CHANCE: JORDAN OR DRAW\n2.48\nHOME\nDRAW\nAWAY\n5.90\n4.20\n1.55"
+    },
+    {
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url": "https://oddspedia.com/football/portugal-uzbekistan-1232",
+      "label": "Odds"
+    },
+    {
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url": "https://oddspedia.com/football/portugal-uzbekistan-1232/predictions",
+      "label": "Predictions"
+    },
+    {
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url": "https://oddspedia.com/football/portugal-uzbekistan-1232",
+      "label": "23 Jun 19:00\n\nPortugal\nUzbekistan\nTOTAL GOALS: UNDER 3.5\n1.52\nHOME\nDRAW\nAWAY\n1.19\n7.00\n15.00"
+    },
+    {
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url": "https://oddspedia.com/football/colombia-dr-congo-1869932",
+      "label": "Odds"
+    },
+    {
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url": "https://oddspedia.com/football/colombia-dr-congo-1869932/predictions",
+      "label": "Predictions"
+    },
+    {
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url": "https://oddspedia.com/football/colombia-dr-congo-1869932",
+      "label": "24 Jun 04:00\n\nColombia\nDR Congo\nDOUBLE CHANCE: DRAW OR DR CONGO\n2.60\nHOME\nDRAW\nAWAY\n1.51\n4.20\n6.80"
+    },
+    {
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url": "https://oddspedia.com/football/england-ghana-1654594",
+      "label": "Odds"
+    },
+    {
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url": "https://oddspedia.com/football/england-ghana-1654594/predictions",
+      "label": "Predictions"
+    },
+    {
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url": "https://oddspedia.com/football/england-ghana-1654594",
+      "label": "23 Jun 22:00\n\nEngland\nGhana\nTOTAL GOALS: UNDER 3.5\n1.50\nHOME\nDRAW\nAWAY\n1.22\n6.50\n13.00"
+    },
+    {
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url": "https://oddspedia.com/football/croatia-panama-1654595",
+      "label": "Odds"
+    },
+    {
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url": "https://oddspedia.com/football/croatia-panama-1654595/predictions",
+      "label": "Predictions"
+    },
+    {
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url": "https://oddspedia.com/football/croatia-panama-1654595",
+      "label": "24 Jun 01:00\n\nPanama\nCroatia\nDOUBLE CHANCE: PANAMA OR DRAW\n2.50\nHOME\nDRAW\nAWAY\n6.60\n4.00\n1.55"
+    },
+    {
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url": "https://oddspedia.com/tips/competitions/wc2026-competition",
+      "label": ""
+    },
+    {
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url": "https://oddspedia.com/bookmakers/world-cup",
+      "label": "World Cup betting sites"
+    },
+    {
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url": "https://oddspedia.com/bookmakers/betting-offers/world-cup",
+      "label": "World Cup betting offers"
+    },
+    {
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url": "https://oddspedia.com/football/world/world-cup/predictions",
+      "label": "World Cup predictions"
+    },
+    {
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url": "https://oddspedia.com/football/world/world-cup#world-cup-2026-betting-odds",
+      "label": "World Cup 2026 betting odds"
+    },
+    {
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url": "https://oddspedia.com/football/world/world-cup#how-world-cup-odds-work",
+      "label": "How World Cup odds work"
+    },
+    {
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url": "https://oddspedia.com/football/world/world-cup#world-cup-2026-match-odds",
+      "label": "World Cup 2026 match odds"
+    },
+    {
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url": "https://oddspedia.com/insights/football/world-cup-2026-top-scorer-odds",
+      "label": "World Cup Golden Boot odds"
+    },
+    {
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url": "https://oddspedia.com/insights/football/world-cup-2026-outright-odds",
+      "label": "World Cup winner odds"
+    },
+    {
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url": "https://oddspedia.com/insights/football/printable-world-cup-bracket",
+      "label": "printable World Cup bracket"
+    },
+    {
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url": "https://oddspedia.com/insights/football/world-cup-2026-golden-ball-odds",
+      "label": "Golden Ball odds"
+    },
+    {
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url": "https://oddspedia.com/insights/football/world-cup-2026-golden-glove-odds",
+      "label": "Golden Glove odds"
+    },
+    {
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url": "https://oddspedia.com/insights/football/world-cup-2026-young-player-of-the-tournament-odds",
+      "label": "Young Player of the Tournament odds"
+    },
+    {
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url": "https://oddspedia.com/insights/football/england-world-cup-2026-odds",
+      "label": "England World Cup odds"
+    },
+    {
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url": "https://oddspedia.com/insights/football/harry-kane-world-cup-odds",
+      "label": "Harry Kane World Cup odds"
+    },
+    {
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url": "https://oddspedia.com/insights/football/lionel-messi-world-cup-odds",
+      "label": "Lionel Messi World Cup odds"
+    },
+    {
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url": "https://oddspedia.com/insights/betting/oddspedia-smartbet-explainer",
+      "label": "SmartBet model"
+    },
+    {
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url": "https://oddspedia.com/insights/guides/world-cup-2026-betting-guide",
+      "label": "World Cup betting guide"
+    },
+    {
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url": "https://oddspedia.com/insights/football/world-cup-accumulator-tips",
+      "label": "World Cup accumulator tips"
+    },
+    {
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url": "https://oddspedia.com/football/mexico-south-africa-1654545",
+      "label": "Mexico vs South Africa odds"
+    },
+    {
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url": "https://oddspedia.com/football/south-korea-czech-republic-1505",
+      "label": "South Korea vs Czech Republic odds"
+    },
+    {
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url": "https://oddspedia.com/football/bosnia-herzegovina-canada-1869934",
+      "label": "Canada vs Bosnia-Herzegovina odds"
+    },
+    {
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url": "https://oddspedia.com/football/switzerland-qatar-1039",
+      "label": "Qatar vs Switzerland odds"
+    },
+    {
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url": "https://oddspedia.com/football/brazil-morocco-1110591",
+      "label": "Brazil vs Morocco odds"
+    },
+    {
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url": "https://oddspedia.com/football/usa-paraguay-1563",
+      "label": "USA vs Paraguay odds"
+    },
+    {
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url": "https://oddspedia.com/football/scotland-haiti-1654555",
+      "label": "Haiti vs Scotland odds"
+    },
+    {
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url": "https://oddspedia.com/football/australia-turkey-1869940",
+      "label": "Australia vs Turkey odds"
+    },
+    {
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url": "https://oddspedia.com/football/germany-curacao-1654561",
+      "label": "Germany vs Curacao odds"
+    },
+    {
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url": "https://oddspedia.com/football/japan-netherlands-1654600",
+      "label": "Netherlands vs Japan odds"
+    },
+    {
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url": "https://oddspedia.com/football/ivory-coast-ecuador-1654562",
+      "label": "Ivory Coast vs Ecuador odds"
+    },
+    {
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url": "https://oddspedia.com/football/sweden-tunisia-1869943",
+      "label": "Sweden vs Tunisia odds"
+    },
+    {
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url": "https://oddspedia.com/football/belgium-egypt-1406",
+      "label": "Belgium vs Egypt odds"
+    },
+    {
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url": "https://oddspedia.com/football/spain-cape-verde-1654574",
+      "label": "Spain vs Cape Verde odds"
+    },
+    {
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url": "https://oddspedia.com/football/uruguay-saudi-arabia-761",
+      "label": "Saudi Arabia vs Uruguay odds"
+    },
+    {
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url": "https://oddspedia.com/football/iran-new-zealand-1654568",
+      "label": "Iran vs New Zealand odds"
+    },
+    {
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url": "https://oddspedia.com/football/france-senegal-1654580",
+      "label": "France vs Senegal odds"
+    },
+    {
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url": "https://oddspedia.com/football/norway-iraq-1869930",
+      "label": "Iraq vs Norway odds"
+    },
+    {
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url": "https://oddspedia.com/football/argentina-algeria-1128",
+      "label": "Argentina vs Algeria odds"
+    },
+    {
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url": "https://oddspedia.com/football/austria-jordan-1654584",
+      "label": "Austria vs Jordan odds"
+    },
+    {
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url": "https://oddspedia.com/football/portugal-dr-congo-1869931",
+      "label": "Portugal vs DR Congo odds"
+    },
+    {
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url": "https://oddspedia.com/football/croatia-england-401",
+      "label": "England vs Croatia odds"
+    },
+    {
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url": "https://oddspedia.com/football/czech-republic-south-africa-1869938",
+      "label": "Czech Republic vs South Africa odds"
+    },
+    {
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url": "https://oddspedia.com/football/switzerland-bosnia-herzegovina-1001",
+      "label": "Switzerland vs Bosnia-Herzegovina odds"
+    },
+    {
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url": "https://oddspedia.com/football/canada-qatar-1023867",
+      "label": "Canada vs Qatar odds"
+    },
+    {
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url": "https://oddspedia.com/football/colombia-uzbekistan-1654589",
+      "label": "Uzbekistan vs Colombia odds"
+    },
+    {
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url": "https://oddspedia.com/football/ghana-panama-1654593",
+      "label": "Ghana vs Panama odds"
+    },
+    {
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url": "https://oddspedia.com/football/mexico-south-korea-465",
+      "label": "Mexico vs South Korea odds"
+    },
+    {
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url": "https://oddspedia.com/football/scotland-morocco-1654557",
+      "label": "Scotland vs Morocco odds"
+    },
+    {
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url": "https://oddspedia.com/football/australia-usa-1534707",
+      "label": "USA vs Australia odds"
+    },
+    {
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url": "https://oddspedia.com/football/brazil-haiti-390",
+      "label": "Brazil vs Haiti odds"
+    },
+    {
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url": "https://oddspedia.com/football/turkey-paraguay-1869941",
+      "label": "Turkey vs Paraguay odds"
+    },
+    {
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url": "https://oddspedia.com/football/ivory-coast-germany-1654563",
+      "label": "Germany vs Ivory Coast odds"
+    },
+    {
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url": "https://oddspedia.com/football/netherlands-sweden-1529",
+      "label": "Netherlands vs Sweden odds"
+    },
+    {
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url": "https://oddspedia.com/football/ecuador-curacao-1654564",
+      "label": "Ecuador vs Curacao odds"
+    },
+    {
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url": "https://oddspedia.com/football/japan-tunisia-957",
+      "label": "Tunisia vs Japan odds"
+    },
+    {
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url": "https://oddspedia.com/football/iran-belgium-1654569",
+      "label": "Belgium vs Iran odds"
+    },
+    {
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url": "https://oddspedia.com/football/spain-saudi-arabia-1654576",
+      "label": "Spain vs Saudi Arabia odds"
+    },
+    {
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url": "https://oddspedia.com/football/uruguay-cape-verde-1654577",
+      "label": "Uruguay vs Cape Verde odds"
+    },
+    {
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url": "https://oddspedia.com/football/egypt-new-zealand-1295549",
+      "label": "New Zealand vs Egypt odds"
+    },
+    {
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url": "https://oddspedia.com/football/france-iraq-1869928",
+      "label": "France vs Iraq odds"
+    },
+    {
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url": "https://oddspedia.com/football/argentina-austria-1654585",
+      "label": "Argentina vs Austria odds"
+    },
+    {
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url": "https://oddspedia.com/football/norway-senegal-1654581",
+      "label": "Norway vs Senegal odds"
+    },
+    {
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url": "https://oddspedia.com/football/algeria-jordan-1654586",
+      "label": "Jordan vs Algeria odds"
+    },
+    {
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url": "https://oddspedia.com/football/portugal-uzbekistan-1232",
+      "label": "Portugal vs Uzbekistan odds"
+    },
+    {
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url": "https://oddspedia.com/football/england-ghana-1654594",
+      "label": "England vs Ghana odds"
+    },
+    {
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url": "https://oddspedia.com/football/colombia-dr-congo-1869932",
+      "label": "Colombia vs DR Congo odds"
+    },
+    {
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url": "https://oddspedia.com/football/croatia-panama-1654595",
+      "label": "Panama vs Croatia odds"
+    },
+    {
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url": "https://oddspedia.com/football/bosnia-herzegovina-qatar-1869936",
+      "label": "Bosnia-Herzegovina vs Qatar odds"
+    },
+    {
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url": "https://oddspedia.com/football/switzerland-canada-1654550",
+      "label": "Switzerland vs Canada odds"
+    },
+    {
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url": "https://oddspedia.com/football/morocco-haiti-1654559",
+      "label": "Morocco vs Haiti odds"
+    },
+    {
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url": "https://oddspedia.com/football/brazil-scotland-379",
+      "label": "Scotland vs Brazil odds"
+    },
+    {
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url": "https://oddspedia.com/football/mexico-czech-republic-481",
+      "label": "Czech Republic vs Mexico odds"
+    },
+    {
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url": "https://oddspedia.com/football/south-korea-south-africa-1654547",
+      "label": "South Africa vs South Korea odds"
+    },
+    {
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url": "https://oddspedia.com/football/ivory-coast-curacao-1654566",
+      "label": "Curacao vs Ivory Coast odds"
+    },
+    {
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url": "https://oddspedia.com/football/ecuador-germany-1654565",
+      "label": "Ecuador vs Germany odds"
+    },
+    {
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url": "https://oddspedia.com/football/australia-paraguay-651",
+      "label": "Paraguay vs Australia odds"
+    },
+    {
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url": "https://oddspedia.com/football/usa-turkey-1487558",
+      "label": "Turkey vs USA odds"
+    },
+    {
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url": "https://oddspedia.com/football/japan-sweden-954",
+      "label": "Japan vs Sweden odds"
+    },
+    {
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url": "https://oddspedia.com/football/netherlands-tunisia-1654560",
+      "label": "Tunisia vs Netherlands odds"
+    },
+    {
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url": "https://oddspedia.com/football/france-norway-1654582",
+      "label": "Norway vs France odds"
+    },
+    {
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url": "https://oddspedia.com/football/senegal-iraq-1869929",
+      "label": "Senegal vs Iraq odds"
+    },
+    {
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url": "https://oddspedia.com/football/iran-egypt-1654572",
+      "label": "Egypt vs Iran odds"
+    },
+    {
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url": "https://oddspedia.com/football/belgium-new-zealand-1654571",
+      "label": "New Zealand vs Belgium odds"
+    },
+    {
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url": "https://oddspedia.com/football/saudi-arabia-cape-verde-1654579",
+      "label": "Cape Verde vs Saudi Arabia odds"
+    },
+    {
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url": "https://oddspedia.com/football/spain-uruguay-552",
+      "label": "Uruguay vs Spain odds"
+    },
+    {
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url": "https://oddspedia.com/football/croatia-ghana-1654597",
+      "label": "Croatia vs Ghana odds"
+    },
+    {
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url": "https://oddspedia.com/football/england-panama-851",
+      "label": "Panama vs England odds"
+    },
+    {
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url": "https://oddspedia.com/football/algeria-austria-1654588",
+      "label": "Algeria vs Austria odds"
+    },
+    {
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url": "https://oddspedia.com/football/argentina-jordan-1654587",
+      "label": "Jordan vs Argentina odds"
+    },
+    {
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url": "https://oddspedia.com/football/colombia-portugal-1654591",
+      "label": "Colombia vs Portugal odds"
+    },
+    {
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url": "https://oddspedia.com/football/uzbekistan-dr-congo-1869933",
+      "label": "DR Congo vs Uzbekistan odds"
+    },
+    {
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url": "https://oddspedia.com/football/world/world-cup/news",
+      "label": "READ MORE"
+    },
+    {
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url": "https://oddspedia.com/insights/football/world-cup-accumulator-tips",
+      "label": ""
+    },
+    {
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url": "https://oddspedia.com/insights/football/world-cup-accumulator-tips",
+      "label": "2026 World Cup Accumulator Tips: Today\u2019s Best Group Stage Picks & 5/2 Acca"
+    },
+    {
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url": "https://oddspedia.com/insights/tags/world-cup-2026",
+      "label": ""
+    },
+    {
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url": "https://oddspedia.com/insights/football",
+      "label": "Football"
+    },
+    {
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url": "https://oddspedia.com/insights/football/over-under-goals-tips",
+      "label": ""
+    },
+    {
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url": "https://oddspedia.com/insights/football/over-under-goals-tips",
+      "label": "Best Over/Under Goals Tips: Today\u2019s Over/Under Football Predictions"
+    },
+    {
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url": "https://oddspedia.com/insights/tags/bundesliga",
+      "label": ""
+    },
+    {
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url": "https://oddspedia.com/insights/tags/europa-league",
+      "label": ""
+    },
+    {
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url": "https://oddspedia.com/insights/tags/la-liga",
+      "label": ""
+    },
+    {
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url": "https://oddspedia.com/insights/tags/ligue-1",
+      "label": ""
+    },
+    {
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url": "https://oddspedia.com/insights/tags/premier-league",
+      "label": ""
+    },
+    {
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url": "https://oddspedia.com/insights/football",
+      "label": "Football"
+    },
+    {
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url": "https://oddspedia.com/insights/football/double-chance-tips",
+      "label": ""
+    },
+    {
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url": "https://oddspedia.com/insights/football/double-chance-tips",
+      "label": "Best Double Chance Tips: Today\u2019s Double Chance Football Predictions"
+    },
+    {
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url": "https://oddspedia.com/insights/tags/bundesliga",
+      "label": ""
+    },
+    {
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url": "https://oddspedia.com/insights/tags/europa-league",
+      "label": ""
+    },
+    {
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url": "https://oddspedia.com/insights/tags/la-liga",
+      "label": ""
+    },
+    {
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url": "https://oddspedia.com/insights/tags/ligue-1",
+      "label": ""
+    },
+    {
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url": "https://oddspedia.com/insights/tags/premier-league",
+      "label": ""
+    },
+    {
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url": "https://oddspedia.com/insights/football",
+      "label": "Football"
+    },
+    {
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url": "https://oddspedia.com/insights/football/football-accumulator-tips",
+      "label": ""
+    },
+    {
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url": "https://oddspedia.com/insights/football/football-accumulator-tips",
+      "label": "Football Accumulator Tips Today: Our Latest Football Acca Predictions"
+    },
+    {
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url": "https://oddspedia.com/insights/tags/bundesliga",
+      "label": ""
+    },
+    {
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url": "https://oddspedia.com/insights/tags/europa-league",
+      "label": ""
+    },
+    {
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url": "https://oddspedia.com/insights/tags/la-liga",
+      "label": ""
+    },
+    {
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url": "https://oddspedia.com/insights/tags/ligue-1",
+      "label": ""
+    },
+    {
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url": "https://oddspedia.com/insights/tags/premier-league",
+      "label": ""
+    },
+    {
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url": "https://oddspedia.com/insights/football",
+      "label": "Football"
+    },
+    {
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url": "https://oddspedia.com/insights/football/world-cup-2026-prop-bets-today",
+      "label": ""
+    },
+    {
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url": "https://oddspedia.com/insights/football/world-cup-2026-prop-bets-today",
+      "label": "World Cup 2026 Best Bets Today: Top Player Props & Parlay Picks for June 21"
+    },
+    {
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url": "https://oddspedia.com/insights/tags/world-cup-2026",
+      "label": ""
+    },
+    {
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url": "https://oddspedia.com/insights/football",
+      "label": "Football"
+    },
+    {
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url": "https://oddspedia.com/bookmakers/betway/bonus/south-africa",
+      "label": ""
+    },
+    {
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url": "https://oddspedia.com/bookmakers/betway",
+      "label": "Betway Review"
+    },
+    {
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url": "https://oddspedia.com/bookmakers/hollywoodbets/bonus",
+      "label": ""
+    },
+    {
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url": "https://oddspedia.com/bookmakers/hollywoodbets",
+      "label": "Hollywoodbets Review"
+    },
+    {
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url": "https://oddspedia.com/bookmakers/10bet/bonus",
+      "label": ""
+    },
+    {
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url": "https://oddspedia.com/bookmakers/10bet",
+      "label": "10bet Review"
+    },
+    {
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url": "https://oddspedia.com/about-us",
+      "label": "About Us"
+    },
+    {
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url": "https://widgets.oddspedia.com",
+      "label": "Widgets for Publishers"
+    },
+    {
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url": "https://oddspedia.com/contact-us",
+      "label": "Contact us"
+    },
+    {
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url": "https://oddspedia.com/privacy-policy",
+      "label": "Privacy Policy"
+    },
+    {
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url": "https://oddspedia.com/terms-and-conditions",
+      "label": "Terms & Conditions"
+    },
+    {
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url": "https://oddspedia.com/editorial-policy",
+      "label": "Editorial Policy"
+    },
+    {
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url": "https://oddspedia.com/responsible-gambling",
+      "label": "Responsible Gambling"
+    },
+    {
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url": "https://oddspedia.com/imprint",
+      "label": "Imprint"
+    },
+    {
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url": "https://oddspedia.com/",
+      "label": "Today's Matches"
+    },
+    {
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url": "https://oddspedia.com/football",
+      "label": "Live Football Scores"
+    },
+    {
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url": "https://oddspedia.com/odds",
+      "label": "Odds Comparison"
+    },
+    {
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url": "https://oddspedia.com/tips/tipsters-ranking",
+      "label": "Oddspedia Community"
+    },
+    {
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url": "https://oddspedia.com/football/england/premier-league",
+      "label": "Premier League Fixtures"
+    },
+    {
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url": "https://oddspedia.com/football/italy/serie-a",
+      "label": "Serie A Fixtures"
+    },
+    {
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url": "https://oddspedia.com/football/germany/bundesliga",
+      "label": "Bundesliga Fixtures"
+    },
+    {
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url": "https://oddspedia.com/tips",
+      "label": "Today's Best Bets"
+    },
+    {
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url": "https://oddspedia.com/football/tips",
+      "label": "Football Predictions"
+    },
+    {
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url": "https://oddspedia.com/tennis/tips",
+      "label": "Tennis Predictions"
+    },
+    {
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url": "https://oddspedia.com/football/england/premier-league/tips",
+      "label": "Premier League Predictions"
+    },
+    {
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url": "https://oddspedia.com/football/europe/champions-league/tips",
+      "label": "Champions League Predictions"
+    },
+    {
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url": "https://oddspedia.com/tips/competitions/monthly",
+      "label": "Monthly Tipster Competition"
+    },
+    {
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url": "https://oddspedia.com/tips/competitions/yearly",
+      "label": "Yearly Tipster Competition"
+    },
+    {
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url": "https://oddspedia.com/tips/rivals",
+      "label": "Oddspedia Rivals"
+    },
+    {
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url": "https://oddspedia.com/bookmakers",
+      "label": "Best Betting Sites"
+    },
+    {
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url": "https://oddspedia.com/bookmakers/betting-apps",
+      "label": "Best Betting Apps"
+    },
+    {
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url": "https://oddspedia.com/bookmakers/betting-offers",
+      "label": "Best Betting Offers"
+    },
+    {
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url": "https://oddspedia.com/bookmakers/crypto-betting",
+      "label": "Crypto Betting Sites"
+    },
+    {
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url": "https://oddspedia.com/free-bets",
+      "label": "Free Bets UK"
+    },
+    {
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url": "https://oddspedia.com/bookmakers/stake-com/bonus",
+      "label": "Stake Referral Code"
+    },
+    {
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url": "https://oddspedia.com/bookmakers/bet365/bonus",
+      "label": "bet365 Bonus Code UK"
+    },
+    {
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url": "https://oddspedia.com/bookmakers/stake-com/bonus/india",
+      "label": "Stake Bonus Code India"
+    },
+    {
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url": "https://oddspedia.com/bookmakers/betvictor/bonus",
+      "label": "BetVictor Bonus Code"
+    },
+    {
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url": "https://oddspedia.com/",
+      "label": ""
+    },
+    {
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url": "https://www.gambleaware.org/",
+      "label": ""
+    },
+    {
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url": "https://www.gamblingtherapy.org/",
+      "label": ""
+    },
+    {
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url": "https://www.gamstop.co.uk/",
+      "label": ""
+    },
+    {
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url": "https://www.gamblinghelponline.org.au/",
+      "label": ""
+    },
+    {
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url": "https://oddspedia.com/",
+      "label": ""
+    },
+    {
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url": "https://www.facebook.com/oddspediaglobal",
+      "label": ""
+    },
+    {
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url": "https://x.com/oddspedia",
+      "label": ""
+    },
+    {
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url": "https://www.instagram.com/oddspediaglobal",
+      "label": ""
+    },
+    {
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url": "https://discord.gg/Thp44bSCxN",
+      "label": ""
+    },
+    {
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url": "https://www.youtube.com/oddspedia/videos",
+      "label": ""
+    },
+    {
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url": "https://t.me/oddspedia",
+      "label": ""
+    },
+    {
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url": "https://www.facebook.com/oddspediaglobal",
+      "label": ""
+    },
+    {
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url": "https://x.com/oddspedia",
+      "label": ""
+    },
+    {
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url": "https://www.instagram.com/oddspediaglobal",
+      "label": ""
+    },
+    {
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url": "https://discord.gg/Thp44bSCxN",
+      "label": ""
+    },
+    {
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url": "https://www.youtube.com/oddspedia/videos",
+      "label": ""
+    },
+    {
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url": "https://t.me/oddspedia",
+      "label": ""
+    }
+  ],
+  "events": [
+    {
+      "match_id": "czech-republic-south-africa",
+      "commence_time": "",
+      "home_team": "Czech Republic",
+      "away_team": "South Africa",
+      "url": "https://oddspedia.com/football/czech-republic-south-africa-1869938",
+      "alt_url": "",
+      "match_key": "1869938",
+      "match_score": 25,
+      "is_fixture_match": false,
+      "link_label": "Odds | Czech Republic vs South Africa odds",
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url_slug": "czech-republic-south-africa",
+      "discovered_url_count": 1,
+      "discovered_order": 90
+    },
+    {
+      "match_id": "mexico-south-korea",
+      "commence_time": "",
+      "home_team": "Mexico",
+      "away_team": "South Korea",
+      "url": "https://oddspedia.com/football/mexico-south-korea-465",
+      "alt_url": "",
+      "match_key": "465",
+      "match_score": 25,
+      "is_fixture_match": false,
+      "link_label": "Odds | Mexico vs South Korea odds",
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url_slug": "mexico-south-korea",
+      "discovered_url_count": 1,
+      "discovered_order": 92
+    },
+    {
+      "match_id": "switzerland-bosnia-herzegovina",
+      "commence_time": "",
+      "home_team": "Switzerland",
+      "away_team": "Bosnia Herzegovina",
+      "url": "https://oddspedia.com/football/switzerland-bosnia-herzegovina-1001",
+      "alt_url": "",
+      "match_key": "1001",
+      "match_score": 25,
+      "is_fixture_match": false,
+      "link_label": "Odds | Switzerland vs Bosnia-Herzegovina odds",
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url_slug": "switzerland-bosnia-herzegovina",
+      "discovered_url_count": 1,
+      "discovered_order": 94
+    },
+    {
+      "match_id": "canada-qatar",
+      "commence_time": "",
+      "home_team": "Canada",
+      "away_team": "Qatar",
+      "url": "https://oddspedia.com/football/canada-qatar-1023867",
+      "alt_url": "",
+      "match_key": "1023867",
+      "match_score": 25,
+      "is_fixture_match": false,
+      "link_label": "Odds | Canada vs Qatar odds",
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url_slug": "canada-qatar",
+      "discovered_url_count": 1,
+      "discovered_order": 96
+    },
+    {
+      "match_id": "scotland-morocco",
+      "commence_time": "",
+      "home_team": "Scotland",
+      "away_team": "Morocco",
+      "url": "https://oddspedia.com/football/scotland-morocco-1654557",
+      "alt_url": "",
+      "match_key": "1654557",
+      "match_score": 25,
+      "is_fixture_match": false,
+      "link_label": "Odds | Scotland vs Morocco odds",
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url_slug": "scotland-morocco",
+      "discovered_url_count": 1,
+      "discovered_order": 98
+    },
+    {
+      "match_id": "brazil-haiti",
+      "commence_time": "",
+      "home_team": "Brazil",
+      "away_team": "Haiti",
+      "url": "https://oddspedia.com/football/brazil-haiti-390",
+      "alt_url": "",
+      "match_key": "390",
+      "match_score": 25,
+      "is_fixture_match": false,
+      "link_label": "Odds | Brazil vs Haiti odds",
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url_slug": "brazil-haiti",
+      "discovered_url_count": 1,
+      "discovered_order": 100
+    },
+    {
+      "match_id": "australia-usa",
+      "commence_time": "",
+      "home_team": "Australia",
+      "away_team": "USA",
+      "url": "https://oddspedia.com/football/australia-usa-1534707",
+      "alt_url": "",
+      "match_key": "1534707",
+      "match_score": 25,
+      "is_fixture_match": false,
+      "link_label": "Odds | USA vs Australia odds",
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url_slug": "australia-usa",
+      "discovered_url_count": 1,
+      "discovered_order": 102
+    },
+    {
+      "match_id": "turkey-paraguay",
+      "commence_time": "",
+      "home_team": "Turkey",
+      "away_team": "Paraguay",
+      "url": "https://oddspedia.com/football/turkey-paraguay-1869941",
+      "alt_url": "",
+      "match_key": "1869941",
+      "match_score": 25,
+      "is_fixture_match": false,
+      "link_label": "Odds | Turkey vs Paraguay odds",
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url_slug": "turkey-paraguay",
+      "discovered_url_count": 1,
+      "discovered_order": 104
+    },
+    {
+      "match_id": "germany-ivory-coast",
+      "commence_time": "2026-06-20T20:00:00Z",
+      "home_team": "Germany",
+      "away_team": "Ivory Coast",
+      "url": "https://oddspedia.com/football/ivory-coast-germany-1654563",
+      "alt_url": "",
+      "match_key": "1654563",
+      "match_score": 100,
+      "is_fixture_match": true,
+      "link_label": "Odds | Germany vs Ivory Coast odds",
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url_slug": "ivory-coast-germany",
+      "discovered_url_count": 1,
+      "discovered_order": 106
+    },
+    {
+      "match_id": "ecuador-curacao",
+      "commence_time": "2026-06-21T00:00:00Z",
+      "home_team": "Ecuador",
+      "away_team": "Curacao",
+      "url": "https://oddspedia.com/football/ecuador-curacao-1654564",
+      "alt_url": "",
+      "match_key": "1654564",
+      "match_score": 100,
+      "is_fixture_match": true,
+      "link_label": "Odds | Ecuador vs Curacao odds",
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url_slug": "ecuador-curacao",
+      "discovered_url_count": 1,
+      "discovered_order": 108
+    },
+    {
+      "match_id": "netherlands-sweden",
+      "commence_time": "2026-06-20T17:00:00Z",
+      "home_team": "Netherlands",
+      "away_team": "Sweden",
+      "url": "https://oddspedia.com/football/netherlands-sweden-1529",
+      "alt_url": "",
+      "match_key": "1529",
+      "match_score": 100,
+      "is_fixture_match": true,
+      "link_label": "Odds | Netherlands vs Sweden odds",
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url_slug": "netherlands-sweden",
+      "discovered_url_count": 1,
+      "discovered_order": 110
+    },
+    {
+      "match_id": "tunisia-japan",
+      "commence_time": "2026-06-21T04:00:00Z",
+      "home_team": "Tunisia",
+      "away_team": "Japan",
+      "url": "https://oddspedia.com/football/japan-tunisia-957",
+      "alt_url": "",
+      "match_key": "957",
+      "match_score": 100,
+      "is_fixture_match": true,
+      "link_label": "Odds | Tunisia vs Japan odds",
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url_slug": "japan-tunisia",
+      "discovered_url_count": 1,
+      "discovered_order": 112
+    },
+    {
+      "match_id": "belgium-iran",
+      "commence_time": "2026-06-21T19:00:00Z",
+      "home_team": "Belgium",
+      "away_team": "Iran",
+      "url": "https://oddspedia.com/football/iran-belgium-1654569",
+      "alt_url": "",
+      "match_key": "1654569",
+      "match_score": 100,
+      "is_fixture_match": true,
+      "link_label": "Odds | Belgium vs Iran odds",
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url_slug": "iran-belgium",
+      "discovered_url_count": 1,
+      "discovered_order": 114
+    },
+    {
+      "match_id": "new-zealand-egypt",
+      "commence_time": "2026-06-22T01:00:00Z",
+      "home_team": "New Zealand",
+      "away_team": "Egypt",
+      "url": "https://oddspedia.com/football/egypt-new-zealand-1295549",
+      "alt_url": "",
+      "match_key": "1295549",
+      "match_score": 100,
+      "is_fixture_match": true,
+      "link_label": "Odds | New Zealand vs Egypt odds",
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url_slug": "egypt-new-zealand",
+      "discovered_url_count": 1,
+      "discovered_order": 116
+    },
+    {
+      "match_id": "spain-saudi-arabia",
+      "commence_time": "2026-06-21T16:00:00Z",
+      "home_team": "Spain",
+      "away_team": "Saudi Arabia",
+      "url": "https://oddspedia.com/football/spain-saudi-arabia-1654576",
+      "alt_url": "",
+      "match_key": "1654576",
+      "match_score": 100,
+      "is_fixture_match": true,
+      "link_label": "Odds | Spain vs Saudi Arabia odds",
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url_slug": "spain-saudi-arabia",
+      "discovered_url_count": 1,
+      "discovered_order": 118
+    },
+    {
+      "match_id": "uruguay-cape-verde",
+      "commence_time": "2026-06-21T22:00:00Z",
+      "home_team": "Uruguay",
+      "away_team": "Cape Verde",
+      "url": "https://oddspedia.com/football/uruguay-cape-verde-1654577",
+      "alt_url": "",
+      "match_key": "1654577",
+      "match_score": 100,
+      "is_fixture_match": true,
+      "link_label": "Odds | Uruguay vs Cape Verde odds",
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url_slug": "uruguay-cape-verde",
+      "discovered_url_count": 1,
+      "discovered_order": 120
+    },
+    {
+      "match_id": "france-iraq",
+      "commence_time": "2026-06-22T21:00:00Z",
+      "home_team": "France",
+      "away_team": "Iraq",
+      "url": "https://oddspedia.com/football/france-iraq-1869928",
+      "alt_url": "",
+      "match_key": "1869928",
+      "match_score": 100,
+      "is_fixture_match": true,
+      "link_label": "Odds | 23:00\n\nFrance\nIraq\nTOTAL GOALS: UNDER 3.5\n2.00\nHOME\nDRAW\nAWAY\n1.07\n12.00\n31.00 | France vs Iraq odds",
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url_slug": "france-iraq",
+      "discovered_url_count": 1,
+      "discovered_order": 122
+    },
+    {
+      "match_id": "norway-senegal",
+      "commence_time": "2026-06-23T00:00:00Z",
+      "home_team": "Norway",
+      "away_team": "Senegal",
+      "url": "https://oddspedia.com/football/norway-senegal-1654581",
+      "alt_url": "",
+      "match_key": "1654581",
+      "match_score": 100,
+      "is_fixture_match": true,
+      "link_label": "Odds | 23 Jun 02:00\n\nNorway\nSenegal\nDOUBLE CHANCE: DRAW OR SENEGAL\n1.67\nHOME\nDRAW\nAWAY\n2.23\n3.45\n3.23 | Norway vs Senegal odds",
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url_slug": "norway-senegal",
+      "discovered_url_count": 1,
+      "discovered_order": 125
+    },
+    {
+      "match_id": "argentina-austria",
+      "commence_time": "2026-06-22T17:00:00Z",
+      "home_team": "Argentina",
+      "away_team": "Austria",
+      "url": "https://oddspedia.com/football/argentina-austria-1654585",
+      "alt_url": "",
+      "match_key": "1654585",
+      "match_score": 100,
+      "is_fixture_match": true,
+      "link_label": "Odds | 19:00\n\nArgentina\nAustria\nDOUBLE CHANCE: DRAW OR AUSTRIA\n2.75\nHOME\nDRAW\nAWAY\n1.50\n4.30\n6.80 | Argentina vs Austria odds",
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url_slug": "argentina-austria",
+      "discovered_url_count": 1,
+      "discovered_order": 128
+    },
+    {
+      "match_id": "jordan-algeria",
+      "commence_time": "2026-06-23T03:00:00Z",
+      "home_team": "Jordan",
+      "away_team": "Algeria",
+      "url": "https://oddspedia.com/football/algeria-jordan-1654586",
+      "alt_url": "",
+      "match_key": "1654586",
+      "match_score": 100,
+      "is_fixture_match": true,
+      "link_label": "Odds | 23 Jun 05:00\n\nJordan\nAlgeria\nDOUBLE CHANCE: JORDAN OR DRAW\n2.48\nHOME\nDRAW\nAWAY\n5.90\n4.20\n1.55 | Jordan vs Algeria odds",
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url_slug": "algeria-jordan",
+      "discovered_url_count": 1,
+      "discovered_order": 131
+    },
+    {
+      "match_id": "portugal-uzbekistan",
+      "commence_time": "2026-06-23T17:00:00Z",
+      "home_team": "Portugal",
+      "away_team": "Uzbekistan",
+      "url": "https://oddspedia.com/football/portugal-uzbekistan-1232",
+      "alt_url": "",
+      "match_key": "1232",
+      "match_score": 100,
+      "is_fixture_match": true,
+      "link_label": "Odds | 23 Jun 19:00\n\nPortugal\nUzbekistan\nTOTAL GOALS: UNDER 3.5\n1.52\nHOME\nDRAW\nAWAY\n1.19\n7.00\n15.00 | Portugal vs Uzbekistan odds",
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url_slug": "portugal-uzbekistan",
+      "discovered_url_count": 1,
+      "discovered_order": 134
+    },
+    {
+      "match_id": "colombia-dr-congo",
+      "commence_time": "2026-06-24T02:00:00Z",
+      "home_team": "Colombia",
+      "away_team": "DR Congo",
+      "url": "https://oddspedia.com/football/colombia-dr-congo-1869932",
+      "alt_url": "",
+      "match_key": "1869932",
+      "match_score": 100,
+      "is_fixture_match": true,
+      "link_label": "Odds | 24 Jun 04:00\n\nColombia\nDR Congo\nDOUBLE CHANCE: DRAW OR DR CONGO\n2.60\nHOME\nDRAW\nAWAY\n1.51\n4.20\n6.80 | Colombia vs DR Congo odds",
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url_slug": "colombia-dr-congo",
+      "discovered_url_count": 1,
+      "discovered_order": 137
+    },
+    {
+      "match_id": "england-ghana",
+      "commence_time": "2026-06-23T20:00:00Z",
+      "home_team": "England",
+      "away_team": "Ghana",
+      "url": "https://oddspedia.com/football/england-ghana-1654594",
+      "alt_url": "",
+      "match_key": "1654594",
+      "match_score": 100,
+      "is_fixture_match": true,
+      "link_label": "Odds | 23 Jun 22:00\n\nEngland\nGhana\nTOTAL GOALS: UNDER 3.5\n1.50\nHOME\nDRAW\nAWAY\n1.22\n6.50\n13.00 | England vs Ghana odds",
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url_slug": "england-ghana",
+      "discovered_url_count": 1,
+      "discovered_order": 140
+    },
+    {
+      "match_id": "panama-croatia",
+      "commence_time": "2026-06-23T23:00:00Z",
+      "home_team": "Panama",
+      "away_team": "Croatia",
+      "url": "https://oddspedia.com/football/croatia-panama-1654595",
+      "alt_url": "",
+      "match_key": "1654595",
+      "match_score": 100,
+      "is_fixture_match": true,
+      "link_label": "Odds | 24 Jun 01:00\n\nPanama\nCroatia\nDOUBLE CHANCE: PANAMA OR DRAW\n2.50\nHOME\nDRAW\nAWAY\n6.60\n4.00\n1.55 | Panama vs Croatia odds",
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url_slug": "croatia-panama",
+      "discovered_url_count": 1,
+      "discovered_order": 143
+    },
+    {
+      "match_id": "mexico-south-africa",
+      "commence_time": "",
+      "home_team": "Mexico",
+      "away_team": "South Africa",
+      "url": "https://oddspedia.com/football/mexico-south-africa-1654545",
+      "alt_url": "",
+      "match_key": "1654545",
+      "match_score": 25,
+      "is_fixture_match": false,
+      "link_label": "Mexico vs South Africa odds",
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url_slug": "mexico-south-africa",
+      "discovered_url_count": 1,
+      "discovered_order": 165
+    },
+    {
+      "match_id": "south-korea-czech-republic",
+      "commence_time": "",
+      "home_team": "South Korea",
+      "away_team": "Czech Republic",
+      "url": "https://oddspedia.com/football/south-korea-czech-republic-1505",
+      "alt_url": "",
+      "match_key": "1505",
+      "match_score": 25,
+      "is_fixture_match": false,
+      "link_label": "South Korea vs Czech Republic odds",
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url_slug": "south-korea-czech-republic",
+      "discovered_url_count": 1,
+      "discovered_order": 166
+    },
+    {
+      "match_id": "bosnia-herzegovina-canada",
+      "commence_time": "",
+      "home_team": "Bosnia Herzegovina",
+      "away_team": "Canada",
+      "url": "https://oddspedia.com/football/bosnia-herzegovina-canada-1869934",
+      "alt_url": "",
+      "match_key": "1869934",
+      "match_score": 25,
+      "is_fixture_match": false,
+      "link_label": "Canada vs Bosnia-Herzegovina odds",
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url_slug": "bosnia-herzegovina-canada",
+      "discovered_url_count": 1,
+      "discovered_order": 167
+    },
+    {
+      "match_id": "switzerland-qatar",
+      "commence_time": "",
+      "home_team": "Switzerland",
+      "away_team": "Qatar",
+      "url": "https://oddspedia.com/football/switzerland-qatar-1039",
+      "alt_url": "",
+      "match_key": "1039",
+      "match_score": 25,
+      "is_fixture_match": false,
+      "link_label": "Qatar vs Switzerland odds",
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url_slug": "switzerland-qatar",
+      "discovered_url_count": 1,
+      "discovered_order": 168
+    },
+    {
+      "match_id": "brazil-morocco",
+      "commence_time": "",
+      "home_team": "Brazil",
+      "away_team": "Morocco",
+      "url": "https://oddspedia.com/football/brazil-morocco-1110591",
+      "alt_url": "",
+      "match_key": "1110591",
+      "match_score": 25,
+      "is_fixture_match": false,
+      "link_label": "Brazil vs Morocco odds",
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url_slug": "brazil-morocco",
+      "discovered_url_count": 1,
+      "discovered_order": 169
+    },
+    {
+      "match_id": "usa-paraguay",
+      "commence_time": "",
+      "home_team": "USA",
+      "away_team": "Paraguay",
+      "url": "https://oddspedia.com/football/usa-paraguay-1563",
+      "alt_url": "",
+      "match_key": "1563",
+      "match_score": 25,
+      "is_fixture_match": false,
+      "link_label": "USA vs Paraguay odds",
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url_slug": "usa-paraguay",
+      "discovered_url_count": 1,
+      "discovered_order": 170
+    },
+    {
+      "match_id": "scotland-haiti",
+      "commence_time": "",
+      "home_team": "Scotland",
+      "away_team": "Haiti",
+      "url": "https://oddspedia.com/football/scotland-haiti-1654555",
+      "alt_url": "",
+      "match_key": "1654555",
+      "match_score": 25,
+      "is_fixture_match": false,
+      "link_label": "Haiti vs Scotland odds",
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url_slug": "scotland-haiti",
+      "discovered_url_count": 1,
+      "discovered_order": 171
+    },
+    {
+      "match_id": "australia-turkey",
+      "commence_time": "",
+      "home_team": "Australia",
+      "away_team": "Turkey",
+      "url": "https://oddspedia.com/football/australia-turkey-1869940",
+      "alt_url": "",
+      "match_key": "1869940",
+      "match_score": 25,
+      "is_fixture_match": false,
+      "link_label": "Australia vs Turkey odds",
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url_slug": "australia-turkey",
+      "discovered_url_count": 1,
+      "discovered_order": 172
+    },
+    {
+      "match_id": "germany-curacao",
+      "commence_time": "",
+      "home_team": "Germany",
+      "away_team": "Curacao",
+      "url": "https://oddspedia.com/football/germany-curacao-1654561",
+      "alt_url": "",
+      "match_key": "1654561",
+      "match_score": 25,
+      "is_fixture_match": false,
+      "link_label": "Germany vs Curacao odds",
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url_slug": "germany-curacao",
+      "discovered_url_count": 1,
+      "discovered_order": 173
+    },
+    {
+      "match_id": "japan-netherlands",
+      "commence_time": "",
+      "home_team": "Japan",
+      "away_team": "Netherlands",
+      "url": "https://oddspedia.com/football/japan-netherlands-1654600",
+      "alt_url": "",
+      "match_key": "1654600",
+      "match_score": 25,
+      "is_fixture_match": false,
+      "link_label": "Netherlands vs Japan odds",
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url_slug": "japan-netherlands",
+      "discovered_url_count": 1,
+      "discovered_order": 174
+    },
+    {
+      "match_id": "ivory-coast-ecuador",
+      "commence_time": "",
+      "home_team": "Ivory Coast",
+      "away_team": "Ecuador",
+      "url": "https://oddspedia.com/football/ivory-coast-ecuador-1654562",
+      "alt_url": "",
+      "match_key": "1654562",
+      "match_score": 25,
+      "is_fixture_match": false,
+      "link_label": "Ivory Coast vs Ecuador odds",
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url_slug": "ivory-coast-ecuador",
+      "discovered_url_count": 1,
+      "discovered_order": 175
+    },
+    {
+      "match_id": "sweden-tunisia",
+      "commence_time": "",
+      "home_team": "Sweden",
+      "away_team": "Tunisia",
+      "url": "https://oddspedia.com/football/sweden-tunisia-1869943",
+      "alt_url": "",
+      "match_key": "1869943",
+      "match_score": 25,
+      "is_fixture_match": false,
+      "link_label": "Sweden vs Tunisia odds",
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url_slug": "sweden-tunisia",
+      "discovered_url_count": 1,
+      "discovered_order": 176
+    },
+    {
+      "match_id": "belgium-egypt",
+      "commence_time": "",
+      "home_team": "Belgium",
+      "away_team": "Egypt",
+      "url": "https://oddspedia.com/football/belgium-egypt-1406",
+      "alt_url": "",
+      "match_key": "1406",
+      "match_score": 25,
+      "is_fixture_match": false,
+      "link_label": "Belgium vs Egypt odds",
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url_slug": "belgium-egypt",
+      "discovered_url_count": 1,
+      "discovered_order": 177
+    },
+    {
+      "match_id": "spain-cape-verde",
+      "commence_time": "",
+      "home_team": "Spain",
+      "away_team": "Cape Verde",
+      "url": "https://oddspedia.com/football/spain-cape-verde-1654574",
+      "alt_url": "",
+      "match_key": "1654574",
+      "match_score": 25,
+      "is_fixture_match": false,
+      "link_label": "Spain vs Cape Verde odds",
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url_slug": "spain-cape-verde",
+      "discovered_url_count": 1,
+      "discovered_order": 178
+    },
+    {
+      "match_id": "uruguay-saudi-arabia",
+      "commence_time": "",
+      "home_team": "Uruguay",
+      "away_team": "Saudi Arabia",
+      "url": "https://oddspedia.com/football/uruguay-saudi-arabia-761",
+      "alt_url": "",
+      "match_key": "761",
+      "match_score": 25,
+      "is_fixture_match": false,
+      "link_label": "Saudi Arabia vs Uruguay odds",
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url_slug": "uruguay-saudi-arabia",
+      "discovered_url_count": 1,
+      "discovered_order": 179
+    },
+    {
+      "match_id": "iran-new-zealand",
+      "commence_time": "",
+      "home_team": "Iran",
+      "away_team": "New Zealand",
+      "url": "https://oddspedia.com/football/iran-new-zealand-1654568",
+      "alt_url": "",
+      "match_key": "1654568",
+      "match_score": 25,
+      "is_fixture_match": false,
+      "link_label": "Iran vs New Zealand odds",
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url_slug": "iran-new-zealand",
+      "discovered_url_count": 1,
+      "discovered_order": 180
+    },
+    {
+      "match_id": "france-senegal",
+      "commence_time": "",
+      "home_team": "France",
+      "away_team": "Senegal",
+      "url": "https://oddspedia.com/football/france-senegal-1654580",
+      "alt_url": "",
+      "match_key": "1654580",
+      "match_score": 25,
+      "is_fixture_match": false,
+      "link_label": "France vs Senegal odds",
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url_slug": "france-senegal",
+      "discovered_url_count": 1,
+      "discovered_order": 181
+    },
+    {
+      "match_id": "norway-iraq",
+      "commence_time": "",
+      "home_team": "Norway",
+      "away_team": "Iraq",
+      "url": "https://oddspedia.com/football/norway-iraq-1869930",
+      "alt_url": "",
+      "match_key": "1869930",
+      "match_score": 25,
+      "is_fixture_match": false,
+      "link_label": "Iraq vs Norway odds",
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url_slug": "norway-iraq",
+      "discovered_url_count": 1,
+      "discovered_order": 182
+    },
+    {
+      "match_id": "argentina-algeria",
+      "commence_time": "",
+      "home_team": "Argentina",
+      "away_team": "Algeria",
+      "url": "https://oddspedia.com/football/argentina-algeria-1128",
+      "alt_url": "",
+      "match_key": "1128",
+      "match_score": 25,
+      "is_fixture_match": false,
+      "link_label": "Argentina vs Algeria odds",
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url_slug": "argentina-algeria",
+      "discovered_url_count": 1,
+      "discovered_order": 183
+    },
+    {
+      "match_id": "austria-jordan",
+      "commence_time": "",
+      "home_team": "Austria",
+      "away_team": "Jordan",
+      "url": "https://oddspedia.com/football/austria-jordan-1654584",
+      "alt_url": "",
+      "match_key": "1654584",
+      "match_score": 25,
+      "is_fixture_match": false,
+      "link_label": "Austria vs Jordan odds",
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url_slug": "austria-jordan",
+      "discovered_url_count": 1,
+      "discovered_order": 184
+    },
+    {
+      "match_id": "portugal-dr-congo",
+      "commence_time": "",
+      "home_team": "Portugal",
+      "away_team": "DR Congo",
+      "url": "https://oddspedia.com/football/portugal-dr-congo-1869931",
+      "alt_url": "",
+      "match_key": "1869931",
+      "match_score": 25,
+      "is_fixture_match": false,
+      "link_label": "Portugal vs DR Congo odds",
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url_slug": "portugal-dr-congo",
+      "discovered_url_count": 1,
+      "discovered_order": 185
+    },
+    {
+      "match_id": "croatia-england",
+      "commence_time": "",
+      "home_team": "Croatia",
+      "away_team": "England",
+      "url": "https://oddspedia.com/football/croatia-england-401",
+      "alt_url": "",
+      "match_key": "401",
+      "match_score": 25,
+      "is_fixture_match": false,
+      "link_label": "England vs Croatia odds",
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url_slug": "croatia-england",
+      "discovered_url_count": 1,
+      "discovered_order": 186
+    },
+    {
+      "match_id": "colombia-uzbekistan",
+      "commence_time": "",
+      "home_team": "Colombia",
+      "away_team": "Uzbekistan",
+      "url": "https://oddspedia.com/football/colombia-uzbekistan-1654589",
+      "alt_url": "",
+      "match_key": "1654589",
+      "match_score": 25,
+      "is_fixture_match": false,
+      "link_label": "Uzbekistan vs Colombia odds",
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url_slug": "colombia-uzbekistan",
+      "discovered_url_count": 1,
+      "discovered_order": 190
+    },
+    {
+      "match_id": "ghana-panama",
+      "commence_time": "",
+      "home_team": "Ghana",
+      "away_team": "Panama",
+      "url": "https://oddspedia.com/football/ghana-panama-1654593",
+      "alt_url": "",
+      "match_key": "1654593",
+      "match_score": 25,
+      "is_fixture_match": false,
+      "link_label": "Ghana vs Panama odds",
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url_slug": "ghana-panama",
+      "discovered_url_count": 1,
+      "discovered_order": 191
+    },
+    {
+      "match_id": "bosnia-herzegovina-qatar",
+      "commence_time": "",
+      "home_team": "Bosnia Herzegovina",
+      "away_team": "Qatar",
+      "url": "https://oddspedia.com/football/bosnia-herzegovina-qatar-1869936",
+      "alt_url": "",
+      "match_key": "1869936",
+      "match_score": 25,
+      "is_fixture_match": false,
+      "link_label": "Bosnia-Herzegovina vs Qatar odds",
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url_slug": "bosnia-herzegovina-qatar",
+      "discovered_url_count": 1,
+      "discovered_order": 213
+    },
+    {
+      "match_id": "switzerland-canada",
+      "commence_time": "2026-06-24T19:00:00Z",
+      "home_team": "Switzerland",
+      "away_team": "Canada",
+      "url": "https://oddspedia.com/football/switzerland-canada-1654550",
+      "alt_url": "",
+      "match_key": "1654550",
+      "match_score": 100,
+      "is_fixture_match": true,
+      "link_label": "Switzerland vs Canada odds",
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url_slug": "switzerland-canada",
+      "discovered_url_count": 1,
+      "discovered_order": 214
+    },
+    {
+      "match_id": "morocco-haiti",
+      "commence_time": "2026-06-24T22:00:00Z",
+      "home_team": "Morocco",
+      "away_team": "Haiti",
+      "url": "https://oddspedia.com/football/morocco-haiti-1654559",
+      "alt_url": "",
+      "match_key": "1654559",
+      "match_score": 100,
+      "is_fixture_match": true,
+      "link_label": "Morocco vs Haiti odds",
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url_slug": "morocco-haiti",
+      "discovered_url_count": 1,
+      "discovered_order": 215
+    },
+    {
+      "match_id": "scotland-brazil",
+      "commence_time": "2026-06-24T22:00:00Z",
+      "home_team": "Scotland",
+      "away_team": "Brazil",
+      "url": "https://oddspedia.com/football/brazil-scotland-379",
+      "alt_url": "",
+      "match_key": "379",
+      "match_score": 100,
+      "is_fixture_match": true,
+      "link_label": "Scotland vs Brazil odds",
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url_slug": "brazil-scotland",
+      "discovered_url_count": 1,
+      "discovered_order": 216
+    },
+    {
+      "match_id": "czech-republic-mexico",
+      "commence_time": "2026-06-25T01:00:00Z",
+      "home_team": "Czech Republic",
+      "away_team": "Mexico",
+      "url": "https://oddspedia.com/football/mexico-czech-republic-481",
+      "alt_url": "",
+      "match_key": "481",
+      "match_score": 100,
+      "is_fixture_match": true,
+      "link_label": "Czech Republic vs Mexico odds",
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url_slug": "mexico-czech-republic",
+      "discovered_url_count": 1,
+      "discovered_order": 217
+    },
+    {
+      "match_id": "south-africa-south-korea",
+      "commence_time": "2026-06-25T01:00:00Z",
+      "home_team": "South Africa",
+      "away_team": "South Korea",
+      "url": "https://oddspedia.com/football/south-korea-south-africa-1654547",
+      "alt_url": "",
+      "match_key": "1654547",
+      "match_score": 100,
+      "is_fixture_match": true,
+      "link_label": "South Africa vs South Korea odds",
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url_slug": "south-korea-south-africa",
+      "discovered_url_count": 1,
+      "discovered_order": 218
+    },
+    {
+      "match_id": "curacao-ivory-coast",
+      "commence_time": "2026-06-25T20:00:00Z",
+      "home_team": "Curacao",
+      "away_team": "Ivory Coast",
+      "url": "https://oddspedia.com/football/ivory-coast-curacao-1654566",
+      "alt_url": "",
+      "match_key": "1654566",
+      "match_score": 100,
+      "is_fixture_match": true,
+      "link_label": "Curacao vs Ivory Coast odds",
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url_slug": "ivory-coast-curacao",
+      "discovered_url_count": 1,
+      "discovered_order": 219
+    },
+    {
+      "match_id": "ecuador-germany",
+      "commence_time": "2026-06-25T20:00:00Z",
+      "home_team": "Ecuador",
+      "away_team": "Germany",
+      "url": "https://oddspedia.com/football/ecuador-germany-1654565",
+      "alt_url": "",
+      "match_key": "1654565",
+      "match_score": 100,
+      "is_fixture_match": true,
+      "link_label": "Ecuador vs Germany odds",
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url_slug": "ecuador-germany",
+      "discovered_url_count": 1,
+      "discovered_order": 220
+    },
+    {
+      "match_id": "paraguay-australia",
+      "commence_time": "2026-06-26T02:00:00Z",
+      "home_team": "Paraguay",
+      "away_team": "Australia",
+      "url": "https://oddspedia.com/football/australia-paraguay-651",
+      "alt_url": "",
+      "match_key": "651",
+      "match_score": 100,
+      "is_fixture_match": true,
+      "link_label": "Paraguay vs Australia odds",
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url_slug": "australia-paraguay",
+      "discovered_url_count": 1,
+      "discovered_order": 221
+    },
+    {
+      "match_id": "turkey-united-states",
+      "commence_time": "2026-06-26T02:00:00Z",
+      "home_team": "Turkey",
+      "away_team": "United States",
+      "url": "https://oddspedia.com/football/usa-turkey-1487558",
+      "alt_url": "",
+      "match_key": "1487558",
+      "match_score": 100,
+      "is_fixture_match": true,
+      "link_label": "Turkey vs USA odds",
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url_slug": "usa-turkey",
+      "discovered_url_count": 1,
+      "discovered_order": 222
+    },
+    {
+      "match_id": "japan-sweden",
+      "commence_time": "2026-06-25T23:00:00Z",
+      "home_team": "Japan",
+      "away_team": "Sweden",
+      "url": "https://oddspedia.com/football/japan-sweden-954",
+      "alt_url": "",
+      "match_key": "954",
+      "match_score": 100,
+      "is_fixture_match": true,
+      "link_label": "Japan vs Sweden odds",
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url_slug": "japan-sweden",
+      "discovered_url_count": 1,
+      "discovered_order": 223
+    },
+    {
+      "match_id": "tunisia-netherlands",
+      "commence_time": "2026-06-25T23:00:00Z",
+      "home_team": "Tunisia",
+      "away_team": "Netherlands",
+      "url": "https://oddspedia.com/football/netherlands-tunisia-1654560",
+      "alt_url": "",
+      "match_key": "1654560",
+      "match_score": 100,
+      "is_fixture_match": true,
+      "link_label": "Tunisia vs Netherlands odds",
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url_slug": "netherlands-tunisia",
+      "discovered_url_count": 1,
+      "discovered_order": 224
+    },
+    {
+      "match_id": "norway-france",
+      "commence_time": "2026-06-26T19:00:00Z",
+      "home_team": "Norway",
+      "away_team": "France",
+      "url": "https://oddspedia.com/football/france-norway-1654582",
+      "alt_url": "",
+      "match_key": "1654582",
+      "match_score": 100,
+      "is_fixture_match": true,
+      "link_label": "Norway vs France odds",
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url_slug": "france-norway",
+      "discovered_url_count": 1,
+      "discovered_order": 225
+    },
+    {
+      "match_id": "senegal-iraq",
+      "commence_time": "2026-06-26T19:00:00Z",
+      "home_team": "Senegal",
+      "away_team": "Iraq",
+      "url": "https://oddspedia.com/football/senegal-iraq-1869929",
+      "alt_url": "",
+      "match_key": "1869929",
+      "match_score": 100,
+      "is_fixture_match": true,
+      "link_label": "Senegal vs Iraq odds",
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url_slug": "senegal-iraq",
+      "discovered_url_count": 1,
+      "discovered_order": 226
+    },
+    {
+      "match_id": "egypt-iran",
+      "commence_time": "2026-06-27T03:00:00Z",
+      "home_team": "Egypt",
+      "away_team": "Iran",
+      "url": "https://oddspedia.com/football/iran-egypt-1654572",
+      "alt_url": "",
+      "match_key": "1654572",
+      "match_score": 100,
+      "is_fixture_match": true,
+      "link_label": "Egypt vs Iran odds",
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url_slug": "iran-egypt",
+      "discovered_url_count": 1,
+      "discovered_order": 227
+    },
+    {
+      "match_id": "new-zealand-belgium",
+      "commence_time": "2026-06-27T03:00:00Z",
+      "home_team": "New Zealand",
+      "away_team": "Belgium",
+      "url": "https://oddspedia.com/football/belgium-new-zealand-1654571",
+      "alt_url": "",
+      "match_key": "1654571",
+      "match_score": 100,
+      "is_fixture_match": true,
+      "link_label": "New Zealand vs Belgium odds",
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url_slug": "belgium-new-zealand",
+      "discovered_url_count": 1,
+      "discovered_order": 228
+    },
+    {
+      "match_id": "cape-verde-saudi-arabia",
+      "commence_time": "2026-06-27T00:00:00Z",
+      "home_team": "Cape Verde",
+      "away_team": "Saudi Arabia",
+      "url": "https://oddspedia.com/football/saudi-arabia-cape-verde-1654579",
+      "alt_url": "",
+      "match_key": "1654579",
+      "match_score": 100,
+      "is_fixture_match": true,
+      "link_label": "Cape Verde vs Saudi Arabia odds",
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url_slug": "saudi-arabia-cape-verde",
+      "discovered_url_count": 1,
+      "discovered_order": 229
+    },
+    {
+      "match_id": "uruguay-spain",
+      "commence_time": "2026-06-27T00:00:00Z",
+      "home_team": "Uruguay",
+      "away_team": "Spain",
+      "url": "https://oddspedia.com/football/spain-uruguay-552",
+      "alt_url": "",
+      "match_key": "552",
+      "match_score": 100,
+      "is_fixture_match": true,
+      "link_label": "Uruguay vs Spain odds",
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url_slug": "spain-uruguay",
+      "discovered_url_count": 1,
+      "discovered_order": 230
+    },
+    {
+      "match_id": "croatia-ghana",
+      "commence_time": "2026-06-27T21:00:00Z",
+      "home_team": "Croatia",
+      "away_team": "Ghana",
+      "url": "https://oddspedia.com/football/croatia-ghana-1654597",
+      "alt_url": "",
+      "match_key": "1654597",
+      "match_score": 100,
+      "is_fixture_match": true,
+      "link_label": "Croatia vs Ghana odds",
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url_slug": "croatia-ghana",
+      "discovered_url_count": 1,
+      "discovered_order": 231
+    },
+    {
+      "match_id": "panama-england",
+      "commence_time": "2026-06-27T21:00:00Z",
+      "home_team": "Panama",
+      "away_team": "England",
+      "url": "https://oddspedia.com/football/england-panama-851",
+      "alt_url": "",
+      "match_key": "851",
+      "match_score": 100,
+      "is_fixture_match": true,
+      "link_label": "Panama vs England odds",
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url_slug": "england-panama",
+      "discovered_url_count": 1,
+      "discovered_order": 232
+    },
+    {
+      "match_id": "algeria-austria",
+      "commence_time": "2026-06-28T02:00:00Z",
+      "home_team": "Algeria",
+      "away_team": "Austria",
+      "url": "https://oddspedia.com/football/algeria-austria-1654588",
+      "alt_url": "",
+      "match_key": "1654588",
+      "match_score": 100,
+      "is_fixture_match": true,
+      "link_label": "Algeria vs Austria odds",
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url_slug": "algeria-austria",
+      "discovered_url_count": 1,
+      "discovered_order": 233
+    },
+    {
+      "match_id": "jordan-argentina",
+      "commence_time": "2026-06-28T02:00:00Z",
+      "home_team": "Jordan",
+      "away_team": "Argentina",
+      "url": "https://oddspedia.com/football/argentina-jordan-1654587",
+      "alt_url": "",
+      "match_key": "1654587",
+      "match_score": 100,
+      "is_fixture_match": true,
+      "link_label": "Jordan vs Argentina odds",
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url_slug": "argentina-jordan",
+      "discovered_url_count": 1,
+      "discovered_order": 234
+    },
+    {
+      "match_id": "colombia-portugal",
+      "commence_time": "2026-06-27T23:30:00Z",
+      "home_team": "Colombia",
+      "away_team": "Portugal",
+      "url": "https://oddspedia.com/football/colombia-portugal-1654591",
+      "alt_url": "",
+      "match_key": "1654591",
+      "match_score": 100,
+      "is_fixture_match": true,
+      "link_label": "Colombia vs Portugal odds",
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url_slug": "colombia-portugal",
+      "discovered_url_count": 1,
+      "discovered_order": 235
+    },
+    {
+      "match_id": "dr-congo-uzbekistan",
+      "commence_time": "2026-06-27T23:30:00Z",
+      "home_team": "DR Congo",
+      "away_team": "Uzbekistan",
+      "url": "https://oddspedia.com/football/uzbekistan-dr-congo-1869933",
+      "alt_url": "",
+      "match_key": "1869933",
+      "match_score": 100,
+      "is_fixture_match": true,
+      "link_label": "DR Congo vs Uzbekistan odds",
+      "seed_url": "https://oddspedia.com/football/world/world-cup",
+      "url_slug": "uzbekistan-dr-congo",
+      "discovered_url_count": 1,
+      "discovered_order": 236
+    }
+  ]
 }

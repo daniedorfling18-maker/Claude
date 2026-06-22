@@ -1,25 +1,161 @@
-match_id,commence_time,home_team,away_team,url,alt_url,match_key,match_score
-netherlands-sweden,2026-06-20T17:00:00Z,Netherlands,Sweden,https://oddspedia.com/football/netherlands-sweden-1529,https://oddspedia.com/football/sweden-netherlands-1529,1529,100
-germany-ivory-coast,2026-06-20T20:00:00Z,Germany,Ivory Coast,https://oddspedia.com/football/germany-ivory-coast-1654563,https://oddspedia.com/football/ivory-coast-germany-1654563,1654563,100
-ecuador-curacao,2026-06-21T00:00:00Z,Ecuador,Curacao,https://oddspedia.com/football/ecuador-curacao-1654564,https://oddspedia.com/football/curacao-ecuador-1654564,1654564,100
-tunisia-japan,2026-06-21T04:00:00Z,Tunisia,Japan,https://oddspedia.com/football/tunisia-japan-957,https://oddspedia.com/football/japan-tunisia-957,957,100
-spain-saudi-arabia,2026-06-21T16:00:00Z,Spain,Saudi Arabia,https://oddspedia.com/football/spain-saudi-arabia-1654576,https://oddspedia.com/football/saudi-arabia-spain-1654576,1654576,100
-belgium-iran,2026-06-21T19:00:00Z,Belgium,Iran,https://oddspedia.com/football/belgium-iran-1654569,https://oddspedia.com/football/iran-belgium-1654569,1654569,100
-uruguay-cape-verde,2026-06-21T22:00:00Z,Uruguay,Cape Verde,https://oddspedia.com/football/uruguay-cape-verde-1654577,https://oddspedia.com/football/cape-verde-uruguay-1654577,1654577,100
-new-zealand-egypt,2026-06-22T01:00:00Z,New Zealand,Egypt,https://oddspedia.com/football/new-zealand-egypt-1295549,https://oddspedia.com/football/egypt-new-zealand-1295549,1295549,100
-argentina-austria,2026-06-22T17:00:00Z,Argentina,Austria,https://oddspedia.com/football/argentina-austria-1654585,https://oddspedia.com/football/austria-argentina-1654585,1654585,100
-france-iraq,2026-06-22T21:00:00Z,France,Iraq,https://oddspedia.com/football/france-iraq-1869928,https://oddspedia.com/football/iraq-france-1869928,1869928,100
-norway-senegal,2026-06-23T00:00:00Z,Norway,Senegal,https://oddspedia.com/football/norway-senegal-1654581,https://oddspedia.com/football/senegal-norway-1654581,1654581,100
-jordan-algeria,2026-06-23T03:00:00Z,Jordan,Algeria,https://oddspedia.com/football/jordan-algeria-1654586,https://oddspedia.com/football/algeria-jordan-1654586,1654586,100
-portugal-uzbekistan,2026-06-23T17:00:00Z,Portugal,Uzbekistan,https://oddspedia.com/football/portugal-uzbekistan-1232,https://oddspedia.com/football/uzbekistan-portugal-1232,1232,100
-england-ghana,2026-06-23T20:00:00Z,England,Ghana,https://oddspedia.com/football/england-ghana-1654594,https://oddspedia.com/football/ghana-england-1654594,1654594,100
-panama-croatia,2026-06-23T23:00:00Z,Panama,Croatia,https://oddspedia.com/football/panama-croatia-1654595,https://oddspedia.com/football/croatia-panama-1654595,1654595,100
-colombia-dr-congo,2026-06-24T02:00:00Z,Colombia,DR Congo,https://oddspedia.com/football/colombia-dr-congo-1869932,https://oddspedia.com/football/dr-congo-colombia-1869932,1869932,100
-1869938,2026-06-18 16:00:00+00,Czech Republic,South Africa,https://oddspedia.com/football/czech-republic-south-africa-1869938,https://oddspedia.com/football/south-africa-czech-republic-1869938,1869938,0
-1001,2026-06-18 19:00:00+00,Switzerland,Bosnia-Herzegovina,https://oddspedia.com/football/switzerland-bosnia-herzegovina-1001,https://oddspedia.com/football/bosnia-herzegovina-switzerland-1001,1001,0
-1023867,2026-06-18 22:00:00+00,Canada,Qatar,https://oddspedia.com/football/canada-qatar-1023867,https://oddspedia.com/football/qatar-canada-1023867,1023867,0
-465,2026-06-19 01:00:00+00,Mexico,South Korea,https://oddspedia.com/football/mexico-south-korea-465,https://oddspedia.com/football/south-korea-mexico-465,465,0
-1534707,2026-06-19 19:00:00+00,USA,Australia,https://oddspedia.com/football/usa-australia-1534707,https://oddspedia.com/football/australia-usa-1534707,1534707,0
-1654557,2026-06-19 22:00:00+00,Scotland,Morocco,https://oddspedia.com/football/scotland-morocco-1654557,https://oddspedia.com/football/morocco-scotland-1654557,1654557,0
-390,2026-06-20 00:30:00+00,Brazil,Haiti,https://oddspedia.com/football/brazil-haiti-390,https://oddspedia.com/football/haiti-brazil-390,390,0
-1869941,2026-06-20 03:00:00+00,Turkey,Paraguay,https://oddspedia.com/football/turkey-paraguay-1869941,https://oddspedia.com/football/paraguay-turkey-1869941,1869941,0
+match_id,commence_time,home_team,away_team,url,alt_url,match_key,match_score,is_fixture_match,link_label,seed_url,url_slug,discovered_url_count,discovered_order
+czech-republic-south-africa,,Czech Republic,South Africa,https://oddspedia.com/football/czech-republic-south-africa-1869938,,1869938,25,False,Odds | Czech Republic vs South Africa odds,https://oddspedia.com/football/world/world-cup,czech-republic-south-africa,1,90
+mexico-south-korea,,Mexico,South Korea,https://oddspedia.com/football/mexico-south-korea-465,,465,25,False,Odds | Mexico vs South Korea odds,https://oddspedia.com/football/world/world-cup,mexico-south-korea,1,92
+switzerland-bosnia-herzegovina,,Switzerland,Bosnia Herzegovina,https://oddspedia.com/football/switzerland-bosnia-herzegovina-1001,,1001,25,False,Odds | Switzerland vs Bosnia-Herzegovina odds,https://oddspedia.com/football/world/world-cup,switzerland-bosnia-herzegovina,1,94
+canada-qatar,,Canada,Qatar,https://oddspedia.com/football/canada-qatar-1023867,,1023867,25,False,Odds | Canada vs Qatar odds,https://oddspedia.com/football/world/world-cup,canada-qatar,1,96
+scotland-morocco,,Scotland,Morocco,https://oddspedia.com/football/scotland-morocco-1654557,,1654557,25,False,Odds | Scotland vs Morocco odds,https://oddspedia.com/football/world/world-cup,scotland-morocco,1,98
+brazil-haiti,,Brazil,Haiti,https://oddspedia.com/football/brazil-haiti-390,,390,25,False,Odds | Brazil vs Haiti odds,https://oddspedia.com/football/world/world-cup,brazil-haiti,1,100
+australia-usa,,Australia,USA,https://oddspedia.com/football/australia-usa-1534707,,1534707,25,False,Odds | USA vs Australia odds,https://oddspedia.com/football/world/world-cup,australia-usa,1,102
+turkey-paraguay,,Turkey,Paraguay,https://oddspedia.com/football/turkey-paraguay-1869941,,1869941,25,False,Odds | Turkey vs Paraguay odds,https://oddspedia.com/football/world/world-cup,turkey-paraguay,1,104
+germany-ivory-coast,2026-06-20T20:00:00Z,Germany,Ivory Coast,https://oddspedia.com/football/ivory-coast-germany-1654563,,1654563,100,True,Odds | Germany vs Ivory Coast odds,https://oddspedia.com/football/world/world-cup,ivory-coast-germany,1,106
+ecuador-curacao,2026-06-21T00:00:00Z,Ecuador,Curacao,https://oddspedia.com/football/ecuador-curacao-1654564,,1654564,100,True,Odds | Ecuador vs Curacao odds,https://oddspedia.com/football/world/world-cup,ecuador-curacao,1,108
+netherlands-sweden,2026-06-20T17:00:00Z,Netherlands,Sweden,https://oddspedia.com/football/netherlands-sweden-1529,,1529,100,True,Odds | Netherlands vs Sweden odds,https://oddspedia.com/football/world/world-cup,netherlands-sweden,1,110
+tunisia-japan,2026-06-21T04:00:00Z,Tunisia,Japan,https://oddspedia.com/football/japan-tunisia-957,,957,100,True,Odds | Tunisia vs Japan odds,https://oddspedia.com/football/world/world-cup,japan-tunisia,1,112
+belgium-iran,2026-06-21T19:00:00Z,Belgium,Iran,https://oddspedia.com/football/iran-belgium-1654569,,1654569,100,True,Odds | Belgium vs Iran odds,https://oddspedia.com/football/world/world-cup,iran-belgium,1,114
+new-zealand-egypt,2026-06-22T01:00:00Z,New Zealand,Egypt,https://oddspedia.com/football/egypt-new-zealand-1295549,,1295549,100,True,Odds | New Zealand vs Egypt odds,https://oddspedia.com/football/world/world-cup,egypt-new-zealand,1,116
+spain-saudi-arabia,2026-06-21T16:00:00Z,Spain,Saudi Arabia,https://oddspedia.com/football/spain-saudi-arabia-1654576,,1654576,100,True,Odds | Spain vs Saudi Arabia odds,https://oddspedia.com/football/world/world-cup,spain-saudi-arabia,1,118
+uruguay-cape-verde,2026-06-21T22:00:00Z,Uruguay,Cape Verde,https://oddspedia.com/football/uruguay-cape-verde-1654577,,1654577,100,True,Odds | Uruguay vs Cape Verde odds,https://oddspedia.com/football/world/world-cup,uruguay-cape-verde,1,120
+france-iraq,2026-06-22T21:00:00Z,France,Iraq,https://oddspedia.com/football/france-iraq-1869928,,1869928,100,True,"Odds | 23:00
+
+France
+Iraq
+TOTAL GOALS: UNDER 3.5
+2.00
+HOME
+DRAW
+AWAY
+1.07
+12.00
+31.00 | France vs Iraq odds",https://oddspedia.com/football/world/world-cup,france-iraq,1,122
+norway-senegal,2026-06-23T00:00:00Z,Norway,Senegal,https://oddspedia.com/football/norway-senegal-1654581,,1654581,100,True,"Odds | 23 Jun 02:00
+
+Norway
+Senegal
+DOUBLE CHANCE: DRAW OR SENEGAL
+1.67
+HOME
+DRAW
+AWAY
+2.23
+3.45
+3.23 | Norway vs Senegal odds",https://oddspedia.com/football/world/world-cup,norway-senegal,1,125
+argentina-austria,2026-06-22T17:00:00Z,Argentina,Austria,https://oddspedia.com/football/argentina-austria-1654585,,1654585,100,True,"Odds | 19:00
+
+Argentina
+Austria
+DOUBLE CHANCE: DRAW OR AUSTRIA
+2.75
+HOME
+DRAW
+AWAY
+1.50
+4.30
+6.80 | Argentina vs Austria odds",https://oddspedia.com/football/world/world-cup,argentina-austria,1,128
+jordan-algeria,2026-06-23T03:00:00Z,Jordan,Algeria,https://oddspedia.com/football/algeria-jordan-1654586,,1654586,100,True,"Odds | 23 Jun 05:00
+
+Jordan
+Algeria
+DOUBLE CHANCE: JORDAN OR DRAW
+2.48
+HOME
+DRAW
+AWAY
+5.90
+4.20
+1.55 | Jordan vs Algeria odds",https://oddspedia.com/football/world/world-cup,algeria-jordan,1,131
+portugal-uzbekistan,2026-06-23T17:00:00Z,Portugal,Uzbekistan,https://oddspedia.com/football/portugal-uzbekistan-1232,,1232,100,True,"Odds | 23 Jun 19:00
+
+Portugal
+Uzbekistan
+TOTAL GOALS: UNDER 3.5
+1.52
+HOME
+DRAW
+AWAY
+1.19
+7.00
+15.00 | Portugal vs Uzbekistan odds",https://oddspedia.com/football/world/world-cup,portugal-uzbekistan,1,134
+colombia-dr-congo,2026-06-24T02:00:00Z,Colombia,DR Congo,https://oddspedia.com/football/colombia-dr-congo-1869932,,1869932,100,True,"Odds | 24 Jun 04:00
+
+Colombia
+DR Congo
+DOUBLE CHANCE: DRAW OR DR CONGO
+2.60
+HOME
+DRAW
+AWAY
+1.51
+4.20
+6.80 | Colombia vs DR Congo odds",https://oddspedia.com/football/world/world-cup,colombia-dr-congo,1,137
+england-ghana,2026-06-23T20:00:00Z,England,Ghana,https://oddspedia.com/football/england-ghana-1654594,,1654594,100,True,"Odds | 23 Jun 22:00
+
+England
+Ghana
+TOTAL GOALS: UNDER 3.5
+1.50
+HOME
+DRAW
+AWAY
+1.22
+6.50
+13.00 | England vs Ghana odds",https://oddspedia.com/football/world/world-cup,england-ghana,1,140
+panama-croatia,2026-06-23T23:00:00Z,Panama,Croatia,https://oddspedia.com/football/croatia-panama-1654595,,1654595,100,True,"Odds | 24 Jun 01:00
+
+Panama
+Croatia
+DOUBLE CHANCE: PANAMA OR DRAW
+2.50
+HOME
+DRAW
+AWAY
+6.60
+4.00
+1.55 | Panama vs Croatia odds",https://oddspedia.com/football/world/world-cup,croatia-panama,1,143
+mexico-south-africa,,Mexico,South Africa,https://oddspedia.com/football/mexico-south-africa-1654545,,1654545,25,False,Mexico vs South Africa odds,https://oddspedia.com/football/world/world-cup,mexico-south-africa,1,165
+south-korea-czech-republic,,South Korea,Czech Republic,https://oddspedia.com/football/south-korea-czech-republic-1505,,1505,25,False,South Korea vs Czech Republic odds,https://oddspedia.com/football/world/world-cup,south-korea-czech-republic,1,166
+bosnia-herzegovina-canada,,Bosnia Herzegovina,Canada,https://oddspedia.com/football/bosnia-herzegovina-canada-1869934,,1869934,25,False,Canada vs Bosnia-Herzegovina odds,https://oddspedia.com/football/world/world-cup,bosnia-herzegovina-canada,1,167
+switzerland-qatar,,Switzerland,Qatar,https://oddspedia.com/football/switzerland-qatar-1039,,1039,25,False,Qatar vs Switzerland odds,https://oddspedia.com/football/world/world-cup,switzerland-qatar,1,168
+brazil-morocco,,Brazil,Morocco,https://oddspedia.com/football/brazil-morocco-1110591,,1110591,25,False,Brazil vs Morocco odds,https://oddspedia.com/football/world/world-cup,brazil-morocco,1,169
+usa-paraguay,,USA,Paraguay,https://oddspedia.com/football/usa-paraguay-1563,,1563,25,False,USA vs Paraguay odds,https://oddspedia.com/football/world/world-cup,usa-paraguay,1,170
+scotland-haiti,,Scotland,Haiti,https://oddspedia.com/football/scotland-haiti-1654555,,1654555,25,False,Haiti vs Scotland odds,https://oddspedia.com/football/world/world-cup,scotland-haiti,1,171
+australia-turkey,,Australia,Turkey,https://oddspedia.com/football/australia-turkey-1869940,,1869940,25,False,Australia vs Turkey odds,https://oddspedia.com/football/world/world-cup,australia-turkey,1,172
+germany-curacao,,Germany,Curacao,https://oddspedia.com/football/germany-curacao-1654561,,1654561,25,False,Germany vs Curacao odds,https://oddspedia.com/football/world/world-cup,germany-curacao,1,173
+japan-netherlands,,Japan,Netherlands,https://oddspedia.com/football/japan-netherlands-1654600,,1654600,25,False,Netherlands vs Japan odds,https://oddspedia.com/football/world/world-cup,japan-netherlands,1,174
+ivory-coast-ecuador,,Ivory Coast,Ecuador,https://oddspedia.com/football/ivory-coast-ecuador-1654562,,1654562,25,False,Ivory Coast vs Ecuador odds,https://oddspedia.com/football/world/world-cup,ivory-coast-ecuador,1,175
+sweden-tunisia,,Sweden,Tunisia,https://oddspedia.com/football/sweden-tunisia-1869943,,1869943,25,False,Sweden vs Tunisia odds,https://oddspedia.com/football/world/world-cup,sweden-tunisia,1,176
+belgium-egypt,,Belgium,Egypt,https://oddspedia.com/football/belgium-egypt-1406,,1406,25,False,Belgium vs Egypt odds,https://oddspedia.com/football/world/world-cup,belgium-egypt,1,177
+spain-cape-verde,,Spain,Cape Verde,https://oddspedia.com/football/spain-cape-verde-1654574,,1654574,25,False,Spain vs Cape Verde odds,https://oddspedia.com/football/world/world-cup,spain-cape-verde,1,178
+uruguay-saudi-arabia,,Uruguay,Saudi Arabia,https://oddspedia.com/football/uruguay-saudi-arabia-761,,761,25,False,Saudi Arabia vs Uruguay odds,https://oddspedia.com/football/world/world-cup,uruguay-saudi-arabia,1,179
+iran-new-zealand,,Iran,New Zealand,https://oddspedia.com/football/iran-new-zealand-1654568,,1654568,25,False,Iran vs New Zealand odds,https://oddspedia.com/football/world/world-cup,iran-new-zealand,1,180
+france-senegal,,France,Senegal,https://oddspedia.com/football/france-senegal-1654580,,1654580,25,False,France vs Senegal odds,https://oddspedia.com/football/world/world-cup,france-senegal,1,181
+norway-iraq,,Norway,Iraq,https://oddspedia.com/football/norway-iraq-1869930,,1869930,25,False,Iraq vs Norway odds,https://oddspedia.com/football/world/world-cup,norway-iraq,1,182
+argentina-algeria,,Argentina,Algeria,https://oddspedia.com/football/argentina-algeria-1128,,1128,25,False,Argentina vs Algeria odds,https://oddspedia.com/football/world/world-cup,argentina-algeria,1,183
+austria-jordan,,Austria,Jordan,https://oddspedia.com/football/austria-jordan-1654584,,1654584,25,False,Austria vs Jordan odds,https://oddspedia.com/football/world/world-cup,austria-jordan,1,184
+portugal-dr-congo,,Portugal,DR Congo,https://oddspedia.com/football/portugal-dr-congo-1869931,,1869931,25,False,Portugal vs DR Congo odds,https://oddspedia.com/football/world/world-cup,portugal-dr-congo,1,185
+croatia-england,,Croatia,England,https://oddspedia.com/football/croatia-england-401,,401,25,False,England vs Croatia odds,https://oddspedia.com/football/world/world-cup,croatia-england,1,186
+colombia-uzbekistan,,Colombia,Uzbekistan,https://oddspedia.com/football/colombia-uzbekistan-1654589,,1654589,25,False,Uzbekistan vs Colombia odds,https://oddspedia.com/football/world/world-cup,colombia-uzbekistan,1,190
+ghana-panama,,Ghana,Panama,https://oddspedia.com/football/ghana-panama-1654593,,1654593,25,False,Ghana vs Panama odds,https://oddspedia.com/football/world/world-cup,ghana-panama,1,191
+bosnia-herzegovina-qatar,,Bosnia Herzegovina,Qatar,https://oddspedia.com/football/bosnia-herzegovina-qatar-1869936,,1869936,25,False,Bosnia-Herzegovina vs Qatar odds,https://oddspedia.com/football/world/world-cup,bosnia-herzegovina-qatar,1,213
+switzerland-canada,2026-06-24T19:00:00Z,Switzerland,Canada,https://oddspedia.com/football/switzerland-canada-1654550,,1654550,100,True,Switzerland vs Canada odds,https://oddspedia.com/football/world/world-cup,switzerland-canada,1,214
+morocco-haiti,2026-06-24T22:00:00Z,Morocco,Haiti,https://oddspedia.com/football/morocco-haiti-1654559,,1654559,100,True,Morocco vs Haiti odds,https://oddspedia.com/football/world/world-cup,morocco-haiti,1,215
+scotland-brazil,2026-06-24T22:00:00Z,Scotland,Brazil,https://oddspedia.com/football/brazil-scotland-379,,379,100,True,Scotland vs Brazil odds,https://oddspedia.com/football/world/world-cup,brazil-scotland,1,216
+czech-republic-mexico,2026-06-25T01:00:00Z,Czech Republic,Mexico,https://oddspedia.com/football/mexico-czech-republic-481,,481,100,True,Czech Republic vs Mexico odds,https://oddspedia.com/football/world/world-cup,mexico-czech-republic,1,217
+south-africa-south-korea,2026-06-25T01:00:00Z,South Africa,South Korea,https://oddspedia.com/football/south-korea-south-africa-1654547,,1654547,100,True,South Africa vs South Korea odds,https://oddspedia.com/football/world/world-cup,south-korea-south-africa,1,218
+curacao-ivory-coast,2026-06-25T20:00:00Z,Curacao,Ivory Coast,https://oddspedia.com/football/ivory-coast-curacao-1654566,,1654566,100,True,Curacao vs Ivory Coast odds,https://oddspedia.com/football/world/world-cup,ivory-coast-curacao,1,219
+ecuador-germany,2026-06-25T20:00:00Z,Ecuador,Germany,https://oddspedia.com/football/ecuador-germany-1654565,,1654565,100,True,Ecuador vs Germany odds,https://oddspedia.com/football/world/world-cup,ecuador-germany,1,220
+paraguay-australia,2026-06-26T02:00:00Z,Paraguay,Australia,https://oddspedia.com/football/australia-paraguay-651,,651,100,True,Paraguay vs Australia odds,https://oddspedia.com/football/world/world-cup,australia-paraguay,1,221
+turkey-united-states,2026-06-26T02:00:00Z,Turkey,United States,https://oddspedia.com/football/usa-turkey-1487558,,1487558,100,True,Turkey vs USA odds,https://oddspedia.com/football/world/world-cup,usa-turkey,1,222
+japan-sweden,2026-06-25T23:00:00Z,Japan,Sweden,https://oddspedia.com/football/japan-sweden-954,,954,100,True,Japan vs Sweden odds,https://oddspedia.com/football/world/world-cup,japan-sweden,1,223
+tunisia-netherlands,2026-06-25T23:00:00Z,Tunisia,Netherlands,https://oddspedia.com/football/netherlands-tunisia-1654560,,1654560,100,True,Tunisia vs Netherlands odds,https://oddspedia.com/football/world/world-cup,netherlands-tunisia,1,224
+norway-france,2026-06-26T19:00:00Z,Norway,France,https://oddspedia.com/football/france-norway-1654582,,1654582,100,True,Norway vs France odds,https://oddspedia.com/football/world/world-cup,france-norway,1,225
+senegal-iraq,2026-06-26T19:00:00Z,Senegal,Iraq,https://oddspedia.com/football/senegal-iraq-1869929,,1869929,100,True,Senegal vs Iraq odds,https://oddspedia.com/football/world/world-cup,senegal-iraq,1,226
+egypt-iran,2026-06-27T03:00:00Z,Egypt,Iran,https://oddspedia.com/football/iran-egypt-1654572,,1654572,100,True,Egypt vs Iran odds,https://oddspedia.com/football/world/world-cup,iran-egypt,1,227
+new-zealand-belgium,2026-06-27T03:00:00Z,New Zealand,Belgium,https://oddspedia.com/football/belgium-new-zealand-1654571,,1654571,100,True,New Zealand vs Belgium odds,https://oddspedia.com/football/world/world-cup,belgium-new-zealand,1,228
+cape-verde-saudi-arabia,2026-06-27T00:00:00Z,Cape Verde,Saudi Arabia,https://oddspedia.com/football/saudi-arabia-cape-verde-1654579,,1654579,100,True,Cape Verde vs Saudi Arabia odds,https://oddspedia.com/football/world/world-cup,saudi-arabia-cape-verde,1,229
+uruguay-spain,2026-06-27T00:00:00Z,Uruguay,Spain,https://oddspedia.com/football/spain-uruguay-552,,552,100,True,Uruguay vs Spain odds,https://oddspedia.com/football/world/world-cup,spain-uruguay,1,230
+croatia-ghana,2026-06-27T21:00:00Z,Croatia,Ghana,https://oddspedia.com/football/croatia-ghana-1654597,,1654597,100,True,Croatia vs Ghana odds,https://oddspedia.com/football/world/world-cup,croatia-ghana,1,231
+panama-england,2026-06-27T21:00:00Z,Panama,England,https://oddspedia.com/football/england-panama-851,,851,100,True,Panama vs England odds,https://oddspedia.com/football/world/world-cup,england-panama,1,232
+algeria-austria,2026-06-28T02:00:00Z,Algeria,Austria,https://oddspedia.com/football/algeria-austria-1654588,,1654588,100,True,Algeria vs Austria odds,https://oddspedia.com/football/world/world-cup,algeria-austria,1,233
+jordan-argentina,2026-06-28T02:00:00Z,Jordan,Argentina,https://oddspedia.com/football/argentina-jordan-1654587,,1654587,100,True,Jordan vs Argentina odds,https://oddspedia.com/football/world/world-cup,argentina-jordan,1,234
+colombia-portugal,2026-06-27T23:30:00Z,Colombia,Portugal,https://oddspedia.com/football/colombia-portugal-1654591,,1654591,100,True,Colombia vs Portugal odds,https://oddspedia.com/football/world/world-cup,colombia-portugal,1,235
+dr-congo-uzbekistan,2026-06-27T23:30:00Z,DR Congo,Uzbekistan,https://oddspedia.com/football/uzbekistan-dr-congo-1869933,,1869933,100,True,DR Congo vs Uzbekistan odds,https://oddspedia.com/football/world/world-cup,uzbekistan-dr-congo,1,236

@@ -21,6 +21,8 @@ It:
 
 The workflow is scheduled every 5 minutes and the script loops for about 270 seconds. GitHub Actions cannot run a true permanent daemon, so this is the closest scheduled workflow design. Move the same script to a VPS or self-hosted runner if you need true always-on execution.
 
+The workflow intentionally does not expose `workflow_dispatch`. This repo validates scheduled automation rules in CI, so configuration should be changed through repository variables and secrets rather than manual workflow inputs.
+
 ## Modes
 
 `PM_MODE` supports:
@@ -29,7 +31,7 @@ The workflow is scheduled every 5 minutes and the script loops for about 270 sec
 - `dry_run`: calculate opportunities and paper-log them, but do not submit orders.
 - `live`: submit orders only when `POLYMARKET_EXECUTE_LIVE=true` is also set.
 
-Scheduled runs default to `dry_run`.
+Scheduled runs default to `dry_run` unless the repository variable `POLYMARKET_MODE` is set.
 
 ## Required model probabilities
 
@@ -105,10 +107,10 @@ CLOB_PASS_PHRASE
 
 If the CLOB API credentials are not supplied, the script attempts to derive them with the private key.
 
-Live mode also requires:
+Live mode also requires repository variables:
 
 ```text
-PM_MODE=live
+POLYMARKET_MODE=live
 POLYMARKET_EXECUTE_LIVE=true
 ```
 
@@ -131,8 +133,8 @@ Do not increase order size until paper logs are stable and you have reconciled f
 
 ## Recommended rollout
 
-1. Run `scan` manually.
-2. Add a small model probability CSV and run `dry_run`.
+1. Set `POLYMARKET_MODE=scan`, wait for the next scheduled run, and review artifacts.
+2. Add a small model probability CSV and set `POLYMARKET_MODE=dry_run`.
 3. Review artifacts over multiple days.
-4. Only then enable `live` with very small order size.
+4. Only then enable `POLYMARKET_MODE=live` and `POLYMARKET_EXECUTE_LIVE=true` with very small order size.
 5. Move to a VPS or self-hosted runner for production continuity.

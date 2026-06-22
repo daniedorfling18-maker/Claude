@@ -40,6 +40,77 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install -e ".[dev]"
 
+      - name: Validate workflow automation rules
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import sys
+
+          workflow_dir = Path('.github/workflows')
+          workflows = sorted(p.name for p in workflow_dir.glob('*.yml')) + sorted(p.name for p in workflow_dir.glob('*.yaml'))
+          expected = {
+              'auto_pick.yml',
+              'check_superbru_fixtures.yml',
+              'ci.yml',
+              'data-inventory.yml',
+              'refresh-locked-superbru-card.yml',
+              'repo-audit-bundle.yml',
+          }
+          forbidden_files = {
+              'daily-superbru-robust.yml',
+              'inspect_superbru_dom.yml',
+              'submit_superbru_pick.yml',
+              'test_submit_dry_run.yml',
+          }
+          failures = []
+
+          present = set(workflows)
+          missing = expected - present
+          unexpected = present - expected
+          forbidden_present = forbidden_files & present
+          if missing:
+              failures.append(f'Missing expected automated workflows: {sorted(missing)}')
+          if unexpected:
+              failures.append(f'Unexpected workflow files present: {sorted(unexpected)}')
+          if forbidden_present:
+              failures.append(f'Manual-only workflow files are still present: {sorted(forbidden_present)}')
+
+          expected_triggers = {
+              'auto_pick.yml': {'schedule'},
+              'check_superbru_fixtures.yml': {'schedule'},
+              'ci.yml': {'push', 'pull_request'},
+              'data-inventory.yml': {'schedule', 'push'},
+              'refresh-locked-superbru-card.yml': {'schedule'},
+              'repo-audit-bundle.yml': {'push'},
+          }
+
+          for name in sorted(expected & present):
+              text = (workflow_dir / name).read_text(encoding='utf-8')
+              if 'workflow_dispatch:' in text:
+                  failures.append(f'{name} still contains workflow_dispatch')
+              for trigger in expected_triggers[name]:
+                  if f'  {trigger}:' not in text:
+                      failures.append(f'{name} is missing required automated trigger: {trigger}')
+              forbidden_triggers = {'workflow_dispatch'} | ({'push', 'pull_request', 'schedule'} - expected_triggers[name])
+              for trigger in forbidden_triggers:
+                  if f'  {trigger}:' in text:
+                      failures.append(f'{name} contains disallowed trigger: {trigger}')
+              if 'timeout-minutes:' not in text:
+                  failures.append(f'{name} is missing timeout-minutes')
+              if 'concurrency:' not in text:
+                  failures.append(f'{name} is missing concurrency')
+              if 'permissions:' not in text:
+                  failures.append(f'{name} is missing permissions')
+
+          if failures:
+              print('Workflow automation validation failed:')
+              for failure in failures:
+                  print(f'- {failure}')
+              sys.exit(1)
+          print('Workflow automation validation passed.')
+          print('Automated workflow files:', ', '.join(workflows))
+          PY
+
       - name: Run tests
         run: pytest
 

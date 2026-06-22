@@ -5,7 +5,6 @@ on:
     # Once daily at 06:00 UTC (08:00 SAST). Verifies upcoming fixtures are covered
     # by auto_pick.yml cron entries and opens a PR with any missing ones.
     - cron: '0 6 * * *'
-  workflow_dispatch:
 
 permissions:
   contents: write
@@ -51,7 +50,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: superbru-fixture-check
+          name: superbru-fixture-check-${{ github.run_number }}
           path: outputs/fixture_check/
           retention-days: 14
           if-no-files-found: warn

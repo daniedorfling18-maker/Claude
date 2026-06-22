@@ -44,6 +44,7 @@ jobs:
         run: |
           python - <<'PY'
           from pathlib import Path
+          import re
           import sys
 
           workflow_dir = Path('.github/workflows')
@@ -62,8 +63,40 @@ jobs:
               'submit_superbru_pick.yml',
               'test_submit_dry_run.yml',
           }
-          failures = []
+          expected_triggers = {
+              'auto_pick.yml': {'schedule'},
+              'check_superbru_fixtures.yml': {'schedule'},
+              'ci.yml': {'push', 'pull_request'},
+              'data-inventory.yml': {'schedule', 'push'},
+              'refresh-locked-superbru-card.yml': {'schedule'},
+              'repo-audit-bundle.yml': {'push'},
+          }
+          possible_triggers = {'schedule', 'push', 'pull_request', 'workflow_dispatch'}
 
+          def top_level_on_block(text: str) -> str:
+              lines = text.splitlines()
+              start = None
+              for i, line in enumerate(lines):
+                  if line.strip() == 'on:':
+                      start = i
+                      break
+              if start is None:
+                  return ''
+              block = [lines[start]]
+              for line in lines[start + 1:]:
+                  if line and not line.startswith((' ', '\t')) and not line.lstrip().startswith('#'):
+                      break
+                  block.append(line)
+              return '\n'.join(block)
+
+          def declared_triggers(on_block: str) -> set[str]:
+              found = set()
+              for trigger in possible_triggers:
+                  if re.search(rf'^  {re.escape(trigger)}\s*:', on_block, flags=re.MULTILINE):
+                      found.add(trigger)
+              return found
+
+          failures = []
           present = set(workflows)
           missing = expected - present
           unexpected = present - expected
@@ -75,26 +108,20 @@ jobs:
           if forbidden_present:
               failures.append(f'Manual-only workflow files are still present: {sorted(forbidden_present)}')
 
-          expected_triggers = {
-              'auto_pick.yml': {'schedule'},
-              'check_superbru_fixtures.yml': {'schedule'},
-              'ci.yml': {'push', 'pull_request'},
-              'data-inventory.yml': {'schedule', 'push'},
-              'refresh-locked-superbru-card.yml': {'schedule'},
-              'repo-audit-bundle.yml': {'push'},
-          }
-
           for name in sorted(expected & present):
-              text = (workflow_dir / name).read_text(encoding='utf-8')
-              if 'workflow_dispatch:' in text:
-                  failures.append(f'{name} still contains workflow_dispatch')
-              for trigger in expected_triggers[name]:
-                  if f'  {trigger}:' not in text:
-                      failures.append(f'{name} is missing required automated trigger: {trigger}')
-              forbidden_triggers = {'workflow_dispatch'} | ({'push', 'pull_request', 'schedule'} - expected_triggers[name])
-              for trigger in forbidden_triggers:
-                  if f'  {trigger}:' in text:
-                      failures.append(f'{name} contains disallowed trigger: {trigger}')
+              path = workflow_dir / name
+              text = path.read_text(encoding='utf-8')
+              on_block = top_level_on_block(text)
+              triggers = declared_triggers(on_block)
+              if 'workflow_dispatch' in triggers:
+                  failures.append(f'{name} declares manual workflow_dispatch trigger')
+              required = expected_triggers[name]
+              missing_triggers = required - triggers
+              extra_triggers = triggers - required
+              if missing_triggers:
+                  failures.append(f'{name} is missing required automated trigger(s): {sorted(missing_triggers)}')
+              if extra_triggers:
+                  failures.append(f'{name} contains disallowed trigger(s): {sorted(extra_triggers)}')
               if 'timeout-minutes:' not in text:
                   failures.append(f'{name} is missing timeout-minutes')
               if 'concurrency:' not in text:

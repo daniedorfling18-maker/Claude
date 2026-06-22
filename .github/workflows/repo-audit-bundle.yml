@@ -1,7 +1,6 @@
 name: Repo Audit Bundle
 
 on:
-  workflow_dispatch:
   push:
     branches:
       - main

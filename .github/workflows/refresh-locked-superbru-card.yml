@@ -100,6 +100,8 @@ jobs:
         uses: stefanzweifel/git-auto-commit-action@v5
         with:
           commit_message: Refresh locked SuperBru card
+          add_options: "-f"
+          branch: main
           file_pattern: >-
             outputs/market_odds outputs/market_odds_validation outputs/market_odds_history
             outputs/component_validation outputs/final_locked_picks outputs/daily_robust_card

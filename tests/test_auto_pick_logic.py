@@ -320,6 +320,41 @@ def test_inject_oddspedia_grid_missing_file_returns_unchanged():
 
 _derive_risk_tier = _mod._derive_risk_tier
 _derive_confidence_tier = _mod._derive_confidence_tier
+card_row_matches = _mod.card_row_matches
+teams_match_event = _mod.teams_match_event
+canon_team = _mod.canon_team
+
+
+# ── Cross-source canonical team matching ───────────────────────────────────
+
+
+def test_canon_team_aliases():
+    assert canon_team("USA") == canon_team("United States")
+    assert canon_team("Curaçao") == canon_team("Curacao")
+    assert canon_team("Korea Republic") == canon_team("South Korea")
+    assert canon_team("Bosnia & Herzegovina") == canon_team("Bosnia and Herzegovina")
+    assert canon_team("Brazil") != canon_team("Argentina")
+
+
+def test_card_row_matches_canonical_alias():
+    # Card carries canonical "United States"; SuperBru tab label says "USA".
+    card_row = {"home_team": "United States", "away_team": "Australia"}
+    entry = {"home_team": "USA", "away_team": "Australia"}
+    assert card_row_matches(card_row, entry)
+
+
+def test_card_row_matches_rejects_different_match():
+    card_row = {"home_team": "Brazil", "away_team": "Haiti"}
+    entry = {"home_team": "USA", "away_team": "Australia"}
+    assert not card_row_matches(card_row, entry)
+
+
+def test_teams_match_event_canonical_and_order_insensitive():
+    # Raw Odds API "USA" vs SuperBru "United States"; order-insensitive.
+    event = {"home_team": "USA", "away_team": "Australia"}
+    assert teams_match_event(event, "United States", "Australia")
+    assert teams_match_event(event, "Australia", "United States")
+    assert not teams_match_event(event, "Brazil", "Australia")
 
 
 def test_derive_tiers_match_report_outputs_definitions():

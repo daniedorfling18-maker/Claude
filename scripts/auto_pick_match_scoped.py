@@ -123,6 +123,25 @@ def normalized_score(value: Any) -> str:
     return f"{int(numbers[0])}-{int(numbers[1])}"
 
 
+def canon_team(value: Any) -> str:
+    """Canonical team key for cross-source matching.
+
+    Auto-pick compares team names from three sources with different spelling conventions:
+    scraped SuperBru tab labels, the committed card (canonical engine names), and raw The
+    Odds API events ("USA" vs "United States", "Curaçao" vs "Curacao", etc.). Bare alnum
+    folding (norm_team) would silently fail to match alias-divergent teams and drop the
+    pick. Use the engine's canonical_team_key, consistent with cli.py/devig.py/betting,
+    falling back to norm_team only if the engine canonicaliser cannot be imported.
+    NB: this is for TEAM names only; leaderboard player-name matching stays on norm_team.
+    """
+    try:
+        from superbru_score_engine.model.team_names import canonical_team_key
+
+        return canonical_team_key(txt(value))
+    except Exception:
+        return norm_team(value)
+
+
 def safe_name(value: str) -> str:
     clean = re.sub(r"[^A-Za-z0-9_.-]+", "_", txt(value))
     return clean.strip("_") or "match"
@@ -701,7 +720,7 @@ def load_pick_rows(path: Path) -> tuple[list[dict[str, str]], str]:
 
 
 def card_row_matches(row: dict[str, Any], entry: dict[str, Any]) -> bool:
-    return norm_team(row.get("home_team")) == norm_team(entry.get("home_team")) and norm_team(row.get("away_team")) == norm_team(entry.get("away_team"))
+    return canon_team(row.get("home_team")) == canon_team(entry.get("home_team")) and canon_team(row.get("away_team")) == canon_team(entry.get("away_team"))
 
 
 def find_pick_from_card(entry: dict[str, Any], card_csv: str) -> dict[str, Any]:
@@ -739,7 +758,7 @@ def request_json(url: str) -> Any:
 
 
 def teams_match_event(event: dict[str, Any], home: str, away: str) -> bool:
-    return {norm_team(event.get("home_team")), norm_team(event.get("away_team"))} == {norm_team(home), norm_team(away)}
+    return {canon_team(event.get("home_team")), canon_team(event.get("away_team"))} == {canon_team(home), canon_team(away)}
 
 
 def find_event(args: argparse.Namespace, entry: dict[str, Any]) -> tuple[dict[str, Any] | None, list[dict[str, Any]], str]:
@@ -925,11 +944,12 @@ def recompute_pick_from_snapshot(
         home_goals = int(prediction.recommended.home_goals)
         away_goals = int(prediction.recommended.away_goals)
 
-        # Determine home/away orientation relative to the Superbru tab order.
-        odds_home = norm_team(match.home_team)
-        if odds_home == norm_team(entry.get("home_team")):
+        # Determine home/away orientation relative to the Superbru tab order. Canonical
+        # matching so the odds feed's "United States" lines up with a Superbru "USA" label.
+        odds_home = canon_team(match.home_team)
+        if odds_home == canon_team(entry.get("home_team")):
             orientation = "aligned"
-        elif odds_home == norm_team(entry.get("away_team")):
+        elif odds_home == canon_team(entry.get("away_team")):
             orientation = "swapped"
         else:
             return {"status": "failed", "error": "orientation_unconfirmed"}

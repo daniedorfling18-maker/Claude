@@ -6,21 +6,6 @@ on:
     # Auto Pick remains the scheduled browser submitter.
     - cron: '5 6 * * *'    # 08:05 SAST
     - cron: '5 14 * * *'   # 16:05 SAST
-  workflow_dispatch:
-    inputs:
-      refresh_market_odds:
-        description: "Call The Odds API during refresh. Leave off by default to protect API credits."
-        type: boolean
-        default: false
-      skip_final_simulation:
-        description: "Skip expensive final leader simulation"
-        type: boolean
-        default: true
-      snapshot_id:
-        description: "Optional snapshot id, e.g. 20260621T060500Z"
-        type: string
-        required: false
-        default: ""
 
 permissions:
   contents: write
@@ -64,22 +49,7 @@ jobs:
           THE_ODDS_API_KEY: ${{ secrets.THE_ODDS_API_KEY }}
           PYTHONPATH: src
         run: |
-          SNAPSHOT_ID="${{ inputs.snapshot_id }}"
-          SKIP_FLAG="--skip-final-simulation"
-          MARKET_ODDS_FLAG="--skip-market-odds-fetch"
-
-          if [ "${{ inputs.skip_final_simulation }}" = "false" ]; then
-            SKIP_FLAG=""
-          fi
-          if [ "${{ inputs.refresh_market_odds }}" = "true" ]; then
-            MARKET_ODDS_FLAG=""
-          fi
-
-          if [ -n "$SNAPSHOT_ID" ]; then
-            python scripts/run_daily_robust_pipeline.py --snapshot-id "$SNAPSHOT_ID" $SKIP_FLAG $MARKET_ODDS_FLAG
-          else
-            python scripts/run_daily_robust_pipeline.py $SKIP_FLAG $MARKET_ODDS_FLAG
-          fi
+          python scripts/run_daily_robust_pipeline.py --skip-final-simulation --skip-market-odds-fetch
 
       - name: Validate locked card exists
         run: |

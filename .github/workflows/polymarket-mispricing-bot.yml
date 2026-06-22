@@ -1,0 +1,114 @@
+name: Polymarket Mispricing Bot
+
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "scan, dry_run, or live. Scheduled runs should normally stay dry_run until validated."
+        required: true
+        default: "dry_run"
+        type: choice
+        options:
+          - scan
+          - dry_run
+          - live
+      query:
+        description: "Gamma event search filter, for example world cup"
+        required: false
+        default: "world cup"
+      event_slug:
+        description: "Optional exact Polymarket event slug. Overrides query/tag discovery when set."
+        required: false
+        default: ""
+      tag_id:
+        description: "Optional Gamma tag_id for sport/category filtering."
+        required: false
+        default: ""
+      scan_seconds:
+        description: "How long this run loops before exiting. Keep below job timeout."
+        required: false
+        default: "270"
+      min_edge:
+        description: "Minimum model edge versus executable bid/ask, for example 0.04 = 4 percentage points."
+        required: false
+        default: "0.04"
+      max_order_usd:
+        description: "Max notional per order."
+        required: false
+        default: "5"
+      execute_live:
+        description: "Must be true as a second live-trading safety switch."
+        required: true
+        default: "false"
+        type: choice
+        options:
+          - "false"
+          - "true"
+
+  schedule:
+    # GitHub scheduled workflows have a 5 minute minimum interval. This run loops
+    # for just under 5 minutes and concurrency prevents overlapping runs.
+    - cron: "2/5 * * * *"
+
+concurrency:
+  group: polymarket-mispricing-bot
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  scan:
+    name: Scan Polymarket mispricings
+    runs-on: ubuntu-latest
+    timeout-minutes: 6
+
+    env:
+      PM_MODE: ${{ github.event_name == 'workflow_dispatch' && inputs.mode || vars.POLYMARKET_MODE || 'dry_run' }}
+      POLYMARKET_EXECUTE_LIVE: ${{ github.event_name == 'workflow_dispatch' && inputs.execute_live || vars.POLYMARKET_EXECUTE_LIVE || 'false' }}
+      POLYMARKET_QUERY: ${{ github.event_name == 'workflow_dispatch' && inputs.query || vars.POLYMARKET_QUERY || 'world cup' }}
+      POLYMARKET_EVENT_SLUG: ${{ github.event_name == 'workflow_dispatch' && inputs.event_slug || vars.POLYMARKET_EVENT_SLUG || '' }}
+      POLYMARKET_TAG_ID: ${{ github.event_name == 'workflow_dispatch' && inputs.tag_id || vars.POLYMARKET_TAG_ID || '' }}
+      POLYMARKET_SCAN_SECONDS: ${{ github.event_name == 'workflow_dispatch' && inputs.scan_seconds || vars.POLYMARKET_SCAN_SECONDS || '270' }}
+      POLYMARKET_SCAN_INTERVAL_SECONDS: ${{ vars.POLYMARKET_SCAN_INTERVAL_SECONDS || '15' }}
+      POLYMARKET_MIN_EDGE: ${{ github.event_name == 'workflow_dispatch' && inputs.min_edge || vars.POLYMARKET_MIN_EDGE || '0.04' }}
+      POLYMARKET_MAX_SPREAD: ${{ vars.POLYMARKET_MAX_SPREAD || '0.04' }}
+      POLYMARKET_MAX_ORDER_USD: ${{ github.event_name == 'workflow_dispatch' && inputs.max_order_usd || vars.POLYMARKET_MAX_ORDER_USD || '5' }}
+      POLYMARKET_MIN_ASK_SIZE: ${{ vars.POLYMARKET_MIN_ASK_SIZE || '5' }}
+      POLYMARKET_MIN_BID_SIZE: ${{ vars.POLYMARKET_MIN_BID_SIZE || '5' }}
+      POLYMARKET_ORDER_TYPE: ${{ vars.POLYMARKET_ORDER_TYPE || 'FOK' }}
+      POLYMARKET_MODEL_PROBABILITIES_CSV: ${{ vars.POLYMARKET_MODEL_PROBABILITIES_CSV || 'inputs/polymarket/model_probabilities.csv' }}
+      POLYMARKET_POSITIONS_CSV: ${{ vars.POLYMARKET_POSITIONS_CSV || 'inputs/polymarket/positions.csv' }}
+      POLYMARKET_OUTPUT_DIR: outputs/polymarket
+      POLYMARKET_WALLET_ADDRESS: ${{ secrets.POLYMARKET_WALLET_ADDRESS }}
+      POLYMARKET_PRIVATE_KEY: ${{ secrets.POLYMARKET_PRIVATE_KEY }}
+      CLOB_API_KEY: ${{ secrets.CLOB_API_KEY }}
+      CLOB_SECRET: ${{ secrets.CLOB_SECRET }}
+      CLOB_PASS_PHRASE: ${{ secrets.CLOB_PASS_PHRASE }}
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install project and optional Polymarket SDK
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e .
+          pip install py-clob-client-v2
+
+      - name: Run Polymarket scanner
+        run: python scripts/polymarket_mispricing_bot.py
+
+      - name: Upload Polymarket outputs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: polymarket-mispricing-${{ github.run_id }}
+          path: outputs/polymarket
+          if-no-files-found: ignore

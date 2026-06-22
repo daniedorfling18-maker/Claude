@@ -119,7 +119,7 @@ jobs:
 
           LOGIN_URL="${SUPERBRU_LOGIN_URL:-https://www.superbru.com/login}"
 
-          python scripts/auto_pick_match_scoped.py \
+          python scripts/auto_pick_match_scoped_smart_odds.py \
             --email "$SUPERBRU_EMAIL" \
             --password "$SUPERBRU_PASSWORD" \
             --login-url "$LOGIN_URL" \

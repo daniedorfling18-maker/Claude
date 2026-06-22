@@ -19,6 +19,26 @@ from superbru_score_engine.betting.polymarket import build_flat_stake_yes_trade
 
 PRICE_COLUMNS = ["market_type", "selection", "yes_price"]
 MATCH_RESULT_SELECTIONS = ("home_win", "draw", "away_win")
+SANITY_COLUMNS = [
+    "commence_time",
+    "match_id",
+    "home_team",
+    "away_team",
+    "market_type",
+    "selection",
+    "selection_label",
+    "yes_price",
+    "market_implied_probability",
+    "breakeven_probability_after_fee",
+    "model_probability",
+    "model_to_market_ratio",
+    "model_to_breakeven_ratio",
+    "edge_vs_market_price",
+    "edge_vs_fee_breakeven",
+    "expected_pnl_model_usdc",
+    "sanity_flags",
+    "price_source",
+]
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -60,6 +80,18 @@ def build_parser() -> argparse.ArgumentParser:
             "Use the model probability as a fallback YES price when no CSV price is present. "
             "This is for plumbing tests only and should not be treated as a market edge."
         ),
+    )
+    parser.add_argument(
+        "--sanity-model-price-ratio-threshold",
+        type=float,
+        default=2.0,
+        help="Flag rows where model_probability / market_implied_probability is greater than this threshold.",
+    )
+    parser.add_argument(
+        "--sanity-min-expected-pnl-usdc",
+        type=float,
+        default=2.0,
+        help="Also flag rows whose expected model P&L is at least this many USDC.",
     )
     parser.add_argument("--out-dir", default="outputs/polymarket_available_markets")
     return parser
@@ -235,6 +267,36 @@ def build_trade_from_price(args: argparse.Namespace, found_price: pd.Series | No
     return trade, price_source, category, fees_enabled, fee_rate, int(used_fallback), missing
 
 
+def sanity_metrics(trade, model_probability: float, expected_pnl: float, args: argparse.Namespace) -> dict[str, Any]:
+    market_implied_probability = float(trade.price)
+    breakeven_probability = (trade.stake_usdc + trade.taker_fee_usdc) / trade.shares if trade.shares else np.nan
+    model_to_market_ratio = model_probability / market_implied_probability if market_implied_probability else np.inf
+    model_to_breakeven_ratio = model_probability / breakeven_probability if breakeven_probability else np.inf
+    edge_vs_market_price = model_probability - market_implied_probability
+    edge_vs_fee_breakeven = model_probability - breakeven_probability
+
+    flags: list[str] = []
+    if model_to_market_ratio > float(args.sanity_model_price_ratio_threshold):
+        flags.append("model_probability_gt_2x_market_implied")
+    if model_to_breakeven_ratio > float(args.sanity_model_price_ratio_threshold):
+        flags.append("model_probability_gt_2x_fee_breakeven")
+    if expected_pnl >= float(args.sanity_min_expected_pnl_usdc):
+        flags.append("high_expected_pnl")
+
+    return {
+        "market_implied_probability": round(market_implied_probability, 8),
+        "breakeven_probability_after_fee": round(float(breakeven_probability), 8),
+        "model_to_market_ratio": round(float(model_to_market_ratio), 6),
+        "model_to_breakeven_ratio": round(float(model_to_breakeven_ratio), 6),
+        "edge_vs_market_price": round(float(edge_vs_market_price), 8),
+        "edge_vs_fee_breakeven": round(float(edge_vs_fee_breakeven), 8),
+        "sanity_flag_model_probability_gt_2x_market_implied": "model_probability_gt_2x_market_implied" in flags,
+        "sanity_flag_model_probability_gt_2x_fee_breakeven": "model_probability_gt_2x_fee_breakeven" in flags,
+        "sanity_flag_high_expected_pnl": "high_expected_pnl" in flags,
+        "sanity_flags": "|".join(flags),
+    }
+
+
 def simulate_match_result(args: argparse.Namespace, prices: pd.DataFrame) -> tuple[list[dict[str, Any]], dict[str, int]]:
     mc = load_mc_module()
     rng = np.random.default_rng(int(args.seed))
@@ -273,6 +335,7 @@ def simulate_match_result(args: argparse.Namespace, prices: pd.DataFrame) -> tup
 
             wins = match_result_wins_vector(actual_home, actual_away, selection)
             pnl = np.where(wins, trade.win_net_pnl_usdc, trade.lose_net_pnl_usdc)
+            expected_pnl = trade.expected_pnl(model_probability)
 
             output_rows.append(
                 {
@@ -292,8 +355,8 @@ def simulate_match_result(args: argparse.Namespace, prices: pd.DataFrame) -> tup
                     "taker_fee_rate": round(trade.taker_fee_rate, 6),
                     "taker_fee_usdc": round(trade.taker_fee_usdc, 5),
                     "model_probability": round(model_probability, 8),
-                    "breakeven_probability_after_fee": round((trade.stake_usdc + trade.taker_fee_usdc) / trade.shares, 8) if trade.shares else "",
-                    "expected_pnl_model_usdc": round(trade.expected_pnl(model_probability), 6),
+                    **sanity_metrics(trade, model_probability, expected_pnl, args),
+                    "expected_pnl_model_usdc": round(expected_pnl, 6),
                     "mean_pnl_mc_usdc": round(float(pnl.mean()), 6),
                     "p05_pnl_mc_usdc": round(float(np.quantile(pnl, 0.05)), 6),
                     "p50_pnl_mc_usdc": round(float(np.quantile(pnl, 0.50)), 6),
@@ -346,6 +409,7 @@ def simulate_futures(args: argparse.Namespace, prices: pd.DataFrame) -> tuple[li
             missing_price_count += 1
             continue
 
+        expected_pnl = trade.expected_pnl(model_probability)
         output_rows.append(
             {
                 "commence_time": "",
@@ -364,8 +428,8 @@ def simulate_futures(args: argparse.Namespace, prices: pd.DataFrame) -> tuple[li
                 "taker_fee_rate": round(trade.taker_fee_rate, 6),
                 "taker_fee_usdc": round(trade.taker_fee_usdc, 5),
                 "model_probability": round(model_probability, 8),
-                "breakeven_probability_after_fee": round((trade.stake_usdc + trade.taker_fee_usdc) / trade.shares, 8) if trade.shares else "",
-                "expected_pnl_model_usdc": round(trade.expected_pnl(model_probability), 6),
+                **sanity_metrics(trade, model_probability, expected_pnl, args),
+                "expected_pnl_model_usdc": round(expected_pnl, 6),
                 "mean_pnl_mc_usdc": "",
                 "p05_pnl_mc_usdc": "",
                 "p50_pnl_mc_usdc": "",
@@ -379,6 +443,24 @@ def simulate_futures(args: argparse.Namespace, prices: pd.DataFrame) -> tuple[li
         "futures_missing_price_count": missing_price_count,
         "futures_used_model_fair_fallback_count": used_model_fallback_count,
     }
+
+
+def build_sanity_report(results: pd.DataFrame) -> pd.DataFrame:
+    if results.empty:
+        return pd.DataFrame(columns=SANITY_COLUMNS)
+    sanity = results[results["sanity_flags"].astype(str).str.strip() != ""].copy()
+    if sanity.empty:
+        return pd.DataFrame(columns=[col for col in SANITY_COLUMNS if col in results.columns])
+    cols = [col for col in SANITY_COLUMNS if col in sanity.columns]
+    sort_cols = [
+        "sanity_flag_model_probability_gt_2x_market_implied",
+        "expected_pnl_model_usdc",
+        "model_to_market_ratio",
+    ]
+    sort_cols = [col for col in sort_cols if col in sanity.columns]
+    if sort_cols:
+        sanity = sanity.sort_values(sort_cols, ascending=[False] + [False] * (len(sort_cols) - 1))
+    return sanity[cols]
 
 
 def simulate(args: argparse.Namespace) -> tuple[pd.DataFrame, dict[str, Any]]:
@@ -407,6 +489,8 @@ def simulate(args: argparse.Namespace) -> tuple[pd.DataFrame, dict[str, Any]]:
                 "rows_simulated": int(len(frame)),
                 "total_stake_usdc": round(float(frame["stake_usdc"].sum()), 6),
                 "expected_pnl_model_usdc": round(float(frame["expected_pnl_model_usdc"].sum()), 6),
+                "sanity_flagged_rows": int((frame["sanity_flags"].astype(str).str.strip() != "").sum()),
+                "model_gt_2x_market_implied_rows": int(frame["sanity_flag_model_probability_gt_2x_market_implied"].astype(bool).sum()),
             }
 
     summary = {
@@ -415,14 +499,18 @@ def simulate(args: argparse.Namespace) -> tuple[pd.DataFrame, dict[str, Any]]:
         "prices_csv": str(args.prices_csv),
         "market_types": sorted(market_types),
         "allow_model_fair_fallback": bool(args.allow_model_fair_fallback),
+        "sanity_model_price_ratio_threshold": float(args.sanity_model_price_ratio_threshold),
+        "sanity_min_expected_pnl_usdc": float(args.sanity_min_expected_pnl_usdc),
         **counts,
         "rows_simulated": int(len(results)),
         "total_stake_usdc": round(float(results["stake_usdc"].sum()), 6) if not results.empty else 0.0,
         "expected_pnl_model_usdc": round(float(results["expected_pnl_model_usdc"].sum()), 6) if not results.empty else 0.0,
+        "sanity_flagged_rows": int((results["sanity_flags"].astype(str).str.strip() != "").sum()) if not results.empty else 0,
+        "model_gt_2x_market_implied_rows": int(results["sanity_flag_model_probability_gt_2x_market_implied"].astype(bool).sum()) if not results.empty else 0,
         "by_market_type": by_market_type,
         "note": (
             "Match-result markets use fixture score matrices. Futures markets require a probabilities CSV. "
-            "Model-fair fallback is only a plumbing test."
+            "Model-fair fallback is only a plumbing test. Sanity flags are review prompts, not trade instructions."
         ),
     }
     return results, summary
@@ -434,13 +522,21 @@ def main() -> int:
     out_dir.mkdir(parents=True, exist_ok=True)
 
     results, summary = simulate(args)
+    sanity = build_sanity_report(results)
+
     results_path = out_dir / "polymarket_available_market_results.csv"
+    sanity_path = out_dir / "polymarket_available_market_sanity_check.csv"
     summary_path = out_dir / "polymarket_available_market_summary.json"
+
     results.to_csv(results_path, index=False)
+    sanity.to_csv(sanity_path, index=False)
+    summary["sanity_report_csv"] = str(sanity_path)
+    summary["sanity_report_rows"] = int(len(sanity))
     summary_path.write_text(json.dumps(summary, indent=2), encoding="utf-8")
 
     print(json.dumps(summary, indent=2))
     print(f"Wrote {results_path}")
+    print(f"Wrote {sanity_path}")
     print(f"Wrote {summary_path}")
     return 0
 

@@ -85,7 +85,7 @@ async def run(args: argparse.Namespace) -> dict[str, Any]:
     out_dir = Path(args.out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    scan_results, queued, scan_status = await base.scan_superbru_matches(args, out_dir)
+    scan_results, queued, scan_status, pool_standing = await base.scan_superbru_matches(args, out_dir)
     if scan_status == "login_failed":
         return {"status": "login_failed", "run_at_utc": now.isoformat(), "scan_results": scan_results}
 
@@ -133,6 +133,7 @@ async def run(args: argparse.Namespace) -> dict[str, Any]:
         "window_minutes": args.window_minutes,
         "dry_run": args.dry_run,
         "pick_card_csv": args.pick_card_csv,
+        "pool_standing": pool_standing,
         "scan_results": scan_results,
         "queued_count": len(queued),
         "results": submitted_results,

@@ -10,6 +10,7 @@ from __future__ import annotations
 import importlib.util
 import json
 from pathlib import Path
+from typing import Any
 
 from team_name_aliases import TEAM_ALIASES
 
@@ -29,9 +30,9 @@ ALIASES_JSON = json.dumps({key: sorted(values) for key, values in TEAM_ALIASES.i
 
 
 def _team_js_body(find_row: bool) -> str:
-    selector = "tr, li, div, section, article" if find_row else "[data-brutip][data-bru-tab]"
     text_expr = "el.innerText || el.textContent || ''" if find_row else "el.getAttribute('data-brutip') || ''"
-    prefix = "" if find_row else "const controls = Array.from(document.querySelectorAll('[data-brutip][data-bru-tab]'));\n  "
+    prefix = "" if find_row else "const controls = Array.from(document.querySelectorAll('[data-brutip][data-bru-tab]'));
+  "
     iterator = "Array.from(document.querySelectorAll('tr, li, div, section, article'))" if find_row else "controls"
     if find_row:
         success = """
@@ -112,8 +113,19 @@ def _team_js_body(find_row: bool) -> str:
 """
 
 
+def pick_score_inputs(inputs: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Prefer SuperBru's explicit left/right score classes before generic inputs."""
+    visible = [inp for inp in inputs if inp.get("visible")]
+    left = next((inp for inp in visible if "soccer-left-score" in str(inp.get("className", ""))), None)
+    right = next((inp for inp in visible if "soccer-right-score" in str(inp.get("className", ""))), None)
+    if left and right:
+        return [left, right]
+    return submitter.pick_score_inputs(inputs)
+
+
 submitter.FIND_ROW_JS = _team_js_body(find_row=True)
 submitter.CLICK_SUBTAB_JS = _team_js_body(find_row=False)
+submitter.pick_score_inputs = pick_score_inputs
 
 build_parser = submitter.build_parser
 run = submitter.run

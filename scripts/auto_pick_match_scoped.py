@@ -51,36 +51,87 @@ CLICK_TAB_JS = r"""
 """
 
 EXTRACT_MATCH_JS = r"""
-() => {
-  let kickoffText = null, kickoffTs = null;
-  const candidates = Array.from(document.querySelectorAll(
-    '[class*=kickoff],[class*=kick-off],[class*=match-time],[class*=fixture-time],' +
-    '[class*=match-date],[class*=fixture-date],[class*=game-time],' +
-    'time,[datetime],[data-kickoff],[data-timestamp],[data-time],' +
-    '[class*=date],[class*=time]'
-  ));
-  for (const el of candidates) {
-    const ts = el.getAttribute('datetime') || el.getAttribute('data-kickoff') ||
-               el.getAttribute('data-timestamp') || el.getAttribute('data-time');
-    const txt = (el.innerText || el.textContent || '').replace(/\s+/g,' ').trim();
-    if (ts)  { kickoffTs = ts; kickoffText = txt; break; }
-    if (/\d{1,2}[:\-]\d{2}/.test(txt)) { kickoffText = txt; break; }
+({gameId, label}) => {
+  function clean(text) {
+    return (text || '').replace(/\s+/g, ' ').trim();
   }
 
-  if (!kickoffText && !kickoffTs) {
-    const body = (document.body && document.body.innerText) || '';
-    const m = body.match(
-      /\b(\w{3}\s+\d{1,2}\s+\w+\s+\d{2}:\d{2}|\d{1,2}\s+\w+\s+\d{4}\s+\d{2}:\d{2}|\d{1,2}[\/\-]\d{1,2}[\/\-]\d{4}\s+\d{2}:\d{2}|\d{2}:\d{2})\b/
-    );
-    if (m) kickoffText = m[0];
+  function isVisible(el) {
+    if (!el) return false;
+    const style = window.getComputedStyle(el);
+    if (style.display === 'none' || style.visibility === 'hidden' || style.opacity === '0') return false;
+    const rect = el.getBoundingClientRect();
+    return rect.width > 0 && rect.height > 0;
   }
 
-  const hi = document.querySelector('input.soccer-left-score');
-  const ai = document.querySelector('input.soccer-right-score');
+  function commonAncestor(a, b) {
+    if (!a || !b) return a || b || null;
+    const seen = new Set();
+    let x = a;
+    while (x) {
+      seen.add(x);
+      x = x.parentElement;
+    }
+    x = b;
+    while (x) {
+      if (seen.has(x)) return x;
+      x = x.parentElement;
+    }
+    return null;
+  }
+
+  function extractKickoff(root) {
+    if (!root) return {kickoffText: null, kickoffTs: null, kickoffSource: null};
+
+    const candidates = Array.from(root.querySelectorAll(
+      '[class*=kickoff],[class*=kick-off],[class*=match-time],[class*=fixture-time],' +
+      '[class*=match-date],[class*=fixture-date],[class*=game-time],' +
+      'time,[datetime],[data-kickoff],[data-timestamp],[data-time],' +
+      '[class*=date],[class*=time]'
+    )).filter(isVisible);
+
+    for (const el of candidates) {
+      const ts = el.getAttribute('datetime') || el.getAttribute('data-kickoff') ||
+                 el.getAttribute('data-timestamp') || el.getAttribute('data-time');
+      const txt = clean(el.innerText || el.textContent || '');
+
+      if (ts) return {kickoffText: txt, kickoffTs: ts, kickoffSource: 'scoped_attr'};
+
+      const fullDate = txt.match(/\b\d{1,2}\s+\w+\s+\d{1,2}:\d{2}\b/);
+      if (fullDate) return {kickoffText: fullDate[0], kickoffTs: null, kickoffSource: 'scoped_text_date_time'};
+
+      const timeOnly = txt.match(/\b\d{1,2}[:\-]\d{2}\b/);
+      if (timeOnly) return {kickoffText: txt, kickoffTs: null, kickoffSource: 'scoped_text_time'};
+    }
+
+    const body = clean(root.innerText || root.textContent || '');
+    const m = body.match(/\b(\w{3}\s+\d{1,2}\s+\w+\s+\d{2}:\d{2}|\d{1,2}\s+\w+\s+\d{4}\s+\d{2}:\d{2}|\d{1,2}\s+\w+\s+\d{1,2}:\d{2}|\d{1,2}[\/\-]\d{1,2}[\/\-]\d{4}\s+\d{2}:\d{2}|\d{2}:\d{2})\b/);
+    if (m) return {kickoffText: m[0], kickoffTs: null, kickoffSource: 'scoped_body'};
+
+    return {kickoffText: null, kickoffTs: null, kickoffSource: null};
+  }
+
+  const visibleLeft = Array.from(document.querySelectorAll('input.soccer-left-score')).filter(isVisible);
+  const visibleRight = Array.from(document.querySelectorAll('input.soccer-right-score')).filter(isVisible);
+
+  const hi = visibleLeft[0] || document.querySelector('input.soccer-left-score');
+  const ai = visibleRight[0] || document.querySelector('input.soccer-right-score');
+
+  let scope = commonAncestor(hi, ai) || document.body;
+
+  let kickoff = {kickoffText: null, kickoffTs: null, kickoffSource: null};
+  let probe = scope;
+
+  while (probe && probe !== document.documentElement) {
+    kickoff = extractKickoff(probe);
+    if (kickoff.kickoffText || kickoff.kickoffTs) break;
+    probe = probe.parentElement;
+  }
 
   return {
-    kickoffText,
-    kickoffTs,
+    kickoffText: kickoff.kickoffText,
+    kickoffTs: kickoff.kickoffTs,
+    kickoffSource: kickoff.kickoffSource,
     homeVal: hi ? hi.value : null,
     awayVal: ai ? ai.value : null,
     locked: hi ? (hi.disabled || hi.readOnly) : null,
@@ -88,6 +139,7 @@ EXTRACT_MATCH_JS = r"""
   };
 }
 """
+
 
 
 EXTRACT_TABLES_JS = r"""
@@ -1055,7 +1107,7 @@ async def scan_superbru_matches(
                 continue
             await page.wait_for_timeout(5000)
 
-            info = await page.evaluate(EXTRACT_MATCH_JS)
+            info = await page.evaluate(EXTRACT_MATCH_JS, {"gameId": game_id, "label": label})
             kickoff_dt = parse_kickoff(info.get("kickoffText"), info.get("kickoffTs"), now)
             time_until = (kickoff_dt - now) if kickoff_dt else None
             in_window = time_until is not None and timedelta(0) <= time_until <= window
@@ -1067,6 +1119,8 @@ async def scan_superbru_matches(
                 "away_team": away_team,
                 "kickoff_utc": kickoff_dt.isoformat() if kickoff_dt else None,
                 "kickoff_raw": info.get("kickoffText"),
+                "kickoff_source": info.get("kickoffSource"),
+                "kickoff_source": info.get("kickoffSource"),
                 "minutes_until": round(time_until.total_seconds() / 60) if time_until else None,
                 "current_pick": f"{info.get('homeVal')}-{info.get('awayVal')}",
                 "locked": info.get("locked"),

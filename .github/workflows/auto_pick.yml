@@ -1,6 +1,7 @@
 name: Auto Pick (Scheduled)
 
 on:
+  workflow_dispatch:
   schedule:
     # All times UTC; fires ~25 min before each kickoff. window_minutes=40 absorbs GitHub cron delays.
     # Single fire per match: the scheduled run pulls that match's odds and recomputes the pick live,

@@ -6,10 +6,7 @@ on:
     # Single fire per match: the scheduled run pulls that match's odds and recomputes the pick live,
     # so one pull per kickoff (~markets x regions credits) instead of a double-fire double-pull.
 
-    # ── ROUND 2 remaining (Jun 21-24) ────────────────────────────────────────
-    - cron: '35 15 21 6 *'   # Jun 21 16:00 UTC (12:00 ET) – ESP/KSA
-    - cron: '35 18 21 6 *'   # Jun 21 19:00 UTC (15:00 ET) – BEL/IRN
-    - cron: '35 21 21 6 *'   # Jun 21 22:00 UTC (18:00 ET) – URU/CPV
+    # ── ROUND 2 remaining (Jun 22-24) ────────────────────────────────────────
     - cron: '35 0 22 6 *'    # Jun 22 01:00 UTC (21:00 ET) – NZL/EGY
     - cron: '35 16 22 6 *'   # Jun 22 17:00 UTC (13:00 ET) – ARG/AUT
     - cron: '35 20 22 6 *'   # Jun 22 21:00 UTC (17:00 ET) – FRA/IRQ
@@ -132,6 +129,7 @@ jobs:
             --leaderboard-pool-keywords "${SUPERBRU_POOL_KEYWORDS:-Moore Infinity,FIFA WC 26,World Cup 2026}" \
             --leader-safe-buffer 5.0 \
             --chaser-range 8.0 \
+            --oddspedia-grid-csv inputs/smartbet_grids/oddspedia_probability_grids_auto.csv \
             --headless \
             $DRY_RUN_FLAG \
             $MATCH_ODDS_FLAG \

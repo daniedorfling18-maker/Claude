@@ -46,7 +46,7 @@ model:
   calibration_profile: big5_h2h_totals
   dixon_coles_rho: -0.08
   devig_method: multiplicative
-  correct_score_blend_weight: 0.0
+  correct_score_blend_weight: 0.15
   odds_weight: 1.0
   ratings_weight: 0.0
   asian_handicap_weight: 0.0

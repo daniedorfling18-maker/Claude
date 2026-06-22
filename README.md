@@ -123,14 +123,38 @@ The full local Oddspedia pipeline must be run locally to refresh the grid. The G
 
 `.github/workflows/auto_pick.yml` fires on a per-fixture cron schedule (~25 min before each kickoff, with a 40-minute window that absorbs GitHub's best-effort cron delays). For each match inside the window it:
 
-1. Logs into Superbru and locates the unlocked match tab
-2. Pulls **that match's** odds from The Odds API and **recomputes the recommended scoreline live** via the engine — so a stale committed card never drives the submission. The fresh pick is oriented to the Superbru home/away order before submitting.
-3. Falls back to the committed locked-card pick only if the live recompute is unavailable (no odds, API error, unconfirmable team orientation)
-4. Submits the pick via headless browser automation
+1. **Logs in** to Superbru via headless Playwright and locates the unlocked match tab.
+2. **Scrapes the leaderboard** for the `Moore Infinity FIFA WC 26` pool (verified by pool ID `p=13236623` and page-content keywords) in the same browser session to establish your current rank and points gap.
+3. **Pulls that match's odds** from The Odds API and **recomputes the pick live** — so a stale committed card never drives the submission.
+4. **Injects the Oddspedia correct-score grid** (from `inputs/smartbet_grids/oddspedia_probability_grids_auto.csv`) into the match object before distribution fitting, so pre-kickoff scoreline probabilities incorporate the market-derived CS grid via `correct_score_blend_weight` blending.
+5. **Applies pool-position intelligence** to select the final scoreline:
 
-The run summary records `pick_source` (`live_odds_recompute` vs `committed_card_fallback`) and `pick_changed_vs_card` per match.
+   | Pool status | Strategy | Behaviour |
+   |-------------|----------|-----------|
+   | Leading, gap ≥ 5 pts | `leading_comfortable` | Keep raw-EV pick (maximum expected points) |
+   | Leading, gap < 5 pts | `defensive_leader` | Game-theory defensive overlay (`game_theory/defensive.py`) — picks the scoreline that maximises EV while blocking likely chaser picks |
+   | Chasing within 8 pts of leader | `private_chase` | Picks the differentiated private-chase scoreline to maximise upside vs. the leader |
+   | Far behind (> 8 pts) | `raw_ev_far_behind` | Keep raw-EV pick |
+   | Leaderboard unavailable | `pool_standing_unavailable` | Keep engine `strategy_mode` pick |
 
-Required secrets: `THE_ODDS_API_KEY`, `SUPERBRU_USERNAME`, `SUPERBRU_PASSWORD`.
+6. **Falls back** to the committed locked-card pick only if the live recompute is unavailable (no odds, API error, unconfirmable team orientation).
+7. **Submits** the pick via browser automation.
+
+The run summary records `pick_source` (`live_odds_recompute` vs `committed_card_fallback`), `pick_changed_vs_card`, `pick_strategy`, `defensive_picks_used`, and `chase_picks_used` per run.
+
+### Key CLI flags for `auto_pick_match_scoped.py`
+
+| Flag | Default | Purpose |
+|------|---------|---------|
+| `--leader-player` | `Danie` (env: `SUPERBRU_PLAYER_NAME`) | Your Superbru display name for leaderboard lookup |
+| `--leaderboard-pool-keywords` | `Moore Infinity,FIFA WC 26,World Cup 2026` | Keywords to verify we are on the correct pool |
+| `--leader-safe-buffer` | `5.0` | Points-ahead threshold below which the defensive strategy activates |
+| `--chaser-range` | `8.0` | Points window for counting chasers / detecting pursuit |
+| `--skip-leaderboard` | off | Skip leaderboard scrape; use engine `strategy_mode` from config |
+| `--oddspedia-grid-csv` | `inputs/smartbet_grids/oddspedia_probability_grids_auto.csv` | Correct-score grid CSV injected into the pre-kickoff recompute |
+
+Required secrets: `THE_ODDS_API_KEY`, `SUPERBRU_USERNAME`, `SUPERBRU_PASSWORD`.  
+Optional secrets: `SUPERBRU_PLAYER_NAME`, `SUPERBRU_POOL_KEYWORDS`.
 
 ## Superbru Fixture Checker
 
@@ -332,14 +356,22 @@ The engine canonicalises common national-team aliases before joining odds, fixtu
 
 Fixture metadata joins fail loudly when a row cannot be matched — a stale fixture row or missing alias should be fixed rather than silently degraded.
 
+## Correct-Score Grid Blending
+
+When the auto-pick runner fetches live pre-kickoff odds it also injects the Oddspedia correct-score probability grid (if available and not stale) as a synthetic `correct_score` market. `model.correct_score_blend_weight: 0.15` in `config.yaml` means 15% of the final scoreline matrix comes from the geometric blend with the de-vigged CS grid; the other 85% comes from the Poisson + Dixon-Coles fit to live h2h/totals markets.
+
+To disable blending, set `correct_score_blend_weight: 0.0` in `config.yaml`.
+
+A staleness warning is printed (but blending still proceeds) when the grid file is older than 2 hours and kickoff is fewer than 120 minutes away.
+
 ## Known Limitations
 
 - Knockout result basis parsed but not applied — all matches scored on 90-minute result
 - `ratings.low_data_prior_sigma` parsed but not yet applied to the model
 - Asian handicap weight disabled until validated out-of-sample
-- Correct-score grid blending disabled by default (`correct_score_blend_weight: 0`)
 - Betting report is circular without an independent probability source
-- Oddspedia SmartBet scraper must run locally (Cloudflare); GitHub Actions does not scrape
+- Oddspedia SmartBet scraper must run locally (Cloudflare); GitHub Actions does not scrape live
+- Pool-position leaderboard scraping requires a live Superbru session and may fail if the page structure changes; the auto-pick run degrades gracefully to engine `strategy_mode` if it does
 
 ## Dependencies
 

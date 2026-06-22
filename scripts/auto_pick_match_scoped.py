@@ -467,6 +467,115 @@ def build_defensive_row(
     }
 
 
+def _inject_oddspedia_grid(
+    match: Any,
+    entry: dict[str, Any],
+    grid_csv: Path,
+    kickoff_utc: "datetime | None" = None,
+) -> Any:
+    """Inject an Oddspedia correct-score market into a MatchOdds object.
+
+    Reads probability_pct rows from the CSV, converts to decimal odds, and
+    inserts a synthetic MarketOdds(key='correct_score') so build_distribution()
+    can blend it via geometric_blend when correct_score_blend_weight > 0.
+    No-ops silently (returns match unchanged) if the grid is missing or the
+    current match cannot be found in it.
+    """
+    if not grid_csv.exists():
+        return match
+
+    if kickoff_utc is not None:
+        now_utc = datetime.now(timezone.utc)
+        file_mtime = datetime.fromtimestamp(grid_csv.stat().st_mtime, tz=timezone.utc)
+        age_hours = (now_utc - file_mtime).total_seconds() / 3600
+        mins_to_kickoff = (kickoff_utc - now_utc).total_seconds() / 60
+        if age_hours > 2 and mins_to_kickoff < 120:
+            print(
+                f"  WARNING: Oddspedia grid is {age_hours:.1f}h old "
+                f"(kickoff in {mins_to_kickoff:.0f} min). Injecting stale grid."
+            )
+
+    try:
+        with grid_csv.open("r", encoding="utf-8-sig", newline="") as fh:
+            reader = csv.DictReader(fh)
+            rows = list(reader)
+    except Exception as exc:
+        print(f"  WARNING: Could not load Oddspedia grid ({grid_csv}): {exc}")
+        return match
+
+    home_n = norm_team(match.home_team)
+    away_n = norm_team(match.away_team)
+    swapped = False
+
+    def _exact_rows(h: str, a: str) -> list[dict[str, str]]:
+        return [
+            row for row in rows
+            if norm_team(row.get("home_team")) == h
+            and norm_team(row.get("away_team")) == a
+            and row.get("score_bucket", "").strip().lower() == "exact"
+        ]
+
+    match_rows = _exact_rows(home_n, away_n)
+    if not match_rows:
+        reversed_rows = _exact_rows(away_n, home_n)
+        if reversed_rows:
+            match_rows = reversed_rows
+            swapped = True
+            print(
+                f"  Oddspedia grid matched in swapped orientation: "
+                f"{match.home_team} vs {match.away_team}"
+            )
+
+    if not match_rows:
+        print(
+            f"  No Oddspedia grid rows for {match.home_team} vs {match.away_team}; "
+            "skipping correct-score blend."
+        )
+        return match
+
+    try:
+        from superbru_score_engine.ingest import MarketOdds, OutcomeOdds
+    except ImportError:
+        return match
+
+    import dataclasses
+
+    outcomes: list[Any] = []
+    for row in match_rows:
+        try:
+            prob_pct = float(row.get("probability_pct") or 0.0)
+            if prob_pct <= 0:
+                continue
+            score_key = row.get("score_key", "").strip()
+            if not score_key or "-" not in score_key:
+                continue
+            parts = score_key.split("-", 1)
+            h_g, a_g = int(parts[0]), int(parts[1])
+            if swapped:
+                h_g, a_g = a_g, h_g
+            label = f"{h_g}-{a_g}"
+            decimal_price = 100.0 / prob_pct
+            outcomes.append(OutcomeOdds(name=label, price=decimal_price))
+        except (ValueError, TypeError):
+            continue
+
+    if not outcomes:
+        return match
+
+    cs_market = MarketOdds(
+        key="correct_score",
+        bookmaker="oddspedia_grid",
+        outcomes=tuple(outcomes),
+    )
+    new_markets = {**match.markets, "correct_score": (cs_market,)}
+    injected = dataclasses.replace(match, markets=new_markets)
+    print(
+        f"  Oddspedia correct-score grid injected: {len(outcomes)} cells "
+        f"for {match.home_team} vs {match.away_team}"
+    )
+    return injected
+
+
 def select_pool_adaptive_pick(
     prediction: Any,
     pool_standing: dict[str, Any],
@@ -775,6 +884,15 @@ def recompute_pick_from_snapshot(
         if not matches:
             return {"status": "failed", "error": "no_normalised_match"}
         match = matches[0]
+
+        # Inject Oddspedia correct-score grid when available so the model can blend
+        # market-derived exact-score probabilities via correct_score_blend_weight.
+        oddspedia_grid_csv = Path(
+            getattr(args, "oddspedia_grid_csv", None)
+            or "inputs/smartbet_grids/oddspedia_probability_grids_auto.csv"
+        )
+        kickoff_utc = parse_iso_datetime(entry.get("kickoff_utc"))
+        match = _inject_oddspedia_grid(match, entry, oddspedia_grid_csv, kickoff_utc)
 
         ratings = RatingsStore(config.paths.ratings_store, config.ratings)
         model = OddsToScorelineModel(config.model, ratings)
@@ -1234,6 +1352,11 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--odds-markets", default=None)
     parser.add_argument("--odds-lookup-window-minutes", type=int, default=90)
     parser.add_argument("--skip-match-odds", action="store_true")
+    parser.add_argument(
+        "--oddspedia-grid-csv",
+        default="inputs/smartbet_grids/oddspedia_probability_grids_auto.csv",
+        help="Path to the Oddspedia correct-score probability grid CSV for blend injection.",
+    )
     # Pool-position intelligence
     parser.add_argument(
         "--leader-player",

@@ -1,0 +1,136 @@
+name: Repo Audit Bundle
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+    paths:
+      - '.github/workflows/**'
+      - 'scripts/**'
+      - 'src/**'
+      - 'config.yaml'
+      - 'pyproject.toml'
+      - 'README.md'
+      - 'docs/**'
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: repo-audit-bundle-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  repo-audit-bundle:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Build repo source archive
+        run: |
+          set -euo pipefail
+          mkdir -p outputs/repo_audit_bundle
+          git archive --format=zip --output outputs/repo_audit_bundle/repo_source_bundle.zip HEAD
+
+      - name: Build repo manifest and line audit
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import csv
+          import hashlib
+          import json
+          import os
+          import subprocess
+          from datetime import datetime, timezone
+          from pathlib import Path
+
+          out_dir = Path('outputs/repo_audit_bundle')
+          out_dir.mkdir(parents=True, exist_ok=True)
+          files = [p for p in subprocess.check_output(['git', 'ls-files'], text=True).splitlines() if p]
+          commit = subprocess.check_output(['git', 'rev-parse', 'HEAD'], text=True).strip()
+
+          def digest(path):
+              h = hashlib.sha256()
+              with Path(path).open('rb') as f:
+                  for chunk in iter(lambda: f.read(1024 * 1024), b''):
+                      h.update(chunk)
+              return h.hexdigest()
+
+          rows = []
+          total_lines = 0
+          text_files = 0
+          binary_files = 0
+          for rel in files:
+              path = Path(rel)
+              size = path.stat().st_size
+              raw = path.read_bytes()
+              is_binary = b'\x00' in raw[:8192]
+              line_count = ''
+              status = 'binary' if is_binary else 'text'
+              if is_binary:
+                  binary_files += 1
+              else:
+                  try:
+                      line_count = len(raw.decode('utf-8').splitlines())
+                      total_lines += int(line_count)
+                      text_files += 1
+                      status = 'text_utf8'
+                  except UnicodeDecodeError:
+                      try:
+                          line_count = len(raw.decode('latin-1').splitlines())
+                          total_lines += int(line_count)
+                          text_files += 1
+                          status = 'text_latin1'
+                      except Exception:
+                          status = 'unreadable'
+                          binary_files += 1
+              rows.append({
+                  'path': rel,
+                  'status': status,
+                  'size_bytes': size,
+                  'line_count': line_count,
+                  'sha256': digest(path),
+              })
+
+          with (out_dir / 'repo_manifest.csv').open('w', newline='', encoding='utf-8') as f:
+              writer = csv.DictWriter(f, fieldnames=['path', 'status', 'size_bytes', 'line_count', 'sha256'])
+              writer.writeheader()
+              writer.writerows(rows)
+
+          audit = {
+              'generated_at_utc': datetime.now(timezone.utc).isoformat(),
+              'branch': os.environ.get('GITHUB_REF_NAME', ''),
+              'commit': commit,
+              'tracked_file_count': len(files),
+              'text_file_count': text_files,
+              'binary_file_count': binary_files,
+              'total_text_lines': total_lines,
+              'files': rows,
+          }
+          (out_dir / 'repo_line_audit.json').write_text(json.dumps(audit, indent=2), encoding='utf-8')
+          (out_dir / 'repo_audit_summary.md').write_text(
+              f"# Repo Audit Bundle\n\n"
+              f"- Commit: `{commit}`\n"
+              f"- Tracked files: {len(files)}\n"
+              f"- Text files: {text_files}\n"
+              f"- Binary files: {binary_files}\n"
+              f"- Total text lines: {total_lines}\n",
+              encoding='utf-8',
+          )
+          print(json.dumps({k: audit[k] for k in audit if k != 'files'}, indent=2))
+          PY
+
+      - name: Upload repo audit bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: repo-audit-bundle-${{ github.run_number }}
+          path: outputs/repo_audit_bundle/
+          retention-days: 14
+          if-no-files-found: error

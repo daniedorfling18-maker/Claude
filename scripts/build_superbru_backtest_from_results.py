@@ -35,6 +35,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--exact-points", type=float, default=3.0)
     parser.add_argument("--margin-points", type=float, default=1.5)
     parser.add_argument("--result-points", type=float, default=1.0)
+    parser.add_argument("--ci-cutoff", type=float, default=1.5)
     parser.add_argument("--only-completed", action="store_true", default=True)
     parser.add_argument("--include-incomplete", dest="only_completed", action="store_false")
     return parser
@@ -131,7 +132,22 @@ def load_results(path: Path, only_completed: bool) -> pd.DataFrame:
     return results
 
 
-def score_points(pick: str, actual: str, exact_points: float, margin_points: float, result_points: float) -> tuple[float, bool, bool, bool]:
+def closeness_index(pred_home: int, pred_away: int, actual_home: int, actual_away: int) -> float:
+    predicted_goal_difference = pred_home - pred_away
+    actual_goal_difference = actual_home - actual_away
+    predicted_total_goals = pred_home + pred_away
+    actual_total_goals = actual_home + actual_away
+    return float(abs(predicted_goal_difference - actual_goal_difference) + abs(predicted_total_goals - actual_total_goals) / 2.0)
+
+
+def score_points(
+    pick: str,
+    actual: str,
+    exact_points: float,
+    close_points: float,
+    result_points: float,
+    ci_cutoff: float,
+) -> tuple[float, bool, bool, bool]:
     ph, pa = parse_score(pick)
     ah, aa = parse_score(actual)
     if ph is None or pa is None or ah is None or aa is None:
@@ -140,11 +156,11 @@ def score_points(pick: str, actual: str, exact_points: float, margin_points: flo
     pick_outcome = outcome_from_goals(ph, pa)
     actual_outcome = outcome_from_goals(ah, aa)
     outcome_hit = pick_outcome == actual_outcome and actual_outcome != "unknown"
-    margin_hit = outcome_hit and goal_diff(ph, pa) == goal_diff(ah, aa)
+    close_hit = outcome_hit and closeness_index(ph, pa, ah, aa) <= ci_cutoff
     if exact_hit:
         return exact_points, True, True, True
-    if margin_hit:
-        return margin_points, False, True, True
+    if close_hit:
+        return close_points, False, True, True
     if outcome_hit:
         return result_points, False, True, False
     return 0.0, False, False, False
@@ -174,7 +190,7 @@ def add_oddspedia_columns(out: pd.DataFrame, comparison_csv: str, args: argparse
         pick = txt(row.get("oddspedia_top1_score")) or txt(row.get("modal_correct_score"))
         actual = txt(row.get("actual_score"))
         points, exact, outcome_hit, margin = score_points(
-            pick, actual, args.exact_points, args.margin_points, args.result_points
+            pick, actual, args.exact_points, args.margin_points, args.result_points, args.ci_cutoff
         )
         modal.append(pick)
         modal_points.append(points if pick and actual else None)
@@ -207,7 +223,7 @@ def build_backtest(args: argparse.Namespace) -> tuple[pd.DataFrame, dict[str, An
         actual_score = txt(result.get("actual_score"))
         locked_pick = txt(pick.get("locked_pick"))
         points, exact_hit, outcome_hit, margin_hit = score_points(
-            locked_pick, actual_score, args.exact_points, args.margin_points, args.result_points
+            locked_pick, actual_score, args.exact_points, args.margin_points, args.result_points, args.ci_cutoff
         )
         ph, pa = parse_score(locked_pick)
         ah, aa = parse_score(actual_score)
@@ -247,7 +263,8 @@ def build_backtest(args: argparse.Namespace) -> tuple[pd.DataFrame, dict[str, An
             "exact_points": args.exact_points,
             "margin_points": args.margin_points,
             "result_points": args.result_points,
-            "note": "Configurable Superbru-style estimate: exact > same goal-difference outcome > outcome.",
+            "ci_cutoff": args.ci_cutoff,
+            "note": "Configurable Superbru-style estimate: exact > close-score outcome by closeness index > outcome.",
         },
         "result_rows_available": int(len(results)),
         "pick_rows_available": int(len(picks)),

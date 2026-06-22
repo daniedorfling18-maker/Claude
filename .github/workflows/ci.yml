@@ -54,6 +54,7 @@ jobs:
               'check_superbru_fixtures.yml',
               'ci.yml',
               'data-inventory.yml',
+              'polymarket-mispricing-bot.yml',
               'refresh-locked-superbru-card.yml',
               'repo-audit-bundle.yml',
           }
@@ -68,6 +69,7 @@ jobs:
               'check_superbru_fixtures.yml': {'schedule'},
               'ci.yml': {'push', 'pull_request'},
               'data-inventory.yml': {'schedule', 'push'},
+              'polymarket-mispricing-bot.yml': {'schedule'},
               'refresh-locked-superbru-card.yml': {'schedule'},
               'repo-audit-bundle.yml': {'push'},
           }

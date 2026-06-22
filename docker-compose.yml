@@ -1,0 +1,20 @@
+services:
+  polymarket-agent:
+    build:
+      context: .
+      args:
+        INSTALL_POLYMARKET_SDK: ${INSTALL_POLYMARKET_SDK:-false}
+    container_name: polymarket-agent
+    env_file:
+      - .env
+    environment:
+      PM_MODE: ${PM_MODE:-dry_run}
+      POLYMARKET_EXECUTE_LIVE: ${POLYMARKET_EXECUTE_LIVE:-false}
+      POLYMARKET_QUERY: ${POLYMARKET_QUERY:-world cup}
+      POLYMARKET_SCAN_INTERVAL_SECONDS: ${POLYMARKET_SCAN_INTERVAL_SECONDS:-5}
+      POLYMARKET_SCAN_SECONDS: ${POLYMARKET_SCAN_SECONDS:-270}
+      POLYMARKET_OUTPUT_DIR: ${POLYMARKET_OUTPUT_DIR:-outputs/polymarket}
+    volumes:
+      - ./outputs:/app/outputs
+      - ./inputs/polymarket:/app/inputs/polymarket:ro
+    restart: unless-stopped

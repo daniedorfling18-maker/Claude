@@ -1,31 +1,27 @@
 #!/usr/bin/env python3
-"""WC 2026 predictive-power & betting-edge validation harness.
+"""WC 2026 ultimate-ROI backtest & predictive-power harness.
 
-This answers one question: do the model's pre-match probabilities carry any
-*real-money* predictive edge over the market, when scored against actual World
-Cup results?
+Scores the model the way it is actually played: by ULTIMATE ROI - the realised
+return on what gets staked - not by trading edge / closing-line value. Two venues:
 
-The engine's probabilities are the de-vigged market consensus (model = market),
-so this harness joins those market-derived 1X2 probabilities to TRUSTED completed
-results and measures three things:
+  1. SuperBru pool (ALL completed results) - the PRIMARY scorecard. The pool pays
+     on finishing position, funded by other players, so realised SuperBru POINTS
+     are the ROI currency. We score the model's realised points across every
+     completed WC 2026 match and compare them to the naive fixed-template
+     strategies a casual pool player would use. Beating those templates IS the edge.
 
-  1. Forecast skill   - outcome accuracy, Brier, log-loss, RPS vs a uniform 1/3 baseline.
-  2. Calibration      - predicted favourite probability vs observed win rate, by band.
-  3. Betting outcome  - ROI of flat-staking the model's pick at FAIR odds (1/p) and at a
-                        realistic VIGGED price, with bootstrap CIs. Betting at the price the
-                        probability came from has expectation 0 (fair) / -vig (real); the
-                        realised ROI and its CI show whether the WC sample deviates from that.
+  2. Betting markets (subset with stored prices) - SECONDARY. Realised flat-stake
+     ROI of backing the model pick at market prices, with bootstrap CIs. Edge vs a
+     sharp anchor (Pinnacle) is kept as a side diagnostic only; against a liquid
+     line at its own price, realised ROI tends to -vig, so positive ultimate ROI
+     here only comes from genuinely soft prices.
 
-Probability sources (both are markets; the model tracks them by construction):
-  - market_odds_history.csv          -> The Odds API de-vigged consensus  (PRIMARY = the model)
-  - polymarket_wc_1x2_summary.csv    -> Polymarket pre-kickoff prices      (independent cross-check)
-
-Actuals come ONLY from the trusted results CSV. The market-history goal columns are
-prediction-card scorelines, never results, and are ignored here.
+Actuals come ONLY from trusted results / realised-submission CSVs. Market-history
+goal columns are prediction-card scorelines, never results, and are ignored.
 
 Outputs (under --out-dir):
-  wc_predictive_power_per_match.csv  - one row per scored match per source
-  wc_predictive_power_summary.json   - skill / calibration / betting metrics + caveats
+  wc_predictive_power_per_match.csv  - one row per market-scored match per source
+  wc_predictive_power_summary.json   - pool ultimate-ROI backtest + market ROI + caveats
 """
 from __future__ import annotations
 
@@ -36,6 +32,7 @@ import math
 import random
 import re
 import unicodedata
+from collections import defaultdict
 from datetime import datetime
 from pathlib import Path
 from statistics import mean
@@ -45,6 +42,7 @@ RESULTS_DEFAULT = "outputs/superbru_pool/superbru_match_results_auto.csv"
 MARKET_HISTORY_DEFAULT = "outputs/market_odds_history/market_odds_history.csv"
 POLYMARKET_DEFAULT = "outputs/polymarket-wc-retrospective/polymarket_wc_1x2_summary.csv"
 REALISED_SUMMARY_DEFAULT = "outputs/backtesting/superbru_realised_submitted_summary.json"
+REALISED_PERF_DEFAULT = "outputs/backtesting/superbru_realised_submitted_performance.csv"
 OUT_DIR_DEFAULT = "outputs/backtesting/wc_predictive_power"
 
 OUTCOMES = ("home", "draw", "away")
@@ -345,9 +343,90 @@ def load_realised_context(path: Path) -> dict:
     ) if k in data}
 
 
+# ---------------------------------------------------------------------------
+# SuperBru pool: ultimate ROI on ALL completed results (primary scorecard)
+# ---------------------------------------------------------------------------
+def score_superbru(ph: int, pa: int, ah: int, aa: int, ci_cutoff: float = 1.5) -> float:
+    """Realised SuperBru points: 3 exact, 1.5 close (right result, closeness<=cut), 1 result, 0 wrong."""
+    if ph == ah and pa == aa:
+        return 3.0
+    if outcome_of(ph, pa) == outcome_of(ah, aa):
+        closeness = abs((ph - pa) - (ah - aa)) + abs((ph + pa) - (ah + aa)) / 2.0
+        return 1.5 if closeness <= ci_cutoff else 1.0
+    return 0.0
+
+
+def parse_score(text: str) -> Optional[tuple[int, int]]:
+    m = re.match(r"\s*(\d+)\D+(\d+)", str(text or ""))
+    return (int(m.group(1)), int(m.group(2))) if m else None
+
+
+def load_realised_points(path: Path) -> list[dict]:
+    """Per-match realised submitted points (ground-truth pool ROI) for every completed match."""
+    rows: list[dict] = []
+    if not path.exists():
+        return rows
+    for r in csv.DictReader(path.open(encoding="utf-8-sig")):
+        actual = parse_score(r.get("actual_score", ""))
+        pts = r.get("submitted_points", "")
+        if actual is None or pts in ("", None):
+            continue
+        try:
+            points = float(pts)
+        except ValueError:
+            continue
+        rows.append({
+            "match_key": match_key(r["home_team"], r["away_team"]),
+            "home_team": r["home_team"], "away_team": r["away_team"],
+            "round": r.get("round_number", ""), "actual": actual, "model_points": points,
+        })
+    return rows
+
+
+# Fixed scorelines a casual pool player leans on; the model has to beat the best of these.
+POOL_TEMPLATES = ((1, 1), (2, 1), (1, 0), (2, 0), (0, 0))
+
+
+def superbru_pool_backtest(realised: list[dict], n_boot: int, seed: int) -> dict:
+    if not realised:
+        return {"n": 0, "note": "no realised submitted results found"}
+    n = len(realised)
+    model_pts = [r["model_points"] for r in realised]
+    templates = {}
+    for tpl in POOL_TEMPLATES:
+        per_match = [score_superbru(tpl[0], tpl[1], r["actual"][0], r["actual"][1]) for r in realised]
+        templates[f"{tpl[0]}-{tpl[1]}"] = {"avg": mean(per_match), "per_match": per_match}
+    best_name = max(templates, key=lambda k: templates[k]["avg"])
+    best = templates[best_name]
+    deltas = [m - t for m, t in zip(model_pts, best["per_match"])]
+    rounds: dict[str, list[float]] = defaultdict(list)
+    for r in realised:
+        rounds[str(r["round"])].append(r["model_points"])
+    cls = {"exact": sum(p == 3.0 for p in model_pts), "close": sum(p == 1.5 for p in model_pts),
+           "result": sum(p == 1.0 for p in model_pts), "wrong": sum(p == 0.0 for p in model_pts)}
+    return {
+        "n": n,
+        "roi_currency": "superbru_points",
+        "model_total_points": round(sum(model_pts), 1),
+        "model_avg_points": round(mean(model_pts), 4),
+        "model_avg_points_ci95": [round(x, 4) for x in bootstrap_ci(model_pts, n_boot, seed)],
+        "result_class_counts": cls,
+        "outcome_hit_rate": round((cls["exact"] + cls["close"] + cls["result"]) / n, 4),
+        "exact_rate": round(cls["exact"] / n, 4),
+        "per_round_avg_points": {k: round(mean(v), 4) for k, v in sorted(rounds.items())},
+        "naive_template_avg_points": {k: round(v["avg"], 4) for k, v in templates.items()},
+        "best_naive_template": best_name,
+        "best_naive_template_avg_points": round(best["avg"], 4),
+        "model_edge_vs_best_template": round(mean(deltas), 4),
+        "model_edge_vs_best_template_ci95": [round(x, 4) for x in bootstrap_ci(deltas, n_boot, seed + 3)],
+        "perfect_hindsight_ceiling_avg_points": 3.0,
+    }
+
+
 def main() -> int:
-    ap = argparse.ArgumentParser(description="WC 2026 predictive-power & betting-edge validation")
+    ap = argparse.ArgumentParser(description="WC 2026 ultimate-ROI backtest & predictive-power harness")
     ap.add_argument("--results-csv", default=RESULTS_DEFAULT)
+    ap.add_argument("--realised-performance-csv", default=REALISED_PERF_DEFAULT)
     ap.add_argument("--market-history-csv", default=MARKET_HISTORY_DEFAULT)
     ap.add_argument("--prediction-log-csv", default="outputs/backtesting/prediction_log.csv")
     ap.add_argument("--polymarket-csv", default=POLYMARKET_DEFAULT)
@@ -362,10 +441,15 @@ def main() -> int:
     out_dir.mkdir(parents=True, exist_ok=True)
 
     results = load_trusted_results(Path(args.results_csv))
+
+    # PRIMARY: SuperBru pool ultimate ROI on ALL completed results.
+    realised = load_realised_points(Path(args.realised_performance_csv))
+    pool = superbru_pool_backtest(realised, args.n_boot, args.seed)
+
+    # SECONDARY: realised betting ROI on the subset of matches with stored prices.
     market_probs = load_market_history_probs(Path(args.market_history_csv))
     log_probs = load_prediction_log_probs(Path(args.prediction_log_csv))
     poly_probs = load_polymarket_probs(Path(args.polymarket_csv))
-
     sources = {
         "market_history_devig_consensus": market_probs,
         "prediction_log_consensus": log_probs,
@@ -373,36 +457,37 @@ def main() -> int:
     }
     summaries, all_records = [], []
     for name, probs in sources.items():
-        summary, records = evaluate_source(name, probs, results, args.assumed_vig, args.n_boot, args.seed)
-        summaries.append(summary)
+        s, records = evaluate_source(name, probs, results, args.assumed_vig, args.n_boot, args.seed)
+        summaries.append(s)
         all_records.extend(records)
-
     scored_keys = {match_key(r["home_team"], r["away_team"]) for r in all_records}
-
-    # Pooled estimate across both markets (both are "the market"; market_history wins any
-    # overlap). Summary-only so the per-match CSV stays one row per match per real source.
     combined_probs = {**poly_probs, **market_probs}
     combined_summary, _ = evaluate_source("all_markets_combined", combined_probs, results,
                                           args.assumed_vig, args.n_boot, args.seed + 7)
     summaries.append(combined_summary)
+
     summary = {
         "generated_at_utc": datetime.utcnow().isoformat() + "Z",
+        "scoring_lens": "ultimate_roi",
         "trusted_completed_matches": len(results),
-        "matches_with_any_prematch_probability": len(scored_keys),
-        "coverage_fraction": round(len(scored_keys) / len(results), 3) if results else 0.0,
-        "assumed_vig": args.assumed_vig,
+        "superbru_pool_ultimate_roi": pool,
+        "betting_market_realised_roi": {
+            "matches_with_stored_price": len(scored_keys),
+            "price_coverage_fraction": round(len(scored_keys) / len(results), 3) if results else 0.0,
+            "assumed_vig": args.assumed_vig,
+            "sources": summaries,
+        },
         "n_bootstrap": args.n_boot,
-        "sources": summaries,
-        "superbru_realised_context_n40": load_realised_context(Path(args.realised_summary)),
         "caveats": [
-            "Model probabilities ARE the de-vigged market consensus; this measures whether the market "
-            "(and therefore the model) beat its own price on the WC sample, not an independent edge.",
-            f"Only {len(scored_keys)}/{len(results)} completed matches had a stored pre-match probability. "
-            "Pre-match probabilities are not being logged for most fixtures, so betting validation is "
-            "currently under-powered. Log every prediction's probability + the obtainable price to grow this.",
-            "Betting at fair odds is 0-EV by construction and at vigged odds is ~ -vig; any deviation here "
-            "is small-sample noise, not demonstrated alpha.",
-            "No independent sharp anchor (Pinnacle/Betfair closing) is used, so closing-line value is NOT tested.",
+            "PRIMARY lens is ultimate ROI on the SuperBru pool: realised points vs naive templates. "
+            "The pool pays on finishing position (funded by other players), so beating the templates "
+            "is real edge - no market edge required.",
+            "Betting-market ROI is secondary and price-taker: model probabilities are the de-vigged "
+            "market consensus, so against a liquid line at its own price realised ROI tends to -vig. "
+            "Positive ultimate ROI there only comes from genuinely soft prices (see prediction_log "
+            "best-obtainable-odds vs sharp anchor).",
+            f"Only {len(scored_keys)}/{len(results)} completed matches had a stored pre-match price, so "
+            "the betting-market ROI is under-powered; the prediction log grows this every refresh.",
         ],
         "outputs": {
             "per_match_csv": str(out_dir / "wc_predictive_power_per_match.csv"),
@@ -412,45 +497,46 @@ def main() -> int:
 
     per_match_path = out_dir / "wc_predictive_power_per_match.csv"
     if all_records:
-        fields = list(all_records[0].keys())
         with per_match_path.open("w", newline="", encoding="utf-8") as fh:
-            writer = csv.DictWriter(fh, fieldnames=fields)
+            writer = csv.DictWriter(fh, fieldnames=list(all_records[0].keys()))
             writer.writeheader()
             writer.writerows(all_records)
-
     (out_dir / "wc_predictive_power_summary.json").write_text(json.dumps(summary, indent=2), encoding="utf-8")
 
-    # Human-readable report.
-    print("=" * 72)
-    print("WC 2026 PREDICTIVE-POWER & BETTING-EDGE VALIDATION")
-    print("=" * 72)
-    print(f"Trusted completed matches : {summary['trusted_completed_matches']}")
-    print(f"With pre-match probability : {summary['matches_with_any_prematch_probability']} "
-          f"({summary['coverage_fraction']:.0%} coverage)")
-    ctx = summary["superbru_realised_context_n40"]
-    if ctx:
-        print(f"SuperBru realised (n={ctx.get('completed_matches')}): "
-              f"{ctx.get('average_points_per_match')} pts/match, "
-              f"outcome hit {ctx.get('outcome_hit_rate_including_exact_close_result')}")
+    # Human-readable report - ultimate ROI first.
+    print("=" * 74)
+    print("WC 2026 ULTIMATE-ROI BACKTEST")
+    print("=" * 74)
+    print(f"Trusted completed matches: {len(results)}")
+    if pool.get("n"):
+        print("\n[1] SUPERBRU POOL  (primary - ROI currency = points, ALL results)")
+        print(f"  model realised        : {pool['model_total_points']} pts over {pool['n']} "
+              f"= {pool['model_avg_points']:.3f}/match  CI95 {pool['model_avg_points_ci95']}")
+        print(f"  result mix            : {pool['result_class_counts']}  "
+              f"(outcome hit {pool['outcome_hit_rate']:.0%}, exact {pool['exact_rate']:.0%})")
+        print(f"  per round             : {pool['per_round_avg_points']}")
+        print(f"  best naive template   : {pool['best_naive_template']} @ "
+              f"{pool['best_naive_template_avg_points']:.3f}/match  (all: {pool['naive_template_avg_points']})")
+        print(f"  >> model edge vs best : {pool['model_edge_vs_best_template']:+.3f}/match  "
+              f"CI95 {pool['model_edge_vs_best_template_ci95']}  (ceiling 3.000)")
+    print("\n[2] BETTING MARKETS  (secondary - realised flat-stake ROI, price subset)")
     for s in summaries:
-        print("\n" + "-" * 72)
-        print(f"SOURCE: {s['source']}  (n={s.get('n', 0)})")
         if not s.get("n"):
-            print("  (no matches joined)")
             continue
-        fs = s["forecast_skill"]
-        print(f"  outcome accuracy   : {fs['outcome_accuracy']:.1%}")
-        print(f"  Brier (vs uniform) : {fs['mean_brier']:.4f} vs {fs['uniform_brier']:.4f} "
-              f"(skill {fs['brier_skill_vs_uniform']:+.3f})")
-        print(f"  log-loss(vs unif)  : {fs['mean_log_loss']:.4f} vs {fs['uniform_log_loss']:.4f}")
         b = s["betting"]
-        ff, vv = b["model_pick_fair_odds"], b["model_pick_vigged_odds"]
-        print(f"  ROI model pick @ FAIR odds : {ff['roi']:+.3f}  CI95 {ff['roi_ci95']}")
-        print(f"  ROI model pick @ VIG odds  : {vv['roi']:+.3f}  CI95 {vv['roi_ci95']}  (vig {b['assumed_vig']:.0%})")
-    print("\n" + "=" * 72)
-    print("VERDICT: probabilities are market-derived; ROI CIs span/realise <= 0 -> no")
-    print("demonstrated betting edge. Coverage is too small to claim otherwise. See caveats.")
-    print("=" * 72)
+        vv = b["model_pick_vigged_odds"]
+        print(f"  {s['source']:30} n={s['n']:<3} acc {s['forecast_skill']['outcome_accuracy']:.0%}  "
+              f"ROI@vig {vv['roi']:+.3f} CI95 {vv['roi_ci95']}")
+    print("\n" + "=" * 74)
+    edge = pool.get("model_edge_vs_best_template")
+    lo = pool.get("model_edge_vs_best_template_ci95", [None, None])[0]
+    if edge is not None:
+        sign = "beats" if edge > 0 else "trails"
+        sig = "CI excludes 0" if (lo is not None and lo > 0) else "CI still spans 0 (small n)"
+        print(f"VERDICT: pool ultimate ROI = {pool['model_avg_points']:.3f} pts/match; model {sign} the "
+              f"best naive\ntemplate by {edge:+.3f}/match ({sig}). Market ROI stays price-taker (-vig) "
+              "absent soft prices.")
+    print("=" * 74)
     return 0
 
 

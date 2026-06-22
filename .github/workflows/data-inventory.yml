@@ -1,5 +1,4 @@
 name: Data Inventory
-# Push-trigger stamp: 2026-06-20T21:34:00+02:00
 
 on:
   workflow_dispatch:
@@ -15,7 +14,7 @@ on:
         default: false
   push:
     branches:
-      - claude/bold-ride-n3n1ti
+      - main
     paths:
       - ".github/workflows/data-inventory.yml"
       - "scripts/audit_oddspedia_available_data_cdp_session.py"
@@ -23,14 +22,18 @@ on:
       - "scripts/filter_oddspedia_high_value_market_paths.py"
       - "scripts/build_data_inventory_summary.py"
       - "inputs/oddspedia_match_urls.csv"
-      - "outputs/final_locked_picks/superbru_final_card.csv"
 
 permissions:
   contents: read
+  actions: read
 
 defaults:
   run:
     shell: bash
+
+concurrency:
+  group: data-inventory-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   data-inventory:
@@ -41,12 +44,12 @@ jobs:
     env:
       PYTHONPATH: src
       CHROME_DEBUG_PORT: "9222"
-      SUPERBRU_POOL_URL: "https://www.superbru.com/worldcup_predictor/pool_view.php?t=1296&p=13236623&g=32&view=matches"
+      SUPERBRU_POOL_URL: ${{ secrets.SUPERBRU_POOL_URL || 'https://www.superbru.com/worldcup_predictor/pool_view.php?t=1296&p=13236623&view=matches' }}
       SUPERBRU_LOGIN_URL: ${{ secrets.SUPERBRU_LOGIN_URL }}
       SUPERBRU_USERNAME: ${{ secrets.SUPERBRU_USERNAME }}
       SUPERBRU_PASSWORD: ${{ secrets.SUPERBRU_PASSWORD }}
       MAX_ODDSPEDIA_MATCHES: ${{ github.event_name == 'workflow_dispatch' && inputs.max_oddspedia_matches || '0' }}
-      TRY_ODDSPEDIA_ALT_URLS: ${{ github.event_name == 'workflow_dispatch' && inputs.try_oddspedia_alt_urls || 'true' }}
+      TRY_ODDSPEDIA_ALT_URLS: ${{ github.event_name == 'workflow_dispatch' && inputs.try_oddspedia_alt_urls || 'false' }}
 
     steps:
       - name: Checkout repository
@@ -56,11 +59,12 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
+          cache: "pip"
 
       - name: Install Python dependencies
         run: |
           python -m pip install --upgrade pip
-          python -m pip install pandas playwright
+          python -m pip install -e ".[scraper]"
           python -m playwright install chromium --with-deps
 
       - name: Start headless Chromium CDP
@@ -141,9 +145,9 @@ jobs:
 
       - name: Upload data inventory artifact
         uses: actions/upload-artifact@v4
+        if: always()
         with:
           name: data-inventory-${{ github.run_id }}
-          path: |
-            outputs/data_inventory/**
+          path: outputs/data_inventory/**
           if-no-files-found: error
           retention-days: 14

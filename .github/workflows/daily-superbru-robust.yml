@@ -57,7 +57,7 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install -e .
+          pip install -e ".[scraper]"
 
       - name: Run daily robust odds pipeline
         env:
@@ -165,8 +165,9 @@ jobs:
         env:
           SUPERBRU_EMAIL: ${{ secrets.SUPERBRU_USERNAME }}
           SUPERBRU_PASSWORD: ${{ secrets.SUPERBRU_PASSWORD }}
+          SUPERBRU_LOGIN_URL: ${{ secrets.SUPERBRU_LOGIN_URL }}
+          SUPERBRU_POOL_URL: ${{ secrets.SUPERBRU_POOL_URL }}
         run: |
-          python -m pip install playwright
           python -m playwright install chromium --with-deps
           python - <<'PY'
           import json
@@ -183,6 +184,8 @@ jobs:
 
           email = os.environ.get('SUPERBRU_EMAIL', '')
           password = os.environ.get('SUPERBRU_PASSWORD', '')
+          login_url = os.environ.get('SUPERBRU_LOGIN_URL') or 'https://www.superbru.com/login'
+          pool_url = os.environ.get('SUPERBRU_POOL_URL') or 'https://www.superbru.com/worldcup_predictor/pool_view.php?t=1296&p=13236623&view=matches'
           data = json.loads(src.read_text(encoding='utf-8')) if src.exists() else {'changes': []}
           changes = data.get('changes', []) or []
           results = []
@@ -195,16 +198,18 @@ jobs:
               away = c.get('away_team', '')
               new_pick = c.get('new_pick', '')
               cmd = [
-                  sys.executable, 'scripts/submit_superbru_pick_cdp.py',
+                  sys.executable, 'scripts/submit_superbru_pick_cdp_aliases.py',
                   '--launch', '--headless',
                   '--email', email,
                   '--password', password,
+                  '--login-url', login_url,
+                  '--pool-url', pool_url,
                   '--home-team', home,
                   '--away-team', away,
                   '--new-pick', new_pick,
                   '--diagnostics-dir', str(diag_dir),
               ]
-              print('$ python scripts/submit_superbru_pick_cdp.py --launch --headless ' +
+              print('$ python scripts/submit_superbru_pick_cdp_aliases.py --launch --headless ' +
                     f'--home-team {home!r} --away-team {away!r} --new-pick {new_pick!r}')
               completed = subprocess.run(cmd, text=True, capture_output=True)
               results.append({

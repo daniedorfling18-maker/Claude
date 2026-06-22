@@ -2,59 +2,69 @@ name: Auto Pick (Scheduled)
 
 on:
   schedule:
-    # All times UTC; fires 10 min before each kickoff. window_minutes=20 covers cron delays.
+    # All times UTC; fires ~25 min before each kickoff. window_minutes=40 absorbs GitHub cron delays.
+    # Single fire per match: the scheduled run pulls that match's odds and recomputes the pick live,
+    # so one pull per kickoff (~markets x regions credits) instead of a double-fire double-pull.
 
     # ── ROUND 2 remaining (Jun 21-24) ────────────────────────────────────────
-    - cron: '50 15 21 6 *'   # Jun 21 16:00 UTC (12:00 ET) – ESP/KSA
-    - cron: '50 18 21 6 *'   # Jun 21 19:00 UTC (15:00 ET) – BEL/IRN
-    - cron: '50 21 21 6 *'   # Jun 21 22:00 UTC (18:00 ET) – URU/CPV
-    - cron: '50 0 22 6 *'    # Jun 22 01:00 UTC (21:00 ET) – NZL/EGY
-    - cron: '50 16 22 6 *'   # Jun 22 17:00 UTC (13:00 ET) – ARG/AUT
-    - cron: '50 20 22 6 *'   # Jun 22 21:00 UTC (17:00 ET) – FRA/IRQ
-    - cron: '50 23 22 6 *'   # Jun 23 00:00 UTC (20:00 ET) – NOR/SEN
-    - cron: '50 2 23 6 *'    # Jun 23 03:00 UTC (23:00 ET) – JOR/ALG
-    - cron: '50 16 23 6 *'   # Jun 23 17:00 UTC (13:00 ET) – POR/UZB
-    - cron: '50 19 23 6 *'   # Jun 23 20:00 UTC (16:00 ET) – ENG/GHA
-    - cron: '50 22 23 6 *'   # Jun 23 23:00 UTC (19:00 ET) – PAN/CRO
-    - cron: '50 1 24 6 *'    # Jun 24 02:00 UTC (22:00 ET) – COL/DRC
+    - cron: '35 15 21 6 *'   # Jun 21 16:00 UTC (12:00 ET) – ESP/KSA
+    - cron: '35 18 21 6 *'   # Jun 21 19:00 UTC (15:00 ET) – BEL/IRN
+    - cron: '35 21 21 6 *'   # Jun 21 22:00 UTC (18:00 ET) – URU/CPV
+    - cron: '35 0 22 6 *'    # Jun 22 01:00 UTC (21:00 ET) – NZL/EGY
+    - cron: '35 16 22 6 *'   # Jun 22 17:00 UTC (13:00 ET) – ARG/AUT
+    - cron: '35 20 22 6 *'   # Jun 22 21:00 UTC (17:00 ET) – FRA/IRQ
+    - cron: '35 23 22 6 *'   # Jun 23 00:00 UTC (20:00 ET) – NOR/SEN
+    - cron: '35 2 23 6 *'    # Jun 23 03:00 UTC (23:00 ET) – JOR/ALG
+    - cron: '35 16 23 6 *'   # Jun 23 17:00 UTC (13:00 ET) – POR/UZB
+    - cron: '35 19 23 6 *'   # Jun 23 20:00 UTC (16:00 ET) – ENG/GHA
+    - cron: '35 22 23 6 *'   # Jun 23 23:00 UTC (19:00 ET) – PAN/CRO
+    - cron: '35 1 24 6 *'    # Jun 24 02:00 UTC (22:00 ET) – COL/DRC
 
     # ── ROUND 3 (Jun 24-28) ──────────────────────────────────────────────────
-    - cron: '50 18 24 6 *'   # Jun 24 19:00 UTC (15:00 ET) – BHI/QAT, SUI/CAN
-    - cron: '50 21 24 6 *'   # Jun 24 22:00 UTC (18:00 ET) – MOR/HAI, SCO/BRA
-    - cron: '50 0 25 6 *'    # Jun 25 01:00 UTC (21:00 ET) – CZE/MEX, RSA/KOR
-    - cron: '50 19 25 6 *'   # Jun 25 20:00 UTC (16:00 ET) – ECU/GER, CUR/CIV
-    - cron: '50 22 25 6 *'   # Jun 25 23:00 UTC (19:00 ET) – JPN/SWE, TUN/NED
-    - cron: '50 1 26 6 *'    # Jun 26 02:00 UTC (22:00 ET) – TUR/USA, PAR/AUS
-    - cron: '50 18 26 6 *'   # Jun 26 19:00 UTC (15:00 ET) – NOR/FRA, SEN/IRQ
-    - cron: '50 23 26 6 *'   # Jun 27 00:00 UTC (20:00 ET) – CPV/KSA, URU/ESP
-    - cron: '50 2 27 6 *'    # Jun 27 03:00 UTC (23:00 ET) – EGY/IRN, NZL/BEL
-    - cron: '50 20 27 6 *'   # Jun 27 21:00 UTC (17:00 ET) – CRO/GHA, PAN/ENG
-    - cron: '20 23 27 6 *'   # Jun 27 23:30 UTC (19:30 ET) – COL/POR, DRC/UZB
-    - cron: '50 1 28 6 *'    # Jun 28 02:00 UTC (22:00 ET) – ALG/AUT, JOR/ARG
+    - cron: '35 18 24 6 *'   # Jun 24 19:00 UTC (15:00 ET) – BHI/QAT, SUI/CAN
+    - cron: '35 21 24 6 *'   # Jun 24 22:00 UTC (18:00 ET) – MOR/HAI, SCO/BRA
+    - cron: '35 0 25 6 *'    # Jun 25 01:00 UTC (21:00 ET) – CZE/MEX, RSA/KOR
+    - cron: '35 19 25 6 *'   # Jun 25 20:00 UTC (16:00 ET) – ECU/GER, CUR/CIV
+    - cron: '35 22 25 6 *'   # Jun 25 23:00 UTC (19:00 ET) – JPN/SWE, TUN/NED
+    - cron: '35 1 26 6 *'    # Jun 26 02:00 UTC (22:00 ET) – TUR/USA, PAR/AUS
+    - cron: '35 18 26 6 *'   # Jun 26 19:00 UTC (15:00 ET) – NOR/FRA, SEN/IRQ
+    - cron: '35 23 26 6 *'   # Jun 27 00:00 UTC (20:00 ET) – CPV/KSA, URU/ESP
+    - cron: '35 2 27 6 *'    # Jun 27 03:00 UTC (23:00 ET) – EGY/IRN, NZL/BEL
+    - cron: '35 20 27 6 *'   # Jun 27 21:00 UTC (17:00 ET) – CRO/GHA, PAN/ENG
+    - cron: '05 23 27 6 *'   # Jun 27 23:30 UTC (19:30 ET) – COL/POR, DRC/UZB
+    - cron: '35 1 28 6 *'    # Jun 28 02:00 UTC (22:00 ET) – ALG/AUT, JOR/ARG
 
     # ── ROUND OF 32 → FINAL (Jun 28 – Jul 19) ───────────────────────────────
     # Standard knockout slots: 20:00, 23:00, 02:00 UTC (16:00/19:00/22:00 ET)
-    - cron: '50 19 28-30 6 *'   # Jun 28-30 20:00 UTC slot
-    - cron: '50 22 28-30 6 *'   # Jun 28-30 23:00 UTC slot
-    - cron: '50 1 29-31 6 *'    # Jun 29-30 02:00 UTC slot
-    - cron: '50 19 1-19 7 *'    # Jul 1-19 20:00 UTC slot
-    - cron: '50 22 1-19 7 *'    # Jul 1-19 23:00 UTC slot
-    - cron: '50 1 2-20 7 *'     # Jul 2-19 02:00 UTC slot
+    - cron: '35 19 28-30 6 *'   # Jun 28-30 20:00 UTC slot
+    - cron: '35 22 28-30 6 *'   # Jun 28-30 23:00 UTC slot
+    - cron: '35 1 29-31 6 *'    # Jun 29-30 02:00 UTC slot
+    - cron: '35 19 1-19 7 *'    # Jul 1-19 20:00 UTC slot
+    - cron: '35 22 1-19 7 *'    # Jul 1-19 23:00 UTC slot
+    - cron: '35 1 2-20 7 *'     # Jul 2-19 02:00 UTC slot
 
   workflow_dispatch:
     inputs:
       window_minutes:
         description: 'Submit picks for games kicking off within this many minutes'
         required: false
-        default: '20'
+        default: '40'
       dry_run:
         description: 'Dry run only (predict but do not submit)'
         required: false
         default: 'false'
+      fetch_match_odds:
+        description: 'Pull a one-match odds snapshot and recompute the pick live. Set false to submit the committed card pick without spending Odds API credits.'
+        required: false
+        default: 'true'
       pool_url:
         description: 'SuperBru pool URL'
         required: false
         default: 'https://www.superbru.com/worldcup_predictor/pool_view.php?t=1296&p=13236623&view=matches'
+      skip_leaderboard:
+        description: 'Skip leaderboard scrape and use configured strategy_mode (no pool-position intelligence)'
+        required: false
+        default: 'false'
 
 jobs:
   auto-pick:
@@ -79,10 +89,24 @@ jobs:
           SUPERBRU_LOGIN_URL: ${{ secrets.SUPERBRU_LOGIN_URL }}
           SUPERBRU_POOL_URL: ${{ secrets.SUPERBRU_POOL_URL }}
           THE_ODDS_API_KEY: ${{ secrets.THE_ODDS_API_KEY }}
+          SUPERBRU_PLAYER_NAME: ${{ secrets.SUPERBRU_PLAYER_NAME || 'Danie' }}
+          SUPERBRU_POOL_KEYWORDS: ${{ secrets.SUPERBRU_POOL_KEYWORDS || 'Moore Infinity,FIFA WC 26,World Cup 2026' }}
         run: |
           DRY_RUN_FLAG=""
           if [ "${{ github.event.inputs.dry_run }}" = "true" ]; then
             DRY_RUN_FLAG="--dry-run"
+          fi
+
+          # Odds are fetched by default so the pick is recomputed live before kickoff.
+          # Set fetch_match_odds=false to fall back to the committed card pick with no Odds API spend.
+          MATCH_ODDS_FLAG=""
+          if [ "${{ github.event.inputs.fetch_match_odds }}" = "false" ]; then
+            MATCH_ODDS_FLAG="--skip-match-odds"
+          fi
+
+          SKIP_LEADERBOARD_FLAG=""
+          if [ "${{ github.event.inputs.skip_leaderboard }}" = "true" ]; then
+            SKIP_LEADERBOARD_FLAG="--skip-leaderboard"
           fi
 
           POOL_URL="${{ github.event.inputs.pool_url || '' }}"
@@ -95,16 +119,23 @@ jobs:
 
           LOGIN_URL="${SUPERBRU_LOGIN_URL:-https://www.superbru.com/login}"
 
-          python scripts/auto_pick_match_scoped.py \
+          python scripts/auto_pick_match_scoped_smart_odds.py \
             --email "$SUPERBRU_EMAIL" \
             --password "$SUPERBRU_PASSWORD" \
             --login-url "$LOGIN_URL" \
             --pool-url "$POOL_URL" \
-            --window-minutes "${{ github.event.inputs.window_minutes || '20' }}" \
+            --config config.yaml \
+            --window-minutes "${{ github.event.inputs.window_minutes || '40' }}" \
             --pick-card-csv outputs/final_locked_picks/superbru_final_card.csv \
             --odds-lookup-window-minutes 90 \
+            --leader-player "${SUPERBRU_PLAYER_NAME:-Danie}" \
+            --leaderboard-pool-keywords "${SUPERBRU_POOL_KEYWORDS:-Moore Infinity,FIFA WC 26,World Cup 2026}" \
+            --leader-safe-buffer 5.0 \
+            --chaser-range 8.0 \
             --headless \
             $DRY_RUN_FLAG \
+            $MATCH_ODDS_FLAG \
+            $SKIP_LEADERBOARD_FLAG \
             --out-dir outputs/pregame_checks/auto_pick
 
       - name: Upload results

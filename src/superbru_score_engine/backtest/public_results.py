@@ -18,6 +18,7 @@ from superbru_score_engine.model.ratings import MatchResult, RatingsStore
 from superbru_score_engine.model.team_names import canonical_team_name, team_key
 
 from .runner import naive_baseline_pick, reliability_cells
+from .utils import parse_float_grid, parse_int_grid
 
 
 PUBLIC_RESULTS_URL = "https://raw.githubusercontent.com/martj42/international_results/master/results.csv"
@@ -25,7 +26,7 @@ PUBLIC_RESULTS_URL = "https://raw.githubusercontent.com/martj42/international_re
 
 def run_public_results_backtest(args: argparse.Namespace, config: AppConfig) -> int:
     source_path = ensure_public_results_csv(args.source_csv, args.download_url)
-    years = _int_grid(args.years) or [2014, 2018, 2022]
+    years = parse_int_grid(args.years) or [2014, 2018, 2022]
     tournament = str(args.tournament)
     out_dir = Path(args.out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -35,8 +36,8 @@ def run_public_results_backtest(args: argparse.Namespace, config: AppConfig) -> 
     exported_results_path = out_dir / "public_worldcup_results.csv"
     world_cup.to_csv(exported_results_path, index=False)
 
-    rho_grid = _float_grid(args.rho_grid) or [config.model.dixon_coles_rho]
-    ci_grid = _float_grid(args.ci_grid) or [config.superbru.ci_cutoff]
+    rho_grid = parse_float_grid(args.rho_grid) or [config.model.dixon_coles_rho]
+    ci_grid = parse_float_grid(args.ci_grid) or [config.superbru.ci_cutoff]
     calibration_rows: list[dict] = []
     best: tuple[float, float, float, pd.DataFrame] | None = None
     for rho in rho_grid:
@@ -271,13 +272,3 @@ def _bool_value(value) -> bool:
     return str(value).strip().lower() in {"1", "true", "yes", "y"}
 
 
-def _float_grid(raw: str) -> list[float]:
-    if not raw:
-        return []
-    return [float(item.strip()) for item in raw.split(",") if item.strip()]
-
-
-def _int_grid(raw: str) -> list[int]:
-    if not raw:
-        return []
-    return [int(item.strip()) for item in raw.split(",") if item.strip()]

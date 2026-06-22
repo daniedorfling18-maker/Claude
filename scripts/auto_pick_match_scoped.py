@@ -90,6 +90,19 @@ EXTRACT_MATCH_JS = r"""
 """
 
 
+EXTRACT_TABLES_JS = r"""
+() => {
+  function clean(text) { return (text || '').replace(/\s+/g, ' ').trim(); }
+  return Array.from(document.querySelectorAll('table')).map((table, idx) => ({
+    index: idx,
+    matrix: Array.from(table.querySelectorAll('tr')).map(row =>
+      Array.from(row.querySelectorAll('th,td')).map(cell => clean(cell.innerText || cell.textContent))
+    ).filter(r => r.some(c => c.length > 0))
+  }));
+}
+"""
+
+
 def txt(value: Any) -> str:
     if value is None:
         return ""
@@ -158,6 +171,385 @@ def parse_kickoff(text: str | None, ts: str | None, ref: datetime) -> datetime |
         except Exception:
             continue
     return None
+
+
+# ─── Leaderboard scraping and pool-position intelligence ─────────────────────
+
+
+def _extract_pool_id(pool_url: str) -> str | None:
+    """Extract the p=XXXXX pool ID from a Superbru URL."""
+    m = re.search(r"[?&]p=(\d+)", pool_url)
+    return m.group(1) if m else None
+
+
+def leaderboard_url_from_pool_url(pool_url: str) -> str:
+    """
+    Build the leaderboard view URL for the *same* pool as pool_url.
+
+    Always keeps the pool ID (p=XXXXX) so we never land on a different pool.
+    Handles both pool_view.php (?view=) and pool.php (?tab=) URL formats.
+    """
+    if "pool_view.php" in pool_url:
+        url = re.sub(r"view=\w+", "view=leaderboard", pool_url)
+        if "view=leaderboard" not in url:
+            sep = "&" if "?" in url else "?"
+            url = url + sep + "view=leaderboard"
+        return url
+
+    if "pool.php" in pool_url:
+        url = re.sub(r"tab=\w+", "tab=leaderboard", pool_url)
+        url = re.sub(r"#tab=\w+", "", url)
+        if "tab=leaderboard" not in url:
+            sep = "&" if "?" in url else "?"
+            url = url + sep + "tab=leaderboard"
+        return url
+
+    # Generic fallback: append view=leaderboard while preserving pool ID
+    url = re.sub(r"view=\w+", "", pool_url).rstrip("&?")
+    sep = "&" if "?" in url else "?"
+    return url + sep + "view=leaderboard"
+
+
+def _is_lb_row(row: list[str]) -> bool:
+    if len(row) < 3:
+        return False
+    rank_ok = bool(re.fullmatch(r"\d+", row[0].strip()))
+    points_ok = bool(re.fullmatch(r"\d+(?:\.\d+)?", row[-1].strip()))
+    has_player = any(re.search(r"[A-Za-z]", cell) for cell in row[1:-1])
+    return rank_ok and points_ok and has_player
+
+
+def _parse_leaderboard(tables: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Extract rank/player/points from raw table matrices returned by EXTRACT_TABLES_JS."""
+    best: list[dict[str, Any]] = []
+    for table in tables:
+        matrix = table.get("matrix") or []
+        data_rows = [row for row in matrix if _is_lb_row(row)]
+        if len(data_rows) <= len(best):
+            continue
+        parsed: list[dict[str, Any]] = []
+        for row in data_rows:
+            try:
+                rank = int(row[0].strip())
+                points = float(row[-1].strip())
+            except (ValueError, IndexError):
+                continue
+            player = next((c.strip() for c in row[1:-1] if re.search(r"[A-Za-z]", c)), "")
+            if player:
+                parsed.append({"rank": rank, "player": player, "current_points": points})
+        if parsed:
+            best = parsed
+    return sorted(best, key=lambda r: r["rank"])
+
+
+def compute_pool_standing(
+    leaderboard: list[dict[str, Any]],
+    my_player: str,
+    chaser_range: float = 8.0,
+) -> dict[str, Any]:
+    """Compute my rank, points gap and strategic context from leaderboard rows."""
+    if not leaderboard or not my_player:
+        return {"status": "unavailable"}
+
+    my_norm = norm_team(my_player)
+    my_row: dict[str, Any] | None = next(
+        (r for r in leaderboard if norm_team(r["player"]) == my_norm), None
+    )
+    if not my_row:
+        my_row = next(
+            (r for r in leaderboard if my_norm in norm_team(r["player"]) or norm_team(r["player"]) in my_norm),
+            None,
+        )
+    if not my_row:
+        return {"status": "player_not_found", "player": my_player, "leaderboard_size": len(leaderboard)}
+
+    my_rank = int(my_row["rank"])
+    my_points = float(my_row["current_points"])
+    others = [r for r in leaderboard if norm_team(r["player"]) != norm_team(my_row["player"])]
+    sorted_lb = sorted(leaderboard, key=lambda r: -float(r["current_points"]))
+    leader = sorted_lb[0]
+    leader_points = float(leader["current_points"])
+
+    if my_rank == 1:
+        second_points = float(sorted_lb[1]["current_points"]) if len(sorted_lb) > 1 else my_points
+        leader_gap = my_points - second_points
+        chasers_close = [r for r in others if (my_points - float(r["current_points"])) <= chaser_range]
+        return {
+            "status": "leading",
+            "rank": 1,
+            "my_points": my_points,
+            "leader_gap": round(leader_gap, 2),
+            "chasers_in_range": len(chasers_close),
+            "chaser_names": [r["player"] for r in chasers_close[:5]],
+            "leaderboard_size": len(leaderboard),
+        }
+
+    gap_to_leader = leader_points - my_points
+    chasers_behind = [r for r in others if 0 < (my_points - float(r["current_points"])) <= chaser_range]
+    return {
+        "status": "chasing",
+        "rank": my_rank,
+        "my_points": my_points,
+        "leader_name": txt(leader["player"]),
+        "leader_points": leader_points,
+        "gap_to_leader": round(gap_to_leader, 2),
+        "chasers_behind": len(chasers_behind),
+        "leaderboard_size": len(leaderboard),
+    }
+
+
+EXTRACT_PAGE_CONTEXT_JS = r"""
+() => ({
+  url: window.location.href,
+  title: document.title || '',
+  h1s: Array.from(document.querySelectorAll('h1,h2,h3,.pool-name,.competition-name,.pool-title'))
+        .map(e => (e.innerText || e.textContent || '').replace(/\s+/g,' ').trim())
+        .filter(t => t.length > 0),
+  bodySnippet: (document.body ? document.body.innerText : '').slice(0, 3000)
+})
+"""
+
+
+def _page_is_target_pool(context: dict[str, Any], pool_id: str | None, pool_name_keywords: list[str]) -> bool:
+    """
+    Return True only if the current page is for our specific pool.
+
+    Checks (in order):
+    1. Page URL contains the pool ID (p=XXXXX)
+    2. Page title or headings contain any of the pool_name_keywords
+    """
+    if pool_id:
+        if f"p={pool_id}" in context.get("url", ""):
+            return True
+
+    text_blob = " ".join([
+        context.get("title", ""),
+        " ".join(context.get("h1s", [])),
+        context.get("bodySnippet", "")[:500],
+    ]).lower()
+
+    return any(kw.lower() in text_blob for kw in pool_name_keywords if kw)
+
+
+async def scrape_leaderboard_in_session(
+    page: Any,
+    pool_url: str,
+    pool_name_keywords: list[str] | None = None,
+) -> list[dict[str, Any]]:
+    """
+    Scrape the leaderboard for the specific pool identified by pool_url.
+
+    Uses the pool ID (p=XXXXX) and optional pool name keywords to verify we are
+    on the right pool before accepting the scraped rows. Falls back to tab-click
+    selectors but only accepts results that pass the pool identity check.
+    """
+    pool_id = _extract_pool_id(pool_url)
+    keywords = pool_name_keywords or []
+    lb_url = leaderboard_url_from_pool_url(pool_url)
+
+    async def _scrape_and_validate(label: str) -> list[dict[str, Any]]:
+        context = await page.evaluate(EXTRACT_PAGE_CONTEXT_JS)
+        current_url = context.get("url", "")
+
+        if not _page_is_target_pool(context, pool_id, keywords):
+            print(
+                f"  leaderboard page failed pool check at {current_url!r} "
+                f"(pool_id={pool_id!r}, keywords={keywords}). Skipping."
+            )
+            return []
+
+        tables = await page.evaluate(EXTRACT_TABLES_JS)
+        rows = _parse_leaderboard(tables)
+        if rows:
+            print(f"  leaderboard scraped via {label}: {len(rows)} players from pool {pool_id!r}")
+        return rows
+
+    # ── Primary: navigate directly to the pool-specific leaderboard URL ────────
+    try:
+        await page.goto(lb_url, wait_until="domcontentloaded", timeout=20000)
+        await page.wait_for_timeout(5000)
+        rows = await _scrape_and_validate(f"direct URL {lb_url}")
+        if rows:
+            return rows
+    except Exception as exc:
+        print(f"  leaderboard direct URL failed ({lb_url}): {exc}")
+
+    # ── Fallback: click a leaderboard tab only if we're still on the right pool ─
+    # Re-navigate to the pool page first so tab-clicks are scoped to it.
+    try:
+        await page.goto(pool_url, wait_until="domcontentloaded", timeout=20000)
+        await page.wait_for_timeout(4000)
+    except Exception as exc:
+        print(f"  could not reload pool page for tab-click fallback: {exc}")
+        return []
+
+    for sel in [
+        f"a[href*='p={pool_id}'][href*='leaderboard']" if pool_id else "",
+        f"a[href*='p={pool_id}'][href*='standings']" if pool_id else "",
+        "a[href*='leaderboard']", "a[href*='standings']",
+        "[data-tab='leaderboard']", "[data-tab='standings']",
+        "a:has-text('Leaderboard')", "a:has-text('Standings')",
+    ]:
+        if not sel:
+            continue
+        try:
+            await page.click(sel, timeout=2500)
+            await page.wait_for_timeout(4000)
+            rows = await _scrape_and_validate(f"tab-click {sel!r}")
+            if rows:
+                return rows
+        except Exception:
+            continue
+
+    return []
+
+
+# ─── Defensive row builder for game_theory.defensive ─────────────────────────
+
+
+def _derive_risk_tier(diag: dict[str, Any]) -> str:
+    stability = float(diag.get("sensitivity_stability") or 1.0)
+    if stability >= 0.85:
+        return "low"
+    if stability >= 0.65:
+        return "medium"
+    return "high"
+
+
+def _derive_confidence_tier(recommended: Any) -> str:
+    p_exact = float(getattr(recommended, "p_exact", 0.0))
+    if p_exact >= 0.14:
+        return "strong"
+    if p_exact >= 0.09:
+        return "medium"
+    return "fragile"
+
+
+def build_defensive_row(
+    prediction: Any,
+    orientation: str,
+    card_row: dict[str, Any] | None,
+) -> dict[str, Any]:
+    """Build the row dict expected by game_theory.defensive.evaluate_match()."""
+
+    def orient(scoreline: str) -> str:
+        if orientation != "swapped" or not scoreline or "-" not in scoreline:
+            return scoreline
+        a, b = scoreline.split("-", 1)
+        return f"{b}-{a}"
+
+    tops = [c.scoreline for c in (prediction.top_candidates or [])]
+    diag = prediction.diagnostics or {}
+
+    ev_gap = 0.0
+    if len(prediction.top_candidates) >= 2:
+        ev_gap = float(prediction.top_candidates[0].expected_points - prediction.top_candidates[1].expected_points)
+
+    risk_tier = txt(card_row.get("risk_tier") if card_row else "") or _derive_risk_tier(diag)
+    confidence_tier = txt(card_row.get("confidence_tier") if card_row else "") or _derive_confidence_tier(prediction.recommended)
+
+    return {
+        "home_team": prediction.home_team,
+        "away_team": prediction.away_team,
+        "commence_time": prediction.commence_time,
+        "recommended_scoreline": orient(prediction.recommended.scoreline),
+        "expected_points": float(prediction.recommended.expected_points),
+        "private_chase_scoreline": orient(prediction.private_chase_pick.scoreline),
+        "modal_scoreline": orient(str(diag.get("modal_scoreline") or prediction.modal_score_pick.scoreline or "")),
+        "top1_scoreline": orient(tops[0]) if len(tops) > 0 else "",
+        "top2_scoreline": orient(tops[1]) if len(tops) > 1 else "",
+        "top3_scoreline": orient(tops[2]) if len(tops) > 2 else "",
+        "ev_gap_to_second": round(ev_gap, 4),
+        "private_chase_ev_loss": float(diag.get("private_chase_ev_loss", 0.05)),
+        "risk_tier": risk_tier,
+        "confidence_tier": confidence_tier,
+        "sensitivity_stability": float(diag.get("sensitivity_stability") or 1.0),
+    }
+
+
+def select_pool_adaptive_pick(
+    prediction: Any,
+    pool_standing: dict[str, Any],
+    orientation: str,
+    card_row: dict[str, Any] | None,
+    leader_safe_buffer: float,
+    chaser_range: float,
+) -> dict[str, Any]:
+    """
+    Overlay pool-position intelligence on a fresh engine prediction.
+
+    Leading with a tight gap  → defensive model (game_theory.defensive)
+    Leading comfortably       → keep raw-EV prediction (EV-optimal)
+    Chasing within range      → private_chase pick (differentiate from leader)
+    Far behind / unknown      → prediction's recommended pick (configured strategy_mode)
+    """
+
+    def orient(scoreline: str) -> str:
+        if orientation != "swapped" or not scoreline or "-" not in scoreline:
+            return scoreline
+        a, b = scoreline.split("-", 1)
+        return f"{b}-{a}"
+
+    raw_scoreline = orient(prediction.recommended.scoreline)
+    raw_ev = float(prediction.recommended.expected_points)
+    status = pool_standing.get("status", "unavailable")
+
+    if status == "leading":
+        leader_gap = float(pool_standing.get("leader_gap", 0.0))
+        chasers = int(pool_standing.get("chasers_in_range", 0))
+
+        if leader_gap < leader_safe_buffer and chasers > 0:
+            try:
+                from superbru_score_engine.game_theory.defensive import evaluate_match
+
+                def_row = build_defensive_row(prediction, orientation, card_row)
+                result = evaluate_match(def_row, leader_gap=leader_gap, chasers=chasers)
+                defensive_scoreline = txt(result.get("leader_defensive_scoreline", ""))
+                if defensive_scoreline:
+                    return {
+                        "scoreline": defensive_scoreline,
+                        "strategy": "defensive_leader",
+                        "leader_gap": leader_gap,
+                        "chasers": chasers,
+                        "ev_cost": float(result.get("ev_cost_vs_recommended", 0.0)),
+                        "defensive_reason": txt(result.get("defensive_reason", "")),
+                        "raw_ev_scoreline": raw_scoreline,
+                        "expected_points": float(result.get("leader_expected_points", raw_ev)),
+                    }
+            except Exception as exc:
+                print(f"  defensive model failed (non-blocking): {exc}")
+
+        return {
+            "scoreline": raw_scoreline,
+            "strategy": "leading_comfortable" if leader_gap >= leader_safe_buffer else "leading_defensive_fallback",
+            "leader_gap": leader_gap,
+            "expected_points": raw_ev,
+        }
+
+    if status == "chasing":
+        gap_to_leader = float(pool_standing.get("gap_to_leader", 999.0))
+        if gap_to_leader <= chaser_range:
+            chase_scoreline = orient(prediction.private_chase_pick.scoreline)
+            return {
+                "scoreline": chase_scoreline,
+                "strategy": "private_chase",
+                "gap_to_leader": gap_to_leader,
+                "raw_ev_scoreline": raw_scoreline,
+                "expected_points": float(prediction.private_chase_pick.expected_points),
+                "leader_name": txt(pool_standing.get("leader_name", "")),
+            }
+        return {
+            "scoreline": raw_scoreline,
+            "strategy": "raw_ev_far_behind",
+            "gap_to_leader": gap_to_leader,
+            "expected_points": raw_ev,
+        }
+
+    return {
+        "scoreline": raw_scoreline,
+        "strategy": "pool_standing_unavailable",
+        "expected_points": raw_ev,
+    }
 
 
 def pick_column(fieldnames: list[str]) -> str:
@@ -346,6 +738,104 @@ def fetch_match_odds_snapshot(args: argparse.Namespace, entry: dict[str, Any], o
     return summary
 
 
+def load_engine_config(path: str) -> Any:
+    from superbru_score_engine.config import load_config
+
+    return load_config(path)
+
+
+def recompute_pick_from_snapshot(
+    snapshot: dict[str, Any],
+    entry: dict[str, Any],
+    config: Any,
+    pool_standing: dict[str, Any] | None = None,
+    card_row: dict[str, Any] | None = None,
+    args: Any | None = None,
+) -> dict[str, Any]:
+    """Recompute the recommended scoreline from freshly fetched single-match odds.
+
+    When pool_standing is provided the pick is additionally adjusted for pool
+    position: defensive if leading with a tight margin, private-chase if within
+    striking range of the leader. Any failure returns a non-"ok" status so the
+    caller can fall back to the committed card pick.
+    """
+    if snapshot.get("status") != "fetched_single_match_odds":
+        return {"status": "skipped", "reason": snapshot.get("status")}
+    odds_path = snapshot.get("odds_json")
+    if not odds_path or not Path(odds_path).exists():
+        return {"status": "failed", "error": "odds_json_missing"}
+    try:
+        from superbru_score_engine.decision import SuperbruDecisionEngine
+        from superbru_score_engine.ingest.normalise import normalise_the_odds_api_events
+        from superbru_score_engine.model import OddsToScorelineModel
+        from superbru_score_engine.model.ratings import RatingsStore
+
+        odds_obj = json.loads(Path(odds_path).read_text(encoding="utf-8"))
+        matches = normalise_the_odds_api_events([odds_obj])
+        if not matches:
+            return {"status": "failed", "error": "no_normalised_match"}
+        match = matches[0]
+
+        ratings = RatingsStore(config.paths.ratings_store, config.ratings)
+        model = OddsToScorelineModel(config.model, ratings)
+        decision = SuperbruDecisionEngine(
+            config.superbru, config.model.candidate_grid_goals, config.public_pick, config.sensitivity
+        )
+        distribution = model.build_distribution(match)
+        prediction = decision.predict(distribution)
+        home_goals = int(prediction.recommended.home_goals)
+        away_goals = int(prediction.recommended.away_goals)
+
+        # Determine home/away orientation relative to the Superbru tab order.
+        odds_home = norm_team(match.home_team)
+        if odds_home == norm_team(entry.get("home_team")):
+            orientation = "aligned"
+        elif odds_home == norm_team(entry.get("away_team")):
+            orientation = "swapped"
+        else:
+            return {"status": "failed", "error": "orientation_unconfirmed"}
+
+        # Apply pool-position intelligence when leaderboard data is available.
+        if pool_standing is not None and pool_standing.get("status") not in ("unavailable", "player_not_found"):
+            leader_safe_buffer = float(getattr(args, "leader_safe_buffer", 5.0))
+            chaser_range = float(getattr(args, "chaser_range", 8.0))
+            adaptive = select_pool_adaptive_pick(
+                prediction=prediction,
+                pool_standing=pool_standing,
+                orientation=orientation,
+                card_row=card_row,
+                leader_safe_buffer=leader_safe_buffer,
+                chaser_range=chaser_range,
+            )
+            return {
+                "status": "ok",
+                "scoreline": adaptive["scoreline"],
+                "orientation": orientation,
+                "strategy": adaptive.get("strategy"),
+                "expected_points": float(adaptive.get("expected_points", prediction.recommended.expected_points)),
+                "pool_standing_status": pool_standing.get("status"),
+                "pool_adaptive_pick": adaptive,
+                "model_home_away_scoreline": f"{home_goals}-{away_goals}",
+                "odds_home_team": match.home_team,
+                "odds_away_team": match.away_team,
+            }
+
+        # No pool standing: use the engine's configured strategy_mode pick.
+        scoreline = f"{home_goals}-{away_goals}" if orientation == "aligned" else f"{away_goals}-{home_goals}"
+        return {
+            "status": "ok",
+            "scoreline": scoreline,
+            "orientation": orientation,
+            "strategy": f"engine_{prediction.strategy_mode}",
+            "expected_points": float(prediction.recommended.expected_points),
+            "model_home_away_scoreline": f"{home_goals}-{away_goals}",
+            "odds_home_team": match.home_team,
+            "odds_away_team": match.away_team,
+        }
+    except Exception as exc:  # non-blocking: fall back to the committed card pick
+        return {"status": "failed", "error": f"{type(exc).__name__}: {exc}"}
+
+
 async def login(page, args, diag_dir: Path | None = None) -> bool:
     if diag_dir:
         diag_dir.mkdir(parents=True, exist_ok=True)
@@ -491,13 +981,16 @@ async def submit_pick(args, home_team: str, away_team: str, pick: str, out_dir: 
     return await mod.run(submit_args)
 
 
-async def scan_superbru_matches(args: argparse.Namespace, out_dir: Path) -> tuple[list[dict[str, Any]], list[dict[str, Any]], str]:
+async def scan_superbru_matches(
+    args: argparse.Namespace, out_dir: Path
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]], str, dict[str, Any]]:
     from playwright.async_api import async_playwright
 
     now = datetime.now(timezone.utc)
     window = timedelta(minutes=args.window_minutes)
     results: list[dict[str, Any]] = []
     queued: list[dict[str, Any]] = []
+    pool_standing: dict[str, Any] = {"status": "unavailable"}
 
     async with async_playwright() as pw:
         browser = await pw.chromium.launch(headless=args.headless)
@@ -506,8 +999,39 @@ async def scan_superbru_matches(args: argparse.Namespace, out_dir: Path) -> tupl
         login_diag = out_dir / "login_diagnostics"
         if not await login(page, args, diag_dir=login_diag):
             await browser.close()
-            return results, queued, "login_failed"
+            return results, queued, "login_failed", pool_standing
 
+        # ── Leaderboard scrape (reuses auth session, no extra login) ──────────
+        skip_lb = getattr(args, "skip_leaderboard", False)
+        leader_player = getattr(args, "leader_player", "")
+        pool_name_keywords: list[str] = []
+        raw_kw = getattr(args, "leaderboard_pool_keywords", "") or ""
+        if raw_kw:
+            pool_name_keywords = [k.strip() for k in raw_kw.split(",") if k.strip()]
+
+        if not skip_lb and leader_player:
+            try:
+                lb_rows = await scrape_leaderboard_in_session(page, args.pool_url, pool_name_keywords)
+                if lb_rows:
+                    chaser_range = float(getattr(args, "chaser_range", 8.0))
+                    pool_standing = compute_pool_standing(lb_rows, leader_player, chaser_range)
+                    pool_standing["leaderboard"] = lb_rows
+                    print(
+                        f"  pool standing: {pool_standing.get('status')} "
+                        f"rank={pool_standing.get('rank')} "
+                        f"gap={pool_standing.get('leader_gap') or pool_standing.get('gap_to_leader')}"
+                    )
+                else:
+                    pool_standing = {"status": "no_leaderboard_rows_found"}
+                    print("  leaderboard scrape returned no rows")
+                (out_dir / "pool_standing.json").write_text(
+                    json.dumps(pool_standing, indent=2, default=str), encoding="utf-8"
+                )
+            except Exception as exc:
+                pool_standing = {"status": "leaderboard_scrape_failed", "error": str(exc)}
+                print(f"  leaderboard scrape failed (non-blocking): {exc}")
+
+        # ── Navigate to pool matches page ──────────────────────────────────────
         await page.goto(args.pool_url, wait_until="domcontentloaded", timeout=30000)
         await page.wait_for_timeout(15000)
         await page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
@@ -565,7 +1089,7 @@ async def scan_superbru_matches(args: argparse.Namespace, out_dir: Path) -> tupl
 
         await browser.close()
 
-    return results, queued, "ok"
+    return results, queued, "ok", pool_standing
 
 
 async def run(args: argparse.Namespace) -> dict[str, Any]:
@@ -573,22 +1097,80 @@ async def run(args: argparse.Namespace) -> dict[str, Any]:
     out_dir = Path(args.out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    scan_results, queued, scan_status = await scan_superbru_matches(args, out_dir)
+    scan_results, queued, scan_status, pool_standing = await scan_superbru_matches(args, out_dir)
     if scan_status == "login_failed":
         return {"status": "login_failed", "run_at_utc": now.isoformat(), "scan_results": scan_results}
+
+    config = None
+    config_error: str | None = None
+    try:
+        config = load_engine_config(args.config)
+    except Exception as exc:  # non-blocking: recompute is skipped, card pick is used
+        config_error = f"{type(exc).__name__}: {exc}"
+        print(f"warning: could not load engine config {args.config!r}: {config_error}. Falling back to committed card picks.")
+
+    # Resolve odds regions/markets from the engine config when not overridden, so the
+    # pre-kickoff single-match pull mirrors the configured book universe and stays
+    # quota-minimal (markets x regions credits per match) instead of a wide 4-region,
+    # 3-market pull. The model ignores spreads while Asian handicap is disabled.
+    provider = (getattr(config.providers, "the_odds_api", {}) or {}) if config is not None else {}
+    if not args.odds_regions:
+        args.odds_regions = provider.get("regions") or "eu"
+    if not args.odds_markets:
+        args.odds_markets = provider.get("markets") or "h2h,totals"
+    print(f"Odds pull scope: regions={args.odds_regions!r} markets={args.odds_markets!r} "
+          f"(~{len(args.odds_markets.split(',')) * len(args.odds_regions.split(','))} credits/match)")
+
+    # Pass pool standing to recompute only when leaderboard data is usable.
+    effective_pool_standing = (
+        pool_standing
+        if pool_standing.get("status") not in ("unavailable", "player_not_found", "no_leaderboard_rows_found", "leaderboard_scrape_failed")
+        else None
+    )
+    if effective_pool_standing:
+        print(f"Pool standing active: status={effective_pool_standing['status']} rank={effective_pool_standing.get('rank')}")
+    else:
+        print(f"Pool standing inactive ({pool_standing.get('status')}): picks use engine strategy_mode")
 
     submitted_results: list[dict[str, Any]] = []
     for entry in queued:
         pick_lookup = find_pick_from_card(entry, args.pick_card_csv)
         entry["pick_lookup"] = pick_lookup
-        if pick_lookup.get("status") != "found" or not txt(pick_lookup.get("pick")):
-            entry["status"] = "pick_card_missing"
+        card_row = pick_lookup.get("card_row") if pick_lookup.get("status") == "found" else None
+        card_pick = txt(pick_lookup.get("pick")) if pick_lookup.get("status") == "found" else ""
+
+        # Pull this match's odds right before kickoff and recompute a fresh pick so a
+        # stale committed card cannot drive the submission. Pool-position intelligence
+        # is applied on top of the fresh recompute when leaderboard data is available.
+        entry["match_odds"] = fetch_match_odds_snapshot(args, entry, out_dir)
+        if config is not None:
+            fresh = recompute_pick_from_snapshot(
+                entry["match_odds"],
+                entry,
+                config,
+                pool_standing=effective_pool_standing,
+                card_row=card_row,
+                args=args,
+            )
+        else:
+            fresh = {"status": "skipped", "reason": "config_unavailable", "error": config_error}
+        entry["fresh_pick"] = fresh
+
+        if fresh.get("status") == "ok" and txt(fresh.get("scoreline")):
+            pick = txt(fresh["scoreline"])
+            entry["pick_source"] = "live_odds_recompute"
+        elif card_pick:
+            pick = card_pick
+            entry["pick_source"] = "committed_card_fallback"
+        else:
+            entry["status"] = "no_pick_available"
             submitted_results.append(entry)
             continue
 
-        pick = txt(pick_lookup["pick"])
+        entry["card_pick"] = card_pick
         entry["selected_pick"] = pick
-        entry["match_odds"] = fetch_match_odds_snapshot(args, entry, out_dir)
+        entry["pick_changed_vs_card"] = bool(card_pick and pick != card_pick)
+        entry["pick_strategy"] = fresh.get("strategy", "committed_card_fallback")
 
         if args.dry_run:
             entry["status"] = "dry_run"
@@ -610,13 +1192,19 @@ async def run(args: argparse.Namespace) -> dict[str, Any]:
         "window_minutes": args.window_minutes,
         "dry_run": args.dry_run,
         "pick_card_csv": args.pick_card_csv,
+        "pool_standing": pool_standing,
         "scan_results": scan_results,
         "queued_count": len(queued),
         "results": submitted_results,
         "submitted": sum(1 for item in submitted_results if item.get("status") == "submitted"),
         "dry_run_count": sum(1 for item in submitted_results if item.get("status") == "dry_run"),
-        "pick_card_missing": sum(1 for item in submitted_results if item.get("status") == "pick_card_missing"),
+        "no_pick_available": sum(1 for item in submitted_results if item.get("status") == "no_pick_available"),
         "submit_failed": sum(1 for item in submitted_results if item.get("status") == "submit_failed"),
+        "fresh_recompute_used": sum(1 for item in submitted_results if item.get("pick_source") == "live_odds_recompute"),
+        "card_fallback_used": sum(1 for item in submitted_results if item.get("pick_source") == "committed_card_fallback"),
+        "pick_changed_vs_card": sum(1 for item in submitted_results if item.get("pick_changed_vs_card")),
+        "defensive_picks_used": sum(1 for item in submitted_results if str(item.get("pick_strategy", "")).startswith("defensive_leader")),
+        "chase_picks_used": sum(1 for item in submitted_results if item.get("pick_strategy") == "private_chase"),
     }
 
     ts = now.strftime("%Y%m%dT%H%M%SZ")
@@ -636,12 +1224,48 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--out-dir", default="outputs/pregame_checks/auto_pick")
     parser.add_argument("--pick-card-csv", default="outputs/final_locked_picks/superbru_final_card.csv")
+    parser.add_argument("--config", default="config.yaml", help="Engine config used to recompute the pick from fresh single-match odds.")
     parser.add_argument("--odds-api-key", default=os.environ.get("THE_ODDS_API_KEY", ""))
     parser.add_argument("--odds-sport", default="soccer_fifa_world_cup")
-    parser.add_argument("--odds-regions", default="uk,eu,us,au")
-    parser.add_argument("--odds-markets", default="h2h,spreads,totals")
+    # Default regions/markets are resolved from the engine config's the_odds_api
+    # provider when left unset, so the pre-kickoff pull uses the same book universe
+    # and market structure the card was built on (cheaper and more comparable).
+    parser.add_argument("--odds-regions", default=None)
+    parser.add_argument("--odds-markets", default=None)
     parser.add_argument("--odds-lookup-window-minutes", type=int, default=90)
     parser.add_argument("--skip-match-odds", action="store_true")
+    # Pool-position intelligence
+    parser.add_argument(
+        "--leader-player",
+        default=os.environ.get("SUPERBRU_PLAYER_NAME", "Danie"),
+        help="Your display name on the Superbru leaderboard.",
+    )
+    parser.add_argument(
+        "--leader-safe-buffer",
+        type=float,
+        default=5.0,
+        help="Points ahead threshold below which the defensive strategy activates (default 5).",
+    )
+    parser.add_argument(
+        "--chaser-range",
+        type=float,
+        default=8.0,
+        help="Points window for counting chasers / detecting pursuit (default 8).",
+    )
+    parser.add_argument(
+        "--skip-leaderboard",
+        action="store_true",
+        help="Skip the leaderboard scrape; picks use the engine strategy_mode from config.",
+    )
+    parser.add_argument(
+        "--leaderboard-pool-keywords",
+        default=os.environ.get("SUPERBRU_POOL_KEYWORDS", "Moore Infinity,FIFA WC 26,World Cup 2026"),
+        help=(
+            "Comma-separated keywords that must appear in the leaderboard page to confirm it is "
+            "the correct pool. Prevents accidentally reading another pool's standings. "
+            "Default: 'Moore Infinity,FIFA WC 26,World Cup 2026'."
+        ),
+    )
     return parser
 
 

@@ -28,6 +28,7 @@ from .metrics import (
     total_goals_crps,
 )
 from .runner import naive_baseline_pick, reliability_cells
+from .utils import mode_delta, parse_float_grid, parse_str_grid
 
 
 FOOTBALL_DATA_BASE_URL = "https://www.football-data.co.uk/mmz4281"
@@ -40,8 +41,8 @@ def run_football_data_league_backtest(args: argparse.Namespace, config: AppConfi
     partial_calibration_path = out_dir / "football_data_league_partial_calibration.csv"
     progress_path = out_dir / "football_data_league_progress.json"
 
-    seasons = _string_grid(args.seasons)
-    divisions = _string_grid(args.divisions)
+    seasons = parse_str_grid(args.seasons)
+    divisions = parse_str_grid(args.divisions)
     csv_paths = ensure_league_csvs(seasons, divisions, Path(args.data_dir), args.download)
     raw_matches = load_league_matches(csv_paths, args.odds_set)
 
@@ -50,7 +51,7 @@ def run_football_data_league_backtest(args: argparse.Namespace, config: AppConfi
     pd.DataFrame([fixture_row(match) for match in raw_matches]).to_csv(fixtures_path, index=False)
     odds_path.write_text(json.dumps([event_row(match) for match in raw_matches], indent=2), encoding="utf-8")
 
-    market_modes = _string_grid(args.market_mode_grid) or ["h2h", "h2h_totals"]
+    market_modes = parse_str_grid(args.market_mode_grid) or ["h2h", "h2h_totals"]
     compare_on_totals_subset = any(_mode_uses_totals(mode) for mode in market_modes)
     compare_on_ah_subset = any(_mode_uses_asian_handicap(mode) for mode in market_modes)
     if compare_on_totals_subset:
@@ -62,10 +63,10 @@ def run_football_data_league_backtest(args: argparse.Namespace, config: AppConfi
             if match.get("ah_line") is not None and match.get("ah_home_price") and match.get("ah_away_price")
         ]
 
-    rho_grid = _float_grid(args.rho_grid) or [config.model.dixon_coles_rho]
-    ci_grid = _float_grid(args.ci_grid) or [config.superbru.ci_cutoff]
-    devig_methods = _string_grid(args.devig_method_grid) or [config.model.devig_method]
-    ah_weight_grid = _float_grid(getattr(args, "asian_handicap_weight_grid", "")) or [config.model.asian_handicap_weight]
+    rho_grid = parse_float_grid(args.rho_grid) or [config.model.dixon_coles_rho]
+    ci_grid = parse_float_grid(args.ci_grid) or [config.superbru.ci_cutoff]
+    devig_methods = parse_str_grid(args.devig_method_grid) or [config.model.devig_method]
+    ah_weight_grid = parse_float_grid(getattr(args, "asian_handicap_weight_grid", "")) or [config.model.asian_handicap_weight]
     total_combinations = sum(
         len(devig_methods) * len(rho_grid) * len(ci_grid) * (len(ah_weight_grid) if _mode_uses_asian_handicap(mode) else 1)
         for mode in market_modes
@@ -178,9 +179,9 @@ def run_football_data_league_backtest(args: argparse.Namespace, config: AppConfi
         "matches_loaded": int(len(raw_matches)),
         "comparison_subset": _comparison_subset_label(compare_on_totals_subset, compare_on_ah_subset),
         "market_modes": summaries,
-        "totals_delta_vs_h2h": _mode_delta(summaries, "h2h_totals", "h2h"),
+        "totals_delta_vs_h2h": mode_delta(summaries, "h2h_totals", "h2h"),
         "totals_delta_significance": paired_mode_significance(best_by_mode, "h2h_totals", "h2h"),
-        "asian_handicap_delta_vs_h2h_totals": _mode_delta(summaries, "h2h_totals_ah", "h2h_totals"),
+        "asian_handicap_delta_vs_h2h_totals": mode_delta(summaries, "h2h_totals_ah", "h2h_totals"),
         "asian_handicap_delta_significance": paired_mode_significance(best_by_mode, "h2h_totals_ah", "h2h_totals"),
         "fixtures": str(fixtures_path),
         "odds_json": str(odds_path),
@@ -614,12 +615,6 @@ def _write_progress(path: Path, payload: dict[str, Any]) -> None:
     path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
 
 
-def _mode_delta(summaries: dict[str, dict[str, Any]], test_mode: str, baseline_mode: str) -> float | None:
-    if test_mode not in summaries or baseline_mode not in summaries:
-        return None
-    return float(summaries[test_mode]["avg_model_points"] - summaries[baseline_mode]["avg_model_points"])
-
-
 def _comparison_subset_label(requires_totals: bool, requires_asian_handicap: bool) -> str:
     parts = ["h2h"]
     if requires_totals:
@@ -672,15 +667,3 @@ def _date_value(value: Any) -> str:
     if pd.isna(parsed):
         return ""
     return parsed.date().isoformat()
-
-
-def _float_grid(raw: str) -> list[float]:
-    if not raw:
-        return []
-    return [float(item.strip()) for item in raw.split(",") if item.strip()]
-
-
-def _string_grid(raw: str) -> list[str]:
-    if not raw:
-        return []
-    return [item.strip() for item in raw.split(",") if item.strip()]

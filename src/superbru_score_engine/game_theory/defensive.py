@@ -27,7 +27,7 @@ def _flt(value: Any, default: float = 0.0) -> float:
         if not text or text.lower() == "nan":
             return default
         return float(text)
-    except Exception:
+    except (TypeError, ValueError):
         return default
 
 

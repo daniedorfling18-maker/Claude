@@ -45,9 +45,9 @@ Schedule:
 
 Default quota posture:
 
-- skips market-odds refresh by default;
-- skips expensive final simulation by default;
-- market odds are refreshed only when manually requested with `refresh_market_odds=true`.
+- skips market-odds refresh by default (runs with `--skip-market-odds-fetch`);
+- skips expensive final simulation by default (runs with `--skip-final-simulation`);
+- market odds are refreshed only by removing `--skip-market-odds-fetch` from the workflow command, or by running the pipeline locally.
 
 This workflow does not submit picks to SuperBru.
 
@@ -88,7 +88,7 @@ Default behaviour:
 
 1. Log in to SuperBru.
 2. Scan match tabs and queue only matches inside the pre-kickoff window.
-3. Fetch a one-match odds snapshot for the queued match when `fetch_match_odds=true`.
+3. Fetch a one-match odds snapshot for the queued match.
 4. Recompute a fresh pick from that one-match snapshot and the engine config.
 5. Apply pool-position intelligence if leaderboard scraping succeeds.
 6. Submit the recomputed pick; if recompute fails, submit the committed card fallback pick.
@@ -96,10 +96,10 @@ Default behaviour:
 Expected quota posture:
 
 ```text
-Scheduled Auto Pick = about one match-scoped odds pull per kickoff, when fetch_match_odds=true.
-Refresh Locked Superbru Card = zero Odds API pulls by default.
-Manual refresh_market_odds=true = intentionally spends refresh credits.
-Manual fetch_match_odds=false = no match odds pull; submit card fallback only.
+Scheduled Auto Pick = about one match-scoped odds pull per kickoff.
+Refresh Locked Superbru Card = zero Odds API pulls (cached odds via --skip-market-odds-fetch).
+Local full pipeline without --skip-market-odds-fetch = intentionally spends refresh credits.
+Auto Pick with no odds / recompute failure = submit committed card fallback pick only.
 ```
 
 The workflow comments estimate match odds cost from the configured region and market scope. The base runner resolves unset `odds_regions` / `odds_markets` from `config.yaml`, defaulting to `eu` and `h2h,totals` when no config value exists.
@@ -127,31 +127,22 @@ Alias implementation:
 - `scripts/auto_pick_match_scoped_smart_odds.py` patches the base runner's `norm_team` to `canonical_team_key`.
 - `scripts/submit_superbru_pick_cdp_aliases.py` patches the browser JavaScript row and subtab matchers so SuperBru labels such as `USA` can match canonical card names such as `United States`.
 
-## Manual dispatch controls
+## Schedule-only operation
 
-Auto Pick manual input:
+Both workflows are schedule-only. CI forbids a `workflow_dispatch` trigger on the automated
+workflows (see the workflow-validation step in `ci.yml`), so there are no manual run-time inputs
+such as `fetch_match_odds` or `refresh_market_odds`. Each workflow's behaviour is fixed in its YAML:
 
-```text
-fetch_match_odds=true
-```
+- **Auto Pick** always performs a match-scoped odds pull and live recompute for any match inside
+  the pre-kickoff window, and falls back to the committed card pick when the recompute is unavailable.
+- **Refresh Locked Superbru Card** always runs
+  `scripts/run_daily_robust_pipeline.py --skip-final-simulation --skip-market-odds-fetch`,
+  rebuilding the card from committed cached odds and spending no Odds API credits.
 
-This is the normal live-recompute path and spends one-match Odds API credits for a queued match.
-
-Use:
-
-```text
-fetch_match_odds=false
-```
-
-when you want to avoid Odds API spend and submit only the committed card fallback pick.
-
-Refresh manual input:
-
-```text
-refresh_market_odds=true
-```
-
-spends The Odds API credits during card refresh. Leave it false unless intentionally refreshing market odds.
+To change posture, edit the workflow command or run the script locally — for example, drop
+`--skip-market-odds-fetch` to refresh market odds during a rebuild, drop `--skip-final-simulation`
+to run the final-leader simulation, or run `python scripts/run_daily_robust_pipeline.py` with no
+skip flags for the full pipeline.
 
 ## Expected Auto Pick statuses
 

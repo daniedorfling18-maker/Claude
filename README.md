@@ -101,23 +101,23 @@ Repeated result refreshes are safe — the ratings store tracks applied match ID
 
 ## Daily Production Workflow
 
-Two workflows keep the committed card fresh:
+The committed card is kept fresh by one scheduled workflow, backed by a fuller pipeline you run locally.
 
-- **`.github/workflows/refresh-locked-superbru-card.yml`** runs **twice daily** (06:05 and 14:05 UTC = 08:05 / 16:05 SAST). It rebuilds the committed locked-card CSV only, skipping the expensive final-leader simulation by default. This is the routine card refresh.
-- **`.github/workflows/daily-superbru-robust.yml`** is the full robust pipeline (market-odds validation, Oddspedia overlay, score-change notification, final-leader simulation). Its schedule is disabled — run it on demand via `workflow_dispatch` when you need the complete card rebuild. Scheduled refreshes go through the lighter workflow above.
+- **`.github/workflows/refresh-locked-superbru-card.yml`** runs **twice daily** (06:05 and 14:05 UTC = 08:05 / 16:05 SAST). It invokes `scripts/run_daily_robust_pipeline.py --skip-final-simulation --skip-market-odds-fetch`, rebuilding the committed locked-card CSV from committed cached odds. It skips the expensive final-leader simulation and spends no Odds API credits by default. This is the routine card refresh, and it is schedule-only (CI forbids a manual `workflow_dispatch` trigger).
+- **Full robust pipeline (run locally):** `python scripts/run_daily_robust_pipeline.py` with no skip flags performs the complete rebuild — market-odds fetch and validation, Oddspedia overlay, score-change notification, and the final-leader simulation. There is no scheduled GitHub workflow for the full pipeline; the scheduled refresh above is a quota-light subset of the same script. See `DAILY_AUTOMATION_README.md` for the full local flow.
 
-The full robust pipeline:
+What the full pipeline (`scripts/run_daily_robust_pipeline.py`) does:
 
-1. Fetches market odds from The Odds API (uses cached odds unless `refresh_market_odds=true`)
-2. Builds the daily Superbru card
+1. Fetches market odds from The Odds API (skipped — committed cached odds are reused — under the scheduled refresh)
+2. Validates market odds and builds the daily Superbru card
 3. Runs the Oddspedia SmartBet overlay if a captured grid exists
 4. Writes the score-change notification report
-5. Creates a GitHub issue only when the recommended scoreline has changed
-6. Uploads and commits daily outputs
+5. Runs the final-leader simulation (skipped under the scheduled refresh)
+6. Commits the refreshed outputs
 
-Required secret: `THE_ODDS_API_KEY`
+Required secret (scheduled refresh): `THE_ODDS_API_KEY`.
 
-The full local Oddspedia pipeline must be run locally to refresh the grid. The GitHub Action consumes the latest committed grid files rather than scraping Oddspedia itself (Cloudflare protection prevents remote scraping).
+The Oddspedia grid must be refreshed locally — Cloudflare protection prevents remote scraping, so the scheduled workflow consumes the latest committed grid files rather than scraping Oddspedia itself.
 
 ## Match-Scoped Auto-Pick
 

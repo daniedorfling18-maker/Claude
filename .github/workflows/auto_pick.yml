@@ -90,6 +90,7 @@ jobs:
           SUPERBRU_POOL_URL: ${{ secrets.SUPERBRU_POOL_URL }}
           THE_ODDS_API_KEY: ${{ secrets.THE_ODDS_API_KEY }}
           SUPERBRU_PLAYER_NAME: ${{ secrets.SUPERBRU_PLAYER_NAME || 'Danie' }}
+          SUPERBRU_POOL_KEYWORDS: ${{ secrets.SUPERBRU_POOL_KEYWORDS || 'Moore Infinity,FIFA WC 26,World Cup 2026' }}
         run: |
           DRY_RUN_FLAG=""
           if [ "${{ github.event.inputs.dry_run }}" = "true" ]; then
@@ -128,6 +129,7 @@ jobs:
             --pick-card-csv outputs/final_locked_picks/superbru_final_card.csv \
             --odds-lookup-window-minutes 90 \
             --leader-player "${SUPERBRU_PLAYER_NAME:-Danie}" \
+            --leaderboard-pool-keywords "${SUPERBRU_POOL_KEYWORDS:-Moore Infinity,FIFA WC 26,World Cup 2026}" \
             --leader-safe-buffer 5.0 \
             --chaser-range 8.0 \
             --headless \

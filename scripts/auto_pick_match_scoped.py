@@ -176,12 +176,38 @@ def parse_kickoff(text: str | None, ts: str | None, ref: datetime) -> datetime |
 # ─── Leaderboard scraping and pool-position intelligence ─────────────────────
 
 
+def _extract_pool_id(pool_url: str) -> str | None:
+    """Extract the p=XXXXX pool ID from a Superbru URL."""
+    m = re.search(r"[?&]p=(\d+)", pool_url)
+    return m.group(1) if m else None
+
+
 def leaderboard_url_from_pool_url(pool_url: str) -> str:
-    """Derive the leaderboard view URL from the matches pool URL."""
-    if "view=matches" in pool_url:
-        return pool_url.replace("view=matches", "view=leaderboard")
-    sep = "&" if "?" in pool_url else "?"
-    return pool_url + sep + "view=leaderboard"
+    """
+    Build the leaderboard view URL for the *same* pool as pool_url.
+
+    Always keeps the pool ID (p=XXXXX) so we never land on a different pool.
+    Handles both pool_view.php (?view=) and pool.php (?tab=) URL formats.
+    """
+    if "pool_view.php" in pool_url:
+        url = re.sub(r"view=\w+", "view=leaderboard", pool_url)
+        if "view=leaderboard" not in url:
+            sep = "&" if "?" in url else "?"
+            url = url + sep + "view=leaderboard"
+        return url
+
+    if "pool.php" in pool_url:
+        url = re.sub(r"tab=\w+", "tab=leaderboard", pool_url)
+        url = re.sub(r"#tab=\w+", "", url)
+        if "tab=leaderboard" not in url:
+            sep = "&" if "?" in url else "?"
+            url = url + sep + "tab=leaderboard"
+        return url
+
+    # Generic fallback: append view=leaderboard while preserving pool ID
+    url = re.sub(r"view=\w+", "", pool_url).rstrip("&?")
+    sep = "&" if "?" in url else "?"
+    return url + sep + "view=leaderboard"
 
 
 def _is_lb_row(row: list[str]) -> bool:
@@ -272,34 +298,105 @@ def compute_pool_standing(
     }
 
 
-async def scrape_leaderboard_in_session(page: Any, pool_url: str) -> list[dict[str, Any]]:
-    """Scrape the pool leaderboard using the already-authenticated Playwright page."""
+EXTRACT_PAGE_CONTEXT_JS = r"""
+() => ({
+  url: window.location.href,
+  title: document.title || '',
+  h1s: Array.from(document.querySelectorAll('h1,h2,h3,.pool-name,.competition-name,.pool-title'))
+        .map(e => (e.innerText || e.textContent || '').replace(/\s+/g,' ').trim())
+        .filter(t => t.length > 0),
+  bodySnippet: (document.body ? document.body.innerText : '').slice(0, 3000)
+})
+"""
+
+
+def _page_is_target_pool(context: dict[str, Any], pool_id: str | None, pool_name_keywords: list[str]) -> bool:
+    """
+    Return True only if the current page is for our specific pool.
+
+    Checks (in order):
+    1. Page URL contains the pool ID (p=XXXXX)
+    2. Page title or headings contain any of the pool_name_keywords
+    """
+    if pool_id:
+        if f"p={pool_id}" in context.get("url", ""):
+            return True
+
+    text_blob = " ".join([
+        context.get("title", ""),
+        " ".join(context.get("h1s", [])),
+        context.get("bodySnippet", "")[:500],
+    ]).lower()
+
+    return any(kw.lower() in text_blob for kw in pool_name_keywords if kw)
+
+
+async def scrape_leaderboard_in_session(
+    page: Any,
+    pool_url: str,
+    pool_name_keywords: list[str] | None = None,
+) -> list[dict[str, Any]]:
+    """
+    Scrape the leaderboard for the specific pool identified by pool_url.
+
+    Uses the pool ID (p=XXXXX) and optional pool name keywords to verify we are
+    on the right pool before accepting the scraped rows. Falls back to tab-click
+    selectors but only accepts results that pass the pool identity check.
+    """
+    pool_id = _extract_pool_id(pool_url)
+    keywords = pool_name_keywords or []
     lb_url = leaderboard_url_from_pool_url(pool_url)
-    try:
-        await page.goto(lb_url, wait_until="domcontentloaded", timeout=20000)
-        await page.wait_for_timeout(5000)
+
+    async def _scrape_and_validate(label: str) -> list[dict[str, Any]]:
+        context = await page.evaluate(EXTRACT_PAGE_CONTEXT_JS)
+        current_url = context.get("url", "")
+
+        if not _page_is_target_pool(context, pool_id, keywords):
+            print(
+                f"  leaderboard page failed pool check at {current_url!r} "
+                f"(pool_id={pool_id!r}, keywords={keywords}). Skipping."
+            )
+            return []
+
         tables = await page.evaluate(EXTRACT_TABLES_JS)
         rows = _parse_leaderboard(tables)
         if rows:
-            print(f"  leaderboard scraped from {lb_url}: {len(rows)} players")
+            print(f"  leaderboard scraped via {label}: {len(rows)} players from pool {pool_id!r}")
+        return rows
+
+    # ── Primary: navigate directly to the pool-specific leaderboard URL ────────
+    try:
+        await page.goto(lb_url, wait_until="domcontentloaded", timeout=20000)
+        await page.wait_for_timeout(5000)
+        rows = await _scrape_and_validate(f"direct URL {lb_url}")
+        if rows:
             return rows
     except Exception as exc:
-        print(f"  leaderboard URL navigation failed ({lb_url}): {exc}")
+        print(f"  leaderboard direct URL failed ({lb_url}): {exc}")
 
-    # Fallback: try tab-click selectors on whatever page we're on
+    # ── Fallback: click a leaderboard tab only if we're still on the right pool ─
+    # Re-navigate to the pool page first so tab-clicks are scoped to it.
+    try:
+        await page.goto(pool_url, wait_until="domcontentloaded", timeout=20000)
+        await page.wait_for_timeout(4000)
+    except Exception as exc:
+        print(f"  could not reload pool page for tab-click fallback: {exc}")
+        return []
+
     for sel in [
+        f"a[href*='p={pool_id}'][href*='leaderboard']" if pool_id else "",
+        f"a[href*='p={pool_id}'][href*='standings']" if pool_id else "",
         "a[href*='leaderboard']", "a[href*='standings']",
         "[data-tab='leaderboard']", "[data-tab='standings']",
         "a:has-text('Leaderboard')", "a:has-text('Standings')",
-        "li:has-text('Leaderboard') a", ".tab:has-text('Leaderboard')",
     ]:
+        if not sel:
+            continue
         try:
             await page.click(sel, timeout=2500)
             await page.wait_for_timeout(4000)
-            tables = await page.evaluate(EXTRACT_TABLES_JS)
-            rows = _parse_leaderboard(tables)
+            rows = await _scrape_and_validate(f"tab-click {sel!r}")
             if rows:
-                print(f"  leaderboard scraped via tab click ({sel}): {len(rows)} players")
                 return rows
         except Exception:
             continue
@@ -907,9 +1004,14 @@ async def scan_superbru_matches(
         # ── Leaderboard scrape (reuses auth session, no extra login) ──────────
         skip_lb = getattr(args, "skip_leaderboard", False)
         leader_player = getattr(args, "leader_player", "")
+        pool_name_keywords: list[str] = []
+        raw_kw = getattr(args, "leaderboard_pool_keywords", "") or ""
+        if raw_kw:
+            pool_name_keywords = [k.strip() for k in raw_kw.split(",") if k.strip()]
+
         if not skip_lb and leader_player:
             try:
-                lb_rows = await scrape_leaderboard_in_session(page, args.pool_url)
+                lb_rows = await scrape_leaderboard_in_session(page, args.pool_url, pool_name_keywords)
                 if lb_rows:
                     chaser_range = float(getattr(args, "chaser_range", 8.0))
                     pool_standing = compute_pool_standing(lb_rows, leader_player, chaser_range)
@@ -1154,6 +1256,15 @@ def build_parser() -> argparse.ArgumentParser:
         "--skip-leaderboard",
         action="store_true",
         help="Skip the leaderboard scrape; picks use the engine strategy_mode from config.",
+    )
+    parser.add_argument(
+        "--leaderboard-pool-keywords",
+        default=os.environ.get("SUPERBRU_POOL_KEYWORDS", "Moore Infinity,FIFA WC 26,World Cup 2026"),
+        help=(
+            "Comma-separated keywords that must appear in the leaderboard page to confirm it is "
+            "the correct pool. Prevents accidentally reading another pool's standings. "
+            "Default: 'Moore Infinity,FIFA WC 26,World Cup 2026'."
+        ),
     )
     return parser
 

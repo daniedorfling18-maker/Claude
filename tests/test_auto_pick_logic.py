@@ -318,6 +318,35 @@ def test_inject_oddspedia_grid_missing_file_returns_unchanged():
     assert injected is match
 
 
+_derive_risk_tier = _mod._derive_risk_tier
+_derive_confidence_tier = _mod._derive_confidence_tier
+
+
+def test_derive_tiers_match_report_outputs_definitions():
+    # The defensive overlay must see the same tier semantics as predictions.csv / the card.
+    from superbru_score_engine.report.outputs import _confidence_tier, _risk_tier
+
+    class _Rec:
+        def __init__(self, p_outcome):
+            self.p_outcome = p_outcome
+
+    class _Cand:
+        def __init__(self, ev):
+            self.expected_points = ev
+
+    class _Pred:
+        def __init__(self, p_outcome, ev_gap):
+            self.recommended = _Rec(p_outcome)
+            self.top_candidates = (_Cand(1.0), _Cand(1.0 - ev_gap))
+
+    for p_outcome in (0.40, 0.55, 0.60, 0.65, 0.80):
+        # risk tier depends only on p_outcome
+        assert _derive_risk_tier(p_outcome) == _risk_tier(p_outcome)
+        for ev_gap in (0.0, 0.015, 0.025, 0.05):
+            pred = _Pred(p_outcome, ev_gap)
+            assert _derive_confidence_tier(p_outcome, ev_gap) == _confidence_tier(pred)
+
+
 def test_inject_oddspedia_grid_canonical_alias_match():
     # Odds feed canonicalises "USA" -> "United States"; the grid CSV still says "USA".
     # The injection must still match via canonical_team_key, not bare alnum fold.

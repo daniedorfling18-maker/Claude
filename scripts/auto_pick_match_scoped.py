@@ -415,20 +415,23 @@ async def scrape_leaderboard_in_session(
 # ─── Defensive row builder for game_theory.defensive ─────────────────────────
 
 
-def _derive_risk_tier(diag: dict[str, Any]) -> str:
-    stability = float(diag.get("sensitivity_stability") or 1.0)
-    if stability >= 0.85:
+# These mirror report/outputs.py _risk_tier / _confidence_tier exactly. The committed
+# card does NOT carry risk_tier/confidence_tier columns, so these derivations are the
+# actual production inputs to the defensive overlay (not a rare fallback). Keeping the
+# definitions identical to report/outputs.py ensures the lead-defence model sees the same
+# tier semantics that describe the match everywhere else (predictions.csv, the card).
+def _derive_risk_tier(p_outcome: float) -> str:
+    if p_outcome >= 0.65:
         return "low"
-    if stability >= 0.65:
+    if p_outcome >= 0.55:
         return "medium"
     return "high"
 
 
-def _derive_confidence_tier(recommended: Any) -> str:
-    p_exact = float(getattr(recommended, "p_exact", 0.0))
-    if p_exact >= 0.14:
+def _derive_confidence_tier(p_outcome: float, ev_gap: float) -> str:
+    if p_outcome >= 0.65 and ev_gap >= 0.025:
         return "strong"
-    if p_exact >= 0.09:
+    if p_outcome >= 0.55 or ev_gap >= 0.015:
         return "medium"
     return "fragile"
 
@@ -453,8 +456,9 @@ def build_defensive_row(
     if len(prediction.top_candidates) >= 2:
         ev_gap = float(prediction.top_candidates[0].expected_points - prediction.top_candidates[1].expected_points)
 
-    risk_tier = txt(card_row.get("risk_tier") if card_row else "") or _derive_risk_tier(diag)
-    confidence_tier = txt(card_row.get("confidence_tier") if card_row else "") or _derive_confidence_tier(prediction.recommended)
+    p_outcome = float(getattr(prediction.recommended, "p_outcome", 0.0))
+    risk_tier = txt(card_row.get("risk_tier") if card_row else "") or _derive_risk_tier(p_outcome)
+    confidence_tier = txt(card_row.get("confidence_tier") if card_row else "") or _derive_confidence_tier(p_outcome, ev_gap)
 
     return {
         "home_team": prediction.home_team,

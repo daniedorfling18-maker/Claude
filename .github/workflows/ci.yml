@@ -2,7 +2,12 @@ name: CI
 
 on:
   push:
+    paths-ignore:
+      - 'outputs/**'
+      - 'docs/superbru-automation-context.md'
   pull_request:
+    paths-ignore:
+      - 'outputs/**'
 
 permissions:
   contents: read

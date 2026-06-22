@@ -878,14 +878,15 @@ def main() -> int:
         flush=True,
     )
 
-    geo = check_geoblock(config)
-    print(f"geoblock={geo}", flush=True)
-
     live_executor = None
     if config.mode == "live":
         if not config.execute_live:
             raise RuntimeError("PM_MODE=live requires POLYMARKET_EXECUTE_LIVE=true")
+        geo = check_geoblock(config)
+        print(f"geoblock={geo}", flush=True)
         live_executor = LiveExecutor(config)
+    else:
+        print("geoblock check skipped because this run is not live execution", flush=True)
 
     deadline = time.monotonic() + max(1, config.scan_seconds)
     scans = 0

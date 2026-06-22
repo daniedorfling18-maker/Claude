@@ -511,15 +511,24 @@ def _inject_oddspedia_grid(
         print(f"  WARNING: Could not load Oddspedia grid ({grid_csv}): {exc}")
         return match
 
-    home_n = norm_team(match.home_team)
-    away_n = norm_team(match.away_team)
+    # Match on the engine's canonical team key, NOT a bare alnum fold. normalise_the_odds_api_events
+    # canonicalises team names (e.g. "USA" -> "United States", "Curaçao" -> "Curacao"), while the
+    # Oddspedia grid CSV carries raw names. canonical_team_key applies the same alias/unicode
+    # normalisation the rest of the engine (devig.py) uses, so alias-divergent teams still match.
+    try:
+        from superbru_score_engine.model.team_names import canonical_team_key as _key
+    except ImportError:
+        _key = norm_team  # last-resort fallback; bare fold still matches identical spellings
+
+    home_n = _key(match.home_team)
+    away_n = _key(match.away_team)
     swapped = False
 
     def _exact_rows(h: str, a: str) -> list[dict[str, str]]:
         return [
             row for row in rows
-            if norm_team(row.get("home_team")) == h
-            and norm_team(row.get("away_team")) == a
+            if _key(row.get("home_team")) == h
+            and _key(row.get("away_team")) == a
             and row.get("score_bucket", "").strip().lower() == "exact"
         ]
 

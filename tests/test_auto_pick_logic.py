@@ -318,6 +318,31 @@ def test_inject_oddspedia_grid_missing_file_returns_unchanged():
     assert injected is match
 
 
+def test_inject_oddspedia_grid_canonical_alias_match():
+    # Odds feed canonicalises "USA" -> "United States"; the grid CSV still says "USA".
+    # The injection must still match via canonical_team_key, not bare alnum fold.
+    with tempfile.TemporaryDirectory() as tmpdir:
+        csv_path = Path(tmpdir) / "grid.csv"
+        _write_grid_csv(csv_path, [
+            _grid_row("USA", "Australia", "2-0", 12.0),
+            _grid_row("USA", "Australia", "1-0", 10.0),
+        ])
+        match = _dummy_match("United States", "Australia")  # canonicalised home name
+        injected = _inject_oddspedia_grid(match, {}, csv_path)
+        assert "correct_score" in injected.markets
+        assert len(injected.markets["correct_score"][0].outcomes) == 2
+
+
+def test_inject_oddspedia_grid_unicode_alias_match():
+    # "Curaçao" (odds, with cedilla) vs "Curacao" (grid). canonical_team_key folds both.
+    with tempfile.TemporaryDirectory() as tmpdir:
+        csv_path = Path(tmpdir) / "grid.csv"
+        _write_grid_csv(csv_path, [_grid_row("Curacao", "Ivory Coast", "0-2", 9.0)])
+        match = _dummy_match("Curaçao", "Ivory Coast")
+        injected = _inject_oddspedia_grid(match, {}, csv_path)
+        assert "correct_score" in injected.markets
+
+
 def test_inject_oddspedia_grid_swapped_orientation():
     with tempfile.TemporaryDirectory() as tmpdir:
         csv_path = Path(tmpdir) / "grid.csv"

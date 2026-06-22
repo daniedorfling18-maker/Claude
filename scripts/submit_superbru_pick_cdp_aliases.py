@@ -1,13 +1,17 @@
 """Alias-aware SuperBru submitter wrapper.
 
-This delegates to `submit_superbru_pick_cdp.py` but replaces its in-browser
-match finders with alias-aware versions. It allows canonical names from the
-locked card, such as "United States", to match SuperBru labels such as "USA".
+This delegates to `submit_superbru_pick_cdp.py` and replaces its in-browser
+match finders with safer alias-aware versions. A SuperBru row or tab must match
+both teams before it is selected, and short aliases are token-matched instead of
+blind substring-matched.
 """
 from __future__ import annotations
 
 import importlib.util
+import json
 from pathlib import Path
+
+from team_name_aliases import TEAM_ALIASES
 
 
 def load_submitter_module():
@@ -21,118 +25,32 @@ def load_submitter_module():
 
 
 submitter = load_submitter_module()
+ALIASES_JSON = json.dumps({key: sorted(values) for key, values in TEAM_ALIASES.items()}, sort_keys=True)
 
-# JS: find a match row by canonical team name or any known alias, then locate score inputs.
-FIND_ROW_JS = r"""
-([homeTeam, awayTeam]) => {
-  const TEAM_ALIASES = {
-    algeria: ['algeria','alg','dza'],
-    argentina: ['argentina','arg'],
-    australia: ['australia','aus'],
-    austria: ['austria','aut'],
-    belgium: ['belgium','bel'],
-    bosniaherzegovina: ['bosniaandherzegovina','bosniaherzegovina','bosnia','bih','bhi'],
-    brazil: ['brazil','bra'],
-    canada: ['canada','can'],
-    capeverde: ['capeverde','caboverde','cpv'],
-    colombia: ['colombia','col'],
-    croatia: ['croatia','cro'],
-    curacao: ['curacao','cur','cuw'],
-    czechia: ['czechia','czechrepublic','cze'],
-    drcongo: ['drcongo','drc','cod','congodr','democraticrepublicofthecongo','demrepcongo'],
-    ecuador: ['ecuador','ecu'],
-    egypt: ['egypt','egy'],
-    england: ['england','eng'],
-    france: ['france','fra'],
-    germany: ['germany','ger','deutschland'],
-    ghana: ['ghana','gha'],
-    haiti: ['haiti','hti','hai'],
-    iran: ['iran','iriran','iri','irn'],
-    iraq: ['iraq','irq'],
-    ivorycoast: ['ivorycoast','cotedivoire','civ','ci'],
-    japan: ['japan','jpn'],
-    jordan: ['jordan','jor'],
-    mexico: ['mexico','mex'],
-    morocco: ['morocco','mar'],
-    netherlands: ['netherlands','holland','ned','nld'],
-    newzealand: ['newzealand','nzl'],
-    norway: ['norway','nor'],
-    panama: ['panama','pan'],
-    paraguay: ['paraguay','par'],
-    portugal: ['portugal','por'],
-    qatar: ['qatar','qat'],
-    saudiarabia: ['saudiarabia','ksa','sau'],
-    scotland: ['scotland','sco'],
-    senegal: ['senegal','sen'],
-    southafrica: ['southafrica','rsa','zaf'],
-    southkorea: ['southkorea','korearepublic','korea','kor'],
-    spain: ['spain','esp'],
-    sweden: ['sweden','swe'],
-    switzerland: ['switzerland','sui','che'],
-    tunisia: ['tunisia','tun'],
-    turkey: ['turkey','turkiye','tur'],
-    unitedstates: ['unitedstates','unitedstatesofamerica','usa','us','america'],
-    uruguay: ['uruguay','uru'],
-    uzbekistan: ['uzbekistan','uzb'],
-  };
-  function norm(s) {
-    return (s || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[^a-z0-9]/g, '');
-  }
-  function variants(team) {
-    const n = norm(team);
-    for (const [canonical, aliases] of Object.entries(TEAM_ALIASES)) {
-      if (canonical === n || aliases.includes(n)) {
-        return Array.from(new Set([n, canonical, ...aliases].filter(Boolean)));
-      }
-    }
-    return [n].filter(Boolean);
-  }
-  function containsAny(text, candidates) {
-    return candidates.some(candidate => candidate && text.includes(candidate));
-  }
 
-  const homeVariants = variants(homeTeam);
-  const awayVariants = variants(awayTeam);
-
-  const all = Array.from(document.querySelectorAll('tr, li, div, section, article'));
-  let matchRow = null;
-  for (const el of all) {
-    const t = norm(el.innerText || el.textContent || '');
-    if (containsAny(t, homeVariants) && containsAny(t, awayVariants) && t.length < 2000) {
+def _team_js_body(find_row: bool) -> str:
+    selector = "tr, li, div, section, article" if find_row else "[data-brutip][data-bru-tab]"
+    text_expr = "el.innerText || el.textContent || ''" if find_row else "el.getAttribute('data-brutip') || ''"
+    prefix = "" if find_row else "const controls = Array.from(document.querySelectorAll('[data-brutip][data-bru-tab]'));\n  "
+    iterator = "Array.from(document.querySelectorAll('tr, li, div, section, article'))" if find_row else "controls"
+    if find_row:
+        success = """
       if (!matchRow || (el.innerText || '').length < (matchRow.innerText || '').length) {
         matchRow = el;
-      }
-    }
-  }
+      }"""
+        after_loop = """
   if (!matchRow) {
-    return {
-      found: false,
-      reason: 'no element contains both team names or aliases',
-      homeVariants,
-      awayVariants,
-    };
+    return {found: false, reason: 'no element contains both team names or safe aliases', homeVariants, awayVariants};
   }
-
   const inputs = Array.from(matchRow.querySelectorAll('input, select')).map(el => ({
-    tag: el.tagName.toLowerCase(),
-    type: el.type || '',
-    name: el.name || '',
-    id: el.id || '',
-    className: el.className || '',
-    placeholder: el.placeholder || '',
-    value: el.value || '',
-    visible: el.offsetParent !== null,
-    maxlength: el.maxLength || ''
+    tag: el.tagName.toLowerCase(), type: el.type || '', name: el.name || '', id: el.id || '',
+    className: el.className || '', placeholder: el.placeholder || '', value: el.value || '',
+    visible: el.offsetParent !== null, maxlength: el.maxLength || ''
   }));
-
   const buttons = Array.from(matchRow.querySelectorAll('button, input[type=submit], a[class*=save], a[class*=submit]')).map(b => ({
-    tag: b.tagName.toLowerCase(),
-    type: b.type || '',
-    text: (b.innerText || b.value || b.textContent || '').trim().slice(0, 80),
-    id: b.id || '',
-    className: b.className || ''
+    tag: b.tagName.toLowerCase(), type: b.type || '', text: (b.innerText || b.value || b.textContent || '').trim().slice(0, 80),
+    id: b.id || '', className: b.className || ''
   }));
-
   return {
     found: true,
     rowTag: matchRow.tagName,
@@ -143,65 +61,59 @@ FIND_ROW_JS = r"""
     matchedAwayAliases: awayVariants,
     inputs,
     buttons
-  };
-}
-"""
+  };"""
+    else:
+        success = """
+      el.click();
+      return el.getAttribute('data-bru-tab') + ': ' + el.getAttribute('data-brutip');"""
+        after_loop = """
+  return null;"""
 
-# JS: click the subtab using canonical team name or aliases before finding the row.
-CLICK_SUBTAB_JS = r"""
-([homeTeam, awayTeam]) => {
-  const TEAM_ALIASES = {
-    algeria: ['algeria','alg','dza'], argentina: ['argentina','arg'], australia: ['australia','aus'], austria: ['austria','aut'],
-    belgium: ['belgium','bel'], bosniaherzegovina: ['bosniaandherzegovina','bosniaherzegovina','bosnia','bih','bhi'], brazil: ['brazil','bra'], canada: ['canada','can'],
-    capeverde: ['capeverde','caboverde','cpv'], colombia: ['colombia','col'], croatia: ['croatia','cro'], curacao: ['curacao','cur','cuw'],
-    czechia: ['czechia','czechrepublic','cze'], drcongo: ['drcongo','drc','cod','congodr','democraticrepublicofthecongo','demrepcongo'], ecuador: ['ecuador','ecu'], egypt: ['egypt','egy'],
-    england: ['england','eng'], france: ['france','fra'], germany: ['germany','ger','deutschland'], ghana: ['ghana','gha'], haiti: ['haiti','hti','hai'],
-    iran: ['iran','iriran','iri','irn'], iraq: ['iraq','irq'], ivorycoast: ['ivorycoast','cotedivoire','civ','ci'], japan: ['japan','jpn'], jordan: ['jordan','jor'],
-    mexico: ['mexico','mex'], morocco: ['morocco','mar'], netherlands: ['netherlands','holland','ned','nld'], newzealand: ['newzealand','nzl'], norway: ['norway','nor'],
-    panama: ['panama','pan'], paraguay: ['paraguay','par'], portugal: ['portugal','por'], qatar: ['qatar','qat'], saudiarabia: ['saudiarabia','ksa','sau'],
-    scotland: ['scotland','sco'], senegal: ['senegal','sen'], southafrica: ['southafrica','rsa','zaf'], southkorea: ['southkorea','korearepublic','korea','kor'],
-    spain: ['spain','esp'], sweden: ['sweden','swe'], switzerland: ['switzerland','sui','che'], tunisia: ['tunisia','tun'], turkey: ['turkey','turkiye','tur'],
-    unitedstates: ['unitedstates','unitedstatesofamerica','usa','us','america'], uruguay: ['uruguay','uru'], uzbekistan: ['uzbekistan','uzb'],
-  };
-  function norm(s) {
-    return (s || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[^a-z0-9]/g, '');
-  }
-  function variants(team) {
-    const n = norm(team);
-    for (const [canonical, aliases] of Object.entries(TEAM_ALIASES)) {
-      if (canonical === n || aliases.includes(n)) return Array.from(new Set([n, canonical, ...aliases].filter(Boolean)));
-    }
+    return f"""
+([homeTeam, awayTeam]) => {{
+  const TEAM_ALIASES = {ALIASES_JSON};
+  function ascii(s) {{
+    return (s || '').normalize('NFD').replace(/[\\u0300-\\u036f]/g, '').toLowerCase();
+  }}
+  function compact(s) {{
+    return ascii(s).replace(/[^a-z0-9]/g, '');
+  }}
+  function tokens(s) {{
+    return new Set(ascii(s).split(/[^a-z0-9]+/).filter(Boolean));
+  }}
+  function variants(team) {{
+    const n = compact(team);
+    for (const [canonical, aliases] of Object.entries(TEAM_ALIASES)) {{
+      if (canonical === n || aliases.includes(n)) {{
+        return Array.from(new Set([n, canonical, ...aliases].filter(Boolean)));
+      }}
+    }}
     return [n].filter(Boolean);
-  }
-  function containsAny(text, candidates) {
-    return candidates.some(candidate => candidate && text.includes(candidate));
-  }
-
+  }}
+  function containsTeam(rawText, candidates) {{
+    const c = compact(rawText);
+    const t = tokens(rawText);
+    return candidates.some(candidate => {{
+      if (!candidate) return false;
+      if (t.has(candidate) || c === candidate) return true;
+      return candidate.length > 3 && c.includes(candidate);
+    }});
+  }}
   const homeVariants = variants(homeTeam);
   const awayVariants = variants(awayTeam);
-  const controls = Array.from(document.querySelectorAll('[data-brutip][data-bru-tab]'));
-
-  for (const c of controls) {
-    const tip = norm(c.getAttribute('data-brutip') || '');
-    if (containsAny(tip, homeVariants) && containsAny(tip, awayVariants)) {
-      c.click();
-      return c.getAttribute('data-bru-tab') + ': ' + c.getAttribute('data-brutip');
-    }
-  }
-
-  for (const c of controls) {
-    const tip = norm(c.getAttribute('data-brutip') || '');
-    if (containsAny(tip, homeVariants) || containsAny(tip, awayVariants)) {
-      c.click();
-      return c.getAttribute('data-bru-tab') + ': ' + c.getAttribute('data-brutip');
-    }
-  }
-  return null;
-}
+  {prefix}let matchRow = null;
+  for (const el of {iterator}) {{
+    const raw = {text_expr};
+    const c = compact(raw);
+    if (containsTeam(raw, homeVariants) && containsTeam(raw, awayVariants) && c.length < 2000) {{{success}
+    }}
+  }}{after_loop}
+}}
 """
 
-submitter.FIND_ROW_JS = FIND_ROW_JS
-submitter.CLICK_SUBTAB_JS = CLICK_SUBTAB_JS
+
+submitter.FIND_ROW_JS = _team_js_body(find_row=True)
+submitter.CLICK_SUBTAB_JS = _team_js_body(find_row=False)
 
 build_parser = submitter.build_parser
 run = submitter.run

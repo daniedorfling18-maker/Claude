@@ -18,3 +18,28 @@ services:
       - ./inputs/polymarket:/app/inputs/polymarket:ro
     command: ["python", "scripts/polymarket_mispricing_bot.py"]
     restart: unless-stopped
+
+  # Post-scan step: runs the long/short engine right after each bot snapshot.
+  # Shares the outputs volume, watches market_snapshot.csv, and re-runs on every change.
+  # Stays dry-run here (PM_MODE=dry_run); the engine only places live maker bids when
+  # PM_MODE=live + POLYMARKET_EXECUTE_LIVE=true and a non-geoblocked IP/credentials exist.
+  polymarket-long-short:
+    build:
+      context: .
+      dockerfile: Dockerfile.monitor
+    container_name: polymarket-long-short
+    env_file:
+      - .env
+    environment:
+      PM_MODE: dry_run
+      POLYMARKET_EXECUTE_LIVE: "false"
+      POLYMARKET_OUTPUT_DIR: ${POLYMARKET_OUTPUT_DIR:-outputs/polymarket}
+      LONG_SHORT_POLL_SECONDS: ${LONG_SHORT_POLL_SECONDS:-3}
+      LONG_SHORT_MAX_LIVE_ORDERS: ${LONG_SHORT_MAX_LIVE_ORDERS:-3}
+    volumes:
+      - ./outputs:/app/outputs
+      - ./inputs/polymarket:/app/inputs/polymarket:ro
+    command: ["sh", "scripts/run_long_short_loop.sh"]
+    depends_on:
+      - polymarket-monitor
+    restart: unless-stopped

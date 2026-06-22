@@ -28,6 +28,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--fixtures", default="data/fixtures_real.csv")
     parser.add_argument("--odds-json", default="data/odds_snapshot_real.json")
     parser.add_argument("--predictions-csv", default="outputs/latest/predictions.csv")
+    parser.add_argument("--leaderboard-csv", default="inputs/pool_leaderboard.csv")
+    parser.add_argument("--chaser-profiles-csv", default="inputs/chaser_profiles.csv")
     parser.add_argument("--prices-csv", default="inputs/polymarket_flat_stake_prices.csv")
     parser.add_argument("--stake-usdc", type=float, default=10.0)
     parser.add_argument("--category", default="sports", help="Default Polymarket fee category when the prices CSV has no category column.")

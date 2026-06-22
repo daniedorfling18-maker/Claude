@@ -1,6 +1,7 @@
 name: Refresh Locked Superbru Card
 
 on:
+  workflow_dispatch:
   schedule:
     # Twice daily UTC refresh. This updates the committed locked-card CSV only;
     # Auto Pick remains the scheduled browser submitter.

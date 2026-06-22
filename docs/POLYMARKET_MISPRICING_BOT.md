@@ -178,3 +178,26 @@ Honest expectation: pre-match WC odds barely move, so the **directional** edge i
 market-making the spread (+ Polymarket maker rebates) is the market-neutral capital engine.
 Graduate it only after the dry-run `long_short_intents.csv` looks sane for several sessions,
 and reconcile any live fills against your wallet before increasing size.
+
+### Live model fairs (directional) + learned calibration
+
+Directional signals need a model fair per token. `scripts/build_polymarket_model_probabilities.py`
+joins the model's `outputs/backtesting/prediction_log.csv` to the live `market_snapshot.csv` by
+parsing each market question, applies the learned calibration, and writes
+`model_probabilities.csv` keyed by `token_id`. The monitor's long/short loop runs it before the
+engine on every snapshot, so the bot's next scan fills `fair_probability` (the prediction log is
+produced by the SuperBru pipeline; without it you get market-making only).
+
+`scripts/learn_edge.py` is the learning step. It builds `(predicted_probability, outcome)` pairs
+from every completed match, fits a Platt calibration (shrunk to identity on small samples), and
+writes `outputs/backtesting/edge_calibration.json` plus a rolling `edge_learning_history.csv` so
+you can watch calibration improve as results accrue. The converter applies that file automatically.
+Re-run it whenever new results land (e.g. as a daily step), not on every scan:
+
+```bash
+python scripts/learn_edge.py     # refit calibration from the latest results
+```
+
+Current fit (17 matches): it learned that favourites were **under**-priced (predicted 65% vs
+observed 76.5%) and sharpens probabilities accordingly — exactly the edge-over-time loop, which
+tightens as the sample grows.

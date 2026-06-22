@@ -13,6 +13,8 @@ services:
       POLYMARKET_SCAN_INTERVAL_SECONDS: ${POLYMARKET_SCAN_INTERVAL_SECONDS:-5}
       POLYMARKET_SCAN_SECONDS: ${POLYMARKET_SCAN_SECONDS:-270}
       POLYMARKET_OUTPUT_DIR: ${POLYMARKET_OUTPUT_DIR:-outputs/polymarket}
+      # Reads the converter's output (writable volume), so the long/short loop can refresh fairs.
+      POLYMARKET_MODEL_PROBABILITIES_CSV: ${POLYMARKET_MODEL_PROBABILITIES_CSV:-outputs/polymarket/model_probabilities.csv}
     volumes:
       - ./outputs:/app/outputs
       - ./inputs/polymarket:/app/inputs/polymarket:ro
@@ -34,6 +36,7 @@ services:
       PM_MODE: dry_run
       POLYMARKET_EXECUTE_LIVE: "false"
       POLYMARKET_OUTPUT_DIR: ${POLYMARKET_OUTPUT_DIR:-outputs/polymarket}
+      MODEL_PROBS_OUT: ${MODEL_PROBS_OUT:-outputs/polymarket/model_probabilities.csv}
       LONG_SHORT_POLL_SECONDS: ${LONG_SHORT_POLL_SECONDS:-3}
       LONG_SHORT_MAX_LIVE_ORDERS: ${LONG_SHORT_MAX_LIVE_ORDERS:-3}
     volumes:

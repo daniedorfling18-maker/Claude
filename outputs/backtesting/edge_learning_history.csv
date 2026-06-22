@@ -1,0 +1,2 @@
+fitted_at_utc,matches,outcome_samples,a,b,brier_before,brier_after,log_loss_before,log_loss_after,favourite_predicted,favourite_observed
+2026-06-22T14:59:47.851521+00:00,17,51,1.2948,0.1308,0.1388,0.1357,0.4361,0.4246,0.6496,0.7647

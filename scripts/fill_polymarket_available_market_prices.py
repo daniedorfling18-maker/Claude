@@ -5,6 +5,7 @@ import csv
 import json
 import re
 import time
+import unicodedata
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlencode
@@ -16,6 +17,18 @@ import pandas as pd
 GAMMA_SEARCH_URL = "https://gamma-api.polymarket.com/public-search"
 CLOB_PRICE_URL = "https://clob.polymarket.com/price"
 MATCH_RESULT_SELECTIONS = ("home_win", "draw", "away_win")
+
+TEAM_ALIASES_RAW: dict[str, tuple[str, ...]] = {
+    "Bosnia & Herzegovina": ("Bosnia and Herzegovina", "Bosnia-Herzegovina", "Bosnia"),
+    "Cape Verde": ("Cabo Verde",),
+    "Curacao": ("Curaçao",),
+    "Czech Republic": ("Czechia",),
+    "DR Congo": ("Democratic Republic of Congo", "Congo DR", "Congo-Kinshasa", "D R Congo"),
+    "Ivory Coast": ("Cote d'Ivoire", "Côte d'Ivoire", "Cote d Ivoire"),
+    "South Korea": ("Korea Republic", "Republic of Korea"),
+    "United States": ("USA", "U.S.A.", "USMNT", "U.S. Men's National Team"),
+    "Netherlands": ("Holland",),
+}
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -59,14 +72,51 @@ def parse_jsonish(value: Any) -> list[Any]:
 
 
 def norm_text(value: Any) -> str:
-    return re.sub(r"[^a-z0-9]+", " ", str(value or "").lower()).strip()
+    text = unicodedata.normalize("NFKD", str(value or ""))
+    text = "".join(ch for ch in text if not unicodedata.combining(ch))
+    return re.sub(r"[^a-z0-9]+", " ", text.lower()).strip()
+
+
+def team_alias_map() -> dict[str, set[str]]:
+    aliases: dict[str, set[str]] = {}
+    for canonical, raw_aliases in TEAM_ALIASES_RAW.items():
+        terms = {norm_text(canonical), *(norm_text(alias) for alias in raw_aliases)}
+        terms = {term for term in terms if term}
+        for term in terms:
+            aliases[term] = set(terms)
+    return aliases
+
+
+TEAM_ALIASES = team_alias_map()
+
+
+def team_terms(team: str) -> set[str]:
+    base = norm_text(team)
+    if not base:
+        return set()
+    return {base, *TEAM_ALIASES.get(base, set())}
+
+
+def team_query_terms(team: str) -> list[str]:
+    base = norm_text(team)
+    terms = team_terms(team)
+    if base:
+        ordered = [base] + sorted(term for term in terms if term != base and len(term) > 2)
+    else:
+        ordered = sorted(term for term in terms if len(term) > 2)
+    # Avoid overly broad search queries such as just "korea" or "bosnia" unless they are the only option.
+    broad = {"korea", "bosnia", "congo"}
+    filtered = [term for term in ordered if term not in broad]
+    return filtered or ordered
+
+
+def text_contains_team(text: str, team: str) -> bool:
+    text_n = norm_text(text)
+    return any(term and term in text_n for term in team_terms(team))
 
 
 def team_match(text: str, home_team: str, away_team: str) -> bool:
-    text_n = norm_text(text)
-    home_n = norm_text(home_team)
-    away_n = norm_text(away_team)
-    return home_n in text_n and away_n in text_n
+    return text_contains_team(text, home_team) and text_contains_team(text, away_team)
 
 
 def requested_market_types(raw: str) -> set[str]:
@@ -86,21 +136,37 @@ def get_taker_buy_price(token_id: str, sleep_seconds: float) -> tuple[str, str]:
 def outcome_selection(outcome: str, market_text: str, home_team: str, away_team: str) -> str:
     outcome_n = norm_text(outcome)
     market_n = norm_text(market_text)
-    home_n = norm_text(home_team)
-    away_n = norm_text(away_team)
+    home_terms = team_terms(home_team)
+    away_terms = team_terms(away_team)
 
     if outcome_n in {"draw", "tie"} or "draw" in outcome_n:
         return "draw"
-    if home_n and home_n in outcome_n:
+    if any(term and term in outcome_n for term in home_terms):
         return "home_win"
-    if away_n and away_n in outcome_n:
+    if any(term and term in outcome_n for term in away_terms):
         return "away_win"
 
     if outcome_n == "yes":
         if "draw" in market_n or "tie" in market_n:
             return "draw"
-        home_win_terms = [f"{home_n} win", f"{home_n} to win", f"will {home_n} win"]
-        away_win_terms = [f"{away_n} win", f"{away_n} to win", f"will {away_n} win"]
+        home_win_terms = [
+            f"{term} win" for term in home_terms
+        ] + [
+            f"{term} to win" for term in home_terms
+        ] + [
+            f"will {term} win" for term in home_terms
+        ] + [
+            f"{term} beats" for term in home_terms
+        ]
+        away_win_terms = [
+            f"{term} win" for term in away_terms
+        ] + [
+            f"{term} to win" for term in away_terms
+        ] + [
+            f"will {term} win" for term in away_terms
+        ] + [
+            f"{term} beats" for term in away_terms
+        ]
         if any(term in market_n for term in home_win_terms):
             return "home_win"
         if any(term in market_n for term in away_win_terms):
@@ -153,47 +219,65 @@ def extract_market_tokens(market: dict[str, Any], home_team: str, away_team: str
     return found
 
 
-def find_match_result_prices(home_team: str, away_team: str, *, limit_per_type: int, sleep_seconds: float) -> dict[str, dict[str, Any]]:
-    query = f"{home_team} {away_team}"
-    search = http_json(
-        GAMMA_SEARCH_URL,
-        {
-            "q": query,
-            "limit_per_type": limit_per_type,
-            "events_status": "active",
-            "search_profiles": "false",
-            "search_tags": "false",
-            "keep_closed_markets": 0,
-        },
-    )
+def search_queries(home_team: str, away_team: str) -> list[str]:
+    home_terms = team_query_terms(home_team)
+    away_terms = team_query_terms(away_team)
+    queries: list[str] = []
+    for home in home_terms[:3]:
+        for away in away_terms[:3]:
+            queries.append(f"{home} {away}")
+            queries.append(f"{home} vs {away}")
+    deduped: list[str] = []
+    seen: set[str] = set()
+    for query in queries:
+        if query not in seen:
+            seen.add(query)
+            deduped.append(query)
+    return deduped
 
+
+def find_match_result_prices(home_team: str, away_team: str, *, limit_per_type: int, sleep_seconds: float) -> dict[str, dict[str, Any]]:
     found: dict[str, dict[str, Any]] = {}
     debug: list[str] = []
 
-    for event in search.get("events") or []:
-        event_text = " ".join(
-            str(event.get(key, ""))
-            for key in ["title", "subtitle", "slug", "description", "ticker"]
+    for query in search_queries(home_team, away_team):
+        search = http_json(
+            GAMMA_SEARCH_URL,
+            {
+                "q": query,
+                "limit_per_type": limit_per_type,
+                "events_status": "active",
+                "search_profiles": "false",
+                "search_tags": "false",
+                "keep_closed_markets": 0,
+            },
         )
-        if not team_match(event_text, home_team, away_team):
-            debug.append(f"event_skip_team:{event.get('title')}")
-            continue
 
-        for market in event.get("markets") or []:
-            if market.get("closed") is True or market.get("active") is False:
+        for event in search.get("events") or []:
+            event_text = " ".join(
+                str(event.get(key, ""))
+                for key in ["title", "subtitle", "slug", "description", "ticker"]
+            )
+            if not team_match(event_text, home_team, away_team):
+                debug.append(f"event_skip_team:{event.get('title')}")
                 continue
-            market_tokens = extract_market_tokens(market, home_team, away_team, sleep_seconds)
-            for selection, token in market_tokens.items():
-                found.setdefault(
-                    selection,
-                    {
-                        **token,
-                        "polymarket_event": event.get("title", ""),
-                    },
-                )
 
-            if all(selection in found for selection in MATCH_RESULT_SELECTIONS):
-                return found
+            for market in event.get("markets") or []:
+                if market.get("closed") is True or market.get("active") is False:
+                    continue
+                market_tokens = extract_market_tokens(market, home_team, away_team, sleep_seconds)
+                for selection, token in market_tokens.items():
+                    found.setdefault(
+                        selection,
+                        {
+                            **token,
+                            "polymarket_event": event.get("title", ""),
+                            "matched_query": query,
+                        },
+                    )
+
+                if all(selection in found for selection in MATCH_RESULT_SELECTIONS):
+                    return found
 
     if debug and not found:
         found["_debug"] = {
@@ -219,6 +303,7 @@ def blank_price_row(row: pd.Series, selection: str) -> dict[str, Any]:
         "polymarket_question": "",
         "polymarket_outcome": "",
         "polymarket_token_id": "",
+        "matched_query": "",
     }
 
 
@@ -245,6 +330,7 @@ def build_match_result_rows(predictions_csv: str, *, limit_per_type: int, sleep_
                         "polymarket_question": token.get("polymarket_question", ""),
                         "polymarket_outcome": token.get("polymarket_outcome", ""),
                         "polymarket_token_id": token.get("polymarket_token_id", ""),
+                        "matched_query": token.get("matched_query", ""),
                     }
                 )
             else:
@@ -305,6 +391,7 @@ def main() -> int:
         "polymarket_question",
         "polymarket_outcome",
         "polymarket_token_id",
+        "matched_query",
     ]
 
     with out_path.open("w", newline="", encoding="utf-8") as handle:

@@ -13,17 +13,6 @@ on:
         required: false
         type: boolean
         default: false
-  push:
-    branches:
-      - claude/bold-ride-n3n1ti
-    paths:
-      - ".github/workflows/data-inventory.yml"
-      - "scripts/audit_oddspedia_available_data_cdp_session.py"
-      - "scripts/audit_superbru_available_data_cdp_session.py"
-      - "scripts/filter_oddspedia_high_value_market_paths.py"
-      - "scripts/build_data_inventory_summary.py"
-      - "inputs/oddspedia_match_urls.csv"
-      - "outputs/final_locked_picks/superbru_final_card.csv"
 
 permissions:
   contents: read

@@ -1,5 +1,5 @@
 {
-  "generated_at_utc": "2026-06-22T09:51:37.280651Z",
+  "generated_at_utc": "2026-06-22T10:00:20.172331Z",
   "trusted_completed_matches": 40,
   "matches_with_any_prematch_probability": 17,
   "coverage_fraction": 0.425,
@@ -59,6 +59,61 @@
         },
         "baseline_always_home_fair_roi": -0.3631,
         "baseline_random_fair_roi": -0.7477
+      }
+    },
+    {
+      "source": "prediction_log_consensus",
+      "n": 4,
+      "forecast_skill": {
+        "outcome_accuracy": 0.5,
+        "mean_brier": 0.6051,
+        "uniform_brier": 0.6667,
+        "brier_skill_vs_uniform": 0.0923,
+        "mean_log_loss": 0.9305,
+        "uniform_log_loss": 1.0986,
+        "mean_rps": 0.1402
+      },
+      "calibration_by_favourite_band": [
+        {
+          "band": "[0.55,0.65)",
+          "n": 1,
+          "mean_predicted_fav_prob": 0.6046,
+          "observed_fav_win_rate": 1.0
+        },
+        {
+          "band": "[0.65,0.80)",
+          "n": 2,
+          "mean_predicted_fav_prob": 0.6693,
+          "observed_fav_win_rate": 0.0
+        },
+        {
+          "band": "[0.80,1.01)",
+          "n": 1,
+          "mean_predicted_fav_prob": 0.8756,
+          "observed_fav_win_rate": 1.0
+        }
+      ],
+      "betting": {
+        "assumed_vig": 0.05,
+        "stake_per_bet": 1.0,
+        "model_pick_fair_odds": {
+          "roi": -0.301,
+          "roi_ci95": [
+            -1.0,
+            0.398
+          ],
+          "expectation_note": "Betting at the price the probability came from is 0-EV by construction."
+        },
+        "model_pick_vigged_odds": {
+          "roi": -0.3359,
+          "roi_ci95": [
+            -1.0,
+            0.3281
+          ],
+          "expectation_note": "Realistic price carries the book's vig; expectation ~ -5%."
+        },
+        "baseline_always_home_fair_roi": -0.7145,
+        "baseline_random_fair_roi": -0.301
       }
     },
     {

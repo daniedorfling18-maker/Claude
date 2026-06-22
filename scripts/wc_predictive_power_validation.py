@@ -158,6 +158,35 @@ def load_market_history_probs(path: Path) -> dict[str, dict]:
     return probs
 
 
+def load_prediction_log_probs(path: Path) -> dict[str, dict]:
+    """Latest pre-kickoff row per match from the rolling prediction log.
+
+    The log (scripts/log_prediction_snapshots.py) also carries the best obtainable
+    price and a sharp anchor, so once fixtures complete this is the source that
+    supports real-price ROI and closing-line value, not just the consensus probs.
+    """
+    if not path.exists():
+        return {}
+    by_match: dict[str, list[dict]] = {}
+    for row in csv.DictReader(path.open(encoding="utf-8-sig")):
+        if not row.get("p_home"):
+            continue
+        by_match.setdefault(row["match_key"], []).append(row)
+    probs: dict[str, dict] = {}
+    for key, rows in by_match.items():
+        commence = parse_iso(rows[0].get("commence_time", ""))
+        pre = [r for r in rows if (s := parse_iso(r.get("snapshot_utc", ""))) and (not commence or s <= commence)]
+        usable = pre or rows
+        latest = max(usable, key=lambda r: r.get("snapshot_utc", ""))
+        try:
+            p = normalise([float(latest["p_home"]), float(latest["p_draw"]), float(latest["p_away"])])
+        except (ValueError, KeyError):
+            continue
+        probs[key] = {"p": p, "best_pick_odds": latest.get("best_pick_odds", ""),
+                      "edge_vs_sharp": latest.get("edge_pick_vs_sharp", "")}
+    return probs
+
+
 def load_polymarket_probs(path: Path) -> dict[str, dict]:
     if not path.exists():
         return {}
@@ -320,6 +349,7 @@ def main() -> int:
     ap = argparse.ArgumentParser(description="WC 2026 predictive-power & betting-edge validation")
     ap.add_argument("--results-csv", default=RESULTS_DEFAULT)
     ap.add_argument("--market-history-csv", default=MARKET_HISTORY_DEFAULT)
+    ap.add_argument("--prediction-log-csv", default="outputs/backtesting/prediction_log.csv")
     ap.add_argument("--polymarket-csv", default=POLYMARKET_DEFAULT)
     ap.add_argument("--realised-summary", default=REALISED_SUMMARY_DEFAULT)
     ap.add_argument("--out-dir", default=OUT_DIR_DEFAULT)
@@ -333,10 +363,12 @@ def main() -> int:
 
     results = load_trusted_results(Path(args.results_csv))
     market_probs = load_market_history_probs(Path(args.market_history_csv))
+    log_probs = load_prediction_log_probs(Path(args.prediction_log_csv))
     poly_probs = load_polymarket_probs(Path(args.polymarket_csv))
 
     sources = {
         "market_history_devig_consensus": market_probs,
+        "prediction_log_consensus": log_probs,
         "polymarket_prekickoff": poly_probs,
     }
     summaries, all_records = [], []

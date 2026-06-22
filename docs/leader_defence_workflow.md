@@ -115,7 +115,7 @@ Commit final outputs with force-add because `outputs/` is usually ignored:
 ```powershell
 git add -f outputs/final_leader_decision
 git commit -m "Add final leader decision outputs"
-git push origin claude/bold-ride-n3n1ti
+git push origin <your-working-branch>
 ```
 
 Do not commit raw `data/` snapshots unless they are required for reproducibility evidence.

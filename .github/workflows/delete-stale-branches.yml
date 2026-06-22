@@ -1,0 +1,128 @@
+name: Delete Stale Branches
+
+# Manual cleanup of merged/superseded branches. Runs from the Actions tab where the
+# job has real push-delete rights via GITHUB_TOKEN, so it works even when local
+# `git push --delete` is blocked by a proxy.
+#
+# Safety:
+#  - dry_run defaults to true: it only lists what *would* be deleted until you set it false.
+#  - protected branches (main, the default branch, and the current PR audit branch) are
+#    never deleted, even if listed.
+#  - each branch is checked: by default only branches already merged into the default
+#    branch are deleted, unless force_unmerged is true.
+
+on:
+  workflow_dispatch:
+    inputs:
+      branches:
+        description: "Comma/space/newline-separated branch names to delete. Leave blank to use the built-in stale list."
+        required: false
+        default: ""
+      dry_run:
+        description: "List only; do not delete (default true)."
+        type: boolean
+        default: true
+      force_unmerged:
+        description: "Delete even if a branch is NOT merged into the default branch (use with care)."
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+
+concurrency:
+  group: delete-stale-branches
+  cancel-in-progress: false
+
+jobs:
+  delete-branches:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout (full history for merge checks)
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Delete stale branches
+        env:
+          INPUT_BRANCHES: ${{ github.event.inputs.branches }}
+          DRY_RUN: ${{ github.event.inputs.dry_run }}
+          FORCE_UNMERGED: ${{ github.event.inputs.force_unmerged }}
+        run: |
+          set -euo pipefail
+
+          DEFAULT_BRANCH="${GITHUB_DEFAULT_BRANCH:-${{ github.event.repository.default_branch }}}"
+          # Branches that must never be deleted.
+          PROTECTED="${DEFAULT_BRANCH} main master claude/repo-audit-optimize-okwcaq"
+
+          # Built-in stale list (the 17 merged/superseded branches identified in the audit).
+          DEFAULT_STALE="
+            audit/engine-fixes
+            audit/optimise-repo
+            backup/claude-bold-ride-before-main-sync
+            backup/claude-bold-ride-live-before-main-sync
+            claude/bold-ride-n3n1ti
+            claude/temp-conflict-test
+            fix/auto-pick-dual-cron
+            fix/auto-pick-smart-odds
+            fix/auto-picker-card-only
+            fix/auto-picker-card-only-2
+            fix/match-scoped-auto-pick
+            fix/quota-safe-auto-pick
+            fix/round2-cron
+            fix/round2-cron-v3
+            fix/scheduled-locked-card-refresh
+            fix/superbru-login-diagnostics
+            fix/test-recipient-check
+          "
+
+          if [ -n "${INPUT_BRANCHES// /}" ]; then
+            RAW="$INPUT_BRANCHES"
+          else
+            RAW="$DEFAULT_STALE"
+          fi
+          # Normalise separators (comma/space/newline) to a clean list.
+          BRANCHES=$(echo "$RAW" | tr ',' '\n' | tr ' ' '\n' | sed '/^$/d' | sort -u)
+
+          git fetch origin --prune
+
+          echo "Default branch: $DEFAULT_BRANCH"
+          echo "Dry run: $DRY_RUN | Force unmerged: $FORCE_UNMERGED"
+          echo "----------------------------------------------------------------"
+
+          DELETED=0; SKIPPED=0
+          for BR in $BRANCHES; do
+            # Never touch protected branches.
+            if echo " $PROTECTED " | grep -q " $BR "; then
+              echo "PROTECTED  $BR  (skipped)"; SKIPPED=$((SKIPPED+1)); continue
+            fi
+            # Must exist on the remote.
+            if ! git show-ref --verify --quiet "refs/remotes/origin/$BR"; then
+              echo "MISSING    $BR  (not on origin, skipped)"; SKIPPED=$((SKIPPED+1)); continue
+            fi
+            # Merge check unless forced.
+            if [ "$FORCE_UNMERGED" != "true" ]; then
+              if ! git merge-base --is-ancestor "origin/$BR" "origin/$DEFAULT_BRANCH"; then
+                echo "UNMERGED   $BR  (not merged into $DEFAULT_BRANCH; skipped — set force_unmerged to delete)"
+                SKIPPED=$((SKIPPED+1)); continue
+              fi
+            fi
+
+            if [ "$DRY_RUN" = "false" ]; then
+              git push origin --delete "$BR"
+              echo "DELETED    $BR"
+              DELETED=$((DELETED+1))
+            else
+              echo "WOULD DELETE  $BR"
+              DELETED=$((DELETED+1))
+            fi
+          done
+
+          echo "----------------------------------------------------------------"
+          echo "Summary: ${DELETED} branch(es) $( [ "$DRY_RUN" = "false" ] && echo deleted || echo 'would be deleted'), ${SKIPPED} skipped."
+          {
+            echo "### Delete Stale Branches"
+            echo ""
+            echo "- Mode: $( [ "$DRY_RUN" = "false" ] && echo 'LIVE delete' || echo 'dry run (no deletions)')"
+            echo "- ${DELETED} branch(es) processed, ${SKIPPED} skipped"
+          } >> "$GITHUB_STEP_SUMMARY"

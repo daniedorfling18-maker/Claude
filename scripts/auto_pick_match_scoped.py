@@ -115,6 +115,14 @@ def norm_team(value: Any) -> str:
     return "".join(ch.lower() for ch in txt(value) if ch.isalnum())
 
 
+def normalized_score(value: Any) -> str:
+    """Normalise a scoreline string like '2 - 1' or 'None-None' to 'H-A', or '' if not parseable."""
+    numbers = re.findall(r"\d+", txt(value))
+    if len(numbers) < 2:
+        return ""
+    return f"{int(numbers[0])}-{int(numbers[1])}"
+
+
 def safe_name(value: str) -> str:
     clean = re.sub(r"[^A-Za-z0-9_.-]+", "_", txt(value))
     return clean.strip("_") or "match"
@@ -1257,6 +1265,29 @@ async def run(args: argparse.Namespace) -> dict[str, Any]:
         card_row = pick_lookup.get("card_row") if pick_lookup.get("status") == "found" else None
         card_pick = txt(pick_lookup.get("pick")) if pick_lookup.get("status") == "found" else ""
 
+        # Smart-odds quota guard: when leaderboard intelligence is NOT in an override-capable
+        # state (effective_pool_standing is None), the live recompute resolves to the engine's
+        # configured strategy pick, which the committed card already encodes. If SuperBru is
+        # already showing that card pick, re-fetching odds and resubmitting spends Odds API
+        # credits for no change, so skip both. When pool standing IS active (leading-defensive
+        # or chasing) the pick may need to be overridden away from the card, so we never skip.
+        visible_norm = normalized_score(entry.get("current_pick"))
+        card_norm = normalized_score(card_pick)
+        if (
+            getattr(args, "smart_odds", True)
+            and effective_pool_standing is None
+            and visible_norm
+            and card_norm
+            and visible_norm == card_norm
+        ):
+            entry["status"] = "already_picked"
+            entry["match_odds"] = {"status": "skipped_already_picked"}
+            entry["selected_pick"] = card_pick
+            entry["pick_source"] = "already_picked_no_spend"
+            entry["pick_strategy"] = "already_picked"
+            submitted_results.append(entry)
+            continue
+
         # Pull this match's odds right before kickoff and recompute a fresh pick so a
         # stale committed card cannot drive the submission. Pool-position intelligence
         # is applied on top of the fresh recompute when leaderboard data is available.
@@ -1315,6 +1346,7 @@ async def run(args: argparse.Namespace) -> dict[str, Any]:
         "queued_count": len(queued),
         "results": submitted_results,
         "submitted": sum(1 for item in submitted_results if item.get("status") == "submitted"),
+        "already_picked": sum(1 for item in submitted_results if item.get("status") == "already_picked"),
         "dry_run_count": sum(1 for item in submitted_results if item.get("status") == "dry_run"),
         "no_pick_available": sum(1 for item in submitted_results if item.get("status") == "no_pick_available"),
         "submit_failed": sum(1 for item in submitted_results if item.get("status") == "submit_failed"),
@@ -1352,6 +1384,20 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--odds-markets", default=None)
     parser.add_argument("--odds-lookup-window-minutes", type=int, default=90)
     parser.add_argument("--skip-match-odds", action="store_true")
+    parser.add_argument(
+        "--smart-odds",
+        dest="smart_odds",
+        action="store_true",
+        default=True,
+        help="Skip the odds pull and submit when SuperBru already shows the card pick and no "
+        "pool-position override is active (default: on, saves Odds API credits on backup runs).",
+    )
+    parser.add_argument(
+        "--no-smart-odds",
+        dest="smart_odds",
+        action="store_false",
+        help="Always pull odds and recompute even when the card pick is already visible.",
+    )
     parser.add_argument(
         "--oddspedia-grid-csv",
         default="inputs/smartbet_grids/oddspedia_probability_grids_auto.csv",

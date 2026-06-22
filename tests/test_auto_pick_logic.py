@@ -23,6 +23,29 @@ _is_lb_row = _mod._is_lb_row
 _parse_leaderboard = _mod._parse_leaderboard
 compute_pool_standing = _mod.compute_pool_standing
 norm_team = _mod.norm_team
+normalized_score = _mod.normalized_score
+
+
+# ── normalized_score (smart-odds quota guard helper) ───────────────────────
+
+
+def test_normalized_score_basic():
+    assert normalized_score("2-1") == "2-1"
+    assert normalized_score("2 - 1") == "2-1"
+    assert normalized_score("02-01") == "2-1"
+
+
+def test_normalized_score_blank_and_unparseable():
+    assert normalized_score("") == ""
+    assert normalized_score("None-None") == ""
+    assert normalized_score(None) == ""
+    assert normalized_score("-") == ""
+
+
+def test_normalized_score_matches_for_quota_skip():
+    # Visible vs card comparison the runner uses to decide already_picked.
+    assert normalized_score("1 - 0") == normalized_score("1-0")
+    assert normalized_score("2-2") != normalized_score("2-1")
 
 
 # ── leaderboard_url_from_pool_url ──────────────────────────────────────────

@@ -62,36 +62,52 @@ Workflow:
 Active runner:
 
 ```text
-scripts/auto_pick_match_scoped_smart_odds.py
+scripts/auto_pick_match_scoped.py
 ```
+
+`scripts/auto_pick_match_scoped_smart_odds.py` is now a thin backward-compatible shim
+that delegates to the base runner. The smart-odds quota guard it used to own is built
+into the base runner and on by default (`--smart-odds`). The base runner additionally
+adds live pre-kickoff recompute, leaderboard pool-position intelligence, and Oddspedia
+correct-score grid blending.
 
 Schedule:
 
-- runs 20 minutes before each configured kickoff;
-- runs again 10 minutes before each configured kickoff as a backup;
-- uses a default `window_minutes` value of 25 to tolerate GitHub cron delay.
+- fires roughly 25 minutes before each configured kickoff;
+- `window_minutes` defaults to 40 in the workflow to absorb GitHub's best-effort cron delay.
 
 ## Smart Odds API spending
 
-The smart runner is designed to spend Odds API credits only when action is needed.
+The base runner spends Odds API credits only when action is needed.
 
 For each queued match:
 
 1. Read the locked-card score from `superbru_final_card.csv`.
 2. Read the score currently visible in SuperBru's score inputs.
-3. If the visible score already matches the locked-card score:
+3. If the visible score already matches the locked-card score **and no leaderboard
+   pool-position override is active** for this run:
    - mark the match as `already_picked`;
    - skip the one-match odds snapshot;
    - skip submit.
-4. If the visible score is blank or different:
-   - fetch a one-match odds snapshot, unless explicitly disabled;
-   - submit the locked-card scoreline.
+4. Otherwise:
+   - fetch a one-match odds snapshot (unless `--skip-match-odds`);
+   - recompute the pick live from fresh odds, applying pool-position intelligence and the
+     Oddspedia correct-score blend;
+   - submit the recomputed pick (falling back to the committed card pick if the recompute
+     is unavailable).
+
+Why the override caveat: when the leaderboard scrape shows you leading with a tight gap
+or chasing within range, the live recompute may need to override the committed card pick
+(defensive or private-chase). In that state the runner always pulls odds and recomputes;
+the `already_picked` shortcut only applies when pool standing is inactive, where the
+recompute resolves to the same engine strategy pick the card already encodes.
 
 Expected behaviour:
 
 ```text
-20-minute run: spends credits only if the pick needs to be submitted or changed.
-10-minute backup: spends zero credits if the 20-minute run already saved the pick.
+Primary run:  spends credits to recompute and submit the best pick before kickoff.
+Backup run:   spends zero credits if the primary already saved that pick and no
+              pool-position override applies.
 ```
 
 ## Manual dispatch controls
@@ -123,15 +139,20 @@ spends The Odds API credits during card refresh. Leave it false unless intention
 ## Expected Auto Pick statuses
 
 ```text
-already_picked      SuperBru already shows the locked-card score; no odds and no submit.
-submitted           Locked-card score was submitted.
+already_picked      SuperBru already shows the card pick and no override active; no odds, no submit.
+submitted           Pick (live recompute or card fallback) was submitted.
 dry_run             Run checked but did not submit.
-pick_card_missing   Match was in the window but missing from the locked card.
+no_pick_available   No fresh recompute and no committed card pick to fall back to.
 locked_skipped      SuperBru inputs were locked.
 no_inputs_skipped   Score inputs were not found.
 not_in_window       Match was not inside the submission window.
 submit_failed       Submit attempt failed after queueing.
 ```
+
+Per-match the summary also records `pick_source` (`live_odds_recompute`,
+`committed_card_fallback`, or `already_picked_no_spend`), `pick_strategy`
+(`leading_comfortable`, `defensive_leader`, `private_chase`, `raw_ev_far_behind`,
+`engine_<mode>`, …), and `pick_changed_vs_card`.
 
 ## Important artifacts
 
@@ -143,10 +164,10 @@ outputs/daily_robust_card/
 outputs/final_locked_picks/
 ```
 
-The Auto Pick summary mode should be:
+The Auto Pick summary mode is:
 
 ```json
-"mode": "match_scoped_locked_card_auto_pick_smart_odds"
+"mode": "match_scoped_locked_card_auto_pick"
 ```
 
 ## Final operational rule

@@ -125,9 +125,10 @@ The full local Oddspedia pipeline must be run locally to refresh the grid. The G
 
 1. **Logs in** to Superbru via headless Playwright and locates the unlocked match tab.
 2. **Scrapes the leaderboard** for the `Moore Infinity FIFA WC 26` pool (verified by pool ID `p=13236623` and page-content keywords) in the same browser session to establish your current rank and points gap.
-3. **Pulls that match's odds** from The Odds API and **recomputes the pick live** — so a stale committed card never drives the submission.
-4. **Injects the Oddspedia correct-score grid** (from `inputs/smartbet_grids/oddspedia_probability_grids_auto.csv`) into the match object before distribution fitting, so pre-kickoff scoreline probabilities incorporate the market-derived CS grid via `correct_score_blend_weight` blending.
-5. **Applies pool-position intelligence** to select the final scoreline:
+3. **Smart-odds quota guard** (`--smart-odds`, on by default): if Superbru already shows the committed card pick *and* no leaderboard override is active for this run, the match is marked `already_picked` and **no Odds API credits are spent** — so backup runs after a successful primary submit cost nothing. Otherwise:
+4. **Pulls that match's odds** from The Odds API and **recomputes the pick live** — so a stale committed card never drives the submission.
+5. **Injects the Oddspedia correct-score grid** (from `inputs/smartbet_grids/oddspedia_probability_grids_auto.csv`) into the match object before distribution fitting, so pre-kickoff scoreline probabilities incorporate the market-derived CS grid via `correct_score_blend_weight` blending.
+6. **Applies pool-position intelligence** to select the final scoreline:
 
    | Pool status | Strategy | Behaviour |
    |-------------|----------|-----------|
@@ -137,10 +138,12 @@ The full local Oddspedia pipeline must be run locally to refresh the grid. The G
    | Far behind (> 8 pts) | `raw_ev_far_behind` | Keep raw-EV pick |
    | Leaderboard unavailable | `pool_standing_unavailable` | Keep engine `strategy_mode` pick |
 
-6. **Falls back** to the committed locked-card pick only if the live recompute is unavailable (no odds, API error, unconfirmable team orientation).
-7. **Submits** the pick via browser automation.
+7. **Falls back** to the committed locked-card pick only if the live recompute is unavailable (no odds, API error, unconfirmable team orientation).
+8. **Submits** the pick via browser automation.
 
-The run summary records `pick_source` (`live_odds_recompute` vs `committed_card_fallback`), `pick_changed_vs_card`, `pick_strategy`, `defensive_picks_used`, and `chase_picks_used` per run.
+The run summary records `pick_source` (`live_odds_recompute`, `committed_card_fallback`, or `already_picked_no_spend`), plus `already_picked`, `pick_changed_vs_card`, `pick_strategy`, `defensive_picks_used`, and `chase_picks_used` per run.
+
+`scripts/auto_pick_match_scoped_smart_odds.py` is retained as a thin backward-compatible shim that delegates to this unified runner.
 
 ### Key CLI flags for `auto_pick_match_scoped.py`
 
@@ -163,6 +166,10 @@ Optional secrets: `SUPERBRU_PLAYER_NAME`, `SUPERBRU_POOL_KEYWORDS`.
 Because the PR edits a workflow file, it needs a personal access token with `repo` + `workflow` scope, exposed as the `WORKFLOW_PAT` secret. Without it the job still produces the report and suggested cron lines but cannot open the PR.
 
 Required secrets: `SUPERBRU_USERNAME`, `SUPERBRU_PASSWORD`, and `WORKFLOW_PAT` (for the auto-PR).
+
+## Branch Cleanup
+
+`.github/workflows/delete-stale-branches.yml` (manual `workflow_dispatch`) deletes merged/superseded branches from the Actions tab, where the job has real push-delete rights — useful when local `git push --delete` is blocked. It defaults to `dry_run=true` (lists only), never touches `main`/default/the active audit branch, and by default only deletes branches already merged into the default branch (`force_unmerged` overrides). Leave the `branches` input blank to use the built-in stale list, or pass a comma/space/newline-separated list.
 
 ## Oddspedia SmartBet Pipeline
 

@@ -1,0 +1,70 @@
+name: Provision OCI VPS
+
+on:
+  schedule:
+    # Every 30 min: one idempotent launch attempt. Keeps retrying until A1 capacity frees
+    # up, then no-ops because the instance already exists. Disable by setting the repo
+    # variable PROVISION_OCI_VPS to anything other than 'true' (or remove it).
+    - cron: '*/30 * * * *'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: provision-oci-vps
+  cancel-in-progress: false
+
+jobs:
+  provision:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    # Opt-in: only runs when you set the repository variable PROVISION_OCI_VPS=true.
+    if: ${{ vars.PROVISION_OCI_VPS == 'true' }}
+    env:
+      OCI_CLI_KEY_CONTENT: ${{ secrets.OCI_CLI_KEY_CONTENT }}
+      OCI_CLI_USER: ${{ secrets.OCI_CLI_USER }}
+      OCI_CLI_TENANCY: ${{ secrets.OCI_CLI_TENANCY }}
+      OCI_CLI_FINGERPRINT: ${{ secrets.OCI_CLI_FINGERPRINT }}
+      OCI_CLI_REGION: ${{ secrets.OCI_CLI_REGION }}
+      OCI_COMPARTMENT_ID: ${{ secrets.OCI_COMPARTMENT_ID }}
+      OCI_SUBNET_ID: ${{ secrets.OCI_SUBNET_ID }}
+      OCI_IMAGE_ID: ${{ secrets.OCI_IMAGE_ID }}
+      OCI_SSH_PUBLIC_KEY: ${{ secrets.OCI_SSH_PUBLIC_KEY }}
+      OCI_SHAPE: ${{ vars.OCI_SHAPE || 'VM.Standard.A1.Flex' }}
+      OCI_OCPUS: ${{ vars.OCI_OCPUS || '1' }}
+      OCI_MEMORY_GB: ${{ vars.OCI_MEMORY_GB || '6' }}
+      OCI_MAX_TRIES: ${{ vars.OCI_MAX_TRIES || '1' }}
+      OCI_SSH_AUTHORIZED_KEYS_FILE: /tmp/oci_id.pub
+      OCI_USER_DATA_FILE: deploy/oci-cloud-init.yaml
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install OCI CLI
+        run: python -m pip install --quiet oci-cli
+
+      - name: Configure OCI CLI and SSH key
+        run: |
+          set -euo pipefail
+          mkdir -p ~/.oci
+          printf '%s' "$OCI_CLI_KEY_CONTENT" > ~/.oci/key.pem
+          chmod 600 ~/.oci/key.pem
+          {
+            echo "[DEFAULT]"
+            echo "user=$OCI_CLI_USER"
+            echo "tenancy=$OCI_CLI_TENANCY"
+            echo "fingerprint=$OCI_CLI_FINGERPRINT"
+            echo "region=$OCI_CLI_REGION"
+            echo "key_file=$HOME/.oci/key.pem"
+          } > ~/.oci/config
+          chmod 600 ~/.oci/config
+          printf '%s\n' "$OCI_SSH_PUBLIC_KEY" > /tmp/oci_id.pub
+
+      - name: Provision (idempotent, capacity-friendly)
+        run: bash scripts/oci_provision_idempotent.sh

@@ -55,6 +55,7 @@ jobs:
               'ci.yml',
               'data-inventory.yml',
               'polymarket-mispricing-bot.yml',
+              'provision-oci-vps.yml',
               'refresh-locked-superbru-card.yml',
               'repo-audit-bundle.yml',
           }
@@ -70,6 +71,7 @@ jobs:
               'ci.yml': {'push', 'pull_request'},
               'data-inventory.yml': {'schedule', 'push'},
               'polymarket-mispricing-bot.yml': {'schedule'},
+              'provision-oci-vps.yml': {'schedule'},
               'refresh-locked-superbru-card.yml': {'schedule'},
               'repo-audit-bundle.yml': {'push'},
           }

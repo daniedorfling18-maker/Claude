@@ -39,6 +39,33 @@ Edit `REPO_URL` / `REPO_REF` in `deploy/oci-cloud-init.yaml` first. It runs **dr
 needs no secrets — do NOT put trading keys in cloud-init (user-data is readable from instance
 metadata). Add live keys to `.env` after you SSH in. Bootstrap log: `/var/log/polymarket-bootstrap.log`.
 
+### Or provision from GitHub Actions (`.github/workflows/provision-oci-vps.yml`)
+
+A scheduled workflow can hunt capacity for you. It runs every 30 min, makes **one idempotent
+launch attempt** (never a second VM), treats "out of capacity" as a retry, and self-bootstraps
+the VM via cloud-init. It only runs when you opt in, and it is best to use a **least-privilege
+OCI user**, not your tenancy admin key.
+
+1. In OCI, create a dedicated user + group and a policy scoped to one compartment:
+   ```
+   Allow group vps-provisioners to manage instance-family in compartment <name>
+   Allow group vps-provisioners to use virtual-network-family in compartment <name>
+   Allow group vps-provisioners to read app-catalog-listing in tenancy
+   ```
+   Generate an API signing key for that user (download the private PEM).
+2. Add repository **secrets** (Settings → Secrets and variables → Actions):
+   `OCI_CLI_USER`, `OCI_CLI_TENANCY`, `OCI_CLI_FINGERPRINT`, `OCI_CLI_KEY_CONTENT` (the PEM
+   body), `OCI_CLI_REGION`, `OCI_COMPARTMENT_ID`, `OCI_SUBNET_ID`, `OCI_IMAGE_ID`,
+   `OCI_SSH_PUBLIC_KEY`.
+3. Add the repository **variable** `PROVISION_OCI_VPS=true` to switch it on (optional vars:
+   `OCI_SHAPE`, `OCI_OCPUS`, `OCI_MEMORY_GB`, `OCI_MAX_TRIES`).
+4. **Turn it off once the VM lands** — set `PROVISION_OCI_VPS=false` (or delete the variable)
+   so the cron stops consuming Actions minutes.
+
+Notes: scheduled workflows run from the default branch, so this activates after the change is on
+`main`. The interactive Cloud Shell one-liner above catches brief capacity windows faster (tight
+loop, no Actions-minute limit); the workflow is the set-and-forget option.
+
 ## After the VM is provisioned
 
 If you did not use cloud-init, do this once the Oracle Always Free VM is provisioned.

@@ -1,17 +1,9 @@
 name: Data Inventory
 
 on:
-  workflow_dispatch:
-    inputs:
-      max_oddspedia_matches:
-        description: "Limit Oddspedia matches for a quicker audit. Use 0 for all matches."
-        required: false
-        default: "0"
-      try_oddspedia_alt_urls:
-        description: "Also inspect alt_url rows where available."
-        required: false
-        type: boolean
-        default: false
+  schedule:
+    # Automated daily inventory check. No manual trigger required.
+    - cron: '30 5 * * *'
   push:
     branches:
       - main
@@ -48,8 +40,8 @@ jobs:
       SUPERBRU_LOGIN_URL: ${{ secrets.SUPERBRU_LOGIN_URL }}
       SUPERBRU_USERNAME: ${{ secrets.SUPERBRU_USERNAME }}
       SUPERBRU_PASSWORD: ${{ secrets.SUPERBRU_PASSWORD }}
-      MAX_ODDSPEDIA_MATCHES: ${{ github.event_name == 'workflow_dispatch' && inputs.max_oddspedia_matches || '0' }}
-      TRY_ODDSPEDIA_ALT_URLS: ${{ github.event_name == 'workflow_dispatch' && inputs.try_oddspedia_alt_urls || 'false' }}
+      MAX_ODDSPEDIA_MATCHES: "0"
+      TRY_ODDSPEDIA_ALT_URLS: "false"
 
     steps:
       - name: Checkout repository

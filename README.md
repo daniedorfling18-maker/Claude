@@ -358,11 +358,29 @@ Fixture metadata joins fail loudly when a row cannot be matched — a stale fixt
 
 ## Correct-Score Grid Blending
 
-When the auto-pick runner fetches live pre-kickoff odds it also injects the Oddspedia correct-score probability grid (if available and not stale) as a synthetic `correct_score` market. `model.correct_score_blend_weight: 0.15` in `config.yaml` means 15% of the final scoreline matrix comes from the geometric blend with the de-vigged CS grid; the other 85% comes from the Poisson + Dixon-Coles fit to live h2h/totals markets.
-
-To disable blending, set `correct_score_blend_weight: 0.0` in `config.yaml`.
+When the auto-pick runner fetches live pre-kickoff odds it also injects the Oddspedia correct-score probability grid (if available and not stale) as a synthetic `correct_score` market. `model.correct_score_blend_weight` in `config.yaml` controls how much of the final scoreline matrix comes from the geometric blend with the de-vigged CS grid; the remainder comes from the Poisson + Dixon-Coles fit to live h2h/totals markets.
 
 A staleness warning is printed (but blending still proceeds) when the grid file is older than 2 hours and kickoff is fewer than 120 minutes away.
+
+### The weight is validated, not hand-picked
+
+The blend weight is **not** an arbitrary constant. It is chosen by `scripts/validate_correct_score_blend.py`, which runs three analyses and writes a report to `outputs/blend_validation/`:
+
+| Analysis | Data required | What it measures |
+|----------|---------------|------------------|
+| **A — EV-tradeoff sweep** | market odds + grid | For each candidate weight, rebuilds the real engine distribution and measures Jensen-Shannon divergence between market and grid, the pick-change rate vs the pure-market baseline, and the EV cost of any change *if the market is the truth* |
+| **B — Grid informativeness** | grid + results | Scores the grid's own EV-optimal Superbru pick against completed results (realized points, exact-hit rate, log-loss) vs a naive baseline — establishes whether the grid is predictive at all |
+| **C — Realized-points sweep** | market odds + grid + results | Gold standard: rebuilds the blended distribution at each weight and scores realized Superbru points against actuals. Auto-activates as soon as a match has all three sources |
+
+The recommended weight is the **largest pick-preserving weight** — the most grid information the distribution can absorb without overriding the market's headline scoreline — provided Analysis B confirms the grid beats the naive baseline. Pick-preserving weights still sharpen the downstream signals (`private_chase`, `p_exact`/`p_close` confidence tiers, sensitivity stability, the defensive chaser model) at near-zero risk. Weights large enough to *flip* picks are withheld until Analysis C has realized-points evidence to justify them.
+
+Re-run the harness whenever new results land and update the weight if the recommendation moves:
+
+```bash
+python scripts/validate_correct_score_blend.py
+```
+
+To disable blending entirely, set `correct_score_blend_weight: 0.0`.
 
 ## Known Limitations
 

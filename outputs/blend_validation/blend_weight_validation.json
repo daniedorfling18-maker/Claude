@@ -1,0 +1,170 @@
+{
+  "generated_at_utc": "2026-06-22T05:07:06.918541+00:00",
+  "config": "config.yaml",
+  "weights_tested": [
+    0.0,
+    0.05,
+    0.1,
+    0.15,
+    0.2,
+    0.25,
+    0.3,
+    0.4,
+    0.5
+  ],
+  "data_overlap": {
+    "grid_matches": 24,
+    "market_odds_matches": 36,
+    "completed_results": 8,
+    "market_and_grid": 12,
+    "grid_and_results": 8,
+    "market_grid_and_results": 0
+  },
+  "analysis_A_ev_tradeoff_sweep": [
+    {
+      "weight": 0.0,
+      "matches": 12,
+      "mean_ev_cost_if_market_true": 0.0,
+      "max_ev_cost_if_market_true": 0.0,
+      "pick_change_rate": 0.0
+    },
+    {
+      "weight": 0.05,
+      "matches": 12,
+      "mean_ev_cost_if_market_true": 0.0,
+      "max_ev_cost_if_market_true": 0.0,
+      "pick_change_rate": 0.0
+    },
+    {
+      "weight": 0.1,
+      "matches": 12,
+      "mean_ev_cost_if_market_true": 0.0,
+      "max_ev_cost_if_market_true": 0.0,
+      "pick_change_rate": 0.0
+    },
+    {
+      "weight": 0.15,
+      "matches": 12,
+      "mean_ev_cost_if_market_true": 0.0,
+      "max_ev_cost_if_market_true": 0.0,
+      "pick_change_rate": 0.0
+    },
+    {
+      "weight": 0.2,
+      "matches": 12,
+      "mean_ev_cost_if_market_true": 0.0,
+      "max_ev_cost_if_market_true": 0.0,
+      "pick_change_rate": 0.0
+    },
+    {
+      "weight": 0.25,
+      "matches": 12,
+      "mean_ev_cost_if_market_true": 0.0016,
+      "max_ev_cost_if_market_true": 0.0198,
+      "pick_change_rate": 0.0833
+    },
+    {
+      "weight": 0.3,
+      "matches": 12,
+      "mean_ev_cost_if_market_true": 0.0034,
+      "max_ev_cost_if_market_true": 0.0211,
+      "pick_change_rate": 0.1667
+    },
+    {
+      "weight": 0.4,
+      "matches": 12,
+      "mean_ev_cost_if_market_true": 0.0034,
+      "max_ev_cost_if_market_true": 0.0211,
+      "pick_change_rate": 0.1667
+    },
+    {
+      "weight": 0.5,
+      "matches": 12,
+      "mean_ev_cost_if_market_true": 0.0034,
+      "max_ev_cost_if_market_true": 0.0211,
+      "pick_change_rate": 0.1667
+    }
+  ],
+  "analysis_B_grid_informativeness": {
+    "completed_matches_scored": 8,
+    "grid_ev_pick_mean_points": 1.1875,
+    "naive_1_0_mean_points": 0.9375,
+    "grid_exact_hit_rate": 0.125,
+    "grid_mean_logloss_on_actual": 5.2684,
+    "grid_informative": true,
+    "per_match": [
+      {
+        "match": "brazil vs haiti",
+        "grid_ev_pick": "2-0",
+        "actual": "3-0",
+        "superbru_points": 1.5,
+        "exact_hit": false,
+        "logloss_on_actual": 2.6664
+      },
+      {
+        "match": "canada vs qatar",
+        "grid_ev_pick": "1-0",
+        "actual": "6-0",
+        "superbru_points": 1.0,
+        "exact_hit": false,
+        "logloss_on_actual": 13.8155
+      },
+      {
+        "match": "czech-republic vs south-africa",
+        "grid_ev_pick": "1-0",
+        "actual": "1-1",
+        "superbru_points": 0.0,
+        "exact_hit": false,
+        "logloss_on_actual": 2.0651
+      },
+      {
+        "match": "mexico vs korea-republic",
+        "grid_ev_pick": "1-0",
+        "actual": "1-0",
+        "superbru_points": 3.0,
+        "exact_hit": true,
+        "logloss_on_actual": 2.2653
+      },
+      {
+        "match": "scotland vs morocco",
+        "grid_ev_pick": "1-2",
+        "actual": "0-1",
+        "superbru_points": 1.5,
+        "exact_hit": false,
+        "logloss_on_actual": 2.275
+      },
+      {
+        "match": "switzerland vs bosnia-and-herzegovina",
+        "grid_ev_pick": "1-0",
+        "actual": "4-1",
+        "superbru_points": 1.0,
+        "exact_hit": false,
+        "logloss_on_actual": 13.8155
+      },
+      {
+        "match": "turkey vs paraguay",
+        "grid_ev_pick": "2-0",
+        "actual": "0-1",
+        "superbru_points": 0.0,
+        "exact_hit": false,
+        "logloss_on_actual": 2.7349
+      },
+      {
+        "match": "usa vs australia",
+        "grid_ev_pick": "2-1",
+        "actual": "2-0",
+        "superbru_points": 1.5,
+        "exact_hit": false,
+        "logloss_on_actual": 2.5096
+      }
+    ]
+  },
+  "analysis_C_realized_points_sweep": {
+    "status": "pending_no_overlap",
+    "note": "Activates automatically once a match has saved market odds, an Oddspedia grid, and a completed result. Re-run this script as results accrue.",
+    "matches": []
+  },
+  "recommended_blend_weight": 0.2,
+  "recommendation_rationale": "Largest pick-preserving weight (no market pick overridden, mean EV cost <= 0.02) across 12 market+grid matches, with grid informativeness confirmed on 8 completed matches (grid 1.188 vs naive 0.938 mean pts). Grid refines private_chase / confidence / sensitivity / defensive signals without overriding the market scoreline. Override weights (>= the first pick-changing weight) are withheld until realized-points evidence (Analysis C) exists.",
+  "max_mean_ev_cost_tolerance": 0.02
+}

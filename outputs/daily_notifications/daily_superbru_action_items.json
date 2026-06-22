@@ -1,17 +1,54 @@
 {
-  "generated_at_utc": "2026-06-21T17:45:46.062362+00:00",
-  "notify": false,
+  "generated_at_utc": "2026-06-22T07:02:11.501467+00:00",
+  "notify": true,
   "has_actions": true,
-  "state_changed": false,
+  "state_changed": true,
   "first_state": false,
-  "digest": "2f92161b19d10c09e35d096c638b355168b9bda60d8c0236ee370ad568173ca3",
+  "digest": "e85fc97f86987d574f9afbe321285f737159e36ecf903f30fd022a2a5f8ae347",
   "previous_digest": "2f92161b19d10c09e35d096c638b355168b9bda60d8c0236ee370ad568173ca3",
-  "score_change_count": 0,
+  "score_change_count": 3,
   "oddspedia_probability_review_count": 8,
   "oddspedia_ev_review_count": 1,
   "oddspedia_review_count": 9,
-  "action_count": 9,
-  "score_changes": [],
+  "action_count": 12,
+  "score_changes": [
+    {
+      "commence_time": "2026-06-24T19:00:00Z",
+      "home_team": "Switzerland",
+      "away_team": "Canada",
+      "previous_pick": "2-1",
+      "new_pick": "1-0",
+      "reason": "",
+      "blocked_by": "candidate current_pick mismatch: 2-1 vs card 1-0",
+      "component_improvement": "",
+      "ev_loss": "",
+      "delta_p_finish_first": ""
+    },
+    {
+      "commence_time": "2026-06-26T19:00:00Z",
+      "home_team": "Norway",
+      "away_team": "France",
+      "previous_pick": "0-2",
+      "new_pick": "1-2",
+      "reason": "",
+      "blocked_by": "candidate current_pick mismatch: 0-2 vs card 1-2",
+      "component_improvement": "",
+      "ev_loss": "",
+      "delta_p_finish_first": ""
+    },
+    {
+      "commence_time": "2026-06-28T02:00:00Z",
+      "home_team": "Algeria",
+      "away_team": "Austria",
+      "previous_pick": "1-2",
+      "new_pick": "0-1",
+      "reason": "",
+      "blocked_by": "candidate current_pick mismatch: 1-2 vs card 0-1",
+      "component_improvement": "",
+      "ev_loss": "",
+      "delta_p_finish_first": ""
+    }
+  ],
   "oddspedia_reviews": [
     {
       "match_id": "spain-saudi-arabia",
@@ -298,6 +335,6 @@
       "review_reason": "Best Oddspedia EV scoreline exceeds the locked pick EV."
     }
   ],
-  "notification_markdown": "outputs/daily_notifications/daily_superbru_action_items.md",
-  "state_json": "outputs/daily_notifications/daily_superbru_action_state.json"
+  "notification_markdown": "outputs\\daily_notifications\\daily_superbru_action_items.md",
+  "state_json": "outputs\\daily_notifications\\daily_superbru_action_state.json"
 }

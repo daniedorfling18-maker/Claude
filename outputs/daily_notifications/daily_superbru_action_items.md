@@ -1,13 +1,21 @@
 # Daily Superbru action items
 
-Generated: `2026-06-21T17:45:46.062046+00:00`
+Generated: `2026-06-22T07:02:11.501467+00:00`
 
-Notify: **no**
-State changed: **no**
+Notify: **yes**
+State changed: **yes**
 
-Score-change items: **0**
+Score-change items: **3**
 Oddspedia probability review items: **8**
 Oddspedia Superbru EV review items: **1**
+
+## Score changes to make in Superbru
+
+| Kickoff UTC | Match | Previous | New | EV loss | Leader delta | Reason |
+|---|---|---:|---:|---:|---:|---|
+| 2026-06-24T19:00:00Z | Switzerland vs Canada | 2-1 | 1-0 |  |  |  |
+| 2026-06-26T19:00:00Z | Norway vs France | 0-2 | 1-2 |  |  |  |
+| 2026-06-28T02:00:00Z | Algeria vs Austria | 1-2 | 0-1 |  |  |  |
 
 ## Oddspedia SmartBet probability review items
 
@@ -32,4 +40,4 @@ These compare expected Superbru points from the Oddspedia correct-score grid. Do
 |---|---:|---:|---:|---:|---:|---:|---|
 | france-iraq | 3-0 | 1.0860999999999998 | 2-0 | 1.24265 | 0.1565500000000002 | True | ev_review |
 
-The same action set was already reported previously, so this run is suppressed to avoid repeated notifications.
+Review the items above and update only the scores that survive final judgement.

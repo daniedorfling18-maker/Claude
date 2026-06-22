@@ -43,29 +43,6 @@ on:
     - cron: '35 22 1-19 7 *'    # Jul 1-19 23:00 UTC slot
     - cron: '35 1 2-20 7 *'     # Jul 2-19 02:00 UTC slot
 
-  workflow_dispatch:
-    inputs:
-      window_minutes:
-        description: 'Submit picks for games kicking off within this many minutes'
-        required: false
-        default: '40'
-      dry_run:
-        description: 'Dry run only (predict but do not submit)'
-        required: false
-        default: 'false'
-      fetch_match_odds:
-        description: 'Pull a one-match odds snapshot and recompute the pick live. Set false to submit the committed card pick without spending Odds API credits.'
-        required: false
-        default: 'true'
-      pool_url:
-        description: 'SuperBru pool URL'
-        required: false
-        default: 'https://www.superbru.com/worldcup_predictor/pool_view.php?t=1296&p=13236623&view=matches'
-      skip_leaderboard:
-        description: 'Skip leaderboard scrape and use configured strategy_mode (no pool-position intelligence)'
-        required: false
-        default: 'false'
-
 permissions:
   contents: read
   actions: read
@@ -102,31 +79,10 @@ jobs:
           SUPERBRU_PLAYER_NAME: ${{ secrets.SUPERBRU_PLAYER_NAME || 'Danie' }}
           SUPERBRU_POOL_KEYWORDS: ${{ secrets.SUPERBRU_POOL_KEYWORDS || 'Moore Infinity,FIFA WC 26,World Cup 2026' }}
         run: |
-          DRY_RUN_FLAG=""
-          if [ "${{ github.event.inputs.dry_run }}" = "true" ]; then
-            DRY_RUN_FLAG="--dry-run"
-          fi
-
-          # Odds are fetched by default so the pick is recomputed live before kickoff.
-          # Set fetch_match_odds=false to fall back to the committed card pick with no Odds API spend.
-          MATCH_ODDS_FLAG=""
-          if [ "${{ github.event.inputs.fetch_match_odds }}" = "false" ]; then
-            MATCH_ODDS_FLAG="--skip-match-odds"
-          fi
-
-          SKIP_LEADERBOARD_FLAG=""
-          if [ "${{ github.event.inputs.skip_leaderboard }}" = "true" ]; then
-            SKIP_LEADERBOARD_FLAG="--skip-leaderboard"
-          fi
-
-          POOL_URL="${{ github.event.inputs.pool_url || '' }}"
-          if [ -z "$POOL_URL" ]; then
-            POOL_URL="$SUPERBRU_POOL_URL"
-          fi
+          POOL_URL="$SUPERBRU_POOL_URL"
           if [ -z "$POOL_URL" ]; then
             POOL_URL="https://www.superbru.com/worldcup_predictor/pool_view.php?t=1296&p=13236623&view=matches"
           fi
-
           LOGIN_URL="${SUPERBRU_LOGIN_URL:-https://www.superbru.com/login}"
 
           python scripts/auto_pick_match_scoped_smart_odds.py \
@@ -135,7 +91,7 @@ jobs:
             --login-url "$LOGIN_URL" \
             --pool-url "$POOL_URL" \
             --config config.yaml \
-            --window-minutes "${{ github.event.inputs.window_minutes || '40' }}" \
+            --window-minutes 40 \
             --pick-card-csv outputs/final_locked_picks/superbru_final_card.csv \
             --odds-lookup-window-minutes 90 \
             --leader-player "${SUPERBRU_PLAYER_NAME:-Danie}" \
@@ -143,9 +99,6 @@ jobs:
             --leader-safe-buffer 5.0 \
             --chaser-range 8.0 \
             --headless \
-            $DRY_RUN_FLAG \
-            $MATCH_ODDS_FLAG \
-            $SKIP_LEADERBOARD_FLAG \
             --out-dir outputs/pregame_checks/auto_pick
 
       - name: Upload results

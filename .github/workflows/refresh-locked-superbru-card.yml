@@ -65,6 +65,12 @@ jobs:
           print('Last fixture:', rows[-1])
           PY
 
+      - name: Log pre-match prediction snapshots
+        run: |
+          python scripts/log_prediction_snapshots.py \
+            --flat-odds-csv outputs/market_odds/worldcup_market_odds_flat.csv \
+            --log-csv outputs/backtesting/prediction_log.csv
+
       - name: Upload refresh outputs
         uses: actions/upload-artifact@v4
         if: always()
@@ -86,6 +92,7 @@ jobs:
             outputs/daily_robust_card/*.md
             outputs/final_leader_decision_daily_robust/**/*.csv
             outputs/final_leader_decision_daily_robust/**/*.json
+            outputs/backtesting/prediction_log.csv
           if-no-files-found: warn
           retention-days: 7
 
@@ -96,4 +103,4 @@ jobs:
           file_pattern: >-
             outputs/market_odds outputs/market_odds_validation outputs/market_odds_history
             outputs/component_validation outputs/final_locked_picks outputs/daily_robust_card
-            outputs/final_leader_decision_daily_robust
+            outputs/final_leader_decision_daily_robust outputs/backtesting/prediction_log.csv

@@ -3,6 +3,35 @@
 This documents the backtesting layer: how past picks are scored against results, and how
 pre-match signals are archived so they can be evaluated once results arrive.
 
+## Ultimate-ROI backtest (all WC 2026 results)
+
+`scripts/wc_predictive_power_validation.py` scores the engine by **ultimate ROI** — the realised
+return on what gets staked — not by trading edge / closing-line value. It runs two venues:
+
+- **SuperBru pool (primary, all completed results).** The pool pays on finishing position, funded
+  by other players, so realised SuperBru points are the ROI currency. The harness scores the
+  model's realised points across every completed match and compares them to the naive fixed-template
+  strategies (`1-1`, `2-1`, `1-0`, `2-0`, `0-0`) a casual player would use. Beating the best of those
+  templates is the edge — no market edge required. A bootstrap gives a 95% CI on the model-minus-best-
+  template points delta (the best template is chosen in hindsight, so it is a conservative bar).
+- **Betting markets (secondary, price subset).** Realised flat-stake ROI of backing the model pick at
+  market prices, with bootstrap CIs. Because the model's probabilities are the de-vigged market
+  consensus, ROI against a liquid line at its own price tends to −vig; positive ROI here only comes
+  from genuinely soft prices, which `scripts/log_prediction_snapshots.py` captures via best-obtainable
+  odds vs a Pinnacle/Betfair sharp anchor.
+
+```bash
+python scripts/wc_predictive_power_validation.py
+```
+
+```text
+outputs/backtesting/wc_predictive_power/wc_predictive_power_summary.json   — pool ROI + market ROI
+outputs/backtesting/wc_predictive_power/wc_predictive_power_per_match.csv  — per market-scored match
+```
+
+The pool backtest uses every completed result; the betting-market venue grows as `prediction_log.csv`
+(logged twice daily by `refresh-locked-superbru-card.yml`) accrues prices for fixtures that complete.
+
 ## How it works
 
 The backtest pipeline has two complementary parts:

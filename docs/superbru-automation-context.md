@@ -65,11 +65,39 @@ Active runner:
 scripts/auto_pick_match_scoped_smart_odds.py
 ```
 
+Supporting alias files:
+
+```text
+scripts/team_name_aliases.py
+scripts/submit_superbru_pick_cdp_aliases.py
+```
+
 Schedule:
 
 - runs 20 minutes before each configured kickoff;
 - runs again 10 minutes before each configured kickoff as a backup;
 - uses a default `window_minutes` value of 25 to tolerate GitHub cron delay.
+
+## Team-name aliases
+
+Team-name matching is alias-aware across the card lookup, one-match Odds API event lookup, and in-browser SuperBru row/subtab matching.
+
+Examples that should match each other:
+
+```text
+United States / USA / US
+South Korea / Korea Republic / KOR
+Czechia / Czech Republic / CZE
+Iran / IR Iran / IRI / IRN
+DR Congo / Democratic Republic of the Congo / DRC / COD
+Bosnia and Herzegovina / Bosnia / BIH / BHI
+Curacao / Curaçao / CUR / CUW
+Ivory Coast / Côte d'Ivoire / CIV
+```
+
+The active smart runner patches the base team normalizer to use `canonical_team_key`, so a canonical locked-card row such as `United States` can match a SuperBru row or tab labelled `USA`.
+
+The alias-aware submitter wrapper replaces the browser JavaScript row and subtab matchers so the in-browser submit step accepts canonical names plus all known aliases.
 
 ## Smart Odds API spending
 
@@ -146,7 +174,7 @@ outputs/final_locked_picks/
 The Auto Pick summary mode should be:
 
 ```json
-"mode": "match_scoped_locked_card_auto_pick_smart_odds"
+"mode": "match_scoped_locked_card_auto_pick_smart_odds_aliases"
 ```
 
 ## Final operational rule
@@ -157,4 +185,5 @@ The automation should be treated as follows:
 Refresh Locked Superbru Card = prepares the card.
 Auto Pick = submits from the card.
 Odds API = used only when the pick needs action or when a manual refresh explicitly asks for market odds.
+Team aliases = canonical card names and SuperBru/Odds short labels must resolve to the same team key.
 ```

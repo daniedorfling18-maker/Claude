@@ -64,27 +64,97 @@ INSPECT_JS = r"""
 }
 """
 
-# JS: find a match row by home/away team name text, then locate score inputs within it
+# JS: find a match row by canonical team name or any known alias, then locate score inputs.
 FIND_ROW_JS = r"""
 ([homeTeam, awayTeam]) => {
-  function norm(s) { return (s || '').toLowerCase().replace(/[^a-z0-9]/g, ''); }
-  const hn = norm(homeTeam), an = norm(awayTeam);
+  const TEAM_ALIASES = {
+    algeria: ['algeria','alg','dza'],
+    argentina: ['argentina','arg'],
+    australia: ['australia','aus'],
+    austria: ['austria','aut'],
+    belgium: ['belgium','bel'],
+    bosniaherzegovina: ['bosniaandherzegovina','bosniaherzegovina','bosnia','bih','bhi'],
+    brazil: ['brazil','bra'],
+    canada: ['canada','can'],
+    capeverde: ['capeverde','caboverde','cpv'],
+    colombia: ['colombia','col'],
+    croatia: ['croatia','cro'],
+    curacao: ['curacao','cur','cuw'],
+    czechia: ['czechia','czechrepublic','cze'],
+    drcongo: ['drcongo','drc','cod','congodr','democraticrepublicofthecongo','demrepcongo'],
+    ecuador: ['ecuador','ecu'],
+    egypt: ['egypt','egy'],
+    england: ['england','eng'],
+    france: ['france','fra'],
+    germany: ['germany','ger','deutschland'],
+    ghana: ['ghana','gha'],
+    haiti: ['haiti','hti','hai'],
+    iran: ['iran','iriran','iri','irn'],
+    iraq: ['iraq','irq'],
+    ivorycoast: ['ivorycoast','cotedivoire','civ','ci'],
+    japan: ['japan','jpn'],
+    jordan: ['jordan','jor'],
+    mexico: ['mexico','mex'],
+    morocco: ['morocco','mar'],
+    netherlands: ['netherlands','holland','ned','nld'],
+    newzealand: ['newzealand','nzl'],
+    norway: ['norway','nor'],
+    panama: ['panama','pan'],
+    paraguay: ['paraguay','par'],
+    portugal: ['portugal','por'],
+    qatar: ['qatar','qat'],
+    saudiarabia: ['saudiarabia','ksa','sau'],
+    scotland: ['scotland','sco'],
+    senegal: ['senegal','sen'],
+    southafrica: ['southafrica','rsa','zaf'],
+    southkorea: ['southkorea','korearepublic','korea','kor'],
+    spain: ['spain','esp'],
+    sweden: ['sweden','swe'],
+    switzerland: ['switzerland','sui','che'],
+    tunisia: ['tunisia','tun'],
+    turkey: ['turkey','turkiye','tur'],
+    unitedstates: ['unitedstates','unitedstatesofamerica','usa','us','america'],
+    uruguay: ['uruguay','uru'],
+    uzbekistan: ['uzbekistan','uzb'],
+  };
+  function norm(s) {
+    return (s || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[^a-z0-9]/g, '');
+  }
+  function variants(team) {
+    const n = norm(team);
+    for (const [canonical, aliases] of Object.entries(TEAM_ALIASES)) {
+      if (canonical === n || aliases.includes(n)) {
+        return Array.from(new Set([n, canonical, ...aliases].filter(Boolean)));
+      }
+    }
+    return [n].filter(Boolean);
+  }
+  function containsAny(text, candidates) {
+    return candidates.some(candidate => candidate && text.includes(candidate));
+  }
 
-  // Walk all elements to find one whose text contains both team names
+  const homeVariants = variants(homeTeam);
+  const awayVariants = variants(awayTeam);
+
   const all = Array.from(document.querySelectorAll('tr, li, div, section, article'));
   let matchRow = null;
   for (const el of all) {
     const t = norm(el.innerText || el.textContent || '');
-    if (t.includes(hn) && t.includes(an) && t.length < 2000) {
-      // Prefer the most specific (smallest) container
+    if (containsAny(t, homeVariants) && containsAny(t, awayVariants) && t.length < 2000) {
       if (!matchRow || (el.innerText || '').length < (matchRow.innerText || '').length) {
         matchRow = el;
       }
     }
   }
-  if (!matchRow) return { found: false, reason: 'no element contains both team names' };
+  if (!matchRow) {
+    return {
+      found: false,
+      reason: 'no element contains both team names or aliases',
+      homeVariants,
+      awayVariants,
+    };
+  }
 
-  // Collect all inputs inside the match row
   const inputs = Array.from(matchRow.querySelectorAll('input, select')).map(el => ({
     tag: el.tagName.toLowerCase(),
     type: el.type || '',
@@ -97,7 +167,6 @@ FIND_ROW_JS = r"""
     maxlength: el.maxLength || ''
   }));
 
-  // Also look for nearby submit/save buttons
   const buttons = Array.from(matchRow.querySelectorAll('button, input[type=submit], a[class*=save], a[class*=submit]')).map(b => ({
     tag: b.tagName.toLowerCase(),
     type: b.type || '',
@@ -112,6 +181,8 @@ FIND_ROW_JS = r"""
     rowId: matchRow.id || '',
     rowClass: matchRow.className || '',
     rowText: (matchRow.innerText || '').replace(/\s+/g, ' ').trim().slice(0, 300),
+    matchedHomeAliases: homeVariants,
+    matchedAwayAliases: awayVariants,
     inputs,
     buttons
   };
@@ -142,15 +213,51 @@ CLICK_JS = r"""
 }
 """
 
-# JS: click the subtab for the target match to trigger AJAX load of the pick form
+# JS: click the subtab using canonical team name or aliases before finding the row.
 CLICK_SUBTAB_JS = r"""
 ([homeTeam, awayTeam]) => {
-  function norm(s) { return (s || '').toLowerCase().replace(/[^a-z]/g, ''); }
-  const hn = norm(homeTeam), an = norm(awayTeam);
+  const TEAM_ALIASES = {
+    algeria: ['algeria','alg','dza'], argentina: ['argentina','arg'], australia: ['australia','aus'], austria: ['austria','aut'],
+    belgium: ['belgium','bel'], bosniaherzegovina: ['bosniaandherzegovina','bosniaherzegovina','bosnia','bih','bhi'], brazil: ['brazil','bra'], canada: ['canada','can'],
+    capeverde: ['capeverde','caboverde','cpv'], colombia: ['colombia','col'], croatia: ['croatia','cro'], curacao: ['curacao','cur','cuw'],
+    czechia: ['czechia','czechrepublic','cze'], drcongo: ['drcongo','drc','cod','congodr','democraticrepublicofthecongo','demrepcongo'], ecuador: ['ecuador','ecu'], egypt: ['egypt','egy'],
+    england: ['england','eng'], france: ['france','fra'], germany: ['germany','ger','deutschland'], ghana: ['ghana','gha'], haiti: ['haiti','hti','hai'],
+    iran: ['iran','iriran','iri','irn'], iraq: ['iraq','irq'], ivorycoast: ['ivorycoast','cotedivoire','civ','ci'], japan: ['japan','jpn'], jordan: ['jordan','jor'],
+    mexico: ['mexico','mex'], morocco: ['morocco','mar'], netherlands: ['netherlands','holland','ned','nld'], newzealand: ['newzealand','nzl'], norway: ['norway','nor'],
+    panama: ['panama','pan'], paraguay: ['paraguay','par'], portugal: ['portugal','por'], qatar: ['qatar','qat'], saudiarabia: ['saudiarabia','ksa','sau'],
+    scotland: ['scotland','sco'], senegal: ['senegal','sen'], southafrica: ['southafrica','rsa','zaf'], southkorea: ['southkorea','korearepublic','korea','kor'],
+    spain: ['spain','esp'], sweden: ['sweden','swe'], switzerland: ['switzerland','sui','che'], tunisia: ['tunisia','tun'], turkey: ['turkey','turkiye','tur'],
+    unitedstates: ['unitedstates','unitedstatesofamerica','usa','us','america'], uruguay: ['uruguay','uru'], uzbekistan: ['uzbekistan','uzb'],
+  };
+  function norm(s) {
+    return (s || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[^a-z0-9]/g, '');
+  }
+  function variants(team) {
+    const n = norm(team);
+    for (const [canonical, aliases] of Object.entries(TEAM_ALIASES)) {
+      if (canonical === n || aliases.includes(n)) return Array.from(new Set([n, canonical, ...aliases].filter(Boolean)));
+    }
+    return [n].filter(Boolean);
+  }
+  function containsAny(text, candidates) {
+    return candidates.some(candidate => candidate && text.includes(candidate));
+  }
+
+  const homeVariants = variants(homeTeam);
+  const awayVariants = variants(awayTeam);
   const controls = Array.from(document.querySelectorAll('[data-brutip][data-bru-tab]'));
+
   for (const c of controls) {
     const tip = norm(c.getAttribute('data-brutip') || '');
-    if (tip.includes(hn) || tip.includes(an)) {
+    if (containsAny(tip, homeVariants) && containsAny(tip, awayVariants)) {
+      c.click();
+      return c.getAttribute('data-bru-tab') + ': ' + c.getAttribute('data-brutip');
+    }
+  }
+
+  for (const c of controls) {
+    const tip = norm(c.getAttribute('data-brutip') || '');
+    if (containsAny(tip, homeVariants) || containsAny(tip, awayVariants)) {
       c.click();
       return c.getAttribute('data-bru-tab') + ': ' + c.getAttribute('data-brutip');
     }

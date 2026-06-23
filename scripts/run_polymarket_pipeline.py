@@ -7,6 +7,8 @@ Pipeline mechanics:
 3. Convert repo match-probability data into token-level model probabilities.
 4. Run one final Polymarket scan using those repo-derived probabilities.
 5. Generate long/short intents from the final live book snapshot.
+6. Evaluate prior market-making quotes against the final live book snapshot and
+   store current quotes for the next scheduled run.
 
 This is designed for GitHub Actions scheduled dry-runs. Live trading remains out
 of scope for GitHub-hosted runners and must stay behind the separate VPS/live
@@ -91,6 +93,28 @@ def run_long_short() -> None:
     )
 
 
+def run_market_making_eval() -> None:
+    print("pipeline: evaluating market-making quote mechanics", flush=True)
+    out_dir = os.environ.get("POLYMARKET_OUTPUT_DIR", "outputs/polymarket")
+    subprocess.check_call(
+        [
+            sys.executable,
+            "scripts/polymarket_market_making_eval.py",
+            "--snapshot",
+            f"{out_dir}/market_snapshot.csv",
+            "--intents",
+            f"{out_dir}/long_short_intents.csv",
+            "--state",
+            f"{out_dir}/mm_quote_state.csv",
+            "--eval-csv",
+            f"{out_dir}/mm_quote_evaluations.csv",
+            "--summary-csv",
+            f"{out_dir}/mm_quote_summary.csv",
+        ],
+        cwd=ROOT,
+    )
+
+
 def main() -> int:
     safe_dry_run_env()
     ensure_runtime_files()
@@ -98,6 +122,7 @@ def main() -> int:
     run_converter()
     run_scanner_once("final")
     run_long_short()
+    run_market_making_eval()
     print("pipeline: complete", flush=True)
     return 0
 

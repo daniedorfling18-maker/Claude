@@ -143,7 +143,9 @@ async def run(args: argparse.Namespace) -> dict[str, Any]:
         window_minutes=100000,
         headless=args.headless,
     )
-    scan_results, _queued, scan_status = await ap.scan_superbru_matches(scan_args, out_dir)
+    scan_result = await ap.scan_superbru_matches(scan_args, out_dir)
+    scan_results, _queued, scan_status = scan_result[:3]
+    pool_standing = scan_result[3] if len(scan_result) > 3 else {"status": "unavailable"}
 
     crons = parse_workflow_crons(WORKFLOW_PATH)
     fixtures: list[dict[str, Any]] = []
@@ -179,6 +181,7 @@ async def run(args: argparse.Namespace) -> dict[str, Any]:
     report = {
         "checked_at_utc": now.isoformat(),
         "scan_status": scan_status,
+        "pool_standing": pool_standing,
         "horizon_hours": args.horizon_hours,
         "fixtures_scanned": len(scan_results),
         "fixtures_within_horizon": sum(1 for f in fixtures if f.get("within_horizon")),

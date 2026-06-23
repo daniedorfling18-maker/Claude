@@ -1,0 +1,16 @@
+services:
+  pm-data-collector:
+    build:
+      context: .
+      dockerfile: Dockerfile.monitor
+    container_name: pm-data-collector
+    env_file:
+      - .env
+    environment:
+      POLYMARKET_OUTPUT_DIR: ${POLYMARKET_OUTPUT_DIR:-outputs/polymarket}
+      POLYMARKET_ML_POLL_SECONDS: ${POLYMARKET_ML_POLL_SECONDS:-30}
+    volumes:
+      - ./outputs:/app/outputs
+      - ./inputs/polymarket:/app/inputs/polymarket:ro
+    command: ["python", "scripts/polymarket_ml_collector.py"]
+    restart: unless-stopped

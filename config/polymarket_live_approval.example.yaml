@@ -1,0 +1,9 @@
+approver: ""
+approval_date: "YYYY-MM-DD"
+approved_model_version: ""
+approved_git_commit: ""
+max_bankroll: 0
+max_daily_loss: 0
+approved_categories: []
+approval_expiry_date: "YYYY-MM-DD"
+acknowledgement_that_live_trading_can_lose_money: false

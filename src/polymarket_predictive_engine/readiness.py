@@ -18,17 +18,28 @@ DECISIONS = {
 }
 
 
+def _clean_resolved_markets_from_resolution_file(cfg: EngineConfig) -> set[str]:
+    path = cfg.output_root / "polymarket_training" / "market_resolutions.csv"
+    resolved: set[str] = set()
+    for row in read_csv_rows(path):
+        if row.get("resolution_quality") == "clean_settlement" and str(row.get("target", "")).lower() in {"0", "1", "true", "false"}:
+            market = row.get("market_slug") or row.get("condition_id") or row.get("gamma_market_id")
+            if market:
+                resolved.add(market)
+    return resolved
+
+
 def readiness_decision(cfg: EngineConfig) -> dict[str, Any]:
     _, dq_summary = data_quality(cfg, allow_warnings=True)
     health_rows, health_summary = pipeline_health(cfg)
     raw_files = discover_files(cfg.data_root, ["outputs/polymarket_wide/**/raw_market_snapshots.csv", "outputs/polymarket_fixed/**/raw_market_snapshots.csv"])
     unique_markets: set[str] = set()
-    resolved_markets: set[str] = set()
+    resolved_markets: set[str] = _clean_resolved_markets_from_resolution_file(cfg)
     snapshot_counts: dict[str, int] = {}
     schema_unknown = False
     for path in raw_files:
         cols = csv_columns(path)
-        market_col = find_first_column(cols, cfg.raw.get("schema", {}).get("market_id_fields", ["market_id", "condition_id", "id", "slug"]))
+        market_col = find_first_column(cols, cfg.raw.get("schema", {}).get("market_id_fields", ["market_id", "condition_id", "id", "market_slug", "slug"]))
         if not market_col:
             schema_unknown = True
             continue
@@ -41,13 +52,14 @@ def readiness_decision(cfg: EngineConfig) -> dict[str, Any]:
                 keys = " ".join(row.keys()).lower()
                 if any(k in keys for k in ["winning", "resolved", "resolution"]) and any(str(v).lower() in {"1", "true", "yes", "won", "winner"} for v in row.values()):
                     resolved_markets.add(m)
+    joined_resolved_markets = unique_markets.intersection(resolved_markets)
     if dq_summary.get("blocker_count", 0):
         decision = "NOT_APPROVED_DATA_QUALITY_BLOCKERS"
     elif schema_unknown:
         decision = "NOT_APPROVED_SCHEMA_UNKNOWN"
     elif health_summary.get("stalled_categories"):
         decision = "NOT_APPROVED_PIPELINE_STALE"
-    elif len(resolved_markets) < cfg.min_resolved_markets:
+    elif len(joined_resolved_markets) < cfg.min_resolved_markets:
         decision = "NOT_APPROVED_INSUFFICIENT_LABELS"
     elif len(unique_markets) >= cfg.min_resolved_markets and min(snapshot_counts.values() or [0]) >= cfg.min_snapshots_per_market:
         decision = "APPROVED_FOR_TRAINING"
@@ -57,13 +69,14 @@ def readiness_decision(cfg: EngineConfig) -> dict[str, Any]:
         "decision": decision,
         "data_quality_blockers": dq_summary.get("blocker_count", 0),
         "unique_markets": len(unique_markets),
-        "unique_resolved_markets": len(resolved_markets),
+        "unique_resolved_markets": len(joined_resolved_markets),
+        "clean_resolution_markets_available": len(resolved_markets),
         "minimum_snapshots_per_market_observed": min(snapshot_counts.values() or [0]),
         "category_coverage": [r["category"] for r in health_rows if r.get("raw_snapshots_growing")],
         "stale_collectors": health_summary.get("stalled_categories", []),
         "duplicate_writer_risks": [],
         "unsuitable_latest_only_data": any(r.get("latest_joined_updating") and not r.get("raw_snapshots_growing") for r in health_rows),
-        "missing_resolution_outcomes": len(resolved_markets) == 0,
+        "missing_resolution_outcomes": len(joined_resolved_markets) == 0,
     }
     write_json(cfg.governance_root / "data_readiness_decision.json", payload)
     return payload

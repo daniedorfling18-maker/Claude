@@ -17,6 +17,7 @@ from .labels import build_labels
 from .models.calibrated import train_model, write_predictions
 from .pipeline_health import pipeline_health
 from .pipeline_inventory import pipeline_inventory
+from .resolution_collector import collect_resolutions
 from .portfolio import portfolio_snapshot
 from .readiness import readiness_decision
 from .storage import init_db
@@ -30,9 +31,10 @@ def _print(payload):
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="polymarket-engine")
-    parser.add_argument("command", choices=["config-check", "pipeline-inventory", "pipeline-health", "inventory", "data-quality", "readiness", "build-labels", "build-features", "external-signals", "train", "validate", "predict", "generate-signals", "backtest", "paper-trade", "portfolio", "governance-report", "live-trade", "init-db"])
+    parser.add_argument("command", choices=["config-check", "pipeline-inventory", "pipeline-health", "inventory", "data-quality", "readiness", "collect-resolutions", "build-labels", "build-features", "external-signals", "train", "validate", "predict", "generate-signals", "backtest", "paper-trade", "portfolio", "governance-report", "live-trade", "init-db"])
     parser.add_argument("--config", default="polymarket_predictive_config.example.yaml")
     parser.add_argument("--allow-data-quality-warnings", action="store_true")
+    parser.add_argument("--resolution-limit", type=int, default=None)
     return parser
 
 
@@ -52,6 +54,8 @@ def main(argv: list[str] | None = None) -> int:
             issues, summary = data_quality(cfg, allow_warnings=args.allow_data_quality_warnings); _print(summary)
         elif args.command == "readiness":
             _print(readiness_decision(cfg))
+        elif args.command == "collect-resolutions":
+            _, _, summary = collect_resolutions(cfg, limit=args.resolution_limit); _print(summary)
         elif args.command == "build-labels":
             _print({"labels": len(build_labels(cfg))})
         elif args.command == "build-features":

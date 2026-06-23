@@ -1,3 +1,3 @@
 # Polymarket Model Validation Standard
 
-Validation requires time splits, holdout tests, calibration and baseline comparison.
+Validation requires time splits, holdout testing, calibration, baseline comparison, drift checks and sample-size warnings.

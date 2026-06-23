@@ -1,3 +1,3 @@
 # Polymarket Docker Safety Audit
 
-Resolve duplicate writers and live execution paths before capital use.
+Docker services must be mapped before live use. Duplicate writers and conflicting signal paths must be resolved before capital is used.

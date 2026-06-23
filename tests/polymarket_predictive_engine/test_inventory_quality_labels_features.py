@@ -18,12 +18,20 @@ def make_cfg(tmp_path: Path) -> Path:
     return cfg
 
 
-def write_raw(tmp_path: Path, resolved: bool = True, leakage: bool = False):
+def write_resolution(tmp_path: Path):
+    out = tmp_path / "outputs" / "polymarket_training"
+    out.mkdir(parents=True, exist_ok=True)
+    path = out / "market_resolutions.csv"
+    cols = ["market_slug", "condition_id", "gamma_market_id", "token_id", "outcome", "close_time", "resolution_time", "target", "resolution_quality"]
+    with path.open("w", newline="", encoding="utf-8") as f:
+        w = csv.DictWriter(f, fieldnames=cols); w.writeheader()
+        w.writerow({"market_slug":"m1", "condition_id":"m1", "gamma_market_id":"g1", "token_id":"t1", "outcome":"Yes", "close_time":"2026-01-02T00:00:00Z", "resolution_time":"2026-01-03T00:00:00Z", "target":"1", "resolution_quality":"clean_settlement"})
+
+
+def write_raw(tmp_path: Path, leakage: bool = False):
     folder = tmp_path / "outputs" / "polymarket_wide" / "sports" / "ml"
     folder.mkdir(parents=True)
     cols = ["snapshot_timestamp", "market_id", "token_id", "question", "best_bid", "best_ask", "liquidity", "volume", "close_time", "resolution_time"]
-    if resolved:
-        cols.append("target")
     if leakage:
         cols.append("resolved")
     path = folder / "raw_market_snapshots.csv"
@@ -32,7 +40,6 @@ def write_raw(tmp_path: Path, resolved: bool = True, leakage: bool = False):
         base = {"market_id":"m1", "token_id":"t1", "question":"Will A win by Friday?", "best_bid":"0.4", "best_ask":"0.42", "liquidity":"100", "volume":"10", "close_time":"2026-01-02T00:00:00Z", "resolution_time":"2026-01-03T00:00:00Z"}
         for ts, price in [("2026-01-01T00:00:00Z", "0.42"), ("2026-01-01T06:00:00Z", "0.45")]:
             row = dict(base); row["snapshot_timestamp"] = ts; row["best_ask"] = price
-            if resolved: row["target"] = "1"
             if leakage: row["resolved"] = "false"
             w.writerow(row)
     return path
@@ -52,29 +59,31 @@ def test_data_quality_missing_raw_is_blocker(tmp_path):
 
 
 def test_missing_labels_fail_closed(tmp_path):
-    write_raw(tmp_path, resolved=False)
+    write_raw(tmp_path)
     cfg = load_config(make_cfg(tmp_path))
     with pytest.raises(RuntimeError):
         build_labels(cfg)
 
 
-def test_label_generation(tmp_path):
-    write_raw(tmp_path, resolved=True)
+def test_label_generation_from_clean_resolution(tmp_path):
+    write_raw(tmp_path)
+    write_resolution(tmp_path)
     cfg = load_config(make_cfg(tmp_path))
     labels = build_labels(cfg)
     assert labels
     assert labels[0]["target"] == 1
+    assert labels[0]["label_source"] == "resolution_join"
 
 
 def test_feature_generation_rejects_leakage(tmp_path):
-    write_raw(tmp_path, resolved=True, leakage=True)
+    write_raw(tmp_path, leakage=True)
     cfg = load_config(make_cfg(tmp_path))
     with pytest.raises(ValueError):
         build_features(cfg)
 
 
 def test_point_in_time_features(tmp_path):
-    write_raw(tmp_path, resolved=False, leakage=False)
+    write_raw(tmp_path, leakage=False)
     cfg = load_config(make_cfg(tmp_path))
     features = build_features(cfg)
     second = [f for f in features if f["snapshots_so_far"] == 1][0]

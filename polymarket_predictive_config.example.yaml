@@ -34,6 +34,30 @@ freshness_thresholds:
   collector_stale_minutes: 60
   latest_snapshot_stale_minutes: 30
 
+resolution:
+  gamma_base_url: "https://gamma-api.polymarket.com/markets"
+  request_timeout_seconds: 20
+  request_pause_seconds: 0.05
+  max_markets: 250
+  settlement_win_threshold: 0.98
+  settlement_loss_threshold: 0.02
+
+historical_backfill:
+  gamma_base_url: "https://gamma-api.polymarket.com/markets"
+  max_closed_markets: 250
+  page_size: 100
+  request_timeout_seconds: 30
+  request_pause_seconds: 0.10
+  gamma_query_params: {}
+
+historical_price_history:
+  clob_base_url: "https://clob.polymarket.com"
+  max_tokens: 500
+  interval: "max"
+  fidelity_seconds: 300
+  request_timeout_seconds: 30
+  request_pause_seconds: 0.10
+
 splits:
   method: time_based
   train_fraction: 0.6
@@ -55,6 +79,12 @@ calibration:
   buckets: 10
   maximum_calibration_error: 0.05
 
+calibration_v2:
+  buckets: 10
+  minimum_training_rows: 100
+  min_rows_per_category: 50
+  bucket_shrinkage_to_midpoint: 0.20
+
 baselines:
   include: [midpoint, best_ask_implied, last_price, favourite_market_implied, category_average, no_trade]
 
@@ -62,6 +92,23 @@ external_signals:
   manual_csv_paths: []
   sports_match_confidence_threshold: 0.90
   allow_election_manual_only: true
+
+external_feeds:
+  request_timeout_seconds: 30
+  feeds: []
+  # Example:
+  # feeds:
+  #   - name: public_macro_calendar
+  #     format: csv
+  #     path: "data/external/public_macro_calendar.csv"
+
+websocket_market_data:
+  url: "wss://ws-subscriptions-clob.polymarket.com/ws/market"
+  market_ids: []
+  subscription_message: null
+
+paper_edge_simulator:
+  minimum_edge: 0.03
 
 backtest:
   execute_at: best_ask

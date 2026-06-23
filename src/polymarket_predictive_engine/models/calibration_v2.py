@@ -63,20 +63,28 @@ def _bucket_id(probability: float, bucket_count: int) -> int:
     return min(bucket_count - 1, int(probability * bucket_count))
 
 
-def fit_bucket_calibrator(rows: list[dict[str, Any]], *, bucket_count: int = 10, shrinkage_to_midpoint: float = 0.20) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+def fit_bucket_calibrator(
+    rows: list[dict[str, Any]],
+    *,
+    bucket_count: int = 10,
+    shrinkage_to_midpoint: float = 0.20,
+) -> tuple[list[dict[str, Any]], dict[str, Any]]:
     by_bucket: dict[int, list[dict[str, Any]]] = defaultdict(list)
     for row in rows:
         by_bucket[_bucket_id(float(row["predicted_probability"]), bucket_count)].append(row)
+
     reliability: list[dict[str, Any]] = []
     mapping: dict[str, Any] = {}
     scored_raw: list[tuple[float, int]] = []
     scored_cal: list[tuple[float, int]] = []
+
     for bucket in range(bucket_count):
         lo = bucket / bucket_count
         hi = (bucket + 1) / bucket_count
         bucket_rows = by_bucket.get(bucket, [])
         row_count = len(bucket_rows)
         bucket_midpoint = (lo + hi) / 2
+
         if row_count:
             avg_pred = sum(float(r["predicted_probability"]) for r in bucket_rows) / row_count
             actual = sum(int(r["target"]) for r in bucket_rows) / row_count
@@ -89,11 +97,37 @@ def fit_bucket_calibrator(rows: list[dict[str, Any]], *, bucket_count: int = 10,
             calibrated = bucket_midpoint
             raw_pairs = []
             cal_pairs = []
+
         scored_raw.extend(raw_pairs)
         scored_cal.extend(cal_pairs)
-        reliability.append({"bucket": bucket, "probability_min": lo, "probability_max": hi, "row_count": row_count, "avg_predicted_probability": avg_pred, "actual_win_rate": actual, "calibrated_probability": calibrated, "brier_score": brier_score(raw_pairs), "log_loss": log_loss(raw_pairs)})
-        mapping[str(bucket)] = {"probability_min": lo, "probability_max": hi, "calibrated_probability": calibrated, "row_count": row_count}
-    model = {"bucket_count": bucket_count, "bucket_mapping": mapping, "baseline_brier_score": brier_score(scored_raw), "baseline_log_loss": log_loss(scored_raw), "calibrated_brier_score": brier_score(scored_cal), "calibrated_log_loss": log_loss(scored_cal)}
+        reliability.append(
+            {
+                "bucket": bucket,
+                "probability_min": lo,
+                "probability_max": hi,
+                "row_count": row_count,
+                "avg_predicted_probability": avg_pred,
+                "actual_win_rate": actual,
+                "calibrated_probability": calibrated,
+                "brier_score": brier_score(raw_pairs),
+                "log_loss": log_loss(raw_pairs),
+            }
+        )
+        mapping[str(bucket)] = {
+            "probability_min": lo,
+            "probability_max": hi,
+            "calibrated_probability": calibrated,
+            "row_count": row_count,
+        }
+
+    model = {
+        "bucket_count": bucket_count,
+        "bucket_mapping": mapping,
+        "baseline_brier_score": brier_score(scored_raw),
+        "baseline_log_loss": log_loss(scored_raw),
+        "calibrated_brier_score": brier_score(scored_cal),
+        "calibrated_log_loss": log_loss(scored_cal),
+    }
     return reliability, model
 
 
@@ -110,16 +144,37 @@ def train_calibration_model(cfg: EngineConfig) -> dict[str, Any]:
     label_path = cfg.output_root / "polymarket_training" / "labels.csv"
     output_dir = cfg.output_root / "polymarket_models"
     output_dir.mkdir(parents=True, exist_ok=True)
+
     minimum_rows = int(settings.get("minimum_training_rows", cfg.raw.get("governance_thresholds", {}).get("min_training_rows", 100)))
     bucket_count = int(settings.get("buckets", cfg.raw.get("calibration", {}).get("buckets", 10)))
     shrinkage = float(settings.get("bucket_shrinkage_to_midpoint", 0.20))
     rows = joined_feature_label_rows(str(feature_path), str(label_path))
+
     if len(rows) < minimum_rows:
-        payload = {"status": "refused", "reason": f"insufficient joined labels: {len(rows)} < {minimum_rows}", "model_version": MODEL_VERSION, "feature_set_version": FEATURE_SET_VERSION, "training_rows": len(rows)}
+        payload = {
+            "status": "refused",
+            "reason": f"insufficient joined labels: {len(rows)} < {minimum_rows}",
+            "model_version": MODEL_VERSION,
+            "feature_set_version": FEATURE_SET_VERSION,
+            "training_rows": len(rows),
+        }
         write_json(output_dir / "calibration_v2_status.json", payload)
         raise RuntimeError(payload["reason"])
+
     reliability, fitted = fit_bucket_calibrator(rows, bucket_count=bucket_count, shrinkage_to_midpoint=shrinkage)
-    model = {"model_version": MODEL_VERSION, "feature_set_version": FEATURE_SET_VERSION, "training_rows": len(rows), "bucket_mapping": fitted["bucket_mapping"], "bucket_count": bucket_count, "baseline_brier_score": fitted["baseline_brier_score"], "baseline_log_loss": fitted["baseline_log_loss"], "calibrated_brier_score": fitted["calibrated_brier_score"], "calibrated_log_loss": fitted["calibrated_log_loss"], "trained_at": now_utc(), "git_commit_hash": git_commit_hash()}
+    model = {
+        "model_version": MODEL_VERSION,
+        "feature_set_version": FEATURE_SET_VERSION,
+        "training_rows": len(rows),
+        "bucket_mapping": fitted["bucket_mapping"],
+        "bucket_count": bucket_count,
+        "baseline_brier_score": fitted["baseline_brier_score"],
+        "baseline_log_loss": fitted["baseline_log_loss"],
+        "calibrated_brier_score": fitted["calibrated_brier_score"],
+        "calibrated_log_loss": fitted["calibrated_log_loss"],
+        "trained_at": now_utc(),
+        "git_commit_hash": git_commit_hash(),
+    }
     write_json(output_dir / "calibration_v2.json", model)
     status = {"status": "trained", "training_rows": len(rows), "model_version": MODEL_VERSION}
     write_json(output_dir / "calibration_v2_status.json", status)

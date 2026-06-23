@@ -1,127 +1,259 @@
 from __future__ import annotations
 
-import json
-import time
-import urllib.parse
-import urllib.request
+from datetime import datetime, timezone
 from typing import Any
 
+import requests
+
 from .config import EngineConfig, load_config
-from .resolution_collector import DEFAULT_GAMMA_BASE_URL, infer_market_resolution_rows
-from .utils import write_csv, write_json
+from .resolution_collector import infer_market_resolution_rows
+from .utils import now_utc, parse_timestamp, write_csv, write_json
 
-DEFAULT_PAGE_SIZE = 100
+DEFAULT_GAMMA_BASE_URL = "https://gamma-api.polymarket.com/markets"
 
 
-def _fetch_gamma_page(
-    *,
-    base_url: str,
-    limit: int,
-    offset: int,
-    timeout_seconds: int,
-    query_params: dict[str, Any] | None = None,
-) -> list[dict[str, Any]]:
-    params = dict(query_params or {})
-    params.update({"closed": "true", "limit": str(limit), "offset": str(offset)})
-    url = f"{base_url}?{urllib.parse.urlencode(params)}"
-    request = urllib.request.Request(url, headers={"User-Agent": "polymarket-predictive-engine/1.0"})
-    with urllib.request.urlopen(request, timeout=timeout_seconds) as response:  # nosec B310: configured public API endpoint
-        payload = json.loads(response.read().decode("utf-8"))
+def _truthy(value: Any) -> bool:
+    if isinstance(value, bool):
+        return value
+    return str(value).strip().lower() in {"1", "true", "yes", "y"}
+
+
+def _market_close_dt(market: dict[str, Any]) -> datetime:
+    for key in ("closedTime", "closed_time", "endDate", "endDateIso", "updatedAt", "createdAt"):
+        parsed = parse_timestamp(market.get(key))
+        if parsed is not None:
+            return parsed
+    return datetime(1970, 1, 1, tzinfo=timezone.utc)
+
+
+def _is_closed_candidate(market: dict[str, Any]) -> bool:
+    return _truthy(market.get("closed"))
+
+
+def _as_market_list(payload: Any) -> list[dict[str, Any]]:
     if isinstance(payload, list):
-        return [item for item in payload if isinstance(item, dict)]
+        return [row for row in payload if isinstance(row, dict)]
     if isinstance(payload, dict):
-        for key in ("markets", "data", "results"):
-            value = payload.get(key)
-            if isinstance(value, list):
-                return [item for item in value if isinstance(item, dict)]
-        return [payload]
+        for key in ("data", "markets", "results"):
+            rows = payload.get(key)
+            if isinstance(rows, list):
+                return [row for row in rows if isinstance(row, dict)]
     return []
 
 
-def historical_backfill(cfg: EngineConfig, historical_limit: int | None = None) -> tuple[list[dict[str, Any]], list[dict[str, Any]], dict[str, Any]]:
-    settings = cfg.raw.get("historical_backfill", {})
-    resolution_settings = cfg.raw.get("resolution", {})
-    base_url = str(settings.get("gamma_base_url", resolution_settings.get("gamma_base_url", DEFAULT_GAMMA_BASE_URL)))
-    max_closed = int(historical_limit or settings.get("max_closed_markets", 250))
-    page_size = int(settings.get("page_size", DEFAULT_PAGE_SIZE))
-    timeout = int(settings.get("request_timeout_seconds", resolution_settings.get("request_timeout_seconds", 30)))
-    pause = float(settings.get("request_pause_seconds", resolution_settings.get("request_pause_seconds", 0.1)))
-    win_threshold = float(resolution_settings.get("settlement_win_threshold", 0.98))
-    loss_threshold = float(resolution_settings.get("settlement_loss_threshold", 0.02))
-    query_params = settings.get("gamma_query_params", {}) or {}
+def _fetch_page(base_url: str, params: dict[str, Any], timeout: int) -> tuple[list[dict[str, Any]], str]:
+    try:
+        response = requests.get(base_url, params=params, timeout=timeout)
+        if response.status_code == 422:
+            return [], "pagination_limit"
+        response.raise_for_status()
+        return _as_market_list(response.json()), "ok"
+    except requests.HTTPError as exc:
+        if getattr(exc.response, "status_code", None) == 422:
+            return [], "pagination_limit"
+        raise
 
-    rows: list[dict[str, Any]] = []
-    quality: list[dict[str, Any]] = []
-    errors: list[dict[str, Any]] = []
-    fetched_markets = 0
-    offset = 0
 
-    while fetched_markets < max_closed:
-        request_limit = min(page_size, max_closed - fetched_markets)
-        try:
-            markets = _fetch_gamma_page(
-                base_url=base_url,
-                limit=request_limit,
-                offset=offset,
-                timeout_seconds=timeout,
-                query_params=query_params,
+def _append_unique(candidates: list[dict[str, Any]], seen: set[str], market: dict[str, Any]) -> None:
+    market_id = str(market.get("id") or market.get("conditionId") or market.get("slug") or "")
+    if not market_id or market_id in seen:
+        return
+    seen.add(market_id)
+    if _is_closed_candidate(market):
+        candidates.append(market)
+
+
+def _scan_feed(
+    *,
+    base_url: str,
+    timeout: int,
+    page_size: int,
+    max_pages: int,
+    base_params: dict[str, Any],
+    requested_closed_markets: int,
+    label: str,
+    progress_every_pages: int,
+) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    candidates: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    pages_scanned = 0
+    rows_seen = 0
+    stop_reason = "max_pages"
+
+    for page in range(max_pages):
+        params = dict(base_params)
+        params["limit"] = page_size
+        params["offset"] = page * page_size
+        rows, status = _fetch_page(base_url, params, timeout)
+        pages_scanned += 1
+
+        if status == "pagination_limit":
+            stop_reason = "pagination_limit"
+            break
+        if not rows:
+            stop_reason = "empty_page"
+            break
+
+        rows_seen += len(rows)
+        for market in rows:
+            _append_unique(candidates, seen, market)
+
+        if progress_every_pages and (pages_scanned % progress_every_pages == 0):
+            newest = _market_close_dt(sorted(candidates, key=_market_close_dt, reverse=True)[0]).isoformat() if candidates else ""
+            print(
+                f"backfill {label} progress: pages={pages_scanned}; rows_seen={rows_seen}; closed_candidates={len(candidates)}; newest_candidate={newest}",
+                flush=True,
             )
-        except Exception as exc:
-            errors.append({
-                "market_slug": "",
-                "gamma_market_id": "",
-                "resolution_quality": "gamma_fetch_error",
-                "resolution_quality_reason": str(exc),
-                "offset": offset,
-            })
-            break
-        if not markets:
-            break
-        for market in markets:
-            fetched_markets += 1
-            try:
-                r, q = infer_market_resolution_rows(
-                    market,
-                    category_hint=str(market.get("category") or ""),
-                    win_threshold=win_threshold,
-                    loss_threshold=loss_threshold,
-                )
-                rows.extend(r)
-                quality.extend(q)
-            except Exception as exc:
-                errors.append({
-                    "market_slug": str(market.get("slug", "")),
-                    "gamma_market_id": str(market.get("id", "")),
-                    "resolution_quality": "gamma_fetch_error",
-                    "resolution_quality_reason": str(exc),
-                    "offset": offset,
-                })
-            if fetched_markets >= max_closed:
-                break
-        offset += len(markets)
-        if len(markets) < request_limit:
-            break
-        if pause:
-            time.sleep(pause)
 
-    quality.extend(errors)
+        # Closed=true can return very old markets first, so do not stop too early
+        # unless a useful number of candidates has already been collected.
+        if len(candidates) >= max(requested_closed_markets * 4, requested_closed_markets + 100):
+            stop_reason = "candidate_buffer_reached"
+            break
+
+    candidates.sort(key=_market_close_dt, reverse=True)
+    return candidates[:requested_closed_markets], {
+        "label": label,
+        "pages_scanned": pages_scanned,
+        "rows_seen": rows_seen,
+        "closed_candidates": len(candidates),
+        "stop_reason": stop_reason,
+    }
+
+
+def _candidate_markets(
+    *,
+    base_url: str,
+    page_size: int,
+    max_pages: int,
+    timeout: int,
+    gamma_query_params: dict[str, Any],
+    requested_closed_markets: int,
+    progress_every_pages: int,
+) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    all_candidates: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    scans: list[dict[str, Any]] = []
+
+    # 1) Explicit closed pagination. Gamma's closed=true feed starts with ancient
+    # rows, so we page forward until either we collect a large buffer or hit the
+    # API pagination cap, then sort locally by close time.
+    closed_params = dict(gamma_query_params or {})
+    closed_params["closed"] = "true"
+    closed_candidates, closed_meta = _scan_feed(
+        base_url=base_url,
+        timeout=timeout,
+        page_size=page_size,
+        max_pages=max_pages,
+        base_params=closed_params,
+        requested_closed_markets=requested_closed_markets,
+        label="closed_true",
+        progress_every_pages=progress_every_pages,
+    )
+    scans.append(closed_meta)
+    for market in closed_candidates:
+        _append_unique(all_candidates, seen, market)
+
+    # 2) Default recent feed as a supplement. This often contains active markets,
+    # but keeping it as a supplement is useful when Gamma returns recently closed
+    # markets in the default feed.
+    recent_params = dict(gamma_query_params or {})
+    recent_params.pop("closed", None)
+    recent_candidates, recent_meta = _scan_feed(
+        base_url=base_url,
+        timeout=timeout,
+        page_size=page_size,
+        max_pages=max_pages,
+        base_params=recent_params,
+        requested_closed_markets=requested_closed_markets,
+        label="default_recent",
+        progress_every_pages=progress_every_pages,
+    )
+    scans.append(recent_meta)
+    for market in recent_candidates:
+        _append_unique(all_candidates, seen, market)
+
+    all_candidates.sort(key=_market_close_dt, reverse=True)
+    return all_candidates[:requested_closed_markets], {
+        "strategy": "closed_true_paginated_plus_default_recent_supplement",
+        "scans": scans,
+        "merged_closed_candidates": len(all_candidates),
+    }
+
+
+def historical_backfill(
+    cfg: EngineConfig,
+    historical_limit: int | None = None,
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]], dict[str, Any]]:
+    settings = cfg.raw.get("historical_backfill", {})
+    base_url = str(settings.get("gamma_base_url", DEFAULT_GAMMA_BASE_URL))
+    requested = int(historical_limit or settings.get("max_closed_markets", 250))
+    page_size = int(settings.get("page_size", 100))
+    max_pages = int(settings.get("max_pages", 25))
+    timeout = int(settings.get("request_timeout_seconds", 30))
+    progress_every_pages = int(settings.get("progress_every_pages", 5))
+    gamma_query_params = dict(settings.get("gamma_query_params", {}) or {})
+
+    candidates, fetch_meta = _candidate_markets(
+        base_url=base_url,
+        page_size=page_size,
+        max_pages=max_pages,
+        timeout=timeout,
+        gamma_query_params=gamma_query_params,
+        requested_closed_markets=requested,
+        progress_every_pages=progress_every_pages,
+    )
+
+    resolution_rows: list[dict[str, Any]] = []
+    quality_rows: list[dict[str, Any]] = []
+    errors = 0
+
+    for market in candidates:
+        try:
+            rows, quality = infer_market_resolution_rows(market)
+            resolution_rows.extend(rows)
+            quality_rows.extend(quality)
+        except Exception as exc:
+            errors += 1
+            quality_rows.append(
+                {
+                    "gamma_market_id": market.get("id", ""),
+                    "market_slug": market.get("slug", ""),
+                    "condition_id": market.get("conditionId", ""),
+                    "resolution_quality": "backfill_error",
+                    "reason": str(exc),
+                }
+            )
+
     out_root = cfg.output_root / "polymarket_training"
     gov_root = cfg.governance_root
-    write_csv(out_root / "historical_resolutions.csv", rows)
-    write_csv(gov_root / "historical_resolution_quality_report.csv", quality)
-    clean_markets = {r.get("market_slug", "") for r in rows if r.get("resolution_quality") == "clean_settlement"}
+    write_csv(out_root / "historical_resolutions.csv", resolution_rows)
+    write_csv(gov_root / "historical_resolution_quality_report.csv", quality_rows)
+
+    clean_markets = len(
+        {
+            row.get("market_slug") or row.get("condition_id") or row.get("gamma_market_id")
+            for row in resolution_rows
+            if row.get("resolution_quality") == "clean_settlement"
+        }
+    )
+    close_dates = [_market_close_dt(market).isoformat() for market in candidates[:10]]
+
     summary = {
-        "requested_closed_markets": max_closed,
-        "fetched_markets": fetched_markets,
-        "resolution_rows": len(rows),
-        "clean_settlement_markets": len({m for m in clean_markets if m}),
-        "quality_rows": len(quality),
-        "error_count": len(errors),
+        "requested_closed_markets": requested,
+        "fetched_markets": len(candidates),
+        "resolution_rows": len(resolution_rows),
+        "quality_rows": len(quality_rows),
+        "clean_settlement_markets": clean_markets,
+        "error_count": errors,
+        "fetch_strategy": fetch_meta,
+        "newest_candidate_close_times": close_dates,
+        "collected_at_utc": now_utc(),
         "output_file": str(out_root / "historical_resolutions.csv"),
         "quality_file": str(gov_root / "historical_resolution_quality_report.csv"),
     }
-    write_json(gov_root / "historical_backfill_summary.json", summary)
-    return rows, quality, summary
+    write_json(gov_root / "historical_resolution_summary.json", summary)
+    return resolution_rows, quality_rows, summary
 
 
 def main(config_path: str, historical_limit: int | None = None) -> dict[str, Any]:

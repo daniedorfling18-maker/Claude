@@ -66,7 +66,7 @@ jobs:
           }
           expected_triggers = {
               'auto_pick.yml': {'schedule', 'workflow_dispatch'},
-              'check_superbru_fixtures.yml': {'schedule'},
+              'check_superbru_fixtures.yml': {'schedule', 'workflow_dispatch'},
               'ci.yml': {'push', 'pull_request'},
               'data-inventory.yml': {'schedule', 'push'},
               'polymarket-mispricing-bot.yml': {'schedule'},
@@ -115,7 +115,7 @@ jobs:
               text = path.read_text(encoding='utf-8')
               on_block = top_level_on_block(text)
               triggers = declared_triggers(on_block)
-              if 'workflow_dispatch' in triggers and name not in {'auto_pick.yml', 'refresh-locked-superbru-card.yml'}:
+              if 'workflow_dispatch' in triggers and name not in {'auto_pick.yml', 'check_superbru_fixtures.yml', 'refresh-locked-superbru-card.yml'}:
                   failures.append(f'{name} declares manual workflow_dispatch trigger')
               required = expected_triggers[name]
               missing_triggers = required - triggers

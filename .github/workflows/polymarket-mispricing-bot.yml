@@ -42,6 +42,20 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@v4
 
+      - name: Prepare output directory
+        run: mkdir -p outputs/polymarket
+
+      - name: Restore market-making quote history
+        uses: actions/cache@v4
+        with:
+          path: |
+            outputs/polymarket/mm_quote_state.csv
+            outputs/polymarket/mm_quote_evaluations.csv
+            outputs/polymarket/mm_quote_summary.csv
+          key: polymarket-mm-history-${{ github.run_id }}
+          restore-keys: |
+            polymarket-mm-history-
+
       - name: Set up Python
         uses: actions/setup-python@v5
         with:

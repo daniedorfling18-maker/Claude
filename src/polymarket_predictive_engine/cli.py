@@ -31,6 +31,7 @@ from .storage import init_db
 from .strategy import generate_signals
 from .validation import validate_model
 from .websocket_collector import collect_websocket
+from .websocket_normaliser import normalize_websocket_file
 
 
 COMMANDS = [
@@ -58,6 +59,7 @@ COMMANDS = [
     "paper-trade",
     "simulate-paper-edge",
     "collect-websocket",
+    "normalize-websocket",
     "portfolio",
     "governance-report",
     "live-trade",
@@ -77,6 +79,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--resolution-limit", type=int, default=None)
     parser.add_argument("--historical-limit", type=int, default=None)
     parser.add_argument("--websocket-seconds", type=int, default=60)
+    parser.add_argument("--websocket-input", default=None)
     return parser
 
 
@@ -144,6 +147,9 @@ def main(argv: list[str] | None = None) -> int:
             _print(simulate_paper_edge(cfg))
         elif args.command == "collect-websocket":
             _print(collect_websocket(cfg, websocket_seconds=args.websocket_seconds))
+        elif args.command == "normalize-websocket":
+            _, _, summary = normalize_websocket_file(cfg, input_path=args.websocket_input)
+            _print(summary)
         elif args.command == "portfolio":
             _print(portfolio_snapshot(cfg))
         elif args.command == "governance-report":

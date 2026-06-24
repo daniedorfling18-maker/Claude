@@ -1,0 +1,166 @@
+import json
+
+from pytest import approx
+
+from polymarket_predictive_engine.config import EngineConfig
+from polymarket_predictive_engine.websocket_normaliser import (
+    FEATURE_FIELDS,
+    FORBIDDEN_FEATURE_FIELDS,
+    normalize_websocket_file,
+    normalize_websocket_message,
+)
+
+BOOK_EVENT = {
+    "event_type": "book",
+    "asset_id": "tok-1",
+    "market": "0xmarket",
+    "timestamp": "1718900000000",
+    "bids": [
+        {"price": "0.50", "size": "100"},
+        {"price": "0.49", "size": "200"},
+        {"price": "0.45", "size": "500"},
+    ],
+    "asks": [
+        {"price": "0.52", "size": "150"},
+        {"price": "0.53", "size": "300"},
+        {"price": "0.60", "size": "400"},
+    ],
+}
+
+PRICE_CHANGE_EVENT = {
+    "event_type": "price_change",
+    "asset_id": "tok-1",
+    "market": "0xmarket",
+    "timestamp": "1718900001000",
+    "price_changes": [
+        {"price": "0.53", "side": "SELL", "size": "250", "best_bid": "0.50", "best_ask": "0.52"},
+    ],
+}
+
+
+def test_book_event_produces_full_feature_row():
+    features, quality = normalize_websocket_message(json.dumps(BOOK_EVENT), collected_at_utc="2026-06-24T00:00:00Z")
+    assert len(features) == 1
+    row = features[0]
+    assert row["event_type"] == "book"
+    assert row["market"] == "0xmarket"
+    assert row["asset_id"] == "tok-1"
+    assert row["source_timestamp"] == "1718900000000"
+    assert row["collected_at_utc"] == "2026-06-24T00:00:00Z"
+    assert row["best_bid"] == approx(0.50)
+    assert row["best_ask"] == approx(0.52)
+    assert row["midpoint"] == approx(0.51)
+    assert row["spread"] == approx(0.02)
+    assert row["top_bid_size"] == approx(100)
+    assert row["top_ask_size"] == approx(150)
+    assert row["bid_depth_1pct"] == approx(100)
+    assert row["ask_depth_1pct"] == approx(150)
+    assert row["bid_depth_5pct"] == approx(300)
+    assert row["ask_depth_5pct"] == approx(450)
+    assert row["book_imbalance"] == approx(-0.2)
+    # a book event carries no incremental price-change fields
+    assert row["price_change_side"] is None
+    assert row["price_change_price"] is None
+    # no quality issues for a clean two-sided book
+    assert quality == []
+
+
+def test_price_change_event_produces_top_of_book_row():
+    features, quality = normalize_websocket_message(json.dumps(PRICE_CHANGE_EVENT), collected_at_utc="2026-06-24T00:00:01Z")
+    assert len(features) == 1
+    row = features[0]
+    assert row["event_type"] == "price_change"
+    assert row["best_bid"] == approx(0.50)
+    assert row["best_ask"] == approx(0.52)
+    assert row["midpoint"] == approx(0.51)
+    assert row["spread"] == approx(0.02)
+    assert row["price_change_side"] == "SELL"
+    assert row["price_change_price"] == approx(0.53)
+    assert row["price_change_size"] == approx(250)
+    assert quality == []
+
+
+def test_array_message_with_two_book_events_yields_two_rows():
+    second = dict(BOOK_EVENT, asset_id="tok-2", timestamp="1718900002000")
+    features, quality = normalize_websocket_message(json.dumps([BOOK_EVENT, second]))
+    assert len(features) == 2
+    assert [r["asset_id"] for r in features] == ["tok-1", "tok-2"]
+    assert all(r["event_type"] == "book" for r in features)
+    assert quality == []
+
+
+def test_malformed_json_message_logs_quality_row_without_crashing():
+    features, quality = normalize_websocket_message("{not valid json", collected_at_utc="2026-06-24T00:00:02Z")
+    assert features == []
+    assert len(quality) == 1
+    assert quality[0]["issue_type"] == "malformed_json"
+    assert quality[0]["collected_at_utc"] == "2026-06-24T00:00:02Z"
+
+
+def test_missing_ask_side_is_null_safe_with_quality_warning():
+    one_sided = {
+        "event_type": "book",
+        "asset_id": "tok-1",
+        "market": "0xmarket",
+        "timestamp": "1718900003000",
+        "bids": [{"price": "0.50", "size": "100"}],
+        "asks": [],
+    }
+    features, quality = normalize_websocket_message(json.dumps(one_sided))
+    assert any(q["issue_type"] == "missing_order_book_side" for q in quality)
+    # null-safe: a row may still be emitted, but the absent side stays empty
+    assert len(features) == 1
+    row = features[0]
+    assert row["best_bid"] == approx(0.50)
+    assert row["best_ask"] is None
+    assert row["midpoint"] is None
+    assert row["spread"] is None
+
+
+def test_output_files_are_feature_only_no_label_columns(tmp_path):
+    cfg = EngineConfig(raw={"paths": {"output_root": str(tmp_path)}}, path=tmp_path / "cfg.yaml")
+    messages = [
+        {"collected_at_utc": "2026-06-24T00:00:00Z", "message": json.dumps(BOOK_EVENT)},
+        {"collected_at_utc": "2026-06-24T00:00:01Z", "message": json.dumps(PRICE_CHANGE_EVENT)},
+        {"collected_at_utc": "2026-06-24T00:00:02Z", "message": "{bad json"},
+    ]
+    input_path = tmp_path / "websocket_messages.json"
+    input_path.write_text(json.dumps(messages))
+
+    features, quality, summary = normalize_websocket_file(cfg, input_path=input_path)
+
+    feat_csv = tmp_path / "polymarket_training" / "websocket_market_features.csv"
+    qual_csv = tmp_path / "polymarket_model_governance" / "websocket_feature_quality_report.csv"
+    summ_json = tmp_path / "polymarket_model_governance" / "websocket_feature_summary.json"
+    assert feat_csv.exists() and qual_csv.exists() and summ_json.exists()
+
+    header = feat_csv.read_text(encoding="utf-8").splitlines()[0].lower()
+    for forbidden in FORBIDDEN_FEATURE_FIELDS:
+        assert forbidden not in header
+    # explicit check on the critical leakage columns
+    for banned in ("target", "winner", "resolution", "resolved", "settled", "payout"):
+        assert banned not in header
+
+    assert any(r["event_type"] == "book" for r in features)
+    assert any(q["issue_type"] == "malformed_json" for q in quality)
+    assert summary["feature_rows"] == len(features)
+    assert summary["label_columns_present"] == []
+    assert set(FEATURE_FIELDS) >= {
+        "collected_at_utc", "source_timestamp", "market", "asset_id", "event_type",
+        "best_bid", "best_ask", "midpoint", "spread", "last_trade_price",
+        "top_bid_size", "top_ask_size", "bid_depth_1pct", "ask_depth_1pct",
+        "bid_depth_5pct", "ask_depth_5pct", "book_imbalance",
+        "price_change_side", "price_change_price", "price_change_size",
+    }
+
+
+def test_minimum_required_columns_present():
+    required = {
+        "collected_at_utc", "source_timestamp", "market", "asset_id", "event_type",
+        "best_bid", "best_ask", "midpoint", "spread", "last_trade_price",
+        "top_bid_size", "top_ask_size", "bid_depth_1pct", "ask_depth_1pct",
+        "bid_depth_5pct", "ask_depth_5pct", "book_imbalance",
+        "price_change_side", "price_change_price", "price_change_size",
+    }
+    assert required <= set(FEATURE_FIELDS)
+    assert len(FEATURE_FIELDS) >= 20

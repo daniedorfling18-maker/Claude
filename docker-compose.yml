@@ -27,9 +27,11 @@ services:
     container_name: polymarket-websocket-live-features
     env_file:
       - .env
+    working_dir: /app
     command: >
-      sh -c "polymarket-engine collect-websocket --config polymarket_predictive_config.example.yaml --websocket-seconds 300 && polymarket-engine refresh-live-features --config polymarket_predictive_config.example.yaml"
+      sh -c "polymarket-engine collect-websocket --config /app/polymarket_predictive_config.example.yaml --websocket-seconds 300 && polymarket-engine refresh-live-features --config /app/polymarket_predictive_config.example.yaml"
     volumes:
+      - ./polymarket_predictive_config.example.yaml:/app/polymarket_predictive_config.example.yaml:ro
       - ./outputs:/app/outputs
       - ./inputs/polymarket:/app/inputs/polymarket:ro
     restart: unless-stopped

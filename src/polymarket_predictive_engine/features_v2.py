@@ -21,6 +21,7 @@ FORBIDDEN_SOURCE_HINTS = [
     "label",
 ]
 FORBIDDEN_FINAL_HINTS = FORBIDDEN_SOURCE_HINTS + ["outcome", "resolution"]
+FEATURE_SOURCES = {"all", "historical", "raw_snapshot", "websocket"}
 MOMENTUM_WINDOWS_HOURS = {"5m": 5 / 60, "15m": 15 / 60, "1h": 1, "6h": 6, "24h": 24}
 ROLLING_WINDOWS_HOURS = {"1h": 1, "6h": 6, "24h": 24}
 
@@ -41,6 +42,13 @@ def _assert_final_feature_schema(features: list[dict[str, Any]]) -> None:
     bad = _leakage_columns(columns, FORBIDDEN_FINAL_HINTS)
     if bad:
         raise ValueError("Potential leakage columns present in final features_v2.csv: " + ", ".join(bad))
+
+
+def _normalise_source_filter(source: str | None) -> str:
+    value = (source or "all").strip().lower()
+    if value not in FEATURE_SOURCES:
+        raise ValueError(f"Unknown feature source {source!r}. Expected one of: {', '.join(sorted(FEATURE_SOURCES))}")
+    return value
 
 
 def _std(values: list[float]) -> str | float:
@@ -82,20 +90,27 @@ def _text_features(question: str, slug: str) -> dict[str, Any]:
     }
 
 
-def _source_files(cfg: EngineConfig) -> list[Path]:
-    files = discover_files(
-        cfg.data_root,
-        [
-            "outputs/polymarket_wide/**/raw_market_snapshots.csv",
-            "outputs/polymarket_fixed/**/raw_market_snapshots.csv",
-        ],
-    )
-    historical = cfg.output_root / "polymarket_training" / "historical_price_snapshots.csv"
-    if historical.exists():
-        files.append(historical)
-    websocket = cfg.output_root / "polymarket_training" / "websocket_market_features.csv"
-    if websocket.exists():
-        files.append(websocket)
+def _source_files(cfg: EngineConfig, source: str = "all") -> list[Path]:
+    source = _normalise_source_filter(source)
+    files: list[Path] = []
+    if source in {"all", "raw_snapshot"}:
+        files.extend(
+            discover_files(
+                cfg.data_root,
+                [
+                    "outputs/polymarket_wide/**/raw_market_snapshots.csv",
+                    "outputs/polymarket_fixed/**/raw_market_snapshots.csv",
+                ],
+            )
+        )
+    if source in {"all", "historical"}:
+        historical = cfg.output_root / "polymarket_training" / "historical_price_snapshots.csv"
+        if historical.exists():
+            files.append(historical)
+    if source in {"all", "websocket"}:
+        websocket = cfg.output_root / "polymarket_training" / "websocket_market_features.csv"
+        if websocket.exists():
+            files.append(websocket)
     return files
 
 
@@ -216,12 +231,13 @@ def _normalise_rows_from_file(cfg: EngineConfig, path: Path) -> list[dict[str, A
     return normalised
 
 
-def build_features_v2(cfg: EngineConfig) -> list[dict[str, Any]]:
+def build_features_v2(cfg: EngineConfig, source: str = "all") -> list[dict[str, Any]]:
+    source = _normalise_source_filter(source)
     source_rows: list[dict[str, Any]] = []
     input_row_counts: Counter[str] = Counter()
     normalised_row_counts: Counter[str] = Counter()
 
-    for path in _source_files(cfg):
+    for path in _source_files(cfg, source=source):
         kind = _source_kind(path)
         raw_rows = read_csv_rows(path)
         input_row_counts[kind] += len(raw_rows)
@@ -337,6 +353,7 @@ def build_features_v2(cfg: EngineConfig) -> list[dict[str, Any]]:
     source_counts = Counter(str(row.get("feature_source", "unknown")) for row in features)
     summary = {
         "status": "ok",
+        "source_filter": source,
         "historical_feature_rows": source_counts.get("historical", 0),
         "raw_snapshot_feature_rows": source_counts.get("raw_snapshot", 0),
         "websocket_feature_rows": source_counts.get("websocket", 0),
@@ -352,5 +369,5 @@ def build_features_v2(cfg: EngineConfig) -> list[dict[str, Any]]:
     return features
 
 
-def main(config_path: str) -> list[dict[str, Any]]:
-    return build_features_v2(load_config(config_path))
+def main(config_path: str, source: str = "all") -> list[dict[str, Any]]:
+    return build_features_v2(load_config(config_path), source=source)

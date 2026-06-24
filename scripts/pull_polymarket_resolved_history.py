@@ -43,15 +43,10 @@ CLOB_HISTORY = "https://clob.polymarket.com/prices-history"
 _CA = "/root/.ccr/ca-bundle.crt"
 _CTX = ssl.create_default_context(cafile=_CA) if os.path.exists(_CA) else ssl.create_default_context()
 
-WORLD_CUP = re.compile(
-    r"world cup|world-cup|\bfifa\b|\bwcup\b|group [a-l]\b|"
-    r"argentina|brazil|france|england|spain|portugal|germany|netherlands|croatia|"
-    r"morocco|japan|usa|united states|mexico|canada|uruguay|colombia|senegal|"
-    r"switzerland|belgium|ghana|qatar|ecuador|iran|tunisia|australia|south korea|"
-    r"saudi arabia|cape verde|ivory coast|egypt|panama|haiti|norway|sweden|scotland|"
-    r"paraguay|uzbekistan|jordan|new zealand|south africa|bosnia|dr congo|algeria|iraq",
-    re.I,
-)
+# Match only explicit World Cup / FIFA references. An earlier version also matched
+# bare country names to catch fixtures, but that mislabelled geopolitical markets
+# (e.g. "US x Iran ceasefire") as World Cup, so the tag is kept strict here.
+WORLD_CUP = re.compile(r"world cup|world-cup|\bfifa\b|\bwcup\b|group [a-l] \b", re.I)
 
 
 def _get(url: str, timeout: int = 40):

@@ -184,3 +184,86 @@ price history. Order-book microstructure (depth, imbalance, top-of-book size) is
 live-only and could not be reconstructed historically; the calibrator already consumes those
 columns when present, so the microstructure hypothesis can be tested forward once live
 capture accumulates — but nothing obtainable from history shows an edge today.
+
+## 11. Deeper diagnostics — why there is no edge (and a data-hygiene finding)
+
+The aggregate −4% Brier result is not uniform; the diagnostics
+(`skill_model_summary.json → diagnostics`) decompose it and explain the mechanism.
+
+**Heterogeneity by market type.**
+
+| Subgroup | n | Market Brier | Model Brier | Skill |
+|---|---|---|---|---|
+| "other" (crypto/politics) | 600 | 0.060 | 0.053 | **+11.8%** |
+| country/geopolitical subset | 528 | 0.333 | 0.356 | −6.9% |
+
+The "other" markets are **near-decided** (prices ≈0.002 / 0.998, realised 0.000 / 1.000) — the
+market is essentially perfectly calibrated and the model's +11.8% is just sharpening
+already-confident, already-correct calls. There is nothing tradeable there: you cannot profit
+buying a 0.998 token to earn 0.2%. The other subset is genuinely hard (Brier 0.333, worse than
+a coin flip) and the model's smoothing *hurts* when rare events land.
+
+**Data-hygiene finding (fixed).** The subset I first tagged "worldcup" is **not** World Cup
+football. The discovery regex matched bare country names and swept in geopolitical markets
+("US×Iran ceasefire", "Khamenei out as Supreme Leader", "QatarEnergy LNG"). These rows are
+correctly *labelled* (priced token == winning token, settlement 1.0); only the tag was wrong.
+The eye-catching extreme-bucket "miscalibration" (tokens priced ~2.6c realising 40%) is **six
+genuine longshot tail events that resolved YES**, each contributing ~10 thinned snapshots —
+small-sample tail clustering, not a systematic, tradeable longshot bias. On the clean "other"
+markets the midpoint is calibrated to the decimal. The regex has been tightened to explicit
+world-cup/fifa terms so the tag means what it says.
+
+**Mechanism (feature weights).** The standardised logistic weights are dominated by the market
+price in collinear disguises — `executable_buy_price` (the ask) and `rolling_mean_1h/6h/24h`
+(moving averages of the midpoint), each ≈0.65 — while the only genuinely independent inputs,
+the `price_change_*` momentum terms, sit at ≈0.07–0.18. **The model learned to re-express the
+market price, not to add information.** That is the market-mirror result, mechanistically.
+
+**Statistical power.** Minimum detectable Brier gain ≈ 0.011 (half the 95% bootstrap CI). The
+test rules out edges larger than ~1% Brier; a genuine sub-1% edge would be invisible at 47 test
+markets. "No significant edge" means "no edge of tradeable size", not "provably exactly zero".
+
+**Selection bias (conservative, in the result's favour).** The corpus is deliberately *liquid*
+markets — only they carry a CLOB price history — i.e. the most efficient markets, the hardest
+place to find edge. Any real inefficiency more likely lives in illiquid markets, which were
+excluded and where size cannot be traded anyway.
+
+**Strengthened verdict.** The negative result holds on Brier, log-loss, ROI, and every
+time-to-close horizon, and is mechanistically explained by the features being collinear copies
+of the price. On liquid Polymarket markets the midpoint is an efficient, well-calibrated
+forecast; backfillable price-trajectory features add no tradeable edge. The only avenue not yet
+tested is live order-book microstructure, which is forward-only.
+
+## 12. Paper-trade readiness — fixes and a critical in-sample catch
+
+Making the paper-trading path ready surfaced one dangerous bug and several mechanical gaps.
+
+**Critical fix — the paper simulator was in-sample.** `train-calibration` fit the bucket
+calibrator on all 49,464 rows, and `simulate-paper-edge` then "traded" those same rows. The
+calibrator had memorised each bucket's realised rate (including the geopolitical tail hits of
+§11), so the paper P&L read **+12% ROI** — pure overfit. Re-run **out of sample** (calibrator
+fit on earlier markets, settled on later held-out markets) the same engine returns **−17% to
+−23% ROI at every edge threshold**. The in-sample number would have justified a live deployment
+that loses ~20%. `simulate-paper-edge` is now OOS-by-market by construction and stamps
+`in_sample: false`; it also reports `paper_pnl_by_edge_threshold` and an edge distribution so
+"zero orders" is transparent rather than mysterious.
+
+**Mechanical fixes.**
+
+- **`paper-readiness` gate** (`readiness.paper_trade_readiness`): paper is risk-free, so it is
+  permitted on mechanical grounds — clean data, a trained calibration model, `trading.mode` in
+  {paper, backtest}, kill switch off, and no live env flags — and explicitly does *not* require
+  proven edge (paper is how forward edge is gathered). It surfaces the honest OOS paper ROI as
+  an advisory. Live promotion still goes through `paper_live_promotion_gate` (labels + skill).
+- **`run-paper` orchestrator** (`paper_session.run_paper_session`): trains the calibrator, runs
+  the gate, runs the OOS paper simulation, and writes one report. It never touches a live order
+  path and refuses to run under `trading.mode: live` or live env flags (`live_trading: false`).
+- The canonical `predict → generate-signals → paper-trade` path remains keyed to the live
+  collector's `raw_market_snapshots`, so it produces nothing on the historical corpus; the
+  settled OOS `simulate-paper-edge` is the paper engine for resolved data. Wiring `predict` to
+  `features_v2`/WebSocket for continuous live paper trading is the remaining forward task.
+
+**Readiness verdict.** Mechanically ready: `run-paper` runs gated, settled, OOS, and safe. But
+the honest forward-style P&L is **negative**, so paper trading should be run only to accumulate
+a live track record (and to test live microstructure), never in the expectation of profit, and
+live stays correctly blocked.

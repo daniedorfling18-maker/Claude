@@ -26,7 +26,9 @@ from .pipeline_health import pipeline_health
 from .pipeline_inventory import pipeline_inventory
 from .portfolio import portfolio_snapshot
 from .price_history_collector import collect_price_history
-from .readiness import paper_live_promotion_gate, readiness_decision
+from .live_mispricing import run_live_mispricing, scan_live_mispricing
+from .paper_session import run_paper_session
+from .readiness import paper_live_promotion_gate, paper_trade_readiness, readiness_decision
 from .resolution_collector import collect_resolutions
 from .snapshot_label_collector import collect_snapshot_labels
 from .storage import init_db
@@ -64,8 +66,12 @@ COMMANDS = [
     "backtest",
     "paper-trade",
     "simulate-paper-edge",
+    "paper-readiness",
+    "run-paper",
     "collect-websocket",
     "normalize-websocket",
+    "scan-mispricing",
+    "run-live-mispricing",
     "resolve-websocket-markets",
     "collect-snapshot-labels",
     "portfolio",
@@ -169,11 +175,20 @@ def main(argv: list[str] | None = None) -> int:
             _print(paper_trade(cfg))
         elif args.command == "simulate-paper-edge":
             _print(simulate_paper_edge(cfg))
+        elif args.command == "paper-readiness":
+            _print(paper_trade_readiness(cfg))
+        elif args.command == "run-paper":
+            _print(run_paper_session(cfg))
         elif args.command == "collect-websocket":
             _print(collect_websocket(cfg, websocket_seconds=args.websocket_seconds))
         elif args.command == "normalize-websocket":
             _, _, summary = normalize_websocket_file(cfg, input_path=args.websocket_input)
             _print(summary)
+        elif args.command == "scan-mispricing":
+            _, summary = scan_live_mispricing(cfg)
+            _print(summary)
+        elif args.command == "run-live-mispricing":
+            _print(run_live_mispricing(cfg, websocket_seconds=args.websocket_seconds))
         elif args.command == "resolve-websocket-markets":
             _print(collect_websocket_resolutions(cfg))
         elif args.command == "collect-snapshot-labels":

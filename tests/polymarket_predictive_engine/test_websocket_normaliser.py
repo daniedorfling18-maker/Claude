@@ -37,6 +37,16 @@ PRICE_CHANGE_EVENT = {
     ],
 }
 
+NESTED_ASSET_PRICE_CHANGE_EVENT = {
+    "event_type": "price_change",
+    "market": "0xmarket",
+    "timestamp": "1718900001000",
+    "price_changes": [
+        {"asset_id": "tok-yes", "price": "0.53", "side": "SELL", "size": "250", "best_bid": "0.50", "best_ask": "0.52"},
+        {"asset_id": "tok-no", "price": "0.47", "side": "BUY", "size": "125", "best_bid": "0.48", "best_ask": "0.50"},
+    ],
+}
+
 
 def test_book_event_produces_full_feature_row():
     features, quality = normalize_websocket_message(json.dumps(BOOK_EVENT), collected_at_utc="2026-06-24T00:00:00Z")
@@ -70,6 +80,7 @@ def test_price_change_event_produces_top_of_book_row():
     assert len(features) == 1
     row = features[0]
     assert row["event_type"] == "price_change"
+    assert row["asset_id"] == "tok-1"
     assert row["best_bid"] == approx(0.50)
     assert row["best_ask"] == approx(0.52)
     assert row["midpoint"] == approx(0.51)
@@ -77,6 +88,15 @@ def test_price_change_event_produces_top_of_book_row():
     assert row["price_change_side"] == "SELL"
     assert row["price_change_price"] == approx(0.53)
     assert row["price_change_size"] == approx(250)
+    assert quality == []
+
+
+def test_nested_price_change_asset_ids_are_preserved_per_change():
+    features, quality = normalize_websocket_message(json.dumps(NESTED_ASSET_PRICE_CHANGE_EVENT), collected_at_utc="2026-06-24T00:00:01Z")
+    assert len(features) == 2
+    assert [row["asset_id"] for row in features] == ["tok-yes", "tok-no"]
+    assert [row["market"] for row in features] == ["0xmarket", "0xmarket"]
+    assert [row["price_change_side"] for row in features] == ["SELL", "BUY"]
     assert quality == []
 
 

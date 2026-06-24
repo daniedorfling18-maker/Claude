@@ -20,9 +20,3 @@ Rough groupings:
 - `build_* / inventory_* / join_* / seed_* / settle_* / set_*` — assemble validation
   sets, paper-trade candidates/ledgers, readiness gates and SuperBru pick boards.
 - `audit_* / diagnose_*` — one-off data-quality and condition-context checks.
-
-Throwaway / already-applied (kept only for provenance; do not re-run):
-
-- `find_hanging_test*.py` — pytest hang-bisection helpers.
-- `patch_*.py` — one-shot in-place source patchers whose edits are already committed
-  (they reference their targets by the old root-relative path).

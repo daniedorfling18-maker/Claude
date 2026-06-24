@@ -18,3 +18,18 @@ services:
       - ./outputs:/app/outputs
       - ./inputs/polymarket:/app/inputs/polymarket:ro
     restart: unless-stopped
+
+  websocket-live-features:
+    build:
+      context: .
+      args:
+        INSTALL_POLYMARKET_SDK: ${INSTALL_POLYMARKET_SDK:-false}
+    container_name: polymarket-websocket-live-features
+    env_file:
+      - .env
+    command: >
+      sh -c "polymarket-engine collect-websocket --config polymarket_predictive_config.example.yaml --websocket-seconds 300 && polymarket-engine refresh-live-features --config polymarket_predictive_config.example.yaml"
+    volumes:
+      - ./outputs:/app/outputs
+      - ./inputs/polymarket:/app/inputs/polymarket:ro
+    restart: unless-stopped

@@ -141,3 +141,46 @@ which is the correct order to build in.
 - `outputs/backtesting/superbru_realised_submitted_summary.json`
 - `outputs/backtesting/live_signal_backtest_summary.json` (oddspedia gate: not promoted)
 - `src/polymarket_predictive_engine/models/calibration_v2.py`, `validation.py`
+
+## 10. Empirical OOS test on real resolved markets (2026-06-24)
+
+The recommendations in §8 were executed: a corpus of resolved Polymarket markets was
+pulled (`scripts/pull_polymarket_resolved_history.py`), a multivariate model was trained
+on point-in-time features anchored on the market price, and it was scored **out of sample
+against the market itself** with a temporal split by market (`models/skill_model.py`).
+
+Corpus: **157 resolved markets** with CLOB price history (**30 World Cup**, the rest the
+liquid "other" set), **314 clean token labels**, 49,466 midpoint snapshots, thinned to
+3,764 point-in-time rows. Split by market: train 110 markets / 2,636 rows, test 47 markets
+/ 1,128 rows. Features were price-derived (momentum 5m–24h, rolling mean/volatility,
+time-to-close, logit-midpoint, text); order-book microstructure is not backfillable and so
+is absent here (see caveat).
+
+Result — the model does **not** beat the market out of sample; it is marginally worse:
+
+| Metric (OOS, n=1,128) | Market | Model | Skill vs market |
+|---|---|---|---|
+| Brier | 0.1876 | 0.1946 | **−3.7%** |
+| Log loss | 0.650 | 0.721 | −10.9% |
+| Mean Brier gain vs market | — | — | **−0.0070, 95% CI [−0.019, +0.004]** |
+| Uncertain region (n=390) Brier | 0.237 | 0.248 | −4.6% |
+
+`beats_market_significantly = false` — the CI for the model's gain over the market straddles
+(and centres slightly below) zero. **Obtainable-price ROI** (trade model-vs-price
+disagreements, settle at resolution, 1% fee) is not significant at any threshold: ROI
+−15% / −1.7% / +9.5% at edge cut 0.03 / 0.05 / 0.08, every CI crossing zero.
+
+Promotion gate: **314 labels ≥ the 300 live target (label gate passes), but skill is not
+significant, so the gate stays closed** for both paper and live — exactly the intended
+fail-closed behaviour.
+
+**Conclusion.** On real resolved Polymarket markets, point-in-time price-trajectory features
+add no out-of-sample forecasting or trading edge over the market midpoint — the midpoint is
+an efficient forecast and the model is, if anything, slightly worse. This **empirically
+confirms** the "market mirror" thesis of §2 with a proper OOS-vs-market test, not vs uniform.
+
+**Caveat (open question).** This tests only the features that can be *backfilled* from REST
+price history. Order-book microstructure (depth, imbalance, top-of-book size) is WebSocket-
+live-only and could not be reconstructed historically; the calibrator already consumes those
+columns when present, so the microstructure hypothesis can be tested forward once live
+capture accumulates — but nothing obtainable from history shows an edge today.

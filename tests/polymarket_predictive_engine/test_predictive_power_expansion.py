@@ -20,14 +20,30 @@ from polymarket_predictive_engine.websocket_collector import collect_websocket
 
 
 def make_cfg(tmp_path: Path, minimum_rows: int = 2, min_category_rows: int = 3) -> Path:
+    import yaml
+
     cfg = tmp_path / "config.yaml"
-    text = Path("polymarket_predictive_config.example.yaml").read_text()
-    text = text.replace('data_root: "."', f'data_root: "{tmp_path.as_posix()}"')
-    text = text.replace('output_root: "outputs"', f'output_root: "{(tmp_path / "outputs").as_posix()}"')
-    text = text.replace("minimum_training_rows: 100", f"minimum_training_rows: {minimum_rows}")
-    text = text.replace("min_rows_per_category: 50", f"min_rows_per_category: {min_category_rows}")
-    cfg.write_text(text, encoding="utf-8")
+    data = yaml.safe_load(Path("polymarket_predictive_config.example.yaml").read_text(encoding="utf-8-sig"))
+
+    data.setdefault("paths", {})
+    data["paths"]["data_root"] = tmp_path.as_posix()
+    data["paths"]["output_root"] = (tmp_path / "outputs").as_posix()
+
+    data.setdefault("calibration_v2", {})
+    data["calibration_v2"]["minimum_training_rows"] = minimum_rows
+
+    data.setdefault("governance_thresholds", {})
+    data["governance_thresholds"]["min_training_rows"] = minimum_rows
+
+    data.setdefault("calibration", {})
+    data["calibration"]["min_rows_per_category"] = min_category_rows
+
+    data.setdefault("category_calibration", {})
+    data["category_calibration"]["min_rows_per_category"] = min_category_rows
+
+    cfg.write_text(yaml.safe_dump(data, sort_keys=False), encoding="utf-8")
     return cfg
+
 
 
 def write_resolution(tmp_path: Path) -> None:

@@ -27,6 +27,7 @@ from .portfolio import portfolio_snapshot
 from .price_history_collector import collect_price_history
 from .readiness import readiness_decision
 from .resolution_collector import collect_resolutions
+from .snapshot_label_collector import collect_snapshot_labels
 from .storage import init_db
 from .strategy import generate_signals
 from .validation import validate_model
@@ -63,6 +64,7 @@ COMMANDS = [
     "collect-websocket",
     "normalize-websocket",
     "resolve-websocket-markets",
+    "collect-snapshot-labels",
     "portfolio",
     "governance-report",
     "live-trade",
@@ -165,6 +167,8 @@ def main(argv: list[str] | None = None) -> int:
             _print(summary)
         elif args.command == "resolve-websocket-markets":
             _print(collect_websocket_resolutions(cfg))
+        elif args.command == "collect-snapshot-labels":
+            _print(collect_snapshot_labels(cfg))
         elif args.command == "portfolio":
             _print(portfolio_snapshot(cfg))
         elif args.command == "governance-report":

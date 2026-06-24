@@ -10,12 +10,16 @@ from polymarket_predictive_engine.features import build_features
 
 
 def make_cfg(tmp_path: Path) -> Path:
+    import yaml
+
     cfg = tmp_path / "config.yaml"
-    text = Path("polymarket_predictive_config.example.yaml").read_text()
-    text = text.replace('data_root: "."', f'data_root: "{tmp_path.as_posix()}"')
-    text = text.replace('output_root: "outputs"', f'output_root: "{(tmp_path/"outputs").as_posix()}"')
-    cfg.write_text(text, encoding="utf-8")
+    data = yaml.safe_load(Path("polymarket_predictive_config.example.yaml").read_text(encoding="utf-8-sig"))
+    data.setdefault("paths", {})
+    data["paths"]["data_root"] = tmp_path.as_posix()
+    data["paths"]["output_root"] = (tmp_path / "outputs").as_posix()
+    cfg.write_text(yaml.safe_dump(data, sort_keys=False), encoding="utf-8")
     return cfg
+
 
 
 def write_resolution(tmp_path: Path):

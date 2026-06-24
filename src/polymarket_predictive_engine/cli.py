@@ -20,12 +20,13 @@ from .labels import build_labels
 from .models.calibrated import train_model, write_predictions
 from .models.calibration_v2 import train_calibration_model
 from .models.category_calibration import train_category_calibration
+from .models.skill_model import train_skill_model
 from .paper_edge_simulator import simulate_paper_edge
 from .pipeline_health import pipeline_health
 from .pipeline_inventory import pipeline_inventory
 from .portfolio import portfolio_snapshot
 from .price_history_collector import collect_price_history
-from .readiness import readiness_decision
+from .readiness import paper_live_promotion_gate, readiness_decision
 from .resolution_collector import collect_resolutions
 from .snapshot_label_collector import collect_snapshot_labels
 from .storage import init_db
@@ -55,6 +56,8 @@ COMMANDS = [
     "train",
     "train-calibration",
     "calibrate-categories",
+    "train-skill-model",
+    "promotion-gate",
     "validate",
     "predict",
     "generate-signals",
@@ -91,6 +94,8 @@ def build_parser() -> argparse.ArgumentParser:
         default="all",
         help="Feature source for build-features-v2. Use websocket for a fast WebSocket-only refresh.",
     )
+    parser.add_argument("--test-fraction", type=float, default=0.3, help="held-out market fraction for train-skill-model")
+    parser.add_argument("--skill-l2", type=float, default=5.0, help="L2 strength for train-skill-model")
     return parser
 
 
@@ -144,6 +149,10 @@ def main(argv: list[str] | None = None) -> int:
             _print(train_calibration_model(cfg))
         elif args.command == "calibrate-categories":
             _print(train_category_calibration(cfg))
+        elif args.command == "train-skill-model":
+            _print(train_skill_model(cfg, test_fraction=args.test_fraction, l2=args.skill_l2))
+        elif args.command == "promotion-gate":
+            _print(paper_live_promotion_gate(cfg))
         elif args.command == "validate":
             _print(validate_model(cfg))
         elif args.command == "predict":

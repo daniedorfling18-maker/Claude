@@ -2,10 +2,10 @@ from __future__ import annotations
 
 from typing import Any
 
-from .config import EngineConfig, load_config
+from .config import EngineConfig, kill_switch_active, load_config
 from .data_quality import data_quality
 from .pipeline_health import pipeline_health
-from .utils import csv_columns, discover_files, find_first_column, read_csv_rows, write_json
+from .utils import csv_columns, discover_files, find_first_column, read_csv_rows, read_json, write_json
 
 DECISIONS = {
     "APPROVED_FOR_TRAINING",
@@ -27,6 +27,74 @@ def _clean_resolved_markets_from_resolution_file(cfg: EngineConfig) -> set[str]:
             if market:
                 resolved.add(market)
     return resolved
+
+
+def count_clean_resolved_labels(cfg: EngineConfig) -> int:
+    """Unique (market, token) clean settlements across all resolution files."""
+    seen: set[tuple[str, str]] = set()
+    for name in ("market_resolutions.csv", "historical_resolutions.csv", "websocket_resolutions.csv"):
+        for row in read_csv_rows(cfg.output_root / "polymarket_training" / name):
+            if row.get("resolution_quality") != "clean_settlement":
+                continue
+            token = row.get("token_id", "")
+            if not token or str(row.get("target", "")).lower() not in {"0", "1", "true", "false"}:
+                continue
+            market = row.get("condition_id") or row.get("market_slug") or row.get("gamma_market_id") or ""
+            seen.add((market, token))
+    return len(seen)
+
+
+def paper_live_promotion_gate(cfg: EngineConfig) -> dict[str, Any]:
+    """Gate paper->live promotion on accumulated labels AND proven out-of-sample skill.
+
+    Promotion is blocked until at least ``min_resolved_labels`` clean labels exist and the
+    skill model shows a statistically significant edge over the market out of sample; live
+    additionally requires ``target_resolved_labels`` and the existing live-trading approvals.
+    """
+    thresholds = cfg.raw.get("governance_thresholds", {})
+    min_labels = int(thresholds.get("min_resolved_labels", 100))
+    target_labels = int(thresholds.get("target_resolved_labels", 300))
+
+    labels = count_clean_resolved_labels(cfg)
+    skill = read_json(cfg.governance_root / "skill_model_summary.json", default={}) or {}
+    oos = skill.get("oos_vs_market", {}) if isinstance(skill, dict) else {}
+    skill_significant = bool(oos.get("beats_market_significantly"))
+    dq_issues, _ = data_quality(cfg, allow_warnings=True)
+    # "no_raw_snapshots" reflects the live raw collector, not the historical-pull corpus
+    # this gate judges, so it is not a promotion blocker here.
+    blockers = sum(1 for i in dq_issues if i.get("severity") == "blocker" and i.get("issue_type") != "no_raw_snapshots")
+
+    paper_reasons: list[str] = []
+    if labels < min_labels:
+        paper_reasons.append(f"insufficient resolved labels: {labels} < {min_labels}")
+    if not skill_significant:
+        paper_reasons.append("no statistically significant out-of-sample skill over the market")
+    if blockers:
+        paper_reasons.append(f"{blockers} data-quality blocker(s)")
+    if kill_switch_active():
+        paper_reasons.append("kill switch active")
+
+    live_reasons = list(paper_reasons)
+    if labels < target_labels:
+        live_reasons.append(f"labels below live target: {labels} < {target_labels}")
+    if not cfg.live_approval_file.exists():
+        live_reasons.append(f"human approval file missing: {cfg.live_approval_file}")
+
+    payload = {
+        "resolved_labels": labels,
+        "min_resolved_labels": min_labels,
+        "target_resolved_labels": target_labels,
+        "skill_model_status": skill.get("status", "missing"),
+        "oos_brier_skill_vs_market": oos.get("brier_skill_vs_market"),
+        "oos_beats_market_significantly": skill_significant,
+        "data_quality_blockers": blockers,
+        "approved_for_paper_trading": not paper_reasons,
+        "approved_for_live_trading": not live_reasons,
+        "paper_blockers": paper_reasons,
+        "live_blockers": live_reasons,
+    }
+    write_json(cfg.governance_root / "promotion_gate.json", payload)
+    return payload
 
 
 def readiness_decision(cfg: EngineConfig) -> dict[str, Any]:

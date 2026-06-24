@@ -47,6 +47,7 @@ COMMANDS = [
     "build-labels",
     "build-features",
     "build-features-v2",
+    "refresh-live-features",
     "external-signals",
     "collect-external-feeds",
     "train",
@@ -80,6 +81,12 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--historical-limit", type=int, default=None)
     parser.add_argument("--websocket-seconds", type=int, default=60)
     parser.add_argument("--websocket-input", default=None)
+    parser.add_argument(
+        "--source",
+        choices=["all", "historical", "raw_snapshot", "websocket"],
+        default="all",
+        help="Feature source for build-features-v2. Use websocket for a fast WebSocket-only refresh.",
+    )
     return parser
 
 
@@ -115,7 +122,11 @@ def main(argv: list[str] | None = None) -> int:
         elif args.command == "build-features":
             _print({"features": len(build_features(cfg))})
         elif args.command == "build-features-v2":
-            _print({"features_v2": len(build_features_v2(cfg))})
+            _print({"features_v2": len(build_features_v2(cfg, source=args.source)), "source": args.source})
+        elif args.command == "refresh-live-features":
+            _, _, websocket_summary = normalize_websocket_file(cfg, input_path=args.websocket_input)
+            features = build_features_v2(cfg, source="websocket")
+            _print({"status": "ok", "websocket": websocket_summary, "features_v2": len(features), "source": "websocket"})
         elif args.command == "external-signals":
             rows, quality = normalize_external_signals(cfg)
             _print({"signals": len(rows), "quality_rows": len(quality)})

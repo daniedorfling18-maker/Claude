@@ -13,8 +13,8 @@ def generate_signals(cfg: EngineConfig) -> tuple[list[dict[str, Any]], list[dict
     preds = read_csv_rows(cfg.output_root / "polymarket_predictions" / "predictions.csv")
     approved: list[dict[str, Any]] = []
     rejected: list[dict[str, Any]] = []
-    validation_status = cfg.output_root / "polymarket_model_validation" / "model_validation_summary.json"
-    allow_prediction = readiness["decision"] in {"APPROVED_FOR_TRAINING", "APPROVED_FOR_BACKTEST_ONLY", "APPROVED_FOR_PAPER_TRADING_ONLY"}
+    allow_prediction = bool(readiness.get("approved_for_paper_trading"))
+    readiness_reason = "; ".join(readiness.get("paper_trading_blockers", []) or []) or "readiness gate is not approved"
     for pred in preds:
         edge = safe_float(pred.get("edge")) or 0.0
         signal = {
@@ -41,7 +41,7 @@ def generate_signals(cfg: EngineConfig) -> tuple[list[dict[str, Any]], list[dict
             "data_snapshot_timestamp": pred.get("prediction_timestamp", ""),
         }
         if not allow_prediction:
-            rejected.append({**signal, "rejection_reason": "data readiness does not allow signal generation"})
+            rejected.append({**signal, "rejection_reason": readiness_reason})
             continue
         decision = risk_decision(cfg, signal)
         signal["risk_decision"] = decision["reason"]

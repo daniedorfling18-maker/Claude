@@ -94,6 +94,21 @@ calibration_v2:
   minimum_training_rows: 100
   min_rows_per_category: 50
   bucket_shrinkage_to_midpoint: 0.2
+market_relative_validation:
+  bucket_count: 10
+  min_rows: 100
+  min_markets: 20
+  min_train_markets: 5
+  walk_forward_splits: 5
+  bootstrap_iterations: 1000
+  min_brier_gain_ci_low: 0.0
+  copy_tolerance: 0.000000001
+  roi_minimum_edge: 0.03
+  slippage: 0.01
+  transaction_cost: 0.0
+  liquidity_cap_fraction: 0.05
+  maximum_single_market_exposure: 0.02
+  model_feature_columns: []
 baselines:
   include:
   - midpoint
@@ -176,7 +191,11 @@ live_trading:
 governance_thresholds:
   min_training_rows: 100
   min_validation_rows: 100
+  min_validation_markets: 20
   min_resolved_markets: 100
+  min_resolved_labels: 100
+  target_resolved_labels: 300
   min_snapshots_per_market: 5
+  min_brier_gain_ci_low: 0.0
   maximum_data_quality_blockers: 0
   require_paper_trading_evidence: true

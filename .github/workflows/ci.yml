@@ -146,5 +146,31 @@ jobs:
       - name: Validate calibration profile
         run: python -m superbru_score_engine config-check --config config.yaml --profiles calibration_profiles.yaml
 
+      - name: Run online smoke prediction
+        timeout-minutes: 5
+        env:
+          THE_ODDS_API_KEY: ${{ secrets.THE_ODDS_API_KEY }}
+        run: |
+          if [ -z "${THE_ODDS_API_KEY:-}" ]; then
+            echo "THE_ODDS_API_KEY secret is not configured for online smoke prediction."
+            exit 1
+          fi
+          python -m superbru_score_engine predict --config config.yaml --out-dir outputs/online-smoke
+          python - <<'PY'
+          import csv
+          import json
+          from pathlib import Path
+
+          csv_path = Path('outputs/online-smoke/predictions.csv')
+          json_path = Path('outputs/online-smoke/predictions.json')
+          assert csv_path.exists() and csv_path.stat().st_size > 0, 'predictions.csv was not written'
+          assert json_path.exists() and json_path.stat().st_size > 0, 'predictions.json was not written'
+          rows = list(csv.DictReader(csv_path.open(newline='', encoding='utf-8')))
+          assert rows, 'online prediction produced no rows'
+          payload = json.loads(json_path.read_text(encoding='utf-8'))
+          assert isinstance(payload, list) and payload, 'online prediction JSON produced no rows'
+          print(f'Online smoke prediction produced {len(rows)} prediction row(s).')
+          PY
+
       - name: Run offline smoke prediction
         run: python -m superbru_score_engine predict --config config.example.yaml --fixtures examples/fixtures.csv --odds-json examples/odds_snapshot.json --out-dir outputs/smoke

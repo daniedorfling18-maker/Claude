@@ -1,9 +1,9 @@
 {
-  "generated_at_utc": "2026-06-22T07:01:38.435039+00:00",
-  "snapshot_id": "20260622T070121Z",
+  "generated_at_utc": "2026-06-23T16:33:59.596667+00:00",
+  "snapshot_id": "20260623T163356Z",
   "snapshot_rows": 40,
-  "history_rows": 720,
-  "previous_snapshot_id": "20260621T174502Z",
+  "history_rows": 880,
+  "previous_snapshot_id": "20260623T111227Z",
   "market_depth_counts": {
     "strong": 34,
     "unavailable": 6
@@ -15,8 +15,8 @@
   "moving_against_pick_count": 0,
   "moving_towards_pick_count": 0,
   "outputs": {
-    "history": "outputs\\market_odds_history\\market_odds_history.csv",
-    "current_snapshot": "outputs\\market_odds_history\\market_odds_snapshot_current.csv",
-    "movement_report": "outputs\\market_odds_history\\market_odds_movement_report.csv"
+    "history": "outputs/market_odds_history/market_odds_history.csv",
+    "current_snapshot": "outputs/market_odds_history/market_odds_snapshot_current.csv",
+    "movement_report": "outputs/market_odds_history/market_odds_movement_report.csv"
   }
 }

@@ -22,3 +22,27 @@ outputs/
 .chrome-oddspedia-profile/
 .playwright-oddspedia-profile/
 .playwright-oddspedia-stealth-profile/
+
+# Polymarket runtime outputs
+outputs/polymarket/*.csv
+outputs/polymarket/ml/
+outputs/polymarket/ml_archive_*/
+inputs/polymarket/model_probabilities.csv
+
+# Polymarket live-trading safety
+.env
+.env.*
+!.env.example
+config/polymarket_live_approval.yaml
+*.pem
+*.key
+*private_key*
+*wallet_secret*
+*seed_phrase*
+*mnemonic*
+*api_key*
+*secret*.log
+credentials.json
+local_credentials.json
+raw_secret_logs/
+

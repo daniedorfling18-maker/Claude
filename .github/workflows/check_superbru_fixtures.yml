@@ -1,6 +1,7 @@
 name: Superbru Fixture Checker
 
 on:
+  workflow_dispatch:
   schedule:
     # Once daily at 06:00 UTC (08:00 SAST). Verifies upcoming fixtures are covered
     # by auto_pick.yml cron entries and opens a PR with any missing ones.

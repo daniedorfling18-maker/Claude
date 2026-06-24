@@ -1,0 +1,390 @@
+services:
+  pm-wide-all-monitor:
+    build:
+      context: .
+      dockerfile: Dockerfile.monitor
+    container_name: pm-wide-all-monitor
+    env_file:
+      - .env
+    environment:
+      PM_MODE: scan
+      POLYMARKET_EXECUTE_LIVE: "false"
+      POLYMARKET_QUERY: ""
+      POLYMARKET_EVENT_LIMIT: "250"
+      POLYMARKET_SCAN_INTERVAL_SECONDS: "5"
+      POLYMARKET_SCAN_SECONDS: "86400"
+      POLYMARKET_OUTPUT_DIR: outputs/polymarket_wide/all
+    volumes:
+      - ./outputs:/app/outputs
+      - ./inputs/polymarket:/app/inputs/polymarket:ro
+    command: ["python", "scripts/polymarket_mispricing_bot.py"]
+    restart: unless-stopped
+
+  pm-wide-all-ml:
+    build:
+      context: .
+      dockerfile: Dockerfile.monitor
+    container_name: pm-wide-all-ml
+    env_file:
+      - .env
+    environment:
+      POLYMARKET_OUTPUT_DIR: outputs/polymarket_wide/all
+      POLYMARKET_ML_POLL_SECONDS: "5"
+    volumes:
+      - ./outputs:/app/outputs
+      - ./inputs/polymarket:/app/inputs/polymarket:ro
+    command: ["python", "scripts/polymarket_ml_collector.py"]
+    depends_on:
+      - pm-wide-all-monitor
+    restart: unless-stopped
+
+  pm-wide-worldcup-monitor:
+    build:
+      context: .
+      dockerfile: Dockerfile.monitor
+    container_name: pm-wide-worldcup-monitor
+    env_file:
+      - .env
+    environment:
+      PM_MODE: scan
+      POLYMARKET_EXECUTE_LIVE: "false"
+      POLYMARKET_QUERY: "world cup"
+      POLYMARKET_EVENT_LIMIT: "200"
+      POLYMARKET_SCAN_INTERVAL_SECONDS: "5"
+      POLYMARKET_SCAN_SECONDS: "86400"
+      POLYMARKET_OUTPUT_DIR: outputs/polymarket_wide/worldcup
+    volumes:
+      - ./outputs:/app/outputs
+      - ./inputs/polymarket:/app/inputs/polymarket:ro
+    command: ["python", "scripts/polymarket_mispricing_bot.py"]
+    restart: unless-stopped
+
+  pm-wide-worldcup-ml:
+    build:
+      context: .
+      dockerfile: Dockerfile.monitor
+    container_name: pm-wide-worldcup-ml
+    env_file:
+      - .env
+    environment:
+      POLYMARKET_OUTPUT_DIR: outputs/polymarket_wide/worldcup
+      POLYMARKET_ML_POLL_SECONDS: "5"
+    volumes:
+      - ./outputs:/app/outputs
+      - ./inputs/polymarket:/app/inputs/polymarket:ro
+    command: ["python", "scripts/polymarket_ml_collector.py"]
+    depends_on:
+      - pm-wide-worldcup-monitor
+    restart: unless-stopped
+
+  pm-wide-soccer-monitor:
+    build:
+      context: .
+      dockerfile: Dockerfile.monitor
+    container_name: pm-wide-soccer-monitor
+    env_file:
+      - .env
+    environment:
+      PM_MODE: scan
+      POLYMARKET_EXECUTE_LIVE: "false"
+      POLYMARKET_QUERY: "soccer"
+      POLYMARKET_EVENT_LIMIT: "200"
+      POLYMARKET_SCAN_INTERVAL_SECONDS: "5"
+      POLYMARKET_SCAN_SECONDS: "86400"
+      POLYMARKET_OUTPUT_DIR: outputs/polymarket_wide/soccer
+    volumes:
+      - ./outputs:/app/outputs
+      - ./inputs/polymarket:/app/inputs/polymarket:ro
+    command: ["python", "scripts/polymarket_mispricing_bot.py"]
+    restart: unless-stopped
+
+  pm-wide-soccer-ml:
+    build:
+      context: .
+      dockerfile: Dockerfile.monitor
+    container_name: pm-wide-soccer-ml
+    env_file:
+      - .env
+    environment:
+      POLYMARKET_OUTPUT_DIR: outputs/polymarket_wide/soccer
+      POLYMARKET_ML_POLL_SECONDS: "5"
+    volumes:
+      - ./outputs:/app/outputs
+      - ./inputs/polymarket:/app/inputs/polymarket:ro
+    command: ["python", "scripts/polymarket_ml_collector.py"]
+    depends_on:
+      - pm-wide-soccer-monitor
+    restart: unless-stopped
+
+  pm-wide-sports-monitor:
+    build:
+      context: .
+      dockerfile: Dockerfile.monitor
+    container_name: pm-wide-sports-monitor
+    env_file:
+      - .env
+    environment:
+      PM_MODE: scan
+      POLYMARKET_EXECUTE_LIVE: "false"
+      POLYMARKET_QUERY: "sports"
+      POLYMARKET_EVENT_LIMIT: "200"
+      POLYMARKET_SCAN_INTERVAL_SECONDS: "5"
+      POLYMARKET_SCAN_SECONDS: "86400"
+      POLYMARKET_OUTPUT_DIR: outputs/polymarket_wide/sports
+    volumes:
+      - ./outputs:/app/outputs
+      - ./inputs/polymarket:/app/inputs/polymarket:ro
+    command: ["python", "scripts/polymarket_mispricing_bot.py"]
+    restart: unless-stopped
+
+  pm-wide-sports-ml:
+    build:
+      context: .
+      dockerfile: Dockerfile.monitor
+    container_name: pm-wide-sports-ml
+    env_file:
+      - .env
+    environment:
+      POLYMARKET_OUTPUT_DIR: outputs/polymarket_wide/sports
+      POLYMARKET_ML_POLL_SECONDS: "5"
+    volumes:
+      - ./outputs:/app/outputs
+      - ./inputs/polymarket:/app/inputs/polymarket:ro
+    command: ["python", "scripts/polymarket_ml_collector.py"]
+    depends_on:
+      - pm-wide-sports-monitor
+    restart: unless-stopped
+
+  pm-wide-crypto-monitor:
+    build:
+      context: .
+      dockerfile: Dockerfile.monitor
+    container_name: pm-wide-crypto-monitor
+    env_file:
+      - .env
+    environment:
+      PM_MODE: scan
+      POLYMARKET_EXECUTE_LIVE: "false"
+      POLYMARKET_QUERY: "crypto"
+      POLYMARKET_EVENT_LIMIT: "200"
+      POLYMARKET_SCAN_INTERVAL_SECONDS: "5"
+      POLYMARKET_SCAN_SECONDS: "86400"
+      POLYMARKET_OUTPUT_DIR: outputs/polymarket_wide/crypto
+    volumes:
+      - ./outputs:/app/outputs
+      - ./inputs/polymarket:/app/inputs/polymarket:ro
+    command: ["python", "scripts/polymarket_mispricing_bot.py"]
+    restart: unless-stopped
+
+  pm-wide-crypto-ml:
+    build:
+      context: .
+      dockerfile: Dockerfile.monitor
+    container_name: pm-wide-crypto-ml
+    env_file:
+      - .env
+    environment:
+      POLYMARKET_OUTPUT_DIR: outputs/polymarket_wide/crypto
+      POLYMARKET_ML_POLL_SECONDS: "5"
+    volumes:
+      - ./outputs:/app/outputs
+      - ./inputs/polymarket:/app/inputs/polymarket:ro
+    command: ["python", "scripts/polymarket_ml_collector.py"]
+    depends_on:
+      - pm-wide-crypto-monitor
+    restart: unless-stopped
+
+  pm-wide-bitcoin-monitor:
+    build:
+      context: .
+      dockerfile: Dockerfile.monitor
+    container_name: pm-wide-bitcoin-monitor
+    env_file:
+      - .env
+    environment:
+      PM_MODE: scan
+      POLYMARKET_EXECUTE_LIVE: "false"
+      POLYMARKET_QUERY: "bitcoin"
+      POLYMARKET_EVENT_LIMIT: "150"
+      POLYMARKET_SCAN_INTERVAL_SECONDS: "5"
+      POLYMARKET_SCAN_SECONDS: "86400"
+      POLYMARKET_OUTPUT_DIR: outputs/polymarket_wide/bitcoin
+    volumes:
+      - ./outputs:/app/outputs
+      - ./inputs/polymarket:/app/inputs/polymarket:ro
+    command: ["python", "scripts/polymarket_mispricing_bot.py"]
+    restart: unless-stopped
+
+  pm-wide-bitcoin-ml:
+    build:
+      context: .
+      dockerfile: Dockerfile.monitor
+    container_name: pm-wide-bitcoin-ml
+    env_file:
+      - .env
+    environment:
+      POLYMARKET_OUTPUT_DIR: outputs/polymarket_wide/bitcoin
+      POLYMARKET_ML_POLL_SECONDS: "5"
+    volumes:
+      - ./outputs:/app/outputs
+      - ./inputs/polymarket:/app/inputs/polymarket:ro
+    command: ["python", "scripts/polymarket_ml_collector.py"]
+    depends_on:
+      - pm-wide-bitcoin-monitor
+    restart: unless-stopped
+
+  pm-wide-election-monitor:
+    build:
+      context: .
+      dockerfile: Dockerfile.monitor
+    container_name: pm-wide-election-monitor
+    env_file:
+      - .env
+    environment:
+      PM_MODE: scan
+      POLYMARKET_EXECUTE_LIVE: "false"
+      POLYMARKET_QUERY: "election"
+      POLYMARKET_EVENT_LIMIT: "200"
+      POLYMARKET_SCAN_INTERVAL_SECONDS: "5"
+      POLYMARKET_SCAN_SECONDS: "86400"
+      POLYMARKET_OUTPUT_DIR: outputs/polymarket_wide/election
+    volumes:
+      - ./outputs:/app/outputs
+      - ./inputs/polymarket:/app/inputs/polymarket:ro
+    command: ["python", "scripts/polymarket_mispricing_bot.py"]
+    restart: unless-stopped
+
+  pm-wide-election-ml:
+    build:
+      context: .
+      dockerfile: Dockerfile.monitor
+    container_name: pm-wide-election-ml
+    env_file:
+      - .env
+    environment:
+      POLYMARKET_OUTPUT_DIR: outputs/polymarket_wide/election
+      POLYMARKET_ML_POLL_SECONDS: "5"
+    volumes:
+      - ./outputs:/app/outputs
+      - ./inputs/polymarket:/app/inputs/polymarket:ro
+    command: ["python", "scripts/polymarket_ml_collector.py"]
+    depends_on:
+      - pm-wide-election-monitor
+    restart: unless-stopped
+
+  pm-wide-trump-monitor:
+    build:
+      context: .
+      dockerfile: Dockerfile.monitor
+    container_name: pm-wide-trump-monitor
+    env_file:
+      - .env
+    environment:
+      PM_MODE: scan
+      POLYMARKET_EXECUTE_LIVE: "false"
+      POLYMARKET_QUERY: "trump"
+      POLYMARKET_EVENT_LIMIT: "150"
+      POLYMARKET_SCAN_INTERVAL_SECONDS: "5"
+      POLYMARKET_SCAN_SECONDS: "86400"
+      POLYMARKET_OUTPUT_DIR: outputs/polymarket_wide/trump
+    volumes:
+      - ./outputs:/app/outputs
+      - ./inputs/polymarket:/app/inputs/polymarket:ro
+    command: ["python", "scripts/polymarket_mispricing_bot.py"]
+    restart: unless-stopped
+
+  pm-wide-trump-ml:
+    build:
+      context: .
+      dockerfile: Dockerfile.monitor
+    container_name: pm-wide-trump-ml
+    env_file:
+      - .env
+    environment:
+      POLYMARKET_OUTPUT_DIR: outputs/polymarket_wide/trump
+      POLYMARKET_ML_POLL_SECONDS: "5"
+    volumes:
+      - ./outputs:/app/outputs
+      - ./inputs/polymarket:/app/inputs/polymarket:ro
+    command: ["python", "scripts/polymarket_ml_collector.py"]
+    depends_on:
+      - pm-wide-trump-monitor
+    restart: unless-stopped
+
+  pm-wide-finance-monitor:
+    build:
+      context: .
+      dockerfile: Dockerfile.monitor
+    container_name: pm-wide-finance-monitor
+    env_file:
+      - .env
+    environment:
+      PM_MODE: scan
+      POLYMARKET_EXECUTE_LIVE: "false"
+      POLYMARKET_QUERY: "market"
+      POLYMARKET_EVENT_LIMIT: "200"
+      POLYMARKET_SCAN_INTERVAL_SECONDS: "5"
+      POLYMARKET_SCAN_SECONDS: "86400"
+      POLYMARKET_OUTPUT_DIR: outputs/polymarket_wide/finance
+    volumes:
+      - ./outputs:/app/outputs
+      - ./inputs/polymarket:/app/inputs/polymarket:ro
+    command: ["python", "scripts/polymarket_mispricing_bot.py"]
+    restart: unless-stopped
+
+  pm-wide-finance-ml:
+    build:
+      context: .
+      dockerfile: Dockerfile.monitor
+    container_name: pm-wide-finance-ml
+    env_file:
+      - .env
+    environment:
+      POLYMARKET_OUTPUT_DIR: outputs/polymarket_wide/finance
+      POLYMARKET_ML_POLL_SECONDS: "5"
+    volumes:
+      - ./outputs:/app/outputs
+      - ./inputs/polymarket:/app/inputs/polymarket:ro
+    command: ["python", "scripts/polymarket_ml_collector.py"]
+    depends_on:
+      - pm-wide-finance-monitor
+    restart: unless-stopped
+
+  pm-wide-fed-monitor:
+    build:
+      context: .
+      dockerfile: Dockerfile.monitor
+    container_name: pm-wide-fed-monitor
+    env_file:
+      - .env
+    environment:
+      PM_MODE: scan
+      POLYMARKET_EXECUTE_LIVE: "false"
+      POLYMARKET_QUERY: "fed"
+      POLYMARKET_EVENT_LIMIT: "150"
+      POLYMARKET_SCAN_INTERVAL_SECONDS: "5"
+      POLYMARKET_SCAN_SECONDS: "86400"
+      POLYMARKET_OUTPUT_DIR: outputs/polymarket_wide/fed
+    volumes:
+      - ./outputs:/app/outputs
+      - ./inputs/polymarket:/app/inputs/polymarket:ro
+    command: ["python", "scripts/polymarket_mispricing_bot.py"]
+    restart: unless-stopped
+
+  pm-wide-fed-ml:
+    build:
+      context: .
+      dockerfile: Dockerfile.monitor
+    container_name: pm-wide-fed-ml
+    env_file:
+      - .env
+    environment:
+      POLYMARKET_OUTPUT_DIR: outputs/polymarket_wide/fed
+      POLYMARKET_ML_POLL_SECONDS: "5"
+    volumes:
+      - ./outputs:/app/outputs
+      - ./inputs/polymarket:/app/inputs/polymarket:ro
+    command: ["python", "scripts/polymarket_ml_collector.py"]
+    depends_on:
+      - pm-wide-fed-monitor
+    restart: unless-stopped

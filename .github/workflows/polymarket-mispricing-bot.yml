@@ -2,8 +2,6 @@ name: Polymarket Mispricing Bot
 
 on:
   schedule:
-    # GitHub scheduled workflows have a 5 minute minimum interval. This run loops
-    # for just under 5 minutes and concurrency prevents overlapping runs.
     - cron: "2/5 * * * *"
 
 concurrency:
@@ -15,36 +13,47 @@ permissions:
 
 jobs:
   scan:
-    name: Scan Polymarket mispricings
+    name: Scan Polymarket prices
     runs-on: ubuntu-latest
     timeout-minutes: 6
 
     env:
-      PM_MODE: ${{ vars.POLYMARKET_MODE || 'dry_run' }}
-      POLYMARKET_EXECUTE_LIVE: ${{ vars.POLYMARKET_EXECUTE_LIVE || 'false' }}
+      PM_MODE: dry_run
+      POLYMARKET_EXECUTE_LIVE: "false"
       POLYMARKET_QUERY: ${{ vars.POLYMARKET_QUERY || 'world cup' }}
       POLYMARKET_EVENT_SLUG: ${{ vars.POLYMARKET_EVENT_SLUG || '' }}
       POLYMARKET_TAG_ID: ${{ vars.POLYMARKET_TAG_ID || '' }}
-      POLYMARKET_SCAN_SECONDS: ${{ vars.POLYMARKET_SCAN_SECONDS || '270' }}
-      POLYMARKET_SCAN_INTERVAL_SECONDS: ${{ vars.POLYMARKET_SCAN_INTERVAL_SECONDS || '15' }}
       POLYMARKET_MIN_EDGE: ${{ vars.POLYMARKET_MIN_EDGE || '0.04' }}
       POLYMARKET_MAX_SPREAD: ${{ vars.POLYMARKET_MAX_SPREAD || '0.04' }}
       POLYMARKET_MAX_ORDER_USD: ${{ vars.POLYMARKET_MAX_ORDER_USD || '5' }}
       POLYMARKET_MIN_ASK_SIZE: ${{ vars.POLYMARKET_MIN_ASK_SIZE || '5' }}
       POLYMARKET_MIN_BID_SIZE: ${{ vars.POLYMARKET_MIN_BID_SIZE || '5' }}
       POLYMARKET_ORDER_TYPE: ${{ vars.POLYMARKET_ORDER_TYPE || 'FOK' }}
-      POLYMARKET_MODEL_PROBABILITIES_CSV: ${{ vars.POLYMARKET_MODEL_PROBABILITIES_CSV || 'inputs/polymarket/model_probabilities.csv' }}
-      POLYMARKET_POSITIONS_CSV: ${{ vars.POLYMARKET_POSITIONS_CSV || 'inputs/polymarket/positions.csv' }}
+      POLYMARKET_MODEL_PROBABILITIES_CSV: inputs/polymarket/model_probabilities.csv
+      POLYMARKET_POSITIONS_CSV: inputs/polymarket/positions.csv
       POLYMARKET_OUTPUT_DIR: outputs/polymarket
-      POLYMARKET_WALLET_ADDRESS: ${{ secrets.POLYMARKET_WALLET_ADDRESS }}
-      POLYMARKET_PRIVATE_KEY: ${{ secrets.POLYMARKET_PRIVATE_KEY }}
-      CLOB_API_KEY: ${{ secrets.CLOB_API_KEY }}
-      CLOB_SECRET: ${{ secrets.CLOB_SECRET }}
-      CLOB_PASS_PHRASE: ${{ secrets.CLOB_PASS_PHRASE }}
+      POLYMARKET_WINNER_TEMPERATURE: ${{ vars.POLYMARKET_WINNER_TEMPERATURE || '1.35' }}
+      LONG_SHORT_MIN_EDGE: ${{ vars.LONG_SHORT_MIN_EDGE || vars.POLYMARKET_MIN_EDGE || '0.04' }}
+      LONG_SHORT_STAKE_USDC: ${{ vars.LONG_SHORT_STAKE_USDC || '50' }}
+      LONG_SHORT_MAX_LIVE_ORDERS: ${{ vars.LONG_SHORT_MAX_LIVE_ORDERS || '3' }}
 
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
+
+      - name: Prepare output directory
+        run: mkdir -p outputs/polymarket
+
+      - name: Restore market-making quote history
+        uses: actions/cache@v4
+        with:
+          path: |
+            outputs/polymarket/mm_quote_state.csv
+            outputs/polymarket/mm_quote_evaluations.csv
+            outputs/polymarket/mm_quote_summary.csv
+          key: polymarket-mm-history-${{ github.run_id }}
+          restore-keys: |
+            polymarket-mm-history-
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -57,17 +66,15 @@ jobs:
           python -m pip install --upgrade pip
           pip install -e .
 
-      - name: Install Polymarket SDK for live mode
-        if: env.PM_MODE == 'live'
-        run: pip install py-clob-client-v2
+      - name: Run pipeline
+        run: python scripts/run_polymarket_pipeline.py
 
-      - name: Run Polymarket scanner
-        run: python scripts/polymarket_mispricing_bot.py
-
-      - name: Upload Polymarket outputs
+      - name: Upload outputs
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: polymarket-mispricing-${{ github.run_id }}
-          path: outputs/polymarket
+          path: |
+            outputs/polymarket
+            inputs/polymarket/model_probabilities.csv
           if-no-files-found: ignore

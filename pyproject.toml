@@ -27,6 +27,7 @@ scraper = [
 ]
 
 [project.scripts]
+polymarket-engine = "polymarket_predictive_engine.cli:main"
 superbru-score = "superbru_score_engine.cli:main"
 
 [tool.setuptools.packages.find]

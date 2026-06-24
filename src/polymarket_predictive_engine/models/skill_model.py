@@ -55,7 +55,9 @@ def _sigmoid(z: float) -> float:
 def select_feature_columns(rows: list[dict[str, Any]]) -> list[str]:
     """Numeric, leakage-screened features, excluding raw market-price duplicates
     (the market logit is added separately as the anchor)."""
-    drop = {"implied_probability", "midpoint", "predicted_probability", "target"}
+    # logit_midpoint is the market anchor added separately; the raw price columns are
+    # the same signal in other units. Drop them so features mean "beyond the market".
+    drop = {"implied_probability", "midpoint", "logit_midpoint", "predicted_probability", "target"}
     return [c for c in numeric_model_feature_columns(rows) if c.lower() not in drop]
 
 
@@ -166,6 +168,48 @@ def _log_loss(pred: list[float], y: list[int]) -> float:
         p = min(1 - 1e-12, max(1e-12, p))
         tot += -(t * math.log(p) + (1 - t) * math.log(1 - p))
     return tot / len(y)
+
+
+def _reliability(probs: list[float], y: list[int], n_buckets: int = 10) -> list[dict[str, Any]]:
+    """Market calibration: mean predicted vs realized rate per probability decile."""
+    rows: list[dict[str, Any]] = []
+    for b in range(n_buckets):
+        lo, hi = b / n_buckets, (b + 1) / n_buckets
+        idx = [i for i, p in enumerate(probs) if (lo <= p < hi) or (b == n_buckets - 1 and p >= hi)]
+        if not idx:
+            continue
+        rows.append({
+            "bucket": f"[{lo:.1f},{hi:.1f})",
+            "n": len(idx),
+            "mean_predicted": round(sum(probs[i] for i in idx) / len(idx), 4),
+            "realized_rate": round(sum(y[i] for i in idx) / len(idx), 4),
+        })
+    return rows
+
+
+def _subgroup_brier(keys: list[str], model_p: list[float], market_p: list[float], y: list[int]) -> list[dict[str, Any]]:
+    groups: dict[str, list[int]] = {}
+    for i, k in enumerate(keys):
+        groups.setdefault(k, []).append(i)
+    out: list[dict[str, Any]] = []
+    for k, idx in sorted(groups.items()):
+        mb = _brier([market_p[i] for i in idx], [y[i] for i in idx])
+        modb = _brier([model_p[i] for i in idx], [y[i] for i in idx])
+        out.append({"group": k, "n": len(idx), "market_brier": round(mb, 4), "model_brier": round(modb, 4),
+                    "brier_skill_vs_market": round(1 - modb / mb, 4) if mb else None})
+    return out
+
+
+def _htc_bucket(hours: float | None) -> str:
+    if hours is None:
+        return "unknown"
+    if hours < 6:
+        return "0-6h"
+    if hours < 24:
+        return "6-24h"
+    if hours < 72:
+        return "24-72h"
+    return ">72h"
 
 
 def _bootstrap_skill_ci(market_loss: list[float], model_loss: list[float], markets: list[str],
@@ -317,6 +361,21 @@ def train_skill_model(cfg: EngineConfig, test_fraction: float = 0.3, l2: float =
          "target": y_test[i]} for i in range(len(test))
     ])
 
+    weight_names = ["intercept", "market_logit"] + feature_columns
+    feature_weights = sorted(
+        ({"name": n, "std_weight": round(float(w), 4)} for n, w in zip(weight_names, weights.tolist())),
+        key=lambda d: abs(d["std_weight"]), reverse=True,
+    )
+    htc_keys = [_htc_bucket(safe_float(r.get("hours_to_close"))) for r in test]
+    cat_keys = ["worldcup" if str(r.get("category")) == "worldcup" else "other" for r in test]
+    diagnostics = {
+        "market_reliability_oos": _reliability(market_p, y_test),
+        "skill_by_time_to_close": _subgroup_brier(htc_keys, model_p, market_p, y_test),
+        "skill_by_category": _subgroup_brier(cat_keys, model_p, market_p, y_test),
+        "standardized_feature_weights": feature_weights,
+        "min_detectable_brier_gain": round((hi - lo) / 2, 5),
+    }
+
     summary = {
         "status": "ok",
         "model_version": MODEL_VERSION,
@@ -340,6 +399,7 @@ def train_skill_model(cfg: EngineConfig, test_fraction: float = 0.3, l2: float =
             "beats_market_significantly": lo > 0,
         },
         "oos_uncertain_region": unc_block,
+        "diagnostics": diagnostics,
         "oos_edge_roi": {
             "note": "Trade model-vs-obtainable-price disagreements, settle at resolution. "
                     "fee approximates taker cost/half-spread; betting at the line itself is ~0-EV.",

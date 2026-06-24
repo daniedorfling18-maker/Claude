@@ -11,7 +11,7 @@ HORIZONS = [("1h", 1), ("6h", 6), ("24h", 24), ("3d", 72), ("7d", 168)]
 
 def _load_resolution_index(cfg: EngineConfig) -> dict[tuple[str, str], dict[str, str]]:
     rows: list[dict[str, str]] = []
-    for name in ("market_resolutions.csv", "historical_resolutions.csv"):
+    for name in ("market_resolutions.csv", "historical_resolutions.csv", "websocket_resolutions.csv"):
         rows.extend(read_csv_rows(cfg.output_root / "polymarket_training" / name))
 
     index: dict[tuple[str, str], dict[str, str]] = {}
@@ -30,6 +30,10 @@ def _load_resolution_index(cfg: EngineConfig) -> dict[tuple[str, str], dict[str,
         for market_key in keys:
             if market_key:
                 index[(market_key, token)] = row
+        # CLOB token ids are globally unique. This fallback lets WebSocket feature rows
+        # join once a websocket_resolutions.csv row exists, even if the WebSocket
+        # event did not carry a Gamma slug or condition id.
+        index.setdefault(("", token), row)
     return index
 
 
@@ -59,18 +63,34 @@ def _candidate_files(cfg: EngineConfig) -> list[Path]:
     historical = cfg.output_root / "polymarket_training" / "historical_price_snapshots.csv"
     if historical.exists():
         files.append(historical)
+
+    websocket = cfg.output_root / "polymarket_training" / "websocket_market_features.csv"
+    if websocket.exists():
+        files.append(websocket)
+
     return files
 
 
 def _columns_for_file(cfg: EngineConfig, path: Path, cols: list[str]) -> tuple[str | None, str | None, str | None, str | None, str | None]:
     is_history = path.name == "historical_price_snapshots.csv"
-    market_col = find_first_column(cols, cfg.raw.get("schema", {}).get("market_id_fields", ["market_id", "condition_id", "id", "market_slug", "slug"]))
-    token_col = find_first_column(cols, cfg.raw.get("schema", {}).get("token_id_fields", ["token_id", "asset_id", "outcome_token_id"]))
-    ts_col = "timestamp" if is_history and "timestamp" in cols else find_first_column(cols, cfg.raw.get("schema", {}).get("timestamp_fields", ["snapshot_timestamp", "timestamp", "collected_at"]))
+    is_websocket = path.name == "websocket_market_features.csv"
+
+    market_candidates = ["market"] + cfg.raw.get("schema", {}).get("market_id_fields", ["market_id", "condition_id", "id", "market_slug", "slug"])
+    token_candidates = ["asset_id"] + cfg.raw.get("schema", {}).get("token_id_fields", ["token_id", "asset_id", "outcome_token_id"])
+    timestamp_candidates = ["collected_at_utc", "source_timestamp"] + cfg.raw.get("schema", {}).get("timestamp_fields", ["snapshot_timestamp", "timestamp", "collected_at"])
+
+    market_col = find_first_column(cols, market_candidates)
+    token_col = find_first_column(cols, token_candidates)
+    ts_col = "timestamp" if is_history and "timestamp" in cols else find_first_column(cols, timestamp_candidates)
     close_col = find_first_column(cols, ["close_time", "end_time", "market_close_time", "closed_at", "end_date"])
     slug_col = find_first_column(cols, ["market_slug", "slug"])
-    return market_col, token_col, ts_col, close_col, slug_col
 
+    # WebSocket files may carry only an asset/token id. They are still valid
+    # label candidates after token-only resolution fallback is available.
+    if is_websocket and not market_col:
+        market_col = token_col
+
+    return market_col, token_col, ts_col, close_col, slug_col
 
 def build_labels(cfg: EngineConfig, allow_late_market: bool = False) -> list[dict[str, Any]]:
     resolution_index = _load_resolution_index(cfg)
@@ -88,10 +108,14 @@ def build_labels(cfg: EngineConfig, allow_late_market: bool = False) -> list[dic
             continue
 
         for row in rows:
-            market_id = row.get(market_col, "")
-            market_slug = row.get(slug_col or "", "") or market_id
             token_id = row.get(token_col, "")
-            resolution = resolution_index.get((market_id, token_id)) or resolution_index.get((market_slug, token_id))
+            market_id = row.get(market_col, "") or (token_id if path.name == "websocket_market_features.csv" else "")
+            market_slug = row.get(slug_col or "", "") or market_id
+            resolution = (
+                resolution_index.get((market_id, token_id))
+                or resolution_index.get((market_slug, token_id))
+                or resolution_index.get(("", token_id))
+            )
             target = _resolution_target(resolution)
             if target is None:
                 rejected.append(

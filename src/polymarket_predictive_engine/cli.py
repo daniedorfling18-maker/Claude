@@ -32,6 +32,7 @@ from .strategy import generate_signals
 from .validation import validate_model
 from .websocket_collector import collect_websocket
 from .websocket_normaliser import normalize_websocket_file
+from .websocket_resolution_collector import collect_websocket_resolutions
 
 
 COMMANDS = [
@@ -61,6 +62,7 @@ COMMANDS = [
     "simulate-paper-edge",
     "collect-websocket",
     "normalize-websocket",
+    "resolve-websocket-markets",
     "portfolio",
     "governance-report",
     "live-trade",
@@ -161,6 +163,8 @@ def main(argv: list[str] | None = None) -> int:
         elif args.command == "normalize-websocket":
             _, _, summary = normalize_websocket_file(cfg, input_path=args.websocket_input)
             _print(summary)
+        elif args.command == "resolve-websocket-markets":
+            _print(collect_websocket_resolutions(cfg))
         elif args.command == "portfolio":
             _print(portfolio_snapshot(cfg))
         elif args.command == "governance-report":

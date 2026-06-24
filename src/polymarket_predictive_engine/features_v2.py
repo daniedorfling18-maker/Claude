@@ -190,7 +190,7 @@ def _normalise_rows_from_file(cfg: EngineConfig, path: Path) -> list[dict[str, A
             continue
         spread = (ask - bid) if ask is not None and bid is not None else ""
 
-        market_id = row.get(market_col, "")
+        market_id = row.get(market_col, "") or (row.get(token_col, "") if is_websocket else "")
         normalised.append(
             {
                 "market_id": market_id,

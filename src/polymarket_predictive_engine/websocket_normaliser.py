@@ -230,6 +230,12 @@ def _normalise_price_change(collected_at_utc: str, event: dict[str, Any]) -> tup
         spread = _round(best_ask - best_bid) if (best_bid is not None and best_ask is not None) else None
 
         row = _blank_feature_row(collected_at_utc, event, "price_change")
+        # Polymarket's current market-channel price_change messages often keep
+        # token-level identifiers inside each price_changes[] element, not on
+        # the parent event. Preserve those asset ids so downstream feature rows
+        # can later join to labels by token_id.
+        row["market"] = _str_or_blank(change.get("market") or event.get("market") or event.get("market_id"))
+        row["asset_id"] = _str_or_blank(change.get("asset_id") or change.get("token_id") or event.get("asset_id") or event.get("token_id"))
         row["best_bid"] = best_bid
         row["best_ask"] = best_ask
         row["midpoint"] = midpoint

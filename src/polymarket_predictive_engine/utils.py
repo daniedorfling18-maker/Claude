@@ -126,7 +126,7 @@ def load_yaml(path: str | Path) -> dict[str, Any]:
         import yaml  # type: ignore
     except Exception as exc:  # pragma: no cover
         raise RuntimeError("PyYAML is required to load polymarket predictive config files") from exc
-    with Path(path).open("r", encoding="utf-8") as f:
+    with Path(path).open("r", encoding="utf-8-sig") as f:
         data = yaml.safe_load(f) or {}
     if not isinstance(data, dict):
         raise ValueError(f"Config at {path} must be a mapping")

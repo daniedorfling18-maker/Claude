@@ -1,4 +1,4 @@
-﻿paths:
+paths:
   data_root: "."
   output_root: "outputs"
   database_path: "work/polymarket/polymarket_engine.sqlite"

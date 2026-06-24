@@ -42,3 +42,25 @@ def test_risk_approves_with_kelly_cap(tmp_path):
     decision = risk_decision(cfg, {"edge": 0.10, "confidence": 0.9, "spread": 0.01, "liquidity": 1000, "executable_price": 0.4, "calibrated_probability": 0.55})
     assert decision["approved"]
     assert decision["size"] <= cfg.raw["risk"]["kelly_cap"] * cfg.raw["risk"]["bankroll"]
+
+
+def test_load_config_tolerates_byte_order_mark(tmp_path):
+    # Baseline config text with any leading BOM removed.
+    base = Path("polymarket_predictive_config.example.yaml").read_text(encoding="utf-8-sig")
+
+    # A real UTF-8 BOM glued to the front (typical of a Windows editor save).
+    real_bom = tmp_path / "real_bom.yaml"
+    real_bom.write_text("\ufeff" + base, encoding="utf-8")
+    assert load_config(real_bom).trading_mode == "paper"
+
+    # The mojibake form: BOM bytes EF BB BF decoded as cp1252 then re-saved as
+    # UTF-8 - exactly what produced the "Missing config sections: paths" error.
+    mojibake_bom = tmp_path / "mojibake_bom.yaml"
+    mojibake_bom.write_text("\u00ef\u00bb\u00bf" + base, encoding="utf-8")
+    assert load_config(mojibake_bom).trading_mode == "paper"
+
+
+def test_example_config_has_no_byte_order_mark():
+    # The committed example config must not carry a BOM; the test helpers read it
+    # with the platform default encoding, which mangles a BOM on Windows.
+    assert Path("polymarket_predictive_config.example.yaml").read_bytes()[:3] != b"\xef\xbb\xbf"

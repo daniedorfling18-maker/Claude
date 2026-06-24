@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from typing import Any
 
 from .config import EngineConfig, kill_switch_active, load_config
@@ -94,6 +95,64 @@ def paper_live_promotion_gate(cfg: EngineConfig) -> dict[str, Any]:
         "live_blockers": live_reasons,
     }
     write_json(cfg.governance_root / "promotion_gate.json", payload)
+    return payload
+
+
+def paper_trade_readiness(cfg: EngineConfig) -> dict[str, Any]:
+    """Go/no-go for *paper* trading. Paper is risk-free, so it is permitted on mechanical
+    grounds (clean data + a trained calibration model + paper mode + kill switch off) and
+    does NOT require proven edge - paper is how forward edge is gathered. The honest
+    out-of-sample paper P&L is surfaced as an advisory so the user knows what to expect.
+    Live promotion still goes through ``paper_live_promotion_gate``.
+    """
+    thresholds = cfg.raw.get("governance_thresholds", {})
+    paper_min = int(thresholds.get("min_paper_labels", 50))
+    labels = count_clean_resolved_labels(cfg)
+    model_present = (cfg.output_root / "polymarket_models" / "calibration_v2.json").exists()
+    dq_issues, _ = data_quality(cfg, allow_warnings=True)
+    blockers = [i for i in dq_issues if i.get("severity") == "blocker" and i.get("issue_type") != "no_raw_snapshots"]
+
+    paper_summary = read_json(cfg.output_root / "polymarket_paper_edge" / "paper_edge_summary.json", default={}) or {}
+    min_edge = paper_summary.get("minimum_edge", float(cfg.raw.get("risk", {}).get("minimum_edge", 0.03)))
+    oos_roi = None
+    for curve in paper_summary.get("paper_pnl_by_edge_threshold", []):
+        if abs(float(curve.get("edge_threshold", -1)) - float(min_edge)) < 1e-9:
+            oos_roi = curve.get("roi_on_staked")
+
+    reasons: list[str] = []
+    if cfg.trading_mode not in {"paper", "backtest"}:
+        reasons.append(f"trading.mode is {cfg.trading_mode}, expected paper or backtest")
+    if kill_switch_active():
+        reasons.append("kill switch active")
+    if not model_present:
+        reasons.append("no trained calibration model (run train-calibration)")
+    if labels < paper_min:
+        reasons.append(f"insufficient resolved labels: {labels} < {paper_min}")
+    if blockers:
+        reasons.append(f"{len(blockers)} data-quality blocker(s)")
+    if os.getenv("POLYMARKET_EXECUTE_LIVE") == "true" or os.getenv("POLYMARKET_LIVE_TRADING") == "1":
+        reasons.append("live execution env flag is set; refusing to run paper under live flags")
+
+    payload = {
+        "decision": "APPROVED_FOR_PAPER_TRADING" if not reasons else "NOT_APPROVED_FOR_PAPER_TRADING",
+        "approved_for_paper_trading": not reasons,
+        "resolved_labels": labels,
+        "min_paper_labels": paper_min,
+        "calibration_model_present": model_present,
+        "trading_mode": cfg.trading_mode,
+        "kill_switch_active": kill_switch_active(),
+        "data_quality_blockers": len(blockers),
+        "blockers": reasons,
+        "oos_paper_roi_at_minimum_edge": oos_roi,
+        "expected_profitable_oos": bool(oos_roi is not None and oos_roi > 0),
+        "advisory": (
+            "paper trading mechanically ready, but the model's out-of-sample paper P&L is not "
+            "positive - expect losses; run forward only to gather a live track record"
+            if (oos_roi is not None and oos_roi <= 0)
+            else "paper trading mechanically ready"
+        ),
+    }
+    write_json(cfg.governance_root / "paper_trade_readiness.json", payload)
     return payload
 
 

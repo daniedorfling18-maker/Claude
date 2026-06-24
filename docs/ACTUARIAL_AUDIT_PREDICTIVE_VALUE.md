@@ -233,3 +233,37 @@ time-to-close horizon, and is mechanistically explained by the features being co
 of the price. On liquid Polymarket markets the midpoint is an efficient, well-calibrated
 forecast; backfillable price-trajectory features add no tradeable edge. The only avenue not yet
 tested is live order-book microstructure, which is forward-only.
+
+## 12. Paper-trade readiness — fixes and a critical in-sample catch
+
+Making the paper-trading path ready surfaced one dangerous bug and several mechanical gaps.
+
+**Critical fix — the paper simulator was in-sample.** `train-calibration` fit the bucket
+calibrator on all 49,464 rows, and `simulate-paper-edge` then "traded" those same rows. The
+calibrator had memorised each bucket's realised rate (including the geopolitical tail hits of
+§11), so the paper P&L read **+12% ROI** — pure overfit. Re-run **out of sample** (calibrator
+fit on earlier markets, settled on later held-out markets) the same engine returns **−17% to
+−23% ROI at every edge threshold**. The in-sample number would have justified a live deployment
+that loses ~20%. `simulate-paper-edge` is now OOS-by-market by construction and stamps
+`in_sample: false`; it also reports `paper_pnl_by_edge_threshold` and an edge distribution so
+"zero orders" is transparent rather than mysterious.
+
+**Mechanical fixes.**
+
+- **`paper-readiness` gate** (`readiness.paper_trade_readiness`): paper is risk-free, so it is
+  permitted on mechanical grounds — clean data, a trained calibration model, `trading.mode` in
+  {paper, backtest}, kill switch off, and no live env flags — and explicitly does *not* require
+  proven edge (paper is how forward edge is gathered). It surfaces the honest OOS paper ROI as
+  an advisory. Live promotion still goes through `paper_live_promotion_gate` (labels + skill).
+- **`run-paper` orchestrator** (`paper_session.run_paper_session`): trains the calibrator, runs
+  the gate, runs the OOS paper simulation, and writes one report. It never touches a live order
+  path and refuses to run under `trading.mode: live` or live env flags (`live_trading: false`).
+- The canonical `predict → generate-signals → paper-trade` path remains keyed to the live
+  collector's `raw_market_snapshots`, so it produces nothing on the historical corpus; the
+  settled OOS `simulate-paper-edge` is the paper engine for resolved data. Wiring `predict` to
+  `features_v2`/WebSocket for continuous live paper trading is the remaining forward task.
+
+**Readiness verdict.** Mechanically ready: `run-paper` runs gated, settled, OOS, and safe. But
+the honest forward-style P&L is **negative**, so paper trading should be run only to accumulate
+a live track record (and to test live microstructure), never in the expectation of profit, and
+live stays correctly blocked.

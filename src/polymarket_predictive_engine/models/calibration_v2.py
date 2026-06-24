@@ -11,9 +11,80 @@ MODEL_VERSION = "pm-bucket-calibration-v2"
 FEATURE_SET_VERSION = "pm-point-in-time-v2"
 EPS = 1e-15
 
+MODEL_METADATA_FIELDS = {
+    "market_id",
+    "market_slug",
+    "condition_id",
+    "token_id",
+    "asset_id",
+    "question",
+    "slug",
+    "category",
+    "prediction_timestamp",
+    "snapshot_timestamp",
+    "collected_at_utc",
+    "source_timestamp",
+    "source_file",
+    "feature_source",
+    "source",
+    "event_type",
+    "price_change_side",
+}
+FORBIDDEN_MODEL_FIELD_HINTS = {
+    "target",
+    "label",
+    "winner",
+    "winning",
+    "resolved",
+    "resolution",
+    "settled",
+    "settlement",
+    "payout",
+    "outcome",
+}
+
 
 def _clip_probability(value: float) -> float:
     return max(EPS, min(1 - EPS, value))
+
+
+def _field_has_forbidden_hint(column: str) -> bool:
+    lower = column.lower()
+    return any(hint in lower for hint in FORBIDDEN_MODEL_FIELD_HINTS)
+
+
+def _column_is_numeric(rows: list[dict[str, Any]], column: str) -> bool:
+    seen = False
+    for row in rows:
+        value = row.get(column, "")
+        if value in ("", None):
+            continue
+        if safe_float(value) is None:
+            return False
+        seen = True
+    return seen
+
+
+def numeric_model_feature_columns(rows: list[dict[str, Any]]) -> list[str]:
+    """Return numeric, model-eligible columns from feature rows.
+
+    Provenance/metadata and any label-like columns are deliberately excluded so
+    traceability fields can live in features_v2.csv without becoming model inputs.
+    """
+    ordered_columns: list[str] = []
+    for row in rows:
+        for column in row.keys():
+            if column not in ordered_columns:
+                ordered_columns.append(str(column))
+
+    feature_columns: list[str] = []
+    for column in ordered_columns:
+        lower = column.lower()
+        if lower in MODEL_METADATA_FIELDS or _field_has_forbidden_hint(lower):
+            continue
+        if _column_is_numeric(rows, column):
+            feature_columns.append(column)
+    return feature_columns
 
 
 def brier_score(rows: list[tuple[float, int]]) -> float:
@@ -149,6 +220,7 @@ def train_calibration_model(cfg: EngineConfig) -> dict[str, Any]:
     bucket_count = int(settings.get("buckets", cfg.raw.get("calibration", {}).get("buckets", 10)))
     shrinkage = float(settings.get("bucket_shrinkage_to_midpoint", 0.20))
     rows = joined_feature_label_rows(str(feature_path), str(label_path))
+    model_feature_columns = numeric_model_feature_columns(rows)
 
     if len(rows) < minimum_rows:
         payload = {
@@ -157,6 +229,7 @@ def train_calibration_model(cfg: EngineConfig) -> dict[str, Any]:
             "model_version": MODEL_VERSION,
             "feature_set_version": FEATURE_SET_VERSION,
             "training_rows": len(rows),
+            "model_feature_columns": model_feature_columns,
         }
         write_json(output_dir / "calibration_v2_status.json", payload)
         raise RuntimeError(payload["reason"])
@@ -166,6 +239,7 @@ def train_calibration_model(cfg: EngineConfig) -> dict[str, Any]:
         "model_version": MODEL_VERSION,
         "feature_set_version": FEATURE_SET_VERSION,
         "training_rows": len(rows),
+        "model_feature_columns": model_feature_columns,
         "bucket_mapping": fitted["bucket_mapping"],
         "bucket_count": bucket_count,
         "baseline_brier_score": fitted["baseline_brier_score"],
@@ -176,7 +250,7 @@ def train_calibration_model(cfg: EngineConfig) -> dict[str, Any]:
         "git_commit_hash": git_commit_hash(),
     }
     write_json(output_dir / "calibration_v2.json", model)
-    status = {"status": "trained", "training_rows": len(rows), "model_version": MODEL_VERSION}
+    status = {"status": "trained", "training_rows": len(rows), "model_version": MODEL_VERSION, "model_feature_columns": model_feature_columns}
     write_json(output_dir / "calibration_v2_status.json", status)
     write_csv(cfg.governance_root / "calibration_v2_reliability.csv", reliability)
     return status

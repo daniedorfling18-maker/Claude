@@ -44,31 +44,57 @@ def count_clean_resolved_labels(cfg: EngineConfig) -> int:
     return len(seen)
 
 
-def paper_live_promotion_gate(cfg: EngineConfig) -> dict[str, Any]:
-    """Gate paper->live promotion on accumulated labels AND proven out-of-sample skill.
+def _market_relative_validation_summary(cfg: EngineConfig) -> dict[str, Any]:
+    summary = read_json(cfg.governance_root / "market_relative_validation_summary.json", default={}) or {}
+    if not summary:
+        summary = read_json(cfg.output_root / "polymarket_model_validation" / "market_relative_validation_summary.json", default={}) or {}
+    return summary if isinstance(summary, dict) else {}
 
-    Promotion is blocked until at least ``min_resolved_labels`` clean labels exist and the
-    skill model shows a statistically significant edge over the market out of sample; live
-    additionally requires ``target_resolved_labels`` and the existing live-trading approvals.
-    """
+
+def _market_relative_skill_is_credible(summary: dict[str, Any]) -> bool:
+    if not summary:
+        return False
+    if summary.get("approved_for_paper_trading") is True and summary.get("status") == "approved":
+        return True
+    ci = summary.get("brier_gain_vs_market_ci95") or [None, None]
+    try:
+        ci_low = float(ci[0])
+    except Exception:
+        return False
+    return bool(
+        summary.get("beats_market_oos")
+        and summary.get("statistically_credible_market_relative_skill")
+        and not summary.get("model_copies_market_midpoint")
+        and ci_low > 0
+    )
+
+
+def paper_live_promotion_gate(cfg: EngineConfig) -> dict[str, Any]:
+    """Gate promotion on accumulated labels and proven out-of-sample market-relative skill."""
     thresholds = cfg.raw.get("governance_thresholds", {})
     min_labels = int(thresholds.get("min_resolved_labels", 100))
     target_labels = int(thresholds.get("target_resolved_labels", 300))
 
     labels = count_clean_resolved_labels(cfg)
-    skill = read_json(cfg.governance_root / "skill_model_summary.json", default={}) or {}
-    oos = skill.get("oos_vs_market", {}) if isinstance(skill, dict) else {}
-    skill_significant = bool(oos.get("beats_market_significantly"))
+    legacy = read_json(cfg.governance_root / "skill_model_summary.json", default={}) or {}
+    legacy_oos = legacy.get("oos_vs_market", {}) if isinstance(legacy, dict) else {}
+    legacy_skill = bool(legacy_oos.get("beats_market_significantly"))
+
+    market_validation = _market_relative_validation_summary(cfg)
+    market_oos = market_validation.get("oos", {}) if isinstance(market_validation, dict) else {}
+    market_skill = _market_relative_skill_is_credible(market_validation)
+    skill_significant = market_skill or legacy_skill
+
     dq_issues, _ = data_quality(cfg, allow_warnings=True)
-    # "no_raw_snapshots" reflects the live raw collector, not the historical-pull corpus
-    # this gate judges, so it is not a promotion blocker here.
     blockers = sum(1 for i in dq_issues if i.get("severity") == "blocker" and i.get("issue_type") != "no_raw_snapshots")
 
     paper_reasons: list[str] = []
     if labels < min_labels:
         paper_reasons.append(f"insufficient resolved labels: {labels} < {min_labels}")
     if not skill_significant:
-        paper_reasons.append("no statistically significant out-of-sample skill over the market")
+        paper_reasons.append("no statistically credible out-of-sample skill over the market midpoint")
+    if market_validation.get("model_copies_market_midpoint"):
+        paper_reasons.append("model probabilities merely copy the market midpoint")
     if blockers:
         paper_reasons.append(f"{blockers} data-quality blocker(s)")
     if kill_switch_active():
@@ -84,9 +110,16 @@ def paper_live_promotion_gate(cfg: EngineConfig) -> dict[str, Any]:
         "resolved_labels": labels,
         "min_resolved_labels": min_labels,
         "target_resolved_labels": target_labels,
-        "skill_model_status": skill.get("status", "missing"),
-        "oos_brier_skill_vs_market": oos.get("brier_skill_vs_market"),
+        "skill_model_status": legacy.get("status", "missing") if isinstance(legacy, dict) else "missing",
+        "oos_brier_skill_vs_market": legacy_oos.get("brier_skill_vs_market"),
         "oos_beats_market_significantly": skill_significant,
+        "market_relative_validation_status": market_validation.get("status", "missing"),
+        "market_relative_validation_rows": market_oos.get("sample_size"),
+        "market_relative_validation_markets": market_oos.get("markets"),
+        "market_relative_brier_improvement": market_oos.get("brier_improvement_vs_market"),
+        "market_relative_brier_gain_ci95": market_validation.get("brier_gain_vs_market_ci95"),
+        "market_relative_skill_credible": market_skill,
+        "model_copies_market_midpoint": market_validation.get("model_copies_market_midpoint"),
         "data_quality_blockers": blockers,
         "approved_for_paper_trading": not paper_reasons,
         "approved_for_live_trading": not live_reasons,
@@ -133,6 +166,20 @@ def readiness_decision(cfg: EngineConfig) -> dict[str, Any]:
         decision = "APPROVED_FOR_TRAINING"
     else:
         decision = "APPROVED_FOR_BACKTEST_ONLY"
+
+    market_validation = _market_relative_validation_summary(cfg)
+    market_oos = market_validation.get("oos", {}) if isinstance(market_validation, dict) else {}
+    market_skill_credible = _market_relative_skill_is_credible(market_validation)
+    paper_blockers: list[str] = []
+    if decision not in {"APPROVED_FOR_TRAINING", "APPROVED_FOR_BACKTEST_ONLY", "APPROVED_FOR_PAPER_TRADING_ONLY"}:
+        paper_blockers.append(f"data readiness decision is {decision}")
+    if not market_skill_credible:
+        paper_blockers.append("market-relative validation has not proven statistically credible skill")
+    if market_validation.get("model_copies_market_midpoint"):
+        paper_blockers.append("model probabilities merely copy the market midpoint")
+    if kill_switch_active():
+        paper_blockers.append("kill switch active")
+
     payload = {
         "decision": decision,
         "data_quality_blockers": dq_summary.get("blocker_count", 0),
@@ -145,6 +192,14 @@ def readiness_decision(cfg: EngineConfig) -> dict[str, Any]:
         "duplicate_writer_risks": [],
         "unsuitable_latest_only_data": any(r.get("latest_joined_updating") and not r.get("raw_snapshots_growing") for r in health_rows),
         "missing_resolution_outcomes": len(joined_resolved_markets) == 0,
+        "market_relative_validation_status": market_validation.get("status", "missing"),
+        "market_relative_validation_rows": market_oos.get("sample_size"),
+        "market_relative_validation_markets": market_oos.get("markets"),
+        "market_relative_brier_improvement": market_oos.get("brier_improvement_vs_market"),
+        "market_relative_brier_gain_ci95": market_validation.get("brier_gain_vs_market_ci95"),
+        "market_relative_skill_credible": market_skill_credible,
+        "approved_for_paper_trading": not paper_blockers,
+        "paper_trading_blockers": paper_blockers,
     }
     write_json(cfg.governance_root / "data_readiness_decision.json", payload)
     return payload

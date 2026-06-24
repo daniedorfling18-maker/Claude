@@ -21,11 +21,15 @@ from __future__ import annotations
 
 import csv
 import math
+import os
 import re
+import sys
 from collections import defaultdict
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT / "src") not in sys.path:
+    sys.path.insert(0, str(ROOT / "src"))
 SNAPSHOT = ROOT / "outputs/polymarket/market_snapshot.csv"
 OUT = ROOT / "inputs/polymarket/model_probabilities.csv"
 DETAIL = ROOT / "outputs/polymarket/repo_worldcup_winner_probabilities.csv"
@@ -250,39 +254,80 @@ def completed_result_bonus() -> defaultdict[str, float]:
     return bonus
 
 
+def _row(token, probability, score):
+    ask = token["market_ask"]
+    return {
+        "team": token["team"],
+        "token_id": token["token_id"],
+        "probability": probability,
+        "repo_strength_score": score,
+        "market_bid": token["market_bid"],
+        "market_ask": ask,
+        "edge_vs_ask": "" if ask is None else probability - float(ask),
+    }
+
+
+def _winner_probabilities_via_bracket(ratings: dict[str, float]) -> dict[str, float] | None:
+    """Bracket Monte Carlo -> realistic outright-winner probabilities. None if the
+    tournament structure cannot be derived (caller falls back to the softmax)."""
+    try:
+        from polymarket_predictive_engine.tournament import derive_group_stage, simulate_winner_probabilities
+    except Exception as exc:  # noqa: BLE001
+        print(f"converter: bracket simulator unavailable ({exc}); softmax fallback", flush=True)
+        return None
+
+    fixtures = [
+        (r.get("home_team"), r.get("away_team"))
+        for r in read_csv(ROOT / "inputs/oddspedia_match_urls.csv")
+        if r.get("home_team") and r.get("away_team")
+    ]
+    results = [
+        (r["home_team"], r["away_team"], r["home_goals"], r["away_goals"])
+        for r in read_csv(ROOT / "outputs/superbru_pool/superbru_match_results_auto.csv")
+        if str(r.get("is_completed", "")).lower() == "true" and r.get("home_goals") and r.get("away_goals")
+    ]
+    if len(fixtures) < 60 or not results:
+        print("converter: insufficient fixtures/results for bracket MC; softmax fallback", flush=True)
+        return None
+
+    stage = derive_group_stage(fixtures, results, normalize=norm)
+    if len(stage.groups) != 12 or stage.warnings:
+        print(f"converter: group derivation off ({len(stage.groups)} groups {stage.warnings}); softmax fallback", flush=True)
+        return None
+
+    n_sims = int(os.getenv("POLYMARKET_WINNER_SIMS", "20000"))
+    probs = simulate_winner_probabilities(stage, ratings, n_sims=n_sims)
+    print(f"converter: bracket Monte Carlo over {n_sims} sims "
+          f"({len(stage.remaining)} remaining group matches)", flush=True)
+    return probs
+
+
 def build_winner_probabilities(tokens: list[dict[str, object]], ratings: dict[str, float]) -> list[dict[str, object]]:
     bonus = completed_result_bonus()
-    scored: list[tuple[dict[str, object], float, float]] = []
+    winner_probs = _winner_probabilities_via_bracket(ratings)
+    if winner_probs is None:
+        return _softmax_winner_probabilities(tokens, ratings, bonus)
+    output = [
+        _row(token, float(winner_probs.get(str(token["key"]), 0.0)),
+             ratings.get(str(token["key"]), 0.0) + bonus.get(str(token["key"]), 0.0))
+        for token in tokens
+    ]
+    output.sort(key=lambda item: float(item["probability"]), reverse=True)
+    return output
 
-    # Temperature > 1 keeps the first-pass converter deliberately conservative.
-    # A future bracket Monte Carlo should replace this normalisation step.
-    temperature = float(__import__("os").getenv("POLYMARKET_WINNER_TEMPERATURE", "1.35"))
+
+def _softmax_winner_probabilities(tokens, ratings, bonus) -> list[dict[str, object]]:
+    """First-pass strength softmax. Kept as a fallback when the bracket cannot be derived."""
+    temperature = float(os.getenv("POLYMARKET_WINNER_TEMPERATURE", "1.35"))
+    scored = []
     for token in tokens:
         key = str(token["key"])
         score = ratings.get(key, 0.0) + bonus.get(key, 0.0)
-        weight = math.exp(score / temperature)
-        scored.append((token, score, weight))
-
+        scored.append((token, score, math.exp(score / temperature)))
     total_weight = sum(weight for _token, _score, weight in scored)
     if total_weight <= 0:
         raise SystemExit("Could not compute winner probability weights.")
-
-    output: list[dict[str, object]] = []
-    for token, score, weight in scored:
-        probability = weight / total_weight
-        ask = token["market_ask"]
-        output.append(
-            {
-                "team": token["team"],
-                "token_id": token["token_id"],
-                "probability": probability,
-                "repo_strength_score": score,
-                "market_bid": token["market_bid"],
-                "market_ask": ask,
-                "edge_vs_ask": "" if ask is None else probability - float(ask),
-            }
-        )
-
+    output = [_row(token, weight / total_weight, score) for token, score, weight in scored]
     output.sort(key=lambda item: float(item["probability"]), reverse=True)
     return output
 

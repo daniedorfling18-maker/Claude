@@ -10,8 +10,8 @@ CANDIDATES_FILE = Path("outputs/polymarket_paper_trading/worldcup_paper_trade_ca
 PAPER_ORDERS_FILE = Path("outputs/polymarket_paper_trading/worldcup_paper_orders.csv")
 PAPER_POSITIONS_FILE = Path("outputs/polymarket_paper_trading/worldcup_paper_positions.csv")
 
-COMPLETED_VALIDATION_FILES = list(Path("outputs/polymarket_training").glob("completed_game_validation_*.csv"))
-MONEYLINE_VALIDATION_FILES = list(Path("outputs/polymarket_training").glob("*moneyline_validation*.csv"))
+COMPLETED_VALIDATION_FILES = [Path("outputs/polymarket_training/worldcup_completed_token_validation.csv")]
+MONEYLINE_VALIDATION_FILES = [Path("outputs/polymarket_training/worldcup_completed_moneyline_validation.csv")]
 
 OUT = Path("outputs/polymarket_model_governance/worldcup_model_readiness_gate.json")
 OUT_CSV = Path("outputs/polymarket_model_governance/worldcup_model_readiness_gate_checks.csv")

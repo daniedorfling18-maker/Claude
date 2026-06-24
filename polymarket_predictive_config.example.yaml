@@ -1,79 +1,146 @@
 paths:
-  data_root: "."
-  output_root: "outputs"
-  database_path: "work/polymarket/polymarket_engine.sqlite"
-
+  data_root: .
+  output_root: outputs
+  database_path: work/polymarket/polymarket_engine.sqlite
 categories:
-  - all
-  - bitcoin
-  - crypto
-  - election
-  - fed
-  - finance
-  - soccer
-  - sports
-  - trump
-  - worldcup
-
+- all
+- bitcoin
+- crypto
+- election
+- fed
+- finance
+- soccer
+- sports
+- trump
+- worldcup
 file_discovery:
   patterns:
-    - "outputs/polymarket_wide/**/*"
-    - "outputs/polymarket_fixed/**/*"
-
+  - outputs/polymarket_wide/**/*
+  - outputs/polymarket_fixed/**/*
 schema:
-  timestamp_fields: [snapshot_timestamp, timestamp, collected_at, updated_at]
-  market_id_fields: [market_id, condition_id, id, market_slug, slug]
-  token_id_fields: [token_id, asset_id, outcome_token_id]
-  required_raw_fields: [snapshot_timestamp, market_id, token_id]
-
+  timestamp_fields:
+  - snapshot_timestamp
+  - timestamp
+  - collected_at
+  - updated_at
+  market_id_fields:
+  - market_id
+  - condition_id
+  - id
+  - market_slug
+  - slug
+  token_id_fields:
+  - token_id
+  - asset_id
+  - outcome_token_id
+  required_raw_fields:
+  - snapshot_timestamp
+  - market_id
+  - token_id
 prediction_horizons:
-  hours_before_close: [1, 6, 24, 72, 168]
+  hours_before_close:
+  - 1
+  - 6
+  - 24
+  - 72
+  - 168
   include_all_valid_snapshots: true
-
 freshness_thresholds:
   collector_stale_minutes: 60
   latest_snapshot_stale_minutes: 30
-
+resolution:
+  gamma_base_url: https://gamma-api.polymarket.com/markets
+  request_timeout_seconds: 20
+  request_pause_seconds: 0.05
+  max_markets: 250
+  settlement_win_threshold: 0.98
+  settlement_loss_threshold: 0.02
+historical_backfill:
+  gamma_base_url: https://gamma-api.polymarket.com/markets
+  max_closed_markets: 250
+  page_size: 100
+  request_timeout_seconds: 30
+  request_pause_seconds: 0.1
+  gamma_query_params: {}
+historical_price_history:
+  clob_base_url: https://clob.polymarket.com
+  max_tokens: 500
+  interval: max
+  fidelity_seconds: 300
+  request_timeout_seconds: 30
+  request_pause_seconds: 0.1
 splits:
   method: time_based
   train_fraction: 0.6
   validation_fraction: 0.2
   test_fraction: 0.2
-
 holdout:
   untouched_final_holdout_fraction: 0.1
   minimum_holdout_rows: 100
-
 model:
   type: calibrated_logistic_or_midpoint_shrinkage
   minimum_training_rows: 100
   probability_shrinkage_to_midpoint: 0.35
   random_seed: 20260623
-
 calibration:
-  methods: [isotonic, platt, midpoint_shrinkage]
+  methods:
+  - isotonic
+  - platt
+  - midpoint_shrinkage
   buckets: 10
   maximum_calibration_error: 0.05
-
+calibration_v2:
+  buckets: 10
+  minimum_training_rows: 100
+  min_rows_per_category: 50
+  bucket_shrinkage_to_midpoint: 0.2
 baselines:
-  include: [midpoint, best_ask_implied, last_price, favourite_market_implied, category_average, no_trade]
-
+  include:
+  - midpoint
+  - best_ask_implied
+  - last_price
+  - favourite_market_implied
+  - category_average
+  - no_trade
 external_signals:
   manual_csv_paths: []
-  sports_match_confidence_threshold: 0.90
+  sports_match_confidence_threshold: 0.9
   allow_election_manual_only: true
-
+external_feeds:
+  request_timeout_seconds: 30
+  feeds: []
+websocket_market_data:
+  url: wss://ws-subscriptions-clob.polymarket.com/ws/market
+  market_ids: &id001
+  - '53767774368871487958852302456977659279367510767287923221897564430044671384128'
+  - '37821011509134197239774147789543695590581250725127252293498663449982199078732'
+  - '91399166209216163431231173062786395215620442056888296437823451282732143924332'
+  - '79641397642615548218794504851128898947984007797041258964017360526641252308395'
+  - '87499184655381882963387695123459684203225076159948233321927840510488271812742'
+  - '84601253470291336367793929535870321504816493185633556218432665574668042171346'
+  - '48187624975632752295312561743215593385055796608528135882106706924535491220897'
+  - '97671046113000204950878221061928218613413930047906731660847862929889111113868'
+  - '9993362623254508594982212570716155560975868718584876749669600087469425428671'
+  - '31605067815721599197943501343636662558593313871709056980278563636917591139852'
+  - '81847767762276015376638362563472043266790475968888863771265036582040507866830'
+  - '284717320081839269860357237903286904886607070475454682161945348414652316634'
+  - '66265680142177294497572235248200066124169304713332831132816781431445413907569'
+  - '96800156676225921195730752129404882998029968936208844846299752417475268205786'
+  subscription_message:
+    assets_ids: *id001
+    type: market
+    custom_feature_enabled: true
+paper_edge_simulator:
+  minimum_edge: 0.03
 backtest:
   execute_at: best_ask
   exit_at: best_bid_or_resolution
   hold_to_resolution: true
   allow_early_exit: false
-
 costs:
   transaction_cost: 0.0
   spread_assumption: 0.02
   slippage: 0.01
-
 risk:
   bankroll: 1000
   minimum_edge: 0.03
@@ -83,10 +150,10 @@ risk:
   minimum_time_to_close_minutes: 15
   maximum_resolution_risk: 0.25
   maximum_single_market_exposure: 0.02
-  maximum_category_exposure: 0.10
-  maximum_correlated_exposure: 0.10
+  maximum_category_exposure: 0.1
+  maximum_correlated_exposure: 0.1
   maximum_daily_loss: 0.03
-  maximum_drawdown: 0.10
+  maximum_drawdown: 0.1
   maximum_open_orders: 10
   maximum_order_rate_per_minute: 3
   maximum_slippage: 0.02
@@ -94,22 +161,18 @@ risk:
   category_blacklist: []
   market_blacklist: []
   event_blacklist: []
-
 paper_trading:
   enabled: true
   starting_cash: 1000
   persist_orders: true
-
 trading:
   mode: paper
-
 live_trading:
   enabled: false
-  approval_file: "config/polymarket_live_approval.yaml"
-  require_env_var: "POLYMARKET_LIVE_TRADING"
+  approval_file: config/polymarket_live_approval.yaml
+  require_env_var: POLYMARKET_LIVE_TRADING
   require_kill_switch_clear: true
   limit_orders_only: true
-
 governance_thresholds:
   min_training_rows: 100
   min_validation_rows: 100

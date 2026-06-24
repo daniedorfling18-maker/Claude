@@ -53,9 +53,34 @@ class EngineConfig:
         return int(self.raw.get("governance_thresholds", {}).get("min_snapshots_per_market", 5))
 
 
+def _normalise_config_keys(value: Any) -> Any:
+    """Strip a stray UTF-8 BOM from mapping keys.
+
+    A config file saved with a BOM (common from Windows editors) parses with the
+    BOM glued to the first key - as U+FEFF when read as UTF-8, or as the mojibake
+    "\\xef\\xbb\\xbf" when those bytes were decoded as cp1252 somewhere upstream.
+    Either form makes ``paths`` look like a missing section, so we normalise keys
+    before validation.
+    """
+    bom = "\ufeff"  # real UTF-8 BOM character
+    mojibake_bom = "\u00ef\u00bb\u00bf"  # BOM bytes EF BB BF decoded as cp1252/latin-1
+    if isinstance(value, dict):
+        cleaned: dict[Any, Any] = {}
+        for key, item in value.items():
+            if isinstance(key, str):
+                key = key.lstrip(bom)
+                if key.startswith(mojibake_bom):
+                    key = key.replace(mojibake_bom, "", 1)
+            cleaned[key] = _normalise_config_keys(item)
+        return cleaned
+    if isinstance(value, list):
+        return [_normalise_config_keys(item) for item in value]
+    return value
+
+
 def load_config(path: str | Path) -> EngineConfig:
     path = Path(path)
-    data = load_yaml(path)
+    data = _normalise_config_keys(load_yaml(path))
     cfg = EngineConfig(raw=data, path=path)
     validate_config(cfg)
     return cfg

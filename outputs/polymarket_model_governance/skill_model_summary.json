@@ -1,0 +1,111 @@
+{
+  "feature_columns": [
+    "executable_buy_price",
+    "hours_to_close",
+    "days_to_close",
+    "is_last_24h",
+    "is_last_6h",
+    "is_last_1h",
+    "hour_of_day",
+    "day_of_week",
+    "logit_midpoint",
+    "distance_to_half",
+    "snapshots_so_far",
+    "question_length",
+    "slug_tokens",
+    "word_will",
+    "word_by",
+    "word_before",
+    "word_after",
+    "word_or",
+    "word_and",
+    "price_change_5m",
+    "price_change_15m",
+    "price_change_1h",
+    "price_change_6h",
+    "price_change_24h",
+    "rolling_mean_1h",
+    "rolling_volatility_1h",
+    "rolling_mean_6h",
+    "rolling_volatility_6h",
+    "rolling_mean_24h",
+    "rolling_volatility_24h"
+  ],
+  "generated_at_utc": "2026-06-24T14:20:01Z",
+  "joined_rows": 3764,
+  "l2": 5.0,
+  "markets": 157,
+  "model_version": "pm-skill-logit-v1",
+  "oos_edge_roi": {
+    "by_threshold": [
+      {
+        "fee": 0.01,
+        "n_bets": 368,
+        "n_markets": 22,
+        "profitable_significantly": false,
+        "roi": -0.1498527491589067,
+        "roi_ci95": [
+          -0.4402418155356883,
+          0.1129761253048244
+        ],
+        "threshold": 0.03
+      },
+      {
+        "fee": 0.01,
+        "n_bets": 285,
+        "n_markets": 20,
+        "profitable_significantly": false,
+        "roi": -0.016528741823968573,
+        "roi_ci95": [
+          -0.3371616497026788,
+          0.24503347303107856
+        ],
+        "threshold": 0.05
+      },
+      {
+        "fee": 0.01,
+        "n_bets": 177,
+        "n_markets": 14,
+        "profitable_significantly": false,
+        "roi": 0.09459957881711854,
+        "roi_ci95": [
+          -0.23255119878345146,
+          0.3355158173014352
+        ],
+        "threshold": 0.08
+      }
+    ],
+    "note": "Trade model-vs-obtainable-price disagreements, settle at resolution. fee approximates taker cost/half-spread; betting at the line itself is ~0-EV."
+  },
+  "oos_uncertain_region": {
+    "brier_skill_vs_market": -0.046379557515448866,
+    "market_brier": 0.23726636025641012,
+    "model_brier": 0.24827066905840353,
+    "n": 390
+  },
+  "oos_vs_market": {
+    "base_rate": 0.5,
+    "beats_market_significantly": false,
+    "brier_skill_vs_market": -0.03737051308374695,
+    "log_loss_skill_vs_market": -0.10917136313213938,
+    "market_brier": 0.18758021453900725,
+    "market_log_loss": 0.6497168493737034,
+    "mean_brier_gain_ci95": [
+      -0.018702411893769835,
+      0.003734323358544156
+    ],
+    "mean_brier_gain_vs_market": -0.007009968861681976,
+    "model_brier": 0.1945901834006893,
+    "model_log_loss": 0.7206473234697496,
+    "n": 1128
+  },
+  "split": {
+    "test_markets": 47,
+    "test_rows": 1128,
+    "train_markets": 110,
+    "train_rows": 2636
+  },
+  "status": "ok",
+  "test_fraction": 0.3,
+  "verdict": "no statistically significant edge over the market OOS"
+}

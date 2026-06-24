@@ -7,7 +7,7 @@ import time
 from typing import Any
 
 from .config import EngineConfig, load_config
-from .utils import now_utc, write_json
+from .utils import now_utc, read_json, write_json
 
 
 async def _collect_messages(url: str, seconds: int, subscription_message: dict[str, Any] | None) -> list[dict[str, Any]]:
@@ -24,6 +24,13 @@ async def _collect_messages(url: str, seconds: int, subscription_message: dict[s
                 continue
             rows.append({"collected_at_utc": now_utc(), "message": message})
     return rows
+
+
+def _existing_messages(path) -> list[dict[str, Any]]:
+    existing = read_json(path, default=[])
+    if not isinstance(existing, list):
+        return []
+    return [row for row in existing if isinstance(row, dict)]
 
 
 def collect_websocket(cfg: EngineConfig, websocket_seconds: int = 60) -> dict[str, Any]:
@@ -45,9 +52,21 @@ def collect_websocket(cfg: EngineConfig, websocket_seconds: int = 60) -> dict[st
 
     url = str(settings.get("url", "wss://ws-subscriptions-clob.polymarket.com/ws/market"))
     subscription = settings.get("subscription_message") or {"markets": market_ids, "type": "market"}
-    rows = asyncio.run(_collect_messages(url, websocket_seconds, subscription))
-    write_json(out_root / "websocket_messages.json", rows)
-    summary = {"status": "collected", "messages": len(rows), "seconds": websocket_seconds, "output_file": str(out_root / "websocket_messages.json")}
+    output_file = out_root / "websocket_messages.json"
+    existing_rows = _existing_messages(output_file)
+    new_rows = asyncio.run(_collect_messages(url, websocket_seconds, subscription))
+    combined_rows = existing_rows + new_rows
+    write_json(output_file, combined_rows)
+    summary = {
+        "status": "collected",
+        "messages": len(combined_rows),
+        "new_messages": len(new_rows),
+        "existing_messages": len(existing_rows),
+        "total_messages": len(combined_rows),
+        "seconds": websocket_seconds,
+        "output_file": str(output_file),
+        "append_mode": True,
+    }
     write_json(out_root / "websocket_summary.json", summary)
     return summary
 

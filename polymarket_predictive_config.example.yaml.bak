@@ -1,4 +1,4 @@
-﻿paths:
+paths:
   data_root: "."
   output_root: "outputs"
   database_path: "work/polymarket/polymarket_engine.sqlite"
@@ -104,15 +104,8 @@ external_feeds:
 
 websocket_market_data:
   url: "wss://ws-subscriptions-clob.polymarket.com/ws/market"
-  market_ids:
-    - "98022490269692409998126496127597032490334070080325855126491859374983463996227"
-    - "53831553061883006530739877284105938919721408776239639687877978808906551086026"
-  subscription_message:
-    assets_ids:
-      - "98022490269692409998126496127597032490334070080325855126491859374983463996227"
-      - "53831553061883006530739877284105938919721408776239639687877978808906551086026"
-    type: "market"
-    custom_feature_enabled: true
+  market_ids: []
+  subscription_message: null
 
 paper_edge_simulator:
   minimum_edge: 0.03

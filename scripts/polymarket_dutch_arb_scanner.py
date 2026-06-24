@@ -78,7 +78,7 @@ def discover_groups(max_pages: int, min_outcomes: int) -> dict[str, list[dict]]:
     return {g: ms for g, ms in groups.items() if len(ms) >= min_outcomes}
 
 
-def scan_group(markets: list[dict], pause: float) -> dict | None:
+def scan_group(markets: list[dict], pause: float, min_ask_sum: float = 0.85) -> dict | None:
     asks, ask_sizes, bids, bid_sizes = [], [], [], []
     for m in markets:
         toks = _jl(m.get("clobTokenIds"))
@@ -100,6 +100,9 @@ def scan_group(markets: list[dict], pause: float) -> dict | None:
     bid_sum = sum(bids)
     sell_lock = max(0.0, bid_sum - 1.0)
     sell_size = min(bid_sizes) if bid_sizes else 0.0
+    # A complete exhaustive event's asks sum to ~1. A sum far below 1 means we only captured
+    # part of the outcome set (low-volume legs missing), which is a false "lock", not an arb.
+    likely_complete = arb.total_cost >= min_ask_sum
     return {
         "event": (markets[0].get("question") or markets[0].get("groupItemTitle") or "")[:80],
         "outcomes": len(markets),
@@ -111,7 +114,8 @@ def scan_group(markets: list[dict], pause: float) -> dict | None:
         "sell_lock_per_set": round(sell_lock, 4),
         "sell_executable_size": round(sell_size, 2),
         "sell_profit_usdc": round(sell_lock * sell_size, 2),
-        "arbitrage": bool(arb.is_arb or sell_lock > 0),
+        "likely_complete": likely_complete,
+        "arbitrage": bool(likely_complete and (arb.is_arb or sell_lock > 0)),
     }
 
 
@@ -120,6 +124,8 @@ def main() -> int:
     ap.add_argument("--max-pages", type=int, default=4)
     ap.add_argument("--min-outcomes", type=int, default=3)
     ap.add_argument("--max-groups", type=int, default=25)
+    ap.add_argument("--min-ask-sum", type=float, default=0.85,
+                    help="reject groups whose ask sum is below this as incomplete outcome capture")
     ap.add_argument("--pause", type=float, default=0.03)
     ap.add_argument("--out", default="outputs/polymarket_arbitrage")
     args = ap.parse_args()
@@ -132,7 +138,7 @@ def main() -> int:
     results = []
     for i, (gid, markets) in enumerate(selected, 1):
         try:
-            row = scan_group(markets, args.pause)
+            row = scan_group(markets, args.pause, min_ask_sum=args.min_ask_sum)
         except Exception as exc:
             print(f"  group {i} error: {exc}", flush=True)
             continue
@@ -155,13 +161,16 @@ def main() -> int:
     summary = {
         "generated_at_utc": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
         "groups_scanned": len(results),
+        "incomplete_groups_filtered": sum(1 for r in results if not r["likely_complete"]),
         "arbitrage_opportunities": len(arbs),
-        "best_buy_lock_per_set": max((r["buy_lock_per_set"] for r in results), default=0.0),
-        "best_sell_lock_per_set": max((r["sell_lock_per_set"] for r in results), default=0.0),
+        "best_buy_lock_per_set": max((r["buy_lock_per_set"] for r in arbs), default=0.0),
+        "best_sell_lock_per_set": max((r["sell_lock_per_set"] for r in arbs), default=0.0),
         "total_lockable_profit_usdc": round(sum(max(r["buy_profit_usdc"], r["sell_profit_usdc"]) for r in arbs), 2),
-        "mean_ask_sum": round(sum(r["ask_sum"] for r in results) / len(results), 4) if results else None,
-        "note": "Polymarket charges no taker fee; lock ~ net profit, bounded by thinnest-leg depth. "
-                "Risk-free only if outcomes are collectively exhaustive (negRisk events are designed to be).",
+        "mean_ask_sum_complete": round(
+            sum(r["ask_sum"] for r in results if r["likely_complete"]) / max(1, sum(1 for r in results if r["likely_complete"])), 4),
+        "note": "Only complete outcome sets (ask sum >= min_ask_sum) count as arbs; a far-below-1 sum means "
+                "missing legs, not a lock. Polymarket charges no taker fee, but locks are bounded by the "
+                "thinnest leg's depth and by capital lock-up to resolution; risk-free only if exhaustive.",
     }
     with (out_dir / "dutch_arb_summary.json").open("w", encoding="utf-8") as f:
         json.dump(summary, f, indent=2)

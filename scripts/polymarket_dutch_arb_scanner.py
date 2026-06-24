@@ -103,15 +103,15 @@ def scan_group(markets: list[dict], pause: float) -> dict | None:
     return {
         "event": (markets[0].get("question") or markets[0].get("groupItemTitle") or "")[:80],
         "outcomes": len(markets),
-        "ask_sum": round(arb.total, 4),
-        "buy_lock_per_set": round(arb.locked_profit, 4),
+        "ask_sum": round(arb.total_cost, 4),
+        "buy_lock_per_set": round(arb.locked_profit_per_set, 4),
         "buy_executable_size": round(buy_size, 2),
-        "buy_profit_usdc": round(arb.locked_profit * buy_size, 2),
+        "buy_profit_usdc": round(arb.locked_profit_per_set * buy_size, 2),
         "bid_sum": round(bid_sum, 4),
         "sell_lock_per_set": round(sell_lock, 4),
         "sell_executable_size": round(sell_size, 2),
         "sell_profit_usdc": round(sell_lock * sell_size, 2),
-        "arbitrage": bool(arb.profitable or sell_lock > 0),
+        "arbitrage": bool(arb.is_arb or sell_lock > 0),
     }
 
 

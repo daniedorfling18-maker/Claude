@@ -26,6 +26,7 @@ from .pipeline_health import pipeline_health
 from .pipeline_inventory import pipeline_inventory
 from .portfolio import portfolio_snapshot
 from .price_history_collector import collect_price_history
+from .market_making_pnl import evaluate_market_making
 from .live_mispricing import run_live_mispricing, scan_live_mispricing
 from .paper_session import run_paper_session
 from .readiness import paper_live_promotion_gate, paper_trade_readiness, readiness_decision
@@ -72,6 +73,7 @@ COMMANDS = [
     "normalize-websocket",
     "scan-mispricing",
     "run-live-mispricing",
+    "market-making-pnl",
     "resolve-websocket-markets",
     "collect-snapshot-labels",
     "portfolio",
@@ -189,6 +191,9 @@ def main(argv: list[str] | None = None) -> int:
             _print(summary)
         elif args.command == "run-live-mispricing":
             _print(run_live_mispricing(cfg, websocket_seconds=args.websocket_seconds))
+        elif args.command == "market-making-pnl":
+            _, summary = evaluate_market_making(cfg)
+            _print(summary)
         elif args.command == "resolve-websocket-markets":
             _print(collect_websocket_resolutions(cfg))
         elif args.command == "collect-snapshot-labels":

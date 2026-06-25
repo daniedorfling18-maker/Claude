@@ -654,6 +654,72 @@ def find_pick_from_card(entry: dict[str, Any], card_csv: str) -> dict[str, Any]:
     }
 
 
+def pick_card_entries_in_window(args: argparse.Namespace, ref: datetime) -> list[dict[str, Any]]:
+    """Build queue entries directly from the locked card as a page-scan fallback."""
+    rows, column = load_pick_rows(Path(args.pick_card_csv))
+    window = timedelta(minutes=args.window_minutes)
+    late_grace = timedelta(minutes=max(0, int(getattr(args, "late_card_grace_minutes", 5))))
+    entries: list[dict[str, Any]] = []
+    for idx, row in enumerate(rows):
+        kickoff = parse_iso_datetime(row.get("commence_time") or row.get("kickoff_utc"))
+        if kickoff is None:
+            continue
+        time_until = kickoff - ref
+        if not (-late_grace <= time_until <= window):
+            continue
+        home_team = txt(row.get("home_team"))
+        away_team = txt(row.get("away_team"))
+        if not home_team or not away_team:
+            continue
+        entries.append(
+            {
+                "game_id": f"pick_card_{idx}",
+                "game": f"{home_team} v {away_team}",
+                "home_team": home_team,
+                "away_team": away_team,
+                "kickoff_utc": kickoff.isoformat(),
+                "kickoff_raw": txt(row.get("commence_time") or row.get("kickoff_utc")),
+                "kickoff_source": "pick_card_fallback",
+                "minutes_until": round(time_until.total_seconds() / 60),
+                "current_pick": "",
+                "locked": False,
+                "inputs_found": None,
+                "status": "queued_from_pick_card_fallback",
+                "pick_card_column": column,
+                "pick_card_row": row,
+            }
+        )
+    return entries
+
+
+def merge_pick_card_fallback_queue(
+    args: argparse.Namespace,
+    ref: datetime,
+    scan_results: list[dict[str, Any]],
+    queued: list[dict[str, Any]],
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """Add card-timed matches not discovered by page tab scanning."""
+    existing = {
+        (norm_team(item.get("home_team")), norm_team(item.get("away_team")), txt(item.get("kickoff_utc"))[:16])
+        for item in queued
+    }
+    locked = {
+        (norm_team(item.get("home_team")), norm_team(item.get("away_team")), txt(item.get("kickoff_utc"))[:16])
+        for item in scan_results
+        if item.get("status") == "locked_skipped"
+    }
+    added: list[dict[str, Any]] = []
+    merged = list(queued)
+    for entry in pick_card_entries_in_window(args, ref):
+        key = (norm_team(entry.get("home_team")), norm_team(entry.get("away_team")), txt(entry.get("kickoff_utc"))[:16])
+        if key in existing or key in locked:
+            continue
+        merged.append(entry)
+        added.append(entry)
+        existing.add(key)
+    return merged, added
+
+
 def request_json(url: str) -> Any:
     request = urllib.request.Request(url, headers={"User-Agent": "superbru-auto-picker/1.0"})
     with urllib.request.urlopen(request, timeout=45) as response:
@@ -1164,6 +1230,7 @@ async def run(args: argparse.Namespace) -> dict[str, Any]:
                 "pool_standing": pool_standing,
                 "scan_results": scan_results,
                 "queued_count": 0,
+                "card_fallback_queued": 0,
                 "results": [],
                 "submitted": 0,
                 "dry_run_count": 0,
@@ -1177,6 +1244,14 @@ async def run(args: argparse.Namespace) -> dict[str, Any]:
                 "chase_picks_used": 0,
             },
         )
+    queued, card_fallback_entries = merge_pick_card_fallback_queue(
+        args,
+        datetime.now(timezone.utc),
+        scan_results,
+        queued,
+    )
+    if card_fallback_entries:
+        print(f"Queued {len(card_fallback_entries)} match(es) from locked-card kickoff fallback.")
 
     config = None
     config_error: str | None = None
@@ -1296,6 +1371,8 @@ async def run(args: argparse.Namespace) -> dict[str, Any]:
         "pool_standing": pool_standing,
         "scan_results": scan_results,
         "queued_count": len(queued),
+        "card_fallback_queued": len(card_fallback_entries),
+        "card_fallback_entries": card_fallback_entries,
         "results": submitted_results,
         "submitted": submitted_count,
         "dry_run_count": dry_run_count,
@@ -1341,6 +1418,15 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--out-dir", default="outputs/pregame_checks/auto_pick")
     parser.add_argument("--pick-card-csv", default="outputs/final_locked_picks/superbru_final_card.csv")
+    parser.add_argument(
+        "--late-card-grace-minutes",
+        type=int,
+        default=5,
+        help=(
+            "When the page scan misses tabs, allow locked-card fallback matches this many minutes "
+            "after kickoff. This mainly protects against small GitHub cron delays."
+        ),
+    )
     parser.add_argument("--config", default="config.yaml", help="Engine config used to recompute the pick from fresh single-match odds.")
     parser.add_argument("--odds-api-key", default=os.environ.get("THE_ODDS_API_KEY", ""))
     parser.add_argument("--odds-sport", default="soccer_fifa_world_cup")
@@ -1392,6 +1478,13 @@ def exit_code_for_result(result: dict[str, Any], args: argparse.Namespace) -> in
     if getattr(args, "require_submission", False) and not getattr(args, "dry_run", False):
         queued = int(result.get("queued_count") or 0)
         submitted = int(result.get("submitted") or 0)
+        if queued <= 0:
+            print(
+                "No Superbru matches were queued after page scan + locked-card fallback; "
+                "not treating this broad scheduled slot as a submission failure.",
+                file=sys.stderr,
+            )
+            return 0
         if submitted <= 0:
             print(
                 "ERROR: Superbru auto-pick submitted zero picks in a required scheduled window. "

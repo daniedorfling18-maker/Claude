@@ -1152,7 +1152,31 @@ async def run(args: argparse.Namespace) -> dict[str, Any]:
 
     scan_results, queued, scan_status, pool_standing = await scan_superbru_matches(args, out_dir)
     if scan_status == "login_failed":
-        return {"status": "login_failed", "run_at_utc": now.isoformat(), "scan_results": scan_results}
+        return write_auto_pick_summary(
+            out_dir,
+            {
+                "status": "login_failed",
+                "run_at_utc": now.isoformat(),
+                "mode": "match_scoped_locked_card_auto_pick",
+                "window_minutes": args.window_minutes,
+                "dry_run": args.dry_run,
+                "pick_card_csv": args.pick_card_csv,
+                "pool_standing": pool_standing,
+                "scan_results": scan_results,
+                "queued_count": 0,
+                "results": [],
+                "submitted": 0,
+                "dry_run_count": 0,
+                "no_pick_available": 0,
+                "submit_failed": 0,
+                "submission_failed": 0,
+                "fresh_recompute_used": 0,
+                "card_fallback_used": 0,
+                "pick_changed_vs_card": 0,
+                "defensive_picks_used": 0,
+                "chase_picks_used": 0,
+            },
+        )
 
     config = None
     config_error: str | None = None
@@ -1239,7 +1263,31 @@ async def run(args: argparse.Namespace) -> dict[str, Any]:
             entry["error"] = str(exc)
         submitted_results.append(entry)
 
+    submitted_count = sum(1 for item in submitted_results if item.get("status") == "submitted")
+    dry_run_count = sum(1 for item in submitted_results if item.get("status") == "dry_run")
+    no_pick_count = sum(1 for item in submitted_results if item.get("status") == "no_pick_available")
+    failed_count = sum(
+        1
+        for item in submitted_results
+        if item.get("status") in {"submit_failed", "failed", "login_failed", "unknown"}
+    )
+    if args.dry_run and queued:
+        status = "dry_run"
+    elif not queued:
+        status = "no_queued_matches"
+    elif submitted_count == len(queued):
+        status = "submitted"
+    elif submitted_count > 0:
+        status = "partial_submission"
+    elif failed_count > 0:
+        status = "submit_failed"
+    elif no_pick_count > 0:
+        status = "no_pick_available"
+    else:
+        status = "no_submission"
+
     summary = {
+        "status": status,
         "run_at_utc": now.isoformat(),
         "mode": "match_scoped_locked_card_auto_pick",
         "window_minutes": args.window_minutes,
@@ -1249,10 +1297,11 @@ async def run(args: argparse.Namespace) -> dict[str, Any]:
         "scan_results": scan_results,
         "queued_count": len(queued),
         "results": submitted_results,
-        "submitted": sum(1 for item in submitted_results if item.get("status") == "submitted"),
-        "dry_run_count": sum(1 for item in submitted_results if item.get("status") == "dry_run"),
-        "no_pick_available": sum(1 for item in submitted_results if item.get("status") == "no_pick_available"),
+        "submitted": submitted_count,
+        "dry_run_count": dry_run_count,
+        "no_pick_available": no_pick_count,
         "submit_failed": sum(1 for item in submitted_results if item.get("status") == "submit_failed"),
+        "submission_failed": failed_count,
         "fresh_recompute_used": sum(1 for item in submitted_results if item.get("pick_source") == "live_odds_recompute"),
         "card_fallback_used": sum(1 for item in submitted_results if item.get("pick_source") == "committed_card_fallback"),
         "pick_changed_vs_card": sum(1 for item in submitted_results if item.get("pick_changed_vs_card")),
@@ -1260,14 +1309,21 @@ async def run(args: argparse.Namespace) -> dict[str, Any]:
         "chase_picks_used": sum(1 for item in submitted_results if item.get("pick_strategy") == "private_chase"),
     }
 
+    return write_auto_pick_summary(out_dir, summary)
+
+
+def write_auto_pick_summary(out_dir: Path, summary: dict[str, Any]) -> dict[str, Any]:
+    out_dir.mkdir(parents=True, exist_ok=True)
+    now = datetime.now(timezone.utc)
     ts = now.strftime("%Y%m%dT%H%M%SZ")
     (out_dir / f"{ts}_auto_pick_match_scoped.json").write_text(json.dumps(summary, indent=2, default=str), encoding="utf-8")
+    (out_dir / "latest_auto_pick_match_scoped.json").write_text(json.dumps(summary, indent=2, default=str), encoding="utf-8")
     return summary
 
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Match-scoped Auto Pick using committed SuperBru card.")
-    parser.add_argument("--email", default=os.environ.get("SUPERBRU_EMAIL", ""))
+    parser.add_argument("--email", default=os.environ.get("SUPERBRU_EMAIL") or os.environ.get("SUPERBRU_USERNAME", ""))
     parser.add_argument("--password", default=os.environ.get("SUPERBRU_PASSWORD", ""))
     parser.add_argument("--login-url", default="https://www.superbru.com/login")
     parser.add_argument("--pool-url", default="https://www.superbru.com/worldcup_predictor/pool_view.php?t=1296&p=13236623&view=matches")
@@ -1275,6 +1331,14 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--headless", dest="headless", action="store_true", default=True)
     parser.add_argument("--headed", dest="headless", action="store_false")
     parser.add_argument("--dry-run", action="store_true")
+    parser.add_argument(
+        "--require-submission",
+        action="store_true",
+        help=(
+            "Exit non-zero when this scheduled window submits zero picks, or when any queued "
+            "match is not submitted. Use this in CI so missed Superbru picks cannot pass silently."
+        ),
+    )
     parser.add_argument("--out-dir", default="outputs/pregame_checks/auto_pick")
     parser.add_argument("--pick-card-csv", default="outputs/final_locked_picks/superbru_final_card.csv")
     parser.add_argument("--config", default="config.yaml", help="Engine config used to recompute the pick from fresh single-match odds.")
@@ -1322,14 +1386,58 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
+def exit_code_for_result(result: dict[str, Any], args: argparse.Namespace) -> int:
+    if result.get("status") == "login_failed":
+        return 1
+    if getattr(args, "require_submission", False) and not getattr(args, "dry_run", False):
+        queued = int(result.get("queued_count") or 0)
+        submitted = int(result.get("submitted") or 0)
+        if submitted <= 0:
+            print(
+                "ERROR: Superbru auto-pick submitted zero picks in a required scheduled window. "
+                "Check outputs/pregame_checks/auto_pick/latest_auto_pick_match_scoped.json",
+                file=sys.stderr,
+            )
+            return 2
+        if queued and submitted < queued:
+            print(
+                f"ERROR: Superbru auto-pick submitted {submitted}/{queued} queued picks.",
+                file=sys.stderr,
+            )
+            return 3
+    return 0
+
+
+def write_missing_credentials_summary(args: argparse.Namespace) -> dict[str, Any]:
+    return write_auto_pick_summary(
+        Path(args.out_dir),
+        {
+            "status": "missing_credentials",
+            "run_at_utc": datetime.now(timezone.utc).isoformat(),
+            "mode": "match_scoped_locked_card_auto_pick",
+            "window_minutes": args.window_minutes,
+            "dry_run": args.dry_run,
+            "pick_card_csv": args.pick_card_csv,
+            "queued_count": 0,
+            "results": [],
+            "submitted": 0,
+            "diagnostic": {
+                "SUPERBRU_EMAIL_present": bool(args.email),
+                "SUPERBRU_PASSWORD_present": bool(args.password),
+            },
+        },
+    )
+
+
 def main() -> int:
     args = build_parser().parse_args()
     if not args.email or not args.password:
+        write_missing_credentials_summary(args)
         print("ERROR: SUPERBRU_EMAIL and SUPERBRU_PASSWORD must be set", file=sys.stderr)
         return 1
     result = asyncio.run(run(args))
     print("\n" + json.dumps(result, indent=2, default=str))
-    return 0 if result.get("status") != "login_failed" else 1
+    return exit_code_for_result(result, args)
 
 
 if __name__ == "__main__":

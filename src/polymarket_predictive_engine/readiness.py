@@ -70,6 +70,66 @@ def _market_relative_skill_is_credible(summary: dict[str, Any]) -> bool:
     )
 
 
+def _forward_paper_evidence(cfg: EngineConfig) -> dict[str, Any]:
+    """Summarise forward paper evidence required before live promotion."""
+    candidates = [
+        cfg.governance_root / "forward_paper_evidence.json",
+        cfg.governance_root / "paper_forward_summary.json",
+        cfg.output_root / "polymarket_paper" / "paper_session_summary.json",
+        cfg.output_root / "polymarket_paper_edge" / "forward_paper_summary.json",
+    ]
+
+    sources: list[dict[str, Any]] = []
+    for path in candidates:
+        summary = read_json(path, default={}) or {}
+        if not isinstance(summary, dict) or not summary:
+            continue
+
+        raw_trades = (
+            summary.get("trades")
+            or summary.get("paper_trades")
+            or summary.get("filled_orders")
+            or summary.get("orders")
+            or 0
+        )
+        try:
+            trades = int(raw_trades)
+        except Exception:
+            trades = 0
+
+        raw_roi = (
+            summary.get("roi_on_staked")
+            or summary.get("paper_roi")
+            or summary.get("realized_roi")
+            or summary.get("roi")
+        )
+        roi = None
+        if raw_roi not in {None, ""}:
+            try:
+                roi = float(raw_roi)
+            except Exception:
+                roi = None
+
+        sources.append(
+            {
+                "path": str(path),
+                "status": summary.get("status", "present"),
+                "trades": trades,
+                "roi": roi,
+            }
+        )
+
+    total_trades = sum(int(source.get("trades", 0) or 0) for source in sources)
+    positive_roi = any(source.get("roi") is not None and float(source["roi"]) > 0 for source in sources)
+
+    return {
+        "present": bool(sources),
+        "trades": total_trades,
+        "positive_roi": positive_roi,
+        "sources": sources,
+    }
+
+
 def paper_live_promotion_gate(cfg: EngineConfig) -> dict[str, Any]:
     """Gate promotion on accumulated labels and proven out-of-sample market-relative skill."""
     thresholds = cfg.raw.get("governance_thresholds", {})
@@ -101,7 +161,17 @@ def paper_live_promotion_gate(cfg: EngineConfig) -> dict[str, Any]:
     if kill_switch_active():
         paper_reasons.append("kill switch active")
 
+    forward_paper_evidence = _forward_paper_evidence(cfg)
+    min_forward_paper_trades = int(thresholds.get("min_forward_paper_trades", 1))
+
     live_reasons = list(paper_reasons)
+    if forward_paper_evidence["trades"] < min_forward_paper_trades:
+        live_reasons.append(
+            f"forward paper evidence missing or insufficient: "
+            f"{forward_paper_evidence['trades']} < {min_forward_paper_trades}"
+        )
+    if thresholds.get("require_positive_forward_paper_roi") and not forward_paper_evidence["positive_roi"]:
+        live_reasons.append("forward paper evidence does not show positive ROI")
     if labels < target_labels:
         live_reasons.append(f"labels below live target: {labels} < {target_labels}")
     if not cfg.live_approval_file.exists():
@@ -122,6 +192,7 @@ def paper_live_promotion_gate(cfg: EngineConfig) -> dict[str, Any]:
         "market_relative_skill_credible": market_skill,
         "model_copies_market_midpoint": market_validation.get("model_copies_market_midpoint"),
         "data_quality_blockers": blockers,
+        "forward_paper_evidence": forward_paper_evidence,
         "approved_for_paper_trading": not paper_reasons,
         "approved_for_live_trading": not live_reasons,
         "paper_blockers": paper_reasons,

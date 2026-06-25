@@ -27,6 +27,7 @@ from .pipeline_inventory import pipeline_inventory
 from .portfolio import portfolio_snapshot
 from .price_history_collector import collect_price_history
 from .market_making_pnl import evaluate_market_making
+from .dutch_arb_monitor import run_dutch_arb_monitor
 from .live_mispricing import run_live_mispricing, scan_live_mispricing
 from .paper_session import run_paper_session
 from .readiness import paper_live_promotion_gate, paper_trade_readiness, readiness_decision
@@ -74,6 +75,7 @@ COMMANDS = [
     "scan-mispricing",
     "run-live-mispricing",
     "market-making-pnl",
+    "dutch-arb-monitor",
     "resolve-websocket-markets",
     "collect-snapshot-labels",
     "portfolio",
@@ -104,6 +106,11 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--test-fraction", type=float, default=0.3, help="held-out market fraction for train-skill-model")
     parser.add_argument("--skill-l2", type=float, default=5.0, help="L2 strength for train-skill-model")
+    parser.add_argument("--polls", type=int, default=1, help="dutch-arb-monitor: number of book polls")
+    parser.add_argument("--poll-seconds", type=int, default=30, help="dutch-arb-monitor: seconds between polls")
+    parser.add_argument("--max-events", type=int, default=20, help="dutch-arb-monitor: max events to scan per poll")
+    parser.add_argument("--min-annualised", type=float, default=0.0, help="dutch-arb-monitor: min annualised ROI to rank")
+    parser.add_argument("--alert-annualised", type=float, default=0.10, help="dutch-arb-monitor: alert threshold")
     return parser
 
 
@@ -194,6 +201,10 @@ def main(argv: list[str] | None = None) -> int:
         elif args.command == "market-making-pnl":
             _, summary = evaluate_market_making(cfg)
             _print(summary)
+        elif args.command == "dutch-arb-monitor":
+            _print(run_dutch_arb_monitor(cfg, polls=args.polls, poll_seconds=args.poll_seconds,
+                                         max_events=args.max_events, min_annualised=args.min_annualised,
+                                         alert_annualised=args.alert_annualised))
         elif args.command == "resolve-websocket-markets":
             _print(collect_websocket_resolutions(cfg))
         elif args.command == "collect-snapshot-labels":

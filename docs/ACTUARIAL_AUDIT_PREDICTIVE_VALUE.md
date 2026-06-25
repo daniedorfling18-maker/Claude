@@ -299,3 +299,35 @@ small, long-horizon dutch-book arbitrage at a low annualised return — automata
 events but not a large or fast P&L. Everything is built as dry-run, tested tooling
 (`market-making-pnl`, the two arb scanners, the live mispricing scanner); none should be taken
 live in the expectation of profit on liquid markets.
+
+## 14. Dutch-arb execution monitor (`dutch-arb-monitor`)
+
+The one-shot scanner answers "is there an arb now?"; the **execution monitor**
+(`dutch_arb_monitor.py`, CLI `dutch-arb-monitor`) answers the operational questions you need
+before committing capital, and is the dry-run scaffold a live arb bot would sit behind:
+
+- **Execution plan, not just a flag** — for each complete basket it emits one dry-run BUY per
+  outcome leg at its best ask, sized to the thinnest leg's depth, with capital and locked profit
+  spelled out (`dry_run_orders`). Every order is tagged `dry_run: True`; the summary always
+  reports `live_trading: False` regardless of `trading.mode`. It never calls an order API.
+- **Persistence via polling** — `--polls N --poll-seconds S` re-prices the book and diffs state
+  across polls (`diff_states`: appeared / persisting / cleared). A lock that survives several
+  polls is real depth; one that blinks out was a stale or already-taken quote. This is the
+  executability signal a single snapshot cannot give.
+- **Ranked by annualised return on capital** with threshold alerts (`--alert-annualised`), since
+  a lock ties capital up until resolution (a 3% lock resolving in two years is ~1.5%/yr).
+
+**Live finding (2026-06-25).** Across the top liquid negRisk events the monitor priced **0
+executable complete baskets**, and the new skip-reason telemetry (`scan_stats_latest_poll`)
+explains why rather than reporting a silent zero: the flagship events are either **oversized**
+(2028 election fields are 128 outcomes, beyond the per-event leg cap) or contain **≥1 unbuyable
+leg** (a dead/closed outcome whose CLOB book 404s — e.g. an eliminated World Cup team), and a
+basket you cannot fully buy is not lockable. This is consistent with §13: liquid baskets are
+efficient and the genuine locks are small, long-dated and partial-set. The core (plan
+construction, ranking, diffing, alerting) is pure and unit-tested; only the Gamma/CLOB reader
+touches the network.
+
+*Natural next refinement* (not built): for partially-resolved events, exclude legs whose Gamma
+market is already **resolved-NO** (they pay 0 and need not be bought) and lock over the still-live
+outcomes — this would let the monitor fire on deep-tournament brackets where most legs are dead.
+It requires verifying resolution status per leg so an unhedged live outcome is never dropped.

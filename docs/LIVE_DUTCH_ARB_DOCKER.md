@@ -1,12 +1,30 @@
 # Running the live stack locally on Docker (dry-run, continuous)
 
-This runs two long-lived, **dry-run** services from `docker-compose.live.yml`. Neither ever places
-an order — they read public order books, compute signals, and write results under `./outputs`.
+This runs two long-lived, **dry-run** services from `docker-compose.live.yml`. Neither has any
+order-placement code path — they read public order books, compute signals, and write results under
+`./outputs`. Going live is a separate, deliberate workflow (see
+[Governance and safety](#governance-and-safety) below).
 
-| Service | What it does | Feed |
+| Service | What it does | Feed | Writes |
+|---|---|---|---|
+| `dutch-arb-monitor` | Polls Gamma/CLOB for complete-set (negRisk) dutch-book arbs, ranks any locks by **annualised return on capital**, diffs state across polls (appeared / persisting / cleared), alerts when one clears a threshold. | REST | `outputs/polymarket_arbitrage/` |
+| `live-mispricing` | Captures the live CLOB book over the **WebSocket**, then scans for `BUY_YES` / `SELL_YES` / `MAKE` signals vs your fair values. | WebSocket | `outputs/polymarket_training/websocket_market_features.csv`, `outputs/polymarket_mispricing/` |
+
+## Run only one stack at a time (duplicate-writer rule)
+
+Per `docs/POLYMARKET_DOCKER_SAFETY_AUDIT.md`, duplicate writers and conflicting signal paths must
+be resolved before any live use. This repo ships several compose files that write **overlapping**
+`outputs/` paths, so they must not run simultaneously:
+
+| Compose file | Services | Writes |
 |---|---|---|
-| `dutch-arb-monitor` | Polls Gamma/CLOB for complete-set (negRisk) dutch-book arbs, ranks any locks by **annualised return on capital**, diffs state across polls (appeared / persisting / cleared), and alerts when one clears a threshold. | REST polling |
-| `live-mispricing` | Captures the live order book over the **WebSocket**, then scans for `BUY_YES` / `SELL_YES` / `MAKE` signals against your fair values. | WebSocket |
+| `docker-compose.live.yml` (this) | dutch-arb-monitor, live-mispricing | `outputs/polymarket_arbitrage/`, `outputs/polymarket_training/websocket_market_features.csv`, `outputs/polymarket_mispricing/` |
+| `docker-compose.yml` | polymarket-agent, websocket-live-features | `outputs/polymarket/`, **`outputs/polymarket_training/websocket_market_features.csv`** |
+| `docker-compose.monitor.yml` | polymarket-monitor (bot), polymarket-long-short | `outputs/polymarket/` |
+
+`live-mispricing` here and `websocket-live-features` in `docker-compose.yml` both write
+`websocket_market_features.csv` — running both at once is a duplicate writer. **Bring up exactly
+one stack.** The two services *inside* this file write disjoint paths, so they are safe together.
 
 ## 1. Prerequisites
 
@@ -85,10 +103,36 @@ The WebSocket subscribes to the asset ids in `polymarket_predictive_config.examp
 docker compose -f docker-compose.live.yml down
 ```
 
-## Safety
+## Governance and safety
 
-These services are analysis-only. The arb monitor's "execution plan" is a list of orders tagged
-`dry_run: true` that is **never submitted**, and every summary reports `live_trading: false`
-regardless of `trading.mode`. There is no order-placement code path in this stack. Going live would
-be a separate, deliberate step behind the kill switch, an explicit `trading.mode: live`, the
-`POLYMARKET_LIVE_TRADING=1` opt-in, and a human approval file — none of which this stack sets.
+These two services are **analysis-only**. The arb monitor's "execution plan" is a list of orders
+tagged `dry_run: true` that is never submitted; every summary reports `live_trading: false`
+regardless of `trading.mode`. There is no order-placement code path in this stack — the engine's
+live executor (`execution/live.py`) is a skeleton that raises until an SDK client is added behind
+governance approval.
+
+**Live trading is gated, fail-closed, in four independent places** (`config.py :: live_trading_allowed`).
+All must hold before any order path could run; this stack sets none of them:
+
+1. Kill switch off — `POLYMARKET_KILL_SWITCH` ≠ `1`.
+2. `trading.mode: live` in the engine config (default is `paper`).
+3. `POLYMARKET_LIVE_TRADING=1` in the environment.
+4. A human approval file at `config/polymarket_live_approval.yaml`
+   (template: `config/polymarket_live_approval.example.yaml`).
+
+Read these before going anywhere near live:
+
+- `docs/POLYMARKET_ACTUARIAL_MODEL_GOVERNANCE.md` — intended use, model risk, approval requirements.
+- `docs/POLYMARKET_RISK_CONTROL_STANDARD.md` — bankroll, Kelly cap, exposure, spread/liquidity, kill switch.
+- `docs/POLYMARKET_LIVE_TRADING_APPROVAL_CHECKLIST.md` — the full pre-live checklist.
+- `docs/POLYMARKET_DOCKER_SAFETY_AUDIT.md` — the duplicate-writer rule enforced above.
+
+**What *can* trade (not this stack).** The mispricing bot + long/short engine
+(`docker-compose.monitor.yml`, `docs/POLYMARKET_MISPRICING_BOT.md`) can graduate **passive maker
+bids** to live behind `PM_MODE=live` + `POLYMARKET_EXECUTE_LIVE=true` + a non-geoblocked IP +
+wallet/CLOB credentials. That is a separate stack with its own guards; keep it in `dry_run` until
+its `long_short_intents.csv` has looked sane for several sessions and you have reconciled fills.
+
+The honest expectation from `docs/ACTUARIAL_AUDIT_PREDICTIVE_VALUE.md`: liquid Polymarket markets
+are efficient on all three axes (direction, spread, basket), so this stack is for **monitoring and
+validation**, not an expectation of profit.

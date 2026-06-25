@@ -41,7 +41,9 @@ def risk_decision(cfg: EngineConfig, signal: dict[str, Any], portfolio: dict[str
     bankroll = _portfolio_number(portfolio, "bankroll", float(risk.get("bankroll", 1000)))
     cash = _portfolio_number(portfolio, "cash", bankroll)
     edge = safe_float(signal.get("edge")) or 0.0
-    confidence = safe_float(signal.get("confidence")) or 0.0
+    confidence = safe_float(signal.get("model_confidence"))
+    if confidence is None:
+        confidence = safe_float(signal.get("confidence")) or 0.0
     spread = safe_float(signal.get("spread")) or 0.0
     liquidity = safe_float(signal.get("liquidity")) or 0.0
     price = safe_float(signal.get("executable_price")) or safe_float(signal.get("market_price")) or 1.0

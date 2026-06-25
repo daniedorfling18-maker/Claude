@@ -1,5 +1,9 @@
+import json
+
 from pytest import approx
 
+import polymarket_predictive_engine.dutch_arb_monitor as monitor
+from polymarket_predictive_engine.config import EngineConfig
 from polymarket_predictive_engine.dutch_arb_monitor import (
     ArbLeg,
     annualised_return_on_capital,
@@ -8,6 +12,7 @@ from polymarket_predictive_engine.dutch_arb_monitor import (
     diff_states,
     dry_run_orders,
     rank_plans,
+    run_dutch_arb_monitor,
 )
 
 
@@ -87,3 +92,24 @@ def test_build_alerts_respects_threshold_and_unknown_horizon():
     assert "B" in ids                # clears the bar
     assert "H" in ids                # unknown horizon always alerts
     assert "A" not in ids            # below the bar
+
+
+def test_run_monitor_bounded_persists_state_and_stays_dry_run(tmp_path, monkeypatch):
+    cfg = EngineConfig(raw={"paths": {"output_root": str(tmp_path / "outputs")}}, path=tmp_path / "cfg.yaml")
+    arb = build_execution_plan("A", "A", _legs([0.30, 0.30, 0.30], [40, 50, 60]), days_to_resolution=30)
+    # Patch the network scan so the loop runs offline.
+    monkeypatch.setattr(monitor, "scan_once", lambda cfg, **k: ([arb], {"discovered": 1, "priced_complete": 1}))
+    summary = run_dutch_arb_monitor(cfg, polls=2, poll_seconds=0, alert_annualised=0.0)
+
+    assert summary["live_trading"] is False and summary["dry_run"] is True
+    assert summary["continuous"] is False and summary["polls_run"] == 2
+    assert summary["complete_arbs_latest_poll"] == 1
+    assert summary["alerts_total"] >= 1
+    assert summary["best_execution_plan"]                       # non-empty dry-run orders
+    assert all(o["dry_run"] is True for o in summary["best_execution_plan"])
+
+    arb_dir = tmp_path / "outputs" / "polymarket_arbitrage"
+    assert (arb_dir / "dutch_arb_monitor_opportunities.csv").exists()
+    assert (arb_dir / "dutch_arb_monitor_alerts.csv").exists()
+    persisted = json.loads((arb_dir / "dutch_arb_monitor_summary.json").read_text())
+    assert persisted["best_opportunity"]["event_id"] == "A"    # summary written to disk each poll

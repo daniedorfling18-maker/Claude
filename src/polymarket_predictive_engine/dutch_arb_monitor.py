@@ -17,7 +17,9 @@ summary always reports ``live_trading: False`` regardless of ``trading.mode``.
 """
 from __future__ import annotations
 
+import itertools
 import time
+from collections import deque
 from dataclasses import dataclass, field
 from typing import Any, Iterable, Mapping, Sequence
 
@@ -322,42 +324,12 @@ def scan_once(cfg: EngineConfig, *, max_pages: int = 4, max_events: int = 20, ma
 
 
 # --------------------------------------------------------------------------- monitor orchestration
-def run_dutch_arb_monitor(cfg: EngineConfig, *, polls: int = 1, poll_seconds: int = 30,
-                          max_pages: int = 4, max_events: int = 20, max_outcomes: int = 80,
-                          min_ask_sum: float = 0.85, min_annualised: float = 0.0,
-                          alert_annualised: float = 0.10, pause: float = 0.02,
-                          timeout: int = 20) -> dict[str, Any]:
-    """Poll the live book ``polls`` times, ranking and diffing complete-set dutch-book arbs and
-    alerting when one clears ``alert_annualised``. Pure analysis + dry-run plans: never trades."""
-    prev_arb_ids: set[str] = set()
-    all_alerts: list[dict[str, Any]] = []
-    transitions: list[dict[str, Any]] = []
-    latest_ranked: list[ExecutionPlan] = []
-    latest_stats: dict[str, int] = {}
-
-    for poll in range(1, max(1, polls) + 1):
-        plans, latest_stats = scan_once(cfg, max_pages=max_pages, max_events=max_events,
-                                        max_outcomes=max_outcomes, pause=pause,
-                                        min_ask_sum=min_ask_sum, timeout=timeout)
-        ranked = rank_plans(plans, min_annualised=min_annualised)
-        diff = diff_states(prev_arb_ids, plans)
-        if diff.appeared or diff.cleared:
-            transitions.append({"poll": poll, "at_utc": now_utc(),
-                                "appeared": diff.appeared, "cleared": diff.cleared,
-                                "persisting": diff.persisting})
-        all_alerts.extend(build_alerts(ranked, alert_annualised=alert_annualised, poll=poll))
-        prev_arb_ids = {p.event_id for p in plans if p.is_arb}
-        latest_ranked = ranked
-        if poll < polls and poll_seconds > 0:
-            time.sleep(poll_seconds)
-
-    out_dir = cfg.output_root / "polymarket_arbitrage"
-    write_csv(out_dir / "dutch_arb_monitor_opportunities.csv", [p.as_row() for p in latest_ranked])
-    if all_alerts:
-        write_csv(out_dir / "dutch_arb_monitor_alerts.csv", all_alerts)
-
+def _monitor_summary(cfg: EngineConfig, *, polls: int, poll_seconds: int, min_annualised: float,
+                     alert_annualised: float, latest_ranked: Sequence[ExecutionPlan],
+                     latest_stats: Mapping[str, int], transitions: Sequence[dict[str, Any]],
+                     alerts_total: int, polls_run: int, interrupted: bool) -> dict[str, Any]:
     top = latest_ranked[0] if latest_ranked else None
-    summary: dict[str, Any] = {
+    return {
         "status": "paper_analysis",
         "live_trading": False,
         "dry_run": True,
@@ -365,14 +337,17 @@ def run_dutch_arb_monitor(cfg: EngineConfig, *, polls: int = 1, poll_seconds: in
         "trading_mode": cfg.trading_mode,
         "kill_switch_active": kill_switch_active(),
         "polls": polls,
+        "polls_run": polls_run,
+        "continuous": polls <= 0,
+        "interrupted": interrupted,
         "poll_seconds": poll_seconds,
         "min_annualised": min_annualised,
         "alert_annualised": alert_annualised,
         "complete_arbs_latest_poll": len(latest_ranked),
         "events_priced_complete_latest_poll": latest_stats.get("priced_complete", 0),
-        "scan_stats_latest_poll": latest_stats,
-        "alerts_total": len(all_alerts),
-        "transitions": transitions[-10:],
+        "scan_stats_latest_poll": dict(latest_stats),
+        "alerts_total": alerts_total,
+        "transitions": list(transitions)[-10:],
         "best_annualised_return_on_capital": top.annualised_return_on_capital if top else 0.0,
         "best_opportunity": top.as_row() if top else None,
         "best_execution_plan": dry_run_orders(top) if top else [],
@@ -380,6 +355,65 @@ def run_dutch_arb_monitor(cfg: EngineConfig, *, polls: int = 1, poll_seconds: in
         "note": "Complete outcome sets only (every leg priced). Ranked by annualised return on "
                 "capital since a lock ties capital up until resolution. Never places an order.",
     }
+
+
+def run_dutch_arb_monitor(cfg: EngineConfig, *, polls: int = 1, poll_seconds: int = 30,
+                          max_pages: int = 4, max_events: int = 20, max_outcomes: int = 80,
+                          min_ask_sum: float = 0.85, min_annualised: float = 0.0,
+                          alert_annualised: float = 0.10, pause: float = 0.02,
+                          timeout: int = 20, max_alerts: int = 1000) -> dict[str, Any]:
+    """Poll the live book, ranking and diffing complete-set dutch-book arbs and alerting when one
+    clears ``alert_annualised``. ``polls <= 0`` runs continuously until interrupted (the Docker
+    mode); a bounded ``polls`` runs that many times. State (opportunities, alerts, summary) is
+    persisted *every* poll so an external dashboard always sees current state, and in-memory
+    buffers are bounded so a long-lived process stays flat. Pure analysis + dry-run: never trades."""
+    out_dir = cfg.output_root / "polymarket_arbitrage"
+    prev_arb_ids: set[str] = set()
+    recent_alerts: deque[dict[str, Any]] = deque(maxlen=max_alerts)
+    transitions: deque[dict[str, Any]] = deque(maxlen=200)
+    latest_ranked: list[ExecutionPlan] = []
+    latest_stats: dict[str, int] = {}
+    alerts_total = 0
+    polls_run = 0
+    interrupted = False
+
+    poll_iter: Iterable[int] = itertools.count(1) if polls <= 0 else range(1, polls + 1)
+    try:
+        for poll in poll_iter:
+            plans, latest_stats = scan_once(cfg, max_pages=max_pages, max_events=max_events,
+                                            max_outcomes=max_outcomes, pause=pause,
+                                            min_ask_sum=min_ask_sum, timeout=timeout)
+            ranked = rank_plans(plans, min_annualised=min_annualised)
+            diff = diff_states(prev_arb_ids, plans)
+            if diff.appeared or diff.cleared:
+                transitions.append({"poll": poll, "at_utc": now_utc(), "appeared": diff.appeared,
+                                    "cleared": diff.cleared, "persisting": diff.persisting})
+            new_alerts = build_alerts(ranked, alert_annualised=alert_annualised, poll=poll)
+            recent_alerts.extend(new_alerts)
+            alerts_total += len(new_alerts)
+            prev_arb_ids = {p.event_id for p in plans if p.is_arb}
+            latest_ranked = ranked
+            polls_run = poll if polls <= 0 else poll  # poll is 1-based count of completed passes
+
+            # Persist current state every poll (latest opportunities + rolling alerts + summary).
+            write_csv(out_dir / "dutch_arb_monitor_opportunities.csv", [p.as_row() for p in latest_ranked])
+            if recent_alerts:
+                write_csv(out_dir / "dutch_arb_monitor_alerts.csv", list(recent_alerts))
+            write_json(out_dir / "dutch_arb_monitor_summary.json", _monitor_summary(
+                cfg, polls=polls, poll_seconds=poll_seconds, min_annualised=min_annualised,
+                alert_annualised=alert_annualised, latest_ranked=latest_ranked, latest_stats=latest_stats,
+                transitions=transitions, alerts_total=alerts_total, polls_run=polls_run, interrupted=False))
+
+            is_last_bounded = polls > 0 and poll >= polls
+            if not is_last_bounded and poll_seconds > 0:
+                time.sleep(poll_seconds)
+    except KeyboardInterrupt:
+        interrupted = True
+
+    summary = _monitor_summary(cfg, polls=polls, poll_seconds=poll_seconds, min_annualised=min_annualised,
+                               alert_annualised=alert_annualised, latest_ranked=latest_ranked,
+                               latest_stats=latest_stats, transitions=transitions, alerts_total=alerts_total,
+                               polls_run=polls_run, interrupted=interrupted)
     write_json(out_dir / "dutch_arb_monitor_summary.json", summary)
     return summary
 

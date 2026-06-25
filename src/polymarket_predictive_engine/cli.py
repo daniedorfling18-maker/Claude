@@ -106,7 +106,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--test-fraction", type=float, default=0.3, help="held-out market fraction for train-skill-model")
     parser.add_argument("--skill-l2", type=float, default=5.0, help="L2 strength for train-skill-model")
-    parser.add_argument("--polls", type=int, default=1, help="dutch-arb-monitor: number of book polls")
+    parser.add_argument("--polls", type=int, default=1, help="dutch-arb-monitor: number of book polls (0 = run continuously until stopped)")
     parser.add_argument("--poll-seconds", type=int, default=30, help="dutch-arb-monitor: seconds between polls")
     parser.add_argument("--max-events", type=int, default=20, help="dutch-arb-monitor: max events to scan per poll")
     parser.add_argument("--min-annualised", type=float, default=0.0, help="dutch-arb-monitor: min annualised ROI to rank")

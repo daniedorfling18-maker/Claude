@@ -1,0 +1,59 @@
+# Constantly-running, DRY-RUN live Polymarket stack.
+#
+#   dutch-arb-monitor : REST polling of Gamma/CLOB for complete-set dutch-book arbs, ranked by
+#                       annualised return on capital, with cross-poll state diffing and alerts.
+#   live-mispricing   : WebSocket-driven BUY/SELL/MAKE mispricing scan vs our fair values.
+#
+# Both run paper/dry-run and NEVER place an order. Bring the stack up with:
+#
+#   cp .env.example .env                                  # first time only
+#   docker compose -f docker-compose.live.yml up -d --build
+#   docker compose -f docker-compose.live.yml logs -f dutch-arb-monitor
+#
+# Results are written under ./outputs (mounted), e.g.
+#   outputs/polymarket_arbitrage/dutch_arb_monitor_summary.json
+#   outputs/polymarket_training/websocket_market_features.csv
+services:
+  dutch-arb-monitor:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: polymarket-engine:live
+    container_name: polymarket-dutch-arb-monitor
+    env_file:
+      - .env
+    environment:
+      PM_MODE: dry_run
+      POLYMARKET_EXECUTE_LIVE: "false"
+      PM_CONFIG: ${PM_CONFIG:-/app/polymarket_predictive_config.example.yaml}
+      ARB_POLL_SECONDS: ${ARB_POLL_SECONDS:-30}
+      ARB_MAX_EVENTS: ${ARB_MAX_EVENTS:-20}
+      ARB_MIN_ANNUALISED: ${ARB_MIN_ANNUALISED:-0.0}
+      ARB_ALERT_ANNUALISED: ${ARB_ALERT_ANNUALISED:-0.10}
+    volumes:
+      - ./polymarket_predictive_config.example.yaml:/app/polymarket_predictive_config.example.yaml:ro
+      - ./outputs:/app/outputs
+      - ./inputs/polymarket:/app/inputs/polymarket:ro
+    command: ["sh", "scripts/run_dutch_arb_monitor.sh"]
+    restart: unless-stopped
+
+  live-mispricing:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: polymarket-engine:live
+    container_name: polymarket-live-mispricing
+    env_file:
+      - .env
+    environment:
+      PM_MODE: dry_run
+      POLYMARKET_EXECUTE_LIVE: "false"
+      PM_CONFIG: ${PM_CONFIG:-/app/polymarket_predictive_config.example.yaml}
+      WS_SECONDS: ${WS_SECONDS:-60}
+      MISPRICING_SLEEP_SECONDS: ${MISPRICING_SLEEP_SECONDS:-5}
+    volumes:
+      - ./polymarket_predictive_config.example.yaml:/app/polymarket_predictive_config.example.yaml:ro
+      - ./outputs:/app/outputs
+      - ./inputs/polymarket:/app/inputs/polymarket:ro
+    command: ["sh", "scripts/run_live_mispricing_loop.sh"]
+    restart: unless-stopped

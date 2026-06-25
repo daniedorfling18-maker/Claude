@@ -93,8 +93,10 @@ def data_quality(cfg: EngineConfig, allow_warnings: bool = False) -> tuple[list[
     write_csv(cfg.governance_root / "data_quality_report.csv", issues)
     write_json(cfg.governance_root / "data_quality_summary.json", summary)
     if summary.get("blocker_count", 0) and not allow_warnings:
-        # Report is written before fail-closed.
-        pass
+        raise RuntimeError(
+            f"Data-quality blockers present: {summary['blocker_count']} blocker(s). "
+            "Reports were written; rerun with allow_warnings=True only for inspection."
+        )
     return issues, summary
 
 

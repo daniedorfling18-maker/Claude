@@ -13,6 +13,16 @@ def shrink_probability(raw_probability: float, midpoint: float, shrinkage: float
     return clamp((1 - shrinkage) * raw_probability + shrinkage * midpoint)
 
 
+def directional_confidence(probability: float) -> float:
+    """Distance from pure uncertainty, scaled to [0,1]."""
+    return max(0.0, min(1.0, 2 * abs(probability - 0.5)))
+
+
+def uncertainty_centrality(probability: float) -> float:
+    """How close the probability is to 0.5, scaled to [0,1]."""
+    return max(0.0, min(1.0, 1 - directional_confidence(probability)))
+
+
 def predict_from_features(features: list[dict[str, Any]], training_cutoff: str = "") -> list[dict[str, Any]]:
     predictions: list[dict[str, Any]] = []
     for row in features:
@@ -30,7 +40,8 @@ def predict_from_features(features: list[dict[str, Any]], training_cutoff: str =
             "market_midpoint": midpoint,
             "executable_price": exec_price,
             "edge": edge,
-            "confidence": max(0.0, min(1.0, 1 - abs(calibrated - 0.5))),
+            "model_confidence": directional_confidence(calibrated),
+            "uncertainty_centrality": uncertainty_centrality(calibrated),
             "uncertainty_low": max(0.0, calibrated - 0.08),
             "uncertainty_high": min(1.0, calibrated + 0.08),
             "model_version": MODEL_VERSION,

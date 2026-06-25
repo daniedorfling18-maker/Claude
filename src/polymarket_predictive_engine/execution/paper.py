@@ -3,26 +3,30 @@ from __future__ import annotations
 from typing import Any
 
 from ..config import EngineConfig, load_config
-from ..readiness import paper_live_promotion_gate
-from ..utils import write_csv, write_json
+from ..utils import write_json
 
 
 def paper_trade(cfg: EngineConfig) -> dict[str, Any]:
-    gate = paper_live_promotion_gate(cfg)
-    out = cfg.output_root / "polymarket_portfolio"
-    write_csv(out / "paper_orders.csv", [])
-    write_csv(out / "paper_fills.csv", [])
-    write_csv(out / "positions.csv", [])
+    """Deprecated placeholder entrypoint.
+
+    The previous implementation created empty CSV artefacts and looked like a broker
+    path even though it did not use the typed ledger. Keep this command fail-closed
+    until a real paper broker writes orders, fills, cash movements, and positions to
+    SQLite atomically.
+    """
     summary = {
         "mode": "paper",
-        "status": "blocked_by_readiness_gate",
+        "status": "deprecated_placeholder_blocked",
+        "approved_for_paper_trading": False,
         "orders": 0,
         "fills": 0,
-        "cash": float(cfg.raw.get("paper_trading", {}).get("starting_cash", cfg.raw.get("risk", {}).get("bankroll", 1000))),
-        "approved_for_paper_trading": bool(gate.get("approved_for_paper_trading")),
-        "blockers": gate.get("paper_blockers", []),
+        "database_path": str(cfg.database_path),
+        "blockers": [
+            "paper-trade CLI path is deprecated until the typed paper broker is wired to the SQLite ledger",
+            "use run-paper or simulate-paper-edge for evidence-only OOS paper analysis",
+        ],
     }
-    write_json(out / "paper_trading_summary.json", summary)
+    write_json(cfg.output_root / "polymarket_portfolio" / "paper_trading_summary.json", summary)
     return summary
 
 

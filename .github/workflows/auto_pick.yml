@@ -72,7 +72,7 @@ jobs:
 
       - name: Run match-scoped auto pick
         env:
-          SUPERBRU_EMAIL: ${{ secrets.SUPERBRU_USERNAME }}
+          SUPERBRU_EMAIL: ${{ secrets.SUPERBRU_USERNAME || secrets.SUPERBRU_EMAIL }}
           SUPERBRU_PASSWORD: ${{ secrets.SUPERBRU_PASSWORD }}
           SUPERBRU_LOGIN_URL: ${{ secrets.SUPERBRU_LOGIN_URL }}
           SUPERBRU_POOL_URL: ${{ secrets.SUPERBRU_POOL_URL }}
@@ -100,6 +100,7 @@ jobs:
             --leader-safe-buffer 5.0 \
             --chaser-range 8.0 \
             --headless \
+            --require-submission \
             --out-dir outputs/pregame_checks/auto_pick
 
       - name: Upload results

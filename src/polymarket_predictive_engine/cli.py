@@ -21,10 +21,11 @@ from .models.calibrated import train_model, write_predictions
 from .models.calibration_v2 import train_calibration_model
 from .models.category_calibration import train_category_calibration
 from .models.skill_model import train_skill_model
+from .overnight_collection import run_collection_only_overnight
 from .paper_edge_simulator import simulate_paper_edge
 from .pipeline_health import pipeline_health
 from .pipeline_inventory import pipeline_inventory
-from .portfolio import portfolio_snapshot
+from .portfolio import portfolio_snapshot, reconciliation_report
 from .price_history_collector import collect_price_history
 from .market_making_pnl import evaluate_market_making
 from .live_mispricing import run_live_mispricing, scan_live_mispricing
@@ -76,7 +77,9 @@ COMMANDS = [
     "market-making-pnl",
     "resolve-websocket-markets",
     "collect-snapshot-labels",
+    "collect-overnight",
     "portfolio",
+    "reconciliation-report",
     "governance-report",
     "live-trade",
     "init-db",
@@ -104,6 +107,11 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--test-fraction", type=float, default=0.3, help="held-out market fraction for train-skill-model")
     parser.add_argument("--skill-l2", type=float, default=5.0, help="L2 strength for train-skill-model")
+    parser.add_argument(
+        "--allow-unlabelled-research-features",
+        action="store_true",
+        help="Allow build-features-v2 to run without clean labels for research-only feature inspection.",
+    )
     return parser
 
 
@@ -139,10 +147,19 @@ def main(argv: list[str] | None = None) -> int:
         elif args.command == "build-features":
             _print({"features": len(build_features(cfg))})
         elif args.command == "build-features-v2":
-            _print({"features_v2": len(build_features_v2(cfg, source=args.source)), "source": args.source})
+            features = build_features_v2(
+                cfg,
+                source=args.source,
+                allow_unlabelled_research=args.allow_unlabelled_research_features,
+            )
+            _print({"features_v2": len(features), "source": args.source})
         elif args.command == "refresh-live-features":
             _, _, websocket_summary = normalize_websocket_file(cfg, input_path=args.websocket_input)
-            features = build_features_v2(cfg, source="websocket")
+            features = build_features_v2(
+                cfg,
+                source="websocket",
+                allow_unlabelled_research=args.allow_unlabelled_research_features,
+            )
             _print({"status": "ok", "websocket": websocket_summary, "features_v2": len(features), "source": "websocket"})
         elif args.command == "external-signals":
             rows, quality = normalize_external_signals(cfg)
@@ -198,8 +215,18 @@ def main(argv: list[str] | None = None) -> int:
             _print(collect_websocket_resolutions(cfg))
         elif args.command == "collect-snapshot-labels":
             _print(collect_snapshot_labels(cfg))
+        elif args.command == "collect-overnight":
+            _print(
+                run_collection_only_overnight(
+                    cfg,
+                    websocket_seconds=args.websocket_seconds,
+                    websocket_input=args.websocket_input,
+                )
+            )
         elif args.command == "portfolio":
             _print(portfolio_snapshot(cfg))
+        elif args.command == "reconciliation-report":
+            _print(reconciliation_report(cfg))
         elif args.command == "governance-report":
             _print(governance_report(cfg))
         elif args.command == "live-trade":

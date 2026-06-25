@@ -109,3 +109,49 @@ def test_portfolio_and_reconciliation_read_sqlite_ledger(tmp_path):
     report = reconciliation_report(cfg)
     assert report["balanced"] is True
     assert report["positions_tie_to_fills"] is True
+
+
+
+def test_features_v2_blocks_without_clean_labels(tmp_path):
+    from polymarket_predictive_engine.features_v2 import build_features_v2
+
+    cfg = _cfg(tmp_path)
+    with pytest.raises(RuntimeError, match="no clean resolved binary labels"):
+        build_features_v2(cfg, allow_unlabelled_research=False)
+
+    assert build_features_v2(cfg, allow_unlabelled_research=True) == []
+
+
+def test_promotion_gate_requires_forward_paper_evidence_for_live(tmp_path):
+    import json
+
+    from polymarket_predictive_engine.readiness import paper_live_promotion_gate
+
+    cfg = _cfg(tmp_path)
+    cfg.raw["governance_thresholds"] = {
+        "min_resolved_labels": 0,
+        "target_resolved_labels": 0,
+        "min_forward_paper_trades": 1,
+    }
+
+    cfg.governance_root.mkdir(parents=True, exist_ok=True)
+    cfg.live_approval_file.parent.mkdir(parents=True, exist_ok=True)
+    cfg.live_approval_file.write_text("approved", encoding="utf-8")
+
+    (cfg.governance_root / "market_relative_validation_summary.json").write_text(
+        json.dumps(
+            {
+                "status": "approved",
+                "approved_for_paper_trading": True,
+                "model_copies_market_midpoint": False,
+                "oos": {"sample_size": 10, "markets": 5},
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    payload = paper_live_promotion_gate(cfg)
+
+    assert payload["approved_for_live_trading"] is False
+    assert payload["forward_paper_evidence"]["present"] is False
+    assert any("forward paper evidence" in blocker for blocker in payload["live_blockers"])

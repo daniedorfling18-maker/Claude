@@ -35,19 +35,25 @@ def _portfolio_number(portfolio: dict[str, Any] | None, key: str, default: float
     return safe_float((portfolio or {}).get(key)) or default
 
 
+def _directional_confidence(probability: float) -> float:
+    return max(0.0, min(1.0, 2 * abs(probability - 0.5)))
+
+
 def risk_decision(cfg: EngineConfig, signal: dict[str, Any], portfolio: dict[str, Any] | None = None) -> dict[str, Any]:
     risk = cfg.raw.get("risk", {})
     portfolio = portfolio or {}
     bankroll = _portfolio_number(portfolio, "bankroll", float(risk.get("bankroll", 1000)))
     cash = _portfolio_number(portfolio, "cash", bankroll)
     edge = safe_float(signal.get("edge")) or 0.0
-    confidence = safe_float(signal.get("model_confidence"))
-    if confidence is None:
-        confidence = safe_float(signal.get("confidence")) or 0.0
     spread = safe_float(signal.get("spread")) or 0.0
     liquidity = safe_float(signal.get("liquidity")) or 0.0
     price = safe_float(signal.get("executable_price")) or safe_float(signal.get("market_price")) or 1.0
     prob = safe_float(signal.get("calibrated_probability")) or safe_float(signal.get("model_probability")) or 0.0
+    confidence = safe_float(signal.get("model_confidence"))
+    if confidence is None:
+        confidence = safe_float(signal.get("confidence"))
+    if confidence is None:
+        confidence = _directional_confidence(prob)
     slippage = safe_float(signal.get("slippage")) or safe_float(signal.get("expected_slippage")) or 0.0
     resolution_risk = safe_float(signal.get("resolution_risk")) or 0.0
     time_to_close_minutes = _time_to_close_minutes(signal)

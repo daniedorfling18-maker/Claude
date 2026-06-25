@@ -208,3 +208,17 @@ def connect_db(path: str | Path) -> sqlite3.Connection:
     con.row_factory = sqlite3.Row
     con.execute("PRAGMA foreign_keys = ON")
     return con
+
+# Backward-compatible export for older governance/storage tests.
+# These are the tables that init_db guarantees to create.
+TABLES = [f"legacy_{table}" for table in LEGACY_TABLES] + [
+    "orders",
+    "fills",
+    "positions",
+    "cash_ledger",
+    "portfolio_snapshots",
+    "risk_events",
+    "model_predictions",
+    "market_snapshots",
+    "schema_migrations",
+]

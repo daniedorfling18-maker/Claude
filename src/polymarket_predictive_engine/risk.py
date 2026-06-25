@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 from typing import Any
 
@@ -93,8 +93,10 @@ def risk_decision(cfg: EngineConfig, signal: dict[str, Any], portfolio: dict[str
         (_portfolio_number(portfolio, "order_rate_per_minute", 0.0) < float(risk.get("maximum_order_rate_per_minute", 3)), "order rate above maximum"),
     ]
     min_ttc = float(risk.get("minimum_time_to_close_minutes", 15))
+    require_ttc = str(risk.get("require_time_to_close", False)).strip().lower() in {"1", "true", "yes"}
     if time_to_close_minutes is None:
-        checks.append((False, "time to close missing"))
+        if require_ttc:
+            checks.append((False, "time to close missing"))
     else:
         checks.append((time_to_close_minutes >= min_ttc, "time to close below minimum"))
 
@@ -141,3 +143,4 @@ def risk_decision(cfg: EngineConfig, signal: dict[str, Any], portfolio: dict[str
             "correlated_capacity_remaining": max(0.0, max_correlated - current_correlated),
         },
     }
+

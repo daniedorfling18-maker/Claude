@@ -30,7 +30,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 from superbru_score_engine.betting.long_short import dutch_arb  # noqa: E402
 
 GAMMA_MARKETS = "https://gamma-api.polymarket.com/markets"
-GAMMA_EVENT = "https://gamma-api.polymarket.com/events/"
+GAMMA_EVENTS = "https://gamma-api.polymarket.com/events"
 CLOB_BOOK = "https://clob.polymarket.com/book"
 _CA = "/root/.ccr/ca-bundle.crt"
 _CTX = ssl.create_default_context(cafile=_CA) if os.path.exists(_CA) else ssl.create_default_context()
@@ -80,7 +80,9 @@ def discover_event_ids(max_pages: int) -> list[str]:
 
 
 def scan_event(event_id: str, pause: float, max_outcomes: int) -> dict | None:
-    event = _get(f"{GAMMA_EVENT}{event_id}")
+    event = _get(f"{GAMMA_EVENTS}?" + urllib.parse.urlencode({"id": event_id}))
+    if isinstance(event, list):
+        event = event[0] if event else {}
     markets = event.get("markets", []) or []
     if str(event.get("negRisk")).lower() not in ("true", "1") or not (3 <= len(markets) <= max_outcomes):
         return None

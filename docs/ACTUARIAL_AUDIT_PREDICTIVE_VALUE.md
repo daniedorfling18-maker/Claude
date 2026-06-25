@@ -267,3 +267,35 @@ that loses ~20%. `simulate-paper-edge` is now OOS-by-market by construction and 
 the honest forward-style P&L is **negative**, so paper trading should be run only to accumulate
 a live track record (and to test live microstructure), never in the expectation of profit, and
 live stays correctly blocked.
+
+## 13. Profitability ranking of the market-neutral engines (live data)
+
+Since directional forecasting has no edge, I built and measured the two market-neutral engines
+on live Polymarket order books. The profitability ranking, with realistic P&L:
+
+| Engine | Realistic P&L on liquid markets | Verdict |
+|---|---|---|
+| **Dutch-book arbitrage** | mean basket ask-sum ≈ **1.002** (slightly overround); a few **2–4%** locks only on long-horizon (2027–28) multi-outcome markets → low **annualised return on capital** with months/years of lock-up | the only positive-EV engine, but marginal |
+| **Market-making (spread)** | median liquid spread **0.1¢ (1 tick)**; half-spread 0.05¢ vs adverse-selection ≥ **0.48¢** → **0/31 markets net-positive**, median **−0.43¢/share** | not viable on liquid markets |
+| **Directional (our fair vs price)** | OOS paper P&L **−17% to −23%** (§12) | no edge |
+
+**Market-making P&L model** (`market_making_pnl`): net maker edge = half-spread − adverse
+mark-out (+ rebate), not the gross spread. The adverse-selection benchmark is empirical — the
+median short-horizon |midpoint move| over 49k pulled snapshots is ~0 and the mean ≈ **0.24¢**
+(an *unconditional* move, hence a lower bound on the conditional-on-fill mark-out). Liquid books
+trade at a one-tick spread, so the half-spread cannot cover even that lower bound: **spread
+capture is competed away**.
+
+**Dutch-arb P&L** (`scripts/polymarket_event_arb_pnl.py`, complete outcome sets via the Gamma
+events endpoint; `scripts/polymarket_dutch_arb_scanner.py` with a completeness filter): once
+incomplete-capture false locks are removed, liquid near-term baskets (World Cup, F1, Fed) are
+efficient (ask-sum ≥ 1) and the only genuine locks are small and long-dated, so the annualised
+return on capital is low.
+
+**Conclusion — confirmed three independent ways.** Polymarket's liquid markets are efficient on
+all three axes: **direction** (no forecast edge, −4% OOS skill), **spread** (one-tick books, no
+maker edge), and **basket** (ask-sum ≈ 1, no arb). The only positive-expectation engine is
+small, long-horizon dutch-book arbitrage at a low annualised return — automatable across many
+events but not a large or fast P&L. Everything is built as dry-run, tested tooling
+(`market-making-pnl`, the two arb scanners, the live mispricing scanner); none should be taken
+live in the expectation of profit on liquid markets.

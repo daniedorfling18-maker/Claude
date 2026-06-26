@@ -81,3 +81,22 @@ def test_adaptive_scan_priority_prefers_positive_near_promoted_cohorts(tmp_path,
     assert plan["adaptive_priority"]["priority_queries"] == ["xrp", "bitcoin"]
     assert "ethereum" not in plan["adaptive_priority"]["priority_queries"]
     assert plan["ordered_queries"][:2] == ["xrp", "bitcoin"]
+
+
+def test_query_attempts_include_family_alias_fallbacks(tmp_path):
+    loop = _load_loop_module()
+    cfg = EngineConfig(
+        raw={
+            "paper_market_scan": {
+                "query_aliases": {
+                    "xrp": ["ripple", "crypto"],
+                    "bitcoin": ["btc", "crypto"],
+                }
+            }
+        },
+        path=tmp_path / "cfg.yaml",
+    )
+
+    assert loop._query_attempts(cfg, "xrp") == ["xrp", "ripple", "crypto"]
+    assert loop._query_attempts(cfg, "bitcoin") == ["bitcoin", "btc", "crypto"]
+    assert loop._query_attempts(cfg, "world cup") == ["world cup"]

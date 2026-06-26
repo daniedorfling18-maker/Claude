@@ -226,6 +226,19 @@ paper_market_scan:
   - solana
   - xrp
   - tennis
+  query_aliases:
+    bitcoin:
+    - btc
+    - crypto
+    ethereum:
+    - eth
+    - crypto
+    solana:
+    - sol
+    - crypto
+    xrp:
+    - ripple
+    - crypto
 cohort_promotion:
   require_positive_forward_pnl: true
   allow_shadow_evidence_for_promotion: true

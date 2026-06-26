@@ -431,6 +431,18 @@ def _query_slug(query: str) -> str:
     return slug or "query"
 
 
+def _query_attempts(cfg, query: str) -> list[str]:
+    settings = cfg.raw.get("paper_market_scan", {}) or {}
+    aliases = settings.get("query_aliases", {}) or {}
+    attempts = [query]
+    if isinstance(aliases, dict):
+        for alias in aliases.get(query, aliases.get(query.lower(), [])) or []:
+            alias_text = str(alias).strip()
+            if alias_text and alias_text.lower() not in {item.lower() for item in attempts}:
+                attempts.append(alias_text)
+    return attempts
+
+
 def _merge_by_token(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     merged: dict[str, dict[str, Any]] = {}
     for row in rows:
@@ -453,33 +465,43 @@ def scan_once(cfg, *, scan_sequence: int = 1) -> dict[str, Any]:
     scan_rows: list[dict[str, Any]] = []
     opportunity_rows: list[dict[str, Any]] = []
     per_query: list[dict[str, Any]] = []
+    used_temp_outputs = len(queries) > 1
 
     for query in queries:
-        query_output_dir = base_output_dir
-        if len(queries) > 1:
-            query_output_dir = base_output_dir / "query_scans" / _query_slug(query)
-        config = dataclasses.replace(
-            base_config,
-            query=query,
-            output_dir=query_output_dir,
-            mode="scan",
-            execute_live=False,
-            model_csv=_abs(base_config.model_csv),
-            positions_csv=_abs(base_config.positions_csv),
-        )
-        token_count, opportunity_count = scanner.run_once(config, live_executor=None)
-        scan_rows.extend(_read_rows(query_output_dir / "market_snapshot.csv"))
-        opportunity_rows.extend(_read_rows(query_output_dir / "opportunities.csv"))
-        per_query.append(
-            {
+        attempts = _query_attempts(cfg, query)
+        final_attempt: dict[str, Any] | None = None
+        for index, actual_query in enumerate(attempts):
+            query_output_dir = base_output_dir
+            if len(queries) > 1 or len(attempts) > 1:
+                used_temp_outputs = True
+                query_output_dir = base_output_dir / "query_scans" / _query_slug(f"{query}-{actual_query}")
+            config = dataclasses.replace(
+                base_config,
+                query=actual_query,
+                output_dir=query_output_dir,
+                mode="scan",
+                execute_live=False,
+                model_csv=_abs(base_config.model_csv),
+                positions_csv=_abs(base_config.positions_csv),
+            )
+            token_count, opportunity_count = scanner.run_once(config, live_executor=None)
+            final_attempt = {
                 "query": query,
+                "actual_query": actual_query,
+                "attempt": index + 1,
+                "attempts": attempts,
                 "tokens": token_count,
                 "scanner_opportunities": opportunity_count,
                 "snapshot_path": str(query_output_dir / "market_snapshot.csv"),
             }
-        )
+            if token_count > 0 or index == len(attempts) - 1:
+                scan_rows.extend(_read_rows(query_output_dir / "market_snapshot.csv"))
+                opportunity_rows.extend(_read_rows(query_output_dir / "opportunities.csv"))
+                break
+        if final_attempt is not None:
+            per_query.append(final_attempt)
 
-    if len(queries) > 1:
+    if used_temp_outputs:
         scan_rows = _merge_by_token(scan_rows)
         _write_rows(base_output_dir / "market_snapshot.csv", scan_rows, SNAPSHOT_FIELDS)
         _write_rows(base_output_dir / "opportunities.csv", opportunity_rows, OPPORTUNITY_FIELDS)

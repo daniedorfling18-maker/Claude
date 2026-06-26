@@ -591,7 +591,7 @@ def apply_mispricing_alpha(
                 shadow_reasons.append("fundamental_edge_below_shadow_minimum")
         if shadow_min_price is not None and price < shadow_min_price:
             shadow_reasons.append("price_below_shadow_minimum")
-        if edge_lower_bound < shadow_min_edge_lower_bound:
+        if not crypto_shadow_mode and edge_lower_bound < shadow_min_edge_lower_bound:
             shadow_reasons.append("edge_lower_bound_below_shadow_minimum")
         if shadow_max_spread is not None and (spread_for_shadow is None or spread_for_shadow > shadow_max_spread):
             shadow_reasons.append("spread_above_shadow_limit")

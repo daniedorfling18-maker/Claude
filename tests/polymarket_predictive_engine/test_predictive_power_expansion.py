@@ -198,6 +198,26 @@ def test_features_v2_websocket_only_no_labels(tmp_path):
     assert row["book_imbalance"] == -0.2
 
 
+def test_features_v2_websocket_uses_price_change_size_as_liquidity_fallback(tmp_path):
+    write_websocket_features(tmp_path)
+    path = tmp_path / "outputs" / "polymarket_training" / "websocket_market_features.csv"
+    rows = read_csv_rows(path)
+    fieldnames = list(rows[0].keys())
+    for row in rows:
+        for key in ("top_bid_size", "top_ask_size", "bid_depth_1pct", "ask_depth_1pct", "bid_depth_5pct", "ask_depth_5pct"):
+            row[key] = ""
+        row["price_change_size"] = "25"
+    with path.open("w", newline="", encoding="utf-8") as handle:
+        writer = csv.DictWriter(handle, fieldnames=fieldnames)
+        writer.writeheader()
+        writer.writerows(rows)
+
+    cfg = load_config(make_cfg(tmp_path))
+    features = build_features_v2(cfg)
+
+    assert features[0]["liquidity"] == 25.0
+
+
 def test_features_v2_combines_historical_and_websocket_sources(tmp_path):
     write_history(tmp_path)
     write_websocket_features(tmp_path)

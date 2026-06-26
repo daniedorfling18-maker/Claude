@@ -300,6 +300,65 @@ def test_alpha_uses_crypto_updown_contract_model_overlay(tmp_path, monkeypatch):
     assert scored[0]["shadow_candidate_reason"] == "shadow_eligible"
 
 
+def test_crypto_shadow_evidence_uses_crypto_edge_not_generic_alpha_lower_bound(tmp_path, monkeypatch):
+    cfg = _config(tmp_path)
+    cfg.raw["mispricing_alpha"].update(
+        {
+            "bias_alpha_shrinkage": 0.0,
+            "model_residual_shrinkage": 0.0,
+            "use_fundamental_probabilities": False,
+            "uncertainty_penalty_weight": 0.2,
+            "market_overround_penalty_weight": 0.0,
+        }
+    )
+    cfg.raw["crypto_updown_live_model"].update(
+        {
+            "enabled": True,
+            "probability_blend_weight": 0.5,
+            "minimum_shadow_edge_after_cost": 0.015,
+        }
+    )
+
+    def fake_crypto_model(row, settings):
+        return {
+            "crypto_model_status": "scored",
+            "crypto_model_probability": 0.60,
+            "crypto_model_p_up": 0.60,
+            "crypto_model_edge_after_cost": 0.04,
+        }
+
+    monkeypatch.setattr(mispricing_alpha_module, "score_crypto_updown_prediction", fake_crypto_model)
+
+    scored = apply_mispricing_alpha(
+        cfg,
+        [
+            {
+                "market_id": "btc-daily",
+                "market_slug": "bitcoin-up-or-down-on-june-26-2026",
+                "question": "Bitcoin Up or Down on June 26?",
+                "outcome": "Up",
+                "token_id": "btc-up-token",
+                "prediction_timestamp": "2026-06-26T09:00:00Z",
+                "close_time": "2026-06-26T16:00:00Z",
+                "category": "crypto",
+                "market_midpoint": "0.55",
+                "calibrated_probability": "0.55",
+                "executable_price": "0.55",
+                "spread": "0.01",
+                "liquidity": "1000",
+                "time_to_close_hours": "7",
+                "confidence": "0",
+            }
+        ],
+    )
+
+    assert scored[0]["crypto_model_status"] == "scored"
+    assert float(scored[0]["edge_lower_bound"]) < 0
+    assert scored[0]["alpha_trade_candidate"] is False
+    assert scored[0]["shadow_trade_candidate"] is True
+    assert scored[0]["shadow_candidate_reason"] == "shadow_eligible"
+
+
 def test_alpha_crypto_overlay_has_fail_fast_row_budget(tmp_path, monkeypatch):
     cfg = _config(tmp_path)
     cfg.raw["mispricing_alpha"].update(

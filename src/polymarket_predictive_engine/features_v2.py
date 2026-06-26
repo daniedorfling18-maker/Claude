@@ -221,6 +221,7 @@ def _normalise_rows_from_file(cfg: EngineConfig, path: Path) -> list[dict[str, A
         ask_depth_1 = safe_float(row.get(ask_depth_1_col or ""))
         bid_depth_5 = safe_float(row.get(bid_depth_5_col or ""))
         ask_depth_5 = safe_float(row.get(ask_depth_5_col or ""))
+        price_change_size = safe_float(row.get(price_change_size_col or ""))
         liquidity = safe_float(row.get(liq_col or ""))
         if liquidity is None and is_websocket:
             if bid_size is not None or ask_size is not None:
@@ -229,6 +230,8 @@ def _normalise_rows_from_file(cfg: EngineConfig, path: Path) -> list[dict[str, A
                 liquidity = (bid_depth_1 or 0.0) + (ask_depth_1 or 0.0)
             elif bid_depth_5 is not None or ask_depth_5 is not None:
                 liquidity = (bid_depth_5 or 0.0) + (ask_depth_5 or 0.0)
+            elif price_change_size is not None:
+                liquidity = price_change_size
 
         market_id = row.get(market_col, "") or (row.get(token_col, "") if is_websocket else "")
         normalised.append(
@@ -267,7 +270,7 @@ def _normalise_rows_from_file(cfg: EngineConfig, path: Path) -> list[dict[str, A
                 "book_imbalance": safe_float(row.get(book_imbalance_col or "")) or "",
                 "price_change_side": row.get(price_change_side_col or "", ""),
                 "price_change_price": safe_float(row.get(price_change_price_col or "")) or "",
-                "price_change_size": safe_float(row.get(price_change_size_col or "")) or "",
+                "price_change_size": price_change_size if price_change_size is not None else "",
             }
         )
     return normalised

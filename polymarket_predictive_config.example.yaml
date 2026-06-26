@@ -326,6 +326,9 @@ shadow_cohort_validation:
   maximum_spread: 0.02
   maximum_relative_spread: 0.2
   minimum_liquidity: 100
+  fast_maximum_spread: 0.06
+  fast_maximum_relative_spread: 0.25
+  fast_minimum_liquidity: 5
   minimum_reentry_minutes_after_exit: 240
   quarantine_negative_cohorts: true
   quarantine_min_closed_positions: 3
@@ -498,6 +501,14 @@ risk:
   maximum_spread: 0.08
   minimum_liquidity: 50
   minimum_time_to_close_minutes: 15
+  fast_market_overrides:
+    enabled: true
+    minimum_edge: 0.005
+    minimum_confidence: 0.05
+    maximum_spread: 0.06
+    minimum_liquidity: 5
+    minimum_time_to_close_minutes: 0.25
+    maximum_stake_usdc: 2
   maximum_resolution_risk: 0.25
   maximum_single_market_exposure: 0.02
   maximum_category_exposure: 0.10

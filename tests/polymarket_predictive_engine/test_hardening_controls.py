@@ -78,6 +78,39 @@ def test_risk_decision_returns_explicit_execution_units(tmp_path):
     assert 0 < decision["limit_price"] < 1
 
 
+def test_fast_market_risk_overrides_allow_tiny_paper_probe(tmp_path):
+    cfg = _cfg(tmp_path)
+    cfg.raw["risk"]["minimum_confidence"] = 0.65
+    cfg.raw["risk"]["fast_market_overrides"] = {
+        "enabled": True,
+        "minimum_edge": 0.005,
+        "minimum_confidence": 0.05,
+        "maximum_spread": 0.06,
+        "minimum_liquidity": 5,
+        "minimum_time_to_close_minutes": 0.25,
+        "maximum_stake_usdc": 2,
+    }
+    decision = risk_decision(
+        cfg,
+        {
+            "market_id": "m-fast",
+            "market_slug": "xrp-updown-5m-1782489000",
+            "token_id": "t-fast",
+            "edge": 0.01,
+            "alpha_probability": 0.578,
+            "executable_price": 0.495,
+            "spread": 0.01,
+            "liquidity": 5,
+            "time_to_close_minutes": 3,
+            "max_stake_usdc": 2,
+        },
+        {"bankroll": 1000, "cash": 1000},
+    )
+
+    assert decision["approved"] is True
+    assert decision["risk_profile"] == "fast_market_paper_probe"
+    assert decision["stake_usdc"] <= 0.25
+
 def test_portfolio_and_reconciliation_read_sqlite_ledger(tmp_path):
     cfg = _cfg(tmp_path)
     init_db(cfg.database_path)

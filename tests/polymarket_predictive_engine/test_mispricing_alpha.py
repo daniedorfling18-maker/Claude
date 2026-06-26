@@ -424,6 +424,72 @@ def test_crypto_shadow_evidence_uses_crypto_edge_not_generic_alpha_lower_bound(t
     assert scored[0]["shadow_candidate_reason"] == "shadow_eligible"
 
 
+def test_fast_crypto_shadow_uses_fast_learning_liquidity_threshold(tmp_path, monkeypatch):
+    cfg = _config(tmp_path)
+    cfg.raw["mispricing_alpha"].update(
+        {
+            "bias_alpha_shrinkage": 0.0,
+            "model_residual_shrinkage": 0.0,
+            "use_fundamental_probabilities": False,
+            "uncertainty_penalty_weight": 0.2,
+            "market_overround_penalty_weight": 0.0,
+        }
+    )
+    cfg.raw["shadow_cohort_validation"].update(
+        {
+            "minimum_liquidity": 100,
+            "fast_minimum_liquidity": 5,
+            "maximum_spread": 0.02,
+            "fast_maximum_spread": 0.06,
+        }
+    )
+    cfg.raw["crypto_updown_live_model"].update(
+        {
+            "enabled": True,
+            "probability_blend_weight": 0.5,
+            "minimum_shadow_edge_after_cost": 0.015,
+        }
+    )
+
+    def fake_crypto_model(row, settings):
+        return {
+            "crypto_model_status": "scored",
+            "crypto_model_contract_kind": "fast",
+            "crypto_model_interval": "5m",
+            "crypto_model_probability": 0.60,
+            "crypto_model_p_up": 0.60,
+            "crypto_model_edge_after_cost": 0.04,
+        }
+
+    monkeypatch.setattr(mispricing_alpha_module, "score_crypto_updown_prediction", fake_crypto_model)
+
+    scored = apply_mispricing_alpha(
+        cfg,
+        [
+            {
+                "market_id": "xrp-fast",
+                "market_slug": "xrp-updown-5m-1782489000",
+                "question": "XRP Up or Down - 5m",
+                "outcome": "Down",
+                "token_id": "xrp-down-token",
+                "prediction_timestamp": "2026-06-26T09:00:00Z",
+                "close_time": "2026-06-26T09:05:00Z",
+                "category": "crypto",
+                "market_midpoint": "0.495",
+                "calibrated_probability": "0.55",
+                "executable_price": "0.495",
+                "spread": "0.01",
+                "liquidity": "5",
+                "time_to_close_hours": "0.05",
+                "confidence": "0",
+            }
+        ],
+    )
+
+    assert scored[0]["crypto_model_contract_kind"] == "fast"
+    assert scored[0]["shadow_trade_candidate"] is True
+    assert scored[0]["shadow_candidate_reason"] == "shadow_eligible"
+
 def test_alpha_crypto_overlay_has_fail_fast_row_budget(tmp_path, monkeypatch):
     cfg = _config(tmp_path)
     cfg.raw["mispricing_alpha"].update(

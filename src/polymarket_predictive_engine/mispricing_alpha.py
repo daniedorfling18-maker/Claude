@@ -577,9 +577,26 @@ def apply_mispricing_alpha(
             crypto_shadow_enabled
             and str(row.get("crypto_model_status") or "") == "scored"
         )
+        crypto_fast_shadow_mode = bool(
+            crypto_shadow_mode
+            and str(row.get("crypto_model_contract_kind") or "").strip().lower() == "fast"
+        )
         spread_for_shadow = safe_float(row.get("spread"))
         liquidity_for_shadow = safe_float(row.get("liquidity"))
         relative_spread_for_shadow = (spread_for_shadow / price) if spread_for_shadow is not None and price > 0 else None
+        shadow_effective_max_spread = shadow_max_spread
+        shadow_effective_max_relative_spread = shadow_max_relative_spread
+        shadow_effective_min_liquidity = shadow_min_liquidity
+        if crypto_fast_shadow_mode:
+            shadow_effective_max_spread = safe_float(
+                shadow_settings.get("fast_maximum_spread", shadow_effective_max_spread)
+            )
+            shadow_effective_max_relative_spread = safe_float(
+                shadow_settings.get("fast_maximum_relative_spread", shadow_effective_max_relative_spread)
+            )
+            shadow_effective_min_liquidity = safe_float(
+                shadow_settings.get("fast_minimum_liquidity", shadow_effective_min_liquidity)
+            )
         shadow_reasons: list[str] = []
         if crypto_shadow_mode:
             if crypto_edge_for_shadow is None or crypto_edge_for_shadow < crypto_min_shadow_edge_after_cost:
@@ -593,14 +610,14 @@ def apply_mispricing_alpha(
             shadow_reasons.append("price_below_shadow_minimum")
         if not crypto_shadow_mode and edge_lower_bound < shadow_min_edge_lower_bound:
             shadow_reasons.append("edge_lower_bound_below_shadow_minimum")
-        if shadow_max_spread is not None and (spread_for_shadow is None or spread_for_shadow > shadow_max_spread):
+        if shadow_effective_max_spread is not None and (spread_for_shadow is None or spread_for_shadow > shadow_effective_max_spread):
             shadow_reasons.append("spread_above_shadow_limit")
-        if shadow_max_relative_spread is not None and (
-            relative_spread_for_shadow is None or relative_spread_for_shadow > shadow_max_relative_spread
+        if shadow_effective_max_relative_spread is not None and (
+            relative_spread_for_shadow is None or relative_spread_for_shadow > shadow_effective_max_relative_spread
         ):
             shadow_reasons.append("relative_spread_above_shadow_limit")
-        if shadow_min_liquidity is not None and (
-            liquidity_for_shadow is None or liquidity_for_shadow < shadow_min_liquidity
+        if shadow_effective_min_liquidity is not None and (
+            liquidity_for_shadow is None or liquidity_for_shadow < shadow_effective_min_liquidity
         ):
             shadow_reasons.append("liquidity_below_shadow_limit")
         shadow_trade_candidate = bool(shadow_enabled and not shadow_reasons)

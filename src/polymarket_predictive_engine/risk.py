@@ -1,9 +1,13 @@
 from __future__ import annotations
 
+import re
 from typing import Any
 
 from .config import EngineConfig, kill_switch_active
-from .utils import safe_float
+from .utils import boolish, safe_float
+
+
+FAST_UPDOWN_SLUG_RE = re.compile(r"-updown-(?:5m|15m)-\d+", re.IGNORECASE)
 
 
 def kelly_fraction(probability: float, price: float, cap: float) -> float:
@@ -42,6 +46,22 @@ def _directional_confidence(probability: float) -> float:
     return max(0.0, min(1.0, 2.0 * abs(probability - 0.5)))
 
 
+def _is_fast_market_signal(signal: dict[str, Any]) -> bool:
+    slug = str(signal.get("market_slug") or "").strip().lower()
+    return bool(FAST_UPDOWN_SLUG_RE.search(slug))
+
+
+def _risk_value(
+    risk: dict[str, Any],
+    fast_overrides: dict[str, Any],
+    fast_market: bool,
+    key: str,
+    default: float,
+) -> float:
+    source = fast_overrides if fast_market and key in fast_overrides else risk
+    return float(source.get(key, default))
+
+
 def risk_decision(
     cfg: EngineConfig,
     signal: dict[str, Any],
@@ -49,6 +69,8 @@ def risk_decision(
 ) -> dict[str, Any]:
     """Apply every configured pre-trade control and return explicit USDC/share units."""
     risk = cfg.raw.get("risk", {})
+    fast_overrides = risk.get("fast_market_overrides", {}) or {}
+    fast_market = boolish(fast_overrides.get("enabled", False)) and _is_fast_market_signal(signal)
     portfolio = portfolio or {}
     bankroll = _number(portfolio, "bankroll", float(risk.get("bankroll", 1000)))
     cash = _number(portfolio, "cash", bankroll)
@@ -98,10 +120,10 @@ def risk_decision(
         return reject("category is blacklisted")
 
     checks = [
-        (edge >= float(risk.get("minimum_edge", 0.03)), "edge below minimum"),
-        (confidence >= float(risk.get("minimum_confidence", 0.65)), "confidence below minimum"),
-        (spread <= float(risk.get("maximum_spread", 0.08)), "spread above maximum"),
-        (liquidity >= float(risk.get("minimum_liquidity", 50)), "liquidity below minimum"),
+        (edge >= _risk_value(risk, fast_overrides, fast_market, "minimum_edge", 0.03), "edge below minimum"),
+        (confidence >= _risk_value(risk, fast_overrides, fast_market, "minimum_confidence", 0.65), "confidence below minimum"),
+        (spread <= _risk_value(risk, fast_overrides, fast_market, "maximum_spread", 0.08), "spread above maximum"),
+        (liquidity >= _risk_value(risk, fast_overrides, fast_market, "minimum_liquidity", 50), "liquidity below minimum"),
         (resolution_risk <= float(risk.get("maximum_resolution_risk", 0.25)), "resolution risk above maximum"),
         (slippage <= float(risk.get("maximum_slippage", 0.02)), "slippage above maximum"),
         (
@@ -121,7 +143,7 @@ def risk_decision(
             "order rate above maximum",
         ),
     ]
-    minimum_time = float(risk.get("minimum_time_to_close_minutes", 15))
+    minimum_time = _risk_value(risk, fast_overrides, fast_market, "minimum_time_to_close_minutes", 15)
     require_time = str(risk.get("require_time_to_close", False)).strip().lower() in {"1", "true", "yes"}
     if time_to_close_minutes is None:
         if require_time:
@@ -142,6 +164,7 @@ def risk_decision(
     liquidity_cap = liquidity * float(risk.get("liquidity_cap_fraction", 0.05))
     kelly = kelly_fraction(probability, price, float(risk.get("kelly_cap", 0.005)))
     signal_cap = safe_float(signal.get("max_stake_usdc"))
+    fast_market_cap = safe_float(fast_overrides.get("maximum_stake_usdc")) if fast_market else None
     stake_usdc = min(
         kelly * bankroll,
         max(0.0, max_single - current_market),
@@ -149,6 +172,7 @@ def risk_decision(
         max(0.0, max_correlated - current_correlated),
         liquidity_cap,
         cash,
+        fast_market_cap if fast_market_cap is not None and fast_market_cap > 0 else cash,
         signal_cap if signal_cap is not None and signal_cap > 0 else cash,
     )
     if stake_usdc <= 0:
@@ -163,6 +187,7 @@ def risk_decision(
         "limit_price": round(price, 6),
         "max_size": round(max_single, 6),
         "kelly_fraction": round(kelly, 8),
+        "risk_profile": "fast_market_paper_probe" if fast_market else "standard",
         "risk_checks": {
             "time_to_close_minutes": time_to_close_minutes,
             "resolution_risk": resolution_risk,

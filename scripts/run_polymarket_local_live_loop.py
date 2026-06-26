@@ -287,12 +287,16 @@ def _run_discovery_iteration(
 ) -> tuple[int, dict[str, Any]]:
     """Run one scanner discovery pass using its own sequence counter."""
     next_iteration = max(0, int(discovery_iteration)) + 1
+    scanner_iteration = next_iteration * 2
     summary = discovery_loop.run_iteration(
         config_path=config_path,
         optimize_model=optimize_model,
-        iteration=next_iteration,
+        iteration=scanner_iteration,
         paper_source=paper_source,
     )
+    if isinstance(summary, dict):
+        summary["discovery_iteration"] = next_iteration
+        summary["scanner_iteration"] = scanner_iteration
     return next_iteration, summary
 
 

@@ -133,9 +133,10 @@ def test_discovery_scheduler_uses_its_own_iteration_counter(monkeypatch, tmp_pat
         paper_source="raw_snapshot",
     )
 
-    assert seen == [1, 2]
+    assert seen == [2, 4]
     assert discovery_iteration == 2
     assert summary["scan"]["tokens"] == 7
+    assert summary["scanner_iteration"] == 4
 
 
 def test_first_discovery_refresh_is_due_immediately_after_start():

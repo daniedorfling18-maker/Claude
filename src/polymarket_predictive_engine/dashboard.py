@@ -37,10 +37,11 @@ HTML = """<!doctype html>
     .value { margin-top:8px; font-size:26px; font-weight:750; letter-spacing:-0.03em; }
     .value.good { color:var(--good); } .value.bad { color:var(--bad); } .value.warn { color:var(--warn); }
     section { padding:16px; margin-top:16px; overflow:hidden; }
+    .tableWrap { width:100%; overflow-x:auto; -webkit-overflow-scrolling:touch; }
     table { width:100%; border-collapse:collapse; }
     th, td { padding:10px 8px; border-bottom:1px solid rgba(255,255,255,0.08); text-align:left; vertical-align:top; }
     th { color:var(--muted); font-size:12px; font-weight:650; text-transform:uppercase; letter-spacing:0.06em; }
-    td { color:#d8e5f8; }
+    td { color:#d8e5f8; overflow-wrap:anywhere; max-width:520px; }
     tr:hover td { background:rgba(255,255,255,0.035); }
     .two { display:grid; grid-template-columns:1fr 1fr; gap:16px; }
     .mono { font-family:ui-monospace, SFMono-Regular, Consolas, monospace; font-size:12px; }
@@ -54,9 +55,9 @@ HTML = """<!doctype html>
   <header>
     <div>
       <h1>Polymarket Paper Trading</h1>
-      <div class="sub">Local paper bot dashboard · auto-refreshes every 15 seconds</div>
+      <div class="sub">Local paper bot dashboard - live websocket view - auto-refreshes every 5 seconds</div>
     </div>
-    <div class="pill"><span id="statusDot" class="dot"></span><span id="statusText">Loading…</span></div>
+    <div class="pill"><span id="statusDot" class="dot"></span><span id="statusText">Loading...</span></div>
   </header>
   <div id="error"></div>
   <div class="grid" id="cards"></div>
@@ -84,15 +85,17 @@ HTML = """<!doctype html>
   <section><h2>Approved signals currently queued/scored</h2><div id="signals"></div></section>
 </main>
 <script>
-const fmtUsd = (v) => v === null || v === undefined || v === "" || Number.isNaN(Number(v)) ? "—" : "$" + Number(v).toFixed(2);
-const fmtNum = (v, d=4) => v === null || v === undefined || v === "" || Number.isNaN(Number(v)) ? "—" : Number(v).toFixed(d);
-const short = (v) => !v ? "—" : String(v).length > 22 ? String(v).slice(0,10) + "…" + String(v).slice(-8) : String(v);
-const joinList = (v) => Array.isArray(v) ? v.join(", ") : (v || "â€”");
-const marketLabel = (row) => row?.market_name || row?.question || row?.market_slug || short(row?.market_id) || short(row?.token_id);
+const fmtUsd = (v) => v === null || v === undefined || v === "" || Number.isNaN(Number(v)) ? "-" : "$" + Number(v).toFixed(2);
+const fmtNum = (v, d=4) => v === null || v === undefined || v === "" || Number.isNaN(Number(v)) ? "-" : Number(v).toFixed(d);
+const longText = (v) => !v ? "-" : String(v).length > 80 ? String(v).slice(0,42) + "..." + String(v).slice(-24) : String(v);
+const joinText = (v) => Array.isArray(v) ? v.join(", ") : (v || "-");
+const short = longText;
+const joinList = joinText;
+const marketLabel = (row) => row?.market_name || row?.question || row?.market_slug || (row?.market_id ? longText(row.market_id) : longText(row?.token_id));
 function card(label, value, cls="") { return `<div class="card"><div class="label">${label}</div><div class="value ${cls}">${value}</div></div>`; }
 function table(rows, columns) {
   if (!rows || !rows.length) return `<div class="muted">No rows yet.</div>`;
-  return `<table><thead><tr>${columns.map(c=>`<th>${c[0]}</th>`).join("")}</tr></thead><tbody>${rows.map(row=>`<tr>${columns.map(c=>`<td>${c[2] ? c[2](row[c[1]], row) : (row[c[1]] ?? "—")}</td>`).join("")}</tr>`).join("")}</tbody></table>`;
+  return `<div class="tableWrap"><table><thead><tr>${columns.map(c=>`<th>${c[0]}</th>`).join("")}</tr></thead><tbody>${rows.map(row=>`<tr>${columns.map(c=>`<td>${c[2] ? c[2](row[c[1]], row) : (row[c[1]] ?? "-")}</td>`).join("")}</tr>`).join("")}</tbody></table></div>`;
 }
 async function load() {
   try {
@@ -104,17 +107,25 @@ async function load() {
     const broker = data.forward_paper_cycle?.broker || paper.broker || {};
     const target = data.actual_profit_target || data.forward_paper_cycle?.actual_profit_target || {};
     const monthly = data.forward_paper_cycle?.monthly_profit_target || {};
+    const live = data.local_live_heartbeat || data.heartbeat || {};
+    const scanner = data.scanner_heartbeat || {};
+    const websocket = live.websocket || {};
+    const websocketFeatures = live.websocket_features || {};
+    const ingest = live.ingest || {};
     const status = target.status || data.forward_paper_cycle?.status || "unknown";
     const good = status === "target_reached" || status === "on_pace";
     const bad = status === "not_on_pace" || status === "missing_equity";
     document.getElementById("statusDot").className = "dot " + (good ? "good" : bad ? "bad" : "");
-    document.getElementById("statusText").textContent = status + " · updated " + (data.generated_at_utc || "—");
+    document.getElementById("statusText").textContent = status + " - live tick " + (live.iteration || "-") + " - updated " + (data.generated_at_utc || "-");
     const pnl = Number(target.actual_pnl_since_baseline_usdc || 0);
     document.getElementById("cards").innerHTML = [
       card("Equity", fmtUsd(broker.equity), Number(broker.equity) >= 1000 ? "good" : "bad"),
       card("Actual P&L since clean baseline", fmtUsd(pnl), pnl >= 0 ? "good" : "bad"),
       card("Monthly run-rate", target.monthly_run_rate_usdc == null ? "Collecting" : fmtUsd(target.monthly_run_rate_usdc), target.monthly_run_rate_usdc >= target.target_monthly_profit_usdc ? "good" : ""),
-      card("Scanning now", joinList(data.heartbeat?.scan?.scan_plan?.selected_queries || data.heartbeat?.scan?.queries), "warn"),
+      card("Live WS messages", websocket.new_messages ?? "-", "good"),
+      card("Live WS features", websocketFeatures.feature_rows ?? "-", "good"),
+      card("Ledger snapshots", ingest.inserted_market_snapshots ?? "-", "good"),
+      card("Scanning now", joinText(live.discovery?.scan?.scan_plan?.selected_queries || scanner.scan?.scan_plan?.selected_queries || scanner.scan?.queries), "warn"),
       card("Exposure", fmtUsd(broker.total_exposure)),
       card("Cash", fmtUsd(broker.cash)),
       card("Buy fills / cycle", broker.buy_orders_filled ?? broker.orders_filled ?? "0"),
@@ -131,15 +142,21 @@ async function load() {
       ["Status","status"], ["Target","target", fmtUsd], ["P&L","pnl", fmtUsd], ["Hours","elapsed", v=>fmtNum(v,2)], ["Run-rate","run", fmtUsd], ["Baseline equity","baseline", fmtUsd]
     ]);
     document.getElementById("cycle").innerHTML = table([{
-      scan: data.heartbeat?.scan?.tokens, features: data.forward_paper_cycle?.features, predictions: data.forward_paper_cycle?.predictions,
+      scan: live.discovery?.scan?.tokens || scanner.scan?.tokens, features: data.forward_paper_cycle?.features, predictions: data.forward_paper_cycle?.predictions,
       approved: data.forward_paper_cycle?.signals_approved, rejected: data.forward_paper_cycle?.signals_rejected,
       brokerRejected: monthly.broker_rejected_orders,
-      scanMode: data.heartbeat?.scan?.scan_plan?.mode,
-      queries: data.heartbeat?.scan?.scan_plan?.selected_queries || data.heartbeat?.scan?.queries,
-      priorityQueue: data.heartbeat?.scan?.scan_plan?.adaptive_priority?.priority_queries || data.heartbeat?.scan?.scan_plan?.ordered_queries,
+      liveTick: live.iteration,
+      liveSource: live.live_source || live.source || (websocket.new_messages != null ? "websocket" : "-"),
+      wsMessages: websocket.new_messages,
+      wsFeatures: websocketFeatures.feature_rows,
+      snapshotsInserted: ingest.inserted_market_snapshots,
+      fullCycle: live.full_prediction_cycle?.status,
+      scanMode: live.discovery?.scan?.scan_plan?.mode || scanner.scan?.scan_plan?.mode,
+      queries: live.discovery?.scan?.scan_plan?.selected_queries || scanner.scan?.scan_plan?.selected_queries || scanner.scan?.queries,
+      priorityQueue: live.discovery?.scan?.scan_plan?.adaptive_priority?.priority_queries || scanner.scan?.scan_plan?.adaptive_priority?.priority_queries || live.discovery?.scan?.scan_plan?.ordered_queries || scanner.scan?.scan_plan?.ordered_queries,
       reason: broker.entry_pause_reason || Object.keys(broker.broker_rejection_reasons || {}).join(", ")
     }], [
-      ["Scan mode","scanMode"], ["Queries","queries", joinList], ["Priority queue","priorityQueue", joinList], ["Tokens","scan"], ["Features","features"], ["Predictions","predictions"], ["Approved","approved"], ["Rejected","rejected"], ["Broker rejects","brokerRejected"], ["Main reason","reason"]
+      ["Live tick","liveTick"], ["Live source","liveSource"], ["WS msgs","wsMessages"], ["WS features","wsFeatures"], ["Snapshots","snapshotsInserted"], ["Full cycle","fullCycle"], ["Scan mode","scanMode"], ["Queries","queries", joinText], ["Priority queue","priorityQueue", joinText], ["Tokens","scan"], ["Features","features"], ["Predictions","predictions"], ["Approved","approved"], ["Rejected","rejected"], ["Broker rejects","brokerRejected"], ["Main reason","reason"]
     ]);
     document.getElementById("promotionReadiness").innerHTML = table(data.cohort_promotion_readiness?.cohorts || [], [
       ["Cohort","signal_cohort"],
@@ -173,7 +190,7 @@ async function load() {
       ["Open","shadow_open_positions"]
     ]);
     document.getElementById("settlementWatch").innerHTML =
-      `<div class="muted">Checks: ${data.shadow_settlement_watch?.settlement_checks ?? 0} · settled last cycle: ${data.shadow_settlement_watch?.settled_positions ?? 0}</div>` +
+      `<div class="muted">Checks: ${data.shadow_settlement_watch?.settlement_checks ?? 0} - settled last cycle: ${data.shadow_settlement_watch?.settled_positions ?? 0}</div>` +
       table(data.shadow_settlement_watch?.next_open_settlements || [], [
         ["Close","close_time"],
         ["Minutes","minutes_until_close", v=>fmtNum(v,0)],
@@ -213,9 +230,9 @@ async function load() {
     ], [
       ["Anchor","anchor"],
       ["Status","status"],
-      ["Rows","rows", (v,row)=>v ?? row.fundamental_rows ?? row.rows_in ?? "—"],
+      ["Rows","rows", (v,row)=>v ?? row.fundamental_rows ?? row.rows_in ?? "-"],
       ["Markets","markets"],
-      ["Output","output_file", v=>short(v)],
+      ["Output","output_file", v=>longText(v)],
       ["Note","note"]
     ]);
     document.getElementById("edgeSearch").innerHTML = table(data.edge_strategy_search?.top_rules || [], [
@@ -229,12 +246,12 @@ async function load() {
     ]);
     const liquidity = data.liquidity_discovery || {};
     document.getElementById("liquidityDiscovery").innerHTML =
-      `<div class="muted">Status: ${liquidity.status || "unknown"} · scanned ${liquidity.tokens_scanned ?? 0} tokens · ${liquidity.tradable_tokens ?? 0} currently pass liquidity filters</div>` +
+      `<div class="muted">Status: ${liquidity.status || "unknown"} - scanned ${liquidity.tokens_scanned ?? 0} tokens - ${liquidity.tradable_tokens ?? 0} currently pass liquidity filters</div>` +
       table(liquidity.model_target_queue || [], [
         ["Family","family"],
         ["Tradable","tradable_tokens"],
         ["Status","status"],
-        ["Best rule","top_rule", v=>short(v)],
+        ["Best rule","top_rule", v=>longText(v)],
         ["Holdout ROI","top_rule_holdout_roi", v=>fmtNum(Number(v) * 100, 2) + "%"],
         ["Evidence","top_rule_reason"],
         ["Recommendation","recommendation"]
@@ -275,7 +292,7 @@ async function load() {
   }
 }
 load();
-setInterval(load, 15000);
+setInterval(load, 5000);
 </script>
 </body>
 </html>
@@ -525,7 +542,9 @@ def render_dashboard(cfg: EngineConfig, latest_report: dict[str, Any] | None = N
     shadow_root = cfg.output_root / "polymarket_shadow"
 
     forward = latest_report or read_json(governance / "forward_paper_cycle.json", default={}) or {}
-    heartbeat = read_json(governance / "live_paper_loop_heartbeat.json", default={}) or {}
+    scanner_heartbeat = read_json(governance / "live_paper_loop_heartbeat.json", default={}) or {}
+    local_live_heartbeat = read_json(governance / "local_live_loop_heartbeat.json", default={}) or {}
+    heartbeat = local_live_heartbeat or scanner_heartbeat
     actual_target = forward.get("actual_profit_target") or read_json(
         governance / "paper_profit_target_tracker.json", default={}
     ) or {}
@@ -556,6 +575,8 @@ def render_dashboard(cfg: EngineConfig, latest_report: dict[str, Any] | None = N
         "generated_at_utc": now_utc(),
         "forward_paper_cycle": forward,
         "heartbeat": heartbeat,
+        "local_live_heartbeat": local_live_heartbeat,
+        "scanner_heartbeat": scanner_heartbeat,
         "actual_profit_target": actual_target,
         "signal_cohort_pnl": signal_cohort_pnl,
         "cohort_promotion_readiness": _cohort_promotion_readiness(cfg, signal_cohort_pnl),

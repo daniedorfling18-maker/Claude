@@ -240,12 +240,32 @@ paper_market_scan:
   adaptive_priority_require_positive_evidence: true
   queries:
   - world cup
+  - btc updown
+  - xrp updown
+  - solana updown
+  - eth updown
   - bitcoin
   - ethereum
   - solana
   - xrp
   - tennis
   query_aliases:
+    btc updown:
+    - bitcoin updown
+    - btc updown 5m
+    - bitcoin up or down
+    xrp updown:
+    - ripple updown
+    - xrp updown 5m
+    - xrp up or down
+    solana updown:
+    - sol updown
+    - solana updown 5m
+    - solana up or down
+    eth updown:
+    - ethereum updown
+    - eth updown 5m
+    - ethereum up or down
     bitcoin:
     - btc
     - crypto

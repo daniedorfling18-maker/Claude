@@ -163,6 +163,73 @@ def test_batch_mode_scans_top_evidence_families_together(tmp_path, monkeypatch):
     assert plan["adaptive_priority"]["priority_queries"][:3] == ["bitcoin", "xrp", "solana"]
 
 
+def test_batch_mode_targets_updown_queries_for_positive_updown_cohorts(tmp_path, monkeypatch):
+    loop = _load_loop_module()
+    monkeypatch.delenv("POLYMARKET_SCAN_QUERY_MODE", raising=False)
+    monkeypatch.delenv("POLYMARKET_MAX_SCAN_QUERIES", raising=False)
+
+    governance = tmp_path / "outputs" / "polymarket_model_governance"
+    governance.mkdir(parents=True)
+    (governance / "signal_cohort_pnl.json").write_text(
+        json.dumps(
+            {
+                "cohorts": [
+                    {
+                        "signal_cohort": "exploratory_inverse_historical_rule|crypto_btc_updown_5m|outcome=up",
+                        "promotion_ready_score": 5,
+                        "promotion_ready_checks": 6,
+                        "total_pnl_usdc": 4.5,
+                        "roi": 0.15,
+                        "monthly_run_rate_usdc": 900,
+                        "probationary": True,
+                    },
+                    {
+                        "signal_cohort": "exploratory_historical_rule|crypto_xrp_updown_5m|outcome=down",
+                        "promotion_ready_score": 4,
+                        "promotion_ready_checks": 6,
+                        "total_pnl_usdc": 21,
+                        "roi": 1.05,
+                        "monthly_run_rate_usdc": 4000,
+                    },
+                    {
+                        "signal_cohort": "exploratory_inverse_historical_rule|crypto_sol_updown_5m|outcome=up",
+                        "promotion_ready_score": 4,
+                        "promotion_ready_checks": 6,
+                        "total_pnl_usdc": 10,
+                        "roi": 1.0,
+                        "monthly_run_rate_usdc": 1600,
+                    },
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+    cfg = EngineConfig(
+        raw={
+            "paths": {"output_root": str(tmp_path / "outputs")},
+            "paper_market_scan": {
+                "mode": "batch",
+                "max_queries_per_cycle": 3,
+                "queries": [
+                    "world cup",
+                    "btc updown",
+                    "xrp updown",
+                    "solana updown",
+                    "bitcoin",
+                    "solana",
+                    "xrp",
+                ],
+            },
+        },
+        path=tmp_path / "cfg.yaml",
+    )
+
+    selected, plan = loop._select_scan_queries(cfg, "world cup", scan_sequence=1)
+
+    assert selected == ["btc updown", "xrp updown", "solana updown"]
+    assert plan["adaptive_priority"]["priority_queries"][:3] == ["btc updown", "xrp updown", "solana updown"]
+
+
 def test_blank_environment_overrides_do_not_disable_live_batch_mode(tmp_path, monkeypatch):
     loop = _load_loop_module()
     monkeypatch.setenv("POLYMARKET_SCAN_QUERY_MODE", "")

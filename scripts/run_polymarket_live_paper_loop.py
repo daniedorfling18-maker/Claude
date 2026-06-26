@@ -287,12 +287,20 @@ def _cohort_to_query_keys(cohort: str) -> list[str]:
     text = str(cohort or "").lower()
     keys: list[str] = []
     if "crypto_btc" in text or "|btc" in text or "bitcoin" in text:
+        if "updown" in text:
+            keys.extend(["btc updown", "bitcoin updown"])
         keys.extend(["bitcoin", "btc"])
     if "crypto_eth" in text or "|eth" in text or "ethereum" in text:
+        if "updown" in text:
+            keys.extend(["eth updown", "ethereum updown"])
         keys.extend(["ethereum", "eth"])
     if "crypto_sol" in text or "|sol" in text or "solana" in text:
+        if "updown" in text:
+            keys.extend(["solana updown", "sol updown"])
         keys.extend(["solana", "sol"])
     if "crypto_xrp" in text or "|xrp" in text or "ripple" in text:
+        if "updown" in text:
+            keys.extend(["xrp updown", "ripple updown"])
         keys.extend(["xrp", "ripple"])
     if "tennis" in text:
         keys.append("tennis")
@@ -375,12 +383,16 @@ def _adaptive_query_order(cfg, queries: list[str]) -> tuple[list[str], dict[str,
         for key in _cohort_to_query_keys(cohort):
             if key not in query_by_key:
                 continue
-            if value > priority_by_key.get(key, -1.0):
-                priority_by_key[key] = value
+            adjusted_value = value
+            if "updown" in cohort and "updown" not in key:
+                adjusted_value = max(0.0, value - 100.0)
+            if adjusted_value > priority_by_key.get(key, -1.0):
+                priority_by_key[key] = adjusted_value
                 reason_by_key[key] = {
                     "query": query_by_key[key],
                     "cohort": cohort,
-                    "priority_value": round(value, 4),
+                    "priority_value": round(adjusted_value, 4),
+                    "cohort_priority_value": round(value, 4),
                     "promotion_ready_score": row.get("promotion_ready_score"),
                     "promotion_ready_checks": row.get("promotion_ready_checks"),
                     "promoted": row.get("promoted"),

@@ -109,6 +109,9 @@ async function load() {
     const monthly = data.forward_paper_cycle?.monthly_profit_target || {};
     const live = data.local_live_heartbeat || data.heartbeat || {};
     const scanner = data.scanner_heartbeat || {};
+    const discovery = live.discovery || {};
+    const currentScan = discovery.scan || {};
+    const lastScan = discovery.last_scan || {};
     const websocket = live.websocket || {};
     const websocketFeatures = live.websocket_features || {};
     const ingest = live.ingest || {};
@@ -125,7 +128,7 @@ async function load() {
       card("Live WS messages", websocket.new_messages ?? "-", "good"),
       card("Live WS features", websocketFeatures.feature_rows ?? "-", "good"),
       card("Ledger snapshots", ingest.inserted_market_snapshots ?? "-", "good"),
-      card("Scanning now", joinText(live.discovery?.scan?.scan_plan?.selected_queries || scanner.scan?.scan_plan?.selected_queries || scanner.scan?.queries), "warn"),
+      card("Scanning now", joinText(currentScan.scan_plan?.selected_queries || lastScan.scan_plan?.selected_queries || scanner.scan?.scan_plan?.selected_queries || scanner.scan?.queries), "warn"),
       card("Exposure", fmtUsd(broker.total_exposure)),
       card("Cash", fmtUsd(broker.cash)),
       card("Buy fills / cycle", broker.buy_orders_filled ?? broker.orders_filled ?? "0"),
@@ -151,12 +154,16 @@ async function load() {
       wsFeatures: websocketFeatures.feature_rows,
       snapshotsInserted: ingest.inserted_market_snapshots,
       fullCycle: live.full_prediction_cycle?.status,
-      scanMode: live.discovery?.scan?.scan_plan?.mode || scanner.scan?.scan_plan?.mode,
-      queries: live.discovery?.scan?.scan_plan?.selected_queries || scanner.scan?.scan_plan?.selected_queries || scanner.scan?.queries,
-      priorityQueue: live.discovery?.scan?.scan_plan?.adaptive_priority?.priority_queries || scanner.scan?.scan_plan?.adaptive_priority?.priority_queries || live.discovery?.scan?.scan_plan?.ordered_queries || scanner.scan?.scan_plan?.ordered_queries,
+      discoveryStatus: discovery.status,
+      lastDiscovery: discovery.last_status,
+      nextDiscovery: discovery.next_due_in_seconds == null ? "-" : Math.round(Number(discovery.next_due_in_seconds)) + "s",
+      discoveryIteration: discovery.discovery_iteration,
+      scanMode: currentScan.scan_plan?.mode || lastScan.scan_plan?.mode || scanner.scan?.scan_plan?.mode,
+      queries: currentScan.scan_plan?.selected_queries || lastScan.scan_plan?.selected_queries || scanner.scan?.scan_plan?.selected_queries || scanner.scan?.queries,
+      priorityQueue: currentScan.scan_plan?.adaptive_priority?.priority_queries || lastScan.scan_plan?.adaptive_priority?.priority_queries || scanner.scan?.scan_plan?.adaptive_priority?.priority_queries || currentScan.scan_plan?.ordered_queries || lastScan.scan_plan?.ordered_queries || scanner.scan?.scan_plan?.ordered_queries,
       reason: broker.entry_pause_reason || Object.keys(broker.broker_rejection_reasons || {}).join(", ")
     }], [
-      ["Live tick","liveTick"], ["Live source","liveSource"], ["WS msgs","wsMessages"], ["WS features","wsFeatures"], ["Snapshots","snapshotsInserted"], ["Full cycle","fullCycle"], ["Scan mode","scanMode"], ["Queries","queries", joinText], ["Priority queue","priorityQueue", joinText], ["Tokens","scan"], ["Features","features"], ["Predictions","predictions"], ["Approved","approved"], ["Rejected","rejected"], ["Broker rejects","brokerRejected"], ["Main reason","reason"]
+      ["Live tick","liveTick"], ["Live source","liveSource"], ["WS msgs","wsMessages"], ["WS features","wsFeatures"], ["Snapshots","snapshotsInserted"], ["Full cycle","fullCycle"], ["Discovery","discoveryStatus"], ["Last scan","lastDiscovery"], ["Next scan","nextDiscovery"], ["Discovery #","discoveryIteration"], ["Scan mode","scanMode"], ["Queries","queries", joinText], ["Priority queue","priorityQueue", joinText], ["Tokens","scan"], ["Features","features"], ["Predictions","predictions"], ["Approved","approved"], ["Rejected","rejected"], ["Broker rejects","brokerRejected"], ["Main reason","reason"]
     ]);
     document.getElementById("promotionReadiness").innerHTML = table(data.cohort_promotion_readiness?.cohorts || [], [
       ["Cohort","signal_cohort"],

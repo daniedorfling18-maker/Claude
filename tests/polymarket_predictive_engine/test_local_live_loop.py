@@ -108,3 +108,38 @@ def test_websocket_asset_discovery_prefers_fresh_scanner_context(tmp_path, monke
         "fresh-scanner-1": "scanner_snapshot",
         "fresh-scanner-2": "scanner_snapshot",
     }
+
+
+def test_discovery_scheduler_uses_its_own_iteration_counter(monkeypatch, tmp_path):
+    loop = _load_loop_module()
+    seen: list[int] = []
+
+    def fake_run_iteration(**kwargs):
+        seen.append(kwargs["iteration"])
+        return {"status": "ran", "scan": {"tokens": 7}}
+
+    monkeypatch.setattr(loop.discovery_loop, "run_iteration", fake_run_iteration)
+
+    discovery_iteration, summary = loop._run_discovery_iteration(
+        config_path=tmp_path / "cfg.yaml",
+        optimize_model=False,
+        discovery_iteration=0,
+        paper_source="raw_snapshot",
+    )
+    discovery_iteration, summary = loop._run_discovery_iteration(
+        config_path=tmp_path / "cfg.yaml",
+        optimize_model=False,
+        discovery_iteration=discovery_iteration,
+        paper_source="raw_snapshot",
+    )
+
+    assert seen == [1, 2]
+    assert discovery_iteration == 2
+    assert summary["scan"]["tokens"] == 7
+
+
+def test_first_discovery_refresh_is_due_immediately_after_start():
+    loop = _load_loop_module()
+
+    assert loop._initial_discovery_due_timestamp(300, now=1234.5) == 1234.5
+    assert loop._initial_discovery_due_timestamp(0, now=1234.5) == float("inf")

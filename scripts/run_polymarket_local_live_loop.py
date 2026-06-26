@@ -264,6 +264,37 @@ def mark_portfolio_and_render_dashboard(cfg, *, source: str, loop_summary: dict[
     return forward
 
 
+def _initial_discovery_due_timestamp(discovery_cycle_seconds: float, *, now: float | None = None) -> float:
+    """Schedule the first discovery refresh immediately after the first live tick.
+
+    WebSocket ticks are the hot path; discovery is the slower market-universe
+    refresh path.  The first discovery pass after a local restart should still
+    be a real scanner pass, not accidentally inherit a high WebSocket iteration
+    number and fall into the scanner's settlement-only maintenance schedule.
+    """
+    if discovery_cycle_seconds <= 0:
+        return float("inf")
+    return time.time() if now is None else now
+
+
+def _run_discovery_iteration(
+    *,
+    config_path: Path,
+    optimize_model: bool,
+    discovery_iteration: int,
+    paper_source: str,
+) -> tuple[int, dict[str, Any]]:
+    """Run one scanner discovery pass using its own sequence counter."""
+    next_iteration = max(0, int(discovery_iteration)) + 1
+    summary = discovery_loop.run_iteration(
+        config_path=config_path,
+        optimize_model=optimize_model,
+        iteration=next_iteration,
+        paper_source=paper_source,
+    )
+    return next_iteration, summary
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="run_polymarket_local_live_loop.py")
     parser.add_argument("--config", default="polymarket_predictive_config.example.yaml")
@@ -288,7 +319,9 @@ def main(argv: list[str] | None = None) -> int:
 
     config_path = ROOT / args.config
     next_prediction_cycle = time.time() + args.prediction_cycle_seconds if args.prediction_cycle_seconds > 0 else float("inf")
-    next_discovery_cycle = time.time() + args.discovery_cycle_seconds if args.discovery_cycle_seconds > 0 else float("inf")
+    next_discovery_cycle = _initial_discovery_due_timestamp(args.discovery_cycle_seconds)
+    discovery_iteration = 0
+    last_discovery_summary: dict[str, Any] = {"status": "not_run_yet"}
     iteration = 0
     failures = 0
     print("local-live-loop: started; press Ctrl+C to stop", flush=True)
@@ -304,12 +337,13 @@ def main(argv: list[str] | None = None) -> int:
                     max_assets=args.max_assets,
                 )
                 if not asset_ids and args.discovery_cycle_seconds > 0:
-                    discovery_summary = discovery_loop.run_iteration(
+                    discovery_iteration, discovery_summary = _run_discovery_iteration(
                         config_path=config_path,
                         optimize_model=args.optimize_model,
-                        iteration=iteration,
+                        discovery_iteration=discovery_iteration,
                         paper_source="raw_snapshot",
                     )
+                    last_discovery_summary = discovery_summary
                     next_discovery_cycle = time.time() + args.discovery_cycle_seconds
                     asset_ids, token_sources = discover_websocket_asset_ids(
                         cfg,
@@ -328,6 +362,9 @@ def main(argv: list[str] | None = None) -> int:
                 if time.time() >= next_prediction_cycle:
                     full_cycle = run_paper_cycle(cfg, source=args.paper_source)
                     next_prediction_cycle = time.time() + args.prediction_cycle_seconds
+                next_discovery_in_seconds = None
+                if next_discovery_cycle != float("inf"):
+                    next_discovery_in_seconds = max(0.0, round(next_discovery_cycle - time.time(), 3))
 
                 loop_summary = {
                     "status": "ok",
@@ -341,6 +378,15 @@ def main(argv: list[str] | None = None) -> int:
                     "discovery": {
                         "status": discovery_summary.get("status") if isinstance(discovery_summary, dict) else "unknown",
                         "scan": discovery_summary.get("scan", {}) if isinstance(discovery_summary, dict) else {},
+                        "last_status": last_discovery_summary.get("status")
+                        if isinstance(last_discovery_summary, dict)
+                        else "unknown",
+                        "last_scan": last_discovery_summary.get("scan", {})
+                        if isinstance(last_discovery_summary, dict)
+                        else {},
+                        "discovery_iteration": discovery_iteration,
+                        "cycle_seconds": args.discovery_cycle_seconds,
+                        "next_due_in_seconds": next_discovery_in_seconds,
                     },
                     "ingest": ingest,
                     "full_prediction_cycle": {
@@ -361,19 +407,21 @@ def main(argv: list[str] | None = None) -> int:
                     flush=True,
                 )
                 if time.time() >= next_discovery_cycle:
-                    discovery_summary = discovery_loop.run_iteration(
+                    discovery_iteration, discovery_summary = _run_discovery_iteration(
                         config_path=config_path,
                         optimize_model=args.optimize_model,
-                        iteration=iteration,
+                        discovery_iteration=discovery_iteration,
                         paper_source="raw_snapshot",
                     )
+                    last_discovery_summary = discovery_summary
                     next_discovery_cycle = time.time() + args.discovery_cycle_seconds
                     write_json(
                         cfg.governance_root / "local_live_loop_discovery_heartbeat.json",
                         {
                             "status": discovery_summary.get("status") if isinstance(discovery_summary, dict) else "unknown",
                             "generated_at_utc": now_utc(),
-                            "iteration": iteration,
+                            "live_iteration": iteration,
+                            "discovery_iteration": discovery_iteration,
                             "scan": discovery_summary.get("scan", {}) if isinstance(discovery_summary, dict) else {},
                         },
                     )

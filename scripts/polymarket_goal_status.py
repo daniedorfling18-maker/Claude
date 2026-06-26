@@ -100,7 +100,9 @@ def main() -> int:
         dashboard_data.get("shadow_signal_cohort_pnl"),
         read_json(GOVERNANCE / "shadow_signal_cohort_pnl.json"),
     )
+    local_live = read_json(GOVERNANCE / "local_live_loop_heartbeat.json")
     heartbeat = first_dict(
+        local_live,
         dashboard_data.get("heartbeat"),
         read_json(GOVERNANCE / "live_paper_loop_heartbeat.json"),
     )
@@ -111,7 +113,15 @@ def main() -> int:
     print(f"Phone URL:      http://{local_ip_hint()}:8765/")
     print(f"Data updated:   {dashboard_data.get('generated_at_utc') or 'n/a'}")
     print(f"Loop heartbeat: {heartbeat.get('status') or 'n/a'}")
+    if local_live:
+        websocket = first_dict(local_live.get("websocket"))
+        ws_features = first_dict(local_live.get("websocket_features"))
+        ingest = first_dict(local_live.get("ingest"))
+        print("Live source:    websocket")
+        print(f"WebSocket:      assets={local_live.get('asset_count', 'n/a')} new_messages={websocket.get('new_messages', 'n/a')} features={ws_features.get('feature_rows', 'n/a')} snapshots_inserted={ingest.get('inserted_market_snapshots', 'n/a')}")
     scan_plan = first_dict(first_dict(heartbeat.get("scan")).get("scan_plan"))
+    if not scan_plan and local_live:
+        scan_plan = first_dict(first_dict(first_dict(local_live.get("discovery")).get("scan")).get("scan_plan"))
     adaptive = first_dict(scan_plan.get("adaptive_priority"))
     if scan_plan:
         selected = scan_plan.get("selected_queries") or []

@@ -161,3 +161,50 @@ def test_batch_mode_scans_top_evidence_families_together(tmp_path, monkeypatch):
     assert selected == ["bitcoin", "xrp", "solana"]
     assert plan["scan_sequence"] == 1
     assert plan["adaptive_priority"]["priority_queries"][:3] == ["bitcoin", "xrp", "solana"]
+
+
+def test_blank_environment_overrides_do_not_disable_live_batch_mode(tmp_path, monkeypatch):
+    loop = _load_loop_module()
+    monkeypatch.setenv("POLYMARKET_SCAN_QUERY_MODE", "")
+    monkeypatch.setenv("POLYMARKET_MAX_SCAN_QUERIES", "")
+    monkeypatch.setenv("POLYMARKET_ADAPTIVE_SCAN_PRIORITY", "")
+
+    governance = tmp_path / "outputs" / "polymarket_model_governance"
+    governance.mkdir(parents=True)
+    (governance / "signal_cohort_pnl.json").write_text(
+        json.dumps(
+            {
+                "cohorts": [
+                    {
+                        "signal_cohort": "exploratory_crypto_updown_live_model|crypto_btc_updown_daily|outcome=down",
+                        "promotion_ready_score": 4,
+                        "promotion_ready_checks": 6,
+                        "total_pnl_usdc": 2,
+                        "roi": 0.08,
+                        "monthly_run_rate_usdc": 120,
+                    }
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+    cfg = EngineConfig(
+        raw={
+            "paths": {"output_root": str(tmp_path / "outputs")},
+            "paper_market_scan": {
+                "mode": "batch",
+                "max_queries_per_cycle": 2,
+                "prioritize_near_promoted": True,
+                "queries": ["world cup", "bitcoin", "xrp"],
+            },
+        },
+        path=tmp_path / "cfg.yaml",
+    )
+
+    selected, plan = loop._select_scan_queries(cfg, "world cup", scan_sequence=1)
+
+    assert plan["mode"] == "batch"
+    assert plan["max_queries_per_cycle"] == 2
+    assert plan["adaptive_priority"]["enabled"] is True
+    assert selected[0] == "bitcoin"
+    assert len(selected) == 2

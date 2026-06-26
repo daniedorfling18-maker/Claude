@@ -36,9 +36,10 @@ from polymarket_predictive_engine.execution.paper import paper_trade  # noqa: E4
 from polymarket_predictive_engine.paper_cycle import run_paper_cycle  # noqa: E402
 from polymarket_predictive_engine.profit_target import write_profit_target_tracker  # noqa: E402
 from polymarket_predictive_engine.storage import connect_db  # noqa: E402
-from polymarket_predictive_engine.utils import now_utc, read_csv_rows, read_json, safe_float, write_json  # noqa: E402
+from polymarket_predictive_engine.utils import now_utc, read_csv_rows, read_json, safe_float, write_csv, write_json  # noqa: E402
 from polymarket_predictive_engine.websocket_collector import collect_websocket  # noqa: E402
 from polymarket_predictive_engine.websocket_normaliser import normalize_websocket_file  # noqa: E402
+import run_polymarket_live_paper_loop as discovery_loop  # noqa: E402
 
 
 def force_local_safe_environment() -> None:
@@ -105,6 +106,77 @@ def configure_websocket_assets(cfg, asset_ids: list[str]) -> None:
     subscription["assets_ids"] = asset_ids
     subscription["type"] = "market"
     settings["subscription_message"] = subscription
+
+
+def enrich_websocket_features_with_scanner_metadata(cfg, features: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Attach human market context to live WebSocket feature rows.
+
+    The CLOB websocket gives the live book by asset id, but the predictive model
+    also needs point-in-time market context such as question, selection, slug and
+    close time.  The latest scanner snapshot supplies that context.  This keeps
+    the live price source as websocket while avoiding a blind model row that only
+    says "asset 123 moved".
+    """
+    snapshot_path = cfg.output_root / "polymarket" / "market_snapshot.csv"
+    metadata_by_token: dict[str, dict[str, Any]] = {}
+    for row in read_csv_rows(snapshot_path):
+        token = str(row.get("token_id") or row.get("asset_id") or "").strip()
+        if token:
+            metadata_by_token[token] = row
+
+    enriched: list[dict[str, Any]] = []
+    metadata_hits = 0
+    for row in features:
+        token = str(row.get("asset_id") or row.get("token_id") or "").strip()
+        metadata = metadata_by_token.get(token, {})
+        if metadata:
+            metadata_hits += 1
+        enriched_row = dict(row)
+        for target, source in {
+            "market_slug": "market_slug",
+            "question": "question",
+            "outcome": "outcome",
+            "close_time": "close_time",
+            "event_slug": "event_slug",
+            "event_title": "event_title",
+            "tick_size": "tick_size",
+        }.items():
+            value = metadata.get(source)
+            if value not in {None, ""}:
+                enriched_row[target] = value
+        if metadata.get("condition_id") and not enriched_row.get("market"):
+            enriched_row["market"] = metadata.get("condition_id")
+        text = " ".join(
+            str(enriched_row.get(key) or "")
+            for key in ("market_slug", "question", "event_slug", "event_title")
+        ).lower()
+        if not enriched_row.get("category"):
+            if any(term in text for term in ("bitcoin", "btc", "ethereum", "eth", "solana", "sol", "xrp", "ripple", "crypto")):
+                enriched_row["category"] = "crypto"
+            elif "world cup" in text or "worldcup" in text or "fifa" in text:
+                enriched_row["category"] = "worldcup"
+        enriched.append(enriched_row)
+
+    if enriched:
+        fieldnames: list[str] = []
+        for row in enriched:
+            for key in row.keys():
+                if key not in fieldnames:
+                    fieldnames.append(str(key))
+        write_csv(cfg.output_root / "polymarket_training" / "websocket_market_features.csv", enriched, fieldnames=fieldnames)
+    write_json(
+        cfg.governance_root / "websocket_metadata_enrichment_summary.json",
+        {
+            "status": "ok",
+            "generated_at_utc": now_utc(),
+            "feature_rows": len(features),
+            "metadata_hits": metadata_hits,
+            "metadata_hit_rate": (metadata_hits / len(features)) if features else 0.0,
+            "snapshot_path": str(snapshot_path),
+            "snapshot_tokens": len(metadata_by_token),
+        },
+    )
+    return enriched
 
 
 def ingest_websocket_features_into_ledger(cfg, features: list[dict[str, Any]]) -> dict[str, Any]:
@@ -201,7 +273,9 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--max-assets", type=int, default=250)
     parser.add_argument("--include-config-websocket-assets", action="store_true", help="Also subscribe to static config assets after dynamic assets.")
     parser.add_argument("--prediction-cycle-seconds", type=float, default=0.0, help="If >0, periodically run the full paper-cycle prediction path too.")
+    parser.add_argument("--discovery-cycle-seconds", type=float, default=300.0, help="Periodically refresh scanner discovery so websocket assets follow changing markets.")
     parser.add_argument("--paper-source", choices=["raw_snapshot", "websocket"], default="raw_snapshot")
+    parser.add_argument("--optimize-model", action="store_true", help="Allow the slower discovery lane to run scheduled model optimisation.")
     return parser
 
 
@@ -212,7 +286,9 @@ def main(argv: list[str] | None = None) -> int:
     cfg.output_root.mkdir(parents=True, exist_ok=True)
     cfg.governance_root.mkdir(parents=True, exist_ok=True)
 
+    config_path = ROOT / args.config
     next_prediction_cycle = 0.0 if args.prediction_cycle_seconds > 0 else float("inf")
+    next_discovery_cycle = 0.0 if args.discovery_cycle_seconds > 0 else float("inf")
     iteration = 0
     failures = 0
     print("local-live-loop: started; press Ctrl+C to stop", flush=True)
@@ -221,6 +297,16 @@ def main(argv: list[str] | None = None) -> int:
             iteration += 1
             started = time.time()
             try:
+                discovery_summary: dict[str, Any] = {"status": "skipped"}
+                if time.time() >= next_discovery_cycle:
+                    discovery_summary = discovery_loop.run_iteration(
+                        config_path=config_path,
+                        optimize_model=args.optimize_model,
+                        iteration=iteration,
+                        paper_source="raw_snapshot",
+                    )
+                    next_discovery_cycle = time.time() + args.discovery_cycle_seconds
+
                 asset_ids, token_sources = discover_websocket_asset_ids(
                     cfg,
                     include_static_config=args.include_config_websocket_assets,
@@ -231,6 +317,7 @@ def main(argv: list[str] | None = None) -> int:
                 configure_websocket_assets(cfg, asset_ids)
                 websocket = collect_websocket(cfg, websocket_seconds=max(1, args.websocket_seconds))
                 features, quality, websocket_features = normalize_websocket_file(cfg)
+                features = enrich_websocket_features_with_scanner_metadata(cfg, features)
                 ingest = ingest_websocket_features_into_ledger(cfg, features)
 
                 full_cycle = {"status": "skipped"}
@@ -247,6 +334,10 @@ def main(argv: list[str] | None = None) -> int:
                     "websocket": websocket,
                     "websocket_features": websocket_features,
                     "websocket_quality_rows": len(quality),
+                    "discovery": {
+                        "status": discovery_summary.get("status") if isinstance(discovery_summary, dict) else "unknown",
+                        "scan": discovery_summary.get("scan", {}) if isinstance(discovery_summary, dict) else {},
+                    },
                     "ingest": ingest,
                     "full_prediction_cycle": {
                         "status": full_cycle.get("status") if isinstance(full_cycle, dict) else "unknown",

@@ -57,6 +57,14 @@ def _truthy(value: Any, default: bool = False) -> bool:
     return str(value).strip().lower() in {"1", "true", "yes", "y", "on"}
 
 
+def _env_override(name: str) -> str | None:
+    value = os.getenv(name)
+    if value is None:
+        return None
+    value = value.strip()
+    return value or None
+
+
 def _current_memory_percent() -> float | None:
     """Return host/container memory load using only stdlib, or None if unavailable."""
     if os.name == "nt":
@@ -242,7 +250,7 @@ def _write_rows(path: Path, rows: list[dict[str, Any]], fieldnames: list[str]) -
 
 def _configured_scan_queries(cfg, default_query: str) -> tuple[list[str], str]:
     settings = cfg.raw.get("paper_market_scan", {}) or {}
-    raw = os.getenv("POLYMARKET_QUERIES", "").strip()
+    raw = _env_override("POLYMARKET_QUERIES") or ""
     configured = settings.get("queries") or []
     if raw:
         queries = [item.strip() for item in raw.split(",") if item.strip()]
@@ -257,7 +265,7 @@ def _configured_scan_queries(cfg, default_query: str) -> tuple[list[str], str]:
         if key and key not in seen:
             unique.append(query)
             seen.add(key)
-    mode = os.getenv("POLYMARKET_SCAN_QUERY_MODE", str(settings.get("mode", "single"))).strip().lower()
+    mode = (_env_override("POLYMARKET_SCAN_QUERY_MODE") or str(settings.get("mode", "single"))).strip().lower()
     if mode not in {"single", "batch", "rotate"}:
         mode = "single"
     return unique, mode
@@ -342,8 +350,9 @@ def _load_cohort_rows(cfg) -> list[dict[str, Any]]:
 
 def _adaptive_query_order(cfg, queries: list[str]) -> tuple[list[str], dict[str, Any]]:
     settings = cfg.raw.get("paper_market_scan", {}) or {}
+    adaptive_override = _env_override("POLYMARKET_ADAPTIVE_SCAN_PRIORITY")
     enabled = _truthy_setting(
-        os.getenv("POLYMARKET_ADAPTIVE_SCAN_PRIORITY", settings.get("prioritize_near_promoted", True)),
+        adaptive_override if adaptive_override is not None else settings.get("prioritize_near_promoted", True),
         default=True,
     )
     if not enabled or not queries:
@@ -397,11 +406,8 @@ def _select_scan_queries(cfg, default_query: str, *, scan_sequence: int) -> tupl
     all_queries, mode = _configured_scan_queries(cfg, default_query)
     settings = cfg.raw.get("paper_market_scan", {}) or {}
     max_queries = int(
-        os.getenv(
-            "POLYMARKET_MAX_SCAN_QUERIES",
-            str(settings.get("max_queries_per_cycle", 0) or 0),
-        )
-        or "0"
+        _env_override("POLYMARKET_MAX_SCAN_QUERIES")
+        or str(settings.get("max_queries_per_cycle", 0) or 0)
     )
     if not all_queries:
         all_queries = [default_query]

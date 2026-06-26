@@ -511,3 +511,246 @@ def test_strategy_uses_alpha_lower_bound_gate(tmp_path):
     assert "alpha lower-bound edge" in rejected[0]["rejection_reason"]
     saved = read_csv_rows(cfg.output_root / "polymarket_predictions" / "rejected_signals.csv")
     assert saved
+
+
+def test_strategy_allows_probationary_cohort_to_satisfy_same_category_label_gate(tmp_path):
+    cfg = _config(tmp_path)
+    cohort = "exploratory_inverse_historical_rule|crypto_btc_updown_5m|outcome=up"
+    cfg.governance_root.mkdir(parents=True, exist_ok=True)
+    (cfg.governance_root / "signal_cohort_pnl.json").write_text(
+        """
+        {
+          "status": "computed",
+          "cohorts": [
+            {
+              "signal_cohort": "exploratory_inverse_historical_rule|crypto_btc_updown_5m|outcome=up",
+              "promoted": false,
+              "probationary": true,
+              "probationary_max_stake_usdc": 2.0,
+              "buy_fills": 3,
+              "settled_fills": 3,
+              "total_pnl_usdc": 4.5,
+              "roi": 0.15
+            }
+          ]
+        }
+        """,
+        encoding="utf-8",
+    )
+    write_csv(
+        cfg.output_root / "polymarket_predictions" / "predictions.csv",
+        [
+            {
+                "market_id": "btc-probationary",
+                "market_slug": "btc-updown-5m-1782487800",
+                "question": "Bitcoin UpDown 5M",
+                "token_id": "btc-up-token",
+                "prediction_timestamp": "2026-06-26T15:00:00Z",
+                "category": "crypto",
+                "signal_cohort": cohort,
+                "outcome": "Up",
+                "market_midpoint": "0.50",
+                "calibrated_probability": "0.65",
+                "model_probability": "0.65",
+                "alpha_probability": "0.65",
+                "executable_price": "0.50",
+                "edge": "0.08",
+                "edge_lower_bound": "0.08",
+                "alpha_trade_candidate": "true",
+                "validation_layer_pass": "true",
+                "bookmaker_cross_check_pass": "true",
+                "microstructure_filter_pass": "true",
+                "spread": "0.01",
+                "liquidity": "1000",
+                "time_to_close_hours": "1",
+                "confidence": "1",
+            },
+            {
+                "market_id": "btc-not-promoted",
+                "market_slug": "btc-updown-5m-1782487800",
+                "question": "Bitcoin UpDown 5M",
+                "token_id": "btc-down-token",
+                "prediction_timestamp": "2026-06-26T15:00:00Z",
+                "category": "crypto",
+                "signal_cohort": "exploratory_historical_rule|crypto_btc_updown_5m|outcome=down",
+                "outcome": "Down",
+                "market_midpoint": "0.50",
+                "calibrated_probability": "0.65",
+                "model_probability": "0.65",
+                "alpha_probability": "0.65",
+                "executable_price": "0.50",
+                "edge": "0.08",
+                "edge_lower_bound": "0.08",
+                "alpha_trade_candidate": "true",
+                "validation_layer_pass": "true",
+                "bookmaker_cross_check_pass": "true",
+                "microstructure_filter_pass": "true",
+                "spread": "0.01",
+                "liquidity": "1000",
+                "time_to_close_hours": "1",
+                "confidence": "1",
+            },
+        ],
+    )
+
+    approved, rejected = generate_signals(
+        cfg,
+        readiness={"approved_for_paper_trading": True, "blockers": []},
+    )
+
+    assert len(approved) == 1
+    assert approved[0]["signal_cohort"] == cohort
+    assert approved[0]["cohort_promotion_status"] == "probationary"
+    assert approved[0]["cohort_evidence_label_gate_override"] is True
+    assert float(approved[0]["sizing_decision"]) <= 2.0
+    assert len(rejected) == 1
+    assert "same-category validation gate failed" in rejected[0]["rejection_reason"]
+
+
+def test_strategy_proxies_crypto_live_model_to_same_updown_probationary_evidence(tmp_path):
+    cfg = _config(tmp_path)
+    source_cohort = "exploratory_inverse_historical_rule|crypto_btc_updown_5m|outcome=up"
+    live_cohort = "exploratory_crypto_updown_live_model|crypto_btc_updown_5m|outcome=up"
+    cfg.governance_root.mkdir(parents=True, exist_ok=True)
+    (cfg.governance_root / "signal_cohort_pnl.json").write_text(
+        f"""
+        {{
+          "status": "computed",
+          "cohorts": [
+            {{
+              "signal_cohort": "{source_cohort}",
+              "promoted": false,
+              "probationary": true,
+              "probationary_max_stake_usdc": 2.0,
+              "promotion_ready_score": 5,
+              "buy_fills": 3,
+              "settled_fills": 3,
+              "total_pnl_usdc": 4.5,
+              "roi": 0.15
+            }}
+          ]
+        }}
+        """,
+        encoding="utf-8",
+    )
+    write_csv(
+        cfg.output_root / "polymarket_predictions" / "predictions.csv",
+        [
+            {
+                "market_id": "btc-live-model",
+                "market_slug": "btc-updown-5m-1782487800",
+                "question": "Bitcoin UpDown 5M",
+                "token_id": "btc-up-token",
+                "prediction_timestamp": "2026-06-26T15:00:00Z",
+                "category": "crypto",
+                "signal_cohort": live_cohort,
+                "outcome": "Up",
+                "market_midpoint": "0.50",
+                "calibrated_probability": "0.65",
+                "model_probability": "0.65",
+                "alpha_probability": "0.65",
+                "executable_price": "0.50",
+                "edge": "0.08",
+                "edge_lower_bound": "0.08",
+                "alpha_trade_candidate": "true",
+                "validation_layer_pass": "true",
+                "bookmaker_cross_check_pass": "true",
+                "microstructure_filter_pass": "true",
+                "spread": "0.01",
+                "liquidity": "1000",
+                "time_to_close_hours": "1",
+                "confidence": "1",
+            }
+        ],
+    )
+
+    approved, rejected = generate_signals(
+        cfg,
+        readiness={"approved_for_paper_trading": True, "blockers": []},
+    )
+
+    assert rejected == []
+    assert len(approved) == 1
+    assert approved[0]["signal_cohort"] == live_cohort
+    assert approved[0]["cohort_evidence_source_cohort"] == source_cohort
+    assert approved[0]["cohort_promotion_status"] == "probationary"
+    assert approved[0]["cohort_evidence_label_gate_override"] is True
+
+
+def test_strategy_does_not_proxy_over_direct_live_model_evidence(tmp_path):
+    cfg = _config(tmp_path)
+    source_cohort = "exploratory_inverse_historical_rule|crypto_btc_updown_5m|outcome=up"
+    live_cohort = "exploratory_crypto_updown_live_model|crypto_btc_updown_5m|outcome=up"
+    cfg.governance_root.mkdir(parents=True, exist_ok=True)
+    (cfg.governance_root / "signal_cohort_pnl.json").write_text(
+        f"""
+        {{
+          "status": "computed",
+          "cohorts": [
+            {{
+              "signal_cohort": "{source_cohort}",
+              "promoted": false,
+              "probationary": true,
+              "probationary_max_stake_usdc": 2.0,
+              "promotion_ready_score": 5,
+              "buy_fills": 3,
+              "settled_fills": 3,
+              "total_pnl_usdc": 4.5,
+              "roi": 0.15
+            }},
+            {{
+              "signal_cohort": "{live_cohort}",
+              "promoted": false,
+              "probationary": false,
+              "promotion_ready_score": 1,
+              "buy_fills": 3,
+              "settled_fills": 3,
+              "total_pnl_usdc": -7.0,
+              "roi": -0.23
+            }}
+          ]
+        }}
+        """,
+        encoding="utf-8",
+    )
+    write_csv(
+        cfg.output_root / "polymarket_predictions" / "predictions.csv",
+        [
+            {
+                "market_id": "btc-live-model-negative-evidence",
+                "market_slug": "btc-updown-5m-1782487800",
+                "question": "Bitcoin UpDown 5M",
+                "token_id": "btc-up-token",
+                "prediction_timestamp": "2026-06-26T15:00:00Z",
+                "category": "crypto",
+                "signal_cohort": live_cohort,
+                "outcome": "Up",
+                "market_midpoint": "0.50",
+                "calibrated_probability": "0.65",
+                "model_probability": "0.65",
+                "alpha_probability": "0.65",
+                "executable_price": "0.50",
+                "edge": "0.08",
+                "edge_lower_bound": "0.08",
+                "alpha_trade_candidate": "true",
+                "validation_layer_pass": "true",
+                "bookmaker_cross_check_pass": "true",
+                "microstructure_filter_pass": "true",
+                "spread": "0.01",
+                "liquidity": "1000",
+                "time_to_close_hours": "1",
+                "confidence": "1",
+            }
+        ],
+    )
+
+    approved, rejected = generate_signals(
+        cfg,
+        readiness={"approved_for_paper_trading": True, "blockers": []},
+    )
+
+    assert approved == []
+    assert len(rejected) == 1
+    assert rejected[0]["cohort_promotion_status"] == "not_promoted"
+    assert rejected[0]["cohort_evidence_source_cohort"] == live_cohort
+    assert "same-category validation gate failed" in rejected[0]["rejection_reason"]

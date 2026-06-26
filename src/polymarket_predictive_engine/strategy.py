@@ -1,6 +1,7 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 from collections import Counter
+import re
 from typing import Any
 
 from .config import EngineConfig, load_config
@@ -44,6 +45,17 @@ def _same_category_label_counts(cfg: EngineConfig) -> dict[str, int]:
     return dict(counts)
 
 
+_CRYPTO_UPDOWN_COHORT_RE = re.compile(
+    r"crypto_(?P<asset>btc|eth|sol|xrp)_updown_(?P<interval>daily|5m|15m)\|outcome=(?P<outcome>up|down)"
+)
+
+
+def _crypto_updown_cohort_key(cohort: str) -> str:
+    match = _CRYPTO_UPDOWN_COHORT_RE.search(str(cohort or ""))
+    if not match:
+        return ""
+    return f"crypto_{match.group('asset')}_updown_{match.group('interval')}|outcome={match.group('outcome')}"
+
 def _cohort_promotion_index(cfg: EngineConfig) -> dict[str, dict[str, Any]]:
     settings = cfg.raw.get("cohort_promotion", {}) or {}
     summary_file = str(settings.get("summary_file", "signal_cohort_pnl.json"))
@@ -68,6 +80,39 @@ def _cohort_is_promoted(row: dict[str, Any] | None) -> bool:
         return value
     return boolish(value)
 
+
+def _cohort_has_direct_evidence(row: dict[str, Any] | None) -> bool:
+    if not row:
+        return False
+    return bool(
+        (safe_float(row.get("buy_fills")) or 0) > 0
+        or (safe_float(row.get("settled_fills")) or 0) > 0
+        or abs(safe_float(row.get("total_pnl_usdc")) or 0.0) > 1e-9
+        or _cohort_ready_score(row) > 0
+    )
+
+def _cohort_ready_score(row: dict[str, Any] | None) -> int:
+    return int(safe_float((row or {}).get("promotion_ready_score")) or 0)
+
+
+def _cohort_evidence_proxy_index(cohorts: dict[str, dict[str, Any]]) -> dict[str, dict[str, Any]]:
+    """Index promoted/probationary crypto UpDown evidence by asset+interval+outcome.
+
+    The same behavioural edge can appear under an exploratory historical cohort
+    before the live crypto model is scored, then under the live-model cohort once
+    the price model is available.  This proxy only bridges identical
+    asset/interval/outcome cohorts and only if the source row is already promoted
+    or probationary.
+    """
+    proxy: dict[str, dict[str, Any]] = {}
+    for cohort, row in cohorts.items():
+        key = _crypto_updown_cohort_key(cohort)
+        if not key or not (_cohort_is_promoted(row) or _cohort_is_probationary(row)):
+            continue
+        current = proxy.get(key)
+        if current is None or _cohort_ready_score(row) > _cohort_ready_score(current):
+            proxy[key] = row
+    return proxy
 
 def _cohort_is_probationary(row: dict[str, Any] | None) -> bool:
     if not row:
@@ -111,9 +156,20 @@ def generate_signals(
     allow_probationary_paper_trading = bool(
         alpha_enabled and _setting_bool(cohort_settings, "allow_probationary_paper_trading", True)
     )
+    allow_cohort_evidence_label_gate = bool(
+        alpha_enabled and _setting_bool(cohort_settings, "allow_cohort_evidence_to_satisfy_label_gate", True)
+    )
+    allow_crypto_updown_cohort_proxy = bool(
+        alpha_enabled and _setting_bool(cohort_settings, "allow_crypto_updown_live_model_cohort_proxy", True)
+    )
     probationary_default_max_stake = float(cohort_settings.get("probationary_max_stake_usdc", 2.0))
     probationary_min_edge = float(cohort_settings.get("probationary_minimum_edge_lower_bound", 0.005))
     promoted_cohorts = _cohort_promotion_index(cfg) if require_positive_cohort else {}
+    cohort_proxy_index = (
+        _cohort_evidence_proxy_index(promoted_cohorts)
+        if require_positive_cohort and allow_crypto_updown_cohort_proxy
+        else {}
+    )
 
     for prediction in predictions:
         alpha_edge = safe_float(prediction.get(edge_field))
@@ -188,6 +244,16 @@ def generate_signals(
             continue
         cohort = str(signal.get("signal_cohort") or "")
         cohort_row = promoted_cohorts.get(cohort) if require_positive_cohort else None
+        cohort_evidence_source = cohort
+        if require_positive_cohort and allow_crypto_updown_cohort_proxy:
+            exact_is_ready = _cohort_is_promoted(cohort_row) or _cohort_is_probationary(cohort_row)
+            exact_has_direct_evidence = _cohort_has_direct_evidence(cohort_row)
+            if not exact_is_ready and not exact_has_direct_evidence:
+                proxy_key = _crypto_updown_cohort_key(cohort)
+                proxy_row = cohort_proxy_index.get(proxy_key)
+                if proxy_row is not None:
+                    cohort_row = proxy_row
+                    cohort_evidence_source = str(proxy_row.get("signal_cohort") or proxy_row.get("cohort") or cohort)
         cohort_promoted = _cohort_is_promoted(cohort_row)
         cohort_probationary = bool(allow_probationary_paper_trading and _cohort_is_probationary(cohort_row))
         signal["cohort_promotion_status"] = (
@@ -197,6 +263,7 @@ def generate_signals(
             if cohort_probationary
             else "not_promoted"
         ) if require_positive_cohort else ""
+        signal["cohort_evidence_source_cohort"] = cohort_evidence_source if require_positive_cohort else ""
         signal["cohort_forward_pnl_usdc"] = "" if not cohort_row else cohort_row.get("total_pnl_usdc", "")
         signal["cohort_filled_orders"] = "" if not cohort_row else cohort_row.get("buy_fills", "")
         signal["cohort_settled_fills"] = "" if not cohort_row else cohort_row.get("settled_fills", "")
@@ -238,7 +305,19 @@ def generate_signals(
         category_key = str(signal.get("category") or "unknown").strip().lower()
         same_category_label_rows = int(same_category_counts.get(category_key, 0))
         signal["same_category_label_rows"] = same_category_label_rows
-        if require_same_category_labels and same_category_label_rows < minimum_same_category_labels:
+        cohort_evidence_satisfies_label_gate = bool(
+            allow_cohort_evidence_label_gate
+            and (cohort_promoted or cohort_probationary)
+            and boolish(prediction.get("validation_layer_pass"))
+            and boolish(prediction.get("microstructure_filter_pass"))
+            and boolish(prediction.get("bookmaker_cross_check_pass"))
+        )
+        signal["cohort_evidence_label_gate_override"] = cohort_evidence_satisfies_label_gate
+        if (
+            require_same_category_labels
+            and same_category_label_rows < minimum_same_category_labels
+            and not cohort_evidence_satisfies_label_gate
+        ):
             rejected.append(
                 {
                     **signal,
@@ -298,3 +377,6 @@ def generate_signals(
 
 def main(config_path: str) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     return generate_signals(load_config(config_path))
+
+
+

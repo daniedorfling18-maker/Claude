@@ -288,6 +288,8 @@ cohort_promotion:
   allow_shadow_evidence_for_promotion: true
   allow_promoted_shadow_candidate_trading: true
   allow_probationary_paper_trading: true
+  allow_cohort_evidence_to_satisfy_label_gate: true
+  allow_crypto_updown_live_model_cohort_proxy: true
   probationary_minimum_filled_orders: 3
   probationary_minimum_settled_orders: 3
   probationary_minimum_pnl_usdc: 0.0
@@ -554,5 +556,7 @@ governance_thresholds:
   require_clean_snapshot_labels_for_paper: false
   min_forward_paper_trades: 1
   require_positive_forward_paper_roi: false
+
+
 
 

@@ -50,6 +50,19 @@ def normalised_correlation_key(row: dict[str, Any]) -> str:
     )
 
 
+def _crypto_updown_interval(row: dict[str, Any], text: str) -> str:
+    if "updown 5m" in text or "updown 5 m" in text or re.search(r"\b5\s*(m|min|minute)s?\b", text):
+        return "5m"
+    if "updown 15m" in text or "updown 15 m" in text or re.search(r"\b15\s*(m|min|minute)s?\b", text):
+        return "15m"
+    if "daily" in text or re.search(
+        r"\bon\s+(january|february|march|april|may|june|july|august|september|october|november|december)\s+\d{1,2}",
+        text,
+    ):
+        return "daily"
+    return "event"
+
+
 def signal_cohort(row: dict[str, Any]) -> str:
     if is_worldcup_winner_market(row):
         fundamental = row.get("fundamental_probability")
@@ -68,6 +81,11 @@ def signal_cohort(row: dict[str, Any]) -> str:
         elif "solana" in text or " sol " in f" {text} ":
             asset = "sol"
         if asset and outcome in {"up", "down"}:
+            interval = _crypto_updown_interval(row, text)
+            if row.get("crypto_model_status") == "scored":
+                return f"exploratory_crypto_updown_live_model|crypto_{asset}_updown_{interval}|outcome={outcome}"
+            if interval != "5m":
+                return f"exploratory_historical_rule|crypto_{asset}_updown_{interval}|outcome={outcome}"
             if asset == "xrp" and outcome == "down":
                 return f"exploratory_historical_rule|crypto_{asset}_updown_5m|outcome={outcome}"
             if asset in {"btc", "sol"} and outcome == "up":

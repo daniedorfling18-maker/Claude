@@ -131,6 +131,7 @@ def predict_from_features(
             "question": row.get("question", ""),
             "category": category,
             "outcome": selection_name,
+            "close_time": row.get("close_time", ""),
             "prediction_timestamp": row.get("prediction_timestamp", now_utc()),
             "raw_probability": midpoint,
             "calibrated_probability": calibrated,

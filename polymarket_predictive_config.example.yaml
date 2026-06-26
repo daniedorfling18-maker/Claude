@@ -189,6 +189,25 @@ crypto_fundamental:
   base_url: https://www.deribit.com/api/v2
   targets_path: inputs/polymarket/crypto_targets.csv
   request_timeout_seconds: 20
+crypto_updown_live_model:
+  # Contract-specific daily Up/Down model. Uses Binance 1m candle close at prior noon ET
+  # versus current Binance spot, then a volatility forecast to the market close.
+  enabled: true
+  binance_base_url: https://api.binance.com/api/v3
+  daily_window_hours: 24
+  volatility_lookback_minutes: 240
+  request_timeout_seconds: 4
+  sigma_floor_per_sqrt_second: 0.00002
+  minimum_elapsed_seconds: 300
+  minimum_remaining_seconds: 60
+  minimum_time_to_close_hours: 0
+  maximum_time_to_close_hours: 36
+  max_scored_rows_per_cycle: 24
+  probability_blend_weight: 0.65
+  max_probability_adjustment: 0.25
+  allow_shadow_candidates: true
+  minimum_shadow_edge_after_cost: 0.015
+  cache_seconds: 30
 profit_tracking:
   target_monthly_profit_usdc: 100
   minimum_tracking_hours_for_on_pace: 24

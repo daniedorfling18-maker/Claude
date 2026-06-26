@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any
 
 from .config import EngineConfig, load_config
+from .crypto_updown_model import is_crypto_updown_daily, score_crypto_updown_prediction
 from .models.calibration_v2 import joined_feature_label_rows
 from .utils import boolish, git_commit_hash, now_utc, read_csv_rows, read_json, safe_float, write_csv, write_json
 from .worldcup_validation import is_worldcup_winner_market, signal_cohort
@@ -367,6 +368,15 @@ def apply_mispricing_alpha(
     shadow_worldcup_only = _setting_bool(shadow_settings, "worldcup_winner_only", True)
     max_fundamental_adjustment = float(settings.get("max_fundamental_adjustment", 0.12))
     fundamental_probabilities = _load_fundamental_probabilities(cfg, settings)
+    crypto_settings = cfg.raw.get("crypto_updown_live_model", {}) or {}
+    crypto_probability_blend = float(crypto_settings.get("probability_blend_weight", 0.65))
+    crypto_max_adjustment = float(crypto_settings.get("max_probability_adjustment", 0.25))
+    crypto_max_rows = int(crypto_settings.get("max_scored_rows_per_cycle", 24))
+    crypto_min_ttc = safe_float(crypto_settings.get("minimum_time_to_close_hours", 0.0))
+    crypto_max_ttc = safe_float(crypto_settings.get("maximum_time_to_close_hours", 36.0))
+    crypto_rows_attempted = 0
+    crypto_shadow_enabled = _setting_bool(crypto_settings, "allow_shadow_candidates", True)
+    crypto_min_shadow_edge_after_cost = float(crypto_settings.get("minimum_shadow_edge_after_cost", 0.015))
 
     enriched: list[dict[str, Any]] = []
     for row in predictions:
@@ -387,6 +397,19 @@ def apply_mispricing_alpha(
         fundamental = fundamental_probabilities.get(token_id)
         fundamental_probability = safe_float(fundamental.get("probability")) if fundamental else None
         fundamental_source = str(fundamental.get("source")) if fundamental else ""
+        crypto_model = {"crypto_model_status": "not_crypto_updown_daily"}
+        if is_crypto_updown_daily(row):
+            time_to_close = safe_float(row.get("time_to_close_hours") or row.get("hours_to_close"))
+            if crypto_min_ttc is not None and time_to_close is not None and time_to_close < crypto_min_ttc:
+                crypto_model = {"crypto_model_status": "outside_time_to_close_window"}
+            elif crypto_max_ttc is not None and time_to_close is not None and time_to_close > crypto_max_ttc:
+                crypto_model = {"crypto_model_status": "outside_time_to_close_window"}
+            elif crypto_rows_attempted >= crypto_max_rows:
+                crypto_model = {"crypto_model_status": "row_budget_exhausted"}
+            else:
+                crypto_rows_attempted += 1
+                crypto_model = score_crypto_updown_prediction(row, crypto_settings)
+        crypto_model_probability = safe_float(crypto_model.get("crypto_model_probability"))
         worldcup_winner = is_worldcup_winner_market(row)
         haircut_fundamental_probability = None
         fundamental_edge_after_haircut = None
@@ -409,7 +432,22 @@ def apply_mispricing_alpha(
                     fundamental_residual_shrinkage * (fundamental_probability - market_probability),
                 ),
             )
-        unconstrained_alpha = market_probability + bias_adjustment + residual_adjustment + fundamental_adjustment
+        crypto_model_adjustment = 0.0
+        if crypto_model_probability is not None:
+            crypto_model_adjustment = max(
+                -crypto_max_adjustment,
+                min(
+                    crypto_max_adjustment,
+                    crypto_probability_blend * (crypto_model_probability - market_probability),
+                ),
+            )
+        unconstrained_alpha = (
+            market_probability
+            + bias_adjustment
+            + residual_adjustment
+            + fundamental_adjustment
+            + crypto_model_adjustment
+        )
         alpha_probability = _clamp_probability(
             max(
                 market_probability - max_deviation_from_market,
@@ -474,8 +512,12 @@ def apply_mispricing_alpha(
                 "bookmaker_cross_check_pass": bookmaker_cross_check_pass,
                 "fundamental_adjustment": fundamental_adjustment,
                 "fundamental_source": fundamental_source,
+                "crypto_model_adjustment": crypto_model_adjustment,
+                **crypto_model,
                 "worldcup_winner_validation_market": worldcup_winner,
-                "signal_cohort": signal_cohort({**row, "fundamental_probability": fundamental_probability or ""}),
+                "signal_cohort": signal_cohort(
+                    {**row, **crypto_model, "fundamental_probability": fundamental_probability or ""}
+                ),
                 "relative_spread": "" if relative_spread is None else relative_spread,
                 "price_filter_pass": price_filter_pass,
                 "spread_filter_pass": spread_filter_pass,
@@ -530,16 +572,25 @@ def apply_mispricing_alpha(
             and row.get("microstructure_filter_pass")
         )
         fundamental_edge_for_shadow = safe_float(row.get("fundamental_edge_after_haircut"))
+        crypto_edge_for_shadow = safe_float(row.get("crypto_model_edge_after_cost"))
+        crypto_shadow_mode = bool(
+            crypto_shadow_enabled
+            and str(row.get("crypto_model_status") or "") == "scored"
+        )
         spread_for_shadow = safe_float(row.get("spread"))
         liquidity_for_shadow = safe_float(row.get("liquidity"))
         relative_spread_for_shadow = (spread_for_shadow / price) if spread_for_shadow is not None and price > 0 else None
         shadow_reasons: list[str] = []
-        if shadow_worldcup_only and not bool(row.get("worldcup_winner_validation_market")):
-            shadow_reasons.append("not_worldcup_winner_market")
+        if crypto_shadow_mode:
+            if crypto_edge_for_shadow is None or crypto_edge_for_shadow < crypto_min_shadow_edge_after_cost:
+                shadow_reasons.append("crypto_model_edge_below_shadow_minimum")
+        else:
+            if shadow_worldcup_only and not bool(row.get("worldcup_winner_validation_market")):
+                shadow_reasons.append("not_worldcup_winner_market")
+            if fundamental_edge_for_shadow is None or fundamental_edge_for_shadow < shadow_min_fundamental_edge:
+                shadow_reasons.append("fundamental_edge_below_shadow_minimum")
         if shadow_min_price is not None and price < shadow_min_price:
             shadow_reasons.append("price_below_shadow_minimum")
-        if fundamental_edge_for_shadow is None or fundamental_edge_for_shadow < shadow_min_fundamental_edge:
-            shadow_reasons.append("fundamental_edge_below_shadow_minimum")
         if edge_lower_bound < shadow_min_edge_lower_bound:
             shadow_reasons.append("edge_lower_bound_below_shadow_minimum")
         if shadow_max_spread is not None and (spread_for_shadow is None or spread_for_shadow > shadow_max_spread):
@@ -555,6 +606,7 @@ def apply_mispricing_alpha(
         shadow_trade_candidate = bool(shadow_enabled and not shadow_reasons)
         shadow_priority_score = (
             (fundamental_edge_for_shadow or 0.0)
+            + (crypto_edge_for_shadow or 0.0)
             + max(0.0, edge_lower_bound)
             - max(0.0, spread_for_shadow or 0.0)
         )
@@ -609,6 +661,21 @@ def apply_mispricing_alpha(
         "alpha_model_version": model.get("model_version", "missing"),
         "fundamental_probabilities_loaded": len(fundamental_probabilities),
         "fundamental_probability_hits": sum(1 for row in final_rows if row.get("fundamental_probability") not in {"", None}),
+        "crypto_model_enabled": bool(crypto_settings.get("enabled", True)),
+        "crypto_model_scored": sum(1 for row in final_rows if row.get("crypto_model_status") == "scored"),
+        "crypto_model_status_counts": dict(
+            sorted(
+                {
+                    str(row.get("crypto_model_status") or "missing"): sum(
+                        1
+                        for item in final_rows
+                        if str(item.get("crypto_model_status") or "missing")
+                        == str(row.get("crypto_model_status") or "missing")
+                    )
+                    for row in final_rows
+                }.items()
+            )
+        ),
         "bookmaker_cross_check_failures": sum(
             1 for row in final_rows if str(row.get("bookmaker_cross_check_pass")).lower() == "false"
         ),

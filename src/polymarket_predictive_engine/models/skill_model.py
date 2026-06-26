@@ -57,7 +57,19 @@ def select_feature_columns(rows: list[dict[str, Any]]) -> list[str]:
     (the market logit is added separately as the anchor)."""
     # logit_midpoint is the market anchor added separately; the raw price columns are
     # the same signal in other units. Drop them so features mean "beyond the market".
-    drop = {"implied_probability", "midpoint", "logit_midpoint", "predicted_probability", "target"}
+    drop = {
+        "implied_probability",
+        "midpoint",
+        "logit_midpoint",
+        "predicted_probability",
+        "target",
+        "best_bid",
+        "best_ask",
+        "executable_buy_price",
+        "executable_price",
+        "last_trade_price",
+        "price_change_price",
+    }
     return [c for c in numeric_model_feature_columns(rows) if c.lower() not in drop]
 
 

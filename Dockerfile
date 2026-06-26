@@ -10,7 +10,7 @@ RUN apt-get update \
     && apt-get install -y --no-install-recommends ca-certificates curl bash \
     && rm -rf /var/lib/apt/lists/*
 
-COPY pyproject.toml README.md ./
+COPY pyproject.toml README.md polymarket_predictive_config.example.yaml ./
 COPY src ./src
 COPY scripts ./scripts
 COPY inputs ./inputs
@@ -20,6 +20,6 @@ RUN python -m pip install --upgrade pip \
     && pip install -e . \
     && if [ "${INSTALL_POLYMARKET_SDK}" = "true" ]; then pip install py-clob-client-v2; fi
 
-RUN mkdir -p outputs/polymarket
+RUN mkdir -p outputs/polymarket work/polymarket
 
-CMD ["bash", "scripts/run_polymarket_agent.sh"]
+CMD ["python", "scripts/run_polymarket_live_paper_loop.py", "--iterations", "1", "--optimize-model"]

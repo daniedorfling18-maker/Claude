@@ -6,8 +6,9 @@ from pathlib import Path
 from typing import Any
 
 from .config import EngineConfig, load_config
+from .paper_broker import export_ledger, portfolio_state, write_portfolio_snapshot
 from .storage import connect_db, init_db
-from .utils import now_utc, write_csv, write_json
+from .utils import now_utc, write_json
 
 
 def _starting_cash(cfg: EngineConfig) -> float:
@@ -21,60 +22,19 @@ def _latest_cash(con: sqlite3.Connection, starting_cash: float) -> float:
     return float(row[0]) if row else float(starting_cash)
 
 
-def portfolio_snapshot(cfg: EngineConfig) -> dict[str, Any]:
-    """Read portfolio state from the typed SQLite ledger, not CSV placeholders."""
-    init_db(cfg.database_path)
+def portfolio_snapshot(cfg: EngineConfig) -> dict[str, float | str]:
     con = connect_db(cfg.database_path)
     try:
-        cash = _latest_cash(con, _starting_cash(cfg))
-        open_orders = con.execute(
-            "SELECT COUNT(*) FROM orders WHERE lower(status) IN ('created','submitted','open','partially_filled','pending')"
-        ).fetchone()[0]
-        positions = con.execute("SELECT * FROM positions").fetchall()
-        exposure = sum(float(p["quantity"] or 0.0) * float(p["average_entry_price"] or 0.0) for p in positions)
-        realised = sum(float(p["realised_pnl_usdc"] or 0.0) for p in positions)
-        timestamp = now_utc()
-        snap = {
-            "timestamp": timestamp,
-            "cash": round(cash, 6),
-            "open_orders": int(open_orders),
-            "position_count": len(positions),
-            "total_exposure": round(exposure, 6),
-            "realized_pnl": round(realised, 6),
-            "unrealized_pnl": 0.0,
-            "drawdown": 0.0,
-            "daily_loss": 0.0,
-            "database_path": str(cfg.database_path),
-        }
-        con.execute(
-            """
-            INSERT OR REPLACE INTO portfolio_snapshots(
-                snapshot_id, created_at, cash_usdc, open_order_count, position_count,
-                total_exposure_usdc, realised_pnl_usdc, unrealised_pnl_usdc,
-                daily_loss_usdc, drawdown, risk_usage_json
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """,
-            (
-                f"portfolio:{timestamp}",
-                timestamp,
-                snap["cash"],
-                snap["open_orders"],
-                snap["position_count"],
-                snap["total_exposure"],
-                snap["realized_pnl"],
-                snap["unrealized_pnl"],
-                snap["daily_loss"],
-                snap["drawdown"],
-                json.dumps({"source": "sqlite_ledger"}, sort_keys=True),
-            ),
+        with con:
+            snapshot = write_portfolio_snapshot(con, cfg)
+            export_ledger(con, cfg)
+        write_json(
+            cfg.output_root / "polymarket_portfolio" / "risk_state.json",
+            {"snapshot": snapshot, "portfolio": portfolio_state(con, cfg)},
         )
-        con.commit()
+        return snapshot
     finally:
         con.close()
-    out = cfg.output_root / "polymarket_portfolio"
-    write_csv(out / "portfolio_snapshot.csv", [snap])
-    write_json(out / "risk_state.json", {"snapshot": snap, "risk_limit_usage": {"single_market": 0, "category": 0, "daily_loss": 0}})
-    return snap
 
 
 def reconciliation_report(cfg: EngineConfig) -> dict[str, Any]:

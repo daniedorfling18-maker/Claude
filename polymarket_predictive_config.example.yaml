@@ -1,4 +1,4 @@
-paths:
+﻿paths:
   data_root: .
   output_root: outputs
   database_path: work/polymarket/polymarket_engine.sqlite
@@ -62,6 +62,7 @@ historical_backfill:
   request_timeout_seconds: 30
   request_pause_seconds: 0.1
   gamma_query_params: {}
+  max_age_days: 365
 historical_price_history:
   clob_base_url: https://clob.polymarket.com
   max_tokens: 500
@@ -94,6 +95,215 @@ calibration_v2:
   minimum_training_rows: 100
   min_rows_per_category: 50
   bucket_shrinkage_to_midpoint: 0.2
+ml_optimization:
+  enabled: true
+  minimum_rows: 100
+  minimum_markets: 20
+  minimum_train_markets: 5
+  final_holdout_fraction: 0.2
+  minimum_holdout_rows: 50
+  minimum_holdout_markets: 3
+  walk_forward_splits: 4
+  max_rows_per_token: 12
+  candidate_l2:
+  - 0.1
+  - 0.3
+  - 1.0
+  - 3.0
+  - 10.0
+  min_brier_gain: 0.0
+  bootstrap_iterations: 1000
+  random_seed: 20260623
+mispricing_alpha:
+  enabled: true
+  target_monthly_profit_usdc: 100
+  target_metric_min_price: 0.05
+  minimum_rows: 100
+  probability_buckets: 10
+  minimum_cell_rows: 8
+  minimum_live_cell_rows: 8
+  bias_prior_strength: 25
+  bias_alpha_shrinkage: 0.5
+  model_residual_shrinkage: 0.0
+  max_model_residual_adjustment: 0.0
+  use_fundamental_probabilities: true
+  fundamental_probability_paths:
+  - outputs/polymarket/repo_worldcup_winner_probabilities.csv
+  - inputs/polymarket/model_probabilities.csv
+  fundamental_residual_shrinkage: 0.35
+  fundamental_probability_haircut: 0.5
+  require_fundamental_cross_check_for_trading: true
+  minimum_fundamental_edge_after_haircut: 0.03
+  max_fundamental_adjustment: 0.12
+  max_alpha_probability_deviation_from_market: 0.25
+  edge_field_for_trading: edge_lower_bound
+  require_alpha_trade_candidate: true
+  require_same_category_labels_for_trading: true
+  minimum_same_category_label_rows_for_trading: 25
+  max_spread_for_alpha_trade: 0.04
+  max_relative_spread_for_alpha_trade: 0.2
+  min_liquidity_for_alpha_trade: 100
+  min_price_for_alpha_trade: 0.005
+  spread_penalty_weight: 0.5
+  low_liquidity_penalty: 0.02
+  missing_liquidity_penalty: 0.01
+  reference_liquidity: 1000
+  depth_imbalance_penalty_weight: 0.02
+  volatility_penalty_weight: 0.15
+  uncertainty_penalty_weight: 0.03
+  market_overround_penalty_weight: 0.35
+  model_overround_penalty_weight: 0.2
+profit_tracking:
+  target_monthly_profit_usdc: 100
+  minimum_tracking_hours_for_on_pace: 24
+  pause_new_entries_below_pnl_usdc: -10
+  baseline_file: paper_profit_target_baseline.json
+  tracker_file: paper_profit_target_tracker.json
+runtime_resource_guard:
+  enabled: true
+  max_memory_percent: 92
+  render_dashboard_on_skip: false
+runtime_schedule:
+  full_scan_every_iterations: 3
+  optimize_model_every_iterations: 12
+  mispricing_alpha_every_iterations: 12
+  edge_strategy_search_every_iterations: 12
+  promoted_rule_shadow_every_iterations: 3
+  liquidity_discovery_every_iterations: 12
+  dashboard_render_every_iterations: 2
+cohort_promotion:
+  require_positive_forward_pnl: true
+  allow_shadow_evidence_for_promotion: true
+  allow_promoted_shadow_candidate_trading: true
+  minimum_filled_orders: 5
+  minimum_settled_orders: 3
+  minimum_pnl_usdc: 0.0
+  minimum_roi: 0.03
+  minimum_tracking_hours_for_promotion: 2
+  minimum_monthly_run_rate_usdc: 20
+  summary_file: signal_cohort_pnl.json
+shadow_cohort_validation:
+  enabled: true
+  policy_version: shadow-cohort-v3-ask-fill-relative-spread
+  stake_usdc: 10
+  candidate_limit_per_cycle: 16
+  maximum_open_positions: 60
+  maximum_open_positions_per_cohort: 25
+  maximum_long_horizon_open_positions: 10
+  long_horizon_min_time_to_close_hours: 24
+  fast_feedback_max_time_to_close_hours: 6
+  minimum_fast_feedback_slots: 30
+  settle_resolved_markets: true
+  settlement_grace_minutes: 1
+  settlement_request_timeout_seconds: 20
+  settlement_max_positions_per_cycle: 25
+  minimum_price: 0.005
+  minimum_edge_lower_bound: -0.01
+  minimum_fundamental_edge_after_haircut: 0.008
+  maximum_spread: 0.02
+  maximum_relative_spread: 0.2
+  minimum_liquidity: 100
+  minimum_reentry_minutes_after_exit: 240
+  quarantine_negative_cohorts: true
+  quarantine_min_closed_positions: 3
+  quarantine_max_closed_roi: -0.05
+  quarantine_max_closed_pnl_usdc: -1
+  maximum_holding_hours: 72
+  take_profit_return: 0.25
+  stop_loss_return: 0.35
+  positions_file: shadow_positions.csv
+  fills_file: shadow_fills.csv
+  summary_file: shadow_signal_cohort_pnl.json
+edge_strategy_search:
+  enabled: true
+  holdout_fraction: 0.25
+  min_rows: 20
+  min_markets: 5
+  min_holdout_rows: 6
+  min_dev_roi: 0.02
+  min_holdout_roi: 0.02
+  stake_usdc: 1
+  max_ranked_rules: 100
+  allowed_rule_families:
+  - family
+  - family_price
+  - family_time
+  - family_price_time
+  - family_outcome
+  - family_outcome_price
+promoted_rule_shadow:
+  enabled: true
+  max_rules: 3
+  exploratory_rules_enabled: true
+  exploratory_max_rules: 3
+  exploratory_inverse_rules_enabled: true
+  exploratory_family_prefixes:
+  - crypto_
+  exploratory_min_dev_rows: 20
+  exploratory_min_dev_markets: 3
+  exploratory_min_holdout_rows: 1
+  exploratory_min_dev_roi: 0.02
+  exploratory_min_holdout_roi: 0.02
+  exploratory_min_time_to_close_hours: 0
+  exploratory_max_time_to_close_hours: 2
+  public_search_limit: 8
+  crypto_updown_public_search_days_ahead: 2
+  crypto_updown_intraday_search_enabled: true
+  crypto_updown_intraday_search_hours_ahead: 2
+  crypto_updown_intraday_search_step_minutes: 10
+  crypto_updown_live_model_enabled: true
+  crypto_updown_model_min_elapsed_seconds: 20
+  crypto_updown_model_min_remaining_seconds: 20
+  crypto_updown_model_min_probability: 0.57
+  crypto_updown_model_min_edge_after_cost: 0.03
+  crypto_updown_model_volatility_lookback_minutes: 90
+  crypto_updown_model_sigma_floor_per_sqrt_second: 0.00002
+  crypto_updown_public_search_assets:
+  - bitcoin
+  - ethereum
+  - solana
+  - xrp
+  event_limit: 250
+  max_tokens_per_rule: 80
+  min_liquidity: 50
+  max_spread: 0.08
+  max_relative_spread: 0.25
+  series_id_overrides:
+    tennis_itf_total: 11634
+    tennis_atp_total: 10365
+    tennis_wta_total: 10366
+  query_overrides:
+    tennis_itf_total: itf
+    tennis_atp_total: atp tennis
+    tennis_wta_total: wta tennis
+    crypto_updown_5m: updown
+liquidity_discovery:
+  enabled: true
+  event_limit: 80
+  token_limit: 180
+  min_liquidity: 250
+  max_spread: 0.04
+  max_relative_spread: 0.15
+  min_price: 0.02
+  public_search_enabled: true
+  public_search_limit: 8
+  crypto_updown_date_search:
+    enabled: true
+    days_ahead: 2
+    assets:
+    - bitcoin
+    - ethereum
+    - solana
+    - xrp
+  queries:
+  - ''
+  - world cup
+  - crypto
+  - updown
+  - btc updown
+  - xrp updown
+  - sports
+  - tennis
 market_relative_validation:
   bucket_count: 10
   min_rows: 100
@@ -104,7 +314,7 @@ market_relative_validation:
   min_brier_gain_ci_low: 0.0
   copy_tolerance: 0.000000001
   roi_minimum_edge: 0.03
-  slippage: 0.01
+  slippage: 0.0
   transaction_cost: 0.0
   liquidity_cap_fraction: 0.05
   maximum_single_market_exposure: 0.02
@@ -126,6 +336,7 @@ external_feeds:
   feeds: []
 websocket_market_data:
   url: wss://ws-subscriptions-clob.polymarket.com/ws/market
+  max_messages: 5000
   market_ids: &id001
   - '53767774368871487958852302456977659279367510767287923221897564430044671384128'
   - '37821011509134197239774147789543695590581250725127252293498663449982199078732'
@@ -155,7 +366,7 @@ backtest:
 costs:
   transaction_cost: 0.0
   spread_assumption: 0.02
-  slippage: 0.01
+  slippage: 0.0
 risk:
   bankroll: 1000
   minimum_edge: 0.03
@@ -165,13 +376,14 @@ risk:
   minimum_time_to_close_minutes: 15
   maximum_resolution_risk: 0.25
   maximum_single_market_exposure: 0.02
-  maximum_category_exposure: 0.1
-  maximum_correlated_exposure: 0.1
+  maximum_category_exposure: 0.10
+  maximum_correlated_exposure: 0.10
   maximum_daily_loss: 0.03
-  maximum_drawdown: 0.1
+  maximum_drawdown: 0.05
   maximum_open_orders: 10
-  maximum_order_rate_per_minute: 3
+  maximum_order_rate_per_minute: 30
   maximum_slippage: 0.02
+  liquidity_cap_fraction: 0.05
   kelly_cap: 0.005
   category_blacklist: []
   market_blacklist: []
@@ -180,6 +392,23 @@ paper_trading:
   enabled: true
   starting_cash: 1000
   persist_orders: true
+  fill_model: taker_immediate
+  mark_price: best_bid
+  allow_position_pyramiding: false
+  maximum_position_cost_usdc: 20
+  minimum_reentry_minutes_after_exit: 240
+  exit_enabled: true
+  exit_policy_version: paper-exit-v1
+  minimum_hold_minutes_before_exit: 15
+  take_profit_return: 0.25
+  take_profit_min_usdc: 0.25
+  exit_when_alpha_edge_below_threshold: true
+  alpha_exit_edge_threshold: -0.01
+  max_loss_usdc_for_alpha_exit: 1
+  stop_loss_return: 0.65
+  stop_loss_max_edge: 0
+  hard_stop_loss_return: 0.35
+  hard_stop_loss_usdc: 2
 trading:
   mode: paper
 live_trading:
@@ -199,3 +428,7 @@ governance_thresholds:
   min_brier_gain_ci_low: 0.0
   maximum_data_quality_blockers: 0
   require_paper_trading_evidence: true
+  min_paper_labels: 50
+  require_clean_snapshot_labels_for_paper: false
+  min_forward_paper_trades: 1
+  require_positive_forward_paper_roi: false

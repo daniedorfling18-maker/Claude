@@ -5,6 +5,7 @@ import json
 import sys
 
 from .backtest import backtest
+from .collection_only import run_collection_only
 from .config import config_check, load_config
 from .data_inventory import inventory
 from .data_quality import data_quality
@@ -17,24 +18,29 @@ from .features_v2 import build_features_v2
 from .governance import governance_report
 from .historical_backfill import historical_backfill
 from .labels import build_labels
-from .models.calibrated import train_model, write_predictions
+from .models.calibrated import load_prediction_models, train_model, write_predictions
 from .models.calibration_v2 import train_calibration_model
 from .models.category_calibration import train_category_calibration
+from .models.optimized import train_optimized_model
 from .models.skill_model import train_skill_model
 from .overnight_collection import run_collection_only_overnight
 from .paper_edge_simulator import simulate_paper_edge
+from .paper_cycle import run_paper_cycle
 from .pipeline_health import pipeline_health
 from .pipeline_inventory import pipeline_inventory
 from .portfolio import portfolio_snapshot, reconciliation_report
 from .price_history_collector import collect_price_history
 from .market_making_pnl import evaluate_market_making
+from .mispricing_alpha import apply_mispricing_alpha, train_mispricing_alpha_model
 from .live_mispricing import run_live_mispricing, scan_live_mispricing
 from .paper_session import run_paper_session
 from .readiness import paper_live_promotion_gate, paper_trade_readiness, readiness_decision
 from .resolution_collector import collect_resolutions
+from .snapshot_ingest import ingest_scanner_snapshot
 from .snapshot_label_collector import collect_snapshot_labels
 from .storage import init_db
 from .strategy import generate_signals
+from .strategy_search import run_edge_strategy_search
 from .validation import validate_model
 from .websocket_collector import collect_websocket
 from .websocket_normaliser import normalize_websocket_file
@@ -61,6 +67,10 @@ COMMANDS = [
     "train-calibration",
     "calibrate-categories",
     "train-skill-model",
+    "optimize-model",
+    "train-mispricing-alpha",
+    "score-mispricing-alpha",
+    "edge-strategy-search",
     "promotion-gate",
     "validate",
     "predict",
@@ -78,6 +88,9 @@ COMMANDS = [
     "resolve-websocket-markets",
     "collect-snapshot-labels",
     "collect-overnight",
+    "collection-only",
+    "ingest-scanner-snapshot",
+    "paper-cycle",
     "portfolio",
     "reconciliation-report",
     "governance-report",
@@ -97,8 +110,14 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--allow-data-quality-warnings", action="store_true")
     parser.add_argument("--resolution-limit", type=int, default=None)
     parser.add_argument("--historical-limit", type=int, default=None)
+    parser.add_argument(
+        "--allow-old-history",
+        action="store_true",
+        help="Explicit research opt-in for historical markets older than the configured cutoff.",
+    )
     parser.add_argument("--websocket-seconds", type=int, default=60)
     parser.add_argument("--websocket-input", default=None)
+    parser.add_argument("--snapshot-input", default=None)
     parser.add_argument(
         "--source",
         choices=["all", "historical", "raw_snapshot", "websocket"],
@@ -109,8 +128,16 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--skill-l2", type=float, default=5.0, help="L2 strength for train-skill-model")
     parser.add_argument(
         "--allow-unlabelled-research-features",
+        "--research-unlabelled-features",
+        dest="research_unlabelled_features",
         action="store_true",
-        help="Allow build-features-v2 to run without clean labels for research-only feature inspection.",
+        help="Permit an unlabeled build-features-v2 research export. Never use it as a training manifest.",
+    )
+    parser.add_argument(
+        "--paper-source",
+        choices=["raw_snapshot", "websocket"],
+        default="raw_snapshot",
+        help="Point-in-time source used by the canonical forward paper cycle.",
     )
     return parser
 
@@ -137,7 +164,11 @@ def main(argv: list[str] | None = None) -> int:
             _, _, summary = collect_resolutions(cfg, limit=args.resolution_limit)
             _print(summary)
         elif args.command == "backfill-resolved-markets":
-            _, _, summary = historical_backfill(cfg, historical_limit=args.historical_limit)
+            _, _, summary = historical_backfill(
+                cfg,
+                historical_limit=args.historical_limit,
+                allow_old_history=args.allow_old_history,
+            )
             _print(summary)
         elif args.command == "collect-price-history":
             _, _, summary = collect_price_history(cfg, historical_limit=args.historical_limit)
@@ -150,7 +181,8 @@ def main(argv: list[str] | None = None) -> int:
             features = build_features_v2(
                 cfg,
                 source=args.source,
-                allow_unlabelled_research=args.allow_unlabelled_research_features,
+                allow_unlabelled_research=args.research_unlabelled_features,
+                require_clean_labels=not args.research_unlabelled_features,
             )
             _print({"features_v2": len(features), "source": args.source})
         elif args.command == "refresh-live-features":
@@ -158,7 +190,8 @@ def main(argv: list[str] | None = None) -> int:
             features = build_features_v2(
                 cfg,
                 source="websocket",
-                allow_unlabelled_research=args.allow_unlabelled_research_features,
+                allow_unlabelled_research=True,
+                require_clean_labels=False,
             )
             _print({"status": "ok", "websocket": websocket_summary, "features_v2": len(features), "source": "websocket"})
         elif args.command == "external-signals":
@@ -176,15 +209,36 @@ def main(argv: list[str] | None = None) -> int:
             _print(train_category_calibration(cfg))
         elif args.command == "train-skill-model":
             _print(train_skill_model(cfg, test_fraction=args.test_fraction, l2=args.skill_l2))
+        elif args.command == "optimize-model":
+            _print(train_optimized_model(cfg))
+        elif args.command == "train-mispricing-alpha":
+            _print(train_mispricing_alpha_model(cfg))
+        elif args.command == "score-mispricing-alpha":
+            _print({"predictions": len(apply_mispricing_alpha(cfg, output_path=str(cfg.output_root / "polymarket_predictions" / "predictions.csv")))})
+        elif args.command == "edge-strategy-search":
+            _print(run_edge_strategy_search(cfg))
         elif args.command == "promotion-gate":
             _print(paper_live_promotion_gate(cfg))
         elif args.command == "validate":
             _print(validate_model(cfg))
         elif args.command == "predict":
-            features = build_features(cfg)
+            features = build_features_v2(cfg, source=args.source, require_clean_labels=False)
+            global_model, category_models = load_prediction_models(cfg)
             out = cfg.output_root / "polymarket_predictions"
             out.mkdir(parents=True, exist_ok=True)
-            _print({"predictions": len(write_predictions(features, str(out / "predictions.csv")))})
+            _print(
+                {
+                    "predictions": len(
+                        write_predictions(
+                            features,
+                            str(out / "predictions.csv"),
+                            model=global_model,
+                            category_models=category_models,
+                            training_cutoff=str(global_model.get("trained_at", "")),
+                        )
+                    )
+                }
+            )
         elif args.command == "generate-signals":
             approved, rejected = generate_signals(cfg)
             _print({"approved": len(approved), "rejected": len(rejected)})
@@ -223,6 +277,12 @@ def main(argv: list[str] | None = None) -> int:
                     websocket_input=args.websocket_input,
                 )
             )
+        elif args.command == "collection-only":
+            _print(run_collection_only(cfg, websocket_seconds=args.websocket_seconds))
+        elif args.command == "ingest-scanner-snapshot":
+            _print(ingest_scanner_snapshot(cfg, snapshot_path=args.snapshot_input))
+        elif args.command == "paper-cycle":
+            _print(run_paper_cycle(cfg, source=args.paper_source))
         elif args.command == "portfolio":
             _print(portfolio_snapshot(cfg))
         elif args.command == "reconciliation-report":

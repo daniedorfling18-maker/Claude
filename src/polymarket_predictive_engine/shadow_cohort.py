@@ -1,0 +1,970 @@
+from __future__ import annotations
+
+import hashlib
+import json
+import re
+import urllib.parse
+import urllib.request
+from collections import defaultdict
+from datetime import datetime, timedelta, timezone
+from pathlib import Path
+from typing import Any
+from zoneinfo import ZoneInfo
+
+from .config import EngineConfig
+from .resolution_collector import fetch_gamma_market, infer_market_resolution_rows
+from .utils import boolish, now_utc, parse_timestamp, read_csv_rows, read_json, safe_float, write_csv, write_json
+from .worldcup_validation import normalised_correlation_key, signal_cohort
+
+
+def _stable_id(prefix: str, value: str) -> str:
+    return f"{prefix}_{hashlib.sha256(value.encode('utf-8')).hexdigest()[:24]}"
+
+
+def _settings(cfg: EngineConfig) -> dict[str, Any]:
+    return cfg.raw.get("shadow_cohort_validation", {}) or {}
+
+
+def _root(cfg: EngineConfig) -> Path:
+    root = cfg.output_root / "polymarket_shadow"
+    root.mkdir(parents=True, exist_ok=True)
+    return root
+
+
+def _positions_path(cfg: EngineConfig) -> Path:
+    return _root(cfg) / str(_settings(cfg).get("positions_file", "shadow_positions.csv"))
+
+
+def _fills_path(cfg: EngineConfig) -> Path:
+    return _root(cfg) / str(_settings(cfg).get("fills_file", "shadow_fills.csv"))
+
+
+def _shadow_slippage(cfg: EngineConfig, prediction: dict[str, Any]) -> float:
+    configured = max(0.0, float(cfg.raw.get("costs", {}).get("slippage", 0.0)))
+    spread = safe_float(prediction.get("spread"))
+    if spread is not None and spread > 0:
+        return min(configured, max(0.0, spread / 2.0))
+    price = safe_float(prediction.get("executable_price"))
+    if price is not None and price > 0:
+        return min(configured, price * 0.02)
+    return configured
+
+
+def _mark_price(prediction: dict[str, Any] | None, fallback: float) -> float:
+    if prediction:
+        for key in ("best_bid", "bid", "executable_sell_price"):
+            value = safe_float(prediction.get(key))
+            if value is not None and 0 < value < 1:
+                return value
+        ask = safe_float(prediction.get("executable_price"))
+        spread = safe_float(prediction.get("spread"))
+        if ask is not None and spread is not None:
+            return max(1e-6, min(0.999999, ask - max(0.0, spread)))
+        for key in ("market_midpoint", "market_probability", "midpoint"):
+            value = safe_float(prediction.get(key))
+            if value is not None and 0 < value < 1:
+                return value
+    return max(1e-6, min(0.999999, fallback))
+
+
+def _row_json(row: dict[str, Any]) -> str:
+    return json.dumps(row, sort_keys=True, default=str)
+
+
+def _row_payload(row: dict[str, Any]) -> dict[str, Any]:
+    payload = row.get("source_signal_json") or "{}"
+    if isinstance(payload, dict):
+        return payload
+    if not isinstance(payload, str) or not payload.strip():
+        return {}
+    try:
+        decoded = json.loads(payload)
+    except (TypeError, ValueError, json.JSONDecodeError):
+        return {}
+    return decoded if isinstance(decoded, dict) else {}
+
+
+def _cohort_name(row: dict[str, Any]) -> str:
+    return str(row.get("signal_cohort") or signal_cohort(row) or "unknown")
+
+
+def _time_to_close_hours(row: dict[str, Any]) -> float | None:
+    payload = _row_payload(row)
+    for key in ("close_time", "end_time", "endDate", "endDateIso"):
+        parsed = parse_timestamp(row.get(key) or payload.get(key))
+        if parsed is not None:
+            return (parsed.astimezone(timezone.utc) - datetime.now(timezone.utc)).total_seconds() / 3600.0
+    for key in ("time_to_close_hours", "hours_to_close"):
+        value = safe_float(row.get(key) or payload.get(key))
+        if value is not None:
+            return value
+    return None
+
+
+def _is_fast_feedback(row: dict[str, Any], settings: dict[str, Any]) -> bool:
+    max_hours = float(settings.get("fast_feedback_max_time_to_close_hours", 6.0))
+    time_to_close = _time_to_close_hours(row)
+    return time_to_close is not None and 0.0 <= time_to_close <= max_hours
+
+
+def _is_long_horizon(row: dict[str, Any], settings: dict[str, Any]) -> bool:
+    min_hours = float(settings.get("long_horizon_min_time_to_close_hours", 24.0))
+    time_to_close = _time_to_close_hours(row)
+    return time_to_close is None or time_to_close >= min_hours
+
+
+def _soonest_first_score(row: dict[str, Any]) -> float:
+    time_to_close = _time_to_close_hours(row)
+    if time_to_close is None:
+        return -999999.0
+    return -max(0.0, time_to_close)
+
+
+def _normalise_position_row(position: dict[str, Any]) -> None:
+    """Backfill newly introduced explicit columns from the embedded signal payload."""
+    payload = _row_payload(position)
+    for key in ("outcome", "close_time", "rule_scope", "time_to_close_hours"):
+        if not str(position.get(key) or "").strip() and payload.get(key) not in (None, ""):
+            position[key] = payload.get(key)
+
+
+def _age_hours(opened_at: Any) -> float:
+    opened = parse_timestamp(opened_at)
+    if opened is None:
+        return 0.0
+    return max(0.0, (datetime.now(timezone.utc) - opened.astimezone(timezone.utc)).total_seconds() / 3600.0)
+
+
+def _minutes_since(timestamp: Any) -> float:
+    parsed = parse_timestamp(timestamp)
+    if parsed is None:
+        return float("inf")
+    return max(0.0, (datetime.now(timezone.utc) - parsed.astimezone(timezone.utc)).total_seconds() / 60.0)
+
+
+def _prediction_index(predictions: list[dict[str, Any]]) -> dict[tuple[str, str], dict[str, Any]]:
+    index: dict[tuple[str, str], dict[str, Any]] = {}
+    for row in predictions:
+        key = (str(row.get("market_id") or ""), str(row.get("token_id") or ""))
+        if key[0] or key[1]:
+            index[key] = row
+    return index
+
+
+def _quarantined_cohorts(cfg: EngineConfig, positions: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
+    settings = _settings(cfg)
+    if not boolish(settings.get("quarantine_negative_cohorts", True)):
+        return {}
+    min_closed = int(settings.get("quarantine_min_closed_positions", 3))
+    max_roi = float(settings.get("quarantine_max_closed_roi", -0.05))
+    max_pnl = float(settings.get("quarantine_max_closed_pnl_usdc", -1.0))
+    stats: dict[str, dict[str, Any]] = defaultdict(
+        lambda: {
+            "closed_positions": 0,
+            "closed_cost_basis_usdc": 0.0,
+            "closed_realised_pnl_usdc": 0.0,
+        }
+    )
+    for position in positions:
+        if str(position.get("status") or "").lower() != "closed":
+            continue
+        cohort = _cohort_name(position)
+        stats[cohort]["closed_positions"] += 1
+        stats[cohort]["closed_cost_basis_usdc"] += safe_float(position.get("cost_basis_usdc")) or 0.0
+        stats[cohort]["closed_realised_pnl_usdc"] += safe_float(position.get("realised_pnl_usdc")) or 0.0
+
+    quarantined: dict[str, dict[str, Any]] = {}
+    for cohort, row in stats.items():
+        cost = float(row["closed_cost_basis_usdc"])
+        pnl = float(row["closed_realised_pnl_usdc"])
+        roi = pnl / cost if cost > 0 else 0.0
+        if int(row["closed_positions"]) >= min_closed and (roi <= max_roi or pnl <= max_pnl):
+            quarantined[cohort] = {
+                **row,
+                "closed_roi": roi,
+                "quarantine_reason": (
+                    f"closed evidence below threshold: roi={roi:.4f}, pnl={pnl:.2f}, "
+                    f"closed_positions={int(row['closed_positions'])}"
+                ),
+            }
+    return quarantined
+
+
+def _hours_since_first_evidence(first_timestamp: Any) -> float:
+    parsed = parse_timestamp(first_timestamp)
+    if parsed is None:
+        return 0.0
+    return max(0.0, (datetime.now(timezone.utc) - parsed.astimezone(timezone.utc)).total_seconds() / 3600.0)
+
+
+def _monthly_run_rate_usdc(pnl: float, first_timestamp: Any) -> float:
+    elapsed_hours = _hours_since_first_evidence(first_timestamp)
+    if elapsed_hours <= 0:
+        return 0.0
+    return pnl * (24.0 * 30.0 / elapsed_hours)
+
+
+def _position_close_time(position: dict[str, Any]) -> datetime | None:
+    payload = _row_payload(position)
+    for key in ("close_time", "end_time", "endDate", "endDateIso"):
+        parsed = parse_timestamp(position.get(key) or payload.get(key))
+        if parsed is not None:
+            return parsed.astimezone(timezone.utc)
+    return None
+
+
+def _should_check_settlement(position: dict[str, Any], *, grace_minutes: float) -> bool:
+    close_time = _position_close_time(position)
+    if close_time is None:
+        return False
+    now_dt = datetime.now(timezone.utc)
+    return (now_dt - close_time).total_seconds() >= grace_minutes * 60.0
+
+
+def _public_search_market_by_slug(slug: str, *, timeout_seconds: int) -> dict[str, Any] | None:
+    queries = [slug, slug.replace("-", " "), *_public_search_queries_for_slug(slug)]
+    seen: set[str] = set()
+    for query in queries:
+        clean_query = query.strip()
+        if not clean_query or clean_query.lower() in seen:
+            continue
+        seen.add(clean_query.lower())
+        params = urllib.parse.urlencode(
+            {
+                "q": clean_query,
+                "limit": "8",
+                "search_profiles": "false",
+                "search_tags": "false",
+            }
+        )
+        request = urllib.request.Request(
+            f"https://gamma-api.polymarket.com/public-search?{params}",
+            headers={
+                "User-Agent": "superbru-polymarket-mispricing-bot/0.1",
+                "Accept": "application/json",
+            },
+        )
+        with urllib.request.urlopen(request, timeout=timeout_seconds) as response:  # nosec B310 - public API
+            payload = json.loads(response.read().decode("utf-8"))
+        events = payload.get("events") if isinstance(payload, dict) else []
+        if not isinstance(events, list):
+            continue
+        for event in events:
+            if not isinstance(event, dict):
+                continue
+            markets = event.get("markets") or []
+            if isinstance(markets, list):
+                for market in markets:
+                    if isinstance(market, dict) and str(market.get("slug") or "") == slug:
+                        return market
+            if str(event.get("slug") or "") == slug:
+                if isinstance(markets, list) and markets and isinstance(markets[0], dict):
+                    return markets[0]
+                return event
+    return None
+
+
+def _public_search_queries_for_slug(slug: str) -> list[str]:
+    match = re.match(r"^(btc|eth|sol|xrp)-updown-(5m|15m)-(\d+)$", slug)
+    if not match:
+        return []
+    asset_key, interval_raw, timestamp_raw = match.groups()
+    asset_name = {
+        "btc": "bitcoin",
+        "eth": "ethereum",
+        "sol": "solana",
+        "xrp": "xrp",
+    }.get(asset_key, asset_key)
+    try:
+        start_utc = datetime.fromtimestamp(int(timestamp_raw), tz=timezone.utc)
+        start_et = start_utc.astimezone(ZoneInfo("America/New_York"))
+    except Exception:
+        return [f"{asset_name} up or down"]
+    date_text = f"{start_et.strftime('%B')} {start_et.day} {start_et.year}"
+    interval_minutes = 15 if interval_raw == "15m" else 5
+    end_et = start_et + timedelta(minutes=interval_minutes)
+
+    def _time_text(dt: datetime) -> str:
+        return f"{int(dt.strftime('%I'))}:{dt.strftime('%M')}{dt.strftime('%p')}"
+
+    short_date_text = f"{start_et.strftime('%B')} {start_et.day}"
+    return [
+        slug,
+        slug.replace("-", " "),
+        f"{asset_name} up or down {short_date_text} {_time_text(end_et)} ET",
+        f"{asset_name} up or down {short_date_text} {_time_text(start_et)}-{_time_text(end_et)} ET",
+        f"{asset_name} up or down {date_text}",
+        f"{asset_name} updown {date_text}",
+    ]
+
+
+def _fetch_binance_window_prices(
+    asset_key: str,
+    *,
+    start_utc: datetime,
+    interval_minutes: int,
+    timeout_seconds: int,
+) -> tuple[float, float, str] | None:
+    symbol = {
+        "btc": "BTCUSDT",
+        "eth": "ETHUSDT",
+        "sol": "SOLUSDT",
+        "xrp": "XRPUSDT",
+    }.get(asset_key)
+    if not symbol:
+        return None
+    interval = "15m" if interval_minutes == 15 else "5m"
+    start_ms = int(start_utc.timestamp() * 1000)
+    params = urllib.parse.urlencode(
+        {
+            "symbol": symbol,
+            "interval": interval,
+            "startTime": str(start_ms),
+            "limit": "1",
+        }
+    )
+    request = urllib.request.Request(
+        f"https://api.binance.com/api/v3/klines?{params}",
+        headers={
+            "User-Agent": "superbru-polymarket-mispricing-bot/0.1",
+            "Accept": "application/json",
+        },
+    )
+    with urllib.request.urlopen(request, timeout=timeout_seconds) as response:  # nosec B310 - public market data API
+        payload = json.loads(response.read().decode("utf-8"))
+    if not isinstance(payload, list) or not payload:
+        return None
+    candle = payload[0]
+    if not isinstance(candle, list) or len(candle) < 5:
+        return None
+    open_price = safe_float(candle[1])
+    close_price = safe_float(candle[4])
+    if open_price is None or close_price is None or open_price <= 0 or close_price <= 0:
+        return None
+    return open_price, close_price, "binance_klines"
+
+
+def _fetch_coinbase_window_prices(
+    asset_key: str,
+    *,
+    start_utc: datetime,
+    interval_minutes: int,
+    timeout_seconds: int,
+) -> tuple[float, float, str] | None:
+    product = {
+        "btc": "BTC-USD",
+        "eth": "ETH-USD",
+        "sol": "SOL-USD",
+        "xrp": "XRP-USD",
+    }.get(asset_key)
+    if not product:
+        return None
+    granularity = 900 if interval_minutes == 15 else 300
+    end_utc = start_utc + timedelta(minutes=interval_minutes)
+    params = urllib.parse.urlencode(
+        {
+            "start": start_utc.isoformat().replace("+00:00", "Z"),
+            "end": end_utc.isoformat().replace("+00:00", "Z"),
+            "granularity": str(granularity),
+        }
+    )
+    request = urllib.request.Request(
+        f"https://api.exchange.coinbase.com/products/{product}/candles?{params}",
+        headers={
+            "User-Agent": "superbru-polymarket-mispricing-bot/0.1",
+            "Accept": "application/json",
+        },
+    )
+    with urllib.request.urlopen(request, timeout=timeout_seconds) as response:  # nosec B310 - public market data API
+        payload = json.loads(response.read().decode("utf-8"))
+    if not isinstance(payload, list) or not payload:
+        return None
+    start_second = int(start_utc.timestamp())
+    candle = next(
+        (row for row in payload if isinstance(row, list) and row and int(safe_float(row[0]) or -1) == start_second),
+        payload[0],
+    )
+    if not isinstance(candle, list) or len(candle) < 5:
+        return None
+    # Coinbase candle format is [time, low, high, open, close, volume].
+    open_price = safe_float(candle[3])
+    close_price = safe_float(candle[4])
+    if open_price is None or close_price is None or open_price <= 0 or close_price <= 0:
+        return None
+    return open_price, close_price, "coinbase_candles"
+
+
+def _crypto_updown_proxy_settlement_price(
+    position: dict[str, Any],
+    *,
+    timeout_seconds: int,
+) -> tuple[float | None, str]:
+    slug = str(position.get("market_slug") or "").strip().lower()
+    match = re.match(r"^(btc|eth|sol|xrp)-updown-(5m|15m)-(\d+)$", slug)
+    if not match:
+        return None, "not_crypto_updown_slug"
+    asset_key, interval_raw, timestamp_raw = match.groups()
+    interval_minutes = 15 if interval_raw == "15m" else 5
+    start_utc = datetime.fromtimestamp(int(timestamp_raw), tz=timezone.utc)
+    end_utc = start_utc + timedelta(minutes=interval_minutes)
+    if datetime.now(timezone.utc) < end_utc + timedelta(seconds=30):
+        return None, "crypto_updown_not_past_close"
+    outcome = str(position.get("outcome") or _row_payload(position).get("outcome") or "").strip().lower()
+    if outcome not in {"up", "down"}:
+        return None, "crypto_updown_missing_outcome"
+
+    errors: list[str] = []
+    for provider in (_fetch_binance_window_prices, _fetch_coinbase_window_prices):
+        try:
+            prices = provider(
+                asset_key,
+                start_utc=start_utc,
+                interval_minutes=interval_minutes,
+                timeout_seconds=timeout_seconds,
+            )
+        except Exception as exc:  # noqa: BLE001 - try the next public price source
+            errors.append(f"{provider.__name__}:{type(exc).__name__}")
+            continue
+        if prices is None:
+            errors.append(f"{provider.__name__}:empty")
+            continue
+        start_price, end_price, source = prices
+        if end_price == start_price:
+            return None, f"crypto_updown_tie:{source}"
+        winning_outcome = "up" if end_price > start_price else "down"
+        return (1.0 if outcome == winning_outcome else 0.0), (
+            f"crypto_updown_proxy_settlement:{source}:{winning_outcome}:"
+            f"{start_price:.8g}->{end_price:.8g}"
+        )
+    return None, "crypto_updown_oracle_unavailable:" + ",".join(errors[:3])
+
+
+def _fetch_resolution_market(slug: str, *, timeout_seconds: int) -> dict[str, Any] | None:
+    market = fetch_gamma_market(slug, timeout_seconds=timeout_seconds)
+    if market:
+        return market
+    return _public_search_market_by_slug(slug, timeout_seconds=timeout_seconds)
+
+
+def _settlement_price_for_position(
+    cfg: EngineConfig,
+    position: dict[str, Any],
+    *,
+    timeout_seconds: int,
+) -> tuple[float | None, str]:
+    slug = str(position.get("market_slug") or "").strip()
+    token_id = str(position.get("token_id") or "").strip()
+    if not slug or not token_id:
+        return None, "missing_market_slug_or_token"
+    proxy_price, proxy_reason = _crypto_updown_proxy_settlement_price(position, timeout_seconds=timeout_seconds)
+    if proxy_price is not None:
+        return proxy_price, proxy_reason
+    if proxy_reason != "not_crypto_updown_slug":
+        return None, proxy_reason
+    market = _fetch_resolution_market(slug, timeout_seconds=timeout_seconds)
+    if not market:
+        return None, "gamma_market_not_found"
+    rows, quality = infer_market_resolution_rows(market, category_hint=str(position.get("category") or ""))
+    quality_label = str(quality[0].get("resolution_quality") if quality else "")
+    if quality_label != "clean_settlement":
+        return None, quality_label or "unclean_settlement"
+    for row in rows:
+        if str(row.get("token_id") or "") == token_id:
+            target = safe_float(row.get("target"))
+            if target in {0.0, 1.0}:
+                return float(target), "clean_settlement"
+            return None, "missing_token_target"
+    return None, "token_not_in_settlement"
+
+
+def _settle_due_positions(
+    cfg: EngineConfig,
+    positions: list[dict[str, Any]],
+    fills: list[dict[str, Any]],
+    *,
+    timestamp: str,
+) -> dict[str, Any]:
+    settings = _settings(cfg)
+    if not boolish(settings.get("settle_resolved_markets", True)):
+        return {
+            "settlement_enabled": False,
+            "settlement_checks": 0,
+            "settled_positions": 0,
+            "settlement_errors": 0,
+        }
+    max_checks = int(settings.get("settlement_max_positions_per_cycle", 25))
+    grace_minutes = float(settings.get("settlement_grace_minutes", 1.0))
+    timeout_seconds = int(settings.get("settlement_request_timeout_seconds", 20))
+    checks = 0
+    settled = 0
+    unresolved = 0
+    errors = 0
+    reasons: dict[str, int] = defaultdict(int)
+    for position in positions:
+        if checks >= max_checks:
+            break
+        if str(position.get("status") or "").lower() != "open":
+            continue
+        if not _should_check_settlement(position, grace_minutes=grace_minutes):
+            continue
+        checks += 1
+        try:
+            settlement_price, reason = _settlement_price_for_position(
+                cfg,
+                position,
+                timeout_seconds=timeout_seconds,
+            )
+        except Exception as exc:  # noqa: BLE001 - one failed resolution lookup must not block the loop
+            errors += 1
+            reasons[f"settlement_error:{type(exc).__name__}"] += 1
+            continue
+        reasons[reason] += 1
+        if settlement_price is None:
+            unresolved += 1
+            continue
+        quantity = safe_float(position.get("quantity")) or 0.0
+        cost = safe_float(position.get("cost_basis_usdc")) or 0.0
+        proceeds = quantity * settlement_price
+        pnl = proceeds - cost
+        position["latest_mark_price"] = settlement_price
+        position["status"] = "closed"
+        position["closed_at"] = timestamp
+        position["updated_at"] = timestamp
+        position["close_reason"] = "shadow_clean_settlement"
+        position["exit_price"] = settlement_price
+        position["realised_pnl_usdc"] = pnl
+        position["unrealised_pnl_usdc"] = 0.0
+        position["return_pct"] = pnl / cost if cost > 0 else 0.0
+        _append_fill(
+            fills,
+            position_id=str(position.get("shadow_position_id")),
+            side="SELL_SHADOW",
+            timestamp=timestamp,
+            price=settlement_price,
+            quantity=quantity,
+            notional=proceeds,
+            row=position,
+            reason="shadow_clean_settlement",
+        )
+        settled += 1
+    return {
+        "settlement_enabled": True,
+        "settlement_checks": checks,
+        "settled_positions": settled,
+        "unresolved_positions_checked": unresolved,
+        "settlement_errors": errors,
+        "settlement_reason_counts": dict(reasons),
+    }
+
+
+def _candidate_rows(cfg: EngineConfig, predictions: list[dict[str, Any]], positions: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    settings = _settings(cfg)
+    if not boolish(settings.get("enabled", True)):
+        return []
+    quarantined = _quarantined_cohorts(cfg, positions)
+    open_keys = {
+        (str(row.get("market_id") or ""), str(row.get("token_id") or ""))
+        for row in positions
+        if str(row.get("status") or "").lower() == "open"
+    }
+    cooldown = float(settings.get("minimum_reentry_minutes_after_exit", 240.0))
+    last_close_by_key: dict[tuple[str, str], str] = {}
+    for row in positions:
+        if str(row.get("status") or "").lower() != "closed":
+            continue
+        key = (str(row.get("market_id") or ""), str(row.get("token_id") or ""))
+        closed_at = str(row.get("closed_at") or "")
+        if closed_at:
+            last_close_by_key[key] = max(last_close_by_key.get(key, ""), closed_at)
+
+    candidates: list[dict[str, Any]] = []
+    for row in predictions:
+        if not boolish(row.get("shadow_trade_candidate")):
+            continue
+        if _cohort_name(row) in quarantined:
+            continue
+        key = (str(row.get("market_id") or ""), str(row.get("token_id") or ""))
+        if key in open_keys:
+            continue
+        if cooldown > 0 and _minutes_since(last_close_by_key.get(key, "")) < cooldown:
+            continue
+        candidates.append(row)
+    candidates.sort(
+        key=lambda row: (
+            1 if _is_fast_feedback(row, settings) else 0,
+            _soonest_first_score(row),
+            safe_float(row.get("shadow_priority_score")) or 0.0,
+            safe_float(row.get("fundamental_edge_after_haircut")) or 0.0,
+            safe_float(row.get("edge_lower_bound")) or 0.0,
+        ),
+        reverse=True,
+    )
+    return candidates[: int(settings.get("candidate_limit_per_cycle", 8))]
+
+
+def _append_fill(
+    fills: list[dict[str, Any]],
+    *,
+    position_id: str,
+    side: str,
+    timestamp: str,
+    price: float,
+    quantity: float,
+    notional: float,
+    row: dict[str, Any],
+    reason: str,
+) -> None:
+    fills.append(
+        {
+            "shadow_fill_id": _stable_id("shadow_fill", f"{position_id}|{side}|{timestamp}|{reason}"),
+            "shadow_position_id": position_id,
+            "created_at": timestamp,
+            "side": side,
+            "market_id": row.get("market_id", ""),
+            "token_id": row.get("token_id", ""),
+            "market_slug": row.get("market_slug", ""),
+            "question": row.get("question", ""),
+            "category": row.get("category", ""),
+            "correlation_key": row.get("correlation_key") or normalised_correlation_key(row),
+            "signal_cohort": row.get("signal_cohort") or signal_cohort(row),
+            "price": price,
+            "quantity": quantity,
+            "gross_notional_usdc": notional,
+            "reason": reason,
+        }
+    )
+
+
+def _summarise_shadow(cfg: EngineConfig, positions: list[dict[str, Any]], fills: list[dict[str, Any]]) -> dict[str, Any]:
+    settings = _settings(cfg)
+    minimum_fills = int((cfg.raw.get("cohort_promotion", {}) or {}).get("minimum_filled_orders", 5))
+    minimum_settled = int((cfg.raw.get("cohort_promotion", {}) or {}).get("minimum_settled_orders", 1))
+    minimum_pnl = float((cfg.raw.get("cohort_promotion", {}) or {}).get("minimum_pnl_usdc", 0.0))
+    minimum_roi = float((cfg.raw.get("cohort_promotion", {}) or {}).get("minimum_roi", 0.0))
+    minimum_monthly_run_rate = float(
+        (cfg.raw.get("cohort_promotion", {}) or {}).get("minimum_monthly_run_rate_usdc", 0.0)
+    )
+    minimum_tracking_hours = float(
+        (cfg.raw.get("cohort_promotion", {}) or {}).get("minimum_tracking_hours_for_promotion", 0.0)
+    )
+    quarantined = _quarantined_cohorts(cfg, positions)
+    stats: dict[str, dict[str, Any]] = defaultdict(
+        lambda: {
+            "shadow_fills": 0,
+            "shadow_sell_fills": 0,
+            "shadow_open_positions": 0,
+            "shadow_total_buy_cost_usdc": 0.0,
+            "shadow_sell_proceeds_usdc": 0.0,
+            "shadow_open_mark_value_usdc": 0.0,
+            "shadow_open_cost_basis_usdc": 0.0,
+            "first_evidence_at_utc": "",
+            "last_evidence_at_utc": "",
+        }
+    )
+    for fill in fills:
+        cohort = str(fill.get("signal_cohort") or "unknown")
+        notional = safe_float(fill.get("gross_notional_usdc")) or 0.0
+        created_at = str(fill.get("created_at") or "")
+        if created_at:
+            current_first = str(stats[cohort].get("first_evidence_at_utc") or "")
+            current_last = str(stats[cohort].get("last_evidence_at_utc") or "")
+            if not current_first or created_at < current_first:
+                stats[cohort]["first_evidence_at_utc"] = created_at
+            if not current_last or created_at > current_last:
+                stats[cohort]["last_evidence_at_utc"] = created_at
+        if str(fill.get("side")) == "BUY_SHADOW":
+            stats[cohort]["shadow_fills"] += 1
+            stats[cohort]["shadow_total_buy_cost_usdc"] += notional
+        elif str(fill.get("side")) == "SELL_SHADOW":
+            stats[cohort]["shadow_sell_fills"] += 1
+            stats[cohort]["shadow_sell_proceeds_usdc"] += notional
+    for position in positions:
+        if str(position.get("status") or "").lower() != "open":
+            continue
+        cohort = str(position.get("signal_cohort") or "unknown")
+        quantity = safe_float(position.get("quantity")) or 0.0
+        mark = safe_float(position.get("latest_mark_price")) or safe_float(position.get("entry_price")) or 0.0
+        cost = safe_float(position.get("cost_basis_usdc")) or 0.0
+        stats[cohort]["shadow_open_positions"] += 1
+        stats[cohort]["shadow_open_mark_value_usdc"] += quantity * mark
+        stats[cohort]["shadow_open_cost_basis_usdc"] += cost
+
+    cohorts: list[dict[str, Any]] = []
+    for cohort, row in sorted(stats.items()):
+        pnl = (
+            float(row["shadow_sell_proceeds_usdc"])
+            + float(row["shadow_open_mark_value_usdc"])
+            - float(row["shadow_total_buy_cost_usdc"])
+        )
+        at_risk = float(row["shadow_total_buy_cost_usdc"])
+        roi = pnl / at_risk if at_risk > 0 else 0.0
+        elapsed_hours = _hours_since_first_evidence(row.get("first_evidence_at_utc"))
+        monthly_run_rate = _monthly_run_rate_usdc(pnl, row.get("first_evidence_at_utc"))
+        readiness = {
+            "fills_remaining": max(0, minimum_fills - int(row["shadow_fills"])),
+            "settled_fills_remaining": max(0, minimum_settled - int(row["shadow_sell_fills"])),
+            "pnl_remaining_usdc": max(0.0, minimum_pnl - pnl),
+            "roi_remaining": max(0.0, minimum_roi - roi),
+            "tracking_hours_remaining": max(0.0, minimum_tracking_hours - elapsed_hours),
+            "monthly_run_rate_remaining_usdc": max(0.0, minimum_monthly_run_rate - monthly_run_rate),
+        }
+        cohorts.append(
+            {
+                "signal_cohort": cohort,
+                **row,
+                "shadow_total_pnl_usdc": pnl,
+                "shadow_roi": roi,
+                "evidence_elapsed_hours": elapsed_hours,
+                "shadow_monthly_run_rate_usdc": monthly_run_rate,
+                "promotion_readiness": readiness,
+                "promotion_ready_score": sum(1 for value in readiness.values() if value <= 0),
+                "promotion_ready_checks": len(readiness),
+                "shadow_promoted": bool(
+                    row["shadow_fills"] >= minimum_fills
+                    and row["shadow_sell_fills"] >= minimum_settled
+                    and pnl > minimum_pnl
+                    and roi >= minimum_roi
+                    and elapsed_hours >= minimum_tracking_hours
+                    and monthly_run_rate >= minimum_monthly_run_rate
+                ),
+            }
+        )
+
+    promotion_watchlist = [
+        {
+            "signal_cohort": row.get("signal_cohort"),
+            "shadow_promoted": bool(row.get("shadow_promoted")),
+            "promotion_ready_score": int(row.get("promotion_ready_score") or 0),
+            "promotion_ready_checks": int(row.get("promotion_ready_checks") or 0),
+            "promotion_readiness": row.get("promotion_readiness") or {},
+            "shadow_total_pnl_usdc": float(row.get("shadow_total_pnl_usdc") or 0.0),
+            "shadow_roi": float(row.get("shadow_roi") or 0.0),
+            "shadow_monthly_run_rate_usdc": float(row.get("shadow_monthly_run_rate_usdc") or 0.0),
+            "shadow_fills": int(row.get("shadow_fills") or 0),
+            "shadow_sell_fills": int(row.get("shadow_sell_fills") or 0),
+            "shadow_open_positions": int(row.get("shadow_open_positions") or 0),
+        }
+        for row in sorted(
+            cohorts,
+            key=lambda item: (
+                int(item.get("promotion_ready_score") or 0),
+                float(item.get("shadow_monthly_run_rate_usdc") or 0.0),
+                float(item.get("shadow_total_pnl_usdc") or 0.0),
+                float(item.get("shadow_roi") or 0.0),
+            ),
+            reverse=True,
+        )
+        if not row.get("shadow_promoted")
+    ][:10]
+
+    return {
+        "status": "computed",
+        "generated_at_utc": now_utc(),
+        "settings": {
+            "policy_version": str(settings.get("policy_version", "shadow-cohort-v1")),
+            "stake_usdc": float(settings.get("stake_usdc", 10.0)),
+            "candidate_limit_per_cycle": int(settings.get("candidate_limit_per_cycle", 8)),
+            "maximum_open_positions": int(settings.get("maximum_open_positions", 25)),
+            "maximum_open_positions_per_cohort": int(settings.get("maximum_open_positions_per_cohort", 0) or 0),
+            "maximum_long_horizon_open_positions": int(settings.get("maximum_long_horizon_open_positions", 0) or 0),
+            "fast_feedback_max_time_to_close_hours": float(settings.get("fast_feedback_max_time_to_close_hours", 6.0)),
+            "minimum_fast_feedback_slots": int(settings.get("minimum_fast_feedback_slots", 0) or 0),
+            "quarantine_negative_cohorts": boolish(settings.get("quarantine_negative_cohorts", True)),
+        },
+        "cohorts": cohorts,
+        "promotion_watchlist": promotion_watchlist,
+        "promoted_cohorts": [row["signal_cohort"] for row in cohorts if row.get("shadow_promoted")],
+        "quarantined_cohorts": [
+            {"signal_cohort": cohort, **details}
+            for cohort, details in sorted(quarantined.items())
+        ],
+    }
+
+
+def read_shadow_signal_cohort_pnl(cfg: EngineConfig) -> dict[str, Any]:
+    summary_file = str(_settings(cfg).get("summary_file", "shadow_signal_cohort_pnl.json"))
+    payload = read_json(cfg.governance_root / summary_file, default={}) or {}
+    return payload if isinstance(payload, dict) else {}
+
+
+def update_shadow_cohort_evidence(cfg: EngineConfig, predictions: list[dict[str, Any]]) -> dict[str, Any]:
+    settings = _settings(cfg)
+    if not boolish(settings.get("enabled", True)):
+        payload = {"status": "disabled", "generated_at_utc": now_utc()}
+        write_json(cfg.governance_root / str(settings.get("summary_file", "shadow_signal_cohort_pnl.json")), payload)
+        return payload
+
+    positions = read_csv_rows(_positions_path(cfg))
+    for position in positions:
+        _normalise_position_row(position)
+    fills = read_csv_rows(_fills_path(cfg))
+    predictions_by_key = _prediction_index(predictions)
+    now = now_utc()
+    take_profit = float(settings.get("take_profit_return", 0.25))
+    stop_loss = float(settings.get("stop_loss_return", 0.35))
+    max_holding_hours = float(settings.get("maximum_holding_hours", 72.0))
+
+    closed_this_cycle = 0
+    settlement = _settle_due_positions(cfg, positions, fills, timestamp=now)
+    closed_this_cycle += int(settlement.get("settled_positions") or 0)
+    for position in positions:
+        if str(position.get("status") or "").lower() != "open":
+            continue
+        key = (str(position.get("market_id") or ""), str(position.get("token_id") or ""))
+        prediction = predictions_by_key.get(key)
+        entry = safe_float(position.get("entry_price")) or 0.0
+        quantity = safe_float(position.get("quantity")) or 0.0
+        cost = safe_float(position.get("cost_basis_usdc")) or (entry * quantity)
+        previous_mark = safe_float(position.get("latest_mark_price")) or entry
+        mark = _mark_price(prediction, fallback=previous_mark)
+        pnl = quantity * mark - cost
+        return_pct = pnl / cost if cost > 0 else 0.0
+        position["latest_mark_price"] = mark
+        position["unrealised_pnl_usdc"] = pnl
+        position["return_pct"] = return_pct
+        position["updated_at"] = now
+        close_reason = ""
+        if return_pct >= take_profit:
+            close_reason = "shadow_take_profit"
+        elif return_pct <= -abs(stop_loss):
+            close_reason = "shadow_stop_loss"
+        elif _age_hours(position.get("opened_at")) >= max_holding_hours:
+            close_reason = "shadow_time_exit"
+        if close_reason:
+            proceeds = quantity * mark
+            position["status"] = "closed"
+            position["closed_at"] = now
+            position["close_reason"] = close_reason
+            position["exit_price"] = mark
+            position["realised_pnl_usdc"] = pnl
+            position["unrealised_pnl_usdc"] = 0.0
+            _append_fill(
+                fills,
+                position_id=str(position.get("shadow_position_id")),
+                side="SELL_SHADOW",
+                timestamp=now,
+                price=mark,
+                quantity=quantity,
+                notional=proceeds,
+                row=position,
+                reason=close_reason,
+            )
+            closed_this_cycle += 1
+
+    open_count = sum(1 for row in positions if str(row.get("status") or "").lower() == "open")
+    max_open = int(settings.get("maximum_open_positions", 25))
+    max_per_cohort = int(settings.get("maximum_open_positions_per_cohort", 0) or 0)
+    max_long_horizon = int(settings.get("maximum_long_horizon_open_positions", 0) or 0)
+    fast_feedback_slots = int(settings.get("minimum_fast_feedback_slots", 0) or 0)
+    cohort_open_counts: dict[str, int] = defaultdict(int)
+    long_horizon_open_count = 0
+    for position in positions:
+        if str(position.get("status") or "").lower() != "open":
+            continue
+        cohort_open_counts[_cohort_name(position)] += 1
+        if _is_long_horizon(position, settings):
+            long_horizon_open_count += 1
+    opened_this_cycle = 0
+    stake = float(settings.get("stake_usdc", 10.0))
+    for row in _candidate_rows(cfg, predictions, positions):
+        if open_count >= max_open:
+            break
+        cohort = _cohort_name(row)
+        is_fast = _is_fast_feedback(row, settings)
+        is_long = _is_long_horizon(row, settings)
+        if max_per_cohort > 0 and cohort_open_counts[cohort] >= max_per_cohort:
+            continue
+        if max_long_horizon > 0 and is_long and long_horizon_open_count >= max_long_horizon:
+            continue
+        if fast_feedback_slots > 0 and not is_fast and open_count >= max(0, max_open - fast_feedback_slots):
+            continue
+        entry_price = safe_float(row.get("executable_price"))
+        if entry_price is None or not 0 < entry_price < 1:
+            continue
+        slippage = _shadow_slippage(cfg, row)
+        fill_price = min(0.999999, entry_price + slippage)
+        quantity = stake / fill_price if fill_price > 0 else 0.0
+        if quantity <= 0:
+            continue
+        policy_version = str(settings.get("policy_version", "shadow-cohort-v1"))
+        key = "|".join(
+            [
+                str(row.get("market_id") or ""),
+                str(row.get("token_id") or ""),
+                str(row.get("prediction_timestamp") or ""),
+                str(row.get("model_version") or ""),
+                policy_version,
+            ]
+        )
+        position_id = _stable_id("shadow_position", key)
+        if any(str(position.get("shadow_position_id")) == position_id for position in positions):
+            continue
+        position = {
+            "shadow_position_id": position_id,
+            "policy_version": policy_version,
+            "opened_at": now,
+            "updated_at": now,
+            "closed_at": "",
+            "status": "open",
+            "market_id": row.get("market_id", ""),
+            "token_id": row.get("token_id", ""),
+            "market_slug": row.get("market_slug", ""),
+            "question": row.get("question", ""),
+            "category": row.get("category", ""),
+            "outcome": row.get("outcome", ""),
+            "close_time": row.get("close_time", ""),
+            "rule_scope": row.get("rule_scope", ""),
+            "correlation_key": normalised_correlation_key(row),
+            "signal_cohort": cohort,
+            "entry_price": fill_price,
+            "quantity": quantity,
+            "stake_usdc": stake,
+            "cost_basis_usdc": stake,
+            "latest_mark_price": _mark_price(row, fallback=fill_price),
+            "unrealised_pnl_usdc": 0.0,
+            "realised_pnl_usdc": 0.0,
+            "return_pct": 0.0,
+            "exit_price": "",
+            "close_reason": "",
+            "entry_edge_lower_bound": row.get("edge_lower_bound", ""),
+            "entry_fundamental_edge_after_haircut": row.get("fundamental_edge_after_haircut", ""),
+            "entry_shadow_priority_score": row.get("shadow_priority_score", ""),
+            "source_signal_json": _row_json(row),
+        }
+        position["unrealised_pnl_usdc"] = quantity * float(position["latest_mark_price"]) - stake
+        position["return_pct"] = float(position["unrealised_pnl_usdc"]) / stake if stake > 0 else 0.0
+        positions.append(position)
+        _append_fill(
+            fills,
+            position_id=position_id,
+            side="BUY_SHADOW",
+            timestamp=now,
+            price=fill_price,
+            quantity=quantity,
+            notional=stake,
+            row=position,
+            reason="shadow_entry",
+        )
+        open_count += 1
+        cohort_open_counts[cohort] += 1
+        if is_long:
+            long_horizon_open_count += 1
+        opened_this_cycle += 1
+
+    summary = _summarise_shadow(cfg, positions, fills)
+    summary.update(
+        {
+            "opened_this_cycle": opened_this_cycle,
+            "closed_this_cycle": closed_this_cycle,
+            **settlement,
+            "open_positions": sum(1 for row in positions if str(row.get("status") or "").lower() == "open"),
+            "shadow_candidates_seen": sum(1 for row in predictions if boolish(row.get("shadow_trade_candidate"))),
+        }
+    )
+    write_csv(_positions_path(cfg), positions)
+    write_csv(_fills_path(cfg), fills)
+    summary_file = str(settings.get("summary_file", "shadow_signal_cohort_pnl.json"))
+    write_json(cfg.governance_root / summary_file, summary)
+    write_csv(cfg.governance_root / "shadow_signal_cohort_pnl.csv", summary.get("cohorts", []))
+    write_json(cfg.governance_root / "shadow_cohort_update_summary.json", summary)
+    return summary

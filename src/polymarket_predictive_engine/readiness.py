@@ -45,6 +45,38 @@ def count_clean_resolved_labels(cfg: EngineConfig) -> int:
     return len(seen)
 
 
+def training_artifact_blockers(cfg: EngineConfig) -> list[str]:
+    """Detect empty, pseudo-labelled, or quarantined artefacts before model use."""
+    training = cfg.output_root / "polymarket_training"
+    labels_path = training / "labels.csv"
+    labels = read_csv_rows(labels_path, limit=500000)
+    blockers: list[str] = []
+    if labels_path.exists() and not labels:
+        blockers.append("labels.csv exists but is empty")
+    for row in labels:
+        if (
+            str(row.get("label_type", "")).lower() == "pseudo"
+            or str(row.get("pseudo_label", "")).lower() in {"1", "true", "yes"}
+            or "pseudo" in str(row.get("label_source", "")).lower()
+        ):
+            blockers.append("labels.csv contains pseudo labels")
+            break
+    features_path = training / "features_v2.csv"
+    if features_path.exists() and not labels:
+        blockers.append("features_v2.csv exists while clean labels are empty")
+    for row in read_csv_rows(features_path, limit=500000):
+        source = " ".join(
+            [
+                str(row.get("source_file", "")),
+                str(row.get("feature_source", "")),
+            ]
+        ).lower()
+        if "quarantine" in source or "pseudo" in source:
+            blockers.append("features_v2.csv references quarantined or pseudo-labelled data")
+            break
+    return list(dict.fromkeys(blockers))
+
+
 def _market_relative_validation_summary(cfg: EngineConfig) -> dict[str, Any]:
     summary = read_json(cfg.governance_root / "market_relative_validation_summary.json", default={}) or {}
     if not summary:
@@ -70,21 +102,45 @@ def _market_relative_skill_is_credible(summary: dict[str, Any]) -> bool:
     )
 
 
+def _optimized_model_summary(cfg: EngineConfig) -> dict[str, Any]:
+    summary = read_json(cfg.output_root / "polymarket_models" / "optimized_model_v1.json", default={}) or {}
+    return summary if isinstance(summary, dict) else {}
+
+
+def _optimized_model_is_champion(summary: dict[str, Any]) -> bool:
+    return bool(
+        summary.get("status") == "trained"
+        and summary.get("deployment_mode") == "champion"
+        and summary.get("model_type") == "market_anchored_logistic"
+    )
+
+
 def _forward_paper_evidence(cfg: EngineConfig) -> dict[str, Any]:
-    """Summarise forward paper evidence required before live promotion."""
-    candidates = [
+    """Summarise observed forward paper trading evidence for live-promotion governance."""
+    fills = read_csv_rows(cfg.output_root / "polymarket_portfolio" / "paper_fills.csv", limit=500000)
+    snapshots = read_csv_rows(cfg.output_root / "polymarket_portfolio" / "portfolio_snapshots.csv", limit=500000)
+    latest_cycle = read_json(cfg.governance_root / "forward_paper_cycle.json", default={}) or {}
+    sources: list[dict[str, Any]] = [
+        {
+            "path": str(cfg.output_root / "polymarket_portfolio" / "paper_fills.csv"),
+            "status": "present" if fills else "missing_or_empty",
+            "trades": len(fills),
+            "roi": None,
+        }
+    ]
+    legacy_candidates = [
         cfg.governance_root / "forward_paper_evidence.json",
         cfg.governance_root / "paper_forward_summary.json",
         cfg.output_root / "polymarket_paper" / "paper_session_summary.json",
         cfg.output_root / "polymarket_paper_edge" / "forward_paper_summary.json",
     ]
-
-    sources: list[dict[str, Any]] = []
-    for path in candidates:
+    legacy_trades = 0
+    legacy_positive_roi = False
+    legacy_roi = None
+    for path in legacy_candidates:
         summary = read_json(path, default={}) or {}
         if not isinstance(summary, dict) or not summary:
             continue
-
         raw_trades = (
             summary.get("trades")
             or summary.get("paper_trades")
@@ -93,38 +149,60 @@ def _forward_paper_evidence(cfg: EngineConfig) -> dict[str, Any]:
             or 0
         )
         try:
-            trades = int(raw_trades)
+            trades_from_summary = int(raw_trades)
         except Exception:
-            trades = 0
-
+            trades_from_summary = 0
         raw_roi = (
             summary.get("roi_on_staked")
             or summary.get("paper_roi")
             or summary.get("realized_roi")
             or summary.get("roi")
         )
-        roi = None
+        roi_from_summary = None
         if raw_roi not in {None, ""}:
             try:
-                roi = float(raw_roi)
+                roi_from_summary = float(raw_roi)
             except Exception:
-                roi = None
-
+                roi_from_summary = None
+        legacy_trades = max(legacy_trades, trades_from_summary)
+        legacy_positive_roi = legacy_positive_roi or bool(roi_from_summary is not None and roi_from_summary > 0)
+        if legacy_roi is None and roi_from_summary is not None:
+            legacy_roi = roi_from_summary
         sources.append(
             {
                 "path": str(path),
                 "status": summary.get("status", "present"),
-                "trades": trades,
-                "roi": roi,
+                "trades": trades_from_summary,
+                "roi": roi_from_summary,
             }
         )
 
-    total_trades = sum(int(source.get("trades", 0) or 0) for source in sources)
-    positive_roi = any(source.get("roi") is not None and float(source["roi"]) > 0 for source in sources)
-
+    trades = max(len(fills), legacy_trades)
+    roi = None
+    positive_roi = False
+    if snapshots:
+        latest = snapshots[-1]
+        equity = None
+        for key in ("equity_usdc", "equity"):
+            try:
+                if latest.get(key, "") != "":
+                    equity = float(latest[key])
+                    break
+            except Exception:
+                pass
+        starting_cash = float(cfg.raw.get("paper_trading", {}).get("starting_cash", cfg.raw.get("risk", {}).get("bankroll", 1000)))
+        if equity is not None and starting_cash > 0:
+            roi = (equity - starting_cash) / starting_cash
+            positive_roi = roi > 0
+    if roi is None:
+        roi = legacy_roi
+        positive_roi = legacy_positive_roi
     return {
-        "present": bool(sources),
-        "trades": total_trades,
+        "present": bool(fills or snapshots or any(source.get("status") == "present" for source in sources)),
+        "trades": trades,
+        "latest_cycle_status": latest_cycle.get("status", "missing") if isinstance(latest_cycle, dict) else "missing",
+        "latest_cycle_predictions": latest_cycle.get("predictions", 0) if isinstance(latest_cycle, dict) else 0,
+        "paper_roi": roi,
         "positive_roi": positive_roi,
         "sources": sources,
     }
@@ -176,6 +254,7 @@ def paper_live_promotion_gate(cfg: EngineConfig) -> dict[str, Any]:
         live_reasons.append(f"labels below live target: {labels} < {target_labels}")
     if not cfg.live_approval_file.exists():
         live_reasons.append(f"human approval file missing: {cfg.live_approval_file}")
+    optimized_summary = _optimized_model_summary(cfg)
 
     payload = {
         "resolved_labels": labels,
@@ -191,6 +270,9 @@ def paper_live_promotion_gate(cfg: EngineConfig) -> dict[str, Any]:
         "market_relative_brier_gain_ci95": market_validation.get("brier_gain_vs_market_ci95"),
         "market_relative_skill_credible": market_skill,
         "model_copies_market_midpoint": market_validation.get("model_copies_market_midpoint"),
+        "optimized_model_status": optimized_summary.get("status", "missing"),
+        "optimized_model_deployment_mode": optimized_summary.get("deployment_mode", "missing"),
+        "optimized_model_champion": _optimized_model_is_champion(optimized_summary),
         "data_quality_blockers": blockers,
         "forward_paper_evidence": forward_paper_evidence,
         "approved_for_paper_trading": not paper_reasons,
@@ -212,9 +294,13 @@ def paper_trade_readiness(cfg: EngineConfig) -> dict[str, Any]:
     thresholds = cfg.raw.get("governance_thresholds", {})
     paper_min = int(thresholds.get("min_paper_labels", 50))
     labels = count_clean_resolved_labels(cfg)
-    model_present = (cfg.output_root / "polymarket_models" / "calibration_v2.json").exists()
+    calibration_present = (cfg.output_root / "polymarket_models" / "calibration_v2.json").exists()
+    optimized_summary = _optimized_model_summary(cfg)
+    optimized_champion = _optimized_model_is_champion(optimized_summary)
+    model_present = calibration_present or optimized_champion
     dq_issues, _ = data_quality(cfg, allow_warnings=True)
     blockers = [i for i in dq_issues if i.get("severity") == "blocker" and i.get("issue_type") != "no_raw_snapshots"]
+    artifact_blockers = training_artifact_blockers(cfg)
 
     paper_summary = read_json(cfg.output_root / "polymarket_paper_edge" / "paper_edge_summary.json", default={}) or {}
     min_edge = paper_summary.get("minimum_edge", float(cfg.raw.get("risk", {}).get("minimum_edge", 0.03)))
@@ -229,11 +315,19 @@ def paper_trade_readiness(cfg: EngineConfig) -> dict[str, Any]:
     if kill_switch_active():
         reasons.append("kill switch active")
     if not model_present:
-        reasons.append("no trained calibration model (run train-calibration)")
+        reasons.append("no trained calibration model or optimized champion (run train-calibration or optimize-model)")
     if labels < paper_min:
         reasons.append(f"insufficient resolved labels: {labels} < {paper_min}")
     if blockers:
         reasons.append(f"{len(blockers)} data-quality blocker(s)")
+    reasons.extend(artifact_blockers)
+    clean_snapshot_path = cfg.output_root / "polymarket_training" / "clean_resolved_snapshot_labels.csv"
+    if (
+        bool(thresholds.get("require_clean_snapshot_labels_for_paper", False))
+        and clean_snapshot_path.exists()
+        and not read_csv_rows(clean_snapshot_path, limit=1)
+    ):
+        reasons.append("clean_resolved_snapshot_labels.csv has zero rows")
     if os.getenv("POLYMARKET_EXECUTE_LIVE") == "true" or os.getenv("POLYMARKET_LIVE_TRADING") == "1":
         reasons.append("live execution env flag is set; refusing to run paper under live flags")
 
@@ -242,10 +336,18 @@ def paper_trade_readiness(cfg: EngineConfig) -> dict[str, Any]:
         "approved_for_paper_trading": not reasons,
         "resolved_labels": labels,
         "min_paper_labels": paper_min,
-        "calibration_model_present": model_present,
+        "calibration_model_present": calibration_present,
+        "optimized_model_champion": optimized_champion,
+        "optimized_model_deployment_mode": optimized_summary.get("deployment_mode", "missing"),
+        "model_source": (
+            "optimized_market_anchored_logistic"
+            if optimized_champion
+            else ("calibration_v2" if calibration_present else "missing")
+        ),
         "trading_mode": cfg.trading_mode,
         "kill_switch_active": kill_switch_active(),
         "data_quality_blockers": len(blockers),
+        "training_artifact_blockers": artifact_blockers,
         "blockers": reasons,
         "oos_paper_roi_at_minimum_edge": oos_roi,
         "expected_profitable_oos": bool(oos_roi is not None and oos_roi > 0),
@@ -268,6 +370,7 @@ def readiness_decision(cfg: EngineConfig) -> dict[str, Any]:
     resolved_markets: set[str] = _clean_resolved_markets_from_resolution_file(cfg)
     snapshot_counts: dict[str, int] = {}
     schema_unknown = False
+    artifact_blockers = training_artifact_blockers(cfg)
     for path in raw_files:
         cols = csv_columns(path)
         market_col = find_first_column(cols, cfg.raw.get("schema", {}).get("market_id_fields", ["market_id", "condition_id", "id", "market_slug", "slug"]))
@@ -284,7 +387,9 @@ def readiness_decision(cfg: EngineConfig) -> dict[str, Any]:
                 if any(k in keys for k in ["winning", "resolved", "resolution"]) and any(str(v).lower() in {"1", "true", "yes", "won", "winner"} for v in row.values()):
                     resolved_markets.add(m)
     joined_resolved_markets = unique_markets.intersection(resolved_markets)
-    if dq_summary.get("blocker_count", 0):
+    if artifact_blockers:
+        decision = "NOT_APPROVED_DATA_QUALITY_BLOCKERS"
+    elif dq_summary.get("blocker_count", 0):
         decision = "NOT_APPROVED_DATA_QUALITY_BLOCKERS"
     elif schema_unknown:
         decision = "NOT_APPROVED_SCHEMA_UNKNOWN"
@@ -313,6 +418,7 @@ def readiness_decision(cfg: EngineConfig) -> dict[str, Any]:
     payload = {
         "decision": decision,
         "data_quality_blockers": dq_summary.get("blocker_count", 0),
+        "training_artifact_blockers": artifact_blockers,
         "unique_markets": len(unique_markets),
         "unique_resolved_markets": len(joined_resolved_markets),
         "clean_resolution_markets_available": len(resolved_markets),

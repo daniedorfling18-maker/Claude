@@ -56,12 +56,19 @@ def collect_websocket(cfg: EngineConfig, websocket_seconds: int = 60) -> dict[st
     existing_rows = _existing_messages(output_file)
     new_rows = asyncio.run(_collect_messages(url, websocket_seconds, subscription))
     combined_rows = existing_rows + new_rows
+    max_messages = int(settings.get("max_messages", 0) or 0)
+    dropped_messages = 0
+    if max_messages > 0 and len(combined_rows) > max_messages:
+        dropped_messages = len(combined_rows) - max_messages
+        combined_rows = combined_rows[-max_messages:]
     write_json(output_file, combined_rows)
     summary = {
         "status": "collected",
         "messages": len(combined_rows),
         "new_messages": len(new_rows),
         "existing_messages": len(existing_rows),
+        "dropped_messages": dropped_messages,
+        "max_messages": max_messages,
         "total_messages": len(combined_rows),
         "seconds": websocket_seconds,
         "output_file": str(output_file),

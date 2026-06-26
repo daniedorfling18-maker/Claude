@@ -96,6 +96,22 @@ def build_labels(cfg: EngineConfig, allow_late_market: bool = False) -> list[dic
     resolution_index = _load_resolution_index(cfg)
     labels: list[dict[str, Any]] = []
     rejected: list[dict[str, Any]] = []
+    out_root = cfg.output_root / "polymarket_training"
+
+    if not resolution_index:
+        write_csv(out_root / "labels.csv", [])
+        write_csv(
+            out_root / "label_quality_report.csv",
+            [
+                {
+                    "file_path": "",
+                    "reason": "no clean resolution rows available; collection remains data-only",
+                }
+            ],
+        )
+        raise RuntimeError(
+            "No clean resolution rows found. Label building stopped before scanning snapshot rows."
+        )
 
     for path in _candidate_files(cfg):
         rows = read_csv_rows(path)
@@ -164,9 +180,16 @@ def build_labels(cfg: EngineConfig, allow_late_market: bool = False) -> list[dic
                     if 0 <= time_to_close <= hours:
                         labels.append({**base, "horizon": name})
 
-    out_root = cfg.output_root / "polymarket_training"
     write_csv(out_root / "labels.csv", labels)
-    write_csv(out_root / "label_quality_report.csv", rejected)
+    quality_rows = rejected[:5000]
+    if len(rejected) > len(quality_rows):
+        quality_rows.append(
+            {
+                "file_path": "",
+                "reason": f"quality report truncated: {len(rejected) - len(quality_rows)} additional rejected rows",
+            }
+        )
+    write_csv(out_root / "label_quality_report.csv", quality_rows)
     if not labels:
         raise RuntimeError("No resolved outcome labels found. Run collect-resolutions or backfill-resolved-markets and ensure clean closed markets join to snapshots.")
     return labels

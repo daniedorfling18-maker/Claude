@@ -6,6 +6,7 @@ import json
 import os
 import re
 import subprocess
+import time
 from dataclasses import asdict, is_dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -46,6 +47,19 @@ def ensure_dir(path: str | Path) -> Path:
     return path
 
 
+
+def replace_with_retry(temp_path: Path, path: Path, attempts: int = 30, delay: float = 0.15) -> None:
+    last_exc = None
+    for i in range(attempts):
+        try:
+            temp_path.replace(path)
+            return
+        except PermissionError as exc:
+            last_exc = exc
+            time.sleep(delay * min(i + 1, 6))
+    raise last_exc
+
+
 def read_csv_rows(path: str | Path, limit: int | None = None) -> list[dict[str, str]]:
     path = Path(path)
     if not path.exists() or path.stat().st_size == 0:
@@ -83,11 +97,15 @@ def write_csv(path: str | Path, rows: Iterable[Mapping[str, Any]], fieldnames: S
                 if key not in keys:
                     keys.append(str(key))
         fieldnames = keys
-    with path.open("w", newline="", encoding="utf-8") as f:
+    temp_path = path.with_name(f".{path.name}.{os.getpid()}.{time.time_ns()}.tmp")
+    with temp_path.open("w", newline="", encoding="utf-8") as f:
         writer = csv.DictWriter(f, fieldnames=list(fieldnames), extrasaction="ignore")
         writer.writeheader()
         for row in rows:
             writer.writerow({k: serialize_value(row.get(k, "")) for k in fieldnames})
+        f.flush()
+        os.fsync(f.fileno())
+    replace_with_retry(temp_path, path)
     return path
 
 
@@ -104,9 +122,13 @@ def serialize_value(value: Any) -> str:
 def write_json(path: str | Path, payload: Any) -> Path:
     path = Path(path)
     ensure_dir(path.parent)
-    with path.open("w", encoding="utf-8") as f:
+    temp_path = path.with_name(f".{path.name}.{os.getpid()}.{time.time_ns()}.tmp")
+    with temp_path.open("w", encoding="utf-8") as f:
         json.dump(payload, f, indent=2, sort_keys=True, default=serialize_value)
         f.write("\n")
+        f.flush()
+        os.fsync(f.fileno())
+    replace_with_retry(temp_path, path)
     return path
 
 

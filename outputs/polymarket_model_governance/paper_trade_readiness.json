@@ -8,7 +8,11 @@
   "expected_profitable_oos": false,
   "kill_switch_active": false,
   "min_paper_labels": 50,
+  "model_source": "calibration_v2",
   "oos_paper_roi_at_minimum_edge": -0.1767,
-  "resolved_labels": 314,
-  "trading_mode": "paper"
+  "optimized_model_champion": false,
+  "optimized_model_deployment_mode": "shadow",
+  "resolved_labels": 160,
+  "trading_mode": "paper",
+  "training_artifact_blockers": []
 }

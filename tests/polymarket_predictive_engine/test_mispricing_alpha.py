@@ -11,7 +11,7 @@ from polymarket_predictive_engine.mispricing_alpha import (
     train_mispricing_alpha_model,
 )
 from polymarket_predictive_engine.strategy import generate_signals
-from polymarket_predictive_engine.utils import read_csv_rows, write_csv
+from polymarket_predictive_engine.utils import read_csv_rows, write_csv, write_json
 
 
 def _config(tmp_path: Path):
@@ -489,6 +489,83 @@ def test_fast_crypto_shadow_uses_fast_learning_liquidity_threshold(tmp_path, mon
     assert scored[0]["crypto_model_contract_kind"] == "fast"
     assert scored[0]["shadow_trade_candidate"] is True
     assert scored[0]["shadow_candidate_reason"] == "shadow_eligible"
+
+def test_quarantined_crypto_live_model_cohort_blocks_alpha_and_shadow_candidate(tmp_path, monkeypatch):
+    cfg = _config(tmp_path)
+    cfg.raw["mispricing_alpha"].update(
+        {
+            "bias_alpha_shrinkage": 0.0,
+            "model_residual_shrinkage": 0.0,
+            "use_fundamental_probabilities": False,
+            "uncertainty_penalty_weight": 0.0,
+            "market_overround_penalty_weight": 0.0,
+        }
+    )
+    cfg.raw["crypto_updown_live_model"].update(
+        {
+            "enabled": True,
+            "probability_blend_weight": 1.0,
+            "minimum_shadow_edge_after_cost": 0.015,
+        }
+    )
+    quarantined_cohort = "exploratory_crypto_updown_live_model|crypto_btc_updown_5m|outcome=up"
+    write_json(
+        cfg.governance_root / "shadow_signal_cohort_pnl.json",
+        {
+            "quarantined_cohorts": [
+                {
+                    "signal_cohort": quarantined_cohort,
+                    "closed_positions": 3,
+                    "closed_realised_pnl_usdc": -7.0,
+                    "closed_roi": -0.23,
+                    "quarantine_reason": "closed evidence below threshold",
+                }
+            ]
+        },
+    )
+
+    def fake_crypto_model(row, settings):
+        return {
+            "crypto_model_status": "scored",
+            "crypto_model_contract_kind": "fast",
+            "crypto_model_interval": "5m",
+            "crypto_model_probability": 0.70,
+            "crypto_model_p_up": 0.70,
+            "crypto_model_edge_after_cost": 0.18,
+        }
+
+    monkeypatch.setattr(mispricing_alpha_module, "score_crypto_updown_prediction", fake_crypto_model)
+
+    scored = apply_mispricing_alpha(
+        cfg,
+        [
+            {
+                "market_id": "btc-fast",
+                "market_slug": "btc-updown-5m-1782489000",
+                "question": "BTC Up or Down - 5m",
+                "outcome": "Up",
+                "token_id": "btc-up-token",
+                "prediction_timestamp": "2026-06-26T09:00:00Z",
+                "close_time": "2026-06-26T09:05:00Z",
+                "category": "crypto",
+                "market_midpoint": "0.50",
+                "calibrated_probability": "0.50",
+                "executable_price": "0.50",
+                "spread": "0.01",
+                "liquidity": "1000",
+                "time_to_close_hours": "0.05",
+                "confidence": "1",
+            }
+        ],
+    )
+
+    assert scored[0]["signal_cohort"] == quarantined_cohort
+    assert scored[0]["cohort_evidence_filter_pass"] is False
+    assert scored[0]["cohort_evidence_status"] == "cohort_quarantined"
+    assert scored[0]["validation_layer_pass"] is False
+    assert scored[0]["alpha_trade_candidate"] is False
+    assert scored[0]["shadow_trade_candidate"] is False
+    assert "cohort_quarantined" in scored[0]["shadow_candidate_reason"]
 
 def test_alpha_crypto_overlay_has_fail_fast_row_budget(tmp_path, monkeypatch):
     cfg = _config(tmp_path)

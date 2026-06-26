@@ -80,6 +80,60 @@ def _category(row: dict[str, Any]) -> str:
     return str(row.get("category") or "unknown").lower()
 
 
+def _cohort_evidence_blocks(cfg: EngineConfig) -> dict[str, dict[str, Any]]:
+    """Return exact cohorts that should be suppressed by measured negative evidence.
+
+    This is deliberately an exact-cohort guard. It does not generalise a losing
+    BTC-up 5m live-model cohort onto other assets, intervals, or rule families;
+    it only stops the scorer from repeatedly surfacing a cohort that the shadow
+    ledger/governance layer has already measured as bad.
+    """
+    settings = cfg.raw.get("shadow_cohort_validation", {}) or {}
+    min_closed = int(settings.get("quarantine_min_closed_positions", 3))
+    max_roi = float(settings.get("quarantine_max_closed_roi", -0.05))
+    max_pnl = float(settings.get("quarantine_max_closed_pnl_usdc", -1.0))
+    blocks: dict[str, dict[str, Any]] = {}
+
+    shadow_summary = read_json(cfg.governance_root / "shadow_signal_cohort_pnl.json", default={}) or {}
+    quarantined = shadow_summary.get("quarantined_cohorts", []) if isinstance(shadow_summary, dict) else []
+    if isinstance(quarantined, list):
+        for row in quarantined:
+            if not isinstance(row, dict):
+                continue
+            cohort = str(row.get("signal_cohort") or row.get("cohort") or "").strip()
+            if not cohort:
+                continue
+            blocks[cohort] = {
+                "status": "cohort_quarantined",
+                "reason": row.get("quarantine_reason") or "cohort is quarantined by closed shadow evidence",
+                "closed_positions": row.get("closed_positions", ""),
+                "pnl_usdc": row.get("closed_realised_pnl_usdc", ""),
+                "roi": row.get("closed_roi", ""),
+            }
+
+    signal_summary = read_json(cfg.governance_root / "signal_cohort_pnl.json", default={}) or {}
+    cohorts = signal_summary.get("cohorts", []) if isinstance(signal_summary, dict) else []
+    if isinstance(cohorts, list):
+        for row in cohorts:
+            if not isinstance(row, dict):
+                continue
+            cohort = str(row.get("signal_cohort") or row.get("cohort") or "").strip()
+            if not cohort or cohort in blocks:
+                continue
+            settled = int(safe_float(row.get("settled_fills") or row.get("shadow_sell_fills") or 0) or 0)
+            pnl = safe_float(row.get("total_pnl_usdc") or row.get("shadow_total_pnl_usdc"))
+            roi = safe_float(row.get("roi") or row.get("shadow_roi"))
+            if settled >= min_closed and pnl is not None and roi is not None and (roi <= max_roi or pnl <= max_pnl):
+                blocks[cohort] = {
+                    "status": "cohort_negative_direct_evidence",
+                    "reason": f"cohort has negative closed evidence: roi={roi:.4f}, pnl={pnl:.2f}, settled={settled}",
+                    "closed_positions": settled,
+                    "pnl_usdc": pnl,
+                    "roi": roi,
+                }
+    return blocks
+
+
 def _row_hours_to_close(row: dict[str, Any]) -> float | None:
     for key in ("time_to_close_hours", "hours_to_close"):
         value = safe_float(row.get(key))
@@ -377,6 +431,7 @@ def apply_mispricing_alpha(
     crypto_rows_attempted = 0
     crypto_shadow_enabled = _setting_bool(crypto_settings, "allow_shadow_candidates", True)
     crypto_min_shadow_edge_after_cost = float(crypto_settings.get("minimum_shadow_edge_after_cost", 0.015))
+    cohort_evidence_blocks = _cohort_evidence_blocks(cfg)
 
     enriched: list[dict[str, Any]] = []
     for row in predictions:
@@ -484,10 +539,17 @@ def apply_mispricing_alpha(
             validation_reasons.append("price_below_alpha_trade_limit")
         if not spread_filter_pass:
             validation_reasons.append("spread_above_alpha_trade_limit")
+        current_signal_cohort = signal_cohort(
+            {**row, **crypto_model, "fundamental_probability": fundamental_probability or ""}
+        )
+        cohort_evidence_block = cohort_evidence_blocks.get(current_signal_cohort)
+        cohort_evidence_filter_pass = cohort_evidence_block is None
         if not relative_spread_filter_pass:
             validation_reasons.append("relative_spread_above_alpha_trade_limit")
         if not liquidity_filter_pass:
             validation_reasons.append("liquidity_below_alpha_trade_limit")
+        if not cohort_evidence_filter_pass:
+            validation_reasons.append(str(cohort_evidence_block.get("status") or "cohort_negative_evidence"))
         enriched.append(
             {
                 **row,
@@ -515,9 +577,10 @@ def apply_mispricing_alpha(
                 "crypto_model_adjustment": crypto_model_adjustment,
                 **crypto_model,
                 "worldcup_winner_validation_market": worldcup_winner,
-                "signal_cohort": signal_cohort(
-                    {**row, **crypto_model, "fundamental_probability": fundamental_probability or ""}
-                ),
+                "signal_cohort": current_signal_cohort,
+                "cohort_evidence_filter_pass": cohort_evidence_filter_pass,
+                "cohort_evidence_status": "" if cohort_evidence_block is None else cohort_evidence_block.get("status", ""),
+                "cohort_evidence_reason": "" if cohort_evidence_block is None else cohort_evidence_block.get("reason", ""),
                 "relative_spread": "" if relative_spread is None else relative_spread,
                 "price_filter_pass": price_filter_pass,
                 "spread_filter_pass": spread_filter_pass,
@@ -570,6 +633,7 @@ def apply_mispricing_alpha(
         validation_layer_pass = bool(
             row.get("bookmaker_cross_check_pass")
             and row.get("microstructure_filter_pass")
+            and row.get("cohort_evidence_filter_pass", True)
         )
         fundamental_edge_for_shadow = safe_float(row.get("fundamental_edge_after_haircut"))
         crypto_edge_for_shadow = safe_float(row.get("crypto_model_edge_after_cost"))
@@ -606,6 +670,8 @@ def apply_mispricing_alpha(
                 shadow_reasons.append("not_worldcup_winner_market")
             if fundamental_edge_for_shadow is None or fundamental_edge_for_shadow < shadow_min_fundamental_edge:
                 shadow_reasons.append("fundamental_edge_below_shadow_minimum")
+        if not boolish(row.get("cohort_evidence_filter_pass", True)):
+            shadow_reasons.append(str(row.get("cohort_evidence_status") or "cohort_evidence_blocked"))
         if shadow_min_price is not None and price < shadow_min_price:
             shadow_reasons.append("price_below_shadow_minimum")
         if not crypto_shadow_mode and edge_lower_bound < shadow_min_edge_lower_bound:

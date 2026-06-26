@@ -530,7 +530,10 @@ def _trade_diagnostics(
         recommended_action = "Keep collecting shadow evidence and only allow tiny probes once a non-quarantined cohort qualifies."
     elif top_reasons:
         reason = str(top_reasons[0]["reason"])
-        if "alpha lower-bound" in reason and "liquidity" in reason:
+        if "cohort_quarantined" in reason or "cohort_negative" in reason or "cohort_evidence" in reason:
+            main_blocker = "Current candidates are blocked by negative or quarantined cohort evidence."
+            recommended_action = "Do not probe this exact cohort until fresh shadow evidence clears the quarantine."
+        elif "alpha lower-bound" in reason and "liquidity" in reason:
             main_blocker = "Most candidates fail both the lower-bound edge and liquidity gates."
             recommended_action = "Improve model selectivity or wait for cleaner liquidity before paper probing."
         elif "alpha lower-bound" in reason:

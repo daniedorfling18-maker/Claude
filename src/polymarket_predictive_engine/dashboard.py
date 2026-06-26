@@ -72,6 +72,7 @@ HTML = """<!doctype html>
     <section><h2>Actual profit target</h2><div id="actualTarget"></div></section>
     <section><h2>Latest cycle</h2><div id="cycle"></div></section>
   </div>
+  <section><h2>Why no trade?</h2><div id="tradeDiagnostics"></div></section>
   <div class="two">
     <section><h2>Promotion readiness</h2><div id="promotionReadiness"></div></section>
     <section><h2>Edge promotion watchlist</h2><div id="promotionWatchlist"></div></section>
@@ -131,6 +132,7 @@ async function load() {
     const broker = data.forward_paper_cycle?.broker || paper.broker || {};
     const target = data.actual_profit_target || data.forward_paper_cycle?.actual_profit_target || {};
     const monthly = data.forward_paper_cycle?.monthly_profit_target || {};
+    const diag = data.trade_diagnostics || {};
     const live = data.local_live_heartbeat || data.heartbeat || {};
     const scanner = data.scanner_heartbeat || {};
     const discovery = live.discovery || {};
@@ -159,6 +161,7 @@ async function load() {
       card("Buy fills / cycle", broker.buy_orders_filled ?? broker.orders_filled ?? "0"),
       card("Exit fills / cycle", broker.exit_orders_filled ?? "0"),
       card("Signals approved", data.forward_paper_cycle?.signals_approved ?? "0"),
+      card("Main trade blocker", longText(diag.main_blocker || "-", 120), Number(diag.approved_signals_count || 0) > 0 ? "good" : "warn"),
       card("Next settlement", data.shadow_settlement_watch?.next_settlement_minutes == null ? "Waiting" : fmtNum(data.shadow_settlement_watch.next_settlement_minutes, 0) + "m"),
       card("Shadow P&L", fmtUsd(data.shadow_settlement_watch?.shadow_total_pnl_usdc), Number(data.shadow_settlement_watch?.shadow_total_pnl_usdc || 0) > 0 ? "good" : "warn"),
       card("Expected lower-bound / cycle", fmtUsd(monthly.expected_lower_bound_profit_per_cycle_usdc), monthly.status === "on_pace" ? "good" : "warn")
@@ -196,6 +199,35 @@ async function load() {
       ["Rejected", data.forward_paper_cycle?.signals_rejected],
       ["Broker rejects", monthly.broker_rejected_orders],
       ["Main reason", broker.entry_pause_reason || Object.keys(broker.broker_rejection_reasons || {}).join(", "), longText]
+    ]);
+    document.getElementById("tradeDiagnostics").innerHTML = facts([
+      ["Main blocker", diag.main_blocker, v=>longText(v, 220)],
+      ["Recommended action", diag.recommended_action, v=>longText(v, 220)],
+      ["Predictions", diag.prediction_count],
+      ["Approved signals", diag.approved_signals_count],
+      ["Rejected signals", diag.rejected_signals_count],
+      ["Shadow candidates", diag.shadow_candidates_seen],
+      ["Opened this cycle", diag.shadow_opened_this_cycle],
+      ["Quarantined cohorts", diag.quarantined_cohort_count]
+    ]) + `<div style="height:12px"></div>` + table(diag.current_shadow_candidates || [], [
+      ["Market","market_slug"],
+      ["Outcome","outcome"],
+      ["Cohort","signal_cohort"],
+      ["Kind","crypto_model_contract_kind"],
+      ["Crypto edge","crypto_model_edge_after_cost", v=>fmtNum(v,4)],
+      ["Spread","spread", v=>fmtNum(v,4)],
+      ["Liquidity","liquidity", v=>fmtNum(v,2)],
+      ["Priority","shadow_priority_score", v=>fmtNum(v,4)],
+      ["Reason","shadow_candidate_reason", longText]
+    ]) + `<div style="height:12px"></div>` + table(diag.top_rejection_reasons || [], [
+      ["Count","count"],
+      ["Rejected reason","reason", v=>longText(v, 180)]
+    ]) + `<div style="height:12px"></div>` + table(diag.quarantined_cohorts || [], [
+      ["Cohort","signal_cohort"],
+      ["Closed","closed_positions"],
+      ["P&L","closed_realised_pnl_usdc", fmtUsd],
+      ["ROI","closed_roi", v=>fmtNum(Number(v) * 100, 2) + "%"],
+      ["Reason","quarantine_reason", v=>longText(v, 180)]
     ]);
     document.getElementById("promotionReadiness").innerHTML = table(data.cohort_promotion_readiness?.cohorts || [], [
       ["Cohort","signal_cohort"],
@@ -462,6 +494,74 @@ def _rejection_counts(rows: list[dict[str, Any]]) -> dict[str, int]:
     return dict(Counter(str(row.get("rejection_reason") or "unknown") for row in rows))
 
 
+def _truthy(value: Any) -> bool:
+    if isinstance(value, bool):
+        return value
+    return str(value).strip().lower() in {"1", "true", "yes", "y"}
+
+
+def _top_rejection_reasons(rejected: list[dict[str, Any]], limit: int = 8) -> list[dict[str, Any]]:
+    counts = Counter(str(row.get("rejection_reason") or "unknown") for row in rejected)
+    return [{"reason": reason, "count": count} for reason, count in counts.most_common(limit)]
+
+
+def _trade_diagnostics(
+    *,
+    predictions: list[dict[str, Any]],
+    approved_signals: list[dict[str, Any]],
+    rejected: list[dict[str, Any]],
+    shadow_summary: dict[str, Any],
+) -> dict[str, Any]:
+    shadow_candidates = [row for row in predictions if _truthy(row.get("shadow_trade_candidate"))]
+    shadow_candidates.sort(
+        key=lambda row: safe_float(row.get("shadow_priority_score")) or 0.0,
+        reverse=True,
+    )
+    quarantined = shadow_summary.get("quarantined_cohorts", []) if isinstance(shadow_summary, dict) else []
+    if not isinstance(quarantined, list):
+        quarantined = []
+    top_reasons = _top_rejection_reasons(rejected)
+
+    if approved_signals:
+        main_blocker = "Approved paper signals are available for the broker."
+        recommended_action = "Monitor fills and realised paper P&L."
+    elif (safe_float(shadow_summary.get("shadow_candidates_seen")) or 0) > 0 and quarantined:
+        main_blocker = "Fast-market shadow candidates exist, but current cohorts are quarantined or blocked by prior bad evidence."
+        recommended_action = "Keep collecting shadow evidence and only allow tiny probes once a non-quarantined cohort qualifies."
+    elif top_reasons:
+        reason = str(top_reasons[0]["reason"])
+        if "alpha lower-bound" in reason and "liquidity" in reason:
+            main_blocker = "Most candidates fail both the lower-bound edge and liquidity gates."
+            recommended_action = "Improve model selectivity or wait for cleaner liquidity before paper probing."
+        elif "alpha lower-bound" in reason:
+            main_blocker = "Model lower-bound edge is below the configured trading threshold."
+            recommended_action = "Keep learning; do not force trades until edge survives uncertainty and cost penalties."
+        elif "same-category validation" in reason:
+            main_blocker = "The same-category validation gate lacks enough resolved labels."
+            recommended_action = "Collect more resolved or live cohort evidence before promotion."
+        else:
+            main_blocker = f"Top rejection reason: {reason}"
+            recommended_action = "Inspect top rejected signals and cohort evidence before changing gates."
+    else:
+        main_blocker = "No approved signals and no rejected-signal evidence is available yet."
+        recommended_action = "Wait for the next full prediction cycle or inspect the live loop heartbeat."
+
+    return {
+        "main_blocker": main_blocker,
+        "recommended_action": recommended_action,
+        "approved_signals_count": len(approved_signals),
+        "rejected_signals_count": len(rejected),
+        "prediction_count": len(predictions),
+        "shadow_candidates_seen": shadow_summary.get("shadow_candidates_seen"),
+        "shadow_opened_this_cycle": shadow_summary.get("opened_this_cycle"),
+        "shadow_open_positions": shadow_summary.get("open_positions"),
+        "quarantined_cohort_count": len(quarantined),
+        "top_rejection_reasons": top_reasons,
+        "current_shadow_candidates": shadow_candidates[:12],
+        "quarantined_cohorts": quarantined[:12],
+    }
+
+
 def _cohort_promotion_readiness(cfg: EngineConfig, signal_cohort_pnl: dict[str, Any]) -> dict[str, Any]:
     policy = cfg.raw.get("cohort_promotion", {}) or {}
     minimum_fills = int(policy.get("minimum_filled_orders", 5))
@@ -631,6 +731,12 @@ def render_dashboard(cfg: EngineConfig, latest_report: dict[str, Any] | None = N
         "shadow_fills": shadow_fills,
         "approved_signals": signals[:50],
         "rejection_counts": _rejection_counts(rejected),
+        "trade_diagnostics": _trade_diagnostics(
+            predictions=predictions,
+            approved_signals=signals,
+            rejected=rejected,
+            shadow_summary=shadow_summary,
+        ),
     }
     write_json(out / "dashboard_data.json", payload)
     (out / "index.html").write_text(HTML, encoding="utf-8")

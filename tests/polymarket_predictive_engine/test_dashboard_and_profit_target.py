@@ -96,3 +96,69 @@ def test_dashboard_renderer_writes_static_dashboard_and_data(tmp_path):
     data = read_json(result["dashboard_data"])
     assert data["positions"][0]["token_id"] == "t1"
     assert data["approved_signals"][0]["market_slug"] == "test-market"
+
+def test_dashboard_explains_no_trade_when_fast_candidates_are_quarantined(tmp_path):
+    cfg = _config(tmp_path)
+    write_csv(
+        cfg.output_root / "polymarket_predictions" / "predictions.csv",
+        [
+            {
+                "market_slug": "btc-updown-5m-1782490200",
+                "outcome": "Up",
+                "signal_cohort": "exploratory_crypto_updown_live_model|crypto_btc_updown_5m|outcome=up",
+                "shadow_trade_candidate": "True",
+                "shadow_candidate_reason": "shadow_eligible",
+                "crypto_model_contract_kind": "fast",
+                "crypto_model_edge_after_cost": "0.08",
+                "spread": "0.01",
+                "liquidity": "1200",
+                "shadow_priority_score": "0.12",
+            }
+        ],
+    )
+    write_csv(
+        cfg.output_root / "polymarket_predictions" / "rejected_signals.csv",
+        [
+            {
+                "market_slug": "btc-updown-5m-1782490200",
+                "outcome": "Up",
+                "rejection_reason": "alpha lower-bound edge below configured minimum",
+            }
+        ],
+    )
+    write_json(
+        cfg.governance_root / "shadow_signal_cohort_pnl.json",
+        {
+            "shadow_candidates_seen": 1,
+            "opened_this_cycle": 0,
+            "open_positions": 3,
+            "quarantined_cohorts": [
+                {
+                    "signal_cohort": "exploratory_crypto_updown_live_model|crypto_btc_updown_5m|outcome=up",
+                    "closed_positions": 3,
+                    "closed_realised_pnl_usdc": -7.0,
+                    "closed_roi": -0.23,
+                    "quarantine_reason": "closed evidence below threshold",
+                }
+            ],
+        },
+    )
+
+    result = render_dashboard(
+        cfg,
+        {
+            "status": "ran",
+            "broker": {"equity": 1000, "cash": 1000, "total_exposure": 0},
+            "actual_profit_target": {"status": "collecting_forward_evidence", "actual_pnl_since_baseline_usdc": 0},
+        },
+    )
+
+    html = Path(result["dashboard_file"]).read_text(encoding="utf-8")
+    data = read_json(result["dashboard_data"])
+    diagnostics = data["trade_diagnostics"]
+    assert "Why no trade?" in html
+    assert diagnostics["approved_signals_count"] == 0
+    assert diagnostics["shadow_candidates_seen"] == 1
+    assert diagnostics["quarantined_cohort_count"] == 1
+    assert "quarantined" in diagnostics["main_blocker"]
+    assert diagnostics["current_shadow_candidates"][0]["market_slug"] == "btc-updown-5m-1782490200"

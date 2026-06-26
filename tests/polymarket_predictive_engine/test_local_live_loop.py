@@ -77,3 +77,34 @@ def test_websocket_features_are_enriched_with_scanner_market_context(tmp_path):
     assert persisted[0]["outcome"] == "Down"
     summary = read_json(cfg.governance_root / "websocket_metadata_enrichment_summary.json")
     assert summary["metadata_hits"] == 1
+
+
+def test_websocket_asset_discovery_prefers_fresh_scanner_context(tmp_path, monkeypatch):
+    loop = _load_loop_module()
+    monkeypatch.setenv("POLYMARKET_MODEL_PROBABILITIES_CSV", str(tmp_path / "missing_model_probabilities.csv"))
+    cfg = EngineConfig(
+        raw={"paths": {"output_root": str(tmp_path / "outputs")}},
+        path=tmp_path / "cfg.yaml",
+    )
+    _write_csv(
+        cfg.output_root / "polymarket_predictions" / "predictions.csv",
+        [
+            {"token_id": "old-prediction-1", "market_id": "old-1"},
+            {"token_id": "old-prediction-2", "market_id": "old-2"},
+        ],
+    )
+    _write_csv(
+        cfg.output_root / "polymarket" / "market_snapshot.csv",
+        [
+            {"token_id": "fresh-scanner-1", "condition_id": "fresh-1"},
+            {"token_id": "fresh-scanner-2", "condition_id": "fresh-2"},
+        ],
+    )
+
+    asset_ids, sources = loop.discover_websocket_asset_ids(cfg, max_assets=2)
+
+    assert asset_ids == ["fresh-scanner-1", "fresh-scanner-2"]
+    assert sources == {
+        "fresh-scanner-1": "scanner_snapshot",
+        "fresh-scanner-2": "scanner_snapshot",
+    }

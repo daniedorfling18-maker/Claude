@@ -193,6 +193,7 @@ def test_features_v2_websocket_only_no_labels(tmp_path):
     assert row["implied_probability"] == 0.52
     assert row["event_type"] == "price_change"
     assert row["source_file"].endswith("websocket_market_features.csv")
+    assert row["liquidity"] == 250.0
     assert row["top_bid_size"] == 100.0
     assert row["book_imbalance"] == -0.2
 

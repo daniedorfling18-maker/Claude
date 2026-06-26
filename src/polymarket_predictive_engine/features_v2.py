@@ -177,7 +177,7 @@ def _normalise_rows_from_file(cfg: EngineConfig, path: Path) -> list[dict[str, A
     question_col = find_first_column(cols, ["question", "title", "market_question"])
     bid_col = find_first_column(cols, ["best_bid", "bid"])
     ask_col = find_first_column(cols, ["best_ask", "ask"])
-    liq_col = find_first_column(cols, ["liquidity", "liquidity_num", "depth"])
+    liq_col = find_first_column(cols, ["liquidity", "liquidity_num"] if is_websocket else ["liquidity", "liquidity_num", "depth"])
     vol_col = find_first_column(cols, ["volume", "volume_num"])
     close_col = find_first_column(cols, ["close_time", "end_time", "market_close_time", "closed_at", "end_date"])
     tick_col = find_first_column(cols, ["tick_size", "order_price_min_tick_size"])
@@ -215,6 +215,20 @@ def _normalise_rows_from_file(cfg: EngineConfig, path: Path) -> list[dict[str, A
         if midpoint is None:
             continue
         spread = (ask - bid) if ask is not None and bid is not None else ""
+        bid_size = safe_float(row.get(bid_size_col or ""))
+        ask_size = safe_float(row.get(ask_size_col or ""))
+        bid_depth_1 = safe_float(row.get(bid_depth_1_col or ""))
+        ask_depth_1 = safe_float(row.get(ask_depth_1_col or ""))
+        bid_depth_5 = safe_float(row.get(bid_depth_5_col or ""))
+        ask_depth_5 = safe_float(row.get(ask_depth_5_col or ""))
+        liquidity = safe_float(row.get(liq_col or ""))
+        if liquidity is None and is_websocket:
+            if bid_size is not None or ask_size is not None:
+                liquidity = (bid_size or 0.0) + (ask_size or 0.0)
+            elif bid_depth_1 is not None or ask_depth_1 is not None:
+                liquidity = (bid_depth_1 or 0.0) + (ask_depth_1 or 0.0)
+            elif bid_depth_5 is not None or ask_depth_5 is not None:
+                liquidity = (bid_depth_5 or 0.0) + (ask_depth_5 or 0.0)
 
         market_id = row.get(market_col, "") or (row.get(token_col, "") if is_websocket else "")
         normalised.append(
@@ -231,10 +245,10 @@ def _normalise_rows_from_file(cfg: EngineConfig, path: Path) -> list[dict[str, A
                 "best_ask": ask if ask is not None else "",
                 "spread": spread,
                 "executable_buy_price": ask if ask is not None else midpoint,
-                "liquidity": safe_float(row.get(liq_col or "")) or "",
+                "liquidity": liquidity if liquidity is not None else "",
                 "volume": safe_float(row.get(vol_col or "")) or "",
-                "bid_size": safe_float(row.get(bid_size_col or "")) or "",
-                "ask_size": safe_float(row.get(ask_size_col or "")) or "",
+                "bid_size": bid_size if bid_size is not None else "",
+                "ask_size": ask_size if ask_size is not None else "",
                 "tick_size": safe_float(row.get(tick_col or "")) or "",
                 "close_time": row.get(close_col or "", ""),
                 "close_dt": parse_timestamp(row.get(close_col or "")),
@@ -246,10 +260,10 @@ def _normalise_rows_from_file(cfg: EngineConfig, path: Path) -> list[dict[str, A
                 "last_trade_price": last_trade if last_trade is not None else "",
                 "top_bid_size": safe_float(row.get(bid_size_col or "")) or "",
                 "top_ask_size": safe_float(row.get(ask_size_col or "")) or "",
-                "bid_depth_1pct": safe_float(row.get(bid_depth_1_col or "")) or "",
-                "ask_depth_1pct": safe_float(row.get(ask_depth_1_col or "")) or "",
-                "bid_depth_5pct": safe_float(row.get(bid_depth_5_col or "")) or "",
-                "ask_depth_5pct": safe_float(row.get(ask_depth_5_col or "")) or "",
+                "bid_depth_1pct": bid_depth_1 if bid_depth_1 is not None else "",
+                "ask_depth_1pct": ask_depth_1 if ask_depth_1 is not None else "",
+                "bid_depth_5pct": bid_depth_5 if bid_depth_5 is not None else "",
+                "ask_depth_5pct": ask_depth_5 if ask_depth_5 is not None else "",
                 "book_imbalance": safe_float(row.get(book_imbalance_col or "")) or "",
                 "price_change_side": row.get(price_change_side_col or "", ""),
                 "price_change_price": safe_float(row.get(price_change_price_col or "")) or "",

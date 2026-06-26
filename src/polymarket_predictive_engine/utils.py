@@ -54,7 +54,7 @@ def replace_with_retry(temp_path: Path, path: Path, attempts: int = 30, delay: f
         try:
             temp_path.replace(path)
             return
-        except PermissionError as exc:
+        except OSError as exc:
             last_exc = exc
             time.sleep(delay * min(i + 1, 6))
     raise last_exc

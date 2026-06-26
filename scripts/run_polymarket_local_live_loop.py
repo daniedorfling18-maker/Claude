@@ -70,17 +70,17 @@ def discover_websocket_asset_ids(cfg, *, include_static_config: bool = False, ma
     """Return live CLOB asset ids from current paper state, not stale config.
 
     The checked-in config may contain old asset ids.  For live dashboard marking
-    we prefer the assets that are currently in the paper portfolio, current trade
-    signals, current predictions, and the model probability file.
+    we prefer assets that have the freshest scanner metadata first, then current
+    portfolio/signals, then broader prediction/model-probability context.
     """
     tokens: dict[str, str] = {}
     model_csv = ROOT / os.environ.get("POLYMARKET_MODEL_PROBABILITIES_CSV", "inputs/polymarket/model_probabilities.csv")
     candidates = [
         (cfg.output_root / "polymarket_portfolio" / "positions.csv", "open_positions"),
         (cfg.output_root / "polymarket_predictions" / "trade_signals.csv", "trade_signals"),
-        (cfg.output_root / "polymarket_predictions" / "predictions.csv", "predictions"),
         (cfg.output_root / "polymarket" / "market_snapshot.csv", "scanner_snapshot"),
         (model_csv, "model_probabilities"),
+        (cfg.output_root / "polymarket_predictions" / "predictions.csv", "predictions"),
     ]
     for path, source in candidates:
         if path.exists():

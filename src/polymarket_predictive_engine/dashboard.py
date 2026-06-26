@@ -87,6 +87,7 @@ HTML = """<!doctype html>
 const fmtUsd = (v) => v === null || v === undefined || v === "" || Number.isNaN(Number(v)) ? "—" : "$" + Number(v).toFixed(2);
 const fmtNum = (v, d=4) => v === null || v === undefined || v === "" || Number.isNaN(Number(v)) ? "—" : Number(v).toFixed(d);
 const short = (v) => !v ? "—" : String(v).length > 22 ? String(v).slice(0,10) + "…" + String(v).slice(-8) : String(v);
+const joinList = (v) => Array.isArray(v) ? v.join(", ") : (v || "â€”");
 const marketLabel = (row) => row?.market_name || row?.question || row?.market_slug || short(row?.market_id) || short(row?.token_id);
 function card(label, value, cls="") { return `<div class="card"><div class="label">${label}</div><div class="value ${cls}">${value}</div></div>`; }
 function table(rows, columns) {
@@ -113,6 +114,7 @@ async function load() {
       card("Equity", fmtUsd(broker.equity), Number(broker.equity) >= 1000 ? "good" : "bad"),
       card("Actual P&L since clean baseline", fmtUsd(pnl), pnl >= 0 ? "good" : "bad"),
       card("Monthly run-rate", target.monthly_run_rate_usdc == null ? "Collecting" : fmtUsd(target.monthly_run_rate_usdc), target.monthly_run_rate_usdc >= target.target_monthly_profit_usdc ? "good" : ""),
+      card("Scanning now", joinList(data.heartbeat?.scan?.scan_plan?.selected_queries || data.heartbeat?.scan?.queries), "warn"),
       card("Exposure", fmtUsd(broker.total_exposure)),
       card("Cash", fmtUsd(broker.cash)),
       card("Buy fills / cycle", broker.buy_orders_filled ?? broker.orders_filled ?? "0"),
@@ -131,9 +133,12 @@ async function load() {
     document.getElementById("cycle").innerHTML = table([{
       scan: data.heartbeat?.scan?.tokens, features: data.forward_paper_cycle?.features, predictions: data.forward_paper_cycle?.predictions,
       approved: data.forward_paper_cycle?.signals_approved, rejected: data.forward_paper_cycle?.signals_rejected,
-      brokerRejected: monthly.broker_rejected_orders, reason: broker.entry_pause_reason || Object.keys(broker.broker_rejection_reasons || {}).join(", ")
+      brokerRejected: monthly.broker_rejected_orders,
+      scanMode: data.heartbeat?.scan?.scan_plan?.mode,
+      queries: data.heartbeat?.scan?.scan_plan?.selected_queries || data.heartbeat?.scan?.queries,
+      reason: broker.entry_pause_reason || Object.keys(broker.broker_rejection_reasons || {}).join(", ")
     }], [
-      ["Tokens","scan"], ["Features","features"], ["Predictions","predictions"], ["Approved","approved"], ["Rejected","rejected"], ["Broker rejects","brokerRejected"], ["Main reason","reason"]
+      ["Scan mode","scanMode"], ["Queries","queries", joinList], ["Tokens","scan"], ["Features","features"], ["Predictions","predictions"], ["Approved","approved"], ["Rejected","rejected"], ["Broker rejects","brokerRejected"], ["Main reason","reason"]
     ]);
     document.getElementById("promotionReadiness").innerHTML = table(data.cohort_promotion_readiness?.cohorts || [], [
       ["Cohort","signal_cohort"],

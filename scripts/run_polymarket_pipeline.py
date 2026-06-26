@@ -28,6 +28,11 @@ if str(SCRIPTS) not in sys.path:
     sys.path.insert(0, str(SCRIPTS))
 
 import polymarket_mispricing_bot as bot  # noqa: E402
+from polymarket_predictive_engine.config import load_config  # noqa: E402
+from polymarket_predictive_engine.mispricing_alpha import train_mispricing_alpha_model  # noqa: E402
+from polymarket_predictive_engine.models.optimized import train_optimized_model  # noqa: E402
+from polymarket_predictive_engine.paper_cycle import run_paper_cycle  # noqa: E402
+from polymarket_predictive_engine.snapshot_ingest import ingest_scanner_snapshot  # noqa: E402
 
 
 def safe_dry_run_env() -> None:
@@ -115,6 +120,44 @@ def run_market_making_eval() -> None:
     )
 
 
+def run_forward_paper_cycle() -> None:
+    """Persist the final scanner snapshot, then run the canonical paper-only path."""
+    config_path = os.environ.get(
+        "POLYMARKET_PREDICTIVE_CONFIG",
+        "polymarket_predictive_config.example.yaml",
+    )
+    cfg = load_config(ROOT / config_path)
+    ingest = ingest_scanner_snapshot(
+        cfg,
+        snapshot_path=ROOT
+        / os.environ.get("POLYMARKET_OUTPUT_DIR", "outputs/polymarket")
+        / "market_snapshot.csv",
+    )
+    optimization = (
+        train_optimized_model(cfg)
+        if bool(cfg.raw.get("ml_optimization", {}).get("enabled", True))
+        else {"status": "skipped"}
+    )
+    alpha = (
+        train_mispricing_alpha_model(cfg)
+        if bool(cfg.raw.get("mispricing_alpha", {}).get("enabled", True))
+        else {"status": "skipped"}
+    )
+    paper = run_paper_cycle(cfg, source="raw_snapshot")
+    print(f"pipeline: raw snapshot ingest={ingest}", flush=True)
+    print(
+        "pipeline: optimized model="
+        f"status={optimization.get('status')} mode={optimization.get('deployment_mode')}",
+        flush=True,
+    )
+    print(
+        "pipeline: mispricing alpha="
+        f"status={alpha.get('status')} rows={alpha.get('training_rows')}",
+        flush=True,
+    )
+    print(f"pipeline: forward paper cycle={paper}", flush=True)
+
+
 def main() -> int:
     safe_dry_run_env()
     ensure_runtime_files()
@@ -123,6 +166,7 @@ def main() -> int:
     run_scanner_once("final")
     run_long_short()
     run_market_making_eval()
+    run_forward_paper_cycle()
     print("pipeline: complete", flush=True)
     return 0
 

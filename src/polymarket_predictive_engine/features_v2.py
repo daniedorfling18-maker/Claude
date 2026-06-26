@@ -22,6 +22,7 @@ FORBIDDEN_SOURCE_HINTS = [
 ]
 FORBIDDEN_FINAL_HINTS = FORBIDDEN_SOURCE_HINTS + ["outcome", "resolution"]
 FEATURE_SOURCES = {"all", "historical", "raw_snapshot", "websocket"}
+BINARY_TARGETS = {"0", "1", "true", "false"}
 MOMENTUM_WINDOWS_HOURS = {"5m": 5 / 60, "15m": 15 / 60, "1h": 1, "6h": 6, "24h": 24}
 ROLLING_WINDOWS_HOURS = {"1h": 1, "6h": 6, "24h": 24}
 
@@ -49,6 +50,30 @@ def _normalise_source_filter(source: str | None) -> str:
     if value not in FEATURE_SOURCES:
         raise ValueError(f"Unknown feature source {source!r}. Expected one of: {', '.join(sorted(FEATURE_SOURCES))}")
     return value
+
+
+def _clean_label_count(cfg: EngineConfig) -> int:
+    """Count clean binary labels available for supervised feature-building."""
+    count = 0
+    label_root = cfg.output_root / "polymarket_training"
+    for name in ("market_resolutions.csv", "historical_resolutions.csv", "websocket_resolutions.csv", "labels.csv"):
+        for row in read_csv_rows(label_root / name):
+            target = str(row.get("target", "")).strip().lower()
+            quality = str(row.get("resolution_quality", "")).strip().lower()
+            if target in BINARY_TARGETS and (not quality or quality == "clean_settlement"):
+                count += 1
+    return count
+
+
+def _assert_clean_labels_available(cfg: EngineConfig, *, allow_unlabelled_research: bool) -> int:
+    clean_count = _clean_label_count(cfg)
+    if clean_count <= 0 and not allow_unlabelled_research:
+        raise RuntimeError(
+            "build-features-v2 blocked: no clean resolved binary labels found. "
+            "Run label/resolution collection first, or pass allow_unlabelled_research=True "
+            "for explicitly unlabelled research-only feature generation."
+        )
+    return clean_count
 
 
 def _std(values: list[float]) -> str | float:
@@ -231,8 +256,39 @@ def _normalise_rows_from_file(cfg: EngineConfig, path: Path) -> list[dict[str, A
     return normalised
 
 
-def build_features_v2(cfg: EngineConfig, source: str = "all") -> list[dict[str, Any]]:
+def _assert_training_labels_ready(cfg: EngineConfig) -> None:
+    labels_path = cfg.output_root / "polymarket_training" / "labels.csv"
+    rows = read_csv_rows(labels_path, limit=200000)
+    if not rows:
+        raise RuntimeError(
+            "Training feature build refused: labels.csv is missing or empty. "
+            "Run build-labels after collecting clean resolutions, or use an inference-only source."
+        )
+    pseudo = [
+        row
+        for row in rows
+        if str(row.get("label_type", "")).lower() == "pseudo"
+        or str(row.get("pseudo_label", "")).lower() in {"1", "true", "yes"}
+        or "pseudo" in str(row.get("label_source", "")).lower()
+    ]
+    if pseudo:
+        raise RuntimeError("Training feature build refused: pseudo labels are present in labels.csv")
+
+
+def build_features_v2(
+    cfg: EngineConfig,
+    source: str = "all",
+    *,
+    allow_unlabelled_research: bool = True,
+    require_clean_labels: bool = False,
+) -> list[dict[str, Any]]:
     source = _normalise_source_filter(source)
+    clean_label_count = _assert_clean_labels_available(
+        cfg,
+        allow_unlabelled_research=allow_unlabelled_research,
+    )
+    if require_clean_labels:
+        _assert_training_labels_ready(cfg)
     source_rows: list[dict[str, Any]] = []
     input_row_counts: Counter[str] = Counter()
     normalised_row_counts: Counter[str] = Counter()
@@ -341,19 +397,22 @@ def build_features_v2(cfg: EngineConfig, source: str = "all") -> list[dict[str, 
     _assert_final_feature_schema(features)
 
     out_root = cfg.output_root / "polymarket_training"
-    features_path = out_root / "features_v2.csv"
+    suffix = "" if source == "all" else f"_{source}"
+    features_path = out_root / f"features_v2{suffix}.csv"
     write_csv(features_path, features)
     write_csv(
-        out_root / "feature_dictionary_v2.csv",
+        out_root / f"feature_dictionary_v2{suffix}.csv",
         [{"feature": key, "description": "point-in-time v2 engineered feature"} for key in sorted({key for row in features for key in row.keys()})],
     )
-    lineage_path = cfg.governance_root / "feature_lineage_v2.csv"
+    lineage_path = cfg.governance_root / f"feature_lineage_v2{suffix}.csv"
     write_csv(lineage_path, lineage)
 
     source_counts = Counter(str(row.get("feature_source", "unknown")) for row in features)
     summary = {
         "status": "ok",
         "source_filter": source,
+        "clean_label_count": clean_label_count,
+        "research_override": allow_unlabelled_research,
         "historical_feature_rows": source_counts.get("historical", 0),
         "raw_snapshot_feature_rows": source_counts.get("raw_snapshot", 0),
         "websocket_feature_rows": source_counts.get("websocket", 0),
@@ -365,9 +424,21 @@ def build_features_v2(cfg: EngineConfig, source: str = "all") -> list[dict[str, 
         "output_file": str(features_path),
         "lineage_file": str(lineage_path),
     }
-    write_json(cfg.governance_root / "features_v2_summary.json", summary)
+    summary_path = cfg.governance_root / f"features_v2_summary{suffix}.json"
+    write_json(summary_path, summary)
     return features
 
 
-def main(config_path: str, source: str = "all") -> list[dict[str, Any]]:
-    return build_features_v2(load_config(config_path), source=source)
+def main(
+    config_path: str,
+    source: str = "all",
+    *,
+    allow_unlabelled_research: bool = False,
+    require_clean_labels: bool = False,
+) -> list[dict[str, Any]]:
+    return build_features_v2(
+        load_config(config_path),
+        source=source,
+        allow_unlabelled_research=allow_unlabelled_research,
+        require_clean_labels=require_clean_labels,
+    )

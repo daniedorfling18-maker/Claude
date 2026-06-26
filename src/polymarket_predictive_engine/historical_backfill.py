@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 import requests
@@ -140,6 +140,8 @@ def _candidate_markets(
     # API pagination cap, then sort locally by close time.
     closed_params = dict(gamma_query_params or {})
     closed_params["closed"] = "true"
+    closed_params.setdefault("order", "closedTime")
+    closed_params.setdefault("ascending", "false")
     closed_candidates, closed_meta = _scan_feed(
         base_url=base_url,
         timeout=timeout,
@@ -184,6 +186,8 @@ def _candidate_markets(
 def historical_backfill(
     cfg: EngineConfig,
     historical_limit: int | None = None,
+    *,
+    allow_old_history: bool = False,
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]], dict[str, Any]]:
     settings = cfg.raw.get("historical_backfill", {})
     base_url = str(settings.get("gamma_base_url", DEFAULT_GAMMA_BASE_URL))
@@ -193,6 +197,7 @@ def historical_backfill(
     timeout = int(settings.get("request_timeout_seconds", 30))
     progress_every_pages = int(settings.get("progress_every_pages", 5))
     gamma_query_params = dict(settings.get("gamma_query_params", {}) or {})
+    max_age_days = int(settings.get("max_age_days", 365))
 
     candidates, fetch_meta = _candidate_markets(
         base_url=base_url,
@@ -203,6 +208,10 @@ def historical_backfill(
         requested_closed_markets=requested,
         progress_every_pages=progress_every_pages,
     )
+    cutoff = datetime.now(timezone.utc) - timedelta(days=max_age_days)
+    old_candidates = [market for market in candidates if _market_close_dt(market) < cutoff]
+    if old_candidates and not allow_old_history:
+        candidates = [market for market in candidates if _market_close_dt(market) >= cutoff]
 
     resolution_rows: list[dict[str, Any]] = []
     quality_rows: list[dict[str, Any]] = []
@@ -247,6 +256,9 @@ def historical_backfill(
         "clean_settlement_markets": clean_markets,
         "error_count": errors,
         "fetch_strategy": fetch_meta,
+        "historical_cutoff_utc": cutoff.isoformat(),
+        "old_candidates_excluded": 0 if allow_old_history else len(old_candidates),
+        "old_history_explicitly_allowed": allow_old_history,
         "newest_candidate_close_times": close_dates,
         "collected_at_utc": now_utc(),
         "output_file": str(out_root / "historical_resolutions.csv"),
@@ -256,6 +268,15 @@ def historical_backfill(
     return resolution_rows, quality_rows, summary
 
 
-def main(config_path: str, historical_limit: int | None = None) -> dict[str, Any]:
-    _, _, summary = historical_backfill(load_config(config_path), historical_limit=historical_limit)
+def main(
+    config_path: str,
+    historical_limit: int | None = None,
+    *,
+    allow_old_history: bool = False,
+) -> dict[str, Any]:
+    _, _, summary = historical_backfill(
+        load_config(config_path),
+        historical_limit=historical_limit,
+        allow_old_history=allow_old_history,
+    )
     return summary

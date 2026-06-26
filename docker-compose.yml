@@ -35,3 +35,53 @@ services:
       - ./outputs:/app/outputs
       - ./inputs/polymarket:/app/inputs/polymarket:ro
     restart: unless-stopped
+
+  polymarket-paper-bot:
+    build:
+      context: .
+      args:
+        INSTALL_POLYMARKET_SDK: "false"
+    container_name: polymarket-paper-bot
+    env_file:
+      - .env
+    working_dir: /app
+    environment:
+      PM_MODE: scan
+      POLYMARKET_MODE: scan
+      POLYMARKET_EXECUTE_LIVE: "false"
+      POLYMARKET_LIVE_TRADING: "0"
+      POLYMARKET_QUERY: ${POLYMARKET_QUERY:-world cup}
+      POLYMARKET_EVENT_SLUG: ${POLYMARKET_EVENT_SLUG:-}
+      POLYMARKET_TAG_ID: ${POLYMARKET_TAG_ID:-}
+      POLYMARKET_OUTPUT_DIR: ${POLYMARKET_OUTPUT_DIR:-outputs/polymarket}
+      POLYMARKET_MODEL_PROBABILITIES_CSV: ${POLYMARKET_MODEL_PROBABILITIES_CSV:-inputs/polymarket/model_probabilities.csv}
+      POLYMARKET_POSITIONS_CSV: ${POLYMARKET_POSITIONS_CSV:-inputs/polymarket/positions.csv}
+      POLYMARKET_MIN_EDGE: ${POLYMARKET_MIN_EDGE:-0.04}
+      PAPER_LOOP_ITERATIONS: ${PAPER_LOOP_ITERATIONS:-0}
+      PAPER_LOOP_SLEEP_SECONDS: ${PAPER_LOOP_SLEEP_SECONDS:-300}
+      PYTHONDONTWRITEBYTECODE: "1"
+    command: >
+      sh -c "python scripts/run_polymarket_live_paper_loop.py
+      --config /app/polymarket_predictive_config.example.yaml
+      --iterations $${PAPER_LOOP_ITERATIONS}
+      --sleep-seconds $${PAPER_LOOP_SLEEP_SECONDS}
+      --optimize-model"
+    volumes:
+      - ./polymarket_predictive_config.example.yaml:/app/polymarket_predictive_config.example.yaml:ro
+      - ./src:/app/src:ro
+      - ./scripts:/app/scripts:ro
+      - ./outputs:/app/outputs
+      - ./work:/app/work
+      - ./inputs/polymarket:/app/inputs/polymarket
+    restart: unless-stopped
+
+  polymarket-dashboard:
+    image: repo-polymarket-paper-bot
+    container_name: polymarket-dashboard
+    working_dir: /app/outputs/polymarket_dashboard
+    command: python -m http.server 8765 --bind 0.0.0.0
+    ports:
+      - "${POLYMARKET_DASHBOARD_HOST:-0.0.0.0}:${POLYMARKET_DASHBOARD_PORT:-8765}:8765"
+    volumes:
+      - ./outputs/polymarket_dashboard:/app/outputs/polymarket_dashboard:ro
+    restart: unless-stopped

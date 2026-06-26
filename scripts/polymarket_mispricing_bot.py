@@ -116,6 +116,7 @@ class OutcomeToken:
     market_slug: str
     question: str
     condition_id: str
+    close_time: str
     outcome: str
     token_id: str
     gamma_price: float | None
@@ -396,6 +397,14 @@ def extract_tokens(events: list[dict[str, Any]]) -> list[OutcomeToken]:
             market_slug = str(market.get("slug") or "")
             question = str(market.get("question") or market.get("title") or market_slug)
             condition_id = str(market.get("conditionId") or market.get("condition_id") or "")
+            close_time = str(
+                market.get("endDate")
+                or market.get("endDateIso")
+                or market.get("end_time")
+                or event.get("endDate")
+                or event.get("endDateIso")
+                or ""
+            )
             outcomes = decode_list(market.get("outcomes"))
             outcome_prices = decode_list(market.get("outcomePrices") or market.get("outcome_prices"))
             token_ids = decode_list(
@@ -426,6 +435,7 @@ def extract_tokens(events: list[dict[str, Any]]) -> list[OutcomeToken]:
                         market_slug=market_slug,
                         question=question,
                         condition_id=condition_id,
+                        close_time=close_time,
                         outcome=str(outcomes[idx]),
                         token_id=str(token_id),
                         gamma_price=gamma_price,
@@ -576,6 +586,10 @@ def build_opportunities(
 
 class LiveExecutor:
     def __init__(self, config: BotConfig):
+        raise RuntimeError(
+            "Live execution is disabled in this paper-trading foundation. "
+            "Use the persistent paper broker and complete forward validation first."
+        )
         if config.mode != "live" or not config.execute_live:
             raise RuntimeError("LiveExecutor should only be initialized for live execution")
         if not config.private_key:
@@ -714,6 +728,8 @@ def token_snapshot_row(token: OutcomeToken, book: Book | None, fair: float | Non
         "event_slug": token.event_slug,
         "event_title": token.event_title,
         "market_slug": token.market_slug,
+        "condition_id": token.condition_id,
+        "close_time": token.close_time,
         "question": token.question,
         "outcome": token.outcome,
         "token_id": token.token_id,
@@ -766,6 +782,8 @@ def run_once(config: BotConfig, live_executor: LiveExecutor | None = None) -> tu
             "event_slug",
             "event_title",
             "market_slug",
+            "condition_id",
+            "close_time",
             "question",
             "outcome",
             "token_id",

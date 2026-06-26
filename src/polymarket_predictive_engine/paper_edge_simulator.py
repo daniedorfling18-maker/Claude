@@ -4,6 +4,7 @@ from typing import Any
 
 from .config import EngineConfig, load_config
 from .models.calibration_v2 import calibrate_probability, fit_bucket_calibrator, joined_feature_label_rows
+from .models.calibrated import prediction_confidence
 from .risk import risk_decision
 from .utils import now_utc, read_json, safe_float, write_csv, write_json
 
@@ -81,7 +82,7 @@ def simulate_paper_edge(cfg: EngineConfig, test_fraction: float = 0.3) -> dict[s
             "calibrated_probability": calibrated_probability,
             "edge": edge,
             "executable_price": executable_price,
-            "confidence": max(0.0, min(1.0, 1 - abs(calibrated_probability - 0.5))),
+            "confidence": prediction_confidence(calibrated_probability),
         }
         decision = risk_decision(cfg, signal)
         if edge < minimum_edge:

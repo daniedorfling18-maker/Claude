@@ -66,12 +66,13 @@ run = base.run
 def main() -> int:
     args = base.build_parser().parse_args()
     if not args.email or not args.password:
+        base.write_missing_credentials_summary(args)
         print("ERROR: SUPERBRU_EMAIL and SUPERBRU_PASSWORD must be set", file=sys.stderr)
         return 1
     result = asyncio.run(base.run(args))
     result["alias_aware_entrypoint"] = True
     print("\n" + json.dumps(result, indent=2, default=str))
-    return 0 if result.get("status") != "login_failed" else 1
+    return base.exit_code_for_result(result, args)
 
 
 if __name__ == "__main__":

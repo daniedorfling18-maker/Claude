@@ -143,8 +143,55 @@ jobs:
       - name: Run tests
         run: pytest
 
+      - name: Run online Polymarket Dutch-book smoke test
+        timeout-minutes: 5
+        env:
+          POLYMARKET_KILL_SWITCH: "1"
+          POLYMARKET_LIVE_TRADING: "0"
+        run: |
+          python -m polymarket_predictive_engine.dutch_book_runner --config polymarket_predictive_config.example.yaml --cycles 1 --websocket-seconds 5 --sleep-seconds 0
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          path = Path('outputs/polymarket_dutch_book/monitor_summary.json')
+          assert path.exists(), 'Dutch-book monitor summary was not written'
+          payload = json.loads(path.read_text(encoding='utf-8'))
+          assert payload.get('dry_run_only') is True, payload
+          assert payload.get('orders_placed') == 0, payload
+          last = payload.get('last_summary') or {}
+          assert last.get('orders_placed') == 0, payload
+          print('Online Dutch-book smoke passed:', json.dumps(payload, sort_keys=True))
+          PY
+
       - name: Validate calibration profile
         run: python -m superbru_score_engine config-check --config config.yaml --profiles calibration_profiles.yaml
+
+      - name: Run online smoke prediction
+        timeout-minutes: 5
+        env:
+          THE_ODDS_API_KEY: ${{ secrets.THE_ODDS_API_KEY }}
+        run: |
+          if [ -z "${THE_ODDS_API_KEY:-}" ]; then
+            echo "THE_ODDS_API_KEY secret is not configured for online smoke prediction."
+            exit 1
+          fi
+          python -m superbru_score_engine predict --config config.yaml --out-dir outputs/online-smoke
+          python - <<'PY'
+          import csv
+          import json
+          from pathlib import Path
+
+          csv_path = Path('outputs/online-smoke/predictions.csv')
+          json_path = Path('outputs/online-smoke/predictions.json')
+          assert csv_path.exists() and csv_path.stat().st_size > 0, 'predictions.csv was not written'
+          assert json_path.exists() and json_path.stat().st_size > 0, 'predictions.json was not written'
+          rows = list(csv.DictReader(csv_path.open(newline='', encoding='utf-8')))
+          assert rows, 'online prediction produced no rows'
+          payload = json.loads(json_path.read_text(encoding='utf-8'))
+          assert isinstance(payload, list) and payload, 'online prediction JSON produced no rows'
+          print(f'Online smoke prediction produced {len(rows)} prediction row(s).')
+          PY
 
       - name: Run offline smoke prediction
         run: python -m superbru_score_engine predict --config config.example.yaml --fixtures examples/fixtures.csv --odds-json examples/odds_snapshot.json --out-dir outputs/smoke

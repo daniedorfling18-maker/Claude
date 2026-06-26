@@ -1,8 +1,7 @@
-name: Polymarket Mispricing Bot
+name: Polymarket Mispricing Bot Manual Dry Run
 
 on:
-  schedule:
-    - cron: "2/5 * * * *"
+  workflow_dispatch:
 
 concurrency:
   group: polymarket-mispricing-bot
@@ -51,6 +50,12 @@ jobs:
             outputs/polymarket/mm_quote_state.csv
             outputs/polymarket/mm_quote_evaluations.csv
             outputs/polymarket/mm_quote_summary.csv
+            outputs/polymarket_fixed/worldcup/ml/raw_market_snapshots.csv
+            outputs/polymarket_models/calibration_v2.json
+            outputs/polymarket_models/category_calibration_v2.json
+            outputs/polymarket_models/optimized_model_v1.json
+            outputs/polymarket_models/optimized_model_status.json
+            work/polymarket/polymarket_engine.sqlite
           key: polymarket-mm-history-${{ github.run_id }}
           restore-keys: |
             polymarket-mm-history-
@@ -76,5 +81,10 @@ jobs:
           name: polymarket-mispricing-${{ github.run_id }}
           path: |
             outputs/polymarket
+            outputs/polymarket_fixed
+            outputs/polymarket_models
+            outputs/polymarket_predictions
+            outputs/polymarket_portfolio
+            outputs/polymarket_model_governance
             inputs/polymarket/model_probabilities.csv
           if-no-files-found: ignore

@@ -39,9 +39,28 @@ def test_risk_rejects_low_edge(tmp_path):
 
 def test_risk_approves_with_kelly_cap(tmp_path):
     cfg = load_config(write_config(tmp_path))
-    decision = risk_decision(cfg, {"edge": 0.10, "confidence": 0.9, "spread": 0.01, "liquidity": 1000, "executable_price": 0.4, "calibrated_probability": 0.55})
+    decision = risk_decision(cfg, {"edge": 0.10, "confidence": 0.9, "spread": 0.01, "liquidity": 1000, "executable_price": 0.4, "calibrated_probability": 0.55, "time_to_close_hours": 24})
     assert decision["approved"]
     assert decision["size"] <= cfg.raw["risk"]["kelly_cap"] * cfg.raw["risk"]["bankroll"]
+
+
+def test_risk_sizes_from_alpha_probability_when_present(tmp_path):
+    cfg = load_config(write_config(tmp_path))
+    decision = risk_decision(
+        cfg,
+        {
+            "edge": 0.10,
+            "confidence": 0.9,
+            "spread": 0.01,
+            "liquidity": 1000,
+            "executable_price": 0.4,
+            "calibrated_probability": 0.20,
+            "alpha_probability": 0.55,
+            "time_to_close_hours": 24,
+        },
+    )
+    assert decision["approved"]
+    assert decision["size"] > 0
 
 
 def test_load_config_tolerates_byte_order_mark(tmp_path):

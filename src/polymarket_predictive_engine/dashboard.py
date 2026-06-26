@@ -146,12 +146,14 @@ async function load() {
     ]);
     document.getElementById("promotionWatchlist").innerHTML = table(data.signal_cohort_pnl?.promotion_watchlist || [], [
       ["Cohort","signal_cohort"],
+      ["Probation","probationary"],
+      ["Probe cap","probationary_max_stake_usdc", fmtUsd],
       ["Score","promotion_ready_score", (v,row)=>`${v ?? 0}/${row.promotion_ready_checks ?? "?"}`],
       ["P&L","total_pnl_usdc", fmtUsd],
       ["ROI","roi", v=>fmtNum(Number(v) * 100, 2) + "%"],
       ["Run-rate","monthly_run_rate_usdc", fmtUsd],
       ["Fills","buy_fills"],
-      ["Settled","sell_fills"],
+      ["Settled","settled_fills"],
       ["Reason","promotion_reason"]
     ]);
     document.getElementById("shadowPromotionWatchlist").innerHTML = table(data.shadow_signal_cohort_pnl?.promotion_watchlist || [], [

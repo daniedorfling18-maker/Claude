@@ -81,7 +81,7 @@ def print_watchlist(title: str, rows: list[dict[str, Any]], *, shadow: bool = Fa
             roi = pct(row.get("roi"))
             run_rate = money(row.get("monthly_run_rate_usdc"))
             fills = row.get("buy_fills", 0)
-            settled = row.get("sell_fills", 0)
+            settled = row.get("settled_fills", row.get("sell_fills", 0))
         print(f"  - {cohort}: score {score}, pnl {pnl}, roi {roi}, run-rate {run_rate}, fills {fills}, settled {settled}")
 
 

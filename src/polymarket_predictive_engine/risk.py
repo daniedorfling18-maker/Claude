@@ -141,6 +141,7 @@ def risk_decision(
     current_correlated = _number(portfolio, "current_correlated_exposure")
     liquidity_cap = liquidity * float(risk.get("liquidity_cap_fraction", 0.05))
     kelly = kelly_fraction(probability, price, float(risk.get("kelly_cap", 0.005)))
+    signal_cap = safe_float(signal.get("max_stake_usdc"))
     stake_usdc = min(
         kelly * bankroll,
         max(0.0, max_single - current_market),
@@ -148,6 +149,7 @@ def risk_decision(
         max(0.0, max_correlated - current_correlated),
         liquidity_cap,
         cash,
+        signal_cap if signal_cap is not None and signal_cap > 0 else cash,
     )
     if stake_usdc <= 0:
         return reject("kelly sizing or exposure capacity is zero", max_single)
@@ -167,5 +169,6 @@ def risk_decision(
             "slippage": slippage,
             "category_capacity_remaining": max(0.0, max_category - current_category),
             "correlated_capacity_remaining": max(0.0, max_correlated - current_correlated),
+            "signal_stake_cap_usdc": signal_cap if signal_cap is not None else "",
         },
     }

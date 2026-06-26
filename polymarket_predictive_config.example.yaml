@@ -213,6 +213,14 @@ cohort_promotion:
   require_positive_forward_pnl: true
   allow_shadow_evidence_for_promotion: true
   allow_promoted_shadow_candidate_trading: true
+  allow_probationary_paper_trading: true
+  probationary_minimum_filled_orders: 3
+  probationary_minimum_settled_orders: 3
+  probationary_minimum_pnl_usdc: 0.0
+  probationary_minimum_roi: 0.03
+  probationary_minimum_monthly_run_rate_usdc: 20
+  probationary_minimum_tracking_hours: 1
+  probationary_max_stake_usdc: 2
   minimum_filled_orders: 5
   minimum_settled_orders: 3
   minimum_pnl_usdc: 0.0

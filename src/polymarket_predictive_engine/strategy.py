@@ -69,6 +69,15 @@ def _cohort_is_promoted(row: dict[str, Any] | None) -> bool:
     return boolish(value)
 
 
+def _cohort_is_probationary(row: dict[str, Any] | None) -> bool:
+    if not row:
+        return False
+    value = row.get("probationary")
+    if isinstance(value, bool):
+        return value
+    return boolish(value)
+
+
 def generate_signals(
     cfg: EngineConfig,
     readiness: dict[str, Any] | None = None,
@@ -99,6 +108,10 @@ def generate_signals(
     allow_promoted_shadow_candidate_trading = bool(
         alpha_enabled and _setting_bool(cohort_settings, "allow_promoted_shadow_candidate_trading", False)
     )
+    allow_probationary_paper_trading = bool(
+        alpha_enabled and _setting_bool(cohort_settings, "allow_probationary_paper_trading", True)
+    )
+    probationary_default_max_stake = float(cohort_settings.get("probationary_max_stake_usdc", 2.0))
     promoted_cohorts = _cohort_promotion_index(cfg) if require_positive_cohort else {}
 
     for prediction in predictions:
@@ -174,15 +187,26 @@ def generate_signals(
             continue
         cohort = str(signal.get("signal_cohort") or "")
         cohort_row = promoted_cohorts.get(cohort) if require_positive_cohort else None
+        cohort_promoted = _cohort_is_promoted(cohort_row)
+        cohort_probationary = bool(allow_probationary_paper_trading and _cohort_is_probationary(cohort_row))
         signal["cohort_promotion_status"] = (
-            "promoted" if _cohort_is_promoted(cohort_row) else "not_promoted"
+            "promoted"
+            if cohort_promoted
+            else "probationary"
+            if cohort_probationary
+            else "not_promoted"
         ) if require_positive_cohort else ""
         signal["cohort_forward_pnl_usdc"] = "" if not cohort_row else cohort_row.get("total_pnl_usdc", "")
         signal["cohort_filled_orders"] = "" if not cohort_row else cohort_row.get("buy_fills", "")
+        signal["cohort_settled_fills"] = "" if not cohort_row else cohort_row.get("settled_fills", "")
+        if cohort_probationary:
+            max_stake = safe_float(cohort_row.get("probationary_max_stake_usdc")) or probationary_default_max_stake
+            signal["probationary_paper_trade"] = True
+            signal["max_stake_usdc"] = max_stake
         promoted_shadow_override = bool(
             allow_promoted_shadow_candidate_trading
             and boolish(prediction.get("shadow_trade_candidate"))
-            and _cohort_is_promoted(cohort_row)
+            and (cohort_promoted or cohort_probationary)
         )
         if (
             require_alpha_candidate
@@ -197,7 +221,9 @@ def generate_signals(
             rejected.append({**signal, "rejection_reason": rejection_reason})
             continue
         if promoted_shadow_override:
-            signal["promotion_override"] = "promoted_shadow_candidate"
+            signal["promotion_override"] = (
+                "probationary_shadow_candidate" if cohort_probationary and not cohort_promoted else "promoted_shadow_candidate"
+            )
         category_key = str(signal.get("category") or "unknown").strip().lower()
         same_category_label_rows = int(same_category_counts.get(category_key, 0))
         signal["same_category_label_rows"] = same_category_label_rows
@@ -213,7 +239,7 @@ def generate_signals(
             )
             continue
         if require_positive_cohort:
-            if not _cohort_is_promoted(cohort_row):
+            if not (cohort_promoted or cohort_probationary):
                 minimum_fills = int(cohort_settings.get("minimum_filled_orders", 5))
                 minimum_pnl = float(cohort_settings.get("minimum_pnl_usdc", 0.0))
                 rejected.append(

@@ -79,6 +79,23 @@ def compute_signal_cohort_pnl(con, cfg: EngineConfig) -> dict[str, Any]:
         "yes",
         "y",
     }
+    allow_probationary = str(settings.get("allow_probationary_paper_trading", True)).strip().lower() in {
+        "1",
+        "true",
+        "yes",
+        "y",
+    }
+    probationary_minimum_filled_orders = int(settings.get("probationary_minimum_filled_orders", 3))
+    probationary_minimum_settled_orders = int(settings.get("probationary_minimum_settled_orders", 3))
+    probationary_minimum_pnl_usdc = float(settings.get("probationary_minimum_pnl_usdc", minimum_pnl_usdc))
+    probationary_minimum_roi = float(settings.get("probationary_minimum_roi", minimum_roi))
+    probationary_minimum_monthly_run_rate = float(
+        settings.get("probationary_minimum_monthly_run_rate_usdc", minimum_monthly_run_rate)
+    )
+    probationary_minimum_tracking_hours = float(
+        settings.get("probationary_minimum_tracking_hours", min(1.0, minimum_tracking_hours))
+    )
+    probationary_max_stake_usdc = float(settings.get("probationary_max_stake_usdc", 2.0))
 
     order_rows = [
         dict(row)
@@ -222,6 +239,16 @@ def compute_signal_cohort_pnl(con, cfg: EngineConfig) -> dict[str, Any]:
             and evidence_elapsed_hours >= minimum_tracking_hours
             and evidence_monthly_run_rate >= minimum_monthly_run_rate
         )
+        probationary = bool(
+            allow_probationary
+            and not promoted
+            and evidence_fills >= probationary_minimum_filled_orders
+            and evidence_settled_fills >= probationary_minimum_settled_orders
+            and evidence_pnl > probationary_minimum_pnl_usdc
+            and evidence_roi >= probationary_minimum_roi
+            and evidence_elapsed_hours >= probationary_minimum_tracking_hours
+            and evidence_monthly_run_rate >= probationary_minimum_monthly_run_rate
+        )
         readiness = {
             "fills_remaining": max(0, minimum_filled_orders - evidence_fills),
             "settled_fills_remaining": max(0, minimum_settled_orders - evidence_settled_fills),
@@ -249,9 +276,13 @@ def compute_signal_cohort_pnl(con, cfg: EngineConfig) -> dict[str, Any]:
                     else "paper"
                 ),
                 "promoted": promoted,
+                "probationary": probationary,
+                "probationary_max_stake_usdc": probationary_max_stake_usdc if probationary else 0.0,
                 "promotion_reason": (
                     "positive cohort evidence"
                     if promoted
+                    else "positive probationary cohort evidence"
+                    if probationary
                     else (
                         f"needs >= {minimum_filled_orders} evidence fills, "
                         f">= {minimum_settled_orders} settled fills, "
@@ -269,6 +300,8 @@ def compute_signal_cohort_pnl(con, cfg: EngineConfig) -> dict[str, Any]:
             {
                 "signal_cohort": row.get("signal_cohort"),
                 "promoted": row.get("promoted"),
+                "probationary": row.get("probationary"),
+                "probationary_max_stake_usdc": row.get("probationary_max_stake_usdc", 0.0),
                 "promotion_ready_score": row.get("promotion_ready_score", 0),
                 "promotion_ready_checks": row.get("promotion_ready_checks", 0),
                 "promotion_readiness": row.get("promotion_readiness", {}),
@@ -301,12 +334,17 @@ def compute_signal_cohort_pnl(con, cfg: EngineConfig) -> dict[str, Any]:
             "minimum_roi": minimum_roi,
             "minimum_monthly_run_rate_usdc": minimum_monthly_run_rate,
             "minimum_tracking_hours_for_promotion": minimum_tracking_hours,
+            "allow_probationary_paper_trading": allow_probationary,
+            "probationary_minimum_filled_orders": probationary_minimum_filled_orders,
+            "probationary_minimum_settled_orders": probationary_minimum_settled_orders,
+            "probationary_max_stake_usdc": probationary_max_stake_usdc,
             "require_positive_forward_pnl": bool(settings.get("require_positive_forward_pnl", True)),
             "allow_shadow_evidence_for_promotion": allow_shadow,
         },
         "shadow_summary_status": shadow_summary.get("status") if isinstance(shadow_summary, dict) else "missing",
         "cohorts": cohorts,
         "promoted_cohorts": [row["signal_cohort"] for row in cohorts if row.get("promoted")],
+        "probationary_cohorts": [row["signal_cohort"] for row in cohorts if row.get("probationary")],
         "promotion_watchlist": promotion_watchlist,
     }
 

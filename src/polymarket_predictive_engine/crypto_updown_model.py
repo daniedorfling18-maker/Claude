@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import json
 import math
@@ -20,7 +20,8 @@ ASSET_SYMBOLS = {
     "xrp": "XRPUSDT",
 }
 
-_SNAPSHOT_CACHE: dict[tuple[str, int, int, str, int], dict[str, Any]] = {}
+_SNAPSHOT_CACHE: dict[tuple[str, str, int, int, str, int], dict[str, Any]] = {}
+_FAST_UPDOWN_RE = re.compile(r"\b(?P<asset>btc|eth|sol|xrp)-updown-(?P<interval>5m|15m)-(?P<start>\d{9,11})\b")
 
 
 def _normal_cdf(value: float) -> float:
@@ -63,11 +64,39 @@ def crypto_updown_asset(row: dict[str, Any]) -> str:
     return ""
 
 
-def is_crypto_updown_daily(row: dict[str, Any]) -> bool:
-    text = " ".join(
+def _joined_text(row: dict[str, Any]) -> str:
+    return " ".join(
         str(row.get(key) or "")
-        for key in ("market_slug", "question", "event_id", "category")
+        for key in ("market_slug", "question", "event_id", "category", "market_id")
     ).lower()
+
+
+def _fast_crypto_updown_parts(row: dict[str, Any]) -> dict[str, Any] | None:
+    text = _joined_text(row)
+    match = _FAST_UPDOWN_RE.search(text)
+    if not match:
+        return None
+    interval = match.group("interval")
+    interval_minutes = 15 if interval == "15m" else 5
+    try:
+        start_time = datetime.fromtimestamp(int(match.group("start")), tz=timezone.utc)
+    except (TypeError, ValueError, OSError):
+        return None
+    return {
+        "kind": "fast",
+        "asset": match.group("asset"),
+        "interval": interval,
+        "interval_minutes": interval_minutes,
+        "start_time": start_time,
+        "close_time": start_time + timedelta(minutes=interval_minutes),
+        "binance_interval": interval,
+        "start_price_kline_index": 1,
+        "price_source": f"binance_{interval}_open",
+    }
+
+
+def is_crypto_updown_daily(row: dict[str, Any]) -> bool:
+    text = _joined_text(row)
     if not crypto_updown_asset(row):
         return False
     if not ("up or down" in text or "up-or-down" in text or "updown" in text):
@@ -85,6 +114,44 @@ def is_crypto_updown_daily(row: dict[str, Any]) -> bool:
             text,
         )
     )
+
+
+def crypto_updown_window(row: dict[str, Any], settings: dict[str, Any] | None = None) -> dict[str, Any] | None:
+    """Return the contract timing window for daily and fast crypto Up/Down markets.
+
+    Daily contracts settle against the prior daily reference candle, while the
+    5m/15m contracts encode their Binance window start directly in the slug
+    (for example ``btc-updown-5m-1782468000``).
+    """
+    settings = settings or {}
+    fast = _fast_crypto_updown_parts(row)
+    if fast is not None:
+        return fast
+    if not is_crypto_updown_daily(row):
+        return None
+    close_time = parse_timestamp(
+        row.get("close_time")
+        or row.get("end_time")
+        or row.get("endDate")
+        or row.get("market_close_time")
+    )
+    window_hours = float(settings.get("daily_window_hours", 24.0))
+    close_utc = close_time.astimezone(timezone.utc) if close_time is not None else None
+    return {
+        "kind": "daily",
+        "asset": crypto_updown_asset(row),
+        "interval": "daily",
+        "interval_minutes": int(window_hours * 60),
+        "start_time": close_utc - timedelta(hours=window_hours) if close_utc is not None else None,
+        "close_time": close_utc,
+        "binance_interval": "1m",
+        "start_price_kline_index": 4,
+        "price_source": "binance_1m_close",
+    }
+
+
+def is_crypto_updown_contract(row: dict[str, Any]) -> bool:
+    return _fast_crypto_updown_parts(row) is not None or is_crypto_updown_daily(row)
 
 
 def _first_float_from_kline(payload: Any, index: int) -> float | None:
@@ -120,34 +187,36 @@ def score_crypto_updown_prediction(
     settings = settings or {}
     if not settings.get("enabled", True):
         return {"crypto_model_status": "disabled"}
-    if not is_crypto_updown_daily(row):
-        return {"crypto_model_status": "not_crypto_updown_daily"}
+    contract = crypto_updown_window(row, settings)
+    if contract is None:
+        return {"crypto_model_status": "not_crypto_updown"}
 
-    asset = crypto_updown_asset(row)
+    asset = str(contract.get("asset") or crypto_updown_asset(row))
     symbol = ASSET_SYMBOLS.get(asset, "")
-    close_time = parse_timestamp(
-        row.get("close_time")
-        or row.get("end_time")
-        or row.get("endDate")
-        or row.get("market_close_time")
-    )
+    start_time = contract.get("start_time")
+    close_time = contract.get("close_time")
     if not symbol:
         return {"crypto_model_status": "unsupported_asset"}
-    if close_time is None:
+    if start_time is None or close_time is None:
         return {"crypto_model_status": "missing_close_time"}
+    start_time = start_time.astimezone(timezone.utc)
     close_time = close_time.astimezone(timezone.utc)
     now_dt = (now or datetime.now(timezone.utc)).astimezone(timezone.utc)
-    window_hours = float(settings.get("daily_window_hours", 24.0))
-    start_time = close_time - timedelta(hours=window_hours)
     elapsed_seconds = (now_dt - start_time).total_seconds()
     remaining_seconds = (close_time - now_dt).total_seconds()
-    if elapsed_seconds < float(settings.get("minimum_elapsed_seconds", 300.0)):
+    if contract.get("kind") == "fast":
+        minimum_elapsed_seconds = float(settings.get("fast_minimum_elapsed_seconds", 20.0))
+        minimum_remaining_seconds = float(settings.get("fast_minimum_remaining_seconds", 20.0))
+    else:
+        minimum_elapsed_seconds = float(settings.get("minimum_elapsed_seconds", 300.0))
+        minimum_remaining_seconds = float(settings.get("minimum_remaining_seconds", 60.0))
+    if elapsed_seconds < minimum_elapsed_seconds:
         return {
             "crypto_model_status": "before_model_window",
             "crypto_model_elapsed_seconds": elapsed_seconds,
             "crypto_model_remaining_seconds": remaining_seconds,
         }
-    if remaining_seconds < float(settings.get("minimum_remaining_seconds", 60.0)):
+    if remaining_seconds < minimum_remaining_seconds:
         return {
             "crypto_model_status": "too_close_to_resolution",
             "crypto_model_elapsed_seconds": elapsed_seconds,
@@ -155,11 +224,20 @@ def score_crypto_updown_prediction(
         }
 
     api_base = str(settings.get("binance_base_url", "https://api.binance.com/api/v3")).rstrip("/")
-    timeout_seconds = float(settings.get("request_timeout_seconds", 10.0))
-    lookback = int(settings.get("volatility_lookback_minutes", 240))
+    if contract.get("kind") == "fast":
+        timeout_seconds = float(settings.get("fast_request_timeout_seconds", settings.get("request_timeout_seconds", 1.5)))
+    else:
+        timeout_seconds = float(settings.get("request_timeout_seconds", 10.0))
+    if contract.get("kind") == "fast":
+        lookback = int(settings.get("fast_volatility_lookback_minutes", settings.get("volatility_lookback_minutes", 90)))
+    else:
+        lookback = int(settings.get("volatility_lookback_minutes", 240))
     cache_seconds = max(1, int(settings.get("cache_seconds", 30)))
+    binance_interval = str(contract.get("binance_interval") or "1m")
+    start_price_kline_index = int(contract.get("start_price_kline_index") or 4)
     cache_key = (
         symbol,
+        binance_interval,
         int(start_time.timestamp()),
         int(close_time.timestamp()),
         api_base,
@@ -171,7 +249,9 @@ def score_crypto_updown_prediction(
         start_ms = int(start_time.timestamp() * 1000)
         start_url = (
             f"{api_base}/klines?"
-            + urllib.parse.urlencode({"symbol": symbol, "interval": "1m", "startTime": str(start_ms), "limit": "1"})
+            + urllib.parse.urlencode(
+                {"symbol": symbol, "interval": binance_interval, "startTime": str(start_ms), "limit": "1"}
+            )
         )
         ticker_url = f"{api_base}/ticker/price?" + urllib.parse.urlencode({"symbol": symbol})
         vol_url = (
@@ -185,8 +265,8 @@ def score_crypto_updown_prediction(
         except Exception as exc:  # noqa: BLE001 - live model must fail closed
             return {"crypto_model_status": f"price_fetch_error:{type(exc).__name__}"}
 
-        # Polymarket resolves these daily contracts against the Binance 1m candle "Close" price.
-        start_price = _first_float_from_kline(start_payload, 4)
+        # Daily contracts use the Binance 1m candle close; fast 5m/15m contracts use the encoded window's open.
+        start_price = _first_float_from_kline(start_payload, start_price_kline_index)
         current_price = safe_float(ticker_payload.get("price") if isinstance(ticker_payload, dict) else None)
         sigma, volatility_rows = _volatility_per_sqrt_second(vol_payload)
         sigma = max(float(settings.get("sigma_floor_per_sqrt_second", 0.00002)), sigma)
@@ -221,6 +301,8 @@ def score_crypto_updown_prediction(
         "crypto_model_status": "scored",
         "crypto_model_asset": asset,
         "crypto_model_symbol": symbol,
+        "crypto_model_contract_kind": contract.get("kind", ""),
+        "crypto_model_interval": contract.get("interval", ""),
         "crypto_model_probability": probability,
         "crypto_model_p_up": p_up,
         "crypto_model_edge": edge,
@@ -235,6 +317,7 @@ def score_crypto_updown_prediction(
         "crypto_model_elapsed_seconds": elapsed_seconds,
         "crypto_model_remaining_seconds": remaining_seconds,
         "crypto_model_volatility_return_rows": volatility_rows,
-        "crypto_model_price_source": "binance_1m_close",
+        "crypto_model_price_source": contract.get("price_source", "binance_1m_close"),
         "crypto_model_cache_hit": bool(snapshot.get("cache_hit")),
     }
+

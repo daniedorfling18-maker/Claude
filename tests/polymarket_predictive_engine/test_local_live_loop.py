@@ -290,3 +290,32 @@ def test_first_discovery_refresh_is_due_immediately_after_start():
 
     assert loop._initial_discovery_due_timestamp(300, now=1234.5) == 1234.5
     assert loop._initial_discovery_due_timestamp(0, now=1234.5) == float("inf")
+
+
+def test_prediction_cycle_status_is_background_friendly():
+    loop = _load_loop_module()
+
+    running = loop._running_prediction_summary(paper_source="websocket", started_at_utc="2026-06-26T14:00:00Z")
+    done = loop._summarise_prediction_cycle(
+        {
+            "status": "ran",
+            "generated_at_utc": "2026-06-26T14:01:00Z",
+            "features": 10,
+            "predictions": 4,
+            "signals_approved": 1,
+            "signals_rejected": 3,
+            "broker": {"equity": 1000.5},
+        },
+        paper_source="websocket",
+        started_at_utc="2026-06-26T14:00:00Z",
+    )
+
+    assert loop.build_parser().parse_args([]).prediction_cycle_seconds == 15.0
+    assert running == {
+        "status": "running",
+        "source": "websocket",
+        "started_at_utc": "2026-06-26T14:00:00Z",
+    }
+    assert done["status"] == "ran"
+    assert done["predictions"] == 4
+    assert done["equity"] == 1000.5

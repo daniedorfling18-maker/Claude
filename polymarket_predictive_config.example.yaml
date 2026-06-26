@@ -1,4 +1,4 @@
-paths:
+﻿paths:
   data_root: .
   output_root: outputs
   database_path: work/polymarket/polymarket_engine.sqlite
@@ -190,19 +190,24 @@ crypto_fundamental:
   targets_path: inputs/polymarket/crypto_targets.csv
   request_timeout_seconds: 20
 crypto_updown_live_model:
-  # Contract-specific daily Up/Down model. Uses Binance 1m candle close at prior noon ET
-  # versus current Binance spot, then a volatility forecast to the market close.
+  # Contract-specific Up/Down model. Daily contracts use the Binance 1m candle close
+  # at the daily reference window; fast 5m/15m contracts use the window start encoded
+  # in the Polymarket slug and the Binance candle open.
   enabled: true
   binance_base_url: https://api.binance.com/api/v3
   daily_window_hours: 24
   volatility_lookback_minutes: 240
-  request_timeout_seconds: 4
+  fast_volatility_lookback_minutes: 90
+  fast_request_timeout_seconds: 1.0
+  request_timeout_seconds: 1.5
   sigma_floor_per_sqrt_second: 0.00002
   minimum_elapsed_seconds: 300
   minimum_remaining_seconds: 60
+  fast_minimum_elapsed_seconds: 20
+  fast_minimum_remaining_seconds: 20
   minimum_time_to_close_hours: 0
   maximum_time_to_close_hours: 36
-  max_scored_rows_per_cycle: 24
+  max_scored_rows_per_cycle: 16
   probability_blend_weight: 0.65
   max_probability_adjustment: 0.25
   allow_shadow_candidates: true
@@ -549,3 +554,5 @@ governance_thresholds:
   require_clean_snapshot_labels_for_paper: false
   min_forward_paper_trades: 1
   require_positive_forward_paper_roi: false
+
+

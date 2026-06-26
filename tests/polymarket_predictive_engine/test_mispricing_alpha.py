@@ -300,6 +300,71 @@ def test_alpha_uses_crypto_updown_contract_model_overlay(tmp_path, monkeypatch):
     assert scored[0]["shadow_candidate_reason"] == "shadow_eligible"
 
 
+def test_alpha_uses_fast_crypto_updown_contract_model_overlay(tmp_path, monkeypatch):
+    cfg = _config(tmp_path)
+    cfg.raw["mispricing_alpha"].update(
+        {
+            "bias_alpha_shrinkage": 0.0,
+            "model_residual_shrinkage": 0.0,
+            "use_fundamental_probabilities": False,
+            "market_overround_penalty_weight": 0.0,
+        }
+    )
+    cfg.raw["crypto_updown_live_model"].update(
+        {
+            "enabled": True,
+            "probability_blend_weight": 0.5,
+            "max_probability_adjustment": 0.3,
+        }
+    )
+    calls = 0
+
+    def fake_crypto_model(row, settings):
+        nonlocal calls
+        calls += 1
+        assert settings["enabled"] is True
+        assert row["market_slug"] == "btc-updown-5m-1782468000"
+        return {
+            "crypto_model_status": "scored",
+            "crypto_model_contract_kind": "fast",
+            "crypto_model_interval": "5m",
+            "crypto_model_probability": 0.70,
+            "crypto_model_p_up": 0.70,
+            "crypto_model_edge_after_cost": 0.24,
+        }
+
+    monkeypatch.setattr(mispricing_alpha_module, "score_crypto_updown_prediction", fake_crypto_model)
+
+    scored = apply_mispricing_alpha(
+        cfg,
+        [
+            {
+                "market_id": "btc-5m",
+                "market_slug": "btc-updown-5m-1782468000",
+                "question": "Bitcoin UpDown 5M",
+                "outcome": "Up",
+                "token_id": "btc-5m-up-token",
+                "prediction_timestamp": "2026-06-26T09:00:00Z",
+                "category": "crypto",
+                "market_midpoint": "0.45",
+                "calibrated_probability": "0.45",
+                "executable_price": "0.45",
+                "spread": "0.01",
+                "liquidity": "1000",
+                "time_to_close_hours": "0.05",
+                "confidence": "1",
+            }
+        ],
+    )
+
+    assert calls == 1
+    assert scored[0]["crypto_model_status"] == "scored"
+    assert scored[0]["crypto_model_contract_kind"] == "fast"
+    assert scored[0]["crypto_model_interval"] == "5m"
+    assert round(float(scored[0]["crypto_model_adjustment"]), 6) == 0.125
+    assert round(float(scored[0]["alpha_probability"]), 6) == 0.575
+
+
 def test_crypto_shadow_evidence_uses_crypto_edge_not_generic_alpha_lower_bound(tmp_path, monkeypatch):
     cfg = _config(tmp_path)
     cfg.raw["mispricing_alpha"].update(

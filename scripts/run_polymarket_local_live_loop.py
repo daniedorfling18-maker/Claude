@@ -530,6 +530,35 @@ def _write_discovery_heartbeat(
     write_json(cfg.governance_root / "local_live_loop_discovery_heartbeat.json", payload)
 
 
+def _run_prediction_cycle(*, config_path: Path, paper_source: str) -> dict[str, Any]:
+    cfg = load_config(config_path)
+    return run_paper_cycle(cfg, source=paper_source)
+
+
+def _summarise_prediction_cycle(result: dict[str, Any], *, paper_source: str, started_at_utc: str = "") -> dict[str, Any]:
+    broker = result.get("broker", {}) if isinstance(result, dict) else {}
+    summary = {
+        "status": result.get("status", "ran") if isinstance(result, dict) else "ran",
+        "source": paper_source,
+        "generated_at_utc": result.get("generated_at_utc", "") if isinstance(result, dict) else "",
+        "started_at_utc": started_at_utc,
+        "features": result.get("features") if isinstance(result, dict) else None,
+        "predictions": result.get("predictions") if isinstance(result, dict) else None,
+        "signals_approved": result.get("signals_approved") if isinstance(result, dict) else None,
+        "signals_rejected": result.get("signals_rejected") if isinstance(result, dict) else None,
+        "equity": broker.get("equity") if isinstance(broker, dict) else None,
+    }
+    return {key: value for key, value in summary.items() if value not in {None, ""}}
+
+
+def _running_prediction_summary(*, paper_source: str, started_at_utc: str) -> dict[str, Any]:
+    return {
+        "status": "running",
+        "source": paper_source,
+        "started_at_utc": started_at_utc,
+    }
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="run_polymarket_local_live_loop.py")
     parser.add_argument("--config", default="polymarket_predictive_config.example.yaml")
@@ -538,7 +567,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--iterations", type=int, default=0, help="0 means run forever.")
     parser.add_argument("--max-assets", type=int, default=250)
     parser.add_argument("--include-config-websocket-assets", action="store_true", help="Also subscribe to static config assets after dynamic assets.")
-    parser.add_argument("--prediction-cycle-seconds", type=float, default=0.0, help="If >0, periodically run the full paper-cycle prediction path too.")
+    parser.add_argument("--prediction-cycle-seconds", type=float, default=15.0, help="How often to run the full paper-cycle prediction path; websocket marking still updates every tick.")
     parser.add_argument("--discovery-cycle-seconds", type=float, default=300.0, help="Periodically refresh scanner discovery so websocket assets follow changing markets.")
     parser.add_argument("--paper-source", choices=["raw_snapshot", "websocket"], default="raw_snapshot")
     parser.add_argument("--optimize-model", action="store_true", help="Allow the slower discovery lane to run scheduled model optimisation.")
@@ -560,6 +589,10 @@ def main(argv: list[str] | None = None) -> int:
     discovery_future: Future[tuple[int, dict[str, Any]]] | None = None
     discovery_running_iteration = 0
     discovery_started_at_utc = ""
+    prediction_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="polymarket-prediction")
+    prediction_future: Future[dict[str, Any]] | None = None
+    prediction_started_at_utc = ""
+    last_prediction_summary: dict[str, Any] = {"status": "not_started", "source": args.paper_source}
     iteration = 0
     failures = 0
     discovery_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="polymarket-discovery")
@@ -601,6 +634,29 @@ def main(argv: list[str] | None = None) -> int:
                         discovery_running_iteration = 0
                         discovery_started_at_utc = ""
                         next_discovery_cycle = time.time() + args.discovery_cycle_seconds
+                if prediction_future is not None and prediction_future.done():
+                    try:
+                        last_prediction_summary = _summarise_prediction_cycle(
+                            prediction_future.result(),
+                            paper_source=args.paper_source,
+                            started_at_utc=prediction_started_at_utc,
+                        )
+                    except Exception as exc:  # noqa: BLE001 - prediction must not stop live websocket ticks
+                        failures += 1
+                        last_prediction_summary = {
+                            "status": "error",
+                            "source": args.paper_source,
+                            "started_at_utc": prediction_started_at_utc,
+                            "error": f"{type(exc).__name__}: {exc}",
+                        }
+                    finally:
+                        prediction_future = None
+                        prediction_started_at_utc = ""
+                        next_prediction_cycle = (
+                            time.time() + args.prediction_cycle_seconds
+                            if args.prediction_cycle_seconds > 0
+                            else float("inf")
+                        )
 
                 asset_ids, token_sources = discover_websocket_asset_ids(
                     cfg,
@@ -629,13 +685,24 @@ def main(argv: list[str] | None = None) -> int:
                 features = enrich_websocket_features_with_scanner_metadata(cfg, features)
                 ingest = ingest_websocket_features_into_ledger(cfg, features)
 
-                full_cycle = {"status": "skipped"}
-                if time.time() >= next_prediction_cycle:
-                    if discovery_future is not None and not discovery_future.done():
-                        full_cycle = {"status": "skipped_discovery_running", "source": args.paper_source}
-                    else:
-                        full_cycle = run_paper_cycle(cfg, source=args.paper_source)
-                        next_prediction_cycle = time.time() + args.prediction_cycle_seconds
+                full_cycle = dict(last_prediction_summary)
+                if prediction_future is not None and not prediction_future.done():
+                    full_cycle = _running_prediction_summary(
+                        paper_source=args.paper_source,
+                        started_at_utc=prediction_started_at_utc,
+                    )
+                elif args.prediction_cycle_seconds > 0 and time.time() >= next_prediction_cycle:
+                    prediction_started_at_utc = now_utc()
+                    prediction_future = prediction_executor.submit(
+                        _run_prediction_cycle,
+                        config_path=config_path,
+                        paper_source=args.paper_source,
+                    )
+                    next_prediction_cycle = float("inf")
+                    full_cycle = _running_prediction_summary(
+                        paper_source=args.paper_source,
+                        started_at_utc=prediction_started_at_utc,
+                    )
                 next_discovery_in_seconds = None
                 if next_discovery_cycle != float("inf"):
                     next_discovery_in_seconds = max(0.0, round(next_discovery_cycle - time.time(), 3))
@@ -646,6 +713,8 @@ def main(argv: list[str] | None = None) -> int:
                     "iteration": iteration,
                     "generated_at_utc": now_utc(),
                     "asset_count": len(asset_ids),
+                    "websocket_seconds": args.websocket_seconds,
+                    "prediction_cycle_seconds": args.prediction_cycle_seconds,
                     "asset_sources": {source: list(token_sources.values()).count(source) for source in sorted(set(token_sources.values()))},
                     "websocket": websocket,
                     "websocket_features": websocket_features,
@@ -676,6 +745,11 @@ def main(argv: list[str] | None = None) -> int:
                     "full_prediction_cycle": {
                         "status": full_cycle.get("status") if isinstance(full_cycle, dict) else "unknown",
                         "source": args.paper_source,
+                        **(
+                            {key: value for key, value in full_cycle.items() if key != "source"}
+                            if isinstance(full_cycle, dict)
+                            else {}
+                        ),
                     },
                     "elapsed_seconds": round(time.time() - started, 3),
                 }
@@ -731,6 +805,7 @@ def main(argv: list[str] | None = None) -> int:
         print("local-live-loop: stopped by user", flush=True)
     finally:
         discovery_executor.shutdown(wait=False, cancel_futures=True)
+        prediction_executor.shutdown(wait=False, cancel_futures=True)
     return 2 if failures else 0
 
 

@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Any
 
 from .config import EngineConfig, load_config
-from .crypto_updown_model import is_crypto_updown_daily, score_crypto_updown_prediction
+from .crypto_updown_model import is_crypto_updown_contract, score_crypto_updown_prediction
 from .models.calibration_v2 import joined_feature_label_rows
 from .utils import boolish, git_commit_hash, now_utc, read_csv_rows, read_json, safe_float, write_csv, write_json
 from .worldcup_validation import is_worldcup_winner_market, signal_cohort
@@ -397,8 +397,8 @@ def apply_mispricing_alpha(
         fundamental = fundamental_probabilities.get(token_id)
         fundamental_probability = safe_float(fundamental.get("probability")) if fundamental else None
         fundamental_source = str(fundamental.get("source")) if fundamental else ""
-        crypto_model = {"crypto_model_status": "not_crypto_updown_daily"}
-        if is_crypto_updown_daily(row):
+        crypto_model = {"crypto_model_status": "not_crypto_updown"}
+        if is_crypto_updown_contract(row):
             time_to_close = safe_float(row.get("time_to_close_hours") or row.get("hours_to_close"))
             if crypto_min_ttc is not None and time_to_close is not None and time_to_close < crypto_min_ttc:
                 crypto_model = {"crypto_model_status": "outside_time_to_close_window"}

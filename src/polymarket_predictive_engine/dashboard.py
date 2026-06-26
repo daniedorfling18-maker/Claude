@@ -21,7 +21,7 @@ HTML = """<!doctype html>
     :root { color-scheme: dark; --bg:#08111f; --panel:#101c2f; --panel2:#13233a; --text:#ecf3ff; --muted:#8ea3bf; --good:#46d39a; --bad:#ff6b7a; --warn:#ffd166; --line:#203553; }
     * { box-sizing: border-box; }
     body { margin:0; font:14px/1.45 Inter, ui-sans-serif, system-ui, -apple-system, Segoe UI, sans-serif; background:radial-gradient(circle at top left,#173154 0,#08111f 42rem); color:var(--text); }
-    main { max-width:1280px; margin:0 auto; padding:28px; }
+    main { max-width:1280px; margin:0 auto; padding:clamp(16px,3vw,28px); }
     header { display:flex; justify-content:space-between; gap:16px; align-items:flex-start; margin-bottom:22px; }
     h1 { margin:0; font-size:28px; letter-spacing:-0.03em; }
     h2 { margin:0 0 12px; font-size:16px; }
@@ -32,22 +32,29 @@ HTML = """<!doctype html>
     .dot.bad { background:var(--bad); color:var(--bad); }
     .grid { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:14px; margin-bottom:16px; }
     .card, section { background:linear-gradient(180deg,rgba(255,255,255,0.055),rgba(255,255,255,0.025)); border:1px solid var(--line); border-radius:18px; box-shadow:0 18px 50px rgba(0,0,0,0.25); }
-    .card { padding:16px; min-height:104px; }
+    .card { padding:16px; min-height:104px; min-width:0; }
     .label { color:var(--muted); font-size:12px; text-transform:uppercase; letter-spacing:0.08em; }
-    .value { margin-top:8px; font-size:26px; font-weight:750; letter-spacing:-0.03em; }
+    .value { margin-top:8px; font-size:clamp(18px,2.2vw,26px); font-weight:750; letter-spacing:-0.03em; overflow-wrap:anywhere; }
     .value.good { color:var(--good); } .value.bad { color:var(--bad); } .value.warn { color:var(--warn); }
     section { padding:16px; margin-top:16px; overflow:hidden; }
-    .tableWrap { width:100%; overflow-x:auto; -webkit-overflow-scrolling:touch; }
-    table { width:100%; border-collapse:collapse; }
+    .tableWrap { width:100%; overflow-x:auto; -webkit-overflow-scrolling:touch; border-radius:12px; }
+    table { width:100%; min-width:720px; border-collapse:collapse; }
     th, td { padding:10px 8px; border-bottom:1px solid rgba(255,255,255,0.08); text-align:left; vertical-align:top; }
     th { color:var(--muted); font-size:12px; font-weight:650; text-transform:uppercase; letter-spacing:0.06em; }
-    td { color:#d8e5f8; overflow-wrap:anywhere; max-width:520px; }
+    td { color:#d8e5f8; overflow-wrap:anywhere; max-width:360px; }
     tr:hover td { background:rgba(255,255,255,0.035); }
     .two { display:grid; grid-template-columns:1fr 1fr; gap:16px; }
     .mono { font-family:ui-monospace, SFMono-Regular, Consolas, monospace; font-size:12px; }
     .muted { color:var(--muted); }
+    .facts { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:10px; }
+    .fact { border:1px solid rgba(255,255,255,0.08); background:rgba(255,255,255,0.035); border-radius:12px; padding:10px; min-width:0; }
+    .fact .label { margin-bottom:5px; }
+    .factValue { color:#d8e5f8; font-weight:650; overflow-wrap:anywhere; }
+    details.expand summary { cursor:pointer; color:#d8e5f8; }
+    details.expand summary::marker { color:var(--muted); }
+    .fullText { margin-top:8px; padding:8px; border-radius:10px; background:rgba(0,0,0,0.22); color:#c8d8ef; white-space:pre-wrap; overflow-wrap:anywhere; }
     .error { color:var(--bad); padding:16px; border:1px solid rgba(255,107,122,0.35); border-radius:14px; background:rgba(255,107,122,0.08); }
-    @media (max-width: 980px) { .grid, .two { grid-template-columns:1fr; } header { flex-direction:column; } }
+    @media (max-width: 980px) { .grid, .two, .facts { grid-template-columns:1fr; } header { flex-direction:column; } table { min-width:640px; } }
   </style>
 </head>
 <body>
@@ -87,15 +94,32 @@ HTML = """<!doctype html>
 <script>
 const fmtUsd = (v) => v === null || v === undefined || v === "" || Number.isNaN(Number(v)) ? "-" : "$" + Number(v).toFixed(2);
 const fmtNum = (v, d=4) => v === null || v === undefined || v === "" || Number.isNaN(Number(v)) ? "-" : Number(v).toFixed(d);
-const longText = (v) => !v ? "-" : String(v).length > 80 ? String(v).slice(0,42) + "..." + String(v).slice(-24) : String(v);
-const joinText = (v) => Array.isArray(v) ? v.join(", ") : (v || "-");
+const escapeHtml = (v) => String(v ?? "-").replace(/[&<>"']/g, ch => ({ "&":"&amp;", "<":"&lt;", ">":"&gt;", '"':"&quot;", "'":"&#39;" }[ch]));
+const asText = (v) => {
+  if (v === null || v === undefined || v === "") return "-";
+  if (Array.isArray(v)) return v.join(", ");
+  if (typeof v === "object") return JSON.stringify(v, null, 2);
+  return String(v);
+};
+const longText = (v, limit=96) => {
+  const text = asText(v);
+  if (!text || text === "-") return "-";
+  if (text.length <= limit) return escapeHtml(text);
+  const preview = text.slice(0, Math.max(24, Math.floor(limit * 0.58))) + " … " + text.slice(-Math.max(16, Math.floor(limit * 0.26)));
+  return `<details class="expand"><summary title="${escapeHtml(text)}">${escapeHtml(preview)}</summary><div class="fullText">${escapeHtml(text)}</div></details>`;
+};
+const joinText = (v) => longText(Array.isArray(v) ? v.join(", ") : v);
 const short = longText;
 const joinList = joinText;
-const marketLabel = (row) => row?.market_name || row?.question || row?.market_slug || (row?.market_id ? longText(row.market_id) : longText(row?.token_id));
-function card(label, value, cls="") { return `<div class="card"><div class="label">${label}</div><div class="value ${cls}">${value}</div></div>`; }
+const marketLabel = (row) => longText(row?.market_name || row?.question || row?.market_slug || row?.market_id || row?.token_id);
+const plain = (v) => escapeHtml(asText(v));
+function card(label, value, cls="") { return `<div class="card"><div class="label">${escapeHtml(label)}</div><div class="value ${cls}">${value}</div></div>`; }
 function table(rows, columns) {
   if (!rows || !rows.length) return `<div class="muted">No rows yet.</div>`;
-  return `<div class="tableWrap"><table><thead><tr>${columns.map(c=>`<th>${c[0]}</th>`).join("")}</tr></thead><tbody>${rows.map(row=>`<tr>${columns.map(c=>`<td>${c[2] ? c[2](row[c[1]], row) : (row[c[1]] ?? "-")}</td>`).join("")}</tr>`).join("")}</tbody></table></div>`;
+  return `<div class="tableWrap"><table><thead><tr>${columns.map(c=>`<th>${escapeHtml(c[0])}</th>`).join("")}</tr></thead><tbody>${rows.map(row=>`<tr>${columns.map(c=>`<td>${c[2] ? c[2](row[c[1]], row) : plain(row[c[1]])}</td>`).join("")}</tr>`).join("")}</tbody></table></div>`;
+}
+function facts(rows) {
+  return `<div class="facts">${rows.map(row => `<div class="fact"><div class="label">${escapeHtml(row[0])}</div><div class="factValue">${row[2] ? row[2](row[1]) : longText(row[1])}</div></div>`).join("")}</div>`;
 }
 async function load() {
   try {
@@ -139,34 +163,39 @@ async function load() {
       card("Shadow P&L", fmtUsd(data.shadow_settlement_watch?.shadow_total_pnl_usdc), Number(data.shadow_settlement_watch?.shadow_total_pnl_usdc || 0) > 0 ? "good" : "warn"),
       card("Expected lower-bound / cycle", fmtUsd(monthly.expected_lower_bound_profit_per_cycle_usdc), monthly.status === "on_pace" ? "good" : "warn")
     ].join("");
-    document.getElementById("actualTarget").innerHTML = table([{
-      status: target.status, target: target.target_monthly_profit_usdc, pnl: target.actual_pnl_since_baseline_usdc,
-      elapsed: target.elapsed_hours, run: target.monthly_run_rate_usdc, baseline: target.baseline?.baseline_equity_usdc
-    }], [
-      ["Status","status"], ["Target","target", fmtUsd], ["P&L","pnl", fmtUsd], ["Hours","elapsed", v=>fmtNum(v,2)], ["Run-rate","run", fmtUsd], ["Baseline equity","baseline", fmtUsd]
+    document.getElementById("actualTarget").innerHTML = facts([
+      ["Status", target.status],
+      ["Target / month", target.target_monthly_profit_usdc, fmtUsd],
+      ["Actual P&L", target.actual_pnl_since_baseline_usdc, fmtUsd],
+      ["Tracking hours", target.elapsed_hours, v=>fmtNum(v,2)],
+      ["Monthly run-rate", target.monthly_run_rate_usdc, fmtUsd],
+      ["Baseline equity", target.baseline?.baseline_equity_usdc, fmtUsd]
     ]);
-    document.getElementById("cycle").innerHTML = table([{
-      scan: live.discovery?.scan?.tokens || scanner.scan?.tokens, features: data.forward_paper_cycle?.features, predictions: data.forward_paper_cycle?.predictions,
-      approved: data.forward_paper_cycle?.signals_approved, rejected: data.forward_paper_cycle?.signals_rejected,
-      brokerRejected: monthly.broker_rejected_orders,
-      liveTick: live.iteration,
-      liveSource: live.live_source || live.source || (websocket.new_messages != null ? "websocket" : "-"),
-      wsMessages: websocket.new_messages,
-      wsFeatures: websocketFeatures.feature_rows,
-      snapshotsInserted: ingest.inserted_market_snapshots,
-      fullCycle: live.full_prediction_cycle?.status,
-      discoveryStatus: discovery.status,
-      lastDiscovery: discovery.last_status,
-      nextDiscovery: discovery.next_due_in_seconds == null ? "-" : Math.round(Number(discovery.next_due_in_seconds)) + "s",
-      discoveryIteration: discovery.discovery_iteration,
-      fastUpdown: fastUpdown.tokens == null ? (fastUpdown.status || "-") : (fastUpdown.tokens + " tokens"),
-      fastAssets: joinText(fastUpdown.assets),
-      scanMode: currentScan.scan_plan?.mode || lastScan.scan_plan?.mode || scanner.scan?.scan_plan?.mode,
-      queries: currentScan.scan_plan?.selected_queries || lastScan.scan_plan?.selected_queries || scanner.scan?.scan_plan?.selected_queries || scanner.scan?.queries,
-      priorityQueue: currentScan.scan_plan?.adaptive_priority?.priority_queries || lastScan.scan_plan?.adaptive_priority?.priority_queries || scanner.scan?.scan_plan?.adaptive_priority?.priority_queries || currentScan.scan_plan?.ordered_queries || lastScan.scan_plan?.ordered_queries || scanner.scan?.scan_plan?.ordered_queries,
-      reason: broker.entry_pause_reason || Object.keys(broker.broker_rejection_reasons || {}).join(", ")
-    }], [
-      ["Live tick","liveTick"], ["Live source","liveSource"], ["WS msgs","wsMessages"], ["WS features","wsFeatures"], ["Snapshots","snapshotsInserted"], ["Full cycle","fullCycle"], ["Discovery","discoveryStatus"], ["Last scan","lastDiscovery"], ["Next scan","nextDiscovery"], ["Discovery #","discoveryIteration"], ["Fast 5m","fastUpdown"], ["Fast assets","fastAssets"], ["Scan mode","scanMode"], ["Queries","queries", joinText], ["Priority queue","priorityQueue", joinText], ["Tokens","scan"], ["Features","features"], ["Predictions","predictions"], ["Approved","approved"], ["Rejected","rejected"], ["Broker rejects","brokerRejected"], ["Main reason","reason"]
+    document.getElementById("cycle").innerHTML = facts([
+      ["Live tick", live.iteration],
+      ["Live source", live.live_source || live.source || (websocket.new_messages != null ? "websocket" : "-")],
+      ["WS window", live.websocket_seconds == null ? "-" : live.websocket_seconds + "s"],
+      ["Prediction cycle", live.prediction_cycle_seconds == null ? "-" : live.prediction_cycle_seconds + "s"],
+      ["WS messages", websocket.new_messages],
+      ["WS features", websocketFeatures.feature_rows],
+      ["Snapshots inserted", ingest.inserted_market_snapshots],
+      ["Full cycle", live.full_prediction_cycle?.status],
+      ["Discovery", discovery.status],
+      ["Last scan", discovery.last_status],
+      ["Next discovery", discovery.next_due_in_seconds == null ? "-" : Math.round(Number(discovery.next_due_in_seconds)) + "s"],
+      ["Discovery #", discovery.discovery_iteration],
+      ["Fast 5m", fastUpdown.tokens == null ? (fastUpdown.status || "-") : (fastUpdown.tokens + " tokens")],
+      ["Fast assets", fastUpdown.assets, joinText],
+      ["Scan mode", currentScan.scan_plan?.mode || lastScan.scan_plan?.mode || scanner.scan?.scan_plan?.mode],
+      ["Queries", currentScan.scan_plan?.selected_queries || lastScan.scan_plan?.selected_queries || scanner.scan?.scan_plan?.selected_queries || scanner.scan?.queries, joinText],
+      ["Priority queue", currentScan.scan_plan?.adaptive_priority?.priority_queries || lastScan.scan_plan?.adaptive_priority?.priority_queries || scanner.scan?.scan_plan?.adaptive_priority?.priority_queries || currentScan.scan_plan?.ordered_queries || lastScan.scan_plan?.ordered_queries || scanner.scan?.scan_plan?.ordered_queries, joinText],
+      ["Tokens", live.discovery?.scan?.tokens || scanner.scan?.tokens],
+      ["Features", data.forward_paper_cycle?.features],
+      ["Predictions", data.forward_paper_cycle?.predictions],
+      ["Approved", data.forward_paper_cycle?.signals_approved],
+      ["Rejected", data.forward_paper_cycle?.signals_rejected],
+      ["Broker rejects", monthly.broker_rejected_orders],
+      ["Main reason", broker.entry_pause_reason || Object.keys(broker.broker_rejection_reasons || {}).join(", "), longText]
     ]);
     document.getElementById("promotionReadiness").innerHTML = table(data.cohort_promotion_readiness?.cohorts || [], [
       ["Cohort","signal_cohort"],

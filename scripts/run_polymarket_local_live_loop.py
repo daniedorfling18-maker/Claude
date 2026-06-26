@@ -21,6 +21,7 @@ import sys
 import time
 import traceback
 from concurrent.futures import Future, ThreadPoolExecutor
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
@@ -36,10 +37,12 @@ from polymarket_predictive_engine.dashboard import render_dashboard  # noqa: E40
 from polymarket_predictive_engine.execution.paper import paper_trade  # noqa: E402
 from polymarket_predictive_engine.paper_cycle import run_paper_cycle  # noqa: E402
 from polymarket_predictive_engine.profit_target import write_profit_target_tracker  # noqa: E402
+from polymarket_predictive_engine.resolution_collector import fetch_gamma_market  # noqa: E402
 from polymarket_predictive_engine.storage import connect_db  # noqa: E402
-from polymarket_predictive_engine.utils import now_utc, read_csv_rows, read_json, safe_float, write_csv, write_json  # noqa: E402
+from polymarket_predictive_engine.utils import now_utc, parse_timestamp, read_csv_rows, read_json, safe_float, write_csv, write_json  # noqa: E402
 from polymarket_predictive_engine.websocket_collector import collect_websocket  # noqa: E402
 from polymarket_predictive_engine.websocket_normaliser import normalize_websocket_file  # noqa: E402
+import polymarket_mispricing_bot as scanner  # noqa: E402
 import run_polymarket_live_paper_loop as discovery_loop  # noqa: E402
 
 
@@ -67,6 +70,153 @@ def _add_tokens_from_csv(path: Path, tokens: dict[str, str], source: str) -> Non
                 tokens.setdefault(token, source)
 
 
+def _fast_updown_snapshot_path(cfg) -> Path:
+    return cfg.output_root / "polymarket_fast_updown" / "fast_updown_market_snapshot.csv"
+
+
+def _positive_fast_updown_assets(cfg) -> list[str]:
+    settings = cfg.raw.get("paper_market_scan", {}) or {}
+    min_score = int(settings.get("fast_updown_min_promotion_ready_score", 4))
+    min_pnl = float(settings.get("fast_updown_min_pnl_usdc", 0.0))
+    min_roi = float(settings.get("fast_updown_min_roi", 0.0))
+    assets: set[str] = set()
+    payload = read_json(cfg.governance_root / "signal_cohort_pnl.json", default={}) or {}
+    cohorts = payload.get("cohorts", []) if isinstance(payload, dict) else []
+    if not isinstance(cohorts, list):
+        return []
+    for row in cohorts:
+        if not isinstance(row, dict):
+            continue
+        cohort = str(row.get("signal_cohort") or "")
+        if "updown_5m" not in cohort:
+            continue
+        pnl = safe_float(row.get("total_pnl_usdc")) or 0.0
+        roi = safe_float(row.get("roi")) or 0.0
+        score = int(safe_float(row.get("promotion_ready_score")) or 0)
+        if pnl <= min_pnl or roi <= min_roi or score < min_score:
+            continue
+        for asset in ("btc", "eth", "sol", "xrp"):
+            if f"crypto_{asset}_updown_5m" in cohort:
+                assets.add(asset)
+    configured = settings.get("fast_updown_assets", []) or []
+    if isinstance(configured, str):
+        configured = [configured]
+    for asset in configured if isinstance(configured, list) else []:
+        clean = str(asset or "").strip().lower()
+        if clean in {"btc", "eth", "sol", "xrp"}:
+            assets.add(clean)
+    return [asset for asset in ("btc", "xrp", "sol", "eth") if asset in assets]
+
+
+def _floor_to_slot(dt: datetime, minutes: int) -> datetime:
+    slot = max(1, int(minutes))
+    discard = timedelta(
+        minutes=dt.minute % slot,
+        seconds=dt.second,
+        microseconds=dt.microsecond,
+    )
+    return dt - discard
+
+
+def _fast_updown_candidate_slugs(cfg, *, now_dt: datetime | None = None) -> list[str]:
+    settings = cfg.raw.get("paper_market_scan", {}) or {}
+    if not settings.get("fast_updown_5m_enabled", True):
+        return []
+    assets = _positive_fast_updown_assets(cfg)
+    if not assets:
+        return []
+    now_dt = (now_dt or datetime.now(timezone.utc)).astimezone(timezone.utc)
+    step_minutes = int(settings.get("fast_updown_5m_step_minutes", 5) or 5)
+    slots_ahead = int(settings.get("fast_updown_5m_slots_ahead", 8) or 8)
+    start = _floor_to_slot(now_dt, step_minutes)
+    slugs: list[str] = []
+    for offset in range(0, max(0, slots_ahead) + 1):
+        slot = start + timedelta(minutes=step_minutes * offset)
+        timestamp = int(slot.timestamp())
+        for asset in assets:
+            slugs.append(f"{asset}-updown-5m-{timestamp}")
+    return slugs
+
+
+def _event_from_gamma_market(market: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "slug": market.get("eventSlug") or market.get("event_slug") or market.get("slug") or "",
+        "title": market.get("eventTitle") or market.get("event_title") or market.get("question") or market.get("slug") or "",
+        "markets": [market],
+    }
+
+
+def refresh_fast_updown_snapshot(cfg) -> dict[str, Any]:
+    """Write a focused token snapshot for positive-evidence 5-minute Up/Down cohorts."""
+    settings = cfg.raw.get("paper_market_scan", {}) or {}
+    if not settings.get("fast_updown_5m_enabled", True):
+        return {"status": "disabled"}
+    bot_config = scanner.BotConfig.from_env()
+    timeout_seconds = int(settings.get("fast_updown_gamma_timeout_seconds", 8) or 8)
+    max_tokens = int(settings.get("fast_updown_5m_max_tokens", 80) or 80)
+    now_dt = datetime.now(timezone.utc)
+    rows: list[dict[str, Any]] = []
+    slugs = _fast_updown_candidate_slugs(cfg, now_dt=now_dt)
+    markets_found = 0
+    orderbook_errors = 0
+    for slug in slugs:
+        try:
+            market = fetch_gamma_market(slug, timeout_seconds=timeout_seconds)
+        except Exception:
+            continue
+        if not market:
+            continue
+        markets_found += 1
+        tokens = scanner.extract_tokens([_event_from_gamma_market(market)])
+        for token in tokens:
+            parsed_close = parse_timestamp(token.close_time)
+            if parsed_close is not None and parsed_close.astimezone(timezone.utc) <= now_dt:
+                continue
+            try:
+                book = scanner.get_orderbook(bot_config, token)
+            except Exception:
+                orderbook_errors += 1
+                book = None
+            rows.append(
+                {
+                    "timestamp": now_utc(),
+                    "event_slug": token.event_slug,
+                    "event_title": token.event_title,
+                    "market_slug": token.market_slug,
+                    "condition_id": token.condition_id,
+                    "close_time": token.close_time,
+                    "question": token.question,
+                    "outcome": token.outcome,
+                    "token_id": token.token_id,
+                    "gamma_price": "" if token.gamma_price is None else token.gamma_price,
+                    "fair_probability": "",
+                    "best_bid": "" if book is None or book.best_bid is None else book.best_bid,
+                    "best_ask": "" if book is None or book.best_ask is None else book.best_ask,
+                    "spread": "" if book is None or book.spread is None else book.spread,
+                    "bid_size": "" if book is None else book.bid_size,
+                    "ask_size": "" if book is None else book.ask_size,
+                    "tick_size": token.tick_size,
+                    "neg_risk": token.neg_risk,
+                }
+            )
+            if len(rows) >= max_tokens:
+                break
+        if len(rows) >= max_tokens:
+            break
+    out = _fast_updown_snapshot_path(cfg)
+    write_csv(out, rows, fieldnames=discovery_loop.SNAPSHOT_FIELDS)
+    return {
+        "status": "ok",
+        "generated_at_utc": now_utc(),
+        "assets": _positive_fast_updown_assets(cfg),
+        "candidate_slugs": len(slugs),
+        "markets_found": markets_found,
+        "tokens": len(rows),
+        "orderbook_errors": orderbook_errors,
+        "snapshot_path": str(out),
+    }
+
+
 def discover_websocket_asset_ids(cfg, *, include_static_config: bool = False, max_assets: int = 250) -> tuple[list[str], dict[str, str]]:
     """Return live CLOB asset ids from current paper state, not stale config.
 
@@ -79,6 +229,7 @@ def discover_websocket_asset_ids(cfg, *, include_static_config: bool = False, ma
     candidates = [
         (cfg.output_root / "polymarket_portfolio" / "positions.csv", "open_positions"),
         (cfg.output_root / "polymarket_predictions" / "trade_signals.csv", "trade_signals"),
+        (_fast_updown_snapshot_path(cfg), "fast_updown_5m"),
         (cfg.output_root / "polymarket" / "market_snapshot.csv", "scanner_snapshot"),
         (model_csv, "model_probabilities"),
         (cfg.output_root / "polymarket_predictions" / "predictions.csv", "predictions"),
@@ -119,11 +270,13 @@ def enrich_websocket_features_with_scanner_metadata(cfg, features: list[dict[str
     says "asset 123 moved".
     """
     snapshot_path = cfg.output_root / "polymarket" / "market_snapshot.csv"
+    snapshot_paths = [_fast_updown_snapshot_path(cfg), snapshot_path]
     metadata_by_token: dict[str, dict[str, Any]] = {}
-    for row in read_csv_rows(snapshot_path):
-        token = str(row.get("token_id") or row.get("asset_id") or "").strip()
-        if token:
-            metadata_by_token[token] = row
+    for path in snapshot_paths:
+        for row in read_csv_rows(path):
+            token = str(row.get("token_id") or row.get("asset_id") or "").strip()
+            if token:
+                metadata_by_token.setdefault(token, row)
 
     enriched: list[dict[str, Any]] = []
     metadata_hits = 0
@@ -174,6 +327,7 @@ def enrich_websocket_features_with_scanner_metadata(cfg, features: list[dict[str
             "metadata_hits": metadata_hits,
             "metadata_hit_rate": (metadata_hits / len(features)) if features else 0.0,
             "snapshot_path": str(snapshot_path),
+            "snapshot_paths": [str(path) for path in snapshot_paths],
             "snapshot_tokens": len(metadata_by_token),
         },
     )
@@ -327,6 +481,7 @@ def _run_discovery_iteration(
             )
         else:
             scan = discovery_loop.scan_once(cfg, scan_sequence=next_iteration)
+            fast_updown = refresh_fast_updown_snapshot(cfg)
             ingest = discovery_loop.ingest_scanner_snapshot(cfg, snapshot_path=scan["snapshot_path"])
             settlement = discovery_loop._run_settlement_only_cycle(cfg)
             summary = {
@@ -337,6 +492,7 @@ def _run_discovery_iteration(
                 "live_trading": False,
                 "resource_guard": guard,
                 "scan": scan,
+                "fast_updown": fast_updown,
                 "ingest": ingest,
                 "settlement": settlement,
                 "optimization": {"status": "skipped_until_scheduled_heavy_cycle"},
@@ -365,6 +521,7 @@ def _write_discovery_heartbeat(
         "live_iteration": live_iteration,
         "discovery_iteration": discovery_iteration,
         "scan": summary.get("scan", {}) if isinstance(summary, dict) else {},
+        "fast_updown": summary.get("fast_updown", {}) if isinstance(summary, dict) else {},
     }
     if started_at_utc:
         payload["started_at_utc"] = started_at_utc
@@ -504,6 +661,9 @@ def main(argv: list[str] | None = None) -> int:
                         if isinstance(last_discovery_summary, dict)
                         else "unknown",
                         "last_scan": last_discovery_summary.get("scan", {})
+                        if isinstance(last_discovery_summary, dict)
+                        else {},
+                        "last_fast_updown": last_discovery_summary.get("fast_updown", {})
                         if isinstance(last_discovery_summary, dict)
                         else {},
                         "discovery_iteration": discovery_iteration,

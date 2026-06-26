@@ -112,6 +112,7 @@ async function load() {
     const discovery = live.discovery || {};
     const currentScan = discovery.scan || {};
     const lastScan = discovery.last_scan || {};
+    const fastUpdown = discovery.last_fast_updown || discovery.fast_updown || {};
     const websocket = live.websocket || {};
     const websocketFeatures = live.websocket_features || {};
     const ingest = live.ingest || {};
@@ -158,12 +159,14 @@ async function load() {
       lastDiscovery: discovery.last_status,
       nextDiscovery: discovery.next_due_in_seconds == null ? "-" : Math.round(Number(discovery.next_due_in_seconds)) + "s",
       discoveryIteration: discovery.discovery_iteration,
+      fastUpdown: fastUpdown.tokens == null ? (fastUpdown.status || "-") : (fastUpdown.tokens + " tokens"),
+      fastAssets: joinText(fastUpdown.assets),
       scanMode: currentScan.scan_plan?.mode || lastScan.scan_plan?.mode || scanner.scan?.scan_plan?.mode,
       queries: currentScan.scan_plan?.selected_queries || lastScan.scan_plan?.selected_queries || scanner.scan?.scan_plan?.selected_queries || scanner.scan?.queries,
       priorityQueue: currentScan.scan_plan?.adaptive_priority?.priority_queries || lastScan.scan_plan?.adaptive_priority?.priority_queries || scanner.scan?.scan_plan?.adaptive_priority?.priority_queries || currentScan.scan_plan?.ordered_queries || lastScan.scan_plan?.ordered_queries || scanner.scan?.scan_plan?.ordered_queries,
       reason: broker.entry_pause_reason || Object.keys(broker.broker_rejection_reasons || {}).join(", ")
     }], [
-      ["Live tick","liveTick"], ["Live source","liveSource"], ["WS msgs","wsMessages"], ["WS features","wsFeatures"], ["Snapshots","snapshotsInserted"], ["Full cycle","fullCycle"], ["Discovery","discoveryStatus"], ["Last scan","lastDiscovery"], ["Next scan","nextDiscovery"], ["Discovery #","discoveryIteration"], ["Scan mode","scanMode"], ["Queries","queries", joinText], ["Priority queue","priorityQueue", joinText], ["Tokens","scan"], ["Features","features"], ["Predictions","predictions"], ["Approved","approved"], ["Rejected","rejected"], ["Broker rejects","brokerRejected"], ["Main reason","reason"]
+      ["Live tick","liveTick"], ["Live source","liveSource"], ["WS msgs","wsMessages"], ["WS features","wsFeatures"], ["Snapshots","snapshotsInserted"], ["Full cycle","fullCycle"], ["Discovery","discoveryStatus"], ["Last scan","lastDiscovery"], ["Next scan","nextDiscovery"], ["Discovery #","discoveryIteration"], ["Fast 5m","fastUpdown"], ["Fast assets","fastAssets"], ["Scan mode","scanMode"], ["Queries","queries", joinText], ["Priority queue","priorityQueue", joinText], ["Tokens","scan"], ["Features","features"], ["Predictions","predictions"], ["Approved","approved"], ["Rejected","rejected"], ["Broker rejects","brokerRejected"], ["Main reason","reason"]
     ]);
     document.getElementById("promotionReadiness").innerHTML = table(data.cohort_promotion_readiness?.cohorts || [], [
       ["Cohort","signal_cohort"],

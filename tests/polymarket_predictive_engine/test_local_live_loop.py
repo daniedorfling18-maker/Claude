@@ -110,6 +110,139 @@ def test_websocket_asset_discovery_prefers_fresh_scanner_context(tmp_path, monke
     }
 
 
+def test_fast_updown_assets_come_from_positive_5m_cohort_evidence(tmp_path):
+    loop = _load_loop_module()
+    cfg = EngineConfig(
+        raw={"paths": {"output_root": str(tmp_path / "outputs")}},
+        path=tmp_path / "cfg.yaml",
+    )
+    governance = cfg.governance_root
+    governance.mkdir(parents=True, exist_ok=True)
+    (governance / "signal_cohort_pnl.json").write_text(
+        """
+        {
+          "cohorts": [
+            {
+              "signal_cohort": "exploratory_inverse_historical_rule|crypto_btc_updown_5m|outcome=up",
+              "promotion_ready_score": 5,
+              "total_pnl_usdc": 4.5,
+              "roi": 0.15
+            },
+            {
+              "signal_cohort": "exploratory_historical_rule|crypto_eth_updown_5m|outcome=down",
+              "promotion_ready_score": 1,
+              "total_pnl_usdc": 9.0,
+              "roi": 0.2
+            },
+            {
+              "signal_cohort": "exploratory_historical_rule|crypto_xrp_updown_daily|outcome=down",
+              "promotion_ready_score": 6,
+              "total_pnl_usdc": 99.0,
+              "roi": 0.5
+            }
+          ]
+        }
+        """,
+        encoding="utf-8",
+    )
+
+    assert loop._positive_fast_updown_assets(cfg) == ["btc"]
+
+
+def test_websocket_asset_discovery_prefers_fast_updown_snapshot(tmp_path, monkeypatch):
+    loop = _load_loop_module()
+    monkeypatch.setenv("POLYMARKET_MODEL_PROBABILITIES_CSV", str(tmp_path / "missing_model_probabilities.csv"))
+    cfg = EngineConfig(
+        raw={"paths": {"output_root": str(tmp_path / "outputs")}},
+        path=tmp_path / "cfg.yaml",
+    )
+    _write_csv(
+        loop._fast_updown_snapshot_path(cfg),
+        [
+            {"token_id": "fast-5m-token", "market_slug": "btc-updown-5m-1782500000"},
+        ],
+    )
+    _write_csv(
+        cfg.output_root / "polymarket" / "market_snapshot.csv",
+        [
+            {"token_id": "scanner-token", "condition_id": "scanner-market"},
+        ],
+    )
+
+    asset_ids, sources = loop.discover_websocket_asset_ids(cfg, max_assets=2)
+
+    assert asset_ids == ["fast-5m-token", "scanner-token"]
+    assert sources["fast-5m-token"] == "fast_updown_5m"
+
+
+def test_refresh_fast_updown_snapshot_fetches_positive_cohort_slots(tmp_path, monkeypatch):
+    loop = _load_loop_module()
+    cfg = EngineConfig(
+        raw={
+            "paths": {"output_root": str(tmp_path / "outputs")},
+            "paper_market_scan": {"fast_updown_5m_slots_ahead": 0},
+        },
+        path=tmp_path / "cfg.yaml",
+    )
+    cfg.governance_root.mkdir(parents=True, exist_ok=True)
+    (cfg.governance_root / "signal_cohort_pnl.json").write_text(
+        """
+        {"cohorts": [{
+          "signal_cohort": "exploratory_inverse_historical_rule|crypto_btc_updown_5m|outcome=up",
+          "promotion_ready_score": 5,
+          "total_pnl_usdc": 4.5,
+          "roi": 0.15
+        }]}
+        """,
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(loop, "_fast_updown_candidate_slugs", lambda _cfg, now_dt=None: ["btc-updown-5m-1782500000"])
+    monkeypatch.setattr(
+        loop,
+        "fetch_gamma_market",
+        lambda slug, timeout_seconds=8: {
+            "slug": slug,
+            "active": True,
+            "closed": False,
+            "enableOrderBook": True,
+            "conditionId": "condition-btc",
+            "question": "Bitcoin UpDown 5M",
+            "endDate": "2099-01-01T00:05:00Z",
+            "outcomes": '["Up","Down"]',
+            "clobTokenIds": '["token-up","token-down"]',
+            "outcomePrices": '["0.51","0.49"]',
+        },
+    )
+    monkeypatch.setattr(
+        loop.scanner.BotConfig,
+        "from_env",
+        classmethod(lambda cls: object()),
+    )
+    monkeypatch.setattr(
+        loop.scanner,
+        "get_orderbook",
+        lambda _cfg, token: loop.scanner.Book(
+            token_id=token.token_id,
+            best_bid=0.49,
+            best_ask=0.51,
+            bid_size=123,
+            ask_size=456,
+            spread=0.02,
+            tick_size="0.01",
+            min_order_size=1,
+            neg_risk=False,
+        ),
+    )
+
+    summary = loop.refresh_fast_updown_snapshot(cfg)
+    rows = read_csv_rows(loop._fast_updown_snapshot_path(cfg))
+
+    assert summary["markets_found"] == 1
+    assert summary["tokens"] == 2
+    assert rows[0]["market_slug"] == "btc-updown-5m-1782500000"
+    assert rows[0]["token_id"] == "token-up"
+
+
 def test_discovery_scheduler_uses_its_own_iteration_counter(monkeypatch, tmp_path):
     loop = _load_loop_module()
     seen: list[int] = []
@@ -128,6 +261,7 @@ def test_discovery_scheduler_uses_its_own_iteration_counter(monkeypatch, tmp_pat
     monkeypatch.setattr(loop.discovery_loop, "_resource_guard", lambda _cfg: {"skip_cycle": False})
     monkeypatch.setattr(loop.discovery_loop, "_scheduled", lambda *_args, **_kwargs: False)
     monkeypatch.setattr(loop.discovery_loop, "scan_once", fake_scan_once)
+    monkeypatch.setattr(loop, "refresh_fast_updown_snapshot", lambda _cfg: {"status": "ok", "tokens": 2})
     monkeypatch.setattr(loop.discovery_loop, "ingest_scanner_snapshot", lambda *_args, **_kwargs: {"status": "ok"})
     monkeypatch.setattr(loop.discovery_loop, "_run_settlement_only_cycle", lambda _cfg: {"status": "settlement_only"})
 

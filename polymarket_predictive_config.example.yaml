@@ -210,6 +210,19 @@ runtime_schedule:
   promoted_rule_shadow_every_iterations: 3
   liquidity_discovery_every_iterations: 12
   dashboard_render_every_iterations: 2
+paper_market_scan:
+  # Local laptop-friendly opportunity discovery. "rotate" scans one family per full scan so the
+  # paper bot can collect fast-feedback crypto/sports evidence without running several scanners at
+  # once. Override with POLYMARKET_QUERIES / POLYMARKET_SCAN_QUERY_MODE if needed.
+  mode: rotate
+  max_queries_per_cycle: 1
+  queries:
+  - world cup
+  - bitcoin
+  - ethereum
+  - solana
+  - xrp
+  - tennis
 cohort_promotion:
   require_positive_forward_pnl: true
   allow_shadow_evidence_for_promotion: true

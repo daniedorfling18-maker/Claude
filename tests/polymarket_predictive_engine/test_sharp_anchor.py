@@ -123,6 +123,33 @@ def test_build_sharp_anchor_joins_worldcup_outrights_by_team_name(tmp_path):
     assert out["SPAIN_YES"] > out["FRANCE_YES"]        # shorter odds -> higher fair probability
 
 
+def test_worldcup_outright_join_falls_back_to_repo_detail_file(tmp_path):
+    cfg = EngineConfig(
+        raw={"paths": {"output_root": str(tmp_path / "outputs")},
+             "sharp_anchor": {"input_path": str(tmp_path / "sharp.csv"),
+                              "token_map_path": str(tmp_path / "current_crypto_snapshot.csv")}},
+        path=tmp_path / "cfg.yaml",
+    )
+    _write(tmp_path / "sharp.csv",
+           [{"market_slug": "soccer-fifa-world-cup-winner", "outcome": "Spain", "decimal_odds": "6.0",
+             "market_key": "outrights", "sport": "soccer_fifa_world_cup_winner"},
+            {"market_slug": "soccer-fifa-world-cup-winner", "outcome": "France", "decimal_odds": "7.0",
+             "market_key": "outrights", "sport": "soccer_fifa_world_cup_winner"}],
+           ["market_slug", "outcome", "decimal_odds", "market_key", "sport"])
+    _write(tmp_path / "current_crypto_snapshot.csv",
+           [{"token_id": "BTC", "market_slug": "bitcoin-updown", "question": "Bitcoin up?", "outcome": "Yes"}],
+           ["token_id", "market_slug", "question", "outcome"])
+    _write(tmp_path / "outputs" / "polymarket" / "repo_worldcup_winner_probabilities.csv",
+           [{"team": "Spain", "token_id": "SPAIN_FROM_DETAIL", "probability": "0.12"},
+            {"team": "France", "token_id": "FRANCE_FROM_DETAIL", "probability": "0.13"}],
+           ["team", "token_id", "probability"])
+
+    summary = build_sharp_anchor(cfg)
+    assert summary["worldcup_winner_token_joins"] == 2
+    out = {r["token_id"]: float(r["probability"]) for r in _read(tmp_path / "outputs" / "polymarket_training" / "sharp_fundamental_probabilities.csv")}
+    assert set(out) == {"SPAIN_FROM_DETAIL", "FRANCE_FROM_DETAIL"}
+
+
 def test_build_sharp_anchor_no_input(tmp_path):
     cfg = EngineConfig(
         raw={"paths": {"output_root": str(tmp_path / "outputs")},

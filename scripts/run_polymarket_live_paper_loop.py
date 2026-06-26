@@ -240,9 +240,16 @@ def _write_rows(path: Path, rows: list[dict[str, Any]], fieldnames: list[str]) -
         writer.writerows(rows)
 
 
-def _scan_queries(default_query: str) -> list[str]:
+def _configured_scan_queries(cfg, default_query: str) -> tuple[list[str], str]:
+    settings = cfg.raw.get("paper_market_scan", {}) or {}
     raw = os.getenv("POLYMARKET_QUERIES", "").strip()
-    queries = [item.strip() for item in raw.split(",") if item.strip()] if raw else [default_query]
+    configured = settings.get("queries") or []
+    if raw:
+        queries = [item.strip() for item in raw.split(",") if item.strip()]
+    elif isinstance(configured, list) and configured:
+        queries = [str(item).strip() for item in configured if str(item).strip()]
+    else:
+        queries = [default_query]
     seen: set[str] = set()
     unique: list[str] = []
     for query in queries:
@@ -250,8 +257,39 @@ def _scan_queries(default_query: str) -> list[str]:
         if key and key not in seen:
             unique.append(query)
             seen.add(key)
-    max_queries = int(os.getenv("POLYMARKET_MAX_SCAN_QUERIES", "0") or "0")
-    return unique[:max_queries] if max_queries > 0 else unique
+    mode = os.getenv("POLYMARKET_SCAN_QUERY_MODE", str(settings.get("mode", "single"))).strip().lower()
+    if mode not in {"single", "batch", "rotate"}:
+        mode = "single"
+    return unique, mode
+
+
+def _select_scan_queries(cfg, default_query: str, *, scan_sequence: int) -> tuple[list[str], dict[str, Any]]:
+    all_queries, mode = _configured_scan_queries(cfg, default_query)
+    settings = cfg.raw.get("paper_market_scan", {}) or {}
+    max_queries = int(
+        os.getenv(
+            "POLYMARKET_MAX_SCAN_QUERIES",
+            str(settings.get("max_queries_per_cycle", 0) or 0),
+        )
+        or "0"
+    )
+    if not all_queries:
+        all_queries = [default_query]
+    if mode == "batch":
+        selected = all_queries[:max_queries] if max_queries > 0 else all_queries
+    elif mode == "rotate":
+        width = max(1, max_queries) if max_queries > 0 else 1
+        start = max(0, scan_sequence - 1) % len(all_queries)
+        selected = [all_queries[(start + offset) % len(all_queries)] for offset in range(min(width, len(all_queries)))]
+    else:
+        selected = [all_queries[0]]
+    return selected, {
+        "mode": mode,
+        "all_queries": all_queries,
+        "selected_queries": selected,
+        "scan_sequence": scan_sequence,
+        "max_queries_per_cycle": max_queries,
+    }
 
 
 def _query_slug(query: str) -> str:
@@ -269,12 +307,14 @@ def _merge_by_token(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return list(merged.values())
 
 
-def scan_once() -> dict[str, Any]:
+def scan_once(cfg, *, scan_sequence: int = 1) -> dict[str, Any]:
     base_config = scanner.BotConfig.from_env()
     base_output_dir = _abs(base_config.output_dir)
-    queries = _scan_queries(base_config.query)
+    queries, scan_plan = _select_scan_queries(cfg, base_config.query, scan_sequence=scan_sequence)
     if base_config.event_slug:
         queries = [base_config.query]
+        scan_plan["selected_queries"] = queries
+        scan_plan["event_slug_override"] = True
 
     scan_rows: list[dict[str, Any]] = []
     opportunity_rows: list[dict[str, Any]] = []
@@ -319,6 +359,7 @@ def scan_once() -> dict[str, Any]:
         output_dir=base_output_dir,
     )
     return {
+        "scan_plan": scan_plan,
         "queries": queries,
         "per_query": per_query,
         "tokens": len(scan_rows) if len(queries) > 1 else (per_query[0]["tokens"] if per_query else 0),
@@ -441,7 +482,9 @@ def run_iteration(*, config_path: Path, optimize_model: bool, iteration: int, pa
         write_json(cfg.governance_root / "live_paper_loop_heartbeat.json", heartbeat)
         return heartbeat
 
-    scan = scan_once()
+    full_scan_every = int(schedule.get("full_scan_every_iterations", 1) or 1)
+    scan_sequence = iteration if full_scan_every <= 1 else (1 if iteration == 1 else (iteration // full_scan_every) + 1)
+    scan = scan_once(cfg, scan_sequence=scan_sequence)
     fundamentals = refresh_repo_worldcup_fundamentals(cfg)
     independent_fundamentals = refresh_independent_fundamentals(cfg, schedule, iteration)
     ingest = ingest_scanner_snapshot(cfg, snapshot_path=scan["snapshot_path"])

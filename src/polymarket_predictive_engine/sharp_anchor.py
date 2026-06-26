@@ -122,8 +122,6 @@ def _worldcup_winner_token_map(cfg: EngineConfig, settings: dict[str, Any]) -> d
     """team_key -> YES token_id for Polymarket 2026 World Cup winner markets."""
     path = Path(settings.get("token_map_path") or (cfg.output_root / "polymarket" / "market_snapshot.csv"))
     rows = read_csv_rows(path)
-    if not rows:
-        return {}
     mapping: dict[str, str] = {}
     for row in rows:
         token = str(row.get("token_id") or row.get("asset_id") or row.get("clob_token_id") or "").strip()
@@ -137,6 +135,16 @@ def _worldcup_winner_token_map(cfg: EngineConfig, settings: dict[str, Any]) -> d
             team = slug_match.group(1).replace("-", " ") if slug_match else ""
         key = _team_key(team)
         if key:
+            mapping.setdefault(key, token)
+
+    # The live paper loop now rotates across market families. If the current scanner snapshot is
+    # crypto/tennis, it will not contain World Cup winner tokens. Preserve sharp-outright usability
+    # by falling back to the repo-built World Cup winner detail file from the last World Cup scan.
+    detail_path = cfg.output_root / "polymarket" / "repo_worldcup_winner_probabilities.csv"
+    for row in read_csv_rows(detail_path):
+        token = str(row.get("token_id") or "").strip()
+        key = _team_key(row.get("team"))
+        if token and key:
             mapping.setdefault(key, token)
     return mapping
 

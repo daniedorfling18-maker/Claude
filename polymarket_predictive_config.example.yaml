@@ -200,7 +200,7 @@ runtime_resource_guard:
   max_memory_percent: 92
   render_dashboard_on_skip: false
 runtime_schedule:
-  full_scan_every_iterations: 3
+  full_scan_every_iterations: 2
   optimize_model_every_iterations: 12
   sharp_odds_fetch_every_iterations: 12
   sharp_anchor_build_every_iterations: 12
@@ -211,11 +211,11 @@ runtime_schedule:
   liquidity_discovery_every_iterations: 12
   dashboard_render_every_iterations: 2
 paper_market_scan:
-  # Local laptop-friendly opportunity discovery. "rotate" scans one family per full scan so the
-  # paper bot can collect fast-feedback crypto/sports evidence without running several scanners at
-  # once. Override with POLYMARKET_QUERIES / POLYMARKET_SCAN_QUERY_MODE if needed.
-  mode: rotate
-  max_queries_per_cycle: 1
+  # Local opportunity discovery. "batch" scans the strongest evidence families together so the
+  # paper bot can find valid probes faster while the runtime resource guard still skips work when
+  # memory is high. Override with POLYMARKET_QUERIES / POLYMARKET_SCAN_QUERY_MODE if needed.
+  mode: batch
+  max_queries_per_cycle: 3
   prioritize_near_promoted: true
   adaptive_priority_min_value: 3.0
   adaptive_priority_require_positive_evidence: true

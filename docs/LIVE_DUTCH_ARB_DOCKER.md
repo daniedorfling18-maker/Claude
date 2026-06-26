@@ -30,10 +30,16 @@ That runs, continuously, with `restart: unless-stopped`:
 | `pm-fixed-ml` | fixed | REST | `outputs/polymarket/*` (training collector) |
 | `live-mispricing` | live | **WebSocket** | `outputs/polymarket_training/websocket_market_features.csv`, `outputs/polymarket_mispricing/` |
 | `dutch-arb-monitor` | live | REST | `outputs/polymarket_arbitrage/` |
+| `sharp-anchor` | live | Odds API | `inputs/polymarket/sharp_odds.csv`, `outputs/polymarket_training/sharp_fundamental_probabilities.csv` |
 
 No two services write the same file, so this respects the duplicate-writer rule
 (`docs/POLYMARKET_DOCKER_SAFETY_AUDIT.md`). If you only want the dutch-arb monitor + websocket feed,
 run just `-f docker-compose.live.yml`.
+
+`sharp-anchor` periodically fetches Pinnacle/Betfair odds and de-vigs them into the
+mispricing-alpha fundamental (see `docs/POLYMARKET_SHARP_ANCHOR.md`). It needs `THE_ODDS_API_KEY`
+in `.env`; without it the service idles harmlessly and the rest of the stack keeps running. The
+Odds API charges credits per request, so it refreshes hourly by default (`SHARP_REFRESH_SECONDS`).
 
 ## The compose stacks, and which can run together
 
@@ -117,6 +123,8 @@ liquid markets, not an error.
 | `ARB_MIN_ANNUALISED` | `0.0` | Drop opportunities below this annualised return. |
 | `WS_SECONDS` | `60` | WebSocket capture window per mispricing cycle. |
 | `MISPRICING_SLEEP_SECONDS` | `5` | Pause between mispricing cycles. |
+| `THE_ODDS_API_KEY` | _(blank)_ | Odds API key for `sharp-anchor`; blank disables fetching. |
+| `SHARP_REFRESH_SECONDS` | `3600` | Sharp-odds refresh interval (hourly; the API bills per request). |
 
 Fair values for the mispricing scan are read from `inputs/polymarket/model_probabilities.csv`
 (mounted read-only). Drop your own there; without it the scan still surfaces spread/`MAKE` signals.

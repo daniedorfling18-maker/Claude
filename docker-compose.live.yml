@@ -7,6 +7,11 @@
 #                       BUY/SELL/MAKE signals vs our fair values.
 #                       Writes -> outputs/polymarket_training/websocket_market_features.csv
 #                                 outputs/polymarket_mispricing/
+#   sharp-anchor      : periodically fetches sharp odds (Pinnacle/Betfair via The Odds API) and
+#                       de-vigs them into the mispricing-alpha fundamental. Needs THE_ODDS_API_KEY;
+#                       idles harmlessly without it.
+#                       Writes -> inputs/polymarket/sharp_odds.csv
+#                                 outputs/polymarket_training/sharp_fundamental_probabilities.csv
 #
 # Both run paper/dry-run and have NO order-placement code path (the engine's live executor is a
 # skeleton that raises). Going live is a separate, deliberate workflow gated by the kill switch,
@@ -64,4 +69,25 @@ services:
       - ./outputs:/app/outputs
       - ./inputs/polymarket:/app/inputs/polymarket:ro
     command: ["sh", "scripts/run_live_mispricing_loop.sh"]
+    restart: unless-stopped
+
+  sharp-anchor:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: polymarket-engine:live
+    container_name: polymarket-sharp-anchor
+    env_file:
+      - .env
+    environment:
+      PM_MODE: dry_run
+      POLYMARKET_EXECUTE_LIVE: "false"
+      PM_CONFIG: ${PM_CONFIG:-/app/polymarket_predictive_config.example.yaml}
+      SHARP_REFRESH_SECONDS: ${SHARP_REFRESH_SECONDS:-3600}
+      THE_ODDS_API_KEY: ${THE_ODDS_API_KEY:-}
+    volumes:
+      - ./polymarket_predictive_config.example.yaml:/app/polymarket_predictive_config.example.yaml:ro
+      - ./outputs:/app/outputs
+      - ./inputs/polymarket:/app/inputs/polymarket          # read-write: writes sharp_odds.csv
+    command: ["sh", "scripts/run_sharp_anchor_loop.sh"]
     restart: unless-stopped

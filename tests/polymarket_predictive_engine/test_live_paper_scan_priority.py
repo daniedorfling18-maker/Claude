@@ -77,10 +77,11 @@ def test_adaptive_scan_priority_prefers_positive_near_promoted_cohorts(tmp_path,
 
     selected, plan = loop._select_scan_queries(cfg, "world cup", scan_sequence=1)
 
-    assert selected == ["xrp"]
-    assert plan["adaptive_priority"]["priority_queries"] == ["xrp", "bitcoin"]
+    assert selected == ["bitcoin"]
+    assert plan["adaptive_priority"]["priority_queries"] == ["bitcoin", "xrp"]
     assert "ethereum" not in plan["adaptive_priority"]["priority_queries"]
-    assert plan["ordered_queries"][:2] == ["xrp", "bitcoin"]
+    assert plan["ordered_queries"][:2] == ["bitcoin", "xrp"]
+    assert plan["adaptive_priority"]["top_cohorts"][0]["probationary"] is True
 
 
 def test_query_attempts_include_family_alias_fallbacks(tmp_path):

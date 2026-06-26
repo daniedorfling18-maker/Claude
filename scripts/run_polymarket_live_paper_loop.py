@@ -312,9 +312,9 @@ def _cohort_priority_value(row: dict[str, Any]) -> float:
     settled = safe_float(row.get("settled_fills")) or safe_float(row.get("shadow_sell_fills")) or safe_float(row.get("sell_fills")) or 0.0
     value = 10.0 * (score / checks)
     if _truthy_setting(row.get("promoted"), default=False):
-        value += 5.0
+        value += 25.0
     if _truthy_setting(row.get("probationary"), default=False):
-        value += 4.0
+        value += 12.0
     if pnl > 0:
         value += min(5.0, pnl / 5.0)
     if roi > 0:
@@ -374,6 +374,8 @@ def _adaptive_query_order(cfg, queries: list[str]) -> tuple[list[str], dict[str,
                     "priority_value": round(value, 4),
                     "promotion_ready_score": row.get("promotion_ready_score"),
                     "promotion_ready_checks": row.get("promotion_ready_checks"),
+                    "promoted": row.get("promoted"),
+                    "probationary": row.get("probationary"),
                     "pnl_usdc": row.get("total_pnl_usdc", row.get("shadow_total_pnl_usdc")),
                     "roi": row.get("roi", row.get("shadow_roi")),
                     "monthly_run_rate_usdc": row.get("monthly_run_rate_usdc", row.get("shadow_monthly_run_rate_usdc")),

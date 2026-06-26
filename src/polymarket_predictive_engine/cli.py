@@ -34,6 +34,7 @@ from .market_making_pnl import evaluate_market_making
 from .dutch_arb_monitor import run_dutch_arb_monitor
 from .mispricing_alpha import apply_mispricing_alpha, train_mispricing_alpha_model
 from .sharp_anchor import build_sharp_anchor
+from .sharp_odds_fetch import fetch_sharp_odds
 from .live_mispricing import run_live_mispricing, scan_live_mispricing
 from .paper_session import run_paper_session
 from .readiness import paper_live_promotion_gate, paper_trade_readiness, readiness_decision
@@ -72,7 +73,9 @@ COMMANDS = [
     "optimize-model",
     "train-mispricing-alpha",
     "score-mispricing-alpha",
+    "fetch-sharp-odds",
     "build-sharp-anchor",
+    "refresh-sharp-anchor",
     "edge-strategy-search",
     "promotion-gate",
     "validate",
@@ -225,8 +228,14 @@ def main(argv: list[str] | None = None) -> int:
             _print(train_mispricing_alpha_model(cfg))
         elif args.command == "score-mispricing-alpha":
             _print({"predictions": len(apply_mispricing_alpha(cfg, output_path=str(cfg.output_root / "polymarket_predictions" / "predictions.csv")))})
+        elif args.command == "fetch-sharp-odds":
+            _print(fetch_sharp_odds(cfg))
         elif args.command == "build-sharp-anchor":
             _print(build_sharp_anchor(cfg, input_path=args.sharp_input))
+        elif args.command == "refresh-sharp-anchor":
+            fetched = fetch_sharp_odds(cfg)
+            built = build_sharp_anchor(cfg)
+            _print({"fetch": fetched, "build": built})
         elif args.command == "edge-strategy-search":
             _print(run_edge_strategy_search(cfg))
         elif args.command == "promotion-gate":

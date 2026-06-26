@@ -163,6 +163,24 @@ sharp_anchor:
   devig_method: power            # power (favourite-longshot aware) or multiplicative
   source_name: pinnacle_close
   token_map_path: outputs/polymarket/market_snapshot.csv
+sharp_odds_fetch:
+  # Automated fetch for the sharp anchor. The Odds API aggregates Pinnacle + Betfair Exchange.
+  # Set the key in the environment (never commit it): export THE_ODDS_API_KEY=...
+  # fetch-sharp-odds writes input_path above; refresh-sharp-anchor fetches then de-vigs.
+  provider: the_odds_api
+  base_url: https://api.the-odds-api.com/v4
+  api_key_env: THE_ODDS_API_KEY
+  sports:
+  - soccer_fifa_world_cup
+  regions: eu,uk                 # Pinnacle is in eu; Betfair Exchange in uk/eu
+  markets: h2h
+  bookmaker_priority:
+  - pinnacle
+  - betfair_ex_eu
+  - betfair_ex_uk
+  odds_format: decimal
+  output_path: inputs/polymarket/sharp_odds.csv
+  request_timeout_seconds: 20
 profit_tracking:
   target_monthly_profit_usdc: 100
   minimum_tracking_hours_for_on_pace: 24

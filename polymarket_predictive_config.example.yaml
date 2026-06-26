@@ -128,8 +128,9 @@ mispricing_alpha:
   max_model_residual_adjustment: 0.0
   use_fundamental_probabilities: true
   fundamental_probability_paths:
-  # Sharp-book de-vigged anchor first (it wins per token); falls back to repo/consensus fairs.
+  # Independent sharp anchors first (each wins per token); falls back to repo/consensus fairs.
   - outputs/polymarket_training/sharp_fundamental_probabilities.csv
+  - outputs/polymarket_training/crypto_fundamental_probabilities.csv
   - outputs/polymarket/repo_worldcup_winner_probabilities.csv
   - inputs/polymarket/model_probabilities.csv
   fundamental_residual_shrinkage: 0.35
@@ -180,6 +181,12 @@ sharp_odds_fetch:
   - betfair_ex_uk
   odds_format: decimal
   output_path: inputs/polymarket/sharp_odds.csv
+  request_timeout_seconds: 20
+crypto_fundamental:
+  # Deribit option-implied P(S_T > strike) for crypto "above $K by DATE" markets. No API key
+  # needed (public market data). Provide targets at targets_path: token_id,currency,strike,expiry.
+  base_url: https://www.deribit.com/api/v2
+  targets_path: inputs/polymarket/crypto_targets.csv
   request_timeout_seconds: 20
 profit_tracking:
   target_monthly_profit_usdc: 100

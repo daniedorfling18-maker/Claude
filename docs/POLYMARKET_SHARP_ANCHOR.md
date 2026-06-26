@@ -55,6 +55,26 @@ To land in the fundamental slot these must resolve to a **Polymarket `token_id`*
 The `build-sharp-anchor` summary reports `skipped_no_token` so you can see join coverage. Start with
 direct `token_id`s for the markets you care about, then broaden via the map.
 
+## Crypto markets (Deribit options)
+
+For "Will BTC/ETH be above $K by DATE?" markets the fair value is *mechanically* computable - no
+labelling lag, no name-matching - so it is the cleanest anchor to validate. The risk-neutral
+probability `P(S_T > K)` equals the negative slope of the option call-price curve
+(`-dC/dK`, Breeden-Litzenberger), and Deribit quotes a dense public chain (no API key needed).
+
+```bash
+# targets: token_id,currency,strike,expiry  (see inputs/polymarket/crypto_targets.example.csv)
+polymarket-engine build-crypto-fundamental --config polymarket_predictive_config.example.yaml
+```
+
+It fetches Deribit's BTC/ETH option chain, builds a `P(S_T > K)` survival curve per expiry (snapping
+to the nearest available expiry), and interpolates the probability at each target strike - writing
+the same fundamental contract (`crypto_fundamental_probabilities.csv`, already in
+`fundamental_probability_paths`). Each row carries `in_curve_range`: a strike outside the quoted
+range is flat-extrapolated to the tail and **overstates** deep-OTM probability, so discount those.
+A live run with spot ≈ \$60.7k and a 2-month expiry gives, e.g., `P(>70k)=0.17`, `P(>90k)=0.007`,
+`P(>100k)=0.002` - a sensible decreasing curve straight from the option market.
+
 ## Safety
 
 Everything here is offline/transform + a read-only odds GET. It produces a *fundamental probability*

@@ -35,6 +35,7 @@ from .dutch_arb_monitor import run_dutch_arb_monitor
 from .mispricing_alpha import apply_mispricing_alpha, train_mispricing_alpha_model
 from .sharp_anchor import build_sharp_anchor
 from .sharp_odds_fetch import fetch_sharp_odds
+from .crypto_fundamental import build_crypto_fundamental
 from .live_mispricing import run_live_mispricing, scan_live_mispricing
 from .paper_session import run_paper_session
 from .readiness import paper_live_promotion_gate, paper_trade_readiness, readiness_decision
@@ -76,6 +77,7 @@ COMMANDS = [
     "fetch-sharp-odds",
     "build-sharp-anchor",
     "refresh-sharp-anchor",
+    "build-crypto-fundamental",
     "edge-strategy-search",
     "promotion-gate",
     "validate",
@@ -126,6 +128,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--websocket-input", default=None)
     parser.add_argument("--snapshot-input", default=None)
     parser.add_argument("--sharp-input", default=None, help="sharp-odds CSV for build-sharp-anchor (overrides config sharp_anchor.input_path)")
+    parser.add_argument("--crypto-targets", default=None, help="crypto targets CSV for build-crypto-fundamental (token_id,currency,strike,expiry)")
     parser.add_argument(
         "--source",
         choices=["all", "historical", "raw_snapshot", "websocket"],
@@ -236,6 +239,8 @@ def main(argv: list[str] | None = None) -> int:
             fetched = fetch_sharp_odds(cfg)
             built = build_sharp_anchor(cfg)
             _print({"fetch": fetched, "build": built})
+        elif args.command == "build-crypto-fundamental":
+            _print(build_crypto_fundamental(cfg, targets_path=args.crypto_targets))
         elif args.command == "edge-strategy-search":
             _print(run_edge_strategy_search(cfg))
         elif args.command == "promotion-gate":

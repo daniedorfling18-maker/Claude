@@ -20,6 +20,7 @@ import os
 import sys
 import time
 import traceback
+from concurrent.futures import Future, ThreadPoolExecutor
 from pathlib import Path
 from typing import Any
 
@@ -295,6 +296,31 @@ def _run_discovery_iteration(
     return next_iteration, summary
 
 
+def _write_discovery_heartbeat(
+    cfg,
+    *,
+    status: str,
+    live_iteration: int,
+    discovery_iteration: int,
+    summary: dict[str, Any] | None = None,
+    error: str = "",
+    started_at_utc: str = "",
+) -> None:
+    summary = summary or {}
+    payload: dict[str, Any] = {
+        "status": status,
+        "generated_at_utc": now_utc(),
+        "live_iteration": live_iteration,
+        "discovery_iteration": discovery_iteration,
+        "scan": summary.get("scan", {}) if isinstance(summary, dict) else {},
+    }
+    if started_at_utc:
+        payload["started_at_utc"] = started_at_utc
+    if error:
+        payload["error"] = error
+    write_json(cfg.governance_root / "local_live_loop_discovery_heartbeat.json", payload)
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="run_polymarket_local_live_loop.py")
     parser.add_argument("--config", default="polymarket_predictive_config.example.yaml")
@@ -322,8 +348,12 @@ def main(argv: list[str] | None = None) -> int:
     next_discovery_cycle = _initial_discovery_due_timestamp(args.discovery_cycle_seconds)
     discovery_iteration = 0
     last_discovery_summary: dict[str, Any] = {"status": "not_run_yet"}
+    discovery_future: Future[tuple[int, dict[str, Any]]] | None = None
+    discovery_running_iteration = 0
+    discovery_started_at_utc = ""
     iteration = 0
     failures = 0
+    discovery_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="polymarket-discovery")
     print("local-live-loop: started; press Ctrl+C to stop", flush=True)
     try:
         while args.iterations <= 0 or iteration < args.iterations:
@@ -331,6 +361,38 @@ def main(argv: list[str] | None = None) -> int:
             started = time.time()
             try:
                 discovery_summary: dict[str, Any] = {"status": "skipped"}
+                if discovery_future is not None and discovery_future.done():
+                    try:
+                        discovery_iteration, last_discovery_summary = discovery_future.result()
+                        _write_discovery_heartbeat(
+                            cfg,
+                            status=str(last_discovery_summary.get("status") or "unknown"),
+                            live_iteration=iteration,
+                            discovery_iteration=discovery_iteration,
+                            summary=last_discovery_summary,
+                            started_at_utc=discovery_started_at_utc,
+                        )
+                    except Exception as exc:  # noqa: BLE001 - discovery must not stop live websocket ticks
+                        failures += 1
+                        last_discovery_summary = {
+                            "status": "error",
+                            "error": f"{type(exc).__name__}: {exc}",
+                        }
+                        _write_discovery_heartbeat(
+                            cfg,
+                            status="error",
+                            live_iteration=iteration,
+                            discovery_iteration=discovery_running_iteration,
+                            summary=last_discovery_summary,
+                            error=str(last_discovery_summary["error"]),
+                            started_at_utc=discovery_started_at_utc,
+                        )
+                    finally:
+                        discovery_future = None
+                        discovery_running_iteration = 0
+                        discovery_started_at_utc = ""
+                        next_discovery_cycle = time.time() + args.discovery_cycle_seconds
+
                 asset_ids, token_sources = discover_websocket_asset_ids(
                     cfg,
                     include_static_config=args.include_config_websocket_assets,
@@ -360,11 +422,15 @@ def main(argv: list[str] | None = None) -> int:
 
                 full_cycle = {"status": "skipped"}
                 if time.time() >= next_prediction_cycle:
-                    full_cycle = run_paper_cycle(cfg, source=args.paper_source)
-                    next_prediction_cycle = time.time() + args.prediction_cycle_seconds
+                    if discovery_future is not None and not discovery_future.done():
+                        full_cycle = {"status": "skipped_discovery_running", "source": args.paper_source}
+                    else:
+                        full_cycle = run_paper_cycle(cfg, source=args.paper_source)
+                        next_prediction_cycle = time.time() + args.prediction_cycle_seconds
                 next_discovery_in_seconds = None
                 if next_discovery_cycle != float("inf"):
                     next_discovery_in_seconds = max(0.0, round(next_discovery_cycle - time.time(), 3))
+                discovery_is_running = discovery_future is not None and not discovery_future.done()
 
                 loop_summary = {
                     "status": "ok",
@@ -376,7 +442,11 @@ def main(argv: list[str] | None = None) -> int:
                     "websocket_features": websocket_features,
                     "websocket_quality_rows": len(quality),
                     "discovery": {
-                        "status": discovery_summary.get("status") if isinstance(discovery_summary, dict) else "unknown",
+                        "status": "running"
+                        if discovery_is_running
+                        else discovery_summary.get("status")
+                        if isinstance(discovery_summary, dict)
+                        else "unknown",
                         "scan": discovery_summary.get("scan", {}) if isinstance(discovery_summary, dict) else {},
                         "last_status": last_discovery_summary.get("status")
                         if isinstance(last_discovery_summary, dict)
@@ -385,6 +455,8 @@ def main(argv: list[str] | None = None) -> int:
                         if isinstance(last_discovery_summary, dict)
                         else {},
                         "discovery_iteration": discovery_iteration,
+                        "running_iteration": discovery_running_iteration if discovery_is_running else 0,
+                        "started_at_utc": discovery_started_at_utc if discovery_is_running else "",
                         "cycle_seconds": args.discovery_cycle_seconds,
                         "next_due_in_seconds": next_discovery_in_seconds,
                     },
@@ -406,24 +478,24 @@ def main(argv: list[str] | None = None) -> int:
                     f"equity={broker.get('equity', 'n/a')} dashboard=updated",
                     flush=True,
                 )
-                if time.time() >= next_discovery_cycle:
-                    discovery_iteration, discovery_summary = _run_discovery_iteration(
+                if time.time() >= next_discovery_cycle and discovery_future is None:
+                    discovery_running_iteration = discovery_iteration + 1
+                    discovery_started_at_utc = now_utc()
+                    discovery_future = discovery_executor.submit(
+                        _run_discovery_iteration,
                         config_path=config_path,
                         optimize_model=args.optimize_model,
                         discovery_iteration=discovery_iteration,
                         paper_source="raw_snapshot",
                     )
-                    last_discovery_summary = discovery_summary
-                    next_discovery_cycle = time.time() + args.discovery_cycle_seconds
-                    write_json(
-                        cfg.governance_root / "local_live_loop_discovery_heartbeat.json",
-                        {
-                            "status": discovery_summary.get("status") if isinstance(discovery_summary, dict) else "unknown",
-                            "generated_at_utc": now_utc(),
-                            "live_iteration": iteration,
-                            "discovery_iteration": discovery_iteration,
-                            "scan": discovery_summary.get("scan", {}) if isinstance(discovery_summary, dict) else {},
-                        },
+                    next_discovery_cycle = float("inf")
+                    _write_discovery_heartbeat(
+                        cfg,
+                        status="running",
+                        live_iteration=iteration,
+                        discovery_iteration=discovery_running_iteration,
+                        summary={},
+                        started_at_utc=discovery_started_at_utc,
                     )
             except Exception as exc:  # noqa: BLE001 - keep loop alive while surfacing the failure
                 failures += 1
@@ -445,6 +517,8 @@ def main(argv: list[str] | None = None) -> int:
                 time.sleep(args.sleep_seconds)
     except KeyboardInterrupt:
         print("local-live-loop: stopped by user", flush=True)
+    finally:
+        discovery_executor.shutdown(wait=False, cancel_futures=True)
     return 2 if failures else 0
 
 

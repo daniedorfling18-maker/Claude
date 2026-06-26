@@ -1,0 +1,4 @@
+market_slug,outcome,decimal_odds,token_id
+spain-vs-france,Spain,2.10,EXAMPLE_SPAIN_TOKEN_ID
+spain-vs-france,Draw,3.40,EXAMPLE_DRAW_TOKEN_ID
+spain-vs-france,France,3.80,EXAMPLE_FRANCE_TOKEN_ID

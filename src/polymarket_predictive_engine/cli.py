@@ -33,6 +33,7 @@ from .price_history_collector import collect_price_history
 from .market_making_pnl import evaluate_market_making
 from .dutch_arb_monitor import run_dutch_arb_monitor
 from .mispricing_alpha import apply_mispricing_alpha, train_mispricing_alpha_model
+from .sharp_anchor import build_sharp_anchor
 from .live_mispricing import run_live_mispricing, scan_live_mispricing
 from .paper_session import run_paper_session
 from .readiness import paper_live_promotion_gate, paper_trade_readiness, readiness_decision
@@ -71,6 +72,7 @@ COMMANDS = [
     "optimize-model",
     "train-mispricing-alpha",
     "score-mispricing-alpha",
+    "build-sharp-anchor",
     "edge-strategy-search",
     "promotion-gate",
     "validate",
@@ -120,6 +122,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--websocket-seconds", type=int, default=60)
     parser.add_argument("--websocket-input", default=None)
     parser.add_argument("--snapshot-input", default=None)
+    parser.add_argument("--sharp-input", default=None, help="sharp-odds CSV for build-sharp-anchor (overrides config sharp_anchor.input_path)")
     parser.add_argument(
         "--source",
         choices=["all", "historical", "raw_snapshot", "websocket"],
@@ -222,6 +225,8 @@ def main(argv: list[str] | None = None) -> int:
             _print(train_mispricing_alpha_model(cfg))
         elif args.command == "score-mispricing-alpha":
             _print({"predictions": len(apply_mispricing_alpha(cfg, output_path=str(cfg.output_root / "polymarket_predictions" / "predictions.csv")))})
+        elif args.command == "build-sharp-anchor":
+            _print(build_sharp_anchor(cfg, input_path=args.sharp_input))
         elif args.command == "edge-strategy-search":
             _print(run_edge_strategy_search(cfg))
         elif args.command == "promotion-gate":

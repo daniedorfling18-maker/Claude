@@ -128,6 +128,8 @@ mispricing_alpha:
   max_model_residual_adjustment: 0.0
   use_fundamental_probabilities: true
   fundamental_probability_paths:
+  # Sharp-book de-vigged anchor first (it wins per token); falls back to repo/consensus fairs.
+  - outputs/polymarket_training/sharp_fundamental_probabilities.csv
   - outputs/polymarket/repo_worldcup_winner_probabilities.csv
   - inputs/polymarket/model_probabilities.csv
   fundamental_residual_shrinkage: 0.35
@@ -153,6 +155,14 @@ mispricing_alpha:
   uncertainty_penalty_weight: 0.03
   market_overround_penalty_weight: 0.35
   model_overround_penalty_weight: 0.2
+sharp_anchor:
+  # Sharper independent source for the mispricing-alpha fundamental slot (e.g. Pinnacle/Betfair).
+  # Provide a CSV at input_path with columns: market_slug,outcome,decimal_odds (and optionally
+  # token_id to skip the join). De-vig within each market; output feeds fundamental_probability_paths.
+  input_path: inputs/polymarket/sharp_odds.csv
+  devig_method: power            # power (favourite-longshot aware) or multiplicative
+  source_name: pinnacle_close
+  token_map_path: outputs/polymarket/market_snapshot.csv
 profit_tracking:
   target_monthly_profit_usdc: 100
   minimum_tracking_hours_for_on_pace: 24

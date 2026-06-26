@@ -288,12 +288,60 @@ def _run_discovery_iteration(
     """Run one scanner discovery pass using its own sequence counter."""
     next_iteration = max(0, int(discovery_iteration)) + 1
     scanner_iteration = next_iteration * 2
-    summary = discovery_loop.run_iteration(
-        config_path=config_path,
-        optimize_model=optimize_model,
-        iteration=scanner_iteration,
-        paper_source=paper_source,
-    )
+    discovery_loop.force_paper_environment()
+    discovery_loop.ensure_scanner_runtime_files()
+    cfg = load_config(config_path)
+
+    guard = discovery_loop._resource_guard(cfg)
+    write_json(cfg.governance_root / "runtime_resource_guard.json", {**guard, "generated_at_utc": now_utc()})
+    if guard.get("skip_cycle"):
+        summary = {
+            "status": "skipped_resource_guard",
+            "generated_at_utc": now_utc(),
+            "live_data": False,
+            "live_trading": False,
+            "resource_guard": guard,
+            "message": "Background discovery skipped to protect local machine resources.",
+        }
+    else:
+        schedule = cfg.raw.get("runtime_schedule", {}) or {}
+        heavy_due = any(
+            discovery_loop._scheduled(schedule, key, scanner_iteration, default=12)
+            for key in (
+                "optimize_model_every_iterations",
+                "sharp_odds_fetch_every_iterations",
+                "sharp_anchor_build_every_iterations",
+                "crypto_fundamental_every_iterations",
+                "mispricing_alpha_every_iterations",
+                "edge_strategy_search_every_iterations",
+                "promoted_rule_shadow_every_iterations",
+                "liquidity_discovery_every_iterations",
+            )
+        )
+        if optimize_model and heavy_due:
+            summary = discovery_loop.run_iteration(
+                config_path=config_path,
+                optimize_model=optimize_model,
+                iteration=scanner_iteration,
+                paper_source=paper_source,
+            )
+        else:
+            scan = discovery_loop.scan_once(cfg, scan_sequence=next_iteration)
+            ingest = discovery_loop.ingest_scanner_snapshot(cfg, snapshot_path=scan["snapshot_path"])
+            settlement = discovery_loop._run_settlement_only_cycle(cfg)
+            summary = {
+                "status": "ran",
+                "mode": "background_lightweight_discovery",
+                "generated_at_utc": now_utc(),
+                "live_data": True,
+                "live_trading": False,
+                "resource_guard": guard,
+                "scan": scan,
+                "ingest": ingest,
+                "settlement": settlement,
+                "optimization": {"status": "skipped_until_scheduled_heavy_cycle"},
+            }
+            write_json(cfg.governance_root / "live_paper_loop_heartbeat.json", summary)
     if isinstance(summary, dict):
         summary["discovery_iteration"] = next_iteration
         summary["scanner_iteration"] = scanner_iteration

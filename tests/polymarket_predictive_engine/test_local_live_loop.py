@@ -113,12 +113,23 @@ def test_websocket_asset_discovery_prefers_fresh_scanner_context(tmp_path, monke
 def test_discovery_scheduler_uses_its_own_iteration_counter(monkeypatch, tmp_path):
     loop = _load_loop_module()
     seen: list[int] = []
+    cfg = EngineConfig(
+        raw={"paths": {"output_root": str(tmp_path / "outputs")}},
+        path=tmp_path / "cfg.yaml",
+    )
 
-    def fake_run_iteration(**kwargs):
-        seen.append(kwargs["iteration"])
-        return {"status": "ran", "scan": {"tokens": 7}}
+    def fake_scan_once(_cfg, *, scan_sequence):
+        seen.append(scan_sequence)
+        return {"tokens": 7, "snapshot_path": str(tmp_path / "snapshot.csv")}
 
-    monkeypatch.setattr(loop.discovery_loop, "run_iteration", fake_run_iteration)
+    monkeypatch.setattr(loop, "load_config", lambda _path: cfg)
+    monkeypatch.setattr(loop.discovery_loop, "force_paper_environment", lambda: None)
+    monkeypatch.setattr(loop.discovery_loop, "ensure_scanner_runtime_files", lambda: None)
+    monkeypatch.setattr(loop.discovery_loop, "_resource_guard", lambda _cfg: {"skip_cycle": False})
+    monkeypatch.setattr(loop.discovery_loop, "_scheduled", lambda *_args, **_kwargs: False)
+    monkeypatch.setattr(loop.discovery_loop, "scan_once", fake_scan_once)
+    monkeypatch.setattr(loop.discovery_loop, "ingest_scanner_snapshot", lambda *_args, **_kwargs: {"status": "ok"})
+    monkeypatch.setattr(loop.discovery_loop, "_run_settlement_only_cycle", lambda _cfg: {"status": "settlement_only"})
 
     discovery_iteration, summary = loop._run_discovery_iteration(
         config_path=tmp_path / "cfg.yaml",
@@ -133,10 +144,11 @@ def test_discovery_scheduler_uses_its_own_iteration_counter(monkeypatch, tmp_pat
         paper_source="raw_snapshot",
     )
 
-    assert seen == [2, 4]
+    assert seen == [1, 2]
     assert discovery_iteration == 2
     assert summary["scan"]["tokens"] == 7
     assert summary["scanner_iteration"] == 4
+    assert summary["mode"] == "background_lightweight_discovery"
 
 
 def test_first_discovery_refresh_is_due_immediately_after_start():

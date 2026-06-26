@@ -55,5 +55,23 @@ def signal_cohort(row: dict[str, Any]) -> str:
         fundamental = row.get("fundamental_probability")
         has_fundamental = fundamental not in {None, ""}
         return "worldcup_2026_winner_fundamental" if has_fundamental else "worldcup_2026_winner_no_bookmaker"
+    text = _joined_text(row, ("category", "market_slug", "question", "event_id", "market_id", "outcome"))
+    outcome = str(row.get("outcome") or "").strip().lower()
+    if "up or down" in text or "updown" in text:
+        asset = ""
+        if "xrp" in text or "ripple" in text:
+            asset = "xrp"
+        elif "bitcoin" in text or " btc " in f" {text} ":
+            asset = "btc"
+        elif "ethereum" in text or " eth " in f" {text} ":
+            asset = "eth"
+        elif "solana" in text or " sol " in f" {text} ":
+            asset = "sol"
+        if asset and outcome in {"up", "down"}:
+            if asset == "xrp" and outcome == "down":
+                return f"exploratory_historical_rule|crypto_{asset}_updown_5m|outcome={outcome}"
+            if asset in {"btc", "sol"} and outcome == "up":
+                return f"exploratory_inverse_historical_rule|crypto_{asset}_updown_5m|outcome={outcome}"
+            return f"exploratory_historical_rule|crypto_{asset}_updown_5m|outcome={outcome}"
     category = str(row.get("category") or "").strip().lower()
     return category or "uncategorised"

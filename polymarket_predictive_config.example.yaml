@@ -251,6 +251,7 @@ cohort_promotion:
   probationary_minimum_monthly_run_rate_usdc: 20
   probationary_minimum_tracking_hours: 1
   probationary_max_stake_usdc: 2
+  probationary_minimum_edge_lower_bound: 0.005
   minimum_filled_orders: 5
   minimum_settled_orders: 3
   minimum_pnl_usdc: 0.0

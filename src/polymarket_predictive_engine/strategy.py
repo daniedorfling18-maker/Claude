@@ -112,6 +112,7 @@ def generate_signals(
         alpha_enabled and _setting_bool(cohort_settings, "allow_probationary_paper_trading", True)
     )
     probationary_default_max_stake = float(cohort_settings.get("probationary_max_stake_usdc", 2.0))
+    probationary_min_edge = float(cohort_settings.get("probationary_minimum_edge_lower_bound", 0.005))
     promoted_cohorts = _cohort_promotion_index(cfg) if require_positive_cohort else {}
 
     for prediction in predictions:
@@ -208,11 +209,19 @@ def generate_signals(
             and boolish(prediction.get("shadow_trade_candidate"))
             and (cohort_promoted or cohort_probationary)
         )
+        probationary_positive_edge_override = bool(
+            cohort_probationary
+            and edge is not None
+            and edge >= probationary_min_edge
+            and boolish(prediction.get("microstructure_filter_pass"))
+            and boolish(prediction.get("bookmaker_cross_check_pass"))
+        )
         if (
             require_alpha_candidate
             and alpha_edge is not None
             and not boolish(prediction.get("alpha_trade_candidate"))
             and not promoted_shadow_override
+            and not probationary_positive_edge_override
         ):
             validation_reason = str(prediction.get("validation_layer_reason") or "").strip()
             rejection_reason = "alpha lower-bound edge below configured minimum"
@@ -224,6 +233,8 @@ def generate_signals(
             signal["promotion_override"] = (
                 "probationary_shadow_candidate" if cohort_probationary and not cohort_promoted else "promoted_shadow_candidate"
             )
+        if probationary_positive_edge_override:
+            signal["promotion_override"] = "probationary_positive_edge_probe"
         category_key = str(signal.get("category") or "unknown").strip().lower()
         same_category_label_rows = int(same_category_counts.get(category_key, 0))
         signal["same_category_label_rows"] = same_category_label_rows

@@ -12,6 +12,23 @@ from .storage import connect_db
 from .utils import now_utc, read_csv_rows, safe_float, write_csv, write_json
 
 
+def _infer_snapshot_category(row: dict[str, Any]) -> str:
+    text = " ".join(
+        str(row.get(key) or "")
+        for key in ("event_slug", "event_title", "market_slug", "question", "outcome")
+    ).lower()
+    compact = text.replace("-", " ")
+    if "world cup" in compact or "worldcup" in compact or "fifa" in compact:
+        return "worldcup"
+    if any(term in compact for term in ("bitcoin", " btc", "ethereum", " eth", "xrp", "ripple", "solana", " sol ")):
+        return "crypto"
+    if "tennis" in compact or " atp " in compact or " wta " in compact or " itf " in compact:
+        return "tennis"
+    if "crypto" in compact:
+        return "crypto"
+    return "unknown"
+
+
 def _snapshot_id(key: str) -> str:
     return "snapshot_" + hashlib.sha256(key.encode("utf-8")).hexdigest()[:24]
 
@@ -23,7 +40,7 @@ def ingest_scanner_snapshot(
     """Append the scanner's latest CSV into the canonical point-in-time raw stream."""
     source = Path(snapshot_path) if snapshot_path else cfg.output_root / "polymarket" / "market_snapshot.csv"
     rows = read_csv_rows(source)
-    raw_path = cfg.data_root / "outputs" / "polymarket_fixed" / "worldcup" / "ml" / "raw_market_snapshots.csv"
+    raw_path = cfg.data_root / "outputs" / "polymarket_fixed" / "all" / "ml" / "raw_market_snapshots.csv"
     existing = read_csv_rows(raw_path)
     existing_keys = {
         (row.get("snapshot_timestamp", ""), row.get("market_id", ""), row.get("token_id", ""))
@@ -53,7 +70,7 @@ def ingest_scanner_snapshot(
             "event_id": row.get("event_slug", ""),
             "token_id": token_id,
             "question": row.get("question", ""),
-            "category": "worldcup",
+            "category": _infer_snapshot_category(row),
             "outcome": row.get("outcome", ""),
             "best_bid": "" if bid is None else bid,
             "best_ask": "" if ask is None else ask,

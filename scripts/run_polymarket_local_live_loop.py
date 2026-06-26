@@ -287,7 +287,7 @@ def main(argv: list[str] | None = None) -> int:
     cfg.governance_root.mkdir(parents=True, exist_ok=True)
 
     config_path = ROOT / args.config
-    next_prediction_cycle = 0.0 if args.prediction_cycle_seconds > 0 else float("inf")
+    next_prediction_cycle = time.time() + args.prediction_cycle_seconds if args.prediction_cycle_seconds > 0 else float("inf")
     next_discovery_cycle = time.time() + args.discovery_cycle_seconds if args.discovery_cycle_seconds > 0 else float("inf")
     iteration = 0
     failures = 0

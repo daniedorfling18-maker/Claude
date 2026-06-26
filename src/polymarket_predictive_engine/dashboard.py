@@ -74,6 +74,7 @@ HTML = """<!doctype html>
   <section><h2>Signal cohort validation</h2><div id="cohorts"></div></section>
   <section><h2>Open shadow positions</h2><div id="shadowPositions"></div></section>
   <section><h2>Recent shadow fills</h2><div id="shadowFills"></div></section>
+  <section><h2>Independent model anchors</h2><div id="independentFundamentals"></div></section>
   <section><h2>Historical edge search</h2><div id="edgeSearch"></div></section>
   <section><h2>Historical rule live shadow scan</h2><div id="promotedRuleShadow"></div></section>
   <section><h2>Liquidity discovery</h2><div id="liquidityDiscovery"></div></section>
@@ -194,6 +195,19 @@ async function load() {
       ["Time","created_at"], ["Side","side"], ["Cohort","signal_cohort"],
       ["Market","question", (v,row)=>marketLabel(row)],
       ["Price","price", v=>fmtNum(v,4)], ["Notional","gross_notional_usdc", fmtUsd], ["Reason","reason"]
+    ]);
+    const anchors = data.heartbeat?.independent_fundamentals || {};
+    document.getElementById("independentFundamentals").innerHTML = table([
+      { anchor: "Sharp odds fetch", ...(anchors.sharp_odds_fetch || {}) },
+      { anchor: "Sharp de-vig anchor", ...(anchors.sharp_anchor || {}) },
+      { anchor: "Deribit crypto fundamental", ...(anchors.crypto_fundamental || {}) }
+    ], [
+      ["Anchor","anchor"],
+      ["Status","status"],
+      ["Rows","rows", (v,row)=>v ?? row.fundamental_rows ?? row.rows_in ?? "—"],
+      ["Markets","markets"],
+      ["Output","output_file", v=>short(v)],
+      ["Note","note"]
     ]);
     document.getElementById("edgeSearch").innerHTML = table(data.edge_strategy_search?.top_rules || [], [
       ["Rule","rule_value"], ["Promotable","promotable"], ["Holdout ROI","holdout_roi", v=>fmtNum(Number(v) * 100, 2) + "%"],

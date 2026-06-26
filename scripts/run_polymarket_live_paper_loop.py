@@ -32,10 +32,13 @@ if str(SCRIPTS) not in sys.path:
 import polymarket_mispricing_bot as scanner  # noqa: E402
 from polymarket_predictive_engine.cohort_validation import write_signal_cohort_pnl  # noqa: E402
 from polymarket_predictive_engine.config import load_config  # noqa: E402
+from polymarket_predictive_engine.crypto_fundamental import build_crypto_fundamental  # noqa: E402
 from polymarket_predictive_engine.dashboard import render_dashboard  # noqa: E402
 from polymarket_predictive_engine.mispricing_alpha import train_mispricing_alpha_model  # noqa: E402
 from polymarket_predictive_engine.models.optimized import train_optimized_model  # noqa: E402
 from polymarket_predictive_engine.paper_cycle import run_paper_cycle  # noqa: E402
+from polymarket_predictive_engine.sharp_anchor import build_sharp_anchor  # noqa: E402
+from polymarket_predictive_engine.sharp_odds_fetch import fetch_sharp_odds  # noqa: E402
 from polymarket_predictive_engine.shadow_cohort import update_shadow_cohort_evidence  # noqa: E402
 from polymarket_predictive_engine.snapshot_ingest import ingest_scanner_snapshot  # noqa: E402
 from polymarket_predictive_engine.storage import connect_db  # noqa: E402
@@ -223,6 +226,49 @@ def refresh_repo_worldcup_fundamentals(cfg) -> dict[str, Any]:
     }
 
 
+def refresh_independent_fundamentals(cfg, schedule: dict[str, Any], iteration: int) -> dict[str, Any]:
+    """Refresh independent anchors used by the mispricing-alpha fundamental slot.
+
+    Each sub-step is additive and fail-soft: missing Odds API credentials, absent
+    crypto target files, or network errors should reduce available edge evidence,
+    not stop the local paper loop.
+    """
+    result: dict[str, Any] = {
+        "status": "skipped",
+        "sharp_odds_fetch": {"status": "skipped"},
+        "sharp_anchor": {"status": "skipped"},
+        "crypto_fundamental": {"status": "skipped"},
+    }
+    if not bool(cfg.raw.get("mispricing_alpha", {}).get("use_fundamental_probabilities", True)):
+        result["status"] = "disabled"
+        return result
+
+    ran = False
+    if _scheduled(schedule, "sharp_odds_fetch_every_iterations", iteration, default=12):
+        ran = True
+        try:
+            result["sharp_odds_fetch"] = fetch_sharp_odds(cfg)
+        except Exception as exc:  # noqa: BLE001 - independent anchor fetch is additive
+            result["sharp_odds_fetch"] = {"status": "error", "error": f"{type(exc).__name__}: {exc}"}
+
+    if _scheduled(schedule, "sharp_anchor_build_every_iterations", iteration, default=12):
+        ran = True
+        try:
+            result["sharp_anchor"] = build_sharp_anchor(cfg)
+        except Exception as exc:  # noqa: BLE001 - independent anchor build is additive
+            result["sharp_anchor"] = {"status": "error", "error": f"{type(exc).__name__}: {exc}"}
+
+    if _scheduled(schedule, "crypto_fundamental_every_iterations", iteration, default=12):
+        ran = True
+        try:
+            result["crypto_fundamental"] = build_crypto_fundamental(cfg)
+        except Exception as exc:  # noqa: BLE001 - independent crypto anchor is additive
+            result["crypto_fundamental"] = {"status": "error", "error": f"{type(exc).__name__}: {exc}"}
+
+    result["status"] = "ran" if ran else "skipped_by_schedule"
+    return result
+
+
 def run_iteration(*, config_path: Path, optimize_model: bool, iteration: int, paper_source: str = "raw_snapshot") -> dict[str, Any]:
     force_paper_environment()
     ensure_scanner_runtime_files()
@@ -268,6 +314,7 @@ def run_iteration(*, config_path: Path, optimize_model: bool, iteration: int, pa
 
     scan = scan_once()
     fundamentals = refresh_repo_worldcup_fundamentals(cfg)
+    independent_fundamentals = refresh_independent_fundamentals(cfg, schedule, iteration)
     ingest = ingest_scanner_snapshot(cfg, snapshot_path=scan["snapshot_path"])
     optimization: dict[str, Any] = {"status": "skipped"}
     if (
@@ -311,6 +358,7 @@ def run_iteration(*, config_path: Path, optimize_model: bool, iteration: int, pa
         "live_trading": False,
         "scan": scan,
         "fundamentals": fundamentals,
+        "independent_fundamentals": independent_fundamentals,
         "ingest": ingest,
         "optimization": {
             "status": optimization.get("status"),
@@ -351,6 +399,7 @@ def run_iteration(*, config_path: Path, optimize_model: bool, iteration: int, pa
             "full_scan_ran": True,
             "settlement_only_ran": False,
             "optimize_model_ran": optimization.get("status") != "skipped",
+            "independent_fundamentals_ran": independent_fundamentals.get("status") == "ran",
             "mispricing_alpha_ran": alpha.get("status") != "skipped",
             "edge_strategy_search_ran": strategy_search.get("status") != "skipped",
             "promoted_rule_shadow_ran": promoted_rule_shadow.get("status") != "skipped",

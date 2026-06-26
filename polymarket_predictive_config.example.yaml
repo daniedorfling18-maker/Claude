@@ -201,6 +201,9 @@ runtime_resource_guard:
 runtime_schedule:
   full_scan_every_iterations: 3
   optimize_model_every_iterations: 12
+  sharp_odds_fetch_every_iterations: 12
+  sharp_anchor_build_every_iterations: 12
+  crypto_fundamental_every_iterations: 12
   mispricing_alpha_every_iterations: 12
   edge_strategy_search_every_iterations: 12
   promoted_rule_shadow_every_iterations: 3

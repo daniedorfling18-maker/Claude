@@ -136,9 +136,10 @@ async function load() {
       brokerRejected: monthly.broker_rejected_orders,
       scanMode: data.heartbeat?.scan?.scan_plan?.mode,
       queries: data.heartbeat?.scan?.scan_plan?.selected_queries || data.heartbeat?.scan?.queries,
+      priorityQueue: data.heartbeat?.scan?.scan_plan?.adaptive_priority?.priority_queries || data.heartbeat?.scan?.scan_plan?.ordered_queries,
       reason: broker.entry_pause_reason || Object.keys(broker.broker_rejection_reasons || {}).join(", ")
     }], [
-      ["Scan mode","scanMode"], ["Queries","queries", joinList], ["Tokens","scan"], ["Features","features"], ["Predictions","predictions"], ["Approved","approved"], ["Rejected","rejected"], ["Broker rejects","brokerRejected"], ["Main reason","reason"]
+      ["Scan mode","scanMode"], ["Queries","queries", joinList], ["Priority queue","priorityQueue", joinList], ["Tokens","scan"], ["Features","features"], ["Predictions","predictions"], ["Approved","approved"], ["Rejected","rejected"], ["Broker rejects","brokerRejected"], ["Main reason","reason"]
     ]);
     document.getElementById("promotionReadiness").innerHTML = table(data.cohort_promotion_readiness?.cohorts || [], [
       ["Cohort","signal_cohort"],

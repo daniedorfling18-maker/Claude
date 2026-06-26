@@ -44,7 +44,7 @@ from polymarket_predictive_engine.shadow_cohort import update_shadow_cohort_evid
 from polymarket_predictive_engine.snapshot_ingest import ingest_scanner_snapshot  # noqa: E402
 from polymarket_predictive_engine.storage import connect_db  # noqa: E402
 from polymarket_predictive_engine.strategy_search import run_edge_strategy_search  # noqa: E402
-from polymarket_predictive_engine.utils import now_utc, write_json  # noqa: E402
+from polymarket_predictive_engine.utils import now_utc, read_json, safe_float, write_json  # noqa: E402
 from run_polymarket_liquidity_discovery import run_liquidity_discovery  # noqa: E402
 from run_promoted_rule_shadow_scan import run_promoted_rule_shadow_scan  # noqa: E402
 
@@ -263,6 +263,134 @@ def _configured_scan_queries(cfg, default_query: str) -> tuple[list[str], str]:
     return unique, mode
 
 
+def _truthy_setting(value: Any, default: bool = False) -> bool:
+    if value is None:
+        return default
+    if isinstance(value, bool):
+        return value
+    return str(value).strip().lower() in {"1", "true", "yes", "y", "on"}
+
+
+def _query_key(value: str) -> str:
+    return "".join(ch.lower() for ch in str(value or "") if ch.isalnum())
+
+
+def _cohort_to_query_keys(cohort: str) -> list[str]:
+    text = str(cohort or "").lower()
+    keys: list[str] = []
+    if "crypto_btc" in text or "|btc" in text or "bitcoin" in text:
+        keys.extend(["bitcoin", "btc"])
+    if "crypto_eth" in text or "|eth" in text or "ethereum" in text:
+        keys.extend(["ethereum", "eth"])
+    if "crypto_sol" in text or "|sol" in text or "solana" in text:
+        keys.extend(["solana", "sol"])
+    if "crypto_xrp" in text or "|xrp" in text or "ripple" in text:
+        keys.extend(["xrp", "ripple"])
+    if "tennis" in text:
+        keys.append("tennis")
+    if "worldcup" in text or "world_cup" in text or "world cup" in text:
+        keys.extend(["worldcup", "world cup"])
+    if "crypto_updown" in text:
+        keys.extend(["bitcoin", "ethereum", "solana", "xrp"])
+    seen: set[str] = set()
+    deduped: list[str] = []
+    for key in keys:
+        normalised = _query_key(key)
+        if normalised and normalised not in seen:
+            deduped.append(normalised)
+            seen.add(normalised)
+    return deduped
+
+
+def _cohort_priority_value(row: dict[str, Any]) -> float:
+    score = safe_float(row.get("promotion_ready_score")) or 0.0
+    checks = max(1.0, safe_float(row.get("promotion_ready_checks")) or 6.0)
+    pnl = safe_float(row.get("total_pnl_usdc")) or safe_float(row.get("shadow_total_pnl_usdc")) or 0.0
+    roi = safe_float(row.get("roi")) or safe_float(row.get("shadow_roi")) or 0.0
+    run_rate = safe_float(row.get("monthly_run_rate_usdc")) or safe_float(row.get("shadow_monthly_run_rate_usdc")) or 0.0
+    fills = safe_float(row.get("buy_fills")) or safe_float(row.get("shadow_fills")) or 0.0
+    settled = safe_float(row.get("settled_fills")) or safe_float(row.get("shadow_sell_fills")) or safe_float(row.get("sell_fills")) or 0.0
+    value = 10.0 * (score / checks)
+    if _truthy_setting(row.get("promoted"), default=False):
+        value += 5.0
+    if _truthy_setting(row.get("probationary"), default=False):
+        value += 4.0
+    if pnl > 0:
+        value += min(5.0, pnl / 5.0)
+    if roi > 0:
+        value += min(4.0, roi * 4.0)
+    if run_rate > 0:
+        value += min(4.0, run_rate / 100.0)
+    value += min(2.0, fills / 3.0)
+    value += min(2.0, settled / 3.0)
+    if pnl <= 0 and roi <= 0:
+        value *= 0.35
+    return value
+
+
+def _load_cohort_rows(cfg) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    for filename in ["signal_cohort_pnl.json", "shadow_signal_cohort_pnl.json"]:
+        payload = read_json(cfg.governance_root / filename, default={}) or {}
+        if not isinstance(payload, dict):
+            continue
+        cohorts = payload.get("cohorts", [])
+        if isinstance(cohorts, list):
+            rows.extend([row for row in cohorts if isinstance(row, dict)])
+    return rows
+
+
+def _adaptive_query_order(cfg, queries: list[str]) -> tuple[list[str], dict[str, Any]]:
+    settings = cfg.raw.get("paper_market_scan", {}) or {}
+    enabled = _truthy_setting(
+        os.getenv("POLYMARKET_ADAPTIVE_SCAN_PRIORITY", settings.get("prioritize_near_promoted", True)),
+        default=True,
+    )
+    if not enabled or not queries:
+        return queries, {"enabled": enabled, "priority_queries": [], "top_cohorts": []}
+    query_by_key = {_query_key(query): query for query in queries}
+    priority_by_key: dict[str, float] = {}
+    reason_by_key: dict[str, dict[str, Any]] = {}
+    min_value = float(settings.get("adaptive_priority_min_value", 3.0))
+    require_positive = _truthy_setting(settings.get("adaptive_priority_require_positive_evidence", True), default=True)
+    for row in _load_cohort_rows(cfg):
+        cohort = str(row.get("signal_cohort") or row.get("cohort") or "")
+        pnl = safe_float(row.get("total_pnl_usdc")) or safe_float(row.get("shadow_total_pnl_usdc")) or 0.0
+        roi = safe_float(row.get("roi")) or safe_float(row.get("shadow_roi")) or 0.0
+        run_rate = safe_float(row.get("monthly_run_rate_usdc")) or safe_float(row.get("shadow_monthly_run_rate_usdc")) or 0.0
+        if require_positive and not (pnl > 0 and roi > 0 and run_rate > 0):
+            continue
+        value = _cohort_priority_value(row)
+        if value < min_value:
+            continue
+        for key in _cohort_to_query_keys(cohort):
+            if key not in query_by_key:
+                continue
+            if value > priority_by_key.get(key, -1.0):
+                priority_by_key[key] = value
+                reason_by_key[key] = {
+                    "query": query_by_key[key],
+                    "cohort": cohort,
+                    "priority_value": round(value, 4),
+                    "promotion_ready_score": row.get("promotion_ready_score"),
+                    "promotion_ready_checks": row.get("promotion_ready_checks"),
+                    "pnl_usdc": row.get("total_pnl_usdc", row.get("shadow_total_pnl_usdc")),
+                    "roi": row.get("roi", row.get("shadow_roi")),
+                    "monthly_run_rate_usdc": row.get("monthly_run_rate_usdc", row.get("shadow_monthly_run_rate_usdc")),
+                }
+    priority_keys = sorted(priority_by_key, key=lambda key: priority_by_key[key], reverse=True)
+    priority_queries = [query_by_key[key] for key in priority_keys]
+    priority_set = {query.lower() for query in priority_queries}
+    ordered = priority_queries + [query for query in queries if query.lower() not in priority_set]
+    return ordered, {
+        "enabled": enabled,
+        "priority_queries": priority_queries,
+        "top_cohorts": [reason_by_key[key] for key in priority_keys[:6]],
+        "min_priority_value": min_value,
+        "require_positive_evidence": require_positive,
+    }
+
+
 def _select_scan_queries(cfg, default_query: str, *, scan_sequence: int) -> tuple[list[str], dict[str, Any]]:
     all_queries, mode = _configured_scan_queries(cfg, default_query)
     settings = cfg.raw.get("paper_market_scan", {}) or {}
@@ -275,20 +403,26 @@ def _select_scan_queries(cfg, default_query: str, *, scan_sequence: int) -> tupl
     )
     if not all_queries:
         all_queries = [default_query]
+    ordered_queries, adaptive_priority = _adaptive_query_order(cfg, all_queries)
     if mode == "batch":
-        selected = all_queries[:max_queries] if max_queries > 0 else all_queries
+        selected = ordered_queries[:max_queries] if max_queries > 0 else ordered_queries
     elif mode == "rotate":
         width = max(1, max_queries) if max_queries > 0 else 1
-        start = max(0, scan_sequence - 1) % len(all_queries)
-        selected = [all_queries[(start + offset) % len(all_queries)] for offset in range(min(width, len(all_queries)))]
+        start = max(0, scan_sequence - 1) % len(ordered_queries)
+        selected = [
+            ordered_queries[(start + offset) % len(ordered_queries)]
+            for offset in range(min(width, len(ordered_queries)))
+        ]
     else:
-        selected = [all_queries[0]]
+        selected = [ordered_queries[0]]
     return selected, {
         "mode": mode,
         "all_queries": all_queries,
+        "ordered_queries": ordered_queries,
         "selected_queries": selected,
         "scan_sequence": scan_sequence,
         "max_queries_per_cycle": max_queries,
+        "adaptive_priority": adaptive_priority,
     }
 
 

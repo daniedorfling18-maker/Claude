@@ -14,7 +14,7 @@ from typing import Any
 
 ROOT = Path(__file__).resolve().parents[1]
 DASHBOARD = ROOT / "outputs" / "polymarket_dashboard"
-GOVERNANCE = ROOT / "outputs" / "polymarket_governance"
+GOVERNANCE = ROOT / "outputs" / "polymarket_model_governance"
 
 
 def read_json(path: Path) -> dict[str, Any]:
@@ -111,6 +111,15 @@ def main() -> int:
     print(f"Phone URL:      http://{local_ip_hint()}:8765/")
     print(f"Data updated:   {dashboard_data.get('generated_at_utc') or 'n/a'}")
     print(f"Loop heartbeat: {heartbeat.get('status') or 'n/a'}")
+    scan_plan = first_dict(first_dict(heartbeat.get("scan")).get("scan_plan"))
+    adaptive = first_dict(scan_plan.get("adaptive_priority"))
+    if scan_plan:
+        selected = scan_plan.get("selected_queries") or []
+        ordered = scan_plan.get("ordered_queries") or scan_plan.get("all_queries") or []
+        priority = adaptive.get("priority_queries") or []
+        print(f"Scan mode:      {scan_plan.get('mode') or 'n/a'}")
+        print(f"Scanning now:   {', '.join(selected) if isinstance(selected, list) else selected}")
+        print(f"Priority queue: {', '.join(priority) if isinstance(priority, list) and priority else ', '.join(ordered) if isinstance(ordered, list) else 'n/a'}")
 
     target_monthly = target.get("target_monthly_profit_usdc", 100)
     actual_pnl = target.get("actual_pnl_since_baseline_usdc")

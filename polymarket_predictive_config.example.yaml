@@ -216,6 +216,9 @@ paper_market_scan:
   # once. Override with POLYMARKET_QUERIES / POLYMARKET_SCAN_QUERY_MODE if needed.
   mode: rotate
   max_queries_per_cycle: 1
+  prioritize_near_promoted: true
+  adaptive_priority_min_value: 3.0
+  adaptive_priority_require_positive_evidence: true
   queries:
   - world cup
   - bitcoin

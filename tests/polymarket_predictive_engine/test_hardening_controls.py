@@ -46,12 +46,14 @@ def test_data_quality_fails_closed_without_raw_snapshots(tmp_path):
     assert summary["training_allowed"] is False
 
 
-def test_paper_trade_placeholder_is_deprecated(tmp_path):
+def test_paper_trade_runs_gated_broker_and_blocks_when_not_ready(tmp_path):
+    # paper_trade now runs the gated paper broker (not an unsafe placeholder). With no readiness
+    # evidence it must block on the readiness gate rather than place any order.
     cfg = _cfg(tmp_path)
     summary = paper_trade(cfg)
-    assert summary["status"] == "deprecated_placeholder_blocked"
+    assert summary["status"] == "blocked_by_readiness_gate"
     assert summary["approved_for_paper_trading"] is False
-    assert summary["orders"] == 0
+    assert summary["orders_filled"] == 0
 
 
 def test_risk_decision_returns_explicit_execution_units(tmp_path):

@@ -15,6 +15,7 @@ No private key, wallet, CLOB client, or live executor is used here.
 from __future__ import annotations
 
 import argparse
+import csv
 import dataclasses
 import os
 import subprocess
@@ -182,20 +183,148 @@ def ensure_scanner_runtime_files() -> None:
         positions_csv.write_text("token_id,shares\n", encoding="utf-8")
 
 
+SNAPSHOT_FIELDS = [
+    "timestamp",
+    "event_slug",
+    "event_title",
+    "market_slug",
+    "condition_id",
+    "close_time",
+    "question",
+    "outcome",
+    "token_id",
+    "gamma_price",
+    "fair_probability",
+    "best_bid",
+    "best_ask",
+    "spread",
+    "bid_size",
+    "ask_size",
+    "tick_size",
+    "neg_risk",
+]
+
+OPPORTUNITY_FIELDS = [
+    "timestamp",
+    "action",
+    "event_slug",
+    "event_title",
+    "market_slug",
+    "question",
+    "outcome",
+    "token_id",
+    "fair_probability",
+    "executable_price",
+    "edge",
+    "best_bid",
+    "best_ask",
+    "spread",
+    "size_usd",
+    "shares",
+    "reason",
+]
+
+
+def _read_rows(path: Path) -> list[dict[str, Any]]:
+    if not path.exists():
+        return []
+    with path.open("r", encoding="utf-8-sig", newline="") as handle:
+        return list(csv.DictReader(handle))
+
+
+def _write_rows(path: Path, rows: list[dict[str, Any]], fieldnames: list[str]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("w", encoding="utf-8", newline="") as handle:
+        writer = csv.DictWriter(handle, fieldnames=fieldnames, extrasaction="ignore")
+        writer.writeheader()
+        writer.writerows(rows)
+
+
+def _scan_queries(default_query: str) -> list[str]:
+    raw = os.getenv("POLYMARKET_QUERIES", "").strip()
+    queries = [item.strip() for item in raw.split(",") if item.strip()] if raw else [default_query]
+    seen: set[str] = set()
+    unique: list[str] = []
+    for query in queries:
+        key = query.lower()
+        if key and key not in seen:
+            unique.append(query)
+            seen.add(key)
+    max_queries = int(os.getenv("POLYMARKET_MAX_SCAN_QUERIES", "0") or "0")
+    return unique[:max_queries] if max_queries > 0 else unique
+
+
+def _query_slug(query: str) -> str:
+    slug = "".join(ch.lower() if ch.isalnum() else "-" for ch in query).strip("-")
+    return slug or "query"
+
+
+def _merge_by_token(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    merged: dict[str, dict[str, Any]] = {}
+    for row in rows:
+        token = str(row.get("token_id") or "").strip()
+        key = token or "|".join(str(row.get(part, "")) for part in ["market_slug", "outcome", "question"])
+        if key:
+            merged[key] = row
+    return list(merged.values())
+
+
 def scan_once() -> dict[str, Any]:
-    config = scanner.BotConfig.from_env()
+    base_config = scanner.BotConfig.from_env()
+    base_output_dir = _abs(base_config.output_dir)
+    queries = _scan_queries(base_config.query)
+    if base_config.event_slug:
+        queries = [base_config.query]
+
+    scan_rows: list[dict[str, Any]] = []
+    opportunity_rows: list[dict[str, Any]] = []
+    per_query: list[dict[str, Any]] = []
+
+    for query in queries:
+        query_output_dir = base_output_dir
+        if len(queries) > 1:
+            query_output_dir = base_output_dir / "query_scans" / _query_slug(query)
+        config = dataclasses.replace(
+            base_config,
+            query=query,
+            output_dir=query_output_dir,
+            mode="scan",
+            execute_live=False,
+            model_csv=_abs(base_config.model_csv),
+            positions_csv=_abs(base_config.positions_csv),
+        )
+        token_count, opportunity_count = scanner.run_once(config, live_executor=None)
+        scan_rows.extend(_read_rows(query_output_dir / "market_snapshot.csv"))
+        opportunity_rows.extend(_read_rows(query_output_dir / "opportunities.csv"))
+        per_query.append(
+            {
+                "query": query,
+                "tokens": token_count,
+                "scanner_opportunities": opportunity_count,
+                "snapshot_path": str(query_output_dir / "market_snapshot.csv"),
+            }
+        )
+
+    if len(queries) > 1:
+        scan_rows = _merge_by_token(scan_rows)
+        _write_rows(base_output_dir / "market_snapshot.csv", scan_rows, SNAPSHOT_FIELDS)
+        _write_rows(base_output_dir / "opportunities.csv", opportunity_rows, OPPORTUNITY_FIELDS)
+
     config = dataclasses.replace(
-        config,
+        base_config,
         mode="scan",
         execute_live=False,
-        model_csv=_abs(config.model_csv),
-        positions_csv=_abs(config.positions_csv),
-        output_dir=_abs(config.output_dir),
+        model_csv=_abs(base_config.model_csv),
+        positions_csv=_abs(base_config.positions_csv),
+        output_dir=base_output_dir,
     )
-    token_count, opportunity_count = scanner.run_once(config, live_executor=None)
     return {
-        "tokens": token_count,
-        "scanner_opportunities": opportunity_count,
+        "queries": queries,
+        "per_query": per_query,
+        "tokens": len(scan_rows) if len(queries) > 1 else (per_query[0]["tokens"] if per_query else 0),
+        "scanner_opportunities": len(opportunity_rows) if len(queries) > 1 else (
+            per_query[0]["scanner_opportunities"] if per_query else 0
+        ),
         "snapshot_path": str(config.output_dir / "market_snapshot.csv"),
     }
 

@@ -182,6 +182,7 @@ def _normalise_rows_from_file(cfg: EngineConfig, path: Path) -> list[dict[str, A
     close_col = find_first_column(cols, ["close_time", "end_time", "market_close_time", "closed_at", "end_date"])
     tick_col = find_first_column(cols, ["tick_size", "order_price_min_tick_size"])
     category_col = find_first_column(cols, ["category"])
+    outcome_col = find_first_column(cols, ["outcome", "selection", "runner", "label"])
 
     event_type_col = find_first_column(cols, ["event_type"])
     source_ts_col = find_first_column(cols, ["source_timestamp"])
@@ -224,6 +225,7 @@ def _normalise_rows_from_file(cfg: EngineConfig, path: Path) -> list[dict[str, A
                 "prediction_timestamp_dt": ts,
                 "prediction_timestamp": ts.strftime("%Y-%m-%dT%H:%M:%SZ"),
                 "category": row.get(category_col or "", "") or ("unknown" if is_websocket else infer_category(path)),
+                "outcome": row.get(outcome_col or "", "") or "YES",
                 "midpoint": midpoint,
                 "best_bid": bid if bid is not None else "",
                 "best_ask": ask if ask is not None else "",

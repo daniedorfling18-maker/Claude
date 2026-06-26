@@ -123,13 +123,14 @@ def predict_from_features(
         model_version = str((selected_model or {}).get("model_version") or MODEL_VERSION)
         feature_version = str((selected_model or {}).get("feature_set_version") or FEATURE_SET_VERSION)
         confidence = prediction_confidence(calibrated)
+        selection_name = row.get("selection_name") or row.get("outcome") or "YES"
         prediction = {
             "market_id": row.get("market_id", ""),
             "market_slug": row.get("market_slug", ""),
             "token_id": row.get("token_id", ""),
             "question": row.get("question", ""),
             "category": category,
-            "outcome": row.get("outcome", "YES"),
+            "outcome": selection_name,
             "prediction_timestamp": row.get("prediction_timestamp", now_utc()),
             "raw_probability": midpoint,
             "calibrated_probability": calibrated,

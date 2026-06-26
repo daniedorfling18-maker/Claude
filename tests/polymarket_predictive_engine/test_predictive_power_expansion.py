@@ -11,6 +11,7 @@ from polymarket_predictive_engine.config import load_config
 from polymarket_predictive_engine.features_v2 import build_features_v2
 from polymarket_predictive_engine.labels import build_labels
 from polymarket_predictive_engine.models.calibration_v2 import fit_bucket_calibrator, numeric_model_feature_columns, train_calibration_model
+from polymarket_predictive_engine.models.calibrated import write_predictions
 from polymarket_predictive_engine.models.category_calibration import train_category_calibration
 from polymarket_predictive_engine.paper_edge_simulator import simulate_paper_edge
 from polymarket_predictive_engine.price_history_collector import normalize_price_history_payload
@@ -61,7 +62,7 @@ def write_resolution(tmp_path: Path) -> None:
 def write_history(tmp_path: Path, leakage: bool = False) -> None:
     out = tmp_path / "outputs" / "polymarket_training"
     out.mkdir(parents=True, exist_ok=True)
-    cols = ["market_id", "market_slug", "token_id", "outcome", "category", "timestamp", "midpoint", "price", "close_time", "source"]
+    cols = ["market_id", "market_slug", "question", "token_id", "outcome", "category", "timestamp", "midpoint", "price", "close_time", "source"]
     if leakage:
         cols.append("target")
     with (out / "historical_price_snapshots.csv").open("w", newline="", encoding="utf-8") as f:
@@ -69,7 +70,7 @@ def write_history(tmp_path: Path, leakage: bool = False) -> None:
         w.writeheader()
         for token, outcome, base in [("t1", "Yes", 0.40), ("t0", "No", 0.60)]:
             for ts, bump in [("2026-01-01T00:00:00Z", 0.0), ("2026-01-01T06:00:00Z", 0.05)]:
-                row = {"market_id": "m1", "market_slug": "m1", "token_id": token, "outcome": outcome, "category": "sports", "timestamp": ts, "midpoint": base + bump, "price": base + bump, "close_time": "2026-01-02T00:00:00Z", "source": "test"}
+                row = {"market_id": "m1", "market_slug": "m1", "question": "Unit test Up or Down?", "token_id": token, "outcome": outcome, "category": "sports", "timestamp": ts, "midpoint": base + bump, "price": base + bump, "close_time": "2026-01-02T00:00:00Z", "source": "test"}
                 if leakage:
                     row["target"] = "1"
                 w.writerow(row)
@@ -224,6 +225,21 @@ def test_features_v2_final_schema_has_no_leakage_columns(tmp_path):
     columns = set(rows[0].keys())
     forbidden = ["target", "winner", "winning", "resolved", "resolution", "settled", "settlement", "payout", "outcome", "label"]
     assert not [column for column in columns if any(token in column.lower() for token in forbidden)]
+
+
+def test_live_side_metadata_survives_feature_to_prediction_handoff(tmp_path):
+    write_history(tmp_path)
+    cfg = load_config(make_cfg(tmp_path))
+    features = build_features_v2(cfg)
+    feature = next(row for row in features if row["token_id"] == "t1")
+    assert feature["selection_name"] == "Yes"
+    assert feature["question"] == "Unit test Up or Down?"
+    assert "outcome" not in feature
+
+    predictions = write_predictions(features, str(tmp_path / "predictions.csv"))
+    prediction = next(row for row in predictions if row["token_id"] == "t1")
+    assert prediction["outcome"] == "Yes"
+    assert prediction["question"] == "Unit test Up or Down?"
 
 
 def test_model_feature_selection_ignores_provenance_and_leakage_fields():

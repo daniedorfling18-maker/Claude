@@ -3,6 +3,7 @@ from __future__ import annotations
 from collections import Counter
 from datetime import datetime, timezone
 import json
+from pathlib import Path
 import re
 from typing import Any
 
@@ -196,7 +197,7 @@ async function load() {
       ["Market","question", (v,row)=>marketLabel(row)],
       ["Price","price", v=>fmtNum(v,4)], ["Notional","gross_notional_usdc", fmtUsd], ["Reason","reason"]
     ]);
-    const anchors = data.heartbeat?.independent_fundamentals || {};
+    const anchors = data.heartbeat?.independent_fundamentals || data.independent_anchor_status || {};
     document.getElementById("independentFundamentals").innerHTML = table([
       { anchor: "Sharp odds fetch", ...(anchors.sharp_odds_fetch || {}) },
       { anchor: "Sharp de-vig anchor", ...(anchors.sharp_anchor || {}) },
@@ -485,6 +486,28 @@ def _shadow_settlement_watch(shadow_positions: list[dict[str, Any]], shadow_summ
     }
 
 
+def _independent_anchor_status(governance: Path) -> dict[str, Any]:
+    """Expose the latest independent-anchor summaries even when the heartbeat is settlement-only."""
+    sharp_fetch = read_json(governance / "sharp_odds_fetch_summary.json", default={}) or {}
+    sharp_anchor = read_json(governance / "sharp_anchor_summary.json", default={}) or {}
+    crypto = read_json(governance / "crypto_fundamental_summary.json", default={}) or {}
+    components = {
+        "sharp_odds_fetch": sharp_fetch if isinstance(sharp_fetch, dict) else {},
+        "sharp_anchor": sharp_anchor if isinstance(sharp_anchor, dict) else {},
+        "crypto_fundamental": crypto if isinstance(crypto, dict) else {},
+    }
+    any_present = any(bool(component) for component in components.values())
+    any_usable = any(
+        str(component.get("status") or "").lower() in {"fetched", "built"}
+        and int(safe_float(component.get("rows") or component.get("fundamental_rows")) or 0) > 0
+        for component in components.values()
+    )
+    return {
+        "status": "usable" if any_usable else "setup_needed" if any_present else "missing",
+        **components,
+    }
+
+
 def render_dashboard(cfg: EngineConfig, latest_report: dict[str, Any] | None = None) -> dict[str, Any]:
     out = cfg.output_root / "polymarket_dashboard"
     out.mkdir(parents=True, exist_ok=True)
@@ -530,6 +553,7 @@ def render_dashboard(cfg: EngineConfig, latest_report: dict[str, Any] | None = N
         "cohort_promotion_readiness": _cohort_promotion_readiness(cfg, signal_cohort_pnl),
         "shadow_signal_cohort_pnl": shadow_summary,
         "shadow_settlement_watch": _shadow_settlement_watch(shadow_positions, shadow_summary),
+        "independent_anchor_status": _independent_anchor_status(governance),
         "edge_strategy_search": edge_strategy_search,
         "promoted_rule_shadow": promoted_rule_shadow,
         "liquidity_discovery": liquidity_discovery,

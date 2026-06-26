@@ -422,13 +422,19 @@ def apply_mispricing_alpha(
         spread = safe_float(row.get("spread"))
         liquidity = safe_float(row.get("liquidity"))
         relative_spread = (spread / price) if spread is not None and price > 0 else None
+        # Microstructure filters only block when book data is present and breaches a limit.
+        # Absent spread/liquidity (a prediction row carrying no book) is unknown, not a breach,
+        # so it passes this research-layer gate; live execution still applies its own
+        # liquidity/geoblock guards before any order is placed.
         price_filter_pass = min_alpha_price is None or price >= min_alpha_price
-        spread_filter_pass = max_alpha_spread is None or (spread is not None and spread <= max_alpha_spread)
-        relative_spread_filter_pass = max_alpha_relative_spread is None or (
-            relative_spread is not None and relative_spread <= max_alpha_relative_spread
+        spread_filter_pass = max_alpha_spread is None or spread is None or spread <= max_alpha_spread
+        relative_spread_filter_pass = (
+            max_alpha_relative_spread is None
+            or relative_spread is None
+            or relative_spread <= max_alpha_relative_spread
         )
-        liquidity_filter_pass = min_alpha_liquidity is None or (
-            liquidity is not None and liquidity >= min_alpha_liquidity
+        liquidity_filter_pass = (
+            min_alpha_liquidity is None or liquidity is None or liquidity >= min_alpha_liquidity
         )
         microstructure_filter_pass = bool(
             price_filter_pass and spread_filter_pass and relative_spread_filter_pass and liquidity_filter_pass

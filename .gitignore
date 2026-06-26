@@ -47,3 +47,7 @@ credentials.json
 local_credentials.json
 raw_secret_logs/
 
+
+# Runtime sharp-odds input (fetched per run; keep the .example.csv only)
+inputs/polymarket/sharp_odds.csv
+inputs/polymarket/crypto_targets.csv

@@ -267,3 +267,67 @@ that loses ~20%. `simulate-paper-edge` is now OOS-by-market by construction and 
 the honest forward-style P&L is **negative**, so paper trading should be run only to accumulate
 a live track record (and to test live microstructure), never in the expectation of profit, and
 live stays correctly blocked.
+
+## 13. Profitability ranking of the market-neutral engines (live data)
+
+Since directional forecasting has no edge, I built and measured the two market-neutral engines
+on live Polymarket order books. The profitability ranking, with realistic P&L:
+
+| Engine | Realistic P&L on liquid markets | Verdict |
+|---|---|---|
+| **Dutch-book arbitrage** | mean basket ask-sum ≈ **1.002** (slightly overround); a few **2–4%** locks only on long-horizon (2027–28) multi-outcome markets → low **annualised return on capital** with months/years of lock-up | the only positive-EV engine, but marginal |
+| **Market-making (spread)** | median liquid spread **0.1¢ (1 tick)**; half-spread 0.05¢ vs adverse-selection ≥ **0.48¢** → **0/31 markets net-positive**, median **−0.43¢/share** | not viable on liquid markets |
+| **Directional (our fair vs price)** | OOS paper P&L **−17% to −23%** (§12) | no edge |
+
+**Market-making P&L model** (`market_making_pnl`): net maker edge = half-spread − adverse
+mark-out (+ rebate), not the gross spread. The adverse-selection benchmark is empirical — the
+median short-horizon |midpoint move| over 49k pulled snapshots is ~0 and the mean ≈ **0.24¢**
+(an *unconditional* move, hence a lower bound on the conditional-on-fill mark-out). Liquid books
+trade at a one-tick spread, so the half-spread cannot cover even that lower bound: **spread
+capture is competed away**.
+
+**Dutch-arb P&L** (`scripts/polymarket_event_arb_pnl.py`, complete outcome sets via the Gamma
+events endpoint; `scripts/polymarket_dutch_arb_scanner.py` with a completeness filter): once
+incomplete-capture false locks are removed, liquid near-term baskets (World Cup, F1, Fed) are
+efficient (ask-sum ≥ 1) and the only genuine locks are small and long-dated, so the annualised
+return on capital is low.
+
+**Conclusion — confirmed three independent ways.** Polymarket's liquid markets are efficient on
+all three axes: **direction** (no forecast edge, −4% OOS skill), **spread** (one-tick books, no
+maker edge), and **basket** (ask-sum ≈ 1, no arb). The only positive-expectation engine is
+small, long-horizon dutch-book arbitrage at a low annualised return — automatable across many
+events but not a large or fast P&L. Everything is built as dry-run, tested tooling
+(`market-making-pnl`, the two arb scanners, the live mispricing scanner); none should be taken
+live in the expectation of profit on liquid markets.
+
+## 14. Dutch-arb execution monitor (`dutch-arb-monitor`)
+
+The one-shot scanner answers "is there an arb now?"; the **execution monitor**
+(`dutch_arb_monitor.py`, CLI `dutch-arb-monitor`) answers the operational questions you need
+before committing capital, and is the dry-run scaffold a live arb bot would sit behind:
+
+- **Execution plan, not just a flag** — for each complete basket it emits one dry-run BUY per
+  outcome leg at its best ask, sized to the thinnest leg's depth, with capital and locked profit
+  spelled out (`dry_run_orders`). Every order is tagged `dry_run: True`; the summary always
+  reports `live_trading: False` regardless of `trading.mode`. It never calls an order API.
+- **Persistence via polling** — `--polls N --poll-seconds S` re-prices the book and diffs state
+  across polls (`diff_states`: appeared / persisting / cleared). A lock that survives several
+  polls is real depth; one that blinks out was a stale or already-taken quote. This is the
+  executability signal a single snapshot cannot give.
+- **Ranked by annualised return on capital** with threshold alerts (`--alert-annualised`), since
+  a lock ties capital up until resolution (a 3% lock resolving in two years is ~1.5%/yr).
+
+**Live finding (2026-06-25).** Across the top liquid negRisk events the monitor priced **0
+executable complete baskets**, and the new skip-reason telemetry (`scan_stats_latest_poll`)
+explains why rather than reporting a silent zero: the flagship events are either **oversized**
+(2028 election fields are 128 outcomes, beyond the per-event leg cap) or contain **≥1 unbuyable
+leg** (a dead/closed outcome whose CLOB book 404s — e.g. an eliminated World Cup team), and a
+basket you cannot fully buy is not lockable. This is consistent with §13: liquid baskets are
+efficient and the genuine locks are small, long-dated and partial-set. The core (plan
+construction, ranking, diffing, alerting) is pure and unit-tested; only the Gamma/CLOB reader
+touches the network.
+
+*Natural next refinement* (not built): for partially-resolved events, exclude legs whose Gamma
+market is already **resolved-NO** (they pay 0 and need not be bought) and lock over the still-live
+outcomes — this would let the monitor fire on deep-tournament brackets where most legs are dead.
+It requires verifying resolution status per leg so an unhedged live outcome is never dropped.

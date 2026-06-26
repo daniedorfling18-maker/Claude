@@ -1,4 +1,4 @@
-﻿paths:
+paths:
   data_root: .
   output_root: outputs
   database_path: work/polymarket/polymarket_engine.sqlite
@@ -128,6 +128,9 @@ mispricing_alpha:
   max_model_residual_adjustment: 0.0
   use_fundamental_probabilities: true
   fundamental_probability_paths:
+  # Independent sharp anchors first (each wins per token); falls back to repo/consensus fairs.
+  - outputs/polymarket_training/sharp_fundamental_probabilities.csv
+  - outputs/polymarket_training/crypto_fundamental_probabilities.csv
   - outputs/polymarket/repo_worldcup_winner_probabilities.csv
   - inputs/polymarket/model_probabilities.csv
   fundamental_residual_shrinkage: 0.35
@@ -153,6 +156,38 @@ mispricing_alpha:
   uncertainty_penalty_weight: 0.03
   market_overround_penalty_weight: 0.35
   model_overround_penalty_weight: 0.2
+sharp_anchor:
+  # Sharper independent source for the mispricing-alpha fundamental slot (e.g. Pinnacle/Betfair).
+  # Provide a CSV at input_path with columns: market_slug,outcome,decimal_odds (and optionally
+  # token_id to skip the join). De-vig within each market; output feeds fundamental_probability_paths.
+  input_path: inputs/polymarket/sharp_odds.csv
+  devig_method: power            # power (favourite-longshot aware) or multiplicative
+  source_name: pinnacle_close
+  token_map_path: outputs/polymarket/market_snapshot.csv
+sharp_odds_fetch:
+  # Automated fetch for the sharp anchor. The Odds API aggregates Pinnacle + Betfair Exchange.
+  # Set the key in the environment (never commit it): export THE_ODDS_API_KEY=...
+  # fetch-sharp-odds writes input_path above; refresh-sharp-anchor fetches then de-vigs.
+  provider: the_odds_api
+  base_url: https://api.the-odds-api.com/v4
+  api_key_env: THE_ODDS_API_KEY
+  sports:
+  - soccer_fifa_world_cup
+  regions: eu,uk                 # Pinnacle is in eu; Betfair Exchange in uk/eu
+  markets: h2h
+  bookmaker_priority:
+  - pinnacle
+  - betfair_ex_eu
+  - betfair_ex_uk
+  odds_format: decimal
+  output_path: inputs/polymarket/sharp_odds.csv
+  request_timeout_seconds: 20
+crypto_fundamental:
+  # Deribit option-implied P(S_T > strike) for crypto "above $K by DATE" markets. No API key
+  # needed (public market data). Provide targets at targets_path: token_id,currency,strike,expiry.
+  base_url: https://www.deribit.com/api/v2
+  targets_path: inputs/polymarket/crypto_targets.csv
+  request_timeout_seconds: 20
 profit_tracking:
   target_monthly_profit_usdc: 100
   minimum_tracking_hours_for_on_pace: 24

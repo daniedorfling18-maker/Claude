@@ -19,9 +19,11 @@ It:
    - `outputs/polymarket/opportunities.csv`
    - `outputs/polymarket/execution_log.csv`
 
-The workflow is scheduled every 5 minutes and the script loops for about 270 seconds. GitHub Actions cannot run a true permanent daemon, so this is the closest scheduled workflow design. Move the same script to a VPS or self-hosted runner if you need true always-on execution.
-
-The workflow intentionally does not expose `workflow_dispatch`. This repo validates scheduled automation rules in CI, so configuration should be changed through repository variables and secrets rather than manual workflow inputs.
+The workflow is **manual-only** (`workflow_dispatch`) — a manual dry run — and the script loops for
+about 270 seconds. GitHub Actions cannot run a true permanent daemon; move the same script to a VPS
+or self-hosted runner (see the Docker stacks) if you need always-on execution. CI validates the
+allowed trigger set, so keep this workflow's trigger as `workflow_dispatch` (the `ci.yml`
+automation-rules check expects exactly that).
 
 ## Modes
 

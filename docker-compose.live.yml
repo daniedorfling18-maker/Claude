@@ -1,0 +1,93 @@
+# Constantly-running, DRY-RUN live Polymarket stack.
+#
+#   dutch-arb-monitor : REST polling of Gamma/CLOB for complete-set dutch-book arbs, ranked by
+#                       annualised return on capital, with cross-poll state diffing and alerts.
+#                       Writes -> outputs/polymarket_arbitrage/
+#   live-mispricing   : the WebSocket writer. Captures the live CLOB book, then scans for
+#                       BUY/SELL/MAKE signals vs our fair values.
+#                       Writes -> outputs/polymarket_training/websocket_market_features.csv
+#                                 outputs/polymarket_mispricing/
+#   sharp-anchor      : periodically fetches sharp odds (Pinnacle/Betfair via The Odds API) and
+#                       de-vigs them into the mispricing-alpha fundamental. Needs THE_ODDS_API_KEY;
+#                       idles harmlessly without it.
+#                       Writes -> inputs/polymarket/sharp_odds.csv
+#                                 outputs/polymarket_training/sharp_fundamental_probabilities.csv
+#
+# Both run paper/dry-run and have NO order-placement code path (the engine's live executor is a
+# skeleton that raises). Going live is a separate, deliberate workflow gated by the kill switch,
+# trading.mode: live, POLYMARKET_LIVE_TRADING=1 and a human approval file - see
+# docs/POLYMARKET_LIVE_TRADING_APPROVAL_CHECKLIST.md. This stack sets none of those.
+#
+# DUPLICATE-WRITER RULE (docs/POLYMARKET_DOCKER_SAFETY_AUDIT.md): run ONLY ONE compose stack at a
+# time. docker-compose.yml (websocket-live-features) and docker-compose.monitor.yml also write
+# websocket_market_features.csv / outputs/polymarket - running them alongside this file would have
+# two processes writing the same files. Pick one stack.
+#
+#   cp .env.example .env                                  # first time only
+#   docker compose -f docker-compose.live.yml up -d --build
+#   docker compose -f docker-compose.live.yml logs -f dutch-arb-monitor
+services:
+  dutch-arb-monitor:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: polymarket-engine:live
+    container_name: polymarket-dutch-arb-monitor
+    env_file:
+      - .env
+    environment:
+      PM_MODE: dry_run
+      POLYMARKET_EXECUTE_LIVE: "false"
+      PM_CONFIG: ${PM_CONFIG:-/app/polymarket_predictive_config.example.yaml}
+      ARB_POLL_SECONDS: ${ARB_POLL_SECONDS:-30}
+      ARB_MAX_EVENTS: ${ARB_MAX_EVENTS:-20}
+      ARB_MIN_ANNUALISED: ${ARB_MIN_ANNUALISED:-0.0}
+      ARB_ALERT_ANNUALISED: ${ARB_ALERT_ANNUALISED:-0.10}
+    volumes:
+      - ./polymarket_predictive_config.example.yaml:/app/polymarket_predictive_config.example.yaml:ro
+      - ./outputs:/app/outputs
+      - ./inputs/polymarket:/app/inputs/polymarket:ro
+    command: ["sh", "scripts/run_dutch_arb_monitor.sh"]
+    restart: unless-stopped
+
+  live-mispricing:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: polymarket-engine:live
+    container_name: polymarket-live-mispricing
+    env_file:
+      - .env
+    environment:
+      PM_MODE: dry_run
+      POLYMARKET_EXECUTE_LIVE: "false"
+      PM_CONFIG: ${PM_CONFIG:-/app/polymarket_predictive_config.example.yaml}
+      WS_SECONDS: ${WS_SECONDS:-60}
+      MISPRICING_SLEEP_SECONDS: ${MISPRICING_SLEEP_SECONDS:-5}
+    volumes:
+      - ./polymarket_predictive_config.example.yaml:/app/polymarket_predictive_config.example.yaml:ro
+      - ./outputs:/app/outputs
+      - ./inputs/polymarket:/app/inputs/polymarket:ro
+    command: ["sh", "scripts/run_live_mispricing_loop.sh"]
+    restart: unless-stopped
+
+  sharp-anchor:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: polymarket-engine:live
+    container_name: polymarket-sharp-anchor
+    env_file:
+      - .env
+    environment:
+      PM_MODE: dry_run
+      POLYMARKET_EXECUTE_LIVE: "false"
+      PM_CONFIG: ${PM_CONFIG:-/app/polymarket_predictive_config.example.yaml}
+      SHARP_REFRESH_SECONDS: ${SHARP_REFRESH_SECONDS:-3600}
+      THE_ODDS_API_KEY: ${THE_ODDS_API_KEY:-}
+    volumes:
+      - ./polymarket_predictive_config.example.yaml:/app/polymarket_predictive_config.example.yaml:ro
+      - ./outputs:/app/outputs
+      - ./inputs/polymarket:/app/inputs/polymarket          # read-write: writes sharp_odds.csv
+    command: ["sh", "scripts/run_sharp_anchor_loop.sh"]
+    restart: unless-stopped

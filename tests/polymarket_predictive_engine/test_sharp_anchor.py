@@ -1,0 +1,105 @@
+import csv
+
+from pytest import approx
+
+from polymarket_predictive_engine.config import EngineConfig
+from polymarket_predictive_engine.sharp_anchor import (
+    build_sharp_anchor,
+    devig_multiplicative,
+    devig_power,
+    implied_from_decimal,
+)
+
+
+def test_implied_from_decimal():
+    assert implied_from_decimal(2.0) == approx(0.5)
+    assert implied_from_decimal(1.0) is None          # no real odds
+    assert implied_from_decimal(None) is None
+
+
+def test_multiplicative_devig_removes_overround_and_sums_to_one():
+    raw = [1 / 2.10, 1 / 3.40, 1 / 3.80]              # sums to ~1.033 (3.3% overround)
+    fair = devig_multiplicative(raw)
+    assert sum(fair) == approx(1.0)
+    assert fair[0] > fair[1] > fair[2]                # ordering preserved
+
+
+def test_power_devig_sums_to_one_and_deflates_favourite_less():
+    raw = [1 / 1.50, 1 / 4.50, 1 / 7.00]             # strong favourite + overround
+    power = devig_power(raw)
+    multiplicative = devig_multiplicative(raw)
+    assert sum(power) == approx(1.0, abs=1e-6)
+    # power method shrinks the favourite less than a flat proportional rescale
+    assert power[0] > multiplicative[0]
+
+
+def _write(path, rows, fields):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("w", newline="", encoding="utf-8") as f:
+        w = csv.DictWriter(f, fieldnames=fields)
+        w.writeheader()
+        w.writerows(rows)
+
+
+def _read(path):
+    with path.open(encoding="utf-8-sig") as f:
+        return list(csv.DictReader(f))
+
+
+def test_build_sharp_anchor_direct_token_id(tmp_path):
+    cfg = EngineConfig(
+        raw={"paths": {"output_root": str(tmp_path / "outputs")},
+             "sharp_anchor": {"input_path": str(tmp_path / "sharp.csv"), "devig_method": "multiplicative"}},
+        path=tmp_path / "cfg.yaml",
+    )
+    _write(tmp_path / "sharp.csv",
+           [{"market_slug": "m", "outcome": "A", "decimal_odds": "2.10", "token_id": "tokA"},
+            {"market_slug": "m", "outcome": "B", "decimal_odds": "3.40", "token_id": "tokB"},
+            {"market_slug": "m", "outcome": "C", "decimal_odds": "3.80", "token_id": "tokC"}],
+           ["market_slug", "outcome", "decimal_odds", "token_id"])
+
+    summary = build_sharp_anchor(cfg)
+    assert summary["status"] == "built"
+    assert summary["fundamental_rows"] == 3
+    assert summary["token_join"] == "direct_token_id"
+    assert summary["mean_overround_removed"] > 0          # vig was present and removed
+
+    out = _read(tmp_path / "outputs" / "polymarket_training" / "sharp_fundamental_probabilities.csv")
+    probs = {r["token_id"]: float(r["probability"]) for r in out}
+    assert set(probs) == {"tokA", "tokB", "tokC"}
+    assert sum(probs.values()) == approx(1.0, abs=1e-5)   # de-vigged within the market (6dp output)
+    assert probs["tokA"] > probs["tokB"] > probs["tokC"]
+
+
+def test_build_sharp_anchor_joins_via_token_map(tmp_path):
+    cfg = EngineConfig(
+        raw={"paths": {"output_root": str(tmp_path / "outputs")},
+             "sharp_anchor": {"input_path": str(tmp_path / "sharp.csv"),
+                              "token_map_path": str(tmp_path / "map.csv")}},
+        path=tmp_path / "cfg.yaml",
+    )
+    _write(tmp_path / "sharp.csv",
+           [{"market_slug": "Spain vs France", "outcome": "Spain", "decimal_odds": "2.0"},
+            {"market_slug": "Spain vs France", "outcome": "France", "decimal_odds": "2.0"}],
+           ["market_slug", "outcome", "decimal_odds"])
+    _write(tmp_path / "map.csv",
+           [{"token_id": "T1", "market_slug": "Spain vs France", "outcome": "Spain"},
+            {"token_id": "T2", "market_slug": "Spain vs France", "outcome": "France"}],
+           ["token_id", "market_slug", "outcome"])
+
+    summary = build_sharp_anchor(cfg)
+    assert summary["token_join"] == "market_outcome_map"
+    assert summary["fundamental_rows"] == 2
+    out = {r["token_id"]: float(r["probability"]) for r in _read(tmp_path / "outputs" / "polymarket_training" / "sharp_fundamental_probabilities.csv")}
+    assert out == {"T1": approx(0.5), "T2": approx(0.5)}   # symmetric odds -> 50/50 after de-vig
+
+
+def test_build_sharp_anchor_no_input(tmp_path):
+    cfg = EngineConfig(
+        raw={"paths": {"output_root": str(tmp_path / "outputs")},
+             "sharp_anchor": {"input_path": str(tmp_path / "missing.csv")}},
+        path=tmp_path / "cfg.yaml",
+    )
+    summary = build_sharp_anchor(cfg)
+    assert summary["status"] == "no_input"
+    assert summary["fundamental_rows"] == 0

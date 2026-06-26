@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from collections import defaultdict
 from datetime import datetime, timezone
+import math
+import random
 import re
 from typing import Any
 
@@ -225,6 +227,41 @@ def _metrics(rows: list[dict[str, Any]], stake_usdc: float) -> dict[str, Any]:
     }
 
 
+def _market_clustered_roi_ci(
+    rows: list[dict[str, Any]], *, n_boot: int = 2000, seed: int = 20260625
+) -> tuple[float, float, float]:
+    """Bootstrap a 95% CI for a rule's ROI, resampling whole *markets* with replacement.
+
+    Snapshots within one market are autocorrelated, so the independent unit is the market,
+    not the row. A rule whose ROI is carried by one lucky longshot market has a CI lower
+    bound far below zero - exactly the overfit signal the promotion gate must catch. Returns
+    ``(point_roi, ci_low, ci_high)``; the CI is NaN when there are fewer than two markets.
+    """
+    if not rows:
+        return 0.0, float("nan"), float("nan")
+    point = sum(float(row["_profit_per_usdc"]) for row in rows) / len(rows)
+    by_market: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    for row in rows:
+        by_market[str(row["_market_key"])].append(row)
+    keys = list(by_market)
+    if len(keys) < 2:
+        return point, float("nan"), float("nan")
+    rng = random.Random(seed)
+    rois: list[float] = []
+    for _ in range(max(1, n_boot)):
+        profit = 0.0
+        count = 0
+        for _ in range(len(keys)):
+            for row in by_market[keys[rng.randrange(len(keys))]]:
+                profit += float(row["_profit_per_usdc"])
+                count += 1
+        rois.append(profit / count if count else 0.0)
+    rois.sort()
+    lo = rois[int(0.025 * (len(rois) - 1))]
+    hi = rois[int(0.975 * (len(rois) - 1))]
+    return point, lo, hi
+
+
 def _evaluate_rule(
     *,
     rule_family: str,
@@ -233,13 +270,19 @@ def _evaluate_rule(
     development_markets: set[str],
     holdout_markets: set[str],
     stake_usdc: float,
+    roi_bootstrap_samples: int = 2000,
 ) -> dict[str, Any]:
     dev_rows = [row for row in rule_rows if str(row["_market_key"]) in development_markets]
     holdout_rows = [row for row in rule_rows if str(row["_market_key"]) in holdout_markets]
     dev = _metrics(dev_rows, stake_usdc)
     holdout = _metrics(holdout_rows, stake_usdc)
     all_metrics = _metrics(rule_rows, stake_usdc)
+    _, holdout_roi_ci_low, holdout_roi_ci_high = _market_clustered_roi_ci(
+        holdout_rows, n_boot=roi_bootstrap_samples
+    )
     return {
+        "holdout_roi_ci_low": holdout_roi_ci_low,
+        "holdout_roi_ci_high": holdout_roi_ci_high,
         "rule_family": rule_family,
         "rule_value": rule_value,
         "family": rule_rows[0].get("_family", "") if rule_rows else "",
@@ -295,6 +338,13 @@ def run_edge_strategy_search(cfg: EngineConfig) -> dict[str, Any]:
     min_holdout_rows = int(settings.get("min_holdout_rows", 6))
     min_dev_roi = float(settings.get("min_dev_roi", 0.02))
     min_holdout_roi = float(settings.get("min_holdout_roi", 0.02))
+    # Hardened gates: a rule must clear an entry-price floor (no untradeable sub-cent longshots),
+    # have enough independent holdout markets, and show a holdout ROI whose market-clustered
+    # bootstrap lower bound stays above the bar - so a single lucky tail hit cannot promote.
+    min_holdout_markets = int(settings.get("min_holdout_markets", 4))
+    min_avg_entry_price = float(settings.get("min_avg_entry_price", 0.05))
+    min_holdout_roi_ci_lower_bound = float(settings.get("min_holdout_roi_ci_lower_bound", 0.0))
+    roi_bootstrap_samples = int(settings.get("roi_bootstrap_samples", 2000))
     stake_usdc = float(settings.get("stake_usdc", 1.0))
     ranked: list[dict[str, Any]] = []
     for (rule_family, rule_value), rule_rows in by_rule.items():
@@ -305,31 +355,44 @@ def run_edge_strategy_search(cfg: EngineConfig) -> dict[str, Any]:
             development_markets=development_markets,
             holdout_markets=holdout_markets,
             stake_usdc=stake_usdc,
+            roi_bootstrap_samples=roi_bootstrap_samples,
         )
+        ci_low = float(result["holdout_roi_ci_low"])
         result["promotable"] = bool(
             int(result["dev_rows"]) >= min_rows
             and int(result["dev_markets"]) >= min_markets
             and int(result["holdout_rows"]) >= min_holdout_rows
+            and int(result["holdout_markets"]) >= min_holdout_markets
+            and float(result["avg_entry_price"]) >= min_avg_entry_price
             and float(result["dev_roi"]) >= min_dev_roi
             and float(result["holdout_roi"]) >= min_holdout_roi
+            and math.isfinite(ci_low)
+            and ci_low >= min_holdout_roi_ci_lower_bound
         )
         result["promotion_reason"] = (
-            "historical dev+holdout ROI positive"
+            "clears significance (holdout ROI CI lower bound), entry-price floor, "
+            "and independent-market gates"
             if result["promotable"]
             else (
                 f"needs dev_rows>={min_rows}, dev_markets>={min_markets}, "
-                f"holdout_rows>={min_holdout_rows}, dev_roi>={min_dev_roi:.2%}, "
-                f"holdout_roi>={min_holdout_roi:.2%}"
+                f"holdout_rows>={min_holdout_rows}, holdout_markets>={min_holdout_markets}, "
+                f"avg_entry_price>={min_avg_entry_price:.2f}, dev_roi>={min_dev_roi:.2%}, "
+                f"holdout_roi>={min_holdout_roi:.2%}, "
+                f"holdout_roi_ci_low>={min_holdout_roi_ci_lower_bound:.2%}"
             )
         )
         ranked.append(result)
 
+    def _ci_low_key(row: dict[str, Any]) -> float:
+        value = float(row.get("holdout_roi_ci_low", float("nan")))
+        return value if math.isfinite(value) else -1e9
+
     ranked.sort(
         key=lambda row: (
             bool(row.get("promotable")),
+            _ci_low_key(row),          # rank by the significance-adjusted ROI, not the point estimate
             float(row.get("holdout_roi") or 0.0),
-            float(row.get("dev_roi") or 0.0),
-            int(row.get("holdout_rows") or 0),
+            int(row.get("holdout_markets") or 0),
         ),
         reverse=True,
     )
@@ -352,8 +415,12 @@ def run_edge_strategy_search(cfg: EngineConfig) -> dict[str, Any]:
             "min_rows": min_rows,
             "min_markets": min_markets,
             "min_holdout_rows": min_holdout_rows,
+            "min_holdout_markets": min_holdout_markets,
+            "min_avg_entry_price": min_avg_entry_price,
             "min_dev_roi": min_dev_roi,
             "min_holdout_roi": min_holdout_roi,
+            "min_holdout_roi_ci_lower_bound": min_holdout_roi_ci_lower_bound,
+            "roi_bootstrap_samples": roi_bootstrap_samples,
         },
     }
     write_json(cfg.governance_root / "edge_strategy_search_summary.json", payload)

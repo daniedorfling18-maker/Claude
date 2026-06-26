@@ -31,7 +31,11 @@ from .pipeline_inventory import pipeline_inventory
 from .portfolio import portfolio_snapshot, reconciliation_report
 from .price_history_collector import collect_price_history
 from .market_making_pnl import evaluate_market_making
+from .dutch_arb_monitor import run_dutch_arb_monitor
 from .mispricing_alpha import apply_mispricing_alpha, train_mispricing_alpha_model
+from .sharp_anchor import build_sharp_anchor
+from .sharp_odds_fetch import fetch_sharp_odds
+from .crypto_fundamental import build_crypto_fundamental
 from .live_mispricing import run_live_mispricing, scan_live_mispricing
 from .paper_session import run_paper_session
 from .readiness import paper_live_promotion_gate, paper_trade_readiness, readiness_decision
@@ -70,6 +74,10 @@ COMMANDS = [
     "optimize-model",
     "train-mispricing-alpha",
     "score-mispricing-alpha",
+    "fetch-sharp-odds",
+    "build-sharp-anchor",
+    "refresh-sharp-anchor",
+    "build-crypto-fundamental",
     "edge-strategy-search",
     "promotion-gate",
     "validate",
@@ -85,6 +93,7 @@ COMMANDS = [
     "scan-mispricing",
     "run-live-mispricing",
     "market-making-pnl",
+    "dutch-arb-monitor",
     "resolve-websocket-markets",
     "collect-snapshot-labels",
     "collect-overnight",
@@ -118,6 +127,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--websocket-seconds", type=int, default=60)
     parser.add_argument("--websocket-input", default=None)
     parser.add_argument("--snapshot-input", default=None)
+    parser.add_argument("--sharp-input", default=None, help="sharp-odds CSV for build-sharp-anchor (overrides config sharp_anchor.input_path)")
+    parser.add_argument("--crypto-targets", default=None, help="crypto targets CSV for build-crypto-fundamental (token_id,currency,strike,expiry)")
     parser.add_argument(
         "--source",
         choices=["all", "historical", "raw_snapshot", "websocket"],
@@ -126,6 +137,11 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--test-fraction", type=float, default=0.3, help="held-out market fraction for train-skill-model")
     parser.add_argument("--skill-l2", type=float, default=5.0, help="L2 strength for train-skill-model")
+    parser.add_argument("--polls", type=int, default=1, help="dutch-arb-monitor: number of book polls (0 = run continuously until stopped)")
+    parser.add_argument("--poll-seconds", type=int, default=30, help="dutch-arb-monitor: seconds between polls")
+    parser.add_argument("--max-events", type=int, default=20, help="dutch-arb-monitor: max events to scan per poll")
+    parser.add_argument("--min-annualised", type=float, default=0.0, help="dutch-arb-monitor: min annualised ROI to rank")
+    parser.add_argument("--alert-annualised", type=float, default=0.10, help="dutch-arb-monitor: alert threshold")
     parser.add_argument(
         "--allow-unlabelled-research-features",
         "--research-unlabelled-features",
@@ -215,6 +231,16 @@ def main(argv: list[str] | None = None) -> int:
             _print(train_mispricing_alpha_model(cfg))
         elif args.command == "score-mispricing-alpha":
             _print({"predictions": len(apply_mispricing_alpha(cfg, output_path=str(cfg.output_root / "polymarket_predictions" / "predictions.csv")))})
+        elif args.command == "fetch-sharp-odds":
+            _print(fetch_sharp_odds(cfg))
+        elif args.command == "build-sharp-anchor":
+            _print(build_sharp_anchor(cfg, input_path=args.sharp_input))
+        elif args.command == "refresh-sharp-anchor":
+            fetched = fetch_sharp_odds(cfg)
+            built = build_sharp_anchor(cfg)
+            _print({"fetch": fetched, "build": built})
+        elif args.command == "build-crypto-fundamental":
+            _print(build_crypto_fundamental(cfg, targets_path=args.crypto_targets))
         elif args.command == "edge-strategy-search":
             _print(run_edge_strategy_search(cfg))
         elif args.command == "promotion-gate":
@@ -265,6 +291,10 @@ def main(argv: list[str] | None = None) -> int:
         elif args.command == "market-making-pnl":
             _, summary = evaluate_market_making(cfg)
             _print(summary)
+        elif args.command == "dutch-arb-monitor":
+            _print(run_dutch_arb_monitor(cfg, polls=args.polls, poll_seconds=args.poll_seconds,
+                                         max_events=args.max_events, min_annualised=args.min_annualised,
+                                         alert_annualised=args.alert_annualised))
         elif args.command == "resolve-websocket-markets":
             _print(collect_websocket_resolutions(cfg))
         elif args.command == "collect-snapshot-labels":

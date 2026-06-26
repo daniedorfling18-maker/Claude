@@ -1,8 +1,8 @@
 """Automated sharp-odds fetch -> the sharp_anchor input contract.
 
 Pinnacle and Betfair Exchange have no free public API, but The Odds API aggregates both (and is
-already used elsewhere in this repo via ``THE_ODDS_API_KEY``). This module pulls head-to-head odds
-for the configured sports, keeps the **sharpest available book per event** (Pinnacle preferred,
+already used elsewhere in this repo via ``THE_ODDS_API_KEY``). This module pulls odds for the
+configured sports/markets, keeps the **sharpest available book per event** (Pinnacle preferred,
 Betfair Exchange as fallback), and writes ``market_slug,outcome,decimal_odds`` - exactly what
 ``build-sharp-anchor`` de-vigs into the mispricing-alpha fundamental slot.
 
@@ -59,6 +59,10 @@ def parse_odds_api_events(
     One complete market per event from the sharpest book available, so ``build-sharp-anchor`` can
     de-vig the whole mutually-exclusive set together. Events with no priority book or no priced
     outcomes are skipped.
+
+    Match odds (``h2h``) are keyed by fixture. Outright/futures odds (``outrights``) usually have
+    no home/away teams, so they are keyed by sport/title and the downstream sharp anchor maps each
+    team outcome onto the corresponding Polymarket World Cup winner YES token.
     """
     rows: list[dict[str, Any]] = []
     for event in events:
@@ -66,11 +70,18 @@ def parse_odds_api_events(
             continue
         home = str(event.get("home_team", "")).strip()
         away = str(event.get("away_team", "")).strip()
+        sport = str(event.get("sport_key", "")).strip()
+        sport_title = str(event.get("sport_title", "") or event.get("title", "")).strip()
         book = _select_bookmaker(event.get("bookmakers", []) or [], bookmaker_priority)
         if book is None:
             continue
         outcomes = _market_outcomes(book, market_key)
-        slug = event_market_slug(home, away) if home and away else normalize_slug(str(event.get("id", "")))
+        if home and away:
+            slug = event_market_slug(home, away)
+        elif str(market_key).lower() == "outrights":
+            slug = normalize_slug(sport or sport_title or str(event.get("id", "")) or "outrights")
+        else:
+            slug = normalize_slug(str(event.get("id", "")))
         for outcome in outcomes:
             price = safe_float(outcome.get("price"))
             name = str(outcome.get("name", "")).strip()
@@ -81,7 +92,9 @@ def parse_odds_api_events(
                 "outcome": name,
                 "decimal_odds": price,
                 "bookmaker": str(book.get("key", "")),
-                "sport": str(event.get("sport_key", "")),
+                "sport": sport,
+                "sport_title": sport_title,
+                "market_key": market_key,
                 "commence_time": str(event.get("commence_time", "")),
                 "home_team": home,
                 "away_team": away,
@@ -139,7 +152,8 @@ def fetch_sharp_odds(cfg: EngineConfig) -> dict[str, Any]:
 
     out_path.parent.mkdir(parents=True, exist_ok=True)
     write_csv(out_path, rows, fieldnames=["market_slug", "outcome", "decimal_odds", "bookmaker",
-                                          "sport", "commence_time", "home_team", "away_team"])
+                                          "sport", "sport_title", "market_key", "commence_time",
+                                          "home_team", "away_team"])
     books_used = sorted({str(r.get("bookmaker", "")) for r in rows if r.get("bookmaker")})
     summary = {
         "status": "fetched",

@@ -52,6 +52,36 @@ def test_betfair_fallback_when_no_pinnacle():
     assert len(rows) == 3
 
 
+def test_outright_market_is_keyed_by_sport_not_fixture():
+    rows = parse_odds_api_events(
+        [
+            {
+                "id": "winner1",
+                "sport_key": "soccer_fifa_world_cup_winner",
+                "sport_title": "FIFA World Cup Winner",
+                "bookmakers": [
+                    {
+                        "key": "pinnacle",
+                        "markets": [
+                            {
+                                "key": "outrights",
+                                "outcomes": [
+                                    {"name": "Spain", "price": 6.0},
+                                    {"name": "France", "price": 7.0},
+                                ],
+                            }
+                        ],
+                    }
+                ],
+            }
+        ],
+        market_key="outrights",
+    )
+    assert len(rows) == 2
+    assert {r["market_slug"] for r in rows} == {"soccer-fifa-world-cup-winner"}
+    assert {r["market_key"] for r in rows} == {"outrights"}
+
+
 def test_event_without_priority_book_is_skipped():
     rows = parse_odds_api_events([_event([_h2h("draftkings", 2.2, 3.5, 3.6)])],
                                  bookmaker_priority=("pinnacle", "betfair_ex_eu"))

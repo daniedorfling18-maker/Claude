@@ -168,13 +168,14 @@ sharp_odds_fetch:
   # Automated fetch for the sharp anchor. The Odds API aggregates Pinnacle + Betfair Exchange.
   # Set the key in the environment (never commit it): export THE_ODDS_API_KEY=...
   # fetch-sharp-odds writes input_path above; refresh-sharp-anchor fetches then de-vigs.
+  # World Cup winner is an outright/futures market, not a match h2h market.
   provider: the_odds_api
   base_url: https://api.the-odds-api.com/v4
   api_key_env: THE_ODDS_API_KEY
   sports:
-  - soccer_fifa_world_cup
+  - soccer_fifa_world_cup_winner
   regions: eu,uk                 # Pinnacle is in eu; Betfair Exchange in uk/eu
-  markets: h2h
+  markets: outrights
   bookmaker_priority:
   - pinnacle
   - betfair_ex_eu

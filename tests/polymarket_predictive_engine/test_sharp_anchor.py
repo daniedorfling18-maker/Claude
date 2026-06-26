@@ -94,6 +94,35 @@ def test_build_sharp_anchor_joins_via_token_map(tmp_path):
     assert out == {"T1": approx(0.5), "T2": approx(0.5)}   # symmetric odds -> 50/50 after de-vig
 
 
+def test_build_sharp_anchor_joins_worldcup_outrights_by_team_name(tmp_path):
+    cfg = EngineConfig(
+        raw={"paths": {"output_root": str(tmp_path / "outputs")},
+             "sharp_anchor": {"input_path": str(tmp_path / "sharp.csv"),
+                              "token_map_path": str(tmp_path / "map.csv")}},
+        path=tmp_path / "cfg.yaml",
+    )
+    _write(tmp_path / "sharp.csv",
+           [{"market_slug": "soccer-fifa-world-cup-winner", "outcome": "Spain", "decimal_odds": "6.0",
+             "market_key": "outrights", "sport": "soccer_fifa_world_cup_winner"},
+            {"market_slug": "soccer-fifa-world-cup-winner", "outcome": "France", "decimal_odds": "7.0",
+             "market_key": "outrights", "sport": "soccer_fifa_world_cup_winner"}],
+           ["market_slug", "outcome", "decimal_odds", "market_key", "sport"])
+    _write(tmp_path / "map.csv",
+           [{"token_id": "SPAIN_YES", "market_slug": "will-spain-win-the-2026-fifa-world-cup-963",
+             "question": "Will Spain win the 2026 FIFA World Cup?", "outcome": "Yes"},
+            {"token_id": "FRANCE_YES", "market_slug": "will-france-win-the-2026-fifa-world-cup-924",
+             "question": "Will France win the 2026 FIFA World Cup?", "outcome": "Yes"}],
+           ["token_id", "market_slug", "question", "outcome"])
+
+    summary = build_sharp_anchor(cfg)
+    assert summary["token_join"] == "market_outcome_map+worldcup_winner_team_map"
+    assert summary["worldcup_winner_token_joins"] == 2
+    assert summary["fundamental_rows"] == 2
+    out = {r["token_id"]: float(r["probability"]) for r in _read(tmp_path / "outputs" / "polymarket_training" / "sharp_fundamental_probabilities.csv")}
+    assert set(out) == {"SPAIN_YES", "FRANCE_YES"}
+    assert out["SPAIN_YES"] > out["FRANCE_YES"]        # shorter odds -> higher fair probability
+
+
 def test_build_sharp_anchor_no_input(tmp_path):
     cfg = EngineConfig(
         raw={"paths": {"output_root": str(tmp_path / "outputs")},

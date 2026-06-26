@@ -21,6 +21,7 @@ from __future__ import annotations
 
 from collections import defaultdict
 from pathlib import Path
+import re
 from typing import Any, Iterable
 
 from .config import EngineConfig, load_config
@@ -39,6 +40,21 @@ OUTCOME_FIELDS = ["outcome", "selection", "team", "runner", "name", "question"]
 DECIMAL_ODDS_FIELDS = ["decimal_odds", "odds", "price_decimal", "decimal"]
 IMPLIED_FIELDS = ["implied_probability", "implied", "fair_probability", "probability"]
 TOKEN_FIELDS = ["token_id", "asset_id", "clob_token_id"]
+TEAM_ALIASES = {
+    "usa": "unitedstates",
+    "us": "unitedstates",
+    "unitedstatesofamerica": "unitedstates",
+    "czech": "czechia",
+    "czechrepublic": "czechia",
+    "bosnia": "bosniaandherzegovina",
+    "bosniaherzegovina": "bosniaandherzegovina",
+    "cotedivoire": "ivorycoast",
+    "congodr": "drcongo",
+    "drc": "drcongo",
+    "democraticrepublicofcongo": "drcongo",
+    "capeverde": "capeverde",
+    "curaao": "curacao",
+}
 
 
 # --------------------------------------------------------------------------- pure de-vig math
@@ -92,6 +108,58 @@ def _match_key(group: str, outcome: str) -> str:
     return f"{normalize_slug(group)}::{normalize_slug(outcome)}"
 
 
+def _team_key(value: object) -> str:
+    key = re.sub(r"[^a-z0-9]+", "", str(value or "").lower())
+    return TEAM_ALIASES.get(key, key)
+
+
+def _team_from_worldcup_question(value: object) -> str:
+    match = re.match(r"\s*Will\s+(.*?)\s+win\s+the\s+2026\s+FIFA\s+World\s+Cup\?\s*$", str(value or ""), re.I)
+    return match.group(1).strip() if match else ""
+
+
+def _worldcup_winner_token_map(cfg: EngineConfig, settings: dict[str, Any]) -> dict[str, str]:
+    """team_key -> YES token_id for Polymarket 2026 World Cup winner markets."""
+    path = Path(settings.get("token_map_path") or (cfg.output_root / "polymarket" / "market_snapshot.csv"))
+    rows = read_csv_rows(path)
+    if not rows:
+        return {}
+    mapping: dict[str, str] = {}
+    for row in rows:
+        token = str(row.get("token_id") or row.get("asset_id") or row.get("clob_token_id") or "").strip()
+        outcome = str(row.get("outcome") or row.get("selection") or "").strip().lower()
+        if not token or outcome not in {"yes", "y"}:
+            continue
+        team = _team_from_worldcup_question(row.get("question"))
+        if not team:
+            slug = str(row.get("market_slug") or row.get("slug") or "")
+            slug_match = re.match(r"will-(.*?)-win-the-2026-fifa-world-cup(?:-|$)", slug, re.I)
+            team = slug_match.group(1).replace("-", " ") if slug_match else ""
+        key = _team_key(team)
+        if key:
+            mapping.setdefault(key, token)
+    return mapping
+
+
+def _looks_like_worldcup_outright(row: dict[str, Any], group: str, market_key: str | None) -> bool:
+    haystack = " ".join(
+        str(value or "")
+        for value in [
+            group,
+            market_key,
+            row.get("market_key"),
+            row.get("sport"),
+            row.get("sport_title"),
+            row.get("market"),
+        ]
+    ).lower()
+    return (
+        "world" in haystack
+        and "cup" in haystack
+        and ("winner" in haystack or "outright" in haystack or "outrights" in haystack)
+    )
+
+
 def _load_token_map(cfg: EngineConfig, settings: dict[str, Any]) -> dict[str, str]:
     """(market, outcome) -> token_id, built from a configured map file (default: the bot's
     market_snapshot.csv, which carries token_id + market_slug + outcome)."""
@@ -137,6 +205,7 @@ def build_sharp_anchor(cfg: EngineConfig, *, input_path: str | None = None) -> d
     implied_col = find_first_column(cols, IMPLIED_FIELDS)
     token_col = find_first_column(cols, TOKEN_FIELDS)
     token_map = {} if token_col else _load_token_map(cfg, settings)
+    worldcup_winner_tokens = {} if token_col else _worldcup_winner_token_map(cfg, settings)
 
     groups: dict[str, list[dict[str, Any]]] = defaultdict(list)
     for row in rows:
@@ -145,6 +214,7 @@ def build_sharp_anchor(cfg: EngineConfig, *, input_path: str | None = None) -> d
     out_rows: list[dict[str, Any]] = []
     skipped_unpriced = 0
     skipped_no_token = 0
+    worldcup_winner_token_joins = 0
     overrounds: list[float] = []
     for gkey, grows in groups.items():
         raw: list[float] = []
@@ -161,11 +231,20 @@ def build_sharp_anchor(cfg: EngineConfig, *, input_path: str | None = None) -> d
         overrounds.append(sum(raw))
         fair = devig(raw, method)
         for row, implied, prob in zip(kept, raw, fair):
+            row_market_key = str(row.get("market_key", "") or "")
             token = (
                 str(row.get(token_col, "")).strip()
                 if token_col
                 else token_map.get(_match_key(gkey, str(row.get(outcome_col, ""))), "")
             )
+            if (
+                not token
+                and outcome_col
+                and _looks_like_worldcup_outright(row, gkey, row_market_key)
+            ):
+                token = worldcup_winner_tokens.get(_team_key(row.get(outcome_col)), "")
+                if token:
+                    worldcup_winner_token_joins += 1
             if not token:
                 skipped_no_token += 1
                 continue
@@ -191,7 +270,15 @@ def build_sharp_anchor(cfg: EngineConfig, *, input_path: str | None = None) -> d
         "skipped_unpriced": skipped_unpriced,
         "skipped_no_token": skipped_no_token,
         "mean_overround_removed": round(sum(overrounds) / len(overrounds) - 1.0, 4) if overrounds else 0.0,
-        "token_join": "direct_token_id" if token_col else "market_outcome_map",
+        "token_join": (
+            "direct_token_id"
+            if token_col
+            else "market_outcome_map+worldcup_winner_team_map"
+            if worldcup_winner_token_joins
+            else "market_outcome_map"
+        ),
+        "worldcup_winner_tokens_available": len(worldcup_winner_tokens),
+        "worldcup_winner_token_joins": worldcup_winner_token_joins,
         "output_file": str(out_path),
         "note": "De-vigged sharp-book fair probabilities in the fundamental contract. Point "
                 "mispricing_alpha.fundamental_probability_paths at output_file to use as the anchor.",

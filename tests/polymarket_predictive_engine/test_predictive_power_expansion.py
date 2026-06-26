@@ -17,6 +17,7 @@ from polymarket_predictive_engine.paper_edge_simulator import simulate_paper_edg
 from polymarket_predictive_engine.price_history_collector import normalize_price_history_payload
 from polymarket_predictive_engine.resolution_collector import infer_market_resolution_rows
 from polymarket_predictive_engine.utils import read_csv_rows, read_json
+import polymarket_predictive_engine.websocket_collector as websocket_collector
 from polymarket_predictive_engine.websocket_collector import collect_websocket
 
 
@@ -315,3 +316,19 @@ def test_websocket_skipped_if_dependency_missing(tmp_path, monkeypatch):
     monkeypatch.setattr("importlib.import_module", lambda name: (_ for _ in ()).throw(ImportError("missing")) if name == "websockets" else __import__(name))
     result = collect_websocket(cfg, websocket_seconds=1)
     assert result["status"] == "skipped"
+
+
+def test_websocket_collector_fails_closed_on_socket_error(tmp_path, monkeypatch):
+    cfg = load_config(make_cfg(tmp_path))
+
+    async def fake_collect(*args, **kwargs):
+        raise TimeoutError("socket open timed out")
+
+    monkeypatch.setattr(websocket_collector, "_collect_messages", fake_collect)
+    result = collect_websocket(cfg, websocket_seconds=1)
+
+    assert result["status"] == "error"
+    assert result["new_messages"] == 0
+    assert "TimeoutError" in result["reason"]
+    summary = read_json(cfg.output_root / "polymarket_websocket" / "websocket_summary.json")
+    assert summary["status"] == "error"

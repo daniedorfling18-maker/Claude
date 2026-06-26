@@ -10,11 +10,23 @@ from .config import EngineConfig, load_config
 from .utils import now_utc, read_json, write_json
 
 
-async def _collect_messages(url: str, seconds: int, subscription_message: dict[str, Any] | None) -> list[dict[str, Any]]:
+async def _collect_messages(
+    url: str,
+    seconds: int,
+    subscription_message: dict[str, Any] | None,
+    *,
+    connect_timeout_seconds: float = 8.0,
+) -> list[dict[str, Any]]:
     websockets = importlib.import_module("websockets")
     rows: list[dict[str, Any]] = []
     deadline = time.time() + max(0, seconds)
-    async with websockets.connect(url) as ws:
+    async with websockets.connect(
+        url,
+        open_timeout=max(1.0, connect_timeout_seconds),
+        close_timeout=1.0,
+        ping_interval=20,
+        ping_timeout=5,
+    ) as ws:
         if subscription_message:
             await ws.send(json.dumps(subscription_message))
         while time.time() < deadline:
@@ -54,7 +66,29 @@ def collect_websocket(cfg: EngineConfig, websocket_seconds: int = 60) -> dict[st
     subscription = settings.get("subscription_message") or {"markets": market_ids, "type": "market"}
     output_file = out_root / "websocket_messages.json"
     existing_rows = _existing_messages(output_file)
-    new_rows = asyncio.run(_collect_messages(url, websocket_seconds, subscription))
+    connect_timeout = float(settings.get("connect_timeout_seconds", 8.0))
+    try:
+        new_rows = asyncio.run(
+            _collect_messages(
+                url,
+                websocket_seconds,
+                subscription,
+                connect_timeout_seconds=connect_timeout,
+            )
+        )
+    except Exception as exc:  # noqa: BLE001 - live loop should fail closed on socket stalls
+        summary = {
+            "status": "error",
+            "reason": f"{type(exc).__name__}: {exc}",
+            "messages": len(existing_rows),
+            "new_messages": 0,
+            "existing_messages": len(existing_rows),
+            "seconds": websocket_seconds,
+            "output_file": str(output_file),
+            "append_mode": True,
+        }
+        write_json(out_root / "websocket_summary.json", summary)
+        return summary
     combined_rows = existing_rows + new_rows
     max_messages = int(settings.get("max_messages", 0) or 0)
     dropped_messages = 0

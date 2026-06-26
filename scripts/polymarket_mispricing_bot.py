@@ -344,6 +344,23 @@ def discover_events(config: BotConfig) -> list[dict[str, Any]]:
         payload = http_json(url)
         return payload if isinstance(payload, list) else [payload]
 
+    query = config.query.lower()
+    if query and _env_bool("POLYMARKET_PUBLIC_SEARCH_ENABLED", default=True):
+        search_params = {
+            "q": config.query,
+            "events_status": "active",
+            "limit_per_type": os.getenv("POLYMARKET_PUBLIC_SEARCH_LIMIT_PER_TYPE", "10"),
+            "search_tags": "false",
+            "search_profiles": "false",
+        }
+        try:
+            payload = http_json(f"{config.gamma_host}/public-search?{urlencode(search_params)}")
+            events = payload.get("events", []) if isinstance(payload, dict) else []
+            if isinstance(events, list) and events:
+                return events
+        except Exception as exc:
+            print(f"warning: public-search failed query={config.query!r}: {exc}", flush=True)
+
     params = {
         "active": "true",
         "closed": "false",
@@ -359,7 +376,6 @@ def discover_events(config: BotConfig) -> list[dict[str, Any]]:
     if not isinstance(events, list):
         return []
 
-    query = config.query.lower()
     if not query:
         return events
 

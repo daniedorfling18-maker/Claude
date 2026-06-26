@@ -288,7 +288,7 @@ def main(argv: list[str] | None = None) -> int:
 
     config_path = ROOT / args.config
     next_prediction_cycle = 0.0 if args.prediction_cycle_seconds > 0 else float("inf")
-    next_discovery_cycle = 0.0 if args.discovery_cycle_seconds > 0 else float("inf")
+    next_discovery_cycle = time.time() + args.discovery_cycle_seconds if args.discovery_cycle_seconds > 0 else float("inf")
     iteration = 0
     failures = 0
     print("local-live-loop: started; press Ctrl+C to stop", flush=True)
@@ -298,7 +298,12 @@ def main(argv: list[str] | None = None) -> int:
             started = time.time()
             try:
                 discovery_summary: dict[str, Any] = {"status": "skipped"}
-                if time.time() >= next_discovery_cycle:
+                asset_ids, token_sources = discover_websocket_asset_ids(
+                    cfg,
+                    include_static_config=args.include_config_websocket_assets,
+                    max_assets=args.max_assets,
+                )
+                if not asset_ids and args.discovery_cycle_seconds > 0:
                     discovery_summary = discovery_loop.run_iteration(
                         config_path=config_path,
                         optimize_model=args.optimize_model,
@@ -306,12 +311,11 @@ def main(argv: list[str] | None = None) -> int:
                         paper_source="raw_snapshot",
                     )
                     next_discovery_cycle = time.time() + args.discovery_cycle_seconds
-
-                asset_ids, token_sources = discover_websocket_asset_ids(
-                    cfg,
-                    include_static_config=args.include_config_websocket_assets,
-                    max_assets=args.max_assets,
-                )
+                    asset_ids, token_sources = discover_websocket_asset_ids(
+                        cfg,
+                        include_static_config=args.include_config_websocket_assets,
+                        max_assets=args.max_assets,
+                    )
                 if not asset_ids:
                     raise RuntimeError("No websocket asset ids found from positions, signals, predictions, scanner snapshot, or model probabilities")
                 configure_websocket_assets(cfg, asset_ids)
@@ -356,6 +360,23 @@ def main(argv: list[str] | None = None) -> int:
                     f"equity={broker.get('equity', 'n/a')} dashboard=updated",
                     flush=True,
                 )
+                if time.time() >= next_discovery_cycle:
+                    discovery_summary = discovery_loop.run_iteration(
+                        config_path=config_path,
+                        optimize_model=args.optimize_model,
+                        iteration=iteration,
+                        paper_source="raw_snapshot",
+                    )
+                    next_discovery_cycle = time.time() + args.discovery_cycle_seconds
+                    write_json(
+                        cfg.governance_root / "local_live_loop_discovery_heartbeat.json",
+                        {
+                            "status": discovery_summary.get("status") if isinstance(discovery_summary, dict) else "unknown",
+                            "generated_at_utc": now_utc(),
+                            "iteration": iteration,
+                            "scan": discovery_summary.get("scan", {}) if isinstance(discovery_summary, dict) else {},
+                        },
+                    )
             except Exception as exc:  # noqa: BLE001 - keep loop alive while surfacing the failure
                 failures += 1
                 traceback.print_exc()

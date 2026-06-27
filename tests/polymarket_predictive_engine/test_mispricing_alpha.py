@@ -126,6 +126,42 @@ def test_alpha_bias_model_creates_conservative_edge_lower_bound(tmp_path):
     assert scored[0]["alpha_trade_candidate"] is True
 
 
+def test_near_miss_learning_lane_records_liquid_uncertain_edge(tmp_path):
+    cfg = _config(tmp_path)
+    cfg.raw["mispricing_alpha"]["model_residual_shrinkage"] = 1.0
+    cfg.raw["mispricing_alpha"]["max_model_residual_adjustment"] = 0.1
+    cfg.raw["mispricing_alpha"]["uncertainty_penalty_weight"] = 0.05
+
+    scored = apply_mispricing_alpha(
+        cfg,
+        [
+            {
+                "market_id": "near-miss-market",
+                "market_slug": "near-miss-market",
+                "token_id": "near-miss-token",
+                "prediction_timestamp": "2026-02-01T00:00:00Z",
+                "category": "crypto",
+                "market_midpoint": "0.50",
+                "raw_probability": "0.56",
+                "calibrated_probability": "0.56",
+                "model_probability": "0.56",
+                "executable_price": "0.50",
+                "spread": "0.01",
+                "liquidity": "1000",
+                "time_to_close_hours": "24",
+                "confidence": "0",
+            }
+        ],
+    )
+
+    assert scored[0]["alpha_trade_candidate"] is False
+    assert scored[0]["near_miss_learning_candidate"] is True
+    assert scored[0]["near_miss_learning_reason"] == "near_miss_eligible"
+    assert 0 < float(scored[0]["edge_lower_bound"]) < 0.03
+    saved = read_csv_rows(cfg.output_root / "polymarket_predictions" / "near_miss_learning_candidates.csv")
+    assert saved[0]["market_slug"] == "near-miss-market"
+
+
 def test_alpha_cross_market_overround_penalises_complete_set(tmp_path):
     cfg = _config(tmp_path)
     _write_training_set(cfg)

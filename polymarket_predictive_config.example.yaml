@@ -156,6 +156,15 @@ mispricing_alpha:
   uncertainty_penalty_weight: 0.03
   market_overround_penalty_weight: 0.35
   model_overround_penalty_weight: 0.2
+  near_miss_learning:
+    enabled: true
+    min_raw_edge: 0.05
+    min_edge_lower_bound: 0.0
+    max_edge_lower_bound: 0.03
+    min_liquidity: 100
+    max_spread: 0.04
+    max_relative_spread: 0.2
+    max_candidates: 25
 sharp_anchor:
   # Sharper independent source for the mispricing-alpha fundamental slot (e.g. Pinnacle/Betfair).
   # Provide a CSV at input_path with columns: market_slug,outcome,decimal_odds (and optionally
@@ -222,6 +231,9 @@ profit_tracking:
 runtime_resource_guard:
   enabled: true
   max_memory_percent: 92
+  degraded_max_websocket_assets: 80
+  skip_prediction_on_high_memory: true
+  skip_discovery_on_high_memory: true
   render_dashboard_on_skip: false
 runtime_schedule:
   full_scan_every_iterations: 2

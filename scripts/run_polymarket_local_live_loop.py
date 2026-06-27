@@ -559,6 +559,49 @@ def _running_prediction_summary(*, paper_source: str, started_at_utc: str) -> di
     }
 
 
+def _truthy_setting(value: Any, *, default: bool = False) -> bool:
+    if value is None:
+        return default
+    if isinstance(value, bool):
+        return value
+    return str(value).strip().lower() in {"1", "true", "yes", "y", "on"}
+
+
+def _local_live_resource_guard(cfg) -> dict[str, Any]:
+    guard = discovery_loop._resource_guard(cfg)
+    settings = cfg.raw.get("runtime_resource_guard", {}) or {}
+    degraded_cap = int(settings.get("degraded_max_websocket_assets", 80) or 80)
+    guard["degrade_live_loop"] = bool(guard.get("skip_cycle"))
+    guard["degraded_max_websocket_assets"] = max(1, degraded_cap)
+    guard["skip_prediction_cycle"] = bool(
+        guard.get("skip_cycle")
+        and _truthy_setting(settings.get("skip_prediction_on_high_memory"), default=True)
+    )
+    guard["skip_discovery_cycle"] = bool(
+        guard.get("skip_cycle")
+        and _truthy_setting(settings.get("skip_discovery_on_high_memory"), default=True)
+    )
+    return guard
+
+
+def _effective_max_assets(requested_max_assets: int, guard: dict[str, Any]) -> int:
+    requested = max(1, int(requested_max_assets or 1))
+    if not guard.get("degrade_live_loop"):
+        return requested
+    degraded = max(1, int(guard.get("degraded_max_websocket_assets") or requested))
+    return min(requested, degraded)
+
+
+def _resource_skipped_prediction_summary(*, paper_source: str, guard: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "status": "skipped_resource_guard",
+        "source": paper_source,
+        "generated_at_utc": now_utc(),
+        "resource_guard": guard,
+        "message": "Prediction cycle skipped to protect local machine resources; websocket marking remains live.",
+    }
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="run_polymarket_local_live_loop.py")
     parser.add_argument("--config", default="polymarket_predictive_config.example.yaml")
@@ -658,24 +701,41 @@ def main(argv: list[str] | None = None) -> int:
                             else float("inf")
                         )
 
+                resource_guard = _local_live_resource_guard(cfg)
+                write_json(
+                    cfg.governance_root / "runtime_resource_guard.json",
+                    {**resource_guard, "generated_at_utc": now_utc()},
+                )
+                effective_max_assets = _effective_max_assets(args.max_assets, resource_guard)
+
                 asset_ids, token_sources = discover_websocket_asset_ids(
                     cfg,
                     include_static_config=args.include_config_websocket_assets,
-                    max_assets=args.max_assets,
+                    max_assets=effective_max_assets,
                 )
                 if not asset_ids and args.discovery_cycle_seconds > 0:
-                    discovery_iteration, discovery_summary = _run_discovery_iteration(
-                        config_path=config_path,
-                        optimize_model=args.optimize_model,
-                        discovery_iteration=discovery_iteration,
-                        paper_source="raw_snapshot",
-                    )
-                    last_discovery_summary = discovery_summary
-                    next_discovery_cycle = time.time() + args.discovery_cycle_seconds
+                    if resource_guard.get("skip_discovery_cycle"):
+                        discovery_summary = {
+                            "status": "skipped_resource_guard",
+                            "generated_at_utc": now_utc(),
+                            "resource_guard": resource_guard,
+                            "message": "Discovery skipped under high memory; no websocket assets available yet.",
+                        }
+                        last_discovery_summary = discovery_summary
+                        next_discovery_cycle = time.time() + args.discovery_cycle_seconds
+                    else:
+                        discovery_iteration, discovery_summary = _run_discovery_iteration(
+                            config_path=config_path,
+                            optimize_model=args.optimize_model,
+                            discovery_iteration=discovery_iteration,
+                            paper_source="raw_snapshot",
+                        )
+                        last_discovery_summary = discovery_summary
+                        next_discovery_cycle = time.time() + args.discovery_cycle_seconds
                     asset_ids, token_sources = discover_websocket_asset_ids(
                         cfg,
                         include_static_config=args.include_config_websocket_assets,
-                        max_assets=args.max_assets,
+                        max_assets=effective_max_assets,
                     )
                 if not asset_ids:
                     raise RuntimeError("No websocket asset ids found from positions, signals, predictions, scanner snapshot, or model probabilities")
@@ -692,17 +752,25 @@ def main(argv: list[str] | None = None) -> int:
                         started_at_utc=prediction_started_at_utc,
                     )
                 elif args.prediction_cycle_seconds > 0 and time.time() >= next_prediction_cycle:
-                    prediction_started_at_utc = now_utc()
-                    prediction_future = prediction_executor.submit(
-                        _run_prediction_cycle,
-                        config_path=config_path,
-                        paper_source=args.paper_source,
-                    )
-                    next_prediction_cycle = float("inf")
-                    full_cycle = _running_prediction_summary(
-                        paper_source=args.paper_source,
-                        started_at_utc=prediction_started_at_utc,
-                    )
+                    if resource_guard.get("skip_prediction_cycle"):
+                        last_prediction_summary = _resource_skipped_prediction_summary(
+                            paper_source=args.paper_source,
+                            guard=resource_guard,
+                        )
+                        full_cycle = dict(last_prediction_summary)
+                        next_prediction_cycle = time.time() + args.prediction_cycle_seconds
+                    else:
+                        prediction_started_at_utc = now_utc()
+                        prediction_future = prediction_executor.submit(
+                            _run_prediction_cycle,
+                            config_path=config_path,
+                            paper_source=args.paper_source,
+                        )
+                        next_prediction_cycle = float("inf")
+                        full_cycle = _running_prediction_summary(
+                            paper_source=args.paper_source,
+                            started_at_utc=prediction_started_at_utc,
+                        )
                 next_discovery_in_seconds = None
                 if next_discovery_cycle != float("inf"):
                     next_discovery_in_seconds = max(0.0, round(next_discovery_cycle - time.time(), 3))
@@ -713,6 +781,8 @@ def main(argv: list[str] | None = None) -> int:
                     "iteration": iteration,
                     "generated_at_utc": now_utc(),
                     "asset_count": len(asset_ids),
+                    "requested_max_assets": args.max_assets,
+                    "effective_max_assets": effective_max_assets,
                     "websocket_seconds": args.websocket_seconds,
                     "prediction_cycle_seconds": args.prediction_cycle_seconds,
                     "asset_sources": {source: list(token_sources.values()).count(source) for source in sorted(set(token_sources.values()))},
@@ -741,6 +811,7 @@ def main(argv: list[str] | None = None) -> int:
                         "cycle_seconds": args.discovery_cycle_seconds,
                         "next_due_in_seconds": next_discovery_in_seconds,
                     },
+                    "resource_guard": resource_guard,
                     "ingest": ingest,
                     "full_prediction_cycle": {
                         "status": full_cycle.get("status") if isinstance(full_cycle, dict) else "unknown",
@@ -767,22 +838,42 @@ def main(argv: list[str] | None = None) -> int:
                 if time.time() >= next_discovery_cycle and discovery_future is None:
                     discovery_running_iteration = discovery_iteration + 1
                     discovery_started_at_utc = now_utc()
-                    discovery_future = discovery_executor.submit(
-                        _run_discovery_iteration,
-                        config_path=config_path,
-                        optimize_model=args.optimize_model,
-                        discovery_iteration=discovery_iteration,
-                        paper_source="raw_snapshot",
-                    )
-                    next_discovery_cycle = float("inf")
-                    _write_discovery_heartbeat(
-                        cfg,
-                        status="running",
-                        live_iteration=iteration,
-                        discovery_iteration=discovery_running_iteration,
-                        summary={},
-                        started_at_utc=discovery_started_at_utc,
-                    )
+                    if resource_guard.get("skip_discovery_cycle"):
+                        last_discovery_summary = {
+                            "status": "skipped_resource_guard",
+                            "generated_at_utc": now_utc(),
+                            "resource_guard": resource_guard,
+                            "message": "Background discovery skipped to protect local machine resources; websocket marking remains live.",
+                        }
+                        discovery_summary = dict(last_discovery_summary)
+                        _write_discovery_heartbeat(
+                            cfg,
+                            status="skipped_resource_guard",
+                            live_iteration=iteration,
+                            discovery_iteration=discovery_running_iteration,
+                            summary=last_discovery_summary,
+                            started_at_utc=discovery_started_at_utc,
+                        )
+                        discovery_running_iteration = 0
+                        discovery_started_at_utc = ""
+                        next_discovery_cycle = time.time() + args.discovery_cycle_seconds
+                    else:
+                        discovery_future = discovery_executor.submit(
+                            _run_discovery_iteration,
+                            config_path=config_path,
+                            optimize_model=args.optimize_model,
+                            discovery_iteration=discovery_iteration,
+                            paper_source="raw_snapshot",
+                        )
+                        next_discovery_cycle = float("inf")
+                        _write_discovery_heartbeat(
+                            cfg,
+                            status="running",
+                            live_iteration=iteration,
+                            discovery_iteration=discovery_running_iteration,
+                            summary={},
+                            started_at_utc=discovery_started_at_utc,
+                        )
             except Exception as exc:  # noqa: BLE001 - keep loop alive while surfacing the failure
                 failures += 1
                 traceback.print_exc()

@@ -319,3 +319,26 @@ def test_prediction_cycle_status_is_background_friendly():
     assert done["status"] == "ran"
     assert done["predictions"] == 4
     assert done["equity"] == 1000.5
+
+
+def test_high_memory_guard_reduces_effective_websocket_assets():
+    loop = _load_loop_module()
+
+    guard = {"degrade_live_loop": True, "degraded_max_websocket_assets": 80}
+
+    assert loop._effective_max_assets(250, guard) == 80
+    assert loop._effective_max_assets(20, guard) == 20
+    assert loop._effective_max_assets(250, {"degrade_live_loop": False}) == 250
+
+
+def test_resource_skipped_prediction_summary_keeps_websocket_live_message():
+    loop = _load_loop_module()
+
+    summary = loop._resource_skipped_prediction_summary(
+        paper_source="websocket",
+        guard={"skip_cycle": True, "reason": "memory_above_limit"},
+    )
+
+    assert summary["status"] == "skipped_resource_guard"
+    assert summary["source"] == "websocket"
+    assert "websocket marking remains live" in summary["message"]

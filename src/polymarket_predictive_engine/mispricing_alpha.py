@@ -411,6 +411,24 @@ def apply_mispricing_alpha(
         settings.get("min_liquidity_for_alpha_trade", cfg.raw.get("risk", {}).get("minimum_liquidity"))
     )
     min_alpha_price = safe_float(settings.get("min_price_for_alpha_trade"))
+    trade_edge_threshold = float(cfg.raw.get("risk", {}).get("minimum_edge", 0.03))
+    near_miss_settings = settings.get("near_miss_learning", {}) or {}
+    near_miss_enabled = _setting_bool(near_miss_settings, "enabled", False)
+    near_miss_min_raw_edge = float(near_miss_settings.get("min_raw_edge", 0.05))
+    near_miss_min_edge_lower_bound = float(near_miss_settings.get("min_edge_lower_bound", 0.0))
+    near_miss_max_edge_lower_bound = float(
+        near_miss_settings.get("max_edge_lower_bound", trade_edge_threshold)
+    )
+    near_miss_min_liquidity = safe_float(
+        near_miss_settings.get("min_liquidity", min_alpha_liquidity)
+    )
+    near_miss_max_spread = safe_float(
+        near_miss_settings.get("max_spread", max_alpha_spread)
+    )
+    near_miss_max_relative_spread = safe_float(
+        near_miss_settings.get("max_relative_spread", max_alpha_relative_spread)
+    )
+    near_miss_max_candidates = max(0, int(near_miss_settings.get("max_candidates", 25) or 25))
     shadow_settings = cfg.raw.get("shadow_cohort_validation", {}) or {}
     shadow_enabled = _setting_bool(shadow_settings, "enabled", False)
     shadow_min_edge_lower_bound = float(shadow_settings.get("minimum_edge_lower_bound", -0.01))
@@ -693,6 +711,39 @@ def apply_mispricing_alpha(
             + max(0.0, edge_lower_bound)
             - max(0.0, spread_for_shadow or 0.0)
         )
+        alpha_trade_candidate = bool(edge_lower_bound >= trade_edge_threshold and validation_layer_pass)
+        near_miss_reasons: list[str] = []
+        if not near_miss_enabled:
+            near_miss_reasons.append("near_miss_learning_disabled")
+        if alpha_trade_candidate:
+            near_miss_reasons.append("already_trade_candidate")
+        if not validation_layer_pass:
+            near_miss_reasons.append("validation_layer_failed")
+        if raw_alpha_edge < near_miss_min_raw_edge:
+            near_miss_reasons.append("raw_edge_below_near_miss_minimum")
+        if edge_lower_bound < near_miss_min_edge_lower_bound:
+            near_miss_reasons.append("edge_lower_bound_below_near_miss_band")
+        if edge_lower_bound >= near_miss_max_edge_lower_bound:
+            near_miss_reasons.append("edge_lower_bound_above_near_miss_band")
+        if near_miss_min_liquidity is not None and (
+            liquidity_for_shadow is None or liquidity_for_shadow < near_miss_min_liquidity
+        ):
+            near_miss_reasons.append("liquidity_below_near_miss_minimum")
+        if near_miss_max_spread is not None and (
+            spread_for_shadow is None or spread_for_shadow > near_miss_max_spread
+        ):
+            near_miss_reasons.append("spread_above_near_miss_limit")
+        if near_miss_max_relative_spread is not None and (
+            relative_spread_for_shadow is None or relative_spread_for_shadow > near_miss_max_relative_spread
+        ):
+            near_miss_reasons.append("relative_spread_above_near_miss_limit")
+        near_miss_learning_candidate = bool(not near_miss_reasons)
+        near_miss_priority_score = (
+            raw_alpha_edge
+            + max(0.0, edge_lower_bound)
+            - max(0.0, spread_for_shadow or 0.0)
+            + min(1.0, max(0.0, (liquidity_for_shadow or 0.0) / max(1.0, near_miss_min_liquidity or 1.0))) * 0.01
+        )
         clean = {key: value for key, value in row.items() if not key.startswith("_")}
         clean.update(
             {
@@ -708,10 +759,12 @@ def apply_mispricing_alpha(
                 "edge_lower_bound": edge_lower_bound,
                 "alpha_score": alpha_score,
                 "validation_layer_pass": validation_layer_pass,
-                "alpha_trade_candidate": (
-                    edge_lower_bound >= float(cfg.raw.get("risk", {}).get("minimum_edge", 0.03))
-                    and validation_layer_pass
-                ),
+                "alpha_trade_candidate": alpha_trade_candidate,
+                "near_miss_learning_candidate": near_miss_learning_candidate,
+                "near_miss_learning_reason": "near_miss_eligible"
+                if near_miss_learning_candidate
+                else "; ".join(near_miss_reasons),
+                "near_miss_priority_score": near_miss_priority_score,
                 "shadow_trade_candidate": shadow_trade_candidate,
                 "shadow_candidate_reason": "shadow_eligible" if shadow_trade_candidate else "; ".join(shadow_reasons),
                 "shadow_priority_score": shadow_priority_score,
@@ -721,6 +774,13 @@ def apply_mispricing_alpha(
 
     target_monthly_profit = float(settings.get("target_monthly_profit_usdc", 100.0))
     candidate_rows = [row for row in final_rows if str(row.get("alpha_trade_candidate")).lower() == "true"]
+    near_miss_rows = sorted(
+        [row for row in final_rows if str(row.get("near_miss_learning_candidate")).lower() == "true"],
+        key=lambda row: safe_float(row.get("near_miss_priority_score")) or 0.0,
+        reverse=True,
+    )
+    if near_miss_max_candidates:
+        near_miss_rows = near_miss_rows[:near_miss_max_candidates]
     unrisked_lower_bound_ev_per_100 = 0.0
     for row in candidate_rows:
         price = _executable_price(row)
@@ -734,6 +794,7 @@ def apply_mispricing_alpha(
         "predictions": len(final_rows),
         "scored": sum(1 for row in final_rows if row.get("alpha_status") == "scored"),
         "trade_candidates": len(candidate_rows),
+        "near_miss_learning_candidates": len(near_miss_rows),
         "shadow_trade_candidates": sum(
             1 for row in final_rows if str(row.get("shadow_trade_candidate")).lower() == "true"
         ),
@@ -776,6 +837,7 @@ def apply_mispricing_alpha(
     }
     write_json(cfg.governance_root / "mispricing_alpha_live_summary.json", summary)
     write_csv(cfg.output_root / "polymarket_predictions" / "mispricing_alpha_scores.csv", final_rows)
+    write_csv(cfg.output_root / "polymarket_predictions" / "near_miss_learning_candidates.csv", near_miss_rows)
     if output_path:
         write_csv(output_path, final_rows)
     return final_rows

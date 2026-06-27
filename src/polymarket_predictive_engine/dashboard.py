@@ -136,6 +136,7 @@ async function load() {
     const live = data.local_live_heartbeat || data.heartbeat || {};
     const scanner = data.scanner_heartbeat || {};
     const discovery = live.discovery || {};
+    const resourceGuard = live.resource_guard || {};
     const currentScan = discovery.scan || {};
     const lastScan = discovery.last_scan || {};
     const fastUpdown = discovery.last_fast_updown || discovery.fast_updown || {};
@@ -179,6 +180,10 @@ async function load() {
       ["Live source", live.live_source || live.source || (websocket.new_messages != null ? "websocket" : "-")],
       ["WS window", live.websocket_seconds == null ? "-" : live.websocket_seconds + "s"],
       ["Prediction cycle", live.prediction_cycle_seconds == null ? "-" : live.prediction_cycle_seconds + "s"],
+      ["Assets", live.asset_count == null ? "-" : live.asset_count],
+      ["Effective max assets", live.effective_max_assets == null ? "-" : live.effective_max_assets],
+      ["Resource guard", resourceGuard.reason || "-"],
+      ["Memory", resourceGuard.memory_percent == null ? "-" : fmtNum(resourceGuard.memory_percent, 1) + "%"],
       ["WS messages", websocket.new_messages],
       ["WS features", websocketFeatures.feature_rows],
       ["Snapshots inserted", ingest.inserted_market_snapshots],
@@ -206,6 +211,7 @@ async function load() {
       ["Predictions", diag.prediction_count],
       ["Approved signals", diag.approved_signals_count],
       ["Rejected signals", diag.rejected_signals_count],
+      ["Near-miss learning", diag.near_miss_candidates_seen],
       ["Shadow candidates", diag.shadow_candidates_seen],
       ["Opened this cycle", diag.shadow_opened_this_cycle],
       ["Quarantined cohorts", diag.quarantined_cohort_count]
@@ -219,6 +225,16 @@ async function load() {
       ["Liquidity","liquidity", v=>fmtNum(v,2)],
       ["Priority","shadow_priority_score", v=>fmtNum(v,4)],
       ["Reason","shadow_candidate_reason", longText]
+    ]) + `<div style="height:12px"></div>` + table(diag.current_near_miss_candidates || [], [
+      ["Market","market_slug"],
+      ["Outcome","outcome"],
+      ["Cohort","signal_cohort"],
+      ["Raw edge","alpha_raw_edge", v=>fmtNum(v,4)],
+      ["Lower-bound","edge_lower_bound", v=>fmtNum(v,4)],
+      ["Penalty","alpha_total_penalty", v=>fmtNum(v,4)],
+      ["Spread","spread", v=>fmtNum(v,4)],
+      ["Liquidity","liquidity", v=>fmtNum(v,2)],
+      ["Reason","near_miss_learning_reason", longText]
     ]) + `<div style="height:12px"></div>` + table(diag.top_rejection_reasons || [], [
       ["Count","count"],
       ["Rejected reason","reason", v=>longText(v, 180)]
@@ -510,11 +526,17 @@ def _trade_diagnostics(
     predictions: list[dict[str, Any]],
     approved_signals: list[dict[str, Any]],
     rejected: list[dict[str, Any]],
+    near_miss_candidates: list[dict[str, Any]],
     shadow_summary: dict[str, Any],
 ) -> dict[str, Any]:
     shadow_candidates = [row for row in predictions if _truthy(row.get("shadow_trade_candidate"))]
     shadow_candidates.sort(
         key=lambda row: safe_float(row.get("shadow_priority_score")) or 0.0,
+        reverse=True,
+    )
+    near_miss_candidates = list(near_miss_candidates)
+    near_miss_candidates.sort(
+        key=lambda row: safe_float(row.get("near_miss_priority_score")) or 0.0,
         reverse=True,
     )
     quarantined = shadow_summary.get("quarantined_cohorts", []) if isinstance(shadow_summary, dict) else []
@@ -555,11 +577,13 @@ def _trade_diagnostics(
         "approved_signals_count": len(approved_signals),
         "rejected_signals_count": len(rejected),
         "prediction_count": len(predictions),
+        "near_miss_candidates_seen": len(near_miss_candidates),
         "shadow_candidates_seen": shadow_summary.get("shadow_candidates_seen"),
         "shadow_opened_this_cycle": shadow_summary.get("opened_this_cycle"),
         "shadow_open_positions": shadow_summary.get("open_positions"),
         "quarantined_cohort_count": len(quarantined),
         "top_rejection_reasons": top_reasons,
+        "current_near_miss_candidates": near_miss_candidates[:12],
         "current_shadow_candidates": shadow_candidates[:12],
         "quarantined_cohorts": quarantined[:12],
     }
@@ -711,6 +735,7 @@ def render_dashboard(cfg: EngineConfig, latest_report: dict[str, Any] | None = N
         reverse=True,
     )
     rejected = read_csv_rows(predictions_root / "rejected_signals.csv")
+    near_miss_candidates = read_csv_rows(predictions_root / "near_miss_learning_candidates.csv")
 
     payload = {
         "status": "ok",
@@ -738,6 +763,7 @@ def render_dashboard(cfg: EngineConfig, latest_report: dict[str, Any] | None = N
             predictions=predictions,
             approved_signals=signals,
             rejected=rejected,
+            near_miss_candidates=near_miss_candidates,
             shadow_summary=shadow_summary,
         ),
     }

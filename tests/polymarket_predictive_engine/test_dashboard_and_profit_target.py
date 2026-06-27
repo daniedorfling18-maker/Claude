@@ -83,6 +83,20 @@ def test_dashboard_renderer_writes_static_dashboard_and_data(tmp_path):
         cfg.output_root / "polymarket_predictions" / "trade_signals.csv",
         [{"market_slug": "test-market", "edge": "0.04", "priority_score": "4"}],
     )
+    write_csv(
+        cfg.output_root / "polymarket_predictions" / "near_miss_learning_candidates.csv",
+        [
+            {
+                "market_slug": "near-miss-market",
+                "outcome": "No",
+                "signal_cohort": "crypto",
+                "alpha_raw_edge": "0.054",
+                "edge_lower_bound": "0.009",
+                "near_miss_priority_score": "0.052",
+                "near_miss_learning_reason": "near_miss_eligible",
+            }
+        ],
+    )
     result = render_dashboard(
         cfg,
         {
@@ -96,6 +110,8 @@ def test_dashboard_renderer_writes_static_dashboard_and_data(tmp_path):
     data = read_json(result["dashboard_data"])
     assert data["positions"][0]["token_id"] == "t1"
     assert data["approved_signals"][0]["market_slug"] == "test-market"
+    assert data["trade_diagnostics"]["near_miss_candidates_seen"] == 1
+    assert data["trade_diagnostics"]["current_near_miss_candidates"][0]["market_slug"] == "near-miss-market"
 
 def test_dashboard_explains_no_trade_when_fast_candidates_are_quarantined(tmp_path):
     cfg = _config(tmp_path)

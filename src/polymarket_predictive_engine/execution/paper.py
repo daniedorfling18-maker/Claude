@@ -4,13 +4,19 @@ from typing import Any
 
 from ..config import EngineConfig, load_config
 from ..dashboard import render_dashboard
+from ..decision_trace import write_agent_runtime_bundle
 from ..paper_broker import run_paper_broker
 from ..profit_target import write_profit_target_tracker
 from ..utils import now_utc, write_json
 
 
 def paper_trade(cfg: EngineConfig) -> dict[str, Any]:
-    return run_paper_broker(cfg)
+    broker = run_paper_broker(cfg)
+    try:
+        broker["agent_runtime"] = write_agent_runtime_bundle(cfg, broker_summary=broker)
+    except Exception as exc:  # noqa: BLE001 - observability failure must not block paper ledger updates
+        broker["agent_runtime"] = {"status": "error", "error": f"{type(exc).__name__}: {exc}"}
+    return broker
 
 
 def paper_trade_report(cfg: EngineConfig, *, render: bool = True) -> dict[str, Any]:
@@ -30,6 +36,10 @@ def paper_trade_report(cfg: EngineConfig, *, render: bool = True) -> dict[str, A
         "actual_profit_target": actual_profit_target,
         "generated_at_utc": now_utc(),
     }
+    try:
+        report["agent_runtime"] = write_agent_runtime_bundle(cfg, cycle_report=report, broker_summary=broker)
+    except Exception as exc:  # noqa: BLE001 - keep paper-trade report alive
+        report["agent_runtime"] = {"status": "error", "error": f"{type(exc).__name__}: {exc}"}
     write_json(cfg.governance_root / "paper_trade_refresh.json", report)
     if render:
         report["dashboard"] = render_dashboard(cfg, report)

@@ -85,7 +85,7 @@ None of those is local dev. If you *are* deploying with Docker:
 | Docker (deploy only) | `docs/LIVE_DUTCH_ARB_DOCKER.md`, `docs/ORACLE_VPS_SETUP.md` |
 | Engine commands | `src/polymarket_predictive_engine/cli.py` (`COMMANDS`) |
 | Local dashboard launcher | `scripts/start_polymarket_local_live.ps1`, `start_polymarket_bot.cmd` |
-| Agent lane / why-no-trade trace | `src/polymarket_predictive_engine/decision_trace.py` |
+| Agent lane / why-no-trade trace | `src/polymarket_predictive_engine/agent_runtime.py` |
 
 The repo has two parts: the **SuperBru score engine** (`src/superbru_score_engine`, see `README.md`)
 and the **Polymarket predictive engine** (`src/polymarket_predictive_engine`, current focus). Both

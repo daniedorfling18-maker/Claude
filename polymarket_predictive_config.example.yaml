@@ -231,8 +231,8 @@ profit_tracking:
   tracker_file: paper_profit_target_tracker.json
 runtime_resource_guard:
   enabled: true
-  max_memory_percent: 92
-  degraded_max_websocket_assets: 80
+  max_memory_percent: 94
+  degraded_max_websocket_assets: 20
   skip_prediction_on_high_memory: true
   skip_discovery_on_high_memory: true
   allow_degraded_fast_updown_refresh: true

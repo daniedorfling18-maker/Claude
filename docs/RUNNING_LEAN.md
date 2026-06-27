@@ -55,11 +55,11 @@ powershell -ExecutionPolicy Bypass -File scripts\start_polymarket_local_live.ps1
 ```
 
 The launcher refuses to start if memory is above its safety threshold, avoids duplicate local bot
-processes, starts the dashboard server when needed, and runs the raw loop with `--max-assets 50`.
+processes, starts the dashboard server when needed, and runs the raw loop with `--max-assets 20`.
 The default local threshold is 95% used memory; lower it with `-MaxMemoryPercentToStart` if the
 laptop is busy with other apps.
 
-Keep `--max-assets` small (40–60) to bound the websocket/feature set. This is a few hundred MB total
+Keep `--max-assets` small (20–30) to bound the websocket/feature set. This is a few hundred MB total
 versus dozens of containers. It still respects the kill switch, readiness, and P&L pause controls.
 
 ## 4. Let the engine back off under pressure

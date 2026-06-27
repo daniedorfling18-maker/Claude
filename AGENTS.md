@@ -16,7 +16,7 @@ powershell -ExecutionPolicy Bypass -File scripts/start_polymarket_local_live.ps1
 
 # Raw equivalent if you are not on Windows:
 python scripts/run_polymarket_local_live_loop.py \
-    --config polymarket_predictive_config.example.yaml --max-assets 50
+    --config polymarket_predictive_config.example.yaml --max-assets 20
 
 # One-off engine commands:
 polymarket-engine <command> --config polymarket_predictive_config.example.yaml
@@ -26,7 +26,7 @@ polymarket-engine <command> --config polymarket_predictive_config.example.yaml
 pytest                                                   # tests (or: python -m pytest -q)
 ```
 
-Keep `--max-assets` small (40–60) to bound the websocket/feature set. One Python process is a few
+Keep `--max-assets` small (20–30) to bound the websocket/feature set. One Python process is a few
 hundred MB; it still honours the kill switch, readiness, and P&L-pause controls.
 
 ## When to use Docker — and when NOT to

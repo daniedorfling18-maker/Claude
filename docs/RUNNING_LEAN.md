@@ -51,8 +51,11 @@ The crypto/paper bot you're implementing is **Docker-free by design**
 process plus a tiny dashboard server. If Docker memory is the problem, just run it directly:
 
 ```powershell
-python scripts\run_polymarket_local_live_loop.py --config polymarket_predictive_config.example.yaml --max-assets 60
+powershell -ExecutionPolicy Bypass -File scripts\start_polymarket_local_live.ps1
 ```
+
+The launcher refuses to start if memory is above its safety threshold, avoids duplicate local bot
+processes, starts the dashboard server when needed, and runs the raw loop with `--max-assets 50`.
 
 Keep `--max-assets` small (40–60) to bound the websocket/feature set. This is a few hundred MB total
 versus dozens of containers. It still respects the kill switch, readiness, and P&L pause controls.
@@ -90,5 +93,5 @@ borrows Codex's bundled Node runtime). To keep it small:
 
 1. `docker stop $(docker ps -q)` — clear Docker.
 2. Close extra Codex sessions; keep one (or none).
-3. `python scripts\run_polymarket_local_live_loop.py --config polymarket_predictive_config.example.yaml --max-assets 50`
+3. `powershell -ExecutionPolicy Bypass -File scripts\start_polymarket_local_live.ps1`
 4. Watch Task Manager / `docker stats`. If you want containers too, bring up **one** capped stack only.

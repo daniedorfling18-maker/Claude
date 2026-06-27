@@ -11,7 +11,10 @@ local work.** The paper bot is Docker-free by design.
 ```bash
 pip install -e ".[dev]"                                  # one-time setup
 
-# The Polymarket paper bot (the main thing to run locally):
+# The Polymarket paper bot (the main thing to run locally on Windows):
+powershell -ExecutionPolicy Bypass -File scripts/start_polymarket_local_live.ps1
+
+# Raw equivalent if you are not on Windows:
 python scripts/run_polymarket_local_live_loop.py \
     --config polymarket_predictive_config.example.yaml --max-assets 50
 

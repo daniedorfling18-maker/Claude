@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any
 
 from .config import EngineConfig, live_trading_allowed
+from .research_focus import build_research_focus
 from .utils import now_utc, parse_timestamp, read_csv_rows, read_json, safe_float, write_json
 
 TRACE_LIMIT = 30
@@ -290,8 +291,10 @@ const cls = s => /ok|live|ran|approved|present/.test(String(s||"")) ? "ok" : /er
 function table(rows, cols){ if(!rows || !rows.length) return '<div class="muted">No rows.</div>'; return '<table><thead><tr>'+cols.map(c=>'<th>'+esc(c[0])+'</th>').join('')+'</tr></thead><tbody>'+rows.map(r=>'<tr>'+cols.map(c=>'<td>'+esc(r[c[1]])+'</td>').join('')+'</tr>').join('')+'</tbody></table>'; }
 async function load(){
   const data = await fetch('agent_status.json?ts=' + Date.now()).then(r => r.json());
+  const focus = data.research_focus || {};
   document.getElementById('app').innerHTML = `
     <section><h2>Next best action</h2><div class="card"><b>${esc(data.next_best_action?.summary)}</b><p>${esc(data.next_best_action?.action)}</p></div></section>
+    <section><h2>Research focus</h2><div class="card"><b>${esc(focus.summary || '-')}</b></div>${table(focus.watchlist || [], [['Cohort','cohort'],['Thesis','thesis'],['Status','status'],['Priority','priority_score'],['Fills','buy_fills'],['Settled','settled_fills'],['P&L','total_pnl_usdc'],['ROI','roi'],['Query','recommended_collection_query']])}</section>
     <section><h2>Agent lanes</h2><div class="grid">${(data.agents||[]).map(a=>`<div class="card"><b>${esc(a.agent)}</b><div class="${cls(a.status)}">${esc(a.status)}</div><p class="muted">${esc(a.role)}</p></div>`).join('')}</div></section>
     <section><h2>Pipeline counts</h2><pre>${esc(JSON.stringify(data.pipeline_counts || {}, null, 2))}</pre></section>
     <section><h2>Subsystem freshness</h2>${table(data.subsystem_freshness || [], [['Subsystem','subsystem'],['Status','status'],['Age sec','age_seconds'],['Generated','generated_at_utc']])}</section>
@@ -315,6 +318,10 @@ def build_agent_status(cfg: EngineConfig, trace: dict[str, Any] | None = None) -
     no_trade = trace.get("no_trade_diagnosis", {}) if isinstance(trace, dict) else {}
     counts = trace.get("pipeline_counts", {}) if isinstance(trace, dict) else {}
     freshness = _subsystem_freshness(cfg)
+    try:
+        research_focus = build_research_focus(cfg)
+    except Exception as exc:  # noqa: BLE001 - keep status page alive
+        research_focus = {"status": "error", "error": f"{type(exc).__name__}: {exc}"}
 
     agents = [
         {"agent": "supervisor", "status": _status_from_payload(_read_json(governance / "supervisor_status.json"), stale_after_seconds=3600), "role": "start/restart the local loop and dashboard, enforce one process, expose reboot state"},
@@ -329,6 +336,7 @@ def build_agent_status(cfg: EngineConfig, trace: dict[str, Any] | None = None) -
         "status": "ok",
         "generated_at_utc": now_utc(),
         "next_best_action": {"summary": no_trade.get("main_blocker", "No decision trace available yet."), "action": no_trade.get("next_action", "Run or wait for the next local-live paper cycle."), "diagnosis_status": no_trade.get("status", "unknown")},
+        "research_focus": research_focus,
         "agents": agents,
         "readiness": readiness,
         "pipeline_counts": counts,
@@ -354,5 +362,6 @@ def write_agent_runtime_bundle(
         "decision_trace": str(cfg.governance_root / "cycle_decision_trace.json"),
         "agent_status": str(cfg.governance_root / "agent_status.json"),
         "next_best_action": agent_status.get("next_best_action", {}),
+        "research_focus": agent_status.get("research_focus", {}),
         "dashboard_agent_status": str(cfg.output_root / "polymarket_dashboard" / "agent_status.html"),
     }

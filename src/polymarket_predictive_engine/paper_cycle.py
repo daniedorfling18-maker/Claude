@@ -6,7 +6,7 @@ from typing import Any
 
 from .config import EngineConfig
 from .dashboard import render_dashboard
-from .decision_trace import write_agent_runtime_bundle
+from .agent_runtime import write_agent_runtime_bundle
 from .execution.paper import paper_trade
 from .features_v2 import build_features_v2
 from .mispricing_alpha import apply_mispricing_alpha

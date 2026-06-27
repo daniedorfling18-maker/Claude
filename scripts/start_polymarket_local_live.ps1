@@ -14,6 +14,10 @@ param(
 
 $ErrorActionPreference = "Stop"
 
+if ([string]::IsNullOrWhiteSpace($PSScriptRoot)) {
+    throw "Do not paste this script body into PowerShell. Run it as a file from the repo root: powershell -ExecutionPolicy Bypass -File .\scripts\start_polymarket_local_live.ps1 -ForceRestart"
+}
+
 $RepoRoot = Resolve-Path -LiteralPath (Join-Path $PSScriptRoot "..")
 $WorkDir = Join-Path $RepoRoot "work"
 $DashboardDir = Join-Path $RepoRoot "outputs\polymarket_dashboard"
@@ -127,6 +131,7 @@ Write-Host "Polymarket local paper bot launcher"
 Write-Host "Repo:      $RepoRoot"
 Write-Host "Memory:    $memoryPercent% used"
 Write-Host "Dashboard: http://127.0.0.1:$DashboardPort/"
+Write-Host "Agent UI:  http://127.0.0.1:$DashboardPort/agent_status.html"
 Write-Host "Phone:     http://$localIp`:$DashboardPort/"
 Write-Host ""
 
@@ -164,7 +169,15 @@ if (-not $SkipDashboard) {
         Write-Host "Dashboard server is already listening on port $DashboardPort."
     } else {
         if (-not (Test-Path -LiteralPath $DashboardDir)) {
-            throw "Dashboard directory was not found: $DashboardDir"
+            Write-Host "Dashboard directory was not found; rendering a bootstrap dashboard."
+            $env:PYTHONPATH = Join-Path $RepoRoot "src"
+            $bootstrap = @'
+from polymarket_predictive_engine.config import load_config
+from polymarket_predictive_engine.dashboard import render_dashboard
+cfg = load_config("polymarket_predictive_config.example.yaml")
+print(render_dashboard(cfg))
+'@
+            $bootstrap | python -
         }
         if (-not (Test-Path -LiteralPath $Node)) {
             throw "Bundled Node.js was not found: $Node"
@@ -220,4 +233,5 @@ $process = Start-Process -FilePath "python" `
 Write-Host ""
 Write-Host "Started local Polymarket paper bot PID $($process.Id)."
 Write-Host "Open dashboard: http://127.0.0.1:$DashboardPort/"
+Write-Host "Agent status: http://127.0.0.1:$DashboardPort/agent_status.html"
 Write-Host "Mobile on same Wi-Fi: http://$localIp`:$DashboardPort/"

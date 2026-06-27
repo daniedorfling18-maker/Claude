@@ -966,7 +966,8 @@ def main(argv: list[str] | None = None) -> int:
                     )
                 elif args.prediction_cycle_seconds > 0 and time.time() >= next_prediction_cycle:
                     if resource_guard.get("skip_prediction_cycle"):
-                        if _degraded_prediction_refresh_enabled(cfg, resource_guard) and time.time() >= next_degraded_prediction_cycle:
+                        degraded_prediction_enabled = _degraded_prediction_refresh_enabled(cfg, resource_guard)
+                        if degraded_prediction_enabled and time.time() >= next_degraded_prediction_cycle:
                             prediction_started_at_utc = now_utc()
                             prediction_future = prediction_executor.submit(
                                 _run_degraded_prediction_cycle,
@@ -982,11 +983,25 @@ def main(argv: list[str] | None = None) -> int:
                             )
                             full_cycle["mode"] = "degraded_websocket_prediction_refresh"
                         else:
-                            last_prediction_summary = _resource_skipped_prediction_summary(
-                                paper_source=args.paper_source,
-                                guard=resource_guard,
-                            )
-                            full_cycle = dict(last_prediction_summary)
+                            if degraded_prediction_enabled:
+                                full_cycle = dict(last_prediction_summary)
+                                full_cycle.update(
+                                    {
+                                        "status": "waiting_degraded_prediction_cooldown",
+                                        "source": args.paper_source,
+                                        "resource_guard": resource_guard,
+                                        "next_degraded_due_in_seconds": None
+                                        if next_degraded_prediction_cycle == float("inf")
+                                        else max(0.0, round(next_degraded_prediction_cycle - time.time(), 3)),
+                                        "message": "Heavy prediction skipped; bounded websocket scoring will run when the degraded cooldown expires.",
+                                    }
+                                )
+                            else:
+                                last_prediction_summary = _resource_skipped_prediction_summary(
+                                    paper_source=args.paper_source,
+                                    guard=resource_guard,
+                                )
+                                full_cycle = dict(last_prediction_summary)
                             next_prediction_cycle = time.time() + args.prediction_cycle_seconds
                     else:
                         prediction_started_at_utc = now_utc()

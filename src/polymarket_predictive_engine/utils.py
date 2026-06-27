@@ -54,6 +54,10 @@ def replace_with_retry(temp_path: Path, path: Path, attempts: int = 30, delay: f
         try:
             temp_path.replace(path)
             return
+        except FileNotFoundError:
+            if not temp_path.exists():
+                raise
+            raise
         except OSError as exc:
             last_exc = exc
             time.sleep(delay * min(i + 1, 6))
@@ -122,13 +126,26 @@ def serialize_value(value: Any) -> str:
 def write_json(path: str | Path, payload: Any) -> Path:
     path = Path(path)
     ensure_dir(path.parent)
-    temp_path = path.with_name(f".{path.name}.{os.getpid()}.{time.time_ns()}.tmp")
-    with temp_path.open("w", encoding="utf-8") as f:
-        json.dump(payload, f, indent=2, sort_keys=True, default=serialize_value)
-        f.write("\n")
-        f.flush()
-        os.fsync(f.fileno())
-    replace_with_retry(temp_path, path)
+    last_exc: Exception | None = None
+    for attempt in range(6):
+        temp_path = path.with_name(f".{path.name}.{os.getpid()}.{time.time_ns()}.{attempt}.tmp")
+        try:
+            with temp_path.open("w", encoding="utf-8") as f:
+                json.dump(payload, f, indent=2, sort_keys=True, default=serialize_value)
+                f.write("\n")
+                f.flush()
+                os.fsync(f.fileno())
+            replace_with_retry(temp_path, path)
+            return path
+        except FileNotFoundError as exc:
+            last_exc = exc
+            try:
+                temp_path.unlink()
+            except OSError:
+                pass
+            time.sleep(0.05 * min(attempt + 1, 6))
+    if last_exc is not None:
+        raise last_exc
     return path
 
 
@@ -182,52 +199,41 @@ def infer_category(path: str | Path) -> str:
             idx = parts.index(marker)
             if idx + 1 < len(parts):
                 return parts[idx + 1]
-    for candidate in ("bitcoin", "crypto", "election", "fed", "finance", "soccer", "sports", "trump", "worldcup", "all"):
-        if candidate in parts:
-            return candidate
+    text = " ".join(parts)
+    for cat in ["bitcoin", "crypto", "election", "fed", "finance", "soccer", "sports", "trump"]:
+        if cat in text:
+            return cat
     return "unknown"
+
+
+def normalize_slug(value: str) -> str:
+    value = value.lower().strip()
+    value = re.sub(r"[^a-z0-9]+", "-", value)
+    return re.sub(r"-+", "-", value).strip("-")
 
 
 def find_first_column(columns: Sequence[str], candidates: Sequence[str]) -> str | None:
     lower = {c.lower(): c for c in columns}
-    for cand in candidates:
-        if cand.lower() in lower:
-            return lower[cand.lower()]
-    for cand in candidates:
-        c_low = cand.lower()
-        for col in columns:
-            if c_low in col.lower():
-                return col
+    for candidate in candidates:
+        if candidate.lower() in lower:
+            return lower[candidate.lower()]
+    for column in columns:
+        lc = column.lower()
+        if any(candidate.lower() in lc for candidate in candidates):
+            return column
     return None
 
 
 def safe_float(value: Any) -> float | None:
+    if value is None or value == "":
+        return None
     try:
-        if value is None or value == "":
-            return None
         return float(value)
     except (TypeError, ValueError):
         return None
 
 
-def safe_int(value: Any) -> int | None:
-    try:
-        if value is None or value == "":
-            return None
-        return int(float(value))
-    except (TypeError, ValueError):
-        return None
-
-
 def boolish(value: Any) -> bool:
-    return str(value).strip().lower() in {"1", "true", "yes", "y", "live", "approved"}
-
-
-def normalize_slug(text: Any) -> str:
-    return re.sub(r"[^a-z0-9]+", "-", str(text or "").lower()).strip("-")
-
-
-def file_summary(path: str | Path) -> dict[str, Any]:
-    path = Path(path)
-    stat = path.stat()
-    return {"path": str(path), "file_size": stat.st_size, "last_modified_timestamp": datetime.fromtimestamp(stat.st_mtime, timezone.utc).strftime(ISO_FORMAT)}
+    if isinstance(value, bool):
+        return value
+    return str(value).strip().lower() in {"1", "true", "yes", "y", "on"}

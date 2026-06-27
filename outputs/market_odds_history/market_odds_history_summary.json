@@ -1,9 +1,9 @@
 {
-  "generated_at_utc": "2026-06-26T16:25:06.232899+00:00",
-  "snapshot_id": "20260626T162503Z",
+  "generated_at_utc": "2026-06-27T08:47:53.393316+00:00",
+  "snapshot_id": "20260627T084750Z",
   "snapshot_rows": 40,
-  "history_rows": 1160,
-  "previous_snapshot_id": "20260626T094547Z",
+  "history_rows": 1200,
+  "previous_snapshot_id": "20260626T162503Z",
   "market_depth_counts": {
     "strong": 34,
     "unavailable": 6

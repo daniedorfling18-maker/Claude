@@ -111,6 +111,49 @@ def test_fast_market_risk_overrides_allow_tiny_paper_probe(tmp_path):
     assert decision["risk_profile"] == "fast_market_paper_probe"
     assert decision["stake_usdc"] <= 0.25
 
+def test_promoted_fast_market_can_step_up_to_promoted_cap(tmp_path):
+    cfg = _cfg(tmp_path)
+    cfg.raw["risk"]["minimum_confidence"] = 0.65
+    cfg.raw["risk"]["fast_market_overrides"] = {
+        "enabled": True,
+        "minimum_edge": 0.005,
+        "minimum_confidence": 0.05,
+        "maximum_spread": 0.06,
+        "minimum_liquidity": 5,
+        "minimum_time_to_close_minutes": 0.25,
+        "maximum_stake_usdc": 2,
+        "promoted_maximum_stake_usdc": 5,
+    }
+    base_signal = {
+        "market_id": "m-fast",
+        "market_slug": "btc-updown-5m-1782489000",
+        "token_id": "t-fast",
+        "edge": 0.03,
+        "alpha_probability": 0.60,
+        "executable_price": 0.50,
+        "spread": 0.01,
+        "liquidity": 1000,
+        "time_to_close_minutes": 3,
+    }
+
+    probationary = risk_decision(
+        cfg,
+        {**base_signal, "cohort_promotion_status": "probationary", "max_stake_usdc": 2},
+        {"bankroll": 1000, "cash": 1000},
+    )
+    promoted = risk_decision(
+        cfg,
+        {**base_signal, "cohort_promotion_status": "promoted"},
+        {"bankroll": 1000, "cash": 1000},
+    )
+
+    assert probationary["approved"] is True
+    assert probationary["stake_usdc"] == 2
+    assert probationary["risk_profile"] == "fast_market_paper_probe"
+    assert promoted["approved"] is True
+    assert promoted["stake_usdc"] == 5
+    assert promoted["risk_profile"] == "fast_market_promoted"
+
 def test_portfolio_and_reconciliation_read_sqlite_ledger(tmp_path):
     cfg = _cfg(tmp_path)
     init_db(cfg.database_path)

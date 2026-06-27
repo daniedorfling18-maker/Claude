@@ -509,6 +509,7 @@ risk:
     minimum_liquidity: 5
     minimum_time_to_close_minutes: 0.25
     maximum_stake_usdc: 2
+    promoted_maximum_stake_usdc: 5
   maximum_resolution_risk: 0.25
   maximum_single_market_exposure: 0.02
   maximum_category_exposure: 0.10

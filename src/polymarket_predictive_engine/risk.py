@@ -62,6 +62,18 @@ def _risk_value(
     return float(source.get(key, default))
 
 
+def _fast_market_stake_cap(fast_overrides: dict[str, Any], signal: dict[str, Any], fast_market: bool) -> float | None:
+    if not fast_market:
+        return None
+    cap = safe_float(fast_overrides.get("maximum_stake_usdc"))
+    promoted = str(signal.get("cohort_promotion_status") or "").strip().lower() == "promoted"
+    if promoted:
+        promoted_cap = safe_float(fast_overrides.get("promoted_maximum_stake_usdc"))
+        if promoted_cap is not None and promoted_cap > 0:
+            return promoted_cap
+    return cap
+
+
 def risk_decision(
     cfg: EngineConfig,
     signal: dict[str, Any],
@@ -164,7 +176,7 @@ def risk_decision(
     liquidity_cap = liquidity * float(risk.get("liquidity_cap_fraction", 0.05))
     kelly = kelly_fraction(probability, price, float(risk.get("kelly_cap", 0.005)))
     signal_cap = safe_float(signal.get("max_stake_usdc"))
-    fast_market_cap = safe_float(fast_overrides.get("maximum_stake_usdc")) if fast_market else None
+    fast_market_cap = _fast_market_stake_cap(fast_overrides, signal, fast_market)
     stake_usdc = min(
         kelly * bankroll,
         max(0.0, max_single - current_market),
@@ -187,7 +199,7 @@ def risk_decision(
         "limit_price": round(price, 6),
         "max_size": round(max_single, 6),
         "kelly_fraction": round(kelly, 8),
-        "risk_profile": "fast_market_paper_probe" if fast_market else "standard",
+        "risk_profile": ("fast_market_promoted" if str(signal.get("cohort_promotion_status") or "").strip().lower() == "promoted" else "fast_market_paper_probe") if fast_market else "standard",
         "risk_checks": {
             "time_to_close_minutes": time_to_close_minutes,
             "resolution_risk": resolution_risk,

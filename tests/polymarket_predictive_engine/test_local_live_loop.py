@@ -286,6 +286,69 @@ def test_degraded_discovery_refresh_can_be_disabled(tmp_path, monkeypatch):
     assert summary["mode"] == "degraded_discovery_disabled"
 
 
+def test_degraded_prediction_refresh_setting_defaults_to_enabled(tmp_path):
+    loop = _load_loop_module()
+    cfg = EngineConfig(
+        raw={"paths": {"output_root": str(tmp_path / "outputs")}},
+        path=tmp_path / "cfg.yaml",
+    )
+
+    assert loop._degraded_prediction_refresh_enabled(cfg, {"skip_prediction_cycle": True}) is True
+    assert loop._degraded_prediction_refresh_enabled(cfg, {"skip_prediction_cycle": False}) is False
+    assert loop._degraded_prediction_cycle_seconds(cfg, 15.0) == 60.0
+
+
+def test_degraded_prediction_refresh_can_be_disabled(tmp_path):
+    loop = _load_loop_module()
+    cfg = EngineConfig(
+        raw={
+            "paths": {"output_root": str(tmp_path / "outputs")},
+            "runtime_resource_guard": {
+                "allow_degraded_websocket_prediction_refresh": False,
+                "degraded_prediction_cycle_seconds": 30,
+            },
+        },
+        path=tmp_path / "cfg.yaml",
+    )
+
+    assert loop._degraded_prediction_refresh_enabled(cfg, {"skip_prediction_cycle": True}) is False
+    assert loop._degraded_prediction_cycle_seconds(cfg, 15.0) == 30.0
+
+
+def test_degraded_prediction_cycle_wraps_canonical_paper_cycle(tmp_path, monkeypatch):
+    loop = _load_loop_module()
+    cfg = EngineConfig(
+        raw={"paths": {"output_root": str(tmp_path / "outputs")}},
+        path=tmp_path / "cfg.yaml",
+    )
+    monkeypatch.setattr(loop, "load_config", lambda _path: cfg)
+
+    def fake_paper_cycle(_cfg, *, source):
+        return {
+            "status": "ran",
+            "source": source,
+            "features": 12,
+            "predictions": 6,
+            "signals_approved": 1,
+            "signals_rejected": 5,
+            "broker": {"equity": 1001.25},
+        }
+
+    monkeypatch.setattr(loop, "run_paper_cycle", fake_paper_cycle)
+
+    summary = loop._run_degraded_prediction_cycle(
+        config_path=tmp_path / "cfg.yaml",
+        paper_source="websocket",
+        guard={"skip_prediction_cycle": True, "reason": "memory_above_limit"},
+    )
+
+    assert summary["status"] == "ran"
+    assert summary["mode"] == "degraded_websocket_prediction_refresh"
+    assert summary["source"] == "websocket"
+    assert summary["signals_approved"] == 1
+    assert summary["resource_guard"]["reason"] == "memory_above_limit"
+
+
 def test_refresh_fast_updown_snapshot_fetches_positive_cohort_slots(tmp_path, monkeypatch):
     loop = _load_loop_module()
     cfg = EngineConfig(

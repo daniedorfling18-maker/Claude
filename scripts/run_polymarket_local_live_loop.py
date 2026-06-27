@@ -648,10 +648,36 @@ def _run_prediction_cycle(*, config_path: Path, paper_source: str) -> dict[str, 
     return run_paper_cycle(cfg, source=paper_source)
 
 
+def _run_degraded_prediction_cycle(*, config_path: Path, paper_source: str, guard: dict[str, Any]) -> dict[str, Any]:
+    """Run a bounded websocket-only paper cycle while the full loop is degraded.
+
+    The source is still the canonical paper cycle, but the current local loop
+    feeds it websocket features capped by the degraded asset budget.  This keeps
+    scoring/paper-signal generation alive without enabling the heavier scanner,
+    optimisation, or discovery lanes.
+    """
+    cfg = load_config(config_path)
+    result = run_paper_cycle(cfg, source=paper_source)
+    if isinstance(result, dict):
+        result = dict(result)
+        result["mode"] = "degraded_websocket_prediction_refresh"
+        result["resource_guard"] = guard
+        result["message"] = "Ran bounded websocket paper cycle while heavy prediction/discovery remained guarded off."
+        write_json(cfg.governance_root / "forward_paper_cycle.json", result)
+        return result
+    return {
+        "status": "ran",
+        "mode": "degraded_websocket_prediction_refresh",
+        "source": paper_source,
+        "resource_guard": guard,
+    }
+
+
 def _summarise_prediction_cycle(result: dict[str, Any], *, paper_source: str, started_at_utc: str = "") -> dict[str, Any]:
     broker = result.get("broker", {}) if isinstance(result, dict) else {}
     summary = {
         "status": result.get("status", "ran") if isinstance(result, dict) else "ran",
+        "mode": result.get("mode", "") if isinstance(result, dict) else "",
         "source": paper_source,
         "generated_at_utc": result.get("generated_at_utc", "") if isinstance(result, dict) else "",
         "started_at_utc": started_at_utc,
@@ -713,6 +739,22 @@ def _resource_skipped_prediction_summary(*, paper_source: str, guard: dict[str, 
         "resource_guard": guard,
         "message": "Prediction cycle skipped to protect local machine resources; websocket marking remains live.",
     }
+
+
+def _degraded_prediction_refresh_enabled(cfg, guard: dict[str, Any]) -> bool:
+    settings = cfg.raw.get("runtime_resource_guard", {}) or {}
+    return bool(
+        guard.get("skip_prediction_cycle")
+        and _truthy_setting(settings.get("allow_degraded_websocket_prediction_refresh"), default=True)
+    )
+
+
+def _degraded_prediction_cycle_seconds(cfg, fallback_seconds: float) -> float:
+    settings = cfg.raw.get("runtime_resource_guard", {}) or {}
+    configured = safe_float(settings.get("degraded_prediction_cycle_seconds"))
+    if configured is None:
+        configured = max(60.0, float(fallback_seconds or 0.0))
+    return max(15.0, float(configured))
 
 
 def _degraded_discovery_refresh(cfg, guard: dict[str, Any], *, reason: str) -> dict[str, Any]:
@@ -792,6 +834,7 @@ def main(argv: list[str] | None = None) -> int:
 
     config_path = ROOT / args.config
     next_prediction_cycle = time.time() + args.prediction_cycle_seconds if args.prediction_cycle_seconds > 0 else float("inf")
+    next_degraded_prediction_cycle = time.time()
     next_discovery_cycle = _initial_discovery_due_timestamp(args.discovery_cycle_seconds)
     discovery_iteration = 0
     last_discovery_summary: dict[str, Any] = {"status": "not_run_yet"}
@@ -861,6 +904,11 @@ def main(argv: list[str] | None = None) -> int:
                     finally:
                         prediction_future = None
                         prediction_started_at_utc = ""
+                        if last_prediction_summary.get("mode") == "degraded_websocket_prediction_refresh":
+                            next_degraded_prediction_cycle = time.time() + _degraded_prediction_cycle_seconds(
+                                cfg,
+                                args.prediction_cycle_seconds,
+                            )
                         next_prediction_cycle = (
                             time.time() + args.prediction_cycle_seconds
                             if args.prediction_cycle_seconds > 0
@@ -918,12 +966,28 @@ def main(argv: list[str] | None = None) -> int:
                     )
                 elif args.prediction_cycle_seconds > 0 and time.time() >= next_prediction_cycle:
                     if resource_guard.get("skip_prediction_cycle"):
-                        last_prediction_summary = _resource_skipped_prediction_summary(
-                            paper_source=args.paper_source,
-                            guard=resource_guard,
-                        )
-                        full_cycle = dict(last_prediction_summary)
-                        next_prediction_cycle = time.time() + args.prediction_cycle_seconds
+                        if _degraded_prediction_refresh_enabled(cfg, resource_guard) and time.time() >= next_degraded_prediction_cycle:
+                            prediction_started_at_utc = now_utc()
+                            prediction_future = prediction_executor.submit(
+                                _run_degraded_prediction_cycle,
+                                config_path=config_path,
+                                paper_source=args.paper_source,
+                                guard=resource_guard,
+                            )
+                            next_prediction_cycle = float("inf")
+                            next_degraded_prediction_cycle = float("inf")
+                            full_cycle = _running_prediction_summary(
+                                paper_source=args.paper_source,
+                                started_at_utc=prediction_started_at_utc,
+                            )
+                            full_cycle["mode"] = "degraded_websocket_prediction_refresh"
+                        else:
+                            last_prediction_summary = _resource_skipped_prediction_summary(
+                                paper_source=args.paper_source,
+                                guard=resource_guard,
+                            )
+                            full_cycle = dict(last_prediction_summary)
+                            next_prediction_cycle = time.time() + args.prediction_cycle_seconds
                     else:
                         prediction_started_at_utc = now_utc()
                         prediction_future = prediction_executor.submit(
@@ -939,6 +1003,9 @@ def main(argv: list[str] | None = None) -> int:
                 next_discovery_in_seconds = None
                 if next_discovery_cycle != float("inf"):
                     next_discovery_in_seconds = max(0.0, round(next_discovery_cycle - time.time(), 3))
+                next_degraded_prediction_in_seconds = None
+                if next_degraded_prediction_cycle != float("inf"):
+                    next_degraded_prediction_in_seconds = max(0.0, round(next_degraded_prediction_cycle - time.time(), 3))
                 discovery_is_running = discovery_future is not None and not discovery_future.done()
 
                 loop_summary = {
@@ -950,6 +1017,8 @@ def main(argv: list[str] | None = None) -> int:
                     "effective_max_assets": effective_max_assets,
                     "websocket_seconds": args.websocket_seconds,
                     "prediction_cycle_seconds": args.prediction_cycle_seconds,
+                    "degraded_prediction_cycle_seconds": _degraded_prediction_cycle_seconds(cfg, args.prediction_cycle_seconds),
+                    "degraded_prediction_next_due_in_seconds": next_degraded_prediction_in_seconds,
                     "asset_sources": {source: list(token_sources.values()).count(source) for source in sorted(set(token_sources.values()))},
                     "websocket": websocket,
                     "websocket_features": websocket_features,

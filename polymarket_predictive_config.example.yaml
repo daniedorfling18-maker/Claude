@@ -235,6 +235,8 @@ runtime_resource_guard:
   skip_prediction_on_high_memory: true
   skip_discovery_on_high_memory: true
   allow_degraded_fast_updown_refresh: true
+  allow_degraded_websocket_prediction_refresh: true
+  degraded_prediction_cycle_seconds: 60
   render_dashboard_on_skip: false
 runtime_schedule:
   full_scan_every_iterations: 2

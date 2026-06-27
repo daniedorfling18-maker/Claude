@@ -92,7 +92,7 @@ jobs:
             --login-url "$LOGIN_URL" \
             --pool-url "$POOL_URL" \
             --config config.yaml \
-            --window-minutes 40 \
+            --window-minutes 90 \
             --pick-card-csv outputs/final_locked_picks/superbru_final_card.csv \
             --odds-lookup-window-minutes 90 \
             --leader-player "${SUPERBRU_PLAYER_NAME:-Danie}" \

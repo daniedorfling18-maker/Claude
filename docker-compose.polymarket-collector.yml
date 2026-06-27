@@ -4,6 +4,7 @@ services:
       context: .
       dockerfile: Dockerfile.monitor
     container_name: pm-data-collector
+    mem_limit: ${PM_MEM_LIMIT:-512m}
     env_file:
       - .env
     environment:

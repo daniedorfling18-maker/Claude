@@ -5,6 +5,7 @@ services:
       args:
         INSTALL_POLYMARKET_SDK: ${INSTALL_POLYMARKET_SDK:-false}
     container_name: polymarket-agent
+    mem_limit: ${PM_MEM_LIMIT:-512m}
     env_file:
       - .env
     environment:
@@ -25,6 +26,7 @@ services:
       args:
         INSTALL_POLYMARKET_SDK: ${INSTALL_POLYMARKET_SDK:-false}
     container_name: polymarket-websocket-live-features
+    mem_limit: ${PM_MEM_LIMIT:-512m}
     env_file:
       - .env
     working_dir: /app
@@ -42,6 +44,7 @@ services:
       args:
         INSTALL_POLYMARKET_SDK: "false"
     container_name: polymarket-paper-bot
+    mem_limit: ${PM_MEM_LIMIT:-512m}
     env_file:
       - .env
     working_dir: /app
@@ -95,6 +98,7 @@ services:
   polymarket-dashboard:
     image: repo-polymarket-paper-bot
     container_name: polymarket-dashboard
+    mem_limit: ${PM_MEM_LIMIT:-512m}
     working_dir: /app/outputs/polymarket_dashboard
     command: python -m http.server 8765 --bind 0.0.0.0
     ports:

@@ -7,6 +7,7 @@ import yaml
 
 from polymarket_predictive_engine.config import load_config
 from polymarket_predictive_engine.dashboard import render_dashboard
+from polymarket_predictive_engine.execution.paper import paper_trade_report
 from polymarket_predictive_engine.profit_target import write_profit_target_tracker
 from polymarket_predictive_engine.utils import read_json, write_csv, write_json
 
@@ -112,6 +113,80 @@ def test_dashboard_renderer_writes_static_dashboard_and_data(tmp_path):
     assert data["approved_signals"][0]["market_slug"] == "test-market"
     assert data["trade_diagnostics"]["near_miss_candidates_seen"] == 1
     assert data["trade_diagnostics"]["current_near_miss_candidates"][0]["market_slug"] == "near-miss-market"
+
+
+def test_dashboard_prefers_fresh_broker_and_profit_tracker_over_stale_forward_cycle(tmp_path):
+    cfg = _config(tmp_path)
+    write_json(
+        cfg.governance_root / "forward_paper_cycle.json",
+        {
+            "status": "ran",
+            "generated_at_utc": "2026-06-25T00:00:00Z",
+            "broker": {
+                "generated_at_utc": "2026-06-25T00:00:00Z",
+                "equity": 900,
+                "cash": 900,
+                "total_exposure": 0,
+            },
+            "actual_profit_target": {
+                "generated_at_utc": "2026-06-25T00:00:00Z",
+                "actual_pnl_since_baseline_usdc": -100,
+                "current": {"timestamp_utc": "2026-06-25T00:00:00Z", "equity_usdc": 900},
+            },
+        },
+    )
+    write_json(
+        cfg.output_root / "polymarket_portfolio" / "paper_trading_summary.json",
+        {
+            "generated_at_utc": "2026-06-25T00:10:00Z",
+            "equity": 1000,
+            "cash": 1000,
+            "total_exposure": 0,
+        },
+    )
+    write_json(
+        cfg.governance_root / "paper_profit_target_tracker.json",
+        {
+            "status": "collecting_forward_evidence",
+            "generated_at_utc": "2026-06-25T00:10:01Z",
+            "actual_pnl_since_baseline_usdc": 0,
+            "current": {
+                "timestamp_utc": "2026-06-25T00:10:00Z",
+                "equity_usdc": 1000,
+                "cash_usdc": 1000,
+                "total_exposure_usdc": 0,
+            },
+        },
+    )
+    write_json(
+        cfg.governance_root / "local_live_loop_heartbeat.json",
+        {"status": "ok", "generated_at_utc": "2020-01-01T00:00:00Z", "websocket_seconds": 5},
+    )
+
+    result = render_dashboard(cfg)
+    data = read_json(result["dashboard_data"])
+
+    assert data["paper_broker_summary"]["equity"] == 1000
+    assert data["actual_profit_target"]["actual_pnl_since_baseline_usdc"] == 0
+    assert data["evidence_freshness"]["broker_source"] == "paper_trading_summary"
+    assert data["evidence_freshness"]["target_source"] == "paper_profit_target_tracker"
+    assert data["evidence_freshness"]["scoreboard_status"] == "aligned"
+    assert data["evidence_freshness"]["live_loop_status"] == "stale"
+
+
+def test_standalone_paper_trade_report_refreshes_profit_tracker_and_dashboard(tmp_path):
+    cfg = _config(tmp_path)
+
+    report = paper_trade_report(cfg)
+
+    tracker = read_json(cfg.governance_root / "paper_profit_target_tracker.json")
+    dashboard = read_json(cfg.output_root / "polymarket_dashboard" / "dashboard_data.json")
+    assert report["mode"] == "paper_trade_refresh"
+    assert tracker["current"]["equity_usdc"] == report["broker"]["equity"]
+    assert dashboard["paper_broker_summary"]["equity"] == report["broker"]["equity"]
+    assert dashboard["actual_profit_target"]["current"]["equity_usdc"] == report["broker"]["equity"]
+    assert dashboard["evidence_freshness"]["scoreboard_status"] == "aligned"
+
 
 def test_dashboard_explains_no_trade_when_fast_candidates_are_quarantined(tmp_path):
     cfg = _config(tmp_path)

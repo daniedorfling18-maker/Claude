@@ -129,11 +129,12 @@ async function load() {
     const data = await res.json();
     document.getElementById("error").innerHTML = "";
     const paper = data.forward_paper_cycle?.paper || data.forward_paper_cycle || {};
-    const broker = data.forward_paper_cycle?.broker || paper.broker || {};
+    const broker = data.paper_broker_summary || data.forward_paper_cycle?.broker || paper.broker || {};
     const target = data.actual_profit_target || data.forward_paper_cycle?.actual_profit_target || {};
     const monthly = data.forward_paper_cycle?.monthly_profit_target || {};
     const diag = data.trade_diagnostics || {};
     const live = data.local_live_heartbeat || data.heartbeat || {};
+    const freshness = data.evidence_freshness || {};
     const scanner = data.scanner_heartbeat || {};
     const discovery = live.discovery || {};
     const resourceGuard = live.resource_guard || {};
@@ -144,15 +145,18 @@ async function load() {
     const websocketFeatures = live.websocket_features || {};
     const ingest = live.ingest || {};
     const status = target.status || data.forward_paper_cycle?.status || "unknown";
-    const good = status === "target_reached" || status === "on_pace";
-    const bad = status === "not_on_pace" || status === "missing_equity";
+    const liveStatus = freshness.live_loop_status || "unknown";
+    const good = liveStatus === "live";
+    const bad = liveStatus === "stale" || liveStatus === "not_started" || liveStatus === "down";
     document.getElementById("statusDot").className = "dot " + (good ? "good" : bad ? "bad" : "");
-    document.getElementById("statusText").textContent = status + " - live tick " + (live.iteration || "-") + " - updated " + (data.generated_at_utc || "-");
+    document.getElementById("statusText").textContent = liveStatus + " - " + status + " - live tick " + (live.iteration || "-") + " - updated " + (data.generated_at_utc || "-");
     const pnl = Number(target.actual_pnl_since_baseline_usdc || 0);
     document.getElementById("cards").innerHTML = [
       card("Equity", fmtUsd(broker.equity), Number(broker.equity) >= 1000 ? "good" : "bad"),
       card("Actual P&L since clean baseline", fmtUsd(pnl), pnl >= 0 ? "good" : "bad"),
       card("Monthly run-rate", target.monthly_run_rate_usdc == null ? "Collecting" : fmtUsd(target.monthly_run_rate_usdc), target.monthly_run_rate_usdc >= target.target_monthly_profit_usdc ? "good" : ""),
+      card("Live loop", liveStatus, good ? "good" : bad ? "bad" : "warn"),
+      card("Scoreboard", freshness.scoreboard_status || "unknown", freshness.scoreboard_status === "aligned" ? "good" : "warn"),
       card("Live WS messages", websocket.new_messages ?? "-", "good"),
       card("Live WS features", websocketFeatures.feature_rows ?? "-", "good"),
       card("Ledger snapshots", ingest.inserted_market_snapshots ?? "-", "good"),
@@ -703,6 +707,69 @@ def _independent_anchor_status(governance: Path) -> dict[str, Any]:
     }
 
 
+def _payload_time(payload: Any) -> datetime | None:
+    if not isinstance(payload, dict):
+        return None
+    for key in ("generated_at_utc", "timestamp_utc", "timestamp", "created_at_utc"):
+        parsed = parse_timestamp(payload.get(key))
+        if parsed is not None:
+            return parsed.astimezone(timezone.utc)
+    current = payload.get("current")
+    if isinstance(current, dict):
+        parsed = parse_timestamp(current.get("timestamp_utc"))
+        if parsed is not None:
+            return parsed.astimezone(timezone.utc)
+    return None
+
+
+def _freshest_payload(candidates: list[tuple[str, Any]]) -> tuple[str, dict[str, Any]]:
+    usable = [(name, payload, _payload_time(payload)) for name, payload in candidates if isinstance(payload, dict) and payload]
+    if not usable:
+        return "", {}
+    with_times = [item for item in usable if item[2] is not None]
+    if with_times:
+        name, payload, _ = max(with_times, key=lambda item: item[2] or datetime.min.replace(tzinfo=timezone.utc))
+        return name, dict(payload)
+    name, payload, _ = usable[0]
+    return name, dict(payload)
+
+
+def _age_seconds(payload: Any) -> float | None:
+    parsed = _payload_time(payload)
+    if parsed is None:
+        return None
+    return max(0.0, (datetime.now(timezone.utc) - parsed).total_seconds())
+
+
+def _live_loop_status(heartbeat: dict[str, Any], cfg: EngineConfig) -> str:
+    if not heartbeat:
+        return "not_started"
+    age = _age_seconds(heartbeat)
+    live_settings = cfg.raw.get("local_live_loop", {}) or {}
+    stale_after = safe_float(live_settings.get("heartbeat_stale_after_seconds"))
+    if stale_after is None:
+        ws_seconds = safe_float(heartbeat.get("websocket_seconds")) or 5.0
+        prediction_seconds = safe_float(heartbeat.get("prediction_cycle_seconds")) or 15.0
+        stale_after = max(90.0, ws_seconds * 6.0, prediction_seconds * 4.0)
+    if age is not None and age > stale_after:
+        return "stale"
+    status = str(heartbeat.get("status") or "").lower()
+    if status in {"ok", "running", "ran"}:
+        return "live"
+    if status in {"error", "failed"}:
+        return "down"
+    return "unknown"
+
+
+def _scoreboard_status(broker: dict[str, Any], target: dict[str, Any]) -> str:
+    broker_equity = safe_float(broker.get("equity"))
+    current = target.get("current") if isinstance(target, dict) else {}
+    target_equity = safe_float(current.get("equity_usdc") if isinstance(current, dict) else None)
+    if broker_equity is None or target_equity is None:
+        return "missing_evidence"
+    return "aligned" if abs(broker_equity - target_equity) <= 0.005 else "drift_detected"
+
+
 def render_dashboard(cfg: EngineConfig, latest_report: dict[str, Any] | None = None) -> dict[str, Any]:
     out = cfg.output_root / "polymarket_dashboard"
     out.mkdir(parents=True, exist_ok=True)
@@ -715,9 +782,19 @@ def render_dashboard(cfg: EngineConfig, latest_report: dict[str, Any] | None = N
     scanner_heartbeat = read_json(governance / "live_paper_loop_heartbeat.json", default={}) or {}
     local_live_heartbeat = read_json(governance / "local_live_loop_heartbeat.json", default={}) or {}
     heartbeat = local_live_heartbeat or scanner_heartbeat
-    actual_target = forward.get("actual_profit_target") or read_json(
-        governance / "paper_profit_target_tracker.json", default={}
-    ) or {}
+    paper_summary = read_json(portfolio_root / "paper_trading_summary.json", default={}) or {}
+    target_source, actual_target = _freshest_payload(
+        [
+            ("latest_report", forward.get("actual_profit_target") if isinstance(forward, dict) else {}),
+            ("paper_profit_target_tracker", read_json(governance / "paper_profit_target_tracker.json", default={}) or {}),
+        ]
+    )
+    broker_source, broker_summary = _freshest_payload(
+        [
+            ("latest_report", forward.get("broker") if isinstance(forward, dict) else {}),
+            ("paper_trading_summary", paper_summary),
+        ]
+    )
     signal_cohort_pnl = read_json(governance / "signal_cohort_pnl.json", default={}) or {}
     shadow_summary = read_json(governance / "shadow_signal_cohort_pnl.json", default={}) or {}
     edge_strategy_search = read_json(governance / "edge_strategy_search_summary.json", default={}) or {}
@@ -745,10 +822,20 @@ def render_dashboard(cfg: EngineConfig, latest_report: dict[str, Any] | None = N
         "status": "ok",
         "generated_at_utc": now_utc(),
         "forward_paper_cycle": forward,
+        "paper_broker_summary": broker_summary,
         "heartbeat": heartbeat,
         "local_live_heartbeat": local_live_heartbeat,
         "scanner_heartbeat": scanner_heartbeat,
         "actual_profit_target": actual_target,
+        "evidence_freshness": {
+            "broker_source": broker_source,
+            "broker_generated_at_utc": broker_summary.get("generated_at_utc"),
+            "target_source": target_source,
+            "target_generated_at_utc": actual_target.get("generated_at_utc"),
+            "live_loop_status": _live_loop_status(heartbeat if isinstance(heartbeat, dict) else {}, cfg),
+            "live_heartbeat_age_seconds": _age_seconds(heartbeat),
+            "scoreboard_status": _scoreboard_status(broker_summary, actual_target),
+        },
         "signal_cohort_pnl": signal_cohort_pnl,
         "cohort_promotion_readiness": _cohort_promotion_readiness(cfg, signal_cohort_pnl),
         "shadow_signal_cohort_pnl": shadow_summary,

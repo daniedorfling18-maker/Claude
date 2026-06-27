@@ -10,7 +10,7 @@ from .config import config_check, load_config
 from .data_inventory import inventory
 from .data_quality import data_quality
 from .execution.live import live_trade
-from .execution.paper import paper_trade
+from .execution.paper import paper_trade_report
 from .external_feed_collector import collect_external_feeds
 from .external_signals import normalize_external_signals
 from .features import build_features
@@ -271,7 +271,7 @@ def main(argv: list[str] | None = None) -> int:
         elif args.command == "backtest":
             _print(backtest(cfg))
         elif args.command == "paper-trade":
-            _print(paper_trade(cfg))
+            _print(paper_trade_report(cfg))
         elif args.command == "simulate-paper-edge":
             _print(simulate_paper_edge(cfg))
         elif args.command == "paper-readiness":

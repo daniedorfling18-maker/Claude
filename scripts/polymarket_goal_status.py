@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import socket
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -15,6 +16,7 @@ from typing import Any
 ROOT = Path(__file__).resolve().parents[1]
 DASHBOARD = ROOT / "outputs" / "polymarket_dashboard"
 GOVERNANCE = ROOT / "outputs" / "polymarket_model_governance"
+PORTFOLIO = ROOT / "outputs" / "polymarket_portfolio"
 
 
 def read_json(path: Path) -> dict[str, Any]:
@@ -55,6 +57,35 @@ def first_dict(*values: Any) -> dict[str, Any]:
     return {}
 
 
+def parse_time(value: Any) -> datetime | None:
+    text = str(value or "").strip()
+    if not text:
+        return None
+    if text.endswith("Z"):
+        text = text[:-1] + "+00:00"
+    try:
+        parsed = datetime.fromisoformat(text)
+    except ValueError:
+        return None
+    return parsed.astimezone(timezone.utc) if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
+
+
+def freshest_dict(*values: Any) -> dict[str, Any]:
+    candidates = [value for value in values if isinstance(value, dict) and value]
+    if not candidates:
+        return {}
+    dated = []
+    for value in candidates:
+        generated = parse_time(value.get("generated_at_utc"))
+        current = first_dict(value.get("current"))
+        current_time = parse_time(current.get("timestamp_utc"))
+        dated.append((generated or current_time, value))
+    with_dates = [(dt, value) for dt, value in dated if dt is not None]
+    if with_dates:
+        return max(with_dates, key=lambda item: item[0])[1]
+    return candidates[0]
+
+
 def top_watchlist_rows(payload: dict[str, Any], key: str, limit: int = 5) -> list[dict[str, Any]]:
     rows = payload.get(key)
     if not isinstance(rows, list):
@@ -87,10 +118,15 @@ def print_watchlist(title: str, rows: list[dict[str, Any]], *, shadow: bool = Fa
 
 def main() -> int:
     dashboard_data = read_json(DASHBOARD / "dashboard_data.json")
-    target = first_dict(
-        dashboard_data.get("actual_profit_target"),
-        first_dict(dashboard_data.get("forward_paper_cycle")).get("actual_profit_target"),
+    target = freshest_dict(
         read_json(GOVERNANCE / "paper_profit_target_tracker.json"),
+        first_dict(dashboard_data.get("forward_paper_cycle")).get("actual_profit_target"),
+        dashboard_data.get("actual_profit_target"),
+    )
+    broker = freshest_dict(
+        read_json(PORTFOLIO / "paper_trading_summary.json"),
+        dashboard_data.get("paper_broker_summary"),
+        first_dict(dashboard_data.get("forward_paper_cycle")).get("broker"),
     )
     signal_cohorts = first_dict(
         dashboard_data.get("signal_cohort_pnl"),
@@ -113,6 +149,10 @@ def main() -> int:
     print(f"Phone URL:      http://{local_ip_hint()}:8765/")
     print(f"Data updated:   {dashboard_data.get('generated_at_utc') or 'n/a'}")
     print(f"Loop heartbeat: {heartbeat.get('status') or 'n/a'}")
+    if dashboard_data.get("evidence_freshness"):
+        freshness = first_dict(dashboard_data.get("evidence_freshness"))
+        print(f"Live status:    {freshness.get('live_loop_status') or 'n/a'}")
+        print(f"Scoreboard:     {freshness.get('scoreboard_status') or 'n/a'}")
     if local_live:
         websocket = first_dict(local_live.get("websocket"))
         ws_features = first_dict(local_live.get("websocket_features"))
@@ -143,6 +183,8 @@ def main() -> int:
     print("\n$100/month target")
     print(f"  Status:            {target.get('status') or 'n/a'}")
     print(f"  Current actual P&L: {money(actual_pnl)}")
+    print(f"  Broker equity:      {money(broker.get('equity'))}")
+    print(f"  Broker exposure:    {money(broker.get('total_exposure'))}")
     print(f"  Monthly target:    {money(target_monthly)}")
     print(f"  Monthly run-rate:  {money(run_rate)}")
     print(f"  Run-rate gap:      {money(gap) if gap is not None else 'n/a'}")

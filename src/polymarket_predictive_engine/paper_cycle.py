@@ -6,6 +6,7 @@ from typing import Any
 
 from .config import EngineConfig
 from .dashboard import render_dashboard
+from .decision_trace import write_agent_runtime_bundle
 from .execution.paper import paper_trade
 from .features_v2 import build_features_v2
 from .mispricing_alpha import apply_mispricing_alpha
@@ -82,6 +83,7 @@ def run_paper_cycle(
             }
         )
         write_json(cfg.governance_root / "forward_paper_cycle.json", report)
+        write_agent_runtime_bundle(cfg, cycle_report=report)
         return report
 
     try:
@@ -90,6 +92,7 @@ def run_paper_cycle(
     except Exception as exc:
         report.update({"status": "blocked", "blockers": [str(exc)]})
         write_json(cfg.governance_root / "forward_paper_cycle.json", report)
+        write_agent_runtime_bundle(cfg, cycle_report=report)
         return report
 
     prediction_path = cfg.output_root / "polymarket_predictions" / "predictions.csv"
@@ -146,6 +149,10 @@ def run_paper_cycle(
             "prediction_file": str(prediction_path),
         }
     )
+    try:
+        report["agent_runtime"] = write_agent_runtime_bundle(cfg, cycle_report=report, broker_summary=broker if isinstance(broker, dict) else {})
+    except Exception as exc:  # noqa: BLE001 - observability failure must not stop paper trading
+        report["agent_runtime"] = {"status": "error", "error": f"{type(exc).__name__}: {exc}"}
     try:
         report["dashboard"] = render_dashboard(cfg, report)
     except Exception as exc:  # noqa: BLE001 - dashboard failure must not stop paper trading

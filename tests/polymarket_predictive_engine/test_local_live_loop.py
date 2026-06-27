@@ -232,6 +232,60 @@ def test_websocket_marks_are_merged_into_shadow_prediction_rows():
     assert merged[0]["liquidity"] == 250.0
 
 
+def test_degraded_discovery_refresh_keeps_fast_updown_fresh(tmp_path, monkeypatch):
+    loop = _load_loop_module()
+    cfg = EngineConfig(
+        raw={"paths": {"output_root": str(tmp_path / "outputs")}},
+        path=tmp_path / "cfg.yaml",
+    )
+    monkeypatch.setattr(
+        loop,
+        "refresh_fast_updown_snapshot",
+        lambda _cfg: {"status": "ok", "tokens": 4, "markets_found": 2},
+    )
+
+    summary = loop._degraded_discovery_refresh(
+        cfg,
+        {"skip_discovery_cycle": True, "reason": "memory_above_limit"},
+        reason="scheduled_discovery_due",
+    )
+
+    assert summary["status"] == "ran"
+    assert summary["mode"] == "degraded_fast_updown_refresh"
+    assert summary["live_data"] is True
+    assert summary["fast_updown"]["tokens"] == 4
+    assert summary["scan"]["status"] == "skipped_resource_guard"
+
+
+def test_degraded_discovery_refresh_can_be_disabled(tmp_path, monkeypatch):
+    loop = _load_loop_module()
+    cfg = EngineConfig(
+        raw={
+            "paths": {"output_root": str(tmp_path / "outputs")},
+            "runtime_resource_guard": {"allow_degraded_fast_updown_refresh": False},
+        },
+        path=tmp_path / "cfg.yaml",
+    )
+    called = False
+
+    def fail_if_called(_cfg):
+        nonlocal called
+        called = True
+        return {}
+
+    monkeypatch.setattr(loop, "refresh_fast_updown_snapshot", fail_if_called)
+
+    summary = loop._degraded_discovery_refresh(
+        cfg,
+        {"skip_discovery_cycle": True, "reason": "memory_above_limit"},
+        reason="scheduled_discovery_due",
+    )
+
+    assert called is False
+    assert summary["status"] == "skipped_resource_guard"
+    assert summary["mode"] == "degraded_discovery_disabled"
+
+
 def test_refresh_fast_updown_snapshot_fetches_positive_cohort_slots(tmp_path, monkeypatch):
     loop = _load_loop_module()
     cfg = EngineConfig(

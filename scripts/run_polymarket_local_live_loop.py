@@ -715,6 +715,59 @@ def _resource_skipped_prediction_summary(*, paper_source: str, guard: dict[str, 
     }
 
 
+def _degraded_discovery_refresh(cfg, guard: dict[str, Any], *, reason: str) -> dict[str, Any]:
+    """Run the cheapest edge-relevant discovery lane while heavy discovery is guarded off.
+
+    Full scanner discovery can be memory/CPU heavy on a local laptop.  The fast
+    crypto Up/Down lane is deliberately bounded by slots/tokens and is the lane
+    with current positive cohort evidence, so degraded mode should keep it fresh
+    instead of letting the only promoted short-horizon opportunity source go
+    stale.
+    """
+    settings = cfg.raw.get("runtime_resource_guard", {}) or {}
+    if not _truthy_setting(settings.get("allow_degraded_fast_updown_refresh"), default=True):
+        return {
+            "status": "skipped_resource_guard",
+            "mode": "degraded_discovery_disabled",
+            "generated_at_utc": now_utc(),
+            "live_data": False,
+            "live_trading": False,
+            "resource_guard": guard,
+            "message": "Background discovery skipped to protect local machine resources.",
+            "reason": reason,
+        }
+    try:
+        fast_updown = refresh_fast_updown_snapshot(cfg)
+        tokens = int(safe_float(fast_updown.get("tokens")) or 0) if isinstance(fast_updown, dict) else 0
+        return {
+            "status": "ran",
+            "mode": "degraded_fast_updown_refresh",
+            "generated_at_utc": now_utc(),
+            "live_data": tokens > 0,
+            "live_trading": False,
+            "resource_guard": guard,
+            "reason": reason,
+            "scan": {
+                "status": "skipped_resource_guard",
+                "message": "Full scanner discovery skipped; refreshed bounded fast Up/Down lane only.",
+            },
+            "fast_updown": fast_updown,
+            "optimization": {"status": "skipped_resource_guard"},
+        }
+    except Exception as exc:  # noqa: BLE001 - degraded refresh should never stop the live tick
+        return {
+            "status": "error",
+            "mode": "degraded_fast_updown_refresh",
+            "generated_at_utc": now_utc(),
+            "live_data": False,
+            "live_trading": False,
+            "resource_guard": guard,
+            "reason": reason,
+            "error": f"{type(exc).__name__}: {exc}",
+            "message": "Fast Up/Down degraded refresh failed; websocket marking remains live.",
+        }
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="run_polymarket_local_live_loop.py")
     parser.add_argument("--config", default="polymarket_predictive_config.example.yaml")
@@ -828,12 +881,11 @@ def main(argv: list[str] | None = None) -> int:
                 )
                 if not asset_ids and args.discovery_cycle_seconds > 0:
                     if resource_guard.get("skip_discovery_cycle"):
-                        discovery_summary = {
-                            "status": "skipped_resource_guard",
-                            "generated_at_utc": now_utc(),
-                            "resource_guard": resource_guard,
-                            "message": "Discovery skipped under high memory; no websocket assets available yet.",
-                        }
+                        discovery_summary = _degraded_discovery_refresh(
+                            cfg,
+                            resource_guard,
+                            reason="no_websocket_assets",
+                        )
                         last_discovery_summary = discovery_summary
                         next_discovery_cycle = time.time() + args.discovery_cycle_seconds
                     else:
@@ -957,16 +1009,15 @@ def main(argv: list[str] | None = None) -> int:
                     discovery_running_iteration = discovery_iteration + 1
                     discovery_started_at_utc = now_utc()
                     if resource_guard.get("skip_discovery_cycle"):
-                        last_discovery_summary = {
-                            "status": "skipped_resource_guard",
-                            "generated_at_utc": now_utc(),
-                            "resource_guard": resource_guard,
-                            "message": "Background discovery skipped to protect local machine resources; websocket marking remains live.",
-                        }
+                        last_discovery_summary = _degraded_discovery_refresh(
+                            cfg,
+                            resource_guard,
+                            reason="scheduled_discovery_due",
+                        )
                         discovery_summary = dict(last_discovery_summary)
                         _write_discovery_heartbeat(
                             cfg,
-                            status="skipped_resource_guard",
+                            status=str(last_discovery_summary.get("status") or "unknown"),
                             live_iteration=iteration,
                             discovery_iteration=discovery_running_iteration,
                             summary=last_discovery_summary,

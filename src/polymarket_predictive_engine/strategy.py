@@ -114,6 +114,37 @@ def _cohort_evidence_proxy_index(cohorts: dict[str, dict[str, Any]]) -> dict[str
             proxy[key] = row
     return proxy
 
+
+def _near_miss_evidence_proxy_index(
+    cohorts: dict[str, dict[str, Any]],
+    *,
+    prefix: str = "near_miss_learning",
+) -> dict[str, dict[str, Any]]:
+    """Index positive near-miss shadow evidence back to its base cohort.
+
+    Near-miss evidence is intentionally stored under a namespaced cohort such
+    as ``near_miss_learning|crypto``.  It may only proxy back to ``crypto`` once
+    the cohort validation layer has marked that near-miss namespace as
+    probationary or promoted from forward shadow P&L.
+    """
+    prefix_text = str(prefix or "near_miss_learning").strip()
+    marker = f"{prefix_text}|"
+    proxy: dict[str, dict[str, Any]] = {}
+    for cohort, row in cohorts.items():
+        cohort_text = str(cohort or "")
+        if not cohort_text.startswith(marker):
+            continue
+        if not (_cohort_is_promoted(row) or _cohort_is_probationary(row)):
+            continue
+        base_cohort = cohort_text[len(marker) :]
+        if not base_cohort:
+            continue
+        current = proxy.get(base_cohort)
+        if current is None or _cohort_ready_score(row) > _cohort_ready_score(current):
+            proxy[base_cohort] = row
+    return proxy
+
+
 def _cohort_is_probationary(row: dict[str, Any] | None) -> bool:
     if not row:
         return False
@@ -162,12 +193,21 @@ def generate_signals(
     allow_crypto_updown_cohort_proxy = bool(
         alpha_enabled and _setting_bool(cohort_settings, "allow_crypto_updown_live_model_cohort_proxy", True)
     )
+    allow_near_miss_learning_cohort_proxy = bool(
+        alpha_enabled and _setting_bool(cohort_settings, "allow_near_miss_learning_cohort_proxy", False)
+    )
+    near_miss_cohort_prefix = str(cohort_settings.get("near_miss_cohort_prefix", "near_miss_learning"))
     probationary_default_max_stake = float(cohort_settings.get("probationary_max_stake_usdc", 2.0))
     probationary_min_edge = float(cohort_settings.get("probationary_minimum_edge_lower_bound", 0.005))
     promoted_cohorts = _cohort_promotion_index(cfg) if require_positive_cohort else {}
     cohort_proxy_index = (
         _cohort_evidence_proxy_index(promoted_cohorts)
         if require_positive_cohort and allow_crypto_updown_cohort_proxy
+        else {}
+    )
+    near_miss_proxy_index = (
+        _near_miss_evidence_proxy_index(promoted_cohorts, prefix=near_miss_cohort_prefix)
+        if require_positive_cohort and allow_near_miss_learning_cohort_proxy
         else {}
     )
 
@@ -254,6 +294,16 @@ def generate_signals(
                 if proxy_row is not None:
                     cohort_row = proxy_row
                     cohort_evidence_source = str(proxy_row.get("signal_cohort") or proxy_row.get("cohort") or cohort)
+        if require_positive_cohort and allow_near_miss_learning_cohort_proxy:
+            exact_is_ready = _cohort_is_promoted(cohort_row) or _cohort_is_probationary(cohort_row)
+            exact_has_direct_evidence = _cohort_has_direct_evidence(cohort_row)
+            if not exact_is_ready and not exact_has_direct_evidence:
+                near_miss_proxy_row = near_miss_proxy_index.get(cohort)
+                if near_miss_proxy_row is not None:
+                    cohort_row = near_miss_proxy_row
+                    cohort_evidence_source = str(
+                        near_miss_proxy_row.get("signal_cohort") or near_miss_proxy_row.get("cohort") or cohort
+                    )
         cohort_promoted = _cohort_is_promoted(cohort_row)
         cohort_probationary = bool(allow_probationary_paper_trading and _cohort_is_probationary(cohort_row))
         signal["cohort_promotion_status"] = (
@@ -271,6 +321,8 @@ def generate_signals(
             max_stake = safe_float(cohort_row.get("probationary_max_stake_usdc")) or probationary_default_max_stake
             signal["probationary_paper_trade"] = True
             signal["max_stake_usdc"] = max_stake
+        if str(cohort_evidence_source or "").startswith(f"{near_miss_cohort_prefix}|"):
+            signal["near_miss_evidence_proxy"] = True
         promoted_shadow_override = bool(
             allow_promoted_shadow_candidate_trading
             and boolish(prediction.get("shadow_trade_candidate"))

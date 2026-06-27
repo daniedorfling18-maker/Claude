@@ -302,6 +302,8 @@ cohort_promotion:
   allow_probationary_paper_trading: true
   allow_cohort_evidence_to_satisfy_label_gate: true
   allow_crypto_updown_live_model_cohort_proxy: true
+  allow_near_miss_learning_cohort_proxy: true
+  near_miss_cohort_prefix: near_miss_learning
   probationary_minimum_filled_orders: 3
   probationary_minimum_settled_orders: 3
   probationary_minimum_pnl_usdc: 0.0

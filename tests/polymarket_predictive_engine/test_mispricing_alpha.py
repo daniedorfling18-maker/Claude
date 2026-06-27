@@ -856,6 +856,89 @@ def test_strategy_proxies_crypto_live_model_to_same_updown_probationary_evidence
     assert approved[0]["cohort_evidence_label_gate_override"] is True
 
 
+def test_strategy_proxies_promoted_near_miss_learning_to_base_cohort(tmp_path):
+    cfg = _config(tmp_path)
+    cfg.raw["risk"]["fast_market_overrides"] = {
+        "enabled": True,
+        "minimum_edge": 0.005,
+        "minimum_confidence": 0.05,
+        "maximum_spread": 0.06,
+        "minimum_liquidity": 5,
+        "minimum_time_to_close_minutes": 0.25,
+        "maximum_stake_usdc": 2,
+    }
+    base_cohort = "crypto"
+    near_miss_cohort = "near_miss_learning|crypto"
+    cfg.governance_root.mkdir(parents=True, exist_ok=True)
+    (cfg.governance_root / "signal_cohort_pnl.json").write_text(
+        f"""
+        {{
+          "status": "computed",
+          "cohorts": [
+            {{
+              "signal_cohort": "{near_miss_cohort}",
+              "promoted": false,
+              "probationary": true,
+              "probationary_max_stake_usdc": 2.0,
+              "promotion_ready_score": 5,
+              "buy_fills": 3,
+              "settled_fills": 3,
+              "total_pnl_usdc": 4.5,
+              "roi": 0.15
+            }}
+          ]
+        }}
+        """,
+        encoding="utf-8",
+    )
+    write_csv(
+        cfg.output_root / "polymarket_predictions" / "predictions.csv",
+        [
+            {
+                "market_id": "near-miss-proxy",
+                "market_slug": "btc-updown-5m-1782487800",
+                "question": "Bitcoin UpDown 5M",
+                "token_id": "near-miss-token",
+                "prediction_timestamp": "2026-06-26T15:00:00Z",
+                "category": "crypto",
+                "signal_cohort": base_cohort,
+                "outcome": "Up",
+                "market_midpoint": "0.50",
+                "calibrated_probability": "0.56",
+                "model_probability": "0.56",
+                "alpha_probability": "0.56",
+                "executable_price": "0.50",
+                "edge": "0.009",
+                "edge_lower_bound": "0.009",
+                "alpha_trade_candidate": "false",
+                "near_miss_learning_candidate": "true",
+                "validation_layer_pass": "true",
+                "bookmaker_cross_check_pass": "true",
+                "microstructure_filter_pass": "true",
+                "spread": "0.01",
+                "liquidity": "1000",
+                "time_to_close_hours": "0.05",
+                "time_to_close_minutes": "3",
+                "confidence": "0.12",
+            }
+        ],
+    )
+
+    approved, rejected = generate_signals(
+        cfg,
+        readiness={"approved_for_paper_trading": True, "blockers": []},
+    )
+
+    assert rejected == []
+    assert len(approved) == 1
+    assert approved[0]["signal_cohort"] == base_cohort
+    assert approved[0]["cohort_evidence_source_cohort"] == near_miss_cohort
+    assert approved[0]["cohort_promotion_status"] == "probationary"
+    assert approved[0]["near_miss_evidence_proxy"] is True
+    assert approved[0]["promotion_override"] == "probationary_positive_edge_probe"
+    assert float(approved[0]["sizing_decision"]) <= 2.0
+
+
 def test_strategy_does_not_proxy_over_direct_live_model_evidence(tmp_path):
     cfg = _config(tmp_path)
     source_cohort = "exploratory_inverse_historical_rule|crypto_btc_updown_5m|outcome=up"

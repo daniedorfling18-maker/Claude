@@ -122,7 +122,87 @@ function Test-PortListening {
     }
 }
 
+function Get-LiquidityQueryScore {
+    param(
+        [string]$Query,
+        [object]$FamilyRows
+    )
+    $familiesByQuery = @{
+        "btc updown" = @("crypto_btc_updown_5m", "crypto_btc_updown_15m")
+        "xrp updown" = @("crypto_xrp_updown_5m", "crypto_xrp_updown_event")
+        "solana updown" = @("crypto_sol_updown_5m")
+        "eth updown" = @("crypto_eth_updown_5m", "crypto_eth_updown_15m")
+        "bitcoin" = @("crypto_btc_special", "crypto_btc_updown_5m", "crypto_btc_updown_15m")
+        "ethereum" = @("crypto_eth_updown_5m", "crypto_eth_updown_15m")
+        "solana" = @("crypto_sol_updown_5m", "crypto_special")
+        "xrp" = @("crypto_xrp_special", "crypto_xrp_updown_5m")
+        "world cup" = @("sports_other", "worldcup")
+        "tennis" = @("tennis_itf_total", "tennis_atp_total", "tennis_wta_total", "unknown")
+    }
+    $queryKey = $Query.ToLowerInvariant()
+    if (-not $familiesByQuery.ContainsKey($queryKey)) {
+        return 0.0
+    }
+    $matched = @()
+    foreach ($row in @($FamilyRows)) {
+        $family = [string]$row.family
+        if ($familiesByQuery[$queryKey] -contains $family) {
+            $matched += $row
+        }
+    }
+    if ($matched.Count -eq 0) {
+        return -20.0
+    }
+    $tradable = 0.0
+    $liquidity = 0.0
+    foreach ($row in $matched) {
+        $tradableValue = $row.tradable_tokens
+        if ($null -eq $tradableValue) { $tradableValue = $row.tradable }
+        if ($null -ne $tradableValue -and "$tradableValue" -ne "") { $tradable += [double]$tradableValue }
+        $liqValue = $row.max_liquidity
+        if ($null -ne $liqValue -and "$liqValue" -ne "") { $liquidity += [double]$liqValue }
+    }
+    if ($tradable -le 0) {
+        return -40.0
+    }
+    return $tradable + [math]::Min(10.0, $liquidity / 10000.0)
+}
+
+function Set-DefaultResearchScanEnvironment {
+    if ([string]::IsNullOrWhiteSpace($env:POLYMARKET_SCAN_QUERY_MODE)) {
+        $env:POLYMARKET_SCAN_QUERY_MODE = "rotate"
+    }
+    if ([string]::IsNullOrWhiteSpace($env:POLYMARKET_MAX_SCAN_QUERIES)) {
+        $env:POLYMARKET_MAX_SCAN_QUERIES = "1"
+    }
+    if (-not [string]::IsNullOrWhiteSpace($env:POLYMARKET_QUERIES)) {
+        return
+    }
+    $defaultQueries = @("btc updown", "xrp updown", "solana updown", "eth updown", "bitcoin", "ethereum", "solana", "xrp", "world cup", "tennis")
+    $liquidityPath = Join-Path $RepoRoot "outputs\polymarket_model_governance\liquidity_discovery_summary.json"
+    if (-not (Test-Path -LiteralPath $liquidityPath)) {
+        return
+    }
+    try {
+        $payload = Get-Content -LiteralPath $liquidityPath -Raw | ConvertFrom-Json
+        $familyRows = @($payload.family_summary)
+        if ($familyRows.Count -eq 0) {
+            return
+        }
+        $ordered = $defaultQueries |
+            ForEach-Object { [PSCustomObject]@{ Query = $_; Score = (Get-LiquidityQueryScore -Query $_ -FamilyRows $familyRows) } } |
+            Sort-Object -Property @{Expression="Score"; Descending=$true}, @{Expression="Query"; Descending=$false} |
+            Select-Object -ExpandProperty Query
+        if ($ordered.Count -gt 0) {
+            $env:POLYMARKET_QUERIES = ($ordered -join ",")
+        }
+    } catch {
+        Write-Warning "Could not build liquidity-aware query order from $liquidityPath. Using configured query order. Error: $($_.Exception.Message)"
+    }
+}
+
 New-Item -ItemType Directory -Force -Path $WorkDir | Out-Null
+Set-DefaultResearchScanEnvironment
 
 $memoryPercent = Get-MemoryPercentUsed
 $localIp = Get-LocalIpHint
@@ -140,6 +220,9 @@ if (-not [string]::IsNullOrWhiteSpace($env:POLYMARKET_SCAN_QUERY_MODE)) {
 }
 if (-not [string]::IsNullOrWhiteSpace($env:POLYMARKET_MAX_SCAN_QUERIES)) {
     Write-Host "Max scan queries override: $env:POLYMARKET_MAX_SCAN_QUERIES"
+}
+if (-not [string]::IsNullOrWhiteSpace($env:POLYMARKET_QUERIES)) {
+    Write-Host "Liquidity-aware query order: $env:POLYMARKET_QUERIES"
 }
 Write-Host ""
 

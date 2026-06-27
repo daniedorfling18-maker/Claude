@@ -2,10 +2,11 @@ param(
     [string]$Config = "polymarket_predictive_config.example.yaml",
     [int]$MaxAssets = 50,
     [int]$DashboardPort = 8765,
-    [double]$MaxMemoryPercentToStart = 90.0,
+    [double]$MaxMemoryPercentToStart = 95.0,
     [int]$WebsocketSeconds = 5,
     [double]$PredictionCycleSeconds = 15.0,
     [double]$DiscoveryCycleSeconds = 300.0,
+    [int]$WindowsProbeTimeoutSeconds = 45,
     [switch]$ForceRestart,
     [switch]$SkipDashboard,
     [switch]$DryRun
@@ -22,10 +23,45 @@ $OutLog = Join-Path $WorkDir "local_live_loop.out.log"
 $ErrLog = Join-Path $WorkDir "local_live_loop.err.log"
 $DashboardOutLog = Join-Path $WorkDir "polymarket_dashboard.out.log"
 $DashboardErrLog = Join-Path $WorkDir "polymarket_dashboard.err.log"
+$ProcessScanTimedOut = $false
+
+function Invoke-WithTimeout {
+    param(
+        [scriptblock]$ScriptBlock,
+        [object[]]$ArgumentList = @(),
+        [int]$TimeoutSeconds = 45,
+        [object]$Fallback = $null,
+        [string]$Description = "Windows probe"
+    )
+
+    $job = Start-Job -ScriptBlock $ScriptBlock -ArgumentList $ArgumentList
+    try {
+        $completed = Wait-Job -Job $job -Timeout $TimeoutSeconds
+        if ($null -ne $completed -and $job.State -eq "Completed") {
+            return Receive-Job -Job $job
+        }
+        Write-Warning "$Description timed out after $TimeoutSeconds seconds."
+        return $Fallback
+    } finally {
+        Stop-Job -Job $job -ErrorAction SilentlyContinue | Out-Null
+        Remove-Job -Job $job -Force -ErrorAction SilentlyContinue
+    }
+}
 
 function Get-MemoryPercentUsed {
-    $os = Get-CimInstance Win32_OperatingSystem
-    return [math]::Round((1.0 - ($os.FreePhysicalMemory / $os.TotalVisibleMemorySize)) * 100.0, 1)
+    $value = Invoke-WithTimeout `
+        -TimeoutSeconds $WindowsProbeTimeoutSeconds `
+        -Description "Memory check" `
+        -Fallback $null `
+        -ScriptBlock {
+            $os = Get-CimInstance Win32_OperatingSystem
+            [math]::Round((1.0 - ($os.FreePhysicalMemory / $os.TotalVisibleMemorySize)) * 100.0, 1)
+        }
+    if ($null -eq $value) {
+        Write-Warning "Could not read memory pressure quickly; refusing to start the bot to protect the laptop."
+        return 1000.0
+    }
+    return [double]$value
 }
 
 function Get-LocalIpHint {
@@ -40,17 +76,44 @@ function Get-LocalIpHint {
 
 function Get-RepoLocalLiveProcesses {
     $repoText = [string]$RepoRoot
-    Get-CimInstance Win32_Process -Filter "Name='python.exe' OR Name='pythonw.exe'" |
-        Where-Object {
-            $_.CommandLine -like "*run_polymarket_local_live_loop.py*" -and
-            $_.CommandLine -like "*$repoText*"
+    $rows = Invoke-WithTimeout `
+        -TimeoutSeconds $WindowsProbeTimeoutSeconds `
+        -Description "Repo-owned local bot process scan" `
+        -Fallback "__TIMEOUT__" `
+        -ArgumentList @($repoText) `
+        -ScriptBlock {
+            param([string]$RepoText)
+            Get-CimInstance Win32_Process -Filter "Name='python.exe' OR Name='pythonw.exe'" |
+                Where-Object {
+                    $_.CommandLine -like "*run_polymarket_local_live_loop.py*" -and
+                    $_.CommandLine -like "*$RepoText*"
+                } |
+                Select-Object ProcessId,Name,CommandLine
         }
+    if ($rows -eq "__TIMEOUT__") {
+        $script:ProcessScanTimedOut = $true
+        return @()
+    }
+    return @($rows)
 }
 
 function Test-PortListening {
     param([int]$Port)
-    $connection = Get-NetTCPConnection -LocalPort $Port -State Listen -ErrorAction SilentlyContinue | Select-Object -First 1
-    return $null -ne $connection
+    $client = New-Object System.Net.Sockets.TcpClient
+    try {
+        $async = $client.BeginConnect("127.0.0.1", $Port, $null, $null)
+        if (-not $async.AsyncWaitHandle.WaitOne(800)) {
+            return $false
+        }
+        try {
+            $client.EndConnect($async)
+            return $true
+        } catch {
+            return $false
+        }
+    } finally {
+        $client.Close()
+    }
 }
 
 New-Item -ItemType Directory -Force -Path $WorkDir | Out-Null
@@ -66,6 +129,12 @@ Write-Host "Memory:    $memoryPercent% used"
 Write-Host "Dashboard: http://127.0.0.1:$DashboardPort/"
 Write-Host "Phone:     http://$localIp`:$DashboardPort/"
 Write-Host ""
+
+if ($ProcessScanTimedOut) {
+    Write-Host "Not starting the live loop: Windows could not confirm whether another local bot is already running."
+    Write-Host "Close heavy apps or reboot, then rerun this script."
+    exit 3
+}
 
 if ($existingBots.Count -gt 0) {
     if (-not $ForceRestart) {

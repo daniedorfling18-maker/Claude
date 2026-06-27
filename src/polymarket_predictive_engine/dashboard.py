@@ -9,6 +9,7 @@ from typing import Any
 
 from .config import EngineConfig
 from .utils import now_utc, parse_timestamp, read_csv_rows, read_json, safe_float, write_json
+from .worldcup_validation import is_worldcup_winner_market
 
 
 HTML = """<!doctype html>
@@ -84,6 +85,7 @@ HTML = """<!doctype html>
   <section><h2>Signal cohort validation</h2><div id="cohorts"></div></section>
   <section><h2>Open shadow positions</h2><div id="shadowPositions"></div></section>
   <section><h2>Recent shadow fills</h2><div id="shadowFills"></div></section>
+  <section><h2>World Cup validation layer</h2><div id="worldcupValidation"></div></section>
   <section><h2>Independent model anchors</h2><div id="independentFundamentals"></div></section>
   <section><h2>Historical edge search</h2><div id="edgeSearch"></div></section>
   <section><h2>Historical rule live shadow scan</h2><div id="promotedRuleShadow"></div></section>
@@ -315,6 +317,20 @@ async function load() {
       ["Market","question", (v,row)=>marketLabel(row)],
       ["Price","price", v=>fmtNum(v,4)], ["Notional","gross_notional_usdc", fmtUsd], ["Reason","reason"]
     ]);
+    const wc = data.worldcup_validation_status || {};
+    document.getElementById("worldcupValidation").innerHTML = facts([
+      ["Status", wc.status],
+      ["Winner rows", wc.worldcup_winner_rows],
+      ["Fundamental coverage", wc.fundamental_coverage_pct == null ? "-" : fmtNum(wc.fundamental_coverage_pct, 1) + "%"],
+      ["Bookmaker pass", wc.bookmaker_cross_check_pass],
+      ["Bookmaker fail", wc.bookmaker_cross_check_fail],
+      ["Microstructure pass", wc.microstructure_pass],
+      ["Approved signals", wc.approved_signals],
+      ["Main blocker", wc.main_blocker, v=>longText(v, 180)]
+    ]) + `<div style="height:12px"></div>` + table(wc.top_rejection_reasons || [], [
+      ["Count","count"],
+      ["Rejected reason","reason", v=>longText(v, 220)]
+    ]);
     const anchors = data.heartbeat?.independent_fundamentals || data.independent_anchor_status || {};
     document.getElementById("independentFundamentals").innerHTML = table([
       { anchor: "Sharp odds fetch", ...(anchors.sharp_odds_fetch || {}) },
@@ -525,6 +541,59 @@ def _truthy(value: Any) -> bool:
 def _top_rejection_reasons(rejected: list[dict[str, Any]], limit: int = 8) -> list[dict[str, Any]]:
     counts = Counter(str(row.get("rejection_reason") or "unknown") for row in rejected)
     return [{"reason": reason, "count": count} for reason, count in counts.most_common(limit)]
+
+
+def _worldcup_validation_status(
+    *,
+    predictions: list[dict[str, Any]],
+    approved_signals: list[dict[str, Any]],
+    rejected: list[dict[str, Any]],
+) -> dict[str, Any]:
+    worldcup_rows = [row for row in predictions if is_worldcup_winner_market(row)]
+    worldcup_approved = [row for row in approved_signals if is_worldcup_winner_market(row)]
+    worldcup_rejected = [row for row in rejected if is_worldcup_winner_market(row)]
+    with_fundamental = [
+        row
+        for row in worldcup_rows
+        if str(row.get("fundamental_probability") or "").strip()
+        or str(row.get("haircut_fundamental_probability") or "").strip()
+    ]
+    bookmaker_pass = [row for row in worldcup_rows if _truthy(row.get("bookmaker_cross_check_pass"))]
+    bookmaker_fail = [
+        row
+        for row in worldcup_rows
+        if str(row.get("bookmaker_cross_check_pass") or "").strip().lower() == "false"
+    ]
+    micro_pass = [row for row in worldcup_rows if _truthy(row.get("microstructure_filter_pass"))]
+    coverage = (len(with_fundamental) / len(worldcup_rows) * 100.0) if worldcup_rows else None
+    if not worldcup_rows:
+        status = "no_worldcup_winner_rows"
+        main_blocker = "No World Cup winner rows are currently in the scored prediction set."
+    elif not with_fundamental:
+        status = "missing_bookmaker_fundamental"
+        main_blocker = "World Cup rows exist, but none have bookmaker/fundamental probabilities attached."
+    elif not bookmaker_pass:
+        status = "no_cross_checked_edge"
+        main_blocker = "Fundamental probabilities exist, but no row passes the bookmaker haircut cross-check."
+    elif not worldcup_approved:
+        status = "collecting_or_blocked_by_trade_gates"
+        main_blocker = "Cross-checked World Cup rows exist, but none are approved by trading and promotion gates yet."
+    else:
+        status = "approved_signals_available"
+        main_blocker = "Approved World Cup signals are available; monitor forward paper P&L by cohort."
+    return {
+        "status": status,
+        "worldcup_winner_rows": len(worldcup_rows),
+        "fundamental_rows": len(with_fundamental),
+        "fundamental_coverage_pct": coverage,
+        "bookmaker_cross_check_pass": len(bookmaker_pass),
+        "bookmaker_cross_check_fail": len(bookmaker_fail),
+        "microstructure_pass": len(micro_pass),
+        "approved_signals": len(worldcup_approved),
+        "rejected_signals": len(worldcup_rejected),
+        "main_blocker": main_blocker,
+        "top_rejection_reasons": _top_rejection_reasons(worldcup_rejected, limit=6),
+    }
 
 
 def _trade_diagnostics(
@@ -850,6 +919,11 @@ def render_dashboard(cfg: EngineConfig, latest_report: dict[str, Any] | None = N
         "shadow_fills": shadow_fills,
         "approved_signals": signals[:50],
         "rejection_counts": _rejection_counts(rejected),
+        "worldcup_validation_status": _worldcup_validation_status(
+            predictions=predictions,
+            approved_signals=signals,
+            rejected=rejected,
+        ),
         "trade_diagnostics": _trade_diagnostics(
             predictions=predictions,
             approved_signals=signals,

@@ -253,3 +253,61 @@ def test_dashboard_explains_no_trade_when_fast_candidates_are_quarantined(tmp_pa
     assert diagnostics["quarantined_cohort_count"] == 1
     assert "quarantined" in diagnostics["main_blocker"]
     assert diagnostics["current_shadow_candidates"][0]["market_slug"] == "btc-updown-5m-1782490200"
+
+
+def test_dashboard_surfaces_worldcup_validation_gap(tmp_path):
+    cfg = _config(tmp_path)
+    row = {
+        "market_id": "worldcup-winner-market",
+        "market_slug": "world-cup-2026-winner",
+        "question": "Who will win the 2026 FIFA World Cup?",
+        "category": "worldcup",
+        "outcome": "Brazil",
+        "token_id": "brazil-token",
+        "bookmaker_cross_check_pass": "false",
+        "microstructure_filter_pass": "true",
+    }
+    write_csv(cfg.output_root / "polymarket_predictions" / "predictions.csv", [row])
+    write_csv(
+        cfg.output_root / "polymarket_predictions" / "rejected_signals.csv",
+        [{**row, "rejection_reason": "bookmaker_fundamental_cross_check_failed"}],
+    )
+
+    result = render_dashboard(cfg)
+    data = read_json(result["dashboard_data"])
+
+    worldcup = data["worldcup_validation_status"]
+    assert "World Cup validation layer" in Path(result["dashboard_file"]).read_text(encoding="utf-8")
+    assert worldcup["status"] == "missing_bookmaker_fundamental"
+    assert worldcup["worldcup_winner_rows"] == 1
+    assert worldcup["fundamental_rows"] == 0
+    assert worldcup["top_rejection_reasons"][0]["reason"] == "bookmaker_fundamental_cross_check_failed"
+
+
+def test_dashboard_reports_cross_checked_worldcup_rows_blocked_by_trade_gates(tmp_path):
+    cfg = _config(tmp_path)
+    row = {
+        "market_id": "worldcup-winner-market",
+        "market_slug": "world-cup-2026-winner",
+        "question": "Who will win the 2026 FIFA World Cup?",
+        "category": "worldcup",
+        "outcome": "Brazil",
+        "token_id": "brazil-token",
+        "fundamental_probability": "0.22",
+        "haircut_fundamental_probability": "0.20",
+        "bookmaker_cross_check_pass": "true",
+        "microstructure_filter_pass": "true",
+    }
+    write_csv(cfg.output_root / "polymarket_predictions" / "predictions.csv", [row])
+    write_csv(
+        cfg.output_root / "polymarket_predictions" / "rejected_signals.csv",
+        [{**row, "rejection_reason": "cohort promotion gate failed"}],
+    )
+
+    result = render_dashboard(cfg)
+    data = read_json(result["dashboard_data"])
+
+    worldcup = data["worldcup_validation_status"]
+    assert worldcup["status"] == "collecting_or_blocked_by_trade_gates"
+    assert worldcup["fundamental_coverage_pct"] == 100.0
+    assert worldcup["bookmaker_cross_check_pass"] == 1

@@ -31,8 +31,7 @@ ALIASES_JSON = json.dumps({key: sorted(values) for key, values in TEAM_ALIASES.i
 
 def _team_js_body(find_row: bool) -> str:
     text_expr = "el.innerText || el.textContent || ''" if find_row else "el.getAttribute('data-brutip') || ''"
-    prefix = "" if find_row else "const controls = Array.from(document.querySelectorAll('[data-brutip][data-bru-tab]'));
-  "
+    prefix = "" if find_row else "const controls = Array.from(document.querySelectorAll('[data-brutip][data-bru-tab]'));\n  "
     iterator = "Array.from(document.querySelectorAll('tr, li, div, section, article'))" if find_row else "controls"
     if find_row:
         success = """

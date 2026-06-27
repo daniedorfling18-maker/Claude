@@ -199,41 +199,52 @@ def infer_category(path: str | Path) -> str:
             idx = parts.index(marker)
             if idx + 1 < len(parts):
                 return parts[idx + 1]
-    text = " ".join(parts)
-    for cat in ["bitcoin", "crypto", "election", "fed", "finance", "soccer", "sports", "trump"]:
-        if cat in text:
-            return cat
+    for candidate in ("bitcoin", "crypto", "election", "fed", "finance", "soccer", "sports", "trump", "worldcup", "all"):
+        if candidate in parts:
+            return candidate
     return "unknown"
-
-
-def normalize_slug(value: str) -> str:
-    value = value.lower().strip()
-    value = re.sub(r"[^a-z0-9]+", "-", value)
-    return re.sub(r"-+", "-", value).strip("-")
 
 
 def find_first_column(columns: Sequence[str], candidates: Sequence[str]) -> str | None:
     lower = {c.lower(): c for c in columns}
-    for candidate in candidates:
-        if candidate.lower() in lower:
-            return lower[candidate.lower()]
-    for column in columns:
-        lc = column.lower()
-        if any(candidate.lower() in lc for candidate in candidates):
-            return column
+    for cand in candidates:
+        if cand.lower() in lower:
+            return lower[cand.lower()]
+    for cand in candidates:
+        c_low = cand.lower()
+        for col in columns:
+            if c_low in col.lower():
+                return col
     return None
 
 
 def safe_float(value: Any) -> float | None:
-    if value is None or value == "":
-        return None
     try:
+        if value is None or value == "":
+            return None
         return float(value)
     except (TypeError, ValueError):
         return None
 
 
+def safe_int(value: Any) -> int | None:
+    try:
+        if value is None or value == "":
+            return None
+        return int(float(value))
+    except (TypeError, ValueError):
+        return None
+
+
 def boolish(value: Any) -> bool:
-    if isinstance(value, bool):
-        return value
-    return str(value).strip().lower() in {"1", "true", "yes", "y", "on"}
+    return str(value).strip().lower() in {"1", "true", "yes", "y", "live", "approved"}
+
+
+def normalize_slug(text: Any) -> str:
+    return re.sub(r"[^a-z0-9]+", "-", str(text or "").lower()).strip("-")
+
+
+def file_summary(path: str | Path) -> dict[str, Any]:
+    path = Path(path)
+    stat = path.stat()
+    return {"path": str(path), "file_size": stat.st_size, "last_modified_timestamp": datetime.fromtimestamp(stat.st_mtime, timezone.utc).strftime(ISO_FORMAT)}

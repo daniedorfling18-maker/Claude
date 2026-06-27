@@ -22,6 +22,7 @@ $RepoRoot = Resolve-Path -LiteralPath (Join-Path $PSScriptRoot "..")
 $WorkDir = Join-Path $RepoRoot "work"
 $DashboardDir = Join-Path $RepoRoot "outputs\polymarket_dashboard"
 $DashboardScript = Join-Path $RepoRoot "scripts\serve_polymarket_dashboard.js"
+$BotScript = Join-Path $RepoRoot "scripts\run_polymarket_local_live_loop.py"
 $Node = Join-Path $env:USERPROFILE ".cache\codex-runtimes\codex-primary-runtime\dependencies\node\bin\node.exe"
 $OutLog = Join-Path $WorkDir "local_live_loop.out.log"
 $ErrLog = Join-Path $WorkDir "local_live_loop.err.log"
@@ -79,18 +80,19 @@ function Get-LocalIpHint {
 }
 
 function Get-RepoLocalLiveProcesses {
-    $repoText = [string]$RepoRoot
+    $botScriptText = [string]$BotScript
     $rows = Invoke-WithTimeout `
         -TimeoutSeconds $WindowsProbeTimeoutSeconds `
-        -Description "Repo-owned local bot process scan" `
+        -Description "Local bot process scan" `
         -Fallback "__TIMEOUT__" `
-        -ArgumentList @($repoText) `
+        -ArgumentList @($botScriptText) `
         -ScriptBlock {
-            param([string]$RepoText)
+            param([string]$BotScriptText)
             Get-CimInstance Win32_Process -Filter "Name='python.exe' OR Name='pythonw.exe'" |
                 Where-Object {
-                    $_.CommandLine -like "*run_polymarket_local_live_loop.py*" -and
-                    $_.CommandLine -like "*$RepoText*"
+                    $cmd = [string]$_.CommandLine
+                    # Match the new absolute-path launcher and legacy relative-path launches.
+                    $cmd -like "*$BotScriptText*" -or $cmd -like "*run_polymarket_local_live_loop.py*"
                 } |
                 Select-Object ProcessId,Name,CommandLine
         }
@@ -133,6 +135,12 @@ Write-Host "Memory:    $memoryPercent% used"
 Write-Host "Dashboard: http://127.0.0.1:$DashboardPort/"
 Write-Host "Agent UI:  http://127.0.0.1:$DashboardPort/agent_status.html"
 Write-Host "Phone:     http://$localIp`:$DashboardPort/"
+if (-not [string]::IsNullOrWhiteSpace($env:POLYMARKET_SCAN_QUERY_MODE)) {
+    Write-Host "Scan mode override: $env:POLYMARKET_SCAN_QUERY_MODE"
+}
+if (-not [string]::IsNullOrWhiteSpace($env:POLYMARKET_MAX_SCAN_QUERIES)) {
+    Write-Host "Max scan queries override: $env:POLYMARKET_MAX_SCAN_QUERIES"
+}
 Write-Host ""
 
 if ($ProcessScanTimedOut) {
@@ -143,7 +151,7 @@ if ($ProcessScanTimedOut) {
 
 if ($existingBots.Count -gt 0) {
     if (-not $ForceRestart) {
-        Write-Host "A repo-owned local Polymarket bot is already running:"
+        Write-Host "A local Polymarket bot is already running:"
         $existingBots | ForEach-Object { Write-Host "  PID $($_.ProcessId): $($_.CommandLine)" }
         Write-Host ""
         Write-Host "Not starting a duplicate. Use -ForceRestart only if you intentionally want to replace it."
@@ -155,6 +163,7 @@ if ($existingBots.Count -gt 0) {
             Stop-Process -Id $bot.ProcessId -Force -ErrorAction SilentlyContinue
         }
     }
+    Start-Sleep -Seconds 2
 }
 
 if ($memoryPercent -gt $MaxMemoryPercentToStart) {
@@ -197,7 +206,7 @@ print(render_dashboard(cfg))
 $env:PYTHONPATH = Join-Path $RepoRoot "src"
 $argsList = @(
     "-u",
-    "scripts\run_polymarket_local_live_loop.py",
+    $BotScript,
     "--config",
     $Config,
     "--websocket-seconds",

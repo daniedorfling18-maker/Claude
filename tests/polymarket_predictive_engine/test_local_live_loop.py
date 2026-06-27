@@ -175,6 +175,63 @@ def test_websocket_asset_discovery_prefers_fast_updown_snapshot(tmp_path, monkey
     assert sources["fast-5m-token"] == "fast_updown_5m"
 
 
+def test_websocket_asset_discovery_includes_shadow_positions(tmp_path, monkeypatch):
+    loop = _load_loop_module()
+    monkeypatch.setenv("POLYMARKET_MODEL_PROBABILITIES_CSV", str(tmp_path / "missing_model_probabilities.csv"))
+    cfg = EngineConfig(
+        raw={"paths": {"output_root": str(tmp_path / "outputs")}},
+        path=tmp_path / "cfg.yaml",
+    )
+    _write_csv(
+        cfg.output_root / "polymarket_shadow" / "shadow_positions.csv",
+        [
+            {
+                "market_id": "shadow-market",
+                "token_id": "shadow-token",
+                "status": "open",
+            }
+        ],
+    )
+
+    asset_ids, sources = loop.discover_websocket_asset_ids(cfg, max_assets=2)
+
+    assert asset_ids == ["shadow-token"]
+    assert sources["shadow-token"] == "shadow_positions"
+
+
+def test_websocket_marks_are_merged_into_shadow_prediction_rows():
+    loop = _load_loop_module()
+
+    merged = loop._merge_websocket_marks_into_predictions(
+        [
+            {
+                "market_id": "m1",
+                "token_id": "t1",
+                "executable_price": "0.50",
+                "best_bid": "0.49",
+                "liquidity": "10",
+            }
+        ],
+        [
+            {
+                "asset_id": "t1",
+                "collected_at_utc": "2026-06-27T04:00:00Z",
+                "best_bid": "0.41",
+                "best_ask": "0.43",
+                "midpoint": "0.42",
+                "spread": "0.02",
+                "top_bid_size": "100",
+                "top_ask_size": "150",
+            }
+        ],
+    )
+
+    assert merged[0]["best_bid"] == 0.41
+    assert merged[0]["executable_price"] == 0.43
+    assert merged[0]["market_midpoint"] == 0.42
+    assert merged[0]["liquidity"] == 250.0
+
+
 def test_refresh_fast_updown_snapshot_fetches_positive_cohort_slots(tmp_path, monkeypatch):
     loop = _load_loop_module()
     cfg = EngineConfig(

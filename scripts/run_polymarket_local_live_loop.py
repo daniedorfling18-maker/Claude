@@ -33,11 +33,13 @@ for path in (SRC, SCRIPTS):
         sys.path.insert(0, str(path))
 
 from polymarket_predictive_engine.config import load_config  # noqa: E402
+from polymarket_predictive_engine.cohort_validation import write_signal_cohort_pnl  # noqa: E402
 from polymarket_predictive_engine.dashboard import render_dashboard  # noqa: E402
 from polymarket_predictive_engine.execution.paper import paper_trade  # noqa: E402
 from polymarket_predictive_engine.paper_cycle import run_paper_cycle  # noqa: E402
 from polymarket_predictive_engine.profit_target import write_profit_target_tracker  # noqa: E402
 from polymarket_predictive_engine.resolution_collector import fetch_gamma_market  # noqa: E402
+from polymarket_predictive_engine.shadow_cohort import update_shadow_cohort_evidence  # noqa: E402
 from polymarket_predictive_engine.storage import connect_db  # noqa: E402
 from polymarket_predictive_engine.utils import now_utc, parse_timestamp, read_csv_rows, read_json, safe_float, write_csv, write_json  # noqa: E402
 from polymarket_predictive_engine.websocket_collector import collect_websocket  # noqa: E402
@@ -230,6 +232,7 @@ def discover_websocket_asset_ids(cfg, *, include_static_config: bool = False, ma
         (cfg.output_root / "polymarket_portfolio" / "positions.csv", "open_positions"),
         (cfg.output_root / "polymarket_predictions" / "trade_signals.csv", "trade_signals"),
         (_fast_updown_snapshot_path(cfg), "fast_updown_5m"),
+        (cfg.output_root / "polymarket_shadow" / "shadow_positions.csv", "shadow_positions"),
         (cfg.output_root / "polymarket" / "market_snapshot.csv", "scanner_snapshot"),
         (model_csv, "model_probabilities"),
         (cfg.output_root / "polymarket_predictions" / "predictions.csv", "predictions"),
@@ -397,7 +400,116 @@ def ingest_websocket_features_into_ledger(cfg, features: list[dict[str, Any]]) -
     return {"status": "ok", "inserted_market_snapshots": inserted, "skipped_rows": skipped}
 
 
-def mark_portfolio_and_render_dashboard(cfg, *, source: str, loop_summary: dict[str, Any]) -> dict[str, Any]:
+def _latest_websocket_feature_index(features: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
+    index: dict[str, dict[str, Any]] = {}
+    for row in features:
+        token = str(row.get("asset_id") or row.get("token_id") or row.get("outcome_token_id") or "").strip()
+        if not token:
+            continue
+        current = index.get(token)
+        if current is None or str(row.get("collected_at_utc") or "") >= str(current.get("collected_at_utc") or ""):
+            index[token] = row
+    return index
+
+
+def _merge_websocket_marks_into_predictions(
+    predictions: list[dict[str, Any]],
+    features: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    feature_by_token = _latest_websocket_feature_index(features)
+    if not feature_by_token:
+        return predictions
+    merged: list[dict[str, Any]] = []
+    for row in predictions:
+        token = str(row.get("token_id") or row.get("asset_id") or row.get("outcome_token_id") or "").strip()
+        feature = feature_by_token.get(token)
+        if not feature:
+            merged.append(row)
+            continue
+        enriched = dict(row)
+        bid = safe_float(feature.get("best_bid"))
+        ask = safe_float(feature.get("best_ask"))
+        midpoint = safe_float(feature.get("midpoint"))
+        spread = safe_float(feature.get("spread"))
+        top_bid_size = safe_float(feature.get("top_bid_size")) or 0.0
+        top_ask_size = safe_float(feature.get("top_ask_size")) or 0.0
+        if spread is None and bid is not None and ask is not None:
+            spread = max(0.0, ask - bid)
+        if midpoint is None and bid is not None and ask is not None:
+            midpoint = (bid + ask) / 2.0
+        if bid is not None:
+            enriched["best_bid"] = bid
+            enriched["bid"] = bid
+            enriched["executable_sell_price"] = bid
+        if ask is not None:
+            enriched["best_ask"] = ask
+            enriched["executable_price"] = ask
+        if midpoint is not None:
+            enriched["market_midpoint"] = midpoint
+            enriched["midpoint"] = midpoint
+        if spread is not None:
+            enriched["spread"] = spread
+        liquidity = top_bid_size + top_ask_size
+        if liquidity > 0:
+            enriched["liquidity"] = liquidity
+        enriched["websocket_mark_timestamp"] = feature.get("collected_at_utc", "")
+        merged.append(enriched)
+    return merged
+
+
+def _lightweight_shadow_maintenance(cfg, features: list[dict[str, Any]]) -> dict[str, Any]:
+    predictions_root = cfg.output_root / "polymarket_predictions"
+    rows = read_csv_rows(predictions_root / "mispricing_alpha_scores.csv")
+    if not rows:
+        rows = read_csv_rows(predictions_root / "predictions.csv")
+    near_miss = read_csv_rows(predictions_root / "near_miss_learning_candidates.csv")
+    seen: set[tuple[str, str]] = {
+        (str(row.get("market_id") or ""), str(row.get("token_id") or ""))
+        for row in rows
+    }
+    for row in near_miss:
+        key = (str(row.get("market_id") or ""), str(row.get("token_id") or ""))
+        if key not in seen:
+            rows.append(row)
+            seen.add(key)
+    marked_rows = _merge_websocket_marks_into_predictions(rows, features)
+    shadow = update_shadow_cohort_evidence(cfg, marked_rows)
+    cohort: dict[str, Any] = {}
+    try:
+        con = connect_db(cfg.database_path)
+        try:
+            cohort = write_signal_cohort_pnl(con, cfg)
+        finally:
+            con.close()
+    except Exception as exc:  # noqa: BLE001 - keep live dashboard alive if cohort aggregation fails
+        cohort = {"status": "error", "error": f"{type(exc).__name__}: {exc}"}
+    return {
+        "status": "ok",
+        "generated_at_utc": now_utc(),
+        "prediction_rows": len(rows),
+        "websocket_feature_rows": len(features),
+        "shadow": {
+            "status": shadow.get("status"),
+            "open_positions": shadow.get("open_positions"),
+            "near_miss_candidates_seen": shadow.get("near_miss_candidates_seen"),
+            "near_miss_open_positions": shadow.get("near_miss_open_positions"),
+            "near_miss_opened_this_cycle": shadow.get("near_miss_opened_this_cycle"),
+        },
+        "cohort_pnl": {
+            "status": cohort.get("status"),
+            "cohorts": len(cohort.get("cohorts", [])) if isinstance(cohort.get("cohorts"), list) else 0,
+        },
+    }
+
+
+def mark_portfolio_and_render_dashboard(
+    cfg,
+    *,
+    source: str,
+    loop_summary: dict[str, Any],
+    features: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    shadow_maintenance = _lightweight_shadow_maintenance(cfg, features or [])
     broker = paper_trade(cfg)
     actual_target = write_profit_target_tracker(cfg, broker if isinstance(broker, dict) else {})
     previous = read_json(cfg.governance_root / "forward_paper_cycle.json", default={}) or {}
@@ -411,6 +523,7 @@ def mark_portfolio_and_render_dashboard(cfg, *, source: str, loop_summary: dict[
             "broker": broker,
             "actual_profit_target": actual_target,
             "local_live_loop": loop_summary,
+            "shadow_maintenance": shadow_maintenance,
         }
     )
     write_json(cfg.governance_root / "forward_paper_cycle.json", forward)
@@ -825,7 +938,12 @@ def main(argv: list[str] | None = None) -> int:
                     "elapsed_seconds": round(time.time() - started, 3),
                 }
                 write_json(cfg.governance_root / "local_live_loop_heartbeat.json", loop_summary)
-                forward = mark_portfolio_and_render_dashboard(cfg, source="websocket_live", loop_summary=loop_summary)
+                forward = mark_portfolio_and_render_dashboard(
+                    cfg,
+                    source="websocket_live",
+                    loop_summary=loop_summary,
+                    features=features,
+                )
                 broker = forward.get("broker", {}) if isinstance(forward, dict) else {}
                 print(
                     "local-live-loop "

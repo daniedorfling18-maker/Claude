@@ -11,11 +11,9 @@ from .utils import now_utc, parse_timestamp, read_csv_rows, read_json, safe_floa
 TRACE_LIMIT = 30
 
 
-def _age_seconds_from_value(value: Any) -> float | None:
-    parsed = parse_timestamp(value)
-    if parsed is None:
-        return None
-    return max(0.0, (datetime.now(timezone.utc) - parsed.astimezone(timezone.utc)).total_seconds())
+def _read_json(path: Path) -> dict[str, Any]:
+    payload = read_json(path, default={}) or {}
+    return payload if isinstance(payload, dict) else {}
 
 
 def _payload_timestamp(payload: Any) -> str:
@@ -31,8 +29,15 @@ def _payload_timestamp(payload: Any) -> str:
     return ""
 
 
+def _age_seconds(value: Any) -> float | None:
+    parsed = parse_timestamp(value)
+    if parsed is None:
+        return None
+    return max(0.0, (datetime.now(timezone.utc) - parsed.astimezone(timezone.utc)).total_seconds())
+
+
 def _payload_age_seconds(payload: Any) -> float | None:
-    return _age_seconds_from_value(_payload_timestamp(payload))
+    return _age_seconds(_payload_timestamp(payload))
 
 
 def _status_from_payload(payload: Any, *, stale_after_seconds: float = 180.0) -> str:
@@ -47,11 +52,6 @@ def _status_from_payload(payload: Any, *, stale_after_seconds: float = 180.0) ->
     if status in {"error", "failed", "blocked", "down"}:
         return status
     return status or "present"
-
-
-def _read_json(path: Path) -> dict[str, Any]:
-    payload = read_json(path, default={}) or {}
-    return payload if isinstance(payload, dict) else {}
 
 
 def _safe_int(value: Any) -> int:
@@ -118,7 +118,7 @@ def _diagnose_no_trade(
     if approved:
         return {
             "status": "signals_available",
-            "main_blocker": "Approved paper signals exist; broker should process them unless duplicate/risk/pause controls intervene.",
+            "main_blocker": "Approved paper signals exist; broker should process them unless duplicate, risk, or pause controls intervene.",
             "next_action": "Monitor broker fills, duplicate skips, and paper P&L.",
         }
     entry_pause = str(broker.get("entry_pause_reason") or "").strip()
@@ -139,11 +139,10 @@ def _diagnose_no_trade(
         return {
             "status": "no_predictions",
             "main_blocker": "No prediction rows are available for the current cycle.",
-            "next_action": "Run or wait for discovery and prediction so the signal gate has a scored universe.",
+            "next_action": "Run or wait for discovery plus prediction so the signal gate has a scored universe.",
         }
     if rejected:
-        top = _counter_rows(rejected, "rejection_reason")[0]
-        reason = str(top.get("reason") or "unknown")
+        reason = str((_counter_rows(rejected, "rejection_reason") or [{"reason": "unknown"}])[0]["reason"])
         if "cohort_quarantined" in reason or "cohort_negative" in reason or "cohort evidence" in reason:
             next_action = "Keep collecting shadow evidence; do not force paper probes until the cohort clears quarantine or earns probationary/promoted status."
         elif "same-category validation" in reason:
@@ -152,11 +151,7 @@ def _diagnose_no_trade(
             next_action = "Wait for stronger lower-bound edge after costs, liquidity, uncertainty, and validation haircuts."
         else:
             next_action = "Inspect rejected_signals.csv and the candidate trace before changing gates."
-        return {
-            "status": "signals_rejected",
-            "main_blocker": reason,
-            "next_action": next_action,
-        }
+        return {"status": "signals_rejected", "main_blocker": reason, "next_action": next_action}
     return {
         "status": "no_signal_evidence",
         "main_blocker": "No approved signals and no rejected-signal evidence are available.",
@@ -247,98 +242,18 @@ def _subsystem_freshness(cfg: EngineConfig) -> dict[str, Any]:
     rows: list[dict[str, Any]] = []
     for name, path in candidates.items():
         payload = _read_json(path)
-        age = _payload_age_seconds(payload)
         rows.append(
             {
                 "subsystem": name,
                 "path": str(path),
                 "status": _status_from_payload(payload),
                 "generated_at_utc": _payload_timestamp(payload),
-                "age_seconds": age,
+                "age_seconds": _payload_age_seconds(payload),
             }
         )
     payload = {"status": "ok", "generated_at_utc": now_utc(), "subsystems": rows}
     write_json(governance / "subsystem_freshness.json", payload)
     return payload
-
-
-def build_agent_status(cfg: EngineConfig, trace: dict[str, Any] | None = None) -> dict[str, Any]:
-    governance = cfg.governance_root
-    trace = trace or _read_json(governance / "cycle_decision_trace.json")
-    heartbeat = _read_json(governance / "local_live_loop_heartbeat.json")
-    broker = _read_json(cfg.output_root / "polymarket_portfolio" / "paper_trading_summary.json")
-    readiness = _read_json(governance / "paper_trade_readiness.json")
-    cohort = _read_json(governance / "signal_cohort_pnl.json")
-    shadow = _read_json(governance / "shadow_signal_cohort_pnl.json")
-    live_allowed, live_reasons = live_trading_allowed(cfg)
-    no_trade = trace.get("no_trade_diagnosis", {}) if isinstance(trace, dict) else {}
-    counts = trace.get("pipeline_counts", {}) if isinstance(trace, dict) else {}
-    freshness = _subsystem_freshness(cfg)
-
-    agents = [
-        {
-            "agent": "supervisor",
-            "status": _status_from_payload(_read_json(governance / "supervisor_status.json"), stale_after_seconds=3600),
-            "role": "start/restart the local loop and dashboard, enforce one process, expose reboot state",
-        },
-        {
-            "agent": "collector",
-            "status": _status_from_payload(heartbeat, stale_after_seconds=180),
-            "role": "collect CLOB websocket messages and update live top-of-book evidence",
-            "last_messages": counts.get("websocket_messages"),
-            "last_features": counts.get("websocket_features"),
-        },
-        {
-            "agent": "predictor",
-            "status": "ok" if _safe_int(counts.get("predictions")) > 0 else "waiting",
-            "role": "build point-in-time features and score the current universe",
-            "predictions": counts.get("predictions"),
-        },
-        {
-            "agent": "signal_gate",
-            "status": "approved_signals" if _safe_int(counts.get("approved_signals")) > 0 else "blocking_all_candidates",
-            "role": "apply alpha, validation, cohort, and risk pre-checks before the broker sees anything",
-            "approved": counts.get("approved_signals"),
-            "rejected": counts.get("rejected_signals"),
-        },
-        {
-            "agent": "paper_broker",
-            "status": broker.get("status", "missing"),
-            "role": "paper-fill approved signals, close exits, settle positions, and export the paper ledger",
-            "buy_fills": broker.get("buy_orders_filled", broker.get("orders_filled", 0)),
-            "exit_fills": broker.get("exit_orders_filled", 0),
-        },
-        {
-            "agent": "shadow_learning",
-            "status": shadow.get("status", "missing"),
-            "role": "maintain shadow positions and forward cohort evidence before promotion",
-            "open_positions": shadow.get("open_positions"),
-            "promoted_cohorts": cohort.get("promoted_cohorts", []),
-        },
-        {
-            "agent": "live_executor",
-            "status": "disabled" if not live_allowed else "approval_flags_set_but_executor_is_skeleton",
-            "role": "real trading path; intentionally disabled/skeleton-only in this repo",
-            "blockers": live_reasons,
-        },
-    ]
-    status = {
-        "status": "ok",
-        "generated_at_utc": now_utc(),
-        "next_best_action": {
-            "summary": no_trade.get("main_blocker", "No decision trace available yet."),
-            "action": no_trade.get("next_action", "Run or wait for the next local-live paper cycle."),
-            "diagnosis_status": no_trade.get("status", "unknown"),
-        },
-        "agents": agents,
-        "readiness": readiness,
-        "pipeline_counts": counts,
-        "subsystem_freshness": freshness.get("subsystems", []),
-    }
-    write_json(governance / "agent_status.json", status)
-    write_json(governance / "next_best_action.json", status["next_best_action"])
-    _write_dashboard_agent_files(cfg, status)
-    return status
 
 
 def _write_dashboard_agent_files(cfg: EngineConfig, status: dict[str, Any]) -> None:
@@ -370,9 +285,9 @@ def _write_dashboard_agent_files(cfg: EngineConfig, status: dict[str, Any]) -> N
   <div id="app">Loading...</div>
 </main>
 <script>
-const esc = v => String(v ?? "-").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[c]));
+const esc = v => String(v ?? "-").replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const cls = s => /ok|live|ran|approved|present/.test(String(s||"")) ? "ok" : /error|blocked|stale|missing|disabled/.test(String(s||"")) ? "bad" : "warn";
-function table(rows, cols){ if(!rows?.length) return '<div class="muted">No rows.</div>'; return '<table><thead><tr>'+cols.map(c=>'<th>'+esc(c[0])+'</th>').join('')+'</tr></thead><tbody>'+rows.map(r=>'<tr>'+cols.map(c=>'<td>'+esc(r[c[1]])+'</td>').join('')+'</tr>').join('')+'</tbody></table>'; }
+function table(rows, cols){ if(!rows || !rows.length) return '<div class="muted">No rows.</div>'; return '<table><thead><tr>'+cols.map(c=>'<th>'+esc(c[0])+'</th>').join('')+'</tr></thead><tbody>'+rows.map(r=>'<tr>'+cols.map(c=>'<td>'+esc(r[c[1]])+'</td>').join('')+'</tr>').join('')+'</tbody></table>'; }
 async function load(){
   const data = await fetch('agent_status.json?ts=' + Date.now()).then(r => r.json());
   document.getElementById('app').innerHTML = `
@@ -386,6 +301,43 @@ load(); setInterval(load, 5000);
 </script></body></html>
 """
     (out / "agent_status.html").write_text(html, encoding="utf-8")
+
+
+def build_agent_status(cfg: EngineConfig, trace: dict[str, Any] | None = None) -> dict[str, Any]:
+    governance = cfg.governance_root
+    trace = trace or _read_json(governance / "cycle_decision_trace.json")
+    heartbeat = _read_json(governance / "local_live_loop_heartbeat.json")
+    broker = _read_json(cfg.output_root / "polymarket_portfolio" / "paper_trading_summary.json")
+    readiness = _read_json(governance / "paper_trade_readiness.json")
+    cohort = _read_json(governance / "signal_cohort_pnl.json")
+    shadow = _read_json(governance / "shadow_signal_cohort_pnl.json")
+    live_allowed, live_reasons = live_trading_allowed(cfg)
+    no_trade = trace.get("no_trade_diagnosis", {}) if isinstance(trace, dict) else {}
+    counts = trace.get("pipeline_counts", {}) if isinstance(trace, dict) else {}
+    freshness = _subsystem_freshness(cfg)
+
+    agents = [
+        {"agent": "supervisor", "status": _status_from_payload(_read_json(governance / "supervisor_status.json"), stale_after_seconds=3600), "role": "start/restart the local loop and dashboard, enforce one process, expose reboot state"},
+        {"agent": "collector", "status": _status_from_payload(heartbeat, stale_after_seconds=180), "role": "collect CLOB websocket messages and update live top-of-book evidence", "last_messages": counts.get("websocket_messages"), "last_features": counts.get("websocket_features")},
+        {"agent": "predictor", "status": "ok" if _safe_int(counts.get("predictions")) > 0 else "waiting", "role": "build point-in-time features and score the current universe", "predictions": counts.get("predictions")},
+        {"agent": "signal_gate", "status": "approved_signals" if _safe_int(counts.get("approved_signals")) > 0 else "blocking_all_candidates", "role": "apply alpha, validation, cohort, and risk pre-checks before the broker sees anything", "approved": counts.get("approved_signals"), "rejected": counts.get("rejected_signals")},
+        {"agent": "paper_broker", "status": broker.get("status", "missing"), "role": "paper-fill approved signals, close exits, settle positions, and export the paper ledger", "buy_fills": broker.get("buy_orders_filled", broker.get("orders_filled", 0)), "exit_fills": broker.get("exit_orders_filled", 0)},
+        {"agent": "shadow_learning", "status": shadow.get("status", "missing"), "role": "maintain shadow positions and forward cohort evidence before promotion", "open_positions": shadow.get("open_positions"), "promoted_cohorts": cohort.get("promoted_cohorts", [])},
+        {"agent": "live_executor", "status": "disabled" if not live_allowed else "approval_flags_set_but_executor_is_skeleton", "role": "real trading path; intentionally disabled/skeleton-only in this repo", "blockers": live_reasons},
+    ]
+    status = {
+        "status": "ok",
+        "generated_at_utc": now_utc(),
+        "next_best_action": {"summary": no_trade.get("main_blocker", "No decision trace available yet."), "action": no_trade.get("next_action", "Run or wait for the next local-live paper cycle."), "diagnosis_status": no_trade.get("status", "unknown")},
+        "agents": agents,
+        "readiness": readiness,
+        "pipeline_counts": counts,
+        "subsystem_freshness": freshness.get("subsystems", []),
+    }
+    write_json(governance / "agent_status.json", status)
+    write_json(governance / "next_best_action.json", status["next_best_action"])
+    _write_dashboard_agent_files(cfg, status)
+    return status
 
 
 def write_agent_runtime_bundle(

@@ -151,6 +151,31 @@ def _prediction_index(predictions: list[dict[str, Any]]) -> dict[tuple[str, str]
     return index
 
 
+def _near_miss_shadow_row(row: dict[str, Any], settings: dict[str, Any]) -> dict[str, Any] | None:
+    if not boolish(settings.get("allow_near_miss_learning_candidates", False)):
+        return None
+    if not boolish(row.get("near_miss_learning_candidate")):
+        return None
+    cohort_prefix = str(settings.get("near_miss_cohort_prefix", "near_miss_learning") or "near_miss_learning")
+    base_cohort = _cohort_name(row)
+    shadow_row = dict(row)
+    shadow_row["shadow_trade_candidate"] = True
+    shadow_row["shadow_candidate_reason"] = "near_miss_shadow_evidence"
+    shadow_row["shadow_source"] = "near_miss_learning"
+    shadow_row["signal_cohort"] = f"{cohort_prefix}|{base_cohort}"
+    if not str(shadow_row.get("shadow_priority_score") or "").strip():
+        shadow_row["shadow_priority_score"] = row.get("near_miss_priority_score", "")
+    return shadow_row
+
+
+def _shadow_candidate_row(row: dict[str, Any], settings: dict[str, Any]) -> dict[str, Any] | None:
+    if boolish(row.get("shadow_trade_candidate")):
+        candidate = dict(row)
+        candidate.setdefault("shadow_source", "shadow_trade_candidate")
+        return candidate
+    return _near_miss_shadow_row(row, settings)
+
+
 def _quarantined_cohorts(cfg: EngineConfig, positions: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
     settings = _settings(cfg)
     if not boolish(settings.get("quarantine_negative_cohorts", True)):
@@ -578,8 +603,9 @@ def _candidate_rows(cfg: EngineConfig, predictions: list[dict[str, Any]], positi
             last_close_by_key[key] = max(last_close_by_key.get(key, ""), closed_at)
 
     candidates: list[dict[str, Any]] = []
-    for row in predictions:
-        if not boolish(row.get("shadow_trade_candidate")):
+    for source_row in predictions:
+        row = _shadow_candidate_row(source_row, settings)
+        if row is None:
             continue
         if _cohort_name(row) in quarantined:
             continue
@@ -599,7 +625,19 @@ def _candidate_rows(cfg: EngineConfig, predictions: list[dict[str, Any]], positi
         ),
         reverse=True,
     )
-    return candidates[: int(settings.get("candidate_limit_per_cycle", 8))]
+    candidate_limit = int(settings.get("candidate_limit_per_cycle", 8))
+    near_miss_limit = int(settings.get("near_miss_candidate_limit_per_cycle", candidate_limit) or candidate_limit)
+    limited: list[dict[str, Any]] = []
+    near_miss_count = 0
+    for row in candidates:
+        if str(row.get("shadow_source") or "") == "near_miss_learning":
+            if near_miss_count >= near_miss_limit:
+                continue
+            near_miss_count += 1
+        limited.append(row)
+        if len(limited) >= candidate_limit:
+            break
+    return limited
 
 
 def _append_fill(
@@ -627,6 +665,7 @@ def _append_fill(
             "category": row.get("category", ""),
             "correlation_key": row.get("correlation_key") or normalised_correlation_key(row),
             "signal_cohort": row.get("signal_cohort") or signal_cohort(row),
+            "shadow_source": row.get("shadow_source", ""),
             "price": price,
             "quantity": quantity,
             "gross_notional_usdc": notional,
@@ -767,6 +806,7 @@ def _summarise_shadow(cfg: EngineConfig, positions: list[dict[str, Any]], fills:
             "maximum_open_positions": int(settings.get("maximum_open_positions", 25)),
             "maximum_open_positions_per_cohort": int(settings.get("maximum_open_positions_per_cohort", 0) or 0),
             "maximum_long_horizon_open_positions": int(settings.get("maximum_long_horizon_open_positions", 0) or 0),
+            "maximum_near_miss_open_positions": int(settings.get("maximum_near_miss_open_positions", 0) or 0),
             "fast_feedback_max_time_to_close_hours": float(settings.get("fast_feedback_max_time_to_close_hours", 6.0)),
             "minimum_fast_feedback_slots": int(settings.get("minimum_fast_feedback_slots", 0) or 0),
             "quarantine_negative_cohorts": boolish(settings.get("quarantine_negative_cohorts", True)),
@@ -855,16 +895,21 @@ def update_shadow_cohort_evidence(cfg: EngineConfig, predictions: list[dict[str,
     max_open = int(settings.get("maximum_open_positions", 25))
     max_per_cohort = int(settings.get("maximum_open_positions_per_cohort", 0) or 0)
     max_long_horizon = int(settings.get("maximum_long_horizon_open_positions", 0) or 0)
+    max_near_miss_open = int(settings.get("maximum_near_miss_open_positions", 0) or 0)
     fast_feedback_slots = int(settings.get("minimum_fast_feedback_slots", 0) or 0)
     cohort_open_counts: dict[str, int] = defaultdict(int)
     long_horizon_open_count = 0
+    near_miss_open_count = 0
     for position in positions:
         if str(position.get("status") or "").lower() != "open":
             continue
         cohort_open_counts[_cohort_name(position)] += 1
         if _is_long_horizon(position, settings):
             long_horizon_open_count += 1
+        if str(position.get("shadow_source") or "") == "near_miss_learning":
+            near_miss_open_count += 1
     opened_this_cycle = 0
+    near_miss_opened_this_cycle = 0
     stake = float(settings.get("stake_usdc", 10.0))
     for row in _candidate_rows(cfg, predictions, positions):
         if open_count >= max_open:
@@ -872,9 +917,12 @@ def update_shadow_cohort_evidence(cfg: EngineConfig, predictions: list[dict[str,
         cohort = _cohort_name(row)
         is_fast = _is_fast_feedback(row, settings)
         is_long = _is_long_horizon(row, settings)
+        is_near_miss = str(row.get("shadow_source") or "") == "near_miss_learning"
         if max_per_cohort > 0 and cohort_open_counts[cohort] >= max_per_cohort:
             continue
-        if max_long_horizon > 0 and is_long and long_horizon_open_count >= max_long_horizon:
+        if max_near_miss_open > 0 and is_near_miss and near_miss_open_count >= max_near_miss_open:
+            continue
+        if max_long_horizon > 0 and is_long and long_horizon_open_count >= max_long_horizon and not is_near_miss:
             continue
         if fast_feedback_slots > 0 and not is_fast and open_count >= max(0, max_open - fast_feedback_slots):
             continue
@@ -902,6 +950,7 @@ def update_shadow_cohort_evidence(cfg: EngineConfig, predictions: list[dict[str,
         position = {
             "shadow_position_id": position_id,
             "policy_version": policy_version,
+            "shadow_source": row.get("shadow_source", "shadow_trade_candidate"),
             "opened_at": now,
             "updated_at": now,
             "closed_at": "",
@@ -949,16 +998,28 @@ def update_shadow_cohort_evidence(cfg: EngineConfig, predictions: list[dict[str,
         cohort_open_counts[cohort] += 1
         if is_long:
             long_horizon_open_count += 1
+        if is_near_miss:
+            near_miss_open_count += 1
         opened_this_cycle += 1
+        if is_near_miss:
+            near_miss_opened_this_cycle += 1
 
     summary = _summarise_shadow(cfg, positions, fills)
     summary.update(
         {
             "opened_this_cycle": opened_this_cycle,
+            "near_miss_opened_this_cycle": near_miss_opened_this_cycle,
             "closed_this_cycle": closed_this_cycle,
             **settlement,
             "open_positions": sum(1 for row in positions if str(row.get("status") or "").lower() == "open"),
             "shadow_candidates_seen": sum(1 for row in predictions if boolish(row.get("shadow_trade_candidate"))),
+            "near_miss_candidates_seen": sum(1 for row in predictions if boolish(row.get("near_miss_learning_candidate"))),
+            "near_miss_open_positions": sum(
+                1
+                for row in positions
+                if str(row.get("status") or "").lower() == "open"
+                and str(row.get("shadow_source") or "") == "near_miss_learning"
+            ),
         }
     )
     write_csv(_positions_path(cfg), positions)

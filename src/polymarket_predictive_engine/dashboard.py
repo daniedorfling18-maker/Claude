@@ -212,6 +212,8 @@ async function load() {
       ["Approved signals", diag.approved_signals_count],
       ["Rejected signals", diag.rejected_signals_count],
       ["Near-miss learning", diag.near_miss_candidates_seen],
+      ["Near-miss opened", diag.near_miss_opened_this_cycle],
+      ["Near-miss open", diag.near_miss_open_positions],
       ["Shadow candidates", diag.shadow_candidates_seen],
       ["Opened this cycle", diag.shadow_opened_this_cycle],
       ["Quarantined cohorts", diag.quarantined_cohort_count]
@@ -578,6 +580,8 @@ def _trade_diagnostics(
         "rejected_signals_count": len(rejected),
         "prediction_count": len(predictions),
         "near_miss_candidates_seen": len(near_miss_candidates),
+        "near_miss_opened_this_cycle": shadow_summary.get("near_miss_opened_this_cycle"),
+        "near_miss_open_positions": shadow_summary.get("near_miss_open_positions"),
         "shadow_candidates_seen": shadow_summary.get("shadow_candidates_seen"),
         "shadow_opened_this_cycle": shadow_summary.get("opened_this_cycle"),
         "shadow_open_positions": shadow_summary.get("open_positions"),

@@ -341,6 +341,10 @@ shadow_cohort_validation:
   fast_maximum_spread: 0.06
   fast_maximum_relative_spread: 0.25
   fast_minimum_liquidity: 5
+  allow_near_miss_learning_candidates: true
+  near_miss_cohort_prefix: near_miss_learning
+  near_miss_candidate_limit_per_cycle: 4
+  maximum_near_miss_open_positions: 3
   minimum_reentry_minutes_after_exit: 240
   quarantine_negative_cohorts: true
   quarantine_min_closed_positions: 3

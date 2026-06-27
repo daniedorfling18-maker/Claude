@@ -102,6 +102,80 @@ def _seed_forward_fixture(cfg) -> None:
     )
 
 
+def _seed_fast_crypto_fixture(cfg) -> None:
+    raw_path = (
+        cfg.data_root
+        / "outputs"
+        / "polymarket_fixed"
+        / "crypto"
+        / "ml"
+        / "raw_market_snapshots.csv"
+    )
+    write_csv(
+        raw_path,
+        [
+            {
+                "snapshot_timestamp": "2026-06-25T10:00:00Z",
+                "market_id": "btc-fast-market",
+                "market_slug": "btc-updown-5m-1782491400",
+                "token_id": "btc-fast-up-token",
+                "question": "Bitcoin Up or Down - synthetic 5M",
+                "category": "crypto",
+                "outcome": "Up",
+                "best_bid": 0.35,
+                "best_ask": 0.40,
+                "midpoint": 0.375,
+                "liquidity": 1000,
+                "close_time": "2026-12-31T00:00:00Z",
+            }
+        ],
+    )
+    training = cfg.output_root / "polymarket_training"
+    write_csv(
+        training / "labels.csv",
+        [
+            {
+                "market_id": "training-market-1",
+                "token_id": "training-token-1",
+                "prediction_timestamp": "2026-01-01T00:00:00Z",
+                "target": 1,
+                "label_source": "clean_settlement",
+            }
+        ],
+    )
+    write_csv(
+        training / "market_resolutions.csv",
+        [
+            {
+                "condition_id": "training-market-1",
+                "market_slug": "training-market-1",
+                "token_id": "training-token-1",
+                "target": 1,
+                "resolution_quality": "clean_settlement",
+            }
+        ],
+    )
+    mapping = {
+        str(bucket): {
+            "probability_min": bucket / 10,
+            "probability_max": (bucket + 1) / 10,
+            "calibrated_probability": 0.90 if bucket == 3 else (bucket + 0.5) / 10,
+            "row_count": 10,
+        }
+        for bucket in range(10)
+    }
+    write_json(
+        cfg.output_root / "polymarket_models" / "calibration_v2.json",
+        {
+            "model_version": "synthetic-calibrator-v1",
+            "feature_set_version": "pm-point-in-time-v2",
+            "bucket_count": 10,
+            "bucket_mapping": mapping,
+            "trained_at": "2026-06-24T00:00:00Z",
+        },
+    )
+
+
 def test_confidence_increases_away_from_half():
     assert prediction_confidence(0.5) == 0
     assert prediction_confidence(0.9) > prediction_confidence(0.7)
@@ -179,6 +253,44 @@ def test_forward_paper_cycle_is_persistent_idempotent_and_settles(tmp_path):
         position = con.execute("SELECT status, quantity FROM positions").fetchone()
         assert position["status"] == "settled"
         assert position["quantity"] == 0
+    finally:
+        con.close()
+
+
+def test_paper_broker_proxy_settles_fast_crypto_updown_position(tmp_path, monkeypatch):
+    cfg = _config(tmp_path)
+    cfg.raw["paper_trading"]["settle_crypto_updown_with_public_price"] = True
+    cfg.raw["paper_trading"]["settlement_request_timeout_seconds"] = 1
+    _seed_fast_crypto_fixture(cfg)
+
+    first = run_paper_cycle(cfg, source="raw_snapshot")
+    assert first["broker"]["orders_filled"] == 1
+
+    import polymarket_predictive_engine.paper_broker as broker_module
+
+    monkeypatch.setattr(
+        broker_module,
+        "_crypto_updown_proxy_settlement_price",
+        lambda position, *, timeout_seconds: (
+            1.0,
+            "crypto_updown_proxy_settlement:test_public_price:up:100->101",
+        ),
+    )
+
+    settlement = run_paper_broker(cfg)
+
+    assert settlement["positions_settled"] == 1
+    assert settlement["cash"] > 1000
+    assert "crypto_updown_proxy_settlement" in settlement["settlements"][0]["resolution_source"]
+
+    con = connect_db(cfg.database_path)
+    try:
+        position = con.execute("SELECT status, quantity, realised_pnl_usdc FROM positions").fetchone()
+        assert position["status"] == "settled"
+        assert position["quantity"] == 0
+        assert position["realised_pnl_usdc"] > 0
+        resolution_source = con.execute("SELECT resolution_source FROM settlements").fetchone()[0]
+        assert "test_public_price" in resolution_source
     finally:
         con.close()
 

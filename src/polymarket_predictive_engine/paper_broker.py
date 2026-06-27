@@ -12,8 +12,9 @@ from .cohort_validation import write_signal_cohort_pnl
 from .config import EngineConfig
 from .readiness import paper_trade_readiness
 from .risk import risk_decision
+from .shadow_cohort import _crypto_updown_proxy_settlement_price
 from .storage import connect_db
-from .utils import now_utc, read_csv_rows, read_json, safe_float, write_csv, write_json
+from .utils import boolish, now_utc, read_csv_rows, read_json, safe_float, write_csv, write_json
 from .worldcup_validation import normalised_correlation_key
 
 
@@ -167,6 +168,56 @@ def _latest_prediction_payload(con, market_id: str, token_id: str) -> dict[str, 
     return payload if isinstance(payload, dict) else {}
 
 
+def _latest_order_signal_payload(con, market_id: str, token_id: str) -> dict[str, Any]:
+    row = con.execute(
+        """
+        SELECT source_signal_json
+        FROM orders
+        WHERE market_id = ? AND token_id = ? AND side = 'BUY_YES'
+        ORDER BY created_at DESC, rowid DESC
+        LIMIT 1
+        """,
+        (market_id, token_id),
+    ).fetchone()
+    if row is None:
+        return {}
+    try:
+        payload = json.loads(row["source_signal_json"] or "{}")
+    except json.JSONDecodeError:
+        return {}
+    return payload if isinstance(payload, dict) else {}
+
+
+def _position_payload_for_settlement(con, position) -> dict[str, Any]:
+    market_id = str(position["market_id"])
+    token_id = str(position["token_id"])
+    order_payload = _latest_order_signal_payload(con, market_id, token_id)
+    prediction_payload = _latest_prediction_payload(con, market_id, token_id)
+    return {
+        **order_payload,
+        **prediction_payload,
+        **dict(position),
+        "market_id": market_id,
+        "token_id": token_id,
+    }
+
+
+def _proxy_resolution_for_position(con, cfg: EngineConfig, position) -> tuple[int, str] | None:
+    settings = _paper_settings(cfg)
+    if not boolish(settings.get("settle_crypto_updown_with_public_price", True)):
+        return None
+    payload = _position_payload_for_settlement(con, position)
+    timeout_seconds = int(settings.get("settlement_request_timeout_seconds", 8) or 8)
+    settlement_price, reason = _crypto_updown_proxy_settlement_price(
+        payload,
+        timeout_seconds=timeout_seconds,
+    )
+    target = safe_float(settlement_price)
+    if target not in {0.0, 1.0}:
+        return None
+    return int(target), reason
+
+
 def _position_mark_price(con, cfg: EngineConfig, position) -> float:
     quote = _latest_quote(con, str(position["market_id"]), str(position["token_id"]))
     mark_mode = str(_paper_settings(cfg).get("mark_price", "best_bid")).lower()
@@ -209,7 +260,7 @@ def _resolution_index(cfg: EngineConfig) -> dict[tuple[str, str], tuple[int, str
 
 
 def settle_resolved_positions(con, cfg: EngineConfig) -> list[dict[str, Any]]:
-    """Settle open paper positions exactly once from clean resolution rows."""
+    """Settle open paper positions exactly once from clean or public proxy resolution rows."""
     resolutions = _resolution_index(cfg)
     settled: list[dict[str, Any]] = []
     positions = con.execute(
@@ -218,6 +269,8 @@ def settle_resolved_positions(con, cfg: EngineConfig) -> list[dict[str, Any]]:
     for position in positions:
         key = (str(position["market_id"]), str(position["token_id"]))
         resolution = resolutions.get(key) or resolutions.get(("", str(position["token_id"])))
+        if resolution is None:
+            resolution = _proxy_resolution_for_position(con, cfg, position)
         if resolution is None:
             continue
         target, source = resolution
@@ -282,6 +335,7 @@ def settle_resolved_positions(con, cfg: EngineConfig) -> list[dict[str, Any]]:
                 "target": target,
                 "payout_usdc": payout,
                 "realised_pnl_usdc": realised,
+                "resolution_source": source,
             }
         )
     return settled
@@ -988,6 +1042,7 @@ def run_paper_broker(cfg: EngineConfig) -> dict[str, Any]:
             "broker_rejection_reasons": dict(rejection_reasons),
             "exit_rejection_reasons": dict(exit_rejections),
             "positions_settled": len(settlements),
+            "settlements": settlements,
             "cohort_pnl": cohort_pnl,
             "cash": snapshot["cash"],
             "equity": snapshot["equity"],

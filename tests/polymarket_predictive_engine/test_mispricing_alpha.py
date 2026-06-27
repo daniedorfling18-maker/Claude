@@ -162,6 +162,49 @@ def test_near_miss_learning_lane_records_liquid_uncertain_edge(tmp_path):
     assert saved[0]["market_slug"] == "near-miss-market"
 
 
+def test_fast_crypto_updown_must_have_scored_live_model_before_trading(tmp_path):
+    cfg = _config(tmp_path)
+    cfg.raw["mispricing_alpha"].update(
+        {
+            "model_residual_shrinkage": 1.0,
+            "max_model_residual_adjustment": 0.4,
+            "market_overround_penalty_weight": 0.0,
+        }
+    )
+    cfg.raw["crypto_updown_live_model"]["require_scored_model_for_trading"] = True
+
+    scored = apply_mispricing_alpha(
+        cfg,
+        [
+            {
+                "market_id": "btc-fast-future",
+                "market_slug": "btc-updown-5m-4102444800",
+                "token_id": "btc-up-token",
+                "question": "Bitcoin Up or Down - future window",
+                "outcome": "Up",
+                "prediction_timestamp": "2026-02-01T00:00:00Z",
+                "category": "crypto",
+                "market_midpoint": "0.50",
+                "raw_probability": "0.80",
+                "calibrated_probability": "0.80",
+                "model_probability": "0.80",
+                "executable_price": "0.50",
+                "spread": "0.01",
+                "liquidity": "1000",
+                "time_to_close_hours": "0.2",
+                "confidence": "1",
+            }
+        ],
+    )
+
+    assert float(scored[0]["alpha_raw_edge"]) > 0.03
+    assert scored[0]["crypto_model_status"] == "before_model_window"
+    assert scored[0]["crypto_model_gate_pass"] is False
+    assert "crypto_updown_model_not_scored_for_trading" in scored[0]["validation_layer_reason"]
+    assert scored[0]["validation_layer_pass"] is False
+    assert scored[0]["alpha_trade_candidate"] is False
+
+
 def test_alpha_cross_market_overround_penalises_complete_set(tmp_path):
     cfg = _config(tmp_path)
     _write_training_set(cfg)

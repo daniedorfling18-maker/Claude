@@ -446,6 +446,11 @@ def apply_mispricing_alpha(
     crypto_max_rows = int(crypto_settings.get("max_scored_rows_per_cycle", 24))
     crypto_min_ttc = safe_float(crypto_settings.get("minimum_time_to_close_hours", 0.0))
     crypto_max_ttc = safe_float(crypto_settings.get("maximum_time_to_close_hours", 36.0))
+    require_scored_crypto_model_for_trading = _setting_bool(
+        crypto_settings,
+        "require_scored_model_for_trading",
+        True,
+    )
     crypto_rows_attempted = 0
     crypto_shadow_enabled = _setting_bool(crypto_settings, "allow_shadow_candidates", True)
     crypto_min_shadow_edge_after_cost = float(crypto_settings.get("minimum_shadow_edge_after_cost", 0.015))
@@ -471,7 +476,8 @@ def apply_mispricing_alpha(
         fundamental_probability = safe_float(fundamental.get("probability")) if fundamental else None
         fundamental_source = str(fundamental.get("source")) if fundamental else ""
         crypto_model = {"crypto_model_status": "not_crypto_updown"}
-        if is_crypto_updown_contract(row):
+        crypto_updown_contract = is_crypto_updown_contract(row)
+        if crypto_updown_contract:
             time_to_close = safe_float(row.get("time_to_close_hours") or row.get("hours_to_close"))
             if crypto_min_ttc is not None and time_to_close is not None and time_to_close < crypto_min_ttc:
                 crypto_model = {"crypto_model_status": "outside_time_to_close_window"}
@@ -553,6 +559,15 @@ def apply_mispricing_alpha(
         validation_reasons = []
         if not bookmaker_cross_check_pass:
             validation_reasons.append("bookmaker_fundamental_cross_check_failed")
+        crypto_model_gate_pass = bool(
+            not (crypto_updown_contract and require_scored_crypto_model_for_trading)
+            or str(crypto_model.get("crypto_model_status") or "") == "scored"
+        )
+        if not crypto_model_gate_pass:
+            validation_reasons.append(
+                "crypto_updown_model_not_scored_for_trading:"
+                + str(crypto_model.get("crypto_model_status") or "missing")
+            )
         if not price_filter_pass:
             validation_reasons.append("price_below_alpha_trade_limit")
         if not spread_filter_pass:
@@ -594,6 +609,7 @@ def apply_mispricing_alpha(
                 "fundamental_source": fundamental_source,
                 "crypto_model_adjustment": crypto_model_adjustment,
                 **crypto_model,
+                "crypto_model_gate_pass": crypto_model_gate_pass,
                 "worldcup_winner_validation_market": worldcup_winner,
                 "signal_cohort": current_signal_cohort,
                 "cohort_evidence_filter_pass": cohort_evidence_filter_pass,
@@ -652,6 +668,7 @@ def apply_mispricing_alpha(
             row.get("bookmaker_cross_check_pass")
             and row.get("microstructure_filter_pass")
             and row.get("cohort_evidence_filter_pass", True)
+            and row.get("crypto_model_gate_pass", True)
         )
         fundamental_edge_for_shadow = safe_float(row.get("fundamental_edge_after_haircut"))
         crypto_edge_for_shadow = safe_float(row.get("crypto_model_edge_after_cost"))

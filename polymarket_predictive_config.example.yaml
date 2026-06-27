@@ -217,6 +217,7 @@ crypto_updown_live_model:
   minimum_time_to_close_hours: 0
   maximum_time_to_close_hours: 36
   max_scored_rows_per_cycle: 16
+  require_scored_model_for_trading: true
   probability_blend_weight: 0.65
   max_probability_adjustment: 0.25
   allow_shadow_candidates: true

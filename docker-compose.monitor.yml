@@ -4,6 +4,7 @@ services:
       context: .
       dockerfile: Dockerfile.monitor
     container_name: polymarket-monitor
+    mem_limit: ${PM_MEM_LIMIT:-512m}
     env_file:
       - .env
     environment:
@@ -28,6 +29,7 @@ services:
       context: .
       dockerfile: Dockerfile.monitor
     container_name: polymarket-long-short
+    mem_limit: ${PM_MEM_LIMIT:-512m}
     env_file:
       - .env
     environment:

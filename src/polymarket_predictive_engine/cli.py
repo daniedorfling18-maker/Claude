@@ -7,39 +7,42 @@ import sys
 from .backtest import backtest
 from .collection_only import run_collection_only
 from .config import config_check, load_config
+from .crypto_fundamental import build_crypto_fundamental
+from .crypto_updown_labels import build_crypto_updown_proxy_labels
 from .data_inventory import inventory
 from .data_quality import data_quality
+from .dutch_arb_monitor import run_dutch_arb_monitor
 from .execution.live import live_trade
 from .execution.paper import paper_trade_report
 from .external_feed_collector import collect_external_feeds
 from .external_signals import normalize_external_signals
 from .features import build_features
 from .features_v2 import build_features_v2
+from .goal_planner import build_goal_plan
 from .governance import governance_report
 from .historical_backfill import historical_backfill
 from .labels import build_labels
+from .live_mispricing import run_live_mispricing, scan_live_mispricing
+from .market_making_pnl import evaluate_market_making
+from .mispricing_alpha import apply_mispricing_alpha, train_mispricing_alpha_model
 from .models.calibrated import load_prediction_models, train_model, write_predictions
 from .models.calibration_v2 import train_calibration_model
 from .models.category_calibration import train_category_calibration
 from .models.optimized import train_optimized_model
 from .models.skill_model import train_skill_model
 from .overnight_collection import run_collection_only_overnight
-from .paper_edge_simulator import simulate_paper_edge
 from .paper_cycle import run_paper_cycle
+from .paper_edge_simulator import simulate_paper_edge
+from .paper_session import run_paper_session
 from .pipeline_health import pipeline_health
 from .pipeline_inventory import pipeline_inventory
 from .portfolio import portfolio_snapshot, reconciliation_report
 from .price_history_collector import collect_price_history
-from .market_making_pnl import evaluate_market_making
-from .dutch_arb_monitor import run_dutch_arb_monitor
-from .mispricing_alpha import apply_mispricing_alpha, train_mispricing_alpha_model
-from .sharp_anchor import build_sharp_anchor
-from .sharp_odds_fetch import fetch_sharp_odds
-from .crypto_fundamental import build_crypto_fundamental
-from .live_mispricing import run_live_mispricing, scan_live_mispricing
-from .paper_session import run_paper_session
+from .promotion_review import build_promotion_review
 from .readiness import paper_live_promotion_gate, paper_trade_readiness, readiness_decision
 from .resolution_collector import collect_resolutions
+from .sharp_anchor import build_sharp_anchor
+from .sharp_odds_fetch import fetch_sharp_odds
 from .snapshot_ingest import ingest_scanner_snapshot
 from .snapshot_label_collector import collect_snapshot_labels
 from .storage import init_db
@@ -78,7 +81,10 @@ COMMANDS = [
     "build-sharp-anchor",
     "refresh-sharp-anchor",
     "build-crypto-fundamental",
+    "build-crypto-updown-labels",
     "edge-strategy-search",
+    "promotion-review",
+    "goal-plan",
     "promotion-gate",
     "validate",
     "predict",
@@ -129,6 +135,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--snapshot-input", default=None)
     parser.add_argument("--sharp-input", default=None, help="sharp-odds CSV for build-sharp-anchor (overrides config sharp_anchor.input_path)")
     parser.add_argument("--crypto-targets", default=None, help="crypto targets CSV for build-crypto-fundamental (token_id,currency,strike,expiry)")
+    parser.add_argument("--max-labels", type=int, default=250, help="build-crypto-updown-labels: max candidate rows to inspect")
     parser.add_argument(
         "--source",
         choices=["all", "historical", "raw_snapshot", "websocket"],
@@ -241,8 +248,14 @@ def main(argv: list[str] | None = None) -> int:
             _print({"fetch": fetched, "build": built})
         elif args.command == "build-crypto-fundamental":
             _print(build_crypto_fundamental(cfg, targets_path=args.crypto_targets))
+        elif args.command == "build-crypto-updown-labels":
+            _print(build_crypto_updown_proxy_labels(cfg, max_rows=args.max_labels))
         elif args.command == "edge-strategy-search":
             _print(run_edge_strategy_search(cfg))
+        elif args.command == "promotion-review":
+            _print(build_promotion_review(cfg))
+        elif args.command == "goal-plan":
+            _print(build_goal_plan(cfg))
         elif args.command == "promotion-gate":
             _print(paper_live_promotion_gate(cfg))
         elif args.command == "validate":

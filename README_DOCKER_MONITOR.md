@@ -1,5 +1,10 @@
 # Docker monitor quick start
 
+> **Local dev? You don't need this.** The paper bot is local-first and Docker-free — run
+> `python scripts/run_polymarket_local_live_loop.py` instead (see `AGENTS.md` / `docs/RUNNING_LEAN.md`).
+> Use Docker only for unattended 24/7 on a VPS or live deployment, and run **one capped stack** at a
+> time (`PM_MEM_LIMIT`, default 512m/service) — never the 20-service `wide-raw` stack whole.
+
 The monitor compose runs two services that share the `outputs/` volume:
 
 - `polymarket-monitor` — the mispricing bot. Scans Polymarket continuously and writes

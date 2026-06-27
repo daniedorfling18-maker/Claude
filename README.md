@@ -1,5 +1,8 @@
 # World Cup 2026 Superbru Score-Prediction Engine
 
+> **Running or developing this repo?** See **[`AGENTS.md`](AGENTS.md)** — it's **local-first**
+> (plain Python), and Docker is for VPS/24-7/live deployment only, not local dev.
+
 Python engine that converts bookmaker odds into a calibrated scoreline distribution and selects the score prediction with the highest expected Superbru points.
 
 The key insight: this is not a "most likely exact score" picker. The decision layer evaluates every candidate scoreline against the Superbru payoff function (3 pts exact, 1.5 pts close, 1 pt right result) and picks the scoreline that maximises expected points — not the single most probable score.

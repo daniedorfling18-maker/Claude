@@ -3,40 +3,79 @@
 Canonical instructions for Codex and any coding agent. **Read this before suggesting how to run
 anything.** The short version: this repo is **local-first**; Docker is for deployment only.
 
+## Current focus and operating state
+
+The current active project is the **Polymarket predictive engine** in automated **shadow-research
+mode**. Do not treat the bot as ready for paper trading or live trading. The current audit state is:
+
+```text
+paper_allowed = false
+paper_trading_invoked = false
+live_trading_invoked = false
+```
+
+The reason is not a broken broker. The infrastructure now works. The blocker is insufficient positive
+forward evidence: `sports_other` has accepted shadow candidates, but the cohort is still negative and
+has no closed/settled positions. See:
+
+- `docs/POLYMARKET_CURRENT_STATE.md`
+- `docs/POLYMARKET_SHADOW_RESEARCH_RUNBOOK.md`
+
 ## Run model — local-first for development
 
-Run plain Python for development, validation, and watching the bots. **Do not spin up Docker for
-local work.** The paper bot is Docker-free by design.
+Run plain Python for development, validation, and watching the research cycle. **Do not spin up Docker
+for local work.** Docker is only for deployment scenarios.
 
 ```bash
 pip install -e ".[dev]"                                  # one-time setup
-
-# The Polymarket paper bot (the main thing to run locally on Windows):
-powershell -ExecutionPolicy Bypass -File scripts/start_polymarket_local_live.ps1
-
-# One-click Windows helper from repo root:
-start_polymarket_bot.cmd
-
-# Optional: install reboot/logon auto-start task:
-powershell -ExecutionPolicy Bypass -File scripts/install_polymarket_local_live_task.ps1 -RunNow
-
-# Raw equivalent if you are not on Windows:
-python scripts/run_polymarket_local_live_loop.py \
-    --config polymarket_predictive_config.example.yaml --max-assets 20
-
-# One-off engine commands:
-polymarket-engine <command> --config polymarket_predictive_config.example.yaml
-#   e.g. paper-cycle, build-crypto-fundamental, refresh-sharp-anchor,
-#        train-mispricing-alpha, validate, dutch-arb-monitor
-
 pytest                                                   # tests (or: python -m pytest -q)
 ```
 
-Keep `--max-assets` small (20–30) to bound the websocket/feature set. One Python process is a few
-hundred MB; it still honours the kill switch, readiness, and P&L-pause controls.
+### Current Polymarket workflow: shadow research cycle
 
-The dashboard is at `http://127.0.0.1:8765/`. The agent-lane status page is at
-`http://127.0.0.1:8765/agent_status.html` after the first broker/paper-cycle tick.
+Use this scheduled-task workflow instead of starting the old local live loop:
+
+```powershell
+# Install or refresh the Windows scheduled task.
+.\scripts\install_polymarket_shadow_research_task.ps1 `
+  -IntervalMinutes 15 `
+  -WebsocketSeconds 30
+
+# Check latest status.
+Get-Content .\work\shadow_research_cycle_latest_status.json -Raw
+
+# Check detailed audit.
+Get-Content .\outputs\polymarket_model_governance\local_history_audit_report.md -Raw
+```
+
+Manual one-cycle run for diagnostics only:
+
+```powershell
+.\scripts\run_polymarket_shadow_research_cycle.ps1 `
+  -ConfigPath polymarket_predictive_config.example.yaml `
+  -WebsocketSeconds 30
+```
+
+This cycle performs broad liquidity discovery, websocket collection, normalisation, feature build,
+prediction, mispricing-alpha scoring, dry/governance signal generation, alpha-candidate shadow evidence,
+and the local-history audit. It explicitly writes `paper_trading_invoked=false` and
+`live_trading_invoked=false`.
+
+## Do not use the old Polymarket live-loop entry points as the default
+
+These entry points exist, but they are **not** the current safe default:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts/start_polymarket_local_live.ps1
+start_polymarket_bot.cmd
+python scripts/run_polymarket_local_live_loop.py --config polymarket_predictive_config.example.yaml --max-assets 20
+```
+
+Only use them after a human review confirms that the audit permits paper trading and the relevant family
+has positive closed/settled shadow evidence. Do not use them to bypass the shadow-research gate.
+
+The dashboard is at `http://127.0.0.1:8765/` when the old local loop is intentionally running, but the
+current recommended workflow is the scheduled shadow cycle and file-based audit status.
 
 ## When to use Docker — and when NOT to
 
@@ -53,7 +92,7 @@ None of those is local dev. If you *are* deploying with Docker:
 - Every service caps at `mem_limit: ${PM_MEM_LIMIT:-512m}`; budget = (containers) × cap.
 - Full guidance: **`docs/RUNNING_LEAN.md`**.
 
-## Memory discipline (the machine is RAM-constrained)
+## Memory discipline
 
 - Prefer the local process over containers; don't run multiple stacks.
 - `runtime_resource_guard` in the config backs the bot off at high memory — lower
@@ -63,35 +102,40 @@ None of those is local dev. If you *are* deploying with Docker:
 
 ## Safety / governance — do not weaken these
 
-- Everything is **paper / dry-run by default**. The engine has **no live order path**
-  (`execution/live.py` is a skeleton that raises).
-- Live trading is gated four independent ways and must stay so: kill switch off
+- Everything is **shadow / dry-run / paper-gated by default**. The engine has **no approved live order path**.
+- Live trading remains gated four independent ways and must stay so: kill switch off
   (`POLYMARKET_KILL_SWITCH` ≠ 1), `trading.mode: live`, `POLYMARKET_LIVE_TRADING=1`, and a human
   approval file. The bot's `LiveExecutor` additionally needs `PM_MODE=live` +
   `POLYMARKET_EXECUTE_LIVE=true` + a non-geoblocked IP + key + SDK. Keep dry-run.
-- No label leakage (point-in-time features only); validation is **OOS by market** with bootstrap
+- No label leakage: point-in-time features only; validation is out-of-sample by market with bootstrap
   CIs; trade/rule promotion requires **forward shadow evidence**, not in-sample backtest ROI.
-- Do not paste `scripts/start_polymarket_local_live.ps1` into a shell. Always run it with `-File`;
-  the script now refuses pasted execution because `$PSScriptRoot` is required for safe paths.
+- Do not paste PowerShell launcher scripts into a shell. Run them with `-File` or by script path.
+- Do not loosen alpha thresholds, same-category gates, cohort-promotion gates, or family exclusions to
+  force activity.
+- Do not treat `unknown` or bad 5-minute crypto families as actionable just because they are liquid.
 
 ## Where things are
 
 | Topic | File |
 |---|---|
+| Current Polymarket state | `docs/POLYMARKET_CURRENT_STATE.md` |
+| Shadow research runbook | `docs/POLYMARKET_SHADOW_RESEARCH_RUNBOOK.md` |
 | Running lean / memory | `docs/RUNNING_LEAN.md` |
 | Alpha approach + audit | `docs/ACTUARIAL_AUDIT_PREDICTIVE_VALUE.md` |
 | Independent signals (sharp odds, Deribit) | `docs/POLYMARKET_SHARP_ANCHOR.md` |
 | Governance + live approval | `docs/POLYMARKET_ACTUARIAL_MODEL_GOVERNANCE.md`, `docs/POLYMARKET_LIVE_TRADING_APPROVAL_CHECKLIST.md` |
 | Docker (deploy only) | `docs/LIVE_DUTCH_ARB_DOCKER.md`, `docs/ORACLE_VPS_SETUP.md` |
 | Engine commands | `src/polymarket_predictive_engine/cli.py` (`COMMANDS`) |
-| Local dashboard launcher | `scripts/start_polymarket_local_live.ps1`, `start_polymarket_bot.cmd` |
+| Shadow research cycle | `scripts/run_polymarket_shadow_research_cycle.ps1`, `scripts/install_polymarket_shadow_research_task.ps1` |
 | Agent lane / why-no-trade trace | `src/polymarket_predictive_engine/decision_trace.py` |
 
 The repo has two parts: the **SuperBru score engine** (`src/superbru_score_engine`, see `README.md`)
-and the **Polymarket predictive engine** (`src/polymarket_predictive_engine`, current focus). Both
-run locally; neither requires Docker for development.
+and the **Polymarket predictive engine** (`src/polymarket_predictive_engine`, current focus). Both run
+locally; neither requires Docker for development.
 
 ## Before pushing
 
-- Run `pytest` (CI also validates workflow-trigger rules, runs the suite, and online smoke tests).
-- Keep changes leakage-safe and dry-run; do not add a live order path or relax the gates above.
+- Run `pytest` where practical.
+- Keep changes leakage-safe and dry-run/shadow-safe.
+- Do not add a live order path or relax the gates above.
+- When changing Polymarket discovery, prefer broad opportunity discovery plus family-balanced target selection over single-family concentration.

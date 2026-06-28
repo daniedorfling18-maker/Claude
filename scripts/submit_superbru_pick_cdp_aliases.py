@@ -26,6 +26,7 @@ def load_submitter_module():
 
 
 submitter = load_submitter_module()
+ORIGINAL_PICK_SCORE_INPUTS = submitter.pick_score_inputs
 ALIASES_JSON = json.dumps({key: sorted(values) for key, values in TEAM_ALIASES.items()}, sort_keys=True)
 
 
@@ -119,7 +120,7 @@ def pick_score_inputs(inputs: list[dict[str, Any]]) -> list[dict[str, Any]]:
     right = next((inp for inp in visible if "soccer-right-score" in str(inp.get("className", ""))), None)
     if left and right:
         return [left, right]
-    return submitter.pick_score_inputs(inputs)
+    return ORIGINAL_PICK_SCORE_INPUTS(inputs)
 
 
 submitter.FIND_ROW_JS = _team_js_body(find_row=True)

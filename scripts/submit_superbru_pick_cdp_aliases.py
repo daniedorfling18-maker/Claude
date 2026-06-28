@@ -68,11 +68,6 @@ def _team_js_body(find_row: bool) -> str:
       el.click();
       return el.getAttribute('data-bru-tab') + ': ' + el.getAttribute('data-brutip');"""
         after_loop = """
-  const round4 = document.querySelector('[data-bru-tab="round4"]');
-  if (round4) {
-    round4.click();
-    return 'round:round4: Round of 32';
-  }
   return null;"""
 
     return f"""
@@ -118,6 +113,67 @@ def _team_js_body(find_row: bool) -> str:
 """
 
 
+CLICK_ALL_ROUNDS_JS = f"""
+async ([homeTeam, awayTeam]) => {{
+  const TEAM_ALIASES = {ALIASES_JSON};
+  function wait(ms) {{ return new Promise(resolve => setTimeout(resolve, ms)); }}
+  function ascii(s) {{ return (s || '').normalize('NFD').replace(/[\\u0300-\\u036f]/g, '').toLowerCase(); }}
+  function compact(s) {{ return ascii(s).replace(/[^a-z0-9]/g, ''); }}
+  function tokens(s) {{ return new Set(ascii(s).split(/[^a-z0-9]+/).filter(Boolean)); }}
+  function variants(team) {{
+    const n = compact(team);
+    for (const [canonical, aliases] of Object.entries(TEAM_ALIASES)) {{
+      if (canonical === n || aliases.includes(n)) return Array.from(new Set([n, canonical, ...aliases].filter(Boolean)));
+    }}
+    return [n].filter(Boolean);
+  }}
+  function containsTeam(rawText, candidates) {{
+    const c = compact(rawText);
+    const t = tokens(rawText);
+    return candidates.some(candidate => {{
+      if (!candidate) return false;
+      if (t.has(candidate) || c === candidate) return true;
+      return candidate.length > 3 && c.includes(candidate);
+    }});
+  }}
+  const homeVariants = variants(homeTeam);
+  const awayVariants = variants(awayTeam);
+  function clickMatchingGame() {{
+    const controls = Array.from(document.querySelectorAll('[data-brutip][data-bru-tab]'));
+    for (const el of controls) {{
+      const raw = el.getAttribute('data-brutip') || '';
+      if (containsTeam(raw, homeVariants) && containsTeam(raw, awayVariants)) {{
+        el.click();
+        return el.getAttribute('data-bru-tab') + ': ' + raw;
+      }}
+    }}
+    return null;
+  }}
+  const immediate = clickMatchingGame();
+  if (immediate) return immediate;
+  const rounds = Array.from(document.querySelectorAll('[data-bru-tab^="round"]'))
+    .filter(el => !(el.getAttribute('data-brutip') || '').includes(' v '));
+  let activeIndex = rounds.findIndex(el =>
+    (el.className || '').toLowerCase().includes('active') || el.getAttribute('aria-selected') === 'true'
+  );
+  if (activeIndex < 0) {{
+    activeIndex = rounds.findIndex(el => el.getAttribute('data-bru-tab') === 'round3');
+  }}
+  const start = activeIndex >= 0 ? activeIndex + 1 : 0;
+  for (let step = 0; step < rounds.length; step++) {{
+    const i = (start + step) % rounds.length;
+    const round = rounds[i];
+    const rawRoundText = (round.innerText || round.textContent || '').replace(/\s+/g, ' ').trim();
+    round.click();
+    await wait(3000);
+    const match = clickMatchingGame();
+    if (match) return 'round:' + round.getAttribute('data-bru-tab') + ': ' + rawRoundText + ' -> ' + match;
+  }}
+  return null;
+}}
+"""
+
+
 def pick_score_inputs(inputs: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """Prefer SuperBru's explicit left/right score classes before generic inputs."""
     visible = [inp for inp in inputs if inp.get("visible")]
@@ -152,7 +208,7 @@ SET_GOAL_JS = r"""
 
 
 submitter.FIND_ROW_JS = _team_js_body(find_row=True)
-submitter.CLICK_SUBTAB_JS = _team_js_body(find_row=False)
+submitter.CLICK_SUBTAB_JS = CLICK_ALL_ROUNDS_JS
 submitter.SET_INPUT_JS = SET_GOAL_JS
 submitter.pick_score_inputs = pick_score_inputs
 

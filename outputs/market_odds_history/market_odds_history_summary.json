@@ -1,16 +1,14 @@
 {
-  "generated_at_utc": "2026-06-28T15:24:08.122750+00:00",
-  "snapshot_id": "20260628T152405Z",
+  "generated_at_utc": "2026-06-28T17:05:52.616776+00:00",
+  "snapshot_id": "20260628T170550Z",
   "snapshot_rows": 40,
-  "history_rows": 1320,
-  "previous_snapshot_id": "20260628T092545Z",
+  "history_rows": 1360,
+  "previous_snapshot_id": "20260628T152405Z",
   "market_depth_counts": {
-    "strong": 34,
-    "unavailable": 6
+    "unavailable": 40
   },
   "movement_counts": {
-    "stable": 34,
-    "unavailable": 6
+    "unavailable": 40
   },
   "moving_against_pick_count": 0,
   "moving_towards_pick_count": 0,

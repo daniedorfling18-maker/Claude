@@ -40,9 +40,78 @@ _DEFAULT_FAST_FEEDBACK_EXCLUDED_FAMILIES = {
     "crypto_xrp_updown_5m",
 }
 
+# Broad by default: the scanner should look for any plausible money-making
+# Polymarket opportunity, not just crypto up/down. Config can override or extend
+# this list with liquidity_discovery.broad_queries.
+_DEFAULT_BROAD_DISCOVERY_QUERIES = [
+    "",
+    "sports",
+    "soccer",
+    "football",
+    "basketball",
+    "baseball",
+    "tennis",
+    "golf",
+    "ufc",
+    "esports",
+    "world cup",
+    "politics",
+    "election",
+    "trump",
+    "fed",
+    "inflation",
+    "economy",
+    "stocks",
+    "crypto",
+    "bitcoin",
+    "ethereum",
+    "solana",
+    "xrp",
+    "ai",
+    "openai",
+    "spacex",
+    "weather",
+    "culture",
+]
+
 
 def _settings(cfg: EngineConfig) -> dict[str, Any]:
     return cfg.raw.get("liquidity_discovery", {}) or {}
+
+
+def _string_list(value: Any) -> list[str]:
+    if value is None:
+        return []
+    if not isinstance(value, list):
+        value = [value]
+    return [str(item or "").strip() for item in value if str(item or "").strip()]
+
+
+def _dedupe_keep_order(values: list[str]) -> list[str]:
+    out: list[str] = []
+    seen: set[str] = set()
+    for value in values:
+        key = value.strip().lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(value)
+    return out
+
+
+def _broad_queries(settings: dict[str, Any]) -> list[str]:
+    if not settings.get("broad_discovery_enabled", True):
+        return []
+    configured = _string_list(settings.get("broad_queries"))
+    return configured or list(_DEFAULT_BROAD_DISCOVERY_QUERIES)
+
+
+def _event_queries(settings: dict[str, Any]) -> list[str]:
+    configured = settings.get("queries", [""]) or [""]
+    if not isinstance(configured, list):
+        configured = [configured]
+    configured_queries = [str(query or "").strip() for query in configured]
+    return _dedupe_keep_order([*configured_queries, *_broad_queries(settings)])
 
 
 def _fast_feedback_excluded_families(settings: dict[str, Any]) -> set[str]:
@@ -121,17 +190,13 @@ def _crypto_updown_public_queries(settings: dict[str, Any]) -> list[str]:
 
 
 def _public_search_queries(settings: dict[str, Any]) -> list[str]:
-    queries = settings.get("public_search_queries", []) or []
-    if not isinstance(queries, list):
-        queries = [queries]
-    return [str(query or "").strip() for query in [*queries, *_crypto_updown_public_queries(settings)] if str(query or "").strip()]
+    queries = _string_list(settings.get("public_search_queries"))
+    return _dedupe_keep_order([*queries, *_broad_queries(settings), *_crypto_updown_public_queries(settings)])
 
 
 def _discover_tokens(settings: dict[str, Any]) -> tuple[list[scanner.OutcomeToken], list[dict[str, Any]]]:
     base = _base_config(settings)
-    queries = settings.get("queries", [""]) or [""]
-    if not isinstance(queries, list):
-        queries = [queries]
+    queries = _event_queries(settings)
     summaries: list[dict[str, Any]] = []
     query_batches: list[list[scanner.OutcomeToken]] = []
     for query in queries:
@@ -441,7 +506,9 @@ def run_liquidity_discovery(cfg: EngineConfig) -> dict[str, Any]:
         "settings": {
             "event_limit": int(settings.get("event_limit", 60)),
             "token_limit": int(settings.get("token_limit", 120)),
-            "selection_strategy": "round_robin_across_queries_fast_feedback_priority",
+            "selection_strategy": "broad_round_robin_across_queries_fast_feedback_priority",
+            "broad_discovery_enabled": bool(settings.get("broad_discovery_enabled", True)),
+            "broad_query_count": len(_broad_queries(settings)),
             "min_liquidity": float(settings.get("min_liquidity", 250)),
             "max_spread": float(settings.get("max_spread", 0.04)),
             "max_relative_spread": float(settings.get("max_relative_spread", 0.15)),

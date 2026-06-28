@@ -38,6 +38,7 @@ from .pipeline_health import pipeline_health
 from .pipeline_inventory import pipeline_inventory
 from .portfolio import portfolio_snapshot, reconciliation_report
 from .price_history_collector import collect_price_history
+from .profit_sprint import build_profit_sprint
 from .promotion_review import build_promotion_review
 from .readiness import paper_live_promotion_gate, paper_trade_readiness, readiness_decision
 from .resolution_collector import collect_resolutions
@@ -85,6 +86,7 @@ COMMANDS = [
     "edge-strategy-search",
     "promotion-review",
     "goal-plan",
+    "profit-sprint",
     "promotion-gate",
     "validate",
     "predict",
@@ -256,6 +258,8 @@ def main(argv: list[str] | None = None) -> int:
             _print(build_promotion_review(cfg))
         elif args.command == "goal-plan":
             _print(build_goal_plan(cfg))
+        elif args.command == "profit-sprint":
+            _print(build_profit_sprint(cfg))
         elif args.command == "promotion-gate":
             _print(paper_live_promotion_gate(cfg))
         elif args.command == "validate":

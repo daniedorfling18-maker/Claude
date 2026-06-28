@@ -58,6 +58,7 @@ Get-CimInstance Win32_Process -Filter "Name='python.exe' OR Name='pythonw.exe'" 
 $env:PYTHONPATH = (Resolve-Path .\src).Path
 
 try {
+  Invoke-Step "liquidity-discovery" @(".\scripts\run_polymarket_liquidity_discovery.py", "--config", $ConfigPath) ".\work\liquidity_discovery_shadow_research_$stamp.json"
   Invoke-Step "collect-websocket" @("-m", "polymarket_predictive_engine.cli", "collect-websocket", "--config", $ConfigPath, "--websocket-seconds", "$WebsocketSeconds") ".\work\collect_shadow_research_$stamp.json"
   Invoke-Step "normalize-websocket" @("-m", "polymarket_predictive_engine.cli", "normalize-websocket", "--config", $ConfigPath) ".\work\normalize_shadow_research_$stamp.json"
   Invoke-Step "build-features-v2" @("-m", "polymarket_predictive_engine.cli", "build-features-v2", "--config", $ConfigPath, "--source", "websocket", "--allow-unlabelled-research-features") ".\work\features_shadow_research_$stamp.json"
@@ -69,6 +70,11 @@ try {
 
   Copy-Item ".\work\local_history_audit_$stamp.json" ".\work\local_history_audit_latest.json" -Force
   $audit = Get-Content ".\work\local_history_audit_$stamp.json" -Raw | ConvertFrom-Json
+  $liquiditySummaryPath = ".\outputs\polymarket_model_governance\liquidity_discovery_summary.json"
+  $liquidity = $null
+  if (Test-Path $liquiditySummaryPath) {
+    $liquidity = Get-Content $liquiditySummaryPath -Raw | ConvertFrom-Json
+  }
   $endedAt = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ")
   $status = [ordered]@{
     status = "ok"
@@ -82,9 +88,12 @@ try {
     shadow_positions = $audit.shadow_positions
     shadow_total_pnl_usdc = $audit.shadow_total_pnl_usdc
     shadow_roi = $audit.shadow_roi
+    liquidity_tradable_tokens = if ($liquidity) { $liquidity.tradable_tokens } else { $null }
+    liquidity_fast_feedback_tradable_tokens = if ($liquidity) { $liquidity.fast_feedback_tradable_tokens } else { $null }
     log_file = $logFile
     audit_file = ".\work\local_history_audit_$stamp.json"
     report_file = ".\outputs\polymarket_model_governance\local_history_audit_report.md"
+    liquidity_report_file = ".\outputs\polymarket_model_governance\liquidity_discovery_summary.json"
     paper_trading_invoked = $false
     live_trading_invoked = $false
   }

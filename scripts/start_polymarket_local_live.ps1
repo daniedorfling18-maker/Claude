@@ -189,10 +189,14 @@ function Set-DefaultResearchScanEnvironment {
         if ($familyRows.Count -eq 0) {
             return
         }
-        $ordered = $defaultQueries |
-            ForEach-Object { [PSCustomObject]@{ Query = $_; Score = (Get-LiquidityQueryScore -Query $_ -FamilyRows $familyRows) } } |
-            Sort-Object -Property @{Expression="Score"; Descending=$true}, @{Expression="Query"; Descending=$false} |
-            Select-Object -ExpandProperty Query
+        $scoredQueries = @()
+        foreach ($query in $defaultQueries) {
+            $scoredQueries += [PSCustomObject]@{
+                Query = $query
+                Score = (Get-LiquidityQueryScore -Query $query -FamilyRows $familyRows)
+            }
+        }
+        $ordered = $scoredQueries | Sort-Object -Property Query | Sort-Object -Property Score -Descending | Select-Object -ExpandProperty Query
         if ($ordered.Count -gt 0) {
             $env:POLYMARKET_QUERIES = ($ordered -join ",")
         }

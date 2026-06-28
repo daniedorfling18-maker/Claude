@@ -57,6 +57,41 @@ def _shadow_row_from_alpha(row: dict[str, Any]) -> dict[str, Any]:
     return out
 
 
+def _reserve_shadow_capacity(cfg: Any, alpha_shadow_rows: list[dict[str, Any]]) -> dict[str, Any]:
+    """Raise in-memory shadow capacity for this evidence-only run.
+
+    The normal shadow ledger intentionally caps long-horizon positions. That is
+    useful for unattended operation, but it can silently prevent validated alpha
+    candidates from being recorded when older stale research positions already
+    fill the long-horizon bucket. This override affects only this script's
+    in-memory config and only the shadow ledger; it does not change paper or live
+    trading gates and does not write to the YAML config.
+    """
+    settings = cfg.raw.setdefault("shadow_cohort_validation", {})
+    before = {
+        "maximum_open_positions": int(settings.get("maximum_open_positions", 60) or 60),
+        "maximum_long_horizon_open_positions": int(settings.get("maximum_long_horizon_open_positions", 10) or 10),
+        "candidate_limit_per_cycle": int(settings.get("candidate_limit_per_cycle", 16) or 16),
+    }
+    desired_extra = max(1, len(alpha_shadow_rows)) if alpha_shadow_rows else 0
+    settings["maximum_open_positions"] = max(before["maximum_open_positions"], 60, before["maximum_open_positions"] + desired_extra)
+    settings["maximum_long_horizon_open_positions"] = max(
+        before["maximum_long_horizon_open_positions"],
+        25,
+        before["maximum_long_horizon_open_positions"] + desired_extra,
+    )
+    settings["candidate_limit_per_cycle"] = max(before["candidate_limit_per_cycle"], len(alpha_shadow_rows) + 8)
+    return {
+        "before": before,
+        "after": {
+            "maximum_open_positions": settings["maximum_open_positions"],
+            "maximum_long_horizon_open_positions": settings["maximum_long_horizon_open_positions"],
+            "candidate_limit_per_cycle": settings["candidate_limit_per_cycle"],
+        },
+        "scope": "in_memory_shadow_only_no_yaml_change",
+    }
+
+
 def run(config_path: str = "polymarket_predictive_config.example.yaml") -> dict[str, Any]:
     cfg = load_config(config_path)
     alpha_path = cfg.output_root / "polymarket_predictions" / "mispricing_alpha_scores.csv"
@@ -79,6 +114,7 @@ def run(config_path: str = "polymarket_predictive_config.example.yaml") -> dict[
             prepared.append(shadow_row)
             alpha_shadow_rows.append(shadow_row)
 
+    capacity_override = _reserve_shadow_capacity(cfg, alpha_shadow_rows)
     candidate_file = cfg.governance_root / "alpha_candidate_shadow_evidence_inputs.csv"
     write_csv(candidate_file, alpha_shadow_rows)
     shadow_summary = update_shadow_cohort_evidence(cfg, prepared)
@@ -96,6 +132,7 @@ def run(config_path: str = "polymarket_predictive_config.example.yaml") -> dict[
         "alpha_shadow_family_counts": dict(sorted(family_counts.items())),
         "alpha_shadow_cohort_counts": dict(sorted(cohort_counts.items())),
         "candidate_file": str(candidate_file),
+        "capacity_override": capacity_override,
         "shadow_summary": shadow_summary,
         "paper_trading_invoked": False,
         "live_trading_invoked": False,

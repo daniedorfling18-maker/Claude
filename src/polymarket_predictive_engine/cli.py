@@ -4,6 +4,7 @@ import argparse
 import json
 import sys
 
+from .active_window_plan import build_active_window_plan
 from .backtest import backtest
 from .collection_only import run_collection_only
 from .config import config_check, load_config
@@ -87,6 +88,7 @@ COMMANDS = [
     "promotion-review",
     "goal-plan",
     "profit-sprint",
+    "active-window-plan",
     "promotion-gate",
     "validate",
     "predict",
@@ -260,6 +262,8 @@ def main(argv: list[str] | None = None) -> int:
             _print(build_goal_plan(cfg))
         elif args.command == "profit-sprint":
             _print(build_profit_sprint(cfg))
+        elif args.command == "active-window-plan":
+            _print(build_active_window_plan(cfg))
         elif args.command == "promotion-gate":
             _print(paper_live_promotion_gate(cfg))
         elif args.command == "validate":

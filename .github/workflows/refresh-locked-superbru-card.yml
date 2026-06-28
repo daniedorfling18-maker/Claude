@@ -45,12 +45,48 @@ jobs:
           python -m pip install --upgrade pip
           pip install -e ".[scraper]"
 
-      - name: Refresh locked card outputs
+      - name: Refresh locked card outputs with fresh odds
         env:
           THE_ODDS_API_KEY: ${{ secrets.THE_ODDS_API_KEY }}
           PYTHONPATH: src
         run: |
-          python scripts/run_daily_robust_pipeline.py --skip-final-simulation --skip-market-odds-fetch
+          rm -f outputs/market_odds/worldcup_market_odds_raw.error.json
+          python scripts/run_daily_robust_pipeline.py --skip-final-simulation --no-match-odds-only
+
+      - name: Validate fresh market odds
+        run: |
+          python - <<'PY'
+          import csv
+          import json
+          from pathlib import Path
+
+          error_path = Path('outputs/market_odds/worldcup_market_odds_raw.error.json')
+          if error_path.exists():
+              try:
+                  report = json.loads(error_path.read_text(encoding='utf-8'))
+              except Exception:
+                  report = {'raw_error_file': error_path.read_text(encoding='utf-8', errors='replace')}
+              raise SystemExit(
+                  'The Odds API fetch failed; refusing to commit a stale locked SuperBru card.\n'
+                  + json.dumps(report, indent=2)
+              )
+
+          flat_path = Path('outputs/market_odds/worldcup_market_odds_flat.csv')
+          if not flat_path.exists() or flat_path.stat().st_size == 0:
+              raise SystemExit('Fresh market odds CSV is missing or empty.')
+
+          rows = list(csv.DictReader(flat_path.open(encoding='utf-8-sig', newline='')))
+          if not rows:
+              raise SystemExit('Fresh market odds CSV has headers only; refusing to commit an empty/stale card.')
+
+          commence_times = sorted({row.get('commence_time', '') for row in rows if row.get('commence_time')})
+          last_updates = sorted({row.get('last_update', '') for row in rows if row.get('last_update')})
+          print(f'Fresh market odds rows: {len(rows)}')
+          if commence_times:
+              print(f'Fixture window: {commence_times[0]} -> {commence_times[-1]}')
+          if last_updates:
+              print(f'Bookmaker update window: {last_updates[0]} -> {last_updates[-1]}')
+          PY
 
       - name: Validate locked card exists
         run: |

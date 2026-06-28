@@ -128,8 +128,32 @@ def pick_score_inputs(inputs: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return ORIGINAL_PICK_SCORE_INPUTS(inputs)
 
 
+SET_GOAL_JS = r"""
+([selector, value]) => {
+  const el = document.querySelector(selector);
+  if (!el) return { ok: false, reason: 'element not found: ' + selector };
+  const side = (el.className || '').includes('soccer-left-score') ? 'left'
+    : (el.className || '').includes('soccer-right-score') ? 'right'
+    : '';
+  const gameNode = el.closest('[data-bru-game-id]');
+  const gameId = gameNode ? parseInt(gameNode.getAttribute('data-bru-game-id'), 10) : NaN;
+  const goal = parseInt(value, 10);
+  if (!side || !Number.isFinite(gameId) || !Number.isFinite(goal)) {
+    return { ok: false, reason: 'could not resolve side/gameId/goal', selector, side, gameId, value };
+  }
+  if (!window.brupicks || !brupicks.soccer || typeof brupicks.soccer.setGoal !== 'function') {
+    return { ok: false, reason: 'brupicks.soccer.setGoal unavailable', selector, side, gameId, value };
+  }
+  brupicks.soccer.setGoal(gameId, side, goal);
+  const newValue = el.value || '';
+  return { ok: String(newValue) === String(goal), selector, side, gameId, value: String(goal), newValue };
+}
+"""
+
+
 submitter.FIND_ROW_JS = _team_js_body(find_row=True)
 submitter.CLICK_SUBTAB_JS = _team_js_body(find_row=False)
+submitter.SET_INPUT_JS = SET_GOAL_JS
 submitter.pick_score_inputs = pick_score_inputs
 
 build_parser = submitter.build_parser

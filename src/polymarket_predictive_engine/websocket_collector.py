@@ -17,6 +17,9 @@ _DEFAULT_TARGET_FAMILIES = {
     "crypto_eth_updown_15m",
     "crypto_updown_event",
 }
+# These are families where local evidence already showed poor behaviour or where the
+# current classifier is too generic for paper-quality routing. They can still appear
+# in liquidity discovery diagnostics, but they should not crowd out websocket slots.
 _EXCLUDED_FAMILIES = {
     "unknown",
     "crypto_btc_updown_5m",
@@ -84,13 +87,68 @@ def _target_families(cfg: EngineConfig, settings: dict[str, Any]) -> set[str]:
     return families or set(_DEFAULT_TARGET_FAMILIES)
 
 
+def _candidate_rank(row: dict[str, Any]) -> tuple[bool, float, float, float]:
+    return (
+        _boolish(row.get("fast_feedback_liquidity_candidate")),
+        safe_float(row.get("liquidity")) or 0.0,
+        -(safe_float(row.get("spread")) or 999.0),
+        -(safe_float(row.get("time_to_close_hours")) or 999999.0),
+    )
+
+
+def _balanced_by_family(rows: list[dict[str, Any]], *, max_assets: int, max_per_family: int) -> list[dict[str, Any]]:
+    if max_assets <= 0:
+        return []
+    grouped: dict[str, list[dict[str, Any]]] = {}
+    for row in rows:
+        family = str(row.get("family") or row.get("category") or "unknown")
+        grouped.setdefault(family, []).append(row)
+    for family_rows in grouped.values():
+        family_rows.sort(key=_candidate_rank, reverse=True)
+
+    selected: list[dict[str, Any]] = []
+    selected_ids: set[str] = set()
+    families = sorted(grouped.keys(), key=lambda family: _candidate_rank(grouped[family][0]), reverse=True)
+    per_family_limit = max(1, max_per_family)
+    for depth in range(per_family_limit):
+        added = False
+        for family in families:
+            family_rows = grouped[family]
+            if depth >= len(family_rows):
+                continue
+            row = family_rows[depth]
+            token_id = str(row.get("token_id") or row.get("asset_id") or row.get("outcome_token_id") or "").strip()
+            if not token_id or token_id in selected_ids:
+                continue
+            selected.append(row)
+            selected_ids.add(token_id)
+            added = True
+            if len(selected) >= max_assets:
+                return selected
+        if not added:
+            break
+
+    # Fill any remaining slots with best available rows, still avoiding duplicates.
+    for row in sorted(rows, key=_candidate_rank, reverse=True):
+        token_id = str(row.get("token_id") or row.get("asset_id") or row.get("outcome_token_id") or "").strip()
+        if not token_id or token_id in selected_ids:
+            continue
+        selected.append(row)
+        selected_ids.add(token_id)
+        if len(selected) >= max_assets:
+            break
+    return selected
+
+
 def _liquidity_target_rows(cfg: EngineConfig, settings: dict[str, Any]) -> list[dict[str, Any]]:
     if not _boolish(settings.get("use_liquidity_targets", True)):
         return []
     watchlist_path = cfg.output_root / "polymarket_liquidity_discovery" / "liquidity_watchlist.csv"
     rows = read_csv_rows(watchlist_path)
-    families = _target_families(cfg, settings)
+    target_all_liquid_families = _boolish(settings.get("target_all_liquid_families", True))
+    families = set() if target_all_liquid_families else _target_families(cfg, settings)
     max_assets = int(settings.get("max_liquidity_target_assets", settings.get("max_assets", 24)) or 24)
+    max_per_family = int(settings.get("max_liquidity_target_assets_per_family", 4) or 4)
     candidates: list[dict[str, Any]] = []
     seen: set[str] = set()
     for row in rows:
@@ -98,22 +156,16 @@ def _liquidity_target_rows(cfg: EngineConfig, settings: dict[str, Any]) -> list[
         token_id = str(row.get("token_id") or row.get("asset_id") or row.get("outcome_token_id") or "").strip()
         if not token_id or token_id in seen:
             continue
-        if family not in families or family in _EXCLUDED_FAMILIES:
+        if family in _EXCLUDED_FAMILIES:
+            continue
+        if families and family not in families:
             continue
         if not _boolish(row.get("tradable_liquidity_candidate")):
             continue
         seen.add(token_id)
         candidates.append(row)
-    candidates.sort(
-        key=lambda row: (
-            _boolish(row.get("fast_feedback_liquidity_candidate")),
-            safe_float(row.get("liquidity")) or 0.0,
-            -(safe_float(row.get("spread")) or 999.0),
-            -(safe_float(row.get("time_to_close_hours")) or 999999.0),
-        ),
-        reverse=True,
-    )
-    return candidates[:max_assets]
+    candidates.sort(key=_candidate_rank, reverse=True)
+    return _balanced_by_family(candidates, max_assets=max_assets, max_per_family=max_per_family)
 
 
 def _asset_ids_from_rows(rows: list[dict[str, Any]]) -> list[str]:

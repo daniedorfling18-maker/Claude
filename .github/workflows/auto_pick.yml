@@ -6,11 +6,11 @@ on:
       window_minutes:
         description: 'Submit picks for matches kicking off within this many minutes'
         required: false
-        default: '40'
+        default: '120'
       dry_run:
         description: 'Dry run only; do not submit to SuperBru'
         required: false
-        default: 'false'
+        default: 'true'
   schedule:
     # Half-hour watcher for the knockout phase.
     # Runs at :05 and :35 UTC. With window_minutes=40 this covers :30 and :00

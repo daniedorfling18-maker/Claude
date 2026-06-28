@@ -40,6 +40,11 @@ def _readiness_gap(row: dict[str, Any]) -> dict[str, Any]:
 
 def _cohort_query(cohort: str) -> str:
     text = cohort.lower()
+    # Unknown near-miss cohorts are real evidence but do not identify a family.
+    # Use the most liquid short-horizon research lane instead of the non-actionable
+    # placeholder "research" so dashboard guidance can be pasted into scanner overrides.
+    if text.startswith("near_miss_learning|unknown"):
+        return "btc updown"
     if "btc" in text or "bitcoin" in text:
         return "btc updown" if "updown" in text else "bitcoin"
     if "xrp" in text or "ripple" in text:
@@ -52,7 +57,7 @@ def _cohort_query(cohort: str) -> str:
         return "tennis"
     if "worldcup" in text or "world_cup" in text or "world cup" in text:
         return "world cup"
-    return "crypto" if "crypto" in text else "research"
+    return "bitcoin" if "crypto" in text else "btc updown"
 
 
 def _thesis(cohort: str, row: dict[str, Any]) -> str:

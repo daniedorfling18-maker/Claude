@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import csv
 import json
+import re
 import sqlite3
 import sys
 from collections import Counter, defaultdict
@@ -25,6 +26,8 @@ from polymarket_predictive_engine.shadow_cohort import _crypto_updown_proxy_sett
 from polymarket_predictive_engine.strategy_search import _market_family  # noqa: E402
 from polymarket_predictive_engine.utils import now_utc, read_csv_rows, read_json, safe_float, write_csv, write_json  # noqa: E402
 
+_HEX_SLUG_RE = re.compile(r"^0x[0-9a-fA-F]{24,}$")
+
 
 def _family(row: dict[str, Any]) -> str:
     return _market_family(
@@ -35,6 +38,16 @@ def _family(row: dict[str, Any]) -> str:
             "outcome": row.get("outcome", ""),
         }
     )
+
+
+def _is_unresolved_unknown_row(row: dict[str, Any]) -> bool:
+    family = _family(row)
+    if family != "unknown":
+        return False
+    question = str(row.get("question") or "").strip()
+    slug = str(row.get("market_slug") or "").strip()
+    cohort = str(row.get("signal_cohort") or "").strip().lower()
+    return not question or bool(_HEX_SLUG_RE.match(slug)) or cohort.startswith("near_miss_learning|unknown")
 
 
 def _stats() -> dict[str, Any]:
@@ -54,6 +67,7 @@ def _stats() -> dict[str, Any]:
         "liquidity_tokens": 0,
         "liquidity_max": 0.0,
         "liquidity_min_spread": "",
+        "unresolved_unknown_rows": 0,
     }
 
 
@@ -86,9 +100,11 @@ def _settlement_audit(cfg, positions: list[dict[str, Any]]) -> list[dict[str, An
         rows.append(
             {
                 "family": _family(position),
+                "unresolved_unknown": _is_unresolved_unknown_row(position),
                 "signal_cohort": position.get("signal_cohort", ""),
                 "shadow_source": position.get("shadow_source", ""),
                 "market_slug": position.get("market_slug", ""),
+                "question": position.get("question", ""),
                 "outcome": position.get("outcome", ""),
                 "status": position.get("status", ""),
                 "entry_price": entry,
@@ -104,6 +120,26 @@ def _settlement_audit(cfg, positions: list[dict[str, Any]]) -> list[dict[str, An
             }
         )
     return rows
+
+
+def _decision_for_family(family: str, stats: dict[str, Any], roi: float) -> tuple[str, float]:
+    score = max(-50.0, min(50.0, roi * 100.0))
+    score += min(10.0, float(stats["liquidity_tradable_tokens"]))
+    score += min(10.0, float(stats["scored_candidates"]))
+    score += min(5.0, max(0.0, float(stats["best_edge"])) * 50.0)
+    score -= min(20.0, float(stats["quarantined_cohorts"]) * 5.0)
+    if stats["settled"] < 3:
+        score -= 10.0
+
+    if family == "unknown" or stats.get("unresolved_unknown_rows", 0) > 0:
+        return "research_only_resolve_family", min(score, -15.0)
+    if stats["settled"] >= 3 and roi > 0.03 and stats["liquidity_tradable_tokens"] > 0:
+        return "candidate_for_focus", score
+    if stats["liquidity_tradable_tokens"] > 0 and stats["settled"] < 3:
+        return "collect_settlement_evidence", score
+    if stats["settled"] >= 3 and roi <= 0:
+        return "avoid_negative_settlement_evidence", score
+    return "avoid", min(score, -10.0)
 
 
 def build_audit(config_path: str = "polymarket_predictive_config.example.yaml") -> dict[str, Any]:
@@ -122,12 +158,16 @@ def build_audit(config_path: str = "polymarket_predictive_config.example.yaml") 
 
     families: dict[str, dict[str, Any]] = defaultdict(_stats)
     for row in settlement_rows:
+        family = str(row.get("family") or "unknown")
+        stats = families[family]
         _add_settlement(
-            families[str(row.get("family") or "unknown")],
+            stats,
             pnl=float(row.get("settlement_pnl_if_held_usdc") or 0.0),
             cost=float(row.get("cost_basis_usdc") or 0.0),
             early_pnl=float(row.get("early_pnl_usdc") or 0.0),
         )
+        if str(row.get("unresolved_unknown") or "").lower() == "true":
+            stats["unresolved_unknown_rows"] += 1
 
     gate_counts: Counter[str] = Counter()
     near_approval: list[dict[str, Any]] = []
@@ -162,6 +202,7 @@ def build_audit(config_path: str = "polymarket_predictive_config.example.yaml") 
                 {
                     "family": family,
                     "market_slug": row.get("market_slug", ""),
+                    "question": row.get("question", ""),
                     "outcome": row.get("outcome", ""),
                     "signal_cohort": row.get("signal_cohort", ""),
                     "edge_lower_bound": edge,
@@ -197,20 +238,7 @@ def build_audit(config_path: str = "polymarket_predictive_config.example.yaml") 
         stake = float(stats["stake"])
         roi = float(stats["settlement_pnl"]) / stake if stake > 0 else 0.0
         win_rate = float(stats["wins"]) / float(stats["settled"]) if stats["settled"] else 0.0
-        score = max(-50.0, min(50.0, roi * 100.0))
-        score += min(10.0, float(stats["liquidity_tradable_tokens"]))
-        score += min(10.0, float(stats["scored_candidates"]))
-        score += min(5.0, max(0.0, float(stats["best_edge"])) * 50.0)
-        score -= min(20.0, float(stats["quarantined_cohorts"]) * 5.0)
-        if stats["settled"] < 3:
-            score -= 10.0
-        decision = "avoid"
-        if stats["settled"] >= 3 and roi > 0.03 and stats["liquidity_tradable_tokens"] > 0:
-            decision = "candidate_for_focus"
-        elif stats["liquidity_tradable_tokens"] > 0 and stats["settled"] < 3:
-            decision = "collect_settlement_evidence"
-        elif stats["settled"] >= 3 and roi <= 0:
-            decision = "avoid_negative_settlement_evidence"
+        decision, score = _decision_for_family(family, stats, roi)
         leaderboard.append(
             {
                 "family": family,
@@ -234,6 +262,7 @@ def build_audit(config_path: str = "polymarket_predictive_config.example.yaml") 
                 "liquidity_max": round(float(stats["liquidity_max"]), 4),
                 "liquidity_min_spread": stats["liquidity_min_spread"],
                 "quarantined_cohorts": int(stats["quarantined_cohorts"]),
+                "unresolved_unknown_rows": int(stats.get("unresolved_unknown_rows", 0)),
             }
         )
     leaderboard.sort(key=lambda row: float(row.get("score") or 0.0), reverse=True)
@@ -275,6 +304,7 @@ def build_audit(config_path: str = "polymarket_predictive_config.example.yaml") 
         "top_10": leaderboard[:10],
         "candidate_for_focus": [row for row in leaderboard if row["decision"] == "candidate_for_focus"],
         "collect_settlement_evidence": [row for row in leaderboard if row["decision"] == "collect_settlement_evidence"][:10],
+        "research_only_resolve_family": [row for row in leaderboard if row["decision"] == "research_only_resolve_family"],
         "avoid": [row for row in leaderboard if row["decision"].startswith("avoid")][:10],
         "failed_gate_counts": dict(gate_counts.most_common()),
     }

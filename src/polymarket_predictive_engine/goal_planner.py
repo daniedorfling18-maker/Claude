@@ -11,6 +11,10 @@ def _num(value: Any, default: float = 0.0) -> float:
     return default if parsed is None else float(parsed)
 
 
+def _dict(value: Any) -> dict[str, Any]:
+    return value if isinstance(value, dict) else {}
+
+
 def _cohorts(payload: dict[str, Any]) -> list[dict[str, Any]]:
     rows = payload.get("cohorts", []) if isinstance(payload, dict) else []
     return [row for row in rows if isinstance(row, dict)] if isinstance(rows, list) else []
@@ -43,17 +47,19 @@ def build_goal_plan(cfg: EngineConfig) -> dict[str, Any]:
     target_daily = target_monthly / 30.0 if target_monthly else 0.0
     target_weekly = target_monthly * 7.0 / 30.0 if target_monthly else 0.0
 
-    tracker = read_json(cfg.governance_root / str(settings.get("tracker_file", "paper_profit_target_tracker.json")), default={}) or {}
-    broker = read_json(cfg.output_root / "polymarket_portfolio" / "paper_trading_summary.json", default={}) or {}
-    cohort_payload = read_json(cfg.governance_root / "signal_cohort_pnl.json", default={}) or {}
+    tracker = _dict(read_json(cfg.governance_root / str(settings.get("tracker_file", "paper_profit_target_tracker.json")), default={}) or {})
+    broker = _dict(read_json(cfg.output_root / "polymarket_portfolio" / "paper_trading_summary.json", default={}) or {})
+    cohort_payload = _dict(read_json(cfg.governance_root / "signal_cohort_pnl.json", default={}) or {})
     rows = _cohorts(cohort_payload)
     approved_signals = read_csv_rows(cfg.output_root / "polymarket_predictions" / "trade_signals.csv")
     rejected_signals = read_csv_rows(cfg.output_root / "polymarket_predictions" / "rejected_signals.csv")
 
+    current = _dict(tracker.get("current"))
+    baseline = _dict(tracker.get("baseline"))
     actual_pnl = _num(
         tracker.get("actual_pnl_since_baseline_usdc"),
-        _num((tracker.get("current") or {}).get("equity_usdc"), _num(broker.get("equity"), 1000.0))
-        - _num((tracker.get("baseline") or {}).get("baseline_equity_usdc"), 1000.0),
+        _num(current.get("equity_usdc"), _num(broker.get("equity"), 1000.0))
+        - _num(baseline.get("baseline_equity_usdc"), 1000.0),
     )
     elapsed_hours = _num(tracker.get("elapsed_hours"))
     elapsed_days = elapsed_hours / 24.0 if elapsed_hours else 0.0

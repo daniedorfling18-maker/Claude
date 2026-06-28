@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from collections import Counter
 from pathlib import Path
 from typing import Any
@@ -44,8 +45,44 @@ def _repo_root(cfg: EngineConfig) -> Path:
     return root if str(root) not in {"", "."} else Path(".")
 
 
-def _status_file(cfg: EngineConfig) -> Path:
-    return _repo_root(cfg) / "work" / "shadow_research_cycle_latest_status.json"
+def _status_file_candidates(cfg: EngineConfig) -> list[Path]:
+    rel = Path("work") / "shadow_research_cycle_latest_status.json"
+    candidates = [
+        _repo_root(cfg) / rel,
+        Path.cwd() / rel,
+        cfg.output_root.parent / rel,
+    ]
+    out: list[Path] = []
+    for path in candidates:
+        if path not in out:
+            out.append(path)
+    return out
+
+
+def _read_json_loose(path: Path) -> Any:
+    """Read a small JSON file that may have been written by PowerShell.
+
+    The repo's normal ``read_json`` uses UTF-8. Some local PowerShell scripts can
+    write status files with UTF-16/Windows encodings, so the sprint report should
+    not silently lose the status snapshot just because of encoding.
+    """
+    if not path.exists() or path.stat().st_size == 0:
+        return None
+    for encoding in ("utf-8", "utf-8-sig", "utf-16", "utf-16-le", "utf-16-be", "cp1252"):
+        try:
+            with path.open("r", encoding=encoding) as handle:
+                return json.load(handle)
+        except Exception:
+            continue
+    return None
+
+
+def _read_shadow_status(cfg: EngineConfig) -> dict[str, Any]:
+    for path in _status_file_candidates(cfg):
+        payload = _read_json_loose(path)
+        if isinstance(payload, dict):
+            return {**payload, "status_file": str(path)}
+    return {"status": "missing", "status_file_candidates": [str(path) for path in _status_file_candidates(cfg)]}
 
 
 def _group_counts(rows: list[dict[str, Any]], field: str) -> list[dict[str, Any]]:
@@ -281,7 +318,7 @@ def build_profit_sprint(cfg: EngineConfig) -> dict[str, Any]:
     approved = read_csv_rows(cfg.output_root / "polymarket_predictions" / "trade_signals.csv")
     rejected = read_csv_rows(cfg.output_root / "polymarket_predictions" / "rejected_signals.csv")
     alpha_scores = read_csv_rows(cfg.output_root / "polymarket_predictions" / "mispricing_alpha_scores.csv")
-    shadow_status = read_json(_status_file(cfg), default={}) or {}
+    shadow_status = _read_shadow_status(cfg)
     tracker = read_json(cfg.governance_root / "paper_profit_target_tracker.json", default={}) or {}
     input_warnings = _input_warnings(cfg)
 
@@ -301,7 +338,7 @@ def build_profit_sprint(cfg: EngineConfig) -> dict[str, Any]:
         probationary_current=probationary_current,
         top_rejection=top_rejection,
         promotion_rows=promotion_rows,
-        shadow_status=shadow_status if isinstance(shadow_status, dict) else {},
+        shadow_status=shadow_status,
         input_warnings=input_warnings,
     )
     actions = _action_rows(
@@ -334,13 +371,15 @@ def build_profit_sprint(cfg: EngineConfig) -> dict[str, Any]:
         "approved_signals": len(approved),
         "rejected_signals": len(rejected),
         "shadow_status": {
-            "status": shadow_status.get("status") if isinstance(shadow_status, dict) else "missing",
-            "paper_allowed": shadow_status.get("paper_allowed") if isinstance(shadow_status, dict) else None,
-            "paper_reason": shadow_status.get("paper_reason") if isinstance(shadow_status, dict) else "",
-            "shadow_total_pnl_usdc": shadow_status.get("shadow_total_pnl_usdc") if isinstance(shadow_status, dict) else None,
-            "shadow_roi": shadow_status.get("shadow_roi") if isinstance(shadow_status, dict) else None,
-            "liquidity_tradable_tokens": shadow_status.get("liquidity_tradable_tokens") if isinstance(shadow_status, dict) else None,
-            "liquidity_fast_feedback_tradable_tokens": shadow_status.get("liquidity_fast_feedback_tradable_tokens") if isinstance(shadow_status, dict) else None,
+            "status": shadow_status.get("status"),
+            "status_file": shadow_status.get("status_file", ""),
+            "paper_allowed": shadow_status.get("paper_allowed"),
+            "paper_reason": shadow_status.get("paper_reason", ""),
+            "shadow_total_pnl_usdc": shadow_status.get("shadow_total_pnl_usdc"),
+            "shadow_roi": shadow_status.get("shadow_roi"),
+            "liquidity_tradable_tokens": shadow_status.get("liquidity_tradable_tokens"),
+            "liquidity_fast_feedback_tradable_tokens": shadow_status.get("liquidity_fast_feedback_tradable_tokens"),
+            "status_file_candidates": shadow_status.get("status_file_candidates", []),
         },
         "promoted_cohorts": sorted(promoted),
         "probationary_cohorts": sorted(probationary),

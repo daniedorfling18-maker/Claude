@@ -106,8 +106,10 @@ def _liquidity_target_rows(cfg: EngineConfig, settings: dict[str, Any]) -> list[
         candidates.append(row)
     candidates.sort(
         key=lambda row: (
+            _boolish(row.get("fast_feedback_liquidity_candidate")),
             safe_float(row.get("liquidity")) or 0.0,
             -(safe_float(row.get("spread")) or 999.0),
+            -(safe_float(row.get("time_to_close_hours")) or 999999.0),
         ),
         reverse=True,
     )
@@ -128,6 +130,16 @@ def _asset_ids_from_rows(rows: list[dict[str, Any]]) -> list[str]:
 def _family_counts(rows: list[dict[str, Any]]) -> dict[str, int]:
     counts: dict[str, int] = {}
     for row in rows:
+        family = str(row.get("family") or row.get("category") or "unknown")
+        counts[family] = counts.get(family, 0) + 1
+    return dict(sorted(counts.items()))
+
+
+def _fast_feedback_counts(rows: list[dict[str, Any]]) -> dict[str, int]:
+    counts: dict[str, int] = {}
+    for row in rows:
+        if not _boolish(row.get("fast_feedback_liquidity_candidate")):
+            continue
         family = str(row.get("family") or row.get("category") or "unknown")
         counts[family] = counts.get(family, 0) + 1
     return dict(sorted(counts.items()))
@@ -226,6 +238,7 @@ def collect_websocket(cfg: EngineConfig, websocket_seconds: int = 60) -> dict[st
             "target_source": target_source,
             "target_assets": len(market_ids),
             "target_family_counts": _family_counts(target_rows),
+            "target_fast_feedback_family_counts": _fast_feedback_counts(target_rows),
             "subscription_attempts": len(variants),
         }
         write_json(out_root / "websocket_summary.json", summary)
@@ -251,6 +264,7 @@ def collect_websocket(cfg: EngineConfig, websocket_seconds: int = 60) -> dict[st
         "target_source": target_source,
         "target_assets": len(market_ids),
         "target_family_counts": _family_counts(target_rows),
+        "target_fast_feedback_family_counts": _fast_feedback_counts(target_rows),
         "target_file": str(cfg.governance_root / "websocket_liquidity_targets.csv") if target_rows else "",
         "selected_subscription": selected_subscription,
         "subscription_attempts": len(variants),
@@ -260,5 +274,5 @@ def collect_websocket(cfg: EngineConfig, websocket_seconds: int = 60) -> dict[st
     return summary
 
 
-def main(config_path: str, websocket_seconds: int = 60) -> dict[str, Any]:
+def collect_websocket_from_config(config_path: str, websocket_seconds: int = 60) -> dict[str, Any]:
     return collect_websocket(load_config(config_path), websocket_seconds=websocket_seconds)

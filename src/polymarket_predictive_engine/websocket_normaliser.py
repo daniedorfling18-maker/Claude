@@ -29,14 +29,19 @@ from pathlib import Path
 from typing import Any
 
 from .config import EngineConfig, load_config
-from .utils import now_utc, read_json, safe_float, write_csv, write_json
+from .utils import now_utc, read_csv_rows, read_json, safe_float, write_csv, write_json
 
-# The 20 feature columns required by the training schema. Order is the CSV order.
+# The feature columns required by the training schema. Order is the CSV order.
 FEATURE_FIELDS = [
     "collected_at_utc",
     "source_timestamp",
     "market",
     "asset_id",
+    "market_slug",
+    "question",
+    "category",
+    "selection",
+    "close_time",
     "event_type",
     "best_bid",
     "best_ask",
@@ -173,6 +178,74 @@ def _quality_row(collected_at_utc: str, event: Any, event_type: str, severity: s
         "issue_type": issue_type,
         "message": message,
     }
+
+
+def _metadata_paths(cfg: EngineConfig) -> list[Path]:
+    return [
+        cfg.governance_root / "websocket_liquidity_targets.csv",
+        cfg.output_root / "polymarket_liquidity_discovery" / "liquidity_watchlist.csv",
+        cfg.output_root / "polymarket" / "market_snapshot.csv",
+        cfg.output_root / "polymarket_fast_updown" / "fast_updown_market_snapshot.csv",
+    ]
+
+
+def _metadata_index(cfg: EngineConfig) -> dict[str, dict[str, str]]:
+    index: dict[str, dict[str, str]] = {}
+    for path in _metadata_paths(cfg):
+        for row in read_csv_rows(path):
+            meta = {
+                "market_slug": _str_or_blank(row.get("market_slug") or row.get("slug")),
+                "question": _str_or_blank(row.get("question") or row.get("title") or row.get("market_question")),
+                "category": _str_or_blank(row.get("family") or row.get("category")),
+                "selection": _str_or_blank(row.get("outcome") or row.get("selection") or row.get("runner")),
+                "close_time": _str_or_blank(row.get("close_time") or row.get("end_time") or row.get("end_date")),
+                "market": _str_or_blank(row.get("market") or row.get("market_id") or row.get("condition_id")),
+            }
+            keys = [
+                row.get("token_id"),
+                row.get("asset_id"),
+                row.get("outcome_token_id"),
+                row.get("market"),
+                row.get("market_id"),
+                row.get("condition_id"),
+                row.get("market_slug"),
+                row.get("slug"),
+            ]
+            for key in keys:
+                key_text = _str_or_blank(key).strip()
+                if key_text and key_text not in index:
+                    index[key_text] = meta
+    return index
+
+
+def _metadata_for_row(index: dict[str, dict[str, str]], row: dict[str, Any]) -> dict[str, str]:
+    for key in (row.get("asset_id"), row.get("market"), row.get("market_slug")):
+        key_text = _str_or_blank(key).strip()
+        if key_text and key_text in index:
+            return index[key_text]
+    return {}
+
+
+def _apply_metadata(cfg: EngineConfig, rows: list[dict[str, Any]]) -> tuple[int, int]:
+    index = _metadata_index(cfg)
+    enriched = 0
+    for row in rows:
+        meta = _metadata_for_row(index, row)
+        if not meta:
+            continue
+        changed = False
+        for field in ("market_slug", "question", "category", "selection", "close_time"):
+            value = meta.get(field, "")
+            current = _str_or_blank(row.get(field)).strip()
+            if value and (not current or current.lower() == "unknown"):
+                row[field] = value
+                changed = True
+        if meta.get("market") and not _str_or_blank(row.get("market")).strip():
+            row["market"] = meta["market"]
+            changed = True
+        if changed:
+            enriched += 1
+    return enriched, len(index)
 
 
 def _normalise_book(collected_at_utc: str, event: dict[str, Any]) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
@@ -329,6 +402,7 @@ def normalize_websocket_file(cfg: EngineConfig, input_path: str | Path | None = 
         features.extend(rows)
         quality.extend(issues)
 
+    metadata_enriched_rows, metadata_index_keys = _apply_metadata(cfg, features)
     _assert_no_leakage(features)
 
     train_root = cfg.output_root / "polymarket_training"
@@ -341,6 +415,7 @@ def normalize_websocket_file(cfg: EngineConfig, input_path: str | Path | None = 
     write_csv(quality_path, quality, fieldnames=QUALITY_FIELDS)
 
     event_type_counts = Counter(row["event_type"] for row in features)
+    category_counts = Counter(str(row.get("category") or "unknown") for row in features)
     issue_type_counts = Counter(row["issue_type"] for row in quality)
     summary = {
         "status": "ok",
@@ -349,6 +424,9 @@ def normalize_websocket_file(cfg: EngineConfig, input_path: str | Path | None = 
         "input_exists": input_path.exists(),
         "messages_processed": len(messages),
         "feature_rows": len(features),
+        "metadata_index_keys": metadata_index_keys,
+        "metadata_enriched_rows": metadata_enriched_rows,
+        "category_counts": dict(sorted(category_counts.items())),
         "quality_rows": len(quality),
         "event_type_counts": dict(sorted(event_type_counts.items())),
         "issue_type_counts": dict(sorted(issue_type_counts.items())),

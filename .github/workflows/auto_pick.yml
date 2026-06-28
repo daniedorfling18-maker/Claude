@@ -63,8 +63,10 @@ jobs:
           LOGIN_URL="${SUPERBRU_LOGIN_URL:-https://www.superbru.com/login}"
           WINDOW_MINUTES="${{ github.event.inputs.window_minutes || '40' }}"
           DRY_RUN_FLAG=""
+          MATCH_ODDS_FLAG=""
           if [ "${{ github.event.inputs.dry_run || 'false' }}" = "true" ]; then
             DRY_RUN_FLAG="--dry-run"
+            MATCH_ODDS_FLAG="--skip-match-odds"
           fi
 
           python scripts/auto_pick_match_scoped_smart_odds.py \
@@ -84,6 +86,7 @@ jobs:
             --headless \
             --require-submission \
             $DRY_RUN_FLAG \
+            $MATCH_ODDS_FLAG \
             --out-dir outputs/pregame_checks/auto_pick
 
       - name: Upload results

@@ -1,0 +1,168 @@
+# Polymarket Current State
+
+Last updated: 2026-06-28
+
+## Status in one paragraph
+
+The Polymarket engine is currently in **automated shadow-research mode**. It is not approved for paper trading, and it must not be used for live trading. The infrastructure now works: websocket collection, metadata enrichment, broad liquidity discovery, prediction, alpha scoring, shadow evidence capture, scheduled automation, and local-history audit all run locally. The blocker is no longer a broken broker or broken websocket path. The blocker is **insufficient positive forward evidence**.
+
+## Current operating verdict
+
+```text
+paper_allowed = false
+live_trading_invoked = false
+paper_trading_invoked = false
+```
+
+The latest audit blocks paper trading for three reasons:
+
+```text
+no approved trade_signals rows
+sports_other shadow evidence is not positive
+sports_other has no closed/settled positions yet
+```
+
+This is the correct fail-closed state.
+
+## What changed during the audit/debug cycle
+
+### 1. The websocket route was fixed
+
+The collector now selects liquidity-derived token IDs and retries the supported Polymarket websocket subscription envelopes. The working envelope observed locally is `assets_ids`. The normaliser now enriches websocket feature rows with market metadata, so `unknown` no longer dominates target data.
+
+### 2. The system moved from silent failure to explainable refusal
+
+Earlier, no trades occurred because no approved signals reached the broker. The paper broker was not the root problem. Rejections happened upstream in alpha, validation, cohort promotion, liquidity, spread, and model-window gates. The current audit makes that explicit.
+
+### 3. Bad 5-minute crypto families are not trusted
+
+Fast 5-minute crypto Up/Down families produced negative shadow/settlement evidence and remain excluded from actionable fast-feedback routing:
+
+```text
+crypto_btc_updown_5m
+crypto_sol_updown_5m
+crypto_xrp_updown_5m
+crypto_updown_5m
+```
+
+They may still appear in diagnostics, but they should not be treated as a path to paper risk.
+
+### 4. `unknown` is diagnostic, not actionable
+
+Some liquid markets classify as `unknown` because the market-family parser does not yet understand them. Examples include esports, tennis outrights, and legal/policy questions. These are useful for research and classifier improvement, but they must not be promoted until a family-specific model and validation path exist.
+
+### 5. `sports_other` is the first real alpha candidate, but not proven
+
+The accepted alpha-shadow candidates are currently World Cup round-of-16 related `sports_other` markets, especially Mexico/Portugal style markets. They are real candidates, but they are still open, negative mark-to-market, and not settled. They close slowly, so they cannot yet support paper promotion.
+
+### 6. BTC 15-minute Up/Down is fast feedback, not the strategy
+
+`crypto_btc_updown_15m` is currently the only valid fast-feedback family discovered with tight liquidity and a short time-to-close window. It is useful because it can test infrastructure/model timing quickly. It is **not** the target strategy by itself, and it has not become accepted alpha-shadow evidence yet.
+
+### 7. Discovery has been broadened
+
+Liquidity discovery now searches broadly across Polymarket opportunity areas, not only crypto:
+
+```text
+sports, soccer, football, basketball, baseball, tennis, golf, UFC,
+esports, World Cup, politics, elections, Trump, Fed, inflation,
+economy, stocks, crypto, BTC/ETH/SOL/XRP, AI, OpenAI, SpaceX,
+weather, culture
+```
+
+Websocket selection now balances liquid targets across families instead of allowing one family, such as BTC 15m, to consume every slot.
+
+## Current automation
+
+The local Windows scheduled task is:
+
+```text
+Polymarket Shadow Research Cycle
+```
+
+It runs:
+
+```text
+liquidity discovery
+websocket collection
+websocket normalisation
+feature build
+prediction
+mispricing alpha scoring
+signal generation as dry/governance output
+alpha-candidate shadow evidence
+local-history audit
+```
+
+It writes the latest status here:
+
+```text
+work/shadow_research_cycle_latest_status.json
+```
+
+A healthy run has:
+
+```text
+status = ok
+paper_trading_invoked = false
+live_trading_invoked = false
+```
+
+## Current important output files
+
+```text
+work/shadow_research_cycle_latest_status.json
+outputs/polymarket_model_governance/local_history_audit_report.md
+outputs/polymarket_model_governance/local_history_audit_summary.json
+outputs/polymarket_model_governance/liquidity_discovery_summary.json
+outputs/polymarket_model_governance/websocket_liquidity_targets.csv
+outputs/polymarket_model_governance/alpha_candidate_shadow_evidence_inputs.csv
+outputs/polymarket_shadow/shadow_positions.csv
+outputs/polymarket_shadow/shadow_fills.csv
+outputs/polymarket_predictions/mispricing_alpha_scores.csv
+outputs/polymarket_predictions/rejected_signals.csv
+outputs/polymarket_predictions/trade_signals.csv
+```
+
+`trade_signals.csv` being empty is currently expected. It means the governance layer is not allowing paper trades.
+
+## Promotion requirements before paper can be considered
+
+Do not paper trade until the audit stops blocking and the relevant family has forward evidence. The important requirements are:
+
+```text
+approved trade signals exist
+family-specific shadow evidence is positive
+closed/settled fills exist
+ROI is positive and clears the configured threshold
+monthly run-rate is plausible
+cohort is probationary/promoted by governance
+```
+
+The goal is not to get any trade. The goal is to find a repeatable family with positive forward evidence.
+
+## Why $100/month is not solved yet
+
+At the current probationary stake of $2, a 3% ROI produces only $0.06 per trade. Hitting $100/month at that level would require about 1,667 trades/month, which is not realistic. The route to the target is therefore:
+
+```text
+1. Discover broad liquid opportunities.
+2. Classify them into reliable families.
+3. Prove one family in shadow with positive closed evidence.
+4. Move only that family to tiny probationary paper.
+5. Scale stake only after the evidence remains positive.
+```
+
+Scaling stake before evidence would scale losses, not expected value.
+
+## Next research priorities
+
+1. **Keep broad discovery enabled.** The scanner must search all plausible Polymarket opportunity areas, not only BTC Up/Down.
+2. **Improve family classification.** Liquid `unknown` markets should be categorised into real families such as esports, tennis outrights, legal/policy, culture, weather, macro, and company/tech events.
+3. **Add independent anchors where possible.** Sports candidates need sharper fair probabilities, ideally bookmaker/no-vig or exchange-based fair odds. Crypto event candidates need independent fundamental anchors where possible.
+4. **Keep BTC 15m as a timing diagnostic only.** It is useful for fast feedback, but it should not become the strategy unless it produces accepted positive shadow evidence.
+5. **Wait for sports evidence to close/settle.** `sports_other` is currently the only accepted alpha-shadow family, but it is not yet positive or settled.
+
+## Safety rule
+
+Do not weaken gates to force activity. No paper or live risk should be taken because the system is bored, quiet, or waiting for settlement. The current correct state is automated shadow research plus explicit audit blocking.

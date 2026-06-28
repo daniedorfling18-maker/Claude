@@ -49,6 +49,10 @@ async def _collect_messages(
                 message = await asyncio.wait_for(ws.recv(), timeout=max(0.1, min(1.0, deadline - time.time())))
             except asyncio.TimeoutError:
                 continue
+            except Exception:
+                if rows:
+                    break
+                raise
             rows.append({"collected_at_utc": now_utc(), "message": message})
     return rows
 
@@ -129,6 +133,47 @@ def _family_counts(rows: list[dict[str, Any]]) -> dict[str, int]:
     return dict(sorted(counts.items()))
 
 
+def _subscription_variants(asset_ids: list[str], settings: dict[str, Any], *, dynamic_ids: bool) -> list[dict[str, Any]]:
+    if not dynamic_ids:
+        configured = settings.get("subscription_message")
+        return [configured] if isinstance(configured, dict) else [{"markets": asset_ids, "type": "market"}]
+    return [
+        {"assets_ids": asset_ids, "type": "market"},
+        {"asset_ids": asset_ids, "type": "market"},
+        {"markets": asset_ids, "type": "market"},
+    ]
+
+
+def _collect_with_variants(
+    *,
+    url: str,
+    seconds: int,
+    variants: list[dict[str, Any]],
+    connect_timeout_seconds: float,
+) -> tuple[list[dict[str, Any]], str, list[str]]:
+    errors: list[str] = []
+    if not variants:
+        return [], "", errors
+    per_attempt = max(5, int(seconds / max(1, len(variants))))
+    for variant in variants:
+        try:
+            rows = asyncio.run(
+                _collect_messages(
+                    url,
+                    per_attempt,
+                    variant,
+                    connect_timeout_seconds=connect_timeout_seconds,
+                )
+            )
+        except Exception as exc:  # noqa: BLE001 - try the next supported envelope
+            errors.append(f"{list(variant.keys())}:{type(exc).__name__}: {exc}")
+            continue
+        if rows:
+            return rows, json.dumps(variant, sort_keys=True), errors
+        errors.append(f"{list(variant.keys())}:no_messages")
+    return [], "", errors
+
+
 def collect_websocket(cfg: EngineConfig, websocket_seconds: int = 60) -> dict[str, Any]:
     settings = cfg.raw.get("websocket_market_data", {})
     out_root = cfg.output_root / "polymarket_websocket"
@@ -158,23 +203,20 @@ def collect_websocket(cfg: EngineConfig, websocket_seconds: int = 60) -> dict[st
         write_json(out_root / "websocket_summary.json", summary)
         return summary
     url = str(settings.get("url", "wss://ws-subscriptions-clob.polymarket.com/ws/market"))
-    subscription = {"markets": market_ids, "type": "market"} if dynamic_ids else settings.get("subscription_message") or {"markets": market_ids, "type": "market"}
+    variants = _subscription_variants(market_ids, settings, dynamic_ids=bool(dynamic_ids))
     output_file = out_root / "websocket_messages.json"
     existing_rows = _existing_messages(output_file)
     connect_timeout = float(settings.get("connect_timeout_seconds", 8.0))
-    try:
-        new_rows = asyncio.run(
-            _collect_messages(
-                url,
-                websocket_seconds,
-                subscription,
-                connect_timeout_seconds=connect_timeout,
-            )
-        )
-    except Exception as exc:  # noqa: BLE001 - collection should fail closed on socket stalls
+    new_rows, selected_subscription, variant_errors = _collect_with_variants(
+        url=url,
+        seconds=websocket_seconds,
+        variants=variants,
+        connect_timeout_seconds=connect_timeout,
+    )
+    if not new_rows:
         summary = {
             "status": "error",
-            "reason": f"{type(exc).__name__}: {exc}",
+            "reason": "; ".join(variant_errors[-5:]) or "websocket returned no messages",
             "messages": len(existing_rows),
             "new_messages": 0,
             "existing_messages": len(existing_rows),
@@ -184,6 +226,7 @@ def collect_websocket(cfg: EngineConfig, websocket_seconds: int = 60) -> dict[st
             "target_source": target_source,
             "target_assets": len(market_ids),
             "target_family_counts": _family_counts(target_rows),
+            "subscription_attempts": len(variants),
         }
         write_json(out_root / "websocket_summary.json", summary)
         return summary
@@ -209,6 +252,9 @@ def collect_websocket(cfg: EngineConfig, websocket_seconds: int = 60) -> dict[st
         "target_assets": len(market_ids),
         "target_family_counts": _family_counts(target_rows),
         "target_file": str(cfg.governance_root / "websocket_liquidity_targets.csv") if target_rows else "",
+        "selected_subscription": selected_subscription,
+        "subscription_attempts": len(variants),
+        "subscription_errors": variant_errors[-5:],
     }
     write_json(out_root / "websocket_summary.json", summary)
     return summary

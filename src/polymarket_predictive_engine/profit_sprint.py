@@ -18,6 +18,14 @@ DECISION_COLLECT_MORE_EVIDENCE = "COLLECT_MORE_EVIDENCE"
 DECISION_FIX_INPUTS = "FIX_INPUTS"
 DECISION_DO_NOT_TRADE_NEGATIVE_EVIDENCE = "DO_NOT_TRADE_NEGATIVE_EVIDENCE"
 
+TARGET_WAIT_ACTIVE_WINDOW = "WAIT_ACTIVE_WINDOW"
+TARGET_SHADOW_LABEL_GATE = "SHADOW_LABEL_GATE"
+TARGET_SHADOW_EDGE_WATCH = "SHADOW_EDGE_WATCH"
+TARGET_IGNORE_LOW_EDGE = "IGNORE_LOW_EDGE"
+TARGET_IGNORE_LIQUIDITY = "IGNORE_LIQUIDITY"
+TARGET_IGNORE_BOOKMAKER = "IGNORE_BOOKMAKER"
+TARGET_IGNORE_NEGATIVE_EDGE = "IGNORE_NEGATIVE_EDGE"
+
 
 _ACTION_PRIORITY = {
     DECISION_PAPER_TRADE_READY: 100,
@@ -26,6 +34,16 @@ _ACTION_PRIORITY = {
     DECISION_COLLECT_MORE_EVIDENCE: 60,
     DECISION_FIX_INPUTS: 50,
     DECISION_DO_NOT_TRADE_NEGATIVE_EVIDENCE: 10,
+}
+
+_TARGET_PRIORITY = {
+    TARGET_WAIT_ACTIVE_WINDOW: 95,
+    TARGET_SHADOW_LABEL_GATE: 85,
+    TARGET_SHADOW_EDGE_WATCH: 65,
+    TARGET_IGNORE_LIQUIDITY: 35,
+    TARGET_IGNORE_BOOKMAKER: 30,
+    TARGET_IGNORE_LOW_EDGE: 20,
+    TARGET_IGNORE_NEGATIVE_EDGE: 5,
 }
 
 
@@ -184,6 +202,122 @@ def _input_warnings(cfg: EngineConfig) -> list[dict[str, Any]]:
     return warnings
 
 
+def _target_thresholds(cfg: EngineConfig) -> dict[str, float]:
+    alpha = cfg.raw.get("mispricing_alpha", {}) or {}
+    near = alpha.get("near_miss_learning", {}) or {}
+    return {
+        "min_liquidity": float(alpha.get("min_liquidity_for_alpha_trade", near.get("min_liquidity", 100.0)) or 100.0),
+        "max_spread": float(alpha.get("max_spread_for_alpha_trade", near.get("max_spread", 0.04)) or 0.04),
+        "edge_watch_floor": float(near.get("min_edge_lower_bound", 0.0) or 0.0),
+    }
+
+
+def _recommended_query(row: dict[str, Any]) -> str:
+    text = " ".join(str(row.get(key) or "") for key in ("market_slug", "question", "category", "signal_cohort")).lower()
+    if "xrp" in text:
+        return "xrp updown" if "updown" in text else "xrp"
+    if "solana" in text or "sol_" in text or "crypto_sol" in text:
+        return "solana updown"
+    if "btc" in text or "bitcoin" in text:
+        return "btc updown" if "updown" in text else "bitcoin"
+    if "worldcup" in text or "world cup" in text:
+        return "world cup"
+    if "sports_other" in text or "round-of-16" in text:
+        return "sports"
+    if "tennis" in text:
+        return "tennis"
+    return "top_active"
+
+
+def _target_next_command(action: str) -> str:
+    if action == TARGET_WAIT_ACTIVE_WINDOW:
+        return "polymarket-engine paper-cycle --config polymarket_predictive_config.example.yaml --paper-source websocket"
+    if action == TARGET_SHADOW_LABEL_GATE:
+        return "polymarket-engine collect-snapshot-labels --config polymarket_predictive_config.example.yaml"
+    if action == TARGET_IGNORE_BOOKMAKER:
+        return "polymarket-engine refresh-sharp-anchor --config polymarket_predictive_config.example.yaml"
+    return "polymarket-engine profit-sprint --config polymarket_predictive_config.example.yaml"
+
+
+def _classify_rejected_row(cfg: EngineConfig, row: dict[str, Any]) -> dict[str, Any]:
+    thresholds = _target_thresholds(cfg)
+    reason = str(row.get("rejection_reason") or "")
+    reason_l = reason.lower()
+    edge = safe_float(row.get("edge_lower_bound"))
+    if edge is None:
+        edge = safe_float(row.get("edge"))
+    liquidity = _num(row.get("liquidity"), 0.0)
+    spread = safe_float(row.get("spread"))
+    spread_value = spread if spread is not None else 999.0
+    positive_edge = edge is not None and edge > thresholds["edge_watch_floor"]
+    liquid = liquidity >= thresholds["min_liquidity"]
+    tight = spread_value <= thresholds["max_spread"]
+
+    if "before_model_window" in reason_l and positive_edge and liquid and tight:
+        action = TARGET_WAIT_ACTIVE_WINDOW
+        target_reason = "Positive edge, liquid/tight book, but fast crypto model says this is before the valid trading window."
+    elif "same-category validation gate failed" in reason_l and positive_edge and liquid and tight:
+        action = TARGET_SHADOW_LABEL_GATE
+        target_reason = "Positive edge but category label gate is not satisfied; collect shadow/label evidence only."
+    elif "bookmaker_fundamental_cross_check_failed" in reason_l:
+        action = TARGET_IGNORE_BOOKMAKER
+        target_reason = "Bookmaker/fundamental cross-check failed; do not trade until independent anchor agrees."
+    elif "liquidity_below" in reason_l or "spread_above" in reason_l or not liquid or not tight:
+        action = TARGET_IGNORE_LIQUIDITY
+        target_reason = "Liquidity/spread is not good enough for the current edge; wait for a better book."
+    elif edge is None or edge <= 0:
+        action = TARGET_IGNORE_NEGATIVE_EDGE
+        target_reason = "No positive lower-bound edge after costs and haircuts."
+    elif positive_edge:
+        action = TARGET_SHADOW_EDGE_WATCH
+        target_reason = "Positive lower-bound edge exists but not enough to pass paper-entry gates; keep in watch/shadow mode."
+    else:
+        action = TARGET_IGNORE_LOW_EDGE
+        target_reason = "Lower-bound edge is below the configured trading threshold."
+
+    # A mild score keeps the queue stable inside each target class without making
+    # any row tradeable. The action class remains the real decision.
+    score = (
+        _TARGET_PRIORITY[action]
+        + max(0.0, edge or 0.0) * 100.0
+        + min(liquidity, 5000.0) / 1000.0
+        - max(0.0, spread_value) * 10.0
+    )
+    return {
+        "target_action": action,
+        "priority": _TARGET_PRIORITY[action],
+        "target_score": round(score, 6),
+        "market_slug": row.get("market_slug", ""),
+        "question": row.get("question", ""),
+        "outcome": row.get("outcome", ""),
+        "category": row.get("category", ""),
+        "signal_cohort": row.get("signal_cohort", ""),
+        "edge_lower_bound": "" if edge is None else edge,
+        "liquidity": liquidity,
+        "spread": "" if spread is None else spread,
+        "rejection_reason": reason,
+        "recommended_query": _recommended_query(row),
+        "reason": target_reason,
+        "next_command": _target_next_command(action),
+    }
+
+
+def _build_target_queue(cfg: EngineConfig, rejected: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    rows = [_classify_rejected_row(cfg, row) for row in rejected]
+    rows.sort(
+        key=lambda row: (
+            _num(row.get("priority")),
+            _num(row.get("target_score")),
+            str(row.get("market_slug") or ""),
+            str(row.get("outcome") or ""),
+        ),
+        reverse=True,
+    )
+    for rank, row in enumerate(rows, start=1):
+        row["rank"] = rank
+    return rows
+
+
 def _top_rejection_reason(rejection_counts: list[dict[str, Any]]) -> str:
     if not rejection_counts:
         return ""
@@ -195,6 +329,7 @@ def _choose_decision(
     approved: list[dict[str, Any]],
     promoted_current: list[dict[str, Any]],
     probationary_current: list[dict[str, Any]],
+    target_rows: list[dict[str, Any]],
     top_rejection: str,
     promotion_rows: list[dict[str, Any]],
     shadow_status: dict[str, Any],
@@ -206,6 +341,8 @@ def _choose_decision(
         return DECISION_PAPER_TRADE_READY, "A current candidate matches a promoted cohort; keep sizing/risk gates intact."
     if probationary_current:
         return DECISION_PROBATIONARY_PROBE_READY, "A current candidate matches a probationary cohort; keep the probationary stake cap small."
+    if any(row.get("target_action") == TARGET_WAIT_ACTIVE_WINDOW for row in target_rows):
+        return DECISION_WAIT_ACTIVE_WINDOW, "Best current targets are liquid positive-edge crypto Up/Down rows that must be rescored inside the model window."
     if "before_model_window" in top_rejection:
         return DECISION_WAIT_ACTIVE_WINDOW, "Current crypto Up/Down rows are liquid but outside the live model window."
     actionable = [row for row in promotion_rows if str(row.get("status") or "") in {"probationary", "eligible_for_probationary_review", "near_full_promotion", "near_probationary", "collecting_evidence"}]
@@ -228,6 +365,7 @@ def _action_rows(
     promoted_current: list[dict[str, Any]],
     probationary_current: list[dict[str, Any]],
     promotion_rows: list[dict[str, Any]],
+    target_rows: list[dict[str, Any]],
     rejection_counts: list[dict[str, Any]],
     input_warnings: list[dict[str, Any]],
 ) -> list[dict[str, Any]]:
@@ -262,6 +400,20 @@ def _action_rows(
                 }
             )
             rank += 1
+    for row in target_rows[:8]:
+        rows.append(
+            {
+                "rank": rank,
+                "action": row.get("target_action", ""),
+                "priority": row.get("priority", 0),
+                "source": "profit_sprint_targets",
+                "cohort": row.get("signal_cohort", ""),
+                "market_slug": row.get("market_slug", ""),
+                "reason": row.get("reason", ""),
+                "next_command": row.get("next_command", ""),
+            }
+        )
+        rank += 1
     for row in promotion_rows[:8]:
         rows.append(
             {
@@ -330,12 +482,15 @@ def build_profit_sprint(cfg: EngineConfig) -> dict[str, Any]:
         probationary=probationary,
         near_miss_prefix=near_miss_prefix,
     )
+    target_rows = _build_target_queue(cfg, rejected)
     rejection_counts = _group_counts(rejected, "rejection_reason")
+    target_counts = _group_counts(target_rows, "target_action")
     top_rejection = _top_rejection_reason(rejection_counts)
     decision, decision_reason = _choose_decision(
         approved=approved,
         promoted_current=promoted_current,
         probationary_current=probationary_current,
+        target_rows=target_rows,
         top_rejection=top_rejection,
         promotion_rows=promotion_rows,
         shadow_status=shadow_status,
@@ -348,13 +503,16 @@ def build_profit_sprint(cfg: EngineConfig) -> dict[str, Any]:
         promoted_current=promoted_current,
         probationary_current=probationary_current,
         promotion_rows=promotion_rows,
+        target_rows=target_rows,
         rejection_counts=rejection_counts,
         input_warnings=input_warnings,
     )
 
     out_dir = cfg.governance_root
     action_path = cfg.output_root / "polymarket_predictions" / "profit_sprint_actions.csv"
+    target_path = out_dir / "profit_sprint_targets.csv"
     write_csv(action_path, actions)
+    write_csv(target_path, target_rows)
 
     payload = {
         "status": "ok",
@@ -386,13 +544,17 @@ def build_profit_sprint(cfg: EngineConfig) -> dict[str, Any]:
         "current_promoted_candidates": promoted_current[:10],
         "current_probationary_candidates": probationary_current[:10],
         "top_rejection_reasons": rejection_counts[:10],
+        "target_summary": target_counts,
+        "top_targets": target_rows[:10],
         "top_actionable": promotion.get("top_actionable", [])[:10] if isinstance(promotion, dict) else [],
         "input_warnings": input_warnings,
         "actions_file": str(action_path),
+        "targets_file": str(target_path),
         "plan_file": str(out_dir / "profit_sprint_plan.json"),
         "notes": [
             "Read/report only: no orders, no live trading, no threshold changes.",
             "Use PAPER_TRADE_READY or PROBATIONARY_PROBE_READY only as a cue to run the existing paper broker path under current risk gates.",
+            "WAIT_ACTIVE_WINDOW targets are not trades; they are queued for rescoring when the model window opens.",
         ],
     }
     write_json(out_dir / "profit_sprint_plan.json", payload)

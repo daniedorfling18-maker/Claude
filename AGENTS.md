@@ -16,8 +16,9 @@ live_trading_invoked = false
 
 The reason is not a broken broker. The infrastructure now works. The blocker is insufficient positive
 forward evidence: `sports_other` has accepted shadow candidates, but the cohort is still negative and
-has no closed/settled positions. See:
+has no closed/settled positions. Start with:
 
+- `docs/POLYMARKET_RESEARCH_README.md`
 - `docs/POLYMARKET_CURRENT_STATE.md`
 - `docs/POLYMARKET_SHADOW_RESEARCH_RUNBOOK.md`
 
@@ -118,6 +119,7 @@ None of those is local dev. If you *are* deploying with Docker:
 
 | Topic | File |
 |---|---|
+| Dedicated Polymarket README | `docs/POLYMARKET_RESEARCH_README.md` |
 | Current Polymarket state | `docs/POLYMARKET_CURRENT_STATE.md` |
 | Shadow research runbook | `docs/POLYMARKET_SHADOW_RESEARCH_RUNBOOK.md` |
 | Running lean / memory | `docs/RUNNING_LEAN.md` |

@@ -113,6 +113,35 @@ def _is_long_horizon(row: dict[str, Any], settings: dict[str, Any]) -> bool:
     return time_to_close is None or time_to_close >= min_hours
 
 
+def _crypto_updown_slug_window(slug: Any) -> tuple[str, int, datetime, datetime] | None:
+    match = re.match(r"^(btc|eth|sol|xrp)-updown-(5m|15m)-(\d+)$", str(slug or "").strip().lower())
+    if not match:
+        return None
+    asset_key, interval_raw, timestamp_raw = match.groups()
+    interval_minutes = 15 if interval_raw == "15m" else 5
+    start_utc = datetime.fromtimestamp(int(timestamp_raw), tz=timezone.utc)
+    end_utc = start_utc + timedelta(minutes=interval_minutes)
+    return asset_key, interval_minutes, start_utc, end_utc
+
+
+def _crypto_updown_slug_close_time(slug: Any) -> str:
+    window = _crypto_updown_slug_window(slug)
+    if window is None:
+        return ""
+    return window[3].isoformat().replace("+00:00", "Z")
+
+
+def _is_fast_crypto_updown_position(position: dict[str, Any]) -> bool:
+    window = _crypto_updown_slug_window(position.get("market_slug"))
+    return bool(window and window[1] in {5, 15})
+
+
+def _settlement_only_shadow_position(position: dict[str, Any], settings: dict[str, Any]) -> bool:
+    if not boolish(settings.get("settlement_only_fast_crypto_updown", True)):
+        return False
+    return _is_fast_crypto_updown_position(position)
+
+
 def _soonest_first_score(row: dict[str, Any]) -> float:
     time_to_close = _time_to_close_hours(row)
     if time_to_close is None:
@@ -126,6 +155,12 @@ def _normalise_position_row(position: dict[str, Any]) -> None:
     for key in ("outcome", "close_time", "rule_scope", "time_to_close_hours"):
         if not str(position.get(key) or "").strip() and payload.get(key) not in (None, ""):
             position[key] = payload.get(key)
+    if not str(position.get("close_time") or "").strip():
+        inferred_close = _crypto_updown_slug_close_time(position.get("market_slug"))
+        if inferred_close:
+            position["close_time"] = inferred_close
+    if _is_fast_crypto_updown_position(position):
+        position.setdefault("settlement_policy", "final_settlement_only")
 
 
 def _age_hours(opened_at: Any) -> float:
@@ -810,6 +845,7 @@ def _summarise_shadow(cfg: EngineConfig, positions: list[dict[str, Any]], fills:
             "fast_feedback_max_time_to_close_hours": float(settings.get("fast_feedback_max_time_to_close_hours", 6.0)),
             "minimum_fast_feedback_slots": int(settings.get("minimum_fast_feedback_slots", 0) or 0),
             "quarantine_negative_cohorts": boolish(settings.get("quarantine_negative_cohorts", True)),
+            "settlement_only_fast_crypto_updown": boolish(settings.get("settlement_only_fast_crypto_updown", True)),
         },
         "cohorts": cohorts,
         "promotion_watchlist": promotion_watchlist,
@@ -864,7 +900,9 @@ def update_shadow_cohort_evidence(cfg: EngineConfig, predictions: list[dict[str,
         position["return_pct"] = return_pct
         position["updated_at"] = now
         close_reason = ""
-        if return_pct >= take_profit:
+        if _settlement_only_shadow_position(position, settings):
+            position["settlement_policy"] = "final_settlement_only"
+        elif return_pct >= take_profit:
             close_reason = "shadow_take_profit"
         elif return_pct <= -abs(stop_loss):
             close_reason = "shadow_stop_loss"
@@ -947,6 +985,7 @@ def update_shadow_cohort_evidence(cfg: EngineConfig, predictions: list[dict[str,
         position_id = _stable_id("shadow_position", key)
         if any(str(position.get("shadow_position_id")) == position_id for position in positions):
             continue
+        close_time = row.get("close_time", "") or _crypto_updown_slug_close_time(row.get("market_slug"))
         position = {
             "shadow_position_id": position_id,
             "policy_version": policy_version,
@@ -961,7 +1000,8 @@ def update_shadow_cohort_evidence(cfg: EngineConfig, predictions: list[dict[str,
             "question": row.get("question", ""),
             "category": row.get("category", ""),
             "outcome": row.get("outcome", ""),
-            "close_time": row.get("close_time", ""),
+            "close_time": close_time,
+            "settlement_policy": "final_settlement_only" if _is_fast_crypto_updown_position(row) else "mark_exit_allowed",
             "rule_scope": row.get("rule_scope", ""),
             "correlation_key": normalised_correlation_key(row),
             "signal_cohort": cohort,

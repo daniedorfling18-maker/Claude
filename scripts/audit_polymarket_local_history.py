@@ -12,7 +12,6 @@ import csv
 import json
 import sys
 from collections import Counter, defaultdict
-from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -32,20 +31,13 @@ def _read_csv(path: Path) -> list[dict[str, Any]]:
         return list(csv.DictReader(handle))
 
 
-def _read_json(path: Path) -> Any:
-    if not path.exists() or path.stat().st_size == 0:
-        return {}
-    with path.open("r", encoding="utf-8") as handle:
-        return json.load(handle)
-
-
 def _timestamp_range(rows: list[dict[str, Any]], keys: tuple[str, ...]) -> dict[str, str]:
     values: list[str] = []
     for row in rows:
         for key in keys:
             parsed = parse_timestamp(row.get(key))
             if parsed is not None:
-                values.append(parsed.astimezone(timezone.utc).isoformat().replace("+00:00", "Z"))
+                values.append(parsed.isoformat().replace("+00:00", "Z"))
                 break
     if not values:
         return {"min": "", "max": ""}
@@ -219,10 +211,13 @@ def _family_summary(rows: list[dict[str, Any]]) -> dict[str, Any]:
 
 def _paper_decision(payload: dict[str, Any]) -> dict[str, Any]:
     blockers: list[str] = []
+    warnings: list[str] = []
     if payload["signals"]["approved"] <= 0:
         blockers.append("no approved trade_signals rows")
     if payload["shadow"]["total_pnl_usdc"] < 0:
-        blockers.append("aggregate shadow P&L is negative")
+        warnings.append(
+            "aggregate shadow P&L is negative across all experimental cohorts; diagnostic warning, not a cross-family paper blocker"
+        )
     sports = next(
         (row for row in payload["shadow_cohorts"] if row.get("signal_cohort") == "sports_other"),
         None,
@@ -232,9 +227,11 @@ def _paper_decision(payload: dict[str, Any]) -> dict[str, Any]:
             blockers.append("sports_other shadow evidence is not positive")
         if int(sports.get("closed_positions") or 0) <= 0:
             blockers.append("sports_other has no closed/settled positions yet")
+    else:
+        blockers.append("sports_other has no shadow evidence yet")
     if blockers:
-        return {"paper_allowed": False, "reason": "; ".join(blockers)}
-    return {"paper_allowed": True, "reason": "local evidence gates are satisfied"}
+        return {"paper_allowed": False, "reason": "; ".join(blockers), "warnings": warnings}
+    return {"paper_allowed": True, "reason": "local family-specific evidence gates are satisfied", "warnings": warnings}
 
 
 def _write_markdown(path: Path, payload: dict[str, Any]) -> None:
@@ -247,27 +244,37 @@ def _write_markdown(path: Path, payload: dict[str, Any]) -> None:
         "",
         payload["paper_decision"]["reason"],
         "",
-        "## Core counts",
-        "",
-        f"- Features: {payload['features']['rows']}",
-        f"- Labels: {payload['labels']['rows']}",
-        f"- Predictions: {payload['alpha']['rows']}",
-        f"- Approved signals: {payload['signals']['approved']}",
-        f"- Rejected signals: {payload['signals']['rejected']}",
-        f"- Shadow positions: {payload['shadow']['positions']}",
-        f"- Shadow fills: {payload['shadow']['fills']}",
-        "",
-        "## Shadow P&L",
-        "",
-        f"- Cost basis: {payload['shadow']['total_cost_basis_usdc']:.2f}",
-        f"- Realised P&L: {payload['shadow']['realised_pnl_usdc']:.2f}",
-        f"- Unrealised P&L: {payload['shadow']['unrealised_pnl_usdc']:.2f}",
-        f"- Total P&L: {payload['shadow']['total_pnl_usdc']:.2f}",
-        f"- ROI: {payload['shadow']['roi']:.4f}",
-        "",
-        "## Top rejection reasons",
-        "",
     ]
+    warnings = payload["paper_decision"].get("warnings") or []
+    if warnings:
+        lines.extend(["## Warnings", ""])
+        for warning in warnings:
+            lines.append(f"- {warning}")
+        lines.append("")
+    lines.extend(
+        [
+            "## Core counts",
+            "",
+            f"- Features: {payload['features']['rows']}",
+            f"- Labels: {payload['labels']['rows']}",
+            f"- Predictions: {payload['alpha']['rows']}",
+            f"- Approved signals: {payload['signals']['approved']}",
+            f"- Rejected signals: {payload['signals']['rejected']}",
+            f"- Shadow positions: {payload['shadow']['positions']}",
+            f"- Shadow fills: {payload['shadow']['fills']}",
+            "",
+            "## Shadow P&L",
+            "",
+            f"- Cost basis: {payload['shadow']['total_cost_basis_usdc']:.2f}",
+            f"- Realised P&L: {payload['shadow']['realised_pnl_usdc']:.2f}",
+            f"- Unrealised P&L: {payload['shadow']['unrealised_pnl_usdc']:.2f}",
+            f"- Total P&L: {payload['shadow']['total_pnl_usdc']:.2f}",
+            f"- ROI: {payload['shadow']['roi']:.4f}",
+            "",
+            "## Top rejection reasons",
+            "",
+        ]
+    )
     for reason, count in payload["signals"]["top_rejection_reasons"].items():
         lines.append(f"- {count}: {reason}")
     lines.extend(["", "## Top alpha rows", ""])
@@ -325,19 +332,25 @@ def run(config_path: str = "polymarket_predictive_config.example.yaml") -> dict[
     write_csv(governance_root / "local_history_shadow_cohorts.csv", shadow_cohorts)
     write_csv(governance_root / "local_history_file_inventory.csv", payload["files"])
     _write_markdown(governance_root / "local_history_audit_report.md", payload)
-    print(json.dumps({
-        "status": "ok",
-        "paper_decision": payload["paper_decision"],
-        "features": payload["features"]["rows"],
-        "labels": payload["labels"]["rows"],
-        "approved_signals": payload["signals"]["approved"],
-        "rejected_signals": payload["signals"]["rejected"],
-        "shadow_positions": payload["shadow"]["positions"],
-        "shadow_total_pnl_usdc": payload["shadow"]["total_pnl_usdc"],
-        "shadow_roi": payload["shadow"]["roi"],
-        "report": str(governance_root / "local_history_audit_report.md"),
-        "summary": str(governance_root / "local_history_audit_summary.json"),
-    }, indent=2, sort_keys=True))
+    print(
+        json.dumps(
+            {
+                "status": "ok",
+                "paper_decision": payload["paper_decision"],
+                "features": payload["features"]["rows"],
+                "labels": payload["labels"]["rows"],
+                "approved_signals": payload["signals"]["approved"],
+                "rejected_signals": payload["signals"]["rejected"],
+                "shadow_positions": payload["shadow"]["positions"],
+                "shadow_total_pnl_usdc": payload["shadow"]["total_pnl_usdc"],
+                "shadow_roi": payload["shadow"]["roi"],
+                "report": str(governance_root / "local_history_audit_report.md"),
+                "summary": str(governance_root / "local_history_audit_summary.json"),
+            },
+            indent=2,
+            sort_keys=True,
+        )
+    )
     return payload
 
 

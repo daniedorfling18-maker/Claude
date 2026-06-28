@@ -12,6 +12,7 @@ import dataclasses
 from datetime import datetime, timedelta, timezone
 import sys
 from pathlib import Path
+import traceback
 from typing import Any
 from urllib.parse import urlencode
 
@@ -536,9 +537,33 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
+def _write_error_summary(config_path: str, payload: dict[str, Any]) -> None:
+    try:
+        cfg = load_config(config_path)
+        write_json(cfg.governance_root / "liquidity_discovery_summary.json", payload)
+    except Exception:
+        fallback = ROOT / "outputs" / "polymarket_model_governance"
+        fallback.mkdir(parents=True, exist_ok=True)
+        write_json(fallback / "liquidity_discovery_summary.json", payload)
+
+
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
-    payload = run_liquidity_discovery(load_config(args.config))
+    try:
+        payload = run_liquidity_discovery(load_config(args.config))
+    except Exception as exc:  # noqa: BLE001 - preserve diagnostics for PowerShell wrappers
+        trace = traceback.format_exc()
+        payload = {
+            "status": "error",
+            "generated_at_utc": now_utc(),
+            "error": f"{type(exc).__name__}: {exc}",
+            "traceback": trace,
+            "diagnostic_note": "Liquidity discovery failed before producing a watchlist. Full traceback is preserved here because some PowerShell wrappers only log the first traceback line.",
+        }
+        _write_error_summary(args.config, payload)
+        print(trace, file=sys.stderr)
+        print(payload)
+        return 2
     print(payload)
     return 0 if payload.get("status") in {"computed", "disabled"} else 2
 

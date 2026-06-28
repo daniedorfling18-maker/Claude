@@ -68,6 +68,11 @@ def _team_js_body(find_row: bool) -> str:
       el.click();
       return el.getAttribute('data-bru-tab') + ': ' + el.getAttribute('data-brutip');"""
         after_loop = """
+  const round4 = document.querySelector('[data-bru-tab="round4"]');
+  if (round4) {
+    round4.click();
+    return 'round:round4: Round of 32';
+  }
   return null;"""
 
     return f"""

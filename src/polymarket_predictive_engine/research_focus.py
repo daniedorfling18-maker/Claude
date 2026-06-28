@@ -40,11 +40,9 @@ def _readiness_gap(row: dict[str, Any]) -> dict[str, Any]:
 
 def _cohort_query(cohort: str) -> str:
     text = cohort.lower()
-    # Unknown near-miss cohorts are real evidence but do not identify a family.
-    # Use the most liquid short-horizon research lane instead of the non-actionable
-    # placeholder "research" so dashboard guidance can be pasted into scanner overrides.
+    # Unknown near-miss evidence is not actionable until it maps to a real family.
     if text.startswith("near_miss_learning|unknown"):
-        return "btc updown"
+        return ""
     if "btc" in text or "bitcoin" in text:
         return "btc updown" if "updown" in text else "bitcoin"
     if "xrp" in text or "ripple" in text:
@@ -64,7 +62,7 @@ def _thesis(cohort: str, row: dict[str, Any]) -> str:
     if cohort in CORE_WATCHLIST_COHORTS:
         return CORE_WATCHLIST_COHORTS[cohort]
     if cohort.startswith("near_miss_learning|unknown"):
-        return "probationary_near_miss_unknown_family_needs_resolution"
+        return "research_only_unknown_near_miss_needs_family_resolution"
     if cohort.startswith("near_miss_learning|"):
         return "near_miss_learning_needs_more_forward_evidence"
     if _bool(row.get("probationary")):
@@ -99,6 +97,8 @@ def _priority(row: dict[str, Any]) -> float:
 def _include_focus_row(cohort: str, row: dict[str, Any]) -> bool:
     if cohort in CORE_WATCHLIST_COHORTS:
         return True
+    if cohort.startswith("near_miss_learning|unknown"):
+        return False
     if cohort.startswith("near_miss_learning|"):
         return True
     if _bool(row.get("probationary")) or _bool(row.get("promoted")):
@@ -161,7 +161,7 @@ def build_research_focus(cfg) -> dict[str, Any]:
             f"thesis={top['thesis']}; remaining gates={top.get('gap', {})}."
         )
     else:
-        next_action = "Keep collecting shadow evidence; no positive or probationary cohort has enough fresh evidence yet."
+        next_action = "Keep collecting settlement-based evidence; no actionable family has enough fresh positive evidence yet."
 
     collection_queries = []
     for row in focus_rows:
@@ -169,7 +169,7 @@ def build_research_focus(cfg) -> dict[str, Any]:
         if query and query not in collection_queries:
             collection_queries.append(query)
     if not collection_queries:
-        collection_queries = ["btc updown", "xrp updown", "solana updown"]
+        collection_queries = ["bitcoin", "ethereum", "world cup", "tennis"]
 
     payload = {
         "status": "ok",

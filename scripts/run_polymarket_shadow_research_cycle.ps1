@@ -32,6 +32,16 @@ function Invoke-Step {
 }
 
 $startedAt = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ")
+$status = [ordered]@{
+  status = "running"
+  started_at_utc = $startedAt
+  stamp = $stamp
+  log_file = $logFile
+  paper_trading_invoked = $false
+  live_trading_invoked = $false
+}
+$status | ConvertTo-Json -Depth 8 | Set-Content $statusFile -Encoding UTF8
+
 Write-LogLine "Starting shadow-only Polymarket research cycle"
 Write-LogLine "Repo: $repoRoot"
 Write-LogLine "Config: $ConfigPath"

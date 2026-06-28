@@ -44,6 +44,14 @@ def _is_fresh(token: scanner.OutcomeToken) -> bool:
     return close_time.astimezone(timezone.utc) > datetime.now(timezone.utc)
 
 
+def _time_to_close_hours(close_time_value: Any) -> float | None:
+    close_time = parse_timestamp(close_time_value)
+    if close_time is None:
+        return None
+    delta = close_time.astimezone(timezone.utc) - datetime.now(timezone.utc)
+    return delta.total_seconds() / 3600.0
+
+
 def _token_key(token: scanner.OutcomeToken) -> str:
     return token.token_id or f"{token.condition_id}|{token.outcome}"
 
@@ -173,6 +181,8 @@ def _row_from_book(token: scanner.OutcomeToken, book: scanner.Book | None, setti
             "outcome": token.outcome,
         }
     )
+    time_to_close_hours = _time_to_close_hours(token.close_time)
+    fast_feedback_max_hours = float(settings.get("fast_feedback_max_time_to_close_hours", 24.0))
     min_liquidity = float(settings.get("min_liquidity", 250))
     max_spread = float(settings.get("max_spread", 0.04))
     max_relative_spread = float(settings.get("max_relative_spread", 0.15))
@@ -195,6 +205,11 @@ def _row_from_book(token: scanner.OutcomeToken, book: scanner.Book | None, setti
     else:
         tradable = True
         reason = "liquid_tight_book"
+    fast_feedback = bool(
+        tradable
+        and time_to_close_hours is not None
+        and 0.0 < time_to_close_hours <= fast_feedback_max_hours
+    )
     return {
         "timestamp": now_utc(),
         "event_slug": token.event_slug,
@@ -205,6 +220,8 @@ def _row_from_book(token: scanner.OutcomeToken, book: scanner.Book | None, setti
         "outcome": token.outcome,
         "token_id": token.token_id,
         "close_time": token.close_time,
+        "time_to_close_hours": "" if time_to_close_hours is None else time_to_close_hours,
+        "fast_feedback_liquidity_candidate": fast_feedback,
         "family": family,
         "gamma_price": "" if token.gamma_price is None else token.gamma_price,
         "best_bid": "" if bid is None else bid,
@@ -226,17 +243,42 @@ def _family_summary(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
         family = str(row.get("family") or "unknown")
         item = grouped.setdefault(
             family,
-            {"family": family, "tokens": 0, "tradable_tokens": 0, "max_liquidity": 0.0, "min_spread": None},
+            {
+                "family": family,
+                "tokens": 0,
+                "tradable_tokens": 0,
+                "fast_feedback_tradable_tokens": 0,
+                "max_liquidity": 0.0,
+                "min_spread": None,
+                "shortest_time_to_close_hours": None,
+            },
         )
         item["tokens"] += 1
         if str(row.get("tradable_liquidity_candidate")).lower() == "true":
             item["tradable_tokens"] += 1
+        if str(row.get("fast_feedback_liquidity_candidate")).lower() == "true":
+            item["fast_feedback_tradable_tokens"] += 1
         liquidity = safe_float(row.get("liquidity")) or 0.0
         item["max_liquidity"] = max(float(item["max_liquidity"]), liquidity)
         spread = safe_float(row.get("spread"))
         if spread is not None:
             item["min_spread"] = spread if item["min_spread"] is None else min(float(item["min_spread"]), spread)
-    return sorted(grouped.values(), key=lambda item: (item["tradable_tokens"], item["max_liquidity"]), reverse=True)
+        hours = safe_float(row.get("time_to_close_hours"))
+        if hours is not None and hours > 0:
+            item["shortest_time_to_close_hours"] = (
+                hours
+                if item["shortest_time_to_close_hours"] is None
+                else min(float(item["shortest_time_to_close_hours"]), hours)
+            )
+    return sorted(
+        grouped.values(),
+        key=lambda item: (
+            item["fast_feedback_tradable_tokens"],
+            item["tradable_tokens"],
+            item["max_liquidity"],
+        ),
+        reverse=True,
+    )
 
 
 def _rule_family(rule: dict[str, Any]) -> str:
@@ -269,6 +311,7 @@ def _model_target_queue(cfg: EngineConfig, family_summary: list[dict[str, Any]])
     for family in family_summary:
         family_name = str(family.get("family") or "unknown")
         tradable_tokens = int(family.get("tradable_tokens") or 0)
+        fast_feedback_tokens = int(family.get("fast_feedback_tradable_tokens") or 0)
         best_rule = _best_rule_for_family(rules_by_family.get(family_name, []))
         promotable = bool(best_rule and str(best_rule.get("promotable")).lower() == "true")
         if tradable_tokens <= 0:
@@ -283,6 +326,9 @@ def _model_target_queue(cfg: EngineConfig, family_summary: list[dict[str, Any]])
         elif family_name == "worldcup_2026_winner":
             status = "fundamental_model_only"
             recommendation = "Liquid, but current value model rejects it; keep bookmaker/fundamental gate."
+        elif fast_feedback_tokens > 0:
+            status = "fast_feedback_research_candidate"
+            recommendation = "Liquid and closes soon; useful for faster shadow evidence, but still requires model validation."
         else:
             status = "needs_model_research"
             recommendation = "Liquid, but no proprietary edge evidence yet; build/import a family-specific model first."
@@ -290,6 +336,8 @@ def _model_target_queue(cfg: EngineConfig, family_summary: list[dict[str, Any]])
             {
                 "family": family_name,
                 "tradable_tokens": tradable_tokens,
+                "fast_feedback_tradable_tokens": fast_feedback_tokens,
+                "shortest_time_to_close_hours": family.get("shortest_time_to_close_hours"),
                 "tokens_scanned": int(family.get("tokens") or 0),
                 "max_liquidity": family.get("max_liquidity"),
                 "min_spread": family.get("min_spread"),
@@ -306,7 +354,8 @@ def _model_target_queue(cfg: EngineConfig, family_summary: list[dict[str, Any]])
         queue,
         key=lambda row: (
             row["status"] == "live_shadow_priority",
-            row["status"] in {"needs_more_evidence", "fundamental_model_only", "needs_model_research"},
+            row["fast_feedback_tradable_tokens"],
+            row["status"] in {"needs_more_evidence", "fundamental_model_only", "fast_feedback_research_candidate", "needs_model_research"},
             row["tradable_tokens"],
             safe_float(row.get("max_liquidity")) or 0.0,
         ),
@@ -340,14 +389,17 @@ def run_liquidity_discovery(cfg: EngineConfig) -> dict[str, Any]:
     rows.sort(
         key=lambda row: (
             str(row.get("tradable_liquidity_candidate")).lower() == "true",
+            str(row.get("fast_feedback_liquidity_candidate")).lower() == "true",
             safe_float(row.get("liquidity")) or 0.0,
             -(safe_float(row.get("spread")) or 999.0),
+            -(safe_float(row.get("time_to_close_hours")) or 999999.0),
         ),
         reverse=True,
     )
     out = cfg.output_root / "polymarket_liquidity_discovery"
     write_csv(out / "liquidity_watchlist.csv", rows)
     tradable = [row for row in rows if str(row.get("tradable_liquidity_candidate")).lower() == "true"]
+    fast_feedback = [row for row in tradable if str(row.get("fast_feedback_liquidity_candidate")).lower() == "true"]
     family_summary = _family_summary(rows)[:25]
     payload = {
         "status": "computed",
@@ -355,16 +407,19 @@ def run_liquidity_discovery(cfg: EngineConfig) -> dict[str, Any]:
         "settings": {
             "event_limit": int(settings.get("event_limit", 60)),
             "token_limit": int(settings.get("token_limit", 120)),
-            "selection_strategy": "round_robin_across_queries",
+            "selection_strategy": "round_robin_across_queries_fast_feedback_priority",
             "min_liquidity": float(settings.get("min_liquidity", 250)),
             "max_spread": float(settings.get("max_spread", 0.04)),
             "max_relative_spread": float(settings.get("max_relative_spread", 0.15)),
+            "fast_feedback_max_time_to_close_hours": float(settings.get("fast_feedback_max_time_to_close_hours", 24.0)),
         },
         "query_summaries": query_summaries,
         "tokens_scanned": len(tokens),
         "tradable_tokens": len(tradable),
+        "fast_feedback_tradable_tokens": len(fast_feedback),
         "errors": len(errors),
         "top_tradable": tradable[:20],
+        "top_fast_feedback": fast_feedback[:20],
         "family_summary": family_summary,
         "model_target_queue": _model_target_queue(cfg, family_summary),
         "watchlist_file": str(out / "liquidity_watchlist.csv"),

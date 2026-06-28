@@ -88,6 +88,29 @@ jobs:
               print(f'Bookmaker update window: {last_updates[0]} -> {last_updates[-1]}')
           PY
 
+      - name: Build locked card from fresh model predictions
+        env:
+          THE_ODDS_API_KEY: ${{ secrets.THE_ODDS_API_KEY }}
+          PYTHONPATH: src
+        run: |
+          python -m superbru_score_engine predict \
+            --config config.yaml \
+            --odds-json outputs/market_odds/worldcup_market_odds_raw.json \
+            --out-dir outputs/latest
+
+          python scripts/build_final_locked_picks.py \
+            --final-picks-csv outputs/latest/predictions.csv \
+            --rescore-csv outputs/component_validation/review_rescore_report.csv \
+            --out-dir outputs/final_locked_picks
+
+          python scripts/build_daily_robust_card.py \
+            --locked-picks-csv outputs/final_locked_picks/final_picks_locked.csv \
+            --rescore-csv outputs/component_validation/review_rescore_report.csv \
+            --movement-csv outputs/market_odds_history/market_odds_movement_report.csv \
+            --manual-flags-csv inputs/manual_match_flags.csv \
+            --out-dir outputs/daily_robust_card \
+            --allow-first-snapshot
+
       - name: Validate locked card exists
         run: |
           test -s outputs/final_locked_picks/superbru_final_card.csv
@@ -99,6 +122,7 @@ jobs:
           if not rows:
               raise SystemExit('Locked SuperBru card is empty.')
           print(f'Locked SuperBru card rows: {len(rows)}')
+          print('First fixture:', rows[0])
           print('Last fixture:', rows[-1])
           PY
 
@@ -114,6 +138,8 @@ jobs:
         with:
           name: refresh-locked-superbru-card-${{ github.run_number }}
           path: |
+            outputs/latest/*.csv
+            outputs/latest/*.json
             outputs/market_odds/*.csv
             outputs/market_odds/*.json
             outputs/market_odds_validation/*.csv
@@ -140,6 +166,6 @@ jobs:
           add_options: "-f"
           branch: main
           file_pattern: >-
-            outputs/market_odds outputs/market_odds_validation outputs/market_odds_history
+            outputs/latest outputs/market_odds outputs/market_odds_validation outputs/market_odds_history
             outputs/component_validation outputs/final_locked_picks outputs/daily_robust_card
             outputs/final_leader_decision_daily_robust outputs/backtesting/prediction_log.csv

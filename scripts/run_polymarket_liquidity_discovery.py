@@ -259,6 +259,8 @@ def _row_from_book(token: scanner.OutcomeToken, book: scanner.Book | None, setti
     relative_spread = (spread / ask) if spread is not None and ask and ask > 0 else None
     family = _market_family(
         {
+            "event_slug": token.event_slug,
+            "event_title": token.event_title,
             "market_slug": token.market_slug,
             "question": token.question,
             "category": "",

@@ -63,7 +63,9 @@ def _market_family(row: dict[str, Any]) -> str:
     slug = str(row.get("market_slug") or "").lower()
     category = str(row.get("category") or "").lower()
     question = str(row.get("question") or "").lower()
-    text = f"{slug} {category} {question}"
+    event_slug = str(row.get("event_slug") or "").lower()
+    event_title = str(row.get("event_title") or "").lower()
+    text = f"{slug} {category} {question} {event_slug} {event_title}"
     if is_worldcup_winner_market(row):
         return "worldcup_2026_winner"
     if "updown" in slug or "-up-or-down" in slug or " up or down " in f" {text} ":
@@ -85,13 +87,27 @@ def _market_family(row: dict[str, Any]) -> str:
             interval = "event"
         return f"crypto_{asset}_updown_{interval}" if asset else f"crypto_updown_{interval}"
     tennis_prefix = slug.startswith(("itf-", "atp-", "wta-", "utr-", "tennis-"))
-    if tennis_prefix or "tennis" in category:
+    if tennis_prefix or "tennis" in text:
         tour = "itf" if slug.startswith("itf-") else "atp" if slug.startswith("atp-") else "wta" if slug.startswith("wta-") else "tennis"
         if "total" in slug or "pt" in slug:
             return f"tennis_{tour}_total"
         if "set" in slug:
             return f"tennis_{tour}_set"
+        if "winner" in slug or "win" in text:
+            return f"tennis_{tour}_winner"
         return f"tennis_{tour}"
+    if any(term in text for term in ("cs2", "counter-strike", "r6siege", "rainbow six", "esports", "e-sports")):
+        return "esports_match"
+    if "fed" in text or "interest rate" in text or "interest rates" in text or "bps" in text:
+        return "macro_rates"
+    if "inflation" in text or "cpi" in text or "economy" in text or "recession" in text:
+        return "macro_economy"
+    if "stocks" in text or "stock market" in text or "s&p" in text or "nasdaq" in text:
+        return "equities_macro"
+    if any(term in text for term in ("openai", "anthropic", "google", "meta", "xai", "best ai model", "ai model")):
+        return "ai_model_leader"
+    if "alien" in text or "ufo" in text or "uap" in text:
+        return "culture_science_special"
     if "gta-vi" in slug or "gta vi" in text or "gta 6" in text:
         if "bitcoin" in text or "btc" in text:
             return "crypto_btc_special"
@@ -108,7 +124,7 @@ def _market_family(row: dict[str, Any]) -> str:
         return "crypto_policy_special" if "tax" in text or "trump" in text or "regulat" in text else "crypto_special"
     if "sports event contract" in text or ("scotus" in text and "contract" in text):
         return "prediction_market_legal"
-    if any(term in text for term in ("nba", "nfl", "mlb", "nhl", "soccer", "football", "world cup", "tennis")):
+    if any(term in text for term in ("nba", "nfl", "mlb", "nhl", "soccer", "football", "world cup", "fifa", "baseball", "basketball", "golf", "ufc")):
         return "sports_other"
     if category:
         return category

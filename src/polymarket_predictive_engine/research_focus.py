@@ -13,8 +13,9 @@ CORE_WATCHLIST_COHORTS = {
 }
 
 
-def _num(value: Any) -> float:
-    return float(safe_float(value) or 0.0)
+def _num(value: Any, default: float = 0.0) -> float:
+    parsed = safe_float(value)
+    return default if parsed is None else float(parsed)
 
 
 def _bool(value: Any) -> bool:

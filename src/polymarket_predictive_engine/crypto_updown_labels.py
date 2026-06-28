@@ -1,11 +1,10 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 from .config import EngineConfig
-from .shadow_cohort import _crypto_updown_proxy_settlement_price
-from .utils import now_utc, parse_timestamp, read_csv_rows, safe_float, write_csv, write_json
+from .utils import now_utc, read_csv_rows, write_csv, write_json
 
 RESOLUTION_FIELDS = [
     "resolution_time",
@@ -36,6 +35,19 @@ LABEL_SOURCE_FIELDS = [
     "resolution_reason",
 ]
 
+SettlementFn = Callable[[dict[str, Any]], tuple[float | None, str]]
+
+
+def _default_settlement_fn(timeout: int) -> SettlementFn:
+    # Import lazily so importing the CLI remains lightweight and so tests that
+    # only inspect COMMANDS do not import the whole shadow-settlement stack.
+    from .shadow_cohort import _crypto_updown_proxy_settlement_price
+
+    def settle(row: dict[str, Any]) -> tuple[float | None, str]:
+        return _crypto_updown_proxy_settlement_price(row, timeout_seconds=timeout)
+
+    return settle
+
 
 def _row_time(row: dict[str, Any]) -> str:
     for key in ("timestamp", "collected_at_utc", "snapshot_timestamp", "collected_at", "source_timestamp"):
@@ -61,7 +73,9 @@ def _source_paths(cfg: EngineConfig) -> list[Path]:
         cfg.output_root / "polymarket_predictions" / "predictions.csv",
         cfg.output_root / "polymarket_predictions" / "mispricing_alpha_scores.csv",
     ]
-    paths.extend(sorted((cfg.output_root / "polymarket" / "query_scans").glob("*/market_snapshot.csv")))
+    query_scan_root = cfg.output_root / "polymarket" / "query_scans"
+    if query_scan_root.exists():
+        paths.extend(sorted(query_scan_root.glob("*/market_snapshot.csv")))
     seen: set[Path] = set()
     unique: list[Path] = []
     for path in paths:
@@ -137,9 +151,16 @@ def _merge_resolution_rows(existing: list[dict[str, str]], new_rows: list[dict[s
     return list(merged.values())
 
 
-def build_crypto_updown_proxy_labels(cfg: EngineConfig, *, max_rows: int = 250, timeout_seconds: int | None = None) -> dict[str, Any]:
+def build_crypto_updown_proxy_labels(
+    cfg: EngineConfig,
+    *,
+    max_rows: int = 250,
+    timeout_seconds: int | None = None,
+    settlement_fn: SettlementFn | None = None,
+) -> dict[str, Any]:
     settings = cfg.raw.get("shadow_cohort_validation", {}) or {}
     timeout = int(timeout_seconds or settings.get("settlement_request_timeout_seconds", 20) or 20)
+    settle = settlement_fn or _default_settlement_fn(timeout)
     checked = 0
     resolved = 0
     skipped = 0
@@ -159,7 +180,10 @@ def build_crypto_updown_proxy_labels(cfg: EngineConfig, *, max_rows: int = 250, 
             continue
         seen.add(key)
         checked += 1
-        target, reason = _crypto_updown_proxy_settlement_price(row, timeout_seconds=timeout)
+        try:
+            target, reason = settle(row)
+        except Exception as exc:  # noqa: BLE001 - one failed proxy lookup must not fail the whole builder
+            target, reason = None, f"proxy_label_error:{type(exc).__name__}"
         reasons[reason] = reasons.get(reason, 0) + 1
         if target not in {0.0, 1.0}:
             skipped += 1

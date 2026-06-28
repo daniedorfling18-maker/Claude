@@ -33,7 +33,7 @@ ALIASES_JSON = json.dumps({key: sorted(values) for key, values in TEAM_ALIASES.i
 def _team_js_body(find_row: bool) -> str:
     text_expr = "el.innerText || el.textContent || ''" if find_row else "el.getAttribute('data-brutip') || ''"
     prefix = "" if find_row else "const controls = Array.from(document.querySelectorAll('[data-brutip][data-bru-tab]'));\n  "
-    iterator = "Array.from(document.querySelectorAll('tr, li, div, section, article'))" if find_row else "controls"
+    iterator = "Array.from(document.querySelectorAll('tr, li, div, section, article')).filter(el => el.querySelector('input, select'))" if find_row else "controls"
     if find_row:
         success = """
       if (!matchRow || (el.innerText || '').length < (matchRow.innerText || '').length) {
@@ -41,7 +41,7 @@ def _team_js_body(find_row: bool) -> str:
       }"""
         after_loop = """
   if (!matchRow) {
-    return {found: false, reason: 'no element contains both team names or safe aliases', homeVariants, awayVariants};
+    return {found: false, reason: 'no input-bearing element contains both team names or safe aliases', homeVariants, awayVariants};
   }
   const inputs = Array.from(matchRow.querySelectorAll('input, select')).map(el => ({
     tag: el.tagName.toLowerCase(), type: el.type || '', name: el.name || '', id: el.id || '',

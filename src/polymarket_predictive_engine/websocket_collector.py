@@ -10,6 +10,7 @@ from .config import EngineConfig, load_config
 from .utils import now_utc, read_csv_rows, read_json, safe_float, write_csv, write_json
 
 _TARGET_DECISIONS = {"collect_settlement_evidence", "candidate_for_focus"}
+_PROFIT_SPRINT_TARGET_ACTIONS = {"WAIT_ACTIVE_WINDOW", "SHADOW_LABEL_GATE", "SHADOW_EDGE_WATCH"}
 _DEFAULT_TARGET_FAMILIES = {
     "sports_other",
     "crypto_btc_special",
@@ -73,6 +74,22 @@ def _boolish(value: Any) -> bool:
     return str(value or "").strip().lower() in {"1", "true", "yes", "y", "on"}
 
 
+def _token_id(row: dict[str, Any]) -> str:
+    return str(row.get("token_id") or row.get("asset_id") or row.get("outcome_token_id") or "").strip()
+
+
+def _match_keys(row: dict[str, Any]) -> set[str]:
+    keys: set[str] = set()
+    token = _token_id(row)
+    if token:
+        keys.add(f"token:{token}")
+    slug = str(row.get("market_slug") or row.get("slug") or "").strip().lower()
+    outcome = str(row.get("outcome") or row.get("selection") or "").strip().lower()
+    if slug and outcome:
+        keys.add(f"slug:{slug}|outcome:{outcome}")
+    return keys
+
+
 def _target_families(cfg: EngineConfig, settings: dict[str, Any]) -> set[str]:
     configured = settings.get("liquidity_target_families") or []
     if configured:
@@ -93,6 +110,15 @@ def _candidate_rank(row: dict[str, Any]) -> tuple[bool, float, float, float]:
         safe_float(row.get("liquidity")) or 0.0,
         -(safe_float(row.get("spread")) or 999.0),
         -(safe_float(row.get("time_to_close_hours")) or 999999.0),
+    )
+
+
+def _profit_sprint_rank(row: dict[str, Any]) -> tuple[float, float, float, float]:
+    return (
+        safe_float(row.get("profit_sprint_target_priority")) or 0.0,
+        safe_float(row.get("profit_sprint_target_score")) or 0.0,
+        safe_float(row.get("liquidity")) or 0.0,
+        -(safe_float(row.get("spread")) or 999.0),
     )
 
 
@@ -117,7 +143,7 @@ def _balanced_by_family(rows: list[dict[str, Any]], *, max_assets: int, max_per_
             if depth >= len(family_rows):
                 continue
             row = family_rows[depth]
-            token_id = str(row.get("token_id") or row.get("asset_id") or row.get("outcome_token_id") or "").strip()
+            token_id = _token_id(row)
             if not token_id or token_id in selected_ids:
                 continue
             selected.append(row)
@@ -130,13 +156,58 @@ def _balanced_by_family(rows: list[dict[str, Any]], *, max_assets: int, max_per_
 
     # Fill any remaining slots with best available rows, still avoiding duplicates.
     for row in sorted(rows, key=_candidate_rank, reverse=True):
-        token_id = str(row.get("token_id") or row.get("asset_id") or row.get("outcome_token_id") or "").strip()
+        token_id = _token_id(row)
         if not token_id or token_id in selected_ids:
             continue
         selected.append(row)
         selected_ids.add(token_id)
         if len(selected) >= max_assets:
             break
+    return selected
+
+
+def _profit_sprint_target_index(cfg: EngineConfig) -> dict[str, dict[str, Any]]:
+    rows = read_csv_rows(cfg.governance_root / "profit_sprint_targets.csv")
+    index: dict[str, dict[str, Any]] = {}
+    for row in rows:
+        action = str(row.get("target_action") or "").strip()
+        if action not in _PROFIT_SPRINT_TARGET_ACTIONS:
+            continue
+        for key in _match_keys(row):
+            current = index.get(key)
+            if current is None or (safe_float(row.get("target_score")) or 0.0) > (safe_float(current.get("target_score")) or 0.0):
+                index[key] = row
+    return index
+
+
+def _profit_sprint_priority_rows(cfg: EngineConfig, candidates: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    index = _profit_sprint_target_index(cfg)
+    if not index:
+        return []
+    selected: list[dict[str, Any]] = []
+    seen_ids: set[str] = set()
+    for row in candidates:
+        matched_target: dict[str, Any] | None = None
+        for key in _match_keys(row):
+            matched_target = index.get(key)
+            if matched_target:
+                break
+        if not matched_target:
+            continue
+        token_id = _token_id(row)
+        if not token_id or token_id in seen_ids:
+            continue
+        enriched = {
+            **row,
+            "profit_sprint_target_action": matched_target.get("target_action", ""),
+            "profit_sprint_target_score": matched_target.get("target_score", ""),
+            "profit_sprint_target_priority": matched_target.get("priority", ""),
+            "profit_sprint_recommended_query": matched_target.get("recommended_query", ""),
+            "profit_sprint_target_reason": matched_target.get("reason", ""),
+        }
+        selected.append(enriched)
+        seen_ids.add(token_id)
+    selected.sort(key=_profit_sprint_rank, reverse=True)
     return selected
 
 
@@ -153,7 +224,7 @@ def _liquidity_target_rows(cfg: EngineConfig, settings: dict[str, Any]) -> list[
     seen: set[str] = set()
     for row in rows:
         family = str(row.get("family") or row.get("category") or "").strip()
-        token_id = str(row.get("token_id") or row.get("asset_id") or row.get("outcome_token_id") or "").strip()
+        token_id = _token_id(row)
         if not token_id or token_id in seen:
             continue
         if family in _EXCLUDED_FAMILIES:
@@ -165,14 +236,32 @@ def _liquidity_target_rows(cfg: EngineConfig, settings: dict[str, Any]) -> list[
         seen.add(token_id)
         candidates.append(row)
     candidates.sort(key=_candidate_rank, reverse=True)
-    return _balanced_by_family(candidates, max_assets=max_assets, max_per_family=max_per_family)
+
+    priority_rows = _profit_sprint_priority_rows(cfg, candidates)
+    if not priority_rows:
+        return _balanced_by_family(candidates, max_assets=max_assets, max_per_family=max_per_family)
+
+    selected: list[dict[str, Any]] = []
+    selected_ids: set[str] = set()
+    for row in priority_rows:
+        token_id = _token_id(row)
+        if not token_id or token_id in selected_ids:
+            continue
+        selected.append(row)
+        selected_ids.add(token_id)
+        if len(selected) >= max_assets:
+            return selected
+
+    remaining = [row for row in candidates if _token_id(row) not in selected_ids]
+    selected.extend(_balanced_by_family(remaining, max_assets=max_assets - len(selected), max_per_family=max_per_family))
+    return selected[:max_assets]
 
 
 def _asset_ids_from_rows(rows: list[dict[str, Any]]) -> list[str]:
     ids: list[str] = []
     seen: set[str] = set()
     for row in rows:
-        token_id = str(row.get("token_id") or row.get("asset_id") or row.get("outcome_token_id") or "").strip()
+        token_id = _token_id(row)
         if token_id and token_id not in seen:
             seen.add(token_id)
             ids.append(token_id)
@@ -194,6 +283,16 @@ def _fast_feedback_counts(rows: list[dict[str, Any]]) -> dict[str, int]:
             continue
         family = str(row.get("family") or row.get("category") or "unknown")
         counts[family] = counts.get(family, 0) + 1
+    return dict(sorted(counts.items()))
+
+
+def _profit_sprint_target_counts(rows: list[dict[str, Any]]) -> dict[str, int]:
+    counts: dict[str, int] = {}
+    for row in rows:
+        action = str(row.get("profit_sprint_target_action") or "")
+        if not action:
+            continue
+        counts[action] = counts.get(action, 0) + 1
     return dict(sorted(counts.items()))
 
 
@@ -251,7 +350,8 @@ def collect_websocket(cfg: EngineConfig, websocket_seconds: int = 60) -> dict[st
 
     target_rows = _liquidity_target_rows(cfg, settings)
     dynamic_ids = _asset_ids_from_rows(target_rows)
-    target_source = "liquidity_watchlist" if dynamic_ids else "configured_market_ids"
+    sprint_counts = _profit_sprint_target_counts(target_rows)
+    target_source = "profit_sprint_targets+liquidity_watchlist" if sprint_counts else "liquidity_watchlist" if dynamic_ids else "configured_market_ids"
     if target_rows:
         write_csv(cfg.governance_root / "websocket_liquidity_targets.csv", target_rows)
 
@@ -291,6 +391,7 @@ def collect_websocket(cfg: EngineConfig, websocket_seconds: int = 60) -> dict[st
             "target_assets": len(market_ids),
             "target_family_counts": _family_counts(target_rows),
             "target_fast_feedback_family_counts": _fast_feedback_counts(target_rows),
+            "target_profit_sprint_counts": sprint_counts,
             "subscription_attempts": len(variants),
         }
         write_json(out_root / "websocket_summary.json", summary)
@@ -317,6 +418,7 @@ def collect_websocket(cfg: EngineConfig, websocket_seconds: int = 60) -> dict[st
         "target_assets": len(market_ids),
         "target_family_counts": _family_counts(target_rows),
         "target_fast_feedback_family_counts": _fast_feedback_counts(target_rows),
+        "target_profit_sprint_counts": sprint_counts,
         "target_file": str(cfg.governance_root / "websocket_liquidity_targets.csv") if target_rows else "",
         "selected_subscription": selected_subscription,
         "subscription_attempts": len(variants),

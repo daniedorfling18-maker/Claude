@@ -32,9 +32,27 @@ from polymarket_predictive_engine.utils import (  # noqa: E402
     write_json,
 )
 
+_DEFAULT_FAST_FEEDBACK_EXCLUDED_FAMILIES = {
+    "unknown",
+    "crypto_updown_5m",
+    "crypto_btc_updown_5m",
+    "crypto_sol_updown_5m",
+    "crypto_xrp_updown_5m",
+}
+
 
 def _settings(cfg: EngineConfig) -> dict[str, Any]:
     return cfg.raw.get("liquidity_discovery", {}) or {}
+
+
+def _fast_feedback_excluded_families(settings: dict[str, Any]) -> set[str]:
+    configured = settings.get("fast_feedback_excluded_families")
+    if configured is None:
+        return set(_DEFAULT_FAST_FEEDBACK_EXCLUDED_FAMILIES)
+    if not isinstance(configured, list):
+        configured = [configured]
+    families = {str(item or "").strip() for item in configured if str(item or "").strip()}
+    return families or set(_DEFAULT_FAST_FEEDBACK_EXCLUDED_FAMILIES)
 
 
 def _is_fresh(token: scanner.OutcomeToken) -> bool:
@@ -183,6 +201,8 @@ def _row_from_book(token: scanner.OutcomeToken, book: scanner.Book | None, setti
     )
     time_to_close_hours = _time_to_close_hours(token.close_time)
     fast_feedback_max_hours = float(settings.get("fast_feedback_max_time_to_close_hours", 24.0))
+    fast_feedback_excluded_families = _fast_feedback_excluded_families(settings)
+    fast_feedback_family_excluded = family in fast_feedback_excluded_families
     min_liquidity = float(settings.get("min_liquidity", 250))
     max_spread = float(settings.get("max_spread", 0.04))
     max_relative_spread = float(settings.get("max_relative_spread", 0.15))
@@ -205,11 +225,24 @@ def _row_from_book(token: scanner.OutcomeToken, book: scanner.Book | None, setti
     else:
         tradable = True
         reason = "liquid_tight_book"
-    fast_feedback = bool(
-        tradable
-        and time_to_close_hours is not None
-        and 0.0 < time_to_close_hours <= fast_feedback_max_hours
-    )
+    if not tradable:
+        fast_feedback = False
+        fast_feedback_reason = reason
+    elif fast_feedback_family_excluded:
+        fast_feedback = False
+        fast_feedback_reason = "family_excluded_from_fast_feedback"
+    elif time_to_close_hours is None:
+        fast_feedback = False
+        fast_feedback_reason = "missing_close_time"
+    elif time_to_close_hours <= 0.0:
+        fast_feedback = False
+        fast_feedback_reason = "already_closed_or_closing"
+    elif time_to_close_hours > fast_feedback_max_hours:
+        fast_feedback = False
+        fast_feedback_reason = "outside_fast_feedback_window"
+    else:
+        fast_feedback = True
+        fast_feedback_reason = "liquid_tight_book_closes_soon"
     return {
         "timestamp": now_utc(),
         "event_slug": token.event_slug,
@@ -222,6 +255,7 @@ def _row_from_book(token: scanner.OutcomeToken, book: scanner.Book | None, setti
         "close_time": token.close_time,
         "time_to_close_hours": "" if time_to_close_hours is None else time_to_close_hours,
         "fast_feedback_liquidity_candidate": fast_feedback,
+        "fast_feedback_filter_reason": fast_feedback_reason,
         "family": family,
         "gamma_price": "" if token.gamma_price is None else token.gamma_price,
         "best_bid": "" if bid is None else bid,
@@ -412,6 +446,7 @@ def run_liquidity_discovery(cfg: EngineConfig) -> dict[str, Any]:
             "max_spread": float(settings.get("max_spread", 0.04)),
             "max_relative_spread": float(settings.get("max_relative_spread", 0.15)),
             "fast_feedback_max_time_to_close_hours": float(settings.get("fast_feedback_max_time_to_close_hours", 24.0)),
+            "fast_feedback_excluded_families": sorted(_fast_feedback_excluded_families(settings)),
         },
         "query_summaries": query_summaries,
         "tokens_scanned": len(tokens),

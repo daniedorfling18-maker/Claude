@@ -25,6 +25,18 @@ def _policy(cfg: EngineConfig) -> dict[str, Any]:
     return cfg.raw.get("cohort_promotion", {}) or {}
 
 
+def _metadata_blocker(row: dict[str, Any]) -> str:
+    blocker = str(row.get("metadata_blocker") or "").strip()
+    if blocker:
+        return blocker
+    if _bool(row.get("metadata_valid")):
+        return ""
+    cohort = str(row.get("signal_cohort") or row.get("cohort") or "").strip().lower()
+    if cohort == "unknown" or cohort.startswith("near_miss_learning|unknown"):
+        return "unresolved_unknown_near_miss_metadata"
+    return ""
+
+
 def _review_row(cfg: EngineConfig, row: dict[str, Any]) -> dict[str, Any]:
     policy = _policy(cfg)
     fills = _num(row.get("buy_fills") or row.get("shadow_fills"))
@@ -34,6 +46,8 @@ def _review_row(cfg: EngineConfig, row: dict[str, Any]) -> dict[str, Any]:
     run_rate = _num(row.get("monthly_run_rate_usdc") or row.get("shadow_monthly_run_rate_usdc"))
     evidence_hours = _num(row.get("evidence_elapsed_hours"))
     cost_basis = _num(row.get("total_buy_cost_usdc") or row.get("shadow_total_buy_cost_usdc"))
+    metadata_blocker = _metadata_blocker(row)
+    metadata_valid = not metadata_blocker
 
     full_required = {
         "fills": _num(policy.get("minimum_filled_orders"), 5.0),
@@ -77,7 +91,9 @@ def _review_row(cfg: EngineConfig, row: dict[str, Any]) -> dict[str, Any]:
         roi_pnl_needed = _num(readiness.get("pnl_remaining_usdc"), 0.0)
 
     status = "collecting_evidence"
-    if _bool(row.get("promoted")):
+    if not metadata_valid:
+        status = "metadata_blocked"
+    elif _bool(row.get("promoted")):
         status = "promoted"
     elif _bool(row.get("probationary")):
         status = "probationary"
@@ -94,6 +110,8 @@ def _review_row(cfg: EngineConfig, row: dict[str, Any]) -> dict[str, Any]:
     return {
         "cohort": row.get("signal_cohort") or row.get("cohort") or "unknown",
         "status": status,
+        "metadata_valid": metadata_valid,
+        "metadata_blocker": metadata_blocker,
         "promoted": _bool(row.get("promoted")),
         "probationary": _bool(row.get("probationary")),
         "buy_fills": fills,
@@ -118,11 +136,19 @@ def _review_row(cfg: EngineConfig, row: dict[str, Any]) -> dict[str, Any]:
             "tracking_hours_remaining": _gap(evidence_hours, full_required["hours"]),
             "monthly_run_rate_remaining_usdc": _gap(run_rate, full_required["run_rate"]),
         },
-        "next_action": _next_action(missing_full, missing_probation, roi_pnl_needed),
+        "next_action": _next_action(missing_full, missing_probation, roi_pnl_needed, metadata_blocker=metadata_blocker),
     }
 
 
-def _next_action(missing_full: list[str], missing_probation: list[str], roi_pnl_needed: float) -> str:
+def _next_action(
+    missing_full: list[str],
+    missing_probation: list[str],
+    roi_pnl_needed: float,
+    *,
+    metadata_blocker: str = "",
+) -> str:
+    if metadata_blocker:
+        return "Metadata is unresolved; keep shadow tracking only and do not promote or probe this cohort."
     if not missing_full:
         return "Eligible for full promotion review; keep gates intact and verify latest forward evidence."
     if not missing_probation:

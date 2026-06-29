@@ -9,7 +9,6 @@ from .cohort_validation import write_signal_cohort_pnl
 from .dashboard import render_dashboard
 from .goal_planner import build_goal_plan
 from .governance import governance_report
-from .paper_cycle import _json_safe
 from .profit_sprint import build_profit_sprint
 from .promotion_review import build_promotion_review
 from .readiness import paper_live_promotion_gate
@@ -72,6 +71,7 @@ def refresh_governance(cfg: EngineConfig, *, refresh_dashboard: bool = True) -> 
         "approved_for_live_trading": promotion_gate.get("approved_for_live_trading"),
         "paper_blockers": promotion_gate.get("paper_blockers", []),
         "live_blockers": promotion_gate.get("live_blockers", []),
+        "governance_report_status": governance.get("status") if isinstance(governance, dict) else "unknown",
         "dashboard": dashboard,
         "notes": [
             "Governance refresh only: no order placement, no threshold changes, no live-trading opt-in.",
@@ -88,7 +88,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--skip-dashboard", action="store_true")
     args = parser.parse_args(argv)
     cfg = load_config(args.config)
-    print(json.dumps(_json_safe(refresh_governance(cfg, refresh_dashboard=not args.skip_dashboard)), indent=2, sort_keys=True))
+    print(json.dumps(refresh_governance(cfg, refresh_dashboard=not args.skip_dashboard), indent=2, sort_keys=True, default=str))
     return 0
 
 

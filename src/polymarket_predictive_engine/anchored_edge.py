@@ -100,6 +100,7 @@ DEFAULT_SETTINGS = {
     "liquidity_penalty_weight": 0.02,
     "uncertainty_penalty": 0.005,
     "reference_liquidity": 1000.0,
+    "threshold_tolerance": 1e-9,
     "promotion_min_candidates": 20,
     "promotion_min_settled": 10,
     "promotion_min_roi": 0.03,
@@ -306,24 +307,25 @@ def _candidate_status(
         blockers.append("missing_independent_anchor")
     if price is None or not 0.0 < price < 1.0:
         blockers.append("missing_executable_price")
+    tolerance = float(settings.get("threshold_tolerance", 1e-9))
     if rule is not None:
         max_spread = safe_float(rule.get("normal_max_spread"))
         max_relative_spread = safe_float(rule.get("normal_max_relative_spread"))
         min_liquidity = safe_float(rule.get("normal_min_liquidity"))
-        if max_spread is not None and (spread is None or spread > max_spread):
+        if max_spread is not None and (spread is None or spread > max_spread + tolerance):
             blockers.append("spread_above_strategy_v2_limit")
-        if max_relative_spread is not None and (relative_spread is None or relative_spread > max_relative_spread):
+        if max_relative_spread is not None and (relative_spread is None or relative_spread > max_relative_spread + tolerance):
             blockers.append("relative_spread_above_strategy_v2_limit")
-        if min_liquidity is not None and (liquidity is None or liquidity < min_liquidity):
+        if min_liquidity is not None and (liquidity is None or liquidity < min_liquidity - tolerance):
             blockers.append("liquidity_below_strategy_v2_limit")
     if edge_after_penalty is None:
         blockers.append("edge_not_computable")
-    elif edge_after_penalty < float(settings["watchlist_min_edge_after_penalty"]):
+    elif edge_after_penalty < float(settings["watchlist_min_edge_after_penalty"]) - tolerance:
         blockers.append("edge_after_penalty_below_watchlist_minimum")
 
     if blockers:
         return "rejected", blockers
-    if edge_after_penalty is not None and edge_after_penalty >= float(settings["shadow_min_edge_after_penalty"]):
+    if edge_after_penalty is not None and edge_after_penalty >= float(settings["shadow_min_edge_after_penalty"]) - tolerance:
         return "shadow_candidate", []
     return "watchlist", []
 

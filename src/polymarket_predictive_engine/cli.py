@@ -5,6 +5,7 @@ import json
 import sys
 
 from .active_window_plan import build_active_window_plan
+from .anchored_edge import run as run_anchored_edge
 from .backtest import backtest
 from .collection_only import run_collection_only
 from .config import config_check, load_config
@@ -87,6 +88,7 @@ COMMANDS = [
     "build-crypto-fundamental",
     "build-crypto-updown-labels",
     "edge-strategy-search",
+    "anchored-edge",
     "refresh-governance",
     "promotion-review",
     "goal-plan",
@@ -265,6 +267,8 @@ def main(argv: list[str] | None = None) -> int:
             _print(build_crypto_updown_proxy_labels(cfg, max_rows=args.max_labels))
         elif args.command == "edge-strategy-search":
             _print(run_edge_strategy_search(cfg))
+        elif args.command == "anchored-edge":
+            _print(run_anchored_edge(args.config))
         elif args.command == "refresh-governance":
             _print(refresh_governance(cfg, refresh_dashboard=not args.skip_dashboard))
         elif args.command == "promotion-review":

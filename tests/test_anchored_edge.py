@@ -1,6 +1,6 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
-from polymarket_predictive_engine.anchored_edge import _candidate_status, _edge_after_penalties
+from polymarket_predictive_engine.anchored_edge import _anchor_index, _candidate_status, _edge_after_penalties, _find_anchor
 
 
 def test_edge_after_penalties_haircuts_raw_anchor_edge() -> None:
@@ -123,3 +123,20 @@ def test_spread_threshold_tolerates_floating_point_noise() -> None:
 
     assert status == "shadow_candidate"
     assert blockers == []
+
+def test_market_level_anchor_does_not_attach_to_explicit_outcome_row() -> None:
+    anchors = _anchor_index([
+        {
+            "market_slug": "will-the-fed-increase-interest-rates-by-25-bps-after-the-july-2026-meeting",
+            "outcome": "",
+            "anchor_fair_probability": 0.30,
+        }
+    ])
+
+    no_row = {
+        "market_slug": "will-the-fed-increase-interest-rates-by-25-bps-after-the-july-2026-meeting",
+        "outcome": "No",
+    }
+
+    assert _find_anchor(no_row, anchors) is None
+

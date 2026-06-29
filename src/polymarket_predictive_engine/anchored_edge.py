@@ -216,13 +216,25 @@ def _anchor_index(anchor_rows: list[dict[str, Any]]) -> dict[tuple[str, str, str
 
 def _find_anchor(row: dict[str, Any], anchors: dict[tuple[str, str, str], dict[str, Any]]) -> dict[str, Any] | None:
     token_id, market_slug, outcome = _anchor_key(row)
-    keys = [
-        (token_id, market_slug, outcome),
-        (token_id, "", outcome),
-        (token_id, "", ""),
-        ("", market_slug, outcome),
-        ("", market_slug, ""),
-    ]
+
+    # If a prediction row has an explicit outcome, require an outcome-specific anchor.
+    # Do not fall back to market-level anchors, because that can leak a Yes anchor onto No.
+    keys: list[tuple[str, str, str]] = []
+    if outcome:
+        if token_id and market_slug:
+            keys.append((token_id, market_slug, outcome))
+        if token_id:
+            keys.append((token_id, "", outcome))
+        if market_slug:
+            keys.append(("", market_slug, outcome))
+    else:
+        if token_id and market_slug:
+            keys.append((token_id, market_slug, ""))
+        if token_id:
+            keys.append((token_id, "", ""))
+        if market_slug:
+            keys.append(("", market_slug, ""))
+
     for key in keys:
         if key in anchors:
             return anchors[key]

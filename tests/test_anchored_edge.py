@@ -96,3 +96,30 @@ def test_research_only_family_is_not_actionable() -> None:
 
     assert status == "rejected"
     assert "family_research_only_until_anchor_methodology_defined" in blockers
+
+def test_spread_threshold_tolerates_floating_point_noise() -> None:
+    rule = {
+        "status": "accepted_with_external_odds_anchor",
+        "normal_max_spread": 0.02,
+        "normal_max_relative_spread": 0.15,
+        "normal_min_liquidity": 250.0,
+    }
+
+    status, blockers = _candidate_status(
+        family="sports_other",
+        rule=rule,
+        anchor={"anchor_fair_probability": 0.820896},
+        price=0.71,
+        spread=0.020000000000000018,
+        relative_spread=0.028169014084507067,
+        liquidity=1410.0,
+        edge_after_penalty=0.09589599999999998,
+        settings={
+            "watchlist_min_edge_after_penalty": 0.03,
+            "shadow_min_edge_after_penalty": 0.05,
+            "threshold_tolerance": 1e-9,
+        },
+    )
+
+    assert status == "shadow_candidate"
+    assert blockers == []

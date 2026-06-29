@@ -42,6 +42,7 @@ from .price_history_collector import collect_price_history
 from .profit_sprint import build_profit_sprint
 from .promotion_review import build_promotion_review
 from .readiness import paper_live_promotion_gate, paper_trade_readiness, readiness_decision
+from .refresh_governance import refresh_governance
 from .resolution_collector import collect_resolutions
 from .sharp_anchor import build_sharp_anchor
 from .sharp_odds_fetch import fetch_sharp_odds
@@ -51,6 +52,7 @@ from .storage import init_db
 from .strategy import generate_signals
 from .strategy_search import run_edge_strategy_search
 from .validation import validate_model
+from .validation_report import build_validation_report
 from .websocket_collector import collect_websocket
 from .websocket_normaliser import normalize_websocket_file
 from .websocket_resolution_collector import collect_websocket_resolutions
@@ -85,11 +87,13 @@ COMMANDS = [
     "build-crypto-fundamental",
     "build-crypto-updown-labels",
     "edge-strategy-search",
+    "refresh-governance",
     "promotion-review",
     "goal-plan",
     "profit-sprint",
     "active-window-plan",
     "promotion-gate",
+    "validation-report",
     "validate",
     "predict",
     "generate-signals",
@@ -165,6 +169,11 @@ def build_parser() -> argparse.ArgumentParser:
         choices=["raw_snapshot", "websocket"],
         default="raw_snapshot",
         help="Point-in-time source used by the canonical forward paper cycle.",
+    )
+    parser.add_argument(
+        "--skip-dashboard",
+        action="store_true",
+        help="refresh-governance: do not rewrite dashboard_data.json/index.html.",
     )
     return parser
 
@@ -256,6 +265,8 @@ def main(argv: list[str] | None = None) -> int:
             _print(build_crypto_updown_proxy_labels(cfg, max_rows=args.max_labels))
         elif args.command == "edge-strategy-search":
             _print(run_edge_strategy_search(cfg))
+        elif args.command == "refresh-governance":
+            _print(refresh_governance(cfg, refresh_dashboard=not args.skip_dashboard))
         elif args.command == "promotion-review":
             _print(build_promotion_review(cfg))
         elif args.command == "goal-plan":
@@ -266,6 +277,8 @@ def main(argv: list[str] | None = None) -> int:
             _print(build_active_window_plan(cfg))
         elif args.command == "promotion-gate":
             _print(paper_live_promotion_gate(cfg))
+        elif args.command == "validation-report":
+            _print(build_validation_report(cfg))
         elif args.command == "validate":
             _print(validate_model(cfg))
         elif args.command == "predict":

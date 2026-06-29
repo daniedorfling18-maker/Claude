@@ -53,6 +53,20 @@ def _order_cohort(order: dict[str, Any]) -> str:
     return signal_cohort(merged)
 
 
+def _promotion_metadata_blocker(cohort: str) -> str:
+    """Return a blocker reason for cohorts that are not valid promotion units.
+
+    Near-miss evidence can be useful for shadow research, but an unresolved
+    metadata bucket such as ``near_miss_learning|unknown`` is not a real strategy
+    family. It must not be promoted, made probationary, or used as a paper-trade
+    evidence proxy until the market has a resolved family/title/category.
+    """
+    cohort_text = str(cohort or "").strip().lower()
+    if cohort_text == "unknown" or cohort_text.startswith("near_miss_learning|unknown"):
+        return "unresolved_unknown_near_miss_metadata"
+    return ""
+
+
 def _empty_stats() -> dict[str, Any]:
     return {
         "buy_fills": 0,
@@ -231,8 +245,11 @@ def compute_signal_cohort_pnl(con, cfg: EngineConfig) -> dict[str, Any]:
         evidence_roi = evidence_pnl / evidence_at_risk if evidence_at_risk > 0 else 0.0
         evidence_monthly_run_rate = safe_float(row.get("shadow_monthly_run_rate_usdc")) or 0.0
         evidence_elapsed_hours = safe_float(row.get("evidence_elapsed_hours")) or 0.0
+        metadata_blocker = _promotion_metadata_blocker(cohort)
+        metadata_valid = not metadata_blocker
         promoted = bool(
-            evidence_fills >= minimum_filled_orders
+            metadata_valid
+            and evidence_fills >= minimum_filled_orders
             and evidence_settled_fills >= minimum_settled_orders
             and evidence_pnl > minimum_pnl_usdc
             and evidence_roi >= minimum_roi
@@ -240,7 +257,8 @@ def compute_signal_cohort_pnl(con, cfg: EngineConfig) -> dict[str, Any]:
             and evidence_monthly_run_rate >= minimum_monthly_run_rate
         )
         probationary = bool(
-            allow_probationary
+            metadata_valid
+            and allow_probationary
             and not promoted
             and evidence_fills >= probationary_minimum_filled_orders
             and evidence_settled_fills >= probationary_minimum_settled_orders
@@ -275,11 +293,15 @@ def compute_signal_cohort_pnl(con, cfg: EngineConfig) -> dict[str, Any]:
                     if shadow_fills and allow_shadow
                     else "paper"
                 ),
+                "metadata_valid": metadata_valid,
+                "metadata_blocker": metadata_blocker,
                 "promoted": promoted,
                 "probationary": probationary,
                 "probationary_max_stake_usdc": probationary_max_stake_usdc if probationary else 0.0,
                 "promotion_reason": (
-                    "positive cohort evidence"
+                    "metadata invalid: unresolved unknown near-miss bucket"
+                    if metadata_blocker
+                    else "positive cohort evidence"
                     if promoted
                     else "positive probationary cohort evidence"
                     if probationary
@@ -310,6 +332,8 @@ def compute_signal_cohort_pnl(con, cfg: EngineConfig) -> dict[str, Any]:
                 "monthly_run_rate_usdc": row.get("monthly_run_rate_usdc", 0.0),
                 "buy_fills": row.get("buy_fills", 0),
                 "settled_fills": row.get("settled_fills", 0),
+                "metadata_valid": row.get("metadata_valid", True),
+                "metadata_blocker": row.get("metadata_blocker", ""),
                 "promotion_reason": row.get("promotion_reason", ""),
             }
             for row in cohorts
@@ -340,6 +364,7 @@ def compute_signal_cohort_pnl(con, cfg: EngineConfig) -> dict[str, Any]:
             "probationary_max_stake_usdc": probationary_max_stake_usdc,
             "require_positive_forward_pnl": bool(settings.get("require_positive_forward_pnl", True)),
             "allow_shadow_evidence_for_promotion": allow_shadow,
+            "unknown_near_miss_metadata_blocks_promotion": True,
         },
         "shadow_summary_status": shadow_summary.get("status") if isinstance(shadow_summary, dict) else "missing",
         "cohorts": cohorts,

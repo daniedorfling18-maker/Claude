@@ -395,7 +395,9 @@ async function load() {
       ["Status","status"],
       ["Rows","rows", (v,row)=>v ?? row.fundamental_rows ?? row.target_rows ?? row.rows_in ?? "-"],
       ["Markets","markets"],
-      ["Output","output_file", v=>longText(v)],
+      ["Rejected","fallback_rejected_rows", (v,row)=>v ?? row.skipped_incomplete_market_rows ?? "-"],
+      ["Reject reasons","fallback_rejection_reasons", (v,row)=>longText(v || row.incomplete_market_samples || "", 180)],
+      ["Output","output_file", (v,row)=>longText(v || row.output_path || row.fallback_rejections_path || "")],
       ["Blocker","blocker", v=>longText(v, 160)],
       ["Note","note"]
     ]);
@@ -835,7 +837,13 @@ def _independent_anchor_status(governance: Path) -> dict[str, Any]:
         )
         status = str(component.get("status") or "").lower()
         blocker = ""
-        if status in {"error", "partial"}:
+        fallback_rejected = int(safe_float(component.get("fallback_rejected_rows")) or 0)
+        incomplete_market_rows = int(safe_float(component.get("skipped_incomplete_market_rows")) or 0)
+        if rows <= 0 and fallback_rejected:
+            blocker = f"fallback odds rejected: {fallback_rejected} rows"
+        elif rows <= 0 and incomplete_market_rows:
+            blocker = f"incomplete odds markets rejected: {incomplete_market_rows} rows"
+        elif status in {"error", "partial"}:
             blocker = f"{status}: {component.get('errors', '')}".strip()
         elif status in {"missing_api_key", "no_input", "no_targets", "no_terminal_targets"}:
             blocker = status

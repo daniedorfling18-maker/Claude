@@ -173,6 +173,11 @@ sharp_anchor:
   devig_method: power            # power (favourite-longshot aware) or multiplicative
   source_name: pinnacle_close
   token_map_path: outputs/polymarket/market_snapshot.csv
+  # Fail closed if an odds group looks partial. A World Cup outright with only France/Spain rows
+  # would otherwise be de-vigged as if every other team did not exist, manufacturing false edge.
+  min_outcomes_per_market: 2
+  min_market_implied_sum: 0.90
+  max_market_implied_sum: 2.00
 sharp_odds_fetch:
   # Automated fetch for the sharp anchor. The Odds API aggregates Pinnacle + Betfair Exchange.
   # Set the key in the environment (never commit it): export THE_ODDS_API_KEY=...
@@ -193,10 +198,15 @@ sharp_odds_fetch:
   output_path: inputs/polymarket/sharp_odds.csv
   fallback_input_paths:
   # Optional manual/import fallback with columns:
-  # market_slug,outcome,decimal_odds,bookmaker,token_id(optional),anchor_source,anchor_timestamp_utc.
+  # market_slug,outcome,decimal_odds,bookmaker,anchor_timestamp_utc,token_id(optional),anchor_source.
   # Used only when the provider returns no usable rows.
   - inputs/polymarket/sharp_odds_fallback.csv
   - inputs/polymarket/manual_sharp_odds.csv
+  fallback_require_bookmaker: true
+  fallback_require_timestamp: true
+  fallback_reject_stale: true
+  fallback_max_age_hours: 24
+  fallback_max_decimal_odds: 1001
   request_timeout_seconds: 20
 crypto_fundamental:
   # Deribit option-implied P(S_T > strike) for crypto "above $K by DATE" markets. No API key
@@ -598,6 +608,5 @@ governance_thresholds:
   require_clean_snapshot_labels_for_paper: false
   min_forward_paper_trades: 1
   require_positive_forward_paper_roi: false
-
 
 

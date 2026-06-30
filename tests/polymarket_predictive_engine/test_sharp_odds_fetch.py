@@ -1,4 +1,5 @@
 import csv
+from datetime import datetime, timezone
 
 from pytest import approx
 
@@ -171,6 +172,7 @@ def test_fetch_uses_fallback_csv_when_provider_errors(tmp_path, monkeypatch):
     api_key = "secret-key-123"
     fallback = tmp_path / "fallback.csv"
     output = tmp_path / "sharp_odds.csv"
+    timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     _write(
         fallback,
         [
@@ -180,6 +182,7 @@ def test_fetch_uses_fallback_csv_when_provider_errors(tmp_path, monkeypatch):
                 "decimal_odds": "7.0",
                 "bookmaker": "manual_pinnacle_snapshot",
                 "token_id": "FRANCE_YES",
+                "anchor_timestamp_utc": timestamp,
             },
             {
                 "market_slug": "soccer-fifa-world-cup-winner",
@@ -187,9 +190,10 @@ def test_fetch_uses_fallback_csv_when_provider_errors(tmp_path, monkeypatch):
                 "decimal_odds": "6.0",
                 "bookmaker": "manual_pinnacle_snapshot",
                 "token_id": "SPAIN_YES",
+                "anchor_timestamp_utc": timestamp,
             },
         ],
-        ["market_slug", "outcome", "decimal_odds", "bookmaker", "token_id"],
+        ["market_slug", "outcome", "decimal_odds", "bookmaker", "token_id", "anchor_timestamp_utc"],
     )
     monkeypatch.setenv("THE_ODDS_API_KEY", api_key)
 
@@ -225,3 +229,52 @@ def test_fetch_uses_fallback_csv_when_provider_errors(tmp_path, monkeypatch):
     out = list(csv.DictReader(open(output, encoding="utf-8-sig")))
     assert {row["token_id"] for row in out} == {"FRANCE_YES", "SPAIN_YES"}
     assert {row["bookmaker"] for row in out} == {"manual_pinnacle_snapshot"}
+
+
+def test_fallback_csv_rejections_are_reported(tmp_path, monkeypatch):
+    fallback = tmp_path / "fallback.csv"
+    output = tmp_path / "sharp_odds.csv"
+    _write(
+        fallback,
+        [
+            {
+                "market_slug": "soccer-fifa-world-cup-winner",
+                "outcome": "France",
+                "decimal_odds": "7.0",
+                "bookmaker": "manual_pinnacle_snapshot",
+                "anchor_timestamp_utc": "2020-01-01T00:00:00Z",
+            },
+            {
+                "market_slug": "",
+                "outcome": "Spain",
+                "decimal_odds": "1.0",
+                "bookmaker": "",
+                "anchor_timestamp_utc": "",
+            },
+        ],
+        ["market_slug", "outcome", "decimal_odds", "bookmaker", "anchor_timestamp_utc"],
+    )
+    monkeypatch.delenv("THE_ODDS_API_KEY", raising=False)
+    cfg = EngineConfig(
+        raw={
+            "paths": {"output_root": str(tmp_path / "outputs")},
+            "sharp_odds_fetch": {
+                "sports": ["soccer_fifa_world_cup_winner"],
+                "markets": "outrights",
+                "output_path": str(output),
+                "fallback_input_paths": [str(fallback)],
+            },
+        },
+        path=tmp_path / "cfg.yaml",
+    )
+
+    summary = fetch_sharp_odds(cfg)
+
+    assert summary["status"] == "missing_api_key"
+    assert summary["rows"] == 0
+    assert summary["fallback_rejected_rows"] == 2
+    assert summary["fallback_rejection_reasons"]["stale_anchor_timestamp"] == 1
+    assert summary["fallback_rejection_reasons"]["missing_market_slug"] == 1
+    rejections = list(csv.DictReader(open(summary["fallback_rejections_path"], encoding="utf-8-sig")))
+    assert len(rejections) == 2
+    assert "decimal_odds_not_greater_than_one" in rejections[1]["reasons"]

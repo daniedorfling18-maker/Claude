@@ -55,6 +55,23 @@ To land in the fundamental slot these must resolve to a **Polymarket `token_id`*
 The `build-sharp-anchor` summary reports `skipped_no_token` so you can see join coverage. Start with
 direct `token_id`s for the markets you care about, then broaden via the map.
 
+## Manual fallback safety
+
+If the API provider is unavailable, `sharp_odds_fetch.fallback_input_paths` can feed a manually
+validated CSV into the same contract. Those rows are intentionally strict:
+
+- required columns: `market_slug,outcome,decimal_odds,bookmaker,anchor_timestamp_utc`;
+- optional but recommended: `token_id` and `anchor_source`;
+- stale fallback rows are rejected by default after `fallback_max_age_hours` (24 hours in the example
+  config);
+- rejected rows are written to `outputs/polymarket_model_governance/sharp_odds_fallback_rejections.csv`;
+- `build-sharp-anchor` refuses to de-vig a partial market if the priced outcomes look incomplete.
+
+That last point matters for futures/outrights. A World Cup winner file with only France and Spain
+would be mathematically unsafe: de-vigging only those two teams would inflate their probabilities as
+if Brazil, Argentina, England, and every other runner did not exist. The engine now treats that as
+missing anchor data rather than manufactured edge.
+
 ## Crypto markets (Deribit options)
 
 For "Will BTC/ETH be above $K by DATE?" markets the fair value is *mechanically* computable - no

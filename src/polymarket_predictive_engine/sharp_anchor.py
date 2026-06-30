@@ -194,6 +194,9 @@ def build_sharp_anchor(cfg: EngineConfig, *, input_path: str | None = None) -> d
     settings = cfg.raw.get("sharp_anchor", {}) or {}
     method = str(settings.get("devig_method", "multiplicative")).lower()
     source_name = str(settings.get("source_name", "sharp_odds"))
+    min_outcomes_per_market = max(2, int(settings.get("min_outcomes_per_market", 2) or 2))
+    min_market_implied_sum = float(settings.get("min_market_implied_sum", 0.90) or 0.90)
+    max_market_implied_sum = float(settings.get("max_market_implied_sum", 2.00) or 2.00)
     in_path = Path(input_path or settings.get("input_path") or "inputs/polymarket/sharp_odds.csv")
     out_dir = cfg.output_root / "polymarket_training"
     out_path = out_dir / "sharp_fundamental_probabilities.csv"
@@ -222,6 +225,9 @@ def build_sharp_anchor(cfg: EngineConfig, *, input_path: str | None = None) -> d
     out_rows: list[dict[str, Any]] = []
     skipped_unpriced = 0
     skipped_no_token = 0
+    skipped_incomplete_markets = 0
+    skipped_incomplete_market_rows = 0
+    incomplete_market_samples: list[dict[str, Any]] = []
     worldcup_winner_token_joins = 0
     overrounds: list[float] = []
     for gkey, grows in groups.items():
@@ -236,7 +242,27 @@ def build_sharp_anchor(cfg: EngineConfig, *, input_path: str | None = None) -> d
             kept.append(row)
         if not raw:
             continue
-        overrounds.append(sum(raw))
+        raw_sum = sum(raw)
+        if len(raw) < min_outcomes_per_market or raw_sum < min_market_implied_sum or raw_sum > max_market_implied_sum:
+            skipped_incomplete_markets += 1
+            skipped_incomplete_market_rows += len(kept)
+            if len(incomplete_market_samples) < 20:
+                incomplete_market_samples.append(
+                    {
+                        "market_slug": gkey,
+                        "priced_outcomes": len(raw),
+                        "implied_probability_sum": round(raw_sum, 6),
+                        "reason": (
+                            "too_few_priced_outcomes"
+                            if len(raw) < min_outcomes_per_market
+                            else "implied_sum_below_complete_market_floor"
+                            if raw_sum < min_market_implied_sum
+                            else "implied_sum_above_sanity_ceiling"
+                        ),
+                    }
+                )
+            continue
+        overrounds.append(raw_sum)
         fair = devig(raw, method)
         for row, implied, prob in zip(kept, raw, fair):
             row_market_key = str(row.get("market_key", "") or "")
@@ -277,6 +303,12 @@ def build_sharp_anchor(cfg: EngineConfig, *, input_path: str | None = None) -> d
         "fundamental_rows": len(out_rows),
         "skipped_unpriced": skipped_unpriced,
         "skipped_no_token": skipped_no_token,
+        "skipped_incomplete_markets": skipped_incomplete_markets,
+        "skipped_incomplete_market_rows": skipped_incomplete_market_rows,
+        "incomplete_market_samples": incomplete_market_samples,
+        "min_outcomes_per_market": min_outcomes_per_market,
+        "min_market_implied_sum": min_market_implied_sum,
+        "max_market_implied_sum": max_market_implied_sum,
         "mean_overround_removed": round(sum(overrounds) / len(overrounds) - 1.0, 4) if overrounds else 0.0,
         "token_join": (
             "direct_token_id"

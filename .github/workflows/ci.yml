@@ -65,11 +65,11 @@ jobs:
               'test_submit_dry_run.yml',
           }
           expected_triggers = {
-              # Auto Pick and its fixture-cron updater are intentionally manual-only and disabled until stale-card fallbacks are removed.
+              # Auto Pick, fixture-cron updater and data inventory are intentionally manual-only until stale-input paths are hardened.
               'auto_pick.yml': {'workflow_dispatch'},
               'check_superbru_fixtures.yml': {'workflow_dispatch'},
+              'data-inventory.yml': {'workflow_dispatch'},
               'ci.yml': {'push', 'pull_request'},
-              'data-inventory.yml': {'schedule', 'push'},
               'polymarket-mispricing-bot.yml': {'workflow_dispatch'},
               'refresh-locked-superbru-card.yml': {'schedule', 'workflow_dispatch'},
               'repo-audit-bundle.yml': {'push'},
@@ -111,12 +111,13 @@ jobs:
           if forbidden_present:
               failures.append(f'Manual-only workflow files are still present: {sorted(forbidden_present)}')
 
+          manual_allowed = {'auto_pick.yml', 'check_superbru_fixtures.yml', 'data-inventory.yml', 'refresh-locked-superbru-card.yml', 'polymarket-mispricing-bot.yml'}
           for name in sorted(expected & present):
               path = workflow_dir / name
               text = path.read_text(encoding='utf-8')
               on_block = top_level_on_block(text)
               triggers = declared_triggers(on_block)
-              if 'workflow_dispatch' in triggers and name not in {'auto_pick.yml', 'check_superbru_fixtures.yml', 'refresh-locked-superbru-card.yml', 'polymarket-mispricing-bot.yml'}:
+              if 'workflow_dispatch' in triggers and name not in manual_allowed:
                   failures.append(f'{name} declares manual workflow_dispatch trigger')
               required = expected_triggers[name]
               missing_triggers = required - triggers

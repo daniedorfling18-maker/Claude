@@ -119,7 +119,14 @@ def _feedback_broaden_family_prefixes(cfg: EngineConfig, settings: dict[str, Any
     payload = read_json(cfg.governance_root / "price_action_feedback.json", default={}) or {}
     if not isinstance(payload, dict):
         return []
-    if str(payload.get("learning_state") or "") != "suppress_negative_price_action_and_broaden":
+    learning_state = str(payload.get("learning_state") or "")
+    has_feedback_target = bool(
+        learning_state == "suppress_negative_price_action_and_broaden"
+        or safe_float(payload.get("paper_confirmation_candidates"))
+        or safe_float(payload.get("promotion_candidates"))
+        or safe_float(payload.get("positive_collect_candidates"))
+    )
+    if not has_feedback_target:
         return []
     prefixes: list[str] = []
     for raw_query in payload.get("collection_queries", []) or []:

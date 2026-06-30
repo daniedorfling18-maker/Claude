@@ -1,4 +1,4 @@
-param(
+﻿param(
   [string]$ConfigPath = "polymarket_predictive_config.example.yaml",
   [int]$WebsocketSeconds = 90
 )
@@ -116,3 +116,4 @@ try {
   Write-LogLine "ERROR: $($_.Exception.Message)"
   exit 1
 }
+

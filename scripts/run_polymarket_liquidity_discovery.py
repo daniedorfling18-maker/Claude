@@ -14,6 +14,7 @@ import sys
 from pathlib import Path
 import traceback
 from typing import Any
+from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -163,7 +164,15 @@ def _public_search_events(bot_config: scanner.BotConfig, query: str, *, limit: i
         "search_profiles": "false",
         "search_tags": "false",
     }
-    payload = scanner.http_json(f"{bot_config.gamma_host}/public-search?{urlencode(params)}")
+    url = f"{bot_config.gamma_host}/public-search?{urlencode(params)}"
+    try:
+        payload = scanner.http_json(url)
+    except HTTPError as exc:
+        print(f"warning: skipping public-search query after HTTP {exc.code}: {query!r}")
+        return []
+    except URLError as exc:
+        print(f"warning: skipping public-search query after URL error: {query!r}: {exc}")
+        return []
     if not isinstance(payload, dict):
         return []
     events = payload.get("events") or []
@@ -572,3 +581,4 @@ def main(argv: list[str] | None = None) -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
+

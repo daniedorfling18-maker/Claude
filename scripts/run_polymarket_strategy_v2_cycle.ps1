@@ -12,6 +12,35 @@ New-Item -ItemType Directory -Force .\work | Out-Null
 
 $started = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ")
 
+# Refresh the underlying Polymarket market/prediction snapshot before rescoring Strategy V2.
+$predictionSnapshotPath = ".\outputs\polymarket_predictions\predictions.csv"
+$predictionSnapshotBeforeUtc = $null
+if (Test-Path $predictionSnapshotPath) {
+  $predictionSnapshotBeforeUtc = (Get-Item $predictionSnapshotPath).LastWriteTimeUtc.ToString("yyyy-MM-ddTHH:mm:ssZ")
+}
+
+$shadowRefreshScript = Join-Path $repoRoot "scripts\run_polymarket_shadow_research_cycle.ps1"
+$shadowRefreshArgs = @(
+  "-NoProfile",
+  "-ExecutionPolicy", "Bypass",
+  "-File", $shadowRefreshScript,
+  "-ConfigPath", $ConfigPath,
+  "-WebsocketSeconds", "30"
+)
+
+& powershell.exe @shadowRefreshArgs | Out-Null
+if ($LASTEXITCODE -ne 0) {
+  throw "Shadow research refresh failed with exit code $LASTEXITCODE"
+}
+
+$predictionSnapshotAfterUtc = $null
+if (Test-Path $predictionSnapshotPath) {
+  $predictionSnapshotAfterUtc = (Get-Item $predictionSnapshotPath).LastWriteTimeUtc.ToString("yyyy-MM-ddTHH:mm:ssZ")
+}
+
+
+# Refresh the underlying market/prediction snapshot before rescoring Strategy V2.
+
 python -m polymarket_predictive_engine.cli refresh-governance --config $ConfigPath | Out-Null
 python -m polymarket_predictive_engine.cli validation-report --config $ConfigPath | Out-Null
 
@@ -52,6 +81,8 @@ $status = [PSCustomObject]@{
   status = "ok"
   started_at_utc = $started
   ended_at_utc = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ")
+  prediction_snapshot_before_utc = $predictionSnapshotBeforeUtc
+  prediction_snapshot_after_utc = $predictionSnapshotAfterUtc
   anchored_rows = @($anchoredRows).Count
   shadow_candidates = @($shadowCandidates).Count
   rejected_anchored_rows = @($rejectedAnchored).Count
@@ -70,3 +101,6 @@ $status | Format-List
 $shadowCandidates |
   Select-Object family, market_slug, outcome, executable_price, anchor_fair_probability, risk_adjusted_anchor_edge, spread, liquidity |
   Format-List
+
+
+

@@ -3,7 +3,8 @@
   [int]$StepTimeoutSeconds = 180,
   [int]$IndependentAnchorMaxAgeMinutes = 60,
   [int]$PostEvidenceWebsocketSeconds = 20,
-  [double]$MaxMemoryPercent = 94
+  [double]$MaxMemoryPercent = 94,
+  [double]$MaintenanceMaxMemoryPercent = 98.5
 )
 
 $ErrorActionPreference = "Stop"
@@ -70,6 +71,70 @@ function Get-MemoryUsedPercent {
   return [math]::Round((($os.TotalVisibleMemorySize - $os.FreePhysicalMemory) / $os.TotalVisibleMemorySize) * 100, 1)
 }
 
+function Invoke-LowMemoryMaintenance {
+  param([double]$MemoryUsedPercent)
+  if ($MaintenanceMaxMemoryPercent -le 0 -or $MemoryUsedPercent -ge $MaintenanceMaxMemoryPercent) {
+    return [PSCustomObject]@{
+      status = "skipped_high_memory"
+      memory_used_percent = $MemoryUsedPercent
+      maintenance_max_memory_percent = $MaintenanceMaxMemoryPercent
+      reason = "Paper broker/dashboard maintenance was skipped because memory was above the maintenance guardrail."
+    }
+  }
+
+  $stdoutPath = Join-Path $repoRoot "work\strategy_v2_low_memory_paper_trade.stdout.log"
+  $stderrPath = Join-Path $repoRoot "work\strategy_v2_low_memory_paper_trade.stderr.log"
+  Remove-Item $stdoutPath, $stderrPath -ErrorAction SilentlyContinue
+  try {
+    $process = Start-Process `
+      -FilePath "python" `
+      -ArgumentList @("-m", "polymarket_predictive_engine.cli", "paper-trade", "--config", $ConfigPath) `
+      -WorkingDirectory $repoRoot `
+      -PassThru `
+      -WindowStyle Hidden `
+      -RedirectStandardOutput $stdoutPath `
+      -RedirectStandardError $stderrPath
+
+    $maintenanceTimeoutMs = [int]([math]::Max(30, [math]::Min($StepTimeoutSeconds, 90)) * 1000)
+    if (-not $process.WaitForExit($maintenanceTimeoutMs)) {
+      try { Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue } catch {}
+      return [PSCustomObject]@{
+        status = "timed_out"
+        memory_used_percent = $MemoryUsedPercent
+        stdout_log = $stdoutPath
+        stderr_log = $stderrPath
+        reason = "Low-memory paper broker/dashboard maintenance timed out."
+      }
+    }
+    $process.Refresh()
+    if ([int]$process.ExitCode -ne 0) {
+      return [PSCustomObject]@{
+        status = "error"
+        exit_code = [int]$process.ExitCode
+        memory_used_percent = $MemoryUsedPercent
+        stdout_log = $stdoutPath
+        stderr_log = $stderrPath
+        reason = "Low-memory paper broker/dashboard maintenance failed."
+      }
+    }
+    return [PSCustomObject]@{
+      status = "ran"
+      memory_used_percent = $MemoryUsedPercent
+      stdout_log = $stdoutPath
+      stderr_log = $stderrPath
+      paper_trade_refresh = Read-JsonIfExists ".\outputs\polymarket_model_governance\paper_trade_refresh.json"
+    }
+  } catch {
+    return [PSCustomObject]@{
+      status = "error"
+      memory_used_percent = $MemoryUsedPercent
+      stdout_log = $stdoutPath
+      stderr_log = $stderrPath
+      reason = $_.Exception.Message
+    }
+  }
+}
+
 function Stop-StrategyCycleForHighMemory {
   param(
     [string]$Phase,
@@ -81,6 +146,7 @@ function Stop-StrategyCycleForHighMemory {
   } else {
     "Strategy V2 cycle stopped before launching the next step because local memory was at or above the guardrail."
   }
+  $maintenance = Invoke-LowMemoryMaintenance -MemoryUsedPercent $MemoryUsedPercent
   $status = [PSCustomObject]@{
     status = $statusName
     started_at_utc = $started
@@ -93,8 +159,9 @@ function Stop-StrategyCycleForHighMemory {
     shadow_candidates = $null
     rejected_anchored_rows = $null
     active_shadow_candidates = @()
-    paper_trading_invoked = $false
+    paper_trading_invoked = ($maintenance.status -eq "ran")
     live_trading_invoked = $false
+    low_memory_maintenance = $maintenance
   }
   $status |
     ConvertTo-Json -Depth 8 |

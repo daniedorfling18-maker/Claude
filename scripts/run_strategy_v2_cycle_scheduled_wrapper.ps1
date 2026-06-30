@@ -1,5 +1,7 @@
 param(
-  [double]$MaxMemoryPercent = 95
+  [double]$MaxMemoryPercent = 95,
+  [double]$MaintenanceMaxMemoryPercent = 98.5,
+  [string]$ConfigPath = "polymarket_predictive_config.example.yaml"
 )
 
 $ErrorActionPreference = "Continue"
@@ -34,6 +36,76 @@ function Get-MemoryUsedPercent {
   return [math]::Round((($os.TotalVisibleMemorySize - $os.FreePhysicalMemory) / $os.TotalVisibleMemorySize) * 100, 1)
 }
 
+function Invoke-LowMemoryMaintenance {
+  param([double]$MemoryUsedPercent)
+  if ($MaintenanceMaxMemoryPercent -le 0 -or $MemoryUsedPercent -ge $MaintenanceMaxMemoryPercent) {
+    return [PSCustomObject]@{
+      status = "skipped_high_memory"
+      memory_used_percent = $MemoryUsedPercent
+      maintenance_max_memory_percent = $MaintenanceMaxMemoryPercent
+      reason = "Scheduled paper broker/dashboard maintenance was skipped because memory was above the maintenance guardrail."
+    }
+  }
+
+  $stdoutPath = Join-Path $workRoot "strategy_v2_scheduled_low_memory_paper_trade.stdout.log"
+  $stderrPath = Join-Path $workRoot "strategy_v2_scheduled_low_memory_paper_trade.stderr.log"
+  Remove-Item $stdoutPath, $stderrPath -ErrorAction SilentlyContinue
+  try {
+    Set-Location $repoRoot
+    $env:PYTHONPATH = Join-Path $repoRoot "src"
+    $process = Start-Process `
+      -FilePath "python" `
+      -ArgumentList @("-m", "polymarket_predictive_engine.cli", "paper-trade", "--config", $ConfigPath) `
+      -WorkingDirectory $repoRoot `
+      -PassThru `
+      -WindowStyle Hidden `
+      -RedirectStandardOutput $stdoutPath `
+      -RedirectStandardError $stderrPath
+
+    if (-not $process.WaitForExit(90000)) {
+      try { Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue } catch {}
+      return [PSCustomObject]@{
+        status = "timed_out"
+        memory_used_percent = $MemoryUsedPercent
+        stdout_log = $stdoutPath
+        stderr_log = $stderrPath
+        reason = "Scheduled low-memory paper broker/dashboard maintenance timed out."
+      }
+    }
+    $process.Refresh()
+    if ([int]$process.ExitCode -ne 0) {
+      return [PSCustomObject]@{
+        status = "error"
+        exit_code = [int]$process.ExitCode
+        memory_used_percent = $MemoryUsedPercent
+        stdout_log = $stdoutPath
+        stderr_log = $stderrPath
+        reason = "Scheduled low-memory paper broker/dashboard maintenance failed."
+      }
+    }
+    $paperRefreshPath = Join-Path $repoRoot "outputs\polymarket_model_governance\paper_trade_refresh.json"
+    $paperRefresh = $null
+    if (Test-Path $paperRefreshPath) {
+      try { $paperRefresh = Get-Content $paperRefreshPath -Raw | ConvertFrom-Json } catch {}
+    }
+    return [PSCustomObject]@{
+      status = "ran"
+      memory_used_percent = $MemoryUsedPercent
+      stdout_log = $stdoutPath
+      stderr_log = $stderrPath
+      paper_trade_refresh = $paperRefresh
+    }
+  } catch {
+    return [PSCustomObject]@{
+      status = "error"
+      memory_used_percent = $MemoryUsedPercent
+      stdout_log = $stdoutPath
+      stderr_log = $stderrPath
+      reason = $_.Exception.Message
+    }
+  }
+}
+
 $mutex = New-Object System.Threading.Mutex($false, "Global\PolymarketStrategyV2Cycle")
 $lockTaken = $false
 
@@ -56,6 +128,7 @@ try {
 
   $memoryUsedPercent = Get-MemoryUsedPercent
   if ($MaxMemoryPercent -gt 0 -and $memoryUsedPercent -ge $MaxMemoryPercent) {
+    $maintenance = Invoke-LowMemoryMaintenance -MemoryUsedPercent $memoryUsedPercent
     $status = [PSCustomObject]@{
       status = "skipped_high_memory"
       started_at_utc = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ")
@@ -64,6 +137,7 @@ try {
       max_memory_percent = $MaxMemoryPercent
       reason = "Strategy V2 scheduled wrapper skipped before invoking the cycle because local memory was at or above the guardrail."
       run_log = $runLogPath
+      low_memory_maintenance = $maintenance
     }
     Write-StrategyStatus $status
     Write-StrategyLog "=== Strategy V2 scheduled run skipped for high memory: $memoryUsedPercent% / $MaxMemoryPercent% $(Get-Date -Format o) ==="

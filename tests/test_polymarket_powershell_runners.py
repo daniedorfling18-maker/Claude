@@ -48,10 +48,13 @@ def test_strategy_v2_cycle_skips_before_heavy_work_when_memory_is_high():
     text = _script_text("scripts/run_polymarket_strategy_v2_cycle.ps1")
 
     assert "[double]$MaxMemoryPercent = 94" in text
+    assert "[double]$MaintenanceMaxMemoryPercent = 98.5" in text
     guard_index = text.index("skipped_high_memory")
     shadow_start_index = text.index("$shadowRefreshProcess.Start()")
 
     assert "Get-MemoryUsedPercent" in text
+    assert "Invoke-LowMemoryMaintenance" in text
+    assert '"paper-trade"' in text
     assert "$memoryUsedPercent -ge $MaxMemoryPercent" in text
     assert guard_index < shadow_start_index
 
@@ -185,8 +188,12 @@ def test_strategy_v2_scheduled_wrapper_skips_before_cycle_when_memory_is_high():
     text = _script_text("scripts/run_strategy_v2_cycle_scheduled_wrapper.ps1")
 
     assert "[double]$MaxMemoryPercent = 95" in text
+    assert "[double]$MaintenanceMaxMemoryPercent = 98.5" in text
     assert "Get-MemoryUsedPercent" in text
     assert "$memoryUsedPercent -ge $MaxMemoryPercent" in text
+    assert "Invoke-LowMemoryMaintenance" in text
+    assert '"paper-trade"' in text
+    assert "low_memory_maintenance = $maintenance" in text
     assert "skipped_high_memory" in text
     assert "run_polymarket_strategy_v2_cycle.ps1" in text
     assert text.index("skipped_high_memory") < text.index("run_polymarket_strategy_v2_cycle.ps1")

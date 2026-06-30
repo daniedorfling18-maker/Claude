@@ -45,13 +45,21 @@ jobs:
           python -m pip install --upgrade pip
           pip install -e ".[scraper]"
 
-      - name: Refresh locked card outputs with fresh odds
+      - name: Fetch fresh market odds once
         env:
           THE_ODDS_API_KEY: ${{ secrets.THE_ODDS_API_KEY }}
           PYTHONPATH: src
         run: |
           rm -f outputs/market_odds/worldcup_market_odds_raw.error.json
-          python scripts/run_daily_robust_pipeline.py --skip-final-simulation --no-match-odds-only
+          mkdir -p outputs/market_odds
+          python scripts/fetch_market_odds_theoddsapi.py \
+            --sport soccer_fifa_world_cup \
+            --regions uk,eu,us,au \
+            --markets h2h,spreads,totals \
+            --out-json outputs/market_odds/worldcup_market_odds_raw.json \
+            --out-csv outputs/market_odds/worldcup_market_odds_flat.csv \
+            --no-allow-stale-on-failure \
+            --no-allow-empty-on-failure
 
       - name: Validate fresh market odds
         run: |
@@ -88,28 +96,66 @@ jobs:
               print(f'Bookmaker update window: {last_updates[0]} -> {last_updates[-1]}')
           PY
 
-      - name: Build locked card from fresh model predictions
+      - name: Build base final picks from fresh odds
         env:
-          THE_ODDS_API_KEY: ${{ secrets.THE_ODDS_API_KEY }}
           PYTHONPATH: src
         run: |
+          mkdir -p data outputs/latest outputs/final_leader_decision_round_summary_profiles
+          python - <<'PY'
+          import csv
+          from pathlib import Path
+
+          flat_path = Path('outputs/market_odds/worldcup_market_odds_flat.csv')
+          fixture_path = Path('data/fixtures_real.csv')
+          by_event = {}
+          with flat_path.open(encoding='utf-8-sig', newline='') as handle:
+              for row in csv.DictReader(handle):
+                  event_id = (row.get('event_id') or '').strip()
+                  if not event_id or event_id in by_event:
+                      continue
+                  by_event[event_id] = {
+                      'match_id': event_id,
+                      'commence_time': row.get('commence_time', ''),
+                      'home_team': row.get('home_team', ''),
+                      'away_team': row.get('away_team', ''),
+                      'neutral': 'true',
+                      'venue_country': '',
+                      'stage': '',
+                  }
+
+          fixtures = sorted(by_event.values(), key=lambda item: item.get('commence_time', ''))
+          if not fixtures:
+              raise SystemExit('No fixtures could be derived from fresh market odds.')
+
+          fixture_path.parent.mkdir(parents=True, exist_ok=True)
+          with fixture_path.open('w', encoding='utf-8', newline='') as handle:
+              writer = csv.DictWriter(
+                  handle,
+                  fieldnames=['match_id', 'commence_time', 'home_team', 'away_team', 'neutral', 'venue_country', 'stage'],
+              )
+              writer.writeheader()
+              writer.writerows(fixtures)
+          print(f'Wrote {fixture_path} with {len(fixtures)} fixtures')
+          PY
+
           python -m superbru_score_engine predict \
             --config config.yaml \
+            --fixtures data/fixtures_real.csv \
             --odds-json outputs/market_odds/worldcup_market_odds_raw.json \
             --out-dir outputs/latest
 
-          python scripts/build_final_locked_picks.py \
-            --final-picks-csv outputs/latest/predictions.csv \
-            --rescore-csv outputs/component_validation/review_rescore_report.csv \
-            --out-dir outputs/final_locked_picks
+          python scripts/run_final_leader_decision.py \
+            --fixtures data/fixtures_real.csv \
+            --odds-json outputs/market_odds/worldcup_market_odds_raw.json \
+            --predictions-csv outputs/latest/predictions.csv \
+            --out-dir outputs/final_leader_decision_round_summary_profiles
 
-          python scripts/build_daily_robust_card.py \
-            --locked-picks-csv outputs/final_locked_picks/final_picks_locked.csv \
-            --rescore-csv outputs/component_validation/review_rescore_report.csv \
-            --movement-csv outputs/market_odds_history/market_odds_movement_report.csv \
-            --manual-flags-csv inputs/manual_match_flags.csv \
-            --out-dir outputs/daily_robust_card \
-            --allow-first-snapshot
+      - name: Refresh locked card outputs from fetched odds
+        env:
+          PYTHONPATH: src
+        run: |
+          rm -f outputs/market_odds/worldcup_market_odds_raw.error.json
+          python scripts/run_daily_robust_pipeline.py --skip-final-simulation --skip-market-odds-fetch
 
       - name: Validate locked card exists
         run: |
@@ -138,6 +184,7 @@ jobs:
         with:
           name: refresh-locked-superbru-card-${{ github.run_number }}
           path: |
+            data/fixtures_real.csv
             outputs/latest/*.csv
             outputs/latest/*.json
             outputs/market_odds/*.csv
@@ -148,6 +195,9 @@ jobs:
             outputs/market_odds_history/*.json
             outputs/component_validation/*.csv
             outputs/component_validation/*.json
+            outputs/final_leader_decision_round_summary_profiles/**/*.csv
+            outputs/final_leader_decision_round_summary_profiles/**/*.json
+            outputs/final_leader_decision_round_summary_profiles/**/*.md
             outputs/final_locked_picks/*.csv
             outputs/final_locked_picks/*.json
             outputs/daily_robust_card/*.csv

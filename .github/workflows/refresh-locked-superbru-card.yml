@@ -54,8 +54,8 @@ jobs:
           mkdir -p outputs/market_odds
           python scripts/fetch_market_odds_theoddsapi.py \
             --sport soccer_fifa_world_cup \
-            --regions uk,eu,us,au \
-            --markets h2h,spreads,totals \
+            --regions eu \
+            --markets h2h,totals \
             --out-json outputs/market_odds/worldcup_market_odds_raw.json \
             --out-csv outputs/market_odds/worldcup_market_odds_flat.csv \
             --no-allow-stale-on-failure \

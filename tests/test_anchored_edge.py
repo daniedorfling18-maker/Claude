@@ -1,6 +1,6 @@
 ﻿from __future__ import annotations
 
-from polymarket_predictive_engine.anchored_edge import _anchor_index, _candidate_status, _edge_after_penalties, _find_anchor
+from polymarket_predictive_engine.anchored_edge import _anchor_index, _build_report, _candidate_status, _edge_after_penalties, _family_rows, _find_anchor
 
 
 def test_edge_after_penalties_haircuts_raw_anchor_edge() -> None:
@@ -140,3 +140,52 @@ def test_market_level_anchor_does_not_attach_to_explicit_outcome_row() -> None:
 
     assert _find_anchor(no_row, anchors) is None
 
+
+def test_family_summary_counts_matched_anchors_even_when_row_is_rejected() -> None:
+    rows = _family_rows([
+        {
+            "family": "macro_rates",
+            "status": "rejected",
+            "anchor_fair_probability": "0.30",
+            "risk_adjusted_anchor_edge": "0.1025",
+            "blockers": "liquidity_below_strategy_v2_limit",
+        },
+        {
+            "family": "macro_rates",
+            "status": "rejected",
+            "blockers": "missing_independent_anchor; edge_not_computable",
+        },
+    ])
+
+    assert rows[0]["family"] == "macro_rates"
+    assert rows[0]["rows"] == 2
+    assert rows[0]["anchored_rows"] == 1
+    assert rows[0]["anchored_candidates"] == 0
+    assert rows[0]["best_edge"] == 0.1025
+
+
+def test_report_surfaces_anchored_rejected_near_misses() -> None:
+    report = _build_report(
+        [
+            {
+                "family": "macro_rates",
+                "status": "rejected",
+                "anchor_fair_probability": "0.30",
+                "risk_adjusted_anchor_edge": "0.1025",
+                "blockers": "liquidity_below_strategy_v2_limit",
+            },
+            {
+                "family": "sports_other",
+                "status": "rejected",
+                "anchor_fair_probability": "0.64",
+                "risk_adjusted_anchor_edge": "0.002",
+                "blockers": "edge_after_penalty_below_watchlist_minimum",
+            },
+        ],
+        anchor_rows=[{"market_slug": "m", "outcome": "Yes", "anchor_fair_probability": 0.30}],
+        settings={},
+    )
+
+    assert report["anchored_rows"] == 2
+    assert report["top_anchored_rejections"][0]["family"] == "macro_rates"
+    assert report["top_anchored_rejections"][0]["blockers"] == "liquidity_below_strategy_v2_limit"

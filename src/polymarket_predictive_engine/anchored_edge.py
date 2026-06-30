@@ -432,14 +432,16 @@ def _family_rows(candidates: list[dict[str, Any]]) -> list[dict[str, Any]]:
         by_family[str(row.get("family") or "unknown")].append(row)
     rows = []
     for family, family_rows in by_family.items():
+        anchored_rows = [row for row in family_rows if safe_float(row.get("anchor_fair_probability")) is not None]
         candidate_rows = [row for row in family_rows if row.get("status") in {"watchlist", "shadow_candidate"}]
         shadow_rows = [row for row in family_rows if row.get("status") == "shadow_candidate"]
-        edges = [safe_float(row.get("risk_adjusted_anchor_edge")) for row in candidate_rows]
+        edges = [safe_float(row.get("risk_adjusted_anchor_edge")) for row in anchored_rows]
         clean_edges = [float(item) for item in edges if item is not None]
         rows.append(
             {
                 "family": family,
                 "rows": len(family_rows),
+                "anchored_rows": len(anchored_rows),
                 "anchored_candidates": len(candidate_rows),
                 "shadow_candidates": len(shadow_rows),
                 "median_edge": median(clean_edges) if clean_edges else None,
@@ -449,7 +451,7 @@ def _family_rows(candidates: list[dict[str, Any]]) -> list[dict[str, Any]]:
                 "action": _family_action(candidate_rows, shadow_rows),
             }
         )
-    rows.sort(key=lambda row: (row["shadow_candidates"], row["anchored_candidates"], row.get("best_edge") or -999.0), reverse=True)
+    rows.sort(key=lambda row: (row["shadow_candidates"], row["anchored_candidates"], row["anchored_rows"], row.get("best_edge") or -999.0), reverse=True)
     return rows
 
 
@@ -467,6 +469,9 @@ def _build_report(candidates: list[dict[str, Any]], anchor_rows: list[dict[str, 
     status_counts = Counter(str(row.get("status") or "unknown") for row in candidates)
     blocker_counts = Counter(str(row.get("blockers") or "none") for row in candidates)
     family_summary = _family_rows(candidates)
+    anchored_rows = [row for row in candidates if safe_float(row.get("anchor_fair_probability")) is not None]
+    anchored_rejections = [row for row in anchored_rows if row.get("status") == "rejected"]
+    anchored_rejections.sort(key=lambda row: safe_float(row.get("risk_adjusted_anchor_edge")) if safe_float(row.get("risk_adjusted_anchor_edge")) is not None else -999.0, reverse=True)
     shadow_count = status_counts.get("shadow_candidate", 0)
     watchlist_count = status_counts.get("watchlist", 0)
     if shadow_count > 0:
@@ -487,10 +492,12 @@ def _build_report(candidates: list[dict[str, Any]], anchor_rows: list[dict[str, 
         "settings": settings,
         "rows_scored": len(candidates),
         "anchor_rows_loaded": len(anchor_rows),
+        "anchored_rows": len(anchored_rows),
         "status_counts": dict(status_counts.most_common()),
         "top_blockers": dict(blocker_counts.most_common(10)),
         "family_summary": family_summary,
         "top_candidates": [row for row in candidates if row.get("status") in {"shadow_candidate", "watchlist"}][:25],
+        "top_anchored_rejections": anchored_rejections[:25],
         "warnings": {
             "unknown_rows": sum(1 for row in candidates if str(row.get("family") or "").startswith("unknown")),
             "missing_anchor_rows": sum(1 for row in candidates if "missing_independent_anchor" in str(row.get("blockers") or "")),
@@ -521,19 +528,21 @@ def _write_markdown(path: Path, report: dict[str, Any]) -> None:
         "",
         f"- Rows scored: {report['rows_scored']}",
         f"- Anchor rows loaded: {report['anchor_rows_loaded']}",
+        f"- Rows matched to anchors: {report.get('anchored_rows', 0)}",
         f"- Status counts: `{report['status_counts']}`",
         f"- Top blockers: `{report['top_blockers']}`",
         "",
         "## Family summary",
         "",
-        "| Family | Rows | Anchored | Shadow | Median edge | Best edge | Action |",
-        "|---|---:|---:|---:|---:|---:|---|",
+        "| Family | Rows | Anchored rows | Actionable | Shadow | Median edge | Best edge | Action |",
+        "|---|---:|---:|---:|---:|---:|---:|---|",
     ]
     for row in report.get("family_summary", [])[:20]:
         lines.append(
-            "| {family} | {rows} | {anchored} | {shadow} | {median_edge} | {best_edge} | {action} |".format(
+            "| {family} | {rows} | {anchored_rows} | {anchored} | {shadow} | {median_edge} | {best_edge} | {action} |".format(
                 family=row.get("family", ""),
                 rows=row.get("rows", 0),
+                anchored_rows=row.get("anchored_rows", 0),
                 anchored=row.get("anchored_candidates", 0),
                 shadow=row.get("shadow_candidates", 0),
                 median_edge=_fmt(row.get("median_edge")),
@@ -558,6 +567,25 @@ def _write_markdown(path: Path, report: dict[str, Any]) -> None:
                 price=_fmt(row.get("executable_price")),
                 edge=_fmt(row.get("risk_adjusted_anchor_edge")),
                 status=row.get("status", ""),
+            )
+        )
+    lines.extend([
+        "",
+        "## Top anchored rejections / near misses",
+        "",
+        "| Family | Market | Outcome | Anchor fair | Price | Edge after penalty | Blockers |",
+        "|---|---|---|---:|---:|---:|---|",
+    ])
+    for row in report.get("top_anchored_rejections", [])[:25]:
+        lines.append(
+            "| {family} | {market} | {outcome} | {anchor} | {price} | {edge} | {blockers} |".format(
+                family=row.get("family", ""),
+                market=str(row.get("market_slug", ""))[:80],
+                outcome=row.get("outcome", ""),
+                anchor=_fmt(row.get("anchor_fair_probability")),
+                price=_fmt(row.get("executable_price")),
+                edge=_fmt(row.get("risk_adjusted_anchor_edge")),
+                blockers=str(row.get("blockers", ""))[:120],
             )
         )
     lines.extend(

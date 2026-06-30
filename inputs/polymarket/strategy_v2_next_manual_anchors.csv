@@ -1,0 +1,5 @@
+"token_id","market_slug","outcome","fair_probability","anchor_source","anchor_timestamp_utc","methodology_note"
+"","will-mexico-reach-the-round-of-16-at-the-2026-fifa-world-cup-20260602025120735","No","","manual_external_anchor_required","2026-06-29T16:05:55Z","Fill fair_probability from independent external source. No anchor = no Strategy V2 candidate."
+"","will-anthropic-flip-btc-by-december-31","No","","manual_external_anchor_required","2026-06-29T16:05:55Z","Fill fair_probability from independent external source. No anchor = no Strategy V2 candidate."
+"","lol-ewi-big1-2026-06-30","E WIE EINFACH E-SPORTS","","manual_external_anchor_required","2026-06-29T16:05:55Z","Fill fair_probability from independent external source. No anchor = no Strategy V2 candidate."
+"","will-the-fed-increase-interest-rates-by-25-bps-after-the-july-2026-meeting","Yes","0.30","Reuters_CME_Fed_funds_futures_proxy","2026-06-29T16:08:17Z","Reuters reported markets pricing about a 30% chance of a July Fed rate hike based on CME Group Fed funds futures. Used as proxy for July +25 bps Yes; verify exact market resolution terms."

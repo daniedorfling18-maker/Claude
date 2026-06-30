@@ -149,6 +149,7 @@ async function load() {
     const priceActionFeedback = data.price_action_feedback || {};
     const probeExitWatch = data.paper_probe_exit_watch || {};
     const paperMaintenance = data.paper_maintenance || {};
+    const paperMaintenanceTask = data.paper_maintenance_task || {};
     const priceScoutPnl = priceScout.realized_pnl_usdc ?? priceScout.total_mark_pnl_usdc;
     const live = data.local_live_heartbeat || data.heartbeat || {};
     const freshness = data.evidence_freshness || {};
@@ -194,6 +195,7 @@ async function load() {
       card("Price-action paper signals", priceActionPaper.signals ?? "0", Number(priceActionPaper.signals || 0) > 0 ? "good" : "warn"),
       card("Broker refresh", priceActionPaper.broker_refresh_needed ? `${priceActionPaper.pending_broker_signals ?? 0} pending` : "fresh", priceActionPaper.broker_refresh_needed ? "warn" : "good"),
       card("Paper maintenance", paperMaintenance.status || "not_started", paperMaintenance.status === "ran_broker_maintenance" || paperMaintenance.status === "refreshed_dashboard_idle" || paperMaintenance.status === "skipped_no_work" ? "good" : paperMaintenance.status === "skipped_high_memory" ? "warn" : ""),
+      card("Maintenance task", paperMaintenanceTask.status || "not_installed_or_unknown", paperMaintenanceTask.status === "installed" ? "good" : "warn"),
       card("Probe exit due", probeExitWatch.fixed_horizon_due_count ? `${probeExitWatch.fixed_horizon_due_count} due` : (probeExitWatch.next_due_minutes == null ? "none" : `${fmtNum(probeExitWatch.next_due_minutes, 0)}m`), probeExitWatch.fixed_horizon_due_count ? "warn" : ""),
       card("Main trade blocker", longText(diag.main_blocker || "-", 120), Number(diag.approved_signals_count || 0) > 0 ? "good" : "warn"),
       card("Next settlement", data.shadow_settlement_watch?.next_settlement_minutes == null ? "Waiting" : fmtNum(data.shadow_settlement_watch.next_settlement_minutes, 0) + "m"),
@@ -241,6 +243,10 @@ async function load() {
       ["Broker generated", tradingAccount.generated_at_utc || freshness.broker_generated_at_utc],
       ["Stale cycle broker", tradingAccount.forward_cycle_broker_mismatch ? "yes" : "no"],
       ["Paper maintenance", paperMaintenance.status],
+      ["Maintenance task", paperMaintenanceTask.status],
+      ["Task state", paperMaintenanceTask.task_state],
+      ["Task interval", paperMaintenanceTask.interval_minutes == null ? "-" : paperMaintenanceTask.interval_minutes + "m"],
+      ["Task next run", paperMaintenanceTask.next_run_time],
       ["Maintenance age", paperMaintenance.age_seconds == null ? "-" : fmtNum(paperMaintenance.age_seconds, 0) + "s"],
       ["Maintenance memory", paperMaintenance.memory_used_percent == null ? "-" : fmtNum(paperMaintenance.memory_used_percent, 1) + "% / " + fmtNum(paperMaintenance.max_memory_percent, 1) + "%"],
       ["Maintenance next exit", paperMaintenance.next_exit_due_utc],
@@ -1685,6 +1691,22 @@ def _paper_maintenance_status(cfg: EngineConfig) -> dict[str, Any]:
     }
 
 
+def _paper_maintenance_task_status(cfg: EngineConfig) -> dict[str, Any]:
+    path = cfg.path.parent / "work" / "polymarket_paper_maintenance_task_status.json"
+    payload = _read_json_lenient(path, default={}) or {}
+    if not isinstance(payload, dict) or not payload:
+        return {
+            "status": "not_installed_or_unknown",
+            "status_file": str(path),
+            "reason": "No paper-maintenance scheduled-task status file has been written.",
+        }
+    return {
+        **payload,
+        "status_file": str(path),
+        "age_seconds": _age_seconds(payload),
+    }
+
+
 def _scoreboard_status(broker: dict[str, Any], target: dict[str, Any]) -> str:
     broker_equity = safe_float(broker.get("equity"))
     current = target.get("current") if isinstance(target, dict) else {}
@@ -1818,6 +1840,7 @@ def render_dashboard(cfg: EngineConfig, latest_report: dict[str, Any] | None = N
     if not isinstance(price_action_feedback, dict):
         price_action_feedback = {}
     paper_maintenance = _paper_maintenance_status(cfg)
+    paper_maintenance_task = _paper_maintenance_task_status(cfg)
 
     payload = {
         "status": "ok",
@@ -1860,6 +1883,7 @@ def render_dashboard(cfg: EngineConfig, latest_report: dict[str, Any] | None = N
         "price_action_feedback": price_action_feedback,
         "paper_probe_exit_watch": paper_probe_exit_watch,
         "paper_maintenance": paper_maintenance,
+        "paper_maintenance_task": paper_maintenance_task,
         "edge_strategy_search": edge_strategy_search,
         "promoted_rule_shadow": promoted_rule_shadow,
         "liquidity_discovery": liquidity_discovery,

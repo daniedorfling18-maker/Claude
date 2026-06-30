@@ -361,6 +361,44 @@ def test_dashboard_surfaces_lightweight_paper_maintenance_status(tmp_path):
     assert "Paper maintenance" in html
 
 
+def test_dashboard_surfaces_paper_maintenance_task_status(tmp_path):
+    cfg = _config(tmp_path)
+    status_path = cfg.path.parent / "work" / "polymarket_paper_maintenance_task_status.json"
+    write_json(
+        status_path,
+        {
+            "status": "installed",
+            "task_name": "Polymarket Paper Maintenance",
+            "task_state": "Ready",
+            "interval_minutes": 1,
+            "max_memory_percent": 95,
+            "next_run_time": "2026-07-01T00:10:00Z",
+            "installed_at_utc": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+            "generated_at_utc": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        },
+    )
+
+    result = render_dashboard(cfg)
+    data = read_json(result["dashboard_data"])
+    html = Path(result["dashboard_file"]).read_text(encoding="utf-8")
+
+    assert data["paper_maintenance_task"]["status"] == "installed"
+    assert data["paper_maintenance_task"]["task_state"] == "Ready"
+    assert data["paper_maintenance_task"]["interval_minutes"] == 1
+    assert data["paper_maintenance_task"]["age_seconds"] is not None
+    assert "Maintenance task" in html
+
+
+def test_dashboard_marks_missing_paper_maintenance_task_status(tmp_path):
+    cfg = _config(tmp_path)
+
+    result = render_dashboard(cfg)
+    data = read_json(result["dashboard_data"])
+
+    assert data["paper_maintenance_task"]["status"] == "not_installed_or_unknown"
+    assert "No paper-maintenance scheduled-task status file" in data["paper_maintenance_task"]["reason"]
+
+
 def test_standalone_paper_trade_report_refreshes_profit_tracker_and_dashboard(tmp_path):
     cfg = _config(tmp_path)
 

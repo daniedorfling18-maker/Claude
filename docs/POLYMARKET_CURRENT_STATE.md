@@ -146,6 +146,11 @@ at the candidate entry ask/executable price and selling or marking at later webs
 learn whether odds movement creates a tradable edge before markets settle. It is useful fast feedback,
 but it is not settlement proof and does not by itself authorise paper or live trading.
 
+The engine also runs a fast price-action scout for liquid short-window/profit-sprint targets. This
+persists shadow-only entry prices from liquidity/profit-sprint candidates and evaluates later websocket
+bids for take-profit/stop-loss evidence. It is a throughput layer for learning, not a promotion bypass:
+candidate cohorts still need positive evidence and governance review before paper trading.
+
 ## Why $100/month is not solved yet
 
 At the current probationary stake of $2, a 3% ROI produces only $0.06 per trade. Hitting $100/month at that level would require about 1,667 trades/month, which is not realistic. The route to the target is therefore:

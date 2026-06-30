@@ -75,6 +75,7 @@ HTML = """<!doctype html>
   </div>
   <section><h2>Why no trade?</h2><div id="tradeDiagnostics"></div></section>
   <section><h2>Strategy V2 anchored edge</h2><div id="strategyV2"></div></section>
+  <section><h2>Fast price-action scout</h2><div id="priceActionScout"></div></section>
   <div class="two">
     <section><h2>Promotion readiness</h2><div id="promotionReadiness"></div></section>
     <section><h2>Edge promotion watchlist</h2><div id="promotionWatchlist"></div></section>
@@ -139,6 +140,8 @@ async function load() {
     const strategyV2 = data.strategy_v2 || {};
     const roundTrip = strategyV2.round_trip_evidence || {};
     const roundTripPnl = roundTrip.realized_pnl_usdc ?? roundTrip.total_mark_pnl_usdc;
+    const priceScout = data.price_action_scout || {};
+    const priceScoutPnl = priceScout.realized_pnl_usdc ?? priceScout.total_mark_pnl_usdc;
     const live = data.local_live_heartbeat || data.heartbeat || {};
     const freshness = data.evidence_freshness || {};
     const scanner = data.scanner_heartbeat || {};
@@ -178,6 +181,7 @@ async function load() {
       card("Strategy V2 shadow", strategyV2.shadow_candidates ?? "0", Number(strategyV2.shadow_candidates || 0) > 0 ? "good" : "warn"),
       card("Strategy V2 anchors", `${strategyV2.anchored_rows ?? 0}/${strategyV2.rows_scored ?? 0}`, Number(strategyV2.anchored_rows || 0) > 0 ? "good" : "warn"),
       card("Round-trip P&L", fmtUsd(roundTripPnl), Number(roundTripPnl || 0) > 0 ? "good" : "warn"),
+      card("Price scout P&L", fmtUsd(priceScoutPnl), Number(priceScoutPnl || 0) > 0 ? "good" : "warn"),
       card("Main trade blocker", longText(diag.main_blocker || "-", 120), Number(diag.approved_signals_count || 0) > 0 ? "good" : "warn"),
       card("Next settlement", data.shadow_settlement_watch?.next_settlement_minutes == null ? "Waiting" : fmtNum(data.shadow_settlement_watch.next_settlement_minutes, 0) + "m"),
       card("Shadow P&L", fmtUsd(data.shadow_settlement_watch?.shadow_total_pnl_usdc), Number(data.shadow_settlement_watch?.shadow_total_pnl_usdc || 0) > 0 ? "good" : "warn"),
@@ -364,6 +368,48 @@ async function load() {
       ["Shadow","shadow_candidates"],
       ["Best edge","best_edge", v=>fmtNum(v,4)],
       ["Action","action", v=>longText(v, 120)]
+    ]);
+    document.getElementById("priceActionScout").innerHTML = facts([
+      ["Decision", priceScout.decision],
+      ["Ledger entries", priceScout.ledger_entries],
+      ["Policy eligible", priceScout.policy_eligible_entries],
+      ["Policy excluded", priceScout.policy_excluded_entries],
+      ["Deduped evidence", priceScout.deduped_evidence_entries],
+      ["Duplicate entries", priceScout.duplicate_policy_eligible_entries],
+      ["New entries", priceScout.new_entries],
+      ["Observed candidates", priceScout.observed_candidates],
+      ["Closed round trips", priceScout.closed_trades],
+      ["Open marks", priceScout.open_trades],
+      ["Take-profit exits", priceScout.take_profit_exits],
+      ["Stop-loss exits", priceScout.stop_loss_exits],
+      ["Realized P&L", priceScout.realized_pnl_usdc, fmtUsd],
+      ["Marked P&L", priceScout.total_mark_pnl_usdc, fmtUsd],
+      ["Marked ROI", priceScout.mark_roi, v=>fmtNum(Number(v) * 100, 2) + "%"],
+      ["Review candidates", priceScout.price_action_review_candidates]
+    ]) + `<div style="height:12px"></div><h3>Price-action scout by cohort</h3>` + table(priceScout.cohorts || [], [
+      ["Cohort","signal_cohort"],
+      ["Candidates","candidates"],
+      ["Closed","closed_trades"],
+      ["Open","open_trades"],
+      ["TP/SL","take_profit_exits", (v,row)=>`${v ?? 0}/${row.stop_loss_exits ?? 0}`],
+      ["Win rate","win_rate", v=>fmtNum(Number(v) * 100, 1) + "%"],
+      ["Realized P&L","realized_pnl_usdc", fmtUsd],
+      ["Realized ROI","realized_roi", v=>fmtNum(Number(v) * 100, 2) + "%"],
+      ["MTM P&L","total_mark_pnl_usdc", fmtUsd],
+      ["Status","status", v=>longText(v, 140)],
+      ["Reason","reason", v=>longText(v, 180)]
+    ]) + `<div style="height:12px"></div><h3>Price-action scout candidate marks</h3>` + table(priceScout.top_candidates || [], [
+      ["Source","source"],
+      ["Cohort","signal_cohort"],
+      ["Market","market_slug", v=>longText(v, 120)],
+      ["Outcome","outcome"],
+      ["Entry","entry_price", v=>fmtNum(v,4)],
+      ["Latest bid","latest_bid", v=>fmtNum(v,4)],
+      ["Exit","exit_price", v=>fmtNum(v,4)],
+      ["Status","round_trip_status", v=>longText(v, 120)],
+      ["Realized P&L","realized_pnl_usdc", fmtUsd],
+      ["MTM P&L","mark_pnl_usdc", fmtUsd],
+      ["Reason","candidate_reason", v=>longText(v, 140)]
     ]);
     document.getElementById("promotionReadiness").innerHTML = table(data.cohort_promotion_readiness?.cohorts || [], [
       ["Cohort","signal_cohort"],
@@ -1118,6 +1164,45 @@ def _strategy_v2_status(cfg: EngineConfig) -> dict[str, Any]:
     }
 
 
+def _price_action_scout_status(cfg: EngineConfig) -> dict[str, Any]:
+    """Expose fast shadow-only price-action scout evidence."""
+    root = cfg.output_root / "polymarket_price_action"
+    summary = read_json(root / "price_action_scout_summary.json", default={}) or {}
+    if not isinstance(summary, dict):
+        summary = {}
+    cohorts = read_csv_rows(root / "price_action_scout_cohort_evidence.csv")
+    candidates = read_csv_rows(root / "price_action_scout_round_trip_evidence.csv")
+    entries = read_csv_rows(root / "price_action_scout_entries.csv")
+    return {
+        "status": summary.get("status") or ("missing" if not entries and not candidates else "computed"),
+        "generated_at_utc": summary.get("generated_at_utc"),
+        "decision": summary.get("decision") or "collect_more_price_action_scout_evidence",
+        "new_entries": summary.get("new_entries"),
+        "ledger_entries": summary.get("ledger_entries", len(entries)),
+        "policy_eligible_entries": summary.get("policy_eligible_entries"),
+        "policy_excluded_entries": summary.get("policy_excluded_entries"),
+        "deduped_evidence_entries": summary.get("deduped_evidence_entries"),
+        "duplicate_policy_eligible_entries": summary.get("duplicate_policy_eligible_entries"),
+        "round_trip_candidates": summary.get("round_trip_candidates", len(candidates)),
+        "observed_candidates": summary.get("observed_candidates"),
+        "closed_trades": summary.get("closed_trades"),
+        "open_trades": summary.get("open_trades"),
+        "take_profit_exits": summary.get("take_profit_exits"),
+        "stop_loss_exits": summary.get("stop_loss_exits"),
+        "price_action_review_candidates": summary.get("price_action_review_candidates"),
+        "realized_pnl_usdc": summary.get("realized_pnl_usdc"),
+        "realized_roi": summary.get("realized_roi"),
+        "total_mark_pnl_usdc": summary.get("total_mark_pnl_usdc"),
+        "mark_roi": summary.get("mark_roi"),
+        "warnings": summary.get("warnings", {}),
+        "cohorts": cohorts[:25],
+        "top_candidates": _sorted_by_numeric(candidates, "mark_pnl_usdc")[:25],
+        "entry_file": str(root / "price_action_scout_entries.csv"),
+        "candidate_file": str(root / "price_action_scout_round_trip_evidence.csv"),
+        "shadow_only": True,
+    }
+
+
 def _payload_time(payload: Any) -> datetime | None:
     if not isinstance(payload, dict):
         return None
@@ -1252,6 +1337,7 @@ def render_dashboard(cfg: EngineConfig, latest_report: dict[str, Any] | None = N
     live_loop_status = _live_loop_status(heartbeat if isinstance(heartbeat, dict) else {}, cfg)
     strategy_v2_status = _strategy_v2_status(cfg)
     strategy_v2_runtime = _strategy_v2_runtime_freshness(strategy_v2_status, live_loop_status)
+    price_action_scout_status = _price_action_scout_status(cfg)
 
     payload = {
         "status": "ok",
@@ -1278,6 +1364,7 @@ def render_dashboard(cfg: EngineConfig, latest_report: dict[str, Any] | None = N
         "shadow_settlement_watch": _shadow_settlement_watch(shadow_positions, shadow_summary),
         "independent_anchor_status": _independent_anchor_status(governance),
         "strategy_v2": strategy_v2_status,
+        "price_action_scout": price_action_scout_status,
         "edge_strategy_search": edge_strategy_search,
         "promoted_rule_shadow": promoted_rule_shadow,
         "liquidity_discovery": liquidity_discovery,

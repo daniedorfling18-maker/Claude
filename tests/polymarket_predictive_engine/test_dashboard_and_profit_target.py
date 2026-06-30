@@ -443,6 +443,61 @@ def test_dashboard_surfaces_strategy_v2_anchored_edge_progress(tmp_path):
             }
         ],
     )
+    write_json(
+        cfg.output_root / "polymarket_price_action" / "price_action_scout_summary.json",
+        {
+            "status": "computed",
+            "decision": "collect_more_closed_price_action_scout_evidence",
+            "new_entries": 2,
+            "ledger_entries": 3,
+            "observed_candidates": 3,
+            "closed_trades": 1,
+            "open_trades": 2,
+            "take_profit_exits": 1,
+            "stop_loss_exits": 0,
+            "realized_pnl_usdc": 0.75,
+            "total_mark_pnl_usdc": 1.1,
+            "mark_roi": 0.0366666667,
+            "price_action_review_candidates": 0,
+        },
+    )
+    write_csv(
+        cfg.output_root / "polymarket_price_action" / "price_action_scout_cohort_evidence.csv",
+        [
+            {
+                "signal_cohort": "price_action_scout|profit_sprint|macro_rates",
+                "family": "macro_rates",
+                "candidates": "1",
+                "closed_trades": "1",
+                "open_trades": "0",
+                "take_profit_exits": "1",
+                "stop_loss_exits": "0",
+                "win_rate": "1.0",
+                "realized_pnl_usdc": "0.75",
+                "realized_roi": "0.075",
+                "total_mark_pnl_usdc": "0.75",
+                "status": "collect_more_closed_round_trips",
+            }
+        ],
+    )
+    write_csv(
+        cfg.output_root / "polymarket_price_action" / "price_action_scout_round_trip_evidence.csv",
+        [
+            {
+                "source": "profit_sprint_target",
+                "signal_cohort": "price_action_scout|profit_sprint|macro_rates",
+                "market_slug": candidate["market_slug"],
+                "outcome": "Yes",
+                "entry_price": "0.176",
+                "latest_bid": "0.19",
+                "exit_price": "0.19",
+                "round_trip_status": "closed_take_profit",
+                "realized_pnl_usdc": "0.75",
+                "mark_pnl_usdc": "0.75",
+                "candidate_reason": "Positive model target blocked by label gate.",
+            }
+        ],
+    )
     cycle_status_path = cfg.path.parent / "work" / "strategy_v2_cycle_latest_status.json"
     cycle_status_path.parent.mkdir(parents=True, exist_ok=True)
     cycle_status_path.write_text(
@@ -456,6 +511,7 @@ def test_dashboard_surfaces_strategy_v2_anchored_edge_progress(tmp_path):
     strategy_v2 = data["strategy_v2"]
 
     assert "Strategy V2 anchored edge" in html
+    assert "Fast price-action scout" in html
     assert strategy_v2["decision"] == "candidate_family_found"
     assert strategy_v2["shadow_candidates"] == 1
     assert strategy_v2["anchored_rows"] == 3
@@ -466,6 +522,9 @@ def test_dashboard_surfaces_strategy_v2_anchored_edge_progress(tmp_path):
     assert strategy_v2["round_trip_evidence"]["decision"] == "collect_more_round_trip_evidence"
     assert strategy_v2["round_trip_evidence_cohorts"][0]["closed_trades"] == "1"
     assert strategy_v2["round_trip_evidence_top_candidates"][0]["round_trip_status"] == "closed_take_profit"
+    assert data["price_action_scout"]["decision"] == "collect_more_closed_price_action_scout_evidence"
+    assert data["price_action_scout"]["closed_trades"] == 1
+    assert data["price_action_scout"]["top_candidates"][0]["source"] == "profit_sprint_target"
     assert strategy_v2["top_shadow_candidates"][0]["market_slug"] == candidate["market_slug"]
     assert strategy_v2["promotion_progress"][0]["remaining_shadow_entries_to_review"] == 19
 

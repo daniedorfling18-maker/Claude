@@ -103,6 +103,18 @@ def test_strategy_v2_cycle_builds_round_trip_after_websocket_normalisation():
     assert "strategy_v2_round_trip_evidence.json" in text
 
 
+def test_strategy_v2_cycle_builds_price_action_scout_after_round_trip():
+    text = _script_text("scripts/run_polymarket_strategy_v2_cycle.ps1")
+
+    round_trip_index = text.index("strategy-v2-round-trip")
+    scout_index = text.index("price-action-scout")
+    status_payload_index = text.index("price_action_scout = $priceActionScout")
+
+    assert round_trip_index < scout_index
+    assert scout_index < status_payload_index
+    assert "price_action_scout_summary.json" in text
+
+
 def test_strategy_v2_scheduled_wrapper_pins_repo_source():
     text = _script_text("scripts/run_strategy_v2_cycle_scheduled_wrapper.ps1")
 

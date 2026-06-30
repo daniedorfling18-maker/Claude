@@ -40,6 +40,7 @@ from .paper_session import run_paper_session
 from .pipeline_health import pipeline_health
 from .pipeline_inventory import pipeline_inventory
 from .portfolio import portfolio_snapshot, reconciliation_report
+from .price_action_scout import build_price_action_scout
 from .price_history_collector import collect_price_history
 from .profit_sprint import build_profit_sprint
 from .promotion_review import build_promotion_review
@@ -99,6 +100,7 @@ COMMANDS = [
     "promotion-review",
     "goal-plan",
     "profit-sprint",
+    "price-action-scout",
     "active-window-plan",
     "promotion-gate",
     "validation-report",
@@ -289,6 +291,8 @@ def main(argv: list[str] | None = None) -> int:
             _print(build_goal_plan(cfg))
         elif args.command == "profit-sprint":
             _print(build_profit_sprint(cfg))
+        elif args.command == "price-action-scout":
+            _print(build_price_action_scout(cfg))
         elif args.command == "active-window-plan":
             _print(build_active_window_plan(cfg))
         elif args.command == "promotion-gate":

@@ -217,6 +217,20 @@ paper-only take-profit/stop-loss rules and use the bid, not midpoint, for exits.
 price-action feedback while markets remain unresolved, but it is still not proof that the probability
 model is right and it does not bypass settlement governance.
 
+A separate fast price-action scout writes:
+
+```text
+outputs/polymarket_price_action/price_action_scout_entries.csv
+outputs/polymarket_price_action/price_action_scout_round_trip_evidence.csv
+outputs/polymarket_price_action/price_action_scout_cohort_evidence.csv
+outputs/polymarket_price_action/price_action_scout_summary.json
+```
+
+The scout is deliberately broader than Strategy V2. It persists shadow entries for liquid
+fast-feedback rows and positive profit-sprint targets, then evaluates later websocket bids. This
+increases learning throughput for odds-movement edge, but it is still observability only and cannot
+create approved paper signals.
+
 Minimum candidate filters:
 
 ```text

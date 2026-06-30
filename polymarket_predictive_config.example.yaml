@@ -260,6 +260,27 @@ strategy_v2:
   round_trip_min_win_rate: 0.55
   round_trip_min_monthly_run_rate_usdc: 20
   round_trip_max_single_market_positive_pnl_share: 0.35
+price_action_scout:
+  enabled: true
+  stake_usdc: 10
+  min_liquidity: 100
+  max_spread: 0.04
+  max_relative_spread: 0.15
+  max_new_entries_per_run: 24
+  include_profit_sprint_targets: true
+  include_fast_feedback_liquidity: true
+  target_actions:
+  - SHADOW_LABEL_GATE
+  - SHADOW_EDGE_WATCH
+  - WAIT_ACTIVE_WINDOW
+  take_profit_return: 0.08
+  stop_loss_return: 0.06
+  min_profit_usdc: 0.25
+  min_closed_trades: 5
+  min_roi: 0.03
+  min_win_rate: 0.55
+  min_monthly_run_rate_usdc: 20
+  max_single_market_positive_pnl_share: 0.35
 runtime_resource_guard:
   enabled: true
   max_memory_percent: 94
@@ -623,4 +644,3 @@ governance_thresholds:
   require_clean_snapshot_labels_for_paper: false
   min_forward_paper_trades: 1
   require_positive_forward_paper_roi: false
-

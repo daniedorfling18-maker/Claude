@@ -366,6 +366,11 @@ paper_market_scan:
   prioritize_near_promoted: true
   adaptive_priority_min_value: 3.0
   adaptive_priority_require_positive_evidence: true
+  # When price-action feedback says current fast cohorts are negative, reserve
+  # at least one batch slot for broader discovery instead of letting near-miss
+  # crypto evidence consume the full scan window.
+  feedback_broaden_reserve_enabled: true
+  feedback_broaden_reserve_slots: 1
   queries:
   - world cup
   - btc updown

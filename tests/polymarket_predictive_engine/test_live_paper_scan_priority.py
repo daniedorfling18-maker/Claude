@@ -361,3 +361,68 @@ def test_quarantined_5m_crypto_cohorts_do_not_drive_scan_priority(tmp_path, monk
 
     assert selected == ["world cup"]
     assert plan["adaptive_priority"]["priority_queries"] == []
+
+
+def test_feedback_broaden_state_reserves_exploration_slot_in_batch_scan(tmp_path, monkeypatch):
+    loop = _load_loop_module()
+    monkeypatch.delenv("POLYMARKET_SCAN_QUERY_MODE", raising=False)
+    monkeypatch.delenv("POLYMARKET_MAX_SCAN_QUERIES", raising=False)
+    monkeypatch.delenv("POLYMARKET_ADAPTIVE_SCAN_PRIORITY", raising=False)
+
+    governance = tmp_path / "outputs" / "polymarket_model_governance"
+    governance.mkdir(parents=True)
+    (governance / "signal_cohort_pnl.json").write_text(
+        json.dumps(
+            {
+                "cohorts": [
+                    {
+                        "signal_cohort": "exploratory_crypto_updown_live_model|crypto_btc_updown_daily|outcome=down",
+                        "promotion_ready_score": 5,
+                        "promotion_ready_checks": 6,
+                        "total_pnl_usdc": 4.5,
+                        "roi": 0.15,
+                        "monthly_run_rate_usdc": 900,
+                    },
+                    {
+                        "signal_cohort": "exploratory_crypto_updown_live_model|crypto_sol_updown_event|outcome=up",
+                        "promotion_ready_score": 4,
+                        "promotion_ready_checks": 6,
+                        "total_pnl_usdc": 10,
+                        "roi": 0.5,
+                        "monthly_run_rate_usdc": 1600,
+                    },
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+    (governance / "price_action_feedback.json").write_text(
+        json.dumps(
+            {
+                "status": "ok",
+                "learning_state": "suppress_negative_price_action_and_broaden",
+                "collection_queries": ["world cup", "tennis", "bitcoin", "ethereum"],
+            }
+        ),
+        encoding="utf-8",
+    )
+    cfg = EngineConfig(
+        raw={
+            "paths": {"output_root": str(tmp_path / "outputs")},
+            "paper_market_scan": {
+                "mode": "batch",
+                "max_queries_per_cycle": 3,
+                "prioritize_near_promoted": True,
+                "feedback_broaden_reserve_slots": 1,
+                "queries": ["btc updown", "solana updown", "bitcoin", "world cup", "tennis", "ethereum"],
+            },
+        },
+        path=tmp_path / "cfg.yaml",
+    )
+
+    selected, plan = loop._select_scan_queries(cfg, "world cup", scan_sequence=1)
+
+    assert set(selected[:2]) == {"btc updown", "solana updown"}
+    assert selected[2] == "world cup"
+    assert plan["adaptive_priority"]["feedback_learning_state"] == "suppress_negative_price_action_and_broaden"
+    assert plan["adaptive_priority"]["feedback_broaden_queries"][:2] == ["world cup", "tennis"]

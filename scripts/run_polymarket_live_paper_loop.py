@@ -374,6 +374,11 @@ def _load_research_focus(cfg) -> dict[str, Any]:
     return payload if isinstance(payload, dict) else {}
 
 
+def _load_price_action_feedback(cfg) -> dict[str, Any]:
+    payload = read_json(cfg.governance_root / "price_action_feedback.json", default={}) or {}
+    return payload if isinstance(payload, dict) else {}
+
+
 def _adaptive_query_order(cfg, queries: list[str]) -> tuple[list[str], dict[str, Any]]:
     settings = cfg.raw.get("paper_market_scan", {}) or {}
     adaptive_override = _env_override("POLYMARKET_ADAPTIVE_SCAN_PRIORITY")
@@ -425,6 +430,13 @@ def _adaptive_query_order(cfg, queries: list[str]) -> tuple[list[str], dict[str,
     focus_enabled = _truthy_setting(settings.get("use_research_focus_priority", True), default=True)
     focus_queries: list[str] = []
     suppressed_keys: set[str] = set()
+    price_action_feedback = _load_price_action_feedback(cfg)
+    feedback_learning_state = str(
+        price_action_feedback.get("learning_state")
+        or (focus_payload.get("price_action_feedback") or {}).get("learning_state")
+        or ""
+    )
+    feedback_broaden_queries: list[str] = []
     if focus_enabled and focus_payload:
         focus_value = float(settings.get("research_focus_priority_value", min_value + 1.0))
         for raw_query in focus_payload.get("collection_queries", []):
@@ -447,6 +459,14 @@ def _adaptive_query_order(cfg, queries: list[str]) -> tuple[list[str], dict[str,
             key = _query_key(str(raw_query or ""))
             if key and key in query_by_key:
                 suppressed_keys.add(key)
+    if feedback_learning_state == "suppress_negative_price_action_and_broaden":
+        for raw_query in price_action_feedback.get("collection_queries", []):
+            key = _query_key(str(raw_query or ""))
+            if not key or key not in query_by_key:
+                continue
+            query = query_by_key[key]
+            if query not in feedback_broaden_queries:
+                feedback_broaden_queries.append(query)
     priority_keys = sorted(priority_by_key, key=lambda key: priority_by_key[key], reverse=True)
     priority_queries = [query_by_key[key] for key in priority_keys]
     priority_set = {query.lower() for query in priority_queries}
@@ -473,7 +493,50 @@ def _adaptive_query_order(cfg, queries: list[str]) -> tuple[list[str], dict[str,
         "research_focus_enabled": focus_enabled,
         "research_focus_queries": focus_queries,
         "suppressed_queries": suppressed_tail,
+        "feedback_learning_state": feedback_learning_state,
+        "feedback_broaden_queries": feedback_broaden_queries,
     }
+
+
+def _apply_feedback_broaden_reserve(
+    *,
+    selected: list[str],
+    ordered_queries: list[str],
+    adaptive_priority: dict[str, Any],
+    max_queries: int,
+    settings: dict[str, Any],
+) -> list[str]:
+    if max_queries <= 1:
+        return selected
+    if adaptive_priority.get("feedback_learning_state") != "suppress_negative_price_action_and_broaden":
+        return selected
+    reserve_enabled = _truthy_setting(settings.get("feedback_broaden_reserve_enabled", True), default=True)
+    if not reserve_enabled:
+        return selected
+    slots = int(safe_float(settings.get("feedback_broaden_reserve_slots")) or 1)
+    slots = max(0, min(slots, max_queries - 1))
+    if slots <= 0:
+        return selected
+    broaden_queries = [
+        query
+        for query in adaptive_priority.get("feedback_broaden_queries", [])
+        if query in ordered_queries
+    ]
+    reserved: list[str] = []
+    for query in broaden_queries:
+        if query not in reserved:
+            reserved.append(query)
+        if len(reserved) >= slots:
+            break
+    if not reserved:
+        return selected
+    merged = [query for query in selected if query not in reserved][: max_queries - len(reserved)] + reserved
+    for query in ordered_queries:
+        if len(merged) >= max_queries:
+            break
+        if query not in merged:
+            merged.append(query)
+    return merged[:max_queries]
 
 
 def _select_scan_queries(cfg, default_query: str, *, scan_sequence: int) -> tuple[list[str], dict[str, Any]]:
@@ -488,6 +551,14 @@ def _select_scan_queries(cfg, default_query: str, *, scan_sequence: int) -> tupl
     ordered_queries, adaptive_priority = _adaptive_query_order(cfg, all_queries)
     if mode == "batch":
         selected = ordered_queries[:max_queries] if max_queries > 0 else ordered_queries
+        if max_queries > 0:
+            selected = _apply_feedback_broaden_reserve(
+                selected=selected,
+                ordered_queries=ordered_queries,
+                adaptive_priority=adaptive_priority,
+                max_queries=max_queries,
+                settings=settings,
+            )
     elif mode == "rotate":
         width = max(1, max_queries) if max_queries > 0 else 1
         start = max(0, scan_sequence - 1) % len(ordered_queries)

@@ -70,11 +70,57 @@ function Get-MemoryUsedPercent {
   return [math]::Round((($os.TotalVisibleMemorySize - $os.FreePhysicalMemory) / $os.TotalVisibleMemorySize) * 100, 1)
 }
 
+function Stop-StrategyCycleForHighMemory {
+  param(
+    [string]$Phase,
+    [double]$MemoryUsedPercent
+  )
+  $statusName = if ($Phase -eq "before_shadow_refresh") { "skipped_high_memory" } else { "stopped_high_memory" }
+  $reason = if ($Phase -eq "before_shadow_refresh") {
+    "Strategy V2 cycle skipped before starting heavy work because local memory was at or above the guardrail."
+  } else {
+    "Strategy V2 cycle stopped before launching the next step because local memory was at or above the guardrail."
+  }
+  $status = [PSCustomObject]@{
+    status = $statusName
+    started_at_utc = $started
+    ended_at_utc = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ")
+    phase = $Phase
+    memory_used_percent = $MemoryUsedPercent
+    max_memory_percent = $MaxMemoryPercent
+    reason = $reason
+    anchored_rows = $null
+    shadow_candidates = $null
+    rejected_anchored_rows = $null
+    active_shadow_candidates = @()
+    paper_trading_invoked = $false
+    live_trading_invoked = $false
+  }
+  $status |
+    ConvertTo-Json -Depth 8 |
+    Set-Content .\work\strategy_v2_cycle_latest_status.json -Encoding UTF8
+  "`n=== STRATEGY V2 CYCLE STOPPED: HIGH MEMORY ==="
+  $status | Format-List
+  exit 0
+}
+
+function Assert-MemoryBelowGuard {
+  param([string]$Phase)
+  if ($MaxMemoryPercent -le 0) {
+    return
+  }
+  $memoryUsedPercent = Get-MemoryUsedPercent
+  if ($memoryUsedPercent -ge $MaxMemoryPercent) {
+    Stop-StrategyCycleForHighMemory -Phase $Phase -MemoryUsedPercent $memoryUsedPercent
+  }
+}
+
 function Invoke-PythonStep {
   param(
     [string]$Name,
     [string[]]$Arguments
   )
+  Assert-MemoryBelowGuard -Phase "before_$Name"
   $safeName = $Name -replace "[^A-Za-z0-9_.-]", "_"
   $stdoutPath = Join-Path $repoRoot "work\strategy_v2_$safeName.stdout.log"
   $stderrPath = Join-Path $repoRoot "work\strategy_v2_$safeName.stderr.log"
@@ -108,29 +154,7 @@ function Invoke-PythonStep {
   }
 }
 
-$memoryUsedPercent = Get-MemoryUsedPercent
-if ($memoryUsedPercent -ge $MaxMemoryPercent) {
-  $status = [PSCustomObject]@{
-    status = "skipped_high_memory"
-    started_at_utc = $started
-    ended_at_utc = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ")
-    memory_used_percent = $memoryUsedPercent
-    max_memory_percent = $MaxMemoryPercent
-    reason = "Strategy V2 cycle skipped before starting heavy work because local memory was at or above the guardrail."
-    anchored_rows = $null
-    shadow_candidates = $null
-    rejected_anchored_rows = $null
-    active_shadow_candidates = @()
-    paper_trading_invoked = $false
-    live_trading_invoked = $false
-  }
-  $status |
-    ConvertTo-Json -Depth 8 |
-    Set-Content .\work\strategy_v2_cycle_latest_status.json -Encoding UTF8
-  "`n=== STRATEGY V2 CYCLE SKIPPED: HIGH MEMORY ==="
-  $status | Format-List
-  exit 0
-}
+Assert-MemoryBelowGuard -Phase "before_shadow_refresh"
 
 $shadowCommand = "& $(Quote-ForPowerShellCommand $shadowRefreshScript) -ConfigPath $(Quote-ForPowerShellCommand $ConfigPath) -WebsocketSeconds 30 *> $(Quote-ForPowerShellCommand $shadowStdoutPath)"
 $shadowCommandArg = '"' + ($shadowCommand -replace '"', '\"') + '"'
@@ -175,6 +199,8 @@ if ($shadowStatus.status -ne "ok") {
 if ([datetime]$shadowStatus.started_at_utc -lt [datetime]$started) {
   throw "Shadow research refresh status is stale: $($shadowStatus.started_at_utc) before $started"
 }
+
+Assert-MemoryBelowGuard -Phase "after_shadow_refresh"
 
 $predictionSnapshotAfterUtc = $null
 if (Test-Path $predictionSnapshotPath) {

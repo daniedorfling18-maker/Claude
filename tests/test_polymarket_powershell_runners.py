@@ -56,6 +56,16 @@ def test_strategy_v2_cycle_skips_before_heavy_work_when_memory_is_high():
     assert guard_index < shadow_start_index
 
 
+def test_strategy_v2_cycle_checks_memory_between_python_steps():
+    text = _script_text("scripts/run_polymarket_strategy_v2_cycle.ps1")
+
+    assert "function Assert-MemoryBelowGuard" in text
+    assert "stopped_high_memory" in text
+    assert 'Assert-MemoryBelowGuard -Phase "before_$Name"' in text
+    assert 'Assert-MemoryBelowGuard -Phase "after_shadow_refresh"' in text
+    assert text.index('Assert-MemoryBelowGuard -Phase "before_$Name"') < text.index("Start-Process")
+
+
 def test_strategy_v2_cycle_renders_dashboard_after_latest_status_is_written():
     text = _script_text("scripts/run_polymarket_strategy_v2_cycle.ps1")
 

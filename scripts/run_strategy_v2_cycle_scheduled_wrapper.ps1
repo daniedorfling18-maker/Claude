@@ -9,6 +9,7 @@ New-Item -ItemType Directory -Force (Join-Path $repoRoot "work") | Out-Null
 
 try {
   Set-Location $repoRoot
+  $env:PYTHONPATH = Join-Path $repoRoot "src"
   & "$repoRoot\scripts\run_polymarket_strategy_v2_cycle.ps1" *>> $logPath
   "=== Strategy V2 scheduled run completed $(Get-Date -Format o) ===" | Out-File $logPath -Append -Encoding UTF8
   exit 0

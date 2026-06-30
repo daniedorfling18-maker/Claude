@@ -6,6 +6,7 @@ $ErrorActionPreference = "Stop"
 
 $repoRoot = Resolve-Path (Join-Path $PSScriptRoot "..")
 Set-Location $repoRoot
+$env:PYTHONPATH = (Resolve-Path .\src).Path
 
 New-Item -ItemType Directory -Force .\outputs\polymarket_strategy_v2 | Out-Null
 New-Item -ItemType Directory -Force .\work | Out-Null

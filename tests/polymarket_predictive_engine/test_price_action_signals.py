@@ -255,6 +255,7 @@ def test_microstructure_candidate_stays_blocked_without_feedback_promotion(tmp_p
 
 def test_trusted_shadow_confirmation_backlog_compiles_paper_probe(tmp_path):
     cfg = _cfg(tmp_path)
+    cfg.raw["price_action_paper"]["paper_confirmation_max_hold_minutes_before_exit"] = 45
     root = cfg.output_root / "polymarket_price_action"
     write_json(cfg.governance_root / "price_action_feedback.json", _paper_confirmation_feedback_payload())
     write_csv(
@@ -302,6 +303,7 @@ def test_trusted_shadow_confirmation_backlog_compiles_paper_probe(tmp_path):
     assert signals[0]["price_action_entry_source"] == "paper_confirmation_candidate"
     assert signals[0]["price_action_evidence_status"] == "trusted_shadow_requires_broker_paper_confirmation"
     assert float(signals[0]["price_action_cohort_realized_roi"]) == 0.033
+    assert float(signals[0]["max_hold_minutes_before_exit"]) == 45.0
 
 
 def test_blocked_shadow_confirmation_backlog_stays_rejected(tmp_path):

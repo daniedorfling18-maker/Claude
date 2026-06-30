@@ -341,6 +341,7 @@ price_action_paper:
   # cohorts so the broker can prove/disprove them with real bid/ask fills.
   paper_confirmation_enabled: true
   paper_confirmation_max_stake_usdc: 2
+  paper_confirmation_max_hold_minutes_before_exit: 120
   minimum_price_edge: 0.005
   maximum_price_edge: 0.08
   max_spread: 0.04

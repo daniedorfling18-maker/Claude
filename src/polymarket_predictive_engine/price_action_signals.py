@@ -256,6 +256,9 @@ def _build_signal(
     max_hold_minutes = safe_float(row.get("max_hold_minutes_before_exit"))
     if max_hold_minutes is None and max_forward_observations is not None and max_forward_observations > 0:
         max_hold_minutes = float(max_forward_observations) * observation_minutes
+    if str(row.get("source") or "") == "paper_confirmation_candidate" and max_hold_minutes is None:
+        configured_horizon = safe_float(settings.get("paper_confirmation_max_hold_minutes_before_exit"))
+        max_hold_minutes = float(configured_horizon) if configured_horizon is not None and configured_horizon > 0 else 120.0
     max_stake = float(safe_float(settings.get("max_stake_usdc")) or 2.0)
     if str(row.get("source") or "") == "paper_confirmation_candidate":
         confirmation_max = safe_float(settings.get("paper_confirmation_max_stake_usdc"))

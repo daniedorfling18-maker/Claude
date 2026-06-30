@@ -98,7 +98,8 @@ jobs:
 
       - name: Scrape live SuperBru leaderboard
         env:
-          SUPERBRU_EMAIL: ${{ secrets.SUPERBRU_EMAIL }}
+          SUPERBRU_EMAIL: ${{ secrets.SUPERBRU_EMAIL || secrets.SUPERBRU_USERNAME }}
+          SUPERBRU_USERNAME: ${{ secrets.SUPERBRU_USERNAME || secrets.SUPERBRU_EMAIL }}
           SUPERBRU_PASSWORD: ${{ secrets.SUPERBRU_PASSWORD }}
           SUPERBRU_POOL_URL: ${{ secrets.SUPERBRU_POOL_URL }}
           SUPERBRU_PLAYER_NAME: ${{ secrets.SUPERBRU_PLAYER_NAME || 'Danie' }}

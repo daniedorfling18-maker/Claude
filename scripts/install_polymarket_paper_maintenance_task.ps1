@@ -66,7 +66,8 @@ if ($StartAtNextExitDue) {
 }
 $QuotedRunner = '"' + $Runner + '"'
 $QuotedConfig = '"' + $ConfigPath + '"'
-$Arguments = "-NoProfile -ExecutionPolicy Bypass -File $QuotedRunner -ConfigPath $QuotedConfig -MaxMemoryPercent $MaxMemoryPercent"
+$QuotedTaskName = '"' + $TaskName + '"'
+$Arguments = "-NoProfile -ExecutionPolicy Bypass -File $QuotedRunner -ConfigPath $QuotedConfig -TaskName $QuotedTaskName -MaxMemoryPercent $MaxMemoryPercent"
 $Action = New-ScheduledTaskAction -Execute "powershell.exe" -Argument $Arguments -WorkingDirectory $RepoRoot
 $Trigger = New-ScheduledTaskTrigger `
     -Once `

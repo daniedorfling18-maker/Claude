@@ -260,6 +260,11 @@ def test_paper_maintenance_runner_is_lightweight_and_due_exit_aware():
     assert "exit_due_by_clock" in text
     assert "Update-DashboardMaintenanceStatus" in text
     assert 'Add-Member -NotePropertyName "paper_maintenance"' in text
+    assert "Update-TaskStatus" in text
+    assert 'Add-Member -NotePropertyName "paper_maintenance_task"' in text
+    assert "polymarket_paper_maintenance_task_status.json" in text
+    assert "Read-JsonIfExists $TaskStatusPath" in text
+    assert "runner = $PSCommandPath" in text
     assert "Write-JsonNoBom" in text
     assert "UTF8Encoding($false)" in text
     assert '"paper-trade"' in text
@@ -276,6 +281,7 @@ def test_paper_maintenance_task_installer_runs_every_minute_without_overlap():
     assert "[switch]$StartAtNextExitDue" in text
     assert "next_broker_exit_due_utc" in text
     assert "dashboard_next_broker_exit_due_utc" in text
+    assert "-TaskName $QuotedTaskName" in text
     assert "[int]$IntervalMinutes = 1" in text
     assert "-RepetitionInterval (New-TimeSpan -Minutes $IntervalMinutes)" in text
     assert "-MultipleInstances IgnoreNew" in text

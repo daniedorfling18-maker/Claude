@@ -1,5 +1,6 @@
 param(
     [string]$ConfigPath = "polymarket_predictive_config.example.yaml",
+    [string]$TaskName = "Polymarket Paper Maintenance",
     [double]$MaxMemoryPercent = 95,
     [int]$StepTimeoutSeconds = 90,
     [switch]$Force,
@@ -11,6 +12,7 @@ $ErrorActionPreference = "Stop"
 $RepoRoot = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot "..")).Path
 $WorkRoot = Join-Path $RepoRoot "work"
 $StatusPath = Join-Path $WorkRoot "polymarket_paper_maintenance_latest_status.json"
+$TaskStatusPath = Join-Path $WorkRoot "polymarket_paper_maintenance_task_status.json"
 $DashboardDataPath = Join-Path $RepoRoot "outputs\polymarket_dashboard\dashboard_data.json"
 
 New-Item -ItemType Directory -Force $WorkRoot | Out-Null
@@ -21,6 +23,7 @@ function Write-MaintenanceStatus {
     param([PSCustomObject]$Status)
     Write-JsonNoBom -Path $StatusPath -Value $Status -Depth 12
     Update-DashboardMaintenanceStatus -Status $Status
+    Update-TaskStatus
 }
 
 function Write-JsonNoBom {
@@ -48,6 +51,58 @@ function Update-DashboardMaintenanceStatus {
         # above is still written even if the static dashboard JSON is temporarily
         # locked, missing, or unreadable.
     }
+}
+
+function Update-DashboardTaskStatus {
+    param([PSCustomObject]$Status)
+    if (-not (Test-Path -LiteralPath $DashboardDataPath)) {
+        return
+    }
+    try {
+        $dashboard = Get-Content -LiteralPath $DashboardDataPath -Raw | ConvertFrom-Json
+        $dashboard | Add-Member -NotePropertyName "paper_maintenance_task" -NotePropertyValue $Status -Force
+        Write-JsonNoBom -Path $DashboardDataPath -Value $dashboard -Depth 100
+    } catch {
+        # Best-effort only; the task status file is the source of truth.
+    }
+}
+
+function Update-TaskStatus {
+    try {
+        $existing = Read-JsonIfExists $TaskStatusPath
+        if (-not ($existing -is [PSCustomObject])) {
+            $existing = $null
+        }
+        $task = Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
+        $taskInfo = Get-ScheduledTaskInfo -TaskName $TaskName -ErrorAction SilentlyContinue
+        $status = [PSCustomObject]@{
+            status = if ($task) { "installed" } else { "not_installed_or_unknown" }
+            task_name = $TaskName
+            task_state = if ($task) { [string]$task.State } else { "" }
+            interval_minutes = if ($existing) { $existing.interval_minutes } else { $null }
+            max_memory_percent = if ($existing -and $null -ne $existing.max_memory_percent) { $existing.max_memory_percent } else { $MaxMemoryPercent }
+            config_path = if ($existing -and $existing.config_path) { $existing.config_path } else { $ConfigPath }
+            trigger_start_time = if ($existing) { $existing.trigger_start_time } else { "" }
+            trigger_start_source = if ($existing) { $existing.trigger_start_source } else { "" }
+            start_at_next_exit_due_requested = if ($existing -and $null -ne $existing.start_at_next_exit_due_requested) { $existing.start_at_next_exit_due_requested } else { $null }
+            next_run_time = if ($taskInfo) { $taskInfo.NextRunTime.ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ") } else { "" }
+            last_run_time = if ($taskInfo) { $taskInfo.LastRunTime.ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ") } else { "" }
+            last_task_result = if ($taskInfo) { [int]$taskInfo.LastTaskResult } else { $null }
+            runner = $PSCommandPath
+            generated_at_utc = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ")
+            updated_by_runner = $true
+        }
+    } catch {
+        $status = [PSCustomObject]@{
+            status = "not_installed_or_unknown"
+            task_name = $TaskName
+            reason = $_.Exception.Message
+            generated_at_utc = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ")
+            updated_by_runner = $true
+        }
+    }
+    Write-JsonNoBom -Path $TaskStatusPath -Value $status -Depth 12
+    Update-DashboardTaskStatus -Status $status
 }
 
 function Read-JsonIfExists {

@@ -1,6 +1,7 @@
 ﻿param(
   [string]$ConfigPath = "polymarket_predictive_config.example.yaml",
-  [int]$WebsocketSeconds = 90
+  [int]$WebsocketSeconds = 90,
+  [int]$StepTimeoutSeconds = 180
 )
 
 $ErrorActionPreference = "Stop"
@@ -25,9 +26,35 @@ function Invoke-Step {
     [string]$OutFile
   )
   Write-LogLine "=== $Name ==="
-  & python @Arguments 2>&1 | Tee-Object -FilePath $OutFile | Tee-Object -FilePath $logFile -Append
-  if ($LASTEXITCODE -ne 0) {
-    throw "$Name failed with exit code $LASTEXITCODE"
+  $safeName = $Name -replace "[^A-Za-z0-9_.-]", "_"
+  $stdoutPath = Join-Path $repoRoot "work\.$stamp.$safeName.stdout.tmp"
+  $stderrPath = Join-Path $repoRoot "work\.$stamp.$safeName.stderr.tmp"
+  Remove-Item $stdoutPath, $stderrPath -ErrorAction SilentlyContinue
+  $process = Start-Process `
+    -FilePath "python" `
+    -ArgumentList $Arguments `
+    -WorkingDirectory $repoRoot `
+    -NoNewWindow `
+    -PassThru `
+    -RedirectStandardOutput $stdoutPath `
+    -RedirectStandardError $stderrPath
+  if (-not $process.WaitForExit($StepTimeoutSeconds * 1000)) {
+    try { Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue } catch {}
+    $message = "$Name timed out after $StepTimeoutSeconds seconds"
+    $message | Tee-Object -FilePath $OutFile | Tee-Object -FilePath $logFile -Append
+    throw $message
+  }
+  $lines = @()
+  if (Test-Path $stdoutPath) {
+    $lines += Get-Content $stdoutPath
+  }
+  if (Test-Path $stderrPath) {
+    $lines += Get-Content $stderrPath
+  }
+  $lines | Tee-Object -FilePath $OutFile | Tee-Object -FilePath $logFile -Append
+  Remove-Item $stdoutPath, $stderrPath -ErrorAction SilentlyContinue
+  if ($process.ExitCode -ne 0) {
+    throw "$Name failed with exit code $($process.ExitCode)"
   }
 }
 
@@ -46,6 +73,7 @@ Write-LogLine "Starting shadow-only Polymarket research cycle"
 Write-LogLine "Repo: $repoRoot"
 Write-LogLine "Config: $ConfigPath"
 Write-LogLine "Websocket seconds: $WebsocketSeconds"
+Write-LogLine "Step timeout seconds: $StepTimeoutSeconds"
 
 # Hard safety guard: this scheduled research cycle must never run the local bot loop.
 Get-CimInstance Win32_Process -Filter "Name='python.exe' OR Name='pythonw.exe'" |

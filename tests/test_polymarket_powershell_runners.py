@@ -31,3 +31,12 @@ def test_strategy_v2_scheduled_wrapper_pins_repo_source():
     text = _script_text("scripts/run_strategy_v2_cycle_scheduled_wrapper.ps1")
 
     assert '$env:PYTHONPATH = Join-Path $repoRoot "src"' in text
+
+
+def test_shadow_research_cycle_bounds_each_python_step():
+    text = _script_text("scripts/run_polymarket_shadow_research_cycle.ps1")
+
+    assert "[int]$StepTimeoutSeconds = 180" in text
+    assert "Start-Process" in text
+    assert "$process.WaitForExit($StepTimeoutSeconds * 1000)" in text
+    assert "timed out after $StepTimeoutSeconds seconds" in text

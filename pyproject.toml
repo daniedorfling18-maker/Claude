@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "superbru-score-engine"
 version = "0.1.0"
-description = "Expected-points score prediction engine for World Cup 2026 Superbru"
+description = "Research automation engines for World Cup 2026 Superbru and Polymarket shadow trading"
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
@@ -21,10 +21,18 @@ dependencies = [
 [project.optional-dependencies]
 dev = [
     "pytest>=7",
+    "ruff>=0.8",
 ]
 scraper = [
     "playwright>=1.44",
     "playwright-stealth>=1.0",
+    "curl_cffi>=0.7",
+]
+analysis = [
+    "matplotlib>=3.7",
+]
+live = [
+    "py-clob-client-v2",
 ]
 
 [project.scripts]
@@ -33,3 +41,21 @@ superbru-score = "superbru_score_engine.cli:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.ruff]
+target-version = "py310"
+line-length = 160
+extend-exclude = [
+    ".git",
+    ".venv",
+    "venv",
+    "work",
+    "outputs",
+    "data",
+    "node_modules",
+]
+
+[tool.ruff.lint]
+# Keep the first lint gate intentionally small: syntax/undefined-name failures
+# plus invalid escape sequences that compile with warnings today.
+select = ["E9", "F63", "F7", "F82", "W605"]

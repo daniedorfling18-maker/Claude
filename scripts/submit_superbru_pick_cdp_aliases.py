@@ -57,7 +57,7 @@ def _team_js_body(find_row: bool) -> str:
     rowTag: matchRow.tagName,
     rowId: matchRow.id || '',
     rowClass: matchRow.className || '',
-    rowText: (matchRow.innerText || '').replace(/\s+/g, ' ').trim().slice(0, 300),
+    rowText: (matchRow.innerText || '').replace(/\\s+/g, ' ').trim().slice(0, 300),
     matchedHomeAliases: homeVariants,
     matchedAwayAliases: awayVariants,
     inputs,
@@ -163,7 +163,7 @@ async ([homeTeam, awayTeam]) => {{
   for (let step = 0; step < rounds.length; step++) {{
     const i = (start + step) % rounds.length;
     const round = rounds[i];
-    const rawRoundText = (round.innerText || round.textContent || '').replace(/\s+/g, ' ').trim();
+    const rawRoundText = (round.innerText || round.textContent || '').replace(/\\s+/g, ' ').trim();
     round.click();
     await wait(3000);
     const match = clickMatchingGame();

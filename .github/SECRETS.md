@@ -2,13 +2,21 @@
 
 Configure these secrets in **Settings → Secrets and variables → Actions** on the repository.
 
-The repository runs six workflows. Only three of them need secrets.
+The repository runs seven workflows. The sections below list secrets required for required checks and for authenticated workflow paths.
+
+## `ci.yml` (push / pull request)
+
+| Secret | Required | Description |
+|--------|----------|-------------|
+| `THE_ODDS_API_KEY` | **Yes** | Used by the online smoke prediction step. Without it, CI intentionally fails before the online smoke can run. |
+
+> The offline tests and offline smoke prediction do not need secrets, but the current CI workflow includes the online smoke as a required check.
 
 ## `refresh-locked-superbru-card.yml` (scheduled, twice daily)
 
 | Secret | Required | Description |
 |--------|----------|-------------|
-| `THE_ODDS_API_KEY` | No | API key from [the-odds-api.com](https://the-odds-api.com). The scheduled refresh runs with `--skip-market-odds-fetch` and reuses committed cached odds, so the key is only consumed if you remove that flag to refresh market odds during a rebuild. |
+| `THE_ODDS_API_KEY` | **Yes** | API key from [the-odds-api.com](https://the-odds-api.com). The scheduled refresh fetches and validates fresh market odds before rebuilding the locked SuperBru card. |
 
 > Commits are pushed with the automatic `GITHUB_TOKEN` (the workflow grants `contents: write`); no personal token is needed for the commit step.
 
@@ -45,5 +53,5 @@ The repository runs six workflows. Only three of them need secrets.
 
 ## No secrets required
 
-- `ci.yml` runs entirely offline using committed example fixtures and odds snapshots.
 - `repo-audit-bundle.yml` only archives and audits the tracked source tree.
+- `polymarket-mispricing-bot.yml` is manual dry-run only under the committed workflow defaults.

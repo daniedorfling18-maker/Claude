@@ -1,6 +1,6 @@
 """
-Data-driven tests that load real committed data files from examples/, inputs/, and
-outputs/ and assert invariants on the pipeline outputs.
+Data-driven tests that load real committed fixture files from examples/ and
+inputs/ and assert invariants on representative pipeline outputs.
 
 These tests catch regressions that unit tests miss because they exercise the full
 pipeline against the same fixtures the production smoke run uses.
@@ -30,7 +30,7 @@ REPO = Path(__file__).parent.parent
 ODDS_SNAPSHOT = REPO / "examples" / "odds_snapshot.json"
 BACKTEST_MATCHES = REPO / "examples" / "backtest_matches.csv"
 SMARTBET_GRID = REPO / "inputs" / "smartbet_grids" / "oddspedia_probability_grids_auto.csv"
-SMOKE_PREDICTIONS = REPO / "outputs" / "smoke" / "predictions.csv"
+SMOKE_PREDICTIONS = REPO / "examples" / "smoke_predictions.csv"
 
 
 # ---------------------------------------------------------------------------

@@ -165,7 +165,4 @@ jobs:
           commit_message: Refresh locked SuperBru card
           add_options: "-f"
           branch: main
-          file_pattern: >-
-            outputs/latest outputs/market_odds outputs/market_odds_validation outputs/market_odds_history
-            outputs/component_validation outputs/final_locked_picks outputs/daily_robust_card
-            outputs/final_leader_decision_daily_robust outputs/backtesting/prediction_log.csv
+          file_pattern: outputs/final_locked_picks/superbru_final_card.csv

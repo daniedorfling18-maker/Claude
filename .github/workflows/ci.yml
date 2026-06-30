@@ -140,6 +140,9 @@ jobs:
           print('Automated workflow files:', ', '.join(workflows))
           PY
 
+      - name: Run lint
+        run: ruff check .
+
       - name: Run tests
         run: pytest
 

@@ -4,6 +4,7 @@ from polymarket_predictive_engine.sharp_odds_fetch import (
     event_market_slug,
     fetch_sharp_odds,
     parse_odds_api_events,
+    redact_fetch_error,
 )
 from polymarket_predictive_engine.config import EngineConfig
 
@@ -110,3 +111,47 @@ def test_fetch_without_api_key_is_graceful(tmp_path, monkeypatch):
     summary = fetch_sharp_odds(cfg)
     assert summary["status"] == "missing_api_key"      # no network call, no crash
     assert summary["rows"] == 0
+
+
+def test_fetch_error_redacts_api_key_from_provider_url():
+    api_key = "secret-key-123"
+    message = (
+        "401 Client Error: Unauthorized for url: "
+        f"https://api.the-odds-api.com/v4/sports/soccer/odds?apiKey={api_key}&regions=eu"
+    )
+
+    redacted = redact_fetch_error(message, api_key)
+
+    assert api_key not in redacted
+    assert "apiKey=[REDACTED]" in redacted
+
+
+def test_fetch_all_provider_errors_reports_error_and_redacts_key(tmp_path, monkeypatch):
+    api_key = "secret-key-123"
+    monkeypatch.setenv("THE_ODDS_API_KEY", api_key)
+
+    def raise_unauthorized(*args, **kwargs):
+        raise RuntimeError(
+            "401 Client Error: Unauthorized for url: "
+            f"https://api.the-odds-api.com/v4/sports/soccer/odds?apiKey={api_key}&regions=eu"
+        )
+
+    monkeypatch.setattr("polymarket_predictive_engine.sharp_odds_fetch.requests.get", raise_unauthorized)
+    cfg = EngineConfig(
+        raw={
+            "paths": {"output_root": str(tmp_path / "outputs")},
+            "sharp_odds_fetch": {
+                "sports": ["soccer_fifa_world_cup"],
+                "output_path": str(tmp_path / "sharp_odds.csv"),
+            },
+        },
+        path=tmp_path / "cfg.yaml",
+    )
+
+    summary = fetch_sharp_odds(cfg)
+
+    assert summary["status"] == "error"
+    assert summary["errors"] == 1
+    assert summary["rows"] == 0
+    assert api_key not in summary["per_sport"][0]["error"]
+    assert "apiKey=[REDACTED]" in summary["per_sport"][0]["error"]

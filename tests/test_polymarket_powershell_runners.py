@@ -12,10 +12,33 @@ def test_strategy_v2_cycle_pins_repo_source_before_python_invocations():
     text = _script_text("scripts/run_polymarket_strategy_v2_cycle.ps1")
 
     pythonpath_index = text.index("$env:PYTHONPATH")
-    first_python_module_index = text.index("python -m polymarket_predictive_engine.cli")
+    first_python_module_index = text.index('"-m", "polymarket_predictive_engine.cli"')
 
     assert "(Resolve-Path .\\src).Path" in text
     assert pythonpath_index < first_python_module_index
+
+
+def test_strategy_v2_cycle_refreshes_independent_anchors_before_scoring():
+    text = _script_text("scripts/run_polymarket_strategy_v2_cycle.ps1")
+
+    assert "[int]$IndependentAnchorMaxAgeMinutes = 60" in text
+    sharp_refresh_index = text.index("refresh-sharp-anchor")
+    crypto_refresh_index = text.index("build-crypto-fundamental")
+    anchored_edge_index = text.index("run_polymarket_strategy_v2_anchored_edge.ps1")
+
+    assert sharp_refresh_index < anchored_edge_index
+    assert crypto_refresh_index < anchored_edge_index
+    assert "independent_anchor_refresh = $independentAnchorRefresh" in text
+
+
+def test_strategy_v2_cycle_bounds_python_steps():
+    text = _script_text("scripts/run_polymarket_strategy_v2_cycle.ps1")
+
+    assert "[int]$StepTimeoutSeconds = 180" in text
+    assert "Start-Process" in text
+    assert "$process.WaitForExit($StepTimeoutSeconds * 1000)" in text
+    assert "timed out after $StepTimeoutSeconds seconds" in text
+    assert "$exitCode = [int]$process.ExitCode" in text
 
 
 def test_strategy_v2_cycle_renders_dashboard_after_latest_status_is_written():

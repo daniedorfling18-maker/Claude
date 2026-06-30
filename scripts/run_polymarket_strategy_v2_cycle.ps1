@@ -1,5 +1,7 @@
 ﻿param(
-  [string]$ConfigPath = "polymarket_predictive_config.example.yaml"
+  [string]$ConfigPath = "polymarket_predictive_config.example.yaml",
+  [int]$StepTimeoutSeconds = 180,
+  [int]$IndependentAnchorMaxAgeMinutes = 60
 )
 
 $ErrorActionPreference = "Stop"
@@ -28,6 +30,75 @@ Remove-Item $shadowStdoutPath, $shadowStderrPath -ErrorAction SilentlyContinue
 function Quote-ForPowerShellCommand {
   param([string]$Value)
   "'" + ($Value -replace "'", "''") + "'"
+}
+
+function Test-FreshFile {
+  param(
+    [string]$Path,
+    [int]$MaxAgeMinutes
+  )
+  if ($MaxAgeMinutes -le 0) {
+    return $false
+  }
+  if (-not (Test-Path $Path)) {
+    return $false
+  }
+  $ageMinutes = ((Get-Date).ToUniversalTime() - (Get-Item $Path).LastWriteTimeUtc).TotalMinutes
+  return ($ageMinutes -lt $MaxAgeMinutes)
+}
+
+function Read-JsonIfExists {
+  param([string]$Path)
+  if (-not (Test-Path $Path)) {
+    return $null
+  }
+  try {
+    return Get-Content $Path -Raw | ConvertFrom-Json
+  } catch {
+    return [PSCustomObject]@{
+      status = "unreadable"
+      path = $Path
+      error = $_.Exception.Message
+    }
+  }
+}
+
+function Invoke-PythonStep {
+  param(
+    [string]$Name,
+    [string[]]$Arguments
+  )
+  $safeName = $Name -replace "[^A-Za-z0-9_.-]", "_"
+  $stdoutPath = Join-Path $repoRoot "work\strategy_v2_$safeName.stdout.log"
+  $stderrPath = Join-Path $repoRoot "work\strategy_v2_$safeName.stderr.log"
+  Remove-Item $stdoutPath, $stderrPath -ErrorAction SilentlyContinue
+
+  $process = Start-Process `
+    -FilePath "python" `
+    -ArgumentList $Arguments `
+    -WorkingDirectory $repoRoot `
+    -PassThru `
+    -WindowStyle Hidden `
+    -RedirectStandardOutput $stdoutPath `
+    -RedirectStandardError $stderrPath
+
+  if (-not $process.WaitForExit($StepTimeoutSeconds * 1000)) {
+    try { Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue } catch {}
+    throw "$Name timed out after $StepTimeoutSeconds seconds"
+  }
+
+  $process.Refresh()
+  $exitCode = [int]$process.ExitCode
+  if ($exitCode -ne 0) {
+    $output = ""
+    if (Test-Path $stdoutPath) {
+      $output += (Get-Content $stdoutPath -Raw)
+    }
+    if (Test-Path $stderrPath) {
+      $output += (Get-Content $stderrPath -Raw)
+    }
+    throw "$Name failed with exit code $exitCode. Output: $output"
+  }
 }
 
 $shadowCommand = "& $(Quote-ForPowerShellCommand $shadowRefreshScript) -ConfigPath $(Quote-ForPowerShellCommand $ConfigPath) -WebsocketSeconds 30 *> $(Quote-ForPowerShellCommand $shadowStdoutPath)"
@@ -79,11 +150,33 @@ if (Test-Path $predictionSnapshotPath) {
   $predictionSnapshotAfterUtc = (Get-Item $predictionSnapshotPath).LastWriteTimeUtc.ToString("yyyy-MM-ddTHH:mm:ssZ")
 }
 
+$independentAnchorRefresh = [ordered]@{
+  max_age_minutes = $IndependentAnchorMaxAgeMinutes
+  sharp_anchor_step = "skipped_fresh"
+  crypto_fundamental_step = "skipped_fresh"
+}
 
-# Refresh the underlying market/prediction snapshot before rescoring Strategy V2.
+$sharpFundamentalPath = ".\outputs\polymarket_training\sharp_fundamental_probabilities.csv"
+if (-not (Test-FreshFile $sharpFundamentalPath $IndependentAnchorMaxAgeMinutes)) {
+  Invoke-PythonStep "refresh-sharp-anchor" @("-m", "polymarket_predictive_engine.cli", "refresh-sharp-anchor", "--config", $ConfigPath)
+  $independentAnchorRefresh.sharp_anchor_step = "refreshed"
+}
 
-python -m polymarket_predictive_engine.cli refresh-governance --config $ConfigPath | Out-Null
-python -m polymarket_predictive_engine.cli validation-report --config $ConfigPath | Out-Null
+$cryptoFundamentalPath = ".\outputs\polymarket_training\crypto_fundamental_probabilities.csv"
+if (-not (Test-FreshFile $cryptoFundamentalPath $IndependentAnchorMaxAgeMinutes)) {
+  Invoke-PythonStep "build-crypto-fundamental" @("-m", "polymarket_predictive_engine.cli", "build-crypto-fundamental", "--config", $ConfigPath)
+  $independentAnchorRefresh.crypto_fundamental_step = "refreshed"
+}
+
+$independentAnchorRefresh.sharp_odds_fetch = Read-JsonIfExists ".\outputs\polymarket_model_governance\sharp_odds_fetch_summary.json"
+$independentAnchorRefresh.sharp_anchor = Read-JsonIfExists ".\outputs\polymarket_model_governance\sharp_anchor_summary.json"
+$independentAnchorRefresh.crypto_fundamental = Read-JsonIfExists ".\outputs\polymarket_model_governance\crypto_fundamental_summary.json"
+
+
+# Refresh the governance/pipeline state before rescoring Strategy V2.
+
+Invoke-PythonStep "refresh-governance" @("-m", "polymarket_predictive_engine.cli", "refresh-governance", "--config", $ConfigPath)
+Invoke-PythonStep "validation-report" @("-m", "polymarket_predictive_engine.cli", "validation-report", "--config", $ConfigPath)
 
 .\scripts\run_polymarket_opportunity_audit.ps1 -ConfigPath $ConfigPath | Out-Null
 .\scripts\run_polymarket_strategy_v2_anchored_edge.ps1 -ConfigPath $ConfigPath | Out-Null
@@ -129,13 +222,14 @@ $status = [PSCustomObject]@{
   rejected_anchored_rows = @($rejectedAnchored).Count
   active_shadow_candidates = @($shadowCandidates | Select-Object family, market_slug, outcome, executable_price, anchor_fair_probability, risk_adjusted_anchor_edge)
   persistence_log = $logPath
+  independent_anchor_refresh = $independentAnchorRefresh
 }
 
 $status |
   ConvertTo-Json -Depth 8 |
   Set-Content .\work\strategy_v2_cycle_latest_status.json -Encoding UTF8
 
-python .\scripts\render_polymarket_dashboard.py --config $ConfigPath | Out-Null
+Invoke-PythonStep "render-dashboard" @(".\scripts\render_polymarket_dashboard.py", "--config", $ConfigPath)
 
 "`n=== STRATEGY V2 CYCLE COMPLETE ==="
 $status | Format-List

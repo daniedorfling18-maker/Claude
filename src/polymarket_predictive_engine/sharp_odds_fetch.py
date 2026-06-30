@@ -15,6 +15,7 @@ the sport list and regions are kept tight by default.
 from __future__ import annotations
 
 import os
+import re
 from pathlib import Path
 from typing import Any, Iterable, Mapping, Sequence
 
@@ -25,6 +26,14 @@ from .utils import normalize_slug, now_utc, safe_float, write_csv, write_json
 
 DEFAULT_BASE_URL = "https://api.the-odds-api.com/v4"
 DEFAULT_BOOKMAKER_PRIORITY = ("pinnacle", "betfair_ex_eu", "betfair_ex_uk", "betfair")
+
+
+def redact_fetch_error(message: object, api_key: str | None = None) -> str:
+    """Remove provider credentials from network error strings before writing audit files."""
+    text = str(message)
+    if api_key:
+        text = text.replace(api_key, "[REDACTED]")
+    return re.sub(r"(?i)(apiKey=)[^&\s]+", r"\1[REDACTED]", text)
 
 
 def event_market_slug(home: str, away: str) -> str:
@@ -148,18 +157,26 @@ def fetch_sharp_odds(cfg: EngineConfig) -> dict[str, Any]:
                               "rows": len(sport_rows),
                               "requests_remaining": response.headers.get("x-requests-remaining", "")})
         except Exception as exc:  # noqa: BLE001 - network/parse errors are per-sport, not fatal
-            per_sport.append({"sport": sport, "status": "error", "error": str(exc), "rows": 0})
+            per_sport.append({"sport": sport, "status": "error", "error": redact_fetch_error(exc, api_key), "rows": 0})
 
     out_path.parent.mkdir(parents=True, exist_ok=True)
     write_csv(out_path, rows, fieldnames=["market_slug", "outcome", "decimal_odds", "bookmaker",
                                           "sport", "sport_title", "market_key", "commence_time",
                                           "home_team", "away_team"])
     books_used = sorted({str(r.get("bookmaker", "")) for r in rows if r.get("bookmaker")})
+    error_count = sum(1 for item in per_sport if item.get("status") == "error")
+    if per_sport and error_count == len(per_sport):
+        status = "error"
+    elif error_count:
+        status = "partial"
+    else:
+        status = "fetched"
     summary = {
-        "status": "fetched",
+        "status": status,
         "rows": len(rows),
         "markets": len({r["market_slug"] for r in rows}),
         "books_used": books_used,
+        "errors": error_count,
         "per_sport": per_sport,
         "output_path": str(out_path),
         "note": "Run build-sharp-anchor next to de-vig these into the fundamental slot.",

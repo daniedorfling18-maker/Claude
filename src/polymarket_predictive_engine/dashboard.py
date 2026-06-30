@@ -503,8 +503,23 @@ async function load() {
       ["Promotion candidates", priceActionFeedback.promotion_candidates],
       ["Positive collect candidates", priceActionFeedback.positive_collect_candidates],
       ["Suppressed candidates", priceActionFeedback.suppressed_candidates],
+      ["Forward paper cohorts", priceActionFeedback.forward_paper_cohorts],
+      ["Forward paper positive", priceActionFeedback.forward_paper_positive_cohorts],
+      ["Forward paper run-rate", priceActionFeedback.best_forward_paper_monthly_run_rate_usdc, fmtUsd],
+      ["Forward paper gap", priceActionFeedback.forward_paper_goal_gap_usdc, fmtUsd],
       ["Collect next", priceActionFeedback.collection_queries, joinText],
       ["Suppress", priceActionFeedback.suppressed_queries, joinText]
+    ]) + `<div style="height:12px"></div><h3>Forward paper P&L by signal cohort</h3>` + table(priceActionFeedback.forward_paper_preview || [], [
+      ["Cohort","cohort", v=>longText(v, 180)],
+      ["Action","action", v=>longText(v, 160)],
+      ["Buys","buy_fills"],
+      ["Closed","closed_trades"],
+      ["Open","open_trades"],
+      ["P&L","forward_paper_pnl_usdc", fmtUsd],
+      ["ROI","forward_paper_roi", v=>fmtNum(Number(v) * 100, 2) + "%"],
+      ["Run-rate","monthly_run_rate_usdc", fmtUsd],
+      ["Source","promotion_evidence_source"],
+      ["Reason","reason", v=>longText(v, 200)]
     ]) + `<div style="height:12px"></div><h3>Price-action feedback cohort leaderboard</h3>` + table(priceActionFeedback.top_cohorts || [], [
       ["Source","source"],
       ["Cohort","cohort", v=>longText(v, 180)],

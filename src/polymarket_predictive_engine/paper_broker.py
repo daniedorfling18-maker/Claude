@@ -1107,6 +1107,10 @@ def run_paper_broker(cfg: EngineConfig) -> dict[str, Any]:
             _ensure_initial_cash(con, cfg)
             settlements = settle_resolved_positions(con, cfg)
             gate = paper_trade_readiness(cfg)
+            settings = _paper_settings(cfg)
+            exit_monitoring_when_blocked = boolish(settings.get("monitor_exits_when_readiness_blocked", True)) and boolish(
+                settings.get("exit_enabled", True)
+            )
             results: list[dict[str, Any]] = []
             exit_results: list[dict[str, Any]] = []
             entry_pause_reason = ""
@@ -1117,6 +1121,8 @@ def run_paper_broker(cfg: EngineConfig) -> dict[str, Any]:
                     signals = _paper_signal_rows(cfg)
                     for signal in signals:
                         results.append(submit_paper_signal(con, cfg, signal))
+            elif exit_monitoring_when_blocked:
+                exit_results = close_eligible_positions(con, cfg)
             snapshot = write_portfolio_snapshot(con, cfg)
             export_ledger(con, cfg)
             cohort_pnl = write_signal_cohort_pnl(con, cfg)
@@ -1132,10 +1138,15 @@ def run_paper_broker(cfg: EngineConfig) -> dict[str, Any]:
             if result.get("status") not in {"closed", "duplicate_exit_skipped"}
         )
         rejection_reasons = Counter(str(result.get("reason", "")) for result in results if result.get("status") == "rejected")
+        status = "ran" if gate.get("approved_for_paper_trading") else "blocked_by_readiness_gate"
+        if not gate.get("approved_for_paper_trading") and exit_monitoring_when_blocked:
+            status = "monitoring_exits_only_readiness_gate_blocked"
         summary = {
             "mode": "paper",
-            "status": "ran" if gate.get("approved_for_paper_trading") else "blocked_by_readiness_gate",
+            "status": status,
             "approved_for_paper_trading": bool(gate.get("approved_for_paper_trading")),
+            "entry_gate_blocked": not bool(gate.get("approved_for_paper_trading")),
+            "exit_monitoring_when_blocked": bool(exit_monitoring_when_blocked),
             "blockers": gate.get("blockers", []),
             "signals_processed": len(results),
             "entry_pause_reason": entry_pause_reason,

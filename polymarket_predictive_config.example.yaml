@@ -706,6 +706,7 @@ paper_trading:
   maximum_position_cost_usdc: 20
   minimum_reentry_minutes_after_exit: 240
   exit_enabled: true
+  monitor_exits_when_readiness_blocked: true
   exit_policy_version: paper-exit-v1
   minimum_hold_minutes_before_exit: 15
   take_profit_return: 0.25

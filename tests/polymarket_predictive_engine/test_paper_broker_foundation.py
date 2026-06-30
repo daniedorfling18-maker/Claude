@@ -356,6 +356,83 @@ def test_paper_broker_closes_profitable_position_and_respects_exit_cooldown(tmp_
         con.close()
 
 
+def test_paper_broker_monitors_exits_when_readiness_blocks_new_entries(tmp_path, monkeypatch):
+    cfg = _config(tmp_path)
+    cfg.raw["paper_trading"]["minimum_hold_minutes_before_exit"] = 0
+    cfg.raw["paper_trading"]["take_profit_return"] = 0.1
+    cfg.raw["paper_trading"]["take_profit_min_usdc"] = 0.01
+    _seed_forward_fixture(cfg)
+
+    first = run_paper_cycle(cfg, source="raw_snapshot")
+    assert first["broker"]["orders_filled"] == 1
+
+    con = connect_db(cfg.database_path)
+    try:
+        con.execute(
+            """
+            INSERT INTO market_snapshots(
+                snapshot_id, idempotency_key, collected_at, market_id, token_id,
+                best_bid, best_ask, midpoint, spread, liquidity, raw_payload_json
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                "snapshot_blocked_gate_profitable_exit",
+                "blocked-gate-profitable-exit|market-forward-1|token-forward-yes",
+                "2026-06-25T10:05:00Z",
+                "market-forward-1",
+                "token-forward-yes",
+                0.56,
+                0.57,
+                0.565,
+                0.01,
+                1000,
+                "{}",
+            ),
+        )
+        con.commit()
+    finally:
+        con.close()
+
+    signals_path = cfg.output_root / "polymarket_predictions" / "trade_signals.csv"
+    signals = read_csv_rows(signals_path)
+    signals[0]["data_snapshot_timestamp"] = "2026-06-25T10:06:00Z"
+    write_csv(signals_path, signals)
+
+    import polymarket_predictive_engine.paper_broker as broker_module
+
+    monkeypatch.setattr(
+        broker_module,
+        "paper_trade_readiness",
+        lambda cfg: {
+            "approved_for_paper_trading": False,
+            "blockers": ["test readiness blocker"],
+        },
+    )
+
+    result = run_paper_broker(cfg)
+
+    assert result["status"] == "monitoring_exits_only_readiness_gate_blocked"
+    assert result["approved_for_paper_trading"] is False
+    assert result["exit_monitoring_when_blocked"] is True
+    assert result["exit_orders_filled"] == 1
+    assert result["orders_filled"] == 0
+    assert result["signals_processed"] == 0
+    assert result["closed_positions"][0]["reason"] == "take_profit"
+
+    con = connect_db(cfg.database_path)
+    try:
+        position = con.execute("SELECT status, quantity, realised_pnl_usdc FROM positions").fetchone()
+        assert position["status"] == "closed"
+        assert position["quantity"] == 0
+        assert position["realised_pnl_usdc"] > 0
+        buy_count = con.execute("SELECT COUNT(*) FROM fills WHERE side = 'BUY_YES'").fetchone()[0]
+        sell_count = con.execute("SELECT COUNT(*) FROM fills WHERE side = 'SELL_YES'").fetchone()[0]
+        assert buy_count == 1
+        assert sell_count == 1
+    finally:
+        con.close()
+
+
 def test_paper_broker_pauses_new_entries_when_clean_forward_pnl_is_below_threshold(tmp_path):
     cfg = _config(tmp_path)
     cfg.raw["profit_tracking"]["pause_new_entries_below_pnl_usdc"] = -1

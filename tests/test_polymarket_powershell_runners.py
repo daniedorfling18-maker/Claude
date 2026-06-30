@@ -269,6 +269,9 @@ def test_paper_maintenance_task_installer_runs_every_minute_without_overlap():
 
     assert "run_polymarket_paper_maintenance.ps1" in text
     assert "polymarket_paper_maintenance_task_status.json" in text
+    assert "[switch]$StartAtNextExitDue" in text
+    assert "next_broker_exit_due_utc" in text
+    assert "dashboard_next_broker_exit_due_utc" in text
     assert "[int]$IntervalMinutes = 1" in text
     assert "-RepetitionInterval (New-TimeSpan -Minutes $IntervalMinutes)" in text
     assert "-MultipleInstances IgnoreNew" in text

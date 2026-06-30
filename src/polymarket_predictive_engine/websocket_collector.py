@@ -113,6 +113,45 @@ def _candidate_rank(row: dict[str, Any]) -> tuple[bool, float, float, float]:
     )
 
 
+def _feedback_broaden_family_prefixes(cfg: EngineConfig, settings: dict[str, Any]) -> list[str]:
+    if not _boolish(settings.get("feedback_broaden_target_enabled", True)):
+        return []
+    payload = read_json(cfg.governance_root / "price_action_feedback.json", default={}) or {}
+    if not isinstance(payload, dict):
+        return []
+    if str(payload.get("learning_state") or "") != "suppress_negative_price_action_and_broaden":
+        return []
+    prefixes: list[str] = []
+    for raw_query in payload.get("collection_queries", []) or []:
+        query = str(raw_query or "").strip().lower()
+        mapped: list[str] = []
+        if "world" in query or "cup" in query:
+            mapped = ["worldcup", "sports_other"]
+        elif "tennis" in query:
+            mapped = ["tennis"]
+        elif "bitcoin" in query or "btc" in query:
+            mapped = ["crypto_btc"]
+        elif "ethereum" in query or query == "eth":
+            mapped = ["crypto_eth"]
+        elif "solana" in query or query == "sol":
+            mapped = ["crypto_sol"]
+        elif "xrp" in query or "ripple" in query:
+            mapped = ["crypto_xrp"]
+        for prefix in mapped:
+            if prefix not in prefixes:
+                prefixes.append(prefix)
+    return prefixes
+
+
+def _matches_feedback_broaden_family(row: dict[str, Any], prefixes: list[str]) -> bool:
+    if not prefixes:
+        return False
+    family = str(row.get("family") or row.get("category") or "unknown").strip().lower()
+    if not family or family in _EXCLUDED_FAMILIES:
+        return False
+    return any(family.startswith(prefix) or family == prefix for prefix in prefixes)
+
+
 def _profit_sprint_rank(row: dict[str, Any]) -> tuple[float, float, float, float]:
     return (
         safe_float(row.get("profit_sprint_target_priority")) or 0.0,
@@ -120,6 +159,40 @@ def _profit_sprint_rank(row: dict[str, Any]) -> tuple[float, float, float, float
         safe_float(row.get("liquidity")) or 0.0,
         -(safe_float(row.get("spread")) or 999.0),
     )
+
+
+def _feedback_broaden_rows(cfg: EngineConfig, settings: dict[str, Any], candidates: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    prefixes = _feedback_broaden_family_prefixes(cfg, settings)
+    if not prefixes:
+        return []
+    rows: list[dict[str, Any]] = []
+    for row in candidates:
+        if not _matches_feedback_broaden_family(row, prefixes):
+            continue
+        enriched = dict(row)
+        enriched["feedback_broaden_target"] = True
+        enriched["feedback_broaden_family_prefixes"] = ",".join(prefixes)
+        rows.append(enriched)
+    max_rows = int(settings.get("feedback_broaden_target_assets", 4) or 4)
+    max_per_family = int(settings.get("feedback_broaden_target_assets_per_family", 2) or 2)
+    return _balanced_by_family(rows, max_assets=max_rows, max_per_family=max_per_family)
+
+
+def _tag_feedback_broaden_targets(rows: list[dict[str, Any]], feedback_rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    if not feedback_rows:
+        return rows
+    feedback_by_id = {_token_id(row): row for row in feedback_rows if _token_id(row)}
+    tagged: list[dict[str, Any]] = []
+    for row in rows:
+        token_id = _token_id(row)
+        if token_id and token_id in feedback_by_id:
+            enriched = dict(row)
+            enriched["feedback_broaden_target"] = True
+            enriched["feedback_broaden_family_prefixes"] = feedback_by_id[token_id].get("feedback_broaden_family_prefixes", "")
+            tagged.append(enriched)
+        else:
+            tagged.append(row)
+    return tagged
 
 
 def _balanced_by_family(rows: list[dict[str, Any]], *, max_assets: int, max_per_family: int) -> list[dict[str, Any]]:
@@ -282,8 +355,29 @@ def _liquidity_target_rows(cfg: EngineConfig, settings: dict[str, Any]) -> list[
     strategy_v2_rows = _strategy_v2_priority_rows(cfg, settings)
     priority_rows = _profit_sprint_priority_rows(cfg, candidates)
     if not priority_rows and not strategy_v2_rows:
-        return _balanced_by_family(candidates, max_assets=max_assets, max_per_family=max_per_family)
+        feedback_rows = _feedback_broaden_rows(cfg, settings, candidates)
+        if not feedback_rows:
+            return _balanced_by_family(candidates, max_assets=max_assets, max_per_family=max_per_family)
+        reserve = min(len(feedback_rows), max(0, max_assets - 1))
+        base_rows = [row for row in candidates if _token_id(row) not in {_token_id(item) for item in feedback_rows[:reserve]}]
+        selected = _balanced_by_family(base_rows, max_assets=max_assets - reserve, max_per_family=max_per_family)
+        selected_ids = {_token_id(row) for row in selected}
+        for row in feedback_rows:
+            token_id = _token_id(row)
+            if token_id and token_id not in selected_ids:
+                selected.append(row)
+                selected_ids.add(token_id)
+            if len(selected) >= max_assets:
+                break
+        return _tag_feedback_broaden_targets(selected[:max_assets], feedback_rows)
 
+    feedback_rows = _feedback_broaden_rows(cfg, settings, candidates)
+    feedback_reserve = min(
+        len(feedback_rows),
+        max(0, int(settings.get("feedback_broaden_target_assets", 4) or 4)),
+        max(0, max_assets - 1),
+    )
+    normal_budget = max_assets - feedback_reserve
     selected: list[dict[str, Any]] = []
     selected_ids: set[str] = set()
     for row in strategy_v2_rows:
@@ -292,21 +386,34 @@ def _liquidity_target_rows(cfg: EngineConfig, settings: dict[str, Any]) -> list[
             continue
         selected.append(row)
         selected_ids.add(token_id)
-        if len(selected) >= max_assets:
-            return selected
+        if len(selected) >= normal_budget:
+            break
 
     for row in priority_rows:
+        if len(selected) >= normal_budget:
+            break
         token_id = _token_id(row)
         if not token_id or token_id in selected_ids:
             continue
         selected.append(row)
         selected_ids.add(token_id)
-        if len(selected) >= max_assets:
-            return selected
+        if len(selected) >= normal_budget:
+            break
 
     remaining = [row for row in candidates if _token_id(row) not in selected_ids]
-    selected.extend(_balanced_by_family(remaining, max_assets=max_assets - len(selected), max_per_family=max_per_family))
-    return selected[:max_assets]
+    selected.extend(_balanced_by_family(remaining, max_assets=normal_budget - len(selected), max_per_family=max_per_family))
+    selected_ids = {_token_id(row) for row in selected}
+    for row in feedback_rows:
+        token_id = _token_id(row)
+        if token_id and token_id not in selected_ids:
+            selected.append(row)
+            selected_ids.add(token_id)
+        if len(selected) >= max_assets:
+            break
+    if len(selected) < max_assets:
+        remaining = [row for row in candidates if _token_id(row) not in selected_ids]
+        selected.extend(_balanced_by_family(remaining, max_assets=max_assets - len(selected), max_per_family=max_per_family))
+    return _tag_feedback_broaden_targets(selected[:max_assets], feedback_rows)
 
 
 def _asset_ids_from_rows(rows: list[dict[str, Any]]) -> list[str]:
@@ -355,6 +462,16 @@ def _strategy_v2_target_counts(rows: list[dict[str, Any]]) -> dict[str, int]:
             continue
         cohort = str(row.get("strategy_v2_signal_cohort") or row.get("family") or "strategy_v2")
         counts[cohort] = counts.get(cohort, 0) + 1
+    return dict(sorted(counts.items()))
+
+
+def _feedback_broaden_counts(rows: list[dict[str, Any]]) -> dict[str, int]:
+    counts: dict[str, int] = {}
+    for row in rows:
+        if not _boolish(row.get("feedback_broaden_target")):
+            continue
+        family = str(row.get("family") or row.get("category") or "unknown")
+        counts[family] = counts.get(family, 0) + 1
     return dict(sorted(counts.items()))
 
 
@@ -414,6 +531,7 @@ def collect_websocket(cfg: EngineConfig, websocket_seconds: int = 60) -> dict[st
     dynamic_ids = _asset_ids_from_rows(target_rows)
     sprint_counts = _profit_sprint_target_counts(target_rows)
     strategy_v2_counts = _strategy_v2_target_counts(target_rows)
+    feedback_counts = _feedback_broaden_counts(target_rows)
     if strategy_v2_counts and sprint_counts:
         target_source = "strategy_v2_forward_evidence+profit_sprint_targets+liquidity_watchlist"
     elif strategy_v2_counts:
@@ -422,6 +540,8 @@ def collect_websocket(cfg: EngineConfig, websocket_seconds: int = 60) -> dict[st
         target_source = "profit_sprint_targets+liquidity_watchlist"
     else:
         target_source = "liquidity_watchlist" if dynamic_ids else "configured_market_ids"
+    if feedback_counts and dynamic_ids:
+        target_source += "+price_action_feedback_broaden"
     if target_rows:
         write_csv(cfg.governance_root / "websocket_liquidity_targets.csv", target_rows)
 
@@ -463,6 +583,7 @@ def collect_websocket(cfg: EngineConfig, websocket_seconds: int = 60) -> dict[st
             "target_fast_feedback_family_counts": _fast_feedback_counts(target_rows),
             "target_profit_sprint_counts": sprint_counts,
             "target_strategy_v2_counts": strategy_v2_counts,
+            "target_feedback_broaden_counts": feedback_counts,
             "subscription_attempts": len(variants),
         }
         write_json(out_root / "websocket_summary.json", summary)
@@ -491,6 +612,7 @@ def collect_websocket(cfg: EngineConfig, websocket_seconds: int = 60) -> dict[st
         "target_fast_feedback_family_counts": _fast_feedback_counts(target_rows),
         "target_profit_sprint_counts": sprint_counts,
         "target_strategy_v2_counts": strategy_v2_counts,
+        "target_feedback_broaden_counts": feedback_counts,
         "target_file": str(cfg.governance_root / "websocket_liquidity_targets.csv") if target_rows else "",
         "selected_subscription": selected_subscription,
         "subscription_attempts": len(variants),

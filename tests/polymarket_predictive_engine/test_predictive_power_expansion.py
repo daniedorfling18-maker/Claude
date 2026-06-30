@@ -16,7 +16,7 @@ from polymarket_predictive_engine.models.category_calibration import train_categ
 from polymarket_predictive_engine.paper_edge_simulator import simulate_paper_edge
 from polymarket_predictive_engine.price_history_collector import normalize_price_history_payload
 from polymarket_predictive_engine.resolution_collector import infer_market_resolution_rows
-from polymarket_predictive_engine.utils import read_csv_rows, read_json, write_csv
+from polymarket_predictive_engine.utils import read_csv_rows, read_json, write_csv, write_json
 import polymarket_predictive_engine.websocket_collector as websocket_collector
 from polymarket_predictive_engine.websocket_collector import collect_websocket
 
@@ -418,6 +418,87 @@ def test_websocket_prioritises_strategy_v2_forward_evidence_targets(tmp_path, mo
     assert targets[0]["token_id"] == "strategy-token"
     assert "strategy-token" in subscriptions[0]["assets_ids"]
     assert "resolved-token" not in subscriptions[0]["assets_ids"]
+
+
+def test_websocket_reserves_feedback_broaden_targets_when_price_action_negative(tmp_path):
+    import yaml
+
+    cfg_path = make_cfg(tmp_path)
+    data = yaml.safe_load(cfg_path.read_text(encoding="utf-8"))
+    data.setdefault("websocket_market_data", {})
+    data["websocket_market_data"].update(
+        {
+            "use_liquidity_targets": True,
+            "use_strategy_v2_targets": True,
+            "max_strategy_v2_target_assets": 4,
+            "max_liquidity_target_assets": 4,
+            "feedback_broaden_target_assets": 2,
+            "market_ids": [],
+        }
+    )
+    cfg_path.write_text(yaml.safe_dump(data, sort_keys=False), encoding="utf-8")
+    cfg = load_config(cfg_path)
+    write_json(
+        cfg.governance_root / "price_action_feedback.json",
+        {
+            "status": "ok",
+            "learning_state": "suppress_negative_price_action_and_broaden",
+            "collection_queries": ["world cup", "tennis"],
+        },
+    )
+    write_csv(
+        cfg.output_root / "polymarket_strategy_v2" / "strategy_v2_forward_evidence.csv",
+        [
+            {
+                "token_id": f"strategy-token-{idx}",
+                "family": "crypto_btc_updown_daily",
+                "signal_cohort": "strategy_v2|crypto_btc_updown_daily",
+                "latest_status": "shadow_candidate",
+                "mark_pnl_usdc": str(2.0 - idx * 0.1),
+                "latest_risk_adjusted_anchor_edge": "0.1",
+                "resolved_evidence": "False",
+            }
+            for idx in range(4)
+        ],
+    )
+    write_csv(
+        cfg.output_root / "polymarket_liquidity_discovery" / "liquidity_watchlist.csv",
+        [
+            {
+                "token_id": "worldcup-token",
+                "family": "sports_other",
+                "tradable_liquidity_candidate": "true",
+                "liquidity": "800",
+                "spread": "0.02",
+                "time_to_close_hours": "24",
+            },
+            {
+                "token_id": "tennis-token",
+                "family": "tennis_match_winner",
+                "tradable_liquidity_candidate": "true",
+                "liquidity": "700",
+                "spread": "0.02",
+                "time_to_close_hours": "5",
+            },
+            {
+                "token_id": "plain-token",
+                "family": "macro_rates",
+                "tradable_liquidity_candidate": "true",
+                "liquidity": "1200",
+                "spread": "0.01",
+                "time_to_close_hours": "3",
+                "fast_feedback_liquidity_candidate": "true",
+            },
+        ],
+    )
+
+    targets = websocket_collector._liquidity_target_rows(cfg, cfg.raw["websocket_market_data"])
+    token_ids = {row["token_id"] for row in targets}
+
+    assert len(targets) == 4
+    assert "worldcup-token" in token_ids
+    assert "tennis-token" in token_ids
+    assert sum(1 for row in targets if row.get("feedback_broaden_target") is True) == 2
 
 
 def test_websocket_collector_fails_closed_on_socket_error(tmp_path, monkeypatch):

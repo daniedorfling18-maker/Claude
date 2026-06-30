@@ -598,6 +598,9 @@ websocket_market_data:
   url: wss://ws-subscriptions-clob.polymarket.com/ws/market
   max_messages: 1000
   connect_timeout_seconds: 8
+  feedback_broaden_target_enabled: true
+  feedback_broaden_target_assets: 4
+  feedback_broaden_target_assets_per_family: 2
   market_ids: &id001
   - '53767774368871487958852302456977659279367510767287923221897564430044671384128'
   - '37821011509134197239774147789543695590581250725127252293498663449982199078732'

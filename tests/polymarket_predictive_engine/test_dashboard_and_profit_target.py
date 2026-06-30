@@ -229,6 +229,49 @@ def test_dashboard_prefers_fresh_paper_trade_refresh_over_stale_summaries(tmp_pa
     assert data["evidence_freshness"]["scoreboard_status"] == "aligned"
 
 
+def test_dashboard_flags_price_action_signals_waiting_for_broker_refresh(tmp_path):
+    cfg = _config(tmp_path)
+    write_json(
+        cfg.governance_root / "paper_trade_refresh.json",
+        {
+            "status": "ran",
+            "generated_at_utc": "2026-06-30T18:59:25Z",
+            "broker": {
+                "status": "ran",
+                "generated_at_utc": "2026-06-30T18:59:25Z",
+                "equity": 1000,
+                "cash": 1000,
+                "total_exposure": 0,
+                "orders_filled": 0,
+            },
+        },
+    )
+    write_json(
+        cfg.output_root / "polymarket_price_action" / "price_action_paper_signal_summary.json",
+        {
+            "status": "computed",
+            "generated_at_utc": "2026-06-30T21:20:14Z",
+            "signals": 3,
+            "paper_confirmation_signals": 3,
+            "paper_confirmation_candidates": 3,
+        },
+    )
+    write_csv(
+        cfg.output_root / "polymarket_price_action" / "price_action_paper_signals.csv",
+        [{"signal_cohort": "macro_economy", "market_slug": "macro-test", "token_id": "macro-token"}],
+    )
+
+    result = render_dashboard(cfg)
+    data = read_json(result["dashboard_data"])
+
+    paper_status = data["price_action_paper_signals"]
+    assert paper_status["broker_refresh_needed"] is True
+    assert paper_status["pending_broker_signals"] == 3
+    assert paper_status["pending_broker_confirmation_signals"] == 3
+    assert data["evidence_freshness"]["broker_refresh_needed"] is True
+    assert data["evidence_freshness"]["pending_broker_signals"] == 3
+
+
 def test_standalone_paper_trade_report_refreshes_profit_tracker_and_dashboard(tmp_path):
     cfg = _config(tmp_path)
 

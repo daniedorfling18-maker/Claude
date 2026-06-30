@@ -189,6 +189,7 @@ async function load() {
       card("Price scout P&L", fmtUsd(priceScoutPnl), Number(priceScoutPnl || 0) > 0 ? "good" : "warn"),
       card("Microstructure rules", microstructure.validation_pass_rules ?? "0", Number(microstructure.validation_pass_rules || 0) > 0 ? "good" : "warn"),
       card("Price-action paper signals", priceActionPaper.signals ?? "0", Number(priceActionPaper.signals || 0) > 0 ? "good" : "warn"),
+      card("Broker refresh", priceActionPaper.broker_refresh_needed ? `${priceActionPaper.pending_broker_signals ?? 0} pending` : "fresh", priceActionPaper.broker_refresh_needed ? "warn" : "good"),
       card("Main trade blocker", longText(diag.main_blocker || "-", 120), Number(diag.approved_signals_count || 0) > 0 ? "good" : "warn"),
       card("Next settlement", data.shadow_settlement_watch?.next_settlement_minutes == null ? "Waiting" : fmtNum(data.shadow_settlement_watch.next_settlement_minutes, 0) + "m"),
       card("Shadow P&L", fmtUsd(data.shadow_settlement_watch?.shadow_total_pnl_usdc), Number(data.shadow_settlement_watch?.shadow_total_pnl_usdc || 0) > 0 ? "good" : "warn"),
@@ -404,6 +405,12 @@ async function load() {
       ["Approved microstructure cohorts", priceActionPaper.approved_microstructure_cohorts],
       ["Paper-confirm candidates", priceActionPaper.paper_confirmation_candidates],
       ["Paper-confirm signals", priceActionPaper.paper_confirmation_signals],
+      ["Broker refresh needed", priceActionPaper.broker_refresh_needed],
+      ["Pending broker signals", priceActionPaper.pending_broker_signals],
+      ["Pending broker confirmations", priceActionPaper.pending_broker_confirmation_signals],
+      ["Signal generated", priceActionPaper.signal_generated_at_utc],
+      ["Broker generated", priceActionPaper.broker_generated_at_utc],
+      ["Broker freshness reason", priceActionPaper.broker_refresh_reason, v=>longText(v, 220)],
       ["Microstructure current rows", priceActionPaper.source_microstructure_current_rows]
     ]) + `<div style="height:12px"></div><h3>Price-action scout by cohort</h3>` + table(priceScout.cohorts || [], [
       ["Cohort","signal_cohort"],
@@ -1510,6 +1517,40 @@ def _scoreboard_status(broker: dict[str, Any], target: dict[str, Any]) -> str:
     return "aligned" if abs(broker_equity - target_equity) <= 0.005 else "drift_detected"
 
 
+def _broker_signal_freshness(price_action_signals: dict[str, Any], broker: dict[str, Any]) -> dict[str, Any]:
+    """Report whether current price-action paper signals have reached the broker.
+
+    The broker summary can be perfectly valid but older than the latest signal
+    file. When that happens, the dashboard must show pending broker work instead
+    of implying the latest paper probes were already processed.
+    """
+    signal_count = int(safe_float(price_action_signals.get("signals")) or 0)
+    confirmation_count = int(safe_float(price_action_signals.get("paper_confirmation_signals")) or 0)
+    signal_time = parse_timestamp(price_action_signals.get("generated_at_utc"))
+    broker_time = parse_timestamp(broker.get("generated_at_utc"))
+    stale = bool(signal_count > 0 and (broker_time is None or (signal_time is not None and signal_time > broker_time)))
+    stale_seconds = (
+        max(0.0, (signal_time - broker_time).total_seconds())
+        if stale and signal_time is not None and broker_time is not None
+        else None
+    )
+    return {
+        "broker_refresh_needed": stale,
+        "pending_broker_signals": signal_count if stale else 0,
+        "pending_broker_confirmation_signals": confirmation_count if stale else 0,
+        "signal_generated_at_utc": price_action_signals.get("generated_at_utc"),
+        "broker_generated_at_utc": broker.get("generated_at_utc"),
+        "broker_signal_stale_seconds": stale_seconds,
+        "broker_refresh_reason": (
+            "Price-action paper signals were generated after the latest broker run."
+            if stale and broker_time is not None
+            else "Price-action paper signals exist but no broker run timestamp is available."
+            if stale
+            else "Latest broker run is at least as fresh as the paper signal file."
+        ),
+    }
+
+
 def render_dashboard(cfg: EngineConfig, latest_report: dict[str, Any] | None = None) -> dict[str, Any]:
     out = cfg.output_root / "polymarket_dashboard"
     out.mkdir(parents=True, exist_ok=True)
@@ -1571,6 +1612,8 @@ def render_dashboard(cfg: EngineConfig, latest_report: dict[str, Any] | None = N
     price_action_scout_status = _price_action_scout_status(cfg)
     price_action_microstructure_status = _price_action_microstructure_status(cfg)
     price_action_paper_signal_status = _price_action_paper_signal_status(cfg)
+    broker_signal_freshness = _broker_signal_freshness(price_action_paper_signal_status, broker_summary)
+    price_action_paper_signal_status = {**price_action_paper_signal_status, **broker_signal_freshness}
     price_action_feedback = read_json(governance / "price_action_feedback.json", default={}) or {}
     if not isinstance(price_action_feedback, dict):
         price_action_feedback = {}
@@ -1593,6 +1636,9 @@ def render_dashboard(cfg: EngineConfig, latest_report: dict[str, Any] | None = N
             "live_loop_status": live_loop_status,
             "live_heartbeat_age_seconds": _age_seconds(heartbeat),
             "scoreboard_status": _scoreboard_status(broker_summary, actual_target),
+            "broker_refresh_needed": broker_signal_freshness.get("broker_refresh_needed"),
+            "pending_broker_signals": broker_signal_freshness.get("pending_broker_signals"),
+            "pending_broker_confirmation_signals": broker_signal_freshness.get("pending_broker_confirmation_signals"),
             **strategy_v2_runtime,
         },
         "signal_cohort_pnl": signal_cohort_pnl,

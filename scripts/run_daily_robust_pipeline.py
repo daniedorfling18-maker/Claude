@@ -15,8 +15,8 @@ ROOT = Path(__file__).resolve().parents[1]
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Run the daily Superbru robust odds-update pipeline.")
     parser.add_argument("--sport", default="soccer_fifa_world_cup")
-    parser.add_argument("--regions", default="uk,eu,us,au")
-    parser.add_argument("--markets", default="h2h,spreads,totals")
+    parser.add_argument("--regions", default="eu")
+    parser.add_argument("--markets", default="h2h,totals")
     parser.add_argument("--out-root", default="outputs")
     parser.add_argument("--snapshot-id", default="", help="Optional snapshot id. Defaults to current UTC timestamp.")
     parser.add_argument("--require-two-day-support", action=argparse.BooleanOptionalAction, default=True)
@@ -25,7 +25,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--skip-market-odds-fetch",
         action="store_true",
-        help="Use committed/cached market odds files and do not call The Odds API.",
+        help="Use the already-fetched market odds files and do not call The Odds API.",
     )
     parser.add_argument(
         "--match-odds-only",
@@ -37,6 +37,13 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--match-window-after-minutes", type=int, default=30)
     parser.add_argument("--match-commence-from", default="")
     parser.add_argument("--match-commence-to", default="")
+    parser.add_argument("--fixtures", default="data/fixtures_real.csv")
+    parser.add_argument("--odds-json", default="outputs/market_odds/worldcup_market_odds_raw.json")
+    parser.add_argument("--leaderboard-csv", default="outputs/superbru_pool/live_pool_leaderboard.csv")
+    parser.add_argument("--chaser-profiles-csv", default="outputs/superbru_pool/live_chaser_profiles.csv")
+    parser.add_argument("--chasers", default="")
+    parser.add_argument("--leader-player", default=os.environ.get("SUPERBRU_PLAYER_NAME", "Danie"))
+    parser.add_argument("--manual-flags-csv", default="outputs/superbru_pool/live_manual_match_flags.csv")
     parser.add_argument(
         "--run-fresh-final-simulation",
         action="store_true",
@@ -63,7 +70,7 @@ def require_file(path: str | Path, label: str) -> None:
     p = ROOT / Path(path)
     if not p.exists():
         raise FileNotFoundError(
-            f"Missing {label}: {p}. Commit/generate this input before running the scheduled pipeline."
+            f"Missing {label}: {p}. Generate this input before running the scheduled pipeline."
         )
 
 
@@ -150,11 +157,10 @@ def main() -> int:
     if args.skip_market_odds_fetch:
         if not market_odds_cache_available():
             raise FileNotFoundError(
-                "--skip-market-odds-fetch was passed, but cached market odds files are missing. "
-                "Either commit outputs/market_odds/worldcup_market_odds_raw.json and "
-                "outputs/market_odds/worldcup_market_odds_flat.csv, or rerun without --skip-market-odds-fetch."
+                "--skip-market-odds-fetch was passed, but current-run market odds files are missing. "
+                "Run the fresh odds fetch step first."
             )
-        print("Skipping The Odds API fetch and using committed cached market odds files.")
+        print("Skipping The Odds API fetch and using current-run market odds files.")
     else:
         fetch_cmd = [
             sys.executable,
@@ -248,7 +254,7 @@ def main() -> int:
         "--movement-csv",
         "outputs/market_odds_history/market_odds_movement_report.csv",
         "--manual-flags-csv",
-        "inputs/manual_match_flags.csv",
+        args.manual_flags_csv,
         "--out-dir",
         "outputs/daily_robust_card",
     ]
@@ -278,11 +284,23 @@ def main() -> int:
         final_decision_cmd = [
             sys.executable,
             "scripts/run_final_leader_decision.py",
+            "--fixtures",
+            args.fixtures,
+            "--odds-json",
+            args.odds_json,
             "--predictions-csv",
             predictions_for_final_simulation,
+            "--leaderboard-csv",
+            args.leaderboard_csv,
+            "--chaser-profiles-csv",
+            args.chaser_profiles_csv,
+            "--leader-player",
+            args.leader_player,
             "--out-dir",
             "outputs/final_leader_decision_daily_robust",
         ]
+        if args.chasers:
+            final_decision_cmd.extend(["--chasers", args.chasers])
         if final_simulation_cache_complete():
             final_decision_cmd.append("--reuse-existing")
             final_simulation_cache_reused = True
@@ -315,6 +333,12 @@ def main() -> int:
         "market_history_summary": "outputs/market_odds_history/market_odds_history_summary.json",
         "market_odds_fetch_skipped": bool(args.skip_market_odds_fetch),
         "market_odds_scope": market_odds_scope,
+        "fixtures": args.fixtures,
+        "odds_json": args.odds_json,
+        "leaderboard_csv": args.leaderboard_csv,
+        "chaser_profiles_csv": args.chaser_profiles_csv,
+        "chasers": args.chasers,
+        "manual_flags_csv": args.manual_flags_csv,
         "final_simulation_dir": final_simulation_dir,
         "predictions_for_final_simulation": predictions_for_final_simulation,
         "final_simulation_status": final_simulation_status,

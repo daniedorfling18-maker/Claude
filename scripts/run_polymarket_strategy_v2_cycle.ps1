@@ -153,6 +153,7 @@ if (Test-Path $predictionSnapshotPath) {
 $independentAnchorRefresh = [ordered]@{
   max_age_minutes = $IndependentAnchorMaxAgeMinutes
   sharp_anchor_step = "skipped_fresh"
+  crypto_targets_step = "skipped_fresh"
   crypto_fundamental_step = "skipped_fresh"
 }
 
@@ -162,14 +163,21 @@ if (-not (Test-FreshFile $sharpFundamentalPath $IndependentAnchorMaxAgeMinutes))
   $independentAnchorRefresh.sharp_anchor_step = "refreshed"
 }
 
+$independentAnchorRefresh.sharp_odds_fetch = Read-JsonIfExists ".\outputs\polymarket_model_governance\sharp_odds_fetch_summary.json"
+$independentAnchorRefresh.sharp_anchor = Read-JsonIfExists ".\outputs\polymarket_model_governance\sharp_anchor_summary.json"
+
+$cryptoTargetsPath = ".\inputs\polymarket\crypto_targets.csv"
+if (-not (Test-FreshFile $cryptoTargetsPath $IndependentAnchorMaxAgeMinutes)) {
+  Invoke-PythonStep "build-crypto-targets" @("-m", "polymarket_predictive_engine.cli", "build-crypto-targets", "--config", $ConfigPath)
+  $independentAnchorRefresh.crypto_targets_step = "refreshed"
+}
+$independentAnchorRefresh.crypto_targets = Read-JsonIfExists ".\outputs\polymarket_model_governance\crypto_targets_summary.json"
+
 $cryptoFundamentalPath = ".\outputs\polymarket_training\crypto_fundamental_probabilities.csv"
 if (-not (Test-FreshFile $cryptoFundamentalPath $IndependentAnchorMaxAgeMinutes)) {
   Invoke-PythonStep "build-crypto-fundamental" @("-m", "polymarket_predictive_engine.cli", "build-crypto-fundamental", "--config", $ConfigPath)
   $independentAnchorRefresh.crypto_fundamental_step = "refreshed"
 }
-
-$independentAnchorRefresh.sharp_odds_fetch = Read-JsonIfExists ".\outputs\polymarket_model_governance\sharp_odds_fetch_summary.json"
-$independentAnchorRefresh.sharp_anchor = Read-JsonIfExists ".\outputs\polymarket_model_governance\sharp_anchor_summary.json"
 $independentAnchorRefresh.crypto_fundamental = Read-JsonIfExists ".\outputs\polymarket_model_governance\crypto_fundamental_summary.json"
 
 

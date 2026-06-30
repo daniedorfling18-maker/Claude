@@ -388,13 +388,15 @@ async function load() {
     document.getElementById("independentFundamentals").innerHTML = table([
       { anchor: "Sharp odds fetch", ...(anchors.sharp_odds_fetch || {}) },
       { anchor: "Sharp de-vig anchor", ...(anchors.sharp_anchor || {}) },
+      { anchor: "Crypto target generator", ...(anchors.crypto_targets || {}) },
       { anchor: "Deribit crypto fundamental", ...(anchors.crypto_fundamental || {}) }
     ], [
       ["Anchor","anchor"],
       ["Status","status"],
-      ["Rows","rows", (v,row)=>v ?? row.fundamental_rows ?? row.rows_in ?? "-"],
+      ["Rows","rows", (v,row)=>v ?? row.fundamental_rows ?? row.target_rows ?? row.rows_in ?? "-"],
       ["Markets","markets"],
       ["Output","output_file", v=>longText(v)],
+      ["Blocker","blocker", v=>longText(v, 160)],
       ["Note","note"]
     ]);
     document.getElementById("edgeSearch").innerHTML = table(data.edge_strategy_search?.top_rules || [], [
@@ -811,20 +813,58 @@ def _independent_anchor_status(governance: Path) -> dict[str, Any]:
     """Expose the latest independent-anchor summaries even when the heartbeat is settlement-only."""
     sharp_fetch = read_json(governance / "sharp_odds_fetch_summary.json", default={}) or {}
     sharp_anchor = read_json(governance / "sharp_anchor_summary.json", default={}) or {}
+    crypto_targets = read_json(governance / "crypto_targets_summary.json", default={}) or {}
     crypto = read_json(governance / "crypto_fundamental_summary.json", default={}) or {}
     components = {
         "sharp_odds_fetch": sharp_fetch if isinstance(sharp_fetch, dict) else {},
         "sharp_anchor": sharp_anchor if isinstance(sharp_anchor, dict) else {},
+        "crypto_targets": crypto_targets if isinstance(crypto_targets, dict) else {},
         "crypto_fundamental": crypto if isinstance(crypto, dict) else {},
     }
+    for name, component in components.items():
+        if not component:
+            continue
+        rows = int(
+            safe_float(
+                component.get("rows")
+                or component.get("fundamental_rows")
+                or component.get("target_rows")
+                or component.get("rows_in")
+            )
+            or 0
+        )
+        status = str(component.get("status") or "").lower()
+        blocker = ""
+        if status in {"error", "partial"}:
+            blocker = f"{status}: {component.get('errors', '')}".strip()
+        elif status in {"missing_api_key", "no_input", "no_targets", "no_terminal_targets"}:
+            blocker = status
+        elif rows <= 0 and status:
+            blocker = "no usable rows"
+        if blocker:
+            component.setdefault("blocker", blocker)
     any_present = any(bool(component) for component in components.values())
     any_usable = any(
         str(component.get("status") or "").lower() in {"fetched", "built"}
-        and int(safe_float(component.get("rows") or component.get("fundamental_rows")) or 0) > 0
+        and int(
+            safe_float(
+                component.get("rows")
+                or component.get("fundamental_rows")
+                or component.get("target_rows")
+            )
+            or 0
+        ) > 0
         for component in components.values()
     )
+    blockers = [
+        f"{name}: {component.get('blocker')}"
+        for name, component in components.items()
+        if isinstance(component, dict) and component.get("blocker")
+    ]
     return {
         "status": "usable" if any_usable else "setup_needed" if any_present else "missing",
+        "main_blocker": blockers[0] if blockers else "",
+        "blockers": blockers,
         **components,
     }
 

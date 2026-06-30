@@ -193,12 +193,19 @@ def build_crypto_fundamental(cfg: EngineConfig, *, targets_path: str | None = No
         if probability is None:
             skipped += 1
             continue
+        direction = str(target.get("direction") or "above").strip().lower()
+        if direction in {"below", "under", "less_than"}:
+            probability = 1.0 - probability
+        elif direction not in {"above", "over", "greater_than"}:
+            skipped += 1
+            continue
         # A strike outside the quoted strike range is flat-extrapolated to the nearest tail value,
         # which overstates deep-OTM probabilities - flag it so the overlay/operator can discount it.
         in_curve_range = strikes[0] <= strike <= strikes[-1]
         out_rows.append({
             "token_id": token_id,
             "probability": round(probability, 6),
+            "direction": direction,
             "in_curve_range": in_curve_range,
             "curve_strike_min": strikes[0],
             "curve_strike_max": strikes[-1],

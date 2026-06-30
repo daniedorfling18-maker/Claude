@@ -23,11 +23,14 @@ def test_strategy_v2_cycle_refreshes_independent_anchors_before_scoring():
 
     assert "[int]$IndependentAnchorMaxAgeMinutes = 60" in text
     sharp_refresh_index = text.index("refresh-sharp-anchor")
+    crypto_targets_index = text.index("build-crypto-targets")
     crypto_refresh_index = text.index("build-crypto-fundamental")
     anchored_edge_index = text.index("run_polymarket_strategy_v2_anchored_edge.ps1")
 
     assert sharp_refresh_index < anchored_edge_index
+    assert crypto_targets_index < crypto_refresh_index
     assert crypto_refresh_index < anchored_edge_index
+    assert "crypto_targets = Read-JsonIfExists" in text
     assert "independent_anchor_refresh = $independentAnchorRefresh" in text
 
 

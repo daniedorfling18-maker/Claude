@@ -10,6 +10,7 @@ from .backtest import backtest
 from .collection_only import run_collection_only
 from .config import config_check, load_config
 from .crypto_fundamental import build_crypto_fundamental
+from .crypto_targets import build_crypto_targets
 from .crypto_updown_labels import build_crypto_updown_proxy_labels
 from .data_inventory import inventory
 from .data_quality import data_quality
@@ -85,6 +86,7 @@ COMMANDS = [
     "fetch-sharp-odds",
     "build-sharp-anchor",
     "refresh-sharp-anchor",
+    "build-crypto-targets",
     "build-crypto-fundamental",
     "build-crypto-updown-labels",
     "edge-strategy-search",
@@ -261,6 +263,8 @@ def main(argv: list[str] | None = None) -> int:
             fetched = fetch_sharp_odds(cfg)
             built = build_sharp_anchor(cfg)
             _print({"fetch": fetched, "build": built})
+        elif args.command == "build-crypto-targets":
+            _print(build_crypto_targets(cfg))
         elif args.command == "build-crypto-fundamental":
             _print(build_crypto_fundamental(cfg, targets_path=args.crypto_targets))
         elif args.command == "build-crypto-updown-labels":

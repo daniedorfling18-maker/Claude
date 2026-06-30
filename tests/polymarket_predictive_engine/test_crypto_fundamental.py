@@ -81,6 +81,21 @@ def test_build_crypto_fundamental_prices_targets_offline(tmp_path):
     assert out["T95"]["expiry_used"] == "2026-06-27"      # snapped to the nearest available expiry
 
 
+def test_build_crypto_fundamental_supports_below_direction(tmp_path):
+    cfg = EngineConfig(raw={"paths": {"output_root": str(tmp_path / "outputs")},
+                            "crypto_fundamental": {"targets_path": str(tmp_path / "targets.csv")}},
+                       path=tmp_path / "cfg.yaml")
+    _write(tmp_path / "targets.csv",
+           [{"token_id": "BELOW95", "currency": "BTC", "strike": "95000", "expiry": "2026-06-27", "direction": "below"}],
+           ["token_id", "currency", "strike", "expiry", "direction"])
+
+    summary = build_crypto_fundamental(cfg, book_by_currency={"BTC": _book()})
+    assert summary["status"] == "built"
+    out = {r["token_id"]: r for r in csv.DictReader(open(tmp_path / "outputs" / "polymarket_training" / "crypto_fundamental_probabilities.csv", encoding="utf-8-sig"))}
+    assert float(out["BELOW95"]["probability"]) == approx(0.45)
+    assert out["BELOW95"]["direction"] == "below"
+
+
 def test_build_crypto_fundamental_no_targets(tmp_path):
     cfg = EngineConfig(raw={"paths": {"output_root": str(tmp_path / "outputs")},
                             "crypto_fundamental": {"targets_path": str(tmp_path / "missing.csv")}},

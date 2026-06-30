@@ -388,3 +388,30 @@ def test_dashboard_surfaces_strategy_v2_anchored_edge_progress(tmp_path):
     assert strategy_v2["cycle_status"]["status"] == "ok"
     assert strategy_v2["top_shadow_candidates"][0]["market_slug"] == candidate["market_slug"]
     assert strategy_v2["promotion_progress"][0]["remaining_shadow_entries_to_review"] == 19
+
+
+def test_dashboard_explains_independent_anchor_blockers(tmp_path):
+    cfg = _config(tmp_path)
+    write_json(
+        cfg.governance_root / "sharp_odds_fetch_summary.json",
+        {"status": "error", "rows": 0, "errors": 1, "output_path": "inputs/polymarket/sharp_odds.csv"},
+    )
+    write_json(
+        cfg.governance_root / "crypto_targets_summary.json",
+        {"status": "no_terminal_targets", "target_rows": 0, "output_file": "inputs/polymarket/crypto_targets.csv"},
+    )
+    write_json(
+        cfg.governance_root / "crypto_fundamental_summary.json",
+        {"status": "no_targets", "fundamental_rows": 0, "output_file": "outputs/polymarket_training/crypto_fundamental_probabilities.csv"},
+    )
+
+    result = render_dashboard(cfg)
+    html = Path(result["dashboard_file"]).read_text(encoding="utf-8")
+    data = read_json(result["dashboard_data"])
+    anchors = data["independent_anchor_status"]
+
+    assert "Crypto target generator" in html
+    assert anchors["status"] == "setup_needed"
+    assert anchors["sharp_odds_fetch"]["blocker"] == "error: 1"
+    assert anchors["crypto_targets"]["blocker"] == "no_terminal_targets"
+    assert anchors["main_blocker"] == "sharp_odds_fetch: error: 1"

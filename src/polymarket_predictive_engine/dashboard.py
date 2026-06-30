@@ -1665,7 +1665,11 @@ def _scoreboard_status(broker: dict[str, Any], target: dict[str, Any]) -> str:
     return "aligned" if abs(broker_equity - target_equity) <= 0.005 else "drift_detected"
 
 
-def _broker_signal_freshness(price_action_signals: dict[str, Any], broker: dict[str, Any]) -> dict[str, Any]:
+def _broker_signal_freshness(
+    price_action_signals: dict[str, Any],
+    broker: dict[str, Any],
+    paper_probe_exit_watch: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     """Report whether current price-action paper signals have reached the broker.
 
     The broker summary can be perfectly valid but older than the latest signal
@@ -1677,25 +1681,39 @@ def _broker_signal_freshness(price_action_signals: dict[str, Any], broker: dict[
     signal_time = parse_timestamp(price_action_signals.get("generated_at_utc"))
     broker_time = parse_timestamp(broker.get("generated_at_utc"))
     stale = bool(signal_count > 0 and (broker_time is None or (signal_time is not None and signal_time > broker_time)))
+    exit_watch = paper_probe_exit_watch if isinstance(paper_probe_exit_watch, dict) else {}
+    due_exit_count = int(safe_float(exit_watch.get("fixed_horizon_due_count")) or 0)
+    open_exit_probes = int(safe_float(exit_watch.get("open_confirmation_probes")) or 0)
+    exit_refresh_needed = due_exit_count > 0
     stale_seconds = (
         max(0.0, (signal_time - broker_time).total_seconds())
         if stale and signal_time is not None and broker_time is not None
         else None
     )
+    if stale:
+        reason = (
+            "Price-action paper signals were generated after the latest broker run."
+            if broker_time is not None
+            else "Price-action paper signals exist but no broker run timestamp is available."
+        )
+    elif exit_refresh_needed:
+        reason = "One or more open paper-confirmation probes reached their fixed exit horizon."
+    else:
+        reason = "Latest broker run is at least as fresh as the paper signal file."
     return {
-        "broker_refresh_needed": stale,
+        "broker_refresh_needed": stale or exit_refresh_needed,
+        "broker_signal_refresh_needed": stale,
+        "broker_exit_refresh_needed": exit_refresh_needed,
         "pending_broker_signals": signal_count if stale else 0,
         "pending_broker_confirmation_signals": confirmation_count if stale else 0,
+        "pending_broker_exit_probes": due_exit_count,
+        "open_broker_exit_probes": open_exit_probes,
+        "next_broker_exit_due_utc": exit_watch.get("next_due_utc", ""),
+        "next_broker_exit_due_minutes": exit_watch.get("next_due_minutes"),
         "signal_generated_at_utc": price_action_signals.get("generated_at_utc"),
         "broker_generated_at_utc": broker.get("generated_at_utc"),
         "broker_signal_stale_seconds": stale_seconds,
-        "broker_refresh_reason": (
-            "Price-action paper signals were generated after the latest broker run."
-            if stale and broker_time is not None
-            else "Price-action paper signals exist but no broker run timestamp is available."
-            if stale
-            else "Latest broker run is at least as fresh as the paper signal file."
-        ),
+        "broker_refresh_reason": reason,
     }
 
 
@@ -1761,7 +1779,11 @@ def render_dashboard(cfg: EngineConfig, latest_report: dict[str, Any] | None = N
     price_action_scout_status = _price_action_scout_status(cfg)
     price_action_microstructure_status = _price_action_microstructure_status(cfg)
     price_action_paper_signal_status = _price_action_paper_signal_status(cfg)
-    broker_signal_freshness = _broker_signal_freshness(price_action_paper_signal_status, broker_summary)
+    broker_signal_freshness = _broker_signal_freshness(
+        price_action_paper_signal_status,
+        broker_summary,
+        paper_probe_exit_watch,
+    )
     price_action_paper_signal_status = {**price_action_paper_signal_status, **broker_signal_freshness}
     price_action_feedback = read_json(governance / "price_action_feedback.json", default={}) or {}
     if not isinstance(price_action_feedback, dict):
@@ -1787,8 +1809,13 @@ def render_dashboard(cfg: EngineConfig, latest_report: dict[str, Any] | None = N
             "live_heartbeat_age_seconds": _age_seconds(heartbeat),
             "scoreboard_status": _scoreboard_status(broker_summary, actual_target),
             "broker_refresh_needed": broker_signal_freshness.get("broker_refresh_needed"),
+            "broker_signal_refresh_needed": broker_signal_freshness.get("broker_signal_refresh_needed"),
+            "broker_exit_refresh_needed": broker_signal_freshness.get("broker_exit_refresh_needed"),
             "pending_broker_signals": broker_signal_freshness.get("pending_broker_signals"),
             "pending_broker_confirmation_signals": broker_signal_freshness.get("pending_broker_confirmation_signals"),
+            "pending_broker_exit_probes": broker_signal_freshness.get("pending_broker_exit_probes"),
+            "next_broker_exit_due_utc": broker_signal_freshness.get("next_broker_exit_due_utc"),
+            "next_broker_exit_due_minutes": broker_signal_freshness.get("next_broker_exit_due_minutes"),
             **strategy_v2_runtime,
         },
         "signal_cohort_pnl": signal_cohort_pnl,

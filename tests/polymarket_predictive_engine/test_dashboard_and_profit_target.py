@@ -327,6 +327,12 @@ def test_dashboard_tracks_paper_confirmation_probe_exit_horizon(tmp_path):
     assert watch["next_due_minutes"] == 0.0
     assert watch["preview"][0]["market_slug"] == "macro-test"
     assert watch["preview"][0]["fixed_horizon_due"] is True
+    paper_status = data["price_action_paper_signals"]
+    assert paper_status["broker_refresh_needed"] is True
+    assert paper_status["broker_exit_refresh_needed"] is True
+    assert paper_status["pending_broker_exit_probes"] == 1
+    assert data["evidence_freshness"]["broker_exit_refresh_needed"] is True
+    assert data["evidence_freshness"]["pending_broker_exit_probes"] == 1
 
 
 def test_standalone_paper_trade_report_refreshes_profit_tracker_and_dashboard(tmp_path):

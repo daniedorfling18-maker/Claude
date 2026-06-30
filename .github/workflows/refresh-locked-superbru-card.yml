@@ -96,11 +96,25 @@ jobs:
               print(f'Bookmaker update window: {last_updates[0]} -> {last_updates[-1]}')
           PY
 
-      - name: Build base final picks from fresh odds
+      - name: Scrape live SuperBru leaderboard
+        env:
+          SUPERBRU_EMAIL: ${{ secrets.SUPERBRU_EMAIL }}
+          SUPERBRU_PASSWORD: ${{ secrets.SUPERBRU_PASSWORD }}
+          SUPERBRU_POOL_URL: ${{ secrets.SUPERBRU_POOL_URL }}
+          SUPERBRU_PLAYER_NAME: ${{ secrets.SUPERBRU_PLAYER_NAME || 'Danie' }}
+          SUPERBRU_POOL_KEYWORDS: ${{ secrets.SUPERBRU_POOL_KEYWORDS || 'Moore Infinity,FIFA WC 26,World Cup 2026' }}
+          PYTHONPATH: scripts:src
+        run: |
+          python scripts/scrape_superbru_leaderboard.py \
+            --out-csv outputs/superbru_pool/live_pool_leaderboard.csv \
+            --summary-json outputs/superbru_pool/live_pool_leaderboard_summary.json \
+            --headless
+
+      - name: Build base final picks from fresh odds and live leaderboard
         env:
           PYTHONPATH: src
         run: |
-          mkdir -p data outputs/latest outputs/final_leader_decision_round_summary_profiles
+          mkdir -p data outputs/latest outputs/final_leader_decision_round_summary_profiles outputs/superbru_pool
           python - <<'PY'
           import csv
           from pathlib import Path
@@ -148,6 +162,7 @@ jobs:
             --fixtures data/fixtures_real.csv \
             --odds-json outputs/market_odds/worldcup_market_odds_raw.json \
             --predictions-csv outputs/latest/predictions.csv \
+            --leaderboard-csv outputs/superbru_pool/live_pool_leaderboard.csv \
             --out-dir outputs/final_leader_decision_round_summary_profiles
 
       - name: Refresh locked card outputs from fetched odds
@@ -187,6 +202,10 @@ jobs:
             data/fixtures_real.csv
             outputs/latest/*.csv
             outputs/latest/*.json
+            outputs/superbru_pool/**/*.csv
+            outputs/superbru_pool/**/*.json
+            outputs/superbru_pool/**/*.html
+            outputs/superbru_pool/**/*.png
             outputs/market_odds/*.csv
             outputs/market_odds/*.json
             outputs/market_odds_validation/*.csv

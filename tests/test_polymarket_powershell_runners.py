@@ -76,10 +76,28 @@ def test_strategy_v2_cycle_builds_forward_evidence_after_persistence_log():
     assert evidence_index < status_payload_index
 
 
+def test_strategy_v2_cycle_refreshes_websocket_after_forward_evidence():
+    text = _script_text("scripts/run_polymarket_strategy_v2_cycle.ps1")
+
+    assert "[int]$PostEvidenceWebsocketSeconds = 20" in text
+    evidence_index = text.index("strategy-v2-evidence")
+    websocket_index = text.index("strategy-v2-websocket-refresh")
+    normalize_index = text.index("strategy-v2-normalize-websocket")
+    status_payload_index = text.index("strategy_v2_websocket_refresh = $strategyV2WebsocketRefresh")
+
+    assert evidence_index < websocket_index
+    assert websocket_index < normalize_index
+    assert normalize_index < status_payload_index
+    assert "websocket_feature_summary.json" in text
+
+
 def test_strategy_v2_scheduled_wrapper_pins_repo_source():
     text = _script_text("scripts/run_strategy_v2_cycle_scheduled_wrapper.ps1")
 
+    assert "(Resolve-Path -LiteralPath (Join-Path $PSScriptRoot \"..\"))" in text
+    assert "C:\\Users" not in text
     assert '$env:PYTHONPATH = Join-Path $repoRoot "src"' in text
+    assert "strategy_v2_scheduled_task_$runId.log" in text
 
 
 def test_strategy_v2_scheduled_wrapper_skips_before_cycle_when_memory_is_high():
@@ -91,6 +109,15 @@ def test_strategy_v2_scheduled_wrapper_skips_before_cycle_when_memory_is_high():
     assert "skipped_high_memory" in text
     assert "run_polymarket_strategy_v2_cycle.ps1" in text
     assert text.index("skipped_high_memory") < text.index("run_polymarket_strategy_v2_cycle.ps1")
+
+
+def test_strategy_v2_scheduled_wrapper_prevents_overlapping_runs():
+    text = _script_text("scripts/run_strategy_v2_cycle_scheduled_wrapper.ps1")
+
+    assert "Global\\PolymarketStrategyV2Cycle" in text
+    assert "$mutex.WaitOne(0)" in text
+    assert "skipped_already_running" in text
+    assert "ReleaseMutex" in text
 
 
 def test_shadow_research_cycle_bounds_each_python_step():

@@ -2,6 +2,7 @@
   [string]$ConfigPath = "polymarket_predictive_config.example.yaml",
   [int]$StepTimeoutSeconds = 180,
   [int]$IndependentAnchorMaxAgeMinutes = 60,
+  [int]$PostEvidenceWebsocketSeconds = 20,
   [double]$MaxMemoryPercent = 94
 )
 
@@ -249,6 +250,10 @@ if (Test-Path $logPath) {
 
 Invoke-PythonStep "strategy-v2-evidence" @("-m", "polymarket_predictive_engine.cli", "strategy-v2-evidence", "--config", $ConfigPath)
 $strategyV2ForwardEvidence = Read-JsonIfExists ".\outputs\polymarket_strategy_v2\strategy_v2_forward_evidence.json"
+Invoke-PythonStep "strategy-v2-websocket-refresh" @("-m", "polymarket_predictive_engine.cli", "collect-websocket", "--config", $ConfigPath, "--websocket-seconds", "$PostEvidenceWebsocketSeconds")
+$strategyV2WebsocketRefresh = Read-JsonIfExists ".\outputs\polymarket_websocket\websocket_summary.json"
+Invoke-PythonStep "strategy-v2-normalize-websocket" @("-m", "polymarket_predictive_engine.cli", "normalize-websocket", "--config", $ConfigPath)
+$strategyV2WebsocketFeatures = Read-JsonIfExists ".\outputs\polymarket_model_governance\websocket_feature_summary.json"
 
 $shadowCandidates = $anchoredRows | Where-Object { $_.status -eq "shadow_candidate" }
 $rejectedAnchored = $anchoredRows | Where-Object { $_.status -eq "rejected" }
@@ -265,6 +270,8 @@ $status = [PSCustomObject]@{
   active_shadow_candidates = @($shadowCandidates | Select-Object family, market_slug, outcome, executable_price, anchor_fair_probability, risk_adjusted_anchor_edge)
   persistence_log = $logPath
   strategy_v2_forward_evidence = $strategyV2ForwardEvidence
+  strategy_v2_websocket_refresh = $strategyV2WebsocketRefresh
+  strategy_v2_websocket_features = $strategyV2WebsocketFeatures
   independent_anchor_refresh = $independentAnchorRefresh
 }
 

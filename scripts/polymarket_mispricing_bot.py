@@ -5,7 +5,7 @@ This script is intentionally safe by default. It can run in three modes:
 
 - scan: discover markets, pull order books, and write snapshots only
 - dry_run: produce buy/sell signals and paper-trade logs, but never place orders
-- live: place guarded orders only when POLYMARKET_EXECUTE_LIVE=true and credentials exist
+- live: disabled in this legacy scanner; raises before any order client exists
 
 A model probability source is required for edge calculation. Supply either:
 - POLYMARKET_MODEL_PROBABILITIES_CSV, default inputs/polymarket/model_probabilities.csv
@@ -601,110 +601,24 @@ def build_opportunities(
 
 
 class LiveExecutor:
+    """Fail-closed placeholder for the legacy scanner.
+
+    The canonical packaged engine keeps live trading skeleton-only behind
+    governance gates. This older script should not carry a second dormant order
+    path.
+    """
+
     def __init__(self, config: BotConfig):
+        self.config = config
         raise RuntimeError(
             "Live execution is disabled in this paper-trading foundation. "
-            "Use the persistent paper broker and complete forward validation first."
+            "Use the packaged engine governance path after forward validation."
         )
-        if config.mode != "live" or not config.execute_live:
-            raise RuntimeError("LiveExecutor should only be initialized for live execution")
-        if not config.private_key:
-            raise RuntimeError("POLYMARKET_PRIVATE_KEY or PK is required for live trading")
-
-        try:
-            from py_clob_client_v2 import (  # type: ignore
-                ApiCreds,
-                ClobClient,
-                MarketOrderArgs,
-                OrderArgs,
-                OrderType,
-                PartialCreateOrderOptions,
-                Side,
-            )
-        except Exception as exc:
-            raise RuntimeError(
-                "py-clob-client-v2 is required for live trading. "
-                "Install it with: pip install py-clob-client-v2"
-            ) from exc
-
-        self.config = config
-        self.ApiCreds = ApiCreds
-        self.ClobClient = ClobClient
-        self.MarketOrderArgs = MarketOrderArgs
-        self.OrderArgs = OrderArgs
-        self.OrderType = OrderType
-        self.PartialCreateOrderOptions = PartialCreateOrderOptions
-        self.Side = Side
-
-        creds = None
-        if config.clob_api_key and config.clob_api_secret and config.clob_api_passphrase:
-            creds = ApiCreds(
-                api_key=config.clob_api_key,
-                api_secret=config.clob_api_secret,
-                api_passphrase=config.clob_api_passphrase,
-            )
-
-        if creds is None:
-            bootstrap_client = ClobClient(host=config.clob_host, chain_id=config.chain_id, key=config.private_key)
-            creds = bootstrap_client.create_or_derive_api_key()
-
-        self.client = ClobClient(
-            host=config.clob_host,
-            chain_id=config.chain_id,
-            key=config.private_key,
-            creds=creds,
-        )
-        self._heartbeat_best_effort()
-
-    def _heartbeat_best_effort(self) -> None:
-        for method_name in ("send_heartbeat", "heartbeat"):
-            method = getattr(self.client, method_name, None)
-            if callable(method):
-                try:
-                    method()
-                    print("heartbeat sent", flush=True)
-                except Exception as exc:
-                    print(f"warning: heartbeat failed: {exc}", flush=True)
-                return
 
     def place(self, opportunity: Opportunity, book: Book) -> dict[str, Any]:
-        side = self.Side.BUY if opportunity.action == "BUY" else self.Side.SELL
-        order_type = getattr(self.OrderType, self.config.order_type, self.OrderType.FOK)
-        options = self.PartialCreateOrderOptions(tick_size=book.tick_size, neg_risk=book.neg_risk)
-
-        if self.config.order_type in {"FOK", "FAK"}:
-            amount = opportunity.size_usd if opportunity.action == "BUY" else opportunity.shares
-            try:
-                order_args = self.MarketOrderArgs(
-                    token_id=opportunity.token_id,
-                    amount=amount,
-                    side=side,
-                    price=opportunity.executable_price,
-                    order_type=order_type,
-                )
-            except TypeError:
-                order_args = self.MarketOrderArgs(
-                    token_id=opportunity.token_id,
-                    amount=amount,
-                    side=side,
-                    order_type=order_type,
-                )
-            return self.client.create_and_post_market_order(
-                order_args=order_args,
-                options=options,
-                order_type=order_type,
-            )
-
-        order_args = self.OrderArgs(
-            token_id=opportunity.token_id,
-            price=opportunity.executable_price,
-            side=side,
-            size=opportunity.shares,
-        )
-        return self.client.create_and_post_order(
-            order_args=order_args,
-            options=options,
-            order_type=order_type,
+        raise RuntimeError(
+            "Live execution is disabled in this legacy scanner; "
+            f"refusing {opportunity.action} for {book.token_id}."
         )
 
 

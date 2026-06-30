@@ -12,7 +12,10 @@ venv/
 
 # Engine working dirs (see `paths:` in config.yaml)
 work/
-outputs/
+outputs/*
+!outputs/final_locked_picks/
+outputs/final_locked_picks/*
+!outputs/final_locked_picks/superbru_final_card.csv
 
 # Local secrets / overrides
 .env

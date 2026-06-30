@@ -135,6 +135,8 @@ $status |
   ConvertTo-Json -Depth 8 |
   Set-Content .\work\strategy_v2_cycle_latest_status.json -Encoding UTF8
 
+python .\scripts\render_polymarket_dashboard.py --config $ConfigPath | Out-Null
+
 "`n=== STRATEGY V2 CYCLE COMPLETE ==="
 $status | Format-List
 

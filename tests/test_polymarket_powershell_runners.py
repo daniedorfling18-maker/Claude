@@ -18,6 +18,15 @@ def test_strategy_v2_cycle_pins_repo_source_before_python_invocations():
     assert pythonpath_index < first_python_module_index
 
 
+def test_strategy_v2_cycle_renders_dashboard_after_latest_status_is_written():
+    text = _script_text("scripts/run_polymarket_strategy_v2_cycle.ps1")
+
+    status_write_index = text.index("strategy_v2_cycle_latest_status.json")
+    dashboard_render_index = text.index("render_polymarket_dashboard.py")
+
+    assert status_write_index < dashboard_render_index
+
+
 def test_strategy_v2_scheduled_wrapper_pins_repo_source():
     text = _script_text("scripts/run_strategy_v2_cycle_scheduled_wrapper.ps1")
 

@@ -196,6 +196,10 @@ def test_price_action_feedback_ingests_forward_paper_pnl_by_signal_cohort(tmp_pa
                 "settled_fills": "2",
                 "sell_fills": "2",
                 "open_positions": "1",
+                "paper_buy_fills": "4",
+                "paper_total_pnl_usdc": "6.5",
+                "paper_monthly_run_rate_usdc": "125",
+                "total_buy_cost_usdc": "50",
                 "total_pnl_usdc": "6.5",
                 "roi": "0.13",
                 "monthly_run_rate_usdc": "125",
@@ -220,3 +224,41 @@ def test_price_action_feedback_ingests_forward_paper_pnl_by_signal_cohort(tmp_pa
     assert payload["top_cohorts"][0]["source"] == "paper_broker_forward"
     assert payload["top_cohorts"][0]["evidence_type"] == "forward_paper_bid_ask_trade_pnl"
     assert payload["forward_paper_preview"][0]["forward_paper_pnl_usdc"] == approx(6.5)
+
+
+def test_price_action_feedback_keeps_shadow_only_pnl_out_of_forward_paper_bucket(tmp_path):
+    cfg = _cfg(tmp_path)
+    write_csv(
+        cfg.governance_root / "signal_cohort_pnl.csv",
+        [
+            {
+                "signal_cohort": "exploratory_historical_rule|crypto_xrp_updown_5m|outcome=down",
+                "buy_fills": "2",
+                "sell_fills": "0",
+                "paper_buy_fills": "0",
+                "paper_total_pnl_usdc": "0",
+                "shadow_fills": "2",
+                "shadow_sell_fills": "2",
+                "shadow_total_pnl_usdc": "21.0",
+                "shadow_roi": "1.05",
+                "shadow_monthly_run_rate_usdc": "136",
+                "total_pnl_usdc": "21.0",
+                "roi": "1.05",
+                "monthly_run_rate_usdc": "136",
+                "promoted": "False",
+                "probationary": "False",
+                "promotion_evidence_source": "shadow",
+                "promotion_reason": "needs broker paper confirmation",
+            }
+        ],
+    )
+
+    payload = build_price_action_feedback(cfg)
+
+    assert payload["forward_paper_cohorts"] == 0
+    assert payload["forward_paper_positive_cohorts"] == 0
+    assert payload["best_forward_paper_monthly_run_rate_usdc"] == approx(0.0)
+    assert payload["forward_shadow_cohorts"] == 1
+    assert payload["forward_shadow_positive_cohorts"] == 1
+    assert payload["top_cohorts"][0]["source"] == "shadow_forward"
+    assert payload["top_cohorts"][0]["evidence_type"] == "forward_shadow_bid_ask_trade_pnl"

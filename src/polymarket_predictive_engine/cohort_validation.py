@@ -2,11 +2,12 @@ from __future__ import annotations
 
 import json
 from collections import defaultdict
+from datetime import datetime, timezone
 from typing import Any
 
 from .config import EngineConfig
 from .shadow_cohort import read_shadow_signal_cohort_pnl
-from .utils import now_utc, safe_float, write_csv, write_json
+from .utils import now_utc, parse_timestamp, safe_float, write_csv, write_json
 from .worldcup_validation import signal_cohort
 
 
@@ -76,7 +77,32 @@ def _empty_stats() -> dict[str, Any]:
         "sell_proceeds_usdc": 0.0,
         "open_mark_value_usdc": 0.0,
         "open_cost_basis_usdc": 0.0,
+        "paper_first_observed_at": "",
+        "paper_latest_observed_at": "",
     }
+
+
+def _record_observed_at(stats_row: dict[str, Any], timestamp: Any) -> None:
+    observed = str(timestamp or "").strip()
+    if not observed:
+        return
+    if not str(stats_row.get("paper_first_observed_at") or "").strip():
+        stats_row["paper_first_observed_at"] = observed
+    stats_row["paper_latest_observed_at"] = observed
+
+
+def _elapsed_hours(first: Any, latest: Any) -> float:
+    first_ts = parse_timestamp(first)
+    if first_ts is None:
+        return 0.0
+    latest_ts = parse_timestamp(latest) or datetime.now(timezone.utc)
+    if latest_ts.tzinfo is None:
+        latest_ts = latest_ts.replace(tzinfo=timezone.utc)
+    first_ts = first_ts.astimezone(timezone.utc)
+    latest_ts = latest_ts.astimezone(timezone.utc)
+    if latest_ts < first_ts:
+        latest_ts = datetime.now(timezone.utc)
+    return max((latest_ts - first_ts).total_seconds() / 3600.0, 1.0 / 60.0)
 
 
 def compute_signal_cohort_pnl(con, cfg: EngineConfig) -> dict[str, Any]:
@@ -144,9 +170,11 @@ def compute_signal_cohort_pnl(con, cfg: EngineConfig) -> dict[str, Any]:
         if side == "BUY_YES":
             stats[cohort]["buy_fills"] += 1
             stats[cohort]["total_buy_cost_usdc"] += gross + fee
+            _record_observed_at(stats[cohort], fill.get("created_at"))
         elif side == "SELL_YES":
             stats[cohort]["sell_fills"] += 1
             stats[cohort]["sell_proceeds_usdc"] += gross - fee
+            _record_observed_at(stats[cohort], fill.get("created_at"))
 
     position_rows = [
         dict(row)
@@ -164,6 +192,7 @@ def compute_signal_cohort_pnl(con, cfg: EngineConfig) -> dict[str, Any]:
         stats[cohort]["open_positions"] += 1
         stats[cohort]["open_mark_value_usdc"] += quantity * mark
         stats[cohort]["open_cost_basis_usdc"] += cost_basis
+        _record_observed_at(stats[cohort], position.get("updated_at"))
 
     paper_cohorts: list[dict[str, Any]] = []
     for cohort, row in sorted(stats.items()):
@@ -174,12 +203,19 @@ def compute_signal_cohort_pnl(con, cfg: EngineConfig) -> dict[str, Any]:
         )
         total_at_risk = float(row["total_buy_cost_usdc"])
         roi = total_pnl / total_at_risk if total_at_risk > 0 else 0.0
+        paper_elapsed_hours = _elapsed_hours(
+            row.get("paper_first_observed_at"),
+            row.get("paper_latest_observed_at"),
+        )
+        paper_monthly_run_rate = total_pnl / paper_elapsed_hours * 24.0 * 30.0 if paper_elapsed_hours > 0 else 0.0
         paper_cohorts.append(
             {
                 "signal_cohort": cohort,
                 **row,
                 "paper_buy_fills": row["buy_fills"],
                 "paper_total_pnl_usdc": total_pnl,
+                "paper_elapsed_hours": paper_elapsed_hours,
+                "paper_monthly_run_rate_usdc": paper_monthly_run_rate,
                 "total_pnl_usdc": total_pnl,
                 "roi": roi,
                 "promoted": False,
@@ -210,6 +246,8 @@ def compute_signal_cohort_pnl(con, cfg: EngineConfig) -> dict[str, Any]:
                 **_empty_stats(),
                 "paper_buy_fills": 0,
                 "paper_total_pnl_usdc": 0.0,
+                "paper_elapsed_hours": 0.0,
+                "paper_monthly_run_rate_usdc": 0.0,
                 "total_pnl_usdc": 0.0,
                 "roi": 0.0,
             },
@@ -243,8 +281,12 @@ def compute_signal_cohort_pnl(con, cfg: EngineConfig) -> dict[str, Any]:
         shadow_at_risk = safe_float(row.get("shadow_total_buy_cost_usdc")) or 0.0
         evidence_at_risk = paper_at_risk + (shadow_at_risk if allow_shadow else 0.0)
         evidence_roi = evidence_pnl / evidence_at_risk if evidence_at_risk > 0 else 0.0
-        evidence_monthly_run_rate = safe_float(row.get("shadow_monthly_run_rate_usdc")) or 0.0
-        evidence_elapsed_hours = safe_float(row.get("evidence_elapsed_hours")) or 0.0
+        paper_monthly_run_rate = safe_float(row.get("paper_monthly_run_rate_usdc")) or 0.0
+        shadow_monthly_run_rate = safe_float(row.get("shadow_monthly_run_rate_usdc")) or 0.0
+        evidence_monthly_run_rate = max(paper_monthly_run_rate, shadow_monthly_run_rate if allow_shadow else 0.0)
+        paper_elapsed_hours = safe_float(row.get("paper_elapsed_hours")) or 0.0
+        shadow_elapsed_hours = safe_float(row.get("evidence_elapsed_hours")) or 0.0
+        evidence_elapsed_hours = max(paper_elapsed_hours, shadow_elapsed_hours if allow_shadow else 0.0)
         metadata_blocker = _promotion_metadata_blocker(cohort)
         metadata_valid = not metadata_blocker
         promoted = bool(

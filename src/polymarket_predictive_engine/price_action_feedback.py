@@ -46,6 +46,7 @@ def _source_priority(source: str) -> int:
         "microstructure_exit_policy": 5,
         "microstructure_family": 4,
         "microstructure": 3,
+        "shadow_forward": 2,
         "price_action_scout": 2,
         "strategy_v2_round_trip": 1,
     }
@@ -200,19 +201,32 @@ def _microstructure_row(row: dict[str, str], *, min_validation_trades: int, sour
 
 
 def _paper_broker_forward_row(row: dict[str, str], *, min_closed: int) -> dict[str, Any]:
-    """Convert broker paper P&L into the same feedback language as shadow marks.
+    """Convert paper/shadow P&L into the same feedback language as shadow marks.
 
     This is the most important settlement-independent signal for the trading
     objective: it measures whether the system could buy at the observed paper
     entry and later sell/mark the position at a better executable level.
     """
     cohort = str(row.get("signal_cohort") or "unknown").strip() or "unknown"
-    closed = int(_num(row.get("settled_fills") or row.get("sell_fills")))
-    open_trades = int(_num(row.get("open_positions")))
-    buy_fills = int(_num(row.get("buy_fills") or row.get("paper_buy_fills")))
-    pnl = _num(row.get("total_pnl_usdc") or row.get("paper_total_pnl_usdc"))
-    roi = _num(row.get("roi") or row.get("paper_roi"))
-    monthly = _num(row.get("monthly_run_rate_usdc"))
+    paper_buy_fills = int(_num(row.get("paper_buy_fills") or row.get("buy_fills")))
+    paper_sell_fills = int(_num(row.get("sell_fills") or row.get("paper_sell_fills")))
+    shadow_fills = int(_num(row.get("shadow_fills")))
+    shadow_sell_fills = int(_num(row.get("shadow_sell_fills")))
+    is_paper = paper_buy_fills > 0
+    source = "paper_broker_forward" if is_paper else "shadow_forward"
+
+    closed = paper_sell_fills if is_paper else shadow_sell_fills
+    open_trades = int(_num(row.get("open_positions"))) if is_paper else int(_num(row.get("shadow_open_positions")))
+    buy_fills = paper_buy_fills if is_paper else shadow_fills
+    if is_paper:
+        pnl = _num(row.get("paper_total_pnl_usdc"))
+        at_risk = _num(row.get("total_buy_cost_usdc"))
+        roi = pnl / at_risk if at_risk > 0 else 0.0
+        monthly = _num(row.get("paper_monthly_run_rate_usdc"))
+    else:
+        pnl = _num(row.get("shadow_total_pnl_usdc") or row.get("total_pnl_usdc"))
+        roi = _num(row.get("shadow_roi") or row.get("roi"))
+        monthly = _num(row.get("shadow_monthly_run_rate_usdc") or row.get("monthly_run_rate_usdc"))
     promoted = _bool(row.get("promoted"))
     probationary = _bool(row.get("probationary"))
     has_positive_forward = buy_fills > 0 and pnl > 0 and roi > 0
@@ -230,50 +244,65 @@ def _paper_broker_forward_row(row: dict[str, str], *, min_closed: int) -> dict[s
         reason = "Forward paper evidence is positive enough for probationary paper sizing, not live trading."
     elif has_positive_forward:
         action = "collect_more_positive_price_action_evidence"
-        reason = "Forward paper buy/sell or mark-to-market P&L is positive; collect more live paper evidence."
+        reason = (
+            "Forward paper buy/sell or mark-to-market P&L is positive; collect more live paper evidence."
+            if is_paper
+            else "Forward shadow P&L is positive; collect broker paper evidence before increasing trust."
+        )
     elif has_negative_closed:
         action = "suppress_until_new_thesis"
-        reason = "Forward paper closed trades did not overcome bid/ask costs."
+        reason = (
+            "Forward paper closed trades did not overcome bid/ask costs."
+            if is_paper
+            else "Forward shadow closed trades did not overcome bid/ask costs."
+        )
     elif has_negative_open_mark:
         action = "monitor_but_do_not_expand"
-        reason = "Open forward paper marks are negative; avoid expanding until marks improve or exits close."
+        reason = (
+            "Open forward paper marks are negative; avoid expanding until marks improve or exits close."
+            if is_paper
+            else "Open forward shadow marks are negative; avoid expanding until marks improve or exits close."
+        )
     else:
         action = "collect_forward_paper_evidence"
-        reason = "Cohort needs forward paper fills, exits, and marks before trust can increase."
+        reason = "Cohort needs broker paper fills, exits, and marks before trust can increase."
 
     text = " ".join([cohort, str(row.get("promotion_reason") or "")])
     return {
-        "source": "paper_broker_forward",
+        "source": source,
         "cohort": cohort,
-        "family": str(row.get("family") or "").strip() or "paper_forward",
+        "family": str(row.get("family") or "").strip() or ("paper_forward" if is_paper else "shadow_forward"),
         "recommended_collection_query": _query_from_text(text),
         "promotion_ready": promoted or probationary,
         "probationary": probationary,
         "promoted": promoted,
         "action": action,
         "reason": reason,
-        "source_status": "promoted" if promoted else "probationary" if probationary else "paper_forward",
+        "source_status": "promoted" if promoted else "probationary" if probationary else source,
         "source_reason": row.get("promotion_reason", ""),
         "buy_fills": buy_fills,
         "closed_trades": closed,
         "open_trades": open_trades,
-        "paper_sell_fills": int(_num(row.get("sell_fills") or row.get("paper_sell_fills"))),
-        "shadow_fills": int(_num(row.get("shadow_fills"))),
-        "shadow_sell_fills": int(_num(row.get("shadow_sell_fills"))),
+        "paper_buy_fills": paper_buy_fills,
+        "paper_sell_fills": paper_sell_fills,
+        "shadow_fills": shadow_fills,
+        "shadow_sell_fills": shadow_sell_fills,
         "realized_pnl_usdc": pnl,
         "realized_roi": roi,
         "monthly_run_rate_usdc": monthly,
         "total_mark_pnl_usdc": pnl,
         "mark_roi": roi,
-        "forward_paper_pnl_usdc": pnl,
-        "forward_paper_roi": roi,
+        "forward_paper_pnl_usdc": pnl if is_paper else 0.0,
+        "forward_paper_roi": roi if is_paper else 0.0,
+        "forward_shadow_pnl_usdc": 0.0 if is_paper else pnl,
+        "forward_shadow_roi": 0.0 if is_paper else roi,
         "promotion_ready_score": int(_num(row.get("promotion_ready_score"))),
         "promotion_ready_checks": int(_num(row.get("promotion_ready_checks"))),
         "promotion_readiness": row.get("promotion_readiness", ""),
         "promotion_evidence_source": row.get("promotion_evidence_source", ""),
         "metadata_valid": row.get("metadata_valid", ""),
         "metadata_blocker": row.get("metadata_blocker", ""),
-        "evidence_type": "forward_paper_bid_ask_trade_pnl",
+        "evidence_type": "forward_paper_bid_ask_trade_pnl" if is_paper else "forward_shadow_bid_ask_trade_pnl",
     }
 
 
@@ -337,10 +366,16 @@ def build_price_action_feedback(cfg: EngineConfig) -> dict[str, Any]:
     positive_collect = [row for row in cohorts if str(row.get("action") or "") == "collect_more_positive_price_action_evidence"]
     suppressed = [row for row in cohorts if str(row.get("action") or "") == "suppress_until_new_thesis"]
     forward_paper = [row for row in cohorts if str(row.get("source") or "") == "paper_broker_forward"]
+    forward_shadow = [row for row in cohorts if str(row.get("source") or "") == "shadow_forward"]
     positive_forward_paper = [
         row
         for row in forward_paper
         if _num(row.get("forward_paper_pnl_usdc")) > 0 and _num(row.get("forward_paper_roi")) > 0
+    ]
+    positive_forward_shadow = [
+        row
+        for row in forward_shadow
+        if _num(row.get("forward_shadow_pnl_usdc")) > 0 and _num(row.get("forward_shadow_roi")) > 0
     ]
 
     collection_queries: list[str] = []
@@ -392,9 +427,12 @@ def build_price_action_feedback(cfg: EngineConfig) -> dict[str, Any]:
         "forward_paper_promoted_cohorts": len([row for row in forward_paper if _bool(row.get("promoted"))]),
         "best_forward_paper_monthly_run_rate_usdc": best_forward_paper_run_rate,
         "forward_paper_goal_gap_usdc": max(target_monthly_profit - best_forward_paper_run_rate, 0.0),
+        "forward_shadow_cohorts": len(forward_shadow),
+        "forward_shadow_positive_cohorts": len(positive_forward_shadow),
         "paper_bridge_signals": bridge_summary.get("signals", 0) if isinstance(bridge_summary, dict) else 0,
         "top_cohorts": cohorts[:20],
         "forward_paper_preview": forward_paper[:10],
+        "forward_shadow_preview": forward_shadow[:10],
         "promotion_candidate_preview": promotion_candidates[:10],
         "positive_collect_preview": positive_collect[:10],
         "suppressed_preview": suppressed[:10],

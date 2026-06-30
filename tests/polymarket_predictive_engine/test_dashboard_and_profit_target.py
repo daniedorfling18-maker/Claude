@@ -272,6 +272,56 @@ def test_dashboard_flags_price_action_signals_waiting_for_broker_refresh(tmp_pat
     assert data["evidence_freshness"]["pending_broker_signals"] == 3
 
 
+def test_dashboard_tracks_paper_confirmation_probe_exit_horizon(tmp_path):
+    cfg = _config(tmp_path)
+    opened_at = (datetime.now(timezone.utc) - timedelta(minutes=130)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    signal = {
+        "price_action_entry_source": "paper_confirmation_candidate",
+        "signal_cohort": "macro_economy",
+        "market_slug": "macro-test",
+        "question": "Macro test market?",
+        "outcome": "Yes",
+        "max_hold_minutes_before_exit": "120",
+    }
+    write_csv(
+        cfg.output_root / "polymarket_portfolio" / "positions.csv",
+        [
+            {
+                "market_id": "macro-test",
+                "token_id": "macro-token",
+                "quantity": "4",
+                "average_entry_price": "0.5",
+                "cost_basis_usdc": "2",
+                "status": "open",
+                "updated_at": opened_at,
+            }
+        ],
+    )
+    write_csv(
+        cfg.output_root / "polymarket_portfolio" / "paper_orders.csv",
+        [
+            {
+                "created_at": opened_at,
+                "market_id": "macro-test",
+                "token_id": "macro-token",
+                "side": "BUY_YES",
+                "source_signal_json": json.dumps(signal),
+            }
+        ],
+    )
+
+    result = render_dashboard(cfg)
+    data = read_json(result["dashboard_data"])
+    watch = data["paper_probe_exit_watch"]
+
+    assert watch["status"] == "fixed_horizon_due"
+    assert watch["open_confirmation_probes"] == 1
+    assert watch["fixed_horizon_due_count"] == 1
+    assert watch["next_due_minutes"] == 0.0
+    assert watch["preview"][0]["market_slug"] == "macro-test"
+    assert watch["preview"][0]["fixed_horizon_due"] is True
+
+
 def test_standalone_paper_trade_report_refreshes_profit_tracker_and_dashboard(tmp_path):
     cfg = _config(tmp_path)
 

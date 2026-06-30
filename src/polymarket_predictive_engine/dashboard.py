@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from collections import Counter
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 import json
 from pathlib import Path
 import re
@@ -146,6 +146,7 @@ async function load() {
     const microstructure = data.price_action_microstructure || {};
     const priceActionPaper = data.price_action_paper_signals || {};
     const priceActionFeedback = data.price_action_feedback || {};
+    const probeExitWatch = data.paper_probe_exit_watch || {};
     const priceScoutPnl = priceScout.realized_pnl_usdc ?? priceScout.total_mark_pnl_usdc;
     const live = data.local_live_heartbeat || data.heartbeat || {};
     const freshness = data.evidence_freshness || {};
@@ -190,6 +191,7 @@ async function load() {
       card("Microstructure rules", microstructure.validation_pass_rules ?? "0", Number(microstructure.validation_pass_rules || 0) > 0 ? "good" : "warn"),
       card("Price-action paper signals", priceActionPaper.signals ?? "0", Number(priceActionPaper.signals || 0) > 0 ? "good" : "warn"),
       card("Broker refresh", priceActionPaper.broker_refresh_needed ? `${priceActionPaper.pending_broker_signals ?? 0} pending` : "fresh", priceActionPaper.broker_refresh_needed ? "warn" : "good"),
+      card("Probe exit due", probeExitWatch.fixed_horizon_due_count ? `${probeExitWatch.fixed_horizon_due_count} due` : (probeExitWatch.next_due_minutes == null ? "none" : `${fmtNum(probeExitWatch.next_due_minutes, 0)}m`), probeExitWatch.fixed_horizon_due_count ? "warn" : ""),
       card("Main trade blocker", longText(diag.main_blocker || "-", 120), Number(diag.approved_signals_count || 0) > 0 ? "good" : "warn"),
       card("Next settlement", data.shadow_settlement_watch?.next_settlement_minutes == null ? "Waiting" : fmtNum(data.shadow_settlement_watch.next_settlement_minutes, 0) + "m"),
       card("Shadow P&L", fmtUsd(data.shadow_settlement_watch?.shadow_total_pnl_usdc), Number(data.shadow_settlement_watch?.shadow_total_pnl_usdc || 0) > 0 ? "good" : "warn"),
@@ -412,6 +414,22 @@ async function load() {
       ["Broker generated", priceActionPaper.broker_generated_at_utc],
       ["Broker freshness reason", priceActionPaper.broker_refresh_reason, v=>longText(v, 220)],
       ["Microstructure current rows", priceActionPaper.source_microstructure_current_rows]
+    ]) + `<div style="height:12px"></div><h3>Paper-confirmation probe exit watch</h3>` + facts([
+      ["Status", probeExitWatch.status],
+      ["Open probes", probeExitWatch.open_confirmation_probes],
+      ["Fixed-horizon due", probeExitWatch.fixed_horizon_due_count],
+      ["Next due", probeExitWatch.next_due_minutes == null ? "-" : fmtNum(probeExitWatch.next_due_minutes, 1) + "m"],
+      ["Next due UTC", probeExitWatch.next_due_utc],
+      ["Missing horizon", probeExitWatch.missing_horizon_count]
+    ]) + `<div style="height:12px"></div>` + table(probeExitWatch.preview || [], [
+      ["Cohort","signal_cohort", v=>longText(v, 160)],
+      ["Market","market_slug", v=>longText(v, 140)],
+      ["Outcome","outcome"],
+      ["Age","age_minutes", v=>fmtNum(v, 1) + "m"],
+      ["Horizon","max_hold_minutes_before_exit", v=>fmtNum(v, 1) + "m"],
+      ["Due in","due_in_minutes", v=>fmtNum(v, 1) + "m"],
+      ["Due","fixed_horizon_due"],
+      ["Cost","cost_basis_usdc", fmtUsd]
     ]) + `<div style="height:12px"></div><h3>Price-action scout by cohort</h3>` + table(priceScout.cohorts || [], [
       ["Cohort","signal_cohort"],
       ["Candidates","candidates"],
@@ -814,6 +832,104 @@ def _market_lookup_from_orders(order_rows: list[dict[str, Any]]) -> list[dict[st
             merged = {**order, **decoded}
             rows.append(merged)
     return rows
+
+
+def _decode_json_object(value: Any) -> dict[str, Any]:
+    if isinstance(value, dict):
+        return value
+    if not isinstance(value, str) or not value.strip():
+        return {}
+    try:
+        decoded = json.loads(value)
+    except (TypeError, ValueError, json.JSONDecodeError):
+        return {}
+    return decoded if isinstance(decoded, dict) else {}
+
+
+def _paper_probe_exit_watch(positions: list[dict[str, Any]], orders: list[dict[str, Any]]) -> dict[str, Any]:
+    """Track open paper-confirmation probes against their fixed learning horizon."""
+    latest_buy_by_key: dict[tuple[str, str], dict[str, Any]] = {}
+    for order in orders:
+        if str(order.get("side") or "") != "BUY_YES":
+            continue
+        key = (str(order.get("market_id") or ""), str(order.get("token_id") or ""))
+        if not key[0] and not key[1]:
+            continue
+        current = latest_buy_by_key.get(key)
+        current_time = parse_timestamp(current.get("created_at")) if current else None
+        order_time = parse_timestamp(order.get("created_at"))
+        if current is None or (order_time or datetime.min.replace(tzinfo=timezone.utc)) >= (
+            current_time or datetime.min.replace(tzinfo=timezone.utc)
+        ):
+            latest_buy_by_key[key] = order
+
+    now = datetime.now(timezone.utc)
+    probes: list[dict[str, Any]] = []
+    for position in positions:
+        key = (str(position.get("market_id") or ""), str(position.get("token_id") or ""))
+        order = latest_buy_by_key.get(key)
+        if not order:
+            continue
+        signal = _decode_json_object(order.get("source_signal_json"))
+        if str(signal.get("price_action_entry_source") or "") != "paper_confirmation_candidate":
+            continue
+        opened_at = parse_timestamp(position.get("updated_at")) or parse_timestamp(order.get("created_at"))
+        if opened_at is None:
+            age_minutes = None
+        else:
+            age_minutes = max(0.0, (now - opened_at.astimezone(timezone.utc)).total_seconds() / 60.0)
+        max_hold = safe_float(signal.get("max_hold_minutes_before_exit"))
+        due_in = None
+        due = False
+        if max_hold is not None and max_hold > 0 and age_minutes is not None:
+            due_in = max(0.0, float(max_hold) - age_minutes)
+            due = due_in <= 0.0
+        probes.append(
+            {
+                "market_id": key[0],
+                "token_id": key[1],
+                "market_slug": signal.get("market_slug", ""),
+                "question": signal.get("question", ""),
+                "outcome": signal.get("outcome", ""),
+                "signal_cohort": signal.get("signal_cohort", ""),
+                "opened_at_utc": position.get("updated_at") or order.get("created_at"),
+                "age_minutes": None if age_minutes is None else round(age_minutes, 2),
+                "max_hold_minutes_before_exit": max_hold,
+                "due_in_minutes": None if due_in is None else round(due_in, 2),
+                "fixed_horizon_due": due,
+                "cost_basis_usdc": safe_float(position.get("cost_basis_usdc")),
+                "quantity": safe_float(position.get("quantity")),
+            }
+        )
+
+    due_count = sum(1 for probe in probes if probe.get("fixed_horizon_due"))
+    due_in_values = [
+        float(probe["due_in_minutes"])
+        for probe in probes
+        if probe.get("due_in_minutes") is not None
+    ]
+    next_due = 0.0 if due_count else min(due_in_values) if due_in_values else None
+    missing_horizon = sum(1 for probe in probes if probe.get("max_hold_minutes_before_exit") is None)
+    probes.sort(
+        key=lambda probe: (
+            0 if probe.get("fixed_horizon_due") else 1,
+            float(probe.get("due_in_minutes")) if probe.get("due_in_minutes") is not None else 999999.0,
+        )
+    )
+    return {
+        "status": "no_open_confirmation_probes" if not probes else "fixed_horizon_due" if due_count else "monitoring",
+        "open_confirmation_probes": len(probes),
+        "fixed_horizon_due_count": due_count,
+        "missing_horizon_count": missing_horizon,
+        "next_due_minutes": None if next_due is None else round(next_due, 2),
+        "next_due_utc": (
+            (now if next_due == 0 else now + timedelta(minutes=float(next_due))).strftime("%Y-%m-%dT%H:%M:%SZ")
+            if next_due is not None
+            else ""
+        ),
+        "preview": probes[:10],
+    }
+
 
 def _enrich_shadow_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     enriched: list[dict[str, Any]] = []
@@ -1591,6 +1707,7 @@ def render_dashboard(cfg: EngineConfig, latest_report: dict[str, Any] | None = N
     shadow_positions = _enrich_shadow_rows(_open_positions(read_csv_rows(shadow_root / "shadow_positions.csv")))
     shadow_fills = _last(read_csv_rows(shadow_root / "shadow_fills.csv"), 50)
     orders = read_csv_rows(portfolio_root / "paper_orders.csv")
+    paper_probe_exit_watch = _paper_probe_exit_watch(positions, orders)
     predictions = read_csv_rows(predictions_root / "predictions.csv")
     signals = read_csv_rows(predictions_root / "trade_signals.csv")
     price_action_signals = read_csv_rows(cfg.output_root / "polymarket_price_action" / "price_action_paper_signals.csv")
@@ -1651,6 +1768,7 @@ def render_dashboard(cfg: EngineConfig, latest_report: dict[str, Any] | None = N
         "price_action_microstructure": price_action_microstructure_status,
         "price_action_paper_signals": price_action_paper_signal_status,
         "price_action_feedback": price_action_feedback,
+        "paper_probe_exit_watch": paper_probe_exit_watch,
         "edge_strategy_search": edge_strategy_search,
         "promoted_rule_shadow": promoted_rule_shadow,
         "liquidity_discovery": liquidity_discovery,

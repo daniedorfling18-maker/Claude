@@ -396,7 +396,9 @@ async function load() {
       ["Paper signal decision", priceActionPaper.decision],
       ["Paper signals", priceActionPaper.signals],
       ["Paper rejections", priceActionPaper.rejections],
-      ["Approved PA cohorts", priceActionPaper.approved_price_action_cohorts]
+      ["Approved PA cohorts", priceActionPaper.approved_price_action_cohorts],
+      ["Approved microstructure cohorts", priceActionPaper.approved_microstructure_cohorts],
+      ["Microstructure current rows", priceActionPaper.source_microstructure_current_rows]
     ]) + `<div style="height:12px"></div><h3>Price-action scout by cohort</h3>` + table(priceScout.cohorts || [], [
       ["Cohort","signal_cohort"],
       ["Candidates","candidates"],
@@ -1360,7 +1362,9 @@ def _price_action_paper_signal_status(cfg: EngineConfig) -> dict[str, Any]:
         "signals": summary.get("signals", len(signals)),
         "rejections": summary.get("rejections", len(rejections)),
         "approved_price_action_cohorts": summary.get("approved_price_action_cohorts"),
+        "approved_microstructure_cohorts": summary.get("approved_microstructure_cohorts"),
         "source_round_trip_rows": summary.get("source_round_trip_rows"),
+        "source_microstructure_current_rows": summary.get("source_microstructure_current_rows"),
         "signal_file": str(root / "price_action_paper_signals.csv"),
         "rejection_file": str(root / "price_action_paper_rejections.csv"),
         "top_signals": signals[:25],

@@ -100,6 +100,63 @@ def _entry_row(**overrides: str) -> dict[str, str]:
     return row
 
 
+def _microstructure_current_row(**overrides: str) -> dict[str, str]:
+    row = {
+        "exit_policy_id": "quick_3pct_1obs",
+        "rule_id": "bid_momentum_tight|move>=0.035|spread<=0.01",
+        "rule_family": "bid_momentum_tight",
+        "signal_cohort": "price_action_microstructure|sports_other|bid_momentum_tight|exit=quick_3pct_1obs",
+        "token_id": "world-cup-token",
+        "market_slug": "world-cup-final-test",
+        "question": "World Cup final winner?",
+        "family": "sports_other",
+        "outcome": "Team A",
+        "latest_time_utc": "2026-06-30T10:06:00Z",
+        "latest_bid": "0.51",
+        "latest_ask": "0.52",
+        "latest_midpoint": "0.515",
+        "latest_spread": "0.01",
+        "relative_spread": "0.0192",
+        "validation_roi": "0.065",
+        "validation_win_rate": "0.75",
+        "validation_trades": "4",
+        "take_profit_return": "0.03",
+        "stop_loss_return": "0.20",
+        "max_forward_observations": "1",
+        "min_profit_usdc": "0.01",
+        "shadow_only": "True",
+    }
+    row.update(overrides)
+    return row
+
+
+def _microstructure_feedback_payload(cohort: str) -> dict[str, object]:
+    return {
+        "status": "ok",
+        "learning_state": "price_action_candidates_ready_for_governed_paper_bridge",
+        "promotion_candidates": 1,
+        "top_cohorts": [
+            {
+                "source": "microstructure_exit_policy",
+                "cohort": cohort,
+                "family": "sports_other",
+                "rule_id": "bid_momentum_tight|move>=0.035|spread<=0.01",
+                "promotion_ready": True,
+                "action": "candidate_for_forward_shadow_microstructure",
+                "validation_trades": 4,
+                "validation_win_rate": 0.75,
+                "validation_roi": 0.065,
+                "realized_roi": 0.065,
+                "exit_policy_id": "quick_3pct_1obs",
+                "take_profit_return": 0.03,
+                "stop_loss_return": 0.20,
+                "priority_score": 100.0,
+            }
+        ],
+        "promotion_candidate_preview": [],
+    }
+
+
 def test_positive_price_action_cohort_compiles_paper_signal_without_settlement(tmp_path):
     cfg = _cfg(tmp_path)
     root = cfg.output_root / "polymarket_price_action"
@@ -132,6 +189,40 @@ def test_price_action_signals_stay_blocked_until_cohort_evidence_is_positive(tmp
     assert summary["signals"] == 0
     assert signals == []
     assert "has not passed positive bid/ask evidence gate" in rejections[0]["rejection_reason"]
+
+
+def test_feedback_approved_microstructure_candidate_compiles_paper_signal(tmp_path):
+    cfg = _cfg(tmp_path)
+    root = cfg.output_root / "polymarket_price_action"
+    cohort = "price_action_microstructure|sports_other|bid_momentum_tight|exit=quick_3pct_1obs"
+    write_json(cfg.governance_root / "price_action_feedback.json", _microstructure_feedback_payload(cohort))
+    write_csv(root / "microstructure_current_candidates.csv", [_microstructure_current_row()])
+
+    summary = build_price_action_paper_signals(cfg)
+    signals = read_csv_rows(root / "price_action_paper_signals.csv")
+
+    assert summary["signals"] == 1
+    assert summary["approved_microstructure_cohorts"] == 1
+    assert summary["source_microstructure_current_rows"] == 1
+    assert signals[0]["signal_cohort"] == cohort
+    assert signals[0]["exit_policy_id"] == "quick_3pct_1obs"
+    assert float(signals[0]["take_profit_return"]) == 0.03
+    assert float(signals[0]["stop_loss_return"]) == 0.20
+    assert signals[0]["price_action_entry_source"] == "microstructure_current_candidate"
+
+
+def test_microstructure_candidate_stays_blocked_without_feedback_promotion(tmp_path):
+    cfg = _cfg(tmp_path)
+    root = cfg.output_root / "polymarket_price_action"
+    write_csv(root / "microstructure_current_candidates.csv", [_microstructure_current_row()])
+
+    summary = build_price_action_paper_signals(cfg)
+    signals = read_csv_rows(root / "price_action_paper_signals.csv")
+    rejections = read_csv_rows(root / "price_action_paper_rejections.csv")
+
+    assert summary["signals"] == 0
+    assert signals == []
+    assert "microstructure cohort has not passed governed feedback promotion gate" in rejections[0]["rejection_reason"]
 
 
 def _broker_cfg(tmp_path: Path):

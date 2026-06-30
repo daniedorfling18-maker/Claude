@@ -3,12 +3,13 @@ from __future__ import annotations
 from typing import Any
 
 from .config import EngineConfig, load_config
-from .utils import boolish, now_utc, read_csv_rows, safe_float, write_csv, write_json
+from .utils import boolish, now_utc, read_csv_rows, read_json, safe_float, write_csv, write_json
 
 OUTPUT_DIRNAME = "polymarket_price_action"
 SCOUT_COHORT_FILE = "price_action_scout_cohort_evidence.csv"
 SCOUT_ROUND_TRIP_FILE = "price_action_scout_round_trip_evidence.csv"
 SCOUT_ENTRY_FILE = "price_action_scout_entries.csv"
+MICROSTRUCTURE_CURRENT_FILE = "microstructure_current_candidates.csv"
 SIGNALS_FILE = "price_action_paper_signals.csv"
 REJECTIONS_FILE = "price_action_paper_rejections.csv"
 SUMMARY_JSON = "price_action_paper_signal_summary.json"
@@ -53,6 +54,7 @@ SIGNAL_FIELDS = [
     "price_action_entry_source",
     "price_action_latest_bid",
     "price_action_latest_ask",
+    "exit_policy_id",
     "take_profit_return",
     "stop_loss_return",
     "take_profit_min_usdc",
@@ -65,6 +67,7 @@ REJECTION_FIELDS = [
     "market_slug",
     "outcome",
     "token_id",
+    "exit_policy_id",
     "signal_cohort",
     "round_trip_status",
     "rejection_reason",
@@ -99,6 +102,35 @@ def _approved_cohorts(cohort_rows: list[dict[str, str]]) -> dict[str, dict[str, 
     return approved
 
 
+def _approved_feedback_microstructure_cohorts(cfg: EngineConfig) -> dict[str, dict[str, Any]]:
+    payload = read_json(cfg.governance_root / "price_action_feedback.json", default={}) or {}
+    if not isinstance(payload, dict):
+        return {}
+    approved: dict[str, dict[str, Any]] = {}
+    rows: list[Any] = []
+    for key in ("promotion_candidate_preview", "top_cohorts"):
+        value = payload.get(key)
+        if isinstance(value, list):
+            rows.extend(value)
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        source = str(row.get("source") or "")
+        if source not in {"microstructure", "microstructure_family", "microstructure_exit_policy"}:
+            continue
+        cohort = str(row.get("cohort") or "").strip()
+        if not cohort or not boolish(row.get("promotion_ready")):
+            continue
+        if str(row.get("action") or "") != "candidate_for_forward_shadow_microstructure":
+            continue
+        current = approved.get(cohort)
+        current_score = safe_float(current.get("priority_score")) if current else None
+        new_score = safe_float(row.get("priority_score"))
+        if current is None or (new_score or 0.0) >= (current_score or 0.0):
+            approved[cohort] = row
+    return approved
+
+
 def _entry_index(entry_rows: list[dict[str, str]]) -> dict[str, dict[str, str]]:
     by_token: dict[str, dict[str, str]] = {}
     for row in entry_rows:
@@ -122,6 +154,7 @@ def _reject(row: dict[str, Any], reason: str) -> dict[str, Any]:
         "market_slug": row.get("market_slug", ""),
         "outcome": row.get("outcome", ""),
         "token_id": _token_id(row),
+        "exit_policy_id": row.get("exit_policy_id", ""),
         "signal_cohort": _cohort_name(row),
         "round_trip_status": row.get("round_trip_status", ""),
         "rejection_reason": reason,
@@ -148,9 +181,9 @@ def _build_signal(
         spread = max(0.0, ask - bid)
     relative_spread = _relative_spread(spread, ask)
 
-    take_profit_return = float(safe_float(settings.get("take_profit_return")) or safe_float(row.get("take_profit_return")) or 0.08)
-    stop_loss_return = float(safe_float(settings.get("stop_loss_return")) or safe_float(row.get("stop_loss_return")) or 0.06)
-    min_profit = float(safe_float(settings.get("take_profit_min_usdc")) or safe_float(row.get("min_profit_usdc")) or 0.25)
+    take_profit_return = float(safe_float(row.get("take_profit_return")) or safe_float(settings.get("take_profit_return")) or 0.08)
+    stop_loss_return = float(safe_float(row.get("stop_loss_return")) or safe_float(settings.get("stop_loss_return")) or 0.06)
+    min_profit = float(safe_float(row.get("min_profit_usdc")) or safe_float(settings.get("take_profit_min_usdc")) or 0.25)
     min_hold = float(safe_float(settings.get("minimum_hold_minutes_before_exit")) or 0.0)
     max_stake = float(safe_float(settings.get("max_stake_usdc")) or 2.0)
     min_edge = float(safe_float(settings.get("minimum_price_edge")) or 0.005)
@@ -162,7 +195,7 @@ def _build_signal(
         target_edge = max(target_edge, ask * min(realized_roi, take_profit_return * 2.0))
     edge = max(min_edge, min(max_edge, target_edge))
     probability_proxy = max(0.001, min(0.999, ask + edge))
-    confidence = safe_float(cohort.get("win_rate"))
+    confidence = safe_float(cohort.get("win_rate") or cohort.get("validation_win_rate"))
     if confidence is None or confidence <= 0:
         confidence = float(safe_float(settings.get("default_confidence")) or 0.7)
 
@@ -205,12 +238,13 @@ def _build_signal(
         "price_action_signal": True,
         "price_action_evidence_status": "cohort_bid_ask_round_trip_approved",
         "price_action_cohort_realized_roi": cohort.get("realized_roi", ""),
-        "price_action_cohort_win_rate": cohort.get("win_rate", ""),
-        "price_action_cohort_closed_trades": cohort.get("closed_trades", ""),
+        "price_action_cohort_win_rate": cohort.get("win_rate", cohort.get("validation_win_rate", "")),
+        "price_action_cohort_closed_trades": cohort.get("closed_trades", cohort.get("validation_trades", "")),
         "price_action_cohort_run_rate_usdc": cohort.get("realized_monthly_run_rate_usdc", ""),
         "price_action_entry_source": row.get("source", ""),
         "price_action_latest_bid": bid,
         "price_action_latest_ask": ask,
+        "exit_policy_id": row.get("exit_policy_id", ""),
         "take_profit_return": take_profit_return,
         "stop_loss_return": stop_loss_return,
         "take_profit_min_usdc": min_profit,
@@ -246,7 +280,9 @@ def build_price_action_paper_signals(cfg: EngineConfig) -> dict[str, Any]:
     cohort_rows = read_csv_rows(out_dir / SCOUT_COHORT_FILE)
     round_trip_rows = read_csv_rows(out_dir / SCOUT_ROUND_TRIP_FILE)
     entries = read_csv_rows(out_dir / SCOUT_ENTRY_FILE)
+    microstructure_current = read_csv_rows(out_dir / MICROSTRUCTURE_CURRENT_FILE)
     approved = _approved_cohorts(cohort_rows)
+    approved_microstructure = _approved_feedback_microstructure_cohorts(cfg)
     by_token = _entry_index(entries)
 
     signals: list[dict[str, Any]] = []
@@ -285,6 +321,37 @@ def build_price_action_paper_signals(cfg: EngineConfig) -> dict[str, Any]:
             continue
         signals.append(signal)
 
+    for raw_row in microstructure_current:
+        row = {
+            **raw_row,
+            "source": raw_row.get("source") or "microstructure_current_candidate",
+            "round_trip_status": raw_row.get("round_trip_status") or "open_marked",
+        }
+        cohort_name = _cohort_name(row)
+        if cohort_name not in approved_microstructure:
+            rejections.append(_reject(row, "microstructure cohort has not passed governed feedback promotion gate"))
+            continue
+        ask = safe_float(row.get("latest_ask"))
+        bid = safe_float(row.get("latest_bid"))
+        spread = safe_float(row.get("latest_spread"))
+        if spread is None and ask is not None and bid is not None:
+            spread = max(0.0, ask - bid)
+        relative_spread = _relative_spread(spread, ask)
+        if ask is None or bid is None or not 0 < ask < 1 or not 0 < bid < 1:
+            rejections.append(_reject(row, "missing executable websocket bid/ask"))
+            continue
+        if spread is None or spread > max_spread:
+            rejections.append(_reject(row, "spread above price-action paper limit"))
+            continue
+        if relative_spread is None or relative_spread > max_relative_spread:
+            rejections.append(_reject(row, "relative spread above price-action paper limit"))
+            continue
+        signal = _build_signal(row, cohort=approved_microstructure[cohort_name], entry=row, settings=settings)
+        if signal is None:
+            rejections.append(_reject(row, "could not build executable microstructure price-action signal"))
+            continue
+        signals.append(signal)
+
     signals.sort(key=lambda item: safe_float(item.get("priority_score")) or 0.0, reverse=True)
     signals = signals[:max_signals]
     write_csv(out_dir / SIGNALS_FILE, signals, fieldnames=SIGNAL_FIELDS)
@@ -296,7 +363,9 @@ def build_price_action_paper_signals(cfg: EngineConfig) -> dict[str, Any]:
         "signals": len(signals),
         "rejections": len(rejections),
         "approved_price_action_cohorts": len(approved),
+        "approved_microstructure_cohorts": len(approved_microstructure),
         "source_round_trip_rows": len(round_trip_rows),
+        "source_microstructure_current_rows": len(microstructure_current),
         "signal_file": str(out_dir / SIGNALS_FILE),
         "rejection_file": str(out_dir / REJECTIONS_FILE),
         "paper_trading_invoked": False,

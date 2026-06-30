@@ -18,6 +18,14 @@ DASHBOARD = ROOT / "outputs" / "polymarket_dashboard"
 GOVERNANCE = ROOT / "outputs" / "polymarket_model_governance"
 PORTFOLIO = ROOT / "outputs" / "polymarket_portfolio"
 STRATEGY_V2_STATUS = ROOT / "work" / "strategy_v2_cycle_latest_status.json"
+EXCLUDED_COHORT_MARKERS = {
+    "unknown": "excluded_unknown_family",
+    "crypto_btc_updown_5m": "excluded_fast_crypto_5m",
+    "crypto_sol_updown_5m": "excluded_fast_crypto_5m",
+    "crypto_xrp_updown_5m": "excluded_fast_crypto_5m",
+    "crypto_updown_5m": "excluded_fast_crypto_5m",
+    "quarantine_retest": "quarantine_retest_only",
+}
 
 
 def read_json(path: Path) -> dict[str, Any]:
@@ -94,11 +102,38 @@ def top_watchlist_rows(payload: dict[str, Any], key: str, limit: int = 5) -> lis
     return [row for row in rows if isinstance(row, dict)][:limit]
 
 
-def print_watchlist(title: str, rows: list[dict[str, Any]], *, shadow: bool = False) -> None:
+def quarantined_cohort_names(payload: dict[str, Any]) -> set[str]:
+    rows = payload.get("quarantined_cohorts")
+    if not isinstance(rows, list):
+        return set()
+    return {str(row.get("signal_cohort") or "") for row in rows if isinstance(row, dict)}
+
+
+def cohort_gate_label(row: dict[str, Any], *, quarantined: set[str]) -> str:
+    cohort = str(row.get("signal_cohort") or "unknown")
+    if cohort in quarantined:
+        return "not eligible: quarantined"
+    cohort_l = cohort.lower()
+    for marker, reason in EXCLUDED_COHORT_MARKERS.items():
+        if marker in cohort_l:
+            return f"not eligible: {reason}"
+    try:
+        score = int(float(row.get("promotion_ready_score", 0)))
+        checks = int(float(row.get("promotion_ready_checks", 0)))
+    except Exception:
+        score = 0
+        checks = 0
+    if checks and score >= checks:
+        return "eligible for promotion review"
+    return "not eligible: needs more forward evidence"
+
+
+def print_watchlist(title: str, rows: list[dict[str, Any]], *, shadow: bool = False, quarantined: set[str] | None = None) -> None:
     print(f"\n{title}")
     if not rows:
         print("  No watchlist rows yet. Need the bot to collect more forward evidence.")
         return
+    quarantined = quarantined or set()
     for row in rows:
         score = f"{row.get('promotion_ready_score', 0)}/{row.get('promotion_ready_checks', '?')}"
         cohort = row.get("signal_cohort", "unknown")
@@ -114,7 +149,8 @@ def print_watchlist(title: str, rows: list[dict[str, Any]], *, shadow: bool = Fa
             run_rate = money(row.get("monthly_run_rate_usdc"))
             fills = row.get("buy_fills", 0)
             settled = row.get("settled_fills", row.get("sell_fills", 0))
-        print(f"  - {cohort}: score {score}, pnl {pnl}, roi {roi}, run-rate {run_rate}, fills {fills}, settled {settled}")
+        gate = cohort_gate_label(row, quarantined=quarantined)
+        print(f"  - {cohort}: {gate}; score {score}, pnl {pnl}, roi {roi}, run-rate {run_rate}, fills {fills}, settled {settled}")
 
 
 def strategy_v2_posture(status: dict[str, Any]) -> tuple[str, str]:
@@ -224,16 +260,22 @@ def main() -> int:
     print(f"  Shadow promoted cohorts: {len(shadow_promoted)}")
     if not promoted and not shadow_promoted:
         print("  Trading should remain gated until a cohort proves positive forward evidence.")
+    paper_quarantined = quarantined_cohort_names(signal_cohorts)
+    shadow_quarantined = quarantined_cohort_names(shadow_cohorts)
+    if paper_quarantined or shadow_quarantined:
+        print(f"  Quarantined cohorts excluded from promotion: {len(paper_quarantined | shadow_quarantined)}")
 
     print_watchlist(
         "Nearest paper cohorts",
         top_watchlist_rows(signal_cohorts, "promotion_watchlist"),
         shadow=False,
+        quarantined=paper_quarantined,
     )
     print_watchlist(
         "Nearest shadow cohorts",
         top_watchlist_rows(shadow_cohorts, "promotion_watchlist"),
         shadow=True,
+        quarantined=shadow_quarantined,
     )
     return 0
 

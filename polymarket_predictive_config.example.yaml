@@ -245,6 +245,21 @@ profit_tracking:
   pause_new_entries_below_pnl_usdc: -10
   baseline_file: paper_profit_target_baseline.json
   tracker_file: paper_profit_target_tracker.json
+strategy_v2:
+  forward_evidence_stake_usdc: 10
+  promotion_min_candidates: 20
+  promotion_min_settled: 10
+  promotion_min_roi: 0.03
+  promotion_min_monthly_run_rate_usdc: 20
+  promotion_max_single_market_positive_pnl_share: 0.35
+  round_trip_take_profit_return: 0.08
+  round_trip_stop_loss_return: 0.06
+  round_trip_min_profit_usdc: 0.25
+  round_trip_min_closed_trades: 5
+  round_trip_min_roi: 0.03
+  round_trip_min_win_rate: 0.55
+  round_trip_min_monthly_run_rate_usdc: 20
+  round_trip_max_single_market_positive_pnl_share: 0.35
 runtime_resource_guard:
   enabled: true
   max_memory_percent: 94
@@ -608,5 +623,4 @@ governance_thresholds:
   require_clean_snapshot_labels_for_paper: false
   min_forward_paper_trades: 1
   require_positive_forward_paper_roi: false
-
 

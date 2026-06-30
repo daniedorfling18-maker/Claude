@@ -137,6 +137,8 @@ async function load() {
     const monthly = data.forward_paper_cycle?.monthly_profit_target || {};
     const diag = data.trade_diagnostics || {};
     const strategyV2 = data.strategy_v2 || {};
+    const roundTrip = strategyV2.round_trip_evidence || {};
+    const roundTripPnl = roundTrip.realized_pnl_usdc ?? roundTrip.total_mark_pnl_usdc;
     const live = data.local_live_heartbeat || data.heartbeat || {};
     const freshness = data.evidence_freshness || {};
     const scanner = data.scanner_heartbeat || {};
@@ -175,6 +177,7 @@ async function load() {
       card("Signals approved", data.forward_paper_cycle?.signals_approved ?? "0"),
       card("Strategy V2 shadow", strategyV2.shadow_candidates ?? "0", Number(strategyV2.shadow_candidates || 0) > 0 ? "good" : "warn"),
       card("Strategy V2 anchors", `${strategyV2.anchored_rows ?? 0}/${strategyV2.rows_scored ?? 0}`, Number(strategyV2.anchored_rows || 0) > 0 ? "good" : "warn"),
+      card("Round-trip P&L", fmtUsd(roundTripPnl), Number(roundTripPnl || 0) > 0 ? "good" : "warn"),
       card("Main trade blocker", longText(diag.main_blocker || "-", 120), Number(diag.approved_signals_count || 0) > 0 ? "good" : "warn"),
       card("Next settlement", data.shadow_settlement_watch?.next_settlement_minutes == null ? "Waiting" : fmtNum(data.shadow_settlement_watch.next_settlement_minutes, 0) + "m"),
       card("Shadow P&L", fmtUsd(data.shadow_settlement_watch?.shadow_total_pnl_usdc), Number(data.shadow_settlement_watch?.shadow_total_pnl_usdc || 0) > 0 ? "good" : "warn"),
@@ -278,6 +281,10 @@ async function load() {
       ["Forward evidence", strategyV2.forward_evidence?.decision],
       ["Forward MTM P&L", strategyV2.forward_evidence?.total_mark_pnl_usdc, fmtUsd],
       ["Forward review cohorts", strategyV2.forward_evidence?.paper_review_candidates],
+      ["Round-trip evidence", roundTrip.decision],
+      ["Closed round trips", roundTrip.closed_trades],
+      ["Round-trip realized P&L", roundTrip.realized_pnl_usdc, fmtUsd],
+      ["Round-trip MTM P&L", roundTrip.total_mark_pnl_usdc, fmtUsd],
       ["Main blocker", strategyV2.main_blocker, v=>longText(v, 180)]
     ]) + `<div style="height:12px"></div><h3>Current shadow candidates</h3>` + table(strategyV2.top_shadow_candidates || [], [
       ["Family","family"],
@@ -318,6 +325,29 @@ async function load() {
       ["ROI","mark_roi", v=>fmtNum(Number(v) * 100, 2) + "%"],
       ["Resolved","resolved_evidence"],
       ["Settlement","settlement_status", v=>longText(v, 120)]
+    ]) + `<div style="height:12px"></div><h3>Round-trip price-action evidence by cohort</h3>` + table(strategyV2.round_trip_evidence_cohorts || [], [
+      ["Cohort","signal_cohort"],
+      ["Candidates","candidates"],
+      ["Closed","closed_trades"],
+      ["Open","open_trades"],
+      ["TP/SL","take_profit_exits", (v,row)=>`${v ?? 0}/${row.stop_loss_exits ?? 0}`],
+      ["Win rate","win_rate", v=>fmtNum(Number(v) * 100, 1) + "%"],
+      ["Realized P&L","realized_pnl_usdc", fmtUsd],
+      ["Realized ROI","realized_roi", v=>fmtNum(Number(v) * 100, 2) + "%"],
+      ["MTM P&L","total_mark_pnl_usdc", fmtUsd],
+      ["Status","status", v=>longText(v, 140)],
+      ["Reason","reason", v=>longText(v, 180)]
+    ]) + `<div style="height:12px"></div><h3>Round-trip price-action candidate marks</h3>` + table(strategyV2.round_trip_evidence_top_candidates || [], [
+      ["Cohort","signal_cohort"],
+      ["Market","market_slug", v=>longText(v, 120)],
+      ["Outcome","outcome"],
+      ["Entry","entry_price", v=>fmtNum(v,4)],
+      ["Latest bid","latest_bid", v=>fmtNum(v,4)],
+      ["Exit","exit_price", v=>fmtNum(v,4)],
+      ["Status","round_trip_status", v=>longText(v, 120)],
+      ["Realized P&L","realized_pnl_usdc", fmtUsd],
+      ["MTM P&L","mark_pnl_usdc", fmtUsd],
+      ["Obs","observations"]
     ]) + `<div style="height:12px"></div><h3>Anchored near-misses</h3>` + table(strategyV2.top_anchored_rejections || [], [
       ["Family","family"],
       ["Market","market_slug", v=>longText(v, 120)],
@@ -938,6 +968,11 @@ def _strategy_v2_status(cfg: EngineConfig) -> dict[str, Any]:
         forward_evidence = {}
     forward_cohorts = read_csv_rows(root / "strategy_v2_cohort_forward_evidence.csv")
     forward_candidates = read_csv_rows(root / "strategy_v2_forward_evidence.csv")
+    round_trip_evidence = read_json(root / "strategy_v2_round_trip_evidence.json", default={}) or {}
+    if not isinstance(round_trip_evidence, dict):
+        round_trip_evidence = {}
+    round_trip_cohorts = read_csv_rows(root / "strategy_v2_round_trip_cohort_evidence.csv")
+    round_trip_candidates = read_csv_rows(root / "strategy_v2_round_trip_evidence.csv")
     cycle_status = _read_json_lenient(cfg.path.parent / "work" / "strategy_v2_cycle_latest_status.json", default={}) or {}
     if not isinstance(cycle_status, dict):
         cycle_status = {}
@@ -1074,6 +1109,9 @@ def _strategy_v2_status(cfg: EngineConfig) -> dict[str, Any]:
         "forward_evidence": forward_evidence,
         "forward_evidence_cohorts": forward_cohorts[:25],
         "forward_evidence_top_candidates": _sorted_by_numeric(forward_candidates, "mark_pnl_usdc")[:25],
+        "round_trip_evidence": round_trip_evidence,
+        "round_trip_evidence_cohorts": round_trip_cohorts[:25],
+        "round_trip_evidence_top_candidates": _sorted_by_numeric(round_trip_candidates, "mark_pnl_usdc")[:25],
         "persistence_entries": len(persistence),
         "persistence_log": str(root / "anchored_edge_persistence_log.csv"),
         "shadow_only": True,

@@ -201,12 +201,21 @@ outputs/polymarket_strategy_v2/anchored_edge_report.md
 outputs/polymarket_strategy_v2/strategy_v2_forward_evidence.json
 outputs/polymarket_strategy_v2/strategy_v2_forward_evidence.csv
 outputs/polymarket_strategy_v2/strategy_v2_cohort_forward_evidence.csv
+outputs/polymarket_strategy_v2/strategy_v2_round_trip_evidence.json
+outputs/polymarket_strategy_v2/strategy_v2_round_trip_evidence.csv
+outputs/polymarket_strategy_v2/strategy_v2_round_trip_cohort_evidence.csv
 ```
 
 The forward-evidence files are mark-to-market research ledgers built from the Strategy V2
 persistence log. They answer: "If we had shadow-bought this candidate at first observation, where
 would it mark now?" They are not paper trades, not live trades, and not settlement proof. Promotion
 still requires resolved/settled evidence plus human review.
+
+The round-trip evidence files answer the faster trading question: "Could the candidate have been
+bought at the entry ask/executable price and later sold into the observed websocket bid?" They apply
+paper-only take-profit/stop-loss rules and use the bid, not midpoint, for exits. This gives faster
+price-action feedback while markets remain unresolved, but it is still not proof that the probability
+model is right and it does not bypass settlement governance.
 
 Minimum candidate filters:
 

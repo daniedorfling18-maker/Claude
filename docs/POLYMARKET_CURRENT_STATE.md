@@ -141,6 +141,11 @@ cohort is probationary/promoted by governance
 
 The goal is not to get any trade. The goal is to find a repeatable family with positive forward evidence.
 
+Strategy V2 also maintains a separate round-trip price-action ledger. That ledger simulates buying
+at the candidate entry ask/executable price and selling or marking at later websocket bids, so it can
+learn whether odds movement creates a tradable edge before markets settle. It is useful fast feedback,
+but it is not settlement proof and does not by itself authorise paper or live trading.
+
 ## Why $100/month is not solved yet
 
 At the current probationary stake of $2, a 3% ROI produces only $0.06 per trade. Hitting $100/month at that level would require about 1,667 trades/month, which is not realistic. The route to the target is therefore:

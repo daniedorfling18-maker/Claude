@@ -393,6 +393,56 @@ def test_dashboard_surfaces_strategy_v2_anchored_edge_progress(tmp_path):
             }
         ],
     )
+    write_json(
+        cfg.output_root / "polymarket_strategy_v2" / "strategy_v2_round_trip_evidence.json",
+        {
+            "status": "computed",
+            "decision": "collect_more_round_trip_evidence",
+            "round_trip_candidates": 1,
+            "closed_trades": 1,
+            "take_profit_exits": 1,
+            "realized_pnl_usdc": 0.55,
+            "total_mark_pnl_usdc": 0.55,
+            "price_action_review_candidates": 0,
+        },
+    )
+    write_csv(
+        cfg.output_root / "polymarket_strategy_v2" / "strategy_v2_round_trip_cohort_evidence.csv",
+        [
+            {
+                "signal_cohort": "strategy_v2|macro_rates",
+                "family": "macro_rates",
+                "candidates": "1",
+                "closed_trades": "1",
+                "open_trades": "0",
+                "take_profit_exits": "1",
+                "stop_loss_exits": "0",
+                "win_rate": "1.0",
+                "realized_pnl_usdc": "0.55",
+                "realized_roi": "0.055",
+                "total_mark_pnl_usdc": "0.55",
+                "status": "collect_more_closed_round_trips",
+            }
+        ],
+    )
+    write_csv(
+        cfg.output_root / "polymarket_strategy_v2" / "strategy_v2_round_trip_evidence.csv",
+        [
+            {
+                "signal_cohort": "strategy_v2|macro_rates",
+                "family": "macro_rates",
+                "market_slug": candidate["market_slug"],
+                "outcome": "Yes",
+                "entry_price": "0.176",
+                "latest_bid": "0.186",
+                "exit_price": "0.186",
+                "round_trip_status": "closed_take_profit",
+                "realized_pnl_usdc": "0.55",
+                "mark_pnl_usdc": "0.55",
+                "observations": "4",
+            }
+        ],
+    )
     cycle_status_path = cfg.path.parent / "work" / "strategy_v2_cycle_latest_status.json"
     cycle_status_path.parent.mkdir(parents=True, exist_ok=True)
     cycle_status_path.write_text(
@@ -413,6 +463,9 @@ def test_dashboard_surfaces_strategy_v2_anchored_edge_progress(tmp_path):
     assert strategy_v2["cycle_status"]["status"] == "ok"
     assert strategy_v2["forward_evidence"]["decision"] == "collect_more_resolved_forward_evidence"
     assert strategy_v2["forward_evidence_cohorts"][0]["signal_cohort"] == "strategy_v2|macro_rates"
+    assert strategy_v2["round_trip_evidence"]["decision"] == "collect_more_round_trip_evidence"
+    assert strategy_v2["round_trip_evidence_cohorts"][0]["closed_trades"] == "1"
+    assert strategy_v2["round_trip_evidence_top_candidates"][0]["round_trip_status"] == "closed_take_profit"
     assert strategy_v2["top_shadow_candidates"][0]["market_slug"] == candidate["market_slug"]
     assert strategy_v2["promotion_progress"][0]["remaining_shadow_entries_to_review"] == 19
 

@@ -254,6 +254,8 @@ Invoke-PythonStep "strategy-v2-websocket-refresh" @("-m", "polymarket_predictive
 $strategyV2WebsocketRefresh = Read-JsonIfExists ".\outputs\polymarket_websocket\websocket_summary.json"
 Invoke-PythonStep "strategy-v2-normalize-websocket" @("-m", "polymarket_predictive_engine.cli", "normalize-websocket", "--config", $ConfigPath)
 $strategyV2WebsocketFeatures = Read-JsonIfExists ".\outputs\polymarket_model_governance\websocket_feature_summary.json"
+Invoke-PythonStep "strategy-v2-round-trip" @("-m", "polymarket_predictive_engine.cli", "strategy-v2-round-trip", "--config", $ConfigPath)
+$strategyV2RoundTripEvidence = Read-JsonIfExists ".\outputs\polymarket_strategy_v2\strategy_v2_round_trip_evidence.json"
 
 $shadowCandidates = $anchoredRows | Where-Object { $_.status -eq "shadow_candidate" }
 $rejectedAnchored = $anchoredRows | Where-Object { $_.status -eq "rejected" }
@@ -272,6 +274,7 @@ $status = [PSCustomObject]@{
   strategy_v2_forward_evidence = $strategyV2ForwardEvidence
   strategy_v2_websocket_refresh = $strategyV2WebsocketRefresh
   strategy_v2_websocket_features = $strategyV2WebsocketFeatures
+  strategy_v2_round_trip_evidence = $strategyV2RoundTripEvidence
   independent_anchor_refresh = $independentAnchorRefresh
 }
 

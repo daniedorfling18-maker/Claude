@@ -91,6 +91,18 @@ def test_strategy_v2_cycle_refreshes_websocket_after_forward_evidence():
     assert "websocket_feature_summary.json" in text
 
 
+def test_strategy_v2_cycle_builds_round_trip_after_websocket_normalisation():
+    text = _script_text("scripts/run_polymarket_strategy_v2_cycle.ps1")
+
+    normalize_index = text.index("strategy-v2-normalize-websocket")
+    round_trip_index = text.index("strategy-v2-round-trip")
+    status_payload_index = text.index("strategy_v2_round_trip_evidence = $strategyV2RoundTripEvidence")
+
+    assert normalize_index < round_trip_index
+    assert round_trip_index < status_payload_index
+    assert "strategy_v2_round_trip_evidence.json" in text
+
+
 def test_strategy_v2_scheduled_wrapper_pins_repo_source():
     text = _script_text("scripts/run_strategy_v2_cycle_scheduled_wrapper.ps1")
 

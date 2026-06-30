@@ -54,6 +54,7 @@ from .storage import init_db
 from .strategy import generate_signals
 from .strategy_search import run_edge_strategy_search
 from .strategy_v2_evidence import build_strategy_v2_forward_evidence
+from .strategy_v2_round_trip import build_strategy_v2_round_trip_evidence
 from .validation import validate_model
 from .validation_report import build_validation_report
 from .websocket_collector import collect_websocket
@@ -93,6 +94,7 @@ COMMANDS = [
     "edge-strategy-search",
     "anchored-edge",
     "strategy-v2-evidence",
+    "strategy-v2-round-trip",
     "refresh-governance",
     "promotion-review",
     "goal-plan",
@@ -277,6 +279,8 @@ def main(argv: list[str] | None = None) -> int:
             _print(run_anchored_edge(args.config))
         elif args.command == "strategy-v2-evidence":
             _print(build_strategy_v2_forward_evidence(cfg))
+        elif args.command == "strategy-v2-round-trip":
+            _print(build_strategy_v2_round_trip_evidence(cfg))
         elif args.command == "refresh-governance":
             _print(refresh_governance(cfg, refresh_dashboard=not args.skip_dashboard))
         elif args.command == "promotion-review":

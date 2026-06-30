@@ -87,6 +87,16 @@ trading, Docker, or the old local live loop, and it refuses to start when memory
 guardrail. The current recommended research workflow remains the scheduled shadow/Strategy V2 cycle
 and file-based audit status.
 
+For lightweight local paper-broker/dashboard maintenance without heavy discovery/model scanning, use:
+
+```powershell
+.\scripts\install_polymarket_paper_maintenance_task.ps1 -IntervalMinutes 1
+```
+
+This task only runs the paper broker when fresh paper signals are pending or an open paper-confirmation
+probe has reached its fixed exit horizon; otherwise it only refreshes the static dashboard artifact.
+It is still paper-only and guarded by local memory pressure.
+
 ## When to use Docker — and when NOT to
 
 **Do NOT use Docker for local development.** It is only worth it for:

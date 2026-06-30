@@ -66,7 +66,10 @@ def test_strategy_v2_cycle_checks_memory_between_python_steps():
     assert "stopped_high_memory" in text
     assert 'Assert-MemoryBelowGuard -Phase "before_$Name"' in text
     assert 'Assert-MemoryBelowGuard -Phase "after_shadow_refresh"' in text
-    assert text.index('Assert-MemoryBelowGuard -Phase "before_$Name"') < text.index("Start-Process")
+    invoke_step_index = text.index("function Invoke-PythonStep")
+    assert text.index('Assert-MemoryBelowGuard -Phase "before_$Name"', invoke_step_index) < text.index(
+        "Start-Process", invoke_step_index
+    )
 
 
 def test_strategy_v2_cycle_renders_dashboard_after_latest_status_is_written():
@@ -152,7 +155,7 @@ def test_strategy_v2_cycle_runs_paper_broker_after_price_action_paper_signals():
     text = _script_text("scripts/run_polymarket_strategy_v2_cycle.ps1")
 
     paper_signal_index = text.index("price-action-paper-signals")
-    paper_trade_index = text.index('"paper-trade"')
+    paper_trade_index = text.index('"paper-trade"', paper_signal_index)
     final_feedback_index = text.rindex("price-action-feedback")
     status_payload_index = text.index("paper_trade_refresh = $paperTradeRefresh")
 
@@ -245,3 +248,27 @@ def test_manual_dashboard_launcher_uses_same_memory_guard():
     assert "Get-MemoryUsedPercent" in text
     assert "$memoryUsedPercent -ge $MaxMemoryPercent" in text
     assert "install_polymarket_dashboard_task.ps1 -StartNow" in text
+
+
+def test_paper_maintenance_runner_is_lightweight_and_due_exit_aware():
+    text = _script_text("scripts/run_polymarket_paper_maintenance.ps1")
+
+    assert "[double]$MaxMemoryPercent = 95" in text
+    assert "$env:PYTHONPATH = Join-Path $RepoRoot \"src\"" in text
+    assert "polymarket_paper_maintenance_latest_status.json" in text
+    assert "next_broker_exit_due_utc" in text
+    assert "exit_due_by_clock" in text
+    assert '"paper-trade"' in text
+    assert "render_polymarket_dashboard.py" in text
+    assert "skipped_high_memory" in text
+    assert "Start-Process" in text
+
+
+def test_paper_maintenance_task_installer_runs_every_minute_without_overlap():
+    text = _script_text("scripts/install_polymarket_paper_maintenance_task.ps1")
+
+    assert "run_polymarket_paper_maintenance.ps1" in text
+    assert "[int]$IntervalMinutes = 1" in text
+    assert "-RepetitionInterval (New-TimeSpan -Minutes $IntervalMinutes)" in text
+    assert "-MultipleInstances IgnoreNew" in text
+    assert "Start-ScheduledTask -TaskName $TaskName" in text

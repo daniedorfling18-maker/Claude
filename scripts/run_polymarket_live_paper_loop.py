@@ -318,6 +318,19 @@ def _cohort_to_query_keys(cohort: str) -> list[str]:
     return deduped
 
 
+QUARANTINED_COHORT_FRAGMENTS = (
+    "crypto_btc_updown_5m",
+    "crypto_sol_updown_5m",
+    "crypto_xrp_updown_5m",
+    "crypto_updown_5m",
+)
+
+
+def _is_quarantined_fast_crypto_cohort(cohort: str) -> bool:
+    text = cohort.lower()
+    return any(fragment in text for fragment in QUARANTINED_COHORT_FRAGMENTS)
+
+
 def _cohort_priority_value(row: dict[str, Any]) -> float:
     score = safe_float(row.get("promotion_ready_score")) or 0.0
     checks = max(1.0, safe_float(row.get("promotion_ready_checks")) or 6.0)
@@ -356,6 +369,11 @@ def _load_cohort_rows(cfg) -> list[dict[str, Any]]:
     return rows
 
 
+def _load_research_focus(cfg) -> dict[str, Any]:
+    payload = read_json(cfg.governance_root / "research_focus.json", default={}) or {}
+    return payload if isinstance(payload, dict) else {}
+
+
 def _adaptive_query_order(cfg, queries: list[str]) -> tuple[list[str], dict[str, Any]]:
     settings = cfg.raw.get("paper_market_scan", {}) or {}
     adaptive_override = _env_override("POLYMARKET_ADAPTIVE_SCAN_PRIORITY")
@@ -372,6 +390,8 @@ def _adaptive_query_order(cfg, queries: list[str]) -> tuple[list[str], dict[str,
     require_positive = _truthy_setting(settings.get("adaptive_priority_require_positive_evidence", True), default=True)
     for row in _load_cohort_rows(cfg):
         cohort = str(row.get("signal_cohort") or row.get("cohort") or "")
+        if _is_quarantined_fast_crypto_cohort(cohort):
+            continue
         pnl = safe_float(row.get("total_pnl_usdc")) or safe_float(row.get("shadow_total_pnl_usdc")) or 0.0
         roi = safe_float(row.get("roi")) or safe_float(row.get("shadow_roi")) or 0.0
         run_rate = safe_float(row.get("monthly_run_rate_usdc")) or safe_float(row.get("shadow_monthly_run_rate_usdc")) or 0.0
@@ -401,16 +421,58 @@ def _adaptive_query_order(cfg, queries: list[str]) -> tuple[list[str], dict[str,
                     "roi": row.get("roi", row.get("shadow_roi")),
                     "monthly_run_rate_usdc": row.get("monthly_run_rate_usdc", row.get("shadow_monthly_run_rate_usdc")),
                 }
+    focus_payload = _load_research_focus(cfg)
+    focus_enabled = _truthy_setting(settings.get("use_research_focus_priority", True), default=True)
+    focus_queries: list[str] = []
+    suppressed_keys: set[str] = set()
+    if focus_enabled and focus_payload:
+        focus_value = float(settings.get("research_focus_priority_value", min_value + 1.0))
+        for raw_query in focus_payload.get("collection_queries", []):
+            key = _query_key(str(raw_query or ""))
+            if not key or key not in query_by_key:
+                continue
+            focus_queries.append(query_by_key[key])
+            if focus_value > priority_by_key.get(key, -1.0):
+                priority_by_key[key] = focus_value
+                reason_by_key[key] = {
+                    "query": query_by_key[key],
+                    "cohort": "research_focus",
+                    "priority_value": round(focus_value, 4),
+                    "cohort_priority_value": round(focus_value, 4),
+                    "source": "research_focus",
+                    "learning_state": (focus_payload.get("price_action_feedback") or {}).get("learning_state"),
+                    "summary": focus_payload.get("summary"),
+                }
+        for raw_query in focus_payload.get("suppressed_queries", []):
+            key = _query_key(str(raw_query or ""))
+            if key and key in query_by_key:
+                suppressed_keys.add(key)
     priority_keys = sorted(priority_by_key, key=lambda key: priority_by_key[key], reverse=True)
     priority_queries = [query_by_key[key] for key in priority_keys]
     priority_set = {query.lower() for query in priority_queries}
-    ordered = priority_queries + [query for query in queries if query.lower() not in priority_set]
+    suppressed_tail = [
+        query
+        for query in queries
+        if query.lower() not in priority_set and _query_key(query) in suppressed_keys
+    ]
+    ordered = (
+        priority_queries
+        + [
+            query
+            for query in queries
+            if query.lower() not in priority_set and _query_key(query) not in suppressed_keys
+        ]
+        + suppressed_tail
+    )
     return ordered, {
         "enabled": enabled,
         "priority_queries": priority_queries,
         "top_cohorts": [reason_by_key[key] for key in priority_keys[:6]],
         "min_priority_value": min_value,
         "require_positive_evidence": require_positive,
+        "research_focus_enabled": focus_enabled,
+        "research_focus_queries": focus_queries,
+        "suppressed_queries": suppressed_tail,
     }
 
 

@@ -39,7 +39,7 @@ def test_adaptive_scan_priority_prefers_positive_near_promoted_cohorts(tmp_path,
                         "monthly_run_rate_usdc": -5000,
                     },
                     {
-                        "signal_cohort": "exploratory_inverse_historical_rule|crypto_btc_updown_5m|outcome=up",
+                        "signal_cohort": "exploratory_inverse_historical_rule|crypto_btc_updown_daily|outcome=up",
                         "promotion_ready_score": 5,
                         "promotion_ready_checks": 6,
                         "total_pnl_usdc": 4.5,
@@ -48,7 +48,7 @@ def test_adaptive_scan_priority_prefers_positive_near_promoted_cohorts(tmp_path,
                         "probationary": True,
                     },
                     {
-                        "signal_cohort": "exploratory_historical_rule|crypto_xrp_updown_5m|outcome=down",
+                        "signal_cohort": "exploratory_historical_rule|crypto_xrp_updown_event|outcome=down",
                         "promotion_ready_score": 4,
                         "promotion_ready_checks": 6,
                         "total_pnl_usdc": 21,
@@ -115,7 +115,7 @@ def test_batch_mode_scans_top_evidence_families_together(tmp_path, monkeypatch):
             {
                 "cohorts": [
                     {
-                        "signal_cohort": "exploratory_inverse_historical_rule|crypto_btc_updown_5m|outcome=up",
+                        "signal_cohort": "exploratory_inverse_historical_rule|crypto_btc_updown_daily|outcome=up",
                         "promotion_ready_score": 5,
                         "promotion_ready_checks": 6,
                         "total_pnl_usdc": 4.5,
@@ -124,7 +124,7 @@ def test_batch_mode_scans_top_evidence_families_together(tmp_path, monkeypatch):
                         "probationary": True,
                     },
                     {
-                        "signal_cohort": "exploratory_historical_rule|crypto_xrp_updown_5m|outcome=down",
+                        "signal_cohort": "exploratory_historical_rule|crypto_xrp_updown_event|outcome=down",
                         "promotion_ready_score": 4,
                         "promotion_ready_checks": 6,
                         "total_pnl_usdc": 21,
@@ -132,7 +132,7 @@ def test_batch_mode_scans_top_evidence_families_together(tmp_path, monkeypatch):
                         "monthly_run_rate_usdc": 4000,
                     },
                     {
-                        "signal_cohort": "exploratory_inverse_historical_rule|crypto_sol_updown_5m|outcome=up",
+                        "signal_cohort": "exploratory_inverse_historical_rule|crypto_sol_updown_event|outcome=up",
                         "promotion_ready_score": 4,
                         "promotion_ready_checks": 6,
                         "total_pnl_usdc": 10,
@@ -175,7 +175,7 @@ def test_batch_mode_targets_updown_queries_for_positive_updown_cohorts(tmp_path,
             {
                 "cohorts": [
                     {
-                        "signal_cohort": "exploratory_inverse_historical_rule|crypto_btc_updown_5m|outcome=up",
+                        "signal_cohort": "exploratory_inverse_historical_rule|crypto_btc_updown_daily|outcome=up",
                         "promotion_ready_score": 5,
                         "promotion_ready_checks": 6,
                         "total_pnl_usdc": 4.5,
@@ -184,7 +184,7 @@ def test_batch_mode_targets_updown_queries_for_positive_updown_cohorts(tmp_path,
                         "probationary": True,
                     },
                     {
-                        "signal_cohort": "exploratory_historical_rule|crypto_xrp_updown_5m|outcome=down",
+                        "signal_cohort": "exploratory_historical_rule|crypto_xrp_updown_event|outcome=down",
                         "promotion_ready_score": 4,
                         "promotion_ready_checks": 6,
                         "total_pnl_usdc": 21,
@@ -192,7 +192,7 @@ def test_batch_mode_targets_updown_queries_for_positive_updown_cohorts(tmp_path,
                         "monthly_run_rate_usdc": 4000,
                     },
                     {
-                        "signal_cohort": "exploratory_inverse_historical_rule|crypto_sol_updown_5m|outcome=up",
+                        "signal_cohort": "exploratory_inverse_historical_rule|crypto_sol_updown_event|outcome=up",
                         "promotion_ready_score": 4,
                         "promotion_ready_checks": 6,
                         "total_pnl_usdc": 10,
@@ -275,3 +275,89 @@ def test_blank_environment_overrides_do_not_disable_live_batch_mode(tmp_path, mo
     assert plan["adaptive_priority"]["enabled"] is True
     assert selected[0] == "bitcoin"
     assert len(selected) == 2
+
+
+def test_research_focus_feedback_queries_priority_and_suppression(tmp_path, monkeypatch):
+    loop = _load_loop_module()
+    monkeypatch.delenv("POLYMARKET_SCAN_QUERY_MODE", raising=False)
+    monkeypatch.delenv("POLYMARKET_MAX_SCAN_QUERIES", raising=False)
+    monkeypatch.delenv("POLYMARKET_ADAPTIVE_SCAN_PRIORITY", raising=False)
+
+    governance = tmp_path / "outputs" / "polymarket_model_governance"
+    governance.mkdir(parents=True)
+    (governance / "research_focus.json").write_text(
+        json.dumps(
+            {
+                "status": "ok",
+                "summary": "Prioritise positive price-action tennis cohort.",
+                "collection_queries": ["tennis"],
+                "suppressed_queries": ["bitcoin"],
+                "price_action_feedback": {
+                    "learning_state": "collect_more_positive_price_action_evidence",
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    cfg = EngineConfig(
+        raw={
+            "paths": {"output_root": str(tmp_path / "outputs")},
+            "paper_market_scan": {
+                "mode": "batch",
+                "max_queries_per_cycle": 3,
+                "prioritize_near_promoted": True,
+                "queries": ["bitcoin", "tennis", "world cup"],
+            },
+        },
+        path=tmp_path / "cfg.yaml",
+    )
+
+    selected, plan = loop._select_scan_queries(cfg, "world cup", scan_sequence=1)
+
+    assert selected == ["tennis", "world cup", "bitcoin"]
+    assert plan["adaptive_priority"]["research_focus_queries"] == ["tennis"]
+    assert plan["adaptive_priority"]["suppressed_queries"] == ["bitcoin"]
+
+
+def test_quarantined_5m_crypto_cohorts_do_not_drive_scan_priority(tmp_path, monkeypatch):
+    loop = _load_loop_module()
+    monkeypatch.delenv("POLYMARKET_SCAN_QUERY_MODE", raising=False)
+    monkeypatch.delenv("POLYMARKET_MAX_SCAN_QUERIES", raising=False)
+    monkeypatch.delenv("POLYMARKET_ADAPTIVE_SCAN_PRIORITY", raising=False)
+
+    governance = tmp_path / "outputs" / "polymarket_model_governance"
+    governance.mkdir(parents=True)
+    (governance / "signal_cohort_pnl.json").write_text(
+        json.dumps(
+            {
+                "cohorts": [
+                    {
+                        "signal_cohort": "exploratory_inverse_historical_rule|crypto_btc_updown_5m|outcome=up",
+                        "promotion_ready_score": 6,
+                        "promotion_ready_checks": 6,
+                        "total_pnl_usdc": 25,
+                        "roi": 0.8,
+                        "monthly_run_rate_usdc": 4000,
+                    }
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+    cfg = EngineConfig(
+        raw={
+            "paths": {"output_root": str(tmp_path / "outputs")},
+            "paper_market_scan": {
+                "mode": "batch",
+                "max_queries_per_cycle": 1,
+                "prioritize_near_promoted": True,
+                "queries": ["world cup", "btc updown", "bitcoin"],
+            },
+        },
+        path=tmp_path / "cfg.yaml",
+    )
+
+    selected, plan = loop._select_scan_queries(cfg, "world cup", scan_sequence=1)
+
+    assert selected == ["world cup"]
+    assert plan["adaptive_priority"]["priority_queries"] == []

@@ -185,6 +185,18 @@ and spread compression. Each rule is split chronologically into train/validation
 using entry ask and future exit bid. Rules that fail validation stay shadow-only and do not feed the
 paper broker.
 
+The control loop now also writes a consolidated price-action feedback artifact:
+
+```text
+outputs/polymarket_model_governance/price_action_feedback.json
+```
+
+This treats price movement as a first-class outcome: it consolidates Strategy V2 round trips, fast
+scout cohorts, and microstructure validation into collect/promote/suppress actions. It is still
+shadow-only governance. Positive bid/ask cohorts are prioritised for more websocket collection; negative
+cohorts are suppressed until a new thesis appears; paper promotion still requires positive forward cohort
+evidence rather than a forced trade.
+
 ## Why $100/month is not solved yet
 
 At the current probationary stake of $2, a 3% ROI produces only $0.06 per trade. Hitting $100/month at that level would require about 1,667 trades/month, which is not realistic. The route to the target is therefore:

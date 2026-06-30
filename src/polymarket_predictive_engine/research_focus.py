@@ -6,11 +6,14 @@ from .goal_planner import build_goal_plan
 from .promotion_review import build_promotion_review
 from .utils import now_utc, read_json, safe_float, write_json
 
-CORE_WATCHLIST_COHORTS = {
-    "exploratory_inverse_historical_rule|crypto_btc_updown_5m|outcome=up": "nearest_roi_threshold",
-    "exploratory_historical_rule|crypto_xrp_updown_5m|outcome=down": "high_roi_needs_more_samples",
-    "exploratory_inverse_historical_rule|crypto_sol_updown_5m|outcome=up": "high_roi_tiny_sample",
-}
+CORE_WATCHLIST_COHORTS: dict[str, str] = {}
+
+QUARANTINED_COHORT_FRAGMENTS = (
+    "crypto_btc_updown_5m",
+    "crypto_sol_updown_5m",
+    "crypto_xrp_updown_5m",
+    "crypto_updown_5m",
+)
 
 
 def _num(value: Any, default: float = 0.0) -> float:
@@ -22,6 +25,11 @@ def _bool(value: Any) -> bool:
     if isinstance(value, bool):
         return value
     return str(value or "").strip().lower() in {"1", "true", "yes", "y", "on", "approved", "promoted"}
+
+
+def _is_quarantined_fast_crypto(cohort: str) -> bool:
+    text = cohort.lower()
+    return any(fragment in text for fragment in QUARANTINED_COHORT_FRAGMENTS)
 
 
 def _readiness_gap(row: dict[str, Any]) -> dict[str, Any]:
@@ -59,6 +67,8 @@ def _cohort_query(cohort: str) -> str:
 
 
 def _thesis(cohort: str, row: dict[str, Any]) -> str:
+    if _is_quarantined_fast_crypto(cohort):
+        return "quarantined_fast_crypto_5m_negative_or_untrusted_evidence"
     if cohort in CORE_WATCHLIST_COHORTS:
         return CORE_WATCHLIST_COHORTS[cohort]
     if cohort.startswith("near_miss_learning|unknown"):
@@ -95,6 +105,8 @@ def _priority(row: dict[str, Any]) -> float:
 
 
 def _include_focus_row(cohort: str, row: dict[str, Any]) -> bool:
+    if _is_quarantined_fast_crypto(cohort):
+        return False
     if cohort in CORE_WATCHLIST_COHORTS:
         return True
     if cohort.startswith("near_miss_learning|unknown"):
@@ -153,6 +165,14 @@ def build_research_focus(cfg) -> dict[str, Any]:
 
     promotion_review = build_promotion_review(cfg)
     goal_plan = build_goal_plan(cfg)
+    price_action_feedback = read_json(governance / "price_action_feedback.json", default={}) or {}
+    if not isinstance(price_action_feedback, dict):
+        price_action_feedback = {}
+    feedback_positive = bool(
+        _num(price_action_feedback.get("promotion_candidates"))
+        or _num(price_action_feedback.get("positive_collect_candidates"))
+    )
+    feedback_broaden = str(price_action_feedback.get("learning_state") or "") == "suppress_negative_price_action_and_broaden"
 
     if focus_rows:
         top = focus_rows[0]
@@ -160,6 +180,8 @@ def build_research_focus(cfg) -> dict[str, Any]:
             f"Focus discovery on {top['recommended_collection_query']} for {top['cohort']}; "
             f"thesis={top['thesis']}; remaining gates={top.get('gap', {})}."
         )
+    elif feedback_positive:
+        next_action = str(price_action_feedback.get("next_action") or "Prioritise positive price-action cohorts until bid/ask gates clear.")
     else:
         next_action = "Keep collecting settlement-based evidence; no actionable family has enough fresh positive evidence yet."
 
@@ -168,8 +190,14 @@ def build_research_focus(cfg) -> dict[str, Any]:
         query = str(row.get("recommended_collection_query") or "").strip()
         if query and query not in collection_queries:
             collection_queries.append(query)
+    if feedback_positive or feedback_broaden:
+        for query in price_action_feedback.get("collection_queries", []):
+            query = str(query or "").strip()
+            if query and query not in collection_queries:
+                collection_queries.append(query)
     if not collection_queries:
-        collection_queries = ["bitcoin", "ethereum", "world cup", "tennis"]
+        feedback_queries = [str(query or "").strip() for query in price_action_feedback.get("collection_queries", [])]
+        collection_queries = [query for query in feedback_queries if query] or ["bitcoin", "ethereum", "world cup", "tennis"]
 
     payload = {
         "status": "ok",
@@ -177,6 +205,18 @@ def build_research_focus(cfg) -> dict[str, Any]:
         "summary": next_action,
         "watchlist": focus_rows,
         "collection_queries": collection_queries,
+        "suppressed_queries": price_action_feedback.get("suppressed_queries", []),
+        "price_action_feedback": {
+            "status": price_action_feedback.get("status"),
+            "learning_state": price_action_feedback.get("learning_state"),
+            "next_action": price_action_feedback.get("next_action"),
+            "promotion_candidates": price_action_feedback.get("promotion_candidates"),
+            "positive_collect_candidates": price_action_feedback.get("positive_collect_candidates"),
+            "suppressed_candidates": price_action_feedback.get("suppressed_candidates"),
+            "best_positive_monthly_run_rate_usdc": price_action_feedback.get("best_positive_monthly_run_rate_usdc"),
+            "monthly_goal_gap_usdc": price_action_feedback.get("monthly_goal_gap_usdc"),
+            "top_cohorts": price_action_feedback.get("top_cohorts", [])[:10],
+        },
         "promotion_review": {
             "status": promotion_review.get("status"),
             "top_actionable": promotion_review.get("top_actionable", [])[:10],

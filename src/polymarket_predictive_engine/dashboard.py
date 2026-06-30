@@ -77,6 +77,7 @@ HTML = """<!doctype html>
   <section><h2>Strategy V2 anchored edge</h2><div id="strategyV2"></div></section>
   <section><h2>Fast price-action scout</h2><div id="priceActionScout"></div></section>
   <section><h2>Microstructure edge lab</h2><div id="microstructureLab"></div></section>
+  <section><h2>Price-action feedback loop</h2><div id="priceActionFeedback"></div></section>
   <div class="two">
     <section><h2>Promotion readiness</h2><div id="promotionReadiness"></div></section>
     <section><h2>Edge promotion watchlist</h2><div id="promotionWatchlist"></div></section>
@@ -144,6 +145,7 @@ async function load() {
     const priceScout = data.price_action_scout || {};
     const microstructure = data.price_action_microstructure || {};
     const priceActionPaper = data.price_action_paper_signals || {};
+    const priceActionFeedback = data.price_action_feedback || {};
     const priceScoutPnl = priceScout.realized_pnl_usdc ?? priceScout.total_mark_pnl_usdc;
     const live = data.local_live_heartbeat || data.heartbeat || {};
     const freshness = data.evidence_freshness || {};
@@ -462,6 +464,30 @@ async function load() {
       ["Ask","latest_ask", v=>fmtNum(v,4)],
       ["Bid move","bid_move_abs", v=>fmtNum(v,4)],
       ["Val ROI","validation_roi", v=>fmtNum(Number(v) * 100, 2) + "%"]
+    ]);
+    document.getElementById("priceActionFeedback").innerHTML = facts([
+      ["Learning state", priceActionFeedback.learning_state],
+      ["Next action", priceActionFeedback.next_action, v=>longText(v, 220)],
+      ["Target / month", priceActionFeedback.target_monthly_profit_usdc, fmtUsd],
+      ["Best positive run-rate", priceActionFeedback.best_positive_monthly_run_rate_usdc, fmtUsd],
+      ["Monthly goal gap", priceActionFeedback.monthly_goal_gap_usdc, fmtUsd],
+      ["Promotion candidates", priceActionFeedback.promotion_candidates],
+      ["Positive collect candidates", priceActionFeedback.positive_collect_candidates],
+      ["Suppressed candidates", priceActionFeedback.suppressed_candidates],
+      ["Collect next", priceActionFeedback.collection_queries, joinText],
+      ["Suppress", priceActionFeedback.suppressed_queries, joinText]
+    ]) + `<div style="height:12px"></div><h3>Price-action feedback cohort leaderboard</h3>` + table(priceActionFeedback.top_cohorts || [], [
+      ["Source","source"],
+      ["Cohort","cohort", v=>longText(v, 180)],
+      ["Action","action", v=>longText(v, 160)],
+      ["Query","recommended_collection_query"],
+      ["Closed","closed_trades"],
+      ["Val trades","validation_trades"],
+      ["Realized P&L","realized_pnl_usdc", fmtUsd],
+      ["Realized ROI","realized_roi", v=>fmtNum(Number(v) * 100, 2) + "%"],
+      ["MTM P&L","total_mark_pnl_usdc", fmtUsd],
+      ["Run-rate","monthly_run_rate_usdc", fmtUsd],
+      ["Reason","reason", v=>longText(v, 200)]
     ]);
     document.getElementById("promotionReadiness").innerHTML = table(data.cohort_promotion_readiness?.cohorts || [], [
       ["Cohort","signal_cohort"],
@@ -1448,6 +1474,9 @@ def render_dashboard(cfg: EngineConfig, latest_report: dict[str, Any] | None = N
     price_action_scout_status = _price_action_scout_status(cfg)
     price_action_microstructure_status = _price_action_microstructure_status(cfg)
     price_action_paper_signal_status = _price_action_paper_signal_status(cfg)
+    price_action_feedback = read_json(governance / "price_action_feedback.json", default={}) or {}
+    if not isinstance(price_action_feedback, dict):
+        price_action_feedback = {}
 
     payload = {
         "status": "ok",
@@ -1477,6 +1506,7 @@ def render_dashboard(cfg: EngineConfig, latest_report: dict[str, Any] | None = N
         "price_action_scout": price_action_scout_status,
         "price_action_microstructure": price_action_microstructure_status,
         "price_action_paper_signals": price_action_paper_signal_status,
+        "price_action_feedback": price_action_feedback,
         "edge_strategy_search": edge_strategy_search,
         "promoted_rule_shadow": promoted_rule_shadow,
         "liquidity_discovery": liquidity_discovery,

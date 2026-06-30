@@ -330,6 +330,12 @@ price_action_paper:
   take_profit_min_usdc: 0.05
   minimum_hold_minutes_before_exit: 0
   default_confidence: 0.7
+price_action_feedback:
+  # Consolidates Strategy V2 round trips, fast scout cohorts, and microstructure
+  # validation into one build-test-measure-learn controller. It does not execute
+  # paper/live trades; it tells the scanner what to collect next and what to avoid.
+  min_closed_trades_for_suppression: 5
+  min_validation_trades_for_suppression: 3
 runtime_resource_guard:
   enabled: true
   max_memory_percent: 94

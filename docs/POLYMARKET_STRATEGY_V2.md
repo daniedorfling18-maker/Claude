@@ -256,6 +256,18 @@ It searches pre-declared websocket bid/ask patterns with a chronological train/v
 not a paper-trading approval path. It is a way to kill bad microstructure ideas quickly and promote only
 validated price-action hypotheses into later forward shadow tracking.
 
+The price-action feedback controller closes the build-test-measure-learn loop:
+
+```text
+outputs/polymarket_model_governance/price_action_feedback.json
+```
+
+It consolidates Strategy V2 round-trip cohorts, fast scout cohorts, and microstructure validation into
+one answer: collect more, suppress, or prepare for governed paper-bridge review. This is the layer that
+recognises settlement-independent edge: buying at the executable ask and later selling or marking at the
+bid can be profitable before the market resolves. Settlement validation remains useful for probability
+calibration, but price-action P&L is now a first-class objective for the paper-trading path.
+
 Minimum candidate filters:
 
 ```text

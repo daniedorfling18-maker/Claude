@@ -9,9 +9,11 @@ from .cohort_validation import write_signal_cohort_pnl
 from .dashboard import render_dashboard
 from .goal_planner import build_goal_plan
 from .governance import governance_report
+from .price_action_feedback import build_price_action_feedback
 from .profit_sprint import build_profit_sprint
 from .promotion_review import build_promotion_review
 from .readiness import paper_live_promotion_gate
+from .research_focus import build_research_focus
 from .storage import connect_db
 from .utils import now_utc, write_json
 
@@ -46,6 +48,8 @@ def refresh_governance(cfg: EngineConfig, *, refresh_dashboard: bool = True) -> 
     promotion_review = build_promotion_review(cfg)
     goal_plan = build_goal_plan(cfg)
     profit_sprint = build_profit_sprint(cfg)
+    price_action_feedback = build_price_action_feedback(cfg)
+    research_focus = build_research_focus(cfg)
     promotion_gate = paper_live_promotion_gate(cfg)
     governance = governance_report(cfg)
     dashboard = render_dashboard(cfg) if refresh_dashboard else {"status": "skipped"}
@@ -59,6 +63,8 @@ def refresh_governance(cfg: EngineConfig, *, refresh_dashboard: bool = True) -> 
             "promotion_review": True,
             "goal_plan": True,
             "profit_sprint": True,
+            "price_action_feedback": True,
+            "research_focus": True,
             "promotion_gate": True,
             "governance_report": True,
             "dashboard": bool(refresh_dashboard),
@@ -67,6 +73,8 @@ def refresh_governance(cfg: EngineConfig, *, refresh_dashboard: bool = True) -> 
         "promotion_review_status": promotion_review.get("status"),
         "goal_plan_status": goal_plan.get("status"),
         "profit_sprint_decision": profit_sprint.get("decision"),
+        "price_action_feedback_state": price_action_feedback.get("learning_state"),
+        "research_focus_status": research_focus.get("status"),
         "approved_for_paper_trading": promotion_gate.get("approved_for_paper_trading"),
         "approved_for_live_trading": promotion_gate.get("approved_for_live_trading"),
         "paper_blockers": promotion_gate.get("paper_blockers", []),

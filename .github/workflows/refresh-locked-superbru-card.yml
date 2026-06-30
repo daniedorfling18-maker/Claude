@@ -45,6 +45,41 @@ jobs:
           python -m pip install --upgrade pip
           pip install -e ".[scraper]"
 
+      - name: Validate SuperBru login secrets
+        env:
+          SUPERBRU_EMAIL: ${{ secrets.SUPERBRU_EMAIL }}
+          SUPERBRU_USERNAME: ${{ secrets.SUPERBRU_USERNAME }}
+          SUPERBRU_PASSWORD: ${{ secrets.SUPERBRU_PASSWORD }}
+          SUPERBRU_POOL_URL: ${{ secrets.SUPERBRU_POOL_URL }}
+        run: |
+          python - <<'PY'
+          import os
+          missing = []
+          if not (os.getenv('SUPERBRU_EMAIL') or os.getenv('SUPERBRU_USERNAME')):
+              missing.append('SUPERBRU_EMAIL or SUPERBRU_USERNAME')
+          for name in ['SUPERBRU_PASSWORD', 'SUPERBRU_POOL_URL']:
+              if not os.getenv(name):
+                  missing.append(name)
+          if missing:
+              raise SystemExit('Missing required SuperBru secret(s): ' + ', '.join(missing))
+          print('SuperBru login secrets present: login identity, password and pool URL are configured.')
+          PY
+
+      - name: Scrape live SuperBru leaderboard
+        env:
+          SUPERBRU_EMAIL: ${{ secrets.SUPERBRU_EMAIL }}
+          SUPERBRU_USERNAME: ${{ secrets.SUPERBRU_USERNAME }}
+          SUPERBRU_PASSWORD: ${{ secrets.SUPERBRU_PASSWORD }}
+          SUPERBRU_POOL_URL: ${{ secrets.SUPERBRU_POOL_URL }}
+          SUPERBRU_PLAYER_NAME: ${{ secrets.SUPERBRU_PLAYER_NAME || 'Danie' }}
+          SUPERBRU_POOL_KEYWORDS: ${{ secrets.SUPERBRU_POOL_KEYWORDS || 'Moore Infinity,FIFA WC 26,World Cup 2026' }}
+          PYTHONPATH: scripts:src
+        run: |
+          python scripts/scrape_superbru_leaderboard.py \
+            --out-csv outputs/superbru_pool/live_pool_leaderboard.csv \
+            --summary-json outputs/superbru_pool/live_pool_leaderboard_summary.json \
+            --headless
+
       - name: Fetch fresh market odds once
         env:
           THE_ODDS_API_KEY: ${{ secrets.THE_ODDS_API_KEY }}
@@ -95,21 +130,6 @@ jobs:
           if last_updates:
               print(f'Bookmaker update window: {last_updates[0]} -> {last_updates[-1]}')
           PY
-
-      - name: Scrape live SuperBru leaderboard
-        env:
-          SUPERBRU_EMAIL: ${{ secrets.SUPERBRU_EMAIL || secrets.SUPERBRU_USERNAME }}
-          SUPERBRU_USERNAME: ${{ secrets.SUPERBRU_USERNAME || secrets.SUPERBRU_EMAIL }}
-          SUPERBRU_PASSWORD: ${{ secrets.SUPERBRU_PASSWORD }}
-          SUPERBRU_POOL_URL: ${{ secrets.SUPERBRU_POOL_URL }}
-          SUPERBRU_PLAYER_NAME: ${{ secrets.SUPERBRU_PLAYER_NAME || 'Danie' }}
-          SUPERBRU_POOL_KEYWORDS: ${{ secrets.SUPERBRU_POOL_KEYWORDS || 'Moore Infinity,FIFA WC 26,World Cup 2026' }}
-          PYTHONPATH: scripts:src
-        run: |
-          python scripts/scrape_superbru_leaderboard.py \
-            --out-csv outputs/superbru_pool/live_pool_leaderboard.csv \
-            --summary-json outputs/superbru_pool/live_pool_leaderboard_summary.json \
-            --headless
 
       - name: Build base final picks from fresh odds and live leaderboard
         env:

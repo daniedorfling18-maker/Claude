@@ -81,6 +81,20 @@ jobs:
             --summary-json outputs/superbru_pool/live_pool_leaderboard_summary.json \
             --headless
 
+      - name: Build live chaser profiles
+        env:
+          SUPERBRU_PLAYER_NAME: ${{ secrets.SUPERBRU_PLAYER_NAME || 'Danie' }}
+        run: |
+          python scripts/build_live_chaser_profiles.py \
+            --leaderboard-csv outputs/superbru_pool/live_pool_leaderboard.csv \
+            --leader-player "${SUPERBRU_PLAYER_NAME:-Danie}" \
+            --chaser-range 8.0 \
+            --min-chasers 3 \
+            --max-chasers 10 \
+            --out-csv outputs/superbru_pool/live_chaser_profiles.csv \
+            --out-chasers outputs/superbru_pool/live_chasers.txt \
+            --summary-json outputs/superbru_pool/live_chaser_profiles_summary.json
+
       - name: Fetch fresh market odds once
         env:
           THE_ODDS_API_KEY: ${{ secrets.THE_ODDS_API_KEY }}
@@ -132,9 +146,10 @@ jobs:
               print(f'Bookmaker update window: {last_updates[0]} -> {last_updates[-1]}')
           PY
 
-      - name: Build base final picks from fresh odds and live leaderboard
+      - name: Build base final picks from fresh odds, live leaderboard and live chasers
         env:
           PYTHONPATH: src
+          SUPERBRU_PLAYER_NAME: ${{ secrets.SUPERBRU_PLAYER_NAME || 'Danie' }}
         run: |
           mkdir -p data outputs/latest outputs/final_leader_decision_round_summary_profiles outputs/superbru_pool
           python - <<'PY'
@@ -174,6 +189,9 @@ jobs:
           print(f'Wrote {fixture_path} with {len(fixtures)} fixtures')
           PY
 
+          LIVE_CHASERS="$(cat outputs/superbru_pool/live_chasers.txt)"
+          echo "Live chasers: ${LIVE_CHASERS}"
+
           python -m superbru_score_engine predict \
             --config config.yaml \
             --fixtures data/fixtures_real.csv \
@@ -185,6 +203,9 @@ jobs:
             --odds-json outputs/market_odds/worldcup_market_odds_raw.json \
             --predictions-csv outputs/latest/predictions.csv \
             --leaderboard-csv outputs/superbru_pool/live_pool_leaderboard.csv \
+            --chaser-profiles-csv outputs/superbru_pool/live_chaser_profiles.csv \
+            --leader-player "${SUPERBRU_PLAYER_NAME:-Danie}" \
+            --chasers "${LIVE_CHASERS}" \
             --out-dir outputs/final_leader_decision_round_summary_profiles
 
       - name: Refresh locked card outputs from fetched odds
@@ -225,6 +246,7 @@ jobs:
             outputs/latest/*.csv
             outputs/latest/*.json
             outputs/superbru_pool/**/*.csv
+            outputs/superbru_pool/**/*.txt
             outputs/superbru_pool/**/*.json
             outputs/superbru_pool/**/*.html
             outputs/superbru_pool/**/*.png

@@ -44,6 +44,7 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -e ".[scraper]"
+          python -m playwright install --with-deps chromium
 
       - name: Validate SuperBru login secrets
         env:

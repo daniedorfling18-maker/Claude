@@ -1,29 +1,118 @@
-name: Auto Pick (Manual Only - Disabled Pending Freshness Hardening)
+name: Auto Pick (Scheduled Live Only)
 
 on:
   workflow_dispatch:
     inputs:
+      window_minutes:
+        description: 'Submit picks for matches kicking off within this many minutes'
+        required: false
+        default: '40'
       dry_run:
-        description: 'Dry run only. Real submissions are disabled until stale-input fallbacks are fully removed.'
+        description: 'Dry run only; do not submit to SuperBru'
         required: false
         default: 'true'
+  schedule:
+    # Narrow just-before-game windows from 1 July onward. Times are UTC.
+    # The script scans the live SuperBru page first; if no match is queued, no odds/API call is made.
+    - cron: '35 0,15,19,23 1 7 *'
+    - cron: '35 18,22 2 7 *'
+    - cron: '35 2,17,21 3 7 *'
+    - cron: '05 1 4 7 *'
+    # Later rounds: common knockout slots only, still protected by live page scan.
+    - cron: '35 15,18,19,20,22,23 4-19 7 *'
+    - cron: '35 0,2 5-19 7 *'
 
 permissions:
   contents: read
   actions: read
 
 concurrency:
-  group: auto-pick-disabled-${{ github.ref }}
+  group: auto-pick-${{ github.ref }}
   cancel-in-progress: false
 
 jobs:
-  auto-pick-disabled:
+  auto-pick:
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 30
     steps:
-      - name: Disabled freshness gate
+      - uses: actions/checkout@v4
+
+      - name: Validate live Auto Pick secrets
+        env:
+          SUPERBRU_EMAIL: ${{ secrets.SUPERBRU_EMAIL }}
+          SUPERBRU_USERNAME: ${{ secrets.SUPERBRU_USERNAME }}
+          SUPERBRU_PASSWORD: ${{ secrets.SUPERBRU_PASSWORD }}
+          SUPERBRU_POOL_URL: ${{ secrets.SUPERBRU_POOL_URL }}
+          THE_ODDS_API_KEY: ${{ secrets.THE_ODDS_API_KEY }}
         run: |
-          echo "Scheduled Auto Pick is disabled pending final stale-input hardening."
-          echo "Reason: prior workflow used the committed locked card for schedule preflight and could fall back to card-derived picks."
-          echo "Use Refresh Locked Superbru Card first; do not enable Auto Pick until live-only submission safeguards are reviewed."
-          exit 1
+          python3 - <<'PY'
+          import os
+          missing = []
+          if not (os.getenv('SUPERBRU_EMAIL') or os.getenv('SUPERBRU_USERNAME')):
+              missing.append('SUPERBRU_EMAIL or SUPERBRU_USERNAME')
+          for name in ['SUPERBRU_PASSWORD', 'SUPERBRU_POOL_URL', 'THE_ODDS_API_KEY']:
+              if not os.getenv(name):
+                  missing.append(name)
+          if missing:
+              raise SystemExit('Missing required Auto Pick secret(s): ' + ', '.join(missing))
+          print('Auto Pick secrets present.')
+          PY
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[scraper]"
+          python -m playwright install chromium --with-deps
+
+      - name: Run live-only match-scoped auto pick
+        env:
+          SUPERBRU_EMAIL: ${{ secrets.SUPERBRU_USERNAME || secrets.SUPERBRU_EMAIL }}
+          SUPERBRU_PASSWORD: ${{ secrets.SUPERBRU_PASSWORD }}
+          SUPERBRU_LOGIN_URL: ${{ secrets.SUPERBRU_LOGIN_URL }}
+          SUPERBRU_POOL_URL: ${{ secrets.SUPERBRU_POOL_URL }}
+          THE_ODDS_API_KEY: ${{ secrets.THE_ODDS_API_KEY }}
+          SUPERBRU_PLAYER_NAME: ${{ secrets.SUPERBRU_PLAYER_NAME || 'Danie' }}
+          SUPERBRU_POOL_KEYWORDS: ${{ secrets.SUPERBRU_POOL_KEYWORDS || 'Moore Infinity,FIFA WC 26,World Cup 2026' }}
+        run: |
+          LOGIN_URL="${SUPERBRU_LOGIN_URL:-https://www.superbru.com/login}"
+          WINDOW_MINUTES="${{ github.event.inputs.window_minutes || '40' }}"
+          DRY_RUN_FLAG=""
+          MATCH_ODDS_FLAG=""
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ "${{ github.event.inputs.dry_run || 'true' }}" = "true" ]; then
+            DRY_RUN_FLAG="--dry-run"
+            MATCH_ODDS_FLAG="--skip-match-odds"
+          fi
+
+          python scripts/auto_pick_match_scoped_smart_odds.py \
+            --email "$SUPERBRU_EMAIL" \
+            --password "$SUPERBRU_PASSWORD" \
+            --login-url "$LOGIN_URL" \
+            --pool-url "$SUPERBRU_POOL_URL" \
+            --config config.yaml \
+            --window-minutes "$WINDOW_MINUTES" \
+            --pick-card-csv outputs/final_locked_picks/superbru_final_card.csv \
+            --late-card-grace-minutes 0 \
+            --odds-lookup-window-minutes 90 \
+            --leader-player "${SUPERBRU_PLAYER_NAME:-Danie}" \
+            --leaderboard-pool-keywords "${SUPERBRU_POOL_KEYWORDS:-Moore Infinity,FIFA WC 26,World Cup 2026}" \
+            --leader-safe-buffer 5.0 \
+            --chaser-range 8.0 \
+            --headless \
+            --require-submission \
+            $DRY_RUN_FLAG \
+            $MATCH_ODDS_FLAG \
+            --out-dir outputs/pregame_checks/auto_pick
+
+      - name: Upload results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: auto-pick-results-${{ github.run_number }}
+          path: outputs/pregame_checks/
+          retention-days: 7
+          if-no-files-found: warn

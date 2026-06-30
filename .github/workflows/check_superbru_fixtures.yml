@@ -1,85 +1,24 @@
-name: Superbru Fixture Checker
+name: Superbru Fixture Checker (Manual Only - Disabled Pending Auto Pick Hardening)
 
 on:
   workflow_dispatch:
-  schedule:
-    # Once daily at 06:00 UTC (08:00 SAST). Verifies upcoming fixtures are covered
-    # by auto_pick.yml cron entries and opens a PR with any missing ones.
-    - cron: '0 6 * * *'
 
 permissions:
-  contents: write
-  pull-requests: write
+  contents: read
+  pull-requests: read
 
 concurrency:
-  group: superbru-fixture-checker
+  group: superbru-fixture-checker-disabled
   cancel-in-progress: false
 
 jobs:
-  check-fixtures:
+  check-fixtures-disabled:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 5
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-        with:
-          # A PAT with `repo` + `workflow` scope is required to push changes to a
-          # workflow file (auto_pick.yml). Without it the job still produces the
-          # fixture report artifact, but cannot open the cron-update PR.
-          token: ${{ secrets.WORKFLOW_PAT || github.token }}
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
-          cache: "pip"
-
-      - name: Install dependencies
+      - name: Disabled freshness gate
         run: |
-          python -m pip install --upgrade pip
-          pip install -e ".[scraper]"
-          python -m playwright install chromium --with-deps
-
-      - name: Check Superbru fixtures and stage cron updates
-        env:
-          SUPERBRU_EMAIL: ${{ secrets.SUPERBRU_USERNAME }}
-          SUPERBRU_PASSWORD: ${{ secrets.SUPERBRU_PASSWORD }}
-        run: |
-          python scripts/check_superbru_fixtures.py --apply --out-dir outputs/fixture_check
-
-      - name: Upload fixture report
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: superbru-fixture-check-${{ github.run_number }}
-          path: outputs/fixture_check/
-          retention-days: 14
-          if-no-files-found: warn
-
-      - name: Open PR with cron additions
-        env:
-          GH_TOKEN: ${{ secrets.WORKFLOW_PAT }}
-        run: |
-          set -euo pipefail
-          if git diff --quiet -- .github/workflows/auto_pick.yml; then
-            echo "No auto_pick.yml cron changes needed."
-            exit 0
-          fi
-          if [ -z "${GH_TOKEN}" ]; then
-            echo "::warning::Uncovered fixtures found, but WORKFLOW_PAT is not set, so the workflow file cannot be updated via PR. See the superbru-fixture-check artifact for the suggested cron lines."
-            git checkout -- .github/workflows/auto_pick.yml
-            exit 0
-          fi
-          BRANCH="auto/fixture-cron-update-$(date -u +%Y%m%dT%H%M%SZ)"
-          BASE="${GITHUB_REF_NAME:-main}"
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git checkout -b "$BRANCH"
-          git add .github/workflows/auto_pick.yml
-          git commit -m "Auto-add missing auto-pick cron entries from Superbru fixtures"
-          git push origin "$BRANCH"
-          gh pr create \
-            --base "$BASE" \
-            --head "$BRANCH" \
-            --title "Auto-pick cron update: cover new Superbru fixtures" \
-            --body-file outputs/fixture_check/pr_body.md
+          echo "Superbru Fixture Checker is disabled while Auto Pick is disabled."
+          echo "Reason: it edits auto_pick.yml cron entries, which could reintroduce stale-card scheduling."
+          echo "Re-enable only after Auto Pick is live-scan/live-odds only and no committed-card fallback remains."
+          exit 1

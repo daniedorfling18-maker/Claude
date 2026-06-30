@@ -53,8 +53,10 @@ function Invoke-Step {
   }
   $lines | Tee-Object -FilePath $OutFile | Tee-Object -FilePath $logFile -Append
   Remove-Item $stdoutPath, $stderrPath -ErrorAction SilentlyContinue
-  if ($process.ExitCode -ne 0) {
-    throw "$Name failed with exit code $($process.ExitCode)"
+  $process.Refresh()
+  $exitCode = [int]$process.ExitCode
+  if ($exitCode -ne 0) {
+    throw "$Name failed with exit code $exitCode"
   }
 }
 

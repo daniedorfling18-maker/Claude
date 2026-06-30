@@ -40,3 +40,4 @@ def test_shadow_research_cycle_bounds_each_python_step():
     assert "Start-Process" in text
     assert "$process.WaitForExit($StepTimeoutSeconds * 1000)" in text
     assert "timed out after $StepTimeoutSeconds seconds" in text
+    assert "$exitCode = [int]$process.ExitCode" in text

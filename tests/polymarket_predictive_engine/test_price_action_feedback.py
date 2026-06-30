@@ -146,3 +146,40 @@ def test_price_action_feedback_prioritises_family_microstructure_candidate(tmp_p
     assert payload["top_cohorts"][0]["source"] == "microstructure_family"
     assert payload["top_cohorts"][0]["family"] == "sports_other"
     assert payload["top_cohorts"][0]["cohort"] == "price_action_microstructure|sports_other|bid_momentum_tight"
+
+
+def test_price_action_feedback_prioritises_exit_policy_microstructure_candidate(tmp_path):
+    cfg = _cfg(tmp_path)
+    write_csv(
+        cfg.output_root / "polymarket_price_action" / "microstructure_exit_policy_evidence.csv",
+        [
+            {
+                "exit_policy_id": "quick_3pct_1obs",
+                "take_profit_return": "0.03",
+                "stop_loss_return": "0.20",
+                "max_forward_observations": "1",
+                "min_profit_usdc": "0.01",
+                "market_family": "sports_other",
+                "signal_cohort": "price_action_microstructure|sports_other|bid_momentum_tight|exit=quick_3pct_1obs",
+                "rule_id": "bid_momentum_tight|move>=0.035|spread<=0.01",
+                "rule_family": "bid_momentum_tight",
+                "total_trades": "8",
+                "train_trades": "4",
+                "validation_trades": "4",
+                "validation_pnl_usdc": "2.6",
+                "validation_roi": "0.065",
+                "validation_win_rate": "0.75",
+                "validation_pass": "True",
+                "status": "candidate_for_forward_shadow",
+            }
+        ],
+    )
+
+    payload = build_price_action_feedback(cfg)
+
+    assert payload["learning_state"] == "price_action_candidates_ready_for_governed_paper_bridge"
+    assert payload["promotion_candidates"] == 1
+    assert payload["collection_queries"] == ["world cup"]
+    assert payload["top_cohorts"][0]["source"] == "microstructure_exit_policy"
+    assert payload["top_cohorts"][0]["exit_policy_id"] == "quick_3pct_1obs"
+    assert payload["top_cohorts"][0]["take_profit_return"] == approx(0.03)

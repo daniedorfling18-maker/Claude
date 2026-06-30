@@ -11,6 +11,7 @@ OUTPUT_DIRNAME = "polymarket_price_action"
 TRADE_EVENTS_FILE = "microstructure_trade_events.csv"
 RULE_EVIDENCE_FILE = "microstructure_rule_evidence.csv"
 FAMILY_RULE_EVIDENCE_FILE = "microstructure_family_rule_evidence.csv"
+EXIT_POLICY_EVIDENCE_FILE = "microstructure_exit_policy_evidence.csv"
 CURRENT_CANDIDATES_FILE = "microstructure_current_candidates.csv"
 SUMMARY_JSON = "microstructure_summary.json"
 
@@ -71,7 +72,19 @@ FAMILY_RULE_FIELDS = [
     *RULE_FIELDS,
 ]
 
+EXIT_POLICY_FIELDS = [
+    "exit_policy_id",
+    "take_profit_return",
+    "stop_loss_return",
+    "max_forward_observations",
+    "min_profit_usdc",
+    "market_family",
+    "signal_cohort",
+    *RULE_FIELDS,
+]
+
 CURRENT_FIELDS = [
+    "exit_policy_id",
     "rule_id",
     "rule_family",
     "signal_cohort",
@@ -94,6 +107,10 @@ CURRENT_FIELDS = [
     "validation_roi",
     "validation_win_rate",
     "validation_trades",
+    "take_profit_return",
+    "stop_loss_return",
+    "max_forward_observations",
+    "min_profit_usdc",
     "shadow_only",
 ]
 
@@ -125,6 +142,62 @@ def _int_setting(settings: dict[str, Any], key: str, default: int) -> int:
 def _float_setting(settings: dict[str, Any], key: str, default: float) -> float:
     value = safe_float(settings.get(key))
     return default if value is None else float(value)
+
+
+def _base_exit_policy(settings: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "exit_policy_id": "base",
+        "take_profit_return": _float_setting(settings, "take_profit_return", 0.08),
+        "stop_loss_return": _float_setting(settings, "stop_loss_return", 0.06),
+        "max_forward_observations": _int_setting(settings, "max_forward_observations", 8),
+        "min_profit_usdc": _float_setting(settings, "min_profit_usdc", 0.05),
+    }
+
+
+def _normalise_exit_policy(raw: Any, settings: dict[str, Any], index: int) -> dict[str, Any] | None:
+    if not isinstance(raw, dict):
+        return None
+    base = _base_exit_policy(settings)
+    policy = {
+        "exit_policy_id": str(raw.get("exit_policy_id") or raw.get("id") or f"policy_{index}").strip() or f"policy_{index}",
+        "take_profit_return": safe_float(raw.get("take_profit_return")),
+        "stop_loss_return": safe_float(raw.get("stop_loss_return")),
+        "max_forward_observations": safe_float(raw.get("max_forward_observations")),
+        "min_profit_usdc": safe_float(raw.get("min_profit_usdc")),
+    }
+    for key, value in base.items():
+        if policy.get(key) in {None, ""}:
+            policy[key] = value
+    policy["take_profit_return"] = float(policy["take_profit_return"])
+    policy["stop_loss_return"] = float(policy["stop_loss_return"])
+    policy["max_forward_observations"] = int(policy["max_forward_observations"])
+    policy["min_profit_usdc"] = float(policy["min_profit_usdc"])
+    if policy["take_profit_return"] <= 0 or policy["stop_loss_return"] <= 0 or policy["max_forward_observations"] <= 0:
+        return None
+    return policy
+
+
+def _exit_policy_grid(settings: dict[str, Any]) -> list[dict[str, Any]]:
+    raw_grid = settings.get("exit_policy_grid")
+    raw_items = raw_grid if isinstance(raw_grid, list) else []
+    policies = [_base_exit_policy(settings)]
+    seen = {str(policies[0]["exit_policy_id"])}
+    for idx, raw in enumerate(raw_items, start=1):
+        policy = _normalise_exit_policy(raw, settings, idx)
+        if policy is None or str(policy["exit_policy_id"]) in seen:
+            continue
+        policies.append(policy)
+        seen.add(str(policy["exit_policy_id"]))
+    return policies
+
+
+def _settings_with_exit_policy(settings: dict[str, Any], policy: dict[str, Any]) -> dict[str, Any]:
+    updated = dict(settings)
+    updated["take_profit_return"] = policy["take_profit_return"]
+    updated["stop_loss_return"] = policy["stop_loss_return"]
+    updated["max_forward_observations"] = policy["max_forward_observations"]
+    updated["min_profit_usdc"] = policy["min_profit_usdc"]
+    return updated
 
 
 def _token_id(row: dict[str, Any]) -> str:
@@ -554,6 +627,7 @@ def _current_candidates(
     settings: dict[str, Any],
 ) -> list[dict[str, Any]]:
     max_candidates = _int_setting(settings, "max_current_candidates", 20)
+    base_policy = _base_exit_policy(settings)
     rule_lookup = {row["rule_id"]: row for row in rule_rows if str(row.get("validation_pass")).lower() == "true" or row.get("validation_pass") is True}
     if not rule_lookup:
         return []
@@ -572,6 +646,7 @@ def _current_candidates(
             seen.add(key)
             candidates.append(
                 {
+                    "exit_policy_id": evidence.get("exit_policy_id", base_policy["exit_policy_id"]),
                     "rule_id": rule["rule_id"],
                     "rule_family": rule["rule_family"],
                     "signal_cohort": f"price_action_microstructure|{rule['rule_family']}",
@@ -594,6 +669,10 @@ def _current_candidates(
                     "validation_roi": evidence.get("validation_roi", ""),
                     "validation_win_rate": evidence.get("validation_win_rate", ""),
                     "validation_trades": evidence.get("validation_trades", ""),
+                    "take_profit_return": evidence.get("take_profit_return", base_policy["take_profit_return"]),
+                    "stop_loss_return": evidence.get("stop_loss_return", base_policy["stop_loss_return"]),
+                    "max_forward_observations": evidence.get("max_forward_observations", base_policy["max_forward_observations"]),
+                    "min_profit_usdc": evidence.get("min_profit_usdc", base_policy["min_profit_usdc"]),
                     "shadow_only": True,
                 }
             )
@@ -613,18 +692,22 @@ def _family_current_candidates(
     settings: dict[str, Any],
 ) -> list[dict[str, Any]]:
     max_candidates = _int_setting(settings, "max_current_candidates", 20)
-    rule_lookup = {
-        (str(row.get("market_family") or ""), row["rule_id"]): row
+    base_policy = _base_exit_policy(settings)
+    passing_rows = [
+        row
         for row in family_rule_rows
         if str(row.get("validation_pass")).lower() == "true" or row.get("validation_pass") is True
-    }
-    if not rule_lookup:
+    ]
+    if not passing_rows:
         return []
 
     specs = {rule["rule_id"]: rule for rule in _rule_specs(settings)}
     candidates: list[dict[str, Any]] = []
-    seen: set[tuple[str, str, str]] = set()
-    for (market_family, rule_id), evidence in rule_lookup.items():
+    seen: set[tuple[str, str, str, str]] = set()
+    for evidence in passing_rows:
+        market_family = str(evidence.get("market_family") or "")
+        rule_id = str(evidence.get("rule_id") or "")
+        exit_policy_id = str(evidence.get("exit_policy_id") or base_policy["exit_policy_id"])
         rule = specs.get(rule_id)
         if rule is None:
             continue
@@ -633,12 +716,13 @@ def _family_current_candidates(
             feature_family = str(feature.get("family") or "")
             if not token or feature_family != market_family or not _passes_rule(feature, rule):
                 continue
-            key = (market_family, token, rule_id)
+            key = (market_family, token, rule_id, exit_policy_id)
             if key in seen:
                 continue
             seen.add(key)
             candidates.append(
                 {
+                    "exit_policy_id": evidence.get("exit_policy_id", base_policy["exit_policy_id"]),
                     "rule_id": rule_id,
                     "rule_family": rule["rule_family"],
                     "signal_cohort": evidence.get("signal_cohort")
@@ -662,6 +746,10 @@ def _family_current_candidates(
                     "validation_roi": evidence.get("validation_roi", ""),
                     "validation_win_rate": evidence.get("validation_win_rate", ""),
                     "validation_trades": evidence.get("validation_trades", ""),
+                    "take_profit_return": evidence.get("take_profit_return", base_policy["take_profit_return"]),
+                    "stop_loss_return": evidence.get("stop_loss_return", base_policy["stop_loss_return"]),
+                    "max_forward_observations": evidence.get("max_forward_observations", base_policy["max_forward_observations"]),
+                    "min_profit_usdc": evidence.get("min_profit_usdc", base_policy["min_profit_usdc"]),
                     "shadow_only": True,
                 }
             )
@@ -673,6 +761,45 @@ def _family_current_candidates(
         reverse=True,
     )
     return candidates[:max_candidates]
+
+
+def _exit_policy_evidence(
+    grouped: dict[str, list[dict[str, str]]],
+    settings: dict[str, Any],
+) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    for policy in _exit_policy_grid(settings):
+        policy_settings = _settings_with_exit_policy(settings, policy)
+        policy_events = _trade_events(grouped, policy_settings)
+        if not policy_events:
+            continue
+        for rule_row in _family_rule_evidence(policy_events, policy_settings):
+            signal_cohort = (
+                f"{rule_row['signal_cohort']}|exit={policy['exit_policy_id']}"
+                if rule_row.get("signal_cohort")
+                else f"price_action_microstructure|{rule_row.get('market_family', 'unknown')}|{rule_row['rule_family']}|exit={policy['exit_policy_id']}"
+            )
+            rows.append(
+                {
+                    "exit_policy_id": policy["exit_policy_id"],
+                    "take_profit_return": policy["take_profit_return"],
+                    "stop_loss_return": policy["stop_loss_return"],
+                    "max_forward_observations": policy["max_forward_observations"],
+                    "min_profit_usdc": policy["min_profit_usdc"],
+                    **rule_row,
+                    "signal_cohort": signal_cohort,
+                }
+            )
+    rows.sort(
+        key=lambda row: (
+            bool(row.get("validation_pass")),
+            safe_float(row.get("validation_roi")) or -999.0,
+            safe_float(row.get("validation_pnl_usdc")) or -999.0,
+            int(safe_float(row.get("validation_trades")) or 0),
+        ),
+        reverse=True,
+    )
+    return rows
 
 
 def build_microstructure_edge_lab(cfg: EngineConfig) -> dict[str, Any]:
@@ -695,7 +822,12 @@ def build_microstructure_edge_lab(cfg: EngineConfig) -> dict[str, Any]:
     latest = _latest_features(grouped, settings)
     rule_rows = _rule_evidence(events, settings) if events else []
     family_rule_rows = _family_rule_evidence(events, settings) if events else []
-    current = _current_candidates(latest, rule_rows, settings) + _family_current_candidates(latest, family_rule_rows, settings)
+    exit_policy_rows = _exit_policy_evidence(grouped, settings) if events else []
+    current = (
+        _current_candidates(latest, rule_rows, settings)
+        + _family_current_candidates(latest, family_rule_rows, settings)
+        + _family_current_candidates(latest, exit_policy_rows, settings)
+    )
     current.sort(
         key=lambda row: (
             safe_float(row.get("validation_roi")) or -999.0,
@@ -707,6 +839,7 @@ def build_microstructure_edge_lab(cfg: EngineConfig) -> dict[str, Any]:
     write_csv(out_dir / TRADE_EVENTS_FILE, events, fieldnames=EVENT_FIELDS)
     write_csv(out_dir / RULE_EVIDENCE_FILE, rule_rows, fieldnames=RULE_FIELDS)
     write_csv(out_dir / FAMILY_RULE_EVIDENCE_FILE, family_rule_rows, fieldnames=FAMILY_RULE_FIELDS)
+    write_csv(out_dir / EXIT_POLICY_EVIDENCE_FILE, exit_policy_rows, fieldnames=EXIT_POLICY_FIELDS)
     write_csv(out_dir / CURRENT_CANDIDATES_FILE, current, fieldnames=CURRENT_FIELDS)
 
     passing = [row for row in rule_rows if str(row.get("validation_pass")).lower() == "true" or row.get("validation_pass") is True]
@@ -715,8 +848,14 @@ def build_microstructure_edge_lab(cfg: EngineConfig) -> dict[str, Any]:
         for row in family_rule_rows
         if str(row.get("validation_pass")).lower() == "true" or row.get("validation_pass") is True
     ]
+    exit_policy_passing = [
+        row
+        for row in exit_policy_rows
+        if str(row.get("validation_pass")).lower() == "true" or row.get("validation_pass") is True
+    ]
     top_rule = passing[0] if passing else (rule_rows[0] if rule_rows else {})
     top_family_rule = family_passing[0] if family_passing else (family_rule_rows[0] if family_rule_rows else {})
+    top_exit_policy_rule = exit_policy_passing[0] if exit_policy_passing else (exit_policy_rows[0] if exit_policy_rows else {})
     summary = {
         "status": "computed",
         "generated_at_utc": now_utc(),
@@ -729,20 +868,25 @@ def build_microstructure_edge_lab(cfg: EngineConfig) -> dict[str, Any]:
         "validation_pass_rules": len(passing),
         "family_rule_rows": len(family_rule_rows),
         "family_validation_pass_rules": len(family_passing),
+        "exit_policy_rows": len(exit_policy_rows),
+        "exit_policy_validation_pass_rules": len(exit_policy_passing),
         "current_candidates": len(current),
         "decision": "microstructure_rules_ready_for_forward_shadow"
-        if passing or family_passing
+        if passing or family_passing or exit_policy_passing
         else "collect_more_websocket_microstructure_evidence"
         if events
         else "collect_more_websocket_rows",
         "top_rule": top_rule,
         "top_family_rule": top_family_rule,
+        "top_exit_policy_rule": top_exit_policy_rule,
         "top_rules": rule_rows[:15],
         "top_family_rules": family_rule_rows[:15],
+        "top_exit_policy_rules": exit_policy_rows[:15],
         "current_candidates_preview": current[:15],
         "trade_events_file": str(out_dir / TRADE_EVENTS_FILE),
         "rule_evidence_file": str(out_dir / RULE_EVIDENCE_FILE),
         "family_rule_evidence_file": str(out_dir / FAMILY_RULE_EVIDENCE_FILE),
+        "exit_policy_evidence_file": str(out_dir / EXIT_POLICY_EVIDENCE_FILE),
         "current_candidates_file": str(out_dir / CURRENT_CANDIDATES_FILE),
         "warnings": {
             "shadow_only": True,

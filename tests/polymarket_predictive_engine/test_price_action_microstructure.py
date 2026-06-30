@@ -150,3 +150,59 @@ def test_microstructure_lab_validates_rules_inside_each_market_family(tmp_path):
     assert crypto_bid_rules
     assert crypto_bid_rules[0]["validation_pass"] == "False"
     assert any(row["signal_cohort"] == "price_action_microstructure|sports_other|bid_momentum_tight" for row in current)
+
+
+def test_microstructure_lab_discovers_family_exit_policy_that_clears_spread(tmp_path):
+    cfg = _cfg(tmp_path)
+    cfg.raw["price_action_microstructure"].update(
+        {
+            "take_profit_return": 0.20,
+            "stop_loss_return": 0.50,
+            "max_forward_observations": 2,
+            "min_total_trades": 4,
+            "min_validation_trades": 2,
+            "min_move_grid": [0.035],
+            "exit_policy_grid": [
+                {
+                    "exit_policy_id": "quick_3pct_1obs",
+                    "take_profit_return": 0.03,
+                    "stop_loss_return": 0.20,
+                    "max_forward_observations": 1,
+                    "min_profit_usdc": 0.01,
+                }
+            ],
+        }
+    )
+    pattern = [0.30, 0.34, 0.37, 0.30]
+    bids = pattern * 5 + [0.34]
+    write_csv(
+        cfg.output_root / "polymarket_training" / "websocket_market_features.csv",
+        [
+            _ws_row(
+                i,
+                bid,
+                token="world-cup-exit-token",
+                category="sports_other",
+                slug="world-cup-exit-test",
+                question="World Cup exit-policy test?",
+            )
+            for i, bid in enumerate(bids)
+        ],
+    )
+
+    summary = build_microstructure_edge_lab(cfg)
+    exit_rows = read_csv_rows(cfg.output_root / "polymarket_price_action" / "microstructure_exit_policy_evidence.csv")
+    current = read_csv_rows(cfg.output_root / "polymarket_price_action" / "microstructure_current_candidates.csv")
+    quick_passes = [
+        row
+        for row in exit_rows
+        if row["exit_policy_id"] == "quick_3pct_1obs"
+        and row["market_family"] == "sports_other"
+        and row["rule_family"] == "bid_momentum_tight"
+        and row["validation_pass"] == "True"
+    ]
+
+    assert summary["exit_policy_validation_pass_rules"] >= 1
+    assert quick_passes
+    assert quick_passes[0]["signal_cohort"] == "price_action_microstructure|sports_other|bid_momentum_tight|exit=quick_3pct_1obs"
+    assert any(row["exit_policy_id"] == "quick_3pct_1obs" for row in current)

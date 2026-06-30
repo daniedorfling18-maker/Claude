@@ -42,6 +42,7 @@ def _query_from_text(text: str) -> str:
 
 def _source_priority(source: str) -> int:
     priorities = {
+        "microstructure_exit_policy": 5,
         "microstructure_family": 4,
         "microstructure": 3,
         "price_action_scout": 2,
@@ -183,6 +184,11 @@ def _microstructure_row(row: dict[str, str], *, min_validation_trades: int, sour
         "validation_win_rate": _num(row.get("validation_win_rate")),
         "validation_pnl_usdc": validation_pnl,
         "validation_roi": validation_roi,
+        "exit_policy_id": row.get("exit_policy_id", ""),
+        "take_profit_return": _num(row.get("take_profit_return")),
+        "stop_loss_return": _num(row.get("stop_loss_return")),
+        "max_forward_observations": int(_num(row.get("max_forward_observations"))),
+        "min_profit_usdc": _num(row.get("min_profit_usdc")),
         "monthly_run_rate_usdc": 0.0,
         "realized_pnl_usdc": validation_pnl,
         "realized_roi": validation_roi,
@@ -239,6 +245,8 @@ def build_price_action_feedback(cfg: EngineConfig) -> dict[str, Any]:
         cohorts.append(_microstructure_row(row, min_validation_trades=min_validation_trades))
     for row in read_csv_rows(price_root / "microstructure_family_rule_evidence.csv"):
         cohorts.append(_microstructure_row(row, min_validation_trades=min_validation_trades, source="microstructure_family"))
+    for row in read_csv_rows(price_root / "microstructure_exit_policy_evidence.csv"):
+        cohorts.append(_microstructure_row(row, min_validation_trades=min_validation_trades, source="microstructure_exit_policy"))
 
     for row in cohorts:
         row["priority_score"] = round(_cohort_priority(row), 4)

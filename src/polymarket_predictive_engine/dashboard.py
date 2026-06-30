@@ -444,6 +444,7 @@ async function load() {
       ["Rules tested", microstructure.rule_rows],
       ["Validation-pass rules", microstructure.validation_pass_rules],
       ["Family-pass rules", microstructure.family_validation_pass_rules],
+      ["Exit-policy pass rules", microstructure.exit_policy_validation_pass_rules],
       ["Current candidates", microstructure.current_candidates],
       ["Top rule", microstructure.top_rule?.rule_id, v=>longText(v, 180)],
       ["Top validation ROI", microstructure.top_rule?.validation_roi, v=>fmtNum(Number(v) * 100, 2) + "%"],
@@ -466,7 +467,19 @@ async function load() {
       ["Val P&L","validation_pnl_usdc", fmtUsd],
       ["Pass","validation_pass"],
       ["Status","status", v=>longText(v, 140)]
+    ]) + `<div style="height:12px"></div><h3>Exit-policy leaderboard</h3>` + table(microstructure.top_exit_policy_rules || [], [
+      ["Exit","exit_policy_id"],
+      ["Market family","market_family"],
+      ["Rule","rule_id", v=>longText(v, 150)],
+      ["TP","take_profit_return", v=>fmtNum(Number(v) * 100, 1) + "%"],
+      ["SL","stop_loss_return", v=>fmtNum(Number(v) * 100, 1) + "%"],
+      ["Horizon","max_forward_observations"],
+      ["Val trades","validation_trades"],
+      ["Val ROI","validation_roi", v=>fmtNum(Number(v) * 100, 2) + "%"],
+      ["Val P&L","validation_pnl_usdc", fmtUsd],
+      ["Pass","validation_pass"]
     ]) + `<div style="height:12px"></div><h3>Current microstructure shadow candidates</h3>` + table(microstructure.current_candidates_preview || [], [
+      ["Exit","exit_policy_id"],
       ["Rule","rule_id", v=>longText(v, 160)],
       ["Market","market_slug", v=>longText(v, 120)],
       ["Outcome","outcome"],
@@ -1299,6 +1312,7 @@ def _price_action_microstructure_status(cfg: EngineConfig) -> dict[str, Any]:
         summary = {}
     rules = read_csv_rows(root / "microstructure_rule_evidence.csv")
     family_rules = read_csv_rows(root / "microstructure_family_rule_evidence.csv")
+    exit_policy_rules = read_csv_rows(root / "microstructure_exit_policy_evidence.csv")
     current = read_csv_rows(root / "microstructure_current_candidates.csv")
     events = read_csv_rows(root / "microstructure_trade_events.csv", limit=1)
     return {
@@ -1312,15 +1326,20 @@ def _price_action_microstructure_status(cfg: EngineConfig) -> dict[str, Any]:
         "validation_pass_rules": summary.get("validation_pass_rules"),
         "family_rule_rows": summary.get("family_rule_rows", len(family_rules)),
         "family_validation_pass_rules": summary.get("family_validation_pass_rules"),
+        "exit_policy_rows": summary.get("exit_policy_rows", len(exit_policy_rules)),
+        "exit_policy_validation_pass_rules": summary.get("exit_policy_validation_pass_rules"),
         "current_candidates": summary.get("current_candidates", len(current)),
         "top_rule": summary.get("top_rule", rules[0] if rules else {}),
         "top_family_rule": summary.get("top_family_rule", family_rules[0] if family_rules else {}),
+        "top_exit_policy_rule": summary.get("top_exit_policy_rule", exit_policy_rules[0] if exit_policy_rules else {}),
         "top_rules": summary.get("top_rules", rules[:15]),
         "top_family_rules": summary.get("top_family_rules", family_rules[:15]),
+        "top_exit_policy_rules": summary.get("top_exit_policy_rules", exit_policy_rules[:15]),
         "current_candidates_preview": summary.get("current_candidates_preview", current[:15]),
         "trade_events_file": str(root / "microstructure_trade_events.csv"),
         "rule_evidence_file": str(root / "microstructure_rule_evidence.csv"),
         "family_rule_evidence_file": str(root / "microstructure_family_rule_evidence.csv"),
+        "exit_policy_evidence_file": str(root / "microstructure_exit_policy_evidence.csv"),
         "current_candidates_file": str(root / "microstructure_current_candidates.csv"),
         "shadow_only": True,
     }

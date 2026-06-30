@@ -314,6 +314,22 @@ price_action_microstructure:
   min_spread_compression_grid:
   - 0.005
   - 0.01
+  exit_policy_grid:
+  - exit_policy_id: quick_3pct_4obs
+    take_profit_return: 0.03
+    stop_loss_return: 0.04
+    max_forward_observations: 4
+    min_profit_usdc: 0.05
+  - exit_policy_id: quick_5pct_6obs
+    take_profit_return: 0.05
+    stop_loss_return: 0.05
+    max_forward_observations: 6
+    min_profit_usdc: 0.05
+  - exit_policy_id: patient_10pct_12obs
+    take_profit_return: 0.10
+    stop_loss_return: 0.06
+    max_forward_observations: 12
+    min_profit_usdc: 0.05
 price_action_paper:
   enabled: true
   # Converts positive bid/ask round-trip cohort evidence into paper broker signals.

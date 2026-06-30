@@ -1,0 +1,322 @@
+from __future__ import annotations
+
+from typing import Any
+
+from .config import EngineConfig, load_config
+from .utils import boolish, now_utc, read_csv_rows, safe_float, write_csv, write_json
+
+OUTPUT_DIRNAME = "polymarket_price_action"
+SCOUT_COHORT_FILE = "price_action_scout_cohort_evidence.csv"
+SCOUT_ROUND_TRIP_FILE = "price_action_scout_round_trip_evidence.csv"
+SCOUT_ENTRY_FILE = "price_action_scout_entries.csv"
+SIGNALS_FILE = "price_action_paper_signals.csv"
+REJECTIONS_FILE = "price_action_paper_rejections.csv"
+SUMMARY_JSON = "price_action_paper_signal_summary.json"
+
+SIGNAL_FIELDS = [
+    "market_id",
+    "market_slug",
+    "question",
+    "category",
+    "event_id",
+    "correlation_key",
+    "signal_cohort",
+    "outcome",
+    "token_id",
+    "side",
+    "strategy_name",
+    "market_price",
+    "executable_price",
+    "model_probability",
+    "calibrated_probability",
+    "gross_edge_before_slippage",
+    "edge",
+    "expected_value_per_share",
+    "liquidity",
+    "spread",
+    "relative_spread",
+    "time_to_close_hours",
+    "resolution_risk",
+    "slippage",
+    "confidence",
+    "alpha_probability",
+    "edge_lower_bound",
+    "model_version",
+    "feature_set_version",
+    "data_snapshot_timestamp",
+    "price_action_signal",
+    "price_action_evidence_status",
+    "price_action_cohort_realized_roi",
+    "price_action_cohort_win_rate",
+    "price_action_cohort_closed_trades",
+    "price_action_cohort_run_rate_usdc",
+    "price_action_entry_source",
+    "price_action_latest_bid",
+    "price_action_latest_ask",
+    "take_profit_return",
+    "stop_loss_return",
+    "take_profit_min_usdc",
+    "minimum_hold_minutes_before_exit",
+    "max_stake_usdc",
+    "priority_score",
+]
+
+REJECTION_FIELDS = [
+    "market_slug",
+    "outcome",
+    "token_id",
+    "signal_cohort",
+    "round_trip_status",
+    "rejection_reason",
+]
+
+
+def _settings(cfg: EngineConfig) -> dict[str, Any]:
+    value = cfg.raw.get("price_action_paper", {})
+    return value if isinstance(value, dict) else {}
+
+
+def _enabled(settings: dict[str, Any]) -> bool:
+    return boolish(settings.get("enabled", True))
+
+
+def _token_id(row: dict[str, Any]) -> str:
+    return str(row.get("token_id") or row.get("asset_id") or row.get("outcome_token_id") or "").strip()
+
+
+def _cohort_name(row: dict[str, Any]) -> str:
+    return str(row.get("signal_cohort") or "").strip()
+
+
+def _approved_cohorts(cohort_rows: list[dict[str, str]]) -> dict[str, dict[str, str]]:
+    approved: dict[str, dict[str, str]] = {}
+    for row in cohort_rows:
+        cohort = _cohort_name(row)
+        if not cohort:
+            continue
+        if boolish(row.get("price_action_review_candidate")):
+            approved[cohort] = row
+    return approved
+
+
+def _entry_index(entry_rows: list[dict[str, str]]) -> dict[str, dict[str, str]]:
+    by_token: dict[str, dict[str, str]] = {}
+    for row in entry_rows:
+        token = _token_id(row)
+        if not token:
+            continue
+        current = by_token.get(token)
+        if current is None or (safe_float(row.get("liquidity")) or 0.0) > (safe_float(current.get("liquidity")) or 0.0):
+            by_token[token] = row
+    return by_token
+
+
+def _relative_spread(spread: float | None, price: float | None) -> float | None:
+    if spread is None or price is None or price <= 0:
+        return None
+    return spread / price
+
+
+def _reject(row: dict[str, Any], reason: str) -> dict[str, Any]:
+    return {
+        "market_slug": row.get("market_slug", ""),
+        "outcome": row.get("outcome", ""),
+        "token_id": _token_id(row),
+        "signal_cohort": _cohort_name(row),
+        "round_trip_status": row.get("round_trip_status", ""),
+        "rejection_reason": reason,
+    }
+
+
+def _build_signal(
+    row: dict[str, str],
+    *,
+    cohort: dict[str, str],
+    entry: dict[str, str],
+    settings: dict[str, Any],
+) -> dict[str, Any] | None:
+    token = _token_id(row)
+    ask = safe_float(row.get("latest_ask"))
+    bid = safe_float(row.get("latest_bid"))
+    if not token or ask is None or not 0 < ask < 1:
+        return None
+    if bid is None or bid <= 0:
+        return None
+
+    spread = safe_float(row.get("latest_spread"))
+    if spread is None:
+        spread = max(0.0, ask - bid)
+    relative_spread = _relative_spread(spread, ask)
+
+    take_profit_return = float(safe_float(settings.get("take_profit_return")) or safe_float(row.get("take_profit_return")) or 0.08)
+    stop_loss_return = float(safe_float(settings.get("stop_loss_return")) or safe_float(row.get("stop_loss_return")) or 0.06)
+    min_profit = float(safe_float(settings.get("take_profit_min_usdc")) or safe_float(row.get("min_profit_usdc")) or 0.25)
+    min_hold = float(safe_float(settings.get("minimum_hold_minutes_before_exit")) or 0.0)
+    max_stake = float(safe_float(settings.get("max_stake_usdc")) or 2.0)
+    min_edge = float(safe_float(settings.get("minimum_price_edge")) or 0.005)
+    max_edge = float(safe_float(settings.get("maximum_price_edge")) or 0.08)
+
+    target_edge = ask * take_profit_return
+    realized_roi = safe_float(cohort.get("realized_roi"))
+    if realized_roi is not None and realized_roi > 0:
+        target_edge = max(target_edge, ask * min(realized_roi, take_profit_return * 2.0))
+    edge = max(min_edge, min(max_edge, target_edge))
+    probability_proxy = max(0.001, min(0.999, ask + edge))
+    confidence = safe_float(cohort.get("win_rate"))
+    if confidence is None or confidence <= 0:
+        confidence = float(safe_float(settings.get("default_confidence")) or 0.7)
+
+    market_slug = str(row.get("market_slug") or entry.get("market_slug") or "")
+    outcome = str(row.get("outcome") or entry.get("outcome") or "")
+    signal_cohort = _cohort_name(row)
+    data_timestamp = str(row.get("latest_time_utc") or now_utc())
+    priority_score = max_stake * edge / max(ask, 0.05)
+    return {
+        "market_id": market_slug or token,
+        "market_slug": market_slug,
+        "question": entry.get("question", ""),
+        "category": str(row.get("family") or entry.get("family") or "price_action"),
+        "event_id": "",
+        "correlation_key": market_slug or token,
+        "signal_cohort": signal_cohort,
+        "outcome": outcome,
+        "token_id": token,
+        "side": "BUY_YES",
+        "strategy_name": "price_action_round_trip",
+        "market_price": "" if bid is None else bid,
+        "executable_price": ask,
+        "model_probability": probability_proxy,
+        "calibrated_probability": probability_proxy,
+        "gross_edge_before_slippage": edge,
+        "edge": edge,
+        "expected_value_per_share": edge,
+        "liquidity": entry.get("liquidity", ""),
+        "spread": spread,
+        "relative_spread": "" if relative_spread is None else relative_spread,
+        "time_to_close_hours": entry.get("time_to_close_hours", ""),
+        "resolution_risk": 0.0,
+        "slippage": 0.0,
+        "confidence": confidence,
+        "alpha_probability": probability_proxy,
+        "edge_lower_bound": edge,
+        "model_version": "price_action_round_trip_v1",
+        "feature_set_version": "websocket_bid_ask_v1",
+        "data_snapshot_timestamp": data_timestamp,
+        "price_action_signal": True,
+        "price_action_evidence_status": "cohort_bid_ask_round_trip_approved",
+        "price_action_cohort_realized_roi": cohort.get("realized_roi", ""),
+        "price_action_cohort_win_rate": cohort.get("win_rate", ""),
+        "price_action_cohort_closed_trades": cohort.get("closed_trades", ""),
+        "price_action_cohort_run_rate_usdc": cohort.get("realized_monthly_run_rate_usdc", ""),
+        "price_action_entry_source": row.get("source", ""),
+        "price_action_latest_bid": bid,
+        "price_action_latest_ask": ask,
+        "take_profit_return": take_profit_return,
+        "stop_loss_return": stop_loss_return,
+        "take_profit_min_usdc": min_profit,
+        "minimum_hold_minutes_before_exit": min_hold,
+        "max_stake_usdc": max_stake,
+        "priority_score": priority_score,
+    }
+
+
+def build_price_action_paper_signals(cfg: EngineConfig) -> dict[str, Any]:
+    """Compile governed price-action evidence into paper broker signals.
+
+    This is intentionally paper-only and settlement-independent: it only promotes
+    cohorts whose bid/ask round-trip evidence already passed the price-action
+    review gate. Negative or incomplete cohorts remain rejections.
+    """
+    settings = _settings(cfg)
+    out_dir = cfg.output_root / OUTPUT_DIRNAME
+    if not _enabled(settings):
+        summary = {
+            "status": "disabled",
+            "generated_at_utc": now_utc(),
+            "signals": 0,
+            "rejections": 0,
+            "paper_trading_invoked": False,
+            "live_trading_invoked": False,
+        }
+        write_csv(out_dir / SIGNALS_FILE, [], fieldnames=SIGNAL_FIELDS)
+        write_csv(out_dir / REJECTIONS_FILE, [], fieldnames=REJECTION_FIELDS)
+        write_json(out_dir / SUMMARY_JSON, summary)
+        return summary
+
+    cohort_rows = read_csv_rows(out_dir / SCOUT_COHORT_FILE)
+    round_trip_rows = read_csv_rows(out_dir / SCOUT_ROUND_TRIP_FILE)
+    entries = read_csv_rows(out_dir / SCOUT_ENTRY_FILE)
+    approved = _approved_cohorts(cohort_rows)
+    by_token = _entry_index(entries)
+
+    signals: list[dict[str, Any]] = []
+    rejections: list[dict[str, Any]] = []
+    max_signals = int(safe_float(settings.get("max_signals_per_run")) or 8)
+    max_spread = float(safe_float(settings.get("max_spread")) or 0.04)
+    max_relative_spread = float(safe_float(settings.get("max_relative_spread")) or 0.15)
+
+    for row in round_trip_rows:
+        cohort_name = _cohort_name(row)
+        token = _token_id(row)
+        if cohort_name not in approved:
+            rejections.append(_reject(row, "price-action cohort has not passed positive bid/ask evidence gate"))
+            continue
+        if str(row.get("round_trip_status") or "") != "open_marked":
+            rejections.append(_reject(row, "candidate is not currently open for a fresh paper entry"))
+            continue
+        ask = safe_float(row.get("latest_ask"))
+        bid = safe_float(row.get("latest_bid"))
+        spread = safe_float(row.get("latest_spread"))
+        if spread is None and ask is not None and bid is not None:
+            spread = max(0.0, ask - bid)
+        relative_spread = _relative_spread(spread, ask)
+        if ask is None or bid is None or not 0 < ask < 1 or not 0 < bid < 1:
+            rejections.append(_reject(row, "missing executable websocket bid/ask"))
+            continue
+        if spread is None or spread > max_spread:
+            rejections.append(_reject(row, "spread above price-action paper limit"))
+            continue
+        if relative_spread is None or relative_spread > max_relative_spread:
+            rejections.append(_reject(row, "relative spread above price-action paper limit"))
+            continue
+        signal = _build_signal(row, cohort=approved[cohort_name], entry=by_token.get(token, {}), settings=settings)
+        if signal is None:
+            rejections.append(_reject(row, "could not build executable price-action signal"))
+            continue
+        signals.append(signal)
+
+    signals.sort(key=lambda item: safe_float(item.get("priority_score")) or 0.0, reverse=True)
+    signals = signals[:max_signals]
+    write_csv(out_dir / SIGNALS_FILE, signals, fieldnames=SIGNAL_FIELDS)
+    write_csv(out_dir / REJECTIONS_FILE, rejections, fieldnames=REJECTION_FIELDS)
+
+    summary = {
+        "status": "computed",
+        "generated_at_utc": now_utc(),
+        "signals": len(signals),
+        "rejections": len(rejections),
+        "approved_price_action_cohorts": len(approved),
+        "source_round_trip_rows": len(round_trip_rows),
+        "signal_file": str(out_dir / SIGNALS_FILE),
+        "rejection_file": str(out_dir / REJECTIONS_FILE),
+        "paper_trading_invoked": False,
+        "live_trading_invoked": False,
+        "decision": "signals_ready_for_paper_broker"
+        if signals
+        else "no_price_action_paper_signals_until_positive_cohort_evidence",
+        "warnings": {
+            "paper_only": True,
+            "live_trading_invoked": False,
+            "does_not_wait_for_settlement": True,
+            "requires_positive_bid_ask_cohort_evidence": True,
+        },
+        "top_signals": signals[:10],
+        "top_rejections": rejections[:10],
+    }
+    write_json(out_dir / SUMMARY_JSON, summary)
+    return summary
+
+
+def run(config_path: str = "polymarket_predictive_config.example.yaml") -> dict[str, Any]:
+    cfg = load_config(config_path)
+    return build_price_action_paper_signals(cfg)

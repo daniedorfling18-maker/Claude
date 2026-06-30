@@ -1,10 +1,10 @@
 # Polymarket Strategy V2 — Anchored Edge Research
 
-Last updated: 2026-06-29
+Last updated: 2026-06-30
 
 ## Status
 
-This document defines the next Polymarket research lane. Strategy V2 is **shadow-only** and must run in parallel with the existing baseline shadow-research cycle. It must not execute paper or live orders, weaken existing governance gates, or overwrite Strategy V1 evidence.
+This document defines the next Polymarket research lane. Strategy V2 is **shadow-only** and must run in parallel with the existing baseline shadow-research cycle. Strategy V2 itself must not execute paper or live orders, weaken existing governance gates, or overwrite Strategy V1 evidence.
 
 Outputs for this lane should live under:
 
@@ -228,8 +228,20 @@ outputs/polymarket_price_action/price_action_scout_summary.json
 
 The scout is deliberately broader than Strategy V2. It persists shadow entries for liquid
 fast-feedback rows and positive profit-sprint targets, then evaluates later websocket bids. This
-increases learning throughput for odds-movement edge, but it is still observability only and cannot
-create approved paper signals.
+increases learning throughput for odds-movement edge.
+
+A separate price-action paper-signal bridge now consumes the scout's cohort evidence:
+
+```text
+outputs/polymarket_price_action/price_action_paper_signals.csv
+outputs/polymarket_price_action/price_action_paper_rejections.csv
+outputs/polymarket_price_action/price_action_paper_signal_summary.json
+```
+
+This bridge is settlement-independent: it may create paper broker signals from price changes alone,
+but only when a cohort has already passed the closed bid/ask round-trip evidence gates. Incomplete or
+negative cohorts remain rejected. This lets the system learn from buy/sell odds movement without
+claiming that the final outcome model has been proven right.
 
 Minimum candidate filters:
 

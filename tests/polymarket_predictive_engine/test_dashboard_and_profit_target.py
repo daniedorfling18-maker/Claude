@@ -498,6 +498,29 @@ def test_dashboard_surfaces_strategy_v2_anchored_edge_progress(tmp_path):
             }
         ],
     )
+    write_json(
+        cfg.output_root / "polymarket_price_action" / "price_action_paper_signal_summary.json",
+        {
+            "status": "computed",
+            "decision": "no_price_action_paper_signals_until_positive_cohort_evidence",
+            "signals": 0,
+            "rejections": 1,
+            "approved_price_action_cohorts": 0,
+            "source_round_trip_rows": 1,
+        },
+    )
+    write_csv(
+        cfg.output_root / "polymarket_price_action" / "price_action_paper_rejections.csv",
+        [
+            {
+                "market_slug": candidate["market_slug"],
+                "outcome": "Yes",
+                "signal_cohort": "price_action_scout|profit_sprint|macro_rates",
+                "round_trip_status": "closed_take_profit",
+                "rejection_reason": "candidate is not currently open for a fresh paper entry",
+            }
+        ],
+    )
     cycle_status_path = cfg.path.parent / "work" / "strategy_v2_cycle_latest_status.json"
     cycle_status_path.parent.mkdir(parents=True, exist_ok=True)
     cycle_status_path.write_text(
@@ -525,6 +548,8 @@ def test_dashboard_surfaces_strategy_v2_anchored_edge_progress(tmp_path):
     assert data["price_action_scout"]["decision"] == "collect_more_closed_price_action_scout_evidence"
     assert data["price_action_scout"]["closed_trades"] == 1
     assert data["price_action_scout"]["top_candidates"][0]["source"] == "profit_sprint_target"
+    assert data["price_action_paper_signals"]["signals"] == 0
+    assert data["price_action_paper_signals"]["rejections"] == 1
     assert strategy_v2["top_shadow_candidates"][0]["market_slug"] == candidate["market_slug"]
     assert strategy_v2["promotion_progress"][0]["remaining_shadow_entries_to_review"] == 19
 

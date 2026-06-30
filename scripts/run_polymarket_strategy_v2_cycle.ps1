@@ -258,6 +258,8 @@ Invoke-PythonStep "strategy-v2-round-trip" @("-m", "polymarket_predictive_engine
 $strategyV2RoundTripEvidence = Read-JsonIfExists ".\outputs\polymarket_strategy_v2\strategy_v2_round_trip_evidence.json"
 Invoke-PythonStep "price-action-scout" @("-m", "polymarket_predictive_engine.cli", "price-action-scout", "--config", $ConfigPath)
 $priceActionScout = Read-JsonIfExists ".\outputs\polymarket_price_action\price_action_scout_summary.json"
+Invoke-PythonStep "price-action-paper-signals" @("-m", "polymarket_predictive_engine.cli", "price-action-paper-signals", "--config", $ConfigPath)
+$priceActionPaperSignals = Read-JsonIfExists ".\outputs\polymarket_price_action\price_action_paper_signal_summary.json"
 
 $shadowCandidates = $anchoredRows | Where-Object { $_.status -eq "shadow_candidate" }
 $rejectedAnchored = $anchoredRows | Where-Object { $_.status -eq "rejected" }
@@ -278,6 +280,7 @@ $status = [PSCustomObject]@{
   strategy_v2_websocket_features = $strategyV2WebsocketFeatures
   strategy_v2_round_trip_evidence = $strategyV2RoundTripEvidence
   price_action_scout = $priceActionScout
+  price_action_paper_signals = $priceActionPaperSignals
   independent_anchor_refresh = $independentAnchorRefresh
 }
 

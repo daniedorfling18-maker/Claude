@@ -14,7 +14,7 @@ from .readiness import paper_trade_readiness
 from .risk import risk_decision
 from .shadow_cohort import _crypto_updown_proxy_settlement_price
 from .storage import connect_db
-from .utils import boolish, now_utc, read_csv_rows, read_json, safe_float, write_csv, write_json
+from .utils import boolish, now_utc, parse_timestamp, read_csv_rows, read_json, safe_float, write_csv, write_json
 from .worldcup_validation import normalised_correlation_key
 
 
@@ -101,7 +101,44 @@ def _paper_settings(cfg: EngineConfig) -> dict[str, Any]:
     return cfg.raw.get("paper_trading", {}) or {}
 
 
-def _latest_quote(con, market_id: str, token_id: str) -> dict[str, Any]:
+def _quote_time(quote: dict[str, Any]) -> datetime | None:
+    return parse_timestamp(quote.get("timestamp"))
+
+
+def _latest_websocket_quote(cfg: EngineConfig, market_id: str, token_id: str) -> dict[str, Any] | None:
+    rows = read_csv_rows(cfg.output_root / "polymarket_training" / "websocket_market_features.csv")
+    market_key = str(market_id or "").strip().lower()
+    token_key = str(token_id or "").strip()
+    matches = [
+        row
+        for row in rows
+        if (
+            token_key
+            and token_key
+            in {
+                str(row.get("asset_id") or "").strip(),
+                str(row.get("token_id") or "").strip(),
+                str(row.get("outcome_token_id") or "").strip(),
+            }
+        )
+        or (market_key and str(row.get("market_slug") or "").strip().lower() == market_key)
+    ]
+    if not matches:
+        return None
+    matches.sort(key=lambda row: parse_timestamp(row.get("collected_at_utc")) or datetime.min.replace(tzinfo=timezone.utc))
+    latest = matches[-1]
+    return {
+        "timestamp": latest.get("collected_at_utc") or now_utc(),
+        "best_bid": safe_float(latest.get("best_bid")),
+        "best_ask": safe_float(latest.get("best_ask")),
+        "midpoint": safe_float(latest.get("midpoint")),
+        "spread": safe_float(latest.get("spread")),
+        "source": "websocket_market_features",
+    }
+
+
+def _latest_quote(con, cfg: EngineConfig, market_id: str, token_id: str) -> dict[str, Any]:
+    websocket_quote = _latest_websocket_quote(cfg, market_id, token_id)
     row = con.execute(
         """
         SELECT collected_at, best_bid, best_ask, midpoint, spread
@@ -113,7 +150,7 @@ def _latest_quote(con, market_id: str, token_id: str) -> dict[str, Any]:
         (market_id, token_id),
     ).fetchone()
     if row is not None:
-        return {
+        db_quote = {
             "timestamp": row["collected_at"],
             "best_bid": safe_float(row["best_bid"]),
             "best_ask": safe_float(row["best_ask"]),
@@ -121,6 +158,13 @@ def _latest_quote(con, market_id: str, token_id: str) -> dict[str, Any]:
             "spread": safe_float(row["spread"]),
             "source": "market_snapshots",
         }
+        if websocket_quote is not None and (_quote_time(websocket_quote) or datetime.min.replace(tzinfo=timezone.utc)) > (
+            _quote_time(db_quote) or datetime.min.replace(tzinfo=timezone.utc)
+        ):
+            return websocket_quote
+        return db_quote
+    if websocket_quote is not None:
+        return websocket_quote
     prediction = con.execute(
         """
         SELECT prediction_timestamp, market_probability, executable_price
@@ -219,7 +263,7 @@ def _proxy_resolution_for_position(con, cfg: EngineConfig, position) -> tuple[in
 
 
 def _position_mark_price(con, cfg: EngineConfig, position) -> float:
-    quote = _latest_quote(con, str(position["market_id"]), str(position["token_id"]))
+    quote = _latest_quote(con, cfg, str(position["market_id"]), str(position["token_id"]))
     mark_mode = str(_paper_settings(cfg).get("mark_price", "best_bid")).lower()
     if mark_mode == "midpoint":
         mark = safe_float(quote.get("midpoint"))
@@ -504,7 +548,15 @@ def _exit_reason(position, quote: dict[str, Any], prediction: dict[str, Any], se
     cost_basis = float(position["cost_basis_usdc"])
     if quantity <= 0 or cost_basis <= 0:
         return None
-    if _position_age_minutes(position) < float(settings.get("minimum_hold_minutes_before_exit", 15.0)):
+    price_action_signal = boolish(prediction.get("price_action_signal"))
+    minimum_hold = (
+        safe_float(prediction.get("minimum_hold_minutes_before_exit"))
+        if price_action_signal
+        else safe_float(settings.get("minimum_hold_minutes_before_exit"))
+    )
+    if minimum_hold is None:
+        minimum_hold = 0.0 if price_action_signal else 15.0
+    if _position_age_minutes(position) < float(minimum_hold):
         return None
     exit_value = quantity * bid
     pnl = exit_value - cost_basis
@@ -518,18 +570,30 @@ def _exit_reason(position, quote: dict[str, Any], prediction: dict[str, Any], se
     alpha_edge = safe_float(prediction.get("edge_lower_bound"))
     if alpha_edge is None:
         alpha_edge = safe_float(prediction.get("edge"))
-    take_profit_return = float(settings.get("take_profit_return", 0.25))
-    take_profit_min_usdc = float(settings.get("take_profit_min_usdc", 0.25))
+    take_profit_return = float(
+        safe_float(prediction.get("take_profit_return"))
+        if price_action_signal and safe_float(prediction.get("take_profit_return")) is not None
+        else settings.get("take_profit_return", 0.25)
+    )
+    take_profit_min_usdc = float(
+        safe_float(prediction.get("take_profit_min_usdc"))
+        if price_action_signal and safe_float(prediction.get("take_profit_min_usdc")) is not None
+        else settings.get("take_profit_min_usdc", 0.25)
+    )
     if return_pct >= take_profit_return and pnl >= take_profit_min_usdc:
         return "take_profit"
-    if bool(settings.get("exit_when_alpha_edge_below_threshold", True)):
+    if (not price_action_signal) and bool(settings.get("exit_when_alpha_edge_below_threshold", True)):
         threshold = float(settings.get("alpha_exit_edge_threshold", -0.01))
         max_loss = float(settings.get("max_loss_usdc_for_alpha_exit", 1.0))
         if alpha_edge is not None and alpha_edge <= threshold and pnl >= -max_loss:
             return "alpha_edge_deteriorated"
-    stop_loss_return = float(settings.get("stop_loss_return", 0.65))
+    stop_loss_return = float(
+        safe_float(prediction.get("stop_loss_return"))
+        if price_action_signal and safe_float(prediction.get("stop_loss_return")) is not None
+        else settings.get("stop_loss_return", 0.65)
+    )
     stop_loss_max_edge = float(settings.get("stop_loss_max_edge", 0.0))
-    if return_pct <= -stop_loss_return and (alpha_edge is None or alpha_edge <= stop_loss_max_edge):
+    if return_pct <= -stop_loss_return and (price_action_signal or alpha_edge is None or alpha_edge <= stop_loss_max_edge):
         return "stop_loss"
     return None
 
@@ -689,8 +753,11 @@ def close_eligible_positions(con, cfg: EngineConfig) -> list[dict[str, Any]]:
         "SELECT * FROM positions WHERE status = 'open' AND quantity > 0 ORDER BY updated_at, position_id"
     ).fetchall()
     for position in positions:
-        quote = _latest_quote(con, str(position["market_id"]), str(position["token_id"]))
+        quote = _latest_quote(con, cfg, str(position["market_id"]), str(position["token_id"]))
         prediction = _latest_prediction_payload(con, str(position["market_id"]), str(position["token_id"]))
+        entry_signal = _latest_order_signal_payload(con, str(position["market_id"]), str(position["token_id"]))
+        if entry_signal:
+            prediction = {**prediction, **entry_signal}
         reason = _exit_reason(position, quote, prediction, settings)
         if reason is None:
             continue
@@ -715,6 +782,45 @@ def _entry_pause_reason(con, cfg: EngineConfig) -> str:
     if pnl <= threshold:
         return f"clean forward P&L {pnl:.2f} <= pause threshold {threshold:.2f}; monitoring exits only"
     return ""
+
+
+def _paper_signal_rows(cfg: EngineConfig) -> list[dict[str, Any]]:
+    settings = _paper_settings(cfg)
+    configured = settings.get("signal_files")
+    base = cfg.output_root.parent
+    paths: list[Path] = []
+    if isinstance(configured, list):
+        for item in configured:
+            text = str(item or "").strip()
+            if not text:
+                continue
+            path = Path(text)
+            paths.append(path if path.is_absolute() else base / path)
+    elif configured:
+        path = Path(str(configured))
+        paths.append(path if path.is_absolute() else base / path)
+    else:
+        paths = [
+            cfg.output_root / "polymarket_predictions" / "trade_signals.csv",
+            cfg.output_root / "polymarket_price_action" / "price_action_paper_signals.csv",
+        ]
+
+    rows: list[dict[str, Any]] = []
+    seen: set[tuple[str, str, str, str, str]] = set()
+    for path in paths:
+        for row in read_csv_rows(path):
+            key = (
+                str(row.get("market_id", "")),
+                str(row.get("token_id", "")),
+                str(row.get("side", "BUY_YES")),
+                str(row.get("data_snapshot_timestamp") or row.get("prediction_timestamp") or ""),
+                str(row.get("strategy_name", "")),
+            )
+            if key in seen:
+                continue
+            seen.add(key)
+            rows.append({**row, "source_signal_file": str(path)})
+    return rows
 
 
 def submit_paper_signal(con, cfg: EngineConfig, signal: dict[str, Any]) -> dict[str, Any]:
@@ -1005,9 +1111,7 @@ def run_paper_broker(cfg: EngineConfig) -> dict[str, Any]:
                 exit_results = close_eligible_positions(con, cfg)
                 entry_pause_reason = _entry_pause_reason(con, cfg)
                 if not entry_pause_reason:
-                    signals = read_csv_rows(
-                        cfg.output_root / "polymarket_predictions" / "trade_signals.csv"
-                    )
+                    signals = _paper_signal_rows(cfg)
                     for signal in signals:
                         results.append(submit_paper_signal(con, cfg, signal))
             snapshot = write_portfolio_snapshot(con, cfg)

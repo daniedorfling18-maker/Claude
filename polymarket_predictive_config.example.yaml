@@ -281,6 +281,22 @@ price_action_scout:
   min_win_rate: 0.55
   min_monthly_run_rate_usdc: 20
   max_single_market_positive_pnl_share: 0.35
+price_action_paper:
+  enabled: true
+  # Converts positive bid/ask round-trip cohort evidence into paper broker signals.
+  # This does not wait for market settlement, but it does require the cohort to pass
+  # closed round-trip evidence gates first.
+  max_signals_per_run: 8
+  max_stake_usdc: 2
+  minimum_price_edge: 0.005
+  maximum_price_edge: 0.08
+  max_spread: 0.04
+  max_relative_spread: 0.15
+  take_profit_return: 0.08
+  stop_loss_return: 0.06
+  take_profit_min_usdc: 0.05
+  minimum_hold_minutes_before_exit: 0
+  default_confidence: 0.7
 runtime_resource_guard:
   enabled: true
   max_memory_percent: 94
@@ -584,6 +600,15 @@ risk:
     minimum_time_to_close_minutes: 0.25
     maximum_stake_usdc: 2
     promoted_maximum_stake_usdc: 5
+  price_action_overrides:
+    enabled: true
+    minimum_edge: 0.005
+    minimum_confidence: 0.05
+    maximum_spread: 0.04
+    minimum_liquidity: 50
+    minimum_time_to_close_minutes: 0
+    maximum_stake_usdc: 2
+    promoted_maximum_stake_usdc: 2
   maximum_resolution_risk: 0.25
   maximum_single_market_exposure: 0.02
   maximum_category_exposure: 0.10
@@ -600,6 +625,9 @@ risk:
   event_blacklist: []
 paper_trading:
   enabled: true
+  signal_files:
+  - outputs/polymarket_predictions/trade_signals.csv
+  - outputs/polymarket_price_action/price_action_paper_signals.csv
   starting_cash: 1000
   persist_orders: true
   fill_model: taker_immediate

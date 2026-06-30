@@ -141,6 +141,7 @@ async function load() {
     const roundTrip = strategyV2.round_trip_evidence || {};
     const roundTripPnl = roundTrip.realized_pnl_usdc ?? roundTrip.total_mark_pnl_usdc;
     const priceScout = data.price_action_scout || {};
+    const priceActionPaper = data.price_action_paper_signals || {};
     const priceScoutPnl = priceScout.realized_pnl_usdc ?? priceScout.total_mark_pnl_usdc;
     const live = data.local_live_heartbeat || data.heartbeat || {};
     const freshness = data.evidence_freshness || {};
@@ -182,6 +183,7 @@ async function load() {
       card("Strategy V2 anchors", `${strategyV2.anchored_rows ?? 0}/${strategyV2.rows_scored ?? 0}`, Number(strategyV2.anchored_rows || 0) > 0 ? "good" : "warn"),
       card("Round-trip P&L", fmtUsd(roundTripPnl), Number(roundTripPnl || 0) > 0 ? "good" : "warn"),
       card("Price scout P&L", fmtUsd(priceScoutPnl), Number(priceScoutPnl || 0) > 0 ? "good" : "warn"),
+      card("Price-action paper signals", priceActionPaper.signals ?? "0", Number(priceActionPaper.signals || 0) > 0 ? "good" : "warn"),
       card("Main trade blocker", longText(diag.main_blocker || "-", 120), Number(diag.approved_signals_count || 0) > 0 ? "good" : "warn"),
       card("Next settlement", data.shadow_settlement_watch?.next_settlement_minutes == null ? "Waiting" : fmtNum(data.shadow_settlement_watch.next_settlement_minutes, 0) + "m"),
       card("Shadow P&L", fmtUsd(data.shadow_settlement_watch?.shadow_total_pnl_usdc), Number(data.shadow_settlement_watch?.shadow_total_pnl_usdc || 0) > 0 ? "good" : "warn"),
@@ -385,7 +387,11 @@ async function load() {
       ["Realized P&L", priceScout.realized_pnl_usdc, fmtUsd],
       ["Marked P&L", priceScout.total_mark_pnl_usdc, fmtUsd],
       ["Marked ROI", priceScout.mark_roi, v=>fmtNum(Number(v) * 100, 2) + "%"],
-      ["Review candidates", priceScout.price_action_review_candidates]
+      ["Review candidates", priceScout.price_action_review_candidates],
+      ["Paper signal decision", priceActionPaper.decision],
+      ["Paper signals", priceActionPaper.signals],
+      ["Paper rejections", priceActionPaper.rejections],
+      ["Approved PA cohorts", priceActionPaper.approved_price_action_cohorts]
     ]) + `<div style="height:12px"></div><h3>Price-action scout by cohort</h3>` + table(priceScout.cohorts || [], [
       ["Cohort","signal_cohort"],
       ["Candidates","candidates"],
@@ -410,6 +416,20 @@ async function load() {
       ["Realized P&L","realized_pnl_usdc", fmtUsd],
       ["MTM P&L","mark_pnl_usdc", fmtUsd],
       ["Reason","candidate_reason", v=>longText(v, 140)]
+    ]) + `<div style="height:12px"></div><h3>Price-action paper signals</h3>` + table(priceActionPaper.top_signals || [], [
+      ["Market","market_slug", v=>longText(v, 120)],
+      ["Outcome","outcome"],
+      ["Ask","executable_price", v=>fmtNum(v,4)],
+      ["Bid","price_action_latest_bid", v=>fmtNum(v,4)],
+      ["Edge","edge", v=>fmtNum(v,4)],
+      ["Max stake","max_stake_usdc", fmtUsd],
+      ["Cohort","signal_cohort", v=>longText(v, 140)]
+    ]) + `<div style="height:12px"></div><h3>Price-action paper rejections</h3>` + table(priceActionPaper.top_rejections || [], [
+      ["Market","market_slug", v=>longText(v, 120)],
+      ["Outcome","outcome"],
+      ["Cohort","signal_cohort", v=>longText(v, 140)],
+      ["Status","round_trip_status"],
+      ["Reason","rejection_reason", v=>longText(v, 160)]
     ]);
     document.getElementById("promotionReadiness").innerHTML = table(data.cohort_promotion_readiness?.cohorts || [], [
       ["Cohort","signal_cohort"],
@@ -1203,6 +1223,30 @@ def _price_action_scout_status(cfg: EngineConfig) -> dict[str, Any]:
     }
 
 
+def _price_action_paper_signal_status(cfg: EngineConfig) -> dict[str, Any]:
+    """Expose the settlement-independent price-action paper signal bridge."""
+    root = cfg.output_root / "polymarket_price_action"
+    summary = read_json(root / "price_action_paper_signal_summary.json", default={}) or {}
+    if not isinstance(summary, dict):
+        summary = {}
+    signals = read_csv_rows(root / "price_action_paper_signals.csv")
+    rejections = read_csv_rows(root / "price_action_paper_rejections.csv")
+    return {
+        "status": summary.get("status") or ("missing" if not signals and not rejections else "computed"),
+        "generated_at_utc": summary.get("generated_at_utc"),
+        "decision": summary.get("decision") or "no_price_action_paper_signals_until_positive_cohort_evidence",
+        "signals": summary.get("signals", len(signals)),
+        "rejections": summary.get("rejections", len(rejections)),
+        "approved_price_action_cohorts": summary.get("approved_price_action_cohorts"),
+        "source_round_trip_rows": summary.get("source_round_trip_rows"),
+        "signal_file": str(root / "price_action_paper_signals.csv"),
+        "rejection_file": str(root / "price_action_paper_rejections.csv"),
+        "top_signals": signals[:25],
+        "top_rejections": rejections[:25],
+        "paper_only": True,
+    }
+
+
 def _payload_time(payload: Any) -> datetime | None:
     if not isinstance(payload, dict):
         return None
@@ -1324,6 +1368,9 @@ def render_dashboard(cfg: EngineConfig, latest_report: dict[str, Any] | None = N
     orders = read_csv_rows(portfolio_root / "paper_orders.csv")
     predictions = read_csv_rows(predictions_root / "predictions.csv")
     signals = read_csv_rows(predictions_root / "trade_signals.csv")
+    price_action_signals = read_csv_rows(cfg.output_root / "polymarket_price_action" / "price_action_paper_signals.csv")
+    if price_action_signals:
+        signals = signals + price_action_signals
     lookup = _build_market_lookup(signals, predictions, _market_lookup_from_orders(orders))
     positions = _enrich_market_names(positions, lookup)
     fills = _enrich_market_names(fills, lookup)
@@ -1338,6 +1385,7 @@ def render_dashboard(cfg: EngineConfig, latest_report: dict[str, Any] | None = N
     strategy_v2_status = _strategy_v2_status(cfg)
     strategy_v2_runtime = _strategy_v2_runtime_freshness(strategy_v2_status, live_loop_status)
     price_action_scout_status = _price_action_scout_status(cfg)
+    price_action_paper_signal_status = _price_action_paper_signal_status(cfg)
 
     payload = {
         "status": "ok",
@@ -1365,6 +1413,7 @@ def render_dashboard(cfg: EngineConfig, latest_report: dict[str, Any] | None = N
         "independent_anchor_status": _independent_anchor_status(governance),
         "strategy_v2": strategy_v2_status,
         "price_action_scout": price_action_scout_status,
+        "price_action_paper_signals": price_action_paper_signal_status,
         "edge_strategy_search": edge_strategy_search,
         "promoted_rule_shadow": promoted_rule_shadow,
         "liquidity_discovery": liquidity_discovery,

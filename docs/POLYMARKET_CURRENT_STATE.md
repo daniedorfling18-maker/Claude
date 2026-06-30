@@ -1,25 +1,25 @@
 # Polymarket Current State
 
-Last updated: 2026-06-28
+Last updated: 2026-06-30
 
 ## Status in one paragraph
 
-The Polymarket engine is currently in **automated shadow-research mode**. It is not approved for paper trading, and it must not be used for live trading. The infrastructure now works: websocket collection, metadata enrichment, broad liquidity discovery, prediction, alpha scoring, shadow evidence capture, scheduled automation, and local-history audit all run locally. The blocker is no longer a broken broker or broken websocket path. The blocker is **insufficient positive forward evidence**.
+The Polymarket engine is currently in **automated local paper/shadow-research mode**. Mechanical paper readiness is open, live trading remains disabled, and the broker must still receive governed signals before it can fill paper orders. The infrastructure now works locally: websocket collection, metadata enrichment, broad liquidity discovery, prediction, alpha scoring, shadow evidence capture, Strategy V2 price-action evidence, scheduled automation, and dashboard reporting. The blocker is no longer a broken broker or broken websocket path. The blocker is **insufficient positive forward/price-action cohort evidence**.
 
 ## Current operating verdict
 
 ```text
-paper_allowed = false
+paper_readiness = true
+approved_price_action_paper_signals = 0
 live_trading_invoked = false
-paper_trading_invoked = false
 ```
 
-The latest audit blocks paper trading for three reasons:
+The latest audit blocks new entries for three reasons:
 
 ```text
-no approved trade_signals rows
-sports_other shadow evidence is not positive
-sports_other has no closed/settled positions yet
+no approved normal trade_signals rows
+no price-action cohort has passed positive bid/ask round-trip evidence
+current fast price-action scout evidence is negative/incomplete
 ```
 
 This is the correct fail-closed state.
@@ -150,6 +150,26 @@ The engine also runs a fast price-action scout for liquid short-window/profit-sp
 persists shadow-only entry prices from liquidity/profit-sprint candidates and evaluates later websocket
 bids for take-profit/stop-loss evidence. It is a throughput layer for learning, not a promotion bypass:
 candidate cohorts still need positive evidence and governance review before paper trading.
+
+There is now a separate settlement-independent price-action paper-signal bridge:
+
+```text
+outputs/polymarket_price_action/price_action_paper_signals.csv
+outputs/polymarket_price_action/price_action_paper_rejections.csv
+outputs/polymarket_price_action/price_action_paper_signal_summary.json
+```
+
+This bridge can create paper broker signals without waiting for market settlement, but only after a
+cohort has already passed closed bid/ask round-trip gates. It keeps the key distinction clear:
+
+```text
+settlement evidence = did the final outcome model beat the market?
+price-action evidence = could the bot buy at ask and sell/mark at bid profitably?
+```
+
+The paper broker now reads both normal model trade signals and price-action paper signals, marks open
+positions from websocket bid/ask quotes when available, and applies fast price-action take-profit/
+stop-loss settings to price-action entries.
 
 ## Why $100/month is not solved yet
 

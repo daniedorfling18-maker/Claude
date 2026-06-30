@@ -46,4 +46,11 @@ const server = http.createServer((req, res) => {
   });
 });
 
-server.listen(port, host);
+server.on("error", (err) => {
+  console.error(`Polymarket dashboard server failed on ${host}:${port}: ${err.message}`);
+  process.exit(1);
+});
+
+server.listen(port, host, () => {
+  console.log(`Polymarket dashboard server listening on http://${host}:${port}/ from ${root}`);
+});

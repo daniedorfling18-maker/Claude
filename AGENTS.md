@@ -75,8 +75,17 @@ python scripts/run_polymarket_local_live_loop.py --config polymarket_predictive_
 Only use them after a human review confirms that the audit permits paper trading and the relevant family
 has positive closed/settled shadow evidence. Do not use them to bypass the shadow-research gate.
 
-The dashboard is at `http://127.0.0.1:8765/` when the old local loop is intentionally running, but the
-current recommended workflow is the scheduled shadow cycle and file-based audit status.
+The dashboard is at `http://127.0.0.1:8765/`. For visibility only, prefer the lightweight dashboard
+server task instead of the old local live loop:
+
+```powershell
+.\scripts\install_polymarket_dashboard_task.ps1 -StartNow
+```
+
+The dashboard runner serves existing dashboard artifacts only. It does not invoke paper trading, live
+trading, Docker, or the old local live loop, and it refuses to start when memory is at or above its
+guardrail. The current recommended research workflow remains the scheduled shadow/Strategy V2 cycle
+and file-based audit status.
 
 ## When to use Docker — and when NOT to
 

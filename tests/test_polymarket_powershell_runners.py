@@ -82,6 +82,17 @@ def test_strategy_v2_scheduled_wrapper_pins_repo_source():
     assert '$env:PYTHONPATH = Join-Path $repoRoot "src"' in text
 
 
+def test_strategy_v2_scheduled_wrapper_skips_before_cycle_when_memory_is_high():
+    text = _script_text("scripts/run_strategy_v2_cycle_scheduled_wrapper.ps1")
+
+    assert "[double]$MaxMemoryPercent = 95" in text
+    assert "Get-MemoryUsedPercent" in text
+    assert "$memoryUsedPercent -ge $MaxMemoryPercent" in text
+    assert "skipped_high_memory" in text
+    assert "run_polymarket_strategy_v2_cycle.ps1" in text
+    assert text.index("skipped_high_memory") < text.index("run_polymarket_strategy_v2_cycle.ps1")
+
+
 def test_shadow_research_cycle_bounds_each_python_step():
     text = _script_text("scripts/run_polymarket_shadow_research_cycle.ps1")
 
@@ -90,3 +101,32 @@ def test_shadow_research_cycle_bounds_each_python_step():
     assert "$process.WaitForExit($StepTimeoutSeconds * 1000)" in text
     assert "timed out after $StepTimeoutSeconds seconds" in text
     assert "$exitCode = [int]$process.ExitCode" in text
+
+
+def test_dashboard_server_runner_refuses_to_start_when_memory_is_high():
+    text = _script_text("scripts/run_polymarket_dashboard_server.ps1")
+
+    assert "[double]$MaxMemoryPercent = 95" in text
+    assert "Get-MemoryUsedPercent" in text
+    assert "$memoryUsedPercent -ge $MaxMemoryPercent" in text
+    assert "skipped_high_memory" in text
+    assert "polymarket_dashboard_server_status.json" in text
+
+
+def test_dashboard_task_installer_runs_wrapper_with_working_directory():
+    text = _script_text("scripts/install_polymarket_dashboard_task.ps1")
+
+    assert "run_polymarket_dashboard_server.ps1" in text
+    assert "New-ScheduledTaskTrigger -AtLogOn" in text
+    assert "-WorkingDirectory $RepoRoot" in text
+    assert "-MultipleInstances IgnoreNew" in text
+    assert "Start-ScheduledTask -TaskName $TaskName" in text
+
+
+def test_manual_dashboard_launcher_uses_same_memory_guard():
+    text = _script_text("scripts/start_polymarket_dashboard.ps1")
+
+    assert "[double]$MaxMemoryPercent = 95" in text
+    assert "Get-MemoryUsedPercent" in text
+    assert "$memoryUsedPercent -ge $MaxMemoryPercent" in text
+    assert "install_polymarket_dashboard_task.ps1 -StartNow" in text

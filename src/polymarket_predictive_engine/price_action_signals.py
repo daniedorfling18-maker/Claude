@@ -133,6 +133,70 @@ def _approved_feedback_microstructure_cohorts(cfg: EngineConfig) -> dict[str, di
     return approved
 
 
+def _paper_confirmation_candidates(cfg: EngineConfig, settings: dict[str, Any]) -> list[dict[str, Any]]:
+    if not boolish(settings.get("paper_confirmation_enabled", True)):
+        return []
+    payload = read_json(cfg.governance_root / "price_action_feedback.json", default={}) or {}
+    if not isinstance(payload, dict):
+        return []
+    rows = payload.get("paper_confirmation_preview", [])
+    if not isinstance(rows, list):
+        return []
+    candidates: list[dict[str, Any]] = []
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        cohort = str(row.get("cohort") or "").strip()
+        if not cohort:
+            continue
+        if not boolish(row.get("trusted_for_goal")):
+            continue
+        if str(row.get("forward_edge_blocker") or "").strip():
+            continue
+        if (safe_float(row.get("forward_shadow_pnl_usdc")) or 0.0) <= 0:
+            continue
+        if (safe_float(row.get("forward_shadow_roi")) or 0.0) <= 0:
+            continue
+        candidates.append(row)
+    candidates.sort(key=lambda item: safe_float(item.get("priority_score")) or 0.0, reverse=True)
+    return candidates
+
+
+def _query_family_prefixes(query: str) -> list[str]:
+    query = str(query or "").strip().lower()
+    if not query:
+        return []
+    if "world" in query or "cup" in query:
+        return ["sports_other", "worldcup"]
+    if "tennis" in query:
+        return ["tennis"]
+    if "bitcoin" in query or "btc" in query:
+        return ["crypto_btc"]
+    if "ethereum" in query or query == "eth":
+        return ["crypto_eth"]
+    if "solana" in query or query == "sol":
+        return ["crypto_sol"]
+    if "xrp" in query or "ripple" in query:
+        return ["crypto_xrp"]
+    return []
+
+
+def _confirmation_candidate_for_row(row: dict[str, Any], candidates: list[dict[str, Any]]) -> dict[str, Any] | None:
+    row_cohort = _cohort_name(row).lower()
+    family = str(row.get("family") or row.get("category") or "").strip().lower()
+    market_slug = str(row.get("market_slug") or "").strip().lower()
+    text = " ".join([row_cohort, family, market_slug])
+    for candidate in candidates:
+        cohort = str(candidate.get("cohort") or "").strip().lower()
+        query = str(candidate.get("recommended_collection_query") or "").strip().lower()
+        if cohort and (cohort == family or cohort in row_cohort or cohort in text):
+            return candidate
+        prefixes = _query_family_prefixes(query)
+        if prefixes and any(family.startswith(prefix) or prefix in text for prefix in prefixes):
+            return candidate
+    return None
+
+
 def _entry_index(entry_rows: list[dict[str, str]]) -> dict[str, dict[str, str]]:
     by_token: dict[str, dict[str, str]] = {}
     for row in entry_rows:
@@ -193,11 +257,15 @@ def _build_signal(
     if max_hold_minutes is None and max_forward_observations is not None and max_forward_observations > 0:
         max_hold_minutes = float(max_forward_observations) * observation_minutes
     max_stake = float(safe_float(settings.get("max_stake_usdc")) or 2.0)
+    if str(row.get("source") or "") == "paper_confirmation_candidate":
+        confirmation_max = safe_float(settings.get("paper_confirmation_max_stake_usdc"))
+        if confirmation_max is not None and confirmation_max > 0:
+            max_stake = min(max_stake, float(confirmation_max))
     min_edge = float(safe_float(settings.get("minimum_price_edge")) or 0.005)
     max_edge = float(safe_float(settings.get("maximum_price_edge")) or 0.08)
 
     target_edge = ask * take_profit_return
-    realized_roi = safe_float(cohort.get("realized_roi"))
+    realized_roi = safe_float(cohort.get("realized_roi") or cohort.get("forward_shadow_roi") or cohort.get("forward_paper_roi"))
     if realized_roi is not None and realized_roi > 0:
         target_edge = max(target_edge, ask * min(realized_roi, take_profit_return * 2.0))
     edge = max(min_edge, min(max_edge, target_edge))
@@ -246,11 +314,21 @@ def _build_signal(
         "feature_set_version": "websocket_bid_ask_v1",
         "data_snapshot_timestamp": data_timestamp,
         "price_action_signal": True,
-        "price_action_evidence_status": "cohort_bid_ask_round_trip_approved",
-        "price_action_cohort_realized_roi": cohort.get("realized_roi", ""),
+        "price_action_evidence_status": (
+            "trusted_shadow_requires_broker_paper_confirmation"
+            if str(row.get("source") or "") == "paper_confirmation_candidate"
+            else "cohort_bid_ask_round_trip_approved"
+        ),
+        "price_action_cohort_realized_roi": cohort.get(
+            "realized_roi",
+            cohort.get("forward_shadow_roi", cohort.get("forward_paper_roi", "")),
+        ),
         "price_action_cohort_win_rate": cohort.get("win_rate", cohort.get("validation_win_rate", "")),
         "price_action_cohort_closed_trades": cohort.get("closed_trades", cohort.get("validation_trades", "")),
-        "price_action_cohort_run_rate_usdc": cohort.get("realized_monthly_run_rate_usdc", ""),
+        "price_action_cohort_run_rate_usdc": cohort.get(
+            "realized_monthly_run_rate_usdc",
+            cohort.get("monthly_run_rate_usdc", ""),
+        ),
         "price_action_entry_source": row.get("source", ""),
         "price_action_latest_bid": bid,
         "price_action_latest_ask": ask,
@@ -295,6 +373,7 @@ def build_price_action_paper_signals(cfg: EngineConfig) -> dict[str, Any]:
     microstructure_current = read_csv_rows(out_dir / MICROSTRUCTURE_CURRENT_FILE)
     approved = _approved_cohorts(cohort_rows)
     approved_microstructure = _approved_feedback_microstructure_cohorts(cfg)
+    paper_confirmation = _paper_confirmation_candidates(cfg, settings)
     by_token = _entry_index(entries)
 
     signals: list[dict[str, Any]] = []
@@ -306,7 +385,18 @@ def build_price_action_paper_signals(cfg: EngineConfig) -> dict[str, Any]:
     for row in round_trip_rows:
         cohort_name = _cohort_name(row)
         token = _token_id(row)
-        if cohort_name not in approved:
+        cohort_payload: dict[str, Any] | None = approved.get(cohort_name)
+        if cohort_payload is None:
+            confirmation = _confirmation_candidate_for_row(row, paper_confirmation)
+            if confirmation is not None:
+                row = {
+                    **row,
+                    "source": "paper_confirmation_candidate",
+                    "signal_cohort": confirmation.get("cohort", cohort_name),
+                }
+                cohort_name = _cohort_name(row)
+                cohort_payload = confirmation
+        if cohort_payload is None:
             rejections.append(_reject(row, "price-action cohort has not passed positive bid/ask evidence gate"))
             continue
         if str(row.get("round_trip_status") or "") != "open_marked":
@@ -327,7 +417,7 @@ def build_price_action_paper_signals(cfg: EngineConfig) -> dict[str, Any]:
         if relative_spread is None or relative_spread > max_relative_spread:
             rejections.append(_reject(row, "relative spread above price-action paper limit"))
             continue
-        signal = _build_signal(row, cohort=approved[cohort_name], entry=by_token.get(token, {}), settings=settings)
+        signal = _build_signal(row, cohort=cohort_payload, entry=by_token.get(token, {}), settings=settings)
         if signal is None:
             rejections.append(_reject(row, "could not build executable price-action signal"))
             continue
@@ -376,6 +466,12 @@ def build_price_action_paper_signals(cfg: EngineConfig) -> dict[str, Any]:
         "rejections": len(rejections),
         "approved_price_action_cohorts": len(approved),
         "approved_microstructure_cohorts": len(approved_microstructure),
+        "paper_confirmation_candidates": len(paper_confirmation),
+        "paper_confirmation_signals": sum(
+            1
+            for signal in signals
+            if signal.get("price_action_evidence_status") == "trusted_shadow_requires_broker_paper_confirmation"
+        ),
         "source_round_trip_rows": len(round_trip_rows),
         "source_microstructure_current_rows": len(microstructure_current),
         "signal_file": str(out_dir / SIGNALS_FILE),

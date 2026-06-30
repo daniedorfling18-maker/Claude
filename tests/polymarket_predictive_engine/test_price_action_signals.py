@@ -158,6 +158,33 @@ def _microstructure_feedback_payload(cohort: str) -> dict[str, object]:
     }
 
 
+def _paper_confirmation_feedback_payload(
+    *,
+    cohort: str = "macro_economy",
+    trusted: bool = True,
+    blocker: str = "",
+) -> dict[str, object]:
+    return {
+        "status": "ok",
+        "learning_state": "collect_more_positive_price_action_evidence",
+        "paper_confirmation_candidates": 1 if trusted and not blocker else 0,
+        "paper_confirmation_preview": [
+            {
+                "source": "shadow_forward",
+                "cohort": cohort,
+                "trusted_for_goal": trusted,
+                "forward_edge_blocker": blocker,
+                "forward_shadow_pnl_usdc": 1.35,
+                "forward_shadow_roi": 0.033,
+                "monthly_run_rate_usdc": 19.8,
+                "recommended_collection_query": "",
+                "reason": "Forward shadow P&L is positive; collect broker paper evidence before increasing trust.",
+                "priority_score": 24.0,
+            }
+        ],
+    }
+
+
 def test_positive_price_action_cohort_compiles_paper_signal_without_settlement(tmp_path):
     cfg = _cfg(tmp_path)
     root = cfg.output_root / "polymarket_price_action"
@@ -224,6 +251,92 @@ def test_microstructure_candidate_stays_blocked_without_feedback_promotion(tmp_p
     assert summary["signals"] == 0
     assert signals == []
     assert "microstructure cohort has not passed governed feedback promotion gate" in rejections[0]["rejection_reason"]
+
+
+def test_trusted_shadow_confirmation_backlog_compiles_paper_probe(tmp_path):
+    cfg = _cfg(tmp_path)
+    root = cfg.output_root / "polymarket_price_action"
+    write_json(cfg.governance_root / "price_action_feedback.json", _paper_confirmation_feedback_payload())
+    write_csv(
+        root / "price_action_scout_round_trip_evidence.csv",
+        [
+            _round_trip_row(
+                source="profit_sprint_target",
+                signal_cohort="price_action_scout|profit_sprint|macro_economy",
+                family="macro_economy",
+                market_slug="will-the-us-economy-be-overheating-at-the-end-of-2026",
+                question="Will the US economy be overheating?",
+                outcome="Yes",
+                token_id="macro-token",
+                latest_bid="0.42",
+                latest_ask="0.43",
+                latest_spread="0.01",
+            )
+        ],
+    )
+    write_csv(
+        root / "price_action_scout_entries.csv",
+        [
+            _entry_row(
+                source="profit_sprint_target",
+                signal_cohort="price_action_scout|profit_sprint|macro_economy",
+                family="macro_economy",
+                market_slug="will-the-us-economy-be-overheating-at-the-end-of-2026",
+                question="Will the US economy be overheating?",
+                outcome="Yes",
+                token_id="macro-token",
+                entry_price="0.43",
+                liquidity="600",
+                spread="0.01",
+            )
+        ],
+    )
+
+    summary = build_price_action_paper_signals(cfg)
+    signals = read_csv_rows(root / "price_action_paper_signals.csv")
+
+    assert summary["signals"] == 1
+    assert summary["paper_confirmation_candidates"] == 1
+    assert summary["paper_confirmation_signals"] == 1
+    assert signals[0]["signal_cohort"] == "macro_economy"
+    assert signals[0]["price_action_entry_source"] == "paper_confirmation_candidate"
+    assert signals[0]["price_action_evidence_status"] == "trusted_shadow_requires_broker_paper_confirmation"
+    assert float(signals[0]["price_action_cohort_realized_roi"]) == 0.033
+
+
+def test_blocked_shadow_confirmation_backlog_stays_rejected(tmp_path):
+    cfg = _cfg(tmp_path)
+    root = cfg.output_root / "polymarket_price_action"
+    write_json(
+        cfg.governance_root / "price_action_feedback.json",
+        _paper_confirmation_feedback_payload(
+            cohort="exploratory_historical_rule|crypto_xrp_updown_5m|outcome=down",
+            trusted=False,
+            blocker="quarantined_fast_crypto_updown_family",
+        ),
+    )
+    write_csv(
+        root / "price_action_scout_round_trip_evidence.csv",
+        [
+            _round_trip_row(
+                signal_cohort="price_action_scout|profit_sprint|crypto_xrp_updown_5m",
+                family="crypto_xrp_updown_5m",
+                token_id="xrp-token",
+                latest_bid="0.42",
+                latest_ask="0.43",
+                latest_spread="0.01",
+            )
+        ],
+    )
+
+    summary = build_price_action_paper_signals(cfg)
+    signals = read_csv_rows(root / "price_action_paper_signals.csv")
+    rejections = read_csv_rows(root / "price_action_paper_rejections.csv")
+
+    assert summary["signals"] == 0
+    assert summary["paper_confirmation_candidates"] == 0
+    assert signals == []
+    assert "has not passed positive bid/ask evidence gate" in rejections[0]["rejection_reason"]
 
 
 def _broker_cfg(tmp_path: Path):

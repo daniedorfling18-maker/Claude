@@ -337,6 +337,10 @@ price_action_paper:
   # closed round-trip evidence gates first.
   max_signals_per_run: 8
   max_stake_usdc: 2
+  # Paper-only confirmation probes can be generated from trusted positive shadow
+  # cohorts so the broker can prove/disprove them with real bid/ask fills.
+  paper_confirmation_enabled: true
+  paper_confirmation_max_stake_usdc: 2
   minimum_price_edge: 0.005
   maximum_price_edge: 0.08
   max_spread: 0.04

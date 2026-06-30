@@ -341,10 +341,12 @@ price_action_paper:
   maximum_price_edge: 0.08
   max_spread: 0.04
   max_relative_spread: 0.15
+  microstructure_liquidity_proxy: 50
   take_profit_return: 0.08
   stop_loss_return: 0.06
   take_profit_min_usdc: 0.05
   minimum_hold_minutes_before_exit: 0
+  observation_minutes: 1
   default_confidence: 0.7
 price_action_feedback:
   # Consolidates Strategy V2 round trips, fast scout cohorts, and microstructure

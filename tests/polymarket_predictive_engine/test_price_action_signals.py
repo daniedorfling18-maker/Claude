@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from datetime import datetime, timedelta, timezone
 
 import yaml
 
@@ -237,6 +238,7 @@ def _broker_cfg(tmp_path: Path):
     raw["paper_trading"]["minimum_reentry_minutes_after_exit"] = 240
     raw["paper_trading"]["minimum_hold_minutes_before_exit"] = 15
     raw["paper_trading"]["take_profit_min_usdc"] = 0.25
+    raw["price_action_paper"]["observation_minutes"] = 1
     config_path = tmp_path / "config.yaml"
     config_path.write_text(yaml.safe_dump(raw, sort_keys=False), encoding="utf-8")
     return load_config(config_path)
@@ -317,3 +319,62 @@ def test_paper_broker_fills_price_action_signal_and_exits_from_websocket_bid(tmp
     assert second["exit_orders_filled"] == 1
     assert second["closed_positions"][0]["reason"] == "take_profit"
     assert second["closed_positions"][0]["realised_pnl_usdc"] > 0
+
+
+def test_paper_broker_exits_microstructure_signal_at_fixed_horizon(tmp_path):
+    cfg = _broker_cfg(tmp_path)
+    _seed_readiness(cfg)
+    root = cfg.output_root / "polymarket_price_action"
+    cohort = "price_action_microstructure|sports_other|bid_momentum_tight|exit=quick_3pct_1obs"
+    write_json(cfg.governance_root / "price_action_feedback.json", _microstructure_feedback_payload(cohort))
+    write_csv(root / "microstructure_current_candidates.csv", [_microstructure_current_row(latest_bid="0.49", latest_ask="0.50")])
+    build_price_action_paper_signals(cfg)
+
+    write_csv(
+        cfg.output_root / "polymarket_training" / "websocket_market_features.csv",
+        [
+            {
+                "collected_at_utc": "2026-06-30T10:00:00Z",
+                "asset_id": "world-cup-token",
+                "market_slug": "world-cup-final-test",
+                "selection": "Team A",
+                "best_bid": "0.49",
+                "best_ask": "0.50",
+                "midpoint": "0.495",
+                "spread": "0.01",
+            }
+        ],
+    )
+
+    first = run_paper_broker(cfg)
+    assert first["orders_filled"] == 1
+
+    from polymarket_predictive_engine.storage import connect_db
+
+    old_time = (datetime.now(timezone.utc) - timedelta(minutes=2)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    con = connect_db(cfg.database_path)
+    try:
+        with con:
+            con.execute("UPDATE positions SET updated_at = ? WHERE token_id = ?", (old_time, "world-cup-token"))
+    finally:
+        con.close()
+
+    write_csv(
+        cfg.output_root / "polymarket_training" / "websocket_market_features.csv",
+        [
+            {
+                "collected_at_utc": "2026-06-30T10:02:00Z",
+                "asset_id": "world-cup-token",
+                "market_slug": "world-cup-final-test",
+                "selection": "Team A",
+                "best_bid": "0.50",
+                "best_ask": "0.51",
+                "midpoint": "0.505",
+                "spread": "0.01",
+            }
+        ],
+    )
+
+    second = run_paper_broker(cfg)
+    assert second["exit_orders_filled"] == 1
+    assert second["closed_positions"][0]["reason"] == "fixed_horizon"

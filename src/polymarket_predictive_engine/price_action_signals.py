@@ -55,10 +55,12 @@ SIGNAL_FIELDS = [
     "price_action_latest_bid",
     "price_action_latest_ask",
     "exit_policy_id",
+    "max_forward_observations",
     "take_profit_return",
     "stop_loss_return",
     "take_profit_min_usdc",
     "minimum_hold_minutes_before_exit",
+    "max_hold_minutes_before_exit",
     "max_stake_usdc",
     "priority_score",
 ]
@@ -185,6 +187,11 @@ def _build_signal(
     stop_loss_return = float(safe_float(row.get("stop_loss_return")) or safe_float(settings.get("stop_loss_return")) or 0.06)
     min_profit = float(safe_float(row.get("min_profit_usdc")) or safe_float(settings.get("take_profit_min_usdc")) or 0.25)
     min_hold = float(safe_float(settings.get("minimum_hold_minutes_before_exit")) or 0.0)
+    max_forward_observations = safe_float(row.get("max_forward_observations"))
+    observation_minutes = float(safe_float(settings.get("observation_minutes")) or 1.0)
+    max_hold_minutes = safe_float(row.get("max_hold_minutes_before_exit"))
+    if max_hold_minutes is None and max_forward_observations is not None and max_forward_observations > 0:
+        max_hold_minutes = float(max_forward_observations) * observation_minutes
     max_stake = float(safe_float(settings.get("max_stake_usdc")) or 2.0)
     min_edge = float(safe_float(settings.get("minimum_price_edge")) or 0.005)
     max_edge = float(safe_float(settings.get("maximum_price_edge")) or 0.08)
@@ -203,6 +210,9 @@ def _build_signal(
     outcome = str(row.get("outcome") or entry.get("outcome") or "")
     signal_cohort = _cohort_name(row)
     data_timestamp = str(row.get("latest_time_utc") or now_utc())
+    liquidity = entry.get("liquidity", "")
+    if not str(liquidity or "").strip() and str(row.get("source") or "") == "microstructure_current_candidate":
+        liquidity = settings.get("microstructure_liquidity_proxy", "")
     priority_score = max_stake * edge / max(ask, 0.05)
     return {
         "market_id": market_slug or token,
@@ -223,7 +233,7 @@ def _build_signal(
         "gross_edge_before_slippage": edge,
         "edge": edge,
         "expected_value_per_share": edge,
-        "liquidity": entry.get("liquidity", ""),
+        "liquidity": liquidity,
         "spread": spread,
         "relative_spread": "" if relative_spread is None else relative_spread,
         "time_to_close_hours": entry.get("time_to_close_hours", ""),
@@ -245,10 +255,12 @@ def _build_signal(
         "price_action_latest_bid": bid,
         "price_action_latest_ask": ask,
         "exit_policy_id": row.get("exit_policy_id", ""),
+        "max_forward_observations": "" if max_forward_observations is None else max_forward_observations,
         "take_profit_return": take_profit_return,
         "stop_loss_return": stop_loss_return,
         "take_profit_min_usdc": min_profit,
         "minimum_hold_minutes_before_exit": min_hold,
+        "max_hold_minutes_before_exit": "" if max_hold_minutes is None else max_hold_minutes,
         "max_stake_usdc": max_stake,
         "priority_score": priority_score,
     }

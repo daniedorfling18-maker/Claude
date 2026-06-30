@@ -595,6 +595,9 @@ def _exit_reason(position, quote: dict[str, Any], prediction: dict[str, Any], se
     stop_loss_max_edge = float(settings.get("stop_loss_max_edge", 0.0))
     if return_pct <= -stop_loss_return and (price_action_signal or alpha_edge is None or alpha_edge <= stop_loss_max_edge):
         return "stop_loss"
+    max_hold = safe_float(prediction.get("max_hold_minutes_before_exit")) if price_action_signal else None
+    if max_hold is not None and max_hold > 0 and _position_age_minutes(position) >= float(max_hold):
+        return "fixed_horizon"
     return None
 
 

@@ -65,7 +65,8 @@ jobs:
               'test_submit_dry_run.yml',
           }
           expected_triggers = {
-              'auto_pick.yml': {'schedule', 'workflow_dispatch'},
+              # Auto Pick is intentionally manual-only and disabled until stale-card fallbacks are removed.
+              'auto_pick.yml': {'workflow_dispatch'},
               'check_superbru_fixtures.yml': {'schedule', 'workflow_dispatch'},
               'ci.yml': {'push', 'pull_request'},
               'data-inventory.yml': {'schedule', 'push'},

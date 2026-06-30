@@ -275,6 +275,9 @@ async function load() {
       ["Watchlist rows", strategyV2.watchlist_candidates],
       ["Missing anchors", strategyV2.missing_anchor_rows],
       ["Persistence entries", strategyV2.persistence_entries],
+      ["Forward evidence", strategyV2.forward_evidence?.decision],
+      ["Forward MTM P&L", strategyV2.forward_evidence?.total_mark_pnl_usdc, fmtUsd],
+      ["Forward review cohorts", strategyV2.forward_evidence?.paper_review_candidates],
       ["Main blocker", strategyV2.main_blocker, v=>longText(v, 180)]
     ]) + `<div style="height:12px"></div><h3>Current shadow candidates</h3>` + table(strategyV2.top_shadow_candidates || [], [
       ["Family","family"],
@@ -294,6 +297,27 @@ async function load() {
       ["Min settled","min_settled_for_review"],
       ["Best edge","best_risk_adjusted_anchor_edge", v=>fmtNum(v,4)],
       ["Status","status", v=>longText(v, 120)]
+    ]) + `<div style="height:12px"></div><h3>Forward evidence by Strategy V2 cohort</h3>` + table(strategyV2.forward_evidence_cohorts || [], [
+      ["Cohort","signal_cohort"],
+      ["Candidates","candidates"],
+      ["Current","current_shadow_candidates"],
+      ["Resolved","resolved_candidates"],
+      ["MTM P&L","total_mark_pnl_usdc", fmtUsd],
+      ["MTM ROI","mark_roi", v=>fmtNum(Number(v) * 100, 2) + "%"],
+      ["Run-rate","monthly_run_rate_usdc", fmtUsd],
+      ["Score","promotion_ready_score", (v,row)=>`${v ?? 0}/${row.promotion_ready_checks ?? "?"}`],
+      ["Status","status", v=>longText(v, 140)],
+      ["Reason","reason", v=>longText(v, 180)]
+    ]) + `<div style="height:12px"></div><h3>Forward evidence candidate marks</h3>` + table(strategyV2.forward_evidence_top_candidates || [], [
+      ["Cohort","signal_cohort"],
+      ["Market","market_slug", v=>longText(v, 120)],
+      ["Outcome","outcome"],
+      ["Entry","entry_price", v=>fmtNum(v,4)],
+      ["Latest","latest_price", v=>fmtNum(v,4)],
+      ["P&L","mark_pnl_usdc", fmtUsd],
+      ["ROI","mark_roi", v=>fmtNum(Number(v) * 100, 2) + "%"],
+      ["Resolved","resolved_evidence"],
+      ["Settlement","settlement_status", v=>longText(v, 120)]
     ]) + `<div style="height:12px"></div><h3>Anchored near-misses</h3>` + table(strategyV2.top_anchored_rejections || [], [
       ["Family","family"],
       ["Market","market_slug", v=>longText(v, 120)],
@@ -909,6 +933,11 @@ def _strategy_v2_status(cfg: EngineConfig) -> dict[str, Any]:
         report = {}
     candidates = read_csv_rows(root / "anchored_edge_candidates.csv")
     persistence = read_csv_rows(root / "anchored_edge_persistence_log.csv")
+    forward_evidence = read_json(root / "strategy_v2_forward_evidence.json", default={}) or {}
+    if not isinstance(forward_evidence, dict):
+        forward_evidence = {}
+    forward_cohorts = read_csv_rows(root / "strategy_v2_cohort_forward_evidence.csv")
+    forward_candidates = read_csv_rows(root / "strategy_v2_forward_evidence.csv")
     cycle_status = _read_json_lenient(cfg.path.parent / "work" / "strategy_v2_cycle_latest_status.json", default={}) or {}
     if not isinstance(cycle_status, dict):
         cycle_status = {}
@@ -1042,6 +1071,9 @@ def _strategy_v2_status(cfg: EngineConfig) -> dict[str, Any]:
         "top_shadow_candidates": top_shadow,
         "top_anchored_rejections": top_anchored_rejections[:25],
         "promotion_progress": promotion_progress[:25],
+        "forward_evidence": forward_evidence,
+        "forward_evidence_cohorts": forward_cohorts[:25],
+        "forward_evidence_top_candidates": _sorted_by_numeric(forward_candidates, "mark_pnl_usdc")[:25],
         "persistence_entries": len(persistence),
         "persistence_log": str(root / "anchored_edge_persistence_log.csv"),
         "shadow_only": True,

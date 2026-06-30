@@ -368,6 +368,31 @@ def test_dashboard_surfaces_strategy_v2_anchored_edge_progress(tmp_path):
             }
         ],
     )
+    write_json(
+        cfg.output_root / "polymarket_strategy_v2" / "strategy_v2_forward_evidence.json",
+        {
+            "status": "computed",
+            "decision": "collect_more_resolved_forward_evidence",
+            "unique_forward_candidates": 1,
+            "total_mark_pnl_usdc": 1.25,
+            "paper_review_candidates": 0,
+        },
+    )
+    write_csv(
+        cfg.output_root / "polymarket_strategy_v2" / "strategy_v2_cohort_forward_evidence.csv",
+        [
+            {
+                "signal_cohort": "strategy_v2|macro_rates",
+                "family": "macro_rates",
+                "candidates": "1",
+                "current_shadow_candidates": "1",
+                "resolved_candidates": "0",
+                "total_mark_pnl_usdc": "1.25",
+                "mark_roi": "0.125",
+                "status": "collect_resolved_forward_evidence",
+            }
+        ],
+    )
     cycle_status_path = cfg.path.parent / "work" / "strategy_v2_cycle_latest_status.json"
     cycle_status_path.parent.mkdir(parents=True, exist_ok=True)
     cycle_status_path.write_text(
@@ -386,6 +411,8 @@ def test_dashboard_surfaces_strategy_v2_anchored_edge_progress(tmp_path):
     assert strategy_v2["anchored_rows"] == 3
     assert strategy_v2["worldcup_validated_anchor_rows"] == 2
     assert strategy_v2["cycle_status"]["status"] == "ok"
+    assert strategy_v2["forward_evidence"]["decision"] == "collect_more_resolved_forward_evidence"
+    assert strategy_v2["forward_evidence_cohorts"][0]["signal_cohort"] == "strategy_v2|macro_rates"
     assert strategy_v2["top_shadow_candidates"][0]["market_slug"] == candidate["market_slug"]
     assert strategy_v2["promotion_progress"][0]["remaining_shadow_entries_to_review"] == 19
 

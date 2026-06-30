@@ -246,6 +246,9 @@ if (Test-Path $logPath) {
   $anchoredRows | Export-Csv $logPath -NoTypeInformation
 }
 
+Invoke-PythonStep "strategy-v2-evidence" @("-m", "polymarket_predictive_engine.cli", "strategy-v2-evidence", "--config", $ConfigPath)
+$strategyV2ForwardEvidence = Read-JsonIfExists ".\outputs\polymarket_strategy_v2\strategy_v2_forward_evidence.json"
+
 $shadowCandidates = $anchoredRows | Where-Object { $_.status -eq "shadow_candidate" }
 $rejectedAnchored = $anchoredRows | Where-Object { $_.status -eq "rejected" }
 
@@ -260,6 +263,7 @@ $status = [PSCustomObject]@{
   rejected_anchored_rows = @($rejectedAnchored).Count
   active_shadow_candidates = @($shadowCandidates | Select-Object family, market_slug, outcome, executable_price, anchor_fair_probability, risk_adjusted_anchor_edge)
   persistence_log = $logPath
+  strategy_v2_forward_evidence = $strategyV2ForwardEvidence
   independent_anchor_refresh = $independentAnchorRefresh
 }
 

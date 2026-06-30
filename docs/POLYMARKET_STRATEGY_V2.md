@@ -198,7 +198,15 @@ Report output:
 ```text
 outputs/polymarket_strategy_v2/anchored_edge_report.json
 outputs/polymarket_strategy_v2/anchored_edge_report.md
+outputs/polymarket_strategy_v2/strategy_v2_forward_evidence.json
+outputs/polymarket_strategy_v2/strategy_v2_forward_evidence.csv
+outputs/polymarket_strategy_v2/strategy_v2_cohort_forward_evidence.csv
 ```
+
+The forward-evidence files are mark-to-market research ledgers built from the Strategy V2
+persistence log. They answer: "If we had shadow-bought this candidate at first observation, where
+would it mark now?" They are not paper trades, not live trades, and not settlement proof. Promotion
+still requires resolved/settled evidence plus human review.
 
 Minimum candidate filters:
 

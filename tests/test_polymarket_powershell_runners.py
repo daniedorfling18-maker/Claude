@@ -65,6 +65,17 @@ def test_strategy_v2_cycle_renders_dashboard_after_latest_status_is_written():
     assert status_write_index < dashboard_render_index
 
 
+def test_strategy_v2_cycle_builds_forward_evidence_after_persistence_log():
+    text = _script_text("scripts/run_polymarket_strategy_v2_cycle.ps1")
+
+    persistence_index = text.index("anchored_edge_persistence_log.csv")
+    evidence_index = text.index("strategy-v2-evidence")
+    status_payload_index = text.index("strategy_v2_forward_evidence = $strategyV2ForwardEvidence")
+
+    assert persistence_index < evidence_index
+    assert evidence_index < status_payload_index
+
+
 def test_strategy_v2_scheduled_wrapper_pins_repo_source():
     text = _script_text("scripts/run_strategy_v2_cycle_scheduled_wrapper.ps1")
 

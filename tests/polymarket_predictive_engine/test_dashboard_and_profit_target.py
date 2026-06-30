@@ -168,6 +168,10 @@ def test_dashboard_prefers_fresh_broker_and_profit_tracker_over_stale_forward_cy
     data = read_json(result["dashboard_data"])
 
     assert data["paper_broker_summary"]["equity"] == 1000
+    assert data["paper_trading_account"]["source"] == "paper_trading_summary"
+    assert data["paper_trading_account"]["broker"]["equity"] == 1000
+    assert data["paper_trading_account"]["forward_cycle_broker_mismatch"] is True
+    assert "equity" in data["paper_trading_account"]["forward_cycle_broker_mismatch_fields"]
     assert data["actual_profit_target"]["actual_pnl_since_baseline_usdc"] == 0
     assert data["evidence_freshness"]["broker_source"] == "paper_trading_summary"
     assert data["evidence_freshness"]["target_source"] == "paper_profit_target_tracker"
@@ -223,6 +227,9 @@ def test_dashboard_prefers_fresh_paper_trade_refresh_over_stale_summaries(tmp_pa
 
     assert data["paper_broker_summary"]["equity"] == 1005
     assert data["paper_broker_summary"]["buy_orders_filled"] == 1
+    assert data["paper_trading_account"]["source"] == "paper_trade_refresh"
+    assert data["paper_trading_account"]["broker"]["equity"] == 1005
+    assert data["paper_trading_account"]["forward_cycle_broker_mismatch"] is False
     assert data["actual_profit_target"]["actual_pnl_since_baseline_usdc"] == 5
     assert data["evidence_freshness"]["broker_source"] == "paper_trade_refresh"
     assert data["evidence_freshness"]["target_source"] == "paper_trade_refresh"

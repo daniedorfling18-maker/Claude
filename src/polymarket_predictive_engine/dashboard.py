@@ -135,7 +135,8 @@ async function load() {
     const data = await res.json();
     document.getElementById("error").innerHTML = "";
     const paper = data.forward_paper_cycle?.paper || data.forward_paper_cycle || {};
-    const broker = data.paper_broker_summary || data.forward_paper_cycle?.broker || paper.broker || {};
+    const tradingAccount = data.paper_trading_account || {};
+    const broker = tradingAccount.broker || data.paper_broker_summary || data.forward_paper_cycle?.broker || paper.broker || {};
     const target = data.actual_profit_target || data.forward_paper_cycle?.actual_profit_target || {};
     const monthly = data.forward_paper_cycle?.monthly_profit_target || {};
     const diag = data.trade_diagnostics || {};
@@ -234,6 +235,9 @@ async function load() {
       ["Predictions", data.forward_paper_cycle?.predictions],
       ["Approved", data.forward_paper_cycle?.signals_approved],
       ["Rejected", data.forward_paper_cycle?.signals_rejected],
+      ["Broker source", tradingAccount.source || freshness.broker_source],
+      ["Broker generated", tradingAccount.generated_at_utc || freshness.broker_generated_at_utc],
+      ["Stale cycle broker", tradingAccount.forward_cycle_broker_mismatch ? "yes" : "no"],
       ["Broker rejects", monthly.broker_rejected_orders],
       ["Main reason", broker.entry_pause_reason || Object.keys(broker.broker_rejection_reasons || {}).join(", "), longText]
     ]);
@@ -1576,6 +1580,34 @@ def _freshest_payload(candidates: list[tuple[str, Any]]) -> tuple[str, dict[str,
     return name, dict(payload)
 
 
+def _paper_trading_account_payload(source: str, broker_summary: dict[str, Any], forward: dict[str, Any]) -> dict[str, Any]:
+    """Expose one canonical paper-trading account for dashboard cards and API consumers.
+
+    The raw forward cycle can be older than the standalone paper broker ledger. Keeping the
+    raw cycle is useful for diagnostics, but the dashboard needs a single source of truth for
+    account equity, cash, exposure, and fills.
+    """
+    cycle_broker = forward.get("broker") if isinstance(forward, dict) and isinstance(forward.get("broker"), dict) else {}
+    mismatch_fields: list[str] = []
+    if broker_summary and cycle_broker:
+        for field in ("equity", "cash", "total_exposure", "buy_orders_filled", "exit_orders_filled", "orders_filled"):
+            current = safe_float(broker_summary.get(field))
+            cycle = safe_float(cycle_broker.get(field))
+            if current is None and cycle is None:
+                continue
+            if current is None or cycle is None or abs(current - cycle) > 0.005:
+                mismatch_fields.append(field)
+    return {
+        "source": source,
+        "generated_at_utc": broker_summary.get("generated_at_utc") if isinstance(broker_summary, dict) else "",
+        "broker": broker_summary,
+        "forward_cycle_broker_generated_at_utc": cycle_broker.get("generated_at_utc", "") if cycle_broker else "",
+        "forward_cycle_broker_mismatch": bool(mismatch_fields),
+        "forward_cycle_broker_mismatch_fields": mismatch_fields,
+        "canonical_for_dashboard": True,
+    }
+
+
 def _age_seconds(payload: Any) -> float | None:
     parsed = _payload_time(payload)
     if parsed is None:
@@ -1741,6 +1773,7 @@ def render_dashboard(cfg: EngineConfig, latest_report: dict[str, Any] | None = N
         "forward_paper_cycle": forward,
         "paper_trade_refresh": paper_trade_refresh,
         "paper_broker_summary": broker_summary,
+        "paper_trading_account": _paper_trading_account_payload(broker_source, broker_summary, forward),
         "heartbeat": heartbeat,
         "local_live_heartbeat": local_live_heartbeat,
         "scanner_heartbeat": scanner_heartbeat,

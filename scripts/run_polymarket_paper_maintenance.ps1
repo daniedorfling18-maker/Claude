@@ -19,7 +19,35 @@ $env:PYTHONPATH = Join-Path $RepoRoot "src"
 
 function Write-MaintenanceStatus {
     param([PSCustomObject]$Status)
-    $Status | ConvertTo-Json -Depth 12 | Set-Content -LiteralPath $StatusPath -Encoding UTF8
+    Write-JsonNoBom -Path $StatusPath -Value $Status -Depth 12
+    Update-DashboardMaintenanceStatus -Status $Status
+}
+
+function Write-JsonNoBom {
+    param(
+        [string]$Path,
+        $Value,
+        [int]$Depth = 12
+    )
+    $json = $Value | ConvertTo-Json -Depth $Depth
+    $encoding = New-Object System.Text.UTF8Encoding($false)
+    [System.IO.File]::WriteAllText($Path, $json, $encoding)
+}
+
+function Update-DashboardMaintenanceStatus {
+    param([PSCustomObject]$Status)
+    if (-not (Test-Path -LiteralPath $DashboardDataPath)) {
+        return
+    }
+    try {
+        $dashboard = Get-Content -LiteralPath $DashboardDataPath -Raw | ConvertFrom-Json
+        $dashboard | Add-Member -NotePropertyName "paper_maintenance" -NotePropertyValue $Status -Force
+        Write-JsonNoBom -Path $DashboardDataPath -Value $dashboard -Depth 100
+    } catch {
+        # Dashboard status is best-effort. The canonical maintenance status file
+        # above is still written even if the static dashboard JSON is temporarily
+        # locked, missing, or unreadable.
+    }
 }
 
 function Read-JsonIfExists {

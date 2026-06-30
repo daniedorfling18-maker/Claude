@@ -258,6 +258,10 @@ def test_paper_maintenance_runner_is_lightweight_and_due_exit_aware():
     assert "polymarket_paper_maintenance_latest_status.json" in text
     assert "next_broker_exit_due_utc" in text
     assert "exit_due_by_clock" in text
+    assert "Update-DashboardMaintenanceStatus" in text
+    assert 'Add-Member -NotePropertyName "paper_maintenance"' in text
+    assert "Write-JsonNoBom" in text
+    assert "UTF8Encoding($false)" in text
     assert '"paper-trade"' in text
     assert "render_polymarket_dashboard.py" in text
     assert "skipped_high_memory" in text

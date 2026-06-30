@@ -190,6 +190,7 @@ Candidate output:
 
 ```text
 outputs/polymarket_strategy_v2/anchored_edge_candidates.csv
+outputs/polymarket_strategy_v2/worldcup_validated_anchors.csv
 ```
 
 Report output:
@@ -216,6 +217,11 @@ metadata_blocker is empty
 Fast-feedback research markets may use lower liquidity only if explicitly labelled as fast-feedback and never promoted from thin evidence.
 
 No Strategy V2 output may be used for paper trading unless a separate governance promotion report approves it later.
+
+World Cup rows get one extra bridge artifact: `worldcup_validated_anchors.csv`. It is built from the
+mispricing-alpha validation layer and only includes World Cup rows where the bookmaker/fundamental
+cross-check passed. Strategy V2 uses the conservative `haircut_fundamental_probability` as the anchor
+when available, not the raw fundamental probability.
 
 ---
 

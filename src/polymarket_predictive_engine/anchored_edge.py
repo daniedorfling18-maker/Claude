@@ -6,12 +6,14 @@ from statistics import median
 from typing import Any
 
 from .config import EngineConfig, load_config
-from .utils import now_utc, read_csv_rows, safe_float, write_csv, write_json
+from .utils import boolish, now_utc, read_csv_rows, safe_float, write_csv, write_json
+from .worldcup_validation import is_worldcup_market
 
 OUTPUT_DIRNAME = "polymarket_strategy_v2"
 CANDIDATES_FILE = "anchored_edge_candidates.csv"
 REPORT_JSON = "anchored_edge_report.json"
 REPORT_MD = "anchored_edge_report.md"
+WORLDCUP_VALIDATED_ANCHORS_FILE = "worldcup_validated_anchors.csv"
 
 ACCEPTED_FAMILY_RULES: dict[str, dict[str, Any]] = {
     "macro_rates": {
@@ -44,6 +46,20 @@ ACCEPTED_FAMILY_RULES: dict[str, dict[str, Any]] = {
         "never_promote_from_thin_fast_feedback": True,
     },
     "sports_other": {
+        "status": "accepted_with_external_odds_anchor",
+        "anchor_required": True,
+        "normal_max_spread": 0.02,
+        "normal_max_relative_spread": 0.15,
+        "normal_min_liquidity": 250.0,
+    },
+    "worldcup": {
+        "status": "accepted_with_external_odds_anchor",
+        "anchor_required": True,
+        "normal_max_spread": 0.02,
+        "normal_max_relative_spread": 0.15,
+        "normal_min_liquidity": 250.0,
+    },
+    "worldcup_2026_winner": {
         "status": "accepted_with_external_odds_anchor",
         "anchor_required": True,
         "normal_max_spread": 0.02,
@@ -110,6 +126,25 @@ DEFAULT_SETTINGS = {
     "full_promotion_min_roi": 0.05,
 }
 
+WORLDCUP_VALIDATED_ANCHOR_FIELDS = [
+    "token_id",
+    "market_slug",
+    "outcome",
+    "fair_probability",
+    "anchor_fair_probability",
+    "anchor_source",
+    "anchor_timestamp_utc",
+    "anchor_path",
+    "anchor_type",
+    "fundamental_probability",
+    "haircut_fundamental_probability",
+    "fundamental_edge_after_haircut",
+    "bookmaker_cross_check_pass",
+    "microstructure_filter_pass",
+    "validation_layer_pass",
+    "signal_cohort",
+]
+
 
 def _settings(cfg: EngineConfig) -> dict[str, Any]:
     raw = cfg.raw.get("strategy_v2", {}) or {}
@@ -155,7 +190,7 @@ def _anchor_key(row: dict[str, Any]) -> tuple[str, str, str]:
     return (_token_key(row), _market_key(row), _outcome_key(row).lower())
 
 
-def _load_anchor_rows(cfg: EngineConfig) -> list[dict[str, Any]]:
+def _load_configured_anchor_rows(cfg: EngineConfig) -> list[dict[str, Any]]:
     settings = _settings(cfg)
     configured = settings.get("anchor_probability_paths")
     if configured is None:
@@ -194,6 +229,60 @@ def _load_anchor_rows(cfg: EngineConfig) -> list[dict[str, Any]]:
                     "anchor_path": str(path),
                 }
             )
+    return rows
+
+
+def _validated_worldcup_anchor_rows(cfg: EngineConfig) -> list[dict[str, Any]]:
+    """Build conservative Strategy V2 anchors from the World Cup validation layer.
+
+    The mispricing-alpha layer already attaches bookmaker/fundamental probabilities and applies the
+    configured haircut. Strategy V2 should only consume those probabilities when the row is actually
+    World Cup related and the bookmaker cross-check passed. Using the haircutted probability makes the
+    anchor intentionally more conservative than the raw fundamental estimate.
+    """
+    source_path = cfg.output_root / "polymarket_predictions" / "mispricing_alpha_scores.csv"
+    rows: list[dict[str, Any]] = []
+    seen: set[tuple[str, str, str]] = set()
+    for row in read_csv_rows(source_path):
+        if not is_worldcup_market(row):
+            continue
+        if not boolish(row.get("bookmaker_cross_check_pass")):
+            continue
+        probability = _num(row, "haircut_fundamental_probability", "fundamental_probability")
+        if probability is None or not 0.0 <= probability <= 1.0:
+            continue
+        token_id = _token_key(row)
+        market_slug = _market_key(row)
+        outcome = _outcome_key(row)
+        if not token_id and not (market_slug and outcome):
+            continue
+        key = (token_id, market_slug, outcome.lower())
+        if key in seen:
+            continue
+        seen.add(key)
+        fundamental_source = _text(row, "fundamental_source") or "worldcup_bookmaker_fundamental"
+        timestamp = _text(row, "prediction_timestamp", "generated_at_utc") or now_utc()
+        rows.append(
+            {
+                "token_id": token_id,
+                "market_slug": market_slug,
+                "outcome": outcome,
+                "fair_probability": probability,
+                "anchor_fair_probability": probability,
+                "anchor_source": f"validated_worldcup_haircut:{fundamental_source}",
+                "anchor_timestamp_utc": timestamp,
+                "anchor_path": str(source_path),
+                "anchor_type": "worldcup_validated_haircut",
+                "fundamental_probability": row.get("fundamental_probability", ""),
+                "haircut_fundamental_probability": row.get("haircut_fundamental_probability", ""),
+                "fundamental_edge_after_haircut": row.get("fundamental_edge_after_haircut", ""),
+                "bookmaker_cross_check_pass": row.get("bookmaker_cross_check_pass", ""),
+                "microstructure_filter_pass": row.get("microstructure_filter_pass", ""),
+                "validation_layer_pass": row.get("validation_layer_pass", ""),
+                "signal_cohort": row.get("signal_cohort", ""),
+            }
+        )
+    rows.sort(key=lambda item: (str(item.get("market_slug") or ""), str(item.get("outcome") or "")))
     return rows
 
 
@@ -345,7 +434,15 @@ def _candidate_status(
 def build_anchored_edge_candidates(cfg: EngineConfig) -> tuple[list[dict[str, Any]], dict[str, Any]]:
     settings = _settings(cfg)
     prediction_rows = read_csv_rows(cfg.output_root / "polymarket_predictions" / "predictions.csv")
-    anchor_rows = _load_anchor_rows(cfg)
+    output_dir = cfg.output_root / OUTPUT_DIRNAME
+    output_dir.mkdir(parents=True, exist_ok=True)
+    worldcup_validated_anchor_rows = _validated_worldcup_anchor_rows(cfg)
+    write_csv(
+        output_dir / WORLDCUP_VALIDATED_ANCHORS_FILE,
+        worldcup_validated_anchor_rows,
+        fieldnames=WORLDCUP_VALIDATED_ANCHOR_FIELDS,
+    )
+    anchor_rows = _load_configured_anchor_rows(cfg) + worldcup_validated_anchor_rows
     anchors = _anchor_index(anchor_rows)
     candidates: list[dict[str, Any]] = []
 
@@ -400,6 +497,9 @@ def build_anchored_edge_candidates(cfg: EngineConfig) -> tuple[list[dict[str, An
                 "anchor_source": "" if anchor is None else _text(anchor, "anchor_source"),
                 "anchor_timestamp_utc": "" if anchor is None else _text(anchor, "anchor_timestamp_utc"),
                 "anchor_path": "" if anchor is None else _text(anchor, "anchor_path"),
+                "anchor_type": "" if anchor is None else _text(anchor, "anchor_type"),
+                "fundamental_edge_after_haircut": "" if anchor is None else _text(anchor, "fundamental_edge_after_haircut"),
+                "bookmaker_cross_check_pass": "" if anchor is None else _text(anchor, "bookmaker_cross_check_pass"),
                 "executable_price": "" if price is None else price,
                 "liquidity": "" if liquidity is None else liquidity,
                 "spread": "" if spread is None else spread,
@@ -417,10 +517,13 @@ def build_anchored_edge_candidates(cfg: EngineConfig) -> tuple[list[dict[str, An
         key=lambda row: safe_float(row.get("risk_adjusted_anchor_edge")) or -999.0,
         reverse=True,
     )
-    output_dir = cfg.output_root / OUTPUT_DIRNAME
-    output_dir.mkdir(parents=True, exist_ok=True)
     write_csv(output_dir / CANDIDATES_FILE, candidates)
-    report = _build_report(candidates, anchor_rows, settings)
+    report = _build_report(
+        candidates,
+        anchor_rows,
+        settings,
+        worldcup_validated_anchor_rows=len(worldcup_validated_anchor_rows),
+    )
     write_json(output_dir / REPORT_JSON, report)
     _write_markdown(output_dir / REPORT_MD, report)
     return candidates, report
@@ -465,7 +568,13 @@ def _family_action(candidate_rows: list[dict[str, Any]], shadow_rows: list[dict[
     return "no_actionable_anchored_edge"
 
 
-def _build_report(candidates: list[dict[str, Any]], anchor_rows: list[dict[str, Any]], settings: dict[str, Any]) -> dict[str, Any]:
+def _build_report(
+    candidates: list[dict[str, Any]],
+    anchor_rows: list[dict[str, Any]],
+    settings: dict[str, Any],
+    *,
+    worldcup_validated_anchor_rows: int = 0,
+) -> dict[str, Any]:
     status_counts = Counter(str(row.get("status") or "unknown") for row in candidates)
     blocker_counts = Counter(str(row.get("blockers") or "none") for row in candidates)
     family_summary = _family_rows(candidates)
@@ -492,6 +601,8 @@ def _build_report(candidates: list[dict[str, Any]], anchor_rows: list[dict[str, 
         "settings": settings,
         "rows_scored": len(candidates),
         "anchor_rows_loaded": len(anchor_rows),
+        "worldcup_validated_anchor_rows": worldcup_validated_anchor_rows,
+        "worldcup_validated_anchor_file": str(Path(OUTPUT_DIRNAME) / WORLDCUP_VALIDATED_ANCHORS_FILE),
         "anchored_rows": len(anchored_rows),
         "status_counts": dict(status_counts.most_common()),
         "top_blockers": dict(blocker_counts.most_common(10)),
@@ -528,6 +639,7 @@ def _write_markdown(path: Path, report: dict[str, Any]) -> None:
         "",
         f"- Rows scored: {report['rows_scored']}",
         f"- Anchor rows loaded: {report['anchor_rows_loaded']}",
+        f"- World Cup validated anchors: {report.get('worldcup_validated_anchor_rows', 0)}",
         f"- Rows matched to anchors: {report.get('anchored_rows', 0)}",
         f"- Status counts: `{report['status_counts']}`",
         f"- Top blockers: `{report['top_blockers']}`",
@@ -610,6 +722,8 @@ def run(config_path: str = "polymarket_predictive_config.example.yaml") -> dict[
         "generated_at_utc": report["generated_at_utc"],
         "rows_scored": len(candidates),
         "anchor_rows_loaded": report["anchor_rows_loaded"],
+        "anchored_rows": report["anchored_rows"],
+        "worldcup_validated_anchor_rows": report.get("worldcup_validated_anchor_rows", 0),
         "status_counts": report["status_counts"],
         "decision": report["decision"],
         "recommended_action": report["recommended_action"],

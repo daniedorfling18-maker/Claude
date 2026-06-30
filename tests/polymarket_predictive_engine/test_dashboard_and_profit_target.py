@@ -338,6 +338,7 @@ def test_dashboard_surfaces_strategy_v2_anchored_edge_progress(tmp_path):
             "recommended_action": "Keep Strategy V2 shadow-only and collect settled evidence for the candidate families.",
             "rows_scored": 33,
             "anchor_rows_loaded": 5,
+            "worldcup_validated_anchor_rows": 2,
             "anchored_rows": 3,
             "status_counts": {"shadow_candidate": 1, "rejected": 32},
             "top_blockers": {"none": 1, "missing_independent_anchor; edge_not_computable": 9},
@@ -383,6 +384,7 @@ def test_dashboard_surfaces_strategy_v2_anchored_edge_progress(tmp_path):
     assert strategy_v2["decision"] == "candidate_family_found"
     assert strategy_v2["shadow_candidates"] == 1
     assert strategy_v2["anchored_rows"] == 3
+    assert strategy_v2["worldcup_validated_anchor_rows"] == 2
     assert strategy_v2["cycle_status"]["status"] == "ok"
     assert strategy_v2["top_shadow_candidates"][0]["market_slug"] == candidate["market_slug"]
     assert strategy_v2["promotion_progress"][0]["remaining_shadow_entries_to_review"] == 19

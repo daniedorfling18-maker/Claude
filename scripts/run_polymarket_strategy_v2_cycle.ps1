@@ -1,7 +1,8 @@
 ﻿param(
   [string]$ConfigPath = "polymarket_predictive_config.example.yaml",
   [int]$StepTimeoutSeconds = 180,
-  [int]$IndependentAnchorMaxAgeMinutes = 60
+  [int]$IndependentAnchorMaxAgeMinutes = 60,
+  [double]$MaxMemoryPercent = 94
 )
 
 $ErrorActionPreference = "Stop"
@@ -63,6 +64,11 @@ function Read-JsonIfExists {
   }
 }
 
+function Get-MemoryUsedPercent {
+  $os = Get-CimInstance Win32_OperatingSystem
+  return [math]::Round((($os.TotalVisibleMemorySize - $os.FreePhysicalMemory) / $os.TotalVisibleMemorySize) * 100, 1)
+}
+
 function Invoke-PythonStep {
   param(
     [string]$Name,
@@ -99,6 +105,30 @@ function Invoke-PythonStep {
     }
     throw "$Name failed with exit code $exitCode. Output: $output"
   }
+}
+
+$memoryUsedPercent = Get-MemoryUsedPercent
+if ($memoryUsedPercent -ge $MaxMemoryPercent) {
+  $status = [PSCustomObject]@{
+    status = "skipped_high_memory"
+    started_at_utc = $started
+    ended_at_utc = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ")
+    memory_used_percent = $memoryUsedPercent
+    max_memory_percent = $MaxMemoryPercent
+    reason = "Strategy V2 cycle skipped before starting heavy work because local memory was at or above the guardrail."
+    anchored_rows = $null
+    shadow_candidates = $null
+    rejected_anchored_rows = $null
+    active_shadow_candidates = @()
+    paper_trading_invoked = $false
+    live_trading_invoked = $false
+  }
+  $status |
+    ConvertTo-Json -Depth 8 |
+    Set-Content .\work\strategy_v2_cycle_latest_status.json -Encoding UTF8
+  "`n=== STRATEGY V2 CYCLE SKIPPED: HIGH MEMORY ==="
+  $status | Format-List
+  exit 0
 }
 
 $shadowCommand = "& $(Quote-ForPowerShellCommand $shadowRefreshScript) -ConfigPath $(Quote-ForPowerShellCommand $ConfigPath) -WebsocketSeconds 30 *> $(Quote-ForPowerShellCommand $shadowStdoutPath)"

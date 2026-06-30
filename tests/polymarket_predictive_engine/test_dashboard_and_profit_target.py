@@ -415,3 +415,23 @@ def test_dashboard_explains_independent_anchor_blockers(tmp_path):
     assert anchors["sharp_odds_fetch"]["blocker"] == "error: 1"
     assert anchors["crypto_targets"]["blocker"] == "no_terminal_targets"
     assert anchors["main_blocker"] == "sharp_odds_fetch: error: 1"
+
+
+def test_dashboard_treats_fallback_sharp_odds_as_usable_anchor_input(tmp_path):
+    cfg = _config(tmp_path)
+    write_json(
+        cfg.governance_root / "sharp_odds_fetch_summary.json",
+        {
+            "status": "fallback_loaded",
+            "rows": 2,
+            "fallback_rows": 2,
+            "output_path": "inputs/polymarket/sharp_odds.csv",
+        },
+    )
+
+    result = render_dashboard(cfg)
+    data = read_json(result["dashboard_data"])
+    anchors = data["independent_anchor_status"]
+
+    assert anchors["status"] == "usable"
+    assert anchors["sharp_odds_fetch"].get("blocker") is None

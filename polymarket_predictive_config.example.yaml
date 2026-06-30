@@ -191,6 +191,12 @@ sharp_odds_fetch:
   - betfair_ex_uk
   odds_format: decimal
   output_path: inputs/polymarket/sharp_odds.csv
+  fallback_input_paths:
+  # Optional manual/import fallback with columns:
+  # market_slug,outcome,decimal_odds,bookmaker,token_id(optional),anchor_source,anchor_timestamp_utc.
+  # Used only when the provider returns no usable rows.
+  - inputs/polymarket/sharp_odds_fallback.csv
+  - inputs/polymarket/manual_sharp_odds.csv
   request_timeout_seconds: 20
 crypto_fundamental:
   # Deribit option-implied P(S_T > strike) for crypto "above $K by DATE" markets. No API key
@@ -592,7 +598,6 @@ governance_thresholds:
   require_clean_snapshot_labels_for_paper: false
   min_forward_paper_trades: 1
   require_positive_forward_paper_roi: false
-
 
 
 

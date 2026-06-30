@@ -845,7 +845,7 @@ def _independent_anchor_status(governance: Path) -> dict[str, Any]:
             component.setdefault("blocker", blocker)
     any_present = any(bool(component) for component in components.values())
     any_usable = any(
-        str(component.get("status") or "").lower() in {"fetched", "built"}
+        str(component.get("status") or "").lower() in {"fetched", "built", "fallback_loaded"}
         and int(
             safe_float(
                 component.get("rows")

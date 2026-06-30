@@ -44,6 +44,18 @@ def test_strategy_v2_cycle_bounds_python_steps():
     assert "$exitCode = [int]$process.ExitCode" in text
 
 
+def test_strategy_v2_cycle_skips_before_heavy_work_when_memory_is_high():
+    text = _script_text("scripts/run_polymarket_strategy_v2_cycle.ps1")
+
+    assert "[double]$MaxMemoryPercent = 94" in text
+    guard_index = text.index("skipped_high_memory")
+    shadow_start_index = text.index("$shadowRefreshProcess.Start()")
+
+    assert "Get-MemoryUsedPercent" in text
+    assert "$memoryUsedPercent -ge $MaxMemoryPercent" in text
+    assert guard_index < shadow_start_index
+
+
 def test_strategy_v2_cycle_renders_dashboard_after_latest_status_is_written():
     text = _script_text("scripts/run_polymarket_strategy_v2_cycle.ps1")
 

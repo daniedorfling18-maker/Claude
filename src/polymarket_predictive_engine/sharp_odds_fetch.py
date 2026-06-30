@@ -22,10 +22,29 @@ from typing import Any, Iterable, Mapping, Sequence
 import requests
 
 from .config import EngineConfig, load_config
-from .utils import normalize_slug, now_utc, safe_float, write_csv, write_json
+from .utils import normalize_slug, now_utc, read_csv_rows, safe_float, write_csv, write_json
 
 DEFAULT_BASE_URL = "https://api.the-odds-api.com/v4"
 DEFAULT_BOOKMAKER_PRIORITY = ("pinnacle", "betfair_ex_eu", "betfair_ex_uk", "betfair")
+SHARP_ODDS_FIELDS = [
+    "market_slug",
+    "outcome",
+    "decimal_odds",
+    "bookmaker",
+    "sport",
+    "sport_title",
+    "market_key",
+    "commence_time",
+    "home_team",
+    "away_team",
+    "token_id",
+    "anchor_source",
+    "anchor_timestamp_utc",
+]
+DEFAULT_FALLBACK_INPUT_PATHS = (
+    "inputs/polymarket/sharp_odds_fallback.csv",
+    "inputs/polymarket/manual_sharp_odds.csv",
+)
 
 
 def redact_fetch_error(message: object, api_key: str | None = None) -> str:
@@ -115,6 +134,53 @@ def _settings(cfg: EngineConfig) -> dict[str, Any]:
     return cfg.raw.get("sharp_odds_fetch", {}) or {}
 
 
+def _fallback_paths(settings: Mapping[str, Any]) -> list[Path]:
+    configured = settings.get("fallback_input_paths") or settings.get("manual_input_paths")
+    if configured:
+        return [Path(str(path)) for path in configured]
+    return [Path(path) for path in DEFAULT_FALLBACK_INPUT_PATHS]
+
+
+def _normalise_fallback_row(row: Mapping[str, Any], *, source_path: Path) -> dict[str, Any] | None:
+    market_slug = str(row.get("market_slug") or row.get("market") or row.get("event_slug") or "").strip()
+    outcome = str(row.get("outcome") or row.get("selection") or row.get("team") or row.get("runner") or "").strip()
+    decimal_odds = safe_float(row.get("decimal_odds") or row.get("odds") or row.get("price_decimal") or row.get("decimal"))
+    if not market_slug or not outcome or decimal_odds is None or decimal_odds <= 1.0:
+        return None
+    return {
+        "market_slug": market_slug,
+        "outcome": outcome,
+        "decimal_odds": decimal_odds,
+        "bookmaker": str(row.get("bookmaker") or row.get("source") or "manual_fallback").strip(),
+        "sport": str(row.get("sport") or "").strip(),
+        "sport_title": str(row.get("sport_title") or "").strip(),
+        "market_key": str(row.get("market_key") or row.get("market_type") or "").strip(),
+        "commence_time": str(row.get("commence_time") or row.get("start_time") or "").strip(),
+        "home_team": str(row.get("home_team") or "").strip(),
+        "away_team": str(row.get("away_team") or "").strip(),
+        "token_id": str(row.get("token_id") or row.get("asset_id") or row.get("clob_token_id") or "").strip(),
+        "anchor_source": str(row.get("anchor_source") or row.get("source") or source_path.name).strip(),
+        "anchor_timestamp_utc": str(row.get("anchor_timestamp_utc") or row.get("timestamp") or now_utc()).strip(),
+    }
+
+
+def load_fallback_sharp_odds(settings: Mapping[str, Any]) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    rows: list[dict[str, Any]] = []
+    sources: list[dict[str, Any]] = []
+    for path in _fallback_paths(settings):
+        raw_rows = read_csv_rows(path)
+        accepted = 0
+        for raw in raw_rows:
+            normalised = _normalise_fallback_row(raw, source_path=path)
+            if normalised is None:
+                continue
+            rows.append(normalised)
+            accepted += 1
+        if raw_rows or path.exists():
+            sources.append({"path": str(path), "rows_in": len(raw_rows), "rows": accepted})
+    return rows, sources
+
+
 def fetch_sharp_odds(cfg: EngineConfig) -> dict[str, Any]:
     settings = _settings(cfg)
     base_url = str(settings.get("base_url", DEFAULT_BASE_URL)).rstrip("/")
@@ -127,45 +193,50 @@ def fetch_sharp_odds(cfg: EngineConfig) -> dict[str, Any]:
     timeout = int(settings.get("request_timeout_seconds", 20))
     out_path = Path(settings.get("output_path") or "inputs/polymarket/sharp_odds.csv")
 
-    if not api_key:
-        summary = {"status": "missing_api_key", "api_key_env": settings.get("api_key_env", "THE_ODDS_API_KEY"),
-                   "rows": 0, "note": "Set the odds API key in the environment to enable fetching.",
-                   "generated_at_utc": now_utc()}
-        write_json(cfg.governance_root / "sharp_odds_fetch_summary.json", summary)
-        return summary
-    if not sports:
-        summary = {"status": "no_sports_configured", "rows": 0,
-                   "note": "Add sport keys under sharp_odds_fetch.sports.", "generated_at_utc": now_utc()}
-        write_json(cfg.governance_root / "sharp_odds_fetch_summary.json", summary)
-        return summary
-
     rows: list[dict[str, Any]] = []
     per_sport: list[dict[str, Any]] = []
-    for sport in sports:
-        try:
-            response = requests.get(
-                f"{base_url}/sports/{sport}/odds",
-                params={"apiKey": api_key, "regions": regions, "markets": market_key,
-                        "oddsFormat": odds_format, "bookmakers": ",".join(priority)},
-                timeout=timeout,
-            )
-            response.raise_for_status()
-            events = response.json()
-            sport_rows = parse_odds_api_events(events, bookmaker_priority=priority, market_key=market_key)
-            rows.extend(sport_rows)
-            per_sport.append({"sport": sport, "status": "ok", "events": len(events) if isinstance(events, list) else 0,
-                              "rows": len(sport_rows),
-                              "requests_remaining": response.headers.get("x-requests-remaining", "")})
-        except Exception as exc:  # noqa: BLE001 - network/parse errors are per-sport, not fatal
-            per_sport.append({"sport": sport, "status": "error", "error": redact_fetch_error(exc, api_key), "rows": 0})
+    provider_status = "not_attempted"
+    if api_key and sports:
+        provider_status = "attempted"
+        for sport in sports:
+            try:
+                response = requests.get(
+                    f"{base_url}/sports/{sport}/odds",
+                    params={"apiKey": api_key, "regions": regions, "markets": market_key,
+                            "oddsFormat": odds_format, "bookmakers": ",".join(priority)},
+                    timeout=timeout,
+                )
+                response.raise_for_status()
+                events = response.json()
+                sport_rows = parse_odds_api_events(events, bookmaker_priority=priority, market_key=market_key)
+                rows.extend(sport_rows)
+                per_sport.append({"sport": sport, "status": "ok", "events": len(events) if isinstance(events, list) else 0,
+                                  "rows": len(sport_rows),
+                                  "requests_remaining": response.headers.get("x-requests-remaining", "")})
+            except Exception as exc:  # noqa: BLE001 - network/parse errors are per-sport, not fatal
+                per_sport.append({"sport": sport, "status": "error", "error": redact_fetch_error(exc, api_key), "rows": 0})
+    elif not api_key:
+        provider_status = "missing_api_key"
+    elif not sports:
+        provider_status = "no_sports_configured"
+
+    fallback_rows: list[dict[str, Any]] = []
+    fallback_sources: list[dict[str, Any]] = []
+    if not rows:
+        fallback_rows, fallback_sources = load_fallback_sharp_odds(settings)
+        rows.extend(fallback_rows)
 
     out_path.parent.mkdir(parents=True, exist_ok=True)
-    write_csv(out_path, rows, fieldnames=["market_slug", "outcome", "decimal_odds", "bookmaker",
-                                          "sport", "sport_title", "market_key", "commence_time",
-                                          "home_team", "away_team"])
+    write_csv(out_path, rows, fieldnames=SHARP_ODDS_FIELDS)
     books_used = sorted({str(r.get("bookmaker", "")) for r in rows if r.get("bookmaker")})
     error_count = sum(1 for item in per_sport if item.get("status") == "error")
-    if per_sport and error_count == len(per_sport):
+    if fallback_rows:
+        status = "fallback_loaded"
+    elif provider_status == "missing_api_key":
+        status = "missing_api_key"
+    elif provider_status == "no_sports_configured":
+        status = "no_sports_configured"
+    elif per_sport and error_count == len(per_sport):
         status = "error"
     elif error_count:
         status = "partial"
@@ -177,9 +248,13 @@ def fetch_sharp_odds(cfg: EngineConfig) -> dict[str, Any]:
         "markets": len({r["market_slug"] for r in rows}),
         "books_used": books_used,
         "errors": error_count,
+        "provider_status": provider_status,
         "per_sport": per_sport,
+        "fallback_rows": len(fallback_rows),
+        "fallback_sources": fallback_sources,
         "output_path": str(out_path),
-        "note": "Run build-sharp-anchor next to de-vig these into the fundamental slot.",
+        "note": "Run build-sharp-anchor next to de-vig these into the fundamental slot. "
+                "If the provider fails, fallback_input_paths can feed manually validated bookmaker odds.",
         "generated_at_utc": now_utc(),
     }
     write_json(cfg.governance_root / "sharp_odds_fetch_summary.json", summary)

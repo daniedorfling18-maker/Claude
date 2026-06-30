@@ -1,3 +1,5 @@
+import csv
+
 from pytest import approx
 
 from polymarket_predictive_engine.sharp_odds_fetch import (
@@ -31,6 +33,14 @@ def _h2h(key, spain, draw, france):
             ]}
         ],
     }
+
+
+def _write(path, rows, fields):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("w", newline="", encoding="utf-8") as f:
+        writer = csv.DictWriter(f, fieldnames=fields)
+        writer.writeheader()
+        writer.writerows(rows)
 
 
 def test_event_market_slug_is_normalised():
@@ -155,3 +165,63 @@ def test_fetch_all_provider_errors_reports_error_and_redacts_key(tmp_path, monke
     assert summary["rows"] == 0
     assert api_key not in summary["per_sport"][0]["error"]
     assert "apiKey=[REDACTED]" in summary["per_sport"][0]["error"]
+
+
+def test_fetch_uses_fallback_csv_when_provider_errors(tmp_path, monkeypatch):
+    api_key = "secret-key-123"
+    fallback = tmp_path / "fallback.csv"
+    output = tmp_path / "sharp_odds.csv"
+    _write(
+        fallback,
+        [
+            {
+                "market_slug": "soccer-fifa-world-cup-winner",
+                "outcome": "France",
+                "decimal_odds": "7.0",
+                "bookmaker": "manual_pinnacle_snapshot",
+                "token_id": "FRANCE_YES",
+            },
+            {
+                "market_slug": "soccer-fifa-world-cup-winner",
+                "outcome": "Spain",
+                "decimal_odds": "6.0",
+                "bookmaker": "manual_pinnacle_snapshot",
+                "token_id": "SPAIN_YES",
+            },
+        ],
+        ["market_slug", "outcome", "decimal_odds", "bookmaker", "token_id"],
+    )
+    monkeypatch.setenv("THE_ODDS_API_KEY", api_key)
+
+    def raise_unauthorized(*args, **kwargs):
+        raise RuntimeError(
+            "401 Client Error: Unauthorized for url: "
+            f"https://api.the-odds-api.com/v4/sports/soccer/odds?apiKey={api_key}&regions=eu"
+        )
+
+    monkeypatch.setattr("polymarket_predictive_engine.sharp_odds_fetch.requests.get", raise_unauthorized)
+    cfg = EngineConfig(
+        raw={
+            "paths": {"output_root": str(tmp_path / "outputs")},
+            "sharp_odds_fetch": {
+                "sports": ["soccer_fifa_world_cup_winner"],
+                "markets": "outrights",
+                "output_path": str(output),
+                "fallback_input_paths": [str(fallback)],
+            },
+        },
+        path=tmp_path / "cfg.yaml",
+    )
+
+    summary = fetch_sharp_odds(cfg)
+
+    assert summary["status"] == "fallback_loaded"
+    assert summary["provider_status"] == "attempted"
+    assert summary["errors"] == 1
+    assert summary["rows"] == 2
+    assert summary["fallback_rows"] == 2
+    assert api_key not in summary["per_sport"][0]["error"]
+
+    out = list(csv.DictReader(open(output, encoding="utf-8-sig")))
+    assert {row["token_id"] for row in out} == {"FRANCE_YES", "SPAIN_YES"}
+    assert {row["bookmaker"] for row in out} == {"manual_pinnacle_snapshot"}

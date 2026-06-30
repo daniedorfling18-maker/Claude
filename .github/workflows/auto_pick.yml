@@ -12,9 +12,14 @@ permissions:
   contents: read
   actions: read
 
+concurrency:
+  group: auto-pick-disabled-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
   auto-pick-disabled:
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     steps:
       - name: Disabled freshness gate
         run: |

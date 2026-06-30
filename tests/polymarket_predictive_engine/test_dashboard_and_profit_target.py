@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
+import json
 from pathlib import Path
 
 import yaml
@@ -311,3 +312,77 @@ def test_dashboard_reports_cross_checked_worldcup_rows_blocked_by_trade_gates(tm
     assert worldcup["status"] == "collecting_or_blocked_by_trade_gates"
     assert worldcup["fundamental_coverage_pct"] == 100.0
     assert worldcup["bookmaker_cross_check_pass"] == 1
+
+
+def test_dashboard_surfaces_strategy_v2_anchored_edge_progress(tmp_path):
+    cfg = _config(tmp_path)
+    candidate = {
+        "family": "macro_rates",
+        "market_slug": "will-the-fed-increase-interest-rates-by-25-bps-after-the-july-2026-meeting",
+        "outcome": "Yes",
+        "status": "shadow_candidate",
+        "anchor_source": "Reuters_CME_Fed_funds_futures_proxy",
+        "anchor_fair_probability": "0.30",
+        "executable_price": "0.176",
+        "anchor_raw_edge": "0.124",
+        "risk_adjusted_anchor_edge": "0.1185",
+        "liquidity": "122534",
+        "spread": "0.001",
+    }
+    write_json(
+        cfg.output_root / "polymarket_strategy_v2" / "anchored_edge_report.json",
+        {
+            "status": "ok",
+            "generated_at_utc": "2026-06-30T09:11:24Z",
+            "decision": "candidate_family_found",
+            "recommended_action": "Keep Strategy V2 shadow-only and collect settled evidence for the candidate families.",
+            "rows_scored": 33,
+            "anchor_rows_loaded": 5,
+            "anchored_rows": 3,
+            "status_counts": {"shadow_candidate": 1, "rejected": 32},
+            "top_blockers": {"none": 1, "missing_independent_anchor; edge_not_computable": 9},
+            "family_summary": [
+                {
+                    "family": "macro_rates",
+                    "rows": 4,
+                    "anchored_rows": 1,
+                    "anchored_candidates": 1,
+                    "shadow_candidates": 1,
+                    "best_edge": 0.1185,
+                    "action": "collect_more_shadow_evidence",
+                }
+            ],
+            "top_anchored_rejections": [],
+            "warnings": {"missing_anchor_rows": 30, "shadow_only": True},
+            "settings": {"promotion_min_candidates": 20, "promotion_min_settled": 10},
+        },
+    )
+    write_csv(cfg.output_root / "polymarket_strategy_v2" / "anchored_edge_candidates.csv", [candidate])
+    write_csv(
+        cfg.output_root / "polymarket_strategy_v2" / "anchored_edge_persistence_log.csv",
+        [
+            {
+                "logged_at_utc": "2026-06-30T09:11:24Z",
+                **candidate,
+            }
+        ],
+    )
+    cycle_status_path = cfg.path.parent / "work" / "strategy_v2_cycle_latest_status.json"
+    cycle_status_path.parent.mkdir(parents=True, exist_ok=True)
+    cycle_status_path.write_text(
+        json.dumps({"status": "ok", "started_at_utc": "2026-06-30T09:06:22Z", "shadow_candidates": 1, "anchored_rows": 3}),
+        encoding="utf-8-sig",
+    )
+
+    result = render_dashboard(cfg)
+    html = Path(result["dashboard_file"]).read_text(encoding="utf-8")
+    data = read_json(result["dashboard_data"])
+    strategy_v2 = data["strategy_v2"]
+
+    assert "Strategy V2 anchored edge" in html
+    assert strategy_v2["decision"] == "candidate_family_found"
+    assert strategy_v2["shadow_candidates"] == 1
+    assert strategy_v2["anchored_rows"] == 3
+    assert strategy_v2["cycle_status"]["status"] == "ok"
+    assert strategy_v2["top_shadow_candidates"][0]["market_slug"] == candidate["market_slug"]
+    assert strategy_v2["promotion_progress"][0]["remaining_shadow_entries_to_review"] == 19

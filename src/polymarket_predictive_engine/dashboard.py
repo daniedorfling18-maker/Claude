@@ -74,6 +74,7 @@ HTML = """<!doctype html>
     <section><h2>Latest cycle</h2><div id="cycle"></div></section>
   </div>
   <section><h2>Why no trade?</h2><div id="tradeDiagnostics"></div></section>
+  <section><h2>Strategy V2 anchored edge</h2><div id="strategyV2"></div></section>
   <div class="two">
     <section><h2>Promotion readiness</h2><div id="promotionReadiness"></div></section>
     <section><h2>Edge promotion watchlist</h2><div id="promotionWatchlist"></div></section>
@@ -135,6 +136,7 @@ async function load() {
     const target = data.actual_profit_target || data.forward_paper_cycle?.actual_profit_target || {};
     const monthly = data.forward_paper_cycle?.monthly_profit_target || {};
     const diag = data.trade_diagnostics || {};
+    const strategyV2 = data.strategy_v2 || {};
     const live = data.local_live_heartbeat || data.heartbeat || {};
     const freshness = data.evidence_freshness || {};
     const scanner = data.scanner_heartbeat || {};
@@ -168,6 +170,8 @@ async function load() {
       card("Buy fills / cycle", broker.buy_orders_filled ?? broker.orders_filled ?? "0"),
       card("Exit fills / cycle", broker.exit_orders_filled ?? "0"),
       card("Signals approved", data.forward_paper_cycle?.signals_approved ?? "0"),
+      card("Strategy V2 shadow", strategyV2.shadow_candidates ?? "0", Number(strategyV2.shadow_candidates || 0) > 0 ? "good" : "warn"),
+      card("Strategy V2 anchors", `${strategyV2.anchored_rows ?? 0}/${strategyV2.rows_scored ?? 0}`, Number(strategyV2.anchored_rows || 0) > 0 ? "good" : "warn"),
       card("Main trade blocker", longText(diag.main_blocker || "-", 120), Number(diag.approved_signals_count || 0) > 0 ? "good" : "warn"),
       card("Next settlement", data.shadow_settlement_watch?.next_settlement_minutes == null ? "Waiting" : fmtNum(data.shadow_settlement_watch.next_settlement_minutes, 0) + "m"),
       card("Shadow P&L", fmtUsd(data.shadow_settlement_watch?.shadow_total_pnl_usdc), Number(data.shadow_settlement_watch?.shadow_total_pnl_usdc || 0) > 0 ? "good" : "warn"),
@@ -252,6 +256,54 @@ async function load() {
       ["P&L","closed_realised_pnl_usdc", fmtUsd],
       ["ROI","closed_roi", v=>fmtNum(Number(v) * 100, 2) + "%"],
       ["Reason","quarantine_reason", v=>longText(v, 180)]
+    ]);
+    document.getElementById("strategyV2").innerHTML = facts([
+      ["Decision", strategyV2.decision],
+      ["Recommended action", strategyV2.recommended_action, v=>longText(v, 240)],
+      ["Report generated", strategyV2.generated_at_utc],
+      ["Cycle status", strategyV2.cycle_status?.status],
+      ["Rows scored", strategyV2.rows_scored],
+      ["Anchor rows loaded", strategyV2.anchor_rows_loaded],
+      ["Rows matched to anchors", strategyV2.anchored_rows],
+      ["Shadow candidates", strategyV2.shadow_candidates],
+      ["Watchlist rows", strategyV2.watchlist_candidates],
+      ["Missing anchors", strategyV2.missing_anchor_rows],
+      ["Persistence entries", strategyV2.persistence_entries],
+      ["Main blocker", strategyV2.main_blocker, v=>longText(v, 180)]
+    ]) + `<div style="height:12px"></div><h3>Current shadow candidates</h3>` + table(strategyV2.top_shadow_candidates || [], [
+      ["Family","family"],
+      ["Market","market_slug", v=>longText(v, 120)],
+      ["Outcome","outcome"],
+      ["Anchor","anchor_fair_probability", v=>fmtNum(v,4)],
+      ["Price","executable_price", v=>fmtNum(v,4)],
+      ["Edge after penalty","risk_adjusted_anchor_edge", v=>fmtNum(v,4)],
+      ["Liquidity","liquidity", v=>fmtNum(v,2)],
+      ["Spread","spread", v=>fmtNum(v,4)],
+      ["Anchor source","anchor_source", v=>longText(v, 100)]
+    ]) + `<div style="height:12px"></div><h3>Promotion progress</h3>` + table(strategyV2.promotion_progress || [], [
+      ["Family","family"],
+      ["Shadow log entries","shadow_entries"],
+      ["Current shadows","current_shadow_candidates"],
+      ["Need entries","remaining_shadow_entries_to_review"],
+      ["Min settled","min_settled_for_review"],
+      ["Best edge","best_risk_adjusted_anchor_edge", v=>fmtNum(v,4)],
+      ["Status","status", v=>longText(v, 120)]
+    ]) + `<div style="height:12px"></div><h3>Anchored near-misses</h3>` + table(strategyV2.top_anchored_rejections || [], [
+      ["Family","family"],
+      ["Market","market_slug", v=>longText(v, 120)],
+      ["Outcome","outcome"],
+      ["Anchor","anchor_fair_probability", v=>fmtNum(v,4)],
+      ["Price","executable_price", v=>fmtNum(v,4)],
+      ["Edge after penalty","risk_adjusted_anchor_edge", v=>fmtNum(v,4)],
+      ["Blockers","blockers", v=>longText(v, 160)]
+    ]) + `<div style="height:12px"></div><h3>Family coverage</h3>` + table(strategyV2.family_summary || [], [
+      ["Family","family"],
+      ["Rows","rows"],
+      ["Anchored","anchored_rows"],
+      ["Actionable","anchored_candidates"],
+      ["Shadow","shadow_candidates"],
+      ["Best edge","best_edge", v=>fmtNum(v,4)],
+      ["Action","action", v=>longText(v, 120)]
     ]);
     document.getElementById("promotionReadiness").innerHTML = table(data.cohort_promotion_readiness?.cohorts || [], [
       ["Cohort","signal_cohort"],
@@ -776,6 +828,155 @@ def _independent_anchor_status(governance: Path) -> dict[str, Any]:
     }
 
 
+def _sorted_by_numeric(rows: list[dict[str, Any]], key: str, *, reverse: bool = True) -> list[dict[str, Any]]:
+    return sorted(rows, key=lambda row: safe_float(row.get(key)) if safe_float(row.get(key)) is not None else -999.0, reverse=reverse)
+
+
+def _read_json_lenient(path: Path, default: Any = None) -> Any:
+    payload = read_json(path, default=None)
+    if payload is not None:
+        return payload
+    try:
+        with Path(path).open("r", encoding="utf-8-sig") as f:
+            return json.load(f)
+    except Exception:
+        return default
+
+
+def _strategy_v2_status(cfg: EngineConfig) -> dict[str, Any]:
+    """Expose Strategy V2 anchored-edge research progress on the dashboard.
+
+    This is observability only. Strategy V2 remains shadow-only until a separate
+    governance/promotion review explicitly allows paper probation.
+    """
+    root = cfg.output_root / "polymarket_strategy_v2"
+    report = read_json(root / "anchored_edge_report.json", default={}) or {}
+    if not isinstance(report, dict):
+        report = {}
+    candidates = read_csv_rows(root / "anchored_edge_candidates.csv")
+    persistence = read_csv_rows(root / "anchored_edge_persistence_log.csv")
+    cycle_status = _read_json_lenient(cfg.path.parent / "work" / "strategy_v2_cycle_latest_status.json", default={}) or {}
+    if not isinstance(cycle_status, dict):
+        cycle_status = {}
+
+    status_counts = report.get("status_counts") if isinstance(report.get("status_counts"), dict) else {}
+    warnings = report.get("warnings") if isinstance(report.get("warnings"), dict) else {}
+    family_summary = report.get("family_summary") if isinstance(report.get("family_summary"), list) else []
+    top_anchored_rejections = report.get("top_anchored_rejections") if isinstance(report.get("top_anchored_rejections"), list) else []
+    if not top_anchored_rejections:
+        top_anchored_rejections = [
+            row
+            for row in candidates
+            if str(row.get("status") or "") == "rejected" and safe_float(row.get("anchor_fair_probability")) is not None
+        ]
+        top_anchored_rejections = _sorted_by_numeric(top_anchored_rejections, "risk_adjusted_anchor_edge")[:25]
+
+    shadow_candidates = [row for row in candidates if str(row.get("status") or "") == "shadow_candidate"]
+    watchlist_candidates = [row for row in candidates if str(row.get("status") or "") == "watchlist"]
+    anchored_rows = [row for row in candidates if safe_float(row.get("anchor_fair_probability")) is not None]
+    top_shadow = _sorted_by_numeric(shadow_candidates, "risk_adjusted_anchor_edge")[:25]
+
+    settings = report.get("settings") if isinstance(report.get("settings"), dict) else {}
+    configured = cfg.raw.get("strategy_v2", {}) if isinstance(cfg.raw.get("strategy_v2"), dict) else {}
+    promotion_min_candidates = safe_float(settings.get("promotion_min_candidates") or configured.get("promotion_min_candidates")) or 20.0
+    promotion_min_settled = safe_float(settings.get("promotion_min_settled") or configured.get("promotion_min_settled")) or 10.0
+
+    current_shadow_by_family = Counter(str(row.get("family") or "unknown") for row in shadow_candidates)
+    shadow_log_by_family: dict[str, dict[str, Any]] = {}
+    for row in persistence:
+        if str(row.get("status") or "") != "shadow_candidate":
+            continue
+        family = str(row.get("family") or "unknown")
+        bucket = shadow_log_by_family.setdefault(
+            family,
+            {
+                "family": family,
+                "shadow_entries": 0,
+                "current_shadow_candidates": 0,
+                "best_risk_adjusted_anchor_edge": None,
+                "latest_logged_at_utc": "",
+            },
+        )
+        bucket["shadow_entries"] += 1
+        edge = safe_float(row.get("risk_adjusted_anchor_edge"))
+        best = safe_float(bucket.get("best_risk_adjusted_anchor_edge"))
+        if edge is not None and (best is None or edge > best):
+            bucket["best_risk_adjusted_anchor_edge"] = edge
+        logged_at = str(row.get("logged_at_utc") or "")
+        if logged_at > str(bucket.get("latest_logged_at_utc") or ""):
+            bucket["latest_logged_at_utc"] = logged_at
+
+    for row in shadow_candidates:
+        family = str(row.get("family") or "unknown")
+        bucket = shadow_log_by_family.setdefault(
+            family,
+            {
+                "family": family,
+                "shadow_entries": 0,
+                "current_shadow_candidates": 0,
+                "best_risk_adjusted_anchor_edge": None,
+                "latest_logged_at_utc": "",
+            },
+        )
+        edge = safe_float(row.get("risk_adjusted_anchor_edge"))
+        best = safe_float(bucket.get("best_risk_adjusted_anchor_edge"))
+        if edge is not None and (best is None or edge > best):
+            bucket["best_risk_adjusted_anchor_edge"] = edge
+
+    promotion_progress = []
+    for family, bucket in shadow_log_by_family.items():
+        shadow_entries = int(bucket.get("shadow_entries") or 0)
+        current_count = int(current_shadow_by_family.get(family, 0))
+        remaining_entries = max(0, int(promotion_min_candidates) - shadow_entries)
+        if remaining_entries > 0:
+            status = "collect_more_shadow_entries"
+        else:
+            status = "needs_settled_pnl_and_anchor_methodology_review"
+        promotion_progress.append(
+            {
+                **bucket,
+                "current_shadow_candidates": current_count,
+                "remaining_shadow_entries_to_review": remaining_entries,
+                "min_shadow_entries_for_review": int(promotion_min_candidates),
+                "min_settled_for_review": int(promotion_min_settled),
+                "status": status,
+            }
+        )
+    promotion_progress.sort(
+        key=lambda row: (
+            int(row.get("shadow_entries") or 0),
+            safe_float(row.get("best_risk_adjusted_anchor_edge")) or -999.0,
+        ),
+        reverse=True,
+    )
+
+    top_blockers = report.get("top_blockers") if isinstance(report.get("top_blockers"), dict) else {}
+    main_blocker = next(iter(top_blockers.keys()), "") if top_blockers else ""
+    return {
+        "status": report.get("status") or ("missing" if not candidates else "ok"),
+        "generated_at_utc": report.get("generated_at_utc"),
+        "decision": report.get("decision") or "missing_report",
+        "recommended_action": report.get("recommended_action") or "Run Strategy V2 anchored-edge scanner.",
+        "cycle_status": cycle_status,
+        "rows_scored": report.get("rows_scored") if report.get("rows_scored") is not None else len(candidates),
+        "anchor_rows_loaded": report.get("anchor_rows_loaded"),
+        "anchored_rows": report.get("anchored_rows") if report.get("anchored_rows") is not None else len(anchored_rows),
+        "shadow_candidates": status_counts.get("shadow_candidate", len(shadow_candidates)),
+        "watchlist_candidates": status_counts.get("watchlist", len(watchlist_candidates)),
+        "missing_anchor_rows": warnings.get("missing_anchor_rows"),
+        "main_blocker": main_blocker,
+        "status_counts": status_counts,
+        "top_blockers": top_blockers,
+        "family_summary": family_summary,
+        "top_shadow_candidates": top_shadow,
+        "top_anchored_rejections": top_anchored_rejections[:25],
+        "promotion_progress": promotion_progress[:25],
+        "persistence_entries": len(persistence),
+        "persistence_log": str(root / "anchored_edge_persistence_log.csv"),
+        "shadow_only": True,
+    }
+
+
 def _payload_time(payload: Any) -> datetime | None:
     if not isinstance(payload, dict):
         return None
@@ -910,6 +1111,7 @@ def render_dashboard(cfg: EngineConfig, latest_report: dict[str, Any] | None = N
         "shadow_signal_cohort_pnl": shadow_summary,
         "shadow_settlement_watch": _shadow_settlement_watch(shadow_positions, shadow_summary),
         "independent_anchor_status": _independent_anchor_status(governance),
+        "strategy_v2": _strategy_v2_status(cfg),
         "edge_strategy_search": edge_strategy_search,
         "promoted_rule_shadow": promoted_rule_shadow,
         "liquidity_discovery": liquidity_discovery,

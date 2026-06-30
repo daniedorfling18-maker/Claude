@@ -67,7 +67,10 @@ def _write_summary(path: Path, payload: dict[str, Any]) -> None:
 
 async def run(args: argparse.Namespace) -> int:
     if not args.email or not args.password:
-        raise SystemExit("SUPERBRU_EMAIL/SUPERBRU_PASSWORD are required to scrape the live leaderboard.")
+        raise SystemExit(
+            "SUPERBRU_EMAIL or SUPERBRU_USERNAME, plus SUPERBRU_PASSWORD, are required "
+            "to scrape the live leaderboard."
+        )
     if not args.pool_url:
         raise SystemExit("SUPERBRU_POOL_URL is required to scrape the live leaderboard.")
 

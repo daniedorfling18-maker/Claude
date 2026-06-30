@@ -1,8 +1,8 @@
 """Alias-aware live entrypoint for match-scoped Auto Pick.
 
 This file is the production entrypoint used by the scheduled workflow. It keeps
-the full live-recompute behaviour from `auto_pick_match_scoped.py`, then patches
-team matching and browser submission to be alias-aware.
+the live-recompute behaviour from `auto_pick_match_scoped.py`, then patches team
+matching and browser interaction to be alias-aware.
 """
 from __future__ import annotations
 
@@ -29,6 +29,7 @@ def load_base_module():
 
 base = load_base_module()
 base.norm_team = canonical_team_key
+_original_find_pick_from_card = base.find_pick_from_card
 
 
 async def submit_pick_alias_aware(args: Any, home_team: str, away_team: str, pick: str, out_dir: Path) -> dict[str, Any]:
@@ -58,6 +59,21 @@ async def submit_pick_alias_aware(args: Any, home_team: str, away_team: str, pic
     return await mod.run(submit_args)
 
 
+def use_live_only_inputs() -> None:
+    def no_card_queue(args: Any, ref: Any, scan_results: list[dict[str, Any]], queued: list[dict[str, Any]]):
+        return queued, []
+
+    def card_metadata_only(entry: dict[str, Any], card_csv: str) -> dict[str, Any]:
+        result = dict(_original_find_pick_from_card(entry, card_csv))
+        if result.get("status") == "found":
+            result["pick"] = ""
+            result["live_only_note"] = "card score ignored; live odds recompute is required"
+        return result
+
+    base.merge_pick_card_fallback_queue = no_card_queue
+    base.find_pick_from_card = card_metadata_only
+
+
 base.submit_pick = submit_pick_alias_aware
 build_parser = base.build_parser
 run = base.run
@@ -67,10 +83,16 @@ def main() -> int:
     args = base.build_parser().parse_args()
     if not args.email or not args.password:
         base.write_missing_credentials_summary(args)
-        print("ERROR: SUPERBRU_EMAIL and SUPERBRU_PASSWORD must be set", file=sys.stderr)
+        print("ERROR: SUPERBRU_EMAIL/SUPERBRU_USERNAME and SUPERBRU_PASSWORD must be set", file=sys.stderr)
         return 1
+    if not args.dry_run:
+        if args.skip_match_odds:
+            print("ERROR: live odds recompute is required for non-dry-run Auto Pick", file=sys.stderr)
+            return 2
+        use_live_only_inputs()
     result = asyncio.run(base.run(args))
     result["alias_aware_entrypoint"] = True
+    result["live_only_inputs"] = not args.dry_run
     print("\n" + json.dumps(result, indent=2, default=str))
     return base.exit_code_for_result(result, args)
 

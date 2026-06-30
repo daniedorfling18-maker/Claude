@@ -1,164 +1,24 @@
-name: Auto Pick (Scheduled)
+name: Auto Pick (Manual Only - Disabled Pending Freshness Hardening)
 
 on:
   workflow_dispatch:
     inputs:
-      window_minutes:
-        description: 'Submit picks for matches kicking off within this many minutes'
-        required: false
-        default: '120'
       dry_run:
-        description: 'Dry run only; do not submit to SuperBru'
+        description: 'Dry run only. Real submissions are disabled until stale-input fallbacks are fully removed.'
         required: false
         default: 'true'
-      fetch_match_odds:
-        description: 'Fetch live match odds before choosing pick. Leave false for card-only submit test.'
-        required: false
-        default: 'false'
-  schedule:
-    # Reduced scheduled wake-ups. A lightweight preflight below reads the locked card
-    # and exits before Python setup, Playwright install, SuperBru login, or Odds API
-    # work when no fixture is inside the scheduled window.
-    # Known committed-card windows, 25 minutes before kickoff.
-    - cron: '35 16,20 29 6 *'
-    - cron: '35 0,16,20 30 6 *'
-    - cron: '35 0,15,19,23 1 7 *'
-    - cron: '35 18,22 2 7 *'
-    - cron: '35 2,17,21 3 7 *'
-    - cron: '05 1 4 7 *'
-    # Later rounds: common knockout slots only, still protected by preflight.
-    - cron: '35 15,18,19,20,22,23 4-19 7 *'
-    - cron: '35 0,2 5-19 7 *'
 
 permissions:
   contents: read
   actions: read
 
-concurrency:
-  group: auto-pick-${{ github.ref }}
-  cancel-in-progress: false
-
 jobs:
-  auto-pick:
+  auto-pick-disabled:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v4
-
-      - name: Preflight scheduled window
-        id: preflight
-        shell: bash
+      - name: Disabled freshness gate
         run: |
-          if [ "${{ github.event_name }}" != "schedule" ]; then
-            echo "run_auto_pick=true" >> "$GITHUB_OUTPUT"
-            echo "Manual run: skipping schedule preflight."
-            exit 0
-          fi
-
-          python3 - <<'PY'
-          import csv
-          import os
-          from datetime import datetime, timedelta, timezone
-          from pathlib import Path
-
-          now = datetime.now(timezone.utc)
-          window = timedelta(minutes=45)
-          path = Path('outputs/final_locked_picks/superbru_final_card.csv')
-          queued = []
-
-          if path.exists():
-              with path.open(newline='', encoding='utf-8') as handle:
-                  for row in csv.DictReader(handle):
-                      raw = (row.get('commence_time') or row.get('kickoff_utc') or row.get('kickoff') or '').strip()
-                      if not raw:
-                          continue
-                      try:
-                          kickoff = datetime.fromisoformat(raw.replace('Z', '+00:00'))
-                      except ValueError:
-                          continue
-                      if now <= kickoff <= now + window:
-                          queued.append(
-                              f"{kickoff.isoformat()} {row.get('home_team','')} v {row.get('away_team','')}"
-                          )
-
-          run = bool(queued)
-          with open(os.environ['GITHUB_OUTPUT'], 'a', encoding='utf-8') as out:
-              out.write(f"run_auto_pick={'true' if run else 'false'}\n")
-              out.write(f"queued_count={len(queued)}\n")
-
-          if queued:
-              print('Auto Pick preflight: fixture(s) in window:')
-              for item in queued:
-                  print(' -', item)
-          else:
-              print('Auto Pick preflight: no locked-card fixture inside the next 45 minutes. Skipping browser/API work.')
-          PY
-
-      - uses: actions/setup-python@v5
-        if: steps.preflight.outputs.run_auto_pick == 'true'
-        with:
-          python-version: '3.11'
-          cache: 'pip'
-
-      - name: Install dependencies
-        if: steps.preflight.outputs.run_auto_pick == 'true'
-        run: |
-          python -m pip install --upgrade pip
-          pip install -e ".[scraper]"
-          python -m playwright install chromium --with-deps
-
-      - name: Run match-scoped auto pick
-        if: steps.preflight.outputs.run_auto_pick == 'true'
-        env:
-          SUPERBRU_EMAIL: ${{ secrets.SUPERBRU_USERNAME || secrets.SUPERBRU_EMAIL }}
-          SUPERBRU_PASSWORD: ${{ secrets.SUPERBRU_PASSWORD }}
-          SUPERBRU_LOGIN_URL: ${{ secrets.SUPERBRU_LOGIN_URL }}
-          SUPERBRU_POOL_URL: ${{ secrets.SUPERBRU_POOL_URL }}
-          THE_ODDS_API_KEY: ${{ secrets.THE_ODDS_API_KEY }}
-          SUPERBRU_PLAYER_NAME: ${{ secrets.SUPERBRU_PLAYER_NAME || 'Danie' }}
-          SUPERBRU_POOL_KEYWORDS: ${{ secrets.SUPERBRU_POOL_KEYWORDS || 'Moore Infinity,FIFA WC 26,World Cup 2026' }}
-        run: |
-          POOL_URL="$SUPERBRU_POOL_URL"
-          if [ -z "$POOL_URL" ]; then
-            POOL_URL="https://www.superbru.com/worldcup_predictor/pool_view.php?t=1296&p=13236623&view=matches"
-          fi
-          LOGIN_URL="${SUPERBRU_LOGIN_URL:-https://www.superbru.com/login}"
-          WINDOW_MINUTES="${{ github.event.inputs.window_minutes || '40' }}"
-          DRY_RUN_FLAG=""
-          MATCH_ODDS_FLAG=""
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ "${{ github.event.inputs.fetch_match_odds || 'false' }}" != "true" ]; then
-            MATCH_ODDS_FLAG="--skip-match-odds"
-          fi
-          if [ "${{ github.event.inputs.dry_run || 'false' }}" = "true" ]; then
-            DRY_RUN_FLAG="--dry-run"
-            MATCH_ODDS_FLAG="--skip-match-odds"
-          fi
-
-          python scripts/auto_pick_match_scoped_smart_odds.py \
-            --email "$SUPERBRU_EMAIL" \
-            --password "$SUPERBRU_PASSWORD" \
-            --login-url "$LOGIN_URL" \
-            --pool-url "$POOL_URL" \
-            --config config.yaml \
-            --window-minutes "$WINDOW_MINUTES" \
-            --pick-card-csv outputs/final_locked_picks/superbru_final_card.csv \
-            --late-card-grace-minutes 0 \
-            --odds-lookup-window-minutes 90 \
-            --leader-player "${SUPERBRU_PLAYER_NAME:-Danie}" \
-            --leaderboard-pool-keywords "${SUPERBRU_POOL_KEYWORDS:-Moore Infinity,FIFA WC 26,World Cup 2026}" \
-            --leader-safe-buffer 5.0 \
-            --chaser-range 8.0 \
-            --headless \
-            --require-submission \
-            $DRY_RUN_FLAG \
-            $MATCH_ODDS_FLAG \
-            --out-dir outputs/pregame_checks/auto_pick
-
-      - name: Upload results
-        if: always() && steps.preflight.outputs.run_auto_pick == 'true'
-        uses: actions/upload-artifact@v4
-        with:
-          name: auto-pick-results-${{ github.run_number }}
-          path: outputs/pregame_checks/
-          retention-days: 7
-          if-no-files-found: warn
+          echo "Scheduled Auto Pick is disabled pending final stale-input hardening."
+          echo "Reason: prior workflow used the committed locked card for schedule preflight and could fall back to card-derived picks."
+          echo "Use Refresh Locked Superbru Card first; do not enable Auto Pick until live-only submission safeguards are reviewed."
+          exit 1

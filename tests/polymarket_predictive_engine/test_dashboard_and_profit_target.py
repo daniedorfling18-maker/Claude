@@ -335,6 +335,32 @@ def test_dashboard_tracks_paper_confirmation_probe_exit_horizon(tmp_path):
     assert data["evidence_freshness"]["pending_broker_exit_probes"] == 1
 
 
+def test_dashboard_surfaces_lightweight_paper_maintenance_status(tmp_path):
+    cfg = _config(tmp_path)
+    status_path = cfg.path.parent / "work" / "polymarket_paper_maintenance_latest_status.json"
+    write_json(
+        status_path,
+        {
+            "status": "skipped_high_memory",
+            "generated_at_utc": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+            "memory_used_percent": 97.2,
+            "max_memory_percent": 95,
+            "next_exit_due_utc": "2026-07-01T01:33:39Z",
+            "open_confirmation_probes": 3,
+            "reason": "Paper broker/dashboard maintenance was skipped because local memory is at or above the guardrail.",
+        },
+    )
+
+    result = render_dashboard(cfg)
+    data = read_json(result["dashboard_data"])
+    html = Path(result["dashboard_file"]).read_text(encoding="utf-8")
+
+    assert data["paper_maintenance"]["status"] == "skipped_high_memory"
+    assert data["paper_maintenance"]["memory_used_percent"] == 97.2
+    assert data["paper_maintenance"]["age_seconds"] is not None
+    assert "Paper maintenance" in html
+
+
 def test_standalone_paper_trade_report_refreshes_profit_tracker_and_dashboard(tmp_path):
     cfg = _config(tmp_path)
 

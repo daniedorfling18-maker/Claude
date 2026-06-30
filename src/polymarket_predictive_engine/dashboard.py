@@ -148,6 +148,7 @@ async function load() {
     const priceActionPaper = data.price_action_paper_signals || {};
     const priceActionFeedback = data.price_action_feedback || {};
     const probeExitWatch = data.paper_probe_exit_watch || {};
+    const paperMaintenance = data.paper_maintenance || {};
     const priceScoutPnl = priceScout.realized_pnl_usdc ?? priceScout.total_mark_pnl_usdc;
     const live = data.local_live_heartbeat || data.heartbeat || {};
     const freshness = data.evidence_freshness || {};
@@ -192,6 +193,7 @@ async function load() {
       card("Microstructure rules", microstructure.validation_pass_rules ?? "0", Number(microstructure.validation_pass_rules || 0) > 0 ? "good" : "warn"),
       card("Price-action paper signals", priceActionPaper.signals ?? "0", Number(priceActionPaper.signals || 0) > 0 ? "good" : "warn"),
       card("Broker refresh", priceActionPaper.broker_refresh_needed ? `${priceActionPaper.pending_broker_signals ?? 0} pending` : "fresh", priceActionPaper.broker_refresh_needed ? "warn" : "good"),
+      card("Paper maintenance", paperMaintenance.status || "not_started", paperMaintenance.status === "ran_broker_maintenance" || paperMaintenance.status === "refreshed_dashboard_idle" || paperMaintenance.status === "skipped_no_work" ? "good" : paperMaintenance.status === "skipped_high_memory" ? "warn" : ""),
       card("Probe exit due", probeExitWatch.fixed_horizon_due_count ? `${probeExitWatch.fixed_horizon_due_count} due` : (probeExitWatch.next_due_minutes == null ? "none" : `${fmtNum(probeExitWatch.next_due_minutes, 0)}m`), probeExitWatch.fixed_horizon_due_count ? "warn" : ""),
       card("Main trade blocker", longText(diag.main_blocker || "-", 120), Number(diag.approved_signals_count || 0) > 0 ? "good" : "warn"),
       card("Next settlement", data.shadow_settlement_watch?.next_settlement_minutes == null ? "Waiting" : fmtNum(data.shadow_settlement_watch.next_settlement_minutes, 0) + "m"),
@@ -238,6 +240,11 @@ async function load() {
       ["Broker source", tradingAccount.source || freshness.broker_source],
       ["Broker generated", tradingAccount.generated_at_utc || freshness.broker_generated_at_utc],
       ["Stale cycle broker", tradingAccount.forward_cycle_broker_mismatch ? "yes" : "no"],
+      ["Paper maintenance", paperMaintenance.status],
+      ["Maintenance age", paperMaintenance.age_seconds == null ? "-" : fmtNum(paperMaintenance.age_seconds, 0) + "s"],
+      ["Maintenance memory", paperMaintenance.memory_used_percent == null ? "-" : fmtNum(paperMaintenance.memory_used_percent, 1) + "% / " + fmtNum(paperMaintenance.max_memory_percent, 1) + "%"],
+      ["Maintenance next exit", paperMaintenance.next_exit_due_utc],
+      ["Maintenance reason", paperMaintenance.reason || joinText(paperMaintenance.work_reasons), v=>longText(v, 180)],
       ["Broker rejects", monthly.broker_rejected_orders],
       ["Main reason", broker.entry_pause_reason || Object.keys(broker.broker_rejection_reasons || {}).join(", "), longText]
     ]);
@@ -1656,6 +1663,28 @@ def _strategy_v2_runtime_freshness(strategy_v2: dict[str, Any], live_loop_status
     }
 
 
+def _paper_maintenance_status(cfg: EngineConfig) -> dict[str, Any]:
+    path = cfg.path.parent / "work" / "polymarket_paper_maintenance_latest_status.json"
+    payload = _read_json_lenient(path, default={}) or {}
+    if not isinstance(payload, dict) or not payload:
+        return {
+            "status": "not_started",
+            "status_file": str(path),
+            "age_seconds": None,
+            "reason": "Lightweight paper maintenance has not written a status file yet.",
+        }
+    return {
+        **payload,
+        "status_file": str(path),
+        "age_seconds": _age_seconds(payload),
+        "paper_trade_refresh_status": (
+            payload.get("paper_trade_refresh", {}).get("status")
+            if isinstance(payload.get("paper_trade_refresh"), dict)
+            else ""
+        ),
+    }
+
+
 def _scoreboard_status(broker: dict[str, Any], target: dict[str, Any]) -> str:
     broker_equity = safe_float(broker.get("equity"))
     current = target.get("current") if isinstance(target, dict) else {}
@@ -1788,6 +1817,7 @@ def render_dashboard(cfg: EngineConfig, latest_report: dict[str, Any] | None = N
     price_action_feedback = read_json(governance / "price_action_feedback.json", default={}) or {}
     if not isinstance(price_action_feedback, dict):
         price_action_feedback = {}
+    paper_maintenance = _paper_maintenance_status(cfg)
 
     payload = {
         "status": "ok",
@@ -1829,6 +1859,7 @@ def render_dashboard(cfg: EngineConfig, latest_report: dict[str, Any] | None = N
         "price_action_paper_signals": price_action_paper_signal_status,
         "price_action_feedback": price_action_feedback,
         "paper_probe_exit_watch": paper_probe_exit_watch,
+        "paper_maintenance": paper_maintenance,
         "edge_strategy_search": edge_strategy_search,
         "promoted_rule_shadow": promoted_rule_shadow,
         "liquidity_discovery": liquidity_discovery,

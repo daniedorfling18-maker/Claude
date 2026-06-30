@@ -521,6 +521,45 @@ def test_dashboard_surfaces_strategy_v2_anchored_edge_progress(tmp_path):
             }
         ],
     )
+    write_json(
+        cfg.output_root / "polymarket_price_action" / "microstructure_summary.json",
+        {
+            "status": "computed",
+            "decision": "microstructure_rules_ready_for_forward_shadow",
+            "source_rows": 120,
+            "tokens": 6,
+            "trade_events": 44,
+            "rule_rows": 12,
+            "validation_pass_rules": 1,
+            "current_candidates": 2,
+            "top_rule": {
+                "rule_id": "bid_momentum_tight|move>=0.01|spread<=0.02",
+                "validation_roi": 0.08,
+                "validation_pnl_usdc": 1.2,
+            },
+            "top_rules": [
+                {
+                    "rule_id": "bid_momentum_tight|move>=0.01|spread<=0.02",
+                    "rule_family": "bid_momentum_tight",
+                    "validation_trades": 5,
+                    "validation_roi": 0.08,
+                    "validation_pnl_usdc": 1.2,
+                    "validation_pass": True,
+                    "status": "candidate_for_forward_shadow",
+                }
+            ],
+            "current_candidates_preview": [
+                {
+                    "rule_id": "bid_momentum_tight|move>=0.01|spread<=0.02",
+                    "market_slug": "eth-updown-test",
+                    "outcome": "Up",
+                    "latest_bid": 0.51,
+                    "latest_ask": 0.52,
+                    "validation_roi": 0.08,
+                }
+            ],
+        },
+    )
     cycle_status_path = cfg.path.parent / "work" / "strategy_v2_cycle_latest_status.json"
     cycle_status_path.parent.mkdir(parents=True, exist_ok=True)
     cycle_status_path.write_text(
@@ -535,6 +574,7 @@ def test_dashboard_surfaces_strategy_v2_anchored_edge_progress(tmp_path):
 
     assert "Strategy V2 anchored edge" in html
     assert "Fast price-action scout" in html
+    assert "Microstructure edge lab" in html
     assert strategy_v2["decision"] == "candidate_family_found"
     assert strategy_v2["shadow_candidates"] == 1
     assert strategy_v2["anchored_rows"] == 3
@@ -550,6 +590,7 @@ def test_dashboard_surfaces_strategy_v2_anchored_edge_progress(tmp_path):
     assert data["price_action_scout"]["top_candidates"][0]["source"] == "profit_sprint_target"
     assert data["price_action_paper_signals"]["signals"] == 0
     assert data["price_action_paper_signals"]["rejections"] == 1
+    assert data["price_action_microstructure"]["validation_pass_rules"] == 1
     assert strategy_v2["top_shadow_candidates"][0]["market_slug"] == candidate["market_slug"]
     assert strategy_v2["promotion_progress"][0]["remaining_shadow_entries_to_review"] == 19
 

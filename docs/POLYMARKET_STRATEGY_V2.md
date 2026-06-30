@@ -243,6 +243,19 @@ but only when a cohort has already passed the closed bid/ask round-trip evidence
 negative cohorts remain rejected. This lets the system learn from buy/sell odds movement without
 claiming that the final outcome model has been proven right.
 
+The microstructure edge lab is a still-earlier hypothesis layer:
+
+```text
+outputs/polymarket_price_action/microstructure_trade_events.csv
+outputs/polymarket_price_action/microstructure_rule_evidence.csv
+outputs/polymarket_price_action/microstructure_current_candidates.csv
+outputs/polymarket_price_action/microstructure_summary.json
+```
+
+It searches pre-declared websocket bid/ask patterns with a chronological train/validation split. This is
+not a paper-trading approval path. It is a way to kill bad microstructure ideas quickly and promote only
+validated price-action hypotheses into later forward shadow tracking.
+
 Minimum candidate filters:
 
 ```text

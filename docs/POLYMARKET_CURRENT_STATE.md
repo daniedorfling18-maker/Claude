@@ -171,6 +171,20 @@ The paper broker now reads both normal model trade signals and price-action pape
 positions from websocket bid/ask quotes when available, and applies fast price-action take-profit/
 stop-loss settings to price-action entries.
 
+The newest edge layer is the websocket microstructure lab:
+
+```text
+outputs/polymarket_price_action/microstructure_trade_events.csv
+outputs/polymarket_price_action/microstructure_rule_evidence.csv
+outputs/polymarket_price_action/microstructure_current_candidates.csv
+outputs/polymarket_price_action/microstructure_summary.json
+```
+
+It tests pre-declared bid/ask patterns such as tight-book bid momentum, midpoint momentum, buy-pressure,
+and spread compression. Each rule is split chronologically into train/validation evidence and is scored
+using entry ask and future exit bid. Rules that fail validation stay shadow-only and do not feed the
+paper broker.
+
 ## Why $100/month is not solved yet
 
 At the current probationary stake of $2, a 3% ROI produces only $0.06 per trade. Hitting $100/month at that level would require about 1,667 trades/month, which is not realistic. The route to the target is therefore:

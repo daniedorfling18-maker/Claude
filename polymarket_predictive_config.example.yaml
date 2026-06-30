@@ -281,6 +281,39 @@ price_action_scout:
   min_win_rate: 0.55
   min_monthly_run_rate_usdc: 20
   max_single_market_positive_pnl_share: 0.35
+price_action_microstructure:
+  enabled: true
+  stake_usdc: 10
+  lookback_observations: 3
+  min_future_observations: 2
+  max_forward_observations: 8
+  max_rows_per_token: 500
+  train_fraction: 0.6
+  take_profit_return: 0.08
+  stop_loss_return: 0.06
+  min_profit_usdc: 0.05
+  min_total_trades: 8
+  min_validation_trades: 3
+  min_train_roi: 0.0
+  min_validation_roi: 0.03
+  min_validation_win_rate: 0.55
+  max_single_token_positive_pnl_share: 0.5
+  max_relative_spread: 0.15
+  max_current_candidates: 20
+  max_spread_grid:
+  - 0.01
+  - 0.02
+  - 0.04
+  min_move_grid:
+  - 0.005
+  - 0.01
+  - 0.02
+  min_buy_pressure_grid:
+  - 1
+  - 2
+  min_spread_compression_grid:
+  - 0.005
+  - 0.01
 price_action_paper:
   enabled: true
   # Converts positive bid/ask round-trip cohort evidence into paper broker signals.

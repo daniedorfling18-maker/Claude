@@ -95,11 +95,16 @@ def test_strategy_v2_cycle_builds_round_trip_after_websocket_normalisation():
     text = _script_text("scripts/run_polymarket_strategy_v2_cycle.ps1")
 
     normalize_index = text.index("strategy-v2-normalize-websocket")
+    microstructure_index = text.index("price-action-microstructure")
     round_trip_index = text.index("strategy-v2-round-trip")
+    microstructure_status_index = text.index("price_action_microstructure = $priceActionMicrostructure")
     status_payload_index = text.index("strategy_v2_round_trip_evidence = $strategyV2RoundTripEvidence")
 
-    assert normalize_index < round_trip_index
+    assert normalize_index < microstructure_index
+    assert microstructure_index < round_trip_index
+    assert microstructure_index < microstructure_status_index
     assert round_trip_index < status_payload_index
+    assert "microstructure_summary.json" in text
     assert "strategy_v2_round_trip_evidence.json" in text
 
 

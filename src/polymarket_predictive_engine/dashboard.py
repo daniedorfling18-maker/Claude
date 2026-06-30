@@ -76,6 +76,7 @@ HTML = """<!doctype html>
   <section><h2>Why no trade?</h2><div id="tradeDiagnostics"></div></section>
   <section><h2>Strategy V2 anchored edge</h2><div id="strategyV2"></div></section>
   <section><h2>Fast price-action scout</h2><div id="priceActionScout"></div></section>
+  <section><h2>Microstructure edge lab</h2><div id="microstructureLab"></div></section>
   <div class="two">
     <section><h2>Promotion readiness</h2><div id="promotionReadiness"></div></section>
     <section><h2>Edge promotion watchlist</h2><div id="promotionWatchlist"></div></section>
@@ -141,6 +142,7 @@ async function load() {
     const roundTrip = strategyV2.round_trip_evidence || {};
     const roundTripPnl = roundTrip.realized_pnl_usdc ?? roundTrip.total_mark_pnl_usdc;
     const priceScout = data.price_action_scout || {};
+    const microstructure = data.price_action_microstructure || {};
     const priceActionPaper = data.price_action_paper_signals || {};
     const priceScoutPnl = priceScout.realized_pnl_usdc ?? priceScout.total_mark_pnl_usdc;
     const live = data.local_live_heartbeat || data.heartbeat || {};
@@ -183,6 +185,7 @@ async function load() {
       card("Strategy V2 anchors", `${strategyV2.anchored_rows ?? 0}/${strategyV2.rows_scored ?? 0}`, Number(strategyV2.anchored_rows || 0) > 0 ? "good" : "warn"),
       card("Round-trip P&L", fmtUsd(roundTripPnl), Number(roundTripPnl || 0) > 0 ? "good" : "warn"),
       card("Price scout P&L", fmtUsd(priceScoutPnl), Number(priceScoutPnl || 0) > 0 ? "good" : "warn"),
+      card("Microstructure rules", microstructure.validation_pass_rules ?? "0", Number(microstructure.validation_pass_rules || 0) > 0 ? "good" : "warn"),
       card("Price-action paper signals", priceActionPaper.signals ?? "0", Number(priceActionPaper.signals || 0) > 0 ? "good" : "warn"),
       card("Main trade blocker", longText(diag.main_blocker || "-", 120), Number(diag.approved_signals_count || 0) > 0 ? "good" : "warn"),
       card("Next settlement", data.shadow_settlement_watch?.next_settlement_minutes == null ? "Waiting" : fmtNum(data.shadow_settlement_watch.next_settlement_minutes, 0) + "m"),
@@ -430,6 +433,35 @@ async function load() {
       ["Cohort","signal_cohort", v=>longText(v, 140)],
       ["Status","round_trip_status"],
       ["Reason","rejection_reason", v=>longText(v, 160)]
+    ]);
+    document.getElementById("microstructureLab").innerHTML = facts([
+      ["Decision", microstructure.decision],
+      ["Source rows", microstructure.source_rows],
+      ["Tokens", microstructure.tokens],
+      ["Trade events", microstructure.trade_events],
+      ["Rules tested", microstructure.rule_rows],
+      ["Validation-pass rules", microstructure.validation_pass_rules],
+      ["Current candidates", microstructure.current_candidates],
+      ["Top rule", microstructure.top_rule?.rule_id, v=>longText(v, 180)],
+      ["Top validation ROI", microstructure.top_rule?.validation_roi, v=>fmtNum(Number(v) * 100, 2) + "%"],
+      ["Top validation P&L", microstructure.top_rule?.validation_pnl_usdc, fmtUsd]
+    ]) + `<div style="height:12px"></div><h3>Microstructure rule leaderboard</h3>` + table(microstructure.top_rules || [], [
+      ["Rule","rule_id", v=>longText(v, 180)],
+      ["Family","rule_family"],
+      ["Val trades","validation_trades"],
+      ["Val ROI","validation_roi", v=>fmtNum(Number(v) * 100, 2) + "%"],
+      ["Val P&L","validation_pnl_usdc", fmtUsd],
+      ["Win rate","validation_win_rate", v=>fmtNum(Number(v) * 100, 1) + "%"],
+      ["Pass","validation_pass"],
+      ["Status","status", v=>longText(v, 140)]
+    ]) + `<div style="height:12px"></div><h3>Current microstructure shadow candidates</h3>` + table(microstructure.current_candidates_preview || [], [
+      ["Rule","rule_id", v=>longText(v, 160)],
+      ["Market","market_slug", v=>longText(v, 120)],
+      ["Outcome","outcome"],
+      ["Bid","latest_bid", v=>fmtNum(v,4)],
+      ["Ask","latest_ask", v=>fmtNum(v,4)],
+      ["Bid move","bid_move_abs", v=>fmtNum(v,4)],
+      ["Val ROI","validation_roi", v=>fmtNum(Number(v) * 100, 2) + "%"]
     ]);
     document.getElementById("promotionReadiness").innerHTML = table(data.cohort_promotion_readiness?.cohorts || [], [
       ["Cohort","signal_cohort"],
@@ -1223,6 +1255,35 @@ def _price_action_scout_status(cfg: EngineConfig) -> dict[str, Any]:
     }
 
 
+def _price_action_microstructure_status(cfg: EngineConfig) -> dict[str, Any]:
+    """Expose the websocket microstructure rule lab."""
+    root = cfg.output_root / "polymarket_price_action"
+    summary = read_json(root / "microstructure_summary.json", default={}) or {}
+    if not isinstance(summary, dict):
+        summary = {}
+    rules = read_csv_rows(root / "microstructure_rule_evidence.csv")
+    current = read_csv_rows(root / "microstructure_current_candidates.csv")
+    events = read_csv_rows(root / "microstructure_trade_events.csv", limit=1)
+    return {
+        "status": summary.get("status") or ("missing" if not rules and not current and not events else "computed"),
+        "generated_at_utc": summary.get("generated_at_utc"),
+        "decision": summary.get("decision") or "collect_more_websocket_microstructure_evidence",
+        "source_rows": summary.get("source_rows"),
+        "tokens": summary.get("tokens"),
+        "trade_events": summary.get("trade_events"),
+        "rule_rows": summary.get("rule_rows", len(rules)),
+        "validation_pass_rules": summary.get("validation_pass_rules"),
+        "current_candidates": summary.get("current_candidates", len(current)),
+        "top_rule": summary.get("top_rule", rules[0] if rules else {}),
+        "top_rules": summary.get("top_rules", rules[:15]),
+        "current_candidates_preview": summary.get("current_candidates_preview", current[:15]),
+        "trade_events_file": str(root / "microstructure_trade_events.csv"),
+        "rule_evidence_file": str(root / "microstructure_rule_evidence.csv"),
+        "current_candidates_file": str(root / "microstructure_current_candidates.csv"),
+        "shadow_only": True,
+    }
+
+
 def _price_action_paper_signal_status(cfg: EngineConfig) -> dict[str, Any]:
     """Expose the settlement-independent price-action paper signal bridge."""
     root = cfg.output_root / "polymarket_price_action"
@@ -1385,6 +1446,7 @@ def render_dashboard(cfg: EngineConfig, latest_report: dict[str, Any] | None = N
     strategy_v2_status = _strategy_v2_status(cfg)
     strategy_v2_runtime = _strategy_v2_runtime_freshness(strategy_v2_status, live_loop_status)
     price_action_scout_status = _price_action_scout_status(cfg)
+    price_action_microstructure_status = _price_action_microstructure_status(cfg)
     price_action_paper_signal_status = _price_action_paper_signal_status(cfg)
 
     payload = {
@@ -1413,6 +1475,7 @@ def render_dashboard(cfg: EngineConfig, latest_report: dict[str, Any] | None = N
         "independent_anchor_status": _independent_anchor_status(governance),
         "strategy_v2": strategy_v2_status,
         "price_action_scout": price_action_scout_status,
+        "price_action_microstructure": price_action_microstructure_status,
         "price_action_paper_signals": price_action_paper_signal_status,
         "edge_strategy_search": edge_strategy_search,
         "promoted_rule_shadow": promoted_rule_shadow,

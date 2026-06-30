@@ -254,6 +254,8 @@ Invoke-PythonStep "strategy-v2-websocket-refresh" @("-m", "polymarket_predictive
 $strategyV2WebsocketRefresh = Read-JsonIfExists ".\outputs\polymarket_websocket\websocket_summary.json"
 Invoke-PythonStep "strategy-v2-normalize-websocket" @("-m", "polymarket_predictive_engine.cli", "normalize-websocket", "--config", $ConfigPath)
 $strategyV2WebsocketFeatures = Read-JsonIfExists ".\outputs\polymarket_model_governance\websocket_feature_summary.json"
+Invoke-PythonStep "price-action-microstructure" @("-m", "polymarket_predictive_engine.cli", "price-action-microstructure", "--config", $ConfigPath)
+$priceActionMicrostructure = Read-JsonIfExists ".\outputs\polymarket_price_action\microstructure_summary.json"
 Invoke-PythonStep "strategy-v2-round-trip" @("-m", "polymarket_predictive_engine.cli", "strategy-v2-round-trip", "--config", $ConfigPath)
 $strategyV2RoundTripEvidence = Read-JsonIfExists ".\outputs\polymarket_strategy_v2\strategy_v2_round_trip_evidence.json"
 Invoke-PythonStep "price-action-scout" @("-m", "polymarket_predictive_engine.cli", "price-action-scout", "--config", $ConfigPath)
@@ -278,6 +280,7 @@ $status = [PSCustomObject]@{
   strategy_v2_forward_evidence = $strategyV2ForwardEvidence
   strategy_v2_websocket_refresh = $strategyV2WebsocketRefresh
   strategy_v2_websocket_features = $strategyV2WebsocketFeatures
+  price_action_microstructure = $priceActionMicrostructure
   strategy_v2_round_trip_evidence = $strategyV2RoundTripEvidence
   price_action_scout = $priceActionScout
   price_action_paper_signals = $priceActionPaperSignals

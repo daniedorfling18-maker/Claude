@@ -509,6 +509,7 @@ async function load() {
       ["Forward paper gap", priceActionFeedback.forward_paper_goal_gap_usdc, fmtUsd],
       ["Forward shadow cohorts", priceActionFeedback.forward_shadow_cohorts],
       ["Forward shadow positive", priceActionFeedback.forward_shadow_positive_cohorts],
+      ["Paper-confirmation backlog", priceActionFeedback.paper_confirmation_candidates],
       ["Collect next", priceActionFeedback.collection_queries, joinText],
       ["Suppress", priceActionFeedback.suppressed_queries, joinText]
     ]) + `<div style="height:12px"></div><h3>Forward paper P&L by signal cohort</h3>` + table(priceActionFeedback.forward_paper_preview || [], [
@@ -520,6 +521,8 @@ async function load() {
       ["P&L","forward_paper_pnl_usdc", fmtUsd],
       ["ROI","forward_paper_roi", v=>fmtNum(Number(v) * 100, 2) + "%"],
       ["Run-rate","monthly_run_rate_usdc", fmtUsd],
+      ["Trusted","trusted_for_goal"],
+      ["Blocker","forward_edge_blocker", v=>longText(v, 160)],
       ["Source","promotion_evidence_source"],
       ["Reason","reason", v=>longText(v, 200)]
     ]) + `<div style="height:12px"></div><h3>Forward shadow P&L requiring paper confirmation</h3>` + table(priceActionFeedback.forward_shadow_preview || [], [
@@ -530,7 +533,16 @@ async function load() {
       ["P&L","forward_shadow_pnl_usdc", fmtUsd],
       ["ROI","forward_shadow_roi", v=>fmtNum(Number(v) * 100, 2) + "%"],
       ["Run-rate","monthly_run_rate_usdc", fmtUsd],
+      ["Trusted","trusted_for_goal"],
+      ["Blocker","forward_edge_blocker", v=>longText(v, 160)],
       ["Reason","reason", v=>longText(v, 200)]
+    ]) + `<div style="height:12px"></div><h3>Paper-confirmation backlog from trusted shadow edge</h3>` + table(priceActionFeedback.paper_confirmation_preview || [], [
+      ["Cohort","cohort", v=>longText(v, 180)],
+      ["Query","recommended_collection_query"],
+      ["Shadow P&L","forward_shadow_pnl_usdc", fmtUsd],
+      ["Shadow ROI","forward_shadow_roi", v=>fmtNum(Number(v) * 100, 2) + "%"],
+      ["Shadow run-rate","monthly_run_rate_usdc", fmtUsd],
+      ["Needed","reason", v=>longText(v, 220)]
     ]) + `<div style="height:12px"></div><h3>Price-action feedback cohort leaderboard</h3>` + table(priceActionFeedback.top_cohorts || [], [
       ["Source","source"],
       ["Cohort","cohort", v=>longText(v, 180)],

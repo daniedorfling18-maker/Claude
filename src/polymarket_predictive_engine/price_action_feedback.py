@@ -19,6 +19,26 @@ def _bool(value: Any) -> bool:
     return str(value or "").strip().lower() in {"1", "true", "yes", "y", "on", "approved", "promoted"}
 
 
+def _cohort_blocker(cohort: str, metadata_blocker: Any = "") -> str:
+    """Return a reason a cohort must not count as trusted edge.
+
+    Positive marks in known-bad or unresolved families are still useful as
+    diagnostics, but they should not move the $100/month paper-profit goal until
+    they are re-tested under a trusted, named thesis.
+    """
+    existing = str(metadata_blocker or "").strip()
+    if existing:
+        return existing
+    lowered = str(cohort or "").strip().lower()
+    if lowered == "unknown" or "near_miss_learning|unknown" in lowered:
+        return "unresolved_unknown_near_miss_metadata"
+    if "quarantine_retest|" in lowered:
+        return "quarantined_retest_bucket"
+    if "updown" in lowered and ("_5m" in lowered or "|5m" in lowered or " 5m" in lowered):
+        return "quarantined_fast_crypto_updown_family"
+    return ""
+
+
 def _query_from_text(text: str) -> str:
     lowered = text.lower()
     if "near_miss_learning|unknown" in lowered or lowered.startswith("unknown"):
@@ -229,11 +249,19 @@ def _paper_broker_forward_row(row: dict[str, str], *, min_closed: int) -> dict[s
         monthly = _num(row.get("shadow_monthly_run_rate_usdc") or row.get("monthly_run_rate_usdc"))
     promoted = _bool(row.get("promoted"))
     probationary = _bool(row.get("probationary"))
+    blocker = _cohort_blocker(cohort, row.get("metadata_blocker"))
+    trusted_for_goal = not blocker
     has_positive_forward = buy_fills > 0 and pnl > 0 and roi > 0
     has_negative_closed = closed >= min_closed and (pnl <= 0 or roi <= 0)
     has_negative_open_mark = closed == 0 and open_trades > 0 and pnl < 0 and roi < 0
 
-    if promoted:
+    if blocker:
+        action = "suppress_until_new_thesis"
+        reason = (
+            f"Cohort is blocked from trusted edge accounting ({blocker}); keep it diagnostic-only "
+            "until a named non-quarantined thesis produces broker paper evidence."
+        )
+    elif promoted:
         action = "candidate_for_live_promotion_review"
         reason = (
             "Forward paper/shadow P&L cleared the cohort promotion gate; live trading still needs "
@@ -273,9 +301,11 @@ def _paper_broker_forward_row(row: dict[str, str], *, min_closed: int) -> dict[s
         "cohort": cohort,
         "family": str(row.get("family") or "").strip() or ("paper_forward" if is_paper else "shadow_forward"),
         "recommended_collection_query": _query_from_text(text),
-        "promotion_ready": promoted or probationary,
+        "promotion_ready": trusted_for_goal and (promoted or probationary),
         "probationary": probationary,
         "promoted": promoted,
+        "trusted_for_goal": trusted_for_goal,
+        "forward_edge_blocker": blocker,
         "action": action,
         "reason": reason,
         "source_status": "promoted" if promoted else "probationary" if probationary else source,
@@ -300,8 +330,8 @@ def _paper_broker_forward_row(row: dict[str, str], *, min_closed: int) -> dict[s
         "promotion_ready_checks": int(_num(row.get("promotion_ready_checks"))),
         "promotion_readiness": row.get("promotion_readiness", ""),
         "promotion_evidence_source": row.get("promotion_evidence_source", ""),
-        "metadata_valid": row.get("metadata_valid", ""),
-        "metadata_blocker": row.get("metadata_blocker", ""),
+        "metadata_valid": row.get("metadata_valid", "") if not blocker else False,
+        "metadata_blocker": blocker,
         "evidence_type": "forward_paper_bid_ask_trade_pnl" if is_paper else "forward_shadow_bid_ask_trade_pnl",
     }
 
@@ -370,12 +400,16 @@ def build_price_action_feedback(cfg: EngineConfig) -> dict[str, Any]:
     positive_forward_paper = [
         row
         for row in forward_paper
-        if _num(row.get("forward_paper_pnl_usdc")) > 0 and _num(row.get("forward_paper_roi")) > 0
+        if _bool(row.get("trusted_for_goal"))
+        and _num(row.get("forward_paper_pnl_usdc")) > 0
+        and _num(row.get("forward_paper_roi")) > 0
     ]
     positive_forward_shadow = [
         row
         for row in forward_shadow
-        if _num(row.get("forward_shadow_pnl_usdc")) > 0 and _num(row.get("forward_shadow_roi")) > 0
+        if _bool(row.get("trusted_for_goal"))
+        and _num(row.get("forward_shadow_pnl_usdc")) > 0
+        and _num(row.get("forward_shadow_roi")) > 0
     ]
 
     collection_queries: list[str] = []
@@ -429,10 +463,12 @@ def build_price_action_feedback(cfg: EngineConfig) -> dict[str, Any]:
         "forward_paper_goal_gap_usdc": max(target_monthly_profit - best_forward_paper_run_rate, 0.0),
         "forward_shadow_cohorts": len(forward_shadow),
         "forward_shadow_positive_cohorts": len(positive_forward_shadow),
+        "paper_confirmation_candidates": len(positive_forward_shadow),
         "paper_bridge_signals": bridge_summary.get("signals", 0) if isinstance(bridge_summary, dict) else 0,
         "top_cohorts": cohorts[:20],
         "forward_paper_preview": forward_paper[:10],
         "forward_shadow_preview": forward_shadow[:10],
+        "paper_confirmation_preview": positive_forward_shadow[:10],
         "promotion_candidate_preview": promotion_candidates[:10],
         "positive_collect_preview": positive_collect[:10],
         "suppressed_preview": suppressed[:10],

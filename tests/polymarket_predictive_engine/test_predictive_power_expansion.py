@@ -16,7 +16,7 @@ from polymarket_predictive_engine.models.category_calibration import train_categ
 from polymarket_predictive_engine.paper_edge_simulator import simulate_paper_edge
 from polymarket_predictive_engine.price_history_collector import normalize_price_history_payload
 from polymarket_predictive_engine.resolution_collector import infer_market_resolution_rows
-from polymarket_predictive_engine.utils import read_csv_rows, read_json
+from polymarket_predictive_engine.utils import read_csv_rows, read_json, write_csv
 import polymarket_predictive_engine.websocket_collector as websocket_collector
 from polymarket_predictive_engine.websocket_collector import collect_websocket
 
@@ -337,6 +337,87 @@ def test_websocket_skipped_if_dependency_missing(tmp_path, monkeypatch):
     monkeypatch.setattr("importlib.import_module", lambda name: (_ for _ in ()).throw(ImportError("missing")) if name == "websockets" else __import__(name))
     result = collect_websocket(cfg, websocket_seconds=1)
     assert result["status"] == "skipped"
+
+
+def test_websocket_prioritises_strategy_v2_forward_evidence_targets(tmp_path, monkeypatch):
+    import yaml
+
+    cfg_path = make_cfg(tmp_path)
+    data = yaml.safe_load(cfg_path.read_text(encoding="utf-8"))
+    data.setdefault("websocket_market_data", {})
+    data["websocket_market_data"].update(
+        {
+            "use_liquidity_targets": True,
+            "use_strategy_v2_targets": True,
+            "max_strategy_v2_target_assets": 4,
+            "max_liquidity_target_assets": 4,
+            "market_ids": [],
+            "url": "wss://unit-test.invalid/ws",
+        }
+    )
+    cfg_path.write_text(yaml.safe_dump(data, sort_keys=False), encoding="utf-8")
+    cfg = load_config(cfg_path)
+    write_csv(
+        cfg.output_root / "polymarket_strategy_v2" / "strategy_v2_forward_evidence.csv",
+        [
+            {
+                "token_id": "strategy-token",
+                "family": "macro_rates",
+                "signal_cohort": "strategy_v2|macro_rates",
+                "latest_status": "shadow_candidate",
+                "mark_pnl_usdc": "0.5",
+                "latest_risk_adjusted_anchor_edge": "0.1",
+                "resolved_evidence": "False",
+            },
+            {
+                "token_id": "resolved-token",
+                "family": "macro_rates",
+                "signal_cohort": "strategy_v2|macro_rates",
+                "latest_status": "shadow_candidate",
+                "mark_pnl_usdc": "9.0",
+                "latest_risk_adjusted_anchor_edge": "0.2",
+                "resolved_evidence": "true",
+            },
+        ],
+    )
+    write_csv(
+        cfg.output_root / "polymarket_liquidity_discovery" / "liquidity_watchlist.csv",
+        [
+            {
+                "token_id": "liquid-token",
+                "family": "sports_other",
+                "tradable_liquidity_candidate": "true",
+                "liquidity": "1000",
+                "spread": "0.02",
+                "time_to_close_hours": "12",
+            }
+        ],
+    )
+
+    real_import_module = websocket_collector.importlib.import_module
+    subscriptions = []
+
+    def fake_import_module(name):
+        if name == "websockets":
+            return object()
+        return real_import_module(name)
+
+    async def fake_collect(url, seconds, subscription_message, **kwargs):
+        subscriptions.append(subscription_message)
+        return [{"collected_at_utc": "2026-06-30T10:00:00Z", "message": "{\"asset_id\":\"strategy-token\"}"}]
+
+    monkeypatch.setattr(websocket_collector.importlib, "import_module", fake_import_module)
+    monkeypatch.setattr(websocket_collector, "_collect_messages", fake_collect)
+
+    result = collect_websocket(cfg, websocket_seconds=1)
+    targets = read_csv_rows(cfg.governance_root / "websocket_liquidity_targets.csv")
+
+    assert result["status"] == "collected"
+    assert result["target_source"] == "strategy_v2_forward_evidence+liquidity_watchlist"
+    assert result["target_strategy_v2_counts"] == {"strategy_v2|macro_rates": 1}
+    assert targets[0]["token_id"] == "strategy-token"
+    assert "strategy-token" in subscriptions[0]["assets_ids"]
+    assert "resolved-token" not in subscriptions[0]["assets_ids"]
 
 
 def test_websocket_collector_fails_closed_on_socket_error(tmp_path, monkeypatch):

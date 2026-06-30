@@ -157,3 +157,46 @@ def test_strategy_v2_evidence_never_promotes_mark_to_market_without_resolution(t
     assert summary["paper_review_candidates"] == 0
     assert cohorts[0]["paper_review_candidate"] == "False"
     assert cohorts[0]["status"] == "collect_resolved_forward_evidence"
+
+
+def test_strategy_v2_evidence_backfills_token_id_from_current_candidates(tmp_path):
+    cfg = _cfg(tmp_path)
+    write_csv(
+        cfg.output_root / "polymarket_strategy_v2" / "anchored_edge_candidates.csv",
+        [
+            {
+                "family": "macro_rates",
+                "market_slug": "fed-july",
+                "outcome": "Yes",
+                "token_id": "fed-token",
+            }
+        ],
+    )
+    write_csv(
+        cfg.output_root / "polymarket_strategy_v2" / "anchored_edge_persistence_log.csv",
+        [
+            {
+                "logged_at_utc": "2026-06-30T10:00:00Z",
+                "family": "macro_rates",
+                "market_slug": "fed-july",
+                "outcome": "Yes",
+                "status": "shadow_candidate",
+                "executable_price": "0.20",
+                "risk_adjusted_anchor_edge": "0.10",
+            },
+            {
+                "logged_at_utc": "2026-06-30T10:10:00Z",
+                "family": "macro_rates",
+                "market_slug": "fed-july",
+                "outcome": "Yes",
+                "status": "shadow_candidate",
+                "executable_price": "0.21",
+                "risk_adjusted_anchor_edge": "0.09",
+            },
+        ],
+    )
+
+    build_strategy_v2_forward_evidence(cfg)
+    rows = read_csv_rows(cfg.output_root / "polymarket_strategy_v2" / "strategy_v2_forward_evidence.csv")
+
+    assert rows[0]["token_id"] == "fed-token"

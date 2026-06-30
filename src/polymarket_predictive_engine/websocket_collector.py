@@ -211,6 +211,48 @@ def _profit_sprint_priority_rows(cfg: EngineConfig, candidates: list[dict[str, A
     return selected
 
 
+def _strategy_v2_rank(row: dict[str, Any]) -> tuple[bool, float, float, float]:
+    return (
+        str(row.get("latest_status") or "") == "shadow_candidate",
+        safe_float(row.get("mark_pnl_usdc")) or 0.0,
+        safe_float(row.get("latest_risk_adjusted_anchor_edge")) or safe_float(row.get("entry_risk_adjusted_anchor_edge")) or 0.0,
+        safe_float(row.get("latest_liquidity")) or 0.0,
+    )
+
+
+def _strategy_v2_priority_rows(cfg: EngineConfig, settings: dict[str, Any]) -> list[dict[str, Any]]:
+    if not _boolish(settings.get("use_strategy_v2_targets", True)):
+        return []
+    max_rows = int(settings.get("max_strategy_v2_target_assets", 6) or 6)
+    if max_rows <= 0:
+        return []
+    rows = read_csv_rows(cfg.output_root / "polymarket_strategy_v2" / "strategy_v2_forward_evidence.csv")
+    selected: list[dict[str, Any]] = []
+    seen_ids: set[str] = set()
+    for row in sorted(rows, key=_strategy_v2_rank, reverse=True):
+        token_id = _token_id(row)
+        if not token_id or token_id in seen_ids:
+            continue
+        if str(row.get("resolved_evidence") or "").strip().lower() == "true":
+            continue
+        enriched = {
+            **row,
+            "token_id": token_id,
+            "family": row.get("family") or row.get("signal_cohort") or "strategy_v2",
+            "strategy_v2_target": True,
+            "strategy_v2_signal_cohort": row.get("signal_cohort", ""),
+            "strategy_v2_mark_pnl_usdc": row.get("mark_pnl_usdc", ""),
+            "strategy_v2_risk_adjusted_anchor_edge": row.get("latest_risk_adjusted_anchor_edge")
+            or row.get("entry_risk_adjusted_anchor_edge")
+            or "",
+        }
+        selected.append(enriched)
+        seen_ids.add(token_id)
+        if len(selected) >= max_rows:
+            break
+    return selected
+
+
 def _liquidity_target_rows(cfg: EngineConfig, settings: dict[str, Any]) -> list[dict[str, Any]]:
     if not _boolish(settings.get("use_liquidity_targets", True)):
         return []
@@ -237,12 +279,22 @@ def _liquidity_target_rows(cfg: EngineConfig, settings: dict[str, Any]) -> list[
         candidates.append(row)
     candidates.sort(key=_candidate_rank, reverse=True)
 
+    strategy_v2_rows = _strategy_v2_priority_rows(cfg, settings)
     priority_rows = _profit_sprint_priority_rows(cfg, candidates)
-    if not priority_rows:
+    if not priority_rows and not strategy_v2_rows:
         return _balanced_by_family(candidates, max_assets=max_assets, max_per_family=max_per_family)
 
     selected: list[dict[str, Any]] = []
     selected_ids: set[str] = set()
+    for row in strategy_v2_rows:
+        token_id = _token_id(row)
+        if not token_id or token_id in selected_ids:
+            continue
+        selected.append(row)
+        selected_ids.add(token_id)
+        if len(selected) >= max_assets:
+            return selected
+
     for row in priority_rows:
         token_id = _token_id(row)
         if not token_id or token_id in selected_ids:
@@ -293,6 +345,16 @@ def _profit_sprint_target_counts(rows: list[dict[str, Any]]) -> dict[str, int]:
         if not action:
             continue
         counts[action] = counts.get(action, 0) + 1
+    return dict(sorted(counts.items()))
+
+
+def _strategy_v2_target_counts(rows: list[dict[str, Any]]) -> dict[str, int]:
+    counts: dict[str, int] = {}
+    for row in rows:
+        if not _boolish(row.get("strategy_v2_target")):
+            continue
+        cohort = str(row.get("strategy_v2_signal_cohort") or row.get("family") or "strategy_v2")
+        counts[cohort] = counts.get(cohort, 0) + 1
     return dict(sorted(counts.items()))
 
 
@@ -351,7 +413,15 @@ def collect_websocket(cfg: EngineConfig, websocket_seconds: int = 60) -> dict[st
     target_rows = _liquidity_target_rows(cfg, settings)
     dynamic_ids = _asset_ids_from_rows(target_rows)
     sprint_counts = _profit_sprint_target_counts(target_rows)
-    target_source = "profit_sprint_targets+liquidity_watchlist" if sprint_counts else "liquidity_watchlist" if dynamic_ids else "configured_market_ids"
+    strategy_v2_counts = _strategy_v2_target_counts(target_rows)
+    if strategy_v2_counts and sprint_counts:
+        target_source = "strategy_v2_forward_evidence+profit_sprint_targets+liquidity_watchlist"
+    elif strategy_v2_counts:
+        target_source = "strategy_v2_forward_evidence+liquidity_watchlist"
+    elif sprint_counts:
+        target_source = "profit_sprint_targets+liquidity_watchlist"
+    else:
+        target_source = "liquidity_watchlist" if dynamic_ids else "configured_market_ids"
     if target_rows:
         write_csv(cfg.governance_root / "websocket_liquidity_targets.csv", target_rows)
 
@@ -392,6 +462,7 @@ def collect_websocket(cfg: EngineConfig, websocket_seconds: int = 60) -> dict[st
             "target_family_counts": _family_counts(target_rows),
             "target_fast_feedback_family_counts": _fast_feedback_counts(target_rows),
             "target_profit_sprint_counts": sprint_counts,
+            "target_strategy_v2_counts": strategy_v2_counts,
             "subscription_attempts": len(variants),
         }
         write_json(out_root / "websocket_summary.json", summary)
@@ -419,6 +490,7 @@ def collect_websocket(cfg: EngineConfig, websocket_seconds: int = 60) -> dict[st
         "target_family_counts": _family_counts(target_rows),
         "target_fast_feedback_family_counts": _fast_feedback_counts(target_rows),
         "target_profit_sprint_counts": sprint_counts,
+        "target_strategy_v2_counts": strategy_v2_counts,
         "target_file": str(cfg.governance_root / "websocket_liquidity_targets.csv") if target_rows else "",
         "selected_subscription": selected_subscription,
         "subscription_attempts": len(variants),

@@ -20,6 +20,7 @@ CANDIDATE_FIELDS = [
     "family",
     "market_slug",
     "outcome",
+    "token_id",
     "first_seen_at_utc",
     "last_seen_at_utc",
     "observations",
@@ -150,6 +151,7 @@ def _candidate_from_timeline(
         "family": family,
         "market_slug": market_slug,
         "outcome": outcome,
+        "token_id": str(entry.get("token_id") or latest.get("token_id") or "").strip(),
         "first_seen_at_utc": _fmt_time(entry_time),
         "last_seen_at_utc": _fmt_time(latest_time),
         "observations": len(after_entry),
@@ -287,6 +289,21 @@ def build_strategy_v2_forward_evidence(cfg: EngineConfig) -> dict[str, Any]:
     log_path = out_dir / PERSISTENCE_FILE
     stake_usdc = float(safe_float(settings.get("forward_evidence_stake_usdc")) or 10.0)
     rows = read_csv_rows(log_path)
+    candidate_index = {
+        _key(row): row
+        for row in read_csv_rows(out_dir / "anchored_edge_candidates.csv")
+        if str(row.get("token_id") or row.get("asset_id") or row.get("outcome_token_id") or "").strip()
+    }
+    for row in rows:
+        if not str(row.get("token_id") or row.get("asset_id") or row.get("outcome_token_id") or "").strip():
+            candidate_row = candidate_index.get(_key(row))
+            if candidate_row:
+                row["token_id"] = (
+                    candidate_row.get("token_id")
+                    or candidate_row.get("asset_id")
+                    or candidate_row.get("outcome_token_id")
+                    or ""
+                )
     timelines: dict[tuple[str, str, str], list[dict[str, Any]]] = defaultdict(list)
     for row in rows:
         timelines[_key(row)].append(row)

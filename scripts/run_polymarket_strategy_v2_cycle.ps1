@@ -228,6 +228,7 @@ $anchoredRows = Import-Csv .\outputs\polymarket_strategy_v2\anchored_edge_candid
     family,
     market_slug,
     outcome,
+    token_id,
     status,
     blockers,
     anchor_fair_probability,

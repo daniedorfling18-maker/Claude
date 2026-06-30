@@ -42,6 +42,7 @@ def _query_from_text(text: str) -> str:
 
 def _source_priority(source: str) -> int:
     priorities = {
+        "microstructure_family": 4,
         "microstructure": 3,
         "price_action_scout": 2,
         "strategy_v2_round_trip": 1,
@@ -133,9 +134,17 @@ def _strategy_or_scout_row(row: dict[str, str], *, source: str, min_closed: int)
     }
 
 
-def _microstructure_row(row: dict[str, str], *, min_validation_trades: int) -> dict[str, Any]:
+def _microstructure_row(row: dict[str, str], *, min_validation_trades: int, source: str = "microstructure") -> dict[str, Any]:
     rule_family = str(row.get("rule_family") or "unknown").strip() or "unknown"
     rule_id = str(row.get("rule_id") or rule_family).strip() or rule_family
+    market_family = str(row.get("market_family") or "").strip()
+    signal_cohort = str(row.get("signal_cohort") or "").strip()
+    if not signal_cohort:
+        signal_cohort = (
+            f"price_action_microstructure|{market_family}|{rule_family}"
+            if market_family
+            else f"price_action_microstructure|{rule_family}"
+        )
     validation_trades = int(_num(row.get("validation_trades")))
     validation_pnl = _num(row.get("validation_pnl_usdc"))
     validation_roi = _num(row.get("validation_roi"))
@@ -156,11 +165,11 @@ def _microstructure_row(row: dict[str, str], *, min_validation_trades: int) -> d
         action = "collect_more_websocket_microstructure_evidence"
         reason = "Rule needs more validation observations before it can be trusted."
 
-    text = " ".join([rule_id, rule_family, str(row.get("status") or ""), str(row.get("reason") or "")])
+    text = " ".join([market_family, signal_cohort, rule_id, rule_family, str(row.get("status") or ""), str(row.get("reason") or "")])
     return {
-        "source": "microstructure",
-        "cohort": f"price_action_microstructure|{rule_family}",
-        "family": rule_family,
+        "source": source,
+        "cohort": signal_cohort,
+        "family": market_family or rule_family,
         "rule_id": rule_id,
         "recommended_collection_query": _query_from_text(text),
         "promotion_ready": validation_pass,
@@ -228,6 +237,8 @@ def build_price_action_feedback(cfg: EngineConfig) -> dict[str, Any]:
         cohorts.append(_strategy_or_scout_row(row, source="price_action_scout", min_closed=min_closed))
     for row in read_csv_rows(price_root / "microstructure_rule_evidence.csv"):
         cohorts.append(_microstructure_row(row, min_validation_trades=min_validation_trades))
+    for row in read_csv_rows(price_root / "microstructure_family_rule_evidence.csv"):
+        cohorts.append(_microstructure_row(row, min_validation_trades=min_validation_trades, source="microstructure_family"))
 
     for row in cohorts:
         row["priority_score"] = round(_cohort_priority(row), 4)

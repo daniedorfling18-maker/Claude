@@ -10,6 +10,7 @@ from .utils import now_utc, parse_timestamp, read_csv_rows, safe_float, write_cs
 OUTPUT_DIRNAME = "polymarket_price_action"
 TRADE_EVENTS_FILE = "microstructure_trade_events.csv"
 RULE_EVIDENCE_FILE = "microstructure_rule_evidence.csv"
+FAMILY_RULE_EVIDENCE_FILE = "microstructure_family_rule_evidence.csv"
 CURRENT_CANDIDATES_FILE = "microstructure_current_candidates.csv"
 SUMMARY_JSON = "microstructure_summary.json"
 
@@ -62,6 +63,12 @@ RULE_FIELDS = [
     "validation_pass",
     "status",
     "reason",
+]
+
+FAMILY_RULE_FIELDS = [
+    "market_family",
+    "signal_cohort",
+    *RULE_FIELDS,
 ]
 
 CURRENT_FIELDS = [
@@ -310,11 +317,17 @@ def _trade_events(grouped: dict[str, list[dict[str, str]]], settings: dict[str, 
     events.sort(key=lambda row: row.get("entry_time_utc", ""))
     if not events:
         return events
+    return _with_chronological_split(events, settings)
+
+
+def _with_chronological_split(events: list[dict[str, Any]], settings: dict[str, Any]) -> list[dict[str, Any]]:
+    """Return chronologically split copies of events for leakage-safe validation."""
+    sorted_events = [dict(event) for event in sorted(events, key=lambda row: row.get("entry_time_utc", ""))]
     train_fraction = max(0.1, min(0.9, _float_setting(settings, "train_fraction", 0.6)))
-    split_index = max(1, min(len(events) - 1, int(len(events) * train_fraction))) if len(events) > 1 else len(events)
-    for idx, event in enumerate(events):
+    split_index = max(1, min(len(sorted_events) - 1, int(len(sorted_events) * train_fraction))) if len(sorted_events) > 1 else len(sorted_events)
+    for idx, event in enumerate(sorted_events):
         event["split"] = "train" if idx < split_index else "validation"
-    return events
+    return sorted_events
 
 
 def _latest_features(grouped: dict[str, list[dict[str, str]]], settings: dict[str, Any]) -> list[dict[str, Any]]:
@@ -501,6 +514,40 @@ def _rule_evidence(events: list[dict[str, Any]], settings: dict[str, Any]) -> li
     return evidence
 
 
+def _family_rule_evidence(events: list[dict[str, Any]], settings: dict[str, Any]) -> list[dict[str, Any]]:
+    """Evaluate the same rules inside each market family.
+
+    The global rule table is useful for broad health, but it can bury a real
+    pocket of edge under unrelated noisy markets. Each family receives its own
+    chronological train/validation split so we only promote niches with
+    forward-looking bid/ask evidence inside that family.
+    """
+    grouped: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    for event in events:
+        family = str(event.get("family") or "unknown").strip() or "unknown"
+        grouped[family].append(event)
+
+    rows: list[dict[str, Any]] = []
+    for family, family_events in grouped.items():
+        split_events = _with_chronological_split(family_events, settings)
+        for rule_row in _rule_evidence(split_events, settings):
+            enriched = dict(rule_row)
+            enriched["market_family"] = family
+            enriched["signal_cohort"] = f"price_action_microstructure|{family}|{rule_row['rule_family']}"
+            rows.append(enriched)
+
+    rows.sort(
+        key=lambda row: (
+            bool(row.get("validation_pass")),
+            safe_float(row.get("validation_roi")) or -999.0,
+            safe_float(row.get("validation_pnl_usdc")) or -999.0,
+            int(safe_float(row.get("validation_trades")) or 0),
+        ),
+        reverse=True,
+    )
+    return rows
+
+
 def _current_candidates(
     latest_features: list[dict[str, Any]],
     rule_rows: list[dict[str, Any]],
@@ -560,6 +607,74 @@ def _current_candidates(
     return candidates[:max_candidates]
 
 
+def _family_current_candidates(
+    latest_features: list[dict[str, Any]],
+    family_rule_rows: list[dict[str, Any]],
+    settings: dict[str, Any],
+) -> list[dict[str, Any]]:
+    max_candidates = _int_setting(settings, "max_current_candidates", 20)
+    rule_lookup = {
+        (str(row.get("market_family") or ""), row["rule_id"]): row
+        for row in family_rule_rows
+        if str(row.get("validation_pass")).lower() == "true" or row.get("validation_pass") is True
+    }
+    if not rule_lookup:
+        return []
+
+    specs = {rule["rule_id"]: rule for rule in _rule_specs(settings)}
+    candidates: list[dict[str, Any]] = []
+    seen: set[tuple[str, str, str]] = set()
+    for (market_family, rule_id), evidence in rule_lookup.items():
+        rule = specs.get(rule_id)
+        if rule is None:
+            continue
+        for feature in latest_features:
+            token = str(feature.get("token_id") or "")
+            feature_family = str(feature.get("family") or "")
+            if not token or feature_family != market_family or not _passes_rule(feature, rule):
+                continue
+            key = (market_family, token, rule_id)
+            if key in seen:
+                continue
+            seen.add(key)
+            candidates.append(
+                {
+                    "rule_id": rule_id,
+                    "rule_family": rule["rule_family"],
+                    "signal_cohort": evidence.get("signal_cohort")
+                    or f"price_action_microstructure|{market_family}|{rule['rule_family']}",
+                    "token_id": token,
+                    "market_slug": feature.get("market_slug", ""),
+                    "question": feature.get("question", ""),
+                    "family": feature_family,
+                    "outcome": feature.get("outcome", ""),
+                    "latest_time_utc": feature.get("entry_time_utc", ""),
+                    "latest_bid": feature.get("entry_bid", ""),
+                    "latest_ask": feature.get("entry_ask", ""),
+                    "latest_midpoint": feature.get("entry_midpoint", ""),
+                    "latest_spread": feature.get("entry_spread", ""),
+                    "relative_spread": feature.get("relative_spread", ""),
+                    "bid_move_abs": feature.get("bid_move_abs", ""),
+                    "mid_move_abs": feature.get("mid_move_abs", ""),
+                    "spread_change": feature.get("spread_change", ""),
+                    "net_buy_events": feature.get("net_buy_events", ""),
+                    "net_buy_size": feature.get("net_buy_size", ""),
+                    "validation_roi": evidence.get("validation_roi", ""),
+                    "validation_win_rate": evidence.get("validation_win_rate", ""),
+                    "validation_trades": evidence.get("validation_trades", ""),
+                    "shadow_only": True,
+                }
+            )
+    candidates.sort(
+        key=lambda row: (
+            safe_float(row.get("validation_roi")) or -999.0,
+            safe_float(row.get("bid_move_abs")) or -999.0,
+        ),
+        reverse=True,
+    )
+    return candidates[:max_candidates]
+
+
 def build_microstructure_edge_lab(cfg: EngineConfig) -> dict[str, Any]:
     """Run a shadow-only bid/ask microstructure rule lab over websocket history."""
     settings = _settings(cfg)
@@ -579,13 +694,29 @@ def build_microstructure_edge_lab(cfg: EngineConfig) -> dict[str, Any]:
     events = _trade_events(grouped, settings)
     latest = _latest_features(grouped, settings)
     rule_rows = _rule_evidence(events, settings) if events else []
-    current = _current_candidates(latest, rule_rows, settings)
+    family_rule_rows = _family_rule_evidence(events, settings) if events else []
+    current = _current_candidates(latest, rule_rows, settings) + _family_current_candidates(latest, family_rule_rows, settings)
+    current.sort(
+        key=lambda row: (
+            safe_float(row.get("validation_roi")) or -999.0,
+            safe_float(row.get("bid_move_abs")) or -999.0,
+        ),
+        reverse=True,
+    )
+    current = current[: _int_setting(settings, "max_current_candidates", 20)]
     write_csv(out_dir / TRADE_EVENTS_FILE, events, fieldnames=EVENT_FIELDS)
     write_csv(out_dir / RULE_EVIDENCE_FILE, rule_rows, fieldnames=RULE_FIELDS)
+    write_csv(out_dir / FAMILY_RULE_EVIDENCE_FILE, family_rule_rows, fieldnames=FAMILY_RULE_FIELDS)
     write_csv(out_dir / CURRENT_CANDIDATES_FILE, current, fieldnames=CURRENT_FIELDS)
 
     passing = [row for row in rule_rows if str(row.get("validation_pass")).lower() == "true" or row.get("validation_pass") is True]
+    family_passing = [
+        row
+        for row in family_rule_rows
+        if str(row.get("validation_pass")).lower() == "true" or row.get("validation_pass") is True
+    ]
     top_rule = passing[0] if passing else (rule_rows[0] if rule_rows else {})
+    top_family_rule = family_passing[0] if family_passing else (family_rule_rows[0] if family_rule_rows else {})
     summary = {
         "status": "computed",
         "generated_at_utc": now_utc(),
@@ -596,17 +727,22 @@ def build_microstructure_edge_lab(cfg: EngineConfig) -> dict[str, Any]:
         "trade_events": len(events),
         "rule_rows": len(rule_rows),
         "validation_pass_rules": len(passing),
+        "family_rule_rows": len(family_rule_rows),
+        "family_validation_pass_rules": len(family_passing),
         "current_candidates": len(current),
         "decision": "microstructure_rules_ready_for_forward_shadow"
-        if passing
+        if passing or family_passing
         else "collect_more_websocket_microstructure_evidence"
         if events
         else "collect_more_websocket_rows",
         "top_rule": top_rule,
+        "top_family_rule": top_family_rule,
         "top_rules": rule_rows[:15],
+        "top_family_rules": family_rule_rows[:15],
         "current_candidates_preview": current[:15],
         "trade_events_file": str(out_dir / TRADE_EVENTS_FILE),
         "rule_evidence_file": str(out_dir / RULE_EVIDENCE_FILE),
+        "family_rule_evidence_file": str(out_dir / FAMILY_RULE_EVIDENCE_FILE),
         "current_candidates_file": str(out_dir / CURRENT_CANDIDATES_FILE),
         "warnings": {
             "shadow_only": True,

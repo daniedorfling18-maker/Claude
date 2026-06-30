@@ -114,3 +114,35 @@ def test_price_action_feedback_promotes_passing_microstructure_to_shadow_candida
     assert payload["promotion_candidates"] == 1
     assert payload["collection_queries"] == ["btc updown"]
     assert payload["top_cohorts"][0]["action"] == "candidate_for_forward_shadow_microstructure"
+
+
+def test_price_action_feedback_prioritises_family_microstructure_candidate(tmp_path):
+    cfg = _cfg(tmp_path)
+    write_csv(
+        cfg.output_root / "polymarket_price_action" / "microstructure_family_rule_evidence.csv",
+        [
+            {
+                "market_family": "sports_other",
+                "signal_cohort": "price_action_microstructure|sports_other|bid_momentum_tight",
+                "rule_id": "bid_momentum_tight|move>=0.02|spread<=0.01",
+                "rule_family": "bid_momentum_tight",
+                "total_trades": "8",
+                "train_trades": "4",
+                "validation_trades": "4",
+                "validation_pnl_usdc": "3.1",
+                "validation_roi": "0.0775",
+                "validation_win_rate": "0.75",
+                "validation_pass": "True",
+                "status": "candidate_for_forward_shadow",
+            }
+        ],
+    )
+
+    payload = build_price_action_feedback(cfg)
+
+    assert payload["learning_state"] == "price_action_candidates_ready_for_governed_paper_bridge"
+    assert payload["promotion_candidates"] == 1
+    assert payload["collection_queries"] == ["world cup"]
+    assert payload["top_cohorts"][0]["source"] == "microstructure_family"
+    assert payload["top_cohorts"][0]["family"] == "sports_other"
+    assert payload["top_cohorts"][0]["cohort"] == "price_action_microstructure|sports_other|bid_momentum_tight"

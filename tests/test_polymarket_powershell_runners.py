@@ -157,6 +157,7 @@ def test_strategy_v2_cycle_runs_paper_broker_after_price_action_paper_signals():
     assert paper_trade_index < final_feedback_index
     assert paper_trade_index < status_payload_index
     assert "paper_trade_refresh.json" in text
+    assert "paper_trade_refresh = $paperTradeRefresh" in text
 
 
 def test_strategy_v2_cycle_refreshes_price_action_feedback_after_paper_broker():

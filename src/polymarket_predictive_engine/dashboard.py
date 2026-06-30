@@ -281,6 +281,10 @@ async function load() {
       ["Recommended action", strategyV2.recommended_action, v=>longText(v, 240)],
       ["Report generated", strategyV2.generated_at_utc],
       ["Cycle status", strategyV2.cycle_status?.status],
+      ["Cycle paper broker", strategyV2.paper_broker_status],
+      ["Cycle buy fills", strategyV2.paper_broker_buy_fills],
+      ["Cycle exit fills", strategyV2.paper_broker_exit_fills],
+      ["Cycle broker rejects", strategyV2.paper_broker_rejections],
       ["Rows scored", strategyV2.rows_scored],
       ["Anchor rows loaded", strategyV2.anchor_rows_loaded],
       ["World Cup validated anchors", strategyV2.worldcup_validated_anchor_rows],
@@ -1125,6 +1129,8 @@ def _strategy_v2_status(cfg: EngineConfig) -> dict[str, Any]:
     cycle_status = _read_json_lenient(cfg.path.parent / "work" / "strategy_v2_cycle_latest_status.json", default={}) or {}
     if not isinstance(cycle_status, dict):
         cycle_status = {}
+    cycle_paper_trade = cycle_status.get("paper_trade_refresh") if isinstance(cycle_status.get("paper_trade_refresh"), dict) else {}
+    cycle_broker = cycle_paper_trade.get("broker") if isinstance(cycle_paper_trade.get("broker"), dict) else {}
 
     status_counts = report.get("status_counts") if isinstance(report.get("status_counts"), dict) else {}
     warnings = report.get("warnings") if isinstance(report.get("warnings"), dict) else {}
@@ -1237,6 +1243,11 @@ def _strategy_v2_status(cfg: EngineConfig) -> dict[str, Any]:
         "decision": report.get("decision") or "missing_report",
         "recommended_action": report.get("recommended_action") or "Run Strategy V2 anchored-edge scanner.",
         "cycle_status": cycle_status,
+        "paper_trade_refresh": cycle_paper_trade,
+        "paper_broker_status": cycle_broker.get("status"),
+        "paper_broker_buy_fills": cycle_broker.get("buy_orders_filled", cycle_broker.get("orders_filled")),
+        "paper_broker_exit_fills": cycle_broker.get("exit_orders_filled"),
+        "paper_broker_rejections": cycle_broker.get("orders_rejected"),
         "runtime_posture": runtime_posture,
         "runtime_reason": runtime_reason,
         "memory_used_percent": cycle_status.get("memory_used_percent"),
@@ -1465,6 +1476,9 @@ def render_dashboard(cfg: EngineConfig, latest_report: dict[str, Any] | None = N
     portfolio_root = cfg.output_root / "polymarket_portfolio"
     shadow_root = cfg.output_root / "polymarket_shadow"
 
+    paper_trade_refresh = read_json(governance / "paper_trade_refresh.json", default={}) or {}
+    if not isinstance(paper_trade_refresh, dict):
+        paper_trade_refresh = {}
     forward = latest_report or read_json(governance / "forward_paper_cycle.json", default={}) or {}
     scanner_heartbeat = read_json(governance / "live_paper_loop_heartbeat.json", default={}) or {}
     local_live_heartbeat = read_json(governance / "local_live_loop_heartbeat.json", default={}) or {}
@@ -1473,12 +1487,14 @@ def render_dashboard(cfg: EngineConfig, latest_report: dict[str, Any] | None = N
     target_source, actual_target = _freshest_payload(
         [
             ("latest_report", forward.get("actual_profit_target") if isinstance(forward, dict) else {}),
+            ("paper_trade_refresh", paper_trade_refresh.get("actual_profit_target") if isinstance(paper_trade_refresh, dict) else {}),
             ("paper_profit_target_tracker", read_json(governance / "paper_profit_target_tracker.json", default={}) or {}),
         ]
     )
     broker_source, broker_summary = _freshest_payload(
         [
             ("latest_report", forward.get("broker") if isinstance(forward, dict) else {}),
+            ("paper_trade_refresh", paper_trade_refresh.get("broker") if isinstance(paper_trade_refresh, dict) else {}),
             ("paper_trading_summary", paper_summary),
         ]
     )
@@ -1521,6 +1537,7 @@ def render_dashboard(cfg: EngineConfig, latest_report: dict[str, Any] | None = N
         "status": "ok",
         "generated_at_utc": now_utc(),
         "forward_paper_cycle": forward,
+        "paper_trade_refresh": paper_trade_refresh,
         "paper_broker_summary": broker_summary,
         "heartbeat": heartbeat,
         "local_live_heartbeat": local_live_heartbeat,

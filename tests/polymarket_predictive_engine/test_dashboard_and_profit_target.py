@@ -175,6 +175,60 @@ def test_dashboard_prefers_fresh_broker_and_profit_tracker_over_stale_forward_cy
     assert data["evidence_freshness"]["live_loop_status"] == "stale"
 
 
+def test_dashboard_prefers_fresh_paper_trade_refresh_over_stale_summaries(tmp_path):
+    cfg = _config(tmp_path)
+    write_json(
+        cfg.output_root / "polymarket_portfolio" / "paper_trading_summary.json",
+        {
+            "generated_at_utc": "2026-06-25T00:10:00Z",
+            "equity": 990,
+            "cash": 990,
+            "total_exposure": 0,
+        },
+    )
+    write_json(
+        cfg.governance_root / "paper_profit_target_tracker.json",
+        {
+            "status": "collecting_forward_evidence",
+            "generated_at_utc": "2026-06-25T00:10:01Z",
+            "actual_pnl_since_baseline_usdc": -10,
+            "current": {"timestamp_utc": "2026-06-25T00:10:00Z", "equity_usdc": 990},
+        },
+    )
+    write_json(
+        cfg.governance_root / "paper_trade_refresh.json",
+        {
+            "status": "ran",
+            "generated_at_utc": "2026-06-25T00:12:00Z",
+            "broker": {
+                "status": "ran",
+                "generated_at_utc": "2026-06-25T00:12:00Z",
+                "equity": 1005,
+                "cash": 1003,
+                "total_exposure": 2,
+                "buy_orders_filled": 1,
+                "exit_orders_filled": 0,
+            },
+            "actual_profit_target": {
+                "status": "collecting_forward_evidence",
+                "generated_at_utc": "2026-06-25T00:12:01Z",
+                "actual_pnl_since_baseline_usdc": 5,
+                "current": {"timestamp_utc": "2026-06-25T00:12:00Z", "equity_usdc": 1005},
+            },
+        },
+    )
+
+    result = render_dashboard(cfg)
+    data = read_json(result["dashboard_data"])
+
+    assert data["paper_broker_summary"]["equity"] == 1005
+    assert data["paper_broker_summary"]["buy_orders_filled"] == 1
+    assert data["actual_profit_target"]["actual_pnl_since_baseline_usdc"] == 5
+    assert data["evidence_freshness"]["broker_source"] == "paper_trade_refresh"
+    assert data["evidence_freshness"]["target_source"] == "paper_trade_refresh"
+    assert data["evidence_freshness"]["scoreboard_status"] == "aligned"
+
+
 def test_standalone_paper_trade_report_refreshes_profit_tracker_and_dashboard(tmp_path):
     cfg = _config(tmp_path)
 

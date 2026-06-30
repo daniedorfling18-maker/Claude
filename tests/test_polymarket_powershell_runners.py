@@ -134,23 +134,40 @@ def test_strategy_v2_cycle_builds_price_action_paper_signals_after_scout():
     text = _script_text("scripts/run_polymarket_strategy_v2_cycle.ps1")
 
     scout_index = text.index("price-action-scout")
+    feedback_index = text.index("price-action-feedback")
     paper_signal_index = text.index("price-action-paper-signals")
     status_payload_index = text.index("price_action_paper_signals = $priceActionPaperSignals")
 
-    assert scout_index < paper_signal_index
+    assert scout_index < feedback_index
+    assert feedback_index < paper_signal_index
     assert paper_signal_index < status_payload_index
+    assert "price_action_feedback_before_paper_signals = $priceActionFeedbackBeforePaperSignals" in text
     assert "price_action_paper_signal_summary.json" in text
 
 
-def test_strategy_v2_cycle_builds_price_action_feedback_after_paper_signals():
+def test_strategy_v2_cycle_runs_paper_broker_after_price_action_paper_signals():
     text = _script_text("scripts/run_polymarket_strategy_v2_cycle.ps1")
 
     paper_signal_index = text.index("price-action-paper-signals")
-    feedback_index = text.index("price-action-feedback")
+    paper_trade_index = text.index('"paper-trade"')
+    final_feedback_index = text.rindex("price-action-feedback")
+    status_payload_index = text.index("paper_trade_refresh = $paperTradeRefresh")
+
+    assert paper_signal_index < paper_trade_index
+    assert paper_trade_index < final_feedback_index
+    assert paper_trade_index < status_payload_index
+    assert "paper_trade_refresh.json" in text
+
+
+def test_strategy_v2_cycle_refreshes_price_action_feedback_after_paper_broker():
+    text = _script_text("scripts/run_polymarket_strategy_v2_cycle.ps1")
+
+    paper_trade_index = text.index('"paper-trade"')
+    final_feedback_index = text.rindex("price-action-feedback")
     status_payload_index = text.index("price_action_feedback = $priceActionFeedback")
 
-    assert paper_signal_index < feedback_index
-    assert feedback_index < status_payload_index
+    assert paper_trade_index < final_feedback_index
+    assert final_feedback_index < status_payload_index
     assert "price_action_feedback.json" in text
 
 

@@ -286,8 +286,12 @@ Invoke-PythonStep "strategy-v2-round-trip" @("-m", "polymarket_predictive_engine
 $strategyV2RoundTripEvidence = Read-JsonIfExists ".\outputs\polymarket_strategy_v2\strategy_v2_round_trip_evidence.json"
 Invoke-PythonStep "price-action-scout" @("-m", "polymarket_predictive_engine.cli", "price-action-scout", "--config", $ConfigPath)
 $priceActionScout = Read-JsonIfExists ".\outputs\polymarket_price_action\price_action_scout_summary.json"
+Invoke-PythonStep "price-action-feedback" @("-m", "polymarket_predictive_engine.cli", "price-action-feedback", "--config", $ConfigPath)
+$priceActionFeedbackBeforePaperSignals = Read-JsonIfExists ".\outputs\polymarket_model_governance\price_action_feedback.json"
 Invoke-PythonStep "price-action-paper-signals" @("-m", "polymarket_predictive_engine.cli", "price-action-paper-signals", "--config", $ConfigPath)
 $priceActionPaperSignals = Read-JsonIfExists ".\outputs\polymarket_price_action\price_action_paper_signal_summary.json"
+Invoke-PythonStep "paper-trade" @("-m", "polymarket_predictive_engine.cli", "paper-trade", "--config", $ConfigPath)
+$paperTradeRefresh = Read-JsonIfExists ".\outputs\polymarket_model_governance\paper_trade_refresh.json"
 Invoke-PythonStep "price-action-feedback" @("-m", "polymarket_predictive_engine.cli", "price-action-feedback", "--config", $ConfigPath)
 $priceActionFeedback = Read-JsonIfExists ".\outputs\polymarket_model_governance\price_action_feedback.json"
 
@@ -311,7 +315,9 @@ $status = [PSCustomObject]@{
   price_action_microstructure = $priceActionMicrostructure
   strategy_v2_round_trip_evidence = $strategyV2RoundTripEvidence
   price_action_scout = $priceActionScout
+  price_action_feedback_before_paper_signals = $priceActionFeedbackBeforePaperSignals
   price_action_paper_signals = $priceActionPaperSignals
+  paper_trade_refresh = $paperTradeRefresh
   price_action_feedback = $priceActionFeedback
   independent_anchor_refresh = $independentAnchorRefresh
 }

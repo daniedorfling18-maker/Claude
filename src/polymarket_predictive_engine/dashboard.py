@@ -150,16 +150,19 @@ async function load() {
     const ingest = live.ingest || {};
     const status = target.status || data.forward_paper_cycle?.status || "unknown";
     const liveStatus = freshness.live_loop_status || "unknown";
+    const runPosture = freshness.strategy_v2_runtime_posture || liveStatus;
     const good = liveStatus === "live";
+    const guarded = runPosture === "memory_paused" || runPosture === "guard_paused";
     const bad = liveStatus === "stale" || liveStatus === "not_started" || liveStatus === "down";
-    document.getElementById("statusDot").className = "dot " + (good ? "good" : bad ? "bad" : "");
-    document.getElementById("statusText").textContent = liveStatus + " - " + status + " - live tick " + (live.iteration || "-") + " - updated " + (data.generated_at_utc || "-");
+    document.getElementById("statusDot").className = "dot " + (good ? "good" : guarded ? "warn" : bad ? "bad" : "");
+    document.getElementById("statusText").textContent = runPosture + " - " + status + " - live tick " + (live.iteration || "-") + " - updated " + (data.generated_at_utc || "-");
     const pnl = Number(target.actual_pnl_since_baseline_usdc || 0);
     document.getElementById("cards").innerHTML = [
       card("Equity", fmtUsd(broker.equity), Number(broker.equity) >= 1000 ? "good" : "bad"),
       card("Actual P&L since clean baseline", fmtUsd(pnl), pnl >= 0 ? "good" : "bad"),
       card("Monthly run-rate", target.monthly_run_rate_usdc == null ? "Collecting" : fmtUsd(target.monthly_run_rate_usdc), target.monthly_run_rate_usdc >= target.target_monthly_profit_usdc ? "good" : ""),
       card("Live loop", liveStatus, good ? "good" : bad ? "bad" : "warn"),
+      card("Run posture", runPosture, guarded ? "warn" : good ? "good" : bad ? "bad" : "warn"),
       card("Scoreboard", freshness.scoreboard_status || "unknown", freshness.scoreboard_status === "aligned" ? "good" : "warn"),
       card("Live WS messages", websocket.new_messages ?? "-", "good"),
       card("Live WS features", websocketFeatures.feature_rows ?? "-", "good"),
@@ -194,6 +197,8 @@ async function load() {
       ["Effective max assets", live.effective_max_assets == null ? "-" : live.effective_max_assets],
       ["Resource guard", resourceGuard.reason || "-"],
       ["Memory", resourceGuard.memory_percent == null ? "-" : fmtNum(resourceGuard.memory_percent, 1) + "%"],
+      ["Strategy V2 guard", freshness.strategy_v2_runtime_reason || strategyV2.runtime_reason || "-"],
+      ["Strategy V2 memory", freshness.strategy_v2_memory_percent == null ? "-" : fmtNum(freshness.strategy_v2_memory_percent, 1) + "% / " + fmtNum(freshness.strategy_v2_max_memory_percent, 1) + "%"],
       ["WS messages", websocket.new_messages],
       ["WS features", websocketFeatures.feature_rows],
       ["Snapshots inserted", ingest.inserted_market_snapshots],
@@ -1001,12 +1006,28 @@ def _strategy_v2_status(cfg: EngineConfig) -> dict[str, Any]:
 
     top_blockers = report.get("top_blockers") if isinstance(report.get("top_blockers"), dict) else {}
     main_blocker = next(iter(top_blockers.keys()), "") if top_blockers else ""
+    cycle_state = str(cycle_status.get("status") or "").lower()
+    runtime_posture = "collecting_shadow_evidence"
+    runtime_reason = "Strategy V2 cycle is ready to collect shadow evidence."
+    if cycle_state == "skipped_high_memory":
+        runtime_posture = "memory_paused"
+        runtime_reason = str(cycle_status.get("reason") or "Strategy V2 paused by the local memory guard.")
+    elif cycle_state in {"error", "failed"}:
+        runtime_posture = "cycle_error"
+        runtime_reason = str(cycle_status.get("reason") or cycle_status.get("error") or "Strategy V2 cycle reported an error.")
+    elif cycle_state in {"", "missing"}:
+        runtime_posture = "not_started"
+        runtime_reason = "Strategy V2 cycle status is missing."
     return {
         "status": report.get("status") or ("missing" if not candidates else "ok"),
         "generated_at_utc": report.get("generated_at_utc"),
         "decision": report.get("decision") or "missing_report",
         "recommended_action": report.get("recommended_action") or "Run Strategy V2 anchored-edge scanner.",
         "cycle_status": cycle_status,
+        "runtime_posture": runtime_posture,
+        "runtime_reason": runtime_reason,
+        "memory_used_percent": cycle_status.get("memory_used_percent"),
+        "max_memory_percent": cycle_status.get("max_memory_percent"),
         "rows_scored": report.get("rows_scored") if report.get("rows_scored") is not None else len(candidates),
         "anchor_rows_loaded": report.get("anchor_rows_loaded"),
         "worldcup_validated_anchor_rows": report.get("worldcup_validated_anchor_rows"),
@@ -1081,6 +1102,27 @@ def _live_loop_status(heartbeat: dict[str, Any], cfg: EngineConfig) -> str:
     return "unknown"
 
 
+def _strategy_v2_runtime_freshness(strategy_v2: dict[str, Any], live_loop_status: str) -> dict[str, Any]:
+    """Summarise whether Strategy V2 is collecting evidence or safely paused.
+
+    This is dashboard observability only. A memory pause is not a trading failure; it means the local
+    guard did its job and avoided starting heavier model work while the laptop was under pressure.
+    """
+    posture = str(strategy_v2.get("runtime_posture") or "").strip()
+    reason = str(strategy_v2.get("runtime_reason") or "").strip()
+    if not posture:
+        posture = "collecting_shadow_evidence" if live_loop_status == "live" else live_loop_status or "unknown"
+    return {
+        "strategy_v2_runtime_posture": posture,
+        "strategy_v2_runtime_reason": reason,
+        "strategy_v2_cycle_status": (strategy_v2.get("cycle_status") or {}).get("status")
+        if isinstance(strategy_v2.get("cycle_status"), dict)
+        else "",
+        "strategy_v2_memory_percent": strategy_v2.get("memory_used_percent"),
+        "strategy_v2_max_memory_percent": strategy_v2.get("max_memory_percent"),
+    }
+
+
 def _scoreboard_status(broker: dict[str, Any], target: dict[str, Any]) -> str:
     broker_equity = safe_float(broker.get("equity"))
     current = target.get("current") if isinstance(target, dict) else {}
@@ -1137,6 +1179,9 @@ def render_dashboard(cfg: EngineConfig, latest_report: dict[str, Any] | None = N
     )
     rejected = read_csv_rows(predictions_root / "rejected_signals.csv")
     near_miss_candidates = read_csv_rows(predictions_root / "near_miss_learning_candidates.csv")
+    live_loop_status = _live_loop_status(heartbeat if isinstance(heartbeat, dict) else {}, cfg)
+    strategy_v2_status = _strategy_v2_status(cfg)
+    strategy_v2_runtime = _strategy_v2_runtime_freshness(strategy_v2_status, live_loop_status)
 
     payload = {
         "status": "ok",
@@ -1152,16 +1197,17 @@ def render_dashboard(cfg: EngineConfig, latest_report: dict[str, Any] | None = N
             "broker_generated_at_utc": broker_summary.get("generated_at_utc"),
             "target_source": target_source,
             "target_generated_at_utc": actual_target.get("generated_at_utc"),
-            "live_loop_status": _live_loop_status(heartbeat if isinstance(heartbeat, dict) else {}, cfg),
+            "live_loop_status": live_loop_status,
             "live_heartbeat_age_seconds": _age_seconds(heartbeat),
             "scoreboard_status": _scoreboard_status(broker_summary, actual_target),
+            **strategy_v2_runtime,
         },
         "signal_cohort_pnl": signal_cohort_pnl,
         "cohort_promotion_readiness": _cohort_promotion_readiness(cfg, signal_cohort_pnl),
         "shadow_signal_cohort_pnl": shadow_summary,
         "shadow_settlement_watch": _shadow_settlement_watch(shadow_positions, shadow_summary),
         "independent_anchor_status": _independent_anchor_status(governance),
-        "strategy_v2": _strategy_v2_status(cfg),
+        "strategy_v2": strategy_v2_status,
         "edge_strategy_search": edge_strategy_search,
         "promoted_rule_shadow": promoted_rule_shadow,
         "liquidity_discovery": liquidity_discovery,

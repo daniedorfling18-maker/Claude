@@ -390,6 +390,34 @@ def test_dashboard_surfaces_strategy_v2_anchored_edge_progress(tmp_path):
     assert strategy_v2["promotion_progress"][0]["remaining_shadow_entries_to_review"] == 19
 
 
+def test_dashboard_surfaces_strategy_v2_memory_pause(tmp_path):
+    cfg = _config(tmp_path)
+    cycle_status_path = cfg.path.parent / "work" / "strategy_v2_cycle_latest_status.json"
+    cycle_status_path.parent.mkdir(parents=True, exist_ok=True)
+    cycle_status_path.write_text(
+        json.dumps(
+            {
+                "status": "skipped_high_memory",
+                "started_at_utc": "2026-06-30T16:36:20Z",
+                "memory_used_percent": 94.5,
+                "max_memory_percent": 94,
+                "reason": "Strategy V2 cycle skipped before starting heavy work because local memory was at or above the guardrail.",
+            }
+        ),
+        encoding="utf-8-sig",
+    )
+
+    result = render_dashboard(cfg)
+    data = read_json(result["dashboard_data"])
+
+    assert data["strategy_v2"]["runtime_posture"] == "memory_paused"
+    assert data["strategy_v2"]["memory_used_percent"] == 94.5
+    assert data["evidence_freshness"]["strategy_v2_runtime_posture"] == "memory_paused"
+    assert data["evidence_freshness"]["strategy_v2_memory_percent"] == 94.5
+    reason = data["evidence_freshness"]["strategy_v2_runtime_reason"].lower()
+    assert "memory" in reason and "guard" in reason
+
+
 def test_dashboard_explains_independent_anchor_blockers(tmp_path):
     cfg = _config(tmp_path)
     write_json(

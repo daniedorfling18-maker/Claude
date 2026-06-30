@@ -17,11 +17,12 @@ ROOT = Path(__file__).resolve().parents[1]
 DASHBOARD = ROOT / "outputs" / "polymarket_dashboard"
 GOVERNANCE = ROOT / "outputs" / "polymarket_model_governance"
 PORTFOLIO = ROOT / "outputs" / "polymarket_portfolio"
+STRATEGY_V2_STATUS = ROOT / "work" / "strategy_v2_cycle_latest_status.json"
 
 
 def read_json(path: Path) -> dict[str, Any]:
     try:
-        payload = json.loads(path.read_text(encoding="utf-8"))
+        payload = json.loads(path.read_text(encoding="utf-8-sig"))
     except Exception:
         return {}
     return payload if isinstance(payload, dict) else {}
@@ -116,6 +117,19 @@ def print_watchlist(title: str, rows: list[dict[str, Any]], *, shadow: bool = Fa
         print(f"  - {cohort}: score {score}, pnl {pnl}, roi {roi}, run-rate {run_rate}, fills {fills}, settled {settled}")
 
 
+def strategy_v2_posture(status: dict[str, Any]) -> tuple[str, str]:
+    cycle_status = str(status.get("status") or "").lower()
+    if cycle_status == "skipped_high_memory":
+        return "memory_paused", str(status.get("reason") or "Strategy V2 paused by memory guard.")
+    if cycle_status in {"ok", "ran"}:
+        return "collecting_shadow_evidence", "Strategy V2 cycle completed normally."
+    if cycle_status in {"error", "failed"}:
+        return "cycle_error", str(status.get("reason") or status.get("error") or "Strategy V2 cycle failed.")
+    if not cycle_status:
+        return "not_started", "No Strategy V2 cycle status file found."
+    return cycle_status, str(status.get("reason") or "")
+
+
 def main() -> int:
     dashboard_data = read_json(DASHBOARD / "dashboard_data.json")
     target = freshest_dict(
@@ -142,6 +156,7 @@ def main() -> int:
         dashboard_data.get("heartbeat"),
         read_json(GOVERNANCE / "live_paper_loop_heartbeat.json"),
     )
+    strategy_status = read_json(STRATEGY_V2_STATUS)
 
     print("Polymarket paper bot goal status")
     print(f"Dashboard file: {DASHBOARD / 'index.html'}")
@@ -159,6 +174,14 @@ def main() -> int:
         ingest = first_dict(local_live.get("ingest"))
         print("Live source:    websocket")
         print(f"WebSocket:      assets={local_live.get('asset_count', 'n/a')} new_messages={websocket.get('new_messages', 'n/a')} features={ws_features.get('feature_rows', 'n/a')} snapshots_inserted={ingest.get('inserted_market_snapshots', 'n/a')}")
+    if strategy_status:
+        posture, reason = strategy_v2_posture(strategy_status)
+        memory = strategy_status.get("memory_used_percent")
+        max_memory = strategy_status.get("max_memory_percent")
+        memory_text = f" memory={memory}%/{max_memory}%" if memory is not None or max_memory is not None else ""
+        print(f"Strategy V2:    {posture}{memory_text}")
+        if reason:
+            print(f"Strategy guard: {reason}")
     scan_plan = first_dict(first_dict(heartbeat.get("scan")).get("scan_plan"))
     if not scan_plan and local_live:
         scan_plan = first_dict(first_dict(first_dict(local_live.get("discovery")).get("scan")).get("scan_plan"))

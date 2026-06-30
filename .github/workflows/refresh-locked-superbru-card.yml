@@ -27,13 +27,6 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Capture previous robust card
-        run: |
-          mkdir -p outputs/daily_robust_card
-          if [ -f outputs/daily_robust_card/daily_robust_superbru_card.csv ]; then
-            cp outputs/daily_robust_card/daily_robust_superbru_card.csv outputs/daily_robust_card/previous_superbru_card.csv
-          fi
-
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
@@ -94,6 +87,15 @@ jobs:
             --out-csv outputs/superbru_pool/live_chaser_profiles.csv \
             --out-chasers outputs/superbru_pool/live_chasers.txt \
             --summary-json outputs/superbru_pool/live_chaser_profiles_summary.json
+
+      - name: Create current-run manual flags file
+        run: |
+          mkdir -p outputs/superbru_pool
+          printf 'home_team,away_team,flag_type,severity,notes,block_switch\n' > outputs/superbru_pool/live_manual_match_flags.csv
+
+      - name: Audit live SuperBru state before odds spend
+        run: |
+          python scripts/assert_fresh_superbru_refresh_inputs.py --mode pre-odds
 
       - name: Fetch fresh market odds once
         env:
@@ -211,9 +213,24 @@ jobs:
       - name: Refresh locked card outputs from fetched odds
         env:
           PYTHONPATH: src
+          SUPERBRU_PLAYER_NAME: ${{ secrets.SUPERBRU_PLAYER_NAME || 'Danie' }}
         run: |
+          LIVE_CHASERS="$(cat outputs/superbru_pool/live_chasers.txt)"
           rm -f outputs/market_odds/worldcup_market_odds_raw.error.json
-          python scripts/run_daily_robust_pipeline.py --skip-final-simulation --skip-market-odds-fetch
+          python scripts/run_daily_robust_pipeline.py \
+            --skip-final-simulation \
+            --skip-market-odds-fetch \
+            --fixtures data/fixtures_real.csv \
+            --odds-json outputs/market_odds/worldcup_market_odds_raw.json \
+            --leaderboard-csv outputs/superbru_pool/live_pool_leaderboard.csv \
+            --chaser-profiles-csv outputs/superbru_pool/live_chaser_profiles.csv \
+            --leader-player "${SUPERBRU_PLAYER_NAME:-Danie}" \
+            --chasers "${LIVE_CHASERS}" \
+            --manual-flags-csv outputs/superbru_pool/live_manual_match_flags.csv
+
+      - name: Audit freshness before commit
+        run: |
+          python scripts/assert_fresh_superbru_refresh_inputs.py --mode pre-commit
 
       - name: Validate locked card exists
         run: |

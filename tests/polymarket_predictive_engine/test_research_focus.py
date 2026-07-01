@@ -85,3 +85,41 @@ def test_research_focus_does_not_map_macro_cohort_to_btc_updown(tmp_path):
 
     assert "btc updown" not in payload["collection_queries"]
     assert payload["watchlist"][0]["recommended_collection_query"] == "economy"
+
+
+def test_research_focus_prioritises_model_validation_gap_queries(tmp_path):
+    cfg = _cfg(tmp_path)
+    write_json(
+        cfg.output_root / "polymarket_price_action" / "price_action_model_summary.json",
+        {
+            "status": "trained",
+            "decision": "collect_more_bid_ask_price_action_model_evidence",
+            "promotion_ready": False,
+            "training_events": 1747,
+            "train_rows": 1055,
+            "validation_rows": 692,
+            "train_positive_targets": 4,
+            "validation_positive_targets": 0,
+            "validation_blockers": ["validation positive repricing targets 0 < 1"],
+            "validation_gap": {
+                "state": "needs_positive_validation_examples",
+                "collection_queries": ["fed", "ethereum", "esports"],
+                "reason": "Positive repricing examples exist in train, but validation has not yet seen one.",
+            },
+        },
+    )
+    write_json(
+        cfg.governance_root / "price_action_feedback.json",
+        {
+            "status": "ok",
+            "learning_state": "collect_more_positive_price_action_evidence",
+            "collection_queries": ["btc updown", "solana updown"],
+        },
+    )
+
+    payload = build_research_focus(cfg)
+
+    assert payload["collection_queries"][:3] == ["fed", "ethereum", "esports"]
+    assert payload["collection_queries"][3:5] == ["btc updown", "solana updown"]
+    assert payload["price_action_model"]["validation_gap_needs_collection"] is True
+    assert "positive train repricing examples but no positive validation examples" in payload["summary"]

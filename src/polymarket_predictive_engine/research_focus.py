@@ -183,6 +183,20 @@ def _feedback_collection_queries(price_action_feedback: dict[str, Any]) -> list[
     return queries
 
 
+def _model_validation_gap_queries(price_action_model: dict[str, Any]) -> list[str]:
+    validation_gap = price_action_model.get("validation_gap")
+    if not isinstance(validation_gap, dict):
+        return []
+    if str(validation_gap.get("state") or "") != "needs_positive_validation_examples":
+        return []
+    queries: list[str] = []
+    for raw_query in validation_gap.get("collection_queries", []) or []:
+        query = str(raw_query or "").strip()
+        if query and query not in queries:
+            queries.append(query)
+    return queries
+
+
 def _price_action_model_needs_data(price_action_model: dict[str, Any]) -> bool:
     decision = str(price_action_model.get("decision") or "")
     status = str(price_action_model.get("status") or "")
@@ -207,6 +221,7 @@ def build_research_focus(cfg) -> dict[str, Any]:
     if not isinstance(price_action_model, dict):
         price_action_model = {}
     feedback_queries = _feedback_collection_queries(price_action_feedback)
+    validation_gap_queries = _model_validation_gap_queries(price_action_model)
     model_needs_repricing_data = _price_action_model_needs_data(price_action_model) and bool(feedback_queries)
     feedback_positive = bool(
         _num(price_action_feedback.get("promotion_candidates"))
@@ -215,8 +230,18 @@ def build_research_focus(cfg) -> dict[str, Any]:
     )
     feedback_broaden = str(price_action_feedback.get("learning_state") or "") == "suppress_negative_price_action_and_broaden"
 
-    if model_needs_repricing_data:
-        blockers = price_action_model.get("blockers", [])
+    if validation_gap_queries:
+        validation_gap = price_action_model.get("validation_gap", {})
+        blockers = price_action_model.get("validation_blockers", []) or price_action_model.get("blockers", [])
+        blocker_text = "; ".join(str(item) for item in blockers) if isinstance(blockers, list) else str(blockers or "")
+        next_action = (
+            "Strict price-action model has positive train repricing examples but no positive validation examples; "
+            f"focus fresh websocket/scout collection on {', '.join(validation_gap_queries[:4])}."
+            + (f" Gap: {validation_gap.get('reason')}." if isinstance(validation_gap, dict) and validation_gap.get("reason") else "")
+            + (f" Model blocker: {blocker_text}." if blocker_text else "")
+        )
+    elif model_needs_repricing_data:
+        blockers = price_action_model.get("validation_blockers", []) or price_action_model.get("blockers", [])
         blocker_text = "; ".join(str(item) for item in blockers) if isinstance(blockers, list) else str(blockers or "")
         next_action = (
             "Strict price-action model needs profitable ask-to-future-bid training examples; "
@@ -235,6 +260,10 @@ def build_research_focus(cfg) -> dict[str, Any]:
         next_action = "Keep collecting settlement-based evidence; no actionable family has enough fresh positive evidence yet."
 
     collection_queries = []
+    if validation_gap_queries:
+        for query in validation_gap_queries:
+            if query and query not in collection_queries:
+                collection_queries.append(query)
     if model_needs_repricing_data:
         for query in feedback_queries:
             if query and query not in collection_queries:
@@ -266,8 +295,13 @@ def build_research_focus(cfg) -> dict[str, Any]:
             "training_events": price_action_model.get("training_events"),
             "train_rows": price_action_model.get("train_rows"),
             "validation_rows": price_action_model.get("validation_rows"),
+            "train_positive_targets": price_action_model.get("train_positive_targets"),
+            "validation_positive_targets": price_action_model.get("validation_positive_targets"),
+            "validation_gap": price_action_model.get("validation_gap", {}),
+            "validation_gap_queries": validation_gap_queries,
             "blockers": price_action_model.get("blockers", []),
-            "model_needs_repricing_data": model_needs_repricing_data,
+            "validation_gap_needs_collection": bool(validation_gap_queries),
+            "model_needs_repricing_data": model_needs_repricing_data or bool(validation_gap_queries),
         },
         "price_action_feedback": {
             "status": price_action_feedback.get("status"),

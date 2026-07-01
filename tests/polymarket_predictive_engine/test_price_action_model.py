@@ -231,6 +231,8 @@ def test_price_action_model_keeps_unsplit_round_trip_rows_when_microstructure_ha
     assert summary["training_events"] == summary["train_rows"] + summary["validation_rows"]
     assert summary["train_rows"] == 21
     assert summary["validation_rows"] == 21
+    assert summary["validation_gap"]["state"] == "needs_positive_validation_examples"
+    assert "fed" in summary["validation_gap"]["collection_queries"]
 
 
 def test_price_action_model_uses_observed_open_marked_round_trips_as_mark_to_bid_labels(tmp_path):

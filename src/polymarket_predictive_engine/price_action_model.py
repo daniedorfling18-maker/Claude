@@ -118,6 +118,38 @@ def _family_flags(row: dict[str, Any]) -> dict[str, float]:
     }
 
 
+def _collection_query_from_row(row: dict[str, Any]) -> str:
+    text = " ".join(
+        [
+            str(row.get("signal_cohort") or ""),
+            str(row.get("family") or row.get("category") or ""),
+            str(row.get("market_slug") or ""),
+            str(row.get("question") or ""),
+        ]
+    ).lower()
+    if "btc" in text or "bitcoin" in text:
+        return "btc updown" if "updown" in text else "bitcoin"
+    if "sol" in text or "solana" in text:
+        return "solana updown" if "updown" in text else "solana"
+    if "xrp" in text or "ripple" in text:
+        return "xrp updown" if "updown" in text else "xrp"
+    if "eth" in text or "ethereum" in text:
+        return "eth updown" if "updown" in text else "ethereum"
+    if "esports" in text or "cs2" in text or "dota" in text or "lol" in text:
+        return "esports"
+    if "macro_rates" in text or "fed" in text or "interest-rate" in text or "interest rate" in text:
+        return "fed"
+    if "macro_economy" in text or "inflation" in text or "economy" in text:
+        return "economy"
+    if "worldcup" in text or "world cup" in text or "fifa" in text or "sports_other" in text:
+        return "world cup"
+    if "tennis" in text:
+        return "tennis"
+    if "crypto" in text:
+        return "bitcoin"
+    return ""
+
+
 def _event_price(row: dict[str, Any], event_key: str, current_key: str | None = None) -> float:
     value = safe_float(row.get(event_key))
     if value is None and current_key is not None:
@@ -294,6 +326,65 @@ def _source_summary(rows: list[dict[str, Any]], *, raw_rows: int) -> dict[str, A
         "prepared_rows": len(rows),
         "positive_targets": sum(1 for row in rows if int(row.get("_y") or 0) == 1),
         "positive_pnl_rows": sum(1 for row in rows if float(row.get("_pnl_usdc") or 0.0) > 0),
+    }
+
+
+def _validation_gap_report(
+    train_rows: list[dict[str, Any]],
+    validation_rows: list[dict[str, Any]],
+    *,
+    minimum_validation_positive_targets: int,
+) -> dict[str, Any]:
+    positive_train = [row for row in train_rows if int(row.get("_y") or 0) == 1]
+    positive_validation = [row for row in validation_rows if int(row.get("_y") or 0) == 1]
+    query_counts: dict[str, int] = {}
+    cohort_counts: dict[str, dict[str, Any]] = {}
+    for row in positive_train:
+        query = _collection_query_from_row(row)
+        if query:
+            query_counts[query] = query_counts.get(query, 0) + 1
+        cohort = str(row.get("signal_cohort") or row.get("family") or row.get("market_slug") or "unknown")
+        current = cohort_counts.setdefault(
+            cohort,
+            {
+                "cohort": cohort,
+                "family": row.get("family", ""),
+                "evidence_source": row.get("evidence_source", ""),
+                "recommended_collection_query": query,
+                "positive_train_targets": 0,
+                "latest_positive_train_time_utc": "",
+            },
+        )
+        current["positive_train_targets"] += 1
+        timestamp = str(row.get("entry_time_utc") or "")
+        if timestamp > str(current.get("latest_positive_train_time_utc") or ""):
+            current["latest_positive_train_time_utc"] = timestamp
+    ordered_queries = [
+        query
+        for query, _ in sorted(
+            query_counts.items(),
+            key=lambda item: (item[1], item[0]),
+            reverse=True,
+        )
+    ]
+    cohorts = sorted(
+        cohort_counts.values(),
+        key=lambda item: (int(item.get("positive_train_targets") or 0), str(item.get("latest_positive_train_time_utc") or "")),
+        reverse=True,
+    )
+    needs_validation = len(positive_train) > 0 and len(positive_validation) < minimum_validation_positive_targets
+    return {
+        "state": "needs_positive_validation_examples" if needs_validation else "sufficient_or_waiting_for_training_examples",
+        "train_positive_targets": len(positive_train),
+        "validation_positive_targets": len(positive_validation),
+        "minimum_validation_positive_targets": minimum_validation_positive_targets,
+        "collection_queries": ordered_queries,
+        "positive_train_cohorts": cohorts[:10],
+        "reason": (
+            "Positive repricing examples exist in train, but validation has not yet seen a positive executable bid repricing."
+            if needs_validation
+            else "Validation-positive evidence is not the current primary blocker."
+        ),
     }
 
 
@@ -621,6 +712,12 @@ def train_price_action_model(cfg: EngineConfig) -> dict[str, Any]:
     blockers: list[str] = []
     train_positive_targets = sum(int(row["_y"]) for row in train_rows)
     validation_positive_targets = sum(int(row["_y"]) for row in validation_rows)
+    min_validation_positive_targets = _int_setting(settings, "minimum_validation_positive_targets", 1)
+    validation_gap = _validation_gap_report(
+        train_rows,
+        validation_rows,
+        minimum_validation_positive_targets=min_validation_positive_targets,
+    )
     if len(prepared) < minimum_rows:
         blockers.append(f"training events {len(prepared)} < {minimum_rows}")
     if len(validation_rows) < minimum_validation_rows:
@@ -638,6 +735,8 @@ def train_price_action_model(cfg: EngineConfig) -> dict[str, Any]:
             "validation_rows": len(validation_rows),
             "train_positive_targets": train_positive_targets,
             "validation_positive_targets": validation_positive_targets,
+            "minimum_validation_positive_targets": min_validation_positive_targets,
+            "validation_gap": validation_gap,
             "promotion_ready": False,
             "current_model_candidates": 0,
             "warnings": {"shadow_only": True, "not_settlement_probability_model": True},
@@ -682,6 +781,11 @@ def train_price_action_model(cfg: EngineConfig) -> dict[str, Any]:
     min_roi_ci_low = _float_setting(settings, "minimum_selected_validation_roi_ci_low", 0.0)
     max_validation_drawdown = _float_setting(settings, "maximum_selected_validation_drawdown", -0.10)
     min_validation_positive_targets = _int_setting(settings, "minimum_validation_positive_targets", 1)
+    validation_gap = _validation_gap_report(
+        train_rows,
+        validation_rows,
+        minimum_validation_positive_targets=min_validation_positive_targets,
+    )
     validation_blockers: list[str] = []
     if not threshold_selection["chosen_train_metrics"].get("train_threshold_pass"):
         validation_blockers.append("no probability threshold cleared the training split trade gates")
@@ -744,6 +848,7 @@ def train_price_action_model(cfg: EngineConfig) -> dict[str, Any]:
         "validation_rows": len(validation_rows),
         "train_positive_targets": train_positive_targets,
         "validation_positive_targets": validation_positive_targets,
+        "validation_gap": validation_gap,
         "validation_positive_rate": sum(targets) / len(targets) if targets else 0.0,
         "validation_brier": _brier(probabilities, targets),
         "validation_log_loss": _log_loss(probabilities, targets),

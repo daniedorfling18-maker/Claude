@@ -190,6 +190,7 @@ async function load() {
     const probeExitWatch = data.paper_probe_exit_watch || {};
     const paperMaintenance = data.paper_maintenance || {};
     const paperMaintenanceTask = data.paper_maintenance_task || {};
+    const shadowResearch = data.shadow_research_cycle || {};
     const priceScoutPnl = priceScout.realized_pnl_usdc ?? priceScout.total_mark_pnl_usdc;
     const live = data.local_live_heartbeat || data.heartbeat || {};
     const freshness = data.evidence_freshness || {};
@@ -206,11 +207,15 @@ async function load() {
     const status = target.status || data.forward_paper_cycle?.status || "unknown";
     const dashboardAge = ageSeconds(data.generated_at_utc);
     const liveStatus = freshness.live_loop_status || "unknown";
+    const researchStatus = oversight.shadow_research_status || shadowResearch.effective_status || shadowResearch.status || "unknown";
+    const researchAge = oversight.shadow_research_age_seconds ?? shadowResearch.age_seconds;
     const runPosture = freshness.strategy_v2_runtime_posture || liveStatus;
-    const good = liveStatus === "live";
+    const oversightState = oversight.status || "unknown";
+    const researchGood = ["running", "ok", "completed", "success"].includes(researchStatus);
+    const good = oversightState === "ok" || (oversightState === "unknown" && researchGood);
     const guarded = runPosture === "memory_paused" || runPosture === "guard_paused";
     const dashboardStale = dashboardAge !== null && dashboardAge > 300;
-    const bad = dashboardStale || liveStatus === "stale" || liveStatus === "not_started" || liveStatus === "down";
+    const bad = dashboardStale || oversightState === "bad" || researchStatus === "stale";
     const liveAge = freshness.live_heartbeat_age_seconds ?? ageSeconds(live.generated_at_utc);
     const modelAge = ageSeconds(priceActionModel.generated_at_utc);
     const signalAge = ageSeconds(priceActionPaper.generated_at_utc || priceActionPaper.signal_generated_at_utc);
@@ -224,18 +229,18 @@ async function load() {
       ? oversight.alerts.map(item => alertBox(item.title || "Oversight alert", longText(item.body || "-", 260), item.severity || "warn"))
       : [];
     if (dashboardStale) oversightAlerts.push(alertBox("Dashboard snapshot is stale", `The displayed file is ${fmtAge(dashboardAge)} old. Refresh the dashboard generator before trusting signal counts.`, "bad"));
-    if (!oversightAlerts.length && liveStatus !== "live") oversightAlerts.push(alertBox("Live websocket loop is not live", `Current status: ${escapeHtml(liveStatus)}; last heartbeat age: ${fmtAge(liveAge)}.`, liveStatus === "stale" || liveStatus === "down" ? "bad" : "warn"));
+    if (!oversightAlerts.length && liveStatus !== "live") oversightAlerts.push(alertBox("Legacy local live loop is not running", `Expected unless explicitly approved. Legacy status: ${escapeHtml(liveStatus)}; last heartbeat age: ${fmtAge(liveAge)}.`, "warn"));
     if (!oversightAlerts.length && modelStale) oversightAlerts.push(alertBox("Model scoring is stale", `Price-action model summary is ${fmtAge(modelAge)} old. Re-score/retrain before promoting any new paper signals.`, "bad"));
     if (!oversightAlerts.length && validationGapActive) oversightAlerts.push(alertBox("Model needs positive validation examples", `Train positives: ${plain(priceActionModel.train_positive_targets)}; validation positives: ${plain(priceActionModel.validation_positive_targets)}. Collect next: ${joinText(validationGap.collection_queries || [])}.`, "warn"));
     if (!oversightAlerts.length && approvedSignals <= 0) oversightAlerts.push(alertBox("No approved paper signals", longText(diag.main_blocker || priceActionPaper.decision || "Current gates are blocking paper entries.", 220), "warn"));
     if (!oversightAlerts.length && guarded) oversightAlerts.push(alertBox("Collection paused by memory guard", longText(freshness.strategy_v2_runtime_reason || strategyV2.runtime_reason || "The local guard paused heavier collection because RAM was too high.", 220), "warn"));
-    if (!oversightAlerts.length) oversightAlerts.push(alertBox("Oversight clear", "Dashboard, live loop, model freshness, and paper signal gates are not reporting urgent blockers.", "good"));
+    if (!oversightAlerts.length) oversightAlerts.push(alertBox("Oversight clear", "Dashboard, shadow research, model freshness, and paper signal gates are not reporting urgent blockers.", "good"));
     document.getElementById("statusDot").className = "dot " + (bad ? "bad" : good ? "good" : guarded ? "warn" : "");
-    document.getElementById("statusText").textContent = (dashboardStale ? "dashboard stale" : runPosture) + " - " + status + " - snapshot age " + fmtAge(dashboardAge) + " - updated " + (data.generated_at_utc || "-");
+    document.getElementById("statusText").textContent = (dashboardStale ? "dashboard stale" : `research ${researchStatus}`) + " - " + status + " - snapshot age " + fmtAge(dashboardAge) + " - updated " + (data.generated_at_utc || "-");
     const pnl = Number(target.actual_pnl_since_baseline_usdc || 0);
     document.getElementById("cards").innerHTML = [
       card("Dashboard age", fmtAge(dashboardAge), ageClass(dashboardAge, 60, 300)),
-      card("Live loop", `${liveStatus} / ${fmtAge(liveAge)}`, good ? "good" : bad ? "bad" : "warn"),
+      card("Research cycle", `${researchStatus} / ${fmtAge(researchAge)}`, researchStatus === "stale" ? "bad" : researchStatus === "running" || researchStatus === "completed" || researchStatus === "ok" ? "good" : "warn"),
       card("Model age", fmtAge(modelAge), ageClass(modelAge, 300, 900)),
       card("Model gate", validationGapActive ? "needs validation positives" : (priceActionModel.promotion_ready ? "validated" : priceActionModel.decision || priceActionModel.status || "unknown"), validationGapActive ? "warn" : priceActionModel.promotion_ready ? "good" : "warn"),
       card("Actual P&L since clean baseline", fmtUsd(pnl), pnl >= 0 ? "good" : "bad"),
@@ -254,7 +259,8 @@ async function load() {
     ].join("");
     document.getElementById("oversightCockpit").innerHTML = facts([
       ["Dashboard snapshot", `${fmtAge(dashboardAge)} old / ${data.generated_at_utc || "-"}`],
-      ["Live heartbeat", `${liveStatus} / ${fmtAge(liveAge)} old`],
+      ["Shadow research", `${researchStatus} / ${fmtAge(researchAge)} old`],
+      ["Legacy live heartbeat", `${liveStatus} / ${fmtAge(liveAge)} old`],
       ["Model freshness", `${priceActionModel.status || "unknown"} / ${fmtAge(modelAge)} old`],
       ["Model decision", priceActionModel.decision, v=>longText(v, 220)],
       ["Validation gap", validationGapActive ? validationGap.reason || "Needs positive validation examples." : "No active positive-validation gap.", v=>longText(v, 260)],
@@ -1828,7 +1834,15 @@ def _price_action_paper_signal_status(cfg: EngineConfig) -> dict[str, Any]:
 def _payload_time(payload: Any) -> datetime | None:
     if not isinstance(payload, dict):
         return None
-    for key in ("generated_at_utc", "timestamp_utc", "timestamp", "created_at_utc"):
+    for key in (
+        "generated_at_utc",
+        "updated_at_utc",
+        "started_at_utc",
+        "ended_at_utc",
+        "timestamp_utc",
+        "timestamp",
+        "created_at_utc",
+    ):
         parsed = parse_timestamp(payload.get(key))
         if parsed is not None:
             return parsed.astimezone(timezone.utc)
@@ -1928,10 +1942,53 @@ def _strategy_v2_runtime_freshness(strategy_v2: dict[str, Any], live_loop_status
     }
 
 
+def _shadow_research_cycle_status(cfg: EngineConfig) -> dict[str, Any]:
+    path = cfg.path.parent / "work" / "shadow_research_cycle_latest_status.json"
+    payload = _read_json_lenient(path, default={}) or {}
+    if not isinstance(payload, dict) or not payload:
+        return {
+            "status": "not_started",
+            "effective_status": "not_started",
+            "status_file": str(path),
+            "age_seconds": None,
+            "paper_trading_invoked": False,
+            "live_trading_invoked": False,
+            "reason": "Shadow research cycle has not written a status file yet.",
+        }
+    age = _age_seconds(payload)
+    # The scheduled shadow-research lane is intentionally slower than a live loop,
+    # but a multi-hour "running" file is stale observability, not an active worker.
+    stale_after_seconds = safe_float(
+        (cfg.raw.get("shadow_research_cycle", {}) or {}).get("status_stale_after_seconds")
+    )
+    if stale_after_seconds is None:
+        stale_after_seconds = 45 * 60
+    status = str(payload.get("status") or "unknown")
+    effective_status = status
+    reason = str(payload.get("reason") or "")
+    if age is not None and age > stale_after_seconds:
+        effective_status = "stale"
+        reason = (
+            f"Shadow research status is {round(age, 1)} seconds old; "
+            "treat this as stale even if the file still says running."
+        )
+    return {
+        **payload,
+        "status_file": str(path),
+        "age_seconds": age,
+        "stale_after_seconds": stale_after_seconds,
+        "effective_status": effective_status,
+        "reason": reason,
+        "paper_trading_invoked": bool(payload.get("paper_trading_invoked", False)),
+        "live_trading_invoked": bool(payload.get("live_trading_invoked", False)),
+    }
+
+
 def _dashboard_oversight_status(
     *,
     live_loop_status: str,
     heartbeat: dict[str, Any],
+    shadow_research: dict[str, Any],
     price_action_model: dict[str, Any],
     price_action_paper_signals: dict[str, Any],
     goal_plan: dict[str, Any],
@@ -1941,6 +1998,8 @@ def _dashboard_oversight_status(
 ) -> dict[str, Any]:
     """Single oversight summary for stale/live/model gate visibility."""
     live_age = _age_seconds(heartbeat)
+    shadow_status = str(shadow_research.get("effective_status") or shadow_research.get("status") or "unknown")
+    shadow_age = safe_float(shadow_research.get("age_seconds"))
     model_age = _age_seconds(price_action_model)
     signal_age = _age_seconds(price_action_paper_signals)
     validation_gap = price_action_model.get("validation_gap", {})
@@ -1961,11 +2020,34 @@ def _dashboard_oversight_status(
     def add_alert(severity: str, title: str, body: str) -> None:
         alerts.append({"severity": severity, "title": title, "body": body})
 
-    if live_loop_status != "live":
+    if shadow_status in {"not_started", "missing"}:
         add_alert(
-            "bad" if live_loop_status in {"stale", "down"} else "warn",
-            "Live websocket loop is not live",
-            f"Current status is {live_loop_status or 'unknown'}; heartbeat age is {round(live_age, 1) if live_age is not None else 'unknown'} seconds.",
+            "warn",
+            "Shadow research cycle has not started",
+            str(shadow_research.get("reason") or "The current safe research lane has not produced a status file."),
+        )
+    elif shadow_status == "stale":
+        add_alert(
+            "bad",
+            "Shadow research cycle is stale",
+            str(shadow_research.get("reason") or "The current safe research lane has not refreshed recently."),
+        )
+    elif shadow_status in {"error", "failed"}:
+        add_alert(
+            "bad",
+            "Shadow research cycle failed",
+            str(shadow_research.get("reason") or shadow_research.get("error") or "The current safe research lane reported failure."),
+        )
+    elif shadow_status in {"running", "ok", "completed", "success"}:
+        pass
+    elif live_loop_status != "live":
+        add_alert(
+            "warn",
+            "Legacy local live loop is not running",
+            (
+                "This is expected unless the audit has approved the old local live-loop lane. "
+                f"Legacy heartbeat status is {live_loop_status or 'unknown'}; age is {round(live_age, 1) if live_age is not None else 'unknown'} seconds."
+            ),
         )
     if model_age is None:
         add_alert("warn", "Model freshness unknown", "Price-action model summary has no usable timestamp.")
@@ -2019,6 +2101,9 @@ def _dashboard_oversight_status(
         "alerts": alerts,
         "live_loop_status": live_loop_status,
         "live_heartbeat_age_seconds": live_age,
+        "shadow_research_status": shadow_status,
+        "shadow_research_age_seconds": shadow_age,
+        "shadow_research_reason": shadow_research.get("reason"),
         "model_status": price_action_model.get("status"),
         "model_decision": price_action_model.get("decision"),
         "model_age_seconds": model_age,
@@ -2213,6 +2298,7 @@ def render_dashboard(cfg: EngineConfig, latest_report: dict[str, Any] | None = N
         trade_signal_audit = {}
     paper_maintenance = _paper_maintenance_status(cfg)
     paper_maintenance_task = _paper_maintenance_task_status(cfg)
+    shadow_research_cycle = _shadow_research_cycle_status(cfg)
     evidence_freshness = {
         "broker_source": broker_source,
         "broker_generated_at_utc": broker_summary.get("generated_at_utc"),
@@ -2241,6 +2327,7 @@ def render_dashboard(cfg: EngineConfig, latest_report: dict[str, Any] | None = N
     oversight_status = _dashboard_oversight_status(
         live_loop_status=live_loop_status,
         heartbeat=heartbeat if isinstance(heartbeat, dict) else {},
+        shadow_research=shadow_research_cycle,
         price_action_model=price_action_model_status,
         price_action_paper_signals=price_action_paper_signal_status,
         goal_plan=goal_plan,
@@ -2279,6 +2366,7 @@ def render_dashboard(cfg: EngineConfig, latest_report: dict[str, Any] | None = N
         "paper_probe_exit_watch": paper_probe_exit_watch,
         "paper_maintenance": paper_maintenance,
         "paper_maintenance_task": paper_maintenance_task,
+        "shadow_research_cycle": shadow_research_cycle,
         "edge_strategy_search": edge_strategy_search,
         "promoted_rule_shadow": promoted_rule_shadow,
         "liquidity_discovery": liquidity_discovery,

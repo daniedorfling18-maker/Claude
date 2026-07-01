@@ -364,6 +364,28 @@ def test_dashboard_surfaces_lightweight_paper_maintenance_status(tmp_path):
     assert "Paper maintenance" in html
 
 
+def test_dashboard_treats_old_running_shadow_research_status_as_stale(tmp_path):
+    cfg = _config(tmp_path)
+    status_path = cfg.path.parent / "work" / "shadow_research_cycle_latest_status.json"
+    write_json(
+        status_path,
+        {
+            "status": "running",
+            "started_at_utc": (datetime.now(timezone.utc) - timedelta(hours=3)).strftime("%Y-%m-%dT%H:%M:%SZ"),
+            "paper_trading_invoked": False,
+            "live_trading_invoked": False,
+        },
+    )
+
+    result = render_dashboard(cfg)
+    data = read_json(result["dashboard_data"])
+
+    assert data["shadow_research_cycle"]["status"] == "running"
+    assert data["shadow_research_cycle"]["effective_status"] == "stale"
+    assert data["oversight_status"]["shadow_research_status"] == "stale"
+    assert any(alert["title"] == "Shadow research cycle is stale" for alert in data["oversight_status"]["alerts"])
+
+
 def test_dashboard_surfaces_paper_maintenance_task_status(tmp_path):
     cfg = _config(tmp_path)
     status_path = cfg.path.parent / "work" / "polymarket_paper_maintenance_task_status.json"

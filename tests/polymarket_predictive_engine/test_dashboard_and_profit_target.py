@@ -386,6 +386,29 @@ def test_dashboard_treats_old_running_shadow_research_status_as_stale(tmp_path):
     assert any(alert["title"] == "Shadow research cycle is stale" for alert in data["oversight_status"]["alerts"])
 
 
+def test_dashboard_marks_stale_legacy_full_cycle_as_audit_only(tmp_path):
+    cfg = _config(tmp_path)
+    write_json(
+        cfg.governance_root / "local_live_loop_heartbeat.json",
+        {
+            "status": "ok",
+            "generated_at_utc": "2020-01-01T00:00:00Z",
+            "websocket_seconds": 5,
+            "full_prediction_cycle": {"status": "running"},
+        },
+    )
+
+    result = render_dashboard(cfg)
+    data = read_json(result["dashboard_data"])
+
+    legacy = data["evidence_freshness"]["legacy_full_cycle"]
+    assert data["evidence_freshness"]["live_loop_status"] == "stale"
+    assert legacy["raw_status"] == "running"
+    assert legacy["effective_status"] == "stale"
+    assert legacy["display_status"] == "stale legacy heartbeat (raw: running)"
+    assert "do not treat" in legacy["reason"]
+
+
 def test_dashboard_surfaces_paper_maintenance_task_status(tmp_path):
     cfg = _config(tmp_path)
     status_path = cfg.path.parent / "work" / "polymarket_paper_maintenance_task_status.json"

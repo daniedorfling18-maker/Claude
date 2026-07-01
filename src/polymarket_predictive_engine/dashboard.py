@@ -143,7 +143,7 @@ const longText = (v, limit=96) => {
   const text = asText(v);
   if (!text || text === "-") return "-";
   if (text.length <= limit) return escapeHtml(text);
-  const preview = text.slice(0, Math.max(24, Math.floor(limit * 0.58))) + " … " + text.slice(-Math.max(16, Math.floor(limit * 0.26)));
+  const preview = text.slice(0, Math.max(24, Math.floor(limit * 0.58))) + " ... " + text.slice(-Math.max(16, Math.floor(limit * 0.26)));
   return `<details class="expand"><summary title="${escapeHtml(text)}">${escapeHtml(preview)}</summary><div class="fullText">${escapeHtml(text)}</div></details>`;
 };
 const joinText = (v) => longText(Array.isArray(v) ? v.join(", ") : v);
@@ -204,6 +204,7 @@ async function load() {
     const websocket = live.websocket || {};
     const websocketFeatures = live.websocket_features || {};
     const ingest = live.ingest || {};
+    const legacyFullCycle = freshness.legacy_full_cycle || {};
     const status = target.status || data.forward_paper_cycle?.status || "unknown";
     const dashboardAge = ageSeconds(data.generated_at_utc);
     const liveStatus = freshness.live_loop_status || "unknown";
@@ -361,7 +362,9 @@ async function load() {
       ["WS messages", websocket.new_messages],
       ["WS features", websocketFeatures.feature_rows],
       ["Snapshots inserted", ingest.inserted_market_snapshots],
-      ["Full cycle", live.full_prediction_cycle?.status],
+      ["Full cycle", legacyFullCycle.display_status || live.full_prediction_cycle?.status],
+      ["Full-cycle age", legacyFullCycle.age_seconds == null ? "-" : fmtAge(legacyFullCycle.age_seconds)],
+      ["Full-cycle note", legacyFullCycle.reason || "-", v=>longText(v, 220)],
       ["Discovery", discovery.status],
       ["Last scan", discovery.last_status],
       ["Next discovery", discovery.next_due_in_seconds == null ? "-" : Math.round(Number(discovery.next_due_in_seconds)) + "s"],
@@ -1921,6 +1924,58 @@ def _live_loop_status(heartbeat: dict[str, Any], cfg: EngineConfig) -> str:
     return "unknown"
 
 
+def _legacy_full_cycle_status(heartbeat: dict[str, Any], live_loop_status: str) -> dict[str, Any]:
+    """Display-safe status for the old local live-loop full-cycle heartbeat.
+
+    The current safe lane is the shadow-research cycle. The old live-loop heartbeat is useful
+    as audit context, but a stale file that still says ``running`` must not look like an active
+    trading process in the dashboard.
+    """
+    if not isinstance(heartbeat, dict) or not heartbeat:
+        return {
+            "raw_status": "",
+            "effective_status": "not_started",
+            "display_status": "not started",
+            "age_seconds": None,
+            "reason": "No legacy local live-loop heartbeat was found; dashboard is using the shadow-research lane.",
+        }
+
+    full_cycle = heartbeat.get("full_prediction_cycle") if isinstance(heartbeat.get("full_prediction_cycle"), dict) else {}
+    raw_status = str(full_cycle.get("status") or heartbeat.get("status") or "unknown").strip() or "unknown"
+    age = _age_seconds(heartbeat)
+    if live_loop_status == "stale":
+        return {
+            "raw_status": raw_status,
+            "effective_status": "stale",
+            "display_status": f"stale legacy heartbeat (raw: {raw_status})",
+            "age_seconds": age,
+            "reason": (
+                "This is an old local live-loop status file. It is kept for audit history, "
+                "but the current active lane is shadow research; do not treat its raw "
+                f"'{raw_status}' value as a running bot."
+            ),
+        }
+    if live_loop_status == "live":
+        return {
+            "raw_status": raw_status,
+            "effective_status": "live",
+            "display_status": raw_status,
+            "age_seconds": age,
+            "reason": "Legacy local live-loop heartbeat is fresh.",
+        }
+    if live_loop_status == "down":
+        display_status = f"down (raw: {raw_status})"
+    else:
+        display_status = f"{live_loop_status or 'unknown'} (raw: {raw_status})"
+    return {
+        "raw_status": raw_status,
+        "effective_status": live_loop_status or "unknown",
+        "display_status": display_status,
+        "age_seconds": age,
+        "reason": "Legacy local live-loop heartbeat is not the current safe research lane.",
+    }
+
+
 def _strategy_v2_runtime_freshness(strategy_v2: dict[str, Any], live_loop_status: str) -> dict[str, Any]:
     """Summarise whether Strategy V2 is collecting evidence or safely paused.
 
@@ -2272,6 +2327,7 @@ def render_dashboard(cfg: EngineConfig, latest_report: dict[str, Any] | None = N
     rejected = read_csv_rows(predictions_root / "rejected_signals.csv")
     near_miss_candidates = read_csv_rows(predictions_root / "near_miss_learning_candidates.csv")
     live_loop_status = _live_loop_status(heartbeat if isinstance(heartbeat, dict) else {}, cfg)
+    legacy_full_cycle_status = _legacy_full_cycle_status(heartbeat if isinstance(heartbeat, dict) else {}, live_loop_status)
     strategy_v2_status = _strategy_v2_status(cfg)
     strategy_v2_runtime = _strategy_v2_runtime_freshness(strategy_v2_status, live_loop_status)
     price_action_scout_status = _price_action_scout_status(cfg)
@@ -2306,6 +2362,7 @@ def render_dashboard(cfg: EngineConfig, latest_report: dict[str, Any] | None = N
         "target_generated_at_utc": actual_target.get("generated_at_utc"),
         "live_loop_status": live_loop_status,
         "live_heartbeat_age_seconds": _age_seconds(heartbeat),
+        "legacy_full_cycle": legacy_full_cycle_status,
         "scoreboard_status": _scoreboard_status(broker_summary, actual_target),
         "broker_refresh_needed": broker_signal_freshness.get("broker_refresh_needed"),
         "broker_signal_refresh_needed": broker_signal_freshness.get("broker_signal_refresh_needed"),

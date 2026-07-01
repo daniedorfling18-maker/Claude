@@ -852,7 +852,7 @@ def test_dashboard_surfaces_strategy_v2_anchored_edge_progress(tmp_path):
     assert "Strategy V2 anchored edge" in html
     assert "Fast price-action scout" in html
     assert "Microstructure edge lab" in html
-    assert "Dashboard data age" in html
+    assert "Dashboard snapshot" in html
     assert "Signal count check" in html
     assert strategy_v2["decision"] == "candidate_family_found"
     assert strategy_v2["shadow_candidates"] == 1

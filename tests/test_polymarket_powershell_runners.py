@@ -221,6 +221,26 @@ def test_shadow_research_cycle_bounds_each_python_step():
     assert "$exitCode = [int]$process.ExitCode" in text
 
 
+def test_shadow_research_cycle_refreshes_price_action_learning_and_governance():
+    text = _script_text("scripts/run_polymarket_shadow_research_cycle.ps1")
+
+    local_audit_index = text.index("local-history-audit")
+    profit_sprint_index = text.index("profit-sprint")
+    microstructure_index = text.index("price-action-microstructure")
+    scout_index = text.index("price-action-scout")
+    governance_refresh_index = text.index("refresh-governance")
+    status_payload_index = text.index("price_action_model_decision = $governanceRefresh.price_action_model_decision")
+
+    assert local_audit_index < profit_sprint_index
+    assert profit_sprint_index < microstructure_index
+    assert microstructure_index < scout_index
+    assert scout_index < governance_refresh_index
+    assert governance_refresh_index < status_payload_index
+    assert "polymarket_predictive_engine.refresh_governance" in text
+    assert "price_action_feedback_state = $governanceRefresh.price_action_feedback_state" in text
+    assert "dashboard_status = $governanceRefresh.dashboard.status" in text
+
+
 def test_dashboard_server_runner_refuses_to_start_when_memory_is_high():
     text = _script_text("scripts/run_polymarket_dashboard_server.ps1")
 

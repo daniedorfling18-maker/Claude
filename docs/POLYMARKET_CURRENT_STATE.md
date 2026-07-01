@@ -92,6 +92,11 @@ mispricing alpha scoring
 signal generation as dry/governance output
 alpha-candidate shadow evidence
 local-history audit
+profit-sprint target refresh
+price-action microstructure evidence
+price-action scout round-trip evidence
+governance/model/research-focus refresh
+dashboard render
 ```
 
 It writes the latest status here:
@@ -104,6 +109,7 @@ A healthy run has:
 
 ```text
 status = ok
+price_action_model_decision = collect_more_bid_ask_price_action_model_evidence or better
 paper_trading_invoked = false
 live_trading_invoked = false
 ```

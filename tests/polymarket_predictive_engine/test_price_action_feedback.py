@@ -6,7 +6,7 @@ from pytest import approx
 
 from polymarket_predictive_engine.config import EngineConfig
 from polymarket_predictive_engine.price_action_feedback import build_price_action_feedback
-from polymarket_predictive_engine.utils import write_csv
+from polymarket_predictive_engine.utils import write_csv, write_json
 
 
 def _cfg(tmp_path: Path) -> EngineConfig:
@@ -54,6 +54,65 @@ def test_price_action_feedback_prioritises_positive_bid_ask_cohort(tmp_path):
     assert payload["monthly_goal_gap_usdc"] == approx(58.0)
     assert payload["top_cohorts"][0]["action"] == "collect_more_positive_price_action_evidence"
     assert payload["top_cohorts"][0]["evidence_type"] == "settlement_independent_bid_ask_round_trip"
+
+
+def test_price_action_feedback_prioritises_model_validation_gap_queries(tmp_path):
+    cfg = _cfg(tmp_path)
+    write_json(
+        cfg.output_root / "polymarket_price_action" / "price_action_model_summary.json",
+        {
+            "decision": "collect_more_bid_ask_price_action_model_evidence",
+            "generated_at_utc": "2026-07-01T08:00:00Z",
+            "validation_gap": {
+                "state": "needs_positive_validation_examples",
+                "collection_queries": ["fed", "ethereum", "esports"],
+                "reason": "Positive train examples exist, but validation has no positive executable bid repricing.",
+            },
+        },
+    )
+
+    payload = build_price_action_feedback(cfg)
+
+    assert payload["learning_state"] == "collect_model_validation_gap_price_action_evidence"
+    assert payload["collection_queries"][:3] == ["fed", "ethereum", "esports"]
+    assert payload["model_validation_gap_active"] is True
+    assert payload["model_validation_gap_queries"] == ["fed", "ethereum", "esports"]
+    assert payload["price_action_model_decision"] == "collect_more_bid_ask_price_action_model_evidence"
+
+
+def test_price_action_feedback_puts_model_gap_before_positive_cohort_queries(tmp_path):
+    cfg = _cfg(tmp_path)
+    write_json(
+        cfg.output_root / "polymarket_price_action" / "price_action_model_summary.json",
+        {
+            "decision": "collect_more_bid_ask_price_action_model_evidence",
+            "validation_gap": {
+                "state": "needs_positive_validation_examples",
+                "collection_queries": ["fed", "ethereum"],
+            },
+        },
+    )
+    write_csv(
+        cfg.output_root / "polymarket_price_action" / "price_action_scout_cohort_evidence.csv",
+        [
+            {
+                "signal_cohort": "price_action_scout|fast_liquidity|crypto_btc_updown_daily",
+                "family": "crypto_btc_updown_daily",
+                "closed_trades": "1",
+                "open_trades": "0",
+                "realized_pnl_usdc": "1.5",
+                "realized_roi": "0.15",
+                "realized_monthly_run_rate_usdc": "24",
+                "price_action_review_candidate": "False",
+            }
+        ],
+    )
+
+    payload = build_price_action_feedback(cfg)
+
+    assert payload["positive_collect_candidates"] == 1
+    assert payload["collection_queries"][:3] == ["fed", "ethereum", "btc updown"]
+    assert payload["model_validation_gap_active"] is True
 
 
 def test_price_action_feedback_suppresses_negative_closed_round_trip(tmp_path):

@@ -342,6 +342,18 @@ def _append_unique(items: list[str], value: str) -> None:
         items.append(value)
 
 
+def _model_validation_gap_queries(price_action_model: dict[str, Any]) -> list[str]:
+    validation_gap = price_action_model.get("validation_gap")
+    if not isinstance(validation_gap, dict):
+        return []
+    if str(validation_gap.get("state") or "") != "needs_positive_validation_examples":
+        return []
+    queries: list[str] = []
+    for raw_query in validation_gap.get("collection_queries", []) or []:
+        _append_unique(queries, str(raw_query or ""))
+    return queries
+
+
 def build_price_action_feedback(cfg: EngineConfig) -> dict[str, Any]:
     """Consolidate settlement-independent price-action evidence into a feedback loop.
 
@@ -372,6 +384,16 @@ def build_price_action_feedback(cfg: EngineConfig) -> dict[str, Any]:
         if isinstance(cfg.raw.get("profit_tracking"), dict)
         else None,
         100.0,
+    )
+    price_action_model = read_json(price_root / "price_action_model_summary.json", default={}) or {}
+    if not isinstance(price_action_model, dict):
+        price_action_model = {}
+    validation_gap_queries = _model_validation_gap_queries(price_action_model)
+    validation_gap = price_action_model.get("validation_gap", {})
+    validation_gap_reason = (
+        validation_gap.get("reason")
+        if isinstance(validation_gap, dict)
+        else ""
     )
 
     cohorts: list[dict[str, Any]] = []
@@ -413,6 +435,8 @@ def build_price_action_feedback(cfg: EngineConfig) -> dict[str, Any]:
     ]
 
     collection_queries: list[str] = []
+    for query in validation_gap_queries:
+        _append_unique(collection_queries, query)
     for row in promotion_candidates + positive_collect:
         _append_unique(collection_queries, str(row.get("recommended_collection_query") or ""))
     if not collection_queries:
@@ -427,7 +451,14 @@ def build_price_action_feedback(cfg: EngineConfig) -> dict[str, Any]:
     best_run_rate = max((_num(row.get("monthly_run_rate_usdc")) for row in promotion_candidates + positive_collect), default=0.0)
     best_forward_paper_run_rate = max((_num(row.get("monthly_run_rate_usdc")) for row in positive_forward_paper), default=0.0)
     bridge_summary = read_json(price_root / "price_action_paper_signal_summary.json", default={}) or {}
-    if promotion_candidates:
+    if validation_gap_queries and not promotion_candidates:
+        learning_state = "collect_model_validation_gap_price_action_evidence"
+        next_action = (
+            "Prioritise fresh websocket/scout collection for the strict price-action model validation gap: "
+            f"{', '.join(validation_gap_queries[:4])}."
+            + (f" Gap: {validation_gap_reason}" if validation_gap_reason else "")
+        )
+    elif promotion_candidates:
         learning_state = "price_action_candidates_ready_for_governed_paper_bridge"
         next_action = "Run the price-action paper bridge and keep entries paper-only until broker evidence is positive."
     elif positive_collect:
@@ -452,6 +483,11 @@ def build_price_action_feedback(cfg: EngineConfig) -> dict[str, Any]:
         "next_action": next_action,
         "collection_queries": collection_queries,
         "suppressed_queries": suppressed_queries,
+        "model_validation_gap_active": bool(validation_gap_queries),
+        "model_validation_gap_queries": validation_gap_queries,
+        "model_validation_gap_reason": validation_gap_reason,
+        "price_action_model_decision": price_action_model.get("decision"),
+        "price_action_model_generated_at_utc": price_action_model.get("generated_at_utc"),
         "cohorts_evaluated": len(cohorts),
         "promotion_candidates": len(promotion_candidates),
         "positive_collect_candidates": len(positive_collect),

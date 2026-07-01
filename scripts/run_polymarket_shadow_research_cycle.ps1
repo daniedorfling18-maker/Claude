@@ -168,9 +168,14 @@ try {
   Invoke-Step "generate-signals-dry" @("-m", "polymarket_predictive_engine.cli", "generate-signals", "--config", $ConfigPath) ".\work\signals_shadow_research_$stamp.json"
   Invoke-Step "alpha-candidate-shadow-evidence" @(".\scripts\run_alpha_candidate_shadow_evidence.py", $ConfigPath) ".\work\alpha_candidate_shadow_research_$stamp.json"
   Invoke-Step "local-history-audit" @(".\scripts\audit_polymarket_local_history.py", $ConfigPath) ".\work\local_history_audit_$stamp.json"
+  Invoke-Step "profit-sprint" @("-m", "polymarket_predictive_engine.cli", "profit-sprint", "--config", $ConfigPath) ".\work\profit_sprint_shadow_research_$stamp.json"
+  Invoke-Step "price-action-microstructure" @("-m", "polymarket_predictive_engine.cli", "price-action-microstructure", "--config", $ConfigPath) ".\work\price_action_microstructure_shadow_research_$stamp.json"
+  Invoke-Step "price-action-scout" @("-m", "polymarket_predictive_engine.cli", "price-action-scout", "--config", $ConfigPath) ".\work\price_action_scout_shadow_research_$stamp.json"
+  Invoke-Step "refresh-governance" @("-m", "polymarket_predictive_engine.refresh_governance", "--config", $ConfigPath) ".\work\governance_refresh_shadow_research_$stamp.json"
 
   Copy-Item ".\work\local_history_audit_$stamp.json" ".\work\local_history_audit_latest.json" -Force
   $audit = Get-Content ".\work\local_history_audit_$stamp.json" -Raw | ConvertFrom-Json
+  $governanceRefresh = Get-Content ".\work\governance_refresh_shadow_research_$stamp.json" -Raw | ConvertFrom-Json
   $liquiditySummaryPath = ".\outputs\polymarket_model_governance\liquidity_discovery_summary.json"
   $liquidity = $null
   if (Test-Path $liquiditySummaryPath) {
@@ -195,6 +200,16 @@ try {
     audit_file = ".\work\local_history_audit_$stamp.json"
     report_file = ".\outputs\polymarket_model_governance\local_history_audit_report.md"
     liquidity_report_file = ".\outputs\polymarket_model_governance\liquidity_discovery_summary.json"
+    profit_sprint_file = ".\work\profit_sprint_shadow_research_$stamp.json"
+    price_action_microstructure_file = ".\work\price_action_microstructure_shadow_research_$stamp.json"
+    price_action_scout_file = ".\work\price_action_scout_shadow_research_$stamp.json"
+    governance_refresh_file = ".\work\governance_refresh_shadow_research_$stamp.json"
+    price_action_model_decision = $governanceRefresh.price_action_model_decision
+    price_action_model_promotion_ready = $governanceRefresh.price_action_model_promotion_ready
+    price_action_feedback_state = $governanceRefresh.price_action_feedback_state
+    research_focus_status = $governanceRefresh.research_focus_status
+    approved_for_paper_trading = $governanceRefresh.approved_for_paper_trading
+    dashboard_status = $governanceRefresh.dashboard.status
     paper_trading_invoked = $false
     live_trading_invoked = $false
   }

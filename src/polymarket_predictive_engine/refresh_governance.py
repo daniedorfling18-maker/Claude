@@ -15,6 +15,7 @@ from .promotion_review import build_promotion_review
 from .readiness import paper_live_promotion_gate
 from .research_focus import build_research_focus
 from .storage import connect_db
+from .trade_signal_audit import build_trade_signal_audit
 from .utils import now_utc, write_json
 
 
@@ -46,6 +47,7 @@ def refresh_governance(cfg: EngineConfig, *, refresh_dashboard: bool = True) -> 
         con.close()
 
     price_action_feedback = build_price_action_feedback(cfg)
+    trade_signal_audit = build_trade_signal_audit(cfg)
     promotion_review = build_promotion_review(cfg)
     goal_plan = build_goal_plan(cfg)
     profit_sprint = build_profit_sprint(cfg)
@@ -64,6 +66,7 @@ def refresh_governance(cfg: EngineConfig, *, refresh_dashboard: bool = True) -> 
             "goal_plan": True,
             "profit_sprint": True,
             "price_action_feedback": True,
+            "trade_signal_audit": True,
             "research_focus": True,
             "promotion_gate": True,
             "governance_report": True,
@@ -74,6 +77,7 @@ def refresh_governance(cfg: EngineConfig, *, refresh_dashboard: bool = True) -> 
         "goal_plan_status": goal_plan.get("status"),
         "profit_sprint_decision": profit_sprint.get("decision"),
         "price_action_feedback_state": price_action_feedback.get("learning_state"),
+        "trade_signal_verdict": trade_signal_audit.get("verdict"),
         "research_focus_status": research_focus.get("status"),
         "approved_for_paper_trading": promotion_gate.get("approved_for_paper_trading"),
         "approved_for_live_trading": promotion_gate.get("approved_for_live_trading"),

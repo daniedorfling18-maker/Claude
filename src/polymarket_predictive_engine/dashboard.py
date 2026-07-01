@@ -74,6 +74,7 @@ HTML = """<!doctype html>
     <section><h2>Latest cycle</h2><div id="cycle"></div></section>
   </div>
   <section><h2>$100/month price-change route</h2><div id="goalPlan"></div></section>
+  <section><h2>Trading signal audit</h2><div id="tradeSignalAudit"></div></section>
   <section><h2>Why no trade?</h2><div id="tradeDiagnostics"></div></section>
   <section><h2>Strategy V2 anchored edge</h2><div id="strategyV2"></div></section>
   <section><h2>Fast price-action scout</h2><div id="priceActionScout"></div></section>
@@ -161,6 +162,7 @@ async function load() {
     const priceActionFeedback = data.price_action_feedback || {};
     const goalPlan = data.paper_profit_goal_plan || {};
     const priceActionGoal = goalPlan.price_action_goal_state || {};
+    const tradeSignalAudit = data.trade_signal_audit || {};
     const probeExitWatch = data.paper_probe_exit_watch || {};
     const paperMaintenance = data.paper_maintenance || {};
     const paperMaintenanceTask = data.paper_maintenance_task || {};
@@ -250,6 +252,43 @@ async function load() {
       ["Shadow P&L","forward_shadow_pnl_usdc", fmtUsd],
       ["Trusted","trusted_for_goal"],
       ["Blocker","forward_edge_blocker", v=>longText(v, 160)]
+    ]);
+    document.getElementById("tradeSignalAudit").innerHTML = facts([
+      ["Verdict", tradeSignalAudit.verdict],
+      ["Next action", tradeSignalAudit.next_action, v=>longText(v, 260)],
+      ["Signal CSV rows", tradeSignalAudit.signal_file_rows],
+      ["Summary signal rows", tradeSignalAudit.summary_signal_rows],
+      ["Signal mismatch", tradeSignalAudit.signal_summary_mismatch],
+      ["Rejections", tradeSignalAudit.rejection_file_rows],
+      ["Recent exits", tradeSignalAudit.recent_exit_count],
+      ["Loss-making exits", tradeSignalAudit.recent_loss_exit_count],
+      ["Recent realised P&L", tradeSignalAudit.recent_realised_pnl_usdc, fmtUsd],
+      ["Principles", tradeSignalAudit.trading_principles, joinText]
+    ]) + `<div style="height:12px"></div><h3>Current paper signal trade thesis</h3>` + table(tradeSignalAudit.current_signal_theses || [], [
+      ["Market","market_slug", v=>longText(v, 150)],
+      ["Cohort","signal_cohort", v=>longText(v, 140)],
+      ["Ask entry","entry_ask", v=>fmtNum(v,4)],
+      ["Bid exit now","current_exit_bid", v=>fmtNum(v,4)],
+      ["Spread","spread", v=>fmtNum(v,4)],
+      ["Spread cost","estimated_spread_cost_usdc", fmtUsd],
+      ["Break-even bid","break_even_exit_bid", v=>fmtNum(v,4)],
+      ["TP bid needed","required_take_profit_bid", v=>fmtNum(v,4)],
+      ["Gap to TP","current_bid_gap_to_profit", v=>fmtNum(v,4)],
+      ["Stop bid","stop_loss_bid", v=>fmtNum(v,4)],
+      ["Horizon","max_hold_minutes_before_exit", v=>fmtNum(v,1) + "m"]
+    ]) + `<div style="height:12px"></div><h3>Why current candidates are rejected</h3>` + table(tradeSignalAudit.rejection_reason_counts || [], [
+      ["Count","count"],
+      ["Reason","reason", v=>longText(v, 220)]
+    ]) + `<div style="height:12px"></div><h3>Recent exits and P&L diagnosis</h3>` + table(tradeSignalAudit.recent_exit_preview || [], [
+      ["Market","market_slug", v=>longText(v, 150)],
+      ["Cohort","signal_cohort", v=>longText(v, 140)],
+      ["Entry","entry_price", v=>fmtNum(v,4)],
+      ["Exit","exit_price", v=>fmtNum(v,4)],
+      ["Break-even","break_even_exit_bid", v=>fmtNum(v,4)],
+      ["P&L","realised_pnl_usdc", fmtUsd],
+      ["Reason","exit_reason"],
+      ["Loss","loss_making_exit"],
+      ["Diagnosis","diagnosis", v=>longText(v, 240)]
     ]);
     document.getElementById("cycle").innerHTML = facts([
       ["Live tick", live.iteration],
@@ -1904,6 +1943,9 @@ def render_dashboard(cfg: EngineConfig, latest_report: dict[str, Any] | None = N
     goal_plan = read_json(governance / "paper_profit_goal_plan.json", default={}) or {}
     if not isinstance(goal_plan, dict):
         goal_plan = {}
+    trade_signal_audit = read_json(governance / "trade_signal_audit.json", default={}) or {}
+    if not isinstance(trade_signal_audit, dict):
+        trade_signal_audit = {}
     paper_maintenance = _paper_maintenance_status(cfg)
     paper_maintenance_task = _paper_maintenance_task_status(cfg)
 
@@ -1947,6 +1989,7 @@ def render_dashboard(cfg: EngineConfig, latest_report: dict[str, Any] | None = N
         "price_action_paper_signals": price_action_paper_signal_status,
         "price_action_feedback": price_action_feedback,
         "paper_profit_goal_plan": goal_plan,
+        "trade_signal_audit": trade_signal_audit,
         "paper_probe_exit_watch": paper_probe_exit_watch,
         "paper_maintenance": paper_maintenance,
         "paper_maintenance_task": paper_maintenance_task,

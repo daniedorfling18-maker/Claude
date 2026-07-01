@@ -436,6 +436,35 @@ def test_dashboard_surfaces_shadow_research_memory_pause(tmp_path):
     )
 
 
+def test_dashboard_surfaces_mid_cycle_shadow_research_memory_stop(tmp_path):
+    cfg = _config(tmp_path)
+    status_path = cfg.path.parent / "work" / "shadow_research_cycle_latest_status.json"
+    write_json(
+        status_path,
+        {
+            "status": "stopped_high_memory",
+            "ended_at_utc": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+            "phase": "after_collect-websocket",
+            "reason": "Shadow research cycle stopped at after_collect-websocket because local memory was 99.3% at or above the 99.0% guardrail.",
+            "memory_used_percent": 99.3,
+            "max_memory_percent": 99.0,
+            "paper_trading_invoked": False,
+            "live_trading_invoked": False,
+        },
+    )
+
+    result = render_dashboard(cfg)
+    data = read_json(result["dashboard_data"])
+
+    assert data["shadow_research_cycle"]["effective_status"] == "stopped_high_memory"
+    assert data["oversight_status"]["shadow_research_status"] == "stopped_high_memory"
+    assert data["oversight_status"]["shadow_research_reason"].startswith("Shadow research cycle stopped")
+    assert any(
+        alert["title"] == "Shadow research paused by memory guard"
+        for alert in data["oversight_status"]["alerts"]
+    )
+
+
 def test_dashboard_surfaces_paper_maintenance_task_status(tmp_path):
     cfg = _config(tmp_path)
     status_path = cfg.path.parent / "work" / "polymarket_paper_maintenance_task_status.json"

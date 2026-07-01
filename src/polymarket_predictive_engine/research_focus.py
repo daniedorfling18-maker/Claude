@@ -63,7 +63,13 @@ def _cohort_query(cohort: str) -> str:
         return "tennis"
     if "worldcup" in text or "world_cup" in text or "world cup" in text:
         return "world cup"
-    return "bitcoin" if "crypto" in text else "btc updown"
+    if "macro_rates" in text or "fed" in text or "rates" in text:
+        return "fed"
+    if "macro_economy" in text or "economy" in text or "inflation" in text:
+        return "economy"
+    if "crypto" in text:
+        return "bitcoin"
+    return ""
 
 
 def _thesis(cohort: str, row: dict[str, Any]) -> str:
@@ -158,6 +164,35 @@ def _load_cohort_rows(cfg) -> list[dict[str, Any]]:
     return list(deduped.values())
 
 
+def _feedback_collection_queries(price_action_feedback: dict[str, Any]) -> list[str]:
+    queries: list[str] = []
+    for raw_query in price_action_feedback.get("collection_queries", []) or []:
+        query = str(raw_query or "").strip()
+        if query and query not in queries:
+            queries.append(query)
+    for key in ("paper_confirmation_preview", "promotion_candidate_preview"):
+        rows = price_action_feedback.get(key, [])
+        if not isinstance(rows, list):
+            continue
+        for row in rows:
+            if not isinstance(row, dict):
+                continue
+            query = str(row.get("recommended_collection_query") or "").strip()
+            if query and query not in queries:
+                queries.append(query)
+    return queries
+
+
+def _price_action_model_needs_data(price_action_model: dict[str, Any]) -> bool:
+    decision = str(price_action_model.get("decision") or "")
+    status = str(price_action_model.get("status") or "")
+    return bool(
+        status in {"insufficient_data", "missing"}
+        or decision.startswith("collect_more_bid_ask_price_action")
+        or price_action_model.get("promotion_ready") is False
+    )
+
+
 def build_research_focus(cfg) -> dict[str, Any]:
     governance = cfg.governance_root
     focus_rows = [_focus_row(row) for row in _load_cohort_rows(cfg) if _include_focus_row(str(row.get("signal_cohort") or row.get("cohort") or "unknown"), row)]
@@ -168,13 +203,27 @@ def build_research_focus(cfg) -> dict[str, Any]:
     price_action_feedback = read_json(governance / "price_action_feedback.json", default={}) or {}
     if not isinstance(price_action_feedback, dict):
         price_action_feedback = {}
+    price_action_model = read_json(cfg.output_root / "polymarket_price_action" / "price_action_model_summary.json", default={}) or {}
+    if not isinstance(price_action_model, dict):
+        price_action_model = {}
+    feedback_queries = _feedback_collection_queries(price_action_feedback)
+    model_needs_repricing_data = _price_action_model_needs_data(price_action_model) and bool(feedback_queries)
     feedback_positive = bool(
         _num(price_action_feedback.get("promotion_candidates"))
         or _num(price_action_feedback.get("positive_collect_candidates"))
+        or _num(price_action_feedback.get("paper_confirmation_candidates"))
     )
     feedback_broaden = str(price_action_feedback.get("learning_state") or "") == "suppress_negative_price_action_and_broaden"
 
-    if focus_rows:
+    if model_needs_repricing_data:
+        blockers = price_action_model.get("blockers", [])
+        blocker_text = "; ".join(str(item) for item in blockers) if isinstance(blockers, list) else str(blockers or "")
+        next_action = (
+            "Strict price-action model needs profitable ask-to-future-bid training examples; "
+            f"focus websocket collection on {', '.join(feedback_queries[:4])}."
+            + (f" Model blocker: {blocker_text}." if blocker_text else "")
+        )
+    elif focus_rows:
         top = focus_rows[0]
         next_action = (
             f"Focus discovery on {top['recommended_collection_query']} for {top['cohort']}; "
@@ -186,12 +235,16 @@ def build_research_focus(cfg) -> dict[str, Any]:
         next_action = "Keep collecting settlement-based evidence; no actionable family has enough fresh positive evidence yet."
 
     collection_queries = []
+    if model_needs_repricing_data:
+        for query in feedback_queries:
+            if query and query not in collection_queries:
+                collection_queries.append(query)
     for row in focus_rows:
         query = str(row.get("recommended_collection_query") or "").strip()
         if query and query not in collection_queries:
             collection_queries.append(query)
     if feedback_positive or feedback_broaden:
-        for query in price_action_feedback.get("collection_queries", []):
+        for query in feedback_queries:
             query = str(query or "").strip()
             if query and query not in collection_queries:
                 collection_queries.append(query)
@@ -206,6 +259,16 @@ def build_research_focus(cfg) -> dict[str, Any]:
         "watchlist": focus_rows,
         "collection_queries": collection_queries,
         "suppressed_queries": price_action_feedback.get("suppressed_queries", []),
+        "price_action_model": {
+            "status": price_action_model.get("status"),
+            "decision": price_action_model.get("decision"),
+            "promotion_ready": price_action_model.get("promotion_ready"),
+            "training_events": price_action_model.get("training_events"),
+            "train_rows": price_action_model.get("train_rows"),
+            "validation_rows": price_action_model.get("validation_rows"),
+            "blockers": price_action_model.get("blockers", []),
+            "model_needs_repricing_data": model_needs_repricing_data,
+        },
         "price_action_feedback": {
             "status": price_action_feedback.get("status"),
             "learning_state": price_action_feedback.get("learning_state"),

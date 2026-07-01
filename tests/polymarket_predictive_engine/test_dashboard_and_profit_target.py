@@ -196,10 +196,14 @@ def test_dashboard_emits_decision_useful_summary_for_missing_fresh_candidate(tmp
     data = read_json(result["dashboard_data"])
     summary = data["decision_useful_summary"]
     assert "Action board" in html
+    assert "Operator questions" in html
     assert "Decision evidence drill-down" in html
     assert summary["trade_decision"] == "COLLECT FRESH CANDIDATE"
     assert "fresh open market row" in summary["primary_blocker"]
     assert summary["collect_now"] == ["btc updown", "solana updown"]
+    assert summary["decision_cards"][0]["label"] == "Can paper trade now?"
+    assert summary["decision_cards"][0]["value"].startswith("No - COLLECT FRESH CANDIDATE")
+    assert any(row["question"] == "What unlocks the next trade?" for row in summary["decision_questions"])
     assert summary["priority_actions"][0]["success_metric"]
     assert any(row["panel"] == "Legacy local live-loop heartbeat" for row in summary["audit_only_panels"])
     assert any(row["lane"] == "Paper trade gate" for row in summary["evidence_lanes"])
@@ -238,6 +242,37 @@ def test_dashboard_decision_summary_prioritises_failed_cycle_over_stale_model(tm
     assert summary["headline"] == "The latest research cycle failed before producing trustworthy signals"
     assert summary["primary_blocker"] == "generate-signals-dry timed out after 180 seconds"
     assert summary["shadow_research_status"] == "error"
+
+
+def test_dashboard_decision_summary_waits_for_running_cycle_before_manual_refresh(tmp_path):
+    cfg = _config(tmp_path)
+    write_json(
+        cfg.output_root / "polymarket_price_action" / "price_action_model_summary.json",
+        {
+            "status": "trained",
+            "generated_at_utc": "2026-06-25T00:00:00Z",
+            "decision": "collect_more_bid_ask_price_action_model_evidence",
+            "promotion_ready": False,
+        },
+    )
+    write_json(
+        cfg.path.parent / "work" / "shadow_research_cycle_latest_status.json",
+        {
+            "status": "running",
+            "started_at_utc": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+            "paper_trading_invoked": False,
+            "live_trading_invoked": False,
+        },
+    )
+
+    result = render_dashboard(cfg)
+
+    data = read_json(result["dashboard_data"])
+    summary = data["decision_useful_summary"]
+    assert summary["trade_decision"] == "WAIT: CYCLE RUNNING"
+    assert summary["headline"] == "A fresh research cycle is already updating the model"
+    assert "do not start a competing governance refresh" in summary["next_action"]
+    assert summary["decision_cards"][0]["value"].startswith("No - WAIT: CYCLE RUNNING")
 
 
 def test_dashboard_prefers_fresh_broker_and_profit_tracker_over_stale_forward_cycle(tmp_path):
@@ -389,11 +424,19 @@ def test_dashboard_flags_price_action_signals_waiting_for_broker_refresh(tmp_pat
     )
     write_csv(
         cfg.output_root / "polymarket_price_action" / "price_action_paper_signals.csv",
-        [{"signal_cohort": "macro_economy", "market_slug": "macro-test", "token_id": "macro-token"}],
+        [
+            {
+                "price_action_entry_source": "paper_confirmation_candidate",
+                "signal_cohort": "macro_economy",
+                "market_slug": "macro-test",
+                "token_id": "macro-token",
+            }
+        ],
     )
 
     result = render_dashboard(cfg)
     data = read_json(result["dashboard_data"])
+    summary = data["decision_useful_summary"]
 
     paper_status = data["price_action_paper_signals"]
     assert paper_status["signals"] == 1
@@ -401,9 +444,81 @@ def test_dashboard_flags_price_action_signals_waiting_for_broker_refresh(tmp_pat
     assert paper_status["summary_signal_mismatch"] is True
     assert paper_status["broker_refresh_needed"] is True
     assert paper_status["pending_broker_signals"] == 1
-    assert paper_status["pending_broker_confirmation_signals"] == 0
+    assert paper_status["pending_broker_confirmation_signals"] == 1
+    assert summary["trade_decision"] == "RUN PAPER CONFIRMATION BROKER"
+    assert "not live approval or sizing promotion" in summary["primary_blocker"]
+    assert summary["evidence_lanes"][0]["state"] == "RUN PAPER CONFIRMATION BROKER"
     assert data["evidence_freshness"]["broker_refresh_needed"] is True
     assert data["evidence_freshness"]["pending_broker_signals"] == 1
+
+
+def test_dashboard_does_not_request_broker_refresh_when_signals_are_already_open(tmp_path):
+    cfg = _config(tmp_path)
+    write_json(
+        cfg.governance_root / "paper_trade_refresh.json",
+        {
+            "status": "ran",
+            "generated_at_utc": "2026-06-30T18:59:25Z",
+            "broker": {
+                "status": "ran",
+                "generated_at_utc": "2026-06-30T18:59:25Z",
+                "equity": 1000,
+                "cash": 998,
+                "total_exposure": 2,
+            },
+        },
+    )
+    write_json(
+        cfg.output_root / "polymarket_price_action" / "price_action_paper_signal_summary.json",
+        {
+            "status": "computed",
+            "generated_at_utc": "2026-06-30T21:20:14Z",
+            "signals": 1,
+            "paper_confirmation_signals": 1,
+            "paper_confirmation_candidates": 1,
+        },
+    )
+    write_csv(
+        cfg.output_root / "polymarket_price_action" / "price_action_paper_signals.csv",
+        [
+            {
+                "market_id": "btc-confirmation-market",
+                "market_slug": "btc-confirmation-market",
+                "token_id": "btc-confirmation-token",
+                "side": "BUY_YES",
+                "price_action_entry_source": "paper_confirmation_candidate",
+                "price_action_evidence_status": "trusted_shadow_requires_broker_paper_confirmation",
+                "signal_cohort": "exploratory_crypto_updown_live_model|crypto_btc_updown_daily|outcome=down",
+            }
+        ],
+    )
+    write_csv(
+        cfg.output_root / "polymarket_portfolio" / "positions.csv",
+        [
+            {
+                "market_id": "btc-confirmation-market",
+                "token_id": "btc-confirmation-token",
+                "side": "BUY_YES",
+                "quantity": "6.0",
+                "cost_basis_usdc": "2.0",
+                "average_entry_price": "0.33",
+                "status": "open",
+                "updated_at": "2026-06-30T19:00:00Z",
+            }
+        ],
+    )
+
+    result = render_dashboard(cfg)
+    data = read_json(result["dashboard_data"])
+
+    paper_status = data["price_action_paper_signals"]
+    assert paper_status["signals"] == 1
+    assert paper_status["broker_refresh_needed"] is False
+    assert paper_status["pending_broker_signals"] == 0
+    assert paper_status["pending_broker_confirmation_signals"] == 0
+    assert paper_status["broker_matched_open_signal_positions"] == 1
+    assert "already has an open paper position" in paper_status["broker_refresh_reason"]
+    assert data["decision_useful_summary"]["trade_decision"] == "PAPER CONFIRMATION READY"
 
 
 def test_dashboard_tracks_paper_confirmation_probe_exit_horizon(tmp_path):

@@ -347,6 +347,33 @@ def _build_signal(
     }
 
 
+def _mutually_exclusive_key(signal: dict[str, Any]) -> str:
+    """Return the market-level key where only one outcome should be probed.
+
+    A binary Polymarket question can expose multiple outcome tokens. Opening
+    both sides is not a directional prediction; it usually locks in spread loss.
+    Keep this exact-market scoped so related but non-exclusive threshold markets
+    (for example BTC above 58k and BTC above 60k) can still be evaluated
+    independently.
+    """
+    return str(signal.get("correlation_key") or signal.get("market_slug") or signal.get("market_id") or "").strip().lower()
+
+
+def _dedupe_mutually_exclusive_signals(signals: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    selected: list[dict[str, Any]] = []
+    rejections: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for signal in signals:
+        key = _mutually_exclusive_key(signal)
+        if key and key in seen:
+            rejections.append(_reject(signal, "mutually exclusive paper signal already selected for market"))
+            continue
+        if key:
+            seen.add(key)
+        selected.append(signal)
+    return selected, rejections
+
+
 def _summary_decision(signals: list[dict[str, Any]], paper_confirmation: list[dict[str, Any]], rejections: list[dict[str, Any]]) -> str:
     if signals:
         return "signals_ready_for_paper_broker"
@@ -477,6 +504,8 @@ def build_price_action_paper_signals(cfg: EngineConfig) -> dict[str, Any]:
         signals.append(signal)
 
     signals.sort(key=lambda item: safe_float(item.get("priority_score")) or 0.0, reverse=True)
+    signals, mutually_exclusive_rejections = _dedupe_mutually_exclusive_signals(signals)
+    rejections.extend(mutually_exclusive_rejections)
     signals = signals[:max_signals]
     write_csv(out_dir / SIGNALS_FILE, signals, fieldnames=SIGNAL_FIELDS)
     write_csv(out_dir / REJECTIONS_FILE, rejections, fieldnames=REJECTION_FIELDS)
@@ -494,6 +523,7 @@ def build_price_action_paper_signals(cfg: EngineConfig) -> dict[str, Any]:
             for signal in signals
             if signal.get("price_action_evidence_status") == "trusted_shadow_requires_broker_paper_confirmation"
         ),
+        "mutually_exclusive_signal_rejections": len(mutually_exclusive_rejections),
         "source_round_trip_rows": len(round_trip_rows),
         "source_microstructure_current_rows": len(microstructure_current),
         "signal_file": str(out_dir / SIGNALS_FILE),

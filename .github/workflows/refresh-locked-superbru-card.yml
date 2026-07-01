@@ -290,9 +290,32 @@ jobs:
           retention-days: 7
 
       - name: Commit refreshed locked card outputs
-        uses: stefanzweifel/git-auto-commit-action@v5
-        with:
-          commit_message: Refresh locked SuperBru card
-          add_options: "-f"
-          branch: main
-          file_pattern: outputs/final_locked_picks/superbru_final_card.csv
+        run: |
+          set -euo pipefail
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          git add -f outputs/final_locked_picks/superbru_final_card.csv
+          if git diff --cached --quiet; then
+            echo "Locked SuperBru card is unchanged; nothing to commit."
+            exit 0
+          fi
+
+          git commit \
+            --author="daniedorfling18-maker <252545805+daniedorfling18-maker@users.noreply.github.com>" \
+            -m "Refresh locked SuperBru card"
+
+          for attempt in 1 2 3; do
+            git fetch origin main
+            if git rebase origin/main && git push origin HEAD:main; then
+              echo "Committed refreshed locked SuperBru card on attempt ${attempt}."
+              exit 0
+            fi
+            git rebase --abort || true
+            echo "Push attempt ${attempt} lost a race with a newer main commit; retrying."
+            sleep $((attempt * 5))
+          done
+
+          echo "Failed to push refreshed locked SuperBru card after retries."
+          exit 1

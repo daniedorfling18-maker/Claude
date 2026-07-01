@@ -306,6 +306,83 @@ def test_trusted_shadow_confirmation_backlog_compiles_paper_probe(tmp_path):
     assert float(signals[0]["max_hold_minutes_before_exit"]) == 45.0
 
 
+def test_paper_confirmation_rejects_mutually_exclusive_same_market_probe(tmp_path):
+    cfg = _cfg(tmp_path)
+    root = cfg.output_root / "polymarket_price_action"
+    feedback = _paper_confirmation_feedback_payload(
+        cohort="exploratory_crypto_updown_live_model|crypto_btc_updown_daily|outcome=down"
+    )
+    feedback["paper_confirmation_preview"][0]["recommended_collection_query"] = "btc updown"
+    write_json(
+        cfg.governance_root / "price_action_feedback.json",
+        feedback,
+    )
+    write_csv(
+        root / "price_action_scout_round_trip_evidence.csv",
+        [
+            _round_trip_row(
+                source="profit_sprint_target",
+                signal_cohort="price_action_scout|profit_sprint|crypto_btc_updown_event",
+                family="crypto_btc_updown_event",
+                market_slug="bitcoin-up-or-down-on-july-1-2026",
+                question="Bitcoin Up or Down on July 1?",
+                outcome="Down",
+                token_id="btc-down-token",
+                latest_bid="0.32",
+                latest_ask="0.33",
+                latest_spread="0.01",
+            ),
+            _round_trip_row(
+                source="profit_sprint_target",
+                signal_cohort="price_action_scout|profit_sprint|crypto_btc_updown_event",
+                family="crypto_btc_updown_event",
+                market_slug="bitcoin-up-or-down-on-july-1-2026",
+                question="Bitcoin Up or Down on July 1?",
+                outcome="Up",
+                token_id="btc-up-token",
+                latest_bid="0.67",
+                latest_ask="0.68",
+                latest_spread="0.01",
+            ),
+        ],
+    )
+    write_csv(
+        root / "price_action_scout_entries.csv",
+        [
+            _entry_row(
+                family="crypto_btc_updown_event",
+                market_slug="bitcoin-up-or-down-on-july-1-2026",
+                question="Bitcoin Up or Down on July 1?",
+                outcome="Down",
+                token_id="btc-down-token",
+                liquidity="9000",
+            ),
+            _entry_row(
+                family="crypto_btc_updown_event",
+                market_slug="bitcoin-up-or-down-on-july-1-2026",
+                question="Bitcoin Up or Down on July 1?",
+                outcome="Up",
+                token_id="btc-up-token",
+                liquidity="9000",
+            ),
+        ],
+    )
+
+    summary = build_price_action_paper_signals(cfg)
+    signals = read_csv_rows(root / "price_action_paper_signals.csv")
+    rejections = read_csv_rows(root / "price_action_paper_rejections.csv")
+
+    assert summary["signals"] == 1
+    assert summary["paper_confirmation_signals"] == 1
+    assert summary["mutually_exclusive_signal_rejections"] == 1
+    assert len(signals) == 1
+    assert {row["market_slug"] for row in signals} == {"bitcoin-up-or-down-on-july-1-2026"}
+    assert any(
+        row["rejection_reason"] == "mutually exclusive paper signal already selected for market"
+        for row in rejections
+    )
+
+
 def test_blocked_shadow_confirmation_backlog_stays_rejected(tmp_path):
     cfg = _cfg(tmp_path)
     root = cfg.output_root / "polymarket_price_action"

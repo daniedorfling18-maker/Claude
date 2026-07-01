@@ -190,6 +190,15 @@ const plain = (v) => escapeHtml(asText(v));
 const asNumber = (v, fallback=0) => Number.isFinite(Number(v)) ? Number(v) : fallback;
 const limitRows = (rows, max=6) => Array.isArray(rows) ? rows.slice(0, max) : [];
 function card(label, value, cls="") { return `<div class="card"><div class="label">${escapeHtml(label)}</div><div class="value ${cls}">${value}</div></div>`; }
+function decisionCards(rows) {
+  if (!Array.isArray(rows) || !rows.length) return "";
+  return rows.map(row => `
+    <div class="card">
+      <div class="label">${escapeHtml(row.label || "Decision metric")}</div>
+      <div class="value ${escapeHtml(row.severity || "")}">${longText(row.value ?? "-", 120)}</div>
+      <div class="muted">${longText(row.decision_use || row.why_it_matters || "", 170)}</div>
+    </div>`).join("");
+}
 function table(rows, columns) {
   if (!rows || !rows.length) return `<div class="muted">No rows yet.</div>`;
   return `<div class="tableWrap"><table><thead><tr>${columns.map(c=>`<th>${escapeHtml(c[0])}</th>`).join("")}</tr></thead><tbody>${rows.map(row=>`<tr>${columns.map(c=>`<td>${c[2] ? c[2](row[c[1]], row) : plain(row[c[1]])}</td>`).join("")}</tr>`).join("")}</tbody></table></div>`;
@@ -357,17 +366,14 @@ async function load() {
     const nearMissRows = (diag.current_near_miss_candidates && diag.current_near_miss_candidates.length)
       ? diag.current_near_miss_candidates
       : (diag.current_shadow_candidates || []);
-    document.getElementById("cards").innerHTML = [
-      card("Trade decision", tradeDecision, tradeDecisionClass),
-      card("Actual P&L since clean baseline", fmtUsd(pnl), pnl >= 0 ? "good" : "bad"),
-      card("Monthly run-rate", target.monthly_run_rate_usdc == null ? "Collecting" : fmtUsd(target.monthly_run_rate_usdc), target.monthly_run_rate_usdc >= target.target_monthly_profit_usdc ? "good" : ""),
-      card("Signal gate", `${approvedSignals} approved / ${paperRejections} rejected`, approvedSignals > 0 ? "good" : "warn"),
-      card("Next collect", joinText(collectQueries), collectQueries.length ? "good" : "warn"),
-      card("Model gate", validationGapActive ? "needs validation positives" : (priceActionModel.promotion_ready ? "validated" : priceActionModel.decision || priceActionModel.status || "unknown"), validationGapActive ? "warn" : priceActionModel.promotion_ready ? "good" : "warn"),
-      card("Research freshness", `${researchStatus} / ${fmtAge(researchAge)}`, researchStatus === "stale" ? "bad" : researchStatus === "running" || researchStatus === "completed" || researchStatus === "ok" ? "good" : "warn"),
-      card("Required/day", fmtUsd(goalPlan.required_daily_from_here_usdc), "warn"),
-      card("Live websocket", `${websocket.new_messages ?? "-"} msgs / ${websocketFeatures.feature_rows ?? "-"} features`, "good"),
-      card("Broker refresh", brokerRefreshLabel, priceActionPaper.broker_refresh_needed ? "warn" : "good")
+    const summaryDecisionCards = decisionCards(decisionSummary.decision_cards || []);
+    document.getElementById("cards").innerHTML = summaryDecisionCards || [
+      card("Can paper trade now?", tradeDecision, tradeDecisionClass),
+      card("Why not / why now?", longText(blockerText, 120), tradeDecisionClass),
+      card("Unlock condition", longText(unlockCondition, 120), approvedSignals > 0 ? "good" : "warn"),
+      card("Collect now", joinText(collectQueries), collectQueries.length ? "good" : "warn"),
+      card("$100/month state", `${fmtUsd(pnl)} actual / ${fmtUsd(target.monthly_run_rate_usdc)} run-rate`, pnl >= 0 ? "good" : "bad"),
+      card("Best edge route", `shadow ${fmtUsd(priceActionGoal.best_repricing_monthly_run_rate_usdc)} / paper ${fmtUsd(priceActionGoal.best_forward_paper_monthly_run_rate_usdc)}`, "warn")
     ].join("");
     document.getElementById("decisionCockpit").innerHTML = `
       <div class="decisionHero">
@@ -386,6 +392,11 @@ async function load() {
         <div class="decisionTile"><div class="tileLabel">Collect now</div><div class="tileValue">${joinText(collectQueries)}</div></div>
         <div class="decisionTile"><div class="tileLabel">Risk/P&L lesson</div><div class="tileValue">${longText(riskLesson, 180)}</div></div>
       </div>
+      ${titledTable("Operator questions", decisionSummary.decision_questions || [], [
+        ["Question","question", v=>longText(v, 130)],
+        ["Answer","answer", v=>longText(v, 220)],
+        ["Why it matters","decision_use", v=>longText(v, 240)]
+      ], 6)}
       ${visibleAlerts ? `<div class="alertGrid">${visibleAlerts}</div>` : ""}
       ${titledTable("Closest confirmation targets", decisionTargets, [
         ["Query","recommended_collection_query"],
@@ -410,17 +421,19 @@ async function load() {
       <div class="sectionLead">${longText(decisionSummary.operator_plain_english || "This panel shows only the actions that can move the bot toward a governed paper-trading edge.", 360)}</div>
       <div>${(decisionSummary.state_badges || []).map(item => badge(item.label || item, item.severity || "")).join("")}</div>
       ${actionList(decisionSummary.priority_actions || [])}
-      ${titledTable("Evidence lanes that matter now", decisionSummary.evidence_lanes || [], [
-        ["Lane","lane"],
-        ["State","state", v=>longText(v, 120)],
-        ["Decision use","decision_use", v=>longText(v, 180)],
-        ["Key metric","key_metric", v=>longText(v, 140)],
-        ["Blocker / next","blocker_or_next", v=>longText(v, 220)]
-      ], 8)}
-      ${titledTable("Audit-only panels hidden from the default decision view", decisionSummary.audit_only_panels || [], [
-        ["Panel","panel"],
-        ["Why not primary","reason", v=>longText(v, 240)]
-      ], 8)}
+      <details class="expand"><summary>Evidence lane drill-down</summary>
+        ${titledTable("Evidence lanes that matter now", decisionSummary.evidence_lanes || [], [
+          ["Lane","lane"],
+          ["State","state", v=>longText(v, 120)],
+          ["Decision use","decision_use", v=>longText(v, 180)],
+          ["Key metric","key_metric", v=>longText(v, 140)],
+          ["Blocker / next","blocker_or_next", v=>longText(v, 220)]
+        ], 8)}
+        ${titledTable("Filtered from the primary view", decisionSummary.audit_only_panels || [], [
+          ["Panel","panel"],
+          ["Why not primary","reason", v=>longText(v, 240)]
+        ], 8)}
+      </details>
     `;
     document.getElementById("modelHealth").innerHTML = facts([
       ["Model gate", priceActionModel.decision || decisionSummary.model_state, v=>longText(v, 220)],
@@ -1993,11 +2006,16 @@ def _price_action_paper_signal_status(cfg: EngineConfig) -> dict[str, Any]:
     summary_rejections = safe_float(summary.get("rejections"))
     signal_count = len(signals)
     rejection_count = len(rejections)
-    confirmation_signal_count = sum(
+    row_confirmation_signal_count = sum(
         1
         for signal in signals
         if signal.get("price_action_evidence_status") == "trusted_shadow_requires_broker_paper_confirmation"
+        or signal.get("price_action_entry_source") == "paper_confirmation_candidate"
     )
+    summary_confirmation_signals = int(safe_float(summary.get("paper_confirmation_signals")) or 0)
+    confirmation_signal_count = row_confirmation_signal_count
+    if signal_count and summary_confirmation_signals:
+        confirmation_signal_count = max(row_confirmation_signal_count, min(signal_count, summary_confirmation_signals))
     summary_signal_mismatch = summary_signals is not None and int(summary_signals) != signal_count
     summary_rejection_mismatch = summary_rejections is not None and int(summary_rejections) != rejection_count
     return {
@@ -2473,6 +2491,11 @@ def _decision_useful_summary(
         or safe_float(price_action_paper_signals.get("pending_broker_confirmation_signals"))
         or safe_float(price_action_paper_signals.get("pending_broker_exit_probes"))
     )
+    paper_confirmation_mode = bool(
+        price_action_paper_signals.get("paper_only")
+        or safe_float(price_action_paper_signals.get("paper_confirmation_signals"))
+        or safe_float(price_action_paper_signals.get("pending_broker_confirmation_signals"))
+    )
     shadow_status = str(oversight_status.get("shadow_research_status") or shadow_research.get("effective_status") or "")
     model_age = _age_seconds(price_action_model)
     model_stale = bool(model_age is not None and model_age > 900)
@@ -2539,6 +2562,16 @@ def _decision_useful_summary(
         )
         next_action = "Wait for RAM to drop, then allow the next shadow cycle to refresh evidence."
         unlock_condition = "A fresh cycle must complete under the memory guard without weakening trading gates."
+    elif shadow_status in {"running", "started", "in_progress"} and model_stale:
+        trade_decision = "WAIT: CYCLE RUNNING"
+        decision_class = "warn"
+        headline = "A fresh research cycle is already updating the model"
+        primary_blocker = (
+            f"The previous price-action model summary is {round(model_age, 1) if model_age is not None else 'unknown'} seconds old, "
+            "but the current shadow cycle is running and should refresh model, signal, and dashboard artifacts."
+        )
+        next_action = "Let the running shadow cycle finish; do not start a competing governance refresh."
+        unlock_condition = "The running cycle must complete and publish fresh model, signal, and dashboard artifacts."
     elif model_stale:
         trade_decision = "WAIT: MODEL STALE"
         decision_class = "bad"
@@ -2547,16 +2580,32 @@ def _decision_useful_summary(
         next_action = "Refresh governance so the price-action model is rescored before any paper promotion."
         unlock_condition = "Fresh model timestamp plus unchanged governance gates."
     elif approved_signals > 0:
-        trade_decision = "RUN PAPER BROKER" if broker_work_pending else "PAPER READY"
+        trade_decision = (
+            "RUN PAPER CONFIRMATION BROKER"
+            if paper_confirmation_mode and broker_work_pending
+            else "PAPER CONFIRMATION READY"
+            if paper_confirmation_mode
+            else "RUN PAPER BROKER"
+            if broker_work_pending
+            else "PAPER READY"
+        )
         decision_class = "good"
-        headline = "Approved governed paper signals exist"
+        headline = "Paper-confirmation probes are ready" if paper_confirmation_mode else "Approved governed paper signals exist"
         primary_blocker = (
-            "Approved signals are waiting for the broker refresh."
+            "Paper-confirmation signals are waiting for the broker refresh; this is not live approval or sizing promotion."
+            if paper_confirmation_mode and broker_work_pending
+            else "Paper-confirmation signals are ready; monitor them as evidence, not proof."
+            if paper_confirmation_mode
+            else "Approved signals are waiting for the broker refresh."
             if broker_work_pending
             else "Approved signals have reached the paper lane; monitor fills, exits, and realised P&L."
         )
         next_action = (
-            "Run/allow the paper broker refresh and verify fills are recorded."
+            "Run/allow the paper broker refresh and verify confirmation fills are recorded."
+            if paper_confirmation_mode and broker_work_pending
+            else "Monitor confirmation fills, exits, and cohort P&L before promotion."
+            if paper_confirmation_mode
+            else "Run/allow the paper broker refresh and verify fills are recorded."
             if broker_work_pending
             else "Monitor forward paper P&L by signal cohort and keep stake capped until evidence remains positive."
         )
@@ -2629,11 +2678,12 @@ def _decision_useful_summary(
     if collect_now:
         state_badges.append({"label": "collect: " + ", ".join(collect_now[:3]), "severity": "good"})
 
+    priority_owner = "paper confirmation broker" if paper_confirmation_mode and approved_signals > 0 else "paper broker" if approved_signals > 0 else "research cycle"
     priority_actions = [
         {
             "title": next_action,
             "body": primary_blocker,
-            "owner": "research cycle",
+            "owner": priority_owner,
             "success_metric": unlock_condition,
         }
     ]
@@ -2736,6 +2786,93 @@ def _decision_useful_summary(
         },
     ]
 
+    can_trade_now = decision_class == "good" and approved_signals > 0
+    collect_text = ", ".join(collect_now) if collect_now else "No priority collection target is active."
+    profit_target_text = f"{_usd_text(actual_pnl)} actual; {_usd_text(run_rate)} monthly run-rate vs {_usd_text(target_monthly)} target"
+    edge_route_text = f"shadow repricing {_usd_text(best_repricing_run_rate)}; forward paper {_usd_text(forward_paper_run_rate)}"
+    decision_questions = [
+        {
+            "question": "Can the bot paper trade now?",
+            "answer": (
+                "Yes - paper-confirmation probes exist; keep them evidence-only and monitor fills."
+                if paper_confirmation_mode and can_trade_now
+                else "Yes - governed paper signals exist; keep stake capped and monitor fills."
+                if can_trade_now
+                else f"No - {trade_decision}: {primary_blocker}"
+            ),
+            "decision_use": "This is the only top-line authorisation question for the broker lane.",
+        },
+        {
+            "question": "What unlocks the next trade?",
+            "answer": unlock_condition,
+            "decision_use": "Prevents forcing trades by making the evidence requirement explicit.",
+        },
+        {
+            "question": "What should the bot collect next?",
+            "answer": collect_text,
+            "decision_use": "Turns research focus into a concrete websocket/liquidity collection target.",
+        },
+        {
+            "question": "Are we on pace for $100/month?",
+            "answer": profit_target_text,
+            "decision_use": "Measures the live paper account against the affordability objective, not historical backtest optimism.",
+        },
+        {
+            "question": "Which edge route is being tested?",
+            "answer": edge_route_text,
+            "decision_use": "Separates promising shadow repricing from confirmed forward paper profit.",
+        },
+        {
+            "question": "What did the last losses teach?",
+            "answer": learning_verdict,
+            "decision_use": "Keeps the model learning from failed exits instead of widening weak cohorts.",
+        },
+    ]
+    decision_cards = [
+        {
+            "label": "Can paper trade now?",
+            "value": (
+                "Yes - paper-confirmation probes exist"
+                if paper_confirmation_mode and can_trade_now
+                else "Yes - governed paper signals exist"
+                if can_trade_now
+                else f"No - {trade_decision}"
+            ),
+            "severity": "good" if can_trade_now else decision_class,
+            "decision_use": "Broker action is allowed only from approved paper or paper-confirmation signals.",
+        },
+        {
+            "label": "Why / why not?",
+            "value": primary_blocker,
+            "severity": decision_class,
+            "decision_use": "The main blocker must be removed before trusting new trades.",
+        },
+        {
+            "label": "Unlock condition",
+            "value": unlock_condition,
+            "severity": "good" if can_trade_now else "warn",
+            "decision_use": "The next measurable condition that changes the bot state.",
+        },
+        {
+            "label": "Collect now",
+            "value": collect_text,
+            "severity": "good" if collect_now else "warn",
+            "decision_use": "The next data collection target for the learning loop.",
+        },
+        {
+            "label": "$100/month state",
+            "value": profit_target_text,
+            "severity": "good" if run_rate is not None and run_rate >= target_monthly else "bad",
+            "decision_use": "Shows whether paper trading is actually paying for the capital goal.",
+        },
+        {
+            "label": "Edge route",
+            "value": edge_route_text,
+            "severity": "good" if forward_paper_run_rate is not None and forward_paper_run_rate > 0 else "warn",
+            "decision_use": "Shadow edge is research; forward paper P&L is proof.",
+        },
+    ]
+
     return {
         "trade_decision": trade_decision,
         "decision_class": decision_class,
@@ -2757,6 +2894,8 @@ def _decision_useful_summary(
         "best_repricing_monthly_run_rate_usdc": best_repricing_run_rate,
         "best_forward_paper_monthly_run_rate_usdc": forward_paper_run_rate,
         "state_badges": state_badges,
+        "decision_cards": decision_cards,
+        "decision_questions": decision_questions,
         "priority_actions": priority_actions[:4],
         "evidence_lanes": evidence_lanes,
         "audit_only_panels": audit_only_panels,
@@ -2816,6 +2955,7 @@ def _broker_signal_freshness(
     price_action_signals: dict[str, Any],
     broker: dict[str, Any],
     paper_probe_exit_watch: dict[str, Any] | None = None,
+    open_positions: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     """Report whether current price-action paper signals have reached the broker.
 
@@ -2825,9 +2965,35 @@ def _broker_signal_freshness(
     """
     signal_count = int(safe_float(price_action_signals.get("signals")) or 0)
     confirmation_count = int(safe_float(price_action_signals.get("paper_confirmation_signals")) or 0)
+    signal_rows = price_action_signals.get("top_signals") if isinstance(price_action_signals.get("top_signals"), list) else []
+    position_rows = open_positions if isinstance(open_positions, list) else []
+    open_position_keys = {
+        (
+            str(position.get("market_id") or "").strip(),
+            str(position.get("token_id") or "").strip(),
+            str(position.get("side") or "BUY_YES").strip() or "BUY_YES",
+        )
+        for position in position_rows
+        if str(position.get("status") or "open").strip().lower() == "open"
+        and (safe_float(position.get("quantity")) or 0.0) > 0
+    }
+    pending_signal_rows: list[dict[str, Any]] = []
+    if signal_rows and len(signal_rows) >= signal_count:
+        for signal in signal_rows[:signal_count]:
+            key = (
+                str(signal.get("market_id") or signal.get("market_slug") or "").strip(),
+                str(signal.get("token_id") or "").strip(),
+                str(signal.get("side") or "BUY_YES").strip() or "BUY_YES",
+            )
+            if key not in open_position_keys:
+                pending_signal_rows.append(signal)
     signal_time = parse_timestamp(price_action_signals.get("generated_at_utc"))
     broker_time = parse_timestamp(broker.get("generated_at_utc"))
-    stale = bool(signal_count > 0 and (broker_time is None or (signal_time is not None and signal_time > broker_time)))
+    timestamp_stale = bool(signal_count > 0 and (broker_time is None or (signal_time is not None and signal_time > broker_time)))
+    if timestamp_stale and signal_rows and len(signal_rows) >= signal_count:
+        stale = bool(pending_signal_rows)
+    else:
+        stale = timestamp_stale
     exit_watch = paper_probe_exit_watch if isinstance(paper_probe_exit_watch, dict) else {}
     due_exit_count = int(safe_float(exit_watch.get("fixed_horizon_due_count")) or 0)
     open_exit_probes = int(safe_float(exit_watch.get("open_confirmation_probes")) or 0)
@@ -2837,12 +3003,25 @@ def _broker_signal_freshness(
         if stale and signal_time is not None and broker_time is not None
         else None
     )
+    pending_signal_count = len(pending_signal_rows) if signal_rows and len(signal_rows) >= signal_count else signal_count
+    pending_confirmation_count = (
+        sum(
+            1
+            for signal in pending_signal_rows
+            if signal.get("price_action_evidence_status") == "trusted_shadow_requires_broker_paper_confirmation"
+            or signal.get("price_action_entry_source") == "paper_confirmation_candidate"
+        )
+        if signal_rows and len(signal_rows) >= signal_count
+        else confirmation_count
+    )
     if stale:
         reason = (
             "Price-action paper signals were generated after the latest broker run."
             if broker_time is not None
             else "Price-action paper signals exist but no broker run timestamp is available."
         )
+    elif timestamp_stale and signal_count > 0 and signal_rows and len(signal_rows) >= signal_count:
+        reason = "Latest signal file is newer than the broker run, but every current signal already has an open paper position."
     elif exit_refresh_needed:
         reason = "One or more open paper-confirmation probes reached their fixed exit horizon."
     else:
@@ -2851,10 +3030,13 @@ def _broker_signal_freshness(
         "broker_refresh_needed": stale or exit_refresh_needed,
         "broker_signal_refresh_needed": stale,
         "broker_exit_refresh_needed": exit_refresh_needed,
-        "pending_broker_signals": signal_count if stale else 0,
-        "pending_broker_confirmation_signals": confirmation_count if stale else 0,
+        "pending_broker_signals": pending_signal_count if stale else 0,
+        "pending_broker_confirmation_signals": pending_confirmation_count if stale else 0,
         "pending_broker_exit_probes": due_exit_count,
         "open_broker_exit_probes": open_exit_probes,
+        "broker_matched_open_signal_positions": max(0, signal_count - pending_signal_count)
+        if signal_rows and len(signal_rows) >= signal_count
+        else None,
         "next_broker_exit_due_utc": exit_watch.get("next_due_utc", ""),
         "next_broker_exit_due_minutes": exit_watch.get("next_due_minutes"),
         "signal_generated_at_utc": price_action_signals.get("generated_at_utc"),
@@ -2932,6 +3114,7 @@ def render_dashboard(cfg: EngineConfig, latest_report: dict[str, Any] | None = N
         price_action_paper_signal_status,
         broker_summary,
         paper_probe_exit_watch,
+        positions,
     )
     price_action_paper_signal_status = {**price_action_paper_signal_status, **broker_signal_freshness}
     price_action_feedback = read_json(governance / "price_action_feedback.json", default={}) or {}

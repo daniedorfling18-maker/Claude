@@ -39,12 +39,41 @@ function Get-MemorySnapshot {
   }
 }
 
+$script:StoppedHighMemory = $false
+$script:StoppedHighMemoryPhase = ""
+$script:StoppedHighMemorySnapshot = $null
+
+function Stop-ForHighMemory {
+  param(
+    [string]$Phase,
+    [object]$MemorySnapshot
+  )
+  $script:StoppedHighMemory = $true
+  $script:StoppedHighMemoryPhase = $Phase
+  $script:StoppedHighMemorySnapshot = $MemorySnapshot
+  $message = "Shadow research cycle stopped at $Phase because local memory was $($MemorySnapshot.used_percent)% at or above the $MaxMemoryPercent% guardrail."
+  Write-LogLine $message
+  throw $message
+}
+
+function Assert-MemoryBelowGuard {
+  param([string]$Phase)
+  $snapshot = Get-MemorySnapshot
+  if ($snapshot) {
+    Write-LogLine "Memory at $($Phase): $($snapshot.used_percent)% used, $($snapshot.free_gb) GB free"
+    if ($snapshot.used_percent -ge $MaxMemoryPercent) {
+      Stop-ForHighMemory -Phase $Phase -MemorySnapshot $snapshot
+    }
+  }
+}
+
 function Invoke-Step {
   param(
     [string]$Name,
     [string[]]$Arguments,
     [string]$OutFile
   )
+  Assert-MemoryBelowGuard -Phase "before_$Name"
   Write-LogLine "=== $Name ==="
   $safeName = $Name -replace "[^A-Za-z0-9_.-]", "_"
   $stdoutPath = Join-Path $repoRoot "work\.$stamp.$safeName.stdout.tmp"
@@ -78,6 +107,7 @@ function Invoke-Step {
   if ($exitCode -ne 0) {
     throw "$Name failed with exit code $exitCode"
   }
+  Assert-MemoryBelowGuard -Phase "after_$Name"
 }
 
 $startedAt = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ")
@@ -218,6 +248,29 @@ try {
   exit 0
 } catch {
   $endedAt = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ")
+  if ($script:StoppedHighMemory) {
+    $memory = $script:StoppedHighMemorySnapshot
+    $status = [ordered]@{
+      status = "stopped_high_memory"
+      started_at_utc = $startedAt
+      ended_at_utc = $endedAt
+      stamp = $stamp
+      phase = $script:StoppedHighMemoryPhase
+      reason = $_.Exception.Message
+      memory_used_percent = if ($memory) { $memory.used_percent } else { $null }
+      memory_free_gb = if ($memory) { $memory.free_gb } else { $null }
+      memory_total_gb = if ($memory) { $memory.total_gb } else { $null }
+      max_memory_percent = $MaxMemoryPercent
+      dashboard_status = "skipped_after_memory_stop"
+      dashboard_reason = "Dashboard refresh was skipped because the cycle had already crossed the memory guardrail."
+      log_file = $logFile
+      paper_trading_invoked = $false
+      live_trading_invoked = $false
+    }
+    $status | ConvertTo-Json -Depth 8 | Set-Content $statusFile -Encoding UTF8
+    Write-LogLine "Stopped cleanly due to memory guard at phase $script:StoppedHighMemoryPhase"
+    exit 0
+  }
   $status = [ordered]@{
     status = "error"
     started_at_utc = $startedAt

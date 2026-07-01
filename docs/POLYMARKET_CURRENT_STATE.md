@@ -114,6 +114,15 @@ paper_trading_invoked = false
 live_trading_invoked = false
 ```
 
+If RAM crosses the configured local guardrail after the cycle has already started, the runner now stops
+cleanly instead of continuing through heavier modelling/dashboard steps:
+
+```text
+status = stopped_high_memory
+paper_trading_invoked = false
+live_trading_invoked = false
+```
+
 ## Current important output files
 
 ```text

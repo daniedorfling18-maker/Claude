@@ -221,6 +221,24 @@ def test_shadow_research_cycle_bounds_each_python_step():
     assert "$exitCode = [int]$process.ExitCode" in text
 
 
+def test_shadow_research_cycle_checks_memory_between_python_steps():
+    text = _script_text("scripts/run_polymarket_shadow_research_cycle.ps1")
+
+    assert "function Assert-MemoryBelowGuard" in text
+    assert "function Stop-ForHighMemory" in text
+    assert 'Assert-MemoryBelowGuard -Phase "before_$Name"' in text
+    assert 'Assert-MemoryBelowGuard -Phase "after_$Name"' in text
+    assert 'status = "stopped_high_memory"' in text
+    assert "skipped_after_memory_stop" in text
+    invoke_step_index = text.index("function Invoke-Step")
+    start_process_index = text.index("Start-Process", invoke_step_index)
+    before_guard_index = text.index('Assert-MemoryBelowGuard -Phase "before_$Name"', invoke_step_index)
+    after_guard_index = text.index('Assert-MemoryBelowGuard -Phase "after_$Name"', invoke_step_index)
+
+    assert before_guard_index < start_process_index
+    assert start_process_index < after_guard_index
+
+
 def test_shadow_research_cycle_refreshes_price_action_learning_and_governance():
     text = _script_text("scripts/run_polymarket_shadow_research_cycle.ps1")
 

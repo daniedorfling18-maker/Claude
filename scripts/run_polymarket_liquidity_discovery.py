@@ -76,6 +76,17 @@ _DEFAULT_BROAD_DISCOVERY_QUERIES = [
     "culture",
 ]
 
+_CRYPTO_UPDOWN_QUERY_ASSETS = {
+    "btc": ("bitcoin", "btc"),
+    "bitcoin": ("bitcoin", "btc"),
+    "eth": ("ethereum", "eth"),
+    "ethereum": ("ethereum", "eth"),
+    "sol": ("solana", "sol"),
+    "solana": ("solana", "sol"),
+    "xrp": ("xrp", "xrp"),
+    "ripple": ("xrp", "xrp"),
+}
+
 
 def _settings(cfg: EngineConfig) -> dict[str, Any]:
     return cfg.raw.get("liquidity_discovery", {}) or {}
@@ -99,6 +110,79 @@ def _dedupe_keep_order(values: list[str]) -> list[str]:
         seen.add(key)
         out.append(value)
     return out
+
+
+def _is_crypto_updown_query(query: str) -> bool:
+    text = f" {query.strip().lower()} "
+    compact = text.replace(" ", "")
+    return "updown" in compact or " up or down " in text
+
+
+def _crypto_updown_query_asset(query: str) -> tuple[str, str] | None:
+    text = f" {query.strip().lower()} "
+    for key, aliases in _CRYPTO_UPDOWN_QUERY_ASSETS.items():
+        if f" {key} " in text or text.strip().startswith(f"{key} "):
+            return aliases
+    return None
+
+
+def _crypto_updown_query_aliases(query: str, settings: dict[str, Any]) -> list[str]:
+    """Expand model feedback like ``btc updown`` into Polymarket search terms.
+
+    The public search endpoint often ranks noisy 5-minute contracts ahead of the
+    hourly/event markets we need for paper-confirmation evidence. These aliases
+    deliberately focus on the canonical "Up or Down" wording and date windows;
+    they do not add explicit 5-minute aliases unless a caller opts in through
+    liquidity_discovery.include_fast_updown_aliases.
+    """
+
+    if not _is_crypto_updown_query(query):
+        return []
+    asset = _crypto_updown_query_asset(query)
+    if asset is None:
+        return []
+    canonical, ticker = asset
+    aliases = [
+        f"{canonical} up or down",
+        f"{canonical} updown",
+        f"{ticker} up or down",
+        f"{ticker} updown",
+    ]
+    search = settings.get("crypto_updown_date_search", {}) or {}
+    if search.get("enabled", True):
+        days_ahead = int(search.get("days_ahead", 2))
+        now = datetime.now(timezone.utc)
+        for day_offset in range(0, max(0, days_ahead) + 1):
+            day = now + timedelta(days=day_offset)
+            date_text = f"{day.strftime('%B')} {day.day} {day.year}"
+            aliases.extend(
+                [
+                    f"{canonical} up or down {date_text}",
+                    f"{canonical} up or down on {date_text}",
+                    f"{canonical} updown {date_text}",
+                ]
+            )
+    return aliases
+
+
+def _configured_query_aliases(settings: dict[str, Any], query: str) -> list[str]:
+    aliases = settings.get("query_aliases", {}) or {}
+    if not isinstance(aliases, dict):
+        return []
+    configured = aliases.get(query) or aliases.get(query.lower())
+    values = _string_list(configured)
+    if settings.get("include_fast_updown_aliases", False):
+        return values
+    return [value for value in values if "5m" not in value.lower() and "5 min" not in value.lower()]
+
+
+def _expand_query_aliases(queries: list[str], settings: dict[str, Any]) -> list[str]:
+    expanded: list[str] = []
+    for query in queries:
+        expanded.append(query)
+        expanded.extend(_configured_query_aliases(settings, query))
+        expanded.extend(_crypto_updown_query_aliases(query, settings))
+    return _dedupe_keep_order(expanded)
 
 
 def _adaptive_collection_queries(cfg: EngineConfig) -> list[str]:
@@ -139,7 +223,10 @@ def _event_queries(settings: dict[str, Any], adaptive_queries: list[str] | None 
     if not isinstance(configured, list):
         configured = [configured]
     configured_queries = [str(query or "").strip() for query in configured]
-    return _dedupe_keep_order([*(adaptive_queries or []), *configured_queries, *_broad_queries(settings)])
+    return _expand_query_aliases(
+        _dedupe_keep_order([*(adaptive_queries or []), *configured_queries, *_broad_queries(settings)]),
+        settings,
+    )
 
 
 def _fast_feedback_excluded_families(settings: dict[str, Any]) -> set[str]:
@@ -222,12 +309,17 @@ def _crypto_updown_public_queries(settings: dict[str, Any]) -> list[str]:
             clean_asset = str(asset or "").strip()
             if clean_asset:
                 queries.append(f"{clean_asset} up or down {date_text}")
+                queries.append(f"{clean_asset} up or down on {date_text}")
+                queries.append(f"{clean_asset} updown {date_text}")
     return queries
 
 
 def _public_search_queries(settings: dict[str, Any], adaptive_queries: list[str] | None = None) -> list[str]:
     queries = _string_list(settings.get("public_search_queries"))
-    return _dedupe_keep_order([*(adaptive_queries or []), *queries, *_broad_queries(settings), *_crypto_updown_public_queries(settings)])
+    return _expand_query_aliases(
+        _dedupe_keep_order([*(adaptive_queries or []), *queries, *_broad_queries(settings), *_crypto_updown_public_queries(settings)]),
+        settings,
+    )
 
 
 def _discover_tokens(cfg: EngineConfig, settings: dict[str, Any]) -> tuple[list[scanner.OutcomeToken], list[dict[str, Any]], list[str]]:

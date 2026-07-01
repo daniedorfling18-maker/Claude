@@ -2517,6 +2517,28 @@ def _decision_useful_summary(
         )
         next_action = "Refresh the shadow research/governance cycle before acting on any signal counts."
         unlock_condition = "A fresh shadow-research cycle must complete or be actively running with current model and signal files."
+    elif shadow_status in {"error", "failed"}:
+        trade_decision = "WAIT: CYCLE FAILED"
+        decision_class = "bad"
+        headline = "The latest research cycle failed before producing trustworthy signals"
+        primary_blocker = str(
+            shadow_research.get("error")
+            or shadow_research.get("reason")
+            or oversight_status.get("shadow_research_reason")
+            or "The current safe research lane reported failure."
+        )
+        next_action = "Fix or rerun the failed shadow research cycle after memory is below the guardrail; do not trade from partial outputs."
+        unlock_condition = "The shadow cycle must complete and refresh model, signal, and dashboard artifacts after the failing phase."
+    elif shadow_status in {"skipped_high_memory", "stopped_high_memory", "memory_paused"}:
+        trade_decision = "WAIT: MEMORY GUARD"
+        decision_class = "warn"
+        headline = "The local resource guard stopped the research cycle"
+        primary_blocker = str(
+            shadow_research.get("reason")
+            or "The cycle skipped or stopped because RAM was above the configured guardrail."
+        )
+        next_action = "Wait for RAM to drop, then allow the next shadow cycle to refresh evidence."
+        unlock_condition = "A fresh cycle must complete under the memory guard without weakening trading gates."
     elif model_stale:
         trade_decision = "WAIT: MODEL STALE"
         decision_class = "bad"

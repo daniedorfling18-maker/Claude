@@ -205,6 +205,41 @@ def test_dashboard_emits_decision_useful_summary_for_missing_fresh_candidate(tmp
     assert any(row["lane"] == "Paper trade gate" for row in summary["evidence_lanes"])
 
 
+def test_dashboard_decision_summary_prioritises_failed_cycle_over_stale_model(tmp_path):
+    cfg = _config(tmp_path)
+    write_json(
+        cfg.output_root / "polymarket_price_action" / "price_action_model_summary.json",
+        {
+            "status": "trained",
+            "generated_at_utc": "2026-06-25T00:00:00Z",
+            "decision": "collect_more_bid_ask_price_action_model_evidence",
+            "promotion_ready": False,
+        },
+    )
+    write_json(
+        cfg.path.parent / "work" / "shadow_research_cycle_latest_status.json",
+        {
+            "status": "error",
+            "started_at_utc": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+            "ended_at_utc": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+            "phase": "generate-signals-dry",
+            "error": "generate-signals-dry timed out after 180 seconds",
+            "error_type": "step_timeout",
+            "paper_trading_invoked": False,
+            "live_trading_invoked": False,
+        },
+    )
+
+    result = render_dashboard(cfg)
+
+    data = read_json(result["dashboard_data"])
+    summary = data["decision_useful_summary"]
+    assert summary["trade_decision"] == "WAIT: CYCLE FAILED"
+    assert summary["headline"] == "The latest research cycle failed before producing trustworthy signals"
+    assert summary["primary_blocker"] == "generate-signals-dry timed out after 180 seconds"
+    assert summary["shadow_research_status"] == "error"
+
+
 def test_dashboard_prefers_fresh_broker_and_profit_tracker_over_stale_forward_cycle(tmp_path):
     cfg = _config(tmp_path)
     write_json(

@@ -94,6 +94,20 @@ function Invoke-Step {
     try { Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue } catch {}
     $message = "$Name timed out after $StepTimeoutSeconds seconds"
     $message | Tee-Object -FilePath $OutFile | Tee-Object -FilePath $logFile -Append
+    $endedAt = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ")
+    $timeoutStatus = [ordered]@{
+      status = "error"
+      started_at_utc = $startedAt
+      ended_at_utc = $endedAt
+      stamp = $stamp
+      phase = $Name
+      error = $message
+      error_type = "step_timeout"
+      log_file = $logFile
+      paper_trading_invoked = $false
+      live_trading_invoked = $false
+    }
+    $timeoutStatus | ConvertTo-Json -Depth 8 | Set-Content $statusFile -Encoding UTF8
     throw $message
   }
   $lines = @()

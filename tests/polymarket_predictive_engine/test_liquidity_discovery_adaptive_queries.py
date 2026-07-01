@@ -59,3 +59,41 @@ def test_liquidity_discovery_prepends_model_validation_gap_queries(tmp_path):
     assert event_queries[-1] == "world cup"
     assert public_queries[:4] == ["fed", "ethereum", "esports", "economy"]
     assert public_queries[-1] == "bitcoin"
+
+
+def test_liquidity_discovery_expands_updown_feedback_queries_without_5m_aliases(tmp_path):
+    cfg = _cfg(tmp_path)
+    write_json(
+        cfg.governance_root / "price_action_feedback.json",
+        {
+            "status": "ok",
+            "collection_queries": ["btc updown", "solana updown"],
+        },
+    )
+
+    adaptive_queries = discovery._adaptive_collection_queries(cfg)
+    settings = {
+        "queries": ["world cup"],
+        "broad_discovery_enabled": False,
+        "crypto_updown_date_search": {"enabled": True, "days_ahead": 1},
+        "query_aliases": {
+            "btc updown": ["bitcoin up or down", "btc updown 5m"],
+            "solana updown": ["solana up or down", "solana updown 5m"],
+        },
+    }
+
+    event_queries = discovery._event_queries(settings, adaptive_queries=adaptive_queries)
+    public_queries = discovery._public_search_queries(
+        {"**": "unused", **settings, "public_search_queries": []},
+        adaptive_queries=adaptive_queries,
+    )
+
+    for queries in (event_queries, public_queries):
+        assert "btc updown" in queries
+        assert "bitcoin up or down" in queries
+        assert "bitcoin updown" in queries
+        assert any(query.startswith("bitcoin up or down ") for query in queries)
+        assert "solana updown" in queries
+        assert "solana up or down" in queries
+        assert any(query.startswith("solana up or down ") for query in queries)
+        assert all("5m" not in query for query in queries)

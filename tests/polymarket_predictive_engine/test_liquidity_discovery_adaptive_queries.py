@@ -1,13 +1,20 @@
 from __future__ import annotations
 
-import importlib
+import importlib.util
 from pathlib import Path
 
 from polymarket_predictive_engine.config import EngineConfig
 from polymarket_predictive_engine.utils import write_json
 
 
-discovery = importlib.import_module("scripts.run_polymarket_liquidity_discovery")
+ROOT = Path(__file__).resolve().parents[2]
+SPEC = importlib.util.spec_from_file_location(
+    "run_polymarket_liquidity_discovery",
+    ROOT / "scripts" / "run_polymarket_liquidity_discovery.py",
+)
+assert SPEC and SPEC.loader
+discovery = importlib.util.module_from_spec(SPEC)
+SPEC.loader.exec_module(discovery)
 
 
 def _cfg(tmp_path: Path) -> EngineConfig:

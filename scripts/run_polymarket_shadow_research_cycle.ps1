@@ -4,6 +4,8 @@
   [int]$StepTimeoutSeconds = 180,
   [double]$MaxMemoryPercent = 99.0,
   [double]$TargetedLiquidityMemoryPercent = 95.0,
+  [int]$MemoryGuardRetrySeconds = 75,
+  [int]$MemoryGuardRetryIntervalSeconds = 15,
   [double]$DashboardOnlyMaxMemoryPercent = 99.5,
   [switch]$SkipDashboardOnHighMemory
 )
@@ -64,8 +66,23 @@ function Assert-MemoryBelowGuard {
   $snapshot = Get-MemorySnapshot
   if ($snapshot) {
     Write-LogLine "Memory at $($Phase): $($snapshot.used_percent)% used, $($snapshot.free_gb) GB free"
+    $retrySeconds = [math]::Max(0, $MemoryGuardRetrySeconds)
+    $retryInterval = [math]::Max(1, $MemoryGuardRetryIntervalSeconds)
+    $waitedSeconds = 0
+    while ($snapshot.used_percent -ge $MaxMemoryPercent -and $waitedSeconds -lt $retrySeconds) {
+      $remaining = $retrySeconds - $waitedSeconds
+      $sleepSeconds = [math]::Min($retryInterval, $remaining)
+      Write-LogLine "Memory guard wait at $($Phase): $($snapshot.used_percent)% is above $MaxMemoryPercent%; waiting $sleepSeconds seconds before rechecking."
+      Start-Sleep -Seconds $sleepSeconds
+      $waitedSeconds += $sleepSeconds
+      $snapshot = Get-MemorySnapshot
+      if (-not $snapshot) {
+        return
+      }
+      Write-LogLine "Memory retry at $($Phase): $($snapshot.used_percent)% used, $($snapshot.free_gb) GB free after waiting $waitedSeconds seconds"
+    }
     if ($snapshot.used_percent -ge $MaxMemoryPercent) {
-      Stop-ForHighMemory -Phase $Phase -MemorySnapshot $snapshot
+      Stop-ForHighMemory -Phase "$Phase after waiting $waitedSeconds seconds for memory recovery" -MemorySnapshot $snapshot
     }
   }
 }
@@ -154,6 +171,7 @@ Write-LogLine "Websocket seconds: $WebsocketSeconds"
 Write-LogLine "Step timeout seconds: $StepTimeoutSeconds"
 Write-LogLine "Memory guard: heavy cycle max $MaxMemoryPercent%; dashboard-only max $DashboardOnlyMaxMemoryPercent%"
 Write-LogLine "Liquidity discovery mode threshold: targeted evidence at or above $TargetedLiquidityMemoryPercent% memory"
+Write-LogLine "Memory guard retry: wait up to $MemoryGuardRetrySeconds seconds, rechecking every $MemoryGuardRetryIntervalSeconds seconds"
 
 $env:PYTHONPATH = (Resolve-Path .\src).Path
 $memory = Get-MemorySnapshot

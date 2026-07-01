@@ -247,6 +247,17 @@ def test_shadow_research_cycle_checks_memory_between_python_steps():
     assert start_process_index < after_guard_index
 
 
+def test_shadow_research_cycle_retries_memory_guard_before_stopping():
+    text = _script_text("scripts/run_polymarket_shadow_research_cycle.ps1")
+
+    assert "[int]$MemoryGuardRetrySeconds = 75" in text
+    assert "[int]$MemoryGuardRetryIntervalSeconds = 15" in text
+    assert "Memory guard wait at" in text
+    assert "Start-Sleep -Seconds $sleepSeconds" in text
+    assert "Memory retry at" in text
+    assert "after waiting $waitedSeconds seconds for memory recovery" in text
+
+
 def test_shadow_research_cycle_status_records_runner_process_id():
     text = _script_text("scripts/run_polymarket_shadow_research_cycle.ps1")
 

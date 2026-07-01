@@ -485,6 +485,7 @@ def test_prediction_cycle_status_is_background_friendly():
     )
 
     assert loop.build_parser().parse_args([]).prediction_cycle_seconds == 15.0
+    assert loop.build_parser().parse_args([]).governance_refresh_seconds == 120.0
     assert running == {
         "status": "running",
         "source": "websocket",

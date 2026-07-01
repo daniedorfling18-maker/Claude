@@ -24,6 +24,8 @@ def test_vps_paper_compose_is_lean_and_paper_only():
     assert paper_env["PM_MODE"] == "scan"
     assert "--paper-source websocket" in services["polymarket-paper-live"]["command"]
     assert "--optimize-model" in services["polymarket-paper-live"]["command"]
+    assert "--governance-refresh-seconds $${POLYMARKET_GOVERNANCE_REFRESH_SECONDS}" in services["polymarket-paper-live"]["command"]
+    assert paper_env["POLYMARKET_GOVERNANCE_REFRESH_SECONDS"] == "${POLYMARKET_GOVERNANCE_REFRESH_SECONDS:-120}"
 
     assert services["polymarket-paper-live"]["restart"] == "unless-stopped"
     assert services["polymarket-dashboard"]["restart"] == "unless-stopped"
@@ -39,6 +41,7 @@ def test_vps_env_example_keeps_live_credentials_empty():
     assert "POLYMARKET_PRIVATE_KEY=" in text
     assert "CLOB_API_KEY=" in text
     assert "PM_PAPER_MEM_LIMIT=4g" in text
+    assert "POLYMARKET_GOVERNANCE_REFRESH_SECONDS=120" in text
 
 
 def test_vps_bootstrap_script_starts_only_lean_paper_stack():

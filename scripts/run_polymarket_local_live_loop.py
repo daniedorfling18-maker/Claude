@@ -38,6 +38,7 @@ from polymarket_predictive_engine.dashboard import render_dashboard  # noqa: E40
 from polymarket_predictive_engine.execution.paper import paper_trade  # noqa: E402
 from polymarket_predictive_engine.paper_cycle import run_paper_cycle  # noqa: E402
 from polymarket_predictive_engine.profit_target import write_profit_target_tracker  # noqa: E402
+from polymarket_predictive_engine.refresh_governance import refresh_governance  # noqa: E402
 from polymarket_predictive_engine.resolution_collector import fetch_gamma_market  # noqa: E402
 from polymarket_predictive_engine.shadow_cohort import update_shadow_cohort_evidence  # noqa: E402
 from polymarket_predictive_engine.storage import connect_db  # noqa: E402
@@ -648,6 +649,41 @@ def _run_prediction_cycle(*, config_path: Path, paper_source: str) -> dict[str, 
     return run_paper_cycle(cfg, source=paper_source)
 
 
+def _run_governance_refresh(*, config_path: Path) -> dict[str, Any]:
+    """Refresh quant learning/governance artefacts without placing orders.
+
+    The live WebSocket loop owns dashboard rendering so the dashboard only has
+    one writer. This refresh updates price-action model evidence, feedback,
+    price-action paper-signal evidence, promotion review, cohort P&L, and the
+    profit-goal plan from the current paper/shadow evidence.
+    """
+    cfg = load_config(config_path)
+    return refresh_governance(cfg, refresh_dashboard=False)
+
+
+def _write_governance_refresh_heartbeat(
+    cfg,
+    *,
+    status: str,
+    live_iteration: int,
+    summary: dict[str, Any] | None = None,
+    error: str = "",
+    started_at_utc: str = "",
+) -> None:
+    summary = summary or {}
+    payload: dict[str, Any] = {
+        "status": status,
+        "generated_at_utc": now_utc(),
+        "live_iteration": live_iteration,
+        "summary": summary,
+    }
+    if started_at_utc:
+        payload["started_at_utc"] = started_at_utc
+    if error:
+        payload["error"] = error
+    write_json(cfg.governance_root / "governance_refresh_heartbeat.json", payload)
+
+
 def _run_degraded_prediction_cycle(*, config_path: Path, paper_source: str, guard: dict[str, Any]) -> dict[str, Any]:
     """Run a bounded websocket-only paper cycle while the full loop is degraded.
 
@@ -820,6 +856,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--include-config-websocket-assets", action="store_true", help="Also subscribe to static config assets after dynamic assets.")
     parser.add_argument("--prediction-cycle-seconds", type=float, default=15.0, help="How often to run the full paper-cycle prediction path; websocket marking still updates every tick.")
     parser.add_argument("--discovery-cycle-seconds", type=float, default=300.0, help="Periodically refresh scanner discovery so websocket assets follow changing markets.")
+    parser.add_argument("--governance-refresh-seconds", type=float, default=120.0, help="How often to refresh quant governance, price-action model evidence, feedback, and paper-signal learning artefacts.")
     parser.add_argument("--paper-source", choices=["raw_snapshot", "websocket"], default="raw_snapshot")
     parser.add_argument("--optimize-model", action="store_true", help="Allow the slower discovery lane to run scheduled model optimisation.")
     return parser
@@ -836,6 +873,7 @@ def main(argv: list[str] | None = None) -> int:
     next_prediction_cycle = time.time() + args.prediction_cycle_seconds if args.prediction_cycle_seconds > 0 else float("inf")
     next_degraded_prediction_cycle = time.time()
     next_discovery_cycle = _initial_discovery_due_timestamp(args.discovery_cycle_seconds)
+    next_governance_refresh = time.time() if args.governance_refresh_seconds > 0 else float("inf")
     discovery_iteration = 0
     last_discovery_summary: dict[str, Any] = {"status": "not_run_yet"}
     discovery_future: Future[tuple[int, dict[str, Any]]] | None = None
@@ -845,6 +883,10 @@ def main(argv: list[str] | None = None) -> int:
     prediction_future: Future[dict[str, Any]] | None = None
     prediction_started_at_utc = ""
     last_prediction_summary: dict[str, Any] = {"status": "not_started", "source": args.paper_source}
+    governance_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="polymarket-governance")
+    governance_future: Future[dict[str, Any]] | None = None
+    governance_started_at_utc = ""
+    last_governance_summary: dict[str, Any] = {"status": "not_started"}
     iteration = 0
     failures = 0
     discovery_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="polymarket-discovery")
@@ -912,6 +954,38 @@ def main(argv: list[str] | None = None) -> int:
                         next_prediction_cycle = (
                             time.time() + args.prediction_cycle_seconds
                             if args.prediction_cycle_seconds > 0
+                            else float("inf")
+                        )
+                if governance_future is not None and governance_future.done():
+                    try:
+                        last_governance_summary = governance_future.result()
+                        _write_governance_refresh_heartbeat(
+                            cfg,
+                            status=str(last_governance_summary.get("status") or "unknown"),
+                            live_iteration=iteration,
+                            summary=last_governance_summary,
+                            started_at_utc=governance_started_at_utc,
+                        )
+                    except Exception as exc:  # noqa: BLE001 - governance refresh must not stop live websocket ticks
+                        failures += 1
+                        last_governance_summary = {
+                            "status": "error",
+                            "error": f"{type(exc).__name__}: {exc}",
+                        }
+                        _write_governance_refresh_heartbeat(
+                            cfg,
+                            status="error",
+                            live_iteration=iteration,
+                            summary=last_governance_summary,
+                            error=str(last_governance_summary["error"]),
+                            started_at_utc=governance_started_at_utc,
+                        )
+                    finally:
+                        governance_future = None
+                        governance_started_at_utc = ""
+                        next_governance_refresh = (
+                            time.time() + args.governance_refresh_seconds
+                            if args.governance_refresh_seconds > 0
                             else float("inf")
                         )
 
@@ -1022,6 +1096,10 @@ def main(argv: list[str] | None = None) -> int:
                 if next_degraded_prediction_cycle != float("inf"):
                     next_degraded_prediction_in_seconds = max(0.0, round(next_degraded_prediction_cycle - time.time(), 3))
                 discovery_is_running = discovery_future is not None and not discovery_future.done()
+                governance_is_running = governance_future is not None and not governance_future.done()
+                next_governance_in_seconds = None
+                if next_governance_refresh != float("inf"):
+                    next_governance_in_seconds = max(0.0, round(next_governance_refresh - time.time(), 3))
 
                 loop_summary = {
                     "status": "ok",
@@ -1059,6 +1137,17 @@ def main(argv: list[str] | None = None) -> int:
                         "started_at_utc": discovery_started_at_utc if discovery_is_running else "",
                         "cycle_seconds": args.discovery_cycle_seconds,
                         "next_due_in_seconds": next_discovery_in_seconds,
+                    },
+                    "governance_refresh": {
+                        "status": "running"
+                        if governance_is_running
+                        else last_governance_summary.get("status")
+                        if isinstance(last_governance_summary, dict)
+                        else "unknown",
+                        "started_at_utc": governance_started_at_utc if governance_is_running else "",
+                        "cycle_seconds": args.governance_refresh_seconds,
+                        "next_due_in_seconds": next_governance_in_seconds,
+                        "last_summary": last_governance_summary,
                     },
                     "resource_guard": resource_guard,
                     "ingest": ingest,
@@ -1127,6 +1216,35 @@ def main(argv: list[str] | None = None) -> int:
                             summary={},
                             started_at_utc=discovery_started_at_utc,
                         )
+                if time.time() >= next_governance_refresh and governance_future is None:
+                    if resource_guard.get("skip_cycle"):
+                        last_governance_summary = {
+                            "status": "skipped_resource_guard",
+                            "generated_at_utc": now_utc(),
+                            "message": "Quant governance refresh skipped by resource guard; live WebSocket marking continues.",
+                            "resource_guard": resource_guard,
+                        }
+                        _write_governance_refresh_heartbeat(
+                            cfg,
+                            status="skipped_resource_guard",
+                            live_iteration=iteration,
+                            summary=last_governance_summary,
+                        )
+                        next_governance_refresh = time.time() + args.governance_refresh_seconds
+                    else:
+                        governance_started_at_utc = now_utc()
+                        governance_future = governance_executor.submit(
+                            _run_governance_refresh,
+                            config_path=config_path,
+                        )
+                        next_governance_refresh = float("inf")
+                        _write_governance_refresh_heartbeat(
+                            cfg,
+                            status="running",
+                            live_iteration=iteration,
+                            summary={},
+                            started_at_utc=governance_started_at_utc,
+                        )
             except Exception as exc:  # noqa: BLE001 - keep loop alive while surfacing the failure
                 failures += 1
                 traceback.print_exc()
@@ -1150,6 +1268,7 @@ def main(argv: list[str] | None = None) -> int:
     finally:
         discovery_executor.shutdown(wait=False, cancel_futures=True)
         prediction_executor.shutdown(wait=False, cancel_futures=True)
+        governance_executor.shutdown(wait=False, cancel_futures=True)
     return 2 if failures else 0
 
 

@@ -26,8 +26,22 @@ def test_refresh_governance_rebuilds_price_action_paper_signals_before_audit(tmp
     monkeypatch.setattr(refresh_module, "write_signal_cohort_pnl", lambda _con, _cfg: {"cohorts": []})
     monkeypatch.setattr(
         refresh_module,
+        "build_price_action_scout",
+        lambda _cfg: order.append("price_action_scout") or {"decision": "collect_more", "closed_trades": 3},
+    )
+    monkeypatch.setattr(
+        refresh_module,
+        "build_microstructure_edge_lab",
+        lambda _cfg: order.append("price_action_microstructure") or {"decision": "collect_more", "trade_events": 4},
+    )
+    monkeypatch.setattr(
+        refresh_module,
         "train_price_action_model",
-        lambda _cfg: order.append("price_action_model") or {"decision": "collect_more", "promotion_ready": False},
+        lambda _cfg: (
+            assert_order_contains(order, ["price_action_scout", "price_action_microstructure"])
+            or order.append("price_action_model")
+            or {"decision": "collect_more", "promotion_ready": False}
+        ),
     )
     monkeypatch.setattr(
         refresh_module,
@@ -73,10 +87,19 @@ def test_refresh_governance_rebuilds_price_action_paper_signals_before_audit(tmp
 
     result = refresh_module.refresh_governance(cfg)
 
+    assert order.index("price_action_scout") < order.index("price_action_model")
+    assert order.index("price_action_microstructure") < order.index("price_action_model")
     assert order.index("price_action_feedback") < order.index("price_action_paper_signals")
     assert order.index("price_action_paper_signals") < order.index("trade_signal_audit")
     assert order.index("trade_signal_audit") < order.index("dashboard")
     assert result["refreshed"]["price_action_paper_signals"] is True
     assert result["price_action_paper_signal_count"] == 1
     assert result["price_action_paper_rejection_count"] == 2
+    assert result["refreshed"]["price_action_scout"] is True
+    assert result["refreshed"]["price_action_microstructure"] is True
     assert Path(cfg.governance_root / "governance_refresh.json").exists()
+
+
+def assert_order_contains(order: list[str], required: list[str]) -> None:
+    missing = [item for item in required if item not in order]
+    assert not missing, f"missing prior refresh steps: {missing}"

@@ -13,6 +13,8 @@ from .utils import now_utc, read_csv_rows, safe_float, write_csv, write_json
 
 OUTPUT_DIRNAME = "polymarket_price_action"
 TRADE_EVENTS_FILE = "microstructure_trade_events.csv"
+SCOUT_ROUND_TRIP_FILE = "price_action_scout_round_trip_evidence.csv"
+STRATEGY_V2_ROUND_TRIP_FILE = "strategy_v2_round_trip_evidence.csv"
 SUMMARY_JSON = "price_action_model_summary.json"
 VALIDATION_FILE = "price_action_model_validation_predictions.csv"
 CURRENT_FILE = "price_action_model_current_candidates.csv"
@@ -93,6 +95,15 @@ def _float_setting(settings: dict[str, Any], key: str, default: float) -> float:
 def _int_setting(settings: dict[str, Any], key: str, default: int) -> int:
     value = safe_float(settings.get(key))
     return default if value is None else int(value)
+
+
+def _bool_setting(settings: dict[str, Any], key: str, default: bool) -> bool:
+    value = settings.get(key)
+    if value is None:
+        return default
+    if isinstance(value, bool):
+        return value
+    return str(value).strip().lower() in {"1", "true", "yes", "on"}
 
 
 def _family_flags(row: dict[str, Any]) -> dict[str, float]:
@@ -216,11 +227,127 @@ def _prepared_event(row: dict[str, str], settings: dict[str, Any]) -> dict[str, 
     }
 
 
+def _prepared_round_trip_event(row: dict[str, str], settings: dict[str, Any], *, source: str) -> dict[str, Any] | None:
+    """Convert a strict round-trip ledger row into model training shape.
+
+    These ledgers already represent the exact trading objective: enter at an
+    executable candidate price, then sell/mark at a later executable bid.  We
+    intentionally avoid using latest/max/min bid fields as model features
+    because those are known only after entry; they are label/outcome evidence.
+    """
+    status = str(row.get("round_trip_status") or "").strip().lower()
+    include_marked = _bool_setting(settings, "include_open_marked_round_trips", True)
+    minimum_marked_observations = _int_setting(settings, "minimum_open_marked_observations", 5)
+    if not status.startswith("closed_") and not (include_marked and status == "open_marked"):
+        return None
+    if status == "open_marked" and int(safe_float(row.get("observations")) or 0) < minimum_marked_observations:
+        return None
+    entry_ask = safe_float(row.get("entry_price"))
+    exit_bid = safe_float(row.get("exit_price")) if status.startswith("closed_") else safe_float(row.get("latest_bid"))
+    pnl = safe_float(row.get("realized_pnl_usdc")) if status.startswith("closed_") else safe_float(row.get("mark_pnl_usdc"))
+    roi = safe_float(row.get("realized_roi")) if status.startswith("closed_") else safe_float(row.get("mark_roi"))
+    stake = safe_float(row.get("stake_usdc")) or 0.0
+    if entry_ask is None or exit_bid is None or pnl is None or entry_ask <= 0 or not 0 < exit_bid < 1:
+        return None
+    entry_spread = 0.0
+    entry_bid = entry_ask
+    future_bid_edge = exit_bid - entry_ask
+    future_bid_return = future_bid_edge / entry_ask
+    min_label_return = _float_setting(settings, "minimum_profitable_return_label", 0.0)
+    min_label_edge = _float_setting(settings, "minimum_bid_edge_abs_label", 0.0)
+    target = int(pnl > 0 and future_bid_edge > min_label_edge and future_bid_return >= min_label_return)
+    prepared = {
+        **row,
+        "evidence_source": source,
+        "entry_bid": entry_bid,
+        "entry_ask": entry_ask,
+        "entry_midpoint": entry_ask,
+        "entry_spread": entry_spread,
+        "relative_spread": 0.0,
+        "exit_bid": exit_bid,
+        "exit_time_utc": row.get("exit_time_utc") or row.get("latest_time_utc") or "",
+        "pnl_usdc": pnl,
+        "roi": roi if roi is not None else (pnl / stake if stake > 0 else 0.0),
+        "bid_move_abs": 0.0,
+        "mid_move_abs": 0.0,
+        "ask_move_abs": 0.0,
+        "spread_change": 0.0,
+        "net_buy_events": 0.0,
+        "net_buy_size": 0.0,
+        "current_price_change_size": 0.0,
+    }
+    return {
+        **prepared,
+        "_x": [1.0, *_feature_vector(prepared)],
+        "_y": target,
+        "_future_bid_edge": future_bid_edge,
+        "_future_bid_return": future_bid_return,
+        "_stake_usdc": stake,
+        "_pnl_usdc": pnl,
+        "_roi": roi if roi is not None else (pnl / stake if stake > 0 else 0.0),
+    }
+
+
+def _source_summary(rows: list[dict[str, Any]], *, raw_rows: int) -> dict[str, Any]:
+    return {
+        "raw_rows": raw_rows,
+        "prepared_rows": len(rows),
+        "positive_targets": sum(1 for row in rows if int(row.get("_y") or 0) == 1),
+        "positive_pnl_rows": sum(1 for row in rows if float(row.get("_pnl_usdc") or 0.0) > 0),
+    }
+
+
+def _load_training_events(cfg: EngineConfig, settings: dict[str, Any]) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    out_dir = cfg.output_root / OUTPUT_DIRNAME
+    micro_raw = read_csv_rows(out_dir / TRADE_EVENTS_FILE)
+    micro_events = [
+        {**event, "evidence_source": "microstructure_trade_event"}
+        for row in micro_raw
+        if (event := _prepared_event(row, settings)) is not None
+    ]
+    sources: dict[str, Any] = {
+        "microstructure_trade_event": _source_summary(micro_events, raw_rows=len(micro_raw)),
+    }
+    events = list(micro_events)
+    if not _bool_setting(settings, "include_round_trip_training_events", True):
+        return events, sources
+
+    round_trip_specs = [
+        ("price_action_scout_round_trip", out_dir / SCOUT_ROUND_TRIP_FILE),
+        ("strategy_v2_round_trip", cfg.output_root / "polymarket_strategy_v2" / STRATEGY_V2_ROUND_TRIP_FILE),
+    ]
+    for source, path in round_trip_specs:
+        raw_rows = read_csv_rows(path)
+        prepared = [
+            event
+            for row in raw_rows
+            if (event := _prepared_round_trip_event(row, settings, source=source)) is not None
+        ]
+        sources[source] = _source_summary(prepared, raw_rows=len(raw_rows))
+        events.extend(prepared)
+
+    sources["combined"] = _source_summary(events, raw_rows=sum(int(row.get("raw_rows") or 0) for row in sources.values()))
+    return events, sources
+
+
 def _split_events(events: list[dict[str, Any]], settings: dict[str, Any]) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     explicit_train = [row for row in events if str(row.get("split") or "").lower() == "train"]
     explicit_validation = [row for row in events if str(row.get("split") or "").lower() == "validation"]
     if explicit_train and explicit_validation:
-        return explicit_train, explicit_validation
+        unsplit = [row for row in events if str(row.get("split") or "").lower() not in {"train", "validation"}]
+        validation_start = min(str(row.get("entry_time_utc") or "") for row in explicit_validation)
+        unsplit_train: list[dict[str, Any]] = []
+        unsplit_validation: list[dict[str, Any]] = []
+        for row in unsplit:
+            timestamp = str(row.get("entry_time_utc") or "")
+            if timestamp and timestamp < validation_start:
+                unsplit_train.append(row)
+            else:
+                unsplit_validation.append(row)
+        return (
+            sorted([*explicit_train, *unsplit_train], key=lambda row: str(row.get("entry_time_utc") or "")),
+            sorted([*explicit_validation, *unsplit_validation], key=lambda row: str(row.get("entry_time_utc") or "")),
+        )
     ordered = sorted(events, key=lambda row: str(row.get("entry_time_utc") or ""))
     train_fraction = max(0.1, min(0.9, _float_setting(settings, "train_fraction", 0.6)))
     split_index = max(1, min(len(ordered) - 1, int(len(ordered) * train_fraction))) if len(ordered) > 1 else len(ordered)
@@ -474,8 +601,7 @@ def train_price_action_model(cfg: EngineConfig) -> dict[str, Any]:
     settings = _settings(cfg)
     out_dir = cfg.output_root / OUTPUT_DIRNAME
     model_dir = cfg.output_root / "polymarket_models"
-    rows = read_csv_rows(out_dir / TRADE_EVENTS_FILE)
-    prepared = [event for row in rows if (event := _prepared_event(row, settings)) is not None]
+    prepared, training_event_sources = _load_training_events(cfg, settings)
     train_rows, validation_rows = _split_events(prepared, settings) if prepared else ([], [])
     minimum_rows = _int_setting(settings, "minimum_rows", 100)
     minimum_validation_rows = _int_setting(settings, "minimum_validation_rows", 25)
@@ -490,8 +616,11 @@ def train_price_action_model(cfg: EngineConfig) -> dict[str, Any]:
         "label_definition": "target=1 only when future exit_bid clears historical entry_ask after the configured bid/ask cost hurdle.",
         "feature_names": FEATURE_NAMES,
         "source_file": str(out_dir / TRADE_EVENTS_FILE),
+        "training_event_sources": training_event_sources,
     }
     blockers: list[str] = []
+    train_positive_targets = sum(int(row["_y"]) for row in train_rows)
+    validation_positive_targets = sum(int(row["_y"]) for row in validation_rows)
     if len(prepared) < minimum_rows:
         blockers.append(f"training events {len(prepared)} < {minimum_rows}")
     if len(validation_rows) < minimum_validation_rows:
@@ -507,6 +636,8 @@ def train_price_action_model(cfg: EngineConfig) -> dict[str, Any]:
             "training_events": len(prepared),
             "train_rows": len(train_rows),
             "validation_rows": len(validation_rows),
+            "train_positive_targets": train_positive_targets,
+            "validation_positive_targets": validation_positive_targets,
             "promotion_ready": False,
             "current_model_candidates": 0,
             "warnings": {"shadow_only": True, "not_settlement_probability_model": True},
@@ -534,6 +665,8 @@ def train_price_action_model(cfg: EngineConfig) -> dict[str, Any]:
     threshold = float(threshold_selection["chosen_threshold"])
     probabilities = _predict_probabilities(validation_rows, artifact)
     targets = [int(row["_y"]) for row in validation_rows]
+    train_positive_targets = sum(int(row["_y"]) for row in train_rows)
+    validation_positive_targets = sum(targets)
     selected = _selected_metrics(validation_rows, probabilities, threshold)
     buy_all = _trade_metrics(validation_rows)
     validation_roi_ci = _market_clustered_roi_ci(
@@ -548,11 +681,16 @@ def train_price_action_model(cfg: EngineConfig) -> dict[str, Any]:
     min_selected_win_rate = _float_setting(settings, "minimum_selected_validation_win_rate", 0.55)
     min_roi_ci_low = _float_setting(settings, "minimum_selected_validation_roi_ci_low", 0.0)
     max_validation_drawdown = _float_setting(settings, "maximum_selected_validation_drawdown", -0.10)
+    min_validation_positive_targets = _int_setting(settings, "minimum_validation_positive_targets", 1)
     validation_blockers: list[str] = []
     if not threshold_selection["chosen_train_metrics"].get("train_threshold_pass"):
         validation_blockers.append("no probability threshold cleared the training split trade gates")
     if len(validation_rows) < minimum_validation_rows:
         validation_blockers.append(f"validation rows {len(validation_rows)} < {minimum_validation_rows}")
+    if validation_positive_targets < min_validation_positive_targets:
+        validation_blockers.append(
+            f"validation positive repricing targets {validation_positive_targets} < {min_validation_positive_targets}"
+        )
     if selected["selected_trades"] < min_selected_trades:
         validation_blockers.append(f"selected validation trades {selected['selected_trades']} < {min_selected_trades}")
     if selected["selected_pnl_usdc"] <= 0:
@@ -604,6 +742,8 @@ def train_price_action_model(cfg: EngineConfig) -> dict[str, Any]:
         "training_events": len(prepared),
         "train_rows": len(train_rows),
         "validation_rows": len(validation_rows),
+        "train_positive_targets": train_positive_targets,
+        "validation_positive_targets": validation_positive_targets,
         "validation_positive_rate": sum(targets) / len(targets) if targets else 0.0,
         "validation_brier": _brier(probabilities, targets),
         "validation_log_loss": _log_loss(probabilities, targets),
@@ -623,6 +763,7 @@ def train_price_action_model(cfg: EngineConfig) -> dict[str, Any]:
         "minimum_selected_validation_roi": min_selected_roi,
         "minimum_selected_validation_win_rate": min_selected_win_rate,
         "minimum_selected_validation_roi_ci_low": min_roi_ci_low,
+        "minimum_validation_positive_targets": min_validation_positive_targets,
         "current_rows_scored": len(current_rows),
         "current_model_candidates": len(current_candidates),
         "current_candidates_preview": current_candidates[:15],

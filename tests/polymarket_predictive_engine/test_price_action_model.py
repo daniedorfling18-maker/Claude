@@ -97,6 +97,46 @@ def _ws_row(i: int, *, profitable_pattern: bool, token: str, bid: float | None =
     }
 
 
+def _round_trip_event(i: int, *, split: str, profitable: bool) -> dict[str, str]:
+    entry = 0.30 if profitable else 0.70
+    exit_bid = 0.37 if profitable else 0.66
+    stake = 10.0
+    quantity = stake / entry
+    pnl = (exit_bid - entry) * quantity
+    return {
+        "split": split,
+        "signal_cohort": "price_action_scout|profit_sprint|macro_rates",
+        "family": "macro_rates",
+        "market_slug": f"round-trip-market-{i % 16}",
+        "outcome": "Yes",
+        "token_id": f"round-trip-token-{i}",
+        "entry_time_utc": f"2026-07-01T02:{i % 60:02d}:00Z",
+        "entry_price": f"{entry:.4f}",
+        "stake_usdc": f"{stake:.2f}",
+        "quantity": f"{quantity:.8f}",
+        "observations": "12",
+        "latest_time_utc": f"2026-07-01T02:{(i + 2) % 60:02d}:00Z",
+        "latest_bid": f"{exit_bid:.4f}",
+        "latest_ask": f"{exit_bid + 0.01:.4f}",
+        "latest_midpoint": f"{exit_bid + 0.005:.4f}",
+        "latest_spread": "0.0100",
+        "max_bid": f"{exit_bid:.4f}",
+        "min_bid": f"{min(entry, exit_bid):.4f}",
+        "exit_time_utc": f"2026-07-01T02:{(i + 2) % 60:02d}:00Z",
+        "exit_price": f"{exit_bid:.4f}",
+        "exit_reason": "take_profit" if profitable else "stop_loss",
+        "round_trip_status": "closed_take_profit" if profitable else "closed_stop_loss",
+        "realized_pnl_usdc": f"{pnl:.6f}",
+        "realized_roi": f"{pnl / stake:.6f}",
+        "mark_pnl_usdc": f"{pnl:.6f}",
+        "mark_roi": f"{pnl / stake:.6f}",
+        "take_profit_return": "0.08",
+        "stop_loss_return": "0.06",
+        "min_profit_usdc": "0.25",
+        "settlement_status": "not_settled_price_action_only",
+    }
+
+
 def test_price_action_model_trains_on_future_bid_repricing_and_scores_current_rows(tmp_path):
     cfg = _cfg(tmp_path)
     events = []
@@ -146,3 +186,86 @@ def test_price_action_model_blocks_when_validation_does_not_beat_costs(tmp_path)
     assert summary["promotion_ready"] is False
     assert summary["current_model_candidates"] == 0
     assert summary["validation_blockers"]
+
+
+def test_price_action_model_ingests_strict_scout_round_trip_training_events(tmp_path):
+    cfg = _cfg(tmp_path)
+    events = []
+    for i in range(24):
+        events.append(_round_trip_event(i, split="train", profitable=i % 2 == 0))
+    for i in range(24, 48):
+        events.append(_round_trip_event(i, split="validation", profitable=i % 2 == 0))
+    write_csv(cfg.output_root / "polymarket_price_action" / "price_action_scout_round_trip_evidence.csv", events)
+
+    summary = train_price_action_model(cfg)
+    validation = read_csv_rows(cfg.output_root / "polymarket_price_action" / "price_action_model_validation_predictions.csv")
+
+    assert summary["status"] == "trained"
+    assert summary["training_events"] == 48
+    assert summary["training_event_sources"]["microstructure_trade_event"]["prepared_rows"] == 0
+    assert summary["training_event_sources"]["price_action_scout_round_trip"]["prepared_rows"] == 48
+    assert summary["training_event_sources"]["price_action_scout_round_trip"]["positive_targets"] == 24
+    assert summary["validation_selected"]["selected_roi"] > summary["validation_buy_all_baseline"]["roi"]
+    assert any(row["target"] == "1" for row in validation)
+
+
+def test_price_action_model_keeps_unsplit_round_trip_rows_when_microstructure_has_explicit_split(tmp_path):
+    cfg = _cfg(tmp_path)
+    micro_events = []
+    for i in range(20):
+        micro_events.append(_event(i, split="train", profitable=False))
+    for i in range(20, 40):
+        micro_events.append(_event(i, split="validation", profitable=False))
+    before_boundary = _round_trip_event(100, split="", profitable=True)
+    before_boundary.pop("split")
+    before_boundary["entry_time_utc"] = "2026-07-01T00:10:30Z"
+    after_boundary = _round_trip_event(101, split="", profitable=False)
+    after_boundary.pop("split")
+    after_boundary["entry_time_utc"] = "2026-07-01T00:50:30Z"
+    write_csv(cfg.output_root / "polymarket_price_action" / "microstructure_trade_events.csv", micro_events)
+    write_csv(cfg.output_root / "polymarket_price_action" / "price_action_scout_round_trip_evidence.csv", [before_boundary, after_boundary])
+
+    summary = train_price_action_model(cfg)
+
+    assert summary["training_event_sources"]["price_action_scout_round_trip"]["prepared_rows"] == 2
+    assert summary["training_events"] == summary["train_rows"] + summary["validation_rows"]
+    assert summary["train_rows"] == 21
+    assert summary["validation_rows"] == 21
+
+
+def test_price_action_model_uses_observed_open_marked_round_trips_as_mark_to_bid_labels(tmp_path):
+    cfg = _cfg(tmp_path)
+    rows = []
+    for i in range(24):
+        row = _round_trip_event(i, split="train", profitable=i % 2 == 0)
+        row["round_trip_status"] = "open_marked"
+        row["exit_price"] = ""
+        rows.append(row)
+    for i in range(24, 48):
+        row = _round_trip_event(i, split="validation", profitable=i % 2 == 0)
+        row["round_trip_status"] = "open_marked"
+        row["exit_price"] = ""
+        rows.append(row)
+    write_csv(cfg.output_root / "polymarket_price_action" / "price_action_scout_round_trip_evidence.csv", rows)
+
+    summary = train_price_action_model(cfg)
+
+    assert summary["status"] == "trained"
+    assert summary["training_event_sources"]["price_action_scout_round_trip"]["prepared_rows"] == 48
+    assert summary["training_event_sources"]["price_action_scout_round_trip"]["positive_targets"] == 24
+
+
+def test_price_action_model_ignores_open_marked_round_trips_with_too_few_observations(tmp_path):
+    cfg = _cfg(tmp_path)
+    rows = [_round_trip_event(i, split="train", profitable=True) for i in range(4)]
+    for row in rows:
+        row["round_trip_status"] = "open_marked"
+        row["exit_price"] = ""
+        row["observations"] = "2"
+    write_csv(cfg.output_root / "polymarket_price_action" / "price_action_scout_round_trip_evidence.csv", rows)
+
+    summary = train_price_action_model(cfg)
+
+    assert summary["status"] == "insufficient_data"
+    assert summary["training_event_sources"]["price_action_scout_round_trip"]["raw_rows"] == 4
+    assert summary["training_event_sources"]["price_action_scout_round_trip"]["prepared_rows"] == 0

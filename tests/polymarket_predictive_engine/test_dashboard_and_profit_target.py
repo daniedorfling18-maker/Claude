@@ -476,6 +476,11 @@ def test_dashboard_explains_no_trade_when_fast_candidates_are_quarantined(tmp_pa
     data = read_json(result["dashboard_data"])
     diagnostics = data["trade_diagnostics"]
     assert "Why no trade?" in html
+    assert "Oversight cockpit" in html
+    assert "Slow / legacy evidence panels" in html
+    assert "Historical research panels" in html
+    assert data["oversight_status"]["status"] in {"ok", "warn", "bad"}
+    assert data["oversight_status"]["alerts"]
     assert diagnostics["approved_signals_count"] == 0
     assert diagnostics["shadow_candidates_seen"] == 1
     assert diagnostics["quarantined_cohort_count"] == 1

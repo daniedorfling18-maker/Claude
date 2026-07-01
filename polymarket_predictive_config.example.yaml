@@ -394,6 +394,11 @@ paper_market_scan:
   # crypto evidence consume the full scan window.
   feedback_broaden_reserve_enabled: true
   feedback_broaden_reserve_slots: 1
+  # If model governance asks for fresh validation examples in a cohort that is
+  # not part of the static query list, inject that query into the live scan
+  # universe instead of silently starving the model of the evidence it needs.
+  inject_research_focus_queries: true
+  research_focus_validation_gap_priority_value: 50.0
   queries:
   - world cup
   - btc updown
@@ -434,6 +439,15 @@ paper_market_scan:
     xrp:
     - ripple
     - crypto
+    fed:
+    - fomc
+    - interest rates
+    - federal reserve
+    esports:
+    - cs2
+    - dota
+    - league of legends
+    - lol esports
 cohort_promotion:
   require_positive_forward_pnl: true
   allow_shadow_evidence_for_promotion: true

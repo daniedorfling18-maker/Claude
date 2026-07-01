@@ -319,6 +319,52 @@ def test_research_focus_feedback_queries_priority_and_suppression(tmp_path, monk
     assert plan["adaptive_priority"]["suppressed_queries"] == ["bitcoin"]
 
 
+def test_validation_gap_research_queries_are_injected_and_prioritised(tmp_path, monkeypatch):
+    loop = _load_loop_module()
+    monkeypatch.delenv("POLYMARKET_QUERIES", raising=False)
+    monkeypatch.delenv("POLYMARKET_SCAN_QUERY_MODE", raising=False)
+    monkeypatch.delenv("POLYMARKET_MAX_SCAN_QUERIES", raising=False)
+    monkeypatch.delenv("POLYMARKET_ADAPTIVE_SCAN_PRIORITY", raising=False)
+
+    governance = tmp_path / "outputs" / "polymarket_model_governance"
+    governance.mkdir(parents=True)
+    (governance / "research_focus.json").write_text(
+        json.dumps(
+            {
+                "status": "ok",
+                "summary": "Collect validation positives in fed/ethereum/esports.",
+                "collection_queries": ["fed", "ethereum", "esports"],
+                "price_action_model": {
+                    "validation_gap_needs_collection": True,
+                    "validation_gap_queries": ["fed", "ethereum", "esports"],
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    cfg = EngineConfig(
+        raw={
+            "paths": {"output_root": str(tmp_path / "outputs")},
+            "paper_market_scan": {
+                "mode": "batch",
+                "max_queries_per_cycle": 3,
+                "prioritize_near_promoted": True,
+                "queries": ["world cup", "ethereum", "bitcoin"],
+            },
+        },
+        path=tmp_path / "cfg.yaml",
+    )
+
+    selected, plan = loop._select_scan_queries(cfg, "world cup", scan_sequence=1)
+
+    assert selected == ["fed", "ethereum", "esports"]
+    assert plan["configured_queries"] == ["world cup", "ethereum", "bitcoin"]
+    assert plan["injected_research_focus_queries"] == ["fed", "esports"]
+    assert plan["adaptive_priority"]["research_focus_queries"] == ["fed", "ethereum", "esports"]
+    assert plan["adaptive_priority"]["research_focus_validation_gap_needs_collection"] is True
+    assert plan["adaptive_priority"]["top_cohorts"][0]["validation_gap_needs_collection"] is True
+
+
 def test_quarantined_5m_crypto_cohorts_do_not_drive_scan_priority(tmp_path, monkeypatch):
     loop = _load_loop_module()
     monkeypatch.delenv("POLYMARKET_SCAN_QUERY_MODE", raising=False)

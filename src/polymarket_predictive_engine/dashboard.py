@@ -34,10 +34,21 @@ HTML = """<!doctype html>
     .grid { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:14px; margin-bottom:16px; }
     .card, section { background:linear-gradient(180deg,rgba(255,255,255,0.055),rgba(255,255,255,0.025)); border:1px solid var(--line); border-radius:18px; box-shadow:0 18px 50px rgba(0,0,0,0.25); }
     .card { padding:16px; min-height:104px; min-width:0; }
+    .card.tight { min-height:92px; }
     .label { color:var(--muted); font-size:12px; text-transform:uppercase; letter-spacing:0.08em; }
     .value { margin-top:8px; font-size:clamp(18px,2.2vw,26px); font-weight:750; letter-spacing:-0.03em; overflow-wrap:anywhere; }
     .value.good { color:var(--good); } .value.bad { color:var(--bad); } .value.warn { color:var(--warn); }
     section { padding:16px; margin-top:16px; overflow:hidden; }
+    section.primary { border-color:rgba(70,211,154,0.35); background:linear-gradient(180deg,rgba(70,211,154,0.09),rgba(255,255,255,0.025)); }
+    .alertGrid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:12px; margin-top:12px; }
+    .alert { border:1px solid rgba(255,255,255,0.09); border-left:4px solid var(--warn); border-radius:14px; padding:12px; background:rgba(0,0,0,0.18); }
+    .alert.good { border-left-color:var(--good); }
+    .alert.bad { border-left-color:var(--bad); }
+    .alert .title { font-weight:760; margin-bottom:4px; }
+    .alert .body { color:#c8d8ef; overflow-wrap:anywhere; }
+    details.legacy { margin-top:16px; border:1px solid var(--line); border-radius:18px; background:rgba(255,255,255,0.03); padding:12px 16px 16px; }
+    details.legacy > summary { cursor:pointer; color:#d8e5f8; font-weight:760; }
+    details.legacy > summary span { display:block; color:var(--muted); font-weight:450; margin-top:4px; }
     .tableWrap { width:100%; overflow-x:auto; -webkit-overflow-scrolling:touch; border-radius:12px; }
     table { width:100%; min-width:720px; border-collapse:collapse; }
     th, td { padding:10px 8px; border-bottom:1px solid rgba(255,255,255,0.08); text-align:left; vertical-align:top; }
@@ -55,7 +66,7 @@ HTML = """<!doctype html>
     details.expand summary::marker { color:var(--muted); }
     .fullText { margin-top:8px; padding:8px; border-radius:10px; background:rgba(0,0,0,0.22); color:#c8d8ef; white-space:pre-wrap; overflow-wrap:anywhere; }
     .error { color:var(--bad); padding:16px; border:1px solid rgba(255,107,122,0.35); border-radius:14px; background:rgba(255,107,122,0.08); }
-    @media (max-width: 980px) { .grid, .two, .facts { grid-template-columns:1fr; } header { flex-direction:column; } table { min-width:640px; } }
+    @media (max-width: 980px) { .grid, .two, .facts, .alertGrid { grid-template-columns:1fr; } header { flex-direction:column; } table { min-width:640px; } }
   </style>
 </head>
 <body>
@@ -63,12 +74,13 @@ HTML = """<!doctype html>
   <header>
     <div>
       <h1>Polymarket Paper Trading</h1>
-      <div class="sub">Local paper bot dashboard - live websocket view - auto-refreshes every 5 seconds</div>
+      <div class="sub">Local oversight cockpit - freshness, model state, trading gates, and paper P&L - auto-refreshes every 5 seconds</div>
     </div>
     <div class="pill"><span id="statusDot" class="dot"></span><span id="statusText">Loading...</span></div>
   </header>
   <div id="error"></div>
   <div class="grid" id="cards"></div>
+  <section class="primary"><h2>Oversight cockpit</h2><div id="oversightCockpit"></div></section>
   <div class="two">
     <section><h2>Actual profit target</h2><div id="actualTarget"></div></section>
     <section><h2>Latest cycle</h2><div id="cycle"></div></section>
@@ -86,6 +98,7 @@ HTML = """<!doctype html>
     <section><h2>Promotion readiness</h2><div id="promotionReadiness"></div></section>
     <section><h2>Edge promotion watchlist</h2><div id="promotionWatchlist"></div></section>
   </div>
+  <details class="legacy"><summary>Slow / legacy evidence panels<span>Kept for audit trail, but no longer the first thing to watch for live paper-trading decisions.</span></summary>
   <div class="two">
     <section><h2>Settlement watch</h2><div id="settlementWatch"></div></section>
     <section><h2>Shadow edge watchlist</h2><div id="shadowPromotionWatchlist"></div></section>
@@ -93,10 +106,13 @@ HTML = """<!doctype html>
   <section><h2>Signal cohort validation</h2><div id="cohorts"></div></section>
   <section><h2>Open shadow positions</h2><div id="shadowPositions"></div></section>
   <section><h2>Recent shadow fills</h2><div id="shadowFills"></div></section>
+  </details>
   <section><h2>World Cup validation layer</h2><div id="worldcupValidation"></div></section>
   <section><h2>Independent model anchors</h2><div id="independentFundamentals"></div></section>
+  <details class="legacy"><summary>Historical research panels<span>Useful for provenance, not the live cockpit. Open only when auditing old rule evidence.</span></summary>
   <section><h2>Historical edge search</h2><div id="edgeSearch"></div></section>
   <section><h2>Historical rule live shadow scan</h2><div id="promotedRuleShadow"></div></section>
+  </details>
   <section><h2>Liquidity discovery</h2><div id="liquidityDiscovery"></div></section>
   <section><h2>Open positions</h2><div id="positions"></div></section>
   <section><h2>Recent fills</h2><div id="fills"></div></section>
@@ -143,6 +159,10 @@ function table(rows, columns) {
 function facts(rows) {
   return `<div class="facts">${rows.map(row => `<div class="fact"><div class="label">${escapeHtml(row[0])}</div><div class="factValue">${row[2] ? row[2](row[1]) : longText(row[1])}</div></div>`).join("")}</div>`;
 }
+function alertBox(title, body, cls="warn") {
+  return `<div class="alert ${cls}"><div class="title">${escapeHtml(title)}</div><div class="body">${body}</div></div>`;
+}
+const ageClass = (seconds, warn=300, bad=900) => seconds === null || seconds === undefined ? "warn" : Number(seconds) > bad ? "bad" : Number(seconds) > warn ? "warn" : "good";
 async function load() {
   try {
     const res = await fetch("dashboard_data.json?ts=" + Date.now());
@@ -173,6 +193,7 @@ async function load() {
     const priceScoutPnl = priceScout.realized_pnl_usdc ?? priceScout.total_mark_pnl_usdc;
     const live = data.local_live_heartbeat || data.heartbeat || {};
     const freshness = data.evidence_freshness || {};
+    const oversight = data.oversight_status || {};
     const scanner = data.scanner_heartbeat || {};
     const discovery = live.discovery || {};
     const resourceGuard = live.resource_guard || {};
@@ -190,44 +211,57 @@ async function load() {
     const guarded = runPosture === "memory_paused" || runPosture === "guard_paused";
     const dashboardStale = dashboardAge !== null && dashboardAge > 300;
     const bad = dashboardStale || liveStatus === "stale" || liveStatus === "not_started" || liveStatus === "down";
+    const liveAge = freshness.live_heartbeat_age_seconds ?? ageSeconds(live.generated_at_utc);
+    const modelAge = ageSeconds(priceActionModel.generated_at_utc);
+    const signalAge = ageSeconds(priceActionPaper.generated_at_utc || priceActionPaper.signal_generated_at_utc);
+    const validationGap = priceActionModel.validation_gap || {};
+    const validationGapActive = oversight.validation_gap_active ?? (validationGap.state === "needs_positive_validation_examples" || (Number(priceActionModel.train_positive_targets || 0) > 0 && Number(priceActionModel.validation_positive_targets || 0) <= 0));
+    const modelStale = modelAge !== null && modelAge > 900;
+    const approvedSignals = Number(oversight.approved_signal_count ?? data.forward_paper_cycle?.signals_approved ?? priceActionPaper.signals ?? diag.approved_signals_count ?? 0);
+    const selectedQueries = currentScan.scan_plan?.selected_queries || lastScan.scan_plan?.selected_queries || scanner.scan?.scan_plan?.selected_queries || scanner.scan?.queries || [];
+    const injectedQueries = currentScan.scan_plan?.injected_research_focus_queries || lastScan.scan_plan?.injected_research_focus_queries || scanner.scan?.scan_plan?.injected_research_focus_queries || [];
+    const oversightAlerts = Array.isArray(oversight.alerts) && oversight.alerts.length
+      ? oversight.alerts.map(item => alertBox(item.title || "Oversight alert", longText(item.body || "-", 260), item.severity || "warn"))
+      : [];
+    if (dashboardStale) oversightAlerts.push(alertBox("Dashboard snapshot is stale", `The displayed file is ${fmtAge(dashboardAge)} old. Refresh the dashboard generator before trusting signal counts.`, "bad"));
+    if (!oversightAlerts.length && liveStatus !== "live") oversightAlerts.push(alertBox("Live websocket loop is not live", `Current status: ${escapeHtml(liveStatus)}; last heartbeat age: ${fmtAge(liveAge)}.`, liveStatus === "stale" || liveStatus === "down" ? "bad" : "warn"));
+    if (!oversightAlerts.length && modelStale) oversightAlerts.push(alertBox("Model scoring is stale", `Price-action model summary is ${fmtAge(modelAge)} old. Re-score/retrain before promoting any new paper signals.`, "bad"));
+    if (!oversightAlerts.length && validationGapActive) oversightAlerts.push(alertBox("Model needs positive validation examples", `Train positives: ${plain(priceActionModel.train_positive_targets)}; validation positives: ${plain(priceActionModel.validation_positive_targets)}. Collect next: ${joinText(validationGap.collection_queries || [])}.`, "warn"));
+    if (!oversightAlerts.length && approvedSignals <= 0) oversightAlerts.push(alertBox("No approved paper signals", longText(diag.main_blocker || priceActionPaper.decision || "Current gates are blocking paper entries.", 220), "warn"));
+    if (!oversightAlerts.length && guarded) oversightAlerts.push(alertBox("Collection paused by memory guard", longText(freshness.strategy_v2_runtime_reason || strategyV2.runtime_reason || "The local guard paused heavier collection because RAM was too high.", 220), "warn"));
+    if (!oversightAlerts.length) oversightAlerts.push(alertBox("Oversight clear", "Dashboard, live loop, model freshness, and paper signal gates are not reporting urgent blockers.", "good"));
     document.getElementById("statusDot").className = "dot " + (bad ? "bad" : good ? "good" : guarded ? "warn" : "");
     document.getElementById("statusText").textContent = (dashboardStale ? "dashboard stale" : runPosture) + " - " + status + " - snapshot age " + fmtAge(dashboardAge) + " - updated " + (data.generated_at_utc || "-");
     const pnl = Number(target.actual_pnl_since_baseline_usdc || 0);
     document.getElementById("cards").innerHTML = [
-      card("Equity", fmtUsd(broker.equity), Number(broker.equity) >= 1000 ? "good" : "bad"),
-      card("Dashboard data age", fmtAge(dashboardAge), dashboardAge !== null && dashboardAge > 300 ? "bad" : dashboardAge !== null && dashboardAge > 60 ? "warn" : "good"),
+      card("Dashboard age", fmtAge(dashboardAge), ageClass(dashboardAge, 60, 300)),
+      card("Live loop", `${liveStatus} / ${fmtAge(liveAge)}`, good ? "good" : bad ? "bad" : "warn"),
+      card("Model age", fmtAge(modelAge), ageClass(modelAge, 300, 900)),
+      card("Model gate", validationGapActive ? "needs validation positives" : (priceActionModel.promotion_ready ? "validated" : priceActionModel.decision || priceActionModel.status || "unknown"), validationGapActive ? "warn" : priceActionModel.promotion_ready ? "good" : "warn"),
       card("Actual P&L since clean baseline", fmtUsd(pnl), pnl >= 0 ? "good" : "bad"),
       card("Monthly run-rate", target.monthly_run_rate_usdc == null ? "Collecting" : fmtUsd(target.monthly_run_rate_usdc), target.monthly_run_rate_usdc >= target.target_monthly_profit_usdc ? "good" : ""),
-      card("Live loop", liveStatus, good ? "good" : bad ? "bad" : "warn"),
-      card("Run posture", runPosture, guarded ? "warn" : good ? "good" : bad ? "bad" : "warn"),
-      card("Scoreboard", freshness.scoreboard_status || "unknown", freshness.scoreboard_status === "aligned" ? "good" : "warn"),
+      card("Approved signals", approvedSignals, approvedSignals > 0 ? "good" : "warn"),
+      card("Paper signal age", fmtAge(signalAge), ageClass(signalAge, 300, 900)),
+      card("Scanning now", joinText(selectedQueries), "warn"),
+      card("Injected focus", injectedQueries.length ? joinText(injectedQueries) : "none", injectedQueries.length ? "good" : ""),
+      card("Memory posture", runPosture, guarded ? "warn" : good ? "good" : bad ? "bad" : "warn"),
+      card("Required/day", fmtUsd(goalPlan.required_daily_from_here_usdc), "warn"),
+      card("Equity", fmtUsd(broker.equity), Number(broker.equity) >= 1000 ? "good" : "bad"),
+      card("Cash", fmtUsd(broker.cash)),
       card("Live WS messages", websocket.new_messages ?? "-", "good"),
       card("Live WS features", websocketFeatures.feature_rows ?? "-", "good"),
-      card("Ledger snapshots", ingest.inserted_market_snapshots ?? "-", "good"),
-      card("Scanning now", joinText(currentScan.scan_plan?.selected_queries || lastScan.scan_plan?.selected_queries || scanner.scan?.scan_plan?.selected_queries || scanner.scan?.queries), "warn"),
-      card("Exposure", fmtUsd(broker.total_exposure)),
-      card("Cash", fmtUsd(broker.cash)),
-      card("Buy fills / cycle", broker.buy_orders_filled ?? broker.orders_filled ?? "0"),
-      card("Exit fills / cycle", broker.exit_orders_filled ?? "0"),
-      card("Signals approved", data.forward_paper_cycle?.signals_approved ?? "0"),
-      card("Strategy V2 shadow", strategyV2.shadow_candidates ?? "0", Number(strategyV2.shadow_candidates || 0) > 0 ? "good" : "warn"),
-      card("Strategy V2 anchors", `${strategyV2.anchored_rows ?? 0}/${strategyV2.rows_scored ?? 0}`, Number(strategyV2.anchored_rows || 0) > 0 ? "good" : "warn"),
-      card("Round-trip P&L", fmtUsd(roundTripPnl), Number(roundTripPnl || 0) > 0 ? "good" : "warn"),
-      card("Price scout P&L", fmtUsd(priceScoutPnl), Number(priceScoutPnl || 0) > 0 ? "good" : "warn"),
-      card("Microstructure rules", microstructure.validation_pass_rules ?? "0", Number(microstructure.validation_pass_rules || 0) > 0 ? "good" : "warn"),
-      card("Price-action ML", priceActionModel.promotion_ready ? "validated" : (priceActionModel.status || "missing"), priceActionModel.promotion_ready ? "good" : "warn"),
-      card("Quant modules", `${quantResearch.implemented_modules ?? 0}/${quantResearch.total_modules ?? 8}`, quantResearch.implementation_complete ? "good" : "warn"),
-      card("Price-action paper signals", priceActionPaper.signals ?? "0", Number(priceActionPaper.signals || 0) > 0 ? "good" : "warn"),
-      card("Signal count check", priceActionPaper.summary_signal_mismatch ? "mismatch" : "aligned", priceActionPaper.summary_signal_mismatch ? "bad" : "good"),
-      card("Broker refresh", priceActionPaper.broker_refresh_needed ? `${priceActionPaper.pending_broker_signals ?? 0} pending` : "fresh", priceActionPaper.broker_refresh_needed ? "warn" : "good"),
-      card("Paper maintenance", paperMaintenance.status || "not_started", paperMaintenance.status === "ran_broker_maintenance" || paperMaintenance.status === "refreshed_dashboard_idle" || paperMaintenance.status === "skipped_no_work" ? "good" : paperMaintenance.status === "skipped_high_memory" ? "warn" : ""),
-      card("Maintenance task", paperMaintenanceTask.status || "not_installed_or_unknown", paperMaintenanceTask.status === "installed" ? "good" : "warn"),
-      card("Probe exit due", probeExitWatch.fixed_horizon_due_count ? `${probeExitWatch.fixed_horizon_due_count} due` : (probeExitWatch.next_due_minutes == null ? "none" : `${fmtNum(probeExitWatch.next_due_minutes, 0)}m`), probeExitWatch.fixed_horizon_due_count ? "warn" : ""),
-      card("Main trade blocker", longText(diag.main_blocker || "-", 120), Number(diag.approved_signals_count || 0) > 0 ? "good" : "warn"),
-      card("Next settlement", data.shadow_settlement_watch?.next_settlement_minutes == null ? "Waiting" : fmtNum(data.shadow_settlement_watch.next_settlement_minutes, 0) + "m"),
-      card("Shadow P&L", fmtUsd(data.shadow_settlement_watch?.shadow_total_pnl_usdc), Number(data.shadow_settlement_watch?.shadow_total_pnl_usdc || 0) > 0 ? "good" : "warn"),
-      card("Expected lower-bound / cycle", fmtUsd(monthly.expected_lower_bound_profit_per_cycle_usdc), monthly.status === "on_pace" ? "good" : "warn")
+      card("Broker refresh", priceActionPaper.broker_refresh_needed ? `${priceActionPaper.pending_broker_signals ?? 0} pending` : "fresh", priceActionPaper.broker_refresh_needed ? "warn" : "good")
     ].join("");
+    document.getElementById("oversightCockpit").innerHTML = facts([
+      ["Dashboard snapshot", `${fmtAge(dashboardAge)} old / ${data.generated_at_utc || "-"}`],
+      ["Live heartbeat", `${liveStatus} / ${fmtAge(liveAge)} old`],
+      ["Model freshness", `${priceActionModel.status || "unknown"} / ${fmtAge(modelAge)} old`],
+      ["Model decision", priceActionModel.decision, v=>longText(v, 220)],
+      ["Validation gap", validationGapActive ? validationGap.reason || "Needs positive validation examples." : "No active positive-validation gap.", v=>longText(v, 260)],
+      ["Collect next", validationGap.collection_queries || priceActionGoal.collection_queries || priceActionFeedback.collection_queries, joinText],
+      ["Paper signals", `${approvedSignals} approved / ${priceActionPaper.rejections ?? 0} rejected`],
+      ["Main blocker", diag.main_blocker || priceActionPaper.decision || goalPlan.main_gap, v=>longText(v, 260)]
+    ]) + `<div class="alertGrid">${oversightAlerts.join("")}</div>`;
     document.getElementById("actualTarget").innerHTML = facts([
       ["Status", target.status],
       ["Target / month", target.target_monthly_profit_usdc, fmtUsd],
@@ -1894,6 +1928,109 @@ def _strategy_v2_runtime_freshness(strategy_v2: dict[str, Any], live_loop_status
     }
 
 
+def _dashboard_oversight_status(
+    *,
+    live_loop_status: str,
+    heartbeat: dict[str, Any],
+    price_action_model: dict[str, Any],
+    price_action_paper_signals: dict[str, Any],
+    goal_plan: dict[str, Any],
+    trade_diagnostics: dict[str, Any],
+    evidence_freshness: dict[str, Any],
+    strategy_v2: dict[str, Any],
+) -> dict[str, Any]:
+    """Single oversight summary for stale/live/model gate visibility."""
+    live_age = _age_seconds(heartbeat)
+    model_age = _age_seconds(price_action_model)
+    signal_age = _age_seconds(price_action_paper_signals)
+    validation_gap = price_action_model.get("validation_gap", {})
+    if not isinstance(validation_gap, dict):
+        validation_gap = {}
+    train_positive = safe_float(price_action_model.get("train_positive_targets")) or 0.0
+    validation_positive = safe_float(price_action_model.get("validation_positive_targets")) or 0.0
+    validation_gap_active = bool(
+        validation_gap.get("state") == "needs_positive_validation_examples"
+        or (train_positive > 0 and validation_positive <= 0)
+    )
+    approved_signals = safe_float(price_action_paper_signals.get("signals"))
+    if approved_signals is None:
+        approved_signals = safe_float(trade_diagnostics.get("approved_signals_count")) or 0.0
+
+    alerts: list[dict[str, Any]] = []
+
+    def add_alert(severity: str, title: str, body: str) -> None:
+        alerts.append({"severity": severity, "title": title, "body": body})
+
+    if live_loop_status != "live":
+        add_alert(
+            "bad" if live_loop_status in {"stale", "down"} else "warn",
+            "Live websocket loop is not live",
+            f"Current status is {live_loop_status or 'unknown'}; heartbeat age is {round(live_age, 1) if live_age is not None else 'unknown'} seconds.",
+        )
+    if model_age is None:
+        add_alert("warn", "Model freshness unknown", "Price-action model summary has no usable timestamp.")
+    elif model_age > 900:
+        add_alert(
+            "bad",
+            "Model scoring is stale",
+            f"Price-action model summary is {round(model_age, 1)} seconds old; re-score before trusting new promotions.",
+        )
+    if validation_gap_active:
+        add_alert(
+            "warn",
+            "Model needs positive validation examples",
+            str(
+                validation_gap.get("reason")
+                or "Train positives exist, but validation still has no positive executable bid repricing examples."
+            ),
+        )
+    if approved_signals <= 0:
+        add_alert(
+            "warn",
+            "No approved paper signals",
+            str(
+                trade_diagnostics.get("main_blocker")
+                or price_action_paper_signals.get("decision")
+                or goal_plan.get("main_gap")
+                or "Current gates are blocking paper entries."
+            ),
+        )
+    if evidence_freshness.get("broker_refresh_needed"):
+        add_alert("warn", "Broker refresh pending", "Paper broker is behind the latest approved signal or exit-probe file.")
+    posture = str(evidence_freshness.get("strategy_v2_runtime_posture") or strategy_v2.get("runtime_posture") or "")
+    if posture in {"memory_paused", "guard_paused"}:
+        add_alert(
+            "warn",
+            "Collection paused by memory guard",
+            str(
+                evidence_freshness.get("strategy_v2_runtime_reason")
+                or strategy_v2.get("runtime_reason")
+                or "The local guard paused heavier collection because RAM was high."
+            ),
+        )
+
+    status = "ok"
+    if any(alert.get("severity") == "bad" for alert in alerts):
+        status = "bad"
+    elif alerts:
+        status = "warn"
+    return {
+        "status": status,
+        "alerts": alerts,
+        "live_loop_status": live_loop_status,
+        "live_heartbeat_age_seconds": live_age,
+        "model_status": price_action_model.get("status"),
+        "model_decision": price_action_model.get("decision"),
+        "model_age_seconds": model_age,
+        "signal_age_seconds": signal_age,
+        "approved_signal_count": approved_signals,
+        "validation_gap_active": validation_gap_active,
+        "validation_gap_collection_queries": validation_gap.get("collection_queries", []),
+        "goal_gap": goal_plan.get("main_gap"),
+        "main_trade_blocker": trade_diagnostics.get("main_blocker"),
+    }
+
+
 def _paper_maintenance_status(cfg: EngineConfig) -> dict[str, Any]:
     path = cfg.path.parent / "work" / "polymarket_paper_maintenance_latest_status.json"
     payload = _read_json_lenient(path, default={}) or {}
@@ -2076,6 +2213,41 @@ def render_dashboard(cfg: EngineConfig, latest_report: dict[str, Any] | None = N
         trade_signal_audit = {}
     paper_maintenance = _paper_maintenance_status(cfg)
     paper_maintenance_task = _paper_maintenance_task_status(cfg)
+    evidence_freshness = {
+        "broker_source": broker_source,
+        "broker_generated_at_utc": broker_summary.get("generated_at_utc"),
+        "target_source": target_source,
+        "target_generated_at_utc": actual_target.get("generated_at_utc"),
+        "live_loop_status": live_loop_status,
+        "live_heartbeat_age_seconds": _age_seconds(heartbeat),
+        "scoreboard_status": _scoreboard_status(broker_summary, actual_target),
+        "broker_refresh_needed": broker_signal_freshness.get("broker_refresh_needed"),
+        "broker_signal_refresh_needed": broker_signal_freshness.get("broker_signal_refresh_needed"),
+        "broker_exit_refresh_needed": broker_signal_freshness.get("broker_exit_refresh_needed"),
+        "pending_broker_signals": broker_signal_freshness.get("pending_broker_signals"),
+        "pending_broker_confirmation_signals": broker_signal_freshness.get("pending_broker_confirmation_signals"),
+        "pending_broker_exit_probes": broker_signal_freshness.get("pending_broker_exit_probes"),
+        "next_broker_exit_due_utc": broker_signal_freshness.get("next_broker_exit_due_utc"),
+        "next_broker_exit_due_minutes": broker_signal_freshness.get("next_broker_exit_due_minutes"),
+        **strategy_v2_runtime,
+    }
+    trade_diagnostics = _trade_diagnostics(
+        predictions=predictions,
+        approved_signals=signals,
+        rejected=rejected,
+        near_miss_candidates=near_miss_candidates,
+        shadow_summary=shadow_summary,
+    )
+    oversight_status = _dashboard_oversight_status(
+        live_loop_status=live_loop_status,
+        heartbeat=heartbeat if isinstance(heartbeat, dict) else {},
+        price_action_model=price_action_model_status,
+        price_action_paper_signals=price_action_paper_signal_status,
+        goal_plan=goal_plan,
+        trade_diagnostics=trade_diagnostics,
+        evidence_freshness=evidence_freshness,
+        strategy_v2=strategy_v2_status,
+    )
 
     payload = {
         "status": "ok",
@@ -2088,24 +2260,8 @@ def render_dashboard(cfg: EngineConfig, latest_report: dict[str, Any] | None = N
         "local_live_heartbeat": local_live_heartbeat,
         "scanner_heartbeat": scanner_heartbeat,
         "actual_profit_target": actual_target,
-        "evidence_freshness": {
-            "broker_source": broker_source,
-            "broker_generated_at_utc": broker_summary.get("generated_at_utc"),
-            "target_source": target_source,
-            "target_generated_at_utc": actual_target.get("generated_at_utc"),
-            "live_loop_status": live_loop_status,
-            "live_heartbeat_age_seconds": _age_seconds(heartbeat),
-            "scoreboard_status": _scoreboard_status(broker_summary, actual_target),
-            "broker_refresh_needed": broker_signal_freshness.get("broker_refresh_needed"),
-            "broker_signal_refresh_needed": broker_signal_freshness.get("broker_signal_refresh_needed"),
-            "broker_exit_refresh_needed": broker_signal_freshness.get("broker_exit_refresh_needed"),
-            "pending_broker_signals": broker_signal_freshness.get("pending_broker_signals"),
-            "pending_broker_confirmation_signals": broker_signal_freshness.get("pending_broker_confirmation_signals"),
-            "pending_broker_exit_probes": broker_signal_freshness.get("pending_broker_exit_probes"),
-            "next_broker_exit_due_utc": broker_signal_freshness.get("next_broker_exit_due_utc"),
-            "next_broker_exit_due_minutes": broker_signal_freshness.get("next_broker_exit_due_minutes"),
-            **strategy_v2_runtime,
-        },
+        "evidence_freshness": evidence_freshness,
+        "oversight_status": oversight_status,
         "signal_cohort_pnl": signal_cohort_pnl,
         "cohort_promotion_readiness": _cohort_promotion_readiness(cfg, signal_cohort_pnl),
         "shadow_signal_cohort_pnl": shadow_summary,
@@ -2137,13 +2293,7 @@ def render_dashboard(cfg: EngineConfig, latest_report: dict[str, Any] | None = N
             approved_signals=signals,
             rejected=rejected,
         ),
-        "trade_diagnostics": _trade_diagnostics(
-            predictions=predictions,
-            approved_signals=signals,
-            rejected=rejected,
-            near_miss_candidates=near_miss_candidates,
-            shadow_summary=shadow_summary,
-        ),
+        "trade_diagnostics": trade_diagnostics,
     }
     write_json(out / "dashboard_data.json", payload)
     (out / "index.html").write_text(HTML, encoding="utf-8")

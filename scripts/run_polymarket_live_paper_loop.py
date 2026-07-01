@@ -379,6 +379,39 @@ def _load_price_action_feedback(cfg) -> dict[str, Any]:
     return payload if isinstance(payload, dict) else {}
 
 
+def _research_focus_gap_needs_collection(focus_payload: dict[str, Any]) -> bool:
+    price_action_model = focus_payload.get("price_action_model")
+    if not isinstance(price_action_model, dict):
+        return False
+    return _truthy_setting(price_action_model.get("validation_gap_needs_collection"), default=False)
+
+
+def _extend_with_research_focus_queries(
+    cfg,
+    queries: list[str],
+    *,
+    focus_payload: dict[str, Any],
+) -> tuple[list[str], list[str]]:
+    settings = cfg.raw.get("paper_market_scan", {}) or {}
+    enabled = _truthy_setting(settings.get("use_research_focus_priority", True), default=True)
+    inject_enabled = _truthy_setting(settings.get("inject_research_focus_queries", True), default=True)
+    if not enabled or not inject_enabled or not focus_payload:
+        return queries, []
+
+    seen = {_query_key(query) for query in queries if _query_key(query)}
+    expanded = list(queries)
+    injected: list[str] = []
+    for raw_query in focus_payload.get("collection_queries", []) or []:
+        query = str(raw_query or "").strip()
+        key = _query_key(query)
+        if not query or not key or key in seen:
+            continue
+        expanded.append(query)
+        injected.append(query)
+        seen.add(key)
+    return expanded, injected
+
+
 def _adaptive_query_order(cfg, queries: list[str]) -> tuple[list[str], dict[str, Any]]:
     settings = cfg.raw.get("paper_market_scan", {}) or {}
     adaptive_override = _env_override("POLYMARKET_ADAPTIVE_SCAN_PRIORITY")
@@ -438,7 +471,13 @@ def _adaptive_query_order(cfg, queries: list[str]) -> tuple[list[str], dict[str,
     )
     feedback_broaden_queries: list[str] = []
     if focus_enabled and focus_payload:
+        validation_gap_needs_collection = _research_focus_gap_needs_collection(focus_payload)
         focus_value = float(settings.get("research_focus_priority_value", min_value + 1.0))
+        if validation_gap_needs_collection:
+            focus_value = max(
+                focus_value,
+                float(settings.get("research_focus_validation_gap_priority_value", min_value + 47.0)),
+            )
         for raw_query in focus_payload.get("collection_queries", []):
             key = _query_key(str(raw_query or ""))
             if not key or key not in query_by_key:
@@ -453,6 +492,7 @@ def _adaptive_query_order(cfg, queries: list[str]) -> tuple[list[str], dict[str,
                     "cohort_priority_value": round(focus_value, 4),
                     "source": "research_focus",
                     "learning_state": (focus_payload.get("price_action_feedback") or {}).get("learning_state"),
+                    "validation_gap_needs_collection": validation_gap_needs_collection,
                     "summary": focus_payload.get("summary"),
                 }
         for raw_query in focus_payload.get("suppressed_queries", []):
@@ -492,6 +532,7 @@ def _adaptive_query_order(cfg, queries: list[str]) -> tuple[list[str], dict[str,
         "require_positive_evidence": require_positive,
         "research_focus_enabled": focus_enabled,
         "research_focus_queries": focus_queries,
+        "research_focus_validation_gap_needs_collection": _research_focus_gap_needs_collection(focus_payload),
         "suppressed_queries": suppressed_tail,
         "feedback_learning_state": feedback_learning_state,
         "feedback_broaden_queries": feedback_broaden_queries,
@@ -548,6 +589,13 @@ def _select_scan_queries(cfg, default_query: str, *, scan_sequence: int) -> tupl
     )
     if not all_queries:
         all_queries = [default_query]
+    configured_queries = list(all_queries)
+    focus_payload = _load_research_focus(cfg)
+    all_queries, injected_queries = _extend_with_research_focus_queries(
+        cfg,
+        all_queries,
+        focus_payload=focus_payload,
+    )
     ordered_queries, adaptive_priority = _adaptive_query_order(cfg, all_queries)
     if mode == "batch":
         selected = ordered_queries[:max_queries] if max_queries > 0 else ordered_queries
@@ -570,6 +618,8 @@ def _select_scan_queries(cfg, default_query: str, *, scan_sequence: int) -> tupl
         selected = [ordered_queries[0]]
     return selected, {
         "mode": mode,
+        "configured_queries": configured_queries,
+        "injected_research_focus_queries": injected_queries,
         "all_queries": all_queries,
         "ordered_queries": ordered_queries,
         "selected_queries": selected,

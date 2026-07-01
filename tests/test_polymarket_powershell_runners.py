@@ -274,6 +274,20 @@ def test_shadow_research_cycle_writes_memory_status_before_dashboard_refresh():
     assert stopped_status_write_index < stopped_dashboard_index
 
 
+def test_shadow_research_cycle_writes_success_status_before_final_dashboard_refresh():
+    text = _script_text("scripts/run_polymarket_shadow_research_cycle.ps1")
+
+    status_payload_index = text.index("price_action_model_decision = $governanceRefresh.price_action_model_decision")
+    success_status_write_index = text.index(
+        "$status | ConvertTo-Json -Depth 8 | Set-Content $statusFile -Encoding UTF8",
+        status_payload_index,
+    )
+    final_dashboard_index = text.index('Invoke-Step "render-dashboard-final-status"', success_status_write_index)
+
+    assert success_status_write_index < final_dashboard_index
+    assert "refreshed_after_final_status" in text
+
+
 def test_shadow_research_cycle_dashboard_refresh_bypasses_heavy_guard_only():
     text = _script_text("scripts/run_polymarket_shadow_research_cycle.ps1")
 

@@ -316,6 +316,27 @@ try {
     live_trading_invoked = $false
   }
   $status | ConvertTo-Json -Depth 8 | Set-Content $statusFile -Encoding UTF8
+  $finalDashboardStatus = "not_attempted_after_final_status"
+  $finalDashboardReason = "Final dashboard refresh after writing the completed cycle status was not attempted."
+  $finalDashboardMemory = Get-MemorySnapshot
+  if ($finalDashboardMemory -and $finalDashboardMemory.used_percent -ge $DashboardOnlyMaxMemoryPercent) {
+    $finalDashboardStatus = "skipped_critical_memory_after_final_status"
+    $finalDashboardReason = "Final dashboard refresh skipped because memory was at or above the $DashboardOnlyMaxMemoryPercent% critical dashboard guardrail."
+    Write-LogLine $finalDashboardReason
+  } else {
+    try {
+      Invoke-Step "render-dashboard-final-status" @(".\scripts\render_polymarket_dashboard.py", "--config", $ConfigPath) ".\work\render_dashboard_final_status_$stamp.json" -SkipMemoryGuard
+      $finalDashboardStatus = "refreshed_after_final_status"
+      $finalDashboardReason = "Dashboard refreshed after the final cycle status was written, so the cockpit does not display a stale running state."
+    } catch {
+      $finalDashboardStatus = "dashboard_refresh_failed_after_final_status"
+      $finalDashboardReason = $_.Exception.Message
+      Write-LogLine "Dashboard refresh after final status failed: $finalDashboardReason"
+    }
+  }
+  $status["dashboard_status"] = $finalDashboardStatus
+  $status["dashboard_reason"] = $finalDashboardReason
+  $status | ConvertTo-Json -Depth 8 | Set-Content $statusFile -Encoding UTF8
   Write-LogLine "Cycle completed. Paper allowed: $($audit.paper_decision.paper_allowed). Reason: $($audit.paper_decision.reason)"
   exit 0
 } catch {

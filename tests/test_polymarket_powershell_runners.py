@@ -281,6 +281,8 @@ def test_dashboard_server_runner_refuses_to_start_when_memory_is_high():
     assert "$memoryUsedPercent -ge $MaxMemoryPercent" in text
     assert "skipped_high_memory" in text
     assert "polymarket_dashboard_server_status.json" in text
+    assert 'Write-DashboardStatus "running"' in text
+    assert "Dashboard server process started and is serving the generated dashboard artifacts." in text
 
 
 def test_dashboard_task_installer_runs_wrapper_with_working_directory():

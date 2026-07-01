@@ -172,9 +172,11 @@ candidate cohorts still need positive evidence and governance review before pape
 The price-action model now treats a positive label as a tradable repricing event, not merely any small
 green mark-to-bid movement. It also tests train-only rank/quantile thresholds for rare-event ranking,
 then still fails closed unless the selected validation slice clears P&L, ROI, win-rate, confidence, and
-risk gates. On the 2026-07-01 model-only refresh this improved the diagnosis but did not approve paper:
-the available train-ranked slices remained negative, so the next edge work is better feature separation
-and more forward bid/ask evidence rather than looser thresholds.
+risk gates. The model now also checks cohort transfer: if train positives and validation positives
+appear in different market families, the edge is not treated as repeatable. On the 2026-07-01
+model-only refresh this improved the diagnosis but did not approve paper: train-ranked slices remained
+negative and the tradable positives did not transfer across cohorts, so the next edge work is better
+feature separation and more forward bid/ask evidence rather than looser thresholds.
 
 There is now a separate settlement-independent price-action paper-signal bridge:
 

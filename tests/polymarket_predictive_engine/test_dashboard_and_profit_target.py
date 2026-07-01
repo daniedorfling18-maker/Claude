@@ -618,6 +618,52 @@ def test_dashboard_surfaces_worldcup_validation_gap(tmp_path):
     assert worldcup["top_rejection_reasons"][0]["reason"] == "bookmaker_fundamental_cross_check_failed"
 
 
+def test_dashboard_surfaces_price_action_cohort_transfer_blocker(tmp_path):
+    cfg = _config(tmp_path)
+    write_json(
+        cfg.output_root / "polymarket_price_action" / "price_action_model_summary.json",
+        {
+            "status": "trained",
+            "generated_at_utc": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+            "decision": "collect_more_bid_ask_price_action_model_evidence",
+            "promotion_ready": False,
+            "train_positive_targets": 8,
+            "validation_positive_targets": 8,
+            "validation_blockers": ["no family or signal cohort has tradable positive targets in both train and validation"],
+            "cohort_transfer": {
+                "state": "positive_targets_do_not_transfer",
+                "reason": "Train and validation both contain tradable positive targets, but not in the same family/signal cohort.",
+                "family": {
+                    "overlap_positive_cohorts": [],
+                    "validation_only_positive_cohorts": ["ai_model_leader"],
+                    "top_cohorts": [
+                        {
+                            "cohort": "ai_model_leader",
+                            "train_rows": 10,
+                            "train_positive_targets": 0,
+                            "train_roi": -0.01,
+                            "validation_rows": 8,
+                            "validation_positive_targets": 8,
+                            "validation_roi": 0.05,
+                            "positive_target_transfer": False,
+                        }
+                    ],
+                },
+            },
+        },
+    )
+
+    result = render_dashboard(cfg)
+    data = read_json(result["dashboard_data"])
+    html = Path(result["dashboard_file"]).read_text(encoding="utf-8")
+
+    assert data["price_action_model"]["cohort_transfer"]["state"] == "positive_targets_do_not_transfer"
+    assert data["oversight_status"]["cohort_transfer_state"] == "positive_targets_do_not_transfer"
+    assert any(alert["title"] == "Model edge does not transfer across cohorts" for alert in data["oversight_status"]["alerts"])
+    assert "Cohort transfer check" in html
+    assert data["price_action_model"]["cohort_transfer"]["family"]["top_cohorts"][0]["cohort"] == "ai_model_leader"
+
+
 def test_dashboard_reports_cross_checked_worldcup_rows_blocked_by_trade_gates(tmp_path):
     cfg = _config(tmp_path)
     row = {
@@ -956,6 +1002,45 @@ def test_dashboard_surfaces_strategy_v2_memory_pause(tmp_path):
     assert data["evidence_freshness"]["strategy_v2_memory_percent"] == 94.5
     reason = data["evidence_freshness"]["strategy_v2_runtime_reason"].lower()
     assert "memory" in reason and "guard" in reason
+    assert any(alert["title"] == "Collection paused by memory guard" for alert in data["oversight_status"]["alerts"])
+
+
+def test_dashboard_suppresses_obsolete_strategy_v2_memory_pause_after_fresh_shadow_cycle(tmp_path):
+    cfg = _config(tmp_path)
+    work_dir = cfg.path.parent / "work"
+    work_dir.mkdir(parents=True, exist_ok=True)
+    (work_dir / "strategy_v2_cycle_latest_status.json").write_text(
+        json.dumps(
+            {
+                "status": "skipped_high_memory",
+                "started_at_utc": "2026-07-01T03:06:23Z",
+                "ended_at_utc": "2026-07-01T03:06:23Z",
+                "memory_used_percent": 98.8,
+                "max_memory_percent": 95,
+                "reason": "Strategy V2 scheduled wrapper skipped before invoking the cycle because local memory was at or above the guardrail.",
+            }
+        ),
+        encoding="utf-8-sig",
+    )
+    (work_dir / "shadow_research_cycle_latest_status.json").write_text(
+        json.dumps(
+            {
+                "status": "ok",
+                "started_at_utc": "2026-07-01T08:23:03Z",
+                "ended_at_utc": "2026-07-01T08:25:42Z",
+                "paper_trading_invoked": False,
+                "live_trading_invoked": False,
+            }
+        ),
+        encoding="utf-8-sig",
+    )
+
+    result = render_dashboard(cfg)
+    data = read_json(result["dashboard_data"])
+
+    assert data["strategy_v2"]["runtime_posture"] == "memory_paused"
+    assert data["oversight_status"]["strategy_v2_memory_pause_obsolete"] is True
+    assert not any(alert["title"] == "Collection paused by memory guard" for alert in data["oversight_status"]["alerts"])
 
 
 def test_dashboard_explains_independent_anchor_blockers(tmp_path):

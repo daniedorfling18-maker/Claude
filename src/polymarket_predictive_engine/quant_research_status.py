@@ -74,6 +74,7 @@ def build_quant_research_status(cfg: EngineConfig) -> dict[str, Any]:
             "train_positive_targets": price_action_model.get("train_positive_targets"),
             "validation_positive_targets": price_action_model.get("validation_positive_targets"),
             "validation_gap": price_action_model.get("validation_gap", {}),
+            "cohort_transfer": price_action_model.get("cohort_transfer", {}),
             "training_event_sources": price_action_model.get("training_event_sources", {}),
             "selected_validation": price_action_model.get("validation_selected", {}),
             "selected_risk": price_action_model.get("validation_selected_risk", {}),

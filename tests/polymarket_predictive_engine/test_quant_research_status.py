@@ -21,6 +21,7 @@ def test_quant_research_status_reports_course_modules_and_bot_gates(tmp_path: Pa
             "validation_selected_risk": {"max_drawdown": -0.04},
             "quant_promotion_decision": {"approved": False, "reason": "forward evidence still required"},
             "validation_blockers": ["selected validation P&L is not positive"],
+            "cohort_transfer": {"state": "positive_targets_do_not_transfer"},
         },
     )
     write_json(
@@ -38,5 +39,6 @@ def test_quant_research_status_reports_course_modules_and_bot_gates(tmp_path: Pa
     assert payload["implementation_complete"] is True
     assert payload["implemented_modules"] == payload["total_modules"] == 8
     assert payload["price_action_model"]["promotion_ready"] is False
+    assert payload["price_action_model"]["cohort_transfer"]["state"] == "positive_targets_do_not_transfer"
     assert "btc updown" in payload["price_action_feedback"]["collection_queries"]
     assert written["trading_posture"] == "shadow_research_only_until_positive_forward_bid_ask_evidence"

@@ -693,6 +693,9 @@ async function load() {
       ["Validation positive targets", priceActionModel.validation_positive_targets],
       ["Validation gap", priceActionModel.validation_gap?.reason, v=>longText(v, 220)],
       ["Gap collection", priceActionModel.validation_gap?.collection_queries, joinText],
+      ["Cohort transfer", priceActionModel.cohort_transfer?.reason, v=>longText(v, 240)],
+      ["Family transfer overlap", priceActionModel.cohort_transfer?.family?.overlap_positive_cohorts, joinText],
+      ["Validation-only positives", priceActionModel.cohort_transfer?.family?.validation_only_positive_cohorts, joinText],
       ["Training sources", priceActionModel.training_event_sources, v=>longText(v, 260)],
       ["Chosen probability threshold", priceActionModel.chosen_probability_threshold, v=>fmtNum(v, 3)],
       ["Selected validation trades", priceActionModel.validation_selected?.selected_trades],
@@ -724,6 +727,15 @@ async function load() {
       ["P&L","selected_pnl_usdc", fmtUsd],
       ["Win rate","selected_win_rate", v=>fmtNum(Number(v) * 100, 1) + "%"],
       ["Pass","train_threshold_pass"]
+    ]) + `<div style="height:12px"></div><h3>Cohort transfer check</h3>` + table(priceActionModel.cohort_transfer?.family?.top_cohorts || [], [
+      ["Family","cohort", v=>longText(v, 150)],
+      ["Train rows","train_rows"],
+      ["Train tradable +","train_positive_targets"],
+      ["Train ROI","train_roi", v=>fmtNum(Number(v) * 100, 2) + "%"],
+      ["Val rows","validation_rows"],
+      ["Val tradable +","validation_positive_targets"],
+      ["Val ROI","validation_roi", v=>fmtNum(Number(v) * 100, 2) + "%"],
+      ["Transfers","positive_target_transfer"]
     ]);
     document.getElementById("quantResearch").innerHTML = facts([
       ["Implementation", `${quantResearch.implemented_modules ?? 0}/${quantResearch.total_modules ?? 8} modules`],
@@ -1761,6 +1773,7 @@ def _price_action_model_status(cfg: EngineConfig) -> dict[str, Any]:
         "train_positive_targets": summary.get("train_positive_targets"),
         "validation_positive_targets": summary.get("validation_positive_targets"),
         "validation_gap": summary.get("validation_gap", {}),
+        "cohort_transfer": summary.get("cohort_transfer", {}),
         "training_event_sources": summary.get("training_event_sources", {}),
         "validation_positive_rate": summary.get("validation_positive_rate"),
         "validation_brier": summary.get("validation_brier"),
@@ -2060,6 +2073,9 @@ def _dashboard_oversight_status(
     validation_gap = price_action_model.get("validation_gap", {})
     if not isinstance(validation_gap, dict):
         validation_gap = {}
+    cohort_transfer = price_action_model.get("cohort_transfer", {})
+    if not isinstance(cohort_transfer, dict):
+        cohort_transfer = {}
     train_positive = safe_float(price_action_model.get("train_positive_targets")) or 0.0
     validation_positive = safe_float(price_action_model.get("validation_positive_targets")) or 0.0
     validation_gap_active = bool(
@@ -2130,6 +2146,15 @@ def _dashboard_oversight_status(
                 or "Train positives exist, but validation still has no positive executable bid repricing examples."
             ),
         )
+    if cohort_transfer.get("state") == "positive_targets_do_not_transfer":
+        add_alert(
+            "warn",
+            "Model edge does not transfer across cohorts",
+            str(
+                cohort_transfer.get("reason")
+                or "Train and validation positives are appearing in different market families, so promotion remains blocked."
+            ),
+        )
     if approved_signals <= 0:
         add_alert(
             "warn",
@@ -2144,7 +2169,27 @@ def _dashboard_oversight_status(
     if evidence_freshness.get("broker_refresh_needed"):
         add_alert("warn", "Broker refresh pending", "Paper broker is behind the latest approved signal or exit-probe file.")
     posture = str(evidence_freshness.get("strategy_v2_runtime_posture") or strategy_v2.get("runtime_posture") or "")
-    if posture in {"memory_paused", "guard_paused"}:
+    strategy_cycle_status = strategy_v2.get("cycle_status") if isinstance(strategy_v2.get("cycle_status"), dict) else {}
+    strategy_pause_time = parse_timestamp(
+        strategy_cycle_status.get("ended_at_utc")
+        or strategy_cycle_status.get("generated_at_utc")
+        or strategy_cycle_status.get("updated_at_utc")
+        or strategy_cycle_status.get("started_at_utc")
+    )
+    shadow_refresh_time = parse_timestamp(
+        shadow_research.get("ended_at_utc")
+        or shadow_research.get("generated_at_utc")
+        or shadow_research.get("updated_at_utc")
+        or shadow_research.get("started_at_utc")
+    )
+    memory_pause_obsolete = bool(
+        posture in {"memory_paused", "guard_paused"}
+        and shadow_status in {"running", "ok", "completed", "success"}
+        and strategy_pause_time is not None
+        and shadow_refresh_time is not None
+        and shadow_refresh_time > strategy_pause_time
+    )
+    if posture in {"memory_paused", "guard_paused"} and not memory_pause_obsolete:
         add_alert(
             "warn",
             "Collection paused by memory guard",
@@ -2175,6 +2220,8 @@ def _dashboard_oversight_status(
         "approved_signal_count": approved_signals,
         "validation_gap_active": validation_gap_active,
         "validation_gap_collection_queries": validation_gap.get("collection_queries", []),
+        "cohort_transfer_state": cohort_transfer.get("state"),
+        "strategy_v2_memory_pause_obsolete": memory_pause_obsolete,
         "goal_gap": goal_plan.get("main_gap"),
         "main_trade_blocker": trade_diagnostics.get("main_blocker"),
     }

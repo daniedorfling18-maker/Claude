@@ -18,8 +18,8 @@ STRATEGY_V2_ROUND_TRIP_FILE = "strategy_v2_round_trip_evidence.csv"
 SUMMARY_JSON = "price_action_model_summary.json"
 VALIDATION_FILE = "price_action_model_validation_predictions.csv"
 CURRENT_FILE = "price_action_model_current_candidates.csv"
-MODEL_ARTIFACT = "price_action_model_v1.json"
-MODEL_VERSION = "pm-price-action-bid-reprice-logit-v1"
+MODEL_ARTIFACT = "price_action_model_v2.json"
+MODEL_VERSION = "pm-price-action-bid-reprice-logit-v2"
 
 FEATURE_NAMES = [
     "entry_bid",
@@ -40,6 +40,13 @@ FEATURE_NAMES = [
     "is_esports",
     "is_macro",
     "is_tennis",
+    "is_ai_market",
+    "is_macro_rates",
+    "is_macro_economy",
+    "is_sports_other",
+    "is_crypto_btc",
+    "is_crypto_eth",
+    "is_unknown_family",
 ]
 
 VALIDATION_FIELDS = [
@@ -129,6 +136,13 @@ def _family_flags(row: dict[str, Any]) -> dict[str, float]:
         "is_esports": 1.0 if "esports" in text or "lol" in text or "dota" in text else 0.0,
         "is_macro": 1.0 if "macro" in text or "fed" in text or "inflation" in text else 0.0,
         "is_tennis": 1.0 if "tennis" in text else 0.0,
+        "is_ai_market": 1.0 if "ai" in text or "openai" in text or "anthropic" in text or "model" in text else 0.0,
+        "is_macro_rates": 1.0 if "macro_rates" in text or "fed" in text or "interest-rate" in text or "interest rate" in text else 0.0,
+        "is_macro_economy": 1.0 if "macro_economy" in text or "economy" in text or "inflation" in text else 0.0,
+        "is_sports_other": 1.0 if "sports_other" in text or "world cup" in text or "fifa" in text else 0.0,
+        "is_crypto_btc": 1.0 if "btc" in text or "bitcoin" in text else 0.0,
+        "is_crypto_eth": 1.0 if "eth" in text or "ethereum" in text else 0.0,
+        "is_unknown_family": 1.0 if family in {"", "unknown"} or "unknown" in text else 0.0,
     }
 
 
@@ -397,6 +411,136 @@ def _validation_gap_report(
             if needs_validation
             else "Validation-positive evidence is not the current primary blocker."
         ),
+    }
+
+
+def _cohort_key(row: dict[str, Any], field: str) -> str:
+    value = str(row.get(field) or "").strip()
+    if value:
+        return value
+    if field == "signal_cohort":
+        return str(row.get("family") or row.get("category") or row.get("market_slug") or "unknown").strip() or "unknown"
+    return str(row.get("signal_cohort") or row.get("category") or row.get("market_slug") or "unknown").strip() or "unknown"
+
+
+def _cohort_stats(rows: list[dict[str, Any]], field: str) -> dict[str, dict[str, Any]]:
+    out: dict[str, dict[str, Any]] = {}
+    for row in rows:
+        key = _cohort_key(row, field)
+        current = out.setdefault(
+            key,
+            {
+                "cohort": key,
+                "rows": 0,
+                "positive_targets": 0,
+                "positive_pnl_rows": 0,
+                "pnl_usdc": 0.0,
+                "stake_usdc": 0.0,
+                "roi": 0.0,
+                "latest_positive_time_utc": "",
+            },
+        )
+        current["rows"] += 1
+        current["positive_targets"] += int(row.get("_y") or 0)
+        current["positive_pnl_rows"] += int(float(row.get("_pnl_usdc") or 0.0) > 0)
+        current["pnl_usdc"] += float(row.get("_pnl_usdc") or 0.0)
+        current["stake_usdc"] += float(row.get("_stake_usdc") or 0.0)
+        if int(row.get("_y") or 0) == 1:
+            timestamp = str(row.get("entry_time_utc") or "")
+            if timestamp > str(current.get("latest_positive_time_utc") or ""):
+                current["latest_positive_time_utc"] = timestamp
+    for current in out.values():
+        stake = float(current.get("stake_usdc") or 0.0)
+        current["roi"] = float(current.get("pnl_usdc") or 0.0) / stake if stake > 0 else 0.0
+    return out
+
+
+def _cohort_transfer_report(
+    train_rows: list[dict[str, Any]],
+    validation_rows: list[dict[str, Any]],
+    settings: dict[str, Any],
+) -> dict[str, Any]:
+    min_train_targets = _int_setting(settings, "minimum_cohort_train_positive_targets", 1)
+    min_validation_targets = _int_setting(settings, "minimum_cohort_validation_positive_targets", 1)
+
+    def report_for(field: str) -> dict[str, Any]:
+        train = _cohort_stats(train_rows, field)
+        validation = _cohort_stats(validation_rows, field)
+        keys = sorted(set(train) | set(validation))
+        rows: list[dict[str, Any]] = []
+        train_positive: list[str] = []
+        validation_positive: list[str] = []
+        overlap: list[str] = []
+        for key in keys:
+            train_stats = train.get(key, {})
+            validation_stats = validation.get(key, {})
+            train_targets = int(train_stats.get("positive_targets") or 0)
+            validation_targets = int(validation_stats.get("positive_targets") or 0)
+            has_train_positive = train_targets >= min_train_targets
+            has_validation_positive = validation_targets >= min_validation_targets
+            if has_train_positive:
+                train_positive.append(key)
+            if has_validation_positive:
+                validation_positive.append(key)
+            if has_train_positive and has_validation_positive:
+                overlap.append(key)
+            rows.append(
+                {
+                    "cohort": key,
+                    "train_rows": int(train_stats.get("rows") or 0),
+                    "train_positive_targets": train_targets,
+                    "train_positive_pnl_rows": int(train_stats.get("positive_pnl_rows") or 0),
+                    "train_pnl_usdc": float(train_stats.get("pnl_usdc") or 0.0),
+                    "train_roi": float(train_stats.get("roi") or 0.0),
+                    "validation_rows": int(validation_stats.get("rows") or 0),
+                    "validation_positive_targets": validation_targets,
+                    "validation_positive_pnl_rows": int(validation_stats.get("positive_pnl_rows") or 0),
+                    "validation_pnl_usdc": float(validation_stats.get("pnl_usdc") or 0.0),
+                    "validation_roi": float(validation_stats.get("roi") or 0.0),
+                    "positive_target_transfer": bool(has_train_positive and has_validation_positive),
+                }
+            )
+        rows.sort(
+            key=lambda item: (
+                bool(item.get("positive_target_transfer")),
+                int(item.get("validation_positive_targets") or 0),
+                int(item.get("train_positive_targets") or 0),
+                float(item.get("validation_roi") or 0.0),
+            ),
+            reverse=True,
+        )
+        return {
+            "field": field,
+            "minimum_train_positive_targets": min_train_targets,
+            "minimum_validation_positive_targets": min_validation_targets,
+            "train_positive_cohorts": sorted(train_positive),
+            "validation_positive_cohorts": sorted(validation_positive),
+            "overlap_positive_cohorts": sorted(overlap),
+            "train_only_positive_cohorts": sorted(set(train_positive) - set(validation_positive)),
+            "validation_only_positive_cohorts": sorted(set(validation_positive) - set(train_positive)),
+            "top_cohorts": rows[:20],
+        }
+
+    family = report_for("family")
+    signal_cohort = report_for("signal_cohort")
+    has_overlap = bool(family["overlap_positive_cohorts"] or signal_cohort["overlap_positive_cohorts"])
+    has_train_positive = bool(family["train_positive_cohorts"] or signal_cohort["train_positive_cohorts"])
+    has_validation_positive = bool(family["validation_positive_cohorts"] or signal_cohort["validation_positive_cohorts"])
+    if has_overlap:
+        state = "positive_transfer_observed"
+        reason = "At least one family or signal cohort has tradable positive targets in both train and validation."
+    elif has_train_positive and has_validation_positive:
+        state = "positive_targets_do_not_transfer"
+        reason = "Train and validation both contain tradable positive targets, but not in the same family/signal cohort."
+    else:
+        state = "insufficient_positive_targets_for_transfer_check"
+        reason = "Train or validation lacks enough tradable positive targets to assess cohort transfer."
+    return {
+        "state": state,
+        "reason": reason,
+        "requires_positive_family_or_signal_cohort_transfer": _bool_setting(settings, "require_positive_cohort_transfer", True),
+        "family": family,
+        "signal_cohort": signal_cohort,
     }
 
 
@@ -823,6 +967,7 @@ def train_price_action_model(cfg: EngineConfig) -> dict[str, Any]:
         validation_rows,
         minimum_validation_positive_targets=min_validation_positive_targets,
     )
+    cohort_transfer = _cohort_transfer_report(train_rows, validation_rows, settings)
     if len(prepared) < minimum_rows:
         blockers.append(f"training events {len(prepared)} < {minimum_rows}")
     if len(validation_rows) < minimum_validation_rows:
@@ -842,6 +987,7 @@ def train_price_action_model(cfg: EngineConfig) -> dict[str, Any]:
             "validation_positive_targets": validation_positive_targets,
             "minimum_validation_positive_targets": min_validation_positive_targets,
             "validation_gap": validation_gap,
+            "cohort_transfer": cohort_transfer,
             "promotion_ready": False,
             "current_model_candidates": 0,
             "warnings": {"shadow_only": True, "not_settlement_probability_model": True},
@@ -891,9 +1037,15 @@ def train_price_action_model(cfg: EngineConfig) -> dict[str, Any]:
         validation_rows,
         minimum_validation_positive_targets=min_validation_positive_targets,
     )
+    cohort_transfer = _cohort_transfer_report(train_rows, validation_rows, settings)
     validation_blockers: list[str] = []
     if not threshold_selection["chosen_train_metrics"].get("train_threshold_pass"):
         validation_blockers.append("no probability threshold cleared the training split trade gates")
+    if (
+        _bool_setting(settings, "require_positive_cohort_transfer", True)
+        and cohort_transfer.get("state") == "positive_targets_do_not_transfer"
+    ):
+        validation_blockers.append("no family or signal cohort has tradable positive targets in both train and validation")
     if len(validation_rows) < minimum_validation_rows:
         validation_blockers.append(f"validation rows {len(validation_rows)} < {minimum_validation_rows}")
     if validation_positive_targets < min_validation_positive_targets:
@@ -954,6 +1106,7 @@ def train_price_action_model(cfg: EngineConfig) -> dict[str, Any]:
         "train_positive_targets": train_positive_targets,
         "validation_positive_targets": validation_positive_targets,
         "validation_gap": validation_gap,
+        "cohort_transfer": cohort_transfer,
         "validation_positive_rate": sum(targets) / len(targets) if targets else 0.0,
         "validation_brier": _brier(probabilities, targets),
         "validation_log_loss": _log_loss(probabilities, targets),

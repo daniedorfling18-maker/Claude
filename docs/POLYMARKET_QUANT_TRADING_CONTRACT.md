@@ -64,6 +64,10 @@ while calibrated probabilities remain below 50%. Threshold selection may therefo
 rank/quantile cutoffs in addition to fixed probability cutoffs. This does not authorise trading by
 itself: the chosen threshold still has to beat the out-of-sample validation and forward-shadow gates.
 
+The model must also check whether positive examples transfer across market families or signal cohorts.
+If train positives and validation positives appear in different cohorts, the correct state is blocked:
+the bot has found isolated examples, not a repeatable tradeable edge.
+
 ## Quant research stack
 
 The supporting quant curriculum is implemented under:

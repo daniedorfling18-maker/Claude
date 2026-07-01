@@ -234,6 +234,38 @@ def test_price_action_model_labels_only_tradable_positive_repricing_by_default(t
     assert summary["validation_positive_targets"] == 1
 
 
+def test_price_action_model_blocks_when_positive_targets_do_not_transfer_across_cohorts(tmp_path):
+    cfg = _cfg(tmp_path)
+    cfg.raw["price_action_model"].update(
+        {
+            "minimum_rows": 80,
+            "minimum_validation_rows": 40,
+            "minimum_selected_train_trades": 4,
+            "minimum_selected_validation_trades": 4,
+        }
+    )
+    events = []
+    for i in range(40):
+        row = _event(i, split="train", profitable=i < 8)
+        row["family"] = "macro_economy"
+        row["market_slug"] = f"macro-economy-train-{i}"
+        events.append(row)
+    for i in range(40, 80):
+        row = _event(i, split="validation", profitable=i < 48)
+        row["family"] = "ai_model_leader"
+        row["market_slug"] = f"ai-validation-{i}"
+        events.append(row)
+    write_csv(cfg.output_root / "polymarket_price_action" / "microstructure_trade_events.csv", events)
+
+    summary = train_price_action_model(cfg)
+
+    assert summary["cohort_transfer"]["state"] == "positive_targets_do_not_transfer"
+    assert summary["cohort_transfer"]["family"]["train_positive_cohorts"] == ["macro_economy"]
+    assert summary["cohort_transfer"]["family"]["validation_positive_cohorts"] == ["ai_model_leader"]
+    assert "no family or signal cohort has tradable positive targets in both train and validation" in summary["validation_blockers"]
+    assert summary["promotion_ready"] is False
+
+
 def test_price_action_model_uses_train_only_rank_thresholds_for_rare_repricing(tmp_path):
     cfg = _cfg(tmp_path)
     settings = cfg.raw["price_action_model"]

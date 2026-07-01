@@ -89,9 +89,10 @@ try {
         throw "Bundled Node.js was not found: $Node"
     }
 
-    Write-DashboardStatus "starting" @{
+    Write-DashboardStatus "running" @{
         url = "http://127.0.0.1:$Port/"
         lan_url_hint = "http://YOUR_COMPUTER_IP:$Port/"
+        reason = "Dashboard server process started and is serving the generated dashboard artifacts."
     }
 
     "=== Dashboard server started $(Get-Date -Format o) ===" | Out-File $StdoutLog -Append -Encoding UTF8

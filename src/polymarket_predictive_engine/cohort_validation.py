@@ -7,7 +7,7 @@ from typing import Any
 
 from .config import EngineConfig
 from .shadow_cohort import read_shadow_signal_cohort_pnl
-from .utils import now_utc, parse_timestamp, safe_float, write_csv, write_json
+from .utils import now_utc, parse_timestamp, read_csv_rows, safe_float, write_csv, write_json
 from .worldcup_validation import signal_cohort
 
 
@@ -105,6 +105,67 @@ def _elapsed_hours(first: Any, latest: Any) -> float:
     return max((latest_ts - first_ts).total_seconds() / 3600.0, 1.0 / 60.0)
 
 
+def _audited_paper_round_trip_stats(cfg: EngineConfig) -> dict[str, dict[str, Any]]:
+    """Summarise broker paper evidence after independent quote-consistency checks.
+
+    The broker ledger is still useful account history, but promotion and the
+    $100/month route must be driven by paper exits whose broker quote agrees
+    with the independent market snapshot trail. This prevents Yes/No token
+    inversions from becoming apparent "edge".
+    """
+    path = cfg.output_root / "polymarket_price_action" / "paper_broker_round_trip_evidence.csv"
+    stats: dict[str, dict[str, Any]] = defaultdict(
+        lambda: {
+            "paper_audit_round_trips": 0,
+            "paper_audited_round_trips": 0,
+            "paper_quote_conflict_round_trips": 0,
+            "paper_quote_unverified_round_trips": 0,
+            "paper_audited_pnl_usdc": 0.0,
+            "paper_audited_stake_usdc": 0.0,
+            "paper_audit_first_observed_at": "",
+            "paper_audit_latest_observed_at": "",
+        }
+    )
+    for row in read_csv_rows(path):
+        cohort = str(row.get("signal_cohort") or "unknown").strip() or "unknown"
+        current = stats[cohort]
+        current["paper_audit_round_trips"] += 1
+        status = str(row.get("quote_consistency_status") or "").strip().lower()
+        if status == "ok":
+            current["paper_audited_round_trips"] += 1
+            current["paper_audited_pnl_usdc"] += safe_float(row.get("realized_pnl_usdc")) or 0.0
+            current["paper_audited_stake_usdc"] += safe_float(row.get("stake_usdc")) or 0.0
+            for key in ("entry_time_utc", "exit_time_utc"):
+                observed = str(row.get(key) or "").strip()
+                if not observed:
+                    continue
+                if not str(current.get("paper_audit_first_observed_at") or "").strip():
+                    current["paper_audit_first_observed_at"] = observed
+                current["paper_audit_latest_observed_at"] = observed
+        elif status == "quote_conflict":
+            current["paper_quote_conflict_round_trips"] += 1
+        else:
+            current["paper_quote_unverified_round_trips"] += 1
+
+    for current in stats.values():
+        stake = float(current.get("paper_audited_stake_usdc") or 0.0)
+        pnl = float(current.get("paper_audited_pnl_usdc") or 0.0)
+        elapsed = _elapsed_hours(
+            current.get("paper_audit_first_observed_at"),
+            current.get("paper_audit_latest_observed_at"),
+        )
+        current["paper_audited_roi"] = pnl / stake if stake > 0 else 0.0
+        current["paper_audited_elapsed_hours"] = elapsed if current.get("paper_audited_round_trips") else 0.0
+        current["paper_audited_monthly_run_rate_usdc"] = pnl / elapsed * 24.0 * 30.0 if elapsed > 0 and current.get("paper_audited_round_trips") else 0.0
+        if current.get("paper_quote_conflict_round_trips"):
+            current["paper_audit_blocker"] = "paper_quote_conflicts_excluded_from_edge"
+        elif current.get("paper_quote_unverified_round_trips") and not current.get("paper_audited_round_trips"):
+            current["paper_audit_blocker"] = "paper_quotes_unverified_by_snapshot"
+        else:
+            current["paper_audit_blocker"] = ""
+    return dict(stats)
+
+
 def compute_signal_cohort_pnl(con, cfg: EngineConfig) -> dict[str, Any]:
     settings = cfg.raw.get("cohort_promotion", {}) or {}
     minimum_filled_orders = int(settings.get("minimum_filled_orders", 5))
@@ -175,6 +236,8 @@ def compute_signal_cohort_pnl(con, cfg: EngineConfig) -> dict[str, Any]:
             stats[cohort]["sell_fills"] += 1
             stats[cohort]["sell_proceeds_usdc"] += gross - fee
             _record_observed_at(stats[cohort], fill.get("created_at"))
+
+    audited_round_trips = _audited_paper_round_trip_stats(cfg)
 
     position_rows = [
         dict(row)
@@ -268,9 +331,29 @@ def compute_signal_cohort_pnl(con, cfg: EngineConfig) -> dict[str, Any]:
 
     cohorts: list[dict[str, Any]] = []
     for cohort, row in sorted(combined.items()):
+        audit = audited_round_trips.get(cohort)
+        if audit:
+            row.update(
+                {
+                    "raw_paper_buy_fills": row.get("paper_buy_fills", row.get("buy_fills", 0)),
+                    "raw_paper_sell_fills": row.get("sell_fills", 0),
+                    "raw_paper_total_pnl_usdc": row.get("paper_total_pnl_usdc", row.get("total_pnl_usdc", 0.0)),
+                    "raw_paper_monthly_run_rate_usdc": row.get("paper_monthly_run_rate_usdc", 0.0),
+                    **audit,
+                    "paper_buy_fills": audit.get("paper_audited_round_trips", 0),
+                    "sell_fills": audit.get("paper_audited_round_trips", 0),
+                    "paper_total_pnl_usdc": audit.get("paper_audited_pnl_usdc", 0.0),
+                    "paper_monthly_run_rate_usdc": audit.get("paper_audited_monthly_run_rate_usdc", 0.0),
+                    "paper_elapsed_hours": audit.get("paper_audited_elapsed_hours", 0.0),
+                    "total_buy_cost_usdc": audit.get("paper_audited_stake_usdc", 0.0),
+                }
+            )
         paper_pnl = safe_float(row.get("paper_total_pnl_usdc")) or 0.0
         shadow_pnl = safe_float(row.get("shadow_total_pnl_usdc")) or 0.0
-        paper_fills = int(safe_float(row.get("paper_buy_fills") or row.get("buy_fills")) or 0)
+        paper_fill_source = row.get("paper_buy_fills")
+        if paper_fill_source is None or paper_fill_source == "":
+            paper_fill_source = row.get("buy_fills")
+        paper_fills = int(safe_float(paper_fill_source) or 0)
         paper_sell_fills = int(safe_float(row.get("sell_fills")) or 0)
         shadow_fills = int(safe_float(row.get("shadow_fills")) or 0)
         shadow_sell_fills = int(safe_float(row.get("shadow_sell_fills")) or 0)
@@ -287,7 +370,7 @@ def compute_signal_cohort_pnl(con, cfg: EngineConfig) -> dict[str, Any]:
         paper_elapsed_hours = safe_float(row.get("paper_elapsed_hours")) or 0.0
         shadow_elapsed_hours = safe_float(row.get("evidence_elapsed_hours")) or 0.0
         evidence_elapsed_hours = max(paper_elapsed_hours, shadow_elapsed_hours if allow_shadow else 0.0)
-        metadata_blocker = _promotion_metadata_blocker(cohort)
+        metadata_blocker = _promotion_metadata_blocker(cohort) or str(row.get("paper_audit_blocker") or "")
         metadata_valid = not metadata_blocker
         promoted = bool(
             metadata_valid
@@ -341,7 +424,7 @@ def compute_signal_cohort_pnl(con, cfg: EngineConfig) -> dict[str, Any]:
                 "probationary": probationary,
                 "probationary_max_stake_usdc": probationary_max_stake_usdc if probationary else 0.0,
                 "promotion_reason": (
-                    "metadata invalid: unresolved unknown near-miss bucket"
+                    f"metadata/audit invalid: {metadata_blocker}"
                     if metadata_blocker
                     else "positive cohort evidence"
                     if promoted

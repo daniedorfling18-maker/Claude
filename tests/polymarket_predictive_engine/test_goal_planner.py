@@ -59,6 +59,36 @@ def test_goal_plan_counts_forward_paper_repricing_without_waiting_for_settlement
     assert "Do not scale yet" in payload["recommended_action"]
 
 
+def test_goal_plan_uses_audited_pnl_when_raw_account_contains_quote_conflicts(tmp_path):
+    cfg = _cfg(tmp_path)
+    write_json(
+        cfg.governance_root / "paper_profit_target_tracker.json",
+        {
+            "actual_pnl_since_baseline_usdc": 54.66,
+            "elapsed_hours": 3.0,
+            "current": {"equity_usdc": 1054.66},
+            "baseline": {"baseline_equity_usdc": 1000.0},
+        },
+    )
+    write_json(
+        cfg.output_root / "polymarket_price_action" / "paper_broker_round_trip_summary.json",
+        {
+            "audited_baseline_realized_pnl_usdc": 0.22,
+            "quote_conflict_round_trips": 5,
+            "quote_unverified_round_trips": 5,
+        },
+    )
+
+    payload = build_goal_plan(cfg)
+
+    assert payload["raw_account_pnl_since_baseline_usdc"] == approx(54.66)
+    assert payload["audited_pnl_since_baseline_usdc"] == approx(0.22)
+    assert payload["decision_pnl_usdc"] == approx(0.22)
+    assert payload["pnl_audit_state"] == "raw_pnl_contains_quote_conflicts"
+    assert payload["quote_conflict_round_trips"] == 5
+    assert "raw paper P&L contains quote-conflicted" in payload["main_gap"]
+
+
 def test_goal_plan_routes_positive_shadow_repricing_to_paper_confirmation(tmp_path):
     cfg = _cfg(tmp_path)
     write_json(

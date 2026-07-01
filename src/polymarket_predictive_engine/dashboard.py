@@ -318,7 +318,12 @@ async function load() {
     if (!oversightAlerts.length) oversightAlerts.push(alertBox("Oversight clear", "Dashboard, shadow research, model freshness, and paper signal gates are not reporting urgent blockers.", "good"));
     document.getElementById("statusDot").className = "dot " + (bad ? "bad" : good ? "good" : guarded ? "warn" : "");
     document.getElementById("statusText").textContent = (dashboardStale ? "dashboard stale" : `research ${researchStatus}`) + " - " + status + " - snapshot age " + fmtAge(dashboardAge) + " - updated " + (data.generated_at_utc || "-");
-    const pnl = Number(target.actual_pnl_since_baseline_usdc || 0);
+    const rawPnl = Number(target.actual_pnl_since_baseline_usdc || goalPlan.raw_account_pnl_since_baseline_usdc || 0);
+    const pnl = Number(goalPlan.decision_pnl_usdc ?? rawPnl ?? 0);
+    const rawRunRate = target.monthly_run_rate_usdc;
+    const decisionRunRate = goalPlan.decision_monthly_run_rate_usdc ?? rawRunRate;
+    const auditedPnl = goalPlan.audited_pnl_since_baseline_usdc;
+    const pnlAuditState = goalPlan.pnl_audit_state || "unknown";
     const paperRejections = asNumber(priceActionPaper.rejections, asNumber(data.forward_paper_cycle?.signals_rejected, asNumber(diag.rejected_signals_count, 0)));
     const brokerWorkPending = Boolean(priceActionPaper.broker_refresh_needed || priceActionPaper.pending_broker_signals || priceActionPaper.pending_broker_confirmation_signals || priceActionPaper.pending_broker_exit_probes);
     const trustedEdgeMissingFresh = tradeSignalAudit.verdict === "trusted_edge_missing_fresh_candidate"
@@ -376,7 +381,7 @@ async function load() {
       card("Why not / why now?", longText(blockerText, 120), tradeDecisionClass),
       card("Unlock condition", longText(unlockCondition, 120), approvedSignals > 0 ? "good" : "warn"),
       card("Collect now", joinText(collectQueries), collectQueries.length ? "good" : "warn"),
-      card("$100/month state", `${fmtUsd(pnl)} actual / ${fmtUsd(target.monthly_run_rate_usdc)} run-rate`, pnl >= 0 ? "good" : "bad"),
+      card("$100/month state", `${fmtUsd(pnl)} audited / ${fmtUsd(decisionRunRate)} audited run-rate`, pnl >= 0 ? "good" : "bad"),
       card("Best edge route", `shadow ${fmtUsd(priceActionGoal.best_repricing_monthly_run_rate_usdc)} / paper ${fmtUsd(priceActionGoal.best_forward_paper_monthly_run_rate_usdc)}`, "warn")
     ].join("");
     document.getElementById("decisionCockpit").innerHTML = `
@@ -463,14 +468,22 @@ async function load() {
     document.getElementById("actualTarget").innerHTML = facts([
       ["Status", target.status],
       ["Target / month", target.target_monthly_profit_usdc, fmtUsd],
-      ["Actual P&L", target.actual_pnl_since_baseline_usdc, fmtUsd],
+      ["Audited P&L for goal", pnl, fmtUsd],
+      ["Audited run-rate", decisionRunRate, fmtUsd],
+      ["Raw ledger P&L", rawPnl, fmtUsd],
+      ["P&L audit state", pnlAuditState, v=>longText(v, 180)],
+      ["Quote conflicts", goalPlan.quote_conflict_round_trips],
+      ["Unverified quote rows", goalPlan.quote_unverified_round_trips],
       ["Tracking hours", target.elapsed_hours, v=>fmtNum(v,2)],
-      ["Monthly run-rate", target.monthly_run_rate_usdc, fmtUsd],
+      ["Raw monthly run-rate", rawRunRate, fmtUsd],
       ["Baseline equity", target.baseline?.baseline_equity_usdc, fmtUsd]
     ]);
     document.getElementById("goalPlan").innerHTML = `<div class="sectionLead">This is the route to the $100/month target using tradable price changes, not waiting for market settlement.</div>` + facts([
       ["Route state", priceActionGoal.state || goalPlan.status],
       ["Needs settlement?", priceActionGoal.settlement_required_for_this_milestone ? "yes" : "no - this milestone uses bid/ask repricing and paper exits"],
+      ["Audited P&L for goal", goalPlan.decision_pnl_usdc, fmtUsd],
+      ["Raw ledger P&L", goalPlan.raw_account_pnl_since_baseline_usdc, fmtUsd],
+      ["P&L audit state", goalPlan.pnl_audit_state, v=>longText(v, 180)],
       ["Best repricing run-rate", priceActionGoal.best_repricing_monthly_run_rate_usdc, fmtUsd],
       ["Forward paper run-rate", priceActionGoal.best_forward_paper_monthly_run_rate_usdc, fmtUsd],
       ["Required/day from here", goalPlan.required_daily_from_here_usdc, fmtUsd],
@@ -2601,6 +2614,14 @@ def _decision_useful_summary(
     ) or 100.0
     run_rate = safe_float(actual_target.get("monthly_run_rate_usdc"))
     actual_pnl = safe_float(actual_target.get("actual_pnl_since_baseline_usdc")) or 0.0
+    decision_pnl = safe_float(goal_plan.get("decision_pnl_usdc"))
+    if decision_pnl is None:
+        decision_pnl = actual_pnl
+    decision_run_rate = safe_float(goal_plan.get("decision_monthly_run_rate_usdc"))
+    if decision_run_rate is None:
+        decision_run_rate = run_rate
+    audited_pnl = safe_float(goal_plan.get("audited_pnl_since_baseline_usdc"))
+    pnl_audit_state = str(goal_plan.get("pnl_audit_state") or "unknown")
     best_repricing_run_rate = safe_float(price_action_goal.get("best_repricing_monthly_run_rate_usdc"))
     forward_paper_run_rate = safe_float(price_action_goal.get("best_forward_paper_monthly_run_rate_usdc"))
     recent_loss_exits = int(safe_float(trade_signal_audit.get("recent_loss_exit_count")) or 0)
@@ -2758,10 +2779,10 @@ def _decision_useful_summary(
     state_badges = [
         {"label": trade_decision, "severity": decision_class},
         {"label": f"{approved_signals} approved / {rejected_signals} rejected", "severity": "good" if approved_signals else "warn"},
-        {"label": f"P&L {_usd_text(actual_pnl)}", "severity": "good" if actual_pnl >= 0 else "bad"},
+        {"label": f"audited P&L {_usd_text(decision_pnl)}", "severity": "good" if decision_pnl >= 0 else "bad"},
         {
-            "label": f"run-rate {_usd_text(run_rate)} / {_usd_text(target_monthly)}",
-            "severity": "good" if run_rate is not None and run_rate >= target_monthly else "warn",
+            "label": f"audited run-rate {_usd_text(decision_run_rate)} / {_usd_text(target_monthly)}",
+            "severity": "good" if decision_run_rate is not None and decision_run_rate >= target_monthly else "warn",
         },
     ]
     if collect_now:
@@ -2824,9 +2845,9 @@ def _decision_useful_summary(
         },
         {
             "lane": "Forward paper P&L",
-            "state": actual_target.get("status") or "unknown",
-            "decision_use": "Measures real paper progress toward the $100/month target.",
-            "key_metric": f"actual {_usd_text(actual_pnl)}; run-rate {_usd_text(run_rate)}",
+            "state": pnl_audit_state,
+            "decision_use": "Measures quote-consistent paper progress toward the $100/month target; raw ledger P&L is diagnostic only when quote conflicts exist.",
+            "key_metric": f"audited {_usd_text(decision_pnl)}; run-rate {_usd_text(decision_run_rate)}",
             "blocker_or_next": f"target {_usd_text(target_monthly)}; required/day {_usd_text(goal_plan.get('required_daily_from_here_usdc'))}",
         },
         {
@@ -2877,7 +2898,11 @@ def _decision_useful_summary(
 
     can_trade_now = decision_class == "good" and approved_signals > 0
     collect_text = ", ".join(collect_now) if collect_now else "No priority collection target is active."
-    profit_target_text = f"{_usd_text(actual_pnl)} actual; {_usd_text(run_rate)} monthly run-rate vs {_usd_text(target_monthly)} target"
+    raw_pnl_text = f"raw ledger {_usd_text(actual_pnl)}" if audited_pnl is not None else ""
+    profit_target_text = (
+        f"{_usd_text(decision_pnl)} audited; {_usd_text(decision_run_rate)} audited monthly run-rate vs {_usd_text(target_monthly)} target"
+        + (f" ({raw_pnl_text})" if raw_pnl_text else "")
+    )
     edge_route_text = f"shadow repricing {_usd_text(best_repricing_run_rate)}; forward paper {_usd_text(forward_paper_run_rate)}"
     decision_questions = [
         {
@@ -2904,7 +2929,7 @@ def _decision_useful_summary(
         {
             "question": "Are we on pace for $100/month?",
             "answer": profit_target_text,
-            "decision_use": "Measures the live paper account against the affordability objective, not historical backtest optimism.",
+            "decision_use": "Measures quote-consistent paper evidence against the affordability objective, not raw ledger artefacts or historical backtest optimism.",
         },
         {
             "question": "Which edge route is being tested?",
@@ -2951,8 +2976,8 @@ def _decision_useful_summary(
         {
             "label": "$100/month state",
             "value": profit_target_text,
-            "severity": "good" if run_rate is not None and run_rate >= target_monthly else "bad",
-            "decision_use": "Shows whether paper trading is actually paying for the capital goal.",
+            "severity": "good" if decision_run_rate is not None and decision_run_rate >= target_monthly else "bad",
+            "decision_use": "Shows whether audited paper trading is actually paying for the capital goal.",
         },
         {
             "label": "Edge route",
@@ -2978,7 +3003,11 @@ def _decision_useful_summary(
         "approved_signals": approved_signals,
         "rejected_signals": rejected_signals,
         "actual_pnl_since_baseline_usdc": actual_pnl,
+        "audited_pnl_since_baseline_usdc": audited_pnl,
+        "decision_pnl_usdc": decision_pnl,
         "monthly_run_rate_usdc": run_rate,
+        "decision_monthly_run_rate_usdc": decision_run_rate,
+        "pnl_audit_state": pnl_audit_state,
         "target_monthly_profit_usdc": target_monthly,
         "best_repricing_monthly_run_rate_usdc": best_repricing_run_rate,
         "best_forward_paper_monthly_run_rate_usdc": forward_paper_run_rate,
@@ -3209,6 +3238,9 @@ def render_dashboard(cfg: EngineConfig, latest_report: dict[str, Any] | None = N
     price_action_feedback = read_json(governance / "price_action_feedback.json", default={}) or {}
     if not isinstance(price_action_feedback, dict):
         price_action_feedback = {}
+    paper_round_trip_summary = read_json(cfg.output_root / "polymarket_price_action" / "paper_broker_round_trip_summary.json", default={}) or {}
+    if not isinstance(paper_round_trip_summary, dict):
+        paper_round_trip_summary = {}
     quant_research_status = read_json(governance / "quant_research_status.json", default={}) or {}
     if not isinstance(quant_research_status, dict):
         quant_research_status = {}
@@ -3314,6 +3346,7 @@ def render_dashboard(cfg: EngineConfig, latest_report: dict[str, Any] | None = N
         "price_action_model": price_action_model_status,
         "price_action_paper_signals": price_action_paper_signal_status,
         "price_action_feedback": price_action_feedback,
+        "paper_round_trip_summary": paper_round_trip_summary,
         "quant_research_status": quant_research_status,
         "websocket_summary": websocket_summary,
         "websocket_feature_summary": websocket_feature_summary,

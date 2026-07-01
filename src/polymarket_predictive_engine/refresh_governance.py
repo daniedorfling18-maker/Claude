@@ -46,6 +46,8 @@ def refresh_governance(cfg: EngineConfig, *, refresh_dashboard: bool = True) -> 
     new trade signals, execute paper orders, change thresholds, or affect live
     trading settings.
     """
+    paper_round_trip = build_paper_round_trip_evidence(cfg)
+
     con = connect_db(cfg.database_path)
     try:
         signal_cohort_pnl = write_signal_cohort_pnl(con, cfg)
@@ -54,7 +56,6 @@ def refresh_governance(cfg: EngineConfig, *, refresh_dashboard: bool = True) -> 
 
     price_action_scout = build_price_action_scout(cfg)
     price_action_microstructure = build_microstructure_edge_lab(cfg)
-    paper_round_trip = build_paper_round_trip_evidence(cfg)
     price_action_model = train_price_action_model(cfg)
     price_action_feedback = build_price_action_feedback(cfg)
     price_action_paper_signals = build_price_action_paper_signals(cfg)

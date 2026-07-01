@@ -193,6 +193,7 @@ def build_goal_plan(cfg: EngineConfig) -> dict[str, Any]:
 
     tracker = _dict(read_json(cfg.governance_root / str(settings.get("tracker_file", "paper_profit_target_tracker.json")), default={}) or {})
     broker = _dict(read_json(cfg.output_root / "polymarket_portfolio" / "paper_trading_summary.json", default={}) or {})
+    paper_round_trip = _dict(read_json(cfg.output_root / "polymarket_price_action" / "paper_broker_round_trip_summary.json", default={}) or {})
     cohort_payload = _dict(read_json(cfg.governance_root / "signal_cohort_pnl.json", default={}) or {})
     price_action_feedback = _dict(read_json(cfg.governance_root / "price_action_feedback.json", default={}) or {})
     price_action_state = _price_action_goal_state(price_action_feedback, target_monthly=target_monthly)
@@ -209,8 +210,23 @@ def build_goal_plan(cfg: EngineConfig) -> dict[str, Any]:
     )
     elapsed_hours = _num(tracker.get("elapsed_hours"))
     elapsed_days = elapsed_hours / 24.0 if elapsed_hours else 0.0
+    audited_pnl = safe_float(paper_round_trip.get("audited_baseline_realized_pnl_usdc"))
+    audited_available = audited_pnl is not None
+    decision_pnl = float(audited_pnl) if audited_available else actual_pnl
+    decision_monthly_run_rate = (decision_pnl / elapsed_days * 30.0) if elapsed_days > 0 else None
+    quote_conflicts = int(_num(paper_round_trip.get("quote_conflict_round_trips")))
+    quote_unverified = int(_num(paper_round_trip.get("quote_unverified_round_trips")))
+    pnl_audit_state = (
+        "raw_pnl_contains_quote_conflicts"
+        if quote_conflicts > 0
+        else "raw_pnl_contains_unverified_quotes"
+        if quote_unverified > 0
+        else "quote_consistent"
+        if audited_available
+        else "audit_not_available"
+    )
     prorated_target = target_daily * elapsed_days
-    required_remaining_monthly = max(0.0, target_monthly - actual_pnl)
+    required_remaining_monthly = max(0.0, target_monthly - decision_pnl)
     required_daily_from_here = required_remaining_monthly / max(1.0, 30.0 - elapsed_days) if target_monthly else 0.0
 
     promoted = [row for row in rows if str(row.get("promoted")).lower() == "true" or row.get("promoted") is True]
@@ -218,7 +234,9 @@ def build_goal_plan(cfg: EngineConfig) -> dict[str, Any]:
     positive_watchlist = _positive_actionable_rows(rows)
 
     price_action_gap = _price_action_gap(price_action_state)
-    if approved_signals:
+    if audited_available and (quote_conflicts > 0 or quote_unverified > 0) and decision_pnl < actual_pnl:
+        main_gap = "raw paper P&L contains quote-conflicted/unverified rows; the $100 route must use audited quote-consistent P&L"
+    elif approved_signals:
         main_gap = "approved paper signals exist; broker should process them unless duplicate/risk/pause controls intervene"
     elif price_action_gap:
         main_gap = price_action_gap
@@ -229,6 +247,12 @@ def build_goal_plan(cfg: EngineConfig) -> dict[str, Any]:
     else:
         main_gap = "no promoted/probationary edge cohort is ready to support the $100 paper-profit attempt"
 
+    recommended_action = (
+        "Keep the data, but reset trust to audited quote-consistent paper exits; collect fresh clean exits before counting progress toward $100/month."
+        if audited_available and (quote_conflicts > 0 or quote_unverified > 0) and decision_pnl < actual_pnl
+        else _recommended_action(approved_signals, probationary, positive_watchlist, price_action_state)
+    )
+
     result = {
         "status": "ok",
         "generated_at_utc": now_utc(),
@@ -236,10 +260,18 @@ def build_goal_plan(cfg: EngineConfig) -> dict[str, Any]:
         "target_daily_profit_usdc": target_daily,
         "target_weekly_profit_usdc": target_weekly,
         "actual_pnl_since_baseline_usdc": actual_pnl,
+        "raw_account_pnl_since_baseline_usdc": actual_pnl,
+        "audited_pnl_since_baseline_usdc": audited_pnl,
+        "decision_pnl_usdc": decision_pnl,
+        "decision_monthly_run_rate_usdc": decision_monthly_run_rate,
+        "pnl_audit_state": pnl_audit_state,
+        "quote_conflict_round_trips": quote_conflicts,
+        "quote_unverified_round_trips": quote_unverified,
         "elapsed_hours": elapsed_hours,
         "elapsed_days": elapsed_days,
         "prorated_target_usdc": prorated_target,
         "on_pace_by_actual_pnl": actual_pnl >= prorated_target if elapsed_days > 0 else False,
+        "on_pace_by_decision_pnl": decision_pnl >= prorated_target if elapsed_days > 0 else False,
         "required_remaining_monthly_usdc": required_remaining_monthly,
         "required_daily_from_here_usdc": required_daily_from_here,
         "approved_signals": len(approved_signals),
@@ -259,7 +291,7 @@ def build_goal_plan(cfg: EngineConfig) -> dict[str, Any]:
             for row in positive_watchlist[:10]
         ],
         "main_gap": main_gap,
-        "recommended_action": _recommended_action(approved_signals, probationary, positive_watchlist, price_action_state),
+        "recommended_action": recommended_action,
     }
     write_json(cfg.governance_root / "paper_profit_goal_plan.json", result)
     return result

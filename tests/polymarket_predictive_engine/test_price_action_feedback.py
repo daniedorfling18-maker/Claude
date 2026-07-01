@@ -285,6 +285,53 @@ def test_price_action_feedback_ingests_forward_paper_pnl_by_signal_cohort(tmp_pa
     assert payload["forward_paper_preview"][0]["forward_paper_pnl_usdc"] == approx(6.5)
 
 
+def test_price_action_feedback_uses_audited_paper_pnl_over_raw_conflicted_pnl(tmp_path):
+    cfg = _cfg(tmp_path)
+    write_csv(
+        cfg.governance_root / "signal_cohort_pnl.csv",
+        [
+            {
+                "signal_cohort": "near_miss_learning|crypto",
+                "buy_fills": "4",
+                "settled_fills": "3",
+                "sell_fills": "0",
+                "open_positions": "0",
+                "paper_buy_fills": "0",
+                "paper_total_pnl_usdc": "0.22",
+                "paper_monthly_run_rate_usdc": "12",
+                "total_buy_cost_usdc": "4",
+                "raw_paper_buy_fills": "4",
+                "raw_paper_total_pnl_usdc": "53.88",
+                "raw_paper_monthly_run_rate_usdc": "2188134.72",
+                "paper_audit_round_trips": "4",
+                "paper_audited_round_trips": "2",
+                "paper_quote_conflict_round_trips": "2",
+                "paper_audit_blocker": "paper_quote_conflicts_excluded_from_edge",
+                "total_pnl_usdc": "0.22",
+                "roi": "0.055",
+                "monthly_run_rate_usdc": "12",
+                "promoted": "False",
+                "probationary": "False",
+                "metadata_blocker": "paper_quote_conflicts_excluded_from_edge",
+                "promotion_ready_score": "1",
+                "promotion_ready_checks": "6",
+                "promotion_evidence_source": "paper",
+                "promotion_reason": "metadata/audit invalid: paper_quote_conflicts_excluded_from_edge",
+            }
+        ],
+    )
+
+    payload = build_price_action_feedback(cfg)
+
+    assert payload["forward_paper_positive_cohorts"] == 0
+    assert payload["best_forward_paper_monthly_run_rate_usdc"] == approx(0.0)
+    row = payload["forward_paper_preview"][0]
+    assert row["forward_paper_pnl_usdc"] == approx(0.22)
+    assert row["raw_paper_total_pnl_usdc"] == approx(53.88)
+    assert row["trusted_for_goal"] is False
+    assert row["forward_edge_blocker"] == "paper_quote_conflicts_excluded_from_edge"
+
+
 def test_price_action_feedback_keeps_shadow_only_pnl_out_of_forward_paper_bucket(tmp_path):
     cfg = _cfg(tmp_path)
     write_csv(

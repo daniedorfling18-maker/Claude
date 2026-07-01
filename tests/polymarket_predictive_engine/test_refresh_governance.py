@@ -23,7 +23,7 @@ def test_refresh_governance_rebuilds_price_action_paper_signals_before_audit(tmp
             order.append("close_db")
 
     monkeypatch.setattr(refresh_module, "connect_db", lambda _path: _Connection())
-    monkeypatch.setattr(refresh_module, "write_signal_cohort_pnl", lambda _con, _cfg: {"cohorts": []})
+    monkeypatch.setattr(refresh_module, "write_signal_cohort_pnl", lambda _con, _cfg: order.append("signal_cohort_pnl") or {"cohorts": []})
     monkeypatch.setattr(
         refresh_module,
         "build_price_action_scout",
@@ -93,6 +93,7 @@ def test_refresh_governance_rebuilds_price_action_paper_signals_before_audit(tmp
 
     result = refresh_module.refresh_governance(cfg)
 
+    assert order.index("paper_round_trip") < order.index("signal_cohort_pnl")
     assert order.index("price_action_scout") < order.index("price_action_model")
     assert order.index("price_action_microstructure") < order.index("price_action_model")
     assert order.index("paper_round_trip") < order.index("price_action_model")

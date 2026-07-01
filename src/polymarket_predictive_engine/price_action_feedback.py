@@ -228,14 +228,19 @@ def _paper_broker_forward_row(row: dict[str, str], *, min_closed: int) -> dict[s
     entry and later sell/mark the position at a better executable level.
     """
     cohort = str(row.get("signal_cohort") or "unknown").strip() or "unknown"
+    audit_round_trips = int(_num(row.get("paper_audit_round_trips")))
+    audited_round_trips = int(_num(row.get("paper_audited_round_trips")))
+    raw_paper_buy_fills = int(_num(row.get("raw_paper_buy_fills")))
     paper_buy_fills = int(_num(row.get("paper_buy_fills") or row.get("buy_fills")))
     paper_sell_fills = int(_num(row.get("sell_fills") or row.get("paper_sell_fills")))
     shadow_fills = int(_num(row.get("shadow_fills")))
     shadow_sell_fills = int(_num(row.get("shadow_sell_fills")))
-    is_paper = paper_buy_fills > 0
+    is_paper = paper_buy_fills > 0 or audit_round_trips > 0 or raw_paper_buy_fills > 0
     source = "paper_broker_forward" if is_paper else "shadow_forward"
 
     closed = paper_sell_fills if is_paper else shadow_sell_fills
+    if is_paper and audit_round_trips > 0:
+        closed = audited_round_trips
     open_trades = int(_num(row.get("open_positions"))) if is_paper else int(_num(row.get("shadow_open_positions")))
     buy_fills = paper_buy_fills if is_paper else shadow_fills
     if is_paper:
@@ -249,7 +254,7 @@ def _paper_broker_forward_row(row: dict[str, str], *, min_closed: int) -> dict[s
         monthly = _num(row.get("shadow_monthly_run_rate_usdc") or row.get("monthly_run_rate_usdc"))
     promoted = _bool(row.get("promoted"))
     probationary = _bool(row.get("probationary"))
-    blocker = _cohort_blocker(cohort, row.get("metadata_blocker"))
+    blocker = _cohort_blocker(cohort, row.get("metadata_blocker") or row.get("paper_audit_blocker"))
     trusted_for_goal = not blocker
     has_positive_forward = buy_fills > 0 and pnl > 0 and roi > 0
     has_negative_closed = closed >= min_closed and (pnl <= 0 or roi <= 0)
@@ -315,6 +320,14 @@ def _paper_broker_forward_row(row: dict[str, str], *, min_closed: int) -> dict[s
         "open_trades": open_trades,
         "paper_buy_fills": paper_buy_fills,
         "paper_sell_fills": paper_sell_fills,
+        "raw_paper_buy_fills": raw_paper_buy_fills,
+        "raw_paper_total_pnl_usdc": _num(row.get("raw_paper_total_pnl_usdc")),
+        "raw_paper_monthly_run_rate_usdc": _num(row.get("raw_paper_monthly_run_rate_usdc")),
+        "paper_audit_round_trips": audit_round_trips,
+        "paper_audited_round_trips": audited_round_trips,
+        "paper_quote_conflict_round_trips": int(_num(row.get("paper_quote_conflict_round_trips"))),
+        "paper_quote_unverified_round_trips": int(_num(row.get("paper_quote_unverified_round_trips"))),
+        "paper_audit_blocker": row.get("paper_audit_blocker", ""),
         "shadow_fills": shadow_fills,
         "shadow_sell_fills": shadow_sell_fills,
         "realized_pnl_usdc": pnl,

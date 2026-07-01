@@ -53,6 +53,12 @@ cp .env.vps-paper.example .env
 docker compose -f docker-compose.vps-paper.yml up -d --build
 ```
 
+Or bootstrap a fresh Ubuntu VPS in one go:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/daniedorfling18-maker/Claude/main/scripts/bootstrap_polymarket_vps_paper.sh | sh
+```
+
 That stack runs only the continuous websocket paper/evidence loop plus the dashboard. See `docs/POLYMARKET_VPS_DOCKER_RUNBOOK.md`.
 
 ## 3. The lowest-memory option: the paper bot needs no Docker at all

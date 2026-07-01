@@ -39,3 +39,25 @@ def test_vps_env_example_keeps_live_credentials_empty():
     assert "POLYMARKET_PRIVATE_KEY=" in text
     assert "CLOB_API_KEY=" in text
     assert "PM_PAPER_MEM_LIMIT=4g" in text
+
+
+def test_vps_bootstrap_script_starts_only_lean_paper_stack():
+    text = (ROOT / "scripts" / "bootstrap_polymarket_vps_paper.sh").read_text(encoding="utf-8")
+
+    assert "docker-compose.vps-paper.yml" in text
+    assert "docker-compose.polymarket-wide-raw.yml" not in text
+    assert "docker-compose.monitor.yml" not in text
+    assert "POLYMARKET_LIVE_TRADING=1" not in text
+    assert "POLYMARKET_EXECUTE_LIVE=true" not in text
+    assert "PM_PAPER_MEM_LIMIT 2g" in text
+    assert "POLYMARKET_WEBSOCKET_MAX_ASSETS 80" in text
+
+
+def test_vps_health_script_checks_dashboard_and_heartbeat_files():
+    text = (ROOT / "scripts" / "check_polymarket_vps_paper.sh").read_text(encoding="utf-8")
+
+    assert "docker-compose.vps-paper.yml" in text
+    assert "outputs/polymarket_model_governance/local_live_loop_heartbeat.json" in text
+    assert "outputs/polymarket_model_governance/forward_paper_cycle.json" in text
+    assert "outputs/polymarket_dashboard/dashboard_data.json" in text
+    assert "curl -fsS --max-time 5" in text

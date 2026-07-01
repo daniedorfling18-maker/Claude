@@ -39,7 +39,13 @@ PM_MODE=scan
 
 ## First deploy
 
-On a fresh Ubuntu VPS:
+Fast path on a fresh Ubuntu VPS:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/daniedorfling18-maker/Claude/main/scripts/bootstrap_polymarket_vps_paper.sh | sh
+```
+
+If you prefer to review the commands first:
 
 ```bash
 sudo apt-get update
@@ -68,6 +74,9 @@ docker compose -f docker-compose.vps-paper.yml ps
 docker compose -f docker-compose.vps-paper.yml logs -f polymarket-paper-live
 ```
 
+The bootstrap script leaves an existing `.env` alone. On a fresh `.env`, it
+automatically applies leaner settings if it detects a 4 GB VPS.
+
 ## Dashboard access
 
 The dashboard container listens on port `8765`.
@@ -88,6 +97,7 @@ For a longer-running setup, prefer one of:
 ## Operating checks
 
 ```bash
+bash scripts/check_polymarket_vps_paper.sh
 docker compose -f docker-compose.vps-paper.yml ps
 docker compose -f docker-compose.vps-paper.yml logs --tail=80 polymarket-paper-live
 docker stats --no-stream

@@ -3,6 +3,7 @@
   [int]$WebsocketSeconds = 90,
   [int]$StepTimeoutSeconds = 180,
   [double]$MaxMemoryPercent = 99.0,
+  [double]$TargetedLiquidityMemoryPercent = 95.0,
   [double]$DashboardOnlyMaxMemoryPercent = 99.5,
   [switch]$SkipDashboardOnHighMemory
 )
@@ -107,6 +108,7 @@ function Invoke-Step {
       phase = $Name
       error = $message
       error_type = "step_timeout"
+      runner_process_id = $PID
       log_file = $logFile
       paper_trading_invoked = $false
       live_trading_invoked = $false
@@ -151,6 +153,7 @@ Write-LogLine "Config: $ConfigPath"
 Write-LogLine "Websocket seconds: $WebsocketSeconds"
 Write-LogLine "Step timeout seconds: $StepTimeoutSeconds"
 Write-LogLine "Memory guard: heavy cycle max $MaxMemoryPercent%; dashboard-only max $DashboardOnlyMaxMemoryPercent%"
+Write-LogLine "Liquidity discovery mode threshold: targeted evidence at or above $TargetedLiquidityMemoryPercent% memory"
 
 $env:PYTHONPATH = (Resolve-Path .\src).Path
 $memory = Get-MemorySnapshot
@@ -218,7 +221,43 @@ Get-CimInstance Win32_Process -Filter "Name='python.exe' OR Name='pythonw.exe'" 
   }
 
 try {
-  Invoke-Step "liquidity-discovery" @(".\scripts\run_polymarket_liquidity_discovery.py", "--config", $ConfigPath) ".\work\liquidity_discovery_shadow_research_$stamp.json"
+  $liquidityMode = "full"
+  $liquidityDiscoveryStatus = "not_run"
+  $liquidityDiscoveryError = ""
+  $liquidityArgs = @(".\scripts\run_polymarket_liquidity_discovery.py", "--config", $ConfigPath)
+  $liquidityMemory = Get-MemorySnapshot
+  if ($liquidityMemory -and $liquidityMemory.used_percent -ge $TargetedLiquidityMemoryPercent) {
+    $liquidityMode = "targeted-evidence"
+    $liquidityArgs += @("--mode", "targeted-evidence")
+  }
+  Write-LogLine "Liquidity discovery mode: $liquidityMode"
+  try {
+    Invoke-Step "liquidity-discovery" $liquidityArgs ".\work\liquidity_discovery_shadow_research_$stamp.json"
+    $liquidityDiscoveryStatus = "ok"
+  } catch {
+    if ($script:StoppedHighMemory) {
+      throw
+    }
+    $liquidityDiscoveryStatus = "degraded_non_blocking"
+    $liquidityDiscoveryError = $_.Exception.Message
+    $script:FailedStep = ""
+    $script:FailedErrorType = ""
+    Write-LogLine "WARNING: liquidity discovery did not complete ($liquidityDiscoveryError); continuing with latest available evidence so discovery is not a cycle bottleneck."
+    $degradedStatus = [ordered]@{
+      status = "running_degraded"
+      started_at_utc = $startedAt
+      stamp = $stamp
+      phase = "after_liquidity-discovery"
+      liquidity_discovery_status = $liquidityDiscoveryStatus
+      liquidity_discovery_error = $liquidityDiscoveryError
+      liquidity_discovery_mode = $liquidityMode
+      runner_process_id = $PID
+      log_file = $logFile
+      paper_trading_invoked = $false
+      live_trading_invoked = $false
+    }
+    $degradedStatus | ConvertTo-Json -Depth 8 | Set-Content $statusFile -Encoding UTF8
+  }
   Invoke-Step "collect-websocket" @("-m", "polymarket_predictive_engine.cli", "collect-websocket", "--config", $ConfigPath, "--websocket-seconds", "$WebsocketSeconds") ".\work\collect_shadow_research_$stamp.json"
   Invoke-Step "normalize-websocket" @("-m", "polymarket_predictive_engine.cli", "normalize-websocket", "--config", $ConfigPath) ".\work\normalize_shadow_research_$stamp.json"
   Invoke-Step "build-features-v2" @("-m", "polymarket_predictive_engine.cli", "build-features-v2", "--config", $ConfigPath, "--source", "websocket", "--allow-unlabelled-research-features") ".\work\features_shadow_research_$stamp.json"
@@ -255,6 +294,9 @@ try {
     shadow_roi = $audit.shadow_roi
     liquidity_tradable_tokens = if ($liquidity) { $liquidity.tradable_tokens } else { $null }
     liquidity_fast_feedback_tradable_tokens = if ($liquidity) { $liquidity.fast_feedback_tradable_tokens } else { $null }
+    liquidity_discovery_mode = $liquidityMode
+    liquidity_discovery_status = $liquidityDiscoveryStatus
+    liquidity_discovery_error = $liquidityDiscoveryError
     log_file = $logFile
     audit_file = ".\work\local_history_audit_$stamp.json"
     report_file = ".\outputs\polymarket_model_governance\local_history_audit_report.md"

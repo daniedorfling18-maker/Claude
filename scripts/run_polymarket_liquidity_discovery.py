@@ -195,12 +195,26 @@ def _expand_query_aliases(
 def _adaptive_collection_queries(cfg: EngineConfig) -> list[str]:
     queries: list[str] = []
     payloads = [
+        read_json(cfg.governance_root / "trade_signal_audit.json", default={}) or {},
         read_json(cfg.governance_root / "research_focus.json", default={}) or {},
         read_json(cfg.governance_root / "price_action_feedback.json", default={}) or {},
+        read_json(cfg.governance_root / "paper_profit_goal_plan.json", default={}) or {},
     ]
     for payload in payloads:
         if not isinstance(payload, dict):
             continue
+        for raw_query in payload.get("missing_confirmation_queries", []) or []:
+            query = str(raw_query or "").strip()
+            if query:
+                queries.append(query)
+        for target in payload.get("paper_confirmation_targets", []) or []:
+            if not isinstance(target, dict):
+                continue
+            if target.get("missing_fresh_candidate") is False:
+                continue
+            query = str(target.get("recommended_collection_query") or "").strip()
+            if query:
+                queries.append(query)
         for raw_query in payload.get("collection_queries", []) or []:
             query = str(raw_query or "").strip()
             if query:
@@ -215,7 +229,34 @@ def _adaptive_collection_queries(cfg: EngineConfig) -> list[str]:
                 query = str(raw_query or "").strip()
                 if query:
                     queries.append(query)
+        price_action_goal_state = payload.get("price_action_goal_state", {}) or {}
+        if isinstance(price_action_goal_state, dict):
+            for raw_query in price_action_goal_state.get("collection_queries", []) or []:
+                query = str(raw_query or "").strip()
+                if query:
+                    queries.append(query)
     return _dedupe_keep_order(queries)
+
+
+def _targeted_evidence_settings(settings: dict[str, Any]) -> dict[str, Any]:
+    """Return a lean liquidity-discovery profile for the current evidence target.
+
+    Full discovery is still useful for finding new markets, but when the model
+    already says "collect this query next", the learning loop should not spend
+    the whole local RAM budget on broad search before it reaches that target.
+    """
+
+    targeted = dict(settings)
+    targeted["targeted_evidence_mode"] = True
+    targeted["broad_discovery_enabled"] = False
+    targeted["adaptive_only"] = True
+    targeted["event_limit"] = int(settings.get("targeted_event_limit", 24) or 24)
+    targeted["token_limit"] = int(settings.get("targeted_token_limit", 48) or 48)
+    targeted["public_search_limit"] = int(settings.get("targeted_public_search_limit", 6) or 6)
+    targeted["max_event_queries"] = int(settings.get("targeted_max_event_queries", 10) or 10)
+    targeted["max_public_search_queries"] = int(settings.get("targeted_max_public_search_queries", 18) or 18)
+    targeted["max_broad_public_search_queries"] = 0
+    return targeted
 
 
 def _broad_queries(settings: dict[str, Any]) -> list[str]:
@@ -226,10 +267,13 @@ def _broad_queries(settings: dict[str, Any]) -> list[str]:
 
 
 def _event_queries(settings: dict[str, Any], adaptive_queries: list[str] | None = None) -> list[str]:
-    configured = settings.get("queries", [""]) or [""]
-    if not isinstance(configured, list):
-        configured = [configured]
-    configured_queries = [str(query or "").strip() for query in configured]
+    if settings.get("adaptive_only", False):
+        configured_queries = _string_list(settings.get("targeted_fallback_queries"))
+    else:
+        configured = settings.get("queries", [""]) or [""]
+        if not isinstance(configured, list):
+            configured = [configured]
+        configured_queries = [str(query or "").strip() for query in configured]
     return _expand_query_aliases(
         _dedupe_keep_order([*(adaptive_queries or []), *configured_queries, *_broad_queries(settings)]),
         settings,
@@ -324,13 +368,17 @@ def _crypto_updown_public_queries(settings: dict[str, Any]) -> list[str]:
 
 
 def _public_search_queries(settings: dict[str, Any], adaptive_queries: list[str] | None = None) -> list[str]:
-    queries = _string_list(settings.get("public_search_queries"))
+    queries = (
+        _string_list(settings.get("targeted_public_search_queries"))
+        if settings.get("adaptive_only", False)
+        else _string_list(settings.get("public_search_queries"))
+    )
     confirmation_queries = [
         query
         for query in (adaptive_queries or [])
         if _is_crypto_updown_query(str(query or ""))
     ]
-    broad_queries = _broad_queries(settings)
+    broad_queries = [] if settings.get("adaptive_only", False) else _broad_queries(settings)
     max_broad_public_queries = int(settings.get("max_broad_public_search_queries", 18) or 18)
     return _expand_query_aliases(
         _dedupe_keep_order(
@@ -619,12 +667,14 @@ def _model_target_queue(cfg: EngineConfig, family_summary: list[dict[str, Any]])
     )
 
 
-def run_liquidity_discovery(cfg: EngineConfig) -> dict[str, Any]:
+def run_liquidity_discovery(cfg: EngineConfig, *, mode: str = "full") -> dict[str, Any]:
     settings = _settings(cfg)
     if not settings.get("enabled", True):
         payload = {"status": "disabled", "generated_at_utc": now_utc()}
         write_json(cfg.governance_root / "liquidity_discovery_summary.json", payload)
         return payload
+    if mode == "targeted-evidence":
+        settings = _targeted_evidence_settings(settings)
     tokens, query_summaries, adaptive_queries = _discover_tokens(cfg, settings)
     base = _base_config(settings)
     rows: list[dict[str, Any]] = []
@@ -660,10 +710,15 @@ def run_liquidity_discovery(cfg: EngineConfig) -> dict[str, Any]:
     payload = {
         "status": "computed",
         "generated_at_utc": now_utc(),
+        "mode": mode,
         "settings": {
             "event_limit": int(settings.get("event_limit", 60)),
             "token_limit": int(settings.get("token_limit", 120)),
-            "selection_strategy": "broad_round_robin_across_queries_fast_feedback_priority",
+            "selection_strategy": (
+                "targeted_evidence_queries_first"
+                if mode == "targeted-evidence"
+                else "broad_round_robin_across_queries_fast_feedback_priority"
+            ),
             "adaptive_collection_queries": adaptive_queries,
             "broad_discovery_enabled": bool(settings.get("broad_discovery_enabled", True)),
             "broad_query_count": len(_broad_queries(settings)),
@@ -691,6 +746,12 @@ def run_liquidity_discovery(cfg: EngineConfig) -> dict[str, Any]:
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="run_polymarket_liquidity_discovery.py")
     parser.add_argument("--config", default="polymarket_predictive_config.example.yaml")
+    parser.add_argument(
+        "--mode",
+        choices=["full", "targeted-evidence"],
+        default="full",
+        help="Use targeted-evidence to collect the current model-confirmation queries with bounded limits instead of broad discovery.",
+    )
     return parser
 
 
@@ -707,7 +768,7 @@ def _write_error_summary(config_path: str, payload: dict[str, Any]) -> None:
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     try:
-        payload = run_liquidity_discovery(load_config(args.config))
+        payload = run_liquidity_discovery(load_config(args.config), mode=args.mode)
     except Exception as exc:  # noqa: BLE001 - preserve diagnostics for PowerShell wrappers
         trace = traceback.format_exc()
         payload = {

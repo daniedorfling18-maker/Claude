@@ -732,6 +732,34 @@ def test_dashboard_surfaces_mid_cycle_shadow_research_memory_stop(tmp_path):
     )
 
 
+def test_dashboard_warns_when_liquidity_discovery_degrades_but_cycle_continues(tmp_path):
+    cfg = _config(tmp_path)
+    status_path = cfg.path.parent / "work" / "shadow_research_cycle_latest_status.json"
+    write_json(
+        status_path,
+        {
+            "status": "ok",
+            "started_at_utc": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+            "ended_at_utc": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+            "liquidity_discovery_status": "degraded_non_blocking",
+            "liquidity_discovery_error": "liquidity-discovery timed out after 180 seconds",
+            "liquidity_discovery_mode": "targeted-evidence",
+            "paper_trading_invoked": False,
+            "live_trading_invoked": False,
+        },
+    )
+
+    result = render_dashboard(cfg)
+    data = read_json(result["dashboard_data"])
+
+    assert data["shadow_research_cycle"]["effective_status"] == "ok"
+    assert any(
+        alert["title"] == "Liquidity discovery degraded, cycle continued"
+        and "timed out" in alert["body"]
+        for alert in data["oversight_status"]["alerts"]
+    )
+
+
 def test_dashboard_surfaces_paper_maintenance_task_status(tmp_path):
     cfg = _config(tmp_path)
     status_path = cfg.path.parent / "work" / "polymarket_paper_maintenance_task_status.json"

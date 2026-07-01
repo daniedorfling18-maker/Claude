@@ -2395,6 +2395,16 @@ def _dashboard_oversight_status(
                 f"Legacy heartbeat status is {live_loop_status or 'unknown'}; age is {round(live_age, 1) if live_age is not None else 'unknown'} seconds."
             ),
         )
+    liquidity_status = str(shadow_research.get("liquidity_discovery_status") or "")
+    if liquidity_status in {"degraded_non_blocking", "warning", "failed", "timeout"}:
+        add_alert(
+            "warn",
+            "Liquidity discovery degraded, cycle continued",
+            str(
+                shadow_research.get("liquidity_discovery_error")
+                or "The cycle continued with the latest available liquidity evidence instead of blocking the learning loop."
+            ),
+        )
     if model_age is None:
         add_alert("warn", "Model freshness unknown", "Price-action model summary has no usable timestamp.")
     elif model_age > 900:

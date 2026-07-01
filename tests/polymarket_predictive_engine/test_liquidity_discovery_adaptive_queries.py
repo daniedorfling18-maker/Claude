@@ -61,6 +61,39 @@ def test_liquidity_discovery_prepends_model_validation_gap_queries(tmp_path):
     assert public_queries[-1] == "bitcoin"
 
 
+def test_liquidity_discovery_prioritises_missing_confirmation_queries(tmp_path):
+    cfg = _cfg(tmp_path)
+    write_json(
+        cfg.governance_root / "trade_signal_audit.json",
+        {
+            "status": "ok",
+            "missing_confirmation_queries": ["solana updown"],
+            "paper_confirmation_targets": [
+                {
+                    "missing_fresh_candidate": False,
+                    "recommended_collection_query": "btc updown",
+                },
+                {
+                    "missing_fresh_candidate": True,
+                    "recommended_collection_query": "ethereum updown",
+                },
+            ],
+        },
+    )
+    write_json(
+        cfg.governance_root / "price_action_feedback.json",
+        {
+            "status": "ok",
+            "collection_queries": ["bitcoin", "fed", "solana updown"],
+        },
+    )
+
+    adaptive_queries = discovery._adaptive_collection_queries(cfg)
+
+    assert adaptive_queries[:3] == ["solana updown", "ethereum updown", "bitcoin"]
+    assert adaptive_queries.count("solana updown") == 1
+
+
 def test_liquidity_discovery_expands_updown_feedback_queries_without_5m_aliases(tmp_path):
     cfg = _cfg(tmp_path)
     write_json(
@@ -101,3 +134,31 @@ def test_liquidity_discovery_expands_updown_feedback_queries_without_5m_aliases(
     assert any(query.startswith("solana up or down July") for query in public_queries)
     assert len(event_queries) <= 28
     assert len(public_queries) <= 48
+
+
+def test_targeted_evidence_mode_uses_adaptive_queries_without_broad_search():
+    settings = discovery._targeted_evidence_settings(
+        {
+            "queries": ["world cup"],
+            "broad_discovery_enabled": True,
+            "broad_queries": ["sports", "politics"],
+            "event_limit": 80,
+            "token_limit": 180,
+            "crypto_updown_date_search": {"enabled": True, "days_ahead": 1},
+        }
+    )
+
+    event_queries = discovery._event_queries(settings, adaptive_queries=["solana updown"])
+    public_queries = discovery._public_search_queries(settings, adaptive_queries=["solana updown"])
+
+    assert settings["event_limit"] == 24
+    assert settings["token_limit"] == 48
+    assert "solana updown" in event_queries
+    assert "solana up or down" in event_queries
+    assert "world cup" not in event_queries
+    assert "sports" not in event_queries
+    assert "politics" not in event_queries
+    assert "world cup" not in public_queries
+    assert any(query.startswith("solana up or down") for query in public_queries)
+    assert len(event_queries) <= 10
+    assert len(public_queries) <= 18

@@ -305,6 +305,28 @@ def test_shadow_research_cycle_refreshes_price_action_learning_and_governance():
     assert "dashboard_status = $governanceRefresh.dashboard.status" in text
 
 
+def test_shadow_research_cycle_uses_targeted_liquidity_discovery_under_memory_pressure():
+    text = _script_text("scripts/run_polymarket_shadow_research_cycle.ps1")
+
+    assert "[double]$TargetedLiquidityMemoryPercent = 95.0" in text
+    assert '$liquidityMode = "targeted-evidence"' in text
+    assert '$liquidityArgs += @("--mode", "targeted-evidence")' in text
+    assert "liquidity_discovery_mode = $liquidityMode" in text
+
+
+def test_shadow_research_cycle_keeps_learning_when_liquidity_discovery_times_out():
+    text = _script_text("scripts/run_polymarket_shadow_research_cycle.ps1")
+
+    liquidity_index = text.index('Invoke-Step "liquidity-discovery"')
+    catch_index = text.index('$liquidityDiscoveryStatus = "degraded_non_blocking"', liquidity_index)
+    websocket_index = text.index('Invoke-Step "collect-websocket"', catch_index)
+
+    assert "continuing with latest available evidence so discovery is not a cycle bottleneck" in text
+    assert "running_degraded" in text
+    assert "liquidity_discovery_error = $liquidityDiscoveryError" in text
+    assert catch_index < websocket_index
+
+
 def test_shadow_research_task_installer_uses_hidden_launcher():
     text = _script_text("scripts/install_polymarket_shadow_research_task.ps1")
 

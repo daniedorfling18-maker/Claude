@@ -138,6 +138,7 @@ $status = [ordered]@{
   status = "running"
   started_at_utc = $startedAt
   stamp = $stamp
+  runner_process_id = $PID
   log_file = $logFile
   paper_trading_invoked = $false
   live_trading_invoked = $false
@@ -160,8 +161,27 @@ if ($memory) {
 if ($memory -and $memory.used_percent -ge $MaxMemoryPercent) {
   $endedAt = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ")
   $reason = "Shadow research cycle skipped before websocket/model work because local memory was $($memory.used_percent)% at or above the $MaxMemoryPercent% guardrail."
-  $dashboardStatus = "not_attempted"
-  $dashboardReason = ""
+  $dashboardStatus = "pending_dashboard_refresh"
+  $dashboardReason = "Heavy research was skipped on the memory guard; dashboard-only refresh has not completed yet."
+
+  $status = [ordered]@{
+    status = "skipped_high_memory"
+    started_at_utc = $startedAt
+    ended_at_utc = $endedAt
+    stamp = $stamp
+    reason = $reason
+    memory_used_percent = $memory.used_percent
+    memory_free_gb = $memory.free_gb
+    memory_total_gb = $memory.total_gb
+    max_memory_percent = $MaxMemoryPercent
+    dashboard_status = $dashboardStatus
+    dashboard_reason = $dashboardReason
+    runner_process_id = $PID
+    log_file = $logFile
+    paper_trading_invoked = $false
+    live_trading_invoked = $false
+  }
+  $status | ConvertTo-Json -Depth 8 | Set-Content $statusFile -Encoding UTF8
 
   if ($SkipDashboardOnHighMemory) {
     $dashboardStatus = "skipped_by_flag"
@@ -181,22 +201,8 @@ if ($memory -and $memory.used_percent -ge $MaxMemoryPercent) {
     }
   }
 
-  $status = [ordered]@{
-    status = "skipped_high_memory"
-    started_at_utc = $startedAt
-    ended_at_utc = $endedAt
-    stamp = $stamp
-    reason = $reason
-    memory_used_percent = $memory.used_percent
-    memory_free_gb = $memory.free_gb
-    memory_total_gb = $memory.total_gb
-    max_memory_percent = $MaxMemoryPercent
-    dashboard_status = $dashboardStatus
-    dashboard_reason = $dashboardReason
-    log_file = $logFile
-    paper_trading_invoked = $false
-    live_trading_invoked = $false
-  }
+  $status["dashboard_status"] = $dashboardStatus
+  $status["dashboard_reason"] = $dashboardReason
   $status | ConvertTo-Json -Depth 8 | Set-Content $statusFile -Encoding UTF8
   Write-LogLine $reason
   Write-LogLine "Dashboard status on skip: $dashboardStatus"
@@ -263,6 +269,7 @@ try {
     research_focus_status = $governanceRefresh.research_focus_status
     approved_for_paper_trading = $governanceRefresh.approved_for_paper_trading
     dashboard_status = $governanceRefresh.dashboard.status
+    runner_process_id = $PID
     paper_trading_invoked = $false
     live_trading_invoked = $false
   }
@@ -273,8 +280,28 @@ try {
   $endedAt = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ")
   if ($script:StoppedHighMemory) {
     $memory = $script:StoppedHighMemorySnapshot
-    $dashboardStatus = "skipped_after_memory_stop"
-    $dashboardReason = "Dashboard refresh was skipped because the cycle had already crossed the memory guardrail."
+    $dashboardStatus = "pending_dashboard_refresh_after_memory_stop"
+    $dashboardReason = "Heavy research stopped on the memory guard; dashboard-only refresh has not completed yet."
+    $status = [ordered]@{
+      status = "stopped_high_memory"
+      started_at_utc = $startedAt
+      ended_at_utc = $endedAt
+      stamp = $stamp
+      phase = $script:StoppedHighMemoryPhase
+      reason = $_.Exception.Message
+      memory_used_percent = if ($memory) { $memory.used_percent } else { $null }
+      memory_free_gb = if ($memory) { $memory.free_gb } else { $null }
+      memory_total_gb = if ($memory) { $memory.total_gb } else { $null }
+      max_memory_percent = $MaxMemoryPercent
+      dashboard_status = $dashboardStatus
+      dashboard_reason = $dashboardReason
+      runner_process_id = $PID
+      log_file = $logFile
+      paper_trading_invoked = $false
+      live_trading_invoked = $false
+    }
+    $status | ConvertTo-Json -Depth 8 | Set-Content $statusFile -Encoding UTF8
+
     if ($SkipDashboardOnHighMemory) {
       $dashboardStatus = "skipped_by_flag"
       $dashboardReason = "Dashboard-only refresh was disabled for this run."
@@ -292,23 +319,8 @@ try {
       $dashboardStatus = "skipped_critical_memory"
       $dashboardReason = "Dashboard-only refresh skipped because memory was at or above the $DashboardOnlyMaxMemoryPercent% critical dashboard guardrail."
     }
-    $status = [ordered]@{
-      status = "stopped_high_memory"
-      started_at_utc = $startedAt
-      ended_at_utc = $endedAt
-      stamp = $stamp
-      phase = $script:StoppedHighMemoryPhase
-      reason = $_.Exception.Message
-      memory_used_percent = if ($memory) { $memory.used_percent } else { $null }
-      memory_free_gb = if ($memory) { $memory.free_gb } else { $null }
-      memory_total_gb = if ($memory) { $memory.total_gb } else { $null }
-      max_memory_percent = $MaxMemoryPercent
-      dashboard_status = $dashboardStatus
-      dashboard_reason = $dashboardReason
-      log_file = $logFile
-      paper_trading_invoked = $false
-      live_trading_invoked = $false
-    }
+    $status["dashboard_status"] = $dashboardStatus
+    $status["dashboard_reason"] = $dashboardReason
     $status | ConvertTo-Json -Depth 8 | Set-Content $statusFile -Encoding UTF8
     Write-LogLine "Stopped cleanly due to memory guard at phase $script:StoppedHighMemoryPhase"
     exit 0
@@ -321,6 +333,7 @@ try {
     phase = $script:FailedStep
     error = $_.Exception.Message
     error_type = $script:FailedErrorType
+    runner_process_id = $PID
     log_file = $logFile
     paper_trading_invoked = $false
     live_trading_invoked = $false

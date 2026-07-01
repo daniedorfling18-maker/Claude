@@ -235,7 +235,7 @@ def test_shadow_research_cycle_checks_memory_between_python_steps():
     assert 'Assert-MemoryBelowGuard -Phase "before_$Name"' in text
     assert 'Assert-MemoryBelowGuard -Phase "after_$Name"' in text
     assert 'status = "stopped_high_memory"' in text
-    assert "skipped_after_memory_stop" in text
+    assert "pending_dashboard_refresh_after_memory_stop" in text
     assert "refreshed_dashboard_only_after_memory_stop" in text
     assert "render-dashboard-after-memory-stop" in text
     invoke_step_index = text.index("function Invoke-Step")
@@ -245,6 +245,33 @@ def test_shadow_research_cycle_checks_memory_between_python_steps():
 
     assert before_guard_index < start_process_index
     assert start_process_index < after_guard_index
+
+
+def test_shadow_research_cycle_status_records_runner_process_id():
+    text = _script_text("scripts/run_polymarket_shadow_research_cycle.ps1")
+
+    assert "runner_process_id = $PID" in text
+
+
+def test_shadow_research_cycle_writes_memory_status_before_dashboard_refresh():
+    text = _script_text("scripts/run_polymarket_shadow_research_cycle.ps1")
+
+    skipped_status_index = text.index('status = "skipped_high_memory"')
+    skipped_status_write_index = text.index(
+        "$status | ConvertTo-Json -Depth 8 | Set-Content $statusFile -Encoding UTF8",
+        skipped_status_index,
+    )
+    skipped_dashboard_index = text.index('Invoke-Step "render-dashboard"', skipped_status_write_index)
+
+    stopped_status_index = text.index('status = "stopped_high_memory"')
+    stopped_status_write_index = text.index(
+        "$status | ConvertTo-Json -Depth 8 | Set-Content $statusFile -Encoding UTF8",
+        stopped_status_index,
+    )
+    stopped_dashboard_index = text.index('Invoke-Step "render-dashboard-after-memory-stop"', stopped_status_write_index)
+
+    assert skipped_status_write_index < skipped_dashboard_index
+    assert stopped_status_write_index < stopped_dashboard_index
 
 
 def test_shadow_research_cycle_dashboard_refresh_bypasses_heavy_guard_only():

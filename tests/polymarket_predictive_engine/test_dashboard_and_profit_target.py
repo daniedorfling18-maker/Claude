@@ -625,6 +625,34 @@ def test_dashboard_treats_old_running_shadow_research_status_as_stale(tmp_path):
     assert any(alert["title"] == "Shadow research cycle is stale" for alert in data["oversight_status"]["alerts"])
 
 
+def test_dashboard_treats_dead_running_shadow_research_runner_as_interrupted(tmp_path):
+    cfg = _config(tmp_path)
+    status_path = cfg.path.parent / "work" / "shadow_research_cycle_latest_status.json"
+    write_json(
+        status_path,
+        {
+            "status": "running",
+            "started_at_utc": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+            "runner_process_id": 999999999,
+            "paper_trading_invoked": False,
+            "live_trading_invoked": False,
+        },
+    )
+
+    result = render_dashboard(cfg)
+    data = read_json(result["dashboard_data"])
+
+    assert data["shadow_research_cycle"]["status"] == "running"
+    assert data["shadow_research_cycle"]["effective_status"] == "interrupted"
+    assert data["shadow_research_cycle"]["runner_process_active"] is False
+    assert data["oversight_status"]["shadow_research_status"] == "interrupted"
+    assert data["decision_useful_summary"]["trade_decision"] == "WAIT: CYCLE INTERRUPTED"
+    assert any(
+        alert["title"] == "Shadow research cycle was interrupted"
+        for alert in data["oversight_status"]["alerts"]
+    )
+
+
 def test_dashboard_marks_stale_legacy_full_cycle_as_audit_only(tmp_path):
     cfg = _config(tmp_path)
     write_json(

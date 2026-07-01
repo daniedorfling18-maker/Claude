@@ -1,10 +1,14 @@
 from __future__ import annotations
 
 from collections import Counter
+import ctypes
 from datetime import datetime, timedelta, timezone
 import json
+import os
 from pathlib import Path
 import re
+import subprocess
+import sys
 from typing import Any
 
 from .config import EngineConfig
@@ -1691,6 +1695,51 @@ def _read_json_lenient(path: Path, default: Any = None) -> Any:
         return default
 
 
+def _local_process_exists(pid_value: Any) -> bool | None:
+    try:
+        pid = int(float(str(pid_value)))
+    except (TypeError, ValueError):
+        return None
+    if pid <= 0:
+        return None
+    if sys.platform.startswith("win"):
+        try:
+            kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+            handle = kernel32.OpenProcess(0x1000, False, pid)  # PROCESS_QUERY_LIMITED_INFORMATION
+            if handle:
+                kernel32.CloseHandle(handle)
+                return True
+            error = ctypes.get_last_error()
+            if error == 5:  # ERROR_ACCESS_DENIED: process exists but cannot be queried.
+                return True
+            if error in {0, 87}:  # ERROR_INVALID_PARAMETER usually means the PID is gone.
+                return False
+        except Exception:
+            pass
+        try:
+            result = subprocess.run(
+                ["tasklist", "/FI", f"PID eq {pid}", "/FO", "CSV", "/NH"],
+                capture_output=True,
+                text=True,
+                timeout=10,
+                check=False,
+            )
+        except Exception:
+            return None
+        if result.returncode != 0:
+            return None
+        return f'"{pid}"' in result.stdout
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    except Exception:
+        return None
+    return True
+
+
 def _strategy_v2_status(cfg: EngineConfig) -> dict[str, Any]:
     """Expose Strategy V2 anchored-edge research progress on the dashboard.
 
@@ -2232,12 +2281,21 @@ def _shadow_research_cycle_status(cfg: EngineConfig) -> dict[str, Any]:
     status = str(payload.get("status") or "unknown")
     effective_status = status
     reason = str(payload.get("reason") or "")
+    runner_process_active = None
     if age is not None and age > stale_after_seconds:
         effective_status = "stale"
         reason = (
             f"Shadow research status is {round(age, 1)} seconds old; "
             "treat this as stale even if the file still says running."
         )
+    elif status in {"running", "started", "in_progress"} and payload.get("runner_process_id") is not None:
+        runner_process_active = _local_process_exists(payload.get("runner_process_id"))
+        if runner_process_active is False:
+            effective_status = "interrupted"
+            reason = (
+                f"Shadow research status says {status}, but runner process "
+                f"{payload.get('runner_process_id')} is no longer active; treat the cycle as interrupted."
+            )
     return {
         **payload,
         "status_file": str(path),
@@ -2245,6 +2303,7 @@ def _shadow_research_cycle_status(cfg: EngineConfig) -> dict[str, Any]:
         "stale_after_seconds": stale_after_seconds,
         "effective_status": effective_status,
         "reason": reason,
+        "runner_process_active": runner_process_active,
         "paper_trading_invoked": bool(payload.get("paper_trading_invoked", False)),
         "live_trading_invoked": bool(payload.get("live_trading_invoked", False)),
     }
@@ -2300,6 +2359,15 @@ def _dashboard_oversight_status(
             "bad",
             "Shadow research cycle is stale",
             str(shadow_research.get("reason") or "The current safe research lane has not refreshed recently."),
+        )
+    elif shadow_status == "interrupted":
+        add_alert(
+            "bad",
+            "Shadow research cycle was interrupted",
+            str(
+                shadow_research.get("reason")
+                or "The current safe research lane claimed to be running, but the local runner process is no longer active."
+            ),
         )
     elif shadow_status in {"error", "failed"}:
         add_alert(
@@ -2552,6 +2620,17 @@ def _decision_useful_summary(
         )
         next_action = "Fix or rerun the failed shadow research cycle after memory is below the guardrail; do not trade from partial outputs."
         unlock_condition = "The shadow cycle must complete and refresh model, signal, and dashboard artifacts after the failing phase."
+    elif shadow_status == "interrupted":
+        trade_decision = "WAIT: CYCLE INTERRUPTED"
+        decision_class = "bad"
+        headline = "The research cycle stopped without a clean final status"
+        primary_blocker = str(
+            shadow_research.get("reason")
+            or oversight_status.get("shadow_research_reason")
+            or "The latest research cycle appears to have stopped before publishing a clean result."
+        )
+        next_action = "Let the next scheduled shadow cycle restart after memory is below the guardrail; do not trade from partial outputs."
+        unlock_condition = "A fresh shadow-research cycle must complete and publish model, signal, and dashboard artifacts."
     elif shadow_status in {"skipped_high_memory", "stopped_high_memory", "memory_paused"}:
         trade_decision = "WAIT: MEMORY GUARD"
         decision_class = "warn"

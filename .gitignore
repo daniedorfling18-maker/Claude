@@ -37,6 +37,7 @@ inputs/polymarket/positions.csv
 .env
 .env.*
 !.env.example
+!.env.vps-paper.example
 config/polymarket_live_approval.yaml
 *.pem
 *.key

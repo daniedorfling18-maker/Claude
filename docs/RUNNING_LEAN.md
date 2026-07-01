@@ -44,6 +44,17 @@ docker compose -f docker-compose.live.yml up -d --build
 docker stats --no-stream               # confirm it sits near 3 × PM_MEM_LIMIT
 ```
 
+## VPS option: Docker on a separate machine
+
+Docker only relieves laptop pressure when it runs on a **remote VPS** or another separate machine. For that path, use the lean paper stack instead of the broad compose files:
+
+```bash
+cp .env.vps-paper.example .env
+docker compose -f docker-compose.vps-paper.yml up -d --build
+```
+
+That stack runs only the continuous websocket paper/evidence loop plus the dashboard. See `docs/POLYMARKET_VPS_DOCKER_RUNBOOK.md`.
+
 ## 3. The lowest-memory option: the paper bot needs no Docker at all
 
 The crypto/paper bot you're implementing is **Docker-free by design**

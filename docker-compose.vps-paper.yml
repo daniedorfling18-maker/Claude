@@ -1,0 +1,106 @@
+# Lean VPS deployment for the governed Polymarket paper system.
+#
+# This stack is intentionally small:
+#   1. polymarket-paper-live  - continuous websocket paper/evidence loop, paper-only
+#   2. polymarket-dashboard   - static oversight dashboard on port 8765
+#
+# It does NOT start the broad multi-service research stacks and it does NOT enable live trading.
+# Copy .env.vps-paper.example to .env, tune the memory/asset limits, then run:
+#
+#   docker compose -f docker-compose.vps-paper.yml up -d --build
+#
+services:
+  polymarket-paper-live:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        INSTALL_POLYMARKET_SDK: "false"
+    image: polymarket-paper-vps:latest
+    container_name: polymarket-paper-live
+    mem_limit: ${PM_PAPER_MEM_LIMIT:-4g}
+    env_file:
+      - .env
+    working_dir: /app
+    environment:
+      PM_MODE: scan
+      POLYMARKET_MODE: scan
+      POLYMARKET_EXECUTE_LIVE: "false"
+      POLYMARKET_LIVE_TRADING: "0"
+      POLYMARKET_QUERY: ${POLYMARKET_QUERY:-world cup}
+      POLYMARKET_SCAN_QUERY_MODE: ${POLYMARKET_SCAN_QUERY_MODE:-batch}
+      POLYMARKET_QUERIES: ${POLYMARKET_QUERIES:-}
+      POLYMARKET_MAX_SCAN_QUERIES: ${POLYMARKET_MAX_SCAN_QUERIES:-3}
+      POLYMARKET_ADAPTIVE_SCAN_PRIORITY: ${POLYMARKET_ADAPTIVE_SCAN_PRIORITY:-true}
+      POLYMARKET_EVENT_LIMIT: ${POLYMARKET_EVENT_LIMIT:-160}
+      POLYMARKET_PUBLIC_SEARCH_ENABLED: ${POLYMARKET_PUBLIC_SEARCH_ENABLED:-true}
+      POLYMARKET_PUBLIC_SEARCH_LIMIT_PER_TYPE: ${POLYMARKET_PUBLIC_SEARCH_LIMIT_PER_TYPE:-6}
+      POLYMARKET_OUTPUT_DIR: ${POLYMARKET_OUTPUT_DIR:-outputs/polymarket}
+      POLYMARKET_MODEL_PROBABILITIES_CSV: ${POLYMARKET_MODEL_PROBABILITIES_CSV:-inputs/polymarket/model_probabilities.csv}
+      POLYMARKET_POSITIONS_CSV: ${POLYMARKET_POSITIONS_CSV:-inputs/polymarket/positions.csv}
+      POLYMARKET_MIN_EDGE: ${POLYMARKET_MIN_EDGE:-0.04}
+      THE_ODDS_API_KEY: ${THE_ODDS_API_KEY:-}
+      PAPER_LOOP_ITERATIONS: "0"
+      POLYMARKET_LIVE_LOOP_SLEEP_SECONDS: ${POLYMARKET_LIVE_LOOP_SLEEP_SECONDS:-1}
+      POLYMARKET_WEBSOCKET_SECONDS: ${POLYMARKET_WEBSOCKET_SECONDS:-30}
+      POLYMARKET_DISCOVERY_CYCLE_SECONDS: ${POLYMARKET_DISCOVERY_CYCLE_SECONDS:-180}
+      PAPER_PREDICTION_CYCLE_SECONDS: ${PAPER_PREDICTION_CYCLE_SECONDS:-30}
+      POLYMARKET_WEBSOCKET_MAX_ASSETS: ${POLYMARKET_WEBSOCKET_MAX_ASSETS:-120}
+      PYTHONDONTWRITEBYTECODE: "1"
+    command: >
+      sh -c "python scripts/run_polymarket_local_live_loop.py
+      --config /app/polymarket_predictive_config.example.yaml
+      --iterations $${PAPER_LOOP_ITERATIONS}
+      --websocket-seconds $${POLYMARKET_WEBSOCKET_SECONDS}
+      --sleep-seconds $${POLYMARKET_LIVE_LOOP_SLEEP_SECONDS}
+      --prediction-cycle-seconds $${PAPER_PREDICTION_CYCLE_SECONDS}
+      --discovery-cycle-seconds $${POLYMARKET_DISCOVERY_CYCLE_SECONDS}
+      --max-assets $${POLYMARKET_WEBSOCKET_MAX_ASSETS}
+      --paper-source websocket
+      --optimize-model"
+    volumes:
+      - ./polymarket_predictive_config.example.yaml:/app/polymarket_predictive_config.example.yaml:ro
+      - ./src:/app/src:ro
+      - ./scripts:/app/scripts:ro
+      - ./outputs:/app/outputs
+      - ./work:/app/work
+      - ./inputs/polymarket:/app/inputs/polymarket
+    restart: unless-stopped
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "test -f /app/outputs/polymarket_model_governance/local_live_loop_heartbeat.json || test -f /app/outputs/polymarket_model_governance/forward_paper_cycle.json",
+        ]
+      interval: 60s
+      timeout: 5s
+      retries: 5
+      start_period: 180s
+
+  polymarket-dashboard:
+    image: polymarket-paper-vps:latest
+    container_name: polymarket-dashboard
+    mem_limit: ${PM_DASHBOARD_MEM_LIMIT:-256m}
+    env_file:
+      - .env
+    working_dir: /app
+    command: >
+      sh -c "mkdir -p /app/outputs/polymarket_dashboard &&
+      if [ ! -f /app/outputs/polymarket_dashboard/index.html ]; then
+        python scripts/render_polymarket_dashboard.py --config /app/polymarket_predictive_config.example.yaml || true;
+      fi;
+      cd /app/outputs/polymarket_dashboard &&
+      python -m http.server 8765 --bind 0.0.0.0"
+    ports:
+      - "${POLYMARKET_DASHBOARD_HOST:-0.0.0.0}:${POLYMARKET_DASHBOARD_PORT:-8765}:8765"
+    volumes:
+      - ./polymarket_predictive_config.example.yaml:/app/polymarket_predictive_config.example.yaml:ro
+      - ./scripts:/app/scripts:ro
+      - ./src:/app/src:ro
+      - ./outputs:/app/outputs
+      - ./work:/app/work:ro
+      - ./inputs/polymarket:/app/inputs/polymarket:ro
+    depends_on:
+      polymarket-paper-live:
+        condition: service_started
+    restart: unless-stopped

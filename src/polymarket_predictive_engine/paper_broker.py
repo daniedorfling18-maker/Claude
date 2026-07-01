@@ -109,20 +109,23 @@ def _latest_websocket_quote(cfg: EngineConfig, market_id: str, token_id: str) ->
     rows = read_csv_rows(cfg.output_root / "polymarket_training" / "websocket_market_features.csv")
     market_key = str(market_id or "").strip().lower()
     token_key = str(token_id or "").strip()
-    matches = [
-        row
-        for row in rows
-        if (
-            token_key
-            and token_key
+    if token_key:
+        matches = [
+            row
+            for row in rows
+            if token_key
             in {
                 str(row.get("asset_id") or "").strip(),
                 str(row.get("token_id") or "").strip(),
                 str(row.get("outcome_token_id") or "").strip(),
             }
-        )
-        or (market_key and str(row.get("market_slug") or "").strip().lower() == market_key)
-    ]
+        ]
+    else:
+        matches = [
+            row
+            for row in rows
+            if market_key and str(row.get("market_slug") or "").strip().lower() == market_key
+        ]
     if not matches:
         return None
     matches.sort(key=lambda row: parse_timestamp(row.get("collected_at_utc")) or datetime.min.replace(tzinfo=timezone.utc))
@@ -149,6 +152,19 @@ def _latest_quote(con, cfg: EngineConfig, market_id: str, token_id: str) -> dict
         """,
         (market_id, token_id),
     ).fetchone()
+    snapshot_source = "market_snapshots"
+    if row is None and token_id:
+        row = con.execute(
+            """
+            SELECT collected_at, best_bid, best_ask, midpoint, spread
+            FROM market_snapshots
+            WHERE token_id = ?
+            ORDER BY collected_at DESC, rowid DESC
+            LIMIT 1
+            """,
+            (token_id,),
+        ).fetchone()
+        snapshot_source = "market_snapshots_token_alias"
     if row is not None:
         db_quote = {
             "timestamp": row["collected_at"],
@@ -156,7 +172,7 @@ def _latest_quote(con, cfg: EngineConfig, market_id: str, token_id: str) -> dict
             "best_ask": safe_float(row["best_ask"]),
             "midpoint": safe_float(row["midpoint"]),
             "spread": safe_float(row["spread"]),
-            "source": "market_snapshots",
+            "source": snapshot_source,
         }
         if websocket_quote is not None and (_quote_time(websocket_quote) or datetime.min.replace(tzinfo=timezone.utc)) > (
             _quote_time(db_quote) or datetime.min.replace(tzinfo=timezone.utc)

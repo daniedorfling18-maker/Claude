@@ -36,9 +36,15 @@ def test_refresh_governance_rebuilds_price_action_paper_signals_before_audit(tmp
     )
     monkeypatch.setattr(
         refresh_module,
+        "build_paper_round_trip_evidence",
+        lambda _cfg: order.append("paper_round_trip")
+        or {"closed_round_trips": 2, "positive_round_trips": 1, "realized_pnl_usdc": 3.5},
+    )
+    monkeypatch.setattr(
+        refresh_module,
         "train_price_action_model",
         lambda _cfg: (
-            assert_order_contains(order, ["price_action_scout", "price_action_microstructure"])
+            assert_order_contains(order, ["price_action_scout", "price_action_microstructure", "paper_round_trip"])
             or order.append("price_action_model")
             or {"decision": "collect_more", "promotion_ready": False}
         ),
@@ -89,6 +95,7 @@ def test_refresh_governance_rebuilds_price_action_paper_signals_before_audit(tmp
 
     assert order.index("price_action_scout") < order.index("price_action_model")
     assert order.index("price_action_microstructure") < order.index("price_action_model")
+    assert order.index("paper_round_trip") < order.index("price_action_model")
     assert order.index("price_action_feedback") < order.index("price_action_paper_signals")
     assert order.index("price_action_paper_signals") < order.index("trade_signal_audit")
     assert order.index("trade_signal_audit") < order.index("dashboard")
@@ -97,6 +104,9 @@ def test_refresh_governance_rebuilds_price_action_paper_signals_before_audit(tmp
     assert result["price_action_paper_rejection_count"] == 2
     assert result["refreshed"]["price_action_scout"] is True
     assert result["refreshed"]["price_action_microstructure"] is True
+    assert result["refreshed"]["paper_round_trip_evidence"] is True
+    assert result["paper_round_trip_closed_trades"] == 2
+    assert result["paper_round_trip_positive_trades"] == 1
     assert Path(cfg.governance_root / "governance_refresh.json").exists()
 
 

@@ -14,6 +14,7 @@ from .utils import now_utc, read_csv_rows, safe_float, write_csv, write_json
 OUTPUT_DIRNAME = "polymarket_price_action"
 TRADE_EVENTS_FILE = "microstructure_trade_events.csv"
 SCOUT_ROUND_TRIP_FILE = "price_action_scout_round_trip_evidence.csv"
+PAPER_BROKER_ROUND_TRIP_FILE = "paper_broker_round_trip_evidence.csv"
 STRATEGY_V2_ROUND_TRIP_FILE = "strategy_v2_round_trip_evidence.csv"
 SUMMARY_JSON = "price_action_model_summary.json"
 VALIDATION_FILE = "price_action_model_validation_predictions.csv"
@@ -301,6 +302,8 @@ def _prepared_round_trip_event(row: dict[str, str], settings: dict[str, Any], *,
         return None
     if status == "open_marked" and int(safe_float(row.get("observations")) or 0) < minimum_marked_observations:
         return None
+    if source == "paper_broker_round_trip" and str(row.get("quote_consistency_status") or "") != "ok":
+        return None
     entry_ask = safe_float(row.get("entry_price"))
     exit_bid = safe_float(row.get("exit_price")) if status.startswith("closed_") else safe_float(row.get("latest_bid"))
     pnl = safe_float(row.get("realized_pnl_usdc")) if status.startswith("closed_") else safe_float(row.get("mark_pnl_usdc"))
@@ -560,6 +563,7 @@ def _load_training_events(cfg: EngineConfig, settings: dict[str, Any]) -> tuple[
         return events, sources
 
     round_trip_specs = [
+        ("paper_broker_round_trip", out_dir / PAPER_BROKER_ROUND_TRIP_FILE),
         ("price_action_scout_round_trip", out_dir / SCOUT_ROUND_TRIP_FILE),
         ("strategy_v2_round_trip", cfg.output_root / "polymarket_strategy_v2" / STRATEGY_V2_ROUND_TRIP_FILE),
     ]

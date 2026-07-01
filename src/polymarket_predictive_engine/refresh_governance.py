@@ -9,6 +9,7 @@ from .cohort_validation import write_signal_cohort_pnl
 from .dashboard import render_dashboard
 from .goal_planner import build_goal_plan
 from .governance import governance_report
+from .paper_round_trip import build_paper_round_trip_evidence
 from .price_action_feedback import build_price_action_feedback
 from .price_action_microstructure import build_microstructure_edge_lab
 from .price_action_model import train_price_action_model
@@ -53,6 +54,7 @@ def refresh_governance(cfg: EngineConfig, *, refresh_dashboard: bool = True) -> 
 
     price_action_scout = build_price_action_scout(cfg)
     price_action_microstructure = build_microstructure_edge_lab(cfg)
+    paper_round_trip = build_paper_round_trip_evidence(cfg)
     price_action_model = train_price_action_model(cfg)
     price_action_feedback = build_price_action_feedback(cfg)
     price_action_paper_signals = build_price_action_paper_signals(cfg)
@@ -77,6 +79,7 @@ def refresh_governance(cfg: EngineConfig, *, refresh_dashboard: bool = True) -> 
             "profit_sprint": True,
             "price_action_scout": True,
             "price_action_microstructure": True,
+            "paper_round_trip_evidence": True,
             "price_action_feedback": True,
             "price_action_model": True,
             "price_action_paper_signals": True,
@@ -95,6 +98,9 @@ def refresh_governance(cfg: EngineConfig, *, refresh_dashboard: bool = True) -> 
         "price_action_scout_closed_trades": price_action_scout.get("closed_trades"),
         "price_action_microstructure_decision": price_action_microstructure.get("decision"),
         "price_action_microstructure_training_events": price_action_microstructure.get("trade_events"),
+        "paper_round_trip_closed_trades": paper_round_trip.get("closed_round_trips"),
+        "paper_round_trip_positive_trades": paper_round_trip.get("positive_round_trips"),
+        "paper_round_trip_realized_pnl_usdc": paper_round_trip.get("realized_pnl_usdc"),
         "price_action_feedback_state": price_action_feedback.get("learning_state"),
         "price_action_model_decision": price_action_model.get("decision"),
         "price_action_model_promotion_ready": price_action_model.get("promotion_ready"),

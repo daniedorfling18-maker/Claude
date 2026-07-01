@@ -47,8 +47,8 @@ def test_strategy_v2_cycle_bounds_python_steps():
 def test_strategy_v2_cycle_skips_before_heavy_work_when_memory_is_high():
     text = _script_text("scripts/run_polymarket_strategy_v2_cycle.ps1")
 
-    assert "[double]$MaxMemoryPercent = 94" in text
-    assert "[double]$MaintenanceMaxMemoryPercent = 98.5" in text
+    assert "[double]$MaxMemoryPercent = 99" in text
+    assert "[double]$MaintenanceMaxMemoryPercent = 99.5" in text
     guard_index = text.index("skipped_high_memory")
     shadow_start_index = text.index("$shadowRefreshProcess.Start()")
 
@@ -190,8 +190,8 @@ def test_strategy_v2_scheduled_wrapper_pins_repo_source():
 def test_strategy_v2_scheduled_wrapper_skips_before_cycle_when_memory_is_high():
     text = _script_text("scripts/run_strategy_v2_cycle_scheduled_wrapper.ps1")
 
-    assert "[double]$MaxMemoryPercent = 95" in text
-    assert "[double]$MaintenanceMaxMemoryPercent = 98.5" in text
+    assert "[double]$MaxMemoryPercent = 99" in text
+    assert "[double]$MaintenanceMaxMemoryPercent = 99.5" in text
     assert "Get-MemoryUsedPercent" in text
     assert "$memoryUsedPercent -ge $MaxMemoryPercent" in text
     assert "Invoke-LowMemoryMaintenance" in text
@@ -224,7 +224,7 @@ def test_shadow_research_cycle_bounds_each_python_step():
 def test_dashboard_server_runner_refuses_to_start_when_memory_is_high():
     text = _script_text("scripts/run_polymarket_dashboard_server.ps1")
 
-    assert "[double]$MaxMemoryPercent = 95" in text
+    assert "[double]$MaxMemoryPercent = 99" in text
     assert "Get-MemoryUsedPercent" in text
     assert "$memoryUsedPercent -ge $MaxMemoryPercent" in text
     assert "skipped_high_memory" in text
@@ -244,7 +244,7 @@ def test_dashboard_task_installer_runs_wrapper_with_working_directory():
 def test_manual_dashboard_launcher_uses_same_memory_guard():
     text = _script_text("scripts/start_polymarket_dashboard.ps1")
 
-    assert "[double]$MaxMemoryPercent = 95" in text
+    assert "[double]$MaxMemoryPercent = 99" in text
     assert "Get-MemoryUsedPercent" in text
     assert "$memoryUsedPercent -ge $MaxMemoryPercent" in text
     assert "install_polymarket_dashboard_task.ps1 -StartNow" in text
@@ -253,7 +253,7 @@ def test_manual_dashboard_launcher_uses_same_memory_guard():
 def test_paper_maintenance_runner_is_lightweight_and_due_exit_aware():
     text = _script_text("scripts/run_polymarket_paper_maintenance.ps1")
 
-    assert "[double]$MaxMemoryPercent = 95" in text
+    assert "[double]$MaxMemoryPercent = 99" in text
     assert "$env:PYTHONPATH = Join-Path $RepoRoot \"src\"" in text
     assert "polymarket_paper_maintenance_latest_status.json" in text
     assert "next_broker_exit_due_utc" in text

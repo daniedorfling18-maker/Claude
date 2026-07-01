@@ -45,10 +45,10 @@ def refresh_governance(cfg: EngineConfig, *, refresh_dashboard: bool = True) -> 
     finally:
         con.close()
 
+    price_action_feedback = build_price_action_feedback(cfg)
     promotion_review = build_promotion_review(cfg)
     goal_plan = build_goal_plan(cfg)
     profit_sprint = build_profit_sprint(cfg)
-    price_action_feedback = build_price_action_feedback(cfg)
     research_focus = build_research_focus(cfg)
     promotion_gate = paper_live_promotion_gate(cfg)
     governance = governance_report(cfg)

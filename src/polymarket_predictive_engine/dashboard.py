@@ -73,6 +73,7 @@ HTML = """<!doctype html>
     <section><h2>Actual profit target</h2><div id="actualTarget"></div></section>
     <section><h2>Latest cycle</h2><div id="cycle"></div></section>
   </div>
+  <section><h2>$100/month price-change route</h2><div id="goalPlan"></div></section>
   <section><h2>Why no trade?</h2><div id="tradeDiagnostics"></div></section>
   <section><h2>Strategy V2 anchored edge</h2><div id="strategyV2"></div></section>
   <section><h2>Fast price-action scout</h2><div id="priceActionScout"></div></section>
@@ -147,6 +148,8 @@ async function load() {
     const microstructure = data.price_action_microstructure || {};
     const priceActionPaper = data.price_action_paper_signals || {};
     const priceActionFeedback = data.price_action_feedback || {};
+    const goalPlan = data.paper_profit_goal_plan || {};
+    const priceActionGoal = goalPlan.price_action_goal_state || {};
     const probeExitWatch = data.paper_probe_exit_watch || {};
     const paperMaintenance = data.paper_maintenance || {};
     const paperMaintenanceTask = data.paper_maintenance_task || {};
@@ -209,6 +212,29 @@ async function load() {
       ["Tracking hours", target.elapsed_hours, v=>fmtNum(v,2)],
       ["Monthly run-rate", target.monthly_run_rate_usdc, fmtUsd],
       ["Baseline equity", target.baseline?.baseline_equity_usdc, fmtUsd]
+    ]);
+    document.getElementById("goalPlan").innerHTML = facts([
+      ["Goal gap", goalPlan.main_gap, v=>longText(v, 220)],
+      ["Recommended action", goalPlan.recommended_action, v=>longText(v, 260)],
+      ["Price-change state", priceActionGoal.state],
+      ["Settlement required here", priceActionGoal.settlement_required_for_this_milestone],
+      ["Evidence type", priceActionGoal.evidence_type],
+      ["Best repricing run-rate", priceActionGoal.best_repricing_monthly_run_rate_usdc, fmtUsd],
+      ["Repricing goal gap", priceActionGoal.repricing_goal_gap_usdc, fmtUsd],
+      ["Forward paper run-rate", priceActionGoal.best_forward_paper_monthly_run_rate_usdc, fmtUsd],
+      ["Forward paper gap", priceActionGoal.forward_paper_goal_gap_usdc, fmtUsd],
+      ["Paper-confirmation candidates", priceActionGoal.paper_confirmation_candidates],
+      ["Collect next", priceActionGoal.collection_queries, joinText]
+    ]) + `<div style="height:12px"></div><h3>Top price-change cohorts for the goal</h3>` + table(priceActionGoal.top_cohorts || [], [
+      ["Cohort","cohort", v=>longText(v, 180)],
+      ["Source","source"],
+      ["Action","action", v=>longText(v, 160)],
+      ["Evidence","evidence_type", v=>longText(v, 160)],
+      ["Run-rate","monthly_run_rate_usdc", fmtUsd],
+      ["Paper P&L","forward_paper_pnl_usdc", fmtUsd],
+      ["Shadow P&L","forward_shadow_pnl_usdc", fmtUsd],
+      ["Trusted","trusted_for_goal"],
+      ["Blocker","forward_edge_blocker", v=>longText(v, 160)]
     ]);
     document.getElementById("cycle").innerHTML = facts([
       ["Live tick", live.iteration],
@@ -1839,6 +1865,9 @@ def render_dashboard(cfg: EngineConfig, latest_report: dict[str, Any] | None = N
     price_action_feedback = read_json(governance / "price_action_feedback.json", default={}) or {}
     if not isinstance(price_action_feedback, dict):
         price_action_feedback = {}
+    goal_plan = read_json(governance / "paper_profit_goal_plan.json", default={}) or {}
+    if not isinstance(goal_plan, dict):
+        goal_plan = {}
     paper_maintenance = _paper_maintenance_status(cfg)
     paper_maintenance_task = _paper_maintenance_task_status(cfg)
 
@@ -1881,6 +1910,7 @@ def render_dashboard(cfg: EngineConfig, latest_report: dict[str, Any] | None = N
         "price_action_microstructure": price_action_microstructure_status,
         "price_action_paper_signals": price_action_paper_signal_status,
         "price_action_feedback": price_action_feedback,
+        "paper_profit_goal_plan": goal_plan,
         "paper_probe_exit_watch": paper_probe_exit_watch,
         "paper_maintenance": paper_maintenance,
         "paper_maintenance_task": paper_maintenance_task,

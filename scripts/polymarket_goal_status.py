@@ -193,6 +193,11 @@ def main() -> int:
         read_json(GOVERNANCE / "live_paper_loop_heartbeat.json"),
     )
     strategy_status = read_json(STRATEGY_V2_STATUS)
+    goal_plan = first_dict(
+        dashboard_data.get("paper_profit_goal_plan"),
+        read_json(GOVERNANCE / "paper_profit_goal_plan.json"),
+    )
+    price_action_goal = first_dict(goal_plan.get("price_action_goal_state"))
 
     print("Polymarket paper bot goal status")
     print(f"Dashboard file: {DASHBOARD / 'index.html'}")
@@ -247,6 +252,20 @@ def main() -> int:
     print(f"  Monthly target:    {money(target_monthly)}")
     print(f"  Monthly run-rate:  {money(run_rate)}")
     print(f"  Run-rate gap:      {money(gap) if gap is not None else 'n/a'}")
+
+    if goal_plan or price_action_goal:
+        print("\nPrice-change route")
+        print(f"  State:             {price_action_goal.get('state') or 'n/a'}")
+        print(f"  Evidence type:     {price_action_goal.get('evidence_type') or 'n/a'}")
+        print(f"  Needs settlement:  {price_action_goal.get('settlement_required_for_this_milestone', 'n/a')}")
+        print(f"  Repricing run-rate:{money(price_action_goal.get('best_repricing_monthly_run_rate_usdc'))}")
+        print(f"  Repricing gap:     {money(price_action_goal.get('repricing_goal_gap_usdc'))}")
+        print(f"  Forward paper rate:{money(price_action_goal.get('best_forward_paper_monthly_run_rate_usdc'))}")
+        print(f"  Paper-confirm:     {price_action_goal.get('paper_confirmation_candidates', 'n/a')} candidates")
+        if goal_plan.get("main_gap"):
+            print(f"  Main gap:          {goal_plan.get('main_gap')}")
+        if goal_plan.get("recommended_action"):
+            print(f"  Next action:       {goal_plan.get('recommended_action')}")
 
     promoted = signal_cohorts.get("promoted_cohorts")
     if not isinstance(promoted, list):

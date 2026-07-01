@@ -84,7 +84,13 @@ python -m polymarket_predictive_engine.cli promotion-review --config polymarket_
 - required daily P&L from here;
 - approved/rejected signal counts;
 - promoted/probationary cohorts;
+- settlement-independent price-change goal state;
 - main gap and recommended action.
+
+The price-change goal state is intentionally distinct from final settlement evidence. It tracks the
+tradeable route of buying at the executable ask and later selling or marking at an executable bid. This
+allows the system to learn from odds movement before final market resolution, while still requiring
+positive cohort evidence before paper promotion and while keeping live trading disabled.
 
 CLI:
 

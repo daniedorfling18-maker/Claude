@@ -42,6 +42,7 @@ from .pipeline_inventory import pipeline_inventory
 from .portfolio import portfolio_snapshot, reconciliation_report
 from .price_action_feedback import build_price_action_feedback
 from .price_action_microstructure import build_microstructure_edge_lab
+from .price_action_model import train_price_action_model
 from .price_action_scout import build_price_action_scout
 from .price_action_signals import build_price_action_paper_signals
 from .price_history_collector import collect_price_history
@@ -105,6 +106,7 @@ COMMANDS = [
     "profit-sprint",
     "price-action-feedback",
     "price-action-microstructure",
+    "price-action-model",
     "price-action-scout",
     "price-action-paper-signals",
     "active-window-plan",
@@ -301,6 +303,8 @@ def main(argv: list[str] | None = None) -> int:
             _print(build_price_action_feedback(cfg))
         elif args.command == "price-action-microstructure":
             _print(build_microstructure_edge_lab(cfg))
+        elif args.command == "price-action-model":
+            _print(train_price_action_model(cfg))
         elif args.command == "price-action-scout":
             _print(build_price_action_scout(cfg))
         elif args.command == "price-action-paper-signals":

@@ -10,6 +10,7 @@ from .dashboard import render_dashboard
 from .goal_planner import build_goal_plan
 from .governance import governance_report
 from .price_action_feedback import build_price_action_feedback
+from .price_action_model import train_price_action_model
 from .profit_sprint import build_profit_sprint
 from .promotion_review import build_promotion_review
 from .readiness import paper_live_promotion_gate
@@ -46,6 +47,7 @@ def refresh_governance(cfg: EngineConfig, *, refresh_dashboard: bool = True) -> 
     finally:
         con.close()
 
+    price_action_model = train_price_action_model(cfg)
     price_action_feedback = build_price_action_feedback(cfg)
     trade_signal_audit = build_trade_signal_audit(cfg)
     promotion_review = build_promotion_review(cfg)
@@ -66,6 +68,7 @@ def refresh_governance(cfg: EngineConfig, *, refresh_dashboard: bool = True) -> 
             "goal_plan": True,
             "profit_sprint": True,
             "price_action_feedback": True,
+            "price_action_model": True,
             "trade_signal_audit": True,
             "research_focus": True,
             "promotion_gate": True,
@@ -77,6 +80,8 @@ def refresh_governance(cfg: EngineConfig, *, refresh_dashboard: bool = True) -> 
         "goal_plan_status": goal_plan.get("status"),
         "profit_sprint_decision": profit_sprint.get("decision"),
         "price_action_feedback_state": price_action_feedback.get("learning_state"),
+        "price_action_model_decision": price_action_model.get("decision"),
+        "price_action_model_promotion_ready": price_action_model.get("promotion_ready"),
         "trade_signal_verdict": trade_signal_audit.get("verdict"),
         "research_focus_status": research_focus.get("status"),
         "approved_for_paper_trading": promotion_gate.get("approved_for_paper_trading"),

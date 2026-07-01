@@ -5,7 +5,7 @@ from collections import Counter, defaultdict
 from typing import Any
 
 from .config import EngineConfig, load_config
-from .utils import now_utc, read_csv_rows, read_json, safe_float, write_json
+from .utils import boolish, now_utc, read_csv_rows, read_json, safe_float, write_json
 
 OUTPUT_FILENAME = "trade_signal_audit.json"
 
@@ -94,6 +94,86 @@ def _signal_trade_thesis(signal: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _query_terms(query: str) -> list[str]:
+    text = query.lower().strip()
+    if not text:
+        return []
+    if "btc" in text or "bitcoin" in text:
+        return ["btc", "bitcoin"]
+    if "sol" in text or "solana" in text:
+        return ["sol", "solana"]
+    if "eth" in text or "ethereum" in text:
+        return ["eth", "ethereum"]
+    if "xrp" in text or "ripple" in text:
+        return ["xrp", "ripple"]
+    if "world" in text or "cup" in text:
+        return ["world", "cup", "mexico", "portugal"]
+    if "tennis" in text:
+        return ["tennis", "sinner", "alcaraz"]
+    return [part for part in text.replace("_", " ").replace("-", " ").split() if part]
+
+
+def _matches_target(row: dict[str, Any], target: dict[str, Any]) -> bool:
+    cohort = _text(target.get("cohort")).lower()
+    query = _text(target.get("recommended_collection_query")).lower()
+    terms = _query_terms(query)
+    row_text = " ".join(
+        [
+            _text(row.get("signal_cohort")),
+            _text(row.get("family")),
+            _text(row.get("market_slug")),
+            _text(row.get("question")),
+            _text(row.get("outcome")),
+        ]
+    ).lower()
+    if cohort and cohort in row_text:
+        return True
+    return bool(terms and any(term in row_text for term in terms))
+
+
+def _is_executable_candidate(row: dict[str, Any]) -> bool:
+    ask = safe_float(row.get("latest_ask"))
+    bid = safe_float(row.get("latest_bid"))
+    return bool(str(row.get("round_trip_status") or "") == "open_marked" and ask is not None and bid is not None and 0 < ask < 1 and 0 < bid < 1)
+
+
+def _paper_confirmation_target_status(
+    targets: list[dict[str, Any]],
+    candidate_rows: list[dict[str, str]],
+) -> list[dict[str, Any]]:
+    statuses: list[dict[str, Any]] = []
+    for target in targets:
+        matches = [row for row in candidate_rows if _matches_target(row, target)]
+        executable = [row for row in matches if _is_executable_candidate(row)]
+        statuses.append(
+            {
+                "cohort": target.get("cohort", ""),
+                "recommended_collection_query": target.get("recommended_collection_query", ""),
+                "source": target.get("source", ""),
+                "action": target.get("action", ""),
+                "forward_shadow_pnl_usdc": _num(target.get("forward_shadow_pnl_usdc")),
+                "forward_shadow_roi": _num(target.get("forward_shadow_roi")),
+                "monthly_run_rate_usdc": _num(target.get("monthly_run_rate_usdc")),
+                "trusted_for_goal": target.get("trusted_for_goal"),
+                "current_candidate_rows": len(matches),
+                "current_executable_rows": len(executable),
+                "missing_fresh_candidate": len(executable) == 0,
+                "current_candidate_preview": [
+                    {
+                        "signal_cohort": row.get("signal_cohort", ""),
+                        "market_slug": row.get("market_slug", ""),
+                        "outcome": row.get("outcome", ""),
+                        "round_trip_status": row.get("round_trip_status", ""),
+                        "latest_bid": row.get("latest_bid", ""),
+                        "latest_ask": row.get("latest_ask", ""),
+                    }
+                    for row in executable[:5]
+                ],
+            }
+        )
+    return statuses
+
+
 def _exit_diagnosis(exit_reason: str, realised_pnl: float) -> str:
     if exit_reason == "fixed_horizon":
         if realised_pnl < 0:
@@ -178,9 +258,19 @@ def build_trade_signal_audit(cfg: EngineConfig) -> dict[str, Any]:
     portfolio_root = cfg.output_root / "polymarket_portfolio"
     signals = read_csv_rows(price_root / "price_action_paper_signals.csv")
     rejections = read_csv_rows(price_root / "price_action_paper_rejections.csv")
+    round_trip_rows = read_csv_rows(price_root / "price_action_scout_round_trip_evidence.csv")
     signal_summary = read_json(price_root / "price_action_paper_signal_summary.json", default={}) or {}
     if not isinstance(signal_summary, dict):
         signal_summary = {}
+    feedback = read_json(cfg.governance_root / "price_action_feedback.json", default={}) or {}
+    if not isinstance(feedback, dict):
+        feedback = {}
+    confirmation_targets = [
+        row
+        for row in feedback.get("paper_confirmation_preview", [])
+        if isinstance(row, dict) and boolish(row.get("trusted_for_goal"))
+    ] if isinstance(feedback.get("paper_confirmation_preview"), list) else []
+    confirmation_target_status = _paper_confirmation_target_status(confirmation_targets, round_trip_rows)
 
     exits = _recent_exit_rows(
         read_csv_rows(portfolio_root / "paper_fills.csv"),
@@ -194,6 +284,19 @@ def build_trade_signal_audit(cfg: EngineConfig) -> dict[str, Any]:
     if current_signal_theses:
         verdict = "current_signals_require_broker_or_manual_review"
         next_action = "Review entry ask, required exit bid, spread, horizon, and cohort evidence before paper entry."
+    elif any(row.get("missing_fresh_candidate") for row in confirmation_target_status):
+        verdict = "trusted_edge_missing_fresh_candidate"
+        missing_queries = [
+            _text(row.get("recommended_collection_query"))
+            for row in confirmation_target_status
+            if row.get("missing_fresh_candidate") and _text(row.get("recommended_collection_query"))
+        ]
+        query_text = ", ".join(dict.fromkeys(missing_queries))
+        next_action = (
+            f"Collect fresh websocket/price-action candidates for: {query_text}."
+            if query_text
+            else "Collect fresh websocket/price-action candidates for trusted confirmation cohorts."
+        )
     elif rejections:
         verdict = "no_current_trade_signal"
         next_action = "Do not enter; current candidates do not satisfy the governed evidence gate."
@@ -219,6 +322,13 @@ def build_trade_signal_audit(cfg: EngineConfig) -> dict[str, Any]:
             {"reason": reason, "count": count} for reason, count in rejection_counts.most_common()
         ],
         "current_signal_theses": current_signal_theses[:25],
+        "paper_confirmation_targets": confirmation_target_status,
+        "missing_confirmation_target_count": sum(1 for row in confirmation_target_status if row.get("missing_fresh_candidate")),
+        "missing_confirmation_queries": [
+            row.get("recommended_collection_query")
+            for row in confirmation_target_status
+            if row.get("missing_fresh_candidate") and row.get("recommended_collection_query")
+        ],
         "rejection_preview": rejections[:25],
         "recent_exit_count": len(exits),
         "recent_loss_exit_count": len(loss_exits),

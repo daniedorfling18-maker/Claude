@@ -802,6 +802,19 @@ def _exit_policy_evidence(
     return rows
 
 
+def build_latest_microstructure_features(cfg: EngineConfig) -> list[dict[str, Any]]:
+    """Build point-in-time latest bid/ask features without future labels.
+
+    This is intentionally separate from the rule lab's current candidates. A
+    predictive price-action model should score every current liquid feature row,
+    not only rows that already passed hand-authored rules.
+    """
+    settings = _settings(cfg)
+    rows = read_csv_rows(cfg.output_root / "polymarket_training" / "websocket_market_features.csv")
+    grouped = _dedupe_sort_rows(rows, settings)
+    return _latest_features(grouped, settings)
+
+
 def build_microstructure_edge_lab(cfg: EngineConfig) -> dict[str, Any]:
     """Run a shadow-only bid/ask microstructure rule lab over websocket history."""
     settings = _settings(cfg)

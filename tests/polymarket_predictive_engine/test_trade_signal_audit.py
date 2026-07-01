@@ -134,3 +134,68 @@ def test_trade_signal_audit_explains_fixed_horizon_loss(tmp_path):
     assert exit_row["exit_reason"] == "fixed_horizon"
     assert exit_row["realised_pnl_usdc"] == approx(-0.0540540541)
     assert "did not reprice enough" in exit_row["diagnosis"]
+
+
+def test_trade_signal_audit_flags_trusted_edge_without_fresh_candidate(tmp_path):
+    cfg = _cfg(tmp_path)
+    write_json(
+        cfg.governance_root / "price_action_feedback.json",
+        {
+            "paper_confirmation_preview": [
+                {
+                    "cohort": "exploratory_crypto_updown_live_model|crypto_btc_updown_daily|outcome=down",
+                    "source": "shadow_forward",
+                    "action": "collect_more_positive_price_action_evidence",
+                    "recommended_collection_query": "btc updown",
+                    "forward_shadow_pnl_usdc": 3.87,
+                    "forward_shadow_roi": 0.38,
+                    "monthly_run_rate_usdc": 26.2,
+                    "trusted_for_goal": True,
+                },
+                {
+                    "cohort": "exploratory_crypto_updown_live_model|crypto_xrp_updown_daily|outcome=down",
+                    "source": "shadow_forward",
+                    "action": "keep_shadow_only",
+                    "recommended_collection_query": "xrp updown",
+                    "forward_shadow_pnl_usdc": 0.0,
+                    "forward_shadow_roi": 0.0,
+                    "monthly_run_rate_usdc": 0.0,
+                    "trusted_for_goal": False,
+                }
+            ]
+        },
+    )
+    write_csv(
+        cfg.output_root / "polymarket_price_action" / "price_action_scout_round_trip_evidence.csv",
+        [
+            {
+                "signal_cohort": "price_action_scout|profit_sprint|macro_economy",
+                "market_slug": "will-the-us-economy-be-overheating",
+                "outcome": "Yes",
+                "round_trip_status": "open_marked",
+                "latest_bid": "0.42",
+                "latest_ask": "0.43",
+            }
+        ],
+    )
+    write_csv(
+        cfg.output_root / "polymarket_price_action" / "price_action_paper_rejections.csv",
+        [
+            {
+                "market_slug": "will-the-us-economy-be-overheating",
+                "signal_cohort": "price_action_scout|profit_sprint|macro_economy",
+                "rejection_reason": "price-action cohort has not passed positive bid/ask evidence gate",
+            }
+        ],
+    )
+
+    payload = build_trade_signal_audit(cfg)
+
+    assert payload["verdict"] == "trusted_edge_missing_fresh_candidate"
+    assert payload["missing_confirmation_target_count"] == 1
+    assert payload["missing_confirmation_queries"] == ["btc updown"]
+    assert len(payload["paper_confirmation_targets"]) == 1
+    target = payload["paper_confirmation_targets"][0]
+    assert target["current_candidate_rows"] == 0
+    assert target["current_executable_rows"] == 0
+    assert target["missing_fresh_candidate"] is True

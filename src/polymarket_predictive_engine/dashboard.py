@@ -79,6 +79,7 @@ HTML = """<!doctype html>
   <section><h2>Strategy V2 anchored edge</h2><div id="strategyV2"></div></section>
   <section><h2>Fast price-action scout</h2><div id="priceActionScout"></div></section>
   <section><h2>Microstructure edge lab</h2><div id="microstructureLab"></div></section>
+  <section><h2>Price-action prediction model</h2><div id="priceActionModel"></div></section>
   <section><h2>Price-action feedback loop</h2><div id="priceActionFeedback"></div></section>
   <div class="two">
     <section><h2>Promotion readiness</h2><div id="promotionReadiness"></div></section>
@@ -158,6 +159,7 @@ async function load() {
     const roundTripPnl = roundTrip.realized_pnl_usdc ?? roundTrip.total_mark_pnl_usdc;
     const priceScout = data.price_action_scout || {};
     const microstructure = data.price_action_microstructure || {};
+    const priceActionModel = data.price_action_model || {};
     const priceActionPaper = data.price_action_paper_signals || {};
     const priceActionFeedback = data.price_action_feedback || {};
     const goalPlan = data.paper_profit_goal_plan || {};
@@ -211,6 +213,7 @@ async function load() {
       card("Round-trip P&L", fmtUsd(roundTripPnl), Number(roundTripPnl || 0) > 0 ? "good" : "warn"),
       card("Price scout P&L", fmtUsd(priceScoutPnl), Number(priceScoutPnl || 0) > 0 ? "good" : "warn"),
       card("Microstructure rules", microstructure.validation_pass_rules ?? "0", Number(microstructure.validation_pass_rules || 0) > 0 ? "good" : "warn"),
+      card("Price-action ML", priceActionModel.promotion_ready ? "validated" : (priceActionModel.status || "missing"), priceActionModel.promotion_ready ? "good" : "warn"),
       card("Price-action paper signals", priceActionPaper.signals ?? "0", Number(priceActionPaper.signals || 0) > 0 ? "good" : "warn"),
       card("Signal count check", priceActionPaper.summary_signal_mismatch ? "mismatch" : "aligned", priceActionPaper.summary_signal_mismatch ? "bad" : "good"),
       card("Broker refresh", priceActionPaper.broker_refresh_needed ? `${priceActionPaper.pending_broker_signals ?? 0} pending` : "fresh", priceActionPaper.broker_refresh_needed ? "warn" : "good"),
@@ -260,6 +263,8 @@ async function load() {
       ["Summary signal rows", tradeSignalAudit.summary_signal_rows],
       ["Signal mismatch", tradeSignalAudit.signal_summary_mismatch],
       ["Rejections", tradeSignalAudit.rejection_file_rows],
+      ["Missing target candidates", tradeSignalAudit.missing_confirmation_target_count],
+      ["Missing queries", tradeSignalAudit.missing_confirmation_queries, joinText],
       ["Recent exits", tradeSignalAudit.recent_exit_count],
       ["Loss-making exits", tradeSignalAudit.recent_loss_exit_count],
       ["Recent realised P&L", tradeSignalAudit.recent_realised_pnl_usdc, fmtUsd],
@@ -276,6 +281,15 @@ async function load() {
       ["Gap to TP","current_bid_gap_to_profit", v=>fmtNum(v,4)],
       ["Stop bid","stop_loss_bid", v=>fmtNum(v,4)],
       ["Horizon","max_hold_minutes_before_exit", v=>fmtNum(v,1) + "m"]
+    ]) + `<div style="height:12px"></div><h3>Trusted confirmation targets vs current candidates</h3>` + table(tradeSignalAudit.paper_confirmation_targets || [], [
+      ["Query","recommended_collection_query"],
+      ["Cohort","cohort", v=>longText(v, 180)],
+      ["Shadow P&L","forward_shadow_pnl_usdc", fmtUsd],
+      ["Shadow ROI","forward_shadow_roi", v=>fmtNum(Number(v) * 100, 2) + "%"],
+      ["Run-rate","monthly_run_rate_usdc", fmtUsd],
+      ["Candidate rows","current_candidate_rows"],
+      ["Executable rows","current_executable_rows"],
+      ["Missing fresh","missing_fresh_candidate"]
     ]) + `<div style="height:12px"></div><h3>Why current candidates are rejected</h3>` + table(tradeSignalAudit.rejection_reason_counts || [], [
       ["Count","count"],
       ["Reason","reason", v=>longText(v, 220)]
@@ -620,6 +634,41 @@ async function load() {
       ["Ask","latest_ask", v=>fmtNum(v,4)],
       ["Bid move","bid_move_abs", v=>fmtNum(v,4)],
       ["Val ROI","validation_roi", v=>fmtNum(Number(v) * 100, 2) + "%"]
+    ]);
+    document.getElementById("priceActionModel").innerHTML = facts([
+      ["Decision", priceActionModel.decision],
+      ["Promotion ready", priceActionModel.promotion_ready],
+      ["Objective", priceActionModel.trading_objective, v=>longText(v, 220)],
+      ["Label", priceActionModel.label_definition, v=>longText(v, 260)],
+      ["Training events", priceActionModel.training_events],
+      ["Train rows", priceActionModel.train_rows],
+      ["Validation rows", priceActionModel.validation_rows],
+      ["Chosen probability threshold", priceActionModel.chosen_probability_threshold, v=>fmtNum(v, 3)],
+      ["Selected validation trades", priceActionModel.validation_selected?.selected_trades],
+      ["Selected validation ROI", priceActionModel.validation_selected?.selected_roi, v=>fmtNum(Number(v) * 100, 2) + "%"],
+      ["Buy-all baseline ROI", priceActionModel.validation_buy_all_baseline?.roi, v=>fmtNum(Number(v) * 100, 2) + "%"],
+      ["Edge over baseline", priceActionModel.validation_edge_over_buy_all_roi, v=>fmtNum(Number(v) * 100, 2) + "%"],
+      ["Selected ROI CI95", priceActionModel.validation_selected_roi_ci95, joinText],
+      ["Model blockers", priceActionModel.blockers, joinText],
+      ["Validation blockers", priceActionModel.validation_blockers, joinText],
+      ["Current rows scored", priceActionModel.current_rows_scored],
+      ["Current model candidates", priceActionModel.current_model_candidates]
+    ]) + `<div style="height:12px"></div><h3>Current ML shadow candidates</h3>` + table(priceActionModel.current_candidates_preview || [], [
+      ["Market","market_slug", v=>longText(v, 130)],
+      ["Family","family", v=>longText(v, 120)],
+      ["Outcome","outcome"],
+      ["Bid","latest_bid", v=>fmtNum(v,4)],
+      ["Ask","latest_ask", v=>fmtNum(v,4)],
+      ["Pred prob","predicted_reprice_probability", v=>fmtNum(Number(v) * 100, 1) + "%"],
+      ["Exp ROI","predicted_expected_roi", v=>fmtNum(Number(v) * 100, 2) + "%"],
+      ["Shadow","shadow_only"]
+    ]) + `<div style="height:12px"></div><h3>Training threshold grid</h3>` + table(priceActionModel.train_threshold_selection?.threshold_grid || [], [
+      ["Threshold","threshold", v=>fmtNum(v,3)],
+      ["Trades","selected_trades"],
+      ["ROI","selected_roi", v=>fmtNum(Number(v) * 100, 2) + "%"],
+      ["P&L","selected_pnl_usdc", fmtUsd],
+      ["Win rate","selected_win_rate", v=>fmtNum(Number(v) * 100, 1) + "%"],
+      ["Pass","train_threshold_pass"]
     ]);
     document.getElementById("priceActionFeedback").innerHTML = facts([
       ["Learning state", priceActionFeedback.learning_state],
@@ -1621,6 +1670,47 @@ def _price_action_microstructure_status(cfg: EngineConfig) -> dict[str, Any]:
     }
 
 
+def _price_action_model_status(cfg: EngineConfig) -> dict[str, Any]:
+    """Expose the strict future-bid repricing prediction model."""
+    root = cfg.output_root / "polymarket_price_action"
+    summary = read_json(root / "price_action_model_summary.json", default={}) or {}
+    if not isinstance(summary, dict):
+        summary = {}
+    current = read_csv_rows(root / "price_action_model_current_candidates.csv")
+    validation = read_csv_rows(root / "price_action_model_validation_predictions.csv", limit=25)
+    return {
+        "status": summary.get("status") or ("missing" if not current and not validation else "trained"),
+        "generated_at_utc": summary.get("generated_at_utc"),
+        "decision": summary.get("decision") or "train_price_action_model_from_bid_ask_repricing_events",
+        "promotion_ready": summary.get("promotion_ready", False),
+        "trading_objective": summary.get("trading_objective"),
+        "label_definition": summary.get("label_definition"),
+        "training_events": summary.get("training_events"),
+        "train_rows": summary.get("train_rows"),
+        "validation_rows": summary.get("validation_rows"),
+        "validation_positive_rate": summary.get("validation_positive_rate"),
+        "validation_brier": summary.get("validation_brier"),
+        "validation_log_loss": summary.get("validation_log_loss"),
+        "chosen_probability_threshold": summary.get("chosen_probability_threshold"),
+        "train_threshold_selection": summary.get("train_threshold_selection", {}),
+        "validation_selected": summary.get("validation_selected", {}),
+        "validation_blockers": summary.get("validation_blockers", []),
+        "blockers": summary.get("blockers", []),
+        "validation_buy_all_baseline": summary.get("validation_buy_all_baseline", {}),
+        "validation_selected_roi_ci95": summary.get("validation_selected_roi_ci95", []),
+        "validation_edge_over_buy_all_roi": summary.get("validation_edge_over_buy_all_roi"),
+        "roi_expectancy_from_train": summary.get("roi_expectancy_from_train", {}),
+        "minimum_expected_roi_to_trade": summary.get("minimum_expected_roi_to_trade"),
+        "current_rows_scored": summary.get("current_rows_scored"),
+        "current_model_candidates": summary.get("current_model_candidates", len(current)),
+        "current_candidates_preview": summary.get("current_candidates_preview", current[:15]),
+        "validation_preview": validation,
+        "validation_predictions_file": str(root / "price_action_model_validation_predictions.csv"),
+        "current_candidates_file": str(root / "price_action_model_current_candidates.csv"),
+        "shadow_only": True,
+    }
+
+
 def _price_action_paper_signal_status(cfg: EngineConfig) -> dict[str, Any]:
     """Expose the settlement-independent price-action paper signal bridge."""
     root = cfg.output_root / "polymarket_price_action"
@@ -1930,6 +2020,7 @@ def render_dashboard(cfg: EngineConfig, latest_report: dict[str, Any] | None = N
     strategy_v2_runtime = _strategy_v2_runtime_freshness(strategy_v2_status, live_loop_status)
     price_action_scout_status = _price_action_scout_status(cfg)
     price_action_microstructure_status = _price_action_microstructure_status(cfg)
+    price_action_model_status = _price_action_model_status(cfg)
     price_action_paper_signal_status = _price_action_paper_signal_status(cfg)
     broker_signal_freshness = _broker_signal_freshness(
         price_action_paper_signal_status,
@@ -1986,6 +2077,7 @@ def render_dashboard(cfg: EngineConfig, latest_report: dict[str, Any] | None = N
         "strategy_v2": strategy_v2_status,
         "price_action_scout": price_action_scout_status,
         "price_action_microstructure": price_action_microstructure_status,
+        "price_action_model": price_action_model_status,
         "price_action_paper_signals": price_action_paper_signal_status,
         "price_action_feedback": price_action_feedback,
         "paper_profit_goal_plan": goal_plan,

@@ -71,7 +71,7 @@ jobs:
 
       - name: Run live-only match-scoped auto pick
         env:
-          SUPERBRU_EMAIL: ${{ secrets.SUPERBRU_USERNAME || secrets.SUPERBRU_EMAIL }}
+          SUPERBRU_EMAIL: ${{ secrets.SUPERBRU_EMAIL || secrets.SUPERBRU_USERNAME }}
           SUPERBRU_PASSWORD: ${{ secrets.SUPERBRU_PASSWORD }}
           SUPERBRU_LOGIN_URL: ${{ secrets.SUPERBRU_LOGIN_URL }}
           SUPERBRU_POOL_URL: ${{ secrets.SUPERBRU_POOL_URL }}

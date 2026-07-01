@@ -257,7 +257,10 @@ def build_research_focus(cfg) -> dict[str, Any]:
     elif feedback_positive:
         next_action = str(price_action_feedback.get("next_action") or "Prioritise positive price-action cohorts until bid/ask gates clear.")
     else:
-        next_action = "Keep collecting settlement-based evidence; no actionable family has enough fresh positive evidence yet."
+        next_action = (
+            "Keep collecting bid/ask repricing evidence across liquid event families; "
+            "no actionable family has enough fresh positive validation evidence yet."
+        )
 
     collection_queries = []
     if validation_gap_queries:

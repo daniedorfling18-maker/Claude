@@ -25,11 +25,12 @@ from __future__ import annotations
 
 import json
 from collections import Counter
+from datetime import timedelta, timezone
 from pathlib import Path
 from typing import Any
 
 from .config import EngineConfig, load_config
-from .utils import now_utc, read_csv_rows, read_json, safe_float, write_csv, write_json
+from .utils import now_utc, parse_timestamp, read_csv_rows, read_json, safe_float, write_csv, write_json
 
 # The feature columns required by the training schema. Order is the CSV order.
 FEATURE_FIELDS = [
@@ -379,6 +380,109 @@ def _assert_no_leakage(rows: list[dict[str, Any]]) -> None:
                 raise ValueError(f"websocket feature row contains forbidden label column: {key}")
 
 
+def _normaliser_settings(cfg: EngineConfig) -> dict[str, Any]:
+    value = cfg.raw.get("websocket_market_data", {})
+    return value if isinstance(value, dict) else {}
+
+
+def _feature_row_key(row: dict[str, Any]) -> tuple[str, ...]:
+    return tuple(
+        str(row.get(key) or "")
+        for key in (
+            "collected_at_utc",
+            "source_timestamp",
+            "market",
+            "asset_id",
+            "event_type",
+            "best_bid",
+            "best_ask",
+            "last_trade_price",
+            "price_change_side",
+            "price_change_price",
+            "price_change_size",
+        )
+    )
+
+
+def _feature_time(row: dict[str, Any]):
+    return parse_timestamp(row.get("collected_at_utc") or row.get("source_timestamp"))
+
+
+def _fmt_utc(dt) -> str:
+    return dt.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ") if dt is not None else ""
+
+
+def _feature_only(row: dict[str, Any]) -> dict[str, Any]:
+    """Drop legacy/accidental columns before retention.
+
+    Older local feature files may contain convenience metadata such as
+    ``outcome``.  Those columns are useful for display, but they are forbidden
+    in the model feature table.  Retention must preserve quote history while
+    stripping anything outside the audited feature schema.
+    """
+    return {field: row.get(field, "") for field in FEATURE_FIELDS}
+
+
+def _retained_feature_rows(
+    cfg: EngineConfig,
+    *,
+    features_path: Path,
+    new_features: list[dict[str, Any]],
+) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    """Merge current websocket features with prior feature rows.
+
+    The raw websocket message file is intentionally capped so the live process
+    cannot grow forever. The model, however, needs several days of bid/ask
+    variation. This retention layer keeps the normalised feature history as the
+    reusable training substrate, without adding settlement labels or changing
+    trade gates.
+    """
+    settings = _normaliser_settings(cfg)
+    enabled = str(settings.get("retain_existing_features", True)).strip().lower() not in {"0", "false", "no"}
+    existing = [_feature_only(row) for row in read_csv_rows(features_path)] if enabled else []
+    current_features = [_feature_only(row) for row in new_features]
+    combined: list[dict[str, Any]] = [*existing, *current_features]
+    max_rows = int(safe_float(settings.get("max_feature_rows")) or 0)
+    retention_hours = safe_float(settings.get("feature_retention_hours"))
+    cutoff = None
+    if retention_hours is not None and retention_hours > 0 and combined:
+        latest = max((_feature_time(row) for row in combined if _feature_time(row) is not None), default=None)
+        if latest is not None:
+            cutoff = latest - timedelta(hours=float(retention_hours))
+            combined = [row for row in combined if (_feature_time(row) is None or _feature_time(row) >= cutoff)]
+
+    deduped: dict[tuple[str, ...], dict[str, Any]] = {}
+    for row in combined:
+        key = _feature_row_key(row)
+        if not any(key):
+            continue
+        deduped[key] = row
+    retained = sorted(
+        deduped.values(),
+        key=lambda row: (
+            _feature_time(row) or parse_timestamp("1970-01-01T00:00:00Z"),
+            str(row.get("source_timestamp") or ""),
+            str(row.get("asset_id") or ""),
+        ),
+    )
+    dropped_for_max_rows = 0
+    if max_rows > 0 and len(retained) > max_rows:
+        dropped_for_max_rows = len(retained) - max_rows
+        retained = retained[-max_rows:]
+    diagnostics = {
+        "feature_retention_enabled": enabled,
+        "new_feature_rows": len(current_features),
+        "existing_feature_rows": len(existing),
+        "retained_feature_rows": len(retained),
+        "deduped_feature_rows": len(combined) - len(deduped),
+        "feature_retention_hours": retention_hours,
+        "feature_retention_cutoff_utc": _fmt_utc(cutoff),
+        "max_feature_rows": max_rows,
+        "dropped_for_max_feature_rows": dropped_for_max_rows,
+    }
+    return retained, diagnostics
+
+
 def normalize_websocket_file(cfg: EngineConfig, input_path: str | Path | None = None) -> tuple[list[dict[str, Any]], list[dict[str, Any]], dict[str, Any]]:
     """Read captured websocket messages and write the feature table, quality report
     and summary. Returns (features, quality, summary)."""
@@ -410,12 +514,14 @@ def normalize_websocket_file(cfg: EngineConfig, input_path: str | Path | None = 
     features_path = train_root / "websocket_market_features.csv"
     quality_path = gov_root / "websocket_feature_quality_report.csv"
     summary_path = gov_root / "websocket_feature_summary.json"
+    retained_features, retention = _retained_feature_rows(cfg, features_path=features_path, new_features=features)
+    _assert_no_leakage(retained_features)
 
-    write_csv(features_path, features, fieldnames=FEATURE_FIELDS)
+    write_csv(features_path, retained_features, fieldnames=FEATURE_FIELDS)
     write_csv(quality_path, quality, fieldnames=QUALITY_FIELDS)
 
-    event_type_counts = Counter(row["event_type"] for row in features)
-    category_counts = Counter(str(row.get("category") or "unknown") for row in features)
+    event_type_counts = Counter(row["event_type"] for row in retained_features)
+    category_counts = Counter(str(row.get("category") or "unknown") for row in retained_features)
     issue_type_counts = Counter(row["issue_type"] for row in quality)
     summary = {
         "status": "ok",
@@ -423,7 +529,8 @@ def normalize_websocket_file(cfg: EngineConfig, input_path: str | Path | None = 
         "input_file": str(input_path),
         "input_exists": input_path.exists(),
         "messages_processed": len(messages),
-        "feature_rows": len(features),
+        "feature_rows": len(retained_features),
+        **retention,
         "metadata_index_keys": metadata_index_keys,
         "metadata_enriched_rows": metadata_enriched_rows,
         "category_counts": dict(sorted(category_counts.items())),
@@ -437,7 +544,7 @@ def normalize_websocket_file(cfg: EngineConfig, input_path: str | Path | None = 
         "quality_file": str(quality_path),
     }
     write_json(summary_path, summary)
-    return features, quality, summary
+    return retained_features, quality, summary
 
 
 def main(config_path: str, input_path: str | None = None) -> dict[str, Any]:

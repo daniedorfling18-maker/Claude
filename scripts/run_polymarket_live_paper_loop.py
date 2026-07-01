@@ -412,6 +412,42 @@ def _extend_with_research_focus_queries(
     return expanded, injected
 
 
+def _broad_repricing_queries(settings: dict[str, Any]) -> list[str]:
+    raw = settings.get("broad_repricing_queries") or []
+    if not isinstance(raw, list):
+        raw = [raw]
+    seen: set[str] = set()
+    queries: list[str] = []
+    for item in raw:
+        query = str(item or "").strip()
+        key = _query_key(query)
+        if not query or not key or key in seen:
+            continue
+        queries.append(query)
+        seen.add(key)
+    return queries
+
+
+def _extend_with_broad_repricing_queries(
+    queries: list[str],
+    *,
+    settings: dict[str, Any],
+) -> tuple[list[str], list[str]]:
+    if not _truthy_setting(settings.get("broad_repricing_reserve_enabled", False), default=False):
+        return queries, []
+    seen = {_query_key(query) for query in queries if _query_key(query)}
+    expanded = list(queries)
+    injected: list[str] = []
+    for query in _broad_repricing_queries(settings):
+        key = _query_key(query)
+        if key in seen:
+            continue
+        expanded.append(query)
+        injected.append(query)
+        seen.add(key)
+    return expanded, injected
+
+
 def _adaptive_query_order(cfg, queries: list[str]) -> tuple[list[str], dict[str, Any]]:
     settings = cfg.raw.get("paper_market_scan", {}) or {}
     adaptive_override = _env_override("POLYMARKET_ADAPTIVE_SCAN_PRIORITY")
@@ -580,6 +616,66 @@ def _apply_feedback_broaden_reserve(
     return merged[:max_queries]
 
 
+def _apply_broad_repricing_reserve(
+    *,
+    selected: list[str],
+    ordered_queries: list[str],
+    max_queries: int,
+    settings: dict[str, Any],
+    scan_sequence: int,
+) -> tuple[list[str], list[str]]:
+    """Keep at least one scan slot for broad event repricing discovery.
+
+    Evidence-priority queries are valuable, but if they fill every batch slot the
+    model quietly becomes a crypto-only system. This reserve is for observation
+    breadth only; trade promotion still requires cohort-specific bid/ask
+    validation downstream.
+    """
+    if max_queries <= 1:
+        return selected, []
+    if not _truthy_setting(settings.get("broad_repricing_reserve_enabled", False), default=False):
+        return selected, []
+    slots = int(safe_float(settings.get("broad_repricing_reserve_slots")) or 1)
+    slots = max(0, min(slots, max_queries - 1))
+    if slots <= 0:
+        return selected, []
+
+    broad_keys = {_query_key(query) for query in _broad_repricing_queries(settings)}
+    if not broad_keys:
+        return selected, []
+    ordered_broad = [query for query in ordered_queries if _query_key(query) in broad_keys]
+    if not ordered_broad:
+        return selected, []
+
+    selected_broad = [query for query in selected if _query_key(query) in broad_keys]
+    missing_slots = max(0, slots - len(selected_broad))
+    if missing_slots <= 0:
+        return selected, []
+
+    start = max(0, scan_sequence - 1) % len(ordered_broad)
+    rotated = [ordered_broad[(start + offset) % len(ordered_broad)] for offset in range(len(ordered_broad))]
+    reserved: list[str] = []
+    selected_keys = {_query_key(query) for query in selected}
+    for query in rotated:
+        key = _query_key(query)
+        if not key or key in selected_keys:
+            continue
+        reserved.append(query)
+        if len(reserved) >= missing_slots:
+            break
+    if not reserved:
+        return selected, []
+
+    reserved_keys = {_query_key(query) for query in reserved}
+    merged = [query for query in selected if _query_key(query) not in reserved_keys][: max_queries - len(reserved)] + reserved
+    for query in ordered_queries:
+        if len(merged) >= max_queries:
+            break
+        if query not in merged:
+            merged.append(query)
+    return merged[:max_queries], reserved
+
+
 def _select_scan_queries(cfg, default_query: str, *, scan_sequence: int) -> tuple[list[str], dict[str, Any]]:
     all_queries, mode = _configured_scan_queries(cfg, default_query)
     settings = cfg.raw.get("paper_market_scan", {}) or {}
@@ -596,7 +692,12 @@ def _select_scan_queries(cfg, default_query: str, *, scan_sequence: int) -> tupl
         all_queries,
         focus_payload=focus_payload,
     )
+    all_queries, injected_broad_queries = _extend_with_broad_repricing_queries(
+        all_queries,
+        settings=settings,
+    )
     ordered_queries, adaptive_priority = _adaptive_query_order(cfg, all_queries)
+    broad_reserved_queries: list[str] = []
     if mode == "batch":
         selected = ordered_queries[:max_queries] if max_queries > 0 else ordered_queries
         if max_queries > 0:
@@ -606,6 +707,13 @@ def _select_scan_queries(cfg, default_query: str, *, scan_sequence: int) -> tupl
                 adaptive_priority=adaptive_priority,
                 max_queries=max_queries,
                 settings=settings,
+            )
+            selected, broad_reserved_queries = _apply_broad_repricing_reserve(
+                selected=selected,
+                ordered_queries=ordered_queries,
+                max_queries=max_queries,
+                settings=settings,
+                scan_sequence=scan_sequence,
             )
     elif mode == "rotate":
         width = max(1, max_queries) if max_queries > 0 else 1
@@ -620,9 +728,16 @@ def _select_scan_queries(cfg, default_query: str, *, scan_sequence: int) -> tupl
         "mode": mode,
         "configured_queries": configured_queries,
         "injected_research_focus_queries": injected_queries,
+        "injected_broad_repricing_queries": injected_broad_queries,
         "all_queries": all_queries,
         "ordered_queries": ordered_queries,
         "selected_queries": selected,
+        "broad_repricing_reserved_queries": broad_reserved_queries,
+        "broad_repricing_queries": _broad_repricing_queries(settings),
+        "broad_repricing_reserve_enabled": _truthy_setting(
+            settings.get("broad_repricing_reserve_enabled", False),
+            default=False,
+        ),
         "scan_sequence": scan_sequence,
         "max_queries_per_cycle": max_queries,
         "adaptive_priority": adaptive_priority,

@@ -1122,7 +1122,7 @@ def test_dashboard_surfaces_strategy_v2_anchored_edge_progress(tmp_path):
         cfg.output_root / "polymarket_price_action" / "price_action_scout_summary.json",
         {
             "status": "computed",
-            "decision": "collect_more_closed_price_action_scout_evidence",
+            "decision": "collect_more_bid_ask_price_action_scout_evidence",
             "new_entries": 2,
             "ledger_entries": 3,
             "observed_candidates": 3,
@@ -1262,7 +1262,7 @@ def test_dashboard_surfaces_strategy_v2_anchored_edge_progress(tmp_path):
     assert strategy_v2["round_trip_evidence"]["decision"] == "collect_more_round_trip_evidence"
     assert strategy_v2["round_trip_evidence_cohorts"][0]["closed_trades"] == "1"
     assert strategy_v2["round_trip_evidence_top_candidates"][0]["round_trip_status"] == "closed_take_profit"
-    assert data["price_action_scout"]["decision"] == "collect_more_closed_price_action_scout_evidence"
+    assert data["price_action_scout"]["decision"] == "collect_more_bid_ask_price_action_scout_evidence"
     assert data["price_action_scout"]["closed_trades"] == 1
     assert data["price_action_scout"]["top_candidates"][0]["source"] == "profit_sprint_target"
     assert data["price_action_paper_signals"]["signals"] == 0

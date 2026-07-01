@@ -476,7 +476,7 @@ def build_price_action_feedback(cfg: EngineConfig) -> dict[str, Any]:
         next_action = "Run the price-action paper bridge and keep entries paper-only until broker evidence is positive."
     elif positive_collect:
         learning_state = "collect_more_positive_price_action_evidence"
-        next_action = "Prioritise websocket collection for positive price-action cohorts until closed round-trip gates clear."
+        next_action = "Prioritise websocket collection for positive price-action cohorts until bid/ask validation gates clear."
     elif suppressed:
         learning_state = "suppress_negative_price_action_and_broaden"
         next_action = "Do not expand negative cohorts; broaden discovery and wait for a new positive bid/ask thesis."

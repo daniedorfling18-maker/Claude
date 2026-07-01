@@ -9,6 +9,7 @@ from polymarket_predictive_engine.websocket_normaliser import (
     normalize_websocket_file,
     normalize_websocket_message,
 )
+from polymarket_predictive_engine.utils import read_csv_rows, write_csv
 
 BOOK_EVENT = {
     "event_type": "book",
@@ -172,6 +173,55 @@ def test_output_files_are_feature_only_no_label_columns(tmp_path):
         "bid_depth_5pct", "ask_depth_5pct", "book_imbalance",
         "price_change_side", "price_change_price", "price_change_size",
     }
+
+
+def test_normaliser_retains_existing_feature_history_for_multi_day_repricing(tmp_path):
+    cfg = EngineConfig(
+        raw={
+            "paths": {"output_root": str(tmp_path)},
+            "websocket_market_data": {
+                "retain_existing_features": True,
+                "feature_retention_hours": 96,
+                "max_feature_rows": 10,
+            },
+        },
+        path=tmp_path / "cfg.yaml",
+    )
+    existing_row = {
+        "collected_at_utc": "2026-06-21T00:00:00Z",
+        "source_timestamp": "1718800000000",
+        "market": "old-market",
+        "asset_id": "old-token",
+        "event_type": "price_change",
+        "best_bid": "0.41",
+        "best_ask": "0.43",
+        "midpoint": "0.42",
+        "spread": "0.02",
+        "price_change_side": "BUY",
+        "price_change_price": "0.42",
+        "price_change_size": "50",
+        "outcome": "Yes",
+    }
+    features_path = tmp_path / "polymarket_training" / "websocket_market_features.csv"
+    write_csv(features_path, [existing_row], fieldnames=[*FEATURE_FIELDS, "outcome"])
+    input_path = tmp_path / "websocket_messages.json"
+    input_path.write_text(
+        json.dumps([
+            {"collected_at_utc": "2026-06-24T00:00:00Z", "message": json.dumps(BOOK_EVENT)},
+        ]),
+        encoding="utf-8",
+    )
+
+    features, _, summary = normalize_websocket_file(cfg, input_path=input_path)
+    persisted = read_csv_rows(features_path)
+
+    assert {row["asset_id"] for row in persisted} == {"old-token", "tok-1"}
+    assert {str(row["asset_id"]) for row in features} == {"old-token", "tok-1"}
+    assert summary["existing_feature_rows"] == 1
+    assert summary["new_feature_rows"] == 1
+    assert summary["retained_feature_rows"] == 2
+    assert summary["feature_retention_enabled"] is True
+    assert "outcome" not in persisted[0]
 
 
 def test_minimum_required_columns_present():

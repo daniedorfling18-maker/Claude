@@ -487,7 +487,7 @@ def build_strategy_v2_round_trip_evidence(cfg: EngineConfig) -> dict[str, Any]:
         "realized_roi": realized_pnl / closed_stake if closed_stake > 0 else 0.0,
         "total_mark_pnl_usdc": mark_pnl,
         "mark_roi": mark_pnl / total_stake if total_stake > 0 else 0.0,
-        "decision": "ready_for_human_price_action_review_settlement_still_required"
+        "decision": "ready_for_forward_paper_confirmation_price_action_review"
         if review_candidates
         else "collect_more_round_trip_evidence"
         if observed
@@ -501,7 +501,7 @@ def build_strategy_v2_round_trip_evidence(cfg: EngineConfig) -> dict[str, Any]:
         "warnings": {
             "shadow_only": True,
             "not_paper_or_live_trading": True,
-            "settlement_governance_still_required": True,
+            "forward_paper_confirmation_still_required": True,
             "uses_bid_for_exit_not_midpoint": True,
             "price_action_is_not_settlement": True,
         },

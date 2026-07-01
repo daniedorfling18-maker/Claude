@@ -396,9 +396,11 @@ def _summary_decision(signals: list[dict[str, Any]], paper_confirmation: list[di
 def build_price_action_paper_signals(cfg: EngineConfig) -> dict[str, Any]:
     """Compile governed price-action evidence into paper broker signals.
 
-    This is intentionally paper-only and settlement-independent: it only promotes
-    cohorts whose bid/ask round-trip evidence already passed the price-action
-    review gate. Negative or incomplete cohorts remain rejections.
+    This is intentionally paper-only and settlement-independent: it promotes
+    only cohorts whose executable bid/ask repricing evidence already passed the
+    price-action review gate. That evidence can come from synthetic websocket
+    variation, scout marks, or paper-confirmation exits; negative or incomplete
+    cohorts remain rejections.
     """
     settings = _settings(cfg)
     out_dir = cfg.output_root / OUTPUT_DIRNAME

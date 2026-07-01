@@ -556,8 +556,11 @@ async function load() {
       ["Live source", legacyLiveActive ? (live.live_source || live.source || "websocket") : "websocket"],
       ["WS messages", websocket.new_messages],
       ["WS features", websocketFeatures.feature_rows],
+      ["Retained feature rows", websocketFeatures.retained_feature_rows],
+      ["Feature retention", websocketFeatures.feature_retention_hours ? `${websocketFeatures.feature_retention_hours}h / max ${websocketFeatures.max_feature_rows || "-"}` : "-"],
       ["Target assets", websocket.target_assets],
       ["Target source", websocket.target_source, v=>longText(v, 180)],
+      ["Target families", websocket.target_family_counts, v=>longText(v, 220)],
       ["Feedback targets", websocket.target_feedback_broaden_counts, v=>longText(v, 180)],
       ["Features", data.forward_paper_cycle?.features],
       ["Predictions", data.forward_paper_cycle?.predictions],
@@ -2853,8 +2856,12 @@ def _decision_useful_summary(
         {
             "lane": "Live bid/ask feed",
             "state": shadow_status or "unknown",
-            "decision_use": "Feeds current executable prices and repricing labels.",
-            "key_metric": f"{websocket_summary.get('new_messages', '-')} messages / {websocket_feature_summary.get('feature_rows', '-')} features",
+            "decision_use": "Feeds current executable prices and ask-to-future-bid repricing labels across liquid event families.",
+            "key_metric": (
+                f"{websocket_summary.get('new_messages', '-')} messages / "
+                f"{websocket_feature_summary.get('feature_rows', '-')} features / "
+                f"{len((websocket_summary.get('target_family_counts') or {}))} target families"
+            ),
             "blocker_or_next": "Collect " + ", ".join(collect_now) if collect_now else "No priority collection query is active.",
         },
         {

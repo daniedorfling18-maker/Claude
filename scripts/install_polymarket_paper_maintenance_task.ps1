@@ -14,6 +14,7 @@ $Runner = Join-Path $RepoRoot "scripts\run_polymarket_paper_maintenance.ps1"
 $WorkRoot = Join-Path $RepoRoot "work"
 $StatusPath = Join-Path $WorkRoot "polymarket_paper_maintenance_task_status.json"
 $DashboardDataPath = Join-Path $RepoRoot "outputs\polymarket_dashboard\dashboard_data.json"
+$Launcher = Join-Path $WorkRoot "run_polymarket_paper_maintenance_hidden.vbs"
 
 New-Item -ItemType Directory -Force $WorkRoot | Out-Null
 
@@ -68,7 +69,12 @@ $QuotedRunner = '"' + $Runner + '"'
 $QuotedConfig = '"' + $ConfigPath + '"'
 $QuotedTaskName = '"' + $TaskName + '"'
 $Arguments = "-NoProfile -ExecutionPolicy Bypass -File $QuotedRunner -ConfigPath $QuotedConfig -TaskName $QuotedTaskName -MaxMemoryPercent $MaxMemoryPercent"
-$Action = New-ScheduledTaskAction -Execute "powershell.exe" -Argument $Arguments -WorkingDirectory $RepoRoot
+$EscapedArguments = $Arguments.Replace('"', '""')
+Set-Content -LiteralPath $Launcher -Encoding Unicode -Value @"
+Set shell = CreateObject("WScript.Shell")
+shell.Run "powershell.exe $EscapedArguments", 0, False
+"@
+$Action = New-ScheduledTaskAction -Execute "wscript.exe" -Argument ('"' + $Launcher + '"') -WorkingDirectory $RepoRoot
 $Trigger = New-ScheduledTaskTrigger `
     -Once `
     -At $TriggerStart `

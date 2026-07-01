@@ -40,6 +40,24 @@ HTML = """<!doctype html>
     .value.good { color:var(--good); } .value.bad { color:var(--bad); } .value.warn { color:var(--warn); }
     section { padding:16px; margin-top:16px; overflow:hidden; }
     section.primary { border-color:rgba(70,211,154,0.35); background:linear-gradient(180deg,rgba(70,211,154,0.09),rgba(255,255,255,0.025)); }
+    .decisionHero { display:grid; grid-template-columns:1.1fr 2fr; gap:14px; align-items:stretch; margin-bottom:14px; }
+    .decisionStatus { border:1px solid rgba(255,255,255,0.12); border-radius:16px; padding:16px; background:rgba(0,0,0,0.22); min-width:0; }
+    .decisionStatus .statusLabel { color:var(--muted); font-size:12px; text-transform:uppercase; letter-spacing:0.08em; }
+    .decisionStatus .statusValue { margin-top:8px; font-size:clamp(24px,4vw,38px); line-height:1; font-weight:850; letter-spacing:-0.04em; overflow-wrap:anywhere; }
+    .decisionStatus.good { border-color:rgba(70,211,154,0.5); box-shadow:0 0 0 1px rgba(70,211,154,0.12) inset; }
+    .decisionStatus.good .statusValue { color:var(--good); }
+    .decisionStatus.warn { border-color:rgba(255,209,102,0.45); box-shadow:0 0 0 1px rgba(255,209,102,0.10) inset; }
+    .decisionStatus.warn .statusValue { color:var(--warn); }
+    .decisionStatus.bad { border-color:rgba(255,107,122,0.5); box-shadow:0 0 0 1px rgba(255,107,122,0.12) inset; }
+    .decisionStatus.bad .statusValue { color:var(--bad); }
+    .decisionText { border:1px solid rgba(255,255,255,0.08); border-radius:16px; padding:16px; background:rgba(255,255,255,0.035); color:#d8e5f8; min-width:0; }
+    .decisionText .headline { font-size:18px; font-weight:760; margin-bottom:8px; }
+    .decisionText .body { color:#c8d8ef; overflow-wrap:anywhere; }
+    .decisionGrid { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:10px; margin:12px 0; }
+    .decisionTile { border:1px solid rgba(255,255,255,0.08); background:rgba(255,255,255,0.035); border-radius:12px; padding:11px; min-width:0; }
+    .decisionTile .tileLabel { color:var(--muted); font-size:12px; text-transform:uppercase; letter-spacing:0.08em; margin-bottom:5px; }
+    .decisionTile .tileValue { color:#d8e5f8; font-weight:720; overflow-wrap:anywhere; }
+    .sectionLead { color:#c8d8ef; margin:-3px 0 12px; }
     .alertGrid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:12px; margin-top:12px; }
     .alert { border:1px solid rgba(255,255,255,0.09); border-left:4px solid var(--warn); border-radius:14px; padding:12px; background:rgba(0,0,0,0.18); }
     .alert.good { border-left-color:var(--good); }
@@ -66,7 +84,7 @@ HTML = """<!doctype html>
     details.expand summary::marker { color:var(--muted); }
     .fullText { margin-top:8px; padding:8px; border-radius:10px; background:rgba(0,0,0,0.22); color:#c8d8ef; white-space:pre-wrap; overflow-wrap:anywhere; }
     .error { color:var(--bad); padding:16px; border:1px solid rgba(255,107,122,0.35); border-radius:14px; background:rgba(255,107,122,0.08); }
-    @media (max-width: 980px) { .grid, .two, .facts, .alertGrid { grid-template-columns:1fr; } header { flex-direction:column; } table { min-width:640px; } }
+    @media (max-width: 980px) { .grid, .two, .facts, .alertGrid, .decisionHero, .decisionGrid { grid-template-columns:1fr; } header { flex-direction:column; } table { min-width:640px; } }
   </style>
 </head>
 <body>
@@ -74,19 +92,24 @@ HTML = """<!doctype html>
   <header>
     <div>
       <h1>Polymarket Paper Trading</h1>
-      <div class="sub">Local oversight cockpit - freshness, model state, trading gates, and paper P&L - auto-refreshes every 5 seconds</div>
+      <div class="sub">Decision cockpit - trade/no-trade, blocker, next evidence target, model gate, and paper P&L - auto-refreshes every 5 seconds</div>
     </div>
     <div class="pill"><span id="statusDot" class="dot"></span><span id="statusText">Loading...</span></div>
   </header>
   <div id="error"></div>
   <div class="grid" id="cards"></div>
-  <section class="primary"><h2>Oversight cockpit</h2><div id="oversightCockpit"></div></section>
+  <section class="primary"><h2>Decision cockpit</h2><div id="decisionCockpit"></div></section>
   <div class="two">
-    <section><h2>Actual profit target</h2><div id="actualTarget"></div></section>
-    <section><h2>Latest cycle</h2><div id="cycle"></div></section>
+    <section><h2>Oversight cockpit</h2><div id="oversightCockpit"></div></section>
+    <section><h2>Live evidence cycle</h2><div id="cycle"></div></section>
   </div>
-  <section><h2>$100/month price-change route</h2><div id="goalPlan"></div></section>
+  <div class="two">
+    <section><h2>$100/month price-change route</h2><div id="goalPlan"></div></section>
+    <section><h2>Actual paper P&L</h2><div id="actualTarget"></div></section>
+  </div>
   <section><h2>Trading signal audit</h2><div id="tradeSignalAudit"></div></section>
+  <section><h2>World Cup validation layer</h2><div id="worldcupValidation"></div></section>
+  <details class="legacy"><summary>Deep diagnostics and rejected-candidate audit<span>Raw telemetry is still here for debugging, but the decision cockpit above is the default trading view.</span></summary>
   <section><h2>Why no trade?</h2><div id="tradeDiagnostics"></div></section>
   <section><h2>Strategy V2 anchored edge</h2><div id="strategyV2"></div></section>
   <section><h2>Fast price-action scout</h2><div id="priceActionScout"></div></section>
@@ -98,6 +121,12 @@ HTML = """<!doctype html>
     <section><h2>Promotion readiness</h2><div id="promotionReadiness"></div></section>
     <section><h2>Edge promotion watchlist</h2><div id="promotionWatchlist"></div></section>
   </div>
+  <section><h2>Independent model anchors</h2><div id="independentFundamentals"></div></section>
+  <section><h2>Liquidity discovery</h2><div id="liquidityDiscovery"></div></section>
+  <section><h2>Open positions</h2><div id="positions"></div></section>
+  <section><h2>Recent fills</h2><div id="fills"></div></section>
+  <section><h2>Approved signals currently queued/scored</h2><div id="signals"></div></section>
+  </details>
   <details class="legacy"><summary>Slow / legacy evidence panels<span>Kept for audit trail, but no longer the first thing to watch for live paper-trading decisions.</span></summary>
   <div class="two">
     <section><h2>Settlement watch</h2><div id="settlementWatch"></div></section>
@@ -107,16 +136,10 @@ HTML = """<!doctype html>
   <section><h2>Open shadow positions</h2><div id="shadowPositions"></div></section>
   <section><h2>Recent shadow fills</h2><div id="shadowFills"></div></section>
   </details>
-  <section><h2>World Cup validation layer</h2><div id="worldcupValidation"></div></section>
-  <section><h2>Independent model anchors</h2><div id="independentFundamentals"></div></section>
   <details class="legacy"><summary>Historical research panels<span>Useful for provenance, not the live cockpit. Open only when auditing old rule evidence.</span></summary>
   <section><h2>Historical edge search</h2><div id="edgeSearch"></div></section>
   <section><h2>Historical rule live shadow scan</h2><div id="promotedRuleShadow"></div></section>
   </details>
-  <section><h2>Liquidity discovery</h2><div id="liquidityDiscovery"></div></section>
-  <section><h2>Open positions</h2><div id="positions"></div></section>
-  <section><h2>Recent fills</h2><div id="fills"></div></section>
-  <section><h2>Approved signals currently queued/scored</h2><div id="signals"></div></section>
 </main>
 <script>
 const fmtUsd = (v) => v === null || v === undefined || v === "" || Number.isNaN(Number(v)) ? "-" : "$" + Number(v).toFixed(2);
@@ -151,10 +174,17 @@ const short = longText;
 const joinList = joinText;
 const marketLabel = (row) => longText(row?.market_name || row?.question || row?.market_slug || row?.market_id || row?.token_id);
 const plain = (v) => escapeHtml(asText(v));
+const asNumber = (v, fallback=0) => Number.isFinite(Number(v)) ? Number(v) : fallback;
+const limitRows = (rows, max=6) => Array.isArray(rows) ? rows.slice(0, max) : [];
 function card(label, value, cls="") { return `<div class="card"><div class="label">${escapeHtml(label)}</div><div class="value ${cls}">${value}</div></div>`; }
 function table(rows, columns) {
   if (!rows || !rows.length) return `<div class="muted">No rows yet.</div>`;
   return `<div class="tableWrap"><table><thead><tr>${columns.map(c=>`<th>${escapeHtml(c[0])}</th>`).join("")}</tr></thead><tbody>${rows.map(row=>`<tr>${columns.map(c=>`<td>${c[2] ? c[2](row[c[1]], row) : plain(row[c[1]])}</td>`).join("")}</tr>`).join("")}</tbody></table></div>`;
+}
+function titledTable(title, rows, columns, max=6) {
+  const subset = limitRows(rows, max);
+  if (!subset.length) return "";
+  return `<div style="height:12px"></div><h3>${escapeHtml(title)}</h3>` + table(subset, columns);
 }
 function facts(rows) {
   return `<div class="facts">${rows.map(row => `<div class="fact"><div class="label">${escapeHtml(row[0])}</div><div class="factValue">${row[2] ? row[2](row[1]) : longText(row[1])}</div></div>`).join("")}</div>`;
@@ -192,30 +222,34 @@ async function load() {
     const paperMaintenanceTask = data.paper_maintenance_task || {};
     const shadowResearch = data.shadow_research_cycle || {};
     const priceScoutPnl = priceScout.realized_pnl_usdc ?? priceScout.total_mark_pnl_usdc;
-    const live = data.local_live_heartbeat || data.heartbeat || {};
     const freshness = data.evidence_freshness || {};
     const oversight = data.oversight_status || {};
+    const rawLive = data.local_live_heartbeat || data.heartbeat || {};
+    const liveStatus = freshness.live_loop_status || oversight.live_loop_status || "unknown";
+    const legacyLiveActive = liveStatus === "live";
+    const live = legacyLiveActive ? rawLive : {};
     const scanner = data.scanner_heartbeat || {};
     const discovery = live.discovery || {};
     const resourceGuard = live.resource_guard || {};
     const currentScan = discovery.scan || {};
     const lastScan = discovery.last_scan || {};
     const fastUpdown = discovery.last_fast_updown || discovery.fast_updown || {};
-    const websocket = live.websocket || {};
-    const websocketFeatures = live.websocket_features || {};
+    const websocket = live.websocket || data.websocket_summary || {};
+    const websocketFeatures = live.websocket_features || data.websocket_feature_summary || {};
     const ingest = live.ingest || {};
     const legacyFullCycle = freshness.legacy_full_cycle || {};
     const status = target.status || data.forward_paper_cycle?.status || "unknown";
     const dashboardAge = ageSeconds(data.generated_at_utc);
-    const liveStatus = freshness.live_loop_status || "unknown";
     const researchStatus = oversight.shadow_research_status || shadowResearch.effective_status || shadowResearch.status || "unknown";
     const researchAge = oversight.shadow_research_age_seconds ?? shadowResearch.age_seconds;
-    const runPosture = freshness.strategy_v2_runtime_posture || liveStatus;
+    const runPosture = legacyLiveActive ? (freshness.strategy_v2_runtime_posture || liveStatus) : (researchStatus === "ok" || researchStatus === "completed" || researchStatus === "success" ? "active_shadow_research" : researchStatus);
     const oversightState = oversight.status || "unknown";
     const researchGood = ["running", "ok", "completed", "success"].includes(researchStatus);
     const good = oversightState === "ok" || (oversightState === "unknown" && researchGood);
-    const guarded = runPosture === "memory_paused" || runPosture === "guard_paused";
-    const dashboardStale = dashboardAge !== null && dashboardAge > 300;
+    const guarded = legacyLiveActive && (runPosture === "memory_paused" || runPosture === "guard_paused");
+    const dashboardWarnAfterSeconds = Number(data.dashboard_warn_after_seconds || 900);
+    const dashboardStaleAfterSeconds = Number(data.dashboard_stale_after_seconds || 1800);
+    const dashboardStale = dashboardAge !== null && dashboardAge > dashboardStaleAfterSeconds;
     const bad = dashboardStale || oversightState === "bad" || researchStatus === "stale";
     const liveAge = freshness.live_heartbeat_age_seconds ?? ageSeconds(live.generated_at_utc);
     const modelAge = ageSeconds(priceActionModel.generated_at_utc);
@@ -226,11 +260,18 @@ async function load() {
     const approvedSignals = Number(oversight.approved_signal_count ?? data.forward_paper_cycle?.signals_approved ?? priceActionPaper.signals ?? diag.approved_signals_count ?? 0);
     const selectedQueries = currentScan.scan_plan?.selected_queries || lastScan.scan_plan?.selected_queries || scanner.scan?.scan_plan?.selected_queries || scanner.scan?.queries || [];
     const injectedQueries = currentScan.scan_plan?.injected_research_focus_queries || lastScan.scan_plan?.injected_research_focus_queries || scanner.scan?.scan_plan?.injected_research_focus_queries || [];
+    const adaptiveQueries = data.research_focus?.collection_queries || data.liquidity_discovery?.settings?.adaptive_collection_queries || priceActionFeedback.collection_queries || priceActionGoal.collection_queries || validationGap.collection_queries || [];
+    const displayedQueries = selectedQueries.length ? selectedQueries : adaptiveQueries;
+    const brokerNeedsWork = Boolean(priceActionPaper.broker_refresh_needed || priceActionPaper.pending_broker_signals || priceActionPaper.pending_broker_confirmation_signals || priceActionPaper.pending_broker_exit_probes || approvedSignals > 0);
+    const brokerRefreshLabel = priceActionPaper.broker_refresh_needed ? `${priceActionPaper.pending_broker_signals ?? 0} pending` : brokerNeedsWork ? "fresh" : "idle";
+    const strategyGuardReason = (!oversight.strategy_v2_memory_pause_obsolete && legacyLiveActive) ? (freshness.strategy_v2_runtime_reason || strategyV2.runtime_reason || "") : "";
+    const maintenanceFresh = Number(paperMaintenance.age_seconds ?? 999999) <= 900;
+    const maintenanceInstalled = !["not_installed_or_unknown", "disabled", "not_started", ""].includes(String(paperMaintenanceTask.status || "").toLowerCase());
+    const showMaintenance = maintenanceFresh && (maintenanceInstalled || paperMaintenance.status === "running" || paperMaintenance.status === "ok");
     const oversightAlerts = Array.isArray(oversight.alerts) && oversight.alerts.length
       ? oversight.alerts.map(item => alertBox(item.title || "Oversight alert", longText(item.body || "-", 260), item.severity || "warn"))
       : [];
     if (dashboardStale) oversightAlerts.push(alertBox("Dashboard snapshot is stale", `The displayed file is ${fmtAge(dashboardAge)} old. Refresh the dashboard generator before trusting signal counts.`, "bad"));
-    if (!oversightAlerts.length && liveStatus !== "live") oversightAlerts.push(alertBox("Legacy local live loop is not running", `Expected unless explicitly approved. Legacy status: ${escapeHtml(liveStatus)}; last heartbeat age: ${fmtAge(liveAge)}.`, "warn"));
     if (!oversightAlerts.length && modelStale) oversightAlerts.push(alertBox("Model scoring is stale", `Price-action model summary is ${fmtAge(modelAge)} old. Re-score/retrain before promoting any new paper signals.`, "bad"));
     if (!oversightAlerts.length && validationGapActive) oversightAlerts.push(alertBox("Model needs positive validation examples", `Train positives: ${plain(priceActionModel.train_positive_targets)}; validation positives: ${plain(priceActionModel.validation_positive_targets)}. Collect next: ${joinText(validationGap.collection_queries || [])}.`, "warn"));
     if (!oversightAlerts.length && approvedSignals <= 0) oversightAlerts.push(alertBox("No approved paper signals", longText(diag.main_blocker || priceActionPaper.decision || "Current gates are blocking paper entries.", 220), "warn"));
@@ -239,29 +280,100 @@ async function load() {
     document.getElementById("statusDot").className = "dot " + (bad ? "bad" : good ? "good" : guarded ? "warn" : "");
     document.getElementById("statusText").textContent = (dashboardStale ? "dashboard stale" : `research ${researchStatus}`) + " - " + status + " - snapshot age " + fmtAge(dashboardAge) + " - updated " + (data.generated_at_utc || "-");
     const pnl = Number(target.actual_pnl_since_baseline_usdc || 0);
+    const paperRejections = asNumber(priceActionPaper.rejections, asNumber(data.forward_paper_cycle?.signals_rejected, asNumber(diag.rejected_signals_count, 0)));
+    const brokerWorkPending = Boolean(priceActionPaper.broker_refresh_needed || priceActionPaper.pending_broker_signals || priceActionPaper.pending_broker_confirmation_signals || priceActionPaper.pending_broker_exit_probes);
+    const tradeDecision = dashboardStale
+      ? "WAIT: REFRESH"
+      : approvedSignals > 0
+        ? (brokerWorkPending ? "RUN PAPER BROKER" : "PAPER READY")
+        : "DO NOT TRADE YET";
+    const tradeDecisionClass = dashboardStale ? "bad" : approvedSignals > 0 ? "good" : "warn";
+    const blockerText = dashboardStale
+      ? "The dashboard snapshot is too old to trust. Refresh the dashboard before reading the signal state."
+      : approvedSignals > 0
+        ? (brokerWorkPending ? "Approved signal rows exist and need the paper broker refresh to execute/record them." : "Approved signal rows exist. Monitor fills, exits, spread, and realised P&L.")
+        : (diag.main_blocker || priceActionPaper.decision || goalPlan.main_gap || "Current evidence gates are blocking entries.");
+    const nextAction = tradeSignalAudit.next_action || goalPlan.recommended_action || priceActionFeedback.next_action || diag.recommended_action || "Keep collecting live bid/ask evidence until a validated cohort produces executable positive paper signals.";
+    const collectQueries = tradeSignalAudit.missing_confirmation_queries?.length
+      ? tradeSignalAudit.missing_confirmation_queries
+      : displayedQueries.length
+        ? displayedQueries
+        : adaptiveQueries;
+    const transferReason = priceActionModel.cohort_transfer?.reason || validationGap.reason || "";
+    const unlockCondition = approvedSignals > 0
+      ? (brokerWorkPending ? "Paper broker refresh must run and record the fill/exit evidence." : "Keep this cohort under forward paper supervision.")
+      : validationGapActive
+        ? (validationGap.reason || "The model still needs positive validation examples before promotion.")
+        : transferReason
+          ? transferReason
+          : (priceActionGoal.state === "trusted_shadow_needs_paper_confirmation"
+              ? "Trusted shadow cohorts need fresh executable paper-confirmation probes before promotion."
+              : blockerText);
+    const recentLossExits = asNumber(tradeSignalAudit.recent_loss_exit_count);
+    const recentExitCount = asNumber(tradeSignalAudit.recent_exit_count);
+    const riskLesson = recentExitCount > 0
+      ? `${recentLossExits}/${recentExitCount} recent exits lost; recent realised P&L ${fmtUsd(tradeSignalAudit.recent_realised_pnl_usdc)}.`
+      : "No recent closed paper exits in the current audit window.";
+    const visibleAlerts = oversightAlerts.slice(0, 3).join("");
+    const decisionTargets = tradeSignalAudit.paper_confirmation_targets || priceActionGoal.paper_confirmation_targets || [];
+    const nearMissRows = (diag.current_near_miss_candidates && diag.current_near_miss_candidates.length)
+      ? diag.current_near_miss_candidates
+      : (diag.current_shadow_candidates || []);
     document.getElementById("cards").innerHTML = [
-      card("Dashboard age", fmtAge(dashboardAge), ageClass(dashboardAge, 60, 300)),
-      card("Research cycle", `${researchStatus} / ${fmtAge(researchAge)}`, researchStatus === "stale" ? "bad" : researchStatus === "running" || researchStatus === "completed" || researchStatus === "ok" ? "good" : "warn"),
-      card("Model age", fmtAge(modelAge), ageClass(modelAge, 300, 900)),
-      card("Model gate", validationGapActive ? "needs validation positives" : (priceActionModel.promotion_ready ? "validated" : priceActionModel.decision || priceActionModel.status || "unknown"), validationGapActive ? "warn" : priceActionModel.promotion_ready ? "good" : "warn"),
+      card("Trade decision", tradeDecision, tradeDecisionClass),
       card("Actual P&L since clean baseline", fmtUsd(pnl), pnl >= 0 ? "good" : "bad"),
       card("Monthly run-rate", target.monthly_run_rate_usdc == null ? "Collecting" : fmtUsd(target.monthly_run_rate_usdc), target.monthly_run_rate_usdc >= target.target_monthly_profit_usdc ? "good" : ""),
-      card("Approved signals", approvedSignals, approvedSignals > 0 ? "good" : "warn"),
-      card("Paper signal age", fmtAge(signalAge), ageClass(signalAge, 300, 900)),
-      card("Scanning now", joinText(selectedQueries), "warn"),
-      card("Injected focus", injectedQueries.length ? joinText(injectedQueries) : "none", injectedQueries.length ? "good" : ""),
-      card("Memory posture", runPosture, guarded ? "warn" : good ? "good" : bad ? "bad" : "warn"),
+      card("Signal gate", `${approvedSignals} approved / ${paperRejections} rejected`, approvedSignals > 0 ? "good" : "warn"),
+      card("Next collect", joinText(collectQueries), collectQueries.length ? "good" : "warn"),
+      card("Model gate", validationGapActive ? "needs validation positives" : (priceActionModel.promotion_ready ? "validated" : priceActionModel.decision || priceActionModel.status || "unknown"), validationGapActive ? "warn" : priceActionModel.promotion_ready ? "good" : "warn"),
+      card("Research freshness", `${researchStatus} / ${fmtAge(researchAge)}`, researchStatus === "stale" ? "bad" : researchStatus === "running" || researchStatus === "completed" || researchStatus === "ok" ? "good" : "warn"),
+      card("Dashboard age", fmtAge(dashboardAge), ageClass(dashboardAge, dashboardWarnAfterSeconds, dashboardStaleAfterSeconds)),
       card("Required/day", fmtUsd(goalPlan.required_daily_from_here_usdc), "warn"),
-      card("Equity", fmtUsd(broker.equity), Number(broker.equity) >= 1000 ? "good" : "bad"),
-      card("Cash", fmtUsd(broker.cash)),
-      card("Live WS messages", websocket.new_messages ?? "-", "good"),
-      card("Live WS features", websocketFeatures.feature_rows ?? "-", "good"),
-      card("Broker refresh", priceActionPaper.broker_refresh_needed ? `${priceActionPaper.pending_broker_signals ?? 0} pending` : "fresh", priceActionPaper.broker_refresh_needed ? "warn" : "good")
+      card("Live websocket", `${websocket.new_messages ?? "-"} msgs / ${websocketFeatures.feature_rows ?? "-"} features`, "good"),
+      card("Account equity", fmtUsd(broker.equity), Number(broker.equity) >= 1000 ? "good" : "bad"),
+      card("Broker refresh", brokerRefreshLabel, priceActionPaper.broker_refresh_needed ? "warn" : "good")
     ].join("");
+    document.getElementById("decisionCockpit").innerHTML = `
+      <div class="decisionHero">
+        <div class="decisionStatus ${tradeDecisionClass}">
+          <div class="statusLabel">Paper trading decision</div>
+          <div class="statusValue">${escapeHtml(tradeDecision)}</div>
+        </div>
+        <div class="decisionText">
+          <div class="headline">${approvedSignals > 0 ? "Actionable signal queue exists" : "The bot is correctly refusing weak trades"}</div>
+          <div class="body">${longText(blockerText, 420)}</div>
+        </div>
+      </div>
+      <div class="decisionGrid">
+        <div class="decisionTile"><div class="tileLabel">Unlock condition</div><div class="tileValue">${longText(unlockCondition, 220)}</div></div>
+        <div class="decisionTile"><div class="tileLabel">Next evidence cycle</div><div class="tileValue">${longText(nextAction, 220)}</div></div>
+        <div class="decisionTile"><div class="tileLabel">Collect now</div><div class="tileValue">${joinText(collectQueries)}</div></div>
+        <div class="decisionTile"><div class="tileLabel">Risk/P&L lesson</div><div class="tileValue">${longText(riskLesson, 180)}</div></div>
+      </div>
+      ${visibleAlerts ? `<div class="alertGrid">${visibleAlerts}</div>` : ""}
+      ${titledTable("Closest confirmation targets", decisionTargets, [
+        ["Query","recommended_collection_query"],
+        ["Cohort","cohort", v=>longText(v, 170)],
+        ["Run-rate","monthly_run_rate_usdc", fmtUsd],
+        ["Shadow P&L","forward_shadow_pnl_usdc", fmtUsd],
+        ["Candidate rows","current_candidate_rows"],
+        ["Executable rows","current_executable_rows"],
+        ["Missing fresh","missing_fresh_candidate"]
+      ], 5)}
+      ${titledTable("Closest rejected candidates to learn from", nearMissRows, [
+        ["Market","market_slug", v=>longText(v, 130)],
+        ["Outcome","outcome"],
+        ["Cohort","signal_cohort", v=>longText(v, 140)],
+        ["Lower-bound","edge_lower_bound", v=>fmtNum(v,4)],
+        ["Spread","spread", v=>fmtNum(v,4)],
+        ["Liquidity","liquidity", v=>fmtNum(v,2)],
+        ["Why blocked","near_miss_learning_reason", (v,row)=>longText(v || row.shadow_candidate_reason || row.rejection_reason, 180)]
+      ], 5)}
+    `;
     document.getElementById("oversightCockpit").innerHTML = facts([
       ["Dashboard snapshot", `${fmtAge(dashboardAge)} old / ${data.generated_at_utc || "-"}`],
       ["Shadow research", `${researchStatus} / ${fmtAge(researchAge)} old`],
-      ["Legacy live heartbeat", `${liveStatus} / ${fmtAge(liveAge)} old`],
+      ["Active lane", legacyLiveActive ? "legacy live loop" : "shadow research + websocket"],
       ["Model freshness", `${priceActionModel.status || "unknown"} / ${fmtAge(modelAge)} old`],
       ["Model decision", priceActionModel.decision, v=>longText(v, 220)],
       ["Validation gap", validationGapActive ? validationGap.reason || "Needs positive validation examples." : "No active positive-validation gap.", v=>longText(v, 260)],
@@ -277,19 +389,16 @@ async function load() {
       ["Monthly run-rate", target.monthly_run_rate_usdc, fmtUsd],
       ["Baseline equity", target.baseline?.baseline_equity_usdc, fmtUsd]
     ]);
-    document.getElementById("goalPlan").innerHTML = facts([
+    document.getElementById("goalPlan").innerHTML = `<div class="sectionLead">This is the route to the $100/month target using tradable price changes, not waiting for market settlement.</div>` + facts([
+      ["Route state", priceActionGoal.state || goalPlan.status],
+      ["Needs settlement?", priceActionGoal.settlement_required_for_this_milestone ? "yes" : "no - this milestone uses bid/ask repricing and paper exits"],
+      ["Best repricing run-rate", priceActionGoal.best_repricing_monthly_run_rate_usdc, fmtUsd],
+      ["Forward paper run-rate", priceActionGoal.best_forward_paper_monthly_run_rate_usdc, fmtUsd],
+      ["Required/day from here", goalPlan.required_daily_from_here_usdc, fmtUsd],
       ["Goal gap", goalPlan.main_gap, v=>longText(v, 220)],
       ["Recommended action", goalPlan.recommended_action, v=>longText(v, 260)],
-      ["Price-change state", priceActionGoal.state],
-      ["Settlement required here", priceActionGoal.settlement_required_for_this_milestone],
-      ["Evidence type", priceActionGoal.evidence_type],
-      ["Best repricing run-rate", priceActionGoal.best_repricing_monthly_run_rate_usdc, fmtUsd],
-      ["Repricing goal gap", priceActionGoal.repricing_goal_gap_usdc, fmtUsd],
-      ["Forward paper run-rate", priceActionGoal.best_forward_paper_monthly_run_rate_usdc, fmtUsd],
-      ["Forward paper gap", priceActionGoal.forward_paper_goal_gap_usdc, fmtUsd],
-      ["Paper-confirmation candidates", priceActionGoal.paper_confirmation_candidates],
-      ["Collect next", priceActionGoal.collection_queries, joinText]
-    ]) + `<div style="height:12px"></div><h3>Top price-change cohorts for the goal</h3>` + table(priceActionGoal.top_cohorts || [], [
+      ["Collect next", priceActionGoal.collection_queries || collectQueries, joinText]
+    ]) + titledTable("Top price-change cohorts for the goal", priceActionGoal.top_cohorts || [], [
       ["Cohort","cohort", v=>longText(v, 180)],
       ["Source","source"],
       ["Action","action", v=>longText(v, 160)],
@@ -299,21 +408,29 @@ async function load() {
       ["Shadow P&L","forward_shadow_pnl_usdc", fmtUsd],
       ["Trusted","trusted_for_goal"],
       ["Blocker","forward_edge_blocker", v=>longText(v, 160)]
-    ]);
-    document.getElementById("tradeSignalAudit").innerHTML = facts([
-      ["Verdict", tradeSignalAudit.verdict],
-      ["Next action", tradeSignalAudit.next_action, v=>longText(v, 260)],
-      ["Signal CSV rows", tradeSignalAudit.signal_file_rows],
-      ["Summary signal rows", tradeSignalAudit.summary_signal_rows],
-      ["Signal mismatch", tradeSignalAudit.signal_summary_mismatch],
-      ["Rejections", tradeSignalAudit.rejection_file_rows],
+    ], 5);
+    const recentLossPreview = (tradeSignalAudit.recent_exit_preview || []).filter(row =>
+      String(row.loss_making_exit || "").toLowerCase() === "true" || asNumber(row.realised_pnl_usdc, 0) < 0
+    );
+    document.getElementById("tradeSignalAudit").innerHTML = `<div class="sectionLead">Only evidence that changes the trade/no-trade decision is shown here. Open diagnostics below for raw files and provenance.</div>` + facts([
+      ["Verdict", tradeSignalAudit.verdict || tradeDecision],
+      ["Next action", tradeSignalAudit.next_action || nextAction, v=>longText(v, 260)],
+      ["Approved / rejected", `${approvedSignals} / ${paperRejections}`],
       ["Missing target candidates", tradeSignalAudit.missing_confirmation_target_count],
-      ["Missing queries", tradeSignalAudit.missing_confirmation_queries, joinText],
-      ["Recent exits", tradeSignalAudit.recent_exit_count],
-      ["Loss-making exits", tradeSignalAudit.recent_loss_exit_count],
+      ["Missing queries", tradeSignalAudit.missing_confirmation_queries || collectQueries, joinText],
       ["Recent realised P&L", tradeSignalAudit.recent_realised_pnl_usdc, fmtUsd],
-      ["Principles", tradeSignalAudit.trading_principles, joinText]
-    ]) + `<div style="height:12px"></div><h3>Current paper signal trade thesis</h3>` + table(tradeSignalAudit.current_signal_theses || [], [
+      ["Recent losses", `${recentLossExits}/${recentExitCount}`],
+      ["Trading principles", tradeSignalAudit.trading_principles, joinText]
+    ]) + titledTable("Trusted confirmation targets vs current candidates", tradeSignalAudit.paper_confirmation_targets || [], [
+      ["Query","recommended_collection_query"],
+      ["Cohort","cohort", v=>longText(v, 180)],
+      ["Shadow P&L","forward_shadow_pnl_usdc", fmtUsd],
+      ["Shadow ROI","forward_shadow_roi", v=>fmtNum(Number(v) * 100, 2) + "%"],
+      ["Run-rate","monthly_run_rate_usdc", fmtUsd],
+      ["Candidate rows","current_candidate_rows"],
+      ["Executable rows","current_executable_rows"],
+      ["Missing fresh","missing_fresh_candidate"]
+    ], 6) + titledTable("Current paper signal trade thesis", tradeSignalAudit.current_signal_theses || [], [
       ["Market","market_slug", v=>longText(v, 150)],
       ["Cohort","signal_cohort", v=>longText(v, 140)],
       ["Ask entry","entry_ask", v=>fmtNum(v,4)],
@@ -325,19 +442,10 @@ async function load() {
       ["Gap to TP","current_bid_gap_to_profit", v=>fmtNum(v,4)],
       ["Stop bid","stop_loss_bid", v=>fmtNum(v,4)],
       ["Horizon","max_hold_minutes_before_exit", v=>fmtNum(v,1) + "m"]
-    ]) + `<div style="height:12px"></div><h3>Trusted confirmation targets vs current candidates</h3>` + table(tradeSignalAudit.paper_confirmation_targets || [], [
-      ["Query","recommended_collection_query"],
-      ["Cohort","cohort", v=>longText(v, 180)],
-      ["Shadow P&L","forward_shadow_pnl_usdc", fmtUsd],
-      ["Shadow ROI","forward_shadow_roi", v=>fmtNum(Number(v) * 100, 2) + "%"],
-      ["Run-rate","monthly_run_rate_usdc", fmtUsd],
-      ["Candidate rows","current_candidate_rows"],
-      ["Executable rows","current_executable_rows"],
-      ["Missing fresh","missing_fresh_candidate"]
-    ]) + `<div style="height:12px"></div><h3>Why current candidates are rejected</h3>` + table(tradeSignalAudit.rejection_reason_counts || [], [
+    ], 4) + titledTable("Top reasons current candidates are rejected", tradeSignalAudit.rejection_reason_counts || [], [
       ["Count","count"],
       ["Reason","reason", v=>longText(v, 220)]
-    ]) + `<div style="height:12px"></div><h3>Recent exits and P&L diagnosis</h3>` + table(tradeSignalAudit.recent_exit_preview || [], [
+    ], 5) + titledTable("Recent loss exits and P&L diagnosis", recentLossPreview, [
       ["Market","market_slug", v=>longText(v, 150)],
       ["Cohort","signal_cohort", v=>longText(v, 140)],
       ["Entry","entry_price", v=>fmtNum(v,4)],
@@ -347,56 +455,66 @@ async function load() {
       ["Reason","exit_reason"],
       ["Loss","loss_making_exit"],
       ["Diagnosis","diagnosis", v=>longText(v, 240)]
-    ]);
-    document.getElementById("cycle").innerHTML = facts([
-      ["Live tick", live.iteration],
-      ["Live source", live.live_source || live.source || (websocket.new_messages != null ? "websocket" : "-")],
-      ["WS window", live.websocket_seconds == null ? "-" : live.websocket_seconds + "s"],
-      ["Prediction cycle", live.prediction_cycle_seconds == null ? "-" : live.prediction_cycle_seconds + "s"],
-      ["Assets", live.asset_count == null ? "-" : live.asset_count],
-      ["Effective max assets", live.effective_max_assets == null ? "-" : live.effective_max_assets],
-      ["Resource guard", resourceGuard.reason || "-"],
-      ["Memory", resourceGuard.memory_percent == null ? "-" : fmtNum(resourceGuard.memory_percent, 1) + "%"],
-      ["Strategy V2 guard", freshness.strategy_v2_runtime_reason || strategyV2.runtime_reason || "-"],
-      ["Strategy V2 memory", freshness.strategy_v2_memory_percent == null ? "-" : fmtNum(freshness.strategy_v2_memory_percent, 1) + "% / " + fmtNum(freshness.strategy_v2_max_memory_percent, 1) + "%"],
+    ], 4);
+    const cycleRows = [
+      ["Active lane", legacyLiveActive ? "legacy live loop" : "shadow research + websocket"],
+      ["Research status", `${researchStatus} / ${fmtAge(researchAge)} old`],
+      ["Research started", shadowResearch.started_at_utc || "-"],
+      ["Research ended", shadowResearch.ended_at_utc || "-"],
+      ["Live source", legacyLiveActive ? (live.live_source || live.source || "websocket") : "websocket"],
       ["WS messages", websocket.new_messages],
       ["WS features", websocketFeatures.feature_rows],
-      ["Snapshots inserted", ingest.inserted_market_snapshots],
-      ["Full cycle", legacyFullCycle.display_status || live.full_prediction_cycle?.status],
-      ["Full-cycle age", legacyFullCycle.age_seconds == null ? "-" : fmtAge(legacyFullCycle.age_seconds)],
-      ["Full-cycle note", legacyFullCycle.reason || "-", v=>longText(v, 220)],
-      ["Discovery", discovery.status],
-      ["Last scan", discovery.last_status],
-      ["Next discovery", discovery.next_due_in_seconds == null ? "-" : Math.round(Number(discovery.next_due_in_seconds)) + "s"],
-      ["Discovery #", discovery.discovery_iteration],
-      ["Fast 5m", fastUpdown.tokens == null ? (fastUpdown.status || "-") : (fastUpdown.tokens + " tokens")],
-      ["Fast assets", fastUpdown.assets, joinText],
-      ["Scan mode", currentScan.scan_plan?.mode || lastScan.scan_plan?.mode || scanner.scan?.scan_plan?.mode],
-      ["Queries", currentScan.scan_plan?.selected_queries || lastScan.scan_plan?.selected_queries || scanner.scan?.scan_plan?.selected_queries || scanner.scan?.queries, joinText],
-      ["Priority queue", currentScan.scan_plan?.adaptive_priority?.priority_queries || lastScan.scan_plan?.adaptive_priority?.priority_queries || scanner.scan?.scan_plan?.adaptive_priority?.priority_queries || currentScan.scan_plan?.ordered_queries || lastScan.scan_plan?.ordered_queries || scanner.scan?.scan_plan?.ordered_queries, joinText],
-      ["Tokens", live.discovery?.scan?.tokens || scanner.scan?.tokens],
+      ["Target assets", websocket.target_assets],
+      ["Target source", websocket.target_source, v=>longText(v, 180)],
+      ["Feedback targets", websocket.target_feedback_broaden_counts, v=>longText(v, 180)],
       ["Features", data.forward_paper_cycle?.features],
       ["Predictions", data.forward_paper_cycle?.predictions],
       ["Approved", data.forward_paper_cycle?.signals_approved],
       ["Rejected", data.forward_paper_cycle?.signals_rejected],
-      ["Broker source", tradingAccount.source || freshness.broker_source],
-      ["Broker generated", tradingAccount.generated_at_utc || freshness.broker_generated_at_utc],
-      ["Stale cycle broker", tradingAccount.forward_cycle_broker_mismatch ? "yes" : "no"],
-      ["Paper maintenance", paperMaintenance.status],
-      ["Maintenance task", paperMaintenanceTask.status],
-      ["Task state", paperMaintenanceTask.task_state],
-      ["Task interval", paperMaintenanceTask.interval_minutes == null ? "-" : paperMaintenanceTask.interval_minutes + "m"],
-      ["Task next run", paperMaintenanceTask.next_run_time],
-      ["Maintenance age", paperMaintenance.age_seconds == null ? "-" : fmtNum(paperMaintenance.age_seconds, 0) + "s"],
-      ["Maintenance memory", paperMaintenance.memory_used_percent == null ? "-" : fmtNum(paperMaintenance.memory_used_percent, 1) + "% / " + fmtNum(paperMaintenance.max_memory_percent, 1) + "%"],
-      ["Maintenance next exit", paperMaintenance.next_exit_due_utc],
-      ["Maintenance reason", paperMaintenance.reason || joinText(paperMaintenance.work_reasons), v=>longText(v, 180)],
       ["Signal CSV rows", priceActionPaper.signal_file_rows],
       ["Signal summary rows", priceActionPaper.summary_signals],
       ["Signal mismatch", priceActionPaper.summary_signal_mismatch],
-      ["Broker rejects", monthly.broker_rejected_orders],
+      ["Broker refresh", brokerRefreshLabel],
       ["Main reason", broker.entry_pause_reason || Object.keys(broker.broker_rejection_reasons || {}).join(", "), longText]
-    ]);
+    ];
+    if (legacyLiveActive) {
+      cycleRows.splice(1, 0,
+        ["Live tick", live.iteration],
+        ["WS window", live.websocket_seconds == null ? "-" : live.websocket_seconds + "s"],
+        ["Prediction cycle", live.prediction_cycle_seconds == null ? "-" : live.prediction_cycle_seconds + "s"],
+        ["Assets", live.asset_count == null ? "-" : live.asset_count],
+        ["Effective max assets", live.effective_max_assets == null ? "-" : live.effective_max_assets],
+        ["Resource guard", resourceGuard.reason || "-"],
+        ["Memory", resourceGuard.memory_percent == null ? "-" : fmtNum(resourceGuard.memory_percent, 1) + "%"],
+        ["Full cycle", legacyFullCycle.display_status || live.full_prediction_cycle?.status],
+        ["Discovery", discovery.status],
+        ["Last scan", discovery.last_status],
+        ["Next discovery", discovery.next_due_in_seconds == null ? "-" : Math.round(Number(discovery.next_due_in_seconds)) + "s"],
+        ["Discovery #", discovery.discovery_iteration],
+        ["Fast 5m", fastUpdown.tokens == null ? (fastUpdown.status || "-") : (fastUpdown.tokens + " tokens")],
+        ["Fast assets", fastUpdown.assets, joinText]
+      );
+    }
+    if (strategyGuardReason) {
+      cycleRows.push(
+        ["Strategy V2 guard", strategyGuardReason, v=>longText(v, 180)],
+        ["Strategy V2 memory", freshness.strategy_v2_memory_percent == null ? "-" : fmtNum(freshness.strategy_v2_memory_percent, 1) + "% / " + fmtNum(freshness.strategy_v2_max_memory_percent, 1) + "%"]
+      );
+    }
+    if (showMaintenance) {
+      cycleRows.push(
+        ["Paper maintenance", paperMaintenance.status],
+        ["Maintenance task", paperMaintenanceTask.status],
+        ["Task state", paperMaintenanceTask.task_state],
+        ["Task interval", paperMaintenanceTask.interval_minutes == null ? "-" : paperMaintenanceTask.interval_minutes + "m"],
+        ["Task next run", paperMaintenanceTask.next_run_time],
+        ["Maintenance age", paperMaintenance.age_seconds == null ? "-" : fmtNum(paperMaintenance.age_seconds, 0) + "s"],
+        ["Maintenance memory", paperMaintenance.memory_used_percent == null ? "-" : fmtNum(paperMaintenance.memory_used_percent, 1) + "% / " + fmtNum(paperMaintenance.max_memory_percent, 1) + "%"],
+        ["Maintenance next exit", paperMaintenance.next_exit_due_utc],
+        ["Maintenance reason", paperMaintenance.reason || joinText(paperMaintenance.work_reasons), v=>longText(v, 180)]
+      );
+    }
+    document.getElementById("cycle").innerHTML = facts(cycleRows);
     document.getElementById("tradeDiagnostics").innerHTML = facts([
       ["Main blocker", diag.main_blocker, v=>longText(v, 220)],
       ["Recommended action", diag.recommended_action, v=>longText(v, 220)],
@@ -2402,6 +2520,15 @@ def render_dashboard(cfg: EngineConfig, latest_report: dict[str, Any] | None = N
     quant_research_status = read_json(governance / "quant_research_status.json", default={}) or {}
     if not isinstance(quant_research_status, dict):
         quant_research_status = {}
+    websocket_summary = read_json(cfg.output_root / "polymarket_websocket" / "websocket_summary.json", default={}) or {}
+    if not isinstance(websocket_summary, dict):
+        websocket_summary = {}
+    websocket_feature_summary = read_json(governance / "websocket_feature_summary.json", default={}) or {}
+    if not isinstance(websocket_feature_summary, dict):
+        websocket_feature_summary = {}
+    research_focus = read_json(governance / "research_focus.json", default={}) or {}
+    if not isinstance(research_focus, dict):
+        research_focus = {}
     goal_plan = read_json(governance / "paper_profit_goal_plan.json", default={}) or {}
     if not isinstance(goal_plan, dict):
         goal_plan = {}
@@ -2474,6 +2601,9 @@ def render_dashboard(cfg: EngineConfig, latest_report: dict[str, Any] | None = N
         "price_action_paper_signals": price_action_paper_signal_status,
         "price_action_feedback": price_action_feedback,
         "quant_research_status": quant_research_status,
+        "websocket_summary": websocket_summary,
+        "websocket_feature_summary": websocket_feature_summary,
+        "research_focus": research_focus,
         "paper_profit_goal_plan": goal_plan,
         "trade_signal_audit": trade_signal_audit,
         "paper_probe_exit_watch": paper_probe_exit_watch,

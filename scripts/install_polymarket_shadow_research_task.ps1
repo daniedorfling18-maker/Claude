@@ -9,6 +9,10 @@ $ErrorActionPreference = "Stop"
 $repoRoot = Resolve-Path (Join-Path $PSScriptRoot "..")
 $runner = Join-Path $repoRoot "scripts\run_polymarket_shadow_research_cycle.ps1"
 $config = Join-Path $repoRoot $ConfigPath
+$workRoot = Join-Path $repoRoot "work"
+$launcher = Join-Path $workRoot "run_polymarket_shadow_research_hidden.vbs"
+
+New-Item -ItemType Directory -Force $workRoot | Out-Null
 
 if (-not (Test-Path $runner)) {
   throw "Runner not found: $runner"
@@ -23,7 +27,12 @@ if ($IntervalMinutes -lt 15) {
 $quotedRunner = '"' + $runner + '"'
 $quotedConfig = '"' + $config + '"'
 $arguments = "-NoProfile -ExecutionPolicy Bypass -File $quotedRunner -ConfigPath $quotedConfig -WebsocketSeconds $WebsocketSeconds"
-$action = New-ScheduledTaskAction -Execute "powershell.exe" -Argument $arguments -WorkingDirectory $repoRoot
+$escapedArguments = $arguments.Replace('"', '""')
+Set-Content -LiteralPath $launcher -Encoding Unicode -Value @"
+Set shell = CreateObject("WScript.Shell")
+shell.Run "powershell.exe $escapedArguments", 0, False
+"@
+$action = New-ScheduledTaskAction -Execute "wscript.exe" -Argument ('"' + $launcher + '"') -WorkingDirectory $repoRoot
 $trigger = New-ScheduledTaskTrigger -Once -At (Get-Date).AddMinutes(1) -RepetitionInterval (New-TimeSpan -Minutes $IntervalMinutes) -RepetitionDuration (New-TimeSpan -Days 3650)
 $settings = New-ScheduledTaskSettingsSet -StartWhenAvailable -MultipleInstances IgnoreNew -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries
 $user = [System.Security.Principal.WindowsIdentity]::GetCurrent().Name
@@ -35,6 +44,7 @@ Register-ScheduledTask -TaskName $TaskName -Action $action -Trigger $trigger -Se
 Write-Host "Installed scheduled task: $TaskName"
 Write-Host "Runs every $IntervalMinutes minutes while you are logged in."
 Write-Host "Runner: $runner"
+Write-Host "Hidden launcher: $launcher"
 Write-Host "Config: $config"
 Write-Host "Manual start: Start-ScheduledTask -TaskName '$TaskName'"
 Write-Host "View status: Get-ScheduledTask -TaskName '$TaskName' | Get-ScheduledTaskInfo"

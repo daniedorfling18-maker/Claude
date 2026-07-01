@@ -273,6 +273,16 @@ def test_shadow_research_cycle_refreshes_price_action_learning_and_governance():
     assert "dashboard_status = $governanceRefresh.dashboard.status" in text
 
 
+def test_shadow_research_task_installer_uses_hidden_launcher():
+    text = _script_text("scripts/install_polymarket_shadow_research_task.ps1")
+
+    assert "run_polymarket_shadow_research_cycle.ps1" in text
+    assert "run_polymarket_shadow_research_hidden.vbs" in text
+    assert 'New-ScheduledTaskAction -Execute "wscript.exe"' in text
+    assert "-WorkingDirectory $repoRoot" in text
+    assert "-MultipleInstances IgnoreNew" in text
+
+
 def test_dashboard_server_runner_refuses_to_start_when_memory_is_high():
     text = _script_text("scripts/run_polymarket_dashboard_server.ps1")
 
@@ -289,6 +299,8 @@ def test_dashboard_task_installer_runs_wrapper_with_working_directory():
     text = _script_text("scripts/install_polymarket_dashboard_task.ps1")
 
     assert "run_polymarket_dashboard_server.ps1" in text
+    assert "run_polymarket_dashboard_server_hidden.vbs" in text
+    assert 'New-ScheduledTaskAction -Execute "wscript.exe"' in text
     assert "New-ScheduledTaskTrigger -AtLogOn" in text
     assert "-WorkingDirectory $RepoRoot" in text
     assert "-MultipleInstances IgnoreNew" in text
@@ -331,6 +343,8 @@ def test_paper_maintenance_task_installer_runs_every_minute_without_overlap():
     text = _script_text("scripts/install_polymarket_paper_maintenance_task.ps1")
 
     assert "run_polymarket_paper_maintenance.ps1" in text
+    assert "run_polymarket_paper_maintenance_hidden.vbs" in text
+    assert 'New-ScheduledTaskAction -Execute "wscript.exe"' in text
     assert "polymarket_paper_maintenance_task_status.json" in text
     assert "[switch]$StartAtNextExitDue" in text
     assert "next_broker_exit_due_utc" in text

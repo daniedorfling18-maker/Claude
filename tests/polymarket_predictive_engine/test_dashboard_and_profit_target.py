@@ -576,6 +576,7 @@ def test_dashboard_explains_no_trade_when_fast_candidates_are_quarantined(tmp_pa
     html = Path(result["dashboard_file"]).read_text(encoding="utf-8")
     data = read_json(result["dashboard_data"])
     diagnostics = data["trade_diagnostics"]
+    assert "Decision cockpit" in html
     assert "Why no trade?" in html
     assert "Oversight cockpit" in html
     assert "Slow / legacy evidence panels" in html
@@ -1009,12 +1010,15 @@ def test_dashboard_suppresses_obsolete_strategy_v2_memory_pause_after_fresh_shad
     cfg = _config(tmp_path)
     work_dir = cfg.path.parent / "work"
     work_dir.mkdir(parents=True, exist_ok=True)
+    now = datetime.now(timezone.utc)
+    strategy_pause_time = now - timedelta(minutes=5)
+    shadow_refresh_time = now - timedelta(minutes=1)
     (work_dir / "strategy_v2_cycle_latest_status.json").write_text(
         json.dumps(
             {
                 "status": "skipped_high_memory",
-                "started_at_utc": "2026-07-01T03:06:23Z",
-                "ended_at_utc": "2026-07-01T03:06:23Z",
+                "started_at_utc": strategy_pause_time.strftime("%Y-%m-%dT%H:%M:%SZ"),
+                "ended_at_utc": strategy_pause_time.strftime("%Y-%m-%dT%H:%M:%SZ"),
                 "memory_used_percent": 98.8,
                 "max_memory_percent": 95,
                 "reason": "Strategy V2 scheduled wrapper skipped before invoking the cycle because local memory was at or above the guardrail.",
@@ -1026,8 +1030,8 @@ def test_dashboard_suppresses_obsolete_strategy_v2_memory_pause_after_fresh_shad
         json.dumps(
             {
                 "status": "ok",
-                "started_at_utc": "2026-07-01T08:23:03Z",
-                "ended_at_utc": "2026-07-01T08:25:42Z",
+                "started_at_utc": shadow_refresh_time.strftime("%Y-%m-%dT%H:%M:%SZ"),
+                "ended_at_utc": shadow_refresh_time.strftime("%Y-%m-%dT%H:%M:%SZ"),
                 "paper_trading_invoked": False,
                 "live_trading_invoked": False,
             }

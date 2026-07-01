@@ -219,6 +219,9 @@ def test_shadow_research_cycle_bounds_each_python_step():
     assert "$process.WaitForExit($StepTimeoutSeconds * 1000)" in text
     assert "timed out after $StepTimeoutSeconds seconds" in text
     assert 'error_type = "step_timeout"' in text
+    assert '$script:FailedStep = $Name' in text
+    assert 'phase = $script:FailedStep' in text
+    assert 'error_type = $script:FailedErrorType' in text
     assert "$timeoutStatus | ConvertTo-Json" in text
     assert "$exitCode = [int]$process.ExitCode" in text
 

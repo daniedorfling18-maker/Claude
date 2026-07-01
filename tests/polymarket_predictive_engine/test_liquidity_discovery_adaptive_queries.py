@@ -92,8 +92,12 @@ def test_liquidity_discovery_expands_updown_feedback_queries_without_5m_aliases(
         assert "btc updown" in queries
         assert "bitcoin up or down" in queries
         assert "bitcoin updown" in queries
-        assert any(query.startswith("bitcoin up or down ") for query in queries)
         assert "solana updown" in queries
         assert "solana up or down" in queries
-        assert any(query.startswith("solana up or down ") for query in queries)
         assert all("5m" not in query for query in queries)
+    assert not any(query.startswith("bitcoin up or down July") for query in event_queries)
+    assert not any(query.startswith("solana up or down July") for query in event_queries)
+    assert any(query.startswith("bitcoin up or down July") for query in public_queries)
+    assert any(query.startswith("solana up or down July") for query in public_queries)
+    assert len(event_queries) <= 28
+    assert len(public_queries) <= 48

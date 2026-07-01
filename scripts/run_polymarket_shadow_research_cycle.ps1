@@ -42,6 +42,8 @@ function Get-MemorySnapshot {
 $script:StoppedHighMemory = $false
 $script:StoppedHighMemoryPhase = ""
 $script:StoppedHighMemorySnapshot = $null
+$script:FailedStep = ""
+$script:FailedErrorType = ""
 
 function Stop-ForHighMemory {
   param(
@@ -93,6 +95,8 @@ function Invoke-Step {
   if (-not $process.WaitForExit($StepTimeoutSeconds * 1000)) {
     try { Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue } catch {}
     $message = "$Name timed out after $StepTimeoutSeconds seconds"
+    $script:FailedStep = $Name
+    $script:FailedErrorType = "step_timeout"
     $message | Tee-Object -FilePath $OutFile | Tee-Object -FilePath $logFile -Append
     $endedAt = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ")
     $timeoutStatus = [ordered]@{
@@ -314,7 +318,9 @@ try {
     started_at_utc = $startedAt
     ended_at_utc = $endedAt
     stamp = $stamp
+    phase = $script:FailedStep
     error = $_.Exception.Message
+    error_type = $script:FailedErrorType
     log_file = $logFile
     paper_trading_invoked = $false
     live_trading_invoked = $false

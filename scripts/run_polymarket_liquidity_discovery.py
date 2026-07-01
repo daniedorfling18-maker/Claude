@@ -126,7 +126,7 @@ def _crypto_updown_query_asset(query: str) -> tuple[str, str] | None:
     return None
 
 
-def _crypto_updown_query_aliases(query: str, settings: dict[str, Any]) -> list[str]:
+def _crypto_updown_query_aliases(query: str, settings: dict[str, Any], *, include_date_aliases: bool = True) -> list[str]:
     """Expand model feedback like ``btc updown`` into Polymarket search terms.
 
     The public search endpoint often ranks noisy 5-minute contracts ahead of the
@@ -149,7 +149,7 @@ def _crypto_updown_query_aliases(query: str, settings: dict[str, Any]) -> list[s
         f"{ticker} updown",
     ]
     search = settings.get("crypto_updown_date_search", {}) or {}
-    if search.get("enabled", True):
+    if include_date_aliases and search.get("enabled", True):
         days_ahead = int(search.get("days_ahead", 2))
         now = datetime.now(timezone.utc)
         for day_offset in range(0, max(0, days_ahead) + 1):
@@ -176,13 +176,20 @@ def _configured_query_aliases(settings: dict[str, Any], query: str) -> list[str]
     return [value for value in values if "5m" not in value.lower() and "5 min" not in value.lower()]
 
 
-def _expand_query_aliases(queries: list[str], settings: dict[str, Any]) -> list[str]:
+def _expand_query_aliases(
+    queries: list[str],
+    settings: dict[str, Any],
+    *,
+    include_date_aliases: bool = True,
+    max_queries: int | None = None,
+) -> list[str]:
     expanded: list[str] = []
     for query in queries:
         expanded.append(query)
         expanded.extend(_configured_query_aliases(settings, query))
-        expanded.extend(_crypto_updown_query_aliases(query, settings))
-    return _dedupe_keep_order(expanded)
+        expanded.extend(_crypto_updown_query_aliases(query, settings, include_date_aliases=include_date_aliases))
+    deduped = _dedupe_keep_order(expanded)
+    return deduped if max_queries is None or max_queries <= 0 else deduped[:max_queries]
 
 
 def _adaptive_collection_queries(cfg: EngineConfig) -> list[str]:
@@ -226,6 +233,8 @@ def _event_queries(settings: dict[str, Any], adaptive_queries: list[str] | None 
     return _expand_query_aliases(
         _dedupe_keep_order([*(adaptive_queries or []), *configured_queries, *_broad_queries(settings)]),
         settings,
+        include_date_aliases=False,
+        max_queries=int(settings.get("max_event_queries", 28) or 28),
     )
 
 
@@ -316,9 +325,26 @@ def _crypto_updown_public_queries(settings: dict[str, Any]) -> list[str]:
 
 def _public_search_queries(settings: dict[str, Any], adaptive_queries: list[str] | None = None) -> list[str]:
     queries = _string_list(settings.get("public_search_queries"))
+    confirmation_queries = [
+        query
+        for query in (adaptive_queries or [])
+        if _is_crypto_updown_query(str(query or ""))
+    ]
+    broad_queries = _broad_queries(settings)
+    max_broad_public_queries = int(settings.get("max_broad_public_search_queries", 18) or 18)
     return _expand_query_aliases(
-        _dedupe_keep_order([*(adaptive_queries or []), *queries, *_broad_queries(settings), *_crypto_updown_public_queries(settings)]),
+        _dedupe_keep_order(
+            [
+                *confirmation_queries,
+                *(adaptive_queries or []),
+                *queries,
+                *broad_queries[:max_broad_public_queries],
+                *_crypto_updown_public_queries(settings),
+            ]
+        ),
         settings,
+        include_date_aliases=True,
+        max_queries=int(settings.get("max_public_search_queries", 48) or 48),
     )
 
 

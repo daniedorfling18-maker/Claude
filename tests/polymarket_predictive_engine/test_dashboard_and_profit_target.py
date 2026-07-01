@@ -116,6 +116,95 @@ def test_dashboard_renderer_writes_static_dashboard_and_data(tmp_path):
     assert data["trade_diagnostics"]["current_near_miss_candidates"][0]["market_slug"] == "near-miss-market"
 
 
+def test_dashboard_emits_decision_useful_summary_for_missing_fresh_candidate(tmp_path):
+    cfg = _config(tmp_path)
+    write_json(
+        cfg.output_root / "polymarket_price_action" / "price_action_model_summary.json",
+        {
+            "status": "trained",
+            "generated_at_utc": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+            "decision": "collect_more_bid_ask_price_action_model_evidence",
+            "promotion_ready": False,
+            "train_positive_targets": 4,
+            "validation_positive_targets": 2,
+        },
+    )
+    write_json(
+        cfg.output_root / "polymarket_price_action" / "price_action_paper_signal_summary.json",
+        {
+            "generated_at_utc": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+            "decision": "trusted_shadow_edge_waiting_for_fresh_executable_candidate",
+            "signals": 0,
+            "rejections": 16,
+            "paper_confirmation_candidates": 2,
+            "paper_confirmation_signals": 0,
+        },
+    )
+    write_json(
+        cfg.governance_root / "trade_signal_audit.json",
+        {
+            "verdict": "trusted_edge_missing_fresh_candidate",
+            "next_action": "Collect fresh websocket/price-action candidates for: btc updown, solana updown.",
+            "missing_confirmation_target_count": 2,
+            "missing_confirmation_queries": ["btc updown", "solana updown"],
+            "recent_exit_count": 4,
+            "recent_loss_exit_count": 3,
+            "recent_realised_pnl_usdc": -0.13,
+        },
+    )
+    write_json(
+        cfg.governance_root / "paper_profit_goal_plan.json",
+        {
+            "status": "not_on_pace",
+            "target_monthly_profit_usdc": 100,
+            "required_daily_from_here_usdc": 4.05,
+            "main_gap": "trusted shadow repricing evidence exists; it needs governed paper-confirmation probes",
+            "recommended_action": "Generate governed paper-confirmation probes for trusted positive shadow repricing cohorts.",
+            "price_action_goal_state": {
+                "state": "trusted_shadow_needs_paper_confirmation",
+                "best_repricing_monthly_run_rate_usdc": 23.45,
+                "best_forward_paper_monthly_run_rate_usdc": 0,
+                "collection_queries": ["btc updown", "solana updown"],
+            },
+        },
+    )
+    write_json(
+        cfg.governance_root / "paper_profit_target_tracker.json",
+        {
+            "generated_at_utc": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+            "status": "not_on_pace",
+            "actual_pnl_since_baseline_usdc": -0.13,
+            "monthly_run_rate_usdc": -0.71,
+            "target_monthly_profit_usdc": 100,
+            "current": {"equity_usdc": 999.87, "cash_usdc": 999.87},
+        },
+    )
+    write_json(
+        cfg.path.parent / "work" / "shadow_research_cycle_latest_status.json",
+        {
+            "status": "ok",
+            "started_at_utc": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+            "ended_at_utc": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+            "paper_trading_invoked": False,
+            "live_trading_invoked": False,
+        },
+    )
+
+    result = render_dashboard(cfg)
+
+    html = Path(result["dashboard_file"]).read_text(encoding="utf-8")
+    data = read_json(result["dashboard_data"])
+    summary = data["decision_useful_summary"]
+    assert "Action board" in html
+    assert "Decision evidence drill-down" in html
+    assert summary["trade_decision"] == "COLLECT FRESH CANDIDATE"
+    assert "fresh open market row" in summary["primary_blocker"]
+    assert summary["collect_now"] == ["btc updown", "solana updown"]
+    assert summary["priority_actions"][0]["success_metric"]
+    assert any(row["panel"] == "Legacy local live-loop heartbeat" for row in summary["audit_only_panels"])
+    assert any(row["lane"] == "Paper trade gate" for row in summary["evidence_lanes"])
+
+
 def test_dashboard_prefers_fresh_broker_and_profit_tracker_over_stale_forward_cycle(tmp_path):
     cfg = _config(tmp_path)
     write_json(

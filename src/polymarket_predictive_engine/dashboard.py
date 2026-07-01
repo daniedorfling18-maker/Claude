@@ -80,11 +80,20 @@ HTML = """<!doctype html>
     .fact { border:1px solid rgba(255,255,255,0.08); background:rgba(255,255,255,0.035); border-radius:12px; padding:10px; min-width:0; }
     .fact .label { margin-bottom:5px; }
     .factValue { color:#d8e5f8; font-weight:650; overflow-wrap:anywhere; }
+    .actionList { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:12px; }
+    .actionItem { border:1px solid rgba(255,255,255,0.09); border-radius:14px; padding:12px; background:rgba(255,255,255,0.035); min-width:0; }
+    .actionItem .rank { display:inline-flex; width:24px; height:24px; border-radius:999px; align-items:center; justify-content:center; margin-right:8px; background:rgba(255,255,255,0.08); color:#c8d8ef; font-weight:800; }
+    .actionItem .title { font-weight:780; color:#ecf3ff; margin-bottom:6px; }
+    .actionItem .meta { color:var(--muted); margin-top:7px; font-size:12px; overflow-wrap:anywhere; }
+    .badge { display:inline-flex; align-items:center; border:1px solid rgba(255,255,255,0.12); border-radius:999px; padding:3px 8px; font-size:12px; margin:0 6px 6px 0; color:#d8e5f8; background:rgba(255,255,255,0.04); }
+    .badge.good { border-color:rgba(70,211,154,0.35); color:var(--good); }
+    .badge.warn { border-color:rgba(255,209,102,0.35); color:var(--warn); }
+    .badge.bad { border-color:rgba(255,107,122,0.35); color:var(--bad); }
     details.expand summary { cursor:pointer; color:#d8e5f8; }
     details.expand summary::marker { color:var(--muted); }
     .fullText { margin-top:8px; padding:8px; border-radius:10px; background:rgba(0,0,0,0.22); color:#c8d8ef; white-space:pre-wrap; overflow-wrap:anywhere; }
     .error { color:var(--bad); padding:16px; border:1px solid rgba(255,107,122,0.35); border-radius:14px; background:rgba(255,107,122,0.08); }
-    @media (max-width: 980px) { .grid, .two, .facts, .alertGrid, .decisionHero, .decisionGrid { grid-template-columns:1fr; } header { flex-direction:column; } table { min-width:640px; } }
+    @media (max-width: 980px) { .grid, .two, .facts, .alertGrid, .decisionHero, .decisionGrid, .actionList { grid-template-columns:1fr; } header { flex-direction:column; } table { min-width:640px; } }
   </style>
 </head>
 <body>
@@ -99,16 +108,20 @@ HTML = """<!doctype html>
   <div id="error"></div>
   <div class="grid" id="cards"></div>
   <section class="primary"><h2>Decision cockpit</h2><div id="decisionCockpit"></div></section>
+  <section><h2>Action board</h2><div id="actionBoard"></div></section>
+  <div class="two">
+    <section><h2>$100/month price-change route</h2><div id="goalPlan"></div></section>
+    <section><h2>Model & evidence health</h2><div id="modelHealth"></div></section>
+  </div>
+  <details class="legacy"><summary>Decision evidence drill-down<span>Decision-useful supporting detail. Open this when you want to audit why the cockpit says trade, learn, wait, or stop.</span></summary>
   <div class="two">
     <section><h2>Oversight cockpit</h2><div id="oversightCockpit"></div></section>
     <section><h2>Live evidence cycle</h2><div id="cycle"></div></section>
   </div>
-  <div class="two">
-    <section><h2>$100/month price-change route</h2><div id="goalPlan"></div></section>
-    <section><h2>Actual paper P&L</h2><div id="actualTarget"></div></section>
-  </div>
   <section><h2>Trading signal audit</h2><div id="tradeSignalAudit"></div></section>
   <section><h2>World Cup validation layer</h2><div id="worldcupValidation"></div></section>
+  <section><h2>Actual paper P&L</h2><div id="actualTarget"></div></section>
+  </details>
   <details class="legacy"><summary>Deep diagnostics and rejected-candidate audit<span>Raw telemetry is still here for debugging, but the decision cockpit above is the default trading view.</span></summary>
   <section><h2>Why no trade?</h2><div id="tradeDiagnostics"></div></section>
   <section><h2>Strategy V2 anchored edge</h2><div id="strategyV2"></div></section>
@@ -192,6 +205,18 @@ function facts(rows) {
 function alertBox(title, body, cls="warn") {
   return `<div class="alert ${cls}"><div class="title">${escapeHtml(title)}</div><div class="body">${body}</div></div>`;
 }
+function badge(text, cls="") {
+  return `<span class="badge ${escapeHtml(cls)}">${escapeHtml(text)}</span>`;
+}
+function actionList(rows) {
+  if (!rows || !rows.length) return `<div class="muted">No current action list.</div>`;
+  return `<div class="actionList">${rows.map((row, idx) => `
+    <div class="actionItem">
+      <div class="title"><span class="rank">${idx + 1}</span>${escapeHtml(row.title || row.action || "Action")}</div>
+      <div>${longText(row.body || row.why || row.reason || "-", 280)}</div>
+      <div class="meta">${escapeHtml(row.owner || "bot")} · ${escapeHtml(row.success_metric || row.measure || "measure outcome evidence")}</div>
+    </div>`).join("")}</div>`;
+}
 const ageClass = (seconds, warn=300, bad=900) => seconds === null || seconds === undefined ? "warn" : Number(seconds) > bad ? "bad" : Number(seconds) > warn ? "warn" : "good";
 async function load() {
   try {
@@ -217,6 +242,7 @@ async function load() {
     const goalPlan = data.paper_profit_goal_plan || {};
     const priceActionGoal = goalPlan.price_action_goal_state || {};
     const tradeSignalAudit = data.trade_signal_audit || {};
+    const decisionSummary = data.decision_useful_summary || {};
     const probeExitWatch = data.paper_probe_exit_watch || {};
     const paperMaintenance = data.paper_maintenance || {};
     const paperMaintenanceTask = data.paper_maintenance_task || {};
@@ -284,27 +310,32 @@ async function load() {
     const brokerWorkPending = Boolean(priceActionPaper.broker_refresh_needed || priceActionPaper.pending_broker_signals || priceActionPaper.pending_broker_confirmation_signals || priceActionPaper.pending_broker_exit_probes);
     const trustedEdgeMissingFresh = tradeSignalAudit.verdict === "trusted_edge_missing_fresh_candidate"
       || String(priceActionPaper.decision || "").includes("trusted_shadow_edge_waiting_for_fresh_executable_candidate");
-    const tradeDecision = dashboardStale
+    const rawTradeDecision = dashboardStale
       ? "WAIT: REFRESH"
       : approvedSignals > 0
         ? (brokerWorkPending ? "RUN PAPER BROKER" : "PAPER READY")
         : "DO NOT TRADE YET";
-    const tradeDecisionClass = dashboardStale ? "bad" : approvedSignals > 0 ? "good" : "warn";
-    const blockerText = dashboardStale
+    const tradeDecision = decisionSummary.trade_decision || rawTradeDecision;
+    const tradeDecisionClass = decisionSummary.decision_class || (dashboardStale ? "bad" : approvedSignals > 0 ? "good" : "warn");
+    const rawBlockerText = dashboardStale
       ? "The dashboard snapshot is too old to trust. Refresh the dashboard before reading the signal state."
       : approvedSignals > 0
         ? (brokerWorkPending ? "Approved signal rows exist and need the paper broker refresh to execute/record them." : "Approved signal rows exist. Monitor fills, exits, spread, and realised P&L.")
         : trustedEdgeMissingFresh
           ? "Trusted shadow repricing evidence exists, but there is no fresh open executable paper-confirmation candidate yet. The bot should collect BTC/SOL updown bid/ask rows rather than force a stale or closed trade."
           : (priceActionPaper.decision || diag.main_blocker || goalPlan.main_gap || "Current evidence gates are blocking entries.");
-    const nextAction = tradeSignalAudit.next_action || goalPlan.recommended_action || priceActionFeedback.next_action || diag.recommended_action || "Keep collecting live bid/ask evidence until a validated cohort produces executable positive paper signals.";
-    const collectQueries = tradeSignalAudit.missing_confirmation_queries?.length
+    const blockerText = decisionSummary.primary_blocker || rawBlockerText;
+    const nextAction = decisionSummary.next_action || tradeSignalAudit.next_action || goalPlan.recommended_action || priceActionFeedback.next_action || diag.recommended_action || "Keep collecting live bid/ask evidence until a validated cohort produces executable positive paper signals.";
+    const rawCollectQueries = tradeSignalAudit.missing_confirmation_queries?.length
       ? tradeSignalAudit.missing_confirmation_queries
       : displayedQueries.length
         ? displayedQueries
         : adaptiveQueries;
+    const collectQueries = Array.isArray(decisionSummary.collect_now) && decisionSummary.collect_now.length
+      ? decisionSummary.collect_now
+      : rawCollectQueries;
     const transferReason = priceActionModel.cohort_transfer?.reason || validationGap.reason || "";
-    const unlockCondition = approvedSignals > 0
+    const rawUnlockCondition = approvedSignals > 0
       ? (brokerWorkPending ? "Paper broker refresh must run and record the fill/exit evidence." : "Keep this cohort under forward paper supervision.")
       : trustedEdgeMissingFresh
         ? "Find an open, non-excluded BTC/SOL updown candidate with executable bid and ask, acceptable spread, and matching trusted confirmation cohort."
@@ -315,6 +346,7 @@ async function load() {
           : (priceActionGoal.state === "trusted_shadow_needs_paper_confirmation"
               ? "Trusted shadow cohorts need fresh executable paper-confirmation probes before promotion."
               : blockerText);
+    const unlockCondition = decisionSummary.unlock_condition || rawUnlockCondition;
     const recentLossExits = asNumber(tradeSignalAudit.recent_loss_exit_count);
     const recentExitCount = asNumber(tradeSignalAudit.recent_exit_count);
     const riskLesson = recentExitCount > 0
@@ -333,10 +365,8 @@ async function load() {
       card("Next collect", joinText(collectQueries), collectQueries.length ? "good" : "warn"),
       card("Model gate", validationGapActive ? "needs validation positives" : (priceActionModel.promotion_ready ? "validated" : priceActionModel.decision || priceActionModel.status || "unknown"), validationGapActive ? "warn" : priceActionModel.promotion_ready ? "good" : "warn"),
       card("Research freshness", `${researchStatus} / ${fmtAge(researchAge)}`, researchStatus === "stale" ? "bad" : researchStatus === "running" || researchStatus === "completed" || researchStatus === "ok" ? "good" : "warn"),
-      card("Dashboard age", fmtAge(dashboardAge), ageClass(dashboardAge, dashboardWarnAfterSeconds, dashboardStaleAfterSeconds)),
       card("Required/day", fmtUsd(goalPlan.required_daily_from_here_usdc), "warn"),
       card("Live websocket", `${websocket.new_messages ?? "-"} msgs / ${websocketFeatures.feature_rows ?? "-"} features`, "good"),
-      card("Account equity", fmtUsd(broker.equity), Number(broker.equity) >= 1000 ? "good" : "bad"),
       card("Broker refresh", brokerRefreshLabel, priceActionPaper.broker_refresh_needed ? "warn" : "good")
     ].join("");
     document.getElementById("decisionCockpit").innerHTML = `
@@ -346,7 +376,7 @@ async function load() {
           <div class="statusValue">${escapeHtml(tradeDecision)}</div>
         </div>
         <div class="decisionText">
-          <div class="headline">${approvedSignals > 0 ? "Actionable signal queue exists" : "The bot is correctly refusing weak trades"}</div>
+          <div class="headline">${escapeHtml(decisionSummary.headline || (approvedSignals > 0 ? "Actionable signal queue exists" : "The bot is correctly refusing weak trades"))}</div>
           <div class="body">${longText(blockerText, 420)}</div>
         </div>
       </div>
@@ -376,6 +406,32 @@ async function load() {
         ["Why blocked","near_miss_learning_reason", (v,row)=>longText(v || row.shadow_candidate_reason || row.rejection_reason, 180)]
       ], 5)}
     `;
+    document.getElementById("actionBoard").innerHTML = `
+      <div class="sectionLead">${longText(decisionSummary.operator_plain_english || "This panel shows only the actions that can move the bot toward a governed paper-trading edge.", 360)}</div>
+      <div>${(decisionSummary.state_badges || []).map(item => badge(item.label || item, item.severity || "")).join("")}</div>
+      ${actionList(decisionSummary.priority_actions || [])}
+      ${titledTable("Evidence lanes that matter now", decisionSummary.evidence_lanes || [], [
+        ["Lane","lane"],
+        ["State","state", v=>longText(v, 120)],
+        ["Decision use","decision_use", v=>longText(v, 180)],
+        ["Key metric","key_metric", v=>longText(v, 140)],
+        ["Blocker / next","blocker_or_next", v=>longText(v, 220)]
+      ], 8)}
+      ${titledTable("Audit-only panels hidden from the default decision view", decisionSummary.audit_only_panels || [], [
+        ["Panel","panel"],
+        ["Why not primary","reason", v=>longText(v, 240)]
+      ], 8)}
+    `;
+    document.getElementById("modelHealth").innerHTML = facts([
+      ["Model gate", priceActionModel.decision || decisionSummary.model_state, v=>longText(v, 220)],
+      ["Model age", fmtAge(modelAge)],
+      ["Validation gap", validationGapActive ? validationGap.reason || "Needs positive validation examples." : "No active positive-validation gap.", v=>longText(v, 260)],
+      ["Cohort transfer", priceActionModel.cohort_transfer?.reason || "No active transfer blocker reported.", v=>longText(v, 260)],
+      ["Paper bridge", priceActionPaper.decision, v=>longText(v, 220)],
+      ["World Cup layer", (data.worldcup_validation_status || {}).status, v=>longText(v, 180)],
+      ["Collect next", collectQueries, joinText],
+      ["Learning verdict", decisionSummary.learning_verdict || "-", v=>longText(v, 260)]
+    ]);
     document.getElementById("oversightCockpit").innerHTML = facts([
       ["Dashboard snapshot", `${fmtAge(dashboardAge)} old / ${data.generated_at_utc || "-"}`],
       ["Shadow research", `${researchStatus} / ${fmtAge(researchAge)} old`],
@@ -2351,6 +2407,342 @@ def _dashboard_oversight_status(
     }
 
 
+def _first_non_empty_list(*values: Any) -> list[Any]:
+    for value in values:
+        if isinstance(value, list) and value:
+            return value
+    return []
+
+
+def _compact_list(values: Any, *, limit: int = 5) -> list[str]:
+    if not isinstance(values, list):
+        return []
+    out: list[str] = []
+    for value in values:
+        text = str(value or "").strip()
+        if not text or text in out:
+            continue
+        out.append(text)
+        if len(out) >= limit:
+            break
+    return out
+
+
+def _usd_text(value: Any) -> str:
+    number = safe_float(value)
+    return "-" if number is None else f"${number:.2f}"
+
+
+def _decision_useful_summary(
+    *,
+    actual_target: dict[str, Any],
+    broker_summary: dict[str, Any],
+    shadow_research: dict[str, Any],
+    price_action_model: dict[str, Any],
+    price_action_paper_signals: dict[str, Any],
+    goal_plan: dict[str, Any],
+    trade_signal_audit: dict[str, Any],
+    trade_diagnostics: dict[str, Any],
+    oversight_status: dict[str, Any],
+    evidence_freshness: dict[str, Any],
+    price_action_feedback: dict[str, Any],
+    websocket_summary: dict[str, Any],
+    websocket_feature_summary: dict[str, Any],
+    worldcup_validation: dict[str, Any],
+) -> dict[str, Any]:
+    """Build the small, operator-facing dashboard contract.
+
+    The raw dashboard payload is intentionally rich for audits. This summary is
+    deliberately narrow: it only exposes facts that change the next trading,
+    learning, or safety decision.
+    """
+
+    approved_signals = int(
+        safe_float(price_action_paper_signals.get("signals"))
+        if safe_float(price_action_paper_signals.get("signals")) is not None
+        else safe_float(trade_diagnostics.get("approved_signals_count")) or 0
+    )
+    rejected_signals = int(
+        safe_float(price_action_paper_signals.get("rejections"))
+        if safe_float(price_action_paper_signals.get("rejections")) is not None
+        else safe_float(trade_diagnostics.get("rejected_signals_count")) or 0
+    )
+    broker_work_pending = bool(
+        price_action_paper_signals.get("broker_refresh_needed")
+        or safe_float(price_action_paper_signals.get("pending_broker_signals"))
+        or safe_float(price_action_paper_signals.get("pending_broker_confirmation_signals"))
+        or safe_float(price_action_paper_signals.get("pending_broker_exit_probes"))
+    )
+    shadow_status = str(oversight_status.get("shadow_research_status") or shadow_research.get("effective_status") or "")
+    model_age = _age_seconds(price_action_model)
+    model_stale = bool(model_age is not None and model_age > 900)
+    validation_gap = price_action_model.get("validation_gap") if isinstance(price_action_model.get("validation_gap"), dict) else {}
+    cohort_transfer = price_action_model.get("cohort_transfer") if isinstance(price_action_model.get("cohort_transfer"), dict) else {}
+    validation_gap_active = bool(oversight_status.get("validation_gap_active"))
+    transfer_blocked = cohort_transfer.get("state") == "positive_targets_do_not_transfer"
+    price_action_goal = goal_plan.get("price_action_goal_state") if isinstance(goal_plan.get("price_action_goal_state"), dict) else {}
+    trusted_missing_fresh = bool(
+        trade_signal_audit.get("verdict") == "trusted_edge_missing_fresh_candidate"
+        or str(price_action_paper_signals.get("decision") or "").find("trusted_shadow_edge_waiting_for_fresh_executable_candidate") >= 0
+    )
+    collect_now = _compact_list(
+        _first_non_empty_list(
+            trade_signal_audit.get("missing_confirmation_queries"),
+            price_action_goal.get("collection_queries"),
+            price_action_feedback.get("collection_queries"),
+            validation_gap.get("collection_queries"),
+        ),
+        limit=6,
+    )
+
+    target_monthly = safe_float(actual_target.get("target_monthly_profit_usdc")) or safe_float(
+        goal_plan.get("target_monthly_profit_usdc")
+    ) or 100.0
+    run_rate = safe_float(actual_target.get("monthly_run_rate_usdc"))
+    actual_pnl = safe_float(actual_target.get("actual_pnl_since_baseline_usdc")) or 0.0
+    best_repricing_run_rate = safe_float(price_action_goal.get("best_repricing_monthly_run_rate_usdc"))
+    forward_paper_run_rate = safe_float(price_action_goal.get("best_forward_paper_monthly_run_rate_usdc"))
+    recent_loss_exits = int(safe_float(trade_signal_audit.get("recent_loss_exit_count")) or 0)
+    recent_exits = int(safe_float(trade_signal_audit.get("recent_exit_count")) or 0)
+    missing_targets = int(safe_float(trade_signal_audit.get("missing_confirmation_target_count")) or 0)
+
+    if shadow_status == "stale":
+        trade_decision = "WAIT: RESEARCH STALE"
+        decision_class = "bad"
+        headline = "Do not trust stale research state"
+        primary_blocker = str(
+            shadow_research.get("reason")
+            or oversight_status.get("shadow_research_reason")
+            or "The current research cycle is stale."
+        )
+        next_action = "Refresh the shadow research/governance cycle before acting on any signal counts."
+        unlock_condition = "A fresh shadow-research cycle must complete or be actively running with current model and signal files."
+    elif model_stale:
+        trade_decision = "WAIT: MODEL STALE"
+        decision_class = "bad"
+        headline = "The model score is too old for trading decisions"
+        primary_blocker = f"Price-action model summary is {round(model_age, 1) if model_age is not None else 'unknown'} seconds old."
+        next_action = "Refresh governance so the price-action model is rescored before any paper promotion."
+        unlock_condition = "Fresh model timestamp plus unchanged governance gates."
+    elif approved_signals > 0:
+        trade_decision = "RUN PAPER BROKER" if broker_work_pending else "PAPER READY"
+        decision_class = "good"
+        headline = "Approved governed paper signals exist"
+        primary_blocker = (
+            "Approved signals are waiting for the broker refresh."
+            if broker_work_pending
+            else "Approved signals have reached the paper lane; monitor fills, exits, and realised P&L."
+        )
+        next_action = (
+            "Run/allow the paper broker refresh and verify fills are recorded."
+            if broker_work_pending
+            else "Monitor forward paper P&L by signal cohort and keep stake capped until evidence remains positive."
+        )
+        unlock_condition = "Forward paper fills must produce positive cohort evidence before any sizing increase."
+    elif trusted_missing_fresh:
+        trade_decision = "COLLECT FRESH CANDIDATE"
+        decision_class = "warn"
+        headline = "Trusted shadow edge exists, but no fresh executable candidate"
+        primary_blocker = (
+            "The current gap is not settlement. It is missing a fresh open market row with executable bid/ask, acceptable spread, "
+            "and the same trusted paper-confirmation cohort."
+        )
+        next_action = trade_signal_audit.get("next_action") or (
+            "Collect fresh websocket/liquidity candidates for " + (", ".join(collect_now) if collect_now else "the trusted cohorts") + "."
+        )
+        unlock_condition = "A fresh non-excluded candidate must appear with executable ask entry and bid exit math that passes the paper bridge."
+    elif validation_gap_active or transfer_blocked:
+        trade_decision = "LEARN: MODEL BLOCKED"
+        decision_class = "warn"
+        headline = "The model has not proven a repeatable edge"
+        primary_blocker = str(
+            cohort_transfer.get("reason")
+            or validation_gap.get("reason")
+            or price_action_model.get("decision")
+            or "The model needs forward validation evidence before paper trading."
+        )
+        next_action = (
+            "Collect same-family bid/ask repricing examples and keep suppressed cohorts out of the broker."
+        )
+        unlock_condition = "Positive validation examples must transfer within the same family/signal cohort, after bid/ask costs."
+    else:
+        trade_decision = "DO NOT TRADE YET"
+        decision_class = "warn"
+        headline = "No governed paper entry is currently justified"
+        primary_blocker = str(
+            trade_diagnostics.get("main_blocker")
+            or price_action_paper_signals.get("decision")
+            or goal_plan.get("main_gap")
+            or "Current gates are blocking paper entries."
+        )
+        next_action = str(
+            trade_signal_audit.get("next_action")
+            or goal_plan.get("recommended_action")
+            or price_action_feedback.get("next_action")
+            or trade_diagnostics.get("recommended_action")
+            or "Keep collecting live bid/ask evidence until a validated cohort produces executable positive paper signals."
+        )
+        unlock_condition = "The next paper entry must pass model, cohort, liquidity, spread, and paper-bridge evidence gates."
+
+    if not collect_now:
+        collect_now = _compact_list(price_action_feedback.get("suppressed_queries"), limit=4)
+
+    learning_verdict = primary_blocker
+    if recent_exits:
+        learning_verdict = (
+            f"{recent_loss_exits}/{recent_exits} recent exits lost; use that as feedback before widening any cohort."
+        )
+    elif trusted_missing_fresh and collect_now:
+        learning_verdict = "The current useful learning target is fresh executable bid/ask data for " + ", ".join(collect_now) + "."
+
+    state_badges = [
+        {"label": trade_decision, "severity": decision_class},
+        {"label": f"{approved_signals} approved / {rejected_signals} rejected", "severity": "good" if approved_signals else "warn"},
+        {"label": f"P&L {_usd_text(actual_pnl)}", "severity": "good" if actual_pnl >= 0 else "bad"},
+        {
+            "label": f"run-rate {_usd_text(run_rate)} / {_usd_text(target_monthly)}",
+            "severity": "good" if run_rate is not None and run_rate >= target_monthly else "warn",
+        },
+    ]
+    if collect_now:
+        state_badges.append({"label": "collect: " + ", ".join(collect_now[:3]), "severity": "good"})
+
+    priority_actions = [
+        {
+            "title": next_action,
+            "body": primary_blocker,
+            "owner": "research cycle",
+            "success_metric": unlock_condition,
+        }
+    ]
+    if trusted_missing_fresh:
+        priority_actions.append(
+            {
+                "title": "Find fresh executable confirmation rows",
+                "body": "Search/collect live markets for the trusted confirmation queries; ignore stale closed rows and excluded 5-minute crypto cohorts.",
+                "owner": "liquidity discovery + websocket",
+                "success_metric": f"missing targets falls from {missing_targets} to 0 and paper-confirmation signals become > 0",
+            }
+        )
+    if recent_exits:
+        priority_actions.append(
+            {
+                "title": "Use recent losses as model feedback",
+                "body": f"{recent_loss_exits} of {recent_exits} recent exits lost. Treat fixed-horizon losses as failed signals, not hidden variance.",
+                "owner": "price-action model",
+                "success_metric": "new cohort evidence improves after bid/ask spread and fixed-horizon exits",
+            }
+        )
+    if approved_signals <= 0:
+        priority_actions.append(
+            {
+                "title": "Keep paper/live gates closed",
+                "body": "Do not loosen thresholds to create activity. The current task is evidence collection, not forced turnover.",
+                "owner": "governance",
+                "success_metric": "paper promotion only after positive forward cohort evidence",
+            }
+        )
+
+    evidence_lanes = [
+        {
+            "lane": "Paper trade gate",
+            "state": trade_decision,
+            "decision_use": "Determines whether the broker may take paper risk now.",
+            "key_metric": f"{approved_signals} approved / {rejected_signals} rejected",
+            "blocker_or_next": primary_blocker,
+        },
+        {
+            "lane": "Price-action ML",
+            "state": price_action_model.get("decision") or price_action_model.get("status") or "unknown",
+            "decision_use": "Predicts whether buying at ask can later sell/mark at bid profitably.",
+            "key_metric": (
+                f"train +{price_action_model.get('train_positive_targets', '-')}; "
+                f"validation +{price_action_model.get('validation_positive_targets', '-')}"
+            ),
+            "blocker_or_next": cohort_transfer.get("reason") or validation_gap.get("reason") or "No active model blocker reported.",
+        },
+        {
+            "lane": "Forward paper P&L",
+            "state": actual_target.get("status") or "unknown",
+            "decision_use": "Measures real paper progress toward the $100/month target.",
+            "key_metric": f"actual {_usd_text(actual_pnl)}; run-rate {_usd_text(run_rate)}",
+            "blocker_or_next": f"target {_usd_text(target_monthly)}; required/day {_usd_text(goal_plan.get('required_daily_from_here_usdc'))}",
+        },
+        {
+            "lane": "Live bid/ask feed",
+            "state": shadow_status or "unknown",
+            "decision_use": "Feeds current executable prices and repricing labels.",
+            "key_metric": f"{websocket_summary.get('new_messages', '-')} messages / {websocket_feature_summary.get('feature_rows', '-')} features",
+            "blocker_or_next": "Collect " + ", ".join(collect_now) if collect_now else "No priority collection query is active.",
+        },
+        {
+            "lane": "World Cup validation",
+            "state": worldcup_validation.get("status") or "unknown",
+            "decision_use": "Adds bookmaker/fundamental cross-checks where World Cup rows exist.",
+            "key_metric": f"{worldcup_validation.get('approved_signals', 0)} approved World Cup signals",
+            "blocker_or_next": worldcup_validation.get("main_blocker") or "No World Cup blocker reported.",
+        },
+        {
+            "lane": "Best shadow repricing route",
+            "state": price_action_goal.get("state") or goal_plan.get("status") or "unknown",
+            "decision_use": "Shows whether price-change edge can plausibly bridge to the monthly target.",
+            "key_metric": f"shadow {_usd_text(best_repricing_run_rate)}; paper {_usd_text(forward_paper_run_rate)}",
+            "blocker_or_next": goal_plan.get("main_gap") or goal_plan.get("recommended_action") or "-",
+        },
+    ]
+
+    audit_only_panels = [
+        {
+            "panel": "Legacy local live-loop heartbeat",
+            "reason": "Historical status only; the current active lane is shadow research + websocket.",
+        },
+        {
+            "panel": "Historical edge search",
+            "reason": "Useful for provenance, but in-sample/historical rule tables do not authorise paper trades.",
+        },
+        {
+            "panel": "Promotion readiness tables",
+            "reason": "Audit evidence only unless the current cohort also has fresh governed paper signals.",
+        },
+        {
+            "panel": "Raw liquidity discovery",
+            "reason": "Shows opportunity coverage; decision impact comes only through current executable candidates and cohort evidence.",
+        },
+        {
+            "panel": "Slow settlement watch",
+            "reason": "Helpful for final outcome validation, but the current paper bridge is price-action bid/ask evidence.",
+        },
+    ]
+
+    return {
+        "trade_decision": trade_decision,
+        "decision_class": decision_class,
+        "headline": headline,
+        "operator_plain_english": (
+            "Use this cockpit like a quant control panel: trade only if governed paper signals exist; "
+            "otherwise collect the specific evidence named here and let losing cohorts stay suppressed."
+        ),
+        "primary_blocker": primary_blocker,
+        "next_action": next_action,
+        "unlock_condition": unlock_condition,
+        "collect_now": collect_now,
+        "learning_verdict": learning_verdict,
+        "approved_signals": approved_signals,
+        "rejected_signals": rejected_signals,
+        "actual_pnl_since_baseline_usdc": actual_pnl,
+        "monthly_run_rate_usdc": run_rate,
+        "target_monthly_profit_usdc": target_monthly,
+        "best_repricing_monthly_run_rate_usdc": best_repricing_run_rate,
+        "best_forward_paper_monthly_run_rate_usdc": forward_paper_run_rate,
+        "state_badges": state_badges,
+        "priority_actions": priority_actions[:4],
+        "evidence_lanes": evidence_lanes,
+        "audit_only_panels": audit_only_panels,
+        "model_state": price_action_model.get("decision") or price_action_model.get("status"),
+        "shadow_research_status": shadow_status,
+    }
+
+
 def _paper_maintenance_status(cfg: EngineConfig) -> dict[str, Any]:
     path = cfg.path.parent / "work" / "polymarket_paper_maintenance_latest_status.json"
     payload = _read_json_lenient(path, default={}) or {}
@@ -2581,10 +2973,32 @@ def render_dashboard(cfg: EngineConfig, latest_report: dict[str, Any] | None = N
         evidence_freshness=evidence_freshness,
         strategy_v2=strategy_v2_status,
     )
+    worldcup_validation_status = _worldcup_validation_status(
+        predictions=predictions,
+        approved_signals=signals,
+        rejected=rejected,
+    )
+    decision_useful_summary = _decision_useful_summary(
+        actual_target=actual_target,
+        broker_summary=broker_summary,
+        shadow_research=shadow_research_cycle,
+        price_action_model=price_action_model_status,
+        price_action_paper_signals=price_action_paper_signal_status,
+        goal_plan=goal_plan,
+        trade_signal_audit=trade_signal_audit,
+        trade_diagnostics=trade_diagnostics,
+        oversight_status=oversight_status,
+        evidence_freshness=evidence_freshness,
+        price_action_feedback=price_action_feedback,
+        websocket_summary=websocket_summary,
+        websocket_feature_summary=websocket_feature_summary,
+        worldcup_validation=worldcup_validation_status,
+    )
 
     payload = {
         "status": "ok",
         "generated_at_utc": now_utc(),
+        "decision_useful_summary": decision_useful_summary,
         "forward_paper_cycle": forward,
         "paper_trade_refresh": paper_trade_refresh,
         "paper_broker_summary": broker_summary,
@@ -2625,11 +3039,7 @@ def render_dashboard(cfg: EngineConfig, latest_report: dict[str, Any] | None = N
         "shadow_fills": shadow_fills,
         "approved_signals": signals[:50],
         "rejection_counts": _rejection_counts(rejected),
-        "worldcup_validation_status": _worldcup_validation_status(
-            predictions=predictions,
-            approved_signals=signals,
-            rejected=rejected,
-        ),
+        "worldcup_validation_status": worldcup_validation_status,
         "trade_diagnostics": trade_diagnostics,
     }
     write_json(out / "dashboard_data.json", payload)

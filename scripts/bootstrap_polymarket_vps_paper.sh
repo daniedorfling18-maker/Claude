@@ -1,5 +1,5 @@
 #!/usr/bin/env sh
-# Bootstrap the lean Polymarket paper stack on an Ubuntu VPS.
+# Bootstrap the lean Polymarket paper stack on a Linux VPS.
 #
 # Safe defaults:
 # - paper/dry-run only
@@ -31,21 +31,69 @@ need_cmd() {
   return 0
 }
 
+package_manager() {
+  if need_cmd apt-get; then
+    printf '%s' "apt-get"
+  elif need_cmd dnf; then
+    printf '%s' "dnf"
+  elif need_cmd yum; then
+    printf '%s' "yum"
+  else
+    printf '%s' ""
+  fi
+}
+
 install_base_packages() {
   log "Installing base packages"
-  $SUDO apt-get update
-  $SUDO apt-get install -y ca-certificates curl git
+  pm="$(package_manager)"
+  case "$pm" in
+    apt-get)
+      $SUDO apt-get update
+      $SUDO apt-get install -y ca-certificates curl git
+      ;;
+    dnf|yum)
+      $SUDO "$pm" install -y ca-certificates curl git
+      ;;
+    *)
+      log "No supported package manager found. Install git, curl, and Docker manually, then rerun."
+      exit 1
+      ;;
+  esac
 }
 
 install_docker_if_needed() {
   if need_cmd docker && docker --version >/dev/null 2>&1; then
     log "Docker already installed"
   else
-    log "Installing Docker from Ubuntu packages"
-    if ! $SUDO apt-get install -y docker.io docker-compose-plugin; then
-      log "Ubuntu package install did not provide Docker; falling back to Docker's official install script"
-      curl -fsSL https://get.docker.com | $SUDO sh
-    fi
+    pm="$(package_manager)"
+    case "$pm" in
+      apt-get)
+        log "Installing Docker from Ubuntu/Debian packages"
+        if ! $SUDO apt-get install -y docker.io docker-compose-plugin; then
+          log "Package install did not provide Docker; falling back to Docker's official install script"
+          curl -fsSL https://get.docker.com | $SUDO sh
+        fi
+        ;;
+      dnf|yum)
+        log "Installing Docker from Oracle/RHEL-family packages"
+        if ! $SUDO "$pm" install -y docker-engine docker-cli containerd docker-compose-plugin; then
+          if ! $SUDO "$pm" install -y docker docker-compose-plugin; then
+            log "Package install did not provide Docker; falling back to Docker's official install script"
+            curl -fsSL https://get.docker.com | $SUDO sh
+          fi
+        fi
+        ;;
+      *)
+        log "No supported package manager found. Install Docker manually, then rerun."
+        exit 1
+        ;;
+    esac
+  fi
+
+  if need_cmd systemctl; then
+    $SUDO systemctl enable --now docker >/dev/null 2>&1 || true
+  elif need_cmd service; then
+    $SUDO service docker start >/dev/null 2>&1 || true
   fi
 
   if ! docker compose version >/dev/null 2>&1; then

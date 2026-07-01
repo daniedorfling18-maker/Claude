@@ -45,6 +45,10 @@ def test_vps_bootstrap_script_starts_only_lean_paper_stack():
     text = (ROOT / "scripts" / "bootstrap_polymarket_vps_paper.sh").read_text(encoding="utf-8")
 
     assert "docker-compose.vps-paper.yml" in text
+    assert "apt-get" in text
+    assert "dnf" in text
+    assert "yum" in text
+    assert "systemctl enable --now docker" in text
     assert "docker-compose.polymarket-wide-raw.yml" not in text
     assert "docker-compose.monitor.yml" not in text
     assert "POLYMARKET_LIVE_TRADING=1" not in text

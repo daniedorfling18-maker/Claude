@@ -39,7 +39,7 @@ PM_MODE=scan
 
 ## First deploy
 
-Fast path on a fresh Ubuntu VPS:
+Fast path on a fresh Ubuntu or Oracle Linux VPS:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/daniedorfling18-maker/Claude/main/scripts/bootstrap_polymarket_vps_paper.sh | sh
@@ -75,7 +75,9 @@ docker compose -f docker-compose.vps-paper.yml logs -f polymarket-paper-live
 ```
 
 The bootstrap script leaves an existing `.env` alone. On a fresh `.env`, it
-automatically applies leaner settings if it detects a 4 GB VPS.
+automatically applies leaner settings if it detects a 4 GB VPS. On Oracle Linux,
+it uses `dnf`/`yum` instead of `apt-get`, so prefer the fast path unless you
+deliberately want a manual install.
 
 ## Dashboard access
 

@@ -76,11 +76,15 @@ install_docker_if_needed() {
         ;;
       dnf|yum)
         log "Installing Docker from Oracle/RHEL-family packages"
-        if ! $SUDO "$pm" install -y docker-engine docker-cli containerd docker-compose-plugin; then
-          if ! $SUDO "$pm" install -y docker docker-compose-plugin; then
-            log "Package install did not provide Docker; falling back to Docker's official install script"
-            curl -fsSL https://get.docker.com | $SUDO sh
+        $SUDO "$pm" install -y dnf-plugins-core yum-utils >/dev/null 2>&1 || true
+        if ! $SUDO "$pm" install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin; then
+          log "Adding Docker's RHEL-compatible package repository"
+          if need_cmd dnf; then
+            $SUDO dnf config-manager --add-repo https://download.docker.com/linux/rhel/docker-ce.repo
+          else
+            $SUDO yum-config-manager --add-repo https://download.docker.com/linux/rhel/docker-ce.repo
           fi
+          $SUDO "$pm" install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
         fi
         ;;
       *)

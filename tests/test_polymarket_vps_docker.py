@@ -48,6 +48,8 @@ def test_vps_bootstrap_script_starts_only_lean_paper_stack():
     assert "apt-get" in text
     assert "dnf" in text
     assert "yum" in text
+    assert "https://download.docker.com/linux/rhel/docker-ce.repo" in text
+    assert "docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin" in text
     assert "systemctl enable --now docker" in text
     assert "docker-compose.polymarket-wide-raw.yml" not in text
     assert "docker-compose.monitor.yml" not in text

@@ -5,3 +5,16 @@ small, testable building blocks for the broader quantitative-finance curriculum
 while keeping production trading code modular.
 """
 
+__all__ = [
+    "backtest",
+    "data",
+    "deployment",
+    "features",
+    "foundations",
+    "ml",
+    "pricing",
+    "risk",
+    "rl",
+    "sentiment",
+    "strategies",
+]

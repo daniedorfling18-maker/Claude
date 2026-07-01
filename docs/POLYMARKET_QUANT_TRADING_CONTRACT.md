@@ -27,7 +27,7 @@ Midpoint movement is not enough. Settlement probability is useful for slower mar
 5. Fit the model on train only.
 6. Select thresholds on train only.
 7. Validate out of sample against a buy-all/baseline policy.
-8. Require positive selected validation P&L, ROI, win rate, trade count, and clustered ROI confidence.
+8. Require positive selected validation P&L, ROI, win rate, trade count, clustered ROI confidence, and acceptable selected-trade drawdown/VaR.
 9. Emit only shadow candidates until forward evidence confirms the edge.
 10. Promote to paper only through governance after positive cohort evidence.
 
@@ -54,3 +54,26 @@ outputs/polymarket_price_action/price_action_model_current_candidates.csv
 ```
 
 If the available bid/ask history has no profitable future-bid examples, the correct output is a blocked model, not a forced trade.
+
+## Quant research stack
+
+The supporting quant curriculum is implemented under:
+
+```text
+src/quant_lab/
+```
+
+The bot now consumes that stack in governance:
+
+```text
+outputs/polymarket_model_governance/quant_research_status.json
+```
+
+The most important production-facing integrations are:
+
+```text
+selected-trade drawdown, VaR, CVaR, and performance reporting
+promotion gating that fails closed when validation risk is unacceptable
+chronological validation and train-only threshold selection
+dashboard visibility of the quant stack and current model blockers
+```

@@ -7,28 +7,44 @@ This curriculum is designed for a coding-first AI/research workflow using freely
 ```text
 src/quant_lab/
   foundations.py              # Module 1 primitives: distributions, simulation, MC pricing, time series
+  data.py                     # Module 2 OHLCV ingestion, cleaning, returns, data-quality reports
+  pricing.py                  # Module 3 Black-Scholes, Greeks, CRR binomial option pricing
+  risk.py                     # Module 3/8 VaR, CVaR, drawdown, Sharpe/Sortino, profit factor
+  features.py                 # Module 5 point-in-time price/technical feature engineering
+  strategies.py               # Module 4 MA crossover, z-score reversion, momentum, rank signals
+  backtest.py                 # Module 4/8 lagged-position vector backtester with costs/slippage
+  ml.py                       # Module 5 chronological split, walk-forward split, baseline logistic model
+  rl.py                       # Module 6 toy trading environment and tabular Q-learning baseline
+  sentiment.py                # Module 7 deterministic sentiment scoring/aggregation baseline
+  deployment.py               # Module 8 promotion discipline and evidence gates
 
 notebooks/quant_lab/
   math_foundations.ipynb       # Module 1 worked notebook
 
 tests/quant_lab/
   test_foundations.py          # Unit-style sanity checks for Module 1
+  test_data_and_pricing.py     # Modules 2/3
+  test_backtest_features_risk.py # Modules 4/5/8
+  test_ml_rl_sentiment_deployment.py # Modules 5/6/7/8
 
 docs/
   QUANT_CURRICULUM.md          # This curriculum
 ```
 
-Future phases should add:
+## Implementation status
+
+The first pass of the full curriculum is now implemented as tested, reusable research primitives:
 
 ```text
-src/quant_lab/data.py          # OHLCV ingestion and cleaning
-src/quant_lab/pricing.py       # Black-Scholes, Greeks, binomial trees
-src/quant_lab/risk.py          # VaR, CVaR, stress tests
-src/quant_lab/backtest.py      # Portfolio accounting, costs, slippage
-src/quant_lab/features.py      # Technical/factor/alternative-data features
-src/quant_lab/models.py        # ML models and walk-forward validation
-src/quant_lab/rl.py            # Trading environments and RL agents
+8 / 8 curriculum modules implemented
+all modules are deterministic and locally testable
+no network dependency is required for tests
+the Polymarket bot consumes the risk/deployment discipline through governance
 ```
+
+This does **not** mean the bot has found a tradable edge. It means the bot now has the right quant
+machinery to test for one: point-in-time features, cost-aware backtesting, chronological validation,
+selected-trade risk reporting, and fail-closed promotion rules.
 
 ## Module 1 — Mathematical and statistical foundations
 

@@ -80,6 +80,7 @@ HTML = """<!doctype html>
   <section><h2>Fast price-action scout</h2><div id="priceActionScout"></div></section>
   <section><h2>Microstructure edge lab</h2><div id="microstructureLab"></div></section>
   <section><h2>Price-action prediction model</h2><div id="priceActionModel"></div></section>
+  <section><h2>Quant research stack</h2><div id="quantResearch"></div></section>
   <section><h2>Price-action feedback loop</h2><div id="priceActionFeedback"></div></section>
   <div class="two">
     <section><h2>Promotion readiness</h2><div id="promotionReadiness"></div></section>
@@ -160,6 +161,7 @@ async function load() {
     const priceScout = data.price_action_scout || {};
     const microstructure = data.price_action_microstructure || {};
     const priceActionModel = data.price_action_model || {};
+    const quantResearch = data.quant_research_status || {};
     const priceActionPaper = data.price_action_paper_signals || {};
     const priceActionFeedback = data.price_action_feedback || {};
     const goalPlan = data.paper_profit_goal_plan || {};
@@ -214,6 +216,7 @@ async function load() {
       card("Price scout P&L", fmtUsd(priceScoutPnl), Number(priceScoutPnl || 0) > 0 ? "good" : "warn"),
       card("Microstructure rules", microstructure.validation_pass_rules ?? "0", Number(microstructure.validation_pass_rules || 0) > 0 ? "good" : "warn"),
       card("Price-action ML", priceActionModel.promotion_ready ? "validated" : (priceActionModel.status || "missing"), priceActionModel.promotion_ready ? "good" : "warn"),
+      card("Quant modules", `${quantResearch.implemented_modules ?? 0}/${quantResearch.total_modules ?? 8}`, quantResearch.implementation_complete ? "good" : "warn"),
       card("Price-action paper signals", priceActionPaper.signals ?? "0", Number(priceActionPaper.signals || 0) > 0 ? "good" : "warn"),
       card("Signal count check", priceActionPaper.summary_signal_mismatch ? "mismatch" : "aligned", priceActionPaper.summary_signal_mismatch ? "bad" : "good"),
       card("Broker refresh", priceActionPaper.broker_refresh_needed ? `${priceActionPaper.pending_broker_signals ?? 0} pending` : "fresh", priceActionPaper.broker_refresh_needed ? "warn" : "good"),
@@ -649,6 +652,10 @@ async function load() {
       ["Buy-all baseline ROI", priceActionModel.validation_buy_all_baseline?.roi, v=>fmtNum(Number(v) * 100, 2) + "%"],
       ["Edge over baseline", priceActionModel.validation_edge_over_buy_all_roi, v=>fmtNum(Number(v) * 100, 2) + "%"],
       ["Selected ROI CI95", priceActionModel.validation_selected_roi_ci95, joinText],
+      ["Selected max drawdown", priceActionModel.validation_selected_risk?.max_drawdown, v=>fmtNum(Number(v) * 100, 2) + "%"],
+      ["Selected VaR 95", priceActionModel.validation_selected_risk?.historical_var_95, v=>fmtNum(Number(v) * 100, 2) + "%"],
+      ["Selected CVaR 95", priceActionModel.validation_selected_risk?.conditional_var_95, v=>fmtNum(Number(v) * 100, 2) + "%"],
+      ["Quant promotion rule", priceActionModel.quant_promotion_decision?.reason, v=>longText(v, 180)],
       ["Model blockers", priceActionModel.blockers, joinText],
       ["Validation blockers", priceActionModel.validation_blockers, joinText],
       ["Current rows scored", priceActionModel.current_rows_scored],
@@ -669,6 +676,21 @@ async function load() {
       ["P&L","selected_pnl_usdc", fmtUsd],
       ["Win rate","selected_win_rate", v=>fmtNum(Number(v) * 100, 1) + "%"],
       ["Pass","train_threshold_pass"]
+    ]);
+    document.getElementById("quantResearch").innerHTML = facts([
+      ["Implementation", `${quantResearch.implemented_modules ?? 0}/${quantResearch.total_modules ?? 8} modules`],
+      ["Complete", quantResearch.implementation_complete],
+      ["Trading posture", quantResearch.trading_posture, v=>longText(v, 220)],
+      ["Bot integrations", quantResearch.bot_integrations, joinText],
+      ["Non-negotiables", quantResearch.non_negotiables, joinText],
+      ["Current model decision", quantResearch.price_action_model?.decision, v=>longText(v, 180)],
+      ["Current blockers", quantResearch.price_action_model?.blockers, joinText],
+      ["Collect next", quantResearch.price_action_feedback?.collection_queries, joinText]
+    ]) + `<div style="height:12px"></div><h3>Curriculum modules</h3>` + table(quantResearch.curriculum_modules || [], [
+      ["#","module"],
+      ["Name","name", v=>longText(v, 180)],
+      ["Code","code_module", v=>longText(v, 140)],
+      ["Implemented","implemented"]
     ]);
     document.getElementById("priceActionFeedback").innerHTML = facts([
       ["Learning state", priceActionFeedback.learning_state],
@@ -1694,6 +1716,9 @@ def _price_action_model_status(cfg: EngineConfig) -> dict[str, Any]:
         "chosen_probability_threshold": summary.get("chosen_probability_threshold"),
         "train_threshold_selection": summary.get("train_threshold_selection", {}),
         "validation_selected": summary.get("validation_selected", {}),
+        "validation_selected_risk": summary.get("validation_selected_risk", {}),
+        "quant_promotion_decision": summary.get("quant_promotion_decision", {}),
+        "maximum_selected_validation_drawdown": summary.get("maximum_selected_validation_drawdown"),
         "validation_blockers": summary.get("validation_blockers", []),
         "blockers": summary.get("blockers", []),
         "validation_buy_all_baseline": summary.get("validation_buy_all_baseline", {}),
@@ -2031,6 +2056,9 @@ def render_dashboard(cfg: EngineConfig, latest_report: dict[str, Any] | None = N
     price_action_feedback = read_json(governance / "price_action_feedback.json", default={}) or {}
     if not isinstance(price_action_feedback, dict):
         price_action_feedback = {}
+    quant_research_status = read_json(governance / "quant_research_status.json", default={}) or {}
+    if not isinstance(quant_research_status, dict):
+        quant_research_status = {}
     goal_plan = read_json(governance / "paper_profit_goal_plan.json", default={}) or {}
     if not isinstance(goal_plan, dict):
         goal_plan = {}
@@ -2080,6 +2108,7 @@ def render_dashboard(cfg: EngineConfig, latest_report: dict[str, Any] | None = N
         "price_action_model": price_action_model_status,
         "price_action_paper_signals": price_action_paper_signal_status,
         "price_action_feedback": price_action_feedback,
+        "quant_research_status": quant_research_status,
         "paper_profit_goal_plan": goal_plan,
         "trade_signal_audit": trade_signal_audit,
         "paper_probe_exit_watch": paper_probe_exit_watch,

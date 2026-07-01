@@ -4,6 +4,8 @@ import math
 from typing import Any
 
 import numpy as np
+from quant_lab.deployment import promote_only_after_evidence
+from quant_lab.risk import conditional_var, historical_var, performance_report
 
 from .config import EngineConfig, load_config
 from .price_action_microstructure import build_latest_microstructure_features
@@ -318,6 +320,29 @@ def _market_clustered_roi_ci(
     return [samples[int(0.025 * iterations)], samples[int(0.975 * iterations)]]
 
 
+def _selected_trade_returns(rows: list[dict[str, Any]], probabilities: list[float], threshold: float) -> list[float]:
+    selected = [
+        row
+        for row, probability in zip(rows, probabilities)
+        if probability >= threshold and safe_float(row.get("_roi")) is not None
+    ]
+    selected.sort(key=lambda row: str(row.get("entry_time_utc") or ""))
+    return [float(row.get("_roi") or 0.0) for row in selected]
+
+
+def _selected_risk_report(rows: list[dict[str, Any]], probabilities: list[float], threshold: float) -> dict[str, Any]:
+    returns = _selected_trade_returns(rows, probabilities, threshold)
+    report = performance_report(returns, periods_per_year=365)
+    return {
+        "return_unit": "per_selected_trade_roi",
+        "selected_trade_returns": len(returns),
+        "performance": report.to_dict(),
+        "historical_var_95": historical_var(returns, confidence=0.95),
+        "conditional_var_95": conditional_var(returns, confidence=0.95),
+        "max_drawdown": report.max_drawdown,
+    }
+
+
 def _choose_threshold_from_train(
     rows: list[dict[str, Any]],
     probabilities: list[float],
@@ -517,10 +542,12 @@ def train_price_action_model(cfg: EngineConfig) -> dict[str, Any]:
         threshold,
         iterations=_int_setting(settings, "bootstrap_iterations", 500),
     )
+    validation_risk = _selected_risk_report(validation_rows, probabilities, threshold)
     min_selected_trades = _int_setting(settings, "minimum_selected_validation_trades", 5)
     min_selected_roi = _float_setting(settings, "minimum_selected_validation_roi", 0.03)
     min_selected_win_rate = _float_setting(settings, "minimum_selected_validation_win_rate", 0.55)
     min_roi_ci_low = _float_setting(settings, "minimum_selected_validation_roi_ci_low", 0.0)
+    max_validation_drawdown = _float_setting(settings, "maximum_selected_validation_drawdown", -0.10)
     validation_blockers: list[str] = []
     if not threshold_selection["chosen_train_metrics"].get("train_threshold_pass"):
         validation_blockers.append("no probability threshold cleared the training split trade gates")
@@ -538,6 +565,20 @@ def train_price_action_model(cfg: EngineConfig) -> dict[str, Any]:
         validation_blockers.append(f"selected validation ROI CI low {validation_roi_ci[0]} < {min_roi_ci_low:.4f}")
     if selected["selected_roi"] <= buy_all["roi"]:
         validation_blockers.append("model-selected validation ROI does not beat buy-all baseline ROI")
+    if float(validation_risk["max_drawdown"]) < max_validation_drawdown:
+        validation_blockers.append(
+            f"selected validation drawdown {float(validation_risk['max_drawdown']):.4f} worse than {max_validation_drawdown:.4f}"
+        )
+    promotion_decision = promote_only_after_evidence(
+        validation_roi=float(selected["selected_roi"]),
+        validation_trades=int(selected["selected_trades"]),
+        validation_drawdown=float(validation_risk["max_drawdown"]),
+        minimum_roi=min_selected_roi,
+        minimum_trades=min_selected_trades,
+        maximum_drawdown=max_validation_drawdown,
+    )
+    if not promotion_decision.approved and promotion_decision.reason not in validation_blockers:
+        validation_blockers.append(promotion_decision.reason)
     validation_pass = bool(
         not validation_blockers
     )
@@ -569,10 +610,13 @@ def train_price_action_model(cfg: EngineConfig) -> dict[str, Any]:
         "train_threshold_selection": threshold_selection,
         "chosen_probability_threshold": threshold,
         "validation_selected": selected,
+        "validation_selected_risk": validation_risk,
         "validation_blockers": validation_blockers,
         "validation_buy_all_baseline": buy_all,
         "validation_selected_roi_ci95": validation_roi_ci,
         "validation_edge_over_buy_all_roi": selected["selected_roi"] - buy_all["roi"],
+        "maximum_selected_validation_drawdown": max_validation_drawdown,
+        "quant_promotion_decision": promotion_decision.__dict__,
         "roi_expectancy_from_train": expectancy,
         "minimum_expected_roi_to_trade": minimum_expected_roi,
         "minimum_selected_validation_trades": min_selected_trades,

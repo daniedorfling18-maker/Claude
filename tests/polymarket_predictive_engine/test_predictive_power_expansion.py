@@ -565,6 +565,89 @@ def test_websocket_reserves_paper_confirmation_targets_from_price_action_feedbac
     assert sum(1 for row in targets if row.get("feedback_broaden_target") is True) == 2
 
 
+def test_websocket_reserves_validation_gap_targets_from_research_focus(tmp_path):
+    import yaml
+
+    cfg_path = make_cfg(tmp_path)
+    data = yaml.safe_load(cfg_path.read_text(encoding="utf-8"))
+    data.setdefault("websocket_market_data", {})
+    data["websocket_market_data"].update(
+        {
+            "use_liquidity_targets": True,
+            "use_strategy_v2_targets": False,
+            "max_liquidity_target_assets": 3,
+            "feedback_broaden_target_assets": 2,
+            "market_ids": [],
+        }
+    )
+    cfg_path.write_text(yaml.safe_dump(data, sort_keys=False), encoding="utf-8")
+    cfg = load_config(cfg_path)
+    write_json(
+        cfg.governance_root / "price_action_feedback.json",
+        {
+            "status": "ok",
+            "learning_state": "collect_model_validation_gap_price_action_evidence",
+            "model_validation_gap_active": True,
+            "collection_queries": ["fed", "esports"],
+            "model_validation_gap_queries": ["fed", "esports"],
+        },
+    )
+    write_json(
+        cfg.governance_root / "research_focus.json",
+        {
+            "status": "ok",
+            "collection_queries": ["fed", "esports"],
+            "price_action_model": {
+                "validation_gap_needs_collection": True,
+                "validation_gap_queries": ["fed", "esports"],
+            },
+        },
+    )
+    write_csv(
+        cfg.output_root / "polymarket_liquidity_discovery" / "liquidity_watchlist.csv",
+        [
+            {
+                "token_id": "plain-token",
+                "family": "crypto_btc_special",
+                "tradable_liquidity_candidate": "true",
+                "liquidity": "5000",
+                "spread": "0.01",
+                "time_to_close_hours": "2",
+                "fast_feedback_liquidity_candidate": "true",
+            },
+            {
+                "token_id": "fed-token",
+                "family": "macro_rates",
+                "tradable_liquidity_candidate": "true",
+                "liquidity": "800",
+                "spread": "0.02",
+                "time_to_close_hours": "8",
+            },
+            {
+                "token_id": "esports-token",
+                "family": "esports_match",
+                "tradable_liquidity_candidate": "true",
+                "liquidity": "700",
+                "spread": "0.02",
+                "time_to_close_hours": "6",
+            },
+        ],
+    )
+
+    targets = websocket_collector._liquidity_target_rows(cfg, cfg.raw["websocket_market_data"])
+    token_ids = {row["token_id"] for row in targets}
+    feedback_targets = [row for row in targets if row.get("feedback_broaden_target") is True]
+
+    assert len(targets) == 3
+    assert {"fed-token", "esports-token"}.issubset(token_ids)
+    assert {row["token_id"] for row in feedback_targets} == {"fed-token", "esports-token"}
+    assert all(
+        "macro_rates" in row["feedback_broaden_family_prefixes"]
+        or "esports" in row["feedback_broaden_family_prefixes"]
+        for row in feedback_targets
+    )
+
+
 def test_websocket_collector_fails_closed_on_socket_error(tmp_path, monkeypatch):
     cfg = load_config(make_cfg(tmp_path))
 

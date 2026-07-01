@@ -101,6 +101,32 @@ def _dedupe_keep_order(values: list[str]) -> list[str]:
     return out
 
 
+def _adaptive_collection_queries(cfg: EngineConfig) -> list[str]:
+    queries: list[str] = []
+    payloads = [
+        read_json(cfg.governance_root / "research_focus.json", default={}) or {},
+        read_json(cfg.governance_root / "price_action_feedback.json", default={}) or {},
+    ]
+    for payload in payloads:
+        if not isinstance(payload, dict):
+            continue
+        for raw_query in payload.get("collection_queries", []) or []:
+            query = str(raw_query or "").strip()
+            if query:
+                queries.append(query)
+        for raw_query in payload.get("model_validation_gap_queries", []) or []:
+            query = str(raw_query or "").strip()
+            if query:
+                queries.append(query)
+        price_action_model = payload.get("price_action_model", {}) or {}
+        if isinstance(price_action_model, dict):
+            for raw_query in price_action_model.get("validation_gap_queries", []) or []:
+                query = str(raw_query or "").strip()
+                if query:
+                    queries.append(query)
+    return _dedupe_keep_order(queries)
+
+
 def _broad_queries(settings: dict[str, Any]) -> list[str]:
     if not settings.get("broad_discovery_enabled", True):
         return []
@@ -108,12 +134,12 @@ def _broad_queries(settings: dict[str, Any]) -> list[str]:
     return configured or list(_DEFAULT_BROAD_DISCOVERY_QUERIES)
 
 
-def _event_queries(settings: dict[str, Any]) -> list[str]:
+def _event_queries(settings: dict[str, Any], adaptive_queries: list[str] | None = None) -> list[str]:
     configured = settings.get("queries", [""]) or [""]
     if not isinstance(configured, list):
         configured = [configured]
     configured_queries = [str(query or "").strip() for query in configured]
-    return _dedupe_keep_order([*configured_queries, *_broad_queries(settings)])
+    return _dedupe_keep_order([*(adaptive_queries or []), *configured_queries, *_broad_queries(settings)])
 
 
 def _fast_feedback_excluded_families(settings: dict[str, Any]) -> set[str]:
@@ -199,20 +225,21 @@ def _crypto_updown_public_queries(settings: dict[str, Any]) -> list[str]:
     return queries
 
 
-def _public_search_queries(settings: dict[str, Any]) -> list[str]:
+def _public_search_queries(settings: dict[str, Any], adaptive_queries: list[str] | None = None) -> list[str]:
     queries = _string_list(settings.get("public_search_queries"))
-    return _dedupe_keep_order([*queries, *_broad_queries(settings), *_crypto_updown_public_queries(settings)])
+    return _dedupe_keep_order([*(adaptive_queries or []), *queries, *_broad_queries(settings), *_crypto_updown_public_queries(settings)])
 
 
-def _discover_tokens(settings: dict[str, Any]) -> tuple[list[scanner.OutcomeToken], list[dict[str, Any]]]:
+def _discover_tokens(cfg: EngineConfig, settings: dict[str, Any]) -> tuple[list[scanner.OutcomeToken], list[dict[str, Any]], list[str]]:
     base = _base_config(settings)
-    queries = _event_queries(settings)
+    adaptive_queries = _adaptive_collection_queries(cfg)
+    queries = _event_queries(settings, adaptive_queries=adaptive_queries)
     summaries: list[dict[str, Any]] = []
     query_batches: list[list[scanner.OutcomeToken]] = []
     for query in queries:
         clean_query = str(query or "").strip()
-        cfg = dataclasses.replace(base, query=clean_query)
-        events = scanner.discover_events(cfg)
+        scan_cfg = dataclasses.replace(base, query=clean_query)
+        events = scanner.discover_events(scan_cfg)
         query_tokens = [token for token in scanner.extract_tokens(events) if _is_fresh(token)]
         query_batches.append(query_tokens)
         summaries.append(
@@ -221,7 +248,7 @@ def _discover_tokens(settings: dict[str, Any]) -> tuple[list[scanner.OutcomeToke
 
     if settings.get("public_search_enabled", True):
         public_limit = int(settings.get("public_search_limit", 8))
-        for public_query in _public_search_queries(settings):
+        for public_query in _public_search_queries(settings, adaptive_queries=adaptive_queries):
             events = _public_search_events(base, public_query, limit=public_limit)
             query_tokens = [token for token in scanner.extract_tokens(events) if _is_fresh(token)]
             query_batches.append(query_tokens)
@@ -254,7 +281,7 @@ def _discover_tokens(settings: dict[str, Any]) -> tuple[list[scanner.OutcomeToke
                 break
         if not any_remaining or not added_this_round:
             break
-    return tokens, summaries
+    return tokens, summaries, adaptive_queries
 
 
 def _row_from_book(token: scanner.OutcomeToken, book: scanner.Book | None, settings: dict[str, Any]) -> dict[str, Any]:
@@ -480,7 +507,7 @@ def run_liquidity_discovery(cfg: EngineConfig) -> dict[str, Any]:
         payload = {"status": "disabled", "generated_at_utc": now_utc()}
         write_json(cfg.governance_root / "liquidity_discovery_summary.json", payload)
         return payload
-    tokens, query_summaries = _discover_tokens(settings)
+    tokens, query_summaries, adaptive_queries = _discover_tokens(cfg, settings)
     base = _base_config(settings)
     rows: list[dict[str, Any]] = []
     errors: list[dict[str, Any]] = []
@@ -519,6 +546,7 @@ def run_liquidity_discovery(cfg: EngineConfig) -> dict[str, Any]:
             "event_limit": int(settings.get("event_limit", 60)),
             "token_limit": int(settings.get("token_limit", 120)),
             "selection_strategy": "broad_round_robin_across_queries_fast_feedback_priority",
+            "adaptive_collection_queries": adaptive_queries,
             "broad_discovery_enabled": bool(settings.get("broad_discovery_enabled", True)),
             "broad_query_count": len(_broad_queries(settings)),
             "min_liquidity": float(settings.get("min_liquidity", 250)),
@@ -581,4 +609,3 @@ def main(argv: list[str] | None = None) -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-

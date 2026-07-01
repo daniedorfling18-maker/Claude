@@ -27,6 +27,10 @@ _EXCLUDED_FAMILIES = {
     "crypto_sol_updown_5m",
     "crypto_xrp_updown_5m",
 }
+_FEEDBACK_TARGET_LEARNING_STATES = {
+    "suppress_negative_price_action_and_broaden",
+    "collect_model_validation_gap_price_action_evidence",
+}
 
 
 async def _collect_messages(
@@ -113,40 +117,95 @@ def _candidate_rank(row: dict[str, Any]) -> tuple[bool, float, float, float]:
     )
 
 
+def _append_unique(values: list[str], value: Any) -> None:
+    text = str(value or "").strip()
+    if not text:
+        return
+    key = text.lower()
+    if key not in {item.lower() for item in values}:
+        values.append(text)
+
+
+def _feedback_collection_queries(payload: dict[str, Any], focus_payload: dict[str, Any]) -> list[str]:
+    queries: list[str] = []
+    for raw_query in payload.get("collection_queries", []) or []:
+        _append_unique(queries, raw_query)
+    for raw_query in payload.get("model_validation_gap_queries", []) or []:
+        _append_unique(queries, raw_query)
+    for raw_query in focus_payload.get("collection_queries", []) or []:
+        _append_unique(queries, raw_query)
+    price_action_model = focus_payload.get("price_action_model", {}) or {}
+    if isinstance(price_action_model, dict):
+        for raw_query in price_action_model.get("validation_gap_queries", []) or []:
+            _append_unique(queries, raw_query)
+    return queries
+
+
+def _feedback_has_collection_target(payload: dict[str, Any], focus_payload: dict[str, Any]) -> bool:
+    learning_state = str(payload.get("learning_state") or "")
+    price_action_model = focus_payload.get("price_action_model", {}) or {}
+    focus_validation_gap = (
+        isinstance(price_action_model, dict)
+        and _boolish(price_action_model.get("validation_gap_needs_collection"))
+    )
+    return bool(
+        learning_state in _FEEDBACK_TARGET_LEARNING_STATES
+        or _boolish(payload.get("model_validation_gap_active"))
+        or focus_validation_gap
+        or safe_float(payload.get("paper_confirmation_candidates"))
+        or safe_float(payload.get("promotion_candidates"))
+        or safe_float(payload.get("positive_collect_candidates"))
+    )
+
+
+def _family_prefixes_for_collection_query(query: str) -> list[str]:
+    text = str(query or "").strip().lower()
+    mapped: list[str] = []
+    if not text:
+        return mapped
+    if any(term in text for term in ("world", "cup", "fifa", "soccer", "football", "sports")):
+        mapped.extend(["worldcup", "sports_other"])
+    if "tennis" in text:
+        mapped.append("tennis")
+    if any(term in text for term in ("esports", "e-sports", "cs2", "counter-strike", "dota", "lol", "league of legends")):
+        mapped.append("esports")
+    if any(term in text for term in ("fed", "interest rate", "interest-rate", "rates", "bps")):
+        mapped.append("macro_rates")
+    if any(term in text for term in ("economy", "inflation", "cpi", "recession", "gdp", "jobs", "unemployment")):
+        mapped.append("macro_economy")
+    if any(term in text for term in ("stock", "stocks", "equities", "s&p", "nasdaq")):
+        mapped.append("equities_macro")
+    if "bitcoin" in text or "btc" in text:
+        mapped.append("crypto_btc")
+    if "ethereum" in text or text == "eth" or " eth " in f" {text} ":
+        mapped.append("crypto_eth")
+    if "solana" in text or text == "sol" or " sol " in f" {text} ":
+        mapped.append("crypto_sol")
+    if "xrp" in text or "ripple" in text:
+        mapped.append("crypto_xrp")
+    if any(term in text for term in ("ai", "openai", "anthropic", "xai", "google", "meta")):
+        mapped.append("ai_model")
+    out: list[str] = []
+    for prefix in mapped:
+        _append_unique(out, prefix)
+    return out
+
+
 def _feedback_broaden_family_prefixes(cfg: EngineConfig, settings: dict[str, Any]) -> list[str]:
     if not _boolish(settings.get("feedback_broaden_target_enabled", True)):
         return []
     payload = read_json(cfg.governance_root / "price_action_feedback.json", default={}) or {}
     if not isinstance(payload, dict):
         return []
-    learning_state = str(payload.get("learning_state") or "")
-    has_feedback_target = bool(
-        learning_state == "suppress_negative_price_action_and_broaden"
-        or safe_float(payload.get("paper_confirmation_candidates"))
-        or safe_float(payload.get("promotion_candidates"))
-        or safe_float(payload.get("positive_collect_candidates"))
-    )
-    if not has_feedback_target:
+    focus_payload = read_json(cfg.governance_root / "research_focus.json", default={}) or {}
+    if not isinstance(focus_payload, dict):
+        focus_payload = {}
+    if not _feedback_has_collection_target(payload, focus_payload):
         return []
     prefixes: list[str] = []
-    for raw_query in payload.get("collection_queries", []) or []:
-        query = str(raw_query or "").strip().lower()
-        mapped: list[str] = []
-        if "world" in query or "cup" in query:
-            mapped = ["worldcup", "sports_other"]
-        elif "tennis" in query:
-            mapped = ["tennis"]
-        elif "bitcoin" in query or "btc" in query:
-            mapped = ["crypto_btc"]
-        elif "ethereum" in query or query == "eth":
-            mapped = ["crypto_eth"]
-        elif "solana" in query or query == "sol":
-            mapped = ["crypto_sol"]
-        elif "xrp" in query or "ripple" in query:
-            mapped = ["crypto_xrp"]
-        for prefix in mapped:
-            if prefix not in prefixes:
-                prefixes.append(prefix)
+    for raw_query in _feedback_collection_queries(payload, focus_payload):
+        for prefix in _family_prefixes_for_collection_query(raw_query):
+            _append_unique(prefixes, prefix)
     return prefixes
 
 

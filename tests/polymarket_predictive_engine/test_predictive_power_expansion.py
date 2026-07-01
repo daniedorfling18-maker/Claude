@@ -565,6 +565,95 @@ def test_websocket_reserves_paper_confirmation_targets_from_price_action_feedbac
     assert sum(1 for row in targets if row.get("feedback_broaden_target") is True) == 2
 
 
+def test_websocket_prefers_updown_rows_for_updown_feedback_queries(tmp_path):
+    import yaml
+
+    cfg_path = make_cfg(tmp_path)
+    data = yaml.safe_load(cfg_path.read_text(encoding="utf-8"))
+    data.setdefault("websocket_market_data", {})
+    data["websocket_market_data"].update(
+        {
+            "use_liquidity_targets": True,
+            "use_strategy_v2_targets": False,
+            "max_liquidity_target_assets": 3,
+            "feedback_broaden_target_assets": 2,
+            "feedback_broaden_target_assets_per_family": 1,
+            "market_ids": [],
+        }
+    )
+    cfg_path.write_text(yaml.safe_dump(data, sort_keys=False), encoding="utf-8")
+    cfg = load_config(cfg_path)
+    write_json(
+        cfg.governance_root / "price_action_feedback.json",
+        {
+            "status": "ok",
+            "learning_state": "collect_more_positive_price_action_evidence",
+            "paper_confirmation_candidates": 2,
+            "collection_queries": ["bitcoin", "btc updown", "solana updown"],
+        },
+    )
+    write_csv(
+        cfg.output_root / "polymarket_liquidity_discovery" / "liquidity_watchlist.csv",
+        [
+            {
+                "token_id": "macro-token",
+                "family": "macro_rates",
+                "tradable_liquidity_candidate": "true",
+                "liquidity": "2000",
+                "spread": "0.01",
+                "time_to_close_hours": "3",
+            },
+            {
+                "token_id": "btc-special-token",
+                "family": "crypto_btc_special",
+                "market_slug": "bitcoin-above-58000",
+                "question": "Will Bitcoin be above 58000?",
+                "tradable_liquidity_candidate": "true",
+                "liquidity": "5000",
+                "spread": "0.01",
+                "time_to_close_hours": "4",
+            },
+            {
+                "token_id": "btc-updown-token",
+                "family": "crypto_btc_updown_daily",
+                "market_slug": "btc-updown-daily",
+                "question": "Bitcoin Up or Down today?",
+                "tradable_liquidity_candidate": "true",
+                "liquidity": "800",
+                "spread": "0.02",
+                "time_to_close_hours": "8",
+            },
+            {
+                "token_id": "sol-special-token",
+                "family": "crypto_sol_special",
+                "market_slug": "will-solana-reach-320",
+                "question": "Will Solana reach 320?",
+                "tradable_liquidity_candidate": "true",
+                "liquidity": "3000",
+                "spread": "0.01",
+                "time_to_close_hours": "4",
+            },
+            {
+                "token_id": "sol-updown-token",
+                "family": "crypto_sol_updown_daily",
+                "market_slug": "solana-updown-daily",
+                "question": "Solana Up or Down today?",
+                "tradable_liquidity_candidate": "true",
+                "liquidity": "700",
+                "spread": "0.02",
+                "time_to_close_hours": "6",
+            },
+        ],
+    )
+
+    targets = websocket_collector._liquidity_target_rows(cfg, cfg.raw["websocket_market_data"])
+    feedback_targets = [row for row in targets if row.get("feedback_broaden_target") is True]
+    token_ids = {row["token_id"] for row in feedback_targets}
+
+    assert token_ids == {"btc-updown-token", "sol-updown-token"}
+    assert {row.get("feedback_broaden_query") for row in feedback_targets} == {"btc updown", "solana updown"}
+
+
 def test_websocket_reserves_validation_gap_targets_from_research_focus(tmp_path):
     import yaml
 

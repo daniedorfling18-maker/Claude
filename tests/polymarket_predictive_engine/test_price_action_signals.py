@@ -341,6 +341,39 @@ def test_blocked_shadow_confirmation_backlog_stays_rejected(tmp_path):
     assert "has not passed positive bid/ask evidence gate" in rejections[0]["rejection_reason"]
 
 
+def test_trusted_shadow_confirmation_waits_for_fresh_open_candidate(tmp_path):
+    cfg = _cfg(tmp_path)
+    root = cfg.output_root / "polymarket_price_action"
+    write_json(cfg.governance_root / "price_action_feedback.json", _paper_confirmation_feedback_payload())
+    write_csv(
+        root / "price_action_scout_round_trip_evidence.csv",
+        [
+            _round_trip_row(
+                source="profit_sprint_target",
+                signal_cohort="price_action_scout|profit_sprint|macro_economy",
+                family="macro_economy",
+                market_slug="will-the-us-economy-be-overheating-at-the-end-of-2026",
+                question="Will the US economy be overheating?",
+                outcome="Yes",
+                token_id="macro-token",
+                latest_bid="0.42",
+                latest_ask="0.43",
+                latest_spread="0.01",
+                round_trip_status="closed_take_profit",
+            )
+        ],
+    )
+
+    summary = build_price_action_paper_signals(cfg)
+    signals = read_csv_rows(root / "price_action_paper_signals.csv")
+    rejections = read_csv_rows(root / "price_action_paper_rejections.csv")
+
+    assert signals == []
+    assert summary["paper_confirmation_candidates"] == 1
+    assert summary["decision"] == "trusted_shadow_edge_waiting_for_fresh_executable_candidate"
+    assert rejections[0]["rejection_reason"] == "candidate is not currently open for a fresh paper entry"
+
+
 def _broker_cfg(tmp_path: Path):
     raw = yaml.safe_load(Path("polymarket_predictive_config.example.yaml").read_text(encoding="utf-8"))
     raw["paths"] = {

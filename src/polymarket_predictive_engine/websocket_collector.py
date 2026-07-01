@@ -108,8 +108,9 @@ def _target_families(cfg: EngineConfig, settings: dict[str, Any]) -> set[str]:
     return families or set(_DEFAULT_TARGET_FAMILIES)
 
 
-def _candidate_rank(row: dict[str, Any]) -> tuple[bool, float, float, float]:
+def _candidate_rank(row: dict[str, Any]) -> tuple[float, bool, float, float, float]:
     return (
+        safe_float(row.get("feedback_broaden_match_score")) or 0.0,
         _boolish(row.get("fast_feedback_liquidity_candidate")),
         safe_float(row.get("liquidity")) or 0.0,
         -(safe_float(row.get("spread")) or 999.0),
@@ -128,6 +129,12 @@ def _append_unique(values: list[str], value: Any) -> None:
 
 def _feedback_collection_queries(payload: dict[str, Any], focus_payload: dict[str, Any]) -> list[str]:
     queries: list[str] = []
+    for key in ("paper_confirmation_preview", "promotion_candidate_preview"):
+        rows = payload.get(key, [])
+        if isinstance(rows, list):
+            for row in rows:
+                if isinstance(row, dict):
+                    _append_unique(queries, row.get("recommended_collection_query"))
     for raw_query in payload.get("collection_queries", []) or []:
         _append_unique(queries, raw_query)
     for raw_query in payload.get("model_validation_gap_queries", []) or []:
@@ -191,6 +198,45 @@ def _family_prefixes_for_collection_query(query: str) -> list[str]:
     return out
 
 
+def _row_search_text(row: dict[str, Any]) -> str:
+    return " ".join(
+        str(row.get(key) or "")
+        for key in ("family", "category", "market_slug", "question", "outcome", "signal_cohort")
+    ).lower()
+
+
+def _query_requires_updown(query: str) -> bool:
+    text = str(query or "").strip().lower().replace("-", " ")
+    compact = text.replace(" ", "")
+    return "updown" in compact or "up or down" in text
+
+
+def _row_is_updown(row: dict[str, Any]) -> bool:
+    text = _row_search_text(row).replace("-", " ")
+    compact = text.replace(" ", "")
+    return "updown" in compact or "up or down" in text
+
+
+def _feedback_query_match_score(query: str, row: dict[str, Any]) -> float | None:
+    prefixes = _family_prefixes_for_collection_query(query)
+    if not _matches_feedback_broaden_family(row, prefixes):
+        return None
+    score = 10.0
+    if _query_requires_updown(query):
+        if not _row_is_updown(row):
+            return None
+        score += 100.0
+    elif _row_is_updown(row):
+        # A broad "bitcoin" style query can still use up/down rows, but an
+        # explicit "btc updown" query should outrank generic crypto markets.
+        score += 5.0
+    if any(str(row.get("family") or "").lower().startswith(prefix + "_updown") for prefix in prefixes):
+        score += 15.0
+    if str(row.get("market_slug") or "").strip():
+        score += 1.0
+    return score
+
+
 def _feedback_broaden_family_prefixes(cfg: EngineConfig, settings: dict[str, Any]) -> list[str]:
     if not _boolish(settings.get("feedback_broaden_target_enabled", True)):
         return []
@@ -228,17 +274,62 @@ def _profit_sprint_rank(row: dict[str, Any]) -> tuple[float, float, float, float
 
 
 def _feedback_broaden_rows(cfg: EngineConfig, settings: dict[str, Any], candidates: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    prefixes = _feedback_broaden_family_prefixes(cfg, settings)
-    if not prefixes:
+    if not _boolish(settings.get("feedback_broaden_target_enabled", True)):
+        return []
+    payload = read_json(cfg.governance_root / "price_action_feedback.json", default={}) or {}
+    if not isinstance(payload, dict):
+        return []
+    focus_payload = read_json(cfg.governance_root / "research_focus.json", default={}) or {}
+    if not isinstance(focus_payload, dict):
+        focus_payload = {}
+    if not _feedback_has_collection_target(payload, focus_payload):
+        return []
+    query_priorities: dict[str, float] = {}
+
+    def add_query(raw_query: Any, priority: float) -> None:
+        query = str(raw_query or "").strip()
+        if not query:
+            return
+        key = query.lower()
+        query_priorities[key] = max(priority, query_priorities.get(key, 0.0))
+
+    for key in ("paper_confirmation_preview", "promotion_candidate_preview"):
+        rows = payload.get(key, [])
+        if isinstance(rows, list):
+            for row in rows:
+                if isinstance(row, dict):
+                    add_query(row.get("recommended_collection_query"), 60.0)
+    for raw_query in payload.get("collection_queries", []) or []:
+        add_query(raw_query, 40.0)
+    for raw_query in payload.get("model_validation_gap_queries", []) or []:
+        add_query(raw_query, 30.0)
+    for raw_query in focus_payload.get("collection_queries", []) or []:
+        add_query(raw_query, 20.0)
+    price_action_model = focus_payload.get("price_action_model", {}) or {}
+    if isinstance(price_action_model, dict):
+        for raw_query in price_action_model.get("validation_gap_queries", []) or []:
+            add_query(raw_query, 20.0)
+    queries = [query for query in _feedback_collection_queries(payload, focus_payload) if query.lower() in query_priorities]
+    if not queries:
         return []
     rows: list[dict[str, Any]] = []
     for row in candidates:
-        if not _matches_feedback_broaden_family(row, prefixes):
+        matches = [
+            (score + query_priorities.get(query.lower(), 0.0), query)
+            for query in queries
+            for score in [_feedback_query_match_score(query, row)]
+            if score is not None
+        ]
+        if not matches:
             continue
+        score, query = max(matches, key=lambda item: item[0])
         enriched = dict(row)
         enriched["feedback_broaden_target"] = True
-        enriched["feedback_broaden_family_prefixes"] = ",".join(prefixes)
+        enriched["feedback_broaden_family_prefixes"] = ",".join(_family_prefixes_for_collection_query(query))
+        enriched["feedback_broaden_query"] = query
+        enriched["feedback_broaden_match_score"] = score
         rows.append(enriched)
+    rows.sort(key=_candidate_rank, reverse=True)
     max_rows = int(settings.get("feedback_broaden_target_assets", 4) or 4)
     max_per_family = int(settings.get("feedback_broaden_target_assets_per_family", 2) or 2)
     return _balanced_by_family(rows, max_assets=max_rows, max_per_family=max_per_family)
@@ -255,6 +346,8 @@ def _tag_feedback_broaden_targets(rows: list[dict[str, Any]], feedback_rows: lis
             enriched = dict(row)
             enriched["feedback_broaden_target"] = True
             enriched["feedback_broaden_family_prefixes"] = feedback_by_id[token_id].get("feedback_broaden_family_prefixes", "")
+            enriched["feedback_broaden_query"] = feedback_by_id[token_id].get("feedback_broaden_query", "")
+            enriched["feedback_broaden_match_score"] = feedback_by_id[token_id].get("feedback_broaden_match_score", "")
             tagged.append(enriched)
         else:
             tagged.append(row)

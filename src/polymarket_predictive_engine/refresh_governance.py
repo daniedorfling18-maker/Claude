@@ -11,6 +11,7 @@ from .goal_planner import build_goal_plan
 from .governance import governance_report
 from .price_action_feedback import build_price_action_feedback
 from .price_action_model import train_price_action_model
+from .price_action_signals import build_price_action_paper_signals
 from .profit_sprint import build_profit_sprint
 from .promotion_review import build_promotion_review
 from .quant_research_status import build_quant_research_status
@@ -50,6 +51,7 @@ def refresh_governance(cfg: EngineConfig, *, refresh_dashboard: bool = True) -> 
 
     price_action_model = train_price_action_model(cfg)
     price_action_feedback = build_price_action_feedback(cfg)
+    price_action_paper_signals = build_price_action_paper_signals(cfg)
     quant_research_status = build_quant_research_status(cfg)
     trade_signal_audit = build_trade_signal_audit(cfg)
     promotion_review = build_promotion_review(cfg)
@@ -71,6 +73,7 @@ def refresh_governance(cfg: EngineConfig, *, refresh_dashboard: bool = True) -> 
             "profit_sprint": True,
             "price_action_feedback": True,
             "price_action_model": True,
+            "price_action_paper_signals": True,
             "quant_research_status": True,
             "trade_signal_audit": True,
             "research_focus": True,
@@ -85,6 +88,9 @@ def refresh_governance(cfg: EngineConfig, *, refresh_dashboard: bool = True) -> 
         "price_action_feedback_state": price_action_feedback.get("learning_state"),
         "price_action_model_decision": price_action_model.get("decision"),
         "price_action_model_promotion_ready": price_action_model.get("promotion_ready"),
+        "price_action_paper_signal_count": price_action_paper_signals.get("signals"),
+        "price_action_paper_rejection_count": price_action_paper_signals.get("rejections"),
+        "price_action_paper_decision": price_action_paper_signals.get("decision"),
         "quant_research_implementation_complete": quant_research_status.get("implementation_complete"),
         "trade_signal_verdict": trade_signal_audit.get("verdict"),
         "research_focus_status": research_focus.get("status"),

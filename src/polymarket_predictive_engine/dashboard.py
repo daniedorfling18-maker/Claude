@@ -282,6 +282,8 @@ async function load() {
     const pnl = Number(target.actual_pnl_since_baseline_usdc || 0);
     const paperRejections = asNumber(priceActionPaper.rejections, asNumber(data.forward_paper_cycle?.signals_rejected, asNumber(diag.rejected_signals_count, 0)));
     const brokerWorkPending = Boolean(priceActionPaper.broker_refresh_needed || priceActionPaper.pending_broker_signals || priceActionPaper.pending_broker_confirmation_signals || priceActionPaper.pending_broker_exit_probes);
+    const trustedEdgeMissingFresh = tradeSignalAudit.verdict === "trusted_edge_missing_fresh_candidate"
+      || String(priceActionPaper.decision || "").includes("trusted_shadow_edge_waiting_for_fresh_executable_candidate");
     const tradeDecision = dashboardStale
       ? "WAIT: REFRESH"
       : approvedSignals > 0
@@ -292,7 +294,9 @@ async function load() {
       ? "The dashboard snapshot is too old to trust. Refresh the dashboard before reading the signal state."
       : approvedSignals > 0
         ? (brokerWorkPending ? "Approved signal rows exist and need the paper broker refresh to execute/record them." : "Approved signal rows exist. Monitor fills, exits, spread, and realised P&L.")
-        : (diag.main_blocker || priceActionPaper.decision || goalPlan.main_gap || "Current evidence gates are blocking entries.");
+        : trustedEdgeMissingFresh
+          ? "Trusted shadow repricing evidence exists, but there is no fresh open executable paper-confirmation candidate yet. The bot should collect BTC/SOL updown bid/ask rows rather than force a stale or closed trade."
+          : (priceActionPaper.decision || diag.main_blocker || goalPlan.main_gap || "Current evidence gates are blocking entries.");
     const nextAction = tradeSignalAudit.next_action || goalPlan.recommended_action || priceActionFeedback.next_action || diag.recommended_action || "Keep collecting live bid/ask evidence until a validated cohort produces executable positive paper signals.";
     const collectQueries = tradeSignalAudit.missing_confirmation_queries?.length
       ? tradeSignalAudit.missing_confirmation_queries
@@ -302,6 +306,8 @@ async function load() {
     const transferReason = priceActionModel.cohort_transfer?.reason || validationGap.reason || "";
     const unlockCondition = approvedSignals > 0
       ? (brokerWorkPending ? "Paper broker refresh must run and record the fill/exit evidence." : "Keep this cohort under forward paper supervision.")
+      : trustedEdgeMissingFresh
+        ? "Find an open, non-excluded BTC/SOL updown candidate with executable bid and ask, acceptable spread, and matching trusted confirmation cohort."
       : validationGapActive
         ? (validationGap.reason || "The model still needs positive validation examples before promotion.")
         : transferReason

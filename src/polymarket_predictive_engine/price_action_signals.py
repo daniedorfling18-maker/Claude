@@ -347,6 +347,25 @@ def _build_signal(
     }
 
 
+def _summary_decision(signals: list[dict[str, Any]], paper_confirmation: list[dict[str, Any]], rejections: list[dict[str, Any]]) -> str:
+    if signals:
+        return "signals_ready_for_paper_broker"
+    if paper_confirmation:
+        rejection_reasons = {str(row.get("rejection_reason") or "") for row in rejections}
+        if any(
+            reason in rejection_reasons
+            for reason in {
+                "candidate is not currently open for a fresh paper entry",
+                "missing executable websocket bid/ask",
+                "spread above price-action paper limit",
+                "relative spread above price-action paper limit",
+            }
+        ):
+            return "trusted_shadow_edge_waiting_for_fresh_executable_candidate"
+        return "trusted_shadow_edge_has_no_matching_current_candidate"
+    return "no_price_action_paper_signals_until_positive_cohort_evidence"
+
+
 def build_price_action_paper_signals(cfg: EngineConfig) -> dict[str, Any]:
     """Compile governed price-action evidence into paper broker signals.
 
@@ -481,9 +500,7 @@ def build_price_action_paper_signals(cfg: EngineConfig) -> dict[str, Any]:
         "rejection_file": str(out_dir / REJECTIONS_FILE),
         "paper_trading_invoked": False,
         "live_trading_invoked": False,
-        "decision": "signals_ready_for_paper_broker"
-        if signals
-        else "no_price_action_paper_signals_until_positive_cohort_evidence",
+        "decision": _summary_decision(signals, paper_confirmation, rejections),
         "warnings": {
             "paper_only": True,
             "live_trading_invoked": False,

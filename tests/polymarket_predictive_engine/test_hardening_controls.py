@@ -48,11 +48,14 @@ def test_data_quality_fails_closed_without_raw_snapshots(tmp_path):
 
 def test_paper_trade_runs_gated_broker_and_blocks_when_not_ready(tmp_path):
     # paper_trade now runs the gated paper broker (not an unsafe placeholder). With no readiness
-    # evidence it must block on the readiness gate rather than place any order.
+    # evidence it must block entries on the readiness gate rather than place any order. The broker
+    # may still monitor exits while blocked so open paper probes can close on their risk policy.
     cfg = _cfg(tmp_path)
     summary = paper_trade(cfg)
-    assert summary["status"] == "blocked_by_readiness_gate"
+    assert summary["status"] == "monitoring_exits_only_readiness_gate_blocked"
     assert summary["approved_for_paper_trading"] is False
+    assert summary["entry_gate_blocked"] is True
+    assert summary["exit_monitoring_when_blocked"] is True
     assert summary["orders_filled"] == 0
 
 

@@ -71,9 +71,12 @@ function Invoke-Step {
   param(
     [string]$Name,
     [string[]]$Arguments,
-    [string]$OutFile
+    [string]$OutFile,
+    [switch]$SkipMemoryGuard
   )
-  Assert-MemoryBelowGuard -Phase "before_$Name"
+  if (-not $SkipMemoryGuard) {
+    Assert-MemoryBelowGuard -Phase "before_$Name"
+  }
   Write-LogLine "=== $Name ==="
   $safeName = $Name -replace "[^A-Za-z0-9_.-]", "_"
   $stdoutPath = Join-Path $repoRoot "work\.$stamp.$safeName.stdout.tmp"
@@ -107,7 +110,9 @@ function Invoke-Step {
   if ($exitCode -ne 0) {
     throw "$Name failed with exit code $exitCode"
   }
-  Assert-MemoryBelowGuard -Phase "after_$Name"
+  if (-not $SkipMemoryGuard) {
+    Assert-MemoryBelowGuard -Phase "after_$Name"
+  }
 }
 
 $startedAt = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ")
@@ -148,7 +153,7 @@ if ($memory -and $memory.used_percent -ge $MaxMemoryPercent) {
     $dashboardReason = "Dashboard-only refresh skipped because memory was at or above the $DashboardOnlyMaxMemoryPercent% critical dashboard guardrail."
   } else {
     try {
-      Invoke-Step "render-dashboard" @(".\scripts\render_polymarket_dashboard.py", "--config", $ConfigPath) ".\work\render_dashboard_high_memory_$stamp.json"
+      Invoke-Step "render-dashboard" @(".\scripts\render_polymarket_dashboard.py", "--config", $ConfigPath) ".\work\render_dashboard_high_memory_$stamp.json" -SkipMemoryGuard
       $dashboardStatus = "refreshed_dashboard_only"
       $dashboardReason = "Heavy research was skipped, but the static dashboard was refreshed so oversight stays current."
     } catch {
@@ -250,6 +255,25 @@ try {
   $endedAt = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ")
   if ($script:StoppedHighMemory) {
     $memory = $script:StoppedHighMemorySnapshot
+    $dashboardStatus = "skipped_after_memory_stop"
+    $dashboardReason = "Dashboard refresh was skipped because the cycle had already crossed the memory guardrail."
+    if ($SkipDashboardOnHighMemory) {
+      $dashboardStatus = "skipped_by_flag"
+      $dashboardReason = "Dashboard-only refresh was disabled for this run."
+    } elseif ($memory -and $memory.used_percent -lt $DashboardOnlyMaxMemoryPercent) {
+      try {
+        Invoke-Step "render-dashboard-after-memory-stop" @(".\scripts\render_polymarket_dashboard.py", "--config", $ConfigPath) ".\work\render_dashboard_after_memory_stop_$stamp.json" -SkipMemoryGuard
+        $dashboardStatus = "refreshed_dashboard_only_after_memory_stop"
+        $dashboardReason = "Heavy research stopped on the memory guard, but the static dashboard was refreshed so oversight stays current."
+      } catch {
+        $dashboardStatus = "dashboard_refresh_failed_after_memory_stop"
+        $dashboardReason = $_.Exception.Message
+        Write-LogLine "Dashboard refresh after memory stop failed: $dashboardReason"
+      }
+    } elseif ($memory -and $memory.used_percent -ge $DashboardOnlyMaxMemoryPercent) {
+      $dashboardStatus = "skipped_critical_memory"
+      $dashboardReason = "Dashboard-only refresh skipped because memory was at or above the $DashboardOnlyMaxMemoryPercent% critical dashboard guardrail."
+    }
     $status = [ordered]@{
       status = "stopped_high_memory"
       started_at_utc = $startedAt
@@ -261,8 +285,8 @@ try {
       memory_free_gb = if ($memory) { $memory.free_gb } else { $null }
       memory_total_gb = if ($memory) { $memory.total_gb } else { $null }
       max_memory_percent = $MaxMemoryPercent
-      dashboard_status = "skipped_after_memory_stop"
-      dashboard_reason = "Dashboard refresh was skipped because the cycle had already crossed the memory guardrail."
+      dashboard_status = $dashboardStatus
+      dashboard_reason = $dashboardReason
       log_file = $logFile
       paper_trading_invoked = $false
       live_trading_invoked = $false

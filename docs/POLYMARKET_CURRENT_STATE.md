@@ -123,6 +123,9 @@ paper_trading_invoked = false
 live_trading_invoked = false
 ```
 
+When memory is below the stricter dashboard-only guardrail, the runner may still refresh the static
+dashboard after a protected stop so oversight stays current without starting websocket/model work.
+
 ## Current important output files
 
 ```text

@@ -409,6 +409,33 @@ def test_dashboard_marks_stale_legacy_full_cycle_as_audit_only(tmp_path):
     assert "do not treat" in legacy["reason"]
 
 
+def test_dashboard_surfaces_shadow_research_memory_pause(tmp_path):
+    cfg = _config(tmp_path)
+    status_path = cfg.path.parent / "work" / "shadow_research_cycle_latest_status.json"
+    write_json(
+        status_path,
+        {
+            "status": "skipped_high_memory",
+            "ended_at_utc": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+            "reason": "Shadow research cycle skipped before websocket/model work because local memory was 99.1% at or above the 99.0% guardrail.",
+            "memory_used_percent": 99.1,
+            "max_memory_percent": 99.0,
+            "paper_trading_invoked": False,
+            "live_trading_invoked": False,
+        },
+    )
+
+    result = render_dashboard(cfg)
+    data = read_json(result["dashboard_data"])
+
+    assert data["shadow_research_cycle"]["effective_status"] == "skipped_high_memory"
+    assert data["oversight_status"]["shadow_research_status"] == "skipped_high_memory"
+    assert any(
+        alert["title"] == "Shadow research paused by memory guard"
+        for alert in data["oversight_status"]["alerts"]
+    )
+
+
 def test_dashboard_surfaces_paper_maintenance_task_status(tmp_path):
     cfg = _config(tmp_path)
     status_path = cfg.path.parent / "work" / "polymarket_paper_maintenance_task_status.json"

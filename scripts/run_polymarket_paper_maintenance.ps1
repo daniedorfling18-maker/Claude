@@ -1,7 +1,7 @@
 param(
     [string]$ConfigPath = "polymarket_predictive_config.example.yaml",
     [string]$TaskName = "Polymarket Paper Maintenance",
-    [double]$MaxMemoryPercent = 95,
+    [double]$MaxMemoryPercent = 99,
     [int]$StepTimeoutSeconds = 90,
     [switch]$Force,
     [switch]$SkipIdleDashboardRefresh

@@ -2,7 +2,7 @@ param(
     [string]$Config = "polymarket_predictive_config.example.yaml",
     [int]$MaxAssets = 20,
     [int]$DashboardPort = 8765,
-    [double]$MaxMemoryPercentToStart = 95.0,
+    [double]$MaxMemoryPercentToStart = 99.0,
     [int]$WebsocketSeconds = 5,
     [double]$PredictionCycleSeconds = 30.0,
     [double]$DiscoveryCycleSeconds = 600.0,

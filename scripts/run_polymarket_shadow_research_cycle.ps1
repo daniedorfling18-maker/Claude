@@ -1,7 +1,10 @@
 ﻿param(
   [string]$ConfigPath = "polymarket_predictive_config.example.yaml",
   [int]$WebsocketSeconds = 90,
-  [int]$StepTimeoutSeconds = 180
+  [int]$StepTimeoutSeconds = 180,
+  [double]$MaxMemoryPercent = 99.0,
+  [double]$DashboardOnlyMaxMemoryPercent = 99.5,
+  [switch]$SkipDashboardOnHighMemory
 )
 
 $ErrorActionPreference = "Stop"
@@ -17,6 +20,23 @@ function Write-LogLine {
   param([string]$Message)
   $line = "[{0}] {1}" -f (Get-Date -Format "yyyy-MM-dd HH:mm:ss"), $Message
   $line | Tee-Object -FilePath $logFile -Append
+}
+
+function Get-MemorySnapshot {
+  try {
+    $os = Get-CimInstance Win32_OperatingSystem
+    $totalKb = [double]$os.TotalVisibleMemorySize
+    $freeKb = [double]$os.FreePhysicalMemory
+    if ($totalKb -le 0) { return $null }
+    $usedPercent = [math]::Round((1.0 - ($freeKb / $totalKb)) * 100.0, 1)
+    return [pscustomobject]@{
+      used_percent = $usedPercent
+      free_gb = [math]::Round($freeKb / 1MB, 2)
+      total_gb = [math]::Round($totalKb / 1MB, 2)
+    }
+  } catch {
+    return $null
+  }
 }
 
 function Invoke-Step {
@@ -76,6 +96,59 @@ Write-LogLine "Repo: $repoRoot"
 Write-LogLine "Config: $ConfigPath"
 Write-LogLine "Websocket seconds: $WebsocketSeconds"
 Write-LogLine "Step timeout seconds: $StepTimeoutSeconds"
+Write-LogLine "Memory guard: heavy cycle max $MaxMemoryPercent%; dashboard-only max $DashboardOnlyMaxMemoryPercent%"
+
+$env:PYTHONPATH = (Resolve-Path .\src).Path
+$memory = Get-MemorySnapshot
+if ($memory) {
+  Write-LogLine "Memory before heavy cycle: $($memory.used_percent)% used, $($memory.free_gb) GB free"
+}
+
+if ($memory -and $memory.used_percent -ge $MaxMemoryPercent) {
+  $endedAt = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ")
+  $reason = "Shadow research cycle skipped before websocket/model work because local memory was $($memory.used_percent)% at or above the $MaxMemoryPercent% guardrail."
+  $dashboardStatus = "not_attempted"
+  $dashboardReason = ""
+
+  if ($SkipDashboardOnHighMemory) {
+    $dashboardStatus = "skipped_by_flag"
+    $dashboardReason = "Dashboard-only refresh was disabled for this run."
+  } elseif ($memory.used_percent -ge $DashboardOnlyMaxMemoryPercent) {
+    $dashboardStatus = "skipped_critical_memory"
+    $dashboardReason = "Dashboard-only refresh skipped because memory was at or above the $DashboardOnlyMaxMemoryPercent% critical dashboard guardrail."
+  } else {
+    try {
+      Invoke-Step "render-dashboard" @(".\scripts\render_polymarket_dashboard.py", "--config", $ConfigPath) ".\work\render_dashboard_high_memory_$stamp.json"
+      $dashboardStatus = "refreshed_dashboard_only"
+      $dashboardReason = "Heavy research was skipped, but the static dashboard was refreshed so oversight stays current."
+    } catch {
+      $dashboardStatus = "dashboard_refresh_failed"
+      $dashboardReason = $_.Exception.Message
+      Write-LogLine "Dashboard-only refresh failed: $dashboardReason"
+    }
+  }
+
+  $status = [ordered]@{
+    status = "skipped_high_memory"
+    started_at_utc = $startedAt
+    ended_at_utc = $endedAt
+    stamp = $stamp
+    reason = $reason
+    memory_used_percent = $memory.used_percent
+    memory_free_gb = $memory.free_gb
+    memory_total_gb = $memory.total_gb
+    max_memory_percent = $MaxMemoryPercent
+    dashboard_status = $dashboardStatus
+    dashboard_reason = $dashboardReason
+    log_file = $logFile
+    paper_trading_invoked = $false
+    live_trading_invoked = $false
+  }
+  $status | ConvertTo-Json -Depth 8 | Set-Content $statusFile -Encoding UTF8
+  Write-LogLine $reason
+  Write-LogLine "Dashboard status on skip: $dashboardStatus"
+  exit 0
+}
 
 # Hard safety guard: this scheduled research cycle must never run the local bot loop.
 Get-CimInstance Win32_Process -Filter "Name='python.exe' OR Name='pythonw.exe'" |
@@ -84,8 +157,6 @@ Get-CimInstance Win32_Process -Filter "Name='python.exe' OR Name='pythonw.exe'" 
     Write-LogLine "Stopping local live loop process id $($_.ProcessId) before research cycle"
     Stop-Process -Id $_.ProcessId -Force
   }
-
-$env:PYTHONPATH = (Resolve-Path .\src).Path
 
 try {
   Invoke-Step "liquidity-discovery" @(".\scripts\run_polymarket_liquidity_discovery.py", "--config", $ConfigPath) ".\work\liquidity_discovery_shadow_research_$stamp.json"

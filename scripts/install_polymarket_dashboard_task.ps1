@@ -1,7 +1,7 @@
 param(
     [string]$TaskName = "Polymarket Dashboard Server",
     [int]$Port = 8765,
-    [double]$MaxMemoryPercent = 95,
+    [double]$MaxMemoryPercent = 99,
     [switch]$StartNow
 )
 

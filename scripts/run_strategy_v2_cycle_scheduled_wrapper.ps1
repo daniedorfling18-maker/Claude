@@ -1,6 +1,6 @@
 param(
-  [double]$MaxMemoryPercent = 95,
-  [double]$MaintenanceMaxMemoryPercent = 98.5,
+  [double]$MaxMemoryPercent = 99,
+  [double]$MaintenanceMaxMemoryPercent = 99.5,
   [string]$ConfigPath = "polymarket_predictive_config.example.yaml"
 )
 

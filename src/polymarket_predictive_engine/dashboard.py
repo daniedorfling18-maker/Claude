@@ -2093,6 +2093,15 @@ def _dashboard_oversight_status(
             "Shadow research cycle failed",
             str(shadow_research.get("reason") or shadow_research.get("error") or "The current safe research lane reported failure."),
         )
+    elif shadow_status in {"skipped_high_memory", "memory_paused"}:
+        add_alert(
+            "warn",
+            "Shadow research paused by memory guard",
+            str(
+                shadow_research.get("reason")
+                or "The current safe research lane skipped heavier websocket/model work because local memory was above the configured guardrail."
+            ),
+        )
     elif shadow_status in {"running", "ok", "completed", "success"}:
         pass
     elif live_loop_status != "live":

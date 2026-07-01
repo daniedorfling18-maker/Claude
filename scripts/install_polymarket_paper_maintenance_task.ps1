@@ -1,7 +1,7 @@
 param(
     [string]$TaskName = "Polymarket Paper Maintenance",
     [int]$IntervalMinutes = 1,
-    [double]$MaxMemoryPercent = 95,
+    [double]$MaxMemoryPercent = 99,
     [string]$ConfigPath = "polymarket_predictive_config.example.yaml",
     [switch]$StartAtNextExitDue,
     [switch]$StartNow

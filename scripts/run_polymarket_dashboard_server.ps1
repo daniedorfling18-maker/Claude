@@ -1,7 +1,7 @@
 param(
     [int]$Port = 8765,
     [string]$HostName = "0.0.0.0",
-    [double]$MaxMemoryPercent = 95
+    [double]$MaxMemoryPercent = 99
 )
 
 $ErrorActionPreference = "Stop"

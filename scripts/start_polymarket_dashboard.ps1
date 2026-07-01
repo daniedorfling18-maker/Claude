@@ -1,6 +1,6 @@
 param(
     [int]$Port = 8765,
-    [double]$MaxMemoryPercent = 95
+    [double]$MaxMemoryPercent = 99
 )
 
 $ErrorActionPreference = "Stop"

@@ -3,8 +3,8 @@
   [int]$StepTimeoutSeconds = 180,
   [int]$IndependentAnchorMaxAgeMinutes = 60,
   [int]$PostEvidenceWebsocketSeconds = 20,
-  [double]$MaxMemoryPercent = 94,
-  [double]$MaintenanceMaxMemoryPercent = 98.5
+  [double]$MaxMemoryPercent = 99,
+  [double]$MaintenanceMaxMemoryPercent = 99.5
 )
 
 $ErrorActionPreference = "Stop"

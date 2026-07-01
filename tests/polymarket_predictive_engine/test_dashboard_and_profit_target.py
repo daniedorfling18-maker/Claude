@@ -272,11 +272,14 @@ def test_dashboard_flags_price_action_signals_waiting_for_broker_refresh(tmp_pat
     data = read_json(result["dashboard_data"])
 
     paper_status = data["price_action_paper_signals"]
+    assert paper_status["signals"] == 1
+    assert paper_status["summary_signals"] == 3
+    assert paper_status["summary_signal_mismatch"] is True
     assert paper_status["broker_refresh_needed"] is True
-    assert paper_status["pending_broker_signals"] == 3
-    assert paper_status["pending_broker_confirmation_signals"] == 3
+    assert paper_status["pending_broker_signals"] == 1
+    assert paper_status["pending_broker_confirmation_signals"] == 0
     assert data["evidence_freshness"]["broker_refresh_needed"] is True
-    assert data["evidence_freshness"]["pending_broker_signals"] == 3
+    assert data["evidence_freshness"]["pending_broker_signals"] == 1
 
 
 def test_dashboard_tracks_paper_confirmation_probe_exit_horizon(tmp_path):
@@ -799,6 +802,8 @@ def test_dashboard_surfaces_strategy_v2_anchored_edge_progress(tmp_path):
     assert "Strategy V2 anchored edge" in html
     assert "Fast price-action scout" in html
     assert "Microstructure edge lab" in html
+    assert "Dashboard data age" in html
+    assert "Signal count check" in html
     assert strategy_v2["decision"] == "candidate_family_found"
     assert strategy_v2["shadow_candidates"] == 1
     assert strategy_v2["anchored_rows"] == 3

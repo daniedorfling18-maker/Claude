@@ -102,6 +102,17 @@ HTML = """<!doctype html>
 <script>
 const fmtUsd = (v) => v === null || v === undefined || v === "" || Number.isNaN(Number(v)) ? "-" : "$" + Number(v).toFixed(2);
 const fmtNum = (v, d=4) => v === null || v === undefined || v === "" || Number.isNaN(Number(v)) ? "-" : Number(v).toFixed(d);
+const ageSeconds = (v) => {
+  const t = Date.parse(v || "");
+  return Number.isNaN(t) ? null : Math.max(0, (Date.now() - t) / 1000);
+};
+const fmtAge = (seconds) => {
+  if (seconds === null || seconds === undefined || Number.isNaN(Number(seconds))) return "-";
+  const s = Number(seconds);
+  if (s < 90) return Math.round(s) + "s";
+  if (s < 7200) return Math.round(s / 60) + "m";
+  return fmtNum(s / 3600, 1) + "h";
+};
 const escapeHtml = (v) => String(v ?? "-").replace(/[&<>"']/g, ch => ({ "&":"&amp;", "<":"&lt;", ">":"&gt;", '"':"&quot;", "'":"&#39;" }[ch]));
 const asText = (v) => {
   if (v === null || v === undefined || v === "") return "-";
@@ -166,16 +177,19 @@ async function load() {
     const websocketFeatures = live.websocket_features || {};
     const ingest = live.ingest || {};
     const status = target.status || data.forward_paper_cycle?.status || "unknown";
+    const dashboardAge = ageSeconds(data.generated_at_utc);
     const liveStatus = freshness.live_loop_status || "unknown";
     const runPosture = freshness.strategy_v2_runtime_posture || liveStatus;
     const good = liveStatus === "live";
     const guarded = runPosture === "memory_paused" || runPosture === "guard_paused";
-    const bad = liveStatus === "stale" || liveStatus === "not_started" || liveStatus === "down";
-    document.getElementById("statusDot").className = "dot " + (good ? "good" : guarded ? "warn" : bad ? "bad" : "");
-    document.getElementById("statusText").textContent = runPosture + " - " + status + " - live tick " + (live.iteration || "-") + " - updated " + (data.generated_at_utc || "-");
+    const dashboardStale = dashboardAge !== null && dashboardAge > 300;
+    const bad = dashboardStale || liveStatus === "stale" || liveStatus === "not_started" || liveStatus === "down";
+    document.getElementById("statusDot").className = "dot " + (bad ? "bad" : good ? "good" : guarded ? "warn" : "");
+    document.getElementById("statusText").textContent = (dashboardStale ? "dashboard stale" : runPosture) + " - " + status + " - snapshot age " + fmtAge(dashboardAge) + " - updated " + (data.generated_at_utc || "-");
     const pnl = Number(target.actual_pnl_since_baseline_usdc || 0);
     document.getElementById("cards").innerHTML = [
       card("Equity", fmtUsd(broker.equity), Number(broker.equity) >= 1000 ? "good" : "bad"),
+      card("Dashboard data age", fmtAge(dashboardAge), dashboardAge !== null && dashboardAge > 300 ? "bad" : dashboardAge !== null && dashboardAge > 60 ? "warn" : "good"),
       card("Actual P&L since clean baseline", fmtUsd(pnl), pnl >= 0 ? "good" : "bad"),
       card("Monthly run-rate", target.monthly_run_rate_usdc == null ? "Collecting" : fmtUsd(target.monthly_run_rate_usdc), target.monthly_run_rate_usdc >= target.target_monthly_profit_usdc ? "good" : ""),
       card("Live loop", liveStatus, good ? "good" : bad ? "bad" : "warn"),
@@ -196,6 +210,7 @@ async function load() {
       card("Price scout P&L", fmtUsd(priceScoutPnl), Number(priceScoutPnl || 0) > 0 ? "good" : "warn"),
       card("Microstructure rules", microstructure.validation_pass_rules ?? "0", Number(microstructure.validation_pass_rules || 0) > 0 ? "good" : "warn"),
       card("Price-action paper signals", priceActionPaper.signals ?? "0", Number(priceActionPaper.signals || 0) > 0 ? "good" : "warn"),
+      card("Signal count check", priceActionPaper.summary_signal_mismatch ? "mismatch" : "aligned", priceActionPaper.summary_signal_mismatch ? "bad" : "good"),
       card("Broker refresh", priceActionPaper.broker_refresh_needed ? `${priceActionPaper.pending_broker_signals ?? 0} pending` : "fresh", priceActionPaper.broker_refresh_needed ? "warn" : "good"),
       card("Paper maintenance", paperMaintenance.status || "not_started", paperMaintenance.status === "ran_broker_maintenance" || paperMaintenance.status === "refreshed_dashboard_idle" || paperMaintenance.status === "skipped_no_work" ? "good" : paperMaintenance.status === "skipped_high_memory" ? "warn" : ""),
       card("Maintenance task", paperMaintenanceTask.status || "not_installed_or_unknown", paperMaintenanceTask.status === "installed" ? "good" : "warn"),
@@ -277,6 +292,9 @@ async function load() {
       ["Maintenance memory", paperMaintenance.memory_used_percent == null ? "-" : fmtNum(paperMaintenance.memory_used_percent, 1) + "% / " + fmtNum(paperMaintenance.max_memory_percent, 1) + "%"],
       ["Maintenance next exit", paperMaintenance.next_exit_due_utc],
       ["Maintenance reason", paperMaintenance.reason || joinText(paperMaintenance.work_reasons), v=>longText(v, 180)],
+      ["Signal CSV rows", priceActionPaper.signal_file_rows],
+      ["Signal summary rows", priceActionPaper.summary_signals],
+      ["Signal mismatch", priceActionPaper.summary_signal_mismatch],
       ["Broker rejects", monthly.broker_rejected_orders],
       ["Main reason", broker.entry_pause_reason || Object.keys(broker.broker_rejection_reasons || {}).join(", "), longText]
     ]);
@@ -1572,16 +1590,34 @@ def _price_action_paper_signal_status(cfg: EngineConfig) -> dict[str, Any]:
         summary = {}
     signals = read_csv_rows(root / "price_action_paper_signals.csv")
     rejections = read_csv_rows(root / "price_action_paper_rejections.csv")
+    summary_signals = safe_float(summary.get("signals"))
+    summary_rejections = safe_float(summary.get("rejections"))
+    signal_count = len(signals)
+    rejection_count = len(rejections)
+    confirmation_signal_count = sum(
+        1
+        for signal in signals
+        if signal.get("price_action_evidence_status") == "trusted_shadow_requires_broker_paper_confirmation"
+    )
+    summary_signal_mismatch = summary_signals is not None and int(summary_signals) != signal_count
+    summary_rejection_mismatch = summary_rejections is not None and int(summary_rejections) != rejection_count
     return {
         "status": summary.get("status") or ("missing" if not signals and not rejections else "computed"),
         "generated_at_utc": summary.get("generated_at_utc"),
         "decision": summary.get("decision") or "no_price_action_paper_signals_until_positive_cohort_evidence",
-        "signals": summary.get("signals", len(signals)),
-        "rejections": summary.get("rejections", len(rejections)),
+        "signals": signal_count,
+        "rejections": rejection_count,
+        "signal_file_rows": signal_count,
+        "rejection_file_rows": rejection_count,
+        "summary_signals": summary.get("signals"),
+        "summary_rejections": summary.get("rejections"),
+        "summary_signal_mismatch": summary_signal_mismatch,
+        "summary_rejection_mismatch": summary_rejection_mismatch,
         "approved_price_action_cohorts": summary.get("approved_price_action_cohorts"),
         "approved_microstructure_cohorts": summary.get("approved_microstructure_cohorts"),
         "paper_confirmation_candidates": summary.get("paper_confirmation_candidates"),
-        "paper_confirmation_signals": summary.get("paper_confirmation_signals"),
+        "paper_confirmation_signals": confirmation_signal_count,
+        "summary_paper_confirmation_signals": summary.get("paper_confirmation_signals"),
         "source_round_trip_rows": summary.get("source_round_trip_rows"),
         "source_microstructure_current_rows": summary.get("source_microstructure_current_rows"),
         "signal_file": str(root / "price_action_paper_signals.csv"),

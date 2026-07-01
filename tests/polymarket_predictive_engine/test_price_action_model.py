@@ -75,6 +75,19 @@ def _event(i: int, *, split: str, profitable: bool, token: str | None = None) ->
     }
 
 
+def _small_positive_event(i: int, *, split: str) -> dict[str, str]:
+    row = _event(i, split=split, profitable=True)
+    entry_ask = 0.50
+    exit_bid = 0.505
+    stake = 10.0
+    quantity = stake / entry_ask
+    pnl = (exit_bid - entry_ask) * quantity
+    row["exit_bid"] = f"{exit_bid:.4f}"
+    row["pnl_usdc"] = f"{pnl:.6f}"
+    row["roi"] = f"{pnl / stake:.6f}"
+    return row
+
+
 def _ws_row(i: int, *, profitable_pattern: bool, token: str, bid: float | None = None) -> dict[str, str]:
     if bid is None:
         bid = 0.49 + (0.08 if profitable_pattern else -0.03)
@@ -186,6 +199,74 @@ def test_price_action_model_blocks_when_validation_does_not_beat_costs(tmp_path)
     assert summary["promotion_ready"] is False
     assert summary["current_model_candidates"] == 0
     assert summary["validation_blockers"]
+
+
+def test_price_action_model_labels_only_tradable_positive_repricing_by_default(tmp_path):
+    cfg = _cfg(tmp_path)
+    cfg.raw["price_action_model"].update(
+        {
+            "minimum_rows": 12,
+            "minimum_validation_rows": 4,
+            "minimum_selected_train_trades": 1,
+            "minimum_selected_validation_trades": 1,
+        }
+    )
+    events = [
+        _event(0, split="train", profitable=True),
+        _event(1, split="train", profitable=True),
+        _small_positive_event(2, split="train"),
+        _small_positive_event(3, split="train"),
+        _event(4, split="train", profitable=False),
+        _event(5, split="train", profitable=False),
+        _event(6, split="train", profitable=False),
+        _event(7, split="train", profitable=False),
+        _event(8, split="validation", profitable=True),
+        _small_positive_event(9, split="validation"),
+        _event(10, split="validation", profitable=False),
+        _event(11, split="validation", profitable=False),
+    ]
+    write_csv(cfg.output_root / "polymarket_price_action" / "microstructure_trade_events.csv", events)
+
+    summary = train_price_action_model(cfg)
+
+    assert summary["label_hurdles"]["minimum_profitable_return_label"] == 0.02
+    assert summary["train_positive_targets"] == 2
+    assert summary["validation_positive_targets"] == 1
+
+
+def test_price_action_model_uses_train_only_rank_thresholds_for_rare_repricing(tmp_path):
+    cfg = _cfg(tmp_path)
+    settings = cfg.raw["price_action_model"]
+    settings.update(
+        {
+            "minimum_rows": 120,
+            "minimum_validation_rows": 60,
+            "minimum_selected_train_trades": 6,
+            "minimum_selected_validation_trades": 5,
+            "probability_threshold_grid": [0.95, 0.99],
+            "train_rank_threshold_trade_counts": [6, 12],
+            "train_rank_threshold_quantiles": [0.90, 0.95],
+            "l2": 25.0,
+        }
+    )
+    events = []
+    for i in range(100):
+        events.append(_event(i, split="train", profitable=i < 8))
+    for i in range(100, 160):
+        events.append(_event(i, split="validation", profitable=i < 106))
+    write_csv(cfg.output_root / "polymarket_price_action" / "microstructure_trade_events.csv", events)
+
+    summary = train_price_action_model(cfg)
+
+    assert summary["status"] == "trained"
+    assert summary["promotion_ready"] is True
+    assert summary["chosen_probability_threshold"] < 0.95
+    assert summary["train_threshold_selection"]["threshold_policy"] == "fixed_probability_grid_plus_train_only_rank_thresholds"
+    assert summary["train_threshold_selection"]["threshold_candidates_from_train_only"] > 0
+    assert summary["train_threshold_selection"]["chosen_train_metrics"]["threshold_source"] != "configured_probability_grid"
+    assert summary["validation_selected"]["selected_trades"] >= 5
+    assert summary["validation_selected"]["selected_roi"] > summary["validation_buy_all_baseline"]["roi"]
+    assert "no probability threshold cleared the training split trade gates" not in summary["validation_blockers"]
 
 
 def test_price_action_model_ingests_strict_scout_round_trip_training_events(tmp_path):

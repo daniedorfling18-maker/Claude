@@ -55,6 +55,15 @@ outputs/polymarket_price_action/price_action_model_current_candidates.csv
 
 If the available bid/ask history has no profitable future-bid examples, the correct output is a blocked model, not a forced trade.
 
+The positive label is intentionally aligned with the trading hurdle: a tiny mark-to-bid gain is not
+treated as a win unless it clears the configured minimum profitable return and bid-edge threshold.
+This keeps the model focused on tradeable repricing rather than noise.
+
+Because profitable short-horizon repricing is a rare event, the model may rank candidates correctly
+while calibrated probabilities remain below 50%. Threshold selection may therefore use train-only
+rank/quantile cutoffs in addition to fixed probability cutoffs. This does not authorise trading by
+itself: the chosen threshold still has to beat the out-of-sample validation and forward-shadow gates.
+
 ## Quant research stack
 
 The supporting quant curriculum is implemented under:

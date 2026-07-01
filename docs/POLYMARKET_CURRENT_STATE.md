@@ -1,6 +1,6 @@
 # Polymarket Current State
 
-Last updated: 2026-06-30
+Last updated: 2026-07-01
 
 ## Status in one paragraph
 
@@ -168,6 +168,13 @@ The engine also runs a fast price-action scout for liquid short-window/profit-sp
 persists shadow-only entry prices from liquidity/profit-sprint candidates and evaluates later websocket
 bids for take-profit/stop-loss evidence. It is a throughput layer for learning, not a promotion bypass:
 candidate cohorts still need positive evidence and governance review before paper trading.
+
+The price-action model now treats a positive label as a tradable repricing event, not merely any small
+green mark-to-bid movement. It also tests train-only rank/quantile thresholds for rare-event ranking,
+then still fails closed unless the selected validation slice clears P&L, ROI, win-rate, confidence, and
+risk gates. On the 2026-07-01 model-only refresh this improved the diagnosis but did not approve paper:
+the available train-ranked slices remained negative, so the next edge work is better feature separation
+and more forward bid/ask evidence rather than looser thresholds.
 
 There is now a separate settlement-independent price-action paper-signal bridge:
 

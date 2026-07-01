@@ -106,6 +106,20 @@ def _bool_setting(settings: dict[str, Any], key: str, default: bool) -> bool:
     return str(value).strip().lower() in {"1", "true", "yes", "on"}
 
 
+def _label_hurdles(settings: dict[str, Any]) -> tuple[float, float]:
+    explicit_return = safe_float(settings.get("minimum_profitable_return_label"))
+    if explicit_return is None:
+        min_label_return = max(
+            0.0,
+            _float_setting(settings, "minimum_expected_roi_to_trade", 0.03),
+            _float_setting(settings, "minimum_selected_validation_roi", 0.03),
+        )
+    else:
+        min_label_return = max(0.0, float(explicit_return))
+    min_label_edge = max(0.0, _float_setting(settings, "minimum_bid_edge_abs_label", 0.0))
+    return min_label_return, min_label_edge
+
+
 def _family_flags(row: dict[str, Any]) -> dict[str, float]:
     family = str(row.get("family") or row.get("category") or row.get("signal_cohort") or "").lower()
     text = " ".join([family, str(row.get("market_slug") or ""), str(row.get("question") or "")]).lower()
@@ -244,8 +258,7 @@ def _prepared_event(row: dict[str, str], settings: dict[str, Any]) -> dict[str, 
         return None
     future_bid_edge = exit_bid - entry_ask
     future_bid_return = future_bid_edge / entry_ask
-    min_label_return = _float_setting(settings, "minimum_profitable_return_label", 0.0)
-    min_label_edge = _float_setting(settings, "minimum_bid_edge_abs_label", 0.0)
+    min_label_return, min_label_edge = _label_hurdles(settings)
     target = int(pnl > 0 and future_bid_edge > min_label_edge and future_bid_return >= min_label_return)
     return {
         **row,
@@ -285,8 +298,7 @@ def _prepared_round_trip_event(row: dict[str, str], settings: dict[str, Any], *,
     entry_bid = entry_ask
     future_bid_edge = exit_bid - entry_ask
     future_bid_return = future_bid_edge / entry_ask
-    min_label_return = _float_setting(settings, "minimum_profitable_return_label", 0.0)
-    min_label_edge = _float_setting(settings, "minimum_bid_edge_abs_label", 0.0)
+    min_label_return, min_label_edge = _label_hurdles(settings)
     target = int(pnl > 0 and future_bid_edge > min_label_edge and future_bid_return >= min_label_return)
     prepared = {
         **row,
@@ -469,6 +481,84 @@ def _threshold_grid(settings: dict[str, Any]) -> list[float]:
     return THRESHOLD_GRID
 
 
+def _threshold_candidate_grid(
+    settings: dict[str, Any],
+    probabilities: list[float],
+    *,
+    minimum_train_trades: int,
+) -> list[dict[str, Any]]:
+    """Build threshold candidates without looking at validation outcomes.
+
+    Fixed probability cutoffs are easy to reason about, but rare repricing
+    targets often produce calibrated probabilities below 50% even when the
+    model ranks the best candidates correctly.  The rank/quantile candidates
+    below are derived from train probabilities only; validation is still an
+    untouched out-of-sample pass/fail gate.
+    """
+    candidates: list[dict[str, Any]] = [
+        {"threshold": threshold, "threshold_source": "configured_probability_grid"}
+        for threshold in _threshold_grid(settings)
+    ]
+    if not _bool_setting(settings, "include_train_rank_thresholds", True):
+        return candidates
+
+    finite = sorted(
+        {
+            float(probability)
+            for probability in probabilities
+            if math.isfinite(float(probability)) and 0 < float(probability) < 1
+        }
+    )
+    if not finite:
+        return candidates
+
+    seen = {round(float(row["threshold"]), 12) for row in candidates}
+    floor = max(0.0, min(1.0, _float_setting(settings, "minimum_train_rank_probability_floor", 1e-6)))
+
+    def add_threshold(threshold: float, source: str, value: float | int) -> None:
+        if not math.isfinite(float(threshold)) or threshold <= floor or threshold >= 1:
+            return
+        key = round(float(threshold), 12)
+        if key in seen:
+            return
+        seen.add(key)
+        candidates.append(
+            {
+                "threshold": float(threshold),
+                "threshold_source": source,
+                "threshold_source_value": value,
+            }
+        )
+
+    raw_quantiles = settings.get("train_rank_threshold_quantiles")
+    quantiles = raw_quantiles if isinstance(raw_quantiles, list) else [0.99, 0.975, 0.95, 0.90, 0.85, 0.80]
+    for item in quantiles:
+        quantile = safe_float(item)
+        if quantile is None or not 0 < quantile < 1:
+            continue
+        add_threshold(float(np.quantile(finite, quantile)), "train_probability_quantile", float(quantile))
+
+    raw_counts = settings.get("train_rank_threshold_trade_counts")
+    if isinstance(raw_counts, list):
+        counts = [int(value) for item in raw_counts if (value := safe_float(item)) is not None and value > 0]
+    else:
+        n = len(finite)
+        counts = [
+            minimum_train_trades,
+            minimum_train_trades * 2,
+            minimum_train_trades * 4,
+            max(1, int(math.ceil(n * 0.05))),
+            max(1, int(math.ceil(n * 0.10))),
+            max(1, int(math.ceil(n * 0.20))),
+        ]
+    descending = list(reversed(finite))
+    for count in sorted(set(counts)):
+        bounded = max(1, min(len(descending), int(count)))
+        add_threshold(descending[bounded - 1], "train_top_count_cutoff", bounded)
+
+    return sorted(candidates, key=lambda row: float(row["threshold"]), reverse=True)
+
+
 def _trade_metrics(rows: list[dict[str, Any]], probabilities: list[float] | None = None, threshold: float | None = None) -> dict[str, Any]:
     selected = [
         (row, probabilities[idx] if probabilities is not None else 1.0)
@@ -570,7 +660,9 @@ def _choose_threshold_from_train(
     min_roi = _float_setting(settings, "minimum_selected_train_roi", 0.03)
     min_win_rate = _float_setting(settings, "minimum_selected_train_win_rate", 0.55)
     candidates: list[dict[str, Any]] = []
-    for threshold in _threshold_grid(settings):
+    threshold_candidates = _threshold_candidate_grid(settings, probabilities, minimum_train_trades=min_trades)
+    for candidate in threshold_candidates:
+        threshold = float(candidate["threshold"])
         metrics = _selected_metrics(rows, probabilities, threshold)
         passed = (
             metrics["selected_trades"] >= min_trades
@@ -578,7 +670,7 @@ def _choose_threshold_from_train(
             and metrics["selected_roi"] >= min_roi
             and metrics["selected_win_rate"] >= min_win_rate
         )
-        candidates.append({**metrics, "train_threshold_pass": passed})
+        candidates.append({**metrics, **candidate, "train_threshold_pass": passed})
     passing = [row for row in candidates if row["train_threshold_pass"]]
     if passing:
         chosen = sorted(
@@ -597,6 +689,14 @@ def _choose_threshold_from_train(
         "minimum_selected_train_trades": min_trades,
         "minimum_selected_train_roi": min_roi,
         "minimum_selected_train_win_rate": min_win_rate,
+        "threshold_policy": (
+            "fixed_probability_grid_plus_train_only_rank_thresholds"
+            if _bool_setting(settings, "include_train_rank_thresholds", True)
+            else "fixed_probability_grid"
+        ),
+        "threshold_candidates_from_train_only": sum(
+            1 for row in candidates if row.get("threshold_source") != "configured_probability_grid"
+        ),
     }
 
 
@@ -697,6 +797,7 @@ def train_price_action_model(cfg: EngineConfig) -> dict[str, Any]:
     minimum_rows = _int_setting(settings, "minimum_rows", 100)
     minimum_validation_rows = _int_setting(settings, "minimum_validation_rows", 25)
     l2 = _float_setting(settings, "l2", 5.0)
+    min_label_return, min_label_edge = _label_hurdles(settings)
     common = {
         "model_version": MODEL_VERSION,
         "generated_at_utc": now_utc(),
@@ -704,7 +805,11 @@ def train_price_action_model(cfg: EngineConfig) -> dict[str, Any]:
         "paper_trading_invoked": False,
         "live_trading_invoked": False,
         "trading_objective": "predict_future_executable_bid_reprices_above_entry_ask",
-        "label_definition": "target=1 only when future exit_bid clears historical entry_ask after the configured bid/ask cost hurdle.",
+        "label_definition": "target=1 only when future exit_bid clears historical entry_ask and the configured tradable ROI/bid-edge hurdle.",
+        "label_hurdles": {
+            "minimum_profitable_return_label": min_label_return,
+            "minimum_bid_edge_abs_label": min_label_edge,
+        },
         "feature_names": FEATURE_NAMES,
         "source_file": str(out_dir / TRADE_EVENTS_FILE),
         "training_event_sources": training_event_sources,

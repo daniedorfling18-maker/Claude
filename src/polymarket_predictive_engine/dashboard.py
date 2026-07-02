@@ -919,6 +919,10 @@ async function load() {
       ["Selected validation win rate", priceActionModel.validation_selected?.selected_win_rate, v=>fmtNum(Number(v) * 100, 1) + "%"],
       ["Win/payoff gate", priceActionModel.validation_win_rate_gate],
       ["Win/payoff gate reason", priceActionModel.validation_win_rate_gate_reason, v=>longText(v, 180)],
+      ["Validation rank lesson", priceActionModel.validation_rank_diagnostics?.state, v=>longText(v, 180)],
+      ["Rank next action", priceActionModel.validation_rank_diagnostics?.next_action, v=>longText(v, 220)],
+      ["Best positive rank", priceActionModel.validation_rank_diagnostics?.best_positive_rank],
+      ["Missed positive targets", priceActionModel.validation_rank_diagnostics?.missed_positive_targets],
       ["Selected profit factor", priceActionModel.validation_selected?.selected_profit_factor, v=>fmtNum(v, 2)],
       ["Selected payoff ratio", priceActionModel.validation_selected?.selected_payoff_ratio, v=>fmtNum(v, 2)],
       ["Selected expectancy/trade", priceActionModel.validation_selected?.selected_expectancy_usdc_per_trade, fmtUsd],
@@ -953,6 +957,27 @@ async function load() {
       ["Exp/trade","selected_expectancy_usdc_per_trade", fmtUsd],
       ["Win/payoff","train_win_rate_gate_reason", v=>longText(v, 120)],
       ["Pass","train_threshold_pass"]
+    ]) + `<div style="height:12px"></div><h3>Validation rank lesson</h3>` + table(priceActionModel.validation_rank_diagnostics?.top_selected_examples || [], [
+      ["Rank","rank"],
+      ["Market","market_slug", v=>longText(v, 130)],
+      ["Family","family", v=>longText(v, 120)],
+      ["Prob","predicted_reprice_probability", v=>fmtNum(Number(v) * 100, 1) + "%"],
+      ["Target","target"],
+      ["ROI","roi", v=>fmtNum(Number(v) * 100, 2) + "%"]
+    ]) + `<div style="height:12px"></div><h3>Missed positive repricing examples</h3>` + table(priceActionModel.validation_rank_diagnostics?.missed_positive_examples || [], [
+      ["Rank","rank"],
+      ["Market","market_slug", v=>longText(v, 130)],
+      ["Family","family", v=>longText(v, 120)],
+      ["Prob","predicted_reprice_probability", v=>fmtNum(Number(v) * 100, 1) + "%"],
+      ["ROI","roi", v=>fmtNum(Number(v) * 100, 2) + "%"]
+    ]) + `<div style="height:12px"></div><h3>Validation family rank summary</h3>` + table(priceActionModel.validation_rank_diagnostics?.family_summary || [], [
+      ["Family","family", v=>longText(v, 140)],
+      ["Rows","rows"],
+      ["Positives","positive_targets"],
+      ["Selected","selected"],
+      ["Sel +","selected_positive_targets"],
+      ["Sel ROI","selected_roi", v=>fmtNum(Number(v) * 100, 2) + "%"],
+      ["Best + rank","best_positive_rank"]
     ]) + `<div style="height:12px"></div><h3>Cohort transfer check</h3>` + table(priceActionModel.cohort_transfer?.family?.top_cohorts || [], [
       ["Family","cohort", v=>longText(v, 150)],
       ["Train rows","train_rows"],
@@ -2056,6 +2081,7 @@ def _price_action_model_status(cfg: EngineConfig) -> dict[str, Any]:
         "current_threshold_policy": summary.get("current_threshold_policy", {}),
         "train_threshold_selection": summary.get("train_threshold_selection", {}),
         "validation_selected": summary.get("validation_selected", {}),
+        "validation_rank_diagnostics": summary.get("validation_rank_diagnostics", {}),
         "validation_selected_risk": summary.get("validation_selected_risk", {}),
         "validation_win_rate_gate": summary.get("validation_win_rate_gate"),
         "validation_win_rate_gate_reason": summary.get("validation_win_rate_gate_reason"),
@@ -2848,6 +2874,11 @@ def _decision_useful_summary(
         )
 
     selected_model = price_action_model.get("validation_selected") if isinstance(price_action_model.get("validation_selected"), dict) else {}
+    rank_diagnostics = (
+        price_action_model.get("validation_rank_diagnostics")
+        if isinstance(price_action_model.get("validation_rank_diagnostics"), dict)
+        else {}
+    )
     selected_roi = safe_float(selected_model.get("selected_roi"))
     selected_profit_factor = safe_float(selected_model.get("selected_profit_factor"))
     selected_trades = safe_float(selected_model.get("selected_trades"))
@@ -2872,7 +2903,8 @@ def _decision_useful_summary(
             "state": price_action_model.get("decision") or price_action_model.get("status") or "unknown",
             "decision_use": "Predicts whether buying at ask can later sell/mark at bid profitably.",
             "key_metric": model_key_metric,
-            "blocker_or_next": price_action_model.get("validation_win_rate_gate_reason")
+            "blocker_or_next": rank_diagnostics.get("next_action")
+            or price_action_model.get("validation_win_rate_gate_reason")
             or cohort_transfer.get("reason")
             or validation_gap.get("reason")
             or "No active model blocker reported.",

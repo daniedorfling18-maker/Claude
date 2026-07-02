@@ -1100,6 +1100,125 @@ def _validation_rows(rows: list[dict[str, Any]], probabilities: list[float], thr
     return out
 
 
+def _validation_example(row: dict[str, Any], probability: float, rank: int, selected: bool) -> dict[str, Any]:
+    return {
+        "rank": rank,
+        "market_slug": row.get("market_slug", ""),
+        "family": row.get("family", ""),
+        "outcome": row.get("outcome", ""),
+        "entry_time_utc": row.get("entry_time_utc", ""),
+        "entry_ask": row.get("entry_ask", ""),
+        "exit_bid": row.get("exit_bid", ""),
+        "predicted_reprice_probability": probability,
+        "target": int(row.get("_y") or 0),
+        "roi": float(row.get("_roi") or 0.0),
+        "pnl_usdc": float(row.get("_pnl_usdc") or 0.0),
+        "selected_by_model": selected,
+    }
+
+
+def _validation_rank_diagnostics(
+    rows: list[dict[str, Any]],
+    probabilities: list[float],
+    threshold: float,
+    *,
+    limit: int = 12,
+) -> dict[str, Any]:
+    ranked = sorted(
+        [(idx, row, float(probabilities[idx])) for idx, row in enumerate(rows)],
+        key=lambda item: item[2],
+        reverse=True,
+    )
+    selected = [(rank, row, probability) for rank, (_, row, probability) in enumerate(ranked, start=1) if probability >= threshold]
+    positives = [(rank, row, probability) for rank, (_, row, probability) in enumerate(ranked, start=1) if int(row.get("_y") or 0) == 1]
+    selected_positives = [(rank, row, probability) for rank, row, probability in selected if int(row.get("_y") or 0) == 1]
+    selected_pnl = sum(float(row.get("_pnl_usdc") or 0.0) for _, row, _ in selected)
+    selected_stake = sum(float(row.get("_stake_usdc") or 0.0) for _, row, _ in selected)
+    positive_ranks = [rank for rank, _, _ in positives]
+    family: dict[str, dict[str, Any]] = {}
+    for rank, row, probability in ((rank, row, probability) for rank, (_, row, probability) in enumerate(ranked, start=1)):
+        key = str(row.get("family") or "unknown")
+        bucket = family.setdefault(
+            key,
+            {
+                "family": key,
+                "rows": 0,
+                "positive_targets": 0,
+                "selected": 0,
+                "selected_positive_targets": 0,
+                "selected_pnl_usdc": 0.0,
+                "selected_stake_usdc": 0.0,
+                "max_probability": 0.0,
+                "max_positive_probability": None,
+                "best_positive_rank": None,
+            },
+        )
+        bucket["rows"] += 1
+        bucket["max_probability"] = max(float(bucket["max_probability"]), probability)
+        if int(row.get("_y") or 0) == 1:
+            bucket["positive_targets"] += 1
+            bucket["max_positive_probability"] = max(
+                probability,
+                float(bucket["max_positive_probability"]) if bucket["max_positive_probability"] is not None else 0.0,
+            )
+            if bucket["best_positive_rank"] is None or rank < int(bucket["best_positive_rank"]):
+                bucket["best_positive_rank"] = rank
+        if probability >= threshold:
+            bucket["selected"] += 1
+            bucket["selected_positive_targets"] += int(row.get("_y") or 0)
+            bucket["selected_pnl_usdc"] += float(row.get("_pnl_usdc") or 0.0)
+            bucket["selected_stake_usdc"] += float(row.get("_stake_usdc") or 0.0)
+    family_rows = []
+    for bucket in family.values():
+        stake = float(bucket["selected_stake_usdc"] or 0.0)
+        bucket["selected_roi"] = float(bucket["selected_pnl_usdc"]) / stake if stake > 0 else 0.0
+        family_rows.append(bucket)
+    family_rows.sort(
+        key=lambda item: (
+            int(item.get("selected") or 0),
+            int(item.get("positive_targets") or 0),
+            int(item.get("rows") or 0),
+        ),
+        reverse=True,
+    )
+    state = "no_validation_selection"
+    next_action = "Collect fresh executable rows and rescore before promotion."
+    if selected:
+        if selected_positives and selected_pnl > 0:
+            state = "selected_validation_positive_expectancy"
+            next_action = "Keep paper gates governed; require forward paper confirmation before sizing."
+        elif positives:
+            state = "top_ranked_candidates_failed_missed_positive_repricing"
+            next_action = "Treat selected validation losers as hard negatives; add anti-chase/cohort features before promotion."
+        else:
+            state = "selected_validation_negative_no_positive_targets"
+            next_action = "Collect more positive validation examples before trusting the model."
+    return {
+        "state": state,
+        "next_action": next_action,
+        "threshold": threshold,
+        "validation_rows": len(rows),
+        "selected_rows": len(selected),
+        "selected_positive_targets": len(selected_positives),
+        "selected_pnl_usdc": selected_pnl,
+        "selected_roi": selected_pnl / selected_stake if selected_stake > 0 else 0.0,
+        "positive_targets": len(positives),
+        "positive_targets_selected": len(selected_positives),
+        "missed_positive_targets": max(0, len(positives) - len(selected_positives)),
+        "best_positive_rank": min(positive_ranks) if positive_ranks else None,
+        "worst_selected_rank": max((rank for rank, _, _ in selected), default=None),
+        "top_selected_examples": [
+            _validation_example(row, probability, rank, True) for rank, row, probability in selected[:limit]
+        ],
+        "missed_positive_examples": [
+            _validation_example(row, probability, rank, False)
+            for rank, row, probability in positives
+            if probability < threshold
+        ][:limit],
+        "family_summary": family_rows[:limit],
+    }
+
+
 def _current_candidate_rows(
     rows: list[dict[str, Any]],
     probabilities: list[float],
@@ -1308,6 +1427,7 @@ def train_price_action_model(cfg: EngineConfig) -> dict[str, Any]:
         not validation_blockers
     )
     validation_predictions = _validation_rows(validation_rows, probabilities, validation_threshold)
+    validation_rank_diagnostics = _validation_rank_diagnostics(validation_rows, probabilities, validation_threshold)
     expectancy = _roi_expectancy_components(train_rows, train_probabilities, threshold)
     minimum_expected_roi = _float_setting(settings, "minimum_expected_roi_to_trade", min_selected_roi)
     current_rows = build_latest_microstructure_features(cfg)
@@ -1350,6 +1470,7 @@ def train_price_action_model(cfg: EngineConfig) -> dict[str, Any]:
         "current_probability_threshold": current_threshold,
         "current_threshold_policy": current_threshold_policy,
         "validation_selected": selected,
+        "validation_rank_diagnostics": validation_rank_diagnostics,
         "validation_selected_risk": validation_risk,
         "validation_blockers": validation_blockers,
         "validation_buy_all_baseline": buy_all,

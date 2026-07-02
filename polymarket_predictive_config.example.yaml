@@ -381,6 +381,10 @@ price_action_paper:
   paper_confirmation_enabled: true
   paper_confirmation_max_stake_usdc: 2
   paper_confirmation_max_hold_minutes_before_exit: 120
+  paper_confirmation_max_current_candidates: 8
+  paper_confirmation_require_positive_historical_analogue: true
+  paper_confirmation_min_historical_analogue_validation_rows: 3
+  paper_confirmation_min_historical_analogue_positive_rows: 1
   # Evidence-only lane for the validation lesson where ultra-low-price contracts
   # can earn meaningful ROI from a one-tick bid move. These probes do not
   # promote the model; they collect forward paper fills for the cohort.

@@ -57,6 +57,12 @@ SIGNAL_FIELDS = [
     "price_action_entry_source",
     "price_action_latest_bid",
     "price_action_latest_ask",
+    "historical_analogue_key",
+    "historical_analogue_validation_rows",
+    "historical_analogue_positive_rows",
+    "historical_analogue_validation_roi",
+    "historical_analogue_win_rate",
+    "historical_analogue_gate",
     "exit_policy_id",
     "max_forward_observations",
     "take_profit_return",
@@ -163,6 +169,208 @@ def _paper_confirmation_candidates(cfg: EngineConfig, settings: dict[str, Any]) 
         candidates.append(row)
     candidates.sort(key=lambda item: safe_float(item.get("priority_score")) or 0.0, reverse=True)
     return candidates
+
+
+def _price_bucket(price: float | None) -> str:
+    if price is None:
+        return "na"
+    if price < 0.05:
+        return "<5c"
+    if price < 0.10:
+        return "5-10c"
+    if price < 0.20:
+        return "10-20c"
+    if price < 0.40:
+        return "20-40c"
+    if price < 0.60:
+        return "40-60c"
+    return "60c+"
+
+
+def _spread_bucket(spread: float | None) -> str:
+    if spread is None:
+        return "na"
+    if spread <= 0.001:
+        return "<=0.1c"
+    if spread <= 0.005:
+        return "<=0.5c"
+    if spread <= 0.01:
+        return "<=1c"
+    if spread <= 0.02:
+        return "<=2c"
+    return ">2c"
+
+
+def _historical_analogue_key(row: dict[str, Any]) -> str:
+    family = str(row.get("family") or row.get("category") or "unknown").strip() or "unknown"
+    ask = safe_float(row.get("entry_ask") or row.get("latest_ask") or row.get("best_ask"))
+    bid = safe_float(row.get("entry_bid") or row.get("latest_bid") or row.get("best_bid"))
+    spread = safe_float(row.get("entry_spread") or row.get("latest_spread") or row.get("spread"))
+    if spread is None and ask is not None and bid is not None:
+        spread = max(0.0, ask - bid)
+    side = str(row.get("current_side") or row.get("price_change_side") or "").strip().upper()
+    return f"{family}|ask={_price_bucket(ask)}|spread={_spread_bucket(spread)}|side={side}"
+
+
+def _historical_analogue_stats(cfg: EngineConfig, settings: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    min_rows = int(safe_float(settings.get("paper_confirmation_min_historical_analogue_validation_rows")) or 3)
+    min_positive = int(safe_float(settings.get("paper_confirmation_min_historical_analogue_positive_rows")) or 1)
+    grouped: dict[str, list[dict[str, str]]] = {}
+    for row in read_csv_rows(cfg.output_root / OUTPUT_DIRNAME / MICROSTRUCTURE_TRADE_EVENTS_FILE):
+        if str(row.get("split") or "").strip().lower() != "validation":
+            continue
+        grouped.setdefault(_historical_analogue_key(row), []).append(row)
+    stats: dict[str, dict[str, Any]] = {}
+    for key, rows in grouped.items():
+        stake = sum(safe_float(row.get("stake_usdc")) or 0.0 for row in rows)
+        pnl = sum(safe_float(row.get("pnl_usdc")) or 0.0 for row in rows)
+        positives = [row for row in rows if (safe_float(row.get("roi")) or 0.0) > 0]
+        roi = pnl / stake if stake > 0 else 0.0
+        win_rate = len(positives) / len(rows) if rows else 0.0
+        state = "positive_historical_analogue"
+        if len(rows) < min_rows:
+            state = "insufficient_historical_analogue_rows"
+        elif len(positives) < min_positive:
+            state = "no_positive_historical_analogue_examples"
+        elif pnl <= 0 or roi <= 0:
+            state = "historical_analogue_not_profitable_after_spread"
+        stats[key] = {
+            "key": key,
+            "state": state,
+            "validation_rows": len(rows),
+            "positive_rows": len(positives),
+            "validation_pnl_usdc": pnl,
+            "validation_roi": roi,
+            "win_rate": win_rate,
+            "minimum_validation_rows": min_rows,
+            "minimum_positive_rows": min_positive,
+        }
+    return stats
+
+
+def _empty_historical_analogue(key: str, settings: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "key": key,
+        "state": "no_historical_analogue_rows",
+        "validation_rows": 0,
+        "positive_rows": 0,
+        "validation_pnl_usdc": 0.0,
+        "validation_roi": 0.0,
+        "win_rate": 0.0,
+        "minimum_validation_rows": int(safe_float(settings.get("paper_confirmation_min_historical_analogue_validation_rows")) or 3),
+        "minimum_positive_rows": int(safe_float(settings.get("paper_confirmation_min_historical_analogue_positive_rows")) or 1),
+    }
+
+
+def _paper_confirmation_current_candidates(
+    cfg: EngineConfig,
+    settings: dict[str, Any],
+    paper_confirmation: list[dict[str, Any]],
+) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    """Match trusted shadow confirmation theses to fresh executable bid/ask rows.
+
+    The original paper-confirmation bridge only promoted already-open scout
+    round-trip rows. That was conservative, but it could leave a trusted
+    shadow thesis idle when the live websocket book had a fresh matching market.
+    This helper remains evidence-only: it creates paper-confirmation probes
+    from current best bid/ask rows only after the trusted shadow feedback gate
+    has already identified the cohort.
+    """
+    if not paper_confirmation:
+        return [], {
+            "state": "no_trusted_shadow_confirmation_candidates",
+            "fresh_matches": 0,
+            "approved": 0,
+            "blocked": 0,
+        }
+    max_candidates = int(safe_float(settings.get("paper_confirmation_max_current_candidates")) or 8)
+    require_positive_history = boolish(settings.get("paper_confirmation_require_positive_historical_analogue", True))
+    analogue_stats = _historical_analogue_stats(cfg, settings)
+    latest_rows = build_latest_microstructure_features(cfg)
+    candidates: list[dict[str, Any]] = []
+    seen: set[tuple[str, str]] = set()
+    fresh_matches = 0
+    blocked = 0
+    blocked_by_state: dict[str, int] = {}
+    approved_analogue_keys: set[str] = set()
+    for feature in latest_rows:
+        confirmation = _confirmation_candidate_for_row(feature, paper_confirmation)
+        if confirmation is None:
+            continue
+        fresh_matches += 1
+        token = _token_id(feature)
+        cohort = str(confirmation.get("cohort") or "").strip()
+        if not token or not cohort:
+            continue
+        ask = safe_float(feature.get("entry_ask"))
+        bid = safe_float(feature.get("entry_bid"))
+        if ask is None or bid is None or not 0 < bid < ask < 1:
+            continue
+        key = (token, cohort)
+        if key in seen:
+            continue
+        seen.add(key)
+        spread = safe_float(feature.get("entry_spread"))
+        if spread is None:
+            spread = max(0.0, ask - bid)
+        relative_spread = _relative_spread(spread, ask)
+        analogue_key = _historical_analogue_key(feature)
+        analogue = analogue_stats.get(analogue_key) or _empty_historical_analogue(analogue_key, settings)
+        if require_positive_history and analogue.get("state") != "positive_historical_analogue":
+            blocked += 1
+            state = str(analogue.get("state") or "unknown")
+            blocked_by_state[state] = blocked_by_state.get(state, 0) + 1
+            continue
+        approved_analogue_keys.add(analogue_key)
+        candidates.append(
+            {
+                "source": "paper_confirmation_current_candidate",
+                "round_trip_status": "open_marked",
+                "signal_cohort": cohort,
+                "token_id": token,
+                "market_slug": feature.get("market_slug", ""),
+                "question": feature.get("question", ""),
+                "family": feature.get("family", ""),
+                "outcome": feature.get("outcome", ""),
+                "latest_time_utc": feature.get("entry_time_utc", ""),
+                "latest_bid": bid,
+                "latest_ask": ask,
+                "latest_midpoint": feature.get("entry_midpoint", ""),
+                "latest_spread": spread,
+                "relative_spread": "" if relative_spread is None else relative_spread,
+                "historical_analogue_key": analogue_key,
+                "historical_analogue_validation_rows": analogue.get("validation_rows", 0),
+                "historical_analogue_positive_rows": analogue.get("positive_rows", 0),
+                "historical_analogue_validation_roi": analogue.get("validation_roi", 0.0),
+                "historical_analogue_win_rate": analogue.get("win_rate", 0.0),
+                "historical_analogue_gate": analogue.get("state", ""),
+                "take_profit_return": confirmation.get("take_profit_return", ""),
+                "stop_loss_return": confirmation.get("stop_loss_return", ""),
+                "min_profit_usdc": confirmation.get("min_profit_usdc", ""),
+                "max_hold_minutes_before_exit": confirmation.get("max_hold_minutes_before_exit", ""),
+                "priority_score": safe_float(confirmation.get("priority_score")) or 0.0,
+                "shadow_only": True,
+            }
+        )
+    candidates.sort(
+        key=lambda item: (
+            safe_float(item.get("priority_score")) or 0.0,
+            -(safe_float(item.get("latest_spread")) or 999.0),
+        ),
+        reverse=True,
+    )
+    selected = candidates[:max_candidates]
+    state = "historical_analogue_current_candidates_ready" if selected else "no_positive_historical_analogue_current_candidate"
+    return selected, {
+        "state": state,
+        "require_positive_historical_analogue": require_positive_history,
+        "fresh_matches": fresh_matches,
+        "approved": len(candidates),
+        "selected": len(selected),
+        "blocked": blocked,
+        "blocked_by_state": blocked_by_state,
+        "positive_historical_analogue_keys": len(approved_analogue_keys),
+    }
 
 
 def _is_low_price_tick_row(row: dict[str, Any], settings: dict[str, Any]) -> bool:
@@ -448,11 +656,11 @@ def _build_signal(
     if max_hold_minutes is None and max_forward_observations is not None and max_forward_observations > 0:
         max_hold_minutes = float(max_forward_observations) * observation_minutes
     source = str(row.get("source") or "")
-    if source in {"paper_confirmation_candidate", "low_price_tick_probe"} and max_hold_minutes is None:
+    if source in {"paper_confirmation_candidate", "paper_confirmation_current_candidate", "low_price_tick_probe"} and max_hold_minutes is None:
         configured_horizon = safe_float(settings.get("paper_confirmation_max_hold_minutes_before_exit"))
         max_hold_minutes = float(configured_horizon) if configured_horizon is not None and configured_horizon > 0 else 120.0
     max_stake = float(safe_float(settings.get("max_stake_usdc")) or 2.0)
-    if source == "paper_confirmation_candidate":
+    if source in {"paper_confirmation_candidate", "paper_confirmation_current_candidate"}:
         confirmation_max = safe_float(settings.get("paper_confirmation_max_stake_usdc"))
         if confirmation_max is not None and confirmation_max > 0:
             max_stake = min(max_stake, float(confirmation_max))
@@ -481,7 +689,7 @@ def _build_signal(
     signal_cohort = _cohort_name(row)
     data_timestamp = str(row.get("latest_time_utc") or now_utc())
     liquidity = entry.get("liquidity", "")
-    if not str(liquidity or "").strip() and source in {"microstructure_current_candidate", "low_price_tick_probe"}:
+    if not str(liquidity or "").strip() and source in {"microstructure_current_candidate", "paper_confirmation_current_candidate", "low_price_tick_probe"}:
         liquidity = settings.get("microstructure_liquidity_proxy", "")
     priority_score = max_stake * edge / max(ask, 0.05)
     return {
@@ -518,7 +726,7 @@ def _build_signal(
         "price_action_signal": True,
         "price_action_evidence_status": (
             "trusted_shadow_requires_broker_paper_confirmation"
-            if source == "paper_confirmation_candidate"
+            if source in {"paper_confirmation_candidate", "paper_confirmation_current_candidate"}
             else "low_price_tick_requires_broker_paper_confirmation"
             if source == "low_price_tick_probe"
             else "cohort_bid_ask_round_trip_approved"
@@ -536,6 +744,12 @@ def _build_signal(
         "price_action_entry_source": source,
         "price_action_latest_bid": bid,
         "price_action_latest_ask": ask,
+        "historical_analogue_key": row.get("historical_analogue_key", ""),
+        "historical_analogue_validation_rows": row.get("historical_analogue_validation_rows", ""),
+        "historical_analogue_positive_rows": row.get("historical_analogue_positive_rows", ""),
+        "historical_analogue_validation_roi": row.get("historical_analogue_validation_roi", ""),
+        "historical_analogue_win_rate": row.get("historical_analogue_win_rate", ""),
+        "historical_analogue_gate": row.get("historical_analogue_gate", ""),
         "exit_policy_id": row.get("exit_policy_id", ""),
         "max_forward_observations": "" if max_forward_observations is None else max_forward_observations,
         "take_profit_return": take_profit_return,
@@ -634,6 +848,11 @@ def build_price_action_paper_signals(cfg: EngineConfig) -> dict[str, Any]:
     approved_microstructure = _approved_feedback_microstructure_cohorts(cfg)
     paper_confirmation = _paper_confirmation_candidates(cfg, settings)
     low_price_tick_evidence = _low_price_tick_probe_state(cfg, settings)
+    paper_confirmation_current, paper_confirmation_current_analogue = _paper_confirmation_current_candidates(
+        cfg,
+        settings,
+        paper_confirmation,
+    )
     low_price_tick = _low_price_tick_probe_candidates(cfg, settings)
     by_token = _entry_index(entries)
 
@@ -715,6 +934,38 @@ def build_price_action_paper_signals(cfg: EngineConfig) -> dict[str, Any]:
             continue
         signals.append(signal)
 
+    for raw_row in paper_confirmation_current:
+        row = {
+            **raw_row,
+            "source": raw_row.get("source") or "paper_confirmation_current_candidate",
+            "round_trip_status": raw_row.get("round_trip_status") or "open_marked",
+        }
+        confirmation = _confirmation_candidate_for_row(row, paper_confirmation)
+        if confirmation is None:
+            rejections.append(_reject(row, "paper-confirmation current candidate lost trusted shadow backing"))
+            continue
+        ask = safe_float(row.get("latest_ask"))
+        bid = safe_float(row.get("latest_bid"))
+        spread = safe_float(row.get("latest_spread"))
+        if spread is None and ask is not None and bid is not None:
+            spread = max(0.0, ask - bid)
+            row["latest_spread"] = spread
+        relative_spread = _relative_spread(spread, ask)
+        if ask is None or bid is None or not 0 < ask < 1 or not 0 < bid < 1:
+            rejections.append(_reject(row, "missing executable websocket bid/ask"))
+            continue
+        if spread is None or spread > max_spread:
+            rejections.append(_reject(row, "spread above price-action paper limit"))
+            continue
+        if relative_spread is None or relative_spread > max_relative_spread:
+            rejections.append(_reject(row, "relative spread above price-action paper limit"))
+            continue
+        signal = _build_signal(row, cohort=confirmation, entry=row, settings=settings)
+        if signal is None:
+            rejections.append(_reject(row, "could not build executable paper-confirmation current signal"))
+            continue
+        signals.append(signal)
+
     for raw_row in low_price_tick:
         row = {
             **raw_row,
@@ -759,6 +1010,8 @@ def build_price_action_paper_signals(cfg: EngineConfig) -> dict[str, Any]:
         "approved_price_action_cohorts": len(approved),
         "approved_microstructure_cohorts": len(approved_microstructure),
         "paper_confirmation_candidates": len(paper_confirmation),
+        "paper_confirmation_current_candidates": len(paper_confirmation_current),
+        "paper_confirmation_current_historical_analogue": paper_confirmation_current_analogue,
         "low_price_tick_probe_evidence": low_price_tick_evidence,
         "low_price_tick_probe_candidates": len(low_price_tick),
         "low_price_tick_probe_signals": sum(

@@ -779,6 +779,10 @@ async function load() {
       ["Approved PA cohorts", priceActionPaper.approved_price_action_cohorts],
       ["Approved microstructure cohorts", priceActionPaper.approved_microstructure_cohorts],
       ["Paper-confirm candidates", priceActionPaper.paper_confirmation_candidates],
+      ["Paper-confirm fresh matches", priceActionPaper.paper_confirmation_current_fresh_matches],
+      ["Paper-confirm hist gate", priceActionPaper.paper_confirmation_current_historical_state],
+      ["Paper-confirm hist blocked", priceActionPaper.paper_confirmation_current_historical_blocked],
+      ["Paper-confirm current", priceActionPaper.paper_confirmation_current_candidates],
       ["Paper-confirm signals", priceActionPaper.paper_confirmation_signals],
       ["Low-price evidence", priceActionPaper.low_price_tick_probe_evidence_state],
       ["Low-price val +", priceActionPaper.low_price_tick_validation_positive_rows],
@@ -2149,6 +2153,9 @@ def _price_action_paper_signal_status(cfg: EngineConfig) -> dict[str, Any]:
     low_price_tick_evidence = summary.get("low_price_tick_probe_evidence")
     if not isinstance(low_price_tick_evidence, dict):
         low_price_tick_evidence = {}
+    paper_confirmation_current_historical = summary.get("paper_confirmation_current_historical_analogue")
+    if not isinstance(paper_confirmation_current_historical, dict):
+        paper_confirmation_current_historical = {}
     return {
         "status": summary.get("status") or ("missing" if not signals and not rejections else "computed"),
         "generated_at_utc": summary.get("generated_at_utc"),
@@ -2164,6 +2171,11 @@ def _price_action_paper_signal_status(cfg: EngineConfig) -> dict[str, Any]:
         "approved_price_action_cohorts": summary.get("approved_price_action_cohorts"),
         "approved_microstructure_cohorts": summary.get("approved_microstructure_cohorts"),
         "paper_confirmation_candidates": summary.get("paper_confirmation_candidates"),
+        "paper_confirmation_current_candidates": summary.get("paper_confirmation_current_candidates"),
+        "paper_confirmation_current_historical_analogue": paper_confirmation_current_historical,
+        "paper_confirmation_current_historical_state": paper_confirmation_current_historical.get("state"),
+        "paper_confirmation_current_fresh_matches": paper_confirmation_current_historical.get("fresh_matches"),
+        "paper_confirmation_current_historical_blocked": paper_confirmation_current_historical.get("blocked"),
         "paper_confirmation_signals": confirmation_signal_count,
         "summary_paper_confirmation_signals": summary.get("paper_confirmation_signals"),
         "low_price_tick_probe_evidence": low_price_tick_evidence,

@@ -264,6 +264,9 @@ def test_live_side_metadata_survives_feature_to_prediction_handoff(tmp_path):
     assert prediction["outcome"] == "Yes"
     assert prediction["question"] == "Unit test Up or Down?"
     assert prediction["close_time"] == "2026-01-02T00:00:00Z"
+    assert prediction["top_ask_size"] == feature["top_ask_size"]
+    assert prediction["ask_depth_1pct"] == feature["ask_depth_1pct"]
+    assert prediction["book_imbalance"] == feature["book_imbalance"]
 
 
 def test_model_feature_selection_ignores_provenance_and_leakage_fields():

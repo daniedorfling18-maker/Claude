@@ -154,6 +154,8 @@ mispricing_alpha:
   depth_imbalance_penalty_weight: 0.02
   execution_cost_probe_stake_usdc: 1.0
   execution_cost_penalty_weight: 1.0
+  enrich_with_latest_websocket_quotes: true
+  max_websocket_quote_enrichment_age_seconds: 3600
   volatility_penalty_weight: 0.15
   uncertainty_penalty_weight: 0.03
   market_overround_penalty_weight: 0.35

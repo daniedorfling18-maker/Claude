@@ -163,6 +163,110 @@ def test_alpha_scoring_penalises_shallow_execution_depth(tmp_path):
     assert float(scored[0]["edge_lower_bound"]) < float(scored[0]["alpha_raw_edge"])
 
 
+def test_alpha_scoring_enriches_stale_predictions_with_latest_websocket_depth(tmp_path):
+    cfg = _config(tmp_path)
+    cfg.raw["mispricing_alpha"]["model_residual_shrinkage"] = 1.0
+    cfg.raw["mispricing_alpha"]["max_model_residual_adjustment"] = 0.2
+    cfg.raw["mispricing_alpha"]["execution_cost_probe_stake_usdc"] = 10.0
+    write_csv(
+        cfg.output_root / "polymarket_training" / "websocket_market_features.csv",
+        [
+            {
+                "market_id": "depth-market",
+                "market_slug": "depth-market",
+                "asset_id": "depth-token",
+                "token_id": "depth-token",
+                "collected_at_utc": "2026-02-01T00:00:30Z",
+                "best_bid": "0.47",
+                "best_ask": "0.49",
+                "midpoint": "0.48",
+                "spread": "0.02",
+                "liquidity": "2500",
+                "top_bid_size": "80",
+                "top_ask_size": "40",
+                "bid_depth_1pct": "120",
+                "ask_depth_1pct": "80",
+                "bid_depth_5pct": "200",
+                "ask_depth_5pct": "160",
+                "book_imbalance": "0.62",
+            }
+        ],
+    )
+
+    scored = apply_mispricing_alpha(
+        cfg,
+        [
+            {
+                "market_id": "depth-market",
+                "market_slug": "depth-market",
+                "token_id": "depth-token",
+                "prediction_timestamp": "2026-02-01T00:00:00Z",
+                "category": "synthetic",
+                "market_midpoint": "0.50",
+                "raw_probability": "0.70",
+                "calibrated_probability": "0.70",
+                "model_probability": "0.70",
+                "executable_price": "0.50",
+                "time_to_close_hours": "24",
+                "confidence": "1",
+            }
+        ],
+    )
+
+    assert scored[0]["websocket_quote_enrichment_status"] == "enriched"
+    assert float(scored[0]["executable_price"]) == 0.49
+    assert float(scored[0]["market_midpoint"]) == 0.48
+    assert scored[0]["execution_cost_status"] == "top_of_book_fill"
+    assert float(scored[0]["execution_depth_stake_cap_usdc"]) > 10.0
+
+
+def test_alpha_scoring_refuses_stale_websocket_quote_enrichment(tmp_path):
+    cfg = _config(tmp_path)
+    cfg.raw["mispricing_alpha"]["model_residual_shrinkage"] = 1.0
+    cfg.raw["mispricing_alpha"]["max_websocket_quote_enrichment_age_seconds"] = 60
+    write_csv(
+        cfg.output_root / "polymarket_training" / "websocket_market_features.csv",
+        [
+            {
+                "asset_id": "stale-depth-token",
+                "token_id": "stale-depth-token",
+                "collected_at_utc": "2026-02-01T00:00:00Z",
+                "best_bid": "0.20",
+                "best_ask": "0.21",
+                "midpoint": "0.205",
+                "top_ask_size": "100",
+                "ask_depth_1pct": "100",
+                "ask_depth_5pct": "100",
+            }
+        ],
+    )
+
+    scored = apply_mispricing_alpha(
+        cfg,
+        [
+            {
+                "market_id": "stale-depth-market",
+                "market_slug": "stale-depth-market",
+                "token_id": "stale-depth-token",
+                "prediction_timestamp": "2026-02-01T00:10:00Z",
+                "category": "synthetic",
+                "market_midpoint": "0.50",
+                "raw_probability": "0.70",
+                "calibrated_probability": "0.70",
+                "model_probability": "0.70",
+                "executable_price": "0.50",
+                "time_to_close_hours": "24",
+                "confidence": "1",
+            }
+        ],
+    )
+
+    assert scored[0]["websocket_quote_enrichment_status"] == "stale_quote_outside_age_window"
+    assert scored[0]["executable_price"] == "0.50"
+    assert scored[0]["market_midpoint"] == "0.50"
+    assert scored[0]["execution_cost_status"] == "missing_depth"
+
+
 def test_near_miss_learning_lane_records_liquid_uncertain_edge(tmp_path):
     cfg = _config(tmp_path)
     cfg.raw["mispricing_alpha"]["model_residual_shrinkage"] = 1.0

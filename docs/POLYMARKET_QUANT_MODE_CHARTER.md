@@ -103,15 +103,22 @@ Detailed implementation instructions are written as work orders **WO-1, WO-2, WO
 - Acceptance: promotion review output includes CLV fields; a cohort with only positive CLV still
   reads `blocked`; tests assert both directions.
 
-### WP5 — Execution cost model from order-book depth — `open`
+### WP5 — Execution cost model from order-book depth — `done` (2026-07-02)
 
-- New `execution_costs.py`: estimate expected fill price for a given stake from normalised depth
-  fields (`bid_depth_1pct/5pct`, `ask_depth_*`, `top_*_size`, `book_imbalance`) instead of the flat
-  `costs.slippage` assumption. Output: expected slippage + max stake at acceptable impact.
-- Consumers: shadow entry fill price (`shadow_cohort._shadow_slippage`), `risk_decision` stake cap,
-  EV in `mispricing_alpha`.
-- Acceptance: depth-aware slippage is never lower than the current flat assumption unless the book
-  is demonstrably deeper; unit tests with synthetic books; no behaviour change when depth is missing.
+Implemented in `execution_costs.py`: expected fill price for a given stake is estimated from
+normalised depth fields (`bid_depth_1pct/5pct`, `ask_depth_*`, `top_*_size`, `book_imbalance`)
+instead of relying only on the flat `costs.slippage` assumption. The estimator outputs expected
+slippage plus max stake at acceptable impact, fails closed when depth is missing, and only lowers
+flat slippage when the book is demonstrably deep enough.
+
+Consumers: shadow entry fill price (`shadow_cohort._shadow_slippage`), `risk_decision` stake cap,
+strategy slippage checks, and EV in `mispricing_alpha`. `models/calibrated.py` and `strategy.py`
+preserve bid/ask/depth fields into predictions and signals, and `mispricing_alpha.py` can enrich
+stale prediction rows with the latest fresh websocket quote/depth row before scoring.
+
+Acceptance: `tests/polymarket_predictive_engine/test_execution_costs.py`, the depth-risk test in
+`test_hardening_controls.py`, prediction handoff coverage in `test_predictive_power_expansion.py`,
+and mispricing-alpha depth/enrichment tests.
 
 ### WP6 — Portfolio-level correlated exposure from live positions — `open`
 
@@ -174,7 +181,8 @@ join-bid shadow probe.
 Chronological, no-lookahead replay of recorded websocket features through any registered strategy
 with conservative fill simulation (cross at ask only when the limit crosses; resting orders fill
 only on later crossing quotes; mark to bid). This is the event-driven backtester that closes the
-algo loop offline. Later, WP5's depth-based cost model replaces its flat fill assumptions.
+algo loop offline. WP5's depth-based cost model now supplies the cost-aware execution layer used by
+alpha scoring, shadow fills, strategy checks, and risk sizing.
 
 ## Rules of engagement for coding agents
 

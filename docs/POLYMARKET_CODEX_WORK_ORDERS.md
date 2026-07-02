@@ -273,5 +273,7 @@ WO-6               after WO-5
 ```
 
 After all six land: WP3 is done (flip it in the charter), the algo track (WP9–WP11) is done, and
-the next charter priorities are WP4 (CLV-aware promotion review) and WP5 (depth-based execution
-costs), which then plug straight into the replay harness's fill simulation.
+the next charter priorities are WP4 (CLV-aware promotion review), WP6 (portfolio-level correlated
+exposure), WP7 (family classification for liquid `unknown` markets), and WP8 (edge attribution).
+WP5 (depth-based execution costs) has since landed and now plugs into alpha scoring, strategy checks,
+shadow fills, and risk sizing.

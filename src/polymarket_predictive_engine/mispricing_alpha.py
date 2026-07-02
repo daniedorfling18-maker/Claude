@@ -9,11 +9,34 @@ from .config import EngineConfig, load_config
 from .crypto_updown_model import is_crypto_updown_contract, score_crypto_updown_prediction
 from .execution_costs import estimate_execution_cost
 from .models.calibration_v2 import joined_feature_label_rows
-from .utils import boolish, git_commit_hash, now_utc, read_csv_rows, read_json, safe_float, write_csv, write_json
+from .utils import (
+    boolish,
+    git_commit_hash,
+    now_utc,
+    parse_timestamp,
+    read_csv_rows,
+    read_json,
+    safe_float,
+    write_csv,
+    write_json,
+)
 from .worldcup_validation import is_worldcup_winner_market, signal_cohort
 
 MODEL_VERSION = "pm-mispricing-alpha-v1"
 ARTIFACT_NAME = "mispricing_alpha_v1.json"
+QUOTE_ENRICHMENT_FIELDS = (
+    "best_bid",
+    "best_ask",
+    "spread",
+    "liquidity",
+    "top_bid_size",
+    "top_ask_size",
+    "bid_depth_1pct",
+    "ask_depth_1pct",
+    "bid_depth_5pct",
+    "ask_depth_5pct",
+    "book_imbalance",
+)
 
 
 def _setting_bool(settings: dict[str, Any], key: str, default: bool = False) -> bool:
@@ -262,6 +285,81 @@ def _load_alpha_model(cfg: EngineConfig) -> dict[str, Any]:
     return model if isinstance(model, dict) else {}
 
 
+def _row_time(row: dict[str, Any]):
+    return (
+        row.get("prediction_timestamp")
+        or row.get("collected_at_utc")
+        or row.get("source_timestamp")
+        or row.get("timestamp")
+        or ""
+    )
+
+
+def _enrich_with_latest_websocket_quotes(
+    cfg: EngineConfig,
+    predictions: list[dict[str, Any]],
+    settings: dict[str, Any],
+) -> list[dict[str, Any]]:
+    if not _setting_bool(settings, "enrich_with_latest_websocket_quotes", True):
+        return predictions
+    path = cfg.output_root / "polymarket_training" / "websocket_market_features.csv"
+    if not path.exists():
+        return predictions
+    latest: dict[str, dict[str, Any]] = {}
+    latest_time: dict[str, Any] = {}
+    for row in read_csv_rows(path):
+        token = str(row.get("token_id") or row.get("asset_id") or "").strip()
+        if not token:
+            continue
+        parsed = parse_timestamp(_row_time(row))
+        if parsed is None:
+            continue
+        if token not in latest_time or parsed >= latest_time[token]:
+            latest[token] = row
+            latest_time[token] = parsed
+    if not latest:
+        return predictions
+
+    max_age_seconds = safe_float(settings.get("max_websocket_quote_enrichment_age_seconds"))
+    if max_age_seconds is None:
+        max_age_seconds = 3600.0
+    enriched: list[dict[str, Any]] = []
+    for prediction in predictions:
+        token = str(prediction.get("token_id") or prediction.get("asset_id") or "").strip()
+        quote = latest.get(token)
+        if not quote:
+            enriched.append(prediction)
+            continue
+        pred_time = parse_timestamp(_row_time(prediction))
+        quote_time = latest_time.get(token)
+        age_seconds = abs((quote_time - pred_time).total_seconds()) if pred_time is not None and quote_time is not None else None
+        if age_seconds is not None and age_seconds > max_age_seconds:
+            enriched.append(
+                {
+                    **prediction,
+                    "websocket_quote_enrichment_status": "stale_quote_outside_age_window",
+                    "websocket_quote_age_seconds": round(age_seconds, 3),
+                }
+            )
+            continue
+        merged = dict(prediction)
+        for field in QUOTE_ENRICHMENT_FIELDS:
+            value = quote.get(field)
+            if value not in {None, ""}:
+                merged[field] = value
+        best_ask = safe_float(quote.get("best_ask"))
+        if best_ask is not None and 0 < best_ask < 1:
+            merged["executable_price"] = best_ask
+        midpoint = safe_float(quote.get("midpoint"))
+        if midpoint is not None and 0 <= midpoint <= 1:
+            merged["market_midpoint"] = midpoint
+        merged["websocket_quote_enrichment_status"] = "enriched"
+        merged["websocket_quote_timestamp"] = "" if quote_time is None else quote_time.isoformat().replace("+00:00", "Z")
+        merged["websocket_quote_age_seconds"] = "" if age_seconds is None else round(age_seconds, 3)
+        enriched.append(merged)
+    return enriched
+
+
 def _resolve_repo_relative_path(cfg: EngineConfig, path: str | Path) -> Path:
     resolved = Path(path)
     if resolved.is_absolute():
@@ -403,6 +501,7 @@ def apply_mispricing_alpha(
         predictions = read_csv_rows(cfg.output_root / "polymarket_predictions" / "predictions.csv")
     if not settings.get("enabled", True):
         return predictions
+    predictions = _enrich_with_latest_websocket_quotes(cfg, predictions, settings)
 
     model = _load_alpha_model(cfg)
     alpha_shrinkage = float(settings.get("bias_alpha_shrinkage", 0.50))

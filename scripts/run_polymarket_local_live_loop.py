@@ -37,6 +37,7 @@ from polymarket_predictive_engine.cohort_validation import write_signal_cohort_p
 from polymarket_predictive_engine.dashboard import render_dashboard  # noqa: E402
 from polymarket_predictive_engine.execution.paper import paper_trade  # noqa: E402
 from polymarket_predictive_engine.paper_cycle import run_paper_cycle  # noqa: E402
+from polymarket_predictive_engine.price_action_scout import build_price_action_scout  # noqa: E402
 from polymarket_predictive_engine.profit_target import write_profit_target_tracker  # noqa: E402
 from polymarket_predictive_engine.refresh_governance import refresh_governance  # noqa: E402
 from polymarket_predictive_engine.resolution_collector import fetch_gamma_market  # noqa: E402
@@ -1171,6 +1172,16 @@ def main(argv: list[str] | None = None) -> int:
                 features, quality, websocket_features = normalize_websocket_file(cfg)
                 features = enrich_websocket_features_with_scanner_metadata(cfg, features)
                 ingest = ingest_websocket_features_into_ledger(cfg, features)
+                try:
+                    price_action_scout = build_price_action_scout(cfg)
+                except Exception as exc:  # noqa: BLE001 - scout marking must not stop live websocket ticks
+                    failures += 1
+                    price_action_scout = {
+                        "status": "error",
+                        "error": f"{type(exc).__name__}: {exc}",
+                        "paper_trading_invoked": False,
+                        "live_trading_invoked": False,
+                    }
 
                 full_cycle = dict(last_prediction_summary)
                 now_ts = time.time()
@@ -1380,6 +1391,15 @@ def main(argv: list[str] | None = None) -> int:
                     },
                     "resource_guard": resource_guard,
                     "ingest": ingest,
+                    "price_action_scout": {
+                        "status": price_action_scout.get("status") if isinstance(price_action_scout, dict) else "unknown",
+                        "decision": price_action_scout.get("decision") if isinstance(price_action_scout, dict) else "",
+                        "current_positive_analogue_targets": price_action_scout.get("current_positive_analogue_targets")
+                        if isinstance(price_action_scout, dict)
+                        else "",
+                        "open_trades": price_action_scout.get("open_trades") if isinstance(price_action_scout, dict) else "",
+                        "closed_trades": price_action_scout.get("closed_trades") if isinstance(price_action_scout, dict) else "",
+                    },
                     "full_prediction_cycle": {
                         "status": full_cycle.get("status") if isinstance(full_cycle, dict) else "unknown",
                         "source": args.paper_source,

@@ -766,6 +766,7 @@ def _current_historical_analogue_scan(
     positive_keys: set[str] = set()
     positive_matches = 0
     blocked = 0
+    robust_min_validation_roi = float(safe_float(settings.get("historical_breadth_min_validation_roi")) or 0.03)
 
     for row in rows:
         family = str(row.get("family") or row.get("category") or "unknown").strip() or "unknown"
@@ -778,6 +779,14 @@ def _current_historical_analogue_scan(
             key = str(analogue.get("key") or "")
             if key:
                 positive_keys.add(key)
+            validation_roi = safe_float(analogue.get("validation_roi")) or 0.0
+            recommended_query = _historical_breadth_query(
+                (
+                    family,
+                    str(row.get("market_slug") or ""),
+                    str(row.get("question") or ""),
+                )
+            )
             positive_preview.append(
                 {
                     "market_slug": row.get("market_slug", ""),
@@ -791,8 +800,15 @@ def _current_historical_analogue_scan(
                     "historical_analogue_key": key,
                     "historical_analogue_validation_rows": analogue.get("validation_rows", 0),
                     "historical_analogue_positive_rows": analogue.get("positive_rows", 0),
-                    "historical_analogue_validation_roi": analogue.get("validation_roi", 0.0),
+                    "historical_analogue_validation_roi": validation_roi,
                     "historical_analogue_win_rate": analogue.get("win_rate", 0.0),
+                    "minimum_robust_validation_roi": robust_min_validation_roi,
+                    "robust_validation_roi_gap": max(0.0, robust_min_validation_roi - validation_roi),
+                    "recommended_collection_query": recommended_query,
+                    "trade_authorisation": "diagnostic_only_requires_governed_signal",
+                    "forward_shadow_action": (
+                        "collect_forward_shadow_bid_ask_evidence_until_robust_and_paper_confirmation_gates_clear"
+                    ),
                 }
             )
         else:
@@ -836,7 +852,10 @@ def _current_historical_analogue_scan(
         next_action = "Collect fresh websocket bid/ask rows before evaluating current repricing opportunities."
     elif positive_matches:
         state = "current_positive_historical_analogue_available"
-        next_action = "Route these current positive analogues through cohort governance and paper-confirmation before risking capital."
+        next_action = (
+            "Treat current positive analogues as forward-shadow learning targets only; collect fresh bid/ask "
+            "movement until robust historical breadth and paper-confirmation governance clear."
+        )
     else:
         state = "no_current_positive_historical_analogue"
         next_action = "Broaden live market coverage and keep collecting bid/ask variation; current rows do not match profitable validation buckets."
@@ -853,6 +872,7 @@ def _current_historical_analogue_scan(
         "validation_buckets": len(stats),
         "positive_validation_buckets": positive_validation_buckets,
         "positive_historical_analogue_keys": len(positive_keys),
+        "minimum_robust_validation_roi": robust_min_validation_roi,
         "positive_preview": positive_preview[:10],
         "blocked_preview": sorted(
             blocked_preview,

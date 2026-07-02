@@ -796,6 +796,7 @@ async function load() {
       ["All-current blocked", currentHistScan.blocked],
       ["All-current blocked why", currentHistScan.blocked_by_state, v=>longText(v, 220)],
       ["All-current positive families", currentHistScan.positive_by_family, v=>longText(v, 180)],
+      ["All-current next", currentHistScan.next_action, v=>longText(v, 240)],
       ["Historical breadth state", historicalBreadthScan.state, v=>longText(v, 180)],
       ["Historical events", historicalBreadthScan.total_events],
       ["Historical val ROI", historicalBreadthScan.validation_roi, v=>fmtNum(Number(v) * 100, 2) + "%"],
@@ -827,7 +828,10 @@ async function load() {
       ["Val rows","historical_analogue_validation_rows"],
       ["Val +","historical_analogue_positive_rows"],
       ["Val ROI","historical_analogue_validation_roi", v=>fmtNum(Number(v) * 100, 2) + "%"],
-      ["Win rate","historical_analogue_win_rate", v=>fmtNum(Number(v) * 100, 1) + "%"]
+      ["Robust gap","robust_validation_roi_gap", v=>fmtNum(Number(v) * 100, 2) + "%"],
+      ["Collect","recommended_collection_query"],
+      ["Action","forward_shadow_action", v=>longText(v, 180)],
+      ["Auth","trade_authorisation", v=>longText(v, 160)]
     ]) + `<div style="height:12px"></div><h3>Current analogue blockers to learn from</h3>` + table(currentHistScan.blocked_preview || [], [
       ["Gate","historical_analogue_gate", v=>longText(v, 160)],
       ["Family","family"],

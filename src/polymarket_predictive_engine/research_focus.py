@@ -308,6 +308,76 @@ def _current_analogue_scan_needs_breadth(price_action_paper: dict[str, Any]) -> 
     return False
 
 
+def _current_positive_analogue_targets(price_action_paper: dict[str, Any], *, max_targets: int = 6) -> list[dict[str, Any]]:
+    """Current executable positive analogues are collection targets, not trade approvals."""
+    scan = price_action_paper.get("current_historical_analogue_scan")
+    if not isinstance(scan, dict):
+        return []
+    rows = scan.get("positive_preview")
+    if not isinstance(rows, list):
+        return []
+    breadth = price_action_paper.get("historical_breadth_scan")
+    thresholds = breadth.get("thresholds", {}) if isinstance(breadth, dict) else {}
+    robust_min_roi = _num(
+        scan.get("minimum_robust_validation_roi")
+        or thresholds.get("min_validation_roi")
+        or 0.03
+    )
+    targets: list[dict[str, Any]] = []
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        query = str(row.get("recommended_collection_query") or "").strip()
+        if not query:
+            query = _near_miss_collection_query(row)
+        if not query:
+            query = _cohort_query(str(row.get("family") or row.get("signal_cohort") or ""))
+        validation_roi = _num(row.get("historical_analogue_validation_roi"))
+        validation_rows = _num(row.get("historical_analogue_validation_rows"))
+        positive_rows = _num(row.get("historical_analogue_positive_rows"))
+        targets.append(
+            {
+                "market_slug": row.get("market_slug", ""),
+                "question": row.get("question", ""),
+                "family": row.get("family", ""),
+                "outcome": row.get("outcome", ""),
+                "token_id": row.get("token_id", ""),
+                "recommended_collection_query": query,
+                "latest_bid": row.get("latest_bid", ""),
+                "latest_ask": row.get("latest_ask", ""),
+                "latest_spread": row.get("latest_spread", ""),
+                "historical_analogue_key": row.get("historical_analogue_key", ""),
+                "validation_rows": validation_rows,
+                "positive_rows": positive_rows,
+                "validation_roi": validation_roi,
+                "win_rate": row.get("historical_analogue_win_rate", ""),
+                "minimum_robust_validation_roi": robust_min_roi,
+                "robust_validation_roi_gap": max(0.0, robust_min_roi - validation_roi),
+                "decision_use": "forward_shadow_learning_target_not_trade_authorisation",
+                "next_action": "Collect fresh bid/ask repricing around this family/market until robust breadth and paper-confirmation gates clear.",
+            }
+        )
+    targets.sort(
+        key=lambda item: (
+            _num(item.get("validation_roi")),
+            _num(item.get("positive_rows")),
+            _num(item.get("validation_rows")),
+            -_num(item.get("latest_spread"), 999.0),
+        ),
+        reverse=True,
+    )
+    return targets[:max_targets]
+
+
+def _current_positive_analogue_queries(targets: list[dict[str, Any]]) -> list[str]:
+    queries: list[str] = []
+    for row in targets:
+        query = str(row.get("recommended_collection_query") or "").strip()
+        if query and query not in queries:
+            queries.append(query)
+    return queries
+
+
 def _price_action_model_needs_data(price_action_model: dict[str, Any]) -> bool:
     decision = str(price_action_model.get("decision") or "")
     status = str(price_action_model.get("status") or "")
@@ -339,6 +409,8 @@ def build_research_focus(cfg) -> dict[str, Any]:
     historical_breadth_queries = _historical_breadth_queries(price_action_paper)
     near_miss_queries = _near_miss_candidate_queries(cfg)
     analogue_scan_needs_breadth = _current_analogue_scan_needs_breadth(price_action_paper)
+    current_positive_targets = _current_positive_analogue_targets(price_action_paper)
+    current_positive_queries = _current_positive_analogue_queries(current_positive_targets)
     model_needs_repricing_data = _price_action_model_needs_data(price_action_model) and bool(feedback_queries)
     feedback_positive = bool(
         _num(price_action_feedback.get("promotion_candidates"))
@@ -360,7 +432,17 @@ def build_research_focus(cfg) -> dict[str, Any]:
     elif model_needs_repricing_data:
         blockers = price_action_model.get("validation_blockers", []) or price_action_model.get("blockers", [])
         blocker_text = "; ".join(str(item) for item in blockers) if isinstance(blockers, list) else str(blockers or "")
-        if historical_breadth_queries:
+        if current_positive_queries:
+            target = current_positive_targets[0] if current_positive_targets else {}
+            roi = _num(target.get("validation_roi"))
+            gap = _num(target.get("robust_validation_roi_gap"))
+            next_action = (
+                "A current executable market has a positive historical analogue after bid/ask costs, but it is still a "
+                f"forward-shadow learning target, not a trade approval; prioritise {', '.join(current_positive_queries[:4])} "
+                f"collection. Best current analogue validation ROI={roi:.4f}; robust ROI gap={gap:.4f}."
+                + (f" Model blocker: {blocker_text}." if blocker_text else "")
+            )
+        elif historical_breadth_queries:
             breadth = price_action_paper.get("historical_breadth_scan", {})
             next_action = (
                 "Strict price-action model has near-positive historical buckets but they are not robust yet; "
@@ -400,6 +482,9 @@ def build_research_focus(cfg) -> dict[str, Any]:
             if query and query not in collection_queries:
                 collection_queries.append(query)
     if model_needs_repricing_data:
+        for query in current_positive_queries:
+            if query and query not in collection_queries:
+                collection_queries.append(query)
         for query in historical_breadth_queries:
             if query and query not in collection_queries:
                 collection_queries.append(query)
@@ -445,8 +530,16 @@ def build_research_focus(cfg) -> dict[str, Any]:
             "validation_gap_needs_collection": bool(validation_gap_queries),
             "model_needs_repricing_data": model_needs_repricing_data or bool(validation_gap_queries),
             "historical_breadth_queries": historical_breadth_queries,
+            "current_positive_analogue_queries": current_positive_queries,
             "near_miss_candidate_queries": near_miss_queries,
             "analogue_scan_needs_breadth": analogue_scan_needs_breadth,
+        },
+        "price_action_current_positive_analogues": {
+            "state": "learning_targets_available" if current_positive_targets else "none",
+            "targets": current_positive_targets,
+            "collection_queries": current_positive_queries,
+            "paper_only": True,
+            "trade_authorisation": "no_trade_without_governed_price_action_signal",
         },
         "price_action_historical_breadth": price_action_paper.get("historical_breadth_scan", {}),
         "price_action_feedback": {

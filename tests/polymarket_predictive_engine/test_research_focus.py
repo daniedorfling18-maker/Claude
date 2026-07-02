@@ -246,3 +246,69 @@ def test_research_focus_broadens_to_near_miss_board_when_current_analogues_are_n
     assert payload["price_action_model"]["analogue_scan_needs_breadth"] is True
     assert payload["price_action_model"]["near_miss_candidate_queries"][:4] == ["fed", "world cup", "esports", "bitcoin"]
     assert "broaden evidence collection into near-miss markets" in payload["summary"]
+
+
+def test_research_focus_prioritises_current_positive_analogue_as_learning_target(tmp_path):
+    cfg = _cfg(tmp_path)
+    write_json(
+        cfg.output_root / "polymarket_price_action" / "price_action_model_summary.json",
+        {
+            "status": "trained",
+            "decision": "collect_more_bid_ask_price_action_model_evidence",
+            "promotion_ready": False,
+            "validation_blockers": ["selected validation ROI 0.0000 < 0.0300"],
+        },
+    )
+    write_json(
+        cfg.output_root / "polymarket_price_action" / "price_action_paper_signal_summary.json",
+        {
+            "status": "computed",
+            "current_historical_analogue_scan": {
+                "state": "current_positive_historical_analogue_available",
+                "current_rows": 12,
+                "positive_matches": 1,
+                "minimum_robust_validation_roi": 0.03,
+                "positive_preview": [
+                    {
+                        "market_slug": "will-the-fed-increase-interest-rates-by-50-bps-after-the-july-2026-meeting",
+                        "question": "Will the Fed increase interest rates by 50+ bps after the July 2026 meeting?",
+                        "family": "macro_rates",
+                        "outcome": "Yes",
+                        "token_id": "fed-token",
+                        "latest_bid": 0.996,
+                        "latest_ask": 0.997,
+                        "latest_spread": 0.001,
+                        "historical_analogue_key": "macro_rates|ask=60c+|spread=<=0.1c|side=BUY",
+                        "historical_analogue_validation_rows": 70,
+                        "historical_analogue_positive_rows": 15,
+                        "historical_analogue_validation_roi": 0.0026,
+                        "historical_analogue_win_rate": 0.214,
+                    }
+                ],
+            },
+            "historical_breadth_scan": {
+                "state": "positive_validation_pockets_not_robust",
+                "recommended_collection_queries": ["ethereum"],
+                "thresholds": {"min_validation_roi": 0.03},
+            },
+        },
+    )
+    write_json(
+        cfg.governance_root / "price_action_feedback.json",
+        {
+            "status": "ok",
+            "learning_state": "collect_more_positive_price_action_evidence",
+            "collection_queries": ["btc updown"],
+        },
+    )
+
+    payload = build_research_focus(cfg)
+
+    assert payload["collection_queries"][:3] == ["fed", "ethereum", "btc updown"]
+    assert payload["price_action_model"]["current_positive_analogue_queries"] == ["fed"]
+    assert payload["price_action_current_positive_analogues"]["state"] == "learning_targets_available"
+    target = payload["price_action_current_positive_analogues"]["targets"][0]
+    assert target["recommended_collection_query"] == "fed"
+    assert target["decision_use"] == "forward_shadow_learning_target_not_trade_authorisation"
+    assert target["robust_validation_roi_gap"] > 0
+    assert "not a trade approval" in payload["summary"]

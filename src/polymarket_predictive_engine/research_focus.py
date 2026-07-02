@@ -197,6 +197,29 @@ def _model_validation_gap_queries(price_action_model: dict[str, Any]) -> list[st
     return queries
 
 
+def _historical_breadth_queries(price_action_paper: dict[str, Any]) -> list[str]:
+    breadth = price_action_paper.get("historical_breadth_scan")
+    if not isinstance(breadth, dict):
+        return []
+    if str(breadth.get("state") or "") not in {
+        "positive_validation_pockets_not_robust",
+        "robust_positive_historical_buckets_found",
+    }:
+        return []
+    queries: list[str] = []
+    for raw_query in breadth.get("recommended_collection_queries", []) or []:
+        query = str(raw_query or "").strip()
+        if query and query not in queries:
+            queries.append(query)
+    for row in breadth.get("top_near_positive_buckets", []) or []:
+        if not isinstance(row, dict):
+            continue
+        query = str(row.get("recommended_collection_query") or "").strip()
+        if query and query not in queries:
+            queries.append(query)
+    return queries
+
+
 def _price_action_model_needs_data(price_action_model: dict[str, Any]) -> bool:
     decision = str(price_action_model.get("decision") or "")
     status = str(price_action_model.get("status") or "")
@@ -220,8 +243,12 @@ def build_research_focus(cfg) -> dict[str, Any]:
     price_action_model = read_json(cfg.output_root / "polymarket_price_action" / "price_action_model_summary.json", default={}) or {}
     if not isinstance(price_action_model, dict):
         price_action_model = {}
+    price_action_paper = read_json(cfg.output_root / "polymarket_price_action" / "price_action_paper_signal_summary.json", default={}) or {}
+    if not isinstance(price_action_paper, dict):
+        price_action_paper = {}
     feedback_queries = _feedback_collection_queries(price_action_feedback)
     validation_gap_queries = _model_validation_gap_queries(price_action_model)
+    historical_breadth_queries = _historical_breadth_queries(price_action_paper)
     model_needs_repricing_data = _price_action_model_needs_data(price_action_model) and bool(feedback_queries)
     feedback_positive = bool(
         _num(price_action_feedback.get("promotion_candidates"))
@@ -243,11 +270,20 @@ def build_research_focus(cfg) -> dict[str, Any]:
     elif model_needs_repricing_data:
         blockers = price_action_model.get("validation_blockers", []) or price_action_model.get("blockers", [])
         blocker_text = "; ".join(str(item) for item in blockers) if isinstance(blockers, list) else str(blockers or "")
-        next_action = (
-            "Strict price-action model needs profitable ask-to-future-bid training examples; "
-            f"focus websocket collection on {', '.join(feedback_queries[:4])}."
-            + (f" Model blocker: {blocker_text}." if blocker_text else "")
-        )
+        if historical_breadth_queries:
+            breadth = price_action_paper.get("historical_breadth_scan", {})
+            next_action = (
+                "Strict price-action model has near-positive historical buckets but they are not robust yet; "
+                f"prioritise {', '.join(historical_breadth_queries[:4])} bid/ask collection before generic scans."
+                + (f" Breadth state: {breadth.get('state')}." if isinstance(breadth, dict) else "")
+                + (f" Model blocker: {blocker_text}." if blocker_text else "")
+            )
+        else:
+            next_action = (
+                "Strict price-action model needs profitable ask-to-future-bid training examples; "
+                f"focus websocket collection on {', '.join(feedback_queries[:4])}."
+                + (f" Model blocker: {blocker_text}." if blocker_text else "")
+            )
     elif focus_rows:
         top = focus_rows[0]
         next_action = (
@@ -268,6 +304,9 @@ def build_research_focus(cfg) -> dict[str, Any]:
             if query and query not in collection_queries:
                 collection_queries.append(query)
     if model_needs_repricing_data:
+        for query in historical_breadth_queries:
+            if query and query not in collection_queries:
+                collection_queries.append(query)
         for query in feedback_queries:
             if query and query not in collection_queries:
                 collection_queries.append(query)
@@ -305,7 +344,9 @@ def build_research_focus(cfg) -> dict[str, Any]:
             "blockers": price_action_model.get("blockers", []),
             "validation_gap_needs_collection": bool(validation_gap_queries),
             "model_needs_repricing_data": model_needs_repricing_data or bool(validation_gap_queries),
+            "historical_breadth_queries": historical_breadth_queries,
         },
+        "price_action_historical_breadth": price_action_paper.get("historical_breadth_scan", {}),
         "price_action_feedback": {
             "status": price_action_feedback.get("status"),
             "learning_state": price_action_feedback.get("learning_state"),

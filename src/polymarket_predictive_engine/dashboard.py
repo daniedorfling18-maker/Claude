@@ -801,6 +801,8 @@ async function load() {
       ["Historical val ROI", historicalBreadthScan.validation_roi, v=>fmtNum(Number(v) * 100, 2) + "%"],
       ["Historical val + rows", historicalBreadthScan.validation_positive_rows],
       ["Robust hist buckets", historicalBreadthScan.robust_positive_buckets],
+      ["Near-positive hist buckets", historicalBreadthScan.near_positive_buckets],
+      ["Hist collect target", historicalBreadthScan.recommended_collection_queries, v=>longText(v, 180)],
       ["Historical next", historicalBreadthScan.next_action, v=>longText(v, 220)],
       ["Low-price evidence", priceActionPaper.low_price_tick_probe_evidence_state],
       ["Low-price val +", priceActionPaper.low_price_tick_validation_positive_rows],
@@ -839,6 +841,16 @@ async function load() {
       ["Val rows","validation_rows"],
       ["Val ROI","validation_roi", v=>fmtNum(Number(v) * 100, 2) + "%"],
       ["Val win","validation_win_rate", v=>fmtNum(Number(v) * 100, 1) + "%"]
+    ]) + `<div style="height:12px"></div><h3>Near-positive historical buckets to collect</h3>` + table(historicalBreadthScan.top_near_positive_buckets || [], [
+      ["Spec","spec_id", v=>longText(v, 120)],
+      ["Bucket","key", v=>longText(v, 220)],
+      ["Collect","recommended_collection_query"],
+      ["Blockers","blockers", v=>longText(v, 220)],
+      ["Train rows","train_rows"],
+      ["Train ROI","train_roi", v=>fmtNum(Number(v) * 100, 2) + "%"],
+      ["Val rows","validation_rows"],
+      ["Val ROI","validation_roi", v=>fmtNum(Number(v) * 100, 2) + "%"],
+      ["Concentration","validation_top_positive_token_pnl_share", v=>fmtNum(Number(v) * 100, 1) + "%"]
     ]) + `<div style="height:12px"></div><h3>Paper-confirmation probe exit watch</h3>` + facts([
       ["Status", probeExitWatch.status],
       ["Open probes", probeExitWatch.open_confirmation_probes],
@@ -2237,6 +2249,8 @@ def _price_action_paper_signal_status(cfg: EngineConfig) -> dict[str, Any]:
         "historical_breadth_events": historical_breadth_scan.get("total_events"),
         "historical_breadth_validation_roi": historical_breadth_scan.get("validation_roi"),
         "historical_breadth_robust_positive_buckets": historical_breadth_scan.get("robust_positive_buckets"),
+        "historical_breadth_near_positive_buckets": historical_breadth_scan.get("near_positive_buckets"),
+        "historical_breadth_recommended_collection_queries": historical_breadth_scan.get("recommended_collection_queries"),
         "paper_confirmation_signals": confirmation_signal_count,
         "summary_paper_confirmation_signals": summary.get("paper_confirmation_signals"),
         "low_price_tick_probe_evidence": low_price_tick_evidence,

@@ -123,3 +123,47 @@ def test_research_focus_prioritises_model_validation_gap_queries(tmp_path):
     assert payload["collection_queries"][3:5] == ["btc updown", "solana updown"]
     assert payload["price_action_model"]["validation_gap_needs_collection"] is True
     assert "positive train repricing examples but no positive validation examples" in payload["summary"]
+
+
+def test_research_focus_prioritises_near_positive_historical_breadth_queries(tmp_path):
+    cfg = _cfg(tmp_path)
+    write_json(
+        cfg.output_root / "polymarket_price_action" / "price_action_model_summary.json",
+        {
+            "status": "trained",
+            "decision": "collect_more_bid_ask_price_action_model_evidence",
+            "promotion_ready": False,
+            "validation_blockers": ["no probability threshold cleared the training split trade gates"],
+        },
+    )
+    write_json(
+        cfg.output_root / "polymarket_price_action" / "price_action_paper_signal_summary.json",
+        {
+            "status": "computed",
+            "historical_breadth_scan": {
+                "state": "positive_validation_pockets_not_robust",
+                "recommended_collection_queries": ["xrp updown"],
+                "top_near_positive_buckets": [
+                    {
+                        "recommended_collection_query": "xrp updown",
+                        "key": "crypto_xrp_updown_event|60c+|<=1c|down0.5-2c|sell_pressure",
+                        "blockers": ["train_rows<3", "positive_pnl_concentrated_in_one_token"],
+                    }
+                ],
+            },
+        },
+    )
+    write_json(
+        cfg.governance_root / "price_action_feedback.json",
+        {
+            "status": "ok",
+            "learning_state": "collect_more_positive_price_action_evidence",
+            "collection_queries": ["btc updown", "ethereum"],
+        },
+    )
+
+    payload = build_research_focus(cfg)
+
+    assert payload["collection_queries"][:3] == ["xrp updown", "btc updown", "ethereum"]
+    assert payload["price_action_model"]["historical_breadth_queries"] == ["xrp updown"]
+    assert "near-positive historical buckets" in payload["summary"]

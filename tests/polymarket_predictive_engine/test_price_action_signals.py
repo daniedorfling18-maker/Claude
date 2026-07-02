@@ -545,6 +545,44 @@ def test_low_price_tick_probe_stays_blocked_without_positive_validation_evidence
     assert evidence["positive_rows"] == 1
 
 
+def test_historical_breadth_scan_surfaces_near_positive_bucket_to_collect(tmp_path):
+    cfg = _cfg(tmp_path)
+    root = cfg.output_root / "polymarket_price_action"
+    rows = []
+    for idx in range(3):
+        rows.append(
+            {
+                "split": "validation",
+                "family": "crypto_xrp_updown_event",
+                "market_slug": "xrp-up-or-down-test",
+                "outcome": "Up",
+                "token_id": "xrp-token",
+                "entry_ask": "0.62",
+                "entry_bid": "0.61",
+                "entry_spread": "0.01",
+                "bid_move_abs": "-0.01",
+                "net_buy_events": "-2",
+                "net_buy_size": "-120",
+                "current_side": "SELL",
+                "stake_usdc": "10",
+                "pnl_usdc": "0.40",
+                "roi": "0.04",
+            }
+        )
+    write_csv(root / "microstructure_trade_events.csv", rows)
+
+    summary = build_price_action_paper_signals(cfg)
+    breadth = summary["historical_breadth_scan"]
+    near = breadth["top_near_positive_buckets"][0]
+
+    assert breadth["state"] == "positive_validation_pockets_not_robust"
+    assert breadth["near_positive_buckets"] >= 1
+    assert breadth["recommended_collection_queries"] == ["xrp updown"]
+    assert near["recommended_collection_query"] == "xrp updown"
+    assert "train_rows<3" in near["blockers"]
+    assert "positive_pnl_concentrated_in_one_token" in near["blockers"]
+
+
 def test_paper_confirmation_current_candidate_requires_positive_historical_analogue(tmp_path):
     cfg = _cfg(tmp_path)
     cfg.raw["price_action_microstructure"] = {

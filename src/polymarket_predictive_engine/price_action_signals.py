@@ -307,6 +307,33 @@ def _historical_breadth_components(row: dict[str, Any]) -> dict[str, str]:
     }
 
 
+def _historical_breadth_query(key_parts: tuple[str, ...]) -> str:
+    text = " ".join(key_parts).lower()
+    if "btc" in text or "bitcoin" in text:
+        return "btc updown" if "updown" in text else "bitcoin"
+    if "xrp" in text or "ripple" in text:
+        return "xrp updown"
+    if "sol" in text or "solana" in text:
+        return "solana updown" if "updown" in text else "solana"
+    if "eth" in text or "ethereum" in text:
+        return "eth updown" if "updown" in text else "ethereum"
+    if "esports" in text:
+        return "esports"
+    if "macro_rates" in text or "fed" in text or "rates" in text:
+        return "fed"
+    if "macro_economy" in text or "economy" in text or "inflation" in text:
+        return "economy"
+    if "tennis" in text:
+        return "tennis"
+    if "worldcup" in text or "world cup" in text or "sports_other" in text:
+        return "world cup"
+    if "sports" in text:
+        return "sports"
+    if "crypto" in text:
+        return "bitcoin"
+    return ""
+
+
 def _historical_breadth_scan(cfg: EngineConfig, settings: dict[str, Any]) -> dict[str, Any]:
     """Cross-check all labelled buy-at-ask/sell-at-bid events for robust pockets.
 
@@ -351,6 +378,7 @@ def _historical_breadth_scan(cfg: EngineConfig, settings: dict[str, Any]) -> dic
             bucket[split].append(row)
 
     robust_buckets: list[dict[str, Any]] = []
+    near_positive_buckets: list[dict[str, Any]] = []
     spec_summaries: list[dict[str, Any]] = []
     positive_validation_buckets = 0
     for spec_id, buckets in grouped.items():
@@ -362,6 +390,19 @@ def _historical_breadth_scan(cfg: EngineConfig, settings: dict[str, Any]) -> dic
             if validation_metrics["pnl_usdc"] > 0 and validation_metrics["positive_rows"] > 0:
                 positive_validation_buckets += 1
                 spec_positive_validation += 1
+            blockers: list[str] = []
+            if train_metrics["rows"] < min_train_rows:
+                blockers.append(f"train_rows<{min_train_rows}")
+            if validation_metrics["rows"] < min_validation_rows:
+                blockers.append(f"validation_rows<{min_validation_rows}")
+            if train_metrics["roi"] < min_train_roi:
+                blockers.append("train_roi_below_minimum")
+            if validation_metrics["pnl_usdc"] <= 0:
+                blockers.append("validation_pnl_not_positive")
+            if validation_metrics["roi"] < min_validation_roi:
+                blockers.append("validation_roi_below_minimum")
+            if validation_metrics["top_positive_token_pnl_share"] > max_concentration:
+                blockers.append("positive_pnl_concentrated_in_one_token")
             passed = (
                 train_metrics["rows"] >= min_train_rows
                 and validation_metrics["rows"] >= min_validation_rows
@@ -370,11 +411,30 @@ def _historical_breadth_scan(cfg: EngineConfig, settings: dict[str, Any]) -> dic
                 and validation_metrics["roi"] >= min_validation_roi
                 and validation_metrics["top_positive_token_pnl_share"] <= max_concentration
             )
+            query = _historical_breadth_query(key)
+            if validation_metrics["pnl_usdc"] > 0 and validation_metrics["positive_rows"] > 0 and not passed:
+                near_positive_buckets.append(
+                    {
+                        "spec_id": spec_id,
+                        "key": "|".join(key),
+                        "recommended_collection_query": query,
+                        "blockers": blockers,
+                        "train_rows": train_metrics["rows"],
+                        "train_roi": train_metrics["roi"],
+                        "validation_rows": validation_metrics["rows"],
+                        "validation_positive_rows": validation_metrics["positive_rows"],
+                        "validation_pnl_usdc": validation_metrics["pnl_usdc"],
+                        "validation_roi": validation_metrics["roi"],
+                        "validation_win_rate": validation_metrics["win_rate"],
+                        "validation_top_positive_token_pnl_share": validation_metrics["top_positive_token_pnl_share"],
+                    }
+                )
             if not passed:
                 continue
             payload = {
                 "spec_id": spec_id,
                 "key": "|".join(key),
+                "recommended_collection_query": query,
                 "train_rows": train_metrics["rows"],
                 "train_roi": train_metrics["roi"],
                 "validation_rows": validation_metrics["rows"],
@@ -408,9 +468,23 @@ def _historical_breadth_scan(cfg: EngineConfig, settings: dict[str, Any]) -> dic
             safe_float(item.get("validation_roi")) or -999.0,
             safe_float(item.get("validation_pnl_usdc")) or -999.0,
             safe_float(item.get("validation_rows")) or 0.0,
+            ),
+        reverse=True,
+    )
+    near_positive_buckets.sort(
+        key=lambda item: (
+            -len(item.get("blockers", [])),
+            safe_float(item.get("validation_roi")) or -999.0,
+            safe_float(item.get("validation_pnl_usdc")) or -999.0,
+            safe_float(item.get("validation_rows")) or 0.0,
         ),
         reverse=True,
     )
+    recommended_queries: list[str] = []
+    for bucket in robust_buckets + near_positive_buckets:
+        query = str(bucket.get("recommended_collection_query") or "").strip()
+        if query and query not in recommended_queries:
+            recommended_queries.append(query)
     validation_metrics = _trade_metrics(validation_rows)
     if not rows:
         state = "no_historical_trade_events"
@@ -418,9 +492,10 @@ def _historical_breadth_scan(cfg: EngineConfig, settings: dict[str, Any]) -> dic
     elif robust_buckets:
         state = "robust_positive_historical_buckets_found"
         next_action = "Route robust buckets through current executable signal and forward paper-confirmation gates."
-    elif positive_validation_buckets:
+    elif near_positive_buckets:
         state = "positive_validation_pockets_not_robust"
-        next_action = "Keep collecting broad markets; positives exist but fail train/size/concentration gates."
+        target = ", ".join(recommended_queries[:4]) if recommended_queries else "the near-positive families"
+        next_action = f"Collect more {target} bid/ask rows matching the near-positive historical buckets; positives exist but fail train/size/concentration gates."
     else:
         state = "no_positive_historical_breadth_after_spread"
         next_action = "Do not force trades; the current all-event historical tape is negative after bid/ask costs."
@@ -437,6 +512,8 @@ def _historical_breadth_scan(cfg: EngineConfig, settings: dict[str, Any]) -> dic
         "validation_win_rate": validation_metrics["win_rate"],
         "positive_validation_buckets": positive_validation_buckets,
         "robust_positive_buckets": len(robust_buckets),
+        "near_positive_buckets": len(near_positive_buckets),
+        "recommended_collection_queries": recommended_queries,
         "thresholds": {
             "min_train_rows": min_train_rows,
             "min_validation_rows": min_validation_rows,
@@ -446,6 +523,7 @@ def _historical_breadth_scan(cfg: EngineConfig, settings: dict[str, Any]) -> dic
         },
         "specs": spec_summaries,
         "top_robust_buckets": robust_buckets[:10],
+        "top_near_positive_buckets": near_positive_buckets[:10],
         "paper_only": True,
     }
 

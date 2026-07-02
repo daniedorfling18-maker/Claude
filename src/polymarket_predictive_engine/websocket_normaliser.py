@@ -25,7 +25,7 @@ from __future__ import annotations
 
 import json
 from collections import Counter
-from datetime import timedelta, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
@@ -412,6 +412,31 @@ def _fmt_utc(dt) -> str:
     return dt.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ") if dt is not None else ""
 
 
+def _retention_write_due(
+    *,
+    settings: dict[str, Any],
+    previous_summary: dict[str, Any],
+    features_path: Path,
+    return_latest_features_only: bool,
+) -> tuple[bool, dict[str, Any]]:
+    interval = safe_float(settings.get("feature_retention_write_interval_seconds"))
+    if interval is None or interval <= 0:
+        return True, {"feature_retention_write_interval_seconds": interval or 0}
+    if not return_latest_features_only:
+        return True, {"feature_retention_write_interval_seconds": interval}
+    if not features_path.exists():
+        return True, {"feature_retention_write_interval_seconds": interval}
+    last_write = parse_timestamp(previous_summary.get("feature_retention_last_write_utc") or previous_summary.get("collected_at_utc"))
+    if last_write is None:
+        return True, {"feature_retention_write_interval_seconds": interval}
+    age = max(0.0, (datetime.now(timezone.utc) - last_write.astimezone(timezone.utc)).total_seconds())
+    return age >= float(interval), {
+        "feature_retention_write_interval_seconds": interval,
+        "feature_retention_last_write_utc": _fmt_utc(last_write),
+        "feature_retention_last_write_age_seconds": age,
+    }
+
+
 def _feature_only(row: dict[str, Any]) -> dict[str, Any]:
     """Drop legacy/accidental columns before retention.
 
@@ -523,15 +548,48 @@ def normalize_websocket_file(cfg: EngineConfig, input_path: str | Path | None = 
     features_path = train_root / "websocket_market_features.csv"
     quality_path = gov_root / "websocket_feature_quality_report.csv"
     summary_path = gov_root / "websocket_feature_summary.json"
+    previous_summary = read_json(summary_path, default={}) or {}
+    if not isinstance(previous_summary, dict):
+        previous_summary = {}
     current_features = [_feature_only(row) for row in features]
-    retained_features, retention = _retained_feature_rows(cfg, features_path=features_path, new_features=features)
-    _assert_no_leakage(retained_features)
-
-    write_csv(features_path, retained_features, fieldnames=FEATURE_FIELDS)
+    return_latest_features_only = str(settings.get("return_latest_features_only", False)).strip().lower() in {"1", "true", "yes", "y", "on"}
+    retention_due, retention_schedule = _retention_write_due(
+        settings=settings,
+        previous_summary=previous_summary,
+        features_path=features_path,
+        return_latest_features_only=return_latest_features_only,
+    )
+    if retention_due:
+        retained_features, retention = _retained_feature_rows(cfg, features_path=features_path, new_features=features)
+        _assert_no_leakage(retained_features)
+        write_csv(features_path, retained_features, fieldnames=FEATURE_FIELDS)
+        feature_retention_last_write_utc = now_utc()
+        event_type_counts = Counter(row["event_type"] for row in retained_features)
+        category_counts = Counter(str(row.get("category") or "unknown") for row in retained_features)
+        retained_feature_count = len(retained_features)
+    else:
+        retained_features = []
+        retention = {
+            "feature_retention_enabled": True,
+            "new_feature_rows": len(current_features),
+            "existing_feature_rows": previous_summary.get("retained_feature_rows") or previous_summary.get("feature_rows") or "",
+            "retained_feature_rows": previous_summary.get("retained_feature_rows") or previous_summary.get("feature_rows") or "",
+            "deduped_feature_rows": "",
+            "feature_retention_hours": settings.get("feature_retention_hours"),
+            "feature_retention_cutoff_utc": previous_summary.get("feature_retention_cutoff_utc", ""),
+            "max_feature_rows": settings.get("max_feature_rows"),
+            "dropped_for_max_feature_rows": 0,
+        }
+        feature_retention_last_write_utc = str(
+            previous_summary.get("feature_retention_last_write_utc")
+            or previous_summary.get("collected_at_utc")
+            or ""
+        )
+        event_type_counts = Counter(previous_summary.get("event_type_counts", {}) if isinstance(previous_summary.get("event_type_counts"), dict) else {})
+        category_counts = Counter(previous_summary.get("category_counts", {}) if isinstance(previous_summary.get("category_counts"), dict) else {})
+        retained_feature_count = int(safe_float(previous_summary.get("feature_rows") or previous_summary.get("retained_feature_rows")) or 0)
     write_csv(quality_path, quality, fieldnames=QUALITY_FIELDS)
 
-    event_type_counts = Counter(row["event_type"] for row in retained_features)
-    category_counts = Counter(str(row.get("category") or "unknown") for row in retained_features)
     issue_type_counts = Counter(row["issue_type"] for row in quality)
     summary = {
         "status": "ok",
@@ -540,12 +598,16 @@ def normalize_websocket_file(cfg: EngineConfig, input_path: str | Path | None = 
         "input_scope": input_scope,
         "input_exists": input_path.exists(),
         "messages_processed": len(messages),
-        "feature_rows": len(retained_features),
+        "feature_rows": retained_feature_count,
         "returned_feature_rows": len(current_features)
-        if str(settings.get("return_latest_features_only", False)).strip().lower() in {"1", "true", "yes", "y", "on"}
-        else len(retained_features),
-        "return_latest_features_only": str(settings.get("return_latest_features_only", False)).strip().lower() in {"1", "true", "yes", "y", "on"},
+        if return_latest_features_only
+        else retained_feature_count,
+        "return_latest_features_only": return_latest_features_only,
+        **retention_schedule,
         **retention,
+        "feature_retention_write_due": retention_due,
+        "feature_retention_write_skipped": not retention_due,
+        "feature_retention_last_write_utc": feature_retention_last_write_utc,
         "metadata_index_keys": metadata_index_keys,
         "metadata_enriched_rows": metadata_enriched_rows,
         "category_counts": dict(sorted(category_counts.items())),
@@ -559,7 +621,7 @@ def normalize_websocket_file(cfg: EngineConfig, input_path: str | Path | None = 
         "quality_file": str(quality_path),
     }
     write_json(summary_path, summary)
-    if summary["return_latest_features_only"]:
+    if return_latest_features_only:
         return current_features, quality, summary
     return retained_features, quality, summary
 

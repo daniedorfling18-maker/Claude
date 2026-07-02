@@ -771,6 +771,7 @@ websocket_market_data:
   retain_existing_features: true
   feature_retention_hours: 96
   max_feature_rows: 120000
+  feature_retention_write_interval_seconds: 120
   normalise_latest_messages_only: true
   return_latest_features_only: true
   rewrite_enriched_feature_file_after_normalise: false

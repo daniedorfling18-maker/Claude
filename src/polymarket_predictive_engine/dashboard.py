@@ -560,7 +560,7 @@ async function load() {
       ["Research ended", shadowResearch.ended_at_utc || "-"],
       ["Live source", legacyLiveActive ? (live.live_source || live.source || "websocket") : "websocket"],
       ["WS messages", websocket.new_messages],
-      ["WS features", websocketFeatures.feature_rows],
+      ["Latest WS features", websocketFeatures.returned_feature_rows || websocketFeatures.new_feature_rows || websocketFeatures.feature_rows],
       ["Retained feature rows", websocketFeatures.retained_feature_rows],
       ["Feature retention", websocketFeatures.feature_retention_hours ? `${websocketFeatures.feature_retention_hours}h / max ${websocketFeatures.max_feature_rows || "-"}` : "-"],
       ["Target assets", websocket.target_assets],

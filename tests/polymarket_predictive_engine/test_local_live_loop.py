@@ -487,6 +487,7 @@ def test_prediction_cycle_status_is_background_friendly():
 
     assert loop.build_parser().parse_args([]).prediction_cycle_seconds == 15.0
     assert loop.build_parser().parse_args([]).governance_refresh_seconds == 120.0
+    assert loop.build_parser().parse_args([]).discovery_governance_block_seconds == 180.0
     assert running == {
         "status": "running",
         "source": "websocket",
@@ -519,6 +520,12 @@ def test_stale_prediction_future_does_not_block_governance_forever():
         prediction_started_ts=100.0,
         max_block_seconds=0.0,
         now_ts=101.0,
+    )
+    assert not loop._background_job_blocks_governance(
+        future,
+        started_ts=100.0,
+        max_block_seconds=90.0,
+        now_ts=191.0,
     )
 
 

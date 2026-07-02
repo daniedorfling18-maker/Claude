@@ -8,6 +8,7 @@ from typing import Any
 
 from .config import EngineConfig, load_config
 from .utils import discover_files, find_first_column, infer_category, normalize_slug, parse_timestamp, read_csv_rows, safe_float, write_csv, write_json
+from .worldcup_validation import classify_market_family
 
 FORBIDDEN_SOURCE_HINTS = [
     "target",
@@ -234,6 +235,19 @@ def _normalise_rows_from_file(cfg: EngineConfig, path: Path) -> list[dict[str, A
                 liquidity = price_change_size
 
         market_id = row.get(market_col, "") or (row.get(token_col, "") if is_websocket else "")
+        raw_category = row.get(category_col or "", "") or ("unknown" if is_websocket else infer_category(path))
+        raw_category_text = str(raw_category or "").strip().lower()
+        family = classify_market_family(
+            {
+                **row,
+                "category": raw_category,
+                "market_id": market_id,
+                "market_slug": row.get(slug_col or "", "") or market_id,
+                "question": row.get(question_col or "", ""),
+                "outcome": row.get(outcome_col or "", ""),
+            }
+        )
+        category = family if raw_category_text in {"", "unknown", "uncategorised", "uncategorized"} else raw_category
         normalised.append(
             {
                 "market_id": market_id,
@@ -241,7 +255,7 @@ def _normalise_rows_from_file(cfg: EngineConfig, path: Path) -> list[dict[str, A
                 "token_id": row.get(token_col, ""),
                 "prediction_timestamp_dt": ts,
                 "prediction_timestamp": ts.strftime("%Y-%m-%dT%H:%M:%SZ"),
-                "category": row.get(category_col or "", "") or ("unknown" if is_websocket else infer_category(path)),
+                "category": category,
                 "selection_name": row.get(outcome_col or "", "") or "YES",
                 "midpoint": midpoint,
                 "best_bid": bid if bid is not None else "",

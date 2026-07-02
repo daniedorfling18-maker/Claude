@@ -129,13 +129,18 @@ and mispricing-alpha depth/enrichment tests.
 - Acceptance: risk state artifact reports correlated exposure by key and portfolio VaR; a test shows
   two same-event candidates draining the same correlated budget.
 
-### WP7 — Family classifier for liquid `unknown` markets — `open`
+### WP7 — Family classifier for liquid `unknown` markets — `done` (2026-07-02)
 
-- Improve the market-family parser so liquid `unknown` markets (esports, tennis outrights,
-  legal/policy, culture, weather, macro) map to real families with model+validation paths.
-  `docs/POLYMARKET_CURRENT_STATE.md` lists this as a top research priority.
-- Acceptance: measurable drop in `unknown` share among websocket targets on fixture data; families
-  remain excluded from promotion until they earn their own evidence (no gate relaxation).
+`worldcup_validation.classify_market_family()` now maps liquid metadata-only `unknown` rows into
+research families such as `macro_rates`, `macro_economy`, `equities_macro`, `ai_model_leader`,
+`tennis_tennis_winner`, `esports_match`, `policy_legal`, `weather`, `geopolitics`, and crypto
+specials. `features_v2`, `mispricing_alpha`, and `strategy_search` consume the shared classifier so
+fresh websocket rows and stale prediction rows both stop collapsing into one unusable unknown bucket.
+
+Acceptance: `tests/polymarket_predictive_engine/test_family_classifier.py` plus
+`test_worldcup_validation.py` prove Fed/AI/tennis/esports/equities/crypto rows resolve to real
+research families. This does **not** loosen promotion: newly classified families still need their own
+positive bid/ask, CLV, settlement, and paper evidence before any governed paper sizing.
 
 ### WP8 — Edge attribution / post-trade analytics — `open`
 

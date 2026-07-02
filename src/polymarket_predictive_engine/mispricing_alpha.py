@@ -20,7 +20,7 @@ from .utils import (
     write_csv,
     write_json,
 )
-from .worldcup_validation import is_worldcup_winner_market, signal_cohort
+from .worldcup_validation import classify_market_family, is_worldcup_winner_market, signal_cohort
 
 MODEL_VERSION = "pm-mispricing-alpha-v1"
 ARTIFACT_NAME = "mispricing_alpha_v1.json"
@@ -575,6 +575,10 @@ def apply_mispricing_alpha(
 
     enriched: list[dict[str, Any]] = []
     for row in predictions:
+        row = dict(row)
+        classified_family = classify_market_family(row)
+        if str(row.get("category") or "").strip().lower() in {"", "unknown", "uncategorised", "uncategorized"}:
+            row["category"] = classified_family
         market_probability = _market_probability(row)
         model_probability = _model_probability(row)
         price = _executable_price(row)

@@ -189,6 +189,21 @@ only on later crossing quotes; mark to bid). This is the event-driven backtester
 algo loop offline. WP5's depth-based cost model now supplies the cost-aware execution layer used by
 alpha scoring, shadow fills, strategy checks, and risk sizing.
 
+## Audit log
+
+**2026-07-02 — post-merge audit of Codex's landing on main (orchestrator).** PR #59 merged; Codex
+then landed WO-1..WO-6 (content-equivalent to the branch versions, verified by diff) plus WP5
+(`execution_costs.py` wired into `risk_decision`, signal edge netting, shadow fills, and an alpha
+penalty), WP7 (`classify_market_family` shared across features/alpha/strategy-search), a
+prediction-cycle runtime lock, price-action model hardening (anti-chase entry-book features +
+per-token dedup of selected candidates, model v5), and an algo-replay dashboard section.
+Verified: live/readiness/governance gate files untouched; the execution-cost estimator fails
+closed (missing depth -> flat slippage unchanged, below-flat slippage only when top-of-book
+demonstrably fills the stake); alpha quote enrichment respects a staleness window and the new
+execution-cost term only ever penalises; the classifier is metadata-only and newly named families
+start with zero evidence, so promotion stays fail-closed. 663 tests green. Follow-ups raised as
+WO-7..WO-9 in the work orders doc.
+
 ## Rules of engagement for coding agents
 
 0. **Division of labour**: the orchestrating agent writes/updates this charter and the work orders

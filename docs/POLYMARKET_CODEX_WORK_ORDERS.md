@@ -1,6 +1,6 @@
 # Polymarket Codex Work Orders
 
-Last updated: 2026-07-02 (all six work orders landed)
+Last updated: 2026-07-02 (WO-1..WO-6 landed and audited; WO-7..WO-9 open)
 
 Mechanical, file-level implementation instructions for coding agents (Codex or any other code
 changer). The architecture and priorities live in `docs/POLYMARKET_QUANT_MODE_CHARTER.md`; this file
@@ -263,13 +263,79 @@ valid summary artifact; example strategy over a crafted fixture → exact expect
 
 ---
 
+## WO-7 — CLV-aware promotion review, advisory only (WP4) — `open`
+
+**Goal:** promotion review ranks cohorts using CLV as a *corroborating* signal without letting CLV
+alone promote anything.
+
+**Files:** `src/polymarket_predictive_engine/promotion_review.py`, its tests.
+
+**Steps:**
+
+1. In `build_promotion_review`, `read_json` `closing_line_value.json` (default `{}`) and index
+   cohort rows by `signal_cohort`.
+2. Attach to each reviewed cohort: `clv_evidence`, `mean_final_clv`, `final_clv_ci_low/high`,
+   `clv_final_positions`.
+3. Ranking only: a cohort with existing positive settlement or round-trip evidence AND
+   `positive_clv_evidence` sorts above an otherwise-equal cohort without it;
+   `negative_clv_evidence` appends a blocker *note* string (not a gate change).
+4. A cohort whose only positive stream is CLV must still read blocked; assert this in a test both
+   directions (positive-CLV-only stays blocked; negative CLV adds the note).
+
+**Out of scope:** `readiness.py`, any gate threshold, the audit script's `_paper_decision`.
+
+---
+
+## WO-8 — Quote-freshness guard on below-flat execution costs — `open`
+
+**Goal:** `estimate_execution_cost` may only return below-flat slippage when the depth evidence is
+fresh. Stale depth can overstate what the book can absorb.
+
+**Files:** `src/polymarket_predictive_engine/execution_costs.py`, callers that can pass a quote
+timestamp (`risk.py`, `strategy.py`, `shadow_cohort.py`, `mispricing_alpha.py`), tests.
+
+**Steps:**
+
+1. Add an optional `quote_age_seconds: float | None = None` parameter and a
+   `max_fresh_age_seconds: float = 120.0` knob to `estimate_execution_cost`.
+2. `demonstrably_deep` additionally requires `quote_age_seconds is not None and
+   quote_age_seconds <= max_fresh_age_seconds`. When the age is unknown or stale, expected
+   slippage stays `max(flat, model)` — never below flat (strictly more conservative; no caller
+   can get looser behaviour from this change).
+3. Callers pass the age where they already know it (`websocket_quote_age_seconds` from alpha
+   enrichment; event timestamps in websocket-sourced rows); callers that cannot know it pass
+   nothing and keep today's conservative branch.
+4. Tests: fresh+deep -> below-flat allowed; stale+deep -> floored at flat; unknown age -> floored
+   at flat; missing depth unchanged.
+
+---
+
+## WO-9 — Regression guard: quote enrichment must never touch training/backtest paths — `open`
+
+**Goal:** `_enrich_with_latest_websocket_quotes` merges the *latest* quotes into rows at scoring
+time. That is correct for live decision-making and would be lookahead if it ever reached model
+training or historical backtests. Lock this in with tests before anyone refactors it.
+
+**Files:** `tests/polymarket_predictive_engine/test_mispricing_alpha.py` (extend),
+`src/polymarket_predictive_engine/mispricing_alpha.py` (docstring only unless a leak is found).
+
+**Steps:**
+
+1. Audit call sites: enrichment must be reachable only from `apply_mispricing_alpha` scoring, not
+   from `train_mispricing_alpha_model`, `backtest`, or any label-building path. If a leak exists,
+   gate it out with an explicit `allow_quote_enrichment=False` default on the training path.
+2. Add a test that trains the alpha model with a websocket features file present and asserts the
+   training rows' prices/spreads are untouched by the latest quotes.
+3. Document the invariant in the module docstring: "enrichment is a scoring-time convenience;
+   training and backtests must consume stored point-in-time rows only."
+
+---
+
 ## Sequencing
 
 ```text
-WO-1, WO-2, WO-3   independent of each other — land in any order (WO-1 first is most useful)
-WO-4               independent — can start immediately
-WO-5               after WO-4
-WO-6               after WO-5
+WO-1..WO-6         done and audited (2026-07-02)
+WO-7, WO-8, WO-9   independent of each other — land in any order
 ```
 
 After all six land: WP3 is done (flip it in the charter), the algo track (WP9–WP11) is done, and

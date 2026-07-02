@@ -253,6 +253,8 @@ async function load() {
     const priceActionPaper = data.price_action_paper_signals || {};
     const currentHistScan = priceActionPaper.current_historical_analogue_scan || {};
     const historicalBreadthScan = priceActionPaper.historical_breadth_scan || {};
+    const researchFocus = data.research_focus || {};
+    const currentPositiveAnalogues = researchFocus.price_action_current_positive_analogues || {};
     const priceActionFeedback = data.price_action_feedback || {};
     const goalPlan = data.paper_profit_goal_plan || {};
     const priceActionGoal = goalPlan.price_action_goal_state || {};
@@ -779,6 +781,9 @@ async function load() {
       ["Marked ROI", priceScout.mark_roi, v=>fmtNum(Number(v) * 100, 2) + "%"],
       ["Review candidates", priceScout.price_action_review_candidates],
       ["Current analogue scout targets", priceScout.current_positive_analogue_targets],
+      ["Current analogue eligible", (currentPositiveAnalogues.targets || []).length],
+      ["Current analogue blocked/headroom", (currentPositiveAnalogues.blocked_targets || []).length],
+      ["Model label hurdle", currentPositiveAnalogues.model_label_minimum_return, v=>fmtNum(Number(v) * 100, 2) + "%"],
       ["Paper signal decision", priceActionPaper.decision],
       ["Paper signals", priceActionPaper.signals],
       ["Paper rejections", priceActionPaper.rejections],
@@ -833,6 +838,20 @@ async function load() {
       ["Collect","recommended_collection_query"],
       ["Action","forward_shadow_action", v=>longText(v, 180)],
       ["Auth","trade_authorisation", v=>longText(v, 160)]
+    ]) + `<div style="height:12px"></div><h3>Current positive analogue label-headroom gate</h3>` + table(currentPositiveAnalogues.targets || [], [
+      ["Use","decision_use", v=>longText(v, 160)],
+      ["Market","market_slug", v=>longText(v, 140)],
+      ["Ask","latest_ask", v=>fmtNum(v,4)],
+      ["Max return","max_possible_return", v=>fmtNum(Number(v) * 100, 2) + "%"],
+      ["Required","model_label_minimum_return", v=>fmtNum(Number(v) * 100, 2) + "%"],
+      ["Collect","recommended_collection_query"]
+    ]) + `<div style="height:12px"></div>` + table(currentPositiveAnalogues.blocked_targets || [], [
+      ["Blocked","block_reason", v=>longText(v, 220)],
+      ["Market","market_slug", v=>longText(v, 140)],
+      ["Ask","latest_ask", v=>fmtNum(v,4)],
+      ["Max return","max_possible_return", v=>fmtNum(Number(v) * 100, 2) + "%"],
+      ["Required","model_label_minimum_return", v=>fmtNum(Number(v) * 100, 2) + "%"],
+      ["Collect","recommended_collection_query"]
     ]) + `<div style="height:12px"></div><h3>Current analogue blockers to learn from</h3>` + table(currentHistScan.blocked_preview || [], [
       ["Gate","historical_analogue_gate", v=>longText(v, 160)],
       ["Family","family"],

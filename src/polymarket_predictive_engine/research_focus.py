@@ -308,14 +308,34 @@ def _current_analogue_scan_needs_breadth(price_action_paper: dict[str, Any]) -> 
     return False
 
 
-def _current_positive_analogue_targets(price_action_paper: dict[str, Any], *, max_targets: int = 6) -> list[dict[str, Any]]:
+def _price_action_label_hurdles(cfg) -> tuple[float, float]:
+    settings = cfg.raw.get("price_action_model", {}) if isinstance(cfg.raw.get("price_action_model"), dict) else {}
+    explicit_return = safe_float(settings.get("minimum_profitable_return_label"))
+    if explicit_return is None:
+        min_return = max(
+            0.0,
+            _num(settings.get("minimum_expected_roi_to_trade"), 0.03),
+            _num(settings.get("minimum_selected_validation_roi"), 0.03),
+        )
+    else:
+        min_return = max(0.0, float(explicit_return))
+    min_edge = max(0.0, _num(settings.get("minimum_bid_edge_abs_label")))
+    return min_return, min_edge
+
+
+def _current_positive_analogue_targets(
+    cfg,
+    price_action_paper: dict[str, Any],
+    *,
+    max_targets: int = 6,
+) -> dict[str, Any]:
     """Current executable positive analogues are collection targets, not trade approvals."""
     scan = price_action_paper.get("current_historical_analogue_scan")
     if not isinstance(scan, dict):
-        return []
+        return {"targets": [], "blocked_targets": []}
     rows = scan.get("positive_preview")
     if not isinstance(rows, list):
-        return []
+        return {"targets": [], "blocked_targets": []}
     breadth = price_action_paper.get("historical_breadth_scan")
     thresholds = breadth.get("thresholds", {}) if isinstance(breadth, dict) else {}
     robust_min_roi = _num(
@@ -323,7 +343,9 @@ def _current_positive_analogue_targets(price_action_paper: dict[str, Any], *, ma
         or thresholds.get("min_validation_roi")
         or 0.03
     )
+    min_label_return, min_label_edge = _price_action_label_hurdles(cfg)
     targets: list[dict[str, Any]] = []
+    blocked_targets: list[dict[str, Any]] = []
     for row in rows:
         if not isinstance(row, dict):
             continue
@@ -335,28 +357,47 @@ def _current_positive_analogue_targets(price_action_paper: dict[str, Any], *, ma
         validation_roi = _num(row.get("historical_analogue_validation_roi"))
         validation_rows = _num(row.get("historical_analogue_validation_rows"))
         positive_rows = _num(row.get("historical_analogue_positive_rows"))
-        targets.append(
-            {
-                "market_slug": row.get("market_slug", ""),
-                "question": row.get("question", ""),
-                "family": row.get("family", ""),
-                "outcome": row.get("outcome", ""),
-                "token_id": row.get("token_id", ""),
-                "recommended_collection_query": query,
-                "latest_bid": row.get("latest_bid", ""),
-                "latest_ask": row.get("latest_ask", ""),
-                "latest_spread": row.get("latest_spread", ""),
-                "historical_analogue_key": row.get("historical_analogue_key", ""),
-                "validation_rows": validation_rows,
-                "positive_rows": positive_rows,
-                "validation_roi": validation_roi,
-                "win_rate": row.get("historical_analogue_win_rate", ""),
-                "minimum_robust_validation_roi": robust_min_roi,
-                "robust_validation_roi_gap": max(0.0, robust_min_roi - validation_roi),
-                "decision_use": "forward_shadow_learning_target_not_trade_authorisation",
-                "next_action": "Collect fresh bid/ask repricing around this family/market until robust breadth and paper-confirmation gates clear.",
-            }
+        ask = safe_float(row.get("latest_ask"))
+        max_possible_edge = max(0.0, 1.0 - ask) if ask is not None else 0.0
+        max_possible_return = max_possible_edge / ask if ask and ask > 0 else 0.0
+        can_clear_label_hurdle = bool(
+            ask is not None
+            and 0 < ask < 1
+            and max_possible_edge > min_label_edge
+            and max_possible_return >= min_label_return
         )
+        target = {
+            "market_slug": row.get("market_slug", ""),
+            "question": row.get("question", ""),
+            "family": row.get("family", ""),
+            "outcome": row.get("outcome", ""),
+            "token_id": row.get("token_id", ""),
+            "recommended_collection_query": query,
+            "latest_bid": row.get("latest_bid", ""),
+            "latest_ask": row.get("latest_ask", ""),
+            "latest_spread": row.get("latest_spread", ""),
+            "historical_analogue_key": row.get("historical_analogue_key", ""),
+            "validation_rows": validation_rows,
+            "positive_rows": positive_rows,
+            "validation_roi": validation_roi,
+            "win_rate": row.get("historical_analogue_win_rate", ""),
+            "minimum_robust_validation_roi": robust_min_roi,
+            "robust_validation_roi_gap": max(0.0, robust_min_roi - validation_roi),
+            "model_label_minimum_return": min_label_return,
+            "model_label_minimum_bid_edge": min_label_edge,
+            "max_possible_bid_edge": max_possible_edge,
+            "max_possible_return": max_possible_return,
+            "can_clear_model_label_hurdle": can_clear_label_hurdle,
+            "decision_use": "forward_shadow_learning_target_not_trade_authorisation",
+            "next_action": "Collect fresh bid/ask repricing around this family/market until robust breadth and paper-confirmation gates clear.",
+        }
+        if can_clear_label_hurdle:
+            targets.append(target)
+        else:
+            target["block_reason"] = "latest ask is too high to clear the current model's positive-label return hurdle even at a $1.00 bid"
+            target["decision_use"] = "diagnostic_only_no_model_label_headroom"
+            target["next_action"] = "Do not reserve scout/websocket capacity for this exact row; collect lower-ask analogues with enough upside headroom."
+            blocked_targets.append(target)
     targets.sort(
         key=lambda item: (
             _num(item.get("validation_roi")),
@@ -366,7 +407,20 @@ def _current_positive_analogue_targets(price_action_paper: dict[str, Any], *, ma
         ),
         reverse=True,
     )
-    return targets[:max_targets]
+    blocked_targets.sort(
+        key=lambda item: (
+            _num(item.get("max_possible_return")),
+            _num(item.get("validation_roi")),
+            _num(item.get("positive_rows")),
+        ),
+        reverse=True,
+    )
+    return {
+        "targets": targets[:max_targets],
+        "blocked_targets": blocked_targets[:max_targets],
+        "model_label_minimum_return": min_label_return,
+        "model_label_minimum_bid_edge": min_label_edge,
+    }
 
 
 def _current_positive_analogue_queries(targets: list[dict[str, Any]]) -> list[str]:
@@ -409,7 +463,9 @@ def build_research_focus(cfg) -> dict[str, Any]:
     historical_breadth_queries = _historical_breadth_queries(price_action_paper)
     near_miss_queries = _near_miss_candidate_queries(cfg)
     analogue_scan_needs_breadth = _current_analogue_scan_needs_breadth(price_action_paper)
-    current_positive_targets = _current_positive_analogue_targets(price_action_paper)
+    current_positive_payload = _current_positive_analogue_targets(cfg, price_action_paper)
+    current_positive_targets = current_positive_payload.get("targets", [])
+    current_positive_blocked_targets = current_positive_payload.get("blocked_targets", [])
     current_positive_queries = _current_positive_analogue_queries(current_positive_targets)
     model_needs_repricing_data = _price_action_model_needs_data(price_action_model) and bool(feedback_queries)
     feedback_positive = bool(
@@ -440,6 +496,15 @@ def build_research_focus(cfg) -> dict[str, Any]:
                 "A current executable market has a positive historical analogue after bid/ask costs, but it is still a "
                 f"forward-shadow learning target, not a trade approval; prioritise {', '.join(current_positive_queries[:4])} "
                 f"collection. Best current analogue validation ROI={roi:.4f}; robust ROI gap={gap:.4f}."
+                + (f" Model blocker: {blocker_text}." if blocker_text else "")
+            )
+        elif current_positive_blocked_targets:
+            blocked = current_positive_blocked_targets[0]
+            next_action = (
+                "Current positive analogues exist, but their asks are too high to ever clear the model's "
+                f"positive-label hurdle; best max possible return={_num(blocked.get('max_possible_return')):.4f} "
+                f"vs required {_num(blocked.get('model_label_minimum_return')):.4f}. "
+                "Do not waste scout capacity on these exact rows; collect lower-ask analogues instead."
                 + (f" Model blocker: {blocker_text}." if blocker_text else "")
             )
         elif historical_breadth_queries:
@@ -535,9 +600,18 @@ def build_research_focus(cfg) -> dict[str, Any]:
             "analogue_scan_needs_breadth": analogue_scan_needs_breadth,
         },
         "price_action_current_positive_analogues": {
-            "state": "learning_targets_available" if current_positive_targets else "none",
+            "state": (
+                "learning_targets_available"
+                if current_positive_targets
+                else "blocked_by_model_label_headroom"
+                if current_positive_blocked_targets
+                else "none"
+            ),
             "targets": current_positive_targets,
+            "blocked_targets": current_positive_blocked_targets,
             "collection_queries": current_positive_queries,
+            "model_label_minimum_return": current_positive_payload.get("model_label_minimum_return"),
+            "model_label_minimum_bid_edge": current_positive_payload.get("model_label_minimum_bid_edge"),
             "paper_only": True,
             "trade_authorisation": "no_trade_without_governed_price_action_signal",
         },

@@ -442,6 +442,13 @@ def test_low_price_tick_probe_compiles_only_after_model_missed_low_price_positiv
     root = cfg.output_root / "polymarket_price_action"
     write_json(root / "price_action_model_summary.json", _low_price_model_summary())
     write_csv(
+        root / "microstructure_trade_events.csv",
+        [
+            _low_price_trade_event(split="train", exit_bid="0.027", pnl_usdc="0.16", roi="0.08"),
+            _low_price_trade_event(split="validation", exit_bid="0.028", pnl_usdc="0.24", roi="0.12"),
+        ],
+    )
+    write_csv(
         cfg.output_root / "polymarket_training" / "websocket_market_features.csv",
         [
             _ws_feature_row(0, best_bid="0.022", best_ask="0.023", midpoint="0.0225"),
@@ -462,6 +469,51 @@ def test_low_price_tick_probe_compiles_only_after_model_missed_low_price_positiv
     assert signals[0]["feature_set_version"] == "low_price_tick_v1"
     assert float(signals[0]["max_stake_usdc"]) == 1.0
     assert float(signals[0]["executable_price"]) == 0.026
+
+
+def test_low_price_tick_probe_blocks_missed_positive_when_validation_lane_negative(tmp_path):
+    cfg = _cfg(tmp_path)
+    cfg.raw["price_action_microstructure"] = {
+        "enabled": True,
+        "lookback_observations": 1,
+        "max_rows_per_token": 20,
+    }
+    cfg.raw["price_action_paper"].update(
+        {
+            "low_price_tick_probe_enabled": True,
+            "low_price_tick_max_stake_usdc": 1,
+            "low_price_tick_min_edge": 0.001,
+            "low_price_tick_max_edge": 0.02,
+        }
+    )
+    root = cfg.output_root / "polymarket_price_action"
+    write_json(root / "price_action_model_summary.json", _low_price_model_summary())
+    write_csv(
+        root / "microstructure_trade_events.csv",
+        [
+            _low_price_trade_event(split="validation", exit_bid="0.024", pnl_usdc="-0.08", roi="-0.04"),
+            _low_price_trade_event(split="validation", exit_bid="0.028", pnl_usdc="0.24", roi="0.12"),
+            _low_price_trade_event(split="validation", exit_bid="0.020", pnl_usdc="-0.40", roi="-0.20"),
+        ],
+    )
+    write_csv(
+        cfg.output_root / "polymarket_training" / "websocket_market_features.csv",
+        [
+            _ws_feature_row(0, best_bid="0.022", best_ask="0.023", midpoint="0.0225"),
+            _ws_feature_row(1, best_bid="0.023", best_ask="0.024", midpoint="0.0235"),
+            _ws_feature_row(2, best_bid="0.024", best_ask="0.025", midpoint="0.0245"),
+            _ws_feature_row(3, best_bid="0.025", best_ask="0.026", midpoint="0.0255"),
+        ],
+    )
+
+    summary = build_price_action_paper_signals(cfg)
+    signals = read_csv_rows(root / "price_action_paper_signals.csv")
+    evidence = summary["low_price_tick_probe_evidence"]
+
+    assert signals == []
+    assert summary["low_price_tick_probe_candidates"] == 0
+    assert evidence["diagnostic_missed_positive_examples"] == 1
+    assert evidence["gate_reason"] == "model_missed_low_price_positive_but_validation_lane_negative"
 
 
 def test_low_price_tick_probe_stays_blocked_without_positive_validation_evidence(tmp_path):

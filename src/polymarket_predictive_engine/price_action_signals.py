@@ -248,6 +248,208 @@ def _historical_analogue_stats(cfg: EngineConfig, settings: dict[str, Any]) -> d
     return stats
 
 
+def _move_bucket(value: float | None) -> str:
+    if value is None:
+        return "na"
+    if value >= 0.02:
+        return "up>=2c"
+    if value >= 0.005:
+        return "up0.5-2c"
+    if value > -0.005:
+        return "flat"
+    if value > -0.02:
+        return "down0.5-2c"
+    return "down>=2c"
+
+
+def _pressure_bucket(row: dict[str, Any]) -> str:
+    net_events = safe_float(row.get("net_buy_events")) or 0.0
+    net_size = safe_float(row.get("net_buy_size")) or 0.0
+    if net_events >= 2 or net_size >= 100:
+        return "buy_pressure"
+    if net_events <= -2 or net_size <= -100:
+        return "sell_pressure"
+    return "neutral"
+
+
+def _trade_metrics(rows: list[dict[str, Any]]) -> dict[str, Any]:
+    stake = sum(safe_float(row.get("stake_usdc")) or 0.0 for row in rows)
+    pnl = sum(safe_float(row.get("pnl_usdc")) or 0.0 for row in rows)
+    wins = sum(1 for row in rows if (safe_float(row.get("pnl_usdc")) or 0.0) > 0)
+    positive_by_token: dict[str, float] = {}
+    for row in rows:
+        token = _token_id(row)
+        positive_by_token[token] = positive_by_token.get(token, 0.0) + max(0.0, safe_float(row.get("pnl_usdc")) or 0.0)
+    positive_total = sum(positive_by_token.values())
+    return {
+        "rows": len(rows),
+        "stake_usdc": stake,
+        "pnl_usdc": pnl,
+        "roi": pnl / stake if stake > 0 else 0.0,
+        "win_rate": wins / len(rows) if rows else 0.0,
+        "positive_rows": wins,
+        "top_positive_token_pnl_share": max(positive_by_token.values()) / positive_total if positive_total > 0 else 0.0,
+    }
+
+
+def _historical_breadth_components(row: dict[str, Any]) -> dict[str, str]:
+    family = str(row.get("family") or row.get("category") or "unknown").strip() or "unknown"
+    ask = safe_float(row.get("entry_ask") or row.get("latest_ask") or row.get("best_ask"))
+    spread = safe_float(row.get("entry_spread") or row.get("latest_spread") or row.get("spread"))
+    side = str(row.get("current_side") or row.get("price_change_side") or "").strip().upper() or "NONE"
+    return {
+        "family": family,
+        "ask_bucket": _price_bucket(ask),
+        "spread_bucket": _spread_bucket(spread),
+        "side": side,
+        "bid_move_bucket": _move_bucket(safe_float(row.get("bid_move_abs"))),
+        "pressure_bucket": _pressure_bucket(row),
+    }
+
+
+def _historical_breadth_scan(cfg: EngineConfig, settings: dict[str, Any]) -> dict[str, Any]:
+    """Cross-check all labelled buy-at-ask/sell-at-bid events for robust pockets.
+
+    The exact current analogue gate is intentionally strict. This broader scan
+    answers the operator's next question: across the whole 3-day historical
+    event tape, are there any coarse market/price/spread/order-flow buckets
+    whose train and validation results both survive bid/ask costs?
+    """
+    rows = read_csv_rows(cfg.output_root / OUTPUT_DIRNAME / MICROSTRUCTURE_TRADE_EVENTS_FILE)
+    train_rows = [row for row in rows if str(row.get("split") or "").strip().lower() == "train"]
+    validation_rows = [row for row in rows if str(row.get("split") or "").strip().lower() == "validation"]
+    min_train_rows = int(safe_float(settings.get("historical_breadth_min_train_rows")) or 3)
+    min_validation_rows = int(
+        safe_float(settings.get("historical_breadth_min_validation_rows"))
+        or safe_float(settings.get("paper_confirmation_min_historical_analogue_validation_rows"))
+        or 3
+    )
+    min_validation_roi = float(safe_float(settings.get("historical_breadth_min_validation_roi")) or 0.03)
+    min_train_roi = float(safe_float(settings.get("historical_breadth_min_train_roi")) or 0.0)
+    max_concentration = float(safe_float(settings.get("historical_breadth_max_single_token_positive_pnl_share")) or 0.70)
+    specs: list[tuple[str, tuple[str, ...]]] = [
+        ("family_price_spread", ("family", "ask_bucket", "spread_bucket")),
+        ("family_price_spread_side", ("family", "ask_bucket", "spread_bucket", "side")),
+        (
+            "family_price_spread_move_pressure",
+            ("family", "ask_bucket", "spread_bucket", "bid_move_bucket", "pressure_bucket"),
+        ),
+        ("price_spread_move_pressure", ("ask_bucket", "spread_bucket", "bid_move_bucket", "pressure_bucket")),
+        ("family_price", ("family", "ask_bucket")),
+    ]
+    grouped: dict[str, dict[tuple[str, ...], dict[str, list[dict[str, Any]]]]] = {
+        spec_id: {} for spec_id, _ in specs
+    }
+    for row in rows:
+        split = str(row.get("split") or "").strip().lower()
+        if split not in {"train", "validation"}:
+            continue
+        components = _historical_breadth_components(row)
+        for spec_id, names in specs:
+            key = tuple(components[name] for name in names)
+            bucket = grouped[spec_id].setdefault(key, {"train": [], "validation": []})
+            bucket[split].append(row)
+
+    robust_buckets: list[dict[str, Any]] = []
+    spec_summaries: list[dict[str, Any]] = []
+    positive_validation_buckets = 0
+    for spec_id, buckets in grouped.items():
+        spec_robust: list[dict[str, Any]] = []
+        spec_positive_validation = 0
+        for key, split_rows in buckets.items():
+            train_metrics = _trade_metrics(split_rows.get("train", []))
+            validation_metrics = _trade_metrics(split_rows.get("validation", []))
+            if validation_metrics["pnl_usdc"] > 0 and validation_metrics["positive_rows"] > 0:
+                positive_validation_buckets += 1
+                spec_positive_validation += 1
+            passed = (
+                train_metrics["rows"] >= min_train_rows
+                and validation_metrics["rows"] >= min_validation_rows
+                and train_metrics["roi"] >= min_train_roi
+                and validation_metrics["pnl_usdc"] > 0
+                and validation_metrics["roi"] >= min_validation_roi
+                and validation_metrics["top_positive_token_pnl_share"] <= max_concentration
+            )
+            if not passed:
+                continue
+            payload = {
+                "spec_id": spec_id,
+                "key": "|".join(key),
+                "train_rows": train_metrics["rows"],
+                "train_roi": train_metrics["roi"],
+                "validation_rows": validation_metrics["rows"],
+                "validation_positive_rows": validation_metrics["positive_rows"],
+                "validation_pnl_usdc": validation_metrics["pnl_usdc"],
+                "validation_roi": validation_metrics["roi"],
+                "validation_win_rate": validation_metrics["win_rate"],
+                "validation_top_positive_token_pnl_share": validation_metrics["top_positive_token_pnl_share"],
+            }
+            spec_robust.append(payload)
+            robust_buckets.append(payload)
+        spec_robust.sort(
+            key=lambda item: (
+                safe_float(item.get("validation_roi")) or -999.0,
+                safe_float(item.get("validation_pnl_usdc")) or -999.0,
+                safe_float(item.get("validation_rows")) or 0.0,
+            ),
+            reverse=True,
+        )
+        spec_summaries.append(
+            {
+                "spec_id": spec_id,
+                "tested_buckets": len(buckets),
+                "positive_validation_buckets": spec_positive_validation,
+                "robust_positive_buckets": len(spec_robust),
+                "top_robust_buckets": spec_robust[:5],
+            }
+        )
+    robust_buckets.sort(
+        key=lambda item: (
+            safe_float(item.get("validation_roi")) or -999.0,
+            safe_float(item.get("validation_pnl_usdc")) or -999.0,
+            safe_float(item.get("validation_rows")) or 0.0,
+        ),
+        reverse=True,
+    )
+    validation_metrics = _trade_metrics(validation_rows)
+    if not rows:
+        state = "no_historical_trade_events"
+        next_action = "Collect websocket bid/ask variation before promoting any repricing model."
+    elif robust_buckets:
+        state = "robust_positive_historical_buckets_found"
+        next_action = "Route robust buckets through current executable signal and forward paper-confirmation gates."
+    elif positive_validation_buckets:
+        state = "positive_validation_pockets_not_robust"
+        next_action = "Keep collecting broad markets; positives exist but fail train/size/concentration gates."
+    else:
+        state = "no_positive_historical_breadth_after_spread"
+        next_action = "Do not force trades; the current all-event historical tape is negative after bid/ask costs."
+    return {
+        "state": state,
+        "decision_use": "All-event historical check: buy at ask, later sell/mark at bid, grouped by price/spread/family/order-flow.",
+        "next_action": next_action,
+        "total_events": len(rows),
+        "train_events": len(train_rows),
+        "validation_events": len(validation_rows),
+        "validation_positive_rows": validation_metrics["positive_rows"],
+        "validation_pnl_usdc": validation_metrics["pnl_usdc"],
+        "validation_roi": validation_metrics["roi"],
+        "validation_win_rate": validation_metrics["win_rate"],
+        "positive_validation_buckets": positive_validation_buckets,
+        "robust_positive_buckets": len(robust_buckets),
+        "thresholds": {
+            "min_train_rows": min_train_rows,
+            "min_validation_rows": min_validation_rows,
+            "min_train_roi": min_train_roi,
+            "min_validation_roi": min_validation_roi,
+            "max_single_token_positive_pnl_share": max_concentration,
+        },
+        "specs": spec_summaries,
+        "top_robust_buckets": robust_buckets[:10],
+        "paper_only": True,
+    }
+
+
 def _empty_historical_analogue(key: str, settings: dict[str, Any]) -> dict[str, Any]:
     return {
         "key": key,
@@ -566,13 +768,23 @@ def _low_price_tick_probe_enabled(
         and (safe_float(row.get("low_price_convexity")) or 0.0) >= min_low_price
         and (safe_float(row.get("roi")) or 0.0) > 0
     ]
-    if qualifying:
-        return True, {"diagnostics": diagnostics, "missed_positive_examples": qualifying, "evidence": evidence}
     evidence_ready = (
         int(safe_float(evidence.get("validation_positive_rows")) or 0)
         >= int(safe_float(evidence.get("minimum_validation_positive_examples")) or 1)
         and (safe_float(evidence.get("validation_roi")) or 0.0) > 0
     )
+    if qualifying:
+        allow_negative_validation_exploration = boolish(
+            settings.get("low_price_tick_allow_missed_positive_without_positive_validation_roi", False)
+        )
+        if evidence_ready or allow_negative_validation_exploration:
+            return True, {"diagnostics": diagnostics, "missed_positive_examples": qualifying, "evidence": evidence}
+        return False, {
+            "diagnostics": diagnostics,
+            "missed_positive_examples": qualifying,
+            "evidence": evidence,
+            "blocked_by_negative_validation": True,
+        }
     return evidence_ready, {"diagnostics": diagnostics, "missed_positive_examples": qualifying, "evidence": evidence}
 
 
@@ -667,8 +879,10 @@ def _low_price_tick_probe_state(cfg: EngineConfig, settings: dict[str, Any]) -> 
         "enabled_by_governance": bool(enabled),
         "diagnostic_missed_positive_examples": len(missed),
         "gate_reason": (
-            "model_missed_low_price_positive_examples"
-            if missed
+            "model_missed_low_price_positive_but_validation_lane_negative"
+            if missed and not enabled
+            else "model_missed_low_price_positive_examples"
+            if missed and enabled
             else "validated_low_price_tick_evidence"
             if enabled
             else evidence.get("state", "collect_more_low_price_tick_evidence")
@@ -1013,6 +1227,7 @@ def build_price_action_paper_signals(cfg: EngineConfig) -> dict[str, Any]:
         settings,
         analogue_stats=historical_analogue_stats,
     )
+    historical_breadth_scan = _historical_breadth_scan(cfg, settings)
 
     for row in round_trip_rows:
         cohort_name = _cohort_name(row)
@@ -1176,6 +1391,7 @@ def build_price_action_paper_signals(cfg: EngineConfig) -> dict[str, Any]:
         "paper_confirmation_current_candidates": len(paper_confirmation_current),
         "paper_confirmation_current_historical_analogue": paper_confirmation_current_analogue,
         "current_historical_analogue_scan": current_historical_analogue_scan,
+        "historical_breadth_scan": historical_breadth_scan,
         "low_price_tick_probe_evidence": low_price_tick_evidence,
         "low_price_tick_probe_candidates": len(low_price_tick),
         "low_price_tick_probe_signals": sum(

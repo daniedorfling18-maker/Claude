@@ -252,6 +252,7 @@ async function load() {
     const quantResearch = data.quant_research_status || {};
     const priceActionPaper = data.price_action_paper_signals || {};
     const currentHistScan = priceActionPaper.current_historical_analogue_scan || {};
+    const historicalBreadthScan = priceActionPaper.historical_breadth_scan || {};
     const priceActionFeedback = data.price_action_feedback || {};
     const goalPlan = data.paper_profit_goal_plan || {};
     const priceActionGoal = goalPlan.price_action_goal_state || {};
@@ -795,6 +796,12 @@ async function load() {
       ["All-current blocked", currentHistScan.blocked],
       ["All-current blocked why", currentHistScan.blocked_by_state, v=>longText(v, 220)],
       ["All-current positive families", currentHistScan.positive_by_family, v=>longText(v, 180)],
+      ["Historical breadth state", historicalBreadthScan.state, v=>longText(v, 180)],
+      ["Historical events", historicalBreadthScan.total_events],
+      ["Historical val ROI", historicalBreadthScan.validation_roi, v=>fmtNum(Number(v) * 100, 2) + "%"],
+      ["Historical val + rows", historicalBreadthScan.validation_positive_rows],
+      ["Robust hist buckets", historicalBreadthScan.robust_positive_buckets],
+      ["Historical next", historicalBreadthScan.next_action, v=>longText(v, 220)],
       ["Low-price evidence", priceActionPaper.low_price_tick_probe_evidence_state],
       ["Low-price val +", priceActionPaper.low_price_tick_validation_positive_rows],
       ["Low-price val ROI", priceActionPaper.low_price_tick_validation_roi, v=>fmtNum(Number(v) * 100, 2) + "%"],
@@ -819,6 +826,19 @@ async function load() {
       ["Val +","historical_analogue_positive_rows"],
       ["Val ROI","historical_analogue_validation_roi", v=>fmtNum(Number(v) * 100, 2) + "%"],
       ["Win rate","historical_analogue_win_rate", v=>fmtNum(Number(v) * 100, 1) + "%"]
+    ]) + `<div style="height:12px"></div><h3>Historical breadth scan</h3>` + table(historicalBreadthScan.specs || [], [
+      ["Spec","spec_id", v=>longText(v, 160)],
+      ["Tested buckets","tested_buckets"],
+      ["Val + buckets","positive_validation_buckets"],
+      ["Robust buckets","robust_positive_buckets"]
+    ]) + `<div style="height:12px"></div>` + table(historicalBreadthScan.top_robust_buckets || [], [
+      ["Spec","spec_id", v=>longText(v, 120)],
+      ["Bucket","key", v=>longText(v, 220)],
+      ["Train rows","train_rows"],
+      ["Train ROI","train_roi", v=>fmtNum(Number(v) * 100, 2) + "%"],
+      ["Val rows","validation_rows"],
+      ["Val ROI","validation_roi", v=>fmtNum(Number(v) * 100, 2) + "%"],
+      ["Val win","validation_win_rate", v=>fmtNum(Number(v) * 100, 1) + "%"]
     ]) + `<div style="height:12px"></div><h3>Paper-confirmation probe exit watch</h3>` + facts([
       ["Status", probeExitWatch.status],
       ["Open probes", probeExitWatch.open_confirmation_probes],
@@ -2181,6 +2201,9 @@ def _price_action_paper_signal_status(cfg: EngineConfig) -> dict[str, Any]:
     current_historical_analogue_scan = summary.get("current_historical_analogue_scan")
     if not isinstance(current_historical_analogue_scan, dict):
         current_historical_analogue_scan = {}
+    historical_breadth_scan = summary.get("historical_breadth_scan")
+    if not isinstance(historical_breadth_scan, dict):
+        historical_breadth_scan = {}
     return {
         "status": summary.get("status") or ("missing" if not signals and not rejections else "computed"),
         "generated_at_utc": summary.get("generated_at_utc"),
@@ -2209,6 +2232,11 @@ def _price_action_paper_signal_status(cfg: EngineConfig) -> dict[str, Any]:
         "current_historical_analogue_blocked": current_historical_analogue_scan.get("blocked"),
         "current_historical_analogue_blockers": current_historical_analogue_scan.get("blocked_by_state"),
         "current_historical_analogue_positive_by_family": current_historical_analogue_scan.get("positive_by_family"),
+        "historical_breadth_scan": historical_breadth_scan,
+        "historical_breadth_state": historical_breadth_scan.get("state"),
+        "historical_breadth_events": historical_breadth_scan.get("total_events"),
+        "historical_breadth_validation_roi": historical_breadth_scan.get("validation_roi"),
+        "historical_breadth_robust_positive_buckets": historical_breadth_scan.get("robust_positive_buckets"),
         "paper_confirmation_signals": confirmation_signal_count,
         "summary_paper_confirmation_signals": summary.get("paper_confirmation_signals"),
         "low_price_tick_probe_evidence": low_price_tick_evidence,

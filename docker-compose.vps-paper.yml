@@ -91,8 +91,10 @@ services:
       if [ ! -f /app/outputs/polymarket_dashboard/index.html ]; then
         python scripts/render_polymarket_dashboard.py --config /app/polymarket_predictive_config.example.yaml || true;
       fi;
-      cd /app/outputs/polymarket_dashboard &&
-      python -m http.server 8765 --bind 0.0.0.0"
+      python scripts/serve_polymarket_dashboard.py
+      --directory /app/outputs/polymarket_dashboard
+      --host 0.0.0.0
+      --port 8765"
     ports:
       - "${POLYMARKET_DASHBOARD_HOST:-0.0.0.0}:${POLYMARKET_DASHBOARD_PORT:-8765}:8765"
     volumes:

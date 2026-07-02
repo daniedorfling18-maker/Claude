@@ -53,6 +53,7 @@ from .promotion_review import build_promotion_review
 from .readiness import paper_live_promotion_gate, paper_trade_readiness, readiness_decision
 from .refresh_governance import refresh_governance
 from .resolution_collector import collect_resolutions
+from .runtime_lock import runtime_lock
 from .sharp_anchor import build_sharp_anchor
 from .sharp_odds_fetch import fetch_sharp_odds
 from .snapshot_ingest import ingest_scanner_snapshot
@@ -327,23 +328,37 @@ def main(argv: list[str] | None = None) -> int:
         elif args.command == "validate":
             _print(validate_model(cfg))
         elif args.command == "predict":
-            features = build_features_v2(cfg, source=args.source, require_clean_labels=False)
-            global_model, category_models = load_prediction_models(cfg)
-            out = cfg.output_root / "polymarket_predictions"
-            out.mkdir(parents=True, exist_ok=True)
-            _print(
-                {
-                    "predictions": len(
-                        write_predictions(
-                            features,
-                            str(out / "predictions.csv"),
-                            model=global_model,
-                            category_models=category_models,
-                            training_cutoff=str(global_model.get("trained_at", "")),
-                        )
+            lock_settings = cfg.raw.get("runtime_resource_guard", {}) or {}
+            lock_stale_seconds = float(lock_settings.get("prediction_cycle_lock_stale_seconds", 1800) or 1800)
+            with runtime_lock(cfg, "prediction_cycle", stale_after_seconds=lock_stale_seconds) as lock:
+                if not lock.acquired:
+                    _print(
+                        {
+                            "status": "skipped_existing_prediction_cycle",
+                            "source": args.source,
+                            "runtime_lock": lock.as_dict(),
+                            "paper_trading_invoked": False,
+                            "live_trading_invoked": False,
+                        }
                     )
-                }
-            )
+                else:
+                    features = build_features_v2(cfg, source=args.source, require_clean_labels=False)
+                    global_model, category_models = load_prediction_models(cfg)
+                    out = cfg.output_root / "polymarket_predictions"
+                    out.mkdir(parents=True, exist_ok=True)
+                    _print(
+                        {
+                            "predictions": len(
+                                write_predictions(
+                                    features,
+                                    str(out / "predictions.csv"),
+                                    model=global_model,
+                                    category_models=category_models,
+                                    training_cutoff=str(global_model.get("trained_at", "")),
+                                )
+                            )
+                        }
+                    )
         elif args.command == "generate-signals":
             approved, rejected = generate_signals(cfg)
             _print({"approved": len(approved), "rejected": len(rejected)})

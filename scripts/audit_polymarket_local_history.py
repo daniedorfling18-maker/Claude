@@ -209,6 +209,29 @@ def _family_summary(rows: list[dict[str, Any]]) -> dict[str, Any]:
     }
 
 
+def _closing_line_value_summary(payload: dict[str, Any]) -> dict[str, Any]:
+    if not isinstance(payload, dict) or not payload:
+        return {
+            "positions_scored": 0,
+            "final_line_positions": 0,
+            "mean_final_clv": None,
+            "positive_clv_cohorts": [],
+            "cohorts": [],
+        }
+    cohorts = [
+        row
+        for row in payload.get("cohorts", [])
+        if isinstance(row, dict) and int(safe_float(row.get("final_positions")) or 0) > 0
+    ]
+    return {
+        "positions_scored": int(safe_float(payload.get("positions_scored")) or 0),
+        "final_line_positions": int(safe_float(payload.get("final_line_positions")) or 0),
+        "mean_final_clv": safe_float(payload.get("mean_final_clv")),
+        "positive_clv_cohorts": list(payload.get("positive_clv_cohorts") or []),
+        "cohorts": cohorts,
+    }
+
+
 def _paper_decision(payload: dict[str, Any]) -> dict[str, Any]:
     blockers: list[str] = []
     warnings: list[str] = []
@@ -232,23 +255,6 @@ def _paper_decision(payload: dict[str, Any]) -> dict[str, Any]:
     if blockers:
         return {"paper_allowed": False, "reason": "; ".join(blockers), "warnings": warnings}
     return {"paper_allowed": True, "reason": "local family-specific evidence gates are satisfied", "warnings": warnings}
-
-
-def _closing_line_summary(governance_root: Path) -> dict[str, Any]:
-    artifact = read_json(governance_root / "closing_line_value.json", default={}) or {}
-    if not isinstance(artifact, dict):
-        artifact = {}
-    cohorts = artifact.get("cohorts") or []
-    if not isinstance(cohorts, list):
-        cohorts = []
-    final_cohorts = [row for row in cohorts if isinstance(row, dict) and (row.get("final_positions") or 0) > 0]
-    return {
-        "positions_scored": artifact.get("positions_scored", 0),
-        "final_line_positions": artifact.get("final_line_positions", 0),
-        "mean_final_clv": artifact.get("mean_final_clv"),
-        "positive_clv_cohorts": artifact.get("positive_clv_cohorts", []),
-        "cohorts": final_cohorts,
-    }
 
 
 def _write_markdown(path: Path, payload: dict[str, Any]) -> None:
@@ -306,21 +312,34 @@ def _write_markdown(path: Path, payload: dict[str, Any]) -> None:
     if not clv.get("positions_scored"):
         lines.append("No CLV evidence collected yet.")
     else:
-        lines.append(
-            f"- Scored positions: {clv['positions_scored']} | final lines: {clv['final_line_positions']} | "
-            f"mean final CLV: {clv['mean_final_clv']}"
-        )
-        for row in clv.get("cohorts", []):
-            lines.append(
-                "- "
-                f"{row.get('signal_cohort')} — n_final={row.get('final_positions')}, "
-                f"mean_final_clv={row.get('mean_final_clv')}, "
-                f"CI=[{row.get('final_clv_ci_low')}, {row.get('final_clv_ci_high')}], "
-                f"evidence={row.get('clv_evidence')}"
-            )
+        mean_final = clv.get("mean_final_clv")
+        mean_final_text = f"{float(mean_final):.4f}" if mean_final is not None else "n/a"
         positive = clv.get("positive_clv_cohorts") or []
-        if positive:
-            lines.append(f"- Positive CLV cohorts (diagnostic, not a promotion trigger): {', '.join(positive)}")
+        lines.append(
+            f"- positions_scored={clv.get('positions_scored', 0)}, "
+            f"final_line_positions={clv.get('final_line_positions', 0)}, "
+            f"mean_final_clv={mean_final_text}, "
+            f"positive_clv_cohorts={', '.join(positive) if positive else 'none'}"
+        )
+        cohorts = clv.get("cohorts") or []
+        if cohorts:
+            for row in cohorts:
+                ci_low = safe_float(row.get("final_clv_ci_low"))
+                ci_high = safe_float(row.get("final_clv_ci_high"))
+                ci_low_text = f"{ci_low:.4f}" if ci_low is not None else "n/a"
+                ci_high_text = f"{ci_high:.4f}" if ci_high is not None else "n/a"
+                mean = safe_float(row.get("mean_final_clv"))
+                mean_text = f"{mean:.4f}" if mean is not None else "n/a"
+                lines.append(
+                    "- "
+                    f"{row.get('signal_cohort', 'unknown')} — "
+                    f"n_final={row.get('final_positions', 0)}, "
+                    f"mean_final_clv={mean_text}, "
+                    f"CI=[{ci_low_text}, {ci_high_text}], "
+                    f"evidence={row.get('clv_evidence', 'unknown')}"
+                )
+        else:
+            lines.append("- No cohorts have final CLV evidence yet.")
     lines.append("")
     path.write_text("\n".join(lines), encoding="utf-8")
 
@@ -350,6 +369,9 @@ def run(config_path: str = "polymarket_predictive_config.example.yaml") -> dict[
     shadow_positions = _read_csv(paths["shadow_positions"])
     shadow_fills = _read_csv(paths["shadow_fills"])
     family_rows = _read_csv(paths["family_viability"])
+    closing_line_value = read_json(governance_root / "closing_line_value.json", default={}) or {}
+    if not isinstance(closing_line_value, dict):
+        closing_line_value = {}
     shadow_summary, shadow_cohorts = _shadow_summary(shadow_positions, shadow_fills)
     payload: dict[str, Any] = {
         "status": "ok",
@@ -362,11 +384,9 @@ def run(config_path: str = "polymarket_predictive_config.example.yaml") -> dict[
         "shadow": shadow_summary,
         "shadow_cohorts": shadow_cohorts,
         "family_viability": _family_summary(family_rows),
+        "closing_line_value": _closing_line_value_summary(closing_line_value),
     }
     payload["paper_decision"] = _paper_decision(payload)
-    # CLV is report-only context added after the paper decision on purpose: it
-    # must never add or remove blockers here (promotion use is governed by WP4).
-    payload["closing_line_value"] = _closing_line_summary(governance_root)
     governance_root.mkdir(parents=True, exist_ok=True)
     write_json(governance_root / "local_history_audit_summary.json", payload)
     write_csv(governance_root / "local_history_shadow_cohorts.csv", shadow_cohorts)

@@ -4,6 +4,7 @@ import re
 from typing import Any
 
 from .config import EngineConfig, kill_switch_active
+from .execution_costs import estimate_execution_cost
 from .utils import boolish, safe_float
 
 
@@ -149,7 +150,8 @@ def risk_decision(
     if confidence is None and probability is not None:
         confidence = _directional_confidence(probability)
     confidence = 0.0 if confidence is None else confidence
-    slippage = _number(signal, "slippage", _number(signal, "expected_slippage"))
+    flat_slippage = _number(signal, "slippage", _number(signal, "expected_slippage"))
+    slippage = flat_slippage
     resolution_risk = _number(signal, "resolution_risk")
     time_to_close_minutes = _time_to_close_minutes(signal)
 
@@ -192,7 +194,6 @@ def risk_decision(
             "liquidity below minimum",
         ),
         (resolution_risk <= float(risk.get("maximum_resolution_risk", 0.25)), "resolution risk above maximum"),
-        (slippage <= float(risk.get("maximum_slippage", 0.02)), "slippage above maximum"),
         (
             _number(portfolio, "daily_loss") <= float(risk.get("maximum_daily_loss", 0.03)) * bankroll,
             "daily loss above maximum",
@@ -253,6 +254,23 @@ def risk_decision(
         price_action_cap if price_action_cap is not None and price_action_cap > 0 else cash,
         signal_cap if signal_cap is not None and signal_cap > 0 else cash,
     )
+    execution_estimate = estimate_execution_cost(
+        signal,
+        stake_usdc=stake_usdc,
+        flat_slippage=flat_slippage,
+    )
+    impact_cap = safe_float(execution_estimate.get("max_stake_at_acceptable_impact_usdc"))
+    if impact_cap is not None and impact_cap > 0:
+        stake_usdc = min(stake_usdc, impact_cap)
+        execution_estimate = estimate_execution_cost(
+            signal,
+            stake_usdc=stake_usdc,
+            flat_slippage=flat_slippage,
+        )
+    slippage = safe_float(execution_estimate.get("expected_slippage"))
+    slippage = flat_slippage if slippage is None else slippage
+    if slippage > float(risk.get("maximum_slippage", 0.02)):
+        return reject("slippage above maximum")
     if stake_usdc <= 0:
         return reject("kelly sizing or exposure capacity is zero", max_single)
     quantity = stake_usdc / price
@@ -281,6 +299,8 @@ def risk_decision(
             "time_to_close_minutes": time_to_close_minutes,
             "resolution_risk": resolution_risk,
             "slippage": slippage,
+            "execution_cost_estimate": execution_estimate,
+            "execution_depth_stake_cap_usdc": impact_cap if impact_cap is not None else "",
             "category_capacity_remaining": max(0.0, max_category - current_category),
             "correlated_capacity_remaining": max(0.0, max_correlated - current_correlated),
             "signal_stake_cap_usdc": signal_cap if signal_cap is not None else "",

@@ -142,7 +142,6 @@ None of those is local dev. If you *are* deploying with Docker:
 | Current Polymarket state | `docs/POLYMARKET_CURRENT_STATE.md` |
 | Quant trading contract | `docs/POLYMARKET_QUANT_TRADING_CONTRACT.md` |
 | Quant-mode charter / agent work packages | `docs/POLYMARKET_QUANT_MODE_CHARTER.md` |
-| Codex work orders (mechanical implementation specs) | `docs/POLYMARKET_CODEX_WORK_ORDERS.md` |
 | Shadow research runbook | `docs/POLYMARKET_SHADOW_RESEARCH_RUNBOOK.md` |
 | Running lean / memory | `docs/RUNNING_LEAN.md` |
 | Alpha approach + audit | `docs/ACTUARIAL_AUDIT_PREDICTIVE_VALUE.md` |

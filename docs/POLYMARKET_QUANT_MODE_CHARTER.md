@@ -82,10 +82,17 @@ before Kelly; `risk.kelly_shrinkage` config (default 0.0 = unchanged behaviour).
 Detailed implementation instructions are written as work orders **WO-1, WO-2, WO-3** in
 `docs/POLYMARKET_CODEX_WORK_ORDERS.md` — any coding agent can execute them mechanically.
 
-- WO-1: call `build_closing_line_value` from `refresh_governance()` (covers the scheduled cycle
-  with zero PowerShell changes).
-- WO-2: dashboard CLV section following the `quant_research_status` pattern.
-- WO-3: CLV block in the local-history audit report (report-only; `_paper_decision` untouched).
+- WO-1: `done` (2026-07-02) — call `build_closing_line_value` from `refresh_governance()` (covers
+  the scheduled cycle with zero PowerShell changes). Artifact:
+  `outputs/polymarket_model_governance/closing_line_value.json`; summary also appears in
+  `outputs/polymarket_model_governance/governance_refresh.json`.
+- WO-2: `done` (2026-07-02) — dashboard CLV section following the `quant_research_status`
+  pattern. Artifact appears in `outputs/polymarket_dashboard/dashboard_data.json` under
+  `closing_line_value` and renders as "Closing-line value (CLV)" in the dashboard.
+- WO-3: `done` (2026-07-02) — CLV block in the local-history audit report (report-only;
+  `_paper_decision` untouched). Artifacts:
+  `outputs/polymarket_model_governance/local_history_audit_summary.json` and
+  `outputs/polymarket_model_governance/local_history_audit_report.md`.
 - Acceptance: per work order; `paper_trading_invoked` stays `false`; tests cover the wiring.
 
 ### WP4 — CLV-aware promotion review (advisory, fail-closed) — `open`
@@ -96,15 +103,22 @@ Detailed implementation instructions are written as work orders **WO-1, WO-2, WO
 - Acceptance: promotion review output includes CLV fields; a cohort with only positive CLV still
   reads `blocked`; tests assert both directions.
 
-### WP5 — Execution cost model from order-book depth — `open`
+### WP5 — Execution cost model from order-book depth — `done` (2026-07-02)
 
-- New `execution_costs.py`: estimate expected fill price for a given stake from normalised depth
-  fields (`bid_depth_1pct/5pct`, `ask_depth_*`, `top_*_size`, `book_imbalance`) instead of the flat
-  `costs.slippage` assumption. Output: expected slippage + max stake at acceptable impact.
-- Consumers: shadow entry fill price (`shadow_cohort._shadow_slippage`), `risk_decision` stake cap,
-  EV in `mispricing_alpha`.
-- Acceptance: depth-aware slippage is never lower than the current flat assumption unless the book
-  is demonstrably deeper; unit tests with synthetic books; no behaviour change when depth is missing.
+Implemented in `execution_costs.py`: expected fill price for a given stake is estimated from
+normalised depth fields (`bid_depth_1pct/5pct`, `ask_depth_*`, `top_*_size`, `book_imbalance`)
+instead of relying only on the flat `costs.slippage` assumption. The estimator outputs expected
+slippage plus max stake at acceptable impact, fails closed when depth is missing, and only lowers
+flat slippage when the book is demonstrably deep enough.
+
+Consumers: shadow entry fill price (`shadow_cohort._shadow_slippage`), `risk_decision` stake cap,
+strategy slippage checks, and EV in `mispricing_alpha`. `models/calibrated.py` and `strategy.py`
+preserve bid/ask/depth fields into predictions and signals, and `mispricing_alpha.py` can enrich
+stale prediction rows with the latest fresh websocket quote/depth row before scoring.
+
+Acceptance: `tests/polymarket_predictive_engine/test_execution_costs.py`, the depth-risk test in
+`test_hardening_controls.py`, prediction handoff coverage in `test_predictive_power_expansion.py`,
+and mispricing-alpha depth/enrichment tests.
 
 ### WP6 — Portfolio-level correlated exposure from live positions — `open`
 
@@ -115,13 +129,18 @@ Detailed implementation instructions are written as work orders **WO-1, WO-2, WO
 - Acceptance: risk state artifact reports correlated exposure by key and portfolio VaR; a test shows
   two same-event candidates draining the same correlated budget.
 
-### WP7 — Family classifier for liquid `unknown` markets — `open`
+### WP7 — Family classifier for liquid `unknown` markets — `done` (2026-07-02)
 
-- Improve the market-family parser so liquid `unknown` markets (esports, tennis outrights,
-  legal/policy, culture, weather, macro) map to real families with model+validation paths.
-  `docs/POLYMARKET_CURRENT_STATE.md` lists this as a top research priority.
-- Acceptance: measurable drop in `unknown` share among websocket targets on fixture data; families
-  remain excluded from promotion until they earn their own evidence (no gate relaxation).
+`worldcup_validation.classify_market_family()` now maps liquid metadata-only `unknown` rows into
+research families such as `macro_rates`, `macro_economy`, `equities_macro`, `ai_model_leader`,
+`tennis_tennis_winner`, `esports_match`, `policy_legal`, `weather`, `geopolitics`, and crypto
+specials. `features_v2`, `mispricing_alpha`, and `strategy_search` consume the shared classifier so
+fresh websocket rows and stale prediction rows both stop collapsing into one unusable unknown bucket.
+
+Acceptance: `tests/polymarket_predictive_engine/test_family_classifier.py` plus
+`test_worldcup_validation.py` prove Fed/AI/tennis/esports/equities/crypto rows resolve to real
+research families. This does **not** loosen promotion: newly classified families still need their own
+positive bid/ask, CLV, settlement, and paper evidence before any governed paper sizing.
 
 ### WP8 — Edge attribution / post-trade analytics — `open`
 
@@ -167,7 +186,8 @@ join-bid shadow probe.
 Chronological, no-lookahead replay of recorded websocket features through any registered strategy
 with conservative fill simulation (cross at ask only when the limit crosses; resting orders fill
 only on later crossing quotes; mark to bid). This is the event-driven backtester that closes the
-algo loop offline. Later, WP5's depth-based cost model replaces its flat fill assumptions.
+algo loop offline. WP5's depth-based cost model now supplies the cost-aware execution layer used by
+alpha scoring, shadow fills, strategy checks, and risk sizing.
 
 ## Rules of engagement for coding agents
 

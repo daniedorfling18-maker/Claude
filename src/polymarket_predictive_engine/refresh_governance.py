@@ -4,9 +4,9 @@ import argparse
 import json
 from typing import Any
 
-from .closing_line import build_closing_line_value
 from .config import EngineConfig, load_config
 from .cohort_validation import write_signal_cohort_pnl
+from .closing_line import build_closing_line_value
 from .dashboard import render_dashboard
 from .goal_planner import build_goal_plan
 from .governance import governance_report
@@ -108,7 +108,7 @@ def refresh_governance(cfg: EngineConfig, *, refresh_dashboard: bool = True) -> 
         "closing_line_positions_scored": closing_line.get("positions_scored"),
         "closing_line_final_positions": closing_line.get("final_line_positions"),
         "closing_line_mean_final_clv": closing_line.get("mean_final_clv"),
-        "closing_line_positive_cohorts": closing_line.get("positive_clv_cohorts", []),
+        "closing_line_positive_cohorts": closing_line.get("positive_clv_cohorts"),
         "price_action_feedback_state": price_action_feedback.get("learning_state"),
         "price_action_model_decision": price_action_model.get("decision"),
         "price_action_model_promotion_ready": price_action_model.get("promotion_ready"),

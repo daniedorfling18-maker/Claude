@@ -14,6 +14,7 @@ from .models.calibrated import load_prediction_models, write_predictions
 from .readiness import paper_trade_readiness
 from .profit_target import write_profit_target_tracker
 from .cohort_validation import write_signal_cohort_pnl
+from .runtime_lock import runtime_lock
 from .shadow_cohort import update_shadow_cohort_evidence
 from .storage import connect_db
 from .strategy import generate_signals
@@ -86,6 +87,31 @@ def run_paper_cycle(
         write_agent_runtime_bundle(cfg, cycle_report=report)
         return report
 
+    lock_settings = cfg.raw.get("runtime_resource_guard", {}) or {}
+    lock_stale_seconds = float(lock_settings.get("prediction_cycle_lock_stale_seconds", 1800) or 1800)
+    with runtime_lock(cfg, "prediction_cycle", stale_after_seconds=lock_stale_seconds) as lock:
+        if not lock.acquired:
+            report.update(
+                {
+                    "status": "skipped_existing_prediction_cycle",
+                    "blockers": ["prediction_cycle_lock_already_held"],
+                    "runtime_lock": lock.as_dict(),
+                    "paper_trading_invoked": False,
+                    "live_trading_invoked": False,
+                }
+            )
+            write_json(cfg.governance_root / "forward_paper_cycle.json", report)
+            write_agent_runtime_bundle(cfg, cycle_report=report)
+            return report
+        return _run_paper_cycle_unlocked(cfg, source=source, report=report)
+
+
+def _run_paper_cycle_unlocked(
+    cfg: EngineConfig,
+    *,
+    source: str,
+    report: dict[str, Any],
+) -> dict[str, Any]:
     try:
         features = build_features_v2(cfg, source=source, require_clean_labels=False)
         global_model, category_models = load_prediction_models(cfg)

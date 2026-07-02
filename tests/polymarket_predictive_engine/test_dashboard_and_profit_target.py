@@ -159,6 +159,105 @@ def test_dashboard_renderer_writes_static_dashboard_and_data(tmp_path):
     assert data["trade_diagnostics"]["current_near_miss_candidates"][0]["market_slug"] == "near-miss-market"
 
 
+def test_dashboard_surfaces_closing_line_value_artifact(tmp_path):
+    cfg = _config(tmp_path)
+    write_json(
+        cfg.governance_root / "closing_line_value.json",
+        {
+            "status": "ok",
+            "generated_at_utc": "2026-07-02T12:00:00Z",
+            "positions_scored": 4,
+            "final_line_positions": 3,
+            "mean_final_clv": 0.018,
+            "beat_close_rate": 0.75,
+            "positive_clv_cohorts": ["macro_rates"],
+            "cohorts": [
+                {
+                    "signal_cohort": "macro_rates",
+                    "positions": 4,
+                    "final_positions": 3,
+                    "mean_final_clv": 0.018,
+                    "final_clv_ci_low": 0.004,
+                    "final_clv_ci_high": 0.031,
+                    "final_beat_close_rate": 0.667,
+                    "clv_evidence": "positive_clv_evidence",
+                }
+            ],
+            "governance_note": "Diagnostic only.",
+            "paper_trading_invoked": False,
+            "live_trading_invoked": False,
+        },
+    )
+
+    result = render_dashboard(cfg)
+
+    data = read_json(result["dashboard_data"])
+    html = Path(result["dashboard_file"]).read_text(encoding="utf-8")
+    assert data["closing_line_value"]["positions_scored"] == 4
+    assert data["closing_line_value"]["positive_clv_cohorts"] == ["macro_rates"]
+    assert data["closing_line_value"]["paper_trading_invoked"] is False
+    assert data["closing_line_value"]["live_trading_invoked"] is False
+    assert "Closing-line value (CLV)" in html
+    assert "CLV by cohort" in html
+
+
+def test_dashboard_handles_empty_closing_line_value_artifact(tmp_path):
+    cfg = _config(tmp_path)
+
+    result = render_dashboard(cfg)
+
+    data = read_json(result["dashboard_data"])
+    html = Path(result["dashboard_file"]).read_text(encoding="utf-8")
+    assert data["closing_line_value"] == {}
+    assert "Closing-line value (CLV)" in html
+    assert "No CLV evidence yet" in html
+
+
+def test_dashboard_surfaces_algo_replay_evidence(tmp_path):
+    cfg = _config(tmp_path)
+    algo_root = cfg.output_root / "polymarket_algo"
+    write_json(
+        algo_root / "replay_null_summary.json",
+        {
+            "status": "ok",
+            "strategy": "null",
+            "events_processed": 12,
+            "intents_emitted": 0,
+            "fills": 0,
+            "total_cost_usdc": 0.0,
+            "unrealised_mark_to_bid_pnl_usdc": 0.0,
+            "paper_trading_invoked": False,
+            "live_trading_invoked": False,
+        },
+    )
+    write_json(
+        algo_root / "replay_tight_spread_join_bid_shadow_summary.json",
+        {
+            "status": "ok",
+            "strategy": "tight_spread_join_bid_shadow",
+            "events_processed": 50,
+            "intents_emitted": 4,
+            "fills": 2,
+            "resting_orders_at_end": 1,
+            "total_cost_usdc": 2.0,
+            "unrealised_mark_to_bid_pnl_usdc": -0.42,
+            "paper_trading_invoked": False,
+            "live_trading_invoked": False,
+        },
+    )
+
+    result = render_dashboard(cfg)
+
+    data = read_json(result["dashboard_data"])
+    html = Path(result["dashboard_file"]).read_text(encoding="utf-8")
+    assert "Algo replay lab" in html
+    assert data["algo_replay"]["strategy_count"] == 2
+    assert data["algo_replay"]["best_strategy"]["strategy"] == "null"
+    assert data["algo_replay"]["summaries"][1]["strategy"] == "tight_spread_join_bid_shadow"
+    assert data["algo_replay"]["paper_trading_invoked"] is False
+    assert data["algo_replay"]["live_trading_invoked"] is False
+
+
 def test_dashboard_emits_decision_useful_summary_for_missing_fresh_candidate(tmp_path):
     cfg = _config(tmp_path)
     write_json(
@@ -1430,46 +1529,3 @@ def test_dashboard_treats_fallback_sharp_odds_as_usable_anchor_input(tmp_path):
 
     assert anchors["status"] == "usable"
     assert anchors["sharp_odds_fetch"].get("blocker") is None
-
-
-def test_dashboard_surfaces_closing_line_value(tmp_path):
-    cfg = _config(tmp_path)
-    write_json(
-        cfg.governance_root / "closing_line_value.json",
-        {
-            "positions_scored": 5,
-            "final_line_positions": 4,
-            "mean_final_clv": 0.021,
-            "beat_close_rate": 0.8,
-            "positive_clv_cohorts": ["sports_other|worldcup"],
-            "governance_note": "CLV is diagnostic forward evidence for promotion review; it does not authorise paper or live trading by itself.",
-            "cohorts": [
-                {
-                    "signal_cohort": "sports_other|worldcup",
-                    "positions": 5,
-                    "final_positions": 4,
-                    "mean_final_clv": 0.021,
-                    "final_clv_ci_low": 0.004,
-                    "final_clv_ci_high": 0.039,
-                    "clv_evidence": "insufficient_clv_evidence",
-                }
-            ],
-        },
-    )
-    result = render_dashboard(cfg)
-    assert result["status"] == "ok"
-    data = read_json(result["dashboard_data"])
-    assert data["closing_line_value"]["positions_scored"] == 5
-    assert data["closing_line_value"]["positive_clv_cohorts"] == ["sports_other|worldcup"]
-    html = Path(result["dashboard_file"]).read_text(encoding="utf-8")
-    assert "Closing-line value (CLV)" in html
-    assert 'id="closingLine"' in html
-
-
-def test_dashboard_handles_missing_closing_line_artifact(tmp_path):
-    cfg = _config(tmp_path)
-    result = render_dashboard(cfg)
-    assert result["status"] == "ok"
-    data = read_json(result["dashboard_data"])
-    assert data["closing_line_value"] == {}
-    assert "No CLV evidence collected yet" in Path(result["dashboard_file"]).read_text(encoding="utf-8")

@@ -63,6 +63,92 @@ def _crypto_updown_interval(row: dict[str, Any], text: str) -> str:
     return "event"
 
 
+def classify_market_family(row: dict[str, Any]) -> str:
+    """Resolve a stable research family from point-in-time market metadata.
+
+    This is intentionally a metadata classifier, not a promotion gate. Mapping a
+    row from ``unknown`` to e.g. ``macro_rates`` only creates a cleaner evidence
+    bucket; the existing cohort, validation, and promotion gates still decide
+    whether that bucket may ever be paper-traded.
+    """
+    if is_worldcup_winner_market(row):
+        return "worldcup_2026_winner"
+    category = str(row.get("category") or "").strip().lower().replace(" ", "_")
+    text = _joined_text(
+        row,
+        (
+            "category",
+            "market_slug",
+            "question",
+            "event_slug",
+            "event_title",
+            "event_id",
+            "market_id",
+            "outcome",
+        ),
+    )
+
+    if "up or down" in text or "updown" in text:
+        asset = ""
+        if "xrp" in text or "ripple" in text:
+            asset = "xrp"
+        elif "bitcoin" in text or " btc " in f" {text} ":
+            asset = "btc"
+        elif "ethereum" in text or " eth " in f" {text} ":
+            asset = "eth"
+        elif "solana" in text or " sol " in f" {text} ":
+            asset = "sol"
+        interval = _crypto_updown_interval(row, text)
+        return f"crypto_{asset}_updown_{interval}" if asset else f"crypto_updown_{interval}"
+
+    if any(term in text for term in ("fed", "fomc", "interest rate", "interest rates", "rate cut", "rate hike", "bps")):
+        return "macro_rates"
+    if any(term in text for term in ("inflation", "cpi", "economy", "recession", "gdp", "unemployment")):
+        return "macro_economy"
+    if any(term in text for term in ("largest company", "market cap", "stock market", "stocks", "s p 500", "nasdaq", "dow jones")):
+        return "equities_macro"
+
+    if any(term in text for term in ("wimbledon", "us open", "australian open", "french open", "atp", "wta", "itf", "tennis")):
+        if any(term in text for term in ("winner", "to win", "champion")):
+            return "tennis_tennis_winner"
+        if "set" in text:
+            return "tennis_tennis_set"
+        if "total" in text:
+            return "tennis_tennis_total"
+        return "tennis_tennis"
+    if any(term in text for term in ("lol", "league of legends", "cs2", "counter strike", "valorant", "dota", "rainbow six", "honor of kings", "talent gaming", "esports", "e sports")) or " hok " in f" {text} ":
+        return "esports_match"
+
+    if any(term in text for term in ("openai", "anthropic", "chatgpt", "claude", "grok", "gemini", "best ai model", "ai model", "xai")):
+        return "ai_model_leader"
+    if any(term in text for term in ("scotus", "supreme court", "lawsuit", "legal", "ban", "approval", "regulation", "regulator")):
+        return "policy_legal"
+    if any(term in text for term in ("weather", "hurricane", "temperature", "rainfall", "snowfall", "wildfire")):
+        return "weather"
+    if any(term in text for term in ("gta vi", "gta 6", "grammy", "oscars", "box office", "album", "movie", "netflix")):
+        return "culture_entertainment"
+    if any(term in text for term in ("strait of hormuz", "war", "ceasefire", "tariff", "election", "president", "minister")):
+        return "geopolitics"
+
+    if "bitcoin" in text or " btc " in f" {text} ":
+        return "crypto_btc_special"
+    if "ethereum" in text or " eth " in f" {text} ":
+        return "crypto_eth_special"
+    if "solana" in text or " sol " in f" {text} ":
+        return "crypto_sol_special"
+    if "xrp" in text or "ripple" in text:
+        return "crypto_xrp_special"
+    if "crypto" in text:
+        return "crypto_policy_special" if any(term in text for term in ("tax", "regulat", "policy")) else "crypto_special"
+
+    sports_terms = ("nba", "nfl", "mlb", "nhl", "soccer", "football", "baseball", "basketball", "golf", "ufc", "fifa")
+    if any(term in text for term in sports_terms):
+        return "sports_other"
+    if category and category not in {"unknown", "uncategorised", "uncategorized"}:
+        return category
+    return "unknown"
+
+
 def signal_cohort(row: dict[str, Any]) -> str:
     if is_worldcup_winner_market(row):
         fundamental = row.get("fundamental_probability")
@@ -92,4 +178,6 @@ def signal_cohort(row: dict[str, Any]) -> str:
                 return f"exploratory_inverse_historical_rule|crypto_{asset}_updown_5m|outcome={outcome}"
             return f"exploratory_historical_rule|crypto_{asset}_updown_5m|outcome={outcome}"
     category = str(row.get("category") or "").strip().lower()
-    return category or "uncategorised"
+    if category and category not in {"unknown", "uncategorised", "uncategorized"}:
+        return category
+    return classify_market_family(row)

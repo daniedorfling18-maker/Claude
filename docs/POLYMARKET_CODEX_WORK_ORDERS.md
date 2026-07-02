@@ -58,6 +58,10 @@ top-level fields are present.
 
 **Out of scope:** PowerShell scripts, dashboard, audit script, promotion review logic.
 
+**Landed:** `refresh_governance()` now rebuilds
+`outputs/polymarket_model_governance/closing_line_value.json` after paper round-trip evidence and
+before promotion review/dashboard, and exposes CLV summary fields in `governance_refresh.json`.
+
 ---
 
 ## WO-2 — Show CLV on the dashboard (WP3b) — `done` (2026-07-02)
@@ -90,6 +94,12 @@ the section title; empty-artifact case asserted too.
 
 **Out of scope:** dashboard server/runner scripts, any other dashboard section.
 
+**Landed:** `dashboard.py` now reads
+`outputs/polymarket_model_governance/closing_line_value.json`, includes it in
+`outputs/polymarket_dashboard/dashboard_data.json`, and renders a "Closing-line value (CLV)"
+dashboard section with summary metrics, positive cohorts, and per-cohort evidence classes. Empty
+artifacts render a no-evidence-yet message.
+
 ---
 
 ## WO-3 — CLV block in the local-history audit report (WP3c) — `done` (2026-07-02)
@@ -116,6 +126,11 @@ settlement and round-trip evidence.
 **Definition of done:** test builds a fixture `closing_line_value.json`, runs the audit `run()`
 against a temp output root, asserts the payload block and the markdown section exist, and asserts
 the paper-decision blockers are byte-identical with and without the CLV artifact present.
+
+**Landed:** `scripts/audit_polymarket_local_history.py` now includes a report-only
+`closing_line_value` summary in `local_history_audit_summary.json` and a "Closing-line value (CLV)"
+markdown section in `local_history_audit_report.md`. The regression test proves paper-decision
+blockers are unchanged with and without CLV.
 
 ---
 
@@ -258,5 +273,7 @@ WO-6               after WO-5
 ```
 
 After all six land: WP3 is done (flip it in the charter), the algo track (WP9–WP11) is done, and
-the next charter priorities are WP4 (CLV-aware promotion review) and WP5 (depth-based execution
-costs), which then plug straight into the replay harness's fill simulation.
+the next charter priorities are WP4 (CLV-aware promotion review), WP6 (portfolio-level correlated
+exposure), WP7 (family classification for liquid `unknown` markets), and WP8 (edge attribution).
+WP5 (depth-based execution costs) has since landed and now plugs into alpha scoring, strategy checks,
+shadow fills, and risk sizing.

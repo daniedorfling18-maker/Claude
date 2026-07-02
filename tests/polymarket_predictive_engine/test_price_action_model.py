@@ -3,7 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from polymarket_predictive_engine.config import EngineConfig
-from polymarket_predictive_engine.price_action_model import train_price_action_model
+from polymarket_predictive_engine.price_action_model import _anti_chase_metrics, _selected_metrics, train_price_action_model
 from polymarket_predictive_engine.utils import read_csv_rows, write_csv
 
 
@@ -185,6 +185,51 @@ def _payoff_asymmetric_event(i: int, *, split: str, profitable: bool, high_signa
         }
     )
     return row
+
+
+def test_price_action_model_execution_cost_features_use_buy_ask_sell_bid():
+    metrics = _anti_chase_metrics(
+        {
+            "entry_bid": "0.49",
+            "entry_ask": "0.50",
+            "entry_spread": "0.01",
+            "relative_spread": "0.02",
+        }
+    )
+
+    assert round(metrics["instant_exit_return"], 6) == -0.02
+    assert round(metrics["break_even_bid_move"], 6) == 0.02
+    assert round(metrics["one_tick_net_after_spread"], 6) == 0.0
+
+
+def test_price_action_model_dedupes_selected_snapshots_by_token_market_outcome():
+    repeated_loss = {
+        "token_id": "same-token",
+        "market_slug": "same-market",
+        "outcome": "Up",
+        "_stake_usdc": 10.0,
+        "_pnl_usdc": -0.2,
+        "_roi": -0.02,
+    }
+    unique_win = {
+        "token_id": "winner-token",
+        "market_slug": "winner-market",
+        "outcome": "Up",
+        "_stake_usdc": 10.0,
+        "_pnl_usdc": 1.0,
+        "_roi": 0.10,
+    }
+    rows = [{**repeated_loss, "entry_time_utc": f"2026-07-01T00:0{i}:00Z"} for i in range(5)] + [unique_win]
+    probabilities = [0.9, 0.88, 0.87, 0.86, 0.85, 0.8]
+
+    deduped = _selected_metrics(rows, probabilities, 0.5, {"dedupe_selected_by_token": True})
+    raw = _selected_metrics(rows, probabilities, 0.5, {"dedupe_selected_by_token": False})
+
+    assert deduped["selected_raw_rows"] == 6
+    assert deduped["selected_deduped_rows"] == 4
+    assert deduped["selected_trades"] == 2
+    assert deduped["selected_pnl_usdc"] == 0.8
+    assert raw["selected_trades"] == 6
 
 
 def test_price_action_model_trains_on_future_bid_repricing_and_scores_current_rows(tmp_path):

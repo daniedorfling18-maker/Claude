@@ -24,6 +24,7 @@ def _config(tmp_path: Path):
     }
     raw["governance_thresholds"]["min_paper_labels"] = 1
     raw["mispricing_alpha"]["enabled"] = False
+    raw["paper_trading"]["max_exit_quote_age_minutes"] = 10000000
     config_path = tmp_path / "config.yaml"
     config_path.write_text(yaml.safe_dump(raw, sort_keys=False), encoding="utf-8")
     return load_config(config_path)
@@ -352,6 +353,131 @@ def test_paper_broker_closes_profitable_position_and_respects_exit_cooldown(tmp_
         assert position["realised_pnl_usdc"] > 0
         sell_count = con.execute("SELECT COUNT(*) FROM fills WHERE side = 'SELL_YES'").fetchone()[0]
         assert sell_count == 1
+    finally:
+        con.close()
+
+
+def test_paper_broker_refuses_wrong_side_websocket_exit_quote(tmp_path):
+    cfg = _config(tmp_path)
+    cfg.raw["paper_trading"]["minimum_hold_minutes_before_exit"] = 0
+    cfg.raw["paper_trading"]["take_profit_return"] = 0.1
+    cfg.raw["paper_trading"]["take_profit_min_usdc"] = 0.01
+    cfg.raw["paper_trading"]["require_exit_snapshot_crosscheck"] = True
+    cfg.raw["paper_trading"]["exit_quote_snapshot_tolerance"] = 0.05
+    _seed_forward_fixture(cfg)
+
+    first = run_paper_cycle(cfg, source="raw_snapshot")
+    assert first["broker"]["orders_filled"] == 1
+
+    con = connect_db(cfg.database_path)
+    try:
+        con.execute(
+            """
+            INSERT INTO market_snapshots(
+                snapshot_id, idempotency_key, collected_at, market_id, token_id,
+                best_bid, best_ask, midpoint, spread, liquidity, raw_payload_json
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                "snapshot_true_same_token_bid",
+                "true-same-token-bid|market-forward-1|token-forward-yes",
+                "2026-06-25T10:05:00Z",
+                "market-forward-1",
+                "token-forward-yes",
+                0.41,
+                0.42,
+                0.415,
+                0.01,
+                1000,
+                "{}",
+            ),
+        )
+        con.commit()
+    finally:
+        con.close()
+
+    write_csv(
+        cfg.output_root / "polymarket_training" / "websocket_market_features.csv",
+        [
+            {
+                "collected_at_utc": "2026-06-25T10:06:00Z",
+                "asset_id": "token-forward-yes",
+                "market_slug": "market-forward-1",
+                "selection": "Yes",
+                "best_bid": "0.90",
+                "best_ask": "0.91",
+                "midpoint": "0.905",
+                "spread": "0.01",
+            }
+        ],
+    )
+
+    result = run_paper_broker(cfg)
+
+    assert result["exit_orders_filled"] == 0
+    assert result["exit_rejection_reasons"]["exit quote conflicts with latest snapshot bid: gap 0.490 > 0.050"] == 1
+
+    con = connect_db(cfg.database_path)
+    try:
+        position = con.execute("SELECT status, quantity FROM positions").fetchone()
+        assert position["status"] == "open"
+        assert position["quantity"] > 0
+        sell_count = con.execute("SELECT COUNT(*) FROM fills WHERE side = 'SELL_YES'").fetchone()[0]
+        assert sell_count == 0
+    finally:
+        con.close()
+
+
+def test_paper_broker_refuses_stale_exit_quote(tmp_path):
+    cfg = _config(tmp_path)
+    cfg.raw["paper_trading"]["minimum_hold_minutes_before_exit"] = 0
+    cfg.raw["paper_trading"]["take_profit_return"] = 0.1
+    cfg.raw["paper_trading"]["take_profit_min_usdc"] = 0.01
+    cfg.raw["paper_trading"]["max_exit_quote_age_minutes"] = 1
+    _seed_forward_fixture(cfg)
+
+    first = run_paper_cycle(cfg, source="raw_snapshot")
+    assert first["broker"]["orders_filled"] == 1
+
+    con = connect_db(cfg.database_path)
+    try:
+        con.execute(
+            """
+            INSERT INTO market_snapshots(
+                snapshot_id, idempotency_key, collected_at, market_id, token_id,
+                best_bid, best_ask, midpoint, spread, liquidity, raw_payload_json
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                "snapshot_stale_profitable_exit",
+                "stale-profitable-exit|market-forward-1|token-forward-yes",
+                "2026-06-25T10:05:00Z",
+                "market-forward-1",
+                "token-forward-yes",
+                0.56,
+                0.57,
+                0.565,
+                0.01,
+                1000,
+                "{}",
+            ),
+        )
+        con.commit()
+    finally:
+        con.close()
+
+    result = run_paper_broker(cfg)
+
+    assert result["exit_orders_filled"] == 0
+    assert list(result["exit_rejection_reasons"])[0].startswith("stale exit quote:")
+
+    con = connect_db(cfg.database_path)
+    try:
+        position = con.execute("SELECT status, quantity FROM positions").fetchone()
+        assert position["status"] == "open"
+        assert position["quantity"] > 0
+        sell_count = con.execute("SELECT COUNT(*) FROM fills WHERE side = 'SELL_YES'").fetchone()[0]
+        assert sell_count == 0
     finally:
         con.close()
 

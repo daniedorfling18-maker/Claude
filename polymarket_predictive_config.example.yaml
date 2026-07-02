@@ -877,6 +877,10 @@ paper_trading:
   exit_enabled: true
   monitor_exits_when_readiness_blocked: true
   exit_policy_version: paper-exit-v1
+  require_exit_live_quote: true
+  require_exit_snapshot_crosscheck: true
+  exit_quote_snapshot_tolerance: 0.05
+  max_exit_quote_age_minutes: 30
   minimum_hold_minutes_before_exit: 15
   take_profit_return: 0.25
   take_profit_min_usdc: 0.25

@@ -109,6 +109,18 @@ def _latest_websocket_quote(cfg: EngineConfig, market_id: str, token_id: str) ->
     rows = read_csv_rows(cfg.output_root / "polymarket_training" / "websocket_market_features.csv")
     market_key = str(market_id or "").strip().lower()
     token_key = str(token_id or "").strip()
+    def row_market_matches(row: dict[str, Any]) -> bool:
+        if not market_key:
+            return True
+        row_market = str(
+            row.get("market_slug")
+            or row.get("market_id")
+            or row.get("condition_id")
+            or row.get("market")
+            or ""
+        ).strip().lower()
+        return not row_market or row_market == market_key
+
     if token_key:
         matches = [
             row
@@ -119,6 +131,7 @@ def _latest_websocket_quote(cfg: EngineConfig, market_id: str, token_id: str) ->
                 str(row.get("token_id") or "").strip(),
                 str(row.get("outcome_token_id") or "").strip(),
             }
+            and row_market_matches(row)
         ]
     else:
         matches = [
@@ -137,14 +150,16 @@ def _latest_websocket_quote(cfg: EngineConfig, market_id: str, token_id: str) ->
         "midpoint": safe_float(latest.get("midpoint")),
         "spread": safe_float(latest.get("spread")),
         "source": "websocket_market_features",
+        "asset_id": str(latest.get("asset_id") or latest.get("token_id") or latest.get("outcome_token_id") or ""),
+        "market_slug": str(latest.get("market_slug") or latest.get("market_id") or latest.get("market") or ""),
+        "selection": str(latest.get("selection") or latest.get("outcome") or latest.get("runner") or ""),
     }
 
 
-def _latest_quote(con, cfg: EngineConfig, market_id: str, token_id: str) -> dict[str, Any]:
-    websocket_quote = _latest_websocket_quote(cfg, market_id, token_id)
+def _latest_snapshot_quote(con, market_id: str, token_id: str) -> dict[str, Any] | None:
     row = con.execute(
         """
-        SELECT collected_at, best_bid, best_ask, midpoint, spread
+        SELECT collected_at, market_id, token_id, best_bid, best_ask, midpoint, spread
         FROM market_snapshots
         WHERE market_id = ? AND token_id = ?
         ORDER BY collected_at DESC, rowid DESC
@@ -156,7 +171,7 @@ def _latest_quote(con, cfg: EngineConfig, market_id: str, token_id: str) -> dict
     if row is None and token_id:
         row = con.execute(
             """
-            SELECT collected_at, best_bid, best_ask, midpoint, spread
+            SELECT collected_at, market_id, token_id, best_bid, best_ask, midpoint, spread
             FROM market_snapshots
             WHERE token_id = ?
             ORDER BY collected_at DESC, rowid DESC
@@ -166,14 +181,23 @@ def _latest_quote(con, cfg: EngineConfig, market_id: str, token_id: str) -> dict
         ).fetchone()
         snapshot_source = "market_snapshots_token_alias"
     if row is not None:
-        db_quote = {
+        return {
             "timestamp": row["collected_at"],
+            "market_id": str(row["market_id"] or ""),
+            "token_id": str(row["token_id"] or ""),
             "best_bid": safe_float(row["best_bid"]),
             "best_ask": safe_float(row["best_ask"]),
             "midpoint": safe_float(row["midpoint"]),
             "spread": safe_float(row["spread"]),
             "source": snapshot_source,
         }
+    return None
+
+
+def _latest_quote(con, cfg: EngineConfig, market_id: str, token_id: str) -> dict[str, Any]:
+    websocket_quote = _latest_websocket_quote(cfg, market_id, token_id)
+    db_quote = _latest_snapshot_quote(con, market_id, token_id)
+    if db_quote is not None:
         if websocket_quote is not None and (_quote_time(websocket_quote) or datetime.min.replace(tzinfo=timezone.utc)) > (
             _quote_time(db_quote) or datetime.min.replace(tzinfo=timezone.utc)
         ):
@@ -292,6 +316,39 @@ def _position_mark_price(con, cfg: EngineConfig, position) -> float:
     if mark is None:
         mark = safe_float(position["average_entry_price"]) or 0.0
     return max(0.0, min(1.0, mark))
+
+
+def _exit_quote_rejection_reason(con, cfg: EngineConfig, position, quote: dict[str, Any], settings: dict[str, Any]) -> str | None:
+    bid = safe_float(quote.get("best_bid"))
+    if bid is None or bid <= 0:
+        return "missing executable bid"
+
+    source = str(quote.get("source") or "missing")
+    if boolish(settings.get("require_exit_live_quote", True)) and source in {"missing", "model_predictions"}:
+        return f"non executable exit quote source: {source}"
+
+    max_age = safe_float(settings.get("max_exit_quote_age_minutes"))
+    if max_age is not None and max_age >= 0:
+        quote_time = _quote_time(quote)
+        if quote_time is None:
+            return "missing exit quote timestamp"
+        age_minutes = max(0.0, (datetime.now(timezone.utc) - quote_time.astimezone(timezone.utc)).total_seconds() / 60.0)
+        if age_minutes > float(max_age):
+            return f"stale exit quote: {age_minutes:.1f}m > {float(max_age):.1f}m"
+
+    if boolish(settings.get("require_exit_snapshot_crosscheck", True)) and source == "websocket_market_features":
+        snapshot = _latest_snapshot_quote(con, str(position["market_id"]), str(position["token_id"]))
+        if snapshot is None:
+            return "missing independent snapshot cross-check for websocket exit quote"
+        snapshot_bid = safe_float(snapshot.get("best_bid"))
+        if snapshot_bid is None or snapshot_bid <= 0:
+            return "missing independent snapshot bid for websocket exit quote"
+        tolerance = float(settings.get("exit_quote_snapshot_tolerance", 0.05))
+        gap = abs(float(bid) - float(snapshot_bid))
+        if gap > tolerance:
+            return f"exit quote conflicts with latest snapshot bid: gap {gap:.3f} > {tolerance:.3f}"
+
+    return None
 
 
 def _resolution_index(cfg: EngineConfig) -> dict[tuple[str, str], tuple[int, str]]:
@@ -618,10 +675,20 @@ def _exit_reason(position, quote: dict[str, Any], prediction: dict[str, Any], se
 
 
 def close_paper_position(con, cfg: EngineConfig, position, reason: str, quote: dict[str, Any]) -> dict[str, Any]:
+    settings = _paper_settings(cfg)
+    quote_rejection = _exit_quote_rejection_reason(con, cfg, position, quote, settings)
+    if quote_rejection is not None:
+        return {
+            "status": "exit_skipped",
+            "reason": quote_rejection,
+            "position_id": position["position_id"],
+            "market_id": position["market_id"],
+            "token_id": position["token_id"],
+            "exit_reason": reason,
+        }
     bid = safe_float(quote.get("best_bid"))
     if bid is None or bid <= 0:
         return {"status": "exit_skipped", "reason": "missing executable bid", "position_id": position["position_id"]}
-    settings = _paper_settings(cfg)
     configured_slippage = float(cfg.raw.get("costs", {}).get("slippage", 0.0))
     spread = safe_float(quote.get("spread"))
     exit_slippage = min(configured_slippage, max(0.0, spread / 2.0)) if spread is not None else 0.0
@@ -779,6 +846,19 @@ def close_eligible_positions(con, cfg: EngineConfig) -> list[dict[str, Any]]:
             prediction = {**prediction, **entry_signal}
         reason = _exit_reason(position, quote, prediction, settings)
         if reason is None:
+            continue
+        quote_rejection = _exit_quote_rejection_reason(con, cfg, position, quote, settings)
+        if quote_rejection is not None:
+            results.append(
+                {
+                    "status": "exit_skipped",
+                    "reason": quote_rejection,
+                    "position_id": position["position_id"],
+                    "market_id": position["market_id"],
+                    "token_id": position["token_id"],
+                    "exit_reason": reason,
+                }
+            )
             continue
         results.append(close_paper_position(con, cfg, position, reason, quote))
     return results

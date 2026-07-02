@@ -998,6 +998,8 @@ def _broker_cfg(tmp_path: Path):
     raw["paper_trading"]["minimum_reentry_minutes_after_exit"] = 240
     raw["paper_trading"]["minimum_hold_minutes_before_exit"] = 15
     raw["paper_trading"]["take_profit_min_usdc"] = 0.25
+    raw["paper_trading"]["max_exit_quote_age_minutes"] = 10000000
+    raw["paper_trading"]["require_exit_snapshot_crosscheck"] = False
     raw["price_action_paper"]["observation_minutes"] = 1
     config_path = tmp_path / "config.yaml"
     config_path.write_text(yaml.safe_dump(raw, sort_keys=False), encoding="utf-8")

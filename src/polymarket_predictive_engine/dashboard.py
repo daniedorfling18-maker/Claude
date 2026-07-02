@@ -124,6 +124,7 @@ HTML = """<!doctype html>
   </div>
   <section><h2>Trading signal audit</h2><div id="tradeSignalAudit"></div></section>
   <section><h2>Closing-line value (CLV)</h2><div id="closingLineValue"></div></section>
+  <section><h2>Edge attribution</h2><div id="edgeAttribution"></div></section>
   <section><h2>World Cup validation layer</h2><div id="worldcupValidation"></div></section>
   <section><h2>Actual paper P&L</h2><div id="actualTarget"></div></section>
   </details>
@@ -256,6 +257,7 @@ async function load() {
     const priceActionModel = data.price_action_model || {};
     const quantResearch = data.quant_research_status || {};
     const closingLine = data.closing_line_value || {};
+    const edgeAttribution = data.edge_attribution || {};
     const priceActionPaper = data.price_action_paper_signals || {};
     const currentHistScan = priceActionPaper.current_historical_analogue_scan || {};
     const historicalBreadthScan = priceActionPaper.historical_breadth_scan || {};
@@ -586,6 +588,34 @@ async function load() {
           ["Evidence","clv_evidence", v=>longText(v, 150)]
         ], 8)
       : `<div class="sectionLead">No CLV evidence yet. The next governance refresh should build closing_line_value.json once shadow positions and bid/ask features exist.</div>`;
+    const attributionCohorts = Array.isArray(edgeAttribution.cohorts) ? edgeAttribution.cohorts : [];
+    document.getElementById("edgeAttribution").innerHTML = Object.keys(edgeAttribution).length
+      ? `<div class="sectionLead">Explains whether cohort P&L came from entry edge, market line movement, bid/ask cost, quote quality, or residual model/settlement surprise. Diagnostic only; it does not authorise trading.</div>` + facts([
+          ["Status", edgeAttribution.status || "-"],
+          ["Generated", edgeAttribution.generated_at_utc || "-"],
+          ["Cohorts attributed", edgeAttribution.cohorts_attributed],
+          ["Audited paper P&L", edgeAttribution.total_paper_audited_pnl_usdc, fmtUsd],
+          ["Shadow P&L", edgeAttribution.total_shadow_pnl_usdc, fmtUsd],
+          ["Decision P&L", edgeAttribution.total_decision_pnl_usdc, fmtUsd],
+          ["Entry edge", edgeAttribution.total_entry_edge_usdc, fmtUsd],
+          ["Spread/slippage cost", edgeAttribution.total_spread_slippage_cost_usdc, fmtUsd],
+          ["Line movement", edgeAttribution.total_line_movement_usdc, fmtUsd],
+          ["Primary drags", edgeAttribution.primary_drag_counts, v=>longText(v, 220)],
+          ["Governance note", edgeAttribution.governance_note || "Diagnostic only; no trading gate changed.", v=>longText(v, 260)]
+        ]) + titledTable("Attribution by cohort", attributionCohorts, [
+          ["Cohort","signal_cohort", v=>longText(v, 180)],
+          ["Family","family", v=>longText(v, 120)],
+          ["Decision P&L","decision_pnl_usdc", fmtUsd],
+          ["Audited paper","paper_audited_pnl_usdc", fmtUsd],
+          ["Shadow P&L","shadow_total_pnl_usdc", fmtUsd],
+          ["Entry edge","entry_edge_usdc", fmtUsd],
+          ["Line move","line_movement_usdc", fmtUsd],
+          ["Spread cost","spread_slippage_cost_usdc", fmtUsd],
+          ["Mean CLV","mean_final_clv", v=>fmtNum(v, 4)],
+          ["Drag","primary_drag", v=>longText(v, 150)],
+          ["Action","recommended_action", v=>longText(v, 180)]
+        ], 10)
+      : `<div class="sectionLead">No edge attribution artifact yet. The next governance refresh should build edge_attribution.json from paper round trips, shadow positions, and CLV.</div>`;
     const cycleRows = [
       ["Active lane", legacyLiveActive ? "legacy live loop" : "shadow research + websocket"],
       ["Research status", `${researchStatus} / ${fmtAge(researchAge)} old`],
@@ -3600,6 +3630,9 @@ def render_dashboard(cfg: EngineConfig, latest_report: dict[str, Any] | None = N
     closing_line_value = read_json(governance / "closing_line_value.json", default={}) or {}
     if not isinstance(closing_line_value, dict):
         closing_line_value = {}
+    edge_attribution = read_json(governance / "edge_attribution.json", default={}) or {}
+    if not isinstance(edge_attribution, dict):
+        edge_attribution = {}
     websocket_summary = read_json(cfg.output_root / "polymarket_websocket" / "websocket_summary.json", default={}) or {}
     if not isinstance(websocket_summary, dict):
         websocket_summary = {}
@@ -3706,6 +3739,7 @@ def render_dashboard(cfg: EngineConfig, latest_report: dict[str, Any] | None = N
         "algo_replay": algo_replay,
         "quant_research_status": quant_research_status,
         "closing_line_value": closing_line_value,
+        "edge_attribution": edge_attribution,
         "websocket_summary": websocket_summary,
         "websocket_feature_summary": websocket_feature_summary,
         "research_focus": research_focus,

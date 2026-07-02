@@ -213,6 +213,53 @@ def test_dashboard_handles_empty_closing_line_value_artifact(tmp_path):
     assert "No CLV evidence yet" in html
 
 
+def test_dashboard_surfaces_edge_attribution_artifact(tmp_path):
+    cfg = _config(tmp_path)
+    write_json(
+        cfg.governance_root / "edge_attribution.json",
+        {
+            "status": "ok",
+            "generated_at_utc": "2026-07-02T12:10:00Z",
+            "cohorts_attributed": 1,
+            "total_paper_audited_pnl_usdc": -1.2,
+            "total_shadow_pnl_usdc": -1.0,
+            "total_decision_pnl_usdc": -2.2,
+            "total_entry_edge_usdc": 0.7,
+            "total_spread_slippage_cost_usdc": 0.4,
+            "total_line_movement_usdc": -1.0,
+            "primary_drag_counts": {"spread_slippage": 1},
+            "cohorts": [
+                {
+                    "signal_cohort": "macro_rates",
+                    "family": "macro_rates",
+                    "decision_pnl_usdc": -2.2,
+                    "paper_audited_pnl_usdc": -1.2,
+                    "shadow_total_pnl_usdc": -1.0,
+                    "entry_edge_usdc": 0.7,
+                    "line_movement_usdc": -1.0,
+                    "spread_slippage_cost_usdc": 0.4,
+                    "mean_final_clv": -0.05,
+                    "primary_drag": "spread_slippage",
+                    "recommended_action": "tighten_liquidity_spread_or_reduce_size",
+                }
+            ],
+            "governance_note": "Diagnostic only.",
+            "paper_trading_invoked": False,
+            "live_trading_invoked": False,
+        },
+    )
+
+    result = render_dashboard(cfg)
+
+    data = read_json(result["dashboard_data"])
+    html = Path(result["dashboard_file"]).read_text(encoding="utf-8")
+    assert data["edge_attribution"]["cohorts_attributed"] == 1
+    assert data["edge_attribution"]["paper_trading_invoked"] is False
+    assert data["edge_attribution"]["live_trading_invoked"] is False
+    assert "Edge attribution" in html
+    assert "Attribution by cohort" in html
+
+
 def test_dashboard_surfaces_algo_replay_evidence(tmp_path):
     cfg = _config(tmp_path)
     algo_root = cfg.output_root / "polymarket_algo"

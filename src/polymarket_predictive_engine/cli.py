@@ -17,6 +17,7 @@ from .crypto_updown_labels import build_crypto_updown_proxy_labels
 from .data_inventory import inventory
 from .data_quality import data_quality
 from .dutch_arb_monitor import run_dutch_arb_monitor
+from .edge_attribution import build_edge_attribution
 from .execution.live import live_trade
 from .execution.paper import paper_trade_report
 from .external_feed_collector import collect_external_feeds
@@ -113,6 +114,7 @@ COMMANDS = [
     "price-action-scout",
     "price-action-paper-signals",
     "closing-line-value",
+    "edge-attribution",
     "algo-replay",
     "active-window-plan",
     "promotion-gate",
@@ -317,6 +319,8 @@ def main(argv: list[str] | None = None) -> int:
             _print(build_price_action_paper_signals(cfg))
         elif args.command == "closing-line-value":
             _print(build_closing_line_value(cfg, features_input=args.websocket_input))
+        elif args.command == "edge-attribution":
+            _print(build_edge_attribution(cfg))
         elif args.command == "algo-replay":
             _print(run_replay(cfg, args.strategy, features_input=args.websocket_input))
         elif args.command == "active-window-plan":

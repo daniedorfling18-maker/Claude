@@ -224,6 +224,18 @@ shadow-only governance. Positive bid/ask cohorts are prioritised for more websoc
 cohorts are suppressed until a new thesis appears; paper promotion still requires positive forward cohort
 evidence rather than a forced trade.
 
+The governance refresh now also writes post-trade edge attribution:
+
+```text
+outputs/polymarket_model_governance/edge_attribution.json
+outputs/polymarket_model_governance/edge_attribution_cohorts.csv
+```
+
+This decomposes paper/shadow cohort P&L into audited paper P&L, shadow P&L, entry edge, CLV line
+movement, spread/slippage cost, and residual model/settlement surprise. It is used by
+`research_focus.json` to separate cost/quote-quality problems from model/line-movement problems.
+It is diagnostic only and does not authorise paper or live trading.
+
 ## Why $100/month is not solved yet
 
 At the current probationary stake of $2, a 3% ROI produces only $0.06 per trade. Hitting $100/month at that level would require about 1,667 trades/month, which is not realistic. The route to the target is therefore:

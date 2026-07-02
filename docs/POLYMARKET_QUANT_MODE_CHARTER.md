@@ -142,12 +142,20 @@ Acceptance: `tests/polymarket_predictive_engine/test_family_classifier.py` plus
 research families. This does **not** loosen promotion: newly classified families still need their own
 positive bid/ask, CLV, settlement, and paper evidence before any governed paper sizing.
 
-### WP8 — Edge attribution / post-trade analytics — `open`
+### WP8 — Edge attribution / post-trade analytics — `done` (2026-07-02)
 
-- Per closed shadow/paper position, decompose realised P&L into: entry edge (model vs market),
-  line movement (CLV), spread/slippage cost, and settlement surprise. Aggregate per cohort.
-- Acceptance: an `edge_attribution.json` governance artifact; used by research-focus refresh to
-  direct collection toward cohorts whose losses are cost-driven vs model-driven.
+Implemented in `edge_attribution.py`, CLI `edge-attribution`, and governance refresh. Artifacts:
+`outputs/polymarket_model_governance/edge_attribution.json` +
+`edge_attribution_cohorts.csv`.
+
+Per cohort, the engine now decomposes observed paper/shadow P&L into audited paper P&L, shadow P&L,
+entry edge, CLV line movement, spread/slippage cost, and residual settlement/model surprise. It also
+classifies the primary drag (`quote_quality`, `spread_slippage`, `adverse_line_movement`,
+`model_edge_failed_to_transfer`, `positive_forward_edge`, or `insufficient_evidence`) and recommends
+the next research action. `research_focus.py` consumes the artifact so cost/quote-quality losses
+route toward tighter-spread/liquid analogue collection, while model/line-movement losses are
+suppressed until a new thesis/feature/anchor exists. Dashboard renders an "Edge attribution" panel.
+Diagnostic only; paper/live gates unchanged.
 
 ## Algo execution compatibility track (WP9–WP11)
 

@@ -8,6 +8,7 @@ from .config import EngineConfig, load_config
 from .cohort_validation import write_signal_cohort_pnl
 from .closing_line import build_closing_line_value
 from .dashboard import render_dashboard
+from .edge_attribution import build_edge_attribution
 from .goal_planner import build_goal_plan
 from .governance import governance_report
 from .paper_round_trip import build_paper_round_trip_evidence
@@ -49,6 +50,7 @@ def refresh_governance(cfg: EngineConfig, *, refresh_dashboard: bool = True) -> 
     """
     paper_round_trip = build_paper_round_trip_evidence(cfg)
     closing_line = build_closing_line_value(cfg)
+    edge_attribution = build_edge_attribution(cfg)
 
     con = connect_db(cfg.database_path)
     try:
@@ -84,6 +86,7 @@ def refresh_governance(cfg: EngineConfig, *, refresh_dashboard: bool = True) -> 
             "price_action_microstructure": True,
             "paper_round_trip_evidence": True,
             "closing_line_value": True,
+            "edge_attribution": True,
             "price_action_feedback": True,
             "price_action_model": True,
             "price_action_paper_signals": True,
@@ -109,6 +112,9 @@ def refresh_governance(cfg: EngineConfig, *, refresh_dashboard: bool = True) -> 
         "closing_line_final_positions": closing_line.get("final_line_positions"),
         "closing_line_mean_final_clv": closing_line.get("mean_final_clv"),
         "closing_line_positive_cohorts": closing_line.get("positive_clv_cohorts"),
+        "edge_attribution_status": edge_attribution.get("status"),
+        "edge_attribution_cohorts": edge_attribution.get("cohorts_attributed"),
+        "edge_attribution_primary_drags": edge_attribution.get("primary_drag_counts"),
         "price_action_feedback_state": price_action_feedback.get("learning_state"),
         "price_action_model_decision": price_action_model.get("decision"),
         "price_action_model_promotion_ready": price_action_model.get("promotion_ready"),

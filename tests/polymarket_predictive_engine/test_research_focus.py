@@ -381,3 +381,48 @@ def test_research_focus_blocks_current_positive_analogue_without_label_headroom(
     assert blocked["can_clear_model_label_hurdle"] is False
     assert blocked["max_possible_return"] < blocked["model_label_minimum_return"]
     assert "too high to ever clear" in payload["summary"]
+
+
+def test_research_focus_uses_edge_attribution_to_separate_cost_and_model_drags(tmp_path):
+    cfg = _cfg(tmp_path)
+    write_json(
+        cfg.governance_root / "edge_attribution.json",
+        {
+            "status": "ok",
+            "primary_drag_counts": {"spread_slippage": 1, "model_edge_failed_to_transfer": 1},
+            "cohorts": [
+                {
+                    "signal_cohort": "macro_rates",
+                    "family": "macro_rates",
+                    "decision_pnl_usdc": -0.2,
+                    "entry_edge_usdc": 0.7,
+                    "spread_slippage_cost_usdc": 0.4,
+                    "line_movement_usdc": -0.1,
+                    "mean_final_clv": -0.005,
+                    "primary_drag": "spread_slippage",
+                    "recommended_action": "tighten_liquidity_spread_or_reduce_size",
+                },
+                {
+                    "signal_cohort": "tennis_tennis_winner",
+                    "family": "tennis_tennis_winner",
+                    "decision_pnl_usdc": -2.0,
+                    "entry_edge_usdc": 0.5,
+                    "spread_slippage_cost_usdc": 0.01,
+                    "line_movement_usdc": -1.2,
+                    "mean_final_clv": -0.06,
+                    "primary_drag": "model_edge_failed_to_transfer",
+                    "recommended_action": "collect_more_or_retrain_before_promotion",
+                },
+            ],
+            "paper_trading_invoked": False,
+            "live_trading_invoked": False,
+        },
+    )
+
+    payload = build_research_focus(cfg)
+
+    assert payload["collection_queries"][0] == "fed"
+    assert payload["edge_attribution"]["collection_queries"] == ["fed"]
+    assert payload["edge_attribution"]["cost_driven"][0]["cohort"] == "macro_rates"
+    assert payload["edge_attribution"]["model_driven"][0]["cohort"] == "tennis_tennis_winner"
+    assert "cost/quote-quality constrained" in payload["summary"]

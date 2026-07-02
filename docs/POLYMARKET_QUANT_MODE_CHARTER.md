@@ -77,14 +77,18 @@ pre-close lines only). Diagnostic input to governance review; not an automatic p
 before Kelly; `risk.kelly_shrinkage` config (default 0.0 = unchanged behaviour). Guaranteed
 `<=` plain capped Kelly. Sets up probability-uncertainty-aware sizing for paper probes.
 
-### WP3 — Wire CLV into the shadow research cycle and dashboard — `open`
+### WP3 — Wire CLV into the shadow research cycle and dashboard — `specced` (2026-07-02)
 
-- Call `build_closing_line_value` from the scheduled shadow-research cycle after shadow-cohort
-  refresh (see `scripts/run_polymarket_shadow_research_cycle.ps1` step order and
-  `refresh_governance.py`).
-- Surface per-cohort CLV (mean, CI, evidence class) in `dashboard.py` and the local-history audit.
-- Acceptance: cycle status JSON gains a `closing_line_value` block; audit report shows CLV beside
-  settlement and round-trip evidence; `paper_trading_invoked` stays `false`; tests cover the wiring.
+Detailed implementation instructions are written as work orders **WO-1, WO-2, WO-3** in
+`docs/POLYMARKET_CODEX_WORK_ORDERS.md` — any coding agent can execute them mechanically.
+
+- WO-1: `done` (2026-07-02) — call `build_closing_line_value` from `refresh_governance()` (covers
+  the scheduled cycle with zero PowerShell changes). Artifact:
+  `outputs/polymarket_model_governance/closing_line_value.json`; summary also appears in
+  `outputs/polymarket_model_governance/governance_refresh.json`.
+- WO-2: dashboard CLV section following the `quant_research_status` pattern.
+- WO-3: CLV block in the local-history audit report (report-only; `_paper_decision` untouched).
+- Acceptance: per work order; `paper_trading_invoked` stays `false`; tests cover the wiring.
 
 ### WP4 — CLV-aware promotion review (advisory, fail-closed) — `open`
 
@@ -128,8 +132,43 @@ before Kelly; `risk.kelly_shrinkage` config (default 0.0 = unchanged behaviour).
 - Acceptance: an `edge_attribution.json` governance artifact; used by research-focus refresh to
   direct collection toward cohorts whose losses are cost-driven vs model-driven.
 
+## Algo execution compatibility track (WP9–WP11)
+
+Quant research finds the edge; algo execution trades it. To be "algo trading compatible" the engine
+needs an event-driven seam — typed orders, pluggable strategies, and a replay backtester — so that
+when a cohort finally earns promotion, execution is a policy choice rather than a rewrite. All of it
+stays shadow-only by construction: the order schema has **no live mode value at all**, and the
+replay harness refuses non-shadow intents.
+
+Detailed specs are work orders **WO-4, WO-5, WO-6** in `docs/POLYMARKET_CODEX_WORK_ORDERS.md`.
+
+### WP9 — Typed order-intent schema — `specced` (2026-07-02, WO-4)
+
+One validated `OrderIntent` dataclass between "strategy wants to trade" and "broker executes":
+side/quantity/limit price, time-in-force (IOC/GTD), execution policy (cross spread / join bid /
+work midpoint), and `mode` restricted to `shadow`/`paper`. Adapters bridge today's
+`risk_decision` output and the paper broker's signal rows without changing either.
+
+### WP10 — Algo strategy protocol + registry — `specced` (2026-07-02, WO-5)
+
+`QuoteEvent` (from normalised websocket rows) in, `list[OrderIntent]` out; pure, deterministic,
+no I/O inside strategies. Registry enforces intent validity and downgrades anything non-shadow
+unless governance has approved the cohort. Ships with a Null strategy and one tight-spread
+join-bid shadow probe.
+
+### WP11 — Websocket replay harness — `specced` (2026-07-02, WO-6)
+
+Chronological, no-lookahead replay of recorded websocket features through any registered strategy
+with conservative fill simulation (cross at ask only when the limit crosses; resting orders fill
+only on later crossing quotes; mark to bid). This is the event-driven backtester that closes the
+algo loop offline. Later, WP5's depth-based cost model replaces its flat fill assumptions.
+
 ## Rules of engagement for coding agents
 
+0. **Division of labour**: the orchestrating agent writes/updates this charter and the work orders
+   in `docs/POLYMARKET_CODEX_WORK_ORDERS.md`; implementing agents (Codex etc.) execute work orders
+   exactly as written and flip statuses when they land. If a work order is ambiguous or wrong,
+   raise it — do not improvise around a safety rule.
 1. **Claim one WP at a time.** Keep diffs scoped to the WP; do not drive-by refactor gate logic.
 2. **Fail closed.** Every new evidence stream must default to `insufficient` and require explicit
    sample-size + CI thresholds to turn positive.

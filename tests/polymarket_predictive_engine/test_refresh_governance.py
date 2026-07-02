@@ -40,6 +40,22 @@ def test_refresh_governance_rebuilds_price_action_paper_signals_before_audit(tmp
         lambda _cfg: order.append("paper_round_trip")
         or {"closed_round_trips": 2, "positive_round_trips": 1, "realized_pnl_usdc": 3.5},
     )
+
+    def _closing_line(_cfg):
+        order.append("closing_line_value")
+        payload = {
+            "status": "ok",
+            "positions_scored": 3,
+            "final_line_positions": 2,
+            "mean_final_clv": 0.0123,
+            "positive_clv_cohorts": ["macro_rates"],
+            "paper_trading_invoked": False,
+            "live_trading_invoked": False,
+        }
+        refresh_module.write_json(_cfg.governance_root / "closing_line_value.json", payload)
+        return payload
+
+    monkeypatch.setattr(refresh_module, "build_closing_line_value", _closing_line)
     monkeypatch.setattr(
         refresh_module,
         "train_price_action_model",
@@ -94,6 +110,8 @@ def test_refresh_governance_rebuilds_price_action_paper_signals_before_audit(tmp
     result = refresh_module.refresh_governance(cfg)
 
     assert order.index("paper_round_trip") < order.index("signal_cohort_pnl")
+    assert order.index("paper_round_trip") < order.index("closing_line_value")
+    assert order.index("closing_line_value") < order.index("promotion_review")
     assert order.index("price_action_scout") < order.index("price_action_model")
     assert order.index("price_action_microstructure") < order.index("price_action_model")
     assert order.index("paper_round_trip") < order.index("price_action_model")
@@ -106,8 +124,14 @@ def test_refresh_governance_rebuilds_price_action_paper_signals_before_audit(tmp
     assert result["refreshed"]["price_action_scout"] is True
     assert result["refreshed"]["price_action_microstructure"] is True
     assert result["refreshed"]["paper_round_trip_evidence"] is True
+    assert result["refreshed"]["closing_line_value"] is True
     assert result["paper_round_trip_closed_trades"] == 2
     assert result["paper_round_trip_positive_trades"] == 1
+    assert result["closing_line_positions_scored"] == 3
+    assert result["closing_line_final_positions"] == 2
+    assert result["closing_line_mean_final_clv"] == 0.0123
+    assert result["closing_line_positive_cohorts"] == ["macro_rates"]
+    assert Path(cfg.governance_root / "closing_line_value.json").exists()
     assert Path(cfg.governance_root / "governance_refresh.json").exists()
 
 

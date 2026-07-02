@@ -783,6 +783,15 @@ websocket_market_data:
   feedback_broaden_target_enabled: true
   feedback_broaden_target_assets: 24
   feedback_broaden_target_assets_per_family: 6
+  # Strict tradable targets still lead the subscription.  Any unused websocket
+  # capacity is filled with broader liquid-ish markets for learning only, so the
+  # model can discover repricing pockets outside the current crypto-heavy slice.
+  include_research_liquidity_targets: true
+  max_research_target_assets: 120
+  max_research_target_assets_per_family: 8
+  research_min_liquidity: 25
+  research_max_spread: 0.12
+  research_max_relative_spread: 0.60
   market_ids: &id001
   - '53767774368871487958852302456977659279367510767287923221897564430044671384128'
   - '37821011509134197239774147789543695590581250725127252293498663449982199078732'

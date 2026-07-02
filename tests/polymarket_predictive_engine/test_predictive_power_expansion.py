@@ -420,6 +420,79 @@ def test_websocket_prioritises_strategy_v2_forward_evidence_targets(tmp_path, mo
     assert "resolved-token" not in subscriptions[0]["assets_ids"]
 
 
+def test_websocket_fills_unused_capacity_with_research_liquidity_targets(tmp_path):
+    import yaml
+
+    cfg_path = make_cfg(tmp_path)
+    data = yaml.safe_load(cfg_path.read_text(encoding="utf-8"))
+    data.setdefault("websocket_market_data", {})
+    data["websocket_market_data"].update(
+        {
+            "use_liquidity_targets": True,
+            "target_all_liquid_families": True,
+            "max_liquidity_target_assets": 4,
+            "max_liquidity_target_assets_per_family": 2,
+            "include_research_liquidity_targets": True,
+            "max_research_target_assets": 3,
+            "max_research_target_assets_per_family": 2,
+            "research_min_liquidity": 25,
+            "research_max_spread": 0.12,
+            "research_max_relative_spread": 0.60,
+        }
+    )
+    cfg_path.write_text(yaml.safe_dump(data, sort_keys=False), encoding="utf-8")
+    cfg = load_config(cfg_path)
+    write_csv(
+        cfg.output_root / "polymarket_liquidity_discovery" / "liquidity_watchlist.csv",
+        [
+            {
+                "token_id": "strict-token",
+                "family": "macro_rates",
+                "tradable_liquidity_candidate": "true",
+                "liquidity": "1000",
+                "spread": "0.01",
+                "relative_spread": "0.05",
+                "time_to_close_hours": "12",
+            },
+            {
+                "token_id": "research-token-1",
+                "family": "sports_other",
+                "tradable_liquidity_candidate": "false",
+                "liquidity": "500",
+                "spread": "0.05",
+                "relative_spread": "0.30",
+                "time_to_close_hours": "10",
+            },
+            {
+                "token_id": "research-token-2",
+                "family": "tennis_tennis_winner",
+                "tradable_liquidity_candidate": "false",
+                "liquidity": "300",
+                "spread": "0.08",
+                "relative_spread": "0.40",
+                "time_to_close_hours": "20",
+            },
+            {
+                "token_id": "excluded-token",
+                "family": "crypto_btc_updown_5m",
+                "tradable_liquidity_candidate": "false",
+                "liquidity": "1000",
+                "spread": "0.01",
+                "relative_spread": "0.02",
+                "time_to_close_hours": "1",
+            },
+        ],
+    )
+
+    targets = websocket_collector._liquidity_target_rows(cfg, cfg.raw["websocket_market_data"])
+
+    assert targets[0]["token_id"] == "strict-token"
+    research_targets = [row for row in targets if row.get("research_liquidity_target") is True]
+    assert {row["token_id"] for row in research_targets} == {"research-token-1", "research-token-2"}
+    assert all(row.get("websocket_target_reason") == "broader_repricing_learning" for row in research_targets)
+    assert "excluded-token" not in {row["token_id"] for row in targets}
+
+
 def test_websocket_reserves_feedback_broaden_targets_when_price_action_negative(tmp_path):
     import yaml
 

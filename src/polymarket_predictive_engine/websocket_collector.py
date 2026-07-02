@@ -398,6 +398,103 @@ def _balanced_by_family(rows: list[dict[str, Any]], *, max_assets: int, max_per_
     return selected
 
 
+def _research_target_rank(row: dict[str, Any]) -> tuple[float, float, float, float]:
+    return (
+        safe_float(row.get("liquidity")) or 0.0,
+        -(safe_float(row.get("relative_spread")) or 999.0),
+        -(safe_float(row.get("spread")) or 999.0),
+        -(safe_float(row.get("time_to_close_hours")) or 999999.0),
+    )
+
+
+def _research_liquidity_rows(
+    rows: list[dict[str, Any]],
+    selected: list[dict[str, Any]],
+    settings: dict[str, Any],
+    *,
+    max_assets: int,
+) -> list[dict[str, Any]]:
+    """Fill unused websocket capacity with broader research-only targets.
+
+    Strict tradable rows stay first.  These rows are for learning bid/ask
+    behaviour in under-covered families; they do not make a market paper
+    tradable and the downstream broker still requires governed signal rows.
+    """
+    if not _boolish(settings.get("include_research_liquidity_targets", True)):
+        return []
+    remaining_slots = max(0, max_assets - len(selected))
+    if remaining_slots <= 0:
+        return []
+    max_rows = min(remaining_slots, int(settings.get("max_research_target_assets", remaining_slots) or remaining_slots))
+    max_per_family = int(settings.get("max_research_target_assets_per_family", 6) or 6)
+    min_liquidity = safe_float(settings.get("research_min_liquidity"))
+    if min_liquidity is None:
+        min_liquidity = 25.0
+    max_spread = safe_float(settings.get("research_max_spread"))
+    if max_spread is None:
+        max_spread = 0.12
+    max_relative_spread = safe_float(settings.get("research_max_relative_spread"))
+    if max_relative_spread is None:
+        max_relative_spread = 0.60
+
+    selected_ids = {_token_id(row) for row in selected if _token_id(row)}
+    candidates: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for row in rows:
+        token_id = _token_id(row)
+        if not token_id or token_id in selected_ids or token_id in seen:
+            continue
+        family = str(row.get("family") or row.get("category") or "unknown").strip()
+        if not family or family in _EXCLUDED_FAMILIES:
+            continue
+        liquidity = safe_float(row.get("liquidity")) or 0.0
+        spread = safe_float(row.get("spread"))
+        relative_spread = safe_float(row.get("relative_spread"))
+        if spread is None:
+            continue
+        if relative_spread is None:
+            ask = safe_float(row.get("best_ask") or row.get("ask") or row.get("executable_price"))
+            relative_spread = spread / ask if ask and ask > 0 else None
+        if liquidity < min_liquidity:
+            continue
+        if spread > max_spread:
+            continue
+        if relative_spread is not None and relative_spread > max_relative_spread:
+            continue
+        enriched = dict(row)
+        enriched["research_liquidity_target"] = True
+        enriched["websocket_target_reason"] = "broader_repricing_learning"
+        enriched["tradable_liquidity_candidate"] = row.get("tradable_liquidity_candidate", "")
+        candidates.append(enriched)
+        seen.add(token_id)
+    candidates.sort(key=_research_target_rank, reverse=True)
+    return _balanced_by_family(candidates, max_assets=max_rows, max_per_family=max_per_family)
+
+
+def _with_research_targets(
+    rows: list[dict[str, Any]],
+    selected: list[dict[str, Any]],
+    settings: dict[str, Any],
+    *,
+    max_assets: int,
+) -> list[dict[str, Any]]:
+    if len(selected) >= max_assets:
+        return selected[:max_assets]
+    additions = _research_liquidity_rows(rows, selected, settings, max_assets=max_assets)
+    if not additions:
+        return selected[:max_assets]
+    selected_ids = {_token_id(row) for row in selected if _token_id(row)}
+    out = list(selected)
+    for row in additions:
+        token_id = _token_id(row)
+        if token_id and token_id not in selected_ids:
+            out.append(row)
+            selected_ids.add(token_id)
+        if len(out) >= max_assets:
+            break
+    return out[:max_assets]
+
+
 def _profit_sprint_target_index(cfg: EngineConfig) -> dict[str, dict[str, Any]]:
     rows = read_csv_rows(cfg.governance_root / "profit_sprint_targets.csv")
     index: dict[str, dict[str, Any]] = {}
@@ -516,7 +613,8 @@ def _liquidity_target_rows(cfg: EngineConfig, settings: dict[str, Any]) -> list[
     if not priority_rows and not strategy_v2_rows:
         feedback_rows = _feedback_broaden_rows(cfg, settings, candidates)
         if not feedback_rows:
-            return _balanced_by_family(candidates, max_assets=max_assets, max_per_family=max_per_family)
+            selected = _balanced_by_family(candidates, max_assets=max_assets, max_per_family=max_per_family)
+            return _with_research_targets(rows, selected, settings, max_assets=max_assets)
         reserve = min(len(feedback_rows), max(0, max_assets - 1))
         base_rows = [row for row in candidates if _token_id(row) not in {_token_id(item) for item in feedback_rows[:reserve]}]
         selected = _balanced_by_family(base_rows, max_assets=max_assets - reserve, max_per_family=max_per_family)
@@ -528,7 +626,8 @@ def _liquidity_target_rows(cfg: EngineConfig, settings: dict[str, Any]) -> list[
                 selected_ids.add(token_id)
             if len(selected) >= max_assets:
                 break
-        return _tag_feedback_broaden_targets(selected[:max_assets], feedback_rows)
+        selected = _tag_feedback_broaden_targets(selected[:max_assets], feedback_rows)
+        return _with_research_targets(rows, selected, settings, max_assets=max_assets)
 
     feedback_rows = _feedback_broaden_rows(cfg, settings, candidates)
     feedback_reserve = min(
@@ -572,7 +671,8 @@ def _liquidity_target_rows(cfg: EngineConfig, settings: dict[str, Any]) -> list[
     if len(selected) < max_assets:
         remaining = [row for row in candidates if _token_id(row) not in selected_ids]
         selected.extend(_balanced_by_family(remaining, max_assets=max_assets - len(selected), max_per_family=max_per_family))
-    return _tag_feedback_broaden_targets(selected[:max_assets], feedback_rows)
+    selected = _tag_feedback_broaden_targets(selected[:max_assets], feedback_rows)
+    return _with_research_targets(rows, selected, settings, max_assets=max_assets)
 
 
 def _asset_ids_from_rows(rows: list[dict[str, Any]]) -> list[str]:
@@ -628,6 +728,16 @@ def _feedback_broaden_counts(rows: list[dict[str, Any]]) -> dict[str, int]:
     counts: dict[str, int] = {}
     for row in rows:
         if not _boolish(row.get("feedback_broaden_target")):
+            continue
+        family = str(row.get("family") or row.get("category") or "unknown")
+        counts[family] = counts.get(family, 0) + 1
+    return dict(sorted(counts.items()))
+
+
+def _research_target_counts(rows: list[dict[str, Any]]) -> dict[str, int]:
+    counts: dict[str, int] = {}
+    for row in rows:
+        if not _boolish(row.get("research_liquidity_target")):
             continue
         family = str(row.get("family") or row.get("category") or "unknown")
         counts[family] = counts.get(family, 0) + 1
@@ -691,6 +801,7 @@ def collect_websocket(cfg: EngineConfig, websocket_seconds: int = 60) -> dict[st
     sprint_counts = _profit_sprint_target_counts(target_rows)
     strategy_v2_counts = _strategy_v2_target_counts(target_rows)
     feedback_counts = _feedback_broaden_counts(target_rows)
+    research_counts = _research_target_counts(target_rows)
     if strategy_v2_counts and sprint_counts:
         target_source = "strategy_v2_forward_evidence+profit_sprint_targets+liquidity_watchlist"
     elif strategy_v2_counts:
@@ -701,6 +812,8 @@ def collect_websocket(cfg: EngineConfig, websocket_seconds: int = 60) -> dict[st
         target_source = "liquidity_watchlist" if dynamic_ids else "configured_market_ids"
     if feedback_counts and dynamic_ids:
         target_source += "+price_action_feedback_broaden"
+    if research_counts and dynamic_ids:
+        target_source += "+research_repricing_coverage"
     if target_rows:
         write_csv(cfg.governance_root / "websocket_liquidity_targets.csv", target_rows)
 
@@ -746,6 +859,7 @@ def collect_websocket(cfg: EngineConfig, websocket_seconds: int = 60) -> dict[st
             "target_profit_sprint_counts": sprint_counts,
             "target_strategy_v2_counts": strategy_v2_counts,
             "target_feedback_broaden_counts": feedback_counts,
+            "target_research_counts": research_counts,
             "subscription_attempts": len(variants),
         }
         write_json(out_root / "websocket_summary.json", summary)
@@ -777,6 +891,7 @@ def collect_websocket(cfg: EngineConfig, websocket_seconds: int = 60) -> dict[st
         "target_profit_sprint_counts": sprint_counts,
         "target_strategy_v2_counts": strategy_v2_counts,
         "target_feedback_broaden_counts": feedback_counts,
+        "target_research_counts": research_counts,
         "target_file": str(cfg.governance_root / "websocket_liquidity_targets.csv") if target_rows else "",
         "selected_subscription": selected_subscription,
         "subscription_attempts": len(variants),

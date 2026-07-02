@@ -20,7 +20,7 @@ SUMMARY_JSON = "price_action_model_summary.json"
 VALIDATION_FILE = "price_action_model_validation_predictions.csv"
 CURRENT_FILE = "price_action_model_current_candidates.csv"
 MODEL_ARTIFACT = "price_action_model_v2.json"
-MODEL_VERSION = "pm-price-action-bid-reprice-logit-v3"
+MODEL_VERSION = "pm-price-action-bid-reprice-logit-v4"
 
 FEATURE_NAMES = [
     "entry_bid",
@@ -44,6 +44,11 @@ FEATURE_NAMES = [
     "spread_penalized_chase",
     "high_ask_chase",
     "btc_chase_pressure",
+    "low_price_convexity",
+    "inverse_entry_ask",
+    "one_cent_return",
+    "low_price_upward_move",
+    "low_price_btc",
     "is_crypto",
     "is_sports",
     "is_esports",
@@ -90,6 +95,7 @@ CURRENT_FIELDS = [
     "net_buy_events",
     "chase_pressure",
     "spread_penalized_chase",
+    "low_price_convexity",
     "predicted_reprice_probability",
     "predicted_expected_roi",
     "minimum_probability_to_trade",
@@ -218,6 +224,12 @@ def _anti_chase_metrics(row: dict[str, Any], *, current: bool = False) -> dict[s
     spread_penalized_chase = chase_pressure * (1.0 + max(0.0, relative_spread))
     high_ask_chase = max(0.0, entry_ask - 0.60) * chase_pressure
     btc_chase_pressure = flags["is_crypto_btc"] * chase_pressure
+    safe_entry_ask = max(entry_ask, 0.01) if entry_ask > 0 else 0.01
+    low_price_convexity = max(0.0, 0.15 - entry_ask)
+    inverse_entry_ask = 1.0 / safe_entry_ask
+    one_cent_return = 0.01 / safe_entry_ask
+    low_price_upward_move = low_price_convexity * upward_move
+    low_price_btc = low_price_convexity * flags["is_crypto_btc"]
     return {
         "bid_move_abs": bid_move,
         "mid_move_abs": mid_move,
@@ -233,6 +245,11 @@ def _anti_chase_metrics(row: dict[str, Any], *, current: bool = False) -> dict[s
         "spread_penalized_chase": spread_penalized_chase,
         "high_ask_chase": high_ask_chase,
         "btc_chase_pressure": btc_chase_pressure,
+        "low_price_convexity": low_price_convexity,
+        "inverse_entry_ask": inverse_entry_ask,
+        "one_cent_return": one_cent_return,
+        "low_price_upward_move": low_price_upward_move,
+        "low_price_btc": low_price_btc,
     }
 
 
@@ -268,6 +285,11 @@ def _feature_vector(row: dict[str, Any], *, current: bool = False) -> list[float
         "spread_penalized_chase": anti_chase["spread_penalized_chase"],
         "high_ask_chase": anti_chase["high_ask_chase"],
         "btc_chase_pressure": anti_chase["btc_chase_pressure"],
+        "low_price_convexity": anti_chase["low_price_convexity"],
+        "inverse_entry_ask": anti_chase["inverse_entry_ask"],
+        "one_cent_return": anti_chase["one_cent_return"],
+        "low_price_upward_move": anti_chase["low_price_upward_move"],
+        "low_price_btc": anti_chase["low_price_btc"],
         **flags,
     }
     return [float(values[name]) for name in FEATURE_NAMES]
@@ -1176,6 +1198,8 @@ def _validation_example(row: dict[str, Any], probability: float, rank: int, sele
         "chase_pressure": anti_chase["chase_pressure"],
         "spread_penalized_chase": anti_chase["spread_penalized_chase"],
         "btc_chase_pressure": anti_chase["btc_chase_pressure"],
+        "low_price_convexity": anti_chase["low_price_convexity"],
+        "one_cent_return": anti_chase["one_cent_return"],
         "selected_by_model": selected,
     }
 
@@ -1312,6 +1336,7 @@ def _current_candidate_rows(
                 "net_buy_events": row.get("net_buy_events", ""),
                 "chase_pressure": anti_chase["chase_pressure"],
                 "spread_penalized_chase": anti_chase["spread_penalized_chase"],
+                "low_price_convexity": anti_chase["low_price_convexity"],
                 "predicted_reprice_probability": probability,
                 "predicted_expected_roi": predicted_expected_roi,
                 "minimum_probability_to_trade": probability_threshold,

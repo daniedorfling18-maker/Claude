@@ -944,6 +944,7 @@ async function load() {
       ["Bid","latest_bid", v=>fmtNum(v,4)],
       ["Ask","latest_ask", v=>fmtNum(v,4)],
       ["Chase","chase_pressure", v=>fmtNum(v, 4)],
+      ["Low price","low_price_convexity", v=>fmtNum(v, 4)],
       ["Pred prob","predicted_reprice_probability", v=>fmtNum(Number(v) * 100, 1) + "%"],
       ["Exp ROI","predicted_expected_roi", v=>fmtNum(Number(v) * 100, 2) + "%"],
       ["Shadow","shadow_only"]
@@ -964,6 +965,7 @@ async function load() {
       ["Family","family", v=>longText(v, 120)],
       ["Prob","predicted_reprice_probability", v=>fmtNum(Number(v) * 100, 1) + "%"],
       ["Chase","chase_pressure", v=>fmtNum(v, 4)],
+      ["Low price","low_price_convexity", v=>fmtNum(v, 4)],
       ["Target","target"],
       ["ROI","roi", v=>fmtNum(Number(v) * 100, 2) + "%"]
     ]) + `<div style="height:12px"></div><h3>Missed positive repricing examples</h3>` + table(priceActionModel.validation_rank_diagnostics?.missed_positive_examples || [], [
@@ -972,6 +974,7 @@ async function load() {
       ["Family","family", v=>longText(v, 120)],
       ["Prob","predicted_reprice_probability", v=>fmtNum(Number(v) * 100, 1) + "%"],
       ["Chase","chase_pressure", v=>fmtNum(v, 4)],
+      ["Low price","low_price_convexity", v=>fmtNum(v, 4)],
       ["ROI","roi", v=>fmtNum(Number(v) * 100, 2) + "%"]
     ]) + `<div style="height:12px"></div><h3>Validation family rank summary</h3>` + table(priceActionModel.validation_rank_diagnostics?.family_summary || [], [
       ["Family","family", v=>longText(v, 140)],

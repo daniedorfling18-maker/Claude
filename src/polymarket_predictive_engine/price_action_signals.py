@@ -78,9 +78,22 @@ REJECTION_FIELDS = [
     "market_slug",
     "outcome",
     "token_id",
+    "source",
+    "family",
+    "latest_bid",
+    "latest_ask",
+    "latest_spread",
+    "relative_spread",
+    "liquidity",
     "exit_policy_id",
     "signal_cohort",
     "round_trip_status",
+    "historical_analogue_key",
+    "historical_analogue_validation_rows",
+    "historical_analogue_positive_rows",
+    "historical_analogue_validation_roi",
+    "historical_analogue_win_rate",
+    "historical_analogue_gate",
     "rejection_reason",
 ]
 
@@ -495,7 +508,10 @@ def _historical_breadth_scan(cfg: EngineConfig, settings: dict[str, Any]) -> dic
     elif near_positive_buckets:
         state = "positive_validation_pockets_not_robust"
         target = ", ".join(recommended_queries[:4]) if recommended_queries else "the near-positive families"
-        next_action = f"Collect more {target} bid/ask rows matching the near-positive historical buckets; positives exist but fail train/size/concentration gates."
+        next_action = (
+            f"Collect more {target} bid/ask rows matching the near-positive historical buckets; "
+            "positives exist but fail train/size/concentration gates."
+        )
     else:
         state = "no_positive_historical_breadth_after_spread"
         next_action = "Do not force trades; the current all-event historical tape is negative after bid/ask costs."
@@ -593,6 +609,7 @@ def _paper_confirmation_current_candidates(
     fresh_matches = 0
     blocked = 0
     blocked_by_state: dict[str, int] = {}
+    blocked_preview: list[dict[str, Any]] = []
     approved_analogue_keys: set[str] = set()
     for feature in latest_rows:
         confirmation = _confirmation_candidate_for_row(feature, paper_confirmation)
@@ -620,6 +637,24 @@ def _paper_confirmation_current_candidates(
             blocked += 1
             state = str(analogue.get("state") or "unknown")
             blocked_by_state[state] = blocked_by_state.get(state, 0) + 1
+            blocked_preview.append(
+                _attach_historical_analogue(
+                    {
+                        "source": "paper_confirmation_current_candidate",
+                        "signal_cohort": cohort,
+                        "token_id": token,
+                        "market_slug": feature.get("market_slug", ""),
+                        "question": feature.get("question", ""),
+                        "family": feature.get("family", ""),
+                        "outcome": feature.get("outcome", ""),
+                        "latest_bid": bid,
+                        "latest_ask": ask,
+                        "latest_spread": spread,
+                        "relative_spread": "" if relative_spread is None else relative_spread,
+                    },
+                    analogue,
+                )
+            )
             continue
         analogue_key = str(analogue.get("key") or "")
         approved_analogue_keys.add(analogue_key)
@@ -667,6 +702,15 @@ def _paper_confirmation_current_candidates(
         "selected": len(selected),
         "blocked": blocked,
         "blocked_by_state": blocked_by_state,
+        "blocked_preview": sorted(
+            blocked_preview,
+            key=lambda item: (
+                safe_float(item.get("historical_analogue_validation_roi")) or -999.0,
+                safe_float(item.get("historical_analogue_positive_rows")) or 0.0,
+                safe_float(item.get("historical_analogue_validation_rows")) or 0.0,
+            ),
+            reverse=True,
+        )[:10],
         "positive_historical_analogue_keys": len(approved_analogue_keys),
     }
 
@@ -718,6 +762,7 @@ def _current_historical_analogue_scan(
     family_counts: dict[str, int] = {}
     positive_by_family: dict[str, int] = {}
     positive_preview: list[dict[str, Any]] = []
+    blocked_preview: list[dict[str, Any]] = []
     positive_keys: set[str] = set()
     positive_matches = 0
     blocked = 0
@@ -753,6 +798,25 @@ def _current_historical_analogue_scan(
         else:
             blocked += 1
             blocked_by_state[state] = blocked_by_state.get(state, 0) + 1
+            key = str(analogue.get("key") or "")
+            blocked_preview.append(
+                {
+                    "market_slug": row.get("market_slug", ""),
+                    "question": row.get("question", ""),
+                    "family": family,
+                    "outcome": row.get("outcome", ""),
+                    "token_id": _token_id(row),
+                    "latest_bid": row.get("entry_bid", ""),
+                    "latest_ask": row.get("entry_ask", ""),
+                    "latest_spread": row.get("entry_spread", ""),
+                    "historical_analogue_key": key,
+                    "historical_analogue_gate": state,
+                    "historical_analogue_validation_rows": analogue.get("validation_rows", 0),
+                    "historical_analogue_positive_rows": analogue.get("positive_rows", 0),
+                    "historical_analogue_validation_roi": analogue.get("validation_roi", 0.0),
+                    "historical_analogue_win_rate": analogue.get("win_rate", 0.0),
+                }
+            )
 
     positive_preview.sort(
         key=lambda item: (
@@ -790,6 +854,16 @@ def _current_historical_analogue_scan(
         "positive_validation_buckets": positive_validation_buckets,
         "positive_historical_analogue_keys": len(positive_keys),
         "positive_preview": positive_preview[:10],
+        "blocked_preview": sorted(
+            blocked_preview,
+            key=lambda item: (
+                safe_float(item.get("historical_analogue_validation_roi")) or -999.0,
+                safe_float(item.get("historical_analogue_positive_rows")) or 0.0,
+                safe_float(item.get("historical_analogue_validation_rows")) or 0.0,
+                -(safe_float(item.get("latest_spread")) or 999.0),
+            ),
+            reverse=True,
+        )[:20],
         "paper_only": True,
         "trade_authorisation": "diagnostic_only_requires_governed_signal",
     }
@@ -1044,13 +1118,33 @@ def _relative_spread(spread: float | None, price: float | None) -> float | None:
 
 
 def _reject(row: dict[str, Any], reason: str) -> dict[str, Any]:
+    bid = safe_float(row.get("latest_bid") or row.get("entry_bid") or row.get("best_bid"))
+    ask = safe_float(row.get("latest_ask") or row.get("entry_ask") or row.get("best_ask"))
+    spread = safe_float(row.get("latest_spread") or row.get("entry_spread") or row.get("spread"))
+    if spread is None and bid is not None and ask is not None:
+        spread = max(0.0, ask - bid)
+    relative_spread = _relative_spread(spread, ask)
+    liquidity = row.get("liquidity", "")
     return {
         "market_slug": row.get("market_slug", ""),
         "outcome": row.get("outcome", ""),
         "token_id": _token_id(row),
+        "source": row.get("source", ""),
+        "family": row.get("family", row.get("category", "")),
+        "latest_bid": "" if bid is None else bid,
+        "latest_ask": "" if ask is None else ask,
+        "latest_spread": "" if spread is None else spread,
+        "relative_spread": "" if relative_spread is None else relative_spread,
+        "liquidity": liquidity,
         "exit_policy_id": row.get("exit_policy_id", ""),
         "signal_cohort": _cohort_name(row),
         "round_trip_status": row.get("round_trip_status", ""),
+        "historical_analogue_key": row.get("historical_analogue_key", ""),
+        "historical_analogue_validation_rows": row.get("historical_analogue_validation_rows", ""),
+        "historical_analogue_positive_rows": row.get("historical_analogue_positive_rows", ""),
+        "historical_analogue_validation_roi": row.get("historical_analogue_validation_roi", ""),
+        "historical_analogue_win_rate": row.get("historical_analogue_win_rate", ""),
+        "historical_analogue_gate": row.get("historical_analogue_gate", ""),
         "rejection_reason": reason,
     }
 

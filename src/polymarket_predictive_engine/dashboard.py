@@ -828,6 +828,29 @@ async function load() {
       ["Val +","historical_analogue_positive_rows"],
       ["Val ROI","historical_analogue_validation_roi", v=>fmtNum(Number(v) * 100, 2) + "%"],
       ["Win rate","historical_analogue_win_rate", v=>fmtNum(Number(v) * 100, 1) + "%"]
+    ]) + `<div style="height:12px"></div><h3>Current analogue blockers to learn from</h3>` + table(currentHistScan.blocked_preview || [], [
+      ["Gate","historical_analogue_gate", v=>longText(v, 160)],
+      ["Family","family"],
+      ["Market","market_slug", v=>longText(v, 140)],
+      ["Outcome","outcome"],
+      ["Bid","latest_bid", v=>fmtNum(v,4)],
+      ["Ask","latest_ask", v=>fmtNum(v,4)],
+      ["Spread","latest_spread", v=>fmtNum(v,4)],
+      ["Val rows","historical_analogue_validation_rows"],
+      ["Val +","historical_analogue_positive_rows"],
+      ["Val ROI","historical_analogue_validation_roi", v=>fmtNum(Number(v) * 100, 2) + "%"],
+      ["Bucket","historical_analogue_key", v=>longText(v, 220)]
+    ]) + `<div style="height:12px"></div><h3>Paper-confirmation analogue blockers</h3>` + table((priceActionPaper.paper_confirmation_current_historical_analogue || {}).blocked_preview || [], [
+      ["Gate","historical_analogue_gate", v=>longText(v, 160)],
+      ["Cohort","signal_cohort", v=>longText(v, 180)],
+      ["Market","market_slug", v=>longText(v, 140)],
+      ["Outcome","outcome"],
+      ["Bid","latest_bid", v=>fmtNum(v,4)],
+      ["Ask","latest_ask", v=>fmtNum(v,4)],
+      ["Spread","latest_spread", v=>fmtNum(v,4)],
+      ["Val rows","historical_analogue_validation_rows"],
+      ["Val +","historical_analogue_positive_rows"],
+      ["Val ROI","historical_analogue_validation_roi", v=>fmtNum(Number(v) * 100, 2) + "%"]
     ]) + `<div style="height:12px"></div><h3>Historical breadth scan</h3>` + table(historicalBreadthScan.specs || [], [
       ["Spec","spec_id", v=>longText(v, 160)],
       ["Tested buckets","tested_buckets"],

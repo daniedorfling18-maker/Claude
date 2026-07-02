@@ -687,6 +687,10 @@ def test_paper_confirmation_current_candidate_blocks_negative_historical_analogu
     assert analogue["fresh_matches"] == 1
     assert analogue["blocked"] == 1
     assert analogue["blocked_by_state"]["no_positive_historical_analogue_examples"] == 1
+    assert analogue["blocked_preview"][0]["family"] == "crypto_btc_special"
+    assert analogue["blocked_preview"][0]["historical_analogue_gate"] == "no_positive_historical_analogue_examples"
+    assert analogue["blocked_preview"][0]["historical_analogue_key"].startswith("crypto_btc_special|ask=<5c|")
+    assert analogue["blocked_preview"][0]["latest_ask"] == 0.026
 
 
 def test_eth_updown_confirmation_query_matches_current_eth_rows_by_outcome(tmp_path):
@@ -951,6 +955,10 @@ def test_blocked_shadow_confirmation_backlog_stays_rejected(tmp_path):
     assert summary["paper_confirmation_candidates"] == 0
     assert signals == []
     assert "has not passed positive bid/ask evidence gate" in rejections[0]["rejection_reason"]
+    assert rejections[0]["family"] == "crypto_xrp_updown_5m"
+    assert rejections[0]["latest_bid"] == "0.42"
+    assert rejections[0]["latest_ask"] == "0.43"
+    assert rejections[0]["latest_spread"] == "0.01"
 
 
 def test_trusted_shadow_confirmation_waits_for_fresh_open_candidate(tmp_path):

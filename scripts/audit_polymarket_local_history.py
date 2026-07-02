@@ -21,7 +21,7 @@ if str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))
 
 from polymarket_predictive_engine.config import load_config  # noqa: E402
-from polymarket_predictive_engine.utils import now_utc, parse_timestamp, safe_float, write_csv, write_json  # noqa: E402
+from polymarket_predictive_engine.utils import now_utc, parse_timestamp, read_json, safe_float, write_csv, write_json  # noqa: E402
 
 
 def _read_csv(path: Path) -> list[dict[str, Any]]:
@@ -209,6 +209,29 @@ def _family_summary(rows: list[dict[str, Any]]) -> dict[str, Any]:
     }
 
 
+def _closing_line_value_summary(payload: dict[str, Any]) -> dict[str, Any]:
+    if not isinstance(payload, dict) or not payload:
+        return {
+            "positions_scored": 0,
+            "final_line_positions": 0,
+            "mean_final_clv": None,
+            "positive_clv_cohorts": [],
+            "cohorts": [],
+        }
+    cohorts = [
+        row
+        for row in payload.get("cohorts", [])
+        if isinstance(row, dict) and int(safe_float(row.get("final_positions")) or 0) > 0
+    ]
+    return {
+        "positions_scored": int(safe_float(payload.get("positions_scored")) or 0),
+        "final_line_positions": int(safe_float(payload.get("final_line_positions")) or 0),
+        "mean_final_clv": safe_float(payload.get("mean_final_clv")),
+        "positive_clv_cohorts": list(payload.get("positive_clv_cohorts") or []),
+        "cohorts": cohorts,
+    }
+
+
 def _paper_decision(payload: dict[str, Any]) -> dict[str, Any]:
     blockers: list[str] = []
     warnings: list[str] = []
@@ -284,6 +307,39 @@ def _write_markdown(path: Path, payload: dict[str, Any]) -> None:
             f"{row['category']} | {row['market_slug']} | {row['outcome']} | "
             f"edge_lower_bound={row['edge_lower_bound']} | candidate={row['alpha_trade_candidate']}"
         )
+    lines.extend(["", "## Closing-line value (CLV)", ""])
+    clv = payload.get("closing_line_value") or {}
+    if not clv.get("positions_scored"):
+        lines.append("No CLV evidence collected yet.")
+    else:
+        mean_final = clv.get("mean_final_clv")
+        mean_final_text = f"{float(mean_final):.4f}" if mean_final is not None else "n/a"
+        positive = clv.get("positive_clv_cohorts") or []
+        lines.append(
+            f"- positions_scored={clv.get('positions_scored', 0)}, "
+            f"final_line_positions={clv.get('final_line_positions', 0)}, "
+            f"mean_final_clv={mean_final_text}, "
+            f"positive_clv_cohorts={', '.join(positive) if positive else 'none'}"
+        )
+        cohorts = clv.get("cohorts") or []
+        if cohorts:
+            for row in cohorts:
+                ci_low = safe_float(row.get("final_clv_ci_low"))
+                ci_high = safe_float(row.get("final_clv_ci_high"))
+                ci_low_text = f"{ci_low:.4f}" if ci_low is not None else "n/a"
+                ci_high_text = f"{ci_high:.4f}" if ci_high is not None else "n/a"
+                mean = safe_float(row.get("mean_final_clv"))
+                mean_text = f"{mean:.4f}" if mean is not None else "n/a"
+                lines.append(
+                    "- "
+                    f"{row.get('signal_cohort', 'unknown')} — "
+                    f"n_final={row.get('final_positions', 0)}, "
+                    f"mean_final_clv={mean_text}, "
+                    f"CI=[{ci_low_text}, {ci_high_text}], "
+                    f"evidence={row.get('clv_evidence', 'unknown')}"
+                )
+        else:
+            lines.append("- No cohorts have final CLV evidence yet.")
     lines.append("")
     path.write_text("\n".join(lines), encoding="utf-8")
 
@@ -313,6 +369,9 @@ def run(config_path: str = "polymarket_predictive_config.example.yaml") -> dict[
     shadow_positions = _read_csv(paths["shadow_positions"])
     shadow_fills = _read_csv(paths["shadow_fills"])
     family_rows = _read_csv(paths["family_viability"])
+    closing_line_value = read_json(governance_root / "closing_line_value.json", default={}) or {}
+    if not isinstance(closing_line_value, dict):
+        closing_line_value = {}
     shadow_summary, shadow_cohorts = _shadow_summary(shadow_positions, shadow_fills)
     payload: dict[str, Any] = {
         "status": "ok",
@@ -325,6 +384,7 @@ def run(config_path: str = "polymarket_predictive_config.example.yaml") -> dict[
         "shadow": shadow_summary,
         "shadow_cohorts": shadow_cohorts,
         "family_viability": _family_summary(family_rows),
+        "closing_line_value": _closing_line_value_summary(closing_line_value),
     }
     payload["paper_decision"] = _paper_decision(payload)
     governance_root.mkdir(parents=True, exist_ok=True)

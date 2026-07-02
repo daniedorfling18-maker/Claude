@@ -102,7 +102,7 @@ artifacts render a no-evidence-yet message.
 
 ---
 
-## WO-3 — CLV block in the local-history audit report (WP3c) — `open`
+## WO-3 — CLV block in the local-history audit report (WP3c) — `done` (2026-07-02)
 
 **Goal:** the audit report humans actually read
 (`outputs/polymarket_model_governance/local_history_audit_report.md`) shows CLV evidence beside
@@ -126,6 +126,11 @@ settlement and round-trip evidence.
 **Definition of done:** test builds a fixture `closing_line_value.json`, runs the audit `run()`
 against a temp output root, asserts the payload block and the markdown section exist, and asserts
 the paper-decision blockers are byte-identical with and without the CLV artifact present.
+
+**Landed:** `scripts/audit_polymarket_local_history.py` now includes a report-only
+`closing_line_value` summary in `local_history_audit_summary.json` and a "Closing-line value (CLV)"
+markdown section in `local_history_audit_report.md`. The regression test proves paper-decision
+blockers are unchanged with and without CLV.
 
 ---
 

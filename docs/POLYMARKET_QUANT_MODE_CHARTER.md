@@ -89,7 +89,10 @@ Detailed implementation instructions are written as work orders **WO-1, WO-2, WO
 - WO-2: `done` (2026-07-02) — dashboard CLV section following the `quant_research_status`
   pattern. Artifact appears in `outputs/polymarket_dashboard/dashboard_data.json` under
   `closing_line_value` and renders as "Closing-line value (CLV)" in the dashboard.
-- WO-3: CLV block in the local-history audit report (report-only; `_paper_decision` untouched).
+- WO-3: `done` (2026-07-02) — CLV block in the local-history audit report (report-only;
+  `_paper_decision` untouched). Artifacts:
+  `outputs/polymarket_model_governance/local_history_audit_summary.json` and
+  `outputs/polymarket_model_governance/local_history_audit_report.md`.
 - Acceptance: per work order; `paper_trading_invoked` stays `false`; tests cover the wiring.
 
 ### WP4 — CLV-aware promotion review (advisory, fail-closed) — `open`

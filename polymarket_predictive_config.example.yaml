@@ -442,6 +442,7 @@ runtime_resource_guard:
   allow_degraded_fast_updown_refresh: true
   allow_degraded_websocket_prediction_refresh: true
   degraded_prediction_cycle_seconds: 60
+  prediction_cycle_lock_stale_seconds: 1800
   render_dashboard_on_skip: true
 runtime_schedule:
   full_scan_every_iterations: 2

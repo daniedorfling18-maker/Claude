@@ -211,6 +211,34 @@ def _low_price_trade_event(**overrides: str) -> dict[str, str]:
     return row
 
 
+def _positive_analogue_rows(
+    *,
+    family: str,
+    market_slug: str,
+    outcome: str,
+    entry_bid: str,
+    entry_ask: str,
+    entry_spread: str = "0.01",
+    current_side: str = "",
+) -> list[dict[str, str]]:
+    return [
+        _low_price_trade_event(
+            split="validation",
+            family=family,
+            market_slug=market_slug,
+            outcome=outcome,
+            entry_bid=entry_bid,
+            entry_ask=entry_ask,
+            entry_spread=entry_spread,
+            current_side=current_side,
+            exit_bid=exit_bid,
+            pnl_usdc=pnl,
+            roi=roi,
+        )
+        for exit_bid, pnl, roi in (("0.72", "0.9", "0.09"), ("0.71", "0.7", "0.07"), ("0.70", "0.5", "0.05"))
+    ]
+
+
 def _microstructure_feedback_payload(cohort: str) -> dict[str, object]:
     return {
         "status": "ok",
@@ -371,6 +399,16 @@ def test_trusted_shadow_confirmation_backlog_compiles_paper_probe(tmp_path):
                 spread="0.01",
             )
         ],
+    )
+    write_csv(
+        root / "microstructure_trade_events.csv",
+        _positive_analogue_rows(
+            family="macro_economy",
+            market_slug="will-the-us-economy-be-overheating-at-the-end-of-2026",
+            outcome="Yes",
+            entry_bid="0.42",
+            entry_ask="0.43",
+        ),
     )
 
     summary = build_price_action_paper_signals(cfg)
@@ -699,6 +737,10 @@ def test_paper_confirmation_rejects_mutually_exclusive_same_market_probe(tmp_pat
         cohort="exploratory_crypto_updown_live_model|crypto_btc_updown_daily|outcome=down"
     )
     feedback["paper_confirmation_preview"][0]["recommended_collection_query"] = "btc updown"
+    up_candidate = dict(feedback["paper_confirmation_preview"][0])
+    up_candidate["cohort"] = "exploratory_crypto_updown_live_model|crypto_btc_updown_daily|outcome=up"
+    up_candidate["priority_score"] = float(up_candidate["priority_score"]) - 1.0
+    feedback["paper_confirmation_preview"].append(up_candidate)
     write_json(
         cfg.governance_root / "price_action_feedback.json",
         feedback,
@@ -752,6 +794,23 @@ def test_paper_confirmation_rejects_mutually_exclusive_same_market_probe(tmp_pat
                 liquidity="9000",
             ),
         ],
+    )
+    write_csv(
+        root / "microstructure_trade_events.csv",
+        _positive_analogue_rows(
+            family="crypto_btc_updown_event",
+            market_slug="bitcoin-up-or-down-on-july-1-2026",
+            outcome="Down",
+            entry_bid="0.32",
+            entry_ask="0.33",
+        )
+        + _positive_analogue_rows(
+            family="crypto_btc_updown_event",
+            market_slug="bitcoin-up-or-down-on-july-1-2026",
+            outcome="Up",
+            entry_bid="0.67",
+            entry_ask="0.68",
+        ),
     )
 
     summary = build_price_action_paper_signals(cfg)

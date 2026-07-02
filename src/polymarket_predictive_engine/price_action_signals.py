@@ -262,6 +262,27 @@ def _empty_historical_analogue(key: str, settings: dict[str, Any]) -> dict[str, 
     }
 
 
+def _historical_analogue_for_row(
+    row: dict[str, Any],
+    stats: dict[str, dict[str, Any]],
+    settings: dict[str, Any],
+) -> dict[str, Any]:
+    key = _historical_analogue_key(row)
+    return stats.get(key) or _empty_historical_analogue(key, settings)
+
+
+def _attach_historical_analogue(row: dict[str, Any], analogue: dict[str, Any]) -> dict[str, Any]:
+    return {
+        **row,
+        "historical_analogue_key": analogue.get("key", ""),
+        "historical_analogue_validation_rows": analogue.get("validation_rows", 0),
+        "historical_analogue_positive_rows": analogue.get("positive_rows", 0),
+        "historical_analogue_validation_roi": analogue.get("validation_roi", 0.0),
+        "historical_analogue_win_rate": analogue.get("win_rate", 0.0),
+        "historical_analogue_gate": analogue.get("state", ""),
+    }
+
+
 def _paper_confirmation_current_candidates(
     cfg: EngineConfig,
     settings: dict[str, Any],
@@ -314,16 +335,17 @@ def _paper_confirmation_current_candidates(
         if spread is None:
             spread = max(0.0, ask - bid)
         relative_spread = _relative_spread(spread, ask)
-        analogue_key = _historical_analogue_key(feature)
-        analogue = analogue_stats.get(analogue_key) or _empty_historical_analogue(analogue_key, settings)
+        analogue = _historical_analogue_for_row(feature, analogue_stats, settings)
         if require_positive_history and analogue.get("state") != "positive_historical_analogue":
             blocked += 1
             state = str(analogue.get("state") or "unknown")
             blocked_by_state[state] = blocked_by_state.get(state, 0) + 1
             continue
+        analogue_key = str(analogue.get("key") or "")
         approved_analogue_keys.add(analogue_key)
         candidates.append(
-            {
+            _attach_historical_analogue(
+                {
                 "source": "paper_confirmation_current_candidate",
                 "round_trip_status": "open_marked",
                 "signal_cohort": cohort,
@@ -338,19 +360,15 @@ def _paper_confirmation_current_candidates(
                 "latest_midpoint": feature.get("entry_midpoint", ""),
                 "latest_spread": spread,
                 "relative_spread": "" if relative_spread is None else relative_spread,
-                "historical_analogue_key": analogue_key,
-                "historical_analogue_validation_rows": analogue.get("validation_rows", 0),
-                "historical_analogue_positive_rows": analogue.get("positive_rows", 0),
-                "historical_analogue_validation_roi": analogue.get("validation_roi", 0.0),
-                "historical_analogue_win_rate": analogue.get("win_rate", 0.0),
-                "historical_analogue_gate": analogue.get("state", ""),
                 "take_profit_return": confirmation.get("take_profit_return", ""),
                 "stop_loss_return": confirmation.get("stop_loss_return", ""),
                 "min_profit_usdc": confirmation.get("min_profit_usdc", ""),
                 "max_hold_minutes_before_exit": confirmation.get("max_hold_minutes_before_exit", ""),
                 "priority_score": safe_float(confirmation.get("priority_score")) or 0.0,
                 "shadow_only": True,
-            }
+                },
+                analogue,
+            )
         )
     candidates.sort(
         key=lambda item: (
@@ -891,6 +909,8 @@ def build_price_action_paper_signals(cfg: EngineConfig) -> dict[str, Any]:
     max_signals = int(safe_float(settings.get("max_signals_per_run")) or 8)
     max_spread = float(safe_float(settings.get("max_spread")) or 0.04)
     max_relative_spread = float(safe_float(settings.get("max_relative_spread")) or 0.15)
+    require_confirmation_history = boolish(settings.get("paper_confirmation_require_positive_historical_analogue", True))
+    historical_analogue_stats = _historical_analogue_stats(cfg, settings)
 
     for row in round_trip_rows:
         cohort_name = _cohort_name(row)
@@ -927,6 +947,17 @@ def build_price_action_paper_signals(cfg: EngineConfig) -> dict[str, Any]:
         if relative_spread is None or relative_spread > max_relative_spread:
             rejections.append(_reject(row, "relative spread above price-action paper limit"))
             continue
+        if str(row.get("source") or "") == "paper_confirmation_candidate":
+            analogue = _historical_analogue_for_row(row, historical_analogue_stats, settings)
+            row = _attach_historical_analogue(row, analogue)
+            if require_confirmation_history and analogue.get("state") != "positive_historical_analogue":
+                rejections.append(
+                    _reject(
+                        row,
+                        f"paper-confirmation candidate blocked by historical analogue: {analogue.get('state')}",
+                    )
+                )
+                continue
         signal = _build_signal(row, cohort=cohort_payload, entry=by_token.get(token, {}), settings=settings)
         if signal is None:
             rejections.append(_reject(row, "could not build executable price-action signal"))

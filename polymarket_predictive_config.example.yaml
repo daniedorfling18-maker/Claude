@@ -447,7 +447,7 @@ paper_market_scan:
   # paper bot can find valid probes faster while the runtime resource guard still skips work when
   # memory is high. Override with POLYMARKET_QUERIES / POLYMARKET_SCAN_QUERY_MODE if needed.
   mode: batch
-  max_queries_per_cycle: 8
+  max_queries_per_cycle: 6
   prioritize_near_promoted: true
   adaptive_priority_min_value: 3.0
   adaptive_priority_require_positive_evidence: true
@@ -466,7 +466,7 @@ paper_market_scan:
   # rotating through broad event families while downstream governance still
   # promotes only cohorts with positive bid/ask validation.
   broad_repricing_reserve_enabled: true
-  broad_repricing_reserve_slots: 3
+  broad_repricing_reserve_slots: 2
   broad_repricing_queries:
   - ''
   - world cup
@@ -697,8 +697,8 @@ promoted_rule_shadow:
     crypto_updown_5m: updown
 liquidity_discovery:
   enabled: true
-  event_limit: 180
-  token_limit: 360
+  event_limit: 120
+  token_limit: 240
   min_liquidity: 250
   max_spread: 0.04
   max_relative_spread: 0.15
@@ -767,10 +767,13 @@ websocket_market_data:
   # Keep enough raw + normalised quote history for several days of ask-to-future-bid
   # repricing labels. Message retention protects the socket capture; feature
   # retention protects the actual model training substrate if raw messages roll.
-  max_messages: 100000
+  max_messages: 30000
   retain_existing_features: true
   feature_retention_hours: 96
-  max_feature_rows: 250000
+  max_feature_rows: 120000
+  normalise_latest_messages_only: true
+  return_latest_features_only: true
+  rewrite_enriched_feature_file_after_normalise: false
   connect_timeout_seconds: 8
   use_liquidity_targets: true
   target_all_liquid_families: true

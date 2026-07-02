@@ -486,8 +486,17 @@ def _retained_feature_rows(
 def normalize_websocket_file(cfg: EngineConfig, input_path: str | Path | None = None) -> tuple[list[dict[str, Any]], list[dict[str, Any]], dict[str, Any]]:
     """Read captured websocket messages and write the feature table, quality report
     and summary. Returns (features, quality, summary)."""
+    settings = _normaliser_settings(cfg)
+    input_scope = "explicit"
     if input_path is None:
-        input_path = cfg.output_root / "polymarket_websocket" / "websocket_messages.json"
+        latest_path = cfg.output_root / "polymarket_websocket" / "websocket_messages_latest.json"
+        latest_only = str(settings.get("normalise_latest_messages_only", False)).strip().lower() in {"1", "true", "yes", "y", "on"}
+        if latest_only and latest_path.exists():
+            input_path = latest_path
+            input_scope = "latest_messages"
+        else:
+            input_path = cfg.output_root / "polymarket_websocket" / "websocket_messages.json"
+            input_scope = "all_retained_messages"
     input_path = Path(input_path)
     messages = read_json(input_path, default=[])
     if not isinstance(messages, list):
@@ -514,6 +523,7 @@ def normalize_websocket_file(cfg: EngineConfig, input_path: str | Path | None = 
     features_path = train_root / "websocket_market_features.csv"
     quality_path = gov_root / "websocket_feature_quality_report.csv"
     summary_path = gov_root / "websocket_feature_summary.json"
+    current_features = [_feature_only(row) for row in features]
     retained_features, retention = _retained_feature_rows(cfg, features_path=features_path, new_features=features)
     _assert_no_leakage(retained_features)
 
@@ -527,9 +537,14 @@ def normalize_websocket_file(cfg: EngineConfig, input_path: str | Path | None = 
         "status": "ok",
         "collected_at_utc": now_utc(),
         "input_file": str(input_path),
+        "input_scope": input_scope,
         "input_exists": input_path.exists(),
         "messages_processed": len(messages),
         "feature_rows": len(retained_features),
+        "returned_feature_rows": len(current_features)
+        if str(settings.get("return_latest_features_only", False)).strip().lower() in {"1", "true", "yes", "y", "on"}
+        else len(retained_features),
+        "return_latest_features_only": str(settings.get("return_latest_features_only", False)).strip().lower() in {"1", "true", "yes", "y", "on"},
         **retention,
         "metadata_index_keys": metadata_index_keys,
         "metadata_enriched_rows": metadata_enriched_rows,
@@ -544,6 +559,8 @@ def normalize_websocket_file(cfg: EngineConfig, input_path: str | Path | None = 
         "quality_file": str(quality_path),
     }
     write_json(summary_path, summary)
+    if summary["return_latest_features_only"]:
+        return current_features, quality, summary
     return retained_features, quality, summary
 
 

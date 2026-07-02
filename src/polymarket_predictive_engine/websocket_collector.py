@@ -718,6 +718,7 @@ def collect_websocket(cfg: EngineConfig, websocket_seconds: int = 60) -> dict[st
     url = str(settings.get("url", "wss://ws-subscriptions-clob.polymarket.com/ws/market"))
     variants = _subscription_variants(market_ids, settings, dynamic_ids=bool(dynamic_ids))
     output_file = out_root / "websocket_messages.json"
+    latest_output_file = out_root / "websocket_messages_latest.json"
     existing_rows = _existing_messages(output_file)
     connect_timeout = float(settings.get("connect_timeout_seconds", 8.0))
     new_rows, selected_subscription, variant_errors = _collect_with_variants(
@@ -727,6 +728,7 @@ def collect_websocket(cfg: EngineConfig, websocket_seconds: int = 60) -> dict[st
         connect_timeout_seconds=connect_timeout,
     )
     if not new_rows:
+        write_json(latest_output_file, [])
         summary = {
             "status": "error",
             "reason": "; ".join(variant_errors[-5:]) or "websocket returned no messages",
@@ -735,6 +737,7 @@ def collect_websocket(cfg: EngineConfig, websocket_seconds: int = 60) -> dict[st
             "existing_messages": len(existing_rows),
             "seconds": websocket_seconds,
             "output_file": str(output_file),
+            "latest_output_file": str(latest_output_file),
             "append_mode": True,
             "target_source": target_source,
             "target_assets": len(market_ids),
@@ -754,6 +757,7 @@ def collect_websocket(cfg: EngineConfig, websocket_seconds: int = 60) -> dict[st
         dropped_messages = len(combined_rows) - max_messages
         combined_rows = combined_rows[-max_messages:]
     write_json(output_file, combined_rows)
+    write_json(latest_output_file, new_rows)
     summary = {
         "status": "collected",
         "messages": len(combined_rows),
@@ -764,6 +768,7 @@ def collect_websocket(cfg: EngineConfig, websocket_seconds: int = 60) -> dict[st
         "total_messages": len(combined_rows),
         "seconds": websocket_seconds,
         "output_file": str(output_file),
+        "latest_output_file": str(latest_output_file),
         "append_mode": True,
         "target_source": target_source,
         "target_assets": len(market_ids),

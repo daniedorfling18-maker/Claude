@@ -224,6 +224,53 @@ def test_normaliser_retains_existing_feature_history_for_multi_day_repricing(tmp
     assert "outcome" not in persisted[0]
 
 
+def test_normaliser_can_return_latest_rows_while_retaining_history(tmp_path):
+    cfg = EngineConfig(
+        raw={
+            "paths": {"output_root": str(tmp_path)},
+            "websocket_market_data": {
+                "retain_existing_features": True,
+                "feature_retention_hours": 96,
+                "max_feature_rows": 10,
+                "return_latest_features_only": True,
+            },
+        },
+        path=tmp_path / "cfg.yaml",
+    )
+    existing_row = {
+        "collected_at_utc": "2026-06-23T00:00:00Z",
+        "source_timestamp": "1718800000000",
+        "market": "old-market",
+        "asset_id": "old-token",
+        "event_type": "price_change",
+        "best_bid": "0.41",
+        "best_ask": "0.43",
+        "midpoint": "0.42",
+        "spread": "0.02",
+        "price_change_side": "BUY",
+        "price_change_price": "0.42",
+        "price_change_size": "50",
+    }
+    features_path = tmp_path / "polymarket_training" / "websocket_market_features.csv"
+    write_csv(features_path, [existing_row], fieldnames=FEATURE_FIELDS)
+    input_path = tmp_path / "websocket_messages_latest.json"
+    input_path.write_text(
+        json.dumps([
+            {"collected_at_utc": "2026-06-24T00:00:00Z", "message": json.dumps(BOOK_EVENT)},
+        ]),
+        encoding="utf-8",
+    )
+
+    features, _, summary = normalize_websocket_file(cfg, input_path=input_path)
+    persisted = read_csv_rows(features_path)
+
+    assert {row["asset_id"] for row in persisted} == {"old-token", "tok-1"}
+    assert {str(row["asset_id"]) for row in features} == {"tok-1"}
+    assert summary["feature_rows"] == 2
+    assert summary["returned_feature_rows"] == 1
+    assert summary["return_latest_features_only"] is True
+
+
 def test_minimum_required_columns_present():
     required = {
         "collected_at_utc", "source_timestamp", "market", "asset_id", "event_type",

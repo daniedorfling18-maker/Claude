@@ -315,7 +315,11 @@ def enrich_websocket_features_with_scanner_metadata(cfg, features: list[dict[str
                 enriched_row["category"] = "worldcup"
         enriched.append(enriched_row)
 
-    if enriched:
+    settings = cfg.raw.get("websocket_market_data", {}) or {}
+    rewrite_feature_file = str(
+        settings.get("rewrite_enriched_feature_file_after_normalise", True)
+    ).strip().lower() in {"1", "true", "yes", "y", "on"}
+    if enriched and rewrite_feature_file:
         fieldnames: list[str] = []
         for row in enriched:
             for key in row.keys():
@@ -333,6 +337,7 @@ def enrich_websocket_features_with_scanner_metadata(cfg, features: list[dict[str
             "snapshot_path": str(snapshot_path),
             "snapshot_paths": [str(path) for path in snapshot_paths],
             "snapshot_tokens": len(metadata_by_token),
+            "rewrote_feature_file": rewrite_feature_file,
         },
     )
     return enriched

@@ -4,7 +4,7 @@ from typing import Any
 
 from .goal_planner import build_goal_plan
 from .promotion_review import build_promotion_review
-from .utils import now_utc, read_json, safe_float, write_json
+from .utils import now_utc, read_csv_rows, read_json, safe_float, write_json
 
 CORE_WATCHLIST_COHORTS: dict[str, str] = {}
 
@@ -220,6 +220,94 @@ def _historical_breadth_queries(price_action_paper: dict[str, Any]) -> list[str]
     return queries
 
 
+def _near_miss_collection_query(row: dict[str, Any]) -> str:
+    text = " ".join(
+        str(row.get(key) or "")
+        for key in (
+            "market_slug",
+            "question",
+            "title",
+            "category",
+            "signal_cohort",
+            "outcome",
+        )
+    ).lower()
+    if not text.strip():
+        return ""
+
+    # Check esports before World Cup because some esports rows can inherit noisy categories.
+    if any(
+        marker in text
+        for marker in (
+            "esport",
+            "valorant",
+            "val-",
+            "map handicap",
+            "karmine",
+            "team vitality",
+            "edward gaming",
+            "league of legends",
+            "counter-strike",
+            "cs2",
+            "dota",
+        )
+    ):
+        return "esports"
+    if any(marker in text for marker in ("fed", "fomc", "rate cut", "rate hike", "interest rate")):
+        return "fed"
+    if any(marker in text for marker in ("cpi", "inflation", "gdp", "unemployment", "recession", "economy")):
+        return "economy"
+    if any(marker in text for marker in ("worldcup", "world cup", "fifa")):
+        return "world cup"
+    if any(marker in text for marker in ("tennis", "sinner", "wimbledon", "us-open", "us open")):
+        return "tennis"
+    if "bitcoin" in text or "btc" in text:
+        return "btc updown" if "updown" in text or " up/down" in text or " up or down" in text else "bitcoin"
+    if "ethereum" in text or "eth" in text:
+        return "eth updown" if "updown" in text or " up/down" in text or " up or down" in text else "ethereum"
+    if "solana" in text or " sol" in text or "sol-" in text:
+        return "solana updown" if "updown" in text or " up/down" in text or " up or down" in text else "solana"
+    if "xrp" in text or "ripple" in text:
+        return "xrp updown" if "updown" in text or " up/down" in text or " up or down" in text else "xrp"
+    if "openai" in text:
+        return "openai"
+    return ""
+
+
+def _near_miss_priority(row: dict[str, Any]) -> float:
+    score = _num(row.get("near_miss_priority_score"))
+    edge = _num(row.get("edge_lower_bound"))
+    liquidity = max(0.0, _num(row.get("liquidity")))
+    spread = max(0.0, _num(row.get("current_spread")))
+    query = _near_miss_collection_query(row)
+    crypto_queries = {"bitcoin", "btc updown", "ethereum", "eth updown", "solana", "solana updown", "xrp", "xrp updown"}
+    non_crypto_bonus = 0.02 if query and query not in crypto_queries else 0.0
+    return score + edge * 0.5 + min(liquidity, 50_000.0) * 0.000001 - spread * 0.25 + non_crypto_bonus
+
+
+def _near_miss_candidate_queries(cfg, *, max_queries: int = 6) -> list[str]:
+    rows = read_csv_rows(cfg.output_root / "polymarket_predictions" / "near_miss_learning_candidates.csv")
+    ranked = sorted(rows, key=_near_miss_priority, reverse=True)
+    queries: list[str] = []
+    for row in ranked:
+        query = _near_miss_collection_query(row)
+        if query and query not in queries:
+            queries.append(query)
+        if len(queries) >= max_queries:
+            break
+    return queries
+
+
+def _current_analogue_scan_needs_breadth(price_action_paper: dict[str, Any]) -> bool:
+    scan = price_action_paper.get("current_historical_analogue_scan")
+    if isinstance(scan, dict):
+        return _num(scan.get("current_rows")) > 0 and _num(scan.get("positive_matches")) <= 0
+    breadth = price_action_paper.get("historical_breadth_scan")
+    if isinstance(breadth, dict):
+        return str(breadth.get("state") or "") == "no_positive_historical_breadth_after_spread"
+    return False
+
+
 def _price_action_model_needs_data(price_action_model: dict[str, Any]) -> bool:
     decision = str(price_action_model.get("decision") or "")
     status = str(price_action_model.get("status") or "")
@@ -249,6 +337,8 @@ def build_research_focus(cfg) -> dict[str, Any]:
     feedback_queries = _feedback_collection_queries(price_action_feedback)
     validation_gap_queries = _model_validation_gap_queries(price_action_model)
     historical_breadth_queries = _historical_breadth_queries(price_action_paper)
+    near_miss_queries = _near_miss_candidate_queries(cfg)
+    analogue_scan_needs_breadth = _current_analogue_scan_needs_breadth(price_action_paper)
     model_needs_repricing_data = _price_action_model_needs_data(price_action_model) and bool(feedback_queries)
     feedback_positive = bool(
         _num(price_action_feedback.get("promotion_candidates"))
@@ -276,6 +366,12 @@ def build_research_focus(cfg) -> dict[str, Any]:
                 "Strict price-action model has near-positive historical buckets but they are not robust yet; "
                 f"prioritise {', '.join(historical_breadth_queries[:4])} bid/ask collection before generic scans."
                 + (f" Breadth state: {breadth.get('state')}." if isinstance(breadth, dict) else "")
+                + (f" Model blocker: {blocker_text}." if blocker_text else "")
+            )
+        elif analogue_scan_needs_breadth and near_miss_queries:
+            next_action = (
+                "Strict price-action model found no profitable current analogue after bid/ask costs; "
+                f"broaden evidence collection into near-miss markets: {', '.join(near_miss_queries[:4])}."
                 + (f" Model blocker: {blocker_text}." if blocker_text else "")
             )
         else:
@@ -307,6 +403,10 @@ def build_research_focus(cfg) -> dict[str, Any]:
         for query in historical_breadth_queries:
             if query and query not in collection_queries:
                 collection_queries.append(query)
+        if analogue_scan_needs_breadth:
+            for query in near_miss_queries:
+                if query and query not in collection_queries:
+                    collection_queries.append(query)
         for query in feedback_queries:
             if query and query not in collection_queries:
                 collection_queries.append(query)
@@ -345,6 +445,8 @@ def build_research_focus(cfg) -> dict[str, Any]:
             "validation_gap_needs_collection": bool(validation_gap_queries),
             "model_needs_repricing_data": model_needs_repricing_data or bool(validation_gap_queries),
             "historical_breadth_queries": historical_breadth_queries,
+            "near_miss_candidate_queries": near_miss_queries,
+            "analogue_scan_needs_breadth": analogue_scan_needs_breadth,
         },
         "price_action_historical_breadth": price_action_paper.get("historical_breadth_scan", {}),
         "price_action_feedback": {

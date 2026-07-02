@@ -4,7 +4,7 @@ from pathlib import Path
 
 from polymarket_predictive_engine.config import EngineConfig
 from polymarket_predictive_engine.research_focus import build_research_focus
-from polymarket_predictive_engine.utils import read_json, write_json
+from polymarket_predictive_engine.utils import read_json, write_csv, write_json
 
 
 def _cfg(tmp_path: Path) -> EngineConfig:
@@ -167,3 +167,82 @@ def test_research_focus_prioritises_near_positive_historical_breadth_queries(tmp
     assert payload["collection_queries"][:3] == ["xrp updown", "btc updown", "ethereum"]
     assert payload["price_action_model"]["historical_breadth_queries"] == ["xrp updown"]
     assert "near-positive historical buckets" in payload["summary"]
+
+
+def test_research_focus_broadens_to_near_miss_board_when_current_analogues_are_negative(tmp_path):
+    cfg = _cfg(tmp_path)
+    write_json(
+        cfg.output_root / "polymarket_price_action" / "price_action_model_summary.json",
+        {
+            "status": "trained",
+            "decision": "collect_more_bid_ask_price_action_model_evidence",
+            "promotion_ready": False,
+        },
+    )
+    write_json(
+        cfg.output_root / "polymarket_price_action" / "price_action_paper_signal_summary.json",
+        {
+            "status": "computed",
+            "current_historical_analogue_scan": {
+                "current_rows": 93,
+                "positive_matches": 0,
+            },
+        },
+    )
+    write_json(
+        cfg.governance_root / "price_action_feedback.json",
+        {
+            "status": "ok",
+            "learning_state": "collect_more_positive_price_action_evidence",
+            "collection_queries": ["eth updown", "xrp updown"],
+        },
+    )
+    write_csv(
+        cfg.output_root / "polymarket_predictions" / "near_miss_learning_candidates.csv",
+        [
+            {
+                "market_slug": "will-spain-reach-the-quarterfinals-at-the-2026-fifa-world-cup",
+                "question": "Will Spain reach the Quarterfinals at the 2026 FIFA World Cup?",
+                "category": "worldcup",
+                "signal_cohort": "worldcup",
+                "near_miss_priority_score": "0.100",
+                "edge_lower_bound": "0.024",
+                "liquidity": "249",
+            },
+            {
+                "market_slug": "will-no-fed-rate-cuts-happen-in-2026",
+                "question": "Will no Fed rate cuts happen in 2026?",
+                "category": "unknown",
+                "signal_cohort": "unknown",
+                "near_miss_priority_score": "0.096",
+                "edge_lower_bound": "0.029",
+                "liquidity": "5667",
+            },
+            {
+                "market_slug": "val-vit-kc3-2026-07-02-map-handicap-away-1pt5",
+                "question": "Map Handicap: VIT (-1.5) vs Karmine Corp (+1.5)",
+                "category": "worldcup",
+                "signal_cohort": "worldcup",
+                "near_miss_priority_score": "0.093",
+                "edge_lower_bound": "0.024",
+                "liquidity": "165",
+            },
+            {
+                "market_slug": "will-bitcoin-reach-85000-by-december-31-2026",
+                "question": "Will Bitcoin reach $85,000 by December 31, 2026?",
+                "category": "crypto",
+                "signal_cohort": "crypto",
+                "near_miss_priority_score": "0.073",
+                "edge_lower_bound": "0.020",
+                "liquidity": "2105",
+            },
+        ],
+    )
+
+    payload = build_research_focus(cfg)
+
+    assert payload["collection_queries"][:4] == ["fed", "world cup", "esports", "bitcoin"]
+    assert payload["collection_queries"][4:6] == ["eth updown", "xrp updown"]
+    assert payload["price_action_model"]["analogue_scan_needs_breadth"] is True
+    assert payload["price_action_model"]["near_miss_candidate_queries"][:4] == ["fed", "world cup", "esports", "bitcoin"]
+    assert "broaden evidence collection into near-miss markets" in payload["summary"]

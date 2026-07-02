@@ -707,6 +707,76 @@ def _threshold_candidate_grid(
     return sorted(candidates, key=lambda row: float(row["threshold"]), reverse=True)
 
 
+def _rank_policy_threshold(
+    probabilities: list[float],
+    chosen_train_metrics: dict[str, Any],
+    settings: dict[str, Any],
+    *,
+    phase: str,
+) -> dict[str, Any]:
+    """Resolve the active selection cutoff for validation/current scoring.
+
+    Absolute calibrated probabilities can drift between train, validation, and
+    live windows even when ranking remains useful.  If the training split chose
+    a train-only rank threshold, apply the same rank policy to the target score
+    distribution without looking at target labels.
+    """
+    fallback_threshold = _float_setting(settings, "minimum_probability_to_trade", 0.55)
+    absolute_threshold = safe_float(chosen_train_metrics.get("threshold"))
+    if absolute_threshold is None:
+        absolute_threshold = fallback_threshold
+    source = str(chosen_train_metrics.get("threshold_source") or "absolute_probability_threshold")
+    base = {
+        "threshold": float(absolute_threshold),
+        "threshold_source": "absolute_probability_threshold",
+        "threshold_source_value": source,
+        "trained_threshold": float(absolute_threshold),
+        "trained_threshold_source": source,
+        "trained_threshold_source_value": chosen_train_metrics.get("threshold_source_value"),
+        "phase": phase,
+    }
+    if not _bool_setting(settings, "apply_train_rank_threshold_policy_to_validation", True):
+        return base
+    finite = sorted(
+        float(probability)
+        for probability in probabilities
+        if math.isfinite(float(probability)) and 0 < float(probability) < 1
+    )
+    if not finite:
+        return {**base, "threshold_source": f"{phase}_rank_policy_unavailable"}
+    if source == "train_top_count_cutoff":
+        raw_count = safe_float(chosen_train_metrics.get("threshold_source_value"))
+        if raw_count is None or raw_count <= 0:
+            return base
+        count = int(raw_count)
+        train_rows = int(safe_float(chosen_train_metrics.get("train_probability_rows")) or 0)
+        if (
+            phase == "validation"
+            and train_rows > 0
+            and _bool_setting(settings, "scale_validation_rank_count_by_split_size", True)
+        ):
+            count = max(1, int(math.ceil(len(finite) * count / train_rows)))
+        bounded = max(1, min(len(finite), count))
+        descending = list(reversed(finite))
+        return {
+            **base,
+            "threshold": float(descending[bounded - 1]),
+            "threshold_source": f"{phase}_top_count_cutoff",
+            "threshold_source_value": bounded,
+        }
+    if source == "train_probability_quantile":
+        quantile = safe_float(chosen_train_metrics.get("threshold_source_value"))
+        if quantile is None or not 0 < quantile < 1:
+            return base
+        return {
+            **base,
+            "threshold": float(np.quantile(finite, quantile)),
+            "threshold_source": f"{phase}_probability_quantile",
+            "threshold_source_value": float(quantile),
+        }
+    return base
+
+
 def _trade_metrics(rows: list[dict[str, Any]], probabilities: list[float] | None = None, threshold: float | None = None) -> dict[str, Any]:
     selected = [
         (row, probabilities[idx] if probabilities is not None else 1.0)
@@ -912,6 +982,7 @@ def _choose_threshold_from_train(
             {
                 **metrics,
                 **candidate,
+                "train_probability_rows": len(probabilities),
                 "train_threshold_pass": passed,
                 "train_win_rate_gate": win_gate_passed,
                 "train_win_rate_gate_reason": win_gate_reason,
@@ -940,6 +1011,7 @@ def _choose_threshold_from_train(
             chosen = {
                 **chosen_metrics,
                 "threshold_source": "fallback_minimum_probability_to_trade",
+                "train_probability_rows": len(probabilities),
                 "train_threshold_pass": False,
                 "train_win_rate_gate": win_gate_passed,
                 "train_win_rate_gate_reason": win_gate_reason,
@@ -974,6 +1046,12 @@ def _choose_threshold_from_train(
         ),
         "threshold_candidates_from_train_only": sum(
             1 for row in candidates if row.get("threshold_source") != "configured_probability_grid"
+        ),
+        "apply_train_rank_threshold_policy_to_validation": _bool_setting(
+            settings, "apply_train_rank_threshold_policy_to_validation", True
+        ),
+        "scale_validation_rank_count_by_split_size": _bool_setting(
+            settings, "scale_validation_rank_count_by_split_size", True
         ),
     }
 
@@ -1147,19 +1225,27 @@ def train_price_action_model(cfg: EngineConfig) -> dict[str, Any]:
     train_probabilities = _predict_probabilities(train_rows, artifact)
     threshold_selection = _choose_threshold_from_train(train_rows, train_probabilities, settings)
     threshold = float(threshold_selection["chosen_threshold"])
+    chosen_train_metrics = threshold_selection.get("chosen_train_metrics", {})
     probabilities = _predict_probabilities(validation_rows, artifact)
+    validation_threshold_policy = _rank_policy_threshold(
+        probabilities,
+        chosen_train_metrics if isinstance(chosen_train_metrics, dict) else {},
+        settings,
+        phase="validation",
+    )
+    validation_threshold = float(validation_threshold_policy["threshold"])
     targets = [int(row["_y"]) for row in validation_rows]
     train_positive_targets = sum(int(row["_y"]) for row in train_rows)
     validation_positive_targets = sum(targets)
-    selected = _selected_metrics(validation_rows, probabilities, threshold)
+    selected = _selected_metrics(validation_rows, probabilities, validation_threshold)
     buy_all = _trade_metrics(validation_rows)
     validation_roi_ci = _market_clustered_roi_ci(
         validation_rows,
         probabilities,
-        threshold,
+        validation_threshold,
         iterations=_int_setting(settings, "bootstrap_iterations", 500),
     )
-    validation_risk = _selected_risk_report(validation_rows, probabilities, threshold)
+    validation_risk = _selected_risk_report(validation_rows, probabilities, validation_threshold)
     min_selected_trades = _int_setting(settings, "minimum_selected_validation_trades", 5)
     min_selected_roi = _float_setting(settings, "minimum_selected_validation_roi", 0.03)
     min_selected_win_rate = _float_setting(settings, "minimum_selected_validation_win_rate", 0.55)
@@ -1221,15 +1307,22 @@ def train_price_action_model(cfg: EngineConfig) -> dict[str, Any]:
     validation_pass = bool(
         not validation_blockers
     )
-    validation_predictions = _validation_rows(validation_rows, probabilities, threshold)
+    validation_predictions = _validation_rows(validation_rows, probabilities, validation_threshold)
     expectancy = _roi_expectancy_components(train_rows, train_probabilities, threshold)
     minimum_expected_roi = _float_setting(settings, "minimum_expected_roi_to_trade", min_selected_roi)
     current_rows = build_latest_microstructure_features(cfg)
     current_probabilities = _predict_probabilities(current_rows, artifact, current=True)
+    current_threshold_policy = _rank_policy_threshold(
+        current_probabilities,
+        chosen_train_metrics if isinstance(chosen_train_metrics, dict) else {},
+        settings,
+        phase="current",
+    )
+    current_threshold = float(current_threshold_policy["threshold"])
     current_candidates = _current_candidate_rows(
         current_rows,
         current_probabilities,
-        probability_threshold=threshold,
+        probability_threshold=current_threshold,
         minimum_expected_roi=minimum_expected_roi,
         expectancy=expectancy,
         validation_pass=validation_pass,
@@ -1252,6 +1345,10 @@ def train_price_action_model(cfg: EngineConfig) -> dict[str, Any]:
         "validation_log_loss": _log_loss(probabilities, targets),
         "train_threshold_selection": threshold_selection,
         "chosen_probability_threshold": threshold,
+        "validation_probability_threshold": validation_threshold,
+        "validation_threshold_policy": validation_threshold_policy,
+        "current_probability_threshold": current_threshold,
+        "current_threshold_policy": current_threshold_policy,
         "validation_selected": selected,
         "validation_selected_risk": validation_risk,
         "validation_blockers": validation_blockers,

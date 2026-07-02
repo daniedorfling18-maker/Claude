@@ -354,6 +354,8 @@ price_action_model:
   minimum_selected_expectancy_usdc_per_trade: 0.0
   require_positive_cohort_transfer: true
   include_train_rank_thresholds: true
+  apply_train_rank_threshold_policy_to_validation: true
+  scale_validation_rank_count_by_split_size: true
   probability_threshold_grid:
   - 0.50
   - 0.55

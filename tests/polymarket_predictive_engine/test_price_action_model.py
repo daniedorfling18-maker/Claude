@@ -333,6 +333,8 @@ def test_price_action_model_uses_train_only_rank_thresholds_for_rare_repricing(t
     assert summary["train_threshold_selection"]["threshold_policy"] == "fixed_probability_grid_plus_train_only_rank_thresholds"
     assert summary["train_threshold_selection"]["threshold_candidates_from_train_only"] > 0
     assert summary["train_threshold_selection"]["chosen_train_metrics"]["threshold_source"] != "configured_probability_grid"
+    assert summary["validation_threshold_policy"]["threshold_source"].startswith("validation_")
+    assert summary["validation_threshold_policy"]["trained_threshold_source"].startswith("train_")
     assert summary["validation_selected"]["selected_trades"] >= 5
     assert summary["validation_selected"]["selected_roi"] > summary["validation_buy_all_baseline"]["roi"]
     assert "no probability threshold cleared the training split trade gates" not in summary["validation_blockers"]

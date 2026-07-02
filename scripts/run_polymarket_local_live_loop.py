@@ -798,6 +798,10 @@ def _degraded_prediction_cycle_seconds(cfg, fallback_seconds: float) -> float:
     return max(15.0, float(configured))
 
 
+def _heavy_future_running(*futures: Future[Any] | None) -> bool:
+    return any(future is not None and not future.done() for future in futures)
+
+
 def _degraded_discovery_refresh(cfg, guard: dict[str, Any], *, reason: str) -> dict[str, Any]:
     """Run the cheapest edge-relevant discovery lane while heavy discovery is guarded off.
 
@@ -1043,7 +1047,11 @@ def main(argv: list[str] | None = None) -> int:
                         paper_source=args.paper_source,
                         started_at_utc=prediction_started_at_utc,
                     )
-                elif args.prediction_cycle_seconds > 0 and time.time() >= next_prediction_cycle:
+                elif (
+                    args.prediction_cycle_seconds > 0
+                    and time.time() >= next_prediction_cycle
+                    and not _heavy_future_running(discovery_future, governance_future)
+                ):
                     if resource_guard.get("skip_prediction_cycle"):
                         degraded_prediction_enabled = _degraded_prediction_refresh_enabled(cfg, resource_guard)
                         if degraded_prediction_enabled and time.time() >= next_degraded_prediction_cycle:
@@ -1110,6 +1118,15 @@ def main(argv: list[str] | None = None) -> int:
                     "status": "ok",
                     "iteration": iteration,
                     "generated_at_utc": now_utc(),
+                    "heavy_background_job": (
+                        "discovery"
+                        if discovery_is_running
+                        else "governance"
+                        if governance_is_running
+                        else "prediction"
+                        if prediction_future is not None and not prediction_future.done()
+                        else ""
+                    ),
                     "asset_count": len(asset_ids),
                     "requested_max_assets": args.max_assets,
                     "effective_max_assets": effective_max_assets,
@@ -1183,7 +1200,11 @@ def main(argv: list[str] | None = None) -> int:
                     f"equity={broker.get('equity', 'n/a')} dashboard=updated",
                     flush=True,
                 )
-                if time.time() >= next_discovery_cycle and discovery_future is None:
+                if (
+                    time.time() >= next_discovery_cycle
+                    and discovery_future is None
+                    and not _heavy_future_running(prediction_future, governance_future)
+                ):
                     discovery_running_iteration = discovery_iteration + 1
                     discovery_started_at_utc = now_utc()
                     if resource_guard.get("skip_discovery_cycle"):
@@ -1221,7 +1242,11 @@ def main(argv: list[str] | None = None) -> int:
                             summary={},
                             started_at_utc=discovery_started_at_utc,
                         )
-                if time.time() >= next_governance_refresh and governance_future is None:
+                if (
+                    time.time() >= next_governance_refresh
+                    and governance_future is None
+                    and not _heavy_future_running(discovery_future, prediction_future)
+                ):
                     if resource_guard.get("skip_cycle"):
                         last_governance_summary = {
                             "status": "skipped_resource_guard",

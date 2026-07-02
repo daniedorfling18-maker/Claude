@@ -1,3 +1,13 @@
+"""Mispricing alpha: training and scoring for model-vs-market edge.
+
+Leakage invariant: ``_enrich_with_latest_websocket_quotes`` merges the *latest*
+observed quotes into rows and is a scoring-time convenience only. It must be
+reachable solely from ``apply_mispricing_alpha`` (live decision scoring).
+Training (``train_mispricing_alpha_model``), label building, and historical
+backtests must consume stored point-in-time rows only — enriching them with
+later quotes would be lookahead. A regression test pins this invariant.
+"""
+
 from __future__ import annotations
 
 import math

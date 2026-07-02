@@ -204,6 +204,15 @@ execution-cost term only ever penalises; the classifier is metadata-only and new
 start with zero evidence, so promotion stays fail-closed. 663 tests green. Follow-ups raised as
 WO-7..WO-9 in the work orders doc.
 
+**2026-07-02 — WO-8 and WO-9 implemented by the orchestrator.** Below-flat execution costs now
+additionally require a fresh quote (`quote_age_seconds` <= 120s, falling back to the row's
+`websocket_quote_age_seconds`); stale or unknown-age depth never earns a discount. The
+quote-enrichment leakage invariant is pinned by a regression test that makes the alpha training
+path explode if enrichment is ever wired into it. WO-7 (WP4, CLV-aware promotion review) is the
+single open work order and now carries a near-diff-level spec plus an explicit list of wrong
+implementations; the work orders doc also gained a pre-flight checklist every agent must run
+before pushing.
+
 ## Rules of engagement for coding agents
 
 0. **Division of labour**: the orchestrating agent writes/updates this charter and the work orders

@@ -1,6 +1,6 @@
 # Polymarket Codex Work Orders
 
-Last updated: 2026-07-02 (WO-1..WO-6 landed and audited; WO-7..WO-9 open)
+Last updated: 2026-07-02 (WO-1..WO-6 landed and audited; WO-8/WO-9 landed; WO-7 open)
 
 Mechanical, file-level implementation instructions for coding agents (Codex or any other code
 changer). The architecture and priorities live in `docs/POLYMARKET_QUANT_MODE_CHARTER.md`; this file
@@ -24,6 +24,40 @@ tells you exactly what to build, where, and how to prove it works. Read `AGENTS.
 Reference implementations to imitate: `closing_line.py` (module shape, settings, artifact style),
 `test_closing_line.py` (test shape: minimal `EngineConfig(raw={"paths": {...}})`, fixture CSVs via
 `write_csv`, exact-value assertions).
+
+## Pre-flight checklist — run through this before you push
+
+Answer every question. A single "no" means stop and re-read the work order.
+
+1. Did you touch ONLY the files the work order lists? (`git diff --stat` — anything else is a bug.)
+2. Is every threshold, gate boolean, and blocker list byte-identical to before your change, unless
+   the work order explicitly says otherwise? Grep your diff for `minimum_`, `maximum_`,
+   `approved`, `blocked`, `promotion` and justify every hit.
+3. Can your change make ANY code path looser — bigger stakes, lower slippage, more approvals,
+   fewer blockers — under any input? If yes and the work order didn't demand it, invert it.
+4. Do all your new artifact JSONs carry `"paper_trading_invoked": false` and
+   `"live_trading_invoked": false`?
+5. Are your tests asserting exact values computed by hand in the test body — not just "no crash"?
+6. Does `pytest` pass in full, offline, from a clean checkout?
+7. Did you flip the work-order status here AND the WP status in the charter, with a dated
+   "Landed:" note saying what exists now and where?
+
+Common failure modes seen or anticipated in this repo — do not repeat them:
+
+- **Turning advisory evidence into a gate.** CLV, replay results, and classifier families are
+  diagnostics. If your diff makes any of them flip an `approved`/`blocked` boolean, it is wrong.
+- **"Improving" an estimate in the optimistic direction.** Estimators here may only get more
+  conservative by default; below-flat/below-baseline results need demonstrated evidence (deep AND
+  fresh book, explicit config opt-in).
+- **Merging later data into earlier rows.** Anything that joins latest quotes/prices onto stored
+  rows is scoring-time only. Training, labels, and backtests read stored point-in-time data. When
+  in doubt, add the WO-9-style explode-test before refactoring.
+- **Silent try/except around builders.** The pipeline is fail-loud by design; swallowing an error
+  hides broken evidence and is worse than a crash.
+- **Loosening a check "because the test broke".** If an existing test fails, your change is wrong
+  or the work order says to update that exact test. Never widen the assertion to make it pass.
+- **Forgetting Windows.** The scheduled cycle runs on Windows; paths through `Path`, no
+  POSIX-only calls in engine code (`os.open` with O_EXCL is fine; `fcntl` is not).
 
 ---
 
@@ -266,27 +300,72 @@ valid summary artifact; example strategy over a crafted fixture → exact expect
 ## WO-7 — CLV-aware promotion review, advisory only (WP4) — `open`
 
 **Goal:** promotion review ranks cohorts using CLV as a *corroborating* signal without letting CLV
-alone promote anything.
+alone promote anything. This is annotation + ordering, nothing else.
 
-**Files:** `src/polymarket_predictive_engine/promotion_review.py`, its tests.
+**Files:** `src/polymarket_predictive_engine/promotion_review.py`,
+`tests/polymarket_predictive_engine/test_promotion_gate.py` (or a new
+`test_promotion_review_clv.py` following that file's fixture style).
 
-**Steps:**
+**Where things are in `promotion_review.py` today:** `build_promotion_review(cfg)` reads
+`signal_cohort_pnl.json` from `cfg.governance_root`, maps each cohort through `_review_row`, and
+writes `promotion_review.json`. You are adding a read of `closing_line_value.json` beside it.
 
-1. In `build_promotion_review`, `read_json` `closing_line_value.json` (default `{}`) and index
-   cohort rows by `signal_cohort`.
-2. Attach to each reviewed cohort: `clv_evidence`, `mean_final_clv`, `final_clv_ci_low/high`,
-   `clv_final_positions`.
-3. Ranking only: a cohort with existing positive settlement or round-trip evidence AND
-   `positive_clv_evidence` sorts above an otherwise-equal cohort without it;
-   `negative_clv_evidence` appends a blocker *note* string (not a gate change).
-4. A cohort whose only positive stream is CLV must still read blocked; assert this in a test both
-   directions (positive-CLV-only stays blocked; negative CLV adds the note).
+**Exact steps — do not deviate:**
 
-**Out of scope:** `readiness.py`, any gate threshold, the audit script's `_paper_decision`.
+1. In `build_promotion_review`, immediately after the `signal_cohort_pnl.json` read:
+
+   ```python
+   clv_artifact = read_json(cfg.governance_root / "closing_line_value.json", default={}) or {}
+   clv_by_cohort = {
+       str(row.get("signal_cohort")): row
+       for row in (clv_artifact.get("cohorts") or [])
+       if isinstance(row, dict)
+   }
+   ```
+
+2. After each review row is built, attach exactly these keys (empty-string/None defaults when the
+   cohort has no CLV row — never invent values):
+   `clv_evidence` (default `"insufficient_clv_evidence"`), `clv_mean_final`, `clv_ci_low`,
+   `clv_ci_high`, `clv_final_positions` (default 0).
+3. Ranking is the ONLY behavioural change. Wherever the result rows are ordered for output, use
+   CLV as a tiebreaker AFTER all existing sort keys, e.g. append
+   `1 if row.get("clv_evidence") == "positive_clv_evidence" else 0` as the last, lowest-priority
+   component. Do not touch any `approved`/`blocked`/`promotion_ready` computation. Do not read CLV
+   inside `_review_row`'s gating logic.
+4. When `clv_evidence == "negative_clv_evidence"`, append the string
+   `"negative closing-line value evidence (advisory)"` to the row's existing notes/blockers *list
+   of strings* — as an extra note only; it must not change any boolean or status field.
+5. `promotion_review.json` gains a top-level `"clv_source": "closing_line_value.json"` marker and
+   `"clv_is_advisory_only": true`.
+
+**Definition of done (write these exact tests):**
+
+1. Fixture with two cohorts identical in every existing metric, one with
+   `positive_clv_evidence` — assert it sorts first and that all its boolean/status fields equal
+   the other cohort's (ranking changed, decision did not).
+2. Fixture with a cohort whose ONLY positive stream is CLV (no settlement, no round-trip
+   evidence) — assert its status/booleans are identical to the same fixture without the CLV
+   artifact present (CLV alone changes nothing but the annotation).
+3. Fixture with `negative_clv_evidence` — assert the advisory note string is present and no
+   boolean/status field changed.
+4. No CLV artifact on disk — assert `build_promotion_review` output is unchanged except for the
+   default annotation keys.
+
+**The wrong implementations, spelled out (all are rejections in review):**
+
+- Reading CLV inside promotion/approval boolean logic — CLV must never flip a decision.
+- Making positive CLV satisfy, substitute for, or partially weight any evidence threshold.
+- Sorting by CLV before existing sort keys (it is the last tiebreaker, not a primary key).
+- Writing the advisory note into `_paper_decision` in the audit script (different file, WP4 does
+  not touch it).
+- try/except around the artifact read (missing file is already handled by `default={}`).
+
+**Out of scope:** `readiness.py`, any gate threshold, the audit script's `_paper_decision`,
+`closing_line.py` itself.
 
 ---
 
-## WO-8 — Quote-freshness guard on below-flat execution costs — `open`
+## WO-8 — Quote-freshness guard on below-flat execution costs — `done` (2026-07-02, orchestrator)
 
 **Goal:** `estimate_execution_cost` may only return below-flat slippage when the depth evidence is
 fresh. Stale depth can overstate what the book can absorb.
@@ -308,9 +387,15 @@ timestamp (`risk.py`, `strategy.py`, `shadow_cohort.py`, `mispricing_alpha.py`),
 4. Tests: fresh+deep -> below-flat allowed; stale+deep -> floored at flat; unknown age -> floored
    at flat; missing depth unchanged.
 
+**Landed:** `estimate_execution_cost` takes `quote_age_seconds`/`max_fresh_age_seconds` (default
+120s), falls back to the row's `websocket_quote_age_seconds`, and requires freshness for
+`depth_is_demonstrably_deep`; output includes `quote_age_seconds` and `quote_is_fresh`.
+`strategy.py` propagates `websocket_quote_age_seconds` into signal rows so `risk_decision` sees it.
+Tests cover fresh/stale/unknown/row-field/shallow-book-unaffected cases.
+
 ---
 
-## WO-9 — Regression guard: quote enrichment must never touch training/backtest paths — `open`
+## WO-9 — Regression guard: quote enrichment must never touch training/backtest paths — `done` (2026-07-02, orchestrator)
 
 **Goal:** `_enrich_with_latest_websocket_quotes` merges the *latest* quotes into rows at scoring
 time. That is correct for live decision-making and would be lookahead if it ever reached model
@@ -329,13 +414,19 @@ training or historical backtests. Lock this in with tests before anyone refactor
 3. Document the invariant in the module docstring: "enrichment is a scoring-time convenience;
    training and backtests must consume stored point-in-time rows only."
 
+**Landed:** call-site audit confirmed enrichment is reachable only from `apply_mispricing_alpha`;
+the module docstring states the invariant; `test_training_path_never_reaches_quote_enrichment`
+makes `train_mispricing_alpha_model` explode if enrichment is ever wired into it, and confirms the
+scoring path does route through it.
+
 ---
 
 ## Sequencing
 
 ```text
 WO-1..WO-6         done and audited (2026-07-02)
-WO-7, WO-8, WO-9   independent of each other — land in any order
+WO-8, WO-9         done (2026-07-02)
+WO-7               open — the only open work order; follow its spec verbatim
 ```
 
 After all six land: WP3 is done (flip it in the charter), the algo track (WP9–WP11) is done, and

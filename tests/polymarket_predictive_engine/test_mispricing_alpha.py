@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
 import yaml
 
 import polymarket_predictive_engine.mispricing_alpha as mispricing_alpha_module
@@ -1200,3 +1201,53 @@ def test_strategy_does_not_proxy_over_direct_live_model_evidence(tmp_path):
     assert rejected[0]["cohort_promotion_status"] == "not_promoted"
     assert rejected[0]["cohort_evidence_source_cohort"] == live_cohort
     assert "same-category validation gate failed" in rejected[0]["rejection_reason"]
+
+
+def test_training_path_never_reaches_quote_enrichment(tmp_path, monkeypatch):
+    """Leakage invariant (WO-9): quote enrichment is scoring-time only.
+
+    _enrich_with_latest_websocket_quotes merges the LATEST quotes into rows;
+    reaching it from training would be lookahead. This test makes the training
+    path explode if anyone ever wires enrichment into it.
+    """
+    import polymarket_predictive_engine.mispricing_alpha as alpha_module
+    from polymarket_predictive_engine.config import EngineConfig
+    from polymarket_predictive_engine.utils import write_csv
+
+    cfg = EngineConfig(raw={"paths": {"output_root": str(tmp_path / "outputs")}}, path=tmp_path / "cfg.yaml")
+    train_root = cfg.output_root / "polymarket_training"
+    # A websocket features file is present, so enrichment WOULD have data to
+    # merge if the training path ever called it.
+    write_csv(
+        train_root / "websocket_market_features.csv",
+        [
+            {
+                "collected_at_utc": "2026-07-02T10:00:00Z",
+                "source_timestamp": "2026-07-02T10:00:00Z",
+                "asset_id": "t1",
+                "best_bid": 0.5,
+                "best_ask": 0.52,
+                "midpoint": 0.51,
+                "spread": 0.02,
+            }
+        ],
+    )
+    write_csv(
+        train_root / "features_v2.csv",
+        [{"market_id": "m1", "token_id": "t1", "prediction_timestamp": "2026-07-01T10:00:00Z", "market_midpoint": 0.4}],
+    )
+    write_csv(
+        train_root / "labels.csv",
+        [{"market_id": "m1", "token_id": "t1", "target": 1}],
+    )
+
+    def _explode(*args, **kwargs):
+        raise AssertionError("quote enrichment must never be reached from the training path")
+
+    monkeypatch.setattr(alpha_module, "_enrich_with_latest_websocket_quotes", _explode)
+    result = alpha_module.train_mispricing_alpha_model(cfg)
+    assert result.get("status") in {"insufficient_data", "trained"}
+
+    # Scoring, by contrast, does route through enrichment.
+    with pytest.raises(AssertionError, match="never be reached"):
+        alpha_module.apply_mispricing_alpha(cfg, predictions=[{"token_id": "t1", "market_midpoint": 0.4}])

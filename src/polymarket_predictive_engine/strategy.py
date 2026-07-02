@@ -259,6 +259,7 @@ def generate_signals(
             "bid_depth_5pct": prediction.get("bid_depth_5pct", ""),
             "ask_depth_5pct": prediction.get("ask_depth_5pct", ""),
             "book_imbalance": prediction.get("book_imbalance", ""),
+            "websocket_quote_age_seconds": prediction.get("websocket_quote_age_seconds", ""),
             "time_to_close_hours": prediction.get("time_to_close_hours", ""),
             "resolution_risk": prediction.get("resolution_risk", 0.0),
             "slippage": estimated_slippage,

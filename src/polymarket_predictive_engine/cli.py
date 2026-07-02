@@ -7,6 +7,7 @@ import sys
 from .active_window_plan import build_active_window_plan
 from .anchored_edge import run as run_anchored_edge
 from .backtest import backtest
+from .closing_line import build_closing_line_value
 from .collection_only import run_collection_only
 from .config import config_check, load_config
 from .crypto_fundamental import build_crypto_fundamental
@@ -109,6 +110,7 @@ COMMANDS = [
     "price-action-model",
     "price-action-scout",
     "price-action-paper-signals",
+    "closing-line-value",
     "active-window-plan",
     "promotion-gate",
     "validation-report",
@@ -309,6 +311,8 @@ def main(argv: list[str] | None = None) -> int:
             _print(build_price_action_scout(cfg))
         elif args.command == "price-action-paper-signals":
             _print(build_price_action_paper_signals(cfg))
+        elif args.command == "closing-line-value":
+            _print(build_closing_line_value(cfg, features_input=args.websocket_input))
         elif args.command == "active-window-plan":
             _print(build_active_window_plan(cfg))
         elif args.command == "promotion-gate":

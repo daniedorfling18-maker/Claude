@@ -830,6 +830,14 @@ backtest:
   exit_at: best_bid_or_resolution
   hold_to_resolution: true
   allow_early_exit: false
+# Closing-line-value (CLV) evidence: settlement-independent forward evidence
+# asking whether the market line moved toward shadow entries. Diagnostic only;
+# it never authorises paper or live trading by itself.
+closing_line_value:
+  enabled: true
+  minimum_final_samples: 12
+  bootstrap_iterations: 1000
+  bootstrap_seed: 20260702
 costs:
   transaction_cost: 0.0
   spread_assumption: 0.02
@@ -870,6 +878,10 @@ risk:
   maximum_slippage: 0.02
   liquidity_cap_fraction: 0.05
   kelly_cap: 0.005
+  # Shrink the model probability toward the market price (the no-edge prior)
+  # before Kelly sizing. 0.0 = plain capped Kelly; higher values only ever size
+  # smaller, hedging model-probability estimation error. Never relaxes sizing.
+  kelly_shrinkage: 0.0
   category_blacklist: []
   market_blacklist: []
   event_blacklist: []

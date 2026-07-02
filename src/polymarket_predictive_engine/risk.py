@@ -19,6 +19,24 @@ def kelly_fraction(probability: float, price: float, cap: float) -> float:
     return max(0.0, min(cap, raw))
 
 
+def shrunk_kelly_fraction(probability: float, price: float, cap: float, *, shrinkage: float = 0.0) -> float:
+    """Kelly with the model probability shrunk toward the market-implied price.
+
+    Shrinkage in [0, 1] pulls the probability toward the no-edge prior (the
+    market price) before sizing, hedging estimation error in the model
+    probability. shrinkage=0 reproduces kelly_fraction exactly; any positive
+    value only ever sizes smaller, so this can tighten sizing but never relax it.
+    """
+    if price <= 0 or price >= 1:
+        return 0.0
+    s = max(0.0, min(1.0, shrinkage))
+    shrunk_probability = price + (probability - price) * (1.0 - s)
+    return min(
+        kelly_fraction(probability, price, cap),
+        kelly_fraction(shrunk_probability, price, cap),
+    )
+
+
 def _as_set(values: Any) -> set[str]:
     if not values:
         return set()
@@ -219,7 +237,8 @@ def risk_decision(
     current_category = _number(portfolio, "current_category_exposure")
     current_correlated = _number(portfolio, "current_correlated_exposure")
     liquidity_cap = liquidity * float(risk.get("liquidity_cap_fraction", 0.05))
-    kelly = kelly_fraction(probability, price, float(risk.get("kelly_cap", 0.005)))
+    kelly_shrinkage = _risk_value(risk, fast_overrides, fast_market, price_action_overrides, price_action, "kelly_shrinkage", 0.0)
+    kelly = shrunk_kelly_fraction(probability, price, float(risk.get("kelly_cap", 0.005)), shrinkage=kelly_shrinkage)
     signal_cap = safe_float(signal.get("max_stake_usdc"))
     fast_market_cap = _fast_market_stake_cap(fast_overrides, signal, fast_market)
     price_action_cap = _override_stake_cap(price_action_overrides, signal, price_action)
@@ -246,6 +265,7 @@ def risk_decision(
         "limit_price": round(price, 6),
         "max_size": round(max_single, 6),
         "kelly_fraction": round(kelly, 8),
+        "kelly_shrinkage": round(kelly_shrinkage, 4),
         "risk_profile": (
             "price_action_paper_probe"
             if price_action

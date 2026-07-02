@@ -128,6 +128,8 @@ and mispricing-alpha depth/enrichment tests.
   `quant_lab.risk` over open-position marks.
 - Acceptance: risk state artifact reports correlated exposure by key and portfolio VaR; a test shows
   two same-event candidates draining the same correlated budget.
+- Status: partially landed by Codex (`portfolio_state` computes correlated exposure per
+  `normalised_correlation_key`); the remaining VaR/reporting slice is specced as **WO-12**.
 
 ### WP7 — Family classifier for liquid `unknown` markets — `done` (2026-07-02)
 
@@ -238,6 +240,14 @@ research action. The algo sweep lab searches strategy parameter grids over recor
 history with train-only selection and out-of-sample confirmation through the replay harness.
 Wiring into the cycle/dashboard/audit is WO-10; research-focus consumption of attribution + CLV +
 sweep decisions is WO-11 — both specced for Codex.
+
+**2026-07-02 — overnight queue issued.** WO-7 and WO-10..WO-19 are specced in the work orders doc
+with a night-shift protocol (fixed order, stop conditions, skip-and-note rules, end-of-night
+report). New ground covered by the queue: portfolio VaR reporting (WP6 remainder), microstructure
+hypotheses as replay strategies + generalised sweep, per-family calibration scorecard, collection
+coverage for CLV finality, evidence history time series, a dashboard evidence funnel, and
+invariant property tests that lock the safety envelope. Nothing in the queue can loosen a gate;
+WO-19 explicitly changes zero source files.
 
 ## Rules of engagement for coding agents
 

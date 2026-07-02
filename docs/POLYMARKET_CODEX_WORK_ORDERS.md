@@ -1,6 +1,6 @@
 # Polymarket Codex Work Orders
 
-Last updated: 2026-07-02 (WO-1..WO-9 landed except WO-7; WO-7, WO-10, WO-11 open)
+Last updated: 2026-07-02 (night queue issued: WO-7, WO-10..WO-19 open, in the order given in Sequencing)
 
 Mechanical, file-level implementation instructions for coding agents (Codex or any other code
 changer). The architecture and priorities live in `docs/POLYMARKET_QUANT_MODE_CHARTER.md`; this file
@@ -492,14 +492,258 @@ away from cohorts where the model is simply wrong. Collection steering only — 
 
 ---
 
+## WO-12 — Portfolio VaR snapshot and correlated-exposure reporting (WP6) — `open`
+
+**Goal:** the risk-state artifact shows portfolio-level VaR/CVaR over open-position marks and
+correlated exposure by correlation key. Reporting only — sizing already enforces the caps.
+
+**Facts first:** `paper_broker.portfolio_state` already computes `current_correlated_exposure`
+per `normalised_correlation_key` (see the sums near the end of that function). Do not rebuild it.
+
+**Files:** `src/polymarket_predictive_engine/portfolio.py`, new
+`tests/polymarket_predictive_engine/test_portfolio_var.py`.
+
+**Steps:**
+
+1. In `portfolio.py`, add `_portfolio_risk_snapshot(con, cfg) -> dict`: load open positions,
+   group cost basis by `normalised_correlation_key(dict(row))` and by `category`; compute
+   per-position mark-to-entry return series from `latest_mark_price`/`average_entry_price` (skip
+   rows without both) and feed the return list into `quant_lab.risk` VaR/CVaR helpers (import
+   `quant_lab.risk`, use its existing function signatures — read that module first, do not write
+   new math). Output keys: `open_positions`, `total_cost_usdc`, `exposure_by_correlation_key`
+   (top 10, sorted desc), `exposure_by_category`, `var_95_usdc`, `cvar_95_usdc`,
+   `worst_position_return_pct`.
+2. Merge that dict into the `risk_state.json` payload written by `portfolio_snapshot` under a
+   `"portfolio_risk"` key.
+3. Tests: seed a temp SQLite via the existing storage/init helpers (copy the pattern from
+   `test_execution_governance_storage.py`) with 3 open positions, two sharing a correlation key;
+   assert the shared key's exposure is the sum of both cost bases, VaR/CVaR are finite and <= 0
+   or sensible for the seeded marks (hand-compute), and `risk_state.json` contains the block.
+
+**Out of scope:** `risk_decision`, stake caps, `paper_broker` order logic.
+
+---
+
+## WO-13 — Mirror the validated microstructure hypotheses as replay strategies — `open`
+
+**Goal:** the sweep lab can hunt over the same hypothesis space the microstructure lab already
+tests, but at executable intent level. Three new registered strategies, all shadow-only.
+
+**Files:** `src/polymarket_predictive_engine/algo/registry.py` (or a new
+`algo/strategies_microstructure.py` imported by `registry.py`),
+`tests/polymarket_predictive_engine/test_algo_strategy.py` (extend).
+
+**Steps — copy `TightSpreadJoinBidShadow` exactly in shape (stable intent ids, GTD + TTL,
+config-driven thresholds via `context.algo_setting`, shadow mode hardcoded):**
+
+1. `BidMomentumTightShadow` (`name="bid_momentum_tight_shadow"`): needs the strategy to see the
+   PREVIOUS quote per asset — strategies are stateless per event, so keep a small per-instance
+   `dict[asset_id, QuoteEvent]` of the last event (document that replay instantiates one strategy
+   per run, so this is replay-local state, deterministic, and allowed). Emit a join-bid BUY when
+   `best_bid - previous.best_bid >= algo.min_bid_move` (default 0.01) and
+   `spread <= algo.tight_spread_maximum`.
+2. `MidMomentumTightShadow` (`name="mid_momentum_tight_shadow"`): same, on midpoint moves,
+   `algo.min_mid_move` default 0.01.
+3. `SpreadCompressionShadow` (`name="spread_compression_shadow"`): emit when the spread narrowed
+   by at least `algo.min_spread_compression` (default 0.01) versus the previous event and
+   `book_imbalance >= algo.minimum_book_imbalance`.
+4. Every strategy: return `[]` whenever any needed field is None or there is no previous event.
+   All intents `mode="shadow"`, `execution_policy="join_bid"`, stake `algo.shadow_stake_usdc`.
+5. Tests per strategy: exact intent on a crafted two-event sequence; no intent on first event;
+   no intent when the move/compression is below threshold; determinism (same events -> same
+   intent ids).
+
+**Out of scope:** `price_action_microstructure.py` (the lab stays as-is), replay/sweep internals.
+
+---
+
+## WO-14 — Generalise the sweep to any registered strategy — `open`
+
+**Blocked by WO-13.**
+
+**Goal:** `algo-sweep` reads per-strategy parameter grids from config and sweeps every listed
+strategy, not just the tight-spread probe.
+
+**Files:** `src/polymarket_predictive_engine/algo/sweep.py`,
+`tests/polymarket_predictive_engine/test_algo_sweep.py` (extend).
+
+**Steps:**
+
+1. New config shape (keep the old keys working as the default grid for
+   `tight_spread_join_bid_shadow` — backwards compatible):
+
+   ```yaml
+   algo_sweep:
+     strategies:
+       tight_spread_join_bid_shadow:
+         tight_spread_maximum: [0.01, 0.02, 0.03]
+         minimum_book_imbalance: [0.55, 0.65, 0.75]
+       bid_momentum_tight_shadow:
+         min_bid_move: [0.005, 0.01, 0.02]
+         tight_spread_maximum: [0.02, 0.03]
+   ```
+
+2. Grid = cartesian product of each strategy's param lists (generic: params are plain
+   `algo.<key>` overrides). Selection stays per-strategy AND global: report the best combo per
+   strategy plus one overall `selected` (same deterministic sort). Decision logic unchanged and
+   applied to the overall selection.
+3. Combos CSV gains `strategy` and a `params` JSON column; per-strategy bests appear under
+   `by_strategy` in the summary.
+4. Tests: two strategies in the grid over the existing fixture; assert per-strategy bests, the
+   overall selection, and that legacy config (no `strategies:` key) still produces the WO-6-era
+   behaviour byte-for-byte on the old assertions.
+
+---
+
+## WO-15 — Evidence history time series (CLV + attribution per cycle) — `open`
+
+**Goal:** see evidence accumulating over time instead of only the latest snapshot.
+
+**Files:** new `src/polymarket_predictive_engine/evidence_history.py`, CLI `evidence-history`,
+new test.
+
+**Steps:**
+
+1. `append_evidence_history(cfg)`: read `closing_line_value.json`, `edge_attribution.json`, and
+   `algo_sweep_summary.json`; append ONE row per artifact per call to
+   `outputs/polymarket_model_governance/evidence_history.csv` with:
+   `recorded_at_utc, source, positions_scored/attributed, final_line_positions, mean_final_clv,
+   positive_cohorts (joined by |), total_pnl_usdc, decision_or_class_summary`.
+   Missing artifacts append nothing for that source. Idempotence: skip the append when the
+   artifact's `generated_at_utc` equals the last recorded row's for that source.
+2. Register the CLI command; wiring into `refresh_governance` is a one-line follow-up inside
+   this same WO (call it LAST, after the three builders).
+3. Tests: two calls with unchanged artifacts -> one row per source; artifact regenerated ->
+   second row; missing artifacts -> no rows, no crash.
+
+---
+
+## WO-16 — Per-family calibration scorecard — `open`
+
+**Goal:** answer "which families does the model actually beat the market in?" with one artifact:
+Brier/log-loss vs the market baseline per classified family, on clean settled data only.
+
+**Files:** new `src/polymarket_predictive_engine/family_calibration.py`, CLI
+`family-calibration`, new test.
+
+**Steps:**
+
+1. Reuse, do not rewrite: `market_relative_validation.join_clean_settled_predictions` for the
+   joined rows, its `brier_score`/`log_loss`/`brier_decomposition` for metrics, and
+   `worldcup_validation.classify_market_family` for the family of each row.
+2. Per family with at least `family_calibration.minimum_rows` (default 25) settled rows: model
+   Brier, market Brier, brier gain (market - model), log losses, row/market counts, and the
+   bootstrap CI machinery already present in `market_relative_validation` for the gain
+   (chronological/market-clustered exactly as that module already does it — copy its pattern).
+3. Evidence classes, fail closed: `model_beats_market` only when CI low > 0 and rows >= minimum;
+   `market_beats_model` when CI high < 0; else `insufficient_calibration_evidence`.
+4. Artifact `outputs/polymarket_model_governance/family_calibration_scorecard.json` (+ CSV per
+   family). Standard flags, governance note ("scorecard is diagnostic; promotion still requires
+   forward shadow evidence").
+5. Tests with synthetic settled rows where the model is calibrated in one family and anti-
+   calibrated in another; assert exact class per family and that below-minimum families read
+   insufficient.
+
+---
+
+## WO-17 — Websocket collection coverage report — `open`
+
+**Goal:** CLV finality depends on having quotes near each market's close; attribution depends on
+closed positions having lines. Report where collection is thin so scheduling can fix it.
+
+**Files:** new `src/polymarket_predictive_engine/collection_coverage.py`, CLI
+`collection-coverage`, new test.
+
+**Steps:**
+
+1. Read `websocket_market_features.csv` and `shadow_positions.csv`. Per classified family:
+   quote rows, distinct assets, first/last quote timestamps, median gap between consecutive
+   quotes per asset (report the family median of those).
+2. Per shadow position (open or closed): does a quote exist within
+   `collection_coverage.pre_close_window_minutes` (default 30) BEFORE `close_time`? Summarise:
+   `positions_with_pre_close_quote`, `positions_missing_pre_close_quote`, and list the missing
+   ones (id, family, close_time) — these are exactly the positions whose CLV will stay
+   provisional forever.
+3. Artifact `outputs/polymarket_model_governance/collection_coverage.json`. Standard flags.
+4. Tests: fixture with one covered and one uncovered position; assert both lists exact.
+
+---
+
+## WO-18 — Dashboard evidence funnel panel — `open`
+
+**Land after WO-10 and WO-15..17 (it reads their artifacts; render blanks for missing ones).**
+
+**Goal:** one dashboard section answering "where are we on the road to paper?" at a glance.
+
+**Files:** `src/polymarket_predictive_engine/dashboard.py`, dashboard test (extend).
+
+**Steps:** one section "Evidence funnel" with a single facts list, each value read from an
+existing artifact (missing -> "-"): liquidity targets discovered; alpha shadow candidates; open /
+closed shadow positions; closed with CLV final lines; attributed positions; cohorts by
+attribution class; positive CLV cohorts; families with `model_beats_market` calibration; sweep
+decision; paper gate status (`approved_for_paper_trading` from the promotion gate artifact —
+display only). Follow the CLV section pattern for reads and rendering. Test: fixture artifacts ->
+section title + a few exact values; all-missing -> renders with dashes.
+
+---
+
+## WO-19 — Invariant property tests — `open`
+
+**Goal:** lock the safety envelope in tests so future refactors cannot silently loosen it.
+
+**Files:** new `tests/polymarket_predictive_engine/test_safety_invariants.py` only. **This WO
+changes zero source files.** If a property fails, STOP and report — do not "fix" source to match.
+
+**Properties (loop over seeded random grids, e.g. 200 samples via `random.Random(20260702)`):**
+
+1. Kelly monotonicity: for random (p, price) with p > price, `shrunk_kelly_fraction` is
+   non-increasing in shrinkage and always <= `kelly_fraction`; both always within [0, cap].
+2. Execution-cost conservatism: for random books, `expected_slippage >= flat_slippage` whenever
+   `quote_is_fresh` is False; removing depth fields never DECREASES expected slippage; the
+   stake cap never increases when depth shrinks.
+3. Risk decision envelope: for random approved signals, `stake_usdc <= kelly_cap * bankroll`,
+   `quantity * limit_price == stake_usdc` (to rounding), and setting any single risk input worse
+   (higher spread, lower liquidity, higher slippage) never turns a rejection into an approval.
+4. Intent schema: random dict fuzz over `intent_from_dict` -> `validate_intent` never raises
+   (returns violations instead), and no accepted intent ever has `mode == "live"`.
+
+---
+
+## Night-shift protocol (read this before starting the queue)
+
+Work the queue in the Sequencing order below. For each work order:
+
+1. Fresh branch from latest `main`, named `codex/wo-<n>-<slug>`.
+2. Implement exactly per spec. Run the FULL `pytest` suite.
+3. Green -> push, open the PR, flip the statuses (here + charter) with a dated `Landed:` note,
+   move on.
+4. Red and the failure is yours -> fix or revert your change. NEVER widen an existing assertion,
+   skip a test, or add xfail.
+5. Blocked, ambiguous, or the spec contradicts the code you find -> do NOT improvise. Append a
+   dated note under the work order describing the mismatch, leave the status `open`, skip to the
+   next WO.
+6. Re-read the Pre-flight checklist before every push. The invariants outrank the queue: a
+   finished queue with one loosened gate is a failed night.
+7. End of night: append a "Night report <date>" section at the bottom of this file — one line
+   per WO: landed / skipped(reason) / blocked(note), plus the final full-suite test count.
+
 ## Sequencing
 
 ```text
-WO-1..WO-6         done and audited (2026-07-02)
-WO-8, WO-9         done (2026-07-02)
-WO-7               open — CLV-aware promotion review; follow its spec verbatim
-WO-10              open — wiring for edge attribution + algo sweep (independent of WO-7)
-WO-11              open — research-focus consumption; land AFTER WO-10 so artifacts refresh each cycle
+WO-1..WO-6, WO-8, WO-9   done and audited (2026-07-02)
+
+Night order:
+1. WO-10   wiring: attribution + sweep into cycle/dashboard/audit (unlocks visibility)
+2. WO-7    CLV-aware promotion review (advisory only; follow the spec verbatim)
+3. WO-11   research-focus consumption (after WO-10)
+4. WO-12   portfolio VaR + correlated-exposure reporting
+5. WO-13   microstructure hypotheses as replay strategies
+6. WO-14   generalise the sweep (after WO-13)
+7. WO-16   per-family calibration scorecard
+8. WO-17   collection coverage report
+9. WO-15   evidence history time series
+10. WO-18  dashboard evidence funnel (after WO-10, WO-15..17; render blanks if some are missing)
+11. WO-19  invariant property tests (zero source changes)
 ```
 
 After all six land: WP3 is done (flip it in the charter), the algo track (WP9–WP11) is done, and

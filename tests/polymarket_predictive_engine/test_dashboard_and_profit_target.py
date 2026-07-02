@@ -213,6 +213,51 @@ def test_dashboard_handles_empty_closing_line_value_artifact(tmp_path):
     assert "No CLV evidence yet" in html
 
 
+def test_dashboard_surfaces_algo_replay_evidence(tmp_path):
+    cfg = _config(tmp_path)
+    algo_root = cfg.output_root / "polymarket_algo"
+    write_json(
+        algo_root / "replay_null_summary.json",
+        {
+            "status": "ok",
+            "strategy": "null",
+            "events_processed": 12,
+            "intents_emitted": 0,
+            "fills": 0,
+            "total_cost_usdc": 0.0,
+            "unrealised_mark_to_bid_pnl_usdc": 0.0,
+            "paper_trading_invoked": False,
+            "live_trading_invoked": False,
+        },
+    )
+    write_json(
+        algo_root / "replay_tight_spread_join_bid_shadow_summary.json",
+        {
+            "status": "ok",
+            "strategy": "tight_spread_join_bid_shadow",
+            "events_processed": 50,
+            "intents_emitted": 4,
+            "fills": 2,
+            "resting_orders_at_end": 1,
+            "total_cost_usdc": 2.0,
+            "unrealised_mark_to_bid_pnl_usdc": -0.42,
+            "paper_trading_invoked": False,
+            "live_trading_invoked": False,
+        },
+    )
+
+    result = render_dashboard(cfg)
+
+    data = read_json(result["dashboard_data"])
+    html = Path(result["dashboard_file"]).read_text(encoding="utf-8")
+    assert "Algo replay lab" in html
+    assert data["algo_replay"]["strategy_count"] == 2
+    assert data["algo_replay"]["best_strategy"]["strategy"] == "null"
+    assert data["algo_replay"]["summaries"][1]["strategy"] == "tight_spread_join_bid_shadow"
+    assert data["algo_replay"]["paper_trading_invoked"] is False
+    assert data["algo_replay"]["live_trading_invoked"] is False
+
+
 def test_dashboard_emits_decision_useful_summary_for_missing_fresh_candidate(tmp_path):
     cfg = _config(tmp_path)
     write_json(

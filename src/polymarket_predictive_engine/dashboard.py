@@ -132,6 +132,7 @@ HTML = """<!doctype html>
   <section><h2>Strategy V2 anchored edge</h2><div id="strategyV2"></div></section>
   <section><h2>Fast price-action scout</h2><div id="priceActionScout"></div></section>
   <section><h2>Microstructure edge lab</h2><div id="microstructureLab"></div></section>
+  <section><h2>Algo replay lab</h2><div id="algoReplay"></div></section>
   <section><h2>Price-action prediction model</h2><div id="priceActionModel"></div></section>
   <section><h2>Quant research stack</h2><div id="quantResearch"></div></section>
   <section><h2>Price-action feedback loop</h2><div id="priceActionFeedback"></div></section>
@@ -249,6 +250,9 @@ async function load() {
     const roundTripPnl = roundTrip.realized_pnl_usdc ?? roundTrip.total_mark_pnl_usdc;
     const priceScout = data.price_action_scout || {};
     const microstructure = data.price_action_microstructure || {};
+    const algoReplay = data.algo_replay || {};
+    const algoReplaySummaries = Array.isArray(algoReplay.summaries) ? algoReplay.summaries : [];
+    const bestReplay = algoReplay.best_strategy || {};
     const priceActionModel = data.price_action_model || {};
     const quantResearch = data.quant_research_status || {};
     const closingLine = data.closing_line_value || {};
@@ -456,6 +460,7 @@ async function load() {
       ["Validation gap", validationGapActive ? validationGap.reason || "Needs positive validation examples." : "No active positive-validation gap.", v=>longText(v, 260)],
       ["Cohort transfer", priceActionModel.cohort_transfer?.reason || "No active transfer blocker reported.", v=>longText(v, 260)],
       ["Paper bridge", priceActionPaper.decision, v=>longText(v, 220)],
+      ["Algo replay best", bestReplay.strategy ? `${bestReplay.strategy}: ${fmtUsd(bestReplay.unrealised_mark_to_bid_pnl_usdc)} on ${fmtUsd(bestReplay.total_cost_usdc)}` : "No replay artifact yet", v=>longText(v, 220)],
       ["Current analogue scan", `${currentHistScan.current_rows ?? 0} rows / ${currentHistScan.positive_matches ?? 0} positive matches`, v=>longText(v, 180)],
       ["Analogue blocker", currentHistScan.state || "-", v=>longText(v, 220)],
       ["World Cup layer", (data.worldcup_validation_status || {}).status, v=>longText(v, 180)],
@@ -1032,6 +1037,26 @@ async function load() {
       ["Bid move","bid_move_abs", v=>fmtNum(v,4)],
       ["Val ROI","validation_roi", v=>fmtNum(Number(v) * 100, 2) + "%"]
     ]);
+    document.getElementById("algoReplay").innerHTML = `<div class="sectionLead">Offline, shadow-only replay of event-driven strategies against recorded websocket quotes. Negative mark-to-bid P&L means do not promote the strategy.</div>` + facts([
+      ["Strategies replayed", algoReplay.strategy_count],
+      ["Best strategy", bestReplay.strategy || "-"],
+      ["Best replay P&L", bestReplay.unrealised_mark_to_bid_pnl_usdc, fmtUsd],
+      ["Best replay cost", bestReplay.total_cost_usdc, fmtUsd],
+      ["Best fills", bestReplay.fills],
+      ["Best intents", bestReplay.intents_emitted],
+      ["Paper invoked", bestReplay.paper_trading_invoked],
+      ["Live invoked", bestReplay.live_trading_invoked]
+    ]) + titledTable("Replay strategy scorecard", algoReplaySummaries, [
+      ["Strategy","strategy", v=>longText(v, 150)],
+      ["Status","status"],
+      ["Events","events_processed"],
+      ["Intents","intents_emitted"],
+      ["Fills","fills"],
+      ["Cost","total_cost_usdc", fmtUsd],
+      ["Mark-to-bid P&L","unrealised_mark_to_bid_pnl_usdc", fmtUsd],
+      ["Resting","resting_orders_at_end"],
+      ["Paper/live","paper_trading_invoked", (v,row)=>`${v ? "paper" : "no paper"} / ${row.live_trading_invoked ? "live" : "no live"}`]
+    ], 8);
     document.getElementById("priceActionModel").innerHTML = facts([
       ["Decision", priceActionModel.decision],
       ["Promotion ready", priceActionModel.promotion_ready],
@@ -3342,6 +3367,51 @@ def _paper_maintenance_task_status(cfg: EngineConfig) -> dict[str, Any]:
     }
 
 
+def _algo_replay_status(cfg: EngineConfig) -> dict[str, Any]:
+    root = cfg.output_root / "polymarket_algo"
+    summaries: list[dict[str, Any]] = []
+    if root.exists():
+        for path in sorted(root.glob("replay_*_summary.json")):
+            payload = read_json(path, default={}) or {}
+            if not isinstance(payload, dict) or not payload:
+                continue
+            mtime = datetime.fromtimestamp(path.stat().st_mtime, tz=timezone.utc).isoformat().replace("+00:00", "Z")
+            pnl = safe_float(payload.get("unrealised_mark_to_bid_pnl_usdc"))
+            summaries.append(
+                {
+                    "strategy": payload.get("strategy") or path.stem.replace("replay_", "").replace("_summary", ""),
+                    "status": payload.get("status"),
+                    "generated_at_utc": payload.get("generated_at_utc") or mtime,
+                    "events_processed": payload.get("events_processed"),
+                    "intents_emitted": payload.get("intents_emitted"),
+                    "fills": payload.get("fills"),
+                    "cancels": payload.get("cancels"),
+                    "expiries": payload.get("expiries"),
+                    "resting_orders_at_end": payload.get("resting_orders_at_end"),
+                    "total_cost_usdc": payload.get("total_cost_usdc"),
+                    "unrealised_mark_to_bid_pnl_usdc": payload.get("unrealised_mark_to_bid_pnl_usdc"),
+                    "paper_trading_invoked": bool(payload.get("paper_trading_invoked", False)),
+                    "live_trading_invoked": bool(payload.get("live_trading_invoked", False)),
+                    "artifact_path": str(path),
+                    "_sort_pnl": pnl if pnl is not None else -999999.0,
+                }
+            )
+    summaries.sort(
+        key=lambda row: safe_float(row.get("_sort_pnl")) if safe_float(row.get("_sort_pnl")) is not None else -999999.0,
+        reverse=True,
+    )
+    for row in summaries:
+        row.pop("_sort_pnl", None)
+    return {
+        "status": "ok" if summaries else "missing",
+        "strategy_count": len(summaries),
+        "best_strategy": summaries[0] if summaries else {},
+        "summaries": summaries,
+        "paper_trading_invoked": any(bool(row.get("paper_trading_invoked")) for row in summaries),
+        "live_trading_invoked": any(bool(row.get("live_trading_invoked")) for row in summaries),
+    }
+
+
 def _scoreboard_status(broker: dict[str, Any], target: dict[str, Any]) -> str:
     broker_equity = safe_float(broker.get("equity"))
     current = target.get("current") if isinstance(target, dict) else {}
@@ -3523,6 +3593,7 @@ def render_dashboard(cfg: EngineConfig, latest_report: dict[str, Any] | None = N
     paper_round_trip_summary = read_json(cfg.output_root / "polymarket_price_action" / "paper_broker_round_trip_summary.json", default={}) or {}
     if not isinstance(paper_round_trip_summary, dict):
         paper_round_trip_summary = {}
+    algo_replay = _algo_replay_status(cfg)
     quant_research_status = read_json(governance / "quant_research_status.json", default={}) or {}
     if not isinstance(quant_research_status, dict):
         quant_research_status = {}
@@ -3632,6 +3703,7 @@ def render_dashboard(cfg: EngineConfig, latest_report: dict[str, Any] | None = N
         "price_action_paper_signals": price_action_paper_signal_status,
         "price_action_feedback": price_action_feedback,
         "paper_round_trip_summary": paper_round_trip_summary,
+        "algo_replay": algo_replay,
         "quant_research_status": quant_research_status,
         "closing_line_value": closing_line_value,
         "websocket_summary": websocket_summary,

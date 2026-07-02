@@ -173,6 +173,44 @@ def _low_price_model_summary() -> dict[str, object]:
     }
 
 
+def _non_low_price_model_summary() -> dict[str, object]:
+    payload = _low_price_model_summary()
+    payload["validation_rank_diagnostics"] = {
+        "state": "top_ranked_candidates_failed_missed_positive_repricing",
+        "missed_positive_examples": [
+            {
+                "family": "crypto_eth_updown_daily",
+                "market_slug": "eth-up-or-down-on-july-2-2026",
+                "entry_ask": "0.40",
+                "exit_bid": "0.42",
+                "roi": 0.05,
+                "low_price_convexity": 0.0,
+                "one_cent_return": 0.025,
+            }
+        ],
+    }
+    return payload
+
+
+def _low_price_trade_event(**overrides: str) -> dict[str, str]:
+    row = {
+        "split": "validation",
+        "family": "crypto_btc_special",
+        "market_slug": "bitcoin-above-58k-on-july-2-2026",
+        "outcome": "No",
+        "token_id": "btc-low-token",
+        "entry_ask": "0.025",
+        "entry_bid": "0.024",
+        "entry_spread": "0.001",
+        "exit_bid": "0.024",
+        "stake_usdc": "2",
+        "pnl_usdc": "-0.08",
+        "roi": "-0.04",
+    }
+    row.update(overrides)
+    return row
+
+
 def _microstructure_feedback_payload(cohort: str) -> dict[str, object]:
     return {
         "status": "ok",
@@ -386,6 +424,35 @@ def test_low_price_tick_probe_compiles_only_after_model_missed_low_price_positiv
     assert signals[0]["feature_set_version"] == "low_price_tick_v1"
     assert float(signals[0]["max_stake_usdc"]) == 1.0
     assert float(signals[0]["executable_price"]) == 0.026
+
+
+def test_low_price_tick_probe_stays_blocked_without_positive_validation_evidence(tmp_path):
+    cfg = _cfg(tmp_path)
+    cfg.raw["price_action_paper"].update(
+        {
+            "low_price_tick_probe_enabled": True,
+            "low_price_tick_min_validation_positive_examples": 1,
+        }
+    )
+    root = cfg.output_root / "polymarket_price_action"
+    write_json(root / "price_action_model_summary.json", _non_low_price_model_summary())
+    write_csv(
+        root / "microstructure_trade_events.csv",
+        [
+            _low_price_trade_event(split="train", exit_bid="0.026", pnl_usdc="0.08", roi="0.04"),
+            _low_price_trade_event(split="validation", exit_bid="0.024", pnl_usdc="-0.08", roi="-0.04"),
+        ],
+    )
+
+    summary = build_price_action_paper_signals(cfg)
+    signals = read_csv_rows(root / "price_action_paper_signals.csv")
+    evidence = summary["low_price_tick_probe_evidence"]
+
+    assert signals == []
+    assert summary["low_price_tick_probe_candidates"] == 0
+    assert evidence["state"] == "no_positive_validation_low_price_tick_examples"
+    assert evidence["validation_positive_rows"] == 0
+    assert evidence["positive_rows"] == 1
 
 
 def test_paper_confirmation_rejects_mutually_exclusive_same_market_probe(tmp_path):

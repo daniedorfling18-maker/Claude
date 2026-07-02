@@ -780,6 +780,10 @@ async function load() {
       ["Approved microstructure cohorts", priceActionPaper.approved_microstructure_cohorts],
       ["Paper-confirm candidates", priceActionPaper.paper_confirmation_candidates],
       ["Paper-confirm signals", priceActionPaper.paper_confirmation_signals],
+      ["Low-price evidence", priceActionPaper.low_price_tick_probe_evidence_state],
+      ["Low-price val +", priceActionPaper.low_price_tick_validation_positive_rows],
+      ["Low-price val ROI", priceActionPaper.low_price_tick_validation_roi, v=>fmtNum(Number(v) * 100, 2) + "%"],
+      ["Low-price gate", priceActionPaper.low_price_tick_gate_reason],
       ["Low-price tick candidates", priceActionPaper.low_price_tick_probe_candidates],
       ["Low-price tick signals", priceActionPaper.low_price_tick_probe_signals],
       ["Broker refresh needed", priceActionPaper.broker_refresh_needed],
@@ -2142,6 +2146,9 @@ def _price_action_paper_signal_status(cfg: EngineConfig) -> dict[str, Any]:
         confirmation_signal_count = max(row_confirmation_signal_count, min(signal_count, summary_confirmation_signals))
     summary_signal_mismatch = summary_signals is not None and int(summary_signals) != signal_count
     summary_rejection_mismatch = summary_rejections is not None and int(summary_rejections) != rejection_count
+    low_price_tick_evidence = summary.get("low_price_tick_probe_evidence")
+    if not isinstance(low_price_tick_evidence, dict):
+        low_price_tick_evidence = {}
     return {
         "status": summary.get("status") or ("missing" if not signals and not rejections else "computed"),
         "generated_at_utc": summary.get("generated_at_utc"),
@@ -2159,6 +2166,11 @@ def _price_action_paper_signal_status(cfg: EngineConfig) -> dict[str, Any]:
         "paper_confirmation_candidates": summary.get("paper_confirmation_candidates"),
         "paper_confirmation_signals": confirmation_signal_count,
         "summary_paper_confirmation_signals": summary.get("paper_confirmation_signals"),
+        "low_price_tick_probe_evidence": low_price_tick_evidence,
+        "low_price_tick_probe_evidence_state": low_price_tick_evidence.get("state"),
+        "low_price_tick_validation_positive_rows": low_price_tick_evidence.get("validation_positive_rows"),
+        "low_price_tick_validation_roi": low_price_tick_evidence.get("validation_roi"),
+        "low_price_tick_gate_reason": low_price_tick_evidence.get("gate_reason"),
         "low_price_tick_probe_candidates": summary.get("low_price_tick_probe_candidates"),
         "low_price_tick_probe_signals": max(
             row_low_price_tick_signal_count,

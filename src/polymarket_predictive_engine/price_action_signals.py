@@ -11,6 +11,7 @@ SCOUT_COHORT_FILE = "price_action_scout_cohort_evidence.csv"
 SCOUT_ROUND_TRIP_FILE = "price_action_scout_round_trip_evidence.csv"
 SCOUT_ENTRY_FILE = "price_action_scout_entries.csv"
 MICROSTRUCTURE_CURRENT_FILE = "microstructure_current_candidates.csv"
+MICROSTRUCTURE_TRADE_EVENTS_FILE = "microstructure_trade_events.csv"
 MODEL_SUMMARY_JSON = "price_action_model_summary.json"
 SIGNALS_FILE = "price_action_paper_signals.csv"
 REJECTIONS_FILE = "price_action_paper_rejections.csv"
@@ -164,7 +165,72 @@ def _paper_confirmation_candidates(cfg: EngineConfig, settings: dict[str, Any]) 
     return candidates
 
 
-def _low_price_tick_probe_enabled(summary: dict[str, Any], settings: dict[str, Any]) -> tuple[bool, dict[str, Any]]:
+def _is_low_price_tick_row(row: dict[str, Any], settings: dict[str, Any]) -> bool:
+    ask = safe_float(row.get("entry_ask") or row.get("latest_ask"))
+    bid = safe_float(row.get("entry_bid") or row.get("latest_bid"))
+    spread = safe_float(row.get("entry_spread") or row.get("latest_spread"))
+    if spread is None and ask is not None and bid is not None:
+        spread = max(0.0, ask - bid)
+    relative_spread = _relative_spread(spread, ask)
+    min_price = float(safe_float(settings.get("low_price_tick_min_ask")) or 0.01)
+    max_price = float(safe_float(settings.get("low_price_tick_max_ask")) or 0.15)
+    max_spread = float(safe_float(settings.get("low_price_tick_max_spread")) or 0.01)
+    max_relative_spread = float(safe_float(settings.get("low_price_tick_max_relative_spread")) or 0.25)
+    min_one_cent_return = float(safe_float(settings.get("low_price_tick_min_one_cent_return")) or 0.03)
+    if ask is None or bid is None or not min_price <= ask <= max_price or not 0 < bid < ask:
+        return False
+    if spread is None or spread > max_spread:
+        return False
+    if relative_spread is None or relative_spread > max_relative_spread:
+        return False
+    if 0.01 / max(ask, 0.01) < min_one_cent_return:
+        return False
+    if boolish(settings.get("low_price_tick_exclude_updown", True)):
+        market_slug = str(row.get("market_slug") or "").lower()
+        if "updown" in market_slug or "up-or-down" in market_slug:
+            return False
+    return True
+
+
+def _low_price_tick_evidence(cfg: EngineConfig, settings: dict[str, Any]) -> dict[str, Any]:
+    rows = read_csv_rows(cfg.output_root / OUTPUT_DIRNAME / MICROSTRUCTURE_TRADE_EVENTS_FILE)
+    filtered = [row for row in rows if _is_low_price_tick_row(row, settings)]
+    validation = [row for row in filtered if str(row.get("split") or "").lower() == "validation"]
+    positives = [row for row in filtered if (safe_float(row.get("roi")) or 0.0) > 0]
+    validation_positives = [row for row in validation if (safe_float(row.get("roi")) or 0.0) > 0]
+    pnl = sum(safe_float(row.get("pnl_usdc")) or 0.0 for row in filtered)
+    stake = sum(safe_float(row.get("stake_usdc")) or 0.0 for row in filtered)
+    validation_pnl = sum(safe_float(row.get("pnl_usdc")) or 0.0 for row in validation)
+    validation_stake = sum(safe_float(row.get("stake_usdc")) or 0.0 for row in validation)
+    min_validation_positives = int(safe_float(settings.get("low_price_tick_min_validation_positive_examples")) or 1)
+    validation_roi = validation_pnl / validation_stake if validation_stake > 0 else 0.0
+    state = "collect_more_low_price_tick_evidence"
+    if not filtered:
+        state = "no_low_price_tick_rows"
+    elif len(validation_positives) < min_validation_positives:
+        state = "no_positive_validation_low_price_tick_examples"
+    elif validation_roi <= 0:
+        state = "low_price_tick_validation_roi_not_positive"
+    else:
+        state = "low_price_tick_validation_candidate"
+    return {
+        "state": state,
+        "rows": len(filtered),
+        "positive_rows": len(positives),
+        "validation_rows": len(validation),
+        "validation_positive_rows": len(validation_positives),
+        "roi": pnl / stake if stake > 0 else 0.0,
+        "validation_roi": validation_roi,
+        "minimum_validation_positive_examples": min_validation_positives,
+        "top_positive_examples": validation_positives[:5] or positives[:5],
+    }
+
+
+def _low_price_tick_probe_enabled(
+    summary: dict[str, Any],
+    settings: dict[str, Any],
+    evidence: dict[str, Any],
+) -> tuple[bool, dict[str, Any]]:
     if not boolish(settings.get("low_price_tick_probe_enabled", True)):
         return False, {}
     diagnostics = summary.get("validation_rank_diagnostics") if isinstance(summary.get("validation_rank_diagnostics"), dict) else {}
@@ -177,7 +243,14 @@ def _low_price_tick_probe_enabled(summary: dict[str, Any], settings: dict[str, A
         and (safe_float(row.get("low_price_convexity")) or 0.0) >= min_low_price
         and (safe_float(row.get("roi")) or 0.0) > 0
     ]
-    return bool(qualifying), {"diagnostics": diagnostics, "missed_positive_examples": qualifying}
+    if qualifying:
+        return True, {"diagnostics": diagnostics, "missed_positive_examples": qualifying, "evidence": evidence}
+    evidence_ready = (
+        int(safe_float(evidence.get("validation_positive_rows")) or 0)
+        >= int(safe_float(evidence.get("minimum_validation_positive_examples")) or 1)
+        and (safe_float(evidence.get("validation_roi")) or 0.0) > 0
+    )
+    return evidence_ready, {"diagnostics": diagnostics, "missed_positive_examples": qualifying, "evidence": evidence}
 
 
 def _family_allowed_by_low_price_lesson(row: dict[str, Any], lesson: dict[str, Any], settings: dict[str, Any]) -> bool:
@@ -197,38 +270,25 @@ def _low_price_tick_probe_candidates(cfg: EngineConfig, settings: dict[str, Any]
     summary = read_json(cfg.output_root / OUTPUT_DIRNAME / MODEL_SUMMARY_JSON, default={}) or {}
     if not isinstance(summary, dict):
         return []
-    enabled, lesson = _low_price_tick_probe_enabled(summary, settings)
+    evidence = _low_price_tick_evidence(cfg, settings)
+    enabled, lesson = _low_price_tick_probe_enabled(summary, settings, evidence)
     if not enabled:
         return []
     max_candidates = int(safe_float(settings.get("low_price_tick_max_candidates")) or 4)
-    min_price = float(safe_float(settings.get("low_price_tick_min_ask")) or 0.01)
-    max_price = float(safe_float(settings.get("low_price_tick_max_ask")) or 0.15)
-    max_spread = float(safe_float(settings.get("low_price_tick_max_spread")) or 0.01)
-    max_relative_spread = float(safe_float(settings.get("low_price_tick_max_relative_spread")) or 0.25)
     min_one_cent_return = float(safe_float(settings.get("low_price_tick_min_one_cent_return")) or 0.03)
-    exclude_updown = boolish(settings.get("low_price_tick_exclude_updown", True))
     rows = build_latest_microstructure_features(cfg)
     candidates: list[dict[str, Any]] = []
     for row in rows:
+        if not _is_low_price_tick_row(row, settings):
+            continue
         ask = safe_float(row.get("entry_ask"))
         bid = safe_float(row.get("entry_bid"))
         spread = safe_float(row.get("entry_spread"))
         if spread is None and ask is not None and bid is not None:
             spread = max(0.0, ask - bid)
         relative_spread = _relative_spread(spread, ask)
-        if ask is None or bid is None or not min_price <= ask <= max_price or not 0 < bid < ask:
-            continue
-        if spread is None or spread > max_spread:
-            continue
-        if relative_spread is None or relative_spread > max_relative_spread:
-            continue
         one_cent_return = 0.01 / max(ask, 0.01)
-        if one_cent_return < min_one_cent_return:
-            continue
-        market_slug = str(row.get("market_slug") or "").lower()
-        if exclude_updown and ("updown" in market_slug or "up-or-down" in market_slug):
-            continue
-        if not _family_allowed_by_low_price_lesson(row, lesson, settings):
+        if not _family_allowed_by_low_price_lesson(row, lesson, settings) and evidence.get("state") != "low_price_tick_validation_candidate":
             continue
         signal_cohort = f"low_price_tick_probe|{row.get('family') or 'unknown'}|one_cent_return>={min_one_cent_return:.2f}"
         candidates.append(
@@ -270,6 +330,27 @@ def _low_price_tick_probe_candidates(cfg: EngineConfig, settings: dict[str, Any]
         reverse=True,
     )
     return candidates[:max_candidates]
+
+
+def _low_price_tick_probe_state(cfg: EngineConfig, settings: dict[str, Any]) -> dict[str, Any]:
+    summary = read_json(cfg.output_root / OUTPUT_DIRNAME / MODEL_SUMMARY_JSON, default={}) or {}
+    if not isinstance(summary, dict):
+        summary = {}
+    evidence = _low_price_tick_evidence(cfg, settings)
+    enabled, lesson = _low_price_tick_probe_enabled(summary, settings, evidence)
+    missed = lesson.get("missed_positive_examples") if isinstance(lesson.get("missed_positive_examples"), list) else []
+    return {
+        **evidence,
+        "enabled_by_governance": bool(enabled),
+        "diagnostic_missed_positive_examples": len(missed),
+        "gate_reason": (
+            "model_missed_low_price_positive_examples"
+            if missed
+            else "validated_low_price_tick_evidence"
+            if enabled
+            else evidence.get("state", "collect_more_low_price_tick_evidence")
+        ),
+    }
 
 
 def _query_family_prefixes(query: str) -> list[str]:
@@ -552,6 +633,7 @@ def build_price_action_paper_signals(cfg: EngineConfig) -> dict[str, Any]:
     approved = _approved_cohorts(cohort_rows)
     approved_microstructure = _approved_feedback_microstructure_cohorts(cfg)
     paper_confirmation = _paper_confirmation_candidates(cfg, settings)
+    low_price_tick_evidence = _low_price_tick_probe_state(cfg, settings)
     low_price_tick = _low_price_tick_probe_candidates(cfg, settings)
     by_token = _entry_index(entries)
 
@@ -677,6 +759,7 @@ def build_price_action_paper_signals(cfg: EngineConfig) -> dict[str, Any]:
         "approved_price_action_cohorts": len(approved),
         "approved_microstructure_cohorts": len(approved_microstructure),
         "paper_confirmation_candidates": len(paper_confirmation),
+        "low_price_tick_probe_evidence": low_price_tick_evidence,
         "low_price_tick_probe_candidates": len(low_price_tick),
         "low_price_tick_probe_signals": sum(
             1

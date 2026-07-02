@@ -1430,3 +1430,46 @@ def test_dashboard_treats_fallback_sharp_odds_as_usable_anchor_input(tmp_path):
 
     assert anchors["status"] == "usable"
     assert anchors["sharp_odds_fetch"].get("blocker") is None
+
+
+def test_dashboard_surfaces_closing_line_value(tmp_path):
+    cfg = _config(tmp_path)
+    write_json(
+        cfg.governance_root / "closing_line_value.json",
+        {
+            "positions_scored": 5,
+            "final_line_positions": 4,
+            "mean_final_clv": 0.021,
+            "beat_close_rate": 0.8,
+            "positive_clv_cohorts": ["sports_other|worldcup"],
+            "governance_note": "CLV is diagnostic forward evidence for promotion review; it does not authorise paper or live trading by itself.",
+            "cohorts": [
+                {
+                    "signal_cohort": "sports_other|worldcup",
+                    "positions": 5,
+                    "final_positions": 4,
+                    "mean_final_clv": 0.021,
+                    "final_clv_ci_low": 0.004,
+                    "final_clv_ci_high": 0.039,
+                    "clv_evidence": "insufficient_clv_evidence",
+                }
+            ],
+        },
+    )
+    result = render_dashboard(cfg)
+    assert result["status"] == "ok"
+    data = read_json(result["dashboard_data"])
+    assert data["closing_line_value"]["positions_scored"] == 5
+    assert data["closing_line_value"]["positive_clv_cohorts"] == ["sports_other|worldcup"]
+    html = Path(result["dashboard_file"]).read_text(encoding="utf-8")
+    assert "Closing-line value (CLV)" in html
+    assert 'id="closingLine"' in html
+
+
+def test_dashboard_handles_missing_closing_line_artifact(tmp_path):
+    cfg = _config(tmp_path)
+    result = render_dashboard(cfg)
+    assert result["status"] == "ok"
+    data = read_json(result["dashboard_data"])
+    assert data["closing_line_value"] == {}
+    assert "No CLV evidence collected yet" in Path(result["dashboard_file"]).read_text(encoding="utf-8")

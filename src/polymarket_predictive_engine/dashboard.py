@@ -133,6 +133,7 @@ HTML = """<!doctype html>
   <section><h2>Microstructure edge lab</h2><div id="microstructureLab"></div></section>
   <section><h2>Price-action prediction model</h2><div id="priceActionModel"></div></section>
   <section><h2>Quant research stack</h2><div id="quantResearch"></div></section>
+  <section><h2>Closing-line value (CLV)</h2><div id="closingLine"></div></section>
   <section><h2>Price-action feedback loop</h2><div id="priceActionFeedback"></div></section>
   <div class="two">
     <section><h2>Promotion readiness</h2><div id="promotionReadiness"></div></section>
@@ -250,6 +251,7 @@ async function load() {
     const microstructure = data.price_action_microstructure || {};
     const priceActionModel = data.price_action_model || {};
     const quantResearch = data.quant_research_status || {};
+    const closingLine = data.closing_line_value || {};
     const priceActionPaper = data.price_action_paper_signals || {};
     const currentHistScan = priceActionPaper.current_historical_analogue_scan || {};
     const historicalBreadthScan = priceActionPaper.historical_breadth_scan || {};
@@ -1121,6 +1123,24 @@ async function load() {
       ["Code","code_module", v=>longText(v, 140)],
       ["Implemented","implemented"]
     ]);
+    document.getElementById("closingLine").innerHTML = (Number(closingLine.positions_scored ?? 0) === 0)
+      ? `<p>No CLV evidence collected yet. CLV asks whether the market line moved toward shadow entries after they opened; it is diagnostic forward evidence and never a promotion trigger by itself.</p>`
+      : facts([
+        ["Scored positions", closingLine.positions_scored],
+        ["Final (pre-close) lines", closingLine.final_line_positions],
+        ["Mean final CLV", closingLine.mean_final_clv],
+        ["Beat-close rate", closingLine.beat_close_rate],
+        ["Positive CLV cohorts", closingLine.positive_clv_cohorts, joinText],
+        ["Governance note", closingLine.governance_note, v=>longText(v, 220)]
+      ]) + `<div style="height:12px"></div><h3>Cohorts</h3>` + table(closingLine.cohorts || [], [
+        ["Cohort","signal_cohort", v=>longText(v, 140)],
+        ["Positions","positions"],
+        ["Final n","final_positions"],
+        ["Mean final CLV","mean_final_clv"],
+        ["CI low","final_clv_ci_low"],
+        ["CI high","final_clv_ci_high"],
+        ["Evidence","clv_evidence", v=>longText(v, 120)]
+      ]);
     document.getElementById("priceActionFeedback").innerHTML = facts([
       ["Learning state", priceActionFeedback.learning_state],
       ["Next action", priceActionFeedback.next_action, v=>longText(v, 220)],
@@ -3500,6 +3520,9 @@ def render_dashboard(cfg: EngineConfig, latest_report: dict[str, Any] | None = N
     quant_research_status = read_json(governance / "quant_research_status.json", default={}) or {}
     if not isinstance(quant_research_status, dict):
         quant_research_status = {}
+    closing_line_value = read_json(governance / "closing_line_value.json", default={}) or {}
+    if not isinstance(closing_line_value, dict):
+        closing_line_value = {}
     websocket_summary = read_json(cfg.output_root / "polymarket_websocket" / "websocket_summary.json", default={}) or {}
     if not isinstance(websocket_summary, dict):
         websocket_summary = {}
@@ -3604,6 +3627,7 @@ def render_dashboard(cfg: EngineConfig, latest_report: dict[str, Any] | None = N
         "price_action_feedback": price_action_feedback,
         "paper_round_trip_summary": paper_round_trip_summary,
         "quant_research_status": quant_research_status,
+        "closing_line_value": closing_line_value,
         "websocket_summary": websocket_summary,
         "websocket_feature_summary": websocket_feature_summary,
         "research_focus": research_focus,

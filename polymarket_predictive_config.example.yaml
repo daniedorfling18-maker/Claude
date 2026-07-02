@@ -270,6 +270,8 @@ price_action_scout:
   include_profit_sprint_targets: true
   include_current_positive_analogues: true
   current_positive_analogue_liquidity_proxy: 100
+  include_label_headroom_research_targets: true
+  max_label_headroom_research_entries_per_run: 8
   include_fast_feedback_liquidity: true
   target_actions:
   - SHADOW_LABEL_GATE

@@ -162,12 +162,14 @@ def _valid_book(row: dict[str, Any], settings: dict[str, Any]) -> bool:
     min_liquidity = float(safe_float(settings.get("min_liquidity")) or 100.0)
     max_spread = float(safe_float(settings.get("max_spread")) or 0.04)
     max_relative_spread = float(safe_float(settings.get("max_relative_spread")) or 0.15)
-    ask = safe_float(row.get("best_ask") or row.get("entry_price") or row.get("gamma_price"))
+    ask = safe_float(row.get("best_ask") or row.get("latest_ask") or row.get("entry_price") or row.get("gamma_price"))
     midpoint = safe_float(row.get("midpoint"))
     spread = safe_float(row.get("spread"))
     relative_spread = safe_float(row.get("relative_spread"))
     if relative_spread is None and spread is not None and midpoint is not None and midpoint > 0:
         relative_spread = spread / midpoint
+    if relative_spread is None and spread is not None and ask is not None and ask > 0:
+        relative_spread = spread / ask
     liquidity = safe_float(row.get("liquidity"))
     return bool(
         _token_id(row)
@@ -220,7 +222,12 @@ def _entry_within_current_policy(row: dict[str, Any], settings: dict[str, Any]) 
 def _entry_from_watchlist(row: dict[str, Any], *, source: str, signal_cohort: str, reason: str, settings: dict[str, Any]) -> dict[str, Any] | None:
     if not _valid_book(row, settings):
         return None
-    entry_price = safe_float(row.get("best_ask")) or safe_float(row.get("midpoint")) or safe_float(row.get("gamma_price"))
+    entry_price = (
+        safe_float(row.get("best_ask"))
+        or safe_float(row.get("latest_ask"))
+        or safe_float(row.get("midpoint"))
+        or safe_float(row.get("gamma_price"))
+    )
     if entry_price is None or entry_price <= 0:
         return None
     stake = float(safe_float(settings.get("stake_usdc")) or 10.0)
@@ -247,6 +254,25 @@ def _entry_from_watchlist(row: dict[str, Any], *, source: str, signal_cohort: st
         "time_to_close_hours": row.get("time_to_close_hours") or "",
         "candidate_reason": reason,
     }
+
+
+def _model_label_hurdle_return(cfg: EngineConfig) -> float:
+    settings = cfg.raw.get("price_action_model", {}) if isinstance(cfg.raw.get("price_action_model"), dict) else {}
+    explicit_return = safe_float(settings.get("minimum_profitable_return_label"))
+    if explicit_return is not None:
+        return max(0.0, float(explicit_return))
+    return max(
+        0.0,
+        float(safe_float(settings.get("minimum_expected_roi_to_trade")) or 0.03),
+        float(safe_float(settings.get("minimum_selected_validation_roi")) or 0.03),
+    )
+
+
+def _max_possible_return(row: dict[str, Any]) -> float:
+    ask = safe_float(row.get("best_ask") or row.get("latest_ask") or row.get("entry_price") or row.get("gamma_price"))
+    if ask is None or ask <= 0:
+        return 0.0
+    return max(0.0, 1.0 - ask) / ask
 
 
 def _profit_sprint_candidates(
@@ -300,6 +326,63 @@ def _fast_feedback_candidates(watchlist: list[dict[str, str]], settings: dict[st
         if entry:
             rows.append(entry)
     return rows
+
+
+def _label_headroom_research_candidates(cfg: EngineConfig, settings: dict[str, Any]) -> list[dict[str, Any]]:
+    """Track low-enough-ask research targets that can actually clear the label hurdle."""
+    if not _boolish(settings.get("include_label_headroom_research_targets", True)):
+        return []
+    max_rows = int(safe_float(settings.get("max_label_headroom_research_entries_per_run")) or 8)
+    if max_rows <= 0:
+        return []
+    min_return = _model_label_hurdle_return(cfg)
+    rows = read_csv_rows(cfg.governance_root / "websocket_liquidity_targets.csv")
+    candidates: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for row in rows:
+        token_id = _token_id(row)
+        if not token_id or token_id in seen:
+            continue
+        if not (
+            _boolish(row.get("feedback_broaden_target"))
+            or _boolish(row.get("research_liquidity_target"))
+            or _boolish(row.get("fast_feedback_liquidity_candidate"))
+        ):
+            continue
+        max_return = _max_possible_return(row)
+        if max_return < min_return:
+            continue
+        family = str(row.get("family") or row.get("category") or "unknown")
+        enriched = {
+            **row,
+            "target_action": "FORWARD_SHADOW_HEADROOM",
+            "target_score": max_return,
+            "edge_lower_bound": max_return,
+        }
+        entry = _entry_from_watchlist(
+            enriched,
+            source="label_headroom_research",
+            signal_cohort=f"price_action_scout|label_headroom|{family}",
+            reason=(
+                "label-headroom research target; shadow-only buy-at-ask / future-bid tracking"
+                f"; max_possible_return={max_return:.4f}; model_label_hurdle={min_return:.4f}"
+            ),
+            settings=settings,
+        )
+        if entry:
+            entry["target_score"] = max_return
+            entry["edge_lower_bound"] = max_return
+            candidates.append(entry)
+            seen.add(token_id)
+    candidates.sort(
+        key=lambda row: (
+            safe_float(row.get("target_score")) or 0.0,
+            safe_float(row.get("liquidity")) or 0.0,
+            -(safe_float(row.get("spread")) or 999.0),
+        ),
+        reverse=True,
+    )
+    return candidates[:max_rows]
 
 
 def _current_positive_analogue_candidates(cfg: EngineConfig, settings: dict[str, Any]) -> list[dict[str, Any]]:
@@ -396,6 +479,8 @@ def _merge_entries(existing: list[dict[str, str]], new_entries: list[dict[str, A
 def _source_priority(row: dict[str, Any]) -> int:
     source = str(row.get("source") or "")
     if source == "current_positive_analogue":
+        return 4
+    if source == "label_headroom_research":
         return 3
     if source == "profit_sprint_target":
         return 2
@@ -452,7 +537,9 @@ def build_price_action_scout(cfg: EngineConfig) -> dict[str, Any]:
     if _boolish(settings.get("include_profit_sprint_targets", True)):
         new_candidates.extend(_profit_sprint_candidates(profit_targets=profit_targets, watchlist_by_key=watchlist_by_key, settings=settings))
     current_positive_analogue_candidates = _current_positive_analogue_candidates(cfg, settings)
+    label_headroom_research_candidates = _label_headroom_research_candidates(cfg, settings)
     new_candidates.extend(current_positive_analogue_candidates)
+    new_candidates.extend(label_headroom_research_candidates)
     new_candidates.extend(_fast_feedback_candidates(watchlist, settings))
     new_candidates = _dedupe_candidates_by_token(new_candidates)
     new_candidates.sort(
@@ -511,6 +598,7 @@ def build_price_action_scout(cfg: EngineConfig) -> dict[str, Any]:
         "watchlist_rows": len(watchlist),
         "profit_sprint_target_rows": len(profit_targets),
         "current_positive_analogue_targets": len(current_positive_analogue_candidates),
+        "label_headroom_research_targets": len(label_headroom_research_candidates),
         "new_entries": added,
         "ledger_entries": len(entries),
         "policy_eligible_entries": len(policy_eligible_entries),

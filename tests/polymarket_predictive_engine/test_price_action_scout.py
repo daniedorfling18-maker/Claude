@@ -170,6 +170,61 @@ def test_price_action_scout_tracks_current_positive_analogue_targets(tmp_path):
     assert float(rows[0]["realized_pnl_usdc"]) == approx(1.0)
 
 
+def test_price_action_scout_tracks_label_headroom_research_targets(tmp_path):
+    cfg = _cfg(tmp_path)
+    write_csv(
+        cfg.governance_root / "websocket_liquidity_targets.csv",
+        [
+            {
+                "timestamp": "2026-06-30T10:00:00Z",
+                "market_slug": "will-fed-cut-rates-in-july",
+                "question": "Will the Fed cut rates in July?",
+                "outcome": "Yes",
+                "token_id": "headroom-token",
+                "family": "macro_rates",
+                "best_bid": "0.49",
+                "best_ask": "0.50",
+                "midpoint": "0.495",
+                "spread": "0.01",
+                "liquidity": "500",
+                "feedback_broaden_target": "True",
+            },
+            {
+                "timestamp": "2026-06-30T10:00:00Z",
+                "market_slug": "will-fed-cut-rates-by-50bps-in-july",
+                "question": "Will the Fed cut rates by 50 bps in July?",
+                "outcome": "Yes",
+                "token_id": "too-expensive-token",
+                "family": "macro_rates",
+                "best_bid": "0.98",
+                "best_ask": "0.99",
+                "midpoint": "0.985",
+                "spread": "0.01",
+                "liquidity": "500",
+                "feedback_broaden_target": "True",
+            },
+        ],
+    )
+    write_csv(
+        cfg.output_root / "polymarket_training" / "websocket_market_features.csv",
+        [_websocket_row("2026-06-30T10:05:00Z", "0.55", token="headroom-token")],
+    )
+
+    summary = build_price_action_scout(cfg)
+    entries = read_csv_rows(cfg.output_root / "polymarket_price_action" / "price_action_scout_entries.csv")
+    rows = read_csv_rows(cfg.output_root / "polymarket_price_action" / "price_action_scout_round_trip_evidence.csv")
+
+    assert summary["label_headroom_research_targets"] == 1
+    assert summary["new_entries"] == 1
+    assert entries[0]["source"] == "label_headroom_research"
+    assert entries[0]["signal_cohort"] == "price_action_scout|label_headroom|macro_rates"
+    assert entries[0]["target_action"] == "FORWARD_SHADOW_HEADROOM"
+    assert "model_label_hurdle" in entries[0]["candidate_reason"]
+    assert rows[0]["round_trip_status"] == "closed_take_profit"
+    assert float(rows[0]["exit_price"]) == approx(0.55)
+    assert float(rows[0]["realized_pnl_usdc"]) == approx(1.0)
+
+
 def test_price_action_scout_rejects_spread_toxic_low_price_books(tmp_path):
     cfg = _cfg(tmp_path)
     write_csv(

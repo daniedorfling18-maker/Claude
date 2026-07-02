@@ -802,6 +802,43 @@ def _heavy_future_running(*futures: Future[Any] | None) -> bool:
     return any(future is not None and not future.done() for future in futures)
 
 
+def _future_running_seconds(
+    future: Future[Any] | None,
+    *,
+    started_ts: float,
+    now_ts: float,
+) -> float | None:
+    if future is None or future.done() or started_ts <= 0:
+        return None
+    return max(0.0, float(now_ts) - float(started_ts))
+
+
+def _prediction_blocks_governance(
+    prediction_future: Future[Any] | None,
+    *,
+    prediction_started_ts: float,
+    max_block_seconds: float,
+    now_ts: float,
+) -> bool:
+    """Return whether a running prediction job may still delay governance.
+
+    The full prediction path can be useful, but it is not allowed to starve
+    model/governance refresh indefinitely. Once the prediction lane has run
+    longer than the configured block window, governance is allowed to start on
+    its own executor while websocket marking continues.
+    """
+    running_seconds = _future_running_seconds(
+        prediction_future,
+        started_ts=prediction_started_ts,
+        now_ts=now_ts,
+    )
+    if running_seconds is None:
+        return False
+    if max_block_seconds <= 0:
+        return False
+    return running_seconds < max_block_seconds
+
+
 def _governance_refresh_due(
     *,
     now_ts: float,
@@ -876,6 +913,12 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--prediction-cycle-seconds", type=float, default=15.0, help="How often to run the full paper-cycle prediction path; websocket marking still updates every tick.")
     parser.add_argument("--discovery-cycle-seconds", type=float, default=300.0, help="Periodically refresh scanner discovery so websocket assets follow changing markets.")
     parser.add_argument("--governance-refresh-seconds", type=float, default=120.0, help="How often to refresh quant governance, price-action model evidence, feedback, and paper-signal learning artefacts.")
+    parser.add_argument(
+        "--prediction-governance-block-seconds",
+        type=float,
+        default=180.0,
+        help="Maximum time a running prediction job may delay governance refresh; 0 means prediction never blocks governance.",
+    )
     parser.add_argument("--paper-source", choices=["raw_snapshot", "websocket"], default="raw_snapshot")
     parser.add_argument("--optimize-model", action="store_true", help="Allow the slower discovery lane to run scheduled model optimisation.")
     return parser
@@ -901,6 +944,7 @@ def main(argv: list[str] | None = None) -> int:
     prediction_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="polymarket-prediction")
     prediction_future: Future[dict[str, Any]] | None = None
     prediction_started_at_utc = ""
+    prediction_started_ts = 0.0
     last_prediction_summary: dict[str, Any] = {"status": "not_started", "source": args.paper_source}
     governance_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="polymarket-governance")
     governance_future: Future[dict[str, Any]] | None = None
@@ -965,6 +1009,7 @@ def main(argv: list[str] | None = None) -> int:
                     finally:
                         prediction_future = None
                         prediction_started_at_utc = ""
+                        prediction_started_ts = 0.0
                         if last_prediction_summary.get("mode") == "degraded_websocket_prediction_refresh":
                             next_degraded_prediction_cycle = time.time() + _degraded_prediction_cycle_seconds(
                                 cfg,
@@ -1053,6 +1098,17 @@ def main(argv: list[str] | None = None) -> int:
 
                 full_cycle = dict(last_prediction_summary)
                 now_ts = time.time()
+                prediction_running_seconds = _future_running_seconds(
+                    prediction_future,
+                    started_ts=prediction_started_ts,
+                    now_ts=now_ts,
+                )
+                prediction_blocks_governance = _prediction_blocks_governance(
+                    prediction_future,
+                    prediction_started_ts=prediction_started_ts,
+                    max_block_seconds=args.prediction_governance_block_seconds,
+                    now_ts=now_ts,
+                )
                 governance_due_now = _governance_refresh_due(
                     now_ts=now_ts,
                     cycle_seconds=args.governance_refresh_seconds,
@@ -1074,6 +1130,7 @@ def main(argv: list[str] | None = None) -> int:
                         degraded_prediction_enabled = _degraded_prediction_refresh_enabled(cfg, resource_guard)
                         if degraded_prediction_enabled and time.time() >= next_degraded_prediction_cycle:
                             prediction_started_at_utc = now_utc()
+                            prediction_started_ts = time.time()
                             prediction_future = prediction_executor.submit(
                                 _run_degraded_prediction_cycle,
                                 config_path=config_path,
@@ -1110,6 +1167,7 @@ def main(argv: list[str] | None = None) -> int:
                             next_prediction_cycle = time.time() + args.prediction_cycle_seconds
                     else:
                         prediction_started_at_utc = now_utc()
+                        prediction_started_ts = time.time()
                         prediction_future = prediction_executor.submit(
                             _run_prediction_cycle,
                             config_path=config_path,
@@ -1120,6 +1178,17 @@ def main(argv: list[str] | None = None) -> int:
                             paper_source=args.paper_source,
                             started_at_utc=prediction_started_at_utc,
                         )
+                prediction_running_seconds = _future_running_seconds(
+                    prediction_future,
+                    started_ts=prediction_started_ts,
+                    now_ts=time.time(),
+                )
+                prediction_blocks_governance = _prediction_blocks_governance(
+                    prediction_future,
+                    prediction_started_ts=prediction_started_ts,
+                    max_block_seconds=args.prediction_governance_block_seconds,
+                    now_ts=time.time(),
+                )
                 next_discovery_in_seconds = None
                 if next_discovery_cycle != float("inf"):
                     next_discovery_in_seconds = max(0.0, round(next_discovery_cycle - time.time(), 3))
@@ -1150,6 +1219,14 @@ def main(argv: list[str] | None = None) -> int:
                     "effective_max_assets": effective_max_assets,
                     "websocket_seconds": args.websocket_seconds,
                     "prediction_cycle_seconds": args.prediction_cycle_seconds,
+                    "prediction_governance_block_seconds": args.prediction_governance_block_seconds,
+                    "prediction_running_seconds": prediction_running_seconds,
+                    "prediction_blocks_governance": prediction_blocks_governance,
+                    "prediction_no_longer_blocks_governance": bool(
+                        prediction_future is not None
+                        and not prediction_future.done()
+                        and not prediction_blocks_governance
+                    ),
                     "degraded_prediction_cycle_seconds": _degraded_prediction_cycle_seconds(cfg, args.prediction_cycle_seconds),
                     "degraded_prediction_next_due_in_seconds": next_degraded_prediction_in_seconds,
                     "asset_sources": {source: list(token_sources.values()).count(source) for source in sorted(set(token_sources.values()))},
@@ -1224,6 +1301,12 @@ def main(argv: list[str] | None = None) -> int:
                     next_refresh=next_governance_refresh,
                     governance_future=governance_future,
                 )
+                prediction_blocks_governance = _prediction_blocks_governance(
+                    prediction_future,
+                    prediction_started_ts=prediction_started_ts,
+                    max_block_seconds=args.prediction_governance_block_seconds,
+                    now_ts=time.time(),
+                )
                 if (
                     time.time() >= next_discovery_cycle
                     and discovery_future is None
@@ -1270,7 +1353,8 @@ def main(argv: list[str] | None = None) -> int:
                 if (
                     time.time() >= next_governance_refresh
                     and governance_future is None
-                    and not _heavy_future_running(discovery_future, prediction_future)
+                    and not _heavy_future_running(discovery_future)
+                    and not prediction_blocks_governance
                 ):
                     if resource_guard.get("skip_cycle"):
                         last_governance_summary = {

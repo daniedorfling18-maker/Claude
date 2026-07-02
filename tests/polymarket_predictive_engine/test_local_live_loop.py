@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import csv
 import importlib.util
+from concurrent.futures import Future
 from pathlib import Path
 
 from polymarket_predictive_engine.config import EngineConfig
@@ -494,6 +495,31 @@ def test_prediction_cycle_status_is_background_friendly():
     assert done["status"] == "ran"
     assert done["predictions"] == 4
     assert done["equity"] == 1000.5
+
+
+def test_stale_prediction_future_does_not_block_governance_forever():
+    loop = _load_loop_module()
+    future: Future[dict[str, object]] = Future()
+    assert future.set_running_or_notify_cancel()
+
+    assert loop._prediction_blocks_governance(
+        future,
+        prediction_started_ts=100.0,
+        max_block_seconds=90.0,
+        now_ts=150.0,
+    )
+    assert not loop._prediction_blocks_governance(
+        future,
+        prediction_started_ts=100.0,
+        max_block_seconds=90.0,
+        now_ts=191.0,
+    )
+    assert not loop._prediction_blocks_governance(
+        future,
+        prediction_started_ts=100.0,
+        max_block_seconds=0.0,
+        now_ts=101.0,
+    )
 
 
 def test_high_memory_guard_reduces_effective_websocket_assets():

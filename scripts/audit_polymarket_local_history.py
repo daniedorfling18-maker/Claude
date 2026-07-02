@@ -21,7 +21,7 @@ if str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))
 
 from polymarket_predictive_engine.config import load_config  # noqa: E402
-from polymarket_predictive_engine.utils import now_utc, parse_timestamp, safe_float, write_csv, write_json  # noqa: E402
+from polymarket_predictive_engine.utils import now_utc, parse_timestamp, read_json, safe_float, write_csv, write_json  # noqa: E402
 
 
 def _read_csv(path: Path) -> list[dict[str, Any]]:
@@ -234,6 +234,23 @@ def _paper_decision(payload: dict[str, Any]) -> dict[str, Any]:
     return {"paper_allowed": True, "reason": "local family-specific evidence gates are satisfied", "warnings": warnings}
 
 
+def _closing_line_summary(governance_root: Path) -> dict[str, Any]:
+    artifact = read_json(governance_root / "closing_line_value.json", default={}) or {}
+    if not isinstance(artifact, dict):
+        artifact = {}
+    cohorts = artifact.get("cohorts") or []
+    if not isinstance(cohorts, list):
+        cohorts = []
+    final_cohorts = [row for row in cohorts if isinstance(row, dict) and (row.get("final_positions") or 0) > 0]
+    return {
+        "positions_scored": artifact.get("positions_scored", 0),
+        "final_line_positions": artifact.get("final_line_positions", 0),
+        "mean_final_clv": artifact.get("mean_final_clv"),
+        "positive_clv_cohorts": artifact.get("positive_clv_cohorts", []),
+        "cohorts": final_cohorts,
+    }
+
+
 def _write_markdown(path: Path, payload: dict[str, Any]) -> None:
     lines = [
         "# Polymarket Local History Audit",
@@ -284,6 +301,26 @@ def _write_markdown(path: Path, payload: dict[str, Any]) -> None:
             f"{row['category']} | {row['market_slug']} | {row['outcome']} | "
             f"edge_lower_bound={row['edge_lower_bound']} | candidate={row['alpha_trade_candidate']}"
         )
+    lines.extend(["", "## Closing-line value (CLV)", ""])
+    clv = payload.get("closing_line_value") or {}
+    if not clv.get("positions_scored"):
+        lines.append("No CLV evidence collected yet.")
+    else:
+        lines.append(
+            f"- Scored positions: {clv['positions_scored']} | final lines: {clv['final_line_positions']} | "
+            f"mean final CLV: {clv['mean_final_clv']}"
+        )
+        for row in clv.get("cohorts", []):
+            lines.append(
+                "- "
+                f"{row.get('signal_cohort')} — n_final={row.get('final_positions')}, "
+                f"mean_final_clv={row.get('mean_final_clv')}, "
+                f"CI=[{row.get('final_clv_ci_low')}, {row.get('final_clv_ci_high')}], "
+                f"evidence={row.get('clv_evidence')}"
+            )
+        positive = clv.get("positive_clv_cohorts") or []
+        if positive:
+            lines.append(f"- Positive CLV cohorts (diagnostic, not a promotion trigger): {', '.join(positive)}")
     lines.append("")
     path.write_text("\n".join(lines), encoding="utf-8")
 
@@ -327,6 +364,9 @@ def run(config_path: str = "polymarket_predictive_config.example.yaml") -> dict[
         "family_viability": _family_summary(family_rows),
     }
     payload["paper_decision"] = _paper_decision(payload)
+    # CLV is report-only context added after the paper decision on purpose: it
+    # must never add or remove blockers here (promotion use is governed by WP4).
+    payload["closing_line_value"] = _closing_line_summary(governance_root)
     governance_root.mkdir(parents=True, exist_ok=True)
     write_json(governance_root / "local_history_audit_summary.json", payload)
     write_csv(governance_root / "local_history_shadow_cohorts.csv", shadow_cohorts)

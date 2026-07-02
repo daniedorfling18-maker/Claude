@@ -40,6 +40,13 @@ def test_refresh_governance_rebuilds_price_action_paper_signals_before_audit(tmp
         lambda _cfg: order.append("paper_round_trip")
         or {"closed_round_trips": 2, "positive_round_trips": 1, "realized_pnl_usdc": 3.5},
     )
+    real_closing_line = refresh_module.build_closing_line_value
+
+    def _closing_line(_cfg):
+        order.append("closing_line_value")
+        return real_closing_line(_cfg)
+
+    monkeypatch.setattr(refresh_module, "build_closing_line_value", _closing_line)
     monkeypatch.setattr(
         refresh_module,
         "train_price_action_model",
@@ -108,6 +115,12 @@ def test_refresh_governance_rebuilds_price_action_paper_signals_before_audit(tmp
     assert result["refreshed"]["paper_round_trip_evidence"] is True
     assert result["paper_round_trip_closed_trades"] == 2
     assert result["paper_round_trip_positive_trades"] == 1
+    assert order.index("closing_line_value") < order.index("promotion_review")
+    assert order.index("closing_line_value") < order.index("dashboard")
+    assert result["refreshed"]["closing_line_value"] is True
+    assert result["closing_line_positions_scored"] == 0
+    assert result["closing_line_positive_cohorts"] == []
+    assert Path(cfg.governance_root / "closing_line_value.json").exists()
     assert Path(cfg.governance_root / "governance_refresh.json").exists()
 
 

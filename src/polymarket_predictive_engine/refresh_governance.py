@@ -4,6 +4,7 @@ import argparse
 import json
 from typing import Any
 
+from .closing_line import build_closing_line_value
 from .config import EngineConfig, load_config
 from .cohort_validation import write_signal_cohort_pnl
 from .dashboard import render_dashboard
@@ -47,6 +48,7 @@ def refresh_governance(cfg: EngineConfig, *, refresh_dashboard: bool = True) -> 
     trading settings.
     """
     paper_round_trip = build_paper_round_trip_evidence(cfg)
+    closing_line = build_closing_line_value(cfg)
 
     con = connect_db(cfg.database_path)
     try:
@@ -81,6 +83,7 @@ def refresh_governance(cfg: EngineConfig, *, refresh_dashboard: bool = True) -> 
             "price_action_scout": True,
             "price_action_microstructure": True,
             "paper_round_trip_evidence": True,
+            "closing_line_value": True,
             "price_action_feedback": True,
             "price_action_model": True,
             "price_action_paper_signals": True,
@@ -102,6 +105,10 @@ def refresh_governance(cfg: EngineConfig, *, refresh_dashboard: bool = True) -> 
         "paper_round_trip_closed_trades": paper_round_trip.get("closed_round_trips"),
         "paper_round_trip_positive_trades": paper_round_trip.get("positive_round_trips"),
         "paper_round_trip_realized_pnl_usdc": paper_round_trip.get("realized_pnl_usdc"),
+        "closing_line_positions_scored": closing_line.get("positions_scored"),
+        "closing_line_final_positions": closing_line.get("final_line_positions"),
+        "closing_line_mean_final_clv": closing_line.get("mean_final_clv"),
+        "closing_line_positive_cohorts": closing_line.get("positive_clv_cohorts", []),
         "price_action_feedback_state": price_action_feedback.get("learning_state"),
         "price_action_model_decision": price_action_model.get("decision"),
         "price_action_model_promotion_ready": price_action_model.get("promotion_ready"),

@@ -116,7 +116,7 @@ def classify_market_family(row: dict[str, Any]) -> str:
         if "total" in text:
             return "tennis_tennis_total"
         return "tennis_tennis"
-    if any(term in text for term in ("lol", "league of legends", "cs2", "counter strike", "valorant", "dota", "rainbow six", "esports", "e sports")):
+    if any(term in text for term in ("lol", "league of legends", "cs2", "counter strike", "valorant", "dota", "rainbow six", "honor of kings", "talent gaming", "esports", "e sports")) or " hok " in f" {text} ":
         return "esports_match"
 
     if any(term in text for term in ("openai", "anthropic", "chatgpt", "claude", "grok", "gemini", "best ai model", "ai model", "xai")):

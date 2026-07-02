@@ -81,6 +81,14 @@ def test_unknown_liquid_event_families_are_resolved_for_research_buckets():
         (
             {
                 "category": "unknown",
+                "market_slug": "hok-ttg-tesa-2026-07-02-game-handicap-home-1pt5",
+                "question": "Game Handicap: TES.A (-1.5) vs Talent Gaming (+1.5)",
+            },
+            "esports_match",
+        ),
+        (
+            {
+                "category": "unknown",
                 "market_slug": "will-microsoft-be-the-largest-company-in-the-world-by-market-cap-on-december-31",
                 "question": "Will Microsoft be the largest company in the world by market cap on December 31?",
             },

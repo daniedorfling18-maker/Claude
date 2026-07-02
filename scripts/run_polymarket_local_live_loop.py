@@ -802,6 +802,16 @@ def _heavy_future_running(*futures: Future[Any] | None) -> bool:
     return any(future is not None and not future.done() for future in futures)
 
 
+def _governance_refresh_due(
+    *,
+    now_ts: float,
+    cycle_seconds: float,
+    next_refresh: float,
+    governance_future: Future[Any] | None,
+) -> bool:
+    return cycle_seconds > 0 and now_ts >= next_refresh and governance_future is None
+
+
 def _degraded_discovery_refresh(cfg, guard: dict[str, Any], *, reason: str) -> dict[str, Any]:
     """Run the cheapest edge-relevant discovery lane while heavy discovery is guarded off.
 
@@ -1042,6 +1052,13 @@ def main(argv: list[str] | None = None) -> int:
                 ingest = ingest_websocket_features_into_ledger(cfg, features)
 
                 full_cycle = dict(last_prediction_summary)
+                now_ts = time.time()
+                governance_due_now = _governance_refresh_due(
+                    now_ts=now_ts,
+                    cycle_seconds=args.governance_refresh_seconds,
+                    next_refresh=next_governance_refresh,
+                    governance_future=governance_future,
+                )
                 if prediction_future is not None and not prediction_future.done():
                     full_cycle = _running_prediction_summary(
                         paper_source=args.paper_source,
@@ -1049,7 +1066,8 @@ def main(argv: list[str] | None = None) -> int:
                     )
                 elif (
                     args.prediction_cycle_seconds > 0
-                    and time.time() >= next_prediction_cycle
+                    and now_ts >= next_prediction_cycle
+                    and not governance_due_now
                     and not _heavy_future_running(discovery_future, governance_future)
                 ):
                     if resource_guard.get("skip_prediction_cycle"):
@@ -1200,9 +1218,16 @@ def main(argv: list[str] | None = None) -> int:
                     f"equity={broker.get('equity', 'n/a')} dashboard=updated",
                     flush=True,
                 )
+                governance_due_now = _governance_refresh_due(
+                    now_ts=time.time(),
+                    cycle_seconds=args.governance_refresh_seconds,
+                    next_refresh=next_governance_refresh,
+                    governance_future=governance_future,
+                )
                 if (
                     time.time() >= next_discovery_cycle
                     and discovery_future is None
+                    and not governance_due_now
                     and not _heavy_future_running(prediction_future, governance_future)
                 ):
                     discovery_running_iteration = discovery_iteration + 1

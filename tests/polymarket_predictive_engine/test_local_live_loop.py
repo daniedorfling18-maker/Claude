@@ -421,6 +421,7 @@ def test_refresh_fast_updown_snapshot_fetches_positive_cohort_slots(tmp_path, mo
 def test_discovery_scheduler_uses_its_own_iteration_counter(monkeypatch, tmp_path):
     loop = _load_loop_module()
     seen: list[int] = []
+    liquidity_modes: list[str] = []
     cfg = EngineConfig(
         raw={"paths": {"output_root": str(tmp_path / "outputs")}},
         path=tmp_path / "cfg.yaml",
@@ -437,6 +438,11 @@ def test_discovery_scheduler_uses_its_own_iteration_counter(monkeypatch, tmp_pat
     monkeypatch.setattr(loop.discovery_loop, "_scheduled", lambda *_args, **_kwargs: False)
     monkeypatch.setattr(loop.discovery_loop, "scan_once", fake_scan_once)
     monkeypatch.setattr(loop, "refresh_fast_updown_snapshot", lambda _cfg: {"status": "ok", "tokens": 2})
+    monkeypatch.setattr(
+        loop.discovery_loop,
+        "run_liquidity_discovery",
+        lambda _cfg, *, mode: liquidity_modes.append(mode) or {"status": "computed", "mode": mode, "tokens_scanned": 9},
+    )
     monkeypatch.setattr(loop.discovery_loop, "ingest_scanner_snapshot", lambda *_args, **_kwargs: {"status": "ok"})
     monkeypatch.setattr(loop.discovery_loop, "_run_settlement_only_cycle", lambda _cfg: {"status": "settlement_only"})
 
@@ -456,6 +462,8 @@ def test_discovery_scheduler_uses_its_own_iteration_counter(monkeypatch, tmp_pat
     assert seen == [1, 2]
     assert discovery_iteration == 2
     assert summary["scan"]["tokens"] == 7
+    assert liquidity_modes == ["targeted-evidence", "targeted-evidence"]
+    assert summary["liquidity_discovery"]["mode"] == "targeted-evidence"
     assert summary["scanner_iteration"] == 4
     assert summary["mode"] == "background_lightweight_discovery"
 
@@ -526,6 +534,33 @@ def test_stale_prediction_future_does_not_block_governance_forever():
         started_ts=100.0,
         max_block_seconds=90.0,
         now_ts=191.0,
+    )
+
+
+def test_stale_background_jobs_do_not_block_discovery_forever():
+    loop = _load_loop_module()
+    prediction_future: Future[dict[str, object]] = Future()
+    governance_future: Future[dict[str, object]] = Future()
+    assert prediction_future.set_running_or_notify_cancel()
+    assert governance_future.set_running_or_notify_cancel()
+
+    assert loop._background_jobs_block_discovery(
+        prediction_future=prediction_future,
+        prediction_started_ts=100.0,
+        prediction_block_seconds=90.0,
+        governance_future=governance_future,
+        governance_started_ts=120.0,
+        governance_block_seconds=90.0,
+        now_ts=150.0,
+    )
+    assert not loop._background_jobs_block_discovery(
+        prediction_future=prediction_future,
+        prediction_started_ts=100.0,
+        prediction_block_seconds=90.0,
+        governance_future=governance_future,
+        governance_started_ts=120.0,
+        governance_block_seconds=90.0,
+        now_ts=211.0,
     )
 
 

@@ -418,6 +418,103 @@ def _is_low_price_tick_row(row: dict[str, Any], settings: dict[str, Any]) -> boo
     return True
 
 
+def _current_historical_analogue_scan(
+    cfg: EngineConfig,
+    settings: dict[str, Any],
+    *,
+    analogue_stats: dict[str, dict[str, Any]] | None = None,
+    latest_rows: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    """Score every current executable bid/ask row against historical analogues.
+
+    This is an opportunity-coverage diagnostic, not a trade authoriser. A row
+    can match a profitable ask-to-future-bid analogue and still need the
+    separate cohort/paper-confirmation governance gate before it becomes a
+    paper signal.
+    """
+    stats = analogue_stats if analogue_stats is not None else _historical_analogue_stats(cfg, settings)
+    rows = latest_rows if latest_rows is not None else build_latest_microstructure_features(cfg)
+    blocked_by_state: dict[str, int] = {}
+    family_counts: dict[str, int] = {}
+    positive_by_family: dict[str, int] = {}
+    positive_preview: list[dict[str, Any]] = []
+    positive_keys: set[str] = set()
+    positive_matches = 0
+    blocked = 0
+
+    for row in rows:
+        family = str(row.get("family") or row.get("category") or "unknown").strip() or "unknown"
+        family_counts[family] = family_counts.get(family, 0) + 1
+        analogue = _historical_analogue_for_row(row, stats, settings)
+        state = str(analogue.get("state") or "unknown")
+        if state == "positive_historical_analogue":
+            positive_matches += 1
+            positive_by_family[family] = positive_by_family.get(family, 0) + 1
+            key = str(analogue.get("key") or "")
+            if key:
+                positive_keys.add(key)
+            positive_preview.append(
+                {
+                    "market_slug": row.get("market_slug", ""),
+                    "question": row.get("question", ""),
+                    "family": family,
+                    "outcome": row.get("outcome", ""),
+                    "token_id": _token_id(row),
+                    "latest_bid": row.get("entry_bid", ""),
+                    "latest_ask": row.get("entry_ask", ""),
+                    "latest_spread": row.get("entry_spread", ""),
+                    "historical_analogue_key": key,
+                    "historical_analogue_validation_rows": analogue.get("validation_rows", 0),
+                    "historical_analogue_positive_rows": analogue.get("positive_rows", 0),
+                    "historical_analogue_validation_roi": analogue.get("validation_roi", 0.0),
+                    "historical_analogue_win_rate": analogue.get("win_rate", 0.0),
+                }
+            )
+        else:
+            blocked += 1
+            blocked_by_state[state] = blocked_by_state.get(state, 0) + 1
+
+    positive_preview.sort(
+        key=lambda item: (
+            safe_float(item.get("historical_analogue_validation_roi")) or -999.0,
+            safe_float(item.get("historical_analogue_positive_rows")) or 0.0,
+            -(safe_float(item.get("latest_spread")) or 999.0),
+        ),
+        reverse=True,
+    )
+    positive_validation_buckets = sum(
+        1
+        for analogue in stats.values()
+        if str(analogue.get("state") or "") == "positive_historical_analogue"
+    )
+    if not rows:
+        state = "no_current_bid_ask_rows"
+        next_action = "Collect fresh websocket bid/ask rows before evaluating current repricing opportunities."
+    elif positive_matches:
+        state = "current_positive_historical_analogue_available"
+        next_action = "Route these current positive analogues through cohort governance and paper-confirmation before risking capital."
+    else:
+        state = "no_current_positive_historical_analogue"
+        next_action = "Broaden live market coverage and keep collecting bid/ask variation; current rows do not match profitable validation buckets."
+    return {
+        "state": state,
+        "decision_use": "Shows whether the current live universe contains historically profitable buy-at-ask / sell-at-bid setups after spread.",
+        "next_action": next_action,
+        "current_rows": len(rows),
+        "positive_matches": positive_matches,
+        "blocked": blocked,
+        "blocked_by_state": dict(sorted(blocked_by_state.items())),
+        "family_counts": dict(sorted(family_counts.items())),
+        "positive_by_family": dict(sorted(positive_by_family.items())),
+        "validation_buckets": len(stats),
+        "positive_validation_buckets": positive_validation_buckets,
+        "positive_historical_analogue_keys": len(positive_keys),
+        "positive_preview": positive_preview[:10],
+        "paper_only": True,
+        "trade_authorisation": "diagnostic_only_requires_governed_signal",
+    }
+
+
 def _low_price_tick_evidence(cfg: EngineConfig, settings: dict[str, Any]) -> dict[str, Any]:
     rows = read_csv_rows(cfg.output_root / OUTPUT_DIRNAME / MICROSTRUCTURE_TRADE_EVENTS_FILE)
     filtered = [row for row in rows if _is_low_price_tick_row(row, settings)]
@@ -911,6 +1008,11 @@ def build_price_action_paper_signals(cfg: EngineConfig) -> dict[str, Any]:
     max_relative_spread = float(safe_float(settings.get("max_relative_spread")) or 0.15)
     require_confirmation_history = boolish(settings.get("paper_confirmation_require_positive_historical_analogue", True))
     historical_analogue_stats = _historical_analogue_stats(cfg, settings)
+    current_historical_analogue_scan = _current_historical_analogue_scan(
+        cfg,
+        settings,
+        analogue_stats=historical_analogue_stats,
+    )
 
     for row in round_trip_rows:
         cohort_name = _cohort_name(row)
@@ -1073,6 +1175,7 @@ def build_price_action_paper_signals(cfg: EngineConfig) -> dict[str, Any]:
         "paper_confirmation_candidates": len(paper_confirmation),
         "paper_confirmation_current_candidates": len(paper_confirmation_current),
         "paper_confirmation_current_historical_analogue": paper_confirmation_current_analogue,
+        "current_historical_analogue_scan": current_historical_analogue_scan,
         "low_price_tick_probe_evidence": low_price_tick_evidence,
         "low_price_tick_probe_candidates": len(low_price_tick),
         "low_price_tick_probe_signals": sum(

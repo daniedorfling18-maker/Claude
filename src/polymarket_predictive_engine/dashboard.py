@@ -251,6 +251,7 @@ async function load() {
     const priceActionModel = data.price_action_model || {};
     const quantResearch = data.quant_research_status || {};
     const priceActionPaper = data.price_action_paper_signals || {};
+    const currentHistScan = priceActionPaper.current_historical_analogue_scan || {};
     const priceActionFeedback = data.price_action_feedback || {};
     const goalPlan = data.paper_profit_goal_plan || {};
     const priceActionGoal = goalPlan.price_action_goal_state || {};
@@ -450,6 +451,8 @@ async function load() {
       ["Validation gap", validationGapActive ? validationGap.reason || "Needs positive validation examples." : "No active positive-validation gap.", v=>longText(v, 260)],
       ["Cohort transfer", priceActionModel.cohort_transfer?.reason || "No active transfer blocker reported.", v=>longText(v, 260)],
       ["Paper bridge", priceActionPaper.decision, v=>longText(v, 220)],
+      ["Current analogue scan", `${currentHistScan.current_rows ?? 0} rows / ${currentHistScan.positive_matches ?? 0} positive matches`, v=>longText(v, 180)],
+      ["Analogue blocker", currentHistScan.state || "-", v=>longText(v, 220)],
       ["World Cup layer", (data.worldcup_validation_status || {}).status, v=>longText(v, 180)],
       ["Collect next", collectQueries, joinText],
       ["Learning verdict", decisionSummary.learning_verdict || "-", v=>longText(v, 260)]
@@ -463,6 +466,7 @@ async function load() {
       ["Validation gap", validationGapActive ? validationGap.reason || "Needs positive validation examples." : "No active positive-validation gap.", v=>longText(v, 260)],
       ["Collect next", validationGap.collection_queries || priceActionGoal.collection_queries || priceActionFeedback.collection_queries, joinText],
       ["Paper signals", `${approvedSignals} approved / ${priceActionPaper.rejections ?? 0} rejected`],
+      ["Live historical scan", `${currentHistScan.current_rows ?? 0} current rows / ${currentHistScan.positive_matches ?? 0} positive`, v=>longText(v, 180)],
       ["Main blocker", diag.main_blocker || priceActionPaper.decision || goalPlan.main_gap, v=>longText(v, 260)]
     ]) + `<div class="alertGrid">${oversightAlerts.join("")}</div>`;
     document.getElementById("actualTarget").innerHTML = facts([
@@ -785,6 +789,12 @@ async function load() {
       ["Paper-confirm hist why", priceActionPaper.paper_confirmation_current_historical_blockers, v=>longText(v, 180)],
       ["Paper-confirm current", priceActionPaper.paper_confirmation_current_candidates],
       ["Paper-confirm signals", priceActionPaper.paper_confirmation_signals],
+      ["All-current analogue state", currentHistScan.state, v=>longText(v, 180)],
+      ["All-current rows", currentHistScan.current_rows],
+      ["All-current positive", currentHistScan.positive_matches],
+      ["All-current blocked", currentHistScan.blocked],
+      ["All-current blocked why", currentHistScan.blocked_by_state, v=>longText(v, 220)],
+      ["All-current positive families", currentHistScan.positive_by_family, v=>longText(v, 180)],
       ["Low-price evidence", priceActionPaper.low_price_tick_probe_evidence_state],
       ["Low-price val +", priceActionPaper.low_price_tick_validation_positive_rows],
       ["Low-price val ROI", priceActionPaper.low_price_tick_validation_roi, v=>fmtNum(Number(v) * 100, 2) + "%"],
@@ -798,6 +808,17 @@ async function load() {
       ["Broker generated", priceActionPaper.broker_generated_at_utc],
       ["Broker freshness reason", priceActionPaper.broker_refresh_reason, v=>longText(v, 220)],
       ["Microstructure current rows", priceActionPaper.source_microstructure_current_rows]
+    ]) + `<div style="height:12px"></div><h3>Current historical analogue matches</h3>` + table(currentHistScan.positive_preview || [], [
+      ["Family","family"],
+      ["Market","market_slug", v=>longText(v, 140)],
+      ["Outcome","outcome"],
+      ["Bid","latest_bid", v=>fmtNum(v,4)],
+      ["Ask","latest_ask", v=>fmtNum(v,4)],
+      ["Spread","latest_spread", v=>fmtNum(v,4)],
+      ["Val rows","historical_analogue_validation_rows"],
+      ["Val +","historical_analogue_positive_rows"],
+      ["Val ROI","historical_analogue_validation_roi", v=>fmtNum(Number(v) * 100, 2) + "%"],
+      ["Win rate","historical_analogue_win_rate", v=>fmtNum(Number(v) * 100, 1) + "%"]
     ]) + `<div style="height:12px"></div><h3>Paper-confirmation probe exit watch</h3>` + facts([
       ["Status", probeExitWatch.status],
       ["Open probes", probeExitWatch.open_confirmation_probes],
@@ -2157,6 +2178,9 @@ def _price_action_paper_signal_status(cfg: EngineConfig) -> dict[str, Any]:
     paper_confirmation_current_historical = summary.get("paper_confirmation_current_historical_analogue")
     if not isinstance(paper_confirmation_current_historical, dict):
         paper_confirmation_current_historical = {}
+    current_historical_analogue_scan = summary.get("current_historical_analogue_scan")
+    if not isinstance(current_historical_analogue_scan, dict):
+        current_historical_analogue_scan = {}
     return {
         "status": summary.get("status") or ("missing" if not signals and not rejections else "computed"),
         "generated_at_utc": summary.get("generated_at_utc"),
@@ -2178,6 +2202,13 @@ def _price_action_paper_signal_status(cfg: EngineConfig) -> dict[str, Any]:
         "paper_confirmation_current_fresh_matches": paper_confirmation_current_historical.get("fresh_matches"),
         "paper_confirmation_current_historical_blocked": paper_confirmation_current_historical.get("blocked"),
         "paper_confirmation_current_historical_blockers": paper_confirmation_current_historical.get("blocked_by_state"),
+        "current_historical_analogue_scan": current_historical_analogue_scan,
+        "current_historical_analogue_state": current_historical_analogue_scan.get("state"),
+        "current_historical_analogue_rows": current_historical_analogue_scan.get("current_rows"),
+        "current_historical_analogue_positive_matches": current_historical_analogue_scan.get("positive_matches"),
+        "current_historical_analogue_blocked": current_historical_analogue_scan.get("blocked"),
+        "current_historical_analogue_blockers": current_historical_analogue_scan.get("blocked_by_state"),
+        "current_historical_analogue_positive_by_family": current_historical_analogue_scan.get("positive_by_family"),
         "paper_confirmation_signals": confirmation_signal_count,
         "summary_paper_confirmation_signals": summary.get("paper_confirmation_signals"),
         "low_price_tick_probe_evidence": low_price_tick_evidence,
@@ -2927,6 +2958,11 @@ def _decision_useful_summary(
     selected_roi = safe_float(selected_model.get("selected_roi"))
     selected_profit_factor = safe_float(selected_model.get("selected_profit_factor"))
     selected_trades = safe_float(selected_model.get("selected_trades"))
+    current_historical_scan = (
+        price_action_paper_signals.get("current_historical_analogue_scan")
+        if isinstance(price_action_paper_signals.get("current_historical_analogue_scan"), dict)
+        else {}
+    )
     model_key_metric = (
         f"selected {int(selected_trades or 0)}; ROI {selected_roi * 100:.2f}%; PF {selected_profit_factor:.2f}"
         if selected_roi is not None and selected_profit_factor is not None
@@ -2971,6 +3007,17 @@ def _decision_useful_summary(
                 f"{len((websocket_summary.get('target_family_counts') or {}))} target families"
             ),
             "blocker_or_next": "Collect " + ", ".join(collect_now) if collect_now else "No priority collection query is active.",
+        },
+        {
+            "lane": "Current historical analogue scan",
+            "state": current_historical_scan.get("state") or "unknown",
+            "decision_use": "Checks all current live bid/ask rows against historical buy-at-ask / sell-at-bid validation buckets.",
+            "key_metric": (
+                f"{current_historical_scan.get('current_rows', 0)} rows; "
+                f"{current_historical_scan.get('positive_matches', 0)} positive matches"
+            ),
+            "blocker_or_next": current_historical_scan.get("next_action")
+            or "Collect more current bid/ask variation across liquid families.",
         },
         {
             "lane": "World Cup validation",

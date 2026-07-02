@@ -1,7 +1,4 @@
 commence_time,home_team,away_team,locked_pick
-2026-07-01T16:00:00Z,England,DR Congo,2-1
-2026-07-01T20:00:00Z,Belgium,Senegal,2-1
-2026-07-02T00:00:00Z,United States,Bosnia & Herzegovina,2-0
 2026-07-02T19:00:00Z,Spain,Austria,2-0
 2026-07-02T23:00:00Z,Portugal,Croatia,2-0
 2026-07-03T03:00:00Z,Switzerland,Algeria,2-0
@@ -10,4 +7,6 @@ commence_time,home_team,away_team,locked_pick
 2026-07-04T01:30:00Z,Colombia,Ghana,2-0
 2026-07-04T17:00:00Z,Canada,Morocco,0-2
 2026-07-04T21:00:00Z,Paraguay,France,0-2
-2026-07-05T20:00:00Z,Brazil,Norway,2-0
+2026-07-05T20:00:00Z,Brazil,Norway,2-1
+2026-07-06T00:00:00Z,Mexico,England,0-1
+2026-07-07T00:00:00Z,United States,Belgium,2-1

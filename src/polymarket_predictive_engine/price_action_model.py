@@ -20,7 +20,7 @@ SUMMARY_JSON = "price_action_model_summary.json"
 VALIDATION_FILE = "price_action_model_validation_predictions.csv"
 CURRENT_FILE = "price_action_model_current_candidates.csv"
 MODEL_ARTIFACT = "price_action_model_v2.json"
-MODEL_VERSION = "pm-price-action-bid-reprice-logit-v2"
+MODEL_VERSION = "pm-price-action-bid-reprice-logit-v3"
 
 FEATURE_NAMES = [
     "entry_bid",
@@ -36,6 +36,14 @@ FEATURE_NAMES = [
     "net_buy_events",
     "net_buy_size",
     "current_price_change_size",
+    "positive_bid_move_abs",
+    "negative_bid_move_abs",
+    "positive_buy_pressure",
+    "negative_buy_pressure",
+    "chase_pressure",
+    "spread_penalized_chase",
+    "high_ask_chase",
+    "btc_chase_pressure",
     "is_crypto",
     "is_sports",
     "is_esports",
@@ -80,6 +88,8 @@ CURRENT_FIELDS = [
     "bid_move_abs",
     "mid_move_abs",
     "net_buy_events",
+    "chase_pressure",
+    "spread_penalized_chase",
     "predicted_reprice_probability",
     "predicted_expected_roi",
     "minimum_probability_to_trade",
@@ -186,6 +196,46 @@ def _event_price(row: dict[str, Any], event_key: str, current_key: str | None = 
     return 0.0 if value is None else float(value)
 
 
+def _anti_chase_metrics(row: dict[str, Any], *, current: bool = False) -> dict[str, float]:
+    entry_ask = _event_price(row, "entry_ask", "latest_ask" if current else None)
+    entry_spread = _event_price(row, "entry_spread", "latest_spread" if current else None)
+    relative_spread = _event_price(row, "relative_spread")
+    if relative_spread == 0.0 and entry_spread > 0 and entry_ask > 0:
+        relative_spread = entry_spread / entry_ask
+    flags = _family_flags(row)
+    bid_move = _event_price(row, "bid_move_abs")
+    mid_move = _event_price(row, "mid_move_abs")
+    ask_move = _event_price(row, "ask_move_abs")
+    net_buy_events = _event_price(row, "net_buy_events")
+    net_buy_size = _event_price(row, "net_buy_size")
+    current_price_change_size = _event_price(row, "current_price_change_size")
+    positive_bid_move = max(0.0, bid_move)
+    negative_bid_move = max(0.0, -bid_move)
+    buy_pressure = max(0.0, net_buy_events) + max(0.0, net_buy_size) / 1000.0 + max(0.0, current_price_change_size) / 1000.0
+    sell_pressure = max(0.0, -net_buy_events) + max(0.0, -net_buy_size) / 1000.0
+    upward_move = max(0.0, bid_move, mid_move, ask_move)
+    chase_pressure = upward_move * buy_pressure
+    spread_penalized_chase = chase_pressure * (1.0 + max(0.0, relative_spread))
+    high_ask_chase = max(0.0, entry_ask - 0.60) * chase_pressure
+    btc_chase_pressure = flags["is_crypto_btc"] * chase_pressure
+    return {
+        "bid_move_abs": bid_move,
+        "mid_move_abs": mid_move,
+        "ask_move_abs": ask_move,
+        "net_buy_events": net_buy_events,
+        "net_buy_size": net_buy_size,
+        "current_price_change_size": current_price_change_size,
+        "positive_bid_move_abs": positive_bid_move,
+        "negative_bid_move_abs": negative_bid_move,
+        "positive_buy_pressure": buy_pressure,
+        "negative_buy_pressure": sell_pressure,
+        "chase_pressure": chase_pressure,
+        "spread_penalized_chase": spread_penalized_chase,
+        "high_ask_chase": high_ask_chase,
+        "btc_chase_pressure": btc_chase_pressure,
+    }
+
+
 def _feature_vector(row: dict[str, Any], *, current: bool = False) -> list[float]:
     entry_bid = _event_price(row, "entry_bid", "latest_bid" if current else None)
     entry_ask = _event_price(row, "entry_ask", "latest_ask" if current else None)
@@ -195,6 +245,7 @@ def _feature_vector(row: dict[str, Any], *, current: bool = False) -> list[float
     if relative_spread == 0.0 and entry_spread > 0 and entry_ask > 0:
         relative_spread = entry_spread / entry_ask
     flags = _family_flags(row)
+    anti_chase = _anti_chase_metrics(row, current=current)
     values = {
         "entry_bid": entry_bid,
         "entry_ask": entry_ask,
@@ -202,13 +253,21 @@ def _feature_vector(row: dict[str, Any], *, current: bool = False) -> list[float
         "entry_spread": entry_spread,
         "relative_spread": relative_spread,
         "distance_to_half": abs(entry_midpoint - 0.5) if entry_midpoint > 0 else 0.0,
-        "bid_move_abs": _event_price(row, "bid_move_abs"),
-        "mid_move_abs": _event_price(row, "mid_move_abs"),
-        "ask_move_abs": _event_price(row, "ask_move_abs"),
+        "bid_move_abs": anti_chase["bid_move_abs"],
+        "mid_move_abs": anti_chase["mid_move_abs"],
+        "ask_move_abs": anti_chase["ask_move_abs"],
         "spread_change": _event_price(row, "spread_change"),
-        "net_buy_events": _event_price(row, "net_buy_events"),
-        "net_buy_size": _event_price(row, "net_buy_size"),
-        "current_price_change_size": _event_price(row, "current_price_change_size"),
+        "net_buy_events": anti_chase["net_buy_events"],
+        "net_buy_size": anti_chase["net_buy_size"],
+        "current_price_change_size": anti_chase["current_price_change_size"],
+        "positive_bid_move_abs": anti_chase["positive_bid_move_abs"],
+        "negative_bid_move_abs": anti_chase["negative_bid_move_abs"],
+        "positive_buy_pressure": anti_chase["positive_buy_pressure"],
+        "negative_buy_pressure": anti_chase["negative_buy_pressure"],
+        "chase_pressure": anti_chase["chase_pressure"],
+        "spread_penalized_chase": anti_chase["spread_penalized_chase"],
+        "high_ask_chase": anti_chase["high_ask_chase"],
+        "btc_chase_pressure": anti_chase["btc_chase_pressure"],
         **flags,
     }
     return [float(values[name]) for name in FEATURE_NAMES]
@@ -1101,6 +1160,7 @@ def _validation_rows(rows: list[dict[str, Any]], probabilities: list[float], thr
 
 
 def _validation_example(row: dict[str, Any], probability: float, rank: int, selected: bool) -> dict[str, Any]:
+    anti_chase = _anti_chase_metrics(row)
     return {
         "rank": rank,
         "market_slug": row.get("market_slug", ""),
@@ -1113,6 +1173,9 @@ def _validation_example(row: dict[str, Any], probability: float, rank: int, sele
         "target": int(row.get("_y") or 0),
         "roi": float(row.get("_roi") or 0.0),
         "pnl_usdc": float(row.get("_pnl_usdc") or 0.0),
+        "chase_pressure": anti_chase["chase_pressure"],
+        "spread_penalized_chase": anti_chase["spread_penalized_chase"],
+        "btc_chase_pressure": anti_chase["btc_chase_pressure"],
         "selected_by_model": selected,
     }
 
@@ -1233,6 +1296,7 @@ def _current_candidate_rows(
         predicted_expected_roi = _expected_roi(probability, expectancy)
         if not validation_pass or probability < probability_threshold or predicted_expected_roi < minimum_expected_roi:
             continue
+        anti_chase = _anti_chase_metrics(row, current=True)
         out.append(
             {
                 "token_id": row.get("token_id", ""),
@@ -1246,6 +1310,8 @@ def _current_candidate_rows(
                 "bid_move_abs": row.get("bid_move_abs", ""),
                 "mid_move_abs": row.get("mid_move_abs", ""),
                 "net_buy_events": row.get("net_buy_events", ""),
+                "chase_pressure": anti_chase["chase_pressure"],
+                "spread_penalized_chase": anti_chase["spread_penalized_chase"],
                 "predicted_reprice_probability": probability,
                 "predicted_expected_roi": predicted_expected_roi,
                 "minimum_probability_to_trade": probability_threshold,

@@ -20,7 +20,7 @@ SUMMARY_JSON = "price_action_model_summary.json"
 VALIDATION_FILE = "price_action_model_validation_predictions.csv"
 CURRENT_FILE = "price_action_model_current_candidates.csv"
 MODEL_ARTIFACT = "price_action_model_v2.json"
-MODEL_VERSION = "pm-price-action-bid-reprice-logit-v4"
+MODEL_VERSION = "pm-price-action-bid-reprice-logit-v5"
 
 FEATURE_NAMES = [
     "entry_bid",
@@ -28,6 +28,9 @@ FEATURE_NAMES = [
     "entry_midpoint",
     "entry_spread",
     "relative_spread",
+    "instant_exit_return",
+    "break_even_bid_move",
+    "one_tick_net_after_spread",
     "distance_to_half",
     "bid_move_abs",
     "mid_move_abs",
@@ -74,6 +77,9 @@ VALIDATION_FIELDS = [
     "exit_bid",
     "future_bid_edge",
     "future_bid_return",
+    "instant_exit_return",
+    "break_even_bid_move",
+    "one_tick_net_after_spread",
     "pnl_usdc",
     "roi",
     "target",
@@ -90,6 +96,9 @@ CURRENT_FIELDS = [
     "latest_bid",
     "latest_ask",
     "latest_spread",
+    "instant_exit_return",
+    "break_even_bid_move",
+    "one_tick_net_after_spread",
     "bid_move_abs",
     "mid_move_abs",
     "net_buy_events",
@@ -203,6 +212,7 @@ def _event_price(row: dict[str, Any], event_key: str, current_key: str | None = 
 
 
 def _anti_chase_metrics(row: dict[str, Any], *, current: bool = False) -> dict[str, float]:
+    entry_bid = _event_price(row, "entry_bid", "latest_bid" if current else None)
     entry_ask = _event_price(row, "entry_ask", "latest_ask" if current else None)
     entry_spread = _event_price(row, "entry_spread", "latest_spread" if current else None)
     relative_spread = _event_price(row, "relative_spread")
@@ -228,6 +238,9 @@ def _anti_chase_metrics(row: dict[str, Any], *, current: bool = False) -> dict[s
     low_price_convexity = max(0.0, 0.15 - entry_ask)
     inverse_entry_ask = 1.0 / safe_entry_ask
     one_cent_return = 0.01 / safe_entry_ask
+    instant_exit_return = (entry_bid - entry_ask) / safe_entry_ask if entry_ask > 0 and entry_bid > 0 else 0.0
+    break_even_bid_move = entry_spread / safe_entry_ask if entry_spread > 0 else max(0.0, -instant_exit_return)
+    one_tick_net_after_spread = one_cent_return - break_even_bid_move
     low_price_upward_move = low_price_convexity * upward_move
     low_price_btc = low_price_convexity * flags["is_crypto_btc"]
     return {
@@ -248,6 +261,9 @@ def _anti_chase_metrics(row: dict[str, Any], *, current: bool = False) -> dict[s
         "low_price_convexity": low_price_convexity,
         "inverse_entry_ask": inverse_entry_ask,
         "one_cent_return": one_cent_return,
+        "instant_exit_return": instant_exit_return,
+        "break_even_bid_move": break_even_bid_move,
+        "one_tick_net_after_spread": one_tick_net_after_spread,
         "low_price_upward_move": low_price_upward_move,
         "low_price_btc": low_price_btc,
     }
@@ -269,6 +285,9 @@ def _feature_vector(row: dict[str, Any], *, current: bool = False) -> list[float
         "entry_midpoint": entry_midpoint,
         "entry_spread": entry_spread,
         "relative_spread": relative_spread,
+        "instant_exit_return": anti_chase["instant_exit_return"],
+        "break_even_bid_move": anti_chase["break_even_bid_move"],
+        "one_tick_net_after_spread": anti_chase["one_tick_net_after_spread"],
         "distance_to_half": abs(entry_midpoint - 0.5) if entry_midpoint > 0 else 0.0,
         "bid_move_abs": anti_chase["bid_move_abs"],
         "mid_move_abs": anti_chase["mid_move_abs"],
@@ -858,12 +877,55 @@ def _rank_policy_threshold(
     return base
 
 
-def _trade_metrics(rows: list[dict[str, Any]], probabilities: list[float] | None = None, threshold: float | None = None) -> dict[str, Any]:
-    selected = [
-        (row, probabilities[idx] if probabilities is not None else 1.0)
+def _selection_key(row: dict[str, Any]) -> tuple[str, str, str]:
+    token = str(row.get("token_id") or "").strip().lower()
+    market = str(row.get("market_slug") or "").strip().lower()
+    outcome = str(row.get("outcome") or row.get("selection") or "").strip().lower()
+    if token or market or outcome:
+        return token, market, outcome
+    return (str(id(row)), "", "")
+
+
+def _selected_pairs(
+    rows: list[dict[str, Any]],
+    probabilities: list[float],
+    threshold: float,
+    settings: dict[str, Any] | None = None,
+) -> tuple[list[tuple[int, dict[str, Any], float]], int]:
+    raw = [
+        (idx, row, float(probabilities[idx]))
         for idx, row in enumerate(rows)
-        if threshold is None or (probabilities is not None and probabilities[idx] >= threshold)
+        if idx < len(probabilities) and float(probabilities[idx]) >= threshold
     ]
+    if not _bool_setting(settings or {}, "dedupe_selected_by_token", True):
+        return raw, len(raw)
+    selected: dict[tuple[str, str, str], tuple[int, dict[str, Any], float]] = {}
+    for item in raw:
+        idx, row, probability = item
+        key = _selection_key(row)
+        current = selected.get(key)
+        if current is None:
+            selected[key] = item
+            continue
+        current_time = str(current[1].get("entry_time_utc") or current[1].get("latest_time_utc") or "")
+        row_time = str(row.get("entry_time_utc") or row.get("latest_time_utc") or "")
+        if (probability, row_time, -idx) > (current[2], current_time, -current[0]):
+            selected[key] = item
+    return sorted(selected.values(), key=lambda item: item[2], reverse=True), len(raw)
+
+
+def _trade_metrics(
+    rows: list[dict[str, Any]],
+    probabilities: list[float] | None = None,
+    threshold: float | None = None,
+    settings: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    if threshold is None or probabilities is None:
+        selected = [(row, probabilities[idx] if probabilities is not None else 1.0) for idx, row in enumerate(rows)]
+        raw_trades = len(selected)
+    else:
+        pairs, raw_trades = _selected_pairs(rows, probabilities, threshold, settings)
+        selected = [(row, probability) for _, row, probability in pairs]
     stake = sum(float(row.get("_stake_usdc") or 0.0) for row, _ in selected)
     pnls = [float(row.get("_pnl_usdc") or 0.0) for row, _ in selected]
     rois = [float(row.get("_roi") or 0.0) for row, _ in selected]
@@ -880,6 +942,8 @@ def _trade_metrics(rows: list[dict[str, Any]], probabilities: list[float] | None
     return {
         "threshold": threshold,
         "trades": len(selected),
+        "raw_trades": raw_trades,
+        "deduped_trades": raw_trades - len(selected),
         "stake_usdc": stake,
         "pnl_usdc": pnl,
         "roi": pnl / stake if stake > 0 else 0.0,
@@ -895,11 +959,13 @@ def _trade_metrics(rows: list[dict[str, Any]], probabilities: list[float] | None
     }
 
 
-def _selected_metrics(rows: list[dict[str, Any]], probabilities: list[float], threshold: float) -> dict[str, Any]:
-    metrics = _trade_metrics(rows, probabilities, threshold)
+def _selected_metrics(rows: list[dict[str, Any]], probabilities: list[float], threshold: float, settings: dict[str, Any] | None = None) -> dict[str, Any]:
+    metrics = _trade_metrics(rows, probabilities, threshold, settings)
     return {
         "threshold": threshold,
         "selected_trades": metrics["trades"],
+        "selected_raw_rows": metrics["raw_trades"],
+        "selected_deduped_rows": metrics["deduped_trades"],
         "selected_stake_usdc": metrics["stake_usdc"],
         "selected_pnl_usdc": metrics["pnl_usdc"],
         "selected_roi": metrics["roi"],
@@ -982,11 +1048,12 @@ def _market_clustered_roi_ci(
     *,
     iterations: int = 500,
     seed: int = 20260701,
+    settings: dict[str, Any] | None = None,
 ) -> list[float | None]:
     selected = [
         row
-        for row, probability in zip(rows, probabilities)
-        if probability >= threshold and float(row.get("_stake_usdc") or 0.0) > 0
+        for _, row, _ in _selected_pairs(rows, probabilities, threshold, settings)[0]
+        if float(row.get("_stake_usdc") or 0.0) > 0
     ]
     if not selected:
         return [None, None]
@@ -1011,18 +1078,18 @@ def _market_clustered_roi_ci(
     return [samples[int(0.025 * iterations)], samples[int(0.975 * iterations)]]
 
 
-def _selected_trade_returns(rows: list[dict[str, Any]], probabilities: list[float], threshold: float) -> list[float]:
+def _selected_trade_returns(rows: list[dict[str, Any]], probabilities: list[float], threshold: float, settings: dict[str, Any] | None = None) -> list[float]:
     selected = [
         row
-        for row, probability in zip(rows, probabilities)
-        if probability >= threshold and safe_float(row.get("_roi")) is not None
+        for _, row, _ in _selected_pairs(rows, probabilities, threshold, settings)[0]
+        if safe_float(row.get("_roi")) is not None
     ]
     selected.sort(key=lambda row: str(row.get("entry_time_utc") or ""))
     return [float(row.get("_roi") or 0.0) for row in selected]
 
 
-def _selected_risk_report(rows: list[dict[str, Any]], probabilities: list[float], threshold: float) -> dict[str, Any]:
-    returns = _selected_trade_returns(rows, probabilities, threshold)
+def _selected_risk_report(rows: list[dict[str, Any]], probabilities: list[float], threshold: float, settings: dict[str, Any] | None = None) -> dict[str, Any]:
+    returns = _selected_trade_returns(rows, probabilities, threshold, settings)
     report = performance_report(returns, periods_per_year=365)
     return {
         "return_unit": "per_selected_trade_roi",
@@ -1046,7 +1113,7 @@ def _choose_threshold_from_train(
     threshold_candidates = _threshold_candidate_grid(settings, probabilities, minimum_train_trades=min_trades)
     for candidate in threshold_candidates:
         threshold = float(candidate["threshold"])
-        metrics = _selected_metrics(rows, probabilities, threshold)
+        metrics = _selected_metrics(rows, probabilities, threshold, settings)
         win_gate_passed, win_gate_reason = _win_rate_gate(
             metrics,
             min_win_rate=min_win_rate,
@@ -1082,7 +1149,7 @@ def _choose_threshold_from_train(
             chosen = min(candidates, key=lambda row: abs(float(row["threshold"]) - fallback))
             chosen = {**chosen, "train_threshold_pass": False}
         else:
-            chosen_metrics = _selected_metrics(rows, probabilities, fallback)
+            chosen_metrics = _selected_metrics(rows, probabilities, fallback, settings)
             win_gate_passed, win_gate_reason = _win_rate_gate(
                 chosen_metrics,
                 min_win_rate=min_win_rate,
@@ -1137,8 +1204,8 @@ def _choose_threshold_from_train(
     }
 
 
-def _roi_expectancy_components(rows: list[dict[str, Any]], probabilities: list[float], threshold: float) -> dict[str, float]:
-    selected = [row for row, probability in zip(rows, probabilities) if probability >= threshold]
+def _roi_expectancy_components(rows: list[dict[str, Any]], probabilities: list[float], threshold: float, settings: dict[str, Any] | None = None) -> dict[str, float]:
+    selected = [row for _, row, _ in _selected_pairs(rows, probabilities, threshold, settings)[0]]
     wins = [float(row.get("_roi") or 0.0) for row in selected if float(row.get("_pnl_usdc") or 0.0) > 0]
     losses = [float(row.get("_roi") or 0.0) for row in selected if float(row.get("_pnl_usdc") or 0.0) <= 0]
     all_wins = [float(row.get("_roi") or 0.0) for row in rows if float(row.get("_pnl_usdc") or 0.0) > 0]
@@ -1155,9 +1222,11 @@ def _expected_roi(probability: float, expectancy: dict[str, float]) -> float:
     return probability * expectancy["avg_win_roi"] + (1.0 - probability) * expectancy["avg_loss_roi"]
 
 
-def _validation_rows(rows: list[dict[str, Any]], probabilities: list[float], threshold: float) -> list[dict[str, Any]]:
+def _validation_rows(rows: list[dict[str, Any]], probabilities: list[float], threshold: float, settings: dict[str, Any] | None = None) -> list[dict[str, Any]]:
     out: list[dict[str, Any]] = []
-    for row, probability in zip(rows, probabilities):
+    selected_indices = {idx for idx, _, _ in _selected_pairs(rows, probabilities, threshold, settings)[0]}
+    for idx, (row, probability) in enumerate(zip(rows, probabilities)):
+        anti_chase = _anti_chase_metrics(row)
         out.append(
             {
                 "split": row.get("split", "validation"),
@@ -1170,11 +1239,14 @@ def _validation_rows(rows: list[dict[str, Any]], probabilities: list[float], thr
                 "exit_bid": row.get("exit_bid", ""),
                 "future_bid_edge": row["_future_bid_edge"],
                 "future_bid_return": row["_future_bid_return"],
+                "instant_exit_return": anti_chase["instant_exit_return"],
+                "break_even_bid_move": anti_chase["break_even_bid_move"],
+                "one_tick_net_after_spread": anti_chase["one_tick_net_after_spread"],
                 "pnl_usdc": row["_pnl_usdc"],
                 "roi": row["_roi"],
                 "target": row["_y"],
                 "predicted_reprice_probability": probability,
-                "selected_by_model": probability >= threshold,
+                "selected_by_model": idx in selected_indices,
             }
         )
     out.sort(key=lambda item: safe_float(item.get("predicted_reprice_probability")) or 0.0, reverse=True)
@@ -1195,6 +1267,9 @@ def _validation_example(row: dict[str, Any], probability: float, rank: int, sele
         "target": int(row.get("_y") or 0),
         "roi": float(row.get("_roi") or 0.0),
         "pnl_usdc": float(row.get("_pnl_usdc") or 0.0),
+        "instant_exit_return": anti_chase["instant_exit_return"],
+        "break_even_bid_move": anti_chase["break_even_bid_move"],
+        "one_tick_net_after_spread": anti_chase["one_tick_net_after_spread"],
         "chase_pressure": anti_chase["chase_pressure"],
         "spread_penalized_chase": anti_chase["spread_penalized_chase"],
         "btc_chase_pressure": anti_chase["btc_chase_pressure"],
@@ -1210,20 +1285,27 @@ def _validation_rank_diagnostics(
     threshold: float,
     *,
     limit: int = 12,
+    settings: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     ranked = sorted(
         [(idx, row, float(probabilities[idx])) for idx, row in enumerate(rows)],
         key=lambda item: item[2],
         reverse=True,
     )
-    selected = [(rank, row, probability) for rank, (_, row, probability) in enumerate(ranked, start=1) if probability >= threshold]
+    selected_indices = {idx for idx, _, _ in _selected_pairs(rows, probabilities, threshold, settings)[0]}
+    raw_selected_rows = sum(1 for probability in probabilities if probability >= threshold)
+    selected = [
+        (rank, row, probability)
+        for rank, (idx, row, probability) in enumerate(ranked, start=1)
+        if idx in selected_indices
+    ]
     positives = [(rank, row, probability) for rank, (_, row, probability) in enumerate(ranked, start=1) if int(row.get("_y") or 0) == 1]
     selected_positives = [(rank, row, probability) for rank, row, probability in selected if int(row.get("_y") or 0) == 1]
     selected_pnl = sum(float(row.get("_pnl_usdc") or 0.0) for _, row, _ in selected)
     selected_stake = sum(float(row.get("_stake_usdc") or 0.0) for _, row, _ in selected)
     positive_ranks = [rank for rank, _, _ in positives]
     family: dict[str, dict[str, Any]] = {}
-    for rank, row, probability in ((rank, row, probability) for rank, (_, row, probability) in enumerate(ranked, start=1)):
+    for rank, (idx, row, probability) in enumerate(ranked, start=1):
         key = str(row.get("family") or "unknown")
         bucket = family.setdefault(
             key,
@@ -1251,6 +1333,8 @@ def _validation_rank_diagnostics(
             if bucket["best_positive_rank"] is None or rank < int(bucket["best_positive_rank"]):
                 bucket["best_positive_rank"] = rank
         if probability >= threshold:
+            if _bool_setting(settings or {}, "dedupe_selected_by_token", True) and idx not in selected_indices:
+                continue
             bucket["selected"] += 1
             bucket["selected_positive_targets"] += int(row.get("_y") or 0)
             bucket["selected_pnl_usdc"] += float(row.get("_pnl_usdc") or 0.0)
@@ -1286,6 +1370,8 @@ def _validation_rank_diagnostics(
         "threshold": threshold,
         "validation_rows": len(rows),
         "selected_rows": len(selected),
+        "raw_selected_rows": raw_selected_rows,
+        "deduped_selected_rows": max(0, raw_selected_rows - len(selected)),
         "selected_positive_targets": len(selected_positives),
         "selected_pnl_usdc": selected_pnl,
         "selected_roi": selected_pnl / selected_stake if selected_stake > 0 else 0.0,
@@ -1314,6 +1400,7 @@ def _current_candidate_rows(
     minimum_expected_roi: float,
     expectancy: dict[str, float],
     validation_pass: bool,
+    settings: dict[str, Any] | None = None,
 ) -> list[dict[str, Any]]:
     out: list[dict[str, Any]] = []
     for row, probability in zip(rows, probabilities):
@@ -1331,6 +1418,9 @@ def _current_candidate_rows(
                 "latest_bid": row.get("entry_bid", row.get("latest_bid", "")),
                 "latest_ask": row.get("entry_ask", row.get("latest_ask", "")),
                 "latest_spread": row.get("entry_spread", row.get("latest_spread", "")),
+                "instant_exit_return": anti_chase["instant_exit_return"],
+                "break_even_bid_move": anti_chase["break_even_bid_move"],
+                "one_tick_net_after_spread": anti_chase["one_tick_net_after_spread"],
                 "bid_move_abs": row.get("bid_move_abs", ""),
                 "mid_move_abs": row.get("mid_move_abs", ""),
                 "net_buy_events": row.get("net_buy_events", ""),
@@ -1344,6 +1434,15 @@ def _current_candidate_rows(
                 "shadow_only": True,
             }
         )
+    if _bool_setting(settings or {}, "dedupe_selected_by_token", True):
+        selected: dict[tuple[str, str, str], dict[str, Any]] = {}
+        for row in out:
+            key = _selection_key(row)
+            current = selected.get(key)
+            probability = safe_float(row.get("predicted_reprice_probability")) or 0.0
+            if current is None or probability > (safe_float(current.get("predicted_reprice_probability")) or 0.0):
+                selected[key] = row
+        out = list(selected.values())
     out.sort(key=lambda item: safe_float(item.get("predicted_reprice_probability")) or 0.0, reverse=True)
     return out
 
@@ -1447,15 +1546,16 @@ def train_price_action_model(cfg: EngineConfig) -> dict[str, Any]:
     targets = [int(row["_y"]) for row in validation_rows]
     train_positive_targets = sum(int(row["_y"]) for row in train_rows)
     validation_positive_targets = sum(targets)
-    selected = _selected_metrics(validation_rows, probabilities, validation_threshold)
+    selected = _selected_metrics(validation_rows, probabilities, validation_threshold, settings)
     buy_all = _trade_metrics(validation_rows)
     validation_roi_ci = _market_clustered_roi_ci(
         validation_rows,
         probabilities,
         validation_threshold,
         iterations=_int_setting(settings, "bootstrap_iterations", 500),
+        settings=settings,
     )
-    validation_risk = _selected_risk_report(validation_rows, probabilities, validation_threshold)
+    validation_risk = _selected_risk_report(validation_rows, probabilities, validation_threshold, settings)
     min_selected_trades = _int_setting(settings, "minimum_selected_validation_trades", 5)
     min_selected_roi = _float_setting(settings, "minimum_selected_validation_roi", 0.03)
     min_selected_win_rate = _float_setting(settings, "minimum_selected_validation_win_rate", 0.55)
@@ -1517,9 +1617,9 @@ def train_price_action_model(cfg: EngineConfig) -> dict[str, Any]:
     validation_pass = bool(
         not validation_blockers
     )
-    validation_predictions = _validation_rows(validation_rows, probabilities, validation_threshold)
-    validation_rank_diagnostics = _validation_rank_diagnostics(validation_rows, probabilities, validation_threshold)
-    expectancy = _roi_expectancy_components(train_rows, train_probabilities, threshold)
+    validation_predictions = _validation_rows(validation_rows, probabilities, validation_threshold, settings)
+    validation_rank_diagnostics = _validation_rank_diagnostics(validation_rows, probabilities, validation_threshold, settings=settings)
+    expectancy = _roi_expectancy_components(train_rows, train_probabilities, threshold, settings)
     minimum_expected_roi = _float_setting(settings, "minimum_expected_roi_to_trade", min_selected_roi)
     current_rows = build_latest_microstructure_features(cfg)
     current_probabilities = _predict_probabilities(current_rows, artifact, current=True)
@@ -1537,6 +1637,7 @@ def train_price_action_model(cfg: EngineConfig) -> dict[str, Any]:
         minimum_expected_roi=minimum_expected_roi,
         expectancy=expectancy,
         validation_pass=validation_pass,
+        settings=settings,
     )
     payload = {
         **artifact,

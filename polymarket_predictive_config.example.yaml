@@ -357,6 +357,10 @@ price_action_model:
   minimum_selected_payoff_ratio: 1.50
   minimum_selected_expectancy_usdc_per_trade: 0.0
   require_positive_cohort_transfer: true
+  # One token/market/outcome should count as one selected candidate in train,
+  # validation, and current scoring. This prevents repeated websocket ticks from
+  # pretending to be independent trades.
+  dedupe_selected_by_token: true
   include_train_rank_thresholds: true
   apply_train_rank_threshold_policy_to_validation: true
   scale_validation_rank_count_by_split_size: true

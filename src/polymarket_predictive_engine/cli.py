@@ -5,6 +5,7 @@ import json
 import sys
 
 from .active_window_plan import build_active_window_plan
+from .algo.replay import run_replay
 from .anchored_edge import run as run_anchored_edge
 from .backtest import backtest
 from .closing_line import build_closing_line_value
@@ -111,6 +112,7 @@ COMMANDS = [
     "price-action-scout",
     "price-action-paper-signals",
     "closing-line-value",
+    "algo-replay",
     "active-window-plan",
     "promotion-gate",
     "validation-report",
@@ -160,6 +162,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--websocket-seconds", type=int, default=60)
     parser.add_argument("--websocket-input", default=None)
+    parser.add_argument("--strategy", default="null", help="algo-replay: registered algo strategy name (default: null)")
     parser.add_argument("--snapshot-input", default=None)
     parser.add_argument("--sharp-input", default=None, help="sharp-odds CSV for build-sharp-anchor (overrides config sharp_anchor.input_path)")
     parser.add_argument("--crypto-targets", default=None, help="crypto targets CSV for build-crypto-fundamental (token_id,currency,strike,expiry)")
@@ -313,6 +316,8 @@ def main(argv: list[str] | None = None) -> int:
             _print(build_price_action_paper_signals(cfg))
         elif args.command == "closing-line-value":
             _print(build_closing_line_value(cfg, features_input=args.websocket_input))
+        elif args.command == "algo-replay":
+            _print(run_replay(cfg, args.strategy, features_input=args.websocket_input))
         elif args.command == "active-window-plan":
             _print(build_active_window_plan(cfg))
         elif args.command == "promotion-gate":

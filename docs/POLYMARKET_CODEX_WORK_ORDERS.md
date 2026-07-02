@@ -1,6 +1,6 @@
 # Polymarket Codex Work Orders
 
-Last updated: 2026-07-02
+Last updated: 2026-07-02 (all six work orders landed)
 
 Mechanical, file-level implementation instructions for coding agents (Codex or any other code
 changer). The architecture and priorities live in `docs/POLYMARKET_QUANT_MODE_CHARTER.md`; this file
@@ -27,7 +27,7 @@ Reference implementations to imitate: `closing_line.py` (module shape, settings,
 
 ---
 
-## WO-1 — Call the CLV builder from the governance refresh (WP3a) — `open`
+## WO-1 — Call the CLV builder from the governance refresh (WP3a) — `done` (2026-07-02)
 
 **Goal:** `closing_line_value.json` is rebuilt on every scheduled shadow-research cycle.
 
@@ -60,7 +60,7 @@ top-level fields are present.
 
 ---
 
-## WO-2 — Show CLV on the dashboard (WP3b) — `open`
+## WO-2 — Show CLV on the dashboard (WP3b) — `done` (2026-07-02)
 
 **Goal:** per-cohort CLV evidence is visible at `http://127.0.0.1:8765/` next to the other
 governance sections.
@@ -92,7 +92,7 @@ the section title; empty-artifact case asserted too.
 
 ---
 
-## WO-3 — CLV block in the local-history audit report (WP3c) — `open`
+## WO-3 — CLV block in the local-history audit report (WP3c) — `done` (2026-07-02)
 
 **Goal:** the audit report humans actually read
 (`outputs/polymarket_model_governance/local_history_audit_report.md`) shows CLV evidence beside
@@ -119,7 +119,7 @@ the paper-decision blockers are byte-identical with and without the CLV artifact
 
 ---
 
-## WO-4 — Typed order-intent schema (WP9, algo compatibility) — `open`
+## WO-4 — Typed order-intent schema (WP9, algo compatibility) — `done` (2026-07-02)
 
 **Goal:** a single typed, validated order representation between "a strategy wants to trade" and
 "a broker executes", so strategies, replay, paper, and (far-future, human-gated) live all speak one
@@ -161,7 +161,7 @@ current broker code accepts field-wise (assert expected keys, not broker behavio
 
 ---
 
-## WO-5 — Algo strategy protocol + registry (WP10) — `open`
+## WO-5 — Algo strategy protocol + registry (WP10) — `done` (2026-07-02)
 
 **Blocked by WO-4.**
 
@@ -206,7 +206,7 @@ or imbalance fails; wrapper downgrades a paper-mode intent to shadow by default.
 
 ---
 
-## WO-6 — Websocket replay harness (WP11) — `open`
+## WO-6 — Websocket replay harness (WP11) — `done` (2026-07-02)
 
 **Blocked by WO-4 and WO-5.**
 

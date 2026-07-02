@@ -77,7 +77,7 @@ pre-close lines only). Diagnostic input to governance review; not an automatic p
 before Kelly; `risk.kelly_shrinkage` config (default 0.0 = unchanged behaviour). Guaranteed
 `<=` plain capped Kelly. Sets up probability-uncertainty-aware sizing for paper probes.
 
-### WP3 — Wire CLV into the shadow research cycle and dashboard — `specced` (2026-07-02)
+### WP3 — Wire CLV into the shadow research cycle and dashboard — `done` (2026-07-02)
 
 Detailed implementation instructions are written as work orders **WO-1, WO-2, WO-3** in
 `docs/POLYMARKET_CODEX_WORK_ORDERS.md` — any coding agent can execute them mechanically.
@@ -140,21 +140,29 @@ replay harness refuses non-shadow intents.
 
 Detailed specs are work orders **WO-4, WO-5, WO-6** in `docs/POLYMARKET_CODEX_WORK_ORDERS.md`.
 
-### WP9 — Typed order-intent schema — `specced` (2026-07-02, WO-4)
+Implementation note (2026-07-02): all six work orders landed. One deliberate deviation from the
+WO-5 text: paper-mode intents are approved via explicit config (`algo.allow_paper_intents` plus
+`algo.paper_approved_strategies`) rather than by reading the promotion-gate artifact inside the
+registry wrapper — equally fail-closed, but deterministic and free of I/O in the hot path. The
+promotion-gate check belongs to the caller that flips that config, which stays a human decision.
+Artifacts: `outputs/polymarket_algo/replay_<strategy>_summary.json` + `_fills.csv`; CLI:
+`polymarket-engine algo-replay --strategy null`.
+
+### WP9 — Typed order-intent schema — `done` (2026-07-02, WO-4)
 
 One validated `OrderIntent` dataclass between "strategy wants to trade" and "broker executes":
 side/quantity/limit price, time-in-force (IOC/GTD), execution policy (cross spread / join bid /
 work midpoint), and `mode` restricted to `shadow`/`paper`. Adapters bridge today's
 `risk_decision` output and the paper broker's signal rows without changing either.
 
-### WP10 — Algo strategy protocol + registry — `specced` (2026-07-02, WO-5)
+### WP10 — Algo strategy protocol + registry — `done` (2026-07-02, WO-5)
 
 `QuoteEvent` (from normalised websocket rows) in, `list[OrderIntent]` out; pure, deterministic,
 no I/O inside strategies. Registry enforces intent validity and downgrades anything non-shadow
 unless governance has approved the cohort. Ships with a Null strategy and one tight-spread
 join-bid shadow probe.
 
-### WP11 — Websocket replay harness — `specced` (2026-07-02, WO-6)
+### WP11 — Websocket replay harness — `done` (2026-07-02, WO-6)
 
 Chronological, no-lookahead replay of recorded websocket features through any registered strategy
 with conservative fill simulation (cross at ask only when the limit crosses; resting orders fill

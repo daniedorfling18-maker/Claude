@@ -5,6 +5,7 @@ import re
 from typing import Any
 
 from .config import EngineConfig, load_config
+from .execution_costs import estimate_execution_cost
 from .models.calibration_v2 import joined_feature_label_rows
 from .readiness import paper_trade_readiness
 from .risk import risk_decision
@@ -21,15 +22,14 @@ def _setting_bool(settings: dict[str, Any], key: str, default: bool = False) -> 
     return boolish(value)
 
 
-def _estimated_slippage(default_slippage: float, prediction: dict[str, Any]) -> float:
-    default_slippage = max(0.0, default_slippage)
-    spread = safe_float(prediction.get("spread"))
-    if spread is not None and spread > 0:
-        return min(default_slippage, max(0.0, spread / 2.0))
-    price = safe_float(prediction.get("executable_price"))
-    if price is not None and price > 0:
-        return min(default_slippage, max(0.0, price * 0.02))
-    return default_slippage
+def _estimated_slippage(default_slippage: float, prediction: dict[str, Any], *, stake_usdc: float = 1.0) -> float:
+    estimate = estimate_execution_cost(
+        prediction,
+        stake_usdc=stake_usdc,
+        flat_slippage=max(0.0, default_slippage),
+    )
+    value = safe_float(estimate.get("expected_slippage"))
+    return max(0.0, default_slippage) if value is None else value
 
 
 def _same_category_label_counts(cfg: EngineConfig) -> dict[str, int]:
@@ -215,7 +215,11 @@ def generate_signals(
         alpha_edge = safe_float(prediction.get(edge_field))
         raw_edge = safe_float(prediction.get("edge"))
         gross_edge = alpha_edge if alpha_edge is not None else raw_edge
-        estimated_slippage = _estimated_slippage(default_slippage, prediction)
+        estimated_slippage = _estimated_slippage(
+            default_slippage,
+            prediction,
+            stake_usdc=safe_float(prediction.get("max_stake_usdc")) or probationary_default_max_stake,
+        )
         edge = None if gross_edge is None else gross_edge - estimated_slippage
         alpha_probability = safe_float(prediction.get("alpha_probability"))
         confidence = (

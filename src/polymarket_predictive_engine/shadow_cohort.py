@@ -12,6 +12,7 @@ from typing import Any
 from zoneinfo import ZoneInfo
 
 from .config import EngineConfig
+from .execution_costs import estimate_execution_cost
 from .resolution_collector import fetch_gamma_market, infer_market_resolution_rows
 from .utils import boolish, now_utc, parse_timestamp, read_csv_rows, read_json, safe_float, write_csv, write_json
 from .worldcup_validation import normalised_correlation_key, signal_cohort
@@ -39,15 +40,15 @@ def _fills_path(cfg: EngineConfig) -> Path:
     return _root(cfg) / str(_settings(cfg).get("fills_file", "shadow_fills.csv"))
 
 
-def _shadow_slippage(cfg: EngineConfig, prediction: dict[str, Any]) -> float:
+def _shadow_slippage(cfg: EngineConfig, prediction: dict[str, Any], *, stake_usdc: float | None = None) -> float:
     configured = max(0.0, float(cfg.raw.get("costs", {}).get("slippage", 0.0)))
-    spread = safe_float(prediction.get("spread"))
-    if spread is not None and spread > 0:
-        return min(configured, max(0.0, spread / 2.0))
-    price = safe_float(prediction.get("executable_price"))
-    if price is not None and price > 0:
-        return min(configured, price * 0.02)
-    return configured
+    estimate = estimate_execution_cost(
+        prediction,
+        stake_usdc=stake_usdc if stake_usdc is not None else float(_settings(cfg).get("stake_usdc", 10.0)),
+        flat_slippage=configured,
+    )
+    value = safe_float(estimate.get("expected_slippage"))
+    return configured if value is None else value
 
 
 def _mark_price(prediction: dict[str, Any] | None, fallback: float) -> float:
@@ -967,7 +968,7 @@ def update_shadow_cohort_evidence(cfg: EngineConfig, predictions: list[dict[str,
         entry_price = safe_float(row.get("executable_price"))
         if entry_price is None or not 0 < entry_price < 1:
             continue
-        slippage = _shadow_slippage(cfg, row)
+        slippage = _shadow_slippage(cfg, row, stake_usdc=stake)
         fill_price = min(0.999999, entry_price + slippage)
         quantity = stake / fill_price if fill_price > 0 else 0.0
         if quantity <= 0:

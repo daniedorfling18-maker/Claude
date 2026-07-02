@@ -7,6 +7,7 @@ from typing import Any
 
 from .config import EngineConfig, load_config
 from .crypto_updown_model import is_crypto_updown_contract, score_crypto_updown_prediction
+from .execution_costs import estimate_execution_cost
 from .models.calibration_v2 import joined_feature_label_rows
 from .utils import boolish, git_commit_hash, now_utc, read_csv_rows, read_json, safe_float, write_csv, write_json
 from .worldcup_validation import is_worldcup_winner_market, signal_cohort
@@ -336,7 +337,12 @@ def _confidence(row: dict[str, Any], probability: float) -> float:
     return max(0.0, min(1.0, value))
 
 
-def _microstructure_penalty(row: dict[str, Any], settings: dict[str, Any]) -> tuple[float, dict[str, Any]]:
+def _microstructure_penalty(
+    row: dict[str, Any],
+    settings: dict[str, Any],
+    *,
+    flat_slippage: float = 0.0,
+) -> tuple[float, dict[str, Any]]:
     spread = safe_float(row.get("spread"))
     liquidity = safe_float(row.get("liquidity"))
     ask_size = safe_float(row.get("ask_size") or row.get("top_ask_size"))
@@ -360,13 +366,25 @@ def _microstructure_penalty(row: dict[str, Any], settings: dict[str, Any]) -> tu
         buy_pressure = bid_size / (ask_size + bid_size)
         depth_penalty = max(0.0, buy_pressure - 0.5) * float(settings.get("depth_imbalance_penalty_weight", 0.02))
 
+    execution_estimate = estimate_execution_cost(
+        row,
+        stake_usdc=float(settings.get("execution_cost_probe_stake_usdc", 1.0) or 1.0),
+        flat_slippage=flat_slippage,
+    )
+    execution_slippage = safe_float(execution_estimate.get("expected_slippage")) or 0.0
+    execution_cost_penalty = execution_slippage * float(settings.get("execution_cost_penalty_weight", 1.0))
+
     volatility_penalty = max(0.0, volatility or 0.0) * float(settings.get("volatility_penalty_weight", 0.15))
-    total = spread_penalty + liquidity_penalty + depth_penalty + volatility_penalty
+    total = spread_penalty + liquidity_penalty + depth_penalty + volatility_penalty + execution_cost_penalty
     return total, {
         "spread_penalty": spread_penalty,
         "liquidity_penalty": liquidity_penalty,
         "depth_penalty": depth_penalty,
         "volatility_penalty": volatility_penalty,
+        "execution_cost_penalty": execution_cost_penalty,
+        "execution_cost_status": execution_estimate.get("status", ""),
+        "execution_expected_slippage": execution_estimate.get("expected_slippage", ""),
+        "execution_depth_stake_cap_usdc": execution_estimate.get("max_stake_at_acceptable_impact_usdc", ""),
     }
 
 
@@ -535,7 +553,11 @@ def apply_mispricing_alpha(
         )
         confidence = _confidence(row, alpha_probability)
         uncertainty_penalty = (1.0 - confidence) * uncertainty_penalty_weight
-        micro_penalty, micro_parts = _microstructure_penalty(row, settings)
+        micro_penalty, micro_parts = _microstructure_penalty(
+            row,
+            settings,
+            flat_slippage=float(cfg.raw.get("costs", {}).get("slippage", 0.0) or 0.0),
+        )
         spread = safe_float(row.get("spread"))
         liquidity = safe_float(row.get("liquidity"))
         relative_spread = (spread / price) if spread is not None and price > 0 else None

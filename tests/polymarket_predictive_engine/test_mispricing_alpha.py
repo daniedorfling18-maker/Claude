@@ -126,6 +126,43 @@ def test_alpha_bias_model_creates_conservative_edge_lower_bound(tmp_path):
     assert scored[0]["alpha_trade_candidate"] is True
 
 
+def test_alpha_scoring_penalises_shallow_execution_depth(tmp_path):
+    cfg = _config(tmp_path)
+    cfg.raw["mispricing_alpha"]["model_residual_shrinkage"] = 1.0
+    cfg.raw["mispricing_alpha"]["max_model_residual_adjustment"] = 0.2
+    cfg.raw["mispricing_alpha"]["execution_cost_probe_stake_usdc"] = 10.0
+
+    scored = apply_mispricing_alpha(
+        cfg,
+        [
+            {
+                "market_id": "shallow-depth-market",
+                "market_slug": "shallow-depth-market",
+                "token_id": "shallow-depth-token",
+                "prediction_timestamp": "2026-02-01T00:00:00Z",
+                "category": "synthetic",
+                "market_midpoint": "0.50",
+                "raw_probability": "0.70",
+                "calibrated_probability": "0.70",
+                "model_probability": "0.70",
+                "executable_price": "0.50",
+                "best_ask": "0.50",
+                "spread": "0.01",
+                "liquidity": "1000",
+                "top_ask_size": "1",
+                "ask_depth_1pct": "2",
+                "ask_depth_5pct": "3",
+                "time_to_close_hours": "24",
+                "confidence": "1",
+            }
+        ],
+    )
+
+    assert float(scored[0]["execution_cost_penalty"]) > 0
+    assert scored[0]["execution_cost_status"] == "insufficient_depth"
+    assert float(scored[0]["edge_lower_bound"]) < float(scored[0]["alpha_raw_edge"])
+
+
 def test_near_miss_learning_lane_records_liquid_uncertain_edge(tmp_path):
     cfg = _config(tmp_path)
     cfg.raw["mispricing_alpha"]["model_residual_shrinkage"] = 1.0

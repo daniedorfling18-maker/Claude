@@ -152,6 +152,8 @@ mispricing_alpha:
   missing_liquidity_penalty: 0.01
   reference_liquidity: 1000
   depth_imbalance_penalty_weight: 0.02
+  execution_cost_probe_stake_usdc: 1.0
+  execution_cost_penalty_weight: 1.0
   volatility_penalty_weight: 0.15
   uncertainty_penalty_weight: 0.03
   market_overround_penalty_weight: 0.35

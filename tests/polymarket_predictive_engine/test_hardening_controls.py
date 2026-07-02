@@ -81,6 +81,33 @@ def test_risk_decision_returns_explicit_execution_units(tmp_path):
     assert 0 < decision["limit_price"] < 1
 
 
+def test_risk_decision_caps_stake_to_depth_aware_execution_capacity(tmp_path):
+    cfg = _cfg(tmp_path)
+    decision = risk_decision(
+        cfg,
+        {
+            "market_id": "m-depth",
+            "token_id": "t-depth",
+            "edge": 0.2,
+            "calibrated_probability": 0.8,
+            "executable_price": 0.50,
+            "best_ask": 0.50,
+            "spread": 0.01,
+            "liquidity": 1000,
+            "time_to_close_minutes": 60,
+            "top_ask_size": 1,
+            "ask_depth_1pct": 3,
+            "ask_depth_5pct": 4,
+        },
+        {"bankroll": 1000, "cash": 1000},
+    )
+
+    assert decision["approved"] is True
+    assert decision["stake_usdc"] <= 1.5
+    assert decision["risk_checks"]["execution_depth_stake_cap_usdc"] == 1.5
+    assert decision["risk_checks"]["execution_cost_estimate"]["status"] in {"top_of_book_fill", "within_1pct_depth"}
+
+
 def test_fast_market_risk_overrides_allow_tiny_paper_probe(tmp_path):
     cfg = _cfg(tmp_path)
     cfg.raw["risk"]["minimum_confidence"] = 0.65

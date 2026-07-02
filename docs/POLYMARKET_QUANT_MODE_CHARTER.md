@@ -86,7 +86,9 @@ Detailed implementation instructions are written as work orders **WO-1, WO-2, WO
   the scheduled cycle with zero PowerShell changes). Artifact:
   `outputs/polymarket_model_governance/closing_line_value.json`; summary also appears in
   `outputs/polymarket_model_governance/governance_refresh.json`.
-- WO-2: dashboard CLV section following the `quant_research_status` pattern.
+- WO-2: `done` (2026-07-02) — dashboard CLV section following the `quant_research_status`
+  pattern. Artifact appears in `outputs/polymarket_dashboard/dashboard_data.json` under
+  `closing_line_value` and renders as "Closing-line value (CLV)" in the dashboard.
 - WO-3: CLV block in the local-history audit report (report-only; `_paper_decision` untouched).
 - Acceptance: per work order; `paper_trading_invoked` stays `false`; tests cover the wiring.
 

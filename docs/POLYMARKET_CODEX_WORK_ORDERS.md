@@ -64,7 +64,7 @@ before promotion review/dashboard, and exposes CLV summary fields in `governance
 
 ---
 
-## WO-2 — Show CLV on the dashboard (WP3b) — `open`
+## WO-2 — Show CLV on the dashboard (WP3b) — `done` (2026-07-02)
 
 **Goal:** per-cohort CLV evidence is visible at `http://127.0.0.1:8765/` next to the other
 governance sections.
@@ -93,6 +93,12 @@ dashboard, and asserts the payload JSON contains the `closing_line_value` key an
 the section title; empty-artifact case asserted too.
 
 **Out of scope:** dashboard server/runner scripts, any other dashboard section.
+
+**Landed:** `dashboard.py` now reads
+`outputs/polymarket_model_governance/closing_line_value.json`, includes it in
+`outputs/polymarket_dashboard/dashboard_data.json`, and renders a "Closing-line value (CLV)"
+dashboard section with summary metrics, positive cohorts, and per-cohort evidence classes. Empty
+artifacts render a no-evidence-yet message.
 
 ---
 

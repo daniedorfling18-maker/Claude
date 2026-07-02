@@ -159,6 +159,60 @@ def test_dashboard_renderer_writes_static_dashboard_and_data(tmp_path):
     assert data["trade_diagnostics"]["current_near_miss_candidates"][0]["market_slug"] == "near-miss-market"
 
 
+def test_dashboard_surfaces_closing_line_value_artifact(tmp_path):
+    cfg = _config(tmp_path)
+    write_json(
+        cfg.governance_root / "closing_line_value.json",
+        {
+            "status": "ok",
+            "generated_at_utc": "2026-07-02T12:00:00Z",
+            "positions_scored": 4,
+            "final_line_positions": 3,
+            "mean_final_clv": 0.018,
+            "beat_close_rate": 0.75,
+            "positive_clv_cohorts": ["macro_rates"],
+            "cohorts": [
+                {
+                    "signal_cohort": "macro_rates",
+                    "positions": 4,
+                    "final_positions": 3,
+                    "mean_final_clv": 0.018,
+                    "final_clv_ci_low": 0.004,
+                    "final_clv_ci_high": 0.031,
+                    "final_beat_close_rate": 0.667,
+                    "clv_evidence": "positive_clv_evidence",
+                }
+            ],
+            "governance_note": "Diagnostic only.",
+            "paper_trading_invoked": False,
+            "live_trading_invoked": False,
+        },
+    )
+
+    result = render_dashboard(cfg)
+
+    data = read_json(result["dashboard_data"])
+    html = Path(result["dashboard_file"]).read_text(encoding="utf-8")
+    assert data["closing_line_value"]["positions_scored"] == 4
+    assert data["closing_line_value"]["positive_clv_cohorts"] == ["macro_rates"]
+    assert data["closing_line_value"]["paper_trading_invoked"] is False
+    assert data["closing_line_value"]["live_trading_invoked"] is False
+    assert "Closing-line value (CLV)" in html
+    assert "CLV by cohort" in html
+
+
+def test_dashboard_handles_empty_closing_line_value_artifact(tmp_path):
+    cfg = _config(tmp_path)
+
+    result = render_dashboard(cfg)
+
+    data = read_json(result["dashboard_data"])
+    html = Path(result["dashboard_file"]).read_text(encoding="utf-8")
+    assert data["closing_line_value"] == {}
+    assert "Closing-line value (CLV)" in html
+    assert "No CLV evidence yet" in html
+
+
 def test_dashboard_emits_decision_useful_summary_for_missing_fresh_candidate(tmp_path):
     cfg = _config(tmp_path)
     write_json(

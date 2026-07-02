@@ -123,6 +123,7 @@ HTML = """<!doctype html>
     <section><h2>Live evidence cycle</h2><div id="cycle"></div></section>
   </div>
   <section><h2>Trading signal audit</h2><div id="tradeSignalAudit"></div></section>
+  <section><h2>Closing-line value (CLV)</h2><div id="closingLineValue"></div></section>
   <section><h2>World Cup validation layer</h2><div id="worldcupValidation"></div></section>
   <section><h2>Actual paper P&L</h2><div id="actualTarget"></div></section>
   </details>
@@ -250,6 +251,7 @@ async function load() {
     const microstructure = data.price_action_microstructure || {};
     const priceActionModel = data.price_action_model || {};
     const quantResearch = data.quant_research_status || {};
+    const closingLine = data.closing_line_value || {};
     const priceActionPaper = data.price_action_paper_signals || {};
     const currentHistScan = priceActionPaper.current_historical_analogue_scan || {};
     const historicalBreadthScan = priceActionPaper.historical_breadth_scan || {};
@@ -555,6 +557,30 @@ async function load() {
       ["Loss","loss_making_exit"],
       ["Diagnosis","diagnosis", v=>longText(v, 240)]
     ], 4);
+    const clvCohorts = Array.isArray(closingLine.cohorts) ? closingLine.cohorts : [];
+    const positiveClv = Array.isArray(closingLine.positive_clv_cohorts) ? closingLine.positive_clv_cohorts : [];
+    document.getElementById("closingLineValue").innerHTML = Object.keys(closingLine).length
+      ? `<div class="sectionLead">CLV checks whether the market moved toward our entry after we bought. It is settlement-independent forward evidence, but it does not authorise paper or live trading by itself.</div>` + facts([
+          ["Status", closingLine.status || "-"],
+          ["Generated", closingLine.generated_at_utc || "-"],
+          ["Positions scored", closingLine.positions_scored],
+          ["Final close lines", closingLine.final_line_positions],
+          ["Mean final CLV", closingLine.mean_final_clv, v=>fmtNum(v, 4)],
+          ["Beat close rate", closingLine.beat_close_rate, v=>fmtNum(Number(v) * 100, 1) + "%"],
+          ["Positive CLV cohorts", positiveClv.length ? positiveClv : "none yet", joinText],
+          ["Governance note", closingLine.governance_note || "Diagnostic only; no trading gate changed.", v=>longText(v, 260)]
+        ]) + (positiveClv.length ? `<div class="alertGrid">${alertBox("Positive CLV cohorts found", joinText(positiveClv), "good")}</div>` : "")
+        + titledTable("CLV by cohort", clvCohorts, [
+          ["Cohort","signal_cohort", v=>longText(v, 180)],
+          ["Positions","positions"],
+          ["Final","final_positions"],
+          ["Mean final CLV","mean_final_clv", v=>fmtNum(v, 4)],
+          ["CI low","final_clv_ci_low", v=>fmtNum(v, 4)],
+          ["CI high","final_clv_ci_high", v=>fmtNum(v, 4)],
+          ["Beat close","final_beat_close_rate", v=>fmtNum(Number(v) * 100, 1) + "%"],
+          ["Evidence","clv_evidence", v=>longText(v, 150)]
+        ], 8)
+      : `<div class="sectionLead">No CLV evidence yet. The next governance refresh should build closing_line_value.json once shadow positions and bid/ask features exist.</div>`;
     const cycleRows = [
       ["Active lane", legacyLiveActive ? "legacy live loop" : "shadow research + websocket"],
       ["Research status", `${researchStatus} / ${fmtAge(researchAge)} old`],
@@ -3500,6 +3526,9 @@ def render_dashboard(cfg: EngineConfig, latest_report: dict[str, Any] | None = N
     quant_research_status = read_json(governance / "quant_research_status.json", default={}) or {}
     if not isinstance(quant_research_status, dict):
         quant_research_status = {}
+    closing_line_value = read_json(governance / "closing_line_value.json", default={}) or {}
+    if not isinstance(closing_line_value, dict):
+        closing_line_value = {}
     websocket_summary = read_json(cfg.output_root / "polymarket_websocket" / "websocket_summary.json", default={}) or {}
     if not isinstance(websocket_summary, dict):
         websocket_summary = {}
@@ -3604,6 +3633,7 @@ def render_dashboard(cfg: EngineConfig, latest_report: dict[str, Any] | None = N
         "price_action_feedback": price_action_feedback,
         "paper_round_trip_summary": paper_round_trip_summary,
         "quant_research_status": quant_research_status,
+        "closing_line_value": closing_line_value,
         "websocket_summary": websocket_summary,
         "websocket_feature_summary": websocket_feature_summary,
         "research_focus": research_focus,

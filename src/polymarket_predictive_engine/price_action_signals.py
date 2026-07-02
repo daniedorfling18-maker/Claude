@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Any
 
 from .config import EngineConfig, load_config
+from .price_action_microstructure import build_latest_microstructure_features
 from .utils import boolish, now_utc, read_csv_rows, read_json, safe_float, write_csv, write_json
 
 OUTPUT_DIRNAME = "polymarket_price_action"
@@ -10,6 +11,7 @@ SCOUT_COHORT_FILE = "price_action_scout_cohort_evidence.csv"
 SCOUT_ROUND_TRIP_FILE = "price_action_scout_round_trip_evidence.csv"
 SCOUT_ENTRY_FILE = "price_action_scout_entries.csv"
 MICROSTRUCTURE_CURRENT_FILE = "microstructure_current_candidates.csv"
+MODEL_SUMMARY_JSON = "price_action_model_summary.json"
 SIGNALS_FILE = "price_action_paper_signals.csv"
 REJECTIONS_FILE = "price_action_paper_rejections.csv"
 SUMMARY_JSON = "price_action_paper_signal_summary.json"
@@ -162,6 +164,114 @@ def _paper_confirmation_candidates(cfg: EngineConfig, settings: dict[str, Any]) 
     return candidates
 
 
+def _low_price_tick_probe_enabled(summary: dict[str, Any], settings: dict[str, Any]) -> tuple[bool, dict[str, Any]]:
+    if not boolish(settings.get("low_price_tick_probe_enabled", True)):
+        return False, {}
+    diagnostics = summary.get("validation_rank_diagnostics") if isinstance(summary.get("validation_rank_diagnostics"), dict) else {}
+    missed = diagnostics.get("missed_positive_examples") if isinstance(diagnostics.get("missed_positive_examples"), list) else []
+    min_low_price = float(safe_float(settings.get("low_price_tick_min_convexity")) or 0.02)
+    qualifying = [
+        row
+        for row in missed
+        if isinstance(row, dict)
+        and (safe_float(row.get("low_price_convexity")) or 0.0) >= min_low_price
+        and (safe_float(row.get("roi")) or 0.0) > 0
+    ]
+    return bool(qualifying), {"diagnostics": diagnostics, "missed_positive_examples": qualifying}
+
+
+def _family_allowed_by_low_price_lesson(row: dict[str, Any], lesson: dict[str, Any], settings: dict[str, Any]) -> bool:
+    missed = lesson.get("missed_positive_examples") if isinstance(lesson.get("missed_positive_examples"), list) else []
+    if not missed:
+        return False
+    family = str(row.get("family") or row.get("category") or "").strip().lower()
+    slug = str(row.get("market_slug") or "").strip().lower()
+    families = {str(item.get("family") or "").strip().lower() for item in missed if isinstance(item, dict)}
+    if family and family in families:
+        return True
+    markets = [str(item.get("market_slug") or "").strip().lower() for item in missed if isinstance(item, dict)]
+    return any(token and token.split("-on-")[0] in slug for token in markets)
+
+
+def _low_price_tick_probe_candidates(cfg: EngineConfig, settings: dict[str, Any]) -> list[dict[str, Any]]:
+    summary = read_json(cfg.output_root / OUTPUT_DIRNAME / MODEL_SUMMARY_JSON, default={}) or {}
+    if not isinstance(summary, dict):
+        return []
+    enabled, lesson = _low_price_tick_probe_enabled(summary, settings)
+    if not enabled:
+        return []
+    max_candidates = int(safe_float(settings.get("low_price_tick_max_candidates")) or 4)
+    min_price = float(safe_float(settings.get("low_price_tick_min_ask")) or 0.01)
+    max_price = float(safe_float(settings.get("low_price_tick_max_ask")) or 0.15)
+    max_spread = float(safe_float(settings.get("low_price_tick_max_spread")) or 0.01)
+    max_relative_spread = float(safe_float(settings.get("low_price_tick_max_relative_spread")) or 0.25)
+    min_one_cent_return = float(safe_float(settings.get("low_price_tick_min_one_cent_return")) or 0.03)
+    exclude_updown = boolish(settings.get("low_price_tick_exclude_updown", True))
+    rows = build_latest_microstructure_features(cfg)
+    candidates: list[dict[str, Any]] = []
+    for row in rows:
+        ask = safe_float(row.get("entry_ask"))
+        bid = safe_float(row.get("entry_bid"))
+        spread = safe_float(row.get("entry_spread"))
+        if spread is None and ask is not None and bid is not None:
+            spread = max(0.0, ask - bid)
+        relative_spread = _relative_spread(spread, ask)
+        if ask is None or bid is None or not min_price <= ask <= max_price or not 0 < bid < ask:
+            continue
+        if spread is None or spread > max_spread:
+            continue
+        if relative_spread is None or relative_spread > max_relative_spread:
+            continue
+        one_cent_return = 0.01 / max(ask, 0.01)
+        if one_cent_return < min_one_cent_return:
+            continue
+        market_slug = str(row.get("market_slug") or "").lower()
+        if exclude_updown and ("updown" in market_slug or "up-or-down" in market_slug):
+            continue
+        if not _family_allowed_by_low_price_lesson(row, lesson, settings):
+            continue
+        signal_cohort = f"low_price_tick_probe|{row.get('family') or 'unknown'}|one_cent_return>={min_one_cent_return:.2f}"
+        candidates.append(
+            {
+                "source": "low_price_tick_probe",
+                "round_trip_status": "open_marked",
+                "signal_cohort": signal_cohort,
+                "token_id": row.get("token_id", ""),
+                "market_slug": row.get("market_slug", ""),
+                "question": row.get("question", ""),
+                "family": row.get("family", ""),
+                "outcome": row.get("outcome", ""),
+                "latest_time_utc": row.get("entry_time_utc", ""),
+                "latest_bid": bid,
+                "latest_ask": ask,
+                "latest_midpoint": row.get("entry_midpoint", ""),
+                "latest_spread": spread,
+                "relative_spread": relative_spread,
+                "take_profit_return": max(
+                    min_one_cent_return,
+                    float(safe_float(settings.get("low_price_tick_take_profit_return")) or 0.04),
+                ),
+                "stop_loss_return": float(safe_float(settings.get("low_price_tick_stop_loss_return")) or 0.08),
+                "min_profit_usdc": float(safe_float(settings.get("low_price_tick_min_profit_usdc")) or 0.01),
+                "max_hold_minutes_before_exit": float(
+                    safe_float(settings.get("low_price_tick_max_hold_minutes_before_exit")) or 45.0
+                ),
+                "one_cent_return": one_cent_return,
+                "low_price_convexity": max(0.0, 0.15 - ask),
+                "priority_score": one_cent_return / max(relative_spread, 0.001),
+                "shadow_only": True,
+            }
+        )
+    candidates.sort(
+        key=lambda item: (
+            safe_float(item.get("priority_score")) or 0.0,
+            safe_float(item.get("one_cent_return")) or 0.0,
+        ),
+        reverse=True,
+    )
+    return candidates[:max_candidates]
+
+
 def _query_family_prefixes(query: str) -> list[str]:
     query = str(query or "").strip().lower()
     if not query:
@@ -256,16 +366,24 @@ def _build_signal(
     max_hold_minutes = safe_float(row.get("max_hold_minutes_before_exit"))
     if max_hold_minutes is None and max_forward_observations is not None and max_forward_observations > 0:
         max_hold_minutes = float(max_forward_observations) * observation_minutes
-    if str(row.get("source") or "") == "paper_confirmation_candidate" and max_hold_minutes is None:
+    source = str(row.get("source") or "")
+    if source in {"paper_confirmation_candidate", "low_price_tick_probe"} and max_hold_minutes is None:
         configured_horizon = safe_float(settings.get("paper_confirmation_max_hold_minutes_before_exit"))
         max_hold_minutes = float(configured_horizon) if configured_horizon is not None and configured_horizon > 0 else 120.0
     max_stake = float(safe_float(settings.get("max_stake_usdc")) or 2.0)
-    if str(row.get("source") or "") == "paper_confirmation_candidate":
+    if source == "paper_confirmation_candidate":
         confirmation_max = safe_float(settings.get("paper_confirmation_max_stake_usdc"))
         if confirmation_max is not None and confirmation_max > 0:
             max_stake = min(max_stake, float(confirmation_max))
+    if source == "low_price_tick_probe":
+        probe_max = safe_float(settings.get("low_price_tick_max_stake_usdc"))
+        if probe_max is not None and probe_max > 0:
+            max_stake = min(max_stake, float(probe_max))
     min_edge = float(safe_float(settings.get("minimum_price_edge")) or 0.005)
     max_edge = float(safe_float(settings.get("maximum_price_edge")) or 0.08)
+    if source == "low_price_tick_probe":
+        min_edge = float(safe_float(settings.get("low_price_tick_min_edge")) or 0.001)
+        max_edge = float(safe_float(settings.get("low_price_tick_max_edge")) or 0.02)
 
     target_edge = ask * take_profit_return
     realized_roi = safe_float(cohort.get("realized_roi") or cohort.get("forward_shadow_roi") or cohort.get("forward_paper_roi"))
@@ -282,7 +400,7 @@ def _build_signal(
     signal_cohort = _cohort_name(row)
     data_timestamp = str(row.get("latest_time_utc") or now_utc())
     liquidity = entry.get("liquidity", "")
-    if not str(liquidity or "").strip() and str(row.get("source") or "") == "microstructure_current_candidate":
+    if not str(liquidity or "").strip() and source in {"microstructure_current_candidate", "low_price_tick_probe"}:
         liquidity = settings.get("microstructure_liquidity_proxy", "")
     priority_score = max_stake * edge / max(ask, 0.05)
     return {
@@ -314,12 +432,14 @@ def _build_signal(
         "alpha_probability": probability_proxy,
         "edge_lower_bound": edge,
         "model_version": "price_action_round_trip_v1",
-        "feature_set_version": "websocket_bid_ask_v1",
+        "feature_set_version": "low_price_tick_v1" if source == "low_price_tick_probe" else "websocket_bid_ask_v1",
         "data_snapshot_timestamp": data_timestamp,
         "price_action_signal": True,
         "price_action_evidence_status": (
             "trusted_shadow_requires_broker_paper_confirmation"
-            if str(row.get("source") or "") == "paper_confirmation_candidate"
+            if source == "paper_confirmation_candidate"
+            else "low_price_tick_requires_broker_paper_confirmation"
+            if source == "low_price_tick_probe"
             else "cohort_bid_ask_round_trip_approved"
         ),
         "price_action_cohort_realized_roi": cohort.get(
@@ -332,7 +452,7 @@ def _build_signal(
             "realized_monthly_run_rate_usdc",
             cohort.get("monthly_run_rate_usdc", ""),
         ),
-        "price_action_entry_source": row.get("source", ""),
+        "price_action_entry_source": source,
         "price_action_latest_bid": bid,
         "price_action_latest_ask": ask,
         "exit_policy_id": row.get("exit_policy_id", ""),
@@ -374,9 +494,16 @@ def _dedupe_mutually_exclusive_signals(signals: list[dict[str, Any]]) -> tuple[l
     return selected, rejections
 
 
-def _summary_decision(signals: list[dict[str, Any]], paper_confirmation: list[dict[str, Any]], rejections: list[dict[str, Any]]) -> str:
+def _summary_decision(
+    signals: list[dict[str, Any]],
+    paper_confirmation: list[dict[str, Any]],
+    low_price_tick: list[dict[str, Any]],
+    rejections: list[dict[str, Any]],
+) -> str:
     if signals:
         return "signals_ready_for_paper_broker"
+    if low_price_tick:
+        return "low_price_tick_probe_waiting_for_fresh_executable_candidate"
     if paper_confirmation:
         rejection_reasons = {str(row.get("rejection_reason") or "") for row in rejections}
         if any(
@@ -425,6 +552,7 @@ def build_price_action_paper_signals(cfg: EngineConfig) -> dict[str, Any]:
     approved = _approved_cohorts(cohort_rows)
     approved_microstructure = _approved_feedback_microstructure_cohorts(cfg)
     paper_confirmation = _paper_confirmation_candidates(cfg, settings)
+    low_price_tick = _low_price_tick_probe_candidates(cfg, settings)
     by_token = _entry_index(entries)
 
     signals: list[dict[str, Any]] = []
@@ -505,6 +633,35 @@ def build_price_action_paper_signals(cfg: EngineConfig) -> dict[str, Any]:
             continue
         signals.append(signal)
 
+    for raw_row in low_price_tick:
+        row = {
+            **raw_row,
+            "source": raw_row.get("source") or "low_price_tick_probe",
+            "round_trip_status": raw_row.get("round_trip_status") or "open_marked",
+        }
+        ask = safe_float(row.get("latest_ask"))
+        bid = safe_float(row.get("latest_bid"))
+        spread = safe_float(row.get("latest_spread"))
+        if ask is None or bid is None or not 0 < ask < 1 or not 0 < bid < ask:
+            rejections.append(_reject(row, "low-price tick probe missing executable bid/ask"))
+            continue
+        if spread is None:
+            spread = max(0.0, ask - bid)
+            row["latest_spread"] = spread
+        cohort_payload = {
+            "forward_shadow_roi": row.get("one_cent_return", ""),
+            "forward_shadow_pnl_usdc": "",
+            "win_rate": "",
+            "validation_win_rate": "",
+            "closed_trades": "",
+            "monthly_run_rate_usdc": "",
+        }
+        signal = _build_signal(row, cohort=cohort_payload, entry=row, settings=settings)
+        if signal is None:
+            rejections.append(_reject(row, "could not build executable low-price tick probe"))
+            continue
+        signals.append(signal)
+
     signals.sort(key=lambda item: safe_float(item.get("priority_score")) or 0.0, reverse=True)
     signals, mutually_exclusive_rejections = _dedupe_mutually_exclusive_signals(signals)
     rejections.extend(mutually_exclusive_rejections)
@@ -520,6 +677,12 @@ def build_price_action_paper_signals(cfg: EngineConfig) -> dict[str, Any]:
         "approved_price_action_cohorts": len(approved),
         "approved_microstructure_cohorts": len(approved_microstructure),
         "paper_confirmation_candidates": len(paper_confirmation),
+        "low_price_tick_probe_candidates": len(low_price_tick),
+        "low_price_tick_probe_signals": sum(
+            1
+            for signal in signals
+            if signal.get("price_action_evidence_status") == "low_price_tick_requires_broker_paper_confirmation"
+        ),
         "paper_confirmation_signals": sum(
             1
             for signal in signals
@@ -532,12 +695,13 @@ def build_price_action_paper_signals(cfg: EngineConfig) -> dict[str, Any]:
         "rejection_file": str(out_dir / REJECTIONS_FILE),
         "paper_trading_invoked": False,
         "live_trading_invoked": False,
-        "decision": _summary_decision(signals, paper_confirmation, rejections),
+        "decision": _summary_decision(signals, paper_confirmation, low_price_tick, rejections),
         "warnings": {
             "paper_only": True,
             "live_trading_invoked": False,
             "does_not_wait_for_settlement": True,
             "requires_positive_bid_ask_cohort_evidence": True,
+            "low_price_tick_probes_are_evidence_only": True,
         },
         "top_signals": signals[:10],
         "top_rejections": rejections[:10],

@@ -381,6 +381,25 @@ price_action_paper:
   paper_confirmation_enabled: true
   paper_confirmation_max_stake_usdc: 2
   paper_confirmation_max_hold_minutes_before_exit: 120
+  # Evidence-only lane for the validation lesson where ultra-low-price contracts
+  # can earn meaningful ROI from a one-tick bid move. These probes do not
+  # promote the model; they collect forward paper fills for the cohort.
+  low_price_tick_probe_enabled: true
+  low_price_tick_max_candidates: 4
+  low_price_tick_max_stake_usdc: 1
+  low_price_tick_min_ask: 0.01
+  low_price_tick_max_ask: 0.15
+  low_price_tick_max_spread: 0.01
+  low_price_tick_max_relative_spread: 0.25
+  low_price_tick_min_convexity: 0.02
+  low_price_tick_min_one_cent_return: 0.03
+  low_price_tick_min_edge: 0.001
+  low_price_tick_max_edge: 0.02
+  low_price_tick_take_profit_return: 0.04
+  low_price_tick_stop_loss_return: 0.08
+  low_price_tick_min_profit_usdc: 0.01
+  low_price_tick_max_hold_minutes_before_exit: 45
+  low_price_tick_exclude_updown: true
   minimum_price_edge: 0.005
   maximum_price_edge: 0.08
   max_spread: 0.04

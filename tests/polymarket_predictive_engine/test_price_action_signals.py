@@ -131,6 +131,48 @@ def _microstructure_current_row(**overrides: str) -> dict[str, str]:
     return row
 
 
+def _ws_feature_row(i: int, **overrides: str) -> dict[str, str]:
+    row = {
+        "collected_at_utc": f"2026-07-02T05:3{i}:00Z",
+        "source_timestamp": str(1000 + i),
+        "asset_id": "btc-low-token",
+        "market_slug": "bitcoin-above-58k-on-july-2-2026",
+        "question": "Will Bitcoin be above 58k?",
+        "category": "crypto_btc_special",
+        "selection": "No",
+        "best_bid": "0.024",
+        "best_ask": "0.025",
+        "midpoint": "0.0245",
+        "spread": "0.001",
+        "price_change_side": "BUY",
+        "price_change_size": "20",
+    }
+    row.update(overrides)
+    return row
+
+
+def _low_price_model_summary() -> dict[str, object]:
+    return {
+        "status": "trained",
+        "decision": "collect_more_bid_ask_price_action_model_evidence",
+        "promotion_ready": False,
+        "validation_rank_diagnostics": {
+            "state": "top_ranked_candidates_failed_missed_positive_repricing",
+            "missed_positive_examples": [
+                {
+                    "family": "crypto_btc_special",
+                    "market_slug": "bitcoin-above-58k-on-july-2-2026",
+                    "entry_ask": "0.025",
+                    "exit_bid": "0.026",
+                    "roi": 0.04,
+                    "low_price_convexity": 0.125,
+                    "one_cent_return": 0.40,
+                }
+            ],
+        },
+    }
+
+
 def _microstructure_feedback_payload(cohort: str) -> dict[str, object]:
     return {
         "status": "ok",
@@ -304,6 +346,46 @@ def test_trusted_shadow_confirmation_backlog_compiles_paper_probe(tmp_path):
     assert signals[0]["price_action_evidence_status"] == "trusted_shadow_requires_broker_paper_confirmation"
     assert float(signals[0]["price_action_cohort_realized_roi"]) == 0.033
     assert float(signals[0]["max_hold_minutes_before_exit"]) == 45.0
+
+
+def test_low_price_tick_probe_compiles_only_after_model_missed_low_price_positive(tmp_path):
+    cfg = _cfg(tmp_path)
+    cfg.raw["price_action_microstructure"] = {
+        "enabled": True,
+        "lookback_observations": 1,
+        "max_rows_per_token": 20,
+    }
+    cfg.raw["price_action_paper"].update(
+        {
+            "low_price_tick_probe_enabled": True,
+            "low_price_tick_max_stake_usdc": 1,
+            "low_price_tick_min_edge": 0.001,
+            "low_price_tick_max_edge": 0.02,
+        }
+    )
+    root = cfg.output_root / "polymarket_price_action"
+    write_json(root / "price_action_model_summary.json", _low_price_model_summary())
+    write_csv(
+        cfg.output_root / "polymarket_training" / "websocket_market_features.csv",
+        [
+            _ws_feature_row(0, best_bid="0.022", best_ask="0.023", midpoint="0.0225"),
+            _ws_feature_row(1, best_bid="0.023", best_ask="0.024", midpoint="0.0235"),
+            _ws_feature_row(2, best_bid="0.024", best_ask="0.025", midpoint="0.0245"),
+            _ws_feature_row(3, best_bid="0.025", best_ask="0.026", midpoint="0.0255"),
+        ],
+    )
+
+    summary = build_price_action_paper_signals(cfg)
+    signals = read_csv_rows(root / "price_action_paper_signals.csv")
+
+    assert summary["signals"] == 1
+    assert summary["low_price_tick_probe_candidates"] == 1
+    assert summary["low_price_tick_probe_signals"] == 1
+    assert signals[0]["price_action_entry_source"] == "low_price_tick_probe"
+    assert signals[0]["price_action_evidence_status"] == "low_price_tick_requires_broker_paper_confirmation"
+    assert signals[0]["feature_set_version"] == "low_price_tick_v1"
+    assert float(signals[0]["max_stake_usdc"]) == 1.0
+    assert float(signals[0]["executable_price"]) == 0.026
 
 
 def test_paper_confirmation_rejects_mutually_exclusive_same_market_probe(tmp_path):

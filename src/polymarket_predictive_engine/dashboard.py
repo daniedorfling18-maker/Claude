@@ -780,6 +780,8 @@ async function load() {
       ["Approved microstructure cohorts", priceActionPaper.approved_microstructure_cohorts],
       ["Paper-confirm candidates", priceActionPaper.paper_confirmation_candidates],
       ["Paper-confirm signals", priceActionPaper.paper_confirmation_signals],
+      ["Low-price tick candidates", priceActionPaper.low_price_tick_probe_candidates],
+      ["Low-price tick signals", priceActionPaper.low_price_tick_probe_signals],
       ["Broker refresh needed", priceActionPaper.broker_refresh_needed],
       ["Pending broker signals", priceActionPaper.pending_broker_signals],
       ["Pending broker confirmations", priceActionPaper.pending_broker_confirmation_signals],
@@ -2129,6 +2131,12 @@ def _price_action_paper_signal_status(cfg: EngineConfig) -> dict[str, Any]:
         or signal.get("price_action_entry_source") == "paper_confirmation_candidate"
     )
     summary_confirmation_signals = int(safe_float(summary.get("paper_confirmation_signals")) or 0)
+    row_low_price_tick_signal_count = sum(
+        1
+        for signal in signals
+        if signal.get("price_action_evidence_status") == "low_price_tick_requires_broker_paper_confirmation"
+        or signal.get("price_action_entry_source") == "low_price_tick_probe"
+    )
     confirmation_signal_count = row_confirmation_signal_count
     if signal_count and summary_confirmation_signals:
         confirmation_signal_count = max(row_confirmation_signal_count, min(signal_count, summary_confirmation_signals))
@@ -2151,6 +2159,11 @@ def _price_action_paper_signal_status(cfg: EngineConfig) -> dict[str, Any]:
         "paper_confirmation_candidates": summary.get("paper_confirmation_candidates"),
         "paper_confirmation_signals": confirmation_signal_count,
         "summary_paper_confirmation_signals": summary.get("paper_confirmation_signals"),
+        "low_price_tick_probe_candidates": summary.get("low_price_tick_probe_candidates"),
+        "low_price_tick_probe_signals": max(
+            row_low_price_tick_signal_count,
+            int(safe_float(summary.get("low_price_tick_probe_signals")) or 0),
+        ),
         "source_round_trip_rows": summary.get("source_round_trip_rows"),
         "source_microstructure_current_rows": summary.get("source_microstructure_current_rows"),
         "signal_file": str(root / "price_action_paper_signals.csv"),

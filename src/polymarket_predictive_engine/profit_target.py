@@ -24,6 +24,24 @@ def _tracker_settings(cfg: EngineConfig) -> dict[str, Any]:
     return cfg.raw.get("profit_tracking", {}) or {}
 
 
+def _status_for_pnl(*, pnl: float, target: float, elapsed_hours: float, monthly_run_rate: float | None, minimum_hours: float) -> str:
+    if pnl >= target:
+        return "target_reached"
+    if elapsed_hours < minimum_hours:
+        return "collecting_forward_evidence"
+    if monthly_run_rate is not None and monthly_run_rate >= target:
+        return "on_pace"
+    return "not_on_pace"
+
+
+def _paper_round_trip_audit(cfg: EngineConfig) -> dict[str, Any]:
+    payload = read_json(
+        cfg.output_root / "polymarket_price_action" / "paper_broker_round_trip_summary.json",
+        default={},
+    )
+    return payload if isinstance(payload, dict) else {}
+
+
 def write_profit_target_tracker(cfg: EngineConfig, broker: dict[str, Any]) -> dict[str, Any]:
     """Track actual paper P&L against the $100/month goal from a clean baseline.
 
@@ -73,17 +91,32 @@ def write_profit_target_tracker(cfg: EngineConfig, broker: dict[str, Any]) -> di
     current_time = _parse_utc(timestamp)
     elapsed_hours = max(0.0, (current_time - baseline_time).total_seconds() / 3600.0)
     elapsed_days = elapsed_hours / 24.0
-    pnl = current_equity - baseline_equity
-    monthly_run_rate = (pnl / elapsed_days * 30.0) if elapsed_days > 0 else None
+    raw_pnl = current_equity - baseline_equity
+    raw_monthly_run_rate = (raw_pnl / elapsed_days * 30.0) if elapsed_days > 0 else None
 
-    if pnl >= target:
-        status = "target_reached"
-    elif elapsed_hours < minimum_hours:
-        status = "collecting_forward_evidence"
-    elif monthly_run_rate is not None and monthly_run_rate >= target:
-        status = "on_pace"
-    else:
-        status = "not_on_pace"
+    round_trip_audit = _paper_round_trip_audit(cfg)
+    audited_pnl = safe_float(round_trip_audit.get("audited_baseline_realized_pnl_usdc"))
+    quote_conflicts = int(safe_float(round_trip_audit.get("quote_conflict_round_trips")) or 0)
+    quote_unverified = int(safe_float(round_trip_audit.get("quote_unverified_round_trips")) or 0)
+    audited_available = audited_pnl is not None
+    decision_pnl = float(audited_pnl) if audited_available else raw_pnl
+    decision_monthly_run_rate = (decision_pnl / elapsed_days * 30.0) if elapsed_days > 0 else None
+    pnl_audit_state = (
+        "raw_pnl_contains_quote_conflicts"
+        if quote_conflicts > 0
+        else "raw_pnl_contains_unverified_quotes"
+        if quote_unverified > 0
+        else "quote_consistent"
+        if audited_available
+        else "audit_not_available"
+    )
+    status = _status_for_pnl(
+        pnl=decision_pnl,
+        target=target,
+        elapsed_hours=elapsed_hours,
+        monthly_run_rate=decision_monthly_run_rate,
+        minimum_hours=minimum_hours,
+    )
 
     payload = {
         "status": status,
@@ -96,11 +129,31 @@ def write_profit_target_tracker(cfg: EngineConfig, broker: dict[str, Any]) -> di
             "cash_usdc": current_cash,
             "total_exposure_usdc": current_exposure,
         },
-        "actual_pnl_since_baseline_usdc": pnl,
+        "actual_pnl_since_baseline_usdc": raw_pnl,
+        "raw_account_pnl_since_baseline_usdc": raw_pnl,
+        "raw_account_monthly_run_rate_usdc": raw_monthly_run_rate,
+        "audited_pnl_since_baseline_usdc": audited_pnl,
+        "decision_pnl_usdc": decision_pnl,
         "elapsed_hours": elapsed_hours,
-        "monthly_run_rate_usdc": monthly_run_rate,
-        "on_pace_by_actual_pnl": bool(monthly_run_rate is not None and monthly_run_rate >= target and elapsed_hours >= minimum_hours),
-        "completion_evidence": "Goal is unproven until actual equity P&L, not expected value, reaches or sustains the configured monthly target.",
+        "monthly_run_rate_usdc": decision_monthly_run_rate,
+        "decision_monthly_run_rate_usdc": decision_monthly_run_rate,
+        "pnl_audit_state": pnl_audit_state,
+        "quote_conflict_round_trips": quote_conflicts,
+        "quote_unverified_round_trips": quote_unverified,
+        "on_pace_by_actual_pnl": bool(
+            decision_monthly_run_rate is not None
+            and decision_monthly_run_rate >= target
+            and elapsed_hours >= minimum_hours
+        ),
+        "on_pace_by_decision_pnl": bool(
+            decision_monthly_run_rate is not None
+            and decision_monthly_run_rate >= target
+            and elapsed_hours >= minimum_hours
+        ),
+        "completion_evidence": (
+            "Goal is unproven until audited quote-consistent paper P&L, not expected value or raw quote-conflicted ledger equity, "
+            "reaches or sustains the configured monthly target."
+        ),
     }
     write_json(tracker_path, payload)
     return payload

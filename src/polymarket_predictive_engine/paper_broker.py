@@ -877,9 +877,20 @@ def _entry_pause_reason(con, cfg: EngineConfig) -> str:
     if baseline_equity is None:
         return ""
     state = portfolio_state(con, cfg)
-    pnl = float(state["equity"]) - baseline_equity
+    raw_pnl = float(state["equity"]) - baseline_equity
+    round_trip_audit = read_json(
+        cfg.output_root / "polymarket_price_action" / "paper_broker_round_trip_summary.json",
+        default={},
+    )
+    audited_pnl = (
+        safe_float(round_trip_audit.get("audited_baseline_realized_pnl_usdc"))
+        if isinstance(round_trip_audit, dict)
+        else None
+    )
+    pnl = float(audited_pnl) if audited_pnl is not None else raw_pnl
+    pnl_source = "audited quote-consistent P&L" if audited_pnl is not None else "clean forward P&L"
     if pnl <= threshold:
-        return f"clean forward P&L {pnl:.2f} <= pause threshold {threshold:.2f}; monitoring exits only"
+        return f"{pnl_source} {pnl:.2f} <= pause threshold {threshold:.2f}; monitoring exits only"
     return ""
 
 

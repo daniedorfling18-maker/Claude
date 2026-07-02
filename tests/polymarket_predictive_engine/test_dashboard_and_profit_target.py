@@ -5,6 +5,7 @@ import json
 from pathlib import Path
 
 import yaml
+from pytest import approx
 
 from polymarket_predictive_engine.config import load_config
 from polymarket_predictive_engine.dashboard import render_dashboard
@@ -56,6 +57,48 @@ def test_profit_target_creates_clean_baseline_and_tracks_run_rate(tmp_path):
     assert second["actual_pnl_since_baseline_usdc"] == 10
     assert second["monthly_run_rate_usdc"] > 100
     assert second["status"] == "on_pace"
+
+
+def test_profit_target_uses_audited_pnl_when_raw_ledger_has_quote_conflicts(tmp_path):
+    cfg = _config(tmp_path)
+    write_json(
+        cfg.governance_root / "paper_profit_target_baseline.json",
+        {
+            "created_at_utc": (datetime.now(timezone.utc) - timedelta(hours=48)).strftime("%Y-%m-%dT%H:%M:%SZ"),
+            "baseline_equity_usdc": 1000,
+            "baseline_cash_usdc": 1000,
+            "baseline_total_exposure_usdc": 0,
+        },
+    )
+    write_json(
+        cfg.output_root / "polymarket_price_action" / "paper_broker_round_trip_summary.json",
+        {
+            "audited_baseline_realized_pnl_usdc": 0.22,
+            "quote_conflict_round_trips": 5,
+            "quote_unverified_round_trips": 6,
+        },
+    )
+
+    payload = write_profit_target_tracker(
+        cfg,
+        {
+            "equity": 1054.66,
+            "cash": 1054.66,
+            "total_exposure": 0,
+            "generated_at_utc": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        },
+    )
+
+    assert payload["status"] == "not_on_pace"
+    assert payload["actual_pnl_since_baseline_usdc"] == approx(54.66)
+    assert payload["raw_account_pnl_since_baseline_usdc"] == approx(54.66)
+    assert payload["audited_pnl_since_baseline_usdc"] == approx(0.22)
+    assert payload["decision_pnl_usdc"] == approx(0.22)
+    assert payload["pnl_audit_state"] == "raw_pnl_contains_quote_conflicts"
+    assert payload["quote_conflict_round_trips"] == 5
+    assert payload["quote_unverified_round_trips"] == 6
+    assert payload["raw_account_monthly_run_rate_usdc"] > 100
+    assert payload["decision_monthly_run_rate_usdc"] < 100
 
 
 def test_dashboard_renderer_writes_static_dashboard_and_data(tmp_path):

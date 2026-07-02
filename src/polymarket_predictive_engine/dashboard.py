@@ -322,8 +322,8 @@ async function load() {
     document.getElementById("statusText").textContent = (dashboardStale ? "dashboard stale" : `research ${researchStatus}`) + " - " + status + " - snapshot age " + fmtAge(dashboardAge) + " - updated " + (data.generated_at_utc || "-");
     const rawPnl = Number(target.actual_pnl_since_baseline_usdc || goalPlan.raw_account_pnl_since_baseline_usdc || 0);
     const pnl = Number(goalPlan.decision_pnl_usdc ?? rawPnl ?? 0);
-    const rawRunRate = target.monthly_run_rate_usdc;
-    const decisionRunRate = goalPlan.decision_monthly_run_rate_usdc ?? rawRunRate;
+    const rawRunRate = target.raw_account_monthly_run_rate_usdc ?? target.monthly_run_rate_usdc;
+    const decisionRunRate = goalPlan.decision_monthly_run_rate_usdc ?? target.decision_monthly_run_rate_usdc ?? target.monthly_run_rate_usdc;
     const auditedPnl = goalPlan.audited_pnl_since_baseline_usdc;
     const pnlAuditState = goalPlan.pnl_audit_state || "unknown";
     const paperRejections = asNumber(priceActionPaper.rejections, asNumber(data.forward_paper_cycle?.signals_rejected, asNumber(diag.rejected_signals_count, 0)));
@@ -475,12 +475,12 @@ async function load() {
       ["Target / month", target.target_monthly_profit_usdc, fmtUsd],
       ["Audited P&L for goal", pnl, fmtUsd],
       ["Audited run-rate", decisionRunRate, fmtUsd],
-      ["Raw ledger P&L", rawPnl, fmtUsd],
+      ["Raw ledger P&L (audit-only)", rawPnl, fmtUsd],
       ["P&L audit state", pnlAuditState, v=>longText(v, 180)],
       ["Quote conflicts", goalPlan.quote_conflict_round_trips],
       ["Unverified quote rows", goalPlan.quote_unverified_round_trips],
       ["Tracking hours", target.elapsed_hours, v=>fmtNum(v,2)],
-      ["Raw monthly run-rate", rawRunRate, fmtUsd],
+      ["Raw monthly run-rate (audit-only)", rawRunRate, fmtUsd],
       ["Baseline equity", target.baseline?.baseline_equity_usdc, fmtUsd]
     ]);
     document.getElementById("goalPlan").innerHTML = `<div class="sectionLead">This is the route to the $100/month target using tradable price changes, not waiting for market settlement.</div>` + facts([

@@ -553,11 +553,143 @@ def test_paper_confirmation_current_candidate_blocks_negative_historical_analogu
     analogue = summary["paper_confirmation_current_historical_analogue"]
 
     assert signals == []
+    assert summary["decision"] == "trusted_shadow_edge_blocked_by_negative_historical_analogue"
     assert summary["paper_confirmation_current_candidates"] == 0
     assert analogue["state"] == "no_positive_historical_analogue_current_candidate"
     assert analogue["fresh_matches"] == 1
     assert analogue["blocked"] == 1
     assert analogue["blocked_by_state"]["no_positive_historical_analogue_examples"] == 1
+
+
+def test_eth_updown_confirmation_query_matches_current_eth_rows_by_outcome(tmp_path):
+    cfg = _cfg(tmp_path)
+    cfg.raw["price_action_microstructure"] = {
+        "enabled": True,
+        "lookback_observations": 1,
+        "max_rows_per_token": 20,
+    }
+    cfg.raw["price_action_paper"].update(
+        {
+            "paper_confirmation_max_current_candidates": 4,
+            "paper_confirmation_require_positive_historical_analogue": True,
+            "paper_confirmation_min_historical_analogue_validation_rows": 3,
+            "paper_confirmation_min_historical_analogue_positive_rows": 1,
+            "low_price_tick_probe_enabled": False,
+        }
+    )
+    root = cfg.output_root / "polymarket_price_action"
+    feedback = _paper_confirmation_feedback_payload(
+        cohort="exploratory_crypto_updown_live_model|crypto_eth_updown_15m|outcome=up"
+    )
+    feedback["paper_confirmation_preview"][0]["recommended_collection_query"] = "eth updown"
+    write_json(cfg.governance_root / "price_action_feedback.json", feedback)
+    write_csv(
+        cfg.output_root / "polymarket_training" / "websocket_market_features.csv",
+        [
+            _ws_feature_row(
+                0,
+                asset_id="eth-up-token",
+                market_slug="eth-updown-15m-1783055700",
+                category="crypto_eth_updown_15m",
+                selection="Up",
+                best_bid="0.48",
+                best_ask="0.49",
+                midpoint="0.485",
+                spread="0.01",
+                price_change_side="BUY",
+            ),
+            _ws_feature_row(
+                1,
+                asset_id="eth-up-token",
+                market_slug="eth-updown-15m-1783055700",
+                category="crypto_eth_updown_15m",
+                selection="Up",
+                best_bid="0.49",
+                best_ask="0.50",
+                midpoint="0.495",
+                spread="0.01",
+                price_change_side="BUY",
+            ),
+            _ws_feature_row(
+                0,
+                asset_id="eth-down-token",
+                market_slug="eth-updown-15m-1783055700",
+                category="crypto_eth_updown_15m",
+                selection="Down",
+                best_bid="0.50",
+                best_ask="0.51",
+                midpoint="0.505",
+                spread="0.01",
+                price_change_side="BUY",
+            ),
+            _ws_feature_row(
+                1,
+                asset_id="eth-down-token",
+                market_slug="eth-updown-15m-1783055700",
+                category="crypto_eth_updown_15m",
+                selection="Down",
+                best_bid="0.51",
+                best_ask="0.52",
+                midpoint="0.515",
+                spread="0.01",
+                price_change_side="BUY",
+            ),
+        ],
+    )
+    write_csv(
+        root / "microstructure_trade_events.csv",
+        [
+            _low_price_trade_event(
+                split="validation",
+                family="crypto_eth_updown_15m",
+                market_slug="eth-updown-15m-1783055700",
+                outcome="Up",
+                entry_bid="0.49",
+                entry_ask="0.50",
+                entry_spread="0.01",
+                current_side="BUY",
+                exit_bid="0.54",
+                pnl_usdc="0.8",
+                roi="0.08",
+            ),
+            _low_price_trade_event(
+                split="validation",
+                family="crypto_eth_updown_15m",
+                market_slug="eth-updown-15m-1783055700",
+                outcome="Up",
+                entry_bid="0.49",
+                entry_ask="0.50",
+                entry_spread="0.01",
+                current_side="BUY",
+                exit_bid="0.53",
+                pnl_usdc="0.6",
+                roi="0.06",
+            ),
+            _low_price_trade_event(
+                split="validation",
+                family="crypto_eth_updown_15m",
+                market_slug="eth-updown-15m-1783055700",
+                outcome="Up",
+                entry_bid="0.49",
+                entry_ask="0.50",
+                entry_spread="0.01",
+                current_side="BUY",
+                exit_bid="0.52",
+                pnl_usdc="0.4",
+                roi="0.04",
+            ),
+        ],
+    )
+
+    summary = build_price_action_paper_signals(cfg)
+    signals = read_csv_rows(root / "price_action_paper_signals.csv")
+
+    assert summary["signals"] == 1
+    assert summary["paper_confirmation_current_historical_analogue"]["fresh_matches"] == 1
+    assert signals[0]["market_slug"] == "eth-updown-15m-1783055700"
+    assert signals[0]["outcome"] == "Up"
+    assert signals[0]["token_id"] == "eth-up-token"
+    assert "outcome=up" in signals[0]["signal_cohort"]
 
 
 def test_paper_confirmation_rejects_mutually_exclusive_same_market_probe(tmp_path):

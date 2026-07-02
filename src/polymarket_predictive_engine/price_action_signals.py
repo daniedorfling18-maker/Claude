@@ -571,13 +571,33 @@ def _query_family_prefixes(query: str) -> list[str]:
         return ["tennis"]
     if "bitcoin" in query or "btc" in query:
         return ["crypto_btc"]
-    if "ethereum" in query or query == "eth":
+    if "ethereum" in query or "eth" in query.split():
         return ["crypto_eth"]
     if "solana" in query or query == "sol":
         return ["crypto_sol"]
     if "xrp" in query or "ripple" in query:
         return ["crypto_xrp"]
     return []
+
+
+def _candidate_outcome_matches_row(candidate: dict[str, Any], row: dict[str, Any]) -> bool:
+    cohort = str(candidate.get("cohort") or "").strip().lower()
+    expected = ""
+    marker = "outcome="
+    if marker in cohort:
+        expected = cohort.split(marker, 1)[1].split("|", 1)[0].strip().lower()
+    if not expected:
+        return True
+    actual = str(row.get("outcome") or row.get("selection") or "").strip().lower()
+    if not actual:
+        return True
+    aliases = {
+        "up": {"up", "yes"},
+        "down": {"down", "no"},
+        "yes": {"yes", "up"},
+        "no": {"no", "down"},
+    }
+    return actual in aliases.get(expected, {expected})
 
 
 def _confirmation_candidate_for_row(row: dict[str, Any], candidates: list[dict[str, Any]]) -> dict[str, Any] | None:
@@ -588,6 +608,8 @@ def _confirmation_candidate_for_row(row: dict[str, Any], candidates: list[dict[s
     for candidate in candidates:
         cohort = str(candidate.get("cohort") or "").strip().lower()
         query = str(candidate.get("recommended_collection_query") or "").strip().lower()
+        if not _candidate_outcome_matches_row(candidate, row):
+            continue
         if cohort and (cohort == family or cohort in row_cohort or cohort in text):
             return candidate
         prefixes = _query_family_prefixes(query)
@@ -794,12 +816,20 @@ def _summary_decision(
     paper_confirmation: list[dict[str, Any]],
     low_price_tick: list[dict[str, Any]],
     rejections: list[dict[str, Any]],
+    paper_confirmation_current_analogue: dict[str, Any] | None = None,
 ) -> str:
     if signals:
         return "signals_ready_for_paper_broker"
     if low_price_tick:
         return "low_price_tick_probe_waiting_for_fresh_executable_candidate"
     if paper_confirmation:
+        analogue = paper_confirmation_current_analogue or {}
+        if (
+            int(safe_float(analogue.get("fresh_matches")) or 0) > 0
+            and int(safe_float(analogue.get("selected")) or 0) <= 0
+            and int(safe_float(analogue.get("blocked")) or 0) > 0
+        ):
+            return "trusted_shadow_edge_blocked_by_negative_historical_analogue"
         rejection_reasons = {str(row.get("rejection_reason") or "") for row in rejections}
         if any(
             reason in rejection_reasons
@@ -1031,7 +1061,13 @@ def build_price_action_paper_signals(cfg: EngineConfig) -> dict[str, Any]:
         "rejection_file": str(out_dir / REJECTIONS_FILE),
         "paper_trading_invoked": False,
         "live_trading_invoked": False,
-        "decision": _summary_decision(signals, paper_confirmation, low_price_tick, rejections),
+        "decision": _summary_decision(
+            signals,
+            paper_confirmation,
+            low_price_tick,
+            rejections,
+            paper_confirmation_current_analogue,
+        ),
         "warnings": {
             "paper_only": True,
             "live_trading_invoked": False,

@@ -6,6 +6,7 @@ import sys
 
 from .active_window_plan import build_active_window_plan
 from .algo.replay import run_replay
+from .algo.sweep import run_algo_sweep
 from .anchored_edge import run as run_anchored_edge
 from .backtest import backtest
 from .closing_line import build_closing_line_value
@@ -17,6 +18,7 @@ from .crypto_updown_labels import build_crypto_updown_proxy_labels
 from .data_inventory import inventory
 from .data_quality import data_quality
 from .dutch_arb_monitor import run_dutch_arb_monitor
+from .edge_attribution import build_edge_attribution
 from .execution.live import live_trade
 from .execution.paper import paper_trade_report
 from .external_feed_collector import collect_external_feeds
@@ -114,6 +116,8 @@ COMMANDS = [
     "price-action-paper-signals",
     "closing-line-value",
     "algo-replay",
+    "algo-sweep",
+    "edge-attribution",
     "active-window-plan",
     "promotion-gate",
     "validation-report",
@@ -319,6 +323,10 @@ def main(argv: list[str] | None = None) -> int:
             _print(build_closing_line_value(cfg, features_input=args.websocket_input))
         elif args.command == "algo-replay":
             _print(run_replay(cfg, args.strategy, features_input=args.websocket_input))
+        elif args.command == "algo-sweep":
+            _print(run_algo_sweep(cfg, strategy_name=args.strategy, features_input=args.websocket_input))
+        elif args.command == "edge-attribution":
+            _print(build_edge_attribution(cfg))
         elif args.command == "active-window-plan":
             _print(build_active_window_plan(cfg))
         elif args.command == "promotion-gate":

@@ -142,12 +142,20 @@ Acceptance: `tests/polymarket_predictive_engine/test_family_classifier.py` plus
 research families. This does **not** loosen promotion: newly classified families still need their own
 positive bid/ask, CLV, settlement, and paper evidence before any governed paper sizing.
 
-### WP8 — Edge attribution / post-trade analytics — `open`
+### WP8 — Edge attribution / post-trade analytics — `done` (2026-07-02, orchestrator)
 
 - Per closed shadow/paper position, decompose realised P&L into: entry edge (model vs market),
   line movement (CLV), spread/slippage cost, and settlement surprise. Aggregate per cohort.
 - Acceptance: an `edge_attribution.json` governance artifact; used by research-focus refresh to
   direct collection toward cohorts whose losses are cost-driven vs model-driven.
+
+Landed: `edge_attribution.py`, CLI `edge-attribution`. Exact per-share identity
+`exit - entry_fill == settlement_surprise + line_movement - execution_cost`, joined from closed
+shadow positions and CLV lines. Cohort classes: `positive_edge_confirmed`, `cost_dominated`,
+`model_direction_not_confirmed`, `settlement_adverse`, `mixed_attribution`,
+`insufficient_attribution_evidence` — each with a recommended research action. Artifacts:
+`outputs/polymarket_model_governance/edge_attribution.json` + `edge_attribution_positions.csv`.
+Research-focus consumption is WO-11 (Codex).
 
 ## Algo execution compatibility track (WP9–WP11)
 
@@ -189,6 +197,16 @@ only on later crossing quotes; mark to bid). This is the event-driven backtester
 algo loop offline. WP5's depth-based cost model now supplies the cost-aware execution layer used by
 alpha scoring, shadow fills, strategy checks, and risk sizing.
 
+### WP12 — Algo parameter sweep lab — `done` (2026-07-02, orchestrator)
+
+`algo/sweep.py`, CLI `algo-sweep`: grids strategy parameters over recorded websocket history
+through the replay harness, ranks on the TRAIN window only, then scores the single selected
+combination once out-of-sample. Fail-closed decisions: `insufficient_events_for_sweep`,
+`no_sweep_candidate_reached_minimum_train_fills`, `sweep_candidate_failed_out_of_sample_validation`,
+`sweep_candidate_validated_shadow_only`. A validated candidate is a research lead for more forward
+collection — it never promotes, sizes, or trades. Artifacts:
+`outputs/polymarket_algo/algo_sweep_summary.json` + `algo_sweep_combos.csv`. Config: `algo_sweep:`.
+
 ## Audit log
 
 **2026-07-02 — post-merge audit of Codex's landing on main (orchestrator).** PR #59 merged; Codex
@@ -212,6 +230,14 @@ path explode if enrichment is ever wired into it. WO-7 (WP4, CLV-aware promotion
 single open work order and now carries a near-diff-level spec plus an explicit list of wrong
 implementations; the work orders doc also gained a pre-flight checklist every agent must run
 before pushing.
+
+**2026-07-02 — WP8 and WP12 implemented by the orchestrator (edge-finding machinery).** Edge
+attribution decomposes every closed shadow position's P&L into execution cost, line movement, and
+settlement surprise (exact identity, tested) and classifies each cohort with a recommended
+research action. The algo sweep lab searches strategy parameter grids over recorded websocket
+history with train-only selection and out-of-sample confirmation through the replay harness.
+Wiring into the cycle/dashboard/audit is WO-10; research-focus consumption of attribution + CLV +
+sweep decisions is WO-11 — both specced for Codex.
 
 ## Rules of engagement for coding agents
 

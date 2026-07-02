@@ -1,6 +1,6 @@
 # Polymarket Codex Work Orders
 
-Last updated: 2026-07-02 (WO-1..WO-6 landed and audited; WO-8/WO-9 landed; WO-7 open)
+Last updated: 2026-07-02 (WO-1..WO-9 landed except WO-7; WO-7, WO-10, WO-11 open)
 
 Mechanical, file-level implementation instructions for coding agents (Codex or any other code
 changer). The architecture and priorities live in `docs/POLYMARKET_QUANT_MODE_CHARTER.md`; this file
@@ -421,12 +421,85 @@ scoring path does route through it.
 
 ---
 
+## WO-10 — Wire edge attribution and the algo sweep into the cycle, dashboard, and audit — `open`
+
+**Goal:** `edge-attribution` and `algo-sweep` run on every scheduled cycle and their results are
+visible where humans look. Pure wiring — the modules exist and are tested; do not change them.
+
+**Files:** `src/polymarket_predictive_engine/refresh_governance.py`,
+`src/polymarket_predictive_engine/dashboard.py`, `scripts/audit_polymarket_local_history.py`,
+their existing tests.
+
+**Exact steps (copy the CLV wiring, commit-for-commit — it is the same shape):**
+
+1. `refresh_governance.py`: import `build_edge_attribution` from `.edge_attribution` and
+   `run_algo_sweep` from `.algo.sweep`. Call both immediately after the
+   `build_closing_line_value(cfg)` call (attribution needs the fresh CLV positions CSV, so the
+   order is: closing line -> edge attribution -> algo sweep). Add `"edge_attribution": True` and
+   `"algo_sweep": True` to `refreshed`; add top-level fields
+   `"edge_attribution_positions"` (from `attributed_positions`),
+   `"edge_attribution_cohort_classes"` (dict of cohort -> `attribution_class`),
+   `"algo_sweep_decision"` (from `decision`). No try/except.
+2. `dashboard.py`: copy the `closing_line_value` read/payload/JS pattern for
+   `edge_attribution.json` (governance root) and `polymarket_algo/algo_sweep_summary.json`
+   (output root). Two sections: "Edge attribution" — facts (attributed positions, identity note)
+   plus a cohort table (cohort / positions / total P&L / execution cost / line movement /
+   settlement surprise / class / recommended action); "Algo sweep lab" — facts (decision, combos
+   tested, train candidates, selected params + train/validation P&L). Empty artifacts render
+   "no attribution evidence yet" / "no sweep run yet".
+3. Audit script: add report-only `edge_attribution` and `algo_sweep` payload blocks (summary
+   fields + cohort classes only) and matching markdown sections, added AFTER `_paper_decision`
+   is computed, exactly like the CLV block. **`_paper_decision` stays untouched.**
+4. Tests: extend the refresh-governance test (order: closing_line before edge_attribution before
+   dashboard; refreshed flags; artifact files exist), the dashboard test (fixture artifacts ->
+   payload keys + section titles; empty case), and the audit test (payload blocks present;
+   paper decision byte-identical with and without the artifacts).
+
+**Out of scope:** any change to `edge_attribution.py`, `algo/sweep.py`, gates, or
+`_paper_decision`.
+
+---
+
+## WO-11 — Research focus consumes attribution, CLV, and sweep decisions — `open`
+
+**Goal:** collection priorities steer toward cohorts where the evidence says edge might live and
+away from cohorts where the model is simply wrong. Collection steering only — no gate changes.
+
+**Files:** `src/polymarket_predictive_engine/research_focus.py`, its test.
+
+**Exact steps:**
+
+1. In `build_research_focus`, read (all `default={}`, coerce non-dict to `{}`):
+   `edge_attribution.json`, `closing_line_value.json` (governance root), and
+   `polymarket_algo/algo_sweep_summary.json` (output root).
+2. Priority adjustments — affect ONLY collection ordering/queries, never gates:
+   - cohorts with `attribution_class == "cost_dominated"` or `"positive_edge_confirmed"`, or in
+     `positive_clv_cohorts`: raise collection priority and add their family terms to the
+     collection queries;
+   - cohorts with `attribution_class == "model_direction_not_confirmed"` AND
+     `negative_clv_evidence`: lower collection priority (do NOT blacklist — suppression stays
+     governance's job);
+   - if the sweep decision is `sweep_candidate_validated_shadow_only`, add a research-focus note
+     naming the selected parameters so humans see the lead.
+3. The research-focus artifact gains an `evidence_inputs` block recording which cohorts moved and
+   why (attribution class / CLV evidence / sweep decision) — every adjustment must be explainable
+   from the artifact alone.
+4. Tests: fixture artifacts -> assert a cost_dominated cohort's terms appear in collection
+   queries; a direction-wrong + negative-CLV cohort ranks below it; no gate/threshold fields
+   anywhere in the diff; output unchanged when the three artifacts are absent.
+
+**Out of scope:** thresholds, promotion logic, blacklists, `readiness.py`, the audit script.
+
+---
+
 ## Sequencing
 
 ```text
 WO-1..WO-6         done and audited (2026-07-02)
 WO-8, WO-9         done (2026-07-02)
-WO-7               open — the only open work order; follow its spec verbatim
+WO-7               open — CLV-aware promotion review; follow its spec verbatim
+WO-10              open — wiring for edge attribution + algo sweep (independent of WO-7)
+WO-11              open — research-focus consumption; land AFTER WO-10 so artifacts refresh each cycle
 ```
 
 After all six land: WP3 is done (flip it in the charter), the algo track (WP9–WP11) is done, and

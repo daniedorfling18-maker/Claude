@@ -778,6 +778,7 @@ async function load() {
       ["Marked P&L", priceScout.total_mark_pnl_usdc, fmtUsd],
       ["Marked ROI", priceScout.mark_roi, v=>fmtNum(Number(v) * 100, 2) + "%"],
       ["Review candidates", priceScout.price_action_review_candidates],
+      ["Current analogue scout targets", priceScout.current_positive_analogue_targets],
       ["Paper signal decision", priceActionPaper.decision],
       ["Paper signals", priceActionPaper.signals],
       ["Paper rejections", priceActionPaper.rejections],

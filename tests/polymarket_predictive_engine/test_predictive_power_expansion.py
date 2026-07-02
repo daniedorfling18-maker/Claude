@@ -810,6 +810,80 @@ def test_websocket_reserves_validation_gap_targets_from_research_focus(tmp_path)
     )
 
 
+def test_websocket_reserves_current_positive_analogue_tokens(tmp_path):
+    import yaml
+
+    cfg_path = make_cfg(tmp_path)
+    data = yaml.safe_load(cfg_path.read_text(encoding="utf-8"))
+    data.setdefault("websocket_market_data", {})
+    data["websocket_market_data"].update(
+        {
+            "use_liquidity_targets": True,
+            "use_strategy_v2_targets": False,
+            "feedback_broaden_target_enabled": False,
+            "include_research_liquidity_targets": False,
+            "max_liquidity_target_assets": 2,
+            "max_current_positive_analogue_target_assets": 2,
+            "market_ids": [],
+        }
+    )
+    cfg_path.write_text(yaml.safe_dump(data, sort_keys=False), encoding="utf-8")
+    cfg = load_config(cfg_path)
+    write_json(
+        cfg.governance_root / "research_focus.json",
+        {
+            "status": "ok",
+            "price_action_current_positive_analogues": {
+                "state": "learning_targets_available",
+                "targets": [
+                    {
+                        "token_id": "fed-analogue-token",
+                        "family": "macro_rates",
+                        "market_slug": "will-the-fed-increase-rates",
+                        "question": "Will the Fed increase rates?",
+                        "outcome": "Yes",
+                        "latest_bid": 0.49,
+                        "latest_ask": 0.50,
+                        "latest_spread": 0.01,
+                        "validation_roi": 0.004,
+                        "robust_validation_roi_gap": 0.026,
+                    }
+                ],
+            },
+        },
+    )
+    write_csv(
+        cfg.output_root / "polymarket_liquidity_discovery" / "liquidity_watchlist.csv",
+        [
+            {
+                "token_id": "btc-token",
+                "family": "crypto_btc_special",
+                "tradable_liquidity_candidate": "true",
+                "liquidity": "5000",
+                "spread": "0.01",
+                "time_to_close_hours": "2",
+            },
+            {
+                "token_id": "eth-token",
+                "family": "crypto_eth_special",
+                "tradable_liquidity_candidate": "true",
+                "liquidity": "4000",
+                "spread": "0.01",
+                "time_to_close_hours": "2",
+            },
+        ],
+    )
+
+    targets = websocket_collector._liquidity_target_rows(cfg, cfg.raw["websocket_market_data"])
+    token_ids = [row["token_id"] for row in targets]
+    analogue_targets = [row for row in targets if row.get("current_positive_analogue_target") is True]
+
+    assert token_ids[0] == "fed-analogue-token"
+    assert len(targets) == 2
+    assert len(analogue_targets) == 1
+    assert analogue_targets[0]["websocket_target_reason"] == "reserve_current_positive_analogue_for_forward_bid_tracking"
+
+
 def test_websocket_collector_fails_closed_on_socket_error(tmp_path, monkeypatch):
     cfg = load_config(make_cfg(tmp_path))
 

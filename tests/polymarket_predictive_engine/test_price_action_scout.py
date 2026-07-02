@@ -6,7 +6,7 @@ from pytest import approx
 
 from polymarket_predictive_engine.config import EngineConfig
 from polymarket_predictive_engine.price_action_scout import build_price_action_scout
-from polymarket_predictive_engine.utils import read_csv_rows, write_csv
+from polymarket_predictive_engine.utils import read_csv_rows, write_csv, write_json
 
 
 def _cfg(tmp_path: Path) -> EngineConfig:
@@ -121,6 +121,53 @@ def test_price_action_scout_joins_profit_sprint_targets_to_watchlist_tokens(tmp_
     assert entries[0]["token_id"] == "eth-token"
     assert rows[0]["round_trip_status"] == "closed_stop_loss"
     assert float(rows[0]["realized_pnl_usdc"]) == approx(-0.8)
+
+
+def test_price_action_scout_tracks_current_positive_analogue_targets(tmp_path):
+    cfg = _cfg(tmp_path)
+    write_json(
+        cfg.governance_root / "research_focus.json",
+        {
+            "generated_at_utc": "2026-06-30T10:00:00Z",
+            "price_action_current_positive_analogues": {
+                "state": "learning_targets_available",
+                "paper_only": True,
+                "trade_authorisation": "no_trade_without_governed_price_action_signal",
+                "targets": [
+                    {
+                        "market_slug": "will-the-fed-increase-interest-rates-by-50-bps-after-the-july-2026-meeting",
+                        "question": "Will the Fed increase interest rates by 50+ bps after the July 2026 meeting?",
+                        "family": "macro_rates",
+                        "outcome": "Yes",
+                        "token_id": "fed-token",
+                        "latest_bid": 0.49,
+                        "latest_ask": 0.50,
+                        "latest_spread": 0.01,
+                        "validation_roi": 0.004,
+                        "robust_validation_roi_gap": 0.026,
+                    }
+                ],
+            },
+        },
+    )
+    write_csv(
+        cfg.output_root / "polymarket_training" / "websocket_market_features.csv",
+        [_websocket_row("2026-06-30T10:05:00Z", "0.55", token="fed-token")],
+    )
+
+    summary = build_price_action_scout(cfg)
+    entries = read_csv_rows(cfg.output_root / "polymarket_price_action" / "price_action_scout_entries.csv")
+    rows = read_csv_rows(cfg.output_root / "polymarket_price_action" / "price_action_scout_round_trip_evidence.csv")
+
+    assert summary["current_positive_analogue_targets"] == 1
+    assert summary["new_entries"] == 1
+    assert entries[0]["source"] == "current_positive_analogue"
+    assert entries[0]["signal_cohort"] == "price_action_scout|current_positive_analogue|macro_rates"
+    assert entries[0]["target_action"] == "FORWARD_SHADOW_ANALOGUE"
+    assert "shadow-only" in entries[0]["candidate_reason"]
+    assert rows[0]["round_trip_status"] == "closed_take_profit"
+    assert float(rows[0]["exit_price"]) == approx(0.55)
+    assert float(rows[0]["realized_pnl_usdc"]) == approx(1.0)
 
 
 def test_price_action_scout_rejects_spread_toxic_low_price_books(tmp_path):

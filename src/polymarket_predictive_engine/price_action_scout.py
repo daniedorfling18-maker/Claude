@@ -6,7 +6,7 @@ from typing import Any
 
 from .config import EngineConfig, load_config
 from .strategy_v2_round_trip import _candidate_round_trip, _cohort_rows
-from .utils import now_utc, parse_timestamp, read_csv_rows, safe_float, write_csv, write_json
+from .utils import now_utc, parse_timestamp, read_csv_rows, read_json, safe_float, write_csv, write_json
 
 OUTPUT_DIRNAME = "polymarket_price_action"
 ENTRY_LEDGER_FILE = "price_action_scout_entries.csv"
@@ -302,6 +302,77 @@ def _fast_feedback_candidates(watchlist: list[dict[str, str]], settings: dict[st
     return rows
 
 
+def _current_positive_analogue_candidates(cfg: EngineConfig, settings: dict[str, Any]) -> list[dict[str, Any]]:
+    """Convert current positive analogue diagnostics into shadow round-trip entries.
+
+    This does not authorise paper/live trading. It only records a buy-at-ask
+    entry so later websocket bids can prove whether the analogue truly reprices.
+    """
+    if not _boolish(settings.get("include_current_positive_analogues", True)):
+        return []
+    focus = read_json(cfg.governance_root / "research_focus.json", default={}) or {}
+    if not isinstance(focus, dict):
+        return []
+    payload = focus.get("price_action_current_positive_analogues")
+    if not isinstance(payload, dict):
+        return []
+    targets = payload.get("targets")
+    if not isinstance(targets, list):
+        return []
+    generated_at = str(focus.get("generated_at_utc") or now_utc())
+    min_liquidity = float(safe_float(settings.get("min_liquidity")) or 100.0)
+    liquidity_proxy = safe_float(settings.get("current_positive_analogue_liquidity_proxy"))
+    if liquidity_proxy is None or liquidity_proxy <= 0:
+        liquidity_proxy = min_liquidity
+    rows: list[dict[str, Any]] = []
+    for target in targets:
+        if not isinstance(target, dict):
+            continue
+        bid = safe_float(target.get("latest_bid"))
+        ask = safe_float(target.get("latest_ask"))
+        spread = safe_float(target.get("latest_spread"))
+        if spread is None and bid is not None and ask is not None:
+            spread = max(0.0, ask - bid)
+        midpoint = (bid + ask) / 2.0 if bid is not None and ask is not None else None
+        liquidity = safe_float(target.get("liquidity"))
+        if liquidity is None or liquidity <= 0:
+            liquidity = liquidity_proxy
+        validation_roi = safe_float(target.get("validation_roi"))
+        robust_gap = safe_float(target.get("robust_validation_roi_gap"))
+        family = str(target.get("family") or "unknown").strip() or "unknown"
+        row = {
+            "timestamp": generated_at,
+            "market_slug": target.get("market_slug", ""),
+            "question": target.get("question", ""),
+            "outcome": target.get("outcome", ""),
+            "token_id": target.get("token_id", ""),
+            "family": family,
+            "best_bid": "" if bid is None else bid,
+            "best_ask": "" if ask is None else ask,
+            "midpoint": "" if midpoint is None else midpoint,
+            "spread": "" if spread is None else spread,
+            "liquidity": liquidity,
+            "relative_spread": "" if spread is None or ask is None or ask <= 0 else spread / ask,
+            "target_action": "FORWARD_SHADOW_ANALOGUE",
+            "target_score": "" if validation_roi is None else validation_roi,
+            "edge_lower_bound": "" if validation_roi is None else validation_roi,
+            "candidate_reason": (
+                "current positive historical analogue; shadow-only buy-at-ask / future-bid tracking"
+                + (f"; robust_roi_gap={robust_gap:.4f}" if robust_gap is not None else "")
+            ),
+        }
+        entry = _entry_from_watchlist(
+            row,
+            source="current_positive_analogue",
+            signal_cohort=f"price_action_scout|current_positive_analogue|{family}",
+            reason=str(row["candidate_reason"]),
+            settings=settings,
+        )
+        if entry:
+            rows.append(entry)
+    return rows
+
+
 def _merge_entries(existing: list[dict[str, str]], new_entries: list[dict[str, Any]], *, max_new: int) -> tuple[list[dict[str, Any]], int]:
     merged: dict[tuple[str, str, str, str], dict[str, Any]] = {(_entry_key(row)): dict(row) for row in existing}
     added = 0
@@ -323,7 +394,12 @@ def _merge_entries(existing: list[dict[str, str]], new_entries: list[dict[str, A
 
 
 def _source_priority(row: dict[str, Any]) -> int:
-    return 2 if str(row.get("source") or "") == "profit_sprint_target" else 1
+    source = str(row.get("source") or "")
+    if source == "current_positive_analogue":
+        return 3
+    if source == "profit_sprint_target":
+        return 2
+    return 1
 
 
 def _candidate_priority(row: dict[str, Any]) -> tuple[int, float, float, float, float]:
@@ -375,11 +451,13 @@ def build_price_action_scout(cfg: EngineConfig) -> dict[str, Any]:
     new_candidates: list[dict[str, Any]] = []
     if _boolish(settings.get("include_profit_sprint_targets", True)):
         new_candidates.extend(_profit_sprint_candidates(profit_targets=profit_targets, watchlist_by_key=watchlist_by_key, settings=settings))
+    current_positive_analogue_candidates = _current_positive_analogue_candidates(cfg, settings)
+    new_candidates.extend(current_positive_analogue_candidates)
     new_candidates.extend(_fast_feedback_candidates(watchlist, settings))
     new_candidates = _dedupe_candidates_by_token(new_candidates)
     new_candidates.sort(
         key=lambda row: (
-            str(row.get("source") or "") == "profit_sprint_target",
+            _source_priority(row),
             safe_float(row.get("target_score")) or 0.0,
             safe_float(row.get("edge_lower_bound")) or 0.0,
             safe_float(row.get("liquidity")) or 0.0,
@@ -432,6 +510,7 @@ def build_price_action_scout(cfg: EngineConfig) -> dict[str, Any]:
         "cohort_file": str(out_dir / COHORT_FILE),
         "watchlist_rows": len(watchlist),
         "profit_sprint_target_rows": len(profit_targets),
+        "current_positive_analogue_targets": len(current_positive_analogue_candidates),
         "new_entries": added,
         "ledger_entries": len(entries),
         "policy_eligible_entries": len(policy_eligible_entries),

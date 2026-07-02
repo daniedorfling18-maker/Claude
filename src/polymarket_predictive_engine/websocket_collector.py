@@ -582,6 +582,65 @@ def _strategy_v2_priority_rows(cfg: EngineConfig, settings: dict[str, Any]) -> l
     return selected
 
 
+def _current_positive_analogue_priority_rows(cfg: EngineConfig, settings: dict[str, Any]) -> list[dict[str, Any]]:
+    """Reserve exact websocket tokens for current positive analogue scout entries."""
+    if not _boolish(settings.get("use_current_positive_analogue_targets", True)):
+        return []
+    max_rows = int(settings.get("max_current_positive_analogue_target_assets", 4) or 4)
+    if max_rows <= 0:
+        return []
+    focus = read_json(cfg.governance_root / "research_focus.json", default={}) or {}
+    if not isinstance(focus, dict):
+        return []
+    payload = focus.get("price_action_current_positive_analogues")
+    if not isinstance(payload, dict):
+        return []
+    targets = payload.get("targets")
+    if not isinstance(targets, list):
+        return []
+    liquidity_proxy = safe_float(settings.get("current_positive_analogue_liquidity_proxy"))
+    if liquidity_proxy is None or liquidity_proxy <= 0:
+        liquidity_proxy = safe_float(settings.get("research_min_liquidity")) or 25.0
+    selected: list[dict[str, Any]] = []
+    seen_ids: set[str] = set()
+    for target in targets:
+        if not isinstance(target, dict):
+            continue
+        token_id = _token_id(target)
+        if not token_id or token_id in seen_ids:
+            continue
+        bid = safe_float(target.get("latest_bid"))
+        ask = safe_float(target.get("latest_ask"))
+        spread = safe_float(target.get("latest_spread"))
+        midpoint = (bid + ask) / 2.0 if bid is not None and ask is not None else ""
+        liquidity = safe_float(target.get("liquidity"))
+        if liquidity is None or liquidity <= 0:
+            liquidity = liquidity_proxy
+        selected.append(
+            {
+                "token_id": token_id,
+                "market_slug": target.get("market_slug", ""),
+                "question": target.get("question", ""),
+                "outcome": target.get("outcome", ""),
+                "family": target.get("family", "current_positive_analogue"),
+                "best_bid": "" if bid is None else bid,
+                "best_ask": "" if ask is None else ask,
+                "midpoint": midpoint,
+                "spread": "" if spread is None else spread,
+                "relative_spread": "" if spread is None or ask is None or ask <= 0 else spread / ask,
+                "liquidity": liquidity,
+                "current_positive_analogue_target": True,
+                "current_positive_analogue_validation_roi": target.get("validation_roi", ""),
+                "current_positive_analogue_robust_gap": target.get("robust_validation_roi_gap", ""),
+                "websocket_target_reason": "reserve_current_positive_analogue_for_forward_bid_tracking",
+            }
+        )
+        seen_ids.add(token_id)
+        if len(selected) >= max_rows:
+            break
+    return selected
+
+
 def _liquidity_target_rows(cfg: EngineConfig, settings: dict[str, Any]) -> list[dict[str, Any]]:
     if not _boolish(settings.get("use_liquidity_targets", True)):
         return []
@@ -608,16 +667,39 @@ def _liquidity_target_rows(cfg: EngineConfig, settings: dict[str, Any]) -> list[
         candidates.append(row)
     candidates.sort(key=_candidate_rank, reverse=True)
 
+    current_analogue_rows = _current_positive_analogue_priority_rows(cfg, settings)
     strategy_v2_rows = _strategy_v2_priority_rows(cfg, settings)
     priority_rows = _profit_sprint_priority_rows(cfg, candidates)
+    reserved_ids = {_token_id(row) for row in current_analogue_rows if _token_id(row)}
     if not priority_rows and not strategy_v2_rows:
         feedback_rows = _feedback_broaden_rows(cfg, settings, candidates)
         if not feedback_rows:
-            selected = _balanced_by_family(candidates, max_assets=max_assets, max_per_family=max_per_family)
+            selected = current_analogue_rows[:max_assets]
+            selected_ids = {_token_id(row) for row in selected if _token_id(row)}
+            remaining_candidates = [row for row in candidates if _token_id(row) not in selected_ids]
+            selected.extend(
+                _balanced_by_family(
+                    remaining_candidates,
+                    max_assets=max_assets - len(selected),
+                    max_per_family=max_per_family,
+                )
+            )
             return _with_research_targets(rows, selected, settings, max_assets=max_assets)
         reserve = min(len(feedback_rows), max(0, max_assets - 1))
-        base_rows = [row for row in candidates if _token_id(row) not in {_token_id(item) for item in feedback_rows[:reserve]}]
-        selected = _balanced_by_family(base_rows, max_assets=max_assets - reserve, max_per_family=max_per_family)
+        base_rows = [
+            row
+            for row in candidates
+            if _token_id(row) not in {_token_id(item) for item in feedback_rows[:reserve]}
+            and _token_id(row) not in reserved_ids
+        ]
+        selected = current_analogue_rows[:max_assets]
+        selected.extend(
+            _balanced_by_family(
+                base_rows,
+                max_assets=max_assets - reserve - len(selected),
+                max_per_family=max_per_family,
+            )
+        )
         selected_ids = {_token_id(row) for row in selected}
         for row in feedback_rows:
             token_id = _token_id(row)
@@ -633,11 +715,11 @@ def _liquidity_target_rows(cfg: EngineConfig, settings: dict[str, Any]) -> list[
     feedback_reserve = min(
         len(feedback_rows),
         max(0, int(settings.get("feedback_broaden_target_assets", 4) or 4)),
-        max(0, max_assets - 1),
+        max(0, max_assets - len(current_analogue_rows) - 1),
     )
     normal_budget = max_assets - feedback_reserve
-    selected: list[dict[str, Any]] = []
-    selected_ids: set[str] = set()
+    selected: list[dict[str, Any]] = current_analogue_rows[:normal_budget]
+    selected_ids: set[str] = {_token_id(row) for row in selected if _token_id(row)}
     for row in strategy_v2_rows:
         token_id = _token_id(row)
         if not token_id or token_id in selected_ids:
@@ -724,6 +806,16 @@ def _strategy_v2_target_counts(rows: list[dict[str, Any]]) -> dict[str, int]:
     return dict(sorted(counts.items()))
 
 
+def _current_positive_analogue_counts(rows: list[dict[str, Any]]) -> dict[str, int]:
+    counts: dict[str, int] = {}
+    for row in rows:
+        if not _boolish(row.get("current_positive_analogue_target")):
+            continue
+        family = str(row.get("family") or "current_positive_analogue")
+        counts[family] = counts.get(family, 0) + 1
+    return dict(sorted(counts.items()))
+
+
 def _feedback_broaden_counts(rows: list[dict[str, Any]]) -> dict[str, int]:
     counts: dict[str, int] = {}
     for row in rows:
@@ -800,9 +892,18 @@ def collect_websocket(cfg: EngineConfig, websocket_seconds: int = 60) -> dict[st
     dynamic_ids = _asset_ids_from_rows(target_rows)
     sprint_counts = _profit_sprint_target_counts(target_rows)
     strategy_v2_counts = _strategy_v2_target_counts(target_rows)
+    current_analogue_counts = _current_positive_analogue_counts(target_rows)
     feedback_counts = _feedback_broaden_counts(target_rows)
     research_counts = _research_target_counts(target_rows)
-    if strategy_v2_counts and sprint_counts:
+    if current_analogue_counts and strategy_v2_counts and sprint_counts:
+        target_source = "current_positive_analogue+strategy_v2_forward_evidence+profit_sprint_targets+liquidity_watchlist"
+    elif current_analogue_counts and strategy_v2_counts:
+        target_source = "current_positive_analogue+strategy_v2_forward_evidence+liquidity_watchlist"
+    elif current_analogue_counts and sprint_counts:
+        target_source = "current_positive_analogue+profit_sprint_targets+liquidity_watchlist"
+    elif current_analogue_counts:
+        target_source = "current_positive_analogue+liquidity_watchlist"
+    elif strategy_v2_counts and sprint_counts:
         target_source = "strategy_v2_forward_evidence+profit_sprint_targets+liquidity_watchlist"
     elif strategy_v2_counts:
         target_source = "strategy_v2_forward_evidence+liquidity_watchlist"
@@ -858,6 +959,7 @@ def collect_websocket(cfg: EngineConfig, websocket_seconds: int = 60) -> dict[st
             "target_fast_feedback_family_counts": _fast_feedback_counts(target_rows),
             "target_profit_sprint_counts": sprint_counts,
             "target_strategy_v2_counts": strategy_v2_counts,
+            "target_current_positive_analogue_counts": current_analogue_counts,
             "target_feedback_broaden_counts": feedback_counts,
             "target_research_counts": research_counts,
             "subscription_attempts": len(variants),
@@ -890,6 +992,7 @@ def collect_websocket(cfg: EngineConfig, websocket_seconds: int = 60) -> dict[st
         "target_fast_feedback_family_counts": _fast_feedback_counts(target_rows),
         "target_profit_sprint_counts": sprint_counts,
         "target_strategy_v2_counts": strategy_v2_counts,
+        "target_current_positive_analogue_counts": current_analogue_counts,
         "target_feedback_broaden_counts": feedback_counts,
         "target_research_counts": research_counts,
         "target_file": str(cfg.governance_root / "websocket_liquidity_targets.csv") if target_rows else "",

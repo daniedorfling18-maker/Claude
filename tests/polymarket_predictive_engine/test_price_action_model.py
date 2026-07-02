@@ -150,6 +150,43 @@ def _round_trip_event(i: int, *, split: str, profitable: bool) -> dict[str, str]
     }
 
 
+def _payoff_asymmetric_event(i: int, *, split: str, profitable: bool, high_signal: bool) -> dict[str, str]:
+    row = _event(i, split=split, profitable=profitable)
+    entry_ask = 0.50
+    exit_bid = 0.65 if profitable else 0.475
+    stake = 10.0
+    quantity = stake / entry_ask
+    pnl = (exit_bid - entry_ask) * quantity
+    signal = 0.06 if high_signal else -0.05
+    row.update(
+        {
+            "token_id": f"asymmetric-{split}-{i}",
+            "market_slug": f"asymmetric-market-{split}-{i}",
+            "question": "Will this broad market reprice before close?",
+            "family": "macro_rates",
+            "outcome": "Yes",
+            "entry_ask": f"{entry_ask:.4f}",
+            "entry_midpoint": "0.4950",
+            "entry_spread": "0.0100",
+            "relative_spread": "0.0200",
+            "bid_move_abs": f"{signal:.4f}",
+            "mid_move_abs": f"{signal:.4f}",
+            "ask_move_abs": f"{signal:.4f}",
+            "spread_change": "0.0000",
+            "net_buy_events": "4" if high_signal else "-4",
+            "net_buy_size": "180" if high_signal else "-90",
+            "current_side": "BUY" if high_signal else "SELL",
+            "current_price_change_size": "75" if high_signal else "12",
+            "exit_bid": f"{exit_bid:.4f}",
+            "exit_reason": "take_profit" if profitable else "fixed_horizon",
+            "pnl_usdc": f"{pnl:.6f}",
+            "roi": f"{pnl / stake:.6f}",
+            "stake_usdc": f"{stake:.2f}",
+        }
+    )
+    return row
+
+
 def test_price_action_model_trains_on_future_bid_repricing_and_scores_current_rows(tmp_path):
     cfg = _cfg(tmp_path)
     events = []
@@ -299,6 +336,57 @@ def test_price_action_model_uses_train_only_rank_thresholds_for_rare_repricing(t
     assert summary["validation_selected"]["selected_trades"] >= 5
     assert summary["validation_selected"]["selected_roi"] > summary["validation_buy_all_baseline"]["roi"]
     assert "no probability threshold cleared the training split trade gates" not in summary["validation_blockers"]
+
+
+def test_price_action_model_allows_low_hit_rate_when_payoff_is_asymmetric(tmp_path):
+    cfg = _cfg(tmp_path)
+    settings = cfg.raw["price_action_model"]
+    settings.update(
+        {
+            "minimum_rows": 160,
+            "minimum_validation_rows": 80,
+            "minimum_selected_train_trades": 8,
+            "minimum_selected_validation_trades": 8,
+            "minimum_selected_train_roi": 0.03,
+            "minimum_selected_validation_roi": 0.03,
+            "minimum_selected_train_win_rate": 0.55,
+            "minimum_selected_validation_win_rate": 0.55,
+            "minimum_payoff_asymmetric_win_rate_floor": 0.30,
+            "minimum_selected_profit_factor": 1.20,
+            "minimum_selected_payoff_ratio": 1.50,
+            "minimum_selected_validation_roi_ci_low": -0.20,
+            "maximum_selected_validation_drawdown": -0.50,
+            "probability_threshold_grid": [0.95, 0.99],
+            "train_rank_threshold_trade_counts": [10],
+            "train_rank_threshold_quantiles": [0.90],
+            "l2": 2.0,
+        }
+    )
+    events = []
+    high_signal_pattern = [True, False, False, True, False, True, False, False, True, False]
+    for i, profitable in enumerate(high_signal_pattern):
+        events.append(_payoff_asymmetric_event(i, split="train", profitable=profitable, high_signal=True))
+    for i in range(10, 100):
+        events.append(_payoff_asymmetric_event(i, split="train", profitable=False, high_signal=False))
+    for offset, profitable in enumerate(high_signal_pattern):
+        events.append(_payoff_asymmetric_event(100 + offset, split="validation", profitable=profitable, high_signal=True))
+    for i in range(110, 200):
+        events.append(_payoff_asymmetric_event(i, split="validation", profitable=False, high_signal=False))
+    write_csv(cfg.output_root / "polymarket_price_action" / "microstructure_trade_events.csv", events)
+
+    summary = train_price_action_model(cfg)
+
+    chosen = summary["train_threshold_selection"]["chosen_train_metrics"]
+    selected = summary["validation_selected"]
+    assert summary["status"] == "trained"
+    assert summary["promotion_ready"] is True
+    assert chosen["selected_win_rate"] < 0.55
+    assert chosen["train_win_rate_gate_reason"] == "payoff_asymmetric_positive_expectancy"
+    assert selected["selected_win_rate"] < 0.55
+    assert summary["validation_win_rate_gate_reason"] == "payoff_asymmetric_positive_expectancy"
+    assert selected["selected_profit_factor"] > 1.20
+    assert selected["selected_payoff_ratio"] > 1.50
+    assert "selected validation win-rate/payoff gate failed" not in " ".join(summary["validation_blockers"])
 
 
 def test_price_action_model_ingests_strict_scout_round_trip_training_events(tmp_path):

@@ -913,6 +913,12 @@ async function load() {
       ["Chosen probability threshold", priceActionModel.chosen_probability_threshold, v=>fmtNum(v, 3)],
       ["Selected validation trades", priceActionModel.validation_selected?.selected_trades],
       ["Selected validation ROI", priceActionModel.validation_selected?.selected_roi, v=>fmtNum(Number(v) * 100, 2) + "%"],
+      ["Selected validation win rate", priceActionModel.validation_selected?.selected_win_rate, v=>fmtNum(Number(v) * 100, 1) + "%"],
+      ["Win/payoff gate", priceActionModel.validation_win_rate_gate],
+      ["Win/payoff gate reason", priceActionModel.validation_win_rate_gate_reason, v=>longText(v, 180)],
+      ["Selected profit factor", priceActionModel.validation_selected?.selected_profit_factor, v=>fmtNum(v, 2)],
+      ["Selected payoff ratio", priceActionModel.validation_selected?.selected_payoff_ratio, v=>fmtNum(v, 2)],
+      ["Selected expectancy/trade", priceActionModel.validation_selected?.selected_expectancy_usdc_per_trade, fmtUsd],
       ["Buy-all baseline ROI", priceActionModel.validation_buy_all_baseline?.roi, v=>fmtNum(Number(v) * 100, 2) + "%"],
       ["Edge over baseline", priceActionModel.validation_edge_over_buy_all_roi, v=>fmtNum(Number(v) * 100, 2) + "%"],
       ["Selected ROI CI95", priceActionModel.validation_selected_roi_ci95, joinText],
@@ -939,6 +945,10 @@ async function load() {
       ["ROI","selected_roi", v=>fmtNum(Number(v) * 100, 2) + "%"],
       ["P&L","selected_pnl_usdc", fmtUsd],
       ["Win rate","selected_win_rate", v=>fmtNum(Number(v) * 100, 1) + "%"],
+      ["Profit factor","selected_profit_factor", v=>fmtNum(v, 2)],
+      ["Payoff","selected_payoff_ratio", v=>fmtNum(v, 2)],
+      ["Exp/trade","selected_expectancy_usdc_per_trade", fmtUsd],
+      ["Win/payoff","train_win_rate_gate_reason", v=>longText(v, 120)],
       ["Pass","train_threshold_pass"]
     ]) + `<div style="height:12px"></div><h3>Cohort transfer check</h3>` + table(priceActionModel.cohort_transfer?.family?.top_cohorts || [], [
       ["Family","cohort", v=>longText(v, 150)],
@@ -2040,6 +2050,8 @@ def _price_action_model_status(cfg: EngineConfig) -> dict[str, Any]:
         "train_threshold_selection": summary.get("train_threshold_selection", {}),
         "validation_selected": summary.get("validation_selected", {}),
         "validation_selected_risk": summary.get("validation_selected_risk", {}),
+        "validation_win_rate_gate": summary.get("validation_win_rate_gate"),
+        "validation_win_rate_gate_reason": summary.get("validation_win_rate_gate_reason"),
         "quant_promotion_decision": summary.get("quant_promotion_decision", {}),
         "maximum_selected_validation_drawdown": summary.get("maximum_selected_validation_drawdown"),
         "validation_blockers": summary.get("validation_blockers", []),
@@ -2828,6 +2840,18 @@ def _decision_useful_summary(
             }
         )
 
+    selected_model = price_action_model.get("validation_selected") if isinstance(price_action_model.get("validation_selected"), dict) else {}
+    selected_roi = safe_float(selected_model.get("selected_roi"))
+    selected_profit_factor = safe_float(selected_model.get("selected_profit_factor"))
+    selected_trades = safe_float(selected_model.get("selected_trades"))
+    model_key_metric = (
+        f"selected {int(selected_trades or 0)}; ROI {selected_roi * 100:.2f}%; PF {selected_profit_factor:.2f}"
+        if selected_roi is not None and selected_profit_factor is not None
+        else (
+            f"train +{price_action_model.get('train_positive_targets', '-')}; "
+            f"validation +{price_action_model.get('validation_positive_targets', '-')}"
+        )
+    )
     evidence_lanes = [
         {
             "lane": "Paper trade gate",
@@ -2840,11 +2864,11 @@ def _decision_useful_summary(
             "lane": "Price-action ML",
             "state": price_action_model.get("decision") or price_action_model.get("status") or "unknown",
             "decision_use": "Predicts whether buying at ask can later sell/mark at bid profitably.",
-            "key_metric": (
-                f"train +{price_action_model.get('train_positive_targets', '-')}; "
-                f"validation +{price_action_model.get('validation_positive_targets', '-')}"
-            ),
-            "blocker_or_next": cohort_transfer.get("reason") or validation_gap.get("reason") or "No active model blocker reported.",
+            "key_metric": model_key_metric,
+            "blocker_or_next": price_action_model.get("validation_win_rate_gate_reason")
+            or cohort_transfer.get("reason")
+            or validation_gap.get("reason")
+            or "No active model blocker reported.",
         },
         {
             "lane": "Forward paper P&L",

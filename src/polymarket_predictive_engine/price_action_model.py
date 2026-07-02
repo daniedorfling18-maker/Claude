@@ -714,8 +714,18 @@ def _trade_metrics(rows: list[dict[str, Any]], probabilities: list[float] | None
         if threshold is None or (probabilities is not None and probabilities[idx] >= threshold)
     ]
     stake = sum(float(row.get("_stake_usdc") or 0.0) for row, _ in selected)
-    pnl = sum(float(row.get("_pnl_usdc") or 0.0) for row, _ in selected)
-    wins = sum(1 for row, _ in selected if float(row.get("_pnl_usdc") or 0.0) > 0)
+    pnls = [float(row.get("_pnl_usdc") or 0.0) for row, _ in selected]
+    rois = [float(row.get("_roi") or 0.0) for row, _ in selected]
+    pnl = sum(pnls)
+    wins = sum(1 for value in pnls if value > 0)
+    gross_profit = sum(value for value in pnls if value > 0)
+    gross_loss = -sum(value for value in pnls if value < 0)
+    win_rois = [roi for roi, pnl_value in zip(rois, pnls) if pnl_value > 0]
+    loss_rois = [roi for roi, pnl_value in zip(rois, pnls) if pnl_value <= 0]
+    avg_win_roi = sum(win_rois) / len(win_rois) if win_rois else 0.0
+    avg_loss_roi = sum(loss_rois) / len(loss_rois) if loss_rois else 0.0
+    profit_factor = gross_profit / gross_loss if gross_loss > 0 else (999.0 if gross_profit > 0 else 0.0)
+    payoff_ratio = avg_win_roi / abs(avg_loss_roi) if avg_loss_roi < 0 else (999.0 if avg_win_roi > 0 else 0.0)
     return {
         "threshold": threshold,
         "trades": len(selected),
@@ -723,6 +733,13 @@ def _trade_metrics(rows: list[dict[str, Any]], probabilities: list[float] | None
         "pnl_usdc": pnl,
         "roi": pnl / stake if stake > 0 else 0.0,
         "win_rate": wins / len(selected) if selected else 0.0,
+        "gross_profit_usdc": gross_profit,
+        "gross_loss_usdc": gross_loss,
+        "profit_factor": profit_factor,
+        "avg_win_roi": avg_win_roi,
+        "avg_loss_roi": avg_loss_roi,
+        "payoff_ratio": payoff_ratio,
+        "expectancy_usdc_per_trade": pnl / len(selected) if selected else 0.0,
         "mean_probability": sum(probability for _, probability in selected) / len(selected) if selected else 0.0,
     }
 
@@ -736,8 +753,75 @@ def _selected_metrics(rows: list[dict[str, Any]], probabilities: list[float], th
         "selected_pnl_usdc": metrics["pnl_usdc"],
         "selected_roi": metrics["roi"],
         "selected_win_rate": metrics["win_rate"],
+        "selected_gross_profit_usdc": metrics["gross_profit_usdc"],
+        "selected_gross_loss_usdc": metrics["gross_loss_usdc"],
+        "selected_profit_factor": metrics["profit_factor"],
+        "selected_avg_win_roi": metrics["avg_win_roi"],
+        "selected_avg_loss_roi": metrics["avg_loss_roi"],
+        "selected_payoff_ratio": metrics["payoff_ratio"],
+        "selected_expectancy_usdc_per_trade": metrics["expectancy_usdc_per_trade"],
         "mean_selected_probability": metrics["mean_probability"],
     }
+
+
+def _win_rate_gate(
+    metrics: dict[str, Any],
+    *,
+    min_win_rate: float,
+    settings: dict[str, Any],
+    phase: str,
+) -> tuple[bool, str]:
+    """Return whether selected trades pass hit-rate or payoff-asymmetry evidence.
+
+    A raw 55% hit-rate hurdle is too blunt for trading: a strategy can have a
+    lower hit rate and still be attractive if the wins materially exceed the
+    losses.  This gate keeps the old win-rate path, but allows a second path
+    only when the selected trades show enough positive expectancy, profit
+    factor, and payoff ratio.
+    """
+    win_rate = float(metrics.get("selected_win_rate") or 0.0)
+    if win_rate >= min_win_rate:
+        return True, "win_rate_threshold"
+    if not _bool_setting(settings, "allow_payoff_asymmetric_low_win_rate", True):
+        return False, "win_rate_below_threshold"
+    floor = _float_setting(
+        settings,
+        f"minimum_selected_{phase}_win_rate_floor",
+        _float_setting(settings, "minimum_payoff_asymmetric_win_rate_floor", 0.30),
+    )
+    min_profit_factor = _float_setting(
+        settings,
+        f"minimum_selected_{phase}_profit_factor",
+        _float_setting(settings, "minimum_selected_profit_factor", 1.20),
+    )
+    min_payoff_ratio = _float_setting(
+        settings,
+        f"minimum_selected_{phase}_payoff_ratio",
+        _float_setting(settings, "minimum_selected_payoff_ratio", 1.50),
+    )
+    min_expectancy = _float_setting(
+        settings,
+        f"minimum_selected_{phase}_expectancy_usdc_per_trade",
+        _float_setting(settings, "minimum_selected_expectancy_usdc_per_trade", 0.0),
+    )
+    if win_rate < floor:
+        return False, f"win_rate {win_rate:.4f} below payoff-asymmetry floor {floor:.4f}"
+    if float(metrics.get("selected_profit_factor") or 0.0) < min_profit_factor:
+        return False, (
+            f"profit factor {float(metrics.get('selected_profit_factor') or 0.0):.4f} "
+            f"< {min_profit_factor:.4f}"
+        )
+    if float(metrics.get("selected_payoff_ratio") or 0.0) < min_payoff_ratio:
+        return False, (
+            f"payoff ratio {float(metrics.get('selected_payoff_ratio') or 0.0):.4f} "
+            f"< {min_payoff_ratio:.4f}"
+        )
+    if float(metrics.get("selected_expectancy_usdc_per_trade") or 0.0) <= min_expectancy:
+        return False, (
+            f"expectancy/trade {float(metrics.get('selected_expectancy_usdc_per_trade') or 0.0):.4f} "
+            f"<= {min_expectancy:.4f}"
+        )
+    return True, "payoff_asymmetric_positive_expectancy"
 
 
 def _market_clustered_roi_ci(
@@ -812,13 +896,27 @@ def _choose_threshold_from_train(
     for candidate in threshold_candidates:
         threshold = float(candidate["threshold"])
         metrics = _selected_metrics(rows, probabilities, threshold)
+        win_gate_passed, win_gate_reason = _win_rate_gate(
+            metrics,
+            min_win_rate=min_win_rate,
+            settings=settings,
+            phase="train",
+        )
         passed = (
             metrics["selected_trades"] >= min_trades
             and metrics["selected_pnl_usdc"] > 0
             and metrics["selected_roi"] >= min_roi
-            and metrics["selected_win_rate"] >= min_win_rate
+            and win_gate_passed
         )
-        candidates.append({**metrics, **candidate, "train_threshold_pass": passed})
+        candidates.append(
+            {
+                **metrics,
+                **candidate,
+                "train_threshold_pass": passed,
+                "train_win_rate_gate": win_gate_passed,
+                "train_win_rate_gate_reason": win_gate_reason,
+            }
+        )
     passing = [row for row in candidates if row["train_threshold_pass"]]
     if passing:
         chosen = sorted(
@@ -828,8 +926,24 @@ def _choose_threshold_from_train(
         )[0]
     else:
         fallback = _float_setting(settings, "minimum_probability_to_trade", 0.55)
-        chosen = min(candidates, key=lambda row: abs(float(row["threshold"]) - fallback)) if candidates else _selected_metrics(rows, probabilities, fallback)
-        chosen = {**chosen, "train_threshold_pass": False}
+        if candidates:
+            chosen = min(candidates, key=lambda row: abs(float(row["threshold"]) - fallback))
+            chosen = {**chosen, "train_threshold_pass": False}
+        else:
+            chosen_metrics = _selected_metrics(rows, probabilities, fallback)
+            win_gate_passed, win_gate_reason = _win_rate_gate(
+                chosen_metrics,
+                min_win_rate=min_win_rate,
+                settings=settings,
+                phase="train",
+            )
+            chosen = {
+                **chosen_metrics,
+                "threshold_source": "fallback_minimum_probability_to_trade",
+                "train_threshold_pass": False,
+                "train_win_rate_gate": win_gate_passed,
+                "train_win_rate_gate_reason": win_gate_reason,
+            }
     return {
         "chosen_threshold": chosen["threshold"],
         "chosen_train_metrics": chosen,
@@ -837,6 +951,22 @@ def _choose_threshold_from_train(
         "minimum_selected_train_trades": min_trades,
         "minimum_selected_train_roi": min_roi,
         "minimum_selected_train_win_rate": min_win_rate,
+        "allow_payoff_asymmetric_low_win_rate": _bool_setting(settings, "allow_payoff_asymmetric_low_win_rate", True),
+        "minimum_payoff_asymmetric_win_rate_floor": _float_setting(
+            settings,
+            "minimum_selected_train_win_rate_floor",
+            _float_setting(settings, "minimum_payoff_asymmetric_win_rate_floor", 0.30),
+        ),
+        "minimum_selected_train_profit_factor": _float_setting(
+            settings,
+            "minimum_selected_train_profit_factor",
+            _float_setting(settings, "minimum_selected_profit_factor", 1.20),
+        ),
+        "minimum_selected_train_payoff_ratio": _float_setting(
+            settings,
+            "minimum_selected_train_payoff_ratio",
+            _float_setting(settings, "minimum_selected_payoff_ratio", 1.50),
+        ),
         "threshold_policy": (
             "fixed_probability_grid_plus_train_only_rank_thresholds"
             if _bool_setting(settings, "include_train_rank_thresholds", True)
@@ -1036,6 +1166,12 @@ def train_price_action_model(cfg: EngineConfig) -> dict[str, Any]:
     min_roi_ci_low = _float_setting(settings, "minimum_selected_validation_roi_ci_low", 0.0)
     max_validation_drawdown = _float_setting(settings, "maximum_selected_validation_drawdown", -0.10)
     min_validation_positive_targets = _int_setting(settings, "minimum_validation_positive_targets", 1)
+    validation_win_gate_passed, validation_win_gate_reason = _win_rate_gate(
+        selected,
+        min_win_rate=min_selected_win_rate,
+        settings=settings,
+        phase="validation",
+    )
     validation_gap = _validation_gap_report(
         train_rows,
         validation_rows,
@@ -1062,8 +1198,8 @@ def train_price_action_model(cfg: EngineConfig) -> dict[str, Any]:
         validation_blockers.append("selected validation P&L is not positive")
     if selected["selected_roi"] < min_selected_roi:
         validation_blockers.append(f"selected validation ROI {selected['selected_roi']:.4f} < {min_selected_roi:.4f}")
-    if selected["selected_win_rate"] < min_selected_win_rate:
-        validation_blockers.append(f"selected validation win rate {selected['selected_win_rate']:.4f} < {min_selected_win_rate:.4f}")
+    if not validation_win_gate_passed:
+        validation_blockers.append(f"selected validation win-rate/payoff gate failed: {validation_win_gate_reason}")
     if validation_roi_ci[0] is None or float(validation_roi_ci[0]) < min_roi_ci_low:
         validation_blockers.append(f"selected validation ROI CI low {validation_roi_ci[0]} < {min_roi_ci_low:.4f}")
     if selected["selected_roi"] <= buy_all["roi"]:
@@ -1129,6 +1265,23 @@ def train_price_action_model(cfg: EngineConfig) -> dict[str, Any]:
         "minimum_selected_validation_trades": min_selected_trades,
         "minimum_selected_validation_roi": min_selected_roi,
         "minimum_selected_validation_win_rate": min_selected_win_rate,
+        "validation_win_rate_gate": validation_win_gate_passed,
+        "validation_win_rate_gate_reason": validation_win_gate_reason,
+        "minimum_selected_validation_profit_factor": _float_setting(
+            settings,
+            "minimum_selected_validation_profit_factor",
+            _float_setting(settings, "minimum_selected_profit_factor", 1.20),
+        ),
+        "minimum_selected_validation_payoff_ratio": _float_setting(
+            settings,
+            "minimum_selected_validation_payoff_ratio",
+            _float_setting(settings, "minimum_selected_payoff_ratio", 1.50),
+        ),
+        "minimum_selected_validation_win_rate_floor": _float_setting(
+            settings,
+            "minimum_selected_validation_win_rate_floor",
+            _float_setting(settings, "minimum_payoff_asymmetric_win_rate_floor", 0.30),
+        ),
         "minimum_selected_validation_roi_ci_low": min_roi_ci_low,
         "minimum_validation_positive_targets": min_validation_positive_targets,
         "current_rows_scored": len(current_rows),

@@ -330,6 +330,43 @@ price_action_microstructure:
     stop_loss_return: 0.06
     max_forward_observations: 12
     min_profit_usdc: 0.05
+price_action_model:
+  enabled: true
+  # The ML target is not final market settlement. It is whether a buy at the
+  # historical ask could later be sold/marked at an executable bid after spread
+  # and cost hurdles. This lets the model learn from the rolling 3+ day bid/ask
+  # dataset even while markets remain open.
+  minimum_rows: 100
+  minimum_validation_rows: 25
+  minimum_validation_positive_targets: 1
+  minimum_selected_train_trades: 8
+  minimum_selected_validation_trades: 5
+  minimum_selected_train_roi: 0.03
+  minimum_selected_validation_roi: 0.03
+  minimum_selected_train_win_rate: 0.55
+  minimum_selected_validation_win_rate: 0.55
+  # Trading is payoff-asymmetric: a signal can be valid below 55% hit-rate only
+  # when the wins are demonstrably larger than the losses out of sample.
+  allow_payoff_asymmetric_low_win_rate: true
+  minimum_payoff_asymmetric_win_rate_floor: 0.30
+  minimum_selected_profit_factor: 1.20
+  minimum_selected_payoff_ratio: 1.50
+  minimum_selected_expectancy_usdc_per_trade: 0.0
+  require_positive_cohort_transfer: true
+  include_train_rank_thresholds: true
+  probability_threshold_grid:
+  - 0.50
+  - 0.55
+  - 0.60
+  - 0.65
+  - 0.70
+  - 0.75
+  - 0.80
+  minimum_expected_roi_to_trade: 0.03
+  minimum_selected_validation_roi_ci_low: 0.0
+  maximum_selected_validation_drawdown: -0.10
+  bootstrap_iterations: 500
+  l2: 5.0
 price_action_paper:
   enabled: true
   # Converts positive bid/ask round-trip cohort evidence into paper broker signals.

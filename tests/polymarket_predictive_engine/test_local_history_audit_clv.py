@@ -1,11 +1,18 @@
 from __future__ import annotations
 
+import importlib.util
 from pathlib import Path
 
 import yaml
 
 from polymarket_predictive_engine.utils import read_json, write_json
-from scripts import audit_polymarket_local_history
+
+
+AUDIT_SCRIPT = Path(__file__).resolve().parents[2] / "scripts" / "audit_polymarket_local_history.py"
+SPEC = importlib.util.spec_from_file_location("audit_polymarket_local_history", AUDIT_SCRIPT)
+assert SPEC is not None and SPEC.loader is not None
+audit_polymarket_local_history = importlib.util.module_from_spec(SPEC)
+SPEC.loader.exec_module(audit_polymarket_local_history)
 
 
 def _config_path(tmp_path: Path) -> Path:

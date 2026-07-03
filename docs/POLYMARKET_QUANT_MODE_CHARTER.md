@@ -353,6 +353,12 @@ books, and spread compression with bid-heavy imbalance. They are deterministic, 
 stateful only for previous quotes, emit GTD `join_bid` shadow intents, and remain unavailable for
 paper/live execution unless separate governance later approves a promotion path.
 
+**2026-07-03 — WO-14 landed by Codex.** The algo sweep now runs generic per-strategy parameter grids,
+reports one global selected combo plus `by_strategy` bests, and writes strategy/params into the combos
+CSV. Legacy tight-spread sweep behavior is preserved when no `algo_sweep.strategies` block is set.
+The dashboard sweep panel now displays selected strategy/params and the per-strategy leaderboard,
+making the executable microstructure search visible to the operator.
+
 ## Rules of engagement for coding agents
 
 0. **Division of labour**: the orchestrating agent writes/updates this charter and the work orders

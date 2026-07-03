@@ -1241,20 +1241,41 @@ async function load() {
       ["Paper/live","paper_trading_invoked", (v,row)=>`${v ? "paper" : "no paper"} / ${row.live_trading_invoked ? "live" : "no live"}`]
     ], 8);
     const sweepCombos = Array.isArray(algoSweep.combos) ? algoSweep.combos : [];
+    const sweepByStrategy = algoSweep.by_strategy || {};
+    const sweepByStrategyRows = Object.values(sweepByStrategy || {}).map(row => {
+      const selected = row.selected || {};
+      return {...row, selected_params: selected.params || "-", selected_train_pnl_usdc: selected.train_pnl_usdc, selected_validation_pnl_usdc: selected.validation_pnl_usdc};
+    });
     const sweepSelected = algoSweep.selected || {};
+    const sweepSelectedParams = sweepSelected.params !== undefined
+      ? sweepSelected.params
+      : sweepSelected.tight_spread_maximum !== undefined
+        ? `spread<=${fmtNum(sweepSelected.tight_spread_maximum, 4)}, imbalance>=${fmtNum(sweepSelected.minimum_book_imbalance, 4)}`
+        : "-";
     document.getElementById("algoSweep").innerHTML = Object.keys(algoSweep).length
       ? `<div class="sectionLead">Train-only parameter sweep over recorded websocket history, then one out-of-sample validation score. A validated result is shadow research only.</div>` + facts([
           ["Decision", algoSweep.decision || "-"],
-          ["Strategy", algoSweep.strategy || "-"],
+          ["Default strategy", algoSweep.strategy || "-"],
+          ["Selected strategy", sweepSelected.strategy || "-"],
           ["Events", algoSweep.events_total],
           ["Train / validation", `${algoSweep.train_events ?? "-"} / ${algoSweep.validation_events ?? "-"}`],
           ["Combos tested", algoSweep.combos_tested],
           ["Train candidates", algoSweep.train_candidates],
-          ["Selected params", sweepSelected.tight_spread_maximum !== undefined ? `spread<=${fmtNum(sweepSelected.tight_spread_maximum, 4)}, imbalance>=${fmtNum(sweepSelected.minimum_book_imbalance, 4)}` : "-"],
+          ["Selected params", sweepSelectedParams, v=>longText(v, 180)],
           ["Selected train P&L", sweepSelected.train_pnl_usdc, fmtUsd],
           ["Selected validation P&L", sweepSelected.validation_pnl_usdc, fmtUsd],
           ["Governance note", algoSweep.governance_note || "Shadow research only; no trading gate changed.", v=>longText(v, 260)]
-        ]) + titledTable("Sweep combinations", sweepCombos, [
+        ]) + titledTable("Best by strategy", sweepByStrategyRows, [
+          ["Strategy","strategy", v=>longText(v, 150)],
+          ["Combos","combos_tested"],
+          ["Candidates","train_candidates"],
+          ["Decision","decision", v=>longText(v, 150)],
+          ["Selected params","selected_params", v=>longText(v, 180)],
+          ["Train P&L","selected_train_pnl_usdc", fmtUsd],
+          ["Validation P&L","selected_validation_pnl_usdc", fmtUsd]
+        ], 8) + titledTable("Sweep combinations", sweepCombos, [
+          ["Strategy","strategy", v=>longText(v, 140)],
+          ["Params","params", v=>longText(v, 170)],
           ["Spread max","tight_spread_maximum", v=>fmtNum(v, 4)],
           ["Min imbalance","minimum_book_imbalance", v=>fmtNum(v, 4)],
           ["Train fills","train_fills"],

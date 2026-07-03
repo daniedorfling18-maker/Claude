@@ -11,7 +11,7 @@ from polymarket_predictive_engine.algo.sweep import (
     run_algo_sweep,
 )
 from polymarket_predictive_engine.config import EngineConfig
-from polymarket_predictive_engine.utils import read_json, write_csv
+from polymarket_predictive_engine.utils import csv_columns, read_json, write_csv
 
 
 def _cfg(tmp_path: Path, sweep: dict | None = None) -> EngineConfig:
@@ -61,6 +61,31 @@ def _fixture_events(tmp_path: Path) -> Path:
     return path
 
 
+def _multi_strategy_fixture_events(tmp_path: Path) -> Path:
+    rows = [
+        # Tight-spread training lead: emits at t0, fills at t1, marks up at t2.
+        _quote("tight-train", "2026-07-02T10:00:00Z", 0.50, 0.51, imbalance=0.8),
+        _quote("tight-train", "2026-07-02T10:01:00Z", 0.48, 0.50, imbalance=0.8),
+        _quote("tight-train", "2026-07-02T10:02:00Z", 0.57, 0.58, imbalance=0.8),
+        # Bid-momentum training lead: low imbalance prevents the tight-spread strategy,
+        # then a bid jump emits, fills, and marks up.
+        _quote("bid-train", "2026-07-02T10:03:00Z", 0.20, 0.21, imbalance=0.4),
+        _quote("bid-train", "2026-07-02T10:04:00Z", 0.25, 0.26, imbalance=0.4),
+        _quote("bid-train", "2026-07-02T10:05:00Z", 0.25, 0.25, imbalance=0.4),
+        _quote("bid-train", "2026-07-02T10:06:00Z", 0.45, 0.46, imbalance=0.4),
+        _quote("quiet-train", "2026-07-02T10:07:00Z", 0.30, 0.35, imbalance=0.4),
+        _quote("quiet-train", "2026-07-02T10:08:00Z", 0.30, 0.35, imbalance=0.4),
+        # Validation window: bid-momentum repeats out of sample.
+        _quote("bid-val", "2026-07-02T11:00:00Z", 0.20, 0.21, imbalance=0.4),
+        _quote("bid-val", "2026-07-02T11:01:00Z", 0.25, 0.26, imbalance=0.4),
+        _quote("bid-val", "2026-07-02T11:02:00Z", 0.25, 0.25, imbalance=0.4),
+        _quote("bid-val", "2026-07-02T11:03:00Z", 0.35, 0.36, imbalance=0.4),
+    ]
+    path = tmp_path / "multi_strategy_features.csv"
+    write_csv(path, rows)
+    return path
+
+
 SWEEP_SETTINGS = {
     "minimum_events": 5,
     "minimum_train_fills": 2,
@@ -103,6 +128,57 @@ def test_sweep_selects_on_train_and_validates_out_of_sample(tmp_path: Path):
     written = read_json(cfg.output_root / "polymarket_algo" / "algo_sweep_summary.json")
     assert written["decision"] == DECISION_VALIDATED
     assert (cfg.output_root / "polymarket_algo" / "algo_sweep_combos.csv").exists()
+
+
+def test_sweep_runs_configured_strategy_grids_and_selects_global_best(tmp_path: Path):
+    cfg = _cfg(
+        tmp_path,
+        sweep={
+            "minimum_events": 10,
+            "minimum_train_fills": 1,
+            "minimum_validation_fills": 1,
+            "train_fraction": 0.7,
+            "strategies": {
+                "tight_spread_join_bid_shadow": {
+                    "tight_spread_maximum": [0.02],
+                    "minimum_book_imbalance": [0.55],
+                },
+                "bid_momentum_tight_shadow": {
+                    "min_bid_move": [0.01],
+                    "tight_spread_maximum": [0.02],
+                },
+            },
+        },
+    )
+    path = _multi_strategy_fixture_events(tmp_path)
+
+    summary = run_algo_sweep(cfg, features_input=path)
+
+    assert summary["decision"] == DECISION_VALIDATED
+    assert summary["combos_tested"] == 2
+    assert summary["train_candidates"] == 2
+    assert summary["strategies"] == ["bid_momentum_tight_shadow", "tight_spread_join_bid_shadow"]
+
+    selected = summary["selected"]
+    assert selected["strategy"] == "bid_momentum_tight_shadow"
+    assert selected["params"] == '{"min_bid_move":0.01,"tight_spread_maximum":0.02}'
+    assert selected["train_fills"] == 1
+    assert selected["validation_fills"] == 1
+    assert selected["train_pnl_usdc"] == approx(0.8)
+    assert selected["validation_pnl_usdc"] == approx(0.4)
+    assert selected["selected"] is True
+
+    by_strategy = summary["by_strategy"]
+    assert set(by_strategy) == {"tight_spread_join_bid_shadow", "bid_momentum_tight_shadow"}
+    assert by_strategy["bid_momentum_tight_shadow"]["decision"] == DECISION_VALIDATED
+    assert by_strategy["bid_momentum_tight_shadow"]["selected"]["strategy"] == "bid_momentum_tight_shadow"
+    assert by_strategy["tight_spread_join_bid_shadow"]["selected"]["strategy"] == "tight_spread_join_bid_shadow"
+    assert by_strategy["tight_spread_join_bid_shadow"]["train_candidates"] == 1
+
+    combos = read_json(cfg.output_root / "polymarket_algo" / "algo_sweep_summary.json")["combos"]
+    assert {combo["strategy"] for combo in combos} == {"tight_spread_join_bid_shadow", "bid_momentum_tight_shadow"}
+    assert "strategy" in csv_columns(cfg.output_root / "polymarket_algo" / "algo_sweep_combos.csv")
+    assert "params" in csv_columns(cfg.output_root / "polymarket_algo" / "algo_sweep_combos.csv")
 
 
 def test_sweep_fails_closed_without_enough_events(tmp_path: Path):

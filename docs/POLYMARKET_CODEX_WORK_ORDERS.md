@@ -1,6 +1,6 @@
 # Polymarket Codex Work Orders
 
-Last updated: 2026-07-03 (WO-11/12/13/23/24/25/26/27 code landed; strategic edge reset: WO-24..WO-27 added; WO-20/21/22 landed; read docs/POLYMARKET_EDGE_STRATEGY_RESET.md first)
+Last updated: 2026-07-03 (WO-11/12/13/14/23/24/25/26/27 code landed; strategic edge reset: WO-24..WO-27 added; WO-20/21/22 landed; read docs/POLYMARKET_EDGE_STRATEGY_RESET.md first)
 
 Mechanical, file-level implementation instructions for coding agents (Codex or any other code
 changer). The architecture and priorities live in `docs/POLYMARKET_QUANT_MODE_CHARTER.md`; this file
@@ -594,7 +594,7 @@ two-event intents, no-intent branches, registry exposure, and stable intent ids.
 
 ---
 
-## WO-14 — Generalise the sweep to any registered strategy — `open`
+## WO-14 — Generalise the sweep to any registered strategy — `done` (2026-07-03)
 
 **Blocked by WO-13.**
 
@@ -629,6 +629,14 @@ strategy, not just the tight-spread probe.
 4. Tests: two strategies in the grid over the existing fixture; assert per-strategy bests, the
    overall selection, and that legacy config (no `strategies:` key) still produces the WO-6-era
    behaviour byte-for-byte on the old assertions.
+
+**Landed 2026-07-03:** `algo-sweep` now accepts `algo_sweep.strategies` as a generic per-strategy
+parameter grid. Each strategy's cartesian product is replayed with plain `algo.*` overrides; the
+summary reports one global `selected` combo plus `by_strategy` bests, and the combos CSV now includes
+`strategy` and `params` columns. Legacy config without `strategies:` still runs the old
+`tight_spread_join_bid_shadow` spread/imbalance grid and preserves the WO-6 assertions. The dashboard
+sweep panel now shows selected strategy/params, per-strategy bests, and strategy/params for each
+combo.
 
 ---
 
@@ -1091,7 +1099,7 @@ Queue order (strategic reset, 2026-07-03 — read POLYMARKET_EDGE_STRATEGY_RESET
 10. WO-11  done 2026-07-03: research-focus consumption (after WO-26 so the guard shapes it)
 11. WO-12  done 2026-07-03: portfolio VaR + correlated-exposure reporting
 12. WO-13  done 2026-07-03: microstructure hypotheses as replay strategies
-13. WO-14  generalise the sweep (after WO-13)
+13. WO-14  done 2026-07-03: generalise the sweep (after WO-13)
 14. WO-16  per-family calibration scorecard
 15. WO-17  collection coverage report (verifies WO-20)
 16. WO-15  evidence history time series

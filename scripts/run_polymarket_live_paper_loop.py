@@ -305,7 +305,7 @@ def _cohort_to_query_keys(cohort: str) -> list[str]:
     if "tennis" in text:
         keys.append("tennis")
     if "worldcup" in text or "world_cup" in text or "world cup" in text:
-        keys.extend(["worldcup", "world cup"])
+        keys.extend(["fifa world cup", "world cup winner", "worldcup", "world cup"])
     if "crypto_updown" in text:
         keys.extend(["bitcoin", "ethereum", "solana", "xrp"])
     seen: set[str] = set()

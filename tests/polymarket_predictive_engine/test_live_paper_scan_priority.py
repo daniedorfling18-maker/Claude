@@ -103,6 +103,40 @@ def test_query_attempts_include_family_alias_fallbacks(tmp_path):
     assert loop._query_attempts(cfg, "world cup") == ["world cup"]
 
 
+def test_worldcup_cohort_prioritises_exact_winner_queries():
+    loop = _load_loop_module()
+
+    keys = loop._cohort_to_query_keys("worldcup_2026_winner_fundamental")
+
+    assert keys[:2] == ["fifaworldcup", "worldcupwinner"]
+    assert "worldcup" in keys
+
+
+def test_static_scan_queries_can_target_worldcup_winner_before_generic_worldcup(tmp_path, monkeypatch):
+    loop = _load_loop_module()
+    monkeypatch.delenv("POLYMARKET_QUERIES", raising=False)
+    monkeypatch.delenv("POLYMARKET_SCAN_QUERY_MODE", raising=False)
+    monkeypatch.delenv("POLYMARKET_MAX_SCAN_QUERIES", raising=False)
+    cfg = EngineConfig(
+        raw={
+            "paths": {"output_root": str(tmp_path / "outputs")},
+            "paper_market_scan": {
+                "mode": "batch",
+                "max_queries_per_cycle": 3,
+                "prioritize_near_promoted": False,
+                "broad_repricing_reserve_enabled": False,
+                "queries": ["fifa world cup", "world cup winner", "world cup", "bitcoin"],
+            },
+        },
+        path=tmp_path / "cfg.yaml",
+    )
+
+    selected, plan = loop._select_scan_queries(cfg, "world cup", scan_sequence=1)
+
+    assert selected == ["fifa world cup", "world cup winner", "world cup"]
+    assert plan["configured_queries"][:3] == ["fifa world cup", "world cup winner", "world cup"]
+
+
 def test_batch_mode_scans_top_evidence_families_together(tmp_path, monkeypatch):
     loop = _load_loop_module()
     monkeypatch.delenv("POLYMARKET_SCAN_QUERY_MODE", raising=False)

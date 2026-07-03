@@ -673,6 +673,12 @@ shadow_cohort_validation:
   enabled: true
   policy_version: shadow-cohort-v3-ask-fill-relative-spread
   stake_usdc: 10
+  # Shadow-only broadening for the sharp-anchor reset: non-World-Cup markets may enter
+  # shadow evidence only when their fundamental probability came from an independent
+  # sharp-anchor source. Static/model probability files remain blocked from this path.
+  worldcup_winner_only: false
+  allowed_non_worldcup_fundamental_source_fragments:
+  - sharp_fundamental_probabilities.csv
   candidate_limit_per_cycle: 16
   maximum_open_positions: 60
   maximum_open_positions_per_cohort: 25

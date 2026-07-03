@@ -438,6 +438,99 @@ def test_alpha_uses_capped_fundamental_probability_overlay(tmp_path):
     assert scored[0]["alpha_trade_candidate"] is True
 
 
+def test_sharp_anchor_non_worldcup_market_can_feed_shadow_evidence(tmp_path):
+    cfg = _config(tmp_path)
+    cfg.raw["mispricing_alpha"].update(
+        {
+            "bias_alpha_shrinkage": 0.0,
+            "model_residual_shrinkage": 0.0,
+            "fundamental_residual_shrinkage": 0.35,
+            "max_fundamental_adjustment": 0.12,
+            "market_overround_penalty_weight": 0.0,
+        }
+    )
+    write_csv(
+        cfg.output_root / "polymarket_training" / "sharp_fundamental_probabilities.csv",
+        [{"token_id": "sports-token", "probability": "0.58"}],
+    )
+
+    scored = apply_mispricing_alpha(
+        cfg,
+        [
+            {
+                "market_id": "sports-match-market",
+                "market_slug": "will-boston-beat-new-york-on-july-3",
+                "question": "Will Boston beat New York on July 3?",
+                "category": "sports",
+                "outcome": "Yes",
+                "token_id": "sports-token",
+                "prediction_timestamp": "2026-07-03T11:00:00Z",
+                "market_midpoint": "0.40",
+                "calibrated_probability": "0.40",
+                "executable_price": "0.40",
+                "spread": "0.01",
+                "liquidity": "1000",
+                "time_to_close_hours": "12",
+                "confidence": "1",
+                **_book("0.40"),
+            }
+        ],
+    )
+
+    assert scored[0]["worldcup_winner_validation_market"] is False
+    assert "sharp_fundamental_probabilities.csv" in scored[0]["fundamental_source"].replace("\\", "/")
+    assert scored[0]["non_worldcup_shadow_fundamental_source_allowed"] is True
+    assert float(scored[0]["fundamental_edge_after_haircut"]) > 0.008
+    assert scored[0]["shadow_trade_candidate"] is True
+    assert scored[0]["shadow_candidate_reason"] == "shadow_eligible"
+
+
+def test_static_non_worldcup_fundamental_probability_cannot_feed_shadow_evidence(tmp_path):
+    cfg = _config(tmp_path)
+    cfg.raw["mispricing_alpha"].update(
+        {
+            "bias_alpha_shrinkage": 0.0,
+            "model_residual_shrinkage": 0.0,
+            "fundamental_residual_shrinkage": 0.35,
+            "max_fundamental_adjustment": 0.12,
+            "market_overround_penalty_weight": 0.0,
+        }
+    )
+    write_csv(
+        tmp_path / "inputs" / "polymarket" / "model_probabilities.csv",
+        [{"token_id": "static-model-token", "probability": "0.70"}],
+    )
+
+    scored = apply_mispricing_alpha(
+        cfg,
+        [
+            {
+                "market_id": "static-sports-market",
+                "market_slug": "will-los-angeles-beat-miami-on-july-3",
+                "question": "Will Los Angeles beat Miami on July 3?",
+                "category": "sports",
+                "outcome": "Yes",
+                "token_id": "static-model-token",
+                "prediction_timestamp": "2026-07-03T11:00:00Z",
+                "market_midpoint": "0.40",
+                "calibrated_probability": "0.40",
+                "executable_price": "0.40",
+                "spread": "0.01",
+                "liquidity": "1000",
+                "time_to_close_hours": "12",
+                "confidence": "1",
+                **_book("0.40"),
+            }
+        ],
+    )
+
+    assert scored[0]["worldcup_winner_validation_market"] is False
+    assert "model_probabilities.csv" in scored[0]["fundamental_source"].replace("\\", "/")
+    assert scored[0]["non_worldcup_shadow_fundamental_source_allowed"] is False
+    assert scored[0]["shadow_trade_candidate"] is False
+    assert "non_worldcup_fundamental_source_not_allowed_for_shadow" in scored[0]["shadow_candidate_reason"]
+
+
 def test_alpha_caps_legacy_model_residual_on_tiny_longshots(tmp_path):
     cfg = _config(tmp_path)
     cfg.raw["mispricing_alpha"].update(

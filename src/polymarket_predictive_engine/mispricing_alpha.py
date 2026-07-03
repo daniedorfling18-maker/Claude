@@ -58,6 +58,34 @@ def _setting_bool(settings: dict[str, Any], key: str, default: bool = False) -> 
     return boolish(value)
 
 
+def _setting_strings(
+    settings: dict[str, Any],
+    key: str,
+    default: tuple[str, ...] = (),
+) -> tuple[str, ...]:
+    value = settings.get(key)
+    if value is None:
+        value = default
+    if isinstance(value, (str, Path)):
+        values = [value]
+    elif isinstance(value, (list, tuple, set)):
+        values = list(value)
+    else:
+        values = []
+    return tuple(
+        str(item).strip().lower().replace("\\", "/")
+        for item in values
+        if str(item).strip()
+    )
+
+
+def _source_matches_any_fragment(source: str, fragments: tuple[str, ...]) -> bool:
+    if not source or not fragments:
+        return False
+    normalised = source.strip().lower().replace("\\", "/")
+    return any(fragment in normalised for fragment in fragments)
+
+
 def _clamp_probability(value: float) -> float:
     return max(1e-6, min(1 - 1e-6, float(value)))
 
@@ -565,6 +593,11 @@ def apply_mispricing_alpha(
     shadow_max_relative_spread = safe_float(shadow_settings.get("maximum_relative_spread", max_alpha_relative_spread))
     shadow_min_liquidity = safe_float(shadow_settings.get("minimum_liquidity", min_alpha_liquidity))
     shadow_worldcup_only = _setting_bool(shadow_settings, "worldcup_winner_only", True)
+    shadow_non_worldcup_source_fragments = _setting_strings(
+        shadow_settings,
+        "allowed_non_worldcup_fundamental_source_fragments",
+        ("sharp_fundamental_probabilities.csv",),
+    )
     max_fundamental_adjustment = float(settings.get("max_fundamental_adjustment", 0.12))
     fundamental_probabilities = _load_fundamental_probabilities(cfg, settings)
     crypto_settings = cfg.raw.get("crypto_updown_live_model", {}) or {}
@@ -818,6 +851,14 @@ def apply_mispricing_alpha(
         spread_for_shadow = safe_float(row.get("spread"))
         liquidity_for_shadow = safe_float(row.get("liquidity"))
         relative_spread_for_shadow = (spread_for_shadow / price) if spread_for_shadow is not None and price > 0 else None
+        worldcup_shadow_market = bool(row.get("worldcup_winner_validation_market"))
+        non_worldcup_shadow_source_allowed = (
+            not worldcup_shadow_market
+            and _source_matches_any_fragment(
+                str(row.get("fundamental_source") or ""),
+                shadow_non_worldcup_source_fragments,
+            )
+        )
         shadow_effective_max_spread = shadow_max_spread
         shadow_effective_max_relative_spread = shadow_max_relative_spread
         shadow_effective_min_liquidity = shadow_min_liquidity
@@ -836,8 +877,10 @@ def apply_mispricing_alpha(
             if crypto_edge_for_shadow is None or crypto_edge_for_shadow < crypto_min_shadow_edge_after_cost:
                 shadow_reasons.append("crypto_model_edge_below_shadow_minimum")
         else:
-            if shadow_worldcup_only and not bool(row.get("worldcup_winner_validation_market")):
+            if shadow_worldcup_only and not worldcup_shadow_market:
                 shadow_reasons.append("not_worldcup_winner_market")
+            elif not worldcup_shadow_market and not non_worldcup_shadow_source_allowed:
+                shadow_reasons.append("non_worldcup_fundamental_source_not_allowed_for_shadow")
             if fundamental_edge_for_shadow is None or fundamental_edge_for_shadow < shadow_min_fundamental_edge:
                 shadow_reasons.append("fundamental_edge_below_shadow_minimum")
         if not boolish(row.get("cohort_evidence_filter_pass", True)):
@@ -917,6 +960,7 @@ def apply_mispricing_alpha(
                 if near_miss_learning_candidate
                 else "; ".join(near_miss_reasons),
                 "near_miss_priority_score": near_miss_priority_score,
+                "non_worldcup_shadow_fundamental_source_allowed": non_worldcup_shadow_source_allowed,
                 "shadow_trade_candidate": shadow_trade_candidate,
                 "shadow_candidate_reason": "shadow_eligible" if shadow_trade_candidate else "; ".join(shadow_reasons),
                 "shadow_priority_score": shadow_priority_score,

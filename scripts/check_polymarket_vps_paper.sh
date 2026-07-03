@@ -117,6 +117,18 @@ if [ -f "$dashboard_data" ]; then
     printf '%s\n' "Dashboard deployment health: missing (dashboard data predates deploy-health checks)"
     exit_code=1
   fi
+  if grep -q "mispricing_alpha_bridge" "$dashboard_data"; then
+    printf '%s\n' "Dashboard alpha bridge data: ok"
+  else
+    printf '%s\n' "Dashboard alpha bridge data: missing (dashboard data predates sharp-alpha bridge diagnostics)"
+    exit_code=1
+  fi
+  if grep -q "coverage_by_sport_market" "$dashboard_data"; then
+    printf '%s\n' "Dashboard sharp-anchor coverage data: ok"
+  else
+    printf '%s\n' "Dashboard sharp-anchor coverage data: missing (dashboard data predates per-sport anchor diagnostics)"
+    exit_code=1
+  fi
 else
   printf '%s\n' "Dashboard proof data: missing"
   exit_code=1

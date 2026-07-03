@@ -181,6 +181,8 @@ jobs:
           printf '%s' "$html" | grep -q "Evidence funnel"
           printf '%s' "$data" | grep -q "profit_target_proof_status"
           printf '%s' "$data" | grep -q "deployment_health"
+          printf '%s' "$data" | grep -q "mispricing_alpha_bridge"
+          printf '%s' "$data" | grep -q "coverage_by_sport_market"
 
           echo "VPS deploy verified: http://${PM_VPS_HOST}:${port}/"
           REMOTE

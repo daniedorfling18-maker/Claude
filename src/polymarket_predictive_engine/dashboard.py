@@ -2409,9 +2409,11 @@ def _independent_anchor_status(governance: Path) -> dict[str, Any]:
     sharp_anchor = read_json(governance / "sharp_anchor_summary.json", default={}) or {}
     crypto_targets = read_json(governance / "crypto_targets_summary.json", default={}) or {}
     crypto = read_json(governance / "crypto_fundamental_summary.json", default={}) or {}
+    sharp_anchor_payload = sharp_anchor if isinstance(sharp_anchor, dict) else {}
+    sharp_anchor_payload.setdefault("coverage_by_sport_market", [])
     components = {
         "sharp_odds_fetch": sharp_fetch if isinstance(sharp_fetch, dict) else {},
-        "sharp_anchor": sharp_anchor if isinstance(sharp_anchor, dict) else {},
+        "sharp_anchor": sharp_anchor_payload,
         "crypto_targets": crypto_targets if isinstance(crypto_targets, dict) else {},
         "crypto_fundamental": crypto if isinstance(crypto, dict) else {},
     }

@@ -2268,6 +2268,19 @@ def test_dashboard_surfaces_sharp_anchor_coverage_by_sport(tmp_path):
     assert "Sharp anchor coverage by sport" in html
 
 
+def test_dashboard_normalizes_missing_sharp_anchor_coverage_for_deploy_checks(tmp_path):
+    cfg = _config(tmp_path)
+    write_json(
+        cfg.governance_root / "sharp_anchor_summary.json",
+        {"status": "built", "fundamental_rows": 19, "skipped_no_token": 85},
+    )
+
+    result = render_dashboard(cfg)
+
+    data = read_json(result["dashboard_data"])
+    assert data["independent_anchor_status"]["sharp_anchor"]["coverage_by_sport_market"] == []
+
+
 def test_dashboard_surfaces_sharp_anchor_alpha_bridge_blockers(tmp_path):
     cfg = _config(tmp_path)
     write_json(

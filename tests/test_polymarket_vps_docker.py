@@ -70,3 +70,13 @@ def test_vps_health_script_checks_dashboard_and_heartbeat_files():
     assert "outputs/polymarket_model_governance/forward_paper_cycle.json" in text
     assert "outputs/polymarket_dashboard/dashboard_data.json" in text
     assert "curl -fsS --max-time 5" in text
+    assert "mispricing_alpha_bridge" in text
+    assert "coverage_by_sport_market" in text
+
+
+def test_vps_deploy_workflow_requires_current_dashboard_schema():
+    text = (ROOT / ".github" / "workflows" / "deploy-polymarket-vps-paper.yml").read_text(encoding="utf-8")
+
+    assert "deployment_health" in text
+    assert "mispricing_alpha_bridge" in text
+    assert "coverage_by_sport_market" in text

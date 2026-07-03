@@ -115,7 +115,7 @@ def classify_market_family(row: dict[str, Any]) -> str:
             return "tennis_tennis_set"
         if "total" in text:
             return "tennis_tennis_total"
-        return "tennis_tennis"
+        return "tennis_match"
     if any(term in text for term in ("lol", "league of legends", "cs2", "counter strike", "valorant", "dota", "rainbow six", "honor of kings", "talent gaming", "esports", "e sports")) or " hok " in f" {text} ":
         return "esports_match"
 
@@ -141,7 +141,15 @@ def classify_market_family(row: dict[str, Any]) -> str:
     if "crypto" in text:
         return "crypto_policy_special" if any(term in text for term in ("tax", "regulat", "policy")) else "crypto_special"
 
-    sports_terms = ("nba", "nfl", "mlb", "nhl", "soccer", "football", "baseball", "basketball", "golf", "ufc", "fifa")
+    if "nba" in text or "basketball" in text:
+        return "basketball_nba_match" if "nba" in text else "basketball_match"
+    if "mlb" in text or "baseball" in text:
+        return "baseball_mlb_match" if "mlb" in text else "baseball_match"
+    if any(term in text for term in ("mma", "ufc", "fight night", "mixed martial arts")):
+        return "mma_match"
+    if any(term in text for term in ("soccer", "fifa", "premier league", "la liga", "serie a", "bundesliga")):
+        return "soccer_match"
+    sports_terms = ("nfl", "nhl", "football", "golf")
     if any(term in text for term in sports_terms):
         return "sports_other"
     if category and category not in {"unknown", "uncategorised", "uncategorized"}:
@@ -179,5 +187,16 @@ def signal_cohort(row: dict[str, Any]) -> str:
             return f"exploratory_historical_rule|crypto_{asset}_updown_5m|outcome={outcome}"
     category = str(row.get("category") or "").strip().lower()
     if category and category not in {"unknown", "uncategorised", "uncategorized"}:
+        if category.replace("_", "") in {
+            "sport",
+            "sports",
+            "sportsother",
+            "tennis",
+            "basketball",
+            "baseball",
+            "mma",
+            "soccer",
+        }:
+            return classify_market_family(row)
         return category
     return classify_market_family(row)

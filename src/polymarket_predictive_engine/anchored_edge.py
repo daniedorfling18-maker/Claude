@@ -7,7 +7,7 @@ from typing import Any
 
 from .config import EngineConfig, load_config
 from .utils import boolish, now_utc, read_csv_rows, safe_float, write_csv, write_json
-from .worldcup_validation import is_worldcup_market
+from .worldcup_validation import classify_market_family, is_worldcup_market
 
 OUTPUT_DIRNAME = "polymarket_strategy_v2"
 CANDIDATES_FILE = "anchored_edge_candidates.csv"
@@ -53,6 +53,48 @@ ACCEPTED_FAMILY_RULES: dict[str, dict[str, Any]] = {
         "normal_max_relative_spread": 0.15,
         "normal_min_liquidity": 250.0,
     },
+    "basketball_nba_match": {
+        "status": "accepted_with_external_odds_anchor",
+        "anchor_required": True,
+        "normal_max_spread": 0.02,
+        "normal_max_relative_spread": 0.15,
+        "normal_min_liquidity": 250.0,
+    },
+    "basketball_match": {
+        "status": "accepted_with_external_odds_anchor",
+        "anchor_required": True,
+        "normal_max_spread": 0.02,
+        "normal_max_relative_spread": 0.15,
+        "normal_min_liquidity": 250.0,
+    },
+    "baseball_mlb_match": {
+        "status": "accepted_with_external_odds_anchor",
+        "anchor_required": True,
+        "normal_max_spread": 0.02,
+        "normal_max_relative_spread": 0.15,
+        "normal_min_liquidity": 250.0,
+    },
+    "baseball_match": {
+        "status": "accepted_with_external_odds_anchor",
+        "anchor_required": True,
+        "normal_max_spread": 0.02,
+        "normal_max_relative_spread": 0.15,
+        "normal_min_liquidity": 250.0,
+    },
+    "mma_match": {
+        "status": "accepted_with_external_odds_anchor",
+        "anchor_required": True,
+        "normal_max_spread": 0.02,
+        "normal_max_relative_spread": 0.15,
+        "normal_min_liquidity": 250.0,
+    },
+    "soccer_match": {
+        "status": "accepted_with_external_odds_anchor",
+        "anchor_required": True,
+        "normal_max_spread": 0.02,
+        "normal_max_relative_spread": 0.15,
+        "normal_min_liquidity": 250.0,
+    },
     "worldcup": {
         "status": "accepted_with_external_odds_anchor",
         "anchor_required": True,
@@ -75,6 +117,27 @@ ACCEPTED_FAMILY_RULES: dict[str, dict[str, Any]] = {
         "normal_min_liquidity": 250.0,
     },
     "tennis_total": {
+        "status": "accepted_with_external_odds_anchor",
+        "anchor_required": True,
+        "normal_max_spread": 0.02,
+        "normal_max_relative_spread": 0.15,
+        "normal_min_liquidity": 250.0,
+    },
+    "tennis_match": {
+        "status": "accepted_with_external_odds_anchor",
+        "anchor_required": True,
+        "normal_max_spread": 0.02,
+        "normal_max_relative_spread": 0.15,
+        "normal_min_liquidity": 250.0,
+    },
+    "tennis_tennis": {
+        "status": "accepted_with_external_odds_anchor",
+        "anchor_required": True,
+        "normal_max_spread": 0.02,
+        "normal_max_relative_spread": 0.15,
+        "normal_min_liquidity": 250.0,
+    },
+    "tennis_tennis_winner": {
         "status": "accepted_with_external_odds_anchor",
         "anchor_required": True,
         "normal_max_spread": 0.02,
@@ -197,7 +260,7 @@ def _family(row: dict[str, Any]) -> str:
     value = _text(row, "category", "family", "signal_cohort")
     if "|" in value and value.startswith("near_miss_learning|"):
         return value
-    return value.lower() or "unknown"
+    return classify_market_family(row)
 
 
 def _token_key(row: dict[str, Any]) -> str:

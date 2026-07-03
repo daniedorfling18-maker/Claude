@@ -107,3 +107,44 @@ def test_unknown_liquid_event_families_are_resolved_for_research_buckets():
     for row, expected in cases:
         assert classify_market_family(row) == expected
         assert signal_cohort(row) == expected
+
+
+def test_broadened_sharp_sports_markets_get_specific_families():
+    cases = [
+        (
+            {
+                "category": "sports",
+                "market_slug": "will-the-boston-celtics-beat-the-new-york-knicks-on-july-3",
+                "question": "NBA: Will the Boston Celtics beat the New York Knicks on July 3?",
+            },
+            "basketball_nba_match",
+        ),
+        (
+            {
+                "category": "sports_other",
+                "market_slug": "will-the-yankees-beat-the-red-sox-on-july-3",
+                "question": "MLB: Will the New York Yankees beat the Boston Red Sox?",
+            },
+            "baseball_mlb_match",
+        ),
+        (
+            {
+                "category": "sports",
+                "market_slug": "will-alex-pereira-win-ufc-320",
+                "question": "UFC: Will Alex Pereira win his fight?",
+            },
+            "mma_match",
+        ),
+        (
+            {
+                "category": "tennis",
+                "market_slug": "will-jannik-sinner-win-on-july-3",
+                "question": "Tennis: Will Jannik Sinner win on July 3?",
+            },
+            "tennis_match",
+        ),
+    ]
+
+    for row, expected in cases:
+        assert classify_market_family(row) == expected
+        assert signal_cohort(row) == expected

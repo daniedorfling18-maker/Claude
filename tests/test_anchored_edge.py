@@ -354,7 +354,7 @@ def test_strategy_v2_scores_validated_worldcup_anchor_as_shadow_candidate(tmp_pa
 
     assert report["worldcup_validated_anchor_rows"] == 1
     assert artifact_rows[0]["anchor_type"] == "worldcup_validated_haircut"
-    assert candidates[0]["family"] == "worldcup"
+    assert candidates[0]["family"] == "worldcup_2026_winner"
     assert candidates[0]["status"] == "shadow_candidate"
     assert candidates[0]["anchor_type"] == "worldcup_validated_haircut"
     assert round(float(candidates[0]["risk_adjusted_anchor_edge"]), 6) == 0.06
@@ -404,3 +404,44 @@ def test_strategy_v2_scores_validated_sharp_sports_anchor_as_shadow_candidate(tm
     assert candidates[0]["status"] == "shadow_candidate"
     assert candidates[0]["anchor_type"] == "alpha_validated_haircut"
     assert round(float(candidates[0]["risk_adjusted_anchor_edge"]), 6) == 0.09
+
+
+def test_strategy_v2_refines_generic_sports_category_for_sharp_match_anchor(tmp_path) -> None:
+    cfg = _config(tmp_path)
+    prediction = {
+        "market_slug": "will-the-boston-celtics-beat-the-new-york-knicks-on-july-3",
+        "question": "NBA: Will the Boston Celtics beat the New York Knicks on July 3?",
+        "category": "sports",
+        "outcome": "Yes",
+        "token_id": "nba-token",
+        "executable_price": "0.43",
+        "spread": "0.01",
+        "liquidity": "1000",
+        "market_probability": "0.43",
+    }
+    write_csv(cfg.output_root / "polymarket_predictions" / "predictions.csv", [prediction])
+    write_csv(
+        cfg.output_root / "polymarket_predictions" / "mispricing_alpha_scores.csv",
+        [
+            {
+                **prediction,
+                "prediction_timestamp": "2026-07-03T11:00:00Z",
+                "fundamental_probability": "0.61",
+                "haircut_fundamental_probability": "0.52",
+                "fundamental_edge_after_haircut": "0.09",
+                "bookmaker_cross_check_pass": "true",
+                "microstructure_filter_pass": "true",
+                "validation_layer_pass": "true",
+                "fundamental_source": "outputs/polymarket_training/sharp_fundamental_probabilities.csv",
+                "signal_cohort": "basketball_nba_match",
+            }
+        ],
+    )
+
+    candidates, report = build_anchored_edge_candidates(cfg)
+
+    assert report["alpha_validated_anchor_rows"] == 1
+    assert candidates[0]["family"] == "basketball_nba_match"
+    assert candidates[0]["family_status"] == "accepted_with_external_odds_anchor"
+    assert candidates[0]["status"] == "shadow_candidate"
+    assert "family_not_accepted" not in candidates[0]["blockers"]

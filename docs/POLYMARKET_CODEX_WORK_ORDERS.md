@@ -1,10 +1,6 @@
 # Polymarket Codex Work Orders
 
-<<<<<<< HEAD
-Last updated: 2026-07-02 (night queue issued: WO-7, WO-10..WO-19 open, in the order given in Sequencing)
-=======
 Last updated: 2026-07-03 (WO-10 landed; WO-7, WO-11..WO-19 open, in the order given in Sequencing)
->>>>>>> origin/main
 
 Mechanical, file-level implementation instructions for coding agents (Codex or any other code
 changer). The architecture and priorities live in `docs/POLYMARKET_QUANT_MODE_CHARTER.md`; this file
@@ -425,11 +421,7 @@ scoring path does route through it.
 
 ---
 
-<<<<<<< HEAD
-## WO-10 — Wire edge attribution and the algo sweep into the cycle, dashboard, and audit — `open`
-=======
 ## WO-10 — Wire edge attribution and the algo sweep into the cycle, dashboard, and audit — `done` (2026-07-03)
->>>>>>> origin/main
 
 **Goal:** `edge-attribution` and `algo-sweep` run on every scheduled cycle and their results are
 visible where humans look. Pure wiring — the modules exist and are tested; do not change them.
@@ -466,8 +458,6 @@ their existing tests.
 **Out of scope:** any change to `edge_attribution.py`, `algo/sweep.py`, gates, or
 `_paper_decision`.
 
-<<<<<<< HEAD
-=======
 **Landed:** `refresh_governance()` now runs closing-line value -> edge attribution -> algo sweep
 before cohort P&L and downstream governance, and exposes `edge_attribution_positions`,
 `edge_attribution_cohort_classes`, and `algo_sweep_decision` in `governance_refresh.json`.
@@ -476,7 +466,6 @@ before cohort P&L and downstream governance, and exposes `edge_attribution_posit
 sections for both after `_paper_decision` is computed. Tests cover refresh order, dashboard payload
 and empty-state rendering, and paper-decision invariance.
 
->>>>>>> origin/main
 ---
 
 ## WO-11 — Research focus consumes attribution, CLV, and sweep decisions — `open`
@@ -752,11 +741,7 @@ Work the queue in the Sequencing order below. For each work order:
 WO-1..WO-6, WO-8, WO-9   done and audited (2026-07-02)
 
 Night order:
-<<<<<<< HEAD
-1. WO-10   wiring: attribution + sweep into cycle/dashboard/audit (unlocks visibility)
-=======
 1. WO-10   done 2026-07-03: attribution + sweep wired into cycle/dashboard/audit
->>>>>>> origin/main
 2. WO-7    CLV-aware promotion review (advisory only; follow the spec verbatim)
 3. WO-11   research-focus consumption (after WO-10)
 4. WO-12   portfolio VaR + correlated-exposure reporting

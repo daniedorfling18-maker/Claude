@@ -238,11 +238,6 @@ attribution decomposes every closed shadow position's P&L into execution cost, l
 settlement surprise (exact identity, tested) and classifies each cohort with a recommended
 research action. The algo sweep lab searches strategy parameter grids over recorded websocket
 history with train-only selection and out-of-sample confirmation through the replay harness.
-<<<<<<< HEAD
-Wiring into the cycle/dashboard/audit is WO-10; research-focus consumption of attribution + CLV +
-sweep decisions is WO-11 — both specced for Codex.
-
-=======
 Wiring into the cycle/dashboard/audit landed in WO-10; research-focus consumption of attribution + CLV +
 sweep decisions is WO-11 — both specced for Codex.
 
@@ -251,7 +246,6 @@ algo sweep after CLV and before downstream governance; the dashboard renders bot
 sections; the local-history audit includes report-only summaries after `_paper_decision` is
 computed. No gates, thresholds, broker paths, or live-trading settings were changed.
 
->>>>>>> origin/main
 **2026-07-02 — overnight queue issued.** WO-7 and WO-10..WO-19 are specced in the work orders doc
 with a night-shift protocol (fixed order, stop conditions, skip-and-note rules, end-of-night
 report). New ground covered by the queue: portfolio VaR reporting (WP6 remainder), microstructure

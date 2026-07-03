@@ -326,15 +326,9 @@ def main(argv: list[str] | None = None) -> int:
         elif args.command == "closing-line-value":
             _print(build_closing_line_value(cfg, features_input=args.websocket_input))
         elif args.command == "algo-replay":
-<<<<<<< HEAD
-            _print(run_replay(cfg, args.strategy, features_input=args.websocket_input))
-        elif args.command == "algo-sweep":
-            _print(run_algo_sweep(cfg, strategy_name=args.strategy, features_input=args.websocket_input))
-=======
             _print(run_replay(cfg, args.strategy or "null", features_input=args.websocket_input))
         elif args.command == "algo-sweep":
             _print(run_algo_sweep(cfg, strategy_name=args.strategy or "tight_spread_join_bid_shadow", features_input=args.websocket_input))
->>>>>>> origin/main
         elif args.command == "edge-attribution":
             _print(build_edge_attribution(cfg))
         elif args.command == "active-window-plan":

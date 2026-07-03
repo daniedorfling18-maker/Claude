@@ -275,6 +275,14 @@ past-close hourly crypto up/down positions only when public reference prices res
 otherwise it emits `stale_open_position` evidence and the dashboard/oversight surfaces a bad alert.
 No cost-basis force-close path was added. Full suite: 687 tests green.
 
+**2026-07-03 — WO-22 landed by Codex.** Dashboard extrapolations now fail closed: thin
+`monthly_run_rate_usdc` rows render as `n/a (N fills, Hh)`, CLV beat-close is `n/a` until final
+close lines exist, the zero-fill null replay is no longer presented as a winning algo, and raw
+ledger P&L/run-rate tiles carry the audited P&L caveat when quote conflicts exist. The Best-edge
+route card and decision summary now show actual evidence — P&L, round trips, and observed time —
+instead of annualising micro-windows such as 2 paper round trips over 4 minutes into a monthly
+fact. Full suite: 688 tests green.
+
 **2026-07-02 — overnight queue issued.** WO-7 and WO-10..WO-19 are specced in the work orders doc
 with a night-shift protocol (fixed order, stop conditions, skip-and-note rules, end-of-night
 report). New ground covered by the queue: portfolio VaR reporting (WP6 remainder), microstructure

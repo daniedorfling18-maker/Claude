@@ -1,6 +1,6 @@
 # Polymarket Codex Work Orders
 
-Last updated: 2026-07-03 (WO-7 and WO-10 landed; VPS dashboard audit added WO-20..WO-23; see Sequencing)
+Last updated: 2026-07-03 (WO-22 landed; VPS dashboard audit added WO-20..WO-23; see Sequencing)
 
 Mechanical, file-level implementation instructions for coding agents (Codex or any other code
 changer). The architecture and priorities live in `docs/POLYMARKET_QUANT_MODE_CHARTER.md`; this file
@@ -839,7 +839,7 @@ warning table; flagging does not mutate equity, force-close, or fabricate exits.
 
 ---
 
-## WO-22 — Evidence-gated display of extrapolated metrics — `open` (MEDIUM)
+## WO-22 — Evidence-gated display of extrapolated metrics — `done` (2026-07-03)
 
 **Goal:** the dashboard never renders an extrapolation as a fact.
 
@@ -854,10 +854,27 @@ warning table; flagging does not mutate equity, force-close, or fabricate exits.
    provisional count clearly ("provisional lines await market close").
 3. Algo replay: when the best strategy has 0 fills, render "no strategy beat doing nothing" and
    name the losing strategies with their P&L, instead of "best: null".
+3b. **"Best edge route" card (verified worst offender, 2026-07-03):** it renders
+   `best_repricing_monthly_run_rate_usdc` / `best_forward_paper_monthly_run_rate_usdc` — the MAX
+   across all cohorts of annualised micro-windows. Live example: "forward paper $1,973.93/month"
+   was 2 paper round trips totalling +$0.19 on $4 staked inside a 4-minute window
+   (paper_elapsed_hours=0.068; 0.19/0.068h*730h), from a cohort whose own total P&L was −$1.67.
+   Fix: render the actual evidence — "best paper cohort: +$0.19 on 2 round trips over 4m (n too
+   small to annualise)" — and only show a monthly figure when the cohort passes the same
+   minimum-fills/72h evidence bar as (1). Apply identically to the shadow repricing figure.
 4. Equity/cash tiles and the account P&L line: when `pnl_audit_state` is
    `raw_pnl_contains_quote_conflicts`, append "(raw; audited $X)" using
    `audited_pnl_since_baseline_usdc`. `approved_signal_count` renders as an integer.
 5. Tests: fixture payloads asserting each rendering branch (exact strings).
+
+**Landed:** dashboard run-rate renderers now fail closed to `n/a (N fills, Hh)` unless sample count
+and observation time clear the evidence bar. CLV beat-close displays `n/a` without final close
+lines and labels provisional lines. Algo replay no longer calls the zero-fill null strategy "best"
+when real strategies lost money. Raw ledger P&L/run-rate tiles append the audited P&L caveat when
+quote conflicts exist, and `approved_signal_count` is forced to an integer. The Best-edge-route card
+and decision summary now show actual evidence (P&L, round trips, observed time) and suppress tiny
+window monthly extrapolations until the same minimum-fills/72h bar is met. Full suite: 688 tests
+green.
 
 ---
 
@@ -889,7 +906,7 @@ Queue order (updated 2026-07-03 after the VPS dashboard audit):
 1. WO-20   done 2026-07-03: position-aware quote collection
 2. WO-21   done 2026-07-03: settle or flag stuck paper positions
 3. WO-7    done 2026-07-03: CLV-aware promotion review advisory wiring
-4. WO-22   evidence-gated display fixes
+4. WO-22   done 2026-07-03: evidence-gated display fixes
 5. WO-23   deployment-aware oversight status
 6. WO-11   research-focus consumption
 7. WO-12   portfolio VaR + correlated-exposure reporting

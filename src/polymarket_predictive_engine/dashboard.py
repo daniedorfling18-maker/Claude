@@ -338,6 +338,104 @@ async function load() {
     const decisionRunRate = goalPlan.decision_monthly_run_rate_usdc ?? target.decision_monthly_run_rate_usdc ?? target.monthly_run_rate_usdc;
     const auditedPnl = goalPlan.audited_pnl_since_baseline_usdc;
     const pnlAuditState = goalPlan.pnl_audit_state || "unknown";
+    const promotionPolicy = data.cohort_promotion_readiness || {};
+    const minimumFilledOrders = Number(promotionPolicy.minimum_filled_orders || data.signal_cohort_pnl?.minimum_filled_orders || 5);
+    const minimumEvidenceHours = 72;
+    const fmtSignedUsd = (v) => {
+      const n = Number(v);
+      if (v === null || v === undefined || v === "" || Number.isNaN(n)) return "-";
+      return (n > 0 ? "+" : "") + fmtUsd(n);
+    };
+    const evidenceCount = row => {
+      for (const key of ["paper_audited_round_trips", "paper_audit_round_trips", "filled_orders", "buy_fills", "closed_trades", "settled_fills", "evidence_fills", "paper_buy_fills", "paper_sell_fills", "shadow_fills", "shadow_sell_fills", "validation_trades", "total_trades", "orders", "fills"]) {
+        if (row && row[key] !== undefined && row[key] !== "") return asNumber(row[key], null);
+      }
+      return null;
+    };
+    const evidenceHours = row => {
+      for (const key of ["evidence_hours", "elapsed_hours", "paper_elapsed_hours", "paper_audited_elapsed_hours", "shadow_elapsed_hours", "evidence_elapsed_hours", "hours_since_first_evidence", "hours_observed", "age_hours"]) {
+        if (row && row[key] !== undefined && row[key] !== "") return asNumber(row[key], null);
+      }
+      const start = row ? (row.first_evidence_at_utc || row.first_fill_at_utc || row.first_timestamp || row.first_seen_at_utc) : "";
+      const end = row ? (row.generated_at_utc || data.generated_at_utc) : data.generated_at_utc;
+      const startAge = ageSeconds(start);
+      const endAge = ageSeconds(end);
+      if (startAge !== null && endAge !== null) return Math.max(0, (startAge - endAge) / 3600);
+      const pnl = asNumber(row?.forward_paper_pnl_usdc ?? row?.forward_shadow_pnl_usdc ?? row?.realized_pnl_usdc ?? row?.total_mark_pnl_usdc ?? row?.total_pnl_usdc ?? row?.shadow_total_pnl_usdc, null);
+      const monthly = asNumber(row?.monthly_run_rate_usdc ?? row?.shadow_monthly_run_rate_usdc, null);
+      return pnl !== null && monthly !== null && Math.abs(monthly) > 0 ? Math.abs(pnl) * 720 / Math.abs(monthly) : null;
+    };
+    const evidenceReadyForAnnualising = row => {
+      const count = evidenceCount(row);
+      const hours = evidenceHours(row);
+      return count !== null && count >= minimumFilledOrders && hours !== null && hours >= minimumEvidenceHours;
+    };
+    const fmtEvidenceRunRate = (value, row) => {
+      const count = evidenceCount(row);
+      const hours = evidenceHours(row);
+      const weakCount = count === null || count < minimumFilledOrders;
+      const weakHours = hours === null || hours < minimumEvidenceHours;
+      if (weakCount || weakHours) {
+        const countText = count === null ? "?" : fmtNum(count, 0);
+        const hourText = hours === null ? "?" : fmtNum(hours, 1);
+        return `n/a (${countText} fills, ${hourText}h)`;
+      }
+      return fmtUsd(value);
+    };
+    const fmtClvBeatRate = (value, row) => {
+      const finalPositions = asNumber(row?.final_positions ?? closingLine.final_line_positions, 0);
+      return finalPositions > 0 ? fmtNum(Number(value) * 100, 1) + "%" : "n/a";
+    };
+    const finalLineDisplay = () => {
+      const finalCount = asNumber(closingLine.final_line_positions, 0);
+      const scored = asNumber(closingLine.positions_scored, 0);
+      return finalCount > 0 ? finalCount : `n/a (${scored} provisional lines await market close)`;
+    };
+    const algoBestDisplay = () => {
+      if (!bestReplay.strategy) return "No replay artifact yet";
+      if (asNumber(bestReplay.fills, 0) <= 0) {
+        const losing = algoReplaySummaries
+          .filter(row => asNumber(row.fills, 0) > 0 || asNumber(row.unrealised_mark_to_bid_pnl_usdc, 0) < 0)
+          .map(row => `${row.strategy}: ${fmtUsd(row.unrealised_mark_to_bid_pnl_usdc)}`)
+          .join("; ");
+        return losing ? `no strategy beat doing nothing (${losing})` : "no strategy beat doing nothing";
+      }
+      return `${bestReplay.strategy}: ${fmtUsd(bestReplay.unrealised_mark_to_bid_pnl_usdc)} on ${fmtUsd(bestReplay.total_cost_usdc)}`;
+    };
+    const routeEvidenceRows = () => [
+      ...(Array.isArray(priceActionGoal.top_cohorts) ? priceActionGoal.top_cohorts : []),
+      ...(Array.isArray(priceActionFeedback.forward_paper_preview) ? priceActionFeedback.forward_paper_preview : []),
+      ...(Array.isArray(priceActionFeedback.forward_shadow_preview) ? priceActionFeedback.forward_shadow_preview : []),
+      ...(Array.isArray(priceActionFeedback.paper_confirmation_preview) ? priceActionFeedback.paper_confirmation_preview : []),
+    ];
+    const routePnl = (row, route) => asNumber(route === "paper" ? row?.forward_paper_pnl_usdc : row?.forward_shadow_pnl_usdc, null);
+    const routeBestRow = route => routeEvidenceRows()
+      .filter(row => routePnl(row, route) !== null && routePnl(row, route) > 0 && String(row?.forward_edge_blocker || "") === "")
+      .sort((a,b) => (asNumber(b.monthly_run_rate_usdc, -Infinity) - asNumber(a.monthly_run_rate_usdc, -Infinity)) || (routePnl(b, route) - routePnl(a, route)))[0] || null;
+    const fmtDurationHours = hours => {
+      if (hours === null || hours === undefined || Number.isNaN(Number(hours))) return "?h";
+      const value = Number(hours);
+      if (value < 1) return `${Math.max(1, Math.round(value * 60))}m`;
+      if (value < 24) return `${fmtNum(value, 1)}h`;
+      return `${fmtNum(value / 24, 1)}d`;
+    };
+    const routeEvidenceDisplay = route => {
+      const row = routeBestRow(route);
+      if (!row) return `best ${route} cohort: no positive evidence yet`;
+      const count = evidenceCount(row);
+      const hours = evidenceHours(row);
+      const pnl = routePnl(row, route);
+      const countText = count === null ? "?" : fmtNum(count, 0);
+      const noun = count === 1 ? "round trip" : "round trips";
+      const base = `best ${route} cohort: ${fmtSignedUsd(pnl)} on ${countText} ${noun} over ${fmtDurationHours(hours)}`;
+      return evidenceReadyForAnnualising(row)
+        ? `${base} (${fmtUsd(row.monthly_run_rate_usdc)}/month evidence-qualified)`
+        : `${base} (n too small to annualise)`;
+    };
+    const bestEdgeRouteSummary = () => `${routeEvidenceDisplay("shadow")} / ${routeEvidenceDisplay("paper")}`;
+    const auditedRawSuffix = () => pnlAuditState === "raw_pnl_contains_quote_conflicts" && auditedPnl !== undefined && auditedPnl !== null
+      ? ` (raw; audited ${fmtUsd(auditedPnl)})`
+      : "";
     const paperRejections = asNumber(priceActionPaper.rejections, asNumber(data.forward_paper_cycle?.signals_rejected, asNumber(diag.rejected_signals_count, 0)));
     const brokerWorkPending = Boolean(priceActionPaper.broker_refresh_needed || priceActionPaper.pending_broker_signals || priceActionPaper.pending_broker_confirmation_signals || priceActionPaper.pending_broker_exit_probes);
     const trustedEdgeMissingFresh = tradeSignalAudit.verdict === "trusted_edge_missing_fresh_candidate"
@@ -396,7 +494,7 @@ async function load() {
       card("Unlock condition", longText(unlockCondition, 120), approvedSignals > 0 ? "good" : "warn"),
       card("Collect now", joinText(collectQueries), collectQueries.length ? "good" : "warn"),
       card("$100/month state", `${fmtUsd(pnl)} audited / ${fmtUsd(decisionRunRate)} audited run-rate`, pnl >= 0 ? "good" : "bad"),
-      card("Best edge route", `shadow ${fmtUsd(priceActionGoal.best_repricing_monthly_run_rate_usdc)} / paper ${fmtUsd(priceActionGoal.best_forward_paper_monthly_run_rate_usdc)}`, "warn")
+      card("Best edge route", bestEdgeRouteSummary(), "warn")
     ].join("");
     document.getElementById("decisionCockpit").innerHTML = `
       <div class="decisionHero">
@@ -424,7 +522,7 @@ async function load() {
       ${titledTable("Closest confirmation targets", decisionTargets, [
         ["Query","recommended_collection_query"],
         ["Cohort","cohort", v=>longText(v, 170)],
-        ["Run-rate","monthly_run_rate_usdc", fmtUsd],
+        ["Run-rate","monthly_run_rate_usdc", fmtEvidenceRunRate],
         ["Shadow P&L","forward_shadow_pnl_usdc", fmtUsd],
         ["Candidate rows","current_candidate_rows"],
         ["Executable rows","current_executable_rows"],
@@ -464,7 +562,7 @@ async function load() {
       ["Validation gap", validationGapActive ? validationGap.reason || "Needs positive validation examples." : "No active positive-validation gap.", v=>longText(v, 260)],
       ["Cohort transfer", priceActionModel.cohort_transfer?.reason || "No active transfer blocker reported.", v=>longText(v, 260)],
       ["Paper bridge", priceActionPaper.decision, v=>longText(v, 220)],
-      ["Algo replay best", bestReplay.strategy ? `${bestReplay.strategy}: ${fmtUsd(bestReplay.unrealised_mark_to_bid_pnl_usdc)} on ${fmtUsd(bestReplay.total_cost_usdc)}` : "No replay artifact yet", v=>longText(v, 220)],
+      ["Algo replay best", algoBestDisplay(), v=>longText(v, 220)],
       ["Current analogue scan", `${currentHistScan.current_rows ?? 0} rows / ${currentHistScan.positive_matches ?? 0} positive matches`, v=>longText(v, 180)],
       ["Analogue blocker", currentHistScan.state || "-", v=>longText(v, 220)],
       ["World Cup layer", (data.worldcup_validation_status || {}).status, v=>longText(v, 180)],
@@ -488,22 +586,22 @@ async function load() {
       ["Target / month", target.target_monthly_profit_usdc, fmtUsd],
       ["Audited P&L for goal", pnl, fmtUsd],
       ["Audited run-rate", decisionRunRate, fmtUsd],
-      ["Raw ledger P&L (audit-only)", rawPnl, fmtUsd],
+      ["Raw ledger P&L (audit-only)", rawPnl, v=>fmtUsd(v) + auditedRawSuffix()],
       ["P&L audit state", pnlAuditState, v=>longText(v, 180)],
       ["Quote conflicts", goalPlan.quote_conflict_round_trips],
       ["Unverified quote rows", goalPlan.quote_unverified_round_trips],
       ["Tracking hours", target.elapsed_hours, v=>fmtNum(v,2)],
-      ["Raw monthly run-rate (audit-only)", rawRunRate, fmtUsd],
+      ["Raw monthly run-rate (audit-only)", rawRunRate, v=>fmtUsd(v) + auditedRawSuffix()],
       ["Baseline equity", target.baseline?.baseline_equity_usdc, fmtUsd]
     ]);
     document.getElementById("goalPlan").innerHTML = `<div class="sectionLead">This is the route to the $100/month target using tradable price changes, not waiting for market settlement.</div>` + facts([
       ["Route state", priceActionGoal.state || goalPlan.status],
       ["Needs settlement?", priceActionGoal.settlement_required_for_this_milestone ? "yes" : "no - this milestone uses bid/ask repricing and paper exits"],
       ["Audited P&L for goal", goalPlan.decision_pnl_usdc, fmtUsd],
-      ["Raw ledger P&L", goalPlan.raw_account_pnl_since_baseline_usdc, fmtUsd],
+      ["Raw ledger P&L", goalPlan.raw_account_pnl_since_baseline_usdc, v=>fmtUsd(v) + auditedRawSuffix()],
       ["P&L audit state", goalPlan.pnl_audit_state, v=>longText(v, 180)],
-      ["Best repricing run-rate", priceActionGoal.best_repricing_monthly_run_rate_usdc, fmtUsd],
-      ["Forward paper run-rate", priceActionGoal.best_forward_paper_monthly_run_rate_usdc, fmtUsd],
+      ["Best repricing evidence", routeEvidenceDisplay("shadow"), v=>longText(v, 220)],
+      ["Forward paper evidence", routeEvidenceDisplay("paper"), v=>longText(v, 220)],
       ["Required/day from here", goalPlan.required_daily_from_here_usdc, fmtUsd],
       ["Goal gap", goalPlan.main_gap, v=>longText(v, 220)],
       ["Recommended action", goalPlan.recommended_action, v=>longText(v, 260)],
@@ -513,7 +611,7 @@ async function load() {
       ["Source","source"],
       ["Action","action", v=>longText(v, 160)],
       ["Evidence","evidence_type", v=>longText(v, 160)],
-      ["Run-rate","monthly_run_rate_usdc", fmtUsd],
+      ["Run-rate","monthly_run_rate_usdc", fmtEvidenceRunRate],
       ["Paper P&L","forward_paper_pnl_usdc", fmtUsd],
       ["Shadow P&L","forward_shadow_pnl_usdc", fmtUsd],
       ["Trusted","trusted_for_goal"],
@@ -536,7 +634,7 @@ async function load() {
       ["Cohort","cohort", v=>longText(v, 180)],
       ["Shadow P&L","forward_shadow_pnl_usdc", fmtUsd],
       ["Shadow ROI","forward_shadow_roi", v=>fmtNum(Number(v) * 100, 2) + "%"],
-      ["Run-rate","monthly_run_rate_usdc", fmtUsd],
+      ["Run-rate","monthly_run_rate_usdc", fmtEvidenceRunRate],
       ["Candidate rows","current_candidate_rows"],
       ["Executable rows","current_executable_rows"],
       ["Missing fresh","missing_fresh_candidate"]
@@ -573,9 +671,9 @@ async function load() {
           ["Status", closingLine.status || "-"],
           ["Generated", closingLine.generated_at_utc || "-"],
           ["Positions scored", closingLine.positions_scored],
-          ["Final close lines", closingLine.final_line_positions],
+          ["Final close lines", finalLineDisplay()],
           ["Mean final CLV", closingLine.mean_final_clv, v=>fmtNum(v, 4)],
-          ["Beat close rate", closingLine.beat_close_rate, v=>fmtNum(Number(v) * 100, 1) + "%"],
+          ["Beat close rate", closingLine.beat_close_rate, fmtClvBeatRate],
           ["Positive CLV cohorts", positiveClv.length ? positiveClv : "none yet", joinText],
           ["Governance note", closingLine.governance_note || "Diagnostic only; no trading gate changed.", v=>longText(v, 260)]
         ]) + (positiveClv.length ? `<div class="alertGrid">${alertBox("Positive CLV cohorts found", joinText(positiveClv), "good")}</div>` : "")
@@ -586,7 +684,7 @@ async function load() {
           ["Mean final CLV","mean_final_clv", v=>fmtNum(v, 4)],
           ["CI low","final_clv_ci_low", v=>fmtNum(v, 4)],
           ["CI high","final_clv_ci_high", v=>fmtNum(v, 4)],
-          ["Beat close","final_beat_close_rate", v=>fmtNum(Number(v) * 100, 1) + "%"],
+          ["Beat close","final_beat_close_rate", fmtClvBeatRate],
           ["Evidence","clv_evidence", v=>longText(v, 150)]
         ], 8)
       : `<div class="sectionLead">No CLV evidence yet. The next governance refresh should build closing_line_value.json once shadow positions and bid/ask features exist.</div>`;
@@ -766,7 +864,7 @@ async function load() {
       ["Resolved","resolved_candidates"],
       ["MTM P&L","total_mark_pnl_usdc", fmtUsd],
       ["MTM ROI","mark_roi", v=>fmtNum(Number(v) * 100, 2) + "%"],
-      ["Run-rate","monthly_run_rate_usdc", fmtUsd],
+      ["Run-rate","monthly_run_rate_usdc", fmtEvidenceRunRate],
       ["Score","promotion_ready_score", (v,row)=>`${v ?? 0}/${row.promotion_ready_checks ?? "?"}`],
       ["Status","status", v=>longText(v, 140)],
       ["Reason","reason", v=>longText(v, 180)]
@@ -1228,14 +1326,14 @@ async function load() {
       ["Learning state", priceActionFeedback.learning_state],
       ["Next action", priceActionFeedback.next_action, v=>longText(v, 220)],
       ["Target / month", priceActionFeedback.target_monthly_profit_usdc, fmtUsd],
-      ["Best positive run-rate", priceActionFeedback.best_positive_monthly_run_rate_usdc, fmtUsd],
+      ["Best positive evidence", routeEvidenceDisplay("shadow"), v=>longText(v, 220)],
       ["Monthly goal gap", priceActionFeedback.monthly_goal_gap_usdc, fmtUsd],
       ["Promotion candidates", priceActionFeedback.promotion_candidates],
       ["Positive collect candidates", priceActionFeedback.positive_collect_candidates],
       ["Suppressed candidates", priceActionFeedback.suppressed_candidates],
       ["Forward paper cohorts", priceActionFeedback.forward_paper_cohorts],
       ["Forward paper positive", priceActionFeedback.forward_paper_positive_cohorts],
-      ["Forward paper run-rate", priceActionFeedback.best_forward_paper_monthly_run_rate_usdc, fmtUsd],
+      ["Forward paper evidence", routeEvidenceDisplay("paper"), v=>longText(v, 220)],
       ["Forward paper gap", priceActionFeedback.forward_paper_goal_gap_usdc, fmtUsd],
       ["Forward shadow cohorts", priceActionFeedback.forward_shadow_cohorts],
       ["Forward shadow positive", priceActionFeedback.forward_shadow_positive_cohorts],
@@ -1250,7 +1348,7 @@ async function load() {
       ["Open","open_trades"],
       ["P&L","forward_paper_pnl_usdc", fmtUsd],
       ["ROI","forward_paper_roi", v=>fmtNum(Number(v) * 100, 2) + "%"],
-      ["Run-rate","monthly_run_rate_usdc", fmtUsd],
+      ["Run-rate","monthly_run_rate_usdc", fmtEvidenceRunRate],
       ["Trusted","trusted_for_goal"],
       ["Blocker","forward_edge_blocker", v=>longText(v, 160)],
       ["Source","promotion_evidence_source"],
@@ -1262,7 +1360,7 @@ async function load() {
       ["Shadow closed","shadow_sell_fills"],
       ["P&L","forward_shadow_pnl_usdc", fmtUsd],
       ["ROI","forward_shadow_roi", v=>fmtNum(Number(v) * 100, 2) + "%"],
-      ["Run-rate","monthly_run_rate_usdc", fmtUsd],
+      ["Run-rate","monthly_run_rate_usdc", fmtEvidenceRunRate],
       ["Trusted","trusted_for_goal"],
       ["Blocker","forward_edge_blocker", v=>longText(v, 160)],
       ["Reason","reason", v=>longText(v, 200)]
@@ -1271,7 +1369,7 @@ async function load() {
       ["Query","recommended_collection_query"],
       ["Shadow P&L","forward_shadow_pnl_usdc", fmtUsd],
       ["Shadow ROI","forward_shadow_roi", v=>fmtNum(Number(v) * 100, 2) + "%"],
-      ["Shadow run-rate","monthly_run_rate_usdc", fmtUsd],
+      ["Shadow run-rate","monthly_run_rate_usdc", fmtEvidenceRunRate],
       ["Needed","reason", v=>longText(v, 220)]
     ]) + `<div style="height:12px"></div><h3>Price-action feedback cohort leaderboard</h3>` + table(priceActionFeedback.top_cohorts || [], [
       ["Source","source"],
@@ -1283,7 +1381,7 @@ async function load() {
       ["Realized P&L","realized_pnl_usdc", fmtUsd],
       ["Realized ROI","realized_roi", v=>fmtNum(Number(v) * 100, 2) + "%"],
       ["MTM P&L","total_mark_pnl_usdc", fmtUsd],
-      ["Run-rate","monthly_run_rate_usdc", fmtUsd],
+      ["Run-rate","monthly_run_rate_usdc", fmtEvidenceRunRate],
       ["Reason","reason", v=>longText(v, 200)]
     ]);
     document.getElementById("promotionReadiness").innerHTML = table(data.cohort_promotion_readiness?.cohorts || [], [
@@ -1302,7 +1400,7 @@ async function load() {
       ["Score","promotion_ready_score", (v,row)=>`${v ?? 0}/${row.promotion_ready_checks ?? "?"}`],
       ["P&L","total_pnl_usdc", fmtUsd],
       ["ROI","roi", v=>fmtNum(Number(v) * 100, 2) + "%"],
-      ["Run-rate","monthly_run_rate_usdc", fmtUsd],
+      ["Run-rate","monthly_run_rate_usdc", fmtEvidenceRunRate],
       ["Fills","buy_fills"],
       ["Settled","settled_fills"],
       ["Reason","promotion_reason"]
@@ -1312,7 +1410,7 @@ async function load() {
       ["Score","promotion_ready_score", (v,row)=>`${v ?? 0}/${row.promotion_ready_checks ?? "?"}`],
       ["Shadow P&L","shadow_total_pnl_usdc", fmtUsd],
       ["ROI","shadow_roi", v=>fmtNum(Number(v) * 100, 2) + "%"],
-      ["Run-rate","shadow_monthly_run_rate_usdc", fmtUsd],
+      ["Run-rate","shadow_monthly_run_rate_usdc", fmtEvidenceRunRate],
       ["Fills","shadow_fills"],
       ["Settled","shadow_sell_fills"],
       ["Open","shadow_open_positions"]
@@ -2847,7 +2945,7 @@ def _dashboard_oversight_status(
         "model_decision": price_action_model.get("decision"),
         "model_age_seconds": model_age,
         "signal_age_seconds": signal_age,
-        "approved_signal_count": approved_signals,
+        "approved_signal_count": int(approved_signals),
         "validation_gap_active": validation_gap_active,
         "validation_gap_collection_queries": validation_gap.get("collection_queries", []),
         "cohort_transfer_state": cohort_transfer.get("state"),
@@ -2883,6 +2981,145 @@ def _compact_list(values: Any, *, limit: int = 5) -> list[str]:
 def _usd_text(value: Any) -> str:
     number = safe_float(value)
     return "-" if number is None else f"${number:.2f}"
+
+
+def _signed_usd_text(value: Any) -> str:
+    number = safe_float(value)
+    if number is None:
+        return "-"
+    return f"+${number:.2f}" if number > 0 else f"${number:.2f}"
+
+
+def _route_evidence_count(row: dict[str, Any], route: str) -> int | None:
+    keys = (
+        (
+            "paper_audited_round_trips",
+            "paper_audit_round_trips",
+            "closed_trades",
+            "paper_sell_fills",
+            "paper_buy_fills",
+            "buy_fills",
+        )
+        if route == "paper"
+        else (
+            "shadow_sell_fills",
+            "closed_trades",
+            "shadow_fills",
+            "buy_fills",
+        )
+    )
+    for key in keys:
+        value = safe_float(row.get(key))
+        if value is not None:
+            return int(value)
+    return None
+
+
+def _route_pnl(row: dict[str, Any], route: str) -> float | None:
+    key = "forward_paper_pnl_usdc" if route == "paper" else "forward_shadow_pnl_usdc"
+    value = safe_float(row.get(key))
+    if value is not None:
+        return float(value)
+    fallback = safe_float(row.get("realized_pnl_usdc") or row.get("total_mark_pnl_usdc"))
+    return None if fallback is None else float(fallback)
+
+
+def _route_evidence_hours(row: dict[str, Any], route: str) -> float | None:
+    keys = (
+        "evidence_hours",
+        "elapsed_hours",
+        "paper_elapsed_hours",
+        "paper_audited_elapsed_hours",
+        "shadow_elapsed_hours",
+        "evidence_elapsed_hours",
+        "hours_since_first_evidence",
+        "hours_observed",
+        "age_hours",
+    )
+    for key in keys:
+        value = safe_float(row.get(key))
+        if value is not None:
+            return float(value)
+    pnl = _route_pnl(row, route)
+    monthly = safe_float(row.get("monthly_run_rate_usdc") or row.get("shadow_monthly_run_rate_usdc"))
+    if pnl is None or monthly is None or monthly == 0:
+        return None
+    return abs(float(pnl)) * 720.0 / abs(float(monthly))
+
+
+def _duration_hours_text(hours: float | None) -> str:
+    if hours is None:
+        return "?h"
+    if hours < 1:
+        return f"{max(1, round(hours * 60))}m"
+    if hours < 24:
+        return f"{hours:.1f}h"
+    return f"{hours / 24.0:.1f}d"
+
+
+def _best_route_row(price_action_goal: dict[str, Any], price_action_feedback: dict[str, Any], route: str) -> dict[str, Any] | None:
+    rows: list[dict[str, Any]] = []
+    for key in ("top_cohorts",):
+        value = price_action_goal.get(key)
+        if isinstance(value, list):
+            rows.extend(row for row in value if isinstance(row, dict))
+    for key in ("forward_paper_preview", "forward_shadow_preview", "paper_confirmation_preview"):
+        value = price_action_feedback.get(key)
+        if isinstance(value, list):
+            rows.extend(row for row in value if isinstance(row, dict))
+
+    candidates = [
+        row
+        for row in rows
+        if (_route_pnl(row, route) or 0.0) > 0
+        and str(row.get("forward_edge_blocker") or "") == ""
+    ]
+    if not candidates:
+        return None
+    candidates.sort(
+        key=lambda row: (
+            safe_float(row.get("monthly_run_rate_usdc") or row.get("shadow_monthly_run_rate_usdc")) or -999999.0,
+            _route_pnl(row, route) or -999999.0,
+        ),
+        reverse=True,
+    )
+    return candidates[0]
+
+
+def _route_evidence_text(
+    price_action_goal: dict[str, Any],
+    price_action_feedback: dict[str, Any],
+    route: str,
+    *,
+    minimum_filled_orders: int = 5,
+    minimum_evidence_hours: float = 72.0,
+) -> str:
+    row = _best_route_row(price_action_goal, price_action_feedback, route)
+    if row is None:
+        return f"best {route} cohort: no positive evidence yet"
+    count = _route_evidence_count(row, route)
+    hours = _route_evidence_hours(row, route)
+    pnl = _route_pnl(row, route)
+    count_text = "?" if count is None else str(count)
+    noun = "round trip" if count == 1 else "round trips"
+    base = f"best {route} cohort: {_signed_usd_text(pnl)} on {count_text} {noun} over {_duration_hours_text(hours)}"
+    monthly = safe_float(row.get("monthly_run_rate_usdc") or row.get("shadow_monthly_run_rate_usdc"))
+    if (
+        count is not None
+        and count >= minimum_filled_orders
+        and hours is not None
+        and hours >= minimum_evidence_hours
+        and monthly is not None
+    ):
+        return f"{base} ({_usd_text(monthly)}/month evidence-qualified)"
+    return f"{base} (n too small to annualise)"
+
+
+def _best_edge_route_text(price_action_goal: dict[str, Any], price_action_feedback: dict[str, Any]) -> str:
+    return (
+        f"{_route_evidence_text(price_action_goal, price_action_feedback, 'shadow')} / "
+        f"{_route_evidence_text(price_action_goal, price_action_feedback, 'paper')}"
+    )
 
 
 def _decision_useful_summary(
@@ -2967,6 +3204,13 @@ def _decision_useful_summary(
     pnl_audit_state = str(goal_plan.get("pnl_audit_state") or "unknown")
     best_repricing_run_rate = safe_float(price_action_goal.get("best_repricing_monthly_run_rate_usdc"))
     forward_paper_run_rate = safe_float(price_action_goal.get("best_forward_paper_monthly_run_rate_usdc"))
+    edge_route_text = _best_edge_route_text(price_action_goal, price_action_feedback)
+    paper_route_row = _best_route_row(price_action_goal, price_action_feedback, "paper")
+    paper_route_qualified = bool(
+        paper_route_row
+        and (_route_evidence_count(paper_route_row, "paper") or 0) >= 5
+        and (_route_evidence_hours(paper_route_row, "paper") or 0.0) >= 72.0
+    )
     recent_loss_exits = int(safe_float(trade_signal_audit.get("recent_loss_exit_count")) or 0)
     recent_exits = int(safe_float(trade_signal_audit.get("recent_exit_count")) or 0)
     missing_targets = int(safe_float(trade_signal_audit.get("missing_confirmation_target_count")) or 0)
@@ -3248,8 +3492,8 @@ def _decision_useful_summary(
         {
             "lane": "Best shadow repricing route",
             "state": price_action_goal.get("state") or goal_plan.get("status") or "unknown",
-            "decision_use": "Shows whether price-change edge can plausibly bridge to the monthly target.",
-            "key_metric": f"shadow {_usd_text(best_repricing_run_rate)}; paper {_usd_text(forward_paper_run_rate)}",
+            "decision_use": "Shows the actual positive repricing evidence before any monthly extrapolation.",
+            "key_metric": edge_route_text,
             "blocker_or_next": goal_plan.get("main_gap") or goal_plan.get("recommended_action") or "-",
         },
     ]
@@ -3284,7 +3528,6 @@ def _decision_useful_summary(
         f"{_usd_text(decision_pnl)} audited; {_usd_text(decision_run_rate)} audited monthly run-rate vs {_usd_text(target_monthly)} target"
         + (f" ({raw_pnl_text})" if raw_pnl_text else "")
     )
-    edge_route_text = f"shadow repricing {_usd_text(best_repricing_run_rate)}; forward paper {_usd_text(forward_paper_run_rate)}"
     decision_questions = [
         {
             "question": "Can the bot paper trade now?",
@@ -3363,7 +3606,7 @@ def _decision_useful_summary(
         {
             "label": "Edge route",
             "value": edge_route_text,
-            "severity": "good" if forward_paper_run_rate is not None and forward_paper_run_rate > 0 else "warn",
+            "severity": "good" if paper_route_qualified else "warn",
             "decision_use": "Shadow edge is research; forward paper P&L is proof.",
         },
     ]

@@ -399,6 +399,75 @@ def test_dashboard_surfaces_algo_replay_evidence(tmp_path):
     assert data["algo_replay"]["live_trading_invoked"] is False
 
 
+def test_dashboard_gates_extrapolated_edge_route_evidence(tmp_path):
+    cfg = _config(tmp_path)
+    write_json(
+        cfg.governance_root / "paper_profit_goal_plan.json",
+        {
+            "status": "not_on_pace",
+            "target_monthly_profit_usdc": 100,
+            "decision_pnl_usdc": 0.22,
+            "decision_monthly_run_rate_usdc": 9.4,
+            "price_action_goal_state": {
+                "state": "forward_paper_on_monthly_target",
+                "best_repricing_monthly_run_rate_usdc": 2344.677548049622,
+                "best_forward_paper_monthly_run_rate_usdc": 1973.9336651190747,
+                "top_cohorts": [
+                    {
+                        "source": "paper_broker_forward",
+                        "cohort": "crypto_eth_updown_event",
+                        "forward_edge_blocker": "",
+                        "forward_paper_pnl_usdc": 0.1865793780687397,
+                        "forward_paper_roi": 0.046644844517184925,
+                        "monthly_run_rate_usdc": 1973.9336651190747,
+                        "paper_audited_round_trips": 2,
+                        "paper_buy_fills": 2,
+                        "paper_sell_fills": 2,
+                    },
+                    {
+                        "source": "shadow_forward",
+                        "cohort": "exploratory_crypto_updown_live_model|crypto_sol_updown_15m|outcome=up",
+                        "forward_edge_blocker": "",
+                        "forward_shadow_pnl_usdc": 9.67895748754814,
+                        "forward_shadow_roi": 0.9678957487548139,
+                        "monthly_run_rate_usdc": 2344.677548049622,
+                        "shadow_fills": 1,
+                        "shadow_sell_fills": 1,
+                    },
+                ],
+            },
+        },
+    )
+    write_json(
+        cfg.governance_root / "paper_profit_target_tracker.json",
+        {
+            "generated_at_utc": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+            "status": "not_on_pace",
+            "actual_pnl_since_baseline_usdc": 0.22,
+            "monthly_run_rate_usdc": 9.4,
+            "target_monthly_profit_usdc": 100,
+            "current": {"equity_usdc": 1000.22, "cash_usdc": 1000.22},
+        },
+    )
+
+    result = render_dashboard(cfg)
+
+    data = read_json(result["dashboard_data"])
+    html = Path(result["dashboard_file"]).read_text(encoding="utf-8")
+    edge_card = next(card for card in data["decision_useful_summary"]["decision_cards"] if card["label"] == "Edge route")
+    edge_lane = next(row for row in data["decision_useful_summary"]["evidence_lanes"] if row["lane"] == "Best shadow repricing route")
+    assert edge_card["severity"] == "warn"
+    assert "best paper cohort: +$0.19 on 2 round trips over 4m (n too small to annualise)" in edge_card["value"]
+    assert "best shadow cohort: +$9.68 on 1 round trip over 3.0h (n too small to annualise)" in edge_card["value"]
+    assert "$1973.93" not in edge_card["value"]
+    assert "$2344.68" not in edge_card["value"]
+    assert edge_lane["key_metric"] == edge_card["value"]
+    assert "n too small to annualise" in html
+    assert "provisional lines await market close" in html
+    assert "no strategy beat doing nothing" in html
+    assert "raw; audited" in html
+
+
 def test_dashboard_emits_decision_useful_summary_for_missing_fresh_candidate(tmp_path):
     cfg = _config(tmp_path)
     write_json(

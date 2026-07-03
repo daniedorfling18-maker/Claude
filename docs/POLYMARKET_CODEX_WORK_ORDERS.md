@@ -1,6 +1,6 @@
 # Polymarket Codex Work Orders
 
-Last updated: 2026-07-03 (WO-24 code landed; strategic edge reset: WO-24..WO-27 added; WO-20/21/22 landed; read docs/POLYMARKET_EDGE_STRATEGY_RESET.md first)
+Last updated: 2026-07-03 (WO-24/25/26 code landed; strategic edge reset: WO-24..WO-27 added; WO-20/21/22 landed; read docs/POLYMARKET_EDGE_STRATEGY_RESET.md first)
 
 Mechanical, file-level implementation instructions for coding agents (Codex or any other code
 changer). The architecture and priorities live in `docs/POLYMARKET_QUANT_MODE_CHARTER.md`; this file
@@ -974,7 +974,7 @@ and dashboard rendering. No order placement path was added.
 
 ---
 
-## WO-26 — Anti-concentration guard on adaptive collection queries — `open` (HIGH)
+## WO-26 — Anti-concentration guard on adaptive collection queries — `done` (2026-07-03, HIGH)
 
 **Goal:** the adaptive research-focus loop can never again collapse discovery into one family.
 
@@ -997,6 +997,16 @@ tests.
    round-robin; distinct-family floor enforced; determinism.
 
 **Out of scope:** gates, model thresholds.
+
+**Landed 2026-07-03:** `build_research_focus()` now writes audited pre/post query lists:
+`raw_collection_queries`, guarded `collection_queries`, and `collection_query_guard` with family
+counts, rejected-query reasons, up/down count, broad-base fill rows, and the explicit
+`decision_use=collection_rebalancing_only_not_trade_authorisation`. Defaults in
+`polymarket_predictive_config.example.yaml` enforce `max_queries_per_family=2`,
+`min_distinct_families=4`, and `max_updown_queries=1`, with deterministic broad-base fill across
+World Cup, tennis, macro, esports, AI, politics, elections, and stocks. Regression tests prove an
+8-query crypto up/down proposal becomes one up/down diagnostic plus broad families; CI import-path
+tests were also made Linux-safe by loading `scripts/*.py` by path.
 
 ---
 
@@ -1033,7 +1043,7 @@ Queue order (strategic reset, 2026-07-03 — read POLYMARKET_EDGE_STRATEGY_RESET
 1. WO-24   done 2026-07-03: sharp-anchor activation + broadening (VPS still needs THE_ODDS_API_KEY populated)
 2. WO-20   done 2026-07-03: position-aware quote collection
 3. WO-25   done 2026-07-03: dutch-book arb monitor loop/dashboard wiring (mechanical edge, model-free)
-4. WO-26   anti-concentration guard on adaptive queries
+4. WO-26   done 2026-07-03: anti-concentration guard on adaptive queries
 5. WO-21   done 2026-07-03: settle or flag stuck paper positions
 6. WO-27   longshot-bias research family (shadow-only)
 7. WO-7    done 2026-07-03: CLV-aware promotion review advisory wiring

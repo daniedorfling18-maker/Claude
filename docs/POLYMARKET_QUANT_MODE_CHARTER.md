@@ -311,6 +311,14 @@ above-alert rows, and it tracks 3+ scan persistence for human review. The dashbo
 "Dutch-book arb watch" section plus an info-only oversight alert for persistent baskets. This added
 no order placement path.
 
+**2026-07-03 — WO-26 landed by Codex.** Adaptive research-focus collection now has an audited
+anti-concentration guard: `research_focus.json` records raw proposed queries, guarded queries,
+family counts, rejected-query reasons, broad-base fill rows, and an explicit
+collection-only/no-trade-authorisation decision-use label. Defaults cap each family to two queries,
+cap crypto up/down to one timing diagnostic, and enforce at least four distinct families using a
+deterministic broad base. This pushes discovery back toward sports/macro/esports/AI/politics/stocks
+instead of letting weak up/down evidence consume the loop.
+
 ## Rules of engagement for coding agents
 
 0. **Division of labour**: the orchestrating agent writes/updates this charter and the work orders

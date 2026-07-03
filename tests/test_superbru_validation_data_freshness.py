@@ -2,9 +2,18 @@ from __future__ import annotations
 
 import argparse
 import csv
+import importlib.util
 from pathlib import Path
 
-from scripts.audit_superbru_validation_data_freshness import build_payload
+ROOT = Path(__file__).resolve().parents[1]
+SPEC = importlib.util.spec_from_file_location(
+    "audit_superbru_validation_data_freshness",
+    ROOT / "scripts" / "audit_superbru_validation_data_freshness.py",
+)
+assert SPEC and SPEC.loader
+audit_freshness = importlib.util.module_from_spec(SPEC)
+SPEC.loader.exec_module(audit_freshness)
+build_payload = audit_freshness.build_payload
 
 
 def _write_csv(path: Path, rows: list[dict[str, object]]) -> None:

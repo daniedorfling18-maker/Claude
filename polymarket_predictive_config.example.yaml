@@ -619,6 +619,23 @@ paper_market_scan:
     - ipo
     - earnings
     - recession
+research_focus:
+  # Collection guard only: this rebalances what the bot observes next and never
+  # approves trades or relaxes promotion/risk gates. It keeps adaptive feedback
+  # from collapsing into one family such as crypto up/down.
+  max_queries_per_family: 2
+  min_distinct_families: 4
+  max_updown_queries: 1
+  broad_base_queries:
+  - world cup
+  - tennis
+  - fed
+  - economy
+  - esports
+  - ai
+  - politics
+  - elections
+  - stocks
 cohort_promotion:
   require_positive_forward_pnl: true
   allow_shadow_evidence_for_promotion: true

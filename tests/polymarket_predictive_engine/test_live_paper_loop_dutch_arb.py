@@ -1,10 +1,19 @@
 from __future__ import annotations
 
+import importlib.util
 from pathlib import Path
 
 from polymarket_predictive_engine.config import EngineConfig
 from polymarket_predictive_engine.utils import now_utc, write_json
-from scripts import run_polymarket_live_paper_loop as loop
+
+ROOT = Path(__file__).resolve().parents[2]
+SPEC = importlib.util.spec_from_file_location(
+    "run_polymarket_live_paper_loop",
+    ROOT / "scripts" / "run_polymarket_live_paper_loop.py",
+)
+assert SPEC and SPEC.loader
+loop = importlib.util.module_from_spec(SPEC)
+SPEC.loader.exec_module(loop)
 
 
 def _cfg(tmp_path: Path, dutch_arb: dict | None = None) -> EngineConfig:

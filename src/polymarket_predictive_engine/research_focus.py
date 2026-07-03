@@ -5,6 +5,7 @@ from typing import Any
 from .goal_planner import build_goal_plan
 from .promotion_review import build_promotion_review
 from .utils import now_utc, read_csv_rows, read_json, safe_float, write_json
+from .worldcup_validation import classify_market_family
 
 CORE_WATCHLIST_COHORTS: dict[str, str] = {}
 
@@ -13,6 +14,18 @@ QUARANTINED_COHORT_FRAGMENTS = (
     "crypto_sol_updown_5m",
     "crypto_xrp_updown_5m",
     "crypto_updown_5m",
+)
+
+DEFAULT_BROAD_BASE_QUERIES = (
+    "world cup",
+    "tennis",
+    "fed",
+    "economy",
+    "esports",
+    "ai",
+    "politics",
+    "elections",
+    "stocks",
 )
 
 
@@ -25,6 +38,19 @@ def _bool(value: Any) -> bool:
     if isinstance(value, bool):
         return value
     return str(value or "").strip().lower() in {"1", "true", "yes", "y", "on", "approved", "promoted"}
+
+
+def _int_setting(settings: dict[str, Any], key: str, default: int) -> int:
+    value = safe_float(settings.get(key))
+    if value is None:
+        return default
+    return int(max(0, value))
+
+
+def _append_unique(values: list[str], query: Any) -> None:
+    text = str(query or "").strip()
+    if text and text not in values:
+        values.append(text)
 
 
 def _is_quarantined_fast_crypto(cohort: str) -> bool:
@@ -70,6 +96,160 @@ def _cohort_query(cohort: str) -> str:
     if "crypto" in text:
         return "bitcoin"
     return ""
+
+
+def _research_focus_settings(cfg) -> dict[str, Any]:
+    settings = cfg.raw.get("research_focus", {})
+    return settings if isinstance(settings, dict) else {}
+
+
+def _query_key(query: str) -> str:
+    return " ".join(str(query or "").strip().lower().split())
+
+
+def _is_updown_query(query: str) -> bool:
+    text = f" {_query_key(query)} "
+    return "updown" in text or " up/down " in text or " up or down " in text
+
+
+def _query_family(query: str) -> str:
+    text = f" {_query_key(query)} "
+    if not text.strip():
+        return "empty"
+    if _is_updown_query(query):
+        return "crypto_updown"
+    if "world cup" in text or "worldcup" in text or " fifa " in text:
+        return "worldcup"
+    if "tennis" in text or " wimbledon " in text or " us open " in text or " atp " in text or " wta " in text:
+        return "tennis"
+    if "fed" in text or "fomc" in text or "interest rate" in text or " rate cut " in text or " rate hike " in text:
+        return "macro_rates"
+    if "economy" in text or "inflation" in text or " cpi " in text or " gdp " in text or "recession" in text:
+        return "macro_economy"
+    if "esport" in text or "valorant" in text or "cs2" in text or " dota " in text or "league of legends" in text:
+        return "esports"
+    if "openai" in text or " ai " in text or "chatgpt" in text or "anthropic" in text or "claude" in text:
+        return "ai"
+    if "politic" in text or "election" in text or "trump" in text or "president" in text:
+        return "politics"
+    if "stock" in text or "equities" in text or "nasdaq" in text or "s&p" in text or "s p 500" in text:
+        return "equities"
+    if "sports" in text or " nba " in text or " mlb " in text or " nfl " in text or " ufc " in text:
+        return "sports"
+    if "bitcoin" in text or " btc " in text:
+        return "crypto_btc"
+    if "ethereum" in text or " eth " in text:
+        return "crypto_eth"
+    if "solana" in text or " sol " in text:
+        return "crypto_sol"
+    if " xrp " in text or "ripple" in text:
+        return "crypto_xrp"
+    family = classify_market_family({"question": query, "market_slug": query, "category": query})
+    return family if family and family != "unknown" else "misc"
+
+
+def _broad_base_queries(cfg) -> list[str]:
+    settings = _research_focus_settings(cfg)
+    raw = settings.get("broad_base_queries")
+    if raw is None:
+        paper_scan = cfg.raw.get("paper_market_scan", {}) if isinstance(cfg.raw.get("paper_market_scan"), dict) else {}
+        raw = paper_scan.get("broad_repricing_queries") or DEFAULT_BROAD_BASE_QUERIES
+    if isinstance(raw, tuple):
+        raw = list(raw)
+    elif not isinstance(raw, list):
+        raw = [raw]
+    queries: list[str] = []
+    seen: set[str] = set()
+    for item in raw:
+        query = str(item or "").strip()
+        key = _query_key(query)
+        if not query or not key or key in seen:
+            continue
+        queries.append(query)
+        seen.add(key)
+    return queries or list(DEFAULT_BROAD_BASE_QUERIES)
+
+
+def _guard_collection_queries(cfg, proposed_queries: list[str]) -> tuple[list[str], dict[str, Any]]:
+    settings = _research_focus_settings(cfg)
+    max_per_family = max(1, _int_setting(settings, "max_queries_per_family", 2))
+    min_distinct_families = max(1, _int_setting(settings, "min_distinct_families", 4))
+    max_updown_queries = max(0, _int_setting(settings, "max_updown_queries", 1))
+
+    raw_queries: list[str] = []
+    seen_raw: set[str] = set()
+    for query in proposed_queries:
+        clean = str(query or "").strip()
+        key = _query_key(clean)
+        if not clean or not key or key in seen_raw:
+            continue
+        raw_queries.append(clean)
+        seen_raw.add(key)
+
+    guarded: list[str] = []
+    guarded_keys: set[str] = set()
+    family_counts: dict[str, int] = {}
+    rejected: list[dict[str, Any]] = []
+    updown_count = 0
+
+    def add_query(query: str, *, source: str) -> tuple[bool, str]:
+        nonlocal updown_count
+        key = _query_key(query)
+        if not key or key in guarded_keys:
+            return False, "duplicate"
+        family = _query_family(query)
+        if _is_updown_query(query) and updown_count >= max_updown_queries:
+            return False, "max_updown_queries"
+        if family_counts.get(family, 0) >= max_per_family:
+            return False, "max_queries_per_family"
+        guarded.append(query)
+        guarded_keys.add(key)
+        family_counts[family] = family_counts.get(family, 0) + 1
+        if _is_updown_query(query):
+            updown_count += 1
+        return True, source
+
+    for query in raw_queries:
+        added, reason = add_query(query, source="raw")
+        if not added and reason != "duplicate":
+            rejected.append({"query": query, "family": _query_family(query), "reason": reason})
+
+    broad_queries = _broad_base_queries(cfg)
+    target_len = max(len(raw_queries), min_distinct_families)
+    broad_fill: list[str] = []
+    attempts = max(1, target_len * max(1, len(broad_queries)) * 2)
+    index = 0
+    while (
+        (len(guarded) < target_len or len(family_counts) < min_distinct_families)
+        and index < attempts
+    ):
+        candidate = broad_queries[index % len(broad_queries)]
+        index += 1
+        added, _reason = add_query(candidate, source="broad_base")
+        if added:
+            broad_fill.append(candidate)
+        if len(guarded_keys) >= len(seen_raw) + len({_query_key(query) for query in broad_queries if _query_key(query)}):
+            break
+
+    guard = {
+        "enabled": True,
+        "settings": {
+            "max_queries_per_family": max_per_family,
+            "min_distinct_families": min_distinct_families,
+            "max_updown_queries": max_updown_queries,
+        },
+        "raw_collection_queries": raw_queries,
+        "guarded_collection_queries": guarded,
+        "broad_base_queries": broad_queries,
+        "broad_fill_queries": broad_fill,
+        "rejected_queries": rejected,
+        "family_counts": dict(sorted(family_counts.items())),
+        "distinct_families": len(family_counts),
+        "updown_queries": [query for query in guarded if _is_updown_query(query)],
+        "updown_query_count": updown_count,
+        "decision_use": "collection_rebalancing_only_not_trade_authorisation",
+    }
+    return guarded, guard
 
 
 def _thesis(cohort: str, row: dict[str, Any]) -> str:
@@ -676,12 +856,19 @@ def build_research_focus(cfg) -> dict[str, Any]:
         feedback_queries = [str(query or "").strip() for query in price_action_feedback.get("collection_queries", [])]
         collection_queries = [query for query in feedback_queries if query] or ["bitcoin", "ethereum", "world cup", "tennis"]
 
+    raw_collection_queries = list(collection_queries)
+    collection_queries, collection_query_guard = _guard_collection_queries(cfg, collection_queries)
+
     payload = {
         "status": "ok",
         "generated_at_utc": now_utc(),
+        "paper_trading_invoked": False,
+        "live_trading_invoked": False,
         "summary": next_action,
         "watchlist": focus_rows,
+        "raw_collection_queries": raw_collection_queries,
         "collection_queries": collection_queries,
+        "collection_query_guard": collection_query_guard,
         "suppressed_queries": price_action_feedback.get("suppressed_queries", []),
         "price_action_model": {
             "status": price_action_model.get("status"),

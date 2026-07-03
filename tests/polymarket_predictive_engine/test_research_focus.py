@@ -58,10 +58,19 @@ def test_research_focus_uses_price_action_model_blocker_to_prioritise_feedback_q
     payload = build_research_focus(cfg)
     saved = read_json(cfg.governance_root / "research_focus.json")
 
-    assert payload["collection_queries"][:2] == ["btc updown", "solana updown"]
+    assert payload["raw_collection_queries"][:2] == ["btc updown", "solana updown"]
+    assert payload["collection_queries"][0] == "btc updown"
+    assert "solana updown" not in payload["collection_queries"]
+    assert payload["collection_query_guard"]["updown_query_count"] == 1
+    assert payload["collection_query_guard"]["distinct_families"] >= 4
+    assert payload["collection_query_guard"]["rejected_queries"][0] == {
+        "query": "solana updown",
+        "family": "crypto_updown",
+        "reason": "max_updown_queries",
+    }
     assert payload["price_action_model"]["model_needs_repricing_data"] is True
     assert "Strict price-action model needs profitable ask-to-future-bid" in payload["summary"]
-    assert saved["collection_queries"][:2] == ["btc updown", "solana updown"]
+    assert saved["collection_queries"] == payload["collection_queries"]
 
 
 def test_research_focus_does_not_map_macro_cohort_to_btc_updown(tmp_path):
@@ -120,7 +129,15 @@ def test_research_focus_prioritises_model_validation_gap_queries(tmp_path):
     payload = build_research_focus(cfg)
 
     assert payload["collection_queries"][:3] == ["fed", "ethereum", "esports"]
-    assert payload["collection_queries"][3:5] == ["btc updown", "solana updown"]
+    assert payload["collection_queries"][3] == "btc updown"
+    assert "solana updown" not in payload["collection_queries"]
+    assert payload["collection_query_guard"]["raw_collection_queries"][:5] == [
+        "fed",
+        "ethereum",
+        "esports",
+        "btc updown",
+        "solana updown",
+    ]
     assert payload["price_action_model"]["validation_gap_needs_collection"] is True
     assert "positive train repricing examples but no positive validation examples" in payload["summary"]
 
@@ -164,7 +181,9 @@ def test_research_focus_prioritises_near_positive_historical_breadth_queries(tmp
 
     payload = build_research_focus(cfg)
 
-    assert payload["collection_queries"][:3] == ["xrp updown", "btc updown", "ethereum"]
+    assert payload["collection_queries"][:3] == ["xrp updown", "ethereum", "world cup"]
+    assert "btc updown" not in payload["collection_queries"]
+    assert payload["collection_query_guard"]["rejected_queries"][0]["reason"] == "max_updown_queries"
     assert payload["price_action_model"]["historical_breadth_queries"] == ["xrp updown"]
     assert "near-positive historical buckets" in payload["summary"]
 
@@ -242,10 +261,74 @@ def test_research_focus_broadens_to_near_miss_board_when_current_analogues_are_n
     payload = build_research_focus(cfg)
 
     assert payload["collection_queries"][:4] == ["fed", "world cup", "esports", "bitcoin"]
-    assert payload["collection_queries"][4:6] == ["eth updown", "xrp updown"]
+    assert payload["collection_queries"][4:6] == ["eth updown", "tennis"]
+    assert "xrp updown" not in payload["collection_queries"]
     assert payload["price_action_model"]["analogue_scan_needs_breadth"] is True
     assert payload["price_action_model"]["near_miss_candidate_queries"][:4] == ["fed", "world cup", "esports", "bitcoin"]
     assert "broaden evidence collection into near-miss markets" in payload["summary"]
+
+
+def test_research_focus_guard_prevents_updown_query_collapse(tmp_path):
+    cfg = _cfg(tmp_path)
+    cfg.raw["research_focus"] = {
+        "max_queries_per_family": 2,
+        "min_distinct_families": 4,
+        "max_updown_queries": 1,
+        "broad_base_queries": ["world cup", "tennis", "fed", "economy", "esports", "ai", "politics"],
+    }
+    write_json(
+        cfg.output_root / "polymarket_price_action" / "price_action_model_summary.json",
+        {
+            "status": "insufficient_data",
+            "decision": "collect_more_bid_ask_price_action_training_events",
+            "promotion_ready": False,
+        },
+    )
+    write_json(
+        cfg.governance_root / "price_action_feedback.json",
+        {
+            "status": "ok",
+            "learning_state": "collect_more_positive_price_action_evidence",
+            "collection_queries": [
+                "btc updown",
+                "solana updown",
+                "xrp updown",
+                "eth updown",
+                "bitcoin up or down",
+                "ethereum up or down",
+                "solana up or down",
+                "xrp up or down",
+            ],
+        },
+    )
+
+    payload = build_research_focus(cfg)
+
+    assert payload["raw_collection_queries"] == [
+        "btc updown",
+        "solana updown",
+        "xrp updown",
+        "eth updown",
+        "bitcoin up or down",
+        "ethereum up or down",
+        "solana up or down",
+        "xrp up or down",
+    ]
+    assert payload["collection_queries"] == [
+        "btc updown",
+        "world cup",
+        "tennis",
+        "fed",
+        "economy",
+        "esports",
+        "ai",
+        "politics",
+    ]
+    guard = payload["collection_query_guard"]
+    assert guard["updown_query_count"] == 1
+    assert guard["distinct_families"] >= 4
+    assert guard["broad_fill_queries"] == ["world cup", "tennis", "fed", "economy", "esports", "ai", "politics"]
+    assert [row["reason"] for row in guard["rejected_queries"]] == ["max_updown_queries"] * 7
 
 
 def test_research_focus_prioritises_current_positive_analogue_as_learning_target(tmp_path):

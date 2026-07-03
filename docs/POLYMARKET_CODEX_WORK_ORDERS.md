@@ -1,6 +1,6 @@
 # Polymarket Codex Work Orders
 
-Last updated: 2026-07-03 (strategic edge reset: WO-24..WO-27 added; WO-20/21/22 landed; read docs/POLYMARKET_EDGE_STRATEGY_RESET.md first)
+Last updated: 2026-07-03 (WO-24 code landed; strategic edge reset: WO-24..WO-27 added; WO-20/21/22 landed; read docs/POLYMARKET_EDGE_STRATEGY_RESET.md first)
 
 Mechanical, file-level implementation instructions for coding agents (Codex or any other code
 changer). The architecture and priorities live in `docs/POLYMARKET_QUANT_MODE_CHARTER.md`; this file
@@ -897,7 +897,7 @@ started`), `dashboard.py` Strategy V2 section, tests.
 
 ---
 
-## WO-24 — Activate and broaden the sharp-anchor pipeline — `open` (HIGHEST VALUE)
+## WO-24 — Activate and broaden the sharp-anchor pipeline — `done` (2026-07-03, HIGHEST VALUE)
 
 **Context:** `docs/POLYMARKET_EDGE_STRATEGY_RESET.md`. The de-vig pipeline exists end-to-end and
 has never run (`missing_api_key`). A human must set `THE_ODDS_API_KEY` on the VPS; this WO makes
@@ -927,6 +927,16 @@ or cycle wiring, tests.
 
 **Out of scope:** alpha thresholds, gates. The anchor feeds `fundamental_probability_paths` which
 the alpha layer already consumes with a haircut and cross-check.
+
+**Landed 2026-07-03:** broadened the provider config to World Cup outrights, World Cup match h2h,
+NBA, MLB, MMA, ATP, and WTA; added provider sports-list validation, unknown-sport skipping,
+`max_requests_per_run`, and `fetch_interval_minutes` budget gating; extended h2h anchor joins so
+clear "Will Team beat Team?" YES contracts map to bookmaker team outcomes without guessing NO/draw
+rows; added unmapped-row samples; and made sharp-anchor coding errors fail loud in the VPS loop.
+Tests cover missing key, provider errors, fallback CSVs, budget skips, unknown sports, h2h joins,
+and no-guess unmapped outcomes. Runtime note: GitHub confirms `THE_ODDS_API_KEY` exists as a
+sealed secret, but GitHub cannot reveal secret plaintext; the VPS container remains blocked until
+that value is populated in the VPS environment.
 
 ---
 
@@ -1010,7 +1020,7 @@ by CLV, not settlement waiting.
 WO-1..WO-6, WO-8, WO-9   done and audited (2026-07-02)
 
 Queue order (strategic reset, 2026-07-03 — read POLYMARKET_EDGE_STRATEGY_RESET.md first):
-1. WO-24   sharp-anchor activation + broadening (HIGHEST VALUE; THE_ODDS_API_KEY must be present on the VPS)
+1. WO-24   done 2026-07-03: sharp-anchor activation + broadening (VPS still needs THE_ODDS_API_KEY populated)
 2. WO-20   done 2026-07-03: position-aware quote collection
 3. WO-25   dutch-book arb monitor wiring (mechanical edge, model-free)
 4. WO-26   anti-concentration guard on adaptive queries

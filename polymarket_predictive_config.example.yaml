@@ -191,9 +191,25 @@ sharp_odds_fetch:
   base_url: https://api.the-odds-api.com/v4
   api_key_env: THE_ODDS_API_KEY
   sports:
-  - soccer_fifa_world_cup_winner
+  - key: soccer_fifa_world_cup_winner
+    markets: outrights
+  - key: soccer_fifa_world_cup
+    markets: h2h
+  - key: basketball_nba
+    markets: h2h
+  - key: baseball_mlb
+    markets: h2h
+  - key: mma_mixed_martial_arts
+    markets: h2h
+  - key: tennis_atp
+    markets: h2h
+  - key: tennis_wta
+    markets: h2h
   regions: eu,uk                 # Pinnacle is in eu; Betfair Exchange in uk/eu
-  markets: outrights
+  markets: h2h
+  validate_sports: true
+  max_requests_per_run: 5
+  fetch_interval_minutes: 60
   bookmaker_priority:
   - pinnacle
   - betfair_ex_eu

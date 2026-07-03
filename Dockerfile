@@ -16,6 +16,8 @@ COPY scripts ./scripts
 COPY inputs ./inputs
 
 ARG INSTALL_POLYMARKET_SDK=false
+ARG PM_IMAGE_BUILD_SHA=unknown
+ENV PM_IMAGE_BUILD_SHA=${PM_IMAGE_BUILD_SHA}
 RUN python -m pip install --upgrade pip \
     && pip install -e . \
     && if [ "${INSTALL_POLYMARKET_SDK}" = "true" ]; then pip install py-clob-client-v2; fi

@@ -1363,6 +1363,43 @@ def test_dashboard_treats_fresh_legacy_loop_as_vps_driver_when_shadow_cycle_miss
     assert data["strategy_v2"]["runtime_reason"] == "Strategy V2 is not running in this deployment."
 
 
+def test_dashboard_surfaces_aligned_vps_deployment_health(tmp_path, monkeypatch):
+    cfg = _config(tmp_path)
+    monkeypatch.setenv("PM_VPS_DEPLOYED_SHA", "abcdef123456")
+    monkeypatch.setenv("PM_IMAGE_BUILD_SHA", "abcdef1")
+    monkeypatch.setenv("THE_ODDS_API_KEY", "test-key")
+
+    result = render_dashboard(cfg)
+    data = read_json(result["dashboard_data"])
+    html = Path(result["dashboard_file"]).read_text(encoding="utf-8")
+
+    health = data["deployment_health"]
+    assert health["status"] == "ok"
+    assert health["expected_deploy_sha"] == "abcdef123456"
+    assert health["dashboard_code_version"] == "abcdef1"
+    assert health["version_match"] is True
+    assert health["the_odds_api_key_present"] is True
+    assert health["blockers"] == []
+    assert "Deployment health" in html
+    assert "Expected deploy SHA" in html
+
+
+def test_dashboard_flags_deployment_sha_mismatch_and_missing_odds_key(tmp_path, monkeypatch):
+    cfg = _config(tmp_path)
+    monkeypatch.setenv("PM_VPS_DEPLOYED_SHA", "abcdef123456")
+    monkeypatch.setenv("PM_IMAGE_BUILD_SHA", "1234567")
+    monkeypatch.delenv("THE_ODDS_API_KEY", raising=False)
+
+    result = render_dashboard(cfg)
+    data = read_json(result["dashboard_data"])
+
+    health = data["deployment_health"]
+    assert health["status"] == "needs_attention"
+    assert health["version_match"] is False
+    assert "deployed_sha_mismatch" in health["blockers"]
+    assert "the_odds_api_key_missing" in health["blockers"]
+
+
 def test_dashboard_surfaces_shadow_research_memory_pause(tmp_path):
     cfg = _config(tmp_path)
     status_path = cfg.path.parent / "work" / "shadow_research_cycle_latest_status.json"

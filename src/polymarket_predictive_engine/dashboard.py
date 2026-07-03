@@ -277,6 +277,7 @@ async function load() {
     const tradeSignalAudit = data.trade_signal_audit || {};
     const decisionSummary = data.decision_useful_summary || {};
     const evidenceFunnel = data.evidence_funnel || {};
+    const deploymentHealth = data.deployment_health || {};
     const probeExitWatch = data.paper_probe_exit_watch || {};
     const paperMaintenance = data.paper_maintenance || {};
     const paperMaintenanceTask = data.paper_maintenance_task || {};
@@ -332,6 +333,7 @@ async function load() {
       ? oversight.alerts.map(item => alertBox(item.title || "Oversight alert", longText(item.body || "-", 260), item.severity || "warn"))
       : [];
     if (dashboardStale) oversightAlerts.push(alertBox("Dashboard snapshot is stale", `The displayed file is ${fmtAge(dashboardAge)} old. Refresh the dashboard generator before trusting signal counts.`, "bad"));
+    if (["needs_attention", "container_unversioned"].includes(String(deploymentHealth.status || ""))) oversightAlerts.push(alertBox("Deployment health needs attention", longText(deploymentHealth.summary || "Deployment metadata is incomplete or stale.", 260), "warn"));
     if (!oversightAlerts.length && modelStale) oversightAlerts.push(alertBox("Model scoring is stale", `Price-action model summary is ${fmtAge(modelAge)} old. Re-score/retrain before promoting any new paper signals.`, "bad"));
     if (!oversightAlerts.length && validationGapActive) oversightAlerts.push(alertBox("Model needs positive validation examples", `Train positives: ${plain(priceActionModel.train_positive_targets)}; validation positives: ${plain(priceActionModel.validation_positive_targets)}. Collect next: ${joinText(validationGap.collection_queries || [])}.`, "warn"));
     if (!oversightAlerts.length && approvedSignals <= 0) oversightAlerts.push(alertBox("No approved paper signals", longText(diag.main_blocker || priceActionPaper.decision || "Current gates are blocking paper entries.", 220), "warn"));
@@ -646,6 +648,10 @@ async function load() {
     ]);
     document.getElementById("oversightCockpit").innerHTML = facts([
       ["Dashboard snapshot", `${fmtAge(dashboardAge)} old / ${data.generated_at_utc || "-"}`],
+      ["Deployment health", `${deploymentHealth.status || "-"} / ${deploymentHealth.dashboard_code_version || "unknown"}`, v=>longText(v, 220)],
+      ["Expected deploy SHA", deploymentHealth.expected_deploy_sha || "-", v=>longText(v, 180)],
+      ["Odds API key", deploymentHealth.the_odds_api_key_present ? "present" : "missing"],
+      ["Deploy blockers", deploymentHealth.blockers || [], joinText],
       ["Shadow research", `${researchStatus} / ${fmtAge(researchAge)} old`],
       ["Active lane", legacyLiveActive ? "legacy live loop" : "shadow research + websocket"],
       ["Model freshness", `${priceActionModel.status || "unknown"} / ${fmtAge(modelAge)} old`],
@@ -4104,6 +4110,84 @@ def _broker_signal_freshness(
     }
 
 
+def _sha_matches(expected: str, actual: str) -> bool:
+    expected = expected.strip()
+    actual = actual.strip()
+    if not expected or not actual or expected == "unknown" or actual == "unknown":
+        return False
+    return expected.startswith(actual) or actual.startswith(expected)
+
+
+def _local_git_head() -> str:
+    repo_root = Path(__file__).resolve().parents[2]
+    try:
+        result = subprocess.run(
+            ["git", "rev-parse", "--short", "HEAD"],
+            cwd=repo_root,
+            check=True,
+            capture_output=True,
+            text=True,
+            timeout=3,
+        )
+    except Exception:
+        return ""
+    return result.stdout.strip()
+
+
+def _deployment_health() -> dict[str, Any]:
+    expected_sha = os.getenv("PM_VPS_DEPLOYED_SHA", "").strip()
+    image_build_sha = os.getenv("PM_IMAGE_BUILD_SHA", "").strip()
+    local_git_head = _local_git_head()
+    runtime_sha = image_build_sha if image_build_sha and image_build_sha != "unknown" else local_git_head
+    in_container = Path("/.dockerenv").exists() or bool(os.getenv("KUBERNETES_SERVICE_HOST"))
+    odds_key_present = bool(os.getenv("THE_ODDS_API_KEY", "").strip())
+    version_match = _sha_matches(expected_sha, runtime_sha) if expected_sha and runtime_sha else None
+    blockers: list[str] = []
+
+    if expected_sha:
+        if not runtime_sha:
+            blockers.append("runtime_sha_missing")
+        elif not version_match:
+            blockers.append("deployed_sha_mismatch")
+    elif in_container:
+        blockers.append("pm_vps_deployed_sha_missing")
+
+    if not odds_key_present:
+        blockers.append("the_odds_api_key_missing")
+
+    if expected_sha and not blockers:
+        status = "ok"
+        summary = "VPS deployment SHA, dashboard code, and odds API key are aligned."
+    elif expected_sha:
+        status = "needs_attention"
+        summary = "VPS deployment metadata is present, but one or more runtime checks need attention."
+    elif in_container:
+        status = "container_unversioned"
+        summary = "Running inside a container without PM_VPS_DEPLOYED_SHA, so stale-code checks cannot verify the deployed commit."
+    else:
+        status = "local_development"
+        summary = "Local development render; deployment SHA checks are not expected."
+
+    return {
+        "status": status,
+        "summary": summary,
+        "blockers": blockers,
+        "expected_deploy_sha": expected_sha,
+        "image_build_sha": image_build_sha,
+        "local_git_head": local_git_head,
+        "dashboard_code_version": runtime_sha or "unknown",
+        "version_match": version_match,
+        "the_odds_api_key_present": odds_key_present,
+        "runtime": "container" if in_container else "local",
+        "manual_deploy_workflow": "deploy-polymarket-vps-paper.yml",
+        "dashboard_markers": {
+            "proof_status": True,
+            "evidence_funnel": True,
+            "profit_target_proof_status": True,
+        },
+    }
+
+
 def render_dashboard(cfg: EngineConfig, latest_report: dict[str, Any] | None = None) -> dict[str, Any]:
     out = cfg.output_root / "polymarket_dashboard"
     out.mkdir(parents=True, exist_ok=True)
@@ -4232,6 +4316,7 @@ def render_dashboard(cfg: EngineConfig, latest_report: dict[str, Any] | None = N
     paper_maintenance = _paper_maintenance_status(cfg)
     paper_maintenance_task = _paper_maintenance_task_status(cfg)
     shadow_research_cycle = _shadow_research_cycle_status(cfg)
+    deployment_health = _deployment_health()
     evidence_freshness = {
         "broker_source": broker_source,
         "broker_generated_at_utc": broker_summary.get("generated_at_utc"),
@@ -4309,6 +4394,7 @@ def render_dashboard(cfg: EngineConfig, latest_report: dict[str, Any] | None = N
     payload = {
         "status": "ok",
         "generated_at_utc": now_utc(),
+        "deployment_health": deployment_health,
         "decision_useful_summary": decision_useful_summary,
         "forward_paper_cycle": forward,
         "paper_trade_refresh": paper_trade_refresh,

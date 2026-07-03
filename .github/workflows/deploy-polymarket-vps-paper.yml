@@ -180,6 +180,7 @@ jobs:
           printf '%s' "$html" | grep -q "Proof status"
           printf '%s' "$html" | grep -q "Evidence funnel"
           printf '%s' "$data" | grep -q "profit_target_proof_status"
+          printf '%s' "$data" | grep -q "deployment_health"
 
           echo "VPS deploy verified: http://${PM_VPS_HOST}:${port}/"
           REMOTE

@@ -111,6 +111,12 @@ if [ -f "$dashboard_data" ]; then
     printf '%s\n' "Dashboard proof data: missing (dashboard data predates the verified-profit gate)"
     exit_code=1
   fi
+  if grep -q "deployment_health" "$dashboard_data"; then
+    printf '%s\n' "Dashboard deployment health: ok"
+  else
+    printf '%s\n' "Dashboard deployment health: missing (dashboard data predates deploy-health checks)"
+    exit_code=1
+  fi
 else
   printf '%s\n' "Dashboard proof data: missing"
   exit_code=1

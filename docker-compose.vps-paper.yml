@@ -16,6 +16,7 @@ services:
       dockerfile: Dockerfile
       args:
         INSTALL_POLYMARKET_SDK: "false"
+        PM_IMAGE_BUILD_SHA: ${PM_VPS_DEPLOYED_SHA:-unknown}
     image: polymarket-paper-vps:latest
     container_name: polymarket-paper-live
     mem_limit: ${PM_PAPER_MEM_LIMIT:-4g}

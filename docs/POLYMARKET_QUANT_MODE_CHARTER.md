@@ -269,6 +269,12 @@ when the positions table lacks them, and writes `selection_reason=open_position`
 bid/ask lines needed for CLV finality, edge attribution, paper exits, and settlement detection.
 Full suite: 684 tests green.
 
+**2026-07-03 — WO-21 landed by Codex.** Crypto up/down proxy settlement now lives in a shared
+module and covers encoded fast slugs plus named hourly/daily slugs. The paper broker settles
+past-close hourly crypto up/down positions only when public reference prices resolve the window;
+otherwise it emits `stale_open_position` evidence and the dashboard/oversight surfaces a bad alert.
+No cost-basis force-close path was added. Full suite: 687 tests green.
+
 **2026-07-02 — overnight queue issued.** WO-7 and WO-10..WO-19 are specced in the work orders doc
 with a night-shift protocol (fixed order, stop conditions, skip-and-note rules, end-of-night
 report). New ground covered by the queue: portfolio VaR reporting (WP6 remainder), microstructure

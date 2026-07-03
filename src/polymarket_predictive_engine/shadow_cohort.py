@@ -12,6 +12,11 @@ from typing import Any
 from zoneinfo import ZoneInfo
 
 from .config import EngineConfig
+from .crypto_updown_settlement import (
+    crypto_updown_proxy_settlement_price as _crypto_updown_proxy_settlement_price,
+    crypto_updown_slug_close_time as _crypto_updown_slug_close_time,
+    crypto_updown_slug_window as _crypto_updown_slug_window,
+)
 from .execution_costs import estimate_execution_cost
 from .resolution_collector import fetch_gamma_market, infer_market_resolution_rows
 from .utils import boolish, now_utc, parse_timestamp, read_csv_rows, read_json, safe_float, write_csv, write_json
@@ -112,24 +117,6 @@ def _is_long_horizon(row: dict[str, Any], settings: dict[str, Any]) -> bool:
     min_hours = float(settings.get("long_horizon_min_time_to_close_hours", 24.0))
     time_to_close = _time_to_close_hours(row)
     return time_to_close is None or time_to_close >= min_hours
-
-
-def _crypto_updown_slug_window(slug: Any) -> tuple[str, int, datetime, datetime] | None:
-    match = re.match(r"^(btc|eth|sol|xrp)-updown-(5m|15m)-(\d+)$", str(slug or "").strip().lower())
-    if not match:
-        return None
-    asset_key, interval_raw, timestamp_raw = match.groups()
-    interval_minutes = 15 if interval_raw == "15m" else 5
-    start_utc = datetime.fromtimestamp(int(timestamp_raw), tz=timezone.utc)
-    end_utc = start_utc + timedelta(minutes=interval_minutes)
-    return asset_key, interval_minutes, start_utc, end_utc
-
-
-def _crypto_updown_slug_close_time(slug: Any) -> str:
-    window = _crypto_updown_slug_window(slug)
-    if window is None:
-        return ""
-    return window[3].isoformat().replace("+00:00", "Z")
 
 
 def _is_fast_crypto_updown_position(position: dict[str, Any]) -> bool:
@@ -357,147 +344,6 @@ def _public_search_queries_for_slug(slug: str) -> list[str]:
         f"{asset_name} up or down {date_text}",
         f"{asset_name} updown {date_text}",
     ]
-
-
-def _fetch_binance_window_prices(
-    asset_key: str,
-    *,
-    start_utc: datetime,
-    interval_minutes: int,
-    timeout_seconds: int,
-) -> tuple[float, float, str] | None:
-    symbol = {
-        "btc": "BTCUSDT",
-        "eth": "ETHUSDT",
-        "sol": "SOLUSDT",
-        "xrp": "XRPUSDT",
-    }.get(asset_key)
-    if not symbol:
-        return None
-    interval = "15m" if interval_minutes == 15 else "5m"
-    start_ms = int(start_utc.timestamp() * 1000)
-    params = urllib.parse.urlencode(
-        {
-            "symbol": symbol,
-            "interval": interval,
-            "startTime": str(start_ms),
-            "limit": "1",
-        }
-    )
-    request = urllib.request.Request(
-        f"https://api.binance.com/api/v3/klines?{params}",
-        headers={
-            "User-Agent": "superbru-polymarket-mispricing-bot/0.1",
-            "Accept": "application/json",
-        },
-    )
-    with urllib.request.urlopen(request, timeout=timeout_seconds) as response:  # nosec B310 - public market data API
-        payload = json.loads(response.read().decode("utf-8"))
-    if not isinstance(payload, list) or not payload:
-        return None
-    candle = payload[0]
-    if not isinstance(candle, list) or len(candle) < 5:
-        return None
-    open_price = safe_float(candle[1])
-    close_price = safe_float(candle[4])
-    if open_price is None or close_price is None or open_price <= 0 or close_price <= 0:
-        return None
-    return open_price, close_price, "binance_klines"
-
-
-def _fetch_coinbase_window_prices(
-    asset_key: str,
-    *,
-    start_utc: datetime,
-    interval_minutes: int,
-    timeout_seconds: int,
-) -> tuple[float, float, str] | None:
-    product = {
-        "btc": "BTC-USD",
-        "eth": "ETH-USD",
-        "sol": "SOL-USD",
-        "xrp": "XRP-USD",
-    }.get(asset_key)
-    if not product:
-        return None
-    granularity = 900 if interval_minutes == 15 else 300
-    end_utc = start_utc + timedelta(minutes=interval_minutes)
-    params = urllib.parse.urlencode(
-        {
-            "start": start_utc.isoformat().replace("+00:00", "Z"),
-            "end": end_utc.isoformat().replace("+00:00", "Z"),
-            "granularity": str(granularity),
-        }
-    )
-    request = urllib.request.Request(
-        f"https://api.exchange.coinbase.com/products/{product}/candles?{params}",
-        headers={
-            "User-Agent": "superbru-polymarket-mispricing-bot/0.1",
-            "Accept": "application/json",
-        },
-    )
-    with urllib.request.urlopen(request, timeout=timeout_seconds) as response:  # nosec B310 - public market data API
-        payload = json.loads(response.read().decode("utf-8"))
-    if not isinstance(payload, list) or not payload:
-        return None
-    start_second = int(start_utc.timestamp())
-    candle = next(
-        (row for row in payload if isinstance(row, list) and row and int(safe_float(row[0]) or -1) == start_second),
-        payload[0],
-    )
-    if not isinstance(candle, list) or len(candle) < 5:
-        return None
-    # Coinbase candle format is [time, low, high, open, close, volume].
-    open_price = safe_float(candle[3])
-    close_price = safe_float(candle[4])
-    if open_price is None or close_price is None or open_price <= 0 or close_price <= 0:
-        return None
-    return open_price, close_price, "coinbase_candles"
-
-
-def _crypto_updown_proxy_settlement_price(
-    position: dict[str, Any],
-    *,
-    timeout_seconds: int,
-) -> tuple[float | None, str]:
-    slug = str(position.get("market_slug") or "").strip().lower()
-    match = re.match(r"^(btc|eth|sol|xrp)-updown-(5m|15m)-(\d+)$", slug)
-    if not match:
-        return None, "not_crypto_updown_slug"
-    asset_key, interval_raw, timestamp_raw = match.groups()
-    interval_minutes = 15 if interval_raw == "15m" else 5
-    start_utc = datetime.fromtimestamp(int(timestamp_raw), tz=timezone.utc)
-    end_utc = start_utc + timedelta(minutes=interval_minutes)
-    if datetime.now(timezone.utc) < end_utc + timedelta(seconds=30):
-        return None, "crypto_updown_not_past_close"
-    outcome = str(position.get("outcome") or _row_payload(position).get("outcome") or "").strip().lower()
-    if outcome not in {"up", "down"}:
-        return None, "crypto_updown_missing_outcome"
-
-    errors: list[str] = []
-    for provider in (_fetch_binance_window_prices, _fetch_coinbase_window_prices):
-        try:
-            prices = provider(
-                asset_key,
-                start_utc=start_utc,
-                interval_minutes=interval_minutes,
-                timeout_seconds=timeout_seconds,
-            )
-        except Exception as exc:  # noqa: BLE001 - try the next public price source
-            errors.append(f"{provider.__name__}:{type(exc).__name__}")
-            continue
-        if prices is None:
-            errors.append(f"{provider.__name__}:empty")
-            continue
-        start_price, end_price, source = prices
-        if end_price == start_price:
-            return None, f"crypto_updown_tie:{source}"
-        winning_outcome = "up" if end_price > start_price else "down"
-        return (1.0 if outcome == winning_outcome else 0.0), (
-            f"crypto_updown_proxy_settlement:{source}:{winning_outcome}:"
-            f"{start_price:.8g}->{end_price:.8g}"
-        )
-    return None, "crypto_updown_oracle_unavailable:" + ",".join(errors[:3])
 
 
 def _fetch_resolution_market(slug: str, *, timeout_seconds: int) -> dict[str, Any] | None:

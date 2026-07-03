@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+import json
 import sqlite3
 from pathlib import Path
 
 import yaml
 
 from polymarket_predictive_engine.config import load_config
+import polymarket_predictive_engine.crypto_updown_settlement as crypto_settlement
 from polymarket_predictive_engine.models.calibrated import prediction_confidence
 from polymarket_predictive_engine.paper_broker import run_paper_broker
 from polymarket_predictive_engine.paper_cycle import run_paper_cycle
@@ -177,6 +179,70 @@ def _seed_fast_crypto_fixture(cfg) -> None:
     )
 
 
+def _seed_open_position(
+    cfg,
+    *,
+    market_id: str,
+    token_id: str,
+    source_signal: dict,
+    quantity: float = 10.0,
+    average_entry_price: float = 0.4,
+) -> None:
+    con = connect_db(cfg.database_path)
+    try:
+        con.execute(
+            """
+            INSERT INTO orders(
+                order_id, idempotency_key, created_at, updated_at, mode, status,
+                market_id, token_id, side, limit_price, stake_usdc, quantity,
+                category, event_id, correlation_key, strategy_name, model_version,
+                prediction_timestamp, risk_decision_json, source_signal_json
+            ) VALUES (?, ?, ?, ?, 'paper', 'filled', ?, ?, 'BUY_YES', ?, ?, ?, ?, ?, ?, ?, ?, ?, '{}', ?)
+            """,
+            (
+                f"order-{token_id}",
+                f"order-key-{token_id}",
+                "2026-07-02T10:00:00Z",
+                "2026-07-02T10:00:00Z",
+                market_id,
+                token_id,
+                average_entry_price,
+                quantity * average_entry_price,
+                quantity,
+                source_signal.get("category", "crypto"),
+                source_signal.get("event_id", ""),
+                source_signal.get("correlation_key", ""),
+                "test",
+                "test-model",
+                "2026-07-02T10:00:00Z",
+                json.dumps(source_signal, sort_keys=True),
+            ),
+        )
+        con.execute(
+            """
+            INSERT INTO positions(
+                position_id, market_id, token_id, side, category, correlation_key,
+                quantity, average_entry_price, cost_basis_usdc, realised_pnl_usdc,
+                status, updated_at
+            ) VALUES (?, ?, ?, 'BUY_YES', ?, ?, ?, ?, ?, 0, 'open', ?)
+            """,
+            (
+                f"position-{token_id}",
+                market_id,
+                token_id,
+                source_signal.get("category", "crypto"),
+                source_signal.get("correlation_key", ""),
+                quantity,
+                average_entry_price,
+                quantity * average_entry_price,
+                "2026-07-02T10:00:00Z",
+            ),
+        )
+        con.commit()
+    finally:
+        con.close()
+
+
 def test_confidence_increases_away_from_half():
     assert prediction_confidence(0.5) == 0
     assert prediction_confidence(0.9) > prediction_confidence(0.7)
@@ -292,6 +358,89 @@ def test_paper_broker_proxy_settles_fast_crypto_updown_position(tmp_path, monkey
         assert position["realised_pnl_usdc"] > 0
         resolution_source = con.execute("SELECT resolution_source FROM settlements").fetchone()[0]
         assert "test_public_price" in resolution_source
+    finally:
+        con.close()
+
+
+def test_paper_broker_proxy_settles_hourly_crypto_updown_slug(tmp_path, monkeypatch):
+    cfg = _config(tmp_path)
+    cfg.raw["paper_trading"]["settle_crypto_updown_with_public_price"] = True
+    cfg.raw["paper_trading"]["settlement_request_timeout_seconds"] = 1
+    _seed_open_position(
+        cfg,
+        market_id="eth-hourly-market",
+        token_id="eth-hourly-up-token",
+        source_signal={
+            "market_id": "eth-hourly-market",
+            "market_slug": "ethereum-up-or-down-july-2-2026-12pm-et",
+            "token_id": "eth-hourly-up-token",
+            "question": "Ethereum Up or Down - July 2, 2026 12PM ET",
+            "outcome": "Up",
+            "category": "crypto",
+        },
+    )
+
+    def fake_binance(asset_key, *, start_utc, interval_minutes, timeout_seconds):
+        assert asset_key == "eth"
+        assert interval_minutes == 60
+        assert start_utc.strftime("%Y-%m-%dT%H:%M:%SZ") == "2026-07-02T15:00:00Z"
+        return 100.0, 101.0, "test_hourly_window"
+
+    monkeypatch.setattr(crypto_settlement, "_fetch_binance_window_prices", fake_binance)
+
+    settlement = run_paper_broker(cfg)
+
+    assert settlement["positions_settled"] == 1
+    assert "test_hourly_window" in settlement["settlements"][0]["resolution_source"]
+    assert settlement["stale_open_position_count"] == 0
+
+    con = connect_db(cfg.database_path)
+    try:
+        position = con.execute("SELECT status, quantity, realised_pnl_usdc FROM positions").fetchone()
+        assert position["status"] == "settled"
+        assert position["quantity"] == 0
+        assert position["realised_pnl_usdc"] > 0
+    finally:
+        con.close()
+
+
+def test_paper_broker_flags_stale_open_position_without_changing_equity(tmp_path):
+    cfg = _config(tmp_path)
+    cfg.raw["paper_trading"]["settle_crypto_updown_with_public_price"] = False
+    cfg.raw["paper_trading"]["stale_open_alert_hours"] = 2
+    _seed_open_position(
+        cfg,
+        market_id="eth-stale-market",
+        token_id="eth-stale-up-token",
+        source_signal={
+            "market_id": "eth-stale-market",
+            "market_slug": "ethereum-up-or-down-july-2-2026-12pm-et",
+            "token_id": "eth-stale-up-token",
+            "question": "Ethereum Up or Down - July 2, 2026 12PM ET",
+            "outcome": "Up",
+            "category": "crypto",
+        },
+        quantity=10,
+        average_entry_price=0.4,
+    )
+
+    result = run_paper_broker(cfg)
+
+    assert result["positions_settled"] == 0
+    assert result["stale_open_position_count"] == 1
+    stale = result["stale_open_positions"][0]
+    assert stale["alert"] == "stale_open_position"
+    assert stale["close_time"] == "2026-07-02T16:00:00Z"
+    assert stale["quote_state"] == "missing"
+
+    con = connect_db(cfg.database_path)
+    try:
+        position = con.execute("SELECT status, quantity, cost_basis_usdc, realised_pnl_usdc FROM positions").fetchone()
+        assert position["status"] == "open"
+        assert position["quantity"] == 10
+        assert position["cost_basis_usdc"] == 4
+        assert position["realised_pnl_usdc"] == 0
+        assert con.execute("SELECT COUNT(*) FROM settlements").fetchone()[0] == 0
     finally:
         con.close()
 

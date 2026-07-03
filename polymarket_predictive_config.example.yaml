@@ -935,6 +935,7 @@ paper_trading:
   hard_stop_loss_usdc: 2
   settle_crypto_updown_with_public_price: true
   settlement_request_timeout_seconds: 8
+  stale_open_alert_hours: 2
 trading:
   mode: paper
 live_trading:

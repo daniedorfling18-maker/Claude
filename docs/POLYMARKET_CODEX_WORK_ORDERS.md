@@ -803,7 +803,7 @@ liquidity-discovery tokens and that positions outside the grace window are dropp
 
 ---
 
-## WO-21 — Settle or loudly flag stuck paper positions on resolved markets — `open` (HIGH)
+## WO-21 — Settle or loudly flag stuck paper positions on resolved markets — `done` (2026-07-03)
 
 **Goal:** paper positions on markets that closed hours ago must either settle through an
 evidence-backed path or be flagged as `stale_open_position` on the dashboard and oversight alerts
@@ -827,6 +827,15 @@ evidence-backed path or be flagged as `stale_open_position` on the dashboard and
 4. Tests: hourly-slug proxy settlement resolves a fixture position with a crafted window price;
    a position with no resolvable window becomes `stale_open_position` and appears in the alert
    list; equity is unchanged by flagging.
+
+**Landed:** crypto up/down proxy settlement is factored into
+`crypto_updown_settlement.py` and now supports encoded 5m/15m slugs plus named hourly/daily slugs
+such as `ethereum-up-or-down-july-2-2026-12pm-et`. The paper broker settles eligible hourly
+crypto up/down positions through the shared proxy when public reference prices are available, and
+otherwise reports `stale_open_position` rows for past-close open positions with no fresh executable
+quote or clean resolution. The dashboard renders a bad oversight alert and an open-positions
+warning table; flagging does not mutate equity, force-close, or fabricate exits. Full suite:
+687 tests green.
 
 ---
 
@@ -878,7 +887,7 @@ WO-1..WO-6, WO-8, WO-9   done and audited (2026-07-02)
 
 Queue order (updated 2026-07-03 after the VPS dashboard audit):
 1. WO-20   done 2026-07-03: position-aware quote collection
-2. WO-21   settle or flag stuck paper positions (HIGH)
+2. WO-21   done 2026-07-03: settle or flag stuck paper positions
 3. WO-7    done 2026-07-03: CLV-aware promotion review advisory wiring
 4. WO-22   evidence-gated display fixes
 5. WO-23   deployment-aware oversight status

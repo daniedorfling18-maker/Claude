@@ -1421,7 +1421,20 @@ async function load() {
         ["Max liquidity","max_liquidity", v=>fmtNum(v,2)],
         ["Min spread","min_spread", v=>fmtNum(v,4)]
       ]);
-    document.getElementById("positions").innerHTML = table(data.positions, [
+    const staleOpenPositions = Array.isArray(broker.stale_open_positions) ? broker.stale_open_positions : [];
+    const staleOpenWarning = staleOpenPositions.length
+      ? alertBox("Stale open paper positions", `${staleOpenPositions.length} position(s) are past market close without fresh executable quotes or clean resolution evidence. Do not trust raw equity until they settle or receive fresh quotes.`, "bad")
+        + table(staleOpenPositions, [
+          ["Market","question", (v,row)=>marketLabel(row)],
+          ["Outcome","outcome"],
+          ["Cost","cost_basis_usdc", fmtUsd],
+          ["Close","close_time"],
+          ["Hours past close","hours_past_close", v=>fmtNum(v,2)],
+          ["Quote state","quote_state"]
+        ])
+        + `<div style="height:12px"></div>`
+      : "";
+    document.getElementById("positions").innerHTML = staleOpenWarning + table(data.positions, [
       ["Market","market_name", (v,row)=>marketLabel(row)], ["Avg entry","average_entry_price", v=>fmtNum(v,4)],
       ["Cost","cost_basis_usdc", fmtUsd], ["Qty","quantity", v=>fmtNum(v,2)], ["Status","status"], ["Updated","updated_at"]
     ]);
@@ -2778,6 +2791,13 @@ def _dashboard_oversight_status(
         )
     if evidence_freshness.get("broker_refresh_needed"):
         add_alert("warn", "Broker refresh pending", "Paper broker is behind the latest approved signal or exit-probe file.")
+    stale_open_count = int(safe_float(evidence_freshness.get("stale_open_position_count")) or 0)
+    if stale_open_count > 0:
+        add_alert(
+            "bad",
+            "Stale open paper positions",
+            f"{stale_open_count} open paper position(s) are past market close without fresh quotes or clean resolution evidence.",
+        )
     posture = str(evidence_freshness.get("strategy_v2_runtime_posture") or strategy_v2.get("runtime_posture") or "")
     strategy_cycle_status = strategy_v2.get("cycle_status") if isinstance(strategy_v2.get("cycle_status"), dict) else {}
     strategy_pause_time = parse_timestamp(
@@ -2832,6 +2852,8 @@ def _dashboard_oversight_status(
         "validation_gap_collection_queries": validation_gap.get("collection_queries", []),
         "cohort_transfer_state": cohort_transfer.get("state"),
         "strategy_v2_memory_pause_obsolete": memory_pause_obsolete,
+        "stale_open_position_count": stale_open_count,
+        "stale_open_positions": evidence_freshness.get("stale_open_positions", []),
         "goal_gap": goal_plan.get("main_gap"),
         "main_trade_blocker": trade_diagnostics.get("main_blocker"),
     }
@@ -3693,6 +3715,8 @@ def render_dashboard(cfg: EngineConfig, latest_report: dict[str, Any] | None = N
         "pending_broker_exit_probes": broker_signal_freshness.get("pending_broker_exit_probes"),
         "next_broker_exit_due_utc": broker_signal_freshness.get("next_broker_exit_due_utc"),
         "next_broker_exit_due_minutes": broker_signal_freshness.get("next_broker_exit_due_minutes"),
+        "stale_open_position_count": broker_summary.get("stale_open_position_count"),
+        "stale_open_positions": broker_summary.get("stale_open_positions", []),
         **strategy_v2_runtime,
     }
     trade_diagnostics = _trade_diagnostics(

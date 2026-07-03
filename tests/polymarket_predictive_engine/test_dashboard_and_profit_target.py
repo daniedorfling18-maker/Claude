@@ -101,6 +101,61 @@ def test_profit_target_uses_audited_pnl_when_raw_ledger_has_quote_conflicts(tmp_
     assert payload["decision_monthly_run_rate_usdc"] < 100
 
 
+def test_dashboard_surfaces_stale_open_paper_positions(tmp_path):
+    cfg = _config(tmp_path)
+    stale = {
+        "position_id": "position-stale",
+        "market_id": "eth-stale-market",
+        "token_id": "eth-stale-up-token",
+        "market_slug": "ethereum-up-or-down-july-2-2026-12pm-et",
+        "question": "Ethereum Up or Down - July 2, 2026 12PM ET",
+        "outcome": "Up",
+        "cost_basis_usdc": 4.0,
+        "close_time": "2026-07-02T16:00:00Z",
+        "hours_past_close": 12.5,
+        "quote_state": "missing",
+        "alert": "stale_open_position",
+    }
+    write_csv(
+        cfg.output_root / "polymarket_portfolio" / "positions.csv",
+        [
+            {
+                "position_id": "position-stale",
+                "market_id": "eth-stale-market",
+                "token_id": "eth-stale-up-token",
+                "side": "BUY_YES",
+                "status": "open",
+                "quantity": 10,
+                "average_entry_price": 0.4,
+                "cost_basis_usdc": 4.0,
+                "updated_at": "2026-07-02T10:00:00Z",
+            }
+        ],
+    )
+    write_json(
+        cfg.output_root / "polymarket_portfolio" / "paper_trading_summary.json",
+        {
+            "status": "monitoring_exits_only_readiness_gate_blocked",
+            "generated_at_utc": "2026-07-03T00:00:00Z",
+            "cash": 1000,
+            "equity": 1004,
+            "total_exposure": 4,
+            "stale_open_position_count": 1,
+            "stale_open_positions": [stale],
+        },
+    )
+
+    render_dashboard(cfg)
+
+    data = read_json(cfg.output_root / "polymarket_dashboard" / "dashboard_data.json")
+    html = (cfg.output_root / "polymarket_dashboard" / "index.html").read_text(encoding="utf-8")
+    assert data["paper_broker_summary"]["stale_open_position_count"] == 1
+    assert data["oversight_status"]["stale_open_position_count"] == 1
+    assert any(alert["title"] == "Stale open paper positions" for alert in data["oversight_status"]["alerts"])
+    assert "Stale open paper positions" in html
+    assert "Do not trust raw equity until they settle or receive fresh quotes" in html
+
+
 def test_dashboard_renderer_writes_static_dashboard_and_data(tmp_path):
     cfg = _config(tmp_path)
     write_json(

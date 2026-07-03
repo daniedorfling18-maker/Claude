@@ -2,7 +2,7 @@
   "beat_close_rate": null,
   "clv_ci_high": null,
   "clv_ci_low": null,
-  "generated_at_utc": "2026-07-03T14:53:28Z",
+  "generated_at_utc": "2026-07-03T17:58:29Z",
   "interpretation": "keep the snapshot workflow running; verdict needs more matched picks",
   "mean_clv": null,
   "minimum_samples": 15,

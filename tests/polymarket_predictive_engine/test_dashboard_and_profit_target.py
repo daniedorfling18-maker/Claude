@@ -859,6 +859,10 @@ def test_dashboard_gates_extrapolated_edge_route_evidence(tmp_path):
             "audited_round_trips_since_baseline": 2,
             "minimum_audited_round_trips_for_on_pace": 5,
             "verified_evidence_ready": False,
+            "quote_conflict_round_trips": 0,
+            "quote_unverified_round_trips": 0,
+            "all_time_quote_conflict_round_trips": 7,
+            "all_time_quote_unverified_round_trips": 2,
             "price_action_goal_state": {
                 "state": "forward_paper_on_monthly_target",
                 "best_repricing_monthly_run_rate_usdc": 2344.677548049622,
@@ -922,6 +926,10 @@ def test_dashboard_gates_extrapolated_edge_route_evidence(tmp_path):
     assert "needs_5_audited_round_trips_has_2" in data["decision_useful_summary"]["profit_target_proof_blockers"]
     assert "n too small to annualise" in html
     assert "Proof status" in html
+    assert "Baseline quote conflicts" in html
+    assert "All-time quote conflicts" in html
+    assert data["paper_profit_goal_plan"]["quote_conflict_round_trips"] == 0
+    assert data["paper_profit_goal_plan"]["all_time_quote_conflict_round_trips"] == 7
     assert "provisional lines await market close" in html
     assert "no strategy beat doing nothing" in html
     assert "raw; audited" in html

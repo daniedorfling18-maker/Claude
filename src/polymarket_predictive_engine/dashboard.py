@@ -363,6 +363,10 @@ async function load() {
     const auditedRoundTrips = goalPlan.audited_round_trips_since_baseline ?? target.audited_round_trips_since_baseline ?? "-";
     const minAuditedRoundTrips = goalPlan.minimum_audited_round_trips_for_on_pace ?? target.minimum_audited_round_trips_for_on_pace ?? "-";
     const verifiedEvidenceReady = Boolean(goalPlan.verified_evidence_ready || target.verified_evidence_ready);
+    const baselineQuoteConflicts = goalPlan.quote_conflict_round_trips ?? target.quote_conflict_round_trips ?? "-";
+    const baselineQuoteUnverified = goalPlan.quote_unverified_round_trips ?? target.quote_unverified_round_trips ?? "-";
+    const allTimeQuoteConflicts = goalPlan.all_time_quote_conflict_round_trips ?? target.all_time_quote_conflict_round_trips ?? "-";
+    const allTimeQuoteUnverified = goalPlan.all_time_quote_unverified_round_trips ?? target.all_time_quote_unverified_round_trips ?? "-";
     const promotionPolicy = data.cohort_promotion_readiness || {};
     const minimumFilledOrders = Number(promotionPolicy.minimum_filled_orders || data.signal_cohort_pnl?.minimum_filled_orders || 5);
     const minimumEvidenceHours = 72;
@@ -738,8 +742,10 @@ async function load() {
       ["Proof status", profitProofStatus, v=>longText(v, 180)],
       ["Audited round trips", `${auditedRoundTrips} / ${minAuditedRoundTrips}`],
       ["Proof blockers", profitProofBlockers, joinText],
-      ["Quote conflicts", goalPlan.quote_conflict_round_trips],
-      ["Unverified quote rows", goalPlan.quote_unverified_round_trips],
+      ["Baseline quote conflicts", baselineQuoteConflicts],
+      ["Baseline unverified quote rows", baselineQuoteUnverified],
+      ["All-time quote conflicts", allTimeQuoteConflicts],
+      ["All-time unverified quote rows", allTimeQuoteUnverified],
       ["Tracking hours", target.elapsed_hours, v=>fmtNum(v,2)],
       ["Raw monthly run-rate (audit-only)", rawRunRate, v=>fmtUsd(v) + auditedRawSuffix()],
       ["Baseline equity", target.baseline?.baseline_equity_usdc, fmtUsd]
@@ -769,6 +775,8 @@ async function load() {
       ["Proof status", profitProofStatus, v=>longText(v, 180)],
       ["Audited round trips", `${auditedRoundTrips} / ${minAuditedRoundTrips}`],
       ["Proof blockers", profitProofBlockers, joinText],
+      ["Baseline quote conflicts", baselineQuoteConflicts],
+      ["All-time quote conflicts", allTimeQuoteConflicts],
       ["Best repricing evidence", routeEvidenceDisplay("shadow"), v=>longText(v, 220)],
       ["Forward paper evidence", routeEvidenceDisplay("paper"), v=>longText(v, 220)],
       ["Required/day from here", goalPlan.required_daily_from_here_usdc, fmtUsd],

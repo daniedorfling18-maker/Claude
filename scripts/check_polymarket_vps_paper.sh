@@ -135,6 +135,12 @@ if [ -f "$dashboard_data" ]; then
     printf '%s\n' "Dashboard alpha-validated anchor data: missing (dashboard data predates broad sharp-anchor Strategy V2 diagnostics)"
     exit_code=1
   fi
+  if grep -q "sharp_sports_funnel" "$dashboard_data"; then
+    printf '%s\n' "Dashboard sharp-sports funnel data: ok"
+  else
+    printf '%s\n' "Dashboard sharp-sports funnel data: missing (dashboard data predates sharp sports edge funnel diagnostics)"
+    exit_code=1
+  fi
 else
   printf '%s\n' "Dashboard proof data: missing"
   exit_code=1

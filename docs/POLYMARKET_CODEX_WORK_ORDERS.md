@@ -831,6 +831,14 @@ evidence-backed path or be flagged as `stale_open_position` on the dashboard and
    provisional count clearly ("provisional lines await market close").
 3. Algo replay: when the best strategy has 0 fills, render "no strategy beat doing nothing" and
    name the losing strategies with their P&L, instead of "best: null".
+3b. **"Best edge route" card (verified worst offender, 2026-07-03):** it renders
+   `best_repricing_monthly_run_rate_usdc` / `best_forward_paper_monthly_run_rate_usdc` — the MAX
+   across all cohorts of annualised micro-windows. Live example: "forward paper $1,973.93/month"
+   was 2 paper round trips totalling +$0.19 on $4 staked inside a 4-minute window
+   (paper_elapsed_hours=0.068; 0.19/0.068h*730h), from a cohort whose own total P&L was −$1.67.
+   Fix: render the actual evidence — "best paper cohort: +$0.19 on 2 round trips over 4m (n too
+   small to annualise)" — and only show a monthly figure when the cohort passes the same
+   minimum-fills/72h evidence bar as (1). Apply identically to the shadow repricing figure.
 4. Equity/cash tiles and the account P&L line: when `pnl_audit_state` is
    `raw_pnl_contains_quote_conflicts`, append "(raw; audited $X)" using
    `audited_pnl_since_baseline_usdc`. `approved_signal_count` renders as an integer.

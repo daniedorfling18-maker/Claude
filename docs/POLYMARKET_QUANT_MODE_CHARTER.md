@@ -1,6 +1,6 @@
 # Polymarket Quant Mode Charter
 
-Last updated: 2026-07-02
+Last updated: 2026-07-03
 
 This is the **orchestration charter** for turning the Polymarket predictive engine into a full quant
 trading system. It is written for every coding agent working on this repo — Claude, Codex, or any
@@ -125,7 +125,7 @@ Acceptance: `tests/polymarket_predictive_engine/test_execution_costs.py`, the de
 `test_hardening_controls.py`, prediction handoff coverage in `test_predictive_power_expansion.py`,
 and mispricing-alpha depth/enrichment tests.
 
-### WP6 — Portfolio-level correlated exposure from live positions — `open`
+### WP6 — Portfolio-level correlated exposure from live positions — `done` (2026-07-03)
 
 - `risk_decision` already takes `current_correlated_exposure`, but callers must compute it from open
   positions sharing a `correlation_key` (see `worldcup_validation.normalised_correlation_key`).
@@ -133,8 +133,9 @@ and mispricing-alpha depth/enrichment tests.
   `quant_lab.risk` over open-position marks.
 - Acceptance: risk state artifact reports correlated exposure by key and portfolio VaR; a test shows
   two same-event candidates draining the same correlated budget.
-- Status: partially landed by Codex (`portfolio_state` computes correlated exposure per
-  `normalised_correlation_key`); the remaining VaR/reporting slice is specced as **WO-12**.
+- Status: landed by Codex. `portfolio_state` computes correlated exposure per
+  `normalised_correlation_key`; WO-12 adds the remaining risk-state VaR/CVaR and correlated-exposure
+  reporting slice, plus dashboard visibility.
 
 ### WP7 — Family classifier for liquid `unknown` markets — `done` (2026-07-02)
 
@@ -289,7 +290,8 @@ report). New ground covered by the queue: portfolio VaR reporting (WP6 remainder
 hypotheses as replay strategies + generalised sweep, per-family calibration scorecard, collection
 coverage for CLV finality, evidence history time series, a dashboard evidence funnel, and
 invariant property tests that lock the safety envelope. Nothing in the queue can loosen a gate;
-WO-19 explicitly changes zero source files.
+WO-19 began as a test-only lock but was allowed to harden source behavior only after the invariant
+exposed a conservative execution-cost gap.
 
 ## Strategic reset — 2026-07-03
 
@@ -302,6 +304,95 @@ entry-price band in `risk_decision` (0.05–0.90, base-config only; ends the buy
 probe pathology), and defines the leading indicators that count as "seeing potential profit"
 honestly: arb baskets, anchor coverage, positive CLV cohorts, then audited paper P&L. No gate was
 loosened; none will be.
+
+**2026-07-03 — WO-25 landed by Codex.** The mechanical Dutch-book arb monitor is now wired into
+the VPS live-paper loop as a bounded dry-run pass with config cadence/size controls. It writes
+`outputs/polymarket_arbitrage/dutch_arb_monitor_summary.json`,
+`outputs/polymarket_arbitrage/dutch_arb_latest.json`, latest opportunity rows, and append-only
+above-alert rows, and it tracks 3+ scan persistence for human review. The dashboard now has a
+"Dutch-book arb watch" section plus an info-only oversight alert for persistent baskets. This added
+no order placement path.
+
+**2026-07-03 — WO-26 landed by Codex.** Adaptive research-focus collection now has an audited
+anti-concentration guard: `research_focus.json` records raw proposed queries, guarded queries,
+family counts, rejected-query reasons, broad-base fill rows, and an explicit
+collection-only/no-trade-authorisation decision-use label. Defaults cap each family to two queries,
+cap crypto up/down to one timing diagnostic, and enforce at least four distinct families using a
+deterministic broad base. This pushes discovery back toward sports/macro/esports/AI/politics/stocks
+instead of letting weak up/down evidence consume the loop.
+
+**2026-07-03 — WO-27 landed by Codex.** The structural longshot-bias family now runs as a
+shadow-only research lane. `longshot_bias.py` and CLI `longshot-bias-scan` scan slow, liquid binary
+markets where the YES tail is 2–12c, require a real NO-side token, and nominate
+`structural|longshot_no|<family>` candidates for CLV/forward-shadow validation. The canonical
+paper cycle forwards those rows only into shadow evidence, not paper signal generation. Artifacts
+live under `outputs/polymarket_longshot_bias/`.
+
+**2026-07-03 — WO-23 landed by Codex.** The dashboard now distinguishes the VPS deployment driver
+from local shadow-cycle observability. When the legacy live-loop heartbeat is fresh and the shadow
+research status file is absent, oversight shows the exact info line
+"Driver: legacy live loop (VPS deployment); shadow-cycle status file not expected." and no longer
+raises a false missing-shadow warning. Strategy V2 also renders "not running in this deployment"
+when its artifacts are absent under that fresh VPS live-loop driver.
+
+**2026-07-03 — WO-11 landed by Codex.** Research focus now consumes edge attribution, CLV, and
+algo-sweep artifacts as collection-only feedback. Cost-dominated, positive-edge, and positive-CLV
+cohorts are raised in collection priority and mapped to family queries; model-direction-not-confirmed
+cohorts with negative CLV are lowered without blacklisting. `research_focus.json` records an
+`evidence_inputs` block explaining every movement and any validated shadow-only sweep lead, while
+leaving promotion gates, thresholds, and trading authorisation untouched.
+
+**2026-07-03 — WO-12 landed by Codex.** Portfolio snapshots now write a report-only
+`portfolio_risk` block into `outputs/polymarket_portfolio/risk_state.json`, covering total open cost,
+top correlated exposure, category exposure, historical VaR/CVaR over marked open positions, and worst
+position return. The dashboard renders the same block as a Portfolio risk panel. This completes the
+WP6 reporting slice without changing risk decisions, stake caps, or broker order logic.
+
+**2026-07-03 — WO-13 landed by Codex.** The algo registry now mirrors the microstructure lab as
+three executable shadow replay strategies: bid momentum in tight books, midpoint momentum in tight
+books, and spread compression with bid-heavy imbalance. They are deterministic, per-replay
+stateful only for previous quotes, emit GTD `join_bid` shadow intents, and remain unavailable for
+paper/live execution unless separate governance later approves a promotion path.
+
+**2026-07-03 — WO-14 landed by Codex.** The algo sweep now runs generic per-strategy parameter grids,
+reports one global selected combo plus `by_strategy` bests, and writes strategy/params into the combos
+CSV. Legacy tight-spread sweep behavior is preserved when no `algo_sweep.strategies` block is set.
+The dashboard sweep panel now displays selected strategy/params and the per-strategy leaderboard,
+making the executable microstructure search visible to the operator.
+
+**2026-07-03 — WO-16 landed by Codex.** The model-governance lane now writes a per-family calibration
+scorecard from clean settled rows only. It compares model Brier/log-loss against the market baseline,
+uses clustered bootstrap CIs for family-level Brier gain, and fails closed for thin or inconclusive
+families. This makes family selection quant-driven: collect/scale only where market-relative skill
+transfers, and keep other families in research until evidence improves.
+
+**2026-07-03 — WO-17 landed by Codex.** The evidence lane now writes collection coverage diagnostics:
+family-level websocket quote counts/gaps and exact shadow positions missing pre-close quotes. This
+converts stale/provisional CLV into a scheduling problem the VPS can solve, rather than a vague model
+blocker.
+
+**2026-07-03 — WO-15 landed by Codex.** Governance refresh now appends an idempotent evidence time
+series from CLV, edge attribution, and algo-sweep artifacts. This makes the learning loop auditable
+across cycles: the operator can see evidence accumulating, stalling, or degrading instead of trusting a
+single latest snapshot.
+
+**2026-07-03 — WO-18 landed by Codex.** The dashboard now has a top-level evidence funnel: liquidity
+targets, alpha/shadow candidates, shadow position state, final CLV coverage, attribution classes,
+family calibration winners, pre-close collection gaps, algo-sweep decision, paper gate, and recent
+history. `refresh-governance` also refreshes family calibration and collection coverage before
+rendering, keeping the cockpit decision-useful.
+
+**2026-07-03 — WO-19 landed by Codex.** Seeded safety invariant tests now pin Kelly shrinkage,
+execution-cost conservatism, the risk decision sizing envelope, and order-intent schema safety.
+The first invariant check found that missing depth could look cheaper than known shallow depth, so
+execution costs now fail closed when depth is absent and the risk layer treats a zero acceptable
+impact cap as binding. This tightens execution safety without adding any paper/live permission.
+
+**2026-07-03 — verified $100/month proof gate landed by Codex.** The profit tracker and goal
+planner no longer certify "on pace" from raw account equity or tiny-sample annualised P&L alone.
+The `$100/month` state now requires enough audited, quote-consistent paper round trips, no quote
+conflicts/unverified exits, and sufficient tracking time before the dashboard can treat the
+run-rate as verified progress.
 
 ## Rules of engagement for coding agents
 

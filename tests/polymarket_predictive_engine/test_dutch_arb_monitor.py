@@ -102,6 +102,8 @@ def test_run_monitor_bounded_persists_state_and_stays_dry_run(tmp_path, monkeypa
     summary = run_dutch_arb_monitor(cfg, polls=2, poll_seconds=0, alert_annualised=0.0)
 
     assert summary["live_trading"] is False and summary["dry_run"] is True
+    assert summary["paper_trading_invoked"] is False
+    assert summary["live_trading_invoked"] is False
     assert summary["continuous"] is False and summary["polls_run"] == 2
     assert summary["complete_arbs_latest_poll"] == 1
     assert summary["alerts_total"] >= 1
@@ -110,6 +112,25 @@ def test_run_monitor_bounded_persists_state_and_stays_dry_run(tmp_path, monkeypa
 
     arb_dir = tmp_path / "outputs" / "polymarket_arbitrage"
     assert (arb_dir / "dutch_arb_monitor_opportunities.csv").exists()
+    assert (arb_dir / "dutch_arb_opportunities.csv").exists()
     assert (arb_dir / "dutch_arb_monitor_alerts.csv").exists()
+    assert (arb_dir / "dutch_arb_latest.json").exists()
     persisted = json.loads((arb_dir / "dutch_arb_monitor_summary.json").read_text())
     assert persisted["best_opportunity"]["event_id"] == "A"    # summary written to disk each poll
+
+
+def test_run_monitor_tracks_persistent_alerts_across_bounded_passes(tmp_path, monkeypatch):
+    cfg = EngineConfig(raw={"paths": {"output_root": str(tmp_path / "outputs")}}, path=tmp_path / "cfg.yaml")
+    arb = build_execution_plan("PERSIST", "Persistent basket", _legs([0.30, 0.30, 0.30]), days_to_resolution=30)
+    monkeypatch.setattr(monitor, "scan_once", lambda cfg, **k: ([arb], {"discovered": 1, "priced_complete": 1}))
+
+    first = run_dutch_arb_monitor(cfg, polls=1, poll_seconds=0, alert_annualised=0.0)
+    second = run_dutch_arb_monitor(cfg, polls=1, poll_seconds=0, alert_annualised=0.0)
+    third = run_dutch_arb_monitor(cfg, polls=1, poll_seconds=0, alert_annualised=0.0)
+
+    assert first["persistent_alert_count"] == 0
+    assert second["persistent_alert_count"] == 0
+    assert third["persistent_alert_count"] == 1
+    assert third["persistent_alerts"][0]["event_id"] == "PERSIST"
+    assert third["persistent_alerts"][0]["consecutive_scans_above_alert"] == 3
+    assert third["alert_persistence_counts"] == {"PERSIST": 3}

@@ -9,6 +9,7 @@ from .dashboard import render_dashboard
 from .decision_trace import write_agent_runtime_bundle
 from .execution.paper import paper_trade
 from .features_v2 import build_features_v2
+from .longshot_bias import build_longshot_bias_scan
 from .mispricing_alpha import apply_mispricing_alpha
 from .models.calibrated import load_prediction_models, write_predictions
 from .readiness import paper_trade_readiness
@@ -131,7 +132,11 @@ def _run_paper_cycle_unlocked(
     )
     predictions = apply_mispricing_alpha(cfg, predictions, output_path=str(prediction_path))
     _persist_predictions(cfg, predictions)
-    shadow_cohort = update_shadow_cohort_evidence(cfg, predictions)
+    longshot_scan = build_longshot_bias_scan(cfg, emit_shadow=False)
+    longshot_candidates = [
+        row for row in longshot_scan.get("candidate_rows", []) if isinstance(row, dict)
+    ]
+    shadow_cohort = update_shadow_cohort_evidence(cfg, predictions + longshot_candidates)
     con = connect_db(cfg.database_path)
     try:
         cohort_pnl = write_signal_cohort_pnl(con, cfg)
@@ -169,6 +174,14 @@ def _run_paper_cycle_unlocked(
             "monthly_profit_target": monthly_target,
             "actual_profit_target": actual_profit_target,
             "shadow_cohort": shadow_cohort,
+            "longshot_bias": {
+                "status": longshot_scan.get("status"),
+                "candidates": longshot_scan.get("candidates"),
+                "candidate_cohorts": longshot_scan.get("candidate_cohorts", {}),
+                "decision_use": longshot_scan.get("decision_use"),
+                "emit_shadow_positions": False,
+                "shadow_candidates_forwarded": len(longshot_candidates),
+            },
             "cohort_pnl": cohort_pnl,
             "readiness": gate,
             "broker": broker,

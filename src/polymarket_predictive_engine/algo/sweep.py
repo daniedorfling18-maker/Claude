@@ -20,6 +20,7 @@ Fail-closed by construction:
 
 from __future__ import annotations
 
+import json
 from itertools import product
 from pathlib import Path
 from typing import Any
@@ -29,6 +30,8 @@ from ..utils import git_commit_hash, now_utc, safe_float, write_csv, write_json
 from .replay import iter_quote_events, run_replay
 
 COMBO_FIELDS = [
+    "strategy",
+    "params",
     "tight_spread_maximum",
     "minimum_book_imbalance",
     "train_fills",
@@ -58,10 +61,43 @@ def _grid(settings: dict[str, Any]) -> list[tuple[float, float]]:
     return [(float(s), float(i)) for s, i in product(spreads, imbalances)]
 
 
-def _combo_config(cfg: EngineConfig, spread: float, imbalance: float) -> EngineConfig:
+def _grid_values(value: Any) -> list[Any]:
+    if isinstance(value, (list, tuple)):
+        return list(value) or [None]
+    return [value]
+
+
+def _params_json(params: dict[str, Any]) -> str:
+    return json.dumps(params, sort_keys=True, separators=(",", ":"))
+
+
+def _configured_strategy_grids(settings: dict[str, Any], fallback_strategy: str) -> list[tuple[str, dict[str, Any]]]:
+    strategies = settings.get("strategies")
+    if isinstance(strategies, dict) and strategies:
+        combos: list[tuple[str, dict[str, Any]]] = []
+        for strategy, raw_grid in strategies.items():
+            strategy_name = str(strategy or "").strip()
+            if not strategy_name:
+                continue
+            grid = raw_grid if isinstance(raw_grid, dict) else {}
+            keys = [str(key) for key in grid.keys()]
+            values = [_grid_values(grid[key]) for key in keys]
+            if not keys:
+                combos.append((strategy_name, {}))
+                continue
+            for combo_values in product(*values):
+                params = {key: value for key, value in zip(keys, combo_values, strict=True) if value is not None}
+                combos.append((strategy_name, params))
+        return combos
+    return [
+        (fallback_strategy, {"tight_spread_maximum": spread, "minimum_book_imbalance": imbalance})
+        for spread, imbalance in _grid(settings)
+    ]
+
+
+def _combo_config(cfg: EngineConfig, params: dict[str, Any]) -> EngineConfig:
     algo = dict(cfg.raw.get("algo", {}) or {})
-    algo["tight_spread_maximum"] = spread
-    algo["minimum_book_imbalance"] = imbalance
+    algo.update(params)
     return EngineConfig(raw={**cfg.raw, "algo": algo}, path=cfg.path)
 
 
@@ -70,6 +106,34 @@ def _score(summary: dict[str, Any]) -> tuple[int, float, float]:
     pnl = float(safe_float(summary.get("unrealised_mark_to_bid_pnl_usdc")) or 0.0)
     cost = float(safe_float(summary.get("total_cost_usdc")) or 0.0)
     return fills, pnl, cost
+
+
+def _selection_key(combo: dict[str, Any]) -> tuple[float, int, float, float, str, str]:
+    spread = safe_float(combo.get("tight_spread_maximum"))
+    imbalance = safe_float(combo.get("minimum_book_imbalance"))
+    return (
+        -float(combo.get("train_pnl_usdc") or 0.0),
+        -int(combo.get("train_fills") or 0),
+        float(spread) if spread is not None else 999.0,
+        -float(imbalance) if imbalance is not None else 999.0,
+        str(combo.get("strategy") or ""),
+        str(combo.get("params") or ""),
+    )
+
+
+def _selected_from(candidates: list[dict[str, Any]]) -> dict[str, Any]:
+    if not candidates:
+        return {}
+    return sorted(candidates, key=_selection_key)[0]
+
+
+def _combo_fieldnames(combos: list[dict[str, Any]]) -> list[str]:
+    fields = list(COMBO_FIELDS)
+    for combo in combos:
+        for key in combo:
+            if key not in fields:
+                fields.append(key)
+    return fields
 
 
 def run_algo_sweep(
@@ -86,12 +150,15 @@ def run_algo_sweep(
 
     features_path = Path(features_input) if features_input else cfg.output_root / "polymarket_training" / "websocket_market_features.csv"
     events = iter_quote_events(features_path)
+    strategy_grids = _configured_strategy_grids(settings, strategy_name)
+    strategy_names = sorted({name for name, _params in strategy_grids})
 
     base = {
         "status": "ok",
         "generated_at_utc": now_utc(),
         "git_commit": git_commit_hash(),
         "strategy": strategy_name,
+        "strategies": strategy_names,
         "features_input": str(features_path),
         "events_total": len(events),
         "train_fraction": train_fraction,
@@ -110,6 +177,7 @@ def run_algo_sweep(
             "events_needed": minimum_events,
             "combos": [],
             "selected": {},
+            "by_strategy": {},
         }
         write_json(cfg.output_root / "polymarket_algo" / "algo_sweep_summary.json", summary)
         return summary
@@ -119,15 +187,17 @@ def run_algo_sweep(
     validation_events = events[split:]
 
     combos: list[dict[str, Any]] = []
-    for spread, imbalance in _grid(settings):
-        combo_cfg = _combo_config(cfg, spread, imbalance)
-        train = run_replay(combo_cfg, strategy_name, events=train_events, write_artifacts=False)
-        validation = run_replay(combo_cfg, strategy_name, events=validation_events, write_artifacts=False)
+    for combo_strategy, params in strategy_grids:
+        combo_cfg = _combo_config(cfg, params)
+        params_text = _params_json(params)
+        train = run_replay(combo_cfg, combo_strategy, events=train_events, write_artifacts=False)
+        validation = run_replay(combo_cfg, combo_strategy, events=validation_events, write_artifacts=False)
         if train.get("status") != "ok" or validation.get("status") != "ok":
             combos.append(
                 {
-                    "tight_spread_maximum": spread,
-                    "minimum_book_imbalance": imbalance,
+                    "strategy": combo_strategy,
+                    "params": params_text,
+                    **params,
                     "train_fills": 0,
                     "train_pnl_usdc": 0.0,
                     "train_cost_usdc": 0.0,
@@ -144,8 +214,9 @@ def run_algo_sweep(
         validation_fills, validation_pnl, validation_cost = _score(validation)
         combos.append(
             {
-                "tight_spread_maximum": spread,
-                "minimum_book_imbalance": imbalance,
+                "strategy": combo_strategy,
+                "params": params_text,
+                **params,
                 "train_fills": train_fills,
                 "train_pnl_usdc": round(train_pnl, 6),
                 "train_cost_usdc": round(train_cost, 6),
@@ -164,21 +235,33 @@ def run_algo_sweep(
         decision = DECISION_NO_CANDIDATE
     else:
         # Deterministic: best train P&L, then more fills, then tighter spread first.
-        candidates.sort(
-            key=lambda combo: (
-                -float(combo["train_pnl_usdc"]),
-                -int(combo["train_fills"]),
-                float(combo["tight_spread_maximum"]),
-                -float(combo["minimum_book_imbalance"]),
-            )
-        )
-        selected = candidates[0]
+        selected = _selected_from(candidates)
         selected["selected"] = True
         validated = (
             float(selected["validation_pnl_usdc"]) > 0
             and int(selected["validation_fills"]) >= minimum_validation_fills
         )
         decision = DECISION_VALIDATED if validated else DECISION_FAILED_VALIDATION
+
+    by_strategy: dict[str, dict[str, Any]] = {}
+    for name in strategy_names:
+        strategy_combos = [combo for combo in combos if combo.get("strategy") == name]
+        strategy_candidates = [combo for combo in strategy_combos if combo.get("train_candidate")]
+        best = _selected_from(strategy_candidates) if strategy_candidates else _selected_from(strategy_combos)
+        by_strategy[name] = {
+            "strategy": name,
+            "combos_tested": len(strategy_combos),
+            "train_candidates": len(strategy_candidates),
+            "selected": dict(best) if best else {},
+            "decision": (
+                DECISION_NO_CANDIDATE
+                if not strategy_candidates
+                else DECISION_VALIDATED
+                if float(best.get("validation_pnl_usdc") or 0.0) > 0
+                and int(best.get("validation_fills") or 0) >= minimum_validation_fills
+                else DECISION_FAILED_VALIDATION
+            ),
+        }
 
     summary = {
         **base,
@@ -189,10 +272,11 @@ def run_algo_sweep(
         "train_candidates": len(candidates),
         "combos": combos,
         "selected": selected,
+        "by_strategy": by_strategy,
     }
     out_root = cfg.output_root / "polymarket_algo"
     write_json(out_root / "algo_sweep_summary.json", summary)
-    write_csv(out_root / "algo_sweep_combos.csv", combos, fieldnames=COMBO_FIELDS)
+    write_csv(out_root / "algo_sweep_combos.csv", combos, fieldnames=_combo_fieldnames(combos))
     return summary
 
 

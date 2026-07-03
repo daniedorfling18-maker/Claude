@@ -56,6 +56,16 @@ def _config(tmp_path: Path):
     return load_config(path)
 
 
+def _book(price: str = "0.50") -> dict[str, str]:
+    return {
+        "best_ask": price,
+        "top_ask_size": "1000",
+        "ask_depth_1pct": "1000",
+        "ask_depth_5pct": "1000",
+        "websocket_quote_age_seconds": "30",
+    }
+
+
 def _write_training_set(cfg) -> None:
     features = []
     labels = []
@@ -292,6 +302,7 @@ def test_near_miss_learning_lane_records_liquid_uncertain_edge(tmp_path):
                 "liquidity": "1000",
                 "time_to_close_hours": "24",
                 "confidence": "0",
+                **_book("0.50"),
             }
         ],
     )
@@ -415,6 +426,7 @@ def test_alpha_uses_capped_fundamental_probability_overlay(tmp_path):
                 "executable_price": "0.40",
                 "time_to_close_hours": "24",
                 "confidence": "1",
+                **_book("0.40"),
             }
         ],
     )
@@ -508,6 +520,7 @@ def test_alpha_uses_crypto_updown_contract_model_overlay(tmp_path, monkeypatch):
                 "liquidity": "1000",
                 "time_to_close_hours": "7",
                 "confidence": "1",
+                **_book("0.40"),
             }
         ],
     )
@@ -924,12 +937,13 @@ def test_strategy_allows_probationary_cohort_to_satisfy_same_category_label_gate
                 "validation_layer_pass": "true",
                 "bookmaker_cross_check_pass": "true",
                 "microstructure_filter_pass": "true",
-                "spread": "0.01",
-                "liquidity": "1000",
-                "time_to_close_hours": "1",
-                "confidence": "1",
-            },
-            {
+                    "spread": "0.01",
+                    "liquidity": "1000",
+                    "time_to_close_hours": "1",
+                    "confidence": "1",
+                    **_book("0.50"),
+                },
+                {
                 "market_id": "btc-not-promoted",
                 "market_slug": "btc-updown-5m-1782487800",
                 "question": "Bitcoin UpDown 5M",
@@ -949,11 +963,12 @@ def test_strategy_allows_probationary_cohort_to_satisfy_same_category_label_gate
                 "validation_layer_pass": "true",
                 "bookmaker_cross_check_pass": "true",
                 "microstructure_filter_pass": "true",
-                "spread": "0.01",
-                "liquidity": "1000",
-                "time_to_close_hours": "1",
-                "confidence": "1",
-            },
+                    "spread": "0.01",
+                    "liquidity": "1000",
+                    "time_to_close_hours": "1",
+                    "confidence": "1",
+                    **_book("0.50"),
+                },
         ],
     )
 
@@ -1024,6 +1039,7 @@ def test_strategy_proxies_crypto_live_model_to_same_updown_probationary_evidence
                 "liquidity": "1000",
                 "time_to_close_hours": "1",
                 "confidence": "1",
+                **_book("0.50"),
             }
         ],
     )
@@ -1105,6 +1121,7 @@ def test_strategy_proxies_promoted_near_miss_learning_to_base_cohort(tmp_path):
                 "time_to_close_hours": "0.05",
                 "time_to_close_minutes": "3",
                 "confidence": "0.12",
+                **_book("0.50"),
             }
         ],
     )

@@ -54,6 +54,7 @@ jobs:
               'check_superbru_fixtures.yml',
               'ci.yml',
               'data-inventory.yml',
+              'deploy-polymarket-vps-paper.yml',
               'polymarket-mispricing-bot.yml',
               'refresh-locked-superbru-card.yml',
               'repo-audit-bundle.yml',
@@ -68,6 +69,7 @@ jobs:
               'auto_pick.yml': {'schedule', 'workflow_dispatch'},
               'check_superbru_fixtures.yml': {'workflow_dispatch'},
               'data-inventory.yml': {'workflow_dispatch'},
+              'deploy-polymarket-vps-paper.yml': {'workflow_dispatch'},
               'ci.yml': {'push', 'pull_request'},
               'polymarket-mispricing-bot.yml': {'workflow_dispatch'},
               'refresh-locked-superbru-card.yml': {'schedule', 'workflow_dispatch'},
@@ -110,7 +112,14 @@ jobs:
           if forbidden_present:
               failures.append(f'Forbidden workflow files are present: {sorted(forbidden_present)}')
 
-          manual_allowed = {'auto_pick.yml', 'check_superbru_fixtures.yml', 'data-inventory.yml', 'refresh-locked-superbru-card.yml', 'polymarket-mispricing-bot.yml'}
+          manual_allowed = {
+              'auto_pick.yml',
+              'check_superbru_fixtures.yml',
+              'data-inventory.yml',
+              'deploy-polymarket-vps-paper.yml',
+              'refresh-locked-superbru-card.yml',
+              'polymarket-mispricing-bot.yml',
+          }
           for name in sorted(expected & present):
               text = (workflow_dir / name).read_text(encoding='utf-8')
               triggers = declared_triggers(top_level_on_block(text))

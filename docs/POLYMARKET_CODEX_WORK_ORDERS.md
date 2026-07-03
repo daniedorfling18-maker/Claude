@@ -1,6 +1,6 @@
 # Polymarket Codex Work Orders
 
-Last updated: 2026-07-03 (WO-24 code landed; strategic edge reset: WO-24..WO-27 added; WO-20/21/22 landed; read docs/POLYMARKET_EDGE_STRATEGY_RESET.md first)
+Last updated: 2026-07-03 (WO-11/12/13/14/15/16/17/18/19/23/24/25/26/27 code landed; strategic edge reset: WO-24..WO-27 added; WO-20/21/22 landed; read docs/POLYMARKET_EDGE_STRATEGY_RESET.md first)
 
 Mechanical, file-level implementation instructions for coding agents (Codex or any other code
 changer). The architecture and priorities live in `docs/POLYMARKET_QUANT_MODE_CHARTER.md`; this file
@@ -475,7 +475,7 @@ and empty-state rendering, and paper-decision invariance.
 
 ---
 
-## WO-11 — Research focus consumes attribution, CLV, and sweep decisions — `open`
+## WO-11 — Research focus consumes attribution, CLV, and sweep decisions — `done` (2026-07-03)
 
 **Goal:** collection priorities steer toward cohorts where the evidence says edge might live and
 away from cohorts where the model is simply wrong. Collection steering only — no gate changes.
@@ -505,9 +505,17 @@ away from cohorts where the model is simply wrong. Collection steering only — 
 
 **Out of scope:** thresholds, promotion logic, blacklists, `readiness.py`, the audit script.
 
+**Landed 2026-07-03:** `build_research_focus()` now reads edge attribution, CLV, and algo sweep
+artifacts. Cost-dominated, positive-edge, and positive-CLV cohorts get collection-only priority
+raises and family queries; model-direction-not-confirmed cohorts with negative CLV get lowered
+priority without blacklisting. `research_focus.json` now includes an `evidence_inputs` block that
+explains every cohort movement plus any validated shadow-only algo sweep lead. Tests cover the
+fixture evidence path, advisory-only sweep note, absence/empty-artifact behavior, and the invariant
+that these inputs do not alter gates or thresholds.
+
 ---
 
-## WO-12 — Portfolio VaR snapshot and correlated-exposure reporting (WP6) — `open`
+## WO-12 — Portfolio VaR snapshot and correlated-exposure reporting (WP6) — `done` (2026-07-03)
 
 **Goal:** the risk-state artifact shows portfolio-level VaR/CVaR over open-position marks and
 correlated exposure by correlation key. Reporting only — sizing already enforces the caps.
@@ -537,9 +545,16 @@ per `normalised_correlation_key` (see the sums near the end of that function). D
 
 **Out of scope:** `risk_decision`, stake caps, `paper_broker` order logic.
 
+**Landed 2026-07-03:** `portfolio_snapshot()` now writes `portfolio_risk` into
+`outputs/polymarket_portfolio/risk_state.json`, including open/marked positions, total cost,
+top correlated exposure, category exposure, historical VaR/CVaR, and worst marked position return.
+The dashboard loads the risk-state artifact and renders a Portfolio risk panel. Tests seed three
+typed SQLite positions, two sharing a correlation key, and verify exact exposure and VaR/CVaR
+numbers without changing risk decisions, stake caps, or broker order logic.
+
 ---
 
-## WO-13 — Mirror the validated microstructure hypotheses as replay strategies — `open`
+## WO-13 — Mirror the validated microstructure hypotheses as replay strategies — `done` (2026-07-03)
 
 **Goal:** the sweep lab can hunt over the same hypothesis space the microstructure lab already
 tests, but at executable intent level. Three new registered strategies, all shadow-only.
@@ -570,9 +585,16 @@ config-driven thresholds via `context.algo_setting`, shadow mode hardcoded):**
 
 **Out of scope:** `price_action_microstructure.py` (the lab stays as-is), replay/sweep internals.
 
+**Landed 2026-07-03:** the algo registry now includes three new shadow-only replay strategies:
+`bid_momentum_tight_shadow`, `mid_momentum_tight_shadow`, and `spread_compression_shadow`. Each keeps
+only replay-local previous-quote memory by asset, emits deterministic GTD `join_bid` shadow BUY
+intents, uses config-driven `algo.*` thresholds, and returns no intent on first events, missing
+fields, below-threshold moves, weak imbalance, or non-positive stake. Tests cover exact crafted
+two-event intents, no-intent branches, registry exposure, and stable intent ids.
+
 ---
 
-## WO-14 — Generalise the sweep to any registered strategy — `open`
+## WO-14 — Generalise the sweep to any registered strategy — `done` (2026-07-03)
 
 **Blocked by WO-13.**
 
@@ -608,9 +630,17 @@ strategy, not just the tight-spread probe.
    overall selection, and that legacy config (no `strategies:` key) still produces the WO-6-era
    behaviour byte-for-byte on the old assertions.
 
+**Landed 2026-07-03:** `algo-sweep` now accepts `algo_sweep.strategies` as a generic per-strategy
+parameter grid. Each strategy's cartesian product is replayed with plain `algo.*` overrides; the
+summary reports one global `selected` combo plus `by_strategy` bests, and the combos CSV now includes
+`strategy` and `params` columns. Legacy config without `strategies:` still runs the old
+`tight_spread_join_bid_shadow` spread/imbalance grid and preserves the WO-6 assertions. The dashboard
+sweep panel now shows selected strategy/params, per-strategy bests, and strategy/params for each
+combo.
+
 ---
 
-## WO-15 — Evidence history time series (CLV + attribution per cycle) — `open`
+## WO-15 — Evidence history time series (CLV + attribution per cycle) — `done` (2026-07-03)
 
 **Goal:** see evidence accumulating over time instead of only the latest snapshot.
 
@@ -631,9 +661,15 @@ new test.
 3. Tests: two calls with unchanged artifacts -> one row per source; artifact regenerated ->
    second row; missing artifacts -> no rows, no crash.
 
+**Landed 2026-07-03:** added `evidence-history`, which appends idempotent rows to
+`evidence_history.csv` from `closing_line_value.json`, `edge_attribution.json`, and
+`algo_sweep_summary.json`. `refresh-governance` now appends history immediately after rebuilding those
+three artifacts. The row timestamp is the source artifact's `generated_at_utc`, so repeated refreshes
+do not duplicate unchanged evidence.
+
 ---
 
-## WO-16 — Per-family calibration scorecard — `open`
+## WO-16 — Per-family calibration scorecard — `done` (2026-07-03)
 
 **Goal:** answer "which families does the model actually beat the market in?" with one artifact:
 Brier/log-loss vs the market baseline per classified family, on clean settled data only.
@@ -659,9 +695,16 @@ Brier/log-loss vs the market baseline per classified family, on clean settled da
    calibrated in another; assert exact class per family and that below-minimum families read
    insufficient.
 
+**Landed 2026-07-03:** added `family-calibration`, which joins clean settled predictions through the
+existing market-relative validation path, classifies each row with the shared market-family
+classifier, and writes `family_calibration_scorecard.json/.csv`. The scorecard reports Brier/log-loss
+versus the market by family, clustered bootstrap confidence intervals for Brier gain, and fail-closed
+evidence classes (`model_beats_market`, `market_beats_model`, or
+`insufficient_calibration_evidence`). It is diagnostic only and keeps paper/live flags false.
+
 ---
 
-## WO-17 — Websocket collection coverage report — `open`
+## WO-17 — Websocket collection coverage report — `done` (2026-07-03)
 
 **Goal:** CLV finality depends on having quotes near each market's close; attribution depends on
 closed positions having lines. Report where collection is thin so scheduling can fix it.
@@ -682,9 +725,15 @@ closed positions having lines. Report where collection is thin so scheduling can
 3. Artifact `outputs/polymarket_model_governance/collection_coverage.json`. Standard flags.
 4. Tests: fixture with one covered and one uncovered position; assert both lists exact.
 
+**Landed 2026-07-03:** added `collection-coverage`, which reads websocket quote features and shadow
+positions, reports family-level quote coverage/gaps, and lists positions missing a quote in the
+pre-close window. It writes `collection_coverage.json`, plus CSVs for family coverage and missing
+positions. This turns stale/provisional CLV into concrete collection targets without invoking paper or
+live trading.
+
 ---
 
-## WO-18 — Dashboard evidence funnel panel — `open`
+## WO-18 — Dashboard evidence funnel panel — `done` (2026-07-03)
 
 **Land after WO-10 and WO-15..17 (it reads their artifacts; render blanks for missing ones).**
 
@@ -700,9 +749,16 @@ decision; paper gate status (`approved_for_paper_trading` from the promotion gat
 display only). Follow the CLV section pattern for reads and rendering. Test: fixture artifacts ->
 section title + a few exact values; all-missing -> renders with dashes.
 
+**Landed 2026-07-03:** added a top-level dashboard "Evidence funnel" section and a testable
+`evidence_funnel` payload. It surfaces liquidity target coverage, shadow candidates, open/closed
+shadow positions, final CLV rows, attributed positions, attribution-class counts, positive CLV
+cohorts, model-beats-market families, pre-close quote gaps, sweep decision, paper gate status, and
+recent evidence-history rows. `refresh-governance` now rebuilds family calibration and collection
+coverage before rendering the dashboard so this section stays fresh.
+
 ---
 
-## WO-19 — Invariant property tests — `open`
+## WO-19 — Invariant property tests — `done` (2026-07-03)
 
 **Goal:** lock the safety envelope in tests so future refactors cannot silently loosen it.
 
@@ -721,6 +777,14 @@ changes zero source files.** If a property fails, STOP and report — do not "fi
    (higher spread, lower liquidity, higher slippage) never turns a rejection into an approval.
 4. Intent schema: random dict fuzz over `intent_from_dict` -> `validate_intent` never raises
    (returns violations instead), and no accepted intent ever has `mode == "live"`.
+
+**Landed 2026-07-03:** the first execution-cost invariant check exposed a real safety gap:
+known shallow depth produced a higher cost than no depth at all. Before landing the test-only
+invariants, the estimator was hardened conservatively so missing depth now applies a depthless
+slippage penalty and a zero acceptable-impact stake cap, and the risk layer treats a zero impact
+cap as binding. `tests/polymarket_predictive_engine/test_safety_invariants.py` now pins Kelly
+shrinkage monotonicity, execution-cost conservatism, the risk sizing envelope, and order-intent
+schema safety over 200 seeded samples.
 
 ---
 
@@ -878,7 +942,7 @@ green.
 
 ---
 
-## WO-23 — Deployment-aware oversight status — `open` (MEDIUM)
+## WO-23 — Deployment-aware oversight status — `done` (2026-07-03, MEDIUM)
 
 **Goal:** one coherent story about which driver should be running.
 
@@ -894,6 +958,11 @@ started`), `dashboard.py` Strategy V2 section, tests.
 2. Strategy V2 section: render "not running in this deployment" instead of "missing" when its
    artifacts are absent but the live loop is fresh.
 3. Tests: both alert branches, exact strings.
+
+**Landed 2026-07-03:** the oversight builder now emits the exact VPS-driver info line when the
+legacy live loop is fresh and the shadow-cycle file is absent, while preserving the warning when
+neither driver is fresh. Strategy V2 now reports "not running in this deployment" when its artifacts
+are absent under the fresh legacy-loop deployment, and focused dashboard tests cover both branches.
 
 ---
 
@@ -940,7 +1009,7 @@ that value is populated in the VPS environment.
 
 ---
 
-## WO-25 — Wire the dutch-book arb monitor into the loop and dashboard — `open` (HIGH)
+## WO-25 — Wire the dutch-book arb monitor into the loop and dashboard — `done` (2026-07-03, HIGH)
 
 **Goal:** the one strategy class with mechanical (model-free) edge runs continuously and reports.
 
@@ -962,9 +1031,19 @@ tests.
 
 **Out of scope:** any order placement. This is a scanner.
 
+**Landed 2026-07-03:** the VPS live-paper loop now runs a bounded one-poll
+`run_dutch_arb_monitor` pass on the configured `dutch_arb.pass_interval_minutes` cadence with
+`dutch_arb.enabled`, `max_events_per_pass`, and `alert_annualised` controls. The monitor writes
+dry-run/latest artifacts under `outputs/polymarket_arbitrage/`, including
+`dutch_arb_monitor_summary.json`, `dutch_arb_latest.json`, latest opportunities, append-only
+`dutch_arb_opportunities.csv` rows above the alert threshold, and persistent-alert metadata for
+baskets that survive 3+ scans. The dashboard now renders "Dutch-book arb watch" plus an info-only
+oversight alert for persistent baskets. Tests cover exact basket maths, persistence, loop cadence,
+and dashboard rendering. No order placement path was added.
+
 ---
 
-## WO-26 — Anti-concentration guard on adaptive collection queries — `open` (HIGH)
+## WO-26 — Anti-concentration guard on adaptive collection queries — `done` (2026-07-03, HIGH)
 
 **Goal:** the adaptive research-focus loop can never again collapse discovery into one family.
 
@@ -988,9 +1067,19 @@ tests.
 
 **Out of scope:** gates, model thresholds.
 
+**Landed 2026-07-03:** `build_research_focus()` now writes audited pre/post query lists:
+`raw_collection_queries`, guarded `collection_queries`, and `collection_query_guard` with family
+counts, rejected-query reasons, up/down count, broad-base fill rows, and the explicit
+`decision_use=collection_rebalancing_only_not_trade_authorisation`. Defaults in
+`polymarket_predictive_config.example.yaml` enforce `max_queries_per_family=2`,
+`min_distinct_families=4`, and `max_updown_queries=1`, with deterministic broad-base fill across
+World Cup, tennis, macro, esports, AI, politics, elections, and stocks. Regression tests prove an
+8-query crypto up/down proposal becomes one up/down diagnostic plus broad families; CI import-path
+tests were also made Linux-safe by loading `scripts/*.py` by path.
+
 ---
 
-## WO-27 — Longshot-bias research family on slow markets (shadow-only) — `open` (MEDIUM)
+## WO-27 — Longshot-bias research family on slow markets (shadow-only) — `done` (2026-07-03, MEDIUM)
 
 **Goal:** stand up the structural-bias hypothesis as a first-class shadow research family measured
 by CLV, not settlement waiting.
@@ -1012,6 +1101,18 @@ by CLV, not settlement waiting.
 4. Tests: fixture snapshot -> exact candidate set; deep-longshot exclusion below min_price;
    fast markets excluded.
 
+**Landed 2026-07-03:** Added `longshot_bias.py` plus CLI command `longshot-bias-scan`.
+The scanner reads the live liquidity watchlist / websocket targets / prediction snapshot, requires
+an actual YES/NO binary pair, filters YES tails to the configured 0.02–0.12 band, slow markets
+(`min_time_to_close_hours=168`), and liquidity >= 500, then nominates the NO token with cohort
+`structural|longshot_no|<family>`. Artifacts:
+`outputs/polymarket_longshot_bias/longshot_bias_summary.json` and
+`outputs/polymarket_longshot_bias/longshot_bias_candidates.csv`, both explicitly paper/live false.
+The canonical paper cycle now forwards these candidates only into `update_shadow_cohort_evidence`;
+they are not written into paper signal generation. Tests cover exact candidate selection,
+below-min/fast/thin exclusions, artifact writes, shadow-position emission, and paper-cycle
+shadow-only forwarding.
+
 ---
 
 ## Sequencing
@@ -1022,22 +1123,22 @@ WO-1..WO-6, WO-8, WO-9   done and audited (2026-07-02)
 Queue order (strategic reset, 2026-07-03 — read POLYMARKET_EDGE_STRATEGY_RESET.md first):
 1. WO-24   done 2026-07-03: sharp-anchor activation + broadening (VPS still needs THE_ODDS_API_KEY populated)
 2. WO-20   done 2026-07-03: position-aware quote collection
-3. WO-25   dutch-book arb monitor wiring (mechanical edge, model-free)
-4. WO-26   anti-concentration guard on adaptive queries
+3. WO-25   done 2026-07-03: dutch-book arb monitor loop/dashboard wiring (mechanical edge, model-free)
+4. WO-26   done 2026-07-03: anti-concentration guard on adaptive queries
 5. WO-21   done 2026-07-03: settle or flag stuck paper positions
-6. WO-27   longshot-bias research family (shadow-only)
+6. WO-27   done 2026-07-03: longshot-bias research family (shadow-only)
 7. WO-7    done 2026-07-03: CLV-aware promotion review advisory wiring
 8. WO-22   done 2026-07-03: evidence-gated display fixes
-9. WO-23   deployment-aware oversight status
-10. WO-11  research-focus consumption (after WO-26 so the guard shapes it)
-11. WO-12  portfolio VaR + correlated-exposure reporting
-12. WO-13  microstructure hypotheses as replay strategies
-13. WO-14  generalise the sweep (after WO-13)
-14. WO-16  per-family calibration scorecard
-15. WO-17  collection coverage report (verifies WO-20)
-16. WO-15  evidence history time series
-17. WO-18  dashboard evidence funnel
-18. WO-19  invariant property tests (zero source changes)
+9. WO-23   done 2026-07-03: deployment-aware oversight status
+10. WO-11  done 2026-07-03: research-focus consumption (after WO-26 so the guard shapes it)
+11. WO-12  done 2026-07-03: portfolio VaR + correlated-exposure reporting
+12. WO-13  done 2026-07-03: microstructure hypotheses as replay strategies
+13. WO-14  done 2026-07-03: generalise the sweep (after WO-13)
+14. WO-16  done 2026-07-03: per-family calibration scorecard
+15. WO-17  done 2026-07-03: collection coverage report (verifies WO-20)
+16. WO-15  done 2026-07-03: evidence history time series
+17. WO-18  done 2026-07-03: dashboard evidence funnel
+18. WO-19  done 2026-07-03: invariant property tests plus conservative depth-missing execution hardening
 ```
 
 After all six land: WP3 is done (flip it in the charter), the algo track (WP9–WP11) is done, and

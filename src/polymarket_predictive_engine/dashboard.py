@@ -113,6 +113,8 @@ HTML = """<!doctype html>
   <div class="grid" id="cards"></div>
   <section class="primary"><h2>Decision cockpit</h2><div id="decisionCockpit"></div></section>
   <section><h2>Action board</h2><div id="actionBoard"></div></section>
+  <section><h2>Evidence funnel</h2><div id="evidenceFunnel"></div></section>
+  <section><h2>Dutch-book arb watch</h2><div id="dutchArbWatch"></div></section>
   <div class="two">
     <section><h2>$100/month price-change route</h2><div id="goalPlan"></div></section>
     <section><h2>Model & evidence health</h2><div id="modelHealth"></div></section>
@@ -127,6 +129,7 @@ HTML = """<!doctype html>
   <section><h2>Edge attribution</h2><div id="edgeAttribution"></div></section>
   <section><h2>World Cup validation layer</h2><div id="worldcupValidation"></div></section>
   <section><h2>Actual paper P&L</h2><div id="actualTarget"></div></section>
+  <section><h2>Portfolio risk</h2><div id="portfolioRisk"></div></section>
   </details>
   <details class="legacy"><summary>Deep diagnostics and rejected-candidate audit<span>Raw telemetry is still here for debugging, but the decision cockpit above is the default trading view.</span></summary>
   <section><h2>Why no trade?</h2><div id="tradeDiagnostics"></div></section>
@@ -259,7 +262,10 @@ async function load() {
     const priceActionModel = data.price_action_model || {};
     const quantResearch = data.quant_research_status || {};
     const closingLine = data.closing_line_value || {};
+    const dutchArb = data.dutch_arb || {};
     const edgeAttribution = data.edge_attribution || {};
+    const riskState = data.risk_state || {};
+    const portfolioRisk = riskState.portfolio_risk || {};
     const priceActionPaper = data.price_action_paper_signals || {};
     const currentHistScan = priceActionPaper.current_historical_analogue_scan || {};
     const historicalBreadthScan = priceActionPaper.historical_breadth_scan || {};
@@ -270,6 +276,7 @@ async function load() {
     const priceActionGoal = goalPlan.price_action_goal_state || {};
     const tradeSignalAudit = data.trade_signal_audit || {};
     const decisionSummary = data.decision_useful_summary || {};
+    const evidenceFunnel = data.evidence_funnel || {};
     const probeExitWatch = data.paper_probe_exit_watch || {};
     const paperMaintenance = data.paper_maintenance || {};
     const paperMaintenanceTask = data.paper_maintenance_task || {};
@@ -338,6 +345,11 @@ async function load() {
     const decisionRunRate = goalPlan.decision_monthly_run_rate_usdc ?? target.decision_monthly_run_rate_usdc ?? target.monthly_run_rate_usdc;
     const auditedPnl = goalPlan.audited_pnl_since_baseline_usdc;
     const pnlAuditState = goalPlan.pnl_audit_state || "unknown";
+    const profitProofStatus = goalPlan.profit_target_proof_status || target.profit_target_proof_status || "unknown";
+    const profitProofBlockers = goalPlan.profit_target_proof_blockers || target.profit_target_proof_blockers || [];
+    const auditedRoundTrips = goalPlan.audited_round_trips_since_baseline ?? target.audited_round_trips_since_baseline ?? "-";
+    const minAuditedRoundTrips = goalPlan.minimum_audited_round_trips_for_on_pace ?? target.minimum_audited_round_trips_for_on_pace ?? "-";
+    const verifiedEvidenceReady = Boolean(goalPlan.verified_evidence_ready || target.verified_evidence_ready);
     const promotionPolicy = data.cohort_promotion_readiness || {};
     const minimumFilledOrders = Number(promotionPolicy.minimum_filled_orders || data.signal_cohort_pnl?.minimum_filled_orders || 5);
     const minimumEvidenceHours = 72;
@@ -493,7 +505,7 @@ async function load() {
       card("Why not / why now?", longText(blockerText, 120), tradeDecisionClass),
       card("Unlock condition", longText(unlockCondition, 120), approvedSignals > 0 ? "good" : "warn"),
       card("Collect now", joinText(collectQueries), collectQueries.length ? "good" : "warn"),
-      card("$100/month state", `${fmtUsd(pnl)} audited / ${fmtUsd(decisionRunRate)} audited run-rate`, pnl >= 0 ? "good" : "bad"),
+      card("$100/month state", `${fmtUsd(pnl)} audited / ${fmtUsd(decisionRunRate)} run-rate / ${profitProofStatus}`, verifiedEvidenceReady ? "good" : "warn"),
       card("Best edge route", bestEdgeRouteSummary(), "warn")
     ].join("");
     document.getElementById("decisionCockpit").innerHTML = `
@@ -556,6 +568,69 @@ async function load() {
         ], 8)}
       </details>
     `;
+    document.getElementById("evidenceFunnel").innerHTML = `
+      <div class="sectionLead">Road-to-paper view: discovery -> shadow evidence -> CLV/attribution -> family calibration -> sweep confirmation -> paper gate. Dashes mean the source artifact is missing, not approved.</div>
+      ${facts([
+        ["Liquidity targets discovered", evidenceFunnel.liquidity_targets_discovered],
+        ["Alpha shadow candidates", evidenceFunnel.alpha_shadow_candidates],
+        ["Shadow positions", evidenceFunnel.shadow_positions],
+        ["Closed with CLV final lines", evidenceFunnel.closed_with_clv_final_lines],
+        ["Attributed positions", evidenceFunnel.attributed_positions],
+        ["Cohorts by attribution class", evidenceFunnel.cohorts_by_attribution_class, v=>longText(v, 220)],
+        ["Positive CLV cohorts", evidenceFunnel.positive_clv_cohorts, joinText],
+        ["Families beating market", evidenceFunnel.model_beats_market_families, joinText],
+        ["Collection gap", evidenceFunnel.collection_gap, v=>longText(v, 220)],
+        ["Sweep decision", evidenceFunnel.sweep_decision, v=>longText(v, 220)],
+        ["Paper gate", evidenceFunnel.paper_gate_status, v=>longText(v, 180)],
+        ["History rows", evidenceFunnel.evidence_history_rows]
+      ])}
+      ${titledTable("Missing pre-close quote positions", evidenceFunnel.missing_pre_close_positions || [], [
+        ["Position","shadow_position_id", v=>longText(v, 120)],
+        ["Family","family", v=>longText(v, 120)],
+        ["Close time","close_time"],
+        ["Reason","reason", v=>longText(v, 160)]
+      ], 5)}
+      ${titledTable("Latest evidence history", evidenceFunnel.recent_history || [], [
+        ["Recorded","recorded_at_utc"],
+        ["Source","source"],
+        ["Rows / positions","positions_scored_attributed"],
+        ["Final CLV rows","final_line_positions"],
+        ["Positive cohorts","positive_cohorts", v=>longText(v, 180)],
+        ["Summary","decision_or_class_summary", v=>longText(v, 220)]
+      ], 5)}
+    `;
+    const dutchBest = dutchArb.best_opportunity || {};
+    const dutchStats = dutchArb.scan_stats_latest_poll || {};
+    const dutchPersistent = Array.isArray(dutchArb.persistent_alerts) ? dutchArb.persistent_alerts : [];
+    const dutchTop = Array.isArray(dutchArb.top_opportunities) ? dutchArb.top_opportunities : [];
+    const fmtPct = v => v === null || v === undefined || v === "" || Number.isNaN(Number(v)) ? "-" : fmtNum(Number(v) * 100, 2) + "%";
+    const dutchCaveat = "Observed ask baskets; execution, fees, and fill reality are untested — shadow evidence only.";
+    document.getElementById("dutchArbWatch").innerHTML = Object.keys(dutchArb).length
+      ? `<div class="sectionLead">${dutchCaveat}</div>` + facts([
+          ["Status", dutchArb.status || "-"],
+          ["Last scan", dutchArb.generated_at_utc || dutchArb.last_scan_at_utc || "-"],
+          ["Events discovered", dutchStats.discovered ?? dutchArb.events_scanned ?? "-"],
+          ["Events priced complete", dutchArb.events_priced_complete_latest_poll ?? dutchArb.events_priced_complete ?? "-"],
+          ["Complete arbs now", dutchArb.complete_arbs_latest_poll ?? "-"],
+          ["Above alert total", dutchArb.alerts_total ?? "-"],
+          ["Persistent above alert", dutchArb.persistent_alert_count ?? dutchPersistent.length],
+          ["Best basket", dutchBest.event || "none", v=>longText(v, 180)],
+          ["Best ask sum", dutchBest.ask_sum, v=>fmtNum(v, 4)],
+          ["Best annualised ROI", dutchArb.best_annualised_return_on_capital ?? dutchBest.annualised_return_on_capital, fmtPct],
+          ["Dry-run only", (dutchArb.live_trading_invoked || dutchArb.paper_trading_invoked) ? "unexpected invocation flag" : "yes - no orders placed"],
+          ["Caveat", dutchCaveat, v=>longText(v, 260)]
+        ]) + (dutchPersistent.length ? `<div class="alertGrid">${dutchPersistent.map(row => alertBox(row.title || "Persistent Dutch-book arb", `${longText(row.event, 160)} persisted ${plain(row.consecutive_scans_above_alert)} scans above ${fmtPct(row.alert_annualised)} alert.`, "good")).join("")}</div>` : "")
+        + titledTable("Top Dutch-book baskets", dutchTop, [
+          ["Event","event", v=>longText(v, 180)],
+          ["Outcomes","outcomes"],
+          ["Ask sum","ask_sum", v=>fmtNum(v, 4)],
+          ["Lock/set","lock_per_set", v=>fmtNum(v, 4)],
+          ["Annualised ROI","annualised_return_on_capital", fmtPct],
+          ["Capital","capital_usdc", fmtUsd],
+          ["Profit","profit_usdc", fmtUsd],
+          ["Days","days_to_resolution"]
+        ], 5)
+      : `<div class="sectionLead">No Dutch-book arb scan yet. The VPS loop will run a bounded dry-run pass when the configured cadence is due.</div>`;
     document.getElementById("modelHealth").innerHTML = facts([
       ["Model gate", priceActionModel.decision || decisionSummary.model_state, v=>longText(v, 220)],
       ["Model age", fmtAge(modelAge)],
@@ -588,6 +663,9 @@ async function load() {
       ["Audited run-rate", decisionRunRate, fmtUsd],
       ["Raw ledger P&L (audit-only)", rawPnl, v=>fmtUsd(v) + auditedRawSuffix()],
       ["P&L audit state", pnlAuditState, v=>longText(v, 180)],
+      ["Proof status", profitProofStatus, v=>longText(v, 180)],
+      ["Audited round trips", `${auditedRoundTrips} / ${minAuditedRoundTrips}`],
+      ["Proof blockers", profitProofBlockers, joinText],
       ["Quote conflicts", goalPlan.quote_conflict_round_trips],
       ["Unverified quote rows", goalPlan.quote_unverified_round_trips],
       ["Tracking hours", target.elapsed_hours, v=>fmtNum(v,2)],
@@ -600,6 +678,9 @@ async function load() {
       ["Audited P&L for goal", goalPlan.decision_pnl_usdc, fmtUsd],
       ["Raw ledger P&L", goalPlan.raw_account_pnl_since_baseline_usdc, v=>fmtUsd(v) + auditedRawSuffix()],
       ["P&L audit state", goalPlan.pnl_audit_state, v=>longText(v, 180)],
+      ["Proof status", profitProofStatus, v=>longText(v, 180)],
+      ["Audited round trips", `${auditedRoundTrips} / ${minAuditedRoundTrips}`],
+      ["Proof blockers", profitProofBlockers, joinText],
       ["Best repricing evidence", routeEvidenceDisplay("shadow"), v=>longText(v, 220)],
       ["Forward paper evidence", routeEvidenceDisplay("paper"), v=>longText(v, 220)],
       ["Required/day from here", goalPlan.required_daily_from_here_usdc, fmtUsd],
@@ -688,6 +769,26 @@ async function load() {
           ["Evidence","clv_evidence", v=>longText(v, 150)]
         ], 8)
       : `<div class="sectionLead">No CLV evidence yet. The next governance refresh should build closing_line_value.json once shadow positions and bid/ask features exist.</div>`;
+    const correlatedExposure = Array.isArray(portfolioRisk.exposure_by_correlation_key) ? portfolioRisk.exposure_by_correlation_key : [];
+    const categoryExposure = Array.isArray(portfolioRisk.exposure_by_category) ? portfolioRisk.exposure_by_category : [];
+    document.getElementById("portfolioRisk").innerHTML = Object.keys(portfolioRisk).length
+      ? `<div class="sectionLead">Report-only portfolio downside and concentration view. It does not authorise trades or change stake caps; it tells us when profitable evidence is becoming too concentrated.</div>` + facts([
+          ["Generated", portfolioRisk.generated_at_utc],
+          ["Open positions", portfolioRisk.open_positions],
+          ["Marked positions", `${portfolioRisk.marked_positions ?? 0} marked / ${portfolioRisk.unmarked_positions ?? 0} unmarked`],
+          ["Total cost", portfolioRisk.total_cost_usdc, fmtUsd],
+          ["VaR 95", portfolioRisk.var_95_usdc, fmtUsd],
+          ["CVaR 95", portfolioRisk.cvar_95_usdc, fmtUsd],
+          ["Worst position return", portfolioRisk.worst_position_return_pct == null ? "-" : fmtNum(portfolioRisk.worst_position_return_pct, 2) + "%"],
+          ["Decision use", portfolioRisk.decision_use, v=>longText(v, 180)]
+        ]) + titledTable("Top correlated exposure", correlatedExposure, [
+          ["Correlation key","key", v=>longText(v, 180)],
+          ["Cost basis","cost_basis_usdc", fmtUsd]
+        ], 10) + titledTable("Exposure by category", categoryExposure, [
+          ["Category","key", v=>longText(v, 140)],
+          ["Cost basis","cost_basis_usdc", fmtUsd]
+        ], 10)
+      : `<div class="sectionLead">No portfolio risk snapshot yet. The next portfolio snapshot should write risk_state.json with VaR/CVaR and correlated exposure.</div>`;
     const attributionCohorts = Array.isArray(edgeAttribution.cohorts) ? edgeAttribution.cohorts : [];
     document.getElementById("edgeAttribution").innerHTML = Object.keys(edgeAttribution).length
       ? `<div class="sectionLead">Explains closed shadow P&L using the exact identity: exit minus entry fill equals settlement surprise plus line movement minus execution cost. Diagnostic only; it does not authorise trading.</div>` + facts([
@@ -815,8 +916,10 @@ async function load() {
       ["Reason","quarantine_reason", v=>longText(v, 180)]
     ]);
     document.getElementById("strategyV2").innerHTML = facts([
+      ["Status", strategyV2.status],
       ["Decision", strategyV2.decision],
       ["Recommended action", strategyV2.recommended_action, v=>longText(v, 240)],
+      ["Runtime", strategyV2.runtime_reason, v=>longText(v, 180)],
       ["Report generated", strategyV2.generated_at_utc],
       ["Cycle status", strategyV2.cycle_status?.status],
       ["Cycle paper broker", strategyV2.paper_broker_status],
@@ -1182,20 +1285,41 @@ async function load() {
       ["Paper/live","paper_trading_invoked", (v,row)=>`${v ? "paper" : "no paper"} / ${row.live_trading_invoked ? "live" : "no live"}`]
     ], 8);
     const sweepCombos = Array.isArray(algoSweep.combos) ? algoSweep.combos : [];
+    const sweepByStrategy = algoSweep.by_strategy || {};
+    const sweepByStrategyRows = Object.values(sweepByStrategy || {}).map(row => {
+      const selected = row.selected || {};
+      return {...row, selected_params: selected.params || "-", selected_train_pnl_usdc: selected.train_pnl_usdc, selected_validation_pnl_usdc: selected.validation_pnl_usdc};
+    });
     const sweepSelected = algoSweep.selected || {};
+    const sweepSelectedParams = sweepSelected.params !== undefined
+      ? sweepSelected.params
+      : sweepSelected.tight_spread_maximum !== undefined
+        ? `spread<=${fmtNum(sweepSelected.tight_spread_maximum, 4)}, imbalance>=${fmtNum(sweepSelected.minimum_book_imbalance, 4)}`
+        : "-";
     document.getElementById("algoSweep").innerHTML = Object.keys(algoSweep).length
       ? `<div class="sectionLead">Train-only parameter sweep over recorded websocket history, then one out-of-sample validation score. A validated result is shadow research only.</div>` + facts([
           ["Decision", algoSweep.decision || "-"],
-          ["Strategy", algoSweep.strategy || "-"],
+          ["Default strategy", algoSweep.strategy || "-"],
+          ["Selected strategy", sweepSelected.strategy || "-"],
           ["Events", algoSweep.events_total],
           ["Train / validation", `${algoSweep.train_events ?? "-"} / ${algoSweep.validation_events ?? "-"}`],
           ["Combos tested", algoSweep.combos_tested],
           ["Train candidates", algoSweep.train_candidates],
-          ["Selected params", sweepSelected.tight_spread_maximum !== undefined ? `spread<=${fmtNum(sweepSelected.tight_spread_maximum, 4)}, imbalance>=${fmtNum(sweepSelected.minimum_book_imbalance, 4)}` : "-"],
+          ["Selected params", sweepSelectedParams, v=>longText(v, 180)],
           ["Selected train P&L", sweepSelected.train_pnl_usdc, fmtUsd],
           ["Selected validation P&L", sweepSelected.validation_pnl_usdc, fmtUsd],
           ["Governance note", algoSweep.governance_note || "Shadow research only; no trading gate changed.", v=>longText(v, 260)]
-        ]) + titledTable("Sweep combinations", sweepCombos, [
+        ]) + titledTable("Best by strategy", sweepByStrategyRows, [
+          ["Strategy","strategy", v=>longText(v, 150)],
+          ["Combos","combos_tested"],
+          ["Candidates","train_candidates"],
+          ["Decision","decision", v=>longText(v, 150)],
+          ["Selected params","selected_params", v=>longText(v, 180)],
+          ["Train P&L","selected_train_pnl_usdc", fmtUsd],
+          ["Validation P&L","selected_validation_pnl_usdc", fmtUsd]
+        ], 8) + titledTable("Sweep combinations", sweepCombos, [
+          ["Strategy","strategy", v=>longText(v, 140)],
+          ["Params","params", v=>longText(v, 170)],
           ["Spread max","tight_spread_maximum", v=>fmtNum(v, 4)],
           ["Min imbalance","minimum_book_imbalance", v=>fmtNum(v, 4)],
           ["Train fills","train_fills"],
@@ -1912,6 +2036,95 @@ def _trade_diagnostics(
     }
 
 
+def _dash(value: Any) -> Any:
+    if value is None or value == "" or value == [] or value == {}:
+        return "-"
+    return value
+
+
+def _first_present_number(payload: dict[str, Any], keys: list[str]) -> Any:
+    for key in keys:
+        value = payload.get(key)
+        if value not in {None, ""}:
+            return value
+    return "-"
+
+
+def _count_by_field(rows: list[dict[str, Any]], field: str) -> dict[str, int]:
+    counts = Counter(str(row.get(field) or "unknown") for row in rows if isinstance(row, dict))
+    return dict(sorted(counts.items()))
+
+
+def _evidence_funnel_payload(
+    *,
+    liquidity_discovery: dict[str, Any],
+    predictions: list[dict[str, Any]],
+    shadow_position_rows: list[dict[str, Any]],
+    closing_line_value: dict[str, Any],
+    edge_attribution: dict[str, Any],
+    family_calibration: dict[str, Any],
+    collection_coverage: dict[str, Any],
+    algo_sweep: dict[str, Any],
+    promotion_gate: dict[str, Any],
+    evidence_history_rows: list[dict[str, Any]],
+) -> dict[str, Any]:
+    alpha_shadow_candidates = sum(1 for row in predictions if _truthy(row.get("shadow_trade_candidate")))
+    open_shadow = sum(1 for row in shadow_position_rows if str(row.get("status") or "open").lower() == "open")
+    closed_shadow = sum(1 for row in shadow_position_rows if str(row.get("status") or "").lower() == "closed")
+    attribution_cohorts = edge_attribution.get("cohorts", []) if isinstance(edge_attribution, dict) else []
+    attribution_cohorts = attribution_cohorts if isinstance(attribution_cohorts, list) else []
+    positive_clv = closing_line_value.get("positive_clv_cohorts", []) if isinstance(closing_line_value, dict) else []
+    positive_clv = positive_clv if isinstance(positive_clv, list) else []
+    calibration_families = family_calibration.get("model_beats_market_families", []) if isinstance(family_calibration, dict) else []
+    calibration_families = calibration_families if isinstance(calibration_families, list) else []
+    missing_pre_close = (
+        collection_coverage.get("missing_pre_close_positions", []) if isinstance(collection_coverage, dict) else []
+    )
+    missing_pre_close = missing_pre_close if isinstance(missing_pre_close, list) else []
+    missing_count = collection_coverage.get("positions_missing_pre_close_quote") if isinstance(collection_coverage, dict) else None
+    covered_count = collection_coverage.get("positions_with_pre_close_quote") if isinstance(collection_coverage, dict) else None
+    if missing_count not in {None, ""} and covered_count not in {None, ""}:
+        collection_gap: Any = f"{missing_count} missing / {covered_count} covered"
+    else:
+        collection_gap = "-"
+    if isinstance(promotion_gate, dict) and promotion_gate:
+        approved = bool(promotion_gate.get("approved_for_paper_trading"))
+        gate_status = "approved_for_paper" if approved else "blocked_for_paper"
+        blockers = promotion_gate.get("paper_blockers", [])
+        if blockers:
+            gate_status += ": " + "; ".join(str(item) for item in blockers[:3])
+    else:
+        gate_status = "-"
+
+    return {
+        "liquidity_targets_discovered": _first_present_number(
+            liquidity_discovery,
+            [
+                "target_assets",
+                "targets_discovered",
+                "discovered_targets",
+                "candidate_assets",
+                "tokens",
+                "markets",
+                "rows",
+            ],
+        ),
+        "alpha_shadow_candidates": alpha_shadow_candidates if predictions else "-",
+        "shadow_positions": f"{open_shadow} open / {closed_shadow} closed" if shadow_position_rows else "-",
+        "closed_with_clv_final_lines": _dash(closing_line_value.get("final_line_positions") if isinstance(closing_line_value, dict) else None),
+        "attributed_positions": _dash(edge_attribution.get("attributed_positions") if isinstance(edge_attribution, dict) else None),
+        "cohorts_by_attribution_class": _dash(_count_by_field(attribution_cohorts, "attribution_class")),
+        "positive_clv_cohorts": _dash(positive_clv),
+        "model_beats_market_families": _dash(calibration_families),
+        "collection_gap": collection_gap,
+        "missing_pre_close_positions": missing_pre_close[:25],
+        "sweep_decision": _dash(algo_sweep.get("decision") if isinstance(algo_sweep, dict) else None),
+        "paper_gate_status": gate_status,
+        "evidence_history_rows": len(evidence_history_rows) if evidence_history_rows else "-",
+        "recent_history": list(reversed(evidence_history_rows[-10:])),
+    }
+
+
 def _cohort_promotion_readiness(cfg: EngineConfig, signal_cohort_pnl: dict[str, Any]) -> dict[str, Any]:
     policy = cfg.raw.get("cohort_promotion", {}) or {}
     minimum_fills = int(policy.get("minimum_filled_orders", 5))
@@ -2126,7 +2339,7 @@ def _local_process_exists(pid_value: Any) -> bool | None:
     return True
 
 
-def _strategy_v2_status(cfg: EngineConfig) -> dict[str, Any]:
+def _strategy_v2_status(cfg: EngineConfig, legacy_full_cycle: dict[str, Any] | None = None) -> dict[str, Any]:
     """Expose Strategy V2 anchored-edge research progress on the dashboard.
 
     This is observability only. Strategy V2 remains shadow-only until a separate
@@ -2248,9 +2461,17 @@ def _strategy_v2_status(cfg: EngineConfig) -> dict[str, Any]:
     top_blockers = report.get("top_blockers") if isinstance(report.get("top_blockers"), dict) else {}
     main_blocker = next(iter(top_blockers.keys()), "") if top_blockers else ""
     cycle_state = str(cycle_status.get("status") or "").lower()
+    legacy_live_driver = (
+        isinstance(legacy_full_cycle, dict)
+        and str(legacy_full_cycle.get("effective_status") or "").lower() == "live"
+    )
+    missing_strategy_artifacts = not report and not candidates and cycle_state in {"", "missing"}
     runtime_posture = "collecting_shadow_evidence"
     runtime_reason = "Strategy V2 cycle is ready to collect shadow evidence."
-    if cycle_state == "skipped_high_memory":
+    if missing_strategy_artifacts and legacy_live_driver:
+        runtime_posture = "not_running_in_this_deployment"
+        runtime_reason = "Strategy V2 is not running in this deployment."
+    elif cycle_state == "skipped_high_memory":
         runtime_posture = "memory_paused"
         runtime_reason = str(cycle_status.get("reason") or "Strategy V2 paused by the local memory guard.")
     elif cycle_state in {"error", "failed"}:
@@ -2259,11 +2480,19 @@ def _strategy_v2_status(cfg: EngineConfig) -> dict[str, Any]:
     elif cycle_state in {"", "missing"}:
         runtime_posture = "not_started"
         runtime_reason = "Strategy V2 cycle status is missing."
+    status = report.get("status") or ("missing" if not candidates else "ok")
+    decision = report.get("decision") or "missing_report"
+    recommended_action = report.get("recommended_action") or "Run Strategy V2 anchored-edge scanner."
+    if missing_strategy_artifacts and legacy_live_driver:
+        status = "not running in this deployment"
+        decision = "not running in this deployment"
+        recommended_action = "No Strategy V2 action needed while the VPS deployment is driven by the legacy live loop."
+
     return {
-        "status": report.get("status") or ("missing" if not candidates else "ok"),
+        "status": status,
         "generated_at_utc": report.get("generated_at_utc"),
-        "decision": report.get("decision") or "missing_report",
-        "recommended_action": report.get("recommended_action") or "Run Strategy V2 anchored-edge scanner.",
+        "decision": decision,
+        "recommended_action": recommended_action,
         "cycle_status": cycle_status,
         "paper_trade_refresh": cycle_paper_trade,
         "paper_broker_status": cycle_broker.get("status"),
@@ -2765,6 +2994,7 @@ def _dashboard_oversight_status(
     trade_diagnostics: dict[str, Any],
     evidence_freshness: dict[str, Any],
     strategy_v2: dict[str, Any],
+    dutch_arb: dict[str, Any],
 ) -> dict[str, Any]:
     """Single oversight summary for stale/live/model gate visibility."""
     live_age = _age_seconds(heartbeat)
@@ -2793,12 +3023,24 @@ def _dashboard_oversight_status(
     def add_alert(severity: str, title: str, body: str) -> None:
         alerts.append({"severity": severity, "title": title, "body": body})
 
+    legacy_full_cycle = (
+        evidence_freshness.get("legacy_full_cycle") if isinstance(evidence_freshness.get("legacy_full_cycle"), dict) else {}
+    )
+    legacy_live_driver = str(legacy_full_cycle.get("effective_status") or "").lower() == "live"
+
     if shadow_status in {"not_started", "missing"}:
-        add_alert(
-            "warn",
-            "Shadow research cycle has not started",
-            str(shadow_research.get("reason") or "The current safe research lane has not produced a status file."),
-        )
+        if legacy_live_driver:
+            add_alert(
+                "info",
+                "Driver: legacy live loop (VPS deployment); shadow-cycle status file not expected.",
+                str(legacy_full_cycle.get("reason") or "Legacy live loop heartbeat is fresh."),
+            )
+        else:
+            add_alert(
+                "warn",
+                "Shadow research cycle has not started",
+                str(shadow_research.get("reason") or "The current safe research lane has not produced a status file."),
+            )
     elif shadow_status == "stale":
         add_alert(
             "bad",
@@ -2927,11 +3169,22 @@ def _dashboard_oversight_status(
                 or "The local guard paused heavier collection because RAM was high."
             ),
         )
+    persistent_arbs = dutch_arb.get("persistent_alerts") if isinstance(dutch_arb, dict) else []
+    if isinstance(persistent_arbs, list) and persistent_arbs:
+        best = persistent_arbs[0] if isinstance(persistent_arbs[0], dict) else {}
+        add_alert(
+            "info",
+            "Dutch-book arb basket persisted",
+            (
+                f"{len(persistent_arbs)} dry-run basket(s) persisted above the alert threshold for 3+ scans. "
+                f"Best visible basket: {best.get('event') or best.get('event_id') or 'unknown'}."
+            ),
+        )
 
     status = "ok"
     if any(alert.get("severity") == "bad" for alert in alerts):
         status = "bad"
-    elif alerts:
+    elif any(alert.get("severity") == "warn" for alert in alerts):
         status = "warn"
     return {
         "status": status,
@@ -3202,6 +3455,11 @@ def _decision_useful_summary(
         decision_run_rate = run_rate
     audited_pnl = safe_float(goal_plan.get("audited_pnl_since_baseline_usdc"))
     pnl_audit_state = str(goal_plan.get("pnl_audit_state") or "unknown")
+    profit_target_proof_status = str(goal_plan.get("profit_target_proof_status") or "unknown")
+    profit_target_proof_blockers = _compact_list(goal_plan.get("profit_target_proof_blockers"), limit=4)
+    verified_evidence_ready = bool(goal_plan.get("verified_evidence_ready"))
+    audited_round_trips = int(safe_float(goal_plan.get("audited_round_trips_since_baseline")) or 0)
+    minimum_audited_round_trips = int(safe_float(goal_plan.get("minimum_audited_round_trips_for_on_pace")) or 5)
     best_repricing_run_rate = safe_float(price_action_goal.get("best_repricing_monthly_run_rate_usdc"))
     forward_paper_run_rate = safe_float(price_action_goal.get("best_forward_paper_monthly_run_rate_usdc"))
     edge_route_text = _best_edge_route_text(price_action_goal, price_action_feedback)
@@ -3369,7 +3627,11 @@ def _decision_useful_summary(
         {"label": f"audited P&L {_usd_text(decision_pnl)}", "severity": "good" if decision_pnl >= 0 else "bad"},
         {
             "label": f"audited run-rate {_usd_text(decision_run_rate)} / {_usd_text(target_monthly)}",
-            "severity": "good" if decision_run_rate is not None and decision_run_rate >= target_monthly else "warn",
+            "severity": "good" if decision_run_rate is not None and decision_run_rate >= target_monthly and verified_evidence_ready else "warn",
+        },
+        {
+            "label": f"proof {profit_target_proof_status}",
+            "severity": "good" if verified_evidence_ready else "warn",
         },
     ]
     if collect_now:
@@ -3458,7 +3720,10 @@ def _decision_useful_summary(
             "state": pnl_audit_state,
             "decision_use": "Measures quote-consistent paper progress toward the $100/month target; raw ledger P&L is diagnostic only when quote conflicts exist.",
             "key_metric": f"audited {_usd_text(decision_pnl)}; run-rate {_usd_text(decision_run_rate)}",
-            "blocker_or_next": f"target {_usd_text(target_monthly)}; required/day {_usd_text(goal_plan.get('required_daily_from_here_usdc'))}",
+            "blocker_or_next": (
+                f"proof {profit_target_proof_status}; audited round trips {audited_round_trips}/{minimum_audited_round_trips}"
+                + (f"; blockers {', '.join(profit_target_proof_blockers)}" if profit_target_proof_blockers else "")
+            ),
         },
         {
             "lane": "Live bid/ask feed",
@@ -3526,6 +3791,7 @@ def _decision_useful_summary(
     raw_pnl_text = f"raw ledger {_usd_text(actual_pnl)}" if audited_pnl is not None else ""
     profit_target_text = (
         f"{_usd_text(decision_pnl)} audited; {_usd_text(decision_run_rate)} audited monthly run-rate vs {_usd_text(target_monthly)} target"
+        + f"; proof {profit_target_proof_status}; audited exits {audited_round_trips}/{minimum_audited_round_trips}"
         + (f" ({raw_pnl_text})" if raw_pnl_text else "")
     )
     decision_questions = [
@@ -3600,8 +3866,8 @@ def _decision_useful_summary(
         {
             "label": "$100/month state",
             "value": profit_target_text,
-            "severity": "good" if decision_run_rate is not None and decision_run_rate >= target_monthly else "bad",
-            "decision_use": "Shows whether audited paper trading is actually paying for the capital goal.",
+            "severity": "good" if decision_run_rate is not None and decision_run_rate >= target_monthly and verified_evidence_ready else "warn",
+            "decision_use": "Shows whether audited, quote-consistent paper trading is actually paying for the capital goal.",
         },
         {
             "label": "Edge route",
@@ -3632,6 +3898,11 @@ def _decision_useful_summary(
         "monthly_run_rate_usdc": run_rate,
         "decision_monthly_run_rate_usdc": decision_run_rate,
         "pnl_audit_state": pnl_audit_state,
+        "profit_target_proof_status": profit_target_proof_status,
+        "profit_target_proof_blockers": profit_target_proof_blockers,
+        "verified_evidence_ready": verified_evidence_ready,
+        "audited_round_trips_since_baseline": audited_round_trips,
+        "minimum_audited_round_trips_for_on_pace": minimum_audited_round_trips,
         "target_monthly_profit_usdc": target_monthly,
         "best_repricing_monthly_run_rate_usdc": best_repricing_run_rate,
         "best_forward_paper_monthly_run_rate_usdc": forward_paper_run_rate,
@@ -3870,7 +4141,8 @@ def render_dashboard(cfg: EngineConfig, latest_report: dict[str, Any] | None = N
     liquidity_discovery = read_json(governance / "liquidity_discovery_summary.json", default={}) or {}
     positions = _open_positions(read_csv_rows(portfolio_root / "positions.csv"))
     fills = _last(read_csv_rows(portfolio_root / "paper_fills.csv"), 50)
-    shadow_positions = _enrich_shadow_rows(_open_positions(read_csv_rows(shadow_root / "shadow_positions.csv")))
+    shadow_position_rows = read_csv_rows(shadow_root / "shadow_positions.csv")
+    shadow_positions = _enrich_shadow_rows(_open_positions(shadow_position_rows))
     shadow_fills = _last(read_csv_rows(shadow_root / "shadow_fills.csv"), 50)
     orders = read_csv_rows(portfolio_root / "paper_orders.csv")
     paper_probe_exit_watch = _paper_probe_exit_watch(positions, orders)
@@ -3891,7 +4163,7 @@ def render_dashboard(cfg: EngineConfig, latest_report: dict[str, Any] | None = N
     near_miss_candidates = read_csv_rows(predictions_root / "near_miss_learning_candidates.csv")
     live_loop_status = _live_loop_status(heartbeat if isinstance(heartbeat, dict) else {}, cfg)
     legacy_full_cycle_status = _legacy_full_cycle_status(heartbeat if isinstance(heartbeat, dict) else {}, live_loop_status)
-    strategy_v2_status = _strategy_v2_status(cfg)
+    strategy_v2_status = _strategy_v2_status(cfg, legacy_full_cycle_status)
     strategy_v2_runtime = _strategy_v2_runtime_freshness(strategy_v2_status, live_loop_status)
     price_action_scout_status = _price_action_scout_status(cfg)
     price_action_microstructure_status = _price_action_microstructure_status(cfg)
@@ -3920,9 +4192,28 @@ def render_dashboard(cfg: EngineConfig, latest_report: dict[str, Any] | None = N
     closing_line_value = read_json(governance / "closing_line_value.json", default={}) or {}
     if not isinstance(closing_line_value, dict):
         closing_line_value = {}
+    dutch_arb = read_json(cfg.output_root / "polymarket_arbitrage" / "dutch_arb_monitor_summary.json", default={}) or {}
+    if not isinstance(dutch_arb, dict):
+        dutch_arb = {}
     edge_attribution = read_json(governance / "edge_attribution.json", default={}) or {}
     if not isinstance(edge_attribution, dict):
         edge_attribution = {}
+    family_calibration = read_json(governance / "family_calibration_scorecard.json", default={}) or {}
+    if not isinstance(family_calibration, dict):
+        family_calibration = {}
+    collection_coverage = read_json(governance / "collection_coverage.json", default={}) or {}
+    if not isinstance(collection_coverage, dict):
+        collection_coverage = {}
+    evidence_history_status = read_json(governance / "evidence_history_status.json", default={}) or {}
+    if not isinstance(evidence_history_status, dict):
+        evidence_history_status = {}
+    evidence_history_rows = read_csv_rows(governance / "evidence_history.csv")
+    promotion_gate = read_json(governance / "promotion_gate.json", default={}) or {}
+    if not isinstance(promotion_gate, dict):
+        promotion_gate = {}
+    risk_state = read_json(portfolio_root / "risk_state.json", default={}) or {}
+    if not isinstance(risk_state, dict):
+        risk_state = {}
     websocket_summary = read_json(cfg.output_root / "polymarket_websocket" / "websocket_summary.json", default={}) or {}
     if not isinstance(websocket_summary, dict):
         websocket_summary = {}
@@ -3979,11 +4270,24 @@ def render_dashboard(cfg: EngineConfig, latest_report: dict[str, Any] | None = N
         trade_diagnostics=trade_diagnostics,
         evidence_freshness=evidence_freshness,
         strategy_v2=strategy_v2_status,
+        dutch_arb=dutch_arb,
     )
     worldcup_validation_status = _worldcup_validation_status(
         predictions=predictions,
         approved_signals=signals,
         rejected=rejected,
+    )
+    evidence_funnel = _evidence_funnel_payload(
+        liquidity_discovery=liquidity_discovery if isinstance(liquidity_discovery, dict) else {},
+        predictions=predictions,
+        shadow_position_rows=shadow_position_rows,
+        closing_line_value=closing_line_value,
+        edge_attribution=edge_attribution,
+        family_calibration=family_calibration,
+        collection_coverage=collection_coverage,
+        algo_sweep=algo_sweep,
+        promotion_gate=promotion_gate,
+        evidence_history_rows=evidence_history_rows,
     )
     decision_useful_summary = _decision_useful_summary(
         actual_target=actual_target,
@@ -4032,7 +4336,15 @@ def render_dashboard(cfg: EngineConfig, latest_report: dict[str, Any] | None = N
         "algo_sweep": algo_sweep,
         "quant_research_status": quant_research_status,
         "closing_line_value": closing_line_value,
+        "dutch_arb": dutch_arb,
         "edge_attribution": edge_attribution,
+        "family_calibration": family_calibration,
+        "collection_coverage": collection_coverage,
+        "evidence_history_status": evidence_history_status,
+        "evidence_history": evidence_history_rows[-50:],
+        "promotion_gate": promotion_gate,
+        "evidence_funnel": evidence_funnel,
+        "risk_state": risk_state,
         "websocket_summary": websocket_summary,
         "websocket_feature_summary": websocket_feature_summary,
         "research_focus": research_focus,

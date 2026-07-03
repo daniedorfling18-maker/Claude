@@ -35,6 +35,7 @@ from polymarket_predictive_engine.cohort_validation import write_signal_cohort_p
 from polymarket_predictive_engine.config import load_config  # noqa: E402
 from polymarket_predictive_engine.crypto_fundamental import build_crypto_fundamental  # noqa: E402
 from polymarket_predictive_engine.dashboard import render_dashboard  # noqa: E402
+from polymarket_predictive_engine.dutch_arb_monitor import run_dutch_arb_monitor  # noqa: E402
 from polymarket_predictive_engine.mispricing_alpha import train_mispricing_alpha_model  # noqa: E402
 from polymarket_predictive_engine.models.optimized import train_optimized_model  # noqa: E402
 from polymarket_predictive_engine.paper_cycle import run_paper_cycle  # noqa: E402
@@ -44,7 +45,7 @@ from polymarket_predictive_engine.shadow_cohort import update_shadow_cohort_evid
 from polymarket_predictive_engine.snapshot_ingest import ingest_scanner_snapshot  # noqa: E402
 from polymarket_predictive_engine.storage import connect_db  # noqa: E402
 from polymarket_predictive_engine.strategy_search import run_edge_strategy_search  # noqa: E402
-from polymarket_predictive_engine.utils import now_utc, read_json, safe_float, write_json  # noqa: E402
+from polymarket_predictive_engine.utils import now_utc, parse_timestamp, read_json, safe_float, write_json  # noqa: E402
 from run_polymarket_liquidity_discovery import run_liquidity_discovery  # noqa: E402
 from run_promoted_rule_shadow_scan import run_promoted_rule_shadow_scan  # noqa: E402
 
@@ -127,6 +128,82 @@ def _scheduled(settings: dict[str, Any], key: str, iteration: int, *, default: i
     if every <= 0:
         return False
     return iteration == 1 or iteration % every == 0
+
+
+def _minutes_since(timestamp: Any) -> float | None:
+    parsed = parse_timestamp(timestamp)
+    current = parse_timestamp(now_utc())
+    if parsed is None or current is None:
+        return None
+    return max(0.0, (current - parsed).total_seconds() / 60.0)
+
+
+def _setting_float(settings: dict[str, Any], key: str, default: float) -> float:
+    value = settings.get(key, default)
+    if value is None or value == "":
+        return default
+    return float(value)
+
+
+def _setting_int(settings: dict[str, Any], key: str, default: int) -> int:
+    value = settings.get(key, default)
+    if value is None or value == "":
+        return default
+    return int(value)
+
+
+def run_dutch_arb_loop_pass(cfg) -> dict[str, Any]:
+    """Run at most one Dutch-book arb scan for the VPS loop.
+
+    This is a scanner-only edge monitor. It never calls a broker and never places an order.
+    """
+    settings = cfg.raw.get("dutch_arb", {}) or {}
+    enabled = _truthy(settings.get("enabled", True), default=True)
+    base = {
+        "paper_trading_invoked": False,
+        "live_trading_invoked": False,
+        "live_trading": False,
+        "dry_run": True,
+    }
+    if not enabled:
+        return {**base, "status": "disabled"}
+
+    out_dir = cfg.output_root / "polymarket_arbitrage"
+    latest = read_json(out_dir / "dutch_arb_monitor_summary.json", default={}) or {}
+    if not isinstance(latest, dict):
+        latest = {}
+
+    interval = _setting_float(settings, "pass_interval_minutes", 15)
+    age_minutes = _minutes_since(latest.get("generated_at_utc"))
+    if age_minutes is not None and age_minutes < interval:
+        return {
+            **base,
+            "status": "skipped_interval",
+            "last_scan_at_utc": latest.get("generated_at_utc"),
+            "last_scan_age_minutes": round(age_minutes, 3),
+            "next_due_minutes": round(max(0.0, interval - age_minutes), 3),
+            "pass_interval_minutes": interval,
+        }
+
+    summary = run_dutch_arb_monitor(
+        cfg,
+        polls=1,
+        poll_seconds=0,
+        max_events=_setting_int(settings, "max_events_per_pass", 20),
+        max_pages=_setting_int(settings, "max_pages_per_pass", _setting_int(settings, "max_pages", 4)),
+        max_outcomes=_setting_int(settings, "max_outcomes", 80),
+        min_ask_sum=_setting_float(settings, "min_ask_sum", 0.85),
+        min_annualised=_setting_float(settings, "min_annualised", 0.0),
+        alert_annualised=_setting_float(settings, "alert_annualised", 0.10),
+        pause=_setting_float(settings, "request_pause_seconds", 0.02),
+        timeout=_setting_int(settings, "request_timeout_seconds", 20),
+    )
+    return {
+        **base,
+        **summary,
+        "status": summary.get("status", "paper_analysis"),
+        "pass_interval_minutes": interval,
+    }
 
 
 def _run_settlement_only_cycle(cfg) -> dict[str, Any]:
@@ -991,6 +1068,7 @@ def run_iteration(*, config_path: Path, optimize_model: bool, iteration: int, pa
         and _scheduled(schedule, "liquidity_discovery_every_iterations", iteration, default=12)
         else {"status": "skipped"}
     )
+    dutch_arb = run_dutch_arb_loop_pass(cfg)
     heartbeat = {
         "status": "ran",
         "generated_at_utc": now_utc(),
@@ -1035,6 +1113,20 @@ def run_iteration(*, config_path: Path, optimize_model: bool, iteration: int, pa
             "top_tradable": liquidity_discovery.get("top_tradable", [])[:5],
             "family_summary": liquidity_discovery.get("family_summary", [])[:10],
         },
+        "dutch_arb": {
+            "status": dutch_arb.get("status"),
+            "generated_at_utc": dutch_arb.get("generated_at_utc"),
+            "last_scan_at_utc": dutch_arb.get("last_scan_at_utc"),
+            "events_scanned": (dutch_arb.get("scan_stats_latest_poll") or {}).get("discovered"),
+            "events_priced_complete": dutch_arb.get("events_priced_complete_latest_poll"),
+            "complete_arbs": dutch_arb.get("complete_arbs_latest_poll"),
+            "alerts_total": dutch_arb.get("alerts_total"),
+            "persistent_alert_count": dutch_arb.get("persistent_alert_count"),
+            "best_annualised_return_on_capital": dutch_arb.get("best_annualised_return_on_capital"),
+            "best_opportunity": dutch_arb.get("best_opportunity"),
+            "paper_trading_invoked": False,
+            "live_trading_invoked": False,
+        },
         "resource_guard": guard,
         "runtime_schedule": {
             "full_scan_ran": True,
@@ -1045,6 +1137,7 @@ def run_iteration(*, config_path: Path, optimize_model: bool, iteration: int, pa
             "edge_strategy_search_ran": strategy_search.get("status") != "skipped",
             "promoted_rule_shadow_ran": promoted_rule_shadow.get("status") != "skipped",
             "liquidity_discovery_ran": liquidity_discovery.get("status") != "skipped",
+            "dutch_arb_ran": dutch_arb.get("status") == "paper_analysis",
         },
         "paper": paper,
     }

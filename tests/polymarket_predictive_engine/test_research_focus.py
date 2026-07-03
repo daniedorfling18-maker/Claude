@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 from polymarket_predictive_engine.config import EngineConfig
@@ -58,10 +59,19 @@ def test_research_focus_uses_price_action_model_blocker_to_prioritise_feedback_q
     payload = build_research_focus(cfg)
     saved = read_json(cfg.governance_root / "research_focus.json")
 
-    assert payload["collection_queries"][:2] == ["btc updown", "solana updown"]
+    assert payload["raw_collection_queries"][:2] == ["btc updown", "solana updown"]
+    assert payload["collection_queries"][0] == "btc updown"
+    assert "solana updown" not in payload["collection_queries"]
+    assert payload["collection_query_guard"]["updown_query_count"] == 1
+    assert payload["collection_query_guard"]["distinct_families"] >= 4
+    assert payload["collection_query_guard"]["rejected_queries"][0] == {
+        "query": "solana updown",
+        "family": "crypto_updown",
+        "reason": "max_updown_queries",
+    }
     assert payload["price_action_model"]["model_needs_repricing_data"] is True
     assert "Strict price-action model needs profitable ask-to-future-bid" in payload["summary"]
-    assert saved["collection_queries"][:2] == ["btc updown", "solana updown"]
+    assert saved["collection_queries"] == payload["collection_queries"]
 
 
 def test_research_focus_does_not_map_macro_cohort_to_btc_updown(tmp_path):
@@ -120,7 +130,15 @@ def test_research_focus_prioritises_model_validation_gap_queries(tmp_path):
     payload = build_research_focus(cfg)
 
     assert payload["collection_queries"][:3] == ["fed", "ethereum", "esports"]
-    assert payload["collection_queries"][3:5] == ["btc updown", "solana updown"]
+    assert payload["collection_queries"][3] == "btc updown"
+    assert "solana updown" not in payload["collection_queries"]
+    assert payload["collection_query_guard"]["raw_collection_queries"][:5] == [
+        "fed",
+        "ethereum",
+        "esports",
+        "btc updown",
+        "solana updown",
+    ]
     assert payload["price_action_model"]["validation_gap_needs_collection"] is True
     assert "positive train repricing examples but no positive validation examples" in payload["summary"]
 
@@ -164,7 +182,9 @@ def test_research_focus_prioritises_near_positive_historical_breadth_queries(tmp
 
     payload = build_research_focus(cfg)
 
-    assert payload["collection_queries"][:3] == ["xrp updown", "btc updown", "ethereum"]
+    assert payload["collection_queries"][:3] == ["xrp updown", "ethereum", "world cup"]
+    assert "btc updown" not in payload["collection_queries"]
+    assert payload["collection_query_guard"]["rejected_queries"][0]["reason"] == "max_updown_queries"
     assert payload["price_action_model"]["historical_breadth_queries"] == ["xrp updown"]
     assert "near-positive historical buckets" in payload["summary"]
 
@@ -242,10 +262,74 @@ def test_research_focus_broadens_to_near_miss_board_when_current_analogues_are_n
     payload = build_research_focus(cfg)
 
     assert payload["collection_queries"][:4] == ["fed", "world cup", "esports", "bitcoin"]
-    assert payload["collection_queries"][4:6] == ["eth updown", "xrp updown"]
+    assert payload["collection_queries"][4:6] == ["eth updown", "tennis"]
+    assert "xrp updown" not in payload["collection_queries"]
     assert payload["price_action_model"]["analogue_scan_needs_breadth"] is True
     assert payload["price_action_model"]["near_miss_candidate_queries"][:4] == ["fed", "world cup", "esports", "bitcoin"]
     assert "broaden evidence collection into near-miss markets" in payload["summary"]
+
+
+def test_research_focus_guard_prevents_updown_query_collapse(tmp_path):
+    cfg = _cfg(tmp_path)
+    cfg.raw["research_focus"] = {
+        "max_queries_per_family": 2,
+        "min_distinct_families": 4,
+        "max_updown_queries": 1,
+        "broad_base_queries": ["world cup", "tennis", "fed", "economy", "esports", "ai", "politics"],
+    }
+    write_json(
+        cfg.output_root / "polymarket_price_action" / "price_action_model_summary.json",
+        {
+            "status": "insufficient_data",
+            "decision": "collect_more_bid_ask_price_action_training_events",
+            "promotion_ready": False,
+        },
+    )
+    write_json(
+        cfg.governance_root / "price_action_feedback.json",
+        {
+            "status": "ok",
+            "learning_state": "collect_more_positive_price_action_evidence",
+            "collection_queries": [
+                "btc updown",
+                "solana updown",
+                "xrp updown",
+                "eth updown",
+                "bitcoin up or down",
+                "ethereum up or down",
+                "solana up or down",
+                "xrp up or down",
+            ],
+        },
+    )
+
+    payload = build_research_focus(cfg)
+
+    assert payload["raw_collection_queries"] == [
+        "btc updown",
+        "solana updown",
+        "xrp updown",
+        "eth updown",
+        "bitcoin up or down",
+        "ethereum up or down",
+        "solana up or down",
+        "xrp up or down",
+    ]
+    assert payload["collection_queries"] == [
+        "btc updown",
+        "world cup",
+        "tennis",
+        "fed",
+        "economy",
+        "esports",
+        "ai",
+        "politics",
+    ]
+    guard = payload["collection_query_guard"]
+    assert guard["updown_query_count"] == 1
+    assert guard["distinct_families"] >= 4
+    assert guard["broad_fill_queries"] == ["world cup", "tennis", "fed", "economy", "esports", "ai", "politics"]
+    assert [row["reason"] for row in guard["rejected_queries"]] == ["max_updown_queries"] * 7
 
 
 def test_research_focus_prioritises_current_positive_analogue_as_learning_target(tmp_path):
@@ -426,3 +510,138 @@ def test_research_focus_uses_edge_attribution_to_separate_cost_and_model_drags(t
     assert payload["edge_attribution"]["cost_driven"][0]["cohort"] == "macro_rates"
     assert payload["edge_attribution"]["model_driven"][0]["cohort"] == "tennis_tennis_winner"
     assert "cost/quote-quality constrained" in payload["summary"]
+
+
+def test_research_focus_consumes_attribution_clv_and_sweep_as_collection_only(tmp_path):
+    cfg = _cfg(tmp_path)
+    write_json(
+        cfg.governance_root / "signal_cohort_pnl.json",
+        {
+            "cohorts": [
+                {
+                    "signal_cohort": "macro_rates",
+                    "total_pnl_usdc": 1.0,
+                    "roi": 0.08,
+                    "promotion_ready_score": 4,
+                    "promotion_ready_checks": 6,
+                },
+                {
+                    "signal_cohort": "tennis_tennis_winner",
+                    "total_pnl_usdc": 1.0,
+                    "roi": 0.08,
+                    "promotion_ready_score": 4,
+                    "promotion_ready_checks": 6,
+                },
+            ]
+        },
+    )
+    write_json(
+        cfg.governance_root / "edge_attribution.json",
+        {
+            "status": "ok",
+            "cohorts": [
+                {
+                    "signal_cohort": "macro_rates",
+                    "attribution_class": "cost_dominated",
+                    "total_pnl_usdc": -0.2,
+                    "execution_cost_usdc": 0.7,
+                    "line_movement_usdc": 0.4,
+                    "recommended_action": "work passive entries and tighter quote collection",
+                },
+                {
+                    "signal_cohort": "tennis_tennis_winner",
+                    "attribution_class": "model_direction_not_confirmed",
+                    "total_pnl_usdc": -1.1,
+                    "execution_cost_usdc": 0.01,
+                    "line_movement_usdc": -0.8,
+                    "recommended_action": "re-model before promotion",
+                },
+            ],
+            "paper_trading_invoked": False,
+            "live_trading_invoked": False,
+        },
+    )
+    write_json(
+        cfg.governance_root / "closing_line_value.json",
+        {
+            "status": "ok",
+            "positive_clv_cohorts": ["macro_rates", "esports_valorant_match"],
+            "cohorts": [
+                {"signal_cohort": "macro_rates", "clv_evidence": "positive_clv_evidence"},
+                {"signal_cohort": "tennis_tennis_winner", "clv_evidence": "negative_clv_evidence"},
+                {"signal_cohort": "esports_valorant_match", "clv_evidence": "positive_clv_evidence"},
+            ],
+            "paper_trading_invoked": False,
+            "live_trading_invoked": False,
+        },
+    )
+    write_json(
+        cfg.output_root / "polymarket_algo" / "algo_sweep_summary.json",
+        {
+            "status": "ok",
+            "decision": "sweep_candidate_validated_shadow_only",
+            "selected": {
+                "strategy": "tight_spread_join_bid_shadow",
+                "tight_spread_maximum": 0.02,
+                "minimum_book_imbalance": 0.4,
+                "validation_fills": 4,
+                "validation_pnl_usdc": 1.25,
+            },
+            "paper_trading_invoked": False,
+            "live_trading_invoked": False,
+        },
+    )
+
+    payload = build_research_focus(cfg)
+
+    assert payload["collection_queries"][:2] == ["fed", "esports"]
+    assert payload["watchlist"][0]["cohort"] == "macro_rates"
+    assert payload["watchlist"][1]["cohort"] == "tennis_tennis_winner"
+    assert payload["watchlist"][0]["priority_score"] > payload["watchlist"][1]["priority_score"]
+    evidence = payload["evidence_inputs"]
+    assert evidence["collection_queries_added"] == ["fed", "esports"]
+    macro = next(row for row in evidence["priority_adjustments"] if row["cohort"] == "macro_rates")
+    tennis = next(row for row in evidence["priority_adjustments"] if row["cohort"] == "tennis_tennis_winner")
+    esports = next(row for row in evidence["priority_adjustments"] if row["cohort"] == "esports_valorant_match")
+    assert macro["movement"] == "raised"
+    assert macro["priority_delta"] > 0
+    assert tennis["movement"] == "lowered"
+    assert tennis["priority_delta"] < 0
+    assert esports["movement"] == "raised"
+    assert "positive_clv_cohort" in esports["reasons"]
+    assert evidence["sweep_decision"] == "sweep_candidate_validated_shadow_only"
+    assert "tight_spread_maximum=0.02" in payload["notes"][0]
+    assert "minimum_book_imbalance=0.4" in payload["notes"][0]
+    evidence_json = json.dumps(evidence).lower()
+    assert "gate" not in evidence_json
+    assert "threshold" not in evidence_json
+
+
+def test_research_focus_optional_evidence_inputs_empty_without_artifacts(tmp_path):
+    cfg = _cfg(tmp_path)
+    write_json(
+        cfg.governance_root / "signal_cohort_pnl.json",
+        {
+            "cohorts": [
+                {
+                    "signal_cohort": "macro_economy",
+                    "total_pnl_usdc": 1.0,
+                    "roi": 0.01,
+                    "promotion_ready_score": 5,
+                    "promotion_ready_checks": 6,
+                }
+            ]
+        },
+    )
+
+    payload = build_research_focus(cfg)
+
+    assert payload["collection_queries"][0] == "economy"
+    assert "base_priority_score" not in payload["watchlist"][0]
+    assert "research_evidence_priority_delta" not in payload["watchlist"][0]
+    assert payload["notes"] == []
+    assert payload["evidence_inputs"]["priority_adjustments"] == []
+    assert payload["evidence_inputs"]["collection_queries_added"] == []
+    assert payload["evidence_inputs"]["edge_attribution_status"] is None
+    assert payload["evidence_inputs"]["closing_line_value_status"] is None
+    assert payload["evidence_inputs"]["sweep_decision"] == ""

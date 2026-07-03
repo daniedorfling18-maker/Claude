@@ -37,6 +37,16 @@ def _cfg(tmp_path):
     )
 
 
+def _book(price: float) -> dict[str, float]:
+    return {
+        "best_ask": price,
+        "top_ask_size": 1000.0,
+        "ask_depth_1pct": 1000.0,
+        "ask_depth_5pct": 1000.0,
+        "websocket_quote_age_seconds": 30.0,
+    }
+
+
 def test_data_quality_fails_closed_without_raw_snapshots(tmp_path):
     cfg = _cfg(tmp_path)
     with pytest.raises(RuntimeError, match="Data-quality blockers"):
@@ -68,11 +78,12 @@ def test_risk_decision_returns_explicit_execution_units(tmp_path):
             "token_id": "t1",
             "edge": 0.2,
             "calibrated_probability": 0.8,
-            "executable_price": 0.55,
-            "spread": 0.01,
-            "liquidity": 1000,
-            "time_to_close_minutes": 60,
-        },
+                "executable_price": 0.55,
+                "spread": 0.01,
+                "liquidity": 1000,
+                "time_to_close_minutes": 60,
+                **_book(0.55),
+            },
         {"bankroll": 1000, "cash": 1000},
     )
     assert decision["approved"] is True
@@ -128,12 +139,13 @@ def test_fast_market_risk_overrides_allow_tiny_paper_probe(tmp_path):
             "token_id": "t-fast",
             "edge": 0.01,
             "alpha_probability": 0.578,
-            "executable_price": 0.495,
-            "spread": 0.01,
-            "liquidity": 5,
-            "time_to_close_minutes": 3,
-            "max_stake_usdc": 2,
-        },
+                "executable_price": 0.495,
+                "spread": 0.01,
+                "liquidity": 5,
+                "time_to_close_minutes": 3,
+                "max_stake_usdc": 2,
+                **_book(0.495),
+            },
         {"bankroll": 1000, "cash": 1000},
     )
 
@@ -164,6 +176,7 @@ def test_promoted_fast_market_can_step_up_to_promoted_cap(tmp_path):
         "spread": 0.01,
         "liquidity": 1000,
         "time_to_close_minutes": 3,
+        **_book(0.50),
     }
 
     probationary = risk_decision(

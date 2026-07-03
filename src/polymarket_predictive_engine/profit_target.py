@@ -24,12 +24,22 @@ def _tracker_settings(cfg: EngineConfig) -> dict[str, Any]:
     return cfg.raw.get("profit_tracking", {}) or {}
 
 
-def _status_for_pnl(*, pnl: float, target: float, elapsed_hours: float, monthly_run_rate: float | None, minimum_hours: float) -> str:
-    if pnl >= target:
+def _status_for_pnl(
+    *,
+    pnl: float,
+    target: float,
+    elapsed_hours: float,
+    monthly_run_rate: float | None,
+    minimum_hours: float,
+    verified_evidence_ready: bool,
+) -> str:
+    if pnl >= target and verified_evidence_ready:
         return "target_reached"
     if elapsed_hours < minimum_hours:
         return "collecting_forward_evidence"
-    if monthly_run_rate is not None and monthly_run_rate >= target:
+    if not verified_evidence_ready and monthly_run_rate is not None and monthly_run_rate >= target:
+        return "collecting_verified_paper_evidence"
+    if monthly_run_rate is not None and monthly_run_rate >= target and verified_evidence_ready:
         return "on_pace"
     return "not_on_pace"
 
@@ -58,6 +68,7 @@ def write_profit_target_tracker(cfg: EngineConfig, broker: dict[str, Any]) -> di
         )
     )
     minimum_hours = float(settings.get("minimum_tracking_hours_for_on_pace", 24.0))
+    minimum_audited_round_trips = int(settings.get("minimum_audited_round_trips_for_on_pace", 5))
     baseline_path = cfg.governance_root / str(settings.get("baseline_file", "paper_profit_target_baseline.json"))
     tracker_path = cfg.governance_root / str(settings.get("tracker_file", "paper_profit_target_tracker.json"))
 
@@ -96,6 +107,8 @@ def write_profit_target_tracker(cfg: EngineConfig, broker: dict[str, Any]) -> di
 
     round_trip_audit = _paper_round_trip_audit(cfg)
     audited_pnl = safe_float(round_trip_audit.get("audited_baseline_realized_pnl_usdc"))
+    audited_round_trips = int(safe_float(round_trip_audit.get("audited_baseline_closed_round_trips")) or 0)
+    baseline_round_trips = int(safe_float(round_trip_audit.get("baseline_closed_round_trips")) or 0)
     quote_conflicts = int(safe_float(round_trip_audit.get("quote_conflict_round_trips")) or 0)
     quote_unverified = int(safe_float(round_trip_audit.get("quote_unverified_round_trips")) or 0)
     audited_available = audited_pnl is not None
@@ -110,12 +123,35 @@ def write_profit_target_tracker(cfg: EngineConfig, broker: dict[str, Any]) -> di
         if audited_available
         else "audit_not_available"
     )
+    verified_evidence_ready = bool(
+        audited_available
+        and audited_round_trips >= minimum_audited_round_trips
+        and quote_conflicts == 0
+        and quote_unverified == 0
+    )
+    if verified_evidence_ready:
+        proof_status = "verified_quote_consistent"
+        proof_blockers: list[str] = []
+    else:
+        proof_blockers = []
+        if not audited_available:
+            proof_blockers.append("paper_round_trip_audit_missing")
+        if audited_round_trips < minimum_audited_round_trips:
+            proof_blockers.append(
+                f"needs_{minimum_audited_round_trips}_audited_round_trips_has_{audited_round_trips}"
+            )
+        if quote_conflicts > 0:
+            proof_blockers.append(f"quote_conflict_round_trips_{quote_conflicts}")
+        if quote_unverified > 0:
+            proof_blockers.append(f"quote_unverified_round_trips_{quote_unverified}")
+        proof_status = "unverified_paper_run_rate"
     status = _status_for_pnl(
         pnl=decision_pnl,
         target=target,
         elapsed_hours=elapsed_hours,
         monthly_run_rate=decision_monthly_run_rate,
         minimum_hours=minimum_hours,
+        verified_evidence_ready=verified_evidence_ready,
     )
 
     payload = {
@@ -133,26 +169,33 @@ def write_profit_target_tracker(cfg: EngineConfig, broker: dict[str, Any]) -> di
         "raw_account_pnl_since_baseline_usdc": raw_pnl,
         "raw_account_monthly_run_rate_usdc": raw_monthly_run_rate,
         "audited_pnl_since_baseline_usdc": audited_pnl,
+        "audited_round_trips_since_baseline": audited_round_trips,
+        "baseline_round_trips_since_baseline": baseline_round_trips,
+        "minimum_audited_round_trips_for_on_pace": minimum_audited_round_trips,
         "decision_pnl_usdc": decision_pnl,
         "elapsed_hours": elapsed_hours,
         "monthly_run_rate_usdc": decision_monthly_run_rate,
         "decision_monthly_run_rate_usdc": decision_monthly_run_rate,
         "pnl_audit_state": pnl_audit_state,
+        "profit_target_proof_status": proof_status,
+        "profit_target_proof_blockers": proof_blockers,
+        "verified_evidence_ready": verified_evidence_ready,
         "quote_conflict_round_trips": quote_conflicts,
         "quote_unverified_round_trips": quote_unverified,
         "on_pace_by_actual_pnl": bool(
-            decision_monthly_run_rate is not None
-            and decision_monthly_run_rate >= target
+            raw_monthly_run_rate is not None
+            and raw_monthly_run_rate >= target
             and elapsed_hours >= minimum_hours
         ),
         "on_pace_by_decision_pnl": bool(
             decision_monthly_run_rate is not None
             and decision_monthly_run_rate >= target
             and elapsed_hours >= minimum_hours
+            and verified_evidence_ready
         ),
         "completion_evidence": (
             "Goal is unproven until audited quote-consistent paper P&L, not expected value or raw quote-conflicted ledger equity, "
-            "reaches or sustains the configured monthly target."
+            "reaches or sustains the configured monthly target with enough independent round trips."
         ),
     }
     write_json(tracker_path, payload)

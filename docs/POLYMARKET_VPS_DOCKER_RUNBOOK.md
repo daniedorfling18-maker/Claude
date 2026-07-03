@@ -79,6 +79,38 @@ automatically applies leaner settings if it detects a 4 GB VPS. On Oracle Linux,
 it uses `dnf`/`yum` instead of `apt-get`, so prefer the fast path unless you
 deliberately want a manual install.
 
+## GitHub deploy path
+
+After the first deploy, use the manual GitHub Actions workflow
+`deploy-polymarket-vps-paper.yml` to keep the VPS current without opening an
+interactive SSH session from the laptop.
+
+Required repository secrets:
+
+```text
+PM_VPS_HOST=129.151.178.42
+PM_VPS_USER=ubuntu
+PM_VPS_SSH_PRIVATE_KEY=<the private key matching the VPS public key>
+```
+
+Recommended repository secret:
+
+```text
+THE_ODDS_API_KEY=<the-odds-api key>
+```
+
+Optional secrets:
+
+```text
+PM_VPS_PORT=22
+PM_VPS_REPO_DIR=~/Claude
+```
+
+The workflow pulls `main`, injects `THE_ODDS_API_KEY` into the VPS `.env`,
+rebuilds `docker-compose.vps-paper.yml`, forces a dashboard render, runs
+`scripts/check_polymarket_vps_paper.sh`, and verifies that the served dashboard
+contains the current proof-gate and evidence-funnel sections.
+
 ## Dashboard access
 
 The dashboard container listens on port `8765`.

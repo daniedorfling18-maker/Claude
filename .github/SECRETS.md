@@ -2,7 +2,7 @@
 
 Configure these secrets in **Settings → Secrets and variables → Actions** on the repository.
 
-The repository runs seven workflows. The sections below list secrets required for required checks and for authenticated workflow paths.
+The repository runs eight workflows. The sections below list secrets required for required checks and for authenticated workflow paths.
 
 ## `ci.yml` (push / pull request)
 
@@ -50,6 +50,19 @@ The repository runs seven workflows. The sections below list secrets required fo
 | `SUPERBRU_POOL_URL` | No | Pool view URL. A default is used if unset. |
 
 > The Superbru audit step uses `continue-on-error: true`, so the workflow does not fail when these are absent.
+
+## `deploy-polymarket-vps-paper.yml` (manual VPS deployment)
+
+| Secret | Required | Description |
+|--------|----------|-------------|
+| `PM_VPS_HOST` | **Yes** | Public IPv4/DNS of the Oracle VPS, for example `129.151.178.42`. |
+| `PM_VPS_USER` | **Yes** | SSH user for the Ubuntu VPS, usually `ubuntu`. |
+| `PM_VPS_SSH_PRIVATE_KEY` | **Yes** | Private key matching the public key installed on the VPS. Store the full OpenSSH private key text. |
+| `PM_VPS_PORT` | No | SSH port. Defaults to `22`. |
+| `PM_VPS_REPO_DIR` | No | Repo directory on the VPS. Defaults to `~/Claude`. |
+| `THE_ODDS_API_KEY` | Recommended | Injected into the VPS `.env` so sharp-anchor odds fetching can run. Without it, deployment still works but the highest-priority independent anchor remains disabled. |
+
+The workflow pulls `main`, rebuilds `docker-compose.vps-paper.yml`, forces a dashboard render, and verifies that the deployed dashboard contains the current proof-gate/evidence-funnel sections.
 
 ## No secrets required
 

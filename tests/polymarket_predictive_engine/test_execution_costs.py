@@ -5,7 +5,7 @@ from pytest import approx
 from polymarket_predictive_engine.execution_costs import estimate_execution_cost
 
 
-def test_execution_cost_missing_depth_preserves_flat_slippage():
+def test_execution_cost_missing_depth_fails_closed():
     estimate = estimate_execution_cost(
         {"best_ask": 0.5, "spread": 0.02},
         stake_usdc=10,
@@ -13,8 +13,9 @@ def test_execution_cost_missing_depth_preserves_flat_slippage():
     )
 
     assert estimate["status"] == "missing_depth"
-    assert estimate["expected_slippage"] == approx(0.015)
-    assert estimate["max_stake_at_acceptable_impact_usdc"] == ""
+    assert estimate["expected_slippage"] == approx(0.025)
+    assert estimate["max_stake_at_acceptable_impact_usdc"] == 0.0
+    assert estimate["quote_is_fresh"] is False
 
 
 def test_execution_cost_deep_top_book_with_fresh_quote_can_reduce_flat_slippage():

@@ -12,6 +12,7 @@ from .backtest import backtest
 from .closing_line import build_closing_line_value
 from .collection_only import run_collection_only
 from .config import config_check, load_config
+from .collection_coverage import build_collection_coverage
 from .crypto_fundamental import build_crypto_fundamental
 from .crypto_targets import build_crypto_targets
 from .crypto_updown_labels import build_crypto_updown_proxy_labels
@@ -19,10 +20,12 @@ from .data_inventory import inventory
 from .data_quality import data_quality
 from .dutch_arb_monitor import run_dutch_arb_monitor
 from .edge_attribution import build_edge_attribution
+from .evidence_history import append_evidence_history
 from .execution.live import live_trade
 from .execution.paper import paper_trade_report
 from .external_feed_collector import collect_external_feeds
 from .external_signals import normalize_external_signals
+from .family_calibration import build_family_calibration_scorecard
 from .features import build_features
 from .features_v2 import build_features_v2
 from .goal_planner import build_goal_plan
@@ -30,6 +33,7 @@ from .governance import governance_report
 from .historical_backfill import historical_backfill
 from .labels import build_labels
 from .live_mispricing import run_live_mispricing, scan_live_mispricing
+from .longshot_bias import build_longshot_bias_scan
 from .market_making_pnl import evaluate_market_making
 from .mispricing_alpha import apply_mispricing_alpha, train_mispricing_alpha_model
 from .models.calibrated import load_prediction_models, train_model, write_predictions
@@ -118,7 +122,10 @@ COMMANDS = [
     "algo-replay",
     "algo-sweep",
     "edge-attribution",
+    "family-calibration",
+    "evidence-history",
     "active-window-plan",
+    "collection-coverage",
     "promotion-gate",
     "validation-report",
     "validate",
@@ -135,6 +142,7 @@ COMMANDS = [
     "run-live-mispricing",
     "market-making-pnl",
     "dutch-arb-monitor",
+    "longshot-bias-scan",
     "resolve-websocket-markets",
     "collect-snapshot-labels",
     "collect-overnight",
@@ -331,8 +339,14 @@ def main(argv: list[str] | None = None) -> int:
             _print(run_algo_sweep(cfg, strategy_name=args.strategy or "tight_spread_join_bid_shadow", features_input=args.websocket_input))
         elif args.command == "edge-attribution":
             _print(build_edge_attribution(cfg))
+        elif args.command == "family-calibration":
+            _print(build_family_calibration_scorecard(cfg))
+        elif args.command == "evidence-history":
+            _print(append_evidence_history(cfg))
         elif args.command == "active-window-plan":
             _print(build_active_window_plan(cfg))
+        elif args.command == "collection-coverage":
+            _print(build_collection_coverage(cfg))
         elif args.command == "promotion-gate":
             _print(paper_live_promotion_gate(cfg))
         elif args.command == "validation-report":
@@ -401,6 +415,8 @@ def main(argv: list[str] | None = None) -> int:
             _print(run_dutch_arb_monitor(cfg, polls=args.polls, poll_seconds=args.poll_seconds,
                                          max_events=args.max_events, min_annualised=args.min_annualised,
                                          alert_annualised=args.alert_annualised))
+        elif args.command == "longshot-bias-scan":
+            _print(build_longshot_bias_scan(cfg))
         elif args.command == "resolve-websocket-markets":
             _print(collect_websocket_resolutions(cfg))
         elif args.command == "collect-snapshot-labels":

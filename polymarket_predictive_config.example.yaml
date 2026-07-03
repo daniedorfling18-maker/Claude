@@ -232,6 +232,19 @@ sharp_odds_fetch:
   fallback_max_age_hours: 24
   fallback_max_decimal_odds: 1001
   request_timeout_seconds: 20
+dutch_arb:
+  # Scanner-only Dutch-book/negative-risk arb monitor. It writes dry-run evidence
+  # for human review and dashboard visibility; it never submits orders.
+  enabled: true
+  max_events_per_pass: 20
+  max_pages_per_pass: 4
+  max_outcomes: 80
+  pass_interval_minutes: 15
+  alert_annualised: 0.10
+  min_annualised: 0.0
+  min_ask_sum: 0.85
+  request_timeout_seconds: 20
+  request_pause_seconds: 0.02
 crypto_fundamental:
   # Deribit option-implied P(S_T > strike) for crypto "above $K by DATE" markets. No API key
   # needed (public market data). Provide targets at targets_path: token_id,currency,strike,expiry.
@@ -266,6 +279,7 @@ crypto_updown_live_model:
 profit_tracking:
   target_monthly_profit_usdc: 100
   minimum_tracking_hours_for_on_pace: 24
+  minimum_audited_round_trips_for_on_pace: 5
   pause_new_entries_below_pnl_usdc: -10
   baseline_file: paper_profit_target_baseline.json
   tracker_file: paper_profit_target_tracker.json
@@ -606,6 +620,23 @@ paper_market_scan:
     - ipo
     - earnings
     - recession
+research_focus:
+  # Collection guard only: this rebalances what the bot observes next and never
+  # approves trades or relaxes promotion/risk gates. It keeps adaptive feedback
+  # from collapsing into one family such as crypto up/down.
+  max_queries_per_family: 2
+  min_distinct_families: 4
+  max_updown_queries: 1
+  broad_base_queries:
+  - world cup
+  - tennis
+  - fed
+  - economy
+  - esports
+  - ai
+  - politics
+  - elections
+  - stocks
 cohort_promotion:
   require_positive_forward_pnl: true
   allow_shadow_evidence_for_promotion: true
@@ -669,6 +700,18 @@ shadow_cohort_validation:
   positions_file: shadow_positions.csv
   fills_file: shadow_fills.csv
   summary_file: shadow_signal_cohort_pnl.json
+longshot_bias:
+  # Shadow-only structural-bias research lane. It scans slow liquid binary
+  # markets where the YES tail trades between 2c and 12c, then nominates the
+  # NO token for CLV/forward-shadow validation. It does not create paper or live
+  # orders.
+  enabled: true
+  emit_shadow_positions: true
+  min_price: 0.02
+  max_price: 0.12
+  min_time_to_close_hours: 168
+  minimum_liquidity: 500
+  max_candidates: 25
 edge_strategy_search:
   enabled: true
   holdout_fraction: 0.25

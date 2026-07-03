@@ -172,6 +172,11 @@ def test_risk_decision_respects_kelly_shrinkage(tmp_path: Path):
         "executable_price": 0.4,
         "calibrated_probability": 0.55,
         "time_to_close_hours": 24,
+        "best_ask": 0.4,
+        "top_ask_size": 1000,
+        "ask_depth_1pct": 1000,
+        "ask_depth_5pct": 1000,
+        "websocket_quote_age_seconds": 30,
     }
     plain = risk_decision(load_config(plain_path), dict(signal))
     shrunk = risk_decision(load_config(shrunk_path), dict(signal))

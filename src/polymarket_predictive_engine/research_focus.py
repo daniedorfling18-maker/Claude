@@ -5,6 +5,7 @@ from typing import Any
 from .goal_planner import build_goal_plan
 from .promotion_review import build_promotion_review
 from .utils import now_utc, read_csv_rows, read_json, safe_float, write_json
+from .worldcup_validation import classify_market_family
 
 CORE_WATCHLIST_COHORTS: dict[str, str] = {}
 
@@ -13,6 +14,18 @@ QUARANTINED_COHORT_FRAGMENTS = (
     "crypto_sol_updown_5m",
     "crypto_xrp_updown_5m",
     "crypto_updown_5m",
+)
+
+DEFAULT_BROAD_BASE_QUERIES = (
+    "world cup",
+    "tennis",
+    "fed",
+    "economy",
+    "esports",
+    "ai",
+    "politics",
+    "elections",
+    "stocks",
 )
 
 
@@ -25,6 +38,19 @@ def _bool(value: Any) -> bool:
     if isinstance(value, bool):
         return value
     return str(value or "").strip().lower() in {"1", "true", "yes", "y", "on", "approved", "promoted"}
+
+
+def _int_setting(settings: dict[str, Any], key: str, default: int) -> int:
+    value = safe_float(settings.get(key))
+    if value is None:
+        return default
+    return int(max(0, value))
+
+
+def _append_unique(values: list[str], query: Any) -> None:
+    text = str(query or "").strip()
+    if text and text not in values:
+        values.append(text)
 
 
 def _is_quarantined_fast_crypto(cohort: str) -> bool:
@@ -63,13 +89,181 @@ def _cohort_query(cohort: str) -> str:
         return "tennis"
     if "worldcup" in text or "world_cup" in text or "world cup" in text:
         return "world cup"
+    if "esport" in text or "valorant" in text or "cs2" in text or "dota" in text or "league_of_legends" in text or "league of legends" in text:
+        return "esports"
     if "macro_rates" in text or "fed" in text or "rates" in text:
         return "fed"
     if "macro_economy" in text or "economy" in text or "inflation" in text:
         return "economy"
+    if "nba" in text:
+        return "nba"
+    if "mlb" in text:
+        return "mlb"
+    if "mma" in text or "ufc" in text:
+        return "mma"
+    if "ai" in text or "openai" in text or "anthropic" in text:
+        return "ai"
+    if "politic" in text or "election" in text:
+        return "politics"
+    if "stock" in text or "equities" in text or "nasdaq" in text:
+        return "stocks"
     if "crypto" in text:
         return "bitcoin"
     return ""
+
+
+def _research_focus_settings(cfg) -> dict[str, Any]:
+    settings = cfg.raw.get("research_focus", {})
+    return settings if isinstance(settings, dict) else {}
+
+
+def _query_key(query: str) -> str:
+    return " ".join(str(query or "").strip().lower().split())
+
+
+def _is_updown_query(query: str) -> bool:
+    text = f" {_query_key(query)} "
+    return "updown" in text or " up/down " in text or " up or down " in text
+
+
+def _query_family(query: str) -> str:
+    text = f" {_query_key(query)} "
+    if not text.strip():
+        return "empty"
+    if _is_updown_query(query):
+        return "crypto_updown"
+    if "world cup" in text or "worldcup" in text or " fifa " in text:
+        return "worldcup"
+    if "tennis" in text or " wimbledon " in text or " us open " in text or " atp " in text or " wta " in text:
+        return "tennis"
+    if "fed" in text or "fomc" in text or "interest rate" in text or " rate cut " in text or " rate hike " in text:
+        return "macro_rates"
+    if "economy" in text or "inflation" in text or " cpi " in text or " gdp " in text or "recession" in text:
+        return "macro_economy"
+    if "esport" in text or "valorant" in text or "cs2" in text or " dota " in text or "league of legends" in text:
+        return "esports"
+    if "openai" in text or " ai " in text or "chatgpt" in text or "anthropic" in text or "claude" in text:
+        return "ai"
+    if "politic" in text or "election" in text or "trump" in text or "president" in text:
+        return "politics"
+    if "stock" in text or "equities" in text or "nasdaq" in text or "s&p" in text or "s p 500" in text:
+        return "equities"
+    if "sports" in text or " nba " in text or " mlb " in text or " nfl " in text or " ufc " in text:
+        return "sports"
+    if "bitcoin" in text or " btc " in text:
+        return "crypto_btc"
+    if "ethereum" in text or " eth " in text:
+        return "crypto_eth"
+    if "solana" in text or " sol " in text:
+        return "crypto_sol"
+    if " xrp " in text or "ripple" in text:
+        return "crypto_xrp"
+    family = classify_market_family({"question": query, "market_slug": query, "category": query})
+    return family if family and family != "unknown" else "misc"
+
+
+def _broad_base_queries(cfg) -> list[str]:
+    settings = _research_focus_settings(cfg)
+    raw = settings.get("broad_base_queries")
+    if raw is None:
+        paper_scan = cfg.raw.get("paper_market_scan", {}) if isinstance(cfg.raw.get("paper_market_scan"), dict) else {}
+        raw = paper_scan.get("broad_repricing_queries") or DEFAULT_BROAD_BASE_QUERIES
+    if isinstance(raw, tuple):
+        raw = list(raw)
+    elif not isinstance(raw, list):
+        raw = [raw]
+    queries: list[str] = []
+    seen: set[str] = set()
+    for item in raw:
+        query = str(item or "").strip()
+        key = _query_key(query)
+        if not query or not key or key in seen:
+            continue
+        queries.append(query)
+        seen.add(key)
+    return queries or list(DEFAULT_BROAD_BASE_QUERIES)
+
+
+def _guard_collection_queries(cfg, proposed_queries: list[str]) -> tuple[list[str], dict[str, Any]]:
+    settings = _research_focus_settings(cfg)
+    max_per_family = max(1, _int_setting(settings, "max_queries_per_family", 2))
+    min_distinct_families = max(1, _int_setting(settings, "min_distinct_families", 4))
+    max_updown_queries = max(0, _int_setting(settings, "max_updown_queries", 1))
+
+    raw_queries: list[str] = []
+    seen_raw: set[str] = set()
+    for query in proposed_queries:
+        clean = str(query or "").strip()
+        key = _query_key(clean)
+        if not clean or not key or key in seen_raw:
+            continue
+        raw_queries.append(clean)
+        seen_raw.add(key)
+
+    guarded: list[str] = []
+    guarded_keys: set[str] = set()
+    family_counts: dict[str, int] = {}
+    rejected: list[dict[str, Any]] = []
+    updown_count = 0
+
+    def add_query(query: str, *, source: str) -> tuple[bool, str]:
+        nonlocal updown_count
+        key = _query_key(query)
+        if not key or key in guarded_keys:
+            return False, "duplicate"
+        family = _query_family(query)
+        if _is_updown_query(query) and updown_count >= max_updown_queries:
+            return False, "max_updown_queries"
+        if family_counts.get(family, 0) >= max_per_family:
+            return False, "max_queries_per_family"
+        guarded.append(query)
+        guarded_keys.add(key)
+        family_counts[family] = family_counts.get(family, 0) + 1
+        if _is_updown_query(query):
+            updown_count += 1
+        return True, source
+
+    for query in raw_queries:
+        added, reason = add_query(query, source="raw")
+        if not added and reason != "duplicate":
+            rejected.append({"query": query, "family": _query_family(query), "reason": reason})
+
+    broad_queries = _broad_base_queries(cfg)
+    target_len = max(len(raw_queries), min_distinct_families)
+    broad_fill: list[str] = []
+    attempts = max(1, target_len * max(1, len(broad_queries)) * 2)
+    index = 0
+    while (
+        (len(guarded) < target_len or len(family_counts) < min_distinct_families)
+        and index < attempts
+    ):
+        candidate = broad_queries[index % len(broad_queries)]
+        index += 1
+        added, _reason = add_query(candidate, source="broad_base")
+        if added:
+            broad_fill.append(candidate)
+        if len(guarded_keys) >= len(seen_raw) + len({_query_key(query) for query in broad_queries if _query_key(query)}):
+            break
+
+    guard = {
+        "enabled": True,
+        "settings": {
+            "max_queries_per_family": max_per_family,
+            "min_distinct_families": min_distinct_families,
+            "max_updown_queries": max_updown_queries,
+        },
+        "raw_collection_queries": raw_queries,
+        "guarded_collection_queries": guarded,
+        "broad_base_queries": broad_queries,
+        "broad_fill_queries": broad_fill,
+        "rejected_queries": rejected,
+        "family_counts": dict(sorted(family_counts.items())),
+        "distinct_families": len(family_counts),
+        "updown_queries": [query for query in guarded if _is_updown_query(query)],
+        "updown_query_count": updown_count,
+        "decision_use": "collection_rebalancing_only_not_trade_authorisation",
+    }
+    return guarded, guard
 
 
 def _thesis(cohort: str, row: dict[str, Any]) -> str:
@@ -445,6 +639,191 @@ def _edge_attribution_query(row: dict[str, Any]) -> str:
     return _cohort_query(family) if family else ""
 
 
+def _cohort_name(row: dict[str, Any]) -> str:
+    return str(row.get("signal_cohort") or row.get("cohort") or row.get("family") or "unknown").strip() or "unknown"
+
+
+def _attribution_class(row: dict[str, Any]) -> str:
+    explicit = str(row.get("attribution_class") or "").strip()
+    if explicit:
+        return explicit
+    primary_drag = str(row.get("primary_drag") or "").strip()
+    recommended_action = str(row.get("recommended_action") or "").strip()
+    if primary_drag in {"spread_slippage", "quote_quality"}:
+        return "cost_dominated"
+    if primary_drag in {"adverse_line_movement", "model_edge_failed_to_transfer"}:
+        return "model_direction_not_confirmed"
+    if primary_drag == "positive_forward_edge" or recommended_action == "collect_confirmation_until_governance_threshold":
+        return "positive_edge_confirmed"
+    return ""
+
+
+def _clv_cohort_rows(closing_line_value: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    rows = closing_line_value.get("cohorts", []) if isinstance(closing_line_value, dict) else []
+    if not isinstance(rows, list):
+        return {}
+    out: dict[str, dict[str, Any]] = {}
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        cohort = _cohort_name(row)
+        if cohort != "unknown":
+            out[cohort] = row
+    return out
+
+
+def _positive_clv_cohorts(closing_line_value: dict[str, Any]) -> set[str]:
+    positive = closing_line_value.get("positive_clv_cohorts", []) if isinstance(closing_line_value, dict) else []
+    if not isinstance(positive, list):
+        return set()
+    return {str(cohort or "").strip() for cohort in positive if str(cohort or "").strip()}
+
+
+def _research_evidence_inputs(
+    edge_attribution: dict[str, Any],
+    closing_line_value: dict[str, Any],
+    algo_sweep: dict[str, Any],
+) -> dict[str, Any]:
+    """Explain collection-only priority movement from post-trade evidence artifacts."""
+    edge_rows = edge_attribution.get("cohorts", []) if isinstance(edge_attribution, dict) else []
+    if not isinstance(edge_rows, list):
+        edge_rows = []
+    clv_by_cohort = _clv_cohort_rows(closing_line_value)
+    positive_clv = _positive_clv_cohorts(closing_line_value)
+
+    adjustments: dict[str, dict[str, Any]] = {}
+
+    def upsert(
+        cohort: str,
+        *,
+        priority_delta: float,
+        reason: str,
+        attribution_class: str = "",
+        clv_evidence: str = "",
+        query: str = "",
+    ) -> None:
+        clean = str(cohort or "").strip()
+        if not clean or clean == "unknown" or _is_quarantined_fast_crypto(clean):
+            return
+        row = adjustments.setdefault(
+            clean,
+            {
+                "cohort": clean,
+                "priority_delta": 0.0,
+                "reasons": [],
+                "attribution_class": attribution_class,
+                "clv_evidence": clv_evidence,
+                "recommended_collection_query": query or _cohort_query(clean),
+                "movement": "unchanged",
+                "decision_use": "collection_ordering_only_not_trade_authorisation",
+            },
+        )
+        row["priority_delta"] = round(float(row.get("priority_delta") or 0.0) + priority_delta, 4)
+        if reason and reason not in row["reasons"]:
+            row["reasons"].append(reason)
+        if attribution_class and not row.get("attribution_class"):
+            row["attribution_class"] = attribution_class
+        if clv_evidence and not row.get("clv_evidence"):
+            row["clv_evidence"] = clv_evidence
+        if query and not row.get("recommended_collection_query"):
+            row["recommended_collection_query"] = query
+        row["movement"] = "raised" if row["priority_delta"] > 0 else "lowered" if row["priority_delta"] < 0 else "unchanged"
+
+    for edge_row in edge_rows:
+        if not isinstance(edge_row, dict):
+            continue
+        cohort = _cohort_name(edge_row)
+        attribution_class = _attribution_class(edge_row)
+        clv_row = clv_by_cohort.get(cohort, {})
+        clv_evidence = str(edge_row.get("clv_evidence") or clv_row.get("clv_evidence") or "").strip()
+        query = _edge_attribution_query(edge_row) or _cohort_query(cohort)
+        if attribution_class in {"cost_dominated", "positive_edge_confirmed"}:
+            upsert(
+                cohort,
+                priority_delta=12.0,
+                reason=f"attribution_class={attribution_class}",
+                attribution_class=attribution_class,
+                clv_evidence=clv_evidence,
+                query=query,
+            )
+        elif attribution_class == "model_direction_not_confirmed" and clv_evidence == "negative_clv_evidence":
+            upsert(
+                cohort,
+                priority_delta=-12.0,
+                reason="attribution_class=model_direction_not_confirmed with negative_clv_evidence",
+                attribution_class=attribution_class,
+                clv_evidence=clv_evidence,
+                query=query,
+            )
+
+    for cohort in positive_clv:
+        query = _cohort_query(cohort)
+        upsert(
+            cohort,
+            priority_delta=8.0,
+            reason="positive_clv_cohort",
+            clv_evidence=str((clv_by_cohort.get(cohort) or {}).get("clv_evidence") or "positive_clv_evidence"),
+            query=query,
+        )
+
+    moved = sorted(
+        adjustments.values(),
+        key=lambda row: (
+            _num(row.get("priority_delta")),
+            1 if row.get("recommended_collection_query") else 0,
+            str(row.get("cohort") or ""),
+        ),
+        reverse=True,
+    )
+    raised = [row for row in moved if _num(row.get("priority_delta")) > 0]
+    lowered = [row for row in moved if _num(row.get("priority_delta")) < 0]
+    added_queries: list[str] = []
+    for row in raised:
+        query = str(row.get("recommended_collection_query") or "").strip()
+        if query and query not in added_queries:
+            added_queries.append(query)
+
+    sweep_decision = str(algo_sweep.get("decision") or "") if isinstance(algo_sweep, dict) else ""
+    sweep_note = ""
+    if sweep_decision == "sweep_candidate_validated_shadow_only":
+        selected = algo_sweep.get("selected", {}) if isinstance(algo_sweep, dict) else {}
+        if not isinstance(selected, dict):
+            selected = {}
+        selected_params = {}
+        for key in (
+            "strategy",
+            "tight_spread_maximum",
+            "minimum_book_imbalance",
+            "validation_fills",
+            "validation_pnl_usdc",
+        ):
+            value = selected.get(key)
+            if value is not None and value != "":
+                selected_params[key] = value
+        params_text = ", ".join(f"{key}={value}" for key, value in selected_params.items()) or "selected parameters unavailable"
+        sweep_note = f"Algo sweep validated a shadow-only research lead: {params_text}."
+
+    return {
+        "decision_use": "collection_ordering_only_not_trade_authorisation",
+        "edge_attribution_status": edge_attribution.get("status") if isinstance(edge_attribution, dict) else None,
+        "closing_line_value_status": closing_line_value.get("status") if isinstance(closing_line_value, dict) else None,
+        "algo_sweep_status": algo_sweep.get("status") if isinstance(algo_sweep, dict) else None,
+        "positive_clv_cohorts": sorted(positive_clv),
+        "negative_clv_cohorts": sorted(
+            cohort
+            for cohort, row in clv_by_cohort.items()
+            if str(row.get("clv_evidence") or "") == "negative_clv_evidence"
+        ),
+        "priority_adjustments": moved,
+        "raised_priority_cohorts": raised,
+        "lowered_priority_cohorts": lowered,
+        "collection_queries_added": added_queries,
+        "sweep_decision": sweep_decision,
+        "sweep_selected": algo_sweep.get("selected", {}) if isinstance(algo_sweep, dict) else {},
+        "sweep_note": sweep_note,
+    }
+
+
 def _edge_attribution_focus(edge_attribution: dict[str, Any], *, max_rows: int = 6) -> dict[str, Any]:
     cohorts = edge_attribution.get("cohorts", []) if isinstance(edge_attribution, dict) else []
     if not isinstance(cohorts, list):
@@ -456,26 +835,30 @@ def _edge_attribution_focus(edge_attribution: dict[str, Any], *, max_rows: int =
         if not isinstance(row, dict):
             continue
         primary_drag = str(row.get("primary_drag") or "")
+        attribution_class = _attribution_class(row)
         recommended_action = str(row.get("recommended_action") or "")
         query = _edge_attribution_query(row)
         compact = {
-            "cohort": row.get("signal_cohort") or row.get("cohort") or "unknown",
+            "cohort": _cohort_name(row),
             "family": row.get("family") or "unknown",
             "decision_pnl_usdc": row.get("decision_pnl_usdc"),
+            "total_pnl_usdc": row.get("total_pnl_usdc"),
             "entry_edge_usdc": row.get("entry_edge_usdc"),
             "line_movement_usdc": row.get("line_movement_usdc"),
             "spread_slippage_cost_usdc": row.get("spread_slippage_cost_usdc"),
+            "execution_cost_usdc": row.get("execution_cost_usdc"),
             "mean_final_clv": row.get("mean_final_clv"),
             "primary_drag": primary_drag,
+            "attribution_class": attribution_class,
             "recommended_action": recommended_action,
             "recommended_collection_query": query,
             "decision_use": "post_trade_feedback_for_collection_not_trade_authorisation",
         }
-        if primary_drag in {"spread_slippage", "quote_quality"}:
+        if attribution_class == "cost_dominated":
             cost_driven.append(compact)
-        elif primary_drag in {"adverse_line_movement", "model_edge_failed_to_transfer"}:
+        elif attribution_class == "model_direction_not_confirmed":
             model_driven.append(compact)
-        elif primary_drag == "positive_forward_edge" or recommended_action == "collect_confirmation_until_governance_threshold":
+        elif attribution_class == "positive_edge_confirmed":
             positive.append(compact)
 
     def _sort_key(item: dict[str, Any]) -> tuple[float, float, float]:
@@ -486,7 +869,13 @@ def _edge_attribution_focus(edge_attribution: dict[str, Any], *, max_rows: int =
         )
 
     positive.sort(key=_sort_key, reverse=True)
-    cost_driven.sort(key=lambda item: (_num(item.get("spread_slippage_cost_usdc")), abs(_num(item.get("decision_pnl_usdc")))), reverse=True)
+    cost_driven.sort(
+        key=lambda item: (
+            _num(item.get("spread_slippage_cost_usdc") or item.get("execution_cost_usdc")),
+            abs(_num(item.get("decision_pnl_usdc") or item.get("total_pnl_usdc"))),
+        ),
+        reverse=True,
+    )
     model_driven.sort(key=lambda item: (_num(item.get("decision_pnl_usdc")), _num(item.get("mean_final_clv"))))
     queries: list[str] = []
     for bucket in (positive, cost_driven):
@@ -522,7 +911,6 @@ def _price_action_model_needs_data(price_action_model: dict[str, Any]) -> bool:
 def build_research_focus(cfg) -> dict[str, Any]:
     governance = cfg.governance_root
     focus_rows = [_focus_row(row) for row in _load_cohort_rows(cfg) if _include_focus_row(str(row.get("signal_cohort") or row.get("cohort") or "unknown"), row)]
-    focus_rows.sort(key=lambda item: _num(item.get("priority_score")), reverse=True)
 
     promotion_review = build_promotion_review(cfg)
     goal_plan = build_goal_plan(cfg)
@@ -533,6 +921,28 @@ def build_research_focus(cfg) -> dict[str, Any]:
     if not isinstance(edge_attribution, dict):
         edge_attribution = {}
     edge_focus = _edge_attribution_focus(edge_attribution)
+    closing_line_value = read_json(governance / "closing_line_value.json", default={}) or {}
+    if not isinstance(closing_line_value, dict):
+        closing_line_value = {}
+    algo_sweep = read_json(cfg.output_root / "polymarket_algo" / "algo_sweep_summary.json", default={}) or {}
+    if not isinstance(algo_sweep, dict):
+        algo_sweep = {}
+    evidence_inputs = _research_evidence_inputs(edge_attribution, closing_line_value, algo_sweep)
+    priority_adjustments = {
+        str(row.get("cohort") or ""): _num(row.get("priority_delta"))
+        for row in evidence_inputs.get("priority_adjustments", [])
+        if isinstance(row, dict)
+    }
+    for row in focus_rows:
+        delta = priority_adjustments.get(str(row.get("cohort") or ""))
+        if not delta:
+            continue
+        base_priority = _num(row.get("priority_score"))
+        row["base_priority_score"] = row.get("priority_score")
+        row["priority_score"] = round(max(0.0, base_priority + delta), 4)
+        row["research_evidence_priority_delta"] = round(delta, 4)
+    focus_rows.sort(key=lambda item: _num(item.get("priority_score")), reverse=True)
+
     price_action_model = read_json(cfg.output_root / "polymarket_price_action" / "price_action_model_summary.json", default={}) or {}
     if not isinstance(price_action_model, dict):
         price_action_model = {}
@@ -634,6 +1044,11 @@ def build_research_focus(cfg) -> dict[str, Any]:
             f"Edge attribution says {worst.get('cohort')} losses are model/line-movement driven; "
             "suppress this thesis until a new feature/anchor explains the adverse movement."
         )
+    elif evidence_inputs.get("collection_queries_added"):
+        next_action = (
+            "Post-trade attribution/CLV evidence found collection leads; prioritise "
+            f"{', '.join(evidence_inputs.get('collection_queries_added', [])[:4])} while keeping all trade gates closed."
+        )
     else:
         next_action = (
             "Keep collecting bid/ask repricing evidence across liquid event families; "
@@ -645,6 +1060,10 @@ def build_research_focus(cfg) -> dict[str, Any]:
         for query in validation_gap_queries:
             if query and query not in collection_queries:
                 collection_queries.append(query)
+    for query in evidence_inputs.get("collection_queries_added", []) or []:
+        query = str(query or "").strip()
+        if query and query not in collection_queries:
+            collection_queries.append(query)
     if model_needs_repricing_data:
         for query in current_positive_queries:
             if query and query not in collection_queries:
@@ -672,16 +1091,27 @@ def build_research_focus(cfg) -> dict[str, Any]:
         query = str(query or "").strip()
         if query and query not in collection_queries:
             collection_queries.append(query)
+    notes: list[str] = []
+    if evidence_inputs.get("sweep_note"):
+        notes.append(str(evidence_inputs["sweep_note"]))
     if not collection_queries:
         feedback_queries = [str(query or "").strip() for query in price_action_feedback.get("collection_queries", [])]
         collection_queries = [query for query in feedback_queries if query] or ["bitcoin", "ethereum", "world cup", "tennis"]
 
+    raw_collection_queries = list(collection_queries)
+    collection_queries, collection_query_guard = _guard_collection_queries(cfg, collection_queries)
+
     payload = {
         "status": "ok",
         "generated_at_utc": now_utc(),
+        "paper_trading_invoked": False,
+        "live_trading_invoked": False,
         "summary": next_action,
+        "notes": notes,
         "watchlist": focus_rows,
+        "raw_collection_queries": raw_collection_queries,
         "collection_queries": collection_queries,
+        "collection_query_guard": collection_query_guard,
         "suppressed_queries": price_action_feedback.get("suppressed_queries", []),
         "price_action_model": {
             "status": price_action_model.get("status"),
@@ -731,6 +1161,7 @@ def build_research_focus(cfg) -> dict[str, Any]:
             "top_cohorts": price_action_feedback.get("top_cohorts", [])[:10],
         },
         "edge_attribution": edge_focus,
+        "evidence_inputs": evidence_inputs,
         "promotion_review": {
             "status": promotion_review.get("status"),
             "top_actionable": promotion_review.get("top_actionable", [])[:10],

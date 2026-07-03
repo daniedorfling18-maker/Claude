@@ -56,7 +56,35 @@ def test_profit_target_creates_clean_baseline_and_tracks_run_rate(tmp_path):
     )
     assert second["actual_pnl_since_baseline_usdc"] == 10
     assert second["monthly_run_rate_usdc"] > 100
-    assert second["status"] == "on_pace"
+    assert second["status"] == "collecting_verified_paper_evidence"
+    assert second["on_pace_by_actual_pnl"] is True
+    assert second["on_pace_by_decision_pnl"] is False
+    assert second["profit_target_proof_status"] == "unverified_paper_run_rate"
+    assert "paper_round_trip_audit_missing" in second["profit_target_proof_blockers"]
+
+    write_json(
+        cfg.output_root / "polymarket_price_action" / "paper_broker_round_trip_summary.json",
+        {
+            "audited_baseline_realized_pnl_usdc": 10,
+            "audited_baseline_closed_round_trips": 5,
+            "baseline_closed_round_trips": 5,
+            "quote_conflict_round_trips": 0,
+            "quote_unverified_round_trips": 0,
+        },
+    )
+    verified = write_profit_target_tracker(
+        cfg,
+        {
+            "equity": 1010,
+            "cash": 940,
+            "total_exposure": 70,
+            "generated_at_utc": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        },
+    )
+    assert verified["status"] == "on_pace"
+    assert verified["on_pace_by_decision_pnl"] is True
+    assert verified["profit_target_proof_status"] == "verified_quote_consistent"
+    assert verified["profit_target_proof_blockers"] == []
 
 
 def test_profit_target_uses_audited_pnl_when_raw_ledger_has_quote_conflicts(tmp_path):
@@ -74,6 +102,8 @@ def test_profit_target_uses_audited_pnl_when_raw_ledger_has_quote_conflicts(tmp_
         cfg.output_root / "polymarket_price_action" / "paper_broker_round_trip_summary.json",
         {
             "audited_baseline_realized_pnl_usdc": 0.22,
+            "audited_baseline_closed_round_trips": 5,
+            "baseline_closed_round_trips": 11,
             "quote_conflict_round_trips": 5,
             "quote_unverified_round_trips": 6,
         },
@@ -95,6 +125,8 @@ def test_profit_target_uses_audited_pnl_when_raw_ledger_has_quote_conflicts(tmp_
     assert payload["audited_pnl_since_baseline_usdc"] == approx(0.22)
     assert payload["decision_pnl_usdc"] == approx(0.22)
     assert payload["pnl_audit_state"] == "raw_pnl_contains_quote_conflicts"
+    assert payload["profit_target_proof_status"] == "unverified_paper_run_rate"
+    assert "quote_conflict_round_trips_5" in payload["profit_target_proof_blockers"]
     assert payload["quote_conflict_round_trips"] == 5
     assert payload["quote_unverified_round_trips"] == 6
     assert payload["raw_account_monthly_run_rate_usdc"] > 100
@@ -266,12 +298,261 @@ def test_dashboard_handles_empty_closing_line_value_artifact(tmp_path):
     assert data["closing_line_value"] == {}
     assert data["edge_attribution"] == {}
     assert data["algo_sweep"] == {}
+    assert data["risk_state"] == {}
+    assert data["evidence_funnel"]["liquidity_targets_discovered"] == "-"
+    assert data["evidence_funnel"]["paper_gate_status"] == "-"
     assert "Closing-line value (CLV)" in html
     assert "No CLV evidence yet" in html
     assert "Edge attribution" in html
     assert "No edge attribution evidence yet" in html
+    assert "Evidence funnel" in html
+    assert "Road-to-paper view" in html
+    assert "Portfolio risk" in html
+    assert "No portfolio risk snapshot yet" in html
     assert "Algo sweep lab" in html
     assert "No sweep run yet" in html
+
+
+def test_dashboard_surfaces_evidence_funnel(tmp_path):
+    cfg = _config(tmp_path)
+    write_json(cfg.governance_root / "liquidity_discovery_summary.json", {"target_assets": 12})
+    write_csv(
+        cfg.output_root / "polymarket_predictions" / "predictions.csv",
+        [
+            {
+                "market_id": "m-shadow",
+                "token_id": "t-shadow",
+                "prediction_timestamp": "2026-07-03T10:00:00Z",
+                "shadow_trade_candidate": "true",
+                "market_slug": "fed-cut-shadow",
+            },
+            {
+                "market_id": "m-other",
+                "token_id": "t-other",
+                "prediction_timestamp": "2026-07-03T10:01:00Z",
+                "shadow_trade_candidate": "false",
+                "market_slug": "not-shadow",
+            },
+        ],
+    )
+    write_csv(
+        cfg.output_root / "polymarket_shadow" / "shadow_positions.csv",
+        [
+            {"shadow_position_id": "open-1", "status": "open", "token_id": "t1", "quantity": 1},
+            {"shadow_position_id": "closed-1", "status": "closed", "token_id": "t2", "quantity": 1},
+        ],
+    )
+    write_json(
+        cfg.governance_root / "closing_line_value.json",
+        {
+            "status": "ok",
+            "generated_at_utc": "2026-07-03T10:02:00Z",
+            "positions_scored": 4,
+            "final_line_positions": 3,
+            "positive_clv_cohorts": ["macro_rates"],
+        },
+    )
+    write_json(
+        cfg.governance_root / "edge_attribution.json",
+        {
+            "status": "ok",
+            "generated_at_utc": "2026-07-03T10:03:00Z",
+            "attributed_positions": 2,
+            "cohorts": [
+                {"signal_cohort": "macro_rates", "attribution_class": "positive_edge_confirmed"},
+                {"signal_cohort": "tennis_tennis_winner", "attribution_class": "cost_dominated"},
+            ],
+        },
+    )
+    write_json(
+        cfg.governance_root / "family_calibration_scorecard.json",
+        {
+            "status": "ok",
+            "model_beats_market_families": ["macro_rates", "tennis_tennis_winner"],
+        },
+    )
+    write_json(
+        cfg.governance_root / "collection_coverage.json",
+        {
+            "status": "ok",
+            "positions_with_pre_close_quote": 1,
+            "positions_missing_pre_close_quote": 4,
+            "missing_pre_close_positions": [
+                {
+                    "shadow_position_id": "missing-1",
+                    "family": "macro_rates",
+                    "close_time": "2026-07-03T11:30:00Z",
+                    "reason": "missing_pre_close_quote",
+                }
+            ],
+        },
+    )
+    write_json(
+        cfg.output_root / "polymarket_algo" / "algo_sweep_summary.json",
+        {
+            "status": "ok",
+            "generated_at_utc": "2026-07-03T10:04:00Z",
+            "decision": "sweep_candidate_validated_shadow_only",
+            "paper_trading_invoked": False,
+            "live_trading_invoked": False,
+        },
+    )
+    write_json(
+        cfg.governance_root / "promotion_gate.json",
+        {
+            "approved_for_paper_trading": False,
+            "paper_blockers": ["needs forward paper evidence"],
+        },
+    )
+    write_csv(
+        cfg.governance_root / "evidence_history.csv",
+        [
+            {
+                "recorded_at_utc": "2026-07-03T10:04:00Z",
+                "source": "algo_sweep",
+                "positions_scored_attributed": "9",
+                "final_line_positions": "",
+                "positive_cohorts": "",
+                "decision_or_class_summary": "sweep_candidate_validated_shadow_only",
+            }
+        ],
+    )
+
+    result = render_dashboard(cfg)
+
+    data = read_json(result["dashboard_data"])
+    html = Path(result["dashboard_file"]).read_text(encoding="utf-8")
+    funnel = data["evidence_funnel"]
+    assert funnel["liquidity_targets_discovered"] == 12
+    assert funnel["alpha_shadow_candidates"] == 1
+    assert funnel["shadow_positions"] == "1 open / 1 closed"
+    assert funnel["closed_with_clv_final_lines"] == 3
+    assert funnel["attributed_positions"] == 2
+    assert funnel["cohorts_by_attribution_class"] == {
+        "cost_dominated": 1,
+        "positive_edge_confirmed": 1,
+    }
+    assert funnel["positive_clv_cohorts"] == ["macro_rates"]
+    assert funnel["model_beats_market_families"] == ["macro_rates", "tennis_tennis_winner"]
+    assert funnel["collection_gap"] == "4 missing / 1 covered"
+    assert funnel["sweep_decision"] == "sweep_candidate_validated_shadow_only"
+    assert funnel["paper_gate_status"].startswith("blocked_for_paper")
+    assert funnel["evidence_history_rows"] == 1
+    assert funnel["missing_pre_close_positions"][0]["shadow_position_id"] == "missing-1"
+    assert "Evidence funnel" in html
+    assert "Missing pre-close quote positions" in html
+
+
+def test_dashboard_surfaces_portfolio_risk_state(tmp_path):
+    cfg = _config(tmp_path)
+    write_json(
+        cfg.output_root / "polymarket_portfolio" / "risk_state.json",
+        {
+            "portfolio_risk": {
+                "generated_at_utc": "2026-07-03T09:00:00Z",
+                "decision_use": "reporting_only_not_trade_authorisation",
+                "open_positions": 3,
+                "marked_positions": 3,
+                "unmarked_positions": 0,
+                "total_cost_usdc": 18.0,
+                "var_95_usdc": 3.42,
+                "cvar_95_usdc": 3.6,
+                "worst_position_return_pct": -20.0,
+                "exposure_by_correlation_key": [
+                    {"key": "fed-july-2026", "cost_basis_usdc": 10.0},
+                    {"key": "tennis-final-2026", "cost_basis_usdc": 8.0},
+                ],
+                "exposure_by_category": [
+                    {"key": "macro_rates", "cost_basis_usdc": 10.0},
+                    {"key": "tennis", "cost_basis_usdc": 8.0},
+                ],
+                "paper_trading_invoked": False,
+                "live_trading_invoked": False,
+            }
+        },
+    )
+
+    result = render_dashboard(cfg)
+
+    data = read_json(result["dashboard_data"])
+    html = Path(result["dashboard_file"]).read_text(encoding="utf-8")
+    risk = data["risk_state"]["portfolio_risk"]
+    assert risk["open_positions"] == 3
+    assert risk["var_95_usdc"] == 3.42
+    assert risk["cvar_95_usdc"] == 3.6
+    assert risk["exposure_by_correlation_key"][0]["key"] == "fed-july-2026"
+    assert risk["paper_trading_invoked"] is False
+    assert risk["live_trading_invoked"] is False
+    assert "Portfolio risk" in html
+    assert "Top correlated exposure" in html
+    assert "Exposure by category" in html
+
+
+def test_dashboard_surfaces_dutch_arb_watch(tmp_path):
+    cfg = _config(tmp_path)
+    write_json(
+        cfg.output_root / "polymarket_arbitrage" / "dutch_arb_monitor_summary.json",
+        {
+            "status": "paper_analysis",
+            "generated_at_utc": "2026-07-03T08:00:00Z",
+            "paper_trading_invoked": False,
+            "live_trading_invoked": False,
+            "dry_run": True,
+            "scan_stats_latest_poll": {"discovered": 12, "priced_complete": 4},
+            "events_priced_complete_latest_poll": 4,
+            "complete_arbs_latest_poll": 1,
+            "alerts_total": 3,
+            "persistent_alert_count": 1,
+            "best_annualised_return_on_capital": 0.21,
+            "best_opportunity": {
+                "event_id": "arb-1",
+                "event": "Example complete basket",
+                "outcomes": 3,
+                "ask_sum": 0.94,
+                "lock_per_set": 0.06,
+                "annualised_return_on_capital": 0.21,
+                "capital_usdc": 94,
+                "profit_usdc": 6,
+                "days_to_resolution": 30,
+            },
+            "top_opportunities": [
+                {
+                    "event_id": "arb-1",
+                    "event": "Example complete basket",
+                    "outcomes": 3,
+                    "ask_sum": 0.94,
+                    "lock_per_set": 0.06,
+                    "annualised_return_on_capital": 0.21,
+                    "capital_usdc": 94,
+                    "profit_usdc": 6,
+                    "days_to_resolution": 30,
+                }
+            ],
+            "persistent_alerts": [
+                {
+                    "event_id": "arb-1",
+                    "event": "Example complete basket",
+                    "consecutive_scans_above_alert": 3,
+                    "alert_annualised": 0.10,
+                    "title": "Dutch-book arb basket persisted above alert threshold",
+                }
+            ],
+        },
+    )
+
+    result = render_dashboard(cfg)
+
+    data = read_json(result["dashboard_data"])
+    html = Path(result["dashboard_file"]).read_text(encoding="utf-8")
+    assert data["dutch_arb"]["complete_arbs_latest_poll"] == 1
+    assert data["dutch_arb"]["paper_trading_invoked"] is False
+    assert data["dutch_arb"]["live_trading_invoked"] is False
+    arb_alerts = [alert for alert in data["oversight_status"]["alerts"] if alert["title"] == "Dutch-book arb basket persisted"]
+    assert arb_alerts
+    assert arb_alerts[0]["severity"] == "info"
+    assert "Dutch-book arb watch" in html
+    assert "Top Dutch-book baskets" in html
+    assert "Observed ask baskets" in html
 
 
 def test_dashboard_surfaces_edge_attribution_artifact(tmp_path):
@@ -408,6 +689,11 @@ def test_dashboard_gates_extrapolated_edge_route_evidence(tmp_path):
             "target_monthly_profit_usdc": 100,
             "decision_pnl_usdc": 0.22,
             "decision_monthly_run_rate_usdc": 9.4,
+            "profit_target_proof_status": "unverified_paper_run_rate",
+            "profit_target_proof_blockers": ["needs_5_audited_round_trips_has_2"],
+            "audited_round_trips_since_baseline": 2,
+            "minimum_audited_round_trips_for_on_pace": 5,
+            "verified_evidence_ready": False,
             "price_action_goal_state": {
                 "state": "forward_paper_on_monthly_target",
                 "best_repricing_monthly_run_rate_usdc": 2344.677548049622,
@@ -462,7 +748,15 @@ def test_dashboard_gates_extrapolated_edge_route_evidence(tmp_path):
     assert "$1973.93" not in edge_card["value"]
     assert "$2344.68" not in edge_card["value"]
     assert edge_lane["key_metric"] == edge_card["value"]
+    target_card = next(card for card in data["decision_useful_summary"]["decision_cards"] if card["label"] == "$100/month state")
+    target_lane = next(row for row in data["decision_useful_summary"]["evidence_lanes"] if row["lane"] == "Forward paper P&L")
+    assert target_card["severity"] == "warn"
+    assert "proof unverified_paper_run_rate" in target_card["value"]
+    assert "audited exits 2/5" in target_card["value"]
+    assert "audited round trips 2/5" in target_lane["blocker_or_next"]
+    assert "needs_5_audited_round_trips_has_2" in data["decision_useful_summary"]["profit_target_proof_blockers"]
     assert "n too small to annualise" in html
+    assert "Proof status" in html
     assert "provisional lines await market close" in html
     assert "no strategy beat doing nothing" in html
     assert "raw; audited" in html
@@ -1026,6 +1320,47 @@ def test_dashboard_marks_stale_legacy_full_cycle_as_audit_only(tmp_path):
     assert legacy["effective_status"] == "stale"
     assert legacy["display_status"] == "stale legacy heartbeat (raw: running)"
     assert "do not treat" in legacy["reason"]
+
+
+def test_dashboard_warns_when_no_driver_is_fresh_and_shadow_cycle_missing(tmp_path):
+    cfg = _config(tmp_path)
+
+    result = render_dashboard(cfg)
+    data = read_json(result["dashboard_data"])
+
+    alert_titles = [alert["title"] for alert in data["oversight_status"]["alerts"]]
+    assert data["shadow_research_cycle"]["effective_status"] == "not_started"
+    assert data["evidence_freshness"]["legacy_full_cycle"]["effective_status"] == "not_started"
+    assert "Shadow research cycle has not started" in alert_titles
+    assert "Driver: legacy live loop (VPS deployment); shadow-cycle status file not expected." not in alert_titles
+
+
+def test_dashboard_treats_fresh_legacy_loop_as_vps_driver_when_shadow_cycle_missing(tmp_path):
+    cfg = _config(tmp_path)
+    write_json(
+        cfg.governance_root / "local_live_loop_heartbeat.json",
+        {
+            "status": "ok",
+            "generated_at_utc": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+            "websocket_seconds": 5,
+            "prediction_cycle_seconds": 30,
+            "full_prediction_cycle": {"status": "running"},
+        },
+    )
+
+    result = render_dashboard(cfg)
+    data = read_json(result["dashboard_data"])
+
+    driver_line = "Driver: legacy live loop (VPS deployment); shadow-cycle status file not expected."
+    alerts = data["oversight_status"]["alerts"]
+    assert data["shadow_research_cycle"]["effective_status"] == "not_started"
+    assert data["evidence_freshness"]["legacy_full_cycle"]["effective_status"] == "live"
+    assert any(alert["severity"] == "info" and alert["title"] == driver_line for alert in alerts)
+    assert not any(alert["title"] == "Shadow research cycle has not started" for alert in alerts)
+    assert data["strategy_v2"]["status"] == "not running in this deployment"
+    assert data["strategy_v2"]["decision"] == "not running in this deployment"
+    assert data["strategy_v2"]["runtime_posture"] == "not_running_in_this_deployment"
+    assert data["strategy_v2"]["runtime_reason"] == "Strategy V2 is not running in this deployment."
 
 
 def test_dashboard_surfaces_shadow_research_memory_pause(tmp_path):

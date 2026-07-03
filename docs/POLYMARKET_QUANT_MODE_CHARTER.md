@@ -347,6 +347,12 @@ top correlated exposure, category exposure, historical VaR/CVaR over marked open
 position return. The dashboard renders the same block as a Portfolio risk panel. This completes the
 WP6 reporting slice without changing risk decisions, stake caps, or broker order logic.
 
+**2026-07-03 — WO-13 landed by Codex.** The algo registry now mirrors the microstructure lab as
+three executable shadow replay strategies: bid momentum in tight books, midpoint momentum in tight
+books, and spread compression with bid-heavy imbalance. They are deterministic, per-replay
+stateful only for previous quotes, emit GTD `join_bid` shadow intents, and remain unavailable for
+paper/live execution unless separate governance later approves a promotion path.
+
 ## Rules of engagement for coding agents
 
 0. **Division of labour**: the orchestrating agent writes/updates this charter and the work orders

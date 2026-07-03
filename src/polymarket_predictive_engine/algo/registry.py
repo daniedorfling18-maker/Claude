@@ -82,6 +82,32 @@ def _stable_intent_id(*parts: str) -> str:
     return "intent_" + hashlib.sha256("|".join(parts).encode("utf-8")).hexdigest()[:24]
 
 
+def _join_bid_shadow_intent(strategy_name: str, event: QuoteEvent, context: StrategyContext) -> OrderIntent | None:
+    if event.best_bid is None or event.best_bid <= 0:
+        return None
+    stake = float(context.algo_setting("shadow_stake_usdc", 1.0))
+    ttl_minutes = float(context.algo_setting("join_bid_ttl_minutes", 30.0))
+    if stake <= 0:
+        return None
+    expire = (event.timestamp + timedelta(minutes=ttl_minutes)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    return OrderIntent(
+        intent_id=_stable_intent_id(strategy_name, event.asset_id, event.timestamp_utc),
+        created_at_utc=event.timestamp_utc,
+        market_id=event.market_id,
+        token_id=event.asset_id,
+        side="BUY",
+        quantity=round(stake / event.best_bid, 6),
+        limit_price=event.best_bid,
+        time_in_force="GTD",
+        expire_at_utc=expire,
+        execution_policy="join_bid",
+        max_slippage=0.0,
+        mode="shadow",
+        source_strategy=strategy_name,
+        signal_ref=f"{event.market_id}|{event.asset_id}|{event.timestamp_utc}",
+    )
+
+
 @register
 class NullStrategy:
     """The safety baseline: consumes every event, never trades."""
@@ -112,32 +138,103 @@ class TightSpreadJoinBidShadow:
             return []
         max_spread = float(context.algo_setting("tight_spread_maximum", 0.02))
         min_imbalance = float(context.algo_setting("minimum_book_imbalance", 0.6))
-        stake = float(context.algo_setting("shadow_stake_usdc", 1.0))
-        ttl_minutes = float(context.algo_setting("join_bid_ttl_minutes", 30.0))
         if event.spread > max_spread:
             return []
         if event.book_imbalance is None or event.book_imbalance < min_imbalance:
             return []
-        if stake <= 0 or event.best_bid <= 0:
+        intent = _join_bid_shadow_intent(self.name, event, context)
+        return [] if intent is None else [intent]
+
+    def on_fill(self, fill: dict[str, Any], context: StrategyContext) -> None:
+        return None
+
+
+class _PreviousQuoteByAsset:
+    """Replay-local previous-quote memory.
+
+    Replay instantiates one strategy per run, so this small per-instance cache is
+    deterministic and scoped to the replay. It is intentionally not global.
+    """
+
+    def __init__(self) -> None:
+        self._previous_by_asset: dict[str, QuoteEvent] = {}
+
+    def _previous_then_store(self, event: QuoteEvent) -> QuoteEvent | None:
+        previous = self._previous_by_asset.get(event.asset_id)
+        self._previous_by_asset[event.asset_id] = event
+        return previous
+
+
+@register
+class BidMomentumTightShadow(_PreviousQuoteByAsset):
+    """Shadow join-bid probe for upward best-bid momentum in a tight book."""
+
+    name = "bid_momentum_tight_shadow"
+
+    def on_quote(self, event: QuoteEvent, context: StrategyContext) -> list[OrderIntent]:
+        previous = self._previous_then_store(event)
+        if previous is None:
             return []
-        expire = (event.timestamp + timedelta(minutes=ttl_minutes)).strftime("%Y-%m-%dT%H:%M:%SZ")
-        intent = OrderIntent(
-            intent_id=_stable_intent_id(self.name, event.asset_id, event.timestamp_utc),
-            created_at_utc=event.timestamp_utc,
-            market_id=event.market_id,
-            token_id=event.asset_id,
-            side="BUY",
-            quantity=round(stake / event.best_bid, 6),
-            limit_price=event.best_bid,
-            time_in_force="GTD",
-            expire_at_utc=expire,
-            execution_policy="join_bid",
-            max_slippage=0.0,
-            mode="shadow",
-            source_strategy=self.name,
-            signal_ref=f"{event.market_id}|{event.asset_id}|{event.timestamp_utc}",
-        )
-        return [intent]
+        if event.best_bid is None or previous.best_bid is None or event.spread is None:
+            return []
+        min_bid_move = float(context.algo_setting("min_bid_move", 0.01))
+        max_spread = float(context.algo_setting("tight_spread_maximum", 0.02))
+        if event.best_bid - previous.best_bid < min_bid_move:
+            return []
+        if event.spread > max_spread:
+            return []
+        intent = _join_bid_shadow_intent(self.name, event, context)
+        return [] if intent is None else [intent]
+
+    def on_fill(self, fill: dict[str, Any], context: StrategyContext) -> None:
+        return None
+
+
+@register
+class MidMomentumTightShadow(_PreviousQuoteByAsset):
+    """Shadow join-bid probe for upward midpoint momentum in a tight book."""
+
+    name = "mid_momentum_tight_shadow"
+
+    def on_quote(self, event: QuoteEvent, context: StrategyContext) -> list[OrderIntent]:
+        previous = self._previous_then_store(event)
+        if previous is None:
+            return []
+        if event.midpoint is None or previous.midpoint is None or event.spread is None:
+            return []
+        min_mid_move = float(context.algo_setting("min_mid_move", 0.01))
+        max_spread = float(context.algo_setting("tight_spread_maximum", 0.02))
+        if event.midpoint - previous.midpoint < min_mid_move:
+            return []
+        if event.spread > max_spread:
+            return []
+        intent = _join_bid_shadow_intent(self.name, event, context)
+        return [] if intent is None else [intent]
+
+    def on_fill(self, fill: dict[str, Any], context: StrategyContext) -> None:
+        return None
+
+
+@register
+class SpreadCompressionShadow(_PreviousQuoteByAsset):
+    """Shadow join-bid probe for bid-heavy spread-compression events."""
+
+    name = "spread_compression_shadow"
+
+    def on_quote(self, event: QuoteEvent, context: StrategyContext) -> list[OrderIntent]:
+        previous = self._previous_then_store(event)
+        if previous is None:
+            return []
+        if event.spread is None or previous.spread is None or event.book_imbalance is None:
+            return []
+        min_compression = float(context.algo_setting("min_spread_compression", 0.01))
+        min_imbalance = float(context.algo_setting("minimum_book_imbalance", 0.6))
+        if previous.spread - event.spread < min_compression:
+            return []
+        if event.book_imbalance < min_imbalance:
+            return []
+        intent = _join_bid_shadow_intent(self.name, event, context)
+        return [] if intent is None else [intent]
 
     def on_fill(self, fill: dict[str, Any], context: StrategyContext) -> None:
         return None

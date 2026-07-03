@@ -1,6 +1,6 @@
 # Polymarket Codex Work Orders
 
-Last updated: 2026-07-03 (WO-11/12/23/24/25/26/27 code landed; strategic edge reset: WO-24..WO-27 added; WO-20/21/22 landed; read docs/POLYMARKET_EDGE_STRATEGY_RESET.md first)
+Last updated: 2026-07-03 (WO-11/12/13/23/24/25/26/27 code landed; strategic edge reset: WO-24..WO-27 added; WO-20/21/22 landed; read docs/POLYMARKET_EDGE_STRATEGY_RESET.md first)
 
 Mechanical, file-level implementation instructions for coding agents (Codex or any other code
 changer). The architecture and priorities live in `docs/POLYMARKET_QUANT_MODE_CHARTER.md`; this file
@@ -554,7 +554,7 @@ numbers without changing risk decisions, stake caps, or broker order logic.
 
 ---
 
-## WO-13 — Mirror the validated microstructure hypotheses as replay strategies — `open`
+## WO-13 — Mirror the validated microstructure hypotheses as replay strategies — `done` (2026-07-03)
 
 **Goal:** the sweep lab can hunt over the same hypothesis space the microstructure lab already
 tests, but at executable intent level. Three new registered strategies, all shadow-only.
@@ -584,6 +584,13 @@ config-driven thresholds via `context.algo_setting`, shadow mode hardcoded):**
    intent ids).
 
 **Out of scope:** `price_action_microstructure.py` (the lab stays as-is), replay/sweep internals.
+
+**Landed 2026-07-03:** the algo registry now includes three new shadow-only replay strategies:
+`bid_momentum_tight_shadow`, `mid_momentum_tight_shadow`, and `spread_compression_shadow`. Each keeps
+only replay-local previous-quote memory by asset, emits deterministic GTD `join_bid` shadow BUY
+intents, uses config-driven `algo.*` thresholds, and returns no intent on first events, missing
+fields, below-threshold moves, weak imbalance, or non-positive stake. Tests cover exact crafted
+two-event intents, no-intent branches, registry exposure, and stable intent ids.
 
 ---
 
@@ -1083,7 +1090,7 @@ Queue order (strategic reset, 2026-07-03 — read POLYMARKET_EDGE_STRATEGY_RESET
 9. WO-23   done 2026-07-03: deployment-aware oversight status
 10. WO-11  done 2026-07-03: research-focus consumption (after WO-26 so the guard shapes it)
 11. WO-12  done 2026-07-03: portfolio VaR + correlated-exposure reporting
-12. WO-13  microstructure hypotheses as replay strategies
+12. WO-13  done 2026-07-03: microstructure hypotheses as replay strategies
 13. WO-14  generalise the sweep (after WO-13)
 14. WO-16  per-family calibration scorecard
 15. WO-17  collection coverage report (verifies WO-20)

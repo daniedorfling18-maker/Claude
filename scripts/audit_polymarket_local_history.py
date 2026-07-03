@@ -232,6 +232,47 @@ def _closing_line_value_summary(payload: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _edge_attribution_summary(payload: dict[str, Any]) -> dict[str, Any]:
+    if not isinstance(payload, dict) or not payload:
+        return {
+            "attributed_positions": 0,
+            "closed_positions_seen": 0,
+            "cohort_classes": {},
+            "cohorts": [],
+        }
+    cohorts = [row for row in payload.get("cohorts", []) if isinstance(row, dict)]
+    return {
+        "attributed_positions": int(safe_float(payload.get("attributed_positions")) or 0),
+        "closed_positions_seen": int(safe_float(payload.get("closed_positions_seen")) or 0),
+        "skipped_unattributable_closed": int(safe_float(payload.get("skipped_unattributable_closed")) or 0),
+        "cohort_classes": {
+            str(row.get("signal_cohort") or "unknown"): row.get("attribution_class")
+            for row in cohorts
+        },
+        "cohorts": cohorts,
+    }
+
+
+def _algo_sweep_summary(payload: dict[str, Any]) -> dict[str, Any]:
+    if not isinstance(payload, dict) or not payload:
+        return {
+            "decision": "",
+            "combos_tested": 0,
+            "train_candidates": 0,
+            "selected": {},
+        }
+    return {
+        "decision": payload.get("decision", ""),
+        "strategy": payload.get("strategy", ""),
+        "events_total": payload.get("events_total", 0),
+        "train_events": payload.get("train_events", 0),
+        "validation_events": payload.get("validation_events", 0),
+        "combos_tested": payload.get("combos_tested", 0),
+        "train_candidates": payload.get("train_candidates", 0),
+        "selected": payload.get("selected", {}) if isinstance(payload.get("selected"), dict) else {},
+    }
+
+
 def _paper_decision(payload: dict[str, Any]) -> dict[str, Any]:
     blockers: list[str] = []
     warnings: list[str] = []
@@ -341,6 +382,47 @@ def _write_markdown(path: Path, payload: dict[str, Any]) -> None:
         else:
             lines.append("- No cohorts have final CLV evidence yet.")
     lines.append("")
+    lines.extend(["## Edge attribution", ""])
+    attribution = payload.get("edge_attribution") or {}
+    if not attribution.get("attributed_positions"):
+        lines.append("No edge attribution evidence yet.")
+    else:
+        lines.append(
+            f"- closed_positions_seen={attribution.get('closed_positions_seen', 0)}, "
+            f"attributed_positions={attribution.get('attributed_positions', 0)}, "
+            f"skipped_unattributable_closed={attribution.get('skipped_unattributable_closed', 0)}"
+        )
+        for row in attribution.get("cohorts", [])[:10]:
+            lines.append(
+                "- "
+                f"{row.get('signal_cohort', 'unknown')} — "
+                f"positions={row.get('attributed_positions', 0)}, "
+                f"total_pnl={row.get('total_pnl_usdc', '')}, "
+                f"line_movement={row.get('line_movement_usdc', '')}, "
+                f"execution_cost={row.get('execution_cost_usdc', '')}, "
+                f"class={row.get('attribution_class', 'unknown')}"
+            )
+    lines.append("")
+    lines.extend(["## Algo sweep lab", ""])
+    sweep = payload.get("algo_sweep") or {}
+    if not sweep.get("decision"):
+        lines.append("No sweep run yet.")
+    else:
+        selected = sweep.get("selected") or {}
+        lines.append(
+            f"- decision={sweep.get('decision')}, strategy={sweep.get('strategy', '')}, "
+            f"combos_tested={sweep.get('combos_tested', 0)}, "
+            f"train_candidates={sweep.get('train_candidates', 0)}"
+        )
+        if selected:
+            lines.append(
+                "- selected: "
+                f"spread={selected.get('tight_spread_maximum', '')}, "
+                f"imbalance={selected.get('minimum_book_imbalance', '')}, "
+                f"train_pnl={selected.get('train_pnl_usdc', '')}, "
+                f"validation_pnl={selected.get('validation_pnl_usdc', '')}"
+            )
+    lines.append("")
     path.write_text("\n".join(lines), encoding="utf-8")
 
 
@@ -372,6 +454,12 @@ def run(config_path: str = "polymarket_predictive_config.example.yaml") -> dict[
     closing_line_value = read_json(governance_root / "closing_line_value.json", default={}) or {}
     if not isinstance(closing_line_value, dict):
         closing_line_value = {}
+    edge_attribution = read_json(governance_root / "edge_attribution.json", default={}) or {}
+    if not isinstance(edge_attribution, dict):
+        edge_attribution = {}
+    algo_sweep = read_json(output_root / "polymarket_algo" / "algo_sweep_summary.json", default={}) or {}
+    if not isinstance(algo_sweep, dict):
+        algo_sweep = {}
     shadow_summary, shadow_cohorts = _shadow_summary(shadow_positions, shadow_fills)
     payload: dict[str, Any] = {
         "status": "ok",
@@ -387,6 +475,8 @@ def run(config_path: str = "polymarket_predictive_config.example.yaml") -> dict[
         "closing_line_value": _closing_line_value_summary(closing_line_value),
     }
     payload["paper_decision"] = _paper_decision(payload)
+    payload["edge_attribution"] = _edge_attribution_summary(edge_attribution)
+    payload["algo_sweep"] = _algo_sweep_summary(algo_sweep)
     governance_root.mkdir(parents=True, exist_ok=True)
     write_json(governance_root / "local_history_audit_summary.json", payload)
     write_csv(governance_root / "local_history_shadow_cohorts.csv", shadow_cohorts)

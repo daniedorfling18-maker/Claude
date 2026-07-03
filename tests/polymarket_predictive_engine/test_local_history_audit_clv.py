@@ -67,6 +67,52 @@ def test_local_history_audit_reports_clv_without_changing_paper_decision(tmp_pat
         },
     )
 
+    write_json(
+        governance_root / "edge_attribution.json",
+        {
+            "status": "ok",
+            "generated_at_utc": "2026-07-02T12:10:00Z",
+            "closed_positions_seen": 3,
+            "attributed_positions": 2,
+            "skipped_unattributable_closed": 1,
+            "cohorts": [
+                {
+                    "signal_cohort": "macro_rates",
+                    "attributed_positions": 2,
+                    "total_pnl_usdc": -2.2,
+                    "execution_cost_usdc": 0.4,
+                    "line_movement_usdc": -1.0,
+                    "settlement_surprise_usdc": -0.8,
+                    "attribution_class": "cost_dominated",
+                    "recommended_action": "tighten_execution_filters",
+                }
+            ],
+            "paper_trading_invoked": False,
+            "live_trading_invoked": False,
+        },
+    )
+    write_json(
+        tmp_path / "outputs" / "polymarket_algo" / "algo_sweep_summary.json",
+        {
+            "status": "ok",
+            "decision": "sweep_candidate_failed_out_of_sample_validation",
+            "strategy": "tight_spread_join_bid_shadow",
+            "events_total": 90,
+            "train_events": 60,
+            "validation_events": 30,
+            "combos_tested": 2,
+            "train_candidates": 1,
+            "selected": {
+                "tight_spread_maximum": 0.02,
+                "minimum_book_imbalance": 0.55,
+                "train_pnl_usdc": 0.2,
+                "validation_pnl_usdc": -0.1,
+            },
+            "paper_trading_invoked": False,
+            "live_trading_invoked": False,
+        },
+    )
+
     with_clv = audit_polymarket_local_history.run(str(config_path))
     summary = read_json(governance_root / "local_history_audit_summary.json")
     report = (governance_root / "local_history_audit_report.md").read_text(encoding="utf-8")
@@ -78,6 +124,14 @@ def test_local_history_audit_reports_clv_without_changing_paper_decision(tmp_pat
     assert summary["closing_line_value"]["mean_final_clv"] == 0.0142
     assert summary["closing_line_value"]["positive_clv_cohorts"] == ["macro_rates"]
     assert [row["signal_cohort"] for row in summary["closing_line_value"]["cohorts"]] == ["macro_rates"]
+    assert summary["edge_attribution"]["attributed_positions"] == 2
+    assert summary["edge_attribution"]["cohort_classes"] == {"macro_rates": "cost_dominated"}
+    assert summary["algo_sweep"]["decision"] == "sweep_candidate_failed_out_of_sample_validation"
     assert "Closing-line value (CLV)" in report
     assert "macro_rates — n_final=3, mean_final_clv=0.0142" in report
     assert "evidence=positive_clv_evidence" in report
+    assert "Edge attribution" in report
+    assert "macro_rates — positions=2" in report
+    assert "class=cost_dominated" in report
+    assert "Algo sweep lab" in report
+    assert "decision=sweep_candidate_failed_out_of_sample_validation" in report

@@ -124,6 +124,7 @@ HTML = """<!doctype html>
   </div>
   <section><h2>Trading signal audit</h2><div id="tradeSignalAudit"></div></section>
   <section><h2>Closing-line value (CLV)</h2><div id="closingLineValue"></div></section>
+  <section><h2>Edge attribution</h2><div id="edgeAttribution"></div></section>
   <section><h2>World Cup validation layer</h2><div id="worldcupValidation"></div></section>
   <section><h2>Actual paper P&L</h2><div id="actualTarget"></div></section>
   </details>
@@ -133,6 +134,7 @@ HTML = """<!doctype html>
   <section><h2>Fast price-action scout</h2><div id="priceActionScout"></div></section>
   <section><h2>Microstructure edge lab</h2><div id="microstructureLab"></div></section>
   <section><h2>Algo replay lab</h2><div id="algoReplay"></div></section>
+  <section><h2>Algo sweep lab</h2><div id="algoSweep"></div></section>
   <section><h2>Price-action prediction model</h2><div id="priceActionModel"></div></section>
   <section><h2>Quant research stack</h2><div id="quantResearch"></div></section>
   <section><h2>Price-action feedback loop</h2><div id="priceActionFeedback"></div></section>
@@ -253,9 +255,11 @@ async function load() {
     const algoReplay = data.algo_replay || {};
     const algoReplaySummaries = Array.isArray(algoReplay.summaries) ? algoReplay.summaries : [];
     const bestReplay = algoReplay.best_strategy || {};
+    const algoSweep = data.algo_sweep || {};
     const priceActionModel = data.price_action_model || {};
     const quantResearch = data.quant_research_status || {};
     const closingLine = data.closing_line_value || {};
+    const edgeAttribution = data.edge_attribution || {};
     const priceActionPaper = data.price_action_paper_signals || {};
     const currentHistScan = priceActionPaper.current_historical_analogue_scan || {};
     const historicalBreadthScan = priceActionPaper.historical_breadth_scan || {};
@@ -586,6 +590,28 @@ async function load() {
           ["Evidence","clv_evidence", v=>longText(v, 150)]
         ], 8)
       : `<div class="sectionLead">No CLV evidence yet. The next governance refresh should build closing_line_value.json once shadow positions and bid/ask features exist.</div>`;
+    const attributionCohorts = Array.isArray(edgeAttribution.cohorts) ? edgeAttribution.cohorts : [];
+    document.getElementById("edgeAttribution").innerHTML = Object.keys(edgeAttribution).length
+      ? `<div class="sectionLead">Explains closed shadow P&L using the exact identity: exit minus entry fill equals settlement surprise plus line movement minus execution cost. Diagnostic only; it does not authorise trading.</div>` + facts([
+          ["Status", edgeAttribution.status || "-"],
+          ["Generated", edgeAttribution.generated_at_utc || "-"],
+          ["Closed seen", edgeAttribution.closed_positions_seen],
+          ["Attributed positions", edgeAttribution.attributed_positions],
+          ["Skipped closed", edgeAttribution.skipped_unattributable_closed],
+          ["Minimum/cohort", edgeAttribution.minimum_positions_per_cohort],
+          ["Identity note", edgeAttribution.identity_note, v=>longText(v, 260)],
+          ["Governance note", edgeAttribution.governance_note || "Diagnostic only; no trading gate changed.", v=>longText(v, 260)]
+        ]) + titledTable("Attribution by cohort", attributionCohorts, [
+          ["Cohort","signal_cohort", v=>longText(v, 180)],
+          ["Positions","attributed_positions"],
+          ["Total P&L","total_pnl_usdc", fmtUsd],
+          ["Execution cost","execution_cost_usdc", fmtUsd],
+          ["Line movement","line_movement_usdc", fmtUsd],
+          ["Settlement surprise","settlement_surprise_usdc", fmtUsd],
+          ["Class","attribution_class", v=>longText(v, 170)],
+          ["Action","recommended_action", v=>longText(v, 180)]
+        ], 10)
+      : `<div class="sectionLead">No edge attribution evidence yet. The next governance refresh should build edge_attribution.json from closed shadow positions and CLV.</div>`;
     const cycleRows = [
       ["Active lane", legacyLiveActive ? "legacy live loop" : "shadow research + websocket"],
       ["Research status", `${researchStatus} / ${fmtAge(researchAge)} old`],
@@ -1057,6 +1083,32 @@ async function load() {
       ["Resting","resting_orders_at_end"],
       ["Paper/live","paper_trading_invoked", (v,row)=>`${v ? "paper" : "no paper"} / ${row.live_trading_invoked ? "live" : "no live"}`]
     ], 8);
+    const sweepCombos = Array.isArray(algoSweep.combos) ? algoSweep.combos : [];
+    const sweepSelected = algoSweep.selected || {};
+    document.getElementById("algoSweep").innerHTML = Object.keys(algoSweep).length
+      ? `<div class="sectionLead">Train-only parameter sweep over recorded websocket history, then one out-of-sample validation score. A validated result is shadow research only.</div>` + facts([
+          ["Decision", algoSweep.decision || "-"],
+          ["Strategy", algoSweep.strategy || "-"],
+          ["Events", algoSweep.events_total],
+          ["Train / validation", `${algoSweep.train_events ?? "-"} / ${algoSweep.validation_events ?? "-"}`],
+          ["Combos tested", algoSweep.combos_tested],
+          ["Train candidates", algoSweep.train_candidates],
+          ["Selected params", sweepSelected.tight_spread_maximum !== undefined ? `spread<=${fmtNum(sweepSelected.tight_spread_maximum, 4)}, imbalance>=${fmtNum(sweepSelected.minimum_book_imbalance, 4)}` : "-"],
+          ["Selected train P&L", sweepSelected.train_pnl_usdc, fmtUsd],
+          ["Selected validation P&L", sweepSelected.validation_pnl_usdc, fmtUsd],
+          ["Governance note", algoSweep.governance_note || "Shadow research only; no trading gate changed.", v=>longText(v, 260)]
+        ]) + titledTable("Sweep combinations", sweepCombos, [
+          ["Spread max","tight_spread_maximum", v=>fmtNum(v, 4)],
+          ["Min imbalance","minimum_book_imbalance", v=>fmtNum(v, 4)],
+          ["Train fills","train_fills"],
+          ["Train P&L","train_pnl_usdc", fmtUsd],
+          ["Validation fills","validation_fills"],
+          ["Validation P&L","validation_pnl_usdc", fmtUsd],
+          ["Candidate","train_candidate"],
+          ["Selected","selected"],
+          ["Status","status"]
+        ], 10)
+      : `<div class="sectionLead">No sweep run yet. The next governance refresh should build algo_sweep_summary.json once websocket features exist.</div>`;
     document.getElementById("priceActionModel").innerHTML = facts([
       ["Decision", priceActionModel.decision],
       ["Promotion ready", priceActionModel.promotion_ready],
@@ -3594,12 +3646,18 @@ def render_dashboard(cfg: EngineConfig, latest_report: dict[str, Any] | None = N
     if not isinstance(paper_round_trip_summary, dict):
         paper_round_trip_summary = {}
     algo_replay = _algo_replay_status(cfg)
+    algo_sweep = read_json(cfg.output_root / "polymarket_algo" / "algo_sweep_summary.json", default={}) or {}
+    if not isinstance(algo_sweep, dict):
+        algo_sweep = {}
     quant_research_status = read_json(governance / "quant_research_status.json", default={}) or {}
     if not isinstance(quant_research_status, dict):
         quant_research_status = {}
     closing_line_value = read_json(governance / "closing_line_value.json", default={}) or {}
     if not isinstance(closing_line_value, dict):
         closing_line_value = {}
+    edge_attribution = read_json(governance / "edge_attribution.json", default={}) or {}
+    if not isinstance(edge_attribution, dict):
+        edge_attribution = {}
     websocket_summary = read_json(cfg.output_root / "polymarket_websocket" / "websocket_summary.json", default={}) or {}
     if not isinstance(websocket_summary, dict):
         websocket_summary = {}
@@ -3704,8 +3762,10 @@ def render_dashboard(cfg: EngineConfig, latest_report: dict[str, Any] | None = N
         "price_action_feedback": price_action_feedback,
         "paper_round_trip_summary": paper_round_trip_summary,
         "algo_replay": algo_replay,
+        "algo_sweep": algo_sweep,
         "quant_research_status": quant_research_status,
         "closing_line_value": closing_line_value,
+        "edge_attribution": edge_attribution,
         "websocket_summary": websocket_summary,
         "websocket_feature_summary": websocket_feature_summary,
         "research_focus": research_focus,

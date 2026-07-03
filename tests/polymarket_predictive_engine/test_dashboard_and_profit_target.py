@@ -209,8 +209,94 @@ def test_dashboard_handles_empty_closing_line_value_artifact(tmp_path):
     data = read_json(result["dashboard_data"])
     html = Path(result["dashboard_file"]).read_text(encoding="utf-8")
     assert data["closing_line_value"] == {}
+    assert data["edge_attribution"] == {}
+    assert data["algo_sweep"] == {}
     assert "Closing-line value (CLV)" in html
     assert "No CLV evidence yet" in html
+    assert "Edge attribution" in html
+    assert "No edge attribution evidence yet" in html
+    assert "Algo sweep lab" in html
+    assert "No sweep run yet" in html
+
+
+def test_dashboard_surfaces_edge_attribution_artifact(tmp_path):
+    cfg = _config(tmp_path)
+    write_json(
+        cfg.governance_root / "edge_attribution.json",
+        {
+            "status": "ok",
+            "generated_at_utc": "2026-07-02T12:10:00Z",
+            "closed_positions_seen": 3,
+            "attributed_positions": 2,
+            "skipped_unattributable_closed": 1,
+            "minimum_positions_per_cohort": 1,
+            "identity_note": "per share identity",
+            "cohorts": [
+                {
+                    "signal_cohort": "macro_rates",
+                    "attributed_positions": 2,
+                    "total_pnl_usdc": -2.2,
+                    "execution_cost_usdc": 0.4,
+                    "line_movement_usdc": -1.0,
+                    "settlement_surprise_usdc": -0.8,
+                    "attribution_class": "model_direction_not_confirmed",
+                    "recommended_action": "re-model",
+                }
+            ],
+            "governance_note": "Diagnostic only.",
+            "paper_trading_invoked": False,
+            "live_trading_invoked": False,
+        },
+    )
+    write_json(
+        cfg.output_root / "polymarket_algo" / "algo_sweep_summary.json",
+        {
+            "status": "ok",
+            "decision": "sweep_candidate_failed_out_of_sample_validation",
+            "strategy": "tight_spread_join_bid_shadow",
+            "events_total": 90,
+            "train_events": 60,
+            "validation_events": 30,
+            "combos_tested": 2,
+            "train_candidates": 1,
+            "selected": {
+                "tight_spread_maximum": 0.02,
+                "minimum_book_imbalance": 0.55,
+                "train_pnl_usdc": 0.2,
+                "validation_pnl_usdc": -0.1,
+            },
+            "combos": [
+                {
+                    "tight_spread_maximum": 0.02,
+                    "minimum_book_imbalance": 0.55,
+                    "train_fills": 2,
+                    "train_pnl_usdc": 0.2,
+                    "validation_fills": 1,
+                    "validation_pnl_usdc": -0.1,
+                    "train_candidate": True,
+                    "selected": True,
+                    "status": "ok",
+                }
+            ],
+            "paper_trading_invoked": False,
+            "live_trading_invoked": False,
+        },
+    )
+
+    result = render_dashboard(cfg)
+
+    data = read_json(result["dashboard_data"])
+    html = Path(result["dashboard_file"]).read_text(encoding="utf-8")
+    assert data["edge_attribution"]["attributed_positions"] == 2
+    assert data["edge_attribution"]["paper_trading_invoked"] is False
+    assert data["edge_attribution"]["live_trading_invoked"] is False
+    assert data["algo_sweep"]["decision"] == "sweep_candidate_failed_out_of_sample_validation"
+    assert data["algo_sweep"]["paper_trading_invoked"] is False
+    assert data["algo_sweep"]["live_trading_invoked"] is False
+    assert "Edge attribution" in html
+    assert "Attribution by cohort" in html
+    assert "Algo sweep lab" in html
+    assert "Sweep combinations" in html
 
 
 def test_dashboard_surfaces_algo_replay_evidence(tmp_path):

@@ -432,6 +432,83 @@ def _current_positive_analogue_queries(targets: list[dict[str, Any]]) -> list[st
     return queries
 
 
+def _edge_attribution_query(row: dict[str, Any]) -> str:
+    cohort = str(row.get("signal_cohort") or row.get("cohort") or "").strip()
+    if not cohort:
+        cohort = str(row.get("family") or "").strip()
+    if not cohort or _is_quarantined_fast_crypto(cohort):
+        return ""
+    query = _cohort_query(cohort)
+    if query:
+        return query
+    family = str(row.get("family") or "").strip()
+    return _cohort_query(family) if family else ""
+
+
+def _edge_attribution_focus(edge_attribution: dict[str, Any], *, max_rows: int = 6) -> dict[str, Any]:
+    cohorts = edge_attribution.get("cohorts", []) if isinstance(edge_attribution, dict) else []
+    if not isinstance(cohorts, list):
+        cohorts = []
+    cost_driven: list[dict[str, Any]] = []
+    model_driven: list[dict[str, Any]] = []
+    positive: list[dict[str, Any]] = []
+    for row in cohorts:
+        if not isinstance(row, dict):
+            continue
+        primary_drag = str(row.get("primary_drag") or "")
+        recommended_action = str(row.get("recommended_action") or "")
+        query = _edge_attribution_query(row)
+        compact = {
+            "cohort": row.get("signal_cohort") or row.get("cohort") or "unknown",
+            "family": row.get("family") or "unknown",
+            "decision_pnl_usdc": row.get("decision_pnl_usdc"),
+            "entry_edge_usdc": row.get("entry_edge_usdc"),
+            "line_movement_usdc": row.get("line_movement_usdc"),
+            "spread_slippage_cost_usdc": row.get("spread_slippage_cost_usdc"),
+            "mean_final_clv": row.get("mean_final_clv"),
+            "primary_drag": primary_drag,
+            "recommended_action": recommended_action,
+            "recommended_collection_query": query,
+            "decision_use": "post_trade_feedback_for_collection_not_trade_authorisation",
+        }
+        if primary_drag in {"spread_slippage", "quote_quality"}:
+            cost_driven.append(compact)
+        elif primary_drag in {"adverse_line_movement", "model_edge_failed_to_transfer"}:
+            model_driven.append(compact)
+        elif primary_drag == "positive_forward_edge" or recommended_action == "collect_confirmation_until_governance_threshold":
+            positive.append(compact)
+
+    def _sort_key(item: dict[str, Any]) -> tuple[float, float, float]:
+        return (
+            _num(item.get("decision_pnl_usdc")),
+            _num(item.get("line_movement_usdc")),
+            -_num(item.get("spread_slippage_cost_usdc")),
+        )
+
+    positive.sort(key=_sort_key, reverse=True)
+    cost_driven.sort(key=lambda item: (_num(item.get("spread_slippage_cost_usdc")), abs(_num(item.get("decision_pnl_usdc")))), reverse=True)
+    model_driven.sort(key=lambda item: (_num(item.get("decision_pnl_usdc")), _num(item.get("mean_final_clv"))))
+    queries: list[str] = []
+    for bucket in (positive, cost_driven):
+        for row in bucket:
+            query = str(row.get("recommended_collection_query") or "").strip()
+            if query and query not in queries:
+                queries.append(query)
+            if len(queries) >= max_rows:
+                break
+        if len(queries) >= max_rows:
+            break
+    return {
+        "status": edge_attribution.get("status") if isinstance(edge_attribution, dict) else None,
+        "primary_drag_counts": edge_attribution.get("primary_drag_counts", {}) if isinstance(edge_attribution, dict) else {},
+        "collection_queries": queries,
+        "positive_forward_edge": positive[:max_rows],
+        "cost_driven": cost_driven[:max_rows],
+        "model_driven": model_driven[:max_rows],
+        "top_negative": edge_attribution.get("top_negative_cohorts", [])[:max_rows] if isinstance(edge_attribution, dict) else [],
+    }
+
+
 def _price_action_model_needs_data(price_action_model: dict[str, Any]) -> bool:
     decision = str(price_action_model.get("decision") or "")
     status = str(price_action_model.get("status") or "")
@@ -452,6 +529,10 @@ def build_research_focus(cfg) -> dict[str, Any]:
     price_action_feedback = read_json(governance / "price_action_feedback.json", default={}) or {}
     if not isinstance(price_action_feedback, dict):
         price_action_feedback = {}
+    edge_attribution = read_json(governance / "edge_attribution.json", default={}) or {}
+    if not isinstance(edge_attribution, dict):
+        edge_attribution = {}
+    edge_focus = _edge_attribution_focus(edge_attribution)
     price_action_model = read_json(cfg.output_root / "polymarket_price_action" / "price_action_model_summary.json", default={}) or {}
     if not isinstance(price_action_model, dict):
         price_action_model = {}
@@ -535,6 +616,24 @@ def build_research_focus(cfg) -> dict[str, Any]:
         )
     elif feedback_positive:
         next_action = str(price_action_feedback.get("next_action") or "Prioritise positive price-action cohorts until bid/ask gates clear.")
+    elif edge_focus.get("positive_forward_edge"):
+        best = edge_focus["positive_forward_edge"][0]
+        next_action = (
+            f"Edge attribution shows positive forward P&L for {best.get('cohort')}; "
+            f"collect confirmation rows via {best.get('recommended_collection_query') or 'the same family'} until governance thresholds clear."
+        )
+    elif edge_focus.get("cost_driven"):
+        worst = edge_focus["cost_driven"][0]
+        next_action = (
+            f"Edge attribution says {worst.get('cohort')} is cost/quote-quality constrained, not automatically a bad thesis; "
+            "collect tighter-spread/liquid analogues and fix quote audit before any promotion."
+        )
+    elif edge_focus.get("model_driven"):
+        worst = edge_focus["model_driven"][0]
+        next_action = (
+            f"Edge attribution says {worst.get('cohort')} losses are model/line-movement driven; "
+            "suppress this thesis until a new feature/anchor explains the adverse movement."
+        )
     else:
         next_action = (
             "Keep collecting bid/ask repricing evidence across liquid event families; "
@@ -569,6 +668,10 @@ def build_research_focus(cfg) -> dict[str, Any]:
             query = str(query or "").strip()
             if query and query not in collection_queries:
                 collection_queries.append(query)
+    for query in edge_focus.get("collection_queries", []) or []:
+        query = str(query or "").strip()
+        if query and query not in collection_queries:
+            collection_queries.append(query)
     if not collection_queries:
         feedback_queries = [str(query or "").strip() for query in price_action_feedback.get("collection_queries", [])]
         collection_queries = [query for query in feedback_queries if query] or ["bitcoin", "ethereum", "world cup", "tennis"]
@@ -627,6 +730,7 @@ def build_research_focus(cfg) -> dict[str, Any]:
             "monthly_goal_gap_usdc": price_action_feedback.get("monthly_goal_gap_usdc"),
             "top_cohorts": price_action_feedback.get("top_cohorts", [])[:10],
         },
+        "edge_attribution": edge_focus,
         "promotion_review": {
             "status": promotion_review.get("status"),
             "top_actionable": promotion_review.get("top_actionable", [])[:10],

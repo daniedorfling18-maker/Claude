@@ -58,6 +58,21 @@ def test_refresh_governance_rebuilds_price_action_paper_signals_before_audit(tmp
     monkeypatch.setattr(refresh_module, "build_closing_line_value", _closing_line)
     monkeypatch.setattr(
         refresh_module,
+        "build_edge_attribution",
+        lambda _cfg: order.append("edge_attribution")
+        or {
+            "status": "ok",
+            "attributed_positions": 2,
+            "cohorts": [{"signal_cohort": "macro_rates", "attribution_class": "cost_dominated"}],
+        },
+    )
+    monkeypatch.setattr(
+        refresh_module,
+        "run_algo_sweep",
+        lambda _cfg: order.append("algo_sweep") or {"decision": "no_sweep_candidate_reached_minimum_train_fills"},
+    )
+    monkeypatch.setattr(
+        refresh_module,
         "train_price_action_model",
         lambda _cfg: (
             assert_order_contains(order, ["price_action_scout", "price_action_microstructure", "paper_round_trip"])
@@ -111,6 +126,9 @@ def test_refresh_governance_rebuilds_price_action_paper_signals_before_audit(tmp
 
     assert order.index("paper_round_trip") < order.index("signal_cohort_pnl")
     assert order.index("paper_round_trip") < order.index("closing_line_value")
+    assert order.index("closing_line_value") < order.index("edge_attribution")
+    assert order.index("edge_attribution") < order.index("algo_sweep")
+    assert order.index("algo_sweep") < order.index("signal_cohort_pnl")
     assert order.index("closing_line_value") < order.index("promotion_review")
     assert order.index("price_action_scout") < order.index("price_action_model")
     assert order.index("price_action_microstructure") < order.index("price_action_model")
@@ -125,12 +143,18 @@ def test_refresh_governance_rebuilds_price_action_paper_signals_before_audit(tmp
     assert result["refreshed"]["price_action_microstructure"] is True
     assert result["refreshed"]["paper_round_trip_evidence"] is True
     assert result["refreshed"]["closing_line_value"] is True
+    assert result["refreshed"]["edge_attribution"] is True
+    assert result["refreshed"]["algo_sweep"] is True
     assert result["paper_round_trip_closed_trades"] == 2
     assert result["paper_round_trip_positive_trades"] == 1
     assert result["closing_line_positions_scored"] == 3
     assert result["closing_line_final_positions"] == 2
     assert result["closing_line_mean_final_clv"] == 0.0123
     assert result["closing_line_positive_cohorts"] == ["macro_rates"]
+    assert result["edge_attribution_status"] == "ok"
+    assert result["edge_attribution_positions"] == 2
+    assert result["edge_attribution_cohort_classes"] == {"macro_rates": "cost_dominated"}
+    assert result["algo_sweep_decision"] == "no_sweep_candidate_reached_minimum_train_fills"
     assert Path(cfg.governance_root / "closing_line_value.json").exists()
     assert Path(cfg.governance_root / "governance_refresh.json").exists()
 

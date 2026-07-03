@@ -1,6 +1,6 @@
 # Polymarket Codex Work Orders
 
-Last updated: 2026-07-03 (WO-10 landed; WO-7, WO-11..WO-19 open, in the order given in Sequencing)
+Last updated: 2026-07-03 (WO-7 and WO-10 landed; WO-11..WO-19 open, in the order given in Sequencing)
 
 Mechanical, file-level implementation instructions for coding agents (Codex or any other code
 changer). The architecture and priorities live in `docs/POLYMARKET_QUANT_MODE_CHARTER.md`; this file
@@ -297,7 +297,7 @@ valid summary artifact; example strategy over a crafted fixture → exact expect
 
 ---
 
-## WO-7 — CLV-aware promotion review, advisory only (WP4) — `open`
+## WO-7 — CLV-aware promotion review, advisory only (WP4) — `done` (2026-07-03)
 
 **Goal:** promotion review ranks cohorts using CLV as a *corroborating* signal without letting CLV
 alone promote anything. This is annotation + ordering, nothing else.
@@ -362,6 +362,13 @@ writes `promotion_review.json`. You are adding a read of `closing_line_value.jso
 
 **Out of scope:** `readiness.py`, any gate threshold, the audit script's `_paper_decision`,
 `closing_line.py` itself.
+
+**Landed:** `build_promotion_review()` now reads `closing_line_value.json`, adds advisory CLV
+fields to each review row, and uses positive CLV only as the final output-order tiebreaker after all
+existing sort keys. Negative CLV writes `negative closing-line value evidence (advisory)` to
+`advisory_notes`, not to mechanical gate fields. `promotion_review.json` now includes
+`clv_source` and `clv_is_advisory_only`. Tests prove positive CLV alone cannot change status,
+booleans, gates, or promotion decisions.
 
 ---
 
@@ -742,7 +749,7 @@ WO-1..WO-6, WO-8, WO-9   done and audited (2026-07-02)
 
 Night order:
 1. WO-10   done 2026-07-03: attribution + sweep wired into cycle/dashboard/audit
-2. WO-7    CLV-aware promotion review (advisory only; follow the spec verbatim)
+2. WO-7    done 2026-07-03: CLV-aware promotion review advisory wiring
 3. WO-11   research-focus consumption (after WO-10)
 4. WO-12   portfolio VaR + correlated-exposure reporting
 5. WO-13   microstructure hypotheses as replay strategies
@@ -755,6 +762,6 @@ Night order:
 ```
 
 After all six land: WP3 is done (flip it in the charter), the algo track (WP9–WP11) is done, and
-the remaining charter priorities are WP4 (CLV-aware promotion review) and WP6 (portfolio-level
-correlated exposure). WP5 (depth-based execution costs), WP7 (family classification for liquid
+the remaining charter priority is WP6 (portfolio-level correlated exposure). WP4 (CLV-aware
+promotion review), WP5 (depth-based execution costs), WP7 (family classification for liquid
 `unknown` markets), and WP8 (edge attribution) have since landed.

@@ -162,18 +162,45 @@ def _next_action(
     return "Keep collecting evidence without loosening promotion gates."
 
 
+def _attach_clv_advisory(row: dict[str, Any], clv_by_cohort: dict[str, dict[str, Any]]) -> dict[str, Any]:
+    cohort = str(row.get("cohort") or "unknown")
+    clv = clv_by_cohort.get(cohort) or {}
+    annotated = dict(row)
+    annotated["clv_evidence"] = str(clv.get("clv_evidence") or "insufficient_clv_evidence")
+    annotated["clv_mean_final"] = safe_float(clv.get("mean_final_clv"))
+    annotated["clv_ci_low"] = safe_float(clv.get("final_clv_ci_low"))
+    annotated["clv_ci_high"] = safe_float(clv.get("final_clv_ci_high"))
+    annotated["clv_final_positions"] = int(safe_float(clv.get("final_positions")) or 0)
+    if annotated["clv_evidence"] == "negative_clv_evidence":
+        notes = list(annotated.get("advisory_notes") or [])
+        advisory = "negative closing-line value evidence (advisory)"
+        if advisory not in notes:
+            notes.append(advisory)
+        annotated["advisory_notes"] = notes
+    return annotated
+
+
 def build_promotion_review(cfg: EngineConfig) -> dict[str, Any]:
     payload = read_json(cfg.governance_root / "signal_cohort_pnl.json", default={}) or {}
+    clv_artifact = read_json(cfg.governance_root / "closing_line_value.json", default={}) or {}
+    if not isinstance(clv_artifact, dict):
+        clv_artifact = {}
+    clv_by_cohort = {
+        str(row.get("signal_cohort")): row
+        for row in (clv_artifact.get("cohorts") or [])
+        if isinstance(row, dict)
+    }
     cohorts = payload.get("cohorts", []) if isinstance(payload, dict) else []
     if not isinstance(cohorts, list):
         cohorts = []
-    rows = [_review_row(cfg, row) for row in cohorts if isinstance(row, dict)]
+    rows = [_attach_clv_advisory(_review_row(cfg, row), clv_by_cohort) for row in cohorts if isinstance(row, dict)]
     rows.sort(
         key=lambda row: (
             1 if row["status"] in {"promoted", "probationary", "eligible_for_probationary_review", "near_full_promotion", "near_probationary"} else 0,
             _num(row.get("full_gates_passed")),
             _num(row.get("total_pnl_usdc")),
             _num(row.get("roi")),
+            1 if row.get("clv_evidence") == "positive_clv_evidence" else 0,
         ),
         reverse=True,
     )
@@ -181,6 +208,8 @@ def build_promotion_review(cfg: EngineConfig) -> dict[str, Any]:
         "status": "ok",
         "generated_at_utc": now_utc(),
         "policy": _policy(cfg),
+        "clv_source": "closing_line_value.json",
+        "clv_is_advisory_only": True,
         "review": rows,
         "top_actionable": rows[:10],
     }

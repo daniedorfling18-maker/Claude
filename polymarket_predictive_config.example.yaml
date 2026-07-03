@@ -897,6 +897,12 @@ risk:
   maximum_slippage: 0.02
   liquidity_cap_fraction: 0.05
   kelly_cap: 0.005
+  # Entry-price band for every paper/shadow order. Buying near-certain
+  # favourites (0.90+) risks the whole stake to win pennies at a win rate the
+  # market already prices in; deep longshots carry outsized resolution
+  # ambiguity. Base config only - override profiles cannot widen this band.
+  minimum_entry_price: 0.05
+  maximum_entry_price: 0.90
   # Shrink the model probability toward the market price (the no-edge prior)
   # before Kelly sizing. 0.0 = plain capped Kelly; higher values only ever size
   # smaller, hedging model-probability estimation error. Never relaxes sizing.

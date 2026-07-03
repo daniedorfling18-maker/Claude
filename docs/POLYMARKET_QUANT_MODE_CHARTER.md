@@ -291,6 +291,18 @@ coverage for CLV finality, evidence history time series, a dashboard evidence fu
 invariant property tests that lock the safety envelope. Nothing in the queue can loosen a gate;
 WO-19 explicitly changes zero source files.
 
+## Strategic reset — 2026-07-03
+
+Two days of forward evidence plus a live-system audit produced a verdict: the machinery works,
+the targets were wrong. Crypto up/down families show negative evidence on every stream while the
+two highest-prior edge sources (sharp-anchor divergence, dutch-book arb) sat dormant and discovery
+had collapsed into updown queries. The reset — full reasoning in
+`docs/POLYMARKET_EDGE_STRATEGY_RESET.md` — re-aims the research program (WO-24..WO-27), lands an
+entry-price band in `risk_decision` (0.05–0.90, base-config only; ends the buy-0.95-favourites
+probe pathology), and defines the leading indicators that count as "seeing potential profit"
+honestly: arb baskets, anchor coverage, positive CLV cohorts, then audited paper P&L. No gate was
+loosened; none will be.
+
 ## Rules of engagement for coding agents
 
 0. **Division of labour**: the orchestrating agent writes/updates this charter and the work orders

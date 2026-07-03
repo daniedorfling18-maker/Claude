@@ -129,6 +129,12 @@ if [ -f "$dashboard_data" ]; then
     printf '%s\n' "Dashboard sharp-anchor coverage data: missing (dashboard data predates per-sport anchor diagnostics)"
     exit_code=1
   fi
+  if grep -q "alpha_validated_anchor_rows" "$dashboard_data"; then
+    printf '%s\n' "Dashboard alpha-validated anchor data: ok"
+  else
+    printf '%s\n' "Dashboard alpha-validated anchor data: missing (dashboard data predates broad sharp-anchor Strategy V2 diagnostics)"
+    exit_code=1
+  fi
 else
   printf '%s\n' "Dashboard proof data: missing"
   exit_code=1

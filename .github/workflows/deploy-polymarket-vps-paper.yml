@@ -183,6 +183,7 @@ jobs:
           printf '%s' "$data" | grep -q "deployment_health"
           printf '%s' "$data" | grep -q "mispricing_alpha_bridge"
           printf '%s' "$data" | grep -q "coverage_by_sport_market"
+          printf '%s' "$data" | grep -q "alpha_validated_anchor_rows"
 
           echo "VPS deploy verified: http://${PM_VPS_HOST}:${port}/"
           REMOTE

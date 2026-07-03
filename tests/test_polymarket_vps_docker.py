@@ -72,6 +72,7 @@ def test_vps_health_script_checks_dashboard_and_heartbeat_files():
     assert "curl -fsS --max-time 5" in text
     assert "mispricing_alpha_bridge" in text
     assert "coverage_by_sport_market" in text
+    assert "alpha_validated_anchor_rows" in text
 
 
 def test_vps_deploy_workflow_requires_current_dashboard_schema():
@@ -80,3 +81,4 @@ def test_vps_deploy_workflow_requires_current_dashboard_schema():
     assert "deployment_health" in text
     assert "mispricing_alpha_bridge" in text
     assert "coverage_by_sport_market" in text
+    assert "alpha_validated_anchor_rows" in text

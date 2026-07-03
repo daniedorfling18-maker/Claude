@@ -6,6 +6,16 @@ from polymarket_predictive_engine.config import load_config, live_trading_allowe
 from polymarket_predictive_engine.risk import risk_decision
 
 
+def executable_book(price: float = 0.4) -> dict[str, float]:
+    return {
+        "best_ask": price,
+        "top_ask_size": 1000.0,
+        "ask_depth_1pct": 1000.0,
+        "ask_depth_5pct": 1000.0,
+        "websocket_quote_age_seconds": 30.0,
+    }
+
+
 def write_config(tmp_path: Path) -> Path:
     cfg = tmp_path / "config.yaml"
     cfg.write_text(Path("polymarket_predictive_config.example.yaml").read_text(), encoding="utf-8")
@@ -39,7 +49,19 @@ def test_risk_rejects_low_edge(tmp_path):
 
 def test_risk_approves_with_kelly_cap(tmp_path):
     cfg = load_config(write_config(tmp_path))
-    decision = risk_decision(cfg, {"edge": 0.10, "confidence": 0.9, "spread": 0.01, "liquidity": 1000, "executable_price": 0.4, "calibrated_probability": 0.55, "time_to_close_hours": 24})
+    decision = risk_decision(
+        cfg,
+        {
+            "edge": 0.10,
+            "confidence": 0.9,
+            "spread": 0.01,
+            "liquidity": 1000,
+            "executable_price": 0.4,
+            "calibrated_probability": 0.55,
+            "time_to_close_hours": 24,
+            **executable_book(0.4),
+        },
+    )
     assert decision["approved"]
     assert decision["size"] <= cfg.raw["risk"]["kelly_cap"] * cfg.raw["risk"]["bankroll"]
 
@@ -57,6 +79,7 @@ def test_risk_sizes_from_alpha_probability_when_present(tmp_path):
             "calibrated_probability": 0.20,
             "alpha_probability": 0.55,
             "time_to_close_hours": 24,
+            **executable_book(0.4),
         },
     )
     assert decision["approved"]
@@ -87,7 +110,15 @@ def test_example_config_has_no_byte_order_mark():
 
 def test_risk_rejects_entries_outside_price_band(tmp_path):
     cfg = load_config(write_config(tmp_path))
-    base = {"edge": 0.10, "confidence": 0.9, "spread": 0.01, "liquidity": 1000, "calibrated_probability": 0.99, "time_to_close_hours": 24}
+    base = {
+        "edge": 0.10,
+        "confidence": 0.9,
+        "spread": 0.01,
+        "liquidity": 1000,
+        "calibrated_probability": 0.99,
+        "time_to_close_hours": 24,
+        **executable_book(0.4),
+    }
     favourite = risk_decision(cfg, {**base, "executable_price": 0.95})
     assert not favourite["approved"]
     assert "entry price" in favourite["reason"]

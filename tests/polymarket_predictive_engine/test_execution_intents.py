@@ -94,6 +94,16 @@ def _example_config(tmp_path: Path):
     return load_config(cfg_path)
 
 
+def _book(price: float = 0.4) -> dict[str, float]:
+    return {
+        "best_ask": price,
+        "top_ask_size": 1000.0,
+        "ask_depth_1pct": 1000.0,
+        "ask_depth_5pct": 1000.0,
+        "websocket_quote_age_seconds": 30.0,
+    }
+
+
 def test_intent_from_risk_decision_round_trip(tmp_path: Path):
     cfg = _example_config(tmp_path)
     signal = {
@@ -107,6 +117,7 @@ def test_intent_from_risk_decision_round_trip(tmp_path: Path):
         "executable_price": 0.4,
         "calibrated_probability": 0.55,
         "time_to_close_hours": 24,
+        **_book(0.4),
     }
     decision = risk_decision(cfg, signal)
     assert decision["approved"]
@@ -143,6 +154,7 @@ def test_live_mode_cannot_be_created_via_adapter(tmp_path: Path):
         "executable_price": 0.4,
         "calibrated_probability": 0.55,
         "time_to_close_hours": 24,
+        **_book(0.4),
     }
     decision = risk_decision(cfg, signal)
     with pytest.raises(ValueError, match="mode"):

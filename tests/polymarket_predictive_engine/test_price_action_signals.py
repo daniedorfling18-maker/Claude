@@ -96,6 +96,11 @@ def _entry_row(**overrides: str) -> dict[str, str]:
         "liquidity": "500",
         "spread": "0.01",
         "time_to_close_hours": "1",
+        "best_ask": "0.50",
+        "top_ask_size": "1000",
+        "ask_depth_1pct": "1000",
+        "ask_depth_5pct": "1000",
+        "websocket_quote_age_seconds": "30",
     }
     row.update(overrides)
     return row
@@ -117,6 +122,11 @@ def _microstructure_current_row(**overrides: str) -> dict[str, str]:
         "latest_ask": "0.52",
         "latest_midpoint": "0.515",
         "latest_spread": "0.01",
+        "best_ask": "0.52",
+        "top_ask_size": "1000",
+        "ask_depth_1pct": "1000",
+        "ask_depth_5pct": "1000",
+        "websocket_quote_age_seconds": "30",
         "relative_spread": "0.0192",
         "validation_roi": "0.065",
         "validation_win_rate": "0.75",

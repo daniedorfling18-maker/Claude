@@ -271,7 +271,7 @@ def risk_decision(
         flat_slippage=flat_slippage,
     )
     impact_cap = safe_float(execution_estimate.get("max_stake_at_acceptable_impact_usdc"))
-    if impact_cap is not None and impact_cap > 0:
+    if impact_cap is not None and impact_cap >= 0:
         stake_usdc = min(stake_usdc, impact_cap)
         execution_estimate = estimate_execution_cost(
             signal,

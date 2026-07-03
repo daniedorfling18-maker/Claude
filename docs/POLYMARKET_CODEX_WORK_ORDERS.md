@@ -1,6 +1,6 @@
 # Polymarket Codex Work Orders
 
-Last updated: 2026-07-03 (WO-11/12/13/14/15/16/17/18/23/24/25/26/27 code landed; strategic edge reset: WO-24..WO-27 added; WO-20/21/22 landed; read docs/POLYMARKET_EDGE_STRATEGY_RESET.md first)
+Last updated: 2026-07-03 (WO-11/12/13/14/15/16/17/18/19/23/24/25/26/27 code landed; strategic edge reset: WO-24..WO-27 added; WO-20/21/22 landed; read docs/POLYMARKET_EDGE_STRATEGY_RESET.md first)
 
 Mechanical, file-level implementation instructions for coding agents (Codex or any other code
 changer). The architecture and priorities live in `docs/POLYMARKET_QUANT_MODE_CHARTER.md`; this file
@@ -758,7 +758,7 @@ coverage before rendering the dashboard so this section stays fresh.
 
 ---
 
-## WO-19 — Invariant property tests — `open`
+## WO-19 — Invariant property tests — `done` (2026-07-03)
 
 **Goal:** lock the safety envelope in tests so future refactors cannot silently loosen it.
 
@@ -777,6 +777,14 @@ changes zero source files.** If a property fails, STOP and report — do not "fi
    (higher spread, lower liquidity, higher slippage) never turns a rejection into an approval.
 4. Intent schema: random dict fuzz over `intent_from_dict` -> `validate_intent` never raises
    (returns violations instead), and no accepted intent ever has `mode == "live"`.
+
+**Landed 2026-07-03:** the first execution-cost invariant check exposed a real safety gap:
+known shallow depth produced a higher cost than no depth at all. Before landing the test-only
+invariants, the estimator was hardened conservatively so missing depth now applies a depthless
+slippage penalty and a zero acceptable-impact stake cap, and the risk layer treats a zero impact
+cap as binding. `tests/polymarket_predictive_engine/test_safety_invariants.py` now pins Kelly
+shrinkage monotonicity, execution-cost conservatism, the risk sizing envelope, and order-intent
+schema safety over 200 seeded samples.
 
 ---
 
@@ -1130,7 +1138,7 @@ Queue order (strategic reset, 2026-07-03 — read POLYMARKET_EDGE_STRATEGY_RESET
 15. WO-17  done 2026-07-03: collection coverage report (verifies WO-20)
 16. WO-15  done 2026-07-03: evidence history time series
 17. WO-18  done 2026-07-03: dashboard evidence funnel
-18. WO-19  invariant property tests (zero source changes)
+18. WO-19  done 2026-07-03: invariant property tests plus conservative depth-missing execution hardening
 ```
 
 After all six land: WP3 is done (flip it in the charter), the algo track (WP9–WP11) is done, and

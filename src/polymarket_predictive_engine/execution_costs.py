@@ -45,7 +45,9 @@ def estimate_execution_cost(
     """Estimate conservative fill cost from top-of-book depth fields.
 
     The estimator deliberately fails closed:
-    - if depth is missing, it returns the old flat slippage assumption unchanged;
+    - if depth is missing, it applies a conservative depthless penalty and a
+      zero acceptable-impact stake cap instead of treating missing liquidity as
+      free liquidity;
     - shallow books increase expected slippage and reduce the acceptable stake cap;
     - lower-than-flat slippage is only allowed when the top/depth can fill the
       requested stake AND the quote is demonstrably fresh: ``quote_age_seconds``
@@ -78,22 +80,30 @@ def estimate_execution_cost(
             "reason": "price missing; using flat slippage",
         }
     if top_size is None and depth_1pct is None and depth_5pct is None:
+        spread_floor = max(0.0, (spread or 0.0) / 2.0)
+        depthless_slippage = flat if stake <= 0 else max(flat, spread_floor, price * 0.05)
         return {
             "status": "missing_depth",
             "side": side,
             "reference_price": price,
             "stake_usdc": stake,
             "quantity": stake / price if price > 0 else 0.0,
-            "expected_fill_price": min(0.999999, price + flat) if side == "BUY" else max(0.000001, price - flat),
-            "expected_slippage": flat,
+            "expected_fill_price": (
+                min(0.999999, price + depthless_slippage)
+                if side == "BUY"
+                else max(0.000001, price - depthless_slippage)
+            ),
+            "expected_slippage": round(depthless_slippage, 6),
             "flat_slippage": flat,
             "spread": spread,
             "top_size": "",
             "depth_1pct": "",
             "depth_5pct": "",
-            "max_stake_at_acceptable_impact_usdc": "",
+            "max_stake_at_acceptable_impact_usdc": 0.0,
             "depth_is_demonstrably_deep": False,
-            "reason": "depth missing; using flat slippage",
+            "quote_age_seconds": "" if age is None else round(age, 3),
+            "quote_is_fresh": quote_is_fresh,
+            "reason": "depth missing; using conservative depthless slippage",
         }
 
     top = max(0.0, top_size or 0.0)

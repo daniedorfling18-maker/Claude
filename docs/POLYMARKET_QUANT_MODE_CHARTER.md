@@ -290,7 +290,8 @@ report). New ground covered by the queue: portfolio VaR reporting (WP6 remainder
 hypotheses as replay strategies + generalised sweep, per-family calibration scorecard, collection
 coverage for CLV finality, evidence history time series, a dashboard evidence funnel, and
 invariant property tests that lock the safety envelope. Nothing in the queue can loosen a gate;
-WO-19 explicitly changes zero source files.
+WO-19 began as a test-only lock but was allowed to harden source behavior only after the invariant
+exposed a conservative execution-cost gap.
 
 ## Strategic reset — 2026-07-03
 
@@ -380,6 +381,12 @@ targets, alpha/shadow candidates, shadow position state, final CLV coverage, att
 family calibration winners, pre-close collection gaps, algo-sweep decision, paper gate, and recent
 history. `refresh-governance` also refreshes family calibration and collection coverage before
 rendering, keeping the cockpit decision-useful.
+
+**2026-07-03 — WO-19 landed by Codex.** Seeded safety invariant tests now pin Kelly shrinkage,
+execution-cost conservatism, the risk decision sizing envelope, and order-intent schema safety.
+The first invariant check found that missing depth could look cheaper than known shallow depth, so
+execution costs now fail closed when depth is absent and the risk layer treats a zero acceptable
+impact cap as binding. This tightens execution safety without adding any paper/live permission.
 
 ## Rules of engagement for coding agents
 

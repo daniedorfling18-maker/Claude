@@ -279,6 +279,130 @@ def _looks_like_worldcup_outright(row: dict[str, Any], group: str, market_key: s
     )
 
 
+def _public_search_markets(payload: object) -> list[dict[str, Any]]:
+    """Extract market dictionaries from known Polymarket public-search response shapes."""
+    if not isinstance(payload, dict):
+        return []
+    markets: list[dict[str, Any]] = []
+    root_markets = payload.get("markets")
+    if isinstance(root_markets, list):
+        markets.extend(item for item in root_markets if isinstance(item, dict))
+    events = payload.get("events")
+    if isinstance(events, list):
+        for event in events:
+            if not isinstance(event, dict):
+                continue
+            event_markets = event.get("markets")
+            if isinstance(event_markets, list):
+                markets.extend(item for item in event_markets if isinstance(item, dict))
+    return markets
+
+
+def _yes_token_from_market(market: dict[str, Any]) -> str:
+    outcomes = [str(item).strip().lower() for item in _json_list(market.get("outcomes"))]
+    tokens = [
+        str(item).strip()
+        for item in _json_list(
+            market.get("clobTokenIds")
+            or market.get("clob_token_ids")
+            or market.get("clobTokenIDs")
+            or market.get("tokens")
+        )
+    ]
+    try:
+        yes_index = outcomes.index("yes")
+    except ValueError:
+        yes_index = 0
+    return tokens[yes_index] if yes_index < len(tokens) else ""
+
+
+def _h2h_public_search_queries(rows: Iterable[dict[str, Any]], *, limit: int) -> list[str]:
+    queries: list[str] = []
+    seen: set[str] = set()
+    for row in rows:
+        market_key = str(row.get("market_key") or row.get("market") or "").lower()
+        if market_key != "h2h":
+            continue
+        slug = str(row.get("market_slug") or row.get("event_slug") or row.get("event") or row.get("group") or "").strip()
+        if not slug:
+            continue
+        query = normalize_slug(slug).replace("-", " ").strip()
+        if query and query not in seen:
+            queries.append(query)
+            seen.add(query)
+        if len(queries) >= limit:
+            break
+    return queries
+
+
+def _h2h_match_tokens_from_public_search(
+    settings: dict[str, Any],
+    sharp_rows: Iterable[dict[str, Any]],
+) -> tuple[dict[str, str], dict[str, Any]]:
+    """Map h2h sharp rows to Polymarket binary YES tokens using exact fixture public search.
+
+    This intentionally maps only the YES token for a clear "Will Team beat Team?" market. It never
+    maps the NO token to the opponent because h2h markets can include draws and other non-win
+    outcomes.
+    """
+    if not settings.get("match_public_search_enabled", False):
+        return {}, {"enabled": False, "queries": 0, "tokens": 0}
+
+    max_queries = max(0, int(settings.get("match_public_search_max_queries", 20) or 20))
+    queries = _h2h_public_search_queries(sharp_rows, limit=max_queries)
+    if not queries:
+        return {}, {"enabled": True, "queries": 0, "tokens": 0}
+
+    base_url = str(settings.get("match_public_search_url") or settings.get("worldcup_public_search_url") or DEFAULT_GAMMA_PUBLIC_SEARCH)
+    timeout = int(
+        settings.get("match_public_search_timeout_seconds")
+        or settings.get("worldcup_public_search_timeout_seconds")
+        or 20
+    )
+    limit_per_type = str(settings.get("match_public_search_limit_per_type", 10) or 10)
+    mapping: dict[str, str] = {}
+    failed_queries = 0
+    markets_seen = 0
+    for query in queries:
+        try:
+            response = requests.get(
+                base_url,
+                params={
+                    "q": query,
+                    "events_status": "active",
+                    "limit_per_type": limit_per_type,
+                    "search_tags": "false",
+                    "search_profiles": "false",
+                },
+                timeout=timeout,
+            )
+            response.raise_for_status()
+            payload = response.json()
+        except Exception:  # noqa: BLE001 - public-search enrichment is optional and fail-closed
+            failed_queries += 1
+            continue
+        markets = _public_search_markets(payload)
+        markets_seen += len(markets)
+        for market in markets:
+            question_subject = _match_subject_from_question(market.get("question"))
+            if not question_subject:
+                continue
+            subject, opponent = question_subject
+            token = _yes_token_from_market(market)
+            if not token:
+                continue
+            mapping.setdefault(_match_key(_match_event_slug(subject, opponent), subject), token)
+            mapping.setdefault(_match_key(_match_event_slug(opponent, subject), subject), token)
+    return mapping, {
+        "enabled": True,
+        "queries": len(queries),
+        "failed_queries": failed_queries,
+        "markets_seen": markets_seen,
+        "tokens": len(set(mapping.values())),
+        "sample_queries": queries[:10],
+    }
+
+
 def _load_token_map(cfg: EngineConfig, settings: dict[str, Any]) -> dict[str, str]:
     """(market, outcome) -> token_id, built from a configured map file (default: the bot's
     market_snapshot.csv, which carries token_id + market_slug + outcome)."""
@@ -339,6 +463,7 @@ def build_sharp_anchor(cfg: EngineConfig, *, input_path: str | None = None) -> d
     token_col = find_first_column(cols, TOKEN_FIELDS)
     has_direct_tokens = bool(token_col and any(str(row.get(token_col, "")).strip() for row in rows))
     token_map = _load_token_map(cfg, settings)
+    h2h_public_tokens, h2h_public_search = _h2h_match_tokens_from_public_search(settings, rows)
     worldcup_winner_tokens = _worldcup_winner_token_map(cfg, settings)
 
     groups: dict[str, list[dict[str, Any]]] = defaultdict(list)
@@ -355,6 +480,7 @@ def build_sharp_anchor(cfg: EngineConfig, *, input_path: str | None = None) -> d
     worldcup_winner_token_joins = 0
     direct_token_joins = 0
     token_map_joins = 0
+    h2h_public_search_token_joins = 0
     overrounds: list[float] = []
     for gkey, grows in groups.items():
         raw: list[float] = []
@@ -399,6 +525,10 @@ def build_sharp_anchor(cfg: EngineConfig, *, input_path: str | None = None) -> d
                 token = token_map.get(_match_key(gkey, str(row.get(outcome_col, ""))), "")
                 if token:
                     token_map_joins += 1
+                else:
+                    token = h2h_public_tokens.get(_match_key(gkey, str(row.get(outcome_col, ""))), "")
+                    if token:
+                        h2h_public_search_token_joins += 1
             if (
                 not token
                 and outcome_col
@@ -450,6 +580,26 @@ def build_sharp_anchor(cfg: EngineConfig, *, input_path: str | None = None) -> d
         "max_market_implied_sum": max_market_implied_sum,
         "mean_overround_removed": round(sum(overrounds) / len(overrounds) - 1.0, 4) if overrounds else 0.0,
         "token_join": (
+            (
+                (
+                    "direct_token_id+"
+                    if direct_token_joins or has_direct_tokens
+                    else ""
+                )
+                + (
+                    "market_outcome_map+"
+                    if token_map_joins
+                    else ""
+                )
+                + "match_public_search"
+                + (
+                    "+worldcup_winner_team_map"
+                    if worldcup_winner_token_joins
+                    else ""
+                )
+            )
+            if h2h_public_search_token_joins
+            else
             "direct_token_id+market_outcome_map+worldcup_winner_team_map"
             if direct_token_joins and (token_map_joins or worldcup_winner_token_joins)
             else "direct_token_id+market_outcome_map"
@@ -464,6 +614,9 @@ def build_sharp_anchor(cfg: EngineConfig, *, input_path: str | None = None) -> d
         ),
         "direct_token_joins": direct_token_joins,
         "token_map_joins": token_map_joins,
+        "h2h_public_search": h2h_public_search,
+        "h2h_public_search_tokens_available": len(set(h2h_public_tokens.values())),
+        "h2h_public_search_token_joins": h2h_public_search_token_joins,
         "worldcup_winner_tokens_available": len(worldcup_winner_tokens),
         "worldcup_winner_token_joins": worldcup_winner_token_joins,
         "output_file": str(out_path),

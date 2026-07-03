@@ -181,6 +181,13 @@ sharp_anchor:
   worldcup_public_search_queries:
   - fifa world cup
   - world cup winner
+  # Optional token enrichment for h2h bookmaker rows. Uses exact fixture public-search queries and
+  # maps only explicit binary YES questions such as "Will Spain beat France?". It never maps NO to
+  # the opponent because soccer h2h rows can include draws.
+  match_public_search_enabled: true
+  match_public_search_max_queries: 20
+  match_public_search_limit_per_type: 10
+  match_public_search_timeout_seconds: 20
   # Fail closed if an odds group looks partial. A World Cup outright with only France/Spain rows
   # would otherwise be de-vigged as if every other team did not exist, manufacturing false edge.
   min_outcomes_per_market: 2

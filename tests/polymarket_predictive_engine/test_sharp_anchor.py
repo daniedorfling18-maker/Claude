@@ -204,6 +204,90 @@ def test_build_sharp_anchor_joins_h2h_match_yes_question_without_guessing_no_sid
     assert {sample["outcome"] for sample in summary["skipped_no_token_samples"]} == {"France", "Draw"}
 
 
+def test_build_sharp_anchor_enriches_h2h_match_tokens_from_public_search(tmp_path, monkeypatch):
+    cfg = EngineConfig(
+        raw={
+            "paths": {"output_root": str(tmp_path / "outputs")},
+            "sharp_anchor": {
+                "input_path": str(tmp_path / "sharp.csv"),
+                "token_map_path": str(tmp_path / "empty_map.csv"),
+                "match_public_search_enabled": True,
+                "match_public_search_max_queries": 5,
+            },
+        },
+        path=tmp_path / "cfg.yaml",
+    )
+    _write(
+        tmp_path / "sharp.csv",
+        [
+            {
+                "market_slug": "Spain vs France",
+                "outcome": "Spain",
+                "decimal_odds": "2.10",
+                "market_key": "h2h",
+                "sport": "soccer_fifa_world_cup",
+            },
+            {
+                "market_slug": "Spain vs France",
+                "outcome": "France",
+                "decimal_odds": "3.80",
+                "market_key": "h2h",
+                "sport": "soccer_fifa_world_cup",
+            },
+            {
+                "market_slug": "Spain vs France",
+                "outcome": "Draw",
+                "decimal_odds": "3.40",
+                "market_key": "h2h",
+                "sport": "soccer_fifa_world_cup",
+            },
+        ],
+        ["market_slug", "outcome", "decimal_odds", "market_key", "sport"],
+    )
+    _write(tmp_path / "empty_map.csv", [], ["token_id", "market_slug", "question", "outcome"])
+
+    seen_queries = []
+
+    def fake_get(*args, **kwargs):
+        seen_queries.append(kwargs["params"]["q"])
+        return _Response(
+            {
+                "events": [
+                    {
+                        "slug": "spain-vs-france",
+                        "markets": [
+                            {
+                                "question": "Will Spain beat France?",
+                                "outcomes": '["Yes", "No"]',
+                                "clobTokenIds": '["SPAIN_YES", "SPAIN_NO"]',
+                            },
+                            {
+                                "question": "Who will win Spain vs France?",
+                                "outcomes": '["Spain", "France", "Draw"]',
+                                "clobTokenIds": '["SPAIN_3WAY", "FRANCE_3WAY", "DRAW_3WAY"]',
+                            },
+                        ],
+                    }
+                ]
+            }
+        )
+
+    monkeypatch.setattr("polymarket_predictive_engine.sharp_anchor.requests.get", fake_get)
+
+    summary = build_sharp_anchor(cfg)
+
+    assert seen_queries == ["spain vs france"]
+    assert summary["fundamental_rows"] == 1
+    assert summary["skipped_no_token"] == 2
+    assert summary["h2h_public_search"]["queries"] == 1
+    assert summary["h2h_public_search_tokens_available"] == 1
+    assert summary["h2h_public_search_token_joins"] == 1
+    assert summary["token_join"] == "match_public_search"
+    out = _read(tmp_path / "outputs" / "polymarket_training" / "sharp_fundamental_probabilities.csv")
+    assert {row["token_id"] for row in out} == {"SPAIN_YES"}
+    assert {sample["outcome"] for sample in summary["skipped_no_token_samples"]} == {"France", "Draw"}
+
+
 def test_build_sharp_anchor_joins_worldcup_outrights_by_team_name(tmp_path):
     cfg = EngineConfig(
         raw={"paths": {"output_root": str(tmp_path / "outputs")},

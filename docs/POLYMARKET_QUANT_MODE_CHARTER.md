@@ -255,6 +255,20 @@ computed. No gates, thresholds, broker paths, or live-trading settings were chan
 corroboration only. The tests prove CLV can reorder otherwise-identical rows for human review but
 cannot change status, booleans, gate counts, missing mechanical gates, or paper/live permissions.
 
+**2026-07-03 — VPS dashboard audit added WO-20..WO-23.** The live VPS dashboard showed the next
+binding constraint: collection was not following open shadow/paper positions, leaving CLV finality,
+edge attribution, paper exits, and settlement detection starved of the exact quotes they need.
+The work-order queue now starts with position-aware websocket collection (WO-20), then stuck-position
+settlement/flagging (WO-21), display fixes for evidence-free extrapolations (WO-22), and
+deployment-aware oversight status (WO-23). WO-7 remains landed and advisory-only.
+
+**2026-07-03 — WO-20 landed by Codex.** Websocket target selection now reserves held shadow/paper
+position tokens before discovery tokens, reads paper close times from paper-order source payloads
+when the positions table lacks them, and writes `selection_reason=open_position` plus
+`target_position_counts` for auditability. This directly increases the chance of collecting the
+bid/ask lines needed for CLV finality, edge attribution, paper exits, and settlement detection.
+Full suite: 684 tests green.
+
 **2026-07-02 — overnight queue issued.** WO-7 and WO-10..WO-19 are specced in the work orders doc
 with a night-shift protocol (fixed order, stop conditions, skip-and-note rules, end-of-night
 report). New ground covered by the queue: portfolio VaR reporting (WP6 remainder), microstructure

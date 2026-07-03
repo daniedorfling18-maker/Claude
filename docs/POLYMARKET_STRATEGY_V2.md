@@ -190,6 +190,7 @@ Candidate output:
 
 ```text
 outputs/polymarket_strategy_v2/anchored_edge_candidates.csv
+outputs/polymarket_strategy_v2/alpha_validated_anchors.csv
 outputs/polymarket_strategy_v2/worldcup_validated_anchors.csv
 ```
 
@@ -286,10 +287,13 @@ Fast-feedback research markets may use lower liquidity only if explicitly labell
 
 No Strategy V2 output may be used for paper trading unless a separate governance promotion report approves it later.
 
-World Cup rows get one extra bridge artifact: `worldcup_validated_anchors.csv`. It is built from the
-mispricing-alpha validation layer and only includes World Cup rows where the bookmaker/fundamental
-cross-check passed. Strategy V2 uses the conservative `haircut_fundamental_probability` as the anchor
-when available, not the raw fundamental probability.
+Alpha-validated bookmaker rows get one extra bridge artifact: `alpha_validated_anchors.csv`. It is
+built from the mispricing-alpha validation layer and includes rows where the bookmaker/fundamental
+cross-check passed and the row is either World Cup related or comes from an explicitly allowed
+independent sharp-anchor source such as `sharp_fundamental_probabilities.csv`. Strategy V2 uses the
+conservative `haircut_fundamental_probability` as the anchor when available, not the raw fundamental
+probability. The legacy `worldcup_validated_anchors.csv` remains as the World Cup subset for
+backward-compatible audits.
 
 ---
 

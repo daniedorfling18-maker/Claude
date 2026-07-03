@@ -1857,6 +1857,7 @@ def test_dashboard_surfaces_strategy_v2_anchored_edge_progress(tmp_path):
             "recommended_action": "Keep Strategy V2 shadow-only and collect settled evidence for the candidate families.",
             "rows_scored": 33,
             "anchor_rows_loaded": 5,
+            "alpha_validated_anchor_rows": 4,
             "worldcup_validated_anchor_rows": 2,
             "anchored_rows": 3,
             "status_counts": {"shadow_candidate": 1, "rejected": 32},
@@ -2099,6 +2100,7 @@ def test_dashboard_surfaces_strategy_v2_anchored_edge_progress(tmp_path):
     assert strategy_v2["decision"] == "candidate_family_found"
     assert strategy_v2["shadow_candidates"] == 1
     assert strategy_v2["anchored_rows"] == 3
+    assert strategy_v2["alpha_validated_anchor_rows"] == 4
     assert strategy_v2["worldcup_validated_anchor_rows"] == 2
     assert strategy_v2["cycle_status"]["status"] == "ok"
     assert strategy_v2["forward_evidence"]["decision"] == "collect_more_resolved_forward_evidence"

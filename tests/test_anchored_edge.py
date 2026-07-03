@@ -11,6 +11,7 @@ from polymarket_predictive_engine.anchored_edge import (
     _edge_after_penalties,
     _family_rows,
     _find_anchor,
+    _validated_alpha_anchor_rows,
     _validated_worldcup_anchor_rows,
     build_anchored_edge_candidates,
 )
@@ -273,6 +274,49 @@ def test_validated_worldcup_anchor_rows_require_bookmaker_cross_check(tmp_path) 
     assert rows[0]["anchor_source"].startswith("validated_worldcup_haircut:")
 
 
+def test_alpha_validated_anchor_rows_include_allowed_sharp_sports_sources(tmp_path) -> None:
+    cfg = _config(tmp_path)
+    write_csv(
+        cfg.output_root / "polymarket_predictions" / "mispricing_alpha_scores.csv",
+        [
+            {
+                "market_slug": "will-boston-beat-new-york-on-july-3",
+                "question": "Will Boston beat New York on July 3?",
+                "category": "sports_other",
+                "outcome": "Yes",
+                "token_id": "sports-token",
+                "prediction_timestamp": "2026-07-03T11:00:00Z",
+                "fundamental_probability": "0.58",
+                "haircut_fundamental_probability": "0.49",
+                "fundamental_edge_after_haircut": "0.09",
+                "bookmaker_cross_check_pass": "true",
+                "microstructure_filter_pass": "true",
+                "validation_layer_pass": "true",
+                "fundamental_source": "outputs/polymarket_training/sharp_fundamental_probabilities.csv",
+                "signal_cohort": "sports_other",
+            },
+            {
+                "market_slug": "will-los-angeles-beat-miami-on-july-3",
+                "question": "Will Los Angeles beat Miami on July 3?",
+                "category": "sports_other",
+                "outcome": "Yes",
+                "token_id": "static-token",
+                "haircut_fundamental_probability": "0.80",
+                "bookmaker_cross_check_pass": "true",
+                "fundamental_source": "inputs/polymarket/model_probabilities.csv",
+            },
+        ],
+    )
+
+    rows = _validated_alpha_anchor_rows(cfg)
+
+    assert len(rows) == 1
+    assert rows[0]["token_id"] == "sports-token"
+    assert rows[0]["anchor_fair_probability"] == 0.49
+    assert rows[0]["anchor_type"] == "alpha_validated_haircut"
+    assert rows[0]["anchor_source"].startswith("validated_alpha_haircut:")
+
+
 def test_strategy_v2_scores_validated_worldcup_anchor_as_shadow_candidate(tmp_path) -> None:
     cfg = _config(tmp_path)
     prediction = {
@@ -314,3 +358,49 @@ def test_strategy_v2_scores_validated_worldcup_anchor_as_shadow_candidate(tmp_pa
     assert candidates[0]["status"] == "shadow_candidate"
     assert candidates[0]["anchor_type"] == "worldcup_validated_haircut"
     assert round(float(candidates[0]["risk_adjusted_anchor_edge"]), 6) == 0.06
+
+
+def test_strategy_v2_scores_validated_sharp_sports_anchor_as_shadow_candidate(tmp_path) -> None:
+    cfg = _config(tmp_path)
+    prediction = {
+        "market_slug": "will-boston-beat-new-york-on-july-3",
+        "question": "Will Boston beat New York on July 3?",
+        "category": "sports_other",
+        "outcome": "Yes",
+        "token_id": "sports-token",
+        "executable_price": "0.40",
+        "spread": "0.01",
+        "liquidity": "1000",
+        "market_probability": "0.40",
+    }
+    write_csv(cfg.output_root / "polymarket_predictions" / "predictions.csv", [prediction])
+    write_csv(
+        cfg.output_root / "polymarket_predictions" / "mispricing_alpha_scores.csv",
+        [
+            {
+                **prediction,
+                "prediction_timestamp": "2026-07-03T11:00:00Z",
+                "fundamental_probability": "0.58",
+                "haircut_fundamental_probability": "0.50",
+                "fundamental_edge_after_haircut": "0.10",
+                "bookmaker_cross_check_pass": "true",
+                "microstructure_filter_pass": "true",
+                "validation_layer_pass": "true",
+                "fundamental_source": "outputs/polymarket_training/sharp_fundamental_probabilities.csv",
+                "signal_cohort": "sports_other",
+            }
+        ],
+    )
+
+    candidates, report = build_anchored_edge_candidates(cfg)
+    alpha_rows = read_csv_rows(cfg.output_root / "polymarket_strategy_v2" / "alpha_validated_anchors.csv")
+    worldcup_rows = read_csv_rows(cfg.output_root / "polymarket_strategy_v2" / "worldcup_validated_anchors.csv")
+
+    assert report["alpha_validated_anchor_rows"] == 1
+    assert report["worldcup_validated_anchor_rows"] == 0
+    assert alpha_rows[0]["anchor_type"] == "alpha_validated_haircut"
+    assert worldcup_rows == []
+    assert candidates[0]["family"] == "sports_other"
+    assert candidates[0]["status"] == "shadow_candidate"
+    assert candidates[0]["anchor_type"] == "alpha_validated_haircut"
+    assert round(float(candidates[0]["risk_adjusted_anchor_edge"]), 6) == 0.09

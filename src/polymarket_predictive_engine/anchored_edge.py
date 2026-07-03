@@ -13,6 +13,7 @@ OUTPUT_DIRNAME = "polymarket_strategy_v2"
 CANDIDATES_FILE = "anchored_edge_candidates.csv"
 REPORT_JSON = "anchored_edge_report.json"
 REPORT_MD = "anchored_edge_report.md"
+ALPHA_VALIDATED_ANCHORS_FILE = "alpha_validated_anchors.csv"
 WORLDCUP_VALIDATED_ANCHORS_FILE = "worldcup_validated_anchors.csv"
 
 ACCEPTED_FAMILY_RULES: dict[str, dict[str, Any]] = {
@@ -126,7 +127,7 @@ DEFAULT_SETTINGS = {
     "full_promotion_min_roi": 0.05,
 }
 
-WORLDCUP_VALIDATED_ANCHOR_FIELDS = [
+VALIDATED_ANCHOR_FIELDS = [
     "token_id",
     "market_slug",
     "outcome",
@@ -144,6 +145,7 @@ WORLDCUP_VALIDATED_ANCHOR_FIELDS = [
     "validation_layer_pass",
     "signal_cohort",
 ]
+WORLDCUP_VALIDATED_ANCHOR_FIELDS = VALIDATED_ANCHOR_FIELDS
 
 
 def _settings(cfg: EngineConfig) -> dict[str, Any]:
@@ -165,6 +167,30 @@ def _text(row: dict[str, Any], *keys: str) -> str:
         if value:
             return value
     return ""
+
+
+def _setting_strings(settings: dict[str, Any], key: str, default: tuple[str, ...] = ()) -> tuple[str, ...]:
+    value = settings.get(key)
+    if value is None:
+        value = default
+    if isinstance(value, (str, Path)):
+        values = [value]
+    elif isinstance(value, (list, tuple, set)):
+        values = list(value)
+    else:
+        values = []
+    return tuple(
+        str(item).strip().lower().replace("\\", "/")
+        for item in values
+        if str(item).strip()
+    )
+
+
+def _source_matches_any_fragment(source: str, fragments: tuple[str, ...]) -> bool:
+    if not source or not fragments:
+        return False
+    normalised = source.strip().lower().replace("\\", "/")
+    return any(fragment in normalised for fragment in fragments)
 
 
 def _family(row: dict[str, Any]) -> str:
@@ -232,24 +258,33 @@ def _load_configured_anchor_rows(cfg: EngineConfig) -> list[dict[str, Any]]:
     return rows
 
 
-def _validated_worldcup_anchor_rows(cfg: EngineConfig) -> list[dict[str, Any]]:
-    """Build conservative Strategy V2 anchors from the World Cup validation layer.
+def _validated_alpha_anchor_rows(cfg: EngineConfig) -> list[dict[str, Any]]:
+    """Build conservative Strategy V2 anchors from alpha-validated sharp probabilities.
 
     The mispricing-alpha layer already attaches bookmaker/fundamental probabilities and applies the
-    configured haircut. Strategy V2 should only consume those probabilities when the row is actually
-    World Cup related and the bookmaker cross-check passed. Using the haircutted probability makes the
-    anchor intentionally more conservative than the raw fundamental estimate.
+    configured haircut. Strategy V2 should only consume those probabilities when the bookmaker
+    cross-check passed and the row is either World Cup related or comes from an explicitly allowed
+    independent sharp-anchor source. Using the haircutted probability makes the anchor intentionally
+    more conservative than the raw fundamental estimate.
     """
     source_path = cfg.output_root / "polymarket_predictions" / "mispricing_alpha_scores.csv"
+    shadow_settings = cfg.raw.get("shadow_cohort_validation", {}) or {}
+    non_worldcup_source_fragments = _setting_strings(
+        shadow_settings,
+        "allowed_non_worldcup_fundamental_source_fragments",
+        ("sharp_fundamental_probabilities.csv",),
+    )
     rows: list[dict[str, Any]] = []
     seen: set[tuple[str, str, str]] = set()
     for row in read_csv_rows(source_path):
-        if not is_worldcup_market(row):
-            continue
         if not boolish(row.get("bookmaker_cross_check_pass")):
             continue
         probability = _num(row, "haircut_fundamental_probability", "fundamental_probability")
         if probability is None or not 0.0 <= probability <= 1.0:
+            continue
+        is_worldcup = is_worldcup_market(row)
+        fundamental_source = _text(row, "fundamental_source") or "bookmaker_fundamental"
+        if not is_worldcup and not _source_matches_any_fragment(fundamental_source, non_worldcup_source_fragments):
             continue
         token_id = _token_key(row)
         market_slug = _market_key(row)
@@ -260,8 +295,9 @@ def _validated_worldcup_anchor_rows(cfg: EngineConfig) -> list[dict[str, Any]]:
         if key in seen:
             continue
         seen.add(key)
-        fundamental_source = _text(row, "fundamental_source") or "worldcup_bookmaker_fundamental"
         timestamp = _text(row, "prediction_timestamp", "generated_at_utc") or now_utc()
+        anchor_type = "worldcup_validated_haircut" if is_worldcup else "alpha_validated_haircut"
+        anchor_source_prefix = "validated_worldcup_haircut" if is_worldcup else "validated_alpha_haircut"
         rows.append(
             {
                 "token_id": token_id,
@@ -269,10 +305,10 @@ def _validated_worldcup_anchor_rows(cfg: EngineConfig) -> list[dict[str, Any]]:
                 "outcome": outcome,
                 "fair_probability": probability,
                 "anchor_fair_probability": probability,
-                "anchor_source": f"validated_worldcup_haircut:{fundamental_source}",
+                "anchor_source": f"{anchor_source_prefix}:{fundamental_source}",
                 "anchor_timestamp_utc": timestamp,
                 "anchor_path": str(source_path),
-                "anchor_type": "worldcup_validated_haircut",
+                "anchor_type": anchor_type,
                 "fundamental_probability": row.get("fundamental_probability", ""),
                 "haircut_fundamental_probability": row.get("haircut_fundamental_probability", ""),
                 "fundamental_edge_after_haircut": row.get("fundamental_edge_after_haircut", ""),
@@ -284,6 +320,11 @@ def _validated_worldcup_anchor_rows(cfg: EngineConfig) -> list[dict[str, Any]]:
         )
     rows.sort(key=lambda item: (str(item.get("market_slug") or ""), str(item.get("outcome") or "")))
     return rows
+
+
+def _validated_worldcup_anchor_rows(cfg: EngineConfig) -> list[dict[str, Any]]:
+    """Backward-compatible view of the World Cup subset of alpha-validated anchors."""
+    return [row for row in _validated_alpha_anchor_rows(cfg) if row.get("anchor_type") == "worldcup_validated_haircut"]
 
 
 def _anchor_index(anchor_rows: list[dict[str, Any]]) -> dict[tuple[str, str, str], dict[str, Any]]:
@@ -436,13 +477,21 @@ def build_anchored_edge_candidates(cfg: EngineConfig) -> tuple[list[dict[str, An
     prediction_rows = read_csv_rows(cfg.output_root / "polymarket_predictions" / "predictions.csv")
     output_dir = cfg.output_root / OUTPUT_DIRNAME
     output_dir.mkdir(parents=True, exist_ok=True)
-    worldcup_validated_anchor_rows = _validated_worldcup_anchor_rows(cfg)
+    alpha_validated_anchor_rows = _validated_alpha_anchor_rows(cfg)
+    worldcup_validated_anchor_rows = [
+        row for row in alpha_validated_anchor_rows if row.get("anchor_type") == "worldcup_validated_haircut"
+    ]
+    write_csv(
+        output_dir / ALPHA_VALIDATED_ANCHORS_FILE,
+        alpha_validated_anchor_rows,
+        fieldnames=VALIDATED_ANCHOR_FIELDS,
+    )
     write_csv(
         output_dir / WORLDCUP_VALIDATED_ANCHORS_FILE,
         worldcup_validated_anchor_rows,
         fieldnames=WORLDCUP_VALIDATED_ANCHOR_FIELDS,
     )
-    anchor_rows = _load_configured_anchor_rows(cfg) + worldcup_validated_anchor_rows
+    anchor_rows = _load_configured_anchor_rows(cfg) + alpha_validated_anchor_rows
     anchors = _anchor_index(anchor_rows)
     candidates: list[dict[str, Any]] = []
 
@@ -522,6 +571,7 @@ def build_anchored_edge_candidates(cfg: EngineConfig) -> tuple[list[dict[str, An
         candidates,
         anchor_rows,
         settings,
+        alpha_validated_anchor_rows=len(alpha_validated_anchor_rows),
         worldcup_validated_anchor_rows=len(worldcup_validated_anchor_rows),
     )
     write_json(output_dir / REPORT_JSON, report)
@@ -573,6 +623,7 @@ def _build_report(
     anchor_rows: list[dict[str, Any]],
     settings: dict[str, Any],
     *,
+    alpha_validated_anchor_rows: int = 0,
     worldcup_validated_anchor_rows: int = 0,
 ) -> dict[str, Any]:
     status_counts = Counter(str(row.get("status") or "unknown") for row in candidates)
@@ -601,6 +652,8 @@ def _build_report(
         "settings": settings,
         "rows_scored": len(candidates),
         "anchor_rows_loaded": len(anchor_rows),
+        "alpha_validated_anchor_rows": alpha_validated_anchor_rows,
+        "alpha_validated_anchor_file": str(Path(OUTPUT_DIRNAME) / ALPHA_VALIDATED_ANCHORS_FILE),
         "worldcup_validated_anchor_rows": worldcup_validated_anchor_rows,
         "worldcup_validated_anchor_file": str(Path(OUTPUT_DIRNAME) / WORLDCUP_VALIDATED_ANCHORS_FILE),
         "anchored_rows": len(anchored_rows),
@@ -639,6 +692,7 @@ def _write_markdown(path: Path, report: dict[str, Any]) -> None:
         "",
         f"- Rows scored: {report['rows_scored']}",
         f"- Anchor rows loaded: {report['anchor_rows_loaded']}",
+        f"- Alpha-validated anchors: {report.get('alpha_validated_anchor_rows', report.get('worldcup_validated_anchor_rows', 0))}",
         f"- World Cup validated anchors: {report.get('worldcup_validated_anchor_rows', 0)}",
         f"- Rows matched to anchors: {report.get('anchored_rows', 0)}",
         f"- Status counts: `{report['status_counts']}`",
@@ -723,6 +777,7 @@ def run(config_path: str = "polymarket_predictive_config.example.yaml") -> dict[
         "rows_scored": len(candidates),
         "anchor_rows_loaded": report["anchor_rows_loaded"],
         "anchored_rows": report["anchored_rows"],
+        "alpha_validated_anchor_rows": report.get("alpha_validated_anchor_rows", 0),
         "worldcup_validated_anchor_rows": report.get("worldcup_validated_anchor_rows", 0),
         "status_counts": report["status_counts"],
         "decision": report["decision"],

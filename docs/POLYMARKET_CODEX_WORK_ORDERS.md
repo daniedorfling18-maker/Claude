@@ -1,6 +1,6 @@
 # Polymarket Codex Work Orders
 
-Last updated: 2026-07-03 (WO-24/25/26/27 code landed; strategic edge reset: WO-24..WO-27 added; WO-20/21/22 landed; read docs/POLYMARKET_EDGE_STRATEGY_RESET.md first)
+Last updated: 2026-07-03 (WO-23/24/25/26/27 code landed; strategic edge reset: WO-24..WO-27 added; WO-20/21/22 landed; read docs/POLYMARKET_EDGE_STRATEGY_RESET.md first)
 
 Mechanical, file-level implementation instructions for coding agents (Codex or any other code
 changer). The architecture and priorities live in `docs/POLYMARKET_QUANT_MODE_CHARTER.md`; this file
@@ -878,7 +878,7 @@ green.
 
 ---
 
-## WO-23 — Deployment-aware oversight status — `open` (MEDIUM)
+## WO-23 — Deployment-aware oversight status — `done` (2026-07-03, MEDIUM)
 
 **Goal:** one coherent story about which driver should be running.
 
@@ -894,6 +894,11 @@ started`), `dashboard.py` Strategy V2 section, tests.
 2. Strategy V2 section: render "not running in this deployment" instead of "missing" when its
    artifacts are absent but the live loop is fresh.
 3. Tests: both alert branches, exact strings.
+
+**Landed 2026-07-03:** the oversight builder now emits the exact VPS-driver info line when the
+legacy live loop is fresh and the shadow-cycle file is absent, while preserving the warning when
+neither driver is fresh. Strategy V2 now reports "not running in this deployment" when its artifacts
+are absent under the fresh legacy-loop deployment, and focused dashboard tests cover both branches.
 
 ---
 
@@ -1060,7 +1065,7 @@ Queue order (strategic reset, 2026-07-03 — read POLYMARKET_EDGE_STRATEGY_RESET
 6. WO-27   done 2026-07-03: longshot-bias research family (shadow-only)
 7. WO-7    done 2026-07-03: CLV-aware promotion review advisory wiring
 8. WO-22   done 2026-07-03: evidence-gated display fixes
-9. WO-23   deployment-aware oversight status
+9. WO-23   done 2026-07-03: deployment-aware oversight status
 10. WO-11  research-focus consumption (after WO-26 so the guard shapes it)
 11. WO-12  portfolio VaR + correlated-exposure reporting
 12. WO-13  microstructure hypotheses as replay strategies

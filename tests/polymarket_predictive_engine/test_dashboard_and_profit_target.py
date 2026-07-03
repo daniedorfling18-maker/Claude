@@ -1095,6 +1095,47 @@ def test_dashboard_marks_stale_legacy_full_cycle_as_audit_only(tmp_path):
     assert "do not treat" in legacy["reason"]
 
 
+def test_dashboard_warns_when_no_driver_is_fresh_and_shadow_cycle_missing(tmp_path):
+    cfg = _config(tmp_path)
+
+    result = render_dashboard(cfg)
+    data = read_json(result["dashboard_data"])
+
+    alert_titles = [alert["title"] for alert in data["oversight_status"]["alerts"]]
+    assert data["shadow_research_cycle"]["effective_status"] == "not_started"
+    assert data["evidence_freshness"]["legacy_full_cycle"]["effective_status"] == "not_started"
+    assert "Shadow research cycle has not started" in alert_titles
+    assert "Driver: legacy live loop (VPS deployment); shadow-cycle status file not expected." not in alert_titles
+
+
+def test_dashboard_treats_fresh_legacy_loop_as_vps_driver_when_shadow_cycle_missing(tmp_path):
+    cfg = _config(tmp_path)
+    write_json(
+        cfg.governance_root / "local_live_loop_heartbeat.json",
+        {
+            "status": "ok",
+            "generated_at_utc": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+            "websocket_seconds": 5,
+            "prediction_cycle_seconds": 30,
+            "full_prediction_cycle": {"status": "running"},
+        },
+    )
+
+    result = render_dashboard(cfg)
+    data = read_json(result["dashboard_data"])
+
+    driver_line = "Driver: legacy live loop (VPS deployment); shadow-cycle status file not expected."
+    alerts = data["oversight_status"]["alerts"]
+    assert data["shadow_research_cycle"]["effective_status"] == "not_started"
+    assert data["evidence_freshness"]["legacy_full_cycle"]["effective_status"] == "live"
+    assert any(alert["severity"] == "info" and alert["title"] == driver_line for alert in alerts)
+    assert not any(alert["title"] == "Shadow research cycle has not started" for alert in alerts)
+    assert data["strategy_v2"]["status"] == "not running in this deployment"
+    assert data["strategy_v2"]["decision"] == "not running in this deployment"
+    assert data["strategy_v2"]["runtime_posture"] == "not_running_in_this_deployment"
+    assert data["strategy_v2"]["runtime_reason"] == "Strategy V2 is not running in this deployment."
+
+
 def test_dashboard_surfaces_shadow_research_memory_pause(tmp_path):
     cfg = _config(tmp_path)
     status_path = cfg.path.parent / "work" / "shadow_research_cycle_latest_status.json"

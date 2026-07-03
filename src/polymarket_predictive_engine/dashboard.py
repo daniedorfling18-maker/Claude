@@ -849,8 +849,10 @@ async function load() {
       ["Reason","quarantine_reason", v=>longText(v, 180)]
     ]);
     document.getElementById("strategyV2").innerHTML = facts([
+      ["Status", strategyV2.status],
       ["Decision", strategyV2.decision],
       ["Recommended action", strategyV2.recommended_action, v=>longText(v, 240)],
+      ["Runtime", strategyV2.runtime_reason, v=>longText(v, 180)],
       ["Report generated", strategyV2.generated_at_utc],
       ["Cycle status", strategyV2.cycle_status?.status],
       ["Cycle paper broker", strategyV2.paper_broker_status],
@@ -2160,7 +2162,7 @@ def _local_process_exists(pid_value: Any) -> bool | None:
     return True
 
 
-def _strategy_v2_status(cfg: EngineConfig) -> dict[str, Any]:
+def _strategy_v2_status(cfg: EngineConfig, legacy_full_cycle: dict[str, Any] | None = None) -> dict[str, Any]:
     """Expose Strategy V2 anchored-edge research progress on the dashboard.
 
     This is observability only. Strategy V2 remains shadow-only until a separate
@@ -2282,9 +2284,17 @@ def _strategy_v2_status(cfg: EngineConfig) -> dict[str, Any]:
     top_blockers = report.get("top_blockers") if isinstance(report.get("top_blockers"), dict) else {}
     main_blocker = next(iter(top_blockers.keys()), "") if top_blockers else ""
     cycle_state = str(cycle_status.get("status") or "").lower()
+    legacy_live_driver = (
+        isinstance(legacy_full_cycle, dict)
+        and str(legacy_full_cycle.get("effective_status") or "").lower() == "live"
+    )
+    missing_strategy_artifacts = not report and not candidates and cycle_state in {"", "missing"}
     runtime_posture = "collecting_shadow_evidence"
     runtime_reason = "Strategy V2 cycle is ready to collect shadow evidence."
-    if cycle_state == "skipped_high_memory":
+    if missing_strategy_artifacts and legacy_live_driver:
+        runtime_posture = "not_running_in_this_deployment"
+        runtime_reason = "Strategy V2 is not running in this deployment."
+    elif cycle_state == "skipped_high_memory":
         runtime_posture = "memory_paused"
         runtime_reason = str(cycle_status.get("reason") or "Strategy V2 paused by the local memory guard.")
     elif cycle_state in {"error", "failed"}:
@@ -2293,11 +2303,19 @@ def _strategy_v2_status(cfg: EngineConfig) -> dict[str, Any]:
     elif cycle_state in {"", "missing"}:
         runtime_posture = "not_started"
         runtime_reason = "Strategy V2 cycle status is missing."
+    status = report.get("status") or ("missing" if not candidates else "ok")
+    decision = report.get("decision") or "missing_report"
+    recommended_action = report.get("recommended_action") or "Run Strategy V2 anchored-edge scanner."
+    if missing_strategy_artifacts and legacy_live_driver:
+        status = "not running in this deployment"
+        decision = "not running in this deployment"
+        recommended_action = "No Strategy V2 action needed while the VPS deployment is driven by the legacy live loop."
+
     return {
-        "status": report.get("status") or ("missing" if not candidates else "ok"),
+        "status": status,
         "generated_at_utc": report.get("generated_at_utc"),
-        "decision": report.get("decision") or "missing_report",
-        "recommended_action": report.get("recommended_action") or "Run Strategy V2 anchored-edge scanner.",
+        "decision": decision,
+        "recommended_action": recommended_action,
         "cycle_status": cycle_status,
         "paper_trade_refresh": cycle_paper_trade,
         "paper_broker_status": cycle_broker.get("status"),
@@ -2828,12 +2846,24 @@ def _dashboard_oversight_status(
     def add_alert(severity: str, title: str, body: str) -> None:
         alerts.append({"severity": severity, "title": title, "body": body})
 
+    legacy_full_cycle = (
+        evidence_freshness.get("legacy_full_cycle") if isinstance(evidence_freshness.get("legacy_full_cycle"), dict) else {}
+    )
+    legacy_live_driver = str(legacy_full_cycle.get("effective_status") or "").lower() == "live"
+
     if shadow_status in {"not_started", "missing"}:
-        add_alert(
-            "warn",
-            "Shadow research cycle has not started",
-            str(shadow_research.get("reason") or "The current safe research lane has not produced a status file."),
-        )
+        if legacy_live_driver:
+            add_alert(
+                "info",
+                "Driver: legacy live loop (VPS deployment); shadow-cycle status file not expected.",
+                str(legacy_full_cycle.get("reason") or "Legacy live loop heartbeat is fresh."),
+            )
+        else:
+            add_alert(
+                "warn",
+                "Shadow research cycle has not started",
+                str(shadow_research.get("reason") or "The current safe research lane has not produced a status file."),
+            )
     elif shadow_status == "stale":
         add_alert(
             "bad",
@@ -3937,7 +3967,7 @@ def render_dashboard(cfg: EngineConfig, latest_report: dict[str, Any] | None = N
     near_miss_candidates = read_csv_rows(predictions_root / "near_miss_learning_candidates.csv")
     live_loop_status = _live_loop_status(heartbeat if isinstance(heartbeat, dict) else {}, cfg)
     legacy_full_cycle_status = _legacy_full_cycle_status(heartbeat if isinstance(heartbeat, dict) else {}, live_loop_status)
-    strategy_v2_status = _strategy_v2_status(cfg)
+    strategy_v2_status = _strategy_v2_status(cfg, legacy_full_cycle_status)
     strategy_v2_runtime = _strategy_v2_runtime_freshness(strategy_v2_status, live_loop_status)
     price_action_scout_status = _price_action_scout_status(cfg)
     price_action_microstructure_status = _price_action_microstructure_status(cfg)

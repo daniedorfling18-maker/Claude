@@ -1,6 +1,6 @@
 # Polymarket Quant Mode Charter
 
-Last updated: 2026-07-02
+Last updated: 2026-07-03
 
 This is the **orchestration charter** for turning the Polymarket predictive engine into a full quant
 trading system. It is written for every coding agent working on this repo — Claude, Codex, or any
@@ -325,6 +325,13 @@ markets where the YES tail is 2–12c, require a real NO-side token, and nominat
 `structural|longshot_no|<family>` candidates for CLV/forward-shadow validation. The canonical
 paper cycle forwards those rows only into shadow evidence, not paper signal generation. Artifacts
 live under `outputs/polymarket_longshot_bias/`.
+
+**2026-07-03 — WO-23 landed by Codex.** The dashboard now distinguishes the VPS deployment driver
+from local shadow-cycle observability. When the legacy live-loop heartbeat is fresh and the shadow
+research status file is absent, oversight shows the exact info line
+"Driver: legacy live loop (VPS deployment); shadow-cycle status file not expected." and no longer
+raises a false missing-shadow warning. Strategy V2 also renders "not running in this deployment"
+when its artifacts are absent under that fresh VPS live-loop driver.
 
 ## Rules of engagement for coding agents
 

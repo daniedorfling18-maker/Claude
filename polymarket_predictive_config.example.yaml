@@ -279,6 +279,7 @@ crypto_updown_live_model:
 profit_tracking:
   target_monthly_profit_usdc: 100
   minimum_tracking_hours_for_on_pace: 24
+  minimum_audited_round_trips_for_on_pace: 5
   pause_new_entries_below_pnl_usdc: -10
   baseline_file: paper_profit_target_baseline.json
   tracker_file: paper_profit_target_tracker.json

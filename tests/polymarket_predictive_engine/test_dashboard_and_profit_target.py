@@ -56,7 +56,35 @@ def test_profit_target_creates_clean_baseline_and_tracks_run_rate(tmp_path):
     )
     assert second["actual_pnl_since_baseline_usdc"] == 10
     assert second["monthly_run_rate_usdc"] > 100
-    assert second["status"] == "on_pace"
+    assert second["status"] == "collecting_verified_paper_evidence"
+    assert second["on_pace_by_actual_pnl"] is True
+    assert second["on_pace_by_decision_pnl"] is False
+    assert second["profit_target_proof_status"] == "unverified_paper_run_rate"
+    assert "paper_round_trip_audit_missing" in second["profit_target_proof_blockers"]
+
+    write_json(
+        cfg.output_root / "polymarket_price_action" / "paper_broker_round_trip_summary.json",
+        {
+            "audited_baseline_realized_pnl_usdc": 10,
+            "audited_baseline_closed_round_trips": 5,
+            "baseline_closed_round_trips": 5,
+            "quote_conflict_round_trips": 0,
+            "quote_unverified_round_trips": 0,
+        },
+    )
+    verified = write_profit_target_tracker(
+        cfg,
+        {
+            "equity": 1010,
+            "cash": 940,
+            "total_exposure": 70,
+            "generated_at_utc": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        },
+    )
+    assert verified["status"] == "on_pace"
+    assert verified["on_pace_by_decision_pnl"] is True
+    assert verified["profit_target_proof_status"] == "verified_quote_consistent"
+    assert verified["profit_target_proof_blockers"] == []
 
 
 def test_profit_target_uses_audited_pnl_when_raw_ledger_has_quote_conflicts(tmp_path):
@@ -74,6 +102,8 @@ def test_profit_target_uses_audited_pnl_when_raw_ledger_has_quote_conflicts(tmp_
         cfg.output_root / "polymarket_price_action" / "paper_broker_round_trip_summary.json",
         {
             "audited_baseline_realized_pnl_usdc": 0.22,
+            "audited_baseline_closed_round_trips": 5,
+            "baseline_closed_round_trips": 11,
             "quote_conflict_round_trips": 5,
             "quote_unverified_round_trips": 6,
         },
@@ -95,6 +125,8 @@ def test_profit_target_uses_audited_pnl_when_raw_ledger_has_quote_conflicts(tmp_
     assert payload["audited_pnl_since_baseline_usdc"] == approx(0.22)
     assert payload["decision_pnl_usdc"] == approx(0.22)
     assert payload["pnl_audit_state"] == "raw_pnl_contains_quote_conflicts"
+    assert payload["profit_target_proof_status"] == "unverified_paper_run_rate"
+    assert "quote_conflict_round_trips_5" in payload["profit_target_proof_blockers"]
     assert payload["quote_conflict_round_trips"] == 5
     assert payload["quote_unverified_round_trips"] == 6
     assert payload["raw_account_monthly_run_rate_usdc"] > 100
@@ -657,6 +689,11 @@ def test_dashboard_gates_extrapolated_edge_route_evidence(tmp_path):
             "target_monthly_profit_usdc": 100,
             "decision_pnl_usdc": 0.22,
             "decision_monthly_run_rate_usdc": 9.4,
+            "profit_target_proof_status": "unverified_paper_run_rate",
+            "profit_target_proof_blockers": ["needs_5_audited_round_trips_has_2"],
+            "audited_round_trips_since_baseline": 2,
+            "minimum_audited_round_trips_for_on_pace": 5,
+            "verified_evidence_ready": False,
             "price_action_goal_state": {
                 "state": "forward_paper_on_monthly_target",
                 "best_repricing_monthly_run_rate_usdc": 2344.677548049622,
@@ -711,7 +748,15 @@ def test_dashboard_gates_extrapolated_edge_route_evidence(tmp_path):
     assert "$1973.93" not in edge_card["value"]
     assert "$2344.68" not in edge_card["value"]
     assert edge_lane["key_metric"] == edge_card["value"]
+    target_card = next(card for card in data["decision_useful_summary"]["decision_cards"] if card["label"] == "$100/month state")
+    target_lane = next(row for row in data["decision_useful_summary"]["evidence_lanes"] if row["lane"] == "Forward paper P&L")
+    assert target_card["severity"] == "warn"
+    assert "proof unverified_paper_run_rate" in target_card["value"]
+    assert "audited exits 2/5" in target_card["value"]
+    assert "audited round trips 2/5" in target_lane["blocker_or_next"]
+    assert "needs_5_audited_round_trips_has_2" in data["decision_useful_summary"]["profit_target_proof_blockers"]
     assert "n too small to annualise" in html
+    assert "Proof status" in html
     assert "provisional lines await market close" in html
     assert "no strategy beat doing nothing" in html
     assert "raw; audited" in html

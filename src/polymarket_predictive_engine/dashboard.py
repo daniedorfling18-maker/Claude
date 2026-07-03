@@ -345,6 +345,11 @@ async function load() {
     const decisionRunRate = goalPlan.decision_monthly_run_rate_usdc ?? target.decision_monthly_run_rate_usdc ?? target.monthly_run_rate_usdc;
     const auditedPnl = goalPlan.audited_pnl_since_baseline_usdc;
     const pnlAuditState = goalPlan.pnl_audit_state || "unknown";
+    const profitProofStatus = goalPlan.profit_target_proof_status || target.profit_target_proof_status || "unknown";
+    const profitProofBlockers = goalPlan.profit_target_proof_blockers || target.profit_target_proof_blockers || [];
+    const auditedRoundTrips = goalPlan.audited_round_trips_since_baseline ?? target.audited_round_trips_since_baseline ?? "-";
+    const minAuditedRoundTrips = goalPlan.minimum_audited_round_trips_for_on_pace ?? target.minimum_audited_round_trips_for_on_pace ?? "-";
+    const verifiedEvidenceReady = Boolean(goalPlan.verified_evidence_ready || target.verified_evidence_ready);
     const promotionPolicy = data.cohort_promotion_readiness || {};
     const minimumFilledOrders = Number(promotionPolicy.minimum_filled_orders || data.signal_cohort_pnl?.minimum_filled_orders || 5);
     const minimumEvidenceHours = 72;
@@ -500,7 +505,7 @@ async function load() {
       card("Why not / why now?", longText(blockerText, 120), tradeDecisionClass),
       card("Unlock condition", longText(unlockCondition, 120), approvedSignals > 0 ? "good" : "warn"),
       card("Collect now", joinText(collectQueries), collectQueries.length ? "good" : "warn"),
-      card("$100/month state", `${fmtUsd(pnl)} audited / ${fmtUsd(decisionRunRate)} audited run-rate`, pnl >= 0 ? "good" : "bad"),
+      card("$100/month state", `${fmtUsd(pnl)} audited / ${fmtUsd(decisionRunRate)} run-rate / ${profitProofStatus}`, verifiedEvidenceReady ? "good" : "warn"),
       card("Best edge route", bestEdgeRouteSummary(), "warn")
     ].join("");
     document.getElementById("decisionCockpit").innerHTML = `
@@ -658,6 +663,9 @@ async function load() {
       ["Audited run-rate", decisionRunRate, fmtUsd],
       ["Raw ledger P&L (audit-only)", rawPnl, v=>fmtUsd(v) + auditedRawSuffix()],
       ["P&L audit state", pnlAuditState, v=>longText(v, 180)],
+      ["Proof status", profitProofStatus, v=>longText(v, 180)],
+      ["Audited round trips", `${auditedRoundTrips} / ${minAuditedRoundTrips}`],
+      ["Proof blockers", profitProofBlockers, joinText],
       ["Quote conflicts", goalPlan.quote_conflict_round_trips],
       ["Unverified quote rows", goalPlan.quote_unverified_round_trips],
       ["Tracking hours", target.elapsed_hours, v=>fmtNum(v,2)],
@@ -670,6 +678,9 @@ async function load() {
       ["Audited P&L for goal", goalPlan.decision_pnl_usdc, fmtUsd],
       ["Raw ledger P&L", goalPlan.raw_account_pnl_since_baseline_usdc, v=>fmtUsd(v) + auditedRawSuffix()],
       ["P&L audit state", goalPlan.pnl_audit_state, v=>longText(v, 180)],
+      ["Proof status", profitProofStatus, v=>longText(v, 180)],
+      ["Audited round trips", `${auditedRoundTrips} / ${minAuditedRoundTrips}`],
+      ["Proof blockers", profitProofBlockers, joinText],
       ["Best repricing evidence", routeEvidenceDisplay("shadow"), v=>longText(v, 220)],
       ["Forward paper evidence", routeEvidenceDisplay("paper"), v=>longText(v, 220)],
       ["Required/day from here", goalPlan.required_daily_from_here_usdc, fmtUsd],
@@ -3444,6 +3455,11 @@ def _decision_useful_summary(
         decision_run_rate = run_rate
     audited_pnl = safe_float(goal_plan.get("audited_pnl_since_baseline_usdc"))
     pnl_audit_state = str(goal_plan.get("pnl_audit_state") or "unknown")
+    profit_target_proof_status = str(goal_plan.get("profit_target_proof_status") or "unknown")
+    profit_target_proof_blockers = _compact_list(goal_plan.get("profit_target_proof_blockers"), limit=4)
+    verified_evidence_ready = bool(goal_plan.get("verified_evidence_ready"))
+    audited_round_trips = int(safe_float(goal_plan.get("audited_round_trips_since_baseline")) or 0)
+    minimum_audited_round_trips = int(safe_float(goal_plan.get("minimum_audited_round_trips_for_on_pace")) or 5)
     best_repricing_run_rate = safe_float(price_action_goal.get("best_repricing_monthly_run_rate_usdc"))
     forward_paper_run_rate = safe_float(price_action_goal.get("best_forward_paper_monthly_run_rate_usdc"))
     edge_route_text = _best_edge_route_text(price_action_goal, price_action_feedback)
@@ -3611,7 +3627,11 @@ def _decision_useful_summary(
         {"label": f"audited P&L {_usd_text(decision_pnl)}", "severity": "good" if decision_pnl >= 0 else "bad"},
         {
             "label": f"audited run-rate {_usd_text(decision_run_rate)} / {_usd_text(target_monthly)}",
-            "severity": "good" if decision_run_rate is not None and decision_run_rate >= target_monthly else "warn",
+            "severity": "good" if decision_run_rate is not None and decision_run_rate >= target_monthly and verified_evidence_ready else "warn",
+        },
+        {
+            "label": f"proof {profit_target_proof_status}",
+            "severity": "good" if verified_evidence_ready else "warn",
         },
     ]
     if collect_now:
@@ -3700,7 +3720,10 @@ def _decision_useful_summary(
             "state": pnl_audit_state,
             "decision_use": "Measures quote-consistent paper progress toward the $100/month target; raw ledger P&L is diagnostic only when quote conflicts exist.",
             "key_metric": f"audited {_usd_text(decision_pnl)}; run-rate {_usd_text(decision_run_rate)}",
-            "blocker_or_next": f"target {_usd_text(target_monthly)}; required/day {_usd_text(goal_plan.get('required_daily_from_here_usdc'))}",
+            "blocker_or_next": (
+                f"proof {profit_target_proof_status}; audited round trips {audited_round_trips}/{minimum_audited_round_trips}"
+                + (f"; blockers {', '.join(profit_target_proof_blockers)}" if profit_target_proof_blockers else "")
+            ),
         },
         {
             "lane": "Live bid/ask feed",
@@ -3768,6 +3791,7 @@ def _decision_useful_summary(
     raw_pnl_text = f"raw ledger {_usd_text(actual_pnl)}" if audited_pnl is not None else ""
     profit_target_text = (
         f"{_usd_text(decision_pnl)} audited; {_usd_text(decision_run_rate)} audited monthly run-rate vs {_usd_text(target_monthly)} target"
+        + f"; proof {profit_target_proof_status}; audited exits {audited_round_trips}/{minimum_audited_round_trips}"
         + (f" ({raw_pnl_text})" if raw_pnl_text else "")
     )
     decision_questions = [
@@ -3842,8 +3866,8 @@ def _decision_useful_summary(
         {
             "label": "$100/month state",
             "value": profit_target_text,
-            "severity": "good" if decision_run_rate is not None and decision_run_rate >= target_monthly else "bad",
-            "decision_use": "Shows whether audited paper trading is actually paying for the capital goal.",
+            "severity": "good" if decision_run_rate is not None and decision_run_rate >= target_monthly and verified_evidence_ready else "warn",
+            "decision_use": "Shows whether audited, quote-consistent paper trading is actually paying for the capital goal.",
         },
         {
             "label": "Edge route",
@@ -3874,6 +3898,11 @@ def _decision_useful_summary(
         "monthly_run_rate_usdc": run_rate,
         "decision_monthly_run_rate_usdc": decision_run_rate,
         "pnl_audit_state": pnl_audit_state,
+        "profit_target_proof_status": profit_target_proof_status,
+        "profit_target_proof_blockers": profit_target_proof_blockers,
+        "verified_evidence_ready": verified_evidence_ready,
+        "audited_round_trips_since_baseline": audited_round_trips,
+        "minimum_audited_round_trips_for_on_pace": minimum_audited_round_trips,
         "target_monthly_profit_usdc": target_monthly,
         "best_repricing_monthly_run_rate_usdc": best_repricing_run_rate,
         "best_forward_paper_monthly_run_rate_usdc": forward_paper_run_rate,

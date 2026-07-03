@@ -214,6 +214,9 @@ def build_goal_plan(cfg: EngineConfig) -> dict[str, Any]:
     audited_available = audited_pnl is not None
     decision_pnl = float(audited_pnl) if audited_available else actual_pnl
     decision_monthly_run_rate = (decision_pnl / elapsed_days * 30.0) if elapsed_days > 0 else None
+    minimum_audited_round_trips = int(_num(settings.get("minimum_audited_round_trips_for_on_pace"), 5.0))
+    audited_round_trips = int(_num(paper_round_trip.get("audited_baseline_closed_round_trips")))
+    baseline_round_trips = int(_num(paper_round_trip.get("baseline_closed_round_trips")))
     quote_conflicts = int(_num(paper_round_trip.get("quote_conflict_round_trips")))
     quote_unverified = int(_num(paper_round_trip.get("quote_unverified_round_trips")))
     pnl_audit_state = (
@@ -225,6 +228,23 @@ def build_goal_plan(cfg: EngineConfig) -> dict[str, Any]:
         if audited_available
         else "audit_not_available"
     )
+    verified_evidence_ready = bool(
+        audited_available
+        and audited_round_trips >= minimum_audited_round_trips
+        and quote_conflicts == 0
+        and quote_unverified == 0
+    )
+    proof_blockers: list[str] = []
+    if not verified_evidence_ready:
+        if not audited_available:
+            proof_blockers.append("paper_round_trip_audit_missing")
+        if audited_round_trips < minimum_audited_round_trips:
+            proof_blockers.append(f"needs_{minimum_audited_round_trips}_audited_round_trips_has_{audited_round_trips}")
+        if quote_conflicts > 0:
+            proof_blockers.append(f"quote_conflict_round_trips_{quote_conflicts}")
+        if quote_unverified > 0:
+            proof_blockers.append(f"quote_unverified_round_trips_{quote_unverified}")
+    profit_target_proof_status = "verified_quote_consistent" if verified_evidence_ready else "unverified_paper_run_rate"
     prorated_target = target_daily * elapsed_days
     required_remaining_monthly = max(0.0, target_monthly - decision_pnl)
     required_daily_from_here = required_remaining_monthly / max(1.0, 30.0 - elapsed_days) if target_monthly else 0.0
@@ -236,6 +256,8 @@ def build_goal_plan(cfg: EngineConfig) -> dict[str, Any]:
     price_action_gap = _price_action_gap(price_action_state)
     if audited_available and (quote_conflicts > 0 or quote_unverified > 0) and decision_pnl < actual_pnl:
         main_gap = "raw paper P&L contains quote-conflicted/unverified rows; the $100 route must use audited quote-consistent P&L"
+    elif decision_monthly_run_rate is not None and decision_monthly_run_rate >= target_monthly and not verified_evidence_ready:
+        main_gap = "paper run-rate is mathematically on pace, but the $100 route is not yet verified by enough quote-consistent paper round trips"
     elif approved_signals:
         main_gap = "approved paper signals exist; broker should process them unless duplicate/risk/pause controls intervene"
     elif price_action_gap:
@@ -250,6 +272,8 @@ def build_goal_plan(cfg: EngineConfig) -> dict[str, Any]:
     recommended_action = (
         "Keep the data, but reset trust to audited quote-consistent paper exits; collect fresh clean exits before counting progress toward $100/month."
         if audited_available and (quote_conflicts > 0 or quote_unverified > 0) and decision_pnl < actual_pnl
+        else "Collect more quote-consistent paper exits before treating the run-rate as verified progress toward $100/month."
+        if decision_monthly_run_rate is not None and decision_monthly_run_rate >= target_monthly and not verified_evidence_ready
         else _recommended_action(approved_signals, probationary, positive_watchlist, price_action_state)
     )
 
@@ -262,16 +286,22 @@ def build_goal_plan(cfg: EngineConfig) -> dict[str, Any]:
         "actual_pnl_since_baseline_usdc": actual_pnl,
         "raw_account_pnl_since_baseline_usdc": actual_pnl,
         "audited_pnl_since_baseline_usdc": audited_pnl,
+        "audited_round_trips_since_baseline": audited_round_trips,
+        "baseline_round_trips_since_baseline": baseline_round_trips,
+        "minimum_audited_round_trips_for_on_pace": minimum_audited_round_trips,
         "decision_pnl_usdc": decision_pnl,
         "decision_monthly_run_rate_usdc": decision_monthly_run_rate,
         "pnl_audit_state": pnl_audit_state,
+        "profit_target_proof_status": profit_target_proof_status,
+        "profit_target_proof_blockers": proof_blockers,
+        "verified_evidence_ready": verified_evidence_ready,
         "quote_conflict_round_trips": quote_conflicts,
         "quote_unverified_round_trips": quote_unverified,
         "elapsed_hours": elapsed_hours,
         "elapsed_days": elapsed_days,
         "prorated_target_usdc": prorated_target,
         "on_pace_by_actual_pnl": actual_pnl >= prorated_target if elapsed_days > 0 else False,
-        "on_pace_by_decision_pnl": decision_pnl >= prorated_target if elapsed_days > 0 else False,
+        "on_pace_by_decision_pnl": decision_pnl >= prorated_target and verified_evidence_ready if elapsed_days > 0 else False,
         "required_remaining_monthly_usdc": required_remaining_monthly,
         "required_daily_from_here_usdc": required_daily_from_here,
         "approved_signals": len(approved_signals),

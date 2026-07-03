@@ -74,6 +74,8 @@ def test_goal_plan_uses_audited_pnl_when_raw_account_contains_quote_conflicts(tm
         cfg.output_root / "polymarket_price_action" / "paper_broker_round_trip_summary.json",
         {
             "audited_baseline_realized_pnl_usdc": 0.22,
+            "audited_baseline_closed_round_trips": 5,
+            "baseline_closed_round_trips": 10,
             "quote_conflict_round_trips": 5,
             "quote_unverified_round_trips": 5,
         },
@@ -85,8 +87,43 @@ def test_goal_plan_uses_audited_pnl_when_raw_account_contains_quote_conflicts(tm
     assert payload["audited_pnl_since_baseline_usdc"] == approx(0.22)
     assert payload["decision_pnl_usdc"] == approx(0.22)
     assert payload["pnl_audit_state"] == "raw_pnl_contains_quote_conflicts"
+    assert payload["profit_target_proof_status"] == "unverified_paper_run_rate"
+    assert "quote_conflict_round_trips_5" in payload["profit_target_proof_blockers"]
     assert payload["quote_conflict_round_trips"] == 5
     assert "raw paper P&L contains quote-conflicted" in payload["main_gap"]
+
+
+def test_goal_plan_does_not_certify_on_pace_without_enough_audited_round_trips(tmp_path):
+    cfg = _cfg(tmp_path)
+    write_json(
+        cfg.governance_root / "paper_profit_target_tracker.json",
+        {
+            "actual_pnl_since_baseline_usdc": 12.0,
+            "elapsed_hours": 48.0,
+            "current": {"equity_usdc": 1012.0},
+            "baseline": {"baseline_equity_usdc": 1000.0},
+        },
+    )
+    write_json(
+        cfg.output_root / "polymarket_price_action" / "paper_broker_round_trip_summary.json",
+        {
+            "audited_baseline_realized_pnl_usdc": 12.0,
+            "audited_baseline_closed_round_trips": 2,
+            "baseline_closed_round_trips": 2,
+            "quote_conflict_round_trips": 0,
+            "quote_unverified_round_trips": 0,
+        },
+    )
+
+    payload = build_goal_plan(cfg)
+
+    assert payload["decision_monthly_run_rate_usdc"] > 100
+    assert payload["on_pace_by_actual_pnl"] is True
+    assert payload["on_pace_by_decision_pnl"] is False
+    assert payload["profit_target_proof_status"] == "unverified_paper_run_rate"
+    assert payload["minimum_audited_round_trips_for_on_pace"] == 5
+    assert "needs_5_audited_round_trips_has_2" in payload["profit_target_proof_blockers"]
+    assert "not yet verified" in payload["main_gap"]
 
 
 def test_goal_plan_routes_positive_shadow_repricing_to_paper_confirmation(tmp_path):

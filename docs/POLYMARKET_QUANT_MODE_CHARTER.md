@@ -388,6 +388,12 @@ The first invariant check found that missing depth could look cheaper than known
 execution costs now fail closed when depth is absent and the risk layer treats a zero acceptable
 impact cap as binding. This tightens execution safety without adding any paper/live permission.
 
+**2026-07-03 — verified $100/month proof gate landed by Codex.** The profit tracker and goal
+planner no longer certify "on pace" from raw account equity or tiny-sample annualised P&L alone.
+The `$100/month` state now requires enough audited, quote-consistent paper round trips, no quote
+conflicts/unverified exits, and sufficient tracking time before the dashboard can treat the
+run-rate as verified progress.
+
 ## Rules of engagement for coding agents
 
 0. **Division of labour**: the orchestrating agent writes/updates this charter and the work orders

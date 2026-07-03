@@ -2,7 +2,7 @@
 
 Configure these secrets in **Settings → Secrets and variables → Actions** on the repository.
 
-The repository runs eight workflows. The sections below list secrets required for required checks and for authenticated workflow paths.
+The repository runs nine workflows. The sections below list secrets required for required checks and for authenticated workflow paths.
 
 ## `ci.yml` (push / pull request)
 
@@ -19,6 +19,14 @@ The repository runs eight workflows. The sections below list secrets required fo
 | `THE_ODDS_API_KEY` | **Yes** | API key from [the-odds-api.com](https://the-odds-api.com). The scheduled refresh fetches and validates fresh market odds before rebuilding the locked SuperBru card. |
 
 > Commits are pushed with the automatic `GITHUB_TOKEN` (the workflow grants `contents: write`); no personal token is needed for the commit step.
+
+## `superbru-clv-snapshot.yml` (scheduled, every 4 hours)
+
+| Secret | Required | Description |
+|--------|----------|-------------|
+| `THE_ODDS_API_KEY` | **Yes** | Used to snapshot de-vigged World Cup h2h odds for the SuperBru CLV-vs-close experiment. |
+
+> This workflow is diagnostic only. It commits CLV evidence under `outputs/superbru_clv/` and does not submit picks or place trades.
 
 ## `auto_pick.yml` (scheduled, ~25 min before each kickoff)
 

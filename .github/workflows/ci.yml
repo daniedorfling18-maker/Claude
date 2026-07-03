@@ -58,6 +58,7 @@ jobs:
               'polymarket-mispricing-bot.yml',
               'refresh-locked-superbru-card.yml',
               'repo-audit-bundle.yml',
+              'superbru-clv-snapshot.yml',
           }
           forbidden_files = {
               'daily-superbru-robust.yml',
@@ -74,6 +75,7 @@ jobs:
               'polymarket-mispricing-bot.yml': {'workflow_dispatch'},
               'refresh-locked-superbru-card.yml': {'schedule', 'workflow_dispatch'},
               'repo-audit-bundle.yml': {'push'},
+              'superbru-clv-snapshot.yml': {'schedule', 'workflow_dispatch'},
           }
           possible_triggers = {'schedule', 'push', 'pull_request', 'workflow_dispatch'}
 
@@ -119,6 +121,7 @@ jobs:
               'deploy-polymarket-vps-paper.yml',
               'refresh-locked-superbru-card.yml',
               'polymarket-mispricing-bot.yml',
+              'superbru-clv-snapshot.yml',
           }
           for name in sorted(expected & present):
               text = (workflow_dir / name).read_text(encoding='utf-8')

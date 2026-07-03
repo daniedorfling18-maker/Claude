@@ -3,18 +3,18 @@ run_oddspedia_pipeline.py
 
 Orchestrates the Oddspedia correct-score pipeline in order:
 
-  0. discover_oddspedia_match_urls_curl.py      — refresh match URL list from WC listing page
-  1. scrape_oddspedia_curl.py                   — fetch grids + BTTS/OU from Oddspedia
-  2. build_oddspedia_score_shape_features.py    — shape features + market diffs
-  3. check_oddspedia_grid_quality.py            — diagnostic validation
-  4. compare_locked_picks_to_oddspedia.py       — flag picks worth reviewing
-  5. build_oddspedia_superbru_ev.py             — EV-ranked candidate scorelines
-  6. build_superbru_backtest_from_results.py    — legacy pick scoring against completed results
-  7. build_oddspedia_model_independence.py      — grid vs market independence check
-  8. build_oddspedia_synthetic_pool_crowding.py — synthetic pool crowding estimate
-  9. build_superbru_pool_intelligence.py        — leaderboard leverage + chaser exposure
- 10. build_oddspedia_signal_archive.py          — snapshot signals for future backtesting
- 11. build_live_signal_backtest.py              — trusted rolling signal/policy backtest ledger
+  0. discover_oddspedia_match_urls_curl.py      - refresh match URL list from WC listing page
+  1. scrape_oddspedia_curl.py                   - fetch grids + BTTS/OU from Oddspedia
+  2. build_oddspedia_score_shape_features.py    - shape features + market diffs
+  3. check_oddspedia_grid_quality.py            - diagnostic validation
+  4. compare_locked_picks_to_oddspedia.py       - flag picks worth reviewing
+  5. build_oddspedia_superbru_ev.py             - EV-ranked candidate scorelines
+  6. build_superbru_backtest_from_results.py    - legacy pick scoring against completed results
+  7. build_oddspedia_model_independence.py      - grid vs market independence check
+  8. build_oddspedia_synthetic_pool_crowding.py - synthetic pool crowding estimate
+  9. build_superbru_pool_intelligence.py        - leaderboard leverage + chaser exposure
+ 10. build_oddspedia_signal_archive.py          - snapshot signals for future backtesting
+ 11. build_live_signal_backtest.py              - trusted rolling signal/policy backtest ledger
 
 Usage:
     python scripts/run_oddspedia_pipeline.py
@@ -46,13 +46,21 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--impersonate", default="chrome124")
     p.add_argument("--skip-scrape", action="store_true", help="Re-use existing grid CSVs, skip step 1")
     p.add_argument("--skip-live-backtest", action="store_true", help="Skip the trusted rolling signal backtest")
+    p.add_argument(
+        "--allow-source-unavailable",
+        action="store_true",
+        help=(
+            "Exit 0 with an explicit source-unavailable status if Oddspedia discovery/scrape is blocked. "
+            "Use only when a third-party validation outage should not block a fresh SuperBru card."
+        ),
+    )
     return p
 
 
 def run(label: str, cmd: list[str], *, warn_only: bool = False) -> float:
-    print(f"\n{'='*60}")
+    print(f"\n{'=' * 60}")
     print(f"  {label}")
-    print(f"{'='*60}")
+    print(f"{'=' * 60}")
     print("$ " + " ".join(cmd), flush=True)
     t0 = time.time()
     completed = subprocess.run(cmd, cwd=ROOT, check=False)
@@ -66,30 +74,104 @@ def run(label: str, cmd: list[str], *, warn_only: bool = False) -> float:
     return elapsed
 
 
+def write_source_unavailable_status(
+    *,
+    args: argparse.Namespace,
+    exc: subprocess.CalledProcessError,
+    timings: dict[str, float],
+    elapsed_seconds: float,
+) -> Path:
+    out_dir = ROOT / "outputs" / "oddspedia_url_discovery"
+    out_dir.mkdir(parents=True, exist_ok=True)
+    failed_command = list(map(str, exc.cmd if isinstance(exc.cmd, list) else [exc.cmd]))
+    payload = {
+        "generated_at_utc": datetime.now(timezone.utc).isoformat(),
+        "status": "source_unavailable",
+        "failed_command": failed_command,
+        "returncode": exc.returncode,
+        "total_elapsed_seconds": round(elapsed_seconds, 1),
+        "step_timings": timings,
+        "locked_picks_csv": args.locked_picks_csv,
+        "urls_csv": args.urls_csv,
+        "impersonate": args.impersonate,
+        "governance_note": (
+            "Oddspedia validation was unavailable from this runner, so no fresh validation should be trusted. "
+            "The SuperBru locked card may still be refreshed from live SuperBru state and fresh bookmaker odds; "
+            "the validation freshness audit must surface Oddspedia as missing/stale."
+        ),
+        "paper_trading_invoked": False,
+        "live_trading_invoked": False,
+    }
+    path = out_dir / "oddspedia_pipeline_status.json"
+    path.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
+    md = out_dir / "oddspedia_pipeline_status.md"
+    md.write_text(
+        "\n".join(
+            [
+                "# Oddspedia pipeline status",
+                "",
+                f"Generated: `{payload['generated_at_utc']}`",
+                "",
+                "Status: **source_unavailable**",
+                "",
+                f"Failed command: `{' '.join(failed_command)}`",
+                f"Return code: `{payload['returncode']}`",
+                "",
+                payload["governance_note"],
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    print(json.dumps(payload, indent=2, sort_keys=True))
+    print(f"Wrote {path}")
+    print(f"Wrote {md}")
+    return path
+
+
 def main() -> int:
     args = build_parser().parse_args()
     t_start = time.time()
     timings: dict[str, float] = {}
-
     py = sys.executable
 
     if not args.skip_scrape:
-        timings["discover"] = run(
-            "STEP 0 — Discover/refresh match URLs from Oddspedia listing page",
-            [py, "scripts/discover_oddspedia_match_urls_curl.py",
-             "--fixtures-csv", args.locked_picks_csv,
-             "--impersonate", args.impersonate],
-        )
+        try:
+            timings["discover"] = run(
+                "STEP 0 - Discover/refresh match URLs from Oddspedia listing page",
+                [
+                    py,
+                    "scripts/discover_oddspedia_match_urls_curl.py",
+                    "--fixtures-csv",
+                    args.locked_picks_csv,
+                    "--impersonate",
+                    args.impersonate,
+                ],
+            )
 
-        scrape_cmd = [
-            py, "scripts/scrape_oddspedia_curl.py",
-            "--urls-csv", args.urls_csv,
-            "--max-workers", str(args.max_workers),
-            "--impersonate", args.impersonate,
-        ]
-        if args.max_matches:
-            scrape_cmd += ["--max-matches", str(args.max_matches)]
-        timings["scrape"] = run("STEP 1 - Scrape Oddspedia grids + BTTS/OU", scrape_cmd)
+            scrape_cmd = [
+                py,
+                "scripts/scrape_oddspedia_curl.py",
+                "--urls-csv",
+                args.urls_csv,
+                "--max-workers",
+                str(args.max_workers),
+                "--impersonate",
+                args.impersonate,
+            ]
+            if args.max_matches:
+                scrape_cmd += ["--max-matches", str(args.max_matches)]
+            timings["scrape"] = run("STEP 1 - Scrape Oddspedia grids + BTTS/OU", scrape_cmd)
+        except subprocess.CalledProcessError as exc:
+            if not args.allow_source_unavailable:
+                raise
+            write_source_unavailable_status(
+                args=args,
+                exc=exc,
+                timings=timings,
+                elapsed_seconds=time.time() - t_start,
+            )
+            return 0
     else:
         print("\nSkipping step 1 (--skip-scrape).")
 
@@ -180,9 +262,9 @@ def main() -> int:
             "signal_archive_rolling": "outputs/backtesting/signal_archive_rolling.csv",
         },
     }
-    print(f"\n{'='*60}")
+    print(f"\n{'=' * 60}")
     print(f"  PIPELINE COMPLETE  ({total}s total)")
-    print(f"{'='*60}")
+    print(f"{'=' * 60}")
     print(json.dumps(payload, indent=2))
     return 0
 

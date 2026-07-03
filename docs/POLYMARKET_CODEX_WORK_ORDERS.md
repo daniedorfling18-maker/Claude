@@ -1,6 +1,6 @@
 # Polymarket Codex Work Orders
 
-Last updated: 2026-07-03 (WO-11/12/13/14/16/23/24/25/26/27 code landed; strategic edge reset: WO-24..WO-27 added; WO-20/21/22 landed; read docs/POLYMARKET_EDGE_STRATEGY_RESET.md first)
+Last updated: 2026-07-03 (WO-11/12/13/14/16/17/23/24/25/26/27 code landed; strategic edge reset: WO-24..WO-27 added; WO-20/21/22 landed; read docs/POLYMARKET_EDGE_STRATEGY_RESET.md first)
 
 Mechanical, file-level implementation instructions for coding agents (Codex or any other code
 changer). The architecture and priorities live in `docs/POLYMARKET_QUANT_MODE_CHARTER.md`; this file
@@ -698,7 +698,7 @@ evidence classes (`model_beats_market`, `market_beats_model`, or
 
 ---
 
-## WO-17 — Websocket collection coverage report — `open`
+## WO-17 — Websocket collection coverage report — `done` (2026-07-03)
 
 **Goal:** CLV finality depends on having quotes near each market's close; attribution depends on
 closed positions having lines. Report where collection is thin so scheduling can fix it.
@@ -718,6 +718,12 @@ closed positions having lines. Report where collection is thin so scheduling can
    provisional forever.
 3. Artifact `outputs/polymarket_model_governance/collection_coverage.json`. Standard flags.
 4. Tests: fixture with one covered and one uncovered position; assert both lists exact.
+
+**Landed 2026-07-03:** added `collection-coverage`, which reads websocket quote features and shadow
+positions, reports family-level quote coverage/gaps, and lists positions missing a quote in the
+pre-close window. It writes `collection_coverage.json`, plus CSVs for family coverage and missing
+positions. This turns stale/provisional CLV into concrete collection targets without invoking paper or
+live trading.
 
 ---
 
@@ -1108,7 +1114,7 @@ Queue order (strategic reset, 2026-07-03 — read POLYMARKET_EDGE_STRATEGY_RESET
 12. WO-13  done 2026-07-03: microstructure hypotheses as replay strategies
 13. WO-14  done 2026-07-03: generalise the sweep (after WO-13)
 14. WO-16  done 2026-07-03: per-family calibration scorecard
-15. WO-17  collection coverage report (verifies WO-20)
+15. WO-17  done 2026-07-03: collection coverage report (verifies WO-20)
 16. WO-15  evidence history time series
 17. WO-18  dashboard evidence funnel
 18. WO-19  invariant property tests (zero source changes)

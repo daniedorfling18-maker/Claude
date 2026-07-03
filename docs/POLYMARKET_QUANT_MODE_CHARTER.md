@@ -365,6 +365,11 @@ uses clustered bootstrap CIs for family-level Brier gain, and fails closed for t
 families. This makes family selection quant-driven: collect/scale only where market-relative skill
 transfers, and keep other families in research until evidence improves.
 
+**2026-07-03 — WO-17 landed by Codex.** The evidence lane now writes collection coverage diagnostics:
+family-level websocket quote counts/gaps and exact shadow positions missing pre-close quotes. This
+converts stale/provisional CLV into a scheduling problem the VPS can solve, rather than a vague model
+blocker.
+
 ## Rules of engagement for coding agents
 
 0. **Division of labour**: the orchestrating agent writes/updates this charter and the work orders

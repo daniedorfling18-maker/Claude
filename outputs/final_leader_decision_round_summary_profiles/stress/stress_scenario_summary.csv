@@ -1,0 +1,12 @@
+scenario,description,baseline_p_finish_first,final_p_finish_first,delta_p_finish_first,baseline_p_finish_first_or_tied,final_p_finish_first_or_tied,total_ev_loss,accepted_switch_count,accepted_switch_labels
+base,Current Monte Carlo assumptions.,0.73208,0.73208,0.0,0.77221,0.77221,0.0,0,
+chasers_conservative,"Chasers lean more towards raw, top1 and chalk picks.",0.74793,0.74793,0.0,0.78372,0.78372,0.0,0,
+chasers_aggressive,Chasers chase exacts and differentials more aggressively.,0.71781,0.71781,0.0,0.76274,0.76274,0.0,0,
+favourite_heavy,Chasers overweight favourite/chalk scorelines.,0.74604,0.74604,0.0,0.78525,0.78525,0.0,0,
+exact_chase_heavy,Chasers overweight modal and top exact scorelines.,0.71928,0.71928,0.0,0.7578,0.7578,0.0,0,
+goals_plus_5pct,Model total-goals expectation tilted 5 percent higher.,0.73276,0.73276,0.0,0.77228,0.77228,0.0,0,
+goals_minus_5pct,Model total-goals expectation tilted 5 percent lower.,0.72765,0.72765,0.0,0.76774,0.76774,0.0,0,
+rho_plus_0_02,Dixon-Coles rho increased by 0.02.,0.7337,0.7337,0.0,0.77293,0.77293,0.0,0,
+rho_minus_0_02,Dixon-Coles rho decreased by 0.02.,0.73086,0.73086,0.0,0.77128,0.77128,0.0,0,
+draw_heavy,Draw scorelines receive 8 percent more mass.,0.72819,0.72819,0.0,0.76818,0.76818,0.0,0,
+draw_light,Draw scorelines receive 8 percent less mass.,0.73607,0.73607,0.0,0.77655,0.77655,0.0,0,

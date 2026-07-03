@@ -1,0 +1,250 @@
+{
+  "simulations_per_scenario": 100000,
+  "scenario_count": 11,
+  "support_threshold": 0.7,
+  "robust_switches": [],
+  "scenario_summaries": [
+    {
+      "simulations": 100000,
+      "leader_player": "Danie",
+      "leader_start_points": 95.0,
+      "chasers": [
+        "Ivan Prinsloo",
+        "Dheben",
+        "Leonard",
+        "rob87",
+        "Lusse"
+      ],
+      "baseline_p_finish_first": 0.73208,
+      "baseline_p_finish_first_or_tied": 0.77221,
+      "final_p_finish_first": 0.73208,
+      "final_p_finish_first_or_tied": 0.77221,
+      "delta_p_finish_first": 0.0,
+      "accepted_switches": [],
+      "total_ev_loss": 0.0,
+      "scenario": "base",
+      "scenario_description": "Current Monte Carlo assumptions.",
+      "accepted_switch_labels": []
+    },
+    {
+      "simulations": 100000,
+      "leader_player": "Danie",
+      "leader_start_points": 95.0,
+      "chasers": [
+        "Ivan Prinsloo",
+        "Dheben",
+        "Leonard",
+        "rob87",
+        "Lusse"
+      ],
+      "baseline_p_finish_first": 0.74793,
+      "baseline_p_finish_first_or_tied": 0.78372,
+      "final_p_finish_first": 0.74793,
+      "final_p_finish_first_or_tied": 0.78372,
+      "delta_p_finish_first": 0.0,
+      "accepted_switches": [],
+      "total_ev_loss": 0.0,
+      "scenario": "chasers_conservative",
+      "scenario_description": "Chasers lean more towards raw, top1 and chalk picks.",
+      "accepted_switch_labels": []
+    },
+    {
+      "simulations": 100000,
+      "leader_player": "Danie",
+      "leader_start_points": 95.0,
+      "chasers": [
+        "Ivan Prinsloo",
+        "Dheben",
+        "Leonard",
+        "rob87",
+        "Lusse"
+      ],
+      "baseline_p_finish_first": 0.71781,
+      "baseline_p_finish_first_or_tied": 0.76274,
+      "final_p_finish_first": 0.71781,
+      "final_p_finish_first_or_tied": 0.76274,
+      "delta_p_finish_first": 0.0,
+      "accepted_switches": [],
+      "total_ev_loss": 0.0,
+      "scenario": "chasers_aggressive",
+      "scenario_description": "Chasers chase exacts and differentials more aggressively.",
+      "accepted_switch_labels": []
+    },
+    {
+      "simulations": 100000,
+      "leader_player": "Danie",
+      "leader_start_points": 95.0,
+      "chasers": [
+        "Ivan Prinsloo",
+        "Dheben",
+        "Leonard",
+        "rob87",
+        "Lusse"
+      ],
+      "baseline_p_finish_first": 0.74604,
+      "baseline_p_finish_first_or_tied": 0.78525,
+      "final_p_finish_first": 0.74604,
+      "final_p_finish_first_or_tied": 0.78525,
+      "delta_p_finish_first": 0.0,
+      "accepted_switches": [],
+      "total_ev_loss": 0.0,
+      "scenario": "favourite_heavy",
+      "scenario_description": "Chasers overweight favourite/chalk scorelines.",
+      "accepted_switch_labels": []
+    },
+    {
+      "simulations": 100000,
+      "leader_player": "Danie",
+      "leader_start_points": 95.0,
+      "chasers": [
+        "Ivan Prinsloo",
+        "Dheben",
+        "Leonard",
+        "rob87",
+        "Lusse"
+      ],
+      "baseline_p_finish_first": 0.71928,
+      "baseline_p_finish_first_or_tied": 0.7578,
+      "final_p_finish_first": 0.71928,
+      "final_p_finish_first_or_tied": 0.7578,
+      "delta_p_finish_first": 0.0,
+      "accepted_switches": [],
+      "total_ev_loss": 0.0,
+      "scenario": "exact_chase_heavy",
+      "scenario_description": "Chasers overweight modal and top exact scorelines.",
+      "accepted_switch_labels": []
+    },
+    {
+      "simulations": 100000,
+      "leader_player": "Danie",
+      "leader_start_points": 95.0,
+      "chasers": [
+        "Ivan Prinsloo",
+        "Dheben",
+        "Leonard",
+        "rob87",
+        "Lusse"
+      ],
+      "baseline_p_finish_first": 0.73276,
+      "baseline_p_finish_first_or_tied": 0.77228,
+      "final_p_finish_first": 0.73276,
+      "final_p_finish_first_or_tied": 0.77228,
+      "delta_p_finish_first": 0.0,
+      "accepted_switches": [],
+      "total_ev_loss": 0.0,
+      "scenario": "goals_plus_5pct",
+      "scenario_description": "Model total-goals expectation tilted 5 percent higher.",
+      "accepted_switch_labels": []
+    },
+    {
+      "simulations": 100000,
+      "leader_player": "Danie",
+      "leader_start_points": 95.0,
+      "chasers": [
+        "Ivan Prinsloo",
+        "Dheben",
+        "Leonard",
+        "rob87",
+        "Lusse"
+      ],
+      "baseline_p_finish_first": 0.72765,
+      "baseline_p_finish_first_or_tied": 0.76774,
+      "final_p_finish_first": 0.72765,
+      "final_p_finish_first_or_tied": 0.76774,
+      "delta_p_finish_first": 0.0,
+      "accepted_switches": [],
+      "total_ev_loss": 0.0,
+      "scenario": "goals_minus_5pct",
+      "scenario_description": "Model total-goals expectation tilted 5 percent lower.",
+      "accepted_switch_labels": []
+    },
+    {
+      "simulations": 100000,
+      "leader_player": "Danie",
+      "leader_start_points": 95.0,
+      "chasers": [
+        "Ivan Prinsloo",
+        "Dheben",
+        "Leonard",
+        "rob87",
+        "Lusse"
+      ],
+      "baseline_p_finish_first": 0.7337,
+      "baseline_p_finish_first_or_tied": 0.77293,
+      "final_p_finish_first": 0.7337,
+      "final_p_finish_first_or_tied": 0.77293,
+      "delta_p_finish_first": 0.0,
+      "accepted_switches": [],
+      "total_ev_loss": 0.0,
+      "scenario": "rho_plus_0_02",
+      "scenario_description": "Dixon-Coles rho increased by 0.02.",
+      "accepted_switch_labels": []
+    },
+    {
+      "simulations": 100000,
+      "leader_player": "Danie",
+      "leader_start_points": 95.0,
+      "chasers": [
+        "Ivan Prinsloo",
+        "Dheben",
+        "Leonard",
+        "rob87",
+        "Lusse"
+      ],
+      "baseline_p_finish_first": 0.73086,
+      "baseline_p_finish_first_or_tied": 0.77128,
+      "final_p_finish_first": 0.73086,
+      "final_p_finish_first_or_tied": 0.77128,
+      "delta_p_finish_first": 0.0,
+      "accepted_switches": [],
+      "total_ev_loss": 0.0,
+      "scenario": "rho_minus_0_02",
+      "scenario_description": "Dixon-Coles rho decreased by 0.02.",
+      "accepted_switch_labels": []
+    },
+    {
+      "simulations": 100000,
+      "leader_player": "Danie",
+      "leader_start_points": 95.0,
+      "chasers": [
+        "Ivan Prinsloo",
+        "Dheben",
+        "Leonard",
+        "rob87",
+        "Lusse"
+      ],
+      "baseline_p_finish_first": 0.72819,
+      "baseline_p_finish_first_or_tied": 0.76818,
+      "final_p_finish_first": 0.72819,
+      "final_p_finish_first_or_tied": 0.76818,
+      "delta_p_finish_first": 0.0,
+      "accepted_switches": [],
+      "total_ev_loss": 0.0,
+      "scenario": "draw_heavy",
+      "scenario_description": "Draw scorelines receive 8 percent more mass.",
+      "accepted_switch_labels": []
+    },
+    {
+      "simulations": 100000,
+      "leader_player": "Danie",
+      "leader_start_points": 95.0,
+      "chasers": [
+        "Ivan Prinsloo",
+        "Dheben",
+        "Leonard",
+        "rob87",
+        "Lusse"
+      ],
+      "baseline_p_finish_first": 0.73607,
+      "baseline_p_finish_first_or_tied": 0.77655,
+      "final_p_finish_first": 0.73607,
+      "final_p_finish_first_or_tied": 0.77655,
+      "delta_p_finish_first": 0.0,
+      "accepted_switches": [],
+      "total_ev_loss": 0.0,
+      "scenario": "draw_light",
+      "scenario_description": "Draw scorelines receive 8 percent less mass.",
+      "accepted_switch_labels": []
+    }
+  ]
+}

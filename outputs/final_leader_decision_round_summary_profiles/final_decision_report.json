@@ -1,0 +1,100 @@
+{
+  "generated_at_utc": "2026-07-03T10:06:10.078882+00:00",
+  "leader_player": "Danie",
+  "final_policy": "raw EV pick unless base MC, stress test and high-N confirmation all approve the same switch",
+  "accepted_policy_switches": [],
+  "rejected_policy_switches": [],
+  "summaries": {
+    "base_mc": {
+      "simulations": 100000,
+      "leader_player": "Danie",
+      "leader_start_points": 95.0,
+      "chasers": [
+        "Ivan Prinsloo",
+        "Dheben",
+        "Leonard",
+        "rob87",
+        "Lusse"
+      ],
+      "baseline_p_finish_first": 0.73208,
+      "baseline_p_finish_first_or_tied": 0.77221,
+      "final_p_finish_first": 0.73208,
+      "final_p_finish_first_or_tied": 0.77221,
+      "delta_p_finish_first": 0.0,
+      "accepted_switches": [],
+      "total_ev_loss": 0.0
+    },
+    "confirmation_500k": {
+      "simulations": 500000,
+      "leader_player": "Danie",
+      "leader_start_points": 95.0,
+      "chasers": [
+        "Ivan Prinsloo",
+        "Dheben",
+        "Leonard",
+        "rob87",
+        "Lusse"
+      ],
+      "baseline_p_finish_first": 0.73201,
+      "baseline_p_finish_first_or_tied": 0.771636,
+      "final_p_finish_first": 0.73201,
+      "final_p_finish_first_or_tied": 0.771636,
+      "delta_p_finish_first": 0.0,
+      "accepted_switches": [],
+      "total_ev_loss": 0.0
+    }
+  },
+  "stress": {
+    "scenario_count": 11,
+    "support_threshold": 0.7,
+    "robust_switch_count": 0
+  },
+  "quality_gates": [
+    {
+      "gate": "input_exists:config",
+      "passed": true,
+      "path": "config.yaml"
+    },
+    {
+      "gate": "input_exists:fixtures",
+      "passed": true,
+      "path": "data/fixtures_real.csv"
+    },
+    {
+      "gate": "input_exists:odds_json",
+      "passed": true,
+      "path": "outputs/market_odds/worldcup_market_odds_raw.json"
+    },
+    {
+      "gate": "input_exists:predictions_csv",
+      "passed": true,
+      "path": "outputs/latest/predictions.csv"
+    },
+    {
+      "gate": "input_exists:leaderboard_csv",
+      "passed": true,
+      "path": "outputs/superbru_pool/live_pool_leaderboard.csv"
+    },
+    {
+      "gate": "input_exists:chaser_profiles_csv",
+      "passed": true,
+      "path": "outputs/superbru_pool/live_chaser_profiles.csv"
+    },
+    {
+      "gate": "predictions_required_columns",
+      "passed": true,
+      "missing_columns": []
+    },
+    {
+      "gate": "predictions_non_empty",
+      "passed": true,
+      "row_count": 9
+    }
+  ],
+  "outputs": {
+    "final_picks_csv": "outputs/final_leader_decision_round_summary_profiles/final_picks.csv",
+    "final_decision_report_md": "outputs/final_leader_decision_round_summary_profiles/final_decision_report.md",
+    "final_decision_report_json": "outputs/final_leader_decision_round_summary_profiles/final_decision_report.json",
+    "run_manifest_json": "outputs/final_leader_decision_round_summary_profiles/run_manifest.json"
+  }
+}

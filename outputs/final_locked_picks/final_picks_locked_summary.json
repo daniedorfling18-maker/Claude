@@ -1,0 +1,13 @@
+{
+  "generated_at_utc": "2026-07-03T10:06:12.258848+00:00",
+  "final_pick_count": 9,
+  "approved_switch_candidates": 0,
+  "applied_switch_count": 0,
+  "applied_switches": [],
+  "warnings": [],
+  "outputs": {
+    "locked_picks": "outputs/final_locked_picks/final_picks_locked.csv",
+    "superbru_final_card": "outputs/final_locked_picks/superbru_final_card.csv",
+    "applied_switches": "outputs/final_locked_picks/applied_switches.csv"
+  }
+}

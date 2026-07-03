@@ -1,0 +1,10 @@
+snapshot_id,previous_snapshot_id,home_team,away_team,final_pick,market_available,market_depth_class,h2h_bookmaker_count,totals_bookmaker_count,spreads_bookmaker_count,current_pick_market_prob,previous_pick_market_prob,pick_market_prob_delta,pick_market_movement,market_moving_against_pick,market_moving_towards_pick,current_market_favourite,previous_market_favourite,market_favourite_changed,current_total_lean,previous_total_lean,total_lean_changed,current_avg_home_spread,previous_avg_home_spread,spread_delta
+20260703T100610Z,,Australia,Egypt,0-1,True,strong,25,14,0,0.403311,,,unavailable,False,False,away,,False,under,,False,,,
+20260703T100610Z,,Argentina,Cape Verde,2-0,True,strong,25,14,0,0.845556,,,unavailable,False,False,home,,False,over,,False,,,
+20260703T100610Z,,Colombia,Ghana,2-0,True,strong,25,14,0,0.674244,,,unavailable,False,False,home,,False,under,,False,,,
+20260703T100610Z,,Canada,Morocco,0-2,True,strong,25,14,0,0.541288,,,unavailable,False,False,away,,False,under,,False,,,
+20260703T100610Z,,Paraguay,France,0-2,True,strong,25,14,0,0.805555,,,unavailable,False,False,away,,False,over,,False,,,
+20260703T100610Z,,Brazil,Norway,2-0,True,strong,25,14,0,0.514479,,,unavailable,False,False,home,,False,over,,False,,,
+20260703T100610Z,,Mexico,England,0-1,True,strong,25,15,0,0.396184,,,unavailable,False,False,away,,False,under,,False,,,
+20260703T100610Z,,Portugal,Spain,0-2,True,strong,24,14,0,0.498947,,,unavailable,False,False,away,,False,under,,False,,,
+20260703T100610Z,,United States,Belgium,2-1,False,unavailable,0,0,0,,,,unavailable,False,False,,,False,,,False,,,

@@ -1,25 +1,24 @@
 {
   "blockers": [
-    "Oddspedia grid is stale.",
-    "Oddspedia grid covers 0/11 locked-card matches.",
+    "Oddspedia grid covers 0/9 locked-card matches.",
     "SuperBru results CSV is missing.",
     "No completed SuperBru result rows are available for realised validation."
   ],
-  "generated_at_utc": "2026-07-03T06:01:58.230884+00:00",
+  "generated_at_utc": "2026-07-03T10:06:13.501070+00:00",
   "live_trading_invoked": false,
   "locked_card": {
     "exists": true,
-    "file_age_hours": 13.784,
+    "file_age_hours": 0.0,
     "path": "outputs/final_locked_picks/superbru_final_card.csv",
-    "rows": 11,
+    "rows": 9,
     "status": "ok"
   },
   "market_history": {
     "exists": true,
-    "file_age_hours": 67.559,
-    "latest_snapshot_created_at_utc": "2026-06-30T10:28:25.359278+00:00",
+    "file_age_hours": 0.001,
+    "latest_snapshot_created_at_utc": "2026-07-03T10:06:11.572290+00:00",
     "path": "outputs/market_odds_history/market_odds_history.csv",
-    "rows": 13,
+    "rows": 9,
     "snapshot_count": 1,
     "status": "ok"
   },
@@ -28,7 +27,7 @@
     "file_age_hours": null,
     "locked_card_coverage": {
       "coverage_fraction": 0.0,
-      "locked_matches": 11,
+      "locked_matches": 9,
       "matched_locked_matches": 0,
       "missing_locked_match_keys": [
         "argentina::capeverde",
@@ -38,9 +37,7 @@
         "colombia::ghana",
         "mexico::england",
         "paraguay::france",
-        "portugal::croatia",
-        "spain::austria",
-        "switzerland::algeria",
+        "portugal::spain",
         "unitedstates::belgium"
       ]
     },
@@ -50,11 +47,11 @@
   },
   "oddspedia_grid": {
     "exists": true,
-    "file_age_hours": 188.741,
+    "file_age_hours": 0.043,
     "latest_source_timestamp_utc": "",
     "locked_card_coverage": {
       "coverage_fraction": 0.0,
-      "locked_matches": 11,
+      "locked_matches": 9,
       "matched_locked_matches": 0,
       "missing_locked_match_keys": [
         "argentina::capeverde",
@@ -64,23 +61,21 @@
         "colombia::ghana",
         "mexico::england",
         "paraguay::france",
-        "portugal::croatia",
-        "spain::austria",
-        "switzerland::algeria",
+        "portugal::spain",
         "unitedstates::belgium"
       ]
     },
     "path": "inputs/smartbet_grids/oddspedia_probability_grids_auto.csv",
     "rows": 456,
-    "status": "stale"
+    "status": "ok"
   },
   "paper_trading_invoked": false,
   "prediction_log": {
-    "exists": false,
-    "file_age_hours": null,
+    "exists": true,
+    "file_age_hours": 0.0,
     "path": "outputs/backtesting/prediction_log.csv",
-    "rows": 0,
-    "status": "missing"
+    "rows": 9,
+    "status": "ok"
   },
   "recommended_actions": [
     "Run and commit the Oddspedia pipeline after every locked-card refresh.",

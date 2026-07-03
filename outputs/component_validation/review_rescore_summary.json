@@ -1,0 +1,104 @@
+{
+  "generated_at_utc": "2026-07-03T10:06:11.915410+00:00",
+  "component_pick_count": 9,
+  "component_label_counts": {
+    "component_aligned": 5,
+    "component_mixed": 3,
+    "component_unavailable": 1
+  },
+  "review_candidate_count": 0,
+  "switch_recommendation_count": 0,
+  "switch_recommendations": [],
+  "lowest_component_picks": [
+    {
+      "home_team": "United States",
+      "away_team": "Belgium",
+      "final_pick": "2-1",
+      "validation_label": "fragile",
+      "market_alignment_label": "market_mixed",
+      "component_score": 0.5,
+      "component_label": "component_unavailable",
+      "component_reasons": "outcome market unavailable; totals market unavailable; spread market unavailable"
+    },
+    {
+      "home_team": "Argentina",
+      "away_team": "Cape Verde",
+      "final_pick": "2-0",
+      "validation_label": "validated",
+      "market_alignment_label": "market_aligned",
+      "component_score": 0.65,
+      "component_label": "component_mixed",
+      "component_reasons": "outcome agrees with market favourite; goal total conflicts with market lean; spread market unavailable"
+    },
+    {
+      "home_team": "Brazil",
+      "away_team": "Norway",
+      "final_pick": "2-0",
+      "validation_label": "fragile",
+      "market_alignment_label": "market_aligned",
+      "component_score": 0.6875,
+      "component_label": "component_mixed",
+      "component_reasons": "outcome agrees with market favourite; goal total conflicts with market lean; spread market unavailable"
+    },
+    {
+      "home_team": "Paraguay",
+      "away_team": "France",
+      "final_pick": "0-2",
+      "validation_label": "validated",
+      "market_alignment_label": "market_aligned",
+      "component_score": 0.71,
+      "component_label": "component_mixed",
+      "component_reasons": "outcome agrees with market favourite; goal total conflicts with market lean; spread market unavailable"
+    },
+    {
+      "home_team": "Mexico",
+      "away_team": "England",
+      "final_pick": "0-1",
+      "validation_label": "fragile",
+      "market_alignment_label": "market_aligned",
+      "component_score": 0.758,
+      "component_label": "component_aligned",
+      "component_reasons": "outcome agrees with market favourite; goal total agrees with market lean; spread market unavailable"
+    },
+    {
+      "home_team": "Australia",
+      "away_team": "Egypt",
+      "final_pick": "0-1",
+      "validation_label": "acceptable",
+      "market_alignment_label": "market_aligned",
+      "component_score": 0.758,
+      "component_label": "component_aligned",
+      "component_reasons": "outcome agrees with market favourite; goal total agrees with market lean; spread market unavailable"
+    },
+    {
+      "home_team": "Portugal",
+      "away_team": "Spain",
+      "final_pick": "0-2",
+      "validation_label": "fragile",
+      "market_alignment_label": "market_aligned",
+      "component_score": 0.7745,
+      "component_label": "component_aligned",
+      "component_reasons": "outcome agrees with market favourite; goal total agrees with market lean; spread market unavailable"
+    },
+    {
+      "home_team": "Colombia",
+      "away_team": "Ghana",
+      "final_pick": "2-0",
+      "validation_label": "validated",
+      "market_alignment_label": "market_aligned",
+      "component_score": 0.797,
+      "component_label": "component_aligned",
+      "component_reasons": "outcome agrees with market favourite; goal total agrees with market lean; spread market unavailable"
+    },
+    {
+      "home_team": "Canada",
+      "away_team": "Morocco",
+      "final_pick": "0-2",
+      "validation_label": "acceptable",
+      "market_alignment_label": "market_aligned",
+      "component_score": 0.8165,
+      "component_label": "component_aligned",
+      "component_reasons": "outcome agrees with market favourite; goal total agrees with market lean; spread market unavailable"
+    }
+  ]
+}

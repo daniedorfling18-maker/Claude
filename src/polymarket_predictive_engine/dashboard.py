@@ -12,8 +12,11 @@ import sys
 from typing import Any
 
 from .config import EngineConfig
-from .utils import now_utc, parse_timestamp, read_csv_rows, read_json, safe_float, write_json
+from .utils import now_utc, parse_timestamp, read_csv_rows, read_json, safe_float, serialize_value, write_json
 from .worldcup_validation import is_worldcup_winner_market
+
+
+DASHBOARD_PAYLOAD_LIST_LIMIT = 50
 
 
 HTML = """<!doctype html>
@@ -4685,6 +4688,65 @@ def _deployment_health() -> dict[str, Any]:
     }
 
 
+def _trim_dashboard_payload_value(
+    value: Any,
+    *,
+    path: tuple[str, ...],
+    limits: list[dict[str, Any]],
+    max_list_items: int = DASHBOARD_PAYLOAD_LIST_LIMIT,
+) -> Any:
+    """Return a dashboard-sized copy while leaving source artifacts complete."""
+    if isinstance(value, list):
+        original_items = len(value)
+        dashboard_items = min(original_items, max_list_items)
+        if original_items > max_list_items:
+            limits.append(
+                {
+                    "path": ".".join(path) or "$",
+                    "original_items": original_items,
+                    "dashboard_items": dashboard_items,
+                }
+            )
+        return [
+            _trim_dashboard_payload_value(
+                item,
+                path=path + ("[]",),
+                limits=limits,
+                max_list_items=max_list_items,
+            )
+            for item in value[:dashboard_items]
+        ]
+    if isinstance(value, dict):
+        return {
+            str(key): _trim_dashboard_payload_value(
+                nested,
+                path=path + (str(key),),
+                limits=limits,
+                max_list_items=max_list_items,
+            )
+            for key, nested in value.items()
+        }
+    return value
+
+
+def _write_dashboard_data(path: Path, payload: dict[str, Any]) -> Path:
+    limits: list[dict[str, Any]] = []
+    trimmed = _trim_dashboard_payload_value(payload, path=(), limits=limits)
+    if isinstance(trimmed, dict):
+        trimmed["dashboard_payload_limits"] = {
+            "max_list_items": DASHBOARD_PAYLOAD_LIST_LIMIT,
+            "truncated_list_count": len(limits),
+            "truncated_lists": limits[:100],
+            "source_artifacts_complete": True,
+        }
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temp_path = path.with_name(f".{path.name}.{os.getpid()}.tmp")
+    with temp_path.open("w", encoding="utf-8") as f:
+        json.dump(trimmed, f, sort_keys=True, separators=(",", ":"), default=serialize_value)
+    temp_path.replace(path)
+    return path
+
+
 def render_dashboard(cfg: EngineConfig, latest_report: dict[str, Any] | None = None) -> dict[str, Any]:
     out = cfg.output_root / "polymarket_dashboard"
     out.mkdir(parents=True, exist_ok=True)
@@ -4994,7 +5056,7 @@ def render_dashboard(cfg: EngineConfig, latest_report: dict[str, Any] | None = N
         "worldcup_validation_status": worldcup_validation_status,
         "trade_diagnostics": trade_diagnostics,
     }
-    write_json(out / "dashboard_data.json", payload)
+    _write_dashboard_data(out / "dashboard_data.json", payload)
     (out / "index.html").write_text(HTML, encoding="utf-8")
     return {
         "status": "ok",

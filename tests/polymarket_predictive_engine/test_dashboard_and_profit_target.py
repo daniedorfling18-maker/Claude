@@ -935,6 +935,36 @@ def test_dashboard_gates_extrapolated_edge_route_evidence(tmp_path):
     assert "raw; audited" in html
 
 
+def test_dashboard_serves_capped_compact_cockpit_payload(tmp_path):
+    cfg = _config(tmp_path)
+    focus_path = cfg.governance_root / "research_focus.json"
+    large_rows = [{"row_id": i, "diagnostic": "kept in source artifact"} for i in range(75)]
+    write_json(
+        focus_path,
+        {
+            "status": "ok",
+            "generated_at_utc": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+            "large_diagnostic_rows": large_rows,
+        },
+    )
+
+    result = render_dashboard(cfg)
+
+    data = read_json(result["dashboard_data"])
+    dashboard_text = Path(result["dashboard_data"]).read_text(encoding="utf-8")
+    source_focus = read_json(focus_path)
+    assert len(source_focus["large_diagnostic_rows"]) == 75
+    assert len(data["research_focus"]["large_diagnostic_rows"]) == 50
+    assert data["dashboard_payload_limits"]["source_artifacts_complete"] is True
+    assert data["dashboard_payload_limits"]["max_list_items"] == 50
+    assert {
+        "path": "research_focus.large_diagnostic_rows",
+        "original_items": 75,
+        "dashboard_items": 50,
+    } in data["dashboard_payload_limits"]["truncated_lists"]
+    assert "\n" not in dashboard_text.strip()
+
+
 def test_dashboard_emits_decision_useful_summary_for_missing_fresh_candidate(tmp_path):
     cfg = _config(tmp_path)
     write_json(

@@ -1,100 +1,100 @@
 scenario,scenario_description,commence_time,home_team,away_team,raw_pick,leader_mc_pick,switched,raw_ev_full_matrix,leader_mc_ev_full_matrix,ev_loss,risk_tier,confidence_tier
-base,Current Monte Carlo assumptions.,2026-07-03T18:00:00Z,Australia,Egypt,0-1,0-1,False,0.764679,0.764679,0.0,high,medium
-base,Current Monte Carlo assumptions.,2026-07-03T22:00:00Z,Argentina,Cape Verde,2-0,2-0,False,1.342398,1.342398,0.0,low,strong
-base,Current Monte Carlo assumptions.,2026-07-04T01:30:00Z,Colombia,Ghana,2-0,2-0,False,1.148214,1.148214,0.0,low,strong
-base,Current Monte Carlo assumptions.,2026-07-04T17:00:00Z,Canada,Morocco,0-2,0-2,False,0.930509,0.930509,0.0,high,medium
-base,Current Monte Carlo assumptions.,2026-07-04T21:00:00Z,Paraguay,France,0-2,0-2,False,1.297999,1.297999,0.0,low,strong
-base,Current Monte Carlo assumptions.,2026-07-05T20:00:00Z,Brazil,Norway,2-0,2-0,False,0.844457,0.844457,0.0,high,fragile
-base,Current Monte Carlo assumptions.,2026-07-06T00:00:00Z,Mexico,England,0-1,0-1,False,0.69213,0.69213,0.0,high,fragile
-base,Current Monte Carlo assumptions.,2026-07-06T19:00:00Z,Portugal,Spain,0-2,0-2,False,0.833021,0.833021,0.0,high,fragile
-base,Current Monte Carlo assumptions.,2026-07-07T00:00:00Z,United States,Belgium,2-1,2-1,False,0.637317,0.637317,0.0,high,fragile
-chasers_conservative,"Chasers lean more towards raw, top1 and chalk picks.",2026-07-03T18:00:00Z,Australia,Egypt,0-1,0-1,False,0.764679,0.764679,0.0,high,medium
-chasers_conservative,"Chasers lean more towards raw, top1 and chalk picks.",2026-07-03T22:00:00Z,Argentina,Cape Verde,2-0,2-0,False,1.342398,1.342398,0.0,low,strong
-chasers_conservative,"Chasers lean more towards raw, top1 and chalk picks.",2026-07-04T01:30:00Z,Colombia,Ghana,2-0,2-0,False,1.148214,1.148214,0.0,low,strong
-chasers_conservative,"Chasers lean more towards raw, top1 and chalk picks.",2026-07-04T17:00:00Z,Canada,Morocco,0-2,0-2,False,0.930509,0.930509,0.0,high,medium
-chasers_conservative,"Chasers lean more towards raw, top1 and chalk picks.",2026-07-04T21:00:00Z,Paraguay,France,0-2,0-2,False,1.297999,1.297999,0.0,low,strong
-chasers_conservative,"Chasers lean more towards raw, top1 and chalk picks.",2026-07-05T20:00:00Z,Brazil,Norway,2-0,2-0,False,0.844457,0.844457,0.0,high,fragile
-chasers_conservative,"Chasers lean more towards raw, top1 and chalk picks.",2026-07-06T00:00:00Z,Mexico,England,0-1,0-1,False,0.69213,0.69213,0.0,high,fragile
-chasers_conservative,"Chasers lean more towards raw, top1 and chalk picks.",2026-07-06T19:00:00Z,Portugal,Spain,0-2,0-2,False,0.833021,0.833021,0.0,high,fragile
-chasers_conservative,"Chasers lean more towards raw, top1 and chalk picks.",2026-07-07T00:00:00Z,United States,Belgium,2-1,2-1,False,0.637317,0.637317,0.0,high,fragile
-chasers_aggressive,Chasers chase exacts and differentials more aggressively.,2026-07-03T18:00:00Z,Australia,Egypt,0-1,0-1,False,0.764679,0.764679,0.0,high,medium
-chasers_aggressive,Chasers chase exacts and differentials more aggressively.,2026-07-03T22:00:00Z,Argentina,Cape Verde,2-0,2-0,False,1.342398,1.342398,0.0,low,strong
-chasers_aggressive,Chasers chase exacts and differentials more aggressively.,2026-07-04T01:30:00Z,Colombia,Ghana,2-0,2-0,False,1.148214,1.148214,0.0,low,strong
-chasers_aggressive,Chasers chase exacts and differentials more aggressively.,2026-07-04T17:00:00Z,Canada,Morocco,0-2,0-2,False,0.930509,0.930509,0.0,high,medium
-chasers_aggressive,Chasers chase exacts and differentials more aggressively.,2026-07-04T21:00:00Z,Paraguay,France,0-2,0-2,False,1.297999,1.297999,0.0,low,strong
-chasers_aggressive,Chasers chase exacts and differentials more aggressively.,2026-07-05T20:00:00Z,Brazil,Norway,2-0,2-0,False,0.844457,0.844457,0.0,high,fragile
-chasers_aggressive,Chasers chase exacts and differentials more aggressively.,2026-07-06T00:00:00Z,Mexico,England,0-1,0-1,False,0.69213,0.69213,0.0,high,fragile
-chasers_aggressive,Chasers chase exacts and differentials more aggressively.,2026-07-06T19:00:00Z,Portugal,Spain,0-2,0-2,False,0.833021,0.833021,0.0,high,fragile
-chasers_aggressive,Chasers chase exacts and differentials more aggressively.,2026-07-07T00:00:00Z,United States,Belgium,2-1,2-1,False,0.637317,0.637317,0.0,high,fragile
-favourite_heavy,Chasers overweight favourite/chalk scorelines.,2026-07-03T18:00:00Z,Australia,Egypt,0-1,0-1,False,0.764679,0.764679,0.0,high,medium
-favourite_heavy,Chasers overweight favourite/chalk scorelines.,2026-07-03T22:00:00Z,Argentina,Cape Verde,2-0,2-0,False,1.342398,1.342398,0.0,low,strong
-favourite_heavy,Chasers overweight favourite/chalk scorelines.,2026-07-04T01:30:00Z,Colombia,Ghana,2-0,2-0,False,1.148214,1.148214,0.0,low,strong
-favourite_heavy,Chasers overweight favourite/chalk scorelines.,2026-07-04T17:00:00Z,Canada,Morocco,0-2,0-2,False,0.930509,0.930509,0.0,high,medium
-favourite_heavy,Chasers overweight favourite/chalk scorelines.,2026-07-04T21:00:00Z,Paraguay,France,0-2,0-2,False,1.297999,1.297999,0.0,low,strong
-favourite_heavy,Chasers overweight favourite/chalk scorelines.,2026-07-05T20:00:00Z,Brazil,Norway,2-0,2-0,False,0.844457,0.844457,0.0,high,fragile
-favourite_heavy,Chasers overweight favourite/chalk scorelines.,2026-07-06T00:00:00Z,Mexico,England,0-1,0-1,False,0.69213,0.69213,0.0,high,fragile
-favourite_heavy,Chasers overweight favourite/chalk scorelines.,2026-07-06T19:00:00Z,Portugal,Spain,0-2,0-2,False,0.833021,0.833021,0.0,high,fragile
-favourite_heavy,Chasers overweight favourite/chalk scorelines.,2026-07-07T00:00:00Z,United States,Belgium,2-1,2-1,False,0.637317,0.637317,0.0,high,fragile
-exact_chase_heavy,Chasers overweight modal and top exact scorelines.,2026-07-03T18:00:00Z,Australia,Egypt,0-1,0-1,False,0.764679,0.764679,0.0,high,medium
-exact_chase_heavy,Chasers overweight modal and top exact scorelines.,2026-07-03T22:00:00Z,Argentina,Cape Verde,2-0,2-0,False,1.342398,1.342398,0.0,low,strong
-exact_chase_heavy,Chasers overweight modal and top exact scorelines.,2026-07-04T01:30:00Z,Colombia,Ghana,2-0,2-0,False,1.148214,1.148214,0.0,low,strong
-exact_chase_heavy,Chasers overweight modal and top exact scorelines.,2026-07-04T17:00:00Z,Canada,Morocco,0-2,0-2,False,0.930509,0.930509,0.0,high,medium
-exact_chase_heavy,Chasers overweight modal and top exact scorelines.,2026-07-04T21:00:00Z,Paraguay,France,0-2,0-2,False,1.297999,1.297999,0.0,low,strong
-exact_chase_heavy,Chasers overweight modal and top exact scorelines.,2026-07-05T20:00:00Z,Brazil,Norway,2-0,2-0,False,0.844457,0.844457,0.0,high,fragile
-exact_chase_heavy,Chasers overweight modal and top exact scorelines.,2026-07-06T00:00:00Z,Mexico,England,0-1,0-1,False,0.69213,0.69213,0.0,high,fragile
-exact_chase_heavy,Chasers overweight modal and top exact scorelines.,2026-07-06T19:00:00Z,Portugal,Spain,0-2,0-2,False,0.833021,0.833021,0.0,high,fragile
-exact_chase_heavy,Chasers overweight modal and top exact scorelines.,2026-07-07T00:00:00Z,United States,Belgium,2-1,2-1,False,0.637317,0.637317,0.0,high,fragile
-goals_plus_5pct,Model total-goals expectation tilted 5 percent higher.,2026-07-03T18:00:00Z,Australia,Egypt,0-1,0-1,False,0.758595,0.758595,0.0,high,medium
-goals_plus_5pct,Model total-goals expectation tilted 5 percent higher.,2026-07-03T22:00:00Z,Argentina,Cape Verde,2-0,2-0,False,1.32831,1.32831,0.0,low,strong
-goals_plus_5pct,Model total-goals expectation tilted 5 percent higher.,2026-07-04T01:30:00Z,Colombia,Ghana,2-0,2-0,False,1.14918,1.14918,0.0,low,strong
-goals_plus_5pct,Model total-goals expectation tilted 5 percent higher.,2026-07-04T17:00:00Z,Canada,Morocco,0-2,0-2,False,0.933759,0.933759,0.0,high,medium
-goals_plus_5pct,Model total-goals expectation tilted 5 percent higher.,2026-07-04T21:00:00Z,Paraguay,France,0-2,0-2,False,1.287924,1.287924,0.0,low,strong
-goals_plus_5pct,Model total-goals expectation tilted 5 percent higher.,2026-07-05T20:00:00Z,Brazil,Norway,2-0,2-0,False,0.842869,0.842869,0.0,high,fragile
-goals_plus_5pct,Model total-goals expectation tilted 5 percent higher.,2026-07-06T00:00:00Z,Mexico,England,0-1,0-1,False,0.683719,0.683719,0.0,high,fragile
-goals_plus_5pct,Model total-goals expectation tilted 5 percent higher.,2026-07-06T19:00:00Z,Portugal,Spain,0-2,0-2,False,0.833335,0.833335,0.0,high,fragile
-goals_plus_5pct,Model total-goals expectation tilted 5 percent higher.,2026-07-07T00:00:00Z,United States,Belgium,2-1,2-1,False,0.640869,0.640869,0.0,high,fragile
-goals_minus_5pct,Model total-goals expectation tilted 5 percent lower.,2026-07-03T18:00:00Z,Australia,Egypt,0-1,0-1,False,0.769942,0.769942,0.0,high,medium
-goals_minus_5pct,Model total-goals expectation tilted 5 percent lower.,2026-07-03T22:00:00Z,Argentina,Cape Verde,2-0,2-0,False,1.354536,1.354536,0.0,low,strong
-goals_minus_5pct,Model total-goals expectation tilted 5 percent lower.,2026-07-04T01:30:00Z,Colombia,Ghana,2-0,2-0,False,1.144789,1.144789,0.0,low,strong
-goals_minus_5pct,Model total-goals expectation tilted 5 percent lower.,2026-07-04T17:00:00Z,Canada,Morocco,0-2,0-2,False,0.925254,0.925254,0.0,high,medium
-goals_minus_5pct,Model total-goals expectation tilted 5 percent lower.,2026-07-04T21:00:00Z,Paraguay,France,0-2,0-2,False,1.305923,1.305923,0.0,low,strong
-goals_minus_5pct,Model total-goals expectation tilted 5 percent lower.,2026-07-05T20:00:00Z,Brazil,Norway,2-0,2-0,False,0.844469,0.844469,0.0,high,fragile
-goals_minus_5pct,Model total-goals expectation tilted 5 percent lower.,2026-07-06T00:00:00Z,Mexico,England,0-1,0-1,False,0.700125,0.700125,0.0,high,fragile
-goals_minus_5pct,Model total-goals expectation tilted 5 percent lower.,2026-07-06T19:00:00Z,Portugal,Spain,0-2,0-2,False,0.831031,0.831031,0.0,high,fragile
-goals_minus_5pct,Model total-goals expectation tilted 5 percent lower.,2026-07-07T00:00:00Z,United States,Belgium,2-1,2-1,False,0.632131,0.632131,0.0,high,fragile
-rho_plus_0_02,Dixon-Coles rho increased by 0.02.,2026-07-03T18:00:00Z,Australia,Egypt,0-1,0-1,False,0.773274,0.773274,0.0,high,medium
-rho_plus_0_02,Dixon-Coles rho increased by 0.02.,2026-07-03T22:00:00Z,Argentina,Cape Verde,2-0,2-0,False,1.342257,1.342257,0.0,low,strong
-rho_plus_0_02,Dixon-Coles rho increased by 0.02.,2026-07-04T01:30:00Z,Colombia,Ghana,2-0,2-0,False,1.149401,1.149401,0.0,low,strong
-rho_plus_0_02,Dixon-Coles rho increased by 0.02.,2026-07-04T17:00:00Z,Canada,Morocco,0-2,0-2,False,0.93294,0.93294,0.0,high,medium
-rho_plus_0_02,Dixon-Coles rho increased by 0.02.,2026-07-04T21:00:00Z,Paraguay,France,0-2,0-2,False,1.298166,1.298166,0.0,low,strong
-rho_plus_0_02,Dixon-Coles rho increased by 0.02.,2026-07-05T20:00:00Z,Brazil,Norway,2-0,2-0,False,0.84737,0.84737,0.0,high,fragile
-rho_plus_0_02,Dixon-Coles rho increased by 0.02.,2026-07-06T00:00:00Z,Mexico,England,0-1,0-1,False,0.700882,0.700882,0.0,high,fragile
-rho_plus_0_02,Dixon-Coles rho increased by 0.02.,2026-07-06T19:00:00Z,Portugal,Spain,0-2,0-2,False,0.835978,0.835978,0.0,high,fragile
-rho_plus_0_02,Dixon-Coles rho increased by 0.02.,2026-07-07T00:00:00Z,United States,Belgium,2-1,2-1,False,0.640585,0.640585,0.0,high,fragile
-rho_minus_0_02,Dixon-Coles rho decreased by 0.02.,2026-07-03T18:00:00Z,Australia,Egypt,0-1,0-1,False,0.756128,0.756128,0.0,high,medium
-rho_minus_0_02,Dixon-Coles rho decreased by 0.02.,2026-07-03T22:00:00Z,Argentina,Cape Verde,2-0,2-0,False,1.342614,1.342614,0.0,low,strong
-rho_minus_0_02,Dixon-Coles rho decreased by 0.02.,2026-07-04T01:30:00Z,Colombia,Ghana,2-0,2-0,False,1.147131,1.147131,0.0,low,strong
-rho_minus_0_02,Dixon-Coles rho decreased by 0.02.,2026-07-04T17:00:00Z,Canada,Morocco,0-2,0-2,False,0.928143,0.928143,0.0,high,medium
-rho_minus_0_02,Dixon-Coles rho decreased by 0.02.,2026-07-04T21:00:00Z,Paraguay,France,0-2,0-2,False,1.297914,1.297914,0.0,low,strong
-rho_minus_0_02,Dixon-Coles rho decreased by 0.02.,2026-07-05T20:00:00Z,Brazil,Norway,2-0,2-0,False,0.841569,0.841569,0.0,high,fragile
-rho_minus_0_02,Dixon-Coles rho decreased by 0.02.,2026-07-06T00:00:00Z,Mexico,England,0-1,0-1,False,0.683412,0.683412,0.0,high,fragile
-rho_minus_0_02,Dixon-Coles rho decreased by 0.02.,2026-07-06T19:00:00Z,Portugal,Spain,0-2,0-2,False,0.830096,0.830096,0.0,high,fragile
-rho_minus_0_02,Dixon-Coles rho decreased by 0.02.,2026-07-07T00:00:00Z,United States,Belgium,2-1,2-1,False,0.634073,0.634073,0.0,high,fragile
-draw_heavy,Draw scorelines receive 8 percent more mass.,2026-07-03T18:00:00Z,Australia,Egypt,0-1,0-1,False,0.745591,0.745591,0.0,high,medium
-draw_heavy,Draw scorelines receive 8 percent more mass.,2026-07-03T22:00:00Z,Argentina,Cape Verde,2-0,2-0,False,1.329863,1.329863,0.0,low,strong
-draw_heavy,Draw scorelines receive 8 percent more mass.,2026-07-04T01:30:00Z,Colombia,Ghana,2-0,2-0,False,1.128482,1.128482,0.0,low,strong
-draw_heavy,Draw scorelines receive 8 percent more mass.,2026-07-04T17:00:00Z,Canada,Morocco,0-2,0-2,False,0.910936,0.910936,0.0,high,medium
-draw_heavy,Draw scorelines receive 8 percent more mass.,2026-07-04T21:00:00Z,Paraguay,France,0-2,0-2,False,1.283357,1.283357,0.0,low,strong
-draw_heavy,Draw scorelines receive 8 percent more mass.,2026-07-05T20:00:00Z,Brazil,Norway,2-0,2-0,False,0.827586,0.827586,0.0,high,fragile
-draw_heavy,Draw scorelines receive 8 percent more mass.,2026-07-06T00:00:00Z,Mexico,England,0-1,0-1,False,0.676102,0.676102,0.0,high,fragile
-draw_heavy,Draw scorelines receive 8 percent more mass.,2026-07-06T19:00:00Z,Portugal,Spain,0-2,0-2,False,0.815573,0.815573,0.0,high,fragile
-draw_heavy,Draw scorelines receive 8 percent more mass.,2026-07-07T00:00:00Z,United States,Belgium,2-1,2-1,False,0.623743,0.623743,0.0,high,fragile
-draw_light,Draw scorelines receive 8 percent less mass.,2026-07-03T18:00:00Z,Australia,Egypt,0-1,0-1,False,0.784771,0.784771,0.0,high,medium
-draw_light,Draw scorelines receive 8 percent less mass.,2026-07-03T22:00:00Z,Argentina,Cape Verde,2-0,2-0,False,1.355172,1.355172,0.0,low,strong
-draw_light,Draw scorelines receive 8 percent less mass.,2026-07-04T01:30:00Z,Colombia,Ghana,2-0,2-0,False,1.168649,1.168649,0.0,low,strong
-draw_light,Draw scorelines receive 8 percent less mass.,2026-07-04T17:00:00Z,Canada,Morocco,0-2,0-2,False,0.950941,0.950941,0.0,high,medium
-draw_light,Draw scorelines receive 8 percent less mass.,2026-07-04T21:00:00Z,Paraguay,France,0-2,0-2,False,1.312978,1.312978,0.0,low,strong
-draw_light,Draw scorelines receive 8 percent less mass.,2026-07-05T20:00:00Z,Brazil,Norway,2-0,2-0,False,0.862031,0.862031,0.0,high,fragile
-draw_light,Draw scorelines receive 8 percent less mass.,2026-07-06T00:00:00Z,Mexico,England,0-1,0-1,False,0.708937,0.708937,0.0,high,fragile
-draw_light,Draw scorelines receive 8 percent less mass.,2026-07-06T19:00:00Z,Portugal,Spain,0-2,0-2,False,0.851231,0.851231,0.0,high,fragile
-draw_light,Draw scorelines receive 8 percent less mass.,2026-07-07T00:00:00Z,United States,Belgium,2-1,2-1,False,0.651496,0.651496,0.0,high,fragile
+base,Current Monte Carlo assumptions.,2026-07-03T18:00:00Z,Australia,Egypt,0-1,0-1,False,0.756366,0.756366,0.0,high,medium
+base,Current Monte Carlo assumptions.,2026-07-03T22:00:00Z,Argentina,Cape Verde,2-0,2-0,False,1.344489,1.344489,0.0,low,strong
+base,Current Monte Carlo assumptions.,2026-07-04T01:30:00Z,Colombia,Ghana,2-0,2-0,False,1.145648,1.145648,0.0,low,strong
+base,Current Monte Carlo assumptions.,2026-07-04T17:00:00Z,Canada,Morocco,0-2,0-2,False,0.927647,0.927647,0.0,high,medium
+base,Current Monte Carlo assumptions.,2026-07-04T21:00:00Z,Paraguay,France,0-2,0-2,False,1.325361,1.325361,0.0,low,strong
+base,Current Monte Carlo assumptions.,2026-07-05T20:00:00Z,Brazil,Norway,2-0,2-0,False,0.856397,0.856397,0.0,high,fragile
+base,Current Monte Carlo assumptions.,2026-07-06T00:00:00Z,Mexico,England,0-1,0-1,False,0.691299,0.691299,0.0,high,fragile
+base,Current Monte Carlo assumptions.,2026-07-06T19:00:00Z,Portugal,Spain,0-2,0-2,False,0.832475,0.832475,0.0,high,fragile
+base,Current Monte Carlo assumptions.,2026-07-07T00:00:00Z,United States,Belgium,2-1,2-1,False,0.635457,0.635457,0.0,high,fragile
+chasers_conservative,"Chasers lean more towards raw, top1 and chalk picks.",2026-07-03T18:00:00Z,Australia,Egypt,0-1,0-1,False,0.756366,0.756366,0.0,high,medium
+chasers_conservative,"Chasers lean more towards raw, top1 and chalk picks.",2026-07-03T22:00:00Z,Argentina,Cape Verde,2-0,2-0,False,1.344489,1.344489,0.0,low,strong
+chasers_conservative,"Chasers lean more towards raw, top1 and chalk picks.",2026-07-04T01:30:00Z,Colombia,Ghana,2-0,2-0,False,1.145648,1.145648,0.0,low,strong
+chasers_conservative,"Chasers lean more towards raw, top1 and chalk picks.",2026-07-04T17:00:00Z,Canada,Morocco,0-2,0-2,False,0.927647,0.927647,0.0,high,medium
+chasers_conservative,"Chasers lean more towards raw, top1 and chalk picks.",2026-07-04T21:00:00Z,Paraguay,France,0-2,0-2,False,1.325361,1.325361,0.0,low,strong
+chasers_conservative,"Chasers lean more towards raw, top1 and chalk picks.",2026-07-05T20:00:00Z,Brazil,Norway,2-0,2-0,False,0.856397,0.856397,0.0,high,fragile
+chasers_conservative,"Chasers lean more towards raw, top1 and chalk picks.",2026-07-06T00:00:00Z,Mexico,England,0-1,0-1,False,0.691299,0.691299,0.0,high,fragile
+chasers_conservative,"Chasers lean more towards raw, top1 and chalk picks.",2026-07-06T19:00:00Z,Portugal,Spain,0-2,0-2,False,0.832475,0.832475,0.0,high,fragile
+chasers_conservative,"Chasers lean more towards raw, top1 and chalk picks.",2026-07-07T00:00:00Z,United States,Belgium,2-1,2-1,False,0.635457,0.635457,0.0,high,fragile
+chasers_aggressive,Chasers chase exacts and differentials more aggressively.,2026-07-03T18:00:00Z,Australia,Egypt,0-1,0-1,False,0.756366,0.756366,0.0,high,medium
+chasers_aggressive,Chasers chase exacts and differentials more aggressively.,2026-07-03T22:00:00Z,Argentina,Cape Verde,2-0,2-0,False,1.344489,1.344489,0.0,low,strong
+chasers_aggressive,Chasers chase exacts and differentials more aggressively.,2026-07-04T01:30:00Z,Colombia,Ghana,2-0,2-0,False,1.145648,1.145648,0.0,low,strong
+chasers_aggressive,Chasers chase exacts and differentials more aggressively.,2026-07-04T17:00:00Z,Canada,Morocco,0-2,0-2,False,0.927647,0.927647,0.0,high,medium
+chasers_aggressive,Chasers chase exacts and differentials more aggressively.,2026-07-04T21:00:00Z,Paraguay,France,0-2,0-2,False,1.325361,1.325361,0.0,low,strong
+chasers_aggressive,Chasers chase exacts and differentials more aggressively.,2026-07-05T20:00:00Z,Brazil,Norway,2-0,2-0,False,0.856397,0.856397,0.0,high,fragile
+chasers_aggressive,Chasers chase exacts and differentials more aggressively.,2026-07-06T00:00:00Z,Mexico,England,0-1,0-1,False,0.691299,0.691299,0.0,high,fragile
+chasers_aggressive,Chasers chase exacts and differentials more aggressively.,2026-07-06T19:00:00Z,Portugal,Spain,0-2,0-2,False,0.832475,0.832475,0.0,high,fragile
+chasers_aggressive,Chasers chase exacts and differentials more aggressively.,2026-07-07T00:00:00Z,United States,Belgium,2-1,2-1,False,0.635457,0.635457,0.0,high,fragile
+favourite_heavy,Chasers overweight favourite/chalk scorelines.,2026-07-03T18:00:00Z,Australia,Egypt,0-1,0-1,False,0.756366,0.756366,0.0,high,medium
+favourite_heavy,Chasers overweight favourite/chalk scorelines.,2026-07-03T22:00:00Z,Argentina,Cape Verde,2-0,2-0,False,1.344489,1.344489,0.0,low,strong
+favourite_heavy,Chasers overweight favourite/chalk scorelines.,2026-07-04T01:30:00Z,Colombia,Ghana,2-0,2-0,False,1.145648,1.145648,0.0,low,strong
+favourite_heavy,Chasers overweight favourite/chalk scorelines.,2026-07-04T17:00:00Z,Canada,Morocco,0-2,0-2,False,0.927647,0.927647,0.0,high,medium
+favourite_heavy,Chasers overweight favourite/chalk scorelines.,2026-07-04T21:00:00Z,Paraguay,France,0-2,0-2,False,1.325361,1.325361,0.0,low,strong
+favourite_heavy,Chasers overweight favourite/chalk scorelines.,2026-07-05T20:00:00Z,Brazil,Norway,2-0,2-0,False,0.856397,0.856397,0.0,high,fragile
+favourite_heavy,Chasers overweight favourite/chalk scorelines.,2026-07-06T00:00:00Z,Mexico,England,0-1,0-1,False,0.691299,0.691299,0.0,high,fragile
+favourite_heavy,Chasers overweight favourite/chalk scorelines.,2026-07-06T19:00:00Z,Portugal,Spain,0-2,0-2,False,0.832475,0.832475,0.0,high,fragile
+favourite_heavy,Chasers overweight favourite/chalk scorelines.,2026-07-07T00:00:00Z,United States,Belgium,2-1,2-1,False,0.635457,0.635457,0.0,high,fragile
+exact_chase_heavy,Chasers overweight modal and top exact scorelines.,2026-07-03T18:00:00Z,Australia,Egypt,0-1,0-1,False,0.756366,0.756366,0.0,high,medium
+exact_chase_heavy,Chasers overweight modal and top exact scorelines.,2026-07-03T22:00:00Z,Argentina,Cape Verde,2-0,2-0,False,1.344489,1.344489,0.0,low,strong
+exact_chase_heavy,Chasers overweight modal and top exact scorelines.,2026-07-04T01:30:00Z,Colombia,Ghana,2-0,2-0,False,1.145648,1.145648,0.0,low,strong
+exact_chase_heavy,Chasers overweight modal and top exact scorelines.,2026-07-04T17:00:00Z,Canada,Morocco,0-2,0-2,False,0.927647,0.927647,0.0,high,medium
+exact_chase_heavy,Chasers overweight modal and top exact scorelines.,2026-07-04T21:00:00Z,Paraguay,France,0-2,0-2,False,1.325361,1.325361,0.0,low,strong
+exact_chase_heavy,Chasers overweight modal and top exact scorelines.,2026-07-05T20:00:00Z,Brazil,Norway,2-0,2-0,False,0.856397,0.856397,0.0,high,fragile
+exact_chase_heavy,Chasers overweight modal and top exact scorelines.,2026-07-06T00:00:00Z,Mexico,England,0-1,0-1,False,0.691299,0.691299,0.0,high,fragile
+exact_chase_heavy,Chasers overweight modal and top exact scorelines.,2026-07-06T19:00:00Z,Portugal,Spain,0-2,0-2,False,0.832475,0.832475,0.0,high,fragile
+exact_chase_heavy,Chasers overweight modal and top exact scorelines.,2026-07-07T00:00:00Z,United States,Belgium,2-1,2-1,False,0.635457,0.635457,0.0,high,fragile
+goals_plus_5pct,Model total-goals expectation tilted 5 percent higher.,2026-07-03T18:00:00Z,Australia,Egypt,0-1,0-1,False,0.749638,0.749638,0.0,high,medium
+goals_plus_5pct,Model total-goals expectation tilted 5 percent higher.,2026-07-03T22:00:00Z,Argentina,Cape Verde,2-0,2-0,False,1.330514,1.330514,0.0,low,strong
+goals_plus_5pct,Model total-goals expectation tilted 5 percent higher.,2026-07-04T01:30:00Z,Colombia,Ghana,2-0,2-0,False,1.147164,1.147164,0.0,low,strong
+goals_plus_5pct,Model total-goals expectation tilted 5 percent higher.,2026-07-04T17:00:00Z,Canada,Morocco,0-2,0-2,False,0.930829,0.930829,0.0,high,medium
+goals_plus_5pct,Model total-goals expectation tilted 5 percent higher.,2026-07-04T21:00:00Z,Paraguay,France,0-2,0-2,False,1.316503,1.316503,0.0,low,strong
+goals_plus_5pct,Model total-goals expectation tilted 5 percent higher.,2026-07-05T20:00:00Z,Brazil,Norway,2-0,2-0,False,0.854966,0.854966,0.0,high,fragile
+goals_plus_5pct,Model total-goals expectation tilted 5 percent higher.,2026-07-06T00:00:00Z,Mexico,England,0-1,0-1,False,0.682888,0.682888,0.0,high,fragile
+goals_plus_5pct,Model total-goals expectation tilted 5 percent higher.,2026-07-06T19:00:00Z,Portugal,Spain,0-2,0-2,False,0.832216,0.832216,0.0,high,fragile
+goals_plus_5pct,Model total-goals expectation tilted 5 percent higher.,2026-07-07T00:00:00Z,United States,Belgium,2-1,2-1,False,0.638998,0.638998,0.0,high,fragile
+goals_minus_5pct,Model total-goals expectation tilted 5 percent lower.,2026-07-03T18:00:00Z,Australia,Egypt,0-1,0-1,False,0.762362,0.762362,0.0,high,medium
+goals_minus_5pct,Model total-goals expectation tilted 5 percent lower.,2026-07-03T22:00:00Z,Argentina,Cape Verde,2-0,2-0,False,1.356489,1.356489,0.0,low,strong
+goals_minus_5pct,Model total-goals expectation tilted 5 percent lower.,2026-07-04T01:30:00Z,Colombia,Ghana,2-0,2-0,False,1.141652,1.141652,0.0,low,strong
+goals_minus_5pct,Model total-goals expectation tilted 5 percent lower.,2026-07-04T17:00:00Z,Canada,Morocco,0-2,0-2,False,0.922469,0.922469,0.0,high,medium
+goals_minus_5pct,Model total-goals expectation tilted 5 percent lower.,2026-07-04T21:00:00Z,Paraguay,France,0-2,0-2,False,1.331821,1.331821,0.0,low,strong
+goals_minus_5pct,Model total-goals expectation tilted 5 percent lower.,2026-07-05T20:00:00Z,Brazil,Norway,2-0,2-0,False,0.856217,0.856217,0.0,high,fragile
+goals_minus_5pct,Model total-goals expectation tilted 5 percent lower.,2026-07-06T00:00:00Z,Mexico,England,0-1,0-1,False,0.699294,0.699294,0.0,high,fragile
+goals_minus_5pct,Model total-goals expectation tilted 5 percent lower.,2026-07-06T19:00:00Z,Portugal,Spain,0-2,0-2,False,0.831092,0.831092,0.0,high,fragile
+goals_minus_5pct,Model total-goals expectation tilted 5 percent lower.,2026-07-07T00:00:00Z,United States,Belgium,2-1,2-1,False,0.630285,0.630285,0.0,high,fragile
+rho_plus_0_02,Dixon-Coles rho increased by 0.02.,2026-07-03T18:00:00Z,Australia,Egypt,0-1,0-1,False,0.765051,0.765051,0.0,high,medium
+rho_plus_0_02,Dixon-Coles rho increased by 0.02.,2026-07-03T22:00:00Z,Argentina,Cape Verde,2-0,2-0,False,1.344302,1.344302,0.0,low,strong
+rho_plus_0_02,Dixon-Coles rho increased by 0.02.,2026-07-04T01:30:00Z,Colombia,Ghana,2-0,2-0,False,1.14681,1.14681,0.0,low,strong
+rho_plus_0_02,Dixon-Coles rho increased by 0.02.,2026-07-04T17:00:00Z,Canada,Morocco,0-2,0-2,False,0.930093,0.930093,0.0,high,medium
+rho_plus_0_02,Dixon-Coles rho increased by 0.02.,2026-07-04T21:00:00Z,Paraguay,France,0-2,0-2,False,1.325313,1.325313,0.0,low,strong
+rho_plus_0_02,Dixon-Coles rho increased by 0.02.,2026-07-05T20:00:00Z,Brazil,Norway,2-0,2-0,False,0.859256,0.859256,0.0,high,fragile
+rho_plus_0_02,Dixon-Coles rho increased by 0.02.,2026-07-06T00:00:00Z,Mexico,England,0-1,0-1,False,0.700054,0.700054,0.0,high,fragile
+rho_plus_0_02,Dixon-Coles rho increased by 0.02.,2026-07-06T19:00:00Z,Portugal,Spain,0-2,0-2,False,0.835455,0.835455,0.0,high,fragile
+rho_plus_0_02,Dixon-Coles rho increased by 0.02.,2026-07-07T00:00:00Z,United States,Belgium,2-1,2-1,False,0.638732,0.638732,0.0,high,fragile
+rho_minus_0_02,Dixon-Coles rho decreased by 0.02.,2026-07-03T18:00:00Z,Australia,Egypt,0-1,0-1,False,0.747724,0.747724,0.0,high,medium
+rho_minus_0_02,Dixon-Coles rho decreased by 0.02.,2026-07-03T22:00:00Z,Argentina,Cape Verde,2-0,2-0,False,1.344752,1.344752,0.0,low,strong
+rho_minus_0_02,Dixon-Coles rho decreased by 0.02.,2026-07-04T01:30:00Z,Colombia,Ghana,2-0,2-0,False,1.144592,1.144592,0.0,low,strong
+rho_minus_0_02,Dixon-Coles rho decreased by 0.02.,2026-07-04T17:00:00Z,Canada,Morocco,0-2,0-2,False,0.925267,0.925267,0.0,high,medium
+rho_minus_0_02,Dixon-Coles rho decreased by 0.02.,2026-07-04T21:00:00Z,Paraguay,France,0-2,0-2,False,1.325505,1.325505,0.0,low,strong
+rho_minus_0_02,Dixon-Coles rho decreased by 0.02.,2026-07-05T20:00:00Z,Brazil,Norway,2-0,2-0,False,0.853564,0.853564,0.0,high,fragile
+rho_minus_0_02,Dixon-Coles rho decreased by 0.02.,2026-07-06T00:00:00Z,Mexico,England,0-1,0-1,False,0.682577,0.682577,0.0,high,fragile
+rho_minus_0_02,Dixon-Coles rho decreased by 0.02.,2026-07-06T19:00:00Z,Portugal,Spain,0-2,0-2,False,0.829526,0.829526,0.0,high,fragile
+rho_minus_0_02,Dixon-Coles rho decreased by 0.02.,2026-07-07T00:00:00Z,United States,Belgium,2-1,2-1,False,0.632205,0.632205,0.0,high,fragile
+draw_heavy,Draw scorelines receive 8 percent more mass.,2026-07-03T18:00:00Z,Australia,Egypt,0-1,0-1,False,0.737858,0.737858,0.0,high,medium
+draw_heavy,Draw scorelines receive 8 percent more mass.,2026-07-03T22:00:00Z,Argentina,Cape Verde,2-0,2-0,False,1.331909,1.331909,0.0,low,strong
+draw_heavy,Draw scorelines receive 8 percent more mass.,2026-07-04T01:30:00Z,Colombia,Ghana,2-0,2-0,False,1.125702,1.125702,0.0,low,strong
+draw_heavy,Draw scorelines receive 8 percent more mass.,2026-07-04T17:00:00Z,Canada,Morocco,0-2,0-2,False,0.908126,0.908126,0.0,high,medium
+draw_heavy,Draw scorelines receive 8 percent more mass.,2026-07-04T21:00:00Z,Paraguay,France,0-2,0-2,False,1.310303,1.310303,0.0,low,strong
+draw_heavy,Draw scorelines receive 8 percent more mass.,2026-07-05T20:00:00Z,Brazil,Norway,2-0,2-0,False,0.839329,0.839329,0.0,high,fragile
+draw_heavy,Draw scorelines receive 8 percent more mass.,2026-07-06T00:00:00Z,Mexico,England,0-1,0-1,False,0.675287,0.675287,0.0,high,fragile
+draw_heavy,Draw scorelines receive 8 percent more mass.,2026-07-06T19:00:00Z,Portugal,Spain,0-2,0-2,False,0.815246,0.815246,0.0,high,fragile
+draw_heavy,Draw scorelines receive 8 percent more mass.,2026-07-07T00:00:00Z,United States,Belgium,2-1,2-1,False,0.621916,0.621916,0.0,high,fragile
+draw_light,Draw scorelines receive 8 percent less mass.,2026-07-03T18:00:00Z,Australia,Egypt,0-1,0-1,False,0.775827,0.775827,0.0,high,medium
+draw_light,Draw scorelines receive 8 percent less mass.,2026-07-03T22:00:00Z,Argentina,Cape Verde,2-0,2-0,False,1.357309,1.357309,0.0,low,strong
+draw_light,Draw scorelines receive 8 percent less mass.,2026-07-04T01:30:00Z,Colombia,Ghana,2-0,2-0,False,1.166313,1.166313,0.0,low,strong
+draw_light,Draw scorelines receive 8 percent less mass.,2026-07-04T17:00:00Z,Canada,Morocco,0-2,0-2,False,0.948027,0.948027,0.0,high,medium
+draw_light,Draw scorelines receive 8 percent less mass.,2026-07-04T21:00:00Z,Paraguay,France,0-2,0-2,False,1.340768,1.340768,0.0,low,strong
+draw_light,Draw scorelines receive 8 percent less mass.,2026-07-05T20:00:00Z,Brazil,Norway,2-0,2-0,False,0.874175,0.874175,0.0,high,fragile
+draw_light,Draw scorelines receive 8 percent less mass.,2026-07-06T00:00:00Z,Mexico,England,0-1,0-1,False,0.708088,0.708088,0.0,high,fragile
+draw_light,Draw scorelines receive 8 percent less mass.,2026-07-06T19:00:00Z,Portugal,Spain,0-2,0-2,False,0.850449,0.850449,0.0,high,fragile
+draw_light,Draw scorelines receive 8 percent less mass.,2026-07-07T00:00:00Z,United States,Belgium,2-1,2-1,False,0.6496,0.6496,0.0,high,fragile

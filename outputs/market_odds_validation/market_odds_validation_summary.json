@@ -1,5 +1,5 @@
 {
-  "generated_at_utc": "2026-07-03T10:06:11.168648+00:00",
+  "generated_at_utc": "2026-07-03T16:00:10.426641+00:00",
   "pick_count": 9,
   "market_available_count": 8,
   "totals_available_count": 8,
@@ -34,10 +34,18 @@
       "market_alignment_reasons": "pick outcome agrees with market favourite; market gives selected outcome strong support; goal total conflicts with market lean; spreads market unavailable"
     },
     {
+      "home_team": "Portugal",
+      "away_team": "Spain",
+      "final_pick": "0-2",
+      "market_alignment_score": 0.82591,
+      "market_alignment_label": "market_aligned",
+      "market_alignment_reasons": "pick outcome agrees with market favourite; market gives selected outcome strong support; spreads market unavailable"
+    },
+    {
       "home_team": "Brazil",
       "away_team": "Norway",
       "final_pick": "2-0",
-      "market_alignment_score": 0.83586,
+      "market_alignment_score": 0.840982,
       "market_alignment_label": "market_aligned",
       "market_alignment_reasons": "pick outcome agrees with market favourite; market gives selected outcome strong support; spreads market unavailable"
     },
@@ -45,7 +53,7 @@
       "home_team": "Mexico",
       "away_team": "England",
       "final_pick": "0-1",
-      "market_alignment_score": 0.847138,
+      "market_alignment_score": 0.846515,
       "market_alignment_label": "market_aligned",
       "market_alignment_reasons": "pick outcome agrees with market favourite; goal total agrees with market lean; spreads market unavailable"
     },
@@ -53,15 +61,7 @@
       "home_team": "Australia",
       "away_team": "Egypt",
       "final_pick": "0-1",
-      "market_alignment_score": 0.852484,
-      "market_alignment_label": "market_aligned",
-      "market_alignment_reasons": "pick outcome agrees with market favourite; goal total agrees with market lean; spreads market unavailable"
-    },
-    {
-      "home_team": "Portugal",
-      "away_team": "Spain",
-      "final_pick": "0-2",
-      "market_alignment_score": 0.92421,
+      "market_alignment_score": 0.85249,
       "market_alignment_label": "market_aligned",
       "market_alignment_reasons": "pick outcome agrees with market favourite; goal total agrees with market lean; spreads market unavailable"
     },
@@ -69,7 +69,7 @@
       "home_team": "Canada",
       "away_team": "Morocco",
       "final_pick": "0-2",
-      "market_alignment_score": 0.955966,
+      "market_alignment_score": 0.954994,
       "market_alignment_label": "market_aligned",
       "market_alignment_reasons": "pick outcome agrees with market favourite; market gives selected outcome strong support; goal total agrees with market lean; spreads market unavailable"
     },

@@ -1,6 +1,6 @@
 # Final Leader Decision Report
 
-Generated: 2026-07-03T10:06:10.078882+00:00
+Generated: 2026-07-03T16:00:09.340869+00:00
 
 ## Decision
 
@@ -12,8 +12,8 @@ Generated: 2026-07-03T10:06:10.078882+00:00
 
 | Run | Simulations | Baseline P(first) | Final P(first) | Delta | P(first/tied) | Accepted switches | Total EV loss |
 |---|---:|---:|---:|---:|---:|---:|---:|
-| base_mc | 100000 | 0.732080 | 0.732080 | 0.000000 | 0.772210 | 0 | 0.000000 |
-| confirmation_500k | 500000 | 0.732010 | 0.732010 | 0.000000 | 0.771636 | 0 | 0.000000 |
+| base_mc | 100000 | 0.732260 | 0.732260 | 0.000000 | 0.772850 | 0 | 0.000000 |
+| confirmation_500k | 500000 | 0.731788 | 0.731788 | 0.000000 | 0.772220 | 0 | 0.000000 |
 
 ## Final Picks
 

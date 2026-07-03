@@ -288,6 +288,92 @@ def test_build_sharp_anchor_enriches_h2h_match_tokens_from_public_search(tmp_pat
     assert {sample["outcome"] for sample in summary["skipped_no_token_samples"]} == {"France", "Draw"}
 
 
+def test_build_sharp_anchor_enriches_three_way_h2h_win_and_draw_markets(tmp_path, monkeypatch):
+    cfg = EngineConfig(
+        raw={
+            "paths": {"output_root": str(tmp_path / "outputs")},
+            "sharp_anchor": {
+                "input_path": str(tmp_path / "sharp.csv"),
+                "token_map_path": str(tmp_path / "empty_map.csv"),
+                "match_public_search_enabled": True,
+                "match_public_search_max_queries": 5,
+            },
+        },
+        path=tmp_path / "cfg.yaml",
+    )
+    _write(
+        tmp_path / "sharp.csv",
+        [
+            {
+                "market_slug": "Australia vs Egypt",
+                "outcome": "Australia",
+                "decimal_odds": "2.10",
+                "market_key": "h2h",
+                "sport": "soccer_fifa_world_cup",
+            },
+            {
+                "market_slug": "Australia vs Egypt",
+                "outcome": "Egypt",
+                "decimal_odds": "3.80",
+                "market_key": "h2h",
+                "sport": "soccer_fifa_world_cup",
+            },
+            {
+                "market_slug": "Australia vs Egypt",
+                "outcome": "Draw",
+                "decimal_odds": "3.40",
+                "market_key": "h2h",
+                "sport": "soccer_fifa_world_cup",
+            },
+        ],
+        ["market_slug", "outcome", "decimal_odds", "market_key", "sport"],
+    )
+    _write(tmp_path / "empty_map.csv", [], ["token_id", "market_slug", "question", "outcome"])
+
+    def fake_get(*args, **kwargs):
+        assert "Mozilla/5.0" in kwargs["headers"]["User-Agent"]
+        return _Response(
+            {
+                "events": [
+                    {
+                        "slug": "fifwc-aus-egy-2026-07-03",
+                        "title": "Australia vs. Egypt",
+                        "markets": [
+                            {
+                                "question": "Will Australia win on 2026-07-03?",
+                                "outcomes": '["Yes", "No"]',
+                                "clobTokenIds": '["AUSTRALIA_YES", "AUSTRALIA_NO"]',
+                            },
+                            {
+                                "question": "Will Australia vs. Egypt end in a draw?",
+                                "outcomes": '["Yes", "No"]',
+                                "clobTokenIds": '["DRAW_YES", "DRAW_NO"]',
+                            },
+                            {
+                                "question": "Will Egypt win on 2026-07-03?",
+                                "outcomes": '["Yes", "No"]',
+                                "clobTokenIds": '["EGYPT_YES", "EGYPT_NO"]',
+                            },
+                        ],
+                    }
+                ]
+            }
+        )
+
+    monkeypatch.setattr("polymarket_predictive_engine.sharp_anchor.requests.get", fake_get)
+
+    summary = build_sharp_anchor(cfg)
+
+    assert summary["fundamental_rows"] == 3
+    assert summary["skipped_no_token"] == 0
+    assert summary["h2h_public_search"]["queries"] == 1
+    assert summary["h2h_public_search"]["tokens"] == 3
+    assert summary["h2h_public_search_token_joins"] == 3
+    out = _read(tmp_path / "outputs" / "polymarket_training" / "sharp_fundamental_probabilities.csv")
+    assert {row["token_id"] for row in out} == {"AUSTRALIA_YES", "EGYPT_YES", "DRAW_YES"}
+    assert sum(float(row["probability"]) for row in out) == approx(1.0, abs=1e-5)
+
+
 def test_build_sharp_anchor_joins_worldcup_outrights_by_team_name(tmp_path):
     cfg = EngineConfig(
         raw={"paths": {"output_root": str(tmp_path / "outputs")},

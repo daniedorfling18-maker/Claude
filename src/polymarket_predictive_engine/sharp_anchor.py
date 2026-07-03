@@ -74,6 +74,15 @@ CONFEDERATION_TEAM_KEYS = {
     "ofc",
 }
 DEFAULT_GAMMA_PUBLIC_SEARCH = "https://gamma-api.polymarket.com/public-search"
+DEFAULT_PUBLIC_SEARCH_HEADERS = {
+    "User-Agent": (
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+        "(KHTML, like Gecko) Chrome/124.0 Safari/537.36"
+    ),
+    "Accept": "application/json,text/plain,*/*",
+    "Origin": "https://polymarket.com",
+    "Referer": "https://polymarket.com/",
+}
 
 
 # --------------------------------------------------------------------------- pure de-vig math
@@ -162,6 +171,34 @@ def _match_subject_from_question(value: object) -> tuple[str, str] | None:
     return None
 
 
+def _event_teams_from_text(value: object) -> tuple[str, str] | None:
+    text = str(value or "").strip()
+    if not text:
+        return None
+    compact = re.sub(r"\s+", " ", text)
+    patterns = [
+        r"^(.*?)\s+vs\.?\s+(.*?)(?:\s+\d{4}-\d{2}-\d{2})?$",
+        r"^(.*?)\s+v\.?\s+(.*?)(?:\s+\d{4}-\d{2}-\d{2})?$",
+        r"^(.*?)-vs-(.*?)(?:-\d{4}-\d{2}-\d{2})?$",
+    ]
+    for pattern in patterns:
+        match = re.match(pattern, compact, re.I)
+        if match:
+            left = match.group(1).replace("-", " ").strip(" .")
+            right = match.group(2).replace("-", " ").strip(" .")
+            if left and right:
+                return left, right
+    return None
+
+
+def _public_search_headers(settings: dict[str, Any]) -> dict[str, str]:
+    headers = dict(DEFAULT_PUBLIC_SEARCH_HEADERS)
+    configured = settings.get("public_search_headers")
+    if isinstance(configured, dict):
+        headers.update({str(key): str(value) for key, value in configured.items() if value is not None})
+    return headers
+
+
 def _json_list(value: object) -> list[Any]:
     if isinstance(value, list):
         return value
@@ -194,6 +231,7 @@ def _worldcup_winner_tokens_from_public_search(settings: dict[str, Any]) -> dict
                     "search_tags": "false",
                     "search_profiles": "false",
                 },
+                headers=_public_search_headers(settings),
                 timeout=timeout,
             )
             response.raise_for_status()
@@ -292,9 +330,17 @@ def _public_search_markets(payload: object) -> list[dict[str, Any]]:
         for event in events:
             if not isinstance(event, dict):
                 continue
+            event_title = event.get("title") or event.get("question") or event.get("slug") or ""
+            event_slug = event.get("slug") or ""
             event_markets = event.get("markets")
             if isinstance(event_markets, list):
-                markets.extend(item for item in event_markets if isinstance(item, dict))
+                for item in event_markets:
+                    if not isinstance(item, dict):
+                        continue
+                    enriched = dict(item)
+                    enriched.setdefault("_event_title", event_title)
+                    enriched.setdefault("_event_slug", event_slug)
+                    markets.append(enriched)
     return markets
 
 
@@ -335,15 +381,47 @@ def _h2h_public_search_queries(rows: Iterable[dict[str, Any]], *, limit: int) ->
     return queries
 
 
+def _h2h_public_market_keys(market: dict[str, Any]) -> list[tuple[str, str]]:
+    question = str(market.get("question") or "").strip()
+    event_teams = _event_teams_from_text(market.get("_event_title")) or _event_teams_from_text(market.get("_event_slug"))
+
+    explicit_subject = _match_subject_from_question(question)
+    if explicit_subject:
+        subject, opponent = explicit_subject
+        return [
+            (_match_event_slug(subject, opponent), subject),
+            (_match_event_slug(opponent, subject), subject),
+        ]
+
+    win_match = re.match(r"^Will\s+(.*?)\s+win(?:\s+on\s+\d{4}-\d{2}-\d{2})?(?:\?|$)", question, re.I)
+    if win_match and event_teams:
+        subject = win_match.group(1).strip()
+        left, right = event_teams
+        if _team_key(subject) not in {_team_key(left), _team_key(right)}:
+            return []
+        return [
+            (_match_event_slug(left, right), subject),
+            (_match_event_slug(right, left), subject),
+        ]
+
+    if event_teams and re.search(r"\b(end|finish|result)\b.*\b(in\s+a\s+)?draw\b|\bdraw\?", question, re.I):
+        left, right = event_teams
+        return [
+            (_match_event_slug(left, right), "Draw"),
+            (_match_event_slug(right, left), "Draw"),
+        ]
+    return []
+
+
 def _h2h_match_tokens_from_public_search(
     settings: dict[str, Any],
     sharp_rows: Iterable[dict[str, Any]],
 ) -> tuple[dict[str, str], dict[str, Any]]:
     """Map h2h sharp rows to Polymarket binary YES tokens using exact fixture public search.
 
-    This intentionally maps only the YES token for a clear "Will Team beat Team?" market. It never
-    maps the NO token to the opponent because h2h markets can include draws and other non-win
-    outcomes.
+    This intentionally maps only explicit YES-side public markets: "Will Team beat Team?",
+    "Will Team win on DATE?", and "Will Team vs Team end in a draw?". It never maps a NO token to
+    the opponent because h2h markets can include draws and other non-win outcomes.
     """
     if not settings.get("match_public_search_enabled", False):
         return {}, {"enabled": False, "queries": 0, "tokens": 0}
@@ -374,6 +452,7 @@ def _h2h_match_tokens_from_public_search(
                     "search_tags": "false",
                     "search_profiles": "false",
                 },
+                headers=_public_search_headers(settings),
                 timeout=timeout,
             )
             response.raise_for_status()
@@ -384,15 +463,11 @@ def _h2h_match_tokens_from_public_search(
         markets = _public_search_markets(payload)
         markets_seen += len(markets)
         for market in markets:
-            question_subject = _match_subject_from_question(market.get("question"))
-            if not question_subject:
-                continue
-            subject, opponent = question_subject
             token = _yes_token_from_market(market)
             if not token:
                 continue
-            mapping.setdefault(_match_key(_match_event_slug(subject, opponent), subject), token)
-            mapping.setdefault(_match_key(_match_event_slug(opponent, subject), subject), token)
+            for group, outcome in _h2h_public_market_keys(market):
+                mapping.setdefault(_match_key(group, outcome), token)
     return mapping, {
         "enabled": True,
         "queries": len(queries),

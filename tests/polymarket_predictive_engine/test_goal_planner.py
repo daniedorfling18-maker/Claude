@@ -93,6 +93,43 @@ def test_goal_plan_uses_audited_pnl_when_raw_account_contains_quote_conflicts(tm
     assert "raw paper P&L contains quote-conflicted" in payload["main_gap"]
 
 
+def test_goal_plan_uses_baseline_quote_audit_window_not_all_history(tmp_path):
+    cfg = _cfg(tmp_path)
+    write_json(
+        cfg.governance_root / "paper_profit_target_tracker.json",
+        {
+            "actual_pnl_since_baseline_usdc": 10.0,
+            "elapsed_hours": 48.0,
+            "current": {"equity_usdc": 1010.0},
+            "baseline": {"baseline_equity_usdc": 1000.0},
+        },
+    )
+    write_json(
+        cfg.output_root / "polymarket_price_action" / "paper_broker_round_trip_summary.json",
+        {
+            "audited_baseline_realized_pnl_usdc": 10.0,
+            "audited_baseline_closed_round_trips": 5,
+            "baseline_closed_round_trips": 5,
+            "baseline_quote_conflict_round_trips": 0,
+            "baseline_quote_unverified_round_trips": 0,
+            "quote_conflict_round_trips": 7,
+            "quote_unverified_round_trips": 2,
+        },
+    )
+
+    payload = build_goal_plan(cfg)
+
+    assert payload["profit_target_proof_status"] == "verified_quote_consistent"
+    assert payload["profit_target_proof_blockers"] == []
+    assert payload["pnl_audit_state"] == "quote_consistent"
+    assert payload["quote_conflict_round_trips"] == 0
+    assert payload["quote_unverified_round_trips"] == 0
+    assert payload["all_time_quote_conflict_round_trips"] == 7
+    assert payload["all_time_quote_unverified_round_trips"] == 2
+    assert payload["on_pace_by_decision_pnl"] is True
+    assert payload["decision_monthly_run_rate_usdc"] > 100
+
+
 def test_goal_plan_does_not_certify_on_pace_without_enough_audited_round_trips(tmp_path):
     cfg = _cfg(tmp_path)
     write_json(

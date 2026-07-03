@@ -133,6 +133,51 @@ def test_profit_target_uses_audited_pnl_when_raw_ledger_has_quote_conflicts(tmp_
     assert payload["decision_monthly_run_rate_usdc"] < 100
 
 
+def test_profit_target_uses_baseline_quote_audit_window_not_all_history(tmp_path):
+    cfg = _config(tmp_path)
+    write_json(
+        cfg.governance_root / "paper_profit_target_baseline.json",
+        {
+            "created_at_utc": (datetime.now(timezone.utc) - timedelta(hours=48)).strftime("%Y-%m-%dT%H:%M:%SZ"),
+            "baseline_equity_usdc": 1000,
+            "baseline_cash_usdc": 1000,
+            "baseline_total_exposure_usdc": 0,
+        },
+    )
+    write_json(
+        cfg.output_root / "polymarket_price_action" / "paper_broker_round_trip_summary.json",
+        {
+            "audited_baseline_realized_pnl_usdc": 10.0,
+            "audited_baseline_closed_round_trips": 5,
+            "baseline_closed_round_trips": 5,
+            "baseline_quote_conflict_round_trips": 0,
+            "baseline_quote_unverified_round_trips": 0,
+            "quote_conflict_round_trips": 7,
+            "quote_unverified_round_trips": 2,
+        },
+    )
+
+    payload = write_profit_target_tracker(
+        cfg,
+        {
+            "equity": 1010,
+            "cash": 1010,
+            "total_exposure": 0,
+            "generated_at_utc": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        },
+    )
+
+    assert payload["status"] == "on_pace"
+    assert payload["profit_target_proof_status"] == "verified_quote_consistent"
+    assert payload["profit_target_proof_blockers"] == []
+    assert payload["pnl_audit_state"] == "quote_consistent"
+    assert payload["quote_conflict_round_trips"] == 0
+    assert payload["quote_unverified_round_trips"] == 0
+    assert payload["all_time_quote_conflict_round_trips"] == 7
+    assert payload["all_time_quote_unverified_round_trips"] == 2
+    assert payload["on_pace_by_decision_pnl"] is True
+
+
 def test_dashboard_surfaces_stale_open_paper_positions(tmp_path):
     cfg = _config(tmp_path)
     stale = {

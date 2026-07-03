@@ -217,8 +217,18 @@ def build_goal_plan(cfg: EngineConfig) -> dict[str, Any]:
     minimum_audited_round_trips = int(_num(settings.get("minimum_audited_round_trips_for_on_pace"), 5.0))
     audited_round_trips = int(_num(paper_round_trip.get("audited_baseline_closed_round_trips")))
     baseline_round_trips = int(_num(paper_round_trip.get("baseline_closed_round_trips")))
-    quote_conflicts = int(_num(paper_round_trip.get("quote_conflict_round_trips")))
-    quote_unverified = int(_num(paper_round_trip.get("quote_unverified_round_trips")))
+    all_time_quote_conflicts = int(_num(paper_round_trip.get("quote_conflict_round_trips")))
+    all_time_quote_unverified = int(_num(paper_round_trip.get("quote_unverified_round_trips")))
+    quote_conflicts = (
+        int(_num(paper_round_trip.get("baseline_quote_conflict_round_trips")))
+        if "baseline_quote_conflict_round_trips" in paper_round_trip
+        else all_time_quote_conflicts
+    )
+    quote_unverified = (
+        int(_num(paper_round_trip.get("baseline_quote_unverified_round_trips")))
+        if "baseline_quote_unverified_round_trips" in paper_round_trip
+        else all_time_quote_unverified
+    )
     pnl_audit_state = (
         "raw_pnl_contains_quote_conflicts"
         if quote_conflicts > 0
@@ -297,6 +307,8 @@ def build_goal_plan(cfg: EngineConfig) -> dict[str, Any]:
         "verified_evidence_ready": verified_evidence_ready,
         "quote_conflict_round_trips": quote_conflicts,
         "quote_unverified_round_trips": quote_unverified,
+        "all_time_quote_conflict_round_trips": all_time_quote_conflicts,
+        "all_time_quote_unverified_round_trips": all_time_quote_unverified,
         "elapsed_hours": elapsed_hours,
         "elapsed_days": elapsed_days,
         "prorated_target_usdc": prorated_target,

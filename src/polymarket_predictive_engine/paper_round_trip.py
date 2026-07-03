@@ -541,6 +541,12 @@ def build_paper_round_trip_evidence(cfg: EngineConfig) -> dict[str, Any]:
     baseline_pnl = sum(float(safe_float(row.get("realized_pnl_usdc")) or 0.0) for row in baseline_rows)
     baseline_positive = [row for row in baseline_rows if float(safe_float(row.get("realized_pnl_usdc")) or 0.0) > 0]
     audited_baseline_rows = [row for row in baseline_rows if row.get("quote_consistency_status") == "ok"]
+    baseline_quote_conflicts = [row for row in baseline_rows if row.get("quote_consistency_status") == "quote_conflict"]
+    baseline_quote_unverified = [
+        row
+        for row in baseline_rows
+        if str(row.get("quote_consistency_status") or "").startswith("unverified_")
+    ]
     audited_baseline_stake = sum(float(safe_float(row.get("stake_usdc")) or 0.0) for row in audited_baseline_rows)
     audited_baseline_pnl = sum(float(safe_float(row.get("realized_pnl_usdc")) or 0.0) for row in audited_baseline_rows)
     summary = {
@@ -568,6 +574,8 @@ def build_paper_round_trip_evidence(cfg: EngineConfig) -> dict[str, Any]:
         "baseline_realized_pnl_usdc": baseline_pnl,
         "baseline_realized_roi": baseline_pnl / baseline_stake if baseline_stake > 0 else 0.0,
         "baseline_stake_usdc": baseline_stake,
+        "baseline_quote_conflict_round_trips": len(baseline_quote_conflicts),
+        "baseline_quote_unverified_round_trips": len(baseline_quote_unverified),
         "audited_baseline_closed_round_trips": len(audited_baseline_rows),
         "audited_baseline_realized_pnl_usdc": audited_baseline_pnl,
         "audited_baseline_realized_roi": audited_baseline_pnl / audited_baseline_stake if audited_baseline_stake > 0 else 0.0,

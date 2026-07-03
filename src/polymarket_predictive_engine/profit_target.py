@@ -109,8 +109,18 @@ def write_profit_target_tracker(cfg: EngineConfig, broker: dict[str, Any]) -> di
     audited_pnl = safe_float(round_trip_audit.get("audited_baseline_realized_pnl_usdc"))
     audited_round_trips = int(safe_float(round_trip_audit.get("audited_baseline_closed_round_trips")) or 0)
     baseline_round_trips = int(safe_float(round_trip_audit.get("baseline_closed_round_trips")) or 0)
-    quote_conflicts = int(safe_float(round_trip_audit.get("quote_conflict_round_trips")) or 0)
-    quote_unverified = int(safe_float(round_trip_audit.get("quote_unverified_round_trips")) or 0)
+    all_time_quote_conflicts = int(safe_float(round_trip_audit.get("quote_conflict_round_trips")) or 0)
+    all_time_quote_unverified = int(safe_float(round_trip_audit.get("quote_unverified_round_trips")) or 0)
+    quote_conflicts = (
+        int(safe_float(round_trip_audit.get("baseline_quote_conflict_round_trips")) or 0)
+        if "baseline_quote_conflict_round_trips" in round_trip_audit
+        else all_time_quote_conflicts
+    )
+    quote_unverified = (
+        int(safe_float(round_trip_audit.get("baseline_quote_unverified_round_trips")) or 0)
+        if "baseline_quote_unverified_round_trips" in round_trip_audit
+        else all_time_quote_unverified
+    )
     audited_available = audited_pnl is not None
     decision_pnl = float(audited_pnl) if audited_available else raw_pnl
     decision_monthly_run_rate = (decision_pnl / elapsed_days * 30.0) if elapsed_days > 0 else None
@@ -182,6 +192,8 @@ def write_profit_target_tracker(cfg: EngineConfig, broker: dict[str, Any]) -> di
         "verified_evidence_ready": verified_evidence_ready,
         "quote_conflict_round_trips": quote_conflicts,
         "quote_unverified_round_trips": quote_unverified,
+        "all_time_quote_conflict_round_trips": all_time_quote_conflicts,
+        "all_time_quote_unverified_round_trips": all_time_quote_unverified,
         "on_pace_by_actual_pnl": bool(
             raw_monthly_run_rate is not None
             and raw_monthly_run_rate >= target

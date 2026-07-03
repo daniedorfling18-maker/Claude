@@ -114,6 +114,7 @@ HTML = """<!doctype html>
   <section class="primary"><h2>Decision cockpit</h2><div id="decisionCockpit"></div></section>
   <section><h2>Action board</h2><div id="actionBoard"></div></section>
   <section><h2>Evidence funnel</h2><div id="evidenceFunnel"></div></section>
+  <section><h2>Sharp sports edge funnel</h2><div id="sharpSportsFunnel"></div></section>
   <section><h2>Dutch-book arb watch</h2><div id="dutchArbWatch"></div></section>
   <section><h2>Longshot-bias shadow lane</h2><div id="longshotBias"></div></section>
   <div class="two">
@@ -282,6 +283,7 @@ async function load() {
     const tradeSignalAudit = data.trade_signal_audit || {};
     const decisionSummary = data.decision_useful_summary || {};
     const evidenceFunnel = data.evidence_funnel || {};
+    const sharpSportsFunnel = data.sharp_sports_funnel || {};
     const deploymentHealth = data.deployment_health || {};
     const probeExitWatch = data.paper_probe_exit_watch || {};
     const paperMaintenance = data.paper_maintenance || {};
@@ -605,6 +607,33 @@ async function load() {
         ["Positive cohorts","positive_cohorts", v=>longText(v, 180)],
         ["Summary","decision_or_class_summary", v=>longText(v, 220)]
       ], 5)}
+    `;
+    const sharpSportRows = Array.isArray(sharpSportsFunnel.families) ? sharpSportsFunnel.families : [];
+    document.getElementById("sharpSportsFunnel").innerHTML = `
+      <div class="sectionLead">Bookmaker-anchor route for sports: collection query -> liquid Polymarket rows -> sharp no-vig anchors -> current scored overlap -> CLV/paper proof. Reporting only; it does not approve trades.</div>
+      ${facts([
+        ["Status", sharpSportsFunnel.status || "-"],
+        ["Next bottleneck", sharpSportsFunnel.next_bottleneck || "-", v=>longText(v, 260)],
+        ["Active collection families", sharpSportsFunnel.active_collection_families || [], joinText],
+        ["Anchor rows", sharpSportsFunnel.total_anchor_rows],
+        ["Tradable rows", sharpSportsFunnel.total_tradable_liquidity_rows],
+        ["Scored anchor hits", sharpSportsFunnel.total_scored_anchor_hits],
+        ["Shadow candidates", sharpSportsFunnel.total_shadow_candidates],
+        ["Final CLV rows", sharpSportsFunnel.total_final_clv_rows],
+        ["Decision use", sharpSportsFunnel.decision_use || "-", v=>longText(v, 260)],
+        ["Dry-run only", (sharpSportsFunnel.live_trading_invoked || sharpSportsFunnel.paper_trading_invoked) ? "unexpected invocation flag" : "yes - no orders placed"]
+      ])}
+      ${titledTable("Sharp sports family bottlenecks", sharpSportRows, [
+        ["Family","family"],
+        ["Query active","query_active"],
+        ["Tradable","tradable_liquidity_rows"],
+        ["Anchor rows","anchor_rows"],
+        ["Scored hits","scored_anchor_hits"],
+        ["Shadow","shadow_candidates"],
+        ["CLV final","final_clv_rows"],
+        ["State","state", v=>longText(v, 150)],
+        ["Next","next_action", v=>longText(v, 230)]
+      ], 8)}
     `;
     const dutchBest = dutchArb.best_opportunity || {};
     const dutchStats = dutchArb.scan_stats_latest_poll || {};
@@ -2157,6 +2186,234 @@ def _mispricing_alpha_bridge_status(
     }
 
 
+_SHARP_SPORT_FAMILIES: tuple[dict[str, Any], ...] = (
+    {
+        "family": "worldcup_soccer",
+        "query": "world cup",
+        "family_prefixes": ("worldcup", "world cup", "fifa", "soccer"),
+        "anchor_sports": ("soccer_fifa_world_cup",),
+    },
+    {
+        "family": "tennis_match",
+        "query": "tennis",
+        "family_prefixes": ("tennis", "tennis_match", "tennis_tennis"),
+        "anchor_sports": ("tennis_atp", "tennis_wta"),
+    },
+    {
+        "family": "basketball_nba_match",
+        "query": "nba",
+        "family_prefixes": ("basketball_nba", "basketball"),
+        "anchor_sports": ("basketball_nba",),
+    },
+    {
+        "family": "baseball_mlb_match",
+        "query": "mlb",
+        "family_prefixes": ("baseball_mlb", "baseball"),
+        "anchor_sports": ("baseball_mlb",),
+    },
+    {
+        "family": "mma_match",
+        "query": "mma",
+        "family_prefixes": ("mma",),
+        "anchor_sports": ("mma_mixed_martial_arts",),
+    },
+)
+
+
+def _query_active_for_family(research_focus: dict[str, Any], query: str) -> bool:
+    key = str(query or "").strip().lower()
+    if not key:
+        return False
+    guard = research_focus.get("collection_query_guard")
+    guard = guard if isinstance(guard, dict) else {}
+    query_lists = (
+        research_focus.get("collection_queries"),
+        research_focus.get("raw_collection_queries"),
+        guard.get("guarded_collection_queries"),
+        guard.get("broad_fill_queries"),
+        guard.get("broad_base_queries"),
+    )
+    for values in query_lists:
+        if not isinstance(values, list):
+            continue
+        if any(str(item or "").strip().lower() == key for item in values):
+            return True
+    return False
+
+
+def _row_matches_prefix(row: dict[str, Any], prefixes: tuple[str, ...]) -> bool:
+    text = " ".join(
+        str(row.get(key) or "").strip().lower()
+        for key in ("family", "category", "signal_cohort", "market_slug", "question", "sport")
+    )
+    return any(
+        part == prefix or part.startswith(prefix + "_") or f"|{prefix}" in part or prefix in text
+        for prefix in prefixes
+        for part in text.replace("|", " ").split()
+    )
+
+
+def _sport_anchor_rows(coverage_rows: list[dict[str, Any]], anchor_sports: tuple[str, ...]) -> dict[str, int]:
+    totals = {
+        "anchor_rows": 0,
+        "anchor_rows_in": 0,
+        "anchor_priced_rows": 0,
+        "anchor_no_token_rows": 0,
+    }
+    sports = {sport.lower() for sport in anchor_sports}
+    for row in coverage_rows:
+        sport = str(row.get("sport") or "").strip().lower()
+        if sport not in sports:
+            continue
+        totals["anchor_rows"] += int(safe_float(row.get("fundamental_rows")) or 0)
+        totals["anchor_rows_in"] += int(safe_float(row.get("rows_in")) or 0)
+        totals["anchor_priced_rows"] += int(safe_float(row.get("priced_rows")) or 0)
+        totals["anchor_no_token_rows"] += int(safe_float(row.get("skipped_no_token")) or 0)
+    return totals
+
+
+def _sharp_sports_funnel_payload(
+    *,
+    research_focus: dict[str, Any],
+    liquidity_discovery: dict[str, Any],
+    independent_anchor_status: dict[str, Any],
+    alpha_bridge: dict[str, Any],
+    predictions: list[dict[str, Any]],
+    closing_line_value: dict[str, Any],
+) -> dict[str, Any]:
+    """Summarise the highest-prior sports edge route from collection to proof.
+
+    This is reporting-only. It helps the operator see whether sharp bookmaker
+    anchors are blocked at collection, liquidity, mapping, scoring, or CLV
+    evidence. It never authorises paper or live trading.
+    """
+
+    research_focus = research_focus if isinstance(research_focus, dict) else {}
+    liquidity_discovery = liquidity_discovery if isinstance(liquidity_discovery, dict) else {}
+    independent_anchor_status = independent_anchor_status if isinstance(independent_anchor_status, dict) else {}
+    closing_line_value = closing_line_value if isinstance(closing_line_value, dict) else {}
+    sharp_anchor = independent_anchor_status.get("sharp_anchor")
+    sharp_anchor = sharp_anchor if isinstance(sharp_anchor, dict) else {}
+    coverage_rows = sharp_anchor.get("coverage_by_sport_market")
+    coverage_rows = coverage_rows if isinstance(coverage_rows, list) else []
+    liquidity_rows = liquidity_discovery.get("family_summary")
+    liquidity_rows = liquidity_rows if isinstance(liquidity_rows, list) else []
+    clv_rows = closing_line_value.get("cohorts")
+    clv_rows = clv_rows if isinstance(clv_rows, list) else []
+
+    family_rows: list[dict[str, Any]] = []
+    for item in _SHARP_SPORT_FAMILIES:
+        family = str(item["family"])
+        query = str(item["query"])
+        prefixes = tuple(str(value) for value in item["family_prefixes"])
+        anchor_sports = tuple(str(value) for value in item["anchor_sports"])
+        query_active = _query_active_for_family(research_focus, query)
+        matched_liquidity = [row for row in liquidity_rows if isinstance(row, dict) and _row_matches_prefix(row, prefixes)]
+        liquidity_tokens = sum(int(safe_float(row.get("tokens")) or 0) for row in matched_liquidity)
+        tradable_rows = sum(int(safe_float(row.get("tradable_tokens")) or 0) for row in matched_liquidity)
+        anchor_totals = _sport_anchor_rows([row for row in coverage_rows if isinstance(row, dict)], anchor_sports)
+        matched_predictions = [
+            row
+            for row in predictions
+            if _row_matches_prefix(row, prefixes)
+            and (
+                str(row.get("fundamental_probability") or "").strip()
+                or str(row.get("haircut_fundamental_probability") or "").strip()
+            )
+        ]
+        trade_candidates = sum(1 for row in matched_predictions if _truthy(row.get("alpha_trade_candidate")))
+        shadow_candidates = sum(1 for row in matched_predictions if _truthy(row.get("shadow_trade_candidate")))
+        matched_clv = [
+            row for row in clv_rows if isinstance(row, dict) and _row_matches_prefix(row, prefixes)
+        ]
+        final_clv_rows = sum(int(safe_float(row.get("final_positions")) or 0) for row in matched_clv)
+        positive_clv_rows = sum(
+            1
+            for row in matched_clv
+            if str(row.get("clv_evidence") or "").lower().startswith("positive")
+            or (safe_float(row.get("mean_final_clv")) or 0.0) > 0
+        )
+        if not query_active:
+            state = "needs_collection_query"
+            next_action = f"Keep {query!r} in the guarded collection queue until liquid rows appear."
+        elif tradable_rows <= 0:
+            state = "needs_liquid_polymarket_rows"
+            next_action = "Refresh liquidity discovery/websocket targets for this family."
+        elif anchor_totals["anchor_rows"] <= 0:
+            state = "needs_sharp_bookmaker_anchor"
+            next_action = "Fetch/build no-vig bookmaker anchors and map them to current Polymarket tokens."
+        elif not matched_predictions:
+            state = "needs_scored_anchor_overlap"
+            next_action = "Join the sharp anchor rows to the current prediction universe."
+        elif trade_candidates <= 0 and shadow_candidates <= 0:
+            state = "blocked_by_alpha_filters"
+            next_action = alpha_bridge.get("blocker_or_next") or "Inspect alpha haircut, spread, and liquidity blockers."
+        elif final_clv_rows <= 0:
+            state = "needs_forward_clv_evidence"
+            next_action = "Collect bid/ask lines after the sharp-backed shadow candidates to measure CLV."
+        elif positive_clv_rows <= 0:
+            state = "needs_positive_clv"
+            next_action = "Keep the family shadow-only until final-line CLV becomes positive."
+        else:
+            state = "positive_clv_watch"
+            next_action = "Review paper gates only after cohort-level forward evidence remains positive."
+        family_rows.append(
+            {
+                "family": family,
+                "query": query,
+                "query_active": query_active,
+                "liquidity_tokens": liquidity_tokens,
+                "tradable_liquidity_rows": tradable_rows,
+                **anchor_totals,
+                "scored_anchor_hits": len(matched_predictions),
+                "trade_candidates": trade_candidates,
+                "shadow_candidates": shadow_candidates,
+                "final_clv_rows": final_clv_rows,
+                "positive_clv_rows": positive_clv_rows,
+                "state": state,
+                "next_action": next_action,
+                "decision_use": "reporting_only_not_trade_authorisation",
+            }
+        )
+
+    active = [row["family"] for row in family_rows if row["query_active"]]
+    next_bottleneck = next((row["next_action"] for row in family_rows if row["state"] != "positive_clv_watch"), "")
+    total_shadow = sum(int(row["shadow_candidates"]) for row in family_rows)
+    total_trade = sum(int(row["trade_candidates"]) for row in family_rows)
+    total_clv = sum(int(row["final_clv_rows"]) for row in family_rows)
+    if total_trade > 0:
+        status = "governed_trade_candidates_exist"
+    elif total_shadow > 0:
+        status = "sharp_shadow_candidates_need_forward_evidence"
+    elif total_clv > 0:
+        status = "clv_evidence_collected"
+    elif any(row["anchor_rows"] > 0 for row in family_rows):
+        status = "anchors_need_current_overlap"
+    elif any(row["tradable_liquidity_rows"] > 0 for row in family_rows):
+        status = "liquidity_waiting_for_sharp_anchors"
+    elif active:
+        status = "collecting_sharp_sports_liquidity"
+    else:
+        status = "sharp_sports_collection_not_active"
+
+    return {
+        "status": status,
+        "generated_at_utc": now_utc(),
+        "decision_use": "Shows the sharp sports edge route bottleneck; reporting only, no paper/live authorisation.",
+        "families": family_rows,
+        "active_collection_families": active,
+        "next_bottleneck": next_bottleneck or "No active bottleneck reported.",
+        "total_anchor_rows": sum(int(row["anchor_rows"]) for row in family_rows),
+        "total_tradable_liquidity_rows": sum(int(row["tradable_liquidity_rows"]) for row in family_rows),
+        "total_scored_anchor_hits": sum(int(row["scored_anchor_hits"]) for row in family_rows),
+        "total_trade_candidates": total_trade,
+        "total_shadow_candidates": total_shadow,
+        "total_final_clv_rows": total_clv,
+        "paper_trading_invoked": False,
+        "live_trading_invoked": False,
+    }
+
+
 def _trade_diagnostics(
     *,
     predictions: list[dict[str, Any]],
@@ -3586,6 +3843,7 @@ def _decision_useful_summary(
     websocket_feature_summary: dict[str, Any],
     worldcup_validation: dict[str, Any],
     alpha_bridge: dict[str, Any],
+    sharp_sports_funnel: dict[str, Any],
 ) -> dict[str, Any]:
     """Build the small, operator-facing dashboard contract.
 
@@ -3949,6 +4207,20 @@ def _decision_useful_summary(
             or "Measures whether independent bookmaker probabilities transfer into current executable candidates.",
             "key_metric": alpha_bridge.get("key_metric") or "-",
             "blocker_or_next": alpha_bridge.get("blocker_or_next") or "No sharp-anchor bridge status available.",
+        },
+        {
+            "lane": "Sharp sports edge funnel",
+            "state": sharp_sports_funnel.get("status") or "unknown",
+            "decision_use": sharp_sports_funnel.get("decision_use")
+            or "Shows whether sharp sports edge is blocked at collection, liquidity, anchors, scoring, or CLV.",
+            "key_metric": (
+                f"{sharp_sports_funnel.get('total_tradable_liquidity_rows', 0)} tradable; "
+                f"{sharp_sports_funnel.get('total_anchor_rows', 0)} anchor rows; "
+                f"{sharp_sports_funnel.get('total_scored_anchor_hits', 0)} scored hits; "
+                f"{sharp_sports_funnel.get('total_final_clv_rows', 0)} final CLV"
+            ),
+            "blocker_or_next": sharp_sports_funnel.get("next_bottleneck")
+            or "No sharp sports funnel status available.",
         },
         {
             "lane": "World Cup validation",
@@ -4601,6 +4873,14 @@ def render_dashboard(cfg: EngineConfig, latest_report: dict[str, Any] | None = N
         promotion_gate=promotion_gate,
         evidence_history_rows=evidence_history_rows,
     )
+    sharp_sports_funnel = _sharp_sports_funnel_payload(
+        research_focus=research_focus,
+        liquidity_discovery=liquidity_discovery if isinstance(liquidity_discovery, dict) else {},
+        independent_anchor_status=independent_anchor_status,
+        alpha_bridge=alpha_bridge,
+        predictions=predictions,
+        closing_line_value=closing_line_value,
+    )
     decision_useful_summary = _decision_useful_summary(
         actual_target=actual_target,
         broker_summary=broker_summary,
@@ -4617,6 +4897,7 @@ def render_dashboard(cfg: EngineConfig, latest_report: dict[str, Any] | None = N
         websocket_feature_summary=websocket_feature_summary,
         worldcup_validation=worldcup_validation_status,
         alpha_bridge=alpha_bridge,
+        sharp_sports_funnel=sharp_sports_funnel,
     )
 
     payload = {
@@ -4662,6 +4943,7 @@ def render_dashboard(cfg: EngineConfig, latest_report: dict[str, Any] | None = N
         "evidence_history": evidence_history_rows[-50:],
         "promotion_gate": promotion_gate,
         "evidence_funnel": evidence_funnel,
+        "sharp_sports_funnel": sharp_sports_funnel,
         "risk_state": risk_state,
         "websocket_summary": websocket_summary,
         "websocket_feature_summary": websocket_feature_summary,

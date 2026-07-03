@@ -2356,3 +2356,153 @@ def test_dashboard_surfaces_sharp_anchor_alpha_bridge_blockers(tmp_path):
     assert bridge["top_blockers"][0]["reason"] == "bookmaker_fundamental_cross_check_failed"
     assert any(row["lane"] == "Sharp-anchor alpha bridge" for row in data["decision_useful_summary"]["evidence_lanes"])
     assert "Sharp-anchor alpha bridge" in html
+
+
+def test_dashboard_surfaces_sharp_sports_edge_funnel(tmp_path):
+    cfg = _config(tmp_path)
+    write_json(
+        cfg.governance_root / "research_focus.json",
+        {
+            "status": "ok",
+            "collection_queries": ["nba", "mlb", "mma", "tennis"],
+            "collection_query_guard": {
+                "guarded_collection_queries": ["nba", "mlb", "mma", "tennis"],
+                "broad_fill_queries": ["nba", "mlb", "mma"],
+            },
+        },
+    )
+    write_json(
+        cfg.governance_root / "liquidity_discovery_summary.json",
+        {
+            "status": "ok",
+            "family_summary": [
+                {
+                    "family": "basketball_nba_match",
+                    "tokens": 4,
+                    "tradable_tokens": 2,
+                    "max_liquidity": 950,
+                    "min_spread": 0.01,
+                },
+                {
+                    "family": "baseball_mlb_match",
+                    "tokens": 3,
+                    "tradable_tokens": 1,
+                    "max_liquidity": 800,
+                    "min_spread": 0.02,
+                },
+                {
+                    "family": "mma_match",
+                    "tokens": 2,
+                    "tradable_tokens": 1,
+                    "max_liquidity": 700,
+                    "min_spread": 0.02,
+                },
+            ],
+        },
+    )
+    write_json(
+        cfg.governance_root / "sharp_anchor_summary.json",
+        {
+            "status": "built",
+            "fundamental_rows": 7,
+            "coverage_by_sport_market": [
+                {
+                    "sport": "basketball_nba",
+                    "market_key": "h2h",
+                    "rows_in": 4,
+                    "priced_rows": 4,
+                    "fundamental_rows": 3,
+                    "skipped_no_token": 1,
+                },
+                {
+                    "sport": "baseball_mlb",
+                    "market_key": "h2h",
+                    "rows_in": 3,
+                    "priced_rows": 3,
+                    "fundamental_rows": 2,
+                    "skipped_no_token": 1,
+                },
+                {
+                    "sport": "mma_mixed_martial_arts",
+                    "market_key": "h2h",
+                    "rows_in": 2,
+                    "priced_rows": 2,
+                    "fundamental_rows": 2,
+                    "skipped_no_token": 0,
+                },
+            ],
+        },
+    )
+    write_json(
+        cfg.governance_root / "mispricing_alpha_live_summary.json",
+        {
+            "status": "scored",
+            "fundamental_probabilities_loaded": 7,
+            "fundamental_probability_hits": 1,
+            "trade_candidates": 0,
+            "shadow_trade_candidates": 1,
+            "paper_trading_invoked": False,
+            "live_trading_invoked": False,
+        },
+    )
+    write_csv(
+        cfg.output_root / "polymarket_predictions" / "predictions.csv",
+        [
+            {
+                "market_id": "nba-market",
+                "market_slug": "nba-celtics-knicks",
+                "question": "NBA: Will the Boston Celtics beat the New York Knicks?",
+                "token_id": "nba-yes",
+                "outcome": "Yes",
+                "family": "basketball_nba_match",
+                "category": "sports_other",
+                "fundamental_probability": "0.56",
+                "haircut_fundamental_probability": "0.54",
+                "alpha_trade_candidate": "false",
+                "shadow_trade_candidate": "true",
+            }
+        ],
+    )
+    write_json(
+        cfg.governance_root / "closing_line_value.json",
+        {
+            "status": "ok",
+            "cohorts": [
+                {
+                    "signal_cohort": "strategy_v2|basketball_nba_match",
+                    "final_positions": 2,
+                    "mean_final_clv": 0.03,
+                    "clv_evidence": "positive_clv_evidence",
+                }
+            ],
+            "paper_trading_invoked": False,
+            "live_trading_invoked": False,
+        },
+    )
+
+    result = render_dashboard(cfg)
+
+    data = read_json(result["dashboard_data"])
+    html = Path(result["dashboard_file"]).read_text(encoding="utf-8")
+    funnel = data["sharp_sports_funnel"]
+    nba = next(row for row in funnel["families"] if row["family"] == "basketball_nba_match")
+    mlb = next(row for row in funnel["families"] if row["family"] == "baseball_mlb_match")
+
+    assert funnel["status"] == "sharp_shadow_candidates_need_forward_evidence"
+    assert funnel["paper_trading_invoked"] is False
+    assert funnel["live_trading_invoked"] is False
+    assert funnel["total_anchor_rows"] == 7
+    assert funnel["total_tradable_liquidity_rows"] == 4
+    assert funnel["total_scored_anchor_hits"] == 1
+    assert funnel["total_shadow_candidates"] == 1
+    assert funnel["total_final_clv_rows"] == 2
+    assert nba["query_active"] is True
+    assert nba["anchor_rows"] == 3
+    assert nba["scored_anchor_hits"] == 1
+    assert nba["shadow_candidates"] == 1
+    assert nba["final_clv_rows"] == 2
+    assert nba["state"] == "positive_clv_watch"
+    assert mlb["state"] == "needs_scored_anchor_overlap"
+    assert any(row["lane"] == "Sharp sports edge funnel" for row in data["decision_useful_summary"]["evidence_lanes"])
+    assert "Sharp sports edge funnel" in html
+    assert "Sharp sports family bottlenecks" in html

@@ -1,6 +1,6 @@
 # Polymarket Codex Work Orders
 
-Last updated: 2026-07-03 (WO-11/12/13/14/23/24/25/26/27 code landed; strategic edge reset: WO-24..WO-27 added; WO-20/21/22 landed; read docs/POLYMARKET_EDGE_STRATEGY_RESET.md first)
+Last updated: 2026-07-03 (WO-11/12/13/14/16/23/24/25/26/27 code landed; strategic edge reset: WO-24..WO-27 added; WO-20/21/22 landed; read docs/POLYMARKET_EDGE_STRATEGY_RESET.md first)
 
 Mechanical, file-level implementation instructions for coding agents (Codex or any other code
 changer). The architecture and priorities live in `docs/POLYMARKET_QUANT_MODE_CHARTER.md`; this file
@@ -663,7 +663,7 @@ new test.
 
 ---
 
-## WO-16 — Per-family calibration scorecard — `open`
+## WO-16 — Per-family calibration scorecard — `done` (2026-07-03)
 
 **Goal:** answer "which families does the model actually beat the market in?" with one artifact:
 Brier/log-loss vs the market baseline per classified family, on clean settled data only.
@@ -688,6 +688,13 @@ Brier/log-loss vs the market baseline per classified family, on clean settled da
 5. Tests with synthetic settled rows where the model is calibrated in one family and anti-
    calibrated in another; assert exact class per family and that below-minimum families read
    insufficient.
+
+**Landed 2026-07-03:** added `family-calibration`, which joins clean settled predictions through the
+existing market-relative validation path, classifies each row with the shared market-family
+classifier, and writes `family_calibration_scorecard.json/.csv`. The scorecard reports Brier/log-loss
+versus the market by family, clustered bootstrap confidence intervals for Brier gain, and fail-closed
+evidence classes (`model_beats_market`, `market_beats_model`, or
+`insufficient_calibration_evidence`). It is diagnostic only and keeps paper/live flags false.
 
 ---
 
@@ -1100,7 +1107,7 @@ Queue order (strategic reset, 2026-07-03 — read POLYMARKET_EDGE_STRATEGY_RESET
 11. WO-12  done 2026-07-03: portfolio VaR + correlated-exposure reporting
 12. WO-13  done 2026-07-03: microstructure hypotheses as replay strategies
 13. WO-14  done 2026-07-03: generalise the sweep (after WO-13)
-14. WO-16  per-family calibration scorecard
+14. WO-16  done 2026-07-03: per-family calibration scorecard
 15. WO-17  collection coverage report (verifies WO-20)
 16. WO-15  evidence history time series
 17. WO-18  dashboard evidence funnel

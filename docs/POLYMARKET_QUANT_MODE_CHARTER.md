@@ -359,6 +359,12 @@ CSV. Legacy tight-spread sweep behavior is preserved when no `algo_sweep.strateg
 The dashboard sweep panel now displays selected strategy/params and the per-strategy leaderboard,
 making the executable microstructure search visible to the operator.
 
+**2026-07-03 — WO-16 landed by Codex.** The model-governance lane now writes a per-family calibration
+scorecard from clean settled rows only. It compares model Brier/log-loss against the market baseline,
+uses clustered bootstrap CIs for family-level Brier gain, and fails closed for thin or inconclusive
+families. This makes family selection quant-driven: collect/scale only where market-relative skill
+transfers, and keep other families in research until evidence improves.
+
 ## Rules of engagement for coding agents
 
 0. **Division of labour**: the orchestrating agent writes/updates this charter and the work orders

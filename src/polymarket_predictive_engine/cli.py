@@ -23,6 +23,7 @@ from .execution.live import live_trade
 from .execution.paper import paper_trade_report
 from .external_feed_collector import collect_external_feeds
 from .external_signals import normalize_external_signals
+from .family_calibration import build_family_calibration_scorecard
 from .features import build_features
 from .features_v2 import build_features_v2
 from .goal_planner import build_goal_plan
@@ -119,6 +120,7 @@ COMMANDS = [
     "algo-replay",
     "algo-sweep",
     "edge-attribution",
+    "family-calibration",
     "active-window-plan",
     "promotion-gate",
     "validation-report",
@@ -333,6 +335,8 @@ def main(argv: list[str] | None = None) -> int:
             _print(run_algo_sweep(cfg, strategy_name=args.strategy or "tight_spread_join_bid_shadow", features_input=args.websocket_input))
         elif args.command == "edge-attribution":
             _print(build_edge_attribution(cfg))
+        elif args.command == "family-calibration":
+            _print(build_family_calibration_scorecard(cfg))
         elif args.command == "active-window-plan":
             _print(build_active_window_plan(cfg))
         elif args.command == "promotion-gate":

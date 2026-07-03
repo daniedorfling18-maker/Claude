@@ -694,3 +694,58 @@ def test_research_focus_optional_evidence_inputs_empty_without_artifacts(tmp_pat
     assert payload["evidence_inputs"]["edge_attribution_status"] is None
     assert payload["evidence_inputs"]["closing_line_value_status"] is None
     assert payload["evidence_inputs"]["sweep_decision"] == ""
+
+
+def test_research_focus_routes_quote_audit_blockers_to_collection_only(tmp_path):
+    cfg = _cfg(tmp_path)
+    write_json(
+        cfg.output_root / "polymarket_price_action" / "paper_broker_round_trip_summary.json",
+        {
+            "baseline_quote_audit_by_cohort": [
+                {
+                    "signal_cohort": "exploratory_crypto_updown_live_model|crypto_eth_updown_daily|outcome=up",
+                    "family": "crypto_eth_updown_daily",
+                    "round_trips": 3,
+                    "quote_consistent_round_trips": 1,
+                    "quote_conflict_round_trips": 0,
+                    "quote_unverified_round_trips": 2,
+                    "quote_other_blocked_round_trips": 0,
+                    "raw_pnl_usdc": 12.5,
+                    "audited_pnl_usdc": 0.5,
+                    "excluded_from_audit_pnl_usdc": 12.0,
+                    "top_blocker_status": "unverified",
+                    "top_blocker_count": 2,
+                    "recommended_action": "collect independent bid/ask snapshots through the paper exit horizon",
+                },
+                {
+                    "signal_cohort": "tennis_tennis_winner",
+                    "family": "tennis_tennis_winner",
+                    "round_trips": 1,
+                    "quote_consistent_round_trips": 0,
+                    "quote_conflict_round_trips": 1,
+                    "quote_unverified_round_trips": 0,
+                    "quote_other_blocked_round_trips": 0,
+                    "raw_pnl_usdc": -1.0,
+                    "audited_pnl_usdc": 0.0,
+                    "excluded_from_audit_pnl_usdc": -1.0,
+                    "top_blocker_status": "quote_conflict",
+                    "top_blocker_count": 1,
+                },
+            ]
+        },
+    )
+
+    payload = build_research_focus(cfg)
+
+    quote_focus = payload["quote_audit_focus"]
+    assert quote_focus["status"] == "quote_audit_blockers_present"
+    assert quote_focus["decision_use"] == "collection_only_not_trade_authorisation"
+    assert quote_focus["collection_queries"][:2] == ["eth updown", "tennis"]
+    assert quote_focus["blocked_cohorts"][0]["cohort"] == "exploratory_crypto_updown_live_model|crypto_eth_updown_daily|outcome=up"
+    assert quote_focus["blocked_cohorts"][0]["decision_use"] == "quote_audit_repair_collection_only_not_trade_authorisation"
+    assert payload["raw_collection_queries"][:2] == ["eth updown", "tennis"]
+    assert "eth updown" in payload["collection_queries"]
+    assert "tennis" in payload["collection_queries"]
+    assert payload["paper_trading_invoked"] is False
+    assert payload["live_trading_invoked"] is False
+    assert "proof repair only" in payload["notes"][0]

@@ -913,6 +913,79 @@ def _edge_attribution_focus(edge_attribution: dict[str, Any], *, max_rows: int =
     }
 
 
+def _quote_audit_focus(paper_round_trip_summary: dict[str, Any], *, max_rows: int = 6) -> dict[str, Any]:
+    """Turn quote-audit blockers into collection targets, not trading permissions."""
+    if not isinstance(paper_round_trip_summary, dict):
+        paper_round_trip_summary = {}
+    rows = paper_round_trip_summary.get("baseline_quote_audit_by_cohort")
+    source = "baseline_quote_audit_by_cohort"
+    if not isinstance(rows, list) or not rows:
+        rows = paper_round_trip_summary.get("quote_audit_by_cohort")
+        source = "quote_audit_by_cohort"
+    if not isinstance(rows, list):
+        rows = []
+
+    blockers: list[dict[str, Any]] = []
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        cohort = _cohort_name(row)
+        family = str(row.get("family") or "").strip()
+        if not cohort or cohort == "unknown" or _is_quarantined_fast_crypto(cohort):
+            continue
+        blocked_round_trips = int(_num(row.get("quote_conflict_round_trips"))) + int(
+            _num(row.get("quote_unverified_round_trips"))
+        ) + int(_num(row.get("quote_other_blocked_round_trips")))
+        excluded_pnl = _num(row.get("excluded_from_audit_pnl_usdc"))
+        if blocked_round_trips <= 0 and abs(excluded_pnl) <= 1e-9:
+            continue
+        query = _cohort_query(cohort) or _cohort_query(family)
+        blockers.append(
+            {
+                "cohort": cohort,
+                "family": family or "unknown",
+                "recommended_collection_query": query,
+                "round_trips": int(_num(row.get("round_trips"))),
+                "quote_consistent_round_trips": int(_num(row.get("quote_consistent_round_trips"))),
+                "quote_conflict_round_trips": int(_num(row.get("quote_conflict_round_trips"))),
+                "quote_unverified_round_trips": int(_num(row.get("quote_unverified_round_trips"))),
+                "quote_other_blocked_round_trips": int(_num(row.get("quote_other_blocked_round_trips"))),
+                "raw_pnl_usdc": _num(row.get("raw_pnl_usdc")),
+                "audited_pnl_usdc": _num(row.get("audited_pnl_usdc")),
+                "excluded_from_audit_pnl_usdc": excluded_pnl,
+                "top_blocker_status": row.get("top_blocker_status") or "",
+                "top_blocker_count": int(_num(row.get("top_blocker_count"))),
+                "recommended_action": row.get("recommended_action")
+                or "collect independent bid/ask snapshots through entry and exit before using this cohort as proof",
+                "decision_use": "quote_audit_repair_collection_only_not_trade_authorisation",
+            }
+        )
+    blockers.sort(
+        key=lambda row: (
+            _num(row.get("quote_conflict_round_trips")) + _num(row.get("quote_unverified_round_trips")) + _num(row.get("quote_other_blocked_round_trips")),
+            abs(_num(row.get("excluded_from_audit_pnl_usdc"))),
+            abs(_num(row.get("raw_pnl_usdc"))),
+        ),
+        reverse=True,
+    )
+    queries: list[str] = []
+    for row in blockers:
+        query = str(row.get("recommended_collection_query") or "").strip()
+        if query and query not in queries:
+            queries.append(query)
+        if len(queries) >= max_rows:
+            break
+    return {
+        "status": "quote_audit_blockers_present" if blockers else "ok_or_no_quote_audit_blockers",
+        "source": source,
+        "collection_queries": queries,
+        "blocked_cohorts": blockers[:max_rows],
+        "blocked_cohort_count": len(blockers),
+        "excluded_from_audit_pnl_usdc": sum(_num(row.get("excluded_from_audit_pnl_usdc")) for row in blockers),
+        "decision_use": "collection_only_not_trade_authorisation",
+    }
+
+
 def _price_action_model_needs_data(price_action_model: dict[str, Any]) -> bool:
     decision = str(price_action_model.get("decision") or "")
     status = str(price_action_model.get("status") or "")
@@ -936,6 +1009,10 @@ def build_research_focus(cfg) -> dict[str, Any]:
     if not isinstance(edge_attribution, dict):
         edge_attribution = {}
     edge_focus = _edge_attribution_focus(edge_attribution)
+    paper_round_trip_summary = read_json(cfg.output_root / "polymarket_price_action" / "paper_broker_round_trip_summary.json", default={}) or {}
+    if not isinstance(paper_round_trip_summary, dict):
+        paper_round_trip_summary = {}
+    quote_audit_focus = _quote_audit_focus(paper_round_trip_summary)
     closing_line_value = read_json(governance / "closing_line_value.json", default={}) or {}
     if not isinstance(closing_line_value, dict):
         closing_line_value = {}
@@ -1059,6 +1136,13 @@ def build_research_focus(cfg) -> dict[str, Any]:
             f"Edge attribution says {worst.get('cohort')} losses are model/line-movement driven; "
             "suppress this thesis until a new feature/anchor explains the adverse movement."
         )
+    elif quote_audit_focus.get("blocked_cohorts"):
+        worst = quote_audit_focus["blocked_cohorts"][0]
+        next_action = (
+            f"Quote audit is excluding paper P&L for {worst.get('cohort')}; "
+            f"collect fresh independent bid/ask snapshots via {worst.get('recommended_collection_query') or 'the same family'} "
+            "before using this cohort for the $100/month proof."
+        )
     elif evidence_inputs.get("collection_queries_added"):
         next_action = (
             "Post-trade attribution/CLV evidence found collection leads; prioritise "
@@ -1106,9 +1190,17 @@ def build_research_focus(cfg) -> dict[str, Any]:
         query = str(query or "").strip()
         if query and query not in collection_queries:
             collection_queries.append(query)
+    for query in quote_audit_focus.get("collection_queries", []) or []:
+        query = str(query or "").strip()
+        if query and query not in collection_queries:
+            collection_queries.append(query)
     notes: list[str] = []
     if evidence_inputs.get("sweep_note"):
         notes.append(str(evidence_inputs["sweep_note"]))
+    if quote_audit_focus.get("blocked_cohorts"):
+        notes.append(
+            "Quote-audit blockers are being routed into collection queries; this is proof repair only and does not authorise paper/live trades."
+        )
     if not collection_queries:
         feedback_queries = [str(query or "").strip() for query in price_action_feedback.get("collection_queries", [])]
         collection_queries = [query for query in feedback_queries if query] or ["bitcoin", "ethereum", "world cup", "tennis"]
@@ -1176,6 +1268,7 @@ def build_research_focus(cfg) -> dict[str, Any]:
             "top_cohorts": price_action_feedback.get("top_cohorts", [])[:10],
         },
         "edge_attribution": edge_focus,
+        "quote_audit_focus": quote_audit_focus,
         "evidence_inputs": evidence_inputs,
         "promotion_review": {
             "status": promotion_review.get("status"),

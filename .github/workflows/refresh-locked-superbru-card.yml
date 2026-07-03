@@ -253,6 +253,19 @@ jobs:
             --flat-odds-csv outputs/market_odds/worldcup_market_odds_flat.csv \
             --log-csv outputs/backtesting/prediction_log.csv
 
+      - name: Run Oddspedia validation pipeline for locked card
+        env:
+          PYTHONPATH: src
+        run: |
+          node --version
+          python scripts/run_oddspedia_pipeline.py \
+            --locked-picks-csv outputs/final_locked_picks/superbru_final_card.csv \
+            --results-csv outputs/superbru_pool/superbru_match_results_auto.csv
+
+      - name: Audit SuperBru validation data freshness
+        run: |
+          python scripts/audit_superbru_validation_data_freshness.py
+
       - name: Upload refresh outputs
         uses: actions/upload-artifact@v4
         if: always()
@@ -286,6 +299,20 @@ jobs:
             outputs/final_leader_decision_daily_robust/**/*.csv
             outputs/final_leader_decision_daily_robust/**/*.json
             outputs/backtesting/prediction_log.csv
+            outputs/backtesting/signal_archive_rolling.csv
+            outputs/backtesting/snapshots/*.csv
+            outputs/backtesting/live_signal_backtest_rolling.csv
+            outputs/backtesting/live_signal_backtest_summary.json
+            inputs/oddspedia_match_urls.csv
+            inputs/smartbet_grids/*.csv
+            outputs/oddspedia_url_discovery/**/*.csv
+            outputs/oddspedia_url_discovery/**/*.json
+            outputs/oddspedia_probability_extract/**/*.csv
+            outputs/oddspedia_probability_extract/**/*.json
+            outputs/oddspedia_pick_validation/**/*.csv
+            outputs/oddspedia_pick_validation/**/*.json
+            outputs/superbru_validation_freshness/*.json
+            outputs/superbru_validation_freshness/*.md
           if-no-files-found: warn
           retention-days: 7
 
@@ -296,15 +323,49 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
-          git add -f outputs/final_locked_picks/superbru_final_card.csv
+          for path in \
+            data/fixtures_real.csv \
+            outputs/latest \
+            outputs/superbru_pool/live_pool_leaderboard.csv \
+            outputs/superbru_pool/live_pool_leaderboard_summary.json \
+            outputs/superbru_pool/live_chaser_profiles.csv \
+            outputs/superbru_pool/live_chaser_profiles_summary.json \
+            outputs/superbru_pool/live_chasers.txt \
+            outputs/superbru_pool/superbru_match_results_auto.csv \
+            outputs/superbru_pool/superbru_match_results_summary.json \
+            outputs/market_odds \
+            outputs/market_odds_validation \
+            outputs/market_odds_history \
+            outputs/component_validation \
+            outputs/final_leader_decision_round_summary_profiles \
+            outputs/final_locked_picks \
+            outputs/daily_robust_card \
+            outputs/final_leader_decision_daily_robust \
+            outputs/backtesting/prediction_log.csv \
+            outputs/backtesting/signal_archive_rolling.csv \
+            outputs/backtesting/snapshots \
+            outputs/backtesting/live_signal_backtest_rolling.csv \
+            outputs/backtesting/live_signal_backtest_summary.json \
+            inputs/oddspedia_match_urls.csv \
+            inputs/smartbet_grids \
+            outputs/superbru_validation_freshness; do
+            if [ -e "$path" ]; then
+              git add -f "$path"
+            fi
+          done
+          for dir in outputs/oddspedia_url_discovery outputs/oddspedia_probability_extract outputs/oddspedia_pick_validation; do
+            if [ -d "$dir" ]; then
+              find "$dir" -type f \( -name '*.csv' -o -name '*.json' -o -name '*.md' \) -print0 | xargs -0 -r git add -f
+            fi
+          done
           if git diff --cached --quiet; then
-            echo "Locked SuperBru card is unchanged; nothing to commit."
+            echo "Locked SuperBru validation outputs are unchanged; nothing to commit."
             exit 0
           fi
 
           git commit \
             --author="daniedorfling18-maker <252545805+daniedorfling18-maker@users.noreply.github.com>" \
-            -m "Refresh locked SuperBru card"
+            -m "Refresh locked SuperBru validation data"
 
           for attempt in 1 2 3; do
             git fetch origin main

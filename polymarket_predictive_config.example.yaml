@@ -177,6 +177,10 @@ sharp_anchor:
   devig_method: power            # power (favourite-longshot aware) or multiplicative
   source_name: pinnacle_close
   token_map_path: outputs/polymarket/market_snapshot.csv
+  worldcup_public_search_enabled: true
+  worldcup_public_search_queries:
+  - fifa world cup
+  - world cup winner
   # Fail closed if an odds group looks partial. A World Cup outright with only France/Spain rows
   # would otherwise be de-vigged as if every other team did not exist, manufacturing false edge.
   min_outcomes_per_market: 2

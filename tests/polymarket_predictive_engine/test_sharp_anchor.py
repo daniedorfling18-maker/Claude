@@ -47,6 +47,17 @@ def _read(path):
         return list(csv.DictReader(f))
 
 
+class _Response:
+    def __init__(self, payload):
+        self._payload = payload
+
+    def raise_for_status(self):
+        return None
+
+    def json(self):
+        return self._payload
+
+
 def _complete_worldcup_outright_rows():
     rows = [
         ("Spain", "6.0"),
@@ -241,6 +252,67 @@ def test_worldcup_outright_join_falls_back_to_repo_detail_file(tmp_path):
     assert summary["worldcup_winner_token_joins"] == 2
     out = {r["token_id"]: float(r["probability"]) for r in _read(tmp_path / "outputs" / "polymarket_training" / "sharp_fundamental_probabilities.csv")}
     assert set(out) == {"SPAIN_FROM_DETAIL", "FRANCE_FROM_DETAIL"}
+
+
+def test_worldcup_outright_join_uses_public_search_and_excludes_confederations(tmp_path, monkeypatch):
+    cfg = EngineConfig(
+        raw={
+            "paths": {"output_root": str(tmp_path / "outputs")},
+            "sharp_anchor": {
+                "input_path": str(tmp_path / "sharp.csv"),
+                "token_map_path": str(tmp_path / "missing_snapshot.csv"),
+                "worldcup_public_search_enabled": True,
+            },
+        },
+        path=tmp_path / "cfg.yaml",
+    )
+    _write(
+        tmp_path / "sharp.csv",
+        _complete_worldcup_outright_rows(),
+        ["market_slug", "outcome", "decimal_odds", "market_key", "sport"],
+    )
+
+    def fake_get(*args, **kwargs):
+        return _Response(
+            {
+                "events": [
+                    {
+                        "slug": "world-cup-winner",
+                        "title": "World Cup Winner",
+                        "markets": [
+                            {
+                                "question": "Will Spain win the 2026 FIFA World Cup?",
+                                "outcomes": '["Yes", "No"]',
+                                "clobTokenIds": '["SPAIN_YES", "SPAIN_NO"]',
+                            },
+                            {
+                                "question": "Will France win the 2026 FIFA World Cup?",
+                                "outcomes": ["Yes", "No"],
+                                "clobTokenIds": ["FRANCE_YES", "FRANCE_NO"],
+                            },
+                            {
+                                "question": "Will Europe (UEFA) win the 2026 FIFA World Cup?",
+                                "outcomes": ["Yes", "No"],
+                                "clobTokenIds": ["UEFA_YES", "UEFA_NO"],
+                            },
+                        ],
+                    }
+                ]
+            }
+        )
+
+    monkeypatch.setattr("polymarket_predictive_engine.sharp_anchor.requests.get", fake_get)
+
+    summary = build_sharp_anchor(cfg)
+
+    assert summary["worldcup_winner_tokens_available"] == 2
+    assert summary["worldcup_winner_token_joins"] == 2
+    out = {
+        r["token_id"]: float(r["probability"])
+        for r in _read(tmp_path / "outputs" / "polymarket_training" / "sharp_fundamental_probabilities.csv")
+    }
+    assert set(out) == {"SPAIN_YES", "FRANCE_YES"}
+    assert "UEFA_YES" not in out
 
 
 def test_build_sharp_anchor_skips_partial_outright_to_avoid_inflated_edge(tmp_path):

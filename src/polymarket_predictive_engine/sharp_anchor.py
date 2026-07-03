@@ -20,9 +20,12 @@ unit-tested; the network/odds acquisition is left to the operator (provide an od
 from __future__ import annotations
 
 from collections import defaultdict
+import json
 from pathlib import Path
 import re
 from typing import Any, Iterable
+
+import requests
 
 from .config import EngineConfig, load_config
 from .utils import (
@@ -55,6 +58,22 @@ TEAM_ALIASES = {
     "capeverde": "capeverde",
     "curaao": "curacao",
 }
+CONFEDERATION_TEAM_KEYS = {
+    "africa",
+    "caf",
+    "asia",
+    "afc",
+    "europe",
+    "uefa",
+    "northamerica",
+    "concacaf",
+    "southamerica",
+    "conmebol",
+    "oceania",
+    "ocf",
+    "ofc",
+}
+DEFAULT_GAMMA_PUBLIC_SEARCH = "https://gamma-api.polymarket.com/public-search"
 
 
 # --------------------------------------------------------------------------- pure de-vig math
@@ -113,6 +132,12 @@ def _team_key(value: object) -> str:
     return TEAM_ALIASES.get(key, key)
 
 
+def _is_confederation_token(value: object) -> bool:
+    text = str(value or "").lower()
+    key = _team_key(value)
+    return key in CONFEDERATION_TEAM_KEYS or any(marker in text for marker in ("(caf)", "(afc)", "(uefa)", "(concacaf)", "(conmebol)", "(ocf)", "(ofc)"))
+
+
 def _team_from_worldcup_question(value: object) -> str:
     match = re.match(r"\s*Will\s+(.*?)\s+win\s+the\s+2026\s+FIFA\s+World\s+Cup\?\s*$", str(value or ""), re.I)
     return match.group(1).strip() if match else ""
@@ -137,6 +162,69 @@ def _match_subject_from_question(value: object) -> tuple[str, str] | None:
     return None
 
 
+def _json_list(value: object) -> list[Any]:
+    if isinstance(value, list):
+        return value
+    if isinstance(value, tuple):
+        return list(value)
+    if isinstance(value, str) and value.strip():
+        try:
+            parsed = json.loads(value)
+        except json.JSONDecodeError:
+            return []
+        return parsed if isinstance(parsed, list) else []
+    return []
+
+
+def _worldcup_winner_tokens_from_public_search(settings: dict[str, Any]) -> dict[str, str]:
+    if not settings.get("worldcup_public_search_enabled", False):
+        return {}
+    base_url = str(settings.get("worldcup_public_search_url") or DEFAULT_GAMMA_PUBLIC_SEARCH)
+    timeout = int(settings.get("worldcup_public_search_timeout_seconds", 20) or 20)
+    queries = settings.get("worldcup_public_search_queries") or ["fifa world cup", "world cup winner"]
+    mapping: dict[str, str] = {}
+    for query in queries:
+        try:
+            response = requests.get(
+                base_url,
+                params={
+                    "q": str(query),
+                    "events_status": "active",
+                    "limit_per_type": str(settings.get("worldcup_public_search_limit_per_type", 20) or 20),
+                    "search_tags": "false",
+                    "search_profiles": "false",
+                },
+                timeout=timeout,
+            )
+            response.raise_for_status()
+            payload = response.json()
+        except Exception:  # noqa: BLE001 - public-search fallback is optional
+            continue
+        events = payload.get("events", []) if isinstance(payload, dict) else []
+        for event in events if isinstance(events, list) else []:
+            event_slug = str(event.get("slug") or "").lower()
+            event_title = str(event.get("title") or event.get("question") or "").strip().lower()
+            if event_slug != "world-cup-winner" and event_title != "world cup winner":
+                continue
+            markets = event.get("markets") or []
+            for market in markets if isinstance(markets, list) else []:
+                if not isinstance(market, dict):
+                    continue
+                team = _team_from_worldcup_question(market.get("question"))
+                if not team or _is_confederation_token(team):
+                    continue
+                outcomes = [str(item).strip().lower() for item in _json_list(market.get("outcomes"))]
+                tokens = [str(item).strip() for item in _json_list(market.get("clobTokenIds"))]
+                try:
+                    yes_index = outcomes.index("yes")
+                except ValueError:
+                    yes_index = 0
+                token = tokens[yes_index] if yes_index < len(tokens) else ""
+                if token:
+                    mapping.setdefault(_team_key(team), token)
+    return mapping
+
+
 def _worldcup_winner_token_map(cfg: EngineConfig, settings: dict[str, Any]) -> dict[str, str]:
     """team_key -> YES token_id for Polymarket 2026 World Cup winner markets."""
     path = Path(settings.get("token_map_path") or (cfg.output_root / "polymarket" / "market_snapshot.csv"))
@@ -152,6 +240,8 @@ def _worldcup_winner_token_map(cfg: EngineConfig, settings: dict[str, Any]) -> d
             slug = str(row.get("market_slug") or row.get("slug") or "")
             slug_match = re.match(r"will-(.*?)-win-the-2026-fifa-world-cup(?:-|$)", slug, re.I)
             team = slug_match.group(1).replace("-", " ") if slug_match else ""
+        if _is_confederation_token(team):
+            continue
         key = _team_key(team)
         if key:
             mapping.setdefault(key, token)
@@ -163,8 +253,10 @@ def _worldcup_winner_token_map(cfg: EngineConfig, settings: dict[str, Any]) -> d
     for row in read_csv_rows(detail_path):
         token = str(row.get("token_id") or "").strip()
         key = _team_key(row.get("team"))
-        if token and key:
+        if token and key and not _is_confederation_token(row.get("team")):
             mapping.setdefault(key, token)
+    for key, token in _worldcup_winner_tokens_from_public_search(settings).items():
+        mapping.setdefault(key, token)
     return mapping
 
 

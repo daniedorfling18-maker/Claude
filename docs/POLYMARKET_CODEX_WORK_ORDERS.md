@@ -1,6 +1,6 @@
 # Polymarket Codex Work Orders
 
-Last updated: 2026-07-03 (WO-11/12/13/14/16/17/23/24/25/26/27 code landed; strategic edge reset: WO-24..WO-27 added; WO-20/21/22 landed; read docs/POLYMARKET_EDGE_STRATEGY_RESET.md first)
+Last updated: 2026-07-03 (WO-11/12/13/14/15/16/17/18/23/24/25/26/27 code landed; strategic edge reset: WO-24..WO-27 added; WO-20/21/22 landed; read docs/POLYMARKET_EDGE_STRATEGY_RESET.md first)
 
 Mechanical, file-level implementation instructions for coding agents (Codex or any other code
 changer). The architecture and priorities live in `docs/POLYMARKET_QUANT_MODE_CHARTER.md`; this file
@@ -640,7 +640,7 @@ combo.
 
 ---
 
-## WO-15 — Evidence history time series (CLV + attribution per cycle) — `open`
+## WO-15 — Evidence history time series (CLV + attribution per cycle) — `done` (2026-07-03)
 
 **Goal:** see evidence accumulating over time instead of only the latest snapshot.
 
@@ -660,6 +660,12 @@ new test.
    this same WO (call it LAST, after the three builders).
 3. Tests: two calls with unchanged artifacts -> one row per source; artifact regenerated ->
    second row; missing artifacts -> no rows, no crash.
+
+**Landed 2026-07-03:** added `evidence-history`, which appends idempotent rows to
+`evidence_history.csv` from `closing_line_value.json`, `edge_attribution.json`, and
+`algo_sweep_summary.json`. `refresh-governance` now appends history immediately after rebuilding those
+three artifacts. The row timestamp is the source artifact's `generated_at_utc`, so repeated refreshes
+do not duplicate unchanged evidence.
 
 ---
 
@@ -727,7 +733,7 @@ live trading.
 
 ---
 
-## WO-18 — Dashboard evidence funnel panel — `open`
+## WO-18 — Dashboard evidence funnel panel — `done` (2026-07-03)
 
 **Land after WO-10 and WO-15..17 (it reads their artifacts; render blanks for missing ones).**
 
@@ -742,6 +748,13 @@ attribution class; positive CLV cohorts; families with `model_beats_market` cali
 decision; paper gate status (`approved_for_paper_trading` from the promotion gate artifact —
 display only). Follow the CLV section pattern for reads and rendering. Test: fixture artifacts ->
 section title + a few exact values; all-missing -> renders with dashes.
+
+**Landed 2026-07-03:** added a top-level dashboard "Evidence funnel" section and a testable
+`evidence_funnel` payload. It surfaces liquidity target coverage, shadow candidates, open/closed
+shadow positions, final CLV rows, attributed positions, attribution-class counts, positive CLV
+cohorts, model-beats-market families, pre-close quote gaps, sweep decision, paper gate status, and
+recent evidence-history rows. `refresh-governance` now rebuilds family calibration and collection
+coverage before rendering the dashboard so this section stays fresh.
 
 ---
 
@@ -1115,8 +1128,8 @@ Queue order (strategic reset, 2026-07-03 — read POLYMARKET_EDGE_STRATEGY_RESET
 13. WO-14  done 2026-07-03: generalise the sweep (after WO-13)
 14. WO-16  done 2026-07-03: per-family calibration scorecard
 15. WO-17  done 2026-07-03: collection coverage report (verifies WO-20)
-16. WO-15  evidence history time series
-17. WO-18  dashboard evidence funnel
+16. WO-15  done 2026-07-03: evidence history time series
+17. WO-18  done 2026-07-03: dashboard evidence funnel
 18. WO-19  invariant property tests (zero source changes)
 ```
 

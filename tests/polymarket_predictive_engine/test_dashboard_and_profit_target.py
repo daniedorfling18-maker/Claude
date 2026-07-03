@@ -267,14 +267,148 @@ def test_dashboard_handles_empty_closing_line_value_artifact(tmp_path):
     assert data["edge_attribution"] == {}
     assert data["algo_sweep"] == {}
     assert data["risk_state"] == {}
+    assert data["evidence_funnel"]["liquidity_targets_discovered"] == "-"
+    assert data["evidence_funnel"]["paper_gate_status"] == "-"
     assert "Closing-line value (CLV)" in html
     assert "No CLV evidence yet" in html
     assert "Edge attribution" in html
     assert "No edge attribution evidence yet" in html
+    assert "Evidence funnel" in html
+    assert "Road-to-paper view" in html
     assert "Portfolio risk" in html
     assert "No portfolio risk snapshot yet" in html
     assert "Algo sweep lab" in html
     assert "No sweep run yet" in html
+
+
+def test_dashboard_surfaces_evidence_funnel(tmp_path):
+    cfg = _config(tmp_path)
+    write_json(cfg.governance_root / "liquidity_discovery_summary.json", {"target_assets": 12})
+    write_csv(
+        cfg.output_root / "polymarket_predictions" / "predictions.csv",
+        [
+            {
+                "market_id": "m-shadow",
+                "token_id": "t-shadow",
+                "prediction_timestamp": "2026-07-03T10:00:00Z",
+                "shadow_trade_candidate": "true",
+                "market_slug": "fed-cut-shadow",
+            },
+            {
+                "market_id": "m-other",
+                "token_id": "t-other",
+                "prediction_timestamp": "2026-07-03T10:01:00Z",
+                "shadow_trade_candidate": "false",
+                "market_slug": "not-shadow",
+            },
+        ],
+    )
+    write_csv(
+        cfg.output_root / "polymarket_shadow" / "shadow_positions.csv",
+        [
+            {"shadow_position_id": "open-1", "status": "open", "token_id": "t1", "quantity": 1},
+            {"shadow_position_id": "closed-1", "status": "closed", "token_id": "t2", "quantity": 1},
+        ],
+    )
+    write_json(
+        cfg.governance_root / "closing_line_value.json",
+        {
+            "status": "ok",
+            "generated_at_utc": "2026-07-03T10:02:00Z",
+            "positions_scored": 4,
+            "final_line_positions": 3,
+            "positive_clv_cohorts": ["macro_rates"],
+        },
+    )
+    write_json(
+        cfg.governance_root / "edge_attribution.json",
+        {
+            "status": "ok",
+            "generated_at_utc": "2026-07-03T10:03:00Z",
+            "attributed_positions": 2,
+            "cohorts": [
+                {"signal_cohort": "macro_rates", "attribution_class": "positive_edge_confirmed"},
+                {"signal_cohort": "tennis_tennis_winner", "attribution_class": "cost_dominated"},
+            ],
+        },
+    )
+    write_json(
+        cfg.governance_root / "family_calibration_scorecard.json",
+        {
+            "status": "ok",
+            "model_beats_market_families": ["macro_rates", "tennis_tennis_winner"],
+        },
+    )
+    write_json(
+        cfg.governance_root / "collection_coverage.json",
+        {
+            "status": "ok",
+            "positions_with_pre_close_quote": 1,
+            "positions_missing_pre_close_quote": 4,
+            "missing_pre_close_positions": [
+                {
+                    "shadow_position_id": "missing-1",
+                    "family": "macro_rates",
+                    "close_time": "2026-07-03T11:30:00Z",
+                    "reason": "missing_pre_close_quote",
+                }
+            ],
+        },
+    )
+    write_json(
+        cfg.output_root / "polymarket_algo" / "algo_sweep_summary.json",
+        {
+            "status": "ok",
+            "generated_at_utc": "2026-07-03T10:04:00Z",
+            "decision": "sweep_candidate_validated_shadow_only",
+            "paper_trading_invoked": False,
+            "live_trading_invoked": False,
+        },
+    )
+    write_json(
+        cfg.governance_root / "promotion_gate.json",
+        {
+            "approved_for_paper_trading": False,
+            "paper_blockers": ["needs forward paper evidence"],
+        },
+    )
+    write_csv(
+        cfg.governance_root / "evidence_history.csv",
+        [
+            {
+                "recorded_at_utc": "2026-07-03T10:04:00Z",
+                "source": "algo_sweep",
+                "positions_scored_attributed": "9",
+                "final_line_positions": "",
+                "positive_cohorts": "",
+                "decision_or_class_summary": "sweep_candidate_validated_shadow_only",
+            }
+        ],
+    )
+
+    result = render_dashboard(cfg)
+
+    data = read_json(result["dashboard_data"])
+    html = Path(result["dashboard_file"]).read_text(encoding="utf-8")
+    funnel = data["evidence_funnel"]
+    assert funnel["liquidity_targets_discovered"] == 12
+    assert funnel["alpha_shadow_candidates"] == 1
+    assert funnel["shadow_positions"] == "1 open / 1 closed"
+    assert funnel["closed_with_clv_final_lines"] == 3
+    assert funnel["attributed_positions"] == 2
+    assert funnel["cohorts_by_attribution_class"] == {
+        "cost_dominated": 1,
+        "positive_edge_confirmed": 1,
+    }
+    assert funnel["positive_clv_cohorts"] == ["macro_rates"]
+    assert funnel["model_beats_market_families"] == ["macro_rates", "tennis_tennis_winner"]
+    assert funnel["collection_gap"] == "4 missing / 1 covered"
+    assert funnel["sweep_decision"] == "sweep_candidate_validated_shadow_only"
+    assert funnel["paper_gate_status"].startswith("blocked_for_paper")
+    assert funnel["evidence_history_rows"] == 1
+    assert funnel["missing_pre_close_positions"][0]["shadow_position_id"] == "missing-1"
+    assert "Evidence funnel" in html
+    assert "Missing pre-close quote positions" in html
 
 
 def test_dashboard_surfaces_portfolio_risk_state(tmp_path):

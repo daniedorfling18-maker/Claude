@@ -8,8 +8,11 @@ from .algo.sweep import run_algo_sweep
 from .config import EngineConfig, load_config
 from .cohort_validation import write_signal_cohort_pnl
 from .closing_line import build_closing_line_value
+from .collection_coverage import build_collection_coverage
 from .dashboard import render_dashboard
 from .edge_attribution import build_edge_attribution
+from .evidence_history import append_evidence_history
+from .family_calibration import build_family_calibration_scorecard
 from .goal_planner import build_goal_plan
 from .governance import governance_report
 from .paper_round_trip import build_paper_round_trip_evidence
@@ -53,6 +56,9 @@ def refresh_governance(cfg: EngineConfig, *, refresh_dashboard: bool = True) -> 
     closing_line = build_closing_line_value(cfg)
     edge_attribution = build_edge_attribution(cfg)
     algo_sweep = run_algo_sweep(cfg)
+    family_calibration = build_family_calibration_scorecard(cfg)
+    collection_coverage = build_collection_coverage(cfg)
+    evidence_history = append_evidence_history(cfg)
 
     con = connect_db(cfg.database_path)
     try:
@@ -90,6 +96,9 @@ def refresh_governance(cfg: EngineConfig, *, refresh_dashboard: bool = True) -> 
             "closing_line_value": True,
             "edge_attribution": True,
             "algo_sweep": True,
+            "family_calibration": True,
+            "collection_coverage": True,
+            "evidence_history": True,
             "price_action_feedback": True,
             "price_action_model": True,
             "price_action_paper_signals": True,
@@ -123,6 +132,10 @@ def refresh_governance(cfg: EngineConfig, *, refresh_dashboard: bool = True) -> 
             if isinstance(row, dict)
         },
         "algo_sweep_decision": algo_sweep.get("decision"),
+        "family_calibration_model_beats_market": family_calibration.get("model_beats_market_families", []),
+        "collection_coverage_missing_pre_close": collection_coverage.get("positions_missing_pre_close_quote"),
+        "evidence_history_appended_rows": evidence_history.get("appended_rows"),
+        "evidence_history_appended_sources": evidence_history.get("appended_sources", []),
         "price_action_feedback_state": price_action_feedback.get("learning_state"),
         "price_action_model_decision": price_action_model.get("decision"),
         "price_action_model_promotion_ready": price_action_model.get("promotion_ready"),

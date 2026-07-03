@@ -113,6 +113,7 @@ HTML = """<!doctype html>
   <div class="grid" id="cards"></div>
   <section class="primary"><h2>Decision cockpit</h2><div id="decisionCockpit"></div></section>
   <section><h2>Action board</h2><div id="actionBoard"></div></section>
+  <section><h2>Evidence funnel</h2><div id="evidenceFunnel"></div></section>
   <section><h2>Dutch-book arb watch</h2><div id="dutchArbWatch"></div></section>
   <div class="two">
     <section><h2>$100/month price-change route</h2><div id="goalPlan"></div></section>
@@ -275,6 +276,7 @@ async function load() {
     const priceActionGoal = goalPlan.price_action_goal_state || {};
     const tradeSignalAudit = data.trade_signal_audit || {};
     const decisionSummary = data.decision_useful_summary || {};
+    const evidenceFunnel = data.evidence_funnel || {};
     const probeExitWatch = data.paper_probe_exit_watch || {};
     const paperMaintenance = data.paper_maintenance || {};
     const paperMaintenanceTask = data.paper_maintenance_task || {};
@@ -560,6 +562,37 @@ async function load() {
           ["Why not primary","reason", v=>longText(v, 240)]
         ], 8)}
       </details>
+    `;
+    document.getElementById("evidenceFunnel").innerHTML = `
+      <div class="sectionLead">Road-to-paper view: discovery -> shadow evidence -> CLV/attribution -> family calibration -> sweep confirmation -> paper gate. Dashes mean the source artifact is missing, not approved.</div>
+      ${facts([
+        ["Liquidity targets discovered", evidenceFunnel.liquidity_targets_discovered],
+        ["Alpha shadow candidates", evidenceFunnel.alpha_shadow_candidates],
+        ["Shadow positions", evidenceFunnel.shadow_positions],
+        ["Closed with CLV final lines", evidenceFunnel.closed_with_clv_final_lines],
+        ["Attributed positions", evidenceFunnel.attributed_positions],
+        ["Cohorts by attribution class", evidenceFunnel.cohorts_by_attribution_class, v=>longText(v, 220)],
+        ["Positive CLV cohorts", evidenceFunnel.positive_clv_cohorts, joinText],
+        ["Families beating market", evidenceFunnel.model_beats_market_families, joinText],
+        ["Collection gap", evidenceFunnel.collection_gap, v=>longText(v, 220)],
+        ["Sweep decision", evidenceFunnel.sweep_decision, v=>longText(v, 220)],
+        ["Paper gate", evidenceFunnel.paper_gate_status, v=>longText(v, 180)],
+        ["History rows", evidenceFunnel.evidence_history_rows]
+      ])}
+      ${titledTable("Missing pre-close quote positions", evidenceFunnel.missing_pre_close_positions || [], [
+        ["Position","shadow_position_id", v=>longText(v, 120)],
+        ["Family","family", v=>longText(v, 120)],
+        ["Close time","close_time"],
+        ["Reason","reason", v=>longText(v, 160)]
+      ], 5)}
+      ${titledTable("Latest evidence history", evidenceFunnel.recent_history || [], [
+        ["Recorded","recorded_at_utc"],
+        ["Source","source"],
+        ["Rows / positions","positions_scored_attributed"],
+        ["Final CLV rows","final_line_positions"],
+        ["Positive cohorts","positive_cohorts", v=>longText(v, 180)],
+        ["Summary","decision_or_class_summary", v=>longText(v, 220)]
+      ], 5)}
     `;
     const dutchBest = dutchArb.best_opportunity || {};
     const dutchStats = dutchArb.scan_stats_latest_poll || {};
@@ -1989,6 +2022,95 @@ def _trade_diagnostics(
         "current_near_miss_candidates": near_miss_candidates[:12],
         "current_shadow_candidates": shadow_candidates[:12],
         "quarantined_cohorts": quarantined[:12],
+    }
+
+
+def _dash(value: Any) -> Any:
+    if value is None or value == "" or value == [] or value == {}:
+        return "-"
+    return value
+
+
+def _first_present_number(payload: dict[str, Any], keys: list[str]) -> Any:
+    for key in keys:
+        value = payload.get(key)
+        if value not in {None, ""}:
+            return value
+    return "-"
+
+
+def _count_by_field(rows: list[dict[str, Any]], field: str) -> dict[str, int]:
+    counts = Counter(str(row.get(field) or "unknown") for row in rows if isinstance(row, dict))
+    return dict(sorted(counts.items()))
+
+
+def _evidence_funnel_payload(
+    *,
+    liquidity_discovery: dict[str, Any],
+    predictions: list[dict[str, Any]],
+    shadow_position_rows: list[dict[str, Any]],
+    closing_line_value: dict[str, Any],
+    edge_attribution: dict[str, Any],
+    family_calibration: dict[str, Any],
+    collection_coverage: dict[str, Any],
+    algo_sweep: dict[str, Any],
+    promotion_gate: dict[str, Any],
+    evidence_history_rows: list[dict[str, Any]],
+) -> dict[str, Any]:
+    alpha_shadow_candidates = sum(1 for row in predictions if _truthy(row.get("shadow_trade_candidate")))
+    open_shadow = sum(1 for row in shadow_position_rows if str(row.get("status") or "open").lower() == "open")
+    closed_shadow = sum(1 for row in shadow_position_rows if str(row.get("status") or "").lower() == "closed")
+    attribution_cohorts = edge_attribution.get("cohorts", []) if isinstance(edge_attribution, dict) else []
+    attribution_cohorts = attribution_cohorts if isinstance(attribution_cohorts, list) else []
+    positive_clv = closing_line_value.get("positive_clv_cohorts", []) if isinstance(closing_line_value, dict) else []
+    positive_clv = positive_clv if isinstance(positive_clv, list) else []
+    calibration_families = family_calibration.get("model_beats_market_families", []) if isinstance(family_calibration, dict) else []
+    calibration_families = calibration_families if isinstance(calibration_families, list) else []
+    missing_pre_close = (
+        collection_coverage.get("missing_pre_close_positions", []) if isinstance(collection_coverage, dict) else []
+    )
+    missing_pre_close = missing_pre_close if isinstance(missing_pre_close, list) else []
+    missing_count = collection_coverage.get("positions_missing_pre_close_quote") if isinstance(collection_coverage, dict) else None
+    covered_count = collection_coverage.get("positions_with_pre_close_quote") if isinstance(collection_coverage, dict) else None
+    if missing_count not in {None, ""} and covered_count not in {None, ""}:
+        collection_gap: Any = f"{missing_count} missing / {covered_count} covered"
+    else:
+        collection_gap = "-"
+    if isinstance(promotion_gate, dict) and promotion_gate:
+        approved = bool(promotion_gate.get("approved_for_paper_trading"))
+        gate_status = "approved_for_paper" if approved else "blocked_for_paper"
+        blockers = promotion_gate.get("paper_blockers", [])
+        if blockers:
+            gate_status += ": " + "; ".join(str(item) for item in blockers[:3])
+    else:
+        gate_status = "-"
+
+    return {
+        "liquidity_targets_discovered": _first_present_number(
+            liquidity_discovery,
+            [
+                "target_assets",
+                "targets_discovered",
+                "discovered_targets",
+                "candidate_assets",
+                "tokens",
+                "markets",
+                "rows",
+            ],
+        ),
+        "alpha_shadow_candidates": alpha_shadow_candidates if predictions else "-",
+        "shadow_positions": f"{open_shadow} open / {closed_shadow} closed" if shadow_position_rows else "-",
+        "closed_with_clv_final_lines": _dash(closing_line_value.get("final_line_positions") if isinstance(closing_line_value, dict) else None),
+        "attributed_positions": _dash(edge_attribution.get("attributed_positions") if isinstance(edge_attribution, dict) else None),
+        "cohorts_by_attribution_class": _dash(_count_by_field(attribution_cohorts, "attribution_class")),
+        "positive_clv_cohorts": _dash(positive_clv),
+        "model_beats_market_families": _dash(calibration_families),
+        "collection_gap": collection_gap,
+        "missing_pre_close_positions": missing_pre_close[:25],
+        "sweep_decision": _dash(algo_sweep.get("decision") if isinstance(algo_sweep, dict) else None),
+        "paper_gate_status": gate_status,
+        "evidence_history_rows": len(evidence_history_rows) if evidence_history_rows else "-",
+        "recent_history": list(reversed(evidence_history_rows[-10:])),
     }
 
 
@@ -3990,7 +4112,8 @@ def render_dashboard(cfg: EngineConfig, latest_report: dict[str, Any] | None = N
     liquidity_discovery = read_json(governance / "liquidity_discovery_summary.json", default={}) or {}
     positions = _open_positions(read_csv_rows(portfolio_root / "positions.csv"))
     fills = _last(read_csv_rows(portfolio_root / "paper_fills.csv"), 50)
-    shadow_positions = _enrich_shadow_rows(_open_positions(read_csv_rows(shadow_root / "shadow_positions.csv")))
+    shadow_position_rows = read_csv_rows(shadow_root / "shadow_positions.csv")
+    shadow_positions = _enrich_shadow_rows(_open_positions(shadow_position_rows))
     shadow_fills = _last(read_csv_rows(shadow_root / "shadow_fills.csv"), 50)
     orders = read_csv_rows(portfolio_root / "paper_orders.csv")
     paper_probe_exit_watch = _paper_probe_exit_watch(positions, orders)
@@ -4046,6 +4169,19 @@ def render_dashboard(cfg: EngineConfig, latest_report: dict[str, Any] | None = N
     edge_attribution = read_json(governance / "edge_attribution.json", default={}) or {}
     if not isinstance(edge_attribution, dict):
         edge_attribution = {}
+    family_calibration = read_json(governance / "family_calibration_scorecard.json", default={}) or {}
+    if not isinstance(family_calibration, dict):
+        family_calibration = {}
+    collection_coverage = read_json(governance / "collection_coverage.json", default={}) or {}
+    if not isinstance(collection_coverage, dict):
+        collection_coverage = {}
+    evidence_history_status = read_json(governance / "evidence_history_status.json", default={}) or {}
+    if not isinstance(evidence_history_status, dict):
+        evidence_history_status = {}
+    evidence_history_rows = read_csv_rows(governance / "evidence_history.csv")
+    promotion_gate = read_json(governance / "promotion_gate.json", default={}) or {}
+    if not isinstance(promotion_gate, dict):
+        promotion_gate = {}
     risk_state = read_json(portfolio_root / "risk_state.json", default={}) or {}
     if not isinstance(risk_state, dict):
         risk_state = {}
@@ -4112,6 +4248,18 @@ def render_dashboard(cfg: EngineConfig, latest_report: dict[str, Any] | None = N
         approved_signals=signals,
         rejected=rejected,
     )
+    evidence_funnel = _evidence_funnel_payload(
+        liquidity_discovery=liquidity_discovery if isinstance(liquidity_discovery, dict) else {},
+        predictions=predictions,
+        shadow_position_rows=shadow_position_rows,
+        closing_line_value=closing_line_value,
+        edge_attribution=edge_attribution,
+        family_calibration=family_calibration,
+        collection_coverage=collection_coverage,
+        algo_sweep=algo_sweep,
+        promotion_gate=promotion_gate,
+        evidence_history_rows=evidence_history_rows,
+    )
     decision_useful_summary = _decision_useful_summary(
         actual_target=actual_target,
         broker_summary=broker_summary,
@@ -4161,6 +4309,12 @@ def render_dashboard(cfg: EngineConfig, latest_report: dict[str, Any] | None = N
         "closing_line_value": closing_line_value,
         "dutch_arb": dutch_arb,
         "edge_attribution": edge_attribution,
+        "family_calibration": family_calibration,
+        "collection_coverage": collection_coverage,
+        "evidence_history_status": evidence_history_status,
+        "evidence_history": evidence_history_rows[-50:],
+        "promotion_gate": promotion_gate,
+        "evidence_funnel": evidence_funnel,
         "risk_state": risk_state,
         "websocket_summary": websocket_summary,
         "websocket_feature_summary": websocket_feature_summary,

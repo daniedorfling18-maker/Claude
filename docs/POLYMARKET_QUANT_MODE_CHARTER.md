@@ -370,6 +370,17 @@ family-level websocket quote counts/gaps and exact shadow positions missing pre-
 converts stale/provisional CLV into a scheduling problem the VPS can solve, rather than a vague model
 blocker.
 
+**2026-07-03 — WO-15 landed by Codex.** Governance refresh now appends an idempotent evidence time
+series from CLV, edge attribution, and algo-sweep artifacts. This makes the learning loop auditable
+across cycles: the operator can see evidence accumulating, stalling, or degrading instead of trusting a
+single latest snapshot.
+
+**2026-07-03 — WO-18 landed by Codex.** The dashboard now has a top-level evidence funnel: liquidity
+targets, alpha/shadow candidates, shadow position state, final CLV coverage, attribution classes,
+family calibration winners, pre-close collection gaps, algo-sweep decision, paper gate, and recent
+history. `refresh-governance` also refreshes family calibration and collection coverage before
+rendering, keeping the cockpit decision-useful.
+
 ## Rules of engagement for coding agents
 
 0. **Division of labour**: the orchestrating agent writes/updates this charter and the work orders

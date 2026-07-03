@@ -20,6 +20,7 @@ from .data_inventory import inventory
 from .data_quality import data_quality
 from .dutch_arb_monitor import run_dutch_arb_monitor
 from .edge_attribution import build_edge_attribution
+from .evidence_history import append_evidence_history
 from .execution.live import live_trade
 from .execution.paper import paper_trade_report
 from .external_feed_collector import collect_external_feeds
@@ -122,6 +123,7 @@ COMMANDS = [
     "algo-sweep",
     "edge-attribution",
     "family-calibration",
+    "evidence-history",
     "active-window-plan",
     "collection-coverage",
     "promotion-gate",
@@ -339,6 +341,8 @@ def main(argv: list[str] | None = None) -> int:
             _print(build_edge_attribution(cfg))
         elif args.command == "family-calibration":
             _print(build_family_calibration_scorecard(cfg))
+        elif args.command == "evidence-history":
+            _print(append_evidence_history(cfg))
         elif args.command == "active-window-plan":
             _print(build_active_window_plan(cfg))
         elif args.command == "collection-coverage":

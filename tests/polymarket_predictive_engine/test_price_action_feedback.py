@@ -285,6 +285,49 @@ def test_price_action_feedback_ingests_forward_paper_pnl_by_signal_cohort(tmp_pa
     assert payload["forward_paper_preview"][0]["forward_paper_pnl_usdc"] == approx(6.5)
 
 
+def test_price_action_feedback_demotes_probationary_paper_when_audited_pnl_is_negative(tmp_path):
+    cfg = _cfg(tmp_path)
+    write_csv(
+        cfg.governance_root / "signal_cohort_pnl.csv",
+        [
+            {
+                "signal_cohort": "price_action_microstructure|sports_other|bid_momentum_tight|exit=quick_3pct_1obs",
+                "buy_fills": "4",
+                "sell_fills": "2",
+                "open_positions": "0",
+                "paper_buy_fills": "4",
+                "paper_total_pnl_usdc": "-0.08",
+                "paper_monthly_run_rate_usdc": "-28.39",
+                "total_buy_cost_usdc": "4.0",
+                "total_pnl_usdc": "-0.08",
+                "roi": "-0.02",
+                "monthly_run_rate_usdc": "-28.39",
+                "promoted": "False",
+                "probationary": "True",
+                "promotion_ready_score": "4",
+                "promotion_ready_checks": "6",
+                "promotion_evidence_source": "paper",
+                "promotion_reason": "Forward paper evidence is positive enough for probationary paper sizing.",
+            }
+        ],
+    )
+
+    payload = build_price_action_feedback(cfg)
+
+    assert payload["learning_state"] == "suppress_negative_price_action_and_broaden"
+    assert payload["promotion_candidates"] == 0
+    assert payload["forward_paper_positive_cohorts"] == 0
+    row = payload["forward_paper_preview"][0]
+    assert row["source_probationary"] is True
+    assert row["probationary"] is False
+    assert row["promotion_ready"] is False
+    assert row["promotion_flag_demoted"] is True
+    assert row["trusted_for_goal"] is False
+    assert row["source_status"] == "demoted_promotion_flag"
+    assert row["action"] == "suppress_until_new_thesis"
+    assert "ignored" in row["reason"]
+
+
 def test_price_action_feedback_uses_audited_paper_pnl_over_raw_conflicted_pnl(tmp_path):
     cfg = _cfg(tmp_path)
     write_csv(

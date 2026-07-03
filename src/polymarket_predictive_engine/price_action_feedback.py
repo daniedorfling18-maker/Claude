@@ -252,11 +252,14 @@ def _paper_broker_forward_row(row: dict[str, str], *, min_closed: int) -> dict[s
         pnl = _num(row.get("shadow_total_pnl_usdc") or row.get("total_pnl_usdc"))
         roi = _num(row.get("shadow_roi") or row.get("roi"))
         monthly = _num(row.get("shadow_monthly_run_rate_usdc") or row.get("monthly_run_rate_usdc"))
-    promoted = _bool(row.get("promoted"))
-    probationary = _bool(row.get("probationary"))
+    source_promoted = _bool(row.get("promoted"))
+    source_probationary = _bool(row.get("probationary"))
     blocker = _cohort_blocker(cohort, row.get("metadata_blocker") or row.get("paper_audit_blocker"))
-    trusted_for_goal = not blocker
     has_positive_forward = buy_fills > 0 and pnl > 0 and roi > 0
+    trusted_for_goal = not blocker and has_positive_forward
+    promoted = source_promoted and trusted_for_goal
+    probationary = source_probationary and trusted_for_goal and not promoted
+    demoted_source_promotion = (source_promoted or source_probationary) and not trusted_for_goal
     has_negative_closed = closed >= min_closed and (pnl <= 0 or roi <= 0)
     has_negative_open_mark = closed == 0 and open_trades > 0 and pnl < 0 and roi < 0
 
@@ -275,6 +278,18 @@ def _paper_broker_forward_row(row: dict[str, str], *, min_closed: int) -> dict[s
     elif probationary:
         action = "continue_probationary_paper"
         reason = "Forward paper evidence is positive enough for probationary paper sizing, not live trading."
+    elif demoted_source_promotion and (pnl <= 0 or roi <= 0):
+        action = "suppress_until_new_thesis" if closed > 0 else "monitor_but_do_not_expand"
+        reason = (
+            "Source promotion/probation flag was ignored because audited forward bid/ask P&L "
+            "or ROI is not positive after spread costs."
+        )
+    elif demoted_source_promotion:
+        action = "collect_forward_paper_evidence"
+        reason = (
+            "Source promotion/probation flag was ignored until the cohort has positive executable "
+            "forward P&L and ROI."
+        )
     elif has_positive_forward:
         action = "collect_more_positive_price_action_evidence"
         reason = (
@@ -309,11 +324,14 @@ def _paper_broker_forward_row(row: dict[str, str], *, min_closed: int) -> dict[s
         "promotion_ready": trusted_for_goal and (promoted or probationary),
         "probationary": probationary,
         "promoted": promoted,
+        "source_probationary": source_probationary,
+        "source_promoted": source_promoted,
+        "promotion_flag_demoted": demoted_source_promotion,
         "trusted_for_goal": trusted_for_goal,
         "forward_edge_blocker": blocker,
         "action": action,
         "reason": reason,
-        "source_status": "promoted" if promoted else "probationary" if probationary else source,
+        "source_status": "promoted" if promoted else "probationary" if probationary else "demoted_promotion_flag" if demoted_source_promotion else source,
         "source_reason": row.get("promotion_reason", ""),
         "buy_fills": buy_fills,
         "closed_trades": closed,

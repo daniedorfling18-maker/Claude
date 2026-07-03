@@ -332,6 +332,55 @@ def test_research_focus_guard_prevents_updown_query_collapse(tmp_path):
     assert [row["reason"] for row in guard["rejected_queries"]] == ["max_updown_queries"] * 7
 
 
+def test_research_focus_default_broad_base_collects_sharp_sports_families(tmp_path):
+    cfg = _cfg(tmp_path)
+    write_json(
+        cfg.output_root / "polymarket_price_action" / "price_action_model_summary.json",
+        {
+            "status": "insufficient_data",
+            "decision": "collect_more_bid_ask_price_action_training_events",
+            "promotion_ready": False,
+        },
+    )
+    write_json(
+        cfg.governance_root / "price_action_feedback.json",
+        {
+            "status": "ok",
+            "learning_state": "collect_more_positive_price_action_evidence",
+            "collection_queries": [
+                "btc updown",
+                "solana updown",
+                "xrp updown",
+                "eth updown",
+                "bitcoin up or down",
+                "ethereum up or down",
+                "solana up or down",
+                "xrp up or down",
+            ],
+        },
+    )
+
+    payload = build_research_focus(cfg)
+
+    assert payload["collection_queries"] == [
+        "btc updown",
+        "world cup",
+        "tennis",
+        "nba",
+        "mlb",
+        "mma",
+        "fed",
+        "economy",
+    ]
+    guard = payload["collection_query_guard"]
+    assert guard["broad_fill_queries"] == ["world cup", "tennis", "nba", "mlb", "mma", "fed", "economy"]
+    assert guard["family_counts"]["basketball_nba_match"] == 1
+    assert guard["family_counts"]["baseball_mlb_match"] == 1
+    assert guard["family_counts"]["mma_match"] == 1
+    assert guard["updown_query_count"] == 1
+    assert [row["reason"] for row in guard["rejected_queries"]] == ["max_updown_queries"] * 7
+
+
 def test_research_focus_prioritises_current_positive_analogue_as_learning_target(tmp_path):
     cfg = _cfg(tmp_path)
     write_json(

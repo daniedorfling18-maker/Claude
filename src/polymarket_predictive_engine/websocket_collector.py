@@ -428,8 +428,18 @@ def _family_prefixes_for_collection_query(query: str) -> list[str]:
     mapped: list[str] = []
     if not text:
         return mapped
-    if any(term in text for term in ("world", "cup", "fifa", "soccer", "football", "sports")):
+    if any(term in text for term in ("world", "cup", "fifa")):
         mapped.extend(["worldcup", "sports_other"])
+    if any(term in text for term in ("soccer", "football")):
+        mapped.extend(["soccer", "worldcup", "sports_other"])
+    if any(term in text for term in ("nba", "basketball")):
+        mapped.extend(["basketball_nba", "basketball"])
+    if any(term in text for term in ("mlb", "baseball")):
+        mapped.extend(["baseball_mlb", "baseball"])
+    if any(term in text for term in ("mma", "ufc", "mixed martial")):
+        mapped.append("mma")
+    if "sports" in text:
+        mapped.extend(["sports_other", "soccer", "basketball", "baseball", "mma", "tennis"])
     if "tennis" in text:
         mapped.append("tennis")
     if any(term in text for term in ("esports", "e-sports", "cs2", "counter-strike", "dota", "lol", "league of legends")):

@@ -528,6 +528,9 @@ paper_market_scan:
   - world cup winner
   - world cup
   - tennis
+  - nba
+  - mlb
+  - mma
   - fed
   - economy
   - esports
@@ -551,6 +554,9 @@ paper_market_scan:
   - solana
   - xrp
   - tennis
+  - nba
+  - mlb
+  - mma
   - fed
   - economy
   - esports
@@ -589,6 +595,15 @@ paper_market_scan:
     xrp:
     - ripple
     - crypto
+    nba:
+    - basketball
+    - nba basketball
+    mlb:
+    - baseball
+    - mlb baseball
+    mma:
+    - ufc
+    - mixed martial arts
     fed:
     - fomc
     - interest rates
@@ -638,6 +653,9 @@ research_focus:
   broad_base_queries:
   - world cup
   - tennis
+  - nba
+  - mlb
+  - mma
   - fed
   - economy
   - esports

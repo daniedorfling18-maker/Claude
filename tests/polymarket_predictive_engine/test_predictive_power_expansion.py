@@ -814,6 +814,87 @@ def test_websocket_reserves_validation_gap_targets_from_research_focus(tmp_path)
     )
 
 
+def test_websocket_maps_sharp_sports_queries_to_specific_families(tmp_path):
+    import yaml
+
+    cfg_path = make_cfg(tmp_path)
+    data = yaml.safe_load(cfg_path.read_text(encoding="utf-8"))
+    data.setdefault("websocket_market_data", {})
+    data["websocket_market_data"].update(
+        {
+            "use_liquidity_targets": True,
+            "use_strategy_v2_targets": False,
+            "max_liquidity_target_assets": 4,
+            "feedback_broaden_target_assets": 3,
+            "feedback_broaden_target_assets_per_family": 1,
+            "market_ids": [],
+        }
+    )
+    cfg_path.write_text(yaml.safe_dump(data, sort_keys=False), encoding="utf-8")
+    cfg = load_config(cfg_path)
+    write_json(
+        cfg.governance_root / "price_action_feedback.json",
+        {
+            "status": "ok",
+            "learning_state": "collect_more_positive_price_action_evidence",
+            "positive_collect_candidates": 3,
+            "collection_queries": ["nba", "mlb", "mma"],
+        },
+    )
+    write_csv(
+        cfg.output_root / "polymarket_liquidity_discovery" / "liquidity_watchlist.csv",
+        [
+            {
+                "token_id": "plain-token",
+                "family": "sports_other",
+                "tradable_liquidity_candidate": "true",
+                "liquidity": "2000",
+                "spread": "0.01",
+                "time_to_close_hours": "3",
+            },
+            {
+                "token_id": "nba-token",
+                "family": "basketball_nba_match",
+                "market_slug": "nba-celtics-knicks",
+                "question": "NBA: Will the Celtics beat the Knicks?",
+                "tradable_liquidity_candidate": "true",
+                "liquidity": "900",
+                "spread": "0.02",
+                "time_to_close_hours": "8",
+            },
+            {
+                "token_id": "mlb-token",
+                "family": "baseball_mlb_match",
+                "market_slug": "mlb-yankees-red-sox",
+                "question": "MLB: Will the Yankees beat the Red Sox?",
+                "tradable_liquidity_candidate": "true",
+                "liquidity": "850",
+                "spread": "0.02",
+                "time_to_close_hours": "7",
+            },
+            {
+                "token_id": "mma-token",
+                "family": "mma_match",
+                "market_slug": "ufc-fighter-a-vs-fighter-b",
+                "question": "UFC: Will Fighter A beat Fighter B?",
+                "tradable_liquidity_candidate": "true",
+                "liquidity": "800",
+                "spread": "0.02",
+                "time_to_close_hours": "6",
+            },
+        ],
+    )
+
+    targets = websocket_collector._liquidity_target_rows(cfg, cfg.raw["websocket_market_data"])
+    feedback_targets = [row for row in targets if row.get("feedback_broaden_target") is True]
+
+    assert {row["token_id"] for row in feedback_targets} == {"nba-token", "mlb-token", "mma-token"}
+    prefixes_by_query = {row["feedback_broaden_query"]: row["feedback_broaden_family_prefixes"] for row in feedback_targets}
+    assert "basketball_nba" in prefixes_by_query["nba"]
+    assert "baseball_mlb" in prefixes_by_query["mlb"]
+    assert "mma" in prefixes_by_query["mma"]
+
+
 def test_websocket_reserves_current_positive_analogue_tokens(tmp_path):
     import yaml
 

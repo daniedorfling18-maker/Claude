@@ -19,6 +19,9 @@ QUARANTINED_COHORT_FRAGMENTS = (
 DEFAULT_BROAD_BASE_QUERIES = (
     "world cup",
     "tennis",
+    "nba",
+    "mlb",
+    "mma",
     "fed",
     "economy",
     "esports",
@@ -89,18 +92,18 @@ def _cohort_query(cohort: str) -> str:
         return "tennis"
     if "worldcup" in text or "world_cup" in text or "world cup" in text:
         return "world cup"
+    if "basketball" in text or "nba" in text:
+        return "nba"
+    if "baseball" in text or "mlb" in text:
+        return "mlb"
+    if "mma" in text or "ufc" in text:
+        return "mma"
     if "esport" in text or "valorant" in text or "cs2" in text or "dota" in text or "league_of_legends" in text or "league of legends" in text:
         return "esports"
     if "macro_rates" in text or "fed" in text or "rates" in text:
         return "fed"
     if "macro_economy" in text or "economy" in text or "inflation" in text:
         return "economy"
-    if "nba" in text:
-        return "nba"
-    if "mlb" in text:
-        return "mlb"
-    if "mma" in text or "ufc" in text:
-        return "mma"
     if "ai" in text or "openai" in text or "anthropic" in text:
         return "ai"
     if "politic" in text or "election" in text:
@@ -136,6 +139,12 @@ def _query_family(query: str) -> str:
         return "worldcup"
     if "tennis" in text or " wimbledon " in text or " us open " in text or " atp " in text or " wta " in text:
         return "tennis"
+    if " nba " in text or "basketball" in text:
+        return "basketball_nba_match"
+    if " mlb " in text or "baseball" in text:
+        return "baseball_mlb_match"
+    if " mma " in text or " ufc " in text or "mixed martial" in text:
+        return "mma_match"
     if "fed" in text or "fomc" in text or "interest rate" in text or " rate cut " in text or " rate hike " in text:
         return "macro_rates"
     if "economy" in text or "inflation" in text or " cpi " in text or " gdp " in text or "recession" in text:
@@ -148,7 +157,7 @@ def _query_family(query: str) -> str:
         return "politics"
     if "stock" in text or "equities" in text or "nasdaq" in text or "s&p" in text or "s p 500" in text:
         return "equities"
-    if "sports" in text or " nba " in text or " mlb " in text or " nfl " in text or " ufc " in text:
+    if "sports" in text or " nfl " in text:
         return "sports"
     if "bitcoin" in text or " btc " in text:
         return "crypto_btc"
@@ -455,6 +464,12 @@ def _near_miss_collection_query(row: dict[str, Any]) -> str:
         return "world cup"
     if any(marker in text for marker in ("tennis", "sinner", "wimbledon", "us-open", "us open")):
         return "tennis"
+    if any(marker in text for marker in (" nba ", "basketball", "celtics", "knicks", "lakers", "warriors")):
+        return "nba"
+    if any(marker in text for marker in (" mlb ", "baseball", "yankees", "red sox", "dodgers", "mets")):
+        return "mlb"
+    if any(marker in text for marker in (" mma ", "ufc", "mixed martial")):
+        return "mma"
     if "bitcoin" in text or "btc" in text:
         return "btc updown" if "updown" in text or " up/down" in text or " up or down" in text else "bitcoin"
     if "ethereum" in text or "eth" in text:

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import json
-from collections import defaultdict, deque
+from collections import Counter, defaultdict, deque
 from datetime import timezone
 from typing import Any
 
@@ -114,6 +114,103 @@ def _elapsed_hours(start: Any, end: Any) -> float:
 
 def _monthly_run_rate(pnl: float, start: Any, end: Any) -> float:
     return float(pnl) / _elapsed_hours(start, end) * 24.0 * 30.0
+
+
+def _quote_bucket(row: dict[str, Any]) -> str:
+    status = str(row.get("quote_consistency_status") or "").strip() or "unknown"
+    if status == "ok":
+        return "ok"
+    if status == "quote_conflict":
+        return "quote_conflict"
+    if status.startswith("unverified_"):
+        return "unverified"
+    return status
+
+
+def _quote_audit_action(*, quote_conflicts: int, quote_unverified: int, other_blocked: int) -> str:
+    if quote_conflicts > 0:
+        return "investigate token/market alias or stale exit quote; excluded P&L must not train or prove the goal"
+    if quote_unverified > 0:
+        return "collect independent bid/ask snapshots through the paper exit horizon before trusting this cohort"
+    if other_blocked > 0:
+        return "inspect unknown quote-audit status before using this cohort as proof"
+    return "quote-consistent; eligible for audited paper feedback subject to existing model gates"
+
+
+def _quote_audit_breakdown(rows: list[dict[str, Any]], *, key: str, limit: int = 12) -> list[dict[str, Any]]:
+    grouped: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    for row in rows:
+        label = str(row.get(key) or "unknown").strip() or "unknown"
+        grouped[label].append(row)
+
+    breakdown: list[dict[str, Any]] = []
+    for label, group_rows in grouped.items():
+        ok_rows = [row for row in group_rows if _quote_bucket(row) == "ok"]
+        conflict_rows = [row for row in group_rows if _quote_bucket(row) == "quote_conflict"]
+        unverified_rows = [row for row in group_rows if _quote_bucket(row) == "unverified"]
+        other_blocked_rows = [
+            row
+            for row in group_rows
+            if _quote_bucket(row) not in {"ok", "quote_conflict", "unverified"}
+        ]
+        raw_pnl = sum(float(safe_float(row.get("realized_pnl_usdc")) or 0.0) for row in group_rows)
+        audited_pnl = sum(float(safe_float(row.get("realized_pnl_usdc")) or 0.0) for row in ok_rows)
+        blocked_statuses = Counter(_quote_bucket(row) for row in group_rows if _quote_bucket(row) != "ok")
+        top_status, top_count = ("none", 0) if not blocked_statuses else blocked_statuses.most_common(1)[0]
+        breakdown.append(
+            {
+                key: label,
+                "round_trips": len(group_rows),
+                "quote_consistent_round_trips": len(ok_rows),
+                "quote_conflict_round_trips": len(conflict_rows),
+                "quote_unverified_round_trips": len(unverified_rows),
+                "quote_other_blocked_round_trips": len(other_blocked_rows),
+                "raw_pnl_usdc": raw_pnl,
+                "audited_pnl_usdc": audited_pnl,
+                "excluded_from_audit_pnl_usdc": raw_pnl - audited_pnl,
+                "raw_positive_round_trips": sum(
+                    1 for row in group_rows if float(safe_float(row.get("realized_pnl_usdc")) or 0.0) > 0
+                ),
+                "audited_positive_round_trips": sum(
+                    1 for row in ok_rows if float(safe_float(row.get("realized_pnl_usdc")) or 0.0) > 0
+                ),
+                "top_blocker_status": top_status,
+                "top_blocker_count": top_count,
+                "recommended_action": _quote_audit_action(
+                    quote_conflicts=len(conflict_rows),
+                    quote_unverified=len(unverified_rows),
+                    other_blocked=len(other_blocked_rows),
+                ),
+            }
+        )
+    breakdown.sort(
+        key=lambda row: (
+            int(safe_float(row.get("quote_conflict_round_trips")) or 0)
+            + int(safe_float(row.get("quote_unverified_round_trips")) or 0)
+            + int(safe_float(row.get("quote_other_blocked_round_trips")) or 0),
+            abs(float(safe_float(row.get("excluded_from_audit_pnl_usdc")) or 0.0)),
+            abs(float(safe_float(row.get("raw_pnl_usdc")) or 0.0)),
+        ),
+        reverse=True,
+    )
+    return breakdown[:limit]
+
+
+def _quote_audit_status_counts(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    grouped: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    for row in rows:
+        grouped[str(row.get("quote_consistency_status") or "unknown")].append(row)
+    counts = [
+        {
+            "quote_consistency_status": status,
+            "round_trips": len(group_rows),
+            "pnl_usdc": sum(float(safe_float(row.get("realized_pnl_usdc")) or 0.0) for row in group_rows),
+            "sample_reason": str(group_rows[0].get("quote_consistency_reason") or ""),
+        }
+        for status, group_rows in grouped.items()
+    ]
+    counts.sort(key=lambda row: (str(row["quote_consistency_status"]) == "ok", -int(row["round_trips"])))
+    return counts
 
 
 def _cohort_from_signal(signal: dict[str, Any], fallback: str) -> str:
@@ -459,6 +556,11 @@ def build_paper_round_trip_evidence(cfg: EngineConfig) -> dict[str, Any]:
         "audited_baseline_realized_pnl_usdc": audited_baseline_pnl,
         "audited_baseline_realized_roi": audited_baseline_pnl / audited_baseline_stake if audited_baseline_stake > 0 else 0.0,
         "audited_baseline_stake_usdc": audited_baseline_stake,
+        "quote_audit_status_counts": _quote_audit_status_counts(round_trips),
+        "quote_audit_by_cohort": _quote_audit_breakdown(round_trips, key="signal_cohort"),
+        "quote_audit_by_family": _quote_audit_breakdown(round_trips, key="family"),
+        "baseline_quote_audit_by_cohort": _quote_audit_breakdown(baseline_rows, key="signal_cohort"),
+        "baseline_quote_audit_by_family": _quote_audit_breakdown(baseline_rows, key="family"),
         "account_snapshot_time_utc": account_snapshot.get("created_at", ""),
         "account_baseline_equity_usdc": baseline_equity,
         "account_equity_usdc": account_equity,

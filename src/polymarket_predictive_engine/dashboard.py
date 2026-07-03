@@ -280,6 +280,10 @@ async function load() {
     const priceActionFeedback = data.price_action_feedback || {};
     const goalPlan = data.paper_profit_goal_plan || {};
     const priceActionGoal = goalPlan.price_action_goal_state || {};
+    const paperRoundTripSummary = data.paper_round_trip_summary || {};
+    const quoteAuditCohorts = (Array.isArray(paperRoundTripSummary.baseline_quote_audit_by_cohort) && paperRoundTripSummary.baseline_quote_audit_by_cohort.length)
+      ? paperRoundTripSummary.baseline_quote_audit_by_cohort
+      : (paperRoundTripSummary.quote_audit_by_cohort || []);
     const tradeSignalAudit = data.trade_signal_audit || {};
     const decisionSummary = data.decision_useful_summary || {};
     const evidenceFunnel = data.evidence_funnel || {};
@@ -739,7 +743,23 @@ async function load() {
       ["Tracking hours", target.elapsed_hours, v=>fmtNum(v,2)],
       ["Raw monthly run-rate (audit-only)", rawRunRate, v=>fmtUsd(v) + auditedRawSuffix()],
       ["Baseline equity", target.baseline?.baseline_equity_usdc, fmtUsd]
-    ]);
+    ]) + titledTable("Quote-audit blockers by cohort", quoteAuditCohorts, [
+      ["Cohort","signal_cohort", v=>longText(v, 180)],
+      ["Trips","round_trips"],
+      ["Audited","quote_consistent_round_trips"],
+      ["Conflicts","quote_conflict_round_trips"],
+      ["Unverified","quote_unverified_round_trips"],
+      ["Raw P&L","raw_pnl_usdc", fmtUsd],
+      ["Audited P&L","audited_pnl_usdc", fmtUsd],
+      ["Excluded P&L","excluded_from_audit_pnl_usdc", fmtUsd],
+      ["Top blocker","top_blocker_status", v=>longText(v, 120)],
+      ["Action","recommended_action", v=>longText(v, 220)]
+    ], 8) + titledTable("Quote-audit status counts", paperRoundTripSummary.quote_audit_status_counts || [], [
+      ["Status","quote_consistency_status", v=>longText(v, 140)],
+      ["Trips","round_trips"],
+      ["P&L","pnl_usdc", fmtUsd],
+      ["Reason","sample_reason", v=>longText(v, 260)]
+    ], 6);
     document.getElementById("goalPlan").innerHTML = `<div class="sectionLead">This is the route to the $100/month target using tradable price changes, not waiting for market settlement.</div>` + facts([
       ["Route state", priceActionGoal.state || goalPlan.status],
       ["Needs settlement?", priceActionGoal.settlement_required_for_this_milestone ? "yes" : "no - this milestone uses bid/ask repricing and paper exits"],

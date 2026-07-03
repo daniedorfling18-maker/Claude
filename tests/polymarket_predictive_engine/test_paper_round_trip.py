@@ -150,6 +150,24 @@ def test_paper_round_trip_exports_realised_broker_fills_as_strict_feedback(tmp_p
     assert summary["positive_round_trips"] == 1
     assert summary["negative_round_trips"] == 1
     assert summary["realized_pnl_usdc"] == pytest.approx(0.2)
+    assert summary["quote_audit_status_counts"] == [
+        {
+            "quote_consistency_status": "ok",
+            "round_trips": 2,
+            "pnl_usdc": pytest.approx(0.2),
+            "sample_reason": "exit quote bid is consistent with independent snapshot bid",
+        }
+    ]
+    btc_quote_audit = next(
+        row
+        for row in summary["quote_audit_by_cohort"]
+        if row["signal_cohort"] == "exploratory_crypto_updown_live_model|crypto_btc_updown_daily|outcome=down"
+    )
+    assert btc_quote_audit["round_trips"] == 1
+    assert btc_quote_audit["quote_consistent_round_trips"] == 1
+    assert btc_quote_audit["audited_pnl_usdc"] == pytest.approx(1.2)
+    assert btc_quote_audit["excluded_from_audit_pnl_usdc"] == pytest.approx(0.0)
+    assert btc_quote_audit["recommended_action"] == "quote-consistent; eligible for audited paper feedback subject to existing model gates"
     assert [row["round_trip_status"] for row in rows] == ["closed_take_profit", "closed_stop_loss"]
     assert rows[0]["entry_price"] == "0.4"
     assert rows[0]["exit_price"] == "0.52"
@@ -200,6 +218,15 @@ def test_paper_round_trip_quarantines_quote_conflicts_from_model_training(tmp_pa
     assert summary["closed_round_trips"] == 1
     assert summary["quote_conflict_round_trips"] == 1
     assert summary["audited_realized_pnl_usdc"] == pytest.approx(0.0)
+    assert summary["quote_audit_status_counts"][0]["quote_consistency_status"] == "quote_conflict"
+    assert summary["quote_audit_status_counts"][0]["round_trips"] == 1
+    quote_audit = summary["quote_audit_by_cohort"][0]
+    assert quote_audit["signal_cohort"] == "near_miss_learning|crypto"
+    assert quote_audit["quote_conflict_round_trips"] == 1
+    assert quote_audit["quote_consistent_round_trips"] == 0
+    assert quote_audit["audited_pnl_usdc"] == pytest.approx(0.0)
+    assert quote_audit["excluded_from_audit_pnl_usdc"] == pytest.approx(53.2)
+    assert "excluded P&L must not train" in quote_audit["recommended_action"]
     assert rows[0]["quote_consistency_status"] == "quote_conflict"
     assert float(rows[0]["exit_quote_snapshot_bid_gap"]) == pytest.approx(0.933)
 

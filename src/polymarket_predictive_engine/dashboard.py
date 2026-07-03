@@ -263,6 +263,7 @@ async function load() {
     const algoSweep = data.algo_sweep || {};
     const priceActionModel = data.price_action_model || {};
     const quantResearch = data.quant_research_status || {};
+    const alphaBridge = data.mispricing_alpha_bridge || {};
     const closingLine = data.closing_line_value || {};
     const smartFlowClv = data.smart_flow_clv || {};
     const dutchArb = data.dutch_arb || {};
@@ -669,6 +670,8 @@ async function load() {
       ["Validation gap", validationGapActive ? validationGap.reason || "Needs positive validation examples." : "No active positive-validation gap.", v=>longText(v, 260)],
       ["Cohort transfer", priceActionModel.cohort_transfer?.reason || "No active transfer blocker reported.", v=>longText(v, 260)],
       ["Paper bridge", priceActionPaper.decision, v=>longText(v, 220)],
+      ["Sharp-anchor alpha bridge", alphaBridge.key_metric || alphaBridge.status || "-", v=>longText(v, 220)],
+      ["Sharp-anchor next", alphaBridge.blocker_or_next || "-", v=>longText(v, 260)],
       ["Algo replay best", algoBestDisplay(), v=>longText(v, 220)],
       ["Current analogue scan", `${currentHistScan.current_rows ?? 0} rows / ${currentHistScan.positive_matches ?? 0} positive matches`, v=>longText(v, 180)],
       ["Analogue blocker", currentHistScan.state || "-", v=>longText(v, 220)],
@@ -2032,6 +2035,112 @@ def _worldcup_validation_status(
         "rejected_signals": len(worldcup_rejected),
         "main_blocker": main_blocker,
         "top_rejection_reasons": _top_rejection_reasons(worldcup_rejected, limit=6),
+    }
+
+
+def _mispricing_alpha_bridge_status(
+    *,
+    alpha_summary: dict[str, Any],
+    independent_anchor_status: dict[str, Any],
+    predictions: list[dict[str, Any]],
+    rejected: list[dict[str, Any]],
+) -> dict[str, Any]:
+    """Summarise the sharp/fundamental anchor path into a decision-useful bridge status."""
+    alpha_summary = alpha_summary if isinstance(alpha_summary, dict) else {}
+    independent_anchor_status = independent_anchor_status if isinstance(independent_anchor_status, dict) else {}
+    sharp_fetch = independent_anchor_status.get("sharp_odds_fetch") if isinstance(independent_anchor_status.get("sharp_odds_fetch"), dict) else {}
+    sharp_anchor = independent_anchor_status.get("sharp_anchor") if isinstance(independent_anchor_status.get("sharp_anchor"), dict) else {}
+    fundamental_rows = [
+        row
+        for row in predictions
+        if str(row.get("fundamental_probability") or "").strip()
+        or str(row.get("haircut_fundamental_probability") or "").strip()
+    ]
+    trade_candidates = [row for row in fundamental_rows if _truthy(row.get("alpha_trade_candidate"))]
+    shadow_candidates = [row for row in fundamental_rows if _truthy(row.get("shadow_trade_candidate"))]
+    near_miss_candidates = [row for row in fundamental_rows if _truthy(row.get("near_miss_learning_candidate"))]
+    blocker_counter: Counter[str] = Counter()
+    for row in fundamental_rows:
+        if _truthy(row.get("alpha_trade_candidate")):
+            continue
+        reason = str(row.get("validation_layer_reason") or row.get("shadow_candidate_reason") or "").strip()
+        if reason:
+            for part in reason.split(";"):
+                cleaned = part.strip()
+                if cleaned:
+                    blocker_counter[cleaned] += 1
+    rejected_token_ids = {
+        str(row.get("token_id") or ""): row
+        for row in fundamental_rows
+        if str(row.get("token_id") or "")
+    }
+    for row in rejected:
+        token_id = str(row.get("token_id") or "")
+        if token_id and token_id in rejected_token_ids:
+            reason = str(row.get("rejection_reason") or "").strip()
+            if reason:
+                blocker_counter[reason] += 1
+
+    loaded = int(safe_float(alpha_summary.get("fundamental_probabilities_loaded")) or 0)
+    hits = int(safe_float(alpha_summary.get("fundamental_probability_hits")) or len(fundamental_rows))
+    scored = int(safe_float(alpha_summary.get("scored")) or 0)
+    summary_trade_candidates = int(safe_float(alpha_summary.get("trade_candidates")) or len(trade_candidates))
+    summary_shadow_candidates = int(safe_float(alpha_summary.get("shadow_trade_candidates")) or len(shadow_candidates))
+    if summary_trade_candidates > 0:
+        status = "trade_candidates_waiting_for_governed_risk_path"
+        blocker_or_next = "Run only through paper readiness, cohort, risk, spread, and liquidity gates; do not bypass governance."
+    elif summary_shadow_candidates > 0 or shadow_candidates:
+        status = "shadow_candidates_collecting_forward_evidence"
+        blocker_or_next = "Collect forward paper/CLV evidence for the sharp-backed shadow candidates before promotion."
+    elif fundamental_rows:
+        status = "fundamental_rows_scored_but_blocked"
+        blocker_or_next = blocker_counter.most_common(1)[0][0] if blocker_counter else "No alpha trade candidate after haircut, penalties, and microstructure filters."
+    elif loaded > 0:
+        status = "no_current_prediction_overlap"
+        blocker_or_next = "Sharp anchor rows exist, but the current prediction universe has no matching token rows; broaden/refresh market discovery."
+    elif str(sharp_anchor.get("status") or "") in {"built", "ok"}:
+        status = "anchor_built_without_scored_hits"
+        blocker_or_next = "Sharp anchor built, but no fundamental probabilities reached current scoring."
+    else:
+        status = "missing_or_unusable_sharp_anchor"
+        blocker_or_next = independent_anchor_status.get("main_blocker") or "Fetch/build sharp-anchor probabilities before expecting anchor-led signals."
+
+    top_rows = sorted(
+        fundamental_rows,
+        key=lambda row: (
+            safe_float(row.get("edge_lower_bound")) or -999.0,
+            safe_float(row.get("fundamental_edge_after_haircut")) or -999.0,
+            safe_float(row.get("alpha_raw_edge")) or -999.0,
+        ),
+        reverse=True,
+    )
+    return {
+        "status": status,
+        "generated_at_utc": alpha_summary.get("generated_at_utc"),
+        "decision_use": "Measures whether sharp bookmaker probabilities are transferring into current executable Polymarket candidates.",
+        "key_metric": (
+            f"{hits}/{loaded} current fundamental hits; "
+            f"{summary_trade_candidates} trade candidates; {summary_shadow_candidates} shadow candidates"
+        ),
+        "blocker_or_next": blocker_or_next,
+        "sharp_fetch_status": sharp_fetch.get("status"),
+        "sharp_fetch_rows": sharp_fetch.get("rows"),
+        "sharp_anchor_status": sharp_anchor.get("status"),
+        "sharp_anchor_rows": sharp_anchor.get("fundamental_rows"),
+        "alpha_predictions": alpha_summary.get("predictions"),
+        "alpha_scored": scored,
+        "fundamental_probabilities_loaded": loaded,
+        "fundamental_probability_hits": hits,
+        "fundamental_rows_in_predictions": len(fundamental_rows),
+        "alpha_trade_candidates": summary_trade_candidates,
+        "shadow_trade_candidates": summary_shadow_candidates,
+        "near_miss_candidates": len(near_miss_candidates),
+        "bookmaker_cross_check_failures": alpha_summary.get("bookmaker_cross_check_failures", 0),
+        "microstructure_filter_failures": alpha_summary.get("microstructure_filter_failures", 0),
+        "top_blockers": [{"reason": reason, "count": count} for reason, count in blocker_counter.most_common(6)],
+        "top_fundamental_rows": top_rows[:8],
+        "paper_trading_invoked": False,
+        "live_trading_invoked": False,
     }
 
 
@@ -3460,6 +3569,7 @@ def _decision_useful_summary(
     websocket_summary: dict[str, Any],
     websocket_feature_summary: dict[str, Any],
     worldcup_validation: dict[str, Any],
+    alpha_bridge: dict[str, Any],
 ) -> dict[str, Any]:
     """Build the small, operator-facing dashboard contract.
 
@@ -3815,6 +3925,14 @@ def _decision_useful_summary(
             ),
             "blocker_or_next": current_historical_scan.get("next_action")
             or "Collect more current bid/ask variation across liquid families.",
+        },
+        {
+            "lane": "Sharp-anchor alpha bridge",
+            "state": alpha_bridge.get("status") or "unknown",
+            "decision_use": alpha_bridge.get("decision_use")
+            or "Measures whether independent bookmaker probabilities transfer into current executable candidates.",
+            "key_metric": alpha_bridge.get("key_metric") or "-",
+            "blocker_or_next": alpha_bridge.get("blocker_or_next") or "No sharp-anchor bridge status available.",
         },
         {
             "lane": "World Cup validation",
@@ -4308,6 +4426,16 @@ def render_dashboard(cfg: EngineConfig, latest_report: dict[str, Any] | None = N
     )
     rejected = read_csv_rows(predictions_root / "rejected_signals.csv")
     near_miss_candidates = read_csv_rows(predictions_root / "near_miss_learning_candidates.csv")
+    mispricing_alpha_summary = read_json(governance / "mispricing_alpha_live_summary.json", default={}) or {}
+    if not isinstance(mispricing_alpha_summary, dict):
+        mispricing_alpha_summary = {}
+    independent_anchor_status = _independent_anchor_status(governance)
+    alpha_bridge = _mispricing_alpha_bridge_status(
+        alpha_summary=mispricing_alpha_summary,
+        independent_anchor_status=independent_anchor_status,
+        predictions=predictions,
+        rejected=rejected,
+    )
     live_loop_status = _live_loop_status(heartbeat if isinstance(heartbeat, dict) else {}, cfg)
     legacy_full_cycle_status = _legacy_full_cycle_status(heartbeat if isinstance(heartbeat, dict) else {}, live_loop_status)
     strategy_v2_status = _strategy_v2_status(cfg, legacy_full_cycle_status)
@@ -4472,6 +4600,7 @@ def render_dashboard(cfg: EngineConfig, latest_report: dict[str, Any] | None = N
         websocket_summary=websocket_summary,
         websocket_feature_summary=websocket_feature_summary,
         worldcup_validation=worldcup_validation_status,
+        alpha_bridge=alpha_bridge,
     )
 
     payload = {
@@ -4493,7 +4622,7 @@ def render_dashboard(cfg: EngineConfig, latest_report: dict[str, Any] | None = N
         "cohort_promotion_readiness": _cohort_promotion_readiness(cfg, signal_cohort_pnl),
         "shadow_signal_cohort_pnl": shadow_summary,
         "shadow_settlement_watch": _shadow_settlement_watch(shadow_positions, shadow_summary),
-        "independent_anchor_status": _independent_anchor_status(governance),
+        "independent_anchor_status": independent_anchor_status,
         "strategy_v2": strategy_v2_status,
         "price_action_scout": price_action_scout_status,
         "price_action_microstructure": price_action_microstructure_status,
@@ -4504,6 +4633,8 @@ def render_dashboard(cfg: EngineConfig, latest_report: dict[str, Any] | None = N
         "algo_replay": algo_replay,
         "algo_sweep": algo_sweep,
         "quant_research_status": quant_research_status,
+        "mispricing_alpha_summary": mispricing_alpha_summary,
+        "mispricing_alpha_bridge": alpha_bridge,
         "closing_line_value": closing_line_value,
         "smart_flow_clv": smart_flow_clv,
         "dutch_arb": dutch_arb,

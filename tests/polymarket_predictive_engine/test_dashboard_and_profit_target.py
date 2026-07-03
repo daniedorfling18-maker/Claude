@@ -2231,3 +2231,78 @@ def test_dashboard_treats_fallback_sharp_odds_as_usable_anchor_input(tmp_path):
 
     assert anchors["status"] == "usable"
     assert anchors["sharp_odds_fetch"].get("blocker") is None
+
+
+def test_dashboard_surfaces_sharp_anchor_alpha_bridge_blockers(tmp_path):
+    cfg = _config(tmp_path)
+    write_json(
+        cfg.governance_root / "sharp_odds_fetch_summary.json",
+        {"status": "partial", "rows": 104, "errors": 0},
+    )
+    write_json(
+        cfg.governance_root / "sharp_anchor_summary.json",
+        {"status": "built", "fundamental_rows": 19, "output_path": "outputs/polymarket_training/sharp_fundamental_probabilities.csv"},
+    )
+    write_json(
+        cfg.governance_root / "mispricing_alpha_live_summary.json",
+        {
+            "status": "scored",
+            "predictions": 2,
+            "scored": 2,
+            "trade_candidates": 0,
+            "shadow_trade_candidates": 0,
+            "fundamental_probabilities_loaded": 19,
+            "fundamental_probability_hits": 1,
+            "bookmaker_cross_check_failures": 1,
+            "microstructure_filter_failures": 0,
+            "paper_trading_invoked": False,
+            "live_trading_invoked": False,
+        },
+    )
+    write_csv(
+        cfg.output_root / "polymarket_predictions" / "predictions.csv",
+        [
+            {
+                "market_id": "wc-market",
+                "market_slug": "will-france-win-the-2026-fifa-world-cup",
+                "question": "Will France win the 2026 FIFA World Cup?",
+                "token_id": "france-yes",
+                "outcome": "Yes",
+                "category": "worldcup",
+                "fundamental_probability": "0.18",
+                "haircut_fundamental_probability": "0.14",
+                "fundamental_edge_after_haircut": "-0.01",
+                "bookmaker_cross_check_pass": "false",
+                "alpha_trade_candidate": "false",
+                "shadow_trade_candidate": "false",
+                "validation_layer_reason": "bookmaker_fundamental_cross_check_failed",
+                "edge_lower_bound": "-0.02",
+                "alpha_raw_edge": "0.01",
+            }
+        ],
+    )
+    write_csv(
+        cfg.output_root / "polymarket_predictions" / "rejected_signals.csv",
+        [
+            {
+                "token_id": "france-yes",
+                "rejection_reason": "alpha lower-bound edge below configured minimum; bookmaker_fundamental_cross_check_failed",
+            }
+        ],
+    )
+
+    result = render_dashboard(cfg)
+
+    data = read_json(result["dashboard_data"])
+    html = Path(result["dashboard_file"]).read_text(encoding="utf-8")
+    bridge = data["mispricing_alpha_bridge"]
+    assert bridge["status"] == "fundamental_rows_scored_but_blocked"
+    assert bridge["fundamental_probabilities_loaded"] == 19
+    assert bridge["fundamental_probability_hits"] == 1
+    assert bridge["sharp_fetch_status"] == "partial"
+    assert bridge["sharp_anchor_rows"] == 19
+    assert bridge["paper_trading_invoked"] is False
+    assert bridge["live_trading_invoked"] is False
+    assert bridge["top_blockers"][0]["reason"] == "bookmaker_fundamental_cross_check_failed"
+    assert any(row["lane"] == "Sharp-anchor alpha bridge" for row in data["decision_useful_summary"]["evidence_lanes"])
+    assert "Sharp-anchor alpha bridge" in html

@@ -234,19 +234,50 @@ def _extract_pool_id(pool_url: str) -> str | None:
     return m.group(1) if m else None
 
 
-def leaderboard_url_from_pool_url(pool_url: str) -> str:
+def _dedupe_urls(urls: list[str]) -> list[str]:
+    out: list[str] = []
+    seen: set[str] = set()
+    for url in urls:
+        clean = txt(url)
+        if not clean or clean in seen:
+            continue
+        seen.add(clean)
+        out.append(clean)
+    return out
+
+
+def _replace_query_param(url: str, key: str, value: str) -> str:
+    parts = urllib.parse.urlsplit(url)
+    query = urllib.parse.parse_qsl(parts.query, keep_blank_values=True)
+    updated = [(k, v) for k, v in query if k != key]
+    updated.append((key, value))
+    return urllib.parse.urlunsplit(
+        (parts.scheme, parts.netloc, parts.path, urllib.parse.urlencode(updated), "")
+    )
+
+
+def leaderboard_url_candidates_from_pool_url(pool_url: str) -> list[str]:
     """
-    Build the leaderboard view URL for the *same* pool as pool_url.
+    Build likely leaderboard URLs for the *same* pool as pool_url.
 
     Always keeps the pool ID (p=XXXXX) so we never land on a different pool.
-    Handles both pool_view.php (?view=) and pool.php (?tab=) URL formats.
+    SuperBru has moved pool views between pool_view.php and pool.php over time,
+    so scheduled runs try both known shapes before failing.
     """
+    pool_url = txt(pool_url)
+    pool_id = _extract_pool_id(pool_url)
+    parts = urllib.parse.urlsplit(pool_url)
+    query = dict(urllib.parse.parse_qsl(parts.query, keep_blank_values=True))
+    tournament = query.get("t", "")
+    group = query.get("g", "")
+    base = f"{parts.scheme}://{parts.netloc}" if parts.scheme and parts.netloc else "https://www.superbru.com"
+    path_prefix = "/".join(parts.path.split("/")[:-1])
+    if path_prefix and not path_prefix.startswith("/"):
+        path_prefix = "/" + path_prefix
+
+    urls: list[str] = []
     if "pool_view.php" in pool_url:
-        url = re.sub(r"view=\w+", "view=leaderboard", pool_url)
-        if "view=leaderboard" not in url:
-            sep = "&" if "?" in url else "?"
-            url = url + sep + "view=leaderboard"
-        return url
+        urls.append(_replace_query_param(pool_url, "view", "leaderboard"))
 
     if "pool.php" in pool_url:
         url = re.sub(r"tab=\w+", "tab=leaderboard", pool_url)
@@ -254,12 +285,33 @@ def leaderboard_url_from_pool_url(pool_url: str) -> str:
         if "tab=leaderboard" not in url:
             sep = "&" if "?" in url else "?"
             url = url + sep + "tab=leaderboard"
-        return url
+        urls.append(url + "#tab=leaderboard")
+        urls.append(url)
 
-    # Generic fallback: append view=leaderboard while preserving pool ID
-    url = re.sub(r"view=\w+", "", pool_url).rstrip("&?")
-    sep = "&" if "?" in url else "?"
-    return url + sep + "view=leaderboard"
+    if pool_id and path_prefix:
+        common_query = {"p": pool_id}
+        if tournament:
+            common_query["t"] = tournament
+        if group:
+            common_query["g"] = group
+        view_query = urllib.parse.urlencode({**common_query, "view": "leaderboard"})
+        tab_query = urllib.parse.urlencode({**common_query, "tab": "leaderboard"})
+        urls.extend(
+            [
+                f"{base}{path_prefix}/pool_view.php?{view_query}",
+                f"{base}{path_prefix}/pool.php?{tab_query}#tab=leaderboard",
+                f"{base}{path_prefix}/pool.php?{tab_query}",
+            ]
+        )
+
+    urls.append(pool_url)
+    return _dedupe_urls(urls)
+
+
+def leaderboard_url_from_pool_url(pool_url: str) -> str:
+    """Return the primary leaderboard URL candidate for compatibility."""
+    candidates = leaderboard_url_candidates_from_pool_url(pool_url)
+    return candidates[0] if candidates else pool_url
 
 
 def _is_lb_row(row: list[str]) -> bool:
@@ -362,6 +414,52 @@ EXTRACT_PAGE_CONTEXT_JS = r"""
 """
 
 
+EXTRACT_LEADERBOARD_TEXT_JS = r"""
+() => {
+  function clean(text) { return (text || '').replace(/\s+/g, ' ').trim(); }
+  const selectors = [
+    'table tr',
+    '[class*=leader] tr',
+    '[class*=standing] tr',
+    '[class*=rank] tr',
+    '[class*=leader] li',
+    '[class*=standing] li',
+    '[class*=rank] li',
+    '[class*=leader] [class*=row]',
+    '[class*=standing] [class*=row]',
+    '[class*=rank] [class*=row]',
+    '[data-testid*=leader]',
+    '[data-testid*=standing]'
+  ];
+  const rows = [];
+  const seen = new Set();
+  for (const selector of selectors) {
+    for (const el of Array.from(document.querySelectorAll(selector))) {
+      const text = clean(el.innerText || el.textContent || '');
+      if (!text || seen.has(selector + '|' + text)) continue;
+      seen.add(selector + '|' + text);
+      rows.push({selector, text});
+    }
+  }
+  const body = document.body ? (document.body.innerText || '') : '';
+  for (const line of body.split(/\n+/).map(clean).filter(Boolean)) {
+    if (/^\d{1,4}\s+.+\s+-?\d+(?:\.\d+)?(?:\s*(?:pts|points))?$/i.test(line)) {
+      const key = 'body|' + line;
+      if (!seen.has(key)) {
+        seen.add(key);
+        rows.push({selector: 'body_line', text: line});
+      }
+    }
+  }
+  return {
+    url: window.location.href,
+    title: document.title || '',
+    rows: rows.slice(0, 250)
+  };
+}
+"""
+
+
 def _page_is_target_pool(context: dict[str, Any], pool_id: str | None, pool_name_keywords: list[str]) -> bool:
     """
     Return True only if the current page is for our specific pool.
@@ -383,10 +481,87 @@ def _page_is_target_pool(context: dict[str, Any], pool_id: str | None, pool_name
     return any(kw.lower() in text_blob for kw in pool_name_keywords if kw)
 
 
+def _parse_leaderboard_text_rows(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    seen: set[tuple[int, str]] = set()
+    for item in items:
+        text = txt(item.get("text"))
+        candidates = [text]
+        if "\n" in text:
+            candidates.extend(part.strip() for part in text.splitlines())
+        for raw_line in candidates:
+            line = re.sub(r"\s+", " ", txt(raw_line))
+            if not line:
+                continue
+            match = re.match(
+                r"^(?P<rank>\d{1,4})\s+(?P<middle>.+?)\s+(?P<points>-?\d+(?:\.\d+)?)(?:\s*(?:pts|points))?$",
+                line,
+                flags=re.IGNORECASE,
+            )
+            if not match:
+                continue
+            middle = txt(match.group("middle"))
+            if not re.search(r"[A-Za-z]", middle):
+                continue
+            movement = ""
+            movement_match = re.match(r"^(?P<movement>[+\-]?\d+(?:\.\d+)?)\s+(?P<player>.+)$", middle)
+            if movement_match and re.search(r"[A-Za-z]", movement_match.group("player")):
+                movement = movement_match.group("movement")
+                player = txt(movement_match.group("player"))
+            else:
+                player = middle
+            player = re.sub(r"\s+", " ", player).strip(" -–—")
+            if not player:
+                continue
+            rank = int(match.group("rank"))
+            points = float(match.group("points"))
+            key = (rank, norm_team(player))
+            if key in seen:
+                continue
+            seen.add(key)
+            rows.append(
+                {
+                    "rank": rank,
+                    "movement_or_yellow_caps": movement,
+                    "player": player,
+                    "current_points": points,
+                }
+            )
+    return sorted(rows, key=lambda row: int(row["rank"]))
+
+
+async def _write_leaderboard_diagnostic(page: Any, diagnostics_dir: Path | None, label: str) -> None:
+    if not diagnostics_dir:
+        return
+    diagnostics_dir.mkdir(parents=True, exist_ok=True)
+    stem = safe_name(f"leaderboard_{label}")[:120]
+    try:
+        await page.screenshot(path=str(diagnostics_dir / f"{stem}.png"), full_page=True)
+    except Exception:
+        pass
+    try:
+        html = await page.content()
+        (diagnostics_dir / f"{stem}.html").write_text(html, encoding="utf-8")
+    except Exception:
+        pass
+    state: dict[str, Any] = {"label": label}
+    for key, script in {
+        "context": EXTRACT_PAGE_CONTEXT_JS,
+        "tables": EXTRACT_TABLES_JS,
+        "text_candidates": EXTRACT_LEADERBOARD_TEXT_JS,
+    }.items():
+        try:
+            state[key] = await page.evaluate(script)
+        except Exception as exc:
+            state[key] = {"error": f"{type(exc).__name__}: {exc}"}
+    (diagnostics_dir / f"{stem}.json").write_text(json.dumps(state, indent=2, default=str), encoding="utf-8")
+
+
 async def scrape_leaderboard_in_session(
     page: Any,
     pool_url: str,
     pool_name_keywords: list[str] | None = None,
+    diagnostics_dir: Path | None = None,
 ) -> list[dict[str, Any]]:
     """
     Scrape the leaderboard for the specific pool identified by pool_url.
@@ -397,7 +572,10 @@ async def scrape_leaderboard_in_session(
     """
     pool_id = _extract_pool_id(pool_url)
     keywords = pool_name_keywords or []
-    lb_url = leaderboard_url_from_pool_url(pool_url)
+    url_candidates = leaderboard_url_candidates_from_pool_url(pool_url)
+    print("  leaderboard URL candidates:")
+    for url in url_candidates:
+        print(f"    - {url}")
 
     async def _scrape_and_validate(label: str) -> list[dict[str, Any]]:
         context = await page.evaluate(EXTRACT_PAGE_CONTEXT_JS)
@@ -408,23 +586,31 @@ async def scrape_leaderboard_in_session(
                 f"  leaderboard page failed pool check at {current_url!r} "
                 f"(pool_id={pool_id!r}, keywords={keywords}). Skipping."
             )
+            await _write_leaderboard_diagnostic(page, diagnostics_dir, f"{label}_wrong_pool")
             return []
 
         tables = await page.evaluate(EXTRACT_TABLES_JS)
         rows = _parse_leaderboard(tables)
+        if not rows:
+            text_state = await page.evaluate(EXTRACT_LEADERBOARD_TEXT_JS)
+            rows = _parse_leaderboard_text_rows(text_state.get("rows") or [])
         if rows:
             print(f"  leaderboard scraped via {label}: {len(rows)} players from pool {pool_id!r}")
+        else:
+            print(f"  leaderboard candidate had no rows via {label} at {current_url!r}")
+            await _write_leaderboard_diagnostic(page, diagnostics_dir, f"{label}_no_rows")
         return rows
 
     # ── Primary: navigate directly to the pool-specific leaderboard URL ────────
-    try:
-        await page.goto(lb_url, wait_until="domcontentloaded", timeout=20000)
-        await page.wait_for_timeout(5000)
-        rows = await _scrape_and_validate(f"direct URL {lb_url}")
-        if rows:
-            return rows
-    except Exception as exc:
-        print(f"  leaderboard direct URL failed ({lb_url}): {exc}")
+    for idx, lb_url in enumerate(url_candidates, start=1):
+        try:
+            await page.goto(lb_url, wait_until="domcontentloaded", timeout=20000)
+            await page.wait_for_timeout(5000)
+            rows = await _scrape_and_validate(f"direct_url_{idx}")
+            if rows:
+                return rows
+        except Exception as exc:
+            print(f"  leaderboard direct URL failed ({lb_url}): {exc}")
 
     # ── Fallback: click a leaderboard tab only if we're still on the right pool ─
     # Re-navigate to the pool page first so tab-clicks are scoped to it.
@@ -1129,7 +1315,7 @@ async def scan_superbru_matches(
 
         if not skip_lb and leader_player:
             try:
-                lb_rows = await scrape_leaderboard_in_session(page, args.pool_url, pool_name_keywords)
+                lb_rows = await scrape_leaderboard_in_session(page, args.pool_url, pool_name_keywords, out_dir / "leaderboard_diagnostics")
                 if lb_rows:
                     chaser_range = float(getattr(args, "chaser_range", 8.0))
                     pool_standing = compute_pool_standing(lb_rows, leader_player, chaser_range)

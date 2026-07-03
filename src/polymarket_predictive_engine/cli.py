@@ -62,6 +62,7 @@ from .resolution_collector import collect_resolutions
 from .runtime_lock import runtime_lock
 from .sharp_anchor import build_sharp_anchor
 from .sharp_odds_fetch import fetch_sharp_odds
+from .smart_flow_clv import build_smart_flow_clv
 from .snapshot_ingest import ingest_scanner_snapshot
 from .snapshot_label_collector import collect_snapshot_labels
 from .storage import init_db
@@ -119,6 +120,7 @@ COMMANDS = [
     "price-action-scout",
     "price-action-paper-signals",
     "closing-line-value",
+    "smart-flow-clv",
     "algo-replay",
     "algo-sweep",
     "edge-attribution",
@@ -175,6 +177,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--websocket-seconds", type=int, default=60)
     parser.add_argument("--websocket-input", default=None)
+    parser.add_argument("--fills-input", default=None, help="smart-flow-clv: public wallet fills CSV input")
     parser.add_argument(
         "--strategy",
         default=None,
@@ -333,6 +336,8 @@ def main(argv: list[str] | None = None) -> int:
             _print(build_price_action_paper_signals(cfg))
         elif args.command == "closing-line-value":
             _print(build_closing_line_value(cfg, features_input=args.websocket_input))
+        elif args.command == "smart-flow-clv":
+            _print(build_smart_flow_clv(cfg, fills_input=args.fills_input, features_input=args.websocket_input))
         elif args.command == "algo-replay":
             _print(run_replay(cfg, args.strategy or "null", features_input=args.websocket_input))
         elif args.command == "algo-sweep":

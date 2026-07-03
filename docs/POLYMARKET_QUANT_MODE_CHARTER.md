@@ -328,6 +328,13 @@ markets where the YES tail is 2–12c, require a real NO-side token, and nominat
 paper cycle forwards those rows only into shadow evidence, not paper signal generation. Artifacts
 live under `outputs/polymarket_longshot_bias/`.
 
+**2026-07-03 — WO-28 landed by Codex.** The first smart-flow research lane now scores public
+wallet fills by CLV using the same settlement-independent line standard as our own shadow positions.
+`smart_flow_clv.py` and CLI `smart-flow-clv` read configured public fills, join them to websocket
+quote history, aggregate by wallet with bootstrap CIs, and publish
+`smart_flow_clv.json` / `smart_flow_clv_positions.csv` for dashboard review. Positive wallets are
+research/watchlist candidates only; the module cannot place orders or relax promotion gates.
+
 **2026-07-03 — WO-23 landed by Codex.** The dashboard now distinguishes the VPS deployment driver
 from local shadow-cycle observability. When the legacy live-loop heartbeat is fresh and the shadow
 research status file is absent, oversight shows the exact info line

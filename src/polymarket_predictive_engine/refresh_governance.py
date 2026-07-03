@@ -26,6 +26,7 @@ from .promotion_review import build_promotion_review
 from .quant_research_status import build_quant_research_status
 from .readiness import paper_live_promotion_gate
 from .research_focus import build_research_focus
+from .smart_flow_clv import build_smart_flow_clv
 from .storage import connect_db
 from .trade_signal_audit import build_trade_signal_audit
 from .utils import now_utc, write_json
@@ -54,6 +55,7 @@ def refresh_governance(cfg: EngineConfig, *, refresh_dashboard: bool = True) -> 
     """
     paper_round_trip = build_paper_round_trip_evidence(cfg)
     closing_line = build_closing_line_value(cfg)
+    smart_flow_clv = build_smart_flow_clv(cfg)
     edge_attribution = build_edge_attribution(cfg)
     algo_sweep = run_algo_sweep(cfg)
     family_calibration = build_family_calibration_scorecard(cfg)
@@ -94,6 +96,7 @@ def refresh_governance(cfg: EngineConfig, *, refresh_dashboard: bool = True) -> 
             "price_action_microstructure": True,
             "paper_round_trip_evidence": True,
             "closing_line_value": True,
+            "smart_flow_clv": True,
             "edge_attribution": True,
             "algo_sweep": True,
             "family_calibration": True,
@@ -124,6 +127,8 @@ def refresh_governance(cfg: EngineConfig, *, refresh_dashboard: bool = True) -> 
         "closing_line_final_positions": closing_line.get("final_line_positions"),
         "closing_line_mean_final_clv": closing_line.get("mean_final_clv"),
         "closing_line_positive_cohorts": closing_line.get("positive_clv_cohorts"),
+        "smart_flow_fills_scored": smart_flow_clv.get("fills_scored"),
+        "smart_flow_positive_wallets": smart_flow_clv.get("positive_wallets", []),
         "edge_attribution_status": edge_attribution.get("status"),
         "edge_attribution_positions": edge_attribution.get("attributed_positions"),
         "edge_attribution_cohort_classes": {

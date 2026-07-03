@@ -126,6 +126,7 @@ HTML = """<!doctype html>
   </div>
   <section><h2>Trading signal audit</h2><div id="tradeSignalAudit"></div></section>
   <section><h2>Closing-line value (CLV)</h2><div id="closingLineValue"></div></section>
+  <section><h2>Smart-flow CLV</h2><div id="smartFlowClv"></div></section>
   <section><h2>Edge attribution</h2><div id="edgeAttribution"></div></section>
   <section><h2>World Cup validation layer</h2><div id="worldcupValidation"></div></section>
   <section><h2>Actual paper P&L</h2><div id="actualTarget"></div></section>
@@ -262,6 +263,7 @@ async function load() {
     const priceActionModel = data.price_action_model || {};
     const quantResearch = data.quant_research_status || {};
     const closingLine = data.closing_line_value || {};
+    const smartFlowClv = data.smart_flow_clv || {};
     const dutchArb = data.dutch_arb || {};
     const edgeAttribution = data.edge_attribution || {};
     const riskState = data.risk_state || {};
@@ -775,6 +777,39 @@ async function load() {
           ["Evidence","clv_evidence", v=>longText(v, 150)]
         ], 8)
       : `<div class="sectionLead">No CLV evidence yet. The next governance refresh should build closing_line_value.json once shadow positions and bid/ask features exist.</div>`;
+    const smartFlowWallets = Array.isArray(smartFlowClv.wallets) ? smartFlowClv.wallets : [];
+    const smartFlowWatchlist = Array.isArray(smartFlowClv.watchlist) ? smartFlowClv.watchlist : [];
+    document.getElementById("smartFlowClv").innerHTML = Object.keys(smartFlowClv).length
+      ? `<div class="sectionLead">Scores public wallet fills by closing-line value. A positive wallet is a research target only; it does not authorise paper/live trading.</div>` + facts([
+          ["Status", smartFlowClv.status || "-"],
+          ["Generated", smartFlowClv.generated_at_utc || "-"],
+          ["Fills seen/scored", `${smartFlowClv.fills_seen ?? 0} / ${smartFlowClv.fills_scored ?? 0}`],
+          ["Final-line fills", smartFlowClv.final_line_fills],
+          ["Minimum final fills/wallet", smartFlowClv.minimum_final_samples_per_wallet],
+          ["Positive wallets", smartFlowClv.positive_wallets || [], joinText],
+          ["Skipped", smartFlowClv.positions_skipped || {}, v=>longText(JSON.stringify(v), 220)],
+          ["Governance note", smartFlowClv.governance_note || "Diagnostic only; no trading gate changed.", v=>longText(v, 260)]
+        ]) + titledTable("Smart-flow wallet watchlist", smartFlowWatchlist, [
+          ["Wallet","wallet", v=>longText(v, 120)],
+          ["Fills","fills"],
+          ["Final","final_fills"],
+          ["Mean final CLV","mean_final_clv", v=>fmtNum(v, 4)],
+          ["CI low","final_clv_ci_low", v=>fmtNum(v, 4)],
+          ["CI high","final_clv_ci_high", v=>fmtNum(v, 4)],
+          ["Beat close","beat_close_rate", fmtPct],
+          ["Evidence","clv_evidence"],
+          ["Action","recommended_action", v=>longText(v, 160)]
+        ], 8) + titledTable("All scored smart-flow wallets", smartFlowWallets, [
+          ["Wallet","wallet", v=>longText(v, 120)],
+          ["Fills","fills"],
+          ["Final","final_fills"],
+          ["Mean CLV","mean_clv", v=>fmtNum(v, 4)],
+          ["Mean final CLV","mean_final_clv", v=>fmtNum(v, 4)],
+          ["Evidence","clv_evidence"],
+          ["Need","final_samples_needed"],
+          ["Action","recommended_action", v=>longText(v, 160)]
+        ], 8)
+      : `<div class="sectionLead">No smart-flow CLV evidence yet. Add public wallet fills to the configured input to score whether outside traders are beating the line.</div>`;
     const correlatedExposure = Array.isArray(portfolioRisk.exposure_by_correlation_key) ? portfolioRisk.exposure_by_correlation_key : [];
     const categoryExposure = Array.isArray(portfolioRisk.exposure_by_category) ? portfolioRisk.exposure_by_category : [];
     document.getElementById("portfolioRisk").innerHTML = Object.keys(portfolioRisk).length
@@ -4276,6 +4311,9 @@ def render_dashboard(cfg: EngineConfig, latest_report: dict[str, Any] | None = N
     closing_line_value = read_json(governance / "closing_line_value.json", default={}) or {}
     if not isinstance(closing_line_value, dict):
         closing_line_value = {}
+    smart_flow_clv = read_json(governance / "smart_flow_clv.json", default={}) or {}
+    if not isinstance(smart_flow_clv, dict):
+        smart_flow_clv = {}
     dutch_arb = read_json(cfg.output_root / "polymarket_arbitrage" / "dutch_arb_monitor_summary.json", default={}) or {}
     if not isinstance(dutch_arb, dict):
         dutch_arb = {}
@@ -4422,6 +4460,7 @@ def render_dashboard(cfg: EngineConfig, latest_report: dict[str, Any] | None = N
         "algo_sweep": algo_sweep,
         "quant_research_status": quant_research_status,
         "closing_line_value": closing_line_value,
+        "smart_flow_clv": smart_flow_clv,
         "dutch_arb": dutch_arb,
         "edge_attribution": edge_attribution,
         "family_calibration": family_calibration,

@@ -58,6 +58,12 @@ def test_refresh_governance_rebuilds_price_action_paper_signals_before_audit(tmp
     monkeypatch.setattr(refresh_module, "build_closing_line_value", _closing_line)
     monkeypatch.setattr(
         refresh_module,
+        "build_smart_flow_clv",
+        lambda _cfg: order.append("smart_flow_clv")
+        or {"status": "ok", "fills_scored": 2, "positive_wallets": ["0xalpha"]},
+    )
+    monkeypatch.setattr(
+        refresh_module,
         "build_edge_attribution",
         lambda _cfg: order.append("edge_attribution")
         or {
@@ -126,6 +132,8 @@ def test_refresh_governance_rebuilds_price_action_paper_signals_before_audit(tmp
 
     assert order.index("paper_round_trip") < order.index("signal_cohort_pnl")
     assert order.index("paper_round_trip") < order.index("closing_line_value")
+    assert order.index("closing_line_value") < order.index("smart_flow_clv")
+    assert order.index("smart_flow_clv") < order.index("edge_attribution")
     assert order.index("closing_line_value") < order.index("edge_attribution")
     assert order.index("edge_attribution") < order.index("algo_sweep")
     assert order.index("algo_sweep") < order.index("signal_cohort_pnl")
@@ -143,6 +151,7 @@ def test_refresh_governance_rebuilds_price_action_paper_signals_before_audit(tmp
     assert result["refreshed"]["price_action_microstructure"] is True
     assert result["refreshed"]["paper_round_trip_evidence"] is True
     assert result["refreshed"]["closing_line_value"] is True
+    assert result["refreshed"]["smart_flow_clv"] is True
     assert result["refreshed"]["edge_attribution"] is True
     assert result["refreshed"]["algo_sweep"] is True
     assert result["paper_round_trip_closed_trades"] == 2
@@ -151,6 +160,8 @@ def test_refresh_governance_rebuilds_price_action_paper_signals_before_audit(tmp
     assert result["closing_line_final_positions"] == 2
     assert result["closing_line_mean_final_clv"] == 0.0123
     assert result["closing_line_positive_cohorts"] == ["macro_rates"]
+    assert result["smart_flow_fills_scored"] == 2
+    assert result["smart_flow_positive_wallets"] == ["0xalpha"]
     assert result["edge_attribution_status"] == "ok"
     assert result["edge_attribution_positions"] == 2
     assert result["edge_attribution_cohort_classes"] == {"macro_rates": "cost_dominated"}

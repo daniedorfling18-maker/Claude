@@ -924,6 +924,15 @@ closing_line_value:
   minimum_final_samples: 12
   bootstrap_iterations: 1000
   bootstrap_seed: 20260702
+# Smart-flow CLV: score public wallet fills to discover external traders who
+# consistently beat later market lines. Diagnostic/watchlist only; no orders.
+smart_flow_clv:
+  enabled: true
+  fills_input: inputs/polymarket/public_wallet_fills.csv
+  minimum_final_samples_per_wallet: 20
+  positive_ci_floor: 0.0
+  bootstrap_iterations: 1000
+  bootstrap_seed: 20260703
 costs:
   transaction_cost: 0.0
   spread_assumption: 0.02

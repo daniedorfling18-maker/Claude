@@ -288,6 +288,62 @@ def test_dashboard_surfaces_closing_line_value_artifact(tmp_path):
     assert "CLV by cohort" in html
 
 
+def test_dashboard_surfaces_smart_flow_clv_artifact(tmp_path):
+    cfg = _config(tmp_path)
+    wallet = "0xalpha000000000000000000000000000000000001"
+    write_json(
+        cfg.governance_root / "smart_flow_clv.json",
+        {
+            "status": "ok",
+            "generated_at_utc": "2026-07-03T12:00:00Z",
+            "fills_seen": 3,
+            "fills_scored": 2,
+            "final_line_fills": 2,
+            "minimum_final_samples_per_wallet": 2,
+            "positive_wallets": [wallet],
+            "positions_skipped": {"not_buy_or_missing_required_fields": 1, "no_usable_quote_after_fill": 0},
+            "watchlist": [
+                {
+                    "wallet": wallet,
+                    "fills": 2,
+                    "final_fills": 2,
+                    "mean_final_clv": 0.05,
+                    "final_clv_ci_low": 0.02,
+                    "final_clv_ci_high": 0.08,
+                    "beat_close_rate": 1.0,
+                    "clv_evidence": "positive_clv_evidence",
+                    "recommended_action": "watch_shadow_only",
+                }
+            ],
+            "wallets": [
+                {
+                    "wallet": wallet,
+                    "fills": 2,
+                    "final_fills": 2,
+                    "mean_clv": 0.05,
+                    "mean_final_clv": 0.05,
+                    "clv_evidence": "positive_clv_evidence",
+                    "final_samples_needed": 0,
+                    "recommended_action": "watch_shadow_only",
+                }
+            ],
+            "governance_note": "Diagnostic only.",
+            "paper_trading_invoked": False,
+            "live_trading_invoked": False,
+        },
+    )
+
+    result = render_dashboard(cfg)
+
+    data = read_json(result["dashboard_data"])
+    html = Path(result["dashboard_file"]).read_text(encoding="utf-8")
+    assert data["smart_flow_clv"]["positive_wallets"] == [wallet]
+    assert data["smart_flow_clv"]["paper_trading_invoked"] is False
+    assert data["smart_flow_clv"]["live_trading_invoked"] is False
+    assert "Smart-flow CLV" in html
+    assert "Smart-flow wallet watchlist" in html
+
+
 def test_dashboard_handles_empty_closing_line_value_artifact(tmp_path):
     cfg = _config(tmp_path)
 
@@ -296,6 +352,7 @@ def test_dashboard_handles_empty_closing_line_value_artifact(tmp_path):
     data = read_json(result["dashboard_data"])
     html = Path(result["dashboard_file"]).read_text(encoding="utf-8")
     assert data["closing_line_value"] == {}
+    assert data["smart_flow_clv"] == {}
     assert data["edge_attribution"] == {}
     assert data["algo_sweep"] == {}
     assert data["risk_state"] == {}
@@ -303,6 +360,8 @@ def test_dashboard_handles_empty_closing_line_value_artifact(tmp_path):
     assert data["evidence_funnel"]["paper_gate_status"] == "-"
     assert "Closing-line value (CLV)" in html
     assert "No CLV evidence yet" in html
+    assert "Smart-flow CLV" in html
+    assert "No smart-flow CLV evidence yet" in html
     assert "Edge attribution" in html
     assert "No edge attribution evidence yet" in html
     assert "Evidence funnel" in html

@@ -93,7 +93,7 @@ async def run(args: argparse.Namespace) -> int:
                 _write_summary(summary_json, summary)
                 raise SystemExit("SuperBru login failed; refusing to use stale committed leaderboard.")
 
-            rows = await scrape_leaderboard_in_session(page, args.pool_url, keywords)
+            rows = await scrape_leaderboard_in_session(page, args.pool_url, keywords, diagnostics_dir)
             if not rows:
                 summary = {
                     "generated_at_utc": datetime.now(timezone.utc).isoformat(),

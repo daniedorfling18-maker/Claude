@@ -1115,6 +1115,30 @@ shadow-only forwarding.
 
 ---
 
+## WO-28 — Smart-flow CLV watchlist for public wallet fills — `done` (2026-07-03, MEDIUM)
+
+**Goal:** add the first "follow proven flow" research lane from
+`docs/POLYMARKET_STRATEGY_OPTIONS.md`: score public wallet fills by CLV, then watch only wallets
+that repeatedly beat later market lines.
+
+**Files:** `smart_flow_clv.py`, CLI, governance refresh, dashboard, config, tests.
+
+**Constraints:** diagnostic only. No paper/live order generation, no promotion-gate change, no
+threshold loosening. Positive wallets are research targets only.
+
+**Landed 2026-07-03:** Added `smart_flow_clv.py` plus CLI command `smart-flow-clv`. The builder
+reads configured public wallet fills (`inputs/polymarket/public_wallet_fills.csv` by default),
+joins each buy fill to existing websocket quote history, computes CLV using the same
+settlement-independent line standard as `closing_line.py`, and aggregates by wallet and wallet
+cohort with bootstrap CIs. It writes
+`outputs/polymarket_model_governance/smart_flow_clv.json` and
+`smart_flow_clv_positions.csv`, both explicitly `paper_trading_invoked=false` and
+`live_trading_invoked=false`. Governance refresh now rebuilds it, and the dashboard renders a
+"Smart-flow CLV" watchlist. Tests cover positive/negative wallet classification, empty input
+fail-closed behavior, dashboard rendering, and refresh ordering.
+
+---
+
 ## Sequencing
 
 ```text
@@ -1139,6 +1163,7 @@ Queue order (strategic reset, 2026-07-03 — read POLYMARKET_EDGE_STRATEGY_RESET
 16. WO-15  done 2026-07-03: evidence history time series
 17. WO-18  done 2026-07-03: dashboard evidence funnel
 18. WO-19  done 2026-07-03: invariant property tests plus conservative depth-missing execution hardening
+19. WO-28  done 2026-07-03: smart-flow CLV watchlist for public wallet fills (diagnostic-only)
 ```
 
 After all six land: WP3 is done (flip it in the charter), the algo track (WP9–WP11) is done, and

@@ -1,6 +1,6 @@
 # Polymarket Codex Work Orders
 
-Last updated: 2026-07-03 (WO-10 landed; WO-7, WO-11..WO-19 open, in the order given in Sequencing)
+Last updated: 2026-07-03 (WO-10 landed; VPS dashboard audit added WO-20..WO-23; see Sequencing)
 
 Mechanical, file-level implementation instructions for coding agents (Codex or any other code
 changer). The architecture and priorities live in `docs/POLYMARKET_QUANT_MODE_CHARTER.md`; this file
@@ -735,23 +735,148 @@ Work the queue in the Sequencing order below. For each work order:
 7. End of night: append a "Night report <date>" section at the bottom of this file — one line
    per WO: landed / skipped(reason) / blocked(note), plus the final full-suite test count.
 
+## VPS dashboard audit — 2026-07-03 (orchestrator)
+
+Live dashboard at the VPS was audited against main at 03:04Z. The payload is fresh and runs
+current code (all sections present, WO-10 wiring live). Findings below are filed as WO-20..WO-23.
+Root causes, verified in the repo:
+
+1. **Collection does not follow positions.** 28 of 30 shadow positions had no usable quote
+   history (CLV: 0 final lines; attribution: 22 of 24 closed positions unattributable), and all 6
+   open paper positions are on July-2 intraday ETH/XRP up-or-down markets that settled hours ago
+   but cannot exit or settle — no fresh quotes (exit guard blocks) and no resolution rows. The
+   websocket feature file holds 119k rows of history, so retention is NOT the issue; the
+   subscribed token set simply never included these positions' tokens.
+2. **Raw vs audited P&L.** Raw ledger equity says +$55.27 since baseline; audited quote-consistent
+   P&L is +$0.03 (`pnl_audit_state: raw_pnl_contains_quote_conflicts`, 5 conflicted + 6 unverified
+   round trips). The engine's decisions correctly use the audited number and the headline card is
+   honest, but equity/cash tiles and the account P&L line still surface the raw number without the
+   caveat.
+3. **Evidence-free extrapolations render as facts.** Promotion watchlist shows a cohort
+   "run-rate $1,045/month" from 3 fills over 38h; CLV shows "beat close 0.0%" with zero final
+   lines; "Algo replay best" displays the null strategy (0 fills) as best because the only real
+   strategy lost money (-$8.55 on $30).
+4. **Deployment-mode confusion.** Oversight warns "Shadow research cycle has not started" while
+   `evidence_freshness` correctly reports the legacy live loop as the fresh driver on this VPS;
+   Strategy V2 renders "missing". Two sections disagree about what should be running.
+
+---
+
+## WO-20 — Position-aware quote collection — `open` (HIGH)
+
+**Goal:** every token with an open shadow or paper position stays in the websocket subscription
+set until its market close (+ a grace window). This unblocks CLV finality, attribution joins,
+paper exits, and settlement detection in one change.
+
+**Files:** the websocket target-selection path (grep `websocket_liquidity_targets` writers and
+the collector's asset selection in `websocket_collector.py` / liquidity discovery), plus tests.
+
+**Steps:**
+
+1. Build `position_tokens(cfg) -> list[dict]` reading open rows from
+   `outputs/polymarket_shadow/shadow_positions.csv` and the paper positions table/CSV: token_id,
+   market_id, close_time. Include tokens whose close_time is in the future OR within
+   `collection.position_grace_hours` (default 6) past close.
+2. In target selection, reserve up to `collection.position_token_slots` (default 10, capped at
+   half the total slots) for these tokens FIRST; fill the rest with the existing liquidity-ranked
+   selection. Never drop a position token in favour of a discovery token.
+3. Emit the reserved list into the targets CSV with a `selection_reason=open_position` column so
+   coverage is auditable.
+4. Tests: fixture with 2 open-position tokens + N discovery tokens and a small slot budget ->
+   position tokens always selected; grace-window expiry drops them; reason column present.
+
+**Out of scope:** gates, stakes, broker logic.
+
+---
+
+## WO-21 — Settle or loudly flag stuck paper positions on resolved markets — `open` (HIGH)
+
+**Goal:** paper positions on markets that closed hours ago must either settle through an
+evidence-backed path or be flagged as `stale_open_position` on the dashboard and oversight alerts
+— never sit silently "open" at cost basis inside equity.
+
+**Files:** `paper_broker.py` (settlement/proxy path), `dashboard.py` (flag rendering), tests.
+
+**Steps:**
+
+1. Extend the crypto up/down proxy settlement to the hourly/daily slug family
+   (`ethereum-up-or-down-july-2-2026-12pm-et` style) by reusing
+   `shadow_cohort._crypto_updown_proxy_settlement_price`'s Binance/Coinbase window logic —
+   factor that helper out to a shared module rather than duplicating it. Proxy settlement only
+   applies when the market's close time has passed and a reference price window is resolvable
+   from the slug; otherwise leave the position open.
+2. Add `stale_open_position` detection: open paper position whose market close_time (from the
+   position row or slug) is more than `paper_trading.stale_open_alert_hours` (default 2) in the
+   past and which has neither fresh quotes nor a resolution row. Surface: a list in the broker
+   summary, a dashboard warning in the open-positions section, and an oversight alert.
+3. Do NOT force-close at cost or at stale marks; fail closed (flag, don't fabricate an exit).
+4. Tests: hourly-slug proxy settlement resolves a fixture position with a crafted window price;
+   a position with no resolvable window becomes `stale_open_position` and appears in the alert
+   list; equity is unchanged by flagging.
+
+---
+
+## WO-22 — Evidence-gated display of extrapolated metrics — `open` (MEDIUM)
+
+**Goal:** the dashboard never renders an extrapolation as a fact.
+
+**Files:** `dashboard.py`, dashboard tests.
+
+**Steps:**
+
+1. Everywhere `monthly_run_rate_usdc` renders (promotion watchlist, cohort tables, decision
+   targets): when the row's fills/orders are below the promotion policy's `minimum_filled_orders`
+   or elapsed evidence is under 72h, render `n/a (N fills, Hh)` instead of the USD figure.
+2. CLV section: `beat_close_rate` renders `n/a` when `final_line_positions == 0`; label the
+   provisional count clearly ("provisional lines await market close").
+3. Algo replay: when the best strategy has 0 fills, render "no strategy beat doing nothing" and
+   name the losing strategies with their P&L, instead of "best: null".
+4. Equity/cash tiles and the account P&L line: when `pnl_audit_state` is
+   `raw_pnl_contains_quote_conflicts`, append "(raw; audited $X)" using
+   `audited_pnl_since_baseline_usdc`. `approved_signal_count` renders as an integer.
+5. Tests: fixture payloads asserting each rendering branch (exact strings).
+
+---
+
+## WO-23 — Deployment-aware oversight status — `open` (MEDIUM)
+
+**Goal:** one coherent story about which driver should be running.
+
+**Files:** the oversight/evidence-freshness builder (grep `Shadow research cycle has not
+started`), `dashboard.py` Strategy V2 section, tests.
+
+**Steps:**
+
+1. When the legacy live-loop heartbeat is fresh (existing `legacy_full_cycle.effective_status ==
+   "live"` logic) and the shadow-cycle status file is absent, replace the warn alert with a
+   single info line: "Driver: legacy live loop (VPS deployment); shadow-cycle status file not
+   expected." Keep the warn when NEITHER driver is fresh.
+2. Strategy V2 section: render "not running in this deployment" instead of "missing" when its
+   artifacts are absent but the live loop is fresh.
+3. Tests: both alert branches, exact strings.
+
+---
+
 ## Sequencing
 
 ```text
 WO-1..WO-6, WO-8, WO-9   done and audited (2026-07-02)
 
-Night order:
-1. WO-10   done 2026-07-03: attribution + sweep wired into cycle/dashboard/audit
-2. WO-7    CLV-aware promotion review (advisory only; follow the spec verbatim)
-3. WO-11   research-focus consumption (after WO-10)
-4. WO-12   portfolio VaR + correlated-exposure reporting
-5. WO-13   microstructure hypotheses as replay strategies
-6. WO-14   generalise the sweep (after WO-13)
-7. WO-16   per-family calibration scorecard
-8. WO-17   collection coverage report
-9. WO-15   evidence history time series
-10. WO-18  dashboard evidence funnel (after WO-10, WO-15..17; render blanks if some are missing)
-11. WO-19  invariant property tests (zero source changes)
+Queue order (updated 2026-07-03 after the VPS dashboard audit):
+1. WO-20   position-aware quote collection (HIGH — unblocks CLV/attribution/paper exits)
+2. WO-21   settle or flag stuck paper positions (HIGH)
+3. WO-7    CLV-aware promotion review (advisory only; follow the spec verbatim)
+4. WO-22   evidence-gated display fixes
+5. WO-23   deployment-aware oversight status
+6. WO-11   research-focus consumption
+7. WO-12   portfolio VaR + correlated-exposure reporting
+8. WO-13   microstructure hypotheses as replay strategies
+9. WO-14   generalise the sweep (after WO-13)
+10. WO-16  per-family calibration scorecard
+11. WO-17  collection coverage report (will verify WO-20's effect)
+12. WO-15  evidence history time series
+13. WO-18  dashboard evidence funnel (render blanks for missing artifacts)
+14. WO-19  invariant property tests (zero source changes)
 ```
 
 After all six land: WP3 is done (flip it in the charter), the algo track (WP9–WP11) is done, and

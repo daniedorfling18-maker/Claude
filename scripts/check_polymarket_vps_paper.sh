@@ -62,6 +62,23 @@ printf '%s\n' "Dashboard: $dashboard_url"
 docker_cmd compose -f "$COMPOSE_FILE" ps
 
 printf '%s\n' ""
+printf '%s\n' "Secrets check (.env -> container):"
+odds_key_env="$(env_value THE_ODDS_API_KEY .env)"
+if [ -n "$odds_key_env" ]; then
+  printf '%s\n' "  THE_ODDS_API_KEY: set in .env (${#odds_key_env} chars)"
+else
+  printf '%s\n' "  THE_ODDS_API_KEY: MISSING/empty in .env - sharp-anchor pipeline cannot run."
+  printf '%s\n' "  GitHub Actions secrets do NOT reach this VPS. Fix:"
+  printf '%s\n' "    1. edit .env in this directory: THE_ODDS_API_KEY=<key from the-odds-api.com>"
+  printf '%s\n' "    2. docker compose -f $COMPOSE_FILE up -d --force-recreate polymarket-paper-live"
+fi
+if docker_cmd exec polymarket-paper-live sh -c 'test -n "$THE_ODDS_API_KEY"' >/dev/null 2>&1; then
+  printf '%s\n' "  THE_ODDS_API_KEY: visible inside polymarket-paper-live container"
+else
+  printf '%s\n' "  THE_ODDS_API_KEY: NOT visible inside the container (set .env then force-recreate; a restart alone does not reload env_file)"
+fi
+
+printf '%s\n' ""
 printf '%s\n' "Container memory snapshot:"
 docker_cmd stats --no-stream --format 'table {{.Name}}\t{{.MemUsage}}\t{{.CPUPerc}}' || true
 

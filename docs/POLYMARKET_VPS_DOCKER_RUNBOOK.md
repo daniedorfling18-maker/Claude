@@ -128,6 +128,28 @@ For a longer-running setup, prefer one of:
 - Tailscale on the VPS and your phone, then open `http://<tailscale-ip>:8765/`;
 - a reverse proxy with authentication.
 
+## Secrets on the VPS
+
+GitHub repository/Actions secrets exist only inside GitHub Actions runs; nothing delivers them to
+this VPS. Any key the containers need (today: `THE_ODDS_API_KEY` for the sharp-anchor pipeline)
+must be placed in the `.env` file next to the compose file by hand:
+
+```bash
+cd <repo dir on the VPS>
+nano .env                      # set THE_ODDS_API_KEY=<key>
+docker compose -f docker-compose.vps-paper.yml up -d --force-recreate polymarket-paper-live
+```
+
+Two gotchas that make this look broken when it isn't:
+
+1. `docker compose restart` does NOT reload `env_file` - you must `up -d --force-recreate`.
+2. The variable must appear both in `.env` AND be mapped in the service's `environment:` block
+   (`docker-compose.vps-paper.yml` already maps `THE_ODDS_API_KEY`).
+
+Verify end-to-end with `scripts/check_polymarket_vps_paper.sh` (it now reports whether the key is
+set in `.env` and visible inside the container) or on the dashboard: the "Independent model
+anchors" section should stop showing `missing_api_key` within ~12 loop iterations.
+
 ## Operating checks
 
 ```bash

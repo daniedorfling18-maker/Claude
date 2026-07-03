@@ -170,6 +170,17 @@ def risk_decision(
         return reject("kill switch active")
     if price is None or not 0 < price < 1:
         return reject("invalid executable price")
+    # Entry-price band: buying near-certain favourites (e.g. 0.95 on a
+    # short-horizon binary) risks the full stake to win pennies and needs a
+    # win rate the market already prices in - no room for edge after spread.
+    # Deep longshots carry outsized resolution ambiguity. Base-config only on
+    # purpose: override profiles must not be able to widen the band.
+    minimum_entry_price = float(risk.get("minimum_entry_price", 0.05))
+    maximum_entry_price = float(risk.get("maximum_entry_price", 0.90))
+    if not minimum_entry_price <= price <= maximum_entry_price:
+        return reject(
+            f"entry price {price:.4f} outside configured band [{minimum_entry_price:.2f}, {maximum_entry_price:.2f}]"
+        )
     if probability is None or not 0 <= probability <= 1:
         return reject("invalid model probability")
     if str(signal.get("market_id", "")) in _as_set(risk.get("market_blacklist")):

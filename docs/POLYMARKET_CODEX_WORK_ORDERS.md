@@ -1,6 +1,6 @@
 # Polymarket Codex Work Orders
 
-Last updated: 2026-07-03 (WO-10 landed; VPS dashboard audit added WO-20..WO-23; see Sequencing)
+Last updated: 2026-07-03 (strategic edge reset: WO-24..WO-27 added; read docs/POLYMARKET_EDGE_STRATEGY_RESET.md first)
 
 Mechanical, file-level implementation instructions for coding agents (Codex or any other code
 changer). The architecture and priorities live in `docs/POLYMARKET_QUANT_MODE_CHARTER.md`; this file
@@ -865,26 +865,137 @@ started`), `dashboard.py` Strategy V2 section, tests.
 
 ---
 
+## WO-24 — Activate and broaden the sharp-anchor pipeline — `open` (HIGHEST VALUE)
+
+**Context:** `docs/POLYMARKET_EDGE_STRATEGY_RESET.md`. The de-vig pipeline exists end-to-end and
+has never run (`missing_api_key`). A human must set `THE_ODDS_API_KEY` on the VPS; this WO makes
+the pipeline worth running the moment that happens.
+
+**Files:** `polymarket_predictive_config.example.yaml` (`sharp_odds_fetch.sports`),
+`sharp_odds_fetch.py`, `sharp_anchor.py`, the VPS loop entry (`run_polymarket_live_paper_loop.py`)
+or cycle wiring, tests.
+
+**Steps:**
+
+1. Broaden `sharp_odds_fetch.sports` beyond the WC outright: add h2h for
+   `soccer_fifa_world_cup` (match odds), `basketball_nba`, `baseball_mlb`, `mma_mixed_martial_arts`,
+   `tennis_atp`/`tennis_wta` if the provider exposes them (check the provider's sports list at
+   runtime and skip unknown keys with a logged note — do not crash on one bad key).
+2. Budget guard: config `sharp_odds_fetch.max_requests_per_run` (default 5) and
+   `fetch_interval_minutes` (default 60); the fetch must be a no-op (status
+   `skipped_budget`) when called sooner — free-tier credits are the constraint.
+3. Wire `refresh-sharp-anchor` (fetch + de-vig) into the VPS loop / cycle behind the budget guard,
+   fail-loud on real errors, `skipped_missing_api_key` status when the env var is absent
+   (already the behaviour — keep it).
+4. Match-market slug mapping: extend the anchor joiner to map h2h odds onto Polymarket match
+   markets (team-name normalisation like the existing WC winner mapping). Unmapped rows are
+   reported, never guessed.
+5. Tests: provider-response fixtures -> de-vigged fairs; budget guard skip; unknown sport skip;
+   missing key skip.
+
+**Out of scope:** alpha thresholds, gates. The anchor feeds `fundamental_probability_paths` which
+the alpha layer already consumes with a haircut and cross-check.
+
+---
+
+## WO-25 — Wire the dutch-book arb monitor into the loop and dashboard — `open` (HIGH)
+
+**Goal:** the one strategy class with mechanical (model-free) edge runs continuously and reports.
+
+**Files:** `dutch_arb_monitor.py` (has `run_dutch_arb_monitor`), the VPS loop entry, `dashboard.py`,
+tests.
+
+**Steps:**
+
+1. Add a bounded monitor pass to the loop cadence (config `dutch_arb.enabled` default true,
+   `max_events_per_pass` default 20, `pass_interval_minutes` default 15): one poll per cadence,
+   writing `outputs/polymarket_arb/dutch_arb_latest.json` plus an append-only
+   `dutch_arb_opportunities.csv` for anything above `alert_annualised` (default 0.10).
+2. Dashboard section "Dutch-book arb watch": last scan time, events scanned, best basket
+   (market, sum-of-asks, annualised ROI), count above alert threshold, and the honest caveat
+   ("observed ask baskets; execution and fee reality untested — shadow evidence only").
+3. Oversight alert (info severity) when a basket persists above the alert threshold across 3+
+   consecutive scans — that is a real signal worth a human look.
+4. Tests: fixture book -> basket maths exact; persistence alert; empty scan renders cleanly.
+
+**Out of scope:** any order placement. This is a scanner.
+
+---
+
+## WO-26 — Anti-concentration guard on adaptive collection queries — `open` (HIGH)
+
+**Goal:** the adaptive research-focus loop can never again collapse discovery into one family.
+
+**Files:** `research_focus.py` (adaptive query injection), liquidity discovery settings plumbing,
+tests.
+
+**Steps:**
+
+1. Wherever adaptive collection queries are assembled: classify each query to a family (reuse
+   `classify_market_family` on a synthetic row, or a simple keyword map for query strings) and
+   enforce `research_focus.max_queries_per_family` (default 2) and
+   `research_focus.min_distinct_families` (default 4). Overflow slots go to the configured broad
+   base list (world cup, tennis, fed, economy, esports, ai, politics, elections, stocks) in
+   round-robin order — deterministic.
+2. Crypto up/down specifically: hard cap via `research_focus.max_updown_queries` (default 1) —
+   it remains a timing diagnostic, never the majority of collection attention.
+3. The research-focus artifact records the pre- and post-guard query lists so the rebalancing is
+   auditable.
+4. Tests: a feedback fixture that proposes 8 updown queries -> output has 1 updown + broad
+   round-robin; distinct-family floor enforced; determinism.
+
+**Out of scope:** gates, model thresholds.
+
+---
+
+## WO-27 — Longshot-bias research family on slow markets (shadow-only) — `open` (MEDIUM)
+
+**Goal:** stand up the structural-bias hypothesis as a first-class shadow research family measured
+by CLV, not settlement waiting.
+
+**Files:** new `longshot_bias.py` (pattern: `closing_line.py`), CLI `longshot-bias-scan`, tests.
+
+**Steps:**
+
+1. Scan current liquid markets (from the market snapshot / liquidity watchlist) for YES prices in
+   `[longshot_bias.min_price, longshot_bias.max_price]` (defaults 0.02–0.12) with
+   `time_to_close_hours >= 168` (slow markets only) and liquidity >= 500. The candidate is the
+   **NO side** (buy cheap NO = sell the overpriced tail), which after the WO-20-era collection
+   changes will accumulate CLV lines like any shadow position.
+2. Emit shadow candidates through the existing shadow-cohort path with cohort
+   `structural|longshot_no|<family>` — normal shadow gates apply, nothing is bypassed; stake is
+   the standard shadow stake.
+3. Fail closed: the scan only nominates; alpha/governance still filter. No new thresholds are
+   loosened anywhere.
+4. Tests: fixture snapshot -> exact candidate set; deep-longshot exclusion below min_price;
+   fast markets excluded.
+
+---
+
 ## Sequencing
 
 ```text
 WO-1..WO-6, WO-8, WO-9   done and audited (2026-07-02)
 
-Queue order (updated 2026-07-03 after the VPS dashboard audit):
-1. WO-20   position-aware quote collection (HIGH — unblocks CLV/attribution/paper exits)
-2. WO-21   settle or flag stuck paper positions (HIGH)
-3. WO-7    CLV-aware promotion review (advisory only; follow the spec verbatim)
-4. WO-22   evidence-gated display fixes
-5. WO-23   deployment-aware oversight status
-6. WO-11   research-focus consumption
-7. WO-12   portfolio VaR + correlated-exposure reporting
-8. WO-13   microstructure hypotheses as replay strategies
-9. WO-14   generalise the sweep (after WO-13)
-10. WO-16  per-family calibration scorecard
-11. WO-17  collection coverage report (will verify WO-20's effect)
-12. WO-15  evidence history time series
-13. WO-18  dashboard evidence funnel (render blanks for missing artifacts)
-14. WO-19  invariant property tests (zero source changes)
+Queue order (strategic reset, 2026-07-03 — read POLYMARKET_EDGE_STRATEGY_RESET.md first):
+1. WO-24   sharp-anchor activation + broadening (HIGHEST VALUE; human sets THE_ODDS_API_KEY)
+2. WO-20   position-aware quote collection (unblocks CLV/attribution/paper exits)
+3. WO-25   dutch-book arb monitor wiring (mechanical edge, model-free)
+4. WO-26   anti-concentration guard on adaptive queries
+5. WO-21   settle or flag stuck paper positions
+6. WO-27   longshot-bias research family (shadow-only)
+7. WO-7    CLV-aware promotion review (advisory only)
+8. WO-22   evidence-gated display fixes
+9. WO-23   deployment-aware oversight status
+10. WO-11  research-focus consumption (after WO-26 so the guard shapes it)
+11. WO-12  portfolio VaR + correlated-exposure reporting
+12. WO-13  microstructure hypotheses as replay strategies
+13. WO-14  generalise the sweep (after WO-13)
+14. WO-16  per-family calibration scorecard
+15. WO-17  collection coverage report (verifies WO-20)
+16. WO-15  evidence history time series
+17. WO-18  dashboard evidence funnel
+18. WO-19  invariant property tests (zero source changes)
 ```
 
 After all six land: WP3 is done (flip it in the charter), the algo track (WP9–WP11) is done, and

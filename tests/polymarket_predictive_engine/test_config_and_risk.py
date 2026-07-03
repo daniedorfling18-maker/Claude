@@ -83,3 +83,43 @@ def test_example_config_has_no_byte_order_mark():
     # The committed example config must not carry a BOM; the test helpers read it
     # with the platform default encoding, which mangles a BOM on Windows.
     assert Path("polymarket_predictive_config.example.yaml").read_bytes()[:3] != b"\xef\xbb\xbf"
+
+
+def test_risk_rejects_entries_outside_price_band(tmp_path):
+    cfg = load_config(write_config(tmp_path))
+    base = {"edge": 0.10, "confidence": 0.9, "spread": 0.01, "liquidity": 1000, "calibrated_probability": 0.99, "time_to_close_hours": 24}
+    favourite = risk_decision(cfg, {**base, "executable_price": 0.95})
+    assert not favourite["approved"]
+    assert "entry price" in favourite["reason"]
+    longshot = risk_decision(cfg, {**base, "executable_price": 0.02, "calibrated_probability": 0.2})
+    assert not longshot["approved"]
+    assert "entry price" in longshot["reason"]
+    inside = risk_decision(cfg, {**base, "executable_price": 0.4, "calibrated_probability": 0.55})
+    assert inside["approved"]
+
+
+def test_price_band_cannot_be_widened_by_override_profiles(tmp_path):
+    # The band reads base risk config only; a fast-market override attempting
+    # to widen it must have no effect.
+    path = write_config(tmp_path)
+    text = path.read_text().replace(
+        "fast_market_overrides:\n    enabled: true",
+        "fast_market_overrides:\n    enabled: true\n    maximum_entry_price: 0.99",
+    )
+    path.write_text(text)
+    cfg = load_config(path)
+    decision = risk_decision(
+        cfg,
+        {
+            "edge": 0.10,
+            "confidence": 0.9,
+            "spread": 0.01,
+            "liquidity": 1000,
+            "executable_price": 0.95,
+            "calibrated_probability": 0.99,
+            "time_to_close_hours": 24,
+            "market_slug": "eth-updown-15m-1782929700",
+        },
+    )
+    assert not decision["approved"]
+    assert "entry price" in decision["reason"]

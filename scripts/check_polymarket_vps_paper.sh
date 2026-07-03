@@ -47,9 +47,15 @@ dashboard_url="http://127.0.0.1:${port}/"
 heartbeat="outputs/polymarket_model_governance/local_live_loop_heartbeat.json"
 forward_cycle="outputs/polymarket_model_governance/forward_paper_cycle.json"
 dashboard_data="outputs/polymarket_dashboard/dashboard_data.json"
+repo_head="$(git rev-parse --short HEAD 2>/dev/null || printf 'unknown')"
+deployed_sha="$(env_value PM_VPS_DEPLOYED_SHA .env)"
 
 printf '%s\n' "Polymarket VPS paper stack"
 printf '%s\n' "Repo: $REPO_DIR"
+printf '%s\n' "Repo HEAD: $repo_head"
+if [ -n "${deployed_sha:-}" ]; then
+  printf '%s\n' "Deploy SHA: $deployed_sha"
+fi
 printf '%s\n' "Compose: $COMPOSE_FILE"
 printf '%s\n' "Dashboard: $dashboard_url"
 
@@ -60,10 +66,36 @@ printf '%s\n' "Container memory snapshot:"
 docker_cmd stats --no-stream --format 'table {{.Name}}\t{{.MemUsage}}\t{{.CPUPerc}}' || true
 
 printf '%s\n' ""
-if curl -fsS --max-time 5 "$dashboard_url" >/dev/null 2>&1; then
+dashboard_tmp="${TMPDIR:-/tmp}/polymarket-dashboard-check.$$"
+if curl -fsS --max-time 5 "$dashboard_url" -o "$dashboard_tmp" >/dev/null 2>&1; then
   printf '%s\n' "Dashboard: ok"
+  if grep -q "Proof status" "$dashboard_tmp"; then
+    printf '%s\n' "Dashboard proof gate: ok"
+  else
+    printf '%s\n' "Dashboard proof gate: missing (dashboard may be stale; redeploy or rerender)"
+    exit_code=1
+  fi
+  if grep -q "Evidence funnel" "$dashboard_tmp"; then
+    printf '%s\n' "Dashboard evidence funnel: ok"
+  else
+    printf '%s\n' "Dashboard evidence funnel: missing (dashboard may be stale; redeploy or rerender)"
+    exit_code=1
+  fi
 else
   printf '%s\n' "Dashboard: not responding locally"
+  exit_code=1
+fi
+rm -f "$dashboard_tmp"
+
+if [ -f "$dashboard_data" ]; then
+  if grep -q "profit_target_proof_status" "$dashboard_data"; then
+    printf '%s\n' "Dashboard proof data: ok"
+  else
+    printf '%s\n' "Dashboard proof data: missing (dashboard data predates the verified-profit gate)"
+    exit_code=1
+  fi
+else
+  printf '%s\n' "Dashboard proof data: missing"
   exit_code=1
 fi
 

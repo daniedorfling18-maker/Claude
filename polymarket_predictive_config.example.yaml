@@ -232,6 +232,19 @@ sharp_odds_fetch:
   fallback_max_age_hours: 24
   fallback_max_decimal_odds: 1001
   request_timeout_seconds: 20
+dutch_arb:
+  # Scanner-only Dutch-book/negative-risk arb monitor. It writes dry-run evidence
+  # for human review and dashboard visibility; it never submits orders.
+  enabled: true
+  max_events_per_pass: 20
+  max_pages_per_pass: 4
+  max_outcomes: 80
+  pass_interval_minutes: 15
+  alert_annualised: 0.10
+  min_annualised: 0.0
+  min_ask_sum: 0.85
+  request_timeout_seconds: 20
+  request_pause_seconds: 0.02
 crypto_fundamental:
   # Deribit option-implied P(S_T > strike) for crypto "above $K by DATE" markets. No API key
   # needed (public market data). Provide targets at targets_path: token_id,currency,strike,expiry.

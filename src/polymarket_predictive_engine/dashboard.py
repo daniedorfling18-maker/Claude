@@ -113,6 +113,7 @@ HTML = """<!doctype html>
   <div class="grid" id="cards"></div>
   <section class="primary"><h2>Decision cockpit</h2><div id="decisionCockpit"></div></section>
   <section><h2>Action board</h2><div id="actionBoard"></div></section>
+  <section><h2>Dutch-book arb watch</h2><div id="dutchArbWatch"></div></section>
   <div class="two">
     <section><h2>$100/month price-change route</h2><div id="goalPlan"></div></section>
     <section><h2>Model & evidence health</h2><div id="modelHealth"></div></section>
@@ -259,6 +260,7 @@ async function load() {
     const priceActionModel = data.price_action_model || {};
     const quantResearch = data.quant_research_status || {};
     const closingLine = data.closing_line_value || {};
+    const dutchArb = data.dutch_arb || {};
     const edgeAttribution = data.edge_attribution || {};
     const priceActionPaper = data.price_action_paper_signals || {};
     const currentHistScan = priceActionPaper.current_historical_analogue_scan || {};
@@ -556,6 +558,38 @@ async function load() {
         ], 8)}
       </details>
     `;
+    const dutchBest = dutchArb.best_opportunity || {};
+    const dutchStats = dutchArb.scan_stats_latest_poll || {};
+    const dutchPersistent = Array.isArray(dutchArb.persistent_alerts) ? dutchArb.persistent_alerts : [];
+    const dutchTop = Array.isArray(dutchArb.top_opportunities) ? dutchArb.top_opportunities : [];
+    const fmtPct = v => v === null || v === undefined || v === "" || Number.isNaN(Number(v)) ? "-" : fmtNum(Number(v) * 100, 2) + "%";
+    const dutchCaveat = "Observed ask baskets; execution, fees, and fill reality are untested — shadow evidence only.";
+    document.getElementById("dutchArbWatch").innerHTML = Object.keys(dutchArb).length
+      ? `<div class="sectionLead">${dutchCaveat}</div>` + facts([
+          ["Status", dutchArb.status || "-"],
+          ["Last scan", dutchArb.generated_at_utc || dutchArb.last_scan_at_utc || "-"],
+          ["Events discovered", dutchStats.discovered ?? dutchArb.events_scanned ?? "-"],
+          ["Events priced complete", dutchArb.events_priced_complete_latest_poll ?? dutchArb.events_priced_complete ?? "-"],
+          ["Complete arbs now", dutchArb.complete_arbs_latest_poll ?? "-"],
+          ["Above alert total", dutchArb.alerts_total ?? "-"],
+          ["Persistent above alert", dutchArb.persistent_alert_count ?? dutchPersistent.length],
+          ["Best basket", dutchBest.event || "none", v=>longText(v, 180)],
+          ["Best ask sum", dutchBest.ask_sum, v=>fmtNum(v, 4)],
+          ["Best annualised ROI", dutchArb.best_annualised_return_on_capital ?? dutchBest.annualised_return_on_capital, fmtPct],
+          ["Dry-run only", (dutchArb.live_trading_invoked || dutchArb.paper_trading_invoked) ? "unexpected invocation flag" : "yes - no orders placed"],
+          ["Caveat", dutchCaveat, v=>longText(v, 260)]
+        ]) + (dutchPersistent.length ? `<div class="alertGrid">${dutchPersistent.map(row => alertBox(row.title || "Persistent Dutch-book arb", `${longText(row.event, 160)} persisted ${plain(row.consecutive_scans_above_alert)} scans above ${fmtPct(row.alert_annualised)} alert.`, "good")).join("")}</div>` : "")
+        + titledTable("Top Dutch-book baskets", dutchTop, [
+          ["Event","event", v=>longText(v, 180)],
+          ["Outcomes","outcomes"],
+          ["Ask sum","ask_sum", v=>fmtNum(v, 4)],
+          ["Lock/set","lock_per_set", v=>fmtNum(v, 4)],
+          ["Annualised ROI","annualised_return_on_capital", fmtPct],
+          ["Capital","capital_usdc", fmtUsd],
+          ["Profit","profit_usdc", fmtUsd],
+          ["Days","days_to_resolution"]
+        ], 5)
+      : `<div class="sectionLead">No Dutch-book arb scan yet. The VPS loop will run a bounded dry-run pass when the configured cadence is due.</div>`;
     document.getElementById("modelHealth").innerHTML = facts([
       ["Model gate", priceActionModel.decision || decisionSummary.model_state, v=>longText(v, 220)],
       ["Model age", fmtAge(modelAge)],
@@ -2765,6 +2799,7 @@ def _dashboard_oversight_status(
     trade_diagnostics: dict[str, Any],
     evidence_freshness: dict[str, Any],
     strategy_v2: dict[str, Any],
+    dutch_arb: dict[str, Any],
 ) -> dict[str, Any]:
     """Single oversight summary for stale/live/model gate visibility."""
     live_age = _age_seconds(heartbeat)
@@ -2927,11 +2962,22 @@ def _dashboard_oversight_status(
                 or "The local guard paused heavier collection because RAM was high."
             ),
         )
+    persistent_arbs = dutch_arb.get("persistent_alerts") if isinstance(dutch_arb, dict) else []
+    if isinstance(persistent_arbs, list) and persistent_arbs:
+        best = persistent_arbs[0] if isinstance(persistent_arbs[0], dict) else {}
+        add_alert(
+            "info",
+            "Dutch-book arb basket persisted",
+            (
+                f"{len(persistent_arbs)} dry-run basket(s) persisted above the alert threshold for 3+ scans. "
+                f"Best visible basket: {best.get('event') or best.get('event_id') or 'unknown'}."
+            ),
+        )
 
     status = "ok"
     if any(alert.get("severity") == "bad" for alert in alerts):
         status = "bad"
-    elif alerts:
+    elif any(alert.get("severity") == "warn" for alert in alerts):
         status = "warn"
     return {
         "status": status,
@@ -3920,6 +3966,9 @@ def render_dashboard(cfg: EngineConfig, latest_report: dict[str, Any] | None = N
     closing_line_value = read_json(governance / "closing_line_value.json", default={}) or {}
     if not isinstance(closing_line_value, dict):
         closing_line_value = {}
+    dutch_arb = read_json(cfg.output_root / "polymarket_arbitrage" / "dutch_arb_monitor_summary.json", default={}) or {}
+    if not isinstance(dutch_arb, dict):
+        dutch_arb = {}
     edge_attribution = read_json(governance / "edge_attribution.json", default={}) or {}
     if not isinstance(edge_attribution, dict):
         edge_attribution = {}
@@ -3979,6 +4028,7 @@ def render_dashboard(cfg: EngineConfig, latest_report: dict[str, Any] | None = N
         trade_diagnostics=trade_diagnostics,
         evidence_freshness=evidence_freshness,
         strategy_v2=strategy_v2_status,
+        dutch_arb=dutch_arb,
     )
     worldcup_validation_status = _worldcup_validation_status(
         predictions=predictions,
@@ -4032,6 +4082,7 @@ def render_dashboard(cfg: EngineConfig, latest_report: dict[str, Any] | None = N
         "algo_sweep": algo_sweep,
         "quant_research_status": quant_research_status,
         "closing_line_value": closing_line_value,
+        "dutch_arb": dutch_arb,
         "edge_attribution": edge_attribution,
         "websocket_summary": websocket_summary,
         "websocket_feature_summary": websocket_feature_summary,

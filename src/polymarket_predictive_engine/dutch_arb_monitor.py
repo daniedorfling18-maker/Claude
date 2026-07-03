@@ -17,10 +17,12 @@ summary always reports ``live_trading: False`` regardless of ``trading.mode``.
 """
 from __future__ import annotations
 
+import csv
 import itertools
 import time
 from collections import deque
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any, Iterable, Mapping, Sequence
 
 import requests
@@ -28,7 +30,7 @@ import requests
 from superbru_score_engine.betting.long_short import dutch_arb
 
 from .config import EngineConfig, kill_switch_active, load_config
-from .utils import now_utc, safe_float, write_csv, write_json
+from .utils import ensure_dir, now_utc, read_json, safe_float, serialize_value, write_csv, write_json
 
 GAMMA_MARKETS = "https://gamma-api.polymarket.com/markets"
 GAMMA_EVENTS = "https://gamma-api.polymarket.com/events"
@@ -208,6 +210,28 @@ def build_alerts(plans: Iterable[ExecutionPlan], *, alert_annualised: float, pol
     return alerts
 
 
+def clears_alert_threshold(plan: ExecutionPlan, *, alert_annualised: float) -> bool:
+    """Return whether a complete arb clears the human-look alert threshold."""
+    if not (plan.is_arb and plan.complete):
+        return False
+    ann = plan.annualised_return_on_capital
+    return ann is None or ann >= alert_annualised
+
+
+def _append_csv(path: Path, rows: Iterable[Mapping[str, Any]], fieldnames: Sequence[str]) -> None:
+    rows = list(rows)
+    if not rows:
+        return
+    ensure_dir(path.parent)
+    write_header = not path.exists() or path.stat().st_size == 0
+    with path.open("a", newline="", encoding="utf-8") as f:
+        writer = csv.DictWriter(f, fieldnames=list(fieldnames), extrasaction="ignore")
+        if write_header:
+            writer.writeheader()
+        for row in rows:
+            writer.writerow({k: serialize_value(row.get(k, "")) for k in fieldnames})
+
+
 # --------------------------------------------------------------------------- network layer (thin)
 def _get(url: str, params: Mapping[str, Any] | None = None, timeout: int = 20) -> Any:
     resp = requests.get(url, params=params, headers=_HEADERS, timeout=timeout)  # nosec B113: public API
@@ -327,11 +351,16 @@ def scan_once(cfg: EngineConfig, *, max_pages: int = 4, max_events: int = 20, ma
 def _monitor_summary(cfg: EngineConfig, *, polls: int, poll_seconds: int, min_annualised: float,
                      alert_annualised: float, latest_ranked: Sequence[ExecutionPlan],
                      latest_stats: Mapping[str, int], transitions: Sequence[dict[str, Any]],
-                     alerts_total: int, polls_run: int, interrupted: bool) -> dict[str, Any]:
+                     alerts_total: int, polls_run: int, interrupted: bool,
+                     active_arb_ids: Iterable[str] = (),
+                     alert_persistence_counts: Mapping[str, int] | None = None,
+                     persistent_alerts: Sequence[dict[str, Any]] = ()) -> dict[str, Any]:
     top = latest_ranked[0] if latest_ranked else None
     return {
         "status": "paper_analysis",
         "live_trading": False,
+        "paper_trading_invoked": False,
+        "live_trading_invoked": False,
         "dry_run": True,
         "generated_at_utc": now_utc(),
         "trading_mode": cfg.trading_mode,
@@ -348,6 +377,10 @@ def _monitor_summary(cfg: EngineConfig, *, polls: int, poll_seconds: int, min_an
         "scan_stats_latest_poll": dict(latest_stats),
         "alerts_total": alerts_total,
         "transitions": list(transitions)[-10:],
+        "active_arb_ids": sorted(set(active_arb_ids)),
+        "alert_persistence_counts": dict(alert_persistence_counts or {}),
+        "persistent_alert_count": len(persistent_alerts),
+        "persistent_alerts": list(persistent_alerts),
         "best_annualised_return_on_capital": top.annualised_return_on_capital if top else 0.0,
         "best_opportunity": top.as_row() if top else None,
         "best_execution_plan": dry_run_orders(top) if top else [],
@@ -368,11 +401,21 @@ def run_dutch_arb_monitor(cfg: EngineConfig, *, polls: int = 1, poll_seconds: in
     persisted *every* poll so an external dashboard always sees current state, and in-memory
     buffers are bounded so a long-lived process stays flat. Pure analysis + dry-run: never trades."""
     out_dir = cfg.output_root / "polymarket_arbitrage"
-    prev_arb_ids: set[str] = set()
+    previous_summary = read_json(out_dir / "dutch_arb_monitor_summary.json", default={}) or {}
+    if not isinstance(previous_summary, dict):
+        previous_summary = {}
+    prev_arb_ids: set[str] = set(str(v) for v in previous_summary.get("active_arb_ids", []) if str(v))
+    raw_counts = previous_summary.get("alert_persistence_counts", {})
+    alert_persistence_counts: dict[str, int] = {
+        str(k): int(v) for k, v in raw_counts.items()
+        if str(k) and str(v).replace("-", "").isdigit()
+    } if isinstance(raw_counts, dict) else {}
     recent_alerts: deque[dict[str, Any]] = deque(maxlen=max_alerts)
     transitions: deque[dict[str, Any]] = deque(maxlen=200)
     latest_ranked: list[ExecutionPlan] = []
     latest_stats: dict[str, int] = {}
+    active_arb_ids: set[str] = set(prev_arb_ids)
+    persistent_alerts: list[dict[str, Any]] = []
     alerts_total = 0
     polls_run = 0
     interrupted = False
@@ -391,18 +434,77 @@ def run_dutch_arb_monitor(cfg: EngineConfig, *, polls: int = 1, poll_seconds: in
             new_alerts = build_alerts(ranked, alert_annualised=alert_annualised, poll=poll)
             recent_alerts.extend(new_alerts)
             alerts_total += len(new_alerts)
-            prev_arb_ids = {p.event_id for p in plans if p.is_arb}
+            active_arb_ids = {p.event_id for p in plans if p.is_arb}
+            alert_ids = {p.event_id for p in ranked if clears_alert_threshold(p, alert_annualised=alert_annualised)}
+            alert_persistence_counts = {
+                event_id: (alert_persistence_counts.get(event_id, 0) + 1)
+                for event_id in sorted(alert_ids)
+            }
+            persistent_alerts = []
+            ranked_by_id = {p.event_id: p for p in ranked}
+            for event_id, consecutive_scans in sorted(alert_persistence_counts.items()):
+                if consecutive_scans < 3:
+                    continue
+                plan = ranked_by_id.get(event_id)
+                if plan is None:
+                    continue
+                persistent_alerts.append(
+                    {
+                        **plan.as_row(),
+                        "consecutive_scans_above_alert": consecutive_scans,
+                        "alert_annualised": alert_annualised,
+                        "severity": "info",
+                        "title": "Dutch-book arb basket persisted above alert threshold",
+                    }
+                )
+            prev_arb_ids = active_arb_ids
             latest_ranked = ranked
             polls_run = poll if polls <= 0 else poll  # poll is 1-based count of completed passes
 
             # Persist current state every poll (latest opportunities + rolling alerts + summary).
             write_csv(out_dir / "dutch_arb_monitor_opportunities.csv", [p.as_row() for p in latest_ranked])
+            alert_rows = [
+                {
+                    **p.as_row(),
+                    "observed_at_utc": now_utc(),
+                    "poll": poll,
+                    "alert_annualised": alert_annualised,
+                }
+                for p in latest_ranked
+                if clears_alert_threshold(p, alert_annualised=alert_annualised)
+            ]
+            _append_csv(
+                out_dir / "dutch_arb_opportunities.csv",
+                alert_rows,
+                [
+                    "observed_at_utc",
+                    "poll",
+                    "event_id",
+                    "event",
+                    "outcomes",
+                    "ask_sum",
+                    "lock_per_set",
+                    "is_arb",
+                    "complete",
+                    "executable_sets",
+                    "capital_usdc",
+                    "profit_usdc",
+                    "days_to_resolution",
+                    "annualised_return_on_capital",
+                    "alert_annualised",
+                ],
+            )
             if recent_alerts:
                 write_csv(out_dir / "dutch_arb_monitor_alerts.csv", list(recent_alerts))
-            write_json(out_dir / "dutch_arb_monitor_summary.json", _monitor_summary(
+            summary = _monitor_summary(
                 cfg, polls=polls, poll_seconds=poll_seconds, min_annualised=min_annualised,
                 alert_annualised=alert_annualised, latest_ranked=latest_ranked, latest_stats=latest_stats,
-                transitions=transitions, alerts_total=alerts_total, polls_run=polls_run, interrupted=False))
+                transitions=transitions, alerts_total=alerts_total, polls_run=polls_run, interrupted=False,
+                active_arb_ids=active_arb_ids, alert_persistence_counts=alert_persistence_counts,
+                persistent_alerts=persistent_alerts,
+            )
+            write_json(out_dir / "dutch_arb_monitor_summary.json", summary)
+            write_json(out_dir / "dutch_arb_latest.json", summary)
 
             is_last_bounded = polls > 0 and poll >= polls
             if not is_last_bounded and poll_seconds > 0:
@@ -413,8 +515,12 @@ def run_dutch_arb_monitor(cfg: EngineConfig, *, polls: int = 1, poll_seconds: in
     summary = _monitor_summary(cfg, polls=polls, poll_seconds=poll_seconds, min_annualised=min_annualised,
                                alert_annualised=alert_annualised, latest_ranked=latest_ranked,
                                latest_stats=latest_stats, transitions=transitions, alerts_total=alerts_total,
-                               polls_run=polls_run, interrupted=interrupted)
+                               polls_run=polls_run, interrupted=interrupted,
+                               active_arb_ids=active_arb_ids,
+                               alert_persistence_counts=alert_persistence_counts,
+                               persistent_alerts=persistent_alerts)
     write_json(out_dir / "dutch_arb_monitor_summary.json", summary)
+    write_json(out_dir / "dutch_arb_latest.json", summary)
     return summary
 
 

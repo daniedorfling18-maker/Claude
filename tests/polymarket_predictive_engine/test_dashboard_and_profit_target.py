@@ -274,6 +274,73 @@ def test_dashboard_handles_empty_closing_line_value_artifact(tmp_path):
     assert "No sweep run yet" in html
 
 
+def test_dashboard_surfaces_dutch_arb_watch(tmp_path):
+    cfg = _config(tmp_path)
+    write_json(
+        cfg.output_root / "polymarket_arbitrage" / "dutch_arb_monitor_summary.json",
+        {
+            "status": "paper_analysis",
+            "generated_at_utc": "2026-07-03T08:00:00Z",
+            "paper_trading_invoked": False,
+            "live_trading_invoked": False,
+            "dry_run": True,
+            "scan_stats_latest_poll": {"discovered": 12, "priced_complete": 4},
+            "events_priced_complete_latest_poll": 4,
+            "complete_arbs_latest_poll": 1,
+            "alerts_total": 3,
+            "persistent_alert_count": 1,
+            "best_annualised_return_on_capital": 0.21,
+            "best_opportunity": {
+                "event_id": "arb-1",
+                "event": "Example complete basket",
+                "outcomes": 3,
+                "ask_sum": 0.94,
+                "lock_per_set": 0.06,
+                "annualised_return_on_capital": 0.21,
+                "capital_usdc": 94,
+                "profit_usdc": 6,
+                "days_to_resolution": 30,
+            },
+            "top_opportunities": [
+                {
+                    "event_id": "arb-1",
+                    "event": "Example complete basket",
+                    "outcomes": 3,
+                    "ask_sum": 0.94,
+                    "lock_per_set": 0.06,
+                    "annualised_return_on_capital": 0.21,
+                    "capital_usdc": 94,
+                    "profit_usdc": 6,
+                    "days_to_resolution": 30,
+                }
+            ],
+            "persistent_alerts": [
+                {
+                    "event_id": "arb-1",
+                    "event": "Example complete basket",
+                    "consecutive_scans_above_alert": 3,
+                    "alert_annualised": 0.10,
+                    "title": "Dutch-book arb basket persisted above alert threshold",
+                }
+            ],
+        },
+    )
+
+    result = render_dashboard(cfg)
+
+    data = read_json(result["dashboard_data"])
+    html = Path(result["dashboard_file"]).read_text(encoding="utf-8")
+    assert data["dutch_arb"]["complete_arbs_latest_poll"] == 1
+    assert data["dutch_arb"]["paper_trading_invoked"] is False
+    assert data["dutch_arb"]["live_trading_invoked"] is False
+    arb_alerts = [alert for alert in data["oversight_status"]["alerts"] if alert["title"] == "Dutch-book arb basket persisted"]
+    assert arb_alerts
+    assert arb_alerts[0]["severity"] == "info"
+    assert "Dutch-book arb watch" in html
+    assert "Top Dutch-book baskets" in html
+    assert "Observed ask baskets" in html
+
+
 def test_dashboard_surfaces_edge_attribution_artifact(tmp_path):
     cfg = _config(tmp_path)
     write_json(

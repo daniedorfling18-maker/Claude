@@ -303,6 +303,14 @@ probe pathology), and defines the leading indicators that count as "seeing poten
 honestly: arb baskets, anchor coverage, positive CLV cohorts, then audited paper P&L. No gate was
 loosened; none will be.
 
+**2026-07-03 — WO-25 landed by Codex.** The mechanical Dutch-book arb monitor is now wired into
+the VPS live-paper loop as a bounded dry-run pass with config cadence/size controls. It writes
+`outputs/polymarket_arbitrage/dutch_arb_monitor_summary.json`,
+`outputs/polymarket_arbitrage/dutch_arb_latest.json`, latest opportunity rows, and append-only
+above-alert rows, and it tracks 3+ scan persistence for human review. The dashboard now has a
+"Dutch-book arb watch" section plus an info-only oversight alert for persistent baskets. This added
+no order placement path.
+
 ## Rules of engagement for coding agents
 
 0. **Division of labour**: the orchestrating agent writes/updates this charter and the work orders

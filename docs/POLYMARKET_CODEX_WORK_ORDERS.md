@@ -940,7 +940,7 @@ that value is populated in the VPS environment.
 
 ---
 
-## WO-25 — Wire the dutch-book arb monitor into the loop and dashboard — `open` (HIGH)
+## WO-25 — Wire the dutch-book arb monitor into the loop and dashboard — `done` (2026-07-03, HIGH)
 
 **Goal:** the one strategy class with mechanical (model-free) edge runs continuously and reports.
 
@@ -961,6 +961,16 @@ tests.
 4. Tests: fixture book -> basket maths exact; persistence alert; empty scan renders cleanly.
 
 **Out of scope:** any order placement. This is a scanner.
+
+**Landed 2026-07-03:** the VPS live-paper loop now runs a bounded one-poll
+`run_dutch_arb_monitor` pass on the configured `dutch_arb.pass_interval_minutes` cadence with
+`dutch_arb.enabled`, `max_events_per_pass`, and `alert_annualised` controls. The monitor writes
+dry-run/latest artifacts under `outputs/polymarket_arbitrage/`, including
+`dutch_arb_monitor_summary.json`, `dutch_arb_latest.json`, latest opportunities, append-only
+`dutch_arb_opportunities.csv` rows above the alert threshold, and persistent-alert metadata for
+baskets that survive 3+ scans. The dashboard now renders "Dutch-book arb watch" plus an info-only
+oversight alert for persistent baskets. Tests cover exact basket maths, persistence, loop cadence,
+and dashboard rendering. No order placement path was added.
 
 ---
 
@@ -1022,7 +1032,7 @@ WO-1..WO-6, WO-8, WO-9   done and audited (2026-07-02)
 Queue order (strategic reset, 2026-07-03 — read POLYMARKET_EDGE_STRATEGY_RESET.md first):
 1. WO-24   done 2026-07-03: sharp-anchor activation + broadening (VPS still needs THE_ODDS_API_KEY populated)
 2. WO-20   done 2026-07-03: position-aware quote collection
-3. WO-25   dutch-book arb monitor wiring (mechanical edge, model-free)
+3. WO-25   done 2026-07-03: dutch-book arb monitor loop/dashboard wiring (mechanical edge, model-free)
 4. WO-26   anti-concentration guard on adaptive queries
 5. WO-21   done 2026-07-03: settle or flag stuck paper positions
 6. WO-27   longshot-bias research family (shadow-only)

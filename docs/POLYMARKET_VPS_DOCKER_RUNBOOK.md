@@ -130,9 +130,14 @@ For a longer-running setup, prefer one of:
 
 ## Secrets on the VPS
 
-GitHub repository/Actions secrets exist only inside GitHub Actions runs; nothing delivers them to
-this VPS. Any key the containers need (today: `THE_ODDS_API_KEY` for the sharp-anchor pipeline)
-must be placed in the `.env` file next to the compose file by hand:
+Preferred path: set `PM_VPS_SSH_PRIVATE_KEY` in GitHub Actions secrets and run the manual
+`deploy-polymarket-vps-paper.yml` workflow. The workflow injects `THE_ODDS_API_KEY` into the VPS
+`.env`, rebuilds the Docker stack, forces a dashboard render, and verifies the current dashboard
+schema. If the deploy private key is missing, GitHub can see the sealed odds key but cannot deliver
+it to the VPS.
+
+Manual fallback: place any key the containers need (today: `THE_ODDS_API_KEY` for the sharp-anchor
+pipeline) in the `.env` file next to the compose file by hand:
 
 ```bash
 cd <repo dir on the VPS>
@@ -146,9 +151,10 @@ Two gotchas that make this look broken when it isn't:
 2. The variable must appear both in `.env` AND be mapped in the service's `environment:` block
    (`docker-compose.vps-paper.yml` already maps `THE_ODDS_API_KEY`).
 
-Verify end-to-end with `scripts/check_polymarket_vps_paper.sh` (it now reports whether the key is
-set in `.env` and visible inside the container) or on the dashboard: the "Independent model
-anchors" section should stop showing `missing_api_key` within ~12 loop iterations.
+Verify end-to-end with `scripts/check_polymarket_vps_paper.sh` (it reports whether the key is set in
+`.env`, visible inside the container, and whether deployment metadata is present) or on the
+dashboard: the "Independent model anchors" section should stop showing `missing_api_key` within
+~12 loop iterations.
 
 ## Operating checks
 

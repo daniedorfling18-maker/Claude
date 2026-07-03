@@ -71,13 +71,15 @@ candidate family. Its share of collection attention is capped (WO-26).
 3. **WO-24 code landed after the reset:** the sharp-anchor fetch is now budgeted, broadened to
    match-market sports, validates provider sports before spending odds calls, skips unsupported
    sports, and maps clear h2h YES contracts without guessing unmapped outcomes. The only remaining
-   sharp-anchor blocker is runtime secret injection on the VPS.
+   sharp-anchor blocker is VPS deployment access: GitHub has the sealed odds key, but cannot inject
+   it into the VPS until `PM_VPS_SSH_PRIVATE_KEY` is set for the deploy workflow.
 
 ## The one action only a human can take
 
-**Set `THE_ODDS_API_KEY` on the VPS** (free tier: the-odds-api.com; 500 credits/month suffices for
-a few sports at sane cadence) and restart the loop container. Without it, the highest-probability
-edge path stays dead no matter what any agent codes. Everything else in this reset is automated.
+**Set `PM_VPS_SSH_PRIVATE_KEY` for the deploy workflow, then rerun the VPS deploy.** The workflow
+will inject `THE_ODDS_API_KEY` into the VPS `.env`, rebuild the paper stack, and verify the current
+dashboard schema. Without deploy access, the highest-probability edge path stays stale on the VPS no
+matter what any agent codes. Everything else in this reset is automated.
 
 ## What "seeing potential profits" means honestly
 

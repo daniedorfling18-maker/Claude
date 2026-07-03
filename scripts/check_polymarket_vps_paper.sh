@@ -68,9 +68,10 @@ if [ -n "$odds_key_env" ]; then
   printf '%s\n' "  THE_ODDS_API_KEY: set in .env (${#odds_key_env} chars)"
 else
   printf '%s\n' "  THE_ODDS_API_KEY: MISSING/empty in .env - sharp-anchor pipeline cannot run."
-  printf '%s\n' "  GitHub Actions secrets do NOT reach this VPS. Fix:"
-  printf '%s\n' "    1. edit .env in this directory: THE_ODDS_API_KEY=<key from the-odds-api.com>"
-  printf '%s\n' "    2. docker compose -f $COMPOSE_FILE up -d --force-recreate polymarket-paper-live"
+  printf '%s\n' "  Fix either by running the GitHub deploy workflow after PM_VPS_SSH_PRIVATE_KEY is set,"
+  printf '%s\n' "  or by editing .env in this directory by hand:"
+  printf '%s\n' "    THE_ODDS_API_KEY=<key from the-odds-api.com>"
+  printf '%s\n' "    docker compose -f $COMPOSE_FILE up -d --force-recreate polymarket-paper-live"
 fi
 if docker_cmd exec polymarket-paper-live sh -c 'test -n "$THE_ODDS_API_KEY"' >/dev/null 2>&1; then
   printf '%s\n' "  THE_ODDS_API_KEY: visible inside polymarket-paper-live container"

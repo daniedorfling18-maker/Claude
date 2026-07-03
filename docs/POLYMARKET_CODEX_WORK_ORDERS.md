@@ -969,8 +969,9 @@ are absent under the fresh legacy-loop deployment, and focused dashboard tests c
 ## WO-24 — Activate and broaden the sharp-anchor pipeline — `done` (2026-07-03, HIGHEST VALUE)
 
 **Context:** `docs/POLYMARKET_EDGE_STRATEGY_RESET.md`. The de-vig pipeline exists end-to-end and
-has never run (`missing_api_key`). A human must set `THE_ODDS_API_KEY` on the VPS; this WO makes
-the pipeline worth running the moment that happens.
+needs `THE_ODDS_API_KEY` visible inside the VPS container. The manual deploy workflow can inject the
+sealed GitHub secret into the VPS `.env`; the current runtime blocker is SSH deploy access, not the
+odds-key code path.
 
 **Files:** `polymarket_predictive_config.example.yaml` (`sharp_odds_fetch.sports`),
 `sharp_odds_fetch.py`, `sharp_anchor.py`, the VPS loop entry (`run_polymarket_live_paper_loop.py`)
@@ -1003,9 +1004,9 @@ NBA, MLB, MMA, ATP, and WTA; added provider sports-list validation, unknown-spor
 clear "Will Team beat Team?" YES contracts map to bookmaker team outcomes without guessing NO/draw
 rows; added unmapped-row samples; and made sharp-anchor coding errors fail loud in the VPS loop.
 Tests cover missing key, provider errors, fallback CSVs, budget skips, unknown sports, h2h joins,
-and no-guess unmapped outcomes. Runtime note: GitHub confirms `THE_ODDS_API_KEY` exists as a
-sealed secret, but GitHub cannot reveal secret plaintext; the VPS container remains blocked until
-that value is populated in the VPS environment.
+and no-guess unmapped outcomes. Runtime note: GitHub confirms `THE_ODDS_API_KEY` exists as a sealed
+secret. The deploy workflow can copy it into the VPS `.env`, but that path remains blocked until
+`PM_VPS_SSH_PRIVATE_KEY` is populated with the private key matching the VPS public key.
 
 ---
 
@@ -1145,7 +1146,7 @@ fail-closed behavior, dashboard rendering, and refresh ordering.
 WO-1..WO-6, WO-8, WO-9   done and audited (2026-07-02)
 
 Queue order (strategic reset, 2026-07-03 — read POLYMARKET_EDGE_STRATEGY_RESET.md first):
-1. WO-24   done 2026-07-03: sharp-anchor activation + broadening (VPS still needs THE_ODDS_API_KEY populated)
+1. WO-24   done 2026-07-03: sharp-anchor activation + broadening (VPS deploy still needs PM_VPS_SSH_PRIVATE_KEY populated)
 2. WO-20   done 2026-07-03: position-aware quote collection
 3. WO-25   done 2026-07-03: dutch-book arb monitor loop/dashboard wiring (mechanical edge, model-free)
 4. WO-26   done 2026-07-03: anti-concentration guard on adaptive queries

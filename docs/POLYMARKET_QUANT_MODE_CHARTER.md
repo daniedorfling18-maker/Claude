@@ -128,6 +128,8 @@ and mispricing-alpha depth/enrichment tests.
   `quant_lab.risk` over open-position marks.
 - Acceptance: risk state artifact reports correlated exposure by key and portfolio VaR; a test shows
   two same-event candidates draining the same correlated budget.
+- Status: partially landed by Codex (`portfolio_state` computes correlated exposure per
+  `normalised_correlation_key`); the remaining VaR/reporting slice is specced as **WO-12**.
 
 ### WP7 — Family classifier for liquid `unknown` markets — `done` (2026-07-02)
 
@@ -142,20 +144,20 @@ Acceptance: `tests/polymarket_predictive_engine/test_family_classifier.py` plus
 research families. This does **not** loosen promotion: newly classified families still need their own
 positive bid/ask, CLV, settlement, and paper evidence before any governed paper sizing.
 
-### WP8 — Edge attribution / post-trade analytics — `done` (2026-07-02)
+### WP8 — Edge attribution / post-trade analytics — `done` (2026-07-02, orchestrator)
 
-Implemented in `edge_attribution.py`, CLI `edge-attribution`, and governance refresh. Artifacts:
-`outputs/polymarket_model_governance/edge_attribution.json` +
-`edge_attribution_cohorts.csv`.
+- Per closed shadow/paper position, decompose realised P&L into: entry edge (model vs market),
+  line movement (CLV), spread/slippage cost, and settlement surprise. Aggregate per cohort.
+- Acceptance: an `edge_attribution.json` governance artifact; used by research-focus refresh to
+  direct collection toward cohorts whose losses are cost-driven vs model-driven.
 
-Per cohort, the engine now decomposes observed paper/shadow P&L into audited paper P&L, shadow P&L,
-entry edge, CLV line movement, spread/slippage cost, and residual settlement/model surprise. It also
-classifies the primary drag (`quote_quality`, `spread_slippage`, `adverse_line_movement`,
-`model_edge_failed_to_transfer`, `positive_forward_edge`, or `insufficient_evidence`) and recommends
-the next research action. `research_focus.py` consumes the artifact so cost/quote-quality losses
-route toward tighter-spread/liquid analogue collection, while model/line-movement losses are
-suppressed until a new thesis/feature/anchor exists. Dashboard renders an "Edge attribution" panel.
-Diagnostic only; paper/live gates unchanged.
+Landed: `edge_attribution.py`, CLI `edge-attribution`. Exact per-share identity
+`exit - entry_fill == settlement_surprise + line_movement - execution_cost`, joined from closed
+shadow positions and CLV lines. Cohort classes: `positive_edge_confirmed`, `cost_dominated`,
+`model_direction_not_confirmed`, `settlement_adverse`, `mixed_attribution`,
+`insufficient_attribution_evidence` — each with a recommended research action. Artifacts:
+`outputs/polymarket_model_governance/edge_attribution.json` + `edge_attribution_positions.csv`.
+Research-focus consumption is WO-11 (Codex).
 
 ## Algo execution compatibility track (WP9–WP11)
 
@@ -196,6 +198,61 @@ with conservative fill simulation (cross at ask only when the limit crosses; res
 only on later crossing quotes; mark to bid). This is the event-driven backtester that closes the
 algo loop offline. WP5's depth-based cost model now supplies the cost-aware execution layer used by
 alpha scoring, shadow fills, strategy checks, and risk sizing.
+
+### WP12 — Algo parameter sweep lab — `done` (2026-07-02, orchestrator)
+
+`algo/sweep.py`, CLI `algo-sweep`: grids strategy parameters over recorded websocket history
+through the replay harness, ranks on the TRAIN window only, then scores the single selected
+combination once out-of-sample. Fail-closed decisions: `insufficient_events_for_sweep`,
+`no_sweep_candidate_reached_minimum_train_fills`, `sweep_candidate_failed_out_of_sample_validation`,
+`sweep_candidate_validated_shadow_only`. A validated candidate is a research lead for more forward
+collection — it never promotes, sizes, or trades. Artifacts:
+`outputs/polymarket_algo/algo_sweep_summary.json` + `algo_sweep_combos.csv`. Config: `algo_sweep:`.
+
+## Audit log
+
+**2026-07-02 — post-merge audit of Codex's landing on main (orchestrator).** PR #59 merged; Codex
+then landed WO-1..WO-6 (content-equivalent to the branch versions, verified by diff) plus WP5
+(`execution_costs.py` wired into `risk_decision`, signal edge netting, shadow fills, and an alpha
+penalty), WP7 (`classify_market_family` shared across features/alpha/strategy-search), a
+prediction-cycle runtime lock, price-action model hardening (anti-chase entry-book features +
+per-token dedup of selected candidates, model v5), and an algo-replay dashboard section.
+Verified: live/readiness/governance gate files untouched; the execution-cost estimator fails
+closed (missing depth -> flat slippage unchanged, below-flat slippage only when top-of-book
+demonstrably fills the stake); alpha quote enrichment respects a staleness window and the new
+execution-cost term only ever penalises; the classifier is metadata-only and newly named families
+start with zero evidence, so promotion stays fail-closed. 663 tests green. Follow-ups raised as
+WO-7..WO-9 in the work orders doc.
+
+**2026-07-02 — WO-8 and WO-9 implemented by the orchestrator.** Below-flat execution costs now
+additionally require a fresh quote (`quote_age_seconds` <= 120s, falling back to the row's
+`websocket_quote_age_seconds`); stale or unknown-age depth never earns a discount. The
+quote-enrichment leakage invariant is pinned by a regression test that makes the alpha training
+path explode if enrichment is ever wired into it. WO-7 (WP4, CLV-aware promotion review) is the
+single open work order and now carries a near-diff-level spec plus an explicit list of wrong
+implementations; the work orders doc also gained a pre-flight checklist every agent must run
+before pushing.
+
+**2026-07-02 — WP8 and WP12 implemented by the orchestrator (edge-finding machinery).** Edge
+attribution decomposes every closed shadow position's P&L into execution cost, line movement, and
+settlement surprise (exact identity, tested) and classifies each cohort with a recommended
+research action. The algo sweep lab searches strategy parameter grids over recorded websocket
+history with train-only selection and out-of-sample confirmation through the replay harness.
+Wiring into the cycle/dashboard/audit landed in WO-10; research-focus consumption of attribution + CLV +
+sweep decisions is WO-11 — both specced for Codex.
+
+**2026-07-03 — WO-10 landed by Codex.** Governance refresh now rebuilds edge attribution and the
+algo sweep after CLV and before downstream governance; the dashboard renders both diagnostic
+sections; the local-history audit includes report-only summaries after `_paper_decision` is
+computed. No gates, thresholds, broker paths, or live-trading settings were changed.
+
+**2026-07-02 — overnight queue issued.** WO-7 and WO-10..WO-19 are specced in the work orders doc
+with a night-shift protocol (fixed order, stop conditions, skip-and-note rules, end-of-night
+report). New ground covered by the queue: portfolio VaR reporting (WP6 remainder), microstructure
+hypotheses as replay strategies + generalised sweep, per-family calibration scorecard, collection
+coverage for CLV finality, evidence history time series, a dashboard evidence funnel, and
+invariant property tests that lock the safety envelope. Nothing in the queue can loosen a gate;
+WO-19 explicitly changes zero source files.
 
 ## Rules of engagement for coding agents
 

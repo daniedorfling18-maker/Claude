@@ -70,10 +70,18 @@ def _fill(intent: OrderIntent, price: float, event: QuoteEvent) -> dict[str, Any
     }
 
 
-def run_replay(cfg: EngineConfig, strategy_name: str, *, features_input: str | Path | None = None) -> dict[str, Any]:
+def run_replay(
+    cfg: EngineConfig,
+    strategy_name: str,
+    *,
+    features_input: str | Path | None = None,
+    events: list[QuoteEvent] | None = None,
+    write_artifacts: bool = True,
+) -> dict[str, Any]:
     strategy = get_strategy(strategy_name)
     features_path = Path(features_input) if features_input else cfg.output_root / "polymarket_training" / "websocket_market_features.csv"
-    events = iter_quote_events(features_path)
+    if events is None:
+        events = iter_quote_events(features_path)
 
     resting: dict[str, tuple[OrderIntent, QuoteEvent]] = {}
     positions: dict[str, dict[str, Any]] = {}
@@ -196,9 +204,10 @@ def run_replay(cfg: EngineConfig, strategy_name: str, *, features_input: str | P
         "paper_trading_invoked": False,
         "live_trading_invoked": False,
     }
-    out_root = cfg.output_root / "polymarket_algo"
-    write_json(out_root / f"replay_{strategy_name}_summary.json", summary)
-    write_csv(out_root / f"replay_{strategy_name}_fills.csv", fills, fieldnames=FILL_FIELDS)
+    if write_artifacts:
+        out_root = cfg.output_root / "polymarket_algo"
+        write_json(out_root / f"replay_{strategy_name}_summary.json", summary)
+        write_csv(out_root / f"replay_{strategy_name}_fills.csv", fills, fieldnames=FILL_FIELDS)
     return summary
 
 

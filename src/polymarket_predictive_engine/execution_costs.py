@@ -39,6 +39,8 @@ def estimate_execution_cost(
     side: str = "BUY",
     flat_slippage: float = 0.0,
     acceptable_impact_pct: float = 0.01,
+    quote_age_seconds: float | None = None,
+    max_fresh_age_seconds: float = 120.0,
 ) -> dict[str, Any]:
     """Estimate conservative fill cost from top-of-book depth fields.
 
@@ -46,13 +48,20 @@ def estimate_execution_cost(
     - if depth is missing, it returns the old flat slippage assumption unchanged;
     - shallow books increase expected slippage and reduce the acceptable stake cap;
     - lower-than-flat slippage is only allowed when the top/depth can fill the
-      requested stake, i.e. when the book is demonstrably deep enough.
+      requested stake AND the quote is demonstrably fresh: ``quote_age_seconds``
+      (or the row's ``websocket_quote_age_seconds``) must be known and at most
+      ``max_fresh_age_seconds``. Stale or unknown-age depth can overstate what
+      the book absorbs, so it never earns a below-flat discount.
     """
     side = side.upper()
     flat = max(0.0, float(flat_slippage or 0.0))
     stake = max(0.0, float(stake_usdc or 0.0))
     price = _price(row, side)
     spread = safe_float(row.get("spread"))
+    age = safe_float(quote_age_seconds)
+    if age is None:
+        age = safe_float(row.get("websocket_quote_age_seconds"))
+    quote_is_fresh = bool(age is not None and 0 <= age <= max(0.0, float(max_fresh_age_seconds or 0.0)))
     top_size, depth_1pct, depth_5pct = _depth_fields(row, side)
     if price is None or price <= 0:
         return {
@@ -95,7 +104,7 @@ def estimate_execution_cost(
     acceptable_depth = d1 if impact_pct <= 0.01 else d5
     max_stake = acceptable_depth * price if acceptable_depth > 0 else 0.0
 
-    demonstrably_deep = bool(stake > 0 and top >= quantity and d1 >= quantity)
+    demonstrably_deep = bool(stake > 0 and top >= quantity and d1 >= quantity and quote_is_fresh)
     if quantity <= 0:
         model_slippage = flat
         status = "no_stake"
@@ -139,5 +148,7 @@ def estimate_execution_cost(
         "depth_5pct": round(d5, 6),
         "max_stake_at_acceptable_impact_usdc": round(max_stake, 6),
         "depth_is_demonstrably_deep": demonstrably_deep,
+        "quote_age_seconds": "" if age is None else round(age, 3),
+        "quote_is_fresh": quote_is_fresh,
         "reason": reason,
     }

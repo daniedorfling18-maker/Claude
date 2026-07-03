@@ -838,6 +838,20 @@ backtest:
 # Closing-line-value (CLV) evidence: settlement-independent forward evidence
 # asking whether the market line moved toward shadow entries. Diagnostic only;
 # it never authorises paper or live trading by itself.
+# Edge attribution: decompose closed shadow P&L into execution cost, line
+# movement, and settlement surprise per cohort. Research diagnostics only.
+edge_attribution:
+  minimum_positions_per_cohort: 5
+# Algo sweep: grid the shadow strategy parameters over recorded websocket
+# history, select on the train window only, confirm out-of-sample. A validated
+# candidate is a shadow research lead; it never promotes or trades.
+algo_sweep:
+  train_fraction: 0.7
+  minimum_events: 40
+  minimum_train_fills: 5
+  minimum_validation_fills: 3
+  tight_spread_maximums: [0.01, 0.02, 0.03]
+  minimum_book_imbalances: [0.55, 0.65, 0.75]
 closing_line_value:
   enabled: true
   minimum_final_samples: 12

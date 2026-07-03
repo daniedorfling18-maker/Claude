@@ -228,13 +228,17 @@ The governance refresh now also writes post-trade edge attribution:
 
 ```text
 outputs/polymarket_model_governance/edge_attribution.json
-outputs/polymarket_model_governance/edge_attribution_cohorts.csv
+outputs/polymarket_model_governance/edge_attribution_positions.csv
+outputs/polymarket_algo/algo_sweep_summary.json
+outputs/polymarket_algo/algo_sweep_combos.csv
 ```
 
-This decomposes paper/shadow cohort P&L into audited paper P&L, shadow P&L, entry edge, CLV line
-movement, spread/slippage cost, and residual model/settlement surprise. It is used by
-`research_focus.json` to separate cost/quote-quality problems from model/line-movement problems.
-It is diagnostic only and does not authorise paper or live trading.
+This decomposes closed shadow P&L into execution cost, line movement, and settlement surprise, then
+classifies cohorts as cost-dominated, direction-wrong, settlement-adverse, mixed, or positive-edge
+confirmed. The algo sweep lab searches event-driven strategy parameters over recorded websocket
+history with train-only selection and out-of-sample validation. Both are diagnostic only and do not
+authorise paper or live trading; collection steering consumes them after the WO-11 research-focus
+wiring.
 
 ## Why $100/month is not solved yet
 

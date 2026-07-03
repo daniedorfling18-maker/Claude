@@ -67,6 +67,13 @@ def redact_fetch_error(message: object, api_key: str | None = None) -> str:
     return re.sub(r"(?i)(apiKey=)[^&\s]+", r"\1[REDACTED]", text)
 
 
+def _clean_text(value: object) -> str:
+    if value is None:
+        return ""
+    text = str(value).strip()
+    return "" if text.lower() in {"none", "null", "nan"} else text
+
+
 def event_market_slug(home: str, away: str) -> str:
     """A venue-neutral, join-friendly market key for a fixture (order-independent of casing)."""
     return normalize_slug(f"{home} vs {away}")
@@ -108,10 +115,10 @@ def parse_odds_api_events(
     for event in events:
         if not isinstance(event, Mapping):
             continue
-        home = str(event.get("home_team", "")).strip()
-        away = str(event.get("away_team", "")).strip()
-        sport = str(event.get("sport_key", "")).strip()
-        sport_title = str(event.get("sport_title", "") or event.get("title", "")).strip()
+        home = _clean_text(event.get("home_team"))
+        away = _clean_text(event.get("away_team"))
+        sport = _clean_text(event.get("sport_key"))
+        sport_title = _clean_text(event.get("sport_title") or event.get("title"))
         book = _select_bookmaker(event.get("bookmakers", []) or [], bookmaker_priority)
         if book is None:
             continue

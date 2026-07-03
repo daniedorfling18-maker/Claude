@@ -84,6 +84,8 @@ def test_outright_market_is_keyed_by_sport_not_fixture():
                 "id": "winner1",
                 "sport_key": "soccer_fifa_world_cup_winner",
                 "sport_title": "FIFA World Cup Winner",
+                "home_team": None,
+                "away_team": None,
                 "bookmakers": [
                     {
                         "key": "pinnacle",

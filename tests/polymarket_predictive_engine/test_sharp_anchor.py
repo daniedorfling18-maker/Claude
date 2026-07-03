@@ -141,6 +141,7 @@ def test_build_sharp_anchor_joins_h2h_match_yes_question_without_guessing_no_sid
                 "decimal_odds": "2.10",
                 "market_key": "h2h",
                 "sport": "soccer_fifa_world_cup",
+                "token_id": "",
             },
             {
                 "market_slug": "Spain vs France",
@@ -148,6 +149,7 @@ def test_build_sharp_anchor_joins_h2h_match_yes_question_without_guessing_no_sid
                 "decimal_odds": "3.80",
                 "market_key": "h2h",
                 "sport": "soccer_fifa_world_cup",
+                "token_id": "",
             },
             {
                 "market_slug": "Spain vs France",
@@ -155,9 +157,10 @@ def test_build_sharp_anchor_joins_h2h_match_yes_question_without_guessing_no_sid
                 "decimal_odds": "3.40",
                 "market_key": "h2h",
                 "sport": "soccer_fifa_world_cup",
+                "token_id": "",
             },
         ],
-        ["market_slug", "outcome", "decimal_odds", "market_key", "sport"],
+        ["market_slug", "outcome", "decimal_odds", "market_key", "sport", "token_id"],
     )
     _write(
         tmp_path / "map.csv",
@@ -182,6 +185,9 @@ def test_build_sharp_anchor_joins_h2h_match_yes_question_without_guessing_no_sid
 
     assert summary["fundamental_rows"] == 1
     assert summary["skipped_no_token"] == 2
+    assert summary["token_join"] == "market_outcome_map"
+    assert summary["token_map_joins"] == 1
+    assert summary["direct_token_joins"] == 0
     out = _read(tmp_path / "outputs" / "polymarket_training" / "sharp_fundamental_probabilities.csv")
     assert {row["token_id"] for row in out} == {"SPAIN_YES"}
     assert {sample["outcome"] for sample in summary["skipped_no_token_samples"]} == {"France", "Draw"}

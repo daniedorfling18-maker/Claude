@@ -245,8 +245,9 @@ def build_sharp_anchor(cfg: EngineConfig, *, input_path: str | None = None) -> d
     odds_col = find_first_column(cols, DECIMAL_ODDS_FIELDS)
     implied_col = find_first_column(cols, IMPLIED_FIELDS)
     token_col = find_first_column(cols, TOKEN_FIELDS)
-    token_map = {} if token_col else _load_token_map(cfg, settings)
-    worldcup_winner_tokens = {} if token_col else _worldcup_winner_token_map(cfg, settings)
+    has_direct_tokens = bool(token_col and any(str(row.get(token_col, "")).strip() for row in rows))
+    token_map = _load_token_map(cfg, settings)
+    worldcup_winner_tokens = _worldcup_winner_token_map(cfg, settings)
 
     groups: dict[str, list[dict[str, Any]]] = defaultdict(list)
     for row in rows:
@@ -260,6 +261,8 @@ def build_sharp_anchor(cfg: EngineConfig, *, input_path: str | None = None) -> d
     skipped_incomplete_market_rows = 0
     incomplete_market_samples: list[dict[str, Any]] = []
     worldcup_winner_token_joins = 0
+    direct_token_joins = 0
+    token_map_joins = 0
     overrounds: list[float] = []
     for gkey, grows in groups.items():
         raw: list[float] = []
@@ -297,11 +300,13 @@ def build_sharp_anchor(cfg: EngineConfig, *, input_path: str | None = None) -> d
         fair = devig(raw, method)
         for row, implied, prob in zip(kept, raw, fair):
             row_market_key = str(row.get("market_key", "") or "")
-            token = (
-                str(row.get(token_col, "")).strip()
-                if token_col
-                else token_map.get(_match_key(gkey, str(row.get(outcome_col, ""))), "")
-            )
+            token = str(row.get(token_col, "")).strip() if token_col else ""
+            if token:
+                direct_token_joins += 1
+            elif outcome_col:
+                token = token_map.get(_match_key(gkey, str(row.get(outcome_col, ""))), "")
+                if token:
+                    token_map_joins += 1
             if (
                 not token
                 and outcome_col
@@ -353,12 +358,20 @@ def build_sharp_anchor(cfg: EngineConfig, *, input_path: str | None = None) -> d
         "max_market_implied_sum": max_market_implied_sum,
         "mean_overround_removed": round(sum(overrounds) / len(overrounds) - 1.0, 4) if overrounds else 0.0,
         "token_join": (
-            "direct_token_id"
-            if token_col
+            "direct_token_id+market_outcome_map+worldcup_winner_team_map"
+            if direct_token_joins and (token_map_joins or worldcup_winner_token_joins)
+            else "direct_token_id+market_outcome_map"
+            if direct_token_joins and token_map_joins
+            else "direct_token_id+worldcup_winner_team_map"
+            if direct_token_joins and worldcup_winner_token_joins
+            else "direct_token_id"
+            if has_direct_tokens
             else "market_outcome_map+worldcup_winner_team_map"
             if worldcup_winner_token_joins
             else "market_outcome_map"
         ),
+        "direct_token_joins": direct_token_joins,
+        "token_map_joins": token_map_joins,
         "worldcup_winner_tokens_available": len(worldcup_winner_tokens),
         "worldcup_winner_token_joins": worldcup_winner_token_joins,
         "output_file": str(out_path),

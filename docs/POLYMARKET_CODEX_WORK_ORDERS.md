@@ -1,6 +1,6 @@
 # Polymarket Codex Work Orders
 
-Last updated: 2026-07-03 (WO-24/25/26 code landed; strategic edge reset: WO-24..WO-27 added; WO-20/21/22 landed; read docs/POLYMARKET_EDGE_STRATEGY_RESET.md first)
+Last updated: 2026-07-03 (WO-24/25/26/27 code landed; strategic edge reset: WO-24..WO-27 added; WO-20/21/22 landed; read docs/POLYMARKET_EDGE_STRATEGY_RESET.md first)
 
 Mechanical, file-level implementation instructions for coding agents (Codex or any other code
 changer). The architecture and priorities live in `docs/POLYMARKET_QUANT_MODE_CHARTER.md`; this file
@@ -1010,7 +1010,7 @@ tests were also made Linux-safe by loading `scripts/*.py` by path.
 
 ---
 
-## WO-27 — Longshot-bias research family on slow markets (shadow-only) — `open` (MEDIUM)
+## WO-27 — Longshot-bias research family on slow markets (shadow-only) — `done` (2026-07-03, MEDIUM)
 
 **Goal:** stand up the structural-bias hypothesis as a first-class shadow research family measured
 by CLV, not settlement waiting.
@@ -1032,6 +1032,18 @@ by CLV, not settlement waiting.
 4. Tests: fixture snapshot -> exact candidate set; deep-longshot exclusion below min_price;
    fast markets excluded.
 
+**Landed 2026-07-03:** Added `longshot_bias.py` plus CLI command `longshot-bias-scan`.
+The scanner reads the live liquidity watchlist / websocket targets / prediction snapshot, requires
+an actual YES/NO binary pair, filters YES tails to the configured 0.02–0.12 band, slow markets
+(`min_time_to_close_hours=168`), and liquidity >= 500, then nominates the NO token with cohort
+`structural|longshot_no|<family>`. Artifacts:
+`outputs/polymarket_longshot_bias/longshot_bias_summary.json` and
+`outputs/polymarket_longshot_bias/longshot_bias_candidates.csv`, both explicitly paper/live false.
+The canonical paper cycle now forwards these candidates only into `update_shadow_cohort_evidence`;
+they are not written into paper signal generation. Tests cover exact candidate selection,
+below-min/fast/thin exclusions, artifact writes, shadow-position emission, and paper-cycle
+shadow-only forwarding.
+
 ---
 
 ## Sequencing
@@ -1045,7 +1057,7 @@ Queue order (strategic reset, 2026-07-03 — read POLYMARKET_EDGE_STRATEGY_RESET
 3. WO-25   done 2026-07-03: dutch-book arb monitor loop/dashboard wiring (mechanical edge, model-free)
 4. WO-26   done 2026-07-03: anti-concentration guard on adaptive queries
 5. WO-21   done 2026-07-03: settle or flag stuck paper positions
-6. WO-27   longshot-bias research family (shadow-only)
+6. WO-27   done 2026-07-03: longshot-bias research family (shadow-only)
 7. WO-7    done 2026-07-03: CLV-aware promotion review advisory wiring
 8. WO-22   done 2026-07-03: evidence-gated display fixes
 9. WO-23   deployment-aware oversight status

@@ -699,6 +699,18 @@ shadow_cohort_validation:
   positions_file: shadow_positions.csv
   fills_file: shadow_fills.csv
   summary_file: shadow_signal_cohort_pnl.json
+longshot_bias:
+  # Shadow-only structural-bias research lane. It scans slow liquid binary
+  # markets where the YES tail trades between 2c and 12c, then nominates the
+  # NO token for CLV/forward-shadow validation. It does not create paper or live
+  # orders.
+  enabled: true
+  emit_shadow_positions: true
+  min_price: 0.02
+  max_price: 0.12
+  min_time_to_close_hours: 168
+  minimum_liquidity: 500
+  max_candidates: 25
 edge_strategy_search:
   enabled: true
   holdout_fraction: 0.25

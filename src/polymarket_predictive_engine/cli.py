@@ -30,6 +30,7 @@ from .governance import governance_report
 from .historical_backfill import historical_backfill
 from .labels import build_labels
 from .live_mispricing import run_live_mispricing, scan_live_mispricing
+from .longshot_bias import build_longshot_bias_scan
 from .market_making_pnl import evaluate_market_making
 from .mispricing_alpha import apply_mispricing_alpha, train_mispricing_alpha_model
 from .models.calibrated import load_prediction_models, train_model, write_predictions
@@ -135,6 +136,7 @@ COMMANDS = [
     "run-live-mispricing",
     "market-making-pnl",
     "dutch-arb-monitor",
+    "longshot-bias-scan",
     "resolve-websocket-markets",
     "collect-snapshot-labels",
     "collect-overnight",
@@ -401,6 +403,8 @@ def main(argv: list[str] | None = None) -> int:
             _print(run_dutch_arb_monitor(cfg, polls=args.polls, poll_seconds=args.poll_seconds,
                                          max_events=args.max_events, min_annualised=args.min_annualised,
                                          alert_annualised=args.alert_annualised))
+        elif args.command == "longshot-bias-scan":
+            _print(build_longshot_bias_scan(cfg))
         elif args.command == "resolve-websocket-markets":
             _print(collect_websocket_resolutions(cfg))
         elif args.command == "collect-snapshot-labels":

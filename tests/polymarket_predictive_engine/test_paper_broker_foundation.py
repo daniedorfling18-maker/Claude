@@ -324,6 +324,56 @@ def test_forward_paper_cycle_is_persistent_idempotent_and_settles(tmp_path):
         con.close()
 
 
+def test_forward_paper_cycle_forwards_longshot_bias_only_to_shadow(tmp_path):
+    cfg = _config(tmp_path)
+    _seed_forward_fixture(cfg)
+    write_csv(
+        cfg.output_root / "polymarket_liquidity_discovery" / "liquidity_watchlist.csv",
+        [
+            {
+                "timestamp": "2026-07-03T08:00:00Z",
+                "market_id": "longshot-market",
+                "market_slug": "will-longshot-event-happen",
+                "question": "Will the longshot event happen?",
+                "outcome": "Yes",
+                "token_id": "longshot-yes",
+                "close_time": "2026-12-31T00:00:00Z",
+                "time_to_close_hours": 4000,
+                "best_bid": 0.07,
+                "best_ask": 0.08,
+                "midpoint": 0.075,
+                "spread": 0.01,
+                "liquidity": 1200,
+            },
+            {
+                "timestamp": "2026-07-03T08:00:00Z",
+                "market_id": "longshot-market",
+                "market_slug": "will-longshot-event-happen",
+                "question": "Will the longshot event happen?",
+                "outcome": "No",
+                "token_id": "longshot-no",
+                "close_time": "2026-12-31T00:00:00Z",
+                "time_to_close_hours": 4000,
+                "best_bid": 0.92,
+                "best_ask": 0.93,
+                "midpoint": 0.925,
+                "spread": 0.01,
+                "liquidity": 1200,
+            },
+        ],
+    )
+
+    result = run_paper_cycle(cfg, source="raw_snapshot")
+
+    assert result["signals_approved"] == 1
+    assert result["longshot_bias"]["candidates"] == 1
+    assert result["longshot_bias"]["shadow_candidates_forwarded"] == 1
+    shadow_positions = read_csv_rows(cfg.output_root / "polymarket_shadow" / "shadow_positions.csv")
+    assert len(shadow_positions) == 1
+    assert shadow_positions[0]["token_id"] == "longshot-no"
+    assert shadow_positions[0]["shadow_source"] == "longshot_bias"
+
+
 def test_paper_broker_proxy_settles_fast_crypto_updown_position(tmp_path, monkeypatch):
     cfg = _config(tmp_path)
     cfg.raw["paper_trading"]["settle_crypto_updown_with_public_price"] = True

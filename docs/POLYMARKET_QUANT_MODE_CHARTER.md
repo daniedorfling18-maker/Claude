@@ -319,6 +319,13 @@ cap crypto up/down to one timing diagnostic, and enforce at least four distinct 
 deterministic broad base. This pushes discovery back toward sports/macro/esports/AI/politics/stocks
 instead of letting weak up/down evidence consume the loop.
 
+**2026-07-03 — WO-27 landed by Codex.** The structural longshot-bias family now runs as a
+shadow-only research lane. `longshot_bias.py` and CLI `longshot-bias-scan` scan slow, liquid binary
+markets where the YES tail is 2–12c, require a real NO-side token, and nominate
+`structural|longshot_no|<family>` candidates for CLV/forward-shadow validation. The canonical
+paper cycle forwards those rows only into shadow evidence, not paper signal generation. Artifacts
+live under `outputs/polymarket_longshot_bias/`.
+
 ## Rules of engagement for coding agents
 
 0. **Division of labour**: the orchestrating agent writes/updates this charter and the work orders

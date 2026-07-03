@@ -478,6 +478,31 @@ def _h2h_match_tokens_from_public_search(
     }
 
 
+def _coverage_bucket(
+    coverage: dict[tuple[str, str], dict[str, Any]],
+    row: dict[str, Any],
+) -> dict[str, Any]:
+    sport = str(row.get("sport") or row.get("sport_title") or "unknown").strip() or "unknown"
+    market_key = str(row.get("market_key") or row.get("market") or "unknown").strip() or "unknown"
+    key = (sport, market_key)
+    if key not in coverage:
+        coverage[key] = {
+            "sport": sport,
+            "market_key": market_key,
+            "rows_in": 0,
+            "priced_rows": 0,
+            "fundamental_rows": 0,
+            "skipped_unpriced": 0,
+            "skipped_no_token": 0,
+            "incomplete_market_rows": 0,
+            "direct_token_joins": 0,
+            "token_map_joins": 0,
+            "h2h_public_search_token_joins": 0,
+            "worldcup_winner_token_joins": 0,
+        }
+    return coverage[key]
+
+
 def _load_token_map(cfg: EngineConfig, settings: dict[str, Any]) -> dict[str, str]:
     """(market, outcome) -> token_id, built from a configured map file (default: the bot's
     market_snapshot.csv, which carries token_id + market_slug + outcome)."""
@@ -540,9 +565,11 @@ def build_sharp_anchor(cfg: EngineConfig, *, input_path: str | None = None) -> d
     token_map = _load_token_map(cfg, settings)
     h2h_public_tokens, h2h_public_search = _h2h_match_tokens_from_public_search(settings, rows)
     worldcup_winner_tokens = _worldcup_winner_token_map(cfg, settings)
+    coverage_by_sport_market: dict[tuple[str, str], dict[str, Any]] = {}
 
     groups: dict[str, list[dict[str, Any]]] = defaultdict(list)
     for row in rows:
+        _coverage_bucket(coverage_by_sport_market, row)["rows_in"] += 1
         groups[str(row.get(group_col, "")) if group_col else "all"].append(row)
 
     out_rows: list[dict[str, Any]] = []
@@ -561,18 +588,23 @@ def build_sharp_anchor(cfg: EngineConfig, *, input_path: str | None = None) -> d
         raw: list[float] = []
         kept: list[dict[str, Any]] = []
         for row in grows:
+            coverage = _coverage_bucket(coverage_by_sport_market, row)
             implied = implied_from_decimal(safe_float(row.get(odds_col))) if odds_col else safe_float(row.get(implied_col))
             if implied is None or not 0.0 < implied < 1.0:
                 skipped_unpriced += 1
+                coverage["skipped_unpriced"] += 1
                 continue
             raw.append(implied)
             kept.append(row)
+            coverage["priced_rows"] += 1
         if not raw:
             continue
         raw_sum = sum(raw)
         if len(raw) < min_outcomes_per_market or raw_sum < min_market_implied_sum or raw_sum > max_market_implied_sum:
             skipped_incomplete_markets += 1
             skipped_incomplete_market_rows += len(kept)
+            for row in kept:
+                _coverage_bucket(coverage_by_sport_market, row)["incomplete_market_rows"] += 1
             if len(incomplete_market_samples) < 20:
                 incomplete_market_samples.append(
                     {
@@ -593,17 +625,22 @@ def build_sharp_anchor(cfg: EngineConfig, *, input_path: str | None = None) -> d
         fair = devig(raw, method)
         for row, implied, prob in zip(kept, raw, fair):
             row_market_key = str(row.get("market_key", "") or "")
+            coverage = _coverage_bucket(coverage_by_sport_market, row)
             token = str(row.get(token_col, "")).strip() if token_col else ""
+            join_source = ""
             if token:
                 direct_token_joins += 1
+                join_source = "direct_token_joins"
             elif outcome_col:
                 token = token_map.get(_match_key(gkey, str(row.get(outcome_col, ""))), "")
                 if token:
                     token_map_joins += 1
+                    join_source = "token_map_joins"
                 else:
                     token = h2h_public_tokens.get(_match_key(gkey, str(row.get(outcome_col, ""))), "")
                     if token:
                         h2h_public_search_token_joins += 1
+                        join_source = "h2h_public_search_token_joins"
             if (
                 not token
                 and outcome_col
@@ -612,8 +649,10 @@ def build_sharp_anchor(cfg: EngineConfig, *, input_path: str | None = None) -> d
                 token = worldcup_winner_tokens.get(_team_key(row.get(outcome_col)), "")
                 if token:
                     worldcup_winner_token_joins += 1
+                    join_source = "worldcup_winner_token_joins"
             if not token:
                 skipped_no_token += 1
+                coverage["skipped_no_token"] += 1
                 if len(skipped_no_token_samples) < 20:
                     skipped_no_token_samples.append(
                         {
@@ -625,6 +664,9 @@ def build_sharp_anchor(cfg: EngineConfig, *, input_path: str | None = None) -> d
                         }
                     )
                 continue
+            coverage["fundamental_rows"] += 1
+            if join_source:
+                coverage[join_source] += 1
             out_rows.append({
                 "token_id": token,
                 "probability": round(prob, 6),
@@ -692,6 +734,14 @@ def build_sharp_anchor(cfg: EngineConfig, *, input_path: str | None = None) -> d
         "h2h_public_search": h2h_public_search,
         "h2h_public_search_tokens_available": len(set(h2h_public_tokens.values())),
         "h2h_public_search_token_joins": h2h_public_search_token_joins,
+        "coverage_by_sport_market": sorted(
+            coverage_by_sport_market.values(),
+            key=lambda item: (
+                -int(item.get("rows_in", 0) or 0),
+                str(item.get("sport") or ""),
+                str(item.get("market_key") or ""),
+            ),
+        ),
         "worldcup_winner_tokens_available": len(worldcup_winner_tokens),
         "worldcup_winner_token_joins": worldcup_winner_token_joins,
         "output_file": str(out_path),

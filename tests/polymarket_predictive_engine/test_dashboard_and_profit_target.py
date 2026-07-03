@@ -2233,6 +2233,41 @@ def test_dashboard_treats_fallback_sharp_odds_as_usable_anchor_input(tmp_path):
     assert anchors["sharp_odds_fetch"].get("blocker") is None
 
 
+def test_dashboard_surfaces_sharp_anchor_coverage_by_sport(tmp_path):
+    cfg = _config(tmp_path)
+    write_json(
+        cfg.governance_root / "sharp_anchor_summary.json",
+        {
+            "status": "built",
+            "fundamental_rows": 22,
+            "skipped_no_token": 82,
+            "coverage_by_sport_market": [
+                {
+                    "sport": "soccer_fifa_world_cup",
+                    "market_key": "h2h",
+                    "rows_in": 27,
+                    "priced_rows": 27,
+                    "fundamental_rows": 24,
+                    "skipped_no_token": 3,
+                    "h2h_public_search_token_joins": 24,
+                    "token_map_joins": 0,
+                    "worldcup_winner_token_joins": 0,
+                    "incomplete_market_rows": 0,
+                }
+            ],
+        },
+    )
+
+    result = render_dashboard(cfg)
+
+    data = read_json(result["dashboard_data"])
+    html = Path(result["dashboard_file"]).read_text(encoding="utf-8")
+    coverage = data["independent_anchor_status"]["sharp_anchor"]["coverage_by_sport_market"]
+    assert coverage[0]["sport"] == "soccer_fifa_world_cup"
+    assert coverage[0]["h2h_public_search_token_joins"] == 24
+    assert "Sharp anchor coverage by sport" in html
+
+
 def test_dashboard_surfaces_sharp_anchor_alpha_bridge_blockers(tmp_path):
     cfg = _config(tmp_path)
     write_json(

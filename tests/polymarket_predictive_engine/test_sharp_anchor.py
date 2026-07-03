@@ -369,6 +369,22 @@ def test_build_sharp_anchor_enriches_three_way_h2h_win_and_draw_markets(tmp_path
     assert summary["h2h_public_search"]["queries"] == 1
     assert summary["h2h_public_search"]["tokens"] == 3
     assert summary["h2h_public_search_token_joins"] == 3
+    assert summary["coverage_by_sport_market"] == [
+        {
+            "sport": "soccer_fifa_world_cup",
+            "market_key": "h2h",
+            "rows_in": 3,
+            "priced_rows": 3,
+            "fundamental_rows": 3,
+            "skipped_unpriced": 0,
+            "skipped_no_token": 0,
+            "incomplete_market_rows": 0,
+            "direct_token_joins": 0,
+            "token_map_joins": 0,
+            "h2h_public_search_token_joins": 3,
+            "worldcup_winner_token_joins": 0,
+        }
+    ]
     out = _read(tmp_path / "outputs" / "polymarket_training" / "sharp_fundamental_probabilities.csv")
     assert {row["token_id"] for row in out} == {"AUSTRALIA_YES", "EGYPT_YES", "DRAW_YES"}
     assert sum(float(row["probability"]) for row in out) == approx(1.0, abs=1e-5)

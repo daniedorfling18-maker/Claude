@@ -1674,6 +1674,18 @@ async function load() {
       ["Output","output_file", (v,row)=>longText(v || row.output_path || row.fallback_rejections_path || "")],
       ["Blocker","blocker", v=>longText(v, 160)],
       ["Note","note"]
+    ]) + `<div style="height:12px"></div><h3>Sharp anchor coverage by sport</h3>` +
+    table((anchors.sharp_anchor || {}).coverage_by_sport_market || [], [
+      ["Sport","sport", v=>longText(v, 120)],
+      ["Market","market_key"],
+      ["Rows in","rows_in"],
+      ["Priced","priced_rows"],
+      ["Mapped","fundamental_rows"],
+      ["No token","skipped_no_token"],
+      ["Public search joins","h2h_public_search_token_joins"],
+      ["Token-map joins","token_map_joins"],
+      ["Winner joins","worldcup_winner_token_joins"],
+      ["Incomplete rows","incomplete_market_rows"]
     ]);
     document.getElementById("edgeSearch").innerHTML = table(data.edge_strategy_search?.top_rules || [], [
       ["Rule","rule_value"], ["Promotable","promotable"], ["Holdout ROI","holdout_roi", v=>fmtNum(Number(v) * 100, 2) + "%"],

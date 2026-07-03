@@ -10,9 +10,12 @@ from typing import Any
 
 from .cohort_validation import write_signal_cohort_pnl
 from .config import EngineConfig
+from .crypto_updown_settlement import (
+    crypto_updown_close_time_from_row,
+    crypto_updown_proxy_settlement_price as _crypto_updown_proxy_settlement_price,
+)
 from .readiness import paper_trade_readiness
 from .risk import risk_decision
-from .shadow_cohort import _crypto_updown_proxy_settlement_price
 from .storage import connect_db
 from .utils import boolish, now_utc, parse_timestamp, read_csv_rows, read_json, safe_float, write_csv, write_json
 from .worldcup_validation import normalised_correlation_key
@@ -300,6 +303,83 @@ def _proxy_resolution_for_position(con, cfg: EngineConfig, position) -> tuple[in
     if target not in {0.0, 1.0}:
         return None
     return int(target), reason
+
+
+def _position_close_time_for_alert(con, position) -> datetime | None:
+    payload = _position_payload_for_settlement(con, position)
+    close_time = crypto_updown_close_time_from_row(payload)
+    return close_time.astimezone(timezone.utc) if close_time is not None else None
+
+
+def _has_fresh_position_quote(con, cfg: EngineConfig, position, settings: dict[str, Any]) -> tuple[bool, str, float | None]:
+    quote = _latest_quote(con, cfg, str(position["market_id"]), str(position["token_id"]))
+    source = str(quote.get("source") or "missing")
+    if source in {"missing", "model_predictions"}:
+        return False, source, None
+    bid = safe_float(quote.get("best_bid"))
+    ask = safe_float(quote.get("best_ask"))
+    if (bid is None or bid <= 0) and (ask is None or ask <= 0):
+        return False, f"{source}:missing_bid_ask", None
+    quote_time = _quote_time(quote)
+    if quote_time is None:
+        return False, f"{source}:missing_timestamp", None
+    max_age = safe_float(settings.get("stale_open_fresh_quote_minutes"))
+    if max_age is None:
+        max_age = safe_float(settings.get("max_exit_quote_age_minutes"))
+    if max_age is None:
+        max_age = 30.0
+    age_minutes = max(0.0, (datetime.now(timezone.utc) - quote_time.astimezone(timezone.utc)).total_seconds() / 60.0)
+    if age_minutes > float(max_age):
+        return False, f"{source}:stale_quote", age_minutes
+    return True, source, age_minutes
+
+
+def stale_open_positions(con, cfg: EngineConfig) -> list[dict[str, Any]]:
+    """Report open paper positions that are past close without fresh quotes or resolution evidence."""
+    settings = _paper_settings(cfg)
+    alert_hours = safe_float(settings.get("stale_open_alert_hours"))
+    if alert_hours is None:
+        alert_hours = 2.0
+    if alert_hours < 0:
+        return []
+    resolutions = _resolution_index(cfg)
+    stale: list[dict[str, Any]] = []
+    positions = con.execute(
+        "SELECT * FROM positions WHERE status = 'open' AND quantity > 0 ORDER BY updated_at, position_id"
+    ).fetchall()
+    for position in positions:
+        key = (str(position["market_id"]), str(position["token_id"]))
+        if resolutions.get(key) or resolutions.get(("", str(position["token_id"]))):
+            continue
+        close_time = _position_close_time_for_alert(con, position)
+        if close_time is None:
+            continue
+        hours_past_close = (datetime.now(timezone.utc) - close_time).total_seconds() / 3600.0
+        if hours_past_close <= float(alert_hours):
+            continue
+        has_fresh_quote, quote_state, quote_age = _has_fresh_position_quote(con, cfg, position, settings)
+        if has_fresh_quote:
+            continue
+        payload = _position_payload_for_settlement(con, position)
+        stale.append(
+            {
+                "position_id": position["position_id"],
+                "market_id": position["market_id"],
+                "token_id": position["token_id"],
+                "market_slug": payload.get("market_slug", ""),
+                "question": payload.get("question", ""),
+                "outcome": payload.get("outcome", ""),
+                "side": position["side"],
+                "quantity": float(position["quantity"]),
+                "cost_basis_usdc": float(position["cost_basis_usdc"]),
+                "close_time": close_time.strftime("%Y-%m-%dT%H:%M:%SZ"),
+                "hours_past_close": round(hours_past_close, 3),
+                "quote_state": quote_state,
+                "quote_age_minutes": None if quote_age is None else round(quote_age, 3),
+                "alert": "stale_open_position",
+            }
+        )
+    return stale
 
 
 def _position_mark_price(con, cfg: EngineConfig, position) -> float:
@@ -1230,6 +1310,7 @@ def run_paper_broker(cfg: EngineConfig) -> dict[str, Any]:
                         results.append(submit_paper_signal(con, cfg, signal))
             elif exit_monitoring_when_blocked:
                 exit_results = close_eligible_positions(con, cfg)
+            stale_positions = stale_open_positions(con, cfg)
             snapshot = write_portfolio_snapshot(con, cfg)
             export_ledger(con, cfg)
             cohort_pnl = write_signal_cohort_pnl(con, cfg)
@@ -1268,6 +1349,8 @@ def run_paper_broker(cfg: EngineConfig) -> dict[str, Any]:
             "exit_rejection_reasons": dict(exit_rejections),
             "positions_settled": len(settlements),
             "settlements": settlements,
+            "stale_open_position_count": len(stale_positions),
+            "stale_open_positions": stale_positions,
             "cohort_pnl": cohort_pnl,
             "cash": snapshot["cash"],
             "equity": snapshot["equity"],

@@ -10,6 +10,19 @@ from polymarket_predictive_engine.sharp_odds_fetch import (
     redact_fetch_error,
 )
 from polymarket_predictive_engine.config import EngineConfig
+from polymarket_predictive_engine.utils import write_json
+
+
+class _Response:
+    def __init__(self, payload, *, headers=None):
+        self._payload = payload
+        self.headers = headers or {}
+
+    def raise_for_status(self):
+        return None
+
+    def json(self):
+        return self._payload
 
 
 def _event(bookmakers):
@@ -71,6 +84,8 @@ def test_outright_market_is_keyed_by_sport_not_fixture():
                 "id": "winner1",
                 "sport_key": "soccer_fifa_world_cup_winner",
                 "sport_title": "FIFA World Cup Winner",
+                "home_team": None,
+                "away_team": None,
                 "bookmakers": [
                     {
                         "key": "pinnacle",
@@ -278,3 +293,96 @@ def test_fallback_csv_rejections_are_reported(tmp_path, monkeypatch):
     rejections = list(csv.DictReader(open(summary["fallback_rejections_path"], encoding="utf-8-sig")))
     assert len(rejections) == 2
     assert "decimal_odds_not_greater_than_one" in rejections[1]["reasons"]
+
+
+def test_fetch_skips_when_budget_interval_has_not_elapsed(tmp_path, monkeypatch):
+    monkeypatch.setenv("THE_ODDS_API_KEY", "secret-key-123")
+    cfg = EngineConfig(
+        raw={
+            "paths": {"output_root": str(tmp_path / "outputs")},
+            "sharp_odds_fetch": {
+                "sports": ["soccer_fifa_world_cup"],
+                "output_path": str(tmp_path / "sharp_odds.csv"),
+                "fetch_interval_minutes": 60,
+            },
+        },
+        path=tmp_path / "cfg.yaml",
+    )
+    write_json(
+        cfg.governance_root / "sharp_odds_fetch_summary.json",
+        {
+            "status": "fetched",
+            "provider_status": "attempted",
+            "rows": 3,
+            "markets": 1,
+            "books_used": ["pinnacle"],
+            "generated_at_utc": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        },
+    )
+
+    def fail_network(*args, **kwargs):
+        raise AssertionError("budget guard should not call the provider")
+
+    monkeypatch.setattr("polymarket_predictive_engine.sharp_odds_fetch.requests.get", fail_network)
+
+    summary = fetch_sharp_odds(cfg)
+
+    assert summary["status"] == "skipped_budget"
+    assert summary["provider_status"] == "skipped_budget"
+    assert summary["previous_status"] == "fetched"
+    assert summary["seconds_until_next_fetch"] > 0
+
+
+def test_fetch_skips_unknown_provider_sport_but_fetches_known_sports(tmp_path, monkeypatch):
+    api_key = "secret-key-123"
+    monkeypatch.setenv("THE_ODDS_API_KEY", api_key)
+    output = tmp_path / "sharp_odds.csv"
+    calls = []
+
+    def fake_get(url, params=None, timeout=None):
+        calls.append((url, params))
+        if url.endswith("/sports"):
+            return _Response([{"key": "basketball_nba"}, {"key": "soccer_fifa_world_cup"}])
+        assert url.endswith("/sports/basketball_nba/odds")
+        assert params["markets"] == "h2h"
+        return _Response(
+            [
+                {
+                    "id": "nba1",
+                    "sport_key": "basketball_nba",
+                    "sport_title": "NBA",
+                    "home_team": "Boston Celtics",
+                    "away_team": "Miami Heat",
+                    "bookmakers": [_h2h("pinnacle", 1.7, 20.0, 2.2)],
+                }
+            ],
+            headers={"x-requests-remaining": "499"},
+        )
+
+    monkeypatch.setattr("polymarket_predictive_engine.sharp_odds_fetch.requests.get", fake_get)
+    cfg = EngineConfig(
+        raw={
+            "paths": {"output_root": str(tmp_path / "outputs")},
+            "sharp_odds_fetch": {
+                "sports": [
+                    {"key": "tennis_atp", "markets": "h2h"},
+                    {"key": "basketball_nba", "markets": "h2h"},
+                ],
+                "output_path": str(output),
+                "fetch_interval_minutes": 0,
+                "max_requests_per_run": 5,
+            },
+        },
+        path=tmp_path / "cfg.yaml",
+    )
+
+    summary = fetch_sharp_odds(cfg)
+
+    assert summary["status"] == "partial"
+    assert summary["provider_sports_status"]["status"] == "ok"
+    assert summary["skipped_unknown_sports"] == ["tennis_atp"]
+    assert summary["requests_used"] == 1
+    assert len(calls) == 2
+    rows = list(csv.DictReader(open(output, encoding="utf-8-sig")))
+    assert {row["sport"] for row in rows} == {"basketball_nba"}
+    assert {row["market_key"] for row in rows} == {"h2h"}

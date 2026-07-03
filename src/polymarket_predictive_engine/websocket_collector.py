@@ -3,11 +3,12 @@ from __future__ import annotations
 import asyncio
 import importlib
 import json
+import sqlite3
 import time
 from typing import Any
 
 from .config import EngineConfig, load_config
-from .utils import now_utc, read_csv_rows, read_json, safe_float, write_csv, write_json
+from .utils import now_utc, parse_timestamp, read_csv_rows, read_json, safe_float, write_csv, write_json
 
 _TARGET_DECISIONS = {"collect_settlement_evidence", "candidate_for_focus"}
 _PROFIT_SPRINT_TARGET_ACTIONS = {"WAIT_ACTIVE_WINDOW", "SHADOW_LABEL_GATE", "SHADOW_EDGE_WATCH"}
@@ -80,6 +81,263 @@ def _boolish(value: Any) -> bool:
 
 def _token_id(row: dict[str, Any]) -> str:
     return str(row.get("token_id") or row.get("asset_id") or row.get("outcome_token_id") or "").strip()
+
+
+def _collection_setting(cfg: EngineConfig, settings: dict[str, Any], key: str, default: Any) -> Any:
+    if key in settings:
+        return settings.get(key)
+    collection = cfg.raw.get("collection", {})
+    if isinstance(collection, dict) and key in collection:
+        return collection.get(key)
+    return default
+
+
+def _json_dict(value: Any) -> dict[str, Any]:
+    if isinstance(value, dict):
+        return value
+    text = str(value or "").strip()
+    if not text:
+        return {}
+    try:
+        decoded = json.loads(text)
+    except (TypeError, ValueError, json.JSONDecodeError):
+        return {}
+    return decoded if isinstance(decoded, dict) else {}
+
+
+def _first_text(row: dict[str, Any], keys: tuple[str, ...]) -> str:
+    for key in keys:
+        text = str(row.get(key) or "").strip()
+        if text:
+            return text
+    return ""
+
+
+def _position_close_time_text(row: dict[str, Any]) -> str:
+    direct = _first_text(
+        row,
+        (
+            "close_time",
+            "market_close_time",
+            "end_time",
+            "endDate",
+            "endDateIso",
+            "closed_at",
+        ),
+    )
+    if direct:
+        return direct
+    for payload_key in ("source_signal_json", "raw_payload_json", "prediction_payload_json"):
+        payload = _json_dict(row.get(payload_key))
+        nested = _position_close_time_text(payload) if payload else ""
+        if nested:
+            return nested
+    return ""
+
+
+def _paper_db_rows(cfg: EngineConfig, query: str) -> list[dict[str, Any]]:
+    path = cfg.database_path
+    if not path.exists():
+        return []
+    con: sqlite3.Connection | None = None
+    try:
+        con = sqlite3.connect(path, timeout=2)
+        con.row_factory = sqlite3.Row
+        return [dict(row) for row in con.execute(query).fetchall()]
+    except sqlite3.Error:
+        return []
+    finally:
+        if con is not None:
+            con.close()
+
+
+def _paper_order_payload_index(cfg: EngineConfig) -> dict[str, dict[str, Any]]:
+    rows = read_csv_rows(cfg.output_root / "polymarket_portfolio" / "paper_orders.csv")
+    rows.extend(
+        _paper_db_rows(
+            cfg,
+            """
+            SELECT market_id, token_id, created_at, source_signal_json
+            FROM orders
+            WHERE mode = 'paper'
+            ORDER BY created_at, order_id
+            """,
+        )
+    )
+    index: dict[str, dict[str, Any]] = {}
+    for row in rows:
+        payload = _json_dict(row.get("source_signal_json"))
+        if not payload:
+            continue
+        market_id = str(row.get("market_id") or payload.get("market_id") or "").strip()
+        token_id = _token_id(row) or _token_id(payload)
+        if not token_id:
+            continue
+        payload = {**payload, "market_id": market_id or payload.get("market_id", ""), "token_id": token_id}
+        if market_id:
+            index[f"{market_id}|{token_id}"] = payload
+        index[f"token:{token_id}"] = payload
+    return index
+
+
+def _open_position_rows(cfg: EngineConfig) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    for row in read_csv_rows(cfg.output_root / "polymarket_shadow" / "shadow_positions.csv"):
+        if str(row.get("status") or "").strip().lower() != "open":
+            continue
+        if not _token_id(row):
+            continue
+        rows.append({**row, "position_source": "shadow_position"})
+
+    order_payloads = _paper_order_payload_index(cfg)
+    paper_rows = read_csv_rows(cfg.output_root / "polymarket_portfolio" / "positions.csv")
+    paper_rows.extend(
+        _paper_db_rows(
+            cfg,
+            """
+            SELECT *
+            FROM positions
+            WHERE status = 'open' AND quantity > 0
+            ORDER BY updated_at, position_id
+            """,
+        )
+    )
+    for row in paper_rows:
+        status = str(row.get("status") or "").strip().lower()
+        quantity = safe_float(row.get("quantity"))
+        if status and status != "open":
+            continue
+        if quantity is not None and quantity <= 0:
+            continue
+        token_id = _token_id(row)
+        if not token_id:
+            continue
+        market_id = str(row.get("market_id") or "").strip()
+        payload = order_payloads.get(f"{market_id}|{token_id}") or order_payloads.get(f"token:{token_id}") or {}
+        enriched = {**payload, **row, "token_id": token_id, "position_source": "paper_position"}
+        for key in ("close_time", "market_slug", "question", "outcome", "category", "event_id", "correlation_key"):
+            if not str(enriched.get(key) or "").strip() and str(payload.get(key) or "").strip():
+                enriched[key] = payload.get(key)
+        if payload and not str(enriched.get("source_signal_json") or "").strip():
+            enriched["source_signal_json"] = json.dumps(payload, sort_keys=True)
+        rows.append(enriched)
+    return rows
+
+
+def position_tokens(cfg: EngineConfig, *, as_of: Any | None = None) -> list[dict[str, Any]]:
+    """Return open shadow/paper position tokens that must stay in websocket coverage.
+
+    Known close times are retained until market close plus
+    ``position_grace_hours``. Rows missing close time are retained while the
+    position is open because dropping them would make CLV/settlement evidence
+    impossible to recover; the reserved slot cap bounds that coverage.
+    """
+    settings = cfg.raw.get("websocket_market_data", {})
+    if not isinstance(settings, dict):
+        settings = {}
+    if not _boolish(_collection_setting(cfg, settings, "use_position_targets", True)):
+        return []
+    grace_hours = safe_float(_collection_setting(cfg, settings, "position_grace_hours", 6))
+    if grace_hours is None or grace_hours < 0:
+        grace_hours = 6.0
+    include_missing_close = _boolish(_collection_setting(cfg, settings, "include_position_tokens_without_close_time", True))
+    as_of_dt = parse_timestamp(as_of) or parse_timestamp(now_utc())
+    if as_of_dt is None:
+        return []
+
+    selected: list[dict[str, Any]] = []
+    seen: dict[str, dict[str, Any]] = {}
+    for row in _open_position_rows(cfg):
+        token_id = _token_id(row)
+        if not token_id:
+            continue
+        close_text = _position_close_time_text(row)
+        close_dt = parse_timestamp(close_text)
+        if close_dt is not None:
+            seconds_after_close = (as_of_dt - close_dt).total_seconds()
+            if seconds_after_close > grace_hours * 3600.0:
+                continue
+            close_state = "within_grace" if seconds_after_close >= 0 else "future_close"
+        else:
+            if not include_missing_close:
+                continue
+            close_state = "missing_close_time"
+        target = {
+            "token_id": token_id,
+            "asset_id": token_id,
+            "market_id": row.get("market_id", ""),
+            "market_slug": row.get("market_slug", ""),
+            "question": row.get("question", ""),
+            "outcome": row.get("outcome", ""),
+            "family": row.get("family") or row.get("category") or row.get("signal_cohort") or row.get("position_source", ""),
+            "category": row.get("category", ""),
+            "close_time": close_text,
+            "position_source": row.get("position_source", ""),
+            "position_close_state": close_state,
+            "open_position_target": True,
+            "selection_reason": "open_position",
+            "websocket_target_reason": "open_position",
+        }
+        existing = seen.get(token_id)
+        if existing is not None:
+            sources = {
+                item
+                for item in str(existing.get("position_source") or "").split("+")
+                if item
+            }
+            source = str(target.get("position_source") or "")
+            if source:
+                sources.add(source)
+            existing["position_source"] = "+".join(sorted(sources))
+            if not str(existing.get("close_time") or "").strip() and close_text:
+                existing["close_time"] = close_text
+                existing["position_close_state"] = close_state
+            continue
+        selected.append(target)
+        seen[token_id] = target
+
+    def rank(row: dict[str, Any]) -> tuple[int, float, str]:
+        close_dt = parse_timestamp(row.get("close_time"))
+        if close_dt is None:
+            return (1, float("inf"), str(row.get("token_id") or ""))
+        return (0, close_dt.timestamp(), str(row.get("token_id") or ""))
+
+    selected.sort(key=rank)
+    return selected
+
+
+def _position_priority_rows(cfg: EngineConfig, settings: dict[str, Any], *, max_assets: int) -> list[dict[str, Any]]:
+    if max_assets <= 0:
+        return []
+    requested_slots = int(_collection_setting(cfg, settings, "position_token_slots", 10) or 10)
+    if requested_slots <= 0:
+        return []
+    half_cap = max(1, (max_assets + 1) // 2)
+    slot_cap = min(max_assets, requested_slots, half_cap)
+    return position_tokens(cfg)[:slot_cap]
+
+
+def _with_position_targets(
+    cfg: EngineConfig,
+    settings: dict[str, Any],
+    selected: list[dict[str, Any]],
+    *,
+    max_assets: int,
+) -> list[dict[str, Any]]:
+    position_rows = _position_priority_rows(cfg, settings, max_assets=max_assets)
+    if not position_rows:
+        return selected[:max_assets]
+    out: list[dict[str, Any]] = []
+    seen_ids: set[str] = set()
+    for row in position_rows + selected:
+        token_id = _token_id(row)
+        if not token_id or token_id in seen_ids:
+            continue
+        out.append(row)
+        seen_ids.add(token_id)
+        if len(out) >= max_assets:
+            break
+    return out
 
 
 def _match_keys(row: dict[str, Any]) -> set[str]:
@@ -642,13 +900,13 @@ def _current_positive_analogue_priority_rows(cfg: EngineConfig, settings: dict[s
 
 
 def _liquidity_target_rows(cfg: EngineConfig, settings: dict[str, Any]) -> list[dict[str, Any]]:
+    max_assets = int(settings.get("max_liquidity_target_assets", settings.get("max_assets", 24)) or 24)
     if not _boolish(settings.get("use_liquidity_targets", True)):
-        return []
+        return _with_position_targets(cfg, settings, [], max_assets=max_assets)
     watchlist_path = cfg.output_root / "polymarket_liquidity_discovery" / "liquidity_watchlist.csv"
     rows = read_csv_rows(watchlist_path)
     target_all_liquid_families = _boolish(settings.get("target_all_liquid_families", True))
     families = set() if target_all_liquid_families else _target_families(cfg, settings)
-    max_assets = int(settings.get("max_liquidity_target_assets", settings.get("max_assets", 24)) or 24)
     max_per_family = int(settings.get("max_liquidity_target_assets_per_family", 4) or 4)
     candidates: list[dict[str, Any]] = []
     seen: set[str] = set()
@@ -684,7 +942,12 @@ def _liquidity_target_rows(cfg: EngineConfig, settings: dict[str, Any]) -> list[
                     max_per_family=max_per_family,
                 )
             )
-            return _with_research_targets(rows, selected, settings, max_assets=max_assets)
+            return _with_position_targets(
+                cfg,
+                settings,
+                _with_research_targets(rows, selected, settings, max_assets=max_assets),
+                max_assets=max_assets,
+            )
         reserve = min(len(feedback_rows), max(0, max_assets - 1))
         base_rows = [
             row
@@ -709,7 +972,12 @@ def _liquidity_target_rows(cfg: EngineConfig, settings: dict[str, Any]) -> list[
             if len(selected) >= max_assets:
                 break
         selected = _tag_feedback_broaden_targets(selected[:max_assets], feedback_rows)
-        return _with_research_targets(rows, selected, settings, max_assets=max_assets)
+        return _with_position_targets(
+            cfg,
+            settings,
+            _with_research_targets(rows, selected, settings, max_assets=max_assets),
+            max_assets=max_assets,
+        )
 
     feedback_rows = _feedback_broaden_rows(cfg, settings, candidates)
     feedback_reserve = min(
@@ -754,7 +1022,12 @@ def _liquidity_target_rows(cfg: EngineConfig, settings: dict[str, Any]) -> list[
         remaining = [row for row in candidates if _token_id(row) not in selected_ids]
         selected.extend(_balanced_by_family(remaining, max_assets=max_assets - len(selected), max_per_family=max_per_family))
     selected = _tag_feedback_broaden_targets(selected[:max_assets], feedback_rows)
-    return _with_research_targets(rows, selected, settings, max_assets=max_assets)
+    return _with_position_targets(
+        cfg,
+        settings,
+        _with_research_targets(rows, selected, settings, max_assets=max_assets),
+        max_assets=max_assets,
+    )
 
 
 def _asset_ids_from_rows(rows: list[dict[str, Any]]) -> list[str]:
@@ -836,6 +1109,16 @@ def _research_target_counts(rows: list[dict[str, Any]]) -> dict[str, int]:
     return dict(sorted(counts.items()))
 
 
+def _position_target_counts(rows: list[dict[str, Any]]) -> dict[str, int]:
+    counts: dict[str, int] = {}
+    for row in rows:
+        if not _boolish(row.get("open_position_target")):
+            continue
+        source = str(row.get("position_source") or "open_position")
+        counts[source] = counts.get(source, 0) + 1
+    return dict(sorted(counts.items()))
+
+
 def _subscription_variants(asset_ids: list[str], settings: dict[str, Any], *, dynamic_ids: bool) -> list[dict[str, Any]]:
     if not dynamic_ids:
         configured = settings.get("subscription_message")
@@ -895,6 +1178,7 @@ def collect_websocket(cfg: EngineConfig, websocket_seconds: int = 60) -> dict[st
     current_analogue_counts = _current_positive_analogue_counts(target_rows)
     feedback_counts = _feedback_broaden_counts(target_rows)
     research_counts = _research_target_counts(target_rows)
+    position_counts = _position_target_counts(target_rows)
     if current_analogue_counts and strategy_v2_counts and sprint_counts:
         target_source = "current_positive_analogue+strategy_v2_forward_evidence+profit_sprint_targets+liquidity_watchlist"
     elif current_analogue_counts and strategy_v2_counts:
@@ -915,6 +1199,9 @@ def collect_websocket(cfg: EngineConfig, websocket_seconds: int = 60) -> dict[st
         target_source += "+price_action_feedback_broaden"
     if research_counts and dynamic_ids:
         target_source += "+research_repricing_coverage"
+    if position_counts and dynamic_ids:
+        position_target_total = sum(position_counts.values())
+        target_source = "open_positions" if position_target_total == len(target_rows) else f"open_positions+{target_source}"
     if target_rows:
         write_csv(cfg.governance_root / "websocket_liquidity_targets.csv", target_rows)
 
@@ -962,6 +1249,7 @@ def collect_websocket(cfg: EngineConfig, websocket_seconds: int = 60) -> dict[st
             "target_current_positive_analogue_counts": current_analogue_counts,
             "target_feedback_broaden_counts": feedback_counts,
             "target_research_counts": research_counts,
+            "target_position_counts": position_counts,
             "subscription_attempts": len(variants),
         }
         write_json(out_root / "websocket_summary.json", summary)
@@ -995,6 +1283,7 @@ def collect_websocket(cfg: EngineConfig, websocket_seconds: int = 60) -> dict[st
         "target_current_positive_analogue_counts": current_analogue_counts,
         "target_feedback_broaden_counts": feedback_counts,
         "target_research_counts": research_counts,
+        "target_position_counts": position_counts,
         "target_file": str(cfg.governance_root / "websocket_liquidity_targets.csv") if target_rows else "",
         "selected_subscription": selected_subscription,
         "subscription_attempts": len(variants),

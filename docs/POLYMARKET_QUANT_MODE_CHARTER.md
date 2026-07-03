@@ -95,13 +95,18 @@ Detailed implementation instructions are written as work orders **WO-1, WO-2, WO
   `outputs/polymarket_model_governance/local_history_audit_report.md`.
 - Acceptance: per work order; `paper_trading_invoked` stays `false`; tests cover the wiring.
 
-### WP4 — CLV-aware promotion review (advisory, fail-closed) — `open`
+### WP4 — CLV-aware promotion review (advisory, fail-closed) — `done` (2026-07-03)
 
 - `promotion_review.py`: add CLV as a *corroborating* signal — a cohort with positive settlement or
   round-trip evidence AND `positive_clv_evidence` ranks above one without; `negative_clv_evidence`
-  adds a blocker note. CLV alone must never promote.
+  adds an advisory note. CLV alone must never promote.
 - Acceptance: promotion review output includes CLV fields; a cohort with only positive CLV still
   reads `blocked`; tests assert both directions.
+
+Landed: `promotion_review.json` now includes per-row `clv_evidence`, `clv_mean_final`,
+`clv_ci_low`, `clv_ci_high`, `clv_final_positions`, plus top-level `clv_source` and
+`clv_is_advisory_only`. Positive CLV is only the final ordering tiebreaker; negative CLV is stored
+in `advisory_notes` and does not alter mechanical gate fields, status, or promotion booleans.
 
 ### WP5 — Execution cost model from order-book depth — `done` (2026-07-02)
 
@@ -245,6 +250,38 @@ sweep decisions is WO-11 — both specced for Codex.
 algo sweep after CLV and before downstream governance; the dashboard renders both diagnostic
 sections; the local-history audit includes report-only summaries after `_paper_decision` is
 computed. No gates, thresholds, broker paths, or live-trading settings were changed.
+
+**2026-07-03 — WO-7 landed by Codex.** Promotion review now consumes CLV as advisory
+corroboration only. The tests prove CLV can reorder otherwise-identical rows for human review but
+cannot change status, booleans, gate counts, missing mechanical gates, or paper/live permissions.
+
+**2026-07-03 — VPS dashboard audit added WO-20..WO-23.** The live VPS dashboard showed the next
+binding constraint: collection was not following open shadow/paper positions, leaving CLV finality,
+edge attribution, paper exits, and settlement detection starved of the exact quotes they need.
+The work-order queue now starts with position-aware websocket collection (WO-20), then stuck-position
+settlement/flagging (WO-21), display fixes for evidence-free extrapolations (WO-22), and
+deployment-aware oversight status (WO-23). WO-7 remains landed and advisory-only.
+
+**2026-07-03 — WO-20 landed by Codex.** Websocket target selection now reserves held shadow/paper
+position tokens before discovery tokens, reads paper close times from paper-order source payloads
+when the positions table lacks them, and writes `selection_reason=open_position` plus
+`target_position_counts` for auditability. This directly increases the chance of collecting the
+bid/ask lines needed for CLV finality, edge attribution, paper exits, and settlement detection.
+Full suite: 684 tests green.
+
+**2026-07-03 — WO-21 landed by Codex.** Crypto up/down proxy settlement now lives in a shared
+module and covers encoded fast slugs plus named hourly/daily slugs. The paper broker settles
+past-close hourly crypto up/down positions only when public reference prices resolve the window;
+otherwise it emits `stale_open_position` evidence and the dashboard/oversight surfaces a bad alert.
+No cost-basis force-close path was added. Full suite: 687 tests green.
+
+**2026-07-03 — WO-22 landed by Codex.** Dashboard extrapolations now fail closed: thin
+`monthly_run_rate_usdc` rows render as `n/a (N fills, Hh)`, CLV beat-close is `n/a` until final
+close lines exist, the zero-fill null replay is no longer presented as a winning algo, and raw
+ledger P&L/run-rate tiles carry the audited P&L caveat when quote conflicts exist. The Best-edge
+route card and decision summary now show actual evidence — P&L, round trips, and observed time —
+instead of annualising micro-windows such as 2 paper round trips over 4 minutes into a monthly
+fact. Full suite: 688 tests green.
 
 **2026-07-02 — overnight queue issued.** WO-7 and WO-10..WO-19 are specced in the work orders doc
 with a night-shift protocol (fixed order, stop conditions, skip-and-note rules, end-of-night

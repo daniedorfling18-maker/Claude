@@ -1,6 +1,6 @@
 # Polymarket Codex Work Orders
 
-Last updated: 2026-07-03 (strategic edge reset: WO-24..WO-27 added; read docs/POLYMARKET_EDGE_STRATEGY_RESET.md first)
+Last updated: 2026-07-03 (WO-24 code landed; strategic edge reset: WO-24..WO-27 added; WO-20/21/22 landed; read docs/POLYMARKET_EDGE_STRATEGY_RESET.md first)
 
 Mechanical, file-level implementation instructions for coding agents (Codex or any other code
 changer). The architecture and priorities live in `docs/POLYMARKET_QUANT_MODE_CHARTER.md`; this file
@@ -297,7 +297,7 @@ valid summary artifact; example strategy over a crafted fixture → exact expect
 
 ---
 
-## WO-7 — CLV-aware promotion review, advisory only (WP4) — `open`
+## WO-7 — CLV-aware promotion review, advisory only (WP4) — `done` (2026-07-03)
 
 **Goal:** promotion review ranks cohorts using CLV as a *corroborating* signal without letting CLV
 alone promote anything. This is annotation + ordering, nothing else.
@@ -362,6 +362,13 @@ writes `promotion_review.json`. You are adding a read of `closing_line_value.jso
 
 **Out of scope:** `readiness.py`, any gate threshold, the audit script's `_paper_decision`,
 `closing_line.py` itself.
+
+**Landed:** `build_promotion_review()` now reads `closing_line_value.json`, adds advisory CLV
+fields to each review row, and uses positive CLV only as the final output-order tiebreaker after all
+existing sort keys. Negative CLV writes `negative closing-line value evidence (advisory)` to
+`advisory_notes`, not to mechanical gate fields. `promotion_review.json` now includes
+`clv_source` and `clv_is_advisory_only`. Tests prove positive CLV alone cannot change status,
+booleans, gates, or promotion decisions.
 
 ---
 
@@ -762,7 +769,7 @@ Root causes, verified in the repo:
 
 ---
 
-## WO-20 — Position-aware quote collection — `open` (HIGH)
+## WO-20 — Position-aware quote collection — `done` (2026-07-03)
 
 **Goal:** every token with an open shadow or paper position stays in the websocket subscription
 set until its market close (+ a grace window). This unblocks CLV finality, attribution joins,
@@ -787,9 +794,16 @@ the collector's asset selection in `websocket_collector.py` / liquidity discover
 
 **Out of scope:** gates, stakes, broker logic.
 
+**Landed:** `websocket_collector.position_tokens()` now reads open shadow positions,
+paper-position exports, paper-order source payloads, and the paper positions table when available.
+Held tokens are reserved first in `websocket_liquidity_targets.csv` until market close plus the
+configured grace window, with `selection_reason=open_position` and summary
+`target_position_counts` for auditability. Tests prove shadow + paper position tokens outrank
+liquidity-discovery tokens and that positions outside the grace window are dropped.
+
 ---
 
-## WO-21 — Settle or loudly flag stuck paper positions on resolved markets — `open` (HIGH)
+## WO-21 — Settle or loudly flag stuck paper positions on resolved markets — `done` (2026-07-03)
 
 **Goal:** paper positions on markets that closed hours ago must either settle through an
 evidence-backed path or be flagged as `stale_open_position` on the dashboard and oversight alerts
@@ -814,9 +828,18 @@ evidence-backed path or be flagged as `stale_open_position` on the dashboard and
    a position with no resolvable window becomes `stale_open_position` and appears in the alert
    list; equity is unchanged by flagging.
 
+**Landed:** crypto up/down proxy settlement is factored into
+`crypto_updown_settlement.py` and now supports encoded 5m/15m slugs plus named hourly/daily slugs
+such as `ethereum-up-or-down-july-2-2026-12pm-et`. The paper broker settles eligible hourly
+crypto up/down positions through the shared proxy when public reference prices are available, and
+otherwise reports `stale_open_position` rows for past-close open positions with no fresh executable
+quote or clean resolution. The dashboard renders a bad oversight alert and an open-positions
+warning table; flagging does not mutate equity, force-close, or fabricate exits. Full suite:
+687 tests green.
+
 ---
 
-## WO-22 — Evidence-gated display of extrapolated metrics — `open` (MEDIUM)
+## WO-22 — Evidence-gated display of extrapolated metrics — `done` (2026-07-03)
 
 **Goal:** the dashboard never renders an extrapolation as a fact.
 
@@ -844,6 +867,15 @@ evidence-backed path or be flagged as `stale_open_position` on the dashboard and
    `audited_pnl_since_baseline_usdc`. `approved_signal_count` renders as an integer.
 5. Tests: fixture payloads asserting each rendering branch (exact strings).
 
+**Landed:** dashboard run-rate renderers now fail closed to `n/a (N fills, Hh)` unless sample count
+and observation time clear the evidence bar. CLV beat-close displays `n/a` without final close
+lines and labels provisional lines. Algo replay no longer calls the zero-fill null strategy "best"
+when real strategies lost money. Raw ledger P&L/run-rate tiles append the audited P&L caveat when
+quote conflicts exist, and `approved_signal_count` is forced to an integer. The Best-edge-route card
+and decision summary now show actual evidence (P&L, round trips, observed time) and suppress tiny
+window monthly extrapolations until the same minimum-fills/72h bar is met. Full suite: 688 tests
+green.
+
 ---
 
 ## WO-23 — Deployment-aware oversight status — `open` (MEDIUM)
@@ -865,7 +897,7 @@ started`), `dashboard.py` Strategy V2 section, tests.
 
 ---
 
-## WO-24 — Activate and broaden the sharp-anchor pipeline — `open` (HIGHEST VALUE)
+## WO-24 — Activate and broaden the sharp-anchor pipeline — `done` (2026-07-03, HIGHEST VALUE)
 
 **Context:** `docs/POLYMARKET_EDGE_STRATEGY_RESET.md`. The de-vig pipeline exists end-to-end and
 has never run (`missing_api_key`). A human must set `THE_ODDS_API_KEY` on the VPS; this WO makes
@@ -895,6 +927,16 @@ or cycle wiring, tests.
 
 **Out of scope:** alpha thresholds, gates. The anchor feeds `fundamental_probability_paths` which
 the alpha layer already consumes with a haircut and cross-check.
+
+**Landed 2026-07-03:** broadened the provider config to World Cup outrights, World Cup match h2h,
+NBA, MLB, MMA, ATP, and WTA; added provider sports-list validation, unknown-sport skipping,
+`max_requests_per_run`, and `fetch_interval_minutes` budget gating; extended h2h anchor joins so
+clear "Will Team beat Team?" YES contracts map to bookmaker team outcomes without guessing NO/draw
+rows; added unmapped-row samples; and made sharp-anchor coding errors fail loud in the VPS loop.
+Tests cover missing key, provider errors, fallback CSVs, budget skips, unknown sports, h2h joins,
+and no-guess unmapped outcomes. Runtime note: GitHub confirms `THE_ODDS_API_KEY` exists as a
+sealed secret, but GitHub cannot reveal secret plaintext; the VPS container remains blocked until
+that value is populated in the VPS environment.
 
 ---
 
@@ -978,14 +1020,14 @@ by CLV, not settlement waiting.
 WO-1..WO-6, WO-8, WO-9   done and audited (2026-07-02)
 
 Queue order (strategic reset, 2026-07-03 — read POLYMARKET_EDGE_STRATEGY_RESET.md first):
-1. WO-24   sharp-anchor activation + broadening (HIGHEST VALUE; human sets THE_ODDS_API_KEY)
-2. WO-20   position-aware quote collection (unblocks CLV/attribution/paper exits)
+1. WO-24   done 2026-07-03: sharp-anchor activation + broadening (VPS still needs THE_ODDS_API_KEY populated)
+2. WO-20   done 2026-07-03: position-aware quote collection
 3. WO-25   dutch-book arb monitor wiring (mechanical edge, model-free)
 4. WO-26   anti-concentration guard on adaptive queries
-5. WO-21   settle or flag stuck paper positions
+5. WO-21   done 2026-07-03: settle or flag stuck paper positions
 6. WO-27   longshot-bias research family (shadow-only)
-7. WO-7    CLV-aware promotion review (advisory only)
-8. WO-22   evidence-gated display fixes
+7. WO-7    done 2026-07-03: CLV-aware promotion review advisory wiring
+8. WO-22   done 2026-07-03: evidence-gated display fixes
 9. WO-23   deployment-aware oversight status
 10. WO-11  research-focus consumption (after WO-26 so the guard shapes it)
 11. WO-12  portfolio VaR + correlated-exposure reporting
@@ -999,6 +1041,6 @@ Queue order (strategic reset, 2026-07-03 — read POLYMARKET_EDGE_STRATEGY_RESET
 ```
 
 After all six land: WP3 is done (flip it in the charter), the algo track (WP9–WP11) is done, and
-the remaining charter priorities are WP4 (CLV-aware promotion review) and WP6 (portfolio-level
-correlated exposure). WP5 (depth-based execution costs), WP7 (family classification for liquid
+the remaining charter priority is WP6 (portfolio-level correlated exposure). WP4 (CLV-aware
+promotion review), WP5 (depth-based execution costs), WP7 (family classification for liquid
 `unknown` markets), and WP8 (edge attribution) have since landed.

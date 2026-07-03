@@ -30,6 +30,7 @@ def make_cfg(tmp_path: Path, minimum_rows: int = 2, min_category_rows: int = 3) 
     data.setdefault("paths", {})
     data["paths"]["data_root"] = tmp_path.as_posix()
     data["paths"]["output_root"] = (tmp_path / "outputs").as_posix()
+    data["paths"]["database_path"] = (tmp_path / "work" / "paper.sqlite").as_posix()
 
     data.setdefault("calibration_v2", {})
     data["calibration_v2"]["minimum_training_rows"] = minimum_rows
@@ -885,6 +886,183 @@ def test_websocket_reserves_current_positive_analogue_tokens(tmp_path):
     assert len(targets) == 2
     assert len(analogue_targets) == 1
     assert analogue_targets[0]["websocket_target_reason"] == "reserve_current_positive_analogue_for_forward_bid_tracking"
+
+
+def test_websocket_reserves_open_position_tokens_before_discovery(tmp_path, monkeypatch):
+    import yaml
+
+    cfg_path = make_cfg(tmp_path)
+    data = yaml.safe_load(cfg_path.read_text(encoding="utf-8"))
+    data.setdefault("websocket_market_data", {})
+    data["websocket_market_data"].update(
+        {
+            "use_liquidity_targets": True,
+            "use_strategy_v2_targets": False,
+            "feedback_broaden_target_enabled": False,
+            "include_research_liquidity_targets": False,
+            "max_liquidity_target_assets": 4,
+            "position_token_slots": 10,
+            "position_grace_hours": 6,
+            "market_ids": [],
+        }
+    )
+    cfg_path.write_text(yaml.safe_dump(data, sort_keys=False), encoding="utf-8")
+    cfg = load_config(cfg_path)
+    write_csv(
+        cfg.output_root / "polymarket_shadow" / "shadow_positions.csv",
+        [
+            {
+                "shadow_position_id": "shadow-1",
+                "status": "open",
+                "market_id": "shadow-market",
+                "token_id": "shadow-position-token",
+                "market_slug": "shadow-position-market",
+                "outcome": "Yes",
+                "category": "macro_rates",
+                "close_time": "2099-01-01T00:00:00Z",
+                "quantity": "10",
+            }
+        ],
+    )
+    write_csv(
+        cfg.output_root / "polymarket_portfolio" / "positions.csv",
+        [
+            {
+                "position_id": "paper-1",
+                "status": "open",
+                "market_id": "paper-market",
+                "token_id": "paper-position-token",
+                "side": "BUY_YES",
+                "quantity": "5",
+                "category": "",
+            }
+        ],
+    )
+    write_csv(
+        cfg.output_root / "polymarket_portfolio" / "paper_orders.csv",
+        [
+            {
+                "order_id": "paper-order-1",
+                "created_at": "2026-07-03T00:00:00Z",
+                "mode": "paper",
+                "market_id": "paper-market",
+                "token_id": "paper-position-token",
+                "source_signal_json": json.dumps(
+                    {
+                        "market_id": "paper-market",
+                        "token_id": "paper-position-token",
+                        "market_slug": "paper-position-market",
+                        "outcome": "Yes",
+                        "category": "crypto_eth_updown_daily",
+                        "close_time": "2099-01-02T00:00:00Z",
+                    },
+                    sort_keys=True,
+                ),
+            }
+        ],
+    )
+    write_csv(
+        cfg.output_root / "polymarket_liquidity_discovery" / "liquidity_watchlist.csv",
+        [
+            {
+                "token_id": f"discovery-token-{idx}",
+                "family": "crypto_btc_special",
+                "tradable_liquidity_candidate": "true",
+                "liquidity": str(5000 - idx),
+                "spread": "0.01",
+                "time_to_close_hours": "2",
+            }
+            for idx in range(4)
+        ],
+    )
+
+    subscriptions = []
+    real_import_module = websocket_collector.importlib.import_module
+
+    def fake_import_module(name):
+        if name == "websockets":
+            return object()
+        return real_import_module(name)
+
+    async def fake_collect(url, seconds, subscription_message, **kwargs):
+        subscriptions.append(subscription_message)
+        return [{"collected_at_utc": "2026-07-03T00:00:00Z", "message": "{\"asset_id\":\"ok\"}"}]
+
+    monkeypatch.setattr(websocket_collector.importlib, "import_module", fake_import_module)
+    monkeypatch.setattr(websocket_collector, "_collect_messages", fake_collect)
+
+    result = collect_websocket(cfg, websocket_seconds=1)
+    targets = read_csv_rows(cfg.governance_root / "websocket_liquidity_targets.csv")
+    token_ids = [row["token_id"] for row in targets]
+
+    assert result["status"] == "collected"
+    assert result["target_source"].startswith("open_positions+")
+    assert result["target_position_counts"] == {"paper_position": 1, "shadow_position": 1}
+    assert token_ids[:2] == ["shadow-position-token", "paper-position-token"]
+    assert len(token_ids) == 4
+    assert all(row["selection_reason"] == "open_position" for row in targets[:2])
+    assert all(row["websocket_target_reason"] == "open_position" for row in targets[:2])
+    assert targets[1]["close_time"] == "2099-01-02T00:00:00Z"
+    assert subscriptions[0]["assets_ids"][:2] == ["shadow-position-token", "paper-position-token"]
+
+
+def test_position_tokens_drop_positions_after_grace_window(tmp_path):
+    import yaml
+
+    cfg_path = make_cfg(tmp_path)
+    data = yaml.safe_load(cfg_path.read_text(encoding="utf-8"))
+    data.setdefault("websocket_market_data", {})
+    data["websocket_market_data"].update(
+        {
+            "position_grace_hours": 6,
+            "include_position_tokens_without_close_time": False,
+        }
+    )
+    cfg_path.write_text(yaml.safe_dump(data, sort_keys=False), encoding="utf-8")
+    cfg = load_config(cfg_path)
+    write_csv(
+        cfg.output_root / "polymarket_shadow" / "shadow_positions.csv",
+        [
+            {
+                "shadow_position_id": "future",
+                "status": "open",
+                "market_id": "future-market",
+                "token_id": "future-token",
+                "close_time": "2026-07-03T14:00:00Z",
+                "quantity": "1",
+            },
+            {
+                "shadow_position_id": "within",
+                "status": "open",
+                "market_id": "within-market",
+                "token_id": "within-grace-token",
+                "close_time": "2026-07-03T08:00:00Z",
+                "quantity": "1",
+            },
+            {
+                "shadow_position_id": "expired",
+                "status": "open",
+                "market_id": "expired-market",
+                "token_id": "expired-token",
+                "close_time": "2026-07-03T05:00:00Z",
+                "quantity": "1",
+            },
+            {
+                "shadow_position_id": "missing",
+                "status": "open",
+                "market_id": "missing-market",
+                "token_id": "missing-close-token",
+                "close_time": "",
+                "quantity": "1",
+            },
+        ],
+    )
+
+    targets = websocket_collector.position_tokens(cfg, as_of="2026-07-03T12:00:00Z")
+    token_ids = {row["token_id"] for row in targets}
+
+    assert token_ids == {"within-grace-token", "future-token"}
+    assert {row["position_close_state"] for row in targets} == {"within_grace", "future_close"}
 
 
 def test_websocket_collector_fails_closed_on_socket_error(tmp_path, monkeypatch):

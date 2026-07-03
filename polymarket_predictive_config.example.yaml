@@ -177,6 +177,10 @@ sharp_anchor:
   devig_method: power            # power (favourite-longshot aware) or multiplicative
   source_name: pinnacle_close
   token_map_path: outputs/polymarket/market_snapshot.csv
+  worldcup_public_search_enabled: true
+  worldcup_public_search_queries:
+  - fifa world cup
+  - world cup winner
   # Fail closed if an odds group looks partial. A World Cup outright with only France/Spain rows
   # would otherwise be de-vigged as if every other team did not exist, manufacturing false edge.
   min_outcomes_per_market: 2
@@ -191,9 +195,25 @@ sharp_odds_fetch:
   base_url: https://api.the-odds-api.com/v4
   api_key_env: THE_ODDS_API_KEY
   sports:
-  - soccer_fifa_world_cup_winner
+  - key: soccer_fifa_world_cup_winner
+    markets: outrights
+  - key: soccer_fifa_world_cup
+    markets: h2h
+  - key: basketball_nba
+    markets: h2h
+  - key: baseball_mlb
+    markets: h2h
+  - key: mma_mixed_martial_arts
+    markets: h2h
+  - key: tennis_atp
+    markets: h2h
+  - key: tennis_wta
+    markets: h2h
   regions: eu,uk                 # Pinnacle is in eu; Betfair Exchange in uk/eu
-  markets: outrights
+  markets: h2h
+  validate_sports: true
+  max_requests_per_run: 5
+  fetch_interval_minutes: 60
   bookmaker_priority:
   - pinnacle
   - betfair_ex_eu
@@ -460,7 +480,7 @@ paper_market_scan:
   # paper bot can find valid probes faster while the runtime resource guard still skips work when
   # memory is high. Override with POLYMARKET_QUERIES / POLYMARKET_SCAN_QUERY_MODE if needed.
   mode: batch
-  max_queries_per_cycle: 6
+  max_queries_per_cycle: 8
   prioritize_near_promoted: true
   adaptive_priority_min_value: 3.0
   adaptive_priority_require_positive_evidence: true
@@ -482,6 +502,8 @@ paper_market_scan:
   broad_repricing_reserve_slots: 2
   broad_repricing_queries:
   - ''
+  - fifa world cup
+  - world cup winner
   - world cup
   - tennis
   - fed
@@ -495,6 +517,8 @@ paper_market_scan:
   - stocks
   - business
   queries:
+  - fifa world cup
+  - world cup winner
   - world cup
   - btc updown
   - xrp updown
@@ -941,6 +965,7 @@ paper_trading:
   hard_stop_loss_usdc: 2
   settle_crypto_updown_with_public_price: true
   settlement_request_timeout_seconds: 8
+  stale_open_alert_hours: 2
 trading:
   mode: paper
 live_trading:

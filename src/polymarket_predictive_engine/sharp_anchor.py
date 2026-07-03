@@ -20,9 +20,12 @@ unit-tested; the network/odds acquisition is left to the operator (provide an od
 from __future__ import annotations
 
 from collections import defaultdict
+import json
 from pathlib import Path
 import re
 from typing import Any, Iterable
+
+import requests
 
 from .config import EngineConfig, load_config
 from .utils import (
@@ -55,6 +58,22 @@ TEAM_ALIASES = {
     "capeverde": "capeverde",
     "curaao": "curacao",
 }
+CONFEDERATION_TEAM_KEYS = {
+    "africa",
+    "caf",
+    "asia",
+    "afc",
+    "europe",
+    "uefa",
+    "northamerica",
+    "concacaf",
+    "southamerica",
+    "conmebol",
+    "oceania",
+    "ocf",
+    "ofc",
+}
+DEFAULT_GAMMA_PUBLIC_SEARCH = "https://gamma-api.polymarket.com/public-search"
 
 
 # --------------------------------------------------------------------------- pure de-vig math
@@ -113,9 +132,97 @@ def _team_key(value: object) -> str:
     return TEAM_ALIASES.get(key, key)
 
 
+def _is_confederation_token(value: object) -> bool:
+    text = str(value or "").lower()
+    key = _team_key(value)
+    return key in CONFEDERATION_TEAM_KEYS or any(marker in text for marker in ("(caf)", "(afc)", "(uefa)", "(concacaf)", "(conmebol)", "(ocf)", "(ofc)"))
+
+
 def _team_from_worldcup_question(value: object) -> str:
     match = re.match(r"\s*Will\s+(.*?)\s+win\s+the\s+2026\s+FIFA\s+World\s+Cup\?\s*$", str(value or ""), re.I)
     return match.group(1).strip() if match else ""
+
+
+def _match_event_slug(home: object, away: object) -> str:
+    return normalize_slug(f"{home} vs {away}")
+
+
+def _match_subject_from_question(value: object) -> tuple[str, str] | None:
+    """Return (subject team, opponent team) only for clear binary match-win questions."""
+    text = str(value or "").strip()
+    patterns = [
+        r"^Will\s+(.*?)\s+beat\s+(.*?)(?:\?|$)",
+        r"^Will\s+(.*?)\s+defeat\s+(.*?)(?:\?|$)",
+        r"^Will\s+(.*?)\s+win\s+against\s+(.*?)(?:\?|$)",
+    ]
+    for pattern in patterns:
+        match = re.match(pattern, text, re.I)
+        if match:
+            return match.group(1).strip(), match.group(2).strip()
+    return None
+
+
+def _json_list(value: object) -> list[Any]:
+    if isinstance(value, list):
+        return value
+    if isinstance(value, tuple):
+        return list(value)
+    if isinstance(value, str) and value.strip():
+        try:
+            parsed = json.loads(value)
+        except json.JSONDecodeError:
+            return []
+        return parsed if isinstance(parsed, list) else []
+    return []
+
+
+def _worldcup_winner_tokens_from_public_search(settings: dict[str, Any]) -> dict[str, str]:
+    if not settings.get("worldcup_public_search_enabled", False):
+        return {}
+    base_url = str(settings.get("worldcup_public_search_url") or DEFAULT_GAMMA_PUBLIC_SEARCH)
+    timeout = int(settings.get("worldcup_public_search_timeout_seconds", 20) or 20)
+    queries = settings.get("worldcup_public_search_queries") or ["fifa world cup", "world cup winner"]
+    mapping: dict[str, str] = {}
+    for query in queries:
+        try:
+            response = requests.get(
+                base_url,
+                params={
+                    "q": str(query),
+                    "events_status": "active",
+                    "limit_per_type": str(settings.get("worldcup_public_search_limit_per_type", 20) or 20),
+                    "search_tags": "false",
+                    "search_profiles": "false",
+                },
+                timeout=timeout,
+            )
+            response.raise_for_status()
+            payload = response.json()
+        except Exception:  # noqa: BLE001 - public-search fallback is optional
+            continue
+        events = payload.get("events", []) if isinstance(payload, dict) else []
+        for event in events if isinstance(events, list) else []:
+            event_slug = str(event.get("slug") or "").lower()
+            event_title = str(event.get("title") or event.get("question") or "").strip().lower()
+            if event_slug != "world-cup-winner" and event_title != "world cup winner":
+                continue
+            markets = event.get("markets") or []
+            for market in markets if isinstance(markets, list) else []:
+                if not isinstance(market, dict):
+                    continue
+                team = _team_from_worldcup_question(market.get("question"))
+                if not team or _is_confederation_token(team):
+                    continue
+                outcomes = [str(item).strip().lower() for item in _json_list(market.get("outcomes"))]
+                tokens = [str(item).strip() for item in _json_list(market.get("clobTokenIds"))]
+                try:
+                    yes_index = outcomes.index("yes")
+                except ValueError:
+                    yes_index = 0
+                token = tokens[yes_index] if yes_index < len(tokens) else ""
+                if token:
+                    mapping.setdefault(_team_key(team), token)
+    return mapping
 
 
 def _worldcup_winner_token_map(cfg: EngineConfig, settings: dict[str, Any]) -> dict[str, str]:
@@ -133,6 +240,8 @@ def _worldcup_winner_token_map(cfg: EngineConfig, settings: dict[str, Any]) -> d
             slug = str(row.get("market_slug") or row.get("slug") or "")
             slug_match = re.match(r"will-(.*?)-win-the-2026-fifa-world-cup(?:-|$)", slug, re.I)
             team = slug_match.group(1).replace("-", " ") if slug_match else ""
+        if _is_confederation_token(team):
+            continue
         key = _team_key(team)
         if key:
             mapping.setdefault(key, token)
@@ -144,8 +253,10 @@ def _worldcup_winner_token_map(cfg: EngineConfig, settings: dict[str, Any]) -> d
     for row in read_csv_rows(detail_path):
         token = str(row.get("token_id") or "").strip()
         key = _team_key(row.get("team"))
-        if token and key:
+        if token and key and not _is_confederation_token(row.get("team")):
             mapping.setdefault(key, token)
+    for key, token in _worldcup_winner_tokens_from_public_search(settings).items():
+        mapping.setdefault(key, token)
     return mapping
 
 
@@ -185,7 +296,18 @@ def _load_token_map(cfg: EngineConfig, settings: dict[str, Any]) -> dict[str, st
     for row in rows:
         token = str(row.get(token_col, "")).strip()
         if token:
-            mapping.setdefault(_match_key(str(row.get(group_col, "")), str(row.get(outcome_col, ""))), token)
+            outcome = str(row.get(outcome_col, ""))
+            mapping.setdefault(_match_key(str(row.get(group_col, "")), outcome), token)
+            home = str(row.get("home_team") or "").strip()
+            away = str(row.get("away_team") or "").strip()
+            if home and away:
+                mapping.setdefault(_match_key(_match_event_slug(home, away), outcome), token)
+                mapping.setdefault(_match_key(_match_event_slug(away, home), outcome), token)
+            question_subject = _match_subject_from_question(row.get("question"))
+            if question_subject and outcome.strip().lower() in {"yes", "y"}:
+                subject, opponent = question_subject
+                mapping.setdefault(_match_key(_match_event_slug(subject, opponent), subject), token)
+                mapping.setdefault(_match_key(_match_event_slug(opponent, subject), subject), token)
     return mapping
 
 
@@ -215,8 +337,9 @@ def build_sharp_anchor(cfg: EngineConfig, *, input_path: str | None = None) -> d
     odds_col = find_first_column(cols, DECIMAL_ODDS_FIELDS)
     implied_col = find_first_column(cols, IMPLIED_FIELDS)
     token_col = find_first_column(cols, TOKEN_FIELDS)
-    token_map = {} if token_col else _load_token_map(cfg, settings)
-    worldcup_winner_tokens = {} if token_col else _worldcup_winner_token_map(cfg, settings)
+    has_direct_tokens = bool(token_col and any(str(row.get(token_col, "")).strip() for row in rows))
+    token_map = _load_token_map(cfg, settings)
+    worldcup_winner_tokens = _worldcup_winner_token_map(cfg, settings)
 
     groups: dict[str, list[dict[str, Any]]] = defaultdict(list)
     for row in rows:
@@ -225,10 +348,13 @@ def build_sharp_anchor(cfg: EngineConfig, *, input_path: str | None = None) -> d
     out_rows: list[dict[str, Any]] = []
     skipped_unpriced = 0
     skipped_no_token = 0
+    skipped_no_token_samples: list[dict[str, Any]] = []
     skipped_incomplete_markets = 0
     skipped_incomplete_market_rows = 0
     incomplete_market_samples: list[dict[str, Any]] = []
     worldcup_winner_token_joins = 0
+    direct_token_joins = 0
+    token_map_joins = 0
     overrounds: list[float] = []
     for gkey, grows in groups.items():
         raw: list[float] = []
@@ -266,11 +392,13 @@ def build_sharp_anchor(cfg: EngineConfig, *, input_path: str | None = None) -> d
         fair = devig(raw, method)
         for row, implied, prob in zip(kept, raw, fair):
             row_market_key = str(row.get("market_key", "") or "")
-            token = (
-                str(row.get(token_col, "")).strip()
-                if token_col
-                else token_map.get(_match_key(gkey, str(row.get(outcome_col, ""))), "")
-            )
+            token = str(row.get(token_col, "")).strip() if token_col else ""
+            if token:
+                direct_token_joins += 1
+            elif outcome_col:
+                token = token_map.get(_match_key(gkey, str(row.get(outcome_col, ""))), "")
+                if token:
+                    token_map_joins += 1
             if (
                 not token
                 and outcome_col
@@ -281,6 +409,16 @@ def build_sharp_anchor(cfg: EngineConfig, *, input_path: str | None = None) -> d
                     worldcup_winner_token_joins += 1
             if not token:
                 skipped_no_token += 1
+                if len(skipped_no_token_samples) < 20:
+                    skipped_no_token_samples.append(
+                        {
+                            "market_slug": gkey,
+                            "outcome": row.get(outcome_col, "") if outcome_col else "",
+                            "market_key": row.get("market_key", ""),
+                            "sport": row.get("sport", ""),
+                            "reason": "unmapped_sharp_anchor_row",
+                        }
+                    )
                 continue
             out_rows.append({
                 "token_id": token,
@@ -303,6 +441,7 @@ def build_sharp_anchor(cfg: EngineConfig, *, input_path: str | None = None) -> d
         "fundamental_rows": len(out_rows),
         "skipped_unpriced": skipped_unpriced,
         "skipped_no_token": skipped_no_token,
+        "skipped_no_token_samples": skipped_no_token_samples,
         "skipped_incomplete_markets": skipped_incomplete_markets,
         "skipped_incomplete_market_rows": skipped_incomplete_market_rows,
         "incomplete_market_samples": incomplete_market_samples,
@@ -311,12 +450,20 @@ def build_sharp_anchor(cfg: EngineConfig, *, input_path: str | None = None) -> d
         "max_market_implied_sum": max_market_implied_sum,
         "mean_overround_removed": round(sum(overrounds) / len(overrounds) - 1.0, 4) if overrounds else 0.0,
         "token_join": (
-            "direct_token_id"
-            if token_col
+            "direct_token_id+market_outcome_map+worldcup_winner_team_map"
+            if direct_token_joins and (token_map_joins or worldcup_winner_token_joins)
+            else "direct_token_id+market_outcome_map"
+            if direct_token_joins and token_map_joins
+            else "direct_token_id+worldcup_winner_team_map"
+            if direct_token_joins and worldcup_winner_token_joins
+            else "direct_token_id"
+            if has_direct_tokens
             else "market_outcome_map+worldcup_winner_team_map"
             if worldcup_winner_token_joins
             else "market_outcome_map"
         ),
+        "direct_token_joins": direct_token_joins,
+        "token_map_joins": token_map_joins,
         "worldcup_winner_tokens_available": len(worldcup_winner_tokens),
         "worldcup_winner_token_joins": worldcup_winner_token_joins,
         "output_file": str(out_path),

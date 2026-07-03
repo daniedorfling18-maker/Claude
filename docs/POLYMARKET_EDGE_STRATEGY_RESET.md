@@ -68,6 +68,10 @@ candidate family. Its share of collection attention is capped (WO-26).
 2. This document, the charter update, and work orders **WO-24..WO-27** (see
    `docs/POLYMARKET_CODEX_WORK_ORDERS.md`): sharp-anchor activation and broadening, dutch-arb
    wiring, an anti-concentration guard on adaptive queries, and the longshot-bias research family.
+3. **WO-24 code landed after the reset:** the sharp-anchor fetch is now budgeted, broadened to
+   match-market sports, validates provider sports before spending odds calls, skips unsupported
+   sports, and maps clear h2h YES contracts without guessing unmapped outcomes. The only remaining
+   sharp-anchor blocker is runtime secret injection on the VPS.
 
 ## The one action only a human can take
 

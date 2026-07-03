@@ -305,7 +305,7 @@ def _cohort_to_query_keys(cohort: str) -> list[str]:
     if "tennis" in text:
         keys.append("tennis")
     if "worldcup" in text or "world_cup" in text or "world cup" in text:
-        keys.extend(["worldcup", "world cup"])
+        keys.extend(["fifa world cup", "world cup winner", "worldcup", "world cup"])
     if "crypto_updown" in text:
         keys.extend(["bitcoin", "ethereum", "solana", "xrp"])
     seen: set[str] = set()
@@ -873,9 +873,10 @@ def refresh_repo_worldcup_fundamentals(cfg) -> dict[str, Any]:
 def refresh_independent_fundamentals(cfg, schedule: dict[str, Any], iteration: int) -> dict[str, Any]:
     """Refresh independent anchors used by the mispricing-alpha fundamental slot.
 
-    Each sub-step is additive and fail-soft: missing Odds API credentials, absent
-    crypto target files, or network errors should reduce available edge evidence,
-    not stop the local paper loop.
+    Sharp-anchor refresh is a first-class edge input: expected states such as
+    missing Odds API credentials or budget skips are returned as artifacts, but
+    coding/build errors should fail loud instead of silently hiding a dead edge
+    path. Crypto target files remain additive/fail-soft.
     """
     result: dict[str, Any] = {
         "status": "skipped",
@@ -890,17 +891,11 @@ def refresh_independent_fundamentals(cfg, schedule: dict[str, Any], iteration: i
     ran = False
     if _scheduled(schedule, "sharp_odds_fetch_every_iterations", iteration, default=12):
         ran = True
-        try:
-            result["sharp_odds_fetch"] = fetch_sharp_odds(cfg)
-        except Exception as exc:  # noqa: BLE001 - independent anchor fetch is additive
-            result["sharp_odds_fetch"] = {"status": "error", "error": f"{type(exc).__name__}: {exc}"}
+        result["sharp_odds_fetch"] = fetch_sharp_odds(cfg)
 
     if _scheduled(schedule, "sharp_anchor_build_every_iterations", iteration, default=12):
         ran = True
-        try:
-            result["sharp_anchor"] = build_sharp_anchor(cfg)
-        except Exception as exc:  # noqa: BLE001 - independent anchor build is additive
-            result["sharp_anchor"] = {"status": "error", "error": f"{type(exc).__name__}: {exc}"}
+        result["sharp_anchor"] = build_sharp_anchor(cfg)
 
     if _scheduled(schedule, "crypto_fundamental_every_iterations", iteration, default=12):
         ran = True

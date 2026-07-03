@@ -179,6 +179,7 @@ def test_paper_round_trip_exports_realised_broker_fills_as_strict_feedback(tmp_p
     assert rows[0]["exit_quote_bid"] == "0.52"
     assert rows[0]["exit_quote_source"] == "websocket_market_features"
     assert rows[0]["quote_consistency_status"] == "ok"
+    assert rows[0]["exit_fill_snapshot_bid_gap"] == "0.010000000000000009"
     assert rows[0]["signal_cohort"] == "exploratory_crypto_updown_live_model|crypto_btc_updown_daily|outcome=down"
     assert rows[1]["exit_reason"] == "hard_stop_loss"
 
@@ -186,6 +187,73 @@ def test_paper_round_trip_exports_realised_broker_fills_as_strict_feedback(tmp_p
     source = model["training_event_sources"]["paper_broker_round_trip"]
     assert model["training_events"] == 2
     assert source["prepared_rows"] == 2
+    assert source["positive_targets"] == 1
+
+
+def test_paper_round_trip_accepts_fill_when_exit_quote_metadata_is_stale(tmp_path):
+    cfg = _cfg(tmp_path)
+    con = connect_db(cfg.database_path)
+    signal = {
+        "market_slug": "ethereum-up-or-down-on-july-1-2026",
+        "question": "Ethereum Up or Down on July 1?",
+        "outcome": "Up",
+        "category": "crypto_eth_updown_event",
+        "signal_cohort": "exploratory_crypto_updown_live_model|crypto_eth_updown_daily|outcome=up",
+        "edge_lower_bound": "0.04",
+        "price_action_entry_source": "paper_confirmation_candidate",
+        "price_action_evidence_status": "trusted_shadow_requires_broker_paper_confirmation",
+        "price_action_latest_bid": "0.39",
+        "price_action_latest_ask": "0.40",
+        "price_action_spread": "0.01",
+        "price_action_latest_time_utc": "2026-07-01T10:00:00Z",
+        "strategy_name": "price_action_round_trip",
+        "model_version": "price_action_round_trip_v1",
+    }
+    try:
+        _insert_order(con, order_id="buy-stale-quote", created_at="2026-07-01T10:00:00Z", market_id="m1", token_id="t1", side="BUY_YES", price=0.40, stake=4.0, quantity=10.0, source_signal=signal)
+        _insert_fill(con, fill_id="fill-buy-stale-quote", order_id="buy-stale-quote", created_at="2026-07-01T10:00:00Z", market_id="m1", token_id="t1", side="BUY_YES", price=0.40, quantity=10.0)
+        _insert_snapshot(con, snapshot_id="snap-stale-quote", collected_at="2026-07-01T10:09:30Z", market_id="m1", token_id="t1", bid=0.50, ask=0.51)
+        _insert_order(
+            con,
+            order_id="sell-stale-quote",
+            created_at="2026-07-01T10:10:00Z",
+            market_id="m1",
+            token_id="t1",
+            side="SELL_YES",
+            price=0.50,
+            stake=5.0,
+            quantity=10.0,
+            source_signal={
+                "side": "SELL_YES",
+                "reason": "take_profit",
+                "quote": {
+                    "best_bid": 0.90,
+                    "best_ask": 0.91,
+                    "spread": 0.01,
+                    "timestamp": "2026-07-01T10:10:00Z",
+                    "source": "stale_exit_metadata",
+                },
+            },
+        )
+        _insert_fill(con, fill_id="fill-sell-stale-quote", order_id="sell-stale-quote", created_at="2026-07-01T10:10:00Z", market_id="m1", token_id="t1", side="SELL_YES", price=0.50, quantity=10.0)
+        con.commit()
+    finally:
+        con.close()
+
+    summary = build_paper_round_trip_evidence(cfg)
+    rows = read_csv_rows(cfg.output_root / "polymarket_price_action" / "paper_broker_round_trip_evidence.csv")
+
+    assert summary["quote_consistent_round_trips"] == 1
+    assert summary["quote_conflict_round_trips"] == 0
+    assert summary["audited_realized_pnl_usdc"] == pytest.approx(1.0)
+    assert rows[0]["quote_consistency_status"] == "ok"
+    assert "stale metadata" in rows[0]["quote_consistency_reason"]
+    assert float(rows[0]["exit_quote_snapshot_bid_gap"]) == pytest.approx(0.4)
+    assert float(rows[0]["exit_fill_snapshot_bid_gap"]) == pytest.approx(0.0)
+
+    model = train_price_action_model(cfg)
+    source = model["training_event_sources"]["paper_broker_round_trip"]
+    assert source["prepared_rows"] == 1
     assert source["positive_targets"] == 1
 
 
@@ -229,6 +297,7 @@ def test_paper_round_trip_quarantines_quote_conflicts_from_model_training(tmp_pa
     assert "excluded P&L must not train" in quote_audit["recommended_action"]
     assert rows[0]["quote_consistency_status"] == "quote_conflict"
     assert float(rows[0]["exit_quote_snapshot_bid_gap"]) == pytest.approx(0.933)
+    assert float(rows[0]["exit_fill_snapshot_bid_gap"]) == pytest.approx(0.933)
 
     model = train_price_action_model(cfg)
     source = model["training_event_sources"]["paper_broker_round_trip"]

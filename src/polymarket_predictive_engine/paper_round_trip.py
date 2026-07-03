@@ -55,6 +55,7 @@ ROUND_TRIP_FIELDS = [
     "quote_consistency_status",
     "quote_consistency_reason",
     "exit_quote_snapshot_bid_gap",
+    "exit_fill_snapshot_bid_gap",
     "exit_reason",
     "round_trip_status",
     "realized_pnl_usdc",
@@ -329,36 +330,51 @@ def _quote_consistency(snapshot: dict[str, Any], exit_quote: dict[str, Any], exi
     latest_bid = safe_float(snapshot.get("latest_bid"))
     quote_bid = safe_float(exit_quote.get("best_bid"))
     gap = abs(quote_bid - latest_bid) if quote_bid is not None and latest_bid is not None else None
+    exit_gap = abs(exit_price - latest_bid) if latest_bid is not None else None
+    tolerance = 0.05
     if observations <= 0:
         return {
             "quote_consistency_status": "unverified_missing_snapshot",
             "quote_consistency_reason": "no independent market_snapshots row matched the token during the round trip",
             "exit_quote_snapshot_bid_gap": "",
+            "exit_fill_snapshot_bid_gap": "",
         }
     if quote_bid is None:
-        exit_gap = abs(exit_price - latest_bid) if latest_bid is not None else None
-        if exit_gap is not None and exit_gap <= 0.05:
+        if exit_gap is not None and exit_gap <= tolerance:
             return {
                 "quote_consistency_status": "ok",
                 "quote_consistency_reason": "exit fill price is consistent with independent snapshot bid",
                 "exit_quote_snapshot_bid_gap": exit_gap,
+                "exit_fill_snapshot_bid_gap": exit_gap,
             }
         return {
             "quote_consistency_status": "unverified_missing_exit_quote",
             "quote_consistency_reason": "exit order has no broker quote payload to compare with independent snapshots",
             "exit_quote_snapshot_bid_gap": "" if exit_gap is None else exit_gap,
+            "exit_fill_snapshot_bid_gap": "" if exit_gap is None else exit_gap,
         }
-    tolerance = 0.05
     if gap is not None and gap > tolerance:
+        if exit_gap is not None and exit_gap <= tolerance:
+            return {
+                "quote_consistency_status": "ok",
+                "quote_consistency_reason": (
+                    "exit fill price is consistent with independent snapshot bid; "
+                    "broker quote payload differed and was treated as stale metadata"
+                ),
+                "exit_quote_snapshot_bid_gap": gap,
+                "exit_fill_snapshot_bid_gap": exit_gap,
+            }
         return {
             "quote_consistency_status": "quote_conflict",
-            "quote_consistency_reason": f"exit quote bid differs from independent snapshot bid by more than {tolerance:.2f}",
+            "quote_consistency_reason": f"exit quote bid and exit fill price are not both consistent with independent snapshot bid within {tolerance:.2f}",
             "exit_quote_snapshot_bid_gap": gap,
+            "exit_fill_snapshot_bid_gap": "" if exit_gap is None else exit_gap,
         }
     return {
         "quote_consistency_status": "ok",
         "quote_consistency_reason": "exit quote bid is consistent with independent snapshot bid",
         "exit_quote_snapshot_bid_gap": "" if gap is None else gap,
+        "exit_fill_snapshot_bid_gap": "" if exit_gap is None else exit_gap,
     }
 
 

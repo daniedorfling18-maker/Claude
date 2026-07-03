@@ -115,6 +115,7 @@ HTML = """<!doctype html>
   <section><h2>Action board</h2><div id="actionBoard"></div></section>
   <section><h2>Evidence funnel</h2><div id="evidenceFunnel"></div></section>
   <section><h2>Dutch-book arb watch</h2><div id="dutchArbWatch"></div></section>
+  <section><h2>Longshot-bias shadow lane</h2><div id="longshotBias"></div></section>
   <div class="two">
     <section><h2>$100/month price-change route</h2><div id="goalPlan"></div></section>
     <section><h2>Model & evidence health</h2><div id="modelHealth"></div></section>
@@ -265,6 +266,7 @@ async function load() {
     const closingLine = data.closing_line_value || {};
     const smartFlowClv = data.smart_flow_clv || {};
     const dutchArb = data.dutch_arb || {};
+    const longshotBias = data.longshot_bias || data.forward_paper_cycle?.longshot_bias || {};
     const edgeAttribution = data.edge_attribution || {};
     const riskState = data.risk_state || {};
     const portfolioRisk = riskState.portfolio_risk || {};
@@ -635,6 +637,32 @@ async function load() {
           ["Days","days_to_resolution"]
         ], 5)
       : `<div class="sectionLead">No Dutch-book arb scan yet. The VPS loop will run a bounded dry-run pass when the configured cadence is due.</div>`;
+    const longshotPreview = Array.isArray(longshotBias.candidate_preview) ? longshotBias.candidate_preview : [];
+    const longshotCandidates = longshotBias.candidates ?? longshotPreview.length ?? "-";
+    document.getElementById("longshotBias").innerHTML = Object.keys(longshotBias).length
+      ? `<div class="sectionLead">Slow-market longshot-bias research only: buy cheap NO / avoid overpriced tails, then validate with CLV before any paper promotion.</div>` + facts([
+          ["Status", longshotBias.status || "-"],
+          ["Generated", longshotBias.generated_at_utc || "-"],
+          ["Source", longshotBias.source || "longshot_bias_summary"],
+          ["Markets scanned", longshotBias.markets_scanned ?? "-"],
+          ["Source rows", longshotBias.source_rows ?? "-"],
+          ["Candidates", longshotCandidates],
+          ["Candidate cohorts", longshotBias.candidate_cohorts || {}, v=>longText(v, 220)],
+          ["Shadow emit", longshotBias.emit_shadow_positions === undefined ? "-" : longshotBias.emit_shadow_positions],
+          ["Shadow opened", longshotBias.shadow_update?.opened_this_cycle ?? "-"],
+          ["Decision use", longshotBias.decision_use || "shadow_clv_learning_target_not_paper_trade_authorisation", v=>longText(v, 260)],
+          ["Dry-run only", (longshotBias.live_trading_invoked || longshotBias.paper_trading_invoked) ? "unexpected invocation flag" : "yes - no paper/live orders placed"]
+        ]) + titledTable("Longshot NO candidates", longshotPreview, [
+          ["Market","question", (v,row)=>marketLabel(row)],
+          ["Family","family", v=>longText(v, 120)],
+          ["Outcome","outcome"],
+          ["Ask","ask", v=>fmtNum(v, 4)],
+          ["Bid","bid", v=>fmtNum(v, 4)],
+          ["Spread","spread", v=>fmtNum(v, 4)],
+          ["Liquidity","liquidity", v=>fmtNum(v, 2)],
+          ["Cohort","signal_cohort", v=>longText(v, 180)]
+        ], 6)
+      : `<div class="sectionLead">No longshot-bias scan artifact yet. This lane should publish a disabled/skipped/ok state each paper cycle so absence is visible, not silent.</div>`;
     document.getElementById("modelHealth").innerHTML = facts([
       ["Model gate", priceActionModel.decision || decisionSummary.model_state, v=>longText(v, 220)],
       ["Model age", fmtAge(modelAge)],
@@ -4317,6 +4345,23 @@ def render_dashboard(cfg: EngineConfig, latest_report: dict[str, Any] | None = N
     dutch_arb = read_json(cfg.output_root / "polymarket_arbitrage" / "dutch_arb_monitor_summary.json", default={}) or {}
     if not isinstance(dutch_arb, dict):
         dutch_arb = {}
+    if not dutch_arb and isinstance(heartbeat, dict) and isinstance(heartbeat.get("dutch_arb"), dict):
+        dutch_arb = {
+            **heartbeat["dutch_arb"],
+            "source": "live_loop_heartbeat",
+            "paper_trading_invoked": False,
+            "live_trading_invoked": False,
+        }
+    longshot_bias = read_json(cfg.output_root / "polymarket_longshot_bias" / "longshot_bias_summary.json", default={}) or {}
+    if not isinstance(longshot_bias, dict):
+        longshot_bias = {}
+    if not longshot_bias and isinstance(forward, dict) and isinstance(forward.get("longshot_bias"), dict):
+        longshot_bias = {
+            **forward["longshot_bias"],
+            "source": "forward_paper_cycle",
+            "paper_trading_invoked": False,
+            "live_trading_invoked": False,
+        }
     edge_attribution = read_json(governance / "edge_attribution.json", default={}) or {}
     if not isinstance(edge_attribution, dict):
         edge_attribution = {}
@@ -4462,6 +4507,7 @@ def render_dashboard(cfg: EngineConfig, latest_report: dict[str, Any] | None = N
         "closing_line_value": closing_line_value,
         "smart_flow_clv": smart_flow_clv,
         "dutch_arb": dutch_arb,
+        "longshot_bias": longshot_bias,
         "edge_attribution": edge_attribution,
         "family_calibration": family_calibration,
         "collection_coverage": collection_coverage,

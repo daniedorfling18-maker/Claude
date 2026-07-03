@@ -614,6 +614,67 @@ def test_dashboard_surfaces_dutch_arb_watch(tmp_path):
     assert "Observed ask baskets" in html
 
 
+def test_dashboard_surfaces_edge_lane_runtime_fallbacks(tmp_path):
+    cfg = _config(tmp_path)
+    write_json(
+        cfg.governance_root / "live_paper_loop_heartbeat.json",
+        {
+            "status": "ran",
+            "generated_at_utc": "2026-07-03T08:05:00Z",
+            "dutch_arb": {
+                "status": "skipped_interval",
+                "last_scan_at_utc": "2026-07-03T08:00:00Z",
+                "next_due_minutes": 7.5,
+                "paper_trading_invoked": False,
+                "live_trading_invoked": False,
+            },
+        },
+    )
+    write_json(
+        cfg.governance_root / "forward_paper_cycle.json",
+        {
+            "status": "ran",
+            "generated_at_utc": "2026-07-03T08:05:00Z",
+            "longshot_bias": {
+                "status": "ok",
+                "generated_at_utc": "2026-07-03T08:05:00Z",
+                "source_rows": 3,
+                "markets_scanned": 2,
+                "candidates": 1,
+                "candidate_cohorts": {"structural|longshot_no|macro_rates": 1},
+                "candidate_preview": [
+                    {
+                        "question": "Will an over-hyped tail event happen?",
+                        "family": "macro_rates",
+                        "outcome": "No",
+                        "ask": 0.09,
+                        "bid": 0.08,
+                        "spread": 0.01,
+                        "liquidity": 1200,
+                        "signal_cohort": "structural|longshot_no|macro_rates",
+                    }
+                ],
+                "emit_shadow_positions": False,
+                "shadow_update": {"opened_this_cycle": 0},
+                "decision_use": "shadow_clv_learning_target_not_paper_trade_authorisation",
+            },
+        },
+    )
+
+    result = render_dashboard(cfg)
+
+    data = read_json(result["dashboard_data"])
+    html = Path(result["dashboard_file"]).read_text(encoding="utf-8")
+    assert data["dutch_arb"]["source"] == "live_loop_heartbeat"
+    assert data["dutch_arb"]["status"] == "skipped_interval"
+    assert data["longshot_bias"]["source"] == "forward_paper_cycle"
+    assert data["longshot_bias"]["paper_trading_invoked"] is False
+    assert data["longshot_bias"]["live_trading_invoked"] is False
+    assert data["longshot_bias"]["candidates"] == 1
+    assert "Longshot-bias shadow lane" in html
+    assert "Longshot NO candidates" in html
+
+
 def test_dashboard_surfaces_edge_attribution_artifact(tmp_path):
     cfg = _config(tmp_path)
     write_json(

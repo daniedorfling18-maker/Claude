@@ -1,6 +1,6 @@
 # Polymarket Codex Work Orders
 
-Last updated: 2026-07-03 (WO-23/24/25/26/27 code landed; strategic edge reset: WO-24..WO-27 added; WO-20/21/22 landed; read docs/POLYMARKET_EDGE_STRATEGY_RESET.md first)
+Last updated: 2026-07-03 (WO-11/23/24/25/26/27 code landed; strategic edge reset: WO-24..WO-27 added; WO-20/21/22 landed; read docs/POLYMARKET_EDGE_STRATEGY_RESET.md first)
 
 Mechanical, file-level implementation instructions for coding agents (Codex or any other code
 changer). The architecture and priorities live in `docs/POLYMARKET_QUANT_MODE_CHARTER.md`; this file
@@ -475,7 +475,7 @@ and empty-state rendering, and paper-decision invariance.
 
 ---
 
-## WO-11 — Research focus consumes attribution, CLV, and sweep decisions — `open`
+## WO-11 — Research focus consumes attribution, CLV, and sweep decisions — `done` (2026-07-03)
 
 **Goal:** collection priorities steer toward cohorts where the evidence says edge might live and
 away from cohorts where the model is simply wrong. Collection steering only — no gate changes.
@@ -504,6 +504,14 @@ away from cohorts where the model is simply wrong. Collection steering only — 
    anywhere in the diff; output unchanged when the three artifacts are absent.
 
 **Out of scope:** thresholds, promotion logic, blacklists, `readiness.py`, the audit script.
+
+**Landed 2026-07-03:** `build_research_focus()` now reads edge attribution, CLV, and algo sweep
+artifacts. Cost-dominated, positive-edge, and positive-CLV cohorts get collection-only priority
+raises and family queries; model-direction-not-confirmed cohorts with negative CLV get lowered
+priority without blacklisting. `research_focus.json` now includes an `evidence_inputs` block that
+explains every cohort movement plus any validated shadow-only algo sweep lead. Tests cover the
+fixture evidence path, advisory-only sweep note, absence/empty-artifact behavior, and the invariant
+that these inputs do not alter gates or thresholds.
 
 ---
 
@@ -1066,7 +1074,7 @@ Queue order (strategic reset, 2026-07-03 — read POLYMARKET_EDGE_STRATEGY_RESET
 7. WO-7    done 2026-07-03: CLV-aware promotion review advisory wiring
 8. WO-22   done 2026-07-03: evidence-gated display fixes
 9. WO-23   done 2026-07-03: deployment-aware oversight status
-10. WO-11  research-focus consumption (after WO-26 so the guard shapes it)
+10. WO-11  done 2026-07-03: research-focus consumption (after WO-26 so the guard shapes it)
 11. WO-12  portfolio VaR + correlated-exposure reporting
 12. WO-13  microstructure hypotheses as replay strategies
 13. WO-14  generalise the sweep (after WO-13)

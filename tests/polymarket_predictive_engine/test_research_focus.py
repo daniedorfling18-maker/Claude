@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 from polymarket_predictive_engine.config import EngineConfig
@@ -509,3 +510,138 @@ def test_research_focus_uses_edge_attribution_to_separate_cost_and_model_drags(t
     assert payload["edge_attribution"]["cost_driven"][0]["cohort"] == "macro_rates"
     assert payload["edge_attribution"]["model_driven"][0]["cohort"] == "tennis_tennis_winner"
     assert "cost/quote-quality constrained" in payload["summary"]
+
+
+def test_research_focus_consumes_attribution_clv_and_sweep_as_collection_only(tmp_path):
+    cfg = _cfg(tmp_path)
+    write_json(
+        cfg.governance_root / "signal_cohort_pnl.json",
+        {
+            "cohorts": [
+                {
+                    "signal_cohort": "macro_rates",
+                    "total_pnl_usdc": 1.0,
+                    "roi": 0.08,
+                    "promotion_ready_score": 4,
+                    "promotion_ready_checks": 6,
+                },
+                {
+                    "signal_cohort": "tennis_tennis_winner",
+                    "total_pnl_usdc": 1.0,
+                    "roi": 0.08,
+                    "promotion_ready_score": 4,
+                    "promotion_ready_checks": 6,
+                },
+            ]
+        },
+    )
+    write_json(
+        cfg.governance_root / "edge_attribution.json",
+        {
+            "status": "ok",
+            "cohorts": [
+                {
+                    "signal_cohort": "macro_rates",
+                    "attribution_class": "cost_dominated",
+                    "total_pnl_usdc": -0.2,
+                    "execution_cost_usdc": 0.7,
+                    "line_movement_usdc": 0.4,
+                    "recommended_action": "work passive entries and tighter quote collection",
+                },
+                {
+                    "signal_cohort": "tennis_tennis_winner",
+                    "attribution_class": "model_direction_not_confirmed",
+                    "total_pnl_usdc": -1.1,
+                    "execution_cost_usdc": 0.01,
+                    "line_movement_usdc": -0.8,
+                    "recommended_action": "re-model before promotion",
+                },
+            ],
+            "paper_trading_invoked": False,
+            "live_trading_invoked": False,
+        },
+    )
+    write_json(
+        cfg.governance_root / "closing_line_value.json",
+        {
+            "status": "ok",
+            "positive_clv_cohorts": ["macro_rates", "esports_valorant_match"],
+            "cohorts": [
+                {"signal_cohort": "macro_rates", "clv_evidence": "positive_clv_evidence"},
+                {"signal_cohort": "tennis_tennis_winner", "clv_evidence": "negative_clv_evidence"},
+                {"signal_cohort": "esports_valorant_match", "clv_evidence": "positive_clv_evidence"},
+            ],
+            "paper_trading_invoked": False,
+            "live_trading_invoked": False,
+        },
+    )
+    write_json(
+        cfg.output_root / "polymarket_algo" / "algo_sweep_summary.json",
+        {
+            "status": "ok",
+            "decision": "sweep_candidate_validated_shadow_only",
+            "selected": {
+                "strategy": "tight_spread_join_bid_shadow",
+                "tight_spread_maximum": 0.02,
+                "minimum_book_imbalance": 0.4,
+                "validation_fills": 4,
+                "validation_pnl_usdc": 1.25,
+            },
+            "paper_trading_invoked": False,
+            "live_trading_invoked": False,
+        },
+    )
+
+    payload = build_research_focus(cfg)
+
+    assert payload["collection_queries"][:2] == ["fed", "esports"]
+    assert payload["watchlist"][0]["cohort"] == "macro_rates"
+    assert payload["watchlist"][1]["cohort"] == "tennis_tennis_winner"
+    assert payload["watchlist"][0]["priority_score"] > payload["watchlist"][1]["priority_score"]
+    evidence = payload["evidence_inputs"]
+    assert evidence["collection_queries_added"] == ["fed", "esports"]
+    macro = next(row for row in evidence["priority_adjustments"] if row["cohort"] == "macro_rates")
+    tennis = next(row for row in evidence["priority_adjustments"] if row["cohort"] == "tennis_tennis_winner")
+    esports = next(row for row in evidence["priority_adjustments"] if row["cohort"] == "esports_valorant_match")
+    assert macro["movement"] == "raised"
+    assert macro["priority_delta"] > 0
+    assert tennis["movement"] == "lowered"
+    assert tennis["priority_delta"] < 0
+    assert esports["movement"] == "raised"
+    assert "positive_clv_cohort" in esports["reasons"]
+    assert evidence["sweep_decision"] == "sweep_candidate_validated_shadow_only"
+    assert "tight_spread_maximum=0.02" in payload["notes"][0]
+    assert "minimum_book_imbalance=0.4" in payload["notes"][0]
+    evidence_json = json.dumps(evidence).lower()
+    assert "gate" not in evidence_json
+    assert "threshold" not in evidence_json
+
+
+def test_research_focus_optional_evidence_inputs_empty_without_artifacts(tmp_path):
+    cfg = _cfg(tmp_path)
+    write_json(
+        cfg.governance_root / "signal_cohort_pnl.json",
+        {
+            "cohorts": [
+                {
+                    "signal_cohort": "macro_economy",
+                    "total_pnl_usdc": 1.0,
+                    "roi": 0.01,
+                    "promotion_ready_score": 5,
+                    "promotion_ready_checks": 6,
+                }
+            ]
+        },
+    )
+
+    payload = build_research_focus(cfg)
+
+    assert payload["collection_queries"][0] == "economy"
+    assert "base_priority_score" not in payload["watchlist"][0]
+    assert "research_evidence_priority_delta" not in payload["watchlist"][0]
+    assert payload["notes"] == []
+    assert payload["evidence_inputs"]["priority_adjustments"] == []
+    assert payload["evidence_inputs"]["collection_queries_added"] == []
+    assert payload["evidence_inputs"]["edge_attribution_status"] is None
+    assert payload["evidence_inputs"]["closing_line_value_status"] is None
+    assert payload["evidence_inputs"]["sweep_decision"] == ""

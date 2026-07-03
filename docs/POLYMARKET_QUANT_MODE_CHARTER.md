@@ -333,6 +333,13 @@ research status file is absent, oversight shows the exact info line
 raises a false missing-shadow warning. Strategy V2 also renders "not running in this deployment"
 when its artifacts are absent under that fresh VPS live-loop driver.
 
+**2026-07-03 — WO-11 landed by Codex.** Research focus now consumes edge attribution, CLV, and
+algo-sweep artifacts as collection-only feedback. Cost-dominated, positive-edge, and positive-CLV
+cohorts are raised in collection priority and mapped to family queries; model-direction-not-confirmed
+cohorts with negative CLV are lowered without blacklisting. `research_focus.json` records an
+`evidence_inputs` block explaining every movement and any validated shadow-only sweep lead, while
+leaving promotion gates, thresholds, and trading authorisation untouched.
+
 ## Rules of engagement for coding agents
 
 0. **Division of labour**: the orchestrating agent writes/updates this charter and the work orders

@@ -120,3 +120,21 @@ def test_sweep_reports_no_candidate_when_nothing_fills_enough(tmp_path: Path):
     assert summary["decision"] == DECISION_NO_CANDIDATE
     assert summary["selected"] == {}
     assert summary["train_candidates"] == 0
+
+
+def test_algo_sweep_cli_defaults_to_tradable_probe_strategy(tmp_path: Path, monkeypatch):
+    from polymarket_predictive_engine import cli
+
+    cfg = _cfg(tmp_path, sweep=SWEEP_SETTINGS)
+    calls: list[tuple[str, str | None]] = []
+
+    monkeypatch.setattr(cli, "load_config", lambda _path: cfg)
+    monkeypatch.setattr(
+        cli,
+        "run_algo_sweep",
+        lambda _cfg, strategy_name, features_input=None: calls.append((strategy_name, features_input))
+        or {"status": "ok", "paper_trading_invoked": False, "live_trading_invoked": False},
+    )
+
+    assert cli.main(["algo-sweep", "--config", str(tmp_path / "cfg.yaml")]) == 0
+    assert calls == [("tight_spread_join_bid_shadow", None)]

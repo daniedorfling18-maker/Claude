@@ -167,7 +167,11 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--websocket-seconds", type=int, default=60)
     parser.add_argument("--websocket-input", default=None)
-    parser.add_argument("--strategy", default="null", help="algo-replay: registered algo strategy name (default: null)")
+    parser.add_argument(
+        "--strategy",
+        default=None,
+        help="algo-replay/algo-sweep: registered algo strategy name (defaults: replay=null, sweep=tight_spread_join_bid_shadow)",
+    )
     parser.add_argument("--snapshot-input", default=None)
     parser.add_argument("--sharp-input", default=None, help="sharp-odds CSV for build-sharp-anchor (overrides config sharp_anchor.input_path)")
     parser.add_argument("--crypto-targets", default=None, help="crypto targets CSV for build-crypto-fundamental (token_id,currency,strike,expiry)")
@@ -322,9 +326,9 @@ def main(argv: list[str] | None = None) -> int:
         elif args.command == "closing-line-value":
             _print(build_closing_line_value(cfg, features_input=args.websocket_input))
         elif args.command == "algo-replay":
-            _print(run_replay(cfg, args.strategy, features_input=args.websocket_input))
+            _print(run_replay(cfg, args.strategy or "null", features_input=args.websocket_input))
         elif args.command == "algo-sweep":
-            _print(run_algo_sweep(cfg, strategy_name=args.strategy, features_input=args.websocket_input))
+            _print(run_algo_sweep(cfg, strategy_name=args.strategy or "tight_spread_join_bid_shadow", features_input=args.websocket_input))
         elif args.command == "edge-attribution":
             _print(build_edge_attribution(cfg))
         elif args.command == "active-window-plan":

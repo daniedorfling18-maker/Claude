@@ -1,0 +1,59 @@
+name: SuperBru CLV snapshot
+
+# CLV-vs-close experiment: snapshot de-vigged World Cup h2h odds on a fixed
+# cadence, rebuild the locked-pick history from git, and refresh the CLV
+# report. Diagnostic only - stakes nothing. See scripts/superbru_clv_experiment.py.
+#
+# Budget: one Odds API request per run (eu region, h2h). Every 4 hours
+# ~= 180 credits/month against the 500/month free tier.
+
+on:
+  schedule:
+    - cron: '30 */4 * * *'
+  workflow_dispatch: {}
+
+concurrency:
+  group: superbru-clv-snapshot
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  snapshot:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # extract-picks walks the full card history
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install engine
+        run: pip install -e . --quiet
+
+      - name: Snapshot de-vigged odds
+        env:
+          THE_ODDS_API_KEY: ${{ secrets.THE_ODDS_API_KEY }}
+        run: python scripts/superbru_clv_experiment.py snapshot
+
+      - name: Rebuild pick history and CLV report
+        run: |
+          python scripts/superbru_clv_experiment.py extract-picks
+          python scripts/superbru_clv_experiment.py report
+
+      - name: Commit evidence
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add outputs/superbru_clv/
+          if git diff --cached --quiet; then
+            echo "no changes"
+            exit 0
+          fi
+          git commit -m "Update SuperBru CLV-vs-close evidence"
+          git pull --rebase origin main
+          git push origin HEAD:main

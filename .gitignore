@@ -16,6 +16,13 @@ outputs/*
 !outputs/final_locked_picks/
 outputs/final_locked_picks/*
 !outputs/final_locked_picks/superbru_final_card.csv
+# CLV-vs-close experiment evidence: committed by the scheduled snapshot workflow.
+!outputs/superbru_clv/
+outputs/superbru_clv/*
+!outputs/superbru_clv/locked_pick_history.csv
+!outputs/superbru_clv/odds_snapshots.csv
+!outputs/superbru_clv/clv_report.json
+!outputs/superbru_clv/clv_per_pick.csv
 
 # Local secrets / overrides
 .env

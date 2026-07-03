@@ -1,0 +1,20 @@
+{
+  "beat_close_rate": null,
+  "clv_ci_high": null,
+  "clv_ci_low": null,
+  "generated_at_utc": "2026-07-03T08:34:35Z",
+  "interpretation": "keep the snapshot workflow running; verdict needs more matched picks",
+  "mean_clv": null,
+  "minimum_samples": 15,
+  "picks_scored": 0,
+  "picks_seen": 61,
+  "skipped": {
+    "no_close_line": 0,
+    "no_outcome": 0,
+    "no_pick_time_line": 0,
+    "no_snapshots": 61
+  },
+  "stakes_placed": false,
+  "status": "ok",
+  "verdict": "insufficient_samples"
+}

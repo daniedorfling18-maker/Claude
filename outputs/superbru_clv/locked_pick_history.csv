@@ -43,20 +43,21 @@ locked_at_utc,commence_time,home_team,away_team,locked_pick,pick_outcome,match_k
 2026-06-29T11:19:50Z,2026-06-29T17:00:00Z,Brazil,Japan,2-0,home,brazil|japan|2026-06-29
 2026-06-29T17:11:05Z,2026-06-29T20:30:00Z,Germany,Paraguay,2-0,home,germany|paraguay|2026-06-29
 2026-06-29T17:11:05Z,2026-06-30T01:00:00Z,Netherlands,Morocco,2-0,home,netherlands|morocco|2026-06-30
-2026-06-30T05:11:53Z,2026-06-30T17:00:00Z,Ivory Coast,Norway,1-2,away,ivory coast|norway|2026-06-30
-2026-06-30T05:11:53Z,2026-06-30T21:00:00Z,France,Sweden,2-0,home,france|sweden|2026-06-30
-2026-06-30T05:11:53Z,2026-07-01T01:00:00Z,Mexico,Ecuador,1-0,home,mexico|ecuador|2026-07-01
-2026-07-01T08:49:40Z,2026-07-01T16:00:00Z,England,DR Congo,2-0,home,england|dr congo|2026-07-01
+2026-06-30T16:31:49Z,2026-06-30T17:00:00Z,Ivory Coast,Norway,1-2,away,ivory coast|norway|2026-06-30
+2026-06-30T16:31:49Z,2026-06-30T21:00:00Z,France,Sweden,3-1,home,france|sweden|2026-06-30
+2026-06-30T16:31:49Z,2026-07-01T01:00:00Z,Mexico,Ecuador,1-0,home,mexico|ecuador|2026-07-01
+2026-06-30T16:31:49Z,2026-07-01T16:00:00Z,England,DR Congo,2-0,home,england|dr congo|2026-07-01
 2026-07-01T16:38:40Z,2026-07-01T20:00:00Z,Belgium,Senegal,2-1,home,belgium|senegal|2026-07-01
 2026-07-01T16:38:40Z,2026-07-02T00:00:00Z,United States,Bosnia & Herzegovina,2-0,home,united states|bosnia and herzegovina|2026-07-02
 2026-07-02T16:14:02Z,2026-07-02T19:00:00Z,Spain,Austria,2-0,home,spain|austria|2026-07-02
 2026-07-02T16:14:02Z,2026-07-02T23:00:00Z,Portugal,Croatia,2-0,home,portugal|croatia|2026-07-02
 2026-07-02T16:14:02Z,2026-07-03T03:00:00Z,Switzerland,Algeria,2-0,home,switzerland|algeria|2026-07-03
-2026-07-02T16:14:02Z,2026-07-03T18:00:00Z,Australia,Egypt,0-1,away,australia|egypt|2026-07-03
-2026-07-02T16:14:02Z,2026-07-03T22:00:00Z,Argentina,Cape Verde,2-0,home,argentina|cape verde|2026-07-03
-2026-07-02T16:14:02Z,2026-07-04T01:30:00Z,Colombia,Ghana,2-0,home,colombia|ghana|2026-07-04
-2026-07-02T16:14:02Z,2026-07-04T17:00:00Z,Canada,Morocco,0-2,away,canada|morocco|2026-07-04
-2026-07-02T16:14:02Z,2026-07-04T21:00:00Z,Paraguay,France,0-2,away,paraguay|france|2026-07-04
-2026-07-02T16:14:02Z,2026-07-05T20:00:00Z,Brazil,Norway,2-0,home,brazil|norway|2026-07-05
-2026-07-02T16:14:02Z,2026-07-06T00:00:00Z,Mexico,England,0-1,away,mexico|england|2026-07-06
-2026-07-02T16:14:02Z,2026-07-07T00:00:00Z,United States,Belgium,2-1,home,united states|belgium|2026-07-07
+2026-07-03T10:06:14Z,2026-07-03T18:00:00Z,Australia,Egypt,0-1,away,australia|egypt|2026-07-03
+2026-07-03T10:06:14Z,2026-07-03T22:00:00Z,Argentina,Cape Verde,2-0,home,argentina|cape verde|2026-07-03
+2026-07-03T10:06:14Z,2026-07-04T01:30:00Z,Colombia,Ghana,2-0,home,colombia|ghana|2026-07-04
+2026-07-03T10:06:14Z,2026-07-04T17:00:00Z,Canada,Morocco,0-2,away,canada|morocco|2026-07-04
+2026-07-03T10:06:14Z,2026-07-04T21:00:00Z,Paraguay,France,0-2,away,paraguay|france|2026-07-04
+2026-07-03T10:06:14Z,2026-07-05T20:00:00Z,Brazil,Norway,2-0,home,brazil|norway|2026-07-05
+2026-07-03T10:06:14Z,2026-07-06T00:00:00Z,Mexico,England,0-1,away,mexico|england|2026-07-06
+2026-07-03T10:06:14Z,2026-07-06T19:00:00Z,Portugal,Spain,0-2,away,portugal|spain|2026-07-06
+2026-07-03T10:06:14Z,2026-07-07T00:00:00Z,United States,Belgium,2-1,home,united states|belgium|2026-07-07

@@ -1,6 +1,6 @@
 # Polymarket Codex Work Orders
 
-Last updated: 2026-07-03 (WO-11/23/24/25/26/27 code landed; strategic edge reset: WO-24..WO-27 added; WO-20/21/22 landed; read docs/POLYMARKET_EDGE_STRATEGY_RESET.md first)
+Last updated: 2026-07-03 (WO-11/12/23/24/25/26/27 code landed; strategic edge reset: WO-24..WO-27 added; WO-20/21/22 landed; read docs/POLYMARKET_EDGE_STRATEGY_RESET.md first)
 
 Mechanical, file-level implementation instructions for coding agents (Codex or any other code
 changer). The architecture and priorities live in `docs/POLYMARKET_QUANT_MODE_CHARTER.md`; this file
@@ -515,7 +515,7 @@ that these inputs do not alter gates or thresholds.
 
 ---
 
-## WO-12 — Portfolio VaR snapshot and correlated-exposure reporting (WP6) — `open`
+## WO-12 — Portfolio VaR snapshot and correlated-exposure reporting (WP6) — `done` (2026-07-03)
 
 **Goal:** the risk-state artifact shows portfolio-level VaR/CVaR over open-position marks and
 correlated exposure by correlation key. Reporting only — sizing already enforces the caps.
@@ -544,6 +544,13 @@ per `normalised_correlation_key` (see the sums near the end of that function). D
    or sensible for the seeded marks (hand-compute), and `risk_state.json` contains the block.
 
 **Out of scope:** `risk_decision`, stake caps, `paper_broker` order logic.
+
+**Landed 2026-07-03:** `portfolio_snapshot()` now writes `portfolio_risk` into
+`outputs/polymarket_portfolio/risk_state.json`, including open/marked positions, total cost,
+top correlated exposure, category exposure, historical VaR/CVaR, and worst marked position return.
+The dashboard loads the risk-state artifact and renders a Portfolio risk panel. Tests seed three
+typed SQLite positions, two sharing a correlation key, and verify exact exposure and VaR/CVaR
+numbers without changing risk decisions, stake caps, or broker order logic.
 
 ---
 
@@ -1075,7 +1082,7 @@ Queue order (strategic reset, 2026-07-03 — read POLYMARKET_EDGE_STRATEGY_RESET
 8. WO-22   done 2026-07-03: evidence-gated display fixes
 9. WO-23   done 2026-07-03: deployment-aware oversight status
 10. WO-11  done 2026-07-03: research-focus consumption (after WO-26 so the guard shapes it)
-11. WO-12  portfolio VaR + correlated-exposure reporting
+11. WO-12  done 2026-07-03: portfolio VaR + correlated-exposure reporting
 12. WO-13  microstructure hypotheses as replay strategies
 13. WO-14  generalise the sweep (after WO-13)
 14. WO-16  per-family calibration scorecard

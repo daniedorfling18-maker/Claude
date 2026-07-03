@@ -125,7 +125,7 @@ Acceptance: `tests/polymarket_predictive_engine/test_execution_costs.py`, the de
 `test_hardening_controls.py`, prediction handoff coverage in `test_predictive_power_expansion.py`,
 and mispricing-alpha depth/enrichment tests.
 
-### WP6 — Portfolio-level correlated exposure from live positions — `open`
+### WP6 — Portfolio-level correlated exposure from live positions — `done` (2026-07-03)
 
 - `risk_decision` already takes `current_correlated_exposure`, but callers must compute it from open
   positions sharing a `correlation_key` (see `worldcup_validation.normalised_correlation_key`).
@@ -133,8 +133,9 @@ and mispricing-alpha depth/enrichment tests.
   `quant_lab.risk` over open-position marks.
 - Acceptance: risk state artifact reports correlated exposure by key and portfolio VaR; a test shows
   two same-event candidates draining the same correlated budget.
-- Status: partially landed by Codex (`portfolio_state` computes correlated exposure per
-  `normalised_correlation_key`); the remaining VaR/reporting slice is specced as **WO-12**.
+- Status: landed by Codex. `portfolio_state` computes correlated exposure per
+  `normalised_correlation_key`; WO-12 adds the remaining risk-state VaR/CVaR and correlated-exposure
+  reporting slice, plus dashboard visibility.
 
 ### WP7 — Family classifier for liquid `unknown` markets — `done` (2026-07-02)
 
@@ -339,6 +340,12 @@ cohorts are raised in collection priority and mapped to family queries; model-di
 cohorts with negative CLV are lowered without blacklisting. `research_focus.json` records an
 `evidence_inputs` block explaining every movement and any validated shadow-only sweep lead, while
 leaving promotion gates, thresholds, and trading authorisation untouched.
+
+**2026-07-03 — WO-12 landed by Codex.** Portfolio snapshots now write a report-only
+`portfolio_risk` block into `outputs/polymarket_portfolio/risk_state.json`, covering total open cost,
+top correlated exposure, category exposure, historical VaR/CVaR over marked open positions, and worst
+position return. The dashboard renders the same block as a Portfolio risk panel. This completes the
+WP6 reporting slice without changing risk decisions, stake caps, or broker order logic.
 
 ## Rules of engagement for coding agents
 

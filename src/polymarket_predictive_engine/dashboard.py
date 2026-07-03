@@ -128,6 +128,7 @@ HTML = """<!doctype html>
   <section><h2>Edge attribution</h2><div id="edgeAttribution"></div></section>
   <section><h2>World Cup validation layer</h2><div id="worldcupValidation"></div></section>
   <section><h2>Actual paper P&L</h2><div id="actualTarget"></div></section>
+  <section><h2>Portfolio risk</h2><div id="portfolioRisk"></div></section>
   </details>
   <details class="legacy"><summary>Deep diagnostics and rejected-candidate audit<span>Raw telemetry is still here for debugging, but the decision cockpit above is the default trading view.</span></summary>
   <section><h2>Why no trade?</h2><div id="tradeDiagnostics"></div></section>
@@ -262,6 +263,8 @@ async function load() {
     const closingLine = data.closing_line_value || {};
     const dutchArb = data.dutch_arb || {};
     const edgeAttribution = data.edge_attribution || {};
+    const riskState = data.risk_state || {};
+    const portfolioRisk = riskState.portfolio_risk || {};
     const priceActionPaper = data.price_action_paper_signals || {};
     const currentHistScan = priceActionPaper.current_historical_analogue_scan || {};
     const historicalBreadthScan = priceActionPaper.historical_breadth_scan || {};
@@ -722,6 +725,26 @@ async function load() {
           ["Evidence","clv_evidence", v=>longText(v, 150)]
         ], 8)
       : `<div class="sectionLead">No CLV evidence yet. The next governance refresh should build closing_line_value.json once shadow positions and bid/ask features exist.</div>`;
+    const correlatedExposure = Array.isArray(portfolioRisk.exposure_by_correlation_key) ? portfolioRisk.exposure_by_correlation_key : [];
+    const categoryExposure = Array.isArray(portfolioRisk.exposure_by_category) ? portfolioRisk.exposure_by_category : [];
+    document.getElementById("portfolioRisk").innerHTML = Object.keys(portfolioRisk).length
+      ? `<div class="sectionLead">Report-only portfolio downside and concentration view. It does not authorise trades or change stake caps; it tells us when profitable evidence is becoming too concentrated.</div>` + facts([
+          ["Generated", portfolioRisk.generated_at_utc],
+          ["Open positions", portfolioRisk.open_positions],
+          ["Marked positions", `${portfolioRisk.marked_positions ?? 0} marked / ${portfolioRisk.unmarked_positions ?? 0} unmarked`],
+          ["Total cost", portfolioRisk.total_cost_usdc, fmtUsd],
+          ["VaR 95", portfolioRisk.var_95_usdc, fmtUsd],
+          ["CVaR 95", portfolioRisk.cvar_95_usdc, fmtUsd],
+          ["Worst position return", portfolioRisk.worst_position_return_pct == null ? "-" : fmtNum(portfolioRisk.worst_position_return_pct, 2) + "%"],
+          ["Decision use", portfolioRisk.decision_use, v=>longText(v, 180)]
+        ]) + titledTable("Top correlated exposure", correlatedExposure, [
+          ["Correlation key","key", v=>longText(v, 180)],
+          ["Cost basis","cost_basis_usdc", fmtUsd]
+        ], 10) + titledTable("Exposure by category", categoryExposure, [
+          ["Category","key", v=>longText(v, 140)],
+          ["Cost basis","cost_basis_usdc", fmtUsd]
+        ], 10)
+      : `<div class="sectionLead">No portfolio risk snapshot yet. The next portfolio snapshot should write risk_state.json with VaR/CVaR and correlated exposure.</div>`;
     const attributionCohorts = Array.isArray(edgeAttribution.cohorts) ? edgeAttribution.cohorts : [];
     document.getElementById("edgeAttribution").innerHTML = Object.keys(edgeAttribution).length
       ? `<div class="sectionLead">Explains closed shadow P&L using the exact identity: exit minus entry fill equals settlement surprise plus line movement minus execution cost. Diagnostic only; it does not authorise trading.</div>` + facts([
@@ -4002,6 +4025,9 @@ def render_dashboard(cfg: EngineConfig, latest_report: dict[str, Any] | None = N
     edge_attribution = read_json(governance / "edge_attribution.json", default={}) or {}
     if not isinstance(edge_attribution, dict):
         edge_attribution = {}
+    risk_state = read_json(portfolio_root / "risk_state.json", default={}) or {}
+    if not isinstance(risk_state, dict):
+        risk_state = {}
     websocket_summary = read_json(cfg.output_root / "polymarket_websocket" / "websocket_summary.json", default={}) or {}
     if not isinstance(websocket_summary, dict):
         websocket_summary = {}
@@ -4114,6 +4140,7 @@ def render_dashboard(cfg: EngineConfig, latest_report: dict[str, Any] | None = N
         "closing_line_value": closing_line_value,
         "dutch_arb": dutch_arb,
         "edge_attribution": edge_attribution,
+        "risk_state": risk_state,
         "websocket_summary": websocket_summary,
         "websocket_feature_summary": websocket_feature_summary,
         "research_focus": research_focus,

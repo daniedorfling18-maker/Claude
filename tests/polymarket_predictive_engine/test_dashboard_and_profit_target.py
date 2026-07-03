@@ -266,12 +266,60 @@ def test_dashboard_handles_empty_closing_line_value_artifact(tmp_path):
     assert data["closing_line_value"] == {}
     assert data["edge_attribution"] == {}
     assert data["algo_sweep"] == {}
+    assert data["risk_state"] == {}
     assert "Closing-line value (CLV)" in html
     assert "No CLV evidence yet" in html
     assert "Edge attribution" in html
     assert "No edge attribution evidence yet" in html
+    assert "Portfolio risk" in html
+    assert "No portfolio risk snapshot yet" in html
     assert "Algo sweep lab" in html
     assert "No sweep run yet" in html
+
+
+def test_dashboard_surfaces_portfolio_risk_state(tmp_path):
+    cfg = _config(tmp_path)
+    write_json(
+        cfg.output_root / "polymarket_portfolio" / "risk_state.json",
+        {
+            "portfolio_risk": {
+                "generated_at_utc": "2026-07-03T09:00:00Z",
+                "decision_use": "reporting_only_not_trade_authorisation",
+                "open_positions": 3,
+                "marked_positions": 3,
+                "unmarked_positions": 0,
+                "total_cost_usdc": 18.0,
+                "var_95_usdc": 3.42,
+                "cvar_95_usdc": 3.6,
+                "worst_position_return_pct": -20.0,
+                "exposure_by_correlation_key": [
+                    {"key": "fed-july-2026", "cost_basis_usdc": 10.0},
+                    {"key": "tennis-final-2026", "cost_basis_usdc": 8.0},
+                ],
+                "exposure_by_category": [
+                    {"key": "macro_rates", "cost_basis_usdc": 10.0},
+                    {"key": "tennis", "cost_basis_usdc": 8.0},
+                ],
+                "paper_trading_invoked": False,
+                "live_trading_invoked": False,
+            }
+        },
+    )
+
+    result = render_dashboard(cfg)
+
+    data = read_json(result["dashboard_data"])
+    html = Path(result["dashboard_file"]).read_text(encoding="utf-8")
+    risk = data["risk_state"]["portfolio_risk"]
+    assert risk["open_positions"] == 3
+    assert risk["var_95_usdc"] == 3.42
+    assert risk["cvar_95_usdc"] == 3.6
+    assert risk["exposure_by_correlation_key"][0]["key"] == "fed-july-2026"
+    assert risk["paper_trading_invoked"] is False
+    assert risk["live_trading_invoked"] is False
+    assert "Portfolio risk" in html
+    assert "Top correlated exposure" in html
+    assert "Exposure by category" in html
 
 
 def test_dashboard_surfaces_dutch_arb_watch(tmp_path):

@@ -2,10 +2,13 @@ from __future__ import annotations
 
 import csv
 import importlib.util
+import json
+import os
 from concurrent.futures import Future
 from pathlib import Path
 
 from polymarket_predictive_engine.config import EngineConfig
+from polymarket_predictive_engine.runtime_lock import runtime_lock_path
 from polymarket_predictive_engine.utils import read_csv_rows, read_json
 
 
@@ -348,6 +351,98 @@ def test_degraded_prediction_cycle_wraps_canonical_paper_cycle(tmp_path, monkeyp
     assert summary["source"] == "websocket"
     assert summary["signals_approved"] == 1
     assert summary["resource_guard"]["reason"] == "memory_above_limit"
+
+
+def test_live_loop_clears_orphaned_same_process_prediction_lock(tmp_path):
+    loop = _load_loop_module()
+    cfg = EngineConfig(
+        raw={"paths": {"output_root": str(tmp_path / "outputs")}},
+        path=tmp_path / "cfg.yaml",
+    )
+    lock_path = runtime_lock_path(cfg, "prediction_cycle")
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
+    lock_path.write_text(
+        json.dumps(
+            {
+                "name": "prediction_cycle",
+                "pid": os.getpid(),
+                "process_started_at_utc": "2026-07-04T14:00:00Z",
+                "acquired_at_utc": "2026-07-04T14:01:00Z",
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    result = loop._clear_orphaned_same_process_prediction_lock(cfg, None)
+
+    assert result["status"] == "cleared_same_process_orphan"
+    assert not lock_path.exists()
+
+
+def test_live_loop_keeps_prediction_lock_while_future_is_running(tmp_path):
+    loop = _load_loop_module()
+    cfg = EngineConfig(
+        raw={"paths": {"output_root": str(tmp_path / "outputs")}},
+        path=tmp_path / "cfg.yaml",
+    )
+    lock_path = runtime_lock_path(cfg, "prediction_cycle")
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
+    lock_path.write_text(
+        json.dumps(
+            {
+                "name": "prediction_cycle",
+                "pid": os.getpid(),
+                "process_started_at_utc": "2026-07-04T14:00:00Z",
+                "acquired_at_utc": "2026-07-04T14:01:00Z",
+            }
+        ),
+        encoding="utf-8",
+    )
+    future: Future[dict[str, object]] = Future()
+    assert future.set_running_or_notify_cancel()
+
+    result = loop._clear_orphaned_same_process_prediction_lock(cfg, future)
+
+    assert result["status"] == "active_prediction_future"
+    assert lock_path.exists()
+
+
+def test_live_dashboard_mark_does_not_carry_stale_prediction_lock_blockers(tmp_path, monkeypatch):
+    loop = _load_loop_module()
+    cfg = EngineConfig(
+        raw={"paths": {"output_root": str(tmp_path / "outputs")}},
+        path=tmp_path / "cfg.yaml",
+    )
+    cfg.governance_root.mkdir(parents=True, exist_ok=True)
+    (cfg.governance_root / "forward_paper_cycle.json").write_text(
+        json.dumps(
+            {
+                "status": "ran",
+                "blockers": ["prediction_cycle_lock_already_held"],
+                "runtime_lock": {"acquired": False, "name": "prediction_cycle"},
+                "features": 10,
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(loop, "_lightweight_shadow_maintenance", lambda _cfg, _features: {"status": "skipped"})
+    monkeypatch.setattr(loop, "paper_trade", lambda _cfg: {"status": "ran", "equity": 1000.0})
+    monkeypatch.setattr(loop, "write_profit_target_tracker", lambda _cfg, _broker: {"status": "collecting_forward_evidence"})
+    monkeypatch.setattr(loop, "render_dashboard", lambda _cfg, _forward=None: {"status": "ok"})
+
+    forward = loop.mark_portfolio_and_render_dashboard(
+        cfg,
+        source="websocket_live",
+        loop_summary={"status": "ok"},
+        features=[],
+    )
+
+    persisted = read_json(cfg.governance_root / "forward_paper_cycle.json")
+    assert "blockers" not in forward
+    assert "runtime_lock" not in forward
+    assert "blockers" not in persisted
+    assert "runtime_lock" not in persisted
+    assert persisted["features"] == 10
 
 
 def test_refresh_fast_updown_snapshot_fetches_positive_cohort_slots(tmp_path, monkeypatch):

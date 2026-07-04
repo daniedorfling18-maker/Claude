@@ -41,6 +41,7 @@ from polymarket_predictive_engine.price_action_scout import build_price_action_s
 from polymarket_predictive_engine.profit_target import write_profit_target_tracker  # noqa: E402
 from polymarket_predictive_engine.refresh_governance import refresh_governance  # noqa: E402
 from polymarket_predictive_engine.resolution_collector import fetch_gamma_market  # noqa: E402
+from polymarket_predictive_engine.runtime_lock import runtime_lock_path  # noqa: E402
 from polymarket_predictive_engine.shadow_cohort import update_shadow_cohort_evidence  # noqa: E402
 from polymarket_predictive_engine.storage import connect_db  # noqa: E402
 from polymarket_predictive_engine.utils import now_utc, parse_timestamp, read_csv_rows, read_json, safe_float, write_csv, write_json  # noqa: E402
@@ -521,6 +522,8 @@ def mark_portfolio_and_render_dashboard(
     actual_target = write_profit_target_tracker(cfg, broker if isinstance(broker, dict) else {})
     previous = read_json(cfg.governance_root / "forward_paper_cycle.json", default={}) or {}
     forward = dict(previous) if isinstance(previous, dict) else {}
+    for stale_prediction_key in ("blockers", "runtime_lock"):
+        forward.pop(stale_prediction_key, None)
     forward.update(
         {
             "status": "ran",
@@ -537,6 +540,32 @@ def mark_portfolio_and_render_dashboard(
     forward["dashboard"] = render_dashboard(cfg, forward)
     write_json(cfg.governance_root / "forward_paper_cycle.json", forward)
     return forward
+
+
+def _clear_orphaned_same_process_prediction_lock(cfg, prediction_future: Future[dict[str, Any]] | None) -> dict[str, Any]:
+    if prediction_future is not None and not prediction_future.done():
+        return {"status": "active_prediction_future"}
+    path = runtime_lock_path(cfg, "prediction_cycle")
+    payload = read_json(path, default={}) or {}
+    if not path.exists() or not isinstance(payload, dict):
+        return {"status": "not_locked"}
+    if str(payload.get("name") or "") != "prediction_cycle":
+        return {"status": "foreign_lock_name", "lock_name": payload.get("name", "")}
+    try:
+        lock_pid = int(payload.get("pid"))
+    except (TypeError, ValueError):
+        return {"status": "foreign_or_malformed_lock", "pid": payload.get("pid", "")}
+    if lock_pid != os.getpid():
+        return {"status": "owned_by_other_process", "pid": lock_pid}
+    try:
+        path.unlink()
+    except FileNotFoundError:
+        return {"status": "already_cleared"}
+    return {
+        "status": "cleared_same_process_orphan",
+        "pid": lock_pid,
+        "acquired_at_utc": payload.get("acquired_at_utc", ""),
+    }
 
 
 def _initial_discovery_due_timestamp(discovery_cycle_seconds: float, *, now: float | None = None) -> float:
@@ -1160,6 +1189,7 @@ def main(argv: list[str] | None = None) -> int:
                             else float("inf")
                         )
 
+                prediction_lock_maintenance = _clear_orphaned_same_process_prediction_lock(cfg, prediction_future)
                 resource_guard = _local_live_resource_guard(cfg)
                 write_json(
                     cfg.governance_root / "runtime_resource_guard.json",
@@ -1384,6 +1414,7 @@ def main(argv: list[str] | None = None) -> int:
                     "prediction_governance_block_seconds": args.prediction_governance_block_seconds,
                     "prediction_running_seconds": prediction_running_seconds,
                     "prediction_blocks_governance": prediction_blocks_governance,
+                    "prediction_lock_maintenance": prediction_lock_maintenance,
                     "prediction_no_longer_blocks_governance": bool(
                         prediction_future is not None
                         and not prediction_future.done()

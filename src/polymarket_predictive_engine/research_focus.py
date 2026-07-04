@@ -641,6 +641,77 @@ def _current_positive_analogue_queries(targets: list[dict[str, Any]]) -> list[st
     return queries
 
 
+def _side_missing_analogue_targets(price_action_paper: dict[str, Any], *, max_targets: int = 6) -> dict[str, Any]:
+    """Rows with positive side-agnostic history need side/context collection, not approval."""
+    scans: list[dict[str, Any]] = []
+    for key in ("current_historical_analogue_scan", "paper_confirmation_current_historical_analogue"):
+        scan = price_action_paper.get(key)
+        if isinstance(scan, dict):
+            scans.append(scan)
+    targets: list[dict[str, Any]] = []
+    for scan in scans:
+        rows = scan.get("blocked_preview")
+        if not isinstance(rows, list):
+            continue
+        for row in rows:
+            if not isinstance(row, dict):
+                continue
+            if str(row.get("historical_analogue_gate") or "") != "side_missing_positive_historical_analogue_shadow_only":
+                continue
+            query = str(row.get("recommended_collection_query") or "").strip()
+            if not query:
+                query = _near_miss_collection_query(row)
+            if not query:
+                query = _cohort_query(str(row.get("family") or row.get("signal_cohort") or ""))
+            if not query:
+                continue
+            targets.append(
+                {
+                    "market_slug": row.get("market_slug", ""),
+                    "question": row.get("question", ""),
+                    "family": row.get("family", ""),
+                    "outcome": row.get("outcome", ""),
+                    "token_id": row.get("token_id", ""),
+                    "recommended_collection_query": query,
+                    "latest_bid": row.get("latest_bid", ""),
+                    "latest_ask": row.get("latest_ask", ""),
+                    "latest_spread": row.get("latest_spread", ""),
+                    "historical_analogue_key": row.get("historical_analogue_key", ""),
+                    "side_agnostic_historical_analogue_key": row.get("side_agnostic_historical_analogue_key", ""),
+                    "side_agnostic_validation_rows": _num(row.get("side_agnostic_historical_analogue_validation_rows")),
+                    "side_agnostic_positive_rows": _num(row.get("side_agnostic_historical_analogue_positive_rows")),
+                    "side_agnostic_validation_roi": _num(row.get("side_agnostic_historical_analogue_validation_roi")),
+                    "side_agnostic_win_rate": row.get("side_agnostic_historical_analogue_win_rate", ""),
+                    "decision_use": "collect_trade_flow_side_context_only_not_trade_authorisation",
+                    "next_action": (
+                        "Collect fresh websocket/trade-flow side context for this family/price/spread bucket; "
+                        "side-agnostic history is positive but cannot authorise paper probes."
+                    ),
+                }
+            )
+    targets.sort(
+        key=lambda item: (
+            _num(item.get("side_agnostic_validation_roi")),
+            _num(item.get("side_agnostic_positive_rows")),
+            _num(item.get("side_agnostic_validation_rows")),
+            -_num(item.get("latest_spread"), 999.0),
+        ),
+        reverse=True,
+    )
+    queries: list[str] = []
+    for target in targets:
+        query = str(target.get("recommended_collection_query") or "").strip()
+        if query and query not in queries:
+            queries.append(query)
+    return {
+        "state": "needs_trade_flow_side_context" if targets else "none",
+        "targets": targets[:max_targets],
+        "collection_queries": queries,
+        "trade_authorisation": "no_trade_side_agnostic_history_is_shadow_only",
+        "paper_only": True,
+    }
+
+
 def _edge_attribution_query(row: dict[str, Any]) -> str:
     cohort = str(row.get("signal_cohort") or row.get("cohort") or "").strip()
     if not cohort:
@@ -1050,6 +1121,8 @@ def build_research_focus(cfg) -> dict[str, Any]:
     current_positive_targets = current_positive_payload.get("targets", [])
     current_positive_blocked_targets = current_positive_payload.get("blocked_targets", [])
     current_positive_queries = _current_positive_analogue_queries(current_positive_targets)
+    side_missing_payload = _side_missing_analogue_targets(price_action_paper)
+    side_missing_queries = side_missing_payload.get("collection_queries", [])
     model_needs_repricing_data = _price_action_model_needs_data(price_action_model) and bool(feedback_queries)
     feedback_positive = bool(
         _num(price_action_feedback.get("promotion_candidates"))
@@ -1088,6 +1161,15 @@ def build_research_focus(cfg) -> dict[str, Any]:
                 f"positive-label hurdle; best max possible return={_num(blocked.get('max_possible_return')):.4f} "
                 f"vs required {_num(blocked.get('model_label_minimum_return')):.4f}. "
                 "Do not waste scout capacity on these exact rows; collect lower-ask analogues instead."
+                + (f" Model blocker: {blocker_text}." if blocker_text else "")
+            )
+        elif side_missing_queries:
+            target = (side_missing_payload.get("targets") or [{}])[0]
+            roi = _num(target.get("side_agnostic_validation_roi"))
+            next_action = (
+                "Current rows have positive side-agnostic historical analogues, but missing BUY/SELL side context keeps "
+                f"paper gates closed; prioritise {', '.join(side_missing_queries[:4])} side/context collection. "
+                f"Best side-agnostic validation ROI={roi:.4f}."
                 + (f" Model blocker: {blocker_text}." if blocker_text else "")
             )
         elif historical_breadth_queries:
@@ -1167,6 +1249,9 @@ def build_research_focus(cfg) -> dict[str, Any]:
         for query in current_positive_queries:
             if query and query not in collection_queries:
                 collection_queries.append(query)
+        for query in side_missing_queries:
+            if query and query not in collection_queries:
+                collection_queries.append(query)
         for query in historical_breadth_queries:
             if query and query not in collection_queries:
                 collection_queries.append(query)
@@ -1236,9 +1321,11 @@ def build_research_focus(cfg) -> dict[str, Any]:
             "model_needs_repricing_data": model_needs_repricing_data or bool(validation_gap_queries),
             "historical_breadth_queries": historical_breadth_queries,
             "current_positive_analogue_queries": current_positive_queries,
+            "side_missing_analogue_queries": side_missing_queries,
             "near_miss_candidate_queries": near_miss_queries,
             "analogue_scan_needs_breadth": analogue_scan_needs_breadth,
         },
+        "price_action_side_missing_analogues": side_missing_payload,
         "price_action_current_positive_analogues": {
             "state": (
                 "learning_targets_available"

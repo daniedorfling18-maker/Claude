@@ -280,6 +280,7 @@ async function load() {
     const historicalBreadthScan = priceActionPaper.historical_breadth_scan || {};
     const researchFocus = data.research_focus || {};
     const currentPositiveAnalogues = researchFocus.price_action_current_positive_analogues || {};
+    const sideMissingAnalogues = researchFocus.price_action_side_missing_analogues || {};
     const priceActionFeedback = data.price_action_feedback || {};
     const goalPlan = data.paper_profit_goal_plan || {};
     const priceActionGoal = goalPlan.price_action_goal_state || {};
@@ -1175,6 +1176,8 @@ async function load() {
       ["Label-headroom scout targets", priceScout.label_headroom_research_targets],
       ["Current analogue eligible", (currentPositiveAnalogues.targets || []).length],
       ["Current analogue blocked/headroom", (currentPositiveAnalogues.blocked_targets || []).length],
+      ["Side-missing analogue targets", (sideMissingAnalogues.targets || []).length],
+      ["Side-missing collect", sideMissingAnalogues.collection_queries, v=>longText(v, 180)],
       ["Model label hurdle", currentPositiveAnalogues.model_label_minimum_return, v=>fmtNum(Number(v) * 100, 2) + "%"],
       ["Paper signal decision", priceActionPaper.decision],
       ["Paper signals", priceActionPaper.signals],
@@ -1244,6 +1247,16 @@ async function load() {
       ["Max return","max_possible_return", v=>fmtNum(Number(v) * 100, 2) + "%"],
       ["Required","model_label_minimum_return", v=>fmtNum(Number(v) * 100, 2) + "%"],
       ["Collect","recommended_collection_query"]
+    ]) + `<div style="height:12px"></div><h3>Side-missing positive analogue context targets</h3>` + table(sideMissingAnalogues.targets || [], [
+      ["Use","decision_use", v=>longText(v, 180)],
+      ["Family","family"],
+      ["Market","market_slug", v=>longText(v, 140)],
+      ["Ask","latest_ask", v=>fmtNum(v,4)],
+      ["Side-free val rows","side_agnostic_validation_rows"],
+      ["Side-free +","side_agnostic_positive_rows"],
+      ["Side-free ROI","side_agnostic_validation_roi", v=>fmtNum(Number(v) * 100, 2) + "%"],
+      ["Collect","recommended_collection_query"],
+      ["Auth","trade_authorisation", v=>longText(v, 160)]
     ]) + `<div style="height:12px"></div><h3>Current analogue blockers to learn from</h3>` + table(currentHistScan.blocked_preview || [], [
       ["Gate","historical_analogue_gate", v=>longText(v, 160)],
       ["Family","family"],

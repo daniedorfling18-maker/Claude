@@ -965,6 +965,46 @@ def test_dashboard_serves_capped_compact_cockpit_payload(tmp_path):
     assert "\n" not in dashboard_text.strip()
 
 
+def test_dashboard_surfaces_side_missing_analogue_context_targets(tmp_path):
+    cfg = _config(tmp_path)
+    write_json(
+        cfg.governance_root / "research_focus.json",
+        {
+            "status": "ok",
+            "collection_queries": ["fed"],
+            "price_action_side_missing_analogues": {
+                "state": "needs_trade_flow_side_context",
+                "collection_queries": ["fed"],
+                "trade_authorisation": "no_trade_side_agnostic_history_is_shadow_only",
+                "targets": [
+                    {
+                        "decision_use": "collect_trade_flow_side_context_only_not_trade_authorisation",
+                        "family": "macro_rates",
+                        "market_slug": "will-the-fed-cut-rates-after-the-july-2026-meeting",
+                        "latest_ask": 0.5,
+                        "side_agnostic_validation_rows": 12,
+                        "side_agnostic_positive_rows": 5,
+                        "side_agnostic_validation_roi": 0.041,
+                        "recommended_collection_query": "fed",
+                        "trade_authorisation": "no_trade_side_agnostic_history_is_shadow_only",
+                    }
+                ],
+                "paper_only": True,
+            },
+        },
+    )
+
+    result = render_dashboard(cfg)
+
+    data = read_json(result["dashboard_data"])
+    html = Path(result["dashboard_file"]).read_text(encoding="utf-8")
+    side_missing = data["research_focus"]["price_action_side_missing_analogues"]
+    assert side_missing["state"] == "needs_trade_flow_side_context"
+    assert side_missing["targets"][0]["recommended_collection_query"] == "fed"
+    assert "Side-missing positive analogue context targets" in html
+    assert "Side-free ROI" in html
+
+
 def test_dashboard_emits_decision_useful_summary_for_missing_fresh_candidate(tmp_path):
     cfg = _config(tmp_path)
     write_json(

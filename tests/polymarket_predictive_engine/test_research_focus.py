@@ -448,6 +448,72 @@ def test_research_focus_prioritises_current_positive_analogue_as_learning_target
     assert "not a trade approval" in payload["summary"]
 
 
+def test_research_focus_routes_side_missing_analogues_to_context_collection(tmp_path):
+    cfg = _cfg(tmp_path)
+    write_json(
+        cfg.output_root / "polymarket_price_action" / "price_action_model_summary.json",
+        {
+            "status": "trained",
+            "decision": "collect_more_bid_ask_price_action_model_evidence",
+            "promotion_ready": False,
+            "validation_blockers": ["current side context is missing"],
+        },
+    )
+    write_json(
+        cfg.output_root / "polymarket_price_action" / "price_action_paper_signal_summary.json",
+        {
+            "status": "computed",
+            "current_historical_analogue_scan": {
+                "state": "no_current_positive_historical_analogue",
+                "current_rows": 8,
+                "positive_matches": 0,
+                "blocked_preview": [
+                    {
+                        "market_slug": "will-the-fed-cut-rates-after-the-july-2026-meeting",
+                        "question": "Will the Fed cut rates after the July 2026 meeting?",
+                        "family": "macro_rates",
+                        "outcome": "Yes",
+                        "token_id": "fed-side-missing-token",
+                        "latest_bid": 0.49,
+                        "latest_ask": 0.50,
+                        "latest_spread": 0.01,
+                        "historical_analogue_key": "macro_rates|ask=40-60c|spread=<=1c|side=",
+                        "historical_analogue_gate": "side_missing_positive_historical_analogue_shadow_only",
+                        "side_agnostic_historical_analogue_key": "macro_rates|ask=40-60c|spread=<=1c|side=ANY",
+                        "side_agnostic_historical_analogue_gate": "positive_historical_analogue",
+                        "side_agnostic_historical_analogue_validation_rows": 12,
+                        "side_agnostic_historical_analogue_positive_rows": 5,
+                        "side_agnostic_historical_analogue_validation_roi": 0.041,
+                        "side_agnostic_historical_analogue_win_rate": 0.4167,
+                    }
+                ],
+                "blocked_by_state": {"side_missing_positive_historical_analogue_shadow_only": 1},
+            },
+        },
+    )
+    write_json(
+        cfg.governance_root / "price_action_feedback.json",
+        {
+            "status": "ok",
+            "learning_state": "collect_more_positive_price_action_evidence",
+            "collection_queries": ["btc updown"],
+        },
+    )
+
+    payload = build_research_focus(cfg)
+
+    assert payload["collection_queries"][0] == "fed"
+    assert payload["price_action_model"]["side_missing_analogue_queries"] == ["fed"]
+    side_missing = payload["price_action_side_missing_analogues"]
+    assert side_missing["state"] == "needs_trade_flow_side_context"
+    assert side_missing["trade_authorisation"] == "no_trade_side_agnostic_history_is_shadow_only"
+    target = side_missing["targets"][0]
+    assert target["recommended_collection_query"] == "fed"
+    assert target["decision_use"] == "collect_trade_flow_side_context_only_not_trade_authorisation"
+    assert target["side_agnostic_validation_roi"] == 0.041
+    assert "missing BUY/SELL side context keeps paper gates closed" in payload["summary"]
+
+
 def test_research_focus_blocks_current_positive_analogue_without_label_headroom(tmp_path):
     cfg = _cfg(tmp_path)
     write_json(

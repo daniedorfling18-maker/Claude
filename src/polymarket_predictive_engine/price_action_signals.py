@@ -72,6 +72,12 @@ SIGNAL_FIELDS = [
     "historical_analogue_validation_roi",
     "historical_analogue_win_rate",
     "historical_analogue_gate",
+    "side_agnostic_historical_analogue_key",
+    "side_agnostic_historical_analogue_validation_rows",
+    "side_agnostic_historical_analogue_positive_rows",
+    "side_agnostic_historical_analogue_validation_roi",
+    "side_agnostic_historical_analogue_win_rate",
+    "side_agnostic_historical_analogue_gate",
     "exit_policy_id",
     "max_forward_observations",
     "take_profit_return",
@@ -103,6 +109,12 @@ REJECTION_FIELDS = [
     "historical_analogue_validation_roi",
     "historical_analogue_win_rate",
     "historical_analogue_gate",
+    "side_agnostic_historical_analogue_key",
+    "side_agnostic_historical_analogue_validation_rows",
+    "side_agnostic_historical_analogue_positive_rows",
+    "side_agnostic_historical_analogue_validation_roi",
+    "side_agnostic_historical_analogue_win_rate",
+    "side_agnostic_historical_analogue_gate",
     "rejection_reason",
 ]
 
@@ -223,14 +235,18 @@ def _spread_bucket(spread: float | None) -> str:
     return ">2c"
 
 
-def _historical_analogue_key(row: dict[str, Any]) -> str:
+def _historical_side(row: dict[str, Any]) -> str:
+    return str(row.get("current_side") or row.get("price_change_side") or "").strip().upper()
+
+
+def _historical_analogue_key(row: dict[str, Any], *, side_override: str | None = None) -> str:
     family = str(row.get("family") or row.get("category") or "unknown").strip() or "unknown"
     ask = safe_float(row.get("entry_ask") or row.get("latest_ask") or row.get("best_ask"))
     bid = safe_float(row.get("entry_bid") or row.get("latest_bid") or row.get("best_bid"))
     spread = safe_float(row.get("entry_spread") or row.get("latest_spread") or row.get("spread"))
     if spread is None and ask is not None and bid is not None:
         spread = max(0.0, ask - bid)
-    side = str(row.get("current_side") or row.get("price_change_side") or "").strip().upper()
+    side = side_override if side_override is not None else _historical_side(row)
     return f"{family}|ask={_price_bucket(ask)}|spread={_spread_bucket(spread)}|side={side}"
 
 
@@ -242,6 +258,7 @@ def _historical_analogue_stats(cfg: EngineConfig, settings: dict[str, Any]) -> d
         if str(row.get("split") or "").strip().lower() != "validation":
             continue
         grouped.setdefault(_historical_analogue_key(row), []).append(row)
+        grouped.setdefault(_historical_analogue_key(row, side_override="ANY"), []).append(row)
     stats: dict[str, dict[str, Any]] = {}
     for key, rows in grouped.items():
         stake = sum(safe_float(row.get("stake_usdc")) or 0.0 for row in rows)
@@ -266,6 +283,7 @@ def _historical_analogue_stats(cfg: EngineConfig, settings: dict[str, Any]) -> d
             "win_rate": win_rate,
             "minimum_validation_rows": min_rows,
             "minimum_positive_rows": min_positive,
+            "side_agnostic": key.endswith("|side=ANY"),
         }
     return stats
 
@@ -564,6 +582,7 @@ def _empty_historical_analogue(key: str, settings: dict[str, Any]) -> dict[str, 
         "win_rate": 0.0,
         "minimum_validation_rows": int(safe_float(settings.get("paper_confirmation_min_historical_analogue_validation_rows")) or 3),
         "minimum_positive_rows": int(safe_float(settings.get("paper_confirmation_min_historical_analogue_positive_rows")) or 1),
+        "side_agnostic": False,
     }
 
 
@@ -573,7 +592,30 @@ def _historical_analogue_for_row(
     settings: dict[str, Any],
 ) -> dict[str, Any]:
     key = _historical_analogue_key(row)
-    return stats.get(key) or _empty_historical_analogue(key, settings)
+    exact = stats.get(key)
+    if exact is not None:
+        return exact
+    if _historical_side(row):
+        return _empty_historical_analogue(key, settings)
+
+    side_agnostic_key = _historical_analogue_key(row, side_override="ANY")
+    side_agnostic = stats.get(side_agnostic_key)
+    if side_agnostic is None:
+        return _empty_historical_analogue(key, settings)
+    if side_agnostic.get("state") != "positive_historical_analogue":
+        return _empty_historical_analogue(key, settings)
+    return {
+        **_empty_historical_analogue(key, settings),
+        "state": "side_missing_positive_historical_analogue_shadow_only",
+        "side_agnostic_key": side_agnostic_key,
+        "side_agnostic_state": side_agnostic.get("state", ""),
+        "side_agnostic_validation_rows": side_agnostic.get("validation_rows", 0),
+        "side_agnostic_positive_rows": side_agnostic.get("positive_rows", 0),
+        "side_agnostic_validation_pnl_usdc": side_agnostic.get("validation_pnl_usdc", 0.0),
+        "side_agnostic_validation_roi": side_agnostic.get("validation_roi", 0.0),
+        "side_agnostic_win_rate": side_agnostic.get("win_rate", 0.0),
+        "side_agnostic_shadow_only": True,
+    }
 
 
 def _attach_historical_analogue(row: dict[str, Any], analogue: dict[str, Any]) -> dict[str, Any]:
@@ -585,6 +627,12 @@ def _attach_historical_analogue(row: dict[str, Any], analogue: dict[str, Any]) -
         "historical_analogue_validation_roi": analogue.get("validation_roi", 0.0),
         "historical_analogue_win_rate": analogue.get("win_rate", 0.0),
         "historical_analogue_gate": analogue.get("state", ""),
+        "side_agnostic_historical_analogue_key": analogue.get("side_agnostic_key", ""),
+        "side_agnostic_historical_analogue_validation_rows": analogue.get("side_agnostic_validation_rows", ""),
+        "side_agnostic_historical_analogue_positive_rows": analogue.get("side_agnostic_positive_rows", ""),
+        "side_agnostic_historical_analogue_validation_roi": analogue.get("side_agnostic_validation_roi", ""),
+        "side_agnostic_historical_analogue_win_rate": analogue.get("side_agnostic_win_rate", ""),
+        "side_agnostic_historical_analogue_gate": analogue.get("side_agnostic_state", ""),
     }
 
 
@@ -855,6 +903,7 @@ def _current_historical_analogue_scan(
         1
         for analogue in stats.values()
         if str(analogue.get("state") or "") == "positive_historical_analogue"
+        and not boolish(analogue.get("side_agnostic"))
     )
     if not rows:
         state = "no_current_bid_ask_rows"

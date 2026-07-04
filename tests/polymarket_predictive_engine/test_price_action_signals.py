@@ -703,6 +703,64 @@ def test_paper_confirmation_current_candidate_blocks_negative_historical_analogu
     assert analogue["blocked_preview"][0]["latest_ask"] == 0.026
 
 
+def test_blank_side_current_candidate_uses_side_agnostic_history_as_shadow_only_blocker(tmp_path):
+    cfg = _cfg(tmp_path)
+    cfg.raw["price_action_microstructure"] = {
+        "enabled": True,
+        "lookback_observations": 1,
+        "max_rows_per_token": 20,
+    }
+    cfg.raw["price_action_paper"].update(
+        {
+            "paper_confirmation_max_current_candidates": 4,
+            "paper_confirmation_require_positive_historical_analogue": True,
+            "paper_confirmation_min_historical_analogue_validation_rows": 3,
+            "paper_confirmation_min_historical_analogue_positive_rows": 1,
+            "low_price_tick_probe_enabled": False,
+        }
+    )
+    root = cfg.output_root / "polymarket_price_action"
+    write_json(
+        cfg.governance_root / "price_action_feedback.json",
+        _paper_confirmation_feedback_payload(cohort="crypto_btc_special"),
+    )
+    write_csv(
+        cfg.output_root / "polymarket_training" / "websocket_market_features.csv",
+        [
+            _ws_feature_row(0, best_bid="0.022", best_ask="0.023", midpoint="0.0225", price_change_side=""),
+            _ws_feature_row(1, best_bid="0.023", best_ask="0.024", midpoint="0.0235", price_change_side=""),
+            _ws_feature_row(2, best_bid="0.024", best_ask="0.025", midpoint="0.0245", price_change_side=""),
+            _ws_feature_row(3, best_bid="0.025", best_ask="0.026", midpoint="0.0255", price_change_side=""),
+        ],
+    )
+    write_csv(
+        root / "microstructure_trade_events.csv",
+        [
+            _low_price_trade_event(split="validation", current_side="BUY", exit_bid="0.027", pnl_usdc="0.16", roi="0.08"),
+            _low_price_trade_event(split="validation", current_side="BUY", exit_bid="0.026", pnl_usdc="0.08", roi="0.04"),
+            _low_price_trade_event(split="validation", current_side="BUY", exit_bid="0.026", pnl_usdc="0.08", roi="0.04"),
+        ],
+    )
+
+    summary = build_price_action_paper_signals(cfg)
+    signals = read_csv_rows(root / "price_action_paper_signals.csv")
+    analogue = summary["paper_confirmation_current_historical_analogue"]
+    current_scan = summary["current_historical_analogue_scan"]
+    blocked = analogue["blocked_preview"][0]
+
+    assert signals == []
+    assert summary["paper_confirmation_current_candidates"] == 0
+    assert analogue["fresh_matches"] == 1
+    assert analogue["blocked_by_state"]["side_missing_positive_historical_analogue_shadow_only"] == 1
+    assert blocked["historical_analogue_gate"] == "side_missing_positive_historical_analogue_shadow_only"
+    assert blocked["historical_analogue_validation_rows"] == 0
+    assert blocked["side_agnostic_historical_analogue_gate"] == "positive_historical_analogue"
+    assert blocked["side_agnostic_historical_analogue_validation_rows"] == 3
+    assert float(blocked["side_agnostic_historical_analogue_validation_roi"]) > 0
+    assert current_scan["blocked_by_state"]["side_missing_positive_historical_analogue_shadow_only"] == 1
+    assert current_scan["positive_matches"] == 0
+
+
 def test_eth_updown_confirmation_query_matches_current_eth_rows_by_outcome(tmp_path):
     cfg = _cfg(tmp_path)
     cfg.raw["price_action_microstructure"] = {

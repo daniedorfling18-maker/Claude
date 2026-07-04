@@ -16,7 +16,7 @@ def test_vps_paper_compose_is_lean_and_paper_only():
     compose = _vps_compose()
     services = compose["services"]
 
-    assert set(services) == {"polymarket-paper-live", "polymarket-dashboard"}
+    assert set(services) == {"polymarket-paper-live", "polymarket-dashboard", "superbru-auto-pick-watchdog"}
 
     paper_env = services["polymarket-paper-live"]["environment"]
     assert paper_env["POLYMARKET_EXECUTE_LIVE"] == "false"
@@ -29,11 +29,18 @@ def test_vps_paper_compose_is_lean_and_paper_only():
 
     assert services["polymarket-paper-live"]["restart"] == "unless-stopped"
     assert services["polymarket-dashboard"]["restart"] == "unless-stopped"
+    assert services["superbru-auto-pick-watchdog"]["restart"] == "unless-stopped"
     assert services["polymarket-paper-live"]["mem_limit"] == "${PM_PAPER_MEM_LIMIT:-4g}"
     assert services["polymarket-dashboard"]["mem_limit"] == "${PM_DASHBOARD_MEM_LIMIT:-256m}"
+    assert services["superbru-auto-pick-watchdog"]["mem_limit"] == "${SUPERBRU_AUTO_PICK_MEM_LIMIT:-1g}"
+    assert services["polymarket-paper-live"]["build"]["args"]["INSTALL_SCRAPER"] == "true"
     dashboard_command = services["polymarket-dashboard"]["command"]
     assert "render_polymarket_dashboard.py" in dashboard_command
     assert "if [ ! -f /app/outputs/polymarket_dashboard/index.html ]" not in dashboard_command
+    superbru = services["superbru-auto-pick-watchdog"]
+    assert "run_superbru_auto_pick_watchdog.sh" in superbru["command"]
+    assert superbru["environment"]["SUPERBRU_AUTO_PICK_ENABLED"] == "${SUPERBRU_AUTO_PICK_ENABLED:-true}"
+    assert "POLYMARKET_LIVE_TRADING" not in superbru["environment"]
 
 
 def test_vps_env_example_keeps_live_credentials_empty():
@@ -44,7 +51,12 @@ def test_vps_env_example_keeps_live_credentials_empty():
     assert "POLYMARKET_PRIVATE_KEY=" in text
     assert "CLOB_API_KEY=" in text
     assert "PM_PAPER_MEM_LIMIT=4g" in text
+    assert "SUPERBRU_AUTO_PICK_MEM_LIMIT=1g" in text
     assert "POLYMARKET_GOVERNANCE_REFRESH_SECONDS=120" in text
+    assert "SUPERBRU_AUTO_PICK_ENABLED=true" in text
+    assert "SUPERBRU_EMAIL=" in text
+    assert "SUPERBRU_PASSWORD=" in text
+    assert "SUPERBRU_POOL_URL=" in text
 
 
 def test_vps_bootstrap_script_starts_only_lean_paper_stack():
@@ -90,6 +102,9 @@ def test_vps_deploy_workflow_requires_current_dashboard_schema():
     assert "coverage_by_sport_market" in text
     assert "alpha_validated_anchor_rows" in text
     assert "sharp_sports_funnel" in text
+    assert "SUPERBRU_PASSWORD" in text
+    assert "VPS auto-pick watchdog" in text
+    assert "json.dumps(updates" in text
 
 
 def test_vps_deploy_workflow_writes_public_dashboard_url():

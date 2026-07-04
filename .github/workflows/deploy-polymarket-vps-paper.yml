@@ -22,6 +22,10 @@ jobs:
           PM_VPS_USER: ${{ secrets.PM_VPS_USER }}
           PM_VPS_SSH_PRIVATE_KEY: ${{ secrets.PM_VPS_SSH_PRIVATE_KEY }}
           THE_ODDS_API_KEY: ${{ secrets.THE_ODDS_API_KEY }}
+          SUPERBRU_EMAIL: ${{ secrets.SUPERBRU_EMAIL }}
+          SUPERBRU_USERNAME: ${{ secrets.SUPERBRU_USERNAME }}
+          SUPERBRU_PASSWORD: ${{ secrets.SUPERBRU_PASSWORD }}
+          SUPERBRU_POOL_URL: ${{ secrets.SUPERBRU_POOL_URL }}
         run: |
           set -euo pipefail
           missing=0
@@ -33,6 +37,9 @@ jobs:
           done
           if [ -z "${THE_ODDS_API_KEY:-}" ]; then
             echo "::warning::THE_ODDS_API_KEY is not set; sharp-anchor odds fetching will remain disabled on the VPS."
+          fi
+          if { [ -z "${SUPERBRU_EMAIL:-}" ] && [ -z "${SUPERBRU_USERNAME:-}" ]; } || [ -z "${SUPERBRU_PASSWORD:-}" ] || [ -z "${SUPERBRU_POOL_URL:-}" ]; then
+            echo "::warning::SuperBru secrets are incomplete; VPS auto-pick watchdog will deploy but idle until credentials are present."
           fi
           exit "$missing"
 
@@ -87,15 +94,39 @@ jobs:
       - name: Create VPS environment patch
         env:
           THE_ODDS_API_KEY: ${{ secrets.THE_ODDS_API_KEY }}
+          SUPERBRU_EMAIL: ${{ secrets.SUPERBRU_EMAIL }}
+          SUPERBRU_USERNAME: ${{ secrets.SUPERBRU_USERNAME }}
+          SUPERBRU_PASSWORD: ${{ secrets.SUPERBRU_PASSWORD }}
+          SUPERBRU_LOGIN_URL: ${{ secrets.SUPERBRU_LOGIN_URL }}
+          SUPERBRU_POOL_URL: ${{ secrets.SUPERBRU_POOL_URL }}
+          SUPERBRU_PLAYER_NAME: ${{ secrets.SUPERBRU_PLAYER_NAME || 'Danie' }}
+          SUPERBRU_POOL_KEYWORDS: ${{ secrets.SUPERBRU_POOL_KEYWORDS || 'Moore Infinity,FIFA WC 26,World Cup 2026' }}
           GITHUB_SHA: ${{ github.sha }}
         run: |
           set -euo pipefail
           patch_file="$RUNNER_TEMP/polymarket-vps-env.patch"
-          : > "$patch_file"
-          if [ -n "${THE_ODDS_API_KEY:-}" ]; then
-            printf 'THE_ODDS_API_KEY=%s\n' "$THE_ODDS_API_KEY" >> "$patch_file"
-          fi
-          printf 'PM_VPS_DEPLOYED_SHA=%s\n' "$GITHUB_SHA" >> "$patch_file"
+          python3 - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          keys = [
+              "THE_ODDS_API_KEY",
+              "SUPERBRU_EMAIL",
+              "SUPERBRU_USERNAME",
+              "SUPERBRU_PASSWORD",
+              "SUPERBRU_LOGIN_URL",
+              "SUPERBRU_POOL_URL",
+              "SUPERBRU_PLAYER_NAME",
+              "SUPERBRU_POOL_KEYWORDS",
+          ]
+          updates = {key: os.environ[key] for key in keys if os.environ.get(key)}
+          updates["PM_VPS_DEPLOYED_SHA"] = os.environ["GITHUB_SHA"]
+          Path(os.environ["RUNNER_TEMP"], "polymarket-vps-env.patch").write_text(
+              json.dumps(updates, ensure_ascii=False),
+              encoding="utf-8",
+          )
+          PY
           chmod 600 "$patch_file"
 
       - name: Copy environment patch
@@ -168,12 +199,24 @@ jobs:
           env_path = Path(".env")
           patch_path = Path("/tmp/polymarket-vps-env.patch." + __import__("os").environ["GITHUB_RUN_ID"])
 
-          updates: dict[str, str] = {}
-          for raw_line in patch_path.read_text(encoding="utf-8").splitlines():
-              if not raw_line or raw_line.lstrip().startswith("#") or "=" not in raw_line:
-                  continue
-              key, value = raw_line.split("=", 1)
-              updates[key] = value
+          raw_patch = patch_path.read_text(encoding="utf-8")
+          try:
+              updates = {str(key): str(value) for key, value in __import__("json").loads(raw_patch).items()}
+          except Exception:
+              updates: dict[str, str] = {}
+              for raw_line in raw_patch.splitlines():
+                  if not raw_line or raw_line.lstrip().startswith("#") or "=" not in raw_line:
+                      continue
+                  key, value = raw_line.split("=", 1)
+                  updates[key] = value
+
+          def render_env_value(value: str) -> str:
+              import json
+              import re
+
+              if re.fullmatch(r"[A-Za-z0-9_./:@%+-]*", value):
+                  return value
+              return json.dumps(value, ensure_ascii=False)
 
           lines = env_path.read_text(encoding="utf-8").splitlines()
           rendered: list[str] = []
@@ -183,14 +226,14 @@ jobs:
               if not stripped.startswith("#") and "=" in line:
                   key, _ = line.split("=", 1)
                   if key in updates:
-                      rendered.append(f"{key}={updates[key]}")
+                      rendered.append(f"{key}={render_env_value(updates[key])}")
                       seen.add(key)
                       continue
               rendered.append(line)
 
           for key, value in updates.items():
               if key not in seen:
-                  rendered.append(f"{key}={value}")
+                  rendered.append(f"{key}={render_env_value(value)}")
 
           env_path.write_text("\n".join(rendered) + "\n", encoding="utf-8")
           env_path.chmod(0o600)

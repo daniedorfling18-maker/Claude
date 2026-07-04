@@ -1189,7 +1189,37 @@ trap.
 
 ---
 
+## WO-29 — Conservative composite fair for knockout advance markets — `done` (2026-07-04, CRITICAL)
+
+**Why:** WO-28 correctly refused to map 90-minute h2h prices directly onto Polymarket
+advance/qualify markets. The live dashboard then exposed a second bottleneck: many liquid knockout
+markets still had a usable YES token but no usable independent anchor because the wording was "to
+advance." Dropping all of them made the sharp-anchor lane too narrow.
+
+**Landed 2026-07-04:** `sharp_anchor.py` now builds a labelled composite only when the full
+three-way h2h fair exists and the local token map exposes an explicit advance YES token:
+
+```text
+advance fair = regulation-win fair + draw fair * advance_composite_draw_split
+```
+
+The default split is neutral/conservative (`0.50`) and is clamped to `[0, 1]`. Output rows are
+tagged as `anchor_type=advance_composite_from_h2h` with the regulation-win probability, draw
+probability, draw-share assumption, source suffix, and target Polymarket question. Missing draw legs
+still fail closed with `advance_market_needs_composite_fair_missing_draw`. This does not loosen
+paper/live gates or sizing; it only turns previously skipped sharp-anchor evidence into an auditable
+candidate input for the existing alpha haircuts and forward paper proof loop.
+
+**Files:** `src/polymarket_predictive_engine/sharp_anchor.py`,
+`polymarket_predictive_config.example.yaml`, tests.
+
+---
+
 ## Sequencing
+
+Runtime update (2026-07-04): `PM_VPS_SSH_PRIVATE_KEY` is now populated in GitHub secrets, so the
+VPS deploy lane is no longer blocked on missing SSH credentials. WO-29 has also landed as the
+conservative composite bridge for explicit advance/qualify YES tokens.
 
 ```text
 WO-1..WO-6, WO-8, WO-9   done and audited (2026-07-02)

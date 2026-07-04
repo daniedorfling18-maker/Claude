@@ -655,26 +655,31 @@ def _coverage_bucket(
             "token_map_joins": 0,
             "h2h_public_search_token_joins": 0,
             "worldcup_winner_token_joins": 0,
+            "advance_composite_token_joins": 0,
         }
     return coverage[key]
 
 
-def _load_token_map(cfg: EngineConfig, settings: dict[str, Any]) -> tuple[dict[str, str], dict[str, str], list[dict[str, Any]]]:
+def _load_token_map(
+    cfg: EngineConfig,
+    settings: dict[str, Any],
+) -> tuple[dict[str, str], dict[str, str], list[dict[str, Any]], dict[str, dict[str, Any]]]:
     """(market, outcome) -> token_id, built from a configured map file (default: the bot's
     market_snapshot.csv, which carries token_id + market_slug + outcome)."""
     path = Path(settings.get("token_map_path") or (cfg.output_root / "polymarket" / "market_snapshot.csv"))
     rows = read_csv_rows(path)
     if not rows:
-        return {}, {}, []
+        return {}, {}, [], {}
     cols = list(rows[0].keys())
     token_col = find_first_column(cols, TOKEN_FIELDS)
     group_col = find_first_column(cols, GROUP_FIELDS)
     outcome_col = find_first_column(cols, OUTCOME_FIELDS)
     if not token_col or not group_col or not outcome_col:
-        return {}, {}, []
+        return {}, {}, [], {}
     mapping: dict[str, str] = {}
     blocked: dict[str, str] = {}
     blocked_samples: list[dict[str, Any]] = []
+    advance_composite_targets: dict[str, dict[str, Any]] = {}
     for row in rows:
         token = str(row.get(token_col, "")).strip()
         if token:
@@ -693,7 +698,19 @@ def _load_token_map(cfg: EngineConfig, settings: dict[str, Any]) -> tuple[dict[s
             h2h_keys, blocker = _h2h_token_map_keys(row, outcome)
             if blocker:
                 for group, blocked_outcome in h2h_keys:
-                    blocked.setdefault(_match_key(group, blocked_outcome), blocker)
+                    key = _match_key(group, blocked_outcome)
+                    blocked.setdefault(key, blocker)
+                    if blocker == "advance_market_needs_composite_fair" and outcome.strip().lower() in {"yes", "y"}:
+                        advance_composite_targets.setdefault(
+                            key,
+                            {
+                                "token_id": token,
+                                "market_slug": row.get(group_col, ""),
+                                "question": row.get("question", ""),
+                                "outcome": blocked_outcome,
+                                "reason": blocker,
+                            },
+                        )
                 if len(blocked_samples) < 20:
                     blocked_samples.append(
                         {
@@ -706,7 +723,29 @@ def _load_token_map(cfg: EngineConfig, settings: dict[str, Any]) -> tuple[dict[s
             else:
                 for group, mapped_outcome in h2h_keys:
                     mapping.setdefault(_match_key(group, mapped_outcome), token)
-    return mapping, blocked, blocked_samples
+    return mapping, blocked, blocked_samples, advance_composite_targets
+
+
+def _bool_setting(value: Any, *, default: bool) -> bool:
+    if value is None:
+        return default
+    if isinstance(value, bool):
+        return value
+    text = str(value).strip().lower()
+    if text in {"1", "true", "yes", "y", "on"}:
+        return True
+    if text in {"0", "false", "no", "n", "off"}:
+        return False
+    return default
+
+
+def _advance_draw_split(settings: dict[str, Any]) -> float:
+    split = safe_float(settings.get("advance_composite_draw_split"))
+    if split is None:
+        split = safe_float(settings.get("advance_draw_split"))
+    if split is None:
+        split = 0.50
+    return max(0.0, min(1.0, split))
 
 
 # --------------------------------------------------------------------------- build
@@ -717,6 +756,8 @@ def build_sharp_anchor(cfg: EngineConfig, *, input_path: str | None = None) -> d
     min_outcomes_per_market = max(2, int(settings.get("min_outcomes_per_market", 2) or 2))
     min_market_implied_sum = float(settings.get("min_market_implied_sum", 0.90) or 0.90)
     max_market_implied_sum = float(settings.get("max_market_implied_sum", 2.00) or 2.00)
+    advance_composite_enabled = _bool_setting(settings.get("advance_composite_enabled"), default=True)
+    advance_draw_split = _advance_draw_split(settings)
     in_path = Path(input_path or settings.get("input_path") or "inputs/polymarket/sharp_odds.csv")
     out_dir = cfg.output_root / "polymarket_training"
     out_path = out_dir / "sharp_fundamental_probabilities.csv"
@@ -736,7 +777,7 @@ def build_sharp_anchor(cfg: EngineConfig, *, input_path: str | None = None) -> d
     implied_col = find_first_column(cols, IMPLIED_FIELDS)
     token_col = find_first_column(cols, TOKEN_FIELDS)
     has_direct_tokens = bool(token_col and any(str(row.get(token_col, "")).strip() for row in rows))
-    token_map, token_map_blockers, token_map_blocked_samples = _load_token_map(cfg, settings)
+    token_map, token_map_blockers, token_map_blocked_samples, advance_composite_targets = _load_token_map(cfg, settings)
     h2h_public_tokens, h2h_public_search = _h2h_match_tokens_from_public_search(settings, rows)
     worldcup_winner_tokens = _worldcup_winner_token_map(cfg, settings)
     coverage_by_sport_market: dict[tuple[str, str], dict[str, Any]] = {}
@@ -757,6 +798,7 @@ def build_sharp_anchor(cfg: EngineConfig, *, input_path: str | None = None) -> d
     direct_token_joins = 0
     token_map_joins = 0
     h2h_public_search_token_joins = 0
+    advance_composite_token_joins = 0
     overrounds: list[float] = []
     for gkey, grows in groups.items():
         raw: list[float] = []
@@ -797,21 +839,39 @@ def build_sharp_anchor(cfg: EngineConfig, *, input_path: str | None = None) -> d
             continue
         overrounds.append(raw_sum)
         fair = devig(raw, method)
+        fair_by_outcome: dict[str, dict[str, Any]] = {}
+        if outcome_col:
+            for fair_row, fair_implied, fair_prob in zip(kept, raw, fair):
+                outcome_key = _team_key(fair_row.get(outcome_col))
+                if outcome_key:
+                    fair_by_outcome.setdefault(
+                        outcome_key,
+                        {
+                            "probability": fair_prob,
+                            "raw_implied_probability": fair_implied,
+                            "outcome": fair_row.get(outcome_col, ""),
+                        },
+                    )
         for row, implied, prob in zip(kept, raw, fair):
             row_market_key = str(row.get("market_key", "") or "")
             coverage = _coverage_bucket(coverage_by_sport_market, row)
+            outcome_text = str(row.get(outcome_col, "")) if outcome_col else ""
             token = str(row.get(token_col, "")).strip() if token_col else ""
             join_source = ""
+            output_probability = prob
+            output_source = source_name
+            output_outcome = row.get(outcome_col, "") if outcome_col else ""
+            output_extra: dict[str, Any] = {}
             if token:
                 direct_token_joins += 1
                 join_source = "direct_token_joins"
             elif outcome_col:
-                token = token_map.get(_match_key(gkey, str(row.get(outcome_col, ""))), "")
+                token = token_map.get(_match_key(gkey, outcome_text), "")
                 if token:
                     token_map_joins += 1
                     join_source = "token_map_joins"
                 else:
-                    token = h2h_public_tokens.get(_match_key(gkey, str(row.get(outcome_col, ""))), "")
+                    token = h2h_public_tokens.get(_match_key(gkey, outcome_text), "")
                     if token:
                         h2h_public_search_token_joins += 1
                         join_source = "h2h_public_search_token_joins"
@@ -824,11 +884,46 @@ def build_sharp_anchor(cfg: EngineConfig, *, input_path: str | None = None) -> d
                 if token:
                     worldcup_winner_token_joins += 1
                     join_source = "worldcup_winner_token_joins"
+            composite_blocker_reason = ""
+            if not token and outcome_col:
+                composite_target = advance_composite_targets.get(_match_key(gkey, outcome_text))
+                if composite_target:
+                    draw_fair = fair_by_outcome.get("draw")
+                    subject_fair = fair_by_outcome.get(_team_key(outcome_text))
+                    if not advance_composite_enabled:
+                        composite_blocker_reason = "advance_market_needs_composite_fair"
+                    elif not draw_fair:
+                        composite_blocker_reason = "advance_market_needs_composite_fair_missing_draw"
+                    elif subject_fair:
+                        token = str(composite_target.get("token_id") or "")
+                        if token:
+                            output_probability = min(
+                                1.0,
+                                max(
+                                    0.0,
+                                    float(subject_fair["probability"])
+                                    + float(draw_fair["probability"]) * advance_draw_split,
+                                ),
+                            )
+                            output_source = f"{source_name}_advance_composite"
+                            output_outcome = f"{outcome_text} advance".strip()
+                            output_extra = {
+                                "anchor_type": "advance_composite_from_h2h",
+                                "composite_method": "regulation_win_plus_draw_share",
+                                "draw_advance_share": round(advance_draw_split, 6),
+                                "regulation_win_probability": round(float(subject_fair["probability"]), 6),
+                                "draw_probability": round(float(draw_fair["probability"]), 6),
+                                "composite_target_market_slug": composite_target.get("market_slug", ""),
+                                "composite_target_question": composite_target.get("question", ""),
+                            }
+                            advance_composite_token_joins += 1
+                            join_source = "advance_composite_token_joins"
             if not token:
                 skipped_no_token += 1
                 coverage["skipped_no_token"] += 1
                 skip_reason = (
-                    token_map_blockers.get(_match_key(gkey, str(row.get(outcome_col, ""))), "")
+                    composite_blocker_reason
+                    or token_map_blockers.get(_match_key(gkey, outcome_text), "")
                     if outcome_col
                     else ""
                 ) or "unmapped_sharp_anchor_row"
@@ -846,18 +941,34 @@ def build_sharp_anchor(cfg: EngineConfig, *, input_path: str | None = None) -> d
             coverage["fundamental_rows"] += 1
             if join_source:
                 coverage[join_source] += 1
-            out_rows.append({
+            out_row = {
                 "token_id": token,
-                "probability": round(prob, 6),
+                "probability": round(output_probability, 6),
                 "market_slug": gkey,
-                "outcome": row.get(outcome_col, "") if outcome_col else "",
+                "outcome": output_outcome,
                 "decimal_odds": row.get(odds_col, "") if odds_col else "",
                 "raw_implied_probability": round(implied, 6),
                 "devig_method": method,
-                "source": source_name,
-            })
+                "source": output_source,
+            }
+            out_row.update(output_extra)
+            out_rows.append(out_row)
 
     write_csv(out_path, out_rows)
+    token_join_parts: list[str] = []
+    if direct_token_joins or has_direct_tokens:
+        token_join_parts.append("direct_token_id")
+    if token_map_joins or (worldcup_winner_token_joins and not direct_token_joins and not has_direct_tokens):
+        token_join_parts.append("market_outcome_map")
+    if h2h_public_search_token_joins:
+        token_join_parts.append("match_public_search")
+    if worldcup_winner_token_joins:
+        token_join_parts.append("worldcup_winner_team_map")
+    if advance_composite_token_joins:
+        token_join_parts.append("advance_composite_h2h")
+    token_join_label = "+".join(token_join_parts) if token_join_parts else (
+        "direct_token_id" if has_direct_tokens else "market_outcome_map"
+    )
     summary = {
         "status": "built",
         "input_path": str(in_path),
@@ -875,44 +986,16 @@ def build_sharp_anchor(cfg: EngineConfig, *, input_path: str | None = None) -> d
         "min_market_implied_sum": min_market_implied_sum,
         "max_market_implied_sum": max_market_implied_sum,
         "mean_overround_removed": round(sum(overrounds) / len(overrounds) - 1.0, 4) if overrounds else 0.0,
-        "token_join": (
-            (
-                (
-                    "direct_token_id+"
-                    if direct_token_joins or has_direct_tokens
-                    else ""
-                )
-                + (
-                    "market_outcome_map+"
-                    if token_map_joins
-                    else ""
-                )
-                + "match_public_search"
-                + (
-                    "+worldcup_winner_team_map"
-                    if worldcup_winner_token_joins
-                    else ""
-                )
-            )
-            if h2h_public_search_token_joins
-            else
-            "direct_token_id+market_outcome_map+worldcup_winner_team_map"
-            if direct_token_joins and (token_map_joins or worldcup_winner_token_joins)
-            else "direct_token_id+market_outcome_map"
-            if direct_token_joins and token_map_joins
-            else "direct_token_id+worldcup_winner_team_map"
-            if direct_token_joins and worldcup_winner_token_joins
-            else "direct_token_id"
-            if has_direct_tokens
-            else "market_outcome_map+worldcup_winner_team_map"
-            if worldcup_winner_token_joins
-            else "market_outcome_map"
-        ),
+        "token_join": token_join_label,
         "direct_token_joins": direct_token_joins,
         "token_map_joins": token_map_joins,
         "h2h_public_search": h2h_public_search,
         "h2h_public_search_tokens_available": len(set(h2h_public_tokens.values())),
         "h2h_public_search_token_joins": h2h_public_search_token_joins,
+        "advance_composite_enabled": advance_composite_enabled,
+        "advance_composite_draw_split": advance_draw_split,
+        "advance_composite_targets_available": len(advance_composite_targets),
+        "advance_composite_token_joins": advance_composite_token_joins,
         "token_map_h2h_blocked_samples": token_map_blocked_samples,
         "coverage_by_sport_market": sorted(
             coverage_by_sport_market.values(),

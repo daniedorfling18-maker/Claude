@@ -194,6 +194,13 @@ sharp_anchor:
   min_outcomes_per_market: 2
   min_market_implied_sum: 0.90
   max_market_implied_sum: 2.00
+  # Knockout "to advance/qualify" markets are not the same as 90-minute h2h win markets. When a
+  # local Polymarket token map exposes an advance YES token, build a labelled conservative
+  # composite fair: regulation-win fair + draw fair * advance_composite_draw_split. Keep this
+  # visible in the output as anchor_type=advance_composite_from_h2h so model/governance layers can
+  # haircut or quarantine it separately from pure sharp-result anchors.
+  advance_composite_enabled: true
+  advance_composite_draw_split: 0.50
 sharp_odds_fetch:
   # Automated fetch for the sharp anchor. The Odds API aggregates Pinnacle + Betfair Exchange.
   # Set the key in the environment (never commit it): export THE_ODDS_API_KEY=...

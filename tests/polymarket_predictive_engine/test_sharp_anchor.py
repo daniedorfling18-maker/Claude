@@ -279,7 +279,7 @@ def test_build_sharp_anchor_joins_local_three_way_h2h_token_map(tmp_path):
     assert {row["token_id"] for row in out} == {"AUSTRALIA_WIN", "EGYPT_WIN", "DRAW_WIN"}
 
 
-def test_build_sharp_anchor_flags_local_advance_market_as_composite_fair_needed(tmp_path):
+def test_build_sharp_anchor_builds_labelled_advance_composite_fair(tmp_path):
     cfg = EngineConfig(
         raw={
             "paths": {"output_root": str(tmp_path / "outputs")},
@@ -339,12 +339,81 @@ def test_build_sharp_anchor_flags_local_advance_market_as_composite_fair_needed(
 
     summary = build_sharp_anchor(cfg)
 
-    assert summary["fundamental_rows"] == 0
-    assert summary["skipped_no_token"] == 3
+    fair = devig_multiplicative([1 / 2.10, 1 / 3.80, 1 / 3.40])
+    expected_canada_advance = fair[0] + fair[2] * 0.5
+
+    assert summary["fundamental_rows"] == 1
+    assert summary["skipped_no_token"] == 2
     assert summary["token_map_joins"] == 0
+    assert summary["advance_composite_token_joins"] == 1
+    assert summary["advance_composite_draw_split"] == approx(0.5)
+    assert summary["token_join"] == "advance_composite_h2h"
     assert summary["token_map_h2h_blocked_samples"][0]["reason"] == "advance_market_needs_composite_fair"
+    assert {sample["outcome"] for sample in summary["skipped_no_token_samples"]} == {"Morocco", "Draw"}
+    out = _read(tmp_path / "outputs" / "polymarket_training" / "sharp_fundamental_probabilities.csv")
+    assert len(out) == 1
+    assert out[0]["token_id"] == "CANADA_ADVANCE_YES"
+    assert float(out[0]["probability"]) == approx(expected_canada_advance, abs=1e-6)
+    assert out[0]["source"] == "sharp_odds_advance_composite"
+    assert out[0]["anchor_type"] == "advance_composite_from_h2h"
+    assert out[0]["composite_method"] == "regulation_win_plus_draw_share"
+    assert float(out[0]["regulation_win_probability"]) == approx(fair[0], abs=1e-6)
+    assert float(out[0]["draw_probability"]) == approx(fair[2], abs=1e-6)
+    assert float(out[0]["draw_advance_share"]) == approx(0.5)
+
+
+def test_build_sharp_anchor_refuses_advance_composite_without_draw_leg(tmp_path):
+    cfg = EngineConfig(
+        raw={
+            "paths": {"output_root": str(tmp_path / "outputs")},
+            "sharp_anchor": {
+                "input_path": str(tmp_path / "sharp.csv"),
+                "token_map_path": str(tmp_path / "map.csv"),
+                "match_public_search_enabled": False,
+                "min_market_implied_sum": 0.70,
+            },
+        },
+        path=tmp_path / "cfg.yaml",
+    )
+    _write(
+        tmp_path / "sharp.csv",
+        [
+            {
+                "market_slug": "Canada vs Morocco",
+                "outcome": "Canada",
+                "decimal_odds": "2.10",
+                "market_key": "h2h",
+                "sport": "soccer_fifa_world_cup",
+            },
+            {
+                "market_slug": "Canada vs Morocco",
+                "outcome": "Morocco",
+                "decimal_odds": "3.80",
+                "market_key": "h2h",
+                "sport": "soccer_fifa_world_cup",
+            },
+        ],
+        ["market_slug", "outcome", "decimal_odds", "market_key", "sport"],
+    )
+    _write(
+        tmp_path / "map.csv",
+        [
+            {
+                "token_id": "CANADA_ADVANCE_YES",
+                "market_slug": "will-canada-advance-against-morocco",
+                "question": "Will Canada advance against Morocco?",
+                "outcome": "Yes",
+            },
+        ],
+        ["token_id", "market_slug", "question", "outcome"],
+    )
+
+    summary = build_sharp_anchor(cfg)
+
+    assert summary["fundamental_rows"] == 0
+    assert summary["advance_composite_token_joins"] == 0
     canada_sample = next(sample for sample in summary["skipped_no_token_samples"] if sample["outcome"] == "Canada")
-    assert canada_sample["reason"] == "advance_market_needs_composite_fair"
+    assert canada_sample["reason"] == "advance_market_needs_composite_fair_missing_draw"
 
 
 def test_build_sharp_anchor_enriches_h2h_match_tokens_from_public_search(tmp_path, monkeypatch):
@@ -526,6 +595,7 @@ def test_build_sharp_anchor_enriches_three_way_h2h_win_and_draw_markets(tmp_path
             "token_map_joins": 0,
             "h2h_public_search_token_joins": 3,
             "worldcup_winner_token_joins": 0,
+            "advance_composite_token_joins": 0,
         }
     ]
     out = _read(tmp_path / "outputs" / "polymarket_training" / "sharp_fundamental_probabilities.csv")

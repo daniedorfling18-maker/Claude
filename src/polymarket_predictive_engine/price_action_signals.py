@@ -5,6 +5,7 @@ from typing import Any
 from .config import EngineConfig, load_config
 from .price_action_microstructure import build_latest_microstructure_features
 from .utils import boolish, now_utc, read_csv_rows, read_json, safe_float, write_csv, write_json
+from .worldcup_validation import classify_market_family
 
 OUTPUT_DIRNAME = "polymarket_price_action"
 SCOUT_COHORT_FILE = "price_action_scout_cohort_evidence.csv"
@@ -136,6 +137,41 @@ def _cohort_name(row: dict[str, Any]) -> str:
     return str(row.get("signal_cohort") or "").strip()
 
 
+GENERIC_FAMILY_VALUES = {
+    "",
+    "unknown",
+    "uncategorised",
+    "uncategorized",
+    "sport",
+    "sports",
+    "sports_other",
+    "worldcup",
+    "world cup",
+    "world_cup",
+}
+
+
+def _raw_family(row: dict[str, Any]) -> str:
+    return str(row.get("family") or row.get("category") or "").strip()
+
+
+def _market_family(row: dict[str, Any]) -> str:
+    """Return the evidence-family bucket used by price-action gates.
+
+    Liquidity discovery can carry broad or stale labels such as ``worldcup``
+    even when the row text is plainly an esports or crypto market.  Use the
+    shared metadata classifier to refine only those generic buckets; keep
+    already-specific families intact so this cannot launder weak evidence into
+    a different, hand-picked cohort.
+    """
+    raw = _raw_family(row)
+    raw_key = raw.lower().replace(" ", "_")
+    classified = str(classify_market_family(row) or "").strip()
+    if classified and classified != "unknown" and (not raw or raw_key in GENERIC_FAMILY_VALUES):
+        return classified
+    return raw or classified or "unknown"
+
+
 def _approved_cohorts(cohort_rows: list[dict[str, str]]) -> dict[str, dict[str, str]]:
     approved: dict[str, dict[str, str]] = {}
     for row in cohort_rows:
@@ -244,7 +280,7 @@ def _historical_side(row: dict[str, Any]) -> str:
 
 
 def _historical_analogue_key(row: dict[str, Any], *, side_override: str | None = None) -> str:
-    family = str(row.get("family") or row.get("category") or "unknown").strip() or "unknown"
+    family = _market_family(row)
     ask = safe_float(row.get("entry_ask") or row.get("latest_ask") or row.get("best_ask"))
     bid = safe_float(row.get("entry_bid") or row.get("latest_bid") or row.get("best_bid"))
     spread = safe_float(row.get("entry_spread") or row.get("latest_spread") or row.get("spread"))
@@ -337,7 +373,7 @@ def _trade_metrics(rows: list[dict[str, Any]]) -> dict[str, Any]:
 
 
 def _historical_breadth_components(row: dict[str, Any]) -> dict[str, str]:
-    family = str(row.get("family") or row.get("category") or "unknown").strip() or "unknown"
+    family = _market_family(row)
     ask = safe_float(row.get("entry_ask") or row.get("latest_ask") or row.get("best_ask"))
     spread = safe_float(row.get("entry_spread") or row.get("latest_spread") or row.get("spread"))
     side = str(row.get("current_side") or row.get("price_change_side") or "").strip().upper() or "NONE"
@@ -712,7 +748,7 @@ def _balanced_blocked_preview(
     family_counts: dict[str, int] = {}
 
     def family_key(row: dict[str, Any]) -> str:
-        return str(row.get("family") or row.get("category") or "unknown").strip() or "unknown"
+        return _market_family(row)
 
     for index, row in enumerate(ranked):
         family = family_key(row)
@@ -787,13 +823,13 @@ def _paper_confirmation_current_candidates(
         if spread is None:
             spread = max(0.0, ask - bid)
         relative_spread = _relative_spread(spread, ask)
+        family = _market_family(feature)
         analogue = _historical_analogue_for_row(feature, analogue_stats, settings)
         entry_band_rejection = _entry_price_band_rejection(cfg, ask)
         if entry_band_rejection:
             blocked += 1
             state = "entry_price_outside_risk_band"
             blocked_by_state[state] = blocked_by_state.get(state, 0) + 1
-            family = str(feature.get("family") or feature.get("category") or "unknown").strip() or "unknown"
             blocked_by_family[family] = blocked_by_family.get(family, 0) + 1
             blocked_preview.append(
                 _attach_historical_analogue(
@@ -803,7 +839,7 @@ def _paper_confirmation_current_candidates(
                         "token_id": token,
                         "market_slug": feature.get("market_slug", ""),
                         "question": feature.get("question", ""),
-                        "family": feature.get("family", ""),
+                        "family": family,
                         "outcome": feature.get("outcome", ""),
                         "latest_bid": bid,
                         "latest_ask": ask,
@@ -820,7 +856,6 @@ def _paper_confirmation_current_candidates(
             blocked += 1
             state = str(analogue.get("state") or "unknown")
             blocked_by_state[state] = blocked_by_state.get(state, 0) + 1
-            family = str(feature.get("family") or feature.get("category") or "unknown").strip() or "unknown"
             blocked_by_family[family] = blocked_by_family.get(family, 0) + 1
             blocked_preview.append(
                 _attach_historical_analogue(
@@ -830,7 +865,7 @@ def _paper_confirmation_current_candidates(
                         "token_id": token,
                         "market_slug": feature.get("market_slug", ""),
                         "question": feature.get("question", ""),
-                        "family": feature.get("family", ""),
+                        "family": family,
                         "outcome": feature.get("outcome", ""),
                         "latest_bid": bid,
                         "latest_ask": ask,
@@ -853,7 +888,7 @@ def _paper_confirmation_current_candidates(
                 "token_id": token,
                 "market_slug": feature.get("market_slug", ""),
                 "question": feature.get("question", ""),
-                "family": feature.get("family", ""),
+                "family": family,
                 "outcome": feature.get("outcome", ""),
                 "latest_time_utc": feature.get("entry_time_utc", ""),
                 "latest_bid": bid,
@@ -954,7 +989,7 @@ def _current_historical_analogue_scan(
     robust_min_validation_roi = float(safe_float(settings.get("historical_breadth_min_validation_roi")) or 0.03)
 
     for row in rows:
-        family = str(row.get("family") or row.get("category") or "unknown").strip() or "unknown"
+        family = _market_family(row)
         family_counts[family] = family_counts.get(family, 0) + 1
         analogue = _historical_analogue_for_row(row, stats, settings)
         state = str(analogue.get("state") or "unknown")
@@ -1254,6 +1289,8 @@ def _query_family_prefixes(query: str) -> list[str]:
         return []
     if "world" in query or "cup" in query:
         return ["sports_other", "worldcup", "soccer_match", "world-cup", "fifa"]
+    if "esports" in query or "e-sports" in query or "e sports" in query:
+        return ["esports"]
     if "tennis" in query:
         return ["tennis"]
     if "bitcoin" in query or "btc" in query:
@@ -1289,11 +1326,12 @@ def _candidate_outcome_matches_row(candidate: dict[str, Any], row: dict[str, Any
 
 def _confirmation_candidate_for_row(row: dict[str, Any], candidates: list[dict[str, Any]]) -> dict[str, Any] | None:
     row_cohort = _cohort_name(row).lower()
-    family = str(row.get("family") or row.get("category") or "").strip().lower()
+    family = _market_family(row).lower()
+    raw_family = _raw_family(row).lower()
     market_slug = str(row.get("market_slug") or "").strip().lower()
     question = str(row.get("question") or "").strip().lower()
     category = str(row.get("category") or "").strip().lower()
-    text = " ".join([row_cohort, family, category, market_slug, question])
+    text = " ".join([row_cohort, family, raw_family, category, market_slug, question])
     for candidate in candidates:
         cohort = str(candidate.get("cohort") or "").strip().lower()
         query = str(candidate.get("recommended_collection_query") or "").strip().lower()
@@ -1357,7 +1395,7 @@ def _reject(row: dict[str, Any], reason: str) -> dict[str, Any]:
         "outcome": row.get("outcome", ""),
         "token_id": _token_id(row),
         "source": row.get("source", ""),
-        "family": row.get("family", row.get("category", "")),
+        "family": _market_family(row),
         "latest_bid": "" if bid is None else bid,
         "latest_ask": "" if ask is None else ask,
         "latest_spread": "" if spread is None else spread,
@@ -1461,7 +1499,7 @@ def _build_signal(
         "market_id": market_slug or token,
         "market_slug": market_slug,
         "question": entry.get("question", ""),
-        "category": str(row.get("family") or entry.get("family") or "price_action"),
+        "category": _market_family(row) if _raw_family(row) else _market_family(entry),
         "event_id": "",
         "correlation_key": market_slug or token,
         "signal_cohort": signal_cohort,

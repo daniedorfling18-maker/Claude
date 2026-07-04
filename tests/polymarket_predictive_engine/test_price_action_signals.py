@@ -856,6 +856,125 @@ def test_worldcup_confirmation_query_matches_soccer_match_current_row(tmp_path):
     assert signals[0]["historical_analogue_gate"] == "positive_historical_analogue"
 
 
+def test_esports_world_cup_rows_use_esports_family_for_confirmation_analogues(tmp_path):
+    cfg = _cfg(tmp_path)
+    cfg.raw["price_action_microstructure"] = {
+        "enabled": True,
+        "lookback_observations": 1,
+        "max_rows_per_token": 20,
+    }
+    cfg.raw["price_action_paper"].update(
+        {
+            "paper_confirmation_max_stake_usdc": 1,
+            "paper_confirmation_max_current_candidates": 4,
+            "paper_confirmation_require_positive_historical_analogue": True,
+            "paper_confirmation_min_historical_analogue_validation_rows": 3,
+            "paper_confirmation_min_historical_analogue_positive_rows": 1,
+            "low_price_tick_probe_enabled": False,
+        }
+    )
+    root = cfg.output_root / "polymarket_price_action"
+    feedback = _paper_confirmation_feedback_payload(cohort="esports_match")
+    feedback["paper_confirmation_preview"][0]["recommended_collection_query"] = "esports"
+    write_json(cfg.governance_root / "price_action_feedback.json", feedback)
+    question = "Valorant: 100 Thieves vs BBL Esports (BO3) - Esports World Cup Group A"
+    write_csv(
+        cfg.output_root / "polymarket_training" / "websocket_market_features.csv",
+        [
+            _ws_feature_row(
+                0,
+                asset_id="valorant-bbl-token",
+                market_slug="val-100t1-bbl1-2026-07-04",
+                question=question,
+                category="worldcup",
+                selection="BBL Esports",
+                best_bid="0.49",
+                best_ask="0.50",
+                midpoint="0.495",
+                spread="0.01",
+                price_change_side="BUY",
+            ),
+            _ws_feature_row(
+                1,
+                asset_id="valorant-bbl-token",
+                market_slug="val-100t1-bbl1-2026-07-04",
+                question=question,
+                category="worldcup",
+                selection="BBL Esports",
+                best_bid="0.50",
+                best_ask="0.51",
+                midpoint="0.505",
+                spread="0.01",
+                price_change_side="BUY",
+            ),
+        ],
+    )
+    write_csv(
+        root / "microstructure_trade_events.csv",
+        [
+            _low_price_trade_event(
+                split="validation",
+                family="worldcup",
+                category="worldcup",
+                market_slug="val-100t1-bbl1-2026-07-04",
+                question=question,
+                outcome="BBL Esports",
+                token_id="valorant-bbl-token-a",
+                current_side="BUY",
+                entry_bid="0.50",
+                entry_ask="0.51",
+                entry_spread="0.01",
+                exit_bid="0.57",
+                pnl_usdc="0.24",
+                roi="0.12",
+            ),
+            _low_price_trade_event(
+                split="validation",
+                family="worldcup",
+                category="worldcup",
+                market_slug="val-100t1-bbl1-2026-07-04",
+                question=question,
+                outcome="BBL Esports",
+                token_id="valorant-bbl-token-b",
+                current_side="BUY",
+                entry_bid="0.50",
+                entry_ask="0.51",
+                entry_spread="0.01",
+                exit_bid="0.56",
+                pnl_usdc="0.20",
+                roi="0.10",
+            ),
+            _low_price_trade_event(
+                split="validation",
+                family="worldcup",
+                category="worldcup",
+                market_slug="val-100t1-bbl1-2026-07-04",
+                question=question,
+                outcome="BBL Esports",
+                token_id="valorant-bbl-token-c",
+                current_side="BUY",
+                entry_bid="0.50",
+                entry_ask="0.51",
+                entry_spread="0.01",
+                exit_bid="0.55",
+                pnl_usdc="0.16",
+                roi="0.08",
+            ),
+        ],
+    )
+
+    summary = build_price_action_paper_signals(cfg)
+    signals = read_csv_rows(root / "price_action_paper_signals.csv")
+    analogue = summary["paper_confirmation_current_historical_analogue"]
+
+    assert summary["signals"] == 1
+    assert summary["paper_confirmation_current_candidates"] == 1
+    assert analogue["fresh_matches"] == 1
+    assert signals[0]["category"] == "esports_match"
+    assert signals[0]["historical_analogue_key"].startswith("esports_match|")
+    assert signals[0]["historical_analogue_gate"] == "positive_historical_analogue"
+
+
 def test_paper_confirmation_blocker_preview_keeps_minority_worldcup_family(tmp_path):
     cfg = _cfg(tmp_path)
     cfg.raw["price_action_microstructure"] = {

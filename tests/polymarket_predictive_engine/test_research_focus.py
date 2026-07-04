@@ -296,6 +296,86 @@ def test_research_focus_prioritises_paper_confirmation_blocker_query(tmp_path):
     }
 
 
+def test_research_focus_suppresses_mature_negative_blockers_for_collection(tmp_path):
+    cfg = _cfg(tmp_path)
+    write_json(
+        cfg.output_root / "polymarket_price_action" / "price_action_model_summary.json",
+        {
+            "status": "trained",
+            "decision": "collect_more_bid_ask_price_action_model_evidence",
+            "promotion_ready": False,
+        },
+    )
+    write_json(
+        cfg.output_root / "polymarket_price_action" / "price_action_paper_signal_summary.json",
+        {
+            "status": "computed",
+            "paper_confirmation_current_historical_analogue": {
+                "state": "no_positive_historical_analogue_current_candidate",
+                "fresh_matches": 2,
+                "selected": 0,
+                "approved": 0,
+                "blocked": 2,
+                "blocked_preview": [
+                    {
+                        "token_id": "worldcup-mature-negative-token",
+                        "market_slug": "will-switzerland-reach-the-quarterfinals-at-the-2026-fifa-world-cup",
+                        "question": "Will Switzerland reach the Quarterfinals at the 2026 FIFA World Cup?",
+                        "family": "soccer_match",
+                        "signal_cohort": "near_miss_learning|worldcup",
+                        "latest_bid": 0.40,
+                        "latest_ask": 0.41,
+                        "latest_spread": 0.01,
+                        "candidate_gate": "no_positive_historical_analogue_examples",
+                        "historical_analogue_gate": "no_positive_historical_analogue_examples",
+                        "historical_analogue_validation_rows": 438,
+                        "historical_analogue_positive_rows": 0,
+                        "historical_analogue_validation_roi": -0.02,
+                    },
+                    {
+                        "token_id": "solana-immature-token",
+                        "market_slug": "solana-up-or-down-on-july-6-2026",
+                        "question": "Solana Up or Down on July 6?",
+                        "family": "crypto_sol_updown_daily",
+                        "signal_cohort": "exploratory_crypto_updown_live_model|crypto_sol_updown_15m|outcome=up",
+                        "latest_bid": 0.49,
+                        "latest_ask": 0.51,
+                        "latest_spread": 0.02,
+                        "candidate_gate": "no_historical_analogue_rows",
+                        "historical_analogue_gate": "no_historical_analogue_rows",
+                        "historical_analogue_validation_rows": 0,
+                        "historical_analogue_positive_rows": 0,
+                        "historical_analogue_validation_roi": 0.0,
+                    },
+                ],
+            },
+        },
+    )
+    write_json(
+        cfg.governance_root / "price_action_feedback.json",
+        {
+            "status": "ok",
+            "learning_state": "collect_more_positive_price_action_evidence",
+            "collection_queries": [],
+        },
+    )
+
+    payload = build_research_focus(cfg)
+
+    targets = payload["price_action_paper_confirmation_blockers"]["targets"]
+    assert targets[0]["token_id"] == "solana-immature-token"
+    assert targets[0]["recommended_collection_query"] == "solana updown"
+    assert targets[0]["evidence_posture"] == "immature_missing_history"
+    assert targets[0]["decision_use"] == "in_band_historical_analogue_gap_collection_target"
+    assert targets[1]["token_id"] == "worldcup-mature-negative-token"
+    assert targets[1]["evidence_posture"] == "mature_negative_no_positive"
+    assert targets[1]["decision_use"] == "mature_negative_historical_evidence_do_not_reserve_capacity"
+    assert payload["price_action_model"]["paper_confirmation_blocker_queries"][:2] == [
+        "solana updown",
+        "world cup",
+    ]
+
+
 def test_research_focus_broadens_to_near_miss_board_when_current_analogues_are_negative(tmp_path):
     cfg = _cfg(tmp_path)
     write_json(

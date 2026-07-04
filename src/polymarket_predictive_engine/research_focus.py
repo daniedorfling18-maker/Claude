@@ -656,27 +656,59 @@ def _collection_query_from_row(row: dict[str, Any]) -> str:
     )
 
 
-def _paper_confirmation_blocker_priority(row: dict[str, Any]) -> tuple[int, float, float, float]:
+def _paper_confirmation_blocker_evidence_posture(row: dict[str, Any]) -> str:
     gate = str(row.get("candidate_gate") or row.get("historical_analogue_gate") or "").strip()
     historical_gate = str(row.get("historical_analogue_gate") or "").strip()
     if not historical_gate and gate != "entry_price_outside_risk_band":
         historical_gate = gate
+    validation_rows = _num(row.get("historical_analogue_validation_rows"))
+    positive_rows = _num(row.get("historical_analogue_positive_rows"))
+    validation_roi = _num(row.get("historical_analogue_validation_roi"))
+    mature_rows = 50.0
     if gate == "entry_price_outside_risk_band":
-        bucket = 0
-    elif historical_gate == "side_missing_positive_historical_analogue_shadow_only":
+        return "entry_price_band_wait"
+    if historical_gate == "side_missing_positive_historical_analogue_shadow_only":
+        return "side_missing_positive_shadow_only"
+    if historical_gate in {"no_historical_analogue_rows", "insufficient_historical_analogue_rows"}:
+        return "immature_missing_history"
+    if historical_gate == "no_positive_historical_analogue_examples":
+        if validation_rows >= mature_rows and positive_rows <= 0 and validation_roi <= 0:
+            return "mature_negative_no_positive"
+        return "immature_no_positive_history"
+    if historical_gate == "historical_analogue_not_profitable_after_spread":
+        if positive_rows > 0 and validation_roi > -0.02:
+            return "near_miss_negative_after_spread"
+        if validation_rows >= mature_rows and validation_roi <= 0:
+            return "mature_negative_after_spread"
+        return "negative_after_spread_collect_more"
+    return "unknown_blocker"
+
+
+def _paper_confirmation_blocker_priority(row: dict[str, Any]) -> tuple[int, float, float, float, float]:
+    posture = _paper_confirmation_blocker_evidence_posture(row)
+    validation_rows = _num(row.get("historical_analogue_validation_rows"))
+    positive_rows = _num(row.get("historical_analogue_positive_rows"))
+    validation_roi = _num(row.get("historical_analogue_validation_roi"))
+    evidence_gap = max(0.0, 50.0 - validation_rows)
+    if posture == "side_missing_positive_shadow_only":
+        bucket = 6
+    elif posture == "immature_missing_history":
         bucket = 5
-    elif historical_gate in {"no_historical_analogue_rows", "insufficient_historical_analogue_rows"}:
+    elif posture == "immature_no_positive_history":
         bucket = 4
-    elif historical_gate == "no_positive_historical_analogue_examples":
+    elif posture == "near_miss_negative_after_spread":
         bucket = 3
-    elif historical_gate == "historical_analogue_not_profitable_after_spread":
+    elif posture == "negative_after_spread_collect_more":
         bucket = 2
-    else:
+    elif posture in {"mature_negative_no_positive", "mature_negative_after_spread"}:
         bucket = 1
+    else:
+        bucket = 0
     return (
         bucket,
-        _num(row.get("historical_analogue_positive_rows")),
-        _num(row.get("historical_analogue_validation_rows")),
+        evidence_gap,
+        positive_rows,
+        validation_roi,
         -_num(row.get("latest_spread"), 999.0),
     )
 
@@ -737,17 +769,23 @@ def _paper_confirmation_blocker_targets(
         if not historical_gate and candidate_gate != "entry_price_outside_risk_band":
             historical_gate = candidate_gate
         entry_band_wait = candidate_gate == "entry_price_outside_risk_band"
+        evidence_posture = _paper_confirmation_blocker_evidence_posture(row)
         decision_use = (
             "entry_price_band_wait_do_not_chase_until_quote_enters_risk_band"
             if entry_band_wait
+            else "mature_negative_historical_evidence_do_not_reserve_capacity"
+            if evidence_posture in {"mature_negative_no_positive", "mature_negative_after_spread"}
             else "in_band_historical_analogue_gap_collection_target"
         )
         next_action = (
             "Wait for a lower-risk in-band quote, or collect lower-ask analogues in the same thesis; "
             "do not promote this row while the entry-price band rejects it."
             if entry_band_wait
+            else "Suppress this exact bucket for now; it already has mature negative validation evidence after bid/ask costs."
+            if evidence_posture in {"mature_negative_no_positive", "mature_negative_after_spread"}
             else "Collect fresh bid/ask variation for this exact family/price/spread/side bucket until validation has enough positive executable examples."
         )
+        priority = _paper_confirmation_blocker_priority(row)
         targets.append(
             {
                 "recommended_collection_query": query,
@@ -767,7 +805,9 @@ def _paper_confirmation_blocker_targets(
                 "latest_ask": row.get("latest_ask", ""),
                 "latest_spread": row.get("latest_spread", ""),
                 "entry_band_wait": entry_band_wait,
-                "priority_bucket": _paper_confirmation_blocker_priority(row)[0],
+                "evidence_posture": evidence_posture,
+                "priority_bucket": priority[0],
+                "priority_evidence_gap": priority[1],
                 "decision_use": decision_use,
                 "next_action": next_action,
                 "trade_authorisation": "no_trade_until_governed_paper_signal_exists",
@@ -777,8 +817,9 @@ def _paper_confirmation_blocker_targets(
     targets.sort(
         key=lambda item: (
             _num(item.get("priority_bucket")),
+            _num(item.get("priority_evidence_gap")),
             _num(item.get("historical_analogue_positive_rows")),
-            _num(item.get("historical_analogue_validation_rows")),
+            _num(item.get("historical_analogue_validation_roi")),
             -_num(item.get("latest_spread"), 999.0),
         ),
         reverse=True,

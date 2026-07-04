@@ -640,16 +640,58 @@ def _attach_historical_analogue(row: dict[str, Any], analogue: dict[str, Any]) -
     }
 
 
-def _paper_confirmation_blocked_preview_sort_key(item: dict[str, Any]) -> tuple[int, float, float, float, float]:
+def _historical_blocker_collectability(item: dict[str, Any]) -> tuple[int, float, float, float, float]:
+    """Rank blocked paper-confirmation rows by whether more data can change them.
+
+    Large buckets with many validation rows, zero positives, and negative ROI
+    are mature negative evidence.  They should remain visible for audit, but
+    they should not consume the scarce "collect next" slots ahead of buckets
+    that are under-sampled, side-missing, or near-profitable after spread.
+    """
     candidate_gate = str(item.get("candidate_gate") or "").strip()
-    entry_band_wait = candidate_gate == "entry_price_outside_risk_band"
+    historical_gate = str(item.get("historical_analogue_gate") or candidate_gate).strip()
+    validation_rows = safe_float(item.get("historical_analogue_validation_rows")) or 0.0
+    positive_rows = safe_float(item.get("historical_analogue_positive_rows")) or 0.0
+    validation_roi = safe_float(item.get("historical_analogue_validation_roi")) or 0.0
+    spread = safe_float(item.get("latest_spread")) or 999.0
+    mature_rows = 50.0
+
+    if candidate_gate == "entry_price_outside_risk_band":
+        bucket = 0
+        evidence_gap = 0.0
+    elif historical_gate == "side_missing_positive_historical_analogue_shadow_only":
+        bucket = 6
+        evidence_gap = max(0.0, mature_rows - validation_rows)
+    elif historical_gate in {"no_historical_analogue_rows", "insufficient_historical_analogue_rows"}:
+        bucket = 5
+        evidence_gap = max(0.0, mature_rows - validation_rows)
+    elif historical_gate == "no_positive_historical_analogue_examples":
+        if validation_rows >= mature_rows and positive_rows <= 0 and validation_roi <= 0:
+            bucket = 1
+            evidence_gap = 0.0
+        else:
+            bucket = 4
+            evidence_gap = max(0.0, mature_rows - validation_rows)
+    elif historical_gate == "historical_analogue_not_profitable_after_spread":
+        if positive_rows > 0 and validation_roi > -0.02:
+            bucket = 3
+        else:
+            bucket = 1
+        evidence_gap = max(0.0, mature_rows - validation_rows)
+    else:
+        bucket = 2
+        evidence_gap = max(0.0, mature_rows - validation_rows)
     return (
-        0 if entry_band_wait else 1,
-        safe_float(item.get("historical_analogue_validation_roi")) or -999.0,
-        safe_float(item.get("historical_analogue_positive_rows")) or 0.0,
-        safe_float(item.get("historical_analogue_validation_rows")) or 0.0,
-        -(safe_float(item.get("latest_spread")) or 999.0),
+        bucket,
+        evidence_gap,
+        positive_rows,
+        validation_roi,
+        -spread,
     )
+
+
+def _paper_confirmation_blocked_preview_sort_key(item: dict[str, Any]) -> tuple[int, float, float, float, float]:
+    return _historical_blocker_collectability(item)
 
 
 def _balanced_blocked_preview(

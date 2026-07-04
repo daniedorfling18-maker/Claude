@@ -1156,8 +1156,91 @@ def test_websocket_reserves_in_band_paper_confirmation_blocker_tokens(tmp_path):
     assert len(proof_targets) == 1
     assert proof_targets[0]["paper_confirmation_blocker_gate"] == "no_positive_historical_analogue_examples"
     assert proof_targets[0]["paper_confirmation_blocker_query"] == "btc updown"
-    assert proof_targets[0]["websocket_target_match_source"] == "slug_outcome_watchlist"
+    assert proof_targets[0]["websocket_target_match_source"] == "slug_outcome_artifact"
     assert proof_targets[0]["websocket_target_reason"] == "reserve_paper_confirmation_blocker_for_forward_bid_tracking"
+
+
+def test_websocket_resolves_paper_confirmation_blocker_tokens_from_predictions(tmp_path):
+    import yaml
+
+    cfg_path = make_cfg(tmp_path)
+    data = yaml.safe_load(cfg_path.read_text(encoding="utf-8"))
+    data.setdefault("websocket_market_data", {})
+    data["websocket_market_data"].update(
+        {
+            "use_liquidity_targets": True,
+            "use_strategy_v2_targets": False,
+            "feedback_broaden_target_enabled": False,
+            "include_research_liquidity_targets": False,
+            "max_liquidity_target_assets": 2,
+            "max_paper_confirmation_blocker_target_assets": 2,
+            "market_ids": [],
+        }
+    )
+    cfg_path.write_text(yaml.safe_dump(data, sort_keys=False), encoding="utf-8")
+    cfg = load_config(cfg_path)
+    write_json(
+        cfg.governance_root / "research_focus.json",
+        {
+            "status": "ok",
+            "price_action_paper_confirmation_blockers": {
+                "state": "in_band_historical_analogue_gaps",
+                "targets": [
+                    {
+                        "family": "worldcup",
+                        "market_slug": "will-north-america-win-the-world-cup",
+                        "question": "Will North America win the World Cup?",
+                        "outcome": "Yes",
+                        "latest_bid": 0.052,
+                        "latest_ask": 0.053,
+                        "latest_spread": 0.001,
+                        "recommended_collection_query": "world cup",
+                        "historical_analogue_gate": "no_positive_historical_analogue_examples",
+                        "historical_analogue_key": "worldcup|ask=5-10c|spread=<=0.1c|side=SELL",
+                        "decision_use": "in_band_historical_analogue_gap_collection_target",
+                        "entry_band_wait": False,
+                    },
+                ],
+            },
+        },
+    )
+    write_csv(
+        cfg.output_root / "polymarket_liquidity_discovery" / "liquidity_watchlist.csv",
+        [
+            {
+                "token_id": "fallback-token",
+                "family": "crypto_btc_special",
+                "tradable_liquidity_candidate": "true",
+                "liquidity": "5000",
+                "spread": "0.01",
+                "time_to_close_hours": "2",
+            },
+        ],
+    )
+    write_csv(
+        cfg.output_root / "polymarket_predictions" / "predictions.csv",
+        [
+            {
+                "token_id": "prediction-proof-token",
+                "family": "worldcup",
+                "category": "worldcup",
+                "market_slug": "will-north-america-win-the-world-cup",
+                "question": "Will North America win the World Cup?",
+                "outcome": "Yes",
+                "best_bid": "0.052",
+                "best_ask": "0.053",
+                "spread": "0.001",
+                "liquidity": "320",
+            },
+        ],
+    )
+
+    targets = websocket_collector._liquidity_target_rows(cfg, cfg.raw["websocket_market_data"])
+    proof_targets = [row for row in targets if row.get("paper_confirmation_blocker_target") is True]
+
+    assert [row["token_id"] for row in proof_targets] == ["prediction-proof-token"]
+    assert proof_targets[0]["paper_confirmation_blocker_query"] == "world cup"
+    assert proof_targets[0]["websocket_target_match_source"] == "slug_outcome_artifact"
 
 
 def test_websocket_reserves_open_position_tokens_before_discovery(tmp_path, monkeypatch):

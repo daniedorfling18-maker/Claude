@@ -928,6 +928,24 @@ def _paper_confirmation_blocker_match_index(rows: list[dict[str, Any]]) -> dict[
     return index
 
 
+def _paper_confirmation_blocker_resolution_rows(
+    cfg: EngineConfig,
+    liquidity_rows: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    rows = list(liquidity_rows)
+    current_paths = [
+        cfg.output_root / "polymarket" / "market_snapshot.csv",
+        cfg.output_root / "polymarket_predictions" / "predictions.csv",
+        cfg.output_root / "polymarket_predictions" / "mispricing_alpha_scores.csv",
+        cfg.output_root / "polymarket_predictions" / "near_miss_learning_candidates.csv",
+        cfg.output_root / "polymarket_predictions" / "rejected_signals.csv",
+        cfg.governance_root / "websocket_liquidity_targets.csv",
+    ]
+    for path in current_paths:
+        rows.extend(read_csv_rows(path))
+    return rows
+
+
 def _paper_confirmation_blocker_priority_rows(
     cfg: EngineConfig,
     settings: dict[str, Any],
@@ -957,7 +975,9 @@ def _paper_confirmation_blocker_priority_rows(
     liquidity_proxy = safe_float(settings.get("paper_confirmation_blocker_liquidity_proxy"))
     if liquidity_proxy is None or liquidity_proxy <= 0:
         liquidity_proxy = safe_float(settings.get("research_min_liquidity")) or 25.0
-    match_index = _paper_confirmation_blocker_match_index(liquidity_rows or [])
+    match_index = _paper_confirmation_blocker_match_index(
+        _paper_confirmation_blocker_resolution_rows(cfg, liquidity_rows or [])
+    )
     selected: list[dict[str, Any]] = []
     seen_ids: set[str] = set()
     for target in targets:
@@ -1012,7 +1032,7 @@ def _paper_confirmation_blocker_priority_rows(
                 "paper_confirmation_blocker_validation_roi": target.get("historical_analogue_validation_roi", ""),
                 "paper_confirmation_blocker_decision_use": target.get("decision_use", ""),
                 "websocket_target_reason": "reserve_paper_confirmation_blocker_for_forward_bid_tracking",
-                "websocket_target_match_source": "direct_token" if target_token_id else "slug_outcome_watchlist",
+                "websocket_target_match_source": "direct_token" if target_token_id else "slug_outcome_artifact",
             }
         )
         seen_ids.add(token_id)

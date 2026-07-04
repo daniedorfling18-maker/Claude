@@ -1195,6 +1195,25 @@ def _relative_spread(spread: float | None, price: float | None) -> float | None:
     return spread / price
 
 
+def _entry_price_band_rejection(cfg: EngineConfig, price: float | None) -> str:
+    """Mirror the broker's base-config entry band before writing paper signals.
+
+    The broker remains authoritative and still re-checks every order.  This
+    earlier check prevents impossible paper-signal rows from being advertised
+    as broker-ready when the risk layer will deterministically reject them.
+    """
+    if price is None:
+        return ""
+    risk = cfg.raw.get("risk", {})
+    if not isinstance(risk, dict):
+        risk = {}
+    minimum_entry_price = float(safe_float(risk.get("minimum_entry_price")) or 0.05)
+    maximum_entry_price = float(safe_float(risk.get("maximum_entry_price")) or 0.90)
+    if not minimum_entry_price <= price <= maximum_entry_price:
+        return f"entry price {price:.4f} outside configured band [{minimum_entry_price:.2f}, {maximum_entry_price:.2f}]"
+    return ""
+
+
 def _reject(row: dict[str, Any], reason: str) -> dict[str, Any]:
     bid = safe_float(row.get("latest_bid") or row.get("entry_bid") or row.get("best_bid"))
     ask = safe_float(row.get("latest_ask") or row.get("entry_ask") or row.get("best_ask"))
@@ -1427,7 +1446,7 @@ def _summary_decision(
                 "spread above price-action paper limit",
                 "relative spread above price-action paper limit",
             }
-        ):
+        ) or any(reason.startswith("entry price ") for reason in rejection_reasons):
             return "trusted_shadow_edge_waiting_for_fresh_executable_candidate"
         return "trusted_shadow_edge_has_no_matching_current_candidate"
     return "no_price_action_paper_signals_until_positive_cohort_evidence"
@@ -1517,6 +1536,10 @@ def build_price_action_paper_signals(cfg: EngineConfig) -> dict[str, Any]:
         if ask is None or bid is None or not 0 < ask < 1 or not 0 < bid < 1:
             rejections.append(_reject(row, "missing executable websocket bid/ask"))
             continue
+        entry_band_rejection = _entry_price_band_rejection(cfg, ask)
+        if entry_band_rejection:
+            rejections.append(_reject(row, entry_band_rejection))
+            continue
         if spread is None or spread > max_spread:
             rejections.append(_reject(row, "spread above price-action paper limit"))
             continue
@@ -1559,6 +1582,10 @@ def build_price_action_paper_signals(cfg: EngineConfig) -> dict[str, Any]:
         if ask is None or bid is None or not 0 < ask < 1 or not 0 < bid < 1:
             rejections.append(_reject(row, "missing executable websocket bid/ask"))
             continue
+        entry_band_rejection = _entry_price_band_rejection(cfg, ask)
+        if entry_band_rejection:
+            rejections.append(_reject(row, entry_band_rejection))
+            continue
         if spread is None or spread > max_spread:
             rejections.append(_reject(row, "spread above price-action paper limit"))
             continue
@@ -1591,6 +1618,10 @@ def build_price_action_paper_signals(cfg: EngineConfig) -> dict[str, Any]:
         if ask is None or bid is None or not 0 < ask < 1 or not 0 < bid < 1:
             rejections.append(_reject(row, "missing executable websocket bid/ask"))
             continue
+        entry_band_rejection = _entry_price_band_rejection(cfg, ask)
+        if entry_band_rejection:
+            rejections.append(_reject(row, entry_band_rejection))
+            continue
         if spread is None or spread > max_spread:
             rejections.append(_reject(row, "spread above price-action paper limit"))
             continue
@@ -1618,6 +1649,10 @@ def build_price_action_paper_signals(cfg: EngineConfig) -> dict[str, Any]:
         if spread is None:
             spread = max(0.0, ask - bid)
             row["latest_spread"] = spread
+        entry_band_rejection = _entry_price_band_rejection(cfg, ask)
+        if entry_band_rejection:
+            rejections.append(_reject(row, entry_band_rejection))
+            continue
         cohort_payload = {
             "forward_shadow_roi": row.get("one_cent_return", ""),
             "forward_shadow_pnl_usdc": "",
@@ -1657,6 +1692,11 @@ def build_price_action_paper_signals(cfg: EngineConfig) -> dict[str, Any]:
             1
             for signal in signals
             if signal.get("price_action_evidence_status") == "low_price_tick_requires_broker_paper_confirmation"
+        ),
+        "entry_price_band_rejections": sum(
+            1
+            for rejection in rejections
+            if str(rejection.get("rejection_reason") or "").startswith("entry price ")
         ),
         "paper_confirmation_signals": sum(
             1

@@ -434,7 +434,42 @@ def test_trusted_shadow_confirmation_backlog_compiles_paper_probe(tmp_path):
     assert float(signals[0]["max_hold_minutes_before_exit"]) == 45.0
 
 
-def test_low_price_tick_probe_compiles_only_after_model_missed_low_price_positive(tmp_path):
+def test_paper_confirmation_signal_respects_broker_entry_price_band(tmp_path):
+    cfg = _cfg(tmp_path)
+    root = cfg.output_root / "polymarket_price_action"
+    write_json(cfg.governance_root / "price_action_feedback.json", _paper_confirmation_feedback_payload())
+    write_csv(
+        root / "price_action_scout_round_trip_evidence.csv",
+        [
+            _round_trip_row(
+                source="profit_sprint_target",
+                signal_cohort="price_action_scout|profit_sprint|macro_economy",
+                family="macro_economy",
+                market_slug="will-the-us-economy-be-overheating-at-the-end-of-2026",
+                question="Will the US economy be overheating?",
+                outcome="Yes",
+                token_id="macro-token",
+                latest_bid="0.98",
+                latest_ask="0.99",
+                latest_spread="0.01",
+            )
+        ],
+    )
+
+    summary = build_price_action_paper_signals(cfg)
+    signals = read_csv_rows(root / "price_action_paper_signals.csv")
+    rejections = read_csv_rows(root / "price_action_paper_rejections.csv")
+
+    assert summary["signals"] == 0
+    assert signals == []
+    assert summary["paper_confirmation_candidates"] == 1
+    assert summary["entry_price_band_rejections"] == 1
+    assert summary["decision"] == "trusted_shadow_edge_waiting_for_fresh_executable_candidate"
+    assert rejections[0]["rejection_reason"] == "entry price 0.9900 outside configured band [0.05, 0.90]"
+    assert rejections[0]["source"] == "paper_confirmation_candidate"
+
+
+def test_low_price_tick_probe_stays_research_only_below_broker_entry_price_band(tmp_path):
     cfg = _cfg(tmp_path)
     cfg.raw["price_action_microstructure"] = {
         "enabled": True,
@@ -470,15 +505,16 @@ def test_low_price_tick_probe_compiles_only_after_model_missed_low_price_positiv
 
     summary = build_price_action_paper_signals(cfg)
     signals = read_csv_rows(root / "price_action_paper_signals.csv")
+    rejections = read_csv_rows(root / "price_action_paper_rejections.csv")
 
-    assert summary["signals"] == 1
+    assert summary["signals"] == 0
     assert summary["low_price_tick_probe_candidates"] == 1
-    assert summary["low_price_tick_probe_signals"] == 1
-    assert signals[0]["price_action_entry_source"] == "low_price_tick_probe"
-    assert signals[0]["price_action_evidence_status"] == "low_price_tick_requires_broker_paper_confirmation"
-    assert signals[0]["feature_set_version"] == "low_price_tick_v1"
-    assert float(signals[0]["max_stake_usdc"]) == 1.0
-    assert float(signals[0]["executable_price"]) == 0.026
+    assert summary["low_price_tick_probe_signals"] == 0
+    assert summary["entry_price_band_rejections"] == 1
+    assert summary["decision"] == "low_price_tick_probe_waiting_for_fresh_executable_candidate"
+    assert signals == []
+    assert rejections[0]["source"] == "low_price_tick_probe"
+    assert rejections[0]["rejection_reason"] == "entry price 0.0260 outside configured band [0.05, 0.90]"
 
 
 def test_low_price_tick_probe_blocks_missed_positive_when_validation_lane_negative(tmp_path):
@@ -618,18 +654,42 @@ def test_paper_confirmation_current_candidate_requires_positive_historical_analo
     write_csv(
         cfg.output_root / "polymarket_training" / "websocket_market_features.csv",
         [
-            _ws_feature_row(0, best_bid="0.022", best_ask="0.023", midpoint="0.0225", price_change_side="BUY"),
-            _ws_feature_row(1, best_bid="0.023", best_ask="0.024", midpoint="0.0235", price_change_side="BUY"),
-            _ws_feature_row(2, best_bid="0.024", best_ask="0.025", midpoint="0.0245", price_change_side="BUY"),
-            _ws_feature_row(3, best_bid="0.025", best_ask="0.026", midpoint="0.0255", price_change_side="BUY"),
+            _ws_feature_row(0, best_bid="0.057", best_ask="0.058", midpoint="0.0575", price_change_side="BUY"),
+            _ws_feature_row(1, best_bid="0.058", best_ask="0.059", midpoint="0.0585", price_change_side="BUY"),
+            _ws_feature_row(2, best_bid="0.059", best_ask="0.060", midpoint="0.0595", price_change_side="BUY"),
+            _ws_feature_row(3, best_bid="0.060", best_ask="0.061", midpoint="0.0605", price_change_side="BUY"),
         ],
     )
     write_csv(
         root / "microstructure_trade_events.csv",
         [
-            _low_price_trade_event(split="validation", current_side="BUY", exit_bid="0.027", pnl_usdc="0.16", roi="0.08"),
-            _low_price_trade_event(split="validation", current_side="BUY", exit_bid="0.026", pnl_usdc="0.08", roi="0.04"),
-            _low_price_trade_event(split="validation", current_side="BUY", exit_bid="0.026", pnl_usdc="0.08", roi="0.04"),
+            _low_price_trade_event(
+                split="validation",
+                current_side="BUY",
+                entry_bid="0.060",
+                entry_ask="0.061",
+                exit_bid="0.067",
+                pnl_usdc="0.20",
+                roi="0.10",
+            ),
+            _low_price_trade_event(
+                split="validation",
+                current_side="BUY",
+                entry_bid="0.060",
+                entry_ask="0.061",
+                exit_bid="0.066",
+                pnl_usdc="0.16",
+                roi="0.08",
+            ),
+            _low_price_trade_event(
+                split="validation",
+                current_side="BUY",
+                entry_bid="0.060",
+                entry_ask="0.061",
+                exit_bid="0.065",
+                pnl_usdc="0.12",
+                roi="0.06",
+            ),
         ],
     )
 

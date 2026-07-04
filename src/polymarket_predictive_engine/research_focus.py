@@ -1004,9 +1004,30 @@ def _quote_audit_focus(paper_round_trip_summary: dict[str, Any], *, max_rows: in
         family = str(row.get("family") or "").strip()
         if not cohort or cohort == "unknown" or _is_quarantined_fast_crypto(cohort):
             continue
-        blocked_round_trips = int(_num(row.get("quote_conflict_round_trips"))) + int(
-            _num(row.get("quote_unverified_round_trips"))
-        ) + int(_num(row.get("quote_other_blocked_round_trips")))
+        quote_conflict_round_trips = int(_num(row.get("quote_conflict_round_trips")))
+        quote_unverified_round_trips = int(_num(row.get("quote_unverified_round_trips")))
+        quote_other_blocked_round_trips = int(_num(row.get("quote_other_blocked_round_trips")))
+        entry_snapshot_missing_round_trips = int(
+            _num(
+                row.get("proof_entry_snapshot_missing_round_trips")
+                if row.get("proof_entry_snapshot_missing_round_trips") not in (None, "")
+                else row.get("entry_snapshot_missing_round_trips")
+            )
+        )
+        exit_snapshot_missing_round_trips = int(
+            _num(
+                row.get("proof_exit_snapshot_missing_round_trips")
+                if row.get("proof_exit_snapshot_missing_round_trips") not in (None, "")
+                else row.get("exit_snapshot_missing_round_trips")
+            )
+        )
+        proof_snapshot_missing_round_trips = entry_snapshot_missing_round_trips + exit_snapshot_missing_round_trips
+        blocked_round_trips = (
+            quote_conflict_round_trips
+            + quote_unverified_round_trips
+            + quote_other_blocked_round_trips
+            + proof_snapshot_missing_round_trips
+        )
         excluded_pnl = _num(row.get("excluded_from_audit_pnl_usdc"))
         if blocked_round_trips <= 0 and abs(excluded_pnl) <= 1e-9:
             continue
@@ -1018,24 +1039,32 @@ def _quote_audit_focus(paper_round_trip_summary: dict[str, Any], *, max_rows: in
                 "recommended_collection_query": query,
                 "round_trips": int(_num(row.get("round_trips"))),
                 "quote_consistent_round_trips": int(_num(row.get("quote_consistent_round_trips"))),
-                "quote_conflict_round_trips": int(_num(row.get("quote_conflict_round_trips"))),
-                "quote_unverified_round_trips": int(_num(row.get("quote_unverified_round_trips"))),
-                "quote_other_blocked_round_trips": int(_num(row.get("quote_other_blocked_round_trips"))),
-                "entry_snapshot_missing_round_trips": int(_num(row.get("entry_snapshot_missing_round_trips"))),
-                "exit_snapshot_missing_round_trips": int(_num(row.get("exit_snapshot_missing_round_trips"))),
+                "quote_conflict_round_trips": quote_conflict_round_trips,
+                "quote_unverified_round_trips": quote_unverified_round_trips,
+                "quote_other_blocked_round_trips": quote_other_blocked_round_trips,
+                "entry_snapshot_missing_round_trips": entry_snapshot_missing_round_trips,
+                "exit_snapshot_missing_round_trips": exit_snapshot_missing_round_trips,
+                "proof_snapshot_missing_round_trips": proof_snapshot_missing_round_trips,
                 "raw_pnl_usdc": _num(row.get("raw_pnl_usdc")),
                 "audited_pnl_usdc": _num(row.get("audited_pnl_usdc")),
                 "excluded_from_audit_pnl_usdc": excluded_pnl,
                 "top_blocker_status": row.get("top_blocker_status") or "",
                 "top_blocker_count": int(_num(row.get("top_blocker_count"))),
                 "recommended_action": row.get("recommended_action")
-                or "collect independent bid/ask snapshots through entry and exit before using this cohort as proof",
+                or (
+                    "collect entry and exit bid/ask snapshots before using this cohort as profit-target proof"
+                    if proof_snapshot_missing_round_trips > 0
+                    else "collect independent bid/ask snapshots through entry and exit before using this cohort as proof"
+                ),
                 "decision_use": "quote_audit_repair_collection_only_not_trade_authorisation",
             }
         )
     blockers.sort(
         key=lambda row: (
-            _num(row.get("quote_conflict_round_trips")) + _num(row.get("quote_unverified_round_trips")) + _num(row.get("quote_other_blocked_round_trips")),
+            _num(row.get("quote_conflict_round_trips"))
+            + _num(row.get("quote_unverified_round_trips"))
+            + _num(row.get("quote_other_blocked_round_trips"))
+            + _num(row.get("proof_snapshot_missing_round_trips")),
             abs(_num(row.get("excluded_from_audit_pnl_usdc"))),
             abs(_num(row.get("raw_pnl_usdc"))),
         ),

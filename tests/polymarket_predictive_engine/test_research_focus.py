@@ -819,3 +819,49 @@ def test_research_focus_routes_quote_audit_blockers_to_collection_only(tmp_path)
     assert payload["paper_trading_invoked"] is False
     assert payload["live_trading_invoked"] is False
     assert "proof repair only" in payload["notes"][0]
+
+
+def test_research_focus_routes_proof_snapshot_gaps_to_collection_only(tmp_path):
+    cfg = _cfg(tmp_path)
+    write_json(
+        cfg.output_root / "polymarket_price_action" / "paper_broker_round_trip_summary.json",
+        {
+            "baseline_quote_audit_by_cohort": [
+                {
+                    "signal_cohort": "tennis_tennis_winner",
+                    "family": "tennis_tennis_winner",
+                    "round_trips": 2,
+                    "quote_consistent_round_trips": 2,
+                    "quote_conflict_round_trips": 0,
+                    "quote_unverified_round_trips": 0,
+                    "quote_other_blocked_round_trips": 0,
+                    "proof_entry_snapshot_missing_round_trips": 1,
+                    "proof_exit_snapshot_missing_round_trips": 1,
+                    "raw_pnl_usdc": 3.25,
+                    "audited_pnl_usdc": 3.25,
+                    "excluded_from_audit_pnl_usdc": 0.0,
+                    "top_blocker_status": "proof_snapshot_gap",
+                    "top_blocker_count": 2,
+                }
+            ]
+        },
+    )
+
+    payload = build_research_focus(cfg)
+
+    quote_focus = payload["quote_audit_focus"]
+    assert quote_focus["status"] == "quote_audit_blockers_present"
+    assert quote_focus["collection_queries"] == ["tennis"]
+    blocked = quote_focus["blocked_cohorts"][0]
+    assert blocked["cohort"] == "tennis_tennis_winner"
+    assert blocked["quote_conflict_round_trips"] == 0
+    assert blocked["quote_unverified_round_trips"] == 0
+    assert blocked["entry_snapshot_missing_round_trips"] == 1
+    assert blocked["exit_snapshot_missing_round_trips"] == 1
+    assert blocked["proof_snapshot_missing_round_trips"] == 2
+    assert "profit-target proof" in blocked["recommended_action"]
+    assert blocked["decision_use"] == "quote_audit_repair_collection_only_not_trade_authorisation"
+    assert payload["raw_collection_queries"][0] == "tennis"
+    assert "tennis" in payload["collection_queries"]
+    assert payload["paper_trading_invoked"] is False
+    assert payload["live_trading_invoked"] is False

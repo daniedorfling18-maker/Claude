@@ -351,6 +351,7 @@ def _merge_target_metadata(existing: dict[str, Any], incoming: dict[str, Any]) -
     always_copy_prefixes = (
         "paper_confirmation_blocker_",
         "current_positive_analogue_",
+        "historical_breadth_",
         "strategy_v2_",
         "profit_sprint_",
         "fast_feedback_",
@@ -358,6 +359,7 @@ def _merge_target_metadata(existing: dict[str, Any], incoming: dict[str, Any]) -
     )
     always_copy_keys = {
         "feedback_broaden_target",
+        "historical_breadth_target",
         "open_position_target",
         "paper_confirmation_blocker_target",
         "websocket_target_match_source",
@@ -451,6 +453,26 @@ def _feedback_collection_queries(payload: dict[str, Any], focus_payload: dict[st
             _append_unique(queries, raw_query)
         for raw_query in price_action_model.get("validation_gap_queries", []) or []:
             _append_unique(queries, raw_query)
+    for raw_query in _historical_breadth_collection_queries(focus_payload):
+        _append_unique(queries, raw_query)
+    return queries
+
+
+def _historical_breadth_collection_queries(focus_payload: dict[str, Any]) -> list[str]:
+    queries: list[str] = []
+    price_action_model = focus_payload.get("price_action_model", {}) or {}
+    if isinstance(price_action_model, dict):
+        for raw_query in price_action_model.get("historical_breadth_queries", []) or []:
+            _append_unique(queries, raw_query)
+    breadth = focus_payload.get("price_action_historical_breadth", {}) or {}
+    if isinstance(breadth, dict):
+        for raw_query in breadth.get("recommended_collection_queries", []) or []:
+            _append_unique(queries, raw_query)
+        rows = breadth.get("top_near_positive_buckets")
+        if isinstance(rows, list):
+            for row in rows:
+                if isinstance(row, dict):
+                    _append_unique(queries, row.get("recommended_collection_query"))
     return queries
 
 
@@ -468,6 +490,7 @@ def _feedback_has_collection_target(payload: dict[str, Any], focus_payload: dict
         or safe_float(payload.get("paper_confirmation_candidates"))
         or safe_float(payload.get("promotion_candidates"))
         or safe_float(payload.get("positive_collect_candidates"))
+        or bool(_historical_breadth_collection_queries(focus_payload))
     )
 
 
@@ -629,6 +652,10 @@ def _feedback_broaden_rows(cfg: EngineConfig, settings: dict[str, Any], candidat
             add_query(raw_query, 80.0)
         for raw_query in price_action_model.get("validation_gap_queries", []) or []:
             add_query(raw_query, 20.0)
+    historical_breadth_queries = _historical_breadth_collection_queries(focus_payload)
+    historical_breadth_query_keys = {query.lower() for query in historical_breadth_queries}
+    for raw_query in historical_breadth_queries:
+        add_query(raw_query, 75.0)
     queries = [query for query in _feedback_collection_queries(payload, focus_payload) if query.lower() in query_priorities]
     if not queries:
         return []
@@ -648,6 +675,12 @@ def _feedback_broaden_rows(cfg: EngineConfig, settings: dict[str, Any], candidat
         enriched["feedback_broaden_family_prefixes"] = ",".join(_family_prefixes_for_collection_query(query))
         enriched["feedback_broaden_query"] = query
         enriched["feedback_broaden_match_score"] = score
+        if query.lower() in historical_breadth_query_keys:
+            enriched["historical_breadth_target"] = True
+            enriched["historical_breadth_query"] = query
+            enriched["historical_breadth_decision_use"] = (
+                "collect_more_bid_ask_rows_for_near_positive_historical_breadth_bucket"
+            )
         rows.append(enriched)
     rows.sort(key=_candidate_rank, reverse=True)
     max_rows = int(settings.get("feedback_broaden_target_assets", 4) or 4)
@@ -1305,6 +1338,16 @@ def _feedback_broaden_counts(rows: list[dict[str, Any]]) -> dict[str, int]:
     return dict(sorted(counts.items()))
 
 
+def _historical_breadth_counts(rows: list[dict[str, Any]]) -> dict[str, int]:
+    counts: dict[str, int] = {}
+    for row in rows:
+        if not _boolish(row.get("historical_breadth_target")):
+            continue
+        family = str(row.get("family") or "historical_breadth")
+        counts[family] = counts.get(family, 0) + 1
+    return dict(sorted(counts.items()))
+
+
 def _research_target_counts(rows: list[dict[str, Any]]) -> dict[str, int]:
     counts: dict[str, int] = {}
     for row in rows:
@@ -1384,6 +1427,7 @@ def collect_websocket(cfg: EngineConfig, websocket_seconds: int = 60) -> dict[st
     current_analogue_counts = _current_positive_analogue_counts(target_rows)
     paper_blocker_counts = _paper_confirmation_blocker_counts(target_rows)
     feedback_counts = _feedback_broaden_counts(target_rows)
+    historical_breadth_counts = _historical_breadth_counts(target_rows)
     research_counts = _research_target_counts(target_rows)
     position_counts = _position_target_counts(target_rows)
     if current_analogue_counts and strategy_v2_counts and sprint_counts:
@@ -1404,6 +1448,8 @@ def collect_websocket(cfg: EngineConfig, websocket_seconds: int = 60) -> dict[st
         target_source = "liquidity_watchlist" if dynamic_ids else "configured_market_ids"
     if feedback_counts and dynamic_ids:
         target_source += "+price_action_feedback_broaden"
+    if historical_breadth_counts and dynamic_ids:
+        target_source += "+historical_breadth_targets"
     if paper_blocker_counts and dynamic_ids:
         target_source += "+paper_confirmation_blocker_targets"
     if research_counts and dynamic_ids:
@@ -1458,6 +1504,7 @@ def collect_websocket(cfg: EngineConfig, websocket_seconds: int = 60) -> dict[st
             "target_current_positive_analogue_counts": current_analogue_counts,
             "target_paper_confirmation_blocker_counts": paper_blocker_counts,
             "target_feedback_broaden_counts": feedback_counts,
+            "target_historical_breadth_counts": historical_breadth_counts,
             "target_research_counts": research_counts,
             "target_position_counts": position_counts,
             "subscription_attempts": len(variants),
@@ -1493,6 +1540,7 @@ def collect_websocket(cfg: EngineConfig, websocket_seconds: int = 60) -> dict[st
         "target_current_positive_analogue_counts": current_analogue_counts,
         "target_paper_confirmation_blocker_counts": paper_blocker_counts,
         "target_feedback_broaden_counts": feedback_counts,
+        "target_historical_breadth_counts": historical_breadth_counts,
         "target_research_counts": research_counts,
         "target_position_counts": position_counts,
         "target_file": str(cfg.governance_root / "websocket_liquidity_targets.csv") if target_rows else "",

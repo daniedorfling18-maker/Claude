@@ -1059,6 +1059,87 @@ def test_websocket_reserves_current_positive_analogue_tokens(tmp_path):
     assert analogue_targets[0]["websocket_target_reason"] == "reserve_current_positive_analogue_for_forward_bid_tracking"
 
 
+def test_websocket_reserves_historical_breadth_learning_targets(tmp_path):
+    import yaml
+
+    cfg_path = make_cfg(tmp_path)
+    data = yaml.safe_load(cfg_path.read_text(encoding="utf-8"))
+    data.setdefault("websocket_market_data", {})
+    data["websocket_market_data"].update(
+        {
+            "use_liquidity_targets": True,
+            "use_strategy_v2_targets": False,
+            "feedback_broaden_target_enabled": True,
+            "feedback_broaden_target_assets": 2,
+            "feedback_broaden_target_assets_per_family": 1,
+            "include_research_liquidity_targets": False,
+            "max_liquidity_target_assets": 3,
+            "market_ids": [],
+        }
+    )
+    cfg_path.write_text(yaml.safe_dump(data, sort_keys=False), encoding="utf-8")
+    cfg = load_config(cfg_path)
+    write_json(
+        cfg.governance_root / "research_focus.json",
+        {
+            "status": "ok",
+            "price_action_model": {
+                "historical_breadth_queries": ["btc updown", "solana updown"],
+            },
+            "price_action_historical_breadth": {
+                "state": "positive_validation_pockets_not_robust",
+                "recommended_collection_queries": ["btc updown", "solana updown"],
+            },
+        },
+    )
+    write_csv(
+        cfg.output_root / "polymarket_liquidity_discovery" / "liquidity_watchlist.csv",
+        [
+            {
+                "token_id": "generic-token",
+                "family": "macro_rates",
+                "market_slug": "will-the-fed-change-rates",
+                "question": "Will the Fed change rates?",
+                "tradable_liquidity_candidate": "true",
+                "liquidity": "8000",
+                "spread": "0.01",
+                "time_to_close_hours": "12",
+            },
+            {
+                "token_id": "btc-breadth-token",
+                "family": "crypto_btc_updown_event",
+                "market_slug": "btc-updown-4h-test",
+                "question": "Bitcoin Up or Down?",
+                "tradable_liquidity_candidate": "true",
+                "liquidity": "5000",
+                "spread": "0.01",
+                "time_to_close_hours": "2",
+            },
+            {
+                "token_id": "sol-breadth-token",
+                "family": "crypto_sol_updown_daily",
+                "market_slug": "solana-up-or-down-test",
+                "question": "Solana Up or Down?",
+                "tradable_liquidity_candidate": "true",
+                "liquidity": "4000",
+                "spread": "0.01",
+                "time_to_close_hours": "2",
+            },
+        ],
+    )
+
+    targets = websocket_collector._liquidity_target_rows(cfg, cfg.raw["websocket_market_data"])
+    breadth_targets = [row for row in targets if row.get("historical_breadth_target") is True]
+
+    assert {row["token_id"] for row in breadth_targets} == {"btc-breadth-token", "sol-breadth-token"}
+    assert {row["historical_breadth_query"] for row in breadth_targets} == {"btc updown", "solana updown"}
+    assert all(row["feedback_broaden_target"] is True for row in breadth_targets)
+    assert websocket_collector._historical_breadth_counts(targets) == {
+        "crypto_btc_updown_event": 1,
+        "crypto_sol_updown_daily": 1,
+    }
+
+
 def test_websocket_reserves_in_band_paper_confirmation_blocker_tokens(tmp_path):
     import yaml
 

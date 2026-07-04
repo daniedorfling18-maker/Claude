@@ -690,6 +690,32 @@ def _paper_confirmation_current_candidates(
             spread = max(0.0, ask - bid)
         relative_spread = _relative_spread(spread, ask)
         analogue = _historical_analogue_for_row(feature, analogue_stats, settings)
+        entry_band_rejection = _entry_price_band_rejection(cfg, ask)
+        if entry_band_rejection:
+            blocked += 1
+            state = "entry_price_outside_risk_band"
+            blocked_by_state[state] = blocked_by_state.get(state, 0) + 1
+            blocked_preview.append(
+                _attach_historical_analogue(
+                    {
+                        "source": "paper_confirmation_current_candidate",
+                        "signal_cohort": cohort,
+                        "token_id": token,
+                        "market_slug": feature.get("market_slug", ""),
+                        "question": feature.get("question", ""),
+                        "family": feature.get("family", ""),
+                        "outcome": feature.get("outcome", ""),
+                        "latest_bid": bid,
+                        "latest_ask": ask,
+                        "latest_spread": spread,
+                        "relative_spread": "" if relative_spread is None else relative_spread,
+                        "candidate_gate": state,
+                        "rejection_reason": entry_band_rejection,
+                    },
+                    analogue,
+                )
+            )
+            continue
         if require_positive_history and analogue.get("state") != "positive_historical_analogue":
             blocked += 1
             state = str(analogue.get("state") or "unknown")
@@ -750,7 +776,12 @@ def _paper_confirmation_current_candidates(
         reverse=True,
     )
     selected = candidates[:max_candidates]
-    state = "historical_analogue_current_candidates_ready" if selected else "no_positive_historical_analogue_current_candidate"
+    if selected:
+        state = "historical_analogue_current_candidates_ready"
+    elif blocked_by_state.get("entry_price_outside_risk_band", 0) > 0:
+        state = "current_candidates_blocked_by_entry_price_band"
+    else:
+        state = "no_positive_historical_analogue_current_candidate"
     return selected, {
         "state": state,
         "require_positive_historical_analogue": require_positive_history,
@@ -1436,6 +1467,9 @@ def _summary_decision(
             and int(safe_float(analogue.get("selected")) or 0) <= 0
             and int(safe_float(analogue.get("blocked")) or 0) > 0
         ):
+            blocked_by_state = analogue.get("blocked_by_state") if isinstance(analogue.get("blocked_by_state"), dict) else {}
+            if blocked_by_state.get("entry_price_outside_risk_band"):
+                return "trusted_shadow_edge_waiting_for_fresh_executable_candidate"
             return "trusted_shadow_edge_blocked_by_negative_historical_analogue"
         rejection_reasons = {str(row.get("rejection_reason") or "") for row in rejections}
         if any(
@@ -1697,6 +1731,16 @@ def build_price_action_paper_signals(cfg: EngineConfig) -> dict[str, Any]:
             1
             for rejection in rejections
             if str(rejection.get("rejection_reason") or "").startswith("entry price ")
+        )
+        + int(
+            safe_float(
+                (
+                    paper_confirmation_current_analogue.get("blocked_by_state", {})
+                    if isinstance(paper_confirmation_current_analogue.get("blocked_by_state"), dict)
+                    else {}
+                ).get("entry_price_outside_risk_band")
+            )
+            or 0
         ),
         "paper_confirmation_signals": sum(
             1

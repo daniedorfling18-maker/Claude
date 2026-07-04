@@ -759,6 +759,7 @@ def _paper_confirmation_blocker_targets(
                 "historical_analogue_validation_roi": _num(row.get("historical_analogue_validation_roi")),
                 "family": row.get("family", ""),
                 "signal_cohort": row.get("signal_cohort", ""),
+                "token_id": row.get("token_id", ""),
                 "market_slug": row.get("market_slug", ""),
                 "question": row.get("question", ""),
                 "outcome": row.get("outcome", ""),

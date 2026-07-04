@@ -1171,6 +1171,7 @@ def test_websocket_reserves_in_band_paper_confirmation_blocker_tokens(tmp_path):
                 "state": "in_band_historical_analogue_gaps",
                 "targets": [
                     {
+                        "token_id": "proof-direct-in-band-token",
                         "family": "crypto_btc_updown_event",
                         "market_slug": "bitcoin-up-or-down-july-4-2026",
                         "question": "Bitcoin Up or Down - July 4?",
@@ -1236,12 +1237,12 @@ def test_websocket_reserves_in_band_paper_confirmation_blocker_tokens(tmp_path):
     token_ids = [row["token_id"] for row in targets]
     proof_targets = [row for row in targets if row.get("paper_confirmation_blocker_target") is True]
 
-    assert token_ids[0] == "proof-in-band-token"
+    assert token_ids[0] == "proof-direct-in-band-token"
     assert "proof-entry-band-wait-token" not in token_ids
     assert len(proof_targets) == 1
     assert proof_targets[0]["paper_confirmation_blocker_gate"] == "no_positive_historical_analogue_examples"
     assert proof_targets[0]["paper_confirmation_blocker_query"] == "btc updown"
-    assert proof_targets[0]["websocket_target_match_source"] == "slug_outcome_artifact"
+    assert proof_targets[0]["websocket_target_match_source"] == "direct_token"
     assert proof_targets[0]["websocket_target_reason"] == "reserve_paper_confirmation_blocker_for_forward_bid_tracking"
 
 

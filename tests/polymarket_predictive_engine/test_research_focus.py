@@ -211,6 +211,7 @@ def test_research_focus_prioritises_paper_confirmation_blocker_query(tmp_path):
                 "blocked": 2,
                 "blocked_preview": [
                     {
+                        "token_id": "sol-entry-band-wait-token",
                         "market_slug": "solana-up-or-down-july-4-2026-3am-et",
                         "question": "Solana Up or Down - July 4, 3AM ET",
                         "family": "crypto_sol_updown_event",
@@ -220,6 +221,7 @@ def test_research_focus_prioritises_paper_confirmation_blocker_query(tmp_path):
                         "candidate_gate": "entry_price_outside_risk_band",
                     },
                     {
+                        "token_id": "btc-in-band-proof-token",
                         "market_slug": "btc-updown-15m-1783130400",
                         "question": "Bitcoin Up or Down - July 4, 3AM ET",
                         "family": "crypto_btc_updown_15m",
@@ -268,9 +270,11 @@ def test_research_focus_prioritises_paper_confirmation_blocker_query(tmp_path):
     assert payload["proof_priority_queries"][:2] == ["btc updown", "solana updown"]
     proof_targets = payload["price_action_paper_confirmation_blockers"]["targets"]
     assert proof_targets[0]["recommended_collection_query"] == "btc updown"
+    assert proof_targets[0]["token_id"] == "btc-in-band-proof-token"
     assert proof_targets[0]["decision_use"] == "in_band_historical_analogue_gap_collection_target"
     assert proof_targets[0]["historical_analogue_gate"] == "insufficient_historical_analogue_rows"
     assert proof_targets[1]["recommended_collection_query"] == "solana updown"
+    assert proof_targets[1]["token_id"] == "sol-entry-band-wait-token"
     assert proof_targets[1]["decision_use"] == "entry_price_band_wait_do_not_chase_until_quote_enters_risk_band"
     assert payload["collection_query_guard"]["rejected_queries"][0] == {
         "query": "solana updown",

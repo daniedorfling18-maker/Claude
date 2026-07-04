@@ -977,6 +977,7 @@ async function load() {
       ["Target assets", websocket.target_assets],
       ["Target source", websocket.target_source, v=>longText(v, 180)],
       ["Target families", websocket.target_family_counts, v=>longText(v, 220)],
+      ["Proof blocker targets", websocket.target_paper_confirmation_blocker_counts, v=>longText(v, 180)],
       ["Feedback targets", websocket.target_feedback_broaden_counts, v=>longText(v, 180)],
       ["Features", data.forward_paper_cycle?.features],
       ["Predictions", data.forward_paper_cycle?.predictions],

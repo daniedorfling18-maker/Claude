@@ -917,6 +917,77 @@ def _current_positive_analogue_priority_rows(cfg: EngineConfig, settings: dict[s
     return selected
 
 
+def _paper_confirmation_blocker_priority_rows(cfg: EngineConfig, settings: dict[str, Any]) -> list[dict[str, Any]]:
+    """Reserve exact websocket tokens for in-band paper-proof blocker targets.
+
+    These rows are not trade approvals. They keep the live bid/ask feed focused
+    on the exact markets whose historical analogue buckets are preventing
+    governed paper-confirmation probes from being created.
+    """
+    if not _boolish(settings.get("use_paper_confirmation_blocker_targets", True)):
+        return []
+    max_rows = int(settings.get("max_paper_confirmation_blocker_target_assets", 4) or 4)
+    if max_rows <= 0:
+        return []
+    focus = read_json(cfg.governance_root / "research_focus.json", default={}) or {}
+    if not isinstance(focus, dict):
+        return []
+    payload = focus.get("price_action_paper_confirmation_blockers")
+    if not isinstance(payload, dict):
+        return []
+    targets = payload.get("targets")
+    if not isinstance(targets, list):
+        return []
+    liquidity_proxy = safe_float(settings.get("paper_confirmation_blocker_liquidity_proxy"))
+    if liquidity_proxy is None or liquidity_proxy <= 0:
+        liquidity_proxy = safe_float(settings.get("research_min_liquidity")) or 25.0
+    selected: list[dict[str, Any]] = []
+    seen_ids: set[str] = set()
+    for target in targets:
+        if not isinstance(target, dict):
+            continue
+        if _boolish(target.get("entry_band_wait")):
+            continue
+        token_id = _token_id(target)
+        if not token_id or token_id in seen_ids:
+            continue
+        bid = safe_float(target.get("latest_bid"))
+        ask = safe_float(target.get("latest_ask"))
+        spread = safe_float(target.get("latest_spread"))
+        midpoint = (bid + ask) / 2.0 if bid is not None and ask is not None else ""
+        liquidity = safe_float(target.get("liquidity"))
+        if liquidity is None or liquidity <= 0:
+            liquidity = liquidity_proxy
+        selected.append(
+            {
+                "token_id": token_id,
+                "market_slug": target.get("market_slug", ""),
+                "question": target.get("question", ""),
+                "outcome": target.get("outcome", ""),
+                "family": target.get("family", "paper_confirmation_blocker"),
+                "best_bid": "" if bid is None else bid,
+                "best_ask": "" if ask is None else ask,
+                "midpoint": midpoint,
+                "spread": "" if spread is None else spread,
+                "relative_spread": "" if spread is None or ask is None or ask <= 0 else spread / ask,
+                "liquidity": liquidity,
+                "paper_confirmation_blocker_target": True,
+                "paper_confirmation_blocker_query": target.get("recommended_collection_query", ""),
+                "paper_confirmation_blocker_gate": target.get("historical_analogue_gate", ""),
+                "paper_confirmation_blocker_key": target.get("historical_analogue_key", ""),
+                "paper_confirmation_blocker_validation_rows": target.get("historical_analogue_validation_rows", ""),
+                "paper_confirmation_blocker_positive_rows": target.get("historical_analogue_positive_rows", ""),
+                "paper_confirmation_blocker_validation_roi": target.get("historical_analogue_validation_roi", ""),
+                "paper_confirmation_blocker_decision_use": target.get("decision_use", ""),
+                "websocket_target_reason": "reserve_paper_confirmation_blocker_for_forward_bid_tracking",
+            }
+        )
+        seen_ids.add(token_id)
+        if len(selected) >= max_rows:
+            break
+    return selected
+
+
 def _liquidity_target_rows(cfg: EngineConfig, settings: dict[str, Any]) -> list[dict[str, Any]]:
     max_assets = int(settings.get("max_liquidity_target_assets", settings.get("max_assets", 24)) or 24)
     if not _boolish(settings.get("use_liquidity_targets", True)):
@@ -944,13 +1015,22 @@ def _liquidity_target_rows(cfg: EngineConfig, settings: dict[str, Any]) -> list[
     candidates.sort(key=_candidate_rank, reverse=True)
 
     current_analogue_rows = _current_positive_analogue_priority_rows(cfg, settings)
+    paper_blocker_rows = _paper_confirmation_blocker_priority_rows(cfg, settings)
     strategy_v2_rows = _strategy_v2_priority_rows(cfg, settings)
     priority_rows = _profit_sprint_priority_rows(cfg, candidates)
-    reserved_ids = {_token_id(row) for row in current_analogue_rows if _token_id(row)}
+    forced_rows: list[dict[str, Any]] = []
+    forced_ids: set[str] = set()
+    for row in [*current_analogue_rows, *paper_blocker_rows]:
+        token_id = _token_id(row)
+        if not token_id or token_id in forced_ids:
+            continue
+        forced_rows.append(row)
+        forced_ids.add(token_id)
+    reserved_ids = set(forced_ids)
     if not priority_rows and not strategy_v2_rows:
         feedback_rows = _feedback_broaden_rows(cfg, settings, candidates)
         if not feedback_rows:
-            selected = current_analogue_rows[:max_assets]
+            selected = forced_rows[:max_assets]
             selected_ids = {_token_id(row) for row in selected if _token_id(row)}
             remaining_candidates = [row for row in candidates if _token_id(row) not in selected_ids]
             selected.extend(
@@ -973,7 +1053,8 @@ def _liquidity_target_rows(cfg: EngineConfig, settings: dict[str, Any]) -> list[
             if _token_id(row) not in {_token_id(item) for item in feedback_rows[:reserve]}
             and _token_id(row) not in reserved_ids
         ]
-        selected = current_analogue_rows[:max_assets]
+        reserve = min(reserve, max(0, max_assets - len(forced_rows)))
+        selected = forced_rows[:max_assets]
         selected.extend(
             _balanced_by_family(
                 base_rows,
@@ -1001,10 +1082,10 @@ def _liquidity_target_rows(cfg: EngineConfig, settings: dict[str, Any]) -> list[
     feedback_reserve = min(
         len(feedback_rows),
         max(0, int(settings.get("feedback_broaden_target_assets", 4) or 4)),
-        max(0, max_assets - len(current_analogue_rows) - 1),
+        max(0, max_assets - len(forced_rows) - 1),
     )
     normal_budget = max_assets - feedback_reserve
-    selected: list[dict[str, Any]] = current_analogue_rows[:normal_budget]
+    selected: list[dict[str, Any]] = forced_rows[:normal_budget]
     selected_ids: set[str] = {_token_id(row) for row in selected if _token_id(row)}
     for row in strategy_v2_rows:
         token_id = _token_id(row)
@@ -1107,6 +1188,16 @@ def _current_positive_analogue_counts(rows: list[dict[str, Any]]) -> dict[str, i
     return dict(sorted(counts.items()))
 
 
+def _paper_confirmation_blocker_counts(rows: list[dict[str, Any]]) -> dict[str, int]:
+    counts: dict[str, int] = {}
+    for row in rows:
+        if not _boolish(row.get("paper_confirmation_blocker_target")):
+            continue
+        family = str(row.get("family") or "paper_confirmation_blocker")
+        counts[family] = counts.get(family, 0) + 1
+    return dict(sorted(counts.items()))
+
+
 def _feedback_broaden_counts(rows: list[dict[str, Any]]) -> dict[str, int]:
     counts: dict[str, int] = {}
     for row in rows:
@@ -1194,6 +1285,7 @@ def collect_websocket(cfg: EngineConfig, websocket_seconds: int = 60) -> dict[st
     sprint_counts = _profit_sprint_target_counts(target_rows)
     strategy_v2_counts = _strategy_v2_target_counts(target_rows)
     current_analogue_counts = _current_positive_analogue_counts(target_rows)
+    paper_blocker_counts = _paper_confirmation_blocker_counts(target_rows)
     feedback_counts = _feedback_broaden_counts(target_rows)
     research_counts = _research_target_counts(target_rows)
     position_counts = _position_target_counts(target_rows)
@@ -1215,6 +1307,8 @@ def collect_websocket(cfg: EngineConfig, websocket_seconds: int = 60) -> dict[st
         target_source = "liquidity_watchlist" if dynamic_ids else "configured_market_ids"
     if feedback_counts and dynamic_ids:
         target_source += "+price_action_feedback_broaden"
+    if paper_blocker_counts and dynamic_ids:
+        target_source += "+paper_confirmation_blocker_targets"
     if research_counts and dynamic_ids:
         target_source += "+research_repricing_coverage"
     if position_counts and dynamic_ids:
@@ -1265,6 +1359,7 @@ def collect_websocket(cfg: EngineConfig, websocket_seconds: int = 60) -> dict[st
             "target_profit_sprint_counts": sprint_counts,
             "target_strategy_v2_counts": strategy_v2_counts,
             "target_current_positive_analogue_counts": current_analogue_counts,
+            "target_paper_confirmation_blocker_counts": paper_blocker_counts,
             "target_feedback_broaden_counts": feedback_counts,
             "target_research_counts": research_counts,
             "target_position_counts": position_counts,
@@ -1299,6 +1394,7 @@ def collect_websocket(cfg: EngineConfig, websocket_seconds: int = 60) -> dict[st
         "target_profit_sprint_counts": sprint_counts,
         "target_strategy_v2_counts": strategy_v2_counts,
         "target_current_positive_analogue_counts": current_analogue_counts,
+        "target_paper_confirmation_blocker_counts": paper_blocker_counts,
         "target_feedback_broaden_counts": feedback_counts,
         "target_research_counts": research_counts,
         "target_position_counts": position_counts,

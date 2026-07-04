@@ -61,8 +61,28 @@ jobs:
             echo "::error::PM_VPS_SSH_PRIVATE_KEY is present but is not a loadable private key. Store the full private key file, not the .pub public key or a PuTTY .ppk file."
             exit 1
           fi
+          ssh-keygen -y -f "$RUNNER_TEMP/ssh/vps_key" > "$RUNNER_TEMP/ssh/vps_key.pub"
           ssh-keyscan -p "$PM_VPS_PORT" -H "$PM_VPS_HOST" > "$RUNNER_TEMP/ssh/known_hosts"
           chmod 600 "$RUNNER_TEMP/ssh/known_hosts"
+
+      - name: Validate VPS SSH authorization
+        env:
+          PM_VPS_HOST: ${{ secrets.PM_VPS_HOST }}
+          PM_VPS_PORT: ${{ secrets.PM_VPS_PORT || '22' }}
+          PM_VPS_USER: ${{ secrets.PM_VPS_USER }}
+        run: |
+          set -euo pipefail
+          if ! ssh \
+            -i "$RUNNER_TEMP/ssh/vps_key" \
+            -o BatchMode=yes \
+            -o UserKnownHostsFile="$RUNNER_TEMP/ssh/known_hosts" \
+            -p "$PM_VPS_PORT" \
+            "$PM_VPS_USER@$PM_VPS_HOST" \
+            "echo VPS_SSH_OK" >/dev/null 2>&1; then
+            pub_key="$(cat "$RUNNER_TEMP/ssh/vps_key.pub")"
+            echo "::error::The deploy private key is valid, but the VPS rejected it. Add this public key to /home/${PM_VPS_USER}/.ssh/authorized_keys on ${PM_VPS_HOST}: ${pub_key}"
+            exit 1
+          fi
 
       - name: Create VPS environment patch
         env:

@@ -96,3 +96,12 @@ def test_vps_deploy_workflow_validates_private_key_secret():
     assert 'raw_key.replace("\\\\n", "\\n")' in text
     assert "ssh-keygen -y -f" in text
     assert "not the .pub public key or a PuTTY .ppk file" in text
+
+
+def test_vps_deploy_workflow_explains_unauthorized_public_key():
+    text = (ROOT / ".github" / "workflows" / "deploy-polymarket-vps-paper.yml").read_text(encoding="utf-8")
+
+    assert "Validate VPS SSH authorization" in text
+    assert "VPS_SSH_OK" in text
+    assert "/home/${PM_VPS_USER}/.ssh/authorized_keys" in text
+    assert "The deploy private key is valid, but the VPS rejected it" in text

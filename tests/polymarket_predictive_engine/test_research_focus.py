@@ -257,17 +257,23 @@ def test_research_focus_prioritises_paper_confirmation_blocker_query(tmp_path):
 
     payload = build_research_focus(cfg)
 
-    assert payload["raw_collection_queries"][:3] == ["solana updown", "btc updown", "ethereum"]
-    assert payload["collection_queries"][0] == "solana updown"
-    assert "btc updown" not in payload["collection_queries"]
+    assert payload["raw_collection_queries"][:3] == ["btc updown", "solana updown", "ethereum"]
+    assert payload["collection_queries"][0] == "btc updown"
+    assert "solana updown" not in payload["collection_queries"]
     assert payload["price_action_model"]["paper_confirmation_blocker_queries"] == [
-        "solana updown",
         "btc updown",
+        "solana updown",
     ]
     assert payload["quote_audit_priority_queries"] == ["btc updown"]
-    assert payload["proof_priority_queries"][:2] == ["solana updown", "btc updown"]
+    assert payload["proof_priority_queries"][:2] == ["btc updown", "solana updown"]
+    proof_targets = payload["price_action_paper_confirmation_blockers"]["targets"]
+    assert proof_targets[0]["recommended_collection_query"] == "btc updown"
+    assert proof_targets[0]["decision_use"] == "in_band_historical_analogue_gap_collection_target"
+    assert proof_targets[0]["historical_analogue_gate"] == "insufficient_historical_analogue_rows"
+    assert proof_targets[1]["recommended_collection_query"] == "solana updown"
+    assert proof_targets[1]["decision_use"] == "entry_price_band_wait_do_not_chase_until_quote_enters_risk_band"
     assert payload["collection_query_guard"]["rejected_queries"][0] == {
-        "query": "btc updown",
+        "query": "solana updown",
         "family": "crypto_updown",
         "reason": "max_updown_queries",
     }

@@ -656,34 +656,169 @@ def _collection_query_from_row(row: dict[str, Any]) -> str:
     )
 
 
-def _paper_confirmation_blocker_queries(price_action_paper: dict[str, Any], *, max_queries: int = 4) -> list[str]:
-    """Collection-only queries for trusted paper-confirmation blockers.
+def _paper_confirmation_blocker_priority(row: dict[str, Any]) -> tuple[int, float, float, float]:
+    gate = str(row.get("candidate_gate") or row.get("historical_analogue_gate") or "").strip()
+    historical_gate = str(row.get("historical_analogue_gate") or "").strip()
+    if not historical_gate and gate != "entry_price_outside_risk_band":
+        historical_gate = gate
+    if gate == "entry_price_outside_risk_band":
+        bucket = 0
+    elif historical_gate == "side_missing_positive_historical_analogue_shadow_only":
+        bucket = 5
+    elif historical_gate in {"no_historical_analogue_rows", "insufficient_historical_analogue_rows"}:
+        bucket = 4
+    elif historical_gate == "no_positive_historical_analogue_examples":
+        bucket = 3
+    elif historical_gate == "historical_analogue_not_profitable_after_spread":
+        bucket = 2
+    else:
+        bucket = 1
+    return (
+        bucket,
+        _num(row.get("historical_analogue_positive_rows")),
+        _num(row.get("historical_analogue_validation_rows")),
+        -_num(row.get("latest_spread"), 999.0),
+    )
 
-    When a trusted shadow thesis has fresh current matches but none can become
-    paper probes, the scarce adaptive query slots should chase the exact family
-    that is blocking proof collection. This does not approve a trade; it only
-    makes websocket/discovery collection consistent with the diagnosed blocker.
+
+def _paper_confirmation_blocker_targets(
+    price_action_paper: dict[str, Any],
+    *,
+    max_targets: int = 8,
+    max_queries: int = 4,
+) -> dict[str, Any]:
+    """Collection-only targets for trusted paper-confirmation blockers.
+
+    The paper-proof bridge can fail for two very different reasons:
+
+    * the live quote is outside the risk layer's entry-price band, which is a
+      wait/avoid condition; or
+    * the quote is in-band but lacks a positive historical analogue, which is
+      the evidence bucket the collector can improve.
+
+    Keep both visible, but rank the in-band analogue gaps first so scarce
+    websocket/discovery capacity is aimed at rows that can actually unlock a
+    governed paper-confirmation probe.
     """
     scan = price_action_paper.get("paper_confirmation_current_historical_analogue")
     if not isinstance(scan, dict):
-        return []
+        return {
+            "state": "no_paper_confirmation_blocker_scan",
+            "targets": [],
+            "collection_queries": [],
+            "in_band_targets": 0,
+            "entry_band_wait_targets": 0,
+            "trade_authorisation": "collection_only_not_trade_authorisation",
+        }
     fresh_matches = _num(scan.get("fresh_matches"))
     selected = _num(scan.get("selected") or scan.get("approved"))
     if fresh_matches <= 0 or selected > 0:
-        return []
+        return {
+            "state": "no_blocked_fresh_paper_confirmation_matches",
+            "targets": [],
+            "collection_queries": [],
+            "in_band_targets": 0,
+            "entry_band_wait_targets": 0,
+            "trade_authorisation": "collection_only_not_trade_authorisation",
+        }
     rows = scan.get("blocked_preview")
     if not isinstance(rows, list):
-        return []
-    queries: list[str] = []
+        rows = []
+
+    targets: list[dict[str, Any]] = []
     for row in rows:
         if not isinstance(row, dict):
             continue
         query = _collection_query_from_row(row)
+        if not query:
+            continue
+        candidate_gate = str(row.get("candidate_gate") or row.get("historical_analogue_gate") or "").strip()
+        historical_gate = str(row.get("historical_analogue_gate") or "").strip()
+        if not historical_gate and candidate_gate != "entry_price_outside_risk_band":
+            historical_gate = candidate_gate
+        entry_band_wait = candidate_gate == "entry_price_outside_risk_band"
+        decision_use = (
+            "entry_price_band_wait_do_not_chase_until_quote_enters_risk_band"
+            if entry_band_wait
+            else "in_band_historical_analogue_gap_collection_target"
+        )
+        next_action = (
+            "Wait for a lower-risk in-band quote, or collect lower-ask analogues in the same thesis; "
+            "do not promote this row while the entry-price band rejects it."
+            if entry_band_wait
+            else "Collect fresh bid/ask variation for this exact family/price/spread/side bucket until validation has enough positive executable examples."
+        )
+        targets.append(
+            {
+                "recommended_collection_query": query,
+                "candidate_gate": candidate_gate,
+                "historical_analogue_gate": historical_gate,
+                "historical_analogue_key": row.get("historical_analogue_key", ""),
+                "historical_analogue_validation_rows": _num(row.get("historical_analogue_validation_rows")),
+                "historical_analogue_positive_rows": _num(row.get("historical_analogue_positive_rows")),
+                "historical_analogue_validation_roi": _num(row.get("historical_analogue_validation_roi")),
+                "family": row.get("family", ""),
+                "signal_cohort": row.get("signal_cohort", ""),
+                "market_slug": row.get("market_slug", ""),
+                "question": row.get("question", ""),
+                "outcome": row.get("outcome", ""),
+                "latest_bid": row.get("latest_bid", ""),
+                "latest_ask": row.get("latest_ask", ""),
+                "latest_spread": row.get("latest_spread", ""),
+                "entry_band_wait": entry_band_wait,
+                "priority_bucket": _paper_confirmation_blocker_priority(row)[0],
+                "decision_use": decision_use,
+                "next_action": next_action,
+                "trade_authorisation": "no_trade_until_governed_paper_signal_exists",
+            }
+        )
+
+    targets.sort(
+        key=lambda item: (
+            _num(item.get("priority_bucket")),
+            _num(item.get("historical_analogue_positive_rows")),
+            _num(item.get("historical_analogue_validation_rows")),
+            -_num(item.get("latest_spread"), 999.0),
+        ),
+        reverse=True,
+    )
+    queries: list[str] = []
+    for row in targets:
+        query = str(row.get("recommended_collection_query") or "").strip()
         if query and query not in queries:
             queries.append(query)
         if len(queries) >= max_queries:
             break
-    return queries
+    in_band_targets = sum(1 for row in targets if not _bool(row.get("entry_band_wait")))
+    entry_band_wait_targets = sum(1 for row in targets if _bool(row.get("entry_band_wait")))
+    return {
+        "state": (
+            "in_band_historical_analogue_gaps"
+            if in_band_targets
+            else "entry_price_band_wait"
+            if entry_band_wait_targets
+            else "no_actionable_blocker_targets"
+        ),
+        "fresh_matches": fresh_matches,
+        "selected": selected,
+        "blocked": _num(scan.get("blocked")),
+        "blocked_by_state": scan.get("blocked_by_state", {}) if isinstance(scan.get("blocked_by_state"), dict) else {},
+        "targets": targets[:max_targets],
+        "collection_queries": queries,
+        "in_band_targets": in_band_targets,
+        "entry_band_wait_targets": entry_band_wait_targets,
+        "decision_use": "collection_only_not_trade_authorisation",
+        "trade_authorisation": "no_trade_until_governed_paper_signal_exists",
+    }
+
+
+def _paper_confirmation_blocker_queries(price_action_paper: dict[str, Any], *, max_queries: int = 4) -> list[str]:
+    """Collection-only queries for trusted paper-confirmation blockers."""
+    payload = _paper_confirmation_blocker_targets(price_action_paper, max_targets=max(8, max_queries))
+    queries = payload.get("collection_queries") if isinstance(payload, dict) else []
+    if not isinstance(queries, list):
+        return []
+    return [str(query or "").strip() for query in queries[:max_queries] if str(query or "").strip()]
 
 
 def _side_missing_analogue_targets(price_action_paper: dict[str, Any], *, max_targets: int = 6) -> dict[str, Any]:
@@ -1197,6 +1332,7 @@ def build_research_focus(cfg) -> dict[str, Any]:
     current_positive_targets = current_positive_payload.get("targets", [])
     current_positive_blocked_targets = current_positive_payload.get("blocked_targets", [])
     current_positive_queries = _current_positive_analogue_queries(current_positive_targets)
+    paper_confirmation_blocker_payload = _paper_confirmation_blocker_targets(price_action_paper)
     paper_confirmation_blocker_queries = _paper_confirmation_blocker_queries(price_action_paper)
     side_missing_payload = _side_missing_analogue_targets(price_action_paper)
     side_missing_queries = side_missing_payload.get("collection_queries", [])
@@ -1242,6 +1378,24 @@ def build_research_focus(cfg) -> dict[str, Any]:
                 "Do not waste scout capacity on these exact rows; collect lower-ask analogues instead."
                 + (f" Model blocker: {blocker_text}." if blocker_text else "")
             )
+        elif paper_confirmation_blocker_queries:
+            blocker_targets = paper_confirmation_blocker_payload.get("targets", [])
+            target = blocker_targets[0] if blocker_targets else {}
+            gate = str(target.get("historical_analogue_gate") or target.get("candidate_gate") or "unknown")
+            if paper_confirmation_blocker_payload.get("state") == "entry_price_band_wait":
+                next_action = (
+                    "Trusted paper-confirmation cohorts have fresh matches, but the available quotes are outside the "
+                    f"risk entry-price band; wait for in-band quotes and collect lower-ask analogues via "
+                    f"{', '.join(paper_confirmation_blocker_queries[:4])}."
+                    + (f" Model blocker: {blocker_text}." if blocker_text else "")
+                )
+            else:
+                next_action = (
+                    "Trusted paper-confirmation cohorts have fresh in-band matches, but the historical analogue gate "
+                    f"is still blocking ({gate}); prioritise {', '.join(paper_confirmation_blocker_queries[:4])} "
+                    "bid/ask collection for those exact price/spread/family buckets."
+                    + (f" Model blocker: {blocker_text}." if blocker_text else "")
+                )
         elif side_missing_queries:
             target = (side_missing_payload.get("targets") or [{}])[0]
             roi = _num(target.get("side_agnostic_validation_roi"))
@@ -1428,6 +1582,7 @@ def build_research_focus(cfg) -> dict[str, Any]:
             "near_miss_candidate_queries": near_miss_queries,
             "analogue_scan_needs_breadth": analogue_scan_needs_breadth,
         },
+        "price_action_paper_confirmation_blockers": paper_confirmation_blocker_payload,
         "price_action_side_missing_analogues": side_missing_payload,
         "price_action_current_positive_analogues": {
             "state": (

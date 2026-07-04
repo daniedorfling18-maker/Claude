@@ -281,6 +281,7 @@ async function load() {
     const researchFocus = data.research_focus || {};
     const currentPositiveAnalogues = researchFocus.price_action_current_positive_analogues || {};
     const sideMissingAnalogues = researchFocus.price_action_side_missing_analogues || {};
+    const paperConfirmationBlockers = researchFocus.price_action_paper_confirmation_blockers || {};
     const priceActionFeedback = data.price_action_feedback || {};
     const goalPlan = data.paper_profit_goal_plan || {};
     const priceActionGoal = goalPlan.price_action_goal_state || {};
@@ -1208,6 +1209,10 @@ async function load() {
       ["Paper-confirm hist gate", priceActionPaper.paper_confirmation_current_historical_state],
       ["Paper-confirm hist blocked", priceActionPaper.paper_confirmation_current_historical_blocked],
       ["Paper-confirm hist why", priceActionPaper.paper_confirmation_current_historical_blockers, v=>longText(v, 180)],
+      ["Proof blocker target state", paperConfirmationBlockers.state, v=>longText(v, 160)],
+      ["Proof blocker collect", paperConfirmationBlockers.collection_queries, v=>longText(v, 180)],
+      ["Proof blocker in-band", paperConfirmationBlockers.in_band_targets],
+      ["Proof blocker entry-band wait", paperConfirmationBlockers.entry_band_wait_targets],
       ["Paper-confirm current", priceActionPaper.paper_confirmation_current_candidates],
       ["Paper-confirm signals", priceActionPaper.paper_confirmation_signals],
       ["All-current analogue state", currentHistScan.state, v=>longText(v, 180)],
@@ -1288,6 +1293,20 @@ async function load() {
       ["Val +","historical_analogue_positive_rows"],
       ["Val ROI","historical_analogue_validation_roi", v=>fmtNum(Number(v) * 100, 2) + "%"],
       ["Bucket","historical_analogue_key", v=>longText(v, 220)]
+    ]) + `<div style="height:12px"></div><h3>Prioritized proof blocker targets</h3>` + table(paperConfirmationBlockers.targets || [], [
+      ["Use","decision_use", v=>longText(v, 180)],
+      ["Collect","recommended_collection_query"],
+      ["Gate","historical_analogue_gate", v=>longText(v, 160)],
+      ["Cohort","signal_cohort", v=>longText(v, 180)],
+      ["Family","family"],
+      ["Market","market_slug", v=>longText(v, 140)],
+      ["Outcome","outcome"],
+      ["Ask","latest_ask", v=>fmtNum(v,4)],
+      ["Spread","latest_spread", v=>fmtNum(v,4)],
+      ["Val rows","historical_analogue_validation_rows"],
+      ["Val +","historical_analogue_positive_rows"],
+      ["Val ROI","historical_analogue_validation_roi", v=>fmtNum(Number(v) * 100, 2) + "%"],
+      ["Next","next_action", v=>longText(v, 220)]
     ]) + `<div style="height:12px"></div><h3>Paper-confirmation analogue blockers</h3>` + table((priceActionPaper.paper_confirmation_current_historical_analogue || {}).blocked_preview || [], [
       ["Gate","historical_analogue_gate", v=>longText(v, 160)],
       ["Cohort","signal_cohort", v=>longText(v, 180)],

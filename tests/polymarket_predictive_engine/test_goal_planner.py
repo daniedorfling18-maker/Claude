@@ -55,8 +55,8 @@ def test_goal_plan_counts_forward_paper_repricing_without_waiting_for_settlement
     assert state["evidence_type"] == "buy_at_ask_sell_or_mark_at_bid"
     assert state["best_forward_paper_monthly_run_rate_usdc"] == approx(125.0)
     assert state["forward_paper_goal_gap_usdc"] == approx(0.0)
-    assert "price-change forward paper P&L" in payload["main_gap"]
-    assert "Do not scale yet" in payload["recommended_action"]
+    assert "active $100/month proof window still has no verified paper P&L" in payload["main_gap"]
+    assert "proof-verified entry/exit quote-supported round trips" in payload["recommended_action"]
 
 
 def test_goal_plan_uses_audited_pnl_when_raw_account_contains_quote_conflicts(tmp_path):

@@ -294,12 +294,21 @@ def build_goal_plan(cfg: EngineConfig) -> dict[str, Any]:
     positive_watchlist = _positive_actionable_rows(rows)
 
     price_action_gap = _price_action_gap(price_action_state)
+    route_only_repricing = bool(
+        price_action_gap
+        and not verified_evidence_ready
+        and decision_pnl <= 0
+        and not approved_signals
+        and price_action_state.get("state") in {"forward_paper_on_monthly_target", "forward_paper_positive_below_target"}
+    )
     if audited_available and (quote_conflicts > 0 or quote_unverified > 0) and decision_pnl < actual_pnl:
         main_gap = "raw paper P&L contains quote-conflicted/unverified rows; the $100 route must use audited quote-consistent P&L"
     elif proof_available and (proof_entry_missing > 0 or proof_exit_missing > 0):
         main_gap = "quote-consistent paper P&L still lacks full entry/exit quote support; the $100 route must use proof-verified buy/sell prices"
     elif decision_monthly_run_rate is not None and decision_monthly_run_rate >= target_monthly and not verified_evidence_ready:
         main_gap = "paper run-rate is mathematically on pace, but the $100 route is not yet verified by enough quote-consistent paper round trips"
+    elif route_only_repricing:
+        main_gap = "price-change route evidence is promising, but the active $100/month proof window still has no verified paper P&L"
     elif approved_signals:
         main_gap = "approved paper signals exist; broker should process them unless duplicate/risk/pause controls intervene"
     elif price_action_gap:
@@ -318,6 +327,8 @@ def build_goal_plan(cfg: EngineConfig) -> dict[str, Any]:
         if proof_available and (proof_entry_missing > 0 or proof_exit_missing > 0)
         else "Collect more quote-consistent paper exits before treating the run-rate as verified progress toward $100/month."
         if decision_monthly_run_rate is not None and decision_monthly_run_rate >= target_monthly and not verified_evidence_ready
+        else "Collect fresh executable paper-confirmation signals, then count only proof-verified entry/exit quote-supported round trips toward the $100/month target."
+        if route_only_repricing
         else _recommended_action(approved_signals, probationary, positive_watchlist, price_action_state)
     )
 

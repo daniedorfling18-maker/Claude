@@ -3984,6 +3984,45 @@ def _decision_useful_summary(
     current_candidates_blocked = bool(
         trade_signal_audit.get("verdict") == "trusted_edge_current_candidates_blocked_by_gate"
     )
+    train_threshold_selection = (
+        price_action_model.get("train_threshold_selection")
+        if isinstance(price_action_model.get("train_threshold_selection"), dict)
+        else {}
+    )
+    chosen_train_metrics = (
+        train_threshold_selection.get("chosen_train_metrics")
+        if isinstance(train_threshold_selection.get("chosen_train_metrics"), dict)
+        else {}
+    )
+    validation_selected_for_decision = (
+        price_action_model.get("validation_selected")
+        if isinstance(price_action_model.get("validation_selected"), dict)
+        else {}
+    )
+    validation_rank_for_decision = (
+        price_action_model.get("validation_rank_diagnostics")
+        if isinstance(price_action_model.get("validation_rank_diagnostics"), dict)
+        else {}
+    )
+    validation_blockers_for_decision = (
+        price_action_model.get("validation_blockers")
+        if isinstance(price_action_model.get("validation_blockers"), list)
+        else []
+    )
+    selected_validation_trades_for_decision = int(
+        safe_float(validation_selected_for_decision.get("selected_trades")) or 0
+    )
+    model_threshold_blocked = bool(
+        str(price_action_model.get("status") or "") == "trained"
+        and selected_validation_trades_for_decision <= 0
+        and (
+            chosen_train_metrics.get("train_threshold_pass") is False
+            or any(
+                "no probability threshold cleared the training split trade gates" in str(item)
+                for item in validation_blockers_for_decision
+            )
+        )
+    )
     trusted_missing_fresh = bool(
         trade_signal_audit.get("verdict") == "trusted_edge_missing_fresh_candidate"
         or (
@@ -4137,6 +4176,32 @@ def _decision_useful_summary(
             else "Monitor forward paper P&L by signal cohort and keep stake capped until evidence remains positive."
         )
         unlock_condition = "Forward paper fills must produce positive cohort evidence before any sizing increase."
+    elif model_threshold_blocked:
+        trade_decision = "LEARN: MODEL SELECTS NO TRADES"
+        decision_class = "warn"
+        headline = "The trained ML model has positives, but no validated tradable selection"
+        threshold_source = str(chosen_train_metrics.get("threshold_source") or "unknown threshold policy")
+        best_positive_rank = validation_rank_for_decision.get("best_positive_rank")
+        blocker = (
+            validation_blockers_for_decision[0]
+            if validation_blockers_for_decision
+            else "No probability/rank threshold produced an evidence-qualified validation trade set."
+        )
+        primary_blocker = (
+            f"{blocker}; selected validation trades={selected_validation_trades_for_decision}; "
+            f"train positives={price_action_model.get('train_positive_targets', '-')}; "
+            f"validation positives={price_action_model.get('validation_positive_targets', '-')}; "
+            f"best positive validation rank={best_positive_rank if best_positive_rank is not None else 'n/a'}; "
+            f"threshold source={threshold_source}."
+        )
+        next_action = str(
+            validation_rank_for_decision.get("next_action")
+            or "Use the missed-positive/ranked-candidate diagnostics to add anti-chase features and collect more matching bid/ask rows."
+        )
+        unlock_condition = (
+            "A train-derived probability/rank threshold must select at least the configured minimum validation trades "
+            "and pass positive P&L, ROI, win/payoff, CI, and drawdown gates."
+        )
     elif current_candidates_blocked:
         trade_decision = "WAIT: CANDIDATES BLOCKED"
         decision_class = "warn"
@@ -4259,12 +4324,8 @@ def _decision_useful_summary(
             }
         )
 
-    selected_model = price_action_model.get("validation_selected") if isinstance(price_action_model.get("validation_selected"), dict) else {}
-    rank_diagnostics = (
-        price_action_model.get("validation_rank_diagnostics")
-        if isinstance(price_action_model.get("validation_rank_diagnostics"), dict)
-        else {}
-    )
+    selected_model = validation_selected_for_decision
+    rank_diagnostics = validation_rank_for_decision
     selected_roi = safe_float(selected_model.get("selected_roi"))
     selected_profit_factor = safe_float(selected_model.get("selected_profit_factor"))
     selected_trades = safe_float(selected_model.get("selected_trades"))
@@ -4274,6 +4335,13 @@ def _decision_useful_summary(
         else {}
     )
     model_key_metric = (
+        (
+            f"selected 0 validation trades; train +{price_action_model.get('train_positive_targets', '-')}; "
+            f"validation +{price_action_model.get('validation_positive_targets', '-')}; "
+            f"best + rank {rank_diagnostics.get('best_positive_rank', 'n/a')}"
+        )
+        if model_threshold_blocked
+        else
         f"selected {int(selected_trades or 0)}; ROI {selected_roi * 100:.2f}%; PF {selected_profit_factor:.2f}"
         if selected_roi is not None and selected_profit_factor is not None
         else (
@@ -4518,6 +4586,12 @@ def _decision_useful_summary(
         "target_monthly_profit_usdc": target_monthly,
         "best_repricing_monthly_run_rate_usdc": best_repricing_run_rate,
         "best_forward_paper_monthly_run_rate_usdc": forward_paper_run_rate,
+        "model_threshold_blocked": model_threshold_blocked,
+        "model_selected_validation_trades": selected_validation_trades_for_decision,
+        "model_train_threshold_pass": chosen_train_metrics.get("train_threshold_pass"),
+        "model_train_threshold_source": chosen_train_metrics.get("threshold_source"),
+        "model_best_positive_validation_rank": validation_rank_for_decision.get("best_positive_rank"),
+        "model_validation_blockers": _compact_list(validation_blockers_for_decision, limit=6),
         "state_badges": state_badges,
         "decision_cards": decision_cards,
         "decision_questions": decision_questions,

@@ -1432,6 +1432,103 @@ def test_dashboard_reports_blocked_candidates_when_fresh_targets_exist(tmp_path)
     assert summary["evidence_lanes"][0]["state"] == "WAIT: CANDIDATES BLOCKED"
 
 
+def test_dashboard_prioritises_zero_selection_model_blocker_over_generic_candidate_block(tmp_path):
+    cfg = _config(tmp_path)
+    write_json(
+        cfg.output_root / "polymarket_price_action" / "price_action_model_summary.json",
+        {
+            "status": "trained",
+            "generated_at_utc": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+            "decision": "collect_more_bid_ask_price_action_model_evidence",
+            "promotion_ready": False,
+            "train_positive_targets": 228,
+            "validation_positive_targets": 108,
+            "validation_selected": {
+                "selected_trades": 0,
+                "selected_roi": 0.0,
+                "selected_profit_factor": 0.0,
+            },
+            "train_threshold_selection": {
+                "chosen_train_metrics": {
+                    "train_threshold_pass": False,
+                    "threshold_source": "configured_probability_grid",
+                }
+            },
+            "validation_blockers": [
+                "no probability threshold cleared the training split trade gates",
+                "selected validation trades 0 < 5",
+            ],
+            "validation_rank_diagnostics": {
+                "best_positive_rank": 220,
+                "next_action": "Treat selected validation losers as hard negatives; add anti-chase/cohort features before promotion.",
+            },
+        },
+    )
+    write_json(
+        cfg.output_root / "polymarket_price_action" / "price_action_paper_signal_summary.json",
+        {
+            "generated_at_utc": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+            "decision": "trusted_shadow_edge_waiting_for_fresh_executable_candidate",
+            "signals": 0,
+            "rejections": 473,
+            "paper_confirmation_candidates": 2,
+            "paper_confirmation_signals": 0,
+        },
+    )
+    write_json(
+        cfg.governance_root / "trade_signal_audit.json",
+        {
+            "verdict": "trusted_edge_current_candidates_blocked_by_gate",
+            "next_action": "Do not enter; fresh executable candidates exist but none has passed the governed signal thesis.",
+            "missing_confirmation_target_count": 0,
+            "missing_confirmation_queries": [],
+            "paper_confirmation_targets": [
+                {
+                    "cohort": "crypto_eth_updown_event",
+                    "recommended_collection_query": "eth updown",
+                    "current_candidate_rows": 12,
+                    "current_executable_rows": 3,
+                    "missing_fresh_candidate": False,
+                    "trusted_for_goal": True,
+                }
+            ],
+        },
+    )
+    write_json(
+        cfg.governance_root / "research_focus.json",
+        {
+            "generated_at_utc": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+            "collection_queries": ["solana updown", "world cup", "fed"],
+        },
+    )
+    write_json(
+        cfg.path.parent / "work" / "shadow_research_cycle_latest_status.json",
+        {
+            "status": "ok",
+            "started_at_utc": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+            "ended_at_utc": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+            "paper_trading_invoked": False,
+            "live_trading_invoked": False,
+        },
+    )
+
+    result = render_dashboard(cfg)
+
+    data = read_json(result["dashboard_data"])
+    summary = data["decision_useful_summary"]
+    model_lane = next(row for row in summary["evidence_lanes"] if row["lane"] == "Price-action ML")
+    assert summary["trade_decision"] == "LEARN: MODEL SELECTS NO TRADES"
+    assert summary["model_threshold_blocked"] is True
+    assert summary["model_selected_validation_trades"] == 0
+    assert summary["model_train_threshold_pass"] is False
+    assert summary["model_best_positive_validation_rank"] == 220
+    assert "selected validation trades=0" in summary["primary_blocker"]
+    assert "train positives=228" in summary["primary_blocker"]
+    assert summary["decision_cards"][0]["value"].startswith("No - LEARN: MODEL SELECTS NO TRADES")
+    assert "selected 0 validation trades" in model_lane["key_metric"]
+    assert "anti-chase" in model_lane["blocker_or_next"]
+
+
 def test_dashboard_decision_summary_prioritises_failed_cycle_over_stale_model(tmp_path):
     cfg = _config(tmp_path)
     write_json(

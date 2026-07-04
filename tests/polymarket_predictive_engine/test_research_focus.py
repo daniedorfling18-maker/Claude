@@ -376,6 +376,87 @@ def test_research_focus_suppresses_mature_negative_blockers_for_collection(tmp_p
     ]
 
 
+def test_research_focus_keeps_near_positive_breadth_updown_when_guard_caps_updown(tmp_path):
+    cfg = _cfg(tmp_path)
+    write_json(
+        cfg.output_root / "polymarket_price_action" / "price_action_model_summary.json",
+        {
+            "status": "trained",
+            "decision": "collect_more_bid_ask_price_action_model_evidence",
+            "promotion_ready": False,
+        },
+    )
+    write_json(
+        cfg.output_root / "polymarket_price_action" / "price_action_paper_signal_summary.json",
+        {
+            "status": "computed",
+            "historical_breadth_scan": {
+                "state": "positive_validation_pockets_not_robust",
+                "recommended_collection_queries": ["solana updown"],
+                "near_positive_buckets": 1,
+                "robust_positive_buckets": 0,
+            },
+            "paper_confirmation_current_historical_analogue": {
+                "state": "no_positive_historical_analogue_current_candidate",
+                "fresh_matches": 2,
+                "selected": 0,
+                "approved": 0,
+                "blocked": 2,
+                "blocked_preview": [
+                    {
+                        "token_id": "eth-immature-token",
+                        "market_slug": "ethereum-up-or-down-on-july-4-2026",
+                        "question": "Ethereum Up or Down on July 4?",
+                        "family": "crypto_eth_updown_daily",
+                        "signal_cohort": "crypto_eth_updown_event",
+                        "latest_bid": 0.49,
+                        "latest_ask": 0.50,
+                        "latest_spread": 0.01,
+                        "candidate_gate": "no_historical_analogue_rows",
+                        "historical_analogue_gate": "no_historical_analogue_rows",
+                        "historical_analogue_validation_rows": 0,
+                        "historical_analogue_positive_rows": 0,
+                        "historical_analogue_validation_roi": 0.0,
+                    },
+                    {
+                        "token_id": "btc-immature-token",
+                        "market_slug": "btc-updown-15m-1783174500",
+                        "question": "Bitcoin Up or Down?",
+                        "family": "crypto_btc_updown_15m",
+                        "signal_cohort": "exploratory_crypto_updown_live_model|crypto_btc_updown_15m|outcome=up",
+                        "latest_bid": 0.50,
+                        "latest_ask": 0.51,
+                        "latest_spread": 0.01,
+                        "candidate_gate": "no_historical_analogue_rows",
+                        "historical_analogue_gate": "no_historical_analogue_rows",
+                        "historical_analogue_validation_rows": 0,
+                        "historical_analogue_positive_rows": 0,
+                        "historical_analogue_validation_roi": 0.0,
+                    },
+                ],
+            },
+        },
+    )
+    write_json(
+        cfg.governance_root / "price_action_feedback.json",
+        {
+            "status": "ok",
+            "learning_state": "collect_more_positive_price_action_evidence",
+            "collection_queries": [],
+        },
+    )
+
+    payload = build_research_focus(cfg)
+
+    assert payload["raw_collection_queries"][:3] == ["solana updown", "eth updown", "btc updown"]
+    assert payload["collection_queries"][0] == "solana updown"
+    assert payload["collection_query_guard"]["updown_queries"] == ["solana updown"]
+    rejected = payload["collection_query_guard"]["rejected_queries"]
+    assert {"query": "eth updown", "family": "crypto_updown", "reason": "max_updown_queries"} in rejected
+    assert {"query": "btc updown", "family": "crypto_updown", "reason": "max_updown_queries"} in rejected
+    assert payload["proof_priority_queries"][:3] == ["solana updown", "eth updown", "btc updown"]
+
+
 def test_research_focus_broadens_to_near_miss_board_when_current_analogues_are_negative(tmp_path):
     cfg = _cfg(tmp_path)
     write_json(

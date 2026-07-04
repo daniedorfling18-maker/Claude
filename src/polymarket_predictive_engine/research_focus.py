@@ -1521,9 +1521,6 @@ def build_research_focus(cfg) -> dict[str, Any]:
         if query and query not in collection_queries:
             collection_queries.append(query)
     if model_needs_repricing_data:
-        for query in paper_confirmation_blocker_queries:
-            if query and query not in collection_queries:
-                collection_queries.append(query)
         for query in current_positive_queries:
             if query and query not in collection_queries:
                 collection_queries.append(query)
@@ -1531,6 +1528,9 @@ def build_research_focus(cfg) -> dict[str, Any]:
             if query and query not in collection_queries:
                 collection_queries.append(query)
         for query in historical_breadth_queries:
+            if query and query not in collection_queries:
+                collection_queries.append(query)
+        for query in paper_confirmation_blocker_queries:
             if query and query not in collection_queries:
                 collection_queries.append(query)
         if analogue_scan_needs_breadth:
@@ -1574,7 +1574,13 @@ def build_research_focus(cfg) -> dict[str, Any]:
         if str(query or "").strip()
     ]
     proof_priority_queries: list[str] = []
-    for query in [*paper_confirmation_blocker_queries, *quote_audit_priority_queries]:
+    for query in [
+        *current_positive_queries,
+        *side_missing_queries,
+        *historical_breadth_queries,
+        *paper_confirmation_blocker_queries,
+        *quote_audit_priority_queries,
+    ]:
         if query and query not in proof_priority_queries:
             proof_priority_queries.append(query)
     if proof_priority_queries:

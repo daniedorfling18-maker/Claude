@@ -865,3 +865,52 @@ def test_research_focus_routes_proof_snapshot_gaps_to_collection_only(tmp_path):
     assert "tennis" in payload["collection_queries"]
     assert payload["paper_trading_invoked"] is False
     assert payload["live_trading_invoked"] is False
+
+
+def test_research_focus_prioritises_quote_repair_before_updown_guard(tmp_path):
+    cfg = _cfg(tmp_path)
+    write_json(
+        cfg.governance_root / "price_action_feedback.json",
+        {
+            "status": "ok",
+            "collection_queries": ["xrp updown", "ethereum"],
+            "learning_state": "suppress_negative_price_action_and_broaden",
+        },
+    )
+    write_json(
+        cfg.output_root / "polymarket_price_action" / "paper_broker_round_trip_summary.json",
+        {
+            "baseline_quote_audit_by_cohort": [
+                {
+                    "signal_cohort": "exploratory_crypto_updown_live_model|crypto_btc_updown_daily|outcome=down",
+                    "family": "crypto_btc_updown_daily",
+                    "round_trips": 4,
+                    "quote_consistent_round_trips": 2,
+                    "quote_conflict_round_trips": 2,
+                    "quote_unverified_round_trips": 0,
+                    "quote_other_blocked_round_trips": 0,
+                    "proof_entry_snapshot_missing_round_trips": 2,
+                    "proof_exit_snapshot_missing_round_trips": 0,
+                    "raw_pnl_usdc": 5.0,
+                    "audited_pnl_usdc": 0.2,
+                    "excluded_from_audit_pnl_usdc": 4.8,
+                    "top_blocker_status": "quote_conflict",
+                    "top_blocker_count": 2,
+                }
+            ]
+        },
+    )
+
+    payload = build_research_focus(cfg)
+
+    assert payload["quote_audit_priority_queries"] == ["btc updown"]
+    assert payload["raw_collection_queries"][:3] == ["btc updown", "xrp updown", "ethereum"]
+    assert payload["collection_queries"][0] == "btc updown"
+    assert "xrp updown" not in payload["collection_queries"]
+    assert payload["collection_query_guard"]["rejected_queries"][0] == {
+        "query": "xrp updown",
+        "family": "crypto_updown",
+        "reason": "max_updown_queries",
+    }
+    assert payload["paper_trading_invoked"] is False
+    assert payload["live_trading_invoked"] is False

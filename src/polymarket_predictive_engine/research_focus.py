@@ -1321,6 +1321,20 @@ def build_research_focus(cfg) -> dict[str, Any]:
         feedback_queries = [str(query or "").strip() for query in price_action_feedback.get("collection_queries", [])]
         collection_queries = [query for query in feedback_queries if query] or ["bitcoin", "ethereum", "world cup", "tennis"]
 
+    quote_audit_priority_queries = [
+        str(query or "").strip()
+        for query in quote_audit_focus.get("collection_queries", []) or []
+        if str(query or "").strip()
+    ]
+    if quote_audit_priority_queries:
+        priority_seen: set[str] = set()
+        prioritized: list[str] = []
+        for query in quote_audit_priority_queries:
+            if query not in priority_seen:
+                prioritized.append(query)
+                priority_seen.add(query)
+        collection_queries = prioritized + [query for query in collection_queries if query not in priority_seen]
+
     raw_collection_queries = list(collection_queries)
     collection_queries, collection_query_guard = _guard_collection_queries(cfg, collection_queries)
 
@@ -1335,6 +1349,7 @@ def build_research_focus(cfg) -> dict[str, Any]:
         "raw_collection_queries": raw_collection_queries,
         "collection_queries": collection_queries,
         "collection_query_guard": collection_query_guard,
+        "quote_audit_priority_queries": quote_audit_priority_queries,
         "suppressed_queries": price_action_feedback.get("suppressed_queries", []),
         "price_action_model": {
             "status": price_action_model.get("status"),

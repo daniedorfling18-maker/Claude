@@ -18,11 +18,12 @@ on:
     - cron: '35 0,15,19,23 1 7 *'
     - cron: '35 18,22 2 7 *'
     - cron: '35 2,17,21 3 7 *'
-    # From 4 July onward use a half-hour watchdog across active match windows.
+    # From 4 July onward use a staggered watchdog across active match windows.
     # The script only spends odds credits when a locked-card/live fixture is due,
-    # so broad no-match runs are cheap but protect us from a single missed cron.
-    - cron: '5,35 14-23 4-19 7 *'
-    - cron: '5,35 0-3 5-20 7 *'
+    # so broad no-match runs are cheap. Staggering gives us resilience against
+    # GitHub scheduler delays/drops without clustering on the top of the hour.
+    - cron: '7,22,37,52 14-23 4-19 7 *'
+    - cron: '7,22,37,52 0-3 5-20 7 *'
 
 permissions:
   contents: read

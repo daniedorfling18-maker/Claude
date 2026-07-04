@@ -2289,6 +2289,7 @@ def test_dashboard_surfaces_strategy_v2_anchored_edge_progress(tmp_path):
             "total_mark_pnl_usdc": 1.1,
             "mark_roi": 0.0366666667,
             "price_action_review_candidates": 0,
+            "paper_confirmation_blocker_targets": 4,
         },
     )
     write_csv(
@@ -2420,6 +2421,7 @@ def test_dashboard_surfaces_strategy_v2_anchored_edge_progress(tmp_path):
     assert strategy_v2["round_trip_evidence_top_candidates"][0]["round_trip_status"] == "closed_take_profit"
     assert data["price_action_scout"]["decision"] == "collect_more_bid_ask_price_action_scout_evidence"
     assert data["price_action_scout"]["closed_trades"] == 1
+    assert data["price_action_scout"]["paper_confirmation_blocker_targets"] == 4
     assert data["price_action_scout"]["top_candidates"][0]["source"] == "profit_sprint_target"
     assert data["price_action_paper_signals"]["signals"] == 0
     assert data["price_action_paper_signals"]["rejections"] == 1

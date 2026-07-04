@@ -52,6 +52,160 @@ def _paper_round_trip_audit(cfg: EngineConfig) -> dict[str, Any]:
     return payload if isinstance(payload, dict) else {}
 
 
+def _baseline_path(cfg: EngineConfig) -> Any:
+    settings = _tracker_settings(cfg)
+    return cfg.governance_root / str(settings.get("baseline_file", "paper_profit_target_baseline.json"))
+
+
+def _tracker_path(cfg: EngineConfig) -> Any:
+    settings = _tracker_settings(cfg)
+    return cfg.governance_root / str(settings.get("tracker_file", "paper_profit_target_tracker.json"))
+
+
+def _baseline_history_path(cfg: EngineConfig) -> Any:
+    settings = _tracker_settings(cfg)
+    return cfg.governance_root / str(
+        settings.get("baseline_history_file", "paper_profit_target_baseline_history.json")
+    )
+
+
+def _round_trip_archive_snapshot(payload: dict[str, Any]) -> dict[str, Any]:
+    keys = [
+        "generated_at_utc",
+        "baseline_start_utc",
+        "closed_round_trips",
+        "positive_round_trips",
+        "negative_round_trips",
+        "realized_pnl_usdc",
+        "quote_conflict_round_trips",
+        "quote_unverified_round_trips",
+        "audited_realized_pnl_usdc",
+        "proof_verified_realized_pnl_usdc",
+        "baseline_closed_round_trips",
+        "baseline_positive_round_trips",
+        "baseline_realized_pnl_usdc",
+        "baseline_quote_conflict_round_trips",
+        "baseline_quote_unverified_round_trips",
+        "audited_baseline_closed_round_trips",
+        "audited_baseline_realized_pnl_usdc",
+        "baseline_proof_verified_closed_round_trips",
+        "baseline_proof_verified_realized_pnl_usdc",
+        "baseline_proof_entry_snapshot_missing_round_trips",
+        "baseline_proof_exit_snapshot_missing_round_trips",
+    ]
+    return {key: payload.get(key) for key in keys if key in payload}
+
+
+def reset_profit_target_baseline(
+    cfg: EngineConfig,
+    broker: dict[str, Any],
+    *,
+    reason: str,
+    operator: str = "operator",
+) -> dict[str, Any]:
+    """Start a fresh proof window without deleting paper fills or learning data.
+
+    The reset is intentionally explicit and auditable.  It archives the prior
+    baseline/tracker state, writes a new baseline at the operator reset time,
+    and leaves all historical broker, quote, and model artefacts untouched.
+    """
+    reset_reason = str(reason or "").strip()
+    if not reset_reason:
+        raise ValueError("reset reason is required")
+
+    current_equity = safe_float(broker.get("equity"))
+    current_cash = safe_float(broker.get("cash"))
+    current_exposure = safe_float(broker.get("total_exposure"))
+    if current_equity is None:
+        return {
+            "status": "missing_equity",
+            "generated_at_utc": now_utc(),
+            "reason": "broker summary did not include equity; proof baseline was not reset",
+            "historical_data_preserved": True,
+        }
+
+    baseline_path = _baseline_path(cfg)
+    tracker_path = _tracker_path(cfg)
+    history_path = _baseline_history_path(cfg)
+    previous_baseline = read_json(baseline_path, default={}) or {}
+    if not isinstance(previous_baseline, dict):
+        previous_baseline = {}
+    previous_tracker = read_json(tracker_path, default={}) or {}
+    if not isinstance(previous_tracker, dict):
+        previous_tracker = {}
+    round_trip_audit = _paper_round_trip_audit(cfg)
+    reset_at = now_utc()
+    previous_generation = int(
+        safe_float(previous_baseline.get("baseline_generation"))
+        or (1 if previous_baseline else 0)
+    )
+    baseline_generation = previous_generation + 1
+    new_baseline = {
+        "created_at_utc": reset_at,
+        "baseline_equity_usdc": current_equity,
+        "baseline_cash_usdc": current_cash,
+        "baseline_total_exposure_usdc": current_exposure,
+        "baseline_generation": baseline_generation,
+        "reset_at_utc": reset_at,
+        "reset_operator": str(operator or "operator").strip() or "operator",
+        "reset_reason": reset_reason,
+        "broker_generated_at_utc": str(broker.get("generated_at_utc") or ""),
+        "historical_data_preserved": True,
+        "previous_baseline_created_at_utc": previous_baseline.get("created_at_utc"),
+        "note": (
+            "Operator reset of the active paper-profit proof window. Historical fills, "
+            "round trips, quotes, model evidence, and learning data are preserved; only "
+            "post-reset closed round trips count toward active $100/month proof."
+        ),
+    }
+
+    history = read_json(history_path, default=[]) or []
+    if not isinstance(history, list):
+        history = []
+    history.append(
+        {
+            "archived_at_utc": reset_at,
+            "reset_reason": reset_reason,
+            "reset_operator": new_baseline["reset_operator"],
+            "new_baseline": new_baseline,
+            "previous_baseline": previous_baseline,
+            "previous_tracker": {
+                key: previous_tracker.get(key)
+                for key in [
+                    "generated_at_utc",
+                    "status",
+                    "actual_pnl_since_baseline_usdc",
+                    "decision_pnl_usdc",
+                    "monthly_run_rate_usdc",
+                    "profit_target_proof_status",
+                    "profit_target_proof_blockers",
+                    "verified_evidence_ready",
+                ]
+                if key in previous_tracker
+            },
+            "previous_round_trip_summary": _round_trip_archive_snapshot(round_trip_audit),
+            "historical_data_preserved": True,
+        }
+    )
+    write_json(history_path, history)
+    write_json(baseline_path, new_baseline)
+    return {
+        "status": "reset",
+        "generated_at_utc": reset_at,
+        "baseline_file": str(baseline_path),
+        "baseline_history_file": str(history_path),
+        "baseline": new_baseline,
+        "previous_baseline_archived": bool(previous_baseline),
+        "history_entries": len(history),
+        "historical_data_preserved": True,
+        "requires_round_trip_refresh": True,
+        "notes": [
+            "This reset does not delete or rewrite paper fills, quote snapshots, round trips, or model evidence.",
+            "Rebuild paper round-trip evidence after the reset so baseline_* proof fields use the new window.",
+        ],
+    }
+
+
 def write_profit_target_tracker(cfg: EngineConfig, broker: dict[str, Any]) -> dict[str, Any]:
     """Track actual paper P&L against the $100/month goal from a clean baseline.
 
@@ -69,8 +223,8 @@ def write_profit_target_tracker(cfg: EngineConfig, broker: dict[str, Any]) -> di
     )
     minimum_hours = float(settings.get("minimum_tracking_hours_for_on_pace", 24.0))
     minimum_audited_round_trips = int(settings.get("minimum_audited_round_trips_for_on_pace", 5))
-    baseline_path = cfg.governance_root / str(settings.get("baseline_file", "paper_profit_target_baseline.json"))
-    tracker_path = cfg.governance_root / str(settings.get("tracker_file", "paper_profit_target_tracker.json"))
+    baseline_path = _baseline_path(cfg)
+    tracker_path = _tracker_path(cfg)
 
     current_equity = safe_float(broker.get("equity"))
     current_cash = safe_float(broker.get("cash"))
@@ -193,6 +347,11 @@ def write_profit_target_tracker(cfg: EngineConfig, broker: dict[str, Any]) -> di
         "generated_at_utc": now_utc(),
         "target_monthly_profit_usdc": target,
         "baseline": baseline,
+        "profit_target_baseline_generation": baseline.get("baseline_generation"),
+        "profit_target_baseline_reset_at_utc": baseline.get("reset_at_utc"),
+        "profit_target_baseline_reset_reason": baseline.get("reset_reason"),
+        "profit_target_baseline_reset_operator": baseline.get("reset_operator"),
+        "historical_profit_data_preserved": bool(baseline.get("historical_data_preserved")),
         "current": {
             "timestamp_utc": timestamp,
             "equity_usdc": current_equity,

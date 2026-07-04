@@ -762,7 +762,11 @@ async function load() {
       ["All-time unverified quote rows", allTimeQuoteUnverified],
       ["Tracking hours", target.elapsed_hours, v=>fmtNum(v,2)],
       ["Raw monthly run-rate (audit-only)", rawRunRate, v=>fmtUsd(v) + auditedRawSuffix()],
-      ["Baseline equity", target.baseline?.baseline_equity_usdc, fmtUsd]
+      ["Baseline equity", target.baseline?.baseline_equity_usdc, fmtUsd],
+      ["Proof baseline generation", target.profit_target_baseline_generation ?? target.baseline?.baseline_generation ?? "-"],
+      ["Proof reset at", target.profit_target_baseline_reset_at_utc || target.baseline?.reset_at_utc || "-"],
+      ["Proof reset reason", target.profit_target_baseline_reset_reason || target.baseline?.reset_reason || "-", v=>longText(v, 220)],
+      ["History preserved", target.historical_profit_data_preserved || target.baseline?.historical_data_preserved ? "yes" : "no"]
     ]) + titledTable("Quote-audit blockers by cohort", quoteAuditCohorts, [
       ["Cohort","signal_cohort", v=>longText(v, 180)],
       ["Trips","round_trips"],

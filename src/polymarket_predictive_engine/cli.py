@@ -16,6 +16,7 @@ from .collection_coverage import build_collection_coverage
 from .crypto_fundamental import build_crypto_fundamental
 from .crypto_targets import build_crypto_targets
 from .crypto_updown_labels import build_crypto_updown_proxy_labels
+from .dashboard import render_dashboard
 from .data_inventory import inventory
 from .data_quality import data_quality
 from .dutch_arb_monitor import run_dutch_arb_monitor
@@ -44,6 +45,7 @@ from .models.skill_model import train_skill_model
 from .overnight_collection import run_collection_only_overnight
 from .paper_cycle import run_paper_cycle
 from .paper_edge_simulator import simulate_paper_edge
+from .paper_round_trip import build_paper_round_trip_evidence
 from .paper_session import run_paper_session
 from .pipeline_health import pipeline_health
 from .pipeline_inventory import pipeline_inventory
@@ -54,6 +56,7 @@ from .price_action_model import train_price_action_model
 from .price_action_scout import build_price_action_scout
 from .price_action_signals import build_price_action_paper_signals
 from .price_history_collector import collect_price_history
+from .profit_target import reset_profit_target_baseline, write_profit_target_tracker
 from .profit_sprint import build_profit_sprint
 from .promotion_review import build_promotion_review
 from .readiness import paper_live_promotion_gate, paper_trade_readiness, readiness_decision
@@ -75,6 +78,7 @@ from .validation_report import build_validation_report
 from .websocket_collector import collect_websocket
 from .websocket_normaliser import normalize_websocket_file
 from .websocket_resolution_collector import collect_websocket_resolutions
+from .utils import read_json, write_json
 
 
 COMMANDS = [
@@ -113,6 +117,7 @@ COMMANDS = [
     "refresh-governance",
     "promotion-review",
     "goal-plan",
+    "reset-profit-baseline",
     "profit-sprint",
     "price-action-feedback",
     "price-action-microstructure",
@@ -218,6 +223,13 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="refresh-governance: do not rewrite dashboard_data.json/index.html.",
     )
+    parser.add_argument("--reset-reason", default=None, help="reset-profit-baseline: required audit reason")
+    parser.add_argument("--reset-operator", default="codex", help="reset-profit-baseline: operator label for audit history")
+    parser.add_argument(
+        "--skip-proof-audit-refresh",
+        action="store_true",
+        help="reset-profit-baseline: do not immediately rebuild paper round-trip proof evidence.",
+    )
     return parser
 
 
@@ -322,6 +334,42 @@ def main(argv: list[str] | None = None) -> int:
             _print(build_promotion_review(cfg))
         elif args.command == "goal-plan":
             _print(build_goal_plan(cfg))
+        elif args.command == "reset-profit-baseline":
+            broker = read_json(cfg.output_root / "polymarket_portfolio" / "paper_trading_summary.json", default={}) or {}
+            if not isinstance(broker, dict):
+                broker = {}
+            if not args.reset_reason:
+                raise ValueError("--reset-reason is required for reset-profit-baseline")
+            reset = reset_profit_target_baseline(
+                cfg,
+                broker,
+                reason=args.reset_reason,
+                operator=args.reset_operator,
+            )
+            proof_audit: dict[str, object] = {"status": "skipped"}
+            if reset.get("status") == "reset" and not args.skip_proof_audit_refresh:
+                try:
+                    proof_audit = build_paper_round_trip_evidence(cfg)
+                except Exception as exc:  # noqa: BLE001 - reset audit should report refresh failure without hiding reset
+                    proof_audit = {"status": "error", "error": f"{type(exc).__name__}: {exc}"}
+            tracker = write_profit_target_tracker(cfg, broker) if reset.get("status") == "reset" else {}
+            dashboard = {"status": "skipped"}
+            if reset.get("status") == "reset" and not args.skip_dashboard:
+                try:
+                    dashboard = render_dashboard(cfg)
+                except Exception as exc:  # noqa: BLE001 - surface dashboard failures in the command result
+                    dashboard = {"status": "error", "error": f"{type(exc).__name__}: {exc}"}
+            payload = {
+                "status": reset.get("status"),
+                "reset": reset,
+                "paper_round_trip_refresh": proof_audit,
+                "actual_profit_target": tracker,
+                "dashboard": dashboard,
+                "paper_trading_invoked": False,
+                "live_trading_invoked": False,
+            }
+            write_json(cfg.governance_root / "paper_profit_target_baseline_reset.json", payload)
+            _print(payload)
         elif args.command == "profit-sprint":
             _print(build_profit_sprint(cfg))
         elif args.command == "price-action-feedback":

@@ -10,7 +10,7 @@ from pytest import approx
 from polymarket_predictive_engine.config import load_config
 from polymarket_predictive_engine.dashboard import render_dashboard
 from polymarket_predictive_engine.execution.paper import paper_trade_report
-from polymarket_predictive_engine.profit_target import write_profit_target_tracker
+from polymarket_predictive_engine.profit_target import reset_profit_target_baseline, write_profit_target_tracker
 from polymarket_predictive_engine.utils import read_json, write_csv, write_json
 
 
@@ -176,6 +176,104 @@ def test_profit_target_uses_baseline_quote_audit_window_not_all_history(tmp_path
     assert payload["all_time_quote_conflict_round_trips"] == 7
     assert payload["all_time_quote_unverified_round_trips"] == 2
     assert payload["on_pace_by_decision_pnl"] is True
+
+
+def test_profit_target_reset_archives_history_and_restarts_active_proof_window(tmp_path):
+    cfg = _config(tmp_path)
+    write_json(
+        cfg.governance_root / "paper_profit_target_baseline.json",
+        {
+            "created_at_utc": (datetime.now(timezone.utc) - timedelta(days=3)).strftime("%Y-%m-%dT%H:%M:%SZ"),
+            "baseline_equity_usdc": 1000,
+            "baseline_cash_usdc": 1000,
+            "baseline_total_exposure_usdc": 0,
+        },
+    )
+    write_json(
+        cfg.governance_root / "paper_profit_target_tracker.json",
+        {
+            "status": "unverified_paper_run_rate",
+            "decision_pnl_usdc": -0.19,
+            "profit_target_proof_status": "unverified_paper_run_rate",
+            "profit_target_proof_blockers": ["quote_conflict_round_trips_5"],
+            "verified_evidence_ready": False,
+        },
+    )
+    write_json(
+        cfg.output_root / "polymarket_price_action" / "paper_broker_round_trip_summary.json",
+        {
+            "generated_at_utc": "2026-07-04T09:00:00Z",
+            "closed_round_trips": 9,
+            "quote_conflict_round_trips": 5,
+            "quote_unverified_round_trips": 2,
+            "baseline_closed_round_trips": 7,
+            "baseline_quote_conflict_round_trips": 5,
+            "baseline_quote_unverified_round_trips": 2,
+            "baseline_proof_verified_closed_round_trips": 0,
+            "baseline_proof_verified_realized_pnl_usdc": 0,
+        },
+    )
+
+    result = reset_profit_target_baseline(
+        cfg,
+        {
+            "equity": 1001.25,
+            "cash": 991.25,
+            "total_exposure": 10.0,
+            "generated_at_utc": "2026-07-04T09:05:00Z",
+        },
+        reason="quote-capture instrumentation fixed",
+        operator="codex-test",
+    )
+
+    assert result["status"] == "reset"
+    assert result["historical_data_preserved"] is True
+    baseline = read_json(cfg.governance_root / "paper_profit_target_baseline.json")
+    assert baseline["baseline_equity_usdc"] == approx(1001.25)
+    assert baseline["baseline_generation"] == 2
+    assert baseline["reset_reason"] == "quote-capture instrumentation fixed"
+    assert baseline["historical_data_preserved"] is True
+    history = read_json(cfg.governance_root / "paper_profit_target_baseline_history.json")
+    assert len(history) == 1
+    assert history[0]["previous_baseline"]["baseline_equity_usdc"] == 1000
+    assert history[0]["previous_round_trip_summary"]["quote_conflict_round_trips"] == 5
+    assert history[0]["previous_tracker"]["profit_target_proof_blockers"] == ["quote_conflict_round_trips_5"]
+
+    write_json(
+        cfg.output_root / "polymarket_price_action" / "paper_broker_round_trip_summary.json",
+        {
+            "generated_at_utc": "2026-07-04T09:06:00Z",
+            "baseline_start_utc": baseline["created_at_utc"],
+            "closed_round_trips": 9,
+            "quote_conflict_round_trips": 5,
+            "quote_unverified_round_trips": 2,
+            "baseline_closed_round_trips": 0,
+            "baseline_quote_conflict_round_trips": 0,
+            "baseline_quote_unverified_round_trips": 0,
+            "baseline_proof_verified_closed_round_trips": 0,
+            "baseline_proof_verified_realized_pnl_usdc": 0,
+            "baseline_proof_entry_snapshot_missing_round_trips": 0,
+            "baseline_proof_exit_snapshot_missing_round_trips": 0,
+        },
+    )
+    tracker = write_profit_target_tracker(
+        cfg,
+        {
+            "equity": 1001.25,
+            "cash": 991.25,
+            "total_exposure": 10.0,
+            "generated_at_utc": baseline["created_at_utc"],
+        },
+    )
+
+    assert tracker["profit_target_baseline_generation"] == 2
+    assert tracker["profit_target_baseline_reset_reason"] == "quote-capture instrumentation fixed"
+    assert tracker["quote_conflict_round_trips"] == 0
+    assert tracker["quote_unverified_round_trips"] == 0
+    assert tracker["all_time_quote_conflict_round_trips"] == 5
+    assert tracker["all_time_quote_unverified_round_trips"] == 2
+    assert "quote_conflict_round_trips_5" not in tracker["profit_target_proof_blockers"]
+    assert "quote_unverified_round_trips_2" not in tracker["profit_target_proof_blockers"]
 
 
 def test_profit_target_prefers_proof_verified_entry_exit_pnl_when_available(tmp_path):

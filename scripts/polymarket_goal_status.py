@@ -7,6 +7,7 @@ the main package so it can be used when the machine is under memory pressure.
 from __future__ import annotations
 
 import json
+import os
 import socket
 from datetime import datetime, timezone
 from pathlib import Path
@@ -16,6 +17,7 @@ from typing import Any
 ROOT = Path(__file__).resolve().parents[1]
 DASHBOARD = ROOT / "outputs" / "polymarket_dashboard"
 GOVERNANCE = ROOT / "outputs" / "polymarket_model_governance"
+PRICE_ACTION = ROOT / "outputs" / "polymarket_price_action"
 PORTFOLIO = ROOT / "outputs" / "polymarket_portfolio"
 STRATEGY_V2_STATUS = ROOT / "work" / "strategy_v2_cycle_latest_status.json"
 EXCLUDED_COHORT_MARKERS = {
@@ -26,6 +28,24 @@ EXCLUDED_COHORT_MARKERS = {
     "crypto_updown_5m": "excluded_fast_crypto_5m",
     "quarantine_retest": "quarantine_retest_only",
 }
+
+
+def env_value(name: str) -> str:
+    direct = os.getenv(name)
+    if direct:
+        return direct.strip().strip('"').strip("'")
+    env_path = ROOT / ".env"
+    try:
+        lines = env_path.read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return ""
+    prefix = f"{name}="
+    for line in lines:
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#") or not stripped.startswith(prefix):
+            continue
+        return stripped.split("=", 1)[1].strip().strip('"').strip("'")
+    return ""
 
 
 def read_json(path: Path) -> dict[str, Any]:
@@ -57,6 +77,25 @@ def local_ip_hint() -> str:
             return sock.getsockname()[0]
     except Exception:
         return "YOUR_COMPUTER_IP"
+
+
+def dashboard_url_hint() -> str:
+    explicit = (
+        env_value("PM_DASHBOARD_PUBLIC_URL")
+        or env_value("POLYMARKET_DASHBOARD_PUBLIC_URL")
+        or env_value("DASHBOARD_PUBLIC_URL")
+    )
+    if explicit:
+        return explicit.rstrip("/") + "/"
+    host = (
+        env_value("PM_VPS_HOST")
+        or env_value("POLYMARKET_DASHBOARD_PUBLIC_HOST")
+        or env_value("VPS_PUBLIC_IP")
+    )
+    port = env_value("POLYMARKET_DASHBOARD_PORT") or env_value("DASHBOARD_PORT") or "8765"
+    if host:
+        return f"http://{host}:{port}/"
+    return f"http://{local_ip_hint()}:{port}/"
 
 
 def first_dict(*values: Any) -> dict[str, Any]:
@@ -198,11 +237,15 @@ def main() -> int:
         read_json(GOVERNANCE / "paper_profit_goal_plan.json"),
     )
     price_action_goal = first_dict(goal_plan.get("price_action_goal_state"))
+    price_action_paper = first_dict(
+        dashboard_data.get("price_action_paper_signals"),
+        read_json(PRICE_ACTION / "price_action_paper_signal_summary.json"),
+    )
 
     print("Polymarket paper bot goal status")
     print(f"Dashboard file: {DASHBOARD / 'index.html'}")
     print(f"Computer URL:   http://127.0.0.1:8765/")
-    print(f"Phone URL:      http://{local_ip_hint()}:8765/")
+    print(f"Phone URL:      {dashboard_url_hint()}")
     print(f"Data updated:   {dashboard_data.get('generated_at_utc') or 'n/a'}")
     print(f"Loop heartbeat: {heartbeat.get('status') or 'n/a'}")
     if dashboard_data.get("evidence_freshness"):
@@ -261,7 +304,19 @@ def main() -> int:
         print(f"  Repricing run-rate:{money(price_action_goal.get('best_repricing_monthly_run_rate_usdc'))}")
         print(f"  Repricing gap:     {money(price_action_goal.get('repricing_goal_gap_usdc'))}")
         print(f"  Forward paper rate:{money(price_action_goal.get('best_forward_paper_monthly_run_rate_usdc'))}")
-        print(f"  Paper-confirm:     {price_action_goal.get('paper_confirmation_candidates', 'n/a')} candidates")
+        print(
+            "  Paper-confirm now: "
+            f"{price_action_paper.get('paper_confirmation_signals', 0)} executable signals; "
+            f"{price_action_paper.get('paper_confirmation_current_candidates', 0)} current matches"
+        )
+        print(f"  Paper-confirm backlog: {price_action_goal.get('paper_confirmation_candidates', 'n/a')} historical candidates")
+        current_gate = first_dict(price_action_paper.get("paper_confirmation_current_historical_analogue"))
+        if current_gate:
+            print(f"  Current hist gate: {current_gate.get('state') or 'n/a'}")
+            blockers = current_gate.get("blocked_by_state")
+            if isinstance(blockers, dict) and blockers:
+                blocker_text = ", ".join(f"{key}={value}" for key, value in sorted(blockers.items())[:4])
+                print(f"  Current blockers:  {blocker_text}")
         if goal_plan.get("main_gap"):
             print(f"  Main gap:          {goal_plan.get('main_gap')}")
         if goal_plan.get("recommended_action"):

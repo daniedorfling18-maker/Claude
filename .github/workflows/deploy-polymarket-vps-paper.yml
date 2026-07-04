@@ -130,7 +130,7 @@ jobs:
             -o UserKnownHostsFile="$RUNNER_TEMP/ssh/known_hosts" \
             -p "$PM_VPS_PORT" \
             "$PM_VPS_USER@$PM_VPS_HOST" \
-            "PM_VPS_REPO_DIR='$PM_VPS_REPO_DIR' GITHUB_REPOSITORY='$GITHUB_REPOSITORY' GITHUB_SHA='$GITHUB_SHA' GITHUB_RUN_ID='$GITHUB_RUN_ID' bash -s" <<'REMOTE'
+            "PM_VPS_HOST='$PM_VPS_HOST' PM_VPS_REPO_DIR='$PM_VPS_REPO_DIR' GITHUB_REPOSITORY='$GITHUB_REPOSITORY' GITHUB_SHA='$GITHUB_SHA' GITHUB_RUN_ID='$GITHUB_RUN_ID' bash -s" <<'REMOTE'
           set -euo pipefail
 
           REPO_DIR="${PM_VPS_REPO_DIR/#\~/$HOME}"
@@ -194,6 +194,37 @@ jobs:
 
           env_path.write_text("\n".join(rendered) + "\n", encoding="utf-8")
           env_path.chmod(0o600)
+          PY
+
+          python3 - <<'PY'
+          import os
+          from pathlib import Path
+
+          env_path = Path(".env")
+          host = os.environ.get("PM_VPS_HOST", "").strip()
+          if host:
+              lines = env_path.read_text(encoding="utf-8").splitlines()
+              values: dict[str, str] = {}
+              for line in lines:
+                  stripped = line.strip()
+                  if not stripped or stripped.startswith("#") or "=" not in stripped:
+                      continue
+                  key, value = stripped.split("=", 1)
+                  values[key] = value.strip().strip('"').strip("'")
+              port = values.get("POLYMARKET_DASHBOARD_PORT") or "8765"
+              public_url = f"http://{host}:{port}/"
+              rendered: list[str] = []
+              wrote = False
+              for line in lines:
+                  if line.startswith("PM_DASHBOARD_PUBLIC_URL="):
+                      rendered.append(f"PM_DASHBOARD_PUBLIC_URL={public_url}")
+                      wrote = True
+                  else:
+                      rendered.append(line)
+              if not wrote:
+                  rendered.append(f"PM_DASHBOARD_PUBLIC_URL={public_url}")
+              env_path.write_text("\n".join(rendered) + "\n", encoding="utf-8")
+              env_path.chmod(0o600)
           PY
           rm -f "$ENV_PATCH"
 

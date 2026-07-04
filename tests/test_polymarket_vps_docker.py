@@ -90,6 +90,14 @@ def test_vps_deploy_workflow_requires_current_dashboard_schema():
     assert "sharp_sports_funnel" in text
 
 
+def test_vps_deploy_workflow_writes_public_dashboard_url():
+    text = (ROOT / ".github" / "workflows" / "deploy-polymarket-vps-paper.yml").read_text(encoding="utf-8")
+
+    assert "PM_VPS_HOST='$PM_VPS_HOST'" in text
+    assert "PM_DASHBOARD_PUBLIC_URL=" in text
+    assert "public_url = f\"http://{host}:{port}/\"" in text
+
+
 def test_vps_deploy_workflow_validates_private_key_secret():
     text = (ROOT / ".github" / "workflows" / "deploy-polymarket-vps-paper.yml").read_text(encoding="utf-8")
 

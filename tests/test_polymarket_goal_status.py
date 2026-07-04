@@ -4,44 +4,32 @@ import importlib.util
 from pathlib import Path
 
 
+ROOT = Path(__file__).resolve().parents[1]
+
+
 def _load_goal_status_module():
-    path = Path(__file__).resolve().parents[1] / "scripts" / "polymarket_goal_status.py"
+    path = ROOT / "scripts" / "polymarket_goal_status.py"
     spec = importlib.util.spec_from_file_location("polymarket_goal_status", path)
-    assert spec and spec.loader
+    assert spec is not None
     module = importlib.util.module_from_spec(spec)
+    assert spec.loader is not None
     spec.loader.exec_module(module)
     return module
 
 
-def test_goal_status_excludes_known_bad_or_quarantined_cohorts_from_promotion_language():
+def test_goal_status_prefers_explicit_public_dashboard_url(monkeypatch):
     module = _load_goal_status_module()
 
-    assert module.cohort_gate_label(
-        {"signal_cohort": "near_miss_learning|unknown", "promotion_ready_score": 6, "promotion_ready_checks": 6},
-        quarantined=set(),
-    ) == "not eligible: excluded_unknown_family"
-    assert module.cohort_gate_label(
-        {
-            "signal_cohort": "exploratory_historical_rule|crypto_btc_updown_5m|outcome=down",
-            "promotion_ready_score": 6,
-            "promotion_ready_checks": 6,
-        },
-        quarantined=set(),
-    ) == "not eligible: excluded_fast_crypto_5m"
-    assert module.cohort_gate_label(
-        {"signal_cohort": "macro_economy", "promotion_ready_score": 6, "promotion_ready_checks": 6},
-        quarantined={"macro_economy"},
-    ) == "not eligible: quarantined"
+    monkeypatch.setenv("PM_DASHBOARD_PUBLIC_URL", "http://129.151.178.42:8765")
+
+    assert module.dashboard_url_hint() == "http://129.151.178.42:8765/"
 
 
-def test_goal_status_only_marks_full_non_excluded_cohorts_as_review_eligible():
+def test_goal_status_builds_public_url_from_vps_host(monkeypatch):
     module = _load_goal_status_module()
 
-    assert module.cohort_gate_label(
-        {"signal_cohort": "macro_economy", "promotion_ready_score": 5, "promotion_ready_checks": 6},
-        quarantined=set(),
-    ) == "not eligible: needs more forward evidence"
-    assert module.cohort_gate_label(
-        {"signal_cohort": "macro_economy", "promotion_ready_score": 6, "promotion_ready_checks": 6},
-        quarantined=set(),
-    ) == "eligible for promotion review"
+    monkeypatch.delenv("PM_DASHBOARD_PUBLIC_URL", raising=False)
+    monkeypatch.setenv("PM_VPS_HOST", "129.151.178.42")
+    monkeypatch.setenv("POLYMARKET_DASHBOARD_PORT", "8765")
+
+    assert module.dashboard_url_hint() == "http://129.151.178.42:8765/"

@@ -24,6 +24,7 @@ import json
 from pathlib import Path
 import re
 from typing import Any, Iterable
+import unicodedata
 
 import requests
 
@@ -133,12 +134,21 @@ def devig(raw: list[float], method: str = "multiplicative") -> list[float]:
 
 # --------------------------------------------------------------------------- token resolution
 def _match_key(group: str, outcome: str) -> str:
-    return f"{normalize_slug(group)}::{normalize_slug(outcome)}"
+    return f"{_ascii_slug(group)}::{_ascii_slug(outcome)}"
 
 
 def _team_key(value: object) -> str:
-    key = re.sub(r"[^a-z0-9]+", "", str(value or "").lower())
+    folded = _ascii_fold(value)
+    key = re.sub(r"[^a-z0-9]+", "", folded.lower())
     return TEAM_ALIASES.get(key, key)
+
+
+def _ascii_fold(value: object) -> str:
+    return unicodedata.normalize("NFKD", str(value or "")).encode("ascii", "ignore").decode("ascii")
+
+
+def _ascii_slug(value: object) -> str:
+    return normalize_slug(_ascii_fold(value))
 
 
 def _is_confederation_token(value: object) -> bool:
@@ -153,7 +163,7 @@ def _team_from_worldcup_question(value: object) -> str:
 
 
 def _match_event_slug(home: object, away: object) -> str:
-    return normalize_slug(f"{home} vs {away}")
+    return _ascii_slug(f"{home} vs {away}")
 
 
 def _match_subject_from_question(value: object) -> tuple[str, str] | None:

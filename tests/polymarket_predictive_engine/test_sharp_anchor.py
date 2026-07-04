@@ -6,6 +6,7 @@ from pytest import approx
 from polymarket_predictive_engine.config import EngineConfig
 from polymarket_predictive_engine.sharp_anchor import (
     _h2h_public_search_queries,
+    _team_key,
     build_sharp_anchor,
     devig_multiplicative,
     devig_power,
@@ -647,6 +648,12 @@ def test_h2h_public_search_queries_are_balanced_across_sports():
     ]
 
 
+def test_team_key_normalises_accents_and_aliases():
+    assert _team_key("Benoît Saint Denis") == _team_key("Benoit Saint Denis")
+    assert _team_key("Côte d'Ivoire") == "ivorycoast"
+    assert _team_key("United States") == _team_key("USA")
+
+
 def test_build_sharp_anchor_public_search_budget_reaches_later_sports(tmp_path, monkeypatch):
     cfg = EngineConfig(
         raw={
@@ -782,6 +789,70 @@ def test_build_sharp_anchor_public_search_budget_reaches_later_sports(tmp_path, 
     assert baseball["fundamental_rows"] == 2
     out = _read(tmp_path / "outputs" / "polymarket_training" / "sharp_fundamental_probabilities.csv")
     assert {row["token_id"] for row in out} == {"YANKEES_YES", "TWINS_YES", "FIGHTER_A_YES", "FIGHTER_B_YES"}
+
+
+def test_build_sharp_anchor_maps_accented_public_fighter_names(tmp_path, monkeypatch):
+    cfg = EngineConfig(
+        raw={
+            "paths": {"output_root": str(tmp_path / "outputs")},
+            "sharp_anchor": {
+                "input_path": str(tmp_path / "sharp.csv"),
+                "token_map_path": str(tmp_path / "empty_map.csv"),
+                "match_public_search_enabled": True,
+                "match_public_search_max_queries": 1,
+            },
+        },
+        path=tmp_path / "cfg.yaml",
+    )
+    _write(
+        tmp_path / "sharp.csv",
+        [
+            {
+                "market_slug": "Paddy Pimblett vs Benoit Saint Denis",
+                "outcome": "Paddy Pimblett",
+                "decimal_odds": "1.90",
+                "market_key": "h2h",
+                "sport": "mma_mixed_martial_arts",
+            },
+            {
+                "market_slug": "Paddy Pimblett vs Benoit Saint Denis",
+                "outcome": "Benoit Saint Denis",
+                "decimal_odds": "1.95",
+                "market_key": "h2h",
+                "sport": "mma_mixed_martial_arts",
+            },
+        ],
+        ["market_slug", "outcome", "decimal_odds", "market_key", "sport"],
+    )
+    _write(tmp_path / "empty_map.csv", [], ["token_id", "market_slug", "question", "outcome"])
+
+    def fake_get(*args, **kwargs):
+        return _Response(
+            {
+                "events": [
+                    {
+                        "slug": "ufc-pad-ben8-2026-07-11",
+                        "title": "Paddy Pimblett vs. Benoît Saint Denis",
+                        "markets": [
+                            {
+                                "question": "Paddy Pimblett vs. Benoît Saint Denis",
+                                "outcomes": ["Paddy Pimblett", "Benoît Saint Denis"],
+                                "clobTokenIds": ["PADDY_YES", "BENOIT_YES"],
+                            }
+                        ],
+                    }
+                ]
+            }
+        )
+
+    monkeypatch.setattr("polymarket_predictive_engine.sharp_anchor.requests.get", fake_get)
+
+    summary = build_sharp_anchor(cfg)
+
+    assert summary["h2h_public_search_token_joins"] == 2
+    assert summary["skipped_no_token"] == 0
+    out = _read(tmp_path / "outputs" / "polymarket_training" / "sharp_fundamental_probabilities.csv")
+    assert {row["token_id"] for row in out} == {"PADDY_YES", "BENOIT_YES"}
 
 
 def test_build_sharp_anchor_joins_worldcup_outrights_by_team_name(tmp_path):

@@ -405,6 +405,18 @@ def _yes_token_from_market(market: dict[str, Any]) -> str:
     return tokens[yes_index] if yes_index < len(tokens) else ""
 
 
+def _tokens_from_public_market(market: dict[str, Any]) -> list[str]:
+    return [
+        str(item).strip()
+        for item in _json_list(
+            market.get("clobTokenIds")
+            or market.get("clob_token_ids")
+            or market.get("clobTokenIDs")
+            or market.get("tokens")
+        )
+    ]
+
+
 def _h2h_public_search_queries(rows: Iterable[dict[str, Any]], *, limit: int) -> list[str]:
     if limit <= 0:
         return []
@@ -482,6 +494,58 @@ def _h2h_public_market_keys(market: dict[str, Any]) -> list[tuple[str, str]]:
             (_match_event_slug(right, left), "Draw"),
         ]
     return []
+
+
+def _h2h_public_market_token_pairs(market: dict[str, Any]) -> list[tuple[str, str, str]]:
+    """Return conservative (group, outcome, token) pairs for public-search h2h markets."""
+    pairs: list[tuple[str, str, str]] = []
+    yes_token = _yes_token_from_market(market)
+    if yes_token:
+        for group, outcome in _h2h_public_market_keys(market):
+            pairs.append((group, outcome, yes_token))
+
+    if _h2h_market_shape_blocker(market):
+        return pairs
+    event_teams = (
+        _event_teams_from_question(market.get("question"))
+        or _event_teams_from_text(market.get("question"))
+        or _event_teams_from_text(market.get("_event_title"))
+        or _event_teams_from_text(market.get("_event_slug"))
+    )
+    if not event_teams:
+        return pairs
+    left, right = event_teams
+    allowed_keys = {_team_key(left), _team_key(right), "draw"}
+    outcomes = [str(item).strip() for item in _json_list(market.get("outcomes"))]
+    tokens = _tokens_from_public_market(market)
+    if not outcomes or len(tokens) < len(outcomes):
+        return pairs
+    for index, outcome in enumerate(outcomes):
+        outcome_key = _team_key(outcome)
+        if outcome_key not in allowed_keys:
+            continue
+        token = tokens[index]
+        if not token:
+            continue
+        pairs.extend(
+            [
+                (_match_event_slug(left, right), outcome, token),
+                (_match_event_slug(right, left), outcome, token),
+            ]
+        )
+    return _unique_token_pairs(pairs)
+
+
+def _unique_token_pairs(values: Iterable[tuple[str, str, str]]) -> list[tuple[str, str, str]]:
+    seen: set[tuple[str, str, str]] = set()
+    unique: list[tuple[str, str, str]] = []
+    for group, outcome, token in values:
+        key = (str(group), str(outcome), str(token))
+        if not key[0] or not key[1] or not key[2] or key in seen:
+            continue
+        seen.add(key)
+        unique.append(key)
+    return unique
 
 
 def _h2h_token_map_keys(row: dict[str, Any], outcome: str) -> tuple[list[tuple[str, str]], str]:
@@ -647,10 +711,7 @@ def _h2h_match_tokens_from_public_search(
         markets = _public_search_markets(payload)
         markets_seen += len(markets)
         for market in markets:
-            token = _yes_token_from_market(market)
-            if not token:
-                continue
-            for group, outcome in _h2h_public_market_keys(market):
+            for group, outcome, token in _h2h_public_market_token_pairs(market):
                 mapping.setdefault(_match_key(group, outcome), token)
     return mapping, {
         "enabled": True,

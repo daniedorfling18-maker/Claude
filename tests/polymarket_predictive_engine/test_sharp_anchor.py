@@ -490,15 +490,15 @@ def test_build_sharp_anchor_enriches_h2h_match_tokens_from_public_search(tmp_pat
     summary = build_sharp_anchor(cfg)
 
     assert seen_queries == ["spain vs france"]
-    assert summary["fundamental_rows"] == 1
-    assert summary["skipped_no_token"] == 2
+    assert summary["fundamental_rows"] == 3
+    assert summary["skipped_no_token"] == 0
     assert summary["h2h_public_search"]["queries"] == 1
-    assert summary["h2h_public_search_tokens_available"] == 1
-    assert summary["h2h_public_search_token_joins"] == 1
+    assert summary["h2h_public_search_tokens_available"] == 3
+    assert summary["h2h_public_search_token_joins"] == 3
     assert summary["token_join"] == "match_public_search"
     out = _read(tmp_path / "outputs" / "polymarket_training" / "sharp_fundamental_probabilities.csv")
-    assert {row["token_id"] for row in out} == {"SPAIN_YES"}
-    assert {sample["outcome"] for sample in summary["skipped_no_token_samples"]} == {"France", "Draw"}
+    assert {row["token_id"] for row in out} == {"SPAIN_YES", "FRANCE_3WAY", "DRAW_3WAY"}
+    assert summary["skipped_no_token_samples"] == []
 
 
 def test_build_sharp_anchor_enriches_three_way_h2h_win_and_draw_markets(tmp_path, monkeypatch):
@@ -738,14 +738,9 @@ def test_build_sharp_anchor_public_search_budget_reaches_later_sports(tmp_path, 
                             "title": "New York Yankees vs Minnesota Twins",
                             "markets": [
                                 {
-                                    "question": "Will New York Yankees win on 2026-07-04?",
-                                    "outcomes": ["Yes", "No"],
-                                    "clobTokenIds": ["YANKEES_YES", "YANKEES_NO"],
-                                },
-                                {
-                                    "question": "Will Minnesota Twins win on 2026-07-04?",
-                                    "outcomes": ["Yes", "No"],
-                                    "clobTokenIds": ["TWINS_YES", "TWINS_NO"],
+                                    "question": "New York Yankees vs Minnesota Twins",
+                                    "outcomes": ["New York Yankees", "Minnesota Twins"],
+                                    "clobTokenIds": ["YANKEES_YES", "TWINS_YES"],
                                 },
                             ],
                         }
@@ -761,9 +756,9 @@ def test_build_sharp_anchor_public_search_budget_reaches_later_sports(tmp_path, 
                             "title": "Fighter A vs Fighter B",
                             "markets": [
                                 {
-                                    "question": "Will Fighter A beat Fighter B?",
-                                    "outcomes": ["Yes", "No"],
-                                    "clobTokenIds": ["FIGHTER_A_YES", "FIGHTER_A_NO"],
+                                    "question": "Fighter A vs Fighter B",
+                                    "outcomes": ["Fighter A", "Fighter B"],
+                                    "clobTokenIds": ["FIGHTER_A_YES", "FIGHTER_B_YES"],
                                 }
                             ],
                         }
@@ -782,11 +777,11 @@ def test_build_sharp_anchor_public_search_budget_reaches_later_sports(tmp_path, 
         "fighter a vs fighter b",
     ]
     assert summary["h2h_public_search"]["queries"] == 3
-    assert summary["h2h_public_search_token_joins"] == 3
+    assert summary["h2h_public_search_token_joins"] == 4
     baseball = next(row for row in summary["coverage_by_sport_market"] if row["sport"] == "baseball_mlb")
     assert baseball["fundamental_rows"] == 2
     out = _read(tmp_path / "outputs" / "polymarket_training" / "sharp_fundamental_probabilities.csv")
-    assert {row["token_id"] for row in out} == {"YANKEES_YES", "TWINS_YES", "FIGHTER_A_YES"}
+    assert {row["token_id"] for row in out} == {"YANKEES_YES", "TWINS_YES", "FIGHTER_A_YES", "FIGHTER_B_YES"}
 
 
 def test_build_sharp_anchor_joins_worldcup_outrights_by_team_name(tmp_path):

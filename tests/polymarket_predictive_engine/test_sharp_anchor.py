@@ -5,6 +5,7 @@ from pytest import approx
 
 from polymarket_predictive_engine.config import EngineConfig
 from polymarket_predictive_engine.sharp_anchor import (
+    _h2h_public_search_queries,
     build_sharp_anchor,
     devig_multiplicative,
     devig_power,
@@ -601,6 +602,191 @@ def test_build_sharp_anchor_enriches_three_way_h2h_win_and_draw_markets(tmp_path
     out = _read(tmp_path / "outputs" / "polymarket_training" / "sharp_fundamental_probabilities.csv")
     assert {row["token_id"] for row in out} == {"AUSTRALIA_YES", "EGYPT_YES", "DRAW_YES"}
     assert sum(float(row["probability"]) for row in out) == approx(1.0, abs=1e-5)
+
+
+def test_h2h_public_search_queries_are_balanced_across_sports():
+    rows = [
+        {
+            "market_slug": "spain-vs-france",
+            "market_key": "h2h",
+            "sport": "soccer_fifa_world_cup",
+        },
+        {
+            "market_slug": "spain-vs-france",
+            "market_key": "h2h",
+            "sport": "soccer_fifa_world_cup",
+        },
+        {
+            "market_slug": "usa-vs-belgium",
+            "market_key": "h2h",
+            "sport": "soccer_fifa_world_cup",
+        },
+        {
+            "market_slug": "argentina-vs-egypt",
+            "market_key": "h2h",
+            "sport": "soccer_fifa_world_cup",
+        },
+        {
+            "market_slug": "new-york-yankees-vs-minnesota-twins",
+            "market_key": "h2h",
+            "sport": "baseball_mlb",
+        },
+        {
+            "market_slug": "fighter-a-vs-fighter-b",
+            "market_key": "h2h",
+            "sport": "mma_mixed_martial_arts",
+        },
+    ]
+
+    queries = _h2h_public_search_queries(rows, limit=3)
+
+    assert queries == [
+        "spain vs france",
+        "new york yankees vs minnesota twins",
+        "fighter a vs fighter b",
+    ]
+
+
+def test_build_sharp_anchor_public_search_budget_reaches_later_sports(tmp_path, monkeypatch):
+    cfg = EngineConfig(
+        raw={
+            "paths": {"output_root": str(tmp_path / "outputs")},
+            "sharp_anchor": {
+                "input_path": str(tmp_path / "sharp.csv"),
+                "token_map_path": str(tmp_path / "empty_map.csv"),
+                "match_public_search_enabled": True,
+                "match_public_search_max_queries": 3,
+            },
+        },
+        path=tmp_path / "cfg.yaml",
+    )
+    _write(
+        tmp_path / "sharp.csv",
+        [
+            {
+                "market_slug": "Spain vs France",
+                "outcome": "Spain",
+                "decimal_odds": "2.10",
+                "market_key": "h2h",
+                "sport": "soccer_fifa_world_cup",
+            },
+            {
+                "market_slug": "Spain vs France",
+                "outcome": "France",
+                "decimal_odds": "3.80",
+                "market_key": "h2h",
+                "sport": "soccer_fifa_world_cup",
+            },
+            {
+                "market_slug": "USA vs Belgium",
+                "outcome": "USA",
+                "decimal_odds": "2.10",
+                "market_key": "h2h",
+                "sport": "soccer_fifa_world_cup",
+            },
+            {
+                "market_slug": "USA vs Belgium",
+                "outcome": "Belgium",
+                "decimal_odds": "3.80",
+                "market_key": "h2h",
+                "sport": "soccer_fifa_world_cup",
+            },
+            {
+                "market_slug": "New York Yankees vs Minnesota Twins",
+                "outcome": "New York Yankees",
+                "decimal_odds": "2.20",
+                "market_key": "h2h",
+                "sport": "baseball_mlb",
+            },
+            {
+                "market_slug": "New York Yankees vs Minnesota Twins",
+                "outcome": "Minnesota Twins",
+                "decimal_odds": "1.80",
+                "market_key": "h2h",
+                "sport": "baseball_mlb",
+            },
+            {
+                "market_slug": "Fighter A vs Fighter B",
+                "outcome": "Fighter A",
+                "decimal_odds": "1.90",
+                "market_key": "h2h",
+                "sport": "mma_mixed_martial_arts",
+            },
+            {
+                "market_slug": "Fighter A vs Fighter B",
+                "outcome": "Fighter B",
+                "decimal_odds": "1.95",
+                "market_key": "h2h",
+                "sport": "mma_mixed_martial_arts",
+            },
+        ],
+        ["market_slug", "outcome", "decimal_odds", "market_key", "sport"],
+    )
+    _write(tmp_path / "empty_map.csv", [], ["token_id", "market_slug", "question", "outcome"])
+
+    seen_queries = []
+
+    def fake_get(*args, **kwargs):
+        query = kwargs["params"]["q"]
+        seen_queries.append(query)
+        if query == "new york yankees vs minnesota twins":
+            return _Response(
+                {
+                    "events": [
+                        {
+                            "slug": "new-york-yankees-vs-minnesota-twins",
+                            "title": "New York Yankees vs Minnesota Twins",
+                            "markets": [
+                                {
+                                    "question": "Will New York Yankees win on 2026-07-04?",
+                                    "outcomes": ["Yes", "No"],
+                                    "clobTokenIds": ["YANKEES_YES", "YANKEES_NO"],
+                                },
+                                {
+                                    "question": "Will Minnesota Twins win on 2026-07-04?",
+                                    "outcomes": ["Yes", "No"],
+                                    "clobTokenIds": ["TWINS_YES", "TWINS_NO"],
+                                },
+                            ],
+                        }
+                    ]
+                }
+            )
+        if query == "fighter a vs fighter b":
+            return _Response(
+                {
+                    "events": [
+                        {
+                            "slug": "fighter-a-vs-fighter-b",
+                            "title": "Fighter A vs Fighter B",
+                            "markets": [
+                                {
+                                    "question": "Will Fighter A beat Fighter B?",
+                                    "outcomes": ["Yes", "No"],
+                                    "clobTokenIds": ["FIGHTER_A_YES", "FIGHTER_A_NO"],
+                                }
+                            ],
+                        }
+                    ]
+                }
+            )
+        return _Response({"events": []})
+
+    monkeypatch.setattr("polymarket_predictive_engine.sharp_anchor.requests.get", fake_get)
+
+    summary = build_sharp_anchor(cfg)
+
+    assert seen_queries == [
+        "spain vs france",
+        "new york yankees vs minnesota twins",
+        "fighter a vs fighter b",
+    ]
+    assert summary["h2h_public_search"]["queries"] == 3
+    assert summary["h2h_public_search_token_joins"] == 3
+    baseball = next(row for row in summary["coverage_by_sport_market"] if row["sport"] == "baseball_mlb")
+    assert baseball["fundamental_rows"] == 2
+    out = _read(tmp_path / "outputs" / "polymarket_training" / "sharp_fundamental_probabilities.csv")
+    assert {row["token_id"] for row in out} == {"YANKEES_YES", "TWINS_YES", "FIGHTER_A_YES"}
 
 
 def test_build_sharp_anchor_joins_worldcup_outrights_by_team_name(tmp_path):

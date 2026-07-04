@@ -406,8 +406,12 @@ def _yes_token_from_market(market: dict[str, Any]) -> str:
 
 
 def _h2h_public_search_queries(rows: Iterable[dict[str, Any]], *, limit: int) -> list[str]:
-    queries: list[str] = []
-    seen: set[str] = set()
+    if limit <= 0:
+        return []
+    buckets: dict[str, list[str]] = {}
+    bucket_seen: dict[str, set[str]] = {}
+    global_seen: set[str] = set()
+    sport_order: list[str] = []
     for row in rows:
         market_key = str(row.get("market_key") or row.get("market") or "").lower()
         if market_key != "h2h":
@@ -416,10 +420,34 @@ def _h2h_public_search_queries(rows: Iterable[dict[str, Any]], *, limit: int) ->
         if not slug:
             continue
         query = normalize_slug(slug).replace("-", " ").strip()
-        if query and query not in seen:
-            queries.append(query)
-            seen.add(query)
-        if len(queries) >= limit:
+        if not query or query in global_seen:
+            continue
+        sport = str(row.get("sport") or row.get("sport_title") or "unknown").strip() or "unknown"
+        if sport not in buckets:
+            buckets[sport] = []
+            bucket_seen[sport] = set()
+            sport_order.append(sport)
+        if query in bucket_seen[sport]:
+            continue
+        buckets[sport].append(query)
+        bucket_seen[sport].add(query)
+        global_seen.add(query)
+
+    queries: list[str] = []
+    index_by_sport = {sport: 0 for sport in sport_order}
+    while len(queries) < limit:
+        added = False
+        for sport in sport_order:
+            index = index_by_sport[sport]
+            sport_queries = buckets.get(sport, [])
+            if index >= len(sport_queries):
+                continue
+            queries.append(sport_queries[index])
+            index_by_sport[sport] = index + 1
+            added = True
+            if len(queries) >= limit:
+                break
+        if not added:
             break
     return queries
 

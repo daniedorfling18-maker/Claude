@@ -1285,6 +1285,81 @@ def test_dashboard_emits_decision_useful_summary_for_missing_fresh_candidate(tmp
     assert any(row["lane"] == "Paper trade gate" for row in summary["evidence_lanes"])
 
 
+def test_dashboard_collect_now_prefers_research_focus_queue_over_raw_missing_queries(tmp_path):
+    cfg = _config(tmp_path)
+    write_json(
+        cfg.output_root / "polymarket_price_action" / "price_action_model_summary.json",
+        {
+            "status": "trained",
+            "generated_at_utc": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+            "decision": "collect_more_bid_ask_price_action_model_evidence",
+            "promotion_ready": False,
+            "train_positive_targets": 4,
+            "validation_positive_targets": 2,
+        },
+    )
+    write_json(
+        cfg.output_root / "polymarket_price_action" / "price_action_paper_signal_summary.json",
+        {
+            "generated_at_utc": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+            "decision": "trusted_shadow_edge_waiting_for_fresh_executable_candidate",
+            "signals": 0,
+            "rejections": 16,
+            "paper_confirmation_candidates": 2,
+            "paper_confirmation_signals": 0,
+        },
+    )
+    write_json(
+        cfg.governance_root / "trade_signal_audit.json",
+        {
+            "verdict": "trusted_edge_missing_fresh_candidate",
+            "next_action": "Collect broad missing confirmation queries.",
+            "missing_confirmation_target_count": 5,
+            "missing_confirmation_queries": [
+                "world cup",
+                "btc updown",
+                "ethereum",
+                "eth updown",
+                "xrp updown",
+            ],
+        },
+    )
+    write_json(
+        cfg.governance_root / "research_focus.json",
+        {
+            "generated_at_utc": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+            "collection_queries": ["solana updown", "esports", "economy"],
+            "raw_collection_queries": ["solana updown", "btc updown", "eth updown"],
+            "collection_query_guard": {
+                "accepted_queries": ["solana updown", "esports", "economy"],
+                "rejected_queries": [
+                    {"query": "btc updown", "reason": "max_updown_queries"},
+                    {"query": "eth updown", "reason": "max_updown_queries"},
+                ],
+            },
+        },
+    )
+    write_json(
+        cfg.path.parent / "work" / "shadow_research_cycle_latest_status.json",
+        {
+            "status": "ok",
+            "started_at_utc": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+            "ended_at_utc": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+            "paper_trading_invoked": False,
+            "live_trading_invoked": False,
+        },
+    )
+
+    result = render_dashboard(cfg)
+
+    data = read_json(result["dashboard_data"])
+    summary = data["decision_useful_summary"]
+    assert summary["trade_decision"] == "COLLECT FRESH CANDIDATE"
+    assert summary["collect_now"] == ["solana updown", "esports", "economy"]
+    assert summary["decision_questions"][2]["answer"] == "solana updown, esports, economy"
+    assert summary["state_badges"][-1]["label"] == "collect: solana updown, esports, economy"
+
+
 def test_dashboard_decision_summary_prioritises_failed_cycle_over_stale_model(tmp_path):
     cfg = _config(tmp_path)
     write_json(

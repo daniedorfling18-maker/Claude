@@ -3925,6 +3925,7 @@ def _decision_useful_summary(
     oversight_status: dict[str, Any],
     evidence_freshness: dict[str, Any],
     price_action_feedback: dict[str, Any],
+    research_focus: dict[str, Any],
     websocket_summary: dict[str, Any],
     websocket_feature_summary: dict[str, Any],
     worldcup_validation: dict[str, Any],
@@ -3973,6 +3974,7 @@ def _decision_useful_summary(
     )
     collect_now = _compact_list(
         _first_non_empty_list(
+            research_focus.get("collection_queries"),
             trade_signal_audit.get("missing_confirmation_queries"),
             price_action_goal.get("collection_queries"),
             price_action_feedback.get("collection_queries"),
@@ -5054,6 +5056,7 @@ def render_dashboard(cfg: EngineConfig, latest_report: dict[str, Any] | None = N
         oversight_status=oversight_status,
         evidence_freshness=evidence_freshness,
         price_action_feedback=price_action_feedback,
+        research_focus=research_focus,
         websocket_summary=websocket_summary,
         websocket_feature_summary=websocket_feature_summary,
         worldcup_validation=worldcup_validation_status,

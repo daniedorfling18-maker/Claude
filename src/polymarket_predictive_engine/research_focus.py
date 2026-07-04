@@ -1377,10 +1377,14 @@ def build_research_focus(cfg) -> dict[str, Any]:
         for query in quote_audit_focus.get("collection_queries", []) or []
         if str(query or "").strip()
     ]
-    if quote_audit_priority_queries:
+    proof_priority_queries: list[str] = []
+    for query in [*paper_confirmation_blocker_queries, *quote_audit_priority_queries]:
+        if query and query not in proof_priority_queries:
+            proof_priority_queries.append(query)
+    if proof_priority_queries:
         priority_seen: set[str] = set()
         prioritized: list[str] = []
-        for query in quote_audit_priority_queries:
+        for query in proof_priority_queries:
             if query not in priority_seen:
                 prioritized.append(query)
                 priority_seen.add(query)
@@ -1401,6 +1405,7 @@ def build_research_focus(cfg) -> dict[str, Any]:
         "collection_queries": collection_queries,
         "collection_query_guard": collection_query_guard,
         "quote_audit_priority_queries": quote_audit_priority_queries,
+        "proof_priority_queries": proof_priority_queries,
         "suppressed_queries": price_action_feedback.get("suppressed_queries", []),
         "price_action_model": {
             "status": price_action_model.get("status"),

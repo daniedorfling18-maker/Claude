@@ -240,6 +240,20 @@ def test_research_focus_prioritises_paper_confirmation_blocker_query(tmp_path):
             "collection_queries": ["btc updown", "ethereum"],
         },
     )
+    write_json(
+        cfg.output_root / "polymarket_price_action" / "paper_broker_round_trip_summary.json",
+        {
+            "baseline_quote_audit_by_cohort": [
+                {
+                    "cohort": "exploratory_crypto_updown_live_model|crypto_btc_updown_daily|outcome=down",
+                    "family": "crypto_btc_updown_daily",
+                    "round_trips": 3,
+                    "quote_conflict_round_trips": 1,
+                    "quote_unverified_round_trips": 0,
+                }
+            ]
+        },
+    )
 
     payload = build_research_focus(cfg)
 
@@ -250,6 +264,8 @@ def test_research_focus_prioritises_paper_confirmation_blocker_query(tmp_path):
         "solana updown",
         "btc updown",
     ]
+    assert payload["quote_audit_priority_queries"] == ["btc updown"]
+    assert payload["proof_priority_queries"][:2] == ["solana updown", "btc updown"]
     assert payload["collection_query_guard"]["rejected_queries"][0] == {
         "query": "btc updown",
         "family": "crypto_updown",

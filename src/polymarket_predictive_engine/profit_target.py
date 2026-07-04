@@ -108,6 +108,11 @@ def write_profit_target_tracker(cfg: EngineConfig, broker: dict[str, Any]) -> di
     round_trip_audit = _paper_round_trip_audit(cfg)
     audited_pnl = safe_float(round_trip_audit.get("audited_baseline_realized_pnl_usdc"))
     audited_round_trips = int(safe_float(round_trip_audit.get("audited_baseline_closed_round_trips")) or 0)
+    proof_fields_available = "baseline_proof_verified_realized_pnl_usdc" in round_trip_audit
+    proof_pnl = safe_float(round_trip_audit.get("baseline_proof_verified_realized_pnl_usdc"))
+    proof_round_trips = int(safe_float(round_trip_audit.get("baseline_proof_verified_closed_round_trips")) or 0)
+    proof_entry_missing = int(safe_float(round_trip_audit.get("baseline_proof_entry_snapshot_missing_round_trips")) or 0)
+    proof_exit_missing = int(safe_float(round_trip_audit.get("baseline_proof_exit_snapshot_missing_round_trips")) or 0)
     baseline_round_trips = int(safe_float(round_trip_audit.get("baseline_closed_round_trips")) or 0)
     all_time_quote_conflicts = int(safe_float(round_trip_audit.get("quote_conflict_round_trips")) or 0)
     all_time_quote_unverified = int(safe_float(round_trip_audit.get("quote_unverified_round_trips")) or 0)
@@ -122,38 +127,57 @@ def write_profit_target_tracker(cfg: EngineConfig, broker: dict[str, Any]) -> di
         else all_time_quote_unverified
     )
     audited_available = audited_pnl is not None
-    decision_pnl = float(audited_pnl) if audited_available else raw_pnl
+    proof_available = proof_fields_available and proof_pnl is not None
+    decision_pnl = float(proof_pnl) if proof_available else float(audited_pnl) if audited_available else raw_pnl
     decision_monthly_run_rate = (decision_pnl / elapsed_days * 30.0) if elapsed_days > 0 else None
+    decision_pnl_source = (
+        "proof_verified_entry_exit_quotes"
+        if proof_available
+        else "audited_quote_consistent_exits"
+        if audited_available
+        else "raw_account_equity"
+    )
+    evidence_round_trips = proof_round_trips if proof_available else audited_round_trips
+    evidence_blocker_name = "proof_verified_round_trips" if proof_available else "audited_round_trips"
     pnl_audit_state = (
         "raw_pnl_contains_quote_conflicts"
         if quote_conflicts > 0
         else "raw_pnl_contains_unverified_quotes"
         if quote_unverified > 0
+        else "quote_consistent_but_entry_exit_proof_missing"
+        if proof_available and (proof_entry_missing > 0 or proof_exit_missing > 0)
+        else "proof_verified_entry_exit_quotes"
+        if proof_available
         else "quote_consistent"
         if audited_available
         else "audit_not_available"
     )
     verified_evidence_ready = bool(
-        audited_available
-        and audited_round_trips >= minimum_audited_round_trips
+        (proof_available or audited_available)
+        and evidence_round_trips >= minimum_audited_round_trips
         and quote_conflicts == 0
         and quote_unverified == 0
+        and (not proof_available or (proof_entry_missing == 0 and proof_exit_missing == 0))
     )
     if verified_evidence_ready:
-        proof_status = "verified_quote_consistent"
+        proof_status = "verified_entry_exit_quote_coverage" if proof_available else "verified_quote_consistent"
         proof_blockers: list[str] = []
     else:
         proof_blockers = []
-        if not audited_available:
+        if not (proof_available or audited_available):
             proof_blockers.append("paper_round_trip_audit_missing")
-        if audited_round_trips < minimum_audited_round_trips:
+        if evidence_round_trips < minimum_audited_round_trips:
             proof_blockers.append(
-                f"needs_{minimum_audited_round_trips}_audited_round_trips_has_{audited_round_trips}"
+                f"needs_{minimum_audited_round_trips}_{evidence_blocker_name}_has_{evidence_round_trips}"
             )
         if quote_conflicts > 0:
             proof_blockers.append(f"quote_conflict_round_trips_{quote_conflicts}")
         if quote_unverified > 0:
             proof_blockers.append(f"quote_unverified_round_trips_{quote_unverified}")
+        if proof_available and proof_entry_missing > 0:
+            proof_blockers.append(f"entry_snapshot_missing_round_trips_{proof_entry_missing}")
+        if proof_available and proof_exit_missing > 0:
+            proof_blockers.append(f"exit_snapshot_missing_round_trips_{proof_exit_missing}")
         proof_status = "unverified_paper_run_rate"
     status = _status_for_pnl(
         pnl=decision_pnl,
@@ -180,9 +204,14 @@ def write_profit_target_tracker(cfg: EngineConfig, broker: dict[str, Any]) -> di
         "raw_account_monthly_run_rate_usdc": raw_monthly_run_rate,
         "audited_pnl_since_baseline_usdc": audited_pnl,
         "audited_round_trips_since_baseline": audited_round_trips,
+        "proof_verified_pnl_since_baseline_usdc": proof_pnl,
+        "proof_verified_round_trips_since_baseline": proof_round_trips if proof_fields_available else None,
+        "proof_entry_snapshot_missing_round_trips": proof_entry_missing if proof_fields_available else None,
+        "proof_exit_snapshot_missing_round_trips": proof_exit_missing if proof_fields_available else None,
         "baseline_round_trips_since_baseline": baseline_round_trips,
         "minimum_audited_round_trips_for_on_pace": minimum_audited_round_trips,
         "decision_pnl_usdc": decision_pnl,
+        "decision_pnl_source": decision_pnl_source,
         "elapsed_hours": elapsed_hours,
         "monthly_run_rate_usdc": decision_monthly_run_rate,
         "decision_monthly_run_rate_usdc": decision_monthly_run_rate,
@@ -206,8 +235,8 @@ def write_profit_target_tracker(cfg: EngineConfig, broker: dict[str, Any]) -> di
             and verified_evidence_ready
         ),
         "completion_evidence": (
-            "Goal is unproven until audited quote-consistent paper P&L, not expected value or raw quote-conflicted ledger equity, "
-            "reaches or sustains the configured monthly target with enough independent round trips."
+            "Goal is unproven until proof-verified paper P&L, not expected value or raw quote-conflicted ledger equity, "
+            "reaches or sustains the configured monthly target with enough independent entry and exit quote-supported round trips."
         ),
     }
     write_json(tracker_path, payload)

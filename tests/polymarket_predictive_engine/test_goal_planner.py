@@ -130,6 +130,78 @@ def test_goal_plan_uses_baseline_quote_audit_window_not_all_history(tmp_path):
     assert payload["decision_monthly_run_rate_usdc"] > 100
 
 
+def test_goal_plan_prefers_proof_verified_entry_exit_pnl_when_available(tmp_path):
+    cfg = _cfg(tmp_path)
+    write_json(
+        cfg.governance_root / "paper_profit_target_tracker.json",
+        {
+            "actual_pnl_since_baseline_usdc": 12.0,
+            "elapsed_hours": 48.0,
+            "current": {"equity_usdc": 1012.0},
+            "baseline": {"baseline_equity_usdc": 1000.0},
+        },
+    )
+    write_json(
+        cfg.output_root / "polymarket_price_action" / "paper_broker_round_trip_summary.json",
+        {
+            "audited_baseline_realized_pnl_usdc": 12.0,
+            "audited_baseline_closed_round_trips": 5,
+            "baseline_proof_verified_realized_pnl_usdc": 2.5,
+            "baseline_proof_verified_closed_round_trips": 5,
+            "baseline_proof_entry_snapshot_missing_round_trips": 0,
+            "baseline_proof_exit_snapshot_missing_round_trips": 0,
+            "baseline_closed_round_trips": 5,
+            "baseline_quote_conflict_round_trips": 0,
+            "baseline_quote_unverified_round_trips": 0,
+        },
+    )
+
+    payload = build_goal_plan(cfg)
+
+    assert payload["audited_pnl_since_baseline_usdc"] == approx(12.0)
+    assert payload["proof_verified_pnl_since_baseline_usdc"] == approx(2.5)
+    assert payload["decision_pnl_usdc"] == approx(2.5)
+    assert payload["decision_pnl_source"] == "proof_verified_entry_exit_quotes"
+    assert payload["profit_target_proof_status"] == "verified_entry_exit_quote_coverage"
+    assert payload["verified_evidence_ready"] is True
+
+
+def test_goal_plan_blocks_proof_when_entry_or_exit_quote_support_is_missing(tmp_path):
+    cfg = _cfg(tmp_path)
+    write_json(
+        cfg.governance_root / "paper_profit_target_tracker.json",
+        {
+            "actual_pnl_since_baseline_usdc": 12.0,
+            "elapsed_hours": 48.0,
+            "current": {"equity_usdc": 1012.0},
+            "baseline": {"baseline_equity_usdc": 1000.0},
+        },
+    )
+    write_json(
+        cfg.output_root / "polymarket_price_action" / "paper_broker_round_trip_summary.json",
+        {
+            "audited_baseline_realized_pnl_usdc": 12.0,
+            "audited_baseline_closed_round_trips": 6,
+            "baseline_proof_verified_realized_pnl_usdc": 10.0,
+            "baseline_proof_verified_closed_round_trips": 5,
+            "baseline_proof_entry_snapshot_missing_round_trips": 0,
+            "baseline_proof_exit_snapshot_missing_round_trips": 1,
+            "baseline_closed_round_trips": 6,
+            "baseline_quote_conflict_round_trips": 0,
+            "baseline_quote_unverified_round_trips": 0,
+        },
+    )
+
+    payload = build_goal_plan(cfg)
+
+    assert payload["decision_pnl_usdc"] == approx(10.0)
+    assert payload["on_pace_by_decision_pnl"] is False
+    assert payload["profit_target_proof_status"] == "unverified_paper_run_rate"
+    assert "exit_snapshot_missing_round_trips_1" in payload["profit_target_proof_blockers"]
+    assert payload["pnl_audit_state"] == "quote_consistent_but_entry_exit_proof_missing"
+    assert "entry/exit quote support" in payload["main_gap"]
+
+
 def test_goal_plan_does_not_certify_on_pace_without_enough_audited_round_trips(tmp_path):
     cfg = _cfg(tmp_path)
     write_json(

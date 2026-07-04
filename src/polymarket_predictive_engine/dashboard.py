@@ -361,10 +361,17 @@ async function load() {
     const rawRunRate = target.raw_account_monthly_run_rate_usdc ?? target.monthly_run_rate_usdc;
     const decisionRunRate = goalPlan.decision_monthly_run_rate_usdc ?? target.decision_monthly_run_rate_usdc ?? target.monthly_run_rate_usdc;
     const auditedPnl = goalPlan.audited_pnl_since_baseline_usdc;
+    const proofPnl = goalPlan.proof_verified_pnl_since_baseline_usdc ?? target.proof_verified_pnl_since_baseline_usdc;
+    const decisionPnlSource = goalPlan.decision_pnl_source || target.decision_pnl_source || (proofPnl !== undefined && proofPnl !== null ? "proof_verified_entry_exit_quotes" : "audited_quote_consistent_exits");
     const pnlAuditState = goalPlan.pnl_audit_state || "unknown";
     const profitProofStatus = goalPlan.profit_target_proof_status || target.profit_target_proof_status || "unknown";
     const profitProofBlockers = goalPlan.profit_target_proof_blockers || target.profit_target_proof_blockers || [];
     const auditedRoundTrips = goalPlan.audited_round_trips_since_baseline ?? target.audited_round_trips_since_baseline ?? "-";
+    const proofRoundTrips = goalPlan.proof_verified_round_trips_since_baseline ?? target.proof_verified_round_trips_since_baseline;
+    const proofEntryMissing = goalPlan.proof_entry_snapshot_missing_round_trips ?? target.proof_entry_snapshot_missing_round_trips;
+    const proofExitMissing = goalPlan.proof_exit_snapshot_missing_round_trips ?? target.proof_exit_snapshot_missing_round_trips;
+    const evidenceRoundTrips = proofRoundTrips ?? auditedRoundTrips;
+    const evidenceTripLabel = proofRoundTrips !== undefined && proofRoundTrips !== null ? "proof round trips" : "audited exits";
     const minAuditedRoundTrips = goalPlan.minimum_audited_round_trips_for_on_pace ?? target.minimum_audited_round_trips_for_on_pace ?? "-";
     const verifiedEvidenceReady = Boolean(goalPlan.verified_evidence_ready || target.verified_evidence_ready);
     const baselineQuoteConflicts = goalPlan.quote_conflict_round_trips ?? target.quote_conflict_round_trips ?? "-";
@@ -739,12 +746,15 @@ async function load() {
     document.getElementById("actualTarget").innerHTML = facts([
       ["Status", target.status],
       ["Target / month", target.target_monthly_profit_usdc, fmtUsd],
-      ["Audited P&L for goal", pnl, fmtUsd],
-      ["Audited run-rate", decisionRunRate, fmtUsd],
+      ["Verified P&L for goal", pnl, fmtUsd],
+      ["Verified run-rate", decisionRunRate, fmtUsd],
+      ["Decision P&L source", decisionPnlSource, v=>longText(v, 180)],
       ["Raw ledger P&L (audit-only)", rawPnl, v=>fmtUsd(v) + auditedRawSuffix()],
       ["P&L audit state", pnlAuditState, v=>longText(v, 180)],
       ["Proof status", profitProofStatus, v=>longText(v, 180)],
-      ["Audited round trips", `${auditedRoundTrips} / ${minAuditedRoundTrips}`],
+      ["Proof round trips", `${evidenceRoundTrips} / ${minAuditedRoundTrips}`],
+      ["Entry proof misses", proofEntryMissing ?? "-"],
+      ["Exit proof misses", proofExitMissing ?? "-"],
       ["Proof blockers", profitProofBlockers, joinText],
       ["Baseline quote conflicts", baselineQuoteConflicts],
       ["Baseline unverified quote rows", baselineQuoteUnverified],
@@ -761,8 +771,10 @@ async function load() {
       ["Unverified","quote_unverified_round_trips"],
       ["Entry miss","entry_snapshot_missing_round_trips"],
       ["Exit miss","exit_snapshot_missing_round_trips"],
+      ["Proof trips","proof_verified_round_trips"],
       ["Raw P&L","raw_pnl_usdc", fmtUsd],
       ["Audited P&L","audited_pnl_usdc", fmtUsd],
+      ["Proof P&L","proof_verified_pnl_usdc", fmtUsd],
       ["Excluded P&L","excluded_from_audit_pnl_usdc", fmtUsd],
       ["Top blocker","top_blocker_status", v=>longText(v, 120)],
       ["Action","recommended_action", v=>longText(v, 220)]
@@ -775,11 +787,12 @@ async function load() {
     document.getElementById("goalPlan").innerHTML = `<div class="sectionLead">This is the route to the $100/month target using tradable price changes, not waiting for market settlement.</div>` + facts([
       ["Route state", priceActionGoal.state || goalPlan.status],
       ["Needs settlement?", priceActionGoal.settlement_required_for_this_milestone ? "yes" : "no - this milestone uses bid/ask repricing and paper exits"],
-      ["Audited P&L for goal", goalPlan.decision_pnl_usdc, fmtUsd],
+      ["Verified P&L for goal", goalPlan.decision_pnl_usdc, fmtUsd],
       ["Raw ledger P&L", goalPlan.raw_account_pnl_since_baseline_usdc, v=>fmtUsd(v) + auditedRawSuffix()],
       ["P&L audit state", goalPlan.pnl_audit_state, v=>longText(v, 180)],
       ["Proof status", profitProofStatus, v=>longText(v, 180)],
-      ["Audited round trips", `${auditedRoundTrips} / ${minAuditedRoundTrips}`],
+      ["Proof round trips", `${evidenceRoundTrips} / ${minAuditedRoundTrips}`],
+      ["Decision P&L source", decisionPnlSource, v=>longText(v, 180)],
       ["Proof blockers", profitProofBlockers, joinText],
       ["Baseline quote conflicts", baselineQuoteConflicts],
       ["All-time quote conflicts", allTimeQuoteConflicts],
@@ -3953,11 +3966,22 @@ def _decision_useful_summary(
     if decision_run_rate is None:
         decision_run_rate = run_rate
     audited_pnl = safe_float(goal_plan.get("audited_pnl_since_baseline_usdc"))
+    proof_pnl = safe_float(goal_plan.get("proof_verified_pnl_since_baseline_usdc"))
+    proof_round_trip_value = safe_float(goal_plan.get("proof_verified_round_trips_since_baseline"))
+    proof_round_trips = int(proof_round_trip_value) if proof_round_trip_value is not None else None
+    proof_entry_missing = safe_float(goal_plan.get("proof_entry_snapshot_missing_round_trips"))
+    proof_exit_missing = safe_float(goal_plan.get("proof_exit_snapshot_missing_round_trips"))
+    decision_pnl_source = str(
+        goal_plan.get("decision_pnl_source")
+        or ("proof_verified_entry_exit_quotes" if proof_pnl is not None else "audited_quote_consistent_exits")
+    )
     pnl_audit_state = str(goal_plan.get("pnl_audit_state") or "unknown")
     profit_target_proof_status = str(goal_plan.get("profit_target_proof_status") or "unknown")
     profit_target_proof_blockers = _compact_list(goal_plan.get("profit_target_proof_blockers"), limit=4)
     verified_evidence_ready = bool(goal_plan.get("verified_evidence_ready"))
     audited_round_trips = int(safe_float(goal_plan.get("audited_round_trips_since_baseline")) or 0)
+    evidence_round_trips = proof_round_trips if proof_round_trips is not None else audited_round_trips
+    evidence_round_trip_label = "proof round trips" if proof_round_trips is not None else "audited round trips"
     minimum_audited_round_trips = int(safe_float(goal_plan.get("minimum_audited_round_trips_for_on_pace")) or 5)
     best_repricing_run_rate = safe_float(price_action_goal.get("best_repricing_monthly_run_rate_usdc"))
     forward_paper_run_rate = safe_float(price_action_goal.get("best_forward_paper_monthly_run_rate_usdc"))
@@ -4217,10 +4241,10 @@ def _decision_useful_summary(
         {
             "lane": "Forward paper P&L",
             "state": pnl_audit_state,
-            "decision_use": "Measures quote-consistent paper progress toward the $100/month target; raw ledger P&L is diagnostic only when quote conflicts exist.",
-            "key_metric": f"audited {_usd_text(decision_pnl)}; run-rate {_usd_text(decision_run_rate)}",
+            "decision_use": "Measures entry-and-exit quote-supported paper progress toward the $100/month target; raw ledger P&L is diagnostic only.",
+            "key_metric": f"verified {_usd_text(decision_pnl)}; run-rate {_usd_text(decision_run_rate)}",
             "blocker_or_next": (
-                f"proof {profit_target_proof_status}; audited round trips {audited_round_trips}/{minimum_audited_round_trips}"
+                f"proof {profit_target_proof_status}; {evidence_round_trip_label} {evidence_round_trips}/{minimum_audited_round_trips}"
                 + (f"; blockers {', '.join(profit_target_proof_blockers)}" if profit_target_proof_blockers else "")
             ),
         },
@@ -4309,10 +4333,10 @@ def _decision_useful_summary(
 
     can_trade_now = decision_class == "good" and approved_signals > 0
     collect_text = ", ".join(collect_now) if collect_now else "No priority collection target is active."
-    raw_pnl_text = f"raw ledger {_usd_text(actual_pnl)}" if audited_pnl is not None else ""
+    raw_pnl_text = f"raw ledger {_usd_text(actual_pnl)}" if audited_pnl is not None or proof_pnl is not None else ""
     profit_target_text = (
-        f"{_usd_text(decision_pnl)} audited; {_usd_text(decision_run_rate)} audited monthly run-rate vs {_usd_text(target_monthly)} target"
-        + f"; proof {profit_target_proof_status}; audited exits {audited_round_trips}/{minimum_audited_round_trips}"
+        f"{_usd_text(decision_pnl)} verified; {_usd_text(decision_run_rate)} verified monthly run-rate vs {_usd_text(target_monthly)} target"
+        + f"; proof {profit_target_proof_status}; {evidence_round_trip_label} {evidence_round_trips}/{minimum_audited_round_trips}"
         + (f" ({raw_pnl_text})" if raw_pnl_text else "")
     )
     decision_questions = [
@@ -4415,7 +4439,9 @@ def _decision_useful_summary(
         "rejected_signals": rejected_signals,
         "actual_pnl_since_baseline_usdc": actual_pnl,
         "audited_pnl_since_baseline_usdc": audited_pnl,
+        "proof_verified_pnl_since_baseline_usdc": proof_pnl,
         "decision_pnl_usdc": decision_pnl,
+        "decision_pnl_source": decision_pnl_source,
         "monthly_run_rate_usdc": run_rate,
         "decision_monthly_run_rate_usdc": decision_run_rate,
         "pnl_audit_state": pnl_audit_state,
@@ -4423,6 +4449,9 @@ def _decision_useful_summary(
         "profit_target_proof_blockers": profit_target_proof_blockers,
         "verified_evidence_ready": verified_evidence_ready,
         "audited_round_trips_since_baseline": audited_round_trips,
+        "proof_verified_round_trips_since_baseline": proof_round_trips,
+        "proof_entry_snapshot_missing_round_trips": proof_entry_missing,
+        "proof_exit_snapshot_missing_round_trips": proof_exit_missing,
         "minimum_audited_round_trips_for_on_pace": minimum_audited_round_trips,
         "target_monthly_profit_usdc": target_monthly,
         "best_repricing_monthly_run_rate_usdc": best_repricing_run_rate,

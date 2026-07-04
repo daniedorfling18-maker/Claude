@@ -66,6 +66,8 @@ ROUND_TRIP_FIELDS = [
     "exit_quote_source",
     "quote_consistency_status",
     "quote_consistency_reason",
+    "quote_proof_status",
+    "quote_proof_reason",
     "exit_quote_snapshot_bid_gap",
     "exit_fill_snapshot_bid_gap",
     "exit_reason",
@@ -140,14 +142,79 @@ def _quote_bucket(row: dict[str, Any]) -> str:
     return status
 
 
-def _quote_audit_action(*, quote_conflicts: int, quote_unverified: int, other_blocked: int) -> str:
+def _snapshot_supported(row: dict[str, Any], *, prefix: str) -> bool:
+    return int(safe_float(row.get(f"{prefix}_snapshot_observations")) or 0) > 0
+
+
+def _quote_proof_bucket(row: dict[str, Any]) -> str:
+    explicit = str(row.get("quote_proof_status") or "").strip()
+    if explicit:
+        return explicit
+    if _quote_bucket(row) != "ok":
+        return "not_quote_consistent"
+    if not _snapshot_supported(row, prefix="entry") and not _snapshot_supported(row, prefix="exit"):
+        return "missing_entry_and_exit_snapshot_support"
+    if not _snapshot_supported(row, prefix="entry"):
+        return "missing_entry_snapshot_support"
+    if not _snapshot_supported(row, prefix="exit"):
+        return "missing_exit_snapshot_support"
+    return "proof_verified"
+
+
+def _quote_proof_verified(row: dict[str, Any]) -> bool:
+    return _quote_proof_bucket(row) == "proof_verified"
+
+
+def _quote_proof_status(
+    *,
+    consistency: dict[str, Any],
+    entry_snapshot: dict[str, Any],
+    exit_snapshot: dict[str, Any],
+) -> dict[str, str]:
+    quote_status = str(consistency.get("quote_consistency_status") or "").strip()
+    if quote_status != "ok":
+        return {
+            "quote_proof_status": "not_quote_consistent",
+            "quote_proof_reason": "round trip is not quote-consistent, so it cannot prove the profit target or train the paper broker model",
+        }
+    missing: list[str] = []
+    if int(safe_float(entry_snapshot.get("entry_snapshot_observations")) or 0) <= 0:
+        missing.append("entry")
+    if int(safe_float(exit_snapshot.get("exit_snapshot_observations")) or 0) <= 0:
+        missing.append("exit")
+    if missing:
+        label = "_and_".join(missing)
+        return {
+            "quote_proof_status": f"missing_{label}_snapshot_support",
+            "quote_proof_reason": (
+                "quote-consistent exit, but missing independent "
+                + " and ".join(missing)
+                + " snapshot support; exclude from verified profit proof and paper-broker model training"
+            ),
+        }
+    return {
+        "quote_proof_status": "proof_verified",
+        "quote_proof_reason": "entry ask and exit bid are both backed by nearby independent bid/ask snapshots",
+    }
+
+
+def _quote_audit_action(
+    *,
+    quote_conflicts: int,
+    quote_unverified: int,
+    other_blocked: int,
+    proof_entry_missing: int = 0,
+    proof_exit_missing: int = 0,
+) -> str:
     if quote_conflicts > 0:
         return "investigate token/market alias or stale exit quote; excluded P&L must not train or prove the goal"
     if quote_unverified > 0:
         return "collect independent bid/ask snapshots through the paper exit horizon before trusting this cohort"
     if other_blocked > 0:
         return "inspect unknown quote-audit status before using this cohort as proof"
-    return "quote-consistent; eligible for audited paper feedback subject to existing model gates"
+    if proof_entry_missing > 0 or proof_exit_missing > 0:
+        return "collect entry and exit bid/ask snapshots; quote-consistent P&L is not profit-target proof until both sides are supported"
+    return "entry/exit quote-proof verified; eligible for paper feedback subject to existing model gates"
 
 
 def _quote_audit_breakdown(rows: list[dict[str, Any]], *, key: str, limit: int = 12) -> list[dict[str, Any]]:
@@ -163,6 +230,17 @@ def _quote_audit_breakdown(rows: list[dict[str, Any]], *, key: str, limit: int =
         unverified_rows = [row for row in group_rows if _quote_bucket(row) == "unverified"]
         entry_supported_rows = [row for row in group_rows if int(safe_float(row.get("entry_snapshot_observations")) or 0) > 0]
         exit_supported_rows = [row for row in group_rows if int(safe_float(row.get("exit_snapshot_observations")) or 0) > 0]
+        proof_rows = [row for row in group_rows if _quote_proof_verified(row)]
+        proof_entry_missing_rows = [
+            row
+            for row in ok_rows
+            if not _snapshot_supported(row, prefix="entry")
+        ]
+        proof_exit_missing_rows = [
+            row
+            for row in ok_rows
+            if not _snapshot_supported(row, prefix="exit")
+        ]
         other_blocked_rows = [
             row
             for row in group_rows
@@ -170,6 +248,7 @@ def _quote_audit_breakdown(rows: list[dict[str, Any]], *, key: str, limit: int =
         ]
         raw_pnl = sum(float(safe_float(row.get("realized_pnl_usdc")) or 0.0) for row in group_rows)
         audited_pnl = sum(float(safe_float(row.get("realized_pnl_usdc")) or 0.0) for row in ok_rows)
+        proof_pnl = sum(float(safe_float(row.get("realized_pnl_usdc")) or 0.0) for row in proof_rows)
         blocked_statuses = Counter(_quote_bucket(row) for row in group_rows if _quote_bucket(row) != "ok")
         top_status, top_count = ("none", 0) if not blocked_statuses else blocked_statuses.most_common(1)[0]
         breakdown.append(
@@ -184,14 +263,22 @@ def _quote_audit_breakdown(rows: list[dict[str, Any]], *, key: str, limit: int =
                 "entry_snapshot_missing_round_trips": len(group_rows) - len(entry_supported_rows),
                 "exit_snapshot_supported_round_trips": len(exit_supported_rows),
                 "exit_snapshot_missing_round_trips": len(group_rows) - len(exit_supported_rows),
+                "proof_verified_round_trips": len(proof_rows),
+                "proof_entry_snapshot_missing_round_trips": len(proof_entry_missing_rows),
+                "proof_exit_snapshot_missing_round_trips": len(proof_exit_missing_rows),
                 "raw_pnl_usdc": raw_pnl,
                 "audited_pnl_usdc": audited_pnl,
+                "proof_verified_pnl_usdc": proof_pnl,
                 "excluded_from_audit_pnl_usdc": raw_pnl - audited_pnl,
+                "excluded_from_proof_pnl_usdc": raw_pnl - proof_pnl,
                 "raw_positive_round_trips": sum(
                     1 for row in group_rows if float(safe_float(row.get("realized_pnl_usdc")) or 0.0) > 0
                 ),
                 "audited_positive_round_trips": sum(
                     1 for row in ok_rows if float(safe_float(row.get("realized_pnl_usdc")) or 0.0) > 0
+                ),
+                "proof_positive_round_trips": sum(
+                    1 for row in proof_rows if float(safe_float(row.get("realized_pnl_usdc")) or 0.0) > 0
                 ),
                 "top_blocker_status": top_status,
                 "top_blocker_count": top_count,
@@ -199,6 +286,8 @@ def _quote_audit_breakdown(rows: list[dict[str, Any]], *, key: str, limit: int =
                     quote_conflicts=len(conflict_rows),
                     quote_unverified=len(unverified_rows),
                     other_blocked=len(other_blocked_rows),
+                    proof_entry_missing=len(proof_entry_missing_rows),
+                    proof_exit_missing=len(proof_exit_missing_rows),
                 ),
             }
         )
@@ -502,6 +591,11 @@ def _round_trip_row(con, buy: dict[str, Any], sell: dict[str, Any], quantity: fl
         gap_field="exit_fill_nearest_snapshot_bid_gap",
     )
     consistency = _quote_consistency(snapshot, exit_quote, exit_price)
+    proof = _quote_proof_status(
+        consistency=consistency,
+        entry_snapshot=entry_snapshot,
+        exit_snapshot=exit_snapshot,
+    )
     run_rate = _monthly_run_rate(pnl, start, end)
     return {
         "source": "paper_broker",
@@ -534,6 +628,7 @@ def _round_trip_row(con, buy: dict[str, Any], sell: dict[str, Any], quantity: fl
         "exit_quote_timestamp": exit_quote.get("timestamp", ""),
         "exit_quote_source": exit_quote.get("source", ""),
         **consistency,
+        **proof,
         "exit_reason": exit_reason,
         "round_trip_status": status,
         "realized_pnl_usdc": pnl,
@@ -627,10 +722,23 @@ def build_paper_round_trip_evidence(cfg: EngineConfig) -> dict[str, Any]:
     exit_supported = [row for row in round_trips if int(safe_float(row.get("exit_snapshot_observations")) or 0) > 0]
     alias_supported = [row for row in round_trips if row.get("snapshot_match_mode") == "token_only_alias"]
     quote_ok = [row for row in round_trips if row.get("quote_consistency_status") == "ok"]
+    proof_verified = [row for row in quote_ok if _quote_proof_verified(row)]
+    proof_entry_missing = [
+        row
+        for row in quote_ok
+        if not _snapshot_supported(row, prefix="entry")
+    ]
+    proof_exit_missing = [
+        row
+        for row in quote_ok
+        if not _snapshot_supported(row, prefix="exit")
+    ]
     quote_conflicts = [row for row in round_trips if row.get("quote_consistency_status") == "quote_conflict"]
     quote_unverified = [row for row in round_trips if str(row.get("quote_consistency_status") or "").startswith("unverified_")]
     audited_stake = sum(float(safe_float(row.get("stake_usdc")) or 0.0) for row in quote_ok)
     audited_pnl = sum(float(safe_float(row.get("realized_pnl_usdc")) or 0.0) for row in quote_ok)
+    proof_stake = sum(float(safe_float(row.get("stake_usdc")) or 0.0) for row in proof_verified)
+    proof_pnl = sum(float(safe_float(row.get("realized_pnl_usdc")) or 0.0) for row in proof_verified)
     baseline_start = _baseline_start_utc(cfg)
     baseline = _profit_baseline(cfg)
     baseline_equity = safe_float(baseline.get("baseline_equity_usdc"))
@@ -645,6 +753,7 @@ def build_paper_round_trip_evidence(cfg: EngineConfig) -> dict[str, Any]:
     baseline_pnl = sum(float(safe_float(row.get("realized_pnl_usdc")) or 0.0) for row in baseline_rows)
     baseline_positive = [row for row in baseline_rows if float(safe_float(row.get("realized_pnl_usdc")) or 0.0) > 0]
     audited_baseline_rows = [row for row in baseline_rows if row.get("quote_consistency_status") == "ok"]
+    proof_baseline_rows = [row for row in audited_baseline_rows if _quote_proof_verified(row)]
     baseline_entry_supported = [
         row for row in baseline_rows if int(safe_float(row.get("entry_snapshot_observations")) or 0) > 0
     ]
@@ -657,8 +766,20 @@ def build_paper_round_trip_evidence(cfg: EngineConfig) -> dict[str, Any]:
         for row in baseline_rows
         if str(row.get("quote_consistency_status") or "").startswith("unverified_")
     ]
+    baseline_proof_entry_missing = [
+        row
+        for row in audited_baseline_rows
+        if not _snapshot_supported(row, prefix="entry")
+    ]
+    baseline_proof_exit_missing = [
+        row
+        for row in audited_baseline_rows
+        if not _snapshot_supported(row, prefix="exit")
+    ]
     audited_baseline_stake = sum(float(safe_float(row.get("stake_usdc")) or 0.0) for row in audited_baseline_rows)
     audited_baseline_pnl = sum(float(safe_float(row.get("realized_pnl_usdc")) or 0.0) for row in audited_baseline_rows)
+    proof_baseline_stake = sum(float(safe_float(row.get("stake_usdc")) or 0.0) for row in proof_baseline_rows)
+    proof_baseline_pnl = sum(float(safe_float(row.get("realized_pnl_usdc")) or 0.0) for row in proof_baseline_rows)
     summary = {
         "status": "computed",
         "generated_at_utc": now_utc(),
@@ -682,6 +803,12 @@ def build_paper_round_trip_evidence(cfg: EngineConfig) -> dict[str, Any]:
         "audited_realized_pnl_usdc": audited_pnl,
         "audited_realized_roi": audited_pnl / audited_stake if audited_stake > 0 else 0.0,
         "audited_stake_usdc": audited_stake,
+        "proof_verified_closed_round_trips": len(proof_verified),
+        "proof_verified_realized_pnl_usdc": proof_pnl,
+        "proof_verified_realized_roi": proof_pnl / proof_stake if proof_stake > 0 else 0.0,
+        "proof_verified_stake_usdc": proof_stake,
+        "proof_entry_snapshot_missing_round_trips": len(proof_entry_missing),
+        "proof_exit_snapshot_missing_round_trips": len(proof_exit_missing),
         "baseline_start_utc": baseline_start,
         "baseline_closed_round_trips": len(baseline_rows),
         "baseline_positive_round_trips": len(baseline_positive),
@@ -698,6 +825,12 @@ def build_paper_round_trip_evidence(cfg: EngineConfig) -> dict[str, Any]:
         "audited_baseline_realized_pnl_usdc": audited_baseline_pnl,
         "audited_baseline_realized_roi": audited_baseline_pnl / audited_baseline_stake if audited_baseline_stake > 0 else 0.0,
         "audited_baseline_stake_usdc": audited_baseline_stake,
+        "baseline_proof_verified_closed_round_trips": len(proof_baseline_rows),
+        "baseline_proof_verified_realized_pnl_usdc": proof_baseline_pnl,
+        "baseline_proof_verified_realized_roi": proof_baseline_pnl / proof_baseline_stake if proof_baseline_stake > 0 else 0.0,
+        "baseline_proof_verified_stake_usdc": proof_baseline_stake,
+        "baseline_proof_entry_snapshot_missing_round_trips": len(baseline_proof_entry_missing),
+        "baseline_proof_exit_snapshot_missing_round_trips": len(baseline_proof_exit_missing),
         "quote_audit_status_counts": _quote_audit_status_counts(round_trips),
         "quote_audit_by_cohort": _quote_audit_breakdown(round_trips, key="signal_cohort"),
         "quote_audit_by_family": _quote_audit_breakdown(round_trips, key="family"),
@@ -718,6 +851,7 @@ def build_paper_round_trip_evidence(cfg: EngineConfig) -> dict[str, Any]:
             "Snapshot fields show whether each fill pair is backed by exact market/token quotes or token-only alias quote support.",
             "Entry/exit snapshot coverage fields show whether actual buy and sell fill prices have nearby independent quote support.",
             "audited_* P&L excludes paper rows where the broker exit quote conflicts with the independent snapshot trail.",
+            "proof_verified_* P&L additionally requires independent entry ask and exit bid snapshot support; use it for the $100/month proof route.",
             "The price-action model still applies strict executable bid-vs-entry-ask label hurdles before treating a row as positive.",
         ],
     }

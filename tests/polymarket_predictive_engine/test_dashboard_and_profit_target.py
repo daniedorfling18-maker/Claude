@@ -178,6 +178,93 @@ def test_profit_target_uses_baseline_quote_audit_window_not_all_history(tmp_path
     assert payload["on_pace_by_decision_pnl"] is True
 
 
+def test_profit_target_prefers_proof_verified_entry_exit_pnl_when_available(tmp_path):
+    cfg = _config(tmp_path)
+    write_json(
+        cfg.governance_root / "paper_profit_target_baseline.json",
+        {
+            "created_at_utc": (datetime.now(timezone.utc) - timedelta(hours=48)).strftime("%Y-%m-%dT%H:%M:%SZ"),
+            "baseline_equity_usdc": 1000,
+            "baseline_cash_usdc": 1000,
+            "baseline_total_exposure_usdc": 0,
+        },
+    )
+    write_json(
+        cfg.output_root / "polymarket_price_action" / "paper_broker_round_trip_summary.json",
+        {
+            "audited_baseline_realized_pnl_usdc": 12.0,
+            "audited_baseline_closed_round_trips": 5,
+            "baseline_proof_verified_realized_pnl_usdc": 2.5,
+            "baseline_proof_verified_closed_round_trips": 5,
+            "baseline_proof_entry_snapshot_missing_round_trips": 0,
+            "baseline_proof_exit_snapshot_missing_round_trips": 0,
+            "baseline_closed_round_trips": 5,
+            "baseline_quote_conflict_round_trips": 0,
+            "baseline_quote_unverified_round_trips": 0,
+        },
+    )
+
+    payload = write_profit_target_tracker(
+        cfg,
+        {
+            "equity": 1012,
+            "cash": 1012,
+            "total_exposure": 0,
+            "generated_at_utc": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        },
+    )
+
+    assert payload["audited_pnl_since_baseline_usdc"] == approx(12.0)
+    assert payload["proof_verified_pnl_since_baseline_usdc"] == approx(2.5)
+    assert payload["decision_pnl_usdc"] == approx(2.5)
+    assert payload["decision_pnl_source"] == "proof_verified_entry_exit_quotes"
+    assert payload["profit_target_proof_status"] == "verified_entry_exit_quote_coverage"
+    assert payload["verified_evidence_ready"] is True
+
+
+def test_profit_target_blocks_goal_proof_when_entry_or_exit_quote_support_is_missing(tmp_path):
+    cfg = _config(tmp_path)
+    write_json(
+        cfg.governance_root / "paper_profit_target_baseline.json",
+        {
+            "created_at_utc": (datetime.now(timezone.utc) - timedelta(hours=48)).strftime("%Y-%m-%dT%H:%M:%SZ"),
+            "baseline_equity_usdc": 1000,
+            "baseline_cash_usdc": 1000,
+            "baseline_total_exposure_usdc": 0,
+        },
+    )
+    write_json(
+        cfg.output_root / "polymarket_price_action" / "paper_broker_round_trip_summary.json",
+        {
+            "audited_baseline_realized_pnl_usdc": 12.0,
+            "audited_baseline_closed_round_trips": 6,
+            "baseline_proof_verified_realized_pnl_usdc": 10.0,
+            "baseline_proof_verified_closed_round_trips": 5,
+            "baseline_proof_entry_snapshot_missing_round_trips": 1,
+            "baseline_proof_exit_snapshot_missing_round_trips": 0,
+            "baseline_closed_round_trips": 6,
+            "baseline_quote_conflict_round_trips": 0,
+            "baseline_quote_unverified_round_trips": 0,
+        },
+    )
+
+    payload = write_profit_target_tracker(
+        cfg,
+        {
+            "equity": 1012,
+            "cash": 1012,
+            "total_exposure": 0,
+            "generated_at_utc": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        },
+    )
+
+    assert payload["decision_pnl_usdc"] == approx(10.0)
+    assert payload["on_pace_by_decision_pnl"] is False
+    assert payload["profit_target_proof_status"] == "unverified_paper_run_rate"
+    assert "entry_snapshot_missing_round_trips_1" in payload["profit_target_proof_blockers"]
+    assert payload["pnl_audit_state"] == "quote_consistent_but_entry_exit_proof_missing"
+
+
 def test_dashboard_surfaces_stale_open_paper_positions(tmp_path):
     cfg = _config(tmp_path)
     stale = {
@@ -921,7 +1008,7 @@ def test_dashboard_gates_extrapolated_edge_route_evidence(tmp_path):
     target_lane = next(row for row in data["decision_useful_summary"]["evidence_lanes"] if row["lane"] == "Forward paper P&L")
     assert target_card["severity"] == "warn"
     assert "proof unverified_paper_run_rate" in target_card["value"]
-    assert "audited exits 2/5" in target_card["value"]
+    assert "audited round trips 2/5" in target_card["value"]
     assert "audited round trips 2/5" in target_lane["blocker_or_next"]
     assert "needs_5_audited_round_trips_has_2" in data["decision_useful_summary"]["profit_target_proof_blockers"]
     assert "n too small to annualise" in html

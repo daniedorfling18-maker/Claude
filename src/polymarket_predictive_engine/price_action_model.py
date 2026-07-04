@@ -402,8 +402,12 @@ def _prepared_round_trip_event(row: dict[str, str], settings: dict[str, Any], *,
         return None
     if status == "open_marked" and int(safe_float(row.get("observations")) or 0) < minimum_marked_observations:
         return None
-    if source == "paper_broker_round_trip" and str(row.get("quote_consistency_status") or "") != "ok":
-        return None
+    if source == "paper_broker_round_trip":
+        if str(row.get("quote_consistency_status") or "") != "ok":
+            return None
+        proof_status = str(row.get("quote_proof_status") or "").strip()
+        if proof_status and proof_status != "proof_verified":
+            return None
     entry_ask = safe_float(row.get("entry_price"))
     exit_bid = safe_float(row.get("exit_price")) if status.startswith("closed_") else safe_float(row.get("latest_bid"))
     pnl = safe_float(row.get("realized_pnl_usdc")) if status.startswith("closed_") else safe_float(row.get("mark_pnl_usdc"))

@@ -212,10 +212,25 @@ def build_goal_plan(cfg: EngineConfig) -> dict[str, Any]:
     elapsed_days = elapsed_hours / 24.0 if elapsed_hours else 0.0
     audited_pnl = safe_float(paper_round_trip.get("audited_baseline_realized_pnl_usdc"))
     audited_available = audited_pnl is not None
-    decision_pnl = float(audited_pnl) if audited_available else actual_pnl
+    proof_fields_available = "baseline_proof_verified_realized_pnl_usdc" in paper_round_trip
+    proof_pnl = safe_float(paper_round_trip.get("baseline_proof_verified_realized_pnl_usdc"))
+    proof_available = proof_fields_available and proof_pnl is not None
+    decision_pnl = float(proof_pnl) if proof_available else float(audited_pnl) if audited_available else actual_pnl
     decision_monthly_run_rate = (decision_pnl / elapsed_days * 30.0) if elapsed_days > 0 else None
     minimum_audited_round_trips = int(_num(settings.get("minimum_audited_round_trips_for_on_pace"), 5.0))
     audited_round_trips = int(_num(paper_round_trip.get("audited_baseline_closed_round_trips")))
+    proof_round_trips = int(_num(paper_round_trip.get("baseline_proof_verified_closed_round_trips")))
+    proof_entry_missing = int(_num(paper_round_trip.get("baseline_proof_entry_snapshot_missing_round_trips")))
+    proof_exit_missing = int(_num(paper_round_trip.get("baseline_proof_exit_snapshot_missing_round_trips")))
+    evidence_round_trips = proof_round_trips if proof_available else audited_round_trips
+    evidence_blocker_name = "proof_verified_round_trips" if proof_available else "audited_round_trips"
+    decision_pnl_source = (
+        "proof_verified_entry_exit_quotes"
+        if proof_available
+        else "audited_quote_consistent_exits"
+        if audited_available
+        else "raw_account_equity"
+    )
     baseline_round_trips = int(_num(paper_round_trip.get("baseline_closed_round_trips")))
     all_time_quote_conflicts = int(_num(paper_round_trip.get("quote_conflict_round_trips")))
     all_time_quote_unverified = int(_num(paper_round_trip.get("quote_unverified_round_trips")))
@@ -234,27 +249,42 @@ def build_goal_plan(cfg: EngineConfig) -> dict[str, Any]:
         if quote_conflicts > 0
         else "raw_pnl_contains_unverified_quotes"
         if quote_unverified > 0
+        else "quote_consistent_but_entry_exit_proof_missing"
+        if proof_available and (proof_entry_missing > 0 or proof_exit_missing > 0)
+        else "proof_verified_entry_exit_quotes"
+        if proof_available
         else "quote_consistent"
         if audited_available
         else "audit_not_available"
     )
     verified_evidence_ready = bool(
-        audited_available
-        and audited_round_trips >= minimum_audited_round_trips
+        (proof_available or audited_available)
+        and evidence_round_trips >= minimum_audited_round_trips
         and quote_conflicts == 0
         and quote_unverified == 0
+        and (not proof_available or (proof_entry_missing == 0 and proof_exit_missing == 0))
     )
     proof_blockers: list[str] = []
     if not verified_evidence_ready:
-        if not audited_available:
+        if not (proof_available or audited_available):
             proof_blockers.append("paper_round_trip_audit_missing")
-        if audited_round_trips < minimum_audited_round_trips:
-            proof_blockers.append(f"needs_{minimum_audited_round_trips}_audited_round_trips_has_{audited_round_trips}")
+        if evidence_round_trips < minimum_audited_round_trips:
+            proof_blockers.append(f"needs_{minimum_audited_round_trips}_{evidence_blocker_name}_has_{evidence_round_trips}")
         if quote_conflicts > 0:
             proof_blockers.append(f"quote_conflict_round_trips_{quote_conflicts}")
         if quote_unverified > 0:
             proof_blockers.append(f"quote_unverified_round_trips_{quote_unverified}")
-    profit_target_proof_status = "verified_quote_consistent" if verified_evidence_ready else "unverified_paper_run_rate"
+        if proof_available and proof_entry_missing > 0:
+            proof_blockers.append(f"entry_snapshot_missing_round_trips_{proof_entry_missing}")
+        if proof_available and proof_exit_missing > 0:
+            proof_blockers.append(f"exit_snapshot_missing_round_trips_{proof_exit_missing}")
+    profit_target_proof_status = (
+        "verified_entry_exit_quote_coverage"
+        if verified_evidence_ready and proof_available
+        else "verified_quote_consistent"
+        if verified_evidence_ready
+        else "unverified_paper_run_rate"
+    )
     prorated_target = target_daily * elapsed_days
     required_remaining_monthly = max(0.0, target_monthly - decision_pnl)
     required_daily_from_here = required_remaining_monthly / max(1.0, 30.0 - elapsed_days) if target_monthly else 0.0
@@ -266,6 +296,8 @@ def build_goal_plan(cfg: EngineConfig) -> dict[str, Any]:
     price_action_gap = _price_action_gap(price_action_state)
     if audited_available and (quote_conflicts > 0 or quote_unverified > 0) and decision_pnl < actual_pnl:
         main_gap = "raw paper P&L contains quote-conflicted/unverified rows; the $100 route must use audited quote-consistent P&L"
+    elif proof_available and (proof_entry_missing > 0 or proof_exit_missing > 0):
+        main_gap = "quote-consistent paper P&L still lacks full entry/exit quote support; the $100 route must use proof-verified buy/sell prices"
     elif decision_monthly_run_rate is not None and decision_monthly_run_rate >= target_monthly and not verified_evidence_ready:
         main_gap = "paper run-rate is mathematically on pace, but the $100 route is not yet verified by enough quote-consistent paper round trips"
     elif approved_signals:
@@ -282,6 +314,8 @@ def build_goal_plan(cfg: EngineConfig) -> dict[str, Any]:
     recommended_action = (
         "Keep the data, but reset trust to audited quote-consistent paper exits; collect fresh clean exits before counting progress toward $100/month."
         if audited_available and (quote_conflicts > 0 or quote_unverified > 0) and decision_pnl < actual_pnl
+        else "Keep the fills as learning context, but collect entry and exit bid/ask snapshots before counting them as profit-target proof."
+        if proof_available and (proof_entry_missing > 0 or proof_exit_missing > 0)
         else "Collect more quote-consistent paper exits before treating the run-rate as verified progress toward $100/month."
         if decision_monthly_run_rate is not None and decision_monthly_run_rate >= target_monthly and not verified_evidence_ready
         else _recommended_action(approved_signals, probationary, positive_watchlist, price_action_state)
@@ -297,9 +331,14 @@ def build_goal_plan(cfg: EngineConfig) -> dict[str, Any]:
         "raw_account_pnl_since_baseline_usdc": actual_pnl,
         "audited_pnl_since_baseline_usdc": audited_pnl,
         "audited_round_trips_since_baseline": audited_round_trips,
+        "proof_verified_pnl_since_baseline_usdc": proof_pnl,
+        "proof_verified_round_trips_since_baseline": proof_round_trips if proof_fields_available else None,
+        "proof_entry_snapshot_missing_round_trips": proof_entry_missing if proof_fields_available else None,
+        "proof_exit_snapshot_missing_round_trips": proof_exit_missing if proof_fields_available else None,
         "baseline_round_trips_since_baseline": baseline_round_trips,
         "minimum_audited_round_trips_for_on_pace": minimum_audited_round_trips,
         "decision_pnl_usdc": decision_pnl,
+        "decision_pnl_source": decision_pnl_source,
         "decision_monthly_run_rate_usdc": decision_monthly_run_rate,
         "pnl_audit_state": pnl_audit_state,
         "profit_target_proof_status": profit_target_proof_status,

@@ -167,7 +167,11 @@ def test_paper_round_trip_exports_realised_broker_fills_as_strict_feedback(tmp_p
     assert btc_quote_audit["quote_consistent_round_trips"] == 1
     assert btc_quote_audit["audited_pnl_usdc"] == pytest.approx(1.2)
     assert btc_quote_audit["excluded_from_audit_pnl_usdc"] == pytest.approx(0.0)
-    assert btc_quote_audit["recommended_action"] == "quote-consistent; eligible for audited paper feedback subject to existing model gates"
+    assert btc_quote_audit["proof_verified_round_trips"] == 0
+    assert btc_quote_audit["proof_entry_snapshot_missing_round_trips"] == 1
+    assert "collect entry and exit bid/ask snapshots" in btc_quote_audit["recommended_action"]
+    assert summary["proof_verified_closed_round_trips"] == 0
+    assert summary["proof_entry_snapshot_missing_round_trips"] == 2
     assert [row["round_trip_status"] for row in rows] == ["closed_take_profit", "closed_stop_loss"]
     assert rows[0]["entry_price"] == "0.4"
     assert rows[0]["exit_price"] == "0.52"
@@ -179,15 +183,15 @@ def test_paper_round_trip_exports_realised_broker_fills_as_strict_feedback(tmp_p
     assert rows[0]["exit_quote_bid"] == "0.52"
     assert rows[0]["exit_quote_source"] == "websocket_market_features"
     assert rows[0]["quote_consistency_status"] == "ok"
+    assert rows[0]["quote_proof_status"] == "missing_entry_snapshot_support"
     assert rows[0]["exit_fill_snapshot_bid_gap"] == "0.010000000000000009"
     assert rows[0]["signal_cohort"] == "exploratory_crypto_updown_live_model|crypto_btc_updown_daily|outcome=down"
     assert rows[1]["exit_reason"] == "hard_stop_loss"
 
     model = train_price_action_model(cfg)
     source = model["training_event_sources"]["paper_broker_round_trip"]
-    assert model["training_events"] == 2
-    assert source["prepared_rows"] == 2
-    assert source["positive_targets"] == 1
+    assert source["prepared_rows"] == 0
+    assert source["positive_targets"] == 0
 
 
 def test_paper_round_trip_reports_entry_and_exit_snapshot_coverage(tmp_path):
@@ -213,6 +217,7 @@ def test_paper_round_trip_reports_entry_and_exit_snapshot_coverage(tmp_path):
         _insert_order(con, order_id="buy-covered", created_at="2026-07-01T10:00:00Z", market_id="fed-market", token_id="fed-token", side="BUY_YES", price=0.50, stake=5.0, quantity=10.0, source_signal=signal)
         _insert_fill(con, fill_id="fill-buy-covered", order_id="buy-covered", created_at="2026-07-01T10:00:00Z", market_id="fed-market", token_id="fed-token", side="BUY_YES", price=0.50, quantity=10.0)
         _insert_snapshot(con, snapshot_id="snap-covered-entry", collected_at="2026-07-01T10:00:30Z", market_id="fed-market", token_id="fed-token", bid=0.49, ask=0.50)
+        _insert_snapshot(con, snapshot_id="snap-covered-interval-exit", collected_at="2026-07-01T10:10:00Z", market_id="fed-market", token_id="fed-token", bid=0.55, ask=0.56)
         _insert_snapshot(con, snapshot_id="snap-covered-exit", collected_at="2026-07-01T10:10:30Z", market_id="fed-market", token_id="fed-token", bid=0.55, ask=0.56)
         _insert_order(con, order_id="sell-covered", created_at="2026-07-01T10:10:00Z", market_id="fed-market", token_id="fed-token", side="SELL_YES", price=0.55, stake=5.5, quantity=10.0, source_signal={"side": "SELL_YES", "reason": "take_profit", "quote": {"best_bid": 0.55, "best_ask": 0.56, "spread": 0.01, "timestamp": "2026-07-01T10:10:00Z", "source": "websocket_market_features"}})
         _insert_fill(con, fill_id="fill-sell-covered", order_id="sell-covered", created_at="2026-07-01T10:10:00Z", market_id="fed-market", token_id="fed-token", side="SELL_YES", price=0.55, quantity=10.0)
@@ -228,16 +233,27 @@ def test_paper_round_trip_reports_entry_and_exit_snapshot_coverage(tmp_path):
     assert summary["entry_snapshot_missing_round_trips"] == 0
     assert summary["exit_snapshot_supported_round_trips"] == 1
     assert summary["exit_snapshot_missing_round_trips"] == 0
+    assert summary["proof_verified_closed_round_trips"] == 1
+    assert summary["proof_verified_realized_pnl_usdc"] == pytest.approx(0.5)
+    assert summary["proof_entry_snapshot_missing_round_trips"] == 0
+    assert summary["proof_exit_snapshot_missing_round_trips"] == 0
     assert rows[0]["entry_snapshot_match_mode"] == "market_and_token"
     assert rows[0]["entry_snapshot_observations"] == "1"
     assert rows[0]["entry_snapshot_ask"] == "0.5"
     assert float(rows[0]["entry_fill_snapshot_ask_gap"]) == pytest.approx(0.0)
     assert rows[0]["exit_snapshot_match_mode"] == "market_and_token"
-    assert rows[0]["exit_snapshot_observations"] == "1"
+    assert rows[0]["exit_snapshot_observations"] == "2"
     assert rows[0]["exit_snapshot_bid"] == "0.55"
+    assert rows[0]["quote_proof_status"] == "proof_verified"
     assert float(rows[0]["exit_fill_nearest_snapshot_bid_gap"]) == pytest.approx(0.0)
     assert cohort["entry_snapshot_supported_round_trips"] == 1
     assert cohort["exit_snapshot_supported_round_trips"] == 1
+    assert cohort["proof_verified_round_trips"] == 1
+
+    model = train_price_action_model(cfg)
+    source = model["training_event_sources"]["paper_broker_round_trip"]
+    assert source["prepared_rows"] == 1
+    assert source["positive_targets"] == 1
 
 
 def test_paper_round_trip_accepts_fill_when_exit_quote_metadata_is_stale(tmp_path):
@@ -296,15 +312,18 @@ def test_paper_round_trip_accepts_fill_when_exit_quote_metadata_is_stale(tmp_pat
     assert summary["quote_consistent_round_trips"] == 1
     assert summary["quote_conflict_round_trips"] == 0
     assert summary["audited_realized_pnl_usdc"] == pytest.approx(1.0)
+    assert summary["proof_verified_closed_round_trips"] == 0
+    assert summary["proof_entry_snapshot_missing_round_trips"] == 1
     assert rows[0]["quote_consistency_status"] == "ok"
+    assert rows[0]["quote_proof_status"] == "missing_entry_snapshot_support"
     assert "stale metadata" in rows[0]["quote_consistency_reason"]
     assert float(rows[0]["exit_quote_snapshot_bid_gap"]) == pytest.approx(0.4)
     assert float(rows[0]["exit_fill_snapshot_bid_gap"]) == pytest.approx(0.0)
 
     model = train_price_action_model(cfg)
     source = model["training_event_sources"]["paper_broker_round_trip"]
-    assert source["prepared_rows"] == 1
-    assert source["positive_targets"] == 1
+    assert source["prepared_rows"] == 0
+    assert source["positive_targets"] == 0
 
 
 def test_paper_round_trip_quarantines_quote_conflicts_from_model_training(tmp_path):

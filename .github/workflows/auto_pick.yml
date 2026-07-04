@@ -21,8 +21,8 @@ on:
     # From 4 July onward use a half-hour watchdog across active match windows.
     # The script only spends odds credits when a locked-card/live fixture is due,
     # so broad no-match runs are cheap but protect us from a single missed cron.
-    - cron: '05,35 14-23 4-19 7 *'
-    - cron: '05,35 0-3 5-20 7 *'
+    - cron: '5,35 14-23 4-19 7 *'
+    - cron: '5,35 0-3 5-20 7 *'
 
 permissions:
   contents: read

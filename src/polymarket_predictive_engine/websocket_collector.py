@@ -328,16 +328,60 @@ def _with_position_targets(
     if not position_rows:
         return selected[:max_assets]
     out: list[dict[str, Any]] = []
-    seen_ids: set[str] = set()
+    seen_by_id: dict[str, dict[str, Any]] = {}
     for row in position_rows + selected:
         token_id = _token_id(row)
-        if not token_id or token_id in seen_ids:
+        if not token_id:
+            continue
+        existing = seen_by_id.get(token_id)
+        if existing is not None:
+            _merge_target_metadata(existing, row)
             continue
         out.append(row)
-        seen_ids.add(token_id)
+        seen_by_id[token_id] = row
         if len(out) >= max_assets:
             break
     return out
+
+
+def _merge_target_metadata(existing: dict[str, Any], incoming: dict[str, Any]) -> None:
+    """Preserve all websocket target meanings when priority lanes share a token."""
+
+    append_fields = {"position_source", "selection_reason", "websocket_target_reason"}
+    always_copy_prefixes = (
+        "paper_confirmation_blocker_",
+        "current_positive_analogue_",
+        "strategy_v2_",
+        "profit_sprint_",
+        "fast_feedback_",
+        "research_",
+    )
+    always_copy_keys = {
+        "feedback_broaden_target",
+        "open_position_target",
+        "paper_confirmation_blocker_target",
+        "websocket_target_match_source",
+    }
+    for key, value in incoming.items():
+        if value is None or value == "":
+            continue
+        if key in append_fields:
+            merged: list[str] = []
+            for part in str(existing.get(key) or "").split("+"):
+                _append_unique(merged, part)
+            for part in str(value).split("+"):
+                _append_unique(merged, part)
+            if merged:
+                existing[key] = "+".join(merged)
+            continue
+        if key in always_copy_keys or key.startswith(always_copy_prefixes):
+            if isinstance(value, bool):
+                existing[key] = _boolish(existing.get(key)) or value
+            elif not str(existing.get(key) or "").strip():
+                existing[key] = value
+            continue
+        if not str(existing.get(key) or "").strip():
+            existing[key] = value
 
 
 def _match_keys(row: dict[str, Any]) -> set[str]:

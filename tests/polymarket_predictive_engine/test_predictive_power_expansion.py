@@ -1086,7 +1086,6 @@ def test_websocket_reserves_in_band_paper_confirmation_blocker_tokens(tmp_path):
                 "state": "in_band_historical_analogue_gaps",
                 "targets": [
                     {
-                        "token_id": "proof-in-band-token",
                         "family": "crypto_btc_updown_event",
                         "market_slug": "bitcoin-up-or-down-july-4-2026",
                         "question": "Bitcoin Up or Down - July 4?",
@@ -1125,6 +1124,19 @@ def test_websocket_reserves_in_band_paper_confirmation_blocker_tokens(tmp_path):
         cfg.output_root / "polymarket_liquidity_discovery" / "liquidity_watchlist.csv",
         [
             {
+                "token_id": "proof-in-band-token",
+                "family": "crypto_btc_updown_event",
+                "market_slug": "bitcoin-up-or-down-july-4-2026",
+                "question": "Bitcoin Up or Down - July 4?",
+                "outcome": "Up",
+                "best_bid": "0.49",
+                "best_ask": "0.50",
+                "tradable_liquidity_candidate": "true",
+                "liquidity": "2500",
+                "spread": "0.01",
+                "time_to_close_hours": "2",
+            },
+            {
                 "token_id": "fallback-token",
                 "family": "crypto_btc_special",
                 "tradable_liquidity_candidate": "true",
@@ -1144,6 +1156,7 @@ def test_websocket_reserves_in_band_paper_confirmation_blocker_tokens(tmp_path):
     assert len(proof_targets) == 1
     assert proof_targets[0]["paper_confirmation_blocker_gate"] == "no_positive_historical_analogue_examples"
     assert proof_targets[0]["paper_confirmation_blocker_query"] == "btc updown"
+    assert proof_targets[0]["websocket_target_match_source"] == "slug_outcome_watchlist"
     assert proof_targets[0]["websocket_target_reason"] == "reserve_paper_confirmation_blocker_for_forward_bid_tracking"
 
 

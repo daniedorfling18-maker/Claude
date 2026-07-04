@@ -917,7 +917,23 @@ def _current_positive_analogue_priority_rows(cfg: EngineConfig, settings: dict[s
     return selected
 
 
-def _paper_confirmation_blocker_priority_rows(cfg: EngineConfig, settings: dict[str, Any]) -> list[dict[str, Any]]:
+def _paper_confirmation_blocker_match_index(rows: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
+    index: dict[str, dict[str, Any]] = {}
+    for row in rows:
+        token_id = _token_id(row)
+        if not token_id:
+            continue
+        for key in _match_keys(row):
+            index.setdefault(key, row)
+    return index
+
+
+def _paper_confirmation_blocker_priority_rows(
+    cfg: EngineConfig,
+    settings: dict[str, Any],
+    *,
+    liquidity_rows: list[dict[str, Any]] | None = None,
+) -> list[dict[str, Any]]:
     """Reserve exact websocket tokens for in-band paper-proof blocker targets.
 
     These rows are not trade approvals. They keep the live bid/ask feed focused
@@ -941,6 +957,7 @@ def _paper_confirmation_blocker_priority_rows(cfg: EngineConfig, settings: dict[
     liquidity_proxy = safe_float(settings.get("paper_confirmation_blocker_liquidity_proxy"))
     if liquidity_proxy is None or liquidity_proxy <= 0:
         liquidity_proxy = safe_float(settings.get("research_min_liquidity")) or 25.0
+    match_index = _paper_confirmation_blocker_match_index(liquidity_rows or [])
     selected: list[dict[str, Any]] = []
     seen_ids: set[str] = set()
     for target in targets:
@@ -948,23 +965,38 @@ def _paper_confirmation_blocker_priority_rows(cfg: EngineConfig, settings: dict[
             continue
         if _boolish(target.get("entry_band_wait")):
             continue
-        token_id = _token_id(target)
+        target_token_id = _token_id(target)
+        matched_row: dict[str, Any] = {}
+        token_id = target_token_id
+        if not token_id:
+            for key in _match_keys(target):
+                candidate = match_index.get(key)
+                if candidate:
+                    matched_row = candidate
+                    token_id = _token_id(candidate)
+                    break
         if not token_id or token_id in seen_ids:
             continue
         bid = safe_float(target.get("latest_bid"))
+        if bid is None:
+            bid = safe_float(matched_row.get("best_bid"))
         ask = safe_float(target.get("latest_ask"))
+        if ask is None:
+            ask = safe_float(matched_row.get("best_ask"))
         spread = safe_float(target.get("latest_spread"))
+        if spread is None:
+            spread = safe_float(matched_row.get("spread"))
         midpoint = (bid + ask) / 2.0 if bid is not None and ask is not None else ""
         liquidity = safe_float(target.get("liquidity"))
         if liquidity is None or liquidity <= 0:
-            liquidity = liquidity_proxy
+            liquidity = safe_float(matched_row.get("liquidity")) or liquidity_proxy
         selected.append(
             {
                 "token_id": token_id,
-                "market_slug": target.get("market_slug", ""),
-                "question": target.get("question", ""),
-                "outcome": target.get("outcome", ""),
-                "family": target.get("family", "paper_confirmation_blocker"),
+                "market_slug": target.get("market_slug") or matched_row.get("market_slug", ""),
+                "question": target.get("question") or matched_row.get("question", ""),
+                "outcome": target.get("outcome") or matched_row.get("outcome", ""),
+                "family": target.get("family") or matched_row.get("family", "paper_confirmation_blocker"),
                 "best_bid": "" if bid is None else bid,
                 "best_ask": "" if ask is None else ask,
                 "midpoint": midpoint,
@@ -980,6 +1012,7 @@ def _paper_confirmation_blocker_priority_rows(cfg: EngineConfig, settings: dict[
                 "paper_confirmation_blocker_validation_roi": target.get("historical_analogue_validation_roi", ""),
                 "paper_confirmation_blocker_decision_use": target.get("decision_use", ""),
                 "websocket_target_reason": "reserve_paper_confirmation_blocker_for_forward_bid_tracking",
+                "websocket_target_match_source": "direct_token" if target_token_id else "slug_outcome_watchlist",
             }
         )
         seen_ids.add(token_id)
@@ -1015,7 +1048,7 @@ def _liquidity_target_rows(cfg: EngineConfig, settings: dict[str, Any]) -> list[
     candidates.sort(key=_candidate_rank, reverse=True)
 
     current_analogue_rows = _current_positive_analogue_priority_rows(cfg, settings)
-    paper_blocker_rows = _paper_confirmation_blocker_priority_rows(cfg, settings)
+    paper_blocker_rows = _paper_confirmation_blocker_priority_rows(cfg, settings, liquidity_rows=rows)
     strategy_v2_rows = _strategy_v2_priority_rows(cfg, settings)
     priority_rows = _profit_sprint_priority_rows(cfg, candidates)
     forced_rows: list[dict[str, Any]] = []

@@ -196,9 +196,13 @@ def _paper_confirmation_candidates(cfg: EngineConfig, settings: dict[str, Any]) 
             continue
         if str(row.get("forward_edge_blocker") or "").strip():
             continue
-        if (safe_float(row.get("forward_shadow_pnl_usdc")) or 0.0) <= 0:
-            continue
-        if (safe_float(row.get("forward_shadow_roi")) or 0.0) <= 0:
+        shadow_ok = (safe_float(row.get("forward_shadow_pnl_usdc")) or 0.0) > 0 and (
+            safe_float(row.get("forward_shadow_roi")) or 0.0
+        ) > 0
+        paper_ok = (safe_float(row.get("forward_paper_pnl_usdc")) or 0.0) > 0 and (
+            safe_float(row.get("forward_paper_roi")) or 0.0
+        ) > 0
+        if not (shadow_ok or paper_ok):
             continue
         candidates.append(row)
     candidates.sort(key=lambda item: safe_float(item.get("priority_score")) or 0.0, reverse=True)
@@ -1277,6 +1281,19 @@ def _reject(row: dict[str, Any], reason: str) -> dict[str, Any]:
     }
 
 
+def _preferred_numeric_metric(row: dict[str, Any], *keys: str) -> float | str:
+    fallback: float | None = None
+    for key in keys:
+        value = safe_float(row.get(key))
+        if value is None:
+            continue
+        if fallback is None:
+            fallback = value
+        if value > 0:
+            return value
+    return "" if fallback is None else fallback
+
+
 def _build_signal(
     row: dict[str, str],
     *,
@@ -1326,7 +1343,9 @@ def _build_signal(
         max_edge = float(safe_float(settings.get("low_price_tick_max_edge")) or 0.02)
 
     target_edge = ask * take_profit_return
-    realized_roi = safe_float(cohort.get("realized_roi") or cohort.get("forward_shadow_roi") or cohort.get("forward_paper_roi"))
+    realized_roi = safe_float(
+        _preferred_numeric_metric(cohort, "realized_roi", "forward_shadow_roi", "forward_paper_roi")
+    )
     if realized_roi is not None and realized_roi > 0:
         target_edge = max(target_edge, ask * min(realized_roi, take_profit_return * 2.0))
     edge = max(min_edge, min(max_edge, target_edge))
@@ -1391,9 +1410,11 @@ def _build_signal(
             if source == "low_price_tick_probe"
             else "cohort_bid_ask_round_trip_approved"
         ),
-        "price_action_cohort_realized_roi": cohort.get(
+        "price_action_cohort_realized_roi": _preferred_numeric_metric(
+            cohort,
             "realized_roi",
-            cohort.get("forward_shadow_roi", cohort.get("forward_paper_roi", "")),
+            "forward_shadow_roi",
+            "forward_paper_roi",
         ),
         "price_action_cohort_win_rate": cohort.get("win_rate", cohort.get("validation_win_rate", "")),
         "price_action_cohort_closed_trades": cohort.get("closed_trades", cohort.get("validation_trades", "")),

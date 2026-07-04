@@ -279,10 +279,13 @@ def test_price_action_feedback_ingests_forward_paper_pnl_by_signal_cohort(tmp_pa
     assert payload["forward_paper_positive_cohorts"] == 1
     assert payload["best_forward_paper_monthly_run_rate_usdc"] == approx(125.0)
     assert payload["forward_paper_goal_gap_usdc"] == approx(0.0)
+    assert payload["paper_confirmation_candidates"] == 1
     assert payload["collection_queries"] == ["world cup"]
     assert payload["top_cohorts"][0]["source"] == "paper_broker_forward"
     assert payload["top_cohorts"][0]["evidence_type"] == "forward_paper_bid_ask_trade_pnl"
     assert payload["forward_paper_preview"][0]["forward_paper_pnl_usdc"] == approx(6.5)
+    assert payload["paper_confirmation_preview"][0]["source"] == "paper_broker_forward"
+    assert payload["paper_confirmation_preview"][0]["forward_paper_pnl_usdc"] == approx(6.5)
 
 
 def test_price_action_feedback_demotes_probationary_paper_when_audited_pnl_is_negative(tmp_path):
@@ -368,6 +371,7 @@ def test_price_action_feedback_uses_audited_paper_pnl_over_raw_conflicted_pnl(tm
 
     assert payload["forward_paper_positive_cohorts"] == 0
     assert payload["best_forward_paper_monthly_run_rate_usdc"] == approx(0.0)
+    assert payload["paper_confirmation_candidates"] == 0
     row = payload["forward_paper_preview"][0]
     assert row["forward_paper_pnl_usdc"] == approx(0.22)
     assert row["raw_paper_total_pnl_usdc"] == approx(53.88)

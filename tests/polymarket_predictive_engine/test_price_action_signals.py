@@ -434,6 +434,76 @@ def test_trusted_shadow_confirmation_backlog_compiles_paper_probe(tmp_path):
     assert float(signals[0]["max_hold_minutes_before_exit"]) == 45.0
 
 
+def test_trusted_forward_paper_confirmation_backlog_compiles_paper_probe(tmp_path):
+    cfg = _cfg(tmp_path)
+    root = cfg.output_root / "polymarket_price_action"
+    feedback = _paper_confirmation_feedback_payload(cohort="crypto_eth_updown_event")
+    feedback["paper_confirmation_preview"][0].update(
+        {
+            "source": "paper_broker_forward",
+            "forward_shadow_pnl_usdc": 0.0,
+            "forward_shadow_roi": 0.0,
+            "forward_paper_pnl_usdc": 0.19,
+            "forward_paper_roi": 0.0475,
+            "recommended_collection_query": "eth updown",
+        }
+    )
+    write_json(cfg.governance_root / "price_action_feedback.json", feedback)
+    write_csv(
+        root / "price_action_scout_round_trip_evidence.csv",
+        [
+            _round_trip_row(
+                source="profit_sprint_target",
+                signal_cohort="price_action_scout|profit_sprint|crypto_eth_updown_event",
+                family="crypto_eth_updown_event",
+                market_slug="ethereum-up-or-down-july-4-2026-8am-et",
+                question="Ethereum Up or Down - July 4, 8AM ET",
+                outcome="Up",
+                token_id="eth-token",
+                latest_bid="0.52",
+                latest_ask="0.53",
+                latest_spread="0.01",
+            )
+        ],
+    )
+    write_csv(
+        root / "price_action_scout_entries.csv",
+        [
+            _entry_row(
+                source="profit_sprint_target",
+                signal_cohort="price_action_scout|profit_sprint|crypto_eth_updown_event",
+                family="crypto_eth_updown_event",
+                market_slug="ethereum-up-or-down-july-4-2026-8am-et",
+                question="Ethereum Up or Down - July 4, 8AM ET",
+                outcome="Up",
+                token_id="eth-token",
+                entry_price="0.53",
+                liquidity="600",
+                spread="0.01",
+            )
+        ],
+    )
+    write_csv(
+        root / "microstructure_trade_events.csv",
+        _positive_analogue_rows(
+            family="crypto_eth_updown_event",
+            market_slug="ethereum-up-or-down-july-4-2026-8am-et",
+            outcome="Up",
+            entry_bid="0.52",
+            entry_ask="0.53",
+        ),
+    )
+
+    summary = build_price_action_paper_signals(cfg)
+    signals = read_csv_rows(root / "price_action_paper_signals.csv")
+
+    assert summary["signals"] == 1
+    assert summary["paper_confirmation_candidates"] == 1
+    assert signals[0]["signal_cohort"] == "crypto_eth_updown_event"
+    assert signals[0]["price_action_entry_source"] == "paper_confirmation_candidate"
+    assert float(signals[0]["price_action_cohort_realized_roi"]) == 0.0475
+
+
 def test_paper_confirmation_signal_respects_broker_entry_price_band(tmp_path):
     cfg = _cfg(tmp_path)
     root = cfg.output_root / "polymarket_price_action"

@@ -464,6 +464,11 @@ def build_price_action_feedback(cfg: EngineConfig) -> dict[str, Any]:
         and _num(row.get("forward_shadow_pnl_usdc")) > 0
         and _num(row.get("forward_shadow_roi")) > 0
     ]
+    positive_confirmation = sorted(
+        [*positive_forward_paper, *positive_forward_shadow],
+        key=lambda row: _num(row.get("priority_score")),
+        reverse=True,
+    )
 
     collection_queries: list[str] = []
     for query in validation_gap_queries:
@@ -530,12 +535,12 @@ def build_price_action_feedback(cfg: EngineConfig) -> dict[str, Any]:
         "forward_paper_goal_gap_usdc": max(target_monthly_profit - best_forward_paper_run_rate, 0.0),
         "forward_shadow_cohorts": len(forward_shadow),
         "forward_shadow_positive_cohorts": len(positive_forward_shadow),
-        "paper_confirmation_candidates": len(positive_forward_shadow),
+        "paper_confirmation_candidates": len(positive_confirmation),
         "paper_bridge_signals": bridge_summary.get("signals", 0) if isinstance(bridge_summary, dict) else 0,
         "top_cohorts": cohorts[:20],
         "forward_paper_preview": forward_paper[:10],
         "forward_shadow_preview": forward_shadow[:10],
-        "paper_confirmation_preview": positive_forward_shadow[:10],
+        "paper_confirmation_preview": positive_confirmation[:10],
         "promotion_candidate_preview": promotion_candidates[:10],
         "positive_collect_preview": positive_collect[:10],
         "suppressed_preview": suppressed[:10],

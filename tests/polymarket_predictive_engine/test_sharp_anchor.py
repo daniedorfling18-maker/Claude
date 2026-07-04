@@ -204,6 +204,149 @@ def test_build_sharp_anchor_joins_h2h_match_yes_question_without_guessing_no_sid
     assert {sample["outcome"] for sample in summary["skipped_no_token_samples"]} == {"France", "Draw"}
 
 
+def test_build_sharp_anchor_joins_local_three_way_h2h_token_map(tmp_path):
+    cfg = EngineConfig(
+        raw={
+            "paths": {"output_root": str(tmp_path / "outputs")},
+            "sharp_anchor": {
+                "input_path": str(tmp_path / "sharp.csv"),
+                "token_map_path": str(tmp_path / "map.csv"),
+                "match_public_search_enabled": False,
+            },
+        },
+        path=tmp_path / "cfg.yaml",
+    )
+    _write(
+        tmp_path / "sharp.csv",
+        [
+            {
+                "market_slug": "Australia vs Egypt",
+                "outcome": "Australia",
+                "decimal_odds": "2.10",
+                "market_key": "h2h",
+                "sport": "soccer_fifa_world_cup",
+            },
+            {
+                "market_slug": "Australia vs Egypt",
+                "outcome": "Egypt",
+                "decimal_odds": "3.80",
+                "market_key": "h2h",
+                "sport": "soccer_fifa_world_cup",
+            },
+            {
+                "market_slug": "Australia vs Egypt",
+                "outcome": "Draw",
+                "decimal_odds": "3.40",
+                "market_key": "h2h",
+                "sport": "soccer_fifa_world_cup",
+            },
+        ],
+        ["market_slug", "outcome", "decimal_odds", "market_key", "sport"],
+    )
+    _write(
+        tmp_path / "map.csv",
+        [
+            {
+                "token_id": "AUSTRALIA_WIN",
+                "market_slug": "who-will-win-australia-vs-egypt",
+                "question": "Who will win Australia vs Egypt?",
+                "outcome": "Australia",
+            },
+            {
+                "token_id": "EGYPT_WIN",
+                "market_slug": "who-will-win-australia-vs-egypt",
+                "question": "Who will win Australia vs Egypt?",
+                "outcome": "Egypt",
+            },
+            {
+                "token_id": "DRAW_WIN",
+                "market_slug": "who-will-win-australia-vs-egypt",
+                "question": "Who will win Australia vs Egypt?",
+                "outcome": "Draw",
+            },
+        ],
+        ["token_id", "market_slug", "question", "outcome"],
+    )
+
+    summary = build_sharp_anchor(cfg)
+
+    assert summary["fundamental_rows"] == 3
+    assert summary["skipped_no_token"] == 0
+    assert summary["token_map_joins"] == 3
+    assert summary["h2h_public_search"]["enabled"] is False
+    assert summary["h2h_public_search_token_joins"] == 0
+    out = _read(tmp_path / "outputs" / "polymarket_training" / "sharp_fundamental_probabilities.csv")
+    assert {row["token_id"] for row in out} == {"AUSTRALIA_WIN", "EGYPT_WIN", "DRAW_WIN"}
+
+
+def test_build_sharp_anchor_flags_local_advance_market_as_composite_fair_needed(tmp_path):
+    cfg = EngineConfig(
+        raw={
+            "paths": {"output_root": str(tmp_path / "outputs")},
+            "sharp_anchor": {
+                "input_path": str(tmp_path / "sharp.csv"),
+                "token_map_path": str(tmp_path / "map.csv"),
+                "match_public_search_enabled": False,
+            },
+        },
+        path=tmp_path / "cfg.yaml",
+    )
+    _write(
+        tmp_path / "sharp.csv",
+        [
+            {
+                "market_slug": "Canada vs Morocco",
+                "outcome": "Canada",
+                "decimal_odds": "2.10",
+                "market_key": "h2h",
+                "sport": "soccer_fifa_world_cup",
+            },
+            {
+                "market_slug": "Canada vs Morocco",
+                "outcome": "Morocco",
+                "decimal_odds": "3.80",
+                "market_key": "h2h",
+                "sport": "soccer_fifa_world_cup",
+            },
+            {
+                "market_slug": "Canada vs Morocco",
+                "outcome": "Draw",
+                "decimal_odds": "3.40",
+                "market_key": "h2h",
+                "sport": "soccer_fifa_world_cup",
+            },
+        ],
+        ["market_slug", "outcome", "decimal_odds", "market_key", "sport"],
+    )
+    _write(
+        tmp_path / "map.csv",
+        [
+            {
+                "token_id": "CANADA_ADVANCE_YES",
+                "market_slug": "will-canada-advance-against-morocco",
+                "question": "Will Canada advance against Morocco?",
+                "outcome": "Yes",
+            },
+            {
+                "token_id": "CANADA_ADVANCE_NO",
+                "market_slug": "will-canada-advance-against-morocco",
+                "question": "Will Canada advance against Morocco?",
+                "outcome": "No",
+            },
+        ],
+        ["token_id", "market_slug", "question", "outcome"],
+    )
+
+    summary = build_sharp_anchor(cfg)
+
+    assert summary["fundamental_rows"] == 0
+    assert summary["skipped_no_token"] == 3
+    assert summary["token_map_joins"] == 0
+    assert summary["token_map_h2h_blocked_samples"][0]["reason"] == "advance_market_needs_composite_fair"
+    canada_sample = next(sample for sample in summary["skipped_no_token_samples"] if sample["outcome"] == "Canada")
+    assert canada_sample["reason"] == "advance_market_needs_composite_fair"
+
+
 def test_build_sharp_anchor_enriches_h2h_match_tokens_from_public_search(tmp_path, monkeypatch):
     cfg = EngineConfig(
         raw={

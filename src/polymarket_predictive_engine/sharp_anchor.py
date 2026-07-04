@@ -191,6 +191,49 @@ def _event_teams_from_text(value: object) -> tuple[str, str] | None:
     return None
 
 
+def _event_teams_from_question(value: object) -> tuple[str, str] | None:
+    text = str(value or "").strip()
+    patterns = [
+        r"^Who\s+will\s+win\s+(.*?)\s+vs\.?\s+(.*?)(?:\?|$)",
+        r"^Who\s+will\s+win\s+(.*?)\s+v\.?\s+(.*?)(?:\?|$)",
+        r"^Will\s+(.*?)\s+vs\.?\s+(.*?)\s+end\s+in\s+a\s+draw(?:\?|$)",
+        r"^Will\s+(.*?)\s+v\.?\s+(.*?)\s+end\s+in\s+a\s+draw(?:\?|$)",
+        r"^Will\s+(.*?)\s+(?:advance|advances|qualify|qualifies|go\s+through|progress)\s+against\s+(.*?)(?:\?|$)",
+    ]
+    for pattern in patterns:
+        match = re.match(pattern, text, re.I)
+        if match:
+            left = match.group(1).strip(" .")
+            right = match.group(2).strip(" .")
+            if left and right:
+                return left, right
+    return None
+
+
+def _h2h_market_shape_blocker(row: dict[str, Any]) -> str:
+    text = " ".join(
+        str(row.get(key) or "")
+        for key in ("question", "market_slug", "slug", "market", "group", "event", "event_slug")
+    ).lower()
+    if re.search(r"\b(advance|advances|qualify|qualifies|qualification|go through|progress)\b", text):
+        return "advance_market_needs_composite_fair"
+    if re.search(r"\b(spread|handicap|total|over|under|goals?|points?|corners?|cards?)\b", text):
+        return "ambiguous_market_shape"
+    return ""
+
+
+def _unique_pairs(values: Iterable[tuple[str, str]]) -> list[tuple[str, str]]:
+    seen: set[tuple[str, str]] = set()
+    unique: list[tuple[str, str]] = []
+    for group, outcome in values:
+        key = (str(group), str(outcome))
+        if not key[0] or not key[1] or key in seen:
+            continue
+        seen.add(key)
+        unique.append(key)
+    return unique
+
+
 def _public_search_headers(settings: dict[str, Any]) -> dict[str, str]:
     headers = dict(DEFAULT_PUBLIC_SEARCH_HEADERS)
     configured = settings.get("public_search_headers")
@@ -413,6 +456,119 @@ def _h2h_public_market_keys(market: dict[str, Any]) -> list[tuple[str, str]]:
     return []
 
 
+def _h2h_token_map_keys(row: dict[str, Any], outcome: str) -> tuple[list[tuple[str, str]], str]:
+    """Return h2h sharp-anchor keys for a local token-map row.
+
+    Local snapshots are preferable to public-search enrichment when they already
+    carry the relevant market.  This parser is intentionally conservative: it
+    maps only explicit 90-minute/result win-or-draw markets and refuses
+    advance/qualify/handicap/total shapes because those need different fairs.
+    """
+    blocker = _h2h_market_shape_blocker(row)
+    question = str(row.get("question") or "").strip()
+    outcome_text = str(outcome or "").strip()
+    outcome_key = _team_key(outcome_text)
+    outcome_lower = outcome_text.lower()
+    is_yes = outcome_lower in {"yes", "y"}
+
+    explicit_subject = _match_subject_from_question(question)
+    if explicit_subject:
+        if blocker:
+            subject, opponent = explicit_subject
+            return [], blocker
+        if not is_yes:
+            return [], ""
+        subject, opponent = explicit_subject
+        return _unique_pairs(
+            [
+                (_match_event_slug(subject, opponent), subject),
+                (_match_event_slug(opponent, subject), subject),
+            ]
+        ), ""
+
+    text_candidates = [
+        question,
+        row.get("event"),
+        row.get("event_slug"),
+        row.get("market_slug"),
+        row.get("slug"),
+        row.get("market"),
+        row.get("group"),
+    ]
+    event_teams: tuple[str, str] | None = None
+    for value in text_candidates:
+        event_teams = _event_teams_from_question(value) or _event_teams_from_text(value)
+        if event_teams:
+            break
+    if not event_teams:
+        return [], blocker
+
+    left, right = event_teams
+    left_key = _team_key(left)
+    right_key = _team_key(right)
+    if blocker:
+        # If the row identifies a team outcome in this fixture, surface the
+        # blocker against the corresponding sharp h2h row instead of silently
+        # leaving it as a generic unmapped anchor.
+        if is_yes:
+            win_match = re.match(r"^Will\s+(.*?)\s+win(?:\s+on\s+\d{4}-\d{2}-\d{2})?(?:\?|$)", question, re.I)
+            advance_match = re.match(
+                r"^Will\s+(.*?)\s+(?:advance|advances|qualify|qualifies|go\s+through|progress)\s+against\s+(.*?)(?:\?|$)",
+                question,
+                re.I,
+            )
+            subject = (
+                win_match.group(1).strip()
+                if win_match
+                else advance_match.group(1).strip()
+                if advance_match
+                else ""
+            )
+            if _team_key(subject) in {left_key, right_key}:
+                return _unique_pairs(
+                    [
+                        (_match_event_slug(left, right), subject),
+                        (_match_event_slug(right, left), subject),
+                    ]
+                ), blocker
+        if outcome_key in {left_key, right_key, "draw"}:
+            return _unique_pairs(
+                [
+                    (_match_event_slug(left, right), outcome_text),
+                    (_match_event_slug(right, left), outcome_text),
+                ]
+            ), blocker
+        return [], blocker
+
+    win_match = re.match(r"^Will\s+(.*?)\s+win(?:\s+on\s+\d{4}-\d{2}-\d{2})?(?:\?|$)", question, re.I)
+    if is_yes and win_match:
+        subject = win_match.group(1).strip()
+        if _team_key(subject) in {left_key, right_key}:
+            return _unique_pairs(
+                [
+                    (_match_event_slug(left, right), subject),
+                    (_match_event_slug(right, left), subject),
+                ]
+            ), ""
+
+    if is_yes and re.search(r"\b(end|finish|result)\b.*\b(in\s+a\s+)?draw\b|\bdraw\?", question, re.I):
+        return _unique_pairs(
+            [
+                (_match_event_slug(left, right), "Draw"),
+                (_match_event_slug(right, left), "Draw"),
+            ]
+        ), ""
+
+    if outcome_key in {left_key, right_key} or outcome_lower == "draw":
+        return _unique_pairs(
+            [
+                (_match_event_slug(left, right), outcome_text),
+                (_match_event_slug(right, left), outcome_text),
+            ]
+        ), ""
+    return [], ""
+
+
 def _h2h_match_tokens_from_public_search(
     settings: dict[str, Any],
     sharp_rows: Iterable[dict[str, Any]],
@@ -503,20 +659,22 @@ def _coverage_bucket(
     return coverage[key]
 
 
-def _load_token_map(cfg: EngineConfig, settings: dict[str, Any]) -> dict[str, str]:
+def _load_token_map(cfg: EngineConfig, settings: dict[str, Any]) -> tuple[dict[str, str], dict[str, str], list[dict[str, Any]]]:
     """(market, outcome) -> token_id, built from a configured map file (default: the bot's
     market_snapshot.csv, which carries token_id + market_slug + outcome)."""
     path = Path(settings.get("token_map_path") or (cfg.output_root / "polymarket" / "market_snapshot.csv"))
     rows = read_csv_rows(path)
     if not rows:
-        return {}
+        return {}, {}, []
     cols = list(rows[0].keys())
     token_col = find_first_column(cols, TOKEN_FIELDS)
     group_col = find_first_column(cols, GROUP_FIELDS)
     outcome_col = find_first_column(cols, OUTCOME_FIELDS)
     if not token_col or not group_col or not outcome_col:
-        return {}
+        return {}, {}, []
     mapping: dict[str, str] = {}
+    blocked: dict[str, str] = {}
+    blocked_samples: list[dict[str, Any]] = []
     for row in rows:
         token = str(row.get(token_col, "")).strip()
         if token:
@@ -532,7 +690,23 @@ def _load_token_map(cfg: EngineConfig, settings: dict[str, Any]) -> dict[str, st
                 subject, opponent = question_subject
                 mapping.setdefault(_match_key(_match_event_slug(subject, opponent), subject), token)
                 mapping.setdefault(_match_key(_match_event_slug(opponent, subject), subject), token)
-    return mapping
+            h2h_keys, blocker = _h2h_token_map_keys(row, outcome)
+            if blocker:
+                for group, blocked_outcome in h2h_keys:
+                    blocked.setdefault(_match_key(group, blocked_outcome), blocker)
+                if len(blocked_samples) < 20:
+                    blocked_samples.append(
+                        {
+                            "market_slug": row.get(group_col, ""),
+                            "question": row.get("question", ""),
+                            "outcome": outcome,
+                            "reason": blocker,
+                        }
+                    )
+            else:
+                for group, mapped_outcome in h2h_keys:
+                    mapping.setdefault(_match_key(group, mapped_outcome), token)
+    return mapping, blocked, blocked_samples
 
 
 # --------------------------------------------------------------------------- build
@@ -562,7 +736,7 @@ def build_sharp_anchor(cfg: EngineConfig, *, input_path: str | None = None) -> d
     implied_col = find_first_column(cols, IMPLIED_FIELDS)
     token_col = find_first_column(cols, TOKEN_FIELDS)
     has_direct_tokens = bool(token_col and any(str(row.get(token_col, "")).strip() for row in rows))
-    token_map = _load_token_map(cfg, settings)
+    token_map, token_map_blockers, token_map_blocked_samples = _load_token_map(cfg, settings)
     h2h_public_tokens, h2h_public_search = _h2h_match_tokens_from_public_search(settings, rows)
     worldcup_winner_tokens = _worldcup_winner_token_map(cfg, settings)
     coverage_by_sport_market: dict[tuple[str, str], dict[str, Any]] = {}
@@ -653,6 +827,11 @@ def build_sharp_anchor(cfg: EngineConfig, *, input_path: str | None = None) -> d
             if not token:
                 skipped_no_token += 1
                 coverage["skipped_no_token"] += 1
+                skip_reason = (
+                    token_map_blockers.get(_match_key(gkey, str(row.get(outcome_col, ""))), "")
+                    if outcome_col
+                    else ""
+                ) or "unmapped_sharp_anchor_row"
                 if len(skipped_no_token_samples) < 20:
                     skipped_no_token_samples.append(
                         {
@@ -660,7 +839,7 @@ def build_sharp_anchor(cfg: EngineConfig, *, input_path: str | None = None) -> d
                             "outcome": row.get(outcome_col, "") if outcome_col else "",
                             "market_key": row.get("market_key", ""),
                             "sport": row.get("sport", ""),
-                            "reason": "unmapped_sharp_anchor_row",
+                            "reason": skip_reason,
                         }
                     )
                 continue
@@ -734,6 +913,7 @@ def build_sharp_anchor(cfg: EngineConfig, *, input_path: str | None = None) -> d
         "h2h_public_search": h2h_public_search,
         "h2h_public_search_tokens_available": len(set(h2h_public_tokens.values())),
         "h2h_public_search_token_joins": h2h_public_search_token_joins,
+        "token_map_h2h_blocked_samples": token_map_blocked_samples,
         "coverage_by_sport_market": sorted(
             coverage_by_sport_market.values(),
             key=lambda item: (

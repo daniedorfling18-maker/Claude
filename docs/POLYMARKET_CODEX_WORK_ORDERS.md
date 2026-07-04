@@ -1140,7 +1140,7 @@ fail-closed behavior, dashboard rendering, and refresh ordering.
 
 ---
 
-## WO-28 — Join h2h sharp anchors to Polymarket match tokens — `open` (CRITICAL, highest value in the queue)
+## WO-28 — Join h2h sharp anchors to Polymarket match tokens — `done` (2026-07-04, CRITICAL)
 
 **Live evidence (2026-07-04 07:04Z dashboard):** the sharp-anchor pipeline works end-to-end —
 102 odds rows fetched from Pinnacle/Betfair, 40 markets de-vigged — but `direct_token_joins: 0`
@@ -1179,6 +1179,14 @@ join gap is the single blocker between the anchor and real candidates.
 
 **Out of scope:** alpha thresholds, haircuts, gates; composite advance-market fairs.
 
+**Landed 2026-07-04:** H2H sharp anchors now join conservatively to Polymarket match tokens from
+both the configured local token map and the optional public-search enrichment. Local snapshots can
+map clear binary "Will Team beat Team?" YES rows, three-way "Who will win Team vs Team?" rows, and
+draw rows without a network lookup. Advance/qualify/handicap/total market shapes remain fail-closed;
+advance rows report `advance_market_needs_composite_fair` instead of generic no-token skips. Tests
+cover direct local H2H joins, public-search H2H joins, three-way draw markets, and the advance-market
+trap.
+
 ---
 
 ## Sequencing
@@ -1186,9 +1194,9 @@ join gap is the single blocker between the anchor and real candidates.
 ```text
 WO-1..WO-6, WO-8, WO-9   done and audited (2026-07-02)
 
-Queue order (updated 2026-07-04 — WO-28 first, it unblocks the money path):
-0. WO-28   h2h anchor->token join (CRITICAL: 86 sharp fairs currently dropped on live knockout matches)
-1. WO-24   done 2026-07-03: sharp-anchor activation + broadening (VPS deploy still needs PM_VPS_SSH_PRIVATE_KEY populated)
+Queue order (updated 2026-07-04 — WO-28 is landed; runtime still needs VPS deploy access):
+0. WO-24   done 2026-07-03: sharp-anchor activation + broadening (VPS deploy still needs PM_VPS_SSH_PRIVATE_KEY populated)
+1. WO-28   done 2026-07-04: h2h anchor->token join, including local token-map H2H joins and advance-market fail-closed reasons
 2. WO-20   done 2026-07-03: position-aware quote collection
 3. WO-25   done 2026-07-03: dutch-book arb monitor loop/dashboard wiring (mechanical edge, model-free)
 4. WO-26   done 2026-07-03: anti-concentration guard on adaptive queries

@@ -60,17 +60,16 @@ async def submit_pick_alias_aware(args: Any, home_team: str, away_team: str, pic
 
 
 def use_live_only_inputs() -> None:
-    def no_card_queue(args: Any, ref: Any, scan_results: list[dict[str, Any]], queued: list[dict[str, Any]]):
-        return queued, []
-
     def card_metadata_only(entry: dict[str, Any], card_csv: str) -> dict[str, Any]:
         result = dict(_original_find_pick_from_card(entry, card_csv))
         if result.get("status") == "found":
             result["pick"] = ""
-            result["live_only_note"] = "card score ignored; live odds recompute is required"
+            result["live_only_note"] = (
+                "card score ignored; card row is used only for due-match timing and "
+                "pool-position metadata; live odds recompute is required"
+            )
         return result
 
-    base.merge_pick_card_fallback_queue = no_card_queue
     base.find_pick_from_card = card_metadata_only
 
 

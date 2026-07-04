@@ -80,6 +80,19 @@ def _input_paths(cfg: EngineConfig) -> list[Path]:
     return [Path(path) for path in raw_paths]
 
 
+def _entry_price_band(cfg: EngineConfig) -> tuple[float, float]:
+    """Use the same base entry band as paper risk for shadow nominations."""
+    risk = cfg.raw.get("risk", {})
+    if not isinstance(risk, dict):
+        risk = {}
+    minimum_entry_price = safe_float(risk.get("minimum_entry_price"))
+    maximum_entry_price = safe_float(risk.get("maximum_entry_price"))
+    return (
+        float(minimum_entry_price) if minimum_entry_price is not None else 0.05,
+        float(maximum_entry_price) if maximum_entry_price is not None else 0.90,
+    )
+
+
 def _first_price(row: dict[str, Any], keys: tuple[str, ...]) -> tuple[float | None, str]:
     for key in keys:
         value = safe_float(row.get(key))
@@ -219,6 +232,13 @@ def _candidate_from_group(
         "no_best_ask": no_row.get("best_ask", ""),
         "best_bid": "" if no_bid is None else round(no_bid, 6),
         "best_ask": round(no_ask, 6),
+        "top_bid_size": no_row.get("top_bid_size", no_row.get("bid_size", "")),
+        "top_ask_size": no_row.get("top_ask_size", no_row.get("ask_size", "")),
+        "bid_depth_1pct": no_row.get("bid_depth_1pct", ""),
+        "ask_depth_1pct": no_row.get("ask_depth_1pct", ""),
+        "bid_depth_5pct": no_row.get("bid_depth_5pct", ""),
+        "ask_depth_5pct": no_row.get("ask_depth_5pct", ""),
+        "websocket_quote_age_seconds": no_row.get("websocket_quote_age_seconds", ""),
         "market_midpoint": "" if no_mid is None else round(no_mid, 6),
         "executable_price": round(no_ask, 6),
         "spread": "" if spread is None else round(spread, 6),
@@ -246,6 +266,7 @@ def scan_longshot_bias_candidates(
     min_ttc = float(settings.get("min_time_to_close_hours", 168.0))
     min_liquidity = float(settings.get("minimum_liquidity", 500.0))
     max_candidates = int(settings.get("max_candidates", 25) or 25)
+    minimum_entry_price, maximum_entry_price = _entry_price_band(cfg)
 
     rows, source_counts = _load_source_rows(cfg)
     grouped: dict[str, list[dict[str, Any]]] = defaultdict(list)
@@ -293,6 +314,19 @@ def scan_longshot_bias_candidates(
             no_rows,
             key=lambda row: safe_float(row.get("liquidity")) or 0.0,
         )
+        no_ask, _no_ask_source = _first_price(
+            no_row,
+            ("best_ask", "executable_price", "gamma_price", "market_midpoint", "midpoint"),
+        )
+        if no_ask is None:
+            skip_counts["missing_no_executable_price"] += 1
+            continue
+        if no_ask < minimum_entry_price:
+            skip_counts["no_entry_price_below_minimum"] += 1
+            continue
+        if no_ask > maximum_entry_price:
+            skip_counts["no_entry_price_above_maximum"] += 1
+            continue
         liquidity = max(
             safe_float(yes_row.get("liquidity")) or 0.0,
             safe_float(no_row.get("liquidity")) or 0.0,
@@ -329,6 +363,8 @@ def scan_longshot_bias_candidates(
             "min_time_to_close_hours": min_ttc,
             "minimum_liquidity": min_liquidity,
             "max_candidates": max_candidates,
+            "minimum_entry_price": minimum_entry_price,
+            "maximum_entry_price": maximum_entry_price,
         },
         "source_rows": len(rows),
         "source_row_counts": source_counts,

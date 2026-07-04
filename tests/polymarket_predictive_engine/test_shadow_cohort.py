@@ -15,6 +15,10 @@ def _cfg(tmp_path: Path) -> EngineConfig:
                 "output_root": str(tmp_path / "outputs"),
                 "database_path": str(tmp_path / "work" / "paper.sqlite"),
             },
+            "risk": {
+                "minimum_entry_price": 0.05,
+                "maximum_entry_price": 0.90,
+            },
             "shadow_cohort_validation": {
                 "enabled": True,
                 "stake_usdc": 10,
@@ -77,3 +81,41 @@ def test_near_miss_candidates_open_distinct_shadow_evidence_cohort(tmp_path):
     assert positions[0]["signal_cohort"] == "near_miss_learning|crypto"
     assert fills[0]["shadow_source"] == "near_miss_learning"
     assert summary["cohorts"][0]["signal_cohort"] == "near_miss_learning|crypto"
+
+
+def test_shadow_cohort_refuses_new_positions_outside_entry_band(tmp_path):
+    cfg = _cfg(tmp_path)
+
+    summary = update_shadow_cohort_evidence(
+        cfg,
+        [
+            {
+                "market_id": "m-fav",
+                "market_slug": "expensive-favourite",
+                "token_id": "t-fav",
+                "outcome": "No",
+                "category": "macro_rates",
+                "signal_cohort": "expensive_shadow_probe",
+                "shadow_trade_candidate": True,
+                "shadow_candidate_reason": "would_poison_shadow_evidence",
+                "shadow_source": "test_shadow",
+                "executable_price": "0.95",
+                "best_bid": "0.94",
+                "spread": "0.01",
+                "liquidity": "1000",
+                "prediction_timestamp": "2026-06-27T04:00:00Z",
+            }
+        ],
+    )
+
+    positions = read_csv_rows(cfg.output_root / "polymarket_shadow" / "shadow_positions.csv")
+    fills = read_csv_rows(cfg.output_root / "polymarket_shadow" / "shadow_fills.csv")
+
+    assert summary["opened_this_cycle"] == 0
+    assert summary["entry_price_band_skipped"] == 1
+    assert summary["entry_price_band"] == {
+        "minimum_entry_price": 0.05,
+        "maximum_entry_price": 0.9,
+    }
+    assert positions == []
+    assert fills == []

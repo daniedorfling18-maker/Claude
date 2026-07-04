@@ -11,6 +11,10 @@ def _cfg(tmp_path: Path, *, emit_shadow: bool = False) -> EngineConfig:
     return EngineConfig(
         raw={
             "paths": {"output_root": str(tmp_path / "outputs")},
+            "risk": {
+                "minimum_entry_price": 0.05,
+                "maximum_entry_price": 0.90,
+            },
             "longshot_bias": {
                 "emit_shadow_positions": emit_shadow,
                 "min_price": 0.02,
@@ -86,9 +90,10 @@ def test_longshot_bias_scan_selects_exact_no_side_candidates(tmp_path):
     _write_watchlist(
         cfg,
         [
-            *_yes_no_market("macro-longshot", yes_ask=0.08, no_ask=0.93, liquidity=1200),
+            *_yes_no_market("macro-longshot", yes_ask=0.08, no_ask=0.89, liquidity=1200),
             *_yes_no_market("tennis-longshot", yes_ask=0.11, no_ask=0.90, liquidity=900, slug="will-sinner-win-obscure-cup"),
             *_yes_no_market("too-expensive-yes", yes_ask=0.18, no_ask=0.83, liquidity=2000),
+            *_yes_no_market("too-expensive-no", yes_ask=0.08, no_ask=0.93, liquidity=2000),
         ],
     )
 
@@ -106,6 +111,8 @@ def test_longshot_bias_scan_selects_exact_no_side_candidates(tmp_path):
     assert summary["paper_trading_invoked"] is False
     assert summary["live_trading_invoked"] is False
     assert summary["skip_counts"]["yes_price_above_max"] == 1
+    assert summary["skip_counts"]["no_entry_price_above_maximum"] == 1
+    assert summary["settings"]["maximum_entry_price"] == 0.9
 
 
 def test_longshot_bias_excludes_deep_longshot_below_min_and_fast_market(tmp_path):
@@ -115,7 +122,7 @@ def test_longshot_bias_excludes_deep_longshot_below_min_and_fast_market(tmp_path
         [
             *_yes_no_market("too-deep", yes_ask=0.01, no_ask=0.99, liquidity=2000),
             *_yes_no_market("too-fast", yes_ask=0.08, no_ask=0.93, time_to_close_hours=24, liquidity=2000),
-            *_yes_no_market("too-thin", yes_ask=0.08, no_ask=0.93, liquidity=100),
+            *_yes_no_market("too-thin", yes_ask=0.08, no_ask=0.89, liquidity=100),
         ],
     )
 
@@ -131,7 +138,7 @@ def test_longshot_bias_excludes_deep_longshot_below_min_and_fast_market(tmp_path
 
 def test_longshot_bias_build_writes_artifacts_and_can_emit_shadow_position(tmp_path):
     cfg = _cfg(tmp_path, emit_shadow=True)
-    _write_watchlist(cfg, _yes_no_market("macro-longshot", yes_ask=0.08, no_ask=0.93, liquidity=1200))
+    _write_watchlist(cfg, _yes_no_market("macro-longshot", yes_ask=0.08, no_ask=0.85, liquidity=1200))
 
     payload = build_longshot_bias_scan(cfg)
 
@@ -148,3 +155,16 @@ def test_longshot_bias_build_writes_artifacts_and_can_emit_shadow_position(tmp_p
     assert len(positions) == 1
     assert positions[0]["signal_cohort"].startswith("structural|longshot_no|")
     assert positions[0]["shadow_source"] == "longshot_bias"
+    assert float(positions[0]["entry_price"]) <= 0.90
+
+
+def test_longshot_bias_shadow_emit_refuses_no_side_outside_entry_band(tmp_path):
+    cfg = _cfg(tmp_path, emit_shadow=True)
+    _write_watchlist(cfg, _yes_no_market("expensive-no", yes_ask=0.08, no_ask=0.94, liquidity=1200))
+
+    payload = build_longshot_bias_scan(cfg)
+
+    assert payload["candidates"] == 0
+    assert payload["skip_counts"]["no_entry_price_above_maximum"] == 1
+    assert payload["shadow_update"]["opened_this_cycle"] == 0
+    assert read_csv_rows(cfg.output_root / "polymarket_longshot_bias" / "longshot_bias_candidates.csv") == []

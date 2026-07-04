@@ -56,6 +56,25 @@ def _shadow_slippage(cfg: EngineConfig, prediction: dict[str, Any], *, stake_usd
     return configured if value is None else value
 
 
+def _entry_price_band(cfg: EngineConfig) -> tuple[float, float]:
+    """Mirror the paper risk entry band for shadow evidence quality.
+
+    Shadow fills are not paper/live orders, but they can later influence
+    promotion readiness.  Keeping the same base entry band prevents research
+    evidence from being dominated by simulated buys that paper trading would
+    deterministically reject.
+    """
+    risk = cfg.raw.get("risk", {})
+    if not isinstance(risk, dict):
+        risk = {}
+    minimum_entry_price = safe_float(risk.get("minimum_entry_price"))
+    maximum_entry_price = safe_float(risk.get("maximum_entry_price"))
+    return (
+        float(minimum_entry_price) if minimum_entry_price is not None else 0.05,
+        float(maximum_entry_price) if maximum_entry_price is not None else 0.90,
+    )
+
+
 def _mark_price(prediction: dict[str, Any] | None, fallback: float) -> float:
     if prediction:
         for key in ("best_bid", "bid", "executable_sell_price"):
@@ -795,7 +814,9 @@ def update_shadow_cohort_evidence(cfg: EngineConfig, predictions: list[dict[str,
             near_miss_open_count += 1
     opened_this_cycle = 0
     near_miss_opened_this_cycle = 0
+    entry_price_band_skipped = 0
     stake = float(settings.get("stake_usdc", 10.0))
+    minimum_entry_price, maximum_entry_price = _entry_price_band(cfg)
     for row in _candidate_rows(cfg, predictions, positions):
         if open_count >= max_open:
             break
@@ -816,6 +837,9 @@ def update_shadow_cohort_evidence(cfg: EngineConfig, predictions: list[dict[str,
             continue
         slippage = _shadow_slippage(cfg, row, stake_usdc=stake)
         fill_price = min(0.999999, entry_price + slippage)
+        if not minimum_entry_price <= fill_price <= maximum_entry_price:
+            entry_price_band_skipped += 1
+            continue
         quantity = stake / fill_price if fill_price > 0 else 0.0
         if quantity <= 0:
             continue
@@ -896,6 +920,11 @@ def update_shadow_cohort_evidence(cfg: EngineConfig, predictions: list[dict[str,
         {
             "opened_this_cycle": opened_this_cycle,
             "near_miss_opened_this_cycle": near_miss_opened_this_cycle,
+            "entry_price_band_skipped": entry_price_band_skipped,
+            "entry_price_band": {
+                "minimum_entry_price": minimum_entry_price,
+                "maximum_entry_price": maximum_entry_price,
+            },
             "closed_this_cycle": closed_this_cycle,
             **settlement,
             "open_positions": sum(1 for row in positions if str(row.get("status") or "").lower() == "open"),

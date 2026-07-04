@@ -383,31 +383,57 @@ async def run(args: argparse.Namespace) -> dict[str, Any]:
             except Exception:
                 pass
 
-            for sel in ["input[type=email]", "input[name=email]", "input[name=username]", "input[id*=email]", "input[id*=user]"]:
+            email_selectors = [
+                "input[type=email]",
+                "input[name=email]",
+                "input[name=username]",
+                "input[id*=email]",
+                "input[id*=user]",
+            ]
+            password_selectors = ["input[type=password]", "input[name=password]", "input[id*=pass]"]
+            submit_selectors = [
+                "button[type=submit]",
+                "input[type=submit]",
+                "button:has-text('Log')",
+                "button:has-text('Sign')",
+            ]
+
+            for attempt in range(2):
+                if attempt:
+                    print("  Login still showing after first submit; retrying once after a longer settle.")
+                    await page.wait_for_timeout(2000)
+                for sel in email_selectors:
+                    try:
+                        await page.fill(sel, args.email, timeout=2500)
+                        print(f"  Filled email via: {sel}")
+                        break
+                    except Exception:
+                        continue
+                for sel in password_selectors:
+                    try:
+                        await page.fill(sel, args.password, timeout=2500)
+                        print(f"  Filled password via: {sel}")
+                        break
+                    except Exception:
+                        continue
+                submitted_login = False
+                for sel in submit_selectors:
+                    try:
+                        await page.click(sel, timeout=3500)
+                        print(f"  Submitted login via: {sel}")
+                        submitted_login = True
+                        break
+                    except Exception:
+                        continue
+                if not submitted_login:
+                    await page.keyboard.press("Enter")
+                    print("  Submitted login via Enter")
                 try:
-                    await page.fill(sel, args.email, timeout=2000)
-                    print(f"  Filled email via: {sel}")
-                    break
+                    await page.wait_for_url(lambda url: "login" not in str(url).lower(), timeout=10000)
                 except Exception:
-                    continue
-            for sel in ["input[type=password]", "input[name=password]", "input[id*=pass]"]:
-                try:
-                    await page.fill(sel, args.password, timeout=2000)
-                    print(f"  Filled password via: {sel}")
+                    await page.wait_for_timeout(3000)
+                if "login" not in page.url.lower():
                     break
-                except Exception:
-                    continue
-            submitted_login = False
-            for sel in ["button[type=submit]", "input[type=submit]", "button:has-text('Log')", "button:has-text('Sign')"]:
-                try:
-                    await page.click(sel, timeout=3000)
-                    submitted_login = True
-                    break
-                except Exception:
-                    continue
-            if not submitted_login:
-                await page.keyboard.press("Enter")
-            await page.wait_for_timeout(4000)
             if "login" in page.url.lower():
                 result["status"] = "login_failed"
                 result["reason"] = f"Still on login page: {page.url}"

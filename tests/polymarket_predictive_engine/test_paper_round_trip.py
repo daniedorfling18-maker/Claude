@@ -190,6 +190,56 @@ def test_paper_round_trip_exports_realised_broker_fills_as_strict_feedback(tmp_p
     assert source["positive_targets"] == 1
 
 
+def test_paper_round_trip_reports_entry_and_exit_snapshot_coverage(tmp_path):
+    cfg = _cfg(tmp_path)
+    con = connect_db(cfg.database_path)
+    signal = {
+        "market_slug": "fed-rates-test",
+        "question": "Will the Fed cut rates?",
+        "outcome": "Yes",
+        "category": "macro_rates",
+        "signal_cohort": "macro_rates",
+        "edge_lower_bound": "0.03",
+        "price_action_entry_source": "paper_confirmation_candidate",
+        "price_action_evidence_status": "trusted_shadow_requires_broker_paper_confirmation",
+        "price_action_latest_bid": "0.49",
+        "price_action_latest_ask": "0.50",
+        "price_action_spread": "0.01",
+        "price_action_latest_time_utc": "2026-07-01T10:00:00Z",
+        "strategy_name": "price_action_round_trip",
+        "model_version": "price_action_round_trip_v1",
+    }
+    try:
+        _insert_order(con, order_id="buy-covered", created_at="2026-07-01T10:00:00Z", market_id="fed-market", token_id="fed-token", side="BUY_YES", price=0.50, stake=5.0, quantity=10.0, source_signal=signal)
+        _insert_fill(con, fill_id="fill-buy-covered", order_id="buy-covered", created_at="2026-07-01T10:00:00Z", market_id="fed-market", token_id="fed-token", side="BUY_YES", price=0.50, quantity=10.0)
+        _insert_snapshot(con, snapshot_id="snap-covered-entry", collected_at="2026-07-01T10:00:30Z", market_id="fed-market", token_id="fed-token", bid=0.49, ask=0.50)
+        _insert_snapshot(con, snapshot_id="snap-covered-exit", collected_at="2026-07-01T10:10:30Z", market_id="fed-market", token_id="fed-token", bid=0.55, ask=0.56)
+        _insert_order(con, order_id="sell-covered", created_at="2026-07-01T10:10:00Z", market_id="fed-market", token_id="fed-token", side="SELL_YES", price=0.55, stake=5.5, quantity=10.0, source_signal={"side": "SELL_YES", "reason": "take_profit", "quote": {"best_bid": 0.55, "best_ask": 0.56, "spread": 0.01, "timestamp": "2026-07-01T10:10:00Z", "source": "websocket_market_features"}})
+        _insert_fill(con, fill_id="fill-sell-covered", order_id="sell-covered", created_at="2026-07-01T10:10:00Z", market_id="fed-market", token_id="fed-token", side="SELL_YES", price=0.55, quantity=10.0)
+        con.commit()
+    finally:
+        con.close()
+
+    summary = build_paper_round_trip_evidence(cfg)
+    rows = read_csv_rows(cfg.output_root / "polymarket_price_action" / "paper_broker_round_trip_evidence.csv")
+    cohort = summary["quote_audit_by_cohort"][0]
+
+    assert summary["entry_snapshot_supported_round_trips"] == 1
+    assert summary["entry_snapshot_missing_round_trips"] == 0
+    assert summary["exit_snapshot_supported_round_trips"] == 1
+    assert summary["exit_snapshot_missing_round_trips"] == 0
+    assert rows[0]["entry_snapshot_match_mode"] == "market_and_token"
+    assert rows[0]["entry_snapshot_observations"] == "1"
+    assert rows[0]["entry_snapshot_ask"] == "0.5"
+    assert float(rows[0]["entry_fill_snapshot_ask_gap"]) == pytest.approx(0.0)
+    assert rows[0]["exit_snapshot_match_mode"] == "market_and_token"
+    assert rows[0]["exit_snapshot_observations"] == "1"
+    assert rows[0]["exit_snapshot_bid"] == "0.55"
+    assert float(rows[0]["exit_fill_nearest_snapshot_bid_gap"]) == pytest.approx(0.0)
+    assert cohort["entry_snapshot_supported_round_trips"] == 1
+    assert cohort["exit_snapshot_supported_round_trips"] == 1
+
+
 def test_paper_round_trip_accepts_fill_when_exit_quote_metadata_is_stale(tmp_path):
     cfg = _cfg(tmp_path)
     con = connect_db(cfg.database_path)

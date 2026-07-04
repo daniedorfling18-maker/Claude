@@ -759,6 +759,8 @@ async function load() {
       ["Audited","quote_consistent_round_trips"],
       ["Conflicts","quote_conflict_round_trips"],
       ["Unverified","quote_unverified_round_trips"],
+      ["Entry miss","entry_snapshot_missing_round_trips"],
+      ["Exit miss","exit_snapshot_missing_round_trips"],
       ["Raw P&L","raw_pnl_usdc", fmtUsd],
       ["Audited P&L","audited_pnl_usdc", fmtUsd],
       ["Excluded P&L","excluded_from_audit_pnl_usdc", fmtUsd],

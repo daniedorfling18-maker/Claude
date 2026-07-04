@@ -1021,6 +1021,8 @@ def _quote_audit_focus(paper_round_trip_summary: dict[str, Any], *, max_rows: in
                 "quote_conflict_round_trips": int(_num(row.get("quote_conflict_round_trips"))),
                 "quote_unverified_round_trips": int(_num(row.get("quote_unverified_round_trips"))),
                 "quote_other_blocked_round_trips": int(_num(row.get("quote_other_blocked_round_trips"))),
+                "entry_snapshot_missing_round_trips": int(_num(row.get("entry_snapshot_missing_round_trips"))),
+                "exit_snapshot_missing_round_trips": int(_num(row.get("exit_snapshot_missing_round_trips"))),
                 "raw_pnl_usdc": _num(row.get("raw_pnl_usdc")),
                 "audited_pnl_usdc": _num(row.get("audited_pnl_usdc")),
                 "excluded_from_audit_pnl_usdc": excluded_pnl,

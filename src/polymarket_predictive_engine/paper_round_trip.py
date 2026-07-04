@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 from collections import Counter, defaultdict, deque
-from datetime import timezone
+from datetime import timedelta, timezone
 from typing import Any
 
 from .config import EngineConfig, load_config
@@ -27,6 +27,18 @@ ROUND_TRIP_FIELDS = [
     "market_id",
     "snapshot_match_mode",
     "snapshot_market_id",
+    "entry_snapshot_match_mode",
+    "entry_snapshot_observations",
+    "entry_snapshot_time_utc",
+    "entry_snapshot_bid",
+    "entry_snapshot_ask",
+    "entry_fill_snapshot_ask_gap",
+    "exit_snapshot_match_mode",
+    "exit_snapshot_observations",
+    "exit_snapshot_time_utc",
+    "exit_snapshot_bid",
+    "exit_snapshot_ask",
+    "exit_fill_nearest_snapshot_bid_gap",
     "entry_time_utc",
     "entry_price",
     "entry_signal_bid",
@@ -149,6 +161,8 @@ def _quote_audit_breakdown(rows: list[dict[str, Any]], *, key: str, limit: int =
         ok_rows = [row for row in group_rows if _quote_bucket(row) == "ok"]
         conflict_rows = [row for row in group_rows if _quote_bucket(row) == "quote_conflict"]
         unverified_rows = [row for row in group_rows if _quote_bucket(row) == "unverified"]
+        entry_supported_rows = [row for row in group_rows if int(safe_float(row.get("entry_snapshot_observations")) or 0) > 0]
+        exit_supported_rows = [row for row in group_rows if int(safe_float(row.get("exit_snapshot_observations")) or 0) > 0]
         other_blocked_rows = [
             row
             for row in group_rows
@@ -166,6 +180,10 @@ def _quote_audit_breakdown(rows: list[dict[str, Any]], *, key: str, limit: int =
                 "quote_conflict_round_trips": len(conflict_rows),
                 "quote_unverified_round_trips": len(unverified_rows),
                 "quote_other_blocked_round_trips": len(other_blocked_rows),
+                "entry_snapshot_supported_round_trips": len(entry_supported_rows),
+                "entry_snapshot_missing_round_trips": len(group_rows) - len(entry_supported_rows),
+                "exit_snapshot_supported_round_trips": len(exit_supported_rows),
+                "exit_snapshot_missing_round_trips": len(group_rows) - len(exit_supported_rows),
                 "raw_pnl_usdc": raw_pnl,
                 "audited_pnl_usdc": audited_pnl,
                 "excluded_from_audit_pnl_usdc": raw_pnl - audited_pnl,
@@ -325,6 +343,68 @@ def _snapshot_stats(con, market_id: str, token_id: str, start: str, end: str) ->
     }
 
 
+def _snapshot_window(center: str, *, seconds: int = 120) -> tuple[str, str]:
+    ts = parse_timestamp(center)
+    if ts is None:
+        return center, center
+    if ts.tzinfo is None:
+        ts = ts.replace(tzinfo=timezone.utc)
+    ts = ts.astimezone(timezone.utc)
+    return (
+        (ts - timedelta(seconds=seconds)).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        (ts + timedelta(seconds=seconds)).strftime("%Y-%m-%dT%H:%M:%SZ"),
+    )
+
+
+def _point_snapshot_stats(
+    con,
+    market_id: str,
+    token_id: str,
+    center: str,
+    *,
+    prefix: str,
+    reference_price: float | None,
+    reference_side: str,
+    gap_field: str,
+) -> dict[str, Any]:
+    start, end = _snapshot_window(center)
+    rows, match_mode = _snapshot_rows(con, market_id, token_id, start, end)
+    if not rows:
+        return {
+            f"{prefix}_snapshot_match_mode": match_mode,
+            f"{prefix}_snapshot_observations": 0,
+            f"{prefix}_snapshot_time_utc": "",
+            f"{prefix}_snapshot_bid": "",
+            f"{prefix}_snapshot_ask": "",
+            gap_field: "",
+        }
+    center_ts = parse_timestamp(center)
+    if center_ts is None:
+        center_ts = parse_timestamp(rows[-1].get("collected_at"))
+    if center_ts is not None and center_ts.tzinfo is None:
+        center_ts = center_ts.replace(tzinfo=timezone.utc)
+
+    def distance(row: dict[str, Any]) -> float:
+        row_ts = parse_timestamp(row.get("collected_at"))
+        if row_ts is None or center_ts is None:
+            return 0.0
+        if row_ts.tzinfo is None:
+            row_ts = row_ts.replace(tzinfo=timezone.utc)
+        return abs((row_ts.astimezone(timezone.utc) - center_ts.astimezone(timezone.utc)).total_seconds())
+
+    nearest = min(rows, key=distance)
+    quote_value = safe_float(nearest.get("best_ask" if reference_side == "ask" else "best_bid"))
+    gap = abs(reference_price - quote_value) if reference_price is not None and quote_value is not None else ""
+    return {
+        f"{prefix}_snapshot_match_mode": match_mode,
+        f"{prefix}_snapshot_observations": len(rows),
+        f"{prefix}_snapshot_time_utc": nearest.get("collected_at", ""),
+        f"{prefix}_snapshot_bid": nearest.get("best_bid", ""),
+        f"{prefix}_snapshot_ask": nearest.get("best_ask", ""),
+        gap_field: gap,
+    }
+
+
 def _quote_consistency(snapshot: dict[str, Any], exit_quote: dict[str, Any], exit_price: float) -> dict[str, Any]:
     observations = int(safe_float(snapshot.get("observations")) or 0)
     latest_bid = safe_float(snapshot.get("latest_bid"))
@@ -401,6 +481,26 @@ def _round_trip_row(con, buy: dict[str, Any], sell: dict[str, Any], quantity: fl
     start = _fmt_time(buy.get("created_at"))
     end = _fmt_time(sell.get("created_at"))
     snapshot = _snapshot_stats(con, str(buy.get("market_id") or ""), str(buy.get("token_id") or ""), start, end)
+    entry_snapshot = _point_snapshot_stats(
+        con,
+        str(buy.get("market_id") or ""),
+        str(buy.get("token_id") or ""),
+        start,
+        prefix="entry",
+        reference_price=entry_price,
+        reference_side="ask",
+        gap_field="entry_fill_snapshot_ask_gap",
+    )
+    exit_snapshot = _point_snapshot_stats(
+        con,
+        str(buy.get("market_id") or ""),
+        str(buy.get("token_id") or ""),
+        end,
+        prefix="exit",
+        reference_price=exit_price,
+        reference_side="bid",
+        gap_field="exit_fill_nearest_snapshot_bid_gap",
+    )
     consistency = _quote_consistency(snapshot, exit_quote, exit_price)
     run_rate = _monthly_run_rate(pnl, start, end)
     return {
@@ -415,6 +515,8 @@ def _round_trip_row(con, buy: dict[str, Any], sell: dict[str, Any], quantity: fl
         "outcome": buy_signal.get("outcome", ""),
         "token_id": buy.get("token_id", ""),
         "market_id": buy.get("market_id", ""),
+        **entry_snapshot,
+        **exit_snapshot,
         "entry_time_utc": start,
         "entry_price": entry_price,
         "entry_signal_bid": buy_signal.get("price_action_latest_bid", buy_signal.get("latest_bid", "")),
@@ -521,6 +623,8 @@ def build_paper_round_trip_evidence(cfg: EngineConfig) -> dict[str, Any]:
     total_pnl = sum(float(safe_float(row.get("realized_pnl_usdc")) or 0.0) for row in round_trips)
     positive = [row for row in round_trips if float(safe_float(row.get("realized_pnl_usdc")) or 0.0) > 0]
     supported = [row for row in round_trips if int(safe_float(row.get("observations")) or 0) > 0]
+    entry_supported = [row for row in round_trips if int(safe_float(row.get("entry_snapshot_observations")) or 0) > 0]
+    exit_supported = [row for row in round_trips if int(safe_float(row.get("exit_snapshot_observations")) or 0) > 0]
     alias_supported = [row for row in round_trips if row.get("snapshot_match_mode") == "token_only_alias"]
     quote_ok = [row for row in round_trips if row.get("quote_consistency_status") == "ok"]
     quote_conflicts = [row for row in round_trips if row.get("quote_consistency_status") == "quote_conflict"]
@@ -541,6 +645,12 @@ def build_paper_round_trip_evidence(cfg: EngineConfig) -> dict[str, Any]:
     baseline_pnl = sum(float(safe_float(row.get("realized_pnl_usdc")) or 0.0) for row in baseline_rows)
     baseline_positive = [row for row in baseline_rows if float(safe_float(row.get("realized_pnl_usdc")) or 0.0) > 0]
     audited_baseline_rows = [row for row in baseline_rows if row.get("quote_consistency_status") == "ok"]
+    baseline_entry_supported = [
+        row for row in baseline_rows if int(safe_float(row.get("entry_snapshot_observations")) or 0) > 0
+    ]
+    baseline_exit_supported = [
+        row for row in baseline_rows if int(safe_float(row.get("exit_snapshot_observations")) or 0) > 0
+    ]
     baseline_quote_conflicts = [row for row in baseline_rows if row.get("quote_consistency_status") == "quote_conflict"]
     baseline_quote_unverified = [
         row
@@ -562,6 +672,10 @@ def build_paper_round_trip_evidence(cfg: EngineConfig) -> dict[str, Any]:
         "snapshot_supported_round_trips": len(supported),
         "snapshot_alias_supported_round_trips": len(alias_supported),
         "snapshot_missing_round_trips": len(round_trips) - len(supported),
+        "entry_snapshot_supported_round_trips": len(entry_supported),
+        "entry_snapshot_missing_round_trips": len(round_trips) - len(entry_supported),
+        "exit_snapshot_supported_round_trips": len(exit_supported),
+        "exit_snapshot_missing_round_trips": len(round_trips) - len(exit_supported),
         "quote_consistent_round_trips": len(quote_ok),
         "quote_conflict_round_trips": len(quote_conflicts),
         "quote_unverified_round_trips": len(quote_unverified),
@@ -574,6 +688,10 @@ def build_paper_round_trip_evidence(cfg: EngineConfig) -> dict[str, Any]:
         "baseline_realized_pnl_usdc": baseline_pnl,
         "baseline_realized_roi": baseline_pnl / baseline_stake if baseline_stake > 0 else 0.0,
         "baseline_stake_usdc": baseline_stake,
+        "baseline_entry_snapshot_supported_round_trips": len(baseline_entry_supported),
+        "baseline_entry_snapshot_missing_round_trips": len(baseline_rows) - len(baseline_entry_supported),
+        "baseline_exit_snapshot_supported_round_trips": len(baseline_exit_supported),
+        "baseline_exit_snapshot_missing_round_trips": len(baseline_rows) - len(baseline_exit_supported),
         "baseline_quote_conflict_round_trips": len(baseline_quote_conflicts),
         "baseline_quote_unverified_round_trips": len(baseline_quote_unverified),
         "audited_baseline_closed_round_trips": len(audited_baseline_rows),
@@ -598,6 +716,7 @@ def build_paper_round_trip_evidence(cfg: EngineConfig) -> dict[str, Any]:
             "Round-trip totals cover broker fill history; baseline_* fields isolate fills closed after the active profit-target baseline.",
             "account_pnl_since_baseline_usdc is the dashboard-compatible equity delta and can differ from baseline_realized_pnl_usdc if the clean baseline was created after earlier fills or account adjustments.",
             "Snapshot fields show whether each fill pair is backed by exact market/token quotes or token-only alias quote support.",
+            "Entry/exit snapshot coverage fields show whether actual buy and sell fill prices have nearby independent quote support.",
             "audited_* P&L excludes paper rows where the broker exit quote conflicts with the independent snapshot trail.",
             "The price-action model still applies strict executable bid-vs-entry-ask label hurdles before treating a row as positive.",
         ],

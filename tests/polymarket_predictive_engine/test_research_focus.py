@@ -776,6 +776,8 @@ def test_research_focus_routes_quote_audit_blockers_to_collection_only(tmp_path)
                     "quote_conflict_round_trips": 0,
                     "quote_unverified_round_trips": 2,
                     "quote_other_blocked_round_trips": 0,
+                    "entry_snapshot_missing_round_trips": 2,
+                    "exit_snapshot_missing_round_trips": 0,
                     "raw_pnl_usdc": 12.5,
                     "audited_pnl_usdc": 0.5,
                     "excluded_from_audit_pnl_usdc": 12.0,
@@ -809,6 +811,8 @@ def test_research_focus_routes_quote_audit_blockers_to_collection_only(tmp_path)
     assert quote_focus["collection_queries"][:2] == ["eth updown", "tennis"]
     assert quote_focus["blocked_cohorts"][0]["cohort"] == "exploratory_crypto_updown_live_model|crypto_eth_updown_daily|outcome=up"
     assert quote_focus["blocked_cohorts"][0]["decision_use"] == "quote_audit_repair_collection_only_not_trade_authorisation"
+    assert quote_focus["blocked_cohorts"][0]["entry_snapshot_missing_round_trips"] == 2
+    assert quote_focus["blocked_cohorts"][0]["exit_snapshot_missing_round_trips"] == 0
     assert payload["raw_collection_queries"][:2] == ["eth updown", "tennis"]
     assert "eth updown" in payload["collection_queries"]
     assert "tennis" in payload["collection_queries"]

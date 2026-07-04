@@ -928,6 +928,8 @@ def test_dashboard_gates_extrapolated_edge_route_evidence(tmp_path):
     assert "Proof status" in html
     assert "Baseline quote conflicts" in html
     assert "All-time quote conflicts" in html
+    assert "Entry miss" in html
+    assert "Exit miss" in html
     assert data["paper_profit_goal_plan"]["quote_conflict_round_trips"] == 0
     assert data["paper_profit_goal_plan"]["all_time_quote_conflict_round_trips"] == 7
     assert "provisional lines await market close" in html

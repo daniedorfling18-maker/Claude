@@ -112,6 +112,12 @@ def _dedupe_keep_order(values: list[str]) -> list[str]:
     return out
 
 
+def _append_query(values: list[str], raw_query: Any) -> None:
+    query = str(raw_query or "").strip()
+    if query:
+        values.append(query)
+
+
 def _is_crypto_updown_query(query: str) -> bool:
     text = f" {query.strip().lower()} "
     compact = text.replace(" ", "")
@@ -204,38 +210,69 @@ def _adaptive_collection_queries(cfg: EngineConfig) -> list[str]:
         if not isinstance(payload, dict):
             continue
         for raw_query in payload.get("missing_confirmation_queries", []) or []:
-            query = str(raw_query or "").strip()
-            if query:
-                queries.append(query)
+            _append_query(queries, raw_query)
         for target in payload.get("paper_confirmation_targets", []) or []:
             if not isinstance(target, dict):
                 continue
             if target.get("missing_fresh_candidate") is False:
                 continue
-            query = str(target.get("recommended_collection_query") or "").strip()
-            if query:
-                queries.append(query)
-        for raw_query in payload.get("collection_queries", []) or []:
-            query = str(raw_query or "").strip()
-            if query:
-                queries.append(query)
-        for raw_query in payload.get("model_validation_gap_queries", []) or []:
-            query = str(raw_query or "").strip()
-            if query:
-                queries.append(query)
+            _append_query(queries, target.get("recommended_collection_query"))
         price_action_model = payload.get("price_action_model", {}) or {}
         if isinstance(price_action_model, dict):
+            # These are more specific than broad collection queries.  In targeted
+            # mode they must reach the capped query window before generic crypto
+            # or the model never sees the missing bid/ask evidence.
+            for raw_query in price_action_model.get("historical_breadth_queries", []) or []:
+                _append_query(queries, raw_query)
+            for raw_query in price_action_model.get("paper_confirmation_blocker_queries", []) or []:
+                _append_query(queries, raw_query)
             for raw_query in price_action_model.get("validation_gap_queries", []) or []:
-                query = str(raw_query or "").strip()
-                if query:
-                    queries.append(query)
+                _append_query(queries, raw_query)
+        breadth = payload.get("price_action_historical_breadth", {}) or {}
+        if isinstance(breadth, dict):
+            for raw_query in breadth.get("recommended_collection_queries", []) or []:
+                _append_query(queries, raw_query)
+            near_positive = breadth.get("top_near_positive_buckets") or []
+            if isinstance(near_positive, list):
+                for row in near_positive:
+                    if isinstance(row, dict):
+                        _append_query(queries, row.get("recommended_collection_query"))
+        guard = payload.get("collection_query_guard", {}) or {}
+        if isinstance(guard, dict):
+            for raw_query in guard.get("raw_collection_queries", []) or []:
+                _append_query(queries, raw_query)
+            rejected = guard.get("rejected_queries", []) or []
+            if isinstance(rejected, list):
+                for row in rejected:
+                    if isinstance(row, dict) and str(row.get("reason") or "") == "max_updown_queries":
+                        _append_query(queries, row.get("query"))
+        for raw_query in payload.get("collection_queries", []) or []:
+            _append_query(queries, raw_query)
+        for raw_query in payload.get("model_validation_gap_queries", []) or []:
+            _append_query(queries, raw_query)
         price_action_goal_state = payload.get("price_action_goal_state", {}) or {}
         if isinstance(price_action_goal_state, dict):
             for raw_query in price_action_goal_state.get("collection_queries", []) or []:
-                query = str(raw_query or "").strip()
-                if query:
-                    queries.append(query)
+                _append_query(queries, raw_query)
     return _dedupe_keep_order(queries)
+
+
+def _limit_targeted_updown_queries(queries: list[str], settings: dict[str, Any]) -> list[str]:
+    if not settings.get("adaptive_only", False):
+        return queries
+    max_updown = int(settings.get("targeted_max_updown_queries", 1) or 1)
+    if max_updown <= 0:
+        return [query for query in queries if not _is_crypto_updown_query(query)]
+    updown = [query for query in queries if _is_crypto_updown_query(query)]
+    if len(updown) <= max_updown:
+        return queries
+    keep = set(updown[:max_updown])
+    limited: list[str] = []
+    for query in queries:
+        if _is_crypto_updown_query(query) and query not in keep:
+            continue
+        limited.append(query)
+    return limited
 
 
 def _targeted_evidence_settings(settings: dict[str, Any]) -> dict[str, Any]:
@@ -256,6 +293,7 @@ def _targeted_evidence_settings(settings: dict[str, Any]) -> dict[str, Any]:
     targeted["max_event_queries"] = int(settings.get("targeted_max_event_queries", 10) or 10)
     targeted["max_public_search_queries"] = int(settings.get("targeted_max_public_search_queries", 18) or 18)
     targeted["max_broad_public_search_queries"] = 0
+    targeted["targeted_max_updown_queries"] = int(settings.get("targeted_max_updown_queries", 1) or 1)
     return targeted
 
 
@@ -274,8 +312,12 @@ def _event_queries(settings: dict[str, Any], adaptive_queries: list[str] | None 
         if not isinstance(configured, list):
             configured = [configured]
         configured_queries = [str(query or "").strip() for query in configured]
-    return _expand_query_aliases(
+    base_queries = _limit_targeted_updown_queries(
         _dedupe_keep_order([*(adaptive_queries or []), *configured_queries, *_broad_queries(settings)]),
+        settings,
+    )
+    return _expand_query_aliases(
+        base_queries,
         settings,
         include_date_aliases=False,
         max_queries=int(settings.get("max_event_queries", 28) or 28),
@@ -380,7 +422,7 @@ def _public_search_queries(settings: dict[str, Any], adaptive_queries: list[str]
     ]
     broad_queries = [] if settings.get("adaptive_only", False) else _broad_queries(settings)
     max_broad_public_queries = int(settings.get("max_broad_public_search_queries", 18) or 18)
-    return _expand_query_aliases(
+    base_queries = _limit_targeted_updown_queries(
         _dedupe_keep_order(
             [
                 *confirmation_queries,
@@ -390,6 +432,10 @@ def _public_search_queries(settings: dict[str, Any], adaptive_queries: list[str]
                 *_crypto_updown_public_queries(settings),
             ]
         ),
+        settings,
+    )
+    return _expand_query_aliases(
+        base_queries,
         settings,
         include_date_aliases=True,
         max_queries=int(settings.get("max_public_search_queries", 48) or 48),

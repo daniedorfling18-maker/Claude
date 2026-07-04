@@ -830,6 +830,7 @@ liquidity_discovery:
   max_spread: 0.04
   max_relative_spread: 0.15
   min_price: 0.02
+  targeted_max_updown_queries: 1
   public_search_enabled: true
   public_search_limit: 8
   crypto_updown_date_search:

@@ -136,6 +136,57 @@ def test_liquidity_discovery_expands_updown_feedback_queries_without_5m_aliases(
     assert len(public_queries) <= 48
 
 
+def test_targeted_liquidity_prioritises_historical_breadth_updown_under_cap(tmp_path):
+    cfg = _cfg(tmp_path)
+    write_json(
+        cfg.governance_root / "research_focus.json",
+        {
+            "status": "ok",
+            "collection_queries": ["btc updown", "esports", "economy", "bitcoin"],
+            "collection_query_guard": {
+                "raw_collection_queries": [
+                    "btc updown",
+                    "xrp updown",
+                    "eth updown",
+                    "solana updown",
+                    "esports",
+                ],
+                "updown_queries": ["btc updown"],
+                "rejected_queries": [
+                    {"query": "xrp updown", "reason": "max_updown_queries"},
+                    {"query": "eth updown", "reason": "max_updown_queries"},
+                    {"query": "solana updown", "reason": "max_updown_queries"},
+                ],
+            },
+            "price_action_model": {
+                "historical_breadth_queries": ["solana updown"],
+                "paper_confirmation_blocker_queries": ["btc updown"],
+            },
+        },
+    )
+
+    adaptive_queries = discovery._adaptive_collection_queries(cfg)
+    settings = discovery._targeted_evidence_settings(
+        {
+            "queries": ["world cup"],
+            "broad_discovery_enabled": True,
+            "crypto_updown_date_search": {"enabled": False},
+        }
+    )
+    event_queries = discovery._event_queries(settings, adaptive_queries=adaptive_queries)
+    public_queries = discovery._public_search_queries(settings, adaptive_queries=adaptive_queries)
+
+    assert adaptive_queries[:5] == ["solana updown", "btc updown", "xrp updown", "eth updown", "esports"]
+    assert "solana updown" in event_queries
+    assert "solana updown" in public_queries
+    assert "btc updown" not in event_queries
+    assert "xrp updown" not in event_queries
+    assert "eth updown" not in event_queries
+    assert "btc updown" not in public_queries
+    assert "xrp updown" not in public_queries
+    assert "eth updown" not in public_queries
+
+
 def test_targeted_evidence_mode_uses_adaptive_queries_without_broad_search():
     settings = discovery._targeted_evidence_settings(
         {

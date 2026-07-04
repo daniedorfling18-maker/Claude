@@ -525,6 +525,12 @@ paper_market_scan:
   research_focus_validation_gap_priority_value: 50.0
   research_focus_reserve_enabled: true
   research_focus_reserve_slots: 3
+  # Keep the anti-concentration cap of one up/down query per batch, but rotate
+  # that evidence slot across BTC/SOL/ETH/XRP when the research-focus guard has
+  # suppressed additional up/down targets. This prevents BTC from permanently
+  # starving other assets while preserving the concentration control.
+  evidence_updown_rotation_enabled: true
+  evidence_updown_rotation_slots: 1
   # Repricing is learned across the full liquid event universe, not only the
   # current best crypto/World Cup lane. This reserve keeps one discovery slot
   # rotating through broad event families while downstream governance still
@@ -905,6 +911,9 @@ websocket_market_data:
   use_current_positive_analogue_targets: true
   max_current_positive_analogue_target_assets: 8
   current_positive_analogue_liquidity_proxy: 25
+  use_historical_breadth_targets: true
+  max_historical_breadth_target_assets: 8
+  max_historical_breadth_target_assets_per_family: 2
   feedback_broaden_target_enabled: true
   feedback_broaden_target_assets: 24
   feedback_broaden_target_assets_per_family: 6

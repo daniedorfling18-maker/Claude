@@ -661,3 +661,83 @@ def test_research_focus_reserve_keeps_current_collection_targets_in_batch_scan(t
     assert plan["research_focus_reserve_enabled"] is True
     assert "btc updown" not in selected
     assert "xrp updown" not in selected
+
+
+def test_research_focus_rotates_guarded_updown_evidence_slot(tmp_path, monkeypatch):
+    loop = _load_loop_module()
+    monkeypatch.delenv("POLYMARKET_SCAN_QUERY_MODE", raising=False)
+    monkeypatch.delenv("POLYMARKET_MAX_SCAN_QUERIES", raising=False)
+    monkeypatch.delenv("POLYMARKET_ADAPTIVE_SCAN_PRIORITY", raising=False)
+
+    governance = tmp_path / "outputs" / "polymarket_model_governance"
+    governance.mkdir(parents=True)
+    (governance / "research_focus.json").write_text(
+        json.dumps(
+            {
+                "status": "ok",
+                "summary": "One up/down query is allowed; rejected siblings need rotation.",
+                "collection_queries": ["btc updown", "world cup", "fed", "bitcoin"],
+                "collection_query_guard": {
+                    "raw_collection_queries": [
+                        "btc updown",
+                        "xrp updown",
+                        "solana updown",
+                        "eth updown",
+                        "world cup",
+                        "fed",
+                    ],
+                    "guarded_collection_queries": ["btc updown", "world cup", "fed", "bitcoin"],
+                    "updown_queries": ["btc updown"],
+                    "rejected_queries": [
+                        {"query": "xrp updown", "reason": "max_updown_queries"},
+                        {"query": "solana updown", "reason": "max_updown_queries"},
+                        {"query": "eth updown", "reason": "max_updown_queries"},
+                    ],
+                },
+                "price_action_model": {
+                    "historical_breadth_queries": ["solana updown"],
+                    "paper_confirmation_blocker_queries": ["btc updown"],
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    cfg = EngineConfig(
+        raw={
+            "paths": {"output_root": str(tmp_path / "outputs")},
+            "paper_market_scan": {
+                "mode": "batch",
+                "max_queries_per_cycle": 8,
+                "prioritize_near_promoted": True,
+                "research_focus_reserve_enabled": False,
+                "evidence_updown_rotation_enabled": True,
+                "evidence_updown_rotation_slots": 1,
+                "queries": [
+                    "world cup",
+                    "btc updown",
+                    "bitcoin",
+                    "ethereum",
+                    "fed",
+                    "tennis",
+                    "nba",
+                    "mlb",
+                ],
+            },
+        },
+        path=tmp_path / "cfg.yaml",
+    )
+
+    selected, plan = loop._select_scan_queries(cfg, "world cup", scan_sequence=3)
+
+    assert [query for query in selected if loop._is_updown_query(query)] == ["solana updown"]
+    assert "btc updown" not in selected
+    assert "xrp updown" not in selected
+    assert "eth updown" not in selected
+    assert "solana updown" in plan["injected_research_focus_queries"]
+    assert plan["adaptive_priority"]["evidence_updown_queries"] == [
+        "btc updown",
+        "xrp updown",
+        "solana updown",
+        "eth updown",
+    ]
+    assert plan["evidence_updown_rotated_queries"] == ["solana updown"]

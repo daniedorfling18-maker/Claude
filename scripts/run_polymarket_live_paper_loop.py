@@ -360,6 +360,12 @@ def _query_key(value: str) -> str:
     return "".join(ch.lower() for ch in str(value or "") if ch.isalnum())
 
 
+def _is_updown_query(value: str) -> bool:
+    text = f" {str(value or '').strip().lower().replace('-', ' ')} "
+    compact = _query_key(text)
+    return "updown" in compact or " up or down " in text or " up/down " in text
+
+
 def _cohort_to_query_keys(cohort: str) -> list[str]:
     text = str(cohort or "").lower()
     keys: list[str] = []
@@ -478,7 +484,34 @@ def _extend_with_research_focus_queries(
     seen = {_query_key(query) for query in queries if _query_key(query)}
     expanded = list(queries)
     injected: list[str] = []
-    for raw_query in focus_payload.get("collection_queries", []) or []:
+    focus_queries = list(focus_payload.get("collection_queries", []) or [])
+    guard = focus_payload.get("collection_query_guard")
+    if isinstance(guard, dict):
+        focus_queries.extend(guard.get("raw_collection_queries", []) or [])
+        rejected = guard.get("rejected_queries", []) or []
+        if isinstance(rejected, list):
+            focus_queries.extend(
+                row.get("query")
+                for row in rejected
+                if isinstance(row, dict) and str(row.get("reason") or "") == "max_updown_queries"
+            )
+    price_action_model = focus_payload.get("price_action_model")
+    if isinstance(price_action_model, dict):
+        focus_queries.extend(price_action_model.get("historical_breadth_queries", []) or [])
+        focus_queries.extend(price_action_model.get("paper_confirmation_blocker_queries", []) or [])
+        focus_queries.extend(price_action_model.get("validation_gap_queries", []) or [])
+    breadth = focus_payload.get("price_action_historical_breadth")
+    if isinstance(breadth, dict):
+        focus_queries.extend(breadth.get("recommended_collection_queries", []) or [])
+        near_positive = breadth.get("top_near_positive_buckets") or []
+        if isinstance(near_positive, list):
+            focus_queries.extend(
+                row.get("recommended_collection_query")
+                for row in near_positive
+                if isinstance(row, dict)
+            )
+
+    for raw_query in focus_queries:
         query = str(raw_query or "").strip()
         key = _query_key(query)
         if not query or not key or key in seen:
@@ -583,6 +616,7 @@ def _adaptive_query_order(cfg, queries: list[str]) -> tuple[list[str], dict[str,
         or ""
     )
     feedback_broaden_queries: list[str] = []
+    evidence_updown_queries: list[str] = []
     if focus_enabled and focus_payload:
         validation_gap_needs_collection = _research_focus_gap_needs_collection(focus_payload)
         focus_value = float(settings.get("research_focus_priority_value", min_value + 1.0))
@@ -612,6 +646,40 @@ def _adaptive_query_order(cfg, queries: list[str]) -> tuple[list[str], dict[str,
             key = _query_key(str(raw_query or ""))
             if key and key in query_by_key:
                 suppressed_keys.add(key)
+        guard = focus_payload.get("collection_query_guard")
+        guarded_updown = []
+        if isinstance(guard, dict):
+            guarded_updown = [
+                str(query or "").strip()
+                for query in guard.get("updown_queries", []) or []
+                if str(query or "").strip()
+            ]
+            raw_updown = [
+                str(query or "").strip()
+                for query in guard.get("raw_collection_queries", []) or []
+                if str(query or "").strip() and _is_updown_query(str(query or ""))
+            ]
+            rejected_updown = [
+                str(row.get("query") or "").strip()
+                for row in guard.get("rejected_queries", []) or []
+                if isinstance(row, dict)
+                and str(row.get("query") or "").strip()
+                and str(row.get("reason") or "") == "max_updown_queries"
+            ]
+            for raw_query in [*guarded_updown, *raw_updown, *rejected_updown]:
+                key = _query_key(raw_query)
+                if key and key in query_by_key and query_by_key[key] not in evidence_updown_queries:
+                    evidence_updown_queries.append(query_by_key[key])
+        price_action_model = focus_payload.get("price_action_model")
+        if isinstance(price_action_model, dict):
+            for raw_query in [
+                *(price_action_model.get("historical_breadth_queries", []) or []),
+                *(price_action_model.get("paper_confirmation_blocker_queries", []) or []),
+            ]:
+                query = str(raw_query or "").strip()
+                key = _query_key(query)
+                if _is_updown_query(query) and key in query_by_key and query_by_key[key] not in evidence_updown_queries:
+                    evidence_updown_queries.append(query_by_key[key])
     if feedback_learning_state == "suppress_negative_price_action_and_broaden":
         for raw_query in price_action_feedback.get("collection_queries", []):
             key = _query_key(str(raw_query or ""))
@@ -649,6 +717,7 @@ def _adaptive_query_order(cfg, queries: list[str]) -> tuple[list[str], dict[str,
         "suppressed_queries": suppressed_tail,
         "feedback_learning_state": feedback_learning_state,
         "feedback_broaden_queries": feedback_broaden_queries,
+        "evidence_updown_queries": evidence_updown_queries,
     }
 
 
@@ -764,6 +833,83 @@ def _apply_research_focus_reserve(
     return merged[:max_queries], reserved
 
 
+def _apply_evidence_updown_rotation(
+    *,
+    selected: list[str],
+    ordered_queries: list[str],
+    adaptive_priority: dict[str, Any],
+    max_queries: int,
+    settings: dict[str, Any],
+    scan_sequence: int,
+) -> tuple[list[str], list[str]]:
+    """Rotate the single guarded up/down evidence slot across assets.
+
+    The research-focus guard deliberately caps up/down concentration.  Without
+    this second-stage rotation, the first guarded query (often BTC) can occupy
+    that slot forever and starve SOL/ETH/XRP of fresh bid/ask examples.  This
+    keeps the cap intact while rotating which up/down market gets observed.
+    """
+    if max_queries <= 0:
+        return selected, []
+    if not _truthy_setting(settings.get("evidence_updown_rotation_enabled", True), default=True):
+        return selected, []
+    slots = int(safe_float(settings.get("evidence_updown_rotation_slots")) or 1)
+    slots = max(0, min(slots, max_queries))
+    if slots <= 0:
+        return selected, []
+
+    ordered_by_key = {_query_key(query): query for query in ordered_queries if _query_key(query)}
+    candidates: list[str] = []
+    for raw_query in adaptive_priority.get("evidence_updown_queries", []) or []:
+        query = str(raw_query or "").strip()
+        key = _query_key(query)
+        if not key or key not in ordered_by_key or not _is_updown_query(query):
+            continue
+        query = ordered_by_key[key]
+        if query not in candidates:
+            candidates.append(query)
+    if not candidates:
+        return selected, []
+
+    start = max(0, scan_sequence - 1) % len(candidates)
+    desired = [candidates[(start + offset) % len(candidates)] for offset in range(min(slots, len(candidates)))]
+    desired_keys = {_query_key(query) for query in desired if _query_key(query)}
+    if not desired_keys:
+        return selected, []
+
+    merged: list[str] = []
+    used_keys: set[str] = set()
+    for query in desired:
+        key = _query_key(query)
+        if key and key not in used_keys:
+            merged.append(query)
+            used_keys.add(key)
+
+    for query in selected:
+        key = _query_key(query)
+        if not key or key in used_keys:
+            continue
+        if _is_updown_query(query) and key not in desired_keys:
+            continue
+        merged.append(query)
+        used_keys.add(key)
+        if len(merged) >= max_queries:
+            break
+
+    for query in ordered_queries:
+        if len(merged) >= max_queries:
+            break
+        key = _query_key(query)
+        if not key or key in used_keys:
+            continue
+        if _is_updown_query(query) and key not in desired_keys:
+            continue
+        merged.append(query)
+        used_keys.add(key)
+
+    return merged[:max_queries], desired
+
+
 def _apply_broad_repricing_reserve(
     *,
     selected: list[str],
@@ -846,6 +992,7 @@ def _select_scan_queries(cfg, default_query: str, *, scan_sequence: int) -> tupl
     )
     ordered_queries, adaptive_priority = _adaptive_query_order(cfg, all_queries)
     research_focus_reserved_queries: list[str] = []
+    evidence_updown_rotated_queries: list[str] = []
     broad_reserved_queries: list[str] = []
     if mode == "batch":
         selected = ordered_queries[:max_queries] if max_queries > 0 else ordered_queries
@@ -858,6 +1005,14 @@ def _select_scan_queries(cfg, default_query: str, *, scan_sequence: int) -> tupl
                 settings=settings,
             )
             selected, research_focus_reserved_queries = _apply_research_focus_reserve(
+                selected=selected,
+                ordered_queries=ordered_queries,
+                adaptive_priority=adaptive_priority,
+                max_queries=max_queries,
+                settings=settings,
+                scan_sequence=scan_sequence,
+            )
+            selected, evidence_updown_rotated_queries = _apply_evidence_updown_rotation(
                 selected=selected,
                 ordered_queries=ordered_queries,
                 adaptive_priority=adaptive_priority,
@@ -890,6 +1045,11 @@ def _select_scan_queries(cfg, default_query: str, *, scan_sequence: int) -> tupl
         "ordered_queries": ordered_queries,
         "selected_queries": selected,
         "research_focus_reserved_queries": research_focus_reserved_queries,
+        "evidence_updown_rotated_queries": evidence_updown_rotated_queries,
+        "evidence_updown_rotation_enabled": _truthy_setting(
+            settings.get("evidence_updown_rotation_enabled", True),
+            default=True,
+        ),
         "research_focus_reserve_enabled": _truthy_setting(
             settings.get("research_focus_reserve_enabled", True),
             default=True,

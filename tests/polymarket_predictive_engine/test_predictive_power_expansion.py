@@ -1069,11 +1069,13 @@ def test_websocket_reserves_historical_breadth_learning_targets(tmp_path):
         {
             "use_liquidity_targets": True,
             "use_strategy_v2_targets": False,
-            "feedback_broaden_target_enabled": True,
+            "feedback_broaden_target_enabled": False,
             "feedback_broaden_target_assets": 2,
             "feedback_broaden_target_assets_per_family": 1,
             "include_research_liquidity_targets": False,
             "max_liquidity_target_assets": 3,
+            "max_historical_breadth_target_assets": 2,
+            "max_historical_breadth_target_assets_per_family": 1,
             "market_ids": [],
         }
     )
@@ -1133,7 +1135,9 @@ def test_websocket_reserves_historical_breadth_learning_targets(tmp_path):
 
     assert {row["token_id"] for row in breadth_targets} == {"btc-breadth-token", "sol-breadth-token"}
     assert {row["historical_breadth_query"] for row in breadth_targets} == {"btc updown", "solana updown"}
-    assert all(row["feedback_broaden_target"] is True for row in breadth_targets)
+    assert {row["websocket_target_reason"] for row in breadth_targets} == {
+        "reserve_historical_breadth_for_forward_bid_tracking",
+    }
     assert websocket_collector._historical_breadth_counts(targets) == {
         "crypto_btc_updown_event": 1,
         "crypto_sol_updown_daily": 1,

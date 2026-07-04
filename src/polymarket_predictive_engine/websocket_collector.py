@@ -688,6 +688,58 @@ def _feedback_broaden_rows(cfg: EngineConfig, settings: dict[str, Any], candidat
     return _balanced_by_family(rows, max_assets=max_rows, max_per_family=max_per_family)
 
 
+def _historical_breadth_priority_rows(
+    cfg: EngineConfig,
+    settings: dict[str, Any],
+    candidates: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Reserve a few live tokens for near-positive historical-breadth buckets.
+
+    This is a collection-only lane.  It keeps websocket bid/ask variation flowing
+    into buckets that have positive validation pockets but are not robust enough
+    for paper promotion.  The broker still requires the separate governed signal
+    files before it can place paper risk.
+    """
+    if not _boolish(settings.get("use_historical_breadth_targets", True)):
+        return []
+    max_rows = int(settings.get("max_historical_breadth_target_assets", 2) or 2)
+    if max_rows <= 0:
+        return []
+    max_per_family = int(settings.get("max_historical_breadth_target_assets_per_family", 1) or 1)
+    focus_payload = read_json(cfg.governance_root / "research_focus.json", default={}) or {}
+    if not isinstance(focus_payload, dict):
+        return []
+    queries = _historical_breadth_collection_queries(focus_payload)
+    if not queries:
+        return []
+    rows: list[dict[str, Any]] = []
+    for row in candidates:
+        matches = [
+            (score, query)
+            for query in queries
+            for score in [_feedback_query_match_score(query, row)]
+            if score is not None
+        ]
+        if not matches:
+            continue
+        score, query = max(matches, key=lambda item: item[0])
+        enriched = dict(row)
+        enriched["historical_breadth_target"] = True
+        enriched["historical_breadth_query"] = query
+        enriched["historical_breadth_match_score"] = score
+        enriched["historical_breadth_decision_use"] = "collect_more_bid_ask_rows_for_near_positive_historical_breadth_bucket"
+        enriched["websocket_target_reason"] = "reserve_historical_breadth_for_forward_bid_tracking"
+        rows.append(enriched)
+    rows.sort(
+        key=lambda item: (
+            safe_float(item.get("historical_breadth_match_score")) or 0.0,
+            *_candidate_rank(item),
+        ),
+        reverse=True,
+    )
+    return _balanced_by_family(rows, max_assets=max_rows, max_per_family=max_per_family)
+
+
 def _tag_feedback_broaden_targets(rows: list[dict[str, Any]], feedback_rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     if not feedback_rows:
         return rows
@@ -1146,11 +1198,12 @@ def _liquidity_target_rows(cfg: EngineConfig, settings: dict[str, Any]) -> list[
 
     current_analogue_rows = _current_positive_analogue_priority_rows(cfg, settings)
     paper_blocker_rows = _paper_confirmation_blocker_priority_rows(cfg, settings, liquidity_rows=rows)
+    historical_breadth_rows = _historical_breadth_priority_rows(cfg, settings, candidates)
     strategy_v2_rows = _strategy_v2_priority_rows(cfg, settings)
     priority_rows = _profit_sprint_priority_rows(cfg, candidates)
     forced_rows: list[dict[str, Any]] = []
     forced_ids: set[str] = set()
-    for row in [*current_analogue_rows, *paper_blocker_rows]:
+    for row in [*current_analogue_rows, *paper_blocker_rows, *historical_breadth_rows]:
         token_id = _token_id(row)
         if not token_id or token_id in forced_ids:
             continue

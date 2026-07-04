@@ -399,8 +399,12 @@ def _feedback_collection_queries(payload: dict[str, Any], focus_payload: dict[st
         _append_unique(queries, raw_query)
     for raw_query in focus_payload.get("collection_queries", []) or []:
         _append_unique(queries, raw_query)
+    for raw_query in focus_payload.get("proof_priority_queries", []) or []:
+        _append_unique(queries, raw_query)
     price_action_model = focus_payload.get("price_action_model", {}) or {}
     if isinstance(price_action_model, dict):
+        for raw_query in price_action_model.get("paper_confirmation_blocker_queries", []) or []:
+            _append_unique(queries, raw_query)
         for raw_query in price_action_model.get("validation_gap_queries", []) or []:
             _append_unique(queries, raw_query)
     return queries
@@ -573,8 +577,12 @@ def _feedback_broaden_rows(cfg: EngineConfig, settings: dict[str, Any], candidat
         add_query(raw_query, 30.0)
     for raw_query in focus_payload.get("collection_queries", []) or []:
         add_query(raw_query, 20.0)
+    for raw_query in focus_payload.get("proof_priority_queries", []) or []:
+        add_query(raw_query, 70.0)
     price_action_model = focus_payload.get("price_action_model", {}) or {}
     if isinstance(price_action_model, dict):
+        for raw_query in price_action_model.get("paper_confirmation_blocker_queries", []) or []:
+            add_query(raw_query, 80.0)
         for raw_query in price_action_model.get("validation_gap_queries", []) or []:
             add_query(raw_query, 20.0)
     queries = [query for query in _feedback_collection_queries(payload, focus_payload) if query.lower() in query_priorities]

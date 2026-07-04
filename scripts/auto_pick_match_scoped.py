@@ -30,6 +30,7 @@ import urllib.request
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 API_HOST = "https://api.the-odds-api.com"
 
@@ -199,7 +200,21 @@ def iso_z(dt: datetime) -> str:
     return dt.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
 
 
-def parse_kickoff(text: str | None, ts: str | None, ref: datetime) -> datetime | None:
+def local_page_timezone(name: str | None) -> timezone | ZoneInfo:
+    clean = txt(name) or "Africa/Johannesburg"
+    try:
+        return ZoneInfo(clean)
+    except ZoneInfoNotFoundError:
+        print(f"warning: unknown page timezone {clean!r}; falling back to Africa/Johannesburg")
+        return ZoneInfo("Africa/Johannesburg")
+
+
+def parse_kickoff(
+    text: str | None,
+    ts: str | None,
+    ref: datetime,
+    page_timezone: str | None = "Africa/Johannesburg",
+) -> datetime | None:
     if ts:
         parsed = parse_iso_datetime(ts)
         if parsed:
@@ -214,6 +229,7 @@ def parse_kickoff(text: str | None, ts: str | None, ref: datetime) -> datetime |
 
     text = text.strip()
     year = ref.year
+    local_tz = local_page_timezone(page_timezone)
 
     for fmt in [
         "%a %d %b %H:%M",
@@ -227,7 +243,7 @@ def parse_kickoff(text: str | None, ts: str | None, ref: datetime) -> datetime |
             dt = datetime.strptime(text[:20], fmt)
             if dt.year == 1900:
                 dt = dt.replace(year=year)
-            return dt.replace(tzinfo=timezone.utc)
+            return dt.replace(tzinfo=local_tz).astimezone(timezone.utc)
         except Exception:
             continue
     return None
@@ -1395,7 +1411,12 @@ async def scan_superbru_matches(
             await page.wait_for_timeout(5000)
 
             info = await page.evaluate(EXTRACT_MATCH_JS, {"gameId": game_id, "label": label})
-            kickoff_dt = parse_kickoff(info.get("kickoffText"), info.get("kickoffTs"), now)
+            kickoff_dt = parse_kickoff(
+                info.get("kickoffText"),
+                info.get("kickoffTs"),
+                now,
+                page_timezone=getattr(args, "page_timezone", "Africa/Johannesburg"),
+            )
             time_until = (kickoff_dt - now) if kickoff_dt else None
             in_window = time_until is not None and timedelta(0) <= time_until <= window
 
@@ -1446,6 +1467,7 @@ async def run(args: argparse.Namespace) -> dict[str, Any]:
                 "run_at_utc": now.isoformat(),
                 "mode": "match_scoped_locked_card_auto_pick",
                 "window_minutes": args.window_minutes,
+                "page_timezone": getattr(args, "page_timezone", "Africa/Johannesburg"),
                 "dry_run": args.dry_run,
                 "pick_card_csv": args.pick_card_csv,
                 "pool_standing": pool_standing,
@@ -1602,6 +1624,7 @@ async def run(args: argparse.Namespace) -> dict[str, Any]:
         "run_at_utc": now.isoformat(),
         "mode": "match_scoped_locked_card_auto_pick",
         "window_minutes": args.window_minutes,
+        "page_timezone": getattr(args, "page_timezone", "Africa/Johannesburg"),
         "dry_run": args.dry_run,
         "pick_card_csv": args.pick_card_csv,
         "pool_standing": pool_standing,
@@ -1641,6 +1664,14 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--password", default=os.environ.get("SUPERBRU_PASSWORD", ""))
     parser.add_argument("--login-url", default="https://www.superbru.com/login")
     parser.add_argument("--pool-url", default="https://www.superbru.com/worldcup_predictor/pool_view.php?t=1296&p=13236623&view=matches")
+    parser.add_argument(
+        "--page-timezone",
+        default=os.environ.get("SUPERBRU_PAGE_TIMEZONE", "Africa/Johannesburg"),
+        help=(
+            "Timezone used for SuperBru text-only fixture times. The pool page displays local "
+            "South Africa times by default, while the locked card stores UTC."
+        ),
+    )
     parser.add_argument("--window-minutes", type=int, default=20)
     parser.add_argument("--headless", dest="headless", action="store_true", default=True)
     parser.add_argument("--headed", dest="headless", action="store_false")
@@ -1750,6 +1781,7 @@ def write_missing_credentials_summary(args: argparse.Namespace) -> dict[str, Any
             "run_at_utc": datetime.now(timezone.utc).isoformat(),
             "mode": "match_scoped_locked_card_auto_pick",
             "window_minutes": args.window_minutes,
+            "page_timezone": getattr(args, "page_timezone", "Africa/Johannesburg"),
             "dry_run": args.dry_run,
             "pick_card_csv": args.pick_card_csv,
             "queued_count": 0,

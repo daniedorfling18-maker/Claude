@@ -107,6 +107,19 @@ def test_card_fallback_reconciles_duplicate_live_match_with_bad_scan_time(tmp_pa
     assert queued[0]["pick_card_row"]["locked_pick"] == "0-2"
 
 
+def test_superbru_text_kickoff_uses_south_africa_timezone() -> None:
+    mod = load_module()
+
+    parsed = mod.base.parse_kickoff(
+        "4 Jul 23:00",
+        None,
+        datetime(2026, 7, 4, 20, 0, tzinfo=timezone.utc),
+        page_timezone="Africa/Johannesburg",
+    )
+
+    assert parsed == datetime(2026, 7, 4, 21, 0, tzinfo=timezone.utc)
+
+
 def test_already_current_counts_as_required_submission_success() -> None:
     mod = load_module()
     args = argparse.Namespace(require_submission=True, dry_run=False)

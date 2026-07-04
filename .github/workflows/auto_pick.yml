@@ -46,6 +46,7 @@ jobs:
           SUPERBRU_USERNAME: ${{ secrets.SUPERBRU_USERNAME }}
           SUPERBRU_PASSWORD: ${{ secrets.SUPERBRU_PASSWORD }}
           SUPERBRU_POOL_URL: ${{ secrets.SUPERBRU_POOL_URL }}
+          SUPERBRU_PAGE_TIMEZONE: ${{ secrets.SUPERBRU_PAGE_TIMEZONE || 'Africa/Johannesburg' }}
           THE_ODDS_API_KEY: ${{ secrets.THE_ODDS_API_KEY }}
         run: |
           python3 - <<'PY'
@@ -96,6 +97,7 @@ jobs:
             --password "$SUPERBRU_PASSWORD" \
             --login-url "$LOGIN_URL" \
             --pool-url "$SUPERBRU_POOL_URL" \
+            --page-timezone "${SUPERBRU_PAGE_TIMEZONE:-Africa/Johannesburg}" \
             --config config.yaml \
             --window-minutes "$WINDOW_MINUTES" \
             --pick-card-csv outputs/final_locked_picks/superbru_final_card.csv \

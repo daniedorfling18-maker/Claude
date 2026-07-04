@@ -1,6 +1,6 @@
 # SuperBru validation data freshness
 
-Generated: `2026-07-03T16:00:12.625229+00:00`
+Generated: `2026-07-04T08:50:58.020733+00:00`
 
 Status: **not_ready**
 
@@ -8,16 +8,16 @@ Status: **not_ready**
 
 | Source | Rows | Status | Age hours | Coverage |
 | --- | ---: | --- | ---: | ---: |
-| Locked card | 9 | ok | 0.0 | - |
-| Oddspedia grid | 456 | ok | 0.042 | 0/9 |
-| Oddspedia comparison | 0 | missing | None | 0/9 |
+| Locked card | 8 | ok | 0.0 | - |
+| Oddspedia grid | 456 | ok | 0.044 | 0/8 |
+| Oddspedia comparison | 0 | missing | None | 0/8 |
 | SuperBru results | 0 | missing | None | - |
-| Market history | 18 | ok | 0.001 | - |
-| Prediction log | 9 | ok | 0.0 | - |
+| Market history | 26 | ok | 0.001 | - |
+| Prediction log | 17 | ok | 0.0 | - |
 
 ## Blockers
 
-- Oddspedia grid covers 0/9 locked-card matches.
+- Oddspedia grid covers 0/8 locked-card matches.
 - SuperBru results CSV is missing.
 - No completed SuperBru result rows are available for realised validation.
 

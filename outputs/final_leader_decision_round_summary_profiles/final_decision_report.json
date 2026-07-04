@@ -1,5 +1,5 @@
 {
-  "generated_at_utc": "2026-07-03T16:00:09.340869+00:00",
+  "generated_at_utc": "2026-07-04T08:50:54.760112+00:00",
   "leader_player": "Danie",
   "final_policy": "raw EV pick unless base MC, stress test and high-N confirmation all approve the same switch",
   "accepted_policy_switches": [],
@@ -8,18 +8,20 @@
     "base_mc": {
       "simulations": 100000,
       "leader_player": "Danie",
-      "leader_start_points": 95.0,
+      "leader_start_points": 97.5,
       "chasers": [
         "Ivan Prinsloo",
+        "Lusse",
         "Dheben",
-        "Leonard",
         "rob87",
-        "Lusse"
+        "Leonard",
+        "Chapman12",
+        "Joe"
       ],
-      "baseline_p_finish_first": 0.73226,
-      "baseline_p_finish_first_or_tied": 0.77285,
-      "final_p_finish_first": 0.73226,
-      "final_p_finish_first_or_tied": 0.77285,
+      "baseline_p_finish_first": 0.71947,
+      "baseline_p_finish_first_or_tied": 0.76179,
+      "final_p_finish_first": 0.71947,
+      "final_p_finish_first_or_tied": 0.76179,
       "delta_p_finish_first": 0.0,
       "accepted_switches": [],
       "total_ev_loss": 0.0
@@ -27,18 +29,20 @@
     "confirmation_500k": {
       "simulations": 500000,
       "leader_player": "Danie",
-      "leader_start_points": 95.0,
+      "leader_start_points": 97.5,
       "chasers": [
         "Ivan Prinsloo",
+        "Lusse",
         "Dheben",
-        "Leonard",
         "rob87",
-        "Lusse"
+        "Leonard",
+        "Chapman12",
+        "Joe"
       ],
-      "baseline_p_finish_first": 0.731788,
-      "baseline_p_finish_first_or_tied": 0.77222,
-      "final_p_finish_first": 0.731788,
-      "final_p_finish_first_or_tied": 0.77222,
+      "baseline_p_finish_first": 0.718448,
+      "baseline_p_finish_first_or_tied": 0.760914,
+      "final_p_finish_first": 0.718448,
+      "final_p_finish_first_or_tied": 0.760914,
       "delta_p_finish_first": 0.0,
       "accepted_switches": [],
       "total_ev_loss": 0.0
@@ -88,7 +92,7 @@
     {
       "gate": "predictions_non_empty",
       "passed": true,
-      "row_count": 9
+      "row_count": 8
     }
   ],
   "outputs": {

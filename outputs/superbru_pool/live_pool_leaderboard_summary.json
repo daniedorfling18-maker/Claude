@@ -1,20 +1,20 @@
 {
-  "generated_at_utc": "2026-07-03T15:58:53.790138+00:00",
+  "generated_at_utc": "2026-07-04T08:49:35.343144+00:00",
   "status": "ok",
   "row_count": 32,
   "leader_player": "Danie",
   "pool_standing": {
     "status": "leading",
     "rank": 1,
-    "my_points": 95.0,
+    "my_points": 97.5,
     "leader_gap": 1.0,
-    "chasers_in_range": 5,
+    "chasers_in_range": 7,
     "chaser_names": [
       "Ivan Prinsloo",
+      "Lusse",
       "Dheben",
-      "Leonard",
       "rob87",
-      "Lusse"
+      "Leonard"
     ],
     "leaderboard_size": 32
   },
@@ -22,42 +22,42 @@
     {
       "rank": 1,
       "player": "Danie",
-      "current_points": 95.0
+      "current_points": 97.5
     },
     {
       "rank": 2,
       "player": "Ivan Prinsloo",
-      "current_points": 94.0
+      "current_points": 96.5
     },
     {
       "rank": 3,
-      "player": "Dheben",
-      "current_points": 89.0
+      "player": "Lusse",
+      "current_points": 94.0
     },
     {
       "rank": 4,
-      "player": "Leonard",
-      "current_points": 89.0
+      "player": "Dheben",
+      "current_points": 91.5
     },
     {
       "rank": 5,
       "player": "rob87",
-      "current_points": 88.5
+      "current_points": 91.5
     },
     {
       "rank": 6,
-      "player": "Lusse",
-      "current_points": 87.0
+      "player": "Leonard",
+      "current_points": 91.5
     },
     {
       "rank": 7,
-      "player": "Bijal",
-      "current_points": 86.5
+      "player": "Chapman12",
+      "current_points": 91.5
     },
     {
       "rank": 8,
-      "player": "Ettiene",
-      "current_points": 86.0
+      "player": "Joe",
+      "current_points": 90.0
     }
   ],
   "out_csv": "outputs/superbru_pool/live_pool_leaderboard.csv"

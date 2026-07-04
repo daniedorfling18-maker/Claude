@@ -1,18 +1,20 @@
 {
   "simulations": 100000,
   "leader_player": "Danie",
-  "leader_start_points": 95.0,
+  "leader_start_points": 97.5,
   "chasers": [
     "Ivan Prinsloo",
+    "Lusse",
     "Dheben",
-    "Leonard",
     "rob87",
-    "Lusse"
+    "Leonard",
+    "Chapman12",
+    "Joe"
   ],
-  "baseline_p_finish_first": 0.73226,
-  "baseline_p_finish_first_or_tied": 0.77285,
-  "final_p_finish_first": 0.73226,
-  "final_p_finish_first_or_tied": 0.77285,
+  "baseline_p_finish_first": 0.71947,
+  "baseline_p_finish_first_or_tied": 0.76179,
+  "final_p_finish_first": 0.71947,
+  "final_p_finish_first_or_tied": 0.76179,
   "delta_p_finish_first": 0.0,
   "accepted_switches": [],
   "total_ev_loss": 0.0

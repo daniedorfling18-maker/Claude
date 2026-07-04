@@ -1,14 +1,14 @@
 {
-  "generated_at_utc": "2026-07-03T16:00:11.844804+00:00",
-  "snapshot_id": "20260703T160009Z",
+  "generated_at_utc": "2026-07-04T08:50:57.172573+00:00",
+  "snapshot_id": "20260704T085054Z",
   "final_card": "outputs/daily_robust_card/daily_robust_superbru_card.csv",
   "daily_summary": "outputs/daily_robust_card/daily_robust_summary.json",
   "market_history_summary": "outputs/market_odds_history/market_odds_history_summary.json",
   "market_odds_fetch_skipped": true,
   "market_odds_scope": {
     "mode": "rolling_pre_match_window",
-    "commence_from": "2026-07-03T15:50:09.488553Z",
-    "commence_to": "2026-07-03T16:30:09.488553Z",
+    "commence_from": "2026-07-04T08:40:54.903603Z",
+    "commence_to": "2026-07-04T09:20:54.903603Z",
     "window_before_minutes": 10,
     "window_after_minutes": 30
   },
@@ -16,7 +16,7 @@
   "odds_json": "outputs/market_odds/worldcup_market_odds_raw.json",
   "leaderboard_csv": "outputs/superbru_pool/live_pool_leaderboard.csv",
   "chaser_profiles_csv": "outputs/superbru_pool/live_chaser_profiles.csv",
-  "chasers": "Ivan Prinsloo,Dheben,Leonard,rob87,Lusse",
+  "chasers": "Ivan Prinsloo,Lusse,Dheben,rob87,Leonard,Chapman12,Joe",
   "manual_flags_csv": "outputs/superbru_pool/live_manual_match_flags.csv",
   "final_simulation_dir": null,
   "predictions_for_final_simulation": null,

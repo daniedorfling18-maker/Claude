@@ -1,25 +1,25 @@
 {
   "blockers": [
-    "Oddspedia grid covers 0/9 locked-card matches.",
+    "Oddspedia grid covers 0/8 locked-card matches.",
     "SuperBru results CSV is missing.",
     "No completed SuperBru result rows are available for realised validation."
   ],
-  "generated_at_utc": "2026-07-03T16:00:12.625229+00:00",
+  "generated_at_utc": "2026-07-04T08:50:58.020733+00:00",
   "live_trading_invoked": false,
   "locked_card": {
     "exists": true,
     "file_age_hours": 0.0,
     "path": "outputs/final_locked_picks/superbru_final_card.csv",
-    "rows": 9,
+    "rows": 8,
     "status": "ok"
   },
   "market_history": {
     "exists": true,
     "file_age_hours": 0.001,
-    "latest_snapshot_created_at_utc": "2026-07-03T16:00:10.802839+00:00",
+    "latest_snapshot_created_at_utc": "2026-07-04T08:50:56.143302+00:00",
     "path": "outputs/market_odds_history/market_odds_history.csv",
-    "rows": 18,
-    "snapshot_count": 2,
+    "rows": 26,
+    "snapshot_count": 3,
     "status": "ok"
   },
   "oddspedia_comparison": {
@@ -27,17 +27,16 @@
     "file_age_hours": null,
     "locked_card_coverage": {
       "coverage_fraction": 0.0,
-      "locked_matches": 9,
+      "locked_matches": 8,
       "matched_locked_matches": 0,
       "missing_locked_match_keys": [
-        "argentina::capeverde",
-        "australia::egypt",
+        "argentina::egypt",
         "brazil::norway",
         "canada::morocco",
-        "colombia::ghana",
         "mexico::england",
         "paraguay::france",
         "portugal::spain",
+        "switzerland::colombia",
         "unitedstates::belgium"
       ]
     },
@@ -47,21 +46,20 @@
   },
   "oddspedia_grid": {
     "exists": true,
-    "file_age_hours": 0.042,
+    "file_age_hours": 0.044,
     "latest_source_timestamp_utc": "",
     "locked_card_coverage": {
       "coverage_fraction": 0.0,
-      "locked_matches": 9,
+      "locked_matches": 8,
       "matched_locked_matches": 0,
       "missing_locked_match_keys": [
-        "argentina::capeverde",
-        "australia::egypt",
+        "argentina::egypt",
         "brazil::norway",
         "canada::morocco",
-        "colombia::ghana",
         "mexico::england",
         "paraguay::france",
         "portugal::spain",
+        "switzerland::colombia",
         "unitedstates::belgium"
       ]
     },
@@ -74,7 +72,7 @@
     "exists": true,
     "file_age_hours": 0.0,
     "path": "outputs/backtesting/prediction_log.csv",
-    "rows": 9,
+    "rows": 17,
     "status": "ok"
   },
   "recommended_actions": [

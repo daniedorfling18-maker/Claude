@@ -44,8 +44,23 @@ jobs:
         run: |
           set -euo pipefail
           install -m 700 -d "$RUNNER_TEMP/ssh"
-          printf '%s\n' "$PM_VPS_SSH_PRIVATE_KEY" > "$RUNNER_TEMP/ssh/vps_key"
+          python3 - <<'PY'
+          import os
+          from pathlib import Path
+
+          raw_key = os.environ.get("PM_VPS_SSH_PRIVATE_KEY", "")
+          # GitHub's UI/API can preserve multiline secrets, but operators sometimes
+          # paste literal "\n" sequences. Normalise that into an OpenSSH key file.
+          if "\\n" in raw_key and "\n" not in raw_key:
+              raw_key = raw_key.replace("\\n", "\n")
+          raw_key = raw_key.replace("\r\n", "\n").replace("\r", "\n").strip() + "\n"
+          Path(os.environ["RUNNER_TEMP"], "ssh", "vps_key").write_text(raw_key, encoding="utf-8")
+          PY
           chmod 600 "$RUNNER_TEMP/ssh/vps_key"
+          if ! ssh-keygen -y -f "$RUNNER_TEMP/ssh/vps_key" >/dev/null 2>&1; then
+            echo "::error::PM_VPS_SSH_PRIVATE_KEY is present but is not a loadable private key. Store the full private key file, not the .pub public key or a PuTTY .ppk file."
+            exit 1
+          fi
           ssh-keyscan -p "$PM_VPS_PORT" -H "$PM_VPS_HOST" > "$RUNNER_TEMP/ssh/known_hosts"
           chmod 600 "$RUNNER_TEMP/ssh/known_hosts"
 

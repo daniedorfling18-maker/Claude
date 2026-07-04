@@ -88,3 +88,11 @@ def test_vps_deploy_workflow_requires_current_dashboard_schema():
     assert "coverage_by_sport_market" in text
     assert "alpha_validated_anchor_rows" in text
     assert "sharp_sports_funnel" in text
+
+
+def test_vps_deploy_workflow_validates_private_key_secret():
+    text = (ROOT / ".github" / "workflows" / "deploy-polymarket-vps-paper.yml").read_text(encoding="utf-8")
+
+    assert 'raw_key.replace("\\\\n", "\\n")' in text
+    assert "ssh-keygen -y -f" in text
+    assert "not the .pub public key or a PuTTY .ppk file" in text

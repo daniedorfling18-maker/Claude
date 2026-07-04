@@ -1,15 +1,15 @@
 {
-  "beat_close_rate": null,
+  "beat_close_rate": 1.0,
   "clv_ci_high": null,
   "clv_ci_low": null,
-  "generated_at_utc": "2026-07-04T10:34:23Z",
+  "generated_at_utc": "2026-07-04T14:10:36Z",
   "interpretation": "keep the snapshot workflow running; verdict needs more matched picks",
-  "mean_clv": null,
+  "mean_clv": 0.02862,
   "minimum_samples": 15,
-  "picks_scored": 0,
+  "picks_scored": 1,
   "picks_seen": 64,
   "skipped": {
-    "no_close_line": 8,
+    "no_close_line": 7,
     "no_outcome": 0,
     "no_pick_time_line": 3,
     "no_snapshots": 53

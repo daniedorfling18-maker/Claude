@@ -105,3 +105,30 @@ def test_card_fallback_reconciles_duplicate_live_match_with_bad_scan_time(tmp_pa
     assert queued[0]["kickoff_utc"] == "2026-07-04T21:00:00+00:00"
     assert queued[0]["kickoff_source"] == "pick_card_fallback_reconciled_scan_time"
     assert queued[0]["pick_card_row"]["locked_pick"] == "0-2"
+
+
+def test_already_current_counts_as_required_submission_success() -> None:
+    mod = load_module()
+    args = argparse.Namespace(require_submission=True, dry_run=False)
+
+    result = {
+        "queued_count": 1,
+        "submitted": 0,
+        "already_current_count": 1,
+    }
+
+    assert mod.base.normalise_score_pick(" 00 – 02 ") == "0-2"
+    assert mod.base.exit_code_for_result(result, args) == 0
+
+
+def test_required_submission_fails_when_not_submitted_or_current() -> None:
+    mod = load_module()
+    args = argparse.Namespace(require_submission=True, dry_run=False)
+
+    result = {
+        "queued_count": 1,
+        "submitted": 0,
+        "already_current_count": 0,
+    }
+
+    assert mod.base.exit_code_for_result(result, args) == 2

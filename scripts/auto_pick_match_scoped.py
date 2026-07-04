@@ -163,6 +163,14 @@ def txt(value: Any) -> str:
     return str(value).strip()
 
 
+def normalise_score_pick(value: Any) -> str:
+    text = txt(value)
+    match = re.search(r"(\d+)\s*[-–]\s*(\d+)", text)
+    if not match:
+        return text
+    return f"{int(match.group(1))}-{int(match.group(2))}"
+
+
 def norm_team(value: Any) -> str:
     return "".join(ch.lower() for ch in txt(value) if ch.isalnum())
 
@@ -1542,6 +1550,19 @@ async def run(args: argparse.Namespace) -> dict[str, Any]:
             submitted_results.append(entry)
             continue
 
+        if normalise_score_pick(entry.get("current_pick")) == normalise_score_pick(pick):
+            entry["status"] = "already_current"
+            entry["submit_result"] = {
+                "status": "already_current",
+                "home_team": entry.get("home_team"),
+                "away_team": entry.get("away_team"),
+                "new_pick": pick,
+                "dry_run": False,
+                "reason": "SuperBru already shows the selected pick; skipped duplicate submit.",
+            }
+            submitted_results.append(entry)
+            continue
+
         try:
             submit_result = await submit_pick(args, entry["home_team"], entry["away_team"], pick, out_dir)
             entry["status"] = submit_result.get("status", "unknown")
@@ -1552,6 +1573,8 @@ async def run(args: argparse.Namespace) -> dict[str, Any]:
         submitted_results.append(entry)
 
     submitted_count = sum(1 for item in submitted_results if item.get("status") == "submitted")
+    already_current_count = sum(1 for item in submitted_results if item.get("status") == "already_current")
+    successful_count = submitted_count + already_current_count
     dry_run_count = sum(1 for item in submitted_results if item.get("status") == "dry_run")
     no_pick_count = sum(1 for item in submitted_results if item.get("status") == "no_pick_available")
     failed_count = sum(
@@ -1563,9 +1586,9 @@ async def run(args: argparse.Namespace) -> dict[str, Any]:
         status = "dry_run"
     elif not queued:
         status = "no_queued_matches"
-    elif submitted_count == len(queued):
-        status = "submitted"
-    elif submitted_count > 0:
+    elif successful_count == len(queued):
+        status = "submitted" if submitted_count else "already_current"
+    elif successful_count > 0:
         status = "partial_submission"
     elif failed_count > 0:
         status = "submit_failed"
@@ -1588,6 +1611,7 @@ async def run(args: argparse.Namespace) -> dict[str, Any]:
         "card_fallback_entries": card_fallback_entries,
         "results": submitted_results,
         "submitted": submitted_count,
+        "already_current_count": already_current_count,
         "dry_run_count": dry_run_count,
         "no_pick_available": no_pick_count,
         "submit_failed": sum(1 for item in submitted_results if item.get("status") == "submit_failed"),
@@ -1691,6 +1715,8 @@ def exit_code_for_result(result: dict[str, Any], args: argparse.Namespace) -> in
     if getattr(args, "require_submission", False) and not getattr(args, "dry_run", False):
         queued = int(result.get("queued_count") or 0)
         submitted = int(result.get("submitted") or 0)
+        already_current = int(result.get("already_current_count") or 0)
+        successful = submitted + already_current
         if queued <= 0:
             print(
                 "No Superbru matches were queued after page scan + locked-card fallback; "
@@ -1698,16 +1724,18 @@ def exit_code_for_result(result: dict[str, Any], args: argparse.Namespace) -> in
                 file=sys.stderr,
             )
             return 0
-        if submitted <= 0:
+        if successful <= 0:
             print(
-                "ERROR: Superbru auto-pick submitted zero picks in a required scheduled window. "
+                "ERROR: Superbru auto-pick neither submitted nor confirmed an already-current pick "
+                "in a required scheduled window. "
                 "Check outputs/pregame_checks/auto_pick/latest_auto_pick_match_scoped.json",
                 file=sys.stderr,
             )
             return 2
-        if queued and submitted < queued:
+        if queued and successful < queued:
             print(
-                f"ERROR: Superbru auto-pick submitted {submitted}/{queued} queued picks.",
+                f"ERROR: Superbru auto-pick completed {successful}/{queued} queued picks "
+                f"({submitted} submitted, {already_current} already current).",
                 file=sys.stderr,
             )
             return 3

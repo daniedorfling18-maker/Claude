@@ -189,6 +189,74 @@ def test_research_focus_prioritises_near_positive_historical_breadth_queries(tmp
     assert "near-positive historical buckets" in payload["summary"]
 
 
+def test_research_focus_prioritises_paper_confirmation_blocker_query(tmp_path):
+    cfg = _cfg(tmp_path)
+    write_json(
+        cfg.output_root / "polymarket_price_action" / "price_action_model_summary.json",
+        {
+            "status": "trained",
+            "decision": "collect_more_bid_ask_price_action_model_evidence",
+            "promotion_ready": False,
+        },
+    )
+    write_json(
+        cfg.output_root / "polymarket_price_action" / "price_action_paper_signal_summary.json",
+        {
+            "status": "computed",
+            "paper_confirmation_current_historical_analogue": {
+                "state": "current_candidates_blocked_by_entry_price_band",
+                "fresh_matches": 2,
+                "selected": 0,
+                "approved": 0,
+                "blocked": 2,
+                "blocked_preview": [
+                    {
+                        "market_slug": "solana-up-or-down-july-4-2026-3am-et",
+                        "question": "Solana Up or Down - July 4, 3AM ET",
+                        "family": "crypto_sol_updown_event",
+                        "signal_cohort": "exploratory_crypto_updown_live_model|crypto_sol_updown_15m|outcome=up",
+                        "latest_bid": 0.98,
+                        "latest_ask": 0.99,
+                        "candidate_gate": "entry_price_outside_risk_band",
+                    },
+                    {
+                        "market_slug": "btc-updown-15m-1783130400",
+                        "question": "Bitcoin Up or Down - July 4, 3AM ET",
+                        "family": "crypto_btc_updown_15m",
+                        "signal_cohort": "exploratory_crypto_updown_live_model|crypto_btc_updown_15m|outcome=up",
+                        "latest_bid": 0.50,
+                        "latest_ask": 0.51,
+                        "candidate_gate": "insufficient_historical_analogue_rows",
+                    },
+                ],
+            },
+        },
+    )
+    write_json(
+        cfg.governance_root / "price_action_feedback.json",
+        {
+            "status": "ok",
+            "learning_state": "collect_more_positive_price_action_evidence",
+            "collection_queries": ["btc updown", "ethereum"],
+        },
+    )
+
+    payload = build_research_focus(cfg)
+
+    assert payload["raw_collection_queries"][:3] == ["solana updown", "btc updown", "ethereum"]
+    assert payload["collection_queries"][0] == "solana updown"
+    assert "btc updown" not in payload["collection_queries"]
+    assert payload["price_action_model"]["paper_confirmation_blocker_queries"] == [
+        "solana updown",
+        "btc updown",
+    ]
+    assert payload["collection_query_guard"]["rejected_queries"][0] == {
+        "query": "btc updown",
+        "family": "crypto_updown",
+        "reason": "max_updown_queries",
+    }
+
+
 def test_research_focus_broadens_to_near_miss_board_when_current_analogues_are_negative(tmp_path):
     cfg = _cfg(tmp_path)
     write_json(

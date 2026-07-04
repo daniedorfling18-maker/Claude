@@ -641,6 +641,51 @@ def _current_positive_analogue_queries(targets: list[dict[str, Any]]) -> list[st
     return queries
 
 
+def _collection_query_from_row(row: dict[str, Any]) -> str:
+    query = str(row.get("recommended_collection_query") or "").strip()
+    if query:
+        return query
+    query = _near_miss_collection_query(row)
+    if query:
+        return query
+    return _cohort_query(
+        " ".join(
+            str(row.get(key) or "")
+            for key in ("family", "signal_cohort", "cohort", "market_slug", "question")
+        )
+    )
+
+
+def _paper_confirmation_blocker_queries(price_action_paper: dict[str, Any], *, max_queries: int = 4) -> list[str]:
+    """Collection-only queries for trusted paper-confirmation blockers.
+
+    When a trusted shadow thesis has fresh current matches but none can become
+    paper probes, the scarce adaptive query slots should chase the exact family
+    that is blocking proof collection. This does not approve a trade; it only
+    makes websocket/discovery collection consistent with the diagnosed blocker.
+    """
+    scan = price_action_paper.get("paper_confirmation_current_historical_analogue")
+    if not isinstance(scan, dict):
+        return []
+    fresh_matches = _num(scan.get("fresh_matches"))
+    selected = _num(scan.get("selected") or scan.get("approved"))
+    if fresh_matches <= 0 or selected > 0:
+        return []
+    rows = scan.get("blocked_preview")
+    if not isinstance(rows, list):
+        return []
+    queries: list[str] = []
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        query = _collection_query_from_row(row)
+        if query and query not in queries:
+            queries.append(query)
+        if len(queries) >= max_queries:
+            break
+    return queries
+
+
 def _side_missing_analogue_targets(price_action_paper: dict[str, Any], *, max_targets: int = 6) -> dict[str, Any]:
     """Rows with positive side-agnostic history need side/context collection, not approval."""
     scans: list[dict[str, Any]] = []
@@ -1152,9 +1197,12 @@ def build_research_focus(cfg) -> dict[str, Any]:
     current_positive_targets = current_positive_payload.get("targets", [])
     current_positive_blocked_targets = current_positive_payload.get("blocked_targets", [])
     current_positive_queries = _current_positive_analogue_queries(current_positive_targets)
+    paper_confirmation_blocker_queries = _paper_confirmation_blocker_queries(price_action_paper)
     side_missing_payload = _side_missing_analogue_targets(price_action_paper)
     side_missing_queries = side_missing_payload.get("collection_queries", [])
-    model_needs_repricing_data = _price_action_model_needs_data(price_action_model) and bool(feedback_queries)
+    model_needs_repricing_data = _price_action_model_needs_data(price_action_model) and bool(
+        feedback_queries or paper_confirmation_blocker_queries
+    )
     feedback_positive = bool(
         _num(price_action_feedback.get("promotion_candidates"))
         or _num(price_action_feedback.get("positive_collect_candidates"))
@@ -1277,6 +1325,9 @@ def build_research_focus(cfg) -> dict[str, Any]:
         if query and query not in collection_queries:
             collection_queries.append(query)
     if model_needs_repricing_data:
+        for query in paper_confirmation_blocker_queries:
+            if query and query not in collection_queries:
+                collection_queries.append(query)
         for query in current_positive_queries:
             if query and query not in collection_queries:
                 collection_queries.append(query)
@@ -1367,6 +1418,7 @@ def build_research_focus(cfg) -> dict[str, Any]:
             "model_needs_repricing_data": model_needs_repricing_data or bool(validation_gap_queries),
             "historical_breadth_queries": historical_breadth_queries,
             "current_positive_analogue_queries": current_positive_queries,
+            "paper_confirmation_blocker_queries": paper_confirmation_blocker_queries,
             "side_missing_analogue_queries": side_missing_queries,
             "near_miss_candidate_queries": near_miss_queries,
             "analogue_scan_needs_breadth": analogue_scan_needs_breadth,

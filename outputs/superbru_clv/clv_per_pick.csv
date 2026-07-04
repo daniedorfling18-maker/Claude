@@ -1,2 +1,3 @@
 match_key,home_team,away_team,commence_time,locked_pick,pick_outcome,p_pick_time,p_close,clv,beat_close,close_snapshot_age_minutes
 canada|morocco|2026-07-04,Canada,Morocco,2026-07-04T17:00:00Z,0-2,away,0.544072,0.572692,0.02862,True,169.4
+paraguay|france|2026-07-04,Paraguay,France,2026-07-04T21:00:00Z,0-2,away,0.833429,0.833429,0.0,False,204.0

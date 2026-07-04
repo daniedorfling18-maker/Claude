@@ -1,5 +1,5 @@
 {
-  "generated_at_utc": "2026-07-04T08:50:55.764287+00:00",
+  "generated_at_utc": "2026-07-04T15:19:14.302967+00:00",
   "pick_count": 8,
   "market_available_count": 7,
   "totals_available_count": 7,
@@ -29,15 +29,15 @@
       "home_team": "Portugal",
       "away_team": "Spain",
       "final_pick": "0-2",
-      "market_alignment_score": 0.8246,
+      "market_alignment_score": 0.826595,
       "market_alignment_label": "market_aligned",
-      "market_alignment_reasons": "pick outcome agrees with market favourite; spreads market unavailable"
+      "market_alignment_reasons": "pick outcome agrees with market favourite; market gives selected outcome strong support; spreads market unavailable"
     },
     {
       "home_team": "Brazil",
       "away_team": "Norway",
       "final_pick": "2-0",
-      "market_alignment_score": 0.843296,
+      "market_alignment_score": 0.842729,
       "market_alignment_label": "market_aligned",
       "market_alignment_reasons": "pick outcome agrees with market favourite; market gives selected outcome strong support; spreads market unavailable"
     },
@@ -45,7 +45,7 @@
       "home_team": "Mexico",
       "away_team": "England",
       "final_pick": "0-1",
-      "market_alignment_score": 0.845445,
+      "market_alignment_score": 0.843865,
       "market_alignment_label": "market_aligned",
       "market_alignment_reasons": "pick outcome agrees with market favourite; goal total agrees with market lean; spreads market unavailable"
     },
@@ -53,7 +53,7 @@
       "home_team": "Switzerland",
       "away_team": "Colombia",
       "final_pick": "0-2",
-      "market_alignment_score": 0.870416,
+      "market_alignment_score": 0.868025,
       "market_alignment_label": "market_aligned",
       "market_alignment_reasons": "pick outcome agrees with market favourite; goal total agrees with market lean; spreads market unavailable"
     },
@@ -61,7 +61,7 @@
       "home_team": "Canada",
       "away_team": "Morocco",
       "final_pick": "0-2",
-      "market_alignment_score": 0.9535,
+      "market_alignment_score": 0.9618,
       "market_alignment_label": "market_aligned",
       "market_alignment_reasons": "pick outcome agrees with market favourite; market gives selected outcome strong support; goal total agrees with market lean; spreads market unavailable"
     },

@@ -11,10 +11,10 @@
     "Chapman12",
     "Joe"
   ],
-  "baseline_p_finish_first": 0.718448,
-  "baseline_p_finish_first_or_tied": 0.760914,
-  "final_p_finish_first": 0.718448,
-  "final_p_finish_first_or_tied": 0.760914,
+  "baseline_p_finish_first": 0.70715,
+  "baseline_p_finish_first_or_tied": 0.752268,
+  "final_p_finish_first": 0.70715,
+  "final_p_finish_first_or_tied": 0.752268,
   "delta_p_finish_first": 0.0,
   "accepted_switches": [],
   "total_ev_loss": 0.0

@@ -93,9 +93,7 @@ services:
     working_dir: /app
     command: >
       sh -c "mkdir -p /app/outputs/polymarket_dashboard &&
-      if [ ! -f /app/outputs/polymarket_dashboard/index.html ]; then
-        python scripts/render_polymarket_dashboard.py --config /app/polymarket_predictive_config.example.yaml || true;
-      fi;
+      python scripts/render_polymarket_dashboard.py --config /app/polymarket_predictive_config.example.yaml || true;
       python scripts/serve_polymarket_dashboard.py
       --directory /app/outputs/polymarket_dashboard
       --host 0.0.0.0

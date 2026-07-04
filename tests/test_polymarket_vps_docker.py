@@ -31,6 +31,9 @@ def test_vps_paper_compose_is_lean_and_paper_only():
     assert services["polymarket-dashboard"]["restart"] == "unless-stopped"
     assert services["polymarket-paper-live"]["mem_limit"] == "${PM_PAPER_MEM_LIMIT:-4g}"
     assert services["polymarket-dashboard"]["mem_limit"] == "${PM_DASHBOARD_MEM_LIMIT:-256m}"
+    dashboard_command = services["polymarket-dashboard"]["command"]
+    assert "render_polymarket_dashboard.py" in dashboard_command
+    assert "if [ ! -f /app/outputs/polymarket_dashboard/index.html ]" not in dashboard_command
 
 
 def test_vps_env_example_keeps_live_credentials_empty():
@@ -74,6 +77,7 @@ def test_vps_health_script_checks_dashboard_and_heartbeat_files():
     assert "coverage_by_sport_market" in text
     assert "alpha_validated_anchor_rows" in text
     assert "sharp_sports_funnel" in text
+    assert "Repair: docker compose -f $COMPOSE_FILE exec -T polymarket-paper-live python scripts/render_polymarket_dashboard.py" in text
 
 
 def test_vps_deploy_workflow_requires_current_dashboard_schema():

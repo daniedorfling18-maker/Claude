@@ -20,6 +20,10 @@ docker_cmd() {
   fi
 }
 
+dashboard_rerender_hint() {
+  printf '%s\n' "  Repair: docker compose -f $COMPOSE_FILE exec -T polymarket-paper-live python scripts/render_polymarket_dashboard.py --config /app/polymarket_predictive_config.example.yaml"
+}
+
 env_value() {
   key="$1"
   file="$2"
@@ -91,12 +95,14 @@ if curl -fsS --max-time 5 "$dashboard_url" -o "$dashboard_tmp" >/dev/null 2>&1; 
     printf '%s\n' "Dashboard proof gate: ok"
   else
     printf '%s\n' "Dashboard proof gate: missing (dashboard may be stale; redeploy or rerender)"
+    dashboard_rerender_hint
     exit_code=1
   fi
   if grep -q "Evidence funnel" "$dashboard_tmp"; then
     printf '%s\n' "Dashboard evidence funnel: ok"
   else
     printf '%s\n' "Dashboard evidence funnel: missing (dashboard may be stale; redeploy or rerender)"
+    dashboard_rerender_hint
     exit_code=1
   fi
 else
@@ -110,36 +116,42 @@ if [ -f "$dashboard_data" ]; then
     printf '%s\n' "Dashboard proof data: ok"
   else
     printf '%s\n' "Dashboard proof data: missing (dashboard data predates the verified-profit gate)"
+    dashboard_rerender_hint
     exit_code=1
   fi
   if grep -q "deployment_health" "$dashboard_data"; then
     printf '%s\n' "Dashboard deployment health: ok"
   else
     printf '%s\n' "Dashboard deployment health: missing (dashboard data predates deploy-health checks)"
+    dashboard_rerender_hint
     exit_code=1
   fi
   if grep -q "mispricing_alpha_bridge" "$dashboard_data"; then
     printf '%s\n' "Dashboard alpha bridge data: ok"
   else
     printf '%s\n' "Dashboard alpha bridge data: missing (dashboard data predates sharp-alpha bridge diagnostics)"
+    dashboard_rerender_hint
     exit_code=1
   fi
   if grep -q "coverage_by_sport_market" "$dashboard_data"; then
     printf '%s\n' "Dashboard sharp-anchor coverage data: ok"
   else
     printf '%s\n' "Dashboard sharp-anchor coverage data: missing (dashboard data predates per-sport anchor diagnostics)"
+    dashboard_rerender_hint
     exit_code=1
   fi
   if grep -q "alpha_validated_anchor_rows" "$dashboard_data"; then
     printf '%s\n' "Dashboard alpha-validated anchor data: ok"
   else
     printf '%s\n' "Dashboard alpha-validated anchor data: missing (dashboard data predates broad sharp-anchor Strategy V2 diagnostics)"
+    dashboard_rerender_hint
     exit_code=1
   fi
   if grep -q "sharp_sports_funnel" "$dashboard_data"; then
     printf '%s\n' "Dashboard sharp-sports funnel data: ok"
   else
     printf '%s\n' "Dashboard sharp-sports funnel data: missing (dashboard data predates sharp sports edge funnel diagnostics)"
+    dashboard_rerender_hint
     exit_code=1
   fi
 else

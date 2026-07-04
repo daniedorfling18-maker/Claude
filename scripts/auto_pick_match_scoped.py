@@ -925,8 +925,18 @@ def merge_pick_card_fallback_queue(
     locked_by_teams = {
         (norm_team(item.get("home_team")), norm_team(item.get("away_team")))
         for item in scan_results
-        if item.get("status") == "locked_skipped"
+        if item.get("status") == "locked_skipped" or item.get("locked") is True
     }
+    scan_by_teams: dict[tuple[str, str], dict[str, Any]] = {}
+    for item in scan_results:
+        team_key = (norm_team(item.get("home_team")), norm_team(item.get("away_team")))
+        if not team_key[0] or not team_key[1]:
+            continue
+        previous = scan_by_teams.get(team_key)
+        current_pick = normalise_score_pick(item.get("current_pick"))
+        previous_pick = normalise_score_pick(previous.get("current_pick")) if previous else ""
+        if previous is None or (current_pick and not previous_pick) or item.get("inputs_found") is True:
+            scan_by_teams[team_key] = item
     added: list[dict[str, Any]] = []
     merged = list(queued)
     for entry in pick_card_entries_in_window(args, ref):
@@ -950,6 +960,18 @@ def merge_pick_card_fallback_queue(
             existing_entry["pick_card_row"] = entry.get("pick_card_row")
             existing.add(key)
             continue
+        scanned = scan_by_teams.get(team_key)
+        if scanned:
+            entry["scan_game_id"] = scanned.get("game_id")
+            entry["scan_status"] = scanned.get("status")
+            entry["scan_kickoff_utc"] = scanned.get("kickoff_utc")
+            entry["scan_kickoff_raw"] = scanned.get("kickoff_raw")
+            if normalise_score_pick(scanned.get("current_pick")):
+                entry["current_pick"] = scanned.get("current_pick")
+            if "locked" in scanned:
+                entry["locked"] = scanned.get("locked")
+            if "inputs_found" in scanned:
+                entry["inputs_found"] = scanned.get("inputs_found")
         merged.append(entry)
         added.append(entry)
         existing.add(key)

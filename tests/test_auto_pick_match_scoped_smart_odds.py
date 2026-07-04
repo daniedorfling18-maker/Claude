@@ -107,6 +107,54 @@ def test_card_fallback_reconciles_duplicate_live_match_with_bad_scan_time(tmp_pa
     assert queued[0]["pick_card_row"]["locked_pick"] == "0-2"
 
 
+def test_card_fallback_carries_current_pick_from_out_of_window_scan(tmp_path: Path) -> None:
+    card = tmp_path / "superbru_final_card.csv"
+    with card.open("w", newline="", encoding="utf-8") as handle:
+        writer = csv.DictWriter(handle, fieldnames=["commence_time", "home_team", "away_team", "locked_pick"])
+        writer.writeheader()
+        writer.writerow(
+            {
+                "commence_time": "2026-07-05T20:00:00Z",
+                "home_team": "Brazil",
+                "away_team": "Norway",
+                "locked_pick": "2-0",
+            }
+        )
+
+    mod = load_module()
+    args = argparse.Namespace(
+        pick_card_csv=str(card),
+        window_minutes=5000,
+        late_card_grace_minutes=0,
+    )
+    ref = datetime(2026, 7, 4, 23, 31, tzinfo=timezone.utc)
+    scan_results = [
+        {
+            "game_id": "game91",
+            "game": "Brazil v Norway",
+            "home_team": "Brazil",
+            "away_team": "Norway",
+            "kickoff_utc": "2026-07-04T23:08:00+00:00",
+            "kickoff_source": "scoped_text_date_time",
+            "minutes_until": -23,
+            "current_pick": "2-0",
+            "locked": False,
+            "inputs_found": True,
+            "status": "not_in_window",
+        }
+    ]
+
+    queued, added = mod.base.merge_pick_card_fallback_queue(args, ref, scan_results=scan_results, queued=[])
+
+    assert len(queued) == 1
+    assert added == queued
+    assert queued[0]["status"] == "queued_from_pick_card_fallback"
+    assert queued[0]["scan_status"] == "not_in_window"
+    assert queued[0]["scan_game_id"] == "game91"
+    assert queued[0]["current_pick"] == "2-0"
+    assert mod.base.normalise_score_pick(queued[0]["current_pick"]) == "2-0"
+
+
 def test_superbru_text_kickoff_uses_south_africa_timezone() -> None:
     mod = load_module()
 

@@ -155,6 +155,24 @@ def test_card_fallback_carries_current_pick_from_out_of_window_scan(tmp_path: Pa
     assert mod.base.normalise_score_pick(queued[0]["current_pick"]) == "2-0"
 
 
+def test_existing_future_pick_is_frozen_until_revision_window() -> None:
+    mod = load_module()
+    args = argparse.Namespace(dry_run=False, revision_window_minutes=260)
+
+    assert mod.base.should_keep_existing_pick_until_revision_window(
+        {"current_pick": "2-1", "minutes_until": 1250},
+        args,
+    )
+    assert not mod.base.should_keep_existing_pick_until_revision_window(
+        {"current_pick": "2-1", "minutes_until": 120},
+        args,
+    )
+    assert not mod.base.should_keep_existing_pick_until_revision_window(
+        {"current_pick": "", "minutes_until": 1250},
+        args,
+    )
+
+
 def test_superbru_text_kickoff_uses_south_africa_timezone() -> None:
     mod = load_module()
 

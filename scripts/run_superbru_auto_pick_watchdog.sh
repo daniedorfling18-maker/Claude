@@ -4,6 +4,7 @@ set -u
 OUT_DIR="${SUPERBRU_AUTO_PICK_OUT_DIR:-outputs/pregame_checks/auto_pick_vps}"
 INTERVAL_SECONDS="${SUPERBRU_AUTO_PICK_INTERVAL_SECONDS:-900}"
 WINDOW_MINUTES="${SUPERBRU_AUTO_PICK_WINDOW_MINUTES:-5000}"
+REVISION_WINDOW_MINUTES="${SUPERBRU_AUTO_PICK_REVISION_WINDOW_MINUTES:-260}"
 TIMEOUT_SECONDS="${SUPERBRU_AUTO_PICK_TIMEOUT_SECONDS:-1500}"
 LOGIN_URL="${SUPERBRU_LOGIN_URL:-https://www.superbru.com/login}"
 POOL_URL="${SUPERBRU_POOL_URL:-https://www.superbru.com/worldcup_predictor/pool_view.php?t=1296&p=13236623&view=matches}"
@@ -16,6 +17,7 @@ LOG_FILE="${SUPERBRU_AUTO_PICK_LOG_FILE:-${OUT_DIR}/watchdog.log}"
 
 mkdir -p "$OUT_DIR"
 export OUT_DIR INTERVAL_SECONDS WINDOW_MINUTES PAGE_TIMEZONE
+export REVISION_WINDOW_MINUTES
 
 write_watchdog_status() {
   STATUS="$1" DETAIL="$2" EXIT_CODE="${3:-0}" python - <<'PY'
@@ -33,6 +35,7 @@ payload = {
     "run_at_utc": datetime.now(timezone.utc).isoformat(),
     "mode": "vps_superbru_auto_pick_watchdog",
     "window_minutes": int(os.environ.get("WINDOW_MINUTES", "260") or 260),
+    "revision_window_minutes": int(os.environ.get("REVISION_WINDOW_MINUTES", "260") or 260),
     "interval_seconds": int(os.environ.get("INTERVAL_SECONDS", "900") or 900),
     "page_timezone": os.environ.get("PAGE_TIMEZONE", "Africa/Johannesburg"),
     "dry_run": False,
@@ -100,6 +103,7 @@ while true; do
     --page-timezone "$PAGE_TIMEZONE" \
     --config "$CONFIG_PATH" \
     --window-minutes "$WINDOW_MINUTES" \
+    --revision-window-minutes "$REVISION_WINDOW_MINUTES" \
     --pick-card-csv "$PICK_CARD_CSV" \
     --late-card-grace-minutes 0 \
     --odds-lookup-window-minutes 90 \

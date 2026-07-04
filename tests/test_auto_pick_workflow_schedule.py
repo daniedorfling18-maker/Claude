@@ -28,3 +28,6 @@ def test_auto_pick_uses_broad_early_card_window_by_default() -> None:
     assert "github.event.inputs.window_minutes || '5000'" in workflow
     assert "SUPERBRU_AUTO_PICK_WINDOW_MINUTES:-5000" in compose
     assert "SUPERBRU_AUTO_PICK_WINDOW_MINUTES:-5000" in watchdog
+    assert "--revision-window-minutes \"$REVISION_WINDOW_MINUTES\"" in workflow
+    assert "SUPERBRU_AUTO_PICK_REVISION_WINDOW_MINUTES:-260" in compose
+    assert "SUPERBRU_AUTO_PICK_REVISION_WINDOW_MINUTES:-260" in watchdog

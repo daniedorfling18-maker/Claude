@@ -979,6 +979,31 @@ def merge_pick_card_fallback_queue(
     return merged, added
 
 
+def should_keep_existing_pick_until_revision_window(entry: dict[str, Any], args: argparse.Namespace) -> bool:
+    """Avoid churn after an early SuperBru pick is already visible on the page.
+
+    The broad watchdog window exists to make sure every visible card gets a pick
+    well before kickoff. Once SuperBru already shows a pick, keep it stable until
+    the final revision window; otherwise a 15-minute watchdog can re-trade the
+    same prediction every time odds or pool tactics move slightly.
+    """
+    if getattr(args, "dry_run", False):
+        return False
+    if not normalise_score_pick(entry.get("current_pick")):
+        return False
+    try:
+        minutes_until = float(entry.get("minutes_until"))
+    except (TypeError, ValueError):
+        return False
+    try:
+        revision_window = float(getattr(args, "revision_window_minutes", 260))
+    except (TypeError, ValueError):
+        revision_window = 260.0
+    if revision_window < 0:
+        return False
+    return minutes_until > revision_window
+
+
 def request_json(url: str) -> Any:
     request = urllib.request.Request(url, headers={"User-Agent": "superbru-auto-picker/1.0"})
     with urllib.request.urlopen(request, timeout=45) as response:
@@ -1556,6 +1581,26 @@ async def run(args: argparse.Namespace) -> dict[str, Any]:
         card_row = pick_lookup.get("card_row") if pick_lookup.get("status") == "found" else None
         card_pick = txt(pick_lookup.get("pick")) if pick_lookup.get("status") == "found" else ""
 
+        if should_keep_existing_pick_until_revision_window(entry, args):
+            current_pick = normalise_score_pick(entry.get("current_pick"))
+            entry["status"] = "already_current"
+            entry["selected_pick"] = current_pick
+            entry["pick_source"] = "existing_superbru_pick_early_window"
+            entry["pick_strategy"] = "freeze_until_revision_window"
+            entry["submit_result"] = {
+                "status": "already_current",
+                "home_team": entry.get("home_team"),
+                "away_team": entry.get("away_team"),
+                "new_pick": current_pick,
+                "dry_run": False,
+                "reason": (
+                    "SuperBru already shows a pick and kickoff is outside the final "
+                    "revision window; skipped odds recompute to prevent pick churn."
+                ),
+            }
+            submitted_results.append(entry)
+            continue
+
         # Pull this match's odds right before kickoff and recompute a fresh pick so a
         # stale committed card cannot drive the submission. Pool-position intelligence
         # is applied on top of the fresh recompute when leaderboard data is available.
@@ -1726,6 +1771,16 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--odds-regions", default=None)
     parser.add_argument("--odds-markets", default=None)
     parser.add_argument("--odds-lookup-window-minutes", type=int, default=90)
+    parser.add_argument(
+        "--revision-window-minutes",
+        type=int,
+        default=260,
+        help=(
+            "If a future SuperBru pick already exists, keep it unchanged until this many "
+            "minutes before kickoff. This lets the broad watchdog fill the card early "
+            "without re-submitting noisy odds/pool tactic changes every cycle."
+        ),
+    )
     parser.add_argument("--skip-match-odds", action="store_true")
     # Pool-position intelligence
     parser.add_argument(

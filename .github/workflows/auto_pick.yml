@@ -85,6 +85,7 @@ jobs:
         run: |
           LOGIN_URL="${SUPERBRU_LOGIN_URL:-https://www.superbru.com/login}"
           WINDOW_MINUTES="${{ github.event.inputs.window_minutes || '5000' }}"
+          REVISION_WINDOW_MINUTES="${SUPERBRU_AUTO_PICK_REVISION_WINDOW_MINUTES:-260}"
           DRY_RUN_FLAG=""
           MATCH_ODDS_FLAG=""
           if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ "${{ github.event.inputs.dry_run || 'true' }}" = "true" ]; then
@@ -100,6 +101,7 @@ jobs:
             --page-timezone "${SUPERBRU_PAGE_TIMEZONE:-Africa/Johannesburg}" \
             --config config.yaml \
             --window-minutes "$WINDOW_MINUTES" \
+            --revision-window-minutes "$REVISION_WINDOW_MINUTES" \
             --pick-card-csv outputs/final_locked_picks/superbru_final_card.csv \
             --late-card-grace-minutes 0 \
             --odds-lookup-window-minutes 90 \

@@ -985,6 +985,7 @@ def _background_jobs_block_discovery(
 
 def _background_jobs_block_prediction(
     *,
+    prediction_mode: str = "full",
     discovery_future: Future[Any] | None,
     discovery_started_ts: float,
     discovery_block_seconds: float,
@@ -999,7 +1000,15 @@ def _background_jobs_block_prediction(
     can delay prediction briefly to avoid contention, but after the configured
     block window the system must keep re-scoring the current websocket universe
     rather than waiting forever for broader discovery to finish.
+
+    The fast paper bridge is deliberately lightweight: it converts already
+    collected websocket bid/ask evidence into governed paper signals and broker
+    refreshes.  Letting discovery/governance starve that hot bridge recreates
+    stale dashboard/broker behaviour, so only the full canonical prediction
+    path waits behind other heavy background lanes.
     """
+    if prediction_mode == "paper-bridge":
+        return False
     return _background_job_blocks_governance(
         discovery_future,
         started_ts=discovery_started_ts,
@@ -1011,6 +1020,17 @@ def _background_jobs_block_prediction(
         max_block_seconds=governance_block_seconds,
         now_ts=now_ts,
     )
+
+
+def _governance_due_blocks_prediction(*, prediction_mode: str, governance_due_now: bool) -> bool:
+    """Return whether due governance should get priority over prediction.
+
+    Full canonical prediction is heavy and can wait one tick for a due
+    governance refresh.  The live paper bridge is the hot trade/no-trade lane
+    and runs on its own executor, so a due governance refresh should not stop it
+    from checking for fresh executable paper candidates.
+    """
+    return bool(governance_due_now and prediction_mode != "paper-bridge")
 
 
 def _governance_refresh_due(
@@ -1348,6 +1368,7 @@ def main(argv: list[str] | None = None) -> int:
                     governance_future=governance_future,
                 )
                 background_jobs_block_prediction = _background_jobs_block_prediction(
+                    prediction_mode=args.prediction_mode,
                     discovery_future=discovery_future,
                     discovery_started_ts=discovery_started_ts,
                     discovery_block_seconds=args.discovery_governance_block_seconds,
@@ -1355,6 +1376,10 @@ def main(argv: list[str] | None = None) -> int:
                     governance_started_ts=governance_started_ts,
                     governance_block_seconds=args.prediction_governance_block_seconds,
                     now_ts=now_ts,
+                )
+                governance_due_blocks_prediction = _governance_due_blocks_prediction(
+                    prediction_mode=args.prediction_mode,
+                    governance_due_now=governance_due_now,
                 )
                 if prediction_future is not None and not prediction_future.done():
                     full_cycle = _running_prediction_summary(
@@ -1364,7 +1389,7 @@ def main(argv: list[str] | None = None) -> int:
                 elif (
                     args.prediction_cycle_seconds > 0
                     and now_ts >= next_prediction_cycle
-                    and not governance_due_now
+                    and not governance_due_blocks_prediction
                     and not background_jobs_block_prediction
                 ):
                     if resource_guard.get("skip_prediction_cycle"):
@@ -1443,6 +1468,7 @@ def main(argv: list[str] | None = None) -> int:
                     now_ts=time.time(),
                 )
                 background_jobs_block_prediction = _background_jobs_block_prediction(
+                    prediction_mode=args.prediction_mode,
                     discovery_future=discovery_future,
                     discovery_started_ts=discovery_started_ts,
                     discovery_block_seconds=args.discovery_governance_block_seconds,
@@ -1485,6 +1511,7 @@ def main(argv: list[str] | None = None) -> int:
                     "prediction_governance_block_seconds": args.prediction_governance_block_seconds,
                     "prediction_running_seconds": prediction_running_seconds,
                     "prediction_blocks_governance": prediction_blocks_governance,
+                    "governance_due_blocks_prediction": governance_due_blocks_prediction,
                     "prediction_lock_maintenance": prediction_lock_maintenance,
                     "prediction_no_longer_blocks_governance": bool(
                         prediction_future is not None

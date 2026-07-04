@@ -6,7 +6,7 @@ on:
       window_minutes:
         description: 'Submit picks for matches kicking off within this many minutes'
         required: false
-        default: '40'
+        default: '5000'
       dry_run:
         description: 'Dry run only; do not submit to SuperBru'
         required: false
@@ -84,7 +84,7 @@ jobs:
           SUPERBRU_POOL_KEYWORDS: ${{ secrets.SUPERBRU_POOL_KEYWORDS || 'Moore Infinity,FIFA WC 26,World Cup 2026' }}
         run: |
           LOGIN_URL="${SUPERBRU_LOGIN_URL:-https://www.superbru.com/login}"
-          WINDOW_MINUTES="${{ github.event.inputs.window_minutes || '260' }}"
+          WINDOW_MINUTES="${{ github.event.inputs.window_minutes || '5000' }}"
           DRY_RUN_FLAG=""
           MATCH_ODDS_FLAG=""
           if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ "${{ github.event.inputs.dry_run || 'true' }}" = "true" ]; then

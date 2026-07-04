@@ -889,8 +889,17 @@ def merge_pick_card_fallback_queue(
         (norm_team(item.get("home_team")), norm_team(item.get("away_team")), txt(item.get("kickoff_utc"))[:16])
         for item in queued
     }
+    existing_by_teams = {
+        (norm_team(item.get("home_team")), norm_team(item.get("away_team"))): item
+        for item in queued
+    }
     locked = {
         (norm_team(item.get("home_team")), norm_team(item.get("away_team")), txt(item.get("kickoff_utc"))[:16])
+        for item in scan_results
+        if item.get("status") == "locked_skipped"
+    }
+    locked_by_teams = {
+        (norm_team(item.get("home_team")), norm_team(item.get("away_team")))
         for item in scan_results
         if item.get("status") == "locked_skipped"
     }
@@ -898,11 +907,29 @@ def merge_pick_card_fallback_queue(
     merged = list(queued)
     for entry in pick_card_entries_in_window(args, ref):
         key = (norm_team(entry.get("home_team")), norm_team(entry.get("away_team")), txt(entry.get("kickoff_utc"))[:16])
+        team_key = (key[0], key[1])
         if key in existing or key in locked:
+            continue
+        if team_key in locked_by_teams:
+            continue
+        if team_key in existing_by_teams:
+            existing_entry = existing_by_teams[team_key]
+            scan_kickoff = txt(existing_entry.get("kickoff_utc"))
+            card_kickoff = txt(entry.get("kickoff_utc"))
+            if scan_kickoff[:16] != card_kickoff[:16]:
+                existing_entry["scan_kickoff_utc"] = scan_kickoff
+                existing_entry["kickoff_utc"] = card_kickoff
+                existing_entry["kickoff_raw"] = txt(entry.get("kickoff_raw"))
+                existing_entry["kickoff_source"] = "pick_card_fallback_reconciled_scan_time"
+                existing_entry["minutes_until"] = entry.get("minutes_until")
+            existing_entry["pick_card_column"] = entry.get("pick_card_column")
+            existing_entry["pick_card_row"] = entry.get("pick_card_row")
+            existing.add(key)
             continue
         merged.append(entry)
         added.append(entry)
         existing.add(key)
+        existing_by_teams[team_key] = entry
     return merged, added
 
 

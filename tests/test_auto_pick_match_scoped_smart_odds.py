@@ -61,3 +61,47 @@ def test_live_wrapper_keeps_locked_card_due_match_queue_but_blanks_score(tmp_pat
     assert pick_lookup["pick"] == ""
     assert pick_lookup["card_row"]["locked_pick"] == "0-2"
     assert "live odds recompute is required" in pick_lookup["live_only_note"]
+
+
+def test_card_fallback_reconciles_duplicate_live_match_with_bad_scan_time(tmp_path: Path) -> None:
+    card = tmp_path / "superbru_final_card.csv"
+    with card.open("w", newline="", encoding="utf-8") as handle:
+        writer = csv.DictWriter(handle, fieldnames=["commence_time", "home_team", "away_team", "locked_pick"])
+        writer.writeheader()
+        writer.writerow(
+            {
+                "commence_time": "2026-07-04T21:00:00Z",
+                "home_team": "Paraguay",
+                "away_team": "France",
+                "locked_pick": "0-2",
+            }
+        )
+
+    mod = load_module()
+    args = argparse.Namespace(
+        pick_card_csv=str(card),
+        window_minutes=180,
+        late_card_grace_minutes=0,
+    )
+    ref = datetime(2026, 7, 4, 19, 5, tzinfo=timezone.utc)
+    live_queue = [
+        {
+            "game_id": "game90",
+            "game": "Paraguay v France",
+            "home_team": "Paraguay",
+            "away_team": "France",
+            "kickoff_utc": "2026-07-04T19:46:00+00:00",
+            "kickoff_source": "scoped_text_date_time",
+            "status": "queued",
+        }
+    ]
+
+    queued, added = mod.base.merge_pick_card_fallback_queue(args, ref, scan_results=[], queued=live_queue)
+
+    assert len(queued) == 1
+    assert added == []
+    assert queued[0]["game_id"] == "game90"
+    assert queued[0]["scan_kickoff_utc"] == "2026-07-04T19:46:00+00:00"
+    assert queued[0]["kickoff_utc"] == "2026-07-04T21:00:00+00:00"
+    assert queued[0]["kickoff_source"] == "pick_card_fallback_reconciled_scan_time"
+    assert queued[0]["pick_card_row"]["locked_pick"] == "0-2"

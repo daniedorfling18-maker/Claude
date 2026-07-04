@@ -199,3 +199,58 @@ def test_trade_signal_audit_flags_trusted_edge_without_fresh_candidate(tmp_path)
     assert target["current_candidate_rows"] == 0
     assert target["current_executable_rows"] == 0
     assert target["missing_fresh_candidate"] is True
+
+
+def test_trade_signal_audit_separates_fresh_candidate_from_governance_block(tmp_path):
+    cfg = _cfg(tmp_path)
+    write_json(
+        cfg.governance_root / "price_action_feedback.json",
+        {
+            "paper_confirmation_preview": [
+                {
+                    "cohort": "crypto_eth_updown_event",
+                    "source": "paper_broker_forward",
+                    "action": "collect_more_positive_price_action_evidence",
+                    "recommended_collection_query": "eth updown",
+                    "forward_shadow_pnl_usdc": 0.0,
+                    "forward_shadow_roi": 0.0,
+                    "monthly_run_rate_usdc": 1973.93,
+                    "trusted_for_goal": True,
+                }
+            ]
+        },
+    )
+    write_csv(
+        cfg.output_root / "polymarket_price_action" / "price_action_scout_round_trip_evidence.csv",
+        [
+            {
+                "signal_cohort": "price_action_scout|profit_sprint|crypto_eth_special",
+                "market_slug": "will-ethereum-reach-1900-in-july-2026",
+                "outcome": "No",
+                "round_trip_status": "open_marked",
+                "latest_bid": "0.46",
+                "latest_ask": "0.47",
+            }
+        ],
+    )
+    write_csv(
+        cfg.output_root / "polymarket_price_action" / "price_action_paper_rejections.csv",
+        [
+            {
+                "market_slug": "will-ethereum-reach-1900-in-july-2026",
+                "signal_cohort": "price_action_scout|profit_sprint|crypto_eth_special",
+                "rejection_reason": "price-action cohort has not passed positive bid/ask evidence gate",
+            }
+        ],
+    )
+
+    payload = build_trade_signal_audit(cfg)
+
+    assert payload["verdict"] == "trusted_edge_current_candidates_blocked_by_gate"
+    assert payload["missing_confirmation_target_count"] == 0
+    assert payload["missing_confirmation_queries"] == []
+    assert "fresh executable candidates exist" in payload["next_action"]
+    target = payload["paper_confirmation_targets"][0]
+    assert target["current_candidate_rows"] == 1
+    assert target["current_executable_rows"] == 1
+    assert target["missing_fresh_candidate"] is False

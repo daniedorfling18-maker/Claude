@@ -3968,9 +3968,29 @@ def _decision_useful_summary(
     validation_gap_active = bool(oversight_status.get("validation_gap_active"))
     transfer_blocked = cohort_transfer.get("state") == "positive_targets_do_not_transfer"
     price_action_goal = goal_plan.get("price_action_goal_state") if isinstance(goal_plan.get("price_action_goal_state"), dict) else {}
+    confirmation_target_rows = (
+        trade_signal_audit.get("paper_confirmation_targets")
+        if isinstance(trade_signal_audit.get("paper_confirmation_targets"), list)
+        else []
+    )
+    confirmation_executable_rows = sum(
+        int(safe_float(row.get("current_executable_rows")) or 0)
+        for row in confirmation_target_rows
+        if isinstance(row, dict)
+    )
+    confirmation_missing_targets = sum(
+        1 for row in confirmation_target_rows if isinstance(row, dict) and row.get("missing_fresh_candidate")
+    )
+    current_candidates_blocked = bool(
+        trade_signal_audit.get("verdict") == "trusted_edge_current_candidates_blocked_by_gate"
+    )
     trusted_missing_fresh = bool(
         trade_signal_audit.get("verdict") == "trusted_edge_missing_fresh_candidate"
-        or str(price_action_paper_signals.get("decision") or "").find("trusted_shadow_edge_waiting_for_fresh_executable_candidate") >= 0
+        or (
+            str(price_action_paper_signals.get("decision") or "").find("trusted_shadow_edge_waiting_for_fresh_executable_candidate") >= 0
+            and confirmation_executable_rows <= 0
+            and confirmation_missing_targets > 0
+        )
     )
     collect_now = _compact_list(
         _first_non_empty_list(
@@ -4023,7 +4043,7 @@ def _decision_useful_summary(
     )
     recent_loss_exits = int(safe_float(trade_signal_audit.get("recent_loss_exit_count")) or 0)
     recent_exits = int(safe_float(trade_signal_audit.get("recent_exit_count")) or 0)
-    missing_targets = int(safe_float(trade_signal_audit.get("missing_confirmation_target_count")) or 0)
+    missing_targets = int(safe_float(trade_signal_audit.get("missing_confirmation_target_count")) or confirmation_missing_targets)
 
     if shadow_status == "stale":
         trade_decision = "WAIT: RESEARCH STALE"
@@ -4117,6 +4137,19 @@ def _decision_useful_summary(
             else "Monitor forward paper P&L by signal cohort and keep stake capped until evidence remains positive."
         )
         unlock_condition = "Forward paper fills must produce positive cohort evidence before any sizing increase."
+    elif current_candidates_blocked:
+        trade_decision = "WAIT: CANDIDATES BLOCKED"
+        decision_class = "warn"
+        headline = "Fresh candidates exist, but none passes the governed signal thesis"
+        primary_blocker = (
+            "Fresh executable candidates exist for trusted confirmation cohorts, but they are still blocked by model, "
+            "cohort-transfer, spread, risk, or recent-loss evidence gates."
+        )
+        next_action = str(
+            trade_signal_audit.get("next_action")
+            or "Use rejection reasons and recent exits to tighten the signal thesis before allowing any paper entry."
+        )
+        unlock_condition = "At least one fresh candidate must move from rejected/blocked into a governed paper signal with entry ask, exit bid, and risk math."
     elif trusted_missing_fresh:
         trade_decision = "COLLECT FRESH CANDIDATE"
         decision_class = "warn"

@@ -1360,6 +1360,78 @@ def test_dashboard_collect_now_prefers_research_focus_queue_over_raw_missing_que
     assert summary["state_badges"][-1]["label"] == "collect: solana updown, esports, economy"
 
 
+def test_dashboard_reports_blocked_candidates_when_fresh_targets_exist(tmp_path):
+    cfg = _config(tmp_path)
+    write_json(
+        cfg.output_root / "polymarket_price_action" / "price_action_model_summary.json",
+        {
+            "status": "trained",
+            "generated_at_utc": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+            "decision": "collect_more_bid_ask_price_action_model_evidence",
+            "promotion_ready": False,
+            "train_positive_targets": 4,
+            "validation_positive_targets": 2,
+        },
+    )
+    write_json(
+        cfg.output_root / "polymarket_price_action" / "price_action_paper_signal_summary.json",
+        {
+            "generated_at_utc": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+            "decision": "trusted_shadow_edge_waiting_for_fresh_executable_candidate",
+            "signals": 0,
+            "rejections": 18,
+            "paper_confirmation_candidates": 2,
+            "paper_confirmation_signals": 0,
+        },
+    )
+    write_json(
+        cfg.governance_root / "trade_signal_audit.json",
+        {
+            "verdict": "trusted_edge_current_candidates_blocked_by_gate",
+            "next_action": "Do not enter; fresh executable candidates exist for trusted confirmation cohorts, but none has passed the governed signal thesis.",
+            "missing_confirmation_target_count": 0,
+            "missing_confirmation_queries": [],
+            "paper_confirmation_targets": [
+                {
+                    "cohort": "crypto_eth_updown_event",
+                    "recommended_collection_query": "eth updown",
+                    "current_candidate_rows": 12,
+                    "current_executable_rows": 3,
+                    "missing_fresh_candidate": False,
+                    "trusted_for_goal": True,
+                }
+            ],
+        },
+    )
+    write_json(
+        cfg.governance_root / "research_focus.json",
+        {
+            "generated_at_utc": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+            "collection_queries": ["eth updown", "world cup", "solana updown"],
+        },
+    )
+    write_json(
+        cfg.path.parent / "work" / "shadow_research_cycle_latest_status.json",
+        {
+            "status": "ok",
+            "started_at_utc": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+            "ended_at_utc": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+            "paper_trading_invoked": False,
+            "live_trading_invoked": False,
+        },
+    )
+
+    result = render_dashboard(cfg)
+
+    data = read_json(result["dashboard_data"])
+    summary = data["decision_useful_summary"]
+    assert summary["trade_decision"] == "WAIT: CANDIDATES BLOCKED"
+    assert "Fresh executable candidates exist" in summary["primary_blocker"]
+    assert "fresh open market row" not in summary["primary_blocker"]
+    assert summary["decision_cards"][0]["value"].startswith("No - WAIT: CANDIDATES BLOCKED")
+    assert summary["evidence_lanes"][0]["state"] == "WAIT: CANDIDATES BLOCKED"
+
+
 def test_dashboard_decision_summary_prioritises_failed_cycle_over_stale_model(tmp_path):
     cfg = _config(tmp_path)
     write_json(

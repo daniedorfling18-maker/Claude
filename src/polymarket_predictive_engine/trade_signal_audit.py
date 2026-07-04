@@ -297,6 +297,13 @@ def build_trade_signal_audit(cfg: EngineConfig) -> dict[str, Any]:
             if query_text
             else "Collect fresh websocket/price-action candidates for trusted confirmation cohorts."
         )
+    elif confirmation_target_status:
+        verdict = "trusted_edge_current_candidates_blocked_by_gate"
+        next_action = (
+            "Do not enter; fresh executable candidates exist for trusted confirmation cohorts, "
+            "but none has passed the governed signal thesis. Use rejection reasons and recent exits "
+            "to tighten model, cohort, spread, and risk gates rather than forcing turnover."
+        )
     elif rejections:
         verdict = "no_current_trade_signal"
         next_action = "Do not enter; current candidates do not satisfy the governed evidence gate."

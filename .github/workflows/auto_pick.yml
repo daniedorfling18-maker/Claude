@@ -12,8 +12,9 @@ on:
         required: false
         default: 'true'
   schedule:
-    # Narrow just-before-game windows from 1 July onward. Times are UTC.
-    # The script scans the live SuperBru page first; if no match is queued, no odds/API call is made.
+    # Match-slot guardrails from 1 July onward. Times are UTC.
+    # Scheduled runs use a wider safety window below so GitHub scheduler delays
+    # or stale live-page scans cannot miss a card-timed fixture.
     - cron: '35 0,15,19,23 1 7 *'
     - cron: '35 18,22 2 7 *'
     - cron: '35 2,17,21 3 7 *'
@@ -80,7 +81,7 @@ jobs:
           SUPERBRU_POOL_KEYWORDS: ${{ secrets.SUPERBRU_POOL_KEYWORDS || 'Moore Infinity,FIFA WC 26,World Cup 2026' }}
         run: |
           LOGIN_URL="${SUPERBRU_LOGIN_URL:-https://www.superbru.com/login}"
-          WINDOW_MINUTES="${{ github.event.inputs.window_minutes || '40' }}"
+          WINDOW_MINUTES="${{ github.event.inputs.window_minutes || '260' }}"
           DRY_RUN_FLAG=""
           MATCH_ODDS_FLAG=""
           if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ "${{ github.event.inputs.dry_run || 'true' }}" = "true" ]; then

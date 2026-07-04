@@ -938,6 +938,152 @@ def test_paper_confirmation_current_candidate_blocks_negative_historical_analogu
     assert analogue["blocked_preview"][0]["latest_ask"] == 0.061
 
 
+def test_paper_confirmation_blocked_preview_prioritises_in_band_analogue_gaps(tmp_path):
+    cfg = _cfg(tmp_path)
+    cfg.raw["price_action_microstructure"] = {
+        "enabled": True,
+        "lookback_observations": 1,
+        "max_rows_per_token": 20,
+    }
+    cfg.raw["price_action_paper"].update(
+        {
+            "paper_confirmation_max_current_candidates": 4,
+            "paper_confirmation_require_positive_historical_analogue": True,
+            "paper_confirmation_min_historical_analogue_validation_rows": 3,
+            "paper_confirmation_min_historical_analogue_positive_rows": 1,
+            "low_price_tick_probe_enabled": False,
+        }
+    )
+    root = cfg.output_root / "polymarket_price_action"
+    write_json(
+        cfg.governance_root / "price_action_feedback.json",
+        _paper_confirmation_feedback_payload(cohort="crypto_btc_special"),
+    )
+    write_csv(
+        cfg.output_root / "polymarket_training" / "websocket_market_features.csv",
+        [
+            _ws_feature_row(
+                0,
+                asset_id="btc-high-token",
+                market_slug="bitcoin-high-priced-favourite",
+                best_bid="0.984",
+                best_ask="0.989",
+                midpoint="0.9865",
+                spread="0.005",
+                price_change_side="BUY",
+            ),
+            _ws_feature_row(
+                1,
+                asset_id="btc-high-token",
+                market_slug="bitcoin-high-priced-favourite",
+                best_bid="0.985",
+                best_ask="0.990",
+                midpoint="0.9875",
+                spread="0.005",
+                price_change_side="BUY",
+            ),
+            _ws_feature_row(
+                2,
+                asset_id="btc-in-band-token",
+                market_slug="bitcoin-in-band-analogue-gap",
+                best_bid="0.059",
+                best_ask="0.060",
+                midpoint="0.0595",
+                spread="0.001",
+                price_change_side="BUY",
+            ),
+            _ws_feature_row(
+                3,
+                asset_id="btc-in-band-token",
+                market_slug="bitcoin-in-band-analogue-gap",
+                best_bid="0.060",
+                best_ask="0.061",
+                midpoint="0.0605",
+                spread="0.001",
+                price_change_side="BUY",
+            ),
+        ],
+    )
+    write_csv(
+        root / "microstructure_trade_events.csv",
+        [
+            _low_price_trade_event(
+                split="validation",
+                current_side="BUY",
+                entry_bid="0.985",
+                entry_ask="0.990",
+                entry_spread="0.005",
+                exit_bid="0.998",
+                pnl_usdc="0.12",
+                roi="0.06",
+            ),
+            _low_price_trade_event(
+                split="validation",
+                current_side="BUY",
+                entry_bid="0.985",
+                entry_ask="0.990",
+                entry_spread="0.005",
+                exit_bid="0.997",
+                pnl_usdc="0.10",
+                roi="0.05",
+            ),
+            _low_price_trade_event(
+                split="validation",
+                current_side="BUY",
+                entry_bid="0.985",
+                entry_ask="0.990",
+                entry_spread="0.005",
+                exit_bid="0.996",
+                pnl_usdc="0.08",
+                roi="0.04",
+            ),
+            _low_price_trade_event(
+                split="validation",
+                current_side="BUY",
+                entry_bid="0.060",
+                entry_ask="0.061",
+                entry_spread="0.001",
+                exit_bid="0.058",
+                pnl_usdc="-0.10",
+                roi="-0.05",
+            ),
+            _low_price_trade_event(
+                split="validation",
+                current_side="BUY",
+                entry_bid="0.060",
+                entry_ask="0.061",
+                entry_spread="0.001",
+                exit_bid="0.057",
+                pnl_usdc="-0.12",
+                roi="-0.06",
+            ),
+            _low_price_trade_event(
+                split="validation",
+                current_side="BUY",
+                entry_bid="0.060",
+                entry_ask="0.061",
+                entry_spread="0.001",
+                exit_bid="0.056",
+                pnl_usdc="-0.14",
+                roi="-0.07",
+            ),
+        ],
+    )
+
+    summary = build_price_action_paper_signals(cfg)
+    analogue = summary["paper_confirmation_current_historical_analogue"]
+    preview = analogue["blocked_preview"]
+
+    assert summary["paper_confirmation_current_candidates"] == 0
+    assert analogue["blocked_by_state"]["entry_price_outside_risk_band"] == 1
+    assert analogue["blocked_by_state"]["no_positive_historical_analogue_examples"] == 1
+    assert preview[0]["market_slug"] == "bitcoin-in-band-analogue-gap"
+    assert preview[0]["candidate_gate"] == "no_positive_historical_analogue_examples"
+    assert preview[1]["market_slug"] == "bitcoin-high-priced-favourite"
+    assert preview[1]["candidate_gate"] == "entry_price_outside_risk_band"
+    assert preview[1]["historical_analogue_gate"] == "positive_historical_analogue"
+
+
 def test_blank_side_current_candidate_uses_side_agnostic_history_as_shadow_only_blocker(tmp_path):
     cfg = _cfg(tmp_path)
     cfg.raw["price_action_microstructure"] = {

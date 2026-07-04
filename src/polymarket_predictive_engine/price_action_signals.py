@@ -640,6 +640,18 @@ def _attach_historical_analogue(row: dict[str, Any], analogue: dict[str, Any]) -
     }
 
 
+def _paper_confirmation_blocked_preview_sort_key(item: dict[str, Any]) -> tuple[int, float, float, float, float]:
+    candidate_gate = str(item.get("candidate_gate") or "").strip()
+    entry_band_wait = candidate_gate == "entry_price_outside_risk_band"
+    return (
+        0 if entry_band_wait else 1,
+        safe_float(item.get("historical_analogue_validation_roi")) or -999.0,
+        safe_float(item.get("historical_analogue_positive_rows")) or 0.0,
+        safe_float(item.get("historical_analogue_validation_rows")) or 0.0,
+        -(safe_float(item.get("latest_spread")) or 999.0),
+    )
+
+
 def _paper_confirmation_current_candidates(
     cfg: EngineConfig,
     settings: dict[str, Any],
@@ -738,6 +750,7 @@ def _paper_confirmation_current_candidates(
                         "latest_ask": ask,
                         "latest_spread": spread,
                         "relative_spread": "" if relative_spread is None else relative_spread,
+                        "candidate_gate": state,
                     },
                     analogue,
                 )
@@ -796,11 +809,7 @@ def _paper_confirmation_current_candidates(
         "blocked_by_state": blocked_by_state,
         "blocked_preview": sorted(
             blocked_preview,
-            key=lambda item: (
-                safe_float(item.get("historical_analogue_validation_roi")) or -999.0,
-                safe_float(item.get("historical_analogue_positive_rows")) or 0.0,
-                safe_float(item.get("historical_analogue_validation_rows")) or 0.0,
-            ),
+            key=_paper_confirmation_blocked_preview_sort_key,
             reverse=True,
         )[:10],
         "positive_historical_analogue_keys": len(approved_analogue_keys),

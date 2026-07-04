@@ -37,11 +37,12 @@ from polymarket_predictive_engine.cohort_validation import write_signal_cohort_p
 from polymarket_predictive_engine.dashboard import render_dashboard  # noqa: E402
 from polymarket_predictive_engine.execution.paper import paper_trade  # noqa: E402
 from polymarket_predictive_engine.paper_cycle import run_paper_cycle  # noqa: E402
+from polymarket_predictive_engine.price_action_signals import build_price_action_paper_signals  # noqa: E402
 from polymarket_predictive_engine.price_action_scout import build_price_action_scout  # noqa: E402
 from polymarket_predictive_engine.profit_target import write_profit_target_tracker  # noqa: E402
 from polymarket_predictive_engine.refresh_governance import refresh_governance  # noqa: E402
 from polymarket_predictive_engine.resolution_collector import fetch_gamma_market  # noqa: E402
-from polymarket_predictive_engine.runtime_lock import runtime_lock_path  # noqa: E402
+from polymarket_predictive_engine.runtime_lock import runtime_lock, runtime_lock_path  # noqa: E402
 from polymarket_predictive_engine.shadow_cohort import update_shadow_cohort_evidence  # noqa: E402
 from polymarket_predictive_engine.storage import connect_db  # noqa: E402
 from polymarket_predictive_engine.utils import now_utc, parse_timestamp, read_csv_rows, read_json, safe_float, write_csv, write_json  # noqa: E402
@@ -685,9 +686,71 @@ def _write_discovery_heartbeat(
     write_json(cfg.governance_root / "local_live_loop_discovery_heartbeat.json", payload)
 
 
-def _run_prediction_cycle(*, config_path: Path, paper_source: str) -> dict[str, Any]:
+def _run_live_paper_bridge_cycle(*, config_path: Path, paper_source: str) -> dict[str, Any]:
+    """Fast live paper bridge: current price-action signals -> broker -> proof tracker.
+
+    The full canonical paper cycle rebuilds features, predictions, alpha scores,
+    longshot scans, cohort P&L, signals, broker, and dashboard. That is useful
+    as a heavier background refresh, but it can take minutes on the VPS. The
+    hot live lane already collects websocket bid/ask data every tick; this
+    bridge converts the current governed price-action evidence into broker
+    action without changing thresholds or enabling live trading.
+    """
     cfg = load_config(config_path)
-    return run_paper_cycle(cfg, source=paper_source)
+    report: dict[str, Any] = {
+        "status": "ran",
+        "mode": "live_price_action_paper_bridge",
+        "source": paper_source,
+        "generated_at_utc": now_utc(),
+        "live_trading": False,
+        "paper_trading_invoked": True,
+        "live_trading_invoked": False,
+    }
+    lock_settings = cfg.raw.get("runtime_resource_guard", {}) or {}
+    lock_stale_seconds = float(lock_settings.get("prediction_cycle_lock_stale_seconds", 1800) or 1800)
+    with runtime_lock(cfg, "prediction_cycle", stale_after_seconds=lock_stale_seconds) as lock:
+        if not lock.acquired:
+            report.update(
+                {
+                    "status": "skipped_existing_prediction_cycle",
+                    "blockers": ["prediction_cycle_lock_already_held"],
+                    "runtime_lock": lock.as_dict(),
+                    "paper_trading_invoked": False,
+                }
+            )
+            write_json(cfg.governance_root / "live_paper_bridge_cycle.json", report)
+            return report
+        price_action = build_price_action_paper_signals(cfg)
+        broker = paper_trade(cfg)
+        actual_profit_target = write_profit_target_tracker(cfg, broker if isinstance(broker, dict) else {})
+        report.update(
+            {
+                "price_action_paper_signals": price_action,
+                "signals_approved": int(price_action.get("signals", 0) or 0) if isinstance(price_action, dict) else 0,
+                "signals_rejected": int(price_action.get("rejections", 0) or 0) if isinstance(price_action, dict) else 0,
+                "price_action_decision": price_action.get("decision") if isinstance(price_action, dict) else "",
+                "paper_confirmation_candidates": price_action.get("paper_confirmation_candidates")
+                if isinstance(price_action, dict)
+                else None,
+                "broker": broker,
+                "actual_profit_target": actual_profit_target,
+                "runtime_lock": lock.as_dict(),
+            }
+        )
+        write_json(cfg.governance_root / "live_paper_bridge_cycle.json", report)
+        return report
+
+
+def _run_prediction_cycle(
+    *,
+    config_path: Path,
+    paper_source: str,
+    prediction_mode: str = "paper-bridge",
+) -> dict[str, Any]:
+    if prediction_mode == "full":
+        cfg = load_config(config_path)
+        return run_paper_cycle(cfg, source=paper_source)
+    return _run_live_paper_bridge_cycle(config_path=config_path, paper_source=paper_source)
 
 
 def _run_governance_refresh(*, config_path: Path) -> dict[str, Any]:
@@ -1052,6 +1115,12 @@ def build_parser() -> argparse.ArgumentParser:
         help="Maximum time a running discovery job may delay governance refresh; 0 means discovery never blocks governance.",
     )
     parser.add_argument("--paper-source", choices=["raw_snapshot", "websocket"], default="raw_snapshot")
+    parser.add_argument(
+        "--prediction-mode",
+        choices=["paper-bridge", "full"],
+        default="paper-bridge",
+        help="paper-bridge keeps the hot live lane fast; full runs the canonical feature/prediction cycle.",
+    )
     parser.add_argument("--optimize-model", action="store_true", help="Allow the slower discovery lane to run scheduled model optimisation.")
     return parser
 
@@ -1344,6 +1413,7 @@ def main(argv: list[str] | None = None) -> int:
                             _run_prediction_cycle,
                             config_path=config_path,
                             paper_source=args.paper_source,
+                            prediction_mode=args.prediction_mode,
                         )
                         next_prediction_cycle = float("inf")
                         full_cycle = _running_prediction_summary(
@@ -1411,6 +1481,7 @@ def main(argv: list[str] | None = None) -> int:
                     "effective_max_assets": effective_max_assets,
                     "websocket_seconds": args.websocket_seconds,
                     "prediction_cycle_seconds": args.prediction_cycle_seconds,
+                    "prediction_mode": args.prediction_mode,
                     "prediction_governance_block_seconds": args.prediction_governance_block_seconds,
                     "prediction_running_seconds": prediction_running_seconds,
                     "prediction_blocks_governance": prediction_blocks_governance,

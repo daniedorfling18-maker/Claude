@@ -353,6 +353,63 @@ def test_degraded_prediction_cycle_wraps_canonical_paper_cycle(tmp_path, monkeyp
     assert summary["resource_guard"]["reason"] == "memory_above_limit"
 
 
+def test_live_prediction_cycle_defaults_to_fast_paper_bridge(tmp_path, monkeypatch):
+    loop = _load_loop_module()
+    cfg = EngineConfig(
+        raw={"paths": {"output_root": str(tmp_path / "outputs")}},
+        path=tmp_path / "cfg.yaml",
+    )
+    monkeypatch.setattr(loop, "load_config", lambda _path: cfg)
+    monkeypatch.setattr(
+        loop,
+        "build_price_action_paper_signals",
+        lambda _cfg: {
+            "status": "computed",
+            "signals": 1,
+            "rejections": 4,
+            "decision": "signals_ready_for_paper_broker",
+            "paper_confirmation_candidates": 1,
+        },
+    )
+    monkeypatch.setattr(loop, "paper_trade", lambda _cfg: {"status": "ran", "orders_filled": 1, "equity": 1002.0})
+    monkeypatch.setattr(loop, "write_profit_target_tracker", lambda _cfg, _broker: {"status": "collecting_forward_evidence"})
+
+    summary = loop._run_prediction_cycle(config_path=tmp_path / "cfg.yaml", paper_source="websocket")
+
+    assert summary["status"] == "ran"
+    assert summary["mode"] == "live_price_action_paper_bridge"
+    assert summary["signals_approved"] == 1
+    assert summary["signals_rejected"] == 4
+    assert summary["broker"]["orders_filled"] == 1
+    persisted = read_json(cfg.governance_root / "live_paper_bridge_cycle.json")
+    assert persisted["mode"] == "live_price_action_paper_bridge"
+
+
+def test_live_prediction_cycle_can_still_run_full_canonical_path(tmp_path, monkeypatch):
+    loop = _load_loop_module()
+    called: list[str] = []
+
+    def fake_load_config(_path):
+        called.append("load_config")
+        return EngineConfig(raw={"paths": {"output_root": str(tmp_path / "outputs")}}, path=tmp_path / "cfg.yaml")
+
+    def fake_run_paper_cycle(_cfg, *, source):
+        called.append(f"run_paper_cycle:{source}")
+        return {"status": "ran", "source": source, "mode": "full"}
+
+    monkeypatch.setattr(loop, "load_config", fake_load_config)
+    monkeypatch.setattr(loop, "run_paper_cycle", fake_run_paper_cycle)
+
+    summary = loop._run_prediction_cycle(
+        config_path=tmp_path / "cfg.yaml",
+        paper_source="websocket",
+        prediction_mode="full",
+    )
+
+    assert summary == {"status": "ran", "source": "websocket", "mode": "full"}
+    assert called == ["load_config", "run_paper_cycle:websocket"]
+
+
 def test_live_loop_clears_orphaned_same_process_prediction_lock(tmp_path):
     loop = _load_loop_module()
     cfg = EngineConfig(
@@ -589,6 +646,7 @@ def test_prediction_cycle_status_is_background_friendly():
     )
 
     assert loop.build_parser().parse_args([]).prediction_cycle_seconds == 15.0
+    assert loop.build_parser().parse_args([]).prediction_mode == "paper-bridge"
     assert loop.build_parser().parse_args([]).governance_refresh_seconds == 120.0
     assert loop.build_parser().parse_args([]).discovery_governance_block_seconds == 180.0
     assert running == {

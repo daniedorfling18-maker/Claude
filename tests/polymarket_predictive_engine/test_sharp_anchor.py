@@ -832,11 +832,11 @@ def test_build_sharp_anchor_maps_accented_public_fighter_names(tmp_path, monkeyp
                 "events": [
                     {
                         "slug": "ufc-pad-ben8-2026-07-11",
-                        "title": "Paddy Pimblett vs. Benoît Saint Denis",
+                        "title": "UFC 329: Paddy Pimblett vs. Benoīt Saint Denis (Lightweight, Main Card)",
                         "markets": [
                             {
-                                "question": "Paddy Pimblett vs. Benoît Saint Denis",
-                                "outcomes": ["Paddy Pimblett", "Benoît Saint Denis"],
+                                "question": "UFC 329: Paddy Pimblett vs. Benoīt Saint Denis (Lightweight, Main Card)",
+                                "outcomes": ["Paddy Pimblett", "Benoīt Saint Denis"],
                                 "clobTokenIds": ["PADDY_YES", "BENOIT_YES"],
                             }
                         ],

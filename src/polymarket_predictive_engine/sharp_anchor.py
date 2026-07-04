@@ -186,18 +186,24 @@ def _event_teams_from_text(value: object) -> tuple[str, str] | None:
     if not text:
         return None
     compact = re.sub(r"\s+", " ", text)
+    candidates = []
+    if ":" in compact:
+        candidates.append(compact.split(":", 1)[1].strip())
+    candidates.append(compact)
     patterns = [
         r"^(.*?)\s+vs\.?\s+(.*?)(?:\s+\d{4}-\d{2}-\d{2})?$",
         r"^(.*?)\s+v\.?\s+(.*?)(?:\s+\d{4}-\d{2}-\d{2})?$",
         r"^(.*?)-vs-(.*?)(?:-\d{4}-\d{2}-\d{2})?$",
     ]
-    for pattern in patterns:
-        match = re.match(pattern, compact, re.I)
-        if match:
-            left = match.group(1).replace("-", " ").strip(" .")
-            right = match.group(2).replace("-", " ").strip(" .")
-            if left and right:
-                return left, right
+    for candidate in candidates:
+        candidate = re.sub(r"\s+\([^)]*\)\s*$", "", candidate).strip()
+        for pattern in patterns:
+            match = re.match(pattern, candidate, re.I)
+            if match:
+                left = match.group(1).replace("-", " ").strip(" .")
+                right = match.group(2).replace("-", " ").strip(" .")
+                if left and right:
+                    return left, right
     return None
 
 
@@ -227,7 +233,10 @@ def _h2h_market_shape_blocker(row: dict[str, Any]) -> str:
     ).lower()
     if re.search(r"\b(advance|advances|qualify|qualifies|qualification|go through|progress)\b", text):
         return "advance_market_needs_composite_fair"
-    if re.search(r"\b(spread|handicap|total|over|under|goals?|points?|corners?|cards?)\b", text):
+    if re.search(
+        r"\b(spread|handicap|total|over|under|goals?|points?|corners?|red cards?|yellow cards?|cards|bookings?)\b",
+        text,
+    ):
         return "ambiguous_market_shape"
     return ""
 

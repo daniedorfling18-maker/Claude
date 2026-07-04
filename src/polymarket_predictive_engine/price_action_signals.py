@@ -652,6 +652,45 @@ def _paper_confirmation_blocked_preview_sort_key(item: dict[str, Any]) -> tuple[
     )
 
 
+def _balanced_blocked_preview(
+    rows: list[dict[str, Any]],
+    *,
+    limit: int = 10,
+    max_first_pass_per_family: int = 2,
+) -> list[dict[str, Any]]:
+    """Return a compact blocker preview without hiding minority families.
+
+    This is reporting/collection guidance only.  It deliberately does not
+    change approval gates; it prevents the operator-facing "next evidence"
+    list from being monopolised by the first large, liquid family.
+    """
+    ranked = sorted(rows, key=_paper_confirmation_blocked_preview_sort_key, reverse=True)
+    selected: list[dict[str, Any]] = []
+    selected_indices: set[int] = set()
+    family_counts: dict[str, int] = {}
+
+    def family_key(row: dict[str, Any]) -> str:
+        return str(row.get("family") or row.get("category") or "unknown").strip() or "unknown"
+
+    for index, row in enumerate(ranked):
+        family = family_key(row)
+        if family_counts.get(family, 0) >= max_first_pass_per_family:
+            continue
+        selected.append(row)
+        selected_indices.add(index)
+        family_counts[family] = family_counts.get(family, 0) + 1
+        if len(selected) >= limit:
+            return selected
+
+    for index, row in enumerate(ranked):
+        if index in selected_indices:
+            continue
+        selected.append(row)
+        if len(selected) >= limit:
+            break
+    return selected
+
+
 def _paper_confirmation_current_candidates(
     cfg: EngineConfig,
     settings: dict[str, Any],
@@ -682,6 +721,7 @@ def _paper_confirmation_current_candidates(
     fresh_matches = 0
     blocked = 0
     blocked_by_state: dict[str, int] = {}
+    blocked_by_family: dict[str, int] = {}
     blocked_preview: list[dict[str, Any]] = []
     approved_analogue_keys: set[str] = set()
     for feature in latest_rows:
@@ -711,6 +751,8 @@ def _paper_confirmation_current_candidates(
             blocked += 1
             state = "entry_price_outside_risk_band"
             blocked_by_state[state] = blocked_by_state.get(state, 0) + 1
+            family = str(feature.get("family") or feature.get("category") or "unknown").strip() or "unknown"
+            blocked_by_family[family] = blocked_by_family.get(family, 0) + 1
             blocked_preview.append(
                 _attach_historical_analogue(
                     {
@@ -736,6 +778,8 @@ def _paper_confirmation_current_candidates(
             blocked += 1
             state = str(analogue.get("state") or "unknown")
             blocked_by_state[state] = blocked_by_state.get(state, 0) + 1
+            family = str(feature.get("family") or feature.get("category") or "unknown").strip() or "unknown"
+            blocked_by_family[family] = blocked_by_family.get(family, 0) + 1
             blocked_preview.append(
                 _attach_historical_analogue(
                     {
@@ -807,11 +851,9 @@ def _paper_confirmation_current_candidates(
         "selected": len(selected),
         "blocked": blocked,
         "blocked_by_state": blocked_by_state,
-        "blocked_preview": sorted(
-            blocked_preview,
-            key=_paper_confirmation_blocked_preview_sort_key,
-            reverse=True,
-        )[:10],
+        "blocked_by_family": dict(sorted(blocked_by_family.items())),
+        "blocked_preview": _balanced_blocked_preview(blocked_preview, limit=10),
+        "blocked_preview_selection": "balanced_by_family_then_gate_strength",
         "positive_historical_analogue_keys": len(approved_analogue_keys),
     }
 
@@ -1169,7 +1211,7 @@ def _query_family_prefixes(query: str) -> list[str]:
     if not query:
         return []
     if "world" in query or "cup" in query:
-        return ["sports_other", "worldcup"]
+        return ["sports_other", "worldcup", "soccer_match", "world-cup", "fifa"]
     if "tennis" in query:
         return ["tennis"]
     if "bitcoin" in query or "btc" in query:
@@ -1207,7 +1249,9 @@ def _confirmation_candidate_for_row(row: dict[str, Any], candidates: list[dict[s
     row_cohort = _cohort_name(row).lower()
     family = str(row.get("family") or row.get("category") or "").strip().lower()
     market_slug = str(row.get("market_slug") or "").strip().lower()
-    text = " ".join([row_cohort, family, market_slug])
+    question = str(row.get("question") or "").strip().lower()
+    category = str(row.get("category") or "").strip().lower()
+    text = " ".join([row_cohort, family, category, market_slug, question])
     for candidate in candidates:
         cohort = str(candidate.get("cohort") or "").strip().lower()
         query = str(candidate.get("recommended_collection_query") or "").strip().lower()

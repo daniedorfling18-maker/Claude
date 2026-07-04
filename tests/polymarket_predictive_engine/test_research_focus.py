@@ -4,7 +4,7 @@ import json
 from pathlib import Path
 
 from polymarket_predictive_engine.config import EngineConfig
-from polymarket_predictive_engine.research_focus import build_research_focus
+from polymarket_predictive_engine.research_focus import build_research_focus, _near_miss_collection_query
 from polymarket_predictive_engine.utils import read_json, write_csv, write_json
 
 
@@ -15,6 +15,19 @@ def _cfg(tmp_path: Path) -> EngineConfig:
             "actual_profit_target": {"target_monthly_profit_usdc": 100},
         },
         path=tmp_path / "cfg.yaml",
+    )
+
+
+def test_near_miss_query_maps_hyphenated_world_cup_slug() -> None:
+    assert (
+        _near_miss_collection_query(
+            {
+                "market_slug": "world-cup-nation-to-reach-quarterfinals",
+                "question": "Will Mexico reach the Quarterfinals?",
+                "category": "soccer_match",
+            }
+        )
+        == "world cup"
     )
 
 

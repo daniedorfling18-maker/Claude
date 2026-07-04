@@ -460,7 +460,7 @@ def _near_miss_collection_query(row: dict[str, Any]) -> str:
         return "fed"
     if any(marker in text for marker in ("cpi", "inflation", "gdp", "unemployment", "recession", "economy")):
         return "economy"
-    if any(marker in text for marker in ("worldcup", "world cup", "fifa")):
+    if any(marker in text for marker in ("worldcup", "world cup", "world-cup", "fifa")):
         return "world cup"
     if any(marker in text for marker in ("tennis", "sinner", "wimbledon", "us-open", "us open")):
         return "tennis"

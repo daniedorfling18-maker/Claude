@@ -778,6 +778,181 @@ def test_paper_confirmation_current_candidate_requires_positive_historical_analo
     assert float(signals[0]["max_stake_usdc"]) == 1.0
 
 
+def test_worldcup_confirmation_query_matches_soccer_match_current_row(tmp_path):
+    cfg = _cfg(tmp_path)
+    cfg.raw["price_action_microstructure"] = {
+        "enabled": True,
+        "lookback_observations": 1,
+        "max_rows_per_token": 20,
+    }
+    cfg.raw["price_action_paper"].update(
+        {
+            "paper_confirmation_max_stake_usdc": 1,
+            "paper_confirmation_max_current_candidates": 4,
+            "paper_confirmation_require_positive_historical_analogue": True,
+            "paper_confirmation_min_historical_analogue_validation_rows": 3,
+            "paper_confirmation_min_historical_analogue_positive_rows": 1,
+            "low_price_tick_probe_enabled": False,
+        }
+    )
+    root = cfg.output_root / "polymarket_price_action"
+    feedback = _paper_confirmation_feedback_payload(cohort="near_miss_learning|worldcup")
+    feedback["paper_confirmation_preview"][0]["recommended_collection_query"] = "world cup"
+    write_json(cfg.governance_root / "price_action_feedback.json", feedback)
+    write_csv(
+        cfg.output_root / "polymarket_training" / "websocket_market_features.csv",
+        [
+            _ws_feature_row(
+                0,
+                asset_id="mexico-quarterfinal-token",
+                market_slug="world-cup-nation-to-reach-quarterfinals",
+                question="Will Mexico reach the Quarterfinals at the 2026 FIFA World Cup?",
+                category="soccer_match",
+                selection="Yes",
+                best_bid="0.45",
+                best_ask="0.46",
+                midpoint="0.455",
+                spread="0.01",
+                price_change_side="BUY",
+            ),
+            _ws_feature_row(
+                1,
+                asset_id="mexico-quarterfinal-token",
+                market_slug="world-cup-nation-to-reach-quarterfinals",
+                question="Will Mexico reach the Quarterfinals at the 2026 FIFA World Cup?",
+                category="soccer_match",
+                selection="Yes",
+                best_bid="0.46",
+                best_ask="0.47",
+                midpoint="0.465",
+                spread="0.01",
+                price_change_side="BUY",
+            ),
+        ],
+    )
+    write_csv(
+        root / "microstructure_trade_events.csv",
+        _positive_analogue_rows(
+            family="soccer_match",
+            market_slug="world-cup-nation-to-reach-quarterfinals",
+            outcome="Yes",
+            entry_bid="0.46",
+            entry_ask="0.47",
+            current_side="BUY",
+        ),
+    )
+
+    summary = build_price_action_paper_signals(cfg)
+    signals = read_csv_rows(root / "price_action_paper_signals.csv")
+    analogue = summary["paper_confirmation_current_historical_analogue"]
+
+    assert summary["signals"] == 1
+    assert summary["paper_confirmation_current_candidates"] == 1
+    assert analogue["fresh_matches"] == 1
+    assert signals[0]["market_slug"] == "world-cup-nation-to-reach-quarterfinals"
+    assert signals[0]["category"] == "soccer_match"
+    assert signals[0]["signal_cohort"] == "near_miss_learning|worldcup"
+    assert signals[0]["price_action_entry_source"] == "paper_confirmation_current_candidate"
+    assert signals[0]["historical_analogue_gate"] == "positive_historical_analogue"
+
+
+def test_paper_confirmation_blocker_preview_keeps_minority_worldcup_family(tmp_path):
+    cfg = _cfg(tmp_path)
+    cfg.raw["price_action_microstructure"] = {
+        "enabled": True,
+        "lookback_observations": 1,
+        "max_rows_per_token": 20,
+    }
+    cfg.raw["price_action_paper"].update(
+        {
+            "paper_confirmation_max_current_candidates": 4,
+            "paper_confirmation_require_positive_historical_analogue": True,
+            "paper_confirmation_min_historical_analogue_validation_rows": 3,
+            "paper_confirmation_min_historical_analogue_positive_rows": 1,
+            "low_price_tick_probe_enabled": False,
+        }
+    )
+    root = cfg.output_root / "polymarket_price_action"
+    feedback = _paper_confirmation_feedback_payload(cohort="crypto_btc_special")
+    feedback["paper_confirmation_preview"][0]["recommended_collection_query"] = "bitcoin"
+    worldcup_candidate = dict(feedback["paper_confirmation_preview"][0])
+    worldcup_candidate["cohort"] = "near_miss_learning|worldcup"
+    worldcup_candidate["recommended_collection_query"] = "world cup"
+    worldcup_candidate["priority_score"] = 23.0
+    feedback["paper_confirmation_preview"].append(worldcup_candidate)
+    write_json(cfg.governance_root / "price_action_feedback.json", feedback)
+
+    rows = []
+    for token_index in range(12):
+        for observation in range(2):
+            minute = token_index * 2 + observation
+            rows.append(
+                _ws_feature_row(
+                    minute,
+                    collected_at_utc=f"2026-07-02T06:{minute:02d}:00Z",
+                    source_timestamp=str(10_000 + minute),
+                    asset_id=f"btc-token-{token_index}",
+                    market_slug=f"bitcoin-above-test-{token_index}",
+                    question="Will Bitcoin be above test level?",
+                    category="crypto_btc_special",
+                    selection="Yes",
+                    best_bid="0.50",
+                    best_ask="0.51",
+                    midpoint="0.505",
+                    spread="0.01",
+                    price_change_side="BUY",
+                )
+            )
+    rows.extend(
+        [
+            _ws_feature_row(
+                30,
+                collected_at_utc="2026-07-02T07:00:00Z",
+                source_timestamp="20000",
+                asset_id="mexico-quarterfinal-token",
+                market_slug="world-cup-nation-to-reach-quarterfinals",
+                question="Will Mexico reach the Quarterfinals at the 2026 FIFA World Cup?",
+                category="soccer_match",
+                selection="Yes",
+                best_bid="0.45",
+                best_ask="0.46",
+                midpoint="0.455",
+                spread="0.01",
+                price_change_side="BUY",
+            ),
+            _ws_feature_row(
+                31,
+                collected_at_utc="2026-07-02T07:01:00Z",
+                source_timestamp="20001",
+                asset_id="mexico-quarterfinal-token",
+                market_slug="world-cup-nation-to-reach-quarterfinals",
+                question="Will Mexico reach the Quarterfinals at the 2026 FIFA World Cup?",
+                category="soccer_match",
+                selection="Yes",
+                best_bid="0.46",
+                best_ask="0.47",
+                midpoint="0.465",
+                spread="0.01",
+                price_change_side="BUY",
+            ),
+        ]
+    )
+    write_csv(cfg.output_root / "polymarket_training" / "websocket_market_features.csv", rows)
+
+    summary = build_price_action_paper_signals(cfg)
+    signals = read_csv_rows(root / "price_action_paper_signals.csv")
+    analogue = summary["paper_confirmation_current_historical_analogue"]
+    preview_families = [row["family"] for row in analogue["blocked_preview"]]
+
+    assert signals == []
+    assert summary["paper_confirmation_current_candidates"] == 0
+    assert analogue["fresh_matches"] == 13
+    assert analogue["blocked_by_family"]["crypto_btc_special"] == 12
+    assert analogue["blocked_by_family"]["soccer_match"] == 1
+    assert analogue["blocked_preview_selection"] == "balanced_by_family_then_gate_strength"
+    assert "soccer_match" in preview_families
+
+
 def test_paper_confirmation_current_candidate_blocks_out_of_band_price_before_selection(tmp_path):
     cfg = _cfg(tmp_path)
     cfg.raw["price_action_microstructure"] = {

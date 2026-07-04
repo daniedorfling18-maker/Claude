@@ -693,6 +693,68 @@ def test_paper_broker_captures_execution_quotes_for_round_trip_proof(tmp_path, m
     assert float(rows[0]["exit_fill_nearest_snapshot_bid_gap"]) == 0.0
 
 
+def test_paper_broker_rejects_entry_without_quote_snapshot_support(tmp_path, monkeypatch):
+    cfg = _config(tmp_path)
+    signals_path = cfg.output_root / "polymarket_predictions" / "trade_signals.csv"
+    write_csv(
+        signals_path,
+        [
+            {
+                "market_id": "missing-entry-quote-market",
+                "market_slug": "missing-entry-quote-market",
+                "token_id": "missing-entry-quote-token",
+                "question": "Will missing entry quotes be rejected?",
+                "outcome": "Yes",
+                "side": "BUY_YES",
+                "category": "quote_proof_test",
+                "edge": "0.08",
+                "model_probability": "0.70",
+                "confidence": "0.75",
+                "executable_price": "0.40",
+                "best_ask": "0.40",
+                "spread": "0.01",
+                "liquidity": "1000",
+                "top_ask_size": "1000",
+                "top_bid_size": "1000",
+                "ask_depth_1pct": "1000",
+                "bid_depth_1pct": "1000",
+                "ask_depth_5pct": "1000",
+                "bid_depth_5pct": "1000",
+                "websocket_quote_age_seconds": "1",
+                "price_action_signal": "true",
+                "take_profit_return": "0.10",
+                "take_profit_min_usdc": "0.01",
+                "strategy_name": "price_action_round_trip",
+                "model_version": "quote-proof-test-v1",
+            }
+        ],
+    )
+
+    import polymarket_predictive_engine.paper_broker as broker_module
+
+    monkeypatch.setattr(
+        broker_module,
+        "paper_trade_readiness",
+        lambda cfg: {
+            "approved_for_paper_trading": True,
+            "blockers": [],
+        },
+    )
+
+    result = run_paper_broker(cfg)
+
+    assert result["orders_filled"] == 0
+    assert result["broker_rejection_reasons"]["missing sane entry bid/ask for proof snapshot"] == 1
+    con = connect_db(cfg.database_path)
+    try:
+        assert con.execute("SELECT COUNT(*) FROM orders").fetchone()[0] == 0
+        assert con.execute("SELECT COUNT(*) FROM fills").fetchone()[0] == 0
+        assert con.execute("SELECT COUNT(*) FROM positions").fetchone()[0] == 0
+        assert con.execute("SELECT COUNT(*) FROM market_snapshots").fetchone()[0] == 0
+    finally:
+        con.close()
+
+
 def test_paper_broker_refuses_wrong_side_websocket_exit_quote(tmp_path):
     cfg = _config(tmp_path)
     cfg.raw["paper_trading"]["minimum_hold_minutes_before_exit"] = 0

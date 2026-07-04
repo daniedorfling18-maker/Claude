@@ -396,6 +396,26 @@ def _entry_execution_quote(signal: dict[str, Any], *, fallback_timestamp: str) -
     }
 
 
+def _entry_quote_rejection_reason(signal: dict[str, Any], settings: dict[str, Any], *, fallback_timestamp: str) -> str | None:
+    """Return a fail-closed reason when a BUY would be missing entry quote proof.
+
+    Profit-target proof requires the paper round trip to have entry ask support.
+    The broker can persist the bid/ask carried by a fresh signal as an execution
+    snapshot, but a signal with no sane bid/ask would create raw P&L that cannot
+    later count toward the verified $100/month route.
+    """
+    if not boolish(settings.get("require_entry_quote_snapshot_capture", True)):
+        return None
+    quote = _entry_execution_quote(signal, fallback_timestamp=fallback_timestamp)
+    bid = safe_float(quote.get("best_bid"))
+    ask = safe_float(quote.get("best_ask"))
+    if not _sane_bid_ask(bid, ask):
+        return "missing sane entry bid/ask for proof snapshot"
+    if not str(quote.get("timestamp") or "").strip():
+        return "missing entry quote timestamp for proof snapshot"
+    return None
+
+
 def _latest_prediction_payload(con, market_id: str, token_id: str) -> dict[str, Any]:
     row = con.execute(
         """
@@ -1315,6 +1335,15 @@ def submit_paper_signal(con, cfg: EngineConfig, signal: dict[str, Any]) -> dict[
     fill_key = f"paper_fill|{order_id}|taker_immediate"
     fill_id = _stable_id("fill", fill_key)
     created_at = now_utc()
+    entry_quote = _entry_execution_quote(signal, fallback_timestamp=created_at)
+    entry_quote_rejection = _entry_quote_rejection_reason(signal, paper_settings, fallback_timestamp=created_at)
+    if entry_quote_rejection:
+        return {
+            "status": "rejected",
+            "reason": entry_quote_rejection,
+            "market_id": market_id,
+            "token_id": token_id,
+        }
     category = str(signal.get("category", ""))
     event_id = str(signal.get("event_id", ""))
     correlation_key = normalised_correlation_key(signal)
@@ -1380,7 +1409,7 @@ def submit_paper_signal(con, cfg: EngineConfig, signal: dict[str, Any]) -> dict[
         fill_id=fill_id,
         side=str(signal.get("side", "BUY_YES")),
         fill_price=fill_price,
-        quote=_entry_execution_quote(signal, fallback_timestamp=created_at),
+        quote=entry_quote,
         fallback_timestamp=created_at,
     )
     _upsert_position(

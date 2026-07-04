@@ -1042,6 +1042,7 @@ paper_trading:
   exit_enabled: true
   monitor_exits_when_readiness_blocked: true
   exit_policy_version: paper-exit-v1
+  require_entry_quote_snapshot_capture: true
   require_exit_live_quote: true
   require_exit_snapshot_crosscheck: true
   exit_quote_snapshot_tolerance: 0.05

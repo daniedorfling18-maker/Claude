@@ -564,6 +564,42 @@ def test_stale_background_jobs_do_not_block_discovery_forever():
     )
 
 
+def test_stale_discovery_does_not_block_prediction_forever():
+    loop = _load_loop_module()
+    discovery_future: Future[dict[str, object]] = Future()
+    governance_future: Future[dict[str, object]] = Future()
+    assert discovery_future.set_running_or_notify_cancel()
+    assert governance_future.set_running_or_notify_cancel()
+
+    assert loop._background_jobs_block_prediction(
+        discovery_future=discovery_future,
+        discovery_started_ts=100.0,
+        discovery_block_seconds=90.0,
+        governance_future=governance_future,
+        governance_started_ts=120.0,
+        governance_block_seconds=90.0,
+        now_ts=150.0,
+    )
+    assert not loop._background_jobs_block_prediction(
+        discovery_future=discovery_future,
+        discovery_started_ts=100.0,
+        discovery_block_seconds=90.0,
+        governance_future=governance_future,
+        governance_started_ts=120.0,
+        governance_block_seconds=90.0,
+        now_ts=211.0,
+    )
+    assert not loop._background_jobs_block_prediction(
+        discovery_future=discovery_future,
+        discovery_started_ts=100.0,
+        discovery_block_seconds=0.0,
+        governance_future=None,
+        governance_started_ts=0.0,
+        governance_block_seconds=90.0,
+        now_ts=101.0,
+    )
+
+
 def test_high_memory_guard_reduces_effective_websocket_assets():
     loop = _load_loop_module()
 

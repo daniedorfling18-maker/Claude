@@ -693,6 +693,77 @@ def _apply_feedback_broaden_reserve(
     return merged[:max_queries]
 
 
+def _apply_research_focus_reserve(
+    *,
+    selected: list[str],
+    ordered_queries: list[str],
+    adaptive_priority: dict[str, Any],
+    max_queries: int,
+    settings: dict[str, Any],
+    scan_sequence: int,
+) -> tuple[list[str], list[str]]:
+    """Reserve scan slots for the governed research-focus collection target.
+
+    This is observation routing only.  It prevents older high-priority cohorts
+    from crowding out the current evidence request; downstream model,
+    governance, and paper gates still decide whether anything is tradable.
+    """
+    if max_queries <= 1:
+        return selected, []
+    enabled = _truthy_setting(settings.get("research_focus_reserve_enabled", True), default=True)
+    if not enabled:
+        return selected, []
+    focus_queries = [
+        str(query or "").strip()
+        for query in adaptive_priority.get("research_focus_queries", []) or []
+        if str(query or "").strip()
+    ]
+    if not focus_queries:
+        return selected, []
+
+    slots = int(safe_float(settings.get("research_focus_reserve_slots")) or 3)
+    slots = max(0, min(slots, max_queries - 1))
+    if slots <= 0:
+        return selected, []
+
+    ordered_by_key = {_query_key(query): query for query in ordered_queries if _query_key(query)}
+    selected_keys = {_query_key(query) for query in selected if _query_key(query)}
+    missing_focus = [
+        ordered_by_key.get(_query_key(query), query)
+        for query in focus_queries
+        if _query_key(query) and _query_key(query) in ordered_by_key and _query_key(query) not in selected_keys
+    ]
+    if not missing_focus:
+        return selected, []
+
+    start = max(0, scan_sequence - 1) % len(missing_focus)
+    rotated = [missing_focus[(start + offset) % len(missing_focus)] for offset in range(len(missing_focus))]
+    focus_keys = {_query_key(query) for query in focus_queries if _query_key(query)}
+    protected_selected = [query for query in selected if _query_key(query) in focus_keys]
+    remaining_capacity = max(0, max_queries - len(protected_selected))
+    reserved = rotated[: min(slots, remaining_capacity)]
+    if not reserved:
+        return selected, []
+
+    reserved_keys = {_query_key(query) for query in reserved}
+    merged = list(protected_selected) + reserved
+    for query in selected:
+        if len(merged) >= max_queries:
+            break
+        key = _query_key(query)
+        if key in reserved_keys or query in merged:
+            continue
+        merged.append(query)
+    for query in ordered_queries:
+        if len(merged) >= max_queries:
+            break
+        key = _query_key(query)
+        if key in reserved_keys or query in merged:
+            continue
+        merged.append(query)
+    return merged[:max_queries], reserved
+
+
 def _apply_broad_repricing_reserve(
     *,
     selected: list[str],
@@ -774,6 +845,7 @@ def _select_scan_queries(cfg, default_query: str, *, scan_sequence: int) -> tupl
         settings=settings,
     )
     ordered_queries, adaptive_priority = _adaptive_query_order(cfg, all_queries)
+    research_focus_reserved_queries: list[str] = []
     broad_reserved_queries: list[str] = []
     if mode == "batch":
         selected = ordered_queries[:max_queries] if max_queries > 0 else ordered_queries
@@ -784,6 +856,14 @@ def _select_scan_queries(cfg, default_query: str, *, scan_sequence: int) -> tupl
                 adaptive_priority=adaptive_priority,
                 max_queries=max_queries,
                 settings=settings,
+            )
+            selected, research_focus_reserved_queries = _apply_research_focus_reserve(
+                selected=selected,
+                ordered_queries=ordered_queries,
+                adaptive_priority=adaptive_priority,
+                max_queries=max_queries,
+                settings=settings,
+                scan_sequence=scan_sequence,
             )
             selected, broad_reserved_queries = _apply_broad_repricing_reserve(
                 selected=selected,
@@ -809,6 +889,11 @@ def _select_scan_queries(cfg, default_query: str, *, scan_sequence: int) -> tupl
         "all_queries": all_queries,
         "ordered_queries": ordered_queries,
         "selected_queries": selected,
+        "research_focus_reserved_queries": research_focus_reserved_queries,
+        "research_focus_reserve_enabled": _truthy_setting(
+            settings.get("research_focus_reserve_enabled", True),
+            default=True,
+        ),
         "broad_repricing_reserved_queries": broad_reserved_queries,
         "broad_repricing_queries": _broad_repricing_queries(settings),
         "broad_repricing_reserve_enabled": _truthy_setting(

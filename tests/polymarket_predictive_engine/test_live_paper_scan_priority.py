@@ -564,3 +564,100 @@ def test_broad_repricing_reserve_keeps_cross_event_scan_slot(tmp_path, monkeypat
     assert plan["injected_broad_repricing_queries"] == ["fed", "tennis"]
     assert plan["broad_repricing_reserved_queries"] == ["fed"]
     assert plan["broad_repricing_reserve_enabled"] is True
+
+
+def test_research_focus_reserve_keeps_current_collection_targets_in_batch_scan(tmp_path, monkeypatch):
+    loop = _load_loop_module()
+    monkeypatch.delenv("POLYMARKET_SCAN_QUERY_MODE", raising=False)
+    monkeypatch.delenv("POLYMARKET_MAX_SCAN_QUERIES", raising=False)
+    monkeypatch.delenv("POLYMARKET_ADAPTIVE_SCAN_PRIORITY", raising=False)
+
+    governance = tmp_path / "outputs" / "polymarket_model_governance"
+    governance.mkdir(parents=True)
+    (governance / "signal_cohort_pnl.json").write_text(
+        json.dumps(
+            {
+                "cohorts": [
+                    {
+                        "signal_cohort": "exploratory_crypto_updown_live_model|crypto_btc_updown_daily|outcome=down",
+                        "promotion_ready_score": 6,
+                        "promotion_ready_checks": 6,
+                        "total_pnl_usdc": 8,
+                        "roi": 0.22,
+                        "monthly_run_rate_usdc": 800,
+                    },
+                    {
+                        "signal_cohort": "exploratory_crypto_updown_live_model|crypto_xrp_updown_daily|outcome=up",
+                        "promotion_ready_score": 5,
+                        "promotion_ready_checks": 6,
+                        "total_pnl_usdc": 6,
+                        "roi": 0.18,
+                        "monthly_run_rate_usdc": 700,
+                    },
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+    (governance / "research_focus.json").write_text(
+        json.dumps(
+            {
+                "status": "ok",
+                "summary": "Guarded broad collection target.",
+                "collection_queries": [
+                    "solana updown",
+                    "ethereum",
+                    "bitcoin",
+                    "world cup",
+                    "fed",
+                    "tennis",
+                    "nba",
+                    "mlb",
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    cfg = EngineConfig(
+        raw={
+            "paths": {"output_root": str(tmp_path / "outputs")},
+            "paper_market_scan": {
+                "mode": "batch",
+                "max_queries_per_cycle": 8,
+                "prioritize_near_promoted": True,
+                "research_focus_reserve_enabled": True,
+                "research_focus_reserve_slots": 3,
+                "queries": [
+                    "btc updown",
+                    "xrp updown",
+                    "solana updown",
+                    "ethereum",
+                    "bitcoin",
+                    "world cup",
+                    "fed",
+                    "tennis",
+                    "nba",
+                    "mlb",
+                ],
+            },
+        },
+        path=tmp_path / "cfg.yaml",
+    )
+
+    selected, plan = loop._select_scan_queries(cfg, "world cup", scan_sequence=1)
+
+    assert set(selected) == {
+        "solana updown",
+        "ethereum",
+        "bitcoin",
+        "world cup",
+        "fed",
+        "tennis",
+        "nba",
+        "mlb",
+    }
+    assert len(selected) == 8
+    assert plan["research_focus_reserved_queries"] == ["nba", "mlb"]
+    assert plan["research_focus_reserve_enabled"] is True
+    assert "btc updown" not in selected
+    assert "xrp updown" not in selected

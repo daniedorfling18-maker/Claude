@@ -523,6 +523,8 @@ paper_market_scan:
   # universe instead of silently starving the model of the evidence it needs.
   inject_research_focus_queries: true
   research_focus_validation_gap_priority_value: 50.0
+  research_focus_reserve_enabled: true
+  research_focus_reserve_slots: 3
   # Repricing is learned across the full liquid event universe, not only the
   # current best crypto/World Cup lane. This reserve keeps one discovery slot
   # rotating through broad event families while downstream governance still

@@ -891,6 +891,36 @@ def _background_jobs_block_discovery(
     )
 
 
+def _background_jobs_block_prediction(
+    *,
+    discovery_future: Future[Any] | None,
+    discovery_started_ts: float,
+    discovery_block_seconds: float,
+    governance_future: Future[Any] | None,
+    governance_started_ts: float,
+    governance_block_seconds: float,
+    now_ts: float,
+) -> bool:
+    """Return whether background jobs may still delay fresh predictions.
+
+    A slow discovery pass should not starve the live paper prediction lane.  It
+    can delay prediction briefly to avoid contention, but after the configured
+    block window the system must keep re-scoring the current websocket universe
+    rather than waiting forever for broader discovery to finish.
+    """
+    return _background_job_blocks_governance(
+        discovery_future,
+        started_ts=discovery_started_ts,
+        max_block_seconds=discovery_block_seconds,
+        now_ts=now_ts,
+    ) or _background_job_blocks_governance(
+        governance_future,
+        started_ts=governance_started_ts,
+        max_block_seconds=governance_block_seconds,
+        now_ts=now_ts,
+    )
+
+
 def _governance_refresh_due(
     *,
     now_ts: float,
@@ -1218,6 +1248,15 @@ def main(argv: list[str] | None = None) -> int:
                     next_refresh=next_governance_refresh,
                     governance_future=governance_future,
                 )
+                background_jobs_block_prediction = _background_jobs_block_prediction(
+                    discovery_future=discovery_future,
+                    discovery_started_ts=discovery_started_ts,
+                    discovery_block_seconds=args.discovery_governance_block_seconds,
+                    governance_future=governance_future,
+                    governance_started_ts=governance_started_ts,
+                    governance_block_seconds=args.prediction_governance_block_seconds,
+                    now_ts=now_ts,
+                )
                 if prediction_future is not None and not prediction_future.done():
                     full_cycle = _running_prediction_summary(
                         paper_source=args.paper_source,
@@ -1227,7 +1266,7 @@ def main(argv: list[str] | None = None) -> int:
                     args.prediction_cycle_seconds > 0
                     and now_ts >= next_prediction_cycle
                     and not governance_due_now
-                    and not _heavy_future_running(discovery_future, governance_future)
+                    and not background_jobs_block_prediction
                 ):
                     if resource_guard.get("skip_prediction_cycle"):
                         degraded_prediction_enabled = _degraded_prediction_refresh_enabled(cfg, resource_guard)
@@ -1303,6 +1342,15 @@ def main(argv: list[str] | None = None) -> int:
                     max_block_seconds=args.discovery_governance_block_seconds,
                     now_ts=time.time(),
                 )
+                background_jobs_block_prediction = _background_jobs_block_prediction(
+                    discovery_future=discovery_future,
+                    discovery_started_ts=discovery_started_ts,
+                    discovery_block_seconds=args.discovery_governance_block_seconds,
+                    governance_future=governance_future,
+                    governance_started_ts=governance_started_ts,
+                    governance_block_seconds=args.prediction_governance_block_seconds,
+                    now_ts=time.time(),
+                )
                 next_discovery_in_seconds = None
                 if next_discovery_cycle != float("inf"):
                     next_discovery_in_seconds = max(0.0, round(next_discovery_cycle - time.time(), 3))
@@ -1344,6 +1392,12 @@ def main(argv: list[str] | None = None) -> int:
                     "discovery_governance_block_seconds": args.discovery_governance_block_seconds,
                     "discovery_running_seconds": discovery_running_seconds,
                     "discovery_blocks_governance": discovery_blocks_governance,
+                    "background_jobs_block_prediction": background_jobs_block_prediction,
+                    "discovery_no_longer_blocks_prediction": bool(
+                        discovery_future is not None
+                        and not discovery_future.done()
+                        and not background_jobs_block_prediction
+                    ),
                     "discovery_no_longer_blocks_governance": bool(
                         discovery_future is not None
                         and not discovery_future.done()

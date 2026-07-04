@@ -1043,6 +1043,21 @@ def _governance_refresh_due(
     return cycle_seconds > 0 and now_ts >= next_refresh and governance_future is None
 
 
+def _first_discovery_should_precede_governance(
+    *,
+    discovery_iteration: int,
+    last_discovery_summary: dict[str, Any],
+) -> bool:
+    """Let the first market-universe refresh run before immediate governance.
+
+    Governance is important, but after a container restart the bot needs at
+    least one fresh discovery pass so websocket targets and paper-candidate
+    evidence are not built from stale pre-deploy rows.
+    """
+    status = str(last_discovery_summary.get("status") or "").strip().lower()
+    return discovery_iteration <= 0 and status in {"", "not_run_yet", "skipped"}
+
+
 def _degraded_discovery_refresh(cfg, guard: dict[str, Any], *, reason: str) -> dict[str, Any]:
     """Run the cheapest edge-relevant discovery lane while heavy discovery is guarded off.
 
@@ -1638,10 +1653,15 @@ def main(argv: list[str] | None = None) -> int:
                     governance_block_seconds=args.discovery_governance_block_seconds,
                     now_ts=time.time(),
                 )
+                first_discovery_precedes_governance = _first_discovery_should_precede_governance(
+                    discovery_iteration=discovery_iteration,
+                    last_discovery_summary=last_discovery_summary,
+                )
+                discovery_started_this_loop = False
                 if (
                     time.time() >= next_discovery_cycle
                     and discovery_future is None
-                    and not governance_due_now
+                    and (not governance_due_now or first_discovery_precedes_governance)
                     and not background_jobs_block_discovery
                 ):
                     discovery_running_iteration = discovery_iteration + 1
@@ -1682,9 +1702,11 @@ def main(argv: list[str] | None = None) -> int:
                             summary={},
                             started_at_utc=discovery_started_at_utc,
                         )
+                    discovery_started_this_loop = True
                 if (
                     time.time() >= next_governance_refresh
                     and governance_future is None
+                    and not discovery_started_this_loop
                     and not discovery_blocks_governance
                     and not prediction_blocks_governance
                 ):

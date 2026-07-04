@@ -627,6 +627,23 @@ def test_first_discovery_refresh_is_due_immediately_after_start():
     assert loop._initial_discovery_due_timestamp(0, now=1234.5) == float("inf")
 
 
+def test_first_discovery_gets_priority_over_initial_governance():
+    loop = _load_loop_module()
+
+    assert loop._first_discovery_should_precede_governance(
+        discovery_iteration=0,
+        last_discovery_summary={"status": "not_run_yet"},
+    )
+    assert loop._first_discovery_should_precede_governance(
+        discovery_iteration=0,
+        last_discovery_summary={"status": "skipped"},
+    )
+    assert not loop._first_discovery_should_precede_governance(
+        discovery_iteration=1,
+        last_discovery_summary={"status": "ran"},
+    )
+
+
 def test_prediction_cycle_status_is_background_friendly():
     loop = _load_loop_module()
 

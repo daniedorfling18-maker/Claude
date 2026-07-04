@@ -65,3 +65,10 @@ snapshot_at_utc,commence_time,home_team,away_team,match_key,bookmaker,p_home,p_d
 2026-07-04T17:35:59Z,2026-07-07T00:00:00Z,USA,Belgium,united states|belgium|2026-07-07,pinnacle,0.356776,0.280963,0.362262
 2026-07-04T17:35:59Z,2026-07-07T16:00:00Z,Argentina,Egypt,argentina|egypt|2026-07-07,pinnacle,0.718136,0.189603,0.092261
 2026-07-04T17:35:59Z,2026-07-07T20:00:00Z,Switzerland,Colombia,switzerland|colombia|2026-07-07,pinnacle,0.270058,0.302408,0.427534
+2026-07-04T21:29:34Z,2026-07-04T21:03:00Z,Paraguay,France,paraguay|france|2026-07-04,pinnacle,0.05235,0.156628,0.791021
+2026-07-04T21:29:34Z,2026-07-05T20:00:00Z,Brazil,Norway,brazil|norway|2026-07-05,pinnacle,0.534841,0.253036,0.212123
+2026-07-04T21:29:34Z,2026-07-06T00:00:00Z,Mexico,England,mexico|england|2026-07-06,pinnacle,0.301436,0.294785,0.403779
+2026-07-04T21:29:34Z,2026-07-06T19:00:00Z,Portugal,Spain,portugal|spain|2026-07-06,pinnacle,0.232978,0.257701,0.509321
+2026-07-04T21:29:34Z,2026-07-07T00:00:00Z,USA,Belgium,united states|belgium|2026-07-07,pinnacle,0.356776,0.280963,0.362262
+2026-07-04T21:29:34Z,2026-07-07T16:00:00Z,Argentina,Egypt,argentina|egypt|2026-07-07,pinnacle,0.7027,0.197791,0.099509
+2026-07-04T21:29:34Z,2026-07-07T20:00:00Z,Switzerland,Colombia,switzerland|colombia|2026-07-07,pinnacle,0.26285,0.30803,0.429119

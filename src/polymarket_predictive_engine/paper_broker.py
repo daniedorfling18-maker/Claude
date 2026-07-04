@@ -162,7 +162,7 @@ def _latest_websocket_quote(cfg: EngineConfig, market_id: str, token_id: str) ->
 def _latest_snapshot_quote(con, market_id: str, token_id: str) -> dict[str, Any] | None:
     row = con.execute(
         """
-        SELECT collected_at, market_id, token_id, best_bid, best_ask, midpoint, spread
+        SELECT collected_at, market_id, token_id, best_bid, best_ask, midpoint, spread, raw_payload_json
         FROM market_snapshots
         WHERE market_id = ? AND token_id = ?
         ORDER BY collected_at DESC, rowid DESC
@@ -174,7 +174,7 @@ def _latest_snapshot_quote(con, market_id: str, token_id: str) -> dict[str, Any]
     if row is None and token_id:
         row = con.execute(
             """
-            SELECT collected_at, market_id, token_id, best_bid, best_ask, midpoint, spread
+            SELECT collected_at, market_id, token_id, best_bid, best_ask, midpoint, spread, raw_payload_json
             FROM market_snapshots
             WHERE token_id = ?
             ORDER BY collected_at DESC, rowid DESC
@@ -192,6 +192,7 @@ def _latest_snapshot_quote(con, market_id: str, token_id: str) -> dict[str, Any]
             "best_ask": safe_float(row["best_ask"]),
             "midpoint": safe_float(row["midpoint"]),
             "spread": safe_float(row["spread"]),
+            "raw_payload_json": row["raw_payload_json"],
             "source": snapshot_source,
         }
     return None
@@ -201,7 +202,7 @@ def _latest_quote(con, cfg: EngineConfig, market_id: str, token_id: str) -> dict
     websocket_quote = _latest_websocket_quote(cfg, market_id, token_id)
     db_quote = _latest_snapshot_quote(con, market_id, token_id)
     if db_quote is not None:
-        if websocket_quote is not None and (_quote_time(websocket_quote) or datetime.min.replace(tzinfo=timezone.utc)) > (
+        if websocket_quote is not None and (_quote_time(websocket_quote) or datetime.min.replace(tzinfo=timezone.utc)) >= (
             _quote_time(db_quote) or datetime.min.replace(tzinfo=timezone.utc)
         ):
             return websocket_quote
@@ -232,6 +233,166 @@ def _latest_quote(con, cfg: EngineConfig, market_id: str, token_id: str) -> dict
         "midpoint": midpoint,
         "spread": None if bid is None or ask is None else max(0.0, ask - bid),
         "source": "model_predictions",
+    }
+
+
+def _sane_bid_ask(bid: float | None, ask: float | None) -> bool:
+    return bid is not None and ask is not None and 0.0 < bid < 1.0 and 0.0 < ask < 1.0 and bid <= ask
+
+
+def _snapshot_timestamp(value: Any, fallback: str) -> str:
+    parsed = parse_timestamp(value)
+    if parsed is None:
+        return fallback
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def _snapshot_raw_payload(snapshot: dict[str, Any] | None) -> dict[str, Any]:
+    if not snapshot:
+        return {}
+    raw = snapshot.get("raw_payload_json")
+    if isinstance(raw, dict):
+        return raw
+    if not isinstance(raw, str) or not raw.strip():
+        return {}
+    try:
+        decoded = json.loads(raw)
+    except json.JSONDecodeError:
+        return {}
+    return decoded if isinstance(decoded, dict) else {}
+
+
+def _is_entry_execution_snapshot(snapshot: dict[str, Any] | None) -> bool:
+    raw = _snapshot_raw_payload(snapshot)
+    return (
+        str(raw.get("source") or "") == "paper_execution_quote_snapshot"
+        and str(raw.get("side") or "").upper().startswith("BUY")
+    )
+
+
+def _snapshot_is_stale_for_quote(
+    snapshot: dict[str, Any] | None,
+    quote: dict[str, Any],
+    *,
+    max_age_seconds: float,
+) -> bool:
+    if not snapshot:
+        return True
+    quote_time = _quote_time(quote)
+    snapshot_time = parse_timestamp(snapshot.get("timestamp") or snapshot.get("collected_at"))
+    if quote_time is None or snapshot_time is None:
+        return False
+    if snapshot_time.tzinfo is None:
+        snapshot_time = snapshot_time.replace(tzinfo=timezone.utc)
+    if quote_time.tzinfo is None:
+        quote_time = quote_time.replace(tzinfo=timezone.utc)
+    return (quote_time.astimezone(timezone.utc) - snapshot_time.astimezone(timezone.utc)).total_seconds() > max_age_seconds
+
+
+def _capture_execution_quote_snapshot(
+    con,
+    *,
+    market_id: str,
+    token_id: str,
+    fill_id: str,
+    side: str,
+    fill_price: float,
+    quote: dict[str, Any],
+    fallback_timestamp: str,
+) -> bool:
+    """Persist the executable quote used for a paper fill as audit evidence.
+
+    The round-trip proof layer verifies fills against ``market_snapshots``.  When
+    the broker acts on a live websocket quote that has not also been mirrored
+    into SQLite, the later proof audit can report a missing entry/exit snapshot
+    even though the broker had a real bid/ask at execution time.  This helper
+    records only sane bid/ask quotes used at paper execution time; it refuses
+    model-prediction and missing-source fallbacks so synthetic prices cannot
+    become profit-target proof.
+    """
+    source = str(quote.get("source") or "").strip() or "unknown"
+    if source in {"missing", "model_predictions"}:
+        return False
+    bid = safe_float(quote.get("best_bid"))
+    ask = safe_float(quote.get("best_ask"))
+    if not _sane_bid_ask(bid, ask):
+        return False
+    midpoint = safe_float(quote.get("midpoint"))
+    if midpoint is None:
+        midpoint = (float(bid) + float(ask)) / 2.0
+    spread = safe_float(quote.get("spread"))
+    if spread is None:
+        spread = max(0.0, float(ask) - float(bid))
+    collected_at = _snapshot_timestamp(quote.get("timestamp"), fallback_timestamp)
+    idempotency_key = f"paper_execution_quote_snapshot|{fill_id}|{side}"
+    con.execute(
+        """
+        INSERT OR IGNORE INTO market_snapshots(
+            snapshot_id, idempotency_key, collected_at, market_id, token_id,
+            best_bid, best_ask, midpoint, spread, liquidity, raw_payload_json
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?)
+        """,
+        (
+            _stable_id("snapshot", idempotency_key),
+            idempotency_key,
+            collected_at,
+            market_id,
+            token_id,
+            bid,
+            ask,
+            midpoint,
+            spread,
+            _json(
+                {
+                    "source": "paper_execution_quote_snapshot",
+                    "quote_source": source,
+                    "fill_id": fill_id,
+                    "side": side,
+                    "fill_price": fill_price,
+                    "quote": quote,
+                }
+            ),
+        ),
+    )
+    return True
+
+
+def _entry_execution_quote(signal: dict[str, Any], *, fallback_timestamp: str) -> dict[str, Any]:
+    bid = safe_float(
+        signal.get("price_action_latest_bid")
+        if signal.get("price_action_latest_bid") not in (None, "")
+        else signal.get("latest_bid")
+        if signal.get("latest_bid") not in (None, "")
+        else signal.get("best_bid")
+    )
+    ask = safe_float(
+        signal.get("price_action_latest_ask")
+        if signal.get("price_action_latest_ask") not in (None, "")
+        else signal.get("latest_ask")
+        if signal.get("latest_ask") not in (None, "")
+        else signal.get("best_ask")
+    )
+    midpoint = safe_float(signal.get("midpoint") or signal.get("market_midpoint") or signal.get("market_probability"))
+    if midpoint is None and _sane_bid_ask(bid, ask):
+        midpoint = (float(bid) + float(ask)) / 2.0
+    spread = safe_float(signal.get("price_action_spread") or signal.get("latest_spread") or signal.get("spread"))
+    if spread is None and _sane_bid_ask(bid, ask):
+        spread = max(0.0, float(ask) - float(bid))
+    return {
+        "timestamp": (
+            signal.get("price_action_latest_time_utc")
+            or signal.get("websocket_quote_timestamp")
+            or signal.get("data_snapshot_timestamp")
+            or signal.get("prediction_timestamp")
+            or fallback_timestamp
+        ),
+        "best_bid": bid,
+        "best_ask": ask,
+        "midpoint": midpoint,
+        "spread": spread,
+        "source": "paper_entry_signal_bid_ask",
     }
 
 
@@ -418,6 +579,23 @@ def _exit_quote_rejection_reason(con, cfg: EngineConfig, position, quote: dict[s
 
     if boolish(settings.get("require_exit_snapshot_crosscheck", True)) and source == "websocket_market_features":
         snapshot = _latest_snapshot_quote(con, str(position["market_id"]), str(position["token_id"]))
+        max_snapshot_age_seconds = float(settings.get("exit_quote_snapshot_crosscheck_window_seconds", 120.0))
+        if _is_entry_execution_snapshot(snapshot) or _snapshot_is_stale_for_quote(
+            snapshot,
+            quote,
+            max_age_seconds=max_snapshot_age_seconds,
+        ):
+            _capture_execution_quote_snapshot(
+                con,
+                market_id=str(position["market_id"]),
+                token_id=str(position["token_id"]),
+                fill_id=f"exit_quote_probe|{position['position_id']}|{quote.get('timestamp') or now_utc()}",
+                side="SELL_YES_PROBE",
+                fill_price=float(bid),
+                quote=quote,
+                fallback_timestamp=str(quote.get("timestamp") or now_utc()),
+            )
+            snapshot = _latest_snapshot_quote(con, str(position["market_id"]), str(position["token_id"]))
         if snapshot is None:
             return "missing independent snapshot cross-check for websocket exit quote"
         snapshot_bid = safe_float(snapshot.get("best_bid"))
@@ -874,6 +1052,16 @@ def close_paper_position(con, cfg: EngineConfig, position, reason: str, quote: d
             quantity * exit_slippage,
         ),
     )
+    _capture_execution_quote_snapshot(
+        con,
+        market_id=market_id,
+        token_id=token_id,
+        fill_id=fill_id,
+        side="SELL_YES",
+        fill_price=fill_price,
+        quote=quote,
+        fallback_timestamp=created_at,
+    )
     con.execute(
         """
         UPDATE positions
@@ -1184,6 +1372,16 @@ def submit_paper_signal(con, cfg: EngineConfig, signal: dict[str, Any]) -> dict[
             quantity * slippage,
             "taker_immediate",
         ),
+    )
+    _capture_execution_quote_snapshot(
+        con,
+        market_id=market_id,
+        token_id=token_id,
+        fill_id=fill_id,
+        side=str(signal.get("side", "BUY_YES")),
+        fill_price=fill_price,
+        quote=_entry_execution_quote(signal, fallback_timestamp=created_at),
+        fallback_timestamp=created_at,
     )
     _upsert_position(
         con,

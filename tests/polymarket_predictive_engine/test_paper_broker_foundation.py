@@ -11,6 +11,7 @@ import polymarket_predictive_engine.crypto_updown_settlement as crypto_settlemen
 from polymarket_predictive_engine.models.calibrated import prediction_confidence
 from polymarket_predictive_engine.paper_broker import run_paper_broker
 from polymarket_predictive_engine.paper_cycle import run_paper_cycle
+from polymarket_predictive_engine.paper_round_trip import build_paper_round_trip_evidence
 from polymarket_predictive_engine.storage import connect_db, init_db
 from polymarket_predictive_engine.utils import read_csv_rows, write_csv, write_json
 
@@ -582,6 +583,114 @@ def test_paper_broker_closes_profitable_position_and_respects_exit_cooldown(tmp_
         assert sell_count == 1
     finally:
         con.close()
+
+
+def test_paper_broker_captures_execution_quotes_for_round_trip_proof(tmp_path, monkeypatch):
+    cfg = _config(tmp_path)
+    cfg.raw["paper_trading"]["minimum_hold_minutes_before_exit"] = 0
+    cfg.raw["paper_trading"]["take_profit_return"] = 0.1
+    cfg.raw["paper_trading"]["take_profit_min_usdc"] = 0.01
+    signals_path = cfg.output_root / "polymarket_predictions" / "trade_signals.csv"
+    write_csv(
+        signals_path,
+        [
+            {
+                "market_id": "quote-proof-market",
+                "market_slug": "quote-proof-market",
+                "token_id": "quote-proof-token",
+                "question": "Will quote proof work?",
+                "outcome": "Yes",
+                "side": "BUY_YES",
+                "category": "quote_proof_test",
+                "edge": "0.08",
+                "model_probability": "0.70",
+                "confidence": "0.75",
+                "executable_price": "0.40",
+                "best_bid": "0.39",
+                "best_ask": "0.40",
+                "spread": "0.01",
+                "liquidity": "1000",
+                "top_ask_size": "1000",
+                "top_bid_size": "1000",
+                "ask_depth_1pct": "1000",
+                "bid_depth_1pct": "1000",
+                "ask_depth_5pct": "1000",
+                "bid_depth_5pct": "1000",
+                "websocket_quote_age_seconds": "1",
+                "price_action_signal": "true",
+                "price_action_latest_bid": "0.39",
+                "price_action_latest_ask": "0.40",
+                "price_action_spread": "0.01",
+                "take_profit_return": "0.10",
+                "take_profit_min_usdc": "0.01",
+                "strategy_name": "price_action_round_trip",
+                "model_version": "quote-proof-test-v1",
+            }
+        ],
+    )
+
+    import polymarket_predictive_engine.paper_broker as broker_module
+
+    monkeypatch.setattr(
+        broker_module,
+        "paper_trade_readiness",
+        lambda cfg: {
+            "approved_for_paper_trading": True,
+            "blockers": [],
+        },
+    )
+
+    first = run_paper_broker(cfg)
+    assert first["orders_filled"] == 1
+
+    con = connect_db(cfg.database_path)
+    try:
+        entry_snapshot = con.execute(
+            """
+            SELECT best_bid, best_ask, raw_payload_json
+            FROM market_snapshots
+            WHERE token_id = 'quote-proof-token'
+            """
+        ).fetchone()
+        assert entry_snapshot is not None
+        assert entry_snapshot["best_bid"] == 0.39
+        assert entry_snapshot["best_ask"] == 0.40
+        payload = json.loads(entry_snapshot["raw_payload_json"])
+        assert payload["source"] == "paper_execution_quote_snapshot"
+        assert payload["quote_source"] == "paper_entry_signal_bid_ask"
+    finally:
+        con.close()
+
+    write_csv(
+        cfg.output_root / "polymarket_training" / "websocket_market_features.csv",
+        [
+            {
+                "asset_id": "quote-proof-token",
+                "market_slug": "quote-proof-market",
+                "selection": "Yes",
+                "best_bid": "0.55",
+                "best_ask": "0.56",
+                "midpoint": "0.555",
+                "spread": "0.01",
+            }
+        ],
+    )
+
+    second = run_paper_broker(cfg)
+    assert second["exit_orders_filled"] == 1
+
+    summary = build_paper_round_trip_evidence(cfg)
+    rows = read_csv_rows(cfg.output_root / "polymarket_price_action" / "paper_broker_round_trip_evidence.csv")
+
+    assert summary["proof_verified_closed_round_trips"] == 1
+    assert summary["proof_verified_realized_pnl_usdc"] > 0
+    assert summary["proof_entry_snapshot_missing_round_trips"] == 0
+    assert summary["proof_exit_snapshot_missing_round_trips"] == 0
+    assert int(rows[0]["entry_snapshot_observations"]) >= 1
+    assert int(rows[0]["exit_snapshot_observations"]) >= 1
+    assert rows[0]["quote_proof_status"] == "proof_verified"
+    assert float(rows[0]["entry_fill_snapshot_ask_gap"]) == 0.0
+    assert float(rows[0]["exit_fill_nearest_snapshot_bid_gap"]) == 0.0
 
 
 def test_paper_broker_refuses_wrong_side_websocket_exit_quote(tmp_path):

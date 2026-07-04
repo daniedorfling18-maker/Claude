@@ -481,7 +481,13 @@ def _point_snapshot_stats(
             row_ts = row_ts.replace(tzinfo=timezone.utc)
         return abs((row_ts.astimezone(timezone.utc) - center_ts.astimezone(timezone.utc)).total_seconds())
 
-    nearest = min(rows, key=distance)
+    def reference_gap(row: dict[str, Any]) -> float:
+        quote_value = safe_float(row.get("best_ask" if reference_side == "ask" else "best_bid"))
+        if reference_price is None or quote_value is None:
+            return float("inf")
+        return abs(reference_price - quote_value)
+
+    nearest = min(rows, key=lambda row: (distance(row), reference_gap(row)))
     quote_value = safe_float(nearest.get("best_ask" if reference_side == "ask" else "best_bid"))
     gap = abs(reference_price - quote_value) if reference_price is not None and quote_value is not None else ""
     return {

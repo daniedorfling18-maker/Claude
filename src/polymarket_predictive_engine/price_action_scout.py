@@ -456,6 +456,97 @@ def _current_positive_analogue_candidates(cfg: EngineConfig, settings: dict[str,
     return rows
 
 
+def _paper_confirmation_blocker_candidates(cfg: EngineConfig, settings: dict[str, Any]) -> list[dict[str, Any]]:
+    """Track exact paper-confirmation blockers as shadow-only round trips.
+
+    Paper-confirmation blockers are not trade approvals: they are the rows that
+    prevented the broker lane from taking paper risk because the historical
+    analogue gate was not yet positive enough.  Recording them here creates the
+    forward bid/ask evidence needed to prove or disprove those buckets without
+    weakening the broker's governed signal gate.
+    """
+    if not _boolish(settings.get("include_paper_confirmation_blocker_targets", True)):
+        return []
+    max_rows = int(safe_float(settings.get("max_paper_confirmation_blocker_entries_per_run")) or 8)
+    if max_rows <= 0:
+        return []
+    focus = read_json(cfg.governance_root / "research_focus.json", default={}) or {}
+    if not isinstance(focus, dict):
+        return []
+    payload = focus.get("price_action_paper_confirmation_blockers")
+    if not isinstance(payload, dict):
+        return []
+    targets = payload.get("targets")
+    if not isinstance(targets, list):
+        return []
+    generated_at = str(focus.get("generated_at_utc") or now_utc())
+    min_liquidity = float(safe_float(settings.get("min_liquidity")) or 100.0)
+    liquidity_proxy = safe_float(settings.get("paper_confirmation_blocker_liquidity_proxy"))
+    if liquidity_proxy is None or liquidity_proxy <= 0:
+        liquidity_proxy = min_liquidity
+    rows: list[dict[str, Any]] = []
+    for target in targets:
+        if not isinstance(target, dict):
+            continue
+        if _boolish(target.get("entry_band_wait")):
+            continue
+        token_id = _token_id(target)
+        if not token_id:
+            continue
+        bid = safe_float(target.get("latest_bid"))
+        ask = safe_float(target.get("latest_ask"))
+        spread = safe_float(target.get("latest_spread"))
+        if spread is None and bid is not None and ask is not None:
+            spread = max(0.0, ask - bid)
+        midpoint = (bid + ask) / 2.0 if bid is not None and ask is not None else None
+        liquidity = safe_float(target.get("liquidity"))
+        if liquidity is None or liquidity <= 0:
+            liquidity = liquidity_proxy
+        family = str(target.get("family") or "unknown").strip() or "unknown"
+        gate = str(target.get("historical_analogue_gate") or target.get("candidate_gate") or "unknown").strip() or "unknown"
+        validation_roi = safe_float(target.get("historical_analogue_validation_roi"))
+        priority_bucket = safe_float(target.get("priority_bucket"))
+        row = {
+            "timestamp": generated_at,
+            "market_slug": target.get("market_slug", ""),
+            "question": target.get("question", ""),
+            "outcome": target.get("outcome", ""),
+            "token_id": token_id,
+            "family": family,
+            "best_bid": "" if bid is None else bid,
+            "best_ask": "" if ask is None else ask,
+            "midpoint": "" if midpoint is None else midpoint,
+            "spread": "" if spread is None else spread,
+            "liquidity": liquidity,
+            "relative_spread": "" if spread is None or ask is None or ask <= 0 else spread / ask,
+            "target_action": "FORWARD_SHADOW_PAPER_CONFIRMATION_BLOCKER",
+            "target_score": "" if priority_bucket is None else priority_bucket,
+            "edge_lower_bound": "" if validation_roi is None else validation_roi,
+            "candidate_reason": (
+                "paper-confirmation blocker; shadow-only buy-at-ask / future-bid tracking"
+                f"; historical_analogue_gate={gate}"
+            ),
+        }
+        entry = _entry_from_watchlist(
+            row,
+            source="paper_confirmation_blocker",
+            signal_cohort=f"price_action_scout|paper_confirmation_blocker|{family}|{gate}",
+            reason=str(row["candidate_reason"]),
+            settings=settings,
+        )
+        if entry:
+            rows.append(entry)
+    rows.sort(
+        key=lambda row: (
+            safe_float(row.get("target_score")) or 0.0,
+            safe_float(row.get("liquidity")) or 0.0,
+            -(safe_float(row.get("spread")) or 999.0),
+        ),
+        reverse=True,
+    )
+    return rows[:max_rows]
+
+
 def _merge_entries(existing: list[dict[str, str]], new_entries: list[dict[str, Any]], *, max_new: int) -> tuple[list[dict[str, Any]], int]:
     merged: dict[tuple[str, str, str, str], dict[str, Any]] = {(_entry_key(row)): dict(row) for row in existing}
     added = 0
@@ -478,6 +569,8 @@ def _merge_entries(existing: list[dict[str, str]], new_entries: list[dict[str, A
 
 def _source_priority(row: dict[str, Any]) -> int:
     source = str(row.get("source") or "")
+    if source == "paper_confirmation_blocker":
+        return 5
     if source == "current_positive_analogue":
         return 4
     if source == "label_headroom_research":
@@ -538,6 +631,8 @@ def build_price_action_scout(cfg: EngineConfig) -> dict[str, Any]:
         new_candidates.extend(_profit_sprint_candidates(profit_targets=profit_targets, watchlist_by_key=watchlist_by_key, settings=settings))
     current_positive_analogue_candidates = _current_positive_analogue_candidates(cfg, settings)
     label_headroom_research_candidates = _label_headroom_research_candidates(cfg, settings)
+    paper_confirmation_blocker_candidates = _paper_confirmation_blocker_candidates(cfg, settings)
+    new_candidates.extend(paper_confirmation_blocker_candidates)
     new_candidates.extend(current_positive_analogue_candidates)
     new_candidates.extend(label_headroom_research_candidates)
     new_candidates.extend(_fast_feedback_candidates(watchlist, settings))
@@ -597,6 +692,7 @@ def build_price_action_scout(cfg: EngineConfig) -> dict[str, Any]:
         "cohort_file": str(out_dir / COHORT_FILE),
         "watchlist_rows": len(watchlist),
         "profit_sprint_target_rows": len(profit_targets),
+        "paper_confirmation_blocker_targets": len(paper_confirmation_blocker_candidates),
         "current_positive_analogue_targets": len(current_positive_analogue_candidates),
         "label_headroom_research_targets": len(label_headroom_research_candidates),
         "new_entries": added,

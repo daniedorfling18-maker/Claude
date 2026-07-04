@@ -170,6 +170,60 @@ def test_price_action_scout_tracks_current_positive_analogue_targets(tmp_path):
     assert float(rows[0]["realized_pnl_usdc"]) == approx(1.0)
 
 
+def test_price_action_scout_tracks_paper_confirmation_blocker_targets(tmp_path):
+    cfg = _cfg(tmp_path)
+    write_json(
+        cfg.governance_root / "research_focus.json",
+        {
+            "generated_at_utc": "2026-06-30T10:00:00Z",
+            "price_action_paper_confirmation_blockers": {
+                "state": "in_band_historical_analogue_gaps",
+                "decision_use": "collection_only_not_trade_authorisation",
+                "trade_authorisation": "no_trade_until_governed_paper_signal_exists",
+                "targets": [
+                    {
+                        "market_slug": "btc-updown-15m-1783174500",
+                        "question": "Bitcoin Up or Down - July 4, 10:15AM-10:30AM ET",
+                        "family": "crypto_btc_updown_15m",
+                        "outcome": "Up",
+                        "token_id": "btc-blocker-token",
+                        "latest_bid": 0.49,
+                        "latest_ask": 0.50,
+                        "latest_spread": 0.01,
+                        "historical_analogue_gate": "no_positive_historical_analogue_examples",
+                        "historical_analogue_validation_roi": -0.016,
+                        "priority_bucket": 3,
+                        "decision_use": "in_band_historical_analogue_gap_collection_target",
+                        "entry_band_wait": False,
+                    }
+                ],
+            },
+        },
+    )
+    write_csv(
+        cfg.output_root / "polymarket_training" / "websocket_market_features.csv",
+        [_websocket_row("2026-06-30T10:05:00Z", "0.55", token="btc-blocker-token")],
+    )
+
+    summary = build_price_action_scout(cfg)
+    entries = read_csv_rows(cfg.output_root / "polymarket_price_action" / "price_action_scout_entries.csv")
+    rows = read_csv_rows(cfg.output_root / "polymarket_price_action" / "price_action_scout_round_trip_evidence.csv")
+
+    assert summary["paper_confirmation_blocker_targets"] == 1
+    assert summary["new_entries"] == 1
+    assert entries[0]["source"] == "paper_confirmation_blocker"
+    assert entries[0]["signal_cohort"] == (
+        "price_action_scout|paper_confirmation_blocker|"
+        "crypto_btc_updown_15m|no_positive_historical_analogue_examples"
+    )
+    assert entries[0]["target_action"] == "FORWARD_SHADOW_PAPER_CONFIRMATION_BLOCKER"
+    assert "shadow-only" in entries[0]["candidate_reason"]
+    assert "historical_analogue_gate=no_positive_historical_analogue_examples" in entries[0]["candidate_reason"]
+    assert rows[0]["round_trip_status"] == "closed_take_profit"
+    assert float(rows[0]["exit_price"]) == approx(0.55)
+    assert float(rows[0]["realized_pnl_usdc"]) == approx(1.0)
+
+
 def test_price_action_scout_tracks_label_headroom_research_targets(tmp_path):
     cfg = _cfg(tmp_path)
     write_csv(

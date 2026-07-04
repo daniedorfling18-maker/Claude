@@ -1460,6 +1460,88 @@ def test_blank_side_current_candidate_uses_side_agnostic_history_as_shadow_only_
     assert current_scan["positive_matches"] == 0
 
 
+def test_paper_confirmation_rejection_preserves_side_agnostic_analogue_context(tmp_path):
+    cfg = _cfg(tmp_path)
+    cfg.raw["price_action_paper"].update(
+        {
+            "paper_confirmation_require_positive_historical_analogue": True,
+            "paper_confirmation_min_historical_analogue_validation_rows": 3,
+            "paper_confirmation_min_historical_analogue_positive_rows": 1,
+            "low_price_tick_probe_enabled": False,
+        }
+    )
+    root = cfg.output_root / "polymarket_price_action"
+    write_json(
+        cfg.governance_root / "price_action_feedback.json",
+        _paper_confirmation_feedback_payload(cohort="crypto_btc_special"),
+    )
+    write_csv(
+        root / "price_action_scout_round_trip_evidence.csv",
+        [
+            _round_trip_row(
+                source="liquidity_fast_feedback",
+                signal_cohort="price_action_scout|label_headroom|crypto_btc_special",
+                family="crypto_btc_special",
+                market_slug="bitcoin-side-missing-rejection",
+                outcome="No",
+                token_id="btc-low-token",
+                latest_bid="0.060",
+                latest_ask="0.061",
+                latest_spread="0.001",
+                round_trip_status="open_marked",
+            )
+        ],
+    )
+    write_csv(
+        root / "microstructure_trade_events.csv",
+        [
+            _low_price_trade_event(
+                split="validation",
+                family="crypto_btc_special",
+                current_side="BUY",
+                entry_bid="0.060",
+                entry_ask="0.061",
+                entry_spread="0.001",
+                exit_bid="0.067",
+                pnl_usdc="0.20",
+                roi="0.10",
+            ),
+            _low_price_trade_event(
+                split="validation",
+                family="crypto_btc_special",
+                current_side="BUY",
+                entry_bid="0.060",
+                entry_ask="0.061",
+                entry_spread="0.001",
+                exit_bid="0.066",
+                pnl_usdc="0.16",
+                roi="0.08",
+            ),
+            _low_price_trade_event(
+                split="validation",
+                family="crypto_btc_special",
+                current_side="BUY",
+                entry_bid="0.060",
+                entry_ask="0.061",
+                entry_spread="0.001",
+                exit_bid="0.065",
+                pnl_usdc="0.12",
+                roi="0.06",
+            ),
+        ],
+    )
+
+    summary = build_price_action_paper_signals(cfg)
+    rejections = read_csv_rows(root / "price_action_paper_rejections.csv")
+
+    assert summary["signals"] == 0
+    assert rejections[0]["historical_analogue_gate"] == "side_missing_positive_historical_analogue_shadow_only"
+    assert rejections[0]["side_agnostic_historical_analogue_gate"] == "positive_historical_analogue"
+    assert rejections[0]["side_agnostic_historical_analogue_validation_rows"] == "3"
+    assert float(rejections[0]["side_agnostic_historical_analogue_validation_roi"]) > 0
+    assert "side_missing_positive_historical_analogue_shadow_only" in rejections[0]["rejection_reason"]
+
+
 def test_eth_updown_confirmation_query_matches_current_eth_rows_by_outcome(tmp_path):
     cfg = _cfg(tmp_path)
     cfg.raw["price_action_microstructure"] = {

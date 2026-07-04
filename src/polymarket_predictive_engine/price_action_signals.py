@@ -1410,6 +1410,12 @@ def _reject(row: dict[str, Any], reason: str) -> dict[str, Any]:
         "historical_analogue_validation_roi": row.get("historical_analogue_validation_roi", ""),
         "historical_analogue_win_rate": row.get("historical_analogue_win_rate", ""),
         "historical_analogue_gate": row.get("historical_analogue_gate", ""),
+        "side_agnostic_historical_analogue_key": row.get("side_agnostic_historical_analogue_key", ""),
+        "side_agnostic_historical_analogue_validation_rows": row.get("side_agnostic_historical_analogue_validation_rows", ""),
+        "side_agnostic_historical_analogue_positive_rows": row.get("side_agnostic_historical_analogue_positive_rows", ""),
+        "side_agnostic_historical_analogue_validation_roi": row.get("side_agnostic_historical_analogue_validation_roi", ""),
+        "side_agnostic_historical_analogue_win_rate": row.get("side_agnostic_historical_analogue_win_rate", ""),
+        "side_agnostic_historical_analogue_gate": row.get("side_agnostic_historical_analogue_gate", ""),
         "rejection_reason": reason,
     }
 

@@ -1140,12 +1140,54 @@ fail-closed behavior, dashboard rendering, and refresh ordering.
 
 ---
 
+## WO-28 — Join h2h sharp anchors to Polymarket match tokens — `open` (CRITICAL, highest value in the queue)
+
+**Live evidence (2026-07-04 07:04Z dashboard):** the sharp-anchor pipeline works end-to-end —
+102 odds rows fetched from Pinnacle/Betfair, 40 markets de-vigged — but `direct_token_joins: 0`
+and **`skipped_no_token: 86`**: every h2h match row (e.g. `canada-vs-morocco`,
+`paraguay-vs-france` — the LIVE World Cup knockout matches) is dropped as
+`unmapped_sharp_anchor_row`. The 16 surviving fundamental rows are WC-winner outrights only.
+The knockout match markets are the most liquid sports markets on Polymarket right now; this
+join gap is the single blocker between the anchor and real candidates.
+
+**Files:** `src/polymarket_predictive_engine/sharp_anchor.py` (the joiner), tests.
+
+**Steps:**
+
+1. Build a match-market index from the token map (`outputs/polymarket/market_snapshot.csv`) plus,
+   when enabled, the same public-search path already used for WC-winner mapping: for each
+   Polymarket market, extract candidate team names from slug + question via
+   `canonical_team_key`-style normalisation (reuse the WC mapper's normaliser; do not write a new
+   one), and index by (team_key_a, team_key_b) unordered pair + close-time day.
+2. Join each unmapped h2h anchor row by team pair + date window (default +/- 1 day around the
+   sharp market's commence date). Map outcomes conservatively:
+   - a Polymarket binary market whose question names exactly one of the two teams as winner
+     ("Will Canada beat Morocco?", "Canada to win") -> that team's fair probability maps to YES;
+   - a draw-specific market ("Draw", "Match drawn") -> the Draw fair maps to YES;
+   - anything ambiguous (handicaps, totals, advance/qualify markets — "to advance" includes
+     penalties and MUST NOT take the 90-minute h2h fair) stays unmapped with reason
+     `ambiguous_market_shape`.
+3. "Advance/qualify" is the trap: knockout Polymarket markets are often "to advance", which is
+   win+draw-then-penalties. Only map the 90-minute h2h fair to markets that are clearly
+   90-minute results; report `advance_market_needs_composite_fair` for the rest (a composite
+   fair from h2h + draw split is a later WO, not this one).
+4. Keep every unmapped row in `skipped_no_token_samples` with its reason — the fail-closed
+   reporting that exposed this gap must keep working.
+5. Tests: fixture snapshot rows + anchor rows -> exact expected joins; ambiguous/advance market
+   stays unmapped with the right reason; team-name normalisation cases (accents, "USA"/"United
+   States", "Ivory Coast"/"Cote d'Ivoire").
+
+**Out of scope:** alpha thresholds, haircuts, gates; composite advance-market fairs.
+
+---
+
 ## Sequencing
 
 ```text
 WO-1..WO-6, WO-8, WO-9   done and audited (2026-07-02)
 
-Queue order (strategic reset, 2026-07-03 — read POLYMARKET_EDGE_STRATEGY_RESET.md first):
+Queue order (updated 2026-07-04 — WO-28 first, it unblocks the money path):
+0. WO-28   h2h anchor->token join (CRITICAL: 86 sharp fairs currently dropped on live knockout matches)
 1. WO-24   done 2026-07-03: sharp-anchor activation + broadening (VPS deploy still needs PM_VPS_SSH_PRIVATE_KEY populated)
 2. WO-20   done 2026-07-03: position-aware quote collection
 3. WO-25   done 2026-07-03: dutch-book arb monitor loop/dashboard wiring (mechanical edge, model-free)

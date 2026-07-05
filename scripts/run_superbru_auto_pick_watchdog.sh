@@ -50,18 +50,45 @@ summary_path = out_dir / "latest_auto_pick_match_scoped.json"
 if summary_path.exists():
     try:
         summary = json.loads(summary_path.read_text(encoding="utf-8"))
+        submitted = int(summary.get("submitted") or 0)
+        already_current = int(summary.get("already_current_count") or 0)
+        confirmed_picks = submitted + already_current
         payload["last_result"] = {
             "status": summary.get("status"),
             "run_at_utc": summary.get("run_at_utc"),
             "queued_count": summary.get("queued_count"),
             "card_fallback_queued": summary.get("card_fallback_queued"),
-            "submitted": summary.get("submitted"),
-            "already_current_count": summary.get("already_current_count"),
+            "submitted": submitted,
+            "already_current_count": already_current,
             "submission_failed": summary.get("submission_failed"),
-            "successful_count": int(summary.get("submitted") or 0)
-            + int(summary.get("already_current_count") or 0),
+            "successful_count": confirmed_picks,
+            "confirmed_picks_count": confirmed_picks,
+            "confirmation_detail": (
+                f"{confirmed_picks} picks confirmed "
+                f"({submitted} submitted, {already_current} already present on SuperBru)"
+            ),
             "page_timezone": summary.get("page_timezone"),
         }
+        payload["confirmed_picks_count"] = confirmed_picks
+        payload["submitted_picks_count"] = submitted
+        payload["already_current_picks_count"] = already_current
+        if payload.get("status") == "ok":
+            queued = int(summary.get("queued_count") or 0)
+            failed = int(summary.get("submission_failed") or summary.get("submit_failed") or 0)
+            if confirmed_picks:
+                payload["detail"] = payload["last_result"]["confirmation_detail"]
+            elif queued and failed:
+                payload["detail"] = (
+                    f"Auto-pick queued {queued} fixtures but {failed} submission(s) failed; "
+                    "inspect watchdog.log and latest_auto_pick_match_scoped.json"
+                )
+            elif queued:
+                payload["detail"] = (
+                    f"Auto-pick queued {queued} fixtures but confirmed none; "
+                    "inspect latest_auto_pick_match_scoped.json before assuming picks are safe"
+                )
+            else:
+                payload["detail"] = "No SuperBru fixtures were due in the current watchdog window"
         next_fixture_candidates = []
         for source_name in ("results", "card_fallback_entries", "scan_results"):
             for row in summary.get(source_name) or []:

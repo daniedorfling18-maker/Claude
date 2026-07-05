@@ -31,3 +31,12 @@ def test_auto_pick_uses_broad_early_card_window_by_default() -> None:
     assert "--revision-window-minutes \"$REVISION_WINDOW_MINUTES\"" in workflow
     assert "SUPERBRU_AUTO_PICK_REVISION_WINDOW_MINUTES:-260" in compose
     assert "SUPERBRU_AUTO_PICK_REVISION_WINDOW_MINUTES:-260" in watchdog
+
+
+def test_auto_pick_watchdog_reports_confirmed_picks_not_only_submissions() -> None:
+    watchdog = VPS_WATCHDOG.read_text(encoding="utf-8")
+
+    assert "confirmed_picks_count" in watchdog
+    assert "submitted_picks_count" in watchdog
+    assert "already_current_picks_count" in watchdog
+    assert "already present on SuperBru" in watchdog

@@ -147,6 +147,13 @@ _UPDOWN_MONTHS = {
     "december": 12,
 }
 
+_UPDOWN_INTERVAL_MINUTES = {
+    "5m": 5,
+    "15m": 15,
+    "4h": 4 * 60,
+    "daily": 24 * 60,
+}
+
 
 def _slug_implied_close_time(slug: str) -> datetime | None:
     text = str(slug or "").strip().lower()
@@ -155,7 +162,13 @@ def _slug_implied_close_time(slug: str) -> datetime | None:
     timestamp_match = re.search(r"(?:^|-)(\d{10})(?:$|-)", text)
     if timestamp_match:
         try:
-            return datetime.fromtimestamp(int(timestamp_match.group(1)), tz=timezone.utc)
+            start = datetime.fromtimestamp(int(timestamp_match.group(1)), tz=timezone.utc)
+            interval_match = re.search(r"-updown-(?P<interval>5m|15m|4h|daily)-\d{10}(?:$|-)", text)
+            if interval_match:
+                minutes = _UPDOWN_INTERVAL_MINUTES.get(interval_match.group("interval"), 0)
+                if minutes > 0:
+                    return start + timedelta(minutes=minutes)
+            return start
         except (OSError, OverflowError, ValueError):
             return None
     dated_match = re.search(

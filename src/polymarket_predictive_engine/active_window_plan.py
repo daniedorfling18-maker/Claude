@@ -9,10 +9,11 @@ from .config import EngineConfig, load_config
 from .utils import now_utc, read_csv_rows, safe_float, write_csv, write_json
 
 
-_UPDOWN_SLUG_RE = re.compile(r"(?P<asset>btc|eth|sol|xrp)-updown-(?P<interval>5m|15m|daily)-(?P<timestamp>\d{10})")
+_UPDOWN_SLUG_RE = re.compile(r"(?P<asset>btc|eth|sol|xrp)-updown-(?P<interval>5m|15m|4h|daily)-(?P<timestamp>\d{10})")
 _INTERVAL_MINUTES = {
     "5m": 5,
     "15m": 15,
+    "4h": 4 * 60,
     "daily": 24 * 60,
 }
 SAST = ZoneInfo("Africa/Johannesburg")

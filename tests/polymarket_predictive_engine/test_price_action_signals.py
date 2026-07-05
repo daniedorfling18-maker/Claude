@@ -7,7 +7,7 @@ import yaml
 
 from polymarket_predictive_engine.config import EngineConfig, load_config
 from polymarket_predictive_engine.paper_broker import run_paper_broker
-from polymarket_predictive_engine.price_action_signals import build_price_action_paper_signals
+from polymarket_predictive_engine.price_action_signals import _row_implies_closed_market, build_price_action_paper_signals
 from polymarket_predictive_engine.utils import read_csv_rows, write_csv, write_json
 
 
@@ -900,6 +900,27 @@ def test_paper_confirmation_current_candidate_filters_closed_updown_slug(tmp_pat
     assert summary["current_historical_analogue_scan"]["stale_current_rows_filtered"] == 2
     assert signals[0]["market_slug"] == "bitcoin-above-open-test"
     assert signals[0]["token_id"] == "open-btc-token"
+
+
+def test_price_action_current_filter_keeps_active_timestamp_window_until_interval_end():
+    start = datetime.fromtimestamp(4102444800, tz=timezone.utc)
+
+    assert not _row_implies_closed_market(
+        {"market_slug": "sol-updown-4h-4102444800"},
+        now_dt=start + timedelta(hours=1),
+    )
+    assert _row_implies_closed_market(
+        {"market_slug": "sol-updown-4h-4102444800"},
+        now_dt=start + timedelta(hours=4, seconds=1),
+    )
+    assert not _row_implies_closed_market(
+        {"market_slug": "btc-updown-15m-4102444800"},
+        now_dt=start + timedelta(minutes=10),
+    )
+    assert _row_implies_closed_market(
+        {"market_slug": "btc-updown-15m-4102444800"},
+        now_dt=start + timedelta(minutes=15, seconds=1),
+    )
 
 
 def test_worldcup_confirmation_query_matches_soccer_match_current_row(tmp_path):

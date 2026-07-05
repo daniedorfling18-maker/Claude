@@ -5,6 +5,7 @@ import importlib.util
 import json
 import os
 from concurrent.futures import Future
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from polymarket_predictive_engine.config import EngineConfig
@@ -253,6 +254,28 @@ def test_websocket_asset_discovery_skips_closed_governance_targets_from_unix_slu
     assert asset_ids == ["future-unix-proof-target", "scanner-token"]
     assert "closed-unix-proof-target" not in sources
     assert sources["future-unix-proof-target"] == "websocket_liquidity_targets"
+
+
+def test_timestamp_updown_slug_stays_open_until_interval_end():
+    loop = _load_loop_module()
+    start = datetime.fromtimestamp(4102444800, tz=timezone.utc)
+
+    assert not loop._row_has_closed(
+        {"market_slug": "sol-updown-4h-4102444800"},
+        now_dt=start + timedelta(hours=1),
+    )
+    assert loop._row_has_closed(
+        {"market_slug": "sol-updown-4h-4102444800"},
+        now_dt=start + timedelta(hours=4, seconds=1),
+    )
+    assert not loop._row_has_closed(
+        {"market_slug": "btc-updown-15m-4102444800"},
+        now_dt=start + timedelta(minutes=10),
+    )
+    assert loop._row_has_closed(
+        {"market_slug": "btc-updown-15m-4102444800"},
+        now_dt=start + timedelta(minutes=15, seconds=1),
+    )
 
 
 def test_websocket_asset_discovery_skips_closed_governance_targets_from_et_slug(tmp_path, monkeypatch):

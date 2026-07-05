@@ -1037,6 +1037,9 @@ async function load() {
       ["Near-miss learning", diag.near_miss_candidates_seen],
       ["Near-miss opened", diag.near_miss_opened_this_cycle],
       ["Near-miss open", diag.near_miss_open_positions],
+      ["Alpha-learning candidates", diag.alpha_candidate_learning_candidates_seen],
+      ["Alpha-learning opened", diag.alpha_candidate_learning_opened_this_cycle],
+      ["Alpha-learning open", diag.alpha_candidate_learning_open_positions],
       ["Shadow candidates", diag.shadow_candidates_seen],
       ["Opened this cycle", diag.shadow_opened_this_cycle],
       ["Quarantined cohorts", diag.quarantined_cohort_count]
@@ -1060,6 +1063,15 @@ async function load() {
       ["Spread","spread", v=>fmtNum(v,4)],
       ["Liquidity","liquidity", v=>fmtNum(v,2)],
       ["Reason","near_miss_learning_reason", longText]
+    ]) + `<div style="height:12px"></div>` + table(diag.current_alpha_learning_candidates || [], [
+      ["Market","market_slug"],
+      ["Outcome","outcome"],
+      ["Cohort","signal_cohort"],
+      ["Lower-bound","edge_lower_bound", v=>fmtNum(v,4)],
+      ["Price","executable_price", v=>fmtNum(v,4)],
+      ["Spread","spread", v=>fmtNum(v,4)],
+      ["Liquidity","liquidity", v=>fmtNum(v,2)],
+      ["Why blocked","rejection_reason", v=>longText(v || "awaiting shadow evidence / cohort promotion", 180)]
     ]) + `<div style="height:12px"></div>` + table(diag.top_rejection_reasons || [], [
       ["Count","count"],
       ["Rejected reason","reason", v=>longText(v, 180)]
@@ -2517,6 +2529,21 @@ def _trade_diagnostics(
         key=lambda row: safe_float(row.get("near_miss_priority_score")) or 0.0,
         reverse=True,
     )
+    alpha_learning_candidates = [
+        row
+        for row in predictions
+        if _truthy(row.get("alpha_trade_candidate"))
+        and _truthy(row.get("validation_layer_pass"))
+        and _truthy(row.get("microstructure_filter_pass"))
+        and _truthy(row.get("bookmaker_cross_check_pass", True))
+    ]
+    alpha_learning_candidates.sort(
+        key=lambda row: (
+            safe_float(row.get("edge_lower_bound")) or 0.0,
+            safe_float(row.get("alpha_score")) or 0.0,
+        ),
+        reverse=True,
+    )
     quarantined = shadow_summary.get("quarantined_cohorts", []) if isinstance(shadow_summary, dict) else []
     if not isinstance(quarantined, list):
         quarantined = []
@@ -2558,12 +2585,19 @@ def _trade_diagnostics(
         "near_miss_candidates_seen": len(near_miss_candidates),
         "near_miss_opened_this_cycle": shadow_summary.get("near_miss_opened_this_cycle"),
         "near_miss_open_positions": shadow_summary.get("near_miss_open_positions"),
+        "alpha_candidate_learning_candidates_seen": shadow_summary.get(
+            "alpha_candidate_learning_candidates_seen",
+            len(alpha_learning_candidates),
+        ),
+        "alpha_candidate_learning_opened_this_cycle": shadow_summary.get("alpha_candidate_learning_opened_this_cycle"),
+        "alpha_candidate_learning_open_positions": shadow_summary.get("alpha_candidate_learning_open_positions"),
         "shadow_candidates_seen": shadow_summary.get("shadow_candidates_seen"),
         "shadow_opened_this_cycle": shadow_summary.get("opened_this_cycle"),
         "shadow_open_positions": shadow_summary.get("open_positions"),
         "quarantined_cohort_count": len(quarantined),
         "top_rejection_reasons": top_reasons,
         "current_near_miss_candidates": near_miss_candidates[:12],
+        "current_alpha_learning_candidates": alpha_learning_candidates[:12],
         "current_shadow_candidates": shadow_candidates[:12],
         "quarantined_cohorts": quarantined[:12],
     }

@@ -459,6 +459,34 @@ def test_dashboard_renderer_writes_static_dashboard_and_data(tmp_path):
             }
         ],
     )
+    write_csv(
+        cfg.output_root / "polymarket_predictions" / "predictions.csv",
+        [
+            {
+                "market_slug": "alpha-learning-market",
+                "outcome": "Yes",
+                "signal_cohort": "crypto",
+                "alpha_trade_candidate": "true",
+                "validation_layer_pass": "true",
+                "microstructure_filter_pass": "true",
+                "bookmaker_cross_check_pass": "true",
+                "edge_lower_bound": "0.08",
+                "alpha_score": "0.20",
+                "executable_price": "0.50",
+                "spread": "0.01",
+                "liquidity": "1000",
+                "rejection_reason": "cohort_not_promoted",
+            }
+        ],
+    )
+    write_json(
+        cfg.governance_root / "shadow_signal_cohort_pnl.json",
+        {
+            "alpha_candidate_learning_candidates_seen": 1,
+            "alpha_candidate_learning_opened_this_cycle": 1,
+            "alpha_candidate_learning_open_positions": 1,
+        },
+    )
     result = render_dashboard(
         cfg,
         {
@@ -474,6 +502,12 @@ def test_dashboard_renderer_writes_static_dashboard_and_data(tmp_path):
     assert data["approved_signals"][0]["market_slug"] == "test-market"
     assert data["trade_diagnostics"]["near_miss_candidates_seen"] == 1
     assert data["trade_diagnostics"]["current_near_miss_candidates"][0]["market_slug"] == "near-miss-market"
+    assert data["trade_diagnostics"]["alpha_candidate_learning_candidates_seen"] == 1
+    assert data["trade_diagnostics"]["alpha_candidate_learning_opened_this_cycle"] == 1
+    assert data["trade_diagnostics"]["alpha_candidate_learning_open_positions"] == 1
+    assert data["trade_diagnostics"]["current_alpha_learning_candidates"][0]["market_slug"] == "alpha-learning-market"
+    html = Path(result["dashboard_file"]).read_text(encoding="utf-8")
+    assert "Alpha-learning candidates" in html
 
 
 def test_dashboard_surfaces_closing_line_value_artifact(tmp_path):

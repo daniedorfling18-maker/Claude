@@ -209,21 +209,26 @@ sharp_odds_fetch:
   provider: the_odds_api
   base_url: https://api.the-odds-api.com/v4
   api_key_env: THE_ODDS_API_KEY
+  # WO-30 (2026-07-05): fetch only markets Polymarket actually lists. Verified via the Gamma API,
+  # Polymarket has NO per-game/per-match sports markets - only outrights/futures/advance markets.
+  # So per-game h2h for NBA/MLB/MMA/tennis mapped to nothing and burned Odds API budget every cycle.
+  # Keep: WC winner outright + WC h2h (the latter feeds the WO-29 composite "advance" fair for the
+  #   "Nation To Reach QF/SF" markets, which DO exist on Polymarket).
+  # Swap: NBA/MLB per-game h2h -> championship-winner outrights (match Polymarket "NBA 2027 Champion"
+  #   / "MLB World Series Champion" futures).
+  # Removed: mma_mixed_martial_arts / tennis_atp / tennis_wta h2h - Polymarket lists no mappable
+  #   market for these (no per-fight/per-match token, no advance equivalent). Removed to stop waste,
+  #   not because odds are unavailable. validate_sports below skips any key the provider does not
+  #   expose, so unknown futures keys are logged-and-skipped, never fatal.
   sports:
   - key: soccer_fifa_world_cup_winner
     markets: outrights
   - key: soccer_fifa_world_cup
     markets: h2h
-  - key: basketball_nba
-    markets: h2h
-  - key: baseball_mlb
-    markets: h2h
-  - key: mma_mixed_martial_arts
-    markets: h2h
-  - key: tennis_atp
-    markets: h2h
-  - key: tennis_wta
-    markets: h2h
+  - key: basketball_nba_championship_winner
+    markets: outrights
+  - key: baseball_mlb_world_series_winner
+    markets: outrights
   regions: eu,uk                 # Pinnacle is in eu; Betfair Exchange in uk/eu
   markets: h2h
   validate_sports: true

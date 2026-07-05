@@ -1215,11 +1215,56 @@ candidate input for the existing alpha haircuts and forward paper proof loop.
 
 ---
 
+## Market-structure finding — 2026-07-04/05 (verified against Polymarket's live Gamma API)
+
+Direct API query settles the sharp-anchor join question. Polymarket **does not list per-match /
+per-game sports markets** — the fixtures the anchor kept dropping (`usa-vs-belgium`,
+`switzerland-vs-colombia`, `atlanta-braves-vs-new-york-mets`) all return zero markets. What
+Polymarket lists per sport is **outrights / futures / advance markets only** (World Cup Winner,
+Group/continent/advance, MLB World Series Champion, NBA 2027 Champion, awards). The per-game h2h
+fetches for NBA/MLB/MMA/tennis therefore mapped to nothing and burned Odds API budget every cycle.
+
+## WO-30 — Refocus sharp_odds_fetch on markets Polymarket actually lists — `done` (2026-07-05, HIGH)
+
+Landed: `sharp_odds_fetch.sports` now fetches only mappable markets — keep
+`soccer_fifa_world_cup_winner` (outrights) + `soccer_fifa_world_cup` (h2h, feeds the WO-29 composite
+advance fair); swap NBA/MLB per-game h2h for `basketball_nba_championship_winner` /
+`baseball_mlb_world_series_winner` (outrights); remove `mma_mixed_martial_arts` / `tennis_atp` /
+`tennis_wta` h2h (no mappable Polymarket market). `validate_sports` skips any futures key the
+provider does not expose, so unknown keys are logged-and-skipped, never fatal. Test:
+`test_example_config_fetches_only_polymarket_mappable_markets`. No gate/threshold/de-vig change.
+
+## WO-31 — Per-sport anchor coverage reconciliation and auto-trim signal — `open` (MEDIUM)
+
+**Goal:** measure per-sport join rate over cycles and surface sports that produce zero token joins
+across N cycles, so the fetch list is trimmed on evidence, not intuition.
+
+**Files:** new `src/polymarket_predictive_engine/sharp_anchor_coverage.py` (pattern:
+`closing_line.py`), CLI `sharp-anchor-coverage`, wire into `refresh_governance` after
+`build_sharp_anchor`, a dashboard line reusing the existing `coverage_by_sport_market` block if
+present, tests.
+
+**Steps:** per configured sport record rows_fetched / rows_mapped / join_rate; append one row per
+sport per run to `outputs/polymarket_model_governance/sharp_anchor_coverage_history.csv` (idempotent
+on the anchor artifact `generated_at_utc`); classify fail-closed `mappable` (join_rate>0 this run) /
+`no_mappable_market` (0 joins across `sharp_anchor_coverage.zero_join_cycles_before_flag`, default 5)
+/ `collecting_coverage_evidence`; `no_mappable_market` is a **recommendation string only**, never an
+automatic config edit. Standard `paper_trading_invoked`/`live_trading_invoked` false flags.
+
+## WP13 (decision, not a work order) — per-match sports belongs on Kalshi/Betfair
+
+The market-structure finding means the per-match sharp-anchor edge cannot be harvested on Polymarket
+at all. If per-match is where the edge is believed to be, that is a **venue** decision — stand up a
+Kalshi collector feeding the same normalised schema (`docs/POLYMARKET_STRATEGY_OPTIONS.md` option 4).
+Left as a decision, not an open WO; spec it only on an explicit go.
+
+---
+
 ## Sequencing
 
-Runtime update (2026-07-04): `PM_VPS_SSH_PRIVATE_KEY` is now populated in GitHub secrets, so the
-VPS deploy lane is no longer blocked on missing SSH credentials. WO-29 has also landed as the
-conservative composite bridge for explicit advance/qualify YES tokens.
+Runtime update (2026-07-05): `PM_VPS_SSH_PRIVATE_KEY` is populated so the VPS deploy lane works.
+WO-29 landed (composite advance bridge). WO-30 landed (sharp fetch refocused onto mappable markets).
+Crypto up/down is now frozen as a diagnostic — see the focus-discipline rule in `AGENTS.md`.
 
 ```text
 WO-1..WO-6, WO-8, WO-9   done and audited (2026-07-02)

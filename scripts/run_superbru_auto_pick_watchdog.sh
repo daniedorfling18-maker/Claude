@@ -58,23 +58,35 @@ if summary_path.exists():
             "submitted": summary.get("submitted"),
             "already_current_count": summary.get("already_current_count"),
             "submission_failed": summary.get("submission_failed"),
+            "successful_count": int(summary.get("submitted") or 0)
+            + int(summary.get("already_current_count") or 0),
             "page_timezone": summary.get("page_timezone"),
         }
-        scan_results = summary.get("scan_results") or []
-        future = [
-            row for row in scan_results
-            if row.get("status") in {"queued", "not_in_window"}
-            and row.get("kickoff_utc")
+        next_fixture_candidates = []
+        for source_name in ("results", "card_fallback_entries", "scan_results"):
+            for row in summary.get(source_name) or []:
+                if not row.get("kickoff_utc"):
+                    continue
+                item = dict(row)
+                item["_source"] = source_name
+                next_fixture_candidates.append(item)
+        upcoming = [
+            row for row in next_fixture_candidates
+            if isinstance(row.get("minutes_until"), (int, float))
+            and row.get("minutes_until") >= 0
         ]
-        future.sort(key=lambda row: row.get("kickoff_utc") or "")
-        if future:
-            row = future[0]
+        upcoming.sort(key=lambda row: (row.get("minutes_until"), row.get("kickoff_utc") or ""))
+        if upcoming:
+            row = upcoming[0]
             payload["next_fixture"] = {
                 "game": row.get("game"),
                 "kickoff_utc": row.get("kickoff_utc"),
                 "minutes_until": row.get("minutes_until"),
                 "status": row.get("status"),
                 "inputs_found": row.get("inputs_found"),
+                "source": row.get("_source"),
+                "current_pick": row.get("current_pick"),
+                "selected_pick": row.get("selected_pick"),
             }
     except Exception as exc:
         payload["last_result_error"] = str(exc)

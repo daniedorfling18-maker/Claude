@@ -57,9 +57,10 @@ locked_at_utc,commence_time,home_team,away_team,locked_pick,pick_outcome,match_k
 2026-07-03T10:06:14Z,2026-07-04T01:30:00Z,Colombia,Ghana,2-0,home,colombia|ghana|2026-07-04
 2026-07-04T08:50:58Z,2026-07-04T17:00:00Z,Canada,Morocco,0-2,away,canada|morocco|2026-07-04
 2026-07-04T08:50:58Z,2026-07-04T21:00:00Z,Paraguay,France,0-2,away,paraguay|france|2026-07-04
-2026-07-05T01:54:44Z,2026-07-05T20:00:00Z,Brazil,Norway,2-0,home,brazil|norway|2026-07-05
-2026-07-05T01:54:44Z,2026-07-06T00:00:00Z,Mexico,England,1-2,away,mexico|england|2026-07-06
-2026-07-05T01:54:44Z,2026-07-06T19:00:00Z,Portugal,Spain,1-2,away,portugal|spain|2026-07-06
-2026-07-05T01:54:44Z,2026-07-07T00:00:00Z,United States,Belgium,1-2,away,united states|belgium|2026-07-07
-2026-07-05T01:54:44Z,2026-07-07T16:00:00Z,Argentina,Egypt,2-0,home,argentina|egypt|2026-07-07
-2026-07-05T01:54:44Z,2026-07-07T20:00:00Z,Switzerland,Colombia,0-1,away,switzerland|colombia|2026-07-07
+2026-07-05T09:21:00Z,2026-07-05T20:00:00Z,Brazil,Norway,2-0,home,brazil|norway|2026-07-05
+2026-07-05T09:21:00Z,2026-07-06T00:00:00Z,Mexico,England,0-1,away,mexico|england|2026-07-06
+2026-07-05T09:21:00Z,2026-07-06T19:00:00Z,Portugal,Spain,0-2,away,portugal|spain|2026-07-06
+2026-07-05T09:21:00Z,2026-07-07T00:00:00Z,United States,Belgium,1-2,away,united states|belgium|2026-07-07
+2026-07-05T09:21:00Z,2026-07-07T16:00:00Z,Argentina,Egypt,2-0,home,argentina|egypt|2026-07-07
+2026-07-05T09:21:00Z,2026-07-07T20:00:00Z,Switzerland,Colombia,0-1,away,switzerland|colombia|2026-07-07
+2026-07-05T09:21:00Z,2026-07-09T20:00:00Z,France,Morocco,2-0,home,france|morocco|2026-07-09

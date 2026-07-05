@@ -3,7 +3,13 @@ from __future__ import annotations
 from pathlib import Path
 
 from polymarket_predictive_engine.config import EngineConfig
-from polymarket_predictive_engine.price_action_model import _anti_chase_metrics, _selected_metrics, train_price_action_model
+from polymarket_predictive_engine.price_action_model import (
+    _anti_chase_metrics,
+    _prepared_event,
+    _prepared_round_trip_event,
+    _selected_metrics,
+    train_price_action_model,
+)
 from polymarket_predictive_engine.utils import read_csv_rows, write_csv
 
 
@@ -314,6 +320,33 @@ def test_price_action_model_labels_only_tradable_positive_repricing_by_default(t
     assert summary["label_hurdles"]["minimum_profitable_return_label"] == 0.02
     assert summary["train_positive_targets"] == 2
     assert summary["validation_positive_targets"] == 1
+
+
+def test_price_action_model_requires_identifiable_training_instrument(tmp_path):
+    settings = _cfg(tmp_path).raw["price_action_model"]
+    missing = _event(0, split="train", profitable=True)
+    missing["token_id"] = ""
+    missing["market_slug"] = ""
+    missing["outcome"] = ""
+
+    alias_row = _event(1, split="train", profitable=True)
+    alias_row["asset_id"] = alias_row.pop("token_id")
+    alias_row["selection"] = alias_row.pop("outcome")
+    alias_row["category"] = alias_row.pop("family")
+
+    missing_round_trip = _round_trip_event(2, split="train", profitable=True)
+    missing_round_trip["token_id"] = ""
+    missing_round_trip["market_slug"] = ""
+    missing_round_trip["outcome"] = ""
+
+    prepared_alias = _prepared_event(alias_row, settings)
+
+    assert _prepared_event(missing, settings) is None
+    assert _prepared_round_trip_event(missing_round_trip, settings, source="price_action_scout_round_trip") is None
+    assert prepared_alias is not None
+    assert prepared_alias["token_id"] == alias_row["asset_id"]
+    assert prepared_alias["outcome"] == alias_row["selection"]
+    assert prepared_alias["family"] == alias_row["category"]
 
 
 def test_price_action_model_blocks_when_positive_targets_do_not_transfer_across_cohorts(tmp_path):

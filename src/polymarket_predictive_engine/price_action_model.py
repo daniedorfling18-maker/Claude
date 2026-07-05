@@ -364,7 +364,29 @@ def _predict_probabilities(rows: list[dict[str, Any]], artifact: dict[str, Any],
     return [float(_clamp_probability(value)) for value in _sigmoid(standardised @ weights).tolist()]
 
 
+def _normalise_trade_identity(row: dict[str, Any]) -> dict[str, Any]:
+    out = dict(row)
+    if not str(out.get("token_id") or "").strip() and str(out.get("asset_id") or "").strip():
+        out["token_id"] = str(out.get("asset_id") or "").strip()
+    if not str(out.get("outcome") or "").strip() and str(out.get("selection") or "").strip():
+        out["outcome"] = str(out.get("selection") or "").strip()
+    if not str(out.get("family") or "").strip() and str(out.get("category") or "").strip():
+        out["family"] = str(out.get("category") or "").strip()
+    return out
+
+
+def _has_tradable_identity(row: dict[str, Any]) -> bool:
+    return bool(
+        str(row.get("token_id") or "").strip()
+        and str(row.get("market_slug") or "").strip()
+        and str(row.get("outcome") or row.get("selection") or "").strip()
+    )
+
+
 def _prepared_event(row: dict[str, str], settings: dict[str, Any]) -> dict[str, Any] | None:
+    row = _normalise_trade_identity(row)
+    if not _has_tradable_identity(row):
+        return None
     entry_ask = safe_float(row.get("entry_ask"))
     exit_bid = safe_float(row.get("exit_bid"))
     stake = safe_float(row.get("stake_usdc")) or 0.0
@@ -395,6 +417,9 @@ def _prepared_round_trip_event(row: dict[str, str], settings: dict[str, Any], *,
     intentionally avoid using latest/max/min bid fields as model features
     because those are known only after entry; they are label/outcome evidence.
     """
+    row = _normalise_trade_identity(row)
+    if not _has_tradable_identity(row):
+        return None
     status = str(row.get("round_trip_status") or "").strip().lower()
     include_marked = _bool_setting(settings, "include_open_marked_round_trips", True)
     minimum_marked_observations = _int_setting(settings, "minimum_open_marked_observations", 5)

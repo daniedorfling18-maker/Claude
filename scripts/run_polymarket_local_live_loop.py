@@ -17,6 +17,7 @@ import argparse
 import hashlib
 import json
 import os
+import re
 import sys
 import time
 import traceback
@@ -24,6 +25,7 @@ from concurrent.futures import Future, ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
+from zoneinfo import ZoneInfo
 
 ROOT = Path(__file__).resolve().parents[1]
 SRC = ROOT / "src"
@@ -68,11 +70,80 @@ def _stable_id(prefix: str, key: str) -> str:
     return prefix + "_" + hashlib.sha256(key.encode("utf-8")).hexdigest()[:24]
 
 
-def _row_has_closed(row: dict[str, Any]) -> bool:
+_UPDOWN_MONTHS = {
+    "january": 1,
+    "february": 2,
+    "march": 3,
+    "april": 4,
+    "may": 5,
+    "june": 6,
+    "july": 7,
+    "august": 8,
+    "september": 9,
+    "october": 10,
+    "november": 11,
+    "december": 12,
+}
+
+
+def _slug_implied_close_time(slug: str) -> datetime | None:
+    """Infer expiry for Polymarket Up/Down slugs that omit close_time.
+
+    Governance target CSVs sometimes preserve rows from short-window markets
+    after Gamma no longer returns a usable ``close_time``.  These slugs carry
+    enough expiry information to avoid wasting websocket slots on closed proof
+    targets.
+    """
+    text = str(slug or "").strip().lower()
+    if not text:
+        return None
+
+    timestamp_match = re.search(r"(?:^|-)(\d{10})(?:$|-)", text)
+    if timestamp_match:
+        try:
+            return datetime.fromtimestamp(int(timestamp_match.group(1)), tz=timezone.utc)
+        except (OSError, OverflowError, ValueError):
+            return None
+
+    dated_match = re.search(
+        r"(?P<month>january|february|march|april|may|june|july|august|september|october|november|december)"
+        r"-(?P<day>\d{1,2})-(?P<year>\d{4})-(?P<hour>\d{1,2})(?P<ampm>am|pm)-et",
+        text,
+    )
+    if not dated_match:
+        return None
+    try:
+        hour = int(dated_match.group("hour"))
+        if hour < 1 or hour > 12:
+            return None
+        ampm = dated_match.group("ampm")
+        if ampm == "pm" and hour != 12:
+            hour += 12
+        if ampm == "am" and hour == 12:
+            hour = 0
+        eastern = ZoneInfo("America/New_York")
+        return datetime(
+            int(dated_match.group("year")),
+            _UPDOWN_MONTHS[dated_match.group("month")],
+            int(dated_match.group("day")),
+            hour,
+            tzinfo=eastern,
+        ).astimezone(timezone.utc)
+    except (KeyError, ValueError):
+        return None
+
+
+def _row_has_closed(row: dict[str, Any], *, now_dt: datetime | None = None) -> bool:
     close_time = parse_timestamp(row.get("close_time"))
     if close_time is None:
+        for key in ("market_slug", "slug", "event_slug"):
+            close_time = _slug_implied_close_time(str(row.get(key) or ""))
+            if close_time is not None:
+                break
+    if close_time is None:
         return False
-    return close_time.astimezone(timezone.utc) <= datetime.now(timezone.utc)
+    now = now_dt or datetime.now(timezone.utc)
+    return close_time.astimezone(timezone.utc) <= now.astimezone(timezone.utc)
 
 
 def _add_tokens_from_csv(path: Path, tokens: dict[str, str], source: str, *, skip_closed: bool = False) -> None:

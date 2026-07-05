@@ -94,7 +94,7 @@ jobs:
             -o ConnectTimeout=30 \
             -p "$PM_VPS_PORT" \
             "$PM_VPS_USER@$PM_VPS_HOST" \
-            "PM_VPS_REPO_DIR='$PM_VPS_REPO_DIR' EXPECTED_SHA='$EXPECTED_SHA' STALE_AFTER_MINUTES='$STALE_AFTER_MINUTES' FAIL_ON_BAD_PROOF='$FAIL_ON_BAD_PROOF' bash -s" > "$report" <<'REMOTE'
+            "PM_VPS_REPO_DIR='$PM_VPS_REPO_DIR' EXPECTED_SHA='$EXPECTED_SHA' STALE_AFTER_MINUTES='$STALE_AFTER_MINUTES' FAIL_ON_BAD_PROOF='$FAIL_ON_BAD_PROOF' GITHUB_RUN_ID='${GITHUB_RUN_ID:-manual}' bash -s" > "$report" <<'REMOTE'
           set -euo pipefail
 
           REPO_DIR="${PM_VPS_REPO_DIR/#\~/$HOME}"
@@ -105,6 +105,17 @@ jobs:
 
           cd "$REPO_DIR"
           ACTUAL_SHA="$(git rev-parse HEAD 2>/dev/null || echo unknown)"
+          git fetch --quiet origin main || true
+          ORIGIN_MAIN_SHA="$(git rev-parse origin/main 2>/dev/null || echo unknown)"
+          RUNTIME_DIFF="$(git diff --name-only "$ACTUAL_SHA" "$ORIGIN_MAIN_SHA" -- \
+            src \
+            scripts \
+            polymarket_predictive_config.example.yaml \
+            pyproject.toml \
+            requirements.txt \
+            docker-compose.vps-paper.yml \
+            .env.vps-paper.example 2>/dev/null || true)"
+          export ACTUAL_SHA ORIGIN_MAIN_SHA RUNTIME_DIFF
 
           PORT="$(python3 - <<'PY'
           from pathlib import Path
@@ -120,6 +131,7 @@ jobs:
           print(port)
           PY
           )"
+          export PORT
 
           DASHBOARD_JSON="/tmp/polymarket-proof-health-dashboard-${GITHUB_RUN_ID:-manual}.json"
           DASHBOARD_HTML="/tmp/polymarket-proof-health-dashboard-${GITHUB_RUN_ID:-manual}.html"
@@ -143,6 +155,8 @@ jobs:
 
           expected_sha = os.environ.get("EXPECTED_SHA", "")
           actual_sha = os.environ.get("ACTUAL_SHA", "")
+          origin_main_sha = os.environ.get("ORIGIN_MAIN_SHA", "")
+          runtime_diff = [line.strip() for line in os.environ.get("RUNTIME_DIFF", "").splitlines() if line.strip()]
           stale_after_minutes = int(float(os.environ.get("STALE_AFTER_MINUTES") or 480))
           fail_on_bad_proof = str(os.environ.get("FAIL_ON_BAD_PROOF") or "false").lower() == "true"
 
@@ -189,8 +203,17 @@ jobs:
           fetch_summary = load_json(governance_root / "sharp_odds_fetch_summary.json")
           governance_refresh = load_json(governance_root / "governance_refresh.json")
 
-          if actual_sha != expected_sha:
-              errors.append(f"VPS SHA mismatch: actual={actual_sha}, expected={expected_sha}")
+          if actual_sha != origin_main_sha:
+              if runtime_diff:
+                  errors.append(
+                      "VPS is behind origin/main on runtime-relevant files: " + ", ".join(runtime_diff[:20])
+                  )
+              else:
+                  warnings.append(
+                      f"VPS SHA differs from origin/main, but only non-runtime files appear to differ: actual={actual_sha}, origin_main={origin_main_sha}"
+                  )
+          if expected_sha and origin_main_sha and expected_sha != origin_main_sha:
+              warnings.append(f"Workflow SHA differs from fetched origin/main: workflow={expected_sha}, origin_main={origin_main_sha}")
 
           required_dashboard_keys = [
               "deployment_health",
@@ -282,7 +305,9 @@ jobs:
           print("## Polymarket VPS proof-health check")
           print("")
           print(f"- VPS SHA: `{actual_sha}`")
-          print(f"- Expected SHA: `{expected_sha}`")
+          print(f"- Origin main SHA: `{origin_main_sha}`")
+          print(f"- Workflow SHA: `{expected_sha}`")
+          print(f"- Runtime diff count: `{len(runtime_diff)}`")
           print(f"- Dashboard port: `{os.environ.get('PORT', 'unknown')}`")
           print(f"- Sharp fetch status: `{fetch_status}`")
           print(f"- Sharp fetch health: `{fetch_health or 'unknown'}`")

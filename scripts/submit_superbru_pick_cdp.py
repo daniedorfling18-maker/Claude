@@ -327,6 +327,71 @@ def pick_score_inputs(inputs: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return candidates
 
 
+def _normalise_goal_value(value: Any) -> str:
+    text = str(value if value is not None else "").strip()
+    if text.endswith(".0"):
+        text = text[:-2]
+    return text
+
+
+def score_values_from_row(row_info: dict[str, Any]) -> list[str]:
+    """Return the visible score values from a SuperBru row inspection."""
+    inputs = row_info.get("inputs", []) if isinstance(row_info, dict) else []
+    return [_normalise_goal_value(inp.get("value")) for inp in pick_score_inputs(inputs)]
+
+
+def saved_score_matches(row_info: dict[str, Any], home_goals: str, away_goals: str) -> bool:
+    values = score_values_from_row(row_info)
+    if len(values) < 2:
+        return False
+    return values[0] == str(home_goals) and values[1] == str(away_goals)
+
+
+async def verify_saved_pick(
+    page: Any,
+    args: argparse.Namespace,
+    diag_dir: Path,
+    slug: str,
+    ts: str,
+    home_goals: str,
+    away_goals: str,
+) -> dict[str, Any]:
+    """Reload SuperBru and prove the submitted score persisted on the site."""
+    verification: dict[str, Any] = {
+        "ok": False,
+        "expected_pick": f"{home_goals}-{away_goals}",
+        "method": "reload_and_read_score_inputs",
+    }
+    try:
+        await page.wait_for_timeout(2500)
+        try:
+            await page.reload(wait_until="domcontentloaded", timeout=args.timeout_ms)
+        except Exception as exc:
+            verification["reload_warning"] = f"{type(exc).__name__}: {exc}"
+            print("Warning: reload after submit did not complete; checking current page state anyway.")
+        await page.wait_for_timeout(args.settle_ms)
+        subtab_clicked = await page.evaluate(CLICK_SUBTAB_JS, [args.home_team, args.away_team])
+        if subtab_clicked:
+            verification["subtab_clicked"] = subtab_clicked
+            await page.wait_for_timeout(4000)
+        row_info = await page.evaluate(FIND_ROW_JS, [args.home_team, args.away_team])
+        verify_path = diag_dir / f"{slug}_{ts}_verify_row.json"
+        verify_path.write_text(json.dumps(row_info, indent=2), encoding="utf-8")
+        values = score_values_from_row(row_info)
+        verification.update(
+            {
+                "row_found": bool(row_info.get("found")),
+                "saved_pick": "-".join(values[:2]) if len(values) >= 2 else "",
+                "score_values": values,
+                "row_path": str(verify_path),
+                "ok": saved_score_matches(row_info, home_goals, away_goals),
+            }
+        )
+    except Exception as exc:  # pragma: no cover - defensive live-browser path
+        verification.update({"ok": False, "error": f"{type(exc).__name__}: {exc}"})
+    return verification
+
+
 async def run(args: argparse.Namespace) -> dict[str, Any]:
     try:
         from playwright.async_api import TimeoutError as PlaywrightTimeoutError
@@ -573,11 +638,31 @@ async def run(args: argparse.Namespace) -> dict[str, Any]:
         if not submitted:
             # SuperBru auto-saves on blur/change — no submit button is expected
             await page.wait_for_timeout(3000)
-            result["status"] = "submitted"
             print("Auto-save: no submit button needed (SuperBru saves on blur/change).")
         else:
             await page.wait_for_timeout(2000)
+
+        verification = await verify_saved_pick(
+            page,
+            args,
+            diag_dir,
+            slug,
+            ts,
+            home_goals,
+            away_goals,
+        )
+        result["post_submit_verification"] = verification
+        if not verification.get("ok"):
+            result["status"] = "failed"
+            result["reason"] = (
+                "post-submit verification failed: expected "
+                f"{verification.get('expected_pick')} but SuperBru read back "
+                f"{verification.get('saved_pick') or 'no saved score'}"
+            )
+            print(f"ERROR: {result['reason']}")
+        else:
             result["status"] = "submitted"
+            print(f"Verified SuperBru saved pick: {verification.get('saved_pick')}")
 
         # Screenshot for verification
         screenshot = diag_dir / f"{slug}_{ts}_after.png"

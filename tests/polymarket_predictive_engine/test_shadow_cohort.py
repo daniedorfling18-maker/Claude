@@ -160,6 +160,96 @@ def test_alpha_trade_candidate_shadow_learning_defaults_closed(tmp_path):
     assert positions == []
 
 
+def test_alpha_learning_prioritises_in_band_candidates_before_source_cap(tmp_path):
+    cfg = _cfg(tmp_path)
+    cfg.raw["shadow_cohort_validation"]["allow_alpha_candidate_learning_candidates"] = True
+    cfg.raw["shadow_cohort_validation"]["candidate_limit_per_cycle"] = 1
+    cfg.raw["shadow_cohort_validation"]["alpha_candidate_learning_candidate_limit_per_cycle"] = 1
+
+    summary = update_shadow_cohort_evidence(
+        cfg,
+        [
+            {
+                "market_id": "m-too-cheap",
+                "market_slug": "too-cheap-alpha",
+                "token_id": "t-too-cheap",
+                "outcome": "Yes",
+                "category": "crypto",
+                "signal_cohort": "crypto",
+                "alpha_trade_candidate": True,
+                "validation_layer_pass": True,
+                "microstructure_filter_pass": True,
+                "bookmaker_cross_check_pass": True,
+                "edge_lower_bound": "0.50",
+                "executable_price": "0.01",
+                "best_bid": "0.009",
+                "spread": "0.001",
+                "liquidity": "10000",
+                "prediction_timestamp": "2026-06-27T04:00:00Z",
+            },
+            {
+                "market_id": "m-in-band",
+                "market_slug": "in-band-alpha",
+                "token_id": "t-in-band",
+                "outcome": "Yes",
+                "category": "crypto",
+                "signal_cohort": "crypto",
+                "alpha_trade_candidate": True,
+                "validation_layer_pass": True,
+                "microstructure_filter_pass": True,
+                "bookmaker_cross_check_pass": True,
+                "edge_lower_bound": "0.08",
+                "executable_price": "0.50",
+                "best_bid": "0.49",
+                "spread": "0.01",
+                "liquidity": "1000",
+                "prediction_timestamp": "2026-06-27T04:00:00Z",
+            },
+        ],
+    )
+
+    positions = read_csv_rows(cfg.output_root / "polymarket_shadow" / "shadow_positions.csv")
+
+    assert summary["opened_this_cycle"] == 1
+    assert summary["entry_price_band_skipped"] == 0
+    assert positions[0]["market_slug"] == "in-band-alpha"
+
+
+def test_shadow_candidates_skip_past_close_rows(tmp_path):
+    cfg = _cfg(tmp_path)
+    cfg.raw["shadow_cohort_validation"]["allow_alpha_candidate_learning_candidates"] = True
+
+    summary = update_shadow_cohort_evidence(
+        cfg,
+        [
+            {
+                "market_id": "m-expired",
+                "market_slug": "expired-alpha",
+                "token_id": "t-expired",
+                "outcome": "Yes",
+                "category": "crypto",
+                "signal_cohort": "crypto",
+                "alpha_trade_candidate": True,
+                "validation_layer_pass": True,
+                "microstructure_filter_pass": True,
+                "bookmaker_cross_check_pass": True,
+                "edge_lower_bound": "0.50",
+                "executable_price": "0.50",
+                "best_bid": "0.49",
+                "spread": "0.01",
+                "liquidity": "10000",
+                "time_to_close_hours": "-0.01",
+                "prediction_timestamp": "2026-06-27T04:00:00Z",
+            }
+        ],
+    )
+
+    positions = read_csv_rows(cfg.output_root / "polymarket_shadow" / "shadow_positions.csv")
+
+    assert summary["opened_this_cycle"] == 0
+    assert positions == []
+
+
 def test_shadow_cohort_refuses_new_positions_outside_entry_band(tmp_path):
     cfg = _cfg(tmp_path)
 

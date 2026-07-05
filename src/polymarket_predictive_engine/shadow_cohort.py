@@ -156,6 +156,16 @@ def _soonest_first_score(row: dict[str, Any]) -> float:
     return -max(0.0, time_to_close)
 
 
+def _is_past_close(row: dict[str, Any]) -> bool:
+    time_to_close = _time_to_close_hours(row)
+    return time_to_close is not None and time_to_close < 0.0
+
+
+def _entry_price_in_band(row: dict[str, Any], minimum_entry_price: float, maximum_entry_price: float) -> bool:
+    entry_price = safe_float(row.get("executable_price"))
+    return entry_price is not None and minimum_entry_price <= entry_price <= maximum_entry_price
+
+
 def _normalise_position_row(position: dict[str, Any]) -> None:
     """Backfill newly introduced explicit columns from the embedded signal payload."""
     payload = _row_payload(position)
@@ -517,6 +527,7 @@ def _candidate_rows(cfg: EngineConfig, predictions: list[dict[str, Any]], positi
     settings = _settings(cfg)
     if not boolish(settings.get("enabled", True)):
         return []
+    minimum_entry_price, maximum_entry_price = _entry_price_band(cfg)
     quarantined = _quarantined_cohorts(cfg, positions)
     open_keys = {
         (str(row.get("market_id") or ""), str(row.get("token_id") or ""))
@@ -538,6 +549,8 @@ def _candidate_rows(cfg: EngineConfig, predictions: list[dict[str, Any]], positi
         row = _shadow_candidate_row(source_row, settings)
         if row is None:
             continue
+        if _is_past_close(row):
+            continue
         if _cohort_name(row) in quarantined:
             continue
         key = (str(row.get("market_id") or ""), str(row.get("token_id") or ""))
@@ -548,6 +561,7 @@ def _candidate_rows(cfg: EngineConfig, predictions: list[dict[str, Any]], positi
         candidates.append(row)
     candidates.sort(
         key=lambda row: (
+            1 if _entry_price_in_band(row, minimum_entry_price, maximum_entry_price) else 0,
             1 if _is_fast_feedback(row, settings) else 0,
             _soonest_first_score(row),
             safe_float(row.get("shadow_priority_score")) or 0.0,

@@ -67,7 +67,7 @@ jobs:
             -o ConnectTimeout=30 \
             -p "$PM_VPS_PORT" \
             "$PM_VPS_USER@$PM_VPS_HOST" \
-            "cd /home/$PM_VPS_USER/Claude && docker compose -f docker-compose.vps-paper.yml exec -T polymarket-paper-live python -m polymarket_predictive_engine.cli refresh-governance --config /app/polymarket_predictive_config.example.yaml"
+            "cd /home/$PM_VPS_USER/Claude && sudo docker compose -f docker-compose.vps-paper.yml exec -T polymarket-paper-live python -m polymarket_predictive_engine.cli refresh-governance --config /app/polymarket_predictive_config.example.yaml"
 
       - name: Verify dashboard proof keys
         env:

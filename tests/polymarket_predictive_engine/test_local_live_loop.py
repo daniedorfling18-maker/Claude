@@ -114,6 +114,73 @@ def test_websocket_asset_discovery_prefers_fresh_scanner_context(tmp_path, monke
     }
 
 
+def test_websocket_asset_discovery_prioritises_governance_targets(tmp_path, monkeypatch):
+    loop = _load_loop_module()
+    monkeypatch.setenv("POLYMARKET_MODEL_PROBABILITIES_CSV", str(tmp_path / "missing_model_probabilities.csv"))
+    cfg = EngineConfig(
+        raw={"paths": {"output_root": str(tmp_path / "outputs")}},
+        path=tmp_path / "cfg.yaml",
+    )
+    _write_csv(
+        cfg.governance_root / "websocket_liquidity_targets.csv",
+        [
+            {
+                "token_id": "proof-target-token",
+                "market_slug": "bitcoin-up-or-down-proof-bucket",
+                "websocket_target_reason": "paper_confirmation_blocker",
+            },
+        ],
+    )
+    _write_csv(
+        cfg.output_root / "polymarket_shadow" / "shadow_positions.csv",
+        [
+            {"token_id": "shadow-token", "market_slug": "generic-shadow-market"},
+        ],
+    )
+    _write_csv(
+        cfg.output_root / "polymarket" / "market_snapshot.csv",
+        [
+            {"token_id": "scanner-token", "condition_id": "scanner-market"},
+        ],
+    )
+
+    asset_ids, sources = loop.discover_websocket_asset_ids(cfg, max_assets=2)
+
+    assert asset_ids == ["proof-target-token", "shadow-token"]
+    assert sources["proof-target-token"] == "websocket_liquidity_targets"
+
+
+def test_websocket_asset_discovery_keeps_open_positions_ahead_of_governance_targets(tmp_path, monkeypatch):
+    loop = _load_loop_module()
+    monkeypatch.setenv("POLYMARKET_MODEL_PROBABILITIES_CSV", str(tmp_path / "missing_model_probabilities.csv"))
+    cfg = EngineConfig(
+        raw={"paths": {"output_root": str(tmp_path / "outputs")}},
+        path=tmp_path / "cfg.yaml",
+    )
+    _write_csv(
+        cfg.output_root / "polymarket_portfolio" / "positions.csv",
+        [
+            {"token_id": "open-position-token", "market_slug": "open-paper-position"},
+        ],
+    )
+    _write_csv(
+        cfg.governance_root / "websocket_liquidity_targets.csv",
+        [
+            {
+                "token_id": "proof-target-token",
+                "market_slug": "solana-up-or-down-proof-bucket",
+                "websocket_target_reason": "paper_confirmation_blocker",
+            },
+        ],
+    )
+
+    asset_ids, sources = loop.discover_websocket_asset_ids(cfg, max_assets=2)
+
+    assert asset_ids == ["open-position-token", "proof-target-token"]
+    assert sources["open-position-token"] == "open_positions"
+    assert sources["proof-target-token"] == "websocket_liquidity_targets"
+
+
 def test_fast_updown_assets_come_from_positive_5m_cohort_evidence(tmp_path):
     loop = _load_loop_module()
     cfg = EngineConfig(

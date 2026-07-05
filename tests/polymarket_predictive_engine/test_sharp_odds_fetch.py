@@ -388,6 +388,56 @@ def test_fetch_skips_unknown_provider_sport_but_fetches_known_sports(tmp_path, m
     assert {row["market_key"] for row in rows} == {"h2h"}
 
 
+def test_summary_reports_minimum_requests_remaining(tmp_path, monkeypatch):
+    """The fetch rolls per-sport quota headers up to one conservative top-level number.
+
+    This is what the dashboard fetch-health badge reads: a dead key or exhausted Odds
+    API budget must be visible at a glance rather than buried inside per_sport.
+    """
+    api_key = "secret-key-123"
+    monkeypatch.setenv("THE_ODDS_API_KEY", api_key)
+    output = tmp_path / "sharp_odds.csv"
+
+    def fake_get(url, params=None, timeout=None):
+        if url.endswith("/sports"):
+            return _Response([{"key": "soccer_fifa_world_cup"}, {"key": "basketball_nba"}])
+        remaining = "480" if "basketball_nba" in url else "495"
+        return _Response(
+            [
+                {
+                    "id": "e1",
+                    "sport_key": "x",
+                    "sport_title": "X",
+                    "home_team": "Spain",
+                    "away_team": "France",
+                    "bookmakers": [_h2h("pinnacle", 1.7, 20.0, 2.2)],
+                }
+            ],
+            headers={"x-requests-remaining": remaining},
+        )
+
+    monkeypatch.setattr("polymarket_predictive_engine.sharp_odds_fetch.requests.get", fake_get)
+    cfg = EngineConfig(
+        raw={
+            "paths": {"output_root": str(tmp_path / "outputs")},
+            "sharp_odds_fetch": {
+                "sports": [
+                    {"key": "soccer_fifa_world_cup", "markets": "h2h"},
+                    {"key": "basketball_nba", "markets": "h2h"},
+                ],
+                "output_path": str(output),
+                "fetch_interval_minutes": 0,
+                "max_requests_per_run": 5,
+            },
+        },
+        path=tmp_path / "cfg.yaml",
+    )
+
+    summary = fetch_sharp_odds(cfg)
+
+    assert summary["requests_remaining"] == 480  # most conservative across sports
+
+
 def test_example_config_fetches_only_polymarket_mappable_markets():
     """WO-30: the shipped sharp_odds_fetch list targets only markets Polymarket lists.
 

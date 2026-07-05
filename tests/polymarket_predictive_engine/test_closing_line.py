@@ -148,6 +148,59 @@ def test_cohort_evidence_classification(tmp_path: Path):
     assert summary["positive_clv_cohorts"] == ["cohort_up"]
 
 
+def test_focus_view_excludes_frozen_updown_cohorts(tmp_path: Path):
+    cfg = _cfg(tmp_path, settings={"minimum_final_samples": 5, "bootstrap_iterations": 200})
+    positions = []
+    quote_rows = []
+    # Focus cohort (sharp-anchor World Cup): should drive the focus headline.
+    for i in range(6):
+        token = f"wc{i}"
+        positions.append(_position(token, "worldcup_sharp_anchor", entry=0.50, opened="2026-07-01T10:00:00Z", close="2026-07-01T12:00:00Z"))
+        quote_rows.append(_quote(token, "2026-07-01T11:00:00Z", 0.55 + i * 0.001))
+    # Frozen diagnostic cohort (crypto up/down): must be excluded from the focus read.
+    for i in range(6):
+        token = f"ud{i}"
+        positions.append(_position(token, "crypto_updown_5m", entry=0.50, opened="2026-07-01T10:00:00Z", close="2026-07-01T12:00:00Z"))
+        quote_rows.append(_quote(token, "2026-07-01T11:00:00Z", 0.40 - i * 0.001))
+    write_csv(cfg.output_root / "polymarket_shadow" / "shadow_positions.csv", positions)
+    write_csv(cfg.output_root / "polymarket_training" / "websocket_market_features.csv", quote_rows)
+
+    summary = build_closing_line_value(cfg, as_of=AS_OF)
+    focus = summary["focus_view"]
+
+    assert focus["focus_cohorts"] == ["worldcup_sharp_anchor"]
+    assert focus["frozen_cohorts"] == ["crypto_updown_5m"]
+    assert focus["focus_positions"] == 6
+    assert focus["frozen_positions"] == 6
+    # Headline mixes both (net near zero); focus isolates the positive WC signal.
+    assert focus["focus_mean_final_clv"] > 0
+    assert focus["frozen_mean_final_clv"] < 0
+    assert focus["focus_mean_final_clv"] > (summary["mean_final_clv"] or 0)
+    assert focus["focus_positive_cohorts"] == ["worldcup_sharp_anchor"]
+    # The frozen updown cohort must never appear as a focus positive cohort.
+    assert "crypto_updown_5m" not in focus["focus_positive_cohorts"]
+
+
+def test_focus_view_respects_configured_substrings(tmp_path: Path):
+    cfg = _cfg(tmp_path, settings={"minimum_final_samples": 5, "diagnostic_cohort_substrings": ["tennis"]})
+    positions = [
+        _position("a", "tennis_h2h", entry=0.5, opened="2026-07-01T10:00:00Z", close="2026-07-01T12:00:00Z"),
+        _position("b", "crypto_updown_5m", entry=0.5, opened="2026-07-01T10:00:00Z", close="2026-07-01T12:00:00Z"),
+    ]
+    quote_rows = [
+        _quote("a", "2026-07-01T11:00:00Z", 0.55),
+        _quote("b", "2026-07-01T11:00:00Z", 0.55),
+    ]
+    write_csv(cfg.output_root / "polymarket_shadow" / "shadow_positions.csv", positions)
+    write_csv(cfg.output_root / "polymarket_training" / "websocket_market_features.csv", quote_rows)
+
+    summary = build_closing_line_value(cfg, as_of=AS_OF)
+    focus = summary["focus_view"]
+    # Only the configured substring ("tennis") is frozen now; updown counts as focus.
+    assert focus["frozen_cohorts"] == ["tennis_h2h"]
+    assert focus["focus_cohorts"] == ["crypto_updown_5m"]
+
+
 def test_shrunk_kelly_never_sizes_larger():
     plain = kelly_fraction(0.60, 0.50, cap=1.0)
     assert shrunk_kelly_fraction(0.60, 0.50, 1.0, shrinkage=0.0) == plain

@@ -873,9 +873,12 @@ async function load() {
           ["Generated", closingLine.generated_at_utc || "-"],
           ["Positions scored", closingLine.positions_scored],
           ["Final close lines", finalLineDisplay()],
-          ["Mean final CLV", closingLine.mean_final_clv, v=>fmtNum(v, 4)],
+          ["Mean final CLV (all cohorts)", closingLine.mean_final_clv, v=>fmtNum(v, 4)],
+          ["Focus mean final CLV (ex-updown)", (closingLine.focus_view||{}).focus_mean_final_clv, v=>fmtNum(v, 4)],
+          ["Focus final positions", (closingLine.focus_view||{}).focus_final_positions],
           ["Beat close rate", closingLine.beat_close_rate, fmtClvBeatRate],
           ["Positive CLV cohorts", positiveClv.length ? positiveClv : "none yet", joinText],
+          ["Focus positive cohorts", ((closingLine.focus_view||{}).focus_positive_cohorts||[]).length ? (closingLine.focus_view||{}).focus_positive_cohorts : "none yet", joinText],
           ["Governance note", closingLine.governance_note || "Diagnostic only; no trading gate changed.", v=>longText(v, 260)]
         ]) + (positiveClv.length ? `<div class="alertGrid">${alertBox("Positive CLV cohorts found", joinText(positiveClv), "good")}</div>` : "")
         + titledTable("CLV by cohort", clvCohorts, [
@@ -1790,7 +1793,19 @@ async function load() {
       ["Rejected reason","reason", v=>longText(v, 220)]
     ]);
     const anchors = data.heartbeat?.independent_fundamentals || data.independent_anchor_status || {};
-    document.getElementById("independentFundamentals").innerHTML = table([
+    const fetchHealth = data.sharp_fetch_health || {};
+    const fetchHealthKind = fetchHealth.health === "ok" ? "good" : (fetchHealth.health === "attention" ? "bad" : "warn");
+    const fetchHealthBadge = Object.keys(fetchHealth).length
+      ? `<div class="alertGrid">${alertBox(
+          "Sharp odds fetch health: " + (fetchHealth.health || "unknown"),
+          "status=" + escapeHtml(String(fetchHealth.status ?? "-"))
+          + " · provider=" + escapeHtml(String(fetchHealth.provider_status ?? "-"))
+          + " · rows=" + escapeHtml(String(fetchHealth.rows ?? "-"))
+          + " · Odds API requests left=" + escapeHtml(String(fetchHealth.requests_remaining ?? "unknown"))
+          + " · last fetch " + escapeHtml(String(fetchHealth.generated_at_utc || "not yet run")),
+          fetchHealthKind)}</div>`
+      : "";
+    document.getElementById("independentFundamentals").innerHTML = fetchHealthBadge + table([
       { anchor: "Sharp odds fetch", ...(anchors.sharp_odds_fetch || {}) },
       { anchor: "Sharp de-vig anchor", ...(anchors.sharp_anchor || {}) },
       { anchor: "Crypto target generator", ...(anchors.crypto_targets || {}) },
@@ -2848,6 +2863,44 @@ def _shadow_settlement_watch(shadow_positions: list[dict[str, Any]], shadow_summ
         "settlement_checks": shadow_summary.get("settlement_checks"),
         "settled_positions": shadow_summary.get("settled_positions"),
         "settlement_reason_counts": shadow_summary.get("settlement_reason_counts", {}),
+    }
+
+
+def _sharp_fetch_health(independent_anchor_status: dict[str, Any]) -> dict[str, Any]:
+    """Compact, top-line health badge for the sharp-odds fetch.
+
+    During an unattended run the biggest silent failure is a dead Odds API key or an
+    exhausted request budget: the fetch keeps 'succeeding' with zero rows and no anchor
+    ever forms. This promotes the key liveness signals to one glanceable object so that
+    failure mode surfaces on day one instead of at the end of the evidence window.
+    """
+    status_map = independent_anchor_status if isinstance(independent_anchor_status, dict) else {}
+    fetch = status_map.get("sharp_odds_fetch") if isinstance(status_map.get("sharp_odds_fetch"), dict) else {}
+    status = str(fetch.get("status") or "unknown")
+    provider_status = str(fetch.get("provider_status") or "unknown")
+    rows = int(safe_float(fetch.get("rows")) or 0)
+    remaining = fetch.get("requests_remaining")
+    remaining_num = safe_float(remaining)
+    # Healthy = the provider was actually reached and either produced rows or is between
+    # scheduled fetches with a live key; unhealthy = missing key, hard error, or quota gone.
+    if status in {"missing_api_key", "error"} or provider_status in {"missing_api_key"}:
+        health = "attention"
+    elif remaining_num is not None and remaining_num <= 0:
+        health = "attention"
+    elif status in {"fetched", "partial", "fallback_loaded"} or provider_status == "attempted":
+        health = "ok"
+    else:
+        health = "unknown"
+    return {
+        "health": health,
+        "status": status,
+        "provider_status": provider_status,
+        "rows": rows,
+        "markets": int(safe_float(fetch.get("markets")) or 0),
+        "requests_used": fetch.get("requests_used"),
+        "requests_remaining": remaining if remaining not in (None, "") else "unknown",
+        "generated_at_utc": fetch.get("generated_at_utc"),
+        "note": "Dead key / exhausted Odds API quota shows as health=attention. Diagnostic only; no gate changed.",
     }
 
 
@@ -5325,6 +5378,7 @@ def render_dashboard(cfg: EngineConfig, latest_report: dict[str, Any] | None = N
         "shadow_signal_cohort_pnl": shadow_summary,
         "shadow_settlement_watch": _shadow_settlement_watch(shadow_positions, shadow_summary),
         "independent_anchor_status": independent_anchor_status,
+        "sharp_fetch_health": _sharp_fetch_health(independent_anchor_status),
         "strategy_v2": strategy_v2_status,
         "price_action_scout": price_action_scout_status,
         "price_action_microstructure": price_action_microstructure_status,

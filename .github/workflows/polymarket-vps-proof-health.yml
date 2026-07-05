@@ -26,7 +26,7 @@ concurrency:
 jobs:
   proof-health:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
 
     steps:
       - name: Validate monitor secrets
@@ -116,6 +116,21 @@ jobs:
             docker-compose.vps-paper.yml \
             .env.vps-paper.example 2>/dev/null || true)"
           export ACTUAL_SHA ORIGIN_MAIN_SHA RUNTIME_DIFF
+
+          if command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1; then
+            DOCKER="docker"
+          else
+            DOCKER="sudo docker"
+          fi
+          COMPOSE_FILE="${PM_VPS_COMPOSE_FILE:-docker-compose.vps-paper.yml}"
+          echo "[proof-health] refreshing governance + dashboard artifacts before verification"
+          $DOCKER compose -f "$COMPOSE_FILE" exec -T polymarket-paper-live \
+            python -m polymarket_predictive_engine.cli refresh-governance \
+            --config /app/polymarket_predictive_config.example.yaml >/tmp/polymarket-proof-health-refresh.log 2>&1 || {
+              cat /tmp/polymarket-proof-health-refresh.log
+              echo "::error::refresh-governance failed before proof-health verification"
+              exit 1
+            }
 
           PORT="$(python3 - <<'PY'
           from pathlib import Path

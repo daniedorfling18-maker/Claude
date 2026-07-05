@@ -721,18 +721,21 @@ def test_stale_prediction_future_does_not_block_governance_forever():
 
     assert loop._prediction_blocks_governance(
         future,
+        prediction_mode="full",
         prediction_started_ts=100.0,
         max_block_seconds=90.0,
         now_ts=150.0,
     )
     assert not loop._prediction_blocks_governance(
         future,
+        prediction_mode="full",
         prediction_started_ts=100.0,
         max_block_seconds=90.0,
         now_ts=191.0,
     )
     assert not loop._prediction_blocks_governance(
         future,
+        prediction_mode="full",
         prediction_started_ts=100.0,
         max_block_seconds=0.0,
         now_ts=101.0,
@@ -831,6 +834,20 @@ def test_paper_bridge_prediction_is_not_starved_by_background_lanes():
     assert not loop._governance_due_blocks_prediction(
         prediction_mode="paper-bridge",
         governance_due_now=True,
+    )
+
+
+def test_paper_bridge_prediction_does_not_starve_governance():
+    loop = _load_loop_module()
+    future: Future[dict[str, object]] = Future()
+    assert future.set_running_or_notify_cancel()
+
+    assert not loop._prediction_blocks_governance(
+        future,
+        prediction_mode="paper-bridge",
+        prediction_started_ts=100.0,
+        max_block_seconds=90.0,
+        now_ts=101.0,
     )
 
 

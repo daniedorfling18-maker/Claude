@@ -994,10 +994,13 @@ def _background_job_blocks_governance(
 def _prediction_blocks_governance(
     prediction_future: Future[Any] | None,
     *,
+    prediction_mode: str,
     prediction_started_ts: float,
     max_block_seconds: float,
     now_ts: float,
 ) -> bool:
+    if prediction_mode == "paper-bridge":
+        return False
     return _background_job_blocks_governance(
         prediction_future,
         started_ts=prediction_started_ts,
@@ -1509,6 +1512,7 @@ def main(argv: list[str] | None = None) -> int:
                 )
                 prediction_blocks_governance = _prediction_blocks_governance(
                     prediction_future,
+                    prediction_mode=args.prediction_mode,
                     prediction_started_ts=prediction_started_ts,
                     max_block_seconds=args.prediction_governance_block_seconds,
                     now_ts=now_ts,
@@ -1620,6 +1624,7 @@ def main(argv: list[str] | None = None) -> int:
                 )
                 prediction_blocks_governance = _prediction_blocks_governance(
                     prediction_future,
+                    prediction_mode=args.prediction_mode,
                     prediction_started_ts=prediction_started_ts,
                     max_block_seconds=args.prediction_governance_block_seconds,
                     now_ts=time.time(),
@@ -1790,6 +1795,7 @@ def main(argv: list[str] | None = None) -> int:
                 )
                 prediction_blocks_governance = _prediction_blocks_governance(
                     prediction_future,
+                    prediction_mode=args.prediction_mode,
                     prediction_started_ts=prediction_started_ts,
                     max_block_seconds=args.prediction_governance_block_seconds,
                     now_ts=time.time(),

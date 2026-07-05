@@ -1,0 +1,319 @@
+name: Polymarket VPS Proof Health
+
+on:
+  workflow_dispatch:
+    inputs:
+      stale_after_minutes:
+        description: "Fail if dashboard/governance artifacts are older than this many minutes."
+        required: false
+        default: "480"
+      fail_on_bad_proof:
+        description: "Fail when proof_questions.status is bad. Leave false during evidence collection."
+        required: false
+        type: boolean
+        default: false
+  schedule:
+    # Every six hours. This is an operational health/proof check, not a strategy tweak.
+    - cron: "17 */6 * * *"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: polymarket-vps-proof-health
+  cancel-in-progress: false
+
+jobs:
+  proof-health:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Validate monitor secrets
+        env:
+          PM_VPS_HOST: ${{ secrets.PM_VPS_HOST }}
+          PM_VPS_USER: ${{ secrets.PM_VPS_USER }}
+          PM_VPS_SSH_PRIVATE_KEY: ${{ secrets.PM_VPS_SSH_PRIVATE_KEY }}
+        run: |
+          set -euo pipefail
+          missing=0
+          for name in PM_VPS_HOST PM_VPS_USER PM_VPS_SSH_PRIVATE_KEY; do
+            if [ -z "${!name:-}" ]; then
+              echo "::error::Repository secret ${name} is required for VPS proof-health checks."
+              missing=1
+            fi
+          done
+          exit "$missing"
+
+      - name: Prepare SSH
+        env:
+          PM_VPS_HOST: ${{ secrets.PM_VPS_HOST }}
+          PM_VPS_PORT: ${{ secrets.PM_VPS_PORT || '22' }}
+          PM_VPS_SSH_PRIVATE_KEY: ${{ secrets.PM_VPS_SSH_PRIVATE_KEY }}
+        run: |
+          set -euo pipefail
+          install -m 700 -d "$RUNNER_TEMP/ssh"
+          python3 - <<'PY'
+          import os
+          from pathlib import Path
+
+          raw_key = os.environ.get("PM_VPS_SSH_PRIVATE_KEY", "")
+          if "\\n" in raw_key and "\n" not in raw_key:
+              raw_key = raw_key.replace("\\n", "\n")
+          raw_key = raw_key.replace("\r\n", "\n").replace("\r", "\n").strip() + "\n"
+          Path(os.environ["RUNNER_TEMP"], "ssh", "vps_key").write_text(raw_key, encoding="utf-8")
+          PY
+          chmod 600 "$RUNNER_TEMP/ssh/vps_key"
+          if ! ssh-keygen -y -f "$RUNNER_TEMP/ssh/vps_key" >/dev/null 2>&1; then
+            echo "::error::PM_VPS_SSH_PRIVATE_KEY is present but is not a loadable private key."
+            exit 1
+          fi
+          ssh-keyscan -p "$PM_VPS_PORT" -H "$PM_VPS_HOST" > "$RUNNER_TEMP/ssh/known_hosts"
+          chmod 600 "$RUNNER_TEMP/ssh/known_hosts"
+
+      - name: Check VPS proof health
+        env:
+          PM_VPS_HOST: ${{ secrets.PM_VPS_HOST }}
+          PM_VPS_PORT: ${{ secrets.PM_VPS_PORT || '22' }}
+          PM_VPS_USER: ${{ secrets.PM_VPS_USER }}
+          PM_VPS_REPO_DIR: ${{ secrets.PM_VPS_REPO_DIR || '~/Claude' }}
+          EXPECTED_SHA: ${{ github.sha }}
+          STALE_AFTER_MINUTES: ${{ github.event.inputs.stale_after_minutes || '480' }}
+          FAIL_ON_BAD_PROOF: ${{ github.event.inputs.fail_on_bad_proof || 'false' }}
+        run: |
+          set -euo pipefail
+          report="$RUNNER_TEMP/polymarket-proof-health.md"
+          set +e
+          ssh \
+            -i "$RUNNER_TEMP/ssh/vps_key" \
+            -o BatchMode=yes \
+            -o UserKnownHostsFile="$RUNNER_TEMP/ssh/known_hosts" \
+            -o ServerAliveInterval=30 \
+            -o ServerAliveCountMax=5 \
+            -o TCPKeepAlive=yes \
+            -o ConnectTimeout=30 \
+            -p "$PM_VPS_PORT" \
+            "$PM_VPS_USER@$PM_VPS_HOST" \
+            "PM_VPS_REPO_DIR='$PM_VPS_REPO_DIR' EXPECTED_SHA='$EXPECTED_SHA' STALE_AFTER_MINUTES='$STALE_AFTER_MINUTES' FAIL_ON_BAD_PROOF='$FAIL_ON_BAD_PROOF' bash -s" > "$report" <<'REMOTE'
+          set -euo pipefail
+
+          REPO_DIR="${PM_VPS_REPO_DIR/#\~/$HOME}"
+          if [ ! -d "$REPO_DIR/.git" ]; then
+            echo "::error::VPS repo directory is missing or not a git checkout: $REPO_DIR"
+            exit 1
+          fi
+
+          cd "$REPO_DIR"
+          ACTUAL_SHA="$(git rev-parse HEAD 2>/dev/null || echo unknown)"
+
+          PORT="$(python3 - <<'PY'
+          from pathlib import Path
+
+          port = "8765"
+          env_path = Path(".env")
+          if env_path.exists():
+              for line in env_path.read_text(encoding="utf-8", errors="replace").splitlines():
+                  stripped = line.strip()
+                  if stripped.startswith("POLYMARKET_DASHBOARD_PORT="):
+                      raw = stripped.split("=", 1)[1].strip().strip('"').strip("'")
+                      port = raw or port
+          print(port)
+          PY
+          )"
+
+          DASHBOARD_JSON="/tmp/polymarket-proof-health-dashboard-${GITHUB_RUN_ID:-manual}.json"
+          DASHBOARD_HTML="/tmp/polymarket-proof-health-dashboard-${GITHUB_RUN_ID:-manual}.html"
+          curl -fsS --max-time 15 "http://127.0.0.1:${PORT}/dashboard_data.json" > "$DASHBOARD_JSON"
+          curl -fsS --max-time 15 "http://127.0.0.1:${PORT}/" > "$DASHBOARD_HTML"
+
+          python3 - "$DASHBOARD_JSON" "$DASHBOARD_HTML" <<'PY'
+          from __future__ import annotations
+
+          import json
+          import os
+          import sys
+          from datetime import datetime, timezone
+          from pathlib import Path
+          from typing import Any
+
+          dashboard_path = Path(sys.argv[1])
+          html_path = Path(sys.argv[2])
+          repo_root = Path.cwd()
+          governance_root = repo_root / "outputs" / "polymarket_model_governance"
+
+          expected_sha = os.environ.get("EXPECTED_SHA", "")
+          actual_sha = os.environ.get("ACTUAL_SHA", "")
+          stale_after_minutes = int(float(os.environ.get("STALE_AFTER_MINUTES") or 480))
+          fail_on_bad_proof = str(os.environ.get("FAIL_ON_BAD_PROOF") or "false").lower() == "true"
+
+          errors: list[str] = []
+          warnings: list[str] = []
+
+          def load_json(path: Path, *, required: bool = False) -> dict[str, Any]:
+              try:
+                  payload = json.loads(path.read_text(encoding="utf-8"))
+              except Exception as exc:
+                  if required:
+                      errors.append(f"Cannot read required JSON artifact {path}: {exc}")
+                  else:
+                      warnings.append(f"Cannot read optional JSON artifact {path}: {exc}")
+                  return {}
+              return payload if isinstance(payload, dict) else {}
+
+          def parse_ts(value: Any) -> datetime | None:
+              if not value:
+                  return None
+              text = str(value).strip()
+              if not text:
+                  return None
+              for candidate in (text, text.replace("Z", "+00:00")):
+                  try:
+                      dt = datetime.fromisoformat(candidate)
+                      return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
+                  except ValueError:
+                      pass
+              return None
+
+          def num(value: Any) -> float | None:
+              try:
+                  if value is None or value == "":
+                      return None
+                  return float(value)
+              except (TypeError, ValueError):
+                  return None
+
+          dashboard = load_json(dashboard_path, required=True)
+          html = html_path.read_text(encoding="utf-8", errors="replace") if html_path.exists() else ""
+          coverage = load_json(governance_root / "sharp_anchor_coverage.json", required=True)
+          proof_artifact = load_json(governance_root / "proof_questions.json")
+          fetch_summary = load_json(governance_root / "sharp_odds_fetch_summary.json")
+          governance_refresh = load_json(governance_root / "governance_refresh.json")
+
+          if actual_sha != expected_sha:
+              errors.append(f"VPS SHA mismatch: actual={actual_sha}, expected={expected_sha}")
+
+          required_dashboard_keys = [
+              "deployment_health",
+              "mispricing_alpha_bridge",
+              "sharp_sports_funnel",
+              "sharp_fetch_health",
+              "proof_questions",
+          ]
+          for key in required_dashboard_keys:
+              if key not in dashboard:
+                  errors.append(f"dashboard_data.json is missing required key: {key}")
+
+          if "proofQuestions" not in html and "Four proof questions" not in html:
+              errors.append("dashboard HTML does not expose the four proof questions section")
+
+          sharp_health = dashboard.get("sharp_fetch_health") if isinstance(dashboard.get("sharp_fetch_health"), dict) else {}
+          fetch_status = str(
+              sharp_health.get("status")
+              or sharp_health.get("provider_status")
+              or fetch_summary.get("status")
+              or fetch_summary.get("provider_status")
+              or "unknown"
+          )
+          fetch_health = str(sharp_health.get("health") or "").lower()
+          fetch_rows = num(sharp_health.get("rows") or sharp_health.get("rows_written") or fetch_summary.get("rows_written"))
+          requests_remaining = num(sharp_health.get("requests_remaining") or fetch_summary.get("requests_remaining"))
+
+          attention_statuses = {
+              "missing_api_key",
+              "missing-key",
+              "zero_quota",
+              "zero-quota",
+              "hard_error",
+              "provider_error",
+              "error",
+          }
+          if fetch_health == "attention":
+              errors.append(f"sharp_fetch_health requires attention: status={fetch_status}, requests_remaining={requests_remaining}")
+          if fetch_status.lower() in attention_statuses:
+              errors.append(f"sharp odds fetch is not live/healthy: status={fetch_status}")
+          if requests_remaining is not None and requests_remaining <= 0:
+              errors.append("Odds API quota appears exhausted: requests_remaining <= 0")
+          if fetch_status.lower() == "skipped_budget":
+              warnings.append("Sharp fetch is currently skipped by fetch-interval budget; this is acceptable if recent provider data exists.")
+          if fetch_rows == 0 and fetch_status.lower() not in {"skipped_budget", "fallback_loaded"}:
+              warnings.append(f"Sharp fetch wrote zero rows with status={fetch_status}; inspect if this persists.")
+
+          coverage_status = str(coverage.get("status") or "unknown")
+          total_fetched = int(num(coverage.get("total_rows_fetched")) or 0)
+          total_mapped = int(num(coverage.get("total_rows_mapped")) or 0)
+          flagged = int(num(coverage.get("flagged_no_mappable_market_count")) or 0)
+          join_rate = (total_mapped / total_fetched) if total_fetched else None
+          if coverage_status not in {"ok", "missing_anchor_summary"}:
+              errors.append(f"sharp_anchor_coverage status is unexpected: {coverage_status}")
+          if flagged > 0:
+              errors.append(f"WO-31 flagged {flagged} no_mappable_market sport/market pair(s); trim or review the fetch list.")
+          if total_fetched == 0:
+              warnings.append("WO-31 coverage has zero fetched rows; if sharp fetch is live, this needs review after the next fetch cycle.")
+
+          proof = dashboard.get("proof_questions") if isinstance(dashboard.get("proof_questions"), dict) else proof_artifact
+          proof_status = str(proof.get("status") or "unknown") if isinstance(proof, dict) else "missing"
+          questions = proof.get("questions") if isinstance(proof, dict) else []
+          questions = questions if isinstance(questions, list) else []
+          if not questions:
+              errors.append("proof_questions exists but contains no questions")
+          if len(questions) != 4:
+              errors.append(f"proof_questions should contain 4 questions; found {len(questions)}")
+          if proof_status == "bad" and fail_on_bad_proof:
+              errors.append("proof_questions.status is bad and fail_on_bad_proof=true")
+          elif proof_status == "bad":
+              warnings.append("proof_questions.status is bad, but this check is configured not to fail on strategy evidence during collection.")
+
+          freshness_sources = [
+              ("dashboard_data", dashboard.get("generated_at_utc") or dashboard.get("updated_at_utc")),
+              ("governance_refresh", governance_refresh.get("generated_at_utc")),
+              ("sharp_anchor_coverage", coverage.get("generated_at_utc")),
+              ("proof_questions", proof.get("generated_at_utc") if isinstance(proof, dict) else None),
+          ]
+          now = datetime.now(timezone.utc)
+          for label, raw_ts in freshness_sources:
+              parsed = parse_ts(raw_ts)
+              if parsed is None:
+                  warnings.append(f"{label} has no parseable generated timestamp: {raw_ts!r}")
+                  continue
+              age_minutes = (now - parsed).total_seconds() / 60.0
+              if age_minutes > stale_after_minutes:
+                  errors.append(f"{label} is stale: age={age_minutes:.1f} minutes > {stale_after_minutes}")
+
+          print("## Polymarket VPS proof-health check")
+          print("")
+          print(f"- VPS SHA: `{actual_sha}`")
+          print(f"- Expected SHA: `{expected_sha}`")
+          print(f"- Dashboard port: `{os.environ.get('PORT', 'unknown')}`")
+          print(f"- Sharp fetch status: `{fetch_status}`")
+          print(f"- Sharp fetch health: `{fetch_health or 'unknown'}`")
+          print(f"- Odds API requests remaining: `{requests_remaining if requests_remaining is not None else 'unknown'}`")
+          print(f"- Sharp rows written/fetched: `{fetch_rows if fetch_rows is not None else 'unknown'}`")
+          print(f"- WO-31 coverage: fetched=`{total_fetched}`, mapped=`{total_mapped}`, join_rate=`{join_rate if join_rate is not None else 'n/a'}`, zero_join_flags=`{flagged}`")
+          print(f"- Proof status: `{proof_status}`")
+          print("")
+          print("### Four proof questions")
+          for row in questions:
+              if not isinstance(row, dict):
+                  continue
+              print(f"- **{row.get('question', 'unknown')}** — `{row.get('severity', 'unknown')}` — {row.get('key_metric', '-')}")
+          if warnings:
+              print("")
+              print("### Warnings")
+              for item in warnings:
+                  print(f"- {item}")
+          if errors:
+              print("")
+              print("### Errors")
+              for item in errors:
+                  print(f"- {item}")
+                  print(f"::error::{item}")
+              raise SystemExit(1)
+          print("")
+          print("Status: **healthy / no action required**")
+          PY
+          REMOTE
+          status=$?
+          set -e
+          cat "$report"
+          cat "$report" >> "$GITHUB_STEP_SUMMARY"
+          exit "$status"

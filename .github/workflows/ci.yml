@@ -56,6 +56,7 @@ jobs:
               'data-inventory.yml',
               'deploy-polymarket-vps-paper.yml',
               'polymarket-mispricing-bot.yml',
+              'polymarket-vps-proof-health.yml',
               'refresh-locked-superbru-card.yml',
               'repo-audit-bundle.yml',
               'superbru-clv-snapshot.yml',
@@ -73,6 +74,7 @@ jobs:
               'deploy-polymarket-vps-paper.yml': {'workflow_dispatch'},
               'ci.yml': {'push', 'pull_request'},
               'polymarket-mispricing-bot.yml': {'workflow_dispatch'},
+              'polymarket-vps-proof-health.yml': {'schedule', 'workflow_dispatch'},
               'refresh-locked-superbru-card.yml': {'schedule', 'workflow_dispatch'},
               'repo-audit-bundle.yml': {'push'},
               'superbru-clv-snapshot.yml': {'schedule', 'workflow_dispatch'},
@@ -121,6 +123,7 @@ jobs:
               'deploy-polymarket-vps-paper.yml',
               'refresh-locked-superbru-card.yml',
               'polymarket-mispricing-bot.yml',
+              'polymarket-vps-proof-health.yml',
               'superbru-clv-snapshot.yml',
           }
           for name in sorted(expected & present):

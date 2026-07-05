@@ -1,6 +1,8 @@
 # Polymarket Codex Work Orders
 
-Last updated: 2026-07-03 (WO-11/12/13/14/15/16/17/18/19/23/24/25/26/27 code landed; strategic edge reset: WO-24..WO-27 added; WO-20/21/22 landed; read docs/POLYMARKET_EDGE_STRATEGY_RESET.md first)
+Last updated: 2026-07-05 (WO-1..WO-30 landed; **WO-31 is the only open work order**; WP13 is a venue
+decision, not a WO. Crypto up/down is frozen as a diagnostic — see `AGENTS.md`. Read
+`docs/POLYMARKET_EDGE_STRATEGY_RESET.md` first.)
 
 Mechanical, file-level implementation instructions for coding agents (Codex or any other code
 changer). The architecture and priorities live in `docs/POLYMARKET_QUANT_MODE_CHARTER.md`; this file
@@ -806,30 +808,15 @@ Work the queue in the Sequencing order below. For each work order:
 7. End of night: append a "Night report <date>" section at the bottom of this file — one line
    per WO: landed / skipped(reason) / blocked(note), plus the final full-suite test count.
 
-## VPS dashboard audit — 2026-07-03 (orchestrator)
+## VPS dashboard audit — 2026-07-03 (RESOLVED — historical)
 
-Live dashboard at the VPS was audited against main at 03:04Z. The payload is fresh and runs
-current code (all sections present, WO-10 wiring live). Findings below are filed as WO-20..WO-23.
-Root causes, verified in the repo:
+A live-dashboard audit against main filed four findings, all since fixed (the detailed root-cause
+writeup was removed as stale):
 
-1. **Collection does not follow positions.** 28 of 30 shadow positions had no usable quote
-   history (CLV: 0 final lines; attribution: 22 of 24 closed positions unattributable), and all 6
-   open paper positions are on July-2 intraday ETH/XRP up-or-down markets that settled hours ago
-   but cannot exit or settle — no fresh quotes (exit guard blocks) and no resolution rows. The
-   websocket feature file holds 119k rows of history, so retention is NOT the issue; the
-   subscribed token set simply never included these positions' tokens.
-2. **Raw vs audited P&L.** Raw ledger equity says +$55.27 since baseline; audited quote-consistent
-   P&L is +$0.03 (`pnl_audit_state: raw_pnl_contains_quote_conflicts`, 5 conflicted + 6 unverified
-   round trips). The engine's decisions correctly use the audited number and the headline card is
-   honest, but equity/cash tiles and the account P&L line still surface the raw number without the
-   caveat.
-3. **Evidence-free extrapolations render as facts.** Promotion watchlist shows a cohort
-   "run-rate $1,045/month" from 3 fills over 38h; CLV shows "beat close 0.0%" with zero final
-   lines; "Algo replay best" displays the null strategy (0 fills) as best because the only real
-   strategy lost money (-$8.55 on $30).
-4. **Deployment-mode confusion.** Oversight warns "Shadow research cycle has not started" while
-   `evidence_freshness` correctly reports the legacy live loop as the fresh driver on this VPS;
-   Strategy V2 renders "missing". Two sections disagree about what should be running.
+1. Collection did not follow open positions → **WO-20** (position-aware quote collection).
+2. Raw vs audited P&L surfaced without a caveat → **WO-22** (evidence-gated display).
+3. Evidence-free extrapolations rendered as facts → **WO-22**.
+4. Shadow-cycle vs legacy-live-loop deployment-mode confusion → **WO-23**.
 
 ---
 
@@ -1004,9 +991,15 @@ NBA, MLB, MMA, ATP, and WTA; added provider sports-list validation, unknown-spor
 clear "Will Team beat Team?" YES contracts map to bookmaker team outcomes without guessing NO/draw
 rows; added unmapped-row samples; and made sharp-anchor coding errors fail loud in the VPS loop.
 Tests cover missing key, provider errors, fallback CSVs, budget skips, unknown sports, h2h joins,
-and no-guess unmapped outcomes. Runtime note: GitHub confirms `THE_ODDS_API_KEY` exists as a sealed
-secret. The deploy workflow can copy it into the VPS `.env`, but that path remains blocked until
-`PM_VPS_SSH_PRIVATE_KEY` is populated with the private key matching the VPS public key.
+and no-guess unmapped outcomes.
+
+**Superseded in part by WO-30 (2026-07-05):** the per-game h2h broadening to `basketball_nba` /
+`baseball_mlb` / `mma_mixed_martial_arts` / `tennis_atp` / `tennis_wta` was reverted — Polymarket
+lists no per-match markets for those, so they mapped to nothing and burned Odds API budget. Still
+live from WO-24: pipeline activation, provider sports-list validation, unknown-sport skipping,
+`max_requests_per_run`/`fetch_interval_minutes` budget gating, and the h2h join machinery (kept for
+WC h2h → the WO-29 composite). Runtime blocker resolved: `PM_VPS_SSH_PRIVATE_KEY` is populated and
+the VPS deploy lane runs green.
 
 ---
 
@@ -1116,7 +1109,10 @@ shadow-only forwarding.
 
 ---
 
-## WO-28 — Smart-flow CLV watchlist for public wallet fills — `done` (2026-07-03, MEDIUM)
+## WO-28S — Smart-flow CLV watchlist for public wallet fills — `done` (2026-07-03, MEDIUM)
+
+_(Renumbered 2026-07-05 from a duplicate "WO-28". The h2h anchor→token join below keeps `WO-28`
+because WO-29 builds on it by number.)_
 
 **Goal:** add the first "follow proven flow" research lane from
 `docs/POLYMARKET_STRATEGY_OPTIONS.md`: score public wallet fills by CLV, then watch only wallets
@@ -1234,7 +1230,7 @@ advance fair); swap NBA/MLB per-game h2h for `basketball_nba_championship_winner
 provider does not expose, so unknown keys are logged-and-skipped, never fatal. Test:
 `test_example_config_fetches_only_polymarket_mappable_markets`. No gate/threshold/de-vig change.
 
-## WO-31 — Per-sport anchor coverage reconciliation and auto-trim signal — `open` (MEDIUM)
+## WO-31 — Per-sport anchor coverage reconciliation and auto-trim signal — `done` (2026-07-05, PR #65, MEDIUM)
 
 **Goal:** measure per-sport join rate over cycles and surface sports that produce zero token joins
 across N cycles, so the fetch list is trimmed on evidence, not intuition.
@@ -1251,6 +1247,17 @@ on the anchor artifact `generated_at_utc`); classify fail-closed `mappable` (joi
 / `collecting_coverage_evidence`; `no_mappable_market` is a **recommendation string only**, never an
 automatic config edit. Standard `paper_trading_invoked`/`live_trading_invoked` false flags.
 
+**Landed 2026-07-05 (PR #65):** `sharp_anchor_coverage.py` + CLI `sharp-anchor-coverage`, wired into
+`refresh-governance`. Writes `sharp_anchor_coverage.json` and idempotent
+`sharp_anchor_coverage_history.csv`; classification is fail-closed and `no_mappable_market` is a
+recommendation string only (verified: the module never writes config, mutates gates, or touches
+env). The same PR added a dashboard **proof-questions overlay** (`dashboard_proof_questions.py`,
+`proof_questions` payload key) answering the four go/no-go questions — (1) sharp-anchor rows mapped?
+(2) dutch-arb persistent opportunities? (3) focus-view CLV positive with enough samples? (4) audited
+paper P&L positive after governed probes? — plus a scheduled `polymarket-vps-proof-health` workflow
+(every 6h) that alerts on stale artifacts, bad proof status, or `sharp_fetch_health=attention`. No
+gate/threshold/live-path change; full suite green (552).
+
 ## WP13 (decision, not a work order) — per-match sports belongs on Kalshi/Betfair
 
 The market-structure finding means the per-match sharp-anchor edge cannot be harvested on Polymarket
@@ -1260,39 +1267,21 @@ Left as a decision, not an open WO; spec it only on an explicit go.
 
 ---
 
-## Sequencing
+## Status (2026-07-05)
 
-Runtime update (2026-07-05): `PM_VPS_SSH_PRIVATE_KEY` is populated so the VPS deploy lane works.
-WO-29 landed (composite advance bridge). WO-30 landed (sharp fetch refocused onto mappable markets).
-Crypto up/down is now frozen as a diagnostic — see the focus-discipline rule in `AGENTS.md`.
+Runtime: `PM_VPS_SSH_PRIVATE_KEY` is populated and the VPS deploy lane runs green (the deploy
+workflow is hardened with SSH keepalives). Crypto up/down is frozen as a diagnostic — see the
+focus-discipline rule in `AGENTS.md`.
 
-```text
-WO-1..WO-6, WO-8, WO-9   done and audited (2026-07-02)
+- **Done:** WO-1 .. WO-27, WO-28 (h2h anchor→token join), WO-28S (smart-flow CLV watchlist),
+  WO-29 (composite advance fair), WO-30 (sharp fetch refocused onto mappable markets),
+  WO-31 (per-sport anchor coverage + proof-questions overlay + scheduled proof-health check, PR #65).
+- **Open:** none. Every filed work order has landed.
+- **Decision, not a WO:** WP13 (per-match sports edge belongs on Kalshi/Betfair; spec only on an
+  explicit go).
+- **Next evidence, not code:** let the VPS accumulate the four proof-question signals over ~a week
+  (sharp-anchor coverage, dutch-arb persistence, focus-view CLV, audited paper P&L). The
+  proof-health workflow now watches these automatically.
 
-Queue order (updated 2026-07-04 — WO-28 is landed; runtime still needs VPS deploy access):
-0. WO-24   done 2026-07-03: sharp-anchor activation + broadening (VPS deploy still needs PM_VPS_SSH_PRIVATE_KEY populated)
-1. WO-28   done 2026-07-04: h2h anchor->token join, including local token-map H2H joins and advance-market fail-closed reasons
-2. WO-20   done 2026-07-03: position-aware quote collection
-3. WO-25   done 2026-07-03: dutch-book arb monitor loop/dashboard wiring (mechanical edge, model-free)
-4. WO-26   done 2026-07-03: anti-concentration guard on adaptive queries
-5. WO-21   done 2026-07-03: settle or flag stuck paper positions
-6. WO-27   done 2026-07-03: longshot-bias research family (shadow-only)
-7. WO-7    done 2026-07-03: CLV-aware promotion review advisory wiring
-8. WO-22   done 2026-07-03: evidence-gated display fixes
-9. WO-23   done 2026-07-03: deployment-aware oversight status
-10. WO-11  done 2026-07-03: research-focus consumption (after WO-26 so the guard shapes it)
-11. WO-12  done 2026-07-03: portfolio VaR + correlated-exposure reporting
-12. WO-13  done 2026-07-03: microstructure hypotheses as replay strategies
-13. WO-14  done 2026-07-03: generalise the sweep (after WO-13)
-14. WO-16  done 2026-07-03: per-family calibration scorecard
-15. WO-17  done 2026-07-03: collection coverage report (verifies WO-20)
-16. WO-15  done 2026-07-03: evidence history time series
-17. WO-18  done 2026-07-03: dashboard evidence funnel
-18. WO-19  done 2026-07-03: invariant property tests plus conservative depth-missing execution hardening
-19. WO-28  done 2026-07-03: smart-flow CLV watchlist for public wallet fills (diagnostic-only)
-```
-
-After all six land: WP3 is done (flip it in the charter), the algo track (WP9–WP11) is done, and
-the remaining charter priority is WP6 (portfolio-level correlated exposure). WP4 (CLV-aware
-promotion review), WP5 (depth-based execution costs), WP7 (family classification for liquid
-`unknown` markets), and WP8 (edge attribution) have since landed.
+WP-level status lives in the charter (`docs/POLYMARKET_QUANT_MODE_CHARTER.md`): WP3/WP4/WP5/WP6/
+WP7/WP8 and the algo track (WP9–WP11) have all landed.

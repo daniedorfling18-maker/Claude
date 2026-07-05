@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import re
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any
 from zoneinfo import ZoneInfo
 
@@ -163,26 +163,54 @@ def _slug_implied_close_time(slug: str) -> datetime | None:
         r"-(?P<day>\d{1,2})-(?P<year>\d{4})-(?P<hour>\d{1,2})(?P<ampm>am|pm)-et",
         text,
     )
-    if not dated_match:
-        return None
-    try:
-        hour = int(dated_match.group("hour"))
-        if hour < 1 or hour > 12:
+    if dated_match:
+        try:
+            hour = int(dated_match.group("hour"))
+            if hour < 1 or hour > 12:
+                return None
+            ampm = dated_match.group("ampm")
+            if ampm == "pm" and hour != 12:
+                hour += 12
+            if ampm == "am" and hour == 12:
+                hour = 0
+            return datetime(
+                int(dated_match.group("year")),
+                _UPDOWN_MONTHS[dated_match.group("month")],
+                int(dated_match.group("day")),
+                hour,
+                tzinfo=ZoneInfo("America/New_York"),
+            ).astimezone(timezone.utc)
+        except (KeyError, ValueError):
             return None
-        ampm = dated_match.group("ampm")
-        if ampm == "pm" and hour != 12:
-            hour += 12
-        if ampm == "am" and hour == 12:
-            hour = 0
-        return datetime(
-            int(dated_match.group("year")),
-            _UPDOWN_MONTHS[dated_match.group("month")],
-            int(dated_match.group("day")),
-            hour,
-            tzinfo=ZoneInfo("America/New_York"),
-        ).astimezone(timezone.utc)
-    except (KeyError, ValueError):
-        return None
+
+    date_only_match = re.search(
+        r"(?P<month>january|february|march|april|may|june|july|august|september|october|november|december)"
+        r"-(?P<day>\d{1,2})-(?P<year>\d{4})(?:$|-)",
+        text,
+    )
+    if date_only_match:
+        try:
+            return datetime(
+                int(date_only_match.group("year")),
+                _UPDOWN_MONTHS[date_only_match.group("month")],
+                int(date_only_match.group("day")),
+                tzinfo=timezone.utc,
+            ) + timedelta(days=1)
+        except (KeyError, ValueError):
+            return None
+
+    iso_date_match = re.search(r"(?:^|-)(?P<year>20\d{2})-(?P<month>\d{2})-(?P<day>\d{2})(?:$|-)", text)
+    if iso_date_match:
+        try:
+            return datetime(
+                int(iso_date_match.group("year")),
+                int(iso_date_match.group("month")),
+                int(iso_date_match.group("day")),
+                tzinfo=timezone.utc,
+            ) + timedelta(days=1)
+        except ValueError:
+            return None
+    return None
 
 
 def _row_implies_closed_market(row: dict[str, Any], *, now_dt: datetime | None = None) -> bool:

@@ -291,6 +291,48 @@ def test_websocket_asset_discovery_skips_closed_governance_targets_from_et_slug(
     assert sources["future-et-proof-target"] == "websocket_liquidity_targets"
 
 
+def test_websocket_asset_discovery_skips_closed_governance_targets_from_date_only_slug(tmp_path, monkeypatch):
+    loop = _load_loop_module()
+    monkeypatch.setenv("POLYMARKET_MODEL_PROBABILITIES_CSV", str(tmp_path / "missing_model_probabilities.csv"))
+    cfg = EngineConfig(
+        raw={"paths": {"output_root": str(tmp_path / "outputs")}},
+        path=tmp_path / "cfg.yaml",
+    )
+    _write_csv(
+        cfg.governance_root / "websocket_liquidity_targets.csv",
+        [
+            {
+                "token_id": "closed-month-date-proof-target",
+                "market_slug": "bitcoin-above-60k-on-january-1-2000",
+                "websocket_target_reason": "paper_confirmation_blocker",
+            },
+            {
+                "token_id": "closed-iso-date-proof-target",
+                "market_slug": "val-100t1-bbl1-2000-01-01",
+                "websocket_target_reason": "paper_confirmation_blocker",
+            },
+            {
+                "token_id": "future-month-date-proof-target",
+                "market_slug": "bitcoin-above-60k-on-january-1-2100",
+                "websocket_target_reason": "paper_confirmation_blocker",
+            },
+        ],
+    )
+    _write_csv(
+        cfg.output_root / "polymarket" / "market_snapshot.csv",
+        [
+            {"token_id": "scanner-token", "condition_id": "scanner-market"},
+        ],
+    )
+
+    asset_ids, sources = loop.discover_websocket_asset_ids(cfg, max_assets=2)
+
+    assert asset_ids == ["future-month-date-proof-target", "scanner-token"]
+    assert "closed-month-date-proof-target" not in sources
+    assert "closed-iso-date-proof-target" not in sources
+    assert sources["future-month-date-proof-target"] == "websocket_liquidity_targets"
+
+
 def test_fast_updown_assets_come_from_positive_5m_cohort_evidence(tmp_path):
     loop = _load_loop_module()
     cfg = EngineConfig(

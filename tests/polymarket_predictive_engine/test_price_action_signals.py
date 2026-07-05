@@ -146,7 +146,7 @@ def _ws_feature_row(i: int, **overrides: str) -> dict[str, str]:
         "collected_at_utc": f"2026-07-02T05:3{i}:00Z",
         "source_timestamp": str(1000 + i),
         "asset_id": "btc-low-token",
-        "market_slug": "bitcoin-above-58k-on-july-2-2026",
+        "market_slug": "bitcoin-above-58k-open-test",
         "question": "Will Bitcoin be above 58k?",
         "category": "crypto_btc_special",
         "selection": "No",
@@ -171,7 +171,7 @@ def _low_price_model_summary() -> dict[str, object]:
             "missed_positive_examples": [
                 {
                     "family": "crypto_btc_special",
-                    "market_slug": "bitcoin-above-58k-on-july-2-2026",
+                    "market_slug": "bitcoin-above-58k-open-test",
                     "entry_ask": "0.025",
                     "exit_bid": "0.026",
                     "roi": 0.04,
@@ -206,7 +206,7 @@ def _low_price_trade_event(**overrides: str) -> dict[str, str]:
     row = {
         "split": "validation",
         "family": "crypto_btc_special",
-        "market_slug": "bitcoin-above-58k-on-july-2-2026",
+        "market_slug": "bitcoin-above-58k-open-test",
         "outcome": "No",
         "token_id": "btc-low-token",
         "entry_ask": "0.025",
@@ -829,6 +829,30 @@ def test_paper_confirmation_current_candidate_filters_closed_updown_slug(tmp_pat
             ),
             _ws_feature_row(
                 2,
+                asset_id="closed-date-btc-token",
+                market_slug="bitcoin-above-60k-on-january-1-2000",
+                category="crypto_btc_special",
+                selection="Up",
+                best_bid="0.50",
+                best_ask="0.51",
+                midpoint="0.505",
+                spread="0.01",
+                price_change_side="BUY",
+            ),
+            _ws_feature_row(
+                3,
+                asset_id="closed-date-btc-token",
+                market_slug="bitcoin-above-60k-on-january-1-2000",
+                category="crypto_btc_special",
+                selection="Up",
+                best_bid="0.51",
+                best_ask="0.52",
+                midpoint="0.515",
+                spread="0.01",
+                price_change_side="BUY",
+            ),
+            _ws_feature_row(
+                4,
                 asset_id="open-btc-token",
                 market_slug="bitcoin-above-open-test",
                 category="crypto_btc_special",
@@ -840,7 +864,7 @@ def test_paper_confirmation_current_candidate_filters_closed_updown_slug(tmp_pat
                 price_change_side="BUY",
             ),
             _ws_feature_row(
-                3,
+                5,
                 asset_id="open-btc-token",
                 market_slug="bitcoin-above-open-test",
                 category="crypto_btc_special",
@@ -872,8 +896,8 @@ def test_paper_confirmation_current_candidate_filters_closed_updown_slug(tmp_pat
     assert summary["signals"] == 1
     assert summary["paper_confirmation_current_candidates"] == 1
     assert analogue["fresh_matches"] == 1
-    assert analogue["stale_current_rows_filtered"] == 1
-    assert summary["current_historical_analogue_scan"]["stale_current_rows_filtered"] == 1
+    assert analogue["stale_current_rows_filtered"] == 2
+    assert summary["current_historical_analogue_scan"]["stale_current_rows_filtered"] == 2
     assert signals[0]["market_slug"] == "bitcoin-above-open-test"
     assert signals[0]["token_id"] == "open-btc-token"
 
@@ -1061,7 +1085,7 @@ def test_esports_world_cup_rows_use_esports_family_for_confirmation_analogues(tm
             _ws_feature_row(
                 0,
                 asset_id="valorant-bbl-token",
-                market_slug="val-100t1-bbl1-2026-07-04",
+                market_slug="val-100t1-bbl1-2100-07-04",
                 question=question,
                 category="worldcup",
                 selection="BBL Esports",
@@ -1074,7 +1098,7 @@ def test_esports_world_cup_rows_use_esports_family_for_confirmation_analogues(tm
             _ws_feature_row(
                 1,
                 asset_id="valorant-bbl-token",
-                market_slug="val-100t1-bbl1-2026-07-04",
+                market_slug="val-100t1-bbl1-2100-07-04",
                 question=question,
                 category="worldcup",
                 selection="BBL Esports",
@@ -1093,7 +1117,7 @@ def test_esports_world_cup_rows_use_esports_family_for_confirmation_analogues(tm
                 split="validation",
                 family="worldcup",
                 category="worldcup",
-                market_slug="val-100t1-bbl1-2026-07-04",
+                market_slug="val-100t1-bbl1-2100-07-04",
                 question=question,
                 outcome="BBL Esports",
                 token_id="valorant-bbl-token-a",
@@ -1109,7 +1133,7 @@ def test_esports_world_cup_rows_use_esports_family_for_confirmation_analogues(tm
                 split="validation",
                 family="worldcup",
                 category="worldcup",
-                market_slug="val-100t1-bbl1-2026-07-04",
+                market_slug="val-100t1-bbl1-2100-07-04",
                 question=question,
                 outcome="BBL Esports",
                 token_id="valorant-bbl-token-b",
@@ -1125,7 +1149,7 @@ def test_esports_world_cup_rows_use_esports_family_for_confirmation_analogues(tm
                 split="validation",
                 family="worldcup",
                 category="worldcup",
-                market_slug="val-100t1-bbl1-2026-07-04",
+                market_slug="val-100t1-bbl1-2100-07-04",
                 question=question,
                 outcome="BBL Esports",
                 token_id="valorant-bbl-token-c",

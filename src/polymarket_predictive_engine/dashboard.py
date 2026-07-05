@@ -1226,7 +1226,10 @@ async function load() {
       ["Paper-confirm fresh matches", priceActionPaper.paper_confirmation_current_fresh_matches],
       ["Paper-confirm hist gate", priceActionPaper.paper_confirmation_current_historical_state],
       ["Paper-confirm hist blocked", priceActionPaper.paper_confirmation_current_historical_blocked],
+      ["Paper-confirm top blocker", priceActionPaper.paper_confirmation_current_top_blocker],
+      ["Paper-confirm top family", priceActionPaper.paper_confirmation_current_top_blocked_family],
       ["Paper-confirm hist why", priceActionPaper.paper_confirmation_current_historical_blockers, v=>longText(v, 180)],
+      ["Paper-confirm family why", priceActionPaper.paper_confirmation_current_historical_blocked_by_family, v=>longText(v, 180)],
       ["Proof blocker target state", paperConfirmationBlockers.state, v=>longText(v, 160)],
       ["Proof blocker collect", paperConfirmationBlockers.collection_queries, v=>longText(v, 180)],
       ["Proof blocker in-band", paperConfirmationBlockers.in_band_targets],
@@ -2112,6 +2115,16 @@ def _open_positions(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
 
 def _rejection_counts(rows: list[dict[str, Any]]) -> dict[str, int]:
     return dict(Counter(str(row.get("rejection_reason") or "unknown") for row in rows))
+
+
+def _top_counter_label(counts: Any) -> str:
+    if not isinstance(counts, dict) or not counts:
+        return ""
+    def _count(item: tuple[Any, Any]) -> float:
+        return safe_float(item[1]) or 0.0
+
+    key, count = max(counts.items(), key=_count)
+    return f"{key} ({int(safe_float(count) or 0)})"
 
 
 def _truthy(value: Any) -> bool:
@@ -3334,6 +3347,31 @@ def _price_action_paper_signal_status(cfg: EngineConfig) -> dict[str, Any]:
     paper_confirmation_current_historical = summary.get("paper_confirmation_current_historical_analogue")
     if not isinstance(paper_confirmation_current_historical, dict):
         paper_confirmation_current_historical = {}
+    paper_confirmation_blockers = (
+        paper_confirmation_current_historical.get("blocked_by_state")
+        if isinstance(paper_confirmation_current_historical.get("blocked_by_state"), dict)
+        else {}
+    )
+    paper_confirmation_blocked_by_family = (
+        paper_confirmation_current_historical.get("blocked_by_family")
+        if isinstance(paper_confirmation_current_historical.get("blocked_by_family"), dict)
+        else {}
+    )
+    paper_confirmation_state = paper_confirmation_current_historical.get("state")
+    if not paper_confirmation_state:
+        approved_current = int(safe_float(paper_confirmation_current_historical.get("approved")) or 0)
+        blocked_current = int(safe_float(paper_confirmation_current_historical.get("blocked")) or 0)
+        fresh_current = int(safe_float(paper_confirmation_current_historical.get("fresh_matches")) or 0)
+        if approved_current > 0:
+            paper_confirmation_state = "historical_analogue_current_candidates_ready"
+        elif blocked_current > 0:
+            paper_confirmation_state = "current_candidates_blocked_by_bridge_gates"
+        elif fresh_current > 0:
+            paper_confirmation_state = "fresh_matches_waiting_for_bridge_gate"
+        else:
+            paper_confirmation_state = "waiting_for_fresh_executable_confirmation_match"
+    paper_confirmation_top_blocker = _top_counter_label(paper_confirmation_blockers)
+    paper_confirmation_top_blocked_family = _top_counter_label(paper_confirmation_blocked_by_family)
     current_historical_analogue_scan = summary.get("current_historical_analogue_scan")
     if not isinstance(current_historical_analogue_scan, dict):
         current_historical_analogue_scan = {}
@@ -3357,10 +3395,13 @@ def _price_action_paper_signal_status(cfg: EngineConfig) -> dict[str, Any]:
         "paper_confirmation_candidates": summary.get("paper_confirmation_candidates"),
         "paper_confirmation_current_candidates": summary.get("paper_confirmation_current_candidates"),
         "paper_confirmation_current_historical_analogue": paper_confirmation_current_historical,
-        "paper_confirmation_current_historical_state": paper_confirmation_current_historical.get("state"),
+        "paper_confirmation_current_historical_state": paper_confirmation_state,
         "paper_confirmation_current_fresh_matches": paper_confirmation_current_historical.get("fresh_matches"),
         "paper_confirmation_current_historical_blocked": paper_confirmation_current_historical.get("blocked"),
-        "paper_confirmation_current_historical_blockers": paper_confirmation_current_historical.get("blocked_by_state"),
+        "paper_confirmation_current_historical_blockers": paper_confirmation_blockers,
+        "paper_confirmation_current_historical_blocked_by_family": paper_confirmation_blocked_by_family,
+        "paper_confirmation_current_top_blocker": paper_confirmation_top_blocker,
+        "paper_confirmation_current_top_blocked_family": paper_confirmation_top_blocked_family,
         "current_historical_analogue_scan": current_historical_analogue_scan,
         "current_historical_analogue_state": current_historical_analogue_scan.get("state"),
         "current_historical_analogue_rows": current_historical_analogue_scan.get("current_rows"),

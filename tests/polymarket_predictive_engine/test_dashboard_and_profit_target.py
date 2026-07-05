@@ -1824,6 +1824,46 @@ def test_dashboard_flags_price_action_signals_waiting_for_broker_refresh(tmp_pat
     assert data["evidence_freshness"]["pending_broker_signals"] == 1
 
 
+def test_dashboard_derives_paper_confirmation_bridge_blocker_state(tmp_path):
+    cfg = _config(tmp_path)
+    write_json(
+        cfg.output_root / "polymarket_price_action" / "price_action_paper_signal_summary.json",
+        {
+            "status": "computed",
+            "generated_at_utc": "2026-06-30T21:20:14Z",
+            "decision": "trusted_shadow_edge_waiting_for_fresh_executable_candidate",
+            "signals": 0,
+            "rejections": 2,
+            "paper_confirmation_candidates": 4,
+            "paper_confirmation_current_candidates": 0,
+            "paper_confirmation_current_historical_analogue": {
+                "fresh_matches": 90,
+                "approved": 0,
+                "blocked": 90,
+                "blocked_by_state": {
+                    "entry_price_outside_risk_band": 50,
+                    "no_positive_historical_analogue_examples": 24,
+                },
+                "blocked_by_family": {
+                    "crypto_sol_updown_event": 17,
+                    "crypto_btc_special": 9,
+                },
+            },
+        },
+    )
+
+    result = render_dashboard(cfg)
+
+    data = read_json(result["dashboard_data"])
+    paper_status = data["price_action_paper_signals"]
+    assert paper_status["paper_confirmation_current_historical_state"] == "current_candidates_blocked_by_bridge_gates"
+    assert paper_status["paper_confirmation_current_top_blocker"] == "entry_price_outside_risk_band (50)"
+    assert paper_status["paper_confirmation_current_top_blocked_family"] == "crypto_sol_updown_event (17)"
+    html = Path(result["dashboard_file"]).read_text(encoding="utf-8")
+    assert "Paper-confirm top blocker" in html
+    assert "Paper-confirm family why" in html
+
+
 def test_dashboard_does_not_request_broker_refresh_when_signals_are_already_open(tmp_path):
     cfg = _config(tmp_path)
     write_json(

@@ -946,12 +946,23 @@ def _stale_background_summary(
         "running_seconds": round(float(running_seconds or 0.0), 3),
         "max_runtime_seconds": round(float(max_runtime_seconds), 3),
         "message": (
-            f"{job_name} exceeded the local live-loop supervisor timeout and was abandoned "
-            "fail-closed so websocket marking, governance refresh, and dashboard rendering can continue."
+            f"{job_name} exceeded the local live-loop supervisor timeout. The loop will exit "
+            "fail-closed so the process supervisor can restart it and clear any stuck worker."
         ),
         "paper_trading_invoked": False,
         "live_trading_invoked": False,
     }
+
+
+def _exit_for_stale_background_job() -> None:
+    """Hard-exit so Docker/Task Scheduler restarts the loop and kills stuck workers.
+
+    Python cannot safely terminate an already-running thread in a
+    ThreadPoolExecutor.  A soft "abandon" leaves the thread alive and can leak
+    CPU/memory.  The local/VPS runner is supervised, so the fail-closed action is
+    to publish the stale heartbeat and exit the process.
+    """
+    os._exit(75)
 
 
 def _background_job_blocks_governance(
@@ -1285,13 +1296,7 @@ def main(argv: list[str] | None = None) -> int:
                         error="discovery_max_runtime_exceeded",
                         started_at_utc=discovery_started_at_utc,
                     )
-                    discovery_executor.shutdown(wait=False, cancel_futures=True)
-                    discovery_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="polymarket-discovery")
-                    discovery_future = None
-                    discovery_running_iteration = 0
-                    discovery_started_at_utc = ""
-                    discovery_started_ts = 0.0
-                    next_discovery_cycle = time.time() + args.discovery_cycle_seconds
+                    _exit_for_stale_background_job()
                 if _future_exceeded_runtime(
                     prediction_future,
                     started_ts=prediction_started_ts,
@@ -1310,12 +1315,16 @@ def main(argv: list[str] | None = None) -> int:
                         max_runtime_seconds=args.prediction_max_runtime_seconds,
                     )
                     last_prediction_summary["source"] = args.paper_source
-                    prediction_executor.shutdown(wait=False, cancel_futures=True)
-                    prediction_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="polymarket-prediction")
-                    prediction_future = None
-                    prediction_started_at_utc = ""
-                    prediction_started_ts = 0.0
-                    next_prediction_cycle = time.time() + args.prediction_cycle_seconds
+                    write_json(
+                        cfg.governance_root / "local_live_loop_heartbeat.json",
+                        {
+                            **last_prediction_summary,
+                            "iteration": iteration,
+                            "heavy_background_job": "prediction",
+                            "error": "prediction_max_runtime_exceeded",
+                        },
+                    )
+                    _exit_for_stale_background_job()
                 if _future_exceeded_runtime(
                     governance_future,
                     started_ts=governance_started_ts,
@@ -1341,12 +1350,7 @@ def main(argv: list[str] | None = None) -> int:
                         error="governance_max_runtime_exceeded",
                         started_at_utc=governance_started_at_utc,
                     )
-                    governance_executor.shutdown(wait=False, cancel_futures=True)
-                    governance_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="polymarket-governance")
-                    governance_future = None
-                    governance_started_at_utc = ""
-                    governance_started_ts = 0.0
-                    next_governance_refresh = time.time() + args.governance_refresh_seconds
+                    _exit_for_stale_background_job()
                 if discovery_future is not None and discovery_future.done():
                     try:
                         discovery_iteration, last_discovery_summary = discovery_future.result()

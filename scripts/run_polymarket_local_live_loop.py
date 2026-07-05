@@ -912,6 +912,48 @@ def _future_running_seconds(
     return max(0.0, float(now_ts) - float(started_ts))
 
 
+def _future_exceeded_runtime(
+    future: Future[Any] | None,
+    *,
+    started_ts: float,
+    max_runtime_seconds: float,
+    now_ts: float,
+) -> bool:
+    running_seconds = _future_running_seconds(
+        future,
+        started_ts=started_ts,
+        now_ts=now_ts,
+    )
+    if running_seconds is None:
+        return False
+    if max_runtime_seconds <= 0:
+        return False
+    return running_seconds >= max_runtime_seconds
+
+
+def _stale_background_summary(
+    *,
+    job_name: str,
+    started_at_utc: str,
+    running_seconds: float | None,
+    max_runtime_seconds: float,
+) -> dict[str, Any]:
+    return {
+        "status": "stale_timeout_abandoned",
+        "job": job_name,
+        "started_at_utc": started_at_utc,
+        "generated_at_utc": now_utc(),
+        "running_seconds": round(float(running_seconds or 0.0), 3),
+        "max_runtime_seconds": round(float(max_runtime_seconds), 3),
+        "message": (
+            f"{job_name} exceeded the local live-loop supervisor timeout and was abandoned "
+            "fail-closed so websocket marking, governance refresh, and dashboard rendering can continue."
+        ),
+        "paper_trading_invoked": False,
+        "live_trading_invoked": False,
+    }
+
+
 def _background_job_blocks_governance(
     future: Future[Any] | None,
     *,
@@ -1149,6 +1191,24 @@ def build_parser() -> argparse.ArgumentParser:
         default=180.0,
         help="Maximum time a running discovery job may delay governance refresh; 0 means discovery never blocks governance.",
     )
+    parser.add_argument(
+        "--discovery-max-runtime-seconds",
+        type=float,
+        default=float(os.environ.get("POLYMARKET_DISCOVERY_MAX_RUNTIME_SECONDS", "900") or 900),
+        help="Fail-closed abandon a background discovery pass after this many seconds; 0 disables.",
+    )
+    parser.add_argument(
+        "--prediction-max-runtime-seconds",
+        type=float,
+        default=float(os.environ.get("POLYMARKET_PREDICTION_MAX_RUNTIME_SECONDS", "600") or 600),
+        help="Fail-closed abandon a background prediction pass after this many seconds; 0 disables.",
+    )
+    parser.add_argument(
+        "--governance-max-runtime-seconds",
+        type=float,
+        default=float(os.environ.get("POLYMARKET_GOVERNANCE_MAX_RUNTIME_SECONDS", "600") or 600),
+        help="Fail-closed abandon a background governance refresh after this many seconds; 0 disables.",
+    )
     parser.add_argument("--paper-source", choices=["raw_snapshot", "websocket"], default="raw_snapshot")
     parser.add_argument(
         "--prediction-mode",
@@ -1198,6 +1258,95 @@ def main(argv: list[str] | None = None) -> int:
             started = time.time()
             try:
                 discovery_summary: dict[str, Any] = {"status": "skipped"}
+                now_for_timeout = time.time()
+                if _future_exceeded_runtime(
+                    discovery_future,
+                    started_ts=discovery_started_ts,
+                    max_runtime_seconds=args.discovery_max_runtime_seconds,
+                    now_ts=now_for_timeout,
+                ):
+                    running_seconds = _future_running_seconds(
+                        discovery_future,
+                        started_ts=discovery_started_ts,
+                        now_ts=now_for_timeout,
+                    )
+                    last_discovery_summary = _stale_background_summary(
+                        job_name="discovery",
+                        started_at_utc=discovery_started_at_utc,
+                        running_seconds=running_seconds,
+                        max_runtime_seconds=args.discovery_max_runtime_seconds,
+                    )
+                    _write_discovery_heartbeat(
+                        cfg,
+                        status="stale_timeout_abandoned",
+                        live_iteration=iteration,
+                        discovery_iteration=discovery_running_iteration,
+                        summary=last_discovery_summary,
+                        error="discovery_max_runtime_exceeded",
+                        started_at_utc=discovery_started_at_utc,
+                    )
+                    discovery_executor.shutdown(wait=False, cancel_futures=True)
+                    discovery_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="polymarket-discovery")
+                    discovery_future = None
+                    discovery_running_iteration = 0
+                    discovery_started_at_utc = ""
+                    discovery_started_ts = 0.0
+                    next_discovery_cycle = time.time() + args.discovery_cycle_seconds
+                if _future_exceeded_runtime(
+                    prediction_future,
+                    started_ts=prediction_started_ts,
+                    max_runtime_seconds=args.prediction_max_runtime_seconds,
+                    now_ts=now_for_timeout,
+                ):
+                    running_seconds = _future_running_seconds(
+                        prediction_future,
+                        started_ts=prediction_started_ts,
+                        now_ts=now_for_timeout,
+                    )
+                    last_prediction_summary = _stale_background_summary(
+                        job_name="prediction",
+                        started_at_utc=prediction_started_at_utc,
+                        running_seconds=running_seconds,
+                        max_runtime_seconds=args.prediction_max_runtime_seconds,
+                    )
+                    last_prediction_summary["source"] = args.paper_source
+                    prediction_executor.shutdown(wait=False, cancel_futures=True)
+                    prediction_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="polymarket-prediction")
+                    prediction_future = None
+                    prediction_started_at_utc = ""
+                    prediction_started_ts = 0.0
+                    next_prediction_cycle = time.time() + args.prediction_cycle_seconds
+                if _future_exceeded_runtime(
+                    governance_future,
+                    started_ts=governance_started_ts,
+                    max_runtime_seconds=args.governance_max_runtime_seconds,
+                    now_ts=now_for_timeout,
+                ):
+                    running_seconds = _future_running_seconds(
+                        governance_future,
+                        started_ts=governance_started_ts,
+                        now_ts=now_for_timeout,
+                    )
+                    last_governance_summary = _stale_background_summary(
+                        job_name="governance",
+                        started_at_utc=governance_started_at_utc,
+                        running_seconds=running_seconds,
+                        max_runtime_seconds=args.governance_max_runtime_seconds,
+                    )
+                    _write_governance_refresh_heartbeat(
+                        cfg,
+                        status="stale_timeout_abandoned",
+                        live_iteration=iteration,
+                        summary=last_governance_summary,
+                        error="governance_max_runtime_exceeded",
+                        started_at_utc=governance_started_at_utc,
+                    )
+                    governance_executor.shutdown(wait=False, cancel_futures=True)
+                    governance_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="polymarket-governance")
+                    governance_future = None
+                    governance_started_at_utc = ""
+                    governance_started_ts = 0.0
+                    next_governance_refresh = time.time() + args.governance_refresh_seconds
                 if discovery_future is not None and discovery_future.done():
                     try:
                         discovery_iteration, last_discovery_summary = discovery_future.result()
@@ -1524,6 +1673,7 @@ def main(argv: list[str] | None = None) -> int:
                     "prediction_cycle_seconds": args.prediction_cycle_seconds,
                     "prediction_mode": args.prediction_mode,
                     "prediction_governance_block_seconds": args.prediction_governance_block_seconds,
+                    "prediction_max_runtime_seconds": args.prediction_max_runtime_seconds,
                     "prediction_running_seconds": prediction_running_seconds,
                     "prediction_blocks_governance": prediction_blocks_governance,
                     "governance_due_blocks_prediction": governance_due_blocks_prediction,
@@ -1534,6 +1684,7 @@ def main(argv: list[str] | None = None) -> int:
                         and not prediction_blocks_governance
                     ),
                     "discovery_governance_block_seconds": args.discovery_governance_block_seconds,
+                    "discovery_max_runtime_seconds": args.discovery_max_runtime_seconds,
                     "discovery_running_seconds": discovery_running_seconds,
                     "discovery_blocks_governance": discovery_blocks_governance,
                     "background_jobs_block_prediction": background_jobs_block_prediction,
@@ -1548,6 +1699,7 @@ def main(argv: list[str] | None = None) -> int:
                         and not discovery_blocks_governance
                     ),
                     "governance_running_seconds": governance_running_seconds,
+                    "governance_max_runtime_seconds": args.governance_max_runtime_seconds,
                     "degraded_prediction_cycle_seconds": _degraded_prediction_cycle_seconds(cfg, args.prediction_cycle_seconds),
                     "degraded_prediction_next_due_in_seconds": next_degraded_prediction_in_seconds,
                     "asset_sources": {source: list(token_sources.values()).count(source) for source in sorted(set(token_sources.values()))},

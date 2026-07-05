@@ -236,6 +236,44 @@ def test_websocket_marks_are_merged_into_shadow_prediction_rows():
     assert merged[0]["liquidity"] == 250.0
 
 
+def test_background_future_timeout_helper_is_fail_closed():
+    loop = _load_loop_module()
+    future: Future[dict[str, object]] = Future()
+
+    assert not loop._future_exceeded_runtime(
+        future,
+        started_ts=100.0,
+        max_runtime_seconds=900.0,
+        now_ts=999.0,
+    )
+    assert loop._future_exceeded_runtime(
+        future,
+        started_ts=100.0,
+        max_runtime_seconds=900.0,
+        now_ts=1000.0,
+    )
+    assert not loop._future_exceeded_runtime(
+        future,
+        started_ts=100.0,
+        max_runtime_seconds=0.0,
+        now_ts=9999.0,
+    )
+
+    summary = loop._stale_background_summary(
+        job_name="discovery",
+        started_at_utc="2026-07-04T23:39:32Z",
+        running_seconds=901.2345,
+        max_runtime_seconds=900.0,
+    )
+
+    assert summary["status"] == "stale_timeout_abandoned"
+    assert summary["job"] == "discovery"
+    assert summary["paper_trading_invoked"] is False
+    assert summary["live_trading_invoked"] is False
+    assert summary["running_seconds"] == 901.235
+    assert "fail-closed" in summary["message"]
+
+
 def test_degraded_discovery_refresh_keeps_fast_updown_fresh(tmp_path, monkeypatch):
     loop = _load_loop_module()
     cfg = EngineConfig(

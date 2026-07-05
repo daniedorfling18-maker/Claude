@@ -25,7 +25,13 @@ def test_vps_paper_compose_is_lean_and_paper_only():
     assert "--paper-source websocket" in services["polymarket-paper-live"]["command"]
     assert "--optimize-model" in services["polymarket-paper-live"]["command"]
     assert "--governance-refresh-seconds $${POLYMARKET_GOVERNANCE_REFRESH_SECONDS}" in services["polymarket-paper-live"]["command"]
+    assert "--discovery-max-runtime-seconds $${POLYMARKET_DISCOVERY_MAX_RUNTIME_SECONDS}" in services["polymarket-paper-live"]["command"]
+    assert "--prediction-max-runtime-seconds $${POLYMARKET_PREDICTION_MAX_RUNTIME_SECONDS}" in services["polymarket-paper-live"]["command"]
+    assert "--governance-max-runtime-seconds $${POLYMARKET_GOVERNANCE_MAX_RUNTIME_SECONDS}" in services["polymarket-paper-live"]["command"]
     assert paper_env["POLYMARKET_GOVERNANCE_REFRESH_SECONDS"] == "${POLYMARKET_GOVERNANCE_REFRESH_SECONDS:-120}"
+    assert paper_env["POLYMARKET_DISCOVERY_MAX_RUNTIME_SECONDS"] == "${POLYMARKET_DISCOVERY_MAX_RUNTIME_SECONDS:-900}"
+    assert paper_env["POLYMARKET_PREDICTION_MAX_RUNTIME_SECONDS"] == "${POLYMARKET_PREDICTION_MAX_RUNTIME_SECONDS:-600}"
+    assert paper_env["POLYMARKET_GOVERNANCE_MAX_RUNTIME_SECONDS"] == "${POLYMARKET_GOVERNANCE_MAX_RUNTIME_SECONDS:-600}"
 
     assert services["polymarket-paper-live"]["restart"] == "unless-stopped"
     assert services["polymarket-dashboard"]["restart"] == "unless-stopped"
@@ -43,6 +49,14 @@ def test_vps_paper_compose_is_lean_and_paper_only():
     assert "POLYMARKET_LIVE_TRADING" not in superbru["environment"]
 
 
+def test_dashboard_renderer_prefers_mounted_src_on_vps():
+    text = (ROOT / "scripts" / "render_polymarket_dashboard.py").read_text(encoding="utf-8")
+
+    assert 'SRC = ROOT / "src"' in text
+    assert "sys.path.insert(0, str(SRC))" in text
+    assert text.index("sys.path.insert(0, str(SRC))") < text.index("from polymarket_predictive_engine.dashboard import render_dashboard")
+
+
 def test_vps_env_example_keeps_live_credentials_empty():
     text = (ROOT / ".env.vps-paper.example").read_text(encoding="utf-8")
 
@@ -53,7 +67,12 @@ def test_vps_env_example_keeps_live_credentials_empty():
     assert "PM_PAPER_MEM_LIMIT=4g" in text
     assert "SUPERBRU_AUTO_PICK_MEM_LIMIT=1g" in text
     assert "POLYMARKET_GOVERNANCE_REFRESH_SECONDS=120" in text
+    assert "POLYMARKET_DISCOVERY_MAX_RUNTIME_SECONDS=900" in text
+    assert "POLYMARKET_PREDICTION_MAX_RUNTIME_SECONDS=600" in text
+    assert "POLYMARKET_GOVERNANCE_MAX_RUNTIME_SECONDS=600" in text
     assert "SUPERBRU_AUTO_PICK_ENABLED=true" in text
+    assert "SUPERBRU_AUTO_PICK_WINDOW_MINUTES=5000" in text
+    assert "SUPERBRU_AUTO_PICK_REVISION_WINDOW_MINUTES=260" in text
     assert "SUPERBRU_EMAIL=" in text
     assert "SUPERBRU_PASSWORD=" in text
     assert "SUPERBRU_POOL_URL=" in text

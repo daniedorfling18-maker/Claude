@@ -68,8 +68,17 @@ def _stable_id(prefix: str, key: str) -> str:
     return prefix + "_" + hashlib.sha256(key.encode("utf-8")).hexdigest()[:24]
 
 
-def _add_tokens_from_csv(path: Path, tokens: dict[str, str], source: str) -> None:
+def _row_has_closed(row: dict[str, Any]) -> bool:
+    close_time = parse_timestamp(row.get("close_time"))
+    if close_time is None:
+        return False
+    return close_time.astimezone(timezone.utc) <= datetime.now(timezone.utc)
+
+
+def _add_tokens_from_csv(path: Path, tokens: dict[str, str], source: str, *, skip_closed: bool = False) -> None:
     for row in read_csv_rows(path):
+        if skip_closed and _row_has_closed(row):
+            continue
         for column in ("token_id", "asset_id", "outcome_token_id"):
             token = str(row.get(column) or "").strip()
             if token:
@@ -246,7 +255,12 @@ def discover_websocket_asset_ids(cfg, *, include_static_config: bool = False, ma
     ]
     for path, source in candidates:
         if path.exists():
-            _add_tokens_from_csv(path, tokens, source)
+            _add_tokens_from_csv(
+                path,
+                tokens,
+                source,
+                skip_closed=source == "websocket_liquidity_targets",
+            )
 
     if include_static_config:
         for token in cfg.raw.get("websocket_market_data", {}).get("market_ids", []) or []:

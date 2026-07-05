@@ -10,7 +10,10 @@ from .models.calibration_v2 import joined_feature_label_rows
 from .readiness import paper_trade_readiness
 from .risk import risk_decision
 from .utils import boolish, read_csv_rows, read_json, safe_float, write_csv
-from .worldcup_validation import normalised_correlation_key, signal_cohort
+from .worldcup_validation import classify_market_family, normalised_correlation_key, signal_cohort
+
+
+_UNKNOWN_CATEGORIES = {"", "unknown", "uncategorised", "uncategorized"}
 
 
 def _setting_bool(settings: dict[str, Any], key: str, default: bool = False) -> bool:
@@ -40,9 +43,51 @@ def _same_category_label_counts(cfg: EngineConfig) -> dict[str, int]:
         return {}
     counts: Counter[str] = Counter()
     for row in rows:
-        category = str(row.get("category") or "unknown").strip().lower()
-        counts[category] += 1
+        for category in _same_category_count_keys(row):
+            counts[category] += 1
     return dict(counts)
+
+
+def _same_category_count_keys(row: dict[str, Any]) -> set[str]:
+    """Return category aliases for the resolved-label safety gate.
+
+    Older point-in-time feature rows were often stored with ``category=unknown``
+    even when their slug/question clearly identifies the family. The trading
+    gate should keep requiring same-category labels, but it should use the
+    current taxonomy rather than silently undercounting valid historical labels.
+    """
+    keys: set[str] = set()
+    raw = str(row.get("category") or "").strip().lower().replace(" ", "_")
+    classified = str(classify_market_family(row) or "").strip().lower()
+
+    def add(value: str) -> None:
+        key = str(value or "").strip().lower().replace(" ", "_")
+        if key and key not in _UNKNOWN_CATEGORIES:
+            keys.add(key)
+
+    add(raw)
+    add(classified)
+
+    text = " ".join(
+        str(row.get(field) or "").lower()
+        for field in ("category", "market_slug", "question", "event_slug", "event_title", "event_id", "outcome")
+    )
+    family = classified
+    if raw.startswith("crypto") or family.startswith("crypto_"):
+        keys.add("crypto")
+    if raw.startswith("tennis") or family.startswith("tennis_"):
+        keys.add("tennis")
+    if raw.startswith("worldcup") or family.startswith("worldcup") or "world cup" in text or "fifa_world_cup" in text:
+        keys.add("worldcup")
+    if raw.startswith("baseball_mlb") or family.startswith("baseball_mlb"):
+        keys.add("baseball_mlb_match")
+    if raw.startswith("basketball_nba") or family.startswith("basketball_nba"):
+        keys.add("basketball_nba_match")
+    if raw.startswith("mma") or family == "mma_match":
+        keys.add("mma_match")
+    if not keys:
+        keys.add("unknown")
+    return keys
 
 
 _CRYPTO_UPDOWN_COHORT_RE = re.compile(
@@ -447,6 +492,5 @@ def generate_signals(
 
 def main(config_path: str) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     return generate_signals(load_config(config_path))
-
 
 

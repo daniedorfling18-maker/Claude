@@ -11,7 +11,7 @@ from polymarket_predictive_engine.mispricing_alpha import (
     apply_mispricing_alpha,
     train_mispricing_alpha_model,
 )
-from polymarket_predictive_engine.strategy import generate_signals
+from polymarket_predictive_engine.strategy import _same_category_label_counts, generate_signals
 from polymarket_predictive_engine.utils import read_csv_rows, write_csv, write_json
 
 
@@ -981,6 +981,115 @@ def test_strategy_uses_alpha_lower_bound_gate(tmp_path):
     assert "alpha lower-bound edge" in rejected[0]["rejection_reason"]
     saved = read_csv_rows(cfg.output_root / "polymarket_predictions" / "rejected_signals.csv")
     assert saved
+
+
+def test_strategy_same_category_gate_reclassifies_legacy_unknown_crypto_labels(tmp_path):
+    cfg = _config(tmp_path)
+    train_root = cfg.output_root / "polymarket_training"
+    features = []
+    labels = []
+    for idx in range(25):
+        ts = f"2026-06-26T10:{idx:02d}:00Z"
+        features.append(
+            {
+                "market_id": f"m-{idx}",
+                "market_slug": f"btc-updown-5m-1782487{idx:03d}",
+                "question": "Bitcoin Up or Down - June 26, 5 minute window",
+                "token_id": f"t-{idx}",
+                "prediction_timestamp": ts,
+                "category": "unknown",
+                "implied_probability": "0.51",
+            }
+        )
+        labels.append(
+            {
+                "market_id": f"m-{idx}",
+                "token_id": f"t-{idx}",
+                "prediction_timestamp": ts,
+                "target": "1",
+                "horizon": "all_valid",
+            }
+        )
+    write_csv(train_root / "features_v2.csv", features)
+    write_csv(train_root / "labels.csv", labels)
+
+    counts = _same_category_label_counts(cfg)
+
+    assert counts["crypto_btc_updown_5m"] == 25
+    assert counts["crypto"] == 25
+
+
+def test_strategy_same_category_gate_uses_reclassified_broad_category_before_cohort_gate(tmp_path):
+    cfg = _config(tmp_path)
+    train_root = cfg.output_root / "polymarket_training"
+    features = []
+    labels = []
+    for idx in range(25):
+        ts = f"2026-06-26T11:{idx:02d}:00Z"
+        features.append(
+            {
+                "market_id": f"label-m-{idx}",
+                "market_slug": f"btc-updown-5m-1782488{idx:03d}",
+                "question": "Bitcoin Up or Down - June 26, 5 minute window",
+                "token_id": f"label-t-{idx}",
+                "prediction_timestamp": ts,
+                "category": "unknown",
+                "implied_probability": "0.51",
+            }
+        )
+        labels.append(
+            {
+                "market_id": f"label-m-{idx}",
+                "token_id": f"label-t-{idx}",
+                "prediction_timestamp": ts,
+                "target": "1",
+                "horizon": "all_valid",
+            }
+        )
+    write_csv(train_root / "features_v2.csv", features)
+    write_csv(train_root / "labels.csv", labels)
+    write_csv(
+        cfg.output_root / "polymarket_predictions" / "predictions.csv",
+        [
+            {
+                "market_id": "crypto-alpha",
+                "market_slug": "will-bitcoin-reach-80000-by-december-31-2026",
+                "question": "Will Bitcoin reach $80,000 by December 31, 2026?",
+                "token_id": "crypto-alpha-token",
+                "prediction_timestamp": "2026-06-26T15:00:00Z",
+                "category": "crypto",
+                "signal_cohort": "crypto",
+                "outcome": "Yes",
+                "market_midpoint": "0.50",
+                "calibrated_probability": "0.65",
+                "model_probability": "0.65",
+                "alpha_probability": "0.65",
+                "executable_price": "0.50",
+                "edge": "0.08",
+                "edge_lower_bound": "0.08",
+                "alpha_trade_candidate": "true",
+                "validation_layer_pass": "true",
+                "bookmaker_cross_check_pass": "true",
+                "microstructure_filter_pass": "true",
+                "spread": "0.01",
+                "liquidity": "1000",
+                "time_to_close_hours": "1",
+                "confidence": "1",
+                **_book("0.50"),
+            }
+        ],
+    )
+
+    approved, rejected = generate_signals(
+        cfg,
+        readiness={"approved_for_paper_trading": True, "blockers": []},
+    )
+
+    assert approved == []
+    assert len(rejected) == 1
+    assert rejected[0]["same_category_label_rows"] == 25
+    assert "cohort promotion gate failed" in rejected[0]["rejection_reason"]
+    assert "same-category validation gate failed" not in rejected[0]["rejection_reason"]
 
 
 def test_strategy_allows_probationary_cohort_to_satisfy_same_category_label_gate(tmp_path):

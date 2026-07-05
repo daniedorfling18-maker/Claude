@@ -531,6 +531,19 @@ paper_market_scan:
   # starving other assets while preserving the concentration control.
   evidence_updown_rotation_enabled: true
   evidence_updown_rotation_slots: 1
+  # Focused websocket snapshots should follow the UpDown intervals where the
+  # strict price-action model has validation-positive repricing evidence. This
+  # is collection-only: it does not approve trades or relax paper gates.
+  fast_updown_use_price_action_validation_targets: true
+  fast_updown_intervals:
+  - 5m
+  - 15m
+  - 4h
+  fast_updown_non_5m_slots_ahead: 4
+  fast_updown_slots_ahead_by_interval:
+    15m: 8
+    4h: 3
+  fast_updown_max_asset_interval_targets: 8
   # Repricing is learned across the full liquid event universe, not only the
   # current best crypto/World Cup lane. This reserve keeps one discovery slot
   # rotating through broad event families while downstream governance still

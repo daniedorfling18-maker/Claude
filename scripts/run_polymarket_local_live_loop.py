@@ -92,6 +92,10 @@ _UPDOWN_INTERVAL_MINUTES = {
     "daily": 24 * 60,
 }
 
+_UPDOWN_TIMESTAMP_SLUG_RE = re.compile(
+    r"\b(?P<asset>btc|eth|sol|xrp)-updown-(?P<interval>5m|15m|4h|daily)-(?P<timestamp>\d{10})\b"
+)
+
 
 def _slug_implied_close_time(slug: str) -> datetime | None:
     """Infer expiry for Polymarket Up/Down slugs that omit close_time.
@@ -235,6 +239,54 @@ def _positive_fast_updown_assets(cfg) -> list[str]:
     return [asset for asset in ("btc", "xrp", "sol", "eth") if asset in assets]
 
 
+def _positive_fast_updown_targets(cfg) -> list[tuple[str, str]]:
+    """Return asset/interval windows worth actively snapshotting for proof.
+
+    The older lane only followed 5-minute cohorts from promotion P&L tables.
+    The strict price-action model can learn validation-positive repricing from
+    15-minute and 4-hour windows too, so the live websocket snapshot must track
+    those exact current windows instead of starving the model of executable
+    confirmations.
+    """
+    settings = cfg.raw.get("paper_market_scan", {}) or {}
+    allowed_raw = settings.get("fast_updown_intervals", ["5m", "15m", "4h"])
+    if isinstance(allowed_raw, str):
+        allowed_raw = [allowed_raw]
+    allowed = {
+        str(interval or "").strip().lower()
+        for interval in allowed_raw
+        if str(interval or "").strip().lower() in _UPDOWN_INTERVAL_MINUTES
+    } or {"5m"}
+    counts: dict[tuple[str, str], int] = {}
+    for asset in _positive_fast_updown_assets(cfg):
+        if "5m" in allowed:
+            counts[(asset, "5m")] = counts.get((asset, "5m"), 0) + 1
+
+    if settings.get("fast_updown_use_price_action_validation_targets", True):
+        rows = read_csv_rows(cfg.output_root / "polymarket_price_action" / "price_action_model_validation_predictions.csv")
+        for row in rows:
+            if str(row.get("target") or "").strip() not in {"1", "1.0", "true", "True"}:
+                continue
+            slug = str(row.get("market_slug") or "").strip().lower()
+            match = _UPDOWN_TIMESTAMP_SLUG_RE.search(slug)
+            if not match:
+                continue
+            asset = match.group("asset")
+            interval = match.group("interval")
+            if interval not in allowed:
+                continue
+            counts[(asset, interval)] = counts.get((asset, interval), 0) + 1
+
+    asset_order = {"btc": 0, "xrp": 1, "sol": 2, "eth": 3}
+    interval_order = {"5m": 0, "15m": 1, "4h": 2, "daily": 3}
+    ordered = sorted(
+        counts.items(),
+        key=lambda item: (-item[1], interval_order.get(item[0][1], 99), asset_order.get(item[0][0], 99)),
+    )
+    max_targets = int(settings.get("fast_updown_max_asset_interval_targets", 8) or 8)
+    return [target for target, _ in ordered[: max(1, max_targets)]]
+
+
 def _floor_to_slot(dt: datetime, minutes: int) -> datetime:
     slot = max(1, int(minutes))
     discard = timedelta(
@@ -249,19 +301,25 @@ def _fast_updown_candidate_slugs(cfg, *, now_dt: datetime | None = None) -> list
     settings = cfg.raw.get("paper_market_scan", {}) or {}
     if not settings.get("fast_updown_5m_enabled", True):
         return []
-    assets = _positive_fast_updown_assets(cfg)
-    if not assets:
+    targets = _positive_fast_updown_targets(cfg)
+    if not targets:
         return []
     now_dt = (now_dt or datetime.now(timezone.utc)).astimezone(timezone.utc)
-    step_minutes = int(settings.get("fast_updown_5m_step_minutes", 5) or 5)
-    slots_ahead = int(settings.get("fast_updown_5m_slots_ahead", 8) or 8)
-    start = _floor_to_slot(now_dt, step_minutes)
     slugs: list[str] = []
-    for offset in range(0, max(0, slots_ahead) + 1):
-        slot = start + timedelta(minutes=step_minutes * offset)
-        timestamp = int(slot.timestamp())
-        for asset in assets:
-            slugs.append(f"{asset}-updown-5m-{timestamp}")
+    per_interval_slots = settings.get("fast_updown_slots_ahead_by_interval", {}) or {}
+    for asset, interval in targets:
+        step_minutes = _UPDOWN_INTERVAL_MINUTES.get(interval)
+        if not step_minutes:
+            continue
+        if interval == "5m":
+            slots_ahead = int(settings.get("fast_updown_5m_slots_ahead", 8) or 8)
+        else:
+            slots_ahead = int(per_interval_slots.get(interval, settings.get("fast_updown_non_5m_slots_ahead", 4)) or 4)
+        start = _floor_to_slot(now_dt, step_minutes)
+        for offset in range(0, max(0, slots_ahead) + 1):
+            slot = start + timedelta(minutes=step_minutes * offset)
+            timestamp = int(slot.timestamp())
+            slugs.append(f"{asset}-updown-{interval}-{timestamp}")
     return slugs
 
 
@@ -336,6 +394,7 @@ def refresh_fast_updown_snapshot(cfg) -> dict[str, Any]:
         "status": "ok",
         "generated_at_utc": now_utc(),
         "assets": _positive_fast_updown_assets(cfg),
+        "asset_interval_targets": [f"{asset}:{interval}" for asset, interval in _positive_fast_updown_targets(cfg)],
         "candidate_slugs": len(slugs),
         "markets_found": markets_found,
         "tokens": len(rows),

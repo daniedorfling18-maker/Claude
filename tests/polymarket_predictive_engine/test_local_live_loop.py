@@ -395,6 +395,50 @@ def test_fast_updown_assets_come_from_positive_5m_cohort_evidence(tmp_path):
     assert loop._positive_fast_updown_assets(cfg) == ["btc"]
 
 
+def test_fast_updown_targets_follow_price_action_validation_positive_intervals(tmp_path):
+    loop = _load_loop_module()
+    cfg = EngineConfig(
+        raw={"paths": {"output_root": str(tmp_path / "outputs")}},
+        path=tmp_path / "cfg.yaml",
+    )
+    _write_csv(
+        cfg.output_root / "polymarket_price_action" / "price_action_model_validation_predictions.csv",
+        [
+            {
+                "target": "1",
+                "market_slug": "sol-updown-15m-4102444800",
+                "family": "crypto_sol_updown_15m",
+            },
+            {
+                "target": "1",
+                "market_slug": "sol-updown-15m-4102445700",
+                "family": "crypto_sol_updown_15m",
+            },
+            {
+                "target": "1",
+                "market_slug": "sol-updown-4h-4102444800",
+                "family": "crypto_sol_updown_event",
+            },
+            {
+                "target": "0",
+                "market_slug": "btc-updown-15m-4102444800",
+                "family": "crypto_btc_updown_15m",
+            },
+        ],
+    )
+
+    targets = loop._positive_fast_updown_targets(cfg)
+    slugs = loop._fast_updown_candidate_slugs(
+        cfg,
+        now_dt=datetime.fromtimestamp(4102444800, tz=timezone.utc) + timedelta(minutes=1),
+    )
+
+    assert targets[:2] == [("sol", "15m"), ("sol", "4h")]
+    assert any(slug.startswith("sol-updown-15m-") for slug in slugs)
+    assert any(slug.startswith("sol-updown-4h-") for slug in slugs)
+    assert not any(slug.startswith("btc-updown-15m-") for slug in slugs)
+
+
 def test_websocket_asset_discovery_prefers_fast_updown_snapshot(tmp_path, monkeypatch):
     loop = _load_loop_module()
     monkeypatch.setenv("POLYMARKET_MODEL_PROBABILITIES_CSV", str(tmp_path / "missing_model_probabilities.csv"))

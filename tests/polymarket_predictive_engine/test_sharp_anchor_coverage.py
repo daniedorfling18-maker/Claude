@@ -119,6 +119,9 @@ def test_sharp_anchor_coverage_is_idempotent_for_same_anchor_timestamp(tmp_path:
     first = build_sharp_anchor_coverage(cfg)
     second = build_sharp_anchor_coverage(cfg)
 
-    assert first["history_rows_appended"] == 1
+    # The builder records every configured sport/market once per anchor timestamp,
+    # including configured markets with zero fetched rows, so missing coverage is
+    # visible instead of silently omitted.
+    assert first["history_rows_appended"] == 2
     assert second["history_rows_appended"] == 0
-    assert len(read_csv_rows(governance / "sharp_anchor_coverage_history.csv")) == 1
+    assert len(read_csv_rows(governance / "sharp_anchor_coverage_history.csv")) == 2

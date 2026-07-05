@@ -56,7 +56,6 @@ jobs:
           PM_VPS_HOST: ${{ secrets.PM_VPS_HOST }}
           PM_VPS_PORT: ${{ secrets.PM_VPS_PORT || '22' }}
           PM_VPS_USER: ${{ secrets.PM_VPS_USER }}
-          PM_VPS_REPO_DIR: ${{ secrets.PM_VPS_REPO_DIR || '~/Claude' }}
         run: |
           set -euo pipefail
           ssh -i "$RUNNER_TEMP/ssh/vps_key" \
@@ -68,14 +67,13 @@ jobs:
             -o ConnectTimeout=30 \
             -p "$PM_VPS_PORT" \
             "$PM_VPS_USER@$PM_VPS_HOST" \
-            "PM_VPS_REPO_DIR='$PM_VPS_REPO_DIR' bash -lc 'cd \"\${PM_VPS_REPO_DIR/#\\~/$HOME}\" && docker compose -f \"\${PM_VPS_COMPOSE_FILE:-docker-compose.vps-paper.yml}\" exec -T polymarket-paper-live python -m polymarket_predictive_engine.cli refresh-governance --config /app/polymarket_predictive_config.example.yaml'"
+            "cd /home/$PM_VPS_USER/Claude && docker compose -f docker-compose.vps-paper.yml exec -T polymarket-paper-live python -m polymarket_predictive_engine.cli refresh-governance --config /app/polymarket_predictive_config.example.yaml"
 
       - name: Verify dashboard proof keys
         env:
           PM_VPS_HOST: ${{ secrets.PM_VPS_HOST }}
           PM_VPS_PORT: ${{ secrets.PM_VPS_PORT || '22' }}
           PM_VPS_USER: ${{ secrets.PM_VPS_USER }}
-          PM_VPS_REPO_DIR: ${{ secrets.PM_VPS_REPO_DIR || '~/Claude' }}
         run: |
           set -euo pipefail
           ssh -i "$RUNNER_TEMP/ssh/vps_key" \
@@ -87,4 +85,4 @@ jobs:
             -o ConnectTimeout=30 \
             -p "$PM_VPS_PORT" \
             "$PM_VPS_USER@$PM_VPS_HOST" \
-            "PM_VPS_REPO_DIR='$PM_VPS_REPO_DIR' bash -lc 'cd \"\${PM_VPS_REPO_DIR/#\\~/$HOME}\"; port=\$(grep -E \"^POLYMARKET_DASHBOARD_PORT=\" .env | tail -n 1 | cut -d= -f2-); port=\${port:-8765}; data=\$(curl -fsS --max-time 15 http://127.0.0.1:\${port}/dashboard_data.json); html=\$(curl -fsS --max-time 15 http://127.0.0.1:\${port}/); printf %s \"\$data\" | grep -q sharp_fetch_health; printf %s \"\$data\" | grep -q proof_questions; printf %s \"\$data\" | grep -q sharp_sports_funnel; printf %s \"\$html\" | grep -q \"Four proof questions\"; echo Governance refresh verified on dashboard port \${port}'"
+            "cd /home/$PM_VPS_USER/Claude; port=\$(grep -E '^POLYMARKET_DASHBOARD_PORT=' .env | tail -n 1 | cut -d= -f2-); port=\${port:-8765}; data=\$(curl -fsS --max-time 15 http://127.0.0.1:\${port}/dashboard_data.json); html=\$(curl -fsS --max-time 15 http://127.0.0.1:\${port}/); printf %s \"\$data\" | grep -q sharp_fetch_health; printf %s \"\$data\" | grep -q proof_questions; printf %s \"\$data\" | grep -q sharp_sports_funnel; printf %s \"\$html\" | grep -q 'Four proof questions'; echo Governance refresh verified on dashboard port \${port}"

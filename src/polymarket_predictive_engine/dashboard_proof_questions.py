@@ -3,7 +3,6 @@ from __future__ import annotations
 import argparse
 import json
 import re
-from pathlib import Path
 from typing import Any, Mapping
 
 from .config import EngineConfig, load_config
@@ -12,11 +11,6 @@ from .utils import now_utc, read_json, safe_float, write_json
 OVERLAY_START = "<!-- proof-questions-overlay:start -->"
 OVERLAY_END = "<!-- proof-questions-overlay:end -->"
 PROOF_SECTION = '  <section><h2>Four proof questions</h2><div id="proofQuestions"></div></section>'
-
-
-def _num(value: Any, default: float = 0.0) -> float:
-    parsed = safe_float(value)
-    return default if parsed is None else float(parsed)
 
 
 def _int(value: Any, default: int = 0) -> int:
@@ -219,6 +213,23 @@ def _overlay_script() -> str:
 """.strip()
 
 
+def _insert_proof_section(html: str) -> str:
+    if 'id="proofQuestions"' in html:
+        return html
+    evidence_match = re.search(
+        r'(\s*<section><h2>Evidence funnel</h2><div id="evidenceFunnel"></div></section>)',
+        html,
+    )
+    if evidence_match:
+        return html[: evidence_match.end()] + "\n" + PROOF_SECTION + html[evidence_match.end() :]
+    sharp_match = re.search(r'(\s*<section><h2>Sharp sports edge funnel</h2>)', html)
+    if sharp_match:
+        return html[: sharp_match.start()] + PROOF_SECTION + "\n" + html[sharp_match.start() :]
+    if "</body>" in html:
+        return html.replace("</body>", PROOF_SECTION + "\n</body>", 1)
+    return html + "\n" + PROOF_SECTION
+
+
 def _inject_html_overlay(html: str) -> str:
     html = re.sub(
         re.escape(OVERLAY_START) + r".*?" + re.escape(OVERLAY_END),
@@ -226,12 +237,7 @@ def _inject_html_overlay(html: str) -> str:
         html,
         flags=re.S,
     )
-    if 'id="proofQuestions"' not in html:
-        marker = '  <section><h2>Evidence funnel</h2><div id="evidenceFunnel"></div></section>'
-        if marker in html:
-            html = html.replace(marker, marker + "\n" + PROOF_SECTION, 1)
-        else:
-            html = html.replace("  <section><h2>Sharp sports edge funnel</h2>", PROOF_SECTION + "\n  <section><h2>Sharp sports edge funnel</h2>", 1)
+    html = _insert_proof_section(html)
     script = _overlay_script()
     if "</body>" in html:
         return html.replace("</body>", script + "\n</body>", 1)

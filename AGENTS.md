@@ -134,6 +134,22 @@ None of those is local dev. If you *are* deploying with Docker:
   force activity.
 - Do not treat `unknown` or bad 5-minute crypto families as actionable just because they are liquid.
 
+## Focus discipline — crypto up/down is FROZEN as a diagnostic (2026-07-05)
+
+Crypto up/down (all intervals: 5m, 15m, daily, event) is a **timing/infrastructure diagnostic
+only**. Its forward evidence is negative on every stream (shadow cohorts negative, CLV mean
+negative, replay negative, out-of-sample sweep failed) — it is priced off the same Binance feed the
+bot reads by faster participants, so there is no plausible retail edge there. See
+`docs/POLYMARKET_EDGE_STRATEGY_RESET.md`.
+
+Therefore, for any coding agent: **do NOT spend work on improving up/down "evidence targeting",
+up/down candidate selection, up/down collection prioritisation, or up/down model tuning.** That is
+motion without progress and it crowds out the only paths with a real edge prior. Effort belongs on,
+in order: (1) the sharp-anchor outright/advance path on markets Polymarket actually lists
+(WO-30 landed), (2) the dutch-book/consistency arb scanner, (3) CLV-measured structural-bias and
+smart-flow research. If a task's net effect is "the bot pays more attention to crypto up/down",
+stop — it is the wrong task.
+
 ## Where things are
 
 | Topic | File |

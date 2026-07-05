@@ -386,3 +386,28 @@ def test_fetch_skips_unknown_provider_sport_but_fetches_known_sports(tmp_path, m
     rows = list(csv.DictReader(open(output, encoding="utf-8-sig")))
     assert {row["sport"] for row in rows} == {"basketball_nba"}
     assert {row["market_key"] for row in rows} == {"h2h"}
+
+
+def test_example_config_fetches_only_polymarket_mappable_markets():
+    """WO-30: the shipped sharp_odds_fetch list targets only markets Polymarket lists.
+
+    Polymarket has no per-game/per-match sports markets (verified via the Gamma API),
+    so per-game h2h for NBA/MLB/MMA/tennis maps to nothing and wastes Odds API budget.
+    Keep WC winner outright + WC h2h (feeds the WO-29 advance composite); NBA/MLB use
+    championship-winner outrights; MMA/tennis per-game h2h are removed.
+    """
+    import yaml
+    from pathlib import Path
+
+    raw = yaml.safe_load(Path("polymarket_predictive_config.example.yaml").read_text(encoding="utf-8"))
+    sports = raw["sharp_odds_fetch"]["sports"]
+    by_key = {entry["key"]: entry.get("markets") for entry in sports}
+
+    assert by_key.get("soccer_fifa_world_cup_winner") == "outrights"
+    assert by_key.get("soccer_fifa_world_cup") == "h2h"  # feeds WO-29 composite advance
+    assert by_key.get("basketball_nba_championship_winner") == "outrights"
+    assert by_key.get("baseball_mlb_world_series_winner") == "outrights"
+
+    # Per-game h2h for these maps to nothing on Polymarket - must not be fetched.
+    for removed in ("basketball_nba", "baseball_mlb", "mma_mixed_martial_arts", "tennis_atp", "tennis_wta"):
+        assert removed not in by_key, f"{removed} per-game h2h should be removed (WO-30)"

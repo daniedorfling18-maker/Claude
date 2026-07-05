@@ -1,5 +1,5 @@
 {
-  "generated_at_utc": "2026-07-05T09:20:57.230270+00:00",
+  "generated_at_utc": "2026-07-05T15:24:06.053553+00:00",
   "component_pick_count": 7,
   "component_label_counts": {
     "component_aligned": 4,
@@ -21,6 +21,16 @@
       "component_reasons": "outcome market unavailable; totals market unavailable; spread market unavailable"
     },
     {
+      "home_team": "Mexico",
+      "away_team": "England",
+      "final_pick": "1-2",
+      "validation_label": "fragile",
+      "market_alignment_label": "market_mixed",
+      "component_score": 0.569,
+      "component_label": "component_mixed",
+      "component_reasons": "outcome agrees with market favourite; goal total conflicts with market lean; spread market unavailable"
+    },
+    {
       "home_team": "Brazil",
       "away_team": "Norway",
       "final_pick": "2-0",
@@ -31,18 +41,8 @@
       "component_reasons": "outcome agrees with market favourite; goal total conflicts with market lean; spread market unavailable"
     },
     {
-      "home_team": "Portugal",
-      "away_team": "Spain",
-      "final_pick": "0-2",
-      "validation_label": "fragile",
-      "market_alignment_label": "market_aligned",
-      "component_score": 0.6875,
-      "component_label": "component_mixed",
-      "component_reasons": "outcome agrees with market favourite; goal total conflicts with market lean; spread market unavailable"
-    },
-    {
-      "home_team": "Mexico",
-      "away_team": "England",
+      "home_team": "Switzerland",
+      "away_team": "Colombia",
       "final_pick": "0-1",
       "validation_label": "fragile",
       "market_alignment_label": "market_aligned",
@@ -51,12 +51,12 @@
       "component_reasons": "outcome agrees with market favourite; goal total agrees with market lean; spread market unavailable"
     },
     {
-      "home_team": "Switzerland",
-      "away_team": "Colombia",
-      "final_pick": "0-1",
+      "home_team": "Portugal",
+      "away_team": "Spain",
+      "final_pick": "1-2",
       "validation_label": "fragile",
       "market_alignment_label": "market_aligned",
-      "component_score": 0.758,
+      "component_score": 0.7745,
       "component_label": "component_aligned",
       "component_reasons": "outcome agrees with market favourite; goal total agrees with market lean; spread market unavailable"
     },

@@ -1,14 +1,14 @@
 {
-  "generated_at_utc": "2026-07-05T09:20:57.936025+00:00",
-  "snapshot_id": "20260705T092055Z",
+  "generated_at_utc": "2026-07-05T15:24:06.796776+00:00",
+  "snapshot_id": "20260705T152404Z",
   "final_card": "outputs/daily_robust_card/daily_robust_superbru_card.csv",
   "daily_summary": "outputs/daily_robust_card/daily_robust_summary.json",
   "market_history_summary": "outputs/market_odds_history/market_odds_history_summary.json",
   "market_odds_fetch_skipped": true,
   "market_odds_scope": {
     "mode": "rolling_pre_match_window",
-    "commence_from": "2026-07-05T09:10:55.665461Z",
-    "commence_to": "2026-07-05T09:50:55.665461Z",
+    "commence_from": "2026-07-05T15:14:04.470634Z",
+    "commence_to": "2026-07-05T15:54:04.470634Z",
     "window_before_minutes": 10,
     "window_after_minutes": 30
   },

@@ -10,10 +10,10 @@
     "Chapman12",
     "Dheben"
   ],
-  "baseline_p_finish_first": 0.768192,
-  "baseline_p_finish_first_or_tied": 0.897122,
-  "final_p_finish_first": 0.768192,
-  "final_p_finish_first_or_tied": 0.897122,
+  "baseline_p_finish_first": 0.769658,
+  "baseline_p_finish_first_or_tied": 0.899792,
+  "final_p_finish_first": 0.769658,
+  "final_p_finish_first_or_tied": 0.899792,
   "delta_p_finish_first": 0.0,
   "accepted_switches": [],
   "total_ev_loss": 0.0

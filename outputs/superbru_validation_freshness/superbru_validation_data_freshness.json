@@ -4,7 +4,7 @@
     "SuperBru results CSV is missing.",
     "No completed SuperBru result rows are available for realised validation."
   ],
-  "generated_at_utc": "2026-07-05T09:20:58.794989+00:00",
+  "generated_at_utc": "2026-07-05T15:24:07.796042+00:00",
   "live_trading_invoked": false,
   "locked_card": {
     "exists": true,
@@ -16,10 +16,10 @@
   "market_history": {
     "exists": true,
     "file_age_hours": 0.001,
-    "latest_snapshot_created_at_utc": "2026-07-05T09:20:56.887863+00:00",
+    "latest_snapshot_created_at_utc": "2026-07-05T15:24:05.701550+00:00",
     "path": "outputs/market_odds_history/market_odds_history.csv",
-    "rows": 41,
-    "snapshot_count": 5,
+    "rows": 48,
+    "snapshot_count": 6,
     "status": "ok"
   },
   "oddspedia_comparison": {
@@ -45,7 +45,7 @@
   },
   "oddspedia_grid": {
     "exists": true,
-    "file_age_hours": 0.039,
+    "file_age_hours": 0.041,
     "latest_source_timestamp_utc": "",
     "locked_card_coverage": {
       "coverage_fraction": 0.0,

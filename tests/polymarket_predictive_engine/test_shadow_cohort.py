@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+import json
 
 from polymarket_predictive_engine.config import EngineConfig
 from polymarket_predictive_engine.shadow_cohort import update_shadow_cohort_evidence
@@ -81,6 +82,82 @@ def test_near_miss_candidates_open_distinct_shadow_evidence_cohort(tmp_path):
     assert positions[0]["signal_cohort"] == "near_miss_learning|crypto"
     assert fills[0]["shadow_source"] == "near_miss_learning"
     assert summary["cohorts"][0]["signal_cohort"] == "near_miss_learning|crypto"
+
+
+def test_alpha_trade_candidates_can_enter_shadow_learning_only_when_enabled(tmp_path):
+    cfg = _cfg(tmp_path)
+    cfg.raw["shadow_cohort_validation"]["allow_alpha_candidate_learning_candidates"] = True
+    cfg.raw["shadow_cohort_validation"]["alpha_candidate_learning_candidate_limit_per_cycle"] = 2
+
+    summary = update_shadow_cohort_evidence(
+        cfg,
+        [
+            {
+                "market_id": "m-alpha",
+                "market_slug": "alpha-candidate-market",
+                "token_id": "t-alpha",
+                "outcome": "Yes",
+                "category": "crypto",
+                "signal_cohort": "crypto",
+                "alpha_trade_candidate": True,
+                "validation_layer_pass": True,
+                "microstructure_filter_pass": True,
+                "bookmaker_cross_check_pass": True,
+                "edge_lower_bound": "0.08",
+                "executable_price": "0.50",
+                "best_bid": "0.49",
+                "spread": "0.01",
+                "liquidity": "1000",
+                "prediction_timestamp": "2026-06-27T04:00:00Z",
+            }
+        ],
+    )
+
+    positions = read_csv_rows(cfg.output_root / "polymarket_shadow" / "shadow_positions.csv")
+    fills = read_csv_rows(cfg.output_root / "polymarket_shadow" / "shadow_fills.csv")
+
+    assert summary["opened_this_cycle"] == 1
+    assert summary["alpha_candidate_learning_opened_this_cycle"] == 1
+    assert summary["alpha_candidate_learning_candidates_seen"] == 1
+    assert positions[0]["shadow_source"] == "alpha_candidate_learning"
+    source_signal = json.loads(positions[0]["source_signal_json"])
+    assert source_signal["shadow_candidate_reason"] == "alpha_candidate_shadow_evidence"
+    assert fills[0]["shadow_source"] == "alpha_candidate_learning"
+
+
+def test_alpha_trade_candidate_shadow_learning_defaults_closed(tmp_path):
+    cfg = _cfg(tmp_path)
+
+    summary = update_shadow_cohort_evidence(
+        cfg,
+        [
+            {
+                "market_id": "m-alpha-disabled",
+                "market_slug": "alpha-candidate-market",
+                "token_id": "t-alpha-disabled",
+                "outcome": "Yes",
+                "category": "crypto",
+                "signal_cohort": "crypto",
+                "alpha_trade_candidate": True,
+                "validation_layer_pass": True,
+                "microstructure_filter_pass": True,
+                "bookmaker_cross_check_pass": True,
+                "edge_lower_bound": "0.08",
+                "executable_price": "0.50",
+                "best_bid": "0.49",
+                "spread": "0.01",
+                "liquidity": "1000",
+                "prediction_timestamp": "2026-06-27T04:00:00Z",
+            }
+        ],
+    )
+
+    positions = read_csv_rows(cfg.output_root / "polymarket_shadow" / "shadow_positions.csv")
+
+    assert summary["opened_this_cycle"] == 0
+    assert summary["alpha_candidate_learning_opened_this_cycle"] == 0
+    assert summary["alpha_candidate_learning_candidates_seen"] == 1
+    assert positions == []
 
 
 def test_shadow_cohort_refuses_new_positions_outside_entry_band(tmp_path):

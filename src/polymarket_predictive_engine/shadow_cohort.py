@@ -210,12 +210,42 @@ def _near_miss_shadow_row(row: dict[str, Any], settings: dict[str, Any]) -> dict
     return shadow_row
 
 
+def _alpha_candidate_learning_shadow_row(row: dict[str, Any], settings: dict[str, Any]) -> dict[str, Any] | None:
+    """Convert a governed alpha candidate into shadow-only forward evidence.
+
+    This does not approve a paper trade. It only lets candidates that already
+    passed the alpha validation/microstructure checks enter the same simulated
+    bid/ask P&L loop used for promotion evidence. Paper/live gates remain
+    downstream and unchanged.
+    """
+    if not boolish(settings.get("allow_alpha_candidate_learning_candidates", False)):
+        return None
+    if not boolish(row.get("alpha_trade_candidate")):
+        return None
+    if not boolish(row.get("validation_layer_pass")):
+        return None
+    if not boolish(row.get("microstructure_filter_pass")):
+        return None
+    if not boolish(row.get("bookmaker_cross_check_pass", True)):
+        return None
+    shadow_row = dict(row)
+    shadow_row["shadow_trade_candidate"] = True
+    shadow_row["shadow_candidate_reason"] = "alpha_candidate_shadow_evidence"
+    shadow_row["shadow_source"] = "alpha_candidate_learning"
+    if not str(shadow_row.get("shadow_priority_score") or "").strip():
+        shadow_row["shadow_priority_score"] = row.get("edge_lower_bound") or row.get("alpha_score") or ""
+    return shadow_row
+
+
 def _shadow_candidate_row(row: dict[str, Any], settings: dict[str, Any]) -> dict[str, Any] | None:
     if boolish(row.get("shadow_trade_candidate")):
         candidate = dict(row)
         candidate.setdefault("shadow_source", "shadow_trade_candidate")
         return candidate
-    return _near_miss_shadow_row(row, settings)
+    near_miss = _near_miss_shadow_row(row, settings)
+    if near_miss is not None:
+        return near_miss
+    return _alpha_candidate_learning_shadow_row(row, settings)
 
 
 def _quarantined_cohorts(cfg: EngineConfig, positions: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
@@ -528,13 +558,21 @@ def _candidate_rows(cfg: EngineConfig, predictions: list[dict[str, Any]], positi
     )
     candidate_limit = int(settings.get("candidate_limit_per_cycle", 8))
     near_miss_limit = int(settings.get("near_miss_candidate_limit_per_cycle", candidate_limit) or candidate_limit)
+    alpha_learning_limit = int(
+        settings.get("alpha_candidate_learning_candidate_limit_per_cycle", candidate_limit) or candidate_limit
+    )
     limited: list[dict[str, Any]] = []
     near_miss_count = 0
+    alpha_learning_count = 0
     for row in candidates:
         if str(row.get("shadow_source") or "") == "near_miss_learning":
             if near_miss_count >= near_miss_limit:
                 continue
             near_miss_count += 1
+        if str(row.get("shadow_source") or "") == "alpha_candidate_learning":
+            if alpha_learning_count >= alpha_learning_limit:
+                continue
+            alpha_learning_count += 1
         limited.append(row)
         if len(limited) >= candidate_limit:
             break
@@ -804,6 +842,7 @@ def update_shadow_cohort_evidence(cfg: EngineConfig, predictions: list[dict[str,
     cohort_open_counts: dict[str, int] = defaultdict(int)
     long_horizon_open_count = 0
     near_miss_open_count = 0
+    alpha_learning_open_count = 0
     for position in positions:
         if str(position.get("status") or "").lower() != "open":
             continue
@@ -812,8 +851,11 @@ def update_shadow_cohort_evidence(cfg: EngineConfig, predictions: list[dict[str,
             long_horizon_open_count += 1
         if str(position.get("shadow_source") or "") == "near_miss_learning":
             near_miss_open_count += 1
+        if str(position.get("shadow_source") or "") == "alpha_candidate_learning":
+            alpha_learning_open_count += 1
     opened_this_cycle = 0
     near_miss_opened_this_cycle = 0
+    alpha_learning_opened_this_cycle = 0
     entry_price_band_skipped = 0
     stake = float(settings.get("stake_usdc", 10.0))
     minimum_entry_price, maximum_entry_price = _entry_price_band(cfg)
@@ -911,15 +953,20 @@ def update_shadow_cohort_evidence(cfg: EngineConfig, predictions: list[dict[str,
             long_horizon_open_count += 1
         if is_near_miss:
             near_miss_open_count += 1
+        if str(row.get("shadow_source") or "") == "alpha_candidate_learning":
+            alpha_learning_open_count += 1
         opened_this_cycle += 1
         if is_near_miss:
             near_miss_opened_this_cycle += 1
+        if str(row.get("shadow_source") or "") == "alpha_candidate_learning":
+            alpha_learning_opened_this_cycle += 1
 
     summary = _summarise_shadow(cfg, positions, fills)
     summary.update(
         {
             "opened_this_cycle": opened_this_cycle,
             "near_miss_opened_this_cycle": near_miss_opened_this_cycle,
+            "alpha_candidate_learning_opened_this_cycle": alpha_learning_opened_this_cycle,
             "entry_price_band_skipped": entry_price_band_skipped,
             "entry_price_band": {
                 "minimum_entry_price": minimum_entry_price,
@@ -930,11 +977,25 @@ def update_shadow_cohort_evidence(cfg: EngineConfig, predictions: list[dict[str,
             "open_positions": sum(1 for row in positions if str(row.get("status") or "").lower() == "open"),
             "shadow_candidates_seen": sum(1 for row in predictions if boolish(row.get("shadow_trade_candidate"))),
             "near_miss_candidates_seen": sum(1 for row in predictions if boolish(row.get("near_miss_learning_candidate"))),
+            "alpha_candidate_learning_candidates_seen": sum(
+                1
+                for row in predictions
+                if boolish(row.get("alpha_trade_candidate"))
+                and boolish(row.get("validation_layer_pass"))
+                and boolish(row.get("microstructure_filter_pass"))
+                and boolish(row.get("bookmaker_cross_check_pass", True))
+            ),
             "near_miss_open_positions": sum(
                 1
                 for row in positions
                 if str(row.get("status") or "").lower() == "open"
                 and str(row.get("shadow_source") or "") == "near_miss_learning"
+            ),
+            "alpha_candidate_learning_open_positions": sum(
+                1
+                for row in positions
+                if str(row.get("status") or "").lower() == "open"
+                and str(row.get("shadow_source") or "") == "alpha_candidate_learning"
             ),
         }
     )

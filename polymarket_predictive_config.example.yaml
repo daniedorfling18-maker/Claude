@@ -736,6 +736,11 @@ shadow_cohort_validation:
   near_miss_cohort_prefix: near_miss_learning
   near_miss_candidate_limit_per_cycle: 4
   maximum_near_miss_open_positions: 3
+  # Shadow-only intake for candidates that pass alpha/microstructure checks but
+  # are still blocked from paper by category/cohort/risk gates. This creates
+  # forward evidence; it does not approve paper or live trades.
+  allow_alpha_candidate_learning_candidates: true
+  alpha_candidate_learning_candidate_limit_per_cycle: 4
   minimum_reentry_minutes_after_exit: 240
   quarantine_negative_cohorts: true
   quarantine_min_closed_positions: 3

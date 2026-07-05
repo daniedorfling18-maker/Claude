@@ -1038,6 +1038,7 @@ async function load() {
       ["Near-miss opened", diag.near_miss_opened_this_cycle],
       ["Near-miss open", diag.near_miss_open_positions],
       ["Alpha-learning candidates", diag.alpha_candidate_learning_candidates_seen],
+      ["Alpha-learning openable", diag.alpha_candidate_learning_openable_candidates_seen],
       ["Alpha-learning opened", diag.alpha_candidate_learning_opened_this_cycle],
       ["Alpha-learning open", diag.alpha_candidate_learning_open_positions],
       ["Shadow candidates", diag.shadow_candidates_seen],
@@ -2511,7 +2512,46 @@ def _sharp_sports_funnel_payload(
     }
 
 
+def _dashboard_entry_price_band(cfg: EngineConfig) -> tuple[float, float]:
+    risk = cfg.raw.get("risk") if isinstance(cfg.raw.get("risk"), dict) else {}
+    minimum_entry_price = safe_float(risk.get("minimum_entry_price"))
+    maximum_entry_price = safe_float(risk.get("maximum_entry_price"))
+    return (
+        float(minimum_entry_price) if minimum_entry_price is not None else 0.05,
+        float(maximum_entry_price) if maximum_entry_price is not None else 0.90,
+    )
+
+
+def _dashboard_time_to_close_hours(row: dict[str, Any]) -> float | None:
+    for key in ("close_time", "end_time", "endDate", "endDateIso"):
+        parsed = parse_timestamp(row.get(key))
+        if parsed is not None:
+            return (parsed.astimezone(timezone.utc) - datetime.now(timezone.utc)).total_seconds() / 3600.0
+    for key in ("time_to_close_hours", "hours_to_close"):
+        value = safe_float(row.get(key))
+        if value is not None:
+            return value
+    return None
+
+
+def _alpha_learning_openable_dashboard_candidate(
+    row: dict[str, Any],
+    minimum_entry_price: float,
+    maximum_entry_price: float,
+) -> bool:
+    time_to_close = _dashboard_time_to_close_hours(row)
+    if time_to_close is not None and time_to_close < 0:
+        return False
+    executable_price = safe_float(row.get("executable_price"))
+    if executable_price is None or not minimum_entry_price <= executable_price <= maximum_entry_price:
+        return False
+    if safe_float(row.get("best_ask")) is None and safe_float(row.get("executable_price")) is None:
+        return False
+    return True
+
+
 def _trade_diagnostics(
+    cfg: EngineConfig,
     *,
     predictions: list[dict[str, Any]],
     approved_signals: list[dict[str, Any]],
@@ -2538,6 +2578,19 @@ def _trade_diagnostics(
         and _truthy(row.get("bookmaker_cross_check_pass", True))
     ]
     alpha_learning_candidates.sort(
+        key=lambda row: (
+            safe_float(row.get("edge_lower_bound")) or 0.0,
+            safe_float(row.get("alpha_score")) or 0.0,
+        ),
+        reverse=True,
+    )
+    minimum_entry_price, maximum_entry_price = _dashboard_entry_price_band(cfg)
+    openable_alpha_learning_candidates = [
+        row
+        for row in alpha_learning_candidates
+        if _alpha_learning_openable_dashboard_candidate(row, minimum_entry_price, maximum_entry_price)
+    ]
+    openable_alpha_learning_candidates.sort(
         key=lambda row: (
             safe_float(row.get("edge_lower_bound")) or 0.0,
             safe_float(row.get("alpha_score")) or 0.0,
@@ -2589,15 +2642,20 @@ def _trade_diagnostics(
             "alpha_candidate_learning_candidates_seen",
             len(alpha_learning_candidates),
         ),
+        "alpha_candidate_learning_openable_candidates_seen": len(openable_alpha_learning_candidates),
         "alpha_candidate_learning_opened_this_cycle": shadow_summary.get("alpha_candidate_learning_opened_this_cycle"),
         "alpha_candidate_learning_open_positions": shadow_summary.get("alpha_candidate_learning_open_positions"),
+        "alpha_candidate_learning_entry_price_band": {
+            "minimum_entry_price": minimum_entry_price,
+            "maximum_entry_price": maximum_entry_price,
+        },
         "shadow_candidates_seen": shadow_summary.get("shadow_candidates_seen"),
         "shadow_opened_this_cycle": shadow_summary.get("opened_this_cycle"),
         "shadow_open_positions": shadow_summary.get("open_positions"),
         "quarantined_cohort_count": len(quarantined),
         "top_rejection_reasons": top_reasons,
         "current_near_miss_candidates": near_miss_candidates[:12],
-        "current_alpha_learning_candidates": alpha_learning_candidates[:12],
+        "current_alpha_learning_candidates": openable_alpha_learning_candidates[:12],
         "current_shadow_candidates": shadow_candidates[:12],
         "quarantined_cohorts": quarantined[:12],
     }
@@ -5142,6 +5200,7 @@ def render_dashboard(cfg: EngineConfig, latest_report: dict[str, Any] | None = N
         **strategy_v2_runtime,
     }
     trade_diagnostics = _trade_diagnostics(
+        cfg,
         predictions=predictions,
         approved_signals=signals,
         rejected=rejected,

@@ -83,6 +83,10 @@ jobs:
             -i "$RUNNER_TEMP/ssh/vps_key" \
             -o BatchMode=yes \
             -o UserKnownHostsFile="$RUNNER_TEMP/ssh/known_hosts" \
+            -o ServerAliveInterval=30 \
+            -o ServerAliveCountMax=10 \
+            -o TCPKeepAlive=yes \
+            -o ConnectTimeout=30 \
             -p "$PM_VPS_PORT" \
             "$PM_VPS_USER@$PM_VPS_HOST" \
             "echo VPS_SSH_OK" >/dev/null 2>&1; then
@@ -140,6 +144,10 @@ jobs:
             -i "$RUNNER_TEMP/ssh/vps_key" \
             -o BatchMode=yes \
             -o UserKnownHostsFile="$RUNNER_TEMP/ssh/known_hosts" \
+            -o ServerAliveInterval=30 \
+            -o ServerAliveCountMax=10 \
+            -o TCPKeepAlive=yes \
+            -o ConnectTimeout=30 \
             -P "$PM_VPS_PORT" \
             "$RUNNER_TEMP/polymarket-vps-env.patch" \
             "$PM_VPS_USER@$PM_VPS_HOST:/tmp/polymarket-vps-env.patch.$GITHUB_RUN_ID"
@@ -155,10 +163,19 @@ jobs:
           GITHUB_RUN_ID: ${{ github.run_id }}
         run: |
           set -euo pipefail
+          # Keepalives are essential here: the remote rebuild + governance refresh has
+          # long silent phases (image layer export, refresh-governance) with no stdout.
+          # Without SSH-level keepalive probes a NAT/firewall idle timeout drops the
+          # connection mid-deploy ("client_loop: send disconnect: Broken pipe", exit 255)
+          # even though the deploy itself succeeded. ServerAlive* keeps the channel warm.
           ssh \
             -i "$RUNNER_TEMP/ssh/vps_key" \
             -o BatchMode=yes \
             -o UserKnownHostsFile="$RUNNER_TEMP/ssh/known_hosts" \
+            -o ServerAliveInterval=30 \
+            -o ServerAliveCountMax=10 \
+            -o TCPKeepAlive=yes \
+            -o ConnectTimeout=30 \
             -p "$PM_VPS_PORT" \
             "$PM_VPS_USER@$PM_VPS_HOST" \
             "PM_VPS_HOST='$PM_VPS_HOST' PM_VPS_REPO_DIR='$PM_VPS_REPO_DIR' GITHUB_REPOSITORY='$GITHUB_REPOSITORY' GITHUB_SHA='$GITHUB_SHA' GITHUB_RUN_ID='$GITHUB_RUN_ID' bash -s" <<'REMOTE'
@@ -271,15 +288,20 @@ jobs:
           PY
           rm -f "$ENV_PATCH"
 
+          echo "[deploy] building and (re)starting stack from $(git rev-parse --short HEAD)"
           $DOCKER compose -f "$COMPOSE_FILE" up -d --build
 
           # Force a governance + dashboard artifact refresh after the code update;
           # the dashboard reads generated governance files such as the proof-first
-          # paper_profit_goal_plan, so render-only can leave stale decisions.
+          # paper_profit_goal_plan, so render-only can leave stale decisions. This CLI
+          # run can be silent for several minutes; SSH keepalives (client side) keep the
+          # channel alive, and the marker below localises any failure to this step.
+          echo "[deploy] refreshing governance + dashboard artifacts (may take a few minutes)"
           $DOCKER compose -f "$COMPOSE_FILE" exec -T polymarket-paper-live \
             python -m polymarket_predictive_engine.cli refresh-governance \
             --config /app/polymarket_predictive_config.example.yaml
 
+          echo "[deploy] verifying paper stack health"
           bash scripts/check_polymarket_vps_paper.sh
 
           port="$(grep -E '^POLYMARKET_DASHBOARD_PORT=' .env | tail -n 1 | cut -d= -f2-)"

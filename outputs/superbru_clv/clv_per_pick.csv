@@ -2,3 +2,4 @@ match_key,home_team,away_team,commence_time,locked_pick,pick_outcome,p_pick_time
 canada|morocco|2026-07-04,Canada,Morocco,2026-07-04T17:00:00Z,0-2,away,0.544072,0.572692,0.02862,True,169.4
 paraguay|france|2026-07-04,Paraguay,France,2026-07-04T21:00:00Z,0-2,away,0.833429,0.833429,0.0,False,204.0
 brazil|norway|2026-07-05,Brazil,Norway,2026-07-05T20:00:00Z,2-0,home,0.544476,0.541723,-0.002753,False,142.3
+mexico|england|2026-07-06,Mexico,England,2026-07-06T00:00:00Z,1-2,away,0.390872,0.381705,-0.009167,False,144.9

@@ -42,6 +42,10 @@ services:
       POLYMARKET_POSITIONS_CSV: ${POLYMARKET_POSITIONS_CSV:-inputs/polymarket/positions.csv}
       POLYMARKET_MIN_EDGE: ${POLYMARKET_MIN_EDGE:-0.04}
       THE_ODDS_API_KEY: ${THE_ODDS_API_KEY:-}
+      # VPS services mount ./src and ./scripts from the pulled repo. Override
+      # the baked image SHA so dashboard stale-code checks reflect the deployed
+      # repo commit, not the older base image layer.
+      PM_IMAGE_BUILD_SHA: ${PM_VPS_DEPLOYED_SHA:-unknown}
       PAPER_LOOP_ITERATIONS: "0"
       POLYMARKET_LIVE_LOOP_SLEEP_SECONDS: ${POLYMARKET_LIVE_LOOP_SLEEP_SECONDS:-1}
       POLYMARKET_WEBSOCKET_SECONDS: ${POLYMARKET_WEBSOCKET_SECONDS:-30}
@@ -100,6 +104,10 @@ services:
     env_file:
       - .env
     working_dir: /app
+    environment:
+      # The dashboard renders mounted repo code on the VPS; this marker is the
+      # deployed runtime code version used by deployment-health checks.
+      PM_IMAGE_BUILD_SHA: ${PM_VPS_DEPLOYED_SHA:-unknown}
     command: >
       sh -c "mkdir -p /app/outputs/polymarket_dashboard &&
       python scripts/render_polymarket_dashboard.py --config /app/polymarket_predictive_config.example.yaml || true;
@@ -141,6 +149,7 @@ services:
       SUPERBRU_PLAYER_NAME: ${SUPERBRU_PLAYER_NAME:-Danie}
       SUPERBRU_POOL_KEYWORDS: ${SUPERBRU_POOL_KEYWORDS:-Moore Infinity,FIFA WC 26,World Cup 2026}
       THE_ODDS_API_KEY: ${THE_ODDS_API_KEY:-}
+      PM_IMAGE_BUILD_SHA: ${PM_VPS_DEPLOYED_SHA:-unknown}
     command: sh -c "sh scripts/run_superbru_auto_pick_watchdog.sh"
     volumes:
       - ./config.yaml:/app/config.yaml:ro

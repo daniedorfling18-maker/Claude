@@ -1895,6 +1895,108 @@ def test_eth_updown_confirmation_query_matches_current_eth_rows_by_outcome(tmp_p
     assert "outcome=up" in signals[0]["signal_cohort"]
 
 
+def test_paper_confirmation_current_candidate_uses_fast_updown_snapshot_when_websocket_latest_is_absent(tmp_path):
+    cfg = _cfg(tmp_path)
+    cfg.raw["price_action_paper"].update(
+        {
+            "paper_confirmation_max_current_candidates": 4,
+            "paper_confirmation_require_positive_historical_analogue": True,
+            "paper_confirmation_min_historical_analogue_validation_rows": 3,
+            "paper_confirmation_min_historical_analogue_positive_rows": 1,
+            "low_price_tick_probe_enabled": False,
+        }
+    )
+    root = cfg.output_root / "polymarket_price_action"
+    feedback = _paper_confirmation_feedback_payload(
+        cohort="exploratory_crypto_updown_live_model|crypto_sol_updown_15m|outcome=up"
+    )
+    feedback["paper_confirmation_preview"][0]["recommended_collection_query"] = "solana updown"
+    write_json(cfg.governance_root / "price_action_feedback.json", feedback)
+    write_csv(
+        cfg.output_root / "polymarket_fast_updown" / "fast_updown_market_snapshot.csv",
+        [
+            {
+                "timestamp": "2026-07-05T04:00:00Z",
+                "event_slug": "sol-updown-15m-4102444800",
+                "event_title": "Solana UpDown 15M",
+                "market_slug": "sol-updown-15m-4102444800",
+                "condition_id": "sol-condition",
+                "close_time": "2100-01-01T00:15:00Z",
+                "question": "Solana UpDown 15M",
+                "outcome": "Up",
+                "token_id": "sol-up-token",
+                "best_bid": "0.49",
+                "best_ask": "0.50",
+                "spread": "0.01",
+                "bid_size": "100",
+                "ask_size": "100",
+            }
+        ],
+    )
+    write_csv(
+        root / "microstructure_trade_events.csv",
+        [
+            _low_price_trade_event(
+                split="validation",
+                family="crypto_sol_updown_15m",
+                market_slug="sol-updown-15m-4102441200",
+                outcome="Up",
+                token_id="sol-history-1",
+                entry_bid="0.49",
+                entry_ask="0.50",
+                entry_spread="0.01",
+                current_side="BUY",
+                exit_bid="0.54",
+                pnl_usdc="0.8",
+                roi="0.08",
+            ),
+            _low_price_trade_event(
+                split="validation",
+                family="crypto_sol_updown_15m",
+                market_slug="sol-updown-15m-4102442100",
+                outcome="Up",
+                token_id="sol-history-2",
+                entry_bid="0.49",
+                entry_ask="0.50",
+                entry_spread="0.01",
+                current_side="BUY",
+                exit_bid="0.53",
+                pnl_usdc="0.6",
+                roi="0.06",
+            ),
+            _low_price_trade_event(
+                split="validation",
+                family="crypto_sol_updown_15m",
+                market_slug="sol-updown-15m-4102443000",
+                outcome="Up",
+                token_id="sol-history-3",
+                entry_bid="0.49",
+                entry_ask="0.50",
+                entry_spread="0.01",
+                current_side="BUY",
+                exit_bid="0.52",
+                pnl_usdc="0.4",
+                roi="0.04",
+            ),
+        ],
+    )
+
+    summary = build_price_action_paper_signals(cfg)
+    signals = read_csv_rows(root / "price_action_paper_signals.csv")
+    analogue = summary["paper_confirmation_current_historical_analogue"]
+
+    assert summary["signals"] == 1
+    assert summary["paper_confirmation_signals"] == 1
+    assert analogue["fresh_matches"] == 1
+    assert analogue["selected"] == 1
+    assert analogue["current_quote_sources"] == {"fast_updown_snapshot": 1}
+    assert summary["current_historical_analogue_scan"]["current_quote_sources"] == {"fast_updown_snapshot": 1}
+    assert signals[0]["market_slug"] == "sol-updown-15m-4102444800"
+    assert signals[0]["outcome"] == "Up"
+    assert signals[0]["token_id"] == "sol-up-token"
+    assert "crypto_sol_updown_15m" in signals[0]["signal_cohort"]
+
+
 def test_paper_confirmation_rejects_mutually_exclusive_same_market_probe(tmp_path):
     cfg = _cfg(tmp_path)
     root = cfg.output_root / "polymarket_price_action"

@@ -16,6 +16,7 @@ SCOUT_ROUND_TRIP_FILE = "price_action_scout_round_trip_evidence.csv"
 SCOUT_ENTRY_FILE = "price_action_scout_entries.csv"
 MICROSTRUCTURE_CURRENT_FILE = "microstructure_current_candidates.csv"
 MICROSTRUCTURE_TRADE_EVENTS_FILE = "microstructure_trade_events.csv"
+FAST_UPDOWN_SNAPSHOT_FILE = "fast_updown_market_snapshot.csv"
 MODEL_SUMMARY_JSON = "price_action_model_summary.json"
 SIGNALS_FILE = "price_action_paper_signals.csv"
 REJECTIONS_FILE = "price_action_paper_rejections.csv"
@@ -282,6 +283,106 @@ def _market_family(row: dict[str, Any]) -> str:
     if classified and classified != "unknown" and (not raw or raw_key in GENERIC_FAMILY_VALUES):
         return classified
     return raw or classified or "unknown"
+
+
+def _format_utc(dt: datetime | None) -> str:
+    if dt is None:
+        return ""
+    return dt.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def _current_row_time(row: dict[str, Any]) -> datetime | None:
+    return parse_timestamp(
+        row.get("entry_time_utc")
+        or row.get("latest_time_utc")
+        or row.get("timestamp")
+        or row.get("collected_at_utc")
+        or row.get("source_timestamp")
+    )
+
+
+def _fast_updown_snapshot_features(cfg: EngineConfig) -> list[dict[str, Any]]:
+    """Expose focused fast-UpDown orderbook snapshots as current executable rows.
+
+    These rows are deliberately not used as training labels.  They are only a
+    point-in-time quote source for the paper-confirmation bridge, which still
+    requires the existing trusted-shadow cohort, entry-price band, closed-market
+    filter, and positive historical analogue gates.
+    """
+    path = cfg.output_root / "polymarket_fast_updown" / FAST_UPDOWN_SNAPSHOT_FILE
+    features: list[dict[str, Any]] = []
+    for row in read_csv_rows(path):
+        token = _token_id(row)
+        bid = safe_float(row.get("best_bid"))
+        ask = safe_float(row.get("best_ask"))
+        if not token or bid is None or ask is None or not 0 < bid < ask < 1:
+            continue
+        spread = safe_float(row.get("spread"))
+        if spread is None:
+            spread = max(0.0, ask - bid)
+        midpoint = (bid + ask) / 2.0
+        timestamp = _format_utc(parse_timestamp(row.get("timestamp"))) or now_utc()
+        feature = {
+            "source": "fast_updown_snapshot",
+            "token_id": token,
+            "asset_id": token,
+            "market_slug": row.get("market_slug", ""),
+            "question": row.get("question", ""),
+            "event_slug": row.get("event_slug", ""),
+            "event_title": row.get("event_title", ""),
+            "close_time": row.get("close_time", ""),
+            "outcome": row.get("outcome", ""),
+            "selection": row.get("outcome", ""),
+            "entry_time_utc": timestamp,
+            "latest_time_utc": timestamp,
+            "entry_bid": bid,
+            "entry_ask": ask,
+            "entry_midpoint": midpoint,
+            "entry_spread": spread,
+            "latest_bid": bid,
+            "latest_ask": ask,
+            "latest_midpoint": midpoint,
+            "latest_spread": spread,
+            "relative_spread": _relative_spread(spread, ask),
+            "lookback_observations": 0,
+            "bid_move_abs": "",
+            "mid_move_abs": "",
+            "ask_move_abs": "",
+            "spread_change": "",
+            "net_buy_events": "",
+            "net_buy_size": "",
+            "current_side": "BUY",
+            "price_change_side": "BUY",
+            "current_price_change_size": "",
+        }
+        family = _market_family(feature)
+        feature["family"] = row.get("family") or row.get("category") or family
+        feature["category"] = row.get("category") or row.get("family") or family
+        features.append(feature)
+    return features
+
+
+def _latest_executable_price_action_rows(cfg: EngineConfig) -> list[dict[str, Any]]:
+    """Return current executable quote rows from websocket history plus snapshots."""
+    rows = [*build_latest_microstructure_features(cfg), *_fast_updown_snapshot_features(cfg)]
+    min_time = datetime.min.replace(tzinfo=timezone.utc)
+    rows.sort(
+        key=lambda row: (
+            _current_row_time(row) or min_time,
+            1 if str(row.get("source") or "") == "fast_updown_snapshot" else 0,
+        ),
+        reverse=True,
+    )
+    deduped: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for row in rows:
+        token = _token_id(row)
+        key = token or "|".join(str(row.get(k) or "") for k in ("market_slug", "outcome"))
+        if not key or key in seen:
+            continue
+        seen.add(key)
+        deduped.append(row)
+    return deduped
 
 
 def _approved_cohorts(cohort_rows: list[dict[str, str]]) -> dict[str, dict[str, str]]:
@@ -905,7 +1006,11 @@ def _paper_confirmation_current_candidates(
     max_candidates = int(safe_float(settings.get("paper_confirmation_max_current_candidates")) or 8)
     require_positive_history = boolish(settings.get("paper_confirmation_require_positive_historical_analogue", True))
     analogue_stats = _historical_analogue_stats(cfg, settings)
-    latest_rows = build_latest_microstructure_features(cfg)
+    latest_rows = _latest_executable_price_action_rows(cfg)
+    current_quote_sources: dict[str, int] = {}
+    for row in latest_rows:
+        source = str(row.get("source") or "websocket_market_features").strip() or "websocket_market_features"
+        current_quote_sources[source] = current_quote_sources.get(source, 0) + 1
     candidates: list[dict[str, Any]] = []
     seen: set[tuple[str, str]] = set()
     fresh_matches = 0
@@ -1049,6 +1154,7 @@ def _paper_confirmation_current_candidates(
         "blocked_preview": _balanced_blocked_preview(blocked_preview, limit=10),
         "blocked_preview_selection": "balanced_by_family_then_gate_strength",
         "positive_historical_analogue_keys": len(approved_analogue_keys),
+        "current_quote_sources": dict(sorted(current_quote_sources.items())),
     }
 
 
@@ -1094,7 +1200,11 @@ def _current_historical_analogue_scan(
     paper signal.
     """
     stats = analogue_stats if analogue_stats is not None else _historical_analogue_stats(cfg, settings)
-    raw_rows = latest_rows if latest_rows is not None else build_latest_microstructure_features(cfg)
+    raw_rows = latest_rows if latest_rows is not None else _latest_executable_price_action_rows(cfg)
+    current_quote_sources: dict[str, int] = {}
+    for row in raw_rows:
+        source = str(row.get("source") or "websocket_market_features").strip() or "websocket_market_features"
+        current_quote_sources[source] = current_quote_sources.get(source, 0) + 1
     stale_current_rows_filtered = sum(1 for row in raw_rows if _row_implies_closed_market(row))
     rows = [row for row in raw_rows if not _row_implies_closed_market(row)]
     blocked_by_state: dict[str, int] = {}
@@ -1206,6 +1316,7 @@ def _current_historical_analogue_scan(
         "current_rows": len(rows),
         "raw_current_rows": len(raw_rows),
         "stale_current_rows_filtered": stale_current_rows_filtered,
+        "current_quote_sources": dict(sorted(current_quote_sources.items())),
         "positive_matches": positive_matches,
         "blocked": blocked,
         "blocked_by_state": dict(sorted(blocked_by_state.items())),

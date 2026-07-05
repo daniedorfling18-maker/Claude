@@ -63,9 +63,20 @@ EVIDENCE_POSITIVE = "positive_clv_evidence"
 EVIDENCE_NEGATIVE = "negative_clv_evidence"
 EVIDENCE_INSUFFICIENT = "insufficient_clv_evidence"
 
+# Cohorts whose forward edge is frozen as a diagnostic (crypto up/down; see AGENTS.md).
+# The headline mean CLV mixes these in, which muddies the read on the paths that
+# actually carry an edge prior (sharp anchor, dutch-arb, structural bias). The focus
+# view below reports the clean mean over everything EXCEPT these diagnostic cohorts.
+DEFAULT_DIAGNOSTIC_COHORT_SUBSTRINGS = ["updown", "up_down", "up-down"]
+
 
 def _settings(cfg: EngineConfig) -> dict[str, Any]:
     return cfg.raw.get("closing_line_value", {}) or {}
+
+
+def _is_diagnostic_cohort(name: object, substrings: list[str]) -> bool:
+    low = str(name or "").lower()
+    return any(sub in low for sub in substrings)
 
 
 def _quote_price(row: dict[str, Any]) -> float | None:
@@ -247,6 +258,40 @@ def build_closing_line_value(
     final_rows = [row for row in rows if row.get("line_kind") == "closing"]
     positive_cohorts = [row["signal_cohort"] for row in cohorts if row["clv_evidence"] == EVIDENCE_POSITIVE]
 
+    # Focus view: the clean read for the go/no-go, excluding frozen diagnostic
+    # cohorts (crypto up/down) that would otherwise dilute the headline mean.
+    diagnostic_substrings = [
+        str(sub).lower().strip()
+        for sub in (settings.get("diagnostic_cohort_substrings") or DEFAULT_DIAGNOSTIC_COHORT_SUBSTRINGS)
+        if str(sub).strip()
+    ]
+    focus_rows = [row for row in rows if not _is_diagnostic_cohort(row.get("signal_cohort"), diagnostic_substrings)]
+    focus_final = [row for row in focus_rows if row.get("line_kind") == "closing"]
+    frozen_rows = [row for row in rows if _is_diagnostic_cohort(row.get("signal_cohort"), diagnostic_substrings)]
+    frozen_final = [row for row in frozen_rows if row.get("line_kind") == "closing"]
+    focus_positive = [
+        row["signal_cohort"]
+        for row in cohorts
+        if row["clv_evidence"] == EVIDENCE_POSITIVE
+        and not _is_diagnostic_cohort(row["signal_cohort"], diagnostic_substrings)
+    ]
+    focus_view = {
+        "diagnostic_cohort_substrings": diagnostic_substrings,
+        "focus_positions": len(focus_rows),
+        "focus_final_positions": len(focus_final),
+        "focus_mean_clv": round(sum(float(row["clv"]) for row in focus_rows) / len(focus_rows), 6) if focus_rows else None,
+        "focus_mean_final_clv": round(sum(float(row["clv"]) for row in focus_final) / len(focus_final), 6) if focus_final else None,
+        "focus_beat_close_rate": round(sum(1 for row in focus_rows if row.get("beat_close")) / len(focus_rows), 4) if focus_rows else None,
+        "focus_positive_cohorts": focus_positive,
+        "focus_cohorts": sorted({row.get("signal_cohort") or "unknown" for row in focus_rows}),
+        "frozen_positions": len(frozen_rows),
+        "frozen_final_positions": len(frozen_final),
+        "frozen_mean_final_clv": round(sum(float(row["clv"]) for row in frozen_final) / len(frozen_final), 6) if frozen_final else None,
+        "frozen_cohorts": sorted({row.get("signal_cohort") or "unknown" for row in frozen_rows}),
+        "note": "Focus excludes frozen diagnostic cohorts (crypto up/down); it is the clean CLV read for the "
+                "sharp-anchor / structural-edge go/no-go. Frozen figures are shown for reference only.",
+    }
+
     summary = {
         "status": "ok",
         "generated_at_utc": now_utc(),
@@ -261,6 +306,7 @@ def build_closing_line_value(
         "mean_final_clv": round(sum(float(row["clv"]) for row in final_rows) / len(final_rows), 6) if final_rows else None,
         "beat_close_rate": round(sum(1 for row in rows if row.get("beat_close")) / len(rows), 4) if rows else None,
         "positive_clv_cohorts": positive_cohorts,
+        "focus_view": focus_view,
         "cohorts": cohorts,
         "categories": categories,
         "evidence_semantics": {

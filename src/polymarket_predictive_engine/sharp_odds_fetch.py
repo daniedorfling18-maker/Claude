@@ -507,6 +507,19 @@ def fetch_sharp_odds(cfg: EngineConfig) -> dict[str, Any]:
         status = "partial"
     else:
         status = "fetched"
+    # Roll the per-sport quota headers up to a single top-level number so a dead key
+    # or exhausted Odds API budget is visible at a glance (dashboard badge) instead of
+    # buried inside per_sport. Report the most conservative (minimum) remaining count.
+    remaining_values: list[int] = []
+    for item in per_sport:
+        raw_remaining = str(item.get("requests_remaining") or "").strip()
+        if raw_remaining:
+            try:
+                remaining_values.append(int(float(raw_remaining)))
+            except (TypeError, ValueError):
+                continue
+    requests_remaining = min(remaining_values) if remaining_values else ""
+
     summary = {
         "status": status,
         "rows": len(rows),
@@ -514,6 +527,7 @@ def fetch_sharp_odds(cfg: EngineConfig) -> dict[str, Any]:
         "books_used": books_used,
         "errors": error_count,
         "provider_status": provider_status,
+        "requests_remaining": requests_remaining,
         "provider_sports_status": provider_sports_status,
         "per_sport": per_sport,
         "configured_sports": sport_configs,

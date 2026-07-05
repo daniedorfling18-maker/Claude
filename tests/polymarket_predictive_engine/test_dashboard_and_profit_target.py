@@ -8,7 +8,7 @@ import yaml
 from pytest import approx
 
 from polymarket_predictive_engine.config import load_config
-from polymarket_predictive_engine.dashboard import render_dashboard
+from polymarket_predictive_engine.dashboard import _sharp_fetch_health, render_dashboard
 from polymarket_predictive_engine.execution.paper import paper_trade_report
 from polymarket_predictive_engine.profit_target import reset_profit_target_baseline, write_profit_target_tracker
 from polymarket_predictive_engine.utils import read_json, write_csv, write_json
@@ -23,6 +23,34 @@ def _config(tmp_path: Path):
     path = tmp_path / "config.yaml"
     path.write_text(yaml.safe_dump(raw), encoding="utf-8")
     return load_config(path)
+
+
+def test_sharp_fetch_health_flags_key_and_quota_problems():
+    # A live fetch that produced rows is healthy.
+    ok = _sharp_fetch_health({"sharp_odds_fetch": {
+        "status": "fetched", "provider_status": "attempted", "rows": 12,
+        "markets": 2, "requests_remaining": 480,
+    }})
+    assert ok["health"] == "ok"
+    assert ok["rows"] == 12
+    assert ok["requests_remaining"] == 480
+
+    # A missing key must surface as attention, not silently look fine.
+    missing = _sharp_fetch_health({"sharp_odds_fetch": {
+        "status": "missing_api_key", "provider_status": "missing_api_key", "rows": 0,
+    }})
+    assert missing["health"] == "attention"
+
+    # Exhausted Odds API quota must surface as attention even if status looks ok.
+    exhausted = _sharp_fetch_health({"sharp_odds_fetch": {
+        "status": "fetched", "provider_status": "attempted", "rows": 0, "requests_remaining": 0,
+    }})
+    assert exhausted["health"] == "attention"
+
+    # No fetch summary yet -> unknown, not a crash.
+    unknown = _sharp_fetch_health({})
+    assert unknown["health"] == "unknown"
+    assert unknown["requests_remaining"] == "unknown"
 
 
 def test_profit_target_creates_clean_baseline_and_tracks_run_rate(tmp_path):

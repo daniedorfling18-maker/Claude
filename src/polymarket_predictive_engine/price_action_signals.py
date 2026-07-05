@@ -1137,8 +1137,19 @@ def _paper_confirmation_current_candidates(
     selected = candidates[:max_candidates]
     if selected:
         state = "historical_analogue_current_candidates_ready"
-    elif blocked_by_state.get("entry_price_outside_risk_band", 0) > 0:
-        state = "current_candidates_blocked_by_entry_price_band"
+    elif blocked_by_state:
+        dominant_blocker = max(
+            blocked_by_state.items(),
+            key=lambda item: (
+                item[1],
+                0 if item[0] == "entry_price_outside_risk_band" else 1,
+            ),
+        )[0]
+        state = (
+            "current_candidates_blocked_by_entry_price_band"
+            if dominant_blocker == "entry_price_outside_risk_band"
+            else "no_positive_historical_analogue_current_candidate"
+        )
     else:
         state = "no_positive_historical_analogue_current_candidate"
     return selected, {

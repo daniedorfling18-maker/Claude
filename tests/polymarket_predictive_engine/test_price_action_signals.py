@@ -1591,6 +1591,7 @@ def test_paper_confirmation_blocked_preview_prioritises_in_band_analogue_gaps(tm
     preview = analogue["blocked_preview"]
 
     assert summary["paper_confirmation_current_candidates"] == 0
+    assert analogue["state"] == "no_positive_historical_analogue_current_candidate"
     assert analogue["blocked_by_state"]["entry_price_outside_risk_band"] == 1
     assert analogue["blocked_by_state"]["no_positive_historical_analogue_examples"] == 1
     assert preview[0]["market_slug"] == "bitcoin-in-band-analogue-gap"

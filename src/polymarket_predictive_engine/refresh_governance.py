@@ -10,6 +10,7 @@ from .cohort_validation import write_signal_cohort_pnl
 from .closing_line import build_closing_line_value
 from .collection_coverage import build_collection_coverage
 from .dashboard import render_dashboard
+from .dashboard_proof_questions import apply_dashboard_proof_questions
 from .edge_attribution import build_edge_attribution
 from .evidence_history import append_evidence_history
 from .family_calibration import build_family_calibration_scorecard
@@ -26,6 +27,7 @@ from .promotion_review import build_promotion_review
 from .quant_research_status import build_quant_research_status
 from .readiness import paper_live_promotion_gate
 from .research_focus import build_research_focus
+from .sharp_anchor_coverage import build_sharp_anchor_coverage
 from .smart_flow_clv import build_smart_flow_clv
 from .storage import connect_db
 from .trade_signal_audit import build_trade_signal_audit
@@ -60,6 +62,7 @@ def refresh_governance(cfg: EngineConfig, *, refresh_dashboard: bool = True) -> 
     algo_sweep = run_algo_sweep(cfg)
     family_calibration = build_family_calibration_scorecard(cfg)
     collection_coverage = build_collection_coverage(cfg)
+    sharp_anchor_coverage = build_sharp_anchor_coverage(cfg)
     evidence_history = append_evidence_history(cfg)
 
     con = connect_db(cfg.database_path)
@@ -82,6 +85,11 @@ def refresh_governance(cfg: EngineConfig, *, refresh_dashboard: bool = True) -> 
     promotion_gate = paper_live_promotion_gate(cfg)
     governance = governance_report(cfg)
     dashboard = render_dashboard(cfg) if refresh_dashboard else {"status": "skipped"}
+    proof_questions = (
+        apply_dashboard_proof_questions(cfg, sharp_anchor_coverage=sharp_anchor_coverage)
+        if refresh_dashboard
+        else {"status": "skipped"}
+    )
 
     result = {
         "status": "ok",
@@ -101,6 +109,7 @@ def refresh_governance(cfg: EngineConfig, *, refresh_dashboard: bool = True) -> 
             "algo_sweep": True,
             "family_calibration": True,
             "collection_coverage": True,
+            "sharp_anchor_coverage": True,
             "evidence_history": True,
             "price_action_feedback": True,
             "price_action_model": True,
@@ -111,6 +120,7 @@ def refresh_governance(cfg: EngineConfig, *, refresh_dashboard: bool = True) -> 
             "promotion_gate": True,
             "governance_report": True,
             "dashboard": bool(refresh_dashboard),
+            "dashboard_proof_questions": bool(refresh_dashboard),
         },
         "cohort_counts": _cohort_counts(signal_cohort_pnl),
         "promotion_review_status": promotion_review.get("status"),
@@ -139,6 +149,9 @@ def refresh_governance(cfg: EngineConfig, *, refresh_dashboard: bool = True) -> 
         "algo_sweep_decision": algo_sweep.get("decision"),
         "family_calibration_model_beats_market": family_calibration.get("model_beats_market_families", []),
         "collection_coverage_missing_pre_close": collection_coverage.get("positions_missing_pre_close_quote"),
+        "sharp_anchor_coverage_status": sharp_anchor_coverage.get("status"),
+        "sharp_anchor_coverage_flagged_no_mappable_market": sharp_anchor_coverage.get("flagged_no_mappable_market_count"),
+        "sharp_anchor_coverage_total_rows_mapped": sharp_anchor_coverage.get("total_rows_mapped"),
         "evidence_history_appended_rows": evidence_history.get("appended_rows"),
         "evidence_history_appended_sources": evidence_history.get("appended_sources", []),
         "price_action_feedback_state": price_action_feedback.get("learning_state"),
@@ -155,10 +168,13 @@ def refresh_governance(cfg: EngineConfig, *, refresh_dashboard: bool = True) -> 
         "paper_blockers": promotion_gate.get("paper_blockers", []),
         "live_blockers": promotion_gate.get("live_blockers", []),
         "governance_report_status": governance.get("status") if isinstance(governance, dict) else "unknown",
+        "proof_questions_status": proof_questions.get("proof_status") or proof_questions.get("status"),
+        "proof_questions_html_status": proof_questions.get("html_status"),
         "dashboard": dashboard,
         "notes": [
             "Governance refresh only: no order placement, no threshold changes, no live-trading opt-in.",
             "Metadata-blocked cohorts remain shadow-only and cannot become probationary/promoted from this command.",
+            "Sharp-anchor coverage and proof questions are reporting-only; no config trimming or gate changes are automatic.",
         ],
     }
     write_json(cfg.governance_root / "governance_refresh.json", result)

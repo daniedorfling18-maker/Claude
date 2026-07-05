@@ -5425,8 +5425,18 @@ def render_dashboard(cfg: EngineConfig, latest_report: dict[str, Any] | None = N
         "worldcup_validation_status": worldcup_validation_status,
         "trade_diagnostics": trade_diagnostics,
     }
+    # Attach the four proof questions to the payload and HTML BEFORE the single compact
+    # write, so EVERY render path (VPS live loop, paper cycle, CLI) exposes them while the
+    # payload stays single-line and capped. Previously the overlay only ran inside
+    # refresh_governance (and re-wrote the file pretty-printed); the live loop's plain
+    # render then clobbered it, which is exactly what the scheduled proof-health check
+    # flags. The overlay module imports config/utils only, so there is no import cycle.
+    from .dashboard_proof_questions import build_proof_questions, _inject_html_overlay
+
+    payload["proof_questions"] = build_proof_questions(cfg, dashboard_data=payload)
+    html_out = _inject_html_overlay(HTML)
     _write_dashboard_data(out / "dashboard_data.json", payload)
-    (out / "index.html").write_text(HTML, encoding="utf-8")
+    (out / "index.html").write_text(html_out, encoding="utf-8")
     return {
         "status": "ok",
         "dashboard_dir": str(out),

@@ -144,7 +144,7 @@ jobs:
           import json
           import os
           import sys
-          from datetime import datetime, timezone
+          from datetime import datetime, timedelta, timezone
           from pathlib import Path
           from typing import Any
 
@@ -302,6 +302,139 @@ jobs:
               if age_minutes > stale_after_minutes:
                   errors.append(f"{label} is stale: age={age_minutes:.1f} minutes > {stale_after_minutes}")
 
+          question_rows = []
+          question_severities = {}
+          for row in questions:
+              if not isinstance(row, dict):
+                  continue
+              question = str(row.get("question") or "unknown")
+              severity = str(row.get("severity") or "unknown")
+              question_severities[question] = severity
+              question_rows.append(
+                  {
+                      "question": question,
+                      "severity": severity,
+                      "answer": row.get("answer"),
+                      "key_metric": row.get("key_metric"),
+                      "decision_use": row.get("decision_use"),
+                  }
+              )
+
+          leading_questions = [
+              "Sharp-anchor rows mapped?",
+              "Dutch-arb persistent opportunities?",
+              "Focus-view CLV positive with enough samples?",
+          ]
+          paper_question = "Audited paper P&L positive after governed probes?"
+          snapshot = {
+              "generated_at_utc": now.isoformat().replace("+00:00", "Z"),
+              "vps_sha": actual_sha,
+              "origin_main_sha": origin_main_sha,
+              "workflow_sha": expected_sha,
+              "runtime_diff": runtime_diff,
+              "dashboard_port": os.environ.get("PORT", "unknown"),
+              "sharp_fetch_status": fetch_status,
+              "sharp_fetch_health": fetch_health or "unknown",
+              "odds_api_requests_remaining": requests_remaining,
+              "sharp_rows_written_or_fetched": fetch_rows,
+              "coverage_status": coverage_status,
+              "coverage_total_rows_fetched": total_fetched,
+              "coverage_total_rows_mapped": total_mapped,
+              "coverage_join_rate": join_rate,
+              "coverage_zero_join_flags": flagged,
+              "proof_status": proof_status,
+              "question_severities": question_severities,
+              "questions": question_rows,
+              "leading_streams_good_count": sum(1 for key in leading_questions if question_severities.get(key) == "good"),
+              "paper_stream_good": question_severities.get(paper_question) == "good",
+              "errors": list(errors),
+              "warnings": list(warnings),
+          }
+
+          proof_health_summary = {"status": "not_written"}
+          try:
+              governance_root.mkdir(parents=True, exist_ok=True)
+              snapshot_path = governance_root / "proof_health_snapshots.jsonl"
+              summary_path = governance_root / "proof_health_summary.json"
+              with snapshot_path.open("a", encoding="utf-8") as fh:
+                  fh.write(json.dumps(snapshot, sort_keys=True, default=str) + "\n")
+
+              all_rows: list[dict[str, Any]] = []
+              for raw_line in snapshot_path.read_text(encoding="utf-8", errors="replace").splitlines():
+                  if not raw_line.strip():
+                      continue
+                  try:
+                      item = json.loads(raw_line)
+                  except json.JSONDecodeError:
+                      continue
+                  if isinstance(item, dict):
+                      all_rows.append(item)
+
+              cutoff = now - timedelta(days=21)
+              recent_rows = []
+              recent_times = []
+              for item in all_rows:
+                  parsed = parse_ts(item.get("generated_at_utc"))
+                  if parsed is None or parsed < cutoff:
+                      continue
+                  recent_rows.append(item)
+                  recent_times.append(parsed)
+
+              observed_hours = 0.0
+              if recent_times:
+                  observed_hours = (max(recent_times) - min(recent_times)).total_seconds() / 3600.0
+
+              def count_question(label: str, severity: str) -> int:
+                  return sum(
+                      1
+                      for item in recent_rows
+                      if isinstance(item.get("question_severities"), dict)
+                      and item["question_severities"].get(label) == severity
+                  )
+
+              leading_good_counts = {label: count_question(label, "good") for label in leading_questions}
+              leading_warn_counts = {label: count_question(label, "warn") for label in leading_questions}
+              leading_bad_counts = {label: count_question(label, "bad") for label in leading_questions}
+              zero_join_flag_runs = sum(1 for item in recent_rows if int(item.get("coverage_zero_join_flags") or 0) > 0)
+              sharp_attention_runs = sum(1 for item in recent_rows if str(item.get("sharp_fetch_health") or "").lower() == "attention")
+              operational_error_runs = sum(1 for item in recent_rows if item.get("errors"))
+
+              if observed_hours < 72:
+                  evidence_window_status = "too_early_operational_shakedown"
+              elif observed_hours < 336:
+                  evidence_window_status = "collecting_market_efficiency_evidence"
+              elif observed_hours < 504:
+                  evidence_window_status = "waiting_for_three_week_decision_window"
+              elif all(count == 0 for count in leading_good_counts.values()):
+                  evidence_window_status = "review_stop_or_pivot_no_life_in_leading_streams"
+              else:
+                  evidence_window_status = "edge_stream_showed_life_continue_evidence_review"
+
+              proof_health_summary = {
+                  "status": "ok",
+                  "generated_at_utc": snapshot["generated_at_utc"],
+                  "decision_use": "market_efficiency_evidence_monitoring_only_not_trade_authorisation",
+                  "snapshot_path": str(snapshot_path),
+                  "summary_path": str(summary_path),
+                  "total_snapshot_count": len(all_rows),
+                  "recent_window_days": 21,
+                  "recent_snapshot_count": len(recent_rows),
+                  "recent_observed_hours": round(observed_hours, 2),
+                  "evidence_window_status": evidence_window_status,
+                  "leading_good_counts": leading_good_counts,
+                  "leading_warn_counts": leading_warn_counts,
+                  "leading_bad_counts": leading_bad_counts,
+                  "zero_join_flag_runs": zero_join_flag_runs,
+                  "sharp_attention_runs": sharp_attention_runs,
+                  "operational_error_runs": operational_error_runs,
+                  "latest_snapshot": snapshot,
+                  "paper_trading_invoked": False,
+                  "live_trading_invoked": False,
+              }
+              summary_path.write_text(json.dumps(proof_health_summary, indent=2, sort_keys=True, default=str) + "\n", encoding="utf-8")
+          except Exception as exc:
+              errors.append(f"Could not write proof-health snapshot ledger: {exc}")
+
           print("## Polymarket VPS proof-health check")
           print("")
           print(f"- VPS SHA: `{actual_sha}`")
@@ -315,6 +448,8 @@ jobs:
           print(f"- Sharp rows written/fetched: `{fetch_rows if fetch_rows is not None else 'unknown'}`")
           print(f"- WO-31 coverage: fetched=`{total_fetched}`, mapped=`{total_mapped}`, join_rate=`{join_rate if join_rate is not None else 'n/a'}`, zero_join_flags=`{flagged}`")
           print(f"- Proof status: `{proof_status}`")
+          print(f"- Proof-health snapshots: `{proof_health_summary.get('total_snapshot_count', 'unknown')}` total / `{proof_health_summary.get('recent_snapshot_count', 'unknown')}` in 21d")
+          print(f"- Evidence window status: `{proof_health_summary.get('evidence_window_status', 'unknown')}`")
           print("")
           print("### Four proof questions")
           for row in questions:

@@ -1,10 +1,10 @@
 {
   "beat_close_rate": 0.3333,
   "clv_ci_high": 0.02862,
-  "clv_ci_low": -0.008612,
-  "generated_at_utc": "2026-07-05T14:18:01Z",
+  "clv_ci_low": -0.002753,
+  "generated_at_utc": "2026-07-05T17:37:46Z",
   "interpretation": "keep the snapshot workflow running; verdict needs more matched picks",
-  "mean_clv": 0.006669,
+  "mean_clv": 0.008622,
   "minimum_samples": 15,
   "picks_scored": 3,
   "picks_seen": 65,

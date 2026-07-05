@@ -1,6 +1,6 @@
 # Final Leader Decision Report
 
-Generated: 2026-07-04T15:19:13.308669+00:00
+Generated: 2026-07-05T09:20:55.519572+00:00
 
 ## Decision
 
@@ -12,21 +12,20 @@ Generated: 2026-07-04T15:19:13.308669+00:00
 
 | Run | Simulations | Baseline P(first) | Final P(first) | Delta | P(first/tied) | Accepted switches | Total EV loss |
 |---|---:|---:|---:|---:|---:|---:|---:|
-| base_mc | 100000 | 0.706280 | 0.706280 | 0.000000 | 0.752010 | 0 | 0.000000 |
-| confirmation_500k | 500000 | 0.707150 | 0.707150 | 0.000000 | 0.752268 | 0 | 0.000000 |
+| base_mc | 100000 | 0.768420 | 0.768420 | 0.000000 | 0.896920 | 0 | 0.000000 |
+| confirmation_500k | 500000 | 0.768192 | 0.768192 | 0.000000 | 0.897122 | 0 | 0.000000 |
 
 ## Final Picks
 
 | Kickoff | Home | Away | Raw pick | Final pick | Switched | Risk | Confidence |
 |---|---|---|---|---|---:|---|---|
-| 2026-07-04T17:00:00Z | Canada | Morocco | 0-2 | 0-2 | False | medium | medium |
-| 2026-07-04T21:00:00Z | Paraguay | France | 0-2 | 0-2 | False | low | strong |
 | 2026-07-05T20:00:00Z | Brazil | Norway | 2-0 | 2-0 | False | high | fragile |
 | 2026-07-06T00:00:00Z | Mexico | England | 0-1 | 0-1 | False | high | fragile |
 | 2026-07-06T19:00:00Z | Portugal | Spain | 0-2 | 0-2 | False | high | fragile |
-| 2026-07-07T00:00:00Z | United States | Belgium | 1-2 | 1-2 | False | high | medium |
+| 2026-07-07T00:00:00Z | United States | Belgium | 1-2 | 1-2 | False | high | fragile |
 | 2026-07-07T16:00:00Z | Argentina | Egypt | 2-0 | 2-0 | False | low | strong |
-| 2026-07-07T20:00:00Z | Switzerland | Colombia | 0-2 | 0-2 | False | high | fragile |
+| 2026-07-07T20:00:00Z | Switzerland | Colombia | 0-1 | 0-1 | False | high | fragile |
+| 2026-07-09T20:00:00Z | France | Morocco | 2-0 | 2-0 | False | medium | medium |
 
 ## Quality Gates
 

@@ -186,11 +186,17 @@ def signal_cohort(row: dict[str, Any]) -> str:
                 return f"exploratory_inverse_historical_rule|crypto_{asset}_updown_5m|outcome={outcome}"
             return f"exploratory_historical_rule|crypto_{asset}_updown_5m|outcome={outcome}"
     category = str(row.get("category") or "").strip().lower()
+    if is_worldcup_market(row):
+        classified = classify_market_family(row)
+        if classified and classified != "unknown":
+            return classified
     if category and category not in {"unknown", "uncategorised", "uncategorized"}:
         if category.replace("_", "") in {
             "sport",
             "sports",
             "sportsother",
+            "worldcup",
+            "fifaworldcup",
             "tennis",
             "basketball",
             "baseball",

@@ -5,7 +5,7 @@ from typing import Any
 from .config import EngineConfig, load_config
 from .price_action_microstructure import build_latest_microstructure_features
 from .utils import boolish, now_utc, read_csv_rows, read_json, safe_float, write_csv, write_json
-from .worldcup_validation import classify_market_family
+from .worldcup_validation import classify_market_family, is_worldcup_market
 
 OUTPUT_DIRNAME = "polymarket_price_action"
 SCOUT_COHORT_FILE = "price_action_scout_cohort_evidence.csv"
@@ -167,6 +167,8 @@ def _market_family(row: dict[str, Any]) -> str:
     raw = _raw_family(row)
     raw_key = raw.lower().replace(" ", "_")
     classified = str(classify_market_family(row) or "").strip()
+    if classified and classified != "unknown" and is_worldcup_market(row):
+        return classified
     if classified and classified != "unknown" and (not raw or raw_key in GENERIC_FAMILY_VALUES):
         return classified
     return raw or classified or "unknown"

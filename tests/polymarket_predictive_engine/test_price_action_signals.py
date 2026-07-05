@@ -856,6 +856,83 @@ def test_worldcup_confirmation_query_matches_soccer_match_current_row(tmp_path):
     assert signals[0]["historical_analogue_gate"] == "positive_historical_analogue"
 
 
+def test_worldcup_confirmation_overrides_stale_macro_family_current_row(tmp_path):
+    cfg = _cfg(tmp_path)
+    cfg.raw["price_action_microstructure"] = {
+        "enabled": True,
+        "lookback_observations": 1,
+        "max_rows_per_token": 20,
+    }
+    cfg.raw["price_action_paper"].update(
+        {
+            "paper_confirmation_max_stake_usdc": 1,
+            "paper_confirmation_max_current_candidates": 4,
+            "paper_confirmation_require_positive_historical_analogue": True,
+            "paper_confirmation_min_historical_analogue_validation_rows": 3,
+            "paper_confirmation_min_historical_analogue_positive_rows": 1,
+            "low_price_tick_probe_enabled": False,
+        }
+    )
+    root = cfg.output_root / "polymarket_price_action"
+    feedback = _paper_confirmation_feedback_payload(cohort="near_miss_learning|worldcup")
+    feedback["paper_confirmation_preview"][0]["recommended_collection_query"] = "world cup"
+    write_json(cfg.governance_root / "price_action_feedback.json", feedback)
+    write_csv(
+        cfg.output_root / "polymarket_training" / "websocket_market_features.csv",
+        [
+            _ws_feature_row(
+                0,
+                asset_id="colombia-final-token",
+                market_slug="will-colombia-reach-the-2026-fifa-world-cup-final",
+                question="Will Colombia reach the 2026 FIFA World Cup final?",
+                category="macro_rates",
+                selection="No",
+                best_bid="0.46",
+                best_ask="0.47",
+                midpoint="0.465",
+                spread="0.01",
+                price_change_side="BUY",
+            ),
+            _ws_feature_row(
+                1,
+                asset_id="colombia-final-token",
+                market_slug="will-colombia-reach-the-2026-fifa-world-cup-final",
+                question="Will Colombia reach the 2026 FIFA World Cup final?",
+                category="macro_rates",
+                selection="No",
+                best_bid="0.47",
+                best_ask="0.48",
+                midpoint="0.475",
+                spread="0.01",
+                price_change_side="BUY",
+            ),
+        ],
+    )
+    write_csv(
+        root / "microstructure_trade_events.csv",
+        _positive_analogue_rows(
+            family="soccer_match",
+            market_slug="will-colombia-reach-the-2026-fifa-world-cup-final",
+            outcome="No",
+            entry_bid="0.47",
+            entry_ask="0.48",
+            current_side="BUY",
+        ),
+    )
+
+    summary = build_price_action_paper_signals(cfg)
+    signals = read_csv_rows(root / "price_action_paper_signals.csv")
+    analogue = summary["paper_confirmation_current_historical_analogue"]
+
+    assert summary["signals"] == 1
+    assert summary["paper_confirmation_current_candidates"] == 1
+    assert analogue["fresh_matches"] == 1
+    assert signals[0]["category"] == "soccer_match"
+    assert signals[0]["signal_cohort"] == "near_miss_learning|worldcup"
+    assert signals[0]["historical_analogue_key"].startswith("soccer_match|")
+    assert signals[0]["historical_analogue_gate"] == "positive_historical_analogue"
+
+
 def test_esports_world_cup_rows_use_esports_family_for_confirmation_analogues(tmp_path):
     cfg = _cfg(tmp_path)
     cfg.raw["price_action_microstructure"] = {

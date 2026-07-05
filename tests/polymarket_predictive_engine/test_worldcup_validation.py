@@ -52,6 +52,30 @@ def test_unknown_fed_sequence_market_gets_macro_rates_family():
     assert signal_cohort(row) == "macro_rates"
 
 
+def test_worldcup_text_overrides_stale_macro_category():
+    row = {
+        "category": "macro_rates",
+        "market_slug": "will-colombia-reach-the-2026-fifa-world-cup-final",
+        "question": "Will Colombia reach the 2026 FIFA World Cup final?",
+        "outcome": "No",
+    }
+
+    assert classify_market_family(row) == "soccer_match"
+    assert signal_cohort(row) == "soccer_match"
+
+
+def test_esports_world_cup_text_stays_esports_not_worldcup_bucket():
+    row = {
+        "category": "worldcup",
+        "market_slug": "val-100t1-bbl1-2026-07-04",
+        "question": "Valorant: 100 Thieves vs BBL Esports (BO3) - Esports World Cup Group A",
+        "outcome": "BBL Esports",
+    }
+
+    assert classify_market_family(row) == "esports_match"
+    assert signal_cohort(row) == "esports_match"
+
+
 def test_unknown_liquid_event_families_are_resolved_for_research_buckets():
     cases = [
         (

@@ -1,0 +1,90 @@
+name: Polymarket VPS Governance Refresh
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "02 */6 * * *"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: polymarket-vps-governance-refresh
+  cancel-in-progress: false
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Validate required secrets
+        env:
+          PM_VPS_HOST: ${{ secrets.PM_VPS_HOST }}
+          PM_VPS_USER: ${{ secrets.PM_VPS_USER }}
+          PM_VPS_SSH_PRIVATE_KEY: ${{ secrets.PM_VPS_SSH_PRIVATE_KEY }}
+        run: |
+          set -euo pipefail
+          test -n "${PM_VPS_HOST:-}" || { echo "::error::PM_VPS_HOST is required"; exit 1; }
+          test -n "${PM_VPS_USER:-}" || { echo "::error::PM_VPS_USER is required"; exit 1; }
+          test -n "${PM_VPS_SSH_PRIVATE_KEY:-}" || { echo "::error::PM_VPS_SSH_PRIVATE_KEY is required"; exit 1; }
+
+      - name: Prepare SSH
+        env:
+          PM_VPS_HOST: ${{ secrets.PM_VPS_HOST }}
+          PM_VPS_PORT: ${{ secrets.PM_VPS_PORT || '22' }}
+          PM_VPS_SSH_PRIVATE_KEY: ${{ secrets.PM_VPS_SSH_PRIVATE_KEY }}
+        run: |
+          set -euo pipefail
+          install -m 700 -d "$RUNNER_TEMP/ssh"
+          python3 - <<'PY'
+          import os
+          from pathlib import Path
+          key = os.environ["PM_VPS_SSH_PRIVATE_KEY"]
+          if "\\n" in key and "\n" not in key:
+              key = key.replace("\\n", "\n")
+          key = key.replace("\r\n", "\n").replace("\r", "\n").strip() + "\n"
+          Path(os.environ["RUNNER_TEMP"], "ssh", "vps_key").write_text(key, encoding="utf-8")
+          PY
+          chmod 600 "$RUNNER_TEMP/ssh/vps_key"
+          ssh-keygen -y -f "$RUNNER_TEMP/ssh/vps_key" >/dev/null
+          ssh-keyscan -p "$PM_VPS_PORT" -H "$PM_VPS_HOST" > "$RUNNER_TEMP/ssh/known_hosts"
+          chmod 600 "$RUNNER_TEMP/ssh/known_hosts"
+
+      - name: Refresh governance on VPS
+        env:
+          PM_VPS_HOST: ${{ secrets.PM_VPS_HOST }}
+          PM_VPS_PORT: ${{ secrets.PM_VPS_PORT || '22' }}
+          PM_VPS_USER: ${{ secrets.PM_VPS_USER }}
+          PM_VPS_REPO_DIR: ${{ secrets.PM_VPS_REPO_DIR || '~/Claude' }}
+        run: |
+          set -euo pipefail
+          ssh -i "$RUNNER_TEMP/ssh/vps_key" \
+            -o BatchMode=yes \
+            -o UserKnownHostsFile="$RUNNER_TEMP/ssh/known_hosts" \
+            -o ServerAliveInterval=30 \
+            -o ServerAliveCountMax=10 \
+            -o TCPKeepAlive=yes \
+            -o ConnectTimeout=30 \
+            -p "$PM_VPS_PORT" \
+            "$PM_VPS_USER@$PM_VPS_HOST" \
+            "PM_VPS_REPO_DIR='$PM_VPS_REPO_DIR' bash -lc 'cd \"\${PM_VPS_REPO_DIR/#\\~/$HOME}\" && docker compose -f \"\${PM_VPS_COMPOSE_FILE:-docker-compose.vps-paper.yml}\" exec -T polymarket-paper-live python -m polymarket_predictive_engine.cli refresh-governance --config /app/polymarket_predictive_config.example.yaml'"
+
+      - name: Verify dashboard proof keys
+        env:
+          PM_VPS_HOST: ${{ secrets.PM_VPS_HOST }}
+          PM_VPS_PORT: ${{ secrets.PM_VPS_PORT || '22' }}
+          PM_VPS_USER: ${{ secrets.PM_VPS_USER }}
+          PM_VPS_REPO_DIR: ${{ secrets.PM_VPS_REPO_DIR || '~/Claude' }}
+        run: |
+          set -euo pipefail
+          ssh -i "$RUNNER_TEMP/ssh/vps_key" \
+            -o BatchMode=yes \
+            -o UserKnownHostsFile="$RUNNER_TEMP/ssh/known_hosts" \
+            -o ServerAliveInterval=30 \
+            -o ServerAliveCountMax=5 \
+            -o TCPKeepAlive=yes \
+            -o ConnectTimeout=30 \
+            -p "$PM_VPS_PORT" \
+            "$PM_VPS_USER@$PM_VPS_HOST" \
+            "PM_VPS_REPO_DIR='$PM_VPS_REPO_DIR' bash -lc 'cd \"\${PM_VPS_REPO_DIR/#\\~/$HOME}\"; port=\$(grep -E \"^POLYMARKET_DASHBOARD_PORT=\" .env | tail -n 1 | cut -d= -f2-); port=\${port:-8765}; data=\$(curl -fsS --max-time 15 http://127.0.0.1:\${port}/dashboard_data.json); html=\$(curl -fsS --max-time 15 http://127.0.0.1:\${port}/); printf %s \"\$data\" | grep -q sharp_fetch_health; printf %s \"\$data\" | grep -q proof_questions; printf %s \"\$data\" | grep -q sharp_sports_funnel; printf %s \"\$html\" | grep -q \"Four proof questions\"; echo Governance refresh verified on dashboard port \${port}'"

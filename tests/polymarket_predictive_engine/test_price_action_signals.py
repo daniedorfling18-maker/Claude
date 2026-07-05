@@ -778,6 +778,106 @@ def test_paper_confirmation_current_candidate_requires_positive_historical_analo
     assert float(signals[0]["max_stake_usdc"]) == 1.0
 
 
+def test_paper_confirmation_current_candidate_filters_closed_updown_slug(tmp_path):
+    cfg = _cfg(tmp_path)
+    cfg.raw["price_action_microstructure"] = {
+        "enabled": True,
+        "lookback_observations": 1,
+        "max_rows_per_token": 20,
+    }
+    cfg.raw["price_action_paper"].update(
+        {
+            "paper_confirmation_max_stake_usdc": 1,
+            "paper_confirmation_max_current_candidates": 4,
+            "paper_confirmation_require_positive_historical_analogue": True,
+            "paper_confirmation_min_historical_analogue_validation_rows": 3,
+            "paper_confirmation_min_historical_analogue_positive_rows": 1,
+            "low_price_tick_probe_enabled": False,
+        }
+    )
+    root = cfg.output_root / "polymarket_price_action"
+    write_json(
+        cfg.governance_root / "price_action_feedback.json",
+        _paper_confirmation_feedback_payload(cohort="crypto_btc_special"),
+    )
+    write_csv(
+        cfg.output_root / "polymarket_training" / "websocket_market_features.csv",
+        [
+            _ws_feature_row(
+                0,
+                asset_id="closed-btc-token",
+                market_slug="btc-updown-15m-1609459200",
+                category="crypto_btc_special",
+                selection="Up",
+                best_bid="0.50",
+                best_ask="0.51",
+                midpoint="0.505",
+                spread="0.01",
+                price_change_side="BUY",
+            ),
+            _ws_feature_row(
+                1,
+                asset_id="closed-btc-token",
+                market_slug="btc-updown-15m-1609459200",
+                category="crypto_btc_special",
+                selection="Up",
+                best_bid="0.51",
+                best_ask="0.52",
+                midpoint="0.515",
+                spread="0.01",
+                price_change_side="BUY",
+            ),
+            _ws_feature_row(
+                2,
+                asset_id="open-btc-token",
+                market_slug="bitcoin-above-open-test",
+                category="crypto_btc_special",
+                selection="Up",
+                best_bid="0.50",
+                best_ask="0.51",
+                midpoint="0.505",
+                spread="0.01",
+                price_change_side="BUY",
+            ),
+            _ws_feature_row(
+                3,
+                asset_id="open-btc-token",
+                market_slug="bitcoin-above-open-test",
+                category="crypto_btc_special",
+                selection="Up",
+                best_bid="0.51",
+                best_ask="0.52",
+                midpoint="0.515",
+                spread="0.01",
+                price_change_side="BUY",
+            ),
+        ],
+    )
+    write_csv(
+        root / "microstructure_trade_events.csv",
+        _positive_analogue_rows(
+            family="crypto_btc_special",
+            market_slug="bitcoin-above-open-test",
+            outcome="Up",
+            entry_bid="0.50",
+            entry_ask="0.51",
+            current_side="BUY",
+        ),
+    )
+
+    summary = build_price_action_paper_signals(cfg)
+    signals = read_csv_rows(root / "price_action_paper_signals.csv")
+    analogue = summary["paper_confirmation_current_historical_analogue"]
+
+    assert summary["signals"] == 1
+    assert summary["paper_confirmation_current_candidates"] == 1
+    assert analogue["fresh_matches"] == 1
+    assert analogue["stale_current_rows_filtered"] == 1
+    assert summary["current_historical_analogue_scan"]["stale_current_rows_filtered"] == 1
+    assert signals[0]["market_slug"] == "bitcoin-above-open-test"
+    assert signals[0]["token_id"] == "open-btc-token"
+
+
 def test_worldcup_confirmation_query_matches_soccer_match_current_row(tmp_path):
     cfg = _cfg(tmp_path)
     cfg.raw["price_action_microstructure"] = {
@@ -1647,7 +1747,7 @@ def test_eth_updown_confirmation_query_matches_current_eth_rows_by_outcome(tmp_p
             _ws_feature_row(
                 0,
                 asset_id="eth-up-token",
-                market_slug="eth-updown-15m-1783055700",
+                market_slug="eth-updown-15m-4102444800",
                 category="crypto_eth_updown_15m",
                 selection="Up",
                 best_bid="0.48",
@@ -1659,7 +1759,7 @@ def test_eth_updown_confirmation_query_matches_current_eth_rows_by_outcome(tmp_p
             _ws_feature_row(
                 1,
                 asset_id="eth-up-token",
-                market_slug="eth-updown-15m-1783055700",
+                market_slug="eth-updown-15m-4102444800",
                 category="crypto_eth_updown_15m",
                 selection="Up",
                 best_bid="0.49",
@@ -1671,7 +1771,7 @@ def test_eth_updown_confirmation_query_matches_current_eth_rows_by_outcome(tmp_p
             _ws_feature_row(
                 0,
                 asset_id="eth-down-token",
-                market_slug="eth-updown-15m-1783055700",
+                market_slug="eth-updown-15m-4102444800",
                 category="crypto_eth_updown_15m",
                 selection="Down",
                 best_bid="0.50",
@@ -1683,7 +1783,7 @@ def test_eth_updown_confirmation_query_matches_current_eth_rows_by_outcome(tmp_p
             _ws_feature_row(
                 1,
                 asset_id="eth-down-token",
-                market_slug="eth-updown-15m-1783055700",
+                market_slug="eth-updown-15m-4102444800",
                 category="crypto_eth_updown_15m",
                 selection="Down",
                 best_bid="0.51",
@@ -1700,7 +1800,7 @@ def test_eth_updown_confirmation_query_matches_current_eth_rows_by_outcome(tmp_p
             _low_price_trade_event(
                 split="validation",
                 family="crypto_eth_updown_15m",
-                market_slug="eth-updown-15m-1783055700",
+                market_slug="eth-updown-15m-4102444800",
                 outcome="Up",
                 entry_bid="0.49",
                 entry_ask="0.50",
@@ -1713,7 +1813,7 @@ def test_eth_updown_confirmation_query_matches_current_eth_rows_by_outcome(tmp_p
             _low_price_trade_event(
                 split="validation",
                 family="crypto_eth_updown_15m",
-                market_slug="eth-updown-15m-1783055700",
+                market_slug="eth-updown-15m-4102444800",
                 outcome="Up",
                 entry_bid="0.49",
                 entry_ask="0.50",
@@ -1726,7 +1826,7 @@ def test_eth_updown_confirmation_query_matches_current_eth_rows_by_outcome(tmp_p
             _low_price_trade_event(
                 split="validation",
                 family="crypto_eth_updown_15m",
-                market_slug="eth-updown-15m-1783055700",
+                market_slug="eth-updown-15m-4102444800",
                 outcome="Up",
                 entry_bid="0.49",
                 entry_ask="0.50",
@@ -1744,7 +1844,7 @@ def test_eth_updown_confirmation_query_matches_current_eth_rows_by_outcome(tmp_p
 
     assert summary["signals"] == 1
     assert summary["paper_confirmation_current_historical_analogue"]["fresh_matches"] == 1
-    assert signals[0]["market_slug"] == "eth-updown-15m-1783055700"
+    assert signals[0]["market_slug"] == "eth-updown-15m-4102444800"
     assert signals[0]["outcome"] == "Up"
     assert signals[0]["token_id"] == "eth-up-token"
     assert "outcome=up" in signals[0]["signal_cohort"]

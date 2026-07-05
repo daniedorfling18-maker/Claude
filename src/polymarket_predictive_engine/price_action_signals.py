@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+import re
+from datetime import datetime, timezone
 from typing import Any
+from zoneinfo import ZoneInfo
 
 from .config import EngineConfig, load_config
 from .price_action_microstructure import build_latest_microstructure_features
-from .utils import boolish, now_utc, read_csv_rows, read_json, safe_float, write_csv, write_json
+from .utils import boolish, now_utc, parse_timestamp, read_csv_rows, read_json, safe_float, write_csv, write_json
 from .worldcup_validation import classify_market_family, is_worldcup_market
 
 OUTPUT_DIRNAME = "polymarket_price_action"
@@ -127,6 +130,72 @@ def _settings(cfg: EngineConfig) -> dict[str, Any]:
 
 def _enabled(settings: dict[str, Any]) -> bool:
     return boolish(settings.get("enabled", True))
+
+
+_UPDOWN_MONTHS = {
+    "january": 1,
+    "february": 2,
+    "march": 3,
+    "april": 4,
+    "may": 5,
+    "june": 6,
+    "july": 7,
+    "august": 8,
+    "september": 9,
+    "october": 10,
+    "november": 11,
+    "december": 12,
+}
+
+
+def _slug_implied_close_time(slug: str) -> datetime | None:
+    text = str(slug or "").strip().lower()
+    if not text:
+        return None
+    timestamp_match = re.search(r"(?:^|-)(\d{10})(?:$|-)", text)
+    if timestamp_match:
+        try:
+            return datetime.fromtimestamp(int(timestamp_match.group(1)), tz=timezone.utc)
+        except (OSError, OverflowError, ValueError):
+            return None
+    dated_match = re.search(
+        r"(?P<month>january|february|march|april|may|june|july|august|september|october|november|december)"
+        r"-(?P<day>\d{1,2})-(?P<year>\d{4})-(?P<hour>\d{1,2})(?P<ampm>am|pm)-et",
+        text,
+    )
+    if not dated_match:
+        return None
+    try:
+        hour = int(dated_match.group("hour"))
+        if hour < 1 or hour > 12:
+            return None
+        ampm = dated_match.group("ampm")
+        if ampm == "pm" and hour != 12:
+            hour += 12
+        if ampm == "am" and hour == 12:
+            hour = 0
+        return datetime(
+            int(dated_match.group("year")),
+            _UPDOWN_MONTHS[dated_match.group("month")],
+            int(dated_match.group("day")),
+            hour,
+            tzinfo=ZoneInfo("America/New_York"),
+        ).astimezone(timezone.utc)
+    except (KeyError, ValueError):
+        return None
+
+
+def _row_implies_closed_market(row: dict[str, Any], *, now_dt: datetime | None = None) -> bool:
+    close_time = parse_timestamp(row.get("close_time"))
+    if close_time is None:
+        for key in ("market_slug", "slug", "event_slug"):
+            close_time = _slug_implied_close_time(str(row.get(key) or ""))
+            if close_time is not None:
+                break
+    if close_time is None:
+        return False
+    now = now_dt or datetime.now(timezone.utc)
+    return close_time.astimezone(timezone.utc) <= now.astimezone(timezone.utc)
 
 
 def _token_id(row: dict[str, Any]) -> str:
@@ -804,9 +873,13 @@ def _paper_confirmation_current_candidates(
     blocked_by_family: dict[str, int] = {}
     blocked_preview: list[dict[str, Any]] = []
     approved_analogue_keys: set[str] = set()
+    stale_current_rows_filtered = 0
     for feature in latest_rows:
         confirmation = _confirmation_candidate_for_row(feature, paper_confirmation)
         if confirmation is None:
+            continue
+        if _row_implies_closed_market(feature):
+            stale_current_rows_filtered += 1
             continue
         fresh_matches += 1
         token = _token_id(feature)
@@ -931,6 +1004,7 @@ def _paper_confirmation_current_candidates(
         "blocked": blocked,
         "blocked_by_state": blocked_by_state,
         "blocked_by_family": dict(sorted(blocked_by_family.items())),
+        "stale_current_rows_filtered": stale_current_rows_filtered,
         "blocked_preview": _balanced_blocked_preview(blocked_preview, limit=10),
         "blocked_preview_selection": "balanced_by_family_then_gate_strength",
         "positive_historical_analogue_keys": len(approved_analogue_keys),
@@ -979,7 +1053,9 @@ def _current_historical_analogue_scan(
     paper signal.
     """
     stats = analogue_stats if analogue_stats is not None else _historical_analogue_stats(cfg, settings)
-    rows = latest_rows if latest_rows is not None else build_latest_microstructure_features(cfg)
+    raw_rows = latest_rows if latest_rows is not None else build_latest_microstructure_features(cfg)
+    stale_current_rows_filtered = sum(1 for row in raw_rows if _row_implies_closed_market(row))
+    rows = [row for row in raw_rows if not _row_implies_closed_market(row)]
     blocked_by_state: dict[str, int] = {}
     family_counts: dict[str, int] = {}
     positive_by_family: dict[str, int] = {}
@@ -1087,6 +1163,8 @@ def _current_historical_analogue_scan(
         "decision_use": "Shows whether the current live universe contains historically profitable buy-at-ask / sell-at-bid setups after spread.",
         "next_action": next_action,
         "current_rows": len(rows),
+        "raw_current_rows": len(raw_rows),
+        "stale_current_rows_filtered": stale_current_rows_filtered,
         "positive_matches": positive_matches,
         "blocked": blocked,
         "blocked_by_state": dict(sorted(blocked_by_state.items())),

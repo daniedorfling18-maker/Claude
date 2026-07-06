@@ -1,14 +1,14 @@
 {
-  "generated_at_utc": "2026-07-05T15:24:06.796776+00:00",
-  "snapshot_id": "20260705T152404Z",
+  "generated_at_utc": "2026-07-06T10:58:16.673755+00:00",
+  "snapshot_id": "20260706T105814Z",
   "final_card": "outputs/daily_robust_card/daily_robust_superbru_card.csv",
   "daily_summary": "outputs/daily_robust_card/daily_robust_summary.json",
   "market_history_summary": "outputs/market_odds_history/market_odds_history_summary.json",
   "market_odds_fetch_skipped": true,
   "market_odds_scope": {
     "mode": "rolling_pre_match_window",
-    "commence_from": "2026-07-05T15:14:04.470634Z",
-    "commence_to": "2026-07-05T15:54:04.470634Z",
+    "commence_from": "2026-07-06T10:48:14.506767Z",
+    "commence_to": "2026-07-06T11:28:14.506767Z",
     "window_before_minutes": 10,
     "window_after_minutes": 30
   },
@@ -16,7 +16,7 @@
   "odds_json": "outputs/market_odds/worldcup_market_odds_raw.json",
   "leaderboard_csv": "outputs/superbru_pool/live_pool_leaderboard.csv",
   "chaser_profiles_csv": "outputs/superbru_pool/live_chaser_profiles.csv",
-  "chasers": "Ivan Prinsloo,Lusse,rob87,Leonard,Chapman12,Dheben",
+  "chasers": "Ivan Prinsloo,Lusse,Leonard,Chapman12,rob87,Dheben,Ettiene,Joe,Bijal",
   "manual_flags_csv": "outputs/superbru_pool/live_manual_match_flags.csv",
   "final_simulation_dir": null,
   "predictions_for_final_simulation": null,

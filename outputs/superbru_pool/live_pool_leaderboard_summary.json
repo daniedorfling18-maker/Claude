@@ -1,5 +1,5 @@
 {
-  "generated_at_utc": "2026-07-05T15:23:08.620172+00:00",
+  "generated_at_utc": "2026-07-06T10:57:03.919275+00:00",
   "status": "ok",
   "row_count": 32,
   "leader_player": "Danie",
@@ -8,13 +8,13 @@
     "rank": 1,
     "my_points": 100.5,
     "leader_gap": 1.5,
-    "chasers_in_range": 6,
+    "chasers_in_range": 9,
     "chaser_names": [
       "Ivan Prinsloo",
       "Lusse",
-      "rob87",
       "Leonard",
-      "Chapman12"
+      "Chapman12",
+      "rob87"
     ],
     "leaderboard_size": 32
   },
@@ -36,18 +36,18 @@
     },
     {
       "rank": 4,
-      "player": "rob87",
-      "current_points": 94.5
+      "player": "Leonard",
+      "current_points": 95.5
     },
     {
       "rank": 5,
-      "player": "Leonard",
-      "current_points": 94.0
+      "player": "Chapman12",
+      "current_points": 95.5
     },
     {
       "rank": 6,
-      "player": "Chapman12",
-      "current_points": 94.0
+      "player": "rob87",
+      "current_points": 94.5
     },
     {
       "rank": 7,
@@ -57,7 +57,7 @@
     {
       "rank": 8,
       "player": "Ettiene",
-      "current_points": 92.0
+      "current_points": 93.5
     }
   ],
   "out_csv": "outputs/superbru_pool/live_pool_leaderboard.csv"

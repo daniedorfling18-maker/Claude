@@ -1,5 +1,5 @@
 {
-  "generated_at_utc": "2026-07-05T15:24:04.295410+00:00",
+  "generated_at_utc": "2026-07-06T10:58:14.362579+00:00",
   "leader_player": "Danie",
   "final_policy": "raw EV pick unless base MC, stress test and high-N confirmation all approve the same switch",
   "accepted_policy_switches": [],
@@ -12,15 +12,18 @@
       "chasers": [
         "Ivan Prinsloo",
         "Lusse",
-        "rob87",
         "Leonard",
         "Chapman12",
-        "Dheben"
+        "rob87",
+        "Dheben",
+        "Ettiene",
+        "Joe",
+        "Bijal"
       ],
-      "baseline_p_finish_first": 0.76981,
-      "baseline_p_finish_first_or_tied": 0.89997,
-      "final_p_finish_first": 0.76981,
-      "final_p_finish_first_or_tied": 0.89997,
+      "baseline_p_finish_first": 0.80152,
+      "baseline_p_finish_first_or_tied": 0.92572,
+      "final_p_finish_first": 0.80152,
+      "final_p_finish_first_or_tied": 0.92572,
       "delta_p_finish_first": 0.0,
       "accepted_switches": [],
       "total_ev_loss": 0.0
@@ -32,15 +35,18 @@
       "chasers": [
         "Ivan Prinsloo",
         "Lusse",
-        "rob87",
         "Leonard",
         "Chapman12",
-        "Dheben"
+        "rob87",
+        "Dheben",
+        "Ettiene",
+        "Joe",
+        "Bijal"
       ],
-      "baseline_p_finish_first": 0.769658,
-      "baseline_p_finish_first_or_tied": 0.899792,
-      "final_p_finish_first": 0.769658,
-      "final_p_finish_first_or_tied": 0.899792,
+      "baseline_p_finish_first": 0.800848,
+      "baseline_p_finish_first_or_tied": 0.92548,
+      "final_p_finish_first": 0.800848,
+      "final_p_finish_first_or_tied": 0.92548,
       "delta_p_finish_first": 0.0,
       "accepted_switches": [],
       "total_ev_loss": 0.0
@@ -90,7 +96,7 @@
     {
       "gate": "predictions_non_empty",
       "passed": true,
-      "row_count": 7
+      "row_count": 6
     }
   ],
   "outputs": {

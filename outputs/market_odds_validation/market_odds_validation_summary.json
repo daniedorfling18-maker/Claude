@@ -1,51 +1,43 @@
 {
-  "generated_at_utc": "2026-07-05T15:24:05.318671+00:00",
-  "pick_count": 7,
-  "market_available_count": 6,
-  "totals_available_count": 6,
+  "generated_at_utc": "2026-07-06T10:58:15.306201+00:00",
+  "pick_count": 6,
+  "market_available_count": 5,
+  "totals_available_count": 5,
   "spreads_available_count": 0,
   "market_alignment_label_counts": {
     "market_aligned": 5,
-    "market_mixed": 2
+    "market_mixed": 1
   },
   "lowest_market_alignment": [
     {
       "home_team": "United States",
       "away_team": "Belgium",
-      "final_pick": "1-2",
+      "final_pick": "2-1",
       "market_alignment_score": 0.5,
       "market_alignment_label": "market_mixed",
       "market_alignment_reasons": "h2h market unavailable; totals market unavailable; spreads market unavailable"
     },
     {
-      "home_team": "Mexico",
-      "away_team": "England",
-      "final_pick": "1-2",
-      "market_alignment_score": 0.644407,
-      "market_alignment_label": "market_mixed",
-      "market_alignment_reasons": "pick outcome agrees with market favourite; goal total conflicts with market lean; spreads market unavailable"
-    },
-    {
-      "home_team": "Brazil",
-      "away_team": "Norway",
-      "final_pick": "2-0",
-      "market_alignment_score": 0.753411,
+      "home_team": "Portugal",
+      "away_team": "Spain",
+      "final_pick": "0-2",
+      "market_alignment_score": 0.826685,
       "market_alignment_label": "market_aligned",
-      "market_alignment_reasons": "pick outcome agrees with market favourite; market gives selected outcome strong support; goal total conflicts with market lean; spreads market unavailable"
+      "market_alignment_reasons": "pick outcome agrees with market favourite; market gives selected outcome strong support; spreads market unavailable"
     },
     {
       "home_team": "Switzerland",
       "away_team": "Colombia",
       "final_pick": "0-1",
-      "market_alignment_score": 0.866206,
+      "market_alignment_score": 0.860692,
       "market_alignment_label": "market_aligned",
       "market_alignment_reasons": "pick outcome agrees with market favourite; goal total agrees with market lean; spreads market unavailable"
     },
     {
-      "home_team": "Portugal",
-      "away_team": "Spain",
-      "final_pick": "1-2",
-      "market_alignment_score": 0.923424,
+      "home_team": "Norway",
+      "away_team": "England",
+      "final_pick": "0-2",
+      "market_alignment_score": 0.923175,
       "market_alignment_label": "market_aligned",
       "market_alignment_reasons": "pick outcome agrees with market favourite; goal total agrees with market lean; spreads market unavailable"
     },

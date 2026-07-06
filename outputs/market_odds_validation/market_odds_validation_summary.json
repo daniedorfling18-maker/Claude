@@ -1,5 +1,5 @@
 {
-  "generated_at_utc": "2026-07-06T10:58:15.306201+00:00",
+  "generated_at_utc": "2026-07-06T17:12:56.719222+00:00",
   "pick_count": 6,
   "market_available_count": 5,
   "totals_available_count": 5,
@@ -21,25 +21,25 @@
       "home_team": "Portugal",
       "away_team": "Spain",
       "final_pick": "0-2",
-      "market_alignment_score": 0.826685,
+      "market_alignment_score": 0.82148,
       "market_alignment_label": "market_aligned",
-      "market_alignment_reasons": "pick outcome agrees with market favourite; market gives selected outcome strong support; spreads market unavailable"
+      "market_alignment_reasons": "pick outcome agrees with market favourite; spreads market unavailable"
     },
     {
       "home_team": "Switzerland",
       "away_team": "Colombia",
       "final_pick": "0-1",
-      "market_alignment_score": 0.860692,
+      "market_alignment_score": 0.863671,
       "market_alignment_label": "market_aligned",
       "market_alignment_reasons": "pick outcome agrees with market favourite; goal total agrees with market lean; spreads market unavailable"
     },
     {
       "home_team": "Norway",
       "away_team": "England",
-      "final_pick": "0-2",
-      "market_alignment_score": 0.923175,
+      "final_pick": "1-2",
+      "market_alignment_score": 0.926668,
       "market_alignment_label": "market_aligned",
-      "market_alignment_reasons": "pick outcome agrees with market favourite; goal total agrees with market lean; spreads market unavailable"
+      "market_alignment_reasons": "pick outcome agrees with market favourite; market gives selected outcome strong support; goal total agrees with market lean; spreads market unavailable"
     },
     {
       "home_team": "Argentina",

@@ -1,7 +1,7 @@
 snapshot_id,previous_snapshot_id,home_team,away_team,final_pick,market_available,market_depth_class,h2h_bookmaker_count,totals_bookmaker_count,spreads_bookmaker_count,current_pick_market_prob,previous_pick_market_prob,pick_market_prob_delta,pick_market_movement,market_moving_against_pick,market_moving_towards_pick,current_market_favourite,previous_market_favourite,market_favourite_changed,current_total_lean,previous_total_lean,total_lean_changed,current_avg_home_spread,previous_avg_home_spread,spread_delta
-20260706T105814Z,20260705T152404Z,Portugal,Spain,0-2,True,strong,24,14,0,0.502247,0.497898,0.004348,stable,False,False,away,away,False,over,over,False,,,
-20260706T105814Z,20260705T152404Z,United States,Belgium,2-1,False,unavailable,0,0,0,,,,unavailable,False,False,,,False,,,False,,,
-20260706T105814Z,20260705T152404Z,Argentina,Egypt,2-0,True,strong,24,15,0,0.692374,0.691274,0.0011,stable,False,False,home,home,False,under,under,False,,,
-20260706T105814Z,20260705T152404Z,Switzerland,Colombia,0-1,True,strong,24,15,0,0.414256,0.421608,-0.007352,stable,False,False,away,away,False,under,under,False,,,
-20260706T105814Z,20260705T152404Z,France,Morocco,2-0,True,strong,24,15,0,0.602816,0.60643,-0.003614,stable,False,False,home,home,False,under,under,False,,,
-20260706T105814Z,,Norway,England,0-2,True,strong,23,14,0,0.497566,,,unavailable,False,False,away,,False,under,,False,,,
+20260706T171255Z,20260706T105814Z,Portugal,Spain,0-2,True,strong,23,13,0,0.495307,0.502247,-0.00694,stable,False,False,away,away,False,over,over,False,,,
+20260706T171255Z,20260706T105814Z,United States,Belgium,2-1,False,unavailable,0,0,0,,,,unavailable,False,False,,,False,,,False,,,
+20260706T171255Z,20260706T105814Z,Argentina,Egypt,2-0,True,strong,23,14,0,0.700661,0.692374,0.008287,stable,False,False,home,home,False,under,under,False,,,
+20260706T171255Z,20260706T105814Z,Switzerland,Colombia,0-1,True,strong,23,14,0,0.418228,0.414256,0.003972,stable,False,False,away,away,False,under,under,False,,,
+20260706T171255Z,20260706T105814Z,France,Morocco,2-0,True,strong,23,14,0,0.60242,0.602816,-0.000395,stable,False,False,home,home,False,under,under,False,,,
+20260706T171255Z,20260706T105814Z,Norway,England,1-2,True,strong,23,14,0,0.502224,0.497566,0.004658,stable,False,False,away,away,False,over,under,True,,,

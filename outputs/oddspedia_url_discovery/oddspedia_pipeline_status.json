@@ -7,7 +7,7 @@
     "--impersonate",
     "chrome124"
   ],
-  "generated_at_utc": "2026-07-06T10:58:17.397477+00:00",
+  "generated_at_utc": "2026-07-06T17:12:59.266537+00:00",
   "governance_note": "Oddspedia validation was unavailable from this runner, so no fresh validation should be trusted. The SuperBru locked card may still be refreshed from live SuperBru state and fresh bookmaker odds; the validation freshness audit must surface Oddspedia as missing/stale.",
   "impersonate": "chrome124",
   "live_trading_invoked": false,
@@ -16,6 +16,6 @@
   "returncode": 1,
   "status": "source_unavailable",
   "step_timings": {},
-  "total_elapsed_seconds": 0.5,
+  "total_elapsed_seconds": 0.6,
   "urls_csv": "inputs/oddspedia_match_urls.csv"
 }

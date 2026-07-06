@@ -1,5 +1,5 @@
 {
-  "generated_at_utc": "2026-07-06T10:58:14.362579+00:00",
+  "generated_at_utc": "2026-07-06T17:12:55.584738+00:00",
   "leader_player": "Danie",
   "final_policy": "raw EV pick unless base MC, stress test and high-N confirmation all approve the same switch",
   "accepted_policy_switches": [],
@@ -20,10 +20,10 @@
         "Joe",
         "Bijal"
       ],
-      "baseline_p_finish_first": 0.80152,
-      "baseline_p_finish_first_or_tied": 0.92572,
-      "final_p_finish_first": 0.80152,
-      "final_p_finish_first_or_tied": 0.92572,
+      "baseline_p_finish_first": 0.81431,
+      "baseline_p_finish_first_or_tied": 0.93388,
+      "final_p_finish_first": 0.81431,
+      "final_p_finish_first_or_tied": 0.93388,
       "delta_p_finish_first": 0.0,
       "accepted_switches": [],
       "total_ev_loss": 0.0
@@ -43,10 +43,10 @@
         "Joe",
         "Bijal"
       ],
-      "baseline_p_finish_first": 0.800848,
-      "baseline_p_finish_first_or_tied": 0.92548,
-      "final_p_finish_first": 0.800848,
-      "final_p_finish_first_or_tied": 0.92548,
+      "baseline_p_finish_first": 0.81402,
+      "baseline_p_finish_first_or_tied": 0.934252,
+      "final_p_finish_first": 0.81402,
+      "final_p_finish_first_or_tied": 0.934252,
       "delta_p_finish_first": 0.0,
       "accepted_switches": [],
       "total_ev_loss": 0.0

@@ -1,5 +1,5 @@
 {
-  "generated_at_utc": "2026-07-06T10:58:15.992098+00:00",
+  "generated_at_utc": "2026-07-06T17:12:57.529748+00:00",
   "component_pick_count": 6,
   "component_label_counts": {
     "component_aligned": 4,
@@ -43,7 +43,7 @@
     {
       "home_team": "Norway",
       "away_team": "England",
-      "final_pick": "0-2",
+      "final_pick": "1-2",
       "validation_label": "fragile",
       "market_alignment_label": "market_aligned",
       "component_score": 0.7745,

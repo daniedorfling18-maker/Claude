@@ -1,6 +1,6 @@
 # Final Leader Decision Report
 
-Generated: 2026-07-06T10:58:14.362579+00:00
+Generated: 2026-07-06T17:12:55.584738+00:00
 
 ## Decision
 
@@ -12,8 +12,8 @@ Generated: 2026-07-06T10:58:14.362579+00:00
 
 | Run | Simulations | Baseline P(first) | Final P(first) | Delta | P(first/tied) | Accepted switches | Total EV loss |
 |---|---:|---:|---:|---:|---:|---:|---:|
-| base_mc | 100000 | 0.801520 | 0.801520 | 0.000000 | 0.925720 | 0 | 0.000000 |
-| confirmation_500k | 500000 | 0.800848 | 0.800848 | 0.000000 | 0.925480 | 0 | 0.000000 |
+| base_mc | 100000 | 0.814310 | 0.814310 | 0.000000 | 0.933880 | 0 | 0.000000 |
+| confirmation_500k | 500000 | 0.814020 | 0.814020 | 0.000000 | 0.934252 | 0 | 0.000000 |
 
 ## Final Picks
 
@@ -24,7 +24,7 @@ Generated: 2026-07-06T10:58:14.362579+00:00
 | 2026-07-07T16:00:00Z | Argentina | Egypt | 2-0 | 2-0 | False | low | strong |
 | 2026-07-07T20:00:00Z | Switzerland | Colombia | 0-1 | 0-1 | False | high | fragile |
 | 2026-07-09T20:00:00Z | France | Morocco | 2-0 | 2-0 | False | medium | medium |
-| 2026-07-11T21:00:00Z | Norway | England | 0-2 | 0-2 | False | high | fragile |
+| 2026-07-11T21:00:00Z | Norway | England | 1-2 | 1-2 | False | high | fragile |
 
 ## Quality Gates
 

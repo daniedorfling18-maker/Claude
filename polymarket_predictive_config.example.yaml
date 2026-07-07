@@ -495,7 +495,12 @@ price_action_feedback:
   min_validation_trades_for_suppression: 3
 runtime_resource_guard:
   enabled: true
-  max_memory_percent: 99
+  # 2026-07-07: 99 -> 90, and the guard is now container/cgroup-aware. At 99 the guard
+  # effectively never fired: it read HOST memory (~69% used) while the paper-live
+  # container sat at 78% of its own 4GiB cgroup cap, swap-thrashing the whole VPS
+  # (load ~2.9, 431MiB swap). Degrading heavy passes at 90% keeps iterations fast so
+  # the time-critical sharp-anchor evidence lanes keep firing.
+  max_memory_percent: 90
   degraded_max_websocket_assets: 20
   skip_prediction_on_high_memory: true
   skip_discovery_on_high_memory: true
@@ -507,8 +512,15 @@ runtime_resource_guard:
 runtime_schedule:
   full_scan_every_iterations: 2
   optimize_model_every_iterations: 12
-  sharp_odds_fetch_every_iterations: 12
-  sharp_anchor_build_every_iterations: 12
+  # 2026-07-07: sharp fetch/anchor 12 -> 2 (every full-scan iteration). The every-12th
+  # iteration gate assumed fast iterations; under VPS load one iteration can crawl to
+  # hours, which stretched "every 12 iterations" into DAYS and froze the sharp-fetch
+  # lane for 40+ hours - starving the one evidence stream that decides the $100/month
+  # question before the 2026-07-19 WC final. Real rate limiting belongs to (and stays
+  # with) sharp_odds_fetch.fetch_interval_minutes (180); a budget-skipped attempt is
+  # cheap and rewrites the summary so freshness monitoring stays truthful.
+  sharp_odds_fetch_every_iterations: 2
+  sharp_anchor_build_every_iterations: 2
   crypto_fundamental_every_iterations: 12
   mispricing_alpha_every_iterations: 12
   edge_strategy_search_every_iterations: 12
@@ -924,10 +936,15 @@ websocket_market_data:
   # Keep enough raw + normalised quote history for several days of ask-to-future-bid
   # repricing labels. Message retention protects the socket capture; feature
   # retention protects the actual model training substrate if raw messages roll.
-  max_messages: 30000
+  # 2026-07-07: halved (30000/96h/120000 -> 15000/72h/60000) to relieve VPS memory
+  # pressure (container at 78% of its 4GiB cap, host swapping). Safe for the CLV
+  # decision path because final closing-line rows are now persisted append-only in
+  # closing_line_final_history.csv and survive retention roll-off; 72h still spans
+  # every market's pre-close quote window with margin.
+  max_messages: 15000
   retain_existing_features: true
-  feature_retention_hours: 96
-  max_feature_rows: 120000
+  feature_retention_hours: 72
+  max_feature_rows: 60000
   feature_retention_write_interval_seconds: 120
   normalise_latest_messages_only: true
   return_latest_features_only: true
@@ -951,7 +968,11 @@ websocket_market_data:
   # capacity is filled with broader liquid-ish markets for learning only, so the
   # model can discover repricing pockets outside the current crypto-heavy slice.
   include_research_liquidity_targets: true
-  max_research_target_assets: 120
+  # 2026-07-07: 120 -> 60 learning-only research subscriptions to relieve VPS memory
+  # pressure. Strict tradable targets (160) and the family-balanced reserves above are
+  # untouched, so broad discovery discipline is preserved; only the lowest-priority
+  # learning tail shrinks.
+  max_research_target_assets: 60
   max_research_target_assets_per_family: 8
   research_min_liquidity: 25
   research_max_spread: 0.12

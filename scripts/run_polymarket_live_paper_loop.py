@@ -66,8 +66,59 @@ def _env_override(name: str) -> str | None:
     return value or None
 
 
+def _cgroup_memory_percent(base: Path = Path("/sys/fs/cgroup")) -> float | None:
+    """Container memory load against the cgroup limit, or None when unlimited/absent.
+
+    Inside Docker, /proc/meminfo reports the HOST, so a host at 69% can hide a
+    container thrashing at its own mem_limit (observed 2026-07-07: paper-live at 78%
+    of its 4GiB cap while the host guard at 99% never fired). Mirrors `docker stats`:
+    usage minus inactive file cache, over the hard limit. Supports cgroup v2 and v1.
+    """
+    try:
+        # cgroup v2
+        max_path = base / "memory.max"
+        current_path = base / "memory.current"
+        stat_path = base / "memory.stat"
+        if not max_path.exists():
+            # cgroup v1 fallback
+            max_path = base / "memory" / "memory.limit_in_bytes"
+            current_path = base / "memory" / "memory.usage_in_bytes"
+            stat_path = base / "memory" / "memory.stat"
+        if not (max_path.exists() and current_path.exists()):
+            return None
+        raw_limit = max_path.read_text(encoding="utf-8").strip()
+        if raw_limit == "max":
+            return None
+        limit = float(raw_limit)
+        # v1 reports an enormous sentinel instead of "max" when unlimited.
+        if limit <= 0 or limit >= float(1 << 60):
+            return None
+        usage = float(current_path.read_text(encoding="utf-8").strip())
+        if stat_path.exists():
+            for line in stat_path.read_text(encoding="utf-8", errors="ignore").splitlines():
+                parts = line.split()
+                if len(parts) == 2 and parts[0] in {"inactive_file", "total_inactive_file"}:
+                    usage = max(0.0, usage - float(parts[1]))
+                    break
+        return max(0.0, min(100.0, 100.0 * usage / limit))
+    except Exception:
+        return None
+
+
 def _current_memory_percent() -> float | None:
-    """Return host/container memory load using only stdlib, or None if unavailable."""
+    """Return memory load using only stdlib, or None if unavailable.
+
+    Reports the WORSE of host memory load and container cgroup load, so the
+    resource guard degrades before either constraint starts swap-thrashing.
+    """
+    cgroup_percent = _cgroup_memory_percent()
+    host_percent = _host_memory_percent()
+    candidates = [value for value in (cgroup_percent, host_percent) if value is not None]
+    return max(candidates) if candidates else None
+
+
+def _host_memory_percent() -> float | None:
+    """Host-level memory load using only stdlib, or None if unavailable."""
     if os.name == "nt":
         try:
             import ctypes
@@ -110,7 +161,10 @@ def _current_memory_percent() -> float | None:
 
 def _resource_guard(cfg) -> dict[str, Any]:
     settings = cfg.raw.get("runtime_resource_guard", {}) or {}
-    memory_percent = _current_memory_percent()
+    host_percent = _host_memory_percent()
+    cgroup_percent = _cgroup_memory_percent()
+    candidates = [value for value in (cgroup_percent, host_percent) if value is not None]
+    memory_percent = max(candidates) if candidates else None
     max_memory = float(settings.get("max_memory_percent", 92.0))
     enabled = _truthy(settings.get("enabled", True), default=True)
     skip = bool(enabled and memory_percent is not None and memory_percent >= max_memory)
@@ -118,6 +172,8 @@ def _resource_guard(cfg) -> dict[str, Any]:
         "enabled": enabled,
         "skip_cycle": skip,
         "memory_percent": memory_percent,
+        "host_memory_percent": host_percent,
+        "container_memory_percent": cgroup_percent,
         "max_memory_percent": max_memory,
         "reason": "memory_above_limit" if skip else "ok",
     }

@@ -37,6 +37,6 @@
   {
     "gate": "predictions_non_empty",
     "passed": true,
-    "row_count": 6
+    "row_count": 5
   }
 ]

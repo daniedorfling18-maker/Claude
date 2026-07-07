@@ -1,5 +1,5 @@
 {
-  "generated_at_utc": "2026-07-06T17:12:55.584738+00:00",
+  "generated_at_utc": "2026-07-07T09:59:15.444701+00:00",
   "leader_player": "Danie",
   "final_policy": "raw EV pick unless base MC, stress test and high-N confirmation all approve the same switch",
   "accepted_policy_switches": [],
@@ -8,22 +8,22 @@
     "base_mc": {
       "simulations": 100000,
       "leader_player": "Danie",
-      "leader_start_points": 100.5,
+      "leader_start_points": 102.0,
       "chasers": [
         "Ivan Prinsloo",
         "Lusse",
-        "Leonard",
         "Chapman12",
-        "rob87",
-        "Dheben",
+        "Leonard",
         "Ettiene",
         "Joe",
-        "Bijal"
+        "rob87",
+        "Bijal",
+        "Dheben"
       ],
-      "baseline_p_finish_first": 0.81431,
-      "baseline_p_finish_first_or_tied": 0.93388,
-      "final_p_finish_first": 0.81431,
-      "final_p_finish_first_or_tied": 0.93388,
+      "baseline_p_finish_first": 0.76955,
+      "baseline_p_finish_first_or_tied": 0.80986,
+      "final_p_finish_first": 0.76955,
+      "final_p_finish_first_or_tied": 0.80986,
       "delta_p_finish_first": 0.0,
       "accepted_switches": [],
       "total_ev_loss": 0.0
@@ -31,22 +31,22 @@
     "confirmation_500k": {
       "simulations": 500000,
       "leader_player": "Danie",
-      "leader_start_points": 100.5,
+      "leader_start_points": 102.0,
       "chasers": [
         "Ivan Prinsloo",
         "Lusse",
-        "Leonard",
         "Chapman12",
-        "rob87",
-        "Dheben",
+        "Leonard",
         "Ettiene",
         "Joe",
-        "Bijal"
+        "rob87",
+        "Bijal",
+        "Dheben"
       ],
-      "baseline_p_finish_first": 0.81402,
-      "baseline_p_finish_first_or_tied": 0.934252,
-      "final_p_finish_first": 0.81402,
-      "final_p_finish_first_or_tied": 0.934252,
+      "baseline_p_finish_first": 0.769688,
+      "baseline_p_finish_first_or_tied": 0.80927,
+      "final_p_finish_first": 0.769688,
+      "final_p_finish_first_or_tied": 0.80927,
       "delta_p_finish_first": 0.0,
       "accepted_switches": [],
       "total_ev_loss": 0.0
@@ -96,7 +96,7 @@
     {
       "gate": "predictions_non_empty",
       "passed": true,
-      "row_count": 6
+      "row_count": 5
     }
   ],
   "outputs": {

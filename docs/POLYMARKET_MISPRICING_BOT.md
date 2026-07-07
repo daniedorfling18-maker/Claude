@@ -4,7 +4,10 @@ This workflow adds a guarded Polymarket scanner/trader to the repo without chang
 
 ## What it does
 
-The bot runs from `.github/workflows/polymarket-mispricing-bot.yml`.
+The GitHub Actions workflow (`polymarket-mispricing-bot.yml`) was removed on 2026-07-07 -
+the VPS paper stack superseded it. The script `scripts/polymarket_mispricing_bot.py` remains
+and still runs inside the legacy compose stacks (`docker-compose.monitor.yml`,
+`docker-compose.polymarket-fixed.yml`) for anyone deliberately using those.
 
 It:
 

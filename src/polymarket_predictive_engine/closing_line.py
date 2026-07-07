@@ -79,6 +79,47 @@ def _is_diagnostic_cohort(name: object, substrings: list[str]) -> bool:
     return any(sub in low for sub in substrings)
 
 
+# Final (closing-line) rows are persisted append-only so settled CLV evidence cannot
+# evaporate when websocket quotes roll past the retention window. Without this, a
+# position whose pre-close quotes aged out of the feature file silently loses its
+# final line on the next rebuild (observed live: focus finals dropped 2 -> 0).
+FINAL_HISTORY_FILENAME = "closing_line_final_history.csv"
+
+
+def _load_final_history(path: Path) -> dict[str, dict[str, Any]]:
+    """Previously recorded final rows keyed by shadow_position_id, types restored.
+
+    Each row was computed point-in-time when its quotes were still live; reusing it is
+    strictly conservative (nothing is backfilled or re-estimated). CSV round-trips turn
+    numbers/bools into strings, so coerce the fields the aggregates depend on —
+    ``beat_close`` in particular, because the string "False" is truthy.
+    """
+    history: dict[str, dict[str, Any]] = {}
+    for row in read_csv_rows(path):
+        position_id = str(row.get("shadow_position_id") or "").strip()
+        if not position_id or str(row.get("line_kind")) != "closing":
+            continue
+        entry_price = safe_float(row.get("entry_price"))
+        line_price = safe_float(row.get("line_price"))
+        clv = safe_float(row.get("clv"))
+        if entry_price is None or line_price is None or clv is None:
+            continue
+        restored = dict(row)
+        restored["entry_price"] = entry_price
+        restored["line_price"] = line_price
+        restored["clv"] = clv
+        restored["clv_pct"] = safe_float(row.get("clv_pct")) if safe_float(row.get("clv_pct")) is not None else round(clv / entry_price, 6)
+        line_bid = safe_float(row.get("line_bid"))
+        restored["line_bid"] = line_bid if line_bid is not None else ""
+        clv_vs_bid = safe_float(row.get("clv_vs_bid"))
+        restored["clv_vs_bid"] = clv_vs_bid if clv_vs_bid is not None else ""
+        restored["beat_close"] = boolish(row.get("beat_close"))
+        quote_count = safe_float(row.get("quote_count"))
+        restored["quote_count"] = int(quote_count) if quote_count is not None else 0
+        history[position_id] = restored
+    return history
+
+
 def _quote_price(row: dict[str, Any]) -> float | None:
     """Fair line for a quote row: midpoint first, then bid/ask average, then bid."""
     mid = safe_float(row.get("midpoint"))
@@ -243,15 +284,36 @@ def build_closing_line_value(
     quote_rows = read_csv_rows(features_path)
     quotes = build_quote_history(quote_rows)
 
+    history_path = cfg.governance_root / FINAL_HISTORY_FILENAME
+    final_history = _load_final_history(history_path)
+
     rows: list[dict[str, Any]] = []
     skipped_no_quotes = 0
+    recovered_from_history = 0
     if boolish(settings.get("enabled", True)):
         for position in positions:
             row = position_clv_row(position, quotes, as_of=as_of)
+            if row is None or row.get("line_kind") != "closing":
+                # Quotes rolled past retention (or degraded to a post-close provisional
+                # line); a final line recorded while quotes were live wins over both.
+                persisted = final_history.get(str(position.get("shadow_position_id") or "").strip())
+                if persisted is not None:
+                    rows.append(dict(persisted))
+                    recovered_from_history += 1
+                    continue
             if row is None:
                 skipped_no_quotes += 1
                 continue
             rows.append(row)
+
+    # Record every freshly computed final row (idempotent by position id); never drop
+    # previously recorded finals, even for positions no longer in the positions file.
+    for row in rows:
+        if row.get("line_kind") == "closing":
+            position_id = str(row.get("shadow_position_id") or "").strip()
+            if position_id:
+                final_history[position_id] = dict(row)
+    write_csv(history_path, list(final_history.values()), fieldnames=POSITION_FIELDS)
 
     cohorts = _aggregate(rows, "signal_cohort", minimum_final_samples=minimum_final_samples, iterations=iterations, seed=seed)
     categories = _aggregate(rows, "category", minimum_final_samples=minimum_final_samples, iterations=iterations, seed=seed)
@@ -300,6 +362,9 @@ def build_closing_line_value(
         "positions_scored": len(rows),
         "positions_skipped_no_usable_quotes": skipped_no_quotes,
         "final_line_positions": len(final_rows),
+        "final_rows_recovered_from_history": recovered_from_history,
+        "final_history_rows": len(final_history),
+        "final_history_path": str(history_path),
         "provisional_line_positions": len(rows) - len(final_rows),
         "minimum_final_samples": minimum_final_samples,
         "mean_clv": round(sum(float(row["clv"]) for row in rows) / len(rows), 6) if rows else None,

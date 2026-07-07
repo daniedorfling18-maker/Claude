@@ -148,6 +148,47 @@ def test_cohort_evidence_classification(tmp_path: Path):
     assert summary["positive_clv_cohorts"] == ["cohort_up"]
 
 
+def test_final_clv_rows_survive_quote_retention_rolloff(tmp_path: Path):
+    """Once a closing line is computed it is persisted; retention roll-off cannot erase it.
+
+    Observed live: websocket features keep ~96h of quotes, so a position's pre-close
+    quotes age out and its previously-final CLV row silently reverts to provisional or
+    vanishes (focus finals dropped 2 -> 0 overnight). The history file must recover it.
+    """
+    cfg = _cfg(tmp_path)
+    features_path = cfg.output_root / "polymarket_training" / "websocket_market_features.csv"
+    write_csv(
+        cfg.output_root / "polymarket_shadow" / "shadow_positions.csv",
+        [_position("tokA", "sharp|worldcup", entry=0.50, opened="2026-07-01T10:00:00Z", close="2026-07-01T12:00:00Z")],
+    )
+    write_csv(features_path, [_quote("tokA", "2026-07-01T11:59:00Z", 0.56, bid=0.55)])
+
+    first = build_closing_line_value(cfg, as_of=AS_OF)
+    assert first["final_line_positions"] == 1
+    assert first["final_rows_recovered_from_history"] == 0
+    assert first["final_history_rows"] == 1
+    assert (cfg.governance_root / "closing_line_final_history.csv").exists()
+
+    # Retention roll-off: only a meaningless post-close quote remains. A fresh rebuild
+    # would degrade the row to latest_provisional at 0.90; the persisted final must win.
+    write_csv(features_path, [_quote("tokA", "2026-07-01T12:30:00Z", 0.90, bid=0.89)])
+    second = build_closing_line_value(cfg, as_of=AS_OF)
+    assert second["final_line_positions"] == 1
+    assert second["final_rows_recovered_from_history"] == 1
+    assert second["mean_final_clv"] == 0.06          # from the recorded 0.56 close, not 0.90
+    by_cohort = {row["signal_cohort"]: row for row in second["cohorts"]}
+    assert by_cohort["sharp|worldcup"]["final_positions"] == 1
+    assert by_cohort["sharp|worldcup"]["final_beat_close_rate"] == 1.0   # beat_close survived CSV round-trip
+    assert second["focus_view"]["focus_final_positions"] == 1
+
+    # Quotes fully gone: still recovered, and the history file stays at one row (idempotent).
+    write_csv(features_path, [_quote("tokZ", "2026-07-01T11:00:00Z", 0.50)])
+    third = build_closing_line_value(cfg, as_of=AS_OF)
+    assert third["final_line_positions"] == 1
+    assert third["final_rows_recovered_from_history"] == 1
+    assert third["final_history_rows"] == 1
+
+
 def test_focus_view_excludes_frozen_updown_cohorts(tmp_path: Path):
     cfg = _cfg(tmp_path, settings={"minimum_final_samples": 5, "bootstrap_iterations": 200})
     positions = []

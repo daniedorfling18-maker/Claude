@@ -233,7 +233,13 @@ sharp_odds_fetch:
   markets: h2h
   validate_sports: true
   max_requests_per_run: 5
-  fetch_interval_minutes: 60
+  # 2026-07-06: raised from 60 to 180. The free Odds API tier is ~500 requests/month; the hourly
+  # cadence (2 paid requests/cycle for the two live WC keys = ~48/day) would exhaust the remaining
+  # quota days BEFORE the World Cup final (2026-07-19) - exactly when the anchor matters most.
+  # At 180 min (~16/day) the quota covers the whole tournament with margin. Sharp outright lines
+  # move slowly intraday, and CLV closing lines come from the Polymarket websocket side, so
+  # 3-hourly anchor sampling loses nothing material.
+  fetch_interval_minutes: 180
   bookmaker_priority:
   - pinnacle
   - betfair_ex_eu

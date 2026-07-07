@@ -103,6 +103,42 @@ def test_resource_guard_uses_worse_of_host_and_container(tmp_path: Path, monkeyp
     assert guard["container_memory_percent"] is None
 
 
+def test_scheduled_boot_deferral_skips_iteration_one_only_when_asked():
+    """Heavy ML trainers must not all fire on the first iteration after a restart.
+
+    Observed 2026-07-07: every container restart ran full scan + optimize + alpha +
+    edge search at once on iteration 1, pegging the single VPS core for 10-20 minutes.
+    run_on_first=False defers a pass to its normal cadence; default behaviour
+    (collection/scoring passes) still runs on iteration 1.
+    """
+    schedule = {"optimize_model_every_iterations": 10}
+    # Default: runs on the boot iteration.
+    assert loop._scheduled(schedule, "optimize_model_every_iterations", 1) is True
+    # Boot-deferred: skips iteration 1, fires on its cadence.
+    assert loop._scheduled(schedule, "optimize_model_every_iterations", 1, run_on_first=False) is False
+    assert loop._scheduled(schedule, "optimize_model_every_iterations", 10, run_on_first=False) is True
+    assert loop._scheduled(schedule, "optimize_model_every_iterations", 11, run_on_first=False) is False
+    assert loop._scheduled(schedule, "optimize_model_every_iterations", 20, run_on_first=False) is True
+    # Negative cadence disables regardless (0 falls back to the default by long-standing
+    # `or default` semantics, so -1 is the explicit off switch).
+    assert loop._scheduled({"optimize_model_every_iterations": -1}, "optimize_model_every_iterations", 10, run_on_first=False) is False
+
+
+def test_example_config_staggers_heavy_trainers():
+    """The three trainers must not share one cadence (they used to collide every 12th
+    iteration, stacking their cost onto a single monster iteration)."""
+    import yaml
+
+    raw = yaml.safe_load((ROOT / "polymarket_predictive_config.example.yaml").read_text(encoding="utf-8"))
+    schedule = raw["runtime_schedule"]
+    cadences = [
+        int(schedule["optimize_model_every_iterations"]),
+        int(schedule["mispricing_alpha_every_iterations"]),
+        int(schedule["edge_strategy_search_every_iterations"]),
+    ]
+    assert len(set(cadences)) == 3, f"trainer cadences must be staggered, got {cadences}"
+
+
 def test_example_config_schedules_sharp_fetch_every_full_scan():
     """The every-12th-iteration gate stretched to DAYS under VPS load and froze the
     sharp-fetch lane; rate limiting belongs to fetch_interval_minutes (>=180, quota

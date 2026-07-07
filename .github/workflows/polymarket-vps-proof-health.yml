@@ -139,6 +139,32 @@ jobs:
           curl -fsS --max-time 15 "http://127.0.0.1:${PORT}/dashboard_data.json" > "$DASHBOARD_JSON"
           curl -fsS --max-time 15 "http://127.0.0.1:${PORT}/" > "$DASHBOARD_HTML"
 
+          # Read-only VPS resource diagnostics. 2026-07-07: the deploy workflow's own
+          # refresh-governance call took 9+ min (previously under 1 min) before GitHub's
+          # 20-min job timeout killed it, and the sharp-odds fetch summary has been frozen
+          # for 40+ hours across multiple rebuilds - both point at VPS-level resource
+          # contention rather than a code/credentials issue. Every command is best-effort
+          # (`|| true`) so a diagnostic hiccup can never fail this health check.
+          if command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1; then
+            DOCKER="docker"
+          else
+            DOCKER="sudo docker"
+          fi
+          echo "## VPS resource diagnostics (read-only)"
+          echo ""
+          echo '```text'
+          uptime 2>&1 || true
+          echo ""
+          free -h 2>&1 || true
+          echo ""
+          df -h / 2>&1 || true
+          echo ""
+          $DOCKER ps --format 'table {{.Names}}\t{{.Status}}\t{{.RunningFor}}' 2>&1 || true
+          echo ""
+          timeout 15 $DOCKER stats --no-stream --format 'table {{.Name}}\t{{.CPUPerc}}\t{{.MemUsage}}\t{{.MemPerc}}' 2>&1 || true
+          echo '```'
+          echo ""
+
           python3 - "$DASHBOARD_JSON" "$DASHBOARD_HTML" <<'PY'
           from __future__ import annotations
 

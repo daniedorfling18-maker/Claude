@@ -295,6 +295,61 @@ def test_fallback_csv_rejections_are_reported(tmp_path, monkeypatch):
     assert "decimal_odds_not_greater_than_one" in rejections[1]["reasons"]
 
 
+def test_budget_skips_chain_and_carry_quota_reading(tmp_path, monkeypatch):
+    """Consecutive attempts inside the interval must ALL skip, not alternate.
+
+    A skip summary overwrites the file; if the guard only honoured
+    provider_status == "attempted", the attempt after any skip would fall through and
+    fetch for real - alternating real fetches on every other attempt instead of pacing
+    to fetch_interval_minutes (observed 2026-07-07 once the loop attempted every full
+    scan). Skips must chain via a carried budget_reference_at_utc and keep the last
+    real quota reading visible.
+    """
+    monkeypatch.setenv("THE_ODDS_API_KEY", "secret-key-123")
+    cfg = EngineConfig(
+        raw={
+            "paths": {"output_root": str(tmp_path / "outputs")},
+            "sharp_odds_fetch": {
+                "sports": ["soccer_fifa_world_cup"],
+                "output_path": str(tmp_path / "sharp_odds.csv"),
+                "fetch_interval_minutes": 180,
+            },
+        },
+        path=tmp_path / "cfg.yaml",
+    )
+    real_fetch_time = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    write_json(
+        cfg.governance_root / "sharp_odds_fetch_summary.json",
+        {
+            "status": "partial",
+            "provider_status": "attempted",
+            "rows": 55,
+            "markets": 2,
+            "books_used": ["pinnacle"],
+            "requests_remaining": 19488,
+            "budget_reference_at_utc": real_fetch_time,
+            "generated_at_utc": real_fetch_time,
+        },
+    )
+
+    def fail_network(*args, **kwargs):
+        raise AssertionError("budget guard should not call the provider")
+
+    monkeypatch.setattr("polymarket_predictive_engine.sharp_odds_fetch.requests.get", fail_network)
+
+    first_skip = fetch_sharp_odds(cfg)
+    assert first_skip["status"] == "skipped_budget"
+    assert first_skip["requests_remaining"] == 19488
+    assert first_skip["budget_reference_at_utc"] == real_fetch_time
+
+    # Second attempt reads the SKIP summary from disk - it must still skip.
+    second_skip = fetch_sharp_odds(cfg)
+    assert second_skip["status"] == "skipped_budget"
+    assert second_skip["requests_remaining"] == 19488
+    assert second_skip["budget_reference_at_utc"] == real_fetch_time
+    assert second_skip["previous_status"] == "partial"
+
+
 def test_fetch_skips_when_budget_interval_has_not_elapsed(tmp_path, monkeypatch):
     monkeypatch.setenv("THE_ODDS_API_KEY", "secret-key-123")
     cfg = EngineConfig(

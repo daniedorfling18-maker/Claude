@@ -197,7 +197,13 @@ def _budget_skip_summary(cfg: EngineConfig, settings: Mapping[str, Any]) -> dict
     previous = read_json(_fetch_summary_path(cfg), default={}) or {}
     if not isinstance(previous, dict) or not previous:
         return None
-    if previous.get("provider_status") != "attempted":
+    # Budget skips must CHAIN. A skip summary overwrites the file, so if the guard only
+    # honoured provider_status == "attempted", the attempt after any skip would read the
+    # skip summary, fall through, and fetch for real - alternating real fetches on every
+    # other attempt instead of pacing them to fetch_interval_minutes (observed 2026-07-07
+    # once the loop started attempting every full scan). Skip summaries therefore carry
+    # budget_reference_at_utc forward and are honoured here too.
+    if previous.get("provider_status") not in {"attempted", "skipped_budget"}:
         return None
     previous_time = parse_timestamp(previous.get("budget_reference_at_utc") or previous.get("generated_at_utc"))
     if previous_time is None:
@@ -214,8 +220,13 @@ def _budget_skip_summary(cfg: EngineConfig, settings: Mapping[str, Any]) -> dict
         "books_used": previous.get("books_used", []),
         "errors": 0,
         "provider_status": "skipped_budget",
-        "previous_status": previous.get("status"),
-        "previous_generated_at_utc": previous.get("generated_at_utc"),
+        "previous_status": previous.get("previous_status") or previous.get("status"),
+        "previous_generated_at_utc": previous.get("previous_generated_at_utc") or previous.get("generated_at_utc"),
+        # Carried forward so pacing chains across consecutive skips and the dashboard
+        # health badge keeps showing the last real quota reading instead of "unknown".
+        "budget_reference_at_utc": previous.get("budget_reference_at_utc") or previous.get("generated_at_utc"),
+        "requests_remaining": previous.get("requests_remaining", ""),
+        "requests_used": 0,
         "fetch_interval_minutes": interval_minutes,
         "seconds_until_next_fetch": round(wait_seconds, 3),
         "per_sport": [],

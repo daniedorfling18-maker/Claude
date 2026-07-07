@@ -47,6 +47,15 @@ def test_sharp_fetch_health_flags_key_and_quota_problems():
     }})
     assert exhausted["health"] == "attention"
 
+    # Budget skip between fetches is the healthy steady state; with skip summaries
+    # chaining, it carries the last real quota reading instead of "unknown".
+    skipped = _sharp_fetch_health({"sharp_odds_fetch": {
+        "status": "skipped_budget", "provider_status": "skipped_budget",
+        "rows": 55, "requests_remaining": 19488,
+    }})
+    assert skipped["health"] == "ok"
+    assert skipped["requests_remaining"] == 19488
+
     # No fetch summary yet -> unknown, not a crash.
     unknown = _sharp_fetch_health({})
     assert unknown["health"] == "unknown"

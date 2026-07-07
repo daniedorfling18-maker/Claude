@@ -295,7 +295,9 @@ crypto_updown_live_model:
   fast_minimum_remaining_seconds: 20
   minimum_time_to_close_hours: 0
   maximum_time_to_close_hours: 36
-  max_scored_rows_per_cycle: 16
+  # 2026-07-07: 16 -> 8. Up/down is a frozen diagnostic; halving scored rows halves the
+  # per-cycle Binance calls and model CPU without losing the diagnostic signal.
+  max_scored_rows_per_cycle: 8
   require_scored_model_for_trading: true
   probability_blend_weight: 0.65
   max_probability_adjustment: 0.25
@@ -558,8 +560,11 @@ paper_market_scan:
   # strict price-action model has validation-positive repricing evidence. This
   # is collection-only: it does not approve trades or relax paper gates.
   fast_updown_use_price_action_validation_targets: true
+  # 2026-07-07: dropped 5m from the fast up/down collection intervals. Crypto up/down is
+  # FROZEN as a diagnostic (AGENTS.md focus discipline) and the 5m lane churns a new
+  # market every five minutes - the single highest discovery/websocket/scoring load in
+  # the loop, now the loop is CPU-bound. 15m/4h keep the timing diagnostic alive.
   fast_updown_intervals:
-  - 5m
   - 15m
   - 4h
   fast_updown_non_5m_slots_ahead: 4
@@ -834,7 +839,9 @@ promoted_rule_shadow:
   exploratory_max_time_to_close_hours: 2
   public_search_limit: 8
   crypto_updown_public_search_days_ahead: 2
-  crypto_updown_intraday_search_enabled: true
+  # 2026-07-07: disabled. The 10-minute-step intraday up/down search is pure attention on
+  # the frozen diagnostic family (AGENTS.md) and burns Gamma queries + CPU each pass.
+  crypto_updown_intraday_search_enabled: false
   crypto_updown_intraday_search_hours_ahead: 2
   crypto_updown_intraday_search_step_minutes: 10
   crypto_updown_live_model_enabled: true

@@ -48,16 +48,6 @@ The repository runs nine workflows. The sections below list secrets required for
 | `SUPERBRU_PASSWORD` | **Yes** | Superbru account password. |
 | `WORKFLOW_PAT` | No | Personal access token with `repo` + `workflow` scope. Required only to open the auto-PR that adds missing `auto_pick.yml` cron entries (pushing a workflow file needs `workflow` scope). Without it the job still uploads the fixture report and suggested cron lines but cannot open the PR. |
 
-## `data-inventory.yml` (scheduled, daily)
-
-| Secret | Required | Description |
-|--------|----------|-------------|
-| `SUPERBRU_LOGIN_URL` | No | Superbru login endpoint. If unset, the Superbru inventory audit runs without login (public pool data only). |
-| `SUPERBRU_USERNAME` | No | Superbru account username / email. |
-| `SUPERBRU_PASSWORD` | No | Superbru account password. |
-| `SUPERBRU_POOL_URL` | No | Pool view URL. A default is used if unset. |
-
-> The Superbru audit step uses `continue-on-error: true`, so the workflow does not fail when these are absent.
 
 ## `deploy-polymarket-vps-paper.yml` (manual VPS deployment)
 
@@ -75,4 +65,3 @@ The workflow pulls `main`, rebuilds `docker-compose.vps-paper.yml`, forces a das
 ## No secrets required
 
 - `repo-audit-bundle.yml` only archives and audits the tracked source tree.
-- `polymarket-mispricing-bot.yml` is manual dry-run only under the committed workflow defaults.

@@ -1,15 +1,15 @@
 {
-  "beat_close_rate": 0.2857,
-  "clv_ci_high": 0.011106,
-  "clv_ci_low": -0.008354,
-  "generated_at_utc": "2026-07-07T11:25:55Z",
+  "beat_close_rate": 0.25,
+  "clv_ci_high": 0.010037,
+  "clv_ci_low": -0.007517,
+  "generated_at_utc": "2026-07-07T15:27:28Z",
   "interpretation": "keep the snapshot workflow running; verdict needs more matched picks",
-  "mean_clv": 0.00053,
+  "mean_clv": 0.000304,
   "minimum_samples": 15,
-  "picks_scored": 7,
+  "picks_scored": 8,
   "picks_seen": 67,
   "skipped": {
-    "no_close_line": 4,
+    "no_close_line": 3,
     "no_outcome": 0,
     "no_pick_time_line": 3,
     "no_snapshots": 53

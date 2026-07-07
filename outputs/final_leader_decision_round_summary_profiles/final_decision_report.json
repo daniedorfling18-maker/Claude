@@ -1,5 +1,5 @@
 {
-  "generated_at_utc": "2026-07-07T09:59:15.444701+00:00",
+  "generated_at_utc": "2026-07-07T16:40:35.746516+00:00",
   "leader_player": "Danie",
   "final_policy": "raw EV pick unless base MC, stress test and high-N confirmation all approve the same switch",
   "accepted_policy_switches": [],
@@ -20,10 +20,10 @@
         "Bijal",
         "Dheben"
       ],
-      "baseline_p_finish_first": 0.76955,
-      "baseline_p_finish_first_or_tied": 0.80986,
-      "final_p_finish_first": 0.76955,
-      "final_p_finish_first_or_tied": 0.80986,
+      "baseline_p_finish_first": 0.75569,
+      "baseline_p_finish_first_or_tied": 0.80647,
+      "final_p_finish_first": 0.75569,
+      "final_p_finish_first_or_tied": 0.80647,
       "delta_p_finish_first": 0.0,
       "accepted_switches": [],
       "total_ev_loss": 0.0
@@ -43,10 +43,10 @@
         "Bijal",
         "Dheben"
       ],
-      "baseline_p_finish_first": 0.769688,
-      "baseline_p_finish_first_or_tied": 0.80927,
-      "final_p_finish_first": 0.769688,
-      "final_p_finish_first_or_tied": 0.80927,
+      "baseline_p_finish_first": 0.755478,
+      "baseline_p_finish_first_or_tied": 0.804682,
+      "final_p_finish_first": 0.755478,
+      "final_p_finish_first_or_tied": 0.804682,
       "delta_p_finish_first": 0.0,
       "accepted_switches": [],
       "total_ev_loss": 0.0

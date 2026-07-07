@@ -1,5 +1,5 @@
 {
-  "generated_at_utc": "2026-07-07T09:59:17.098889+00:00",
+  "generated_at_utc": "2026-07-07T16:40:37.446853+00:00",
   "component_pick_count": 5,
   "component_label_counts": {
     "component_aligned": 4,
@@ -20,6 +20,16 @@
       "component_reasons": "outcome agrees with market favourite; goal total conflicts with market lean; spread market unavailable"
     },
     {
+      "home_team": "Argentina",
+      "away_team": "Egypt",
+      "final_pick": "2-1",
+      "validation_label": "acceptable",
+      "market_alignment_label": "market_aligned",
+      "component_score": 0.758,
+      "component_label": "component_aligned",
+      "component_reasons": "outcome agrees with market favourite; goal total agrees with market lean; spread market unavailable"
+    },
+    {
       "home_team": "Switzerland",
       "away_team": "Colombia",
       "final_pick": "0-2",
@@ -36,16 +46,6 @@
       "validation_label": "fragile",
       "market_alignment_label": "market_aligned",
       "component_score": 0.7745,
-      "component_label": "component_aligned",
-      "component_reasons": "outcome agrees with market favourite; goal total agrees with market lean; spread market unavailable"
-    },
-    {
-      "home_team": "Argentina",
-      "away_team": "Egypt",
-      "final_pick": "2-0",
-      "validation_label": "validated",
-      "market_alignment_label": "market_aligned",
-      "component_score": 0.797,
       "component_label": "component_aligned",
       "component_reasons": "outcome agrees with market favourite; goal total agrees with market lean; spread market unavailable"
     },

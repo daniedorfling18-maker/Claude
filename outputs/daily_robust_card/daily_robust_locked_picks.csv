@@ -1,6 +1,6 @@
 commence_time,home_team,away_team,raw_pick,leader_mc_pick,switched,raw_ev_full_matrix,leader_mc_ev_full_matrix,ev_loss,risk_tier,confidence_tier,final_pick,final_switched,final_policy_reason,original_pick,locked_pick,switch_applied,switch_reason,pre_daily_pick,robust_locked_pick,daily_switch_applied,daily_switch_reason
-2026-07-07T16:00:00Z,Argentina,Egypt,2-0,2-0,False,1.217196,1.217196,0.0,low,strong,2-0,False,raw pick retained; no robust defensive switch approved,2-0,2-0,False,,2-0,2-0,False,
-2026-07-07T20:00:00Z,Switzerland,Colombia,0-2,0-2,False,0.734819,0.734819,0.0,high,fragile,0-2,False,raw pick retained; no robust defensive switch approved,0-2,0-2,False,,0-2,0-2,False,
-2026-07-09T20:00:00Z,France,Morocco,2-0,2-0,False,1.017555,1.017555,0.0,medium,medium,2-0,False,raw pick retained; no robust defensive switch approved,2-0,2-0,False,,2-0,2-0,False,
-2026-07-10T19:00:00Z,Spain,Belgium,2-0,2-0,False,0.974598,0.974598,0.0,medium,medium,2-0,False,raw pick retained; no robust defensive switch approved,2-0,2-0,False,,2-0,2-0,False,
-2026-07-11T21:00:00Z,Norway,England,1-2,1-2,False,0.832,0.832,0.0,high,fragile,1-2,False,raw pick retained; no robust defensive switch approved,1-2,1-2,False,,1-2,1-2,False,
+2026-07-07T16:01:00Z,Argentina,Egypt,2-1,2-1,False,0.758952,0.758952,0.0,high,medium,2-1,False,raw pick retained; no robust defensive switch approved,2-1,2-1,False,,2-1,2-1,False,
+2026-07-07T20:00:00Z,Switzerland,Colombia,0-2,0-2,False,0.741242,0.741242,0.0,high,fragile,0-2,False,raw pick retained; no robust defensive switch approved,0-2,0-2,False,,0-2,0-2,False,
+2026-07-09T20:00:00Z,France,Morocco,2-0,2-0,False,1.027638,1.027638,0.0,medium,medium,2-0,False,raw pick retained; no robust defensive switch approved,2-0,2-0,False,,2-0,2-0,False,
+2026-07-10T19:00:00Z,Spain,Belgium,2-0,2-0,False,0.974774,0.974774,0.0,medium,medium,2-0,False,raw pick retained; no robust defensive switch approved,2-0,2-0,False,,2-0,2-0,False,
+2026-07-11T21:00:00Z,Norway,England,1-2,1-2,False,0.833269,0.833269,0.0,high,fragile,1-2,False,raw pick retained; no robust defensive switch approved,1-2,1-2,False,,1-2,1-2,False,

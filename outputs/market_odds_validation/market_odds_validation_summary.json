@@ -1,5 +1,5 @@
 {
-  "generated_at_utc": "2026-07-07T09:59:16.412946+00:00",
+  "generated_at_utc": "2026-07-07T16:40:36.700808+00:00",
   "pick_count": 5,
   "market_available_count": 5,
   "totals_available_count": 5,
@@ -12,7 +12,15 @@
       "home_team": "Switzerland",
       "away_team": "Colombia",
       "final_pick": "0-2",
-      "market_alignment_score": 0.867291,
+      "market_alignment_score": 0.86933,
+      "market_alignment_label": "market_aligned",
+      "market_alignment_reasons": "pick outcome agrees with market favourite; goal total agrees with market lean; spreads market unavailable"
+    },
+    {
+      "home_team": "Argentina",
+      "away_team": "Egypt",
+      "final_pick": "2-1",
+      "market_alignment_score": 0.875808,
       "market_alignment_label": "market_aligned",
       "market_alignment_reasons": "pick outcome agrees with market favourite; goal total agrees with market lean; spreads market unavailable"
     },
@@ -20,7 +28,7 @@
       "home_team": "Spain",
       "away_team": "Belgium",
       "final_pick": "2-0",
-      "market_alignment_score": 0.891887,
+      "market_alignment_score": 0.89398,
       "market_alignment_label": "market_aligned",
       "market_alignment_reasons": "pick outcome agrees with market favourite; market gives selected outcome strong support; spreads market unavailable"
     },
@@ -28,15 +36,7 @@
       "home_team": "Norway",
       "away_team": "England",
       "final_pick": "1-2",
-      "market_alignment_score": 0.928371,
-      "market_alignment_label": "market_aligned",
-      "market_alignment_reasons": "pick outcome agrees with market favourite; market gives selected outcome strong support; goal total agrees with market lean; spreads market unavailable"
-    },
-    {
-      "home_team": "Argentina",
-      "away_team": "Egypt",
-      "final_pick": "2-0",
-      "market_alignment_score": 1.0,
+      "market_alignment_score": 0.929488,
       "market_alignment_label": "market_aligned",
       "market_alignment_reasons": "pick outcome agrees with market favourite; market gives selected outcome strong support; goal total agrees with market lean; spreads market unavailable"
     },

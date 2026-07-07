@@ -1,6 +1,6 @@
 # SuperBru validation data freshness
 
-Generated: `2026-07-07T09:59:18.690904+00:00`
+Generated: `2026-07-07T16:40:38.999131+00:00`
 
 Status: **not_ready**
 
@@ -12,7 +12,7 @@ Status: **not_ready**
 | Oddspedia grid | 456 | ok | 0.037 | 0/5 |
 | Oddspedia comparison | 0 | missing | None | 0/5 |
 | SuperBru results | 0 | missing | None | - |
-| Market history | 65 | ok | 0.001 | - |
+| Market history | 70 | ok | 0.001 | - |
 | Prediction log | 35 | ok | 0.0 | - |
 
 ## Blockers

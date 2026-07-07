@@ -1,5 +1,5 @@
 {
-  "generated_at_utc": "2026-07-07T09:59:15.446763+00:00",
+  "generated_at_utc": "2026-07-07T16:40:35.748666+00:00",
   "python": "3.11.15 (main, Jun 16 2026, 21:41:52) [GCC 13.3.0]",
   "command": "scripts/run_final_leader_decision.py --fixtures data/fixtures_real.csv --odds-json outputs/market_odds/worldcup_market_odds_raw.json --predictions-csv outputs/latest/predictions.csv --leaderboard-csv outputs/superbru_pool/live_pool_leaderboard.csv --chaser-profiles-csv outputs/superbru_pool/live_chaser_profiles.csv --leader-player Danie --chasers Ivan Prinsloo,Lusse,Chapman12,Leonard,Ettiene,Joe,rob87,Bijal,Dheben --out-dir outputs/final_leader_decision_round_summary_profiles",
   "args": {
@@ -27,10 +27,10 @@
     "reuse_existing": false
   },
   "git": {
-    "commit_sha": "5ddbbfd29e07ec0607442fbb2a7c989438dfcd47",
+    "commit_sha": "12201058cf0cb20f17c44f5551719d6e19e79ca7",
     "branch": "main",
     "working_tree_clean": false,
-    "status_porcelain": "M data/fixtures_real.csv\n M outputs/final_leader_decision_round_summary_profiles/base_mc/leader_mc_candidate_tests.csv\n M outputs/final_leader_decision_round_summary_profiles/base_mc/leader_mc_picks.csv\n M outputs/final_leader_decision_round_summary_profiles/base_mc/leader_mc_summary.json\n M outputs/final_leader_decision_round_summary_profiles/confirmation_500k/leader_mc_candidate_tests.csv\n M outputs/final_leader_decision_round_summary_profiles/confirmation_500k/leader_mc_picks.csv\n M outputs/final_leader_decision_round_summary_profiles/confirmation_500k/leader_mc_summary.json\n M outputs/final_leader_decision_round_summary_profiles/final_decision_report.json\n M outputs/final_leader_decision_round_summary_profiles/final_decision_report.md\n M outputs/final_leader_decision_round_summary_profiles/final_picks.csv\n M outputs/final_leader_decision_round_summary_profiles/quality_gates.json\n M outputs/final_leader_decision_round_summary_profiles/stress/stress_candidate_tests.csv\n M outputs/final_leader_decision_round_summary_profiles/stress/stress_picks_by_scenario.csv\n M outputs/final_leader_decision_round_summary_profiles/stress/stress_scenario_summary.csv\n M outputs/final_leader_decision_round_summary_profiles/stress/stress_summary.json\n M outputs/final_leader_decision_round_summary_profiles/stress/stress_switch_support.csv\n M outputs/latest/predictions.csv\n M outputs/latest/predictions.json\n M outputs/market_odds/worldcup_market_odds_flat.csv\n M outputs/market_odds/worldcup_market_odds_raw.json\n M outputs/superbru_pool/live_chaser_profiles.csv\n M outputs/superbru_pool/live_chaser_profiles_summary.json\n M outputs/superbru_pool/live_chasers.txt\n M outputs/superbru_pool/live_pool_leaderboard.csv\n M outputs/superbru_pool/live_pool_leaderboard_summary.json"
+    "status_porcelain": "M data/fixtures_real.csv\n M outputs/final_leader_decision_round_summary_profiles/base_mc/leader_mc_candidate_tests.csv\n M outputs/final_leader_decision_round_summary_profiles/base_mc/leader_mc_picks.csv\n M outputs/final_leader_decision_round_summary_profiles/base_mc/leader_mc_summary.json\n M outputs/final_leader_decision_round_summary_profiles/confirmation_500k/leader_mc_candidate_tests.csv\n M outputs/final_leader_decision_round_summary_profiles/confirmation_500k/leader_mc_picks.csv\n M outputs/final_leader_decision_round_summary_profiles/confirmation_500k/leader_mc_summary.json\n M outputs/final_leader_decision_round_summary_profiles/final_decision_report.json\n M outputs/final_leader_decision_round_summary_profiles/final_decision_report.md\n M outputs/final_leader_decision_round_summary_profiles/final_picks.csv\n M outputs/final_leader_decision_round_summary_profiles/stress/stress_candidate_tests.csv\n M outputs/final_leader_decision_round_summary_profiles/stress/stress_picks_by_scenario.csv\n M outputs/final_leader_decision_round_summary_profiles/stress/stress_scenario_summary.csv\n M outputs/final_leader_decision_round_summary_profiles/stress/stress_summary.json\n M outputs/final_leader_decision_round_summary_profiles/stress/stress_switch_support.csv\n M outputs/latest/predictions.csv\n M outputs/latest/predictions.json\n M outputs/market_odds/worldcup_market_odds_flat.csv\n M outputs/market_odds/worldcup_market_odds_raw.json\n M outputs/superbru_pool/live_chaser_profiles.csv\n M outputs/superbru_pool/live_chaser_profiles_summary.json\n M outputs/superbru_pool/live_pool_leaderboard.csv\n M outputs/superbru_pool/live_pool_leaderboard_summary.json"
   },
   "inputs": {
     "config": {
@@ -39,15 +39,15 @@
     },
     "fixtures": {
       "path": "data/fixtures_real.csv",
-      "sha256": "c138414b046425b5add5c5f2024b77a01dc5d030c3188cc1b8a4fa8da49a7db8"
+      "sha256": "dbd7e917ae207b3c7bd0fb290ac824384438bd6364dddcb9f7b1c4fed565e386"
     },
     "odds_json": {
       "path": "outputs/market_odds/worldcup_market_odds_raw.json",
-      "sha256": "a5d0e5b3a9adfa0a5971c98126a5ac9c22c8b4e6f1f2742c57174161f25f35d6"
+      "sha256": "bc280795d7e4474eb5edfe9ef48d7fe9710ff9566ca7ef2d738995d4cc91eae6"
     },
     "predictions_csv": {
       "path": "outputs/latest/predictions.csv",
-      "sha256": "f6d7d5485681b04c289a81da2dfdc5b1626a4a61c2753095040d3a216d6b5555"
+      "sha256": "63656489d52df5db90c3f888daaf1b00da2dc7c77ed1b7d42ce6c99c6f350ae8"
     },
     "leaderboard_csv": {
       "path": "outputs/superbru_pool/live_pool_leaderboard.csv",
@@ -59,22 +59,22 @@
     }
   },
   "outputs": {
-    "outputs/final_leader_decision_round_summary_profiles/final_picks.csv": "9e320706f36ed6f406e1673fcafc3c5d8c854c913c0a9e17b3668b11fbb0fffb",
-    "outputs/final_leader_decision_round_summary_profiles/final_decision_report.json": "457f0e50ffc67f855c68d02e9f63473b456b95a3b837d52530bdd9607d8edfd5",
-    "outputs/final_leader_decision_round_summary_profiles/final_decision_report.md": "f4b0c02ac4f12de9cc79f189f04ad65a24c8a50606835d80ec4a2cb3b5f7c879",
+    "outputs/final_leader_decision_round_summary_profiles/final_picks.csv": "6c0c35b6565b17e1e70580d5feef0891bea30b37261eb4f53ca17016aff7ff86",
+    "outputs/final_leader_decision_round_summary_profiles/final_decision_report.json": "af9d44314adc58837ff1f05d3882e95121143313eb2a4165cef95f314963b1d0",
+    "outputs/final_leader_decision_round_summary_profiles/final_decision_report.md": "caf8dc4e9afecde9f24055c1b9c23640fa376fc3783d999589c0212b227a27b6",
     "outputs/final_leader_decision_round_summary_profiles/quality_gates.json": "fa5b0c45c558e8374c96d844f1291819966ab41d1fb186ae9ecd46eb39ebd379",
-    "outputs/final_leader_decision_round_summary_profiles/run_manifest.json": "d25cf688e4cc36cbd5478f22372672f6a1bf8cb9ab8677846a327eb5d6ead1cc",
-    "outputs/final_leader_decision_round_summary_profiles/base_mc/leader_mc_picks.csv": "839da6df3f9b5508b4d1837735121ce8ef305f00dff6957719b6d6bd2c5b5b5b",
-    "outputs/final_leader_decision_round_summary_profiles/base_mc/leader_mc_candidate_tests.csv": "1bf69a0c83b94e4346603c7a55323df6d2d832bd4bc053a5bb01b6b5280491e8",
-    "outputs/final_leader_decision_round_summary_profiles/base_mc/leader_mc_summary.json": "c55c4626530bc2cb74eb733de926783be76f08232a056fbf52a25d607e134862",
-    "outputs/final_leader_decision_round_summary_profiles/stress/stress_picks_by_scenario.csv": "6c33db75932a6a71ec6f1a430a66200a05e342002de3598cdad53241c176272a",
-    "outputs/final_leader_decision_round_summary_profiles/stress/stress_candidate_tests.csv": "c99b69f3603621c064b10762795604e86a60a31223624ed3852fde12452280eb",
-    "outputs/final_leader_decision_round_summary_profiles/stress/stress_scenario_summary.csv": "8f3c35be0e8f8dca8542d28d188409de8d6f54f250dbaedff4330245e79168f1",
-    "outputs/final_leader_decision_round_summary_profiles/stress/stress_switch_support.csv": "cdd0abc0008441265944bc91029ee06962f21e2f267c6bacad47bcdf0c6e3434",
-    "outputs/final_leader_decision_round_summary_profiles/stress/stress_summary.json": "2cc9e40041303d22b83a97a53b4b087e6e68a8b0382fcd586c935c430fccd11c",
-    "outputs/final_leader_decision_round_summary_profiles/confirmation_500k/leader_mc_picks.csv": "839da6df3f9b5508b4d1837735121ce8ef305f00dff6957719b6d6bd2c5b5b5b",
-    "outputs/final_leader_decision_round_summary_profiles/confirmation_500k/leader_mc_candidate_tests.csv": "868b00adb9e13a83453c3ea17214494f6369ecf744e23c559d754e2b1207cf05",
-    "outputs/final_leader_decision_round_summary_profiles/confirmation_500k/leader_mc_summary.json": "3e4fa22e04a778c8b69337908b1bae024ec48eb773779f22a24f064dcf18a4f7"
+    "outputs/final_leader_decision_round_summary_profiles/run_manifest.json": "1efed092340c4ecedf32dcf96f6a8651d360852c794e87d441cfed760fc6b50d",
+    "outputs/final_leader_decision_round_summary_profiles/base_mc/leader_mc_picks.csv": "80592808398bed9d8c325c8dae8ee065a4414cd4068ad3f7ff9f264a9d8f775e",
+    "outputs/final_leader_decision_round_summary_profiles/base_mc/leader_mc_candidate_tests.csv": "cdcc05fb2896bb6b32675e5083368c9c78eeb208a3134523c25b868d8f4541a0",
+    "outputs/final_leader_decision_round_summary_profiles/base_mc/leader_mc_summary.json": "b9e834f8298ffce8484038ad11168ac874a7cb9b33febb7493bb7f8532d48734",
+    "outputs/final_leader_decision_round_summary_profiles/stress/stress_picks_by_scenario.csv": "f52155839781da3f4edf90fd3cf0d5d67c74c484625ad58b8d9989c10a789832",
+    "outputs/final_leader_decision_round_summary_profiles/stress/stress_candidate_tests.csv": "9bacc01f110e612c874dbc47cbf785bedb7170743a2a5ba9322162f93cc4b97a",
+    "outputs/final_leader_decision_round_summary_profiles/stress/stress_scenario_summary.csv": "bbd44b491db6a7676c513a3c31de7f931eb42292b99c1cb3ecfbe03d215ab6f0",
+    "outputs/final_leader_decision_round_summary_profiles/stress/stress_switch_support.csv": "44663b96bd505fec9ba1cdc214f76ae2d04eb4095fc63b70b957f0d8611c6487",
+    "outputs/final_leader_decision_round_summary_profiles/stress/stress_summary.json": "204f885da2ecc659fcbe4c7fc3e78e5766dcb20fc9e1508cdd5c3602ab5e20e9",
+    "outputs/final_leader_decision_round_summary_profiles/confirmation_500k/leader_mc_picks.csv": "80592808398bed9d8c325c8dae8ee065a4414cd4068ad3f7ff9f264a9d8f775e",
+    "outputs/final_leader_decision_round_summary_profiles/confirmation_500k/leader_mc_candidate_tests.csv": "2f7ce98ad36ac28a6c4d99d3492c82a473ee6f7e0dbf7d14a8fbc92111bbd445",
+    "outputs/final_leader_decision_round_summary_profiles/confirmation_500k/leader_mc_summary.json": "fb84be97d834beb45c24d976428d8e2c98b569292c7cc2d9f20ac5609cf5bfbc"
   },
   "out_dir": "outputs/final_leader_decision_round_summary_profiles"
 }

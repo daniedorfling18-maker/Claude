@@ -13,10 +13,10 @@
     "Bijal",
     "Dheben"
   ],
-  "baseline_p_finish_first": 0.76955,
-  "baseline_p_finish_first_or_tied": 0.80986,
-  "final_p_finish_first": 0.76955,
-  "final_p_finish_first_or_tied": 0.80986,
+  "baseline_p_finish_first": 0.75569,
+  "baseline_p_finish_first_or_tied": 0.80647,
+  "final_p_finish_first": 0.75569,
+  "final_p_finish_first_or_tied": 0.80647,
   "delta_p_finish_first": 0.0,
   "accepted_switches": [],
   "total_ev_loss": 0.0

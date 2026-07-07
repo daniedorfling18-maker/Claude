@@ -79,6 +79,9 @@ def test_apply_dashboard_proof_questions_writes_data_and_html_overlay(tmp_path: 
 
     assert result["status"] == "ok"
     assert result["proof_status"] == "good"
+    payload_text = (dashboard_root / "dashboard_data.json").read_text(encoding="utf-8")
+    # The apply pass must preserve the dashboard's compact single-line payload format.
+    assert "\n" not in payload_text.strip()
     payload = read_json(dashboard_root / "dashboard_data.json")
     assert payload["proof_questions"]["status"] == "good"
     assert len(payload["proof_questions"]["questions"]) == 4

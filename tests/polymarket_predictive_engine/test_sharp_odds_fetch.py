@@ -438,6 +438,19 @@ def test_summary_reports_minimum_requests_remaining(tmp_path, monkeypatch):
     assert summary["requests_remaining"] == 480  # most conservative across sports
 
 
+def test_example_config_fetch_interval_protects_free_tier_quota():
+    """The free Odds API tier is ~500 requests/month. The hourly cadence (2 paid requests
+    per cycle for the live WC keys = ~48/day) was on track to exhaust the remaining quota
+    days before the 2026-07-19 World Cup final. Keep the interval at 3h+ so the anchor
+    survives the whole evidence window; do not lower it back without a quota plan.
+    """
+    import yaml
+    from pathlib import Path
+
+    raw = yaml.safe_load(Path("polymarket_predictive_config.example.yaml").read_text(encoding="utf-8"))
+    assert int(raw["sharp_odds_fetch"]["fetch_interval_minutes"]) >= 180
+
+
 def test_example_config_fetches_only_polymarket_mappable_markets():
     """WO-30: the shipped sharp_odds_fetch list targets only markets Polymarket lists.
 

@@ -5433,13 +5433,21 @@ def render_dashboard(cfg: EngineConfig, latest_report: dict[str, Any] | None = N
     # flags. The overlay module imports config/utils only, so there is no import cycle.
     from .dashboard_proof_questions import build_proof_questions, _inject_html_overlay
 
-    payload["proof_questions"] = build_proof_questions(cfg, dashboard_data=payload)
+    proof_questions = build_proof_questions(cfg, dashboard_data=payload)
+    payload["proof_questions"] = proof_questions
     html_out = _inject_html_overlay(HTML)
     _write_dashboard_data(out / "dashboard_data.json", payload)
     (out / "index.html").write_text(html_out, encoding="utf-8")
+    # The governance proof_questions.json artifact is written here rather than in a separate
+    # post-render step, so it always matches the served dashboard on every render path and
+    # refresh_governance no longer needs a second apply pass (which re-wrote the payload
+    # pretty-printed, breaking the compact/capped invariant above).
+    write_json(cfg.governance_root / "proof_questions.json", proof_questions)
     return {
         "status": "ok",
         "dashboard_dir": str(out),
         "dashboard_file": str(out / "index.html"),
         "dashboard_data": str(out / "dashboard_data.json"),
+        "proof_questions_status": proof_questions.get("status"),
+        "proof_questions_html_status": "overlay_written",
     }

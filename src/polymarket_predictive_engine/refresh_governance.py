@@ -10,7 +10,6 @@ from .cohort_validation import write_signal_cohort_pnl
 from .closing_line import build_closing_line_value
 from .collection_coverage import build_collection_coverage
 from .dashboard import render_dashboard
-from .dashboard_proof_questions import apply_dashboard_proof_questions
 from .edge_attribution import build_edge_attribution
 from .evidence_history import append_evidence_history
 from .family_calibration import build_family_calibration_scorecard
@@ -84,12 +83,11 @@ def refresh_governance(cfg: EngineConfig, *, refresh_dashboard: bool = True) -> 
     research_focus = build_research_focus(cfg)
     promotion_gate = paper_live_promotion_gate(cfg)
     governance = governance_report(cfg)
+    # render_dashboard builds the four proof questions into its single compact write and
+    # writes the governance proof_questions.json artifact itself, so no separate apply
+    # pass is needed here (a second pass re-wrote the payload pretty-printed, breaking
+    # the compact/capped invariant until the live loop's next render).
     dashboard = render_dashboard(cfg) if refresh_dashboard else {"status": "skipped"}
-    proof_questions = (
-        apply_dashboard_proof_questions(cfg, sharp_anchor_coverage=sharp_anchor_coverage)
-        if refresh_dashboard
-        else {"status": "skipped"}
-    )
 
     result = {
         "status": "ok",
@@ -168,8 +166,8 @@ def refresh_governance(cfg: EngineConfig, *, refresh_dashboard: bool = True) -> 
         "paper_blockers": promotion_gate.get("paper_blockers", []),
         "live_blockers": promotion_gate.get("live_blockers", []),
         "governance_report_status": governance.get("status") if isinstance(governance, dict) else "unknown",
-        "proof_questions_status": proof_questions.get("proof_status") or proof_questions.get("status"),
-        "proof_questions_html_status": proof_questions.get("html_status"),
+        "proof_questions_status": dashboard.get("proof_questions_status"),
+        "proof_questions_html_status": dashboard.get("proof_questions_html_status"),
         "dashboard": dashboard,
         "notes": [
             "Governance refresh only: no order placement, no threshold changes, no live-trading opt-in.",

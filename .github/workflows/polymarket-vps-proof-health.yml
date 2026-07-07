@@ -197,6 +197,15 @@ jobs:
               except (TypeError, ValueError):
                   return None
 
+          def fmt_num(value: Any, missing: str = "unknown") -> str:
+              # Report counts as integers ("280", not "280.0") and rates to 3dp.
+              number = num(value)
+              if number is None:
+                  return missing if value in (None, "") else str(value)
+              if float(number).is_integer():
+                  return str(int(number))
+              return f"{number:.3f}"
+
           dashboard = load_json(dashboard_path, required=True)
           html = html_path.read_text(encoding="utf-8", errors="replace") if html_path.exists() else ""
           coverage = load_json(governance_root / "sharp_anchor_coverage.json", required=True)
@@ -445,9 +454,9 @@ jobs:
           print(f"- Dashboard port: `{os.environ.get('PORT', 'unknown')}`")
           print(f"- Sharp fetch status: `{fetch_status}`")
           print(f"- Sharp fetch health: `{fetch_health or 'unknown'}`")
-          print(f"- Odds API requests remaining: `{requests_remaining if requests_remaining is not None else 'unknown'}`")
-          print(f"- Sharp rows written/fetched: `{fetch_rows if fetch_rows is not None else 'unknown'}`")
-          print(f"- WO-31 coverage: fetched=`{total_fetched}`, mapped=`{total_mapped}`, join_rate=`{join_rate if join_rate is not None else 'n/a'}`, zero_join_flags=`{flagged}`")
+          print(f"- Odds API requests remaining: `{fmt_num(requests_remaining)}`")
+          print(f"- Sharp rows written/fetched: `{fmt_num(fetch_rows)}`")
+          print(f"- WO-31 coverage: fetched=`{total_fetched}`, mapped=`{total_mapped}`, join_rate=`{fmt_num(join_rate, missing='n/a')}`, zero_join_flags=`{flagged}`")
           print(f"- Proof status: `{proof_status}`")
           print(f"- Proof-health snapshots: `{proof_health_summary.get('total_snapshot_count', 'unknown')}` total / `{proof_health_summary.get('recent_snapshot_count', 'unknown')}` in 21d")
           print(f"- Evidence window status: `{proof_health_summary.get('evidence_window_status', 'unknown')}`")

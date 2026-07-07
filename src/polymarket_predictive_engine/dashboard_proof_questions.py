@@ -88,7 +88,10 @@ def build_proof_questions(
         dutch_answer = f"Maybe: {complete_arbs} complete basket(s) appeared, but none are persistent yet. Best ask sum: {best_ask_sum or '-'}."
     elif dutch:
         dutch_severity = "warn"
-        dutch_answer = "No persistent basket yet; continue bounded dry-run monitoring without order placement."
+        dutch_answer = (
+            "None found: zero complete/persistent baskets. That is the expected state of an "
+            "efficient book (not an operational fault); the scanner keeps watching dry-run."
+        )
     else:
         dutch_severity = "warn"
         dutch_answer = "No Dutch-book monitor artifact yet; deploy/governance should build it before this proof stream can answer."
@@ -249,6 +252,13 @@ def apply_dashboard_proof_questions(
     *,
     sharp_anchor_coverage: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
+    """Standalone/CLI repair pass that overlays proof questions onto an existing dashboard.
+
+    The primary path is `dashboard.render_dashboard`, which builds the questions into its
+    own compact payload write; this function exists for retrofitting an already-rendered
+    dashboard (e.g. manual diagnostics). It must preserve the dashboard's compact
+    single-line payload format rather than re-writing it pretty-printed.
+    """
     dashboard_root = cfg.output_root / "polymarket_dashboard"
     data_path = dashboard_root / "dashboard_data.json"
     html_path = dashboard_root / "index.html"
@@ -256,7 +266,11 @@ def apply_dashboard_proof_questions(
     data = data if isinstance(data, dict) else {}
     proof = build_proof_questions(cfg, dashboard_data=data, sharp_anchor_coverage=sharp_anchor_coverage)
     data["proof_questions"] = proof
-    write_json(data_path, data)
+    data_path.parent.mkdir(parents=True, exist_ok=True)
+    data_path.write_text(
+        json.dumps(data, sort_keys=True, separators=(",", ":"), default=str),
+        encoding="utf-8",
+    )
     write_json(cfg.governance_root / "proof_questions.json", proof)
 
     html_status = "missing_html"

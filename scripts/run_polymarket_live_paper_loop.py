@@ -179,11 +179,23 @@ def _resource_guard(cfg) -> dict[str, Any]:
     }
 
 
-def _scheduled(settings: dict[str, Any], key: str, iteration: int, *, default: int = 1) -> bool:
+def _scheduled(settings: dict[str, Any], key: str, iteration: int, *, default: int = 1, run_on_first: bool = True) -> bool:
+    """Cadence gate for per-iteration passes.
+
+    ``run_on_first=False`` marks a pass as boot-deferrable: it does NOT run on the first
+    iteration after a (re)start. The heavy ML trainers all firing on iteration 1 - on top
+    of the full scan - is what pegged the single VPS core for 10-20 minutes after every
+    container restart (observed 2026-07-07 across three deploys: stalled dashboards,
+    stale model scoring, deploy verifies ground into their timeout). Their artifacts
+    persist across restarts, so deferring the first retrain to the normal cadence loses
+    nothing; collection/scoring passes keep running on iteration 1 as before.
+    """
     every = int(settings.get(key, default) or default)
     if every <= 0:
         return False
-    return iteration == 1 or iteration % every == 0
+    if iteration == 1:
+        return run_on_first
+    return iteration % every == 0
 
 
 def _minutes_since(timestamp: Any) -> float | None:
@@ -1339,7 +1351,7 @@ def run_iteration(*, config_path: Path, optimize_model: bool, iteration: int, pa
     if (
         optimize_model
         and bool(cfg.raw.get("ml_optimization", {}).get("enabled", True))
-        and _scheduled(schedule, "optimize_model_every_iterations", iteration, default=12)
+        and _scheduled(schedule, "optimize_model_every_iterations", iteration, default=12, run_on_first=False)
     ):
         optimization = train_optimized_model(cfg)
     alpha: dict[str, Any] = {"status": "skipped"}
@@ -1348,12 +1360,13 @@ def run_iteration(*, config_path: Path, optimize_model: bool, iteration: int, pa
         "mispricing_alpha_every_iterations",
         iteration,
         default=12,
+        run_on_first=False,
     ):
         alpha = train_mispricing_alpha_model(cfg)
     strategy_search = (
         run_edge_strategy_search(cfg)
         if bool(cfg.raw.get("edge_strategy_search", {}).get("enabled", True))
-        and _scheduled(schedule, "edge_strategy_search_every_iterations", iteration, default=12)
+        and _scheduled(schedule, "edge_strategy_search_every_iterations", iteration, default=12, run_on_first=False)
         else {"status": "skipped"}
     )
     paper = run_paper_cycle(cfg, source=paper_source)

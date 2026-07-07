@@ -513,7 +513,12 @@ runtime_resource_guard:
   render_dashboard_on_skip: true
 runtime_schedule:
   full_scan_every_iterations: 2
-  optimize_model_every_iterations: 12
+  # 2026-07-07: the three ML trainers (optimize/alpha/edge-search) are staggered
+  # (10/12/14) instead of all colliding on the same every-12th iteration, and the loop
+  # defers all three past the first iteration after a (re)start. A restart previously
+  # fired full scan + all trainers at once on iteration 1, pegging the single VPS core
+  # for 10-20 minutes (stale dashboards/model scoring, deploy verifies timing out).
+  optimize_model_every_iterations: 10
   # 2026-07-07: sharp fetch/anchor 12 -> 2 (every full-scan iteration). The every-12th
   # iteration gate assumed fast iterations; under VPS load one iteration can crawl to
   # hours, which stretched "every 12 iterations" into DAYS and froze the sharp-fetch
@@ -525,7 +530,7 @@ runtime_schedule:
   sharp_anchor_build_every_iterations: 2
   crypto_fundamental_every_iterations: 12
   mispricing_alpha_every_iterations: 12
-  edge_strategy_search_every_iterations: 12
+  edge_strategy_search_every_iterations: 14
   promoted_rule_shadow_every_iterations: 3
   liquidity_discovery_every_iterations: 12
   dashboard_render_every_iterations: 2

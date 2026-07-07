@@ -2887,7 +2887,9 @@ def _sharp_fetch_health(independent_anchor_status: dict[str, Any]) -> dict[str, 
         health = "attention"
     elif remaining_num is not None and remaining_num <= 0:
         health = "attention"
-    elif status in {"fetched", "partial", "fallback_loaded"} or provider_status == "attempted":
+    elif status in {"fetched", "partial", "fallback_loaded", "skipped_budget"} or provider_status == "attempted":
+        # skipped_budget is the healthy between-fetches state now that skip summaries
+        # chain and carry the last real quota reading forward.
         health = "ok"
     else:
         health = "unknown"

@@ -162,6 +162,13 @@ jobs:
           $DOCKER ps --format 'table {{.Names}}\t{{.Status}}\t{{.RunningFor}}' 2>&1 || true
           echo ""
           timeout 15 $DOCKER stats --no-stream --format 'table {{.Name}}\t{{.CPUPerc}}\t{{.MemUsage}}\t{{.MemPerc}}' 2>&1 || true
+          echo ""
+          # Restart/OOM forensics: a container showing "Up 8 minutes" but created hours
+          # ago restarted for a reason; RestartCount + OOMKilled say whether the kernel
+          # killed it at its mem_limit (observed 2026-07-07 pre-optimisation, exit 137).
+          for name in polymarket-paper-live polymarket-dashboard superbru-auto-pick-watchdog; do
+            $DOCKER inspect --format "$name restarts={{.RestartCount}} oom_killed={{.State.OOMKilled}} started={{.State.StartedAt}} exit_code={{.State.ExitCode}}" "$name" 2>&1 || true
+          done
           echo '```'
           echo ""
 
@@ -305,7 +312,21 @@ jobs:
           if coverage_status not in {"ok", "missing_anchor_summary"}:
               errors.append(f"sharp_anchor_coverage status is unexpected: {coverage_status}")
           if flagged > 0:
-              errors.append(f"WO-31 flagged {flagged} no_mappable_market sport/market pair(s); trim or review the fetch list.")
+              # WO-31's no_mappable_market classification is BY SPEC a recommendation
+              # string for a human to act on deliberately - never an automatic trim and
+              # therefore not an operational failure. Surface it loudly as a warning
+              # with the exact pairs named, but do not paint the health check red
+              # (that chronic red would train people to ignore real failures).
+              flagged_rows = coverage.get("flagged_no_mappable_market")
+              flagged_pairs = ", ".join(
+                  f"{row.get('sport', '?')}/{row.get('market_key', '?')}"
+                  for row in (flagged_rows if isinstance(flagged_rows, list) else [])
+                  if isinstance(row, dict)
+              ) or "unknown pairs"
+              warnings.append(
+                  f"WO-31 recommendation: {flagged} sport/market pair(s) mapped zero tokens across the "
+                  f"flag threshold ({flagged_pairs}); review whether to trim them from sharp_odds_fetch."
+              )
           if total_fetched == 0:
               warnings.append("WO-31 coverage has zero fetched rows; if sharp fetch is live, this needs review after the next fetch cycle.")
 

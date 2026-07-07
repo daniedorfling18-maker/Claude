@@ -312,6 +312,37 @@ jobs:
               if age_minutes > stale_after_minutes:
                   errors.append(f"{label} is stale: age={age_minutes:.1f} minutes > {stale_after_minutes}")
 
+          # Sharp-fetch lane liveness. The artifact checks above cover the dashboard and
+          # governance renders, but the loop can keep rendering while the sharp-odds fetch
+          # lane silently stalls (observed 2026-07-06/07: summary frozen ~24h at
+          # requests_remaining=280 while the shared Odds API quota died elsewhere). A frozen
+          # summary also means the requests-remaining figure shown in this report is stale.
+          # 480 min = 2.6x the configured 180-min fetch interval.
+          fetch_stale_after_minutes = 480
+          fetch_age_minutes = None
+          fetch_generated = parse_ts(fetch_summary.get("generated_at_utc"))
+          if fetch_generated is not None:
+              fetch_age_minutes = (now - fetch_generated).total_seconds() / 60.0
+              if fetch_age_minutes > fetch_stale_after_minutes:
+                  warnings.append(
+                      f"sharp_odds_fetch_summary is frozen: age={fetch_age_minutes:.0f} min > {fetch_stale_after_minutes} "
+                      "(fetch lane stalled, engine skipping heavy passes, or provider dead; "
+                      "requests_remaining above reflects the LAST successful fetch, not now)"
+                  )
+          elif fetch_summary:
+              warnings.append("sharp_odds_fetch_summary has no parseable generated_at_utc; cannot judge fetch-lane liveness")
+
+          # Explicit quota-exhaustion callout: the same key feeds the VPS sharp fetch,
+          # auto_pick, refresh-locked-superbru-card, and superbru-clv-snapshot, so when
+          # quota dies EVERY odds consumer goes dark at once.
+          fetch_error_blob = json.dumps(fetch_summary, default=str)
+          if "OUT_OF_USAGE_CREDITS" in fetch_error_blob or "Usage quota has been reached" in fetch_error_blob:
+              warnings.append(
+                  "Odds API quota exhausted (OUT_OF_USAGE_CREDITS): all shared-key consumers are dark "
+                  "(VPS sharp fetch, auto_pick, locked-card refresh, CLV snapshot). "
+                  "Upgrade the plan or wait for the monthly reset; the anchor and autopicker cannot fetch until then."
+              )
+
           question_rows = []
           question_severities = {}
           for row in questions:
@@ -454,6 +485,9 @@ jobs:
           print(f"- Dashboard port: `{os.environ.get('PORT', 'unknown')}`")
           print(f"- Sharp fetch status: `{fetch_status}`")
           print(f"- Sharp fetch health: `{fetch_health or 'unknown'}`")
+          evidence_freshness = dashboard.get("evidence_freshness") if isinstance(dashboard.get("evidence_freshness"), dict) else {}
+          print(f"- Live loop status: `{evidence_freshness.get('live_loop_status', 'unknown')}` (heartbeat age: `{fmt_num(evidence_freshness.get('live_heartbeat_age_seconds'))}`s)")
+          print(f"- Sharp fetch summary age: `{fmt_num(fetch_age_minutes, missing='unknown')}` min (generated `{fetch_summary.get('generated_at_utc', 'unknown')}`)")
           print(f"- Odds API requests remaining: `{fmt_num(requests_remaining)}`")
           print(f"- Sharp rows written/fetched: `{fmt_num(fetch_rows)}`")
           print(f"- WO-31 coverage: fetched=`{total_fetched}`, mapped=`{total_mapped}`, join_rate=`{fmt_num(join_rate, missing='n/a')}`, zero_join_flags=`{flagged}`")

@@ -242,3 +242,19 @@ def test_submit_loop_retries_once_on_transient_login_bounce() -> None:
     after = retry_block[1][:600]
     assert "asyncio.sleep" in after
     assert "await submit_pick" in after
+
+
+def test_no_pick_branch_keeps_verified_existing_pick_when_odds_feed_is_dead() -> None:
+    """OUT_OF_USAGE_CREDITS (2026-07-08) failed the run while every saved pick
+    was verified correct on SuperBru. When no live odds are available the loop
+    must READ the row (dry-run probe) and treat a fully saved pick as success
+    instead of no_pick_available; a genuinely missing pick stays red."""
+    import inspect
+
+    module = load_module()
+
+    source = inspect.getsource(module.base)
+    assert "kept_existing_pick_no_live_odds" in source
+    assert "current_row_values" in source
+    # The success counter must include the kept-pick outcome.
+    assert '{"already_current", "kept_existing_pick_no_live_odds"}' in source

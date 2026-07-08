@@ -1635,7 +1635,43 @@ async def run(args: argparse.Namespace) -> dict[str, Any]:
             pick = card_pick
             entry["pick_source"] = "committed_card_fallback"
         else:
-            entry["status"] = "no_pick_available"
+            # A dead odds feed must not paint the run red when SuperBru already
+            # holds a saved pick (2026-07-08: OUT_OF_USAGE_CREDITS failed the run
+            # while every saved pick was verified correct). Live-only governance
+            # still refuses stale card scores; this only READS the row.
+            existing_pick = ""
+            if not args.dry_run:
+                try:
+                    probe_args = argparse.Namespace(**vars(args))
+                    probe_args.dry_run = True
+                    probe = await submit_pick(
+                        probe_args, entry["home_team"], entry["away_team"], "0-0", out_dir
+                    )
+                    values = [str(v).strip() for v in (probe.get("current_row_values") or [])]
+                    if len(values) >= 2 and values[0] and values[1]:
+                        existing_pick = f"{values[0]}-{values[1]}"
+                    entry["existing_pick_probe"] = {
+                        "status": probe.get("status"),
+                        "current_row_values": probe.get("current_row_values"),
+                    }
+                except Exception as exc:
+                    entry["existing_pick_probe"] = {"status": "probe_failed", "error": str(exc)}
+            if existing_pick:
+                entry["status"] = "kept_existing_pick_no_live_odds"
+                entry["selected_pick"] = existing_pick
+                entry["submit_result"] = {
+                    "status": "kept_existing_pick_no_live_odds",
+                    "home_team": entry.get("home_team"),
+                    "away_team": entry.get("away_team"),
+                    "new_pick": existing_pick,
+                    "dry_run": False,
+                    "reason": (
+                        "No live odds available, but SuperBru already holds this saved pick; "
+                        "nothing needed submitting."
+                    ),
+                }
+            else:
+                entry["status"] = "no_pick_available"
             submitted_results.append(entry)
             continue
 
@@ -1680,7 +1716,11 @@ async def run(args: argparse.Namespace) -> dict[str, Any]:
         submitted_results.append(entry)
 
     submitted_count = sum(1 for item in submitted_results if item.get("status") == "submitted")
-    already_current_count = sum(1 for item in submitted_results if item.get("status") == "already_current")
+    already_current_count = sum(
+        1
+        for item in submitted_results
+        if item.get("status") in {"already_current", "kept_existing_pick_no_live_odds"}
+    )
     successful_count = submitted_count + already_current_count
     dry_run_count = sum(1 for item in submitted_results if item.get("status") == "dry_run")
     no_pick_count = sum(1 for item in submitted_results if item.get("status") == "no_pick_available")

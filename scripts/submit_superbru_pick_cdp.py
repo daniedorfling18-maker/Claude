@@ -659,6 +659,7 @@ async def run(args: argparse.Namespace) -> dict[str, Any]:
             result["status"] = "dry_run"
             result["home_selector"] = home_sel
             result["away_selector"] = away_sel
+            result["current_row_values"] = score_values_from_row(row_info)
             await browser.close()
             return result
 

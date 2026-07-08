@@ -155,17 +155,34 @@ FIND_ROW_JS = r"""
     };
   }
 
-  const inputs = Array.from(matchRow.querySelectorAll('input, select')).map(el => ({
-    tag: el.tagName.toLowerCase(),
-    type: el.type || '',
-    name: el.name || '',
-    id: el.id || '',
-    className: el.className || '',
-    placeholder: el.placeholder || '',
-    value: el.value || '',
-    visible: el.offsetParent !== null,
-    maxlength: el.maxLength || ''
-  }));
+  const inputs = Array.from(matchRow.querySelectorAll('input, select')).map(el => {
+    // Build a document-unique selector. A bare class like .soccer-left-score
+    // matches the FIRST such input in the DOM, which belongs to a different
+    // game whenever several pickers share the page (observed 2026-07-08:
+    // Spain-Belgium kept filling France-Morocco's inputs, game 97 vs 98).
+    const gameNode = el.closest('[data-bru-game-id]');
+    const gameId = gameNode ? String(gameNode.getAttribute('data-bru-game-id')) : '';
+    let docSelector = '';
+    const cls = el.className || '';
+    if (gameId && /soccer-(left|right)-score/.test(cls)) {
+      const side = cls.includes('soccer-left-score') ? 'left' : 'right';
+      const candidate = '[data-bru-game-id="' + gameId + '"] input.soccer-' + side + '-score';
+      if (document.querySelectorAll(candidate).length === 1) docSelector = candidate;
+    }
+    return {
+      tag: el.tagName.toLowerCase(),
+      type: el.type || '',
+      name: el.name || '',
+      id: el.id || '',
+      className: cls,
+      placeholder: el.placeholder || '',
+      value: el.value || '',
+      visible: el.offsetParent !== null,
+      maxlength: el.maxLength || '',
+      gameId,
+      docSelector
+    };
+  });
 
   const buttons = Array.from(matchRow.querySelectorAll('button, input[type=submit], a[class*=save], a[class*=submit]')).map(b => ({
     tag: b.tagName.toLowerCase(),
@@ -340,6 +357,12 @@ def parse_pick(pick: str) -> tuple[str, str]:
 
 
 def selector_for_input(inp: dict[str, Any], position: int = 0) -> str | None:
+    # The row finder builds a document-unique, game-scoped selector when it can.
+    # Bare class selectors below hit the FIRST matching input in the DOM, which
+    # is a DIFFERENT game whenever several pickers share the page (2026-07-08:
+    # Spain-Belgium silently filled France-Morocco's inputs for 8 runs).
+    if inp.get("docSelector"):
+        return str(inp["docSelector"])
     if inp.get("id"):
         return f"#{inp['id']}"
     if inp.get("name"):

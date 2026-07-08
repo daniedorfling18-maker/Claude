@@ -225,3 +225,20 @@ def test_extract_match_js_scopes_reads_to_the_requested_game() -> None:
     assert "soccer-picker" in js
     assert "data-bru-game-id" in js
     assert "replace(/^game/" in js
+
+
+def test_submit_loop_retries_once_on_transient_login_bounce() -> None:
+    """SuperBru bounced the third fresh headless login inside one run back to
+    the login page (2026-07-08, Spain v Belgium), failing the whole run at
+    2-of-3 verified. A single paused retry absorbs the rate-limit flake while
+    a real credential problem still fails loudly on the retry."""
+    import inspect
+
+    module = load_module()
+
+    source = inspect.getsource(module.base)
+    retry_block = source.split('submit_result.get("status") == "login_failed"', 1)
+    assert len(retry_block) == 2, "submit loop must check for login_failed"
+    after = retry_block[1][:600]
+    assert "asyncio.sleep" in after
+    assert "await submit_pick" in after

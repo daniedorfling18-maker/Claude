@@ -1664,6 +1664,14 @@ async def run(args: argparse.Namespace) -> dict[str, Any]:
 
         try:
             submit_result = await submit_pick(args, entry["home_team"], entry["away_team"], pick, out_dir)
+            if submit_result.get("status") == "login_failed":
+                # Each match logs in on a fresh headless session; SuperBru bounced
+                # the third login inside one run back to the login page
+                # (2026-07-08). One paused retry absorbs that rate-limit flake;
+                # a real credential problem still fails loudly on the retry.
+                entry["login_retry_used"] = True
+                await asyncio.sleep(45)
+                submit_result = await submit_pick(args, entry["home_team"], entry["away_team"], pick, out_dir)
             entry["status"] = submit_result.get("status", "unknown")
             entry["submit_result"] = submit_result
         except Exception as exc:

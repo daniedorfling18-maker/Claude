@@ -227,8 +227,10 @@ sharp_odds_fetch:
     markets: h2h
   - key: basketball_nba_championship_winner
     markets: outrights
-  - key: baseball_mlb_world_series_winner
-    markets: outrights
+  # 2026-07-08: baseball_mlb_world_series_winner/outrights removed per the
+  # standing WO-31 flag - it mapped ZERO Polymarket tokens across the whole
+  # flag window while spending ~2 credits (eu+uk) every fetch cycle. Restore
+  # only after an MLB anchor mapping lane exists (WO-32 candidate).
   regions: eu,uk                 # Pinnacle is in eu; Betfair Exchange in uk/eu
   markets: h2h
   validate_sports: true

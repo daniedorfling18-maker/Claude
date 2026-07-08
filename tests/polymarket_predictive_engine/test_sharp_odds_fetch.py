@@ -524,7 +524,10 @@ def test_example_config_fetches_only_polymarket_mappable_markets():
     assert by_key.get("soccer_fifa_world_cup_winner") == "outrights"
     assert by_key.get("soccer_fifa_world_cup") == "h2h"  # feeds WO-29 composite advance
     assert by_key.get("basketball_nba_championship_winner") == "outrights"
-    assert by_key.get("baseball_mlb_world_series_winner") == "outrights"
+    # WO-31 (closed 2026-07-08): MLB world-series outrights mapped ZERO Polymarket
+    # tokens across the whole flag window while spending ~2 credits per cycle.
+    # It must stay out until an MLB anchor mapping lane exists (WO-32 candidate).
+    assert "baseball_mlb_world_series_winner" not in by_key
 
     # Per-game h2h for these maps to nothing on Polymarket - must not be fetched.
     for removed in ("basketball_nba", "baseball_mlb", "mma_mixed_martial_arts", "tennis_atp", "tennis_wta"):

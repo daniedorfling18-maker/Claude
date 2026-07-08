@@ -22,7 +22,33 @@ permissions:
   contents: write
 
 jobs:
+  # 2026-07-08: preflight the quota on the free /v4/sports endpoint so an
+  # exhausted key produces a clean green skip (with a notice) instead of a red
+  # failure on every slot. Proof-health carries the quota alarm.
+  preflight:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      have_credits: ${{ steps.quota.outputs.have_credits }}
+    steps:
+      - name: Check Odds API quota via free sports endpoint
+        id: quota
+        env:
+          THE_ODDS_API_KEY: ${{ secrets.THE_ODDS_API_KEY }}
+        run: |
+          set -euo pipefail
+          remaining=$(curl -fsS -D - -o /dev/null "https://api.the-odds-api.com/v4/sports/?apiKey=${THE_ODDS_API_KEY}" | tr -d '\r' | awk -F': ' 'tolower($1)=="x-requests-remaining" {print $2}')
+          echo "x-requests-remaining=${remaining:-unknown}"
+          if awk "BEGIN{exit !((${remaining:-0}) > 0)}"; then
+            echo "have_credits=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "have_credits=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::Odds API quota exhausted (x-requests-remaining=${remaining:-0}); skipping the CLV snapshot until credits are available."
+          fi
+
   snapshot:
+    needs: preflight
+    if: needs.preflight.outputs.have_credits == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:

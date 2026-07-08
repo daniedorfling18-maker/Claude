@@ -43,11 +43,27 @@ def _team_js_body(find_row: bool) -> str:
   if (!matchRow) {
     return {found: false, reason: 'no input-bearing element contains both team names or safe aliases', homeVariants, awayVariants};
   }
-  const inputs = Array.from(matchRow.querySelectorAll('input, select')).map(el => ({
-    tag: el.tagName.toLowerCase(), type: el.type || '', name: el.name || '', id: el.id || '',
-    className: el.className || '', placeholder: el.placeholder || '', value: el.value || '',
-    visible: el.offsetParent !== null, maxlength: el.maxLength || ''
-  }));
+  const inputs = Array.from(matchRow.querySelectorAll('input, select')).map(el => {
+    // Document-unique selector: a bare class like .soccer-left-score matches the
+    // FIRST such input in the DOM, which is a DIFFERENT game whenever several
+    // pickers share the page (2026-07-08: Spain-Belgium filled France-Morocco's
+    // inputs, game 97 vs 98, so the real pick never reached the server).
+    const gameNode = el.closest('[data-bru-game-id]');
+    const gameId = gameNode ? String(gameNode.getAttribute('data-bru-game-id')) : '';
+    let docSelector = '';
+    const cls = el.className || '';
+    if (gameId && /soccer-(left|right)-score/.test(cls)) {
+      const side = cls.includes('soccer-left-score') ? 'left' : 'right';
+      const candidate = '[data-bru-game-id="' + gameId + '"] input.soccer-' + side + '-score';
+      if (document.querySelectorAll(candidate).length === 1) docSelector = candidate;
+    }
+    return {
+      tag: el.tagName.toLowerCase(), type: el.type || '', name: el.name || '', id: el.id || '',
+      className: cls, placeholder: el.placeholder || '', value: el.value || '',
+      visible: el.offsetParent !== null, maxlength: el.maxLength || '',
+      gameId, docSelector
+    };
+  });
   const buttons = Array.from(matchRow.querySelectorAll('button, input[type=submit], a[class*=save], a[class*=submit]')).map(b => ({
     tag: b.tagName.toLowerCase(), type: b.type || '', text: (b.innerText || b.value || b.textContent || '').trim().slice(0, 80),
     id: b.id || '', className: b.className || ''

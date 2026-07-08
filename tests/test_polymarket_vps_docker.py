@@ -149,3 +149,14 @@ def test_vps_deploy_workflow_explains_unauthorized_public_key():
     assert "VPS_SSH_OK" in text
     assert "/home/${PM_VPS_USER}/.ssh/authorized_keys" in text
     assert "The deploy private key is valid, but the VPS rejected it" in text
+
+
+def test_vps_governance_refresh_workflow_survives_slow_refresh():
+    """The 2026-07-07 19:57 UTC scheduled run was cancelled at a 20-minute job cap while the
+    VPS was busy, silently doubling the model re-score gap to ~12h. The remote command must
+    time out (exit 124, logs preserved) before the job cap cancels the whole run."""
+    text = (ROOT / ".github" / "workflows" / "polymarket-vps-governance-refresh.yml").read_text(encoding="utf-8")
+
+    assert "timeout-minutes: 30" in text
+    assert "sudo timeout 1500 docker compose" in text
+    assert "refresh-governance failed or exceeded 25 minutes" in text

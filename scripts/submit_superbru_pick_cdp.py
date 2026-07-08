@@ -203,6 +203,49 @@ SET_INPUT_JS = r"""
 }
 """
 
+# JS: force SuperBru's own soccer save path and wait for its server confirmation.
+#
+# Root cause of the 2026-07-07/08 Spain-Belgium failures: SuperBru saves soccer
+# picks from a jQuery change handler that initSoccer() binds DIRECTLY to the
+# inputs present at bind time (no event delegation). Setting a value
+# programmatically fires "change" into a void whenever that binding is missing,
+# so nothing ever calls ajax/save_pick.php and the pick silently evaporates on
+# reload. Instead of hoping the handler exists, call the exact function it
+# would call — brupicks.soccer.processPick — and then poll the state that
+# savePick's success callback updates ($("#soccer-picker<id>").data("bru-existing")
+# becomes "<left>-<right>") until the server has really accepted the pick.
+# processPick validates and dedupes first, so this is a no-op when the pick is
+# already saved.
+FORCE_SAVE_AND_CONFIRM_JS = r"""
+async ([selector, homeGoals, awayGoals, timeoutMs]) => {
+  const el = document.querySelector(selector);
+  if (!el) return { supported: false, reason: 'input not found: ' + selector };
+  const gameNode = el.closest('[data-bru-game-id]');
+  const gameId = gameNode ? parseInt(gameNode.getAttribute('data-bru-game-id'), 10) : NaN;
+  const expected = parseInt(homeGoals, 10) + '-' + parseInt(awayGoals, 10);
+  const jq = window.jQuery || window.$;
+  const bp = window.brupicks;
+  if (!Number.isFinite(gameId) || !jq || !bp || !bp.soccer || typeof bp.soccer.processPick !== 'function') {
+    return { supported: false, reason: 'brupicks soccer save API unavailable', gameId: String(gameId) };
+  }
+  const picker = jq('#soccer-picker' + gameId);
+  const readExisting = () => String(picker.data('bru-existing') || '');
+  const readStatus = () => ((jq('#picker' + gameId + ' .pick-status').text() || '').replace(/\s+/g, ' ').trim());
+  if (readExisting() === expected) {
+    return { supported: true, confirmed: true, alreadySaved: true, gameId, expected, existing: expected, statusText: readStatus() };
+  }
+  bp.soccer.processPick(gameId, picker.data('bru-max-soccer-pick'));
+  const deadline = Date.now() + (parseInt(timeoutMs, 10) || 15000);
+  while (Date.now() < deadline) {
+    if (readExisting() === expected) {
+      return { supported: true, confirmed: true, gameId, expected, existing: readExisting(), statusText: readStatus() };
+    }
+    await new Promise(resolve => setTimeout(resolve, 500));
+  }
+  return { supported: true, confirmed: false, gameId, expected, existing: readExisting(), statusText: readStatus() };
+}
+"""
+
 # JS: click a button/element by CSS selector
 CLICK_JS = r"""
 (selector) => {
@@ -635,12 +678,27 @@ async def run(args: argparse.Namespace) -> dict[str, Any]:
                     submitted = True
                     break
 
-        if not submitted:
-            # SuperBru auto-saves on blur/change — no submit button is expected
-            await page.wait_for_timeout(3000)
-            print("Auto-save: no submit button needed (SuperBru saves on blur/change).")
+        # Do not trust the change-handler auto-save: drive SuperBru's own
+        # processPick -> savePick path and wait for the server-confirmed state.
+        confirmation = await page.evaluate(
+            FORCE_SAVE_AND_CONFIRM_JS, [home_sel, str(home_goals), str(away_goals), 15000]
+        )
+        result["save_confirmation"] = confirmation
+        if confirmation.get("supported"):
+            if confirmation.get("confirmed"):
+                print(f"  SuperBru confirmed save: existing={confirmation.get('existing')!r}")
+            else:
+                print(
+                    "  SuperBru did NOT confirm the save within 15s: "
+                    f"existing={confirmation.get('existing')!r} status={confirmation.get('statusText')!r}"
+                )
         else:
-            await page.wait_for_timeout(2000)
+            print(f"  SuperBru soccer save API unavailable ({confirmation.get('reason')}); relying on auto-save.")
+            if not submitted:
+                await page.wait_for_timeout(3000)
+                print("Auto-save: no submit button needed (SuperBru saves on blur/change).")
+            else:
+                await page.wait_for_timeout(2000)
 
         verification = await verify_saved_pick(
             page,

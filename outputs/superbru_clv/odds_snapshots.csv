@@ -153,3 +153,7 @@ snapshot_at_utc,commence_time,home_team,away_team,match_key,bookmaker,p_home,p_d
 2026-07-07T21:55:08Z,2026-07-09T20:00:00Z,France,Morocco,france|morocco|2026-07-09,pinnacle,0.605582,0.244891,0.149527
 2026-07-07T21:55:08Z,2026-07-10T19:00:00Z,Spain,Belgium,spain|belgium|2026-07-10,pinnacle,0.601821,0.236121,0.162058
 2026-07-07T21:55:08Z,2026-07-11T21:00:00Z,Norway,England,norway|england|2026-07-11,pinnacle,0.223655,0.253193,0.523152
+2026-07-08T03:56:10Z,2026-07-09T20:00:00Z,France,Morocco,france|morocco|2026-07-09,pinnacle,0.612557,0.24452,0.142923
+2026-07-08T03:56:10Z,2026-07-10T19:00:00Z,Spain,Belgium,spain|belgium|2026-07-10,pinnacle,0.597678,0.237605,0.164717
+2026-07-08T03:56:10Z,2026-07-11T21:00:00Z,Norway,England,norway|england|2026-07-11,pinnacle,0.224141,0.255096,0.520764
+2026-07-08T03:56:10Z,2026-07-12T01:00:00Z,Argentina,Switzerland,argentina|switzerland|2026-07-12,pinnacle,0.56247,0.270527,0.167004

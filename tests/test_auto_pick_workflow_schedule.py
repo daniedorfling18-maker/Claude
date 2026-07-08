@@ -8,12 +8,31 @@ VPS_COMPOSE = ROOT / "docker-compose.vps-paper.yml"
 VPS_WATCHDOG = ROOT / "scripts" / "run_superbru_auto_pick_watchdog.sh"
 
 
-def test_auto_pick_watchdog_cron_uses_github_safe_minute_tokens() -> None:
+def test_auto_pick_github_schedule_is_a_thin_safety_net_not_a_watchdog() -> None:
+    """2026-07-08: a 15-minute GitHub cron burned ~250-330 billed Actions
+    minutes/day, exhausted the monthly quota, and GitHub then BLOCKED all
+    scheduled runs. The VPS watchdog container is the primary 15-minute lane
+    (free, on our own server); the GitHub schedule must stay at a handful of
+    daily safety runs at most."""
     text = WORKFLOW.read_text(encoding="utf-8")
     crons = re.findall(r"cron:\s*'([^']+)'", text)
 
-    assert "7,22,37,52 14-23 4-19 7 *" in crons
-    assert "7,22,37,52 0-3 5-20 7 *" in crons
+    assert crons, "auto_pick must keep a safety-net schedule"
+    runs_per_day = 0
+    for cron in crons:
+        minute_field, hour_field = cron.split()[:2]
+        minutes = len(minute_field.split(","))
+        hours = 0
+        for token in hour_field.split(","):
+            if "-" in token:
+                start, end = token.split("-")
+                hours += int(end) - int(start) + 1
+            elif token == "*":
+                hours += 24
+            else:
+                hours += 1
+        runs_per_day += minutes * hours
+    assert runs_per_day <= 4, f"GitHub auto-pick schedule too hot: ~{runs_per_day} runs/day burns paid Actions minutes"
 
     minute_fields = [cron.split()[0] for cron in crons]
     assert all(not token.startswith("0") or token == "0" for field in minute_fields for token in field.split(","))

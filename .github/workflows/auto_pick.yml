@@ -12,18 +12,15 @@ on:
         required: false
         default: 'true'
   schedule:
-    # Match-slot guardrails from 1 July onward. Times are UTC.
-    # Scheduled runs use a wider safety window below so GitHub scheduler delays
-    # or stale live-page scans cannot miss a card-timed fixture.
-    - cron: '35 0,15,19,23 1 7 *'
-    - cron: '35 18,22 2 7 *'
-    - cron: '35 2,17,21 3 7 *'
-    # From 4 July onward use a staggered watchdog across active match windows.
-    # The script only spends odds credits when a locked-card/live fixture is due,
-    # so broad no-match runs are cheap. Staggering gives us resilience against
-    # GitHub scheduler delays/drops without clustering on the top of the hour.
-    - cron: '7,22,37,52 14-23 4-19 7 *'
-    - cron: '7,22,37,52 0-3 5-20 7 *'
+    # 2026-07-08: the 15-minute cadence here burned ~250-330 billed Actions
+    # minutes per DAY on this private repo and exhausted the monthly quota,
+    # which then BLOCKED all scheduled runs. The VPS watchdog container
+    # (scripts/run_superbru_auto_pick_watchdog.sh) already runs the identical
+    # submitter every 15 minutes for free on our own server - it is the
+    # primary lane. This schedule is only a thin safety net in case the VPS
+    # is down: two runs/day ahead of the typical 19:00-01:00 UTC kickoffs.
+    - cron: '7 16 4-19 7 *'
+    - cron: '7 21 4-19 7 *'
 
 permissions:
   contents: read

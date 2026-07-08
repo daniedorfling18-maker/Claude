@@ -63,6 +63,7 @@ locked_at_utc,commence_time,home_team,away_team,locked_pick,pick_outcome,match_k
 2026-07-06T17:13:00Z,2026-07-07T00:00:00Z,United States,Belgium,2-1,home,united states|belgium|2026-07-07
 2026-07-07T09:59:19Z,2026-07-07T16:00:00Z,Argentina,Egypt,2-0,home,argentina|egypt|2026-07-07
 2026-07-07T16:40:40Z,2026-07-07T20:00:00Z,Switzerland,Colombia,0-2,away,switzerland|colombia|2026-07-07
-2026-07-07T16:40:40Z,2026-07-09T20:00:00Z,France,Morocco,2-0,home,france|morocco|2026-07-09
-2026-07-07T16:40:40Z,2026-07-10T19:00:00Z,Spain,Belgium,2-0,home,spain|belgium|2026-07-10
-2026-07-07T16:40:40Z,2026-07-11T21:00:00Z,Norway,England,1-2,away,norway|england|2026-07-11
+2026-07-08T08:43:23Z,2026-07-09T20:00:00Z,France,Morocco,2-0,home,france|morocco|2026-07-09
+2026-07-08T08:43:23Z,2026-07-10T19:00:00Z,Spain,Belgium,2-0,home,spain|belgium|2026-07-10
+2026-07-08T08:43:23Z,2026-07-11T21:00:00Z,Norway,England,0-2,away,norway|england|2026-07-11
+2026-07-08T08:43:23Z,2026-07-12T01:00:00Z,Argentina,Switzerland,2-0,home,argentina|switzerland|2026-07-12

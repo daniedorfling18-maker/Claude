@@ -1,61 +1,143 @@
 {
-  "generated_at_utc": "2026-07-07T16:40:35.746516+00:00",
+  "generated_at_utc": "2026-07-08T08:43:18.860011+00:00",
   "leader_player": "Danie",
   "final_policy": "raw EV pick unless base MC, stress test and high-N confirmation all approve the same switch",
-  "accepted_policy_switches": [],
+  "accepted_policy_switches": [
+    {
+      "commence_time": "2026-07-11T21:00:00Z",
+      "home_team": "Norway",
+      "away_team": "England",
+      "raw_pick": "1-2",
+      "candidate_pick": "0-2",
+      "raw_ev_full_matrix": 0.84346,
+      "candidate_ev_full_matrix": 0.836004,
+      "ev_loss": 0.007456,
+      "baseline_p_finish_first": 0.279396,
+      "candidate_p_finish_first": 0.310736,
+      "candidate_p_finish_first_or_tied": 0.77944,
+      "delta_p_finish_first": 0.03134,
+      "paired_se": 0.000455,
+      "z_score": 68.905,
+      "risk_tier": "high",
+      "confidence_tier": "fragile",
+      "passes_hard_rule": true,
+      "reject_reasons": "",
+      "stress_support": {
+        "home_team": "Norway",
+        "away_team": "England",
+        "raw_pick": "1-2",
+        "candidate_pick": "0-2",
+        "scenarios_tested": 11,
+        "scenarios_passed": 11,
+        "scenarios_positive_delta": 11,
+        "mean_delta_p_finish_first": 0.0311990909090909,
+        "min_delta_p_finish_first": 0.02252,
+        "max_delta_p_finish_first": 0.03936,
+        "mean_ev_loss": 0.0074906363636363,
+        "max_ev_loss": 0.01527,
+        "mean_z_score": 30.69172727272727,
+        "pass_rate": 1.0,
+        "positive_delta_rate": 1.0,
+        "robust_switch": true
+      },
+      "policy": "accepted because base MC, stress test and high-N confirmation all agree"
+    }
+  ],
   "rejected_policy_switches": [],
   "summaries": {
     "base_mc": {
       "simulations": 100000,
       "leader_player": "Danie",
-      "leader_start_points": 102.0,
+      "leader_start_points": 103.0,
       "chasers": [
         "Ivan Prinsloo",
         "Lusse",
+        "Ettiene",
         "Chapman12",
         "Leonard",
-        "Ettiene",
+        "Dheben",
         "Joe",
         "rob87",
-        "Bijal",
-        "Dheben"
+        "Bijal"
       ],
-      "baseline_p_finish_first": 0.75569,
-      "baseline_p_finish_first_or_tied": 0.80647,
-      "final_p_finish_first": 0.75569,
-      "final_p_finish_first_or_tied": 0.80647,
-      "delta_p_finish_first": 0.0,
-      "accepted_switches": [],
-      "total_ev_loss": 0.0
+      "baseline_p_finish_first": 0.27883,
+      "baseline_p_finish_first_or_tied": 0.8202,
+      "final_p_finish_first": 0.31045,
+      "final_p_finish_first_or_tied": 0.78124,
+      "delta_p_finish_first": 0.03162,
+      "accepted_switches": [
+        {
+          "commence_time": "2026-07-11T21:00:00Z",
+          "home_team": "Norway",
+          "away_team": "England",
+          "raw_pick": "1-2",
+          "candidate_pick": "0-2",
+          "raw_ev_full_matrix": 0.84346,
+          "candidate_ev_full_matrix": 0.836004,
+          "ev_loss": 0.007456,
+          "baseline_p_finish_first": 0.27883,
+          "candidate_p_finish_first": 0.31045,
+          "candidate_p_finish_first_or_tied": 0.78124,
+          "delta_p_finish_first": 0.03162,
+          "paired_se": 0.001026,
+          "z_score": 30.823,
+          "risk_tier": "high",
+          "confidence_tier": "fragile",
+          "passes_hard_rule": true,
+          "reject_reasons": ""
+        }
+      ],
+      "total_ev_loss": 0.007456
     },
     "confirmation_500k": {
       "simulations": 500000,
       "leader_player": "Danie",
-      "leader_start_points": 102.0,
+      "leader_start_points": 103.0,
       "chasers": [
         "Ivan Prinsloo",
         "Lusse",
+        "Ettiene",
         "Chapman12",
         "Leonard",
-        "Ettiene",
+        "Dheben",
         "Joe",
         "rob87",
-        "Bijal",
-        "Dheben"
+        "Bijal"
       ],
-      "baseline_p_finish_first": 0.755478,
-      "baseline_p_finish_first_or_tied": 0.804682,
-      "final_p_finish_first": 0.755478,
-      "final_p_finish_first_or_tied": 0.804682,
-      "delta_p_finish_first": 0.0,
-      "accepted_switches": [],
-      "total_ev_loss": 0.0
+      "baseline_p_finish_first": 0.279396,
+      "baseline_p_finish_first_or_tied": 0.818254,
+      "final_p_finish_first": 0.310736,
+      "final_p_finish_first_or_tied": 0.77944,
+      "delta_p_finish_first": 0.03134,
+      "accepted_switches": [
+        {
+          "commence_time": "2026-07-11T21:00:00Z",
+          "home_team": "Norway",
+          "away_team": "England",
+          "raw_pick": "1-2",
+          "candidate_pick": "0-2",
+          "raw_ev_full_matrix": 0.84346,
+          "candidate_ev_full_matrix": 0.836004,
+          "ev_loss": 0.007456,
+          "baseline_p_finish_first": 0.279396,
+          "candidate_p_finish_first": 0.310736,
+          "candidate_p_finish_first_or_tied": 0.77944,
+          "delta_p_finish_first": 0.03134,
+          "paired_se": 0.000455,
+          "z_score": 68.905,
+          "risk_tier": "high",
+          "confidence_tier": "fragile",
+          "passes_hard_rule": true,
+          "reject_reasons": ""
+        }
+      ],
+      "total_ev_loss": 0.007456
     }
   },
   "stress": {
     "scenario_count": 11,
     "support_threshold": 0.7,
-    "robust_switch_count": 0
+    "robust_switch_count": 1
   },
   "quality_gates": [
     {
@@ -96,7 +178,7 @@
     {
       "gate": "predictions_non_empty",
       "passed": true,
-      "row_count": 5
+      "row_count": 4
     }
   ],
   "outputs": {

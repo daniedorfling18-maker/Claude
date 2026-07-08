@@ -2,293 +2,586 @@
   "simulations_per_scenario": 100000,
   "scenario_count": 11,
   "support_threshold": 0.7,
-  "robust_switches": [],
+  "robust_switches": [
+    {
+      "home_team": "Norway",
+      "away_team": "England",
+      "raw_pick": "1-2",
+      "candidate_pick": "0-2",
+      "scenarios_tested": 11,
+      "scenarios_passed": 11,
+      "scenarios_positive_delta": 11,
+      "mean_delta_p_finish_first": 0.03119909090909091,
+      "min_delta_p_finish_first": 0.02252,
+      "max_delta_p_finish_first": 0.03936,
+      "mean_ev_loss": 0.007490636363636363,
+      "max_ev_loss": 0.01527,
+      "mean_z_score": 30.69172727272727,
+      "pass_rate": 1.0,
+      "positive_delta_rate": 1.0,
+      "robust_switch": true
+    }
+  ],
   "scenario_summaries": [
     {
       "simulations": 100000,
       "leader_player": "Danie",
-      "leader_start_points": 102.0,
+      "leader_start_points": 103.0,
       "chasers": [
         "Ivan Prinsloo",
         "Lusse",
+        "Ettiene",
         "Chapman12",
         "Leonard",
-        "Ettiene",
+        "Dheben",
         "Joe",
         "rob87",
-        "Bijal",
-        "Dheben"
+        "Bijal"
       ],
-      "baseline_p_finish_first": 0.75569,
-      "baseline_p_finish_first_or_tied": 0.80647,
-      "final_p_finish_first": 0.75569,
-      "final_p_finish_first_or_tied": 0.80647,
-      "delta_p_finish_first": 0.0,
-      "accepted_switches": [],
-      "total_ev_loss": 0.0,
+      "baseline_p_finish_first": 0.27883,
+      "baseline_p_finish_first_or_tied": 0.8202,
+      "final_p_finish_first": 0.31045,
+      "final_p_finish_first_or_tied": 0.78124,
+      "delta_p_finish_first": 0.03162,
+      "accepted_switches": [
+        {
+          "commence_time": "2026-07-11T21:00:00Z",
+          "home_team": "Norway",
+          "away_team": "England",
+          "raw_pick": "1-2",
+          "candidate_pick": "0-2",
+          "raw_ev_full_matrix": 0.84346,
+          "candidate_ev_full_matrix": 0.836004,
+          "ev_loss": 0.007456,
+          "baseline_p_finish_first": 0.27883,
+          "candidate_p_finish_first": 0.31045,
+          "candidate_p_finish_first_or_tied": 0.78124,
+          "delta_p_finish_first": 0.03162,
+          "paired_se": 0.001026,
+          "z_score": 30.823,
+          "risk_tier": "high",
+          "confidence_tier": "fragile",
+          "passes_hard_rule": true,
+          "reject_reasons": ""
+        }
+      ],
+      "total_ev_loss": 0.007456,
       "scenario": "base",
       "scenario_description": "Current Monte Carlo assumptions.",
-      "accepted_switch_labels": []
+      "accepted_switch_labels": [
+        "Norway vs England: 1-2 -> 0-2"
+      ]
     },
     {
       "simulations": 100000,
       "leader_player": "Danie",
-      "leader_start_points": 102.0,
+      "leader_start_points": 103.0,
       "chasers": [
         "Ivan Prinsloo",
         "Lusse",
+        "Ettiene",
         "Chapman12",
         "Leonard",
-        "Ettiene",
+        "Dheben",
         "Joe",
         "rob87",
-        "Bijal",
-        "Dheben"
+        "Bijal"
       ],
-      "baseline_p_finish_first": 0.76953,
-      "baseline_p_finish_first_or_tied": 0.81782,
-      "final_p_finish_first": 0.76953,
-      "final_p_finish_first_or_tied": 0.81782,
-      "delta_p_finish_first": 0.0,
-      "accepted_switches": [],
-      "total_ev_loss": 0.0,
+      "baseline_p_finish_first": 0.25823,
+      "baseline_p_finish_first_or_tied": 0.83026,
+      "final_p_finish_first": 0.29759,
+      "final_p_finish_first_or_tied": 0.78544,
+      "delta_p_finish_first": 0.03936,
+      "accepted_switches": [
+        {
+          "commence_time": "2026-07-11T21:00:00Z",
+          "home_team": "Norway",
+          "away_team": "England",
+          "raw_pick": "1-2",
+          "candidate_pick": "0-2",
+          "raw_ev_full_matrix": 0.84346,
+          "candidate_ev_full_matrix": 0.836004,
+          "ev_loss": 0.007456,
+          "baseline_p_finish_first": 0.25823,
+          "candidate_p_finish_first": 0.29759,
+          "candidate_p_finish_first_or_tied": 0.78544,
+          "delta_p_finish_first": 0.03936,
+          "paired_se": 0.001029,
+          "z_score": 38.257,
+          "risk_tier": "high",
+          "confidence_tier": "fragile",
+          "passes_hard_rule": true,
+          "reject_reasons": ""
+        }
+      ],
+      "total_ev_loss": 0.007456,
       "scenario": "chasers_conservative",
       "scenario_description": "Chasers lean more towards raw, top1 and chalk picks.",
-      "accepted_switch_labels": []
+      "accepted_switch_labels": [
+        "Norway vs England: 1-2 -> 0-2"
+      ]
     },
     {
       "simulations": 100000,
       "leader_player": "Danie",
-      "leader_start_points": 102.0,
+      "leader_start_points": 103.0,
       "chasers": [
         "Ivan Prinsloo",
         "Lusse",
+        "Ettiene",
         "Chapman12",
         "Leonard",
-        "Ettiene",
+        "Dheben",
         "Joe",
         "rob87",
-        "Bijal",
-        "Dheben"
+        "Bijal"
       ],
-      "baseline_p_finish_first": 0.75047,
-      "baseline_p_finish_first_or_tied": 0.80087,
-      "final_p_finish_first": 0.75047,
-      "final_p_finish_first_or_tied": 0.80087,
-      "delta_p_finish_first": 0.0,
-      "accepted_switches": [],
-      "total_ev_loss": 0.0,
+      "baseline_p_finish_first": 0.29274,
+      "baseline_p_finish_first_or_tied": 0.80822,
+      "final_p_finish_first": 0.31526,
+      "final_p_finish_first_or_tied": 0.77813,
+      "delta_p_finish_first": 0.02252,
+      "accepted_switches": [
+        {
+          "commence_time": "2026-07-11T21:00:00Z",
+          "home_team": "Norway",
+          "away_team": "England",
+          "raw_pick": "1-2",
+          "candidate_pick": "0-2",
+          "raw_ev_full_matrix": 0.84346,
+          "candidate_ev_full_matrix": 0.836004,
+          "ev_loss": 0.007456,
+          "baseline_p_finish_first": 0.29274,
+          "candidate_p_finish_first": 0.31526,
+          "candidate_p_finish_first_or_tied": 0.77813,
+          "delta_p_finish_first": 0.02252,
+          "paired_se": 0.001016,
+          "z_score": 22.167,
+          "risk_tier": "high",
+          "confidence_tier": "fragile",
+          "passes_hard_rule": true,
+          "reject_reasons": ""
+        }
+      ],
+      "total_ev_loss": 0.007456,
       "scenario": "chasers_aggressive",
       "scenario_description": "Chasers chase exacts and differentials more aggressively.",
-      "accepted_switch_labels": []
+      "accepted_switch_labels": [
+        "Norway vs England: 1-2 -> 0-2"
+      ]
     },
     {
       "simulations": 100000,
       "leader_player": "Danie",
-      "leader_start_points": 102.0,
+      "leader_start_points": 103.0,
       "chasers": [
         "Ivan Prinsloo",
         "Lusse",
+        "Ettiene",
         "Chapman12",
         "Leonard",
-        "Ettiene",
+        "Dheben",
         "Joe",
         "rob87",
-        "Bijal",
-        "Dheben"
+        "Bijal"
       ],
-      "baseline_p_finish_first": 0.76489,
-      "baseline_p_finish_first_or_tied": 0.8142,
-      "final_p_finish_first": 0.76489,
-      "final_p_finish_first_or_tied": 0.8142,
-      "delta_p_finish_first": 0.0,
-      "accepted_switches": [],
-      "total_ev_loss": 0.0,
+      "baseline_p_finish_first": 0.26905,
+      "baseline_p_finish_first_or_tied": 0.82754,
+      "final_p_finish_first": 0.30485,
+      "final_p_finish_first_or_tied": 0.78625,
+      "delta_p_finish_first": 0.0358,
+      "accepted_switches": [
+        {
+          "commence_time": "2026-07-11T21:00:00Z",
+          "home_team": "Norway",
+          "away_team": "England",
+          "raw_pick": "1-2",
+          "candidate_pick": "0-2",
+          "raw_ev_full_matrix": 0.84346,
+          "candidate_ev_full_matrix": 0.836004,
+          "ev_loss": 0.007456,
+          "baseline_p_finish_first": 0.26905,
+          "candidate_p_finish_first": 0.30485,
+          "candidate_p_finish_first_or_tied": 0.78625,
+          "delta_p_finish_first": 0.0358,
+          "paired_se": 0.001027,
+          "z_score": 34.858,
+          "risk_tier": "high",
+          "confidence_tier": "fragile",
+          "passes_hard_rule": true,
+          "reject_reasons": ""
+        }
+      ],
+      "total_ev_loss": 0.007456,
       "scenario": "favourite_heavy",
       "scenario_description": "Chasers overweight favourite/chalk scorelines.",
-      "accepted_switch_labels": []
+      "accepted_switch_labels": [
+        "Norway vs England: 1-2 -> 0-2"
+      ]
     },
     {
       "simulations": 100000,
       "leader_player": "Danie",
-      "leader_start_points": 102.0,
+      "leader_start_points": 103.0,
       "chasers": [
         "Ivan Prinsloo",
         "Lusse",
+        "Ettiene",
         "Chapman12",
         "Leonard",
-        "Ettiene",
+        "Dheben",
         "Joe",
         "rob87",
-        "Bijal",
-        "Dheben"
+        "Bijal"
       ],
-      "baseline_p_finish_first": 0.7293,
-      "baseline_p_finish_first_or_tied": 0.78356,
-      "final_p_finish_first": 0.7293,
-      "final_p_finish_first_or_tied": 0.78356,
-      "delta_p_finish_first": 0.0,
-      "accepted_switches": [],
-      "total_ev_loss": 0.0,
+      "baseline_p_finish_first": 0.30335,
+      "baseline_p_finish_first_or_tied": 0.80149,
+      "final_p_finish_first": 0.33181,
+      "final_p_finish_first_or_tied": 0.76701,
+      "delta_p_finish_first": 0.02846,
+      "accepted_switches": [
+        {
+          "commence_time": "2026-07-11T21:00:00Z",
+          "home_team": "Norway",
+          "away_team": "England",
+          "raw_pick": "1-2",
+          "candidate_pick": "0-2",
+          "raw_ev_full_matrix": 0.84346,
+          "candidate_ev_full_matrix": 0.836004,
+          "ev_loss": 0.007456,
+          "baseline_p_finish_first": 0.30335,
+          "candidate_p_finish_first": 0.33181,
+          "candidate_p_finish_first_or_tied": 0.76701,
+          "delta_p_finish_first": 0.02846,
+          "paired_se": 0.000984,
+          "z_score": 28.916,
+          "risk_tier": "high",
+          "confidence_tier": "fragile",
+          "passes_hard_rule": true,
+          "reject_reasons": ""
+        }
+      ],
+      "total_ev_loss": 0.007456,
       "scenario": "exact_chase_heavy",
       "scenario_description": "Chasers overweight modal and top exact scorelines.",
-      "accepted_switch_labels": []
+      "accepted_switch_labels": [
+        "Norway vs England: 1-2 -> 0-2"
+      ]
     },
     {
       "simulations": 100000,
       "leader_player": "Danie",
-      "leader_start_points": 102.0,
+      "leader_start_points": 103.0,
       "chasers": [
         "Ivan Prinsloo",
         "Lusse",
+        "Ettiene",
         "Chapman12",
         "Leonard",
-        "Ettiene",
+        "Dheben",
         "Joe",
         "rob87",
-        "Bijal",
-        "Dheben"
+        "Bijal"
       ],
-      "baseline_p_finish_first": 0.75938,
-      "baseline_p_finish_first_or_tied": 0.81064,
-      "final_p_finish_first": 0.75938,
-      "final_p_finish_first_or_tied": 0.81064,
-      "delta_p_finish_first": 0.0,
-      "accepted_switches": [],
-      "total_ev_loss": 0.0,
+      "baseline_p_finish_first": 0.28221,
+      "baseline_p_finish_first_or_tied": 0.82496,
+      "final_p_finish_first": 0.32674,
+      "final_p_finish_first_or_tied": 0.73416,
+      "delta_p_finish_first": 0.04453,
+      "accepted_switches": [
+        {
+          "commence_time": "2026-07-10T19:00:00Z",
+          "home_team": "Spain",
+          "away_team": "Belgium",
+          "raw_pick": "2-0",
+          "candidate_pick": "2-1",
+          "raw_ev_full_matrix": 0.9674,
+          "candidate_ev_full_matrix": 0.945836,
+          "ev_loss": 0.021564,
+          "baseline_p_finish_first": 0.28221,
+          "candidate_p_finish_first": 0.30421,
+          "candidate_p_finish_first_or_tied": 0.76756,
+          "delta_p_finish_first": 0.022,
+          "paired_se": 0.001075,
+          "z_score": 20.464,
+          "risk_tier": "medium",
+          "confidence_tier": "medium",
+          "passes_hard_rule": true,
+          "reject_reasons": ""
+        },
+        {
+          "commence_time": "2026-07-11T21:00:00Z",
+          "home_team": "Norway",
+          "away_team": "England",
+          "raw_pick": "1-2",
+          "candidate_pick": "0-2",
+          "raw_ev_full_matrix": 0.848901,
+          "candidate_ev_full_matrix": 0.833631,
+          "ev_loss": 0.01527,
+          "baseline_p_finish_first": 0.30421,
+          "candidate_p_finish_first": 0.32674,
+          "candidate_p_finish_first_or_tied": 0.73416,
+          "delta_p_finish_first": 0.02253,
+          "paired_se": 0.000982,
+          "z_score": 22.951,
+          "risk_tier": "high",
+          "confidence_tier": "fragile",
+          "passes_hard_rule": true,
+          "reject_reasons": ""
+        }
+      ],
+      "total_ev_loss": 0.036834,
       "scenario": "goals_plus_5pct",
       "scenario_description": "Model total-goals expectation tilted 5 percent higher.",
-      "accepted_switch_labels": []
+      "accepted_switch_labels": [
+        "Spain vs Belgium: 2-0 -> 2-1",
+        "Norway vs England: 1-2 -> 0-2"
+      ]
     },
     {
       "simulations": 100000,
       "leader_player": "Danie",
-      "leader_start_points": 102.0,
+      "leader_start_points": 103.0,
       "chasers": [
         "Ivan Prinsloo",
         "Lusse",
+        "Ettiene",
         "Chapman12",
         "Leonard",
-        "Ettiene",
+        "Dheben",
         "Joe",
         "rob87",
-        "Bijal",
-        "Dheben"
+        "Bijal"
       ],
-      "baseline_p_finish_first": 0.75077,
-      "baseline_p_finish_first_or_tied": 0.79961,
-      "final_p_finish_first": 0.75077,
-      "final_p_finish_first_or_tied": 0.79961,
-      "delta_p_finish_first": 0.0,
-      "accepted_switches": [],
+      "baseline_p_finish_first": 0.27848,
+      "baseline_p_finish_first_or_tied": 0.8153,
+      "final_p_finish_first": 0.31297,
+      "final_p_finish_first_or_tied": 0.78022,
+      "delta_p_finish_first": 0.03449,
+      "accepted_switches": [
+        {
+          "commence_time": "2026-07-11T21:00:00Z",
+          "home_team": "Norway",
+          "away_team": "England",
+          "raw_pick": "1-2",
+          "candidate_pick": "0-2",
+          "raw_ev_full_matrix": 0.836001,
+          "candidate_ev_full_matrix": 0.836877,
+          "ev_loss": 0.0,
+          "baseline_p_finish_first": 0.27848,
+          "candidate_p_finish_first": 0.31297,
+          "candidate_p_finish_first_or_tied": 0.78022,
+          "delta_p_finish_first": 0.03449,
+          "paired_se": 0.001017,
+          "z_score": 33.911,
+          "risk_tier": "high",
+          "confidence_tier": "fragile",
+          "passes_hard_rule": true,
+          "reject_reasons": ""
+        }
+      ],
       "total_ev_loss": 0.0,
       "scenario": "goals_minus_5pct",
       "scenario_description": "Model total-goals expectation tilted 5 percent lower.",
-      "accepted_switch_labels": []
+      "accepted_switch_labels": [
+        "Norway vs England: 1-2 -> 0-2"
+      ]
     },
     {
       "simulations": 100000,
       "leader_player": "Danie",
-      "leader_start_points": 102.0,
+      "leader_start_points": 103.0,
       "chasers": [
         "Ivan Prinsloo",
         "Lusse",
+        "Ettiene",
         "Chapman12",
         "Leonard",
-        "Ettiene",
+        "Dheben",
         "Joe",
         "rob87",
-        "Bijal",
-        "Dheben"
+        "Bijal"
       ],
-      "baseline_p_finish_first": 0.75538,
-      "baseline_p_finish_first_or_tied": 0.80536,
-      "final_p_finish_first": 0.75538,
-      "final_p_finish_first_or_tied": 0.80536,
-      "delta_p_finish_first": 0.0,
-      "accepted_switches": [],
-      "total_ev_loss": 0.0,
+      "baseline_p_finish_first": 0.27849,
+      "baseline_p_finish_first_or_tied": 0.81412,
+      "final_p_finish_first": 0.31091,
+      "final_p_finish_first_or_tied": 0.77744,
+      "delta_p_finish_first": 0.03242,
+      "accepted_switches": [
+        {
+          "commence_time": "2026-07-11T21:00:00Z",
+          "home_team": "Norway",
+          "away_team": "England",
+          "raw_pick": "1-2",
+          "candidate_pick": "0-2",
+          "raw_ev_full_matrix": 0.845912,
+          "candidate_ev_full_matrix": 0.838924,
+          "ev_loss": 0.006989,
+          "baseline_p_finish_first": 0.27849,
+          "candidate_p_finish_first": 0.31091,
+          "candidate_p_finish_first_or_tied": 0.77744,
+          "delta_p_finish_first": 0.03242,
+          "paired_se": 0.001023,
+          "z_score": 31.679,
+          "risk_tier": "high",
+          "confidence_tier": "fragile",
+          "passes_hard_rule": true,
+          "reject_reasons": ""
+        }
+      ],
+      "total_ev_loss": 0.006989,
       "scenario": "rho_plus_0_02",
       "scenario_description": "Dixon-Coles rho increased by 0.02.",
-      "accepted_switch_labels": []
+      "accepted_switch_labels": [
+        "Norway vs England: 1-2 -> 0-2"
+      ]
     },
     {
       "simulations": 100000,
       "leader_player": "Danie",
-      "leader_start_points": 102.0,
+      "leader_start_points": 103.0,
       "chasers": [
         "Ivan Prinsloo",
         "Lusse",
+        "Ettiene",
         "Chapman12",
         "Leonard",
-        "Ettiene",
+        "Dheben",
         "Joe",
         "rob87",
-        "Bijal",
-        "Dheben"
+        "Bijal"
       ],
-      "baseline_p_finish_first": 0.7538,
-      "baseline_p_finish_first_or_tied": 0.80397,
-      "final_p_finish_first": 0.7538,
-      "final_p_finish_first_or_tied": 0.80397,
-      "delta_p_finish_first": 0.0,
-      "accepted_switches": [],
-      "total_ev_loss": 0.0,
+      "baseline_p_finish_first": 0.27997,
+      "baseline_p_finish_first_or_tied": 0.81826,
+      "final_p_finish_first": 0.31301,
+      "final_p_finish_first_or_tied": 0.77909,
+      "delta_p_finish_first": 0.03304,
+      "accepted_switches": [
+        {
+          "commence_time": "2026-07-11T21:00:00Z",
+          "home_team": "Norway",
+          "away_team": "England",
+          "raw_pick": "1-2",
+          "candidate_pick": "0-2",
+          "raw_ev_full_matrix": 0.841042,
+          "candidate_ev_full_matrix": 0.833102,
+          "ev_loss": 0.00794,
+          "baseline_p_finish_first": 0.27997,
+          "candidate_p_finish_first": 0.31301,
+          "candidate_p_finish_first_or_tied": 0.77909,
+          "delta_p_finish_first": 0.03304,
+          "paired_se": 0.001025,
+          "z_score": 32.227,
+          "risk_tier": "high",
+          "confidence_tier": "fragile",
+          "passes_hard_rule": true,
+          "reject_reasons": ""
+        }
+      ],
+      "total_ev_loss": 0.00794,
       "scenario": "rho_minus_0_02",
       "scenario_description": "Dixon-Coles rho decreased by 0.02.",
-      "accepted_switch_labels": []
+      "accepted_switch_labels": [
+        "Norway vs England: 1-2 -> 0-2"
+      ]
     },
     {
       "simulations": 100000,
       "leader_player": "Danie",
-      "leader_start_points": 102.0,
+      "leader_start_points": 103.0,
       "chasers": [
         "Ivan Prinsloo",
         "Lusse",
+        "Ettiene",
         "Chapman12",
         "Leonard",
-        "Ettiene",
+        "Dheben",
         "Joe",
         "rob87",
-        "Bijal",
-        "Dheben"
+        "Bijal"
       ],
-      "baseline_p_finish_first": 0.75205,
-      "baseline_p_finish_first_or_tied": 0.80217,
-      "final_p_finish_first": 0.75205,
-      "final_p_finish_first_or_tied": 0.80217,
-      "delta_p_finish_first": 0.0,
-      "accepted_switches": [],
-      "total_ev_loss": 0.0,
+      "baseline_p_finish_first": 0.27743,
+      "baseline_p_finish_first_or_tied": 0.81831,
+      "final_p_finish_first": 0.30844,
+      "final_p_finish_first_or_tied": 0.77961,
+      "delta_p_finish_first": 0.03101,
+      "accepted_switches": [
+        {
+          "commence_time": "2026-07-11T21:00:00Z",
+          "home_team": "Norway",
+          "away_team": "England",
+          "raw_pick": "1-2",
+          "candidate_pick": "0-2",
+          "raw_ev_full_matrix": 0.826844,
+          "candidate_ev_full_matrix": 0.819535,
+          "ev_loss": 0.007309,
+          "baseline_p_finish_first": 0.27743,
+          "candidate_p_finish_first": 0.30844,
+          "candidate_p_finish_first_or_tied": 0.77961,
+          "delta_p_finish_first": 0.03101,
+          "paired_se": 0.00101,
+          "z_score": 30.694,
+          "risk_tier": "high",
+          "confidence_tier": "fragile",
+          "passes_hard_rule": true,
+          "reject_reasons": ""
+        }
+      ],
+      "total_ev_loss": 0.007309,
       "scenario": "draw_heavy",
       "scenario_description": "Draw scorelines receive 8 percent more mass.",
-      "accepted_switch_labels": []
+      "accepted_switch_labels": [
+        "Norway vs England: 1-2 -> 0-2"
+      ]
     },
     {
       "simulations": 100000,
       "leader_player": "Danie",
-      "leader_start_points": 102.0,
+      "leader_start_points": 103.0,
       "chasers": [
         "Ivan Prinsloo",
         "Lusse",
+        "Ettiene",
         "Chapman12",
         "Leonard",
-        "Ettiene",
+        "Dheben",
         "Joe",
         "rob87",
-        "Bijal",
-        "Dheben"
+        "Bijal"
       ],
-      "baseline_p_finish_first": 0.75845,
-      "baseline_p_finish_first_or_tied": 0.80845,
-      "final_p_finish_first": 0.75845,
-      "final_p_finish_first_or_tied": 0.80845,
-      "delta_p_finish_first": 0.0,
-      "accepted_switches": [],
-      "total_ev_loss": 0.0,
+      "baseline_p_finish_first": 0.28642,
+      "baseline_p_finish_first_or_tied": 0.82075,
+      "final_p_finish_first": 0.31836,
+      "final_p_finish_first_or_tied": 0.7812,
+      "delta_p_finish_first": 0.03194,
+      "accepted_switches": [
+        {
+          "commence_time": "2026-07-11T21:00:00Z",
+          "home_team": "Norway",
+          "away_team": "England",
+          "raw_pick": "1-2",
+          "candidate_pick": "0-2",
+          "raw_ev_full_matrix": 0.860758,
+          "candidate_ev_full_matrix": 0.853149,
+          "ev_loss": 0.007609,
+          "baseline_p_finish_first": 0.28642,
+          "candidate_p_finish_first": 0.31836,
+          "candidate_p_finish_first_or_tied": 0.7812,
+          "delta_p_finish_first": 0.03194,
+          "paired_se": 0.001026,
+          "z_score": 31.126,
+          "risk_tier": "high",
+          "confidence_tier": "fragile",
+          "passes_hard_rule": true,
+          "reject_reasons": ""
+        }
+      ],
+      "total_ev_loss": 0.007609,
       "scenario": "draw_light",
       "scenario_description": "Draw scorelines receive 8 percent less mass.",
-      "accepted_switch_labels": []
+      "accepted_switch_labels": [
+        "Norway vs England: 1-2 -> 0-2"
+      ]
     }
   ]
 }

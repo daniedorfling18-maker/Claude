@@ -1,6 +1,5 @@
 snapshot_id,previous_snapshot_id,home_team,away_team,final_pick,market_available,market_depth_class,h2h_bookmaker_count,totals_bookmaker_count,spreads_bookmaker_count,current_pick_market_prob,previous_pick_market_prob,pick_market_prob_delta,pick_market_movement,market_moving_against_pick,market_moving_towards_pick,current_market_favourite,previous_market_favourite,market_favourite_changed,current_total_lean,previous_total_lean,total_lean_changed,current_avg_home_spread,previous_avg_home_spread,spread_delta
-20260707T164035Z,20260707T095915Z,Argentina,Egypt,2-1,True,strong,16,9,0,0.434411,0.717068,-0.282657,down,True,False,home,home,False,over,under,True,,,
-20260707T164035Z,20260707T095915Z,Switzerland,Colombia,0-2,True,strong,25,15,0,0.425774,0.423055,0.002719,stable,False,False,away,away,False,under,under,False,,,
-20260707T164035Z,20260707T095915Z,France,Morocco,2-0,True,strong,25,15,0,0.60966,0.601673,0.007987,stable,False,False,home,home,False,under,under,False,,,
-20260707T164035Z,20260707T095915Z,Spain,Belgium,2-0,True,strong,25,15,0,0.591973,0.589182,0.002791,stable,False,False,home,home,False,over,over,False,,,
-20260707T164035Z,20260707T095915Z,Norway,England,1-2,True,strong,25,14,0,0.505984,0.504494,0.00149,stable,False,False,away,away,False,over,over,False,,,
+20260708T084319Z,20260707T164035Z,France,Morocco,2-0,True,strong,24,14,0,0.60307,0.60966,-0.006589,stable,False,False,home,home,False,under,under,False,,,
+20260708T084319Z,20260707T164035Z,Spain,Belgium,2-0,True,strong,24,14,0,0.588987,0.591973,-0.002986,stable,False,False,home,home,False,over,over,False,,,
+20260708T084319Z,20260707T164035Z,Norway,England,0-2,True,strong,24,13,0,0.513803,0.505984,0.007819,stable,False,False,away,away,False,over,over,False,,,
+20260708T084319Z,,Argentina,Switzerland,2-0,True,strong,24,13,0,0.556554,,,unavailable,False,False,home,,False,under,,False,,,

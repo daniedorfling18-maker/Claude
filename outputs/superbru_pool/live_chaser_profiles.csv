@@ -1,10 +1,10 @@
 player,raw_weight,top1_weight,top2_weight,top3_weight,modal_weight,chase_weight,chalk_weight,rank,current_points,point_gap_to_leader_player,profile_type
-Ivan Prinsloo,0.3,0.24,0.15,0.09,0.1,0.05,0.07,2,101.5,0.5,close_chaser
-Lusse,0.26,0.22,0.16,0.11,0.08,0.1,0.07,3,99.0,3.0,medium_chaser
-Chapman12,0.26,0.22,0.16,0.11,0.08,0.1,0.07,4,98.0,4.0,medium_chaser
-Leonard,0.22,0.18,0.16,0.14,0.06,0.18,0.06,5,96.5,5.5,long_chaser
-Ettiene,0.22,0.18,0.16,0.14,0.06,0.18,0.06,6,96.0,6.0,long_chaser
-Joe,0.22,0.18,0.16,0.14,0.06,0.18,0.06,7,96.0,6.0,long_chaser
-rob87,0.22,0.18,0.16,0.14,0.06,0.18,0.06,8,96.0,6.0,long_chaser
-Bijal,0.22,0.18,0.16,0.14,0.06,0.18,0.06,9,95.5,6.5,long_chaser
-Dheben,0.22,0.18,0.16,0.14,0.06,0.18,0.06,10,95.0,7.0,long_chaser
+Ivan Prinsloo,0.34,0.26,0.14,0.06,0.1,0.02,0.08,1,103.0,0.0,ahead_or_tied
+Lusse,0.26,0.22,0.16,0.11,0.08,0.1,0.07,3,100.5,2.5,medium_chaser
+Ettiene,0.26,0.22,0.16,0.11,0.08,0.1,0.07,4,99.0,4.0,medium_chaser
+Chapman12,0.26,0.22,0.16,0.11,0.08,0.1,0.07,5,99.0,4.0,medium_chaser
+Leonard,0.26,0.22,0.16,0.11,0.08,0.1,0.07,6,98.0,5.0,medium_chaser
+Dheben,0.22,0.18,0.16,0.14,0.06,0.18,0.06,7,97.5,5.5,long_chaser
+Joe,0.22,0.18,0.16,0.14,0.06,0.18,0.06,8,97.5,5.5,long_chaser
+rob87,0.22,0.18,0.16,0.14,0.06,0.18,0.06,9,97.5,5.5,long_chaser
+Bijal,0.22,0.18,0.16,0.14,0.06,0.18,0.06,10,97.0,6.0,long_chaser

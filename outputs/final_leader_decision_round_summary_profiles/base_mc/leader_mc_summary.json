@@ -1,23 +1,44 @@
 {
   "simulations": 100000,
   "leader_player": "Danie",
-  "leader_start_points": 102.0,
+  "leader_start_points": 103.0,
   "chasers": [
     "Ivan Prinsloo",
     "Lusse",
+    "Ettiene",
     "Chapman12",
     "Leonard",
-    "Ettiene",
+    "Dheben",
     "Joe",
     "rob87",
-    "Bijal",
-    "Dheben"
+    "Bijal"
   ],
-  "baseline_p_finish_first": 0.75569,
-  "baseline_p_finish_first_or_tied": 0.80647,
-  "final_p_finish_first": 0.75569,
-  "final_p_finish_first_or_tied": 0.80647,
-  "delta_p_finish_first": 0.0,
-  "accepted_switches": [],
-  "total_ev_loss": 0.0
+  "baseline_p_finish_first": 0.27883,
+  "baseline_p_finish_first_or_tied": 0.8202,
+  "final_p_finish_first": 0.31045,
+  "final_p_finish_first_or_tied": 0.78124,
+  "delta_p_finish_first": 0.03162,
+  "accepted_switches": [
+    {
+      "commence_time": "2026-07-11T21:00:00Z",
+      "home_team": "Norway",
+      "away_team": "England",
+      "raw_pick": "1-2",
+      "candidate_pick": "0-2",
+      "raw_ev_full_matrix": 0.84346,
+      "candidate_ev_full_matrix": 0.836004,
+      "ev_loss": 0.007456,
+      "baseline_p_finish_first": 0.27883,
+      "candidate_p_finish_first": 0.31045,
+      "candidate_p_finish_first_or_tied": 0.78124,
+      "delta_p_finish_first": 0.03162,
+      "paired_se": 0.001026,
+      "z_score": 30.823,
+      "risk_tier": "high",
+      "confidence_tier": "fragile",
+      "passes_hard_rule": true,
+      "reject_reasons": ""
+    }
+  ],
+  "total_ev_loss": 0.007456
 }

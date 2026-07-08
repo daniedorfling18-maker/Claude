@@ -1,12 +1,12 @@
 scenario,description,baseline_p_finish_first,final_p_finish_first,delta_p_finish_first,baseline_p_finish_first_or_tied,final_p_finish_first_or_tied,total_ev_loss,accepted_switch_count,accepted_switch_labels
-base,Current Monte Carlo assumptions.,0.75569,0.75569,0.0,0.80647,0.80647,0.0,0,
-chasers_conservative,"Chasers lean more towards raw, top1 and chalk picks.",0.76953,0.76953,0.0,0.81782,0.81782,0.0,0,
-chasers_aggressive,Chasers chase exacts and differentials more aggressively.,0.75047,0.75047,0.0,0.80087,0.80087,0.0,0,
-favourite_heavy,Chasers overweight favourite/chalk scorelines.,0.76489,0.76489,0.0,0.8142,0.8142,0.0,0,
-exact_chase_heavy,Chasers overweight modal and top exact scorelines.,0.7293,0.7293,0.0,0.78356,0.78356,0.0,0,
-goals_plus_5pct,Model total-goals expectation tilted 5 percent higher.,0.75938,0.75938,0.0,0.81064,0.81064,0.0,0,
-goals_minus_5pct,Model total-goals expectation tilted 5 percent lower.,0.75077,0.75077,0.0,0.79961,0.79961,0.0,0,
-rho_plus_0_02,Dixon-Coles rho increased by 0.02.,0.75538,0.75538,0.0,0.80536,0.80536,0.0,0,
-rho_minus_0_02,Dixon-Coles rho decreased by 0.02.,0.7538,0.7538,0.0,0.80397,0.80397,0.0,0,
-draw_heavy,Draw scorelines receive 8 percent more mass.,0.75205,0.75205,0.0,0.80217,0.80217,0.0,0,
-draw_light,Draw scorelines receive 8 percent less mass.,0.75845,0.75845,0.0,0.80845,0.80845,0.0,0,
+base,Current Monte Carlo assumptions.,0.27883,0.31045,0.03162,0.8202,0.78124,0.007456,1,Norway vs England: 1-2 -> 0-2
+chasers_conservative,"Chasers lean more towards raw, top1 and chalk picks.",0.25823,0.29759,0.03936,0.83026,0.78544,0.007456,1,Norway vs England: 1-2 -> 0-2
+chasers_aggressive,Chasers chase exacts and differentials more aggressively.,0.29274,0.31526,0.02252,0.80822,0.77813,0.007456,1,Norway vs England: 1-2 -> 0-2
+favourite_heavy,Chasers overweight favourite/chalk scorelines.,0.26905,0.30485,0.0358,0.82754,0.78625,0.007456,1,Norway vs England: 1-2 -> 0-2
+exact_chase_heavy,Chasers overweight modal and top exact scorelines.,0.30335,0.33181,0.02846,0.80149,0.76701,0.007456,1,Norway vs England: 1-2 -> 0-2
+goals_plus_5pct,Model total-goals expectation tilted 5 percent higher.,0.28221,0.32674,0.04453,0.82496,0.73416,0.036834,2,Spain vs Belgium: 2-0 -> 2-1 | Norway vs England: 1-2 -> 0-2
+goals_minus_5pct,Model total-goals expectation tilted 5 percent lower.,0.27848,0.31297,0.03449,0.8153,0.78022,0.0,1,Norway vs England: 1-2 -> 0-2
+rho_plus_0_02,Dixon-Coles rho increased by 0.02.,0.27849,0.31091,0.03242,0.81412,0.77744,0.006989,1,Norway vs England: 1-2 -> 0-2
+rho_minus_0_02,Dixon-Coles rho decreased by 0.02.,0.27997,0.31301,0.03304,0.81826,0.77909,0.00794,1,Norway vs England: 1-2 -> 0-2
+draw_heavy,Draw scorelines receive 8 percent more mass.,0.27743,0.30844,0.03101,0.81831,0.77961,0.007309,1,Norway vs England: 1-2 -> 0-2
+draw_light,Draw scorelines receive 8 percent less mass.,0.28642,0.31836,0.03194,0.82075,0.7812,0.007609,1,Norway vs England: 1-2 -> 0-2

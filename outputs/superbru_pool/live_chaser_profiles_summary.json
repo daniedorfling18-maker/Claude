@@ -1,15 +1,15 @@
 {
-  "generated_at_utc": "2026-07-07T16:39:38.783401+00:00",
+  "generated_at_utc": "2026-07-08T08:42:33.527054+00:00",
   "status": "ok",
   "leader_player": {
-    "rank": 1,
+    "rank": 2,
     "player": "Danie",
-    "current_points": 102.0,
+    "current_points": 103.0,
     "raw": {
-      "rank": "1",
+      "rank": "2",
       "movement_or_yellow_caps": "",
       "player": "Danie",
-      "current_points": "102.0"
+      "current_points": "103.0"
     }
   },
   "chaser_range": 8.0,
@@ -19,17 +19,17 @@
   "selected_chasers": [
     {
       "player": "Ivan Prinsloo",
-      "raw_weight": 0.3,
-      "top1_weight": 0.24,
-      "top2_weight": 0.15,
-      "top3_weight": 0.09,
+      "raw_weight": 0.34,
+      "top1_weight": 0.26,
+      "top2_weight": 0.14,
+      "top3_weight": 0.06,
       "modal_weight": 0.1,
-      "chase_weight": 0.05,
-      "chalk_weight": 0.07,
-      "rank": 2,
-      "current_points": 101.5,
-      "point_gap_to_leader_player": 0.5,
-      "profile_type": "close_chaser"
+      "chase_weight": 0.02,
+      "chalk_weight": 0.08,
+      "rank": 1,
+      "current_points": 103.0,
+      "point_gap_to_leader_player": 0.0,
+      "profile_type": "ahead_or_tied"
     },
     {
       "player": "Lusse",
@@ -41,8 +41,22 @@
       "chase_weight": 0.1,
       "chalk_weight": 0.07,
       "rank": 3,
+      "current_points": 100.5,
+      "point_gap_to_leader_player": 2.5,
+      "profile_type": "medium_chaser"
+    },
+    {
+      "player": "Ettiene",
+      "raw_weight": 0.26,
+      "top1_weight": 0.22,
+      "top2_weight": 0.16,
+      "top3_weight": 0.11,
+      "modal_weight": 0.08,
+      "chase_weight": 0.1,
+      "chalk_weight": 0.07,
+      "rank": 4,
       "current_points": 99.0,
-      "point_gap_to_leader_player": 3.0,
+      "point_gap_to_leader_player": 4.0,
       "profile_type": "medium_chaser"
     },
     {
@@ -54,27 +68,27 @@
       "modal_weight": 0.08,
       "chase_weight": 0.1,
       "chalk_weight": 0.07,
-      "rank": 4,
-      "current_points": 98.0,
+      "rank": 5,
+      "current_points": 99.0,
       "point_gap_to_leader_player": 4.0,
       "profile_type": "medium_chaser"
     },
     {
       "player": "Leonard",
-      "raw_weight": 0.22,
-      "top1_weight": 0.18,
+      "raw_weight": 0.26,
+      "top1_weight": 0.22,
       "top2_weight": 0.16,
-      "top3_weight": 0.14,
-      "modal_weight": 0.06,
-      "chase_weight": 0.18,
-      "chalk_weight": 0.06,
-      "rank": 5,
-      "current_points": 96.5,
-      "point_gap_to_leader_player": 5.5,
-      "profile_type": "long_chaser"
+      "top3_weight": 0.11,
+      "modal_weight": 0.08,
+      "chase_weight": 0.1,
+      "chalk_weight": 0.07,
+      "rank": 6,
+      "current_points": 98.0,
+      "point_gap_to_leader_player": 5.0,
+      "profile_type": "medium_chaser"
     },
     {
-      "player": "Ettiene",
+      "player": "Dheben",
       "raw_weight": 0.22,
       "top1_weight": 0.18,
       "top2_weight": 0.16,
@@ -82,9 +96,9 @@
       "modal_weight": 0.06,
       "chase_weight": 0.18,
       "chalk_weight": 0.06,
-      "rank": 6,
-      "current_points": 96.0,
-      "point_gap_to_leader_player": 6.0,
+      "rank": 7,
+      "current_points": 97.5,
+      "point_gap_to_leader_player": 5.5,
       "profile_type": "long_chaser"
     },
     {
@@ -96,9 +110,9 @@
       "modal_weight": 0.06,
       "chase_weight": 0.18,
       "chalk_weight": 0.06,
-      "rank": 7,
-      "current_points": 96.0,
-      "point_gap_to_leader_player": 6.0,
+      "rank": 8,
+      "current_points": 97.5,
+      "point_gap_to_leader_player": 5.5,
       "profile_type": "long_chaser"
     },
     {
@@ -110,9 +124,9 @@
       "modal_weight": 0.06,
       "chase_weight": 0.18,
       "chalk_weight": 0.06,
-      "rank": 8,
-      "current_points": 96.0,
-      "point_gap_to_leader_player": 6.0,
+      "rank": 9,
+      "current_points": 97.5,
+      "point_gap_to_leader_player": 5.5,
       "profile_type": "long_chaser"
     },
     {
@@ -124,23 +138,9 @@
       "modal_weight": 0.06,
       "chase_weight": 0.18,
       "chalk_weight": 0.06,
-      "rank": 9,
-      "current_points": 95.5,
-      "point_gap_to_leader_player": 6.5,
-      "profile_type": "long_chaser"
-    },
-    {
-      "player": "Dheben",
-      "raw_weight": 0.22,
-      "top1_weight": 0.18,
-      "top2_weight": 0.16,
-      "top3_weight": 0.14,
-      "modal_weight": 0.06,
-      "chase_weight": 0.18,
-      "chalk_weight": 0.06,
       "rank": 10,
-      "current_points": 95.0,
-      "point_gap_to_leader_player": 7.0,
+      "current_points": 97.0,
+      "point_gap_to_leader_player": 6.0,
       "profile_type": "long_chaser"
     }
   ],

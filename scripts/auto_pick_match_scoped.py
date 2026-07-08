@@ -989,6 +989,21 @@ def merge_pick_card_fallback_queue(
     return merged, added
 
 
+def outside_revision_window(entry: dict[str, Any], args: argparse.Namespace) -> bool:
+    """True when kickoff is further away than the final revision window."""
+    try:
+        minutes_until = float(entry.get("minutes_until"))
+    except (TypeError, ValueError):
+        return False
+    try:
+        revision_window = float(getattr(args, "revision_window_minutes", 260))
+    except (TypeError, ValueError):
+        revision_window = 260.0
+    if revision_window < 0:
+        return False
+    return minutes_until > revision_window
+
+
 def should_keep_existing_pick_until_revision_window(entry: dict[str, Any], args: argparse.Namespace) -> bool:
     """Avoid churn after an early SuperBru pick is already visible on the page.
 
@@ -1001,17 +1016,25 @@ def should_keep_existing_pick_until_revision_window(entry: dict[str, Any], args:
         return False
     if not normalise_score_pick(entry.get("current_pick")):
         return False
-    try:
-        minutes_until = float(entry.get("minutes_until"))
-    except (TypeError, ValueError):
-        return False
-    try:
-        revision_window = float(getattr(args, "revision_window_minutes", 260))
-    except (TypeError, ValueError):
-        revision_window = 260.0
-    if revision_window < 0:
-        return False
-    return minutes_until > revision_window
+    return outside_revision_window(entry, args)
+
+
+async def probe_existing_row_pick(args: argparse.Namespace, entry: dict[str, Any], out_dir: Path) -> str:
+    """Read the SuperBru row's saved pick via a dry-run pass.
+
+    Costs a page visit but NO odds credits, and never submits anything.
+    Records the probe evidence on the entry; returns "h-a" or ""."""
+    probe_args = argparse.Namespace(**vars(args))
+    probe_args.dry_run = True
+    probe = await submit_pick(probe_args, entry["home_team"], entry["away_team"], "0-0", out_dir)
+    values = [str(v).strip() for v in (probe.get("current_row_values") or [])]
+    entry["existing_pick_probe"] = {
+        "status": probe.get("status"),
+        "current_row_values": probe.get("current_row_values"),
+    }
+    if len(values) >= 2 and values[0] and values[1]:
+        return f"{values[0]}-{values[1]}"
+    return ""
 
 
 def request_json(url: str) -> Any:
@@ -1591,6 +1614,24 @@ async def run(args: argparse.Namespace) -> dict[str, Any]:
         card_row = pick_lookup.get("card_row") if pick_lookup.get("status") == "found" else None
         card_pick = txt(pick_lookup.get("pick")) if pick_lookup.get("status") == "found" else ""
 
+        # Card-lane entries never carry the pool page's current_pick, so the
+        # early-window freeze below could not see already-saved picks and the
+        # watchdog re-fetched odds and re-submitted EVERY 15-minute cycle:
+        # ~1 credit x 4 matches x 96 cycles/day is what exhausted two Odds API
+        # keys (2026-07-07/08). A read-only row probe costs no credits and
+        # lets the freeze engage for card-lane matches too.
+        if (
+            not getattr(args, "dry_run", False)
+            and not normalise_score_pick(entry.get("current_pick"))
+            and outside_revision_window(entry, args)
+        ):
+            try:
+                probed_pick = await probe_existing_row_pick(args, entry, out_dir)
+                if probed_pick:
+                    entry["current_pick"] = probed_pick
+            except Exception as exc:
+                entry["existing_pick_probe"] = {"status": "probe_failed", "error": str(exc)}
+
         if should_keep_existing_pick_until_revision_window(entry, args):
             current_pick = normalise_score_pick(entry.get("current_pick"))
             entry["status"] = "already_current"
@@ -1642,18 +1683,7 @@ async def run(args: argparse.Namespace) -> dict[str, Any]:
             existing_pick = ""
             if not args.dry_run:
                 try:
-                    probe_args = argparse.Namespace(**vars(args))
-                    probe_args.dry_run = True
-                    probe = await submit_pick(
-                        probe_args, entry["home_team"], entry["away_team"], "0-0", out_dir
-                    )
-                    values = [str(v).strip() for v in (probe.get("current_row_values") or [])]
-                    if len(values) >= 2 and values[0] and values[1]:
-                        existing_pick = f"{values[0]}-{values[1]}"
-                    entry["existing_pick_probe"] = {
-                        "status": probe.get("status"),
-                        "current_row_values": probe.get("current_row_values"),
-                    }
+                    existing_pick = await probe_existing_row_pick(args, entry, out_dir)
                 except Exception as exc:
                     entry["existing_pick_probe"] = {"status": "probe_failed", "error": str(exc)}
             if existing_pick:

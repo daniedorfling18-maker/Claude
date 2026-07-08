@@ -258,3 +258,25 @@ def test_no_pick_branch_keeps_verified_existing_pick_when_odds_feed_is_dead() ->
     assert "current_row_values" in source
     # The success counter must include the kept-pick outcome.
     assert '{"already_current", "kept_existing_pick_no_live_odds"}' in source
+
+
+def test_card_lane_probes_saved_pick_before_spending_odds_credits() -> None:
+    """Card-lane entries carry no pool-page current_pick, so the early-window
+    freeze never engaged for them and the 15-minute watchdog re-fetched odds
+    and re-submitted every cycle - ~1 credit x 4 matches x 96 cycles/day
+    exhausted two Odds API keys (2026-07-07/08). Outside the revision window
+    the loop must first read the row (free) and only spend odds credits when
+    no pick is saved yet or the revision window is open."""
+    import inspect
+
+    module = load_module()
+
+    source = inspect.getsource(module.base)
+    probe_gate = source.split("probed_pick = await probe_existing_row_pick", 1)
+    assert len(probe_gate) == 2, "queue loop must probe the row before fetching odds"
+    before = probe_gate[0][-900:]
+    assert "outside_revision_window(entry, args)" in before
+    # The probe must run BEFORE the odds snapshot is fetched.
+    assert "fetch_match_odds_snapshot" not in before
+    after = probe_gate[1]
+    assert "fetch_match_odds_snapshot" in after

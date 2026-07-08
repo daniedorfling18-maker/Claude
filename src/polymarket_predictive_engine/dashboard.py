@@ -18,6 +18,12 @@ from .worldcup_validation import is_worldcup_winner_market
 
 DASHBOARD_PAYLOAD_LIST_LIMIT = 50
 
+# The price-action model summary is re-scored by the 6-hourly VPS governance refresh plus the
+# live loop's optimize pass (every ~10 iterations), so a healthy gap can approach six hours.
+# The old 900s threshold flagged "Model scoring is stale" between perfectly healthy refreshes
+# (observed 2026-07-08); 6h cadence + 2h grace means red now signals a genuinely missed refresh.
+MODEL_SCORING_STALE_AFTER_SECONDS = 8 * 3600
+
 
 HTML = """<!doctype html>
 <html lang="en">
@@ -333,7 +339,7 @@ async function load() {
     const signalAge = ageSeconds(priceActionPaper.generated_at_utc || priceActionPaper.signal_generated_at_utc);
     const validationGap = priceActionModel.validation_gap || {};
     const validationGapActive = oversight.validation_gap_active ?? (validationGap.state === "needs_positive_validation_examples" || (Number(priceActionModel.train_positive_targets || 0) > 0 && Number(priceActionModel.validation_positive_targets || 0) <= 0));
-    const modelStale = modelAge !== null && modelAge > 900;
+    const modelStale = modelAge !== null && modelAge > Number(oversight.model_stale_after_seconds || 28800);
     const approvedSignals = Number(oversight.approved_signal_count ?? data.forward_paper_cycle?.signals_approved ?? priceActionPaper.signals ?? diag.approved_signals_count ?? 0);
     const selectedQueries = currentScan.scan_plan?.selected_queries || lastScan.scan_plan?.selected_queries || scanner.scan?.scan_plan?.selected_queries || scanner.scan?.queries || [];
     const injectedQueries = currentScan.scan_plan?.injected_research_focus_queries || lastScan.scan_plan?.injected_research_focus_queries || scanner.scan?.scan_plan?.injected_research_focus_queries || [];
@@ -3819,7 +3825,7 @@ def _dashboard_oversight_status(
         )
     if model_age is None:
         add_alert("warn", "Model freshness unknown", "Price-action model summary has no usable timestamp.")
-    elif model_age > 900:
+    elif model_age > MODEL_SCORING_STALE_AFTER_SECONDS:
         add_alert(
             "bad",
             "Model scoring is stale",
@@ -3922,6 +3928,7 @@ def _dashboard_oversight_status(
         "model_status": price_action_model.get("status"),
         "model_decision": price_action_model.get("decision"),
         "model_age_seconds": model_age,
+        "model_stale_after_seconds": MODEL_SCORING_STALE_AFTER_SECONDS,
         "signal_age_seconds": signal_age,
         "approved_signal_count": int(approved_signals),
         "validation_gap_active": validation_gap_active,
@@ -4150,7 +4157,7 @@ def _decision_useful_summary(
     )
     shadow_status = str(oversight_status.get("shadow_research_status") or shadow_research.get("effective_status") or "")
     model_age = _age_seconds(price_action_model)
-    model_stale = bool(model_age is not None and model_age > 900)
+    model_stale = bool(model_age is not None and model_age > MODEL_SCORING_STALE_AFTER_SECONDS)
     validation_gap = price_action_model.get("validation_gap") if isinstance(price_action_model.get("validation_gap"), dict) else {}
     cohort_transfer = price_action_model.get("cohort_transfer") if isinstance(price_action_model.get("cohort_transfer"), dict) else {}
     validation_gap_active = bool(oversight_status.get("validation_gap_active"))

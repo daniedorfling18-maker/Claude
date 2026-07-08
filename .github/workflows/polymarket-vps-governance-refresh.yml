@@ -15,7 +15,9 @@ concurrency:
 jobs:
   refresh:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    # 30 min matches the deploy workflow; the 2026-07-07 19:57 UTC run was cancelled at the old
+    # 20-min cap while the VPS was busy, silently doubling the model re-score gap to ~12h.
+    timeout-minutes: 30
 
     steps:
       - name: Validate required secrets
@@ -67,7 +69,8 @@ jobs:
             -o ConnectTimeout=30 \
             -p "$PM_VPS_PORT" \
             "$PM_VPS_USER@$PM_VPS_HOST" \
-            "cd /home/$PM_VPS_USER/Claude && sudo docker compose -f docker-compose.vps-paper.yml exec -T polymarket-paper-live python -m polymarket_predictive_engine.cli refresh-governance --config /app/polymarket_predictive_config.example.yaml"
+            "cd /home/$PM_VPS_USER/Claude && sudo timeout 1500 docker compose -f docker-compose.vps-paper.yml exec -T polymarket-paper-live python -m polymarket_predictive_engine.cli refresh-governance --config /app/polymarket_predictive_config.example.yaml" \
+            || { echo "::error::refresh-governance failed or exceeded 25 minutes on the VPS (exit $?)"; exit 1; }
 
       - name: Verify dashboard proof keys
         env:

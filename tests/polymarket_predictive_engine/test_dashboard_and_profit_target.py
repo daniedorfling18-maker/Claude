@@ -3191,3 +3191,41 @@ def test_dashboard_surfaces_sharp_sports_edge_funnel(tmp_path):
     assert any(row["lane"] == "Sharp sports edge funnel" for row in data["decision_useful_summary"]["evidence_lanes"])
     assert "Sharp sports edge funnel" in html
     assert "Sharp sports family bottlenecks" in html
+
+
+def test_dashboard_model_staleness_threshold_matches_rescore_cadence(tmp_path):
+    """The price-action model is re-scored by the 6-hourly governance refresh (plus the loop's
+    optimize pass), so a two-hour-old summary is healthy. The old 900s threshold flagged
+    "Model scoring is stale" between every healthy refresh (observed 2026-07-08); red must
+    mean a genuinely missed refresh, not normal cadence."""
+    cfg = _config(tmp_path)
+    model_path = cfg.output_root / "polymarket_price_action" / "price_action_model_summary.json"
+    write_json(
+        model_path,
+        {
+            "status": "trained",
+            "generated_at_utc": (datetime.now(timezone.utc) - timedelta(hours=2)).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        },
+    )
+
+    result = render_dashboard(cfg)
+    data = read_json(result["dashboard_data"])
+    html = Path(result["dashboard_file"]).read_text(encoding="utf-8")
+
+    assert data["oversight_status"]["model_stale_after_seconds"] >= 6 * 3600
+    assert not any(alert["title"] == "Model scoring is stale" for alert in data["oversight_status"]["alerts"])
+    assert data["decision_useful_summary"]["trade_decision"] != "WAIT: MODEL STALE"
+    # The HTML alert logic must follow the payload threshold, not a hard-coded 900s.
+    assert "model_stale_after_seconds" in html
+
+    # A genuinely missed refresh (well past the 6-hourly cadence) must still go red.
+    write_json(
+        model_path,
+        {
+            "status": "trained",
+            "generated_at_utc": (datetime.now(timezone.utc) - timedelta(hours=13)).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        },
+    )
+    result = render_dashboard(cfg)
+    data = read_json(result["dashboard_data"])
+    assert any(alert["title"] == "Model scoring is stale" for alert in data["oversight_status"]["alerts"])

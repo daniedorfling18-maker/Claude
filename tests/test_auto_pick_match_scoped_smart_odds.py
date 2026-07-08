@@ -211,3 +211,17 @@ def test_required_submission_fails_when_not_submitted_or_current() -> None:
     }
 
     assert mod.base.exit_code_for_result(result, args) == 2
+
+
+def test_extract_match_js_scopes_reads_to_the_requested_game() -> None:
+    """Document-wide first-match input reads returned a DIFFERENT game's values
+    whenever several pickers shared the page (2026-07-08): current_pick/locked
+    read from the wrong row can mark a game already_current and silently skip a
+    needed submit. The extractor must scope to #soccer-picker<id> /
+    [data-bru-game-id] before falling back to the whole document."""
+    module = load_module()
+
+    js = module.base.EXTRACT_MATCH_JS
+    assert "soccer-picker" in js
+    assert "data-bru-game-id" in js
+    assert "replace(/^game/" in js

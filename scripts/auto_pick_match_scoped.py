@@ -112,13 +112,23 @@ EXTRACT_MATCH_JS = r"""
     return {kickoffText: null, kickoffTs: null, kickoffSource: null};
   }
 
-  const visibleLeft = Array.from(document.querySelectorAll('input.soccer-left-score')).filter(isVisible);
-  const visibleRight = Array.from(document.querySelectorAll('input.soccer-right-score')).filter(isVisible);
+  // Scope reads to THIS game's picker. Document-wide first-match reads returned a
+  // DIFFERENT game's inputs whenever several pickers shared the page (2026-07-08:
+  // current_pick/locked/kickoff read from the wrong row can mark a game
+  // already_current and silently skip a needed submit).
+  const numericGameId = String(gameId || '').replace(/^game/, '');
+  const gameRoot = numericGameId
+    ? (document.querySelector('#soccer-picker' + numericGameId)
+       || document.querySelector('[data-bru-game-id="' + numericGameId + '"]'))
+    : null;
 
-  const hi = visibleLeft[0] || document.querySelector('input.soccer-left-score');
-  const ai = visibleRight[0] || document.querySelector('input.soccer-right-score');
+  const visibleLeft = Array.from((gameRoot || document).querySelectorAll('input.soccer-left-score')).filter(isVisible);
+  const visibleRight = Array.from((gameRoot || document).querySelectorAll('input.soccer-right-score')).filter(isVisible);
 
-  let scope = commonAncestor(hi, ai) || document.body;
+  const hi = visibleLeft[0] || (gameRoot || document).querySelector('input.soccer-left-score');
+  const ai = visibleRight[0] || (gameRoot || document).querySelector('input.soccer-right-score');
+
+  let scope = commonAncestor(hi, ai) || gameRoot || document.body;
 
   let kickoff = {kickoffText: null, kickoffTs: null, kickoffSource: null};
   let probe = scope;

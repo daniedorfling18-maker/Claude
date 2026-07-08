@@ -4,12 +4,14 @@ name: SuperBru CLV snapshot
 # cadence, rebuild the locked-pick history from git, and refresh the CLV
 # report. Diagnostic only - stakes nothing. See scripts/superbru_clv_experiment.py.
 #
-# Budget: one Odds API request per run (eu region, h2h). Every 4 hours
-# ~= 180 credits/month against the 500/month free tier.
+# Budget: one Odds API request per run (eu region, h2h) plus a few billed
+# Actions minutes. 2026-07-08: trimmed from every 4 hours to every 8 hours
+# after the monthly Actions quota was exhausted; 3 snapshots/day still
+# brackets open/close lines for daily fixtures.
 
 on:
   schedule:
-    - cron: '30 */4 * * *'
+    - cron: '30 */8 * * *'
   workflow_dispatch: {}
 
 concurrency:

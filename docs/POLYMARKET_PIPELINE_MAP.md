@@ -2,6 +2,10 @@
 
 Generated from static repository inspection.
 
+> 2026-07-08: 40 scripts with no operational, test, or code references were
+> removed in the repo-wide redundancy trim (PR #84). Rows below referring to
+> deleted `scripts/*.py` entries are historical.
+
 | Service or Script | Category | Can place orders | Training suitable | Outputs |
 |---|---:|---:|---:|---|
 | polymarket-monitor | unknown | True | False | outputs/polymarket |

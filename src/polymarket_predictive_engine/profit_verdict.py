@@ -56,11 +56,24 @@ DEFAULT_SETTINGS = {
     "minimum_final_samples": 12,
     "sign_test_alpha": 0.10,
     "exit_cost_haircut_per_dollar": 0.005,
+    "adverse_selection_haircut_per_dollar": 0.005,
     "max_stake_per_trade_usdc": 10.0,
     "days_per_month": 30.0,
 }
 
 REGISTERED_AT_UTC = "2026-07-09T04:00:00Z"
+
+# Amendments registered 2026-07-09 BEFORE the first focus final settled
+# (validity review; all three tighten the gates, none loosen them):
+#   1. Gate A clusters finals by market: one unit per market (mean CLV of its
+#      finals), sign test and the 12-sample floor apply to independent units,
+#      so correlated tokens from one market cannot inflate significance.
+#   2. Gate B adds an adverse-selection haircut (shadow fills never experience
+#      being filled preferentially when wrong; real fills do).
+#   3. Gate C output carries its liquidity regime (world_cup_2026_window), and
+#      an underpowered positive read extends the evidence window to the next
+#      event regime instead of resolving.
+REGISTERED_AMENDMENTS_AT_UTC = "2026-07-09T11:00:00Z"
 
 
 def _settings(cfg: EngineConfig) -> dict[str, Any]:
@@ -95,6 +108,29 @@ def _entries_per_day(positions_path: Path, diagnostic_substrings: list[str]) -> 
     return len(stamps) / span_days, len(stamps), round(span_days, 2)
 
 
+def _clustered_focus_finals(cfg: EngineConfig, diagnostic_substrings: list[str]) -> dict[str, list[float]]:
+    """Settled focus finals grouped into independent units by market.
+
+    Reads the append-only final history ledger; excludes frozen diagnostic
+    cohorts; returns market -> [final CLVs]."""
+    rows = read_csv_rows(cfg.governance_root / "closing_line_final_history.csv")
+    clusters: dict[str, list[float]] = {}
+    for row in rows:
+        if str(row.get("line_kind") or "") != "closing":
+            continue
+        cohort = str(row.get("signal_cohort") or "").lower()
+        if any(sub in cohort for sub in diagnostic_substrings):
+            continue
+        clv = safe_float(row.get("clv"))
+        if clv is None:
+            continue
+        key = str(row.get("market_id") or row.get("market_slug") or row.get("shadow_position_id") or "").strip()
+        if not key:
+            continue
+        clusters.setdefault(key, []).append(clv)
+    return clusters
+
+
 def build_profit_verdict(cfg: EngineConfig) -> dict[str, Any]:
     settings = _settings(cfg)
     target = safe_float((cfg.raw.get("profit_tracking", {}) or {}).get("target_monthly_profit_usdc")) or 100.0
@@ -104,56 +140,67 @@ def build_profit_verdict(cfg: EngineConfig) -> dict[str, Any]:
 
     minimum_samples = int(settings["minimum_final_samples"])
     alpha = float(settings["sign_test_alpha"])
-    haircut = float(settings["exit_cost_haircut_per_dollar"])
+    exit_haircut = float(settings["exit_cost_haircut_per_dollar"])
+    adverse_haircut = float(settings["adverse_selection_haircut_per_dollar"])
+    haircut = exit_haircut + adverse_haircut
 
-    finals = int(safe_float(focus.get("focus_final_positions")) or 0)
-    mean_final_clv = safe_float(focus.get("focus_mean_final_clv"))
-    # Finals-only: provisional rows are diagnostic and must not feed the gate
-    # statistic (they include markets that have not closed - no fallback to
-    # the mixed focus_beat_close_rate, which would contaminate the sign test).
-    beat_close_rate = safe_float(focus.get("focus_final_beat_close_rate"))
+    diagnostic_substrings = [
+        str(sub).lower().strip()
+        for sub in (focus.get("diagnostic_cohort_substrings") or ["updown", "up_down", "up-down"])
+        if str(sub).strip()
+    ]
 
-    # Gate A - edge existence.
-    sign_p: float | None = None
-    if finals > 0 and beat_close_rate is not None:
-        sign_p = _sign_test_p(round(beat_close_rate * finals), finals)
-    if finals < minimum_samples:
+    # Gate A - edge existence, on INDEPENDENT units (registered amendment 1):
+    # finals cluster by market; one market's tokens are one observation, so
+    # correlated finals cannot inflate the sign test or reach the floor early.
+    clusters = _clustered_focus_finals(cfg, diagnostic_substrings)
+    finals_total = sum(len(values) for values in clusters.values())
+    unit_means = [sum(values) / len(values) for values in clusters.values()]
+    n_units = len(unit_means)
+    mean_final_clv = round(sum(unit_means) / n_units, 6) if unit_means else None
+    beaten_units = sum(1 for value in unit_means if value > 0)
+    sign_p = _sign_test_p(beaten_units, n_units) if n_units else None
+    if n_units < minimum_samples:
         gate_a = "pending"
-        gate_a_reason = f"{finals}/{minimum_samples} settled focus finals; verdict needs the sample floor."
+        gate_a_reason = (
+            f"{n_units}/{minimum_samples} independent settled market units "
+            f"({finals_total} finals); verdict needs the unit floor."
+        )
     elif mean_final_clv is None or mean_final_clv <= 0:
         gate_a = "fail"
         gate_a_reason = (
-            f"{finals} settled focus finals with mean final CLV "
+            f"{n_units} independent settled market units with equal-weight mean final CLV "
             f"{mean_final_clv if mean_final_clv is not None else 'unavailable'} <= 0: entries do not beat the close."
         )
     elif sign_p is not None and sign_p <= alpha:
         gate_a = "pass"
-        gate_a_reason = f"mean final CLV {mean_final_clv} > 0 with sign-test p={round(sign_p, 4)} <= {alpha} on {finals} finals."
+        gate_a_reason = (
+            f"unit mean final CLV {mean_final_clv} > 0 with sign-test p={round(sign_p, 4)} <= {alpha} "
+            f"on {beaten_units}/{n_units} independent market units."
+        )
     else:
         gate_a = "pending"
         gate_a_reason = (
-            f"mean final CLV {mean_final_clv} > 0 but sign-test p="
-            f"{round(sign_p, 4) if sign_p is not None else 'n/a'} > {alpha}; more finals required."
+            f"unit mean final CLV {mean_final_clv} > 0 but sign-test p="
+            f"{round(sign_p, 4) if sign_p is not None else 'n/a'} > {alpha}; more settled units required."
         )
 
-    # Gate B - net of execution costs (entry side already inside CLV fills).
+    # Gate B - net of execution costs. Entry-side costs live inside shadow
+    # fills; the haircut covers the exit side PLUS a registered
+    # adverse-selection charge (amendment 2: real fills cluster when wrong).
     net_edge_per_dollar: float | None = None
     if gate_a == "pass" and mean_final_clv is not None:
         net_edge_per_dollar = mean_final_clv - haircut
         gate_b = "pass" if net_edge_per_dollar > 0 else "fail"
         gate_b_reason = (
-            f"edge/dollar {mean_final_clv} minus exit haircut {haircut} = {round(net_edge_per_dollar, 6)}"
+            f"edge/dollar {mean_final_clv} minus haircuts (exit {exit_haircut} + adverse selection "
+            f"{adverse_haircut}) = {round(net_edge_per_dollar, 6)}"
         )
     else:
         gate_b = "pending" if gate_a != "fail" else "not_evaluated"
         gate_b_reason = "evaluated only after Gate A passes."
 
     # Gate C - scale feasibility.
-    diagnostic_substrings = [
-        str(sub).lower().strip()
-        for sub in (focus.get("diagnostic_cohort_substrings") or ["updown", "up_down", "up-down"])
-        if str(sub).strip()
-    ]
     entries_per_day, focus_entries_seen, observed_span_days = _entries_per_day(
         cfg.governance_root / "closing_line_value_positions.csv", diagnostic_substrings
     )
@@ -189,29 +236,35 @@ def build_profit_verdict(cfg: EngineConfig) -> dict[str, Any]:
         "verdict": verdict,
         "generated_at_utc": now_utc(),
         "registered_at_utc": REGISTERED_AT_UTC,
+        "registered_amendments_at_utc": REGISTERED_AMENDMENTS_AT_UTC,
         "question": "Can this bot generate $100/month profit?",
         "target_monthly_profit_usdc": target,
         "gates": {
             "A_edge_exists": {
                 "state": gate_a,
                 "reason": gate_a_reason,
-                "focus_final_positions": finals,
+                "independent_market_units": n_units,
+                "settled_finals_total": finals_total,
                 "minimum_final_samples": minimum_samples,
-                "focus_mean_final_clv": mean_final_clv,
-                "focus_final_beat_close_rate": beat_close_rate,
+                "unit_mean_final_clv": mean_final_clv,
+                "units_beating_close": beaten_units,
                 "sign_test_p": round(sign_p, 6) if sign_p is not None else None,
                 "sign_test_alpha": alpha,
+                "note": "units cluster finals by market so correlated tokens cannot inflate significance.",
             },
             "B_edge_survives_costs": {
                 "state": gate_b,
                 "reason": gate_b_reason,
-                "exit_cost_haircut_per_dollar": haircut,
+                "exit_cost_haircut_per_dollar": exit_haircut,
+                "adverse_selection_haircut_per_dollar": adverse_haircut,
                 "net_edge_per_dollar": round(net_edge_per_dollar, 6) if net_edge_per_dollar is not None else None,
-                "note": "entry-side costs are embedded in shadow fills (entry ask + slippage).",
+                "note": "entry-side costs are embedded in shadow fills; adverse-selection charge covers fill-quality bias shadow entries cannot experience.",
             },
             "C_scale_feasible": {
                 "state": gate_c,
                 "reason": gate_c_reason,
+                "regime": "world_cup_2026_window",
+                "regime_note": "turnover observed during a major-event liquidity regime; a YES is conditional on event-regime flow, not steady state.",
                 "required_monthly_turnover_usdc": round(required_turnover, 2) if required_turnover else None,
                 "achievable_monthly_turnover_usdc": round(achievable_turnover, 2) if achievable_turnover else None,
                 "observed_focus_entries": focus_entries_seen,
@@ -225,8 +278,10 @@ def build_profit_verdict(cfg: EngineConfig) -> dict[str, Any]:
             "crypto_updown_intraday": "NO - frozen 2026-07 after the execution-cost audit; raw run rate did not survive spreads at short horizons.",
         },
         "next_evidence": (
-            "World Cup focus finals settle 2026-07-09 through 2026-07-19; each settlement adds a Gate A sample. "
-            "A YES additionally requires the existing governed paper-confirmation round trips before any run-rate claim."
+            "World Cup focus finals settle 2026-07-09 through 2026-07-19; each settled market adds a Gate A unit. "
+            "If the tournament ends positive but underpowered, the verdict stays insufficient_evidence and the "
+            "window extends to the next event regime rather than resolving. A YES additionally requires the "
+            "existing governed paper-confirmation round trips before any run-rate claim."
         ),
         "proof_questions_seen": bool(proof),
         "paper_trading_invoked": False,

@@ -25,12 +25,18 @@ def _config(tmp_path: Path):
 
 
 def _write_finals(
-    cfg, unit_clvs: dict[str, list[float]], cohort: str = "sharp_anchor_wc", entry_price: float = 0.8
+    cfg,
+    unit_clvs: dict[str, list[float]],
+    cohort: str = "sharp_anchor_wc",
+    entry_price: float = 0.8,
+    questions: dict[str, str] | None = None,
+    close_times: dict[str, str] | None = None,
 ) -> None:
     """Write the append-only final-history ledger: market -> final CLVs.
 
     entry_price drives the taker-fee charge (rate x (1 - p) per dollar);
-    0.8 gives 0.006 at the sports rate of 0.03."""
+    0.8 gives 0.006 at the sports rate of 0.03. questions/close_times feed the
+    amendment-5 fixture tagging when provided."""
     rows = []
     for market, clvs in unit_clvs.items():
         for i, clv in enumerate(clvs):
@@ -39,6 +45,8 @@ def _write_finals(
                     "shadow_position_id": f"{market}-pos-{i}",
                     "signal_cohort": cohort,
                     "market_id": market,
+                    "question": (questions or {}).get(market, ""),
+                    "close_time": (close_times or {}).get(market, ""),
                     "line_kind": "closing",
                     "clv": clv,
                     "entry_price": entry_price,
@@ -48,7 +56,17 @@ def _write_finals(
     write_csv(
         cfg.governance_root / "closing_line_final_history.csv",
         rows,
-        fieldnames=["shadow_position_id", "signal_cohort", "market_id", "line_kind", "clv", "entry_price", "beat_close"],
+        fieldnames=[
+            "shadow_position_id",
+            "signal_cohort",
+            "market_id",
+            "question",
+            "close_time",
+            "line_kind",
+            "clv",
+            "entry_price",
+            "beat_close",
+        ],
     )
 
 
@@ -86,6 +104,38 @@ def test_correlated_finals_collapse_to_market_units(tmp_path):
     gate_a = verdict["gates"]["A_edge_exists"]
     assert gate_a["settled_finals_total"] == 30
     assert gate_a["independent_market_units"] == 3
+    assert gate_a["state"] == "pending"
+    assert verdict["verdict"] == "insufficient_evidence"
+
+
+def test_same_fixture_side_markets_collapse_to_one_unit(tmp_path):
+    """Registered amendment 5: with per-match side markets live on Polymarket
+    (daily-win, advance, totals), four all-positive markets settling on the
+    SAME football match are ONE observation, not four - Gate A must not reach
+    the unit floor through same-fixture correlation."""
+    cfg = _config(tmp_path)
+    fixture_day = "2026-07-09T20:00:00Z"
+    units = {f"independent-{m}": [0.05] for m in range(9)}
+    fixture_markets = {
+        "mkt-daily-win": "Will France win on 2026-07-09?",
+        "mkt-advance": "Will France advance against Morocco?",
+        "mkt-draw": "Will France vs. Morocco end in a draw?",
+        "mkt-totals": "France vs. Morocco: O/U 2.5",
+    }
+    units.update({market: [0.05] for market in fixture_markets})
+    _write_finals(
+        cfg,
+        units,
+        questions=fixture_markets,
+        close_times={market: fixture_day for market in fixture_markets},
+    )
+
+    verdict = build_profit_verdict(cfg)
+
+    gate_a = verdict["gates"]["A_edge_exists"]
+    assert gate_a["settled_finals_total"] == 13
+    # 9 independent markets + 1 merged France-Morocco fixture unit.
+    assert gate_a["independent_market_units"] == 10
     assert gate_a["state"] == "pending"
     assert verdict["verdict"] == "insufficient_evidence"
 

@@ -198,3 +198,8 @@ def test_vps_ops_scheduler_replaces_github_side_jobs():
     assert "collect-price-history" in script
     assert "run_training_harvest" in script
     assert "collect-trade-prints" in script  # signed-flow substrate, 15-min cadence
+    # 2026-07-09: the two registered research lanes ride existing jobs - the
+    # WO-36 maker-carry study daily with the harvest, the WO-34 event-group
+    # consistency scan at print cadence (persistence needs frequency).
+    assert "maker-carry-study" in script
+    assert "scan-event-groups" in script

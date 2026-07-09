@@ -246,9 +246,12 @@ run_training_harvest() {
     set -e
     timeout "$HARVEST_TIMEOUT" python -m polymarket_predictive_engine.cli backfill-resolved-markets --config "$CONFIG_PATH"
     timeout "$HARVEST_TIMEOUT" python -m polymarket_predictive_engine.cli collect-price-history --config "$CONFIG_PATH"
+    # WO-36 maker-carry actuarial study: daily measurement (never trading) of
+    # reward pots, band competition, and pick-off costs. Free public APIs.
+    timeout "$HARVEST_TIMEOUT" python -m polymarket_predictive_engine.cli maker-carry-study --config "$CONFIG_PATH"
   ) >> "$LOG_FILE" 2>&1
   CODE=$?
-  stamp_status training_harvest "$CODE" "gamma resolved-markets backfill + clob price histories"
+  stamp_status training_harvest "$CODE" "gamma resolved-markets backfill + clob price histories + maker-carry study"
   log "training_harvest: exit $CODE"
 }
 
@@ -257,9 +260,15 @@ run_trade_prints() {
   # for the markets the websocket collector already tracks. Signed flow is
   # training substrate; nothing here trades or gates.
   log "trade_prints: starting"
-  timeout "$PRINTS_TIMEOUT" python -m polymarket_predictive_engine.cli collect-trade-prints --config "$CONFIG_PATH" >> "$LOG_FILE" 2>&1
+  (
+    set -e
+    timeout "$PRINTS_TIMEOUT" python -m polymarket_predictive_engine.cli collect-trade-prints --config "$CONFIG_PATH"
+    # WO-34: negRisk sum-constraint scan rides the same 15-min cadence -
+    # deviation persistence is only measurable at print-level frequency.
+    timeout "$PRINTS_TIMEOUT" python -m polymarket_predictive_engine.cli scan-event-groups --config "$CONFIG_PATH"
+  ) >> "$LOG_FILE" 2>&1
   CODE=$?
-  stamp_status trade_prints "$CODE" "data-api /trades for tracked markets"
+  stamp_status trade_prints "$CODE" "data-api /trades for tracked markets + event-group consistency scan"
   log "trade_prints: exit $CODE"
 }
 

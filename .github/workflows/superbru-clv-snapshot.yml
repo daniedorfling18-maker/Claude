@@ -10,8 +10,8 @@ name: SuperBru CLV snapshot
 # brackets open/close lines for daily fixtures.
 
 on:
-  schedule:
-    - cron: '30 */8 * * *'
+  # 2026-07-09: schedule removed - all recurring jobs run on the VPS ops
+  # scheduler now (scripts/run_vps_ops_scheduler.sh); Actions is dispatch-only.
   workflow_dispatch: {}
 
 concurrency:

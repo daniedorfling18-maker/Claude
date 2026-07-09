@@ -12,10 +12,8 @@ on:
         required: false
         type: boolean
         default: false
-  schedule:
-    # Every six hours, shortly after the governance-refresh workflow.
-    # This is an operational health/proof check, not a strategy tweak.
-    - cron: "17 */6 * * *"
+  # 2026-07-09: schedule removed - all recurring jobs run on the VPS ops
+  # scheduler now (scripts/run_vps_ops_scheduler.sh); Actions is dispatch-only.
 
 permissions:
   contents: read

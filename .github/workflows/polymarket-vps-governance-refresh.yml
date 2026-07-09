@@ -2,8 +2,8 @@ name: Polymarket VPS Governance Refresh
 
 on:
   workflow_dispatch:
-  schedule:
-    - cron: "02 */6 * * *"
+  # 2026-07-09: schedule removed - all recurring jobs run on the VPS ops
+  # scheduler now (scripts/run_vps_ops_scheduler.sh); Actions is dispatch-only.
 
 permissions:
   contents: read

@@ -11,16 +11,8 @@ on:
         description: 'Dry run only; do not submit to SuperBru'
         required: false
         default: 'true'
-  schedule:
-    # 2026-07-08: the 15-minute cadence here burned ~250-330 billed Actions
-    # minutes per DAY on this private repo and exhausted the monthly quota,
-    # which then BLOCKED all scheduled runs. The VPS watchdog container
-    # (scripts/run_superbru_auto_pick_watchdog.sh) already runs the identical
-    # submitter every 15 minutes for free on our own server - it is the
-    # primary lane. This schedule is only a thin safety net in case the VPS
-    # is down: two runs/day ahead of the typical 19:00-01:00 UTC kickoffs.
-    - cron: '7 16 4-19 7 *'
-    - cron: '7 21 4-19 7 *'
+  # 2026-07-09: schedule removed - all recurring jobs run on the VPS ops
+  # scheduler now (scripts/run_vps_ops_scheduler.sh); Actions is dispatch-only.
 
 permissions:
   contents: read

@@ -2,11 +2,8 @@ name: Refresh Locked Superbru Card
 
 on:
   workflow_dispatch:
-  schedule:
-    # Twice daily UTC refresh. This updates the committed locked-card CSV only;
-    # Auto Pick remains the scheduled browser submitter.
-    - cron: '5 6 * * *'    # 08:05 SAST
-    - cron: '5 14 * * *'   # 16:05 SAST
+  # 2026-07-09: schedule removed - all recurring jobs run on the VPS ops
+  # scheduler now (scripts/run_vps_ops_scheduler.sh); Actions is dispatch-only.
 
 permissions:
   contents: write

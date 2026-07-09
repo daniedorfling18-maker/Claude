@@ -40,10 +40,12 @@ Model, per candidate market (all inputs from free, key-less public APIs):
 - Payout floor: Polymarket pays no reward below $1/market/day, so the sized
   portfolio only admits quotes whose gross reward clears that floor.
 
-MAKER GATES (pre-registered 2026-07-09, before any accrued trend history):
-  M-A carry evidence  - at least ``gate_min_runs_at_target`` daily study runs
-                        with trusted net carry at/above target, including the
-                        latest run.
+MAKER GATES (pre-registered 2026-07-09, before any accrued trend history;
+clarified same day, also pre-history: M-A counts distinct UTC DAYS, not runs,
+so re-running the study intraday can never fast-forward the clock):
+  M-A carry evidence  - trusted net carry at/above target on at least
+                        ``gate_min_runs_at_target`` distinct UTC days,
+                        including the latest run.
   M-B adverse realism - every portfolio market carries a MEASURED markout
                         charge (empirical fills, not just bar approximations).
   M-C payout floor    - enforced by construction in the sizing loop.
@@ -622,16 +624,21 @@ def run_maker_carry_study(cfg: EngineConfig) -> dict[str, Any]:
     target = float(settings["target_net_usd_per_day"])
 
     # MAKER GATES - pre-registered 2026-07-09 (see module docstring). The
-    # trend ledger is read BEFORE this run appends, then the current run
-    # counts itself, so a single day can never satisfy M-A.
+    # trend ledger is read BEFORE this run appends. Evidence counts distinct
+    # UTC DAYS at/above target - intraday re-runs can never fast-forward the
+    # clock, and a single day can never satisfy M-A.
     history_path = out_root / "maker_carry_history.csv"
     prior_runs = read_csv_rows(history_path)
-    runs_at_target = sum(
-        1 for run in prior_runs if (safe_float(run.get("portfolio_net_carry_usd_per_day")) or 0.0) >= target
-    )
+    days_at_target = {
+        str(run.get("generated_at_utc") or "")[:10]
+        for run in prior_runs
+        if (safe_float(run.get("portfolio_net_carry_usd_per_day")) or 0.0) >= target
+    }
+    days_at_target.discard("")
     latest_at_target = bool(portfolio) and net_total >= target
     if latest_at_target:
-        runs_at_target += 1
+        days_at_target.add(str(summary["generated_at_utc"])[:10])
+    runs_at_target = len(days_at_target)
     required_runs = int(settings["gate_min_runs_at_target"])
     gate_a_state = "pass" if latest_at_target and runs_at_target >= required_runs else "pending"
     gate_b_state = (
@@ -647,6 +654,7 @@ def run_maker_carry_study(cfg: EngineConfig) -> dict[str, Any]:
         "M_A_carry_evidence": {
             "state": gate_a_state,
             "runs_at_or_above_target": runs_at_target,
+            "counting": "distinct_utc_days",
             "required_runs": required_runs,
             "latest_run_at_target": latest_at_target,
         },

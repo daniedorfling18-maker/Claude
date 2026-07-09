@@ -201,7 +201,7 @@ def test_markout_charges_empirical_pickoffs_and_gates_track_evidence(tmp_path, m
     assert gates["maker_verdict"] == "insufficient_evidence"
 
 
-def test_gate_a_passes_only_after_enough_runs_at_target(tmp_path, monkeypatch):
+def test_gate_a_passes_only_after_enough_distinct_days_at_target(tmp_path, monkeypatch):
     cfg = _config(tmp_path)
     markets = [_market("deep calm market", "calm", 1000.0)]
     books = {"calm": _deep_book()}
@@ -210,11 +210,20 @@ def test_gate_a_passes_only_after_enough_runs_at_target(tmp_path, monkeypatch):
     prints = {"0xcalm": [{"price": 0.499, "size": 5, "side": "SELL", "timestamp": 600 + j * 60} for j in range(25)]}
     _fake_requests(monkeypatch, markets=markets, books=books, histories=histories, prints=prints)
 
-    last = None
+    # Registered clarification: intraday re-runs never fast-forward the clock.
+    monkeypatch.setattr(maker_carry_study, "now_utc", lambda: "2026-07-10T08:00:00Z")
     for _ in range(7):
+        same_day = run_maker_carry_study(cfg)
+    assert same_day["maker_gates"]["M_A_carry_evidence"]["runs_at_or_above_target"] == 1
+    assert same_day["maker_gates"]["M_A_carry_evidence"]["state"] == "pending"
+
+    last = None
+    for day in range(11, 17):  # six more distinct UTC days -> 7 total
+        monkeypatch.setattr(maker_carry_study, "now_utc", lambda d=day: f"2026-07-{d}T08:00:00Z")
         last = run_maker_carry_study(cfg)
     gates = last["maker_gates"]
-    assert gates["M_A_carry_evidence"]["runs_at_or_above_target"] >= 7
+    assert gates["M_A_carry_evidence"]["runs_at_or_above_target"] == 7
+    assert gates["M_A_carry_evidence"]["counting"] == "distinct_utc_days"
     assert gates["M_A_carry_evidence"]["state"] == "pass"
     assert gates["M_B_adverse_realism"]["state"] == "pass"
     assert gates["maker_verdict"] == "evidence_supported_pending_human_decision"

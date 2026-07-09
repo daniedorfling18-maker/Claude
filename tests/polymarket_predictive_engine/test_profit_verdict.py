@@ -31,7 +31,7 @@ def _write_clv(cfg, *, finals: int, mean_final_clv, beat_close_rate) -> None:
                 "diagnostic_cohort_substrings": ["updown", "up_down", "up-down"],
                 "focus_final_positions": finals,
                 "focus_mean_final_clv": mean_final_clv,
-                "focus_beat_close_rate": beat_close_rate,
+                "focus_final_beat_close_rate": beat_close_rate,
             },
         },
     )

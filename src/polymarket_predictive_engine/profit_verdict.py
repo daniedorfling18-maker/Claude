@@ -108,7 +108,10 @@ def build_profit_verdict(cfg: EngineConfig) -> dict[str, Any]:
 
     finals = int(safe_float(focus.get("focus_final_positions")) or 0)
     mean_final_clv = safe_float(focus.get("focus_mean_final_clv"))
-    beat_close_rate = safe_float(focus.get("focus_beat_close_rate"))
+    # Finals-only: provisional rows are diagnostic and must not feed the gate
+    # statistic (they include markets that have not closed - no fallback to
+    # the mixed focus_beat_close_rate, which would contaminate the sign test).
+    beat_close_rate = safe_float(focus.get("focus_final_beat_close_rate"))
 
     # Gate A - edge existence.
     sign_p: float | None = None
@@ -195,7 +198,7 @@ def build_profit_verdict(cfg: EngineConfig) -> dict[str, Any]:
                 "focus_final_positions": finals,
                 "minimum_final_samples": minimum_samples,
                 "focus_mean_final_clv": mean_final_clv,
-                "focus_beat_close_rate": beat_close_rate,
+                "focus_final_beat_close_rate": beat_close_rate,
                 "sign_test_p": round(sign_p, 6) if sign_p is not None else None,
                 "sign_test_alpha": alpha,
             },

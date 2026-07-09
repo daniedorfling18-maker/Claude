@@ -401,3 +401,66 @@ def test_minimum_required_columns_present():
     }
     assert required <= set(FEATURE_FIELDS)
     assert len(FEATURE_FIELDS) >= 20
+
+
+def test_expiring_feature_rows_are_archived_not_destroyed(tmp_path):
+    """2026-07-09: rows leaving the live retention window were silently deleted -
+    training substrate destroyed daily. They must land in the compressed archive
+    (deduplicated, disk-capped) before being dropped from the live table."""
+    import gzip
+
+    from polymarket_predictive_engine.config import EngineConfig
+    from polymarket_predictive_engine.websocket_normaliser import _retained_feature_rows
+
+    cfg = EngineConfig(
+        raw={
+            "paths": {"output_root": str(tmp_path / "outputs")},
+            "websocket_market_data": {
+                "retain_existing_features": True,
+                "feature_retention_hours": 24,
+                "max_feature_rows": 0,
+                "training_archive_enabled": True,
+                "training_archive_max_mb": 100,
+            },
+        },
+        path=tmp_path / "cfg.yaml",
+    )
+    features_path = tmp_path / "features.csv"
+    old_row = {"collected_at_utc": "2026-07-01T00:00:00Z", "source_timestamp": "1", "market": "m", "asset_id": "a", "best_bid": "0.4"}
+    fresh_row = {"collected_at_utc": "2026-07-09T00:00:00Z", "source_timestamp": "2", "market": "m", "asset_id": "a", "best_bid": "0.5"}
+
+    retained, diagnostics = _retained_feature_rows(cfg, features_path=features_path, new_features=[old_row, fresh_row])
+
+    assert [row["collected_at_utc"] for row in retained] == ["2026-07-09T00:00:00Z"]
+    archive = diagnostics["training_archive"]
+    assert archive["archived_rows"] == 1
+    archive_file = archive["archive_file"]
+    with gzip.open(archive_file, "rt", encoding="utf-8") as handle:
+        content = handle.read()
+    assert "2026-07-01T00:00:00Z" in content
+
+    # Disabled flag must skip archiving without touching retention behaviour.
+    cfg.raw["websocket_market_data"]["training_archive_enabled"] = False
+    retained2, diagnostics2 = _retained_feature_rows(cfg, features_path=features_path, new_features=[old_row, fresh_row])
+    assert diagnostics2["training_archive"]["archived_rows"] == 0
+    assert [row["collected_at_utc"] for row in retained2] == ["2026-07-09T00:00:00Z"]
+
+
+def test_training_archive_size_cap_deletes_oldest(tmp_path):
+    from polymarket_predictive_engine.config import EngineConfig
+    from polymarket_predictive_engine.websocket_normaliser import _archive_expiring_features
+
+    cfg = EngineConfig(
+        raw={"paths": {"output_root": str(tmp_path / "outputs")}},
+        path=tmp_path / "cfg.yaml",
+    )
+    settings = {"training_archive_enabled": True, "training_archive_max_mb": 0.000001}
+    rows = [{"collected_at_utc": f"2026-07-0{i}T00:00:00Z", "source_timestamp": str(i), "market": "m", "asset_id": "a"} for i in range(1, 6)]
+
+    first = _archive_expiring_features(cfg, settings, rows[:2])
+    second = _archive_expiring_features(cfg, settings, rows[2:])
+
+    assert first["archived_rows"] == 2
+    assert second["archived_rows"] == 3
+    # The tiny cap forces the oldest archive out once the second lands.
+    assert second["oldest_archives_deleted_for_cap"] >= 1

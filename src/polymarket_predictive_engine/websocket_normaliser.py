@@ -448,6 +448,62 @@ def _feature_only(row: dict[str, Any]) -> dict[str, Any]:
     return {field: row.get(field, "") for field in FEATURE_FIELDS}
 
 
+def _archive_expiring_features(
+    cfg: EngineConfig,
+    settings: dict[str, Any],
+    expired_rows: list[dict[str, Any]],
+) -> dict[str, Any]:
+    """Persist rows leaving the live retention window as compressed CSV.
+
+    The live feature table must stay small for the loop, but expired rows are
+    still training substrate. One gzip file per flush, oldest files deleted
+    once the archive exceeds ``training_archive_max_mb`` (default 1024)."""
+    import csv as _csv
+    import gzip as _gzip
+
+    enabled = str(settings.get("training_archive_enabled", True)).strip().lower() not in {"0", "false", "no"}
+    if not enabled or not expired_rows:
+        return {"enabled": enabled, "archived_rows": 0}
+
+    deduped: dict[tuple[str, ...], dict[str, Any]] = {}
+    for row in expired_rows:
+        key = _feature_row_key(row)
+        if any(key):
+            deduped[key] = row
+    rows = list(deduped.values())
+    if not rows:
+        return {"enabled": True, "archived_rows": 0}
+
+    archive_dir = cfg.output_root / "polymarket_training_archive"
+    archive_dir.mkdir(parents=True, exist_ok=True)
+    fieldnames = sorted({field for row in rows for field in row})
+    stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
+    archive_path = archive_dir / f"features_{stamp}.csv.gz"
+    with _gzip.open(archive_path, "wt", encoding="utf-8", newline="") as handle:
+        writer = _csv.DictWriter(handle, fieldnames=fieldnames, extrasaction="ignore")
+        writer.writeheader()
+        writer.writerows(rows)
+
+    max_mb = safe_float(settings.get("training_archive_max_mb"))
+    max_bytes = int((max_mb if max_mb and max_mb > 0 else 1024) * 1024 * 1024)
+    archives = sorted(archive_dir.glob("features_*.csv.gz"))
+    total = sum(path.stat().st_size for path in archives)
+    deleted = 0
+    for path in archives:
+        if total <= max_bytes:
+            break
+        total -= path.stat().st_size
+        path.unlink()
+        deleted += 1
+    return {
+        "enabled": True,
+        "archived_rows": len(rows),
+        "archive_file": str(archive_path),
+        "archive_total_bytes": total,
+        "oldest_archives_deleted_for_cap": deleted,
+    }
+
+
 def _retained_feature_rows(
     cfg: EngineConfig,
     *,
@@ -470,11 +526,18 @@ def _retained_feature_rows(
     max_rows = int(safe_float(settings.get("max_feature_rows")) or 0)
     retention_hours = safe_float(settings.get("feature_retention_hours"))
     cutoff = None
+    expired_rows: list[dict[str, Any]] = []
     if retention_hours is not None and retention_hours > 0 and combined:
         latest = max((_feature_time(row) for row in combined if _feature_time(row) is not None), default=None)
         if latest is not None:
             cutoff = latest - timedelta(hours=float(retention_hours))
-            combined = [row for row in combined if (_feature_time(row) is None or _feature_time(row) >= cutoff)]
+            kept: list[dict[str, Any]] = []
+            for row in combined:
+                if _feature_time(row) is None or _feature_time(row) >= cutoff:
+                    kept.append(row)
+                else:
+                    expired_rows.append(row)
+            combined = kept
 
     deduped: dict[tuple[str, ...], dict[str, Any]] = {}
     for row in combined:
@@ -493,8 +556,16 @@ def _retained_feature_rows(
     dropped_for_max_rows = 0
     if max_rows > 0 and len(retained) > max_rows:
         dropped_for_max_rows = len(retained) - max_rows
+        expired_rows.extend(retained[:-max_rows])
         retained = retained[-max_rows:]
+
+    # 2026-07-09: rows leaving the live retention window used to be silently
+    # DELETED - a day of order-book training substrate destroyed every day.
+    # Archive them (deduplicated, compressed, disk-capped) before dropping.
+    archive_diag = _archive_expiring_features(cfg, settings, expired_rows)
+
     diagnostics = {
+        "training_archive": archive_diag,
         "feature_retention_enabled": enabled,
         "new_feature_rows": len(current_features),
         "existing_feature_rows": len(existing),

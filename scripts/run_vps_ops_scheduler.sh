@@ -23,6 +23,8 @@ TICK_SECONDS="${OPS_TICK_SECONDS:-300}"
 GOVERNANCE_INTERVAL="${OPS_GOVERNANCE_INTERVAL_SECONDS:-21600}"
 CLV_INTERVAL="${OPS_CLV_SNAPSHOT_INTERVAL_SECONDS:-28800}"
 CARD_INTERVAL="${OPS_CARD_REFRESH_INTERVAL_SECONDS:-43200}"
+HARVEST_INTERVAL="${OPS_TRAINING_HARVEST_INTERVAL_SECONDS:-86400}"
+HARVEST_TIMEOUT="${OPS_TRAINING_HARVEST_TIMEOUT_SECONDS:-1800}"
 GOVERNANCE_TIMEOUT="${OPS_GOVERNANCE_TIMEOUT_SECONDS:-1500}"
 CLV_TIMEOUT="${OPS_CLV_TIMEOUT_SECONDS:-900}"
 CARD_TIMEOUT="${OPS_CARD_TIMEOUT_SECONDS:-2400}"
@@ -231,7 +233,24 @@ PY
   log "locked_card_refresh: exit $CODE"
 }
 
-log "vps-ops-scheduler starting: governance=${GOVERNANCE_INTERVAL}s clv=${CLV_INTERVAL}s card=${CARD_INTERVAL}s tick=${TICK_SECONDS}s"
+run_training_harvest() {
+  # Resolved-market corpus: Gamma closed markets + CLOB price histories are
+  # free (no API key, no odds credits) and give outcome-LABELLED training
+  # sequences across thousands of markets - the direct attack on the
+  # validation-gap and cohort-transfer blockers. Harvest accrues to outputs;
+  # trainer wiring is a separate leakage-reviewed work order (WO-33).
+  log "training_harvest: starting"
+  (
+    set -e
+    timeout "$HARVEST_TIMEOUT" python -m polymarket_predictive_engine.cli backfill-resolved-markets --config "$CONFIG_PATH"
+    timeout "$HARVEST_TIMEOUT" python -m polymarket_predictive_engine.cli collect-price-history --config "$CONFIG_PATH"
+  ) >> "$LOG_FILE" 2>&1
+  CODE=$?
+  stamp_status training_harvest "$CODE" "gamma resolved-markets backfill + clob price histories"
+  log "training_harvest: exit $CODE"
+}
+
+log "vps-ops-scheduler starting: governance=${GOVERNANCE_INTERVAL}s clv=${CLV_INTERVAL}s card=${CARD_INTERVAL}s harvest=${HARVEST_INTERVAL}s tick=${TICK_SECONDS}s"
 stamp_status scheduler 0 "started"
 
 while :; do
@@ -246,6 +265,10 @@ while :; do
   if [ "$(seconds_since_stamp locked_card_refresh)" -ge "$CARD_INTERVAL" ]; then
     touch_stamp locked_card_refresh
     run_locked_card_refresh
+  fi
+  if [ "$(seconds_since_stamp training_harvest)" -ge "$HARVEST_INTERVAL" ]; then
+    touch_stamp training_harvest
+    run_training_harvest
   fi
   sleep "$TICK_SECONDS"
 done

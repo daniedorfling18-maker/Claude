@@ -162,3 +162,42 @@ services:
       polymarket-paper-live:
         condition: service_started
     restart: unless-stopped
+
+  # 2026-07-09: runs the recurring jobs that previously lived in GitHub Actions
+  # (governance refresh, SuperBru CLV snapshot, locked-card refresh) so the
+  # system stays fully operational when the Actions minutes quota is exhausted.
+  # The GitHub workflows remain as optional/archival duplicates. Odds-spending
+  # jobs preflight the free /v4/sports quota endpoint and skip cleanly at zero
+  # credits; every job runs under `timeout` inside this container's own memory
+  # cgroup so a heavy refresh cannot OOM-thrash the live loop's 4G limit.
+  vps-ops-scheduler:
+    image: polymarket-paper-vps:latest
+    container_name: vps-ops-scheduler
+    mem_limit: ${VPS_OPS_MEM_LIMIT:-2g}
+    env_file:
+      - .env
+    working_dir: /app
+    environment:
+      POLYMARKET_CONFIG_PATH: /app/polymarket_predictive_config.example.yaml
+      OPS_GOVERNANCE_INTERVAL_SECONDS: ${OPS_GOVERNANCE_INTERVAL_SECONDS:-21600}
+      OPS_CLV_SNAPSHOT_INTERVAL_SECONDS: ${OPS_CLV_SNAPSHOT_INTERVAL_SECONDS:-28800}
+      OPS_CARD_REFRESH_INTERVAL_SECONDS: ${OPS_CARD_REFRESH_INTERVAL_SECONDS:-43200}
+      SUPERBRU_PLAYER_NAME: ${SUPERBRU_PLAYER_NAME:-Danie}
+      SUPERBRU_POOL_KEYWORDS: ${SUPERBRU_POOL_KEYWORDS:-Moore Infinity,FIFA WC 26,World Cup 2026}
+      THE_ODDS_API_KEY: ${THE_ODDS_API_KEY:-}
+      PM_IMAGE_BUILD_SHA: ${PM_VPS_DEPLOYED_SHA:-unknown}
+      PYTHONPATH: scripts:src
+    command: sh -c "sh scripts/run_vps_ops_scheduler.sh"
+    volumes:
+      - ./polymarket_predictive_config.example.yaml:/app/polymarket_predictive_config.example.yaml:ro
+      - ./config.yaml:/app/config.yaml:ro
+      - ./scripts:/app/scripts:ro
+      - ./src:/app/src:ro
+      - ./outputs:/app/outputs
+      - ./work:/app/work
+      - ./data:/app/data
+      - ./inputs:/app/inputs
+    depends_on:
+      polymarket-paper-live:
+        condition: service_started
+    restart: unless-stopped

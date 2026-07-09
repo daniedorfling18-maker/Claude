@@ -1,11 +1,11 @@
 name: CI
 
 on:
-  # 2026-07-09: push trigger removed (each merge burned a duplicate run);
-  # the pull_request run remains the single pre-merge check.
-  pull_request:
-    paths-ignore:
-      - 'outputs/**'
+  # 2026-07-09: fully dispatch-only. The Actions quota was exhausted, so even
+  # PR-triggered runs just fail instantly at the billing wall; the local full
+  # test suite is the gate before every merge. Re-add pull_request here when
+  # billed CI is wanted again.
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -72,7 +72,7 @@ jobs:
               'auto_pick.yml': {'workflow_dispatch'},
               'check_superbru_fixtures.yml': {'workflow_dispatch'},
               'deploy-polymarket-vps-paper.yml': {'workflow_dispatch'},
-              'ci.yml': {'pull_request'},
+              'ci.yml': {'workflow_dispatch'},
               'polymarket-vps-governance-refresh.yml': {'workflow_dispatch'},
               'polymarket-vps-proof-health.yml': {'workflow_dispatch'},
               'refresh-locked-superbru-card.yml': {'workflow_dispatch'},

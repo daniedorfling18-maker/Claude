@@ -280,3 +280,32 @@ def test_card_lane_probes_saved_pick_before_spending_odds_credits() -> None:
     assert "fetch_match_odds_snapshot" not in before
     after = probe_gate[1]
     assert "fetch_match_odds_snapshot" in after
+
+
+def test_probe_cache_prevents_per_cycle_browser_logins(tmp_path: Path) -> None:
+    """2026-07-09 efficiency audit: the watchdog re-probed every frozen match's
+    SuperBru row each 15-minute cycle - a full headless login per match,
+    ~300-400/day of waste and login-rate risk. A saved pick only changes when
+    this system changes it, so probe results must be cached with a TTL and
+    refreshed by verified submits."""
+    import inspect
+
+    module = load_module()
+    base = module.base
+
+    entry = {"home_team": "Spain", "away_team": "Belgium"}
+    assert base.cached_row_pick(tmp_path, entry, 360) == ""
+
+    base.remember_row_pick(tmp_path, entry, "2-0")
+    assert base.cached_row_pick(tmp_path, entry, 360) == "2-0"
+    # TTL zero disables trust; expired cache must force a real probe.
+    assert base.cached_row_pick(tmp_path, entry, 0) == ""
+    # Different match, no bleed-through.
+    assert base.cached_row_pick(tmp_path, {"home_team": "Norway", "away_team": "England"}, 360) == ""
+
+    source = inspect.getsource(base)
+    gate = source.split("cached_pick = cached_row_pick", 1)
+    assert len(gate) == 2, "probe gate must consult the cache first"
+    assert "await probe_existing_row_pick" in gate[1]
+    assert 'submit_result.get("status") == "submitted"' in gate[1]
+    assert "remember_row_pick(out_dir, entry, pick)" in gate[1]

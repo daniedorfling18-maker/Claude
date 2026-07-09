@@ -1019,6 +1019,60 @@ def should_keep_existing_pick_until_revision_window(entry: dict[str, Any], args:
     return outside_revision_window(entry, args)
 
 
+def _probe_cache_path(out_dir: Path) -> Path:
+    return out_dir / "auto_pick_probe_cache.json"
+
+
+def _probe_cache_key(entry: dict[str, Any]) -> str:
+    return f"{norm_team(entry.get('home_team'))}|{norm_team(entry.get('away_team'))}"
+
+
+def cached_row_pick(out_dir: Path, entry: dict[str, Any], ttl_minutes: float) -> str:
+    """Return a recently probed/verified saved pick without opening a browser.
+
+    2026-07-09 efficiency audit: the watchdog re-probed every frozen match's
+    row each 15-minute cycle - a full headless Chromium login per match,
+    ~300-400 logins/day of pure waste (and SuperBru login-rate risk). A saved
+    pick only changes when this system changes it, so trust the last
+    probe/verified submit for the TTL."""
+    if ttl_minutes <= 0:
+        return ""
+    try:
+        payload = json.loads(_probe_cache_path(out_dir).read_text(encoding="utf-8"))
+    except Exception:
+        return ""
+    record = payload.get(_probe_cache_key(entry)) if isinstance(payload, dict) else None
+    if not isinstance(record, dict):
+        return ""
+    stamp = parse_iso_datetime(record.get("verified_at_utc"))
+    if stamp is None:
+        return ""
+    age_minutes = (datetime.now(timezone.utc) - stamp).total_seconds() / 60.0
+    if age_minutes > ttl_minutes:
+        return ""
+    return normalise_score_pick(record.get("pick"))
+
+
+def remember_row_pick(out_dir: Path, entry: dict[str, Any], pick: str) -> None:
+    """Record a probed or submit-verified saved pick for cache reuse."""
+    pick = normalise_score_pick(pick)
+    if not pick:
+        return
+    path = _probe_cache_path(out_dir)
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+        if not isinstance(payload, dict):
+            payload = {}
+    except Exception:
+        payload = {}
+    payload[_probe_cache_key(entry)] = {
+        "pick": pick,
+        "verified_at_utc": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+    }
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+
+
 async def probe_existing_row_pick(args: argparse.Namespace, entry: dict[str, Any], out_dir: Path) -> str:
     """Read the SuperBru row's saved pick via a dry-run pass.
 
@@ -1625,12 +1679,20 @@ async def run(args: argparse.Namespace) -> dict[str, Any]:
             and not normalise_score_pick(entry.get("current_pick"))
             and outside_revision_window(entry, args)
         ):
-            try:
-                probed_pick = await probe_existing_row_pick(args, entry, out_dir)
-                if probed_pick:
-                    entry["current_pick"] = probed_pick
-            except Exception as exc:
-                entry["existing_pick_probe"] = {"status": "probe_failed", "error": str(exc)}
+            cached_pick = cached_row_pick(
+                out_dir, entry, float(getattr(args, "probe_cache_ttl_minutes", 360))
+            )
+            if cached_pick:
+                entry["current_pick"] = cached_pick
+                entry["existing_pick_probe"] = {"status": "cache_hit", "pick": cached_pick}
+            else:
+                try:
+                    probed_pick = await probe_existing_row_pick(args, entry, out_dir)
+                    if probed_pick:
+                        entry["current_pick"] = probed_pick
+                        remember_row_pick(out_dir, entry, probed_pick)
+                except Exception as exc:
+                    entry["existing_pick_probe"] = {"status": "probe_failed", "error": str(exc)}
 
         if should_keep_existing_pick_until_revision_window(entry, args):
             current_pick = normalise_score_pick(entry.get("current_pick"))
@@ -1740,6 +1802,9 @@ async def run(args: argparse.Namespace) -> dict[str, Any]:
                 submit_result = await submit_pick(args, entry["home_team"], entry["away_team"], pick, out_dir)
             entry["status"] = submit_result.get("status", "unknown")
             entry["submit_result"] = submit_result
+            if submit_result.get("status") == "submitted":
+                # A read-back-verified save is the freshest possible probe result.
+                remember_row_pick(out_dir, entry, pick)
         except Exception as exc:
             entry["status"] = "submit_failed"
             entry["error"] = str(exc)
@@ -1867,6 +1932,16 @@ def build_parser() -> argparse.ArgumentParser:
             "If a future SuperBru pick already exists, keep it unchanged until this many "
             "minutes before kickoff. This lets the broad watchdog fill the card early "
             "without re-submitting noisy odds/pool tactic changes every cycle."
+        ),
+    )
+    parser.add_argument(
+        "--probe-cache-ttl-minutes",
+        type=int,
+        default=360,
+        help=(
+            "Trust a previously probed/verified saved pick for this long before opening a "
+            "browser to re-read the row. A saved pick only changes when this system changes "
+            "it, so re-probing every watchdog cycle burned ~300-400 headless logins/day."
         ),
     )
     parser.add_argument("--skip-match-odds", action="store_true")

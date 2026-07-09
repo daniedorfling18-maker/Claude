@@ -3229,3 +3229,20 @@ def test_dashboard_model_staleness_threshold_matches_rescore_cadence(tmp_path):
     result = render_dashboard(cfg)
     data = read_json(result["dashboard_data"])
     assert any(alert["title"] == "Model scoring is stale" for alert in data["oversight_status"]["alerts"])
+
+
+def test_dashboard_carries_profit_verdict_and_html_panel(tmp_path):
+    """The pre-registered $100/month verdict must ride every render path (same
+    clobber-proofing as proof_questions) and surface as a dashboard panel."""
+    cfg = _config(tmp_path)
+
+    result = render_dashboard(cfg)
+    data = read_json(result["dashboard_data"])
+    html = Path(result["dashboard_file"]).read_text(encoding="utf-8")
+
+    verdict = data["profit_verdict"]
+    assert verdict["verdict"] == "insufficient_evidence"
+    assert verdict["gates"]["A_edge_exists"]["state"] == "pending"
+    assert verdict["paper_trading_invoked"] is False
+    assert "The $100/month verdict" in html
+    assert "profitVerdict" in html

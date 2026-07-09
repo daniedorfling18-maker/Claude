@@ -5444,6 +5444,12 @@ def render_dashboard(cfg: EngineConfig, latest_report: dict[str, Any] | None = N
 
     proof_questions = build_proof_questions(cfg, dashboard_data=payload)
     payload["proof_questions"] = proof_questions
+    # The pre-registered $100/month verdict recomputes on every render path for the
+    # same clobber-proofing reason as proof_questions above: whichever process
+    # renders last must carry the current verdict, not erase it.
+    from .profit_verdict import build_profit_verdict
+
+    payload["profit_verdict"] = build_profit_verdict(cfg)
     html_out = _inject_html_overlay(HTML)
     _write_dashboard_data(out / "dashboard_data.json", payload)
     (out / "index.html").write_text(html_out, encoding="utf-8")

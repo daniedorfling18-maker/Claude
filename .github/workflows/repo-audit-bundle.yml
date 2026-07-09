@@ -1,17 +1,8 @@
 name: Repo Audit Bundle
 
 on:
-  push:
-    branches:
-      - main
-    paths:
-      - '.github/workflows/**'
-      - 'scripts/**'
-      - 'src/**'
-      - 'config.yaml'
-      - 'pyproject.toml'
-      - 'README.md'
-      - 'docs/**'
+  # 2026-07-09: push trigger removed to stop per-merge Actions burn.
+  workflow_dispatch:
 
 permissions:
   contents: read

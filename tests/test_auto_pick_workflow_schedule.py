@@ -8,34 +8,16 @@ VPS_COMPOSE = ROOT / "docker-compose.vps-paper.yml"
 VPS_WATCHDOG = ROOT / "scripts" / "run_superbru_auto_pick_watchdog.sh"
 
 
-def test_auto_pick_github_schedule_is_a_thin_safety_net_not_a_watchdog() -> None:
-    """2026-07-08: a 15-minute GitHub cron burned ~250-330 billed Actions
-    minutes/day, exhausted the monthly quota, and GitHub then BLOCKED all
-    scheduled runs. The VPS watchdog container is the primary 15-minute lane
-    (free, on our own server); the GitHub schedule must stay at a handful of
-    daily safety runs at most."""
+def test_auto_pick_has_no_github_schedule_actions_is_dispatch_only() -> None:
+    """2026-07-09: the Actions minutes quota was exhausted, so ALL recurring
+    jobs moved to the VPS ops scheduler and every workflow became
+    dispatch-only. A reintroduced cron here would silently start burning paid
+    minutes again; the VPS watchdog container is the pick lane."""
     text = WORKFLOW.read_text(encoding="utf-8")
     crons = re.findall(r"cron:\s*'([^']+)'", text)
 
-    assert crons, "auto_pick must keep a safety-net schedule"
-    runs_per_day = 0
-    for cron in crons:
-        minute_field, hour_field = cron.split()[:2]
-        minutes = len(minute_field.split(","))
-        hours = 0
-        for token in hour_field.split(","):
-            if "-" in token:
-                start, end = token.split("-")
-                hours += int(end) - int(start) + 1
-            elif token == "*":
-                hours += 24
-            else:
-                hours += 1
-        runs_per_day += minutes * hours
-    assert runs_per_day <= 4, f"GitHub auto-pick schedule too hot: ~{runs_per_day} runs/day burns paid Actions minutes"
-
-    minute_fields = [cron.split()[0] for cron in crons]
-    assert all(not token.startswith("0") or token == "0" for field in minute_fields for token in field.split(","))
+    assert not crons, f"auto_pick must stay dispatch-only, found schedule: {crons}"
+    assert "workflow_dispatch" in text
 
 
 def test_auto_pick_uses_broad_early_card_window_by_default() -> None:

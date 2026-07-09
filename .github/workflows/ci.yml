@@ -1,10 +1,8 @@
 name: CI
 
 on:
-  push:
-    paths-ignore:
-      - 'outputs/**'
-      - 'docs/superbru-automation-context.md'
+  # 2026-07-09: push trigger removed (each merge burned a duplicate run);
+  # the pull_request run remains the single pre-merge check.
   pull_request:
     paths-ignore:
       - 'outputs/**'
@@ -71,15 +69,15 @@ jobs:
               'test_submit_dry_run.yml',
           }
           expected_triggers = {
-              'auto_pick.yml': {'schedule', 'workflow_dispatch'},
+              'auto_pick.yml': {'workflow_dispatch'},
               'check_superbru_fixtures.yml': {'workflow_dispatch'},
               'deploy-polymarket-vps-paper.yml': {'workflow_dispatch'},
-              'ci.yml': {'push', 'pull_request'},
-              'polymarket-vps-governance-refresh.yml': {'schedule', 'workflow_dispatch'},
-              'polymarket-vps-proof-health.yml': {'schedule', 'workflow_dispatch'},
-              'refresh-locked-superbru-card.yml': {'schedule', 'workflow_dispatch'},
-              'repo-audit-bundle.yml': {'push'},
-              'superbru-clv-snapshot.yml': {'schedule', 'workflow_dispatch'},
+              'ci.yml': {'pull_request'},
+              'polymarket-vps-governance-refresh.yml': {'workflow_dispatch'},
+              'polymarket-vps-proof-health.yml': {'workflow_dispatch'},
+              'refresh-locked-superbru-card.yml': {'workflow_dispatch'},
+              'repo-audit-bundle.yml': {'workflow_dispatch'},
+              'superbru-clv-snapshot.yml': {'workflow_dispatch'},
           }
           possible_triggers = {'schedule', 'push', 'pull_request', 'workflow_dispatch'}
 

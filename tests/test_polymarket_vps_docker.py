@@ -192,3 +192,8 @@ def test_vps_ops_scheduler_replaces_github_side_jobs():
     assert "x-requests-remaining" in script  # free-endpoint quota preflight
     assert 'timeout "$GOVERNANCE_TIMEOUT"' in script
     assert "status.json" in script
+    # 2026-07-09: daily resolved-market harvest (Gamma backfill + CLOB price
+    # histories) - free, key-less, outcome-labelled training corpus.
+    assert "backfill-resolved-markets" in script
+    assert "collect-price-history" in script
+    assert "run_training_harvest" in script

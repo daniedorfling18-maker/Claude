@@ -1285,3 +1285,28 @@ focus-discipline rule in `AGENTS.md`.
 
 WP-level status lives in the charter (`docs/POLYMARKET_QUANT_MODE_CHARTER.md`): WP3/WP4/WP5/WP6/
 WP7/WP8 and the algo track (WP9–WP11) have all landed.
+
+---
+
+## WO-33 — Wire the resolved-market corpus into the trainer (leakage-reviewed)
+
+Filed 2026-07-09. The training-data audit found the harvest machinery parked and
+the live feature substrate being destroyed on retention roll-off. Both are fixed
+operationally (features now archive to `outputs/polymarket_training_archive`
+before deletion; the VPS ops scheduler runs `backfill-resolved-markets` +
+`collect-price-history` daily — free, key-less, outcome-labelled sequences
+across thousands of resolved markets). What remains is MODEL work, not plumbing:
+
+1. Build a leakage-safe training-set assembly from the harvested corpus:
+   features strictly point-in-time from price history; labels from resolution
+   outcomes only at/after market close; explicit time-based splits per market.
+2. Use the corpus to attack the two standing blockers with evidence:
+   the validation gap (positive out-of-sample executable examples) and
+   cohort transfer (train/validate across DIFFERENT market categories).
+3. Report through the existing gates. No gate, stake, or promotion threshold
+   changes; the corpus earns its way in through validation metrics or not at all.
+
+Also filed from the same audit, smaller: trade-print (time & sales) collection
+for signed-flow features and empirical fill/slippage modelling (sharpens verdict
+Gate B), and a guarded partial re-widening of live collection
+(assets 60→90, retention 72→96h) now that the cgroup memory guard is active.

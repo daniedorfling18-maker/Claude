@@ -959,6 +959,12 @@ websocket_market_data:
   retain_existing_features: true
   feature_retention_hours: 72
   max_feature_rows: 60000
+  # 2026-07-09: rows leaving the live retention window used to be silently
+  # deleted - a day of order-book training substrate destroyed every day. They
+  # are now archived (deduplicated gzip CSV) to outputs/polymarket_training_archive
+  # before deletion, oldest files pruned above the size cap.
+  training_archive_enabled: true
+  training_archive_max_mb: 1024
   feature_retention_write_interval_seconds: 120
   normalise_latest_messages_only: true
   return_latest_features_only: true

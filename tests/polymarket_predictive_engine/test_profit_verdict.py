@@ -24,8 +24,13 @@ def _config(tmp_path: Path):
     return load_config(path)
 
 
-def _write_finals(cfg, unit_clvs: dict[str, list[float]], cohort: str = "sharp_anchor_wc") -> None:
-    """Write the append-only final-history ledger: market -> final CLVs."""
+def _write_finals(
+    cfg, unit_clvs: dict[str, list[float]], cohort: str = "sharp_anchor_wc", entry_price: float = 0.8
+) -> None:
+    """Write the append-only final-history ledger: market -> final CLVs.
+
+    entry_price drives the taker-fee charge (rate x (1 - p) per dollar);
+    0.8 gives 0.006 at the sports rate of 0.03."""
     rows = []
     for market, clvs in unit_clvs.items():
         for i, clv in enumerate(clvs):
@@ -36,13 +41,14 @@ def _write_finals(cfg, unit_clvs: dict[str, list[float]], cohort: str = "sharp_a
                     "market_id": market,
                     "line_kind": "closing",
                     "clv": clv,
+                    "entry_price": entry_price,
                     "beat_close": clv > 0,
                 }
             )
     write_csv(
         cfg.governance_root / "closing_line_final_history.csv",
         rows,
-        fieldnames=["shadow_position_id", "signal_cohort", "market_id", "line_kind", "clv", "beat_close"],
+        fieldnames=["shadow_position_id", "signal_cohort", "market_id", "line_kind", "clv", "entry_price", "beat_close"],
     )
 
 
@@ -107,11 +113,11 @@ def test_verdict_is_no_when_unit_floor_met_and_clv_nonpositive(tmp_path):
 def test_verdict_yes_requires_all_three_gates_and_stays_paper_gated(tmp_path):
     cfg = _config(tmp_path)
     # 13/14 units beat the close (sign p ~= 0.00092); equal-weight unit mean
-    # (13 x 0.036 - 0.05) / 14 ~= 0.0299; net of 0.01 haircuts ~= 0.0199.
+    # (13 x 0.036 - 0.05) / 14 ~= 0.0299; net of taker fee 0.006 (entry 0.8)
+    # plus 0.01 haircuts ~= 0.0139 -> required ~= $7,194/month.
     units = {f"m{m}": [0.036] for m in range(13)}
     units["m-loser"] = [-0.05]
-    _write_finals(cfg, units)
-    # required ~= 100 / 0.0199 ~= $5,033/month.
+    _write_finals(cfg, units, entry_price=0.8)
     # 60 entries over 10 days = 6/day -> $1,800/month achievable: Gate C FAILS.
     _write_positions(cfg, count=60, span_days=10)
 
@@ -121,8 +127,8 @@ def test_verdict_yes_requires_all_three_gates_and_stays_paper_gated(tmp_path):
     assert verdict["gates"]["C_scale_feasible"]["state"] == "fail"
     assert verdict["verdict"] == "no_for_tested_edge_classes"
 
-    # Denser flow: 240 entries over 10 days = 24/day -> $7,200/month >= required.
-    _write_positions(cfg, count=240, span_days=10)
+    # Denser flow: 250 entries over 10 days = 25/day -> $7,500/month >= required.
+    _write_positions(cfg, count=250, span_days=10)
     verdict = build_profit_verdict(cfg)
     assert verdict["gates"]["C_scale_feasible"]["state"] == "pass"
     assert verdict["gates"]["C_scale_feasible"]["regime"] == "world_cup_2026_window"
@@ -136,11 +142,12 @@ def test_verdict_yes_requires_all_three_gates_and_stays_paper_gated(tmp_path):
 
 
 def test_adverse_selection_haircut_is_charged_in_gate_b(tmp_path):
-    """Registered amendment 2: an edge that only clears the exit haircut but
-    not the adverse-selection charge must FAIL Gate B."""
+    """Registered amendment 2: an edge that clears fees + exit haircut but not
+    the adverse-selection charge must FAIL Gate B."""
     cfg = _config(tmp_path)
-    # Unit mean 0.008: above exit haircut alone (0.005), below combined (0.010).
-    _write_finals(cfg, {f"m{m}": [0.008] for m in range(14)})
+    # Unit mean 0.0125 at entry 0.8: fee 0.006 + exit 0.005 = 0.011 leaves
+    # +0.0015 without the adverse charge; with it (0.005) the net is negative.
+    _write_finals(cfg, {f"m{m}": [0.0125] for m in range(14)}, entry_price=0.8)
 
     verdict = build_profit_verdict(cfg)
 
@@ -149,6 +156,26 @@ def test_adverse_selection_haircut_is_charged_in_gate_b(tmp_path):
     assert gate_b["adverse_selection_haircut_per_dollar"] == 0.005
     assert gate_b["state"] == "fail"
     assert verdict["verdict"] == "no_for_tested_edge_classes"
+
+
+def test_taker_fees_are_charged_from_entry_prices(tmp_path):
+    """Registered amendment 4 (live fee schedule, verified 2026-07-09): sports
+    takers pay rate x (1-p) per dollar. An edge that clears both haircuts but
+    not the fee must FAIL, and cheaper entries must charge larger fees."""
+    cfg = _config(tmp_path)
+    # Unit mean 0.014 at entry 0.8: haircuts 0.010 leave +0.004, but the fee
+    # 0.03 x 0.2 = 0.006 makes the net negative.
+    _write_finals(cfg, {f"m{m}": [0.014] for m in range(14)}, entry_price=0.8)
+
+    verdict = build_profit_verdict(cfg)
+    gate_b = verdict["gates"]["B_edge_survives_costs"]
+    assert gate_b["mean_taker_fee_per_dollar"] == 0.006
+    assert gate_b["state"] == "fail"
+
+    # Longshot entries (p=0.3) pay 0.03 x 0.7 = 0.021 per dollar.
+    _write_finals(cfg, {f"m{m}": [0.014] for m in range(14)}, entry_price=0.3)
+    verdict = build_profit_verdict(cfg)
+    assert verdict["gates"]["B_edge_survives_costs"]["mean_taker_fee_per_dollar"] == 0.021
 
 
 def test_frozen_cohort_entries_do_not_inflate_achievable_turnover(tmp_path):

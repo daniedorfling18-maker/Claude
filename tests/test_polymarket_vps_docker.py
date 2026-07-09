@@ -197,3 +197,4 @@ def test_vps_ops_scheduler_replaces_github_side_jobs():
     assert "backfill-resolved-markets" in script
     assert "collect-price-history" in script
     assert "run_training_harvest" in script
+    assert "collect-trade-prints" in script  # signed-flow substrate, 15-min cadence

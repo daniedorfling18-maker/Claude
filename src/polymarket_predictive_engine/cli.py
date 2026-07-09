@@ -56,6 +56,7 @@ from .price_action_model import train_price_action_model
 from .price_action_scout import build_price_action_scout
 from .price_action_signals import build_price_action_paper_signals
 from .price_history_collector import collect_price_history
+from .trade_print_collector import collect_trade_prints
 from .profit_target import reset_profit_target_baseline, write_profit_target_tracker
 from .profit_sprint import build_profit_sprint
 from .promotion_review import build_promotion_review
@@ -91,6 +92,7 @@ COMMANDS = [
     "collect-resolutions",
     "backfill-resolved-markets",
     "collect-price-history",
+    "collect-trade-prints",
     "build-labels",
     "build-features",
     "build-features-v2",
@@ -264,6 +266,8 @@ def main(argv: list[str] | None = None) -> int:
         elif args.command == "collect-price-history":
             _, _, summary = collect_price_history(cfg, historical_limit=args.historical_limit)
             _print(summary)
+        elif args.command == "collect-trade-prints":
+            _print(collect_trade_prints(cfg))
         elif args.command == "build-labels":
             _print({"labels": len(build_labels(cfg))})
         elif args.command == "build-features":

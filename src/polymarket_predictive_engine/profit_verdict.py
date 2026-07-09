@@ -42,12 +42,14 @@ gates above.
 """
 from __future__ import annotations
 
+import re
 from datetime import datetime, timezone
 from math import comb
 from pathlib import Path
 from typing import Any
 
 from .config import EngineConfig
+from .sharp_anchor import _event_teams_from_question, _event_teams_from_text, _match_subject_from_question, _team_key
 from .utils import now_utc, parse_timestamp, read_csv_rows, read_json, safe_float, write_json
 
 VERDICT_FILENAME = "profit_verdict.json"
@@ -82,6 +84,17 @@ REGISTERED_AT_UTC = "2026-07-09T04:00:00Z"
 #      rate x (1-p) per dollar staked, computed per final from its actual
 #      entry price). The engine was built on a zero-fee prior that is no
 #      longer true.
+#   5. Gate A units merge across MARKETS that share a fixture (any common
+#      team-key on the same settlement date, transitively), not just across
+#      tokens of one market. Registered together with - and specifically
+#      because of - the coverage expansion below: as of the knockout rounds
+#      Polymarket lists several markets per match (daily-win, advance, draw,
+#      totals/spread side markets), and counting them as separate units would
+#      inflate the sign test with correlated observations. The focus edge
+#      class prospectively includes every sharp-anchored market on covered
+#      fixtures (the existing h2h mapper already joins the new shapes; the
+#      Odds API fetch already pays for soccer_fifa_world_cup h2h). Expansion
+#      only ever adds units THROUGH this tightened clustering.
 REGISTERED_AMENDMENTS_AT_UTC = "2026-07-09T11:00:00Z"
 
 
@@ -117,17 +130,64 @@ def _entries_per_day(positions_path: Path, diagnostic_substrings: list[str]) -> 
     return len(stamps) / span_days, len(stamps), round(span_days, 2)
 
 
+def _fixture_tags(row: dict[str, Any]) -> set[str]:
+    """Team-plus-settlement-date tags identifying the real-world fixture.
+
+    Registered amendment 5: markets sharing any tag are the SAME independence
+    unit (a France daily-win, a France-Morocco advance market and the match
+    totals all settle on one football match). Extraction is best-effort - a
+    row with no parsable team or date simply contributes no tags and clusters
+    by market as before. False merges are acceptable: they only ever TIGHTEN
+    the unit count."""
+    close_stamp = parse_timestamp(row.get("close_time") or row.get("line_timestamp"))
+    if close_stamp is None:
+        return set()
+    day = close_stamp.strftime("%Y-%m-%d")
+    question = str(row.get("question") or "")
+    slug = str(row.get("market_slug") or "")
+    teams: set[str] = set()
+    pair = (
+        _match_subject_from_question(question)
+        or _event_teams_from_question(question)
+        or _event_teams_from_text(question)
+        or _event_teams_from_text(slug)
+    )
+    if pair:
+        teams.update(pair)
+    single = re.match(r"^will\s+(.+?)\s+(?:win|advance|qualify|beat|defeat)\b", question.strip().lower())
+    if single:
+        teams.add(single.group(1))
+    return {f"{_team_key(team)}:{day}" for team in teams if _team_key(team)}
+
+
 def _clustered_focus_finals(
     cfg: EngineConfig, diagnostic_substrings: list[str], taker_fee_rate: float
 ) -> dict[str, list[tuple[float, float]]]:
-    """Settled focus finals grouped into independent units by market.
+    """Settled focus finals grouped into independent fixture-level units.
 
     Reads the append-only final history ledger; excludes frozen diagnostic
-    cohorts; returns market -> [(final CLV, taker fee per dollar)] where the
+    cohorts; returns unit -> [(final CLV, taker fee per dollar)] where the
     fee uses each final's actual entry price: rate x (1 - p). Missing entry
-    prices charge the worst case (p -> 0 gives rate x 1) - fail conservative."""
+    prices charge the worst case (p -> 0 gives rate x 1) - fail conservative.
+
+    Units start as markets (amendment 1) and merge transitively across
+    markets sharing a fixture tag (amendment 5) via union-find."""
     rows = read_csv_rows(cfg.governance_root / "closing_line_final_history.csv")
-    clusters: dict[str, list[tuple[float, float]]] = {}
+
+    parent: dict[str, str] = {}
+
+    def find(node: str) -> str:
+        while parent.setdefault(node, node) != node:
+            parent[node] = parent[parent[node]]
+            node = parent[node]
+        return node
+
+    def union(left: str, right: str) -> None:
+        root_left, root_right = find(left), find(right)
+        if root_left != root_right:
+            parent[root_right] = root_left
+
+    entries: list[tuple[str, float, float]] = []
     for row in rows:
         if str(row.get("line_kind") or "") != "closing":
             continue
@@ -140,12 +200,19 @@ def _clustered_focus_finals(
         key = str(row.get("market_id") or row.get("market_slug") or row.get("shadow_position_id") or "").strip()
         if not key:
             continue
+        node = f"market:{key}"
+        for tag in _fixture_tags(row):
+            union(node, f"fixture:{tag}")
         entry_price = safe_float(row.get("entry_price"))
         if entry_price is not None and 0 < entry_price <= 1:
             fee_per_dollar = taker_fee_rate * (1.0 - entry_price)
         else:
             fee_per_dollar = taker_fee_rate
-        clusters.setdefault(key, []).append((clv, fee_per_dollar))
+        entries.append((node, clv, fee_per_dollar))
+
+    clusters: dict[str, list[tuple[float, float]]] = {}
+    for node, clv, fee_per_dollar in entries:
+        clusters.setdefault(find(node), []).append((clv, fee_per_dollar))
     return clusters
 
 
@@ -170,9 +237,10 @@ def build_profit_verdict(cfg: EngineConfig) -> dict[str, Any]:
 
     taker_fee_rate = float(settings["taker_fee_rate"])
 
-    # Gate A - edge existence, on INDEPENDENT units (registered amendment 1):
-    # finals cluster by market; one market's tokens are one observation, so
-    # correlated finals cannot inflate the sign test or reach the floor early.
+    # Gate A - edge existence, on INDEPENDENT units (registered amendments 1+5):
+    # finals cluster by market, and markets sharing a fixture merge into one
+    # unit, so neither correlated tokens nor per-match side markets can
+    # inflate the sign test or reach the floor early.
     clusters = _clustered_focus_finals(cfg, diagnostic_substrings, taker_fee_rate)
     finals_total = sum(len(values) for values in clusters.values())
     unit_means = [sum(clv for clv, _ in values) / len(values) for values in clusters.values()]
@@ -274,7 +342,7 @@ def build_profit_verdict(cfg: EngineConfig) -> dict[str, Any]:
                 "units_beating_close": beaten_units,
                 "sign_test_p": round(sign_p, 6) if sign_p is not None else None,
                 "sign_test_alpha": alpha,
-                "note": "units cluster finals by market so correlated tokens cannot inflate significance.",
+                "note": "units cluster finals by market AND merge markets sharing a fixture (team + settlement date), so neither correlated tokens nor same-match side markets can inflate significance.",
             },
             "B_edge_survives_costs": {
                 "state": gate_b,

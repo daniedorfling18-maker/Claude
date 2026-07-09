@@ -1322,6 +1322,15 @@ are NOT) are an unexploited mispricing family. Build event-group joins in the
 feature layer and expose group-consistency features to the model. No gates or
 stakes change.
 
+**Detection layer SHIPPED 2026-07-09** (`event_group_consistency.py`,
+`scan-event-groups`, 15-min VPS cadence with the trade-prints job): scans the
+top negRisk event groups, charges live taker fees per leg, appends net
+deviations > 0.2c/basket to a persistence ledger. First live scan: 83 groups,
+one flagged - a zero-fee politics group at +4.5c/basket on the buy-all-YES
+side. Open question the ledger now answers: are deviations persistent and
+deep enough to be an edge class, or stale-quote mirages? Feature wiring into
+the model remains open (leakage review with WO-33).
+
 ## WO-35 — Wallet intelligence (smart-money positioning)
 
 Filed 2026-07-09. Polymarket positions are public on-chain: the data-API
@@ -1354,6 +1363,19 @@ risk = adverse fills near events; this is the real cost); (3) verdict-style
 gate: expected rewards minus expected adverse-selection loss must be positive
 with the same statistical discipline as the taking lane. No live orders; the
 existing governance gates stay in charge.
+
+**Step (1) SHIPPED 2026-07-09** (`maker_carry_study.py`, `maker-carry-study`,
+daily VPS cadence with the training harvest): live universe scan + book
+competition (quadratic score inside the band) + dual-window pick-off charge
+(worse of 24h@1min and 7d@10min mids) + capital-capped sized portfolio.
+First live run: ~$45k/day of reward pots across 132 markets; trusted sized
+portfolio $6.30/day (~$189/month upper bound) on $443 capital, driven by the
+Fed July-meeting market. Two failure modes are guarded by construction (both
+observed live): thin in-game books faking 40-86% reward shares (untrusted
+above 5% share), and calm-24h windows hiding news gaps (LeBron market:
+$0/day fast window vs $11.67/day slow window - the worse window is charged).
+The daily history ledger tracks stability. Steps (2)-(3) remain open and are
+required before ANY quoting behaviour is even paper-simulated.
 
 Also from the docs read, smaller: batch endpoints (/books, /prices,
 /midpoints, batch prices-history) to cut poller overhead; klines endpoint;

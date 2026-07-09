@@ -55,6 +55,8 @@ from .price_action_microstructure import build_microstructure_edge_lab
 from .price_action_model import train_price_action_model
 from .price_action_scout import build_price_action_scout
 from .price_action_signals import build_price_action_paper_signals
+from .event_group_consistency import scan_event_groups
+from .maker_carry_study import run_maker_carry_study
 from .price_history_collector import collect_price_history
 from .trade_print_collector import collect_trade_prints
 from .profit_target import reset_profit_target_baseline, write_profit_target_tracker
@@ -93,6 +95,8 @@ COMMANDS = [
     "backfill-resolved-markets",
     "collect-price-history",
     "collect-trade-prints",
+    "maker-carry-study",
+    "scan-event-groups",
     "build-labels",
     "build-features",
     "build-features-v2",
@@ -268,6 +272,10 @@ def main(argv: list[str] | None = None) -> int:
             _print(summary)
         elif args.command == "collect-trade-prints":
             _print(collect_trade_prints(cfg))
+        elif args.command == "maker-carry-study":
+            _print(run_maker_carry_study(cfg))
+        elif args.command == "scan-event-groups":
+            _print(scan_event_groups(cfg))
         elif args.command == "build-labels":
             _print({"labels": len(build_labels(cfg))})
         elif args.command == "build-features":

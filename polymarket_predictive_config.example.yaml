@@ -73,6 +73,29 @@ trade_prints:
   limit_per_market: 500
   request_timeout_seconds: 20
   max_ledger_rows: 200000
+# 2026-07-09 WO-36: maker-carry actuarial study. Measures (never trades) whether
+# zero-fee quoting for daily liquidity rewards clears $100/month net of a
+# pick-off charge estimated from 1-min price history. Free key-less endpoints.
+maker_carry_study:
+  enabled: true
+  universe_pages: 5
+  page_size: 100
+  min_daily_pot_usd: 25
+  max_book_candidates: 20
+  quote_distance_fraction: 0.5
+  reaction_minutes: 1
+  capital_cap_usd: 500
+  target_net_usd_per_day: 3.33
+# 2026-07-09 WO-34: negRisk event groups must price to $1; the detector logs
+# net-of-fee deviations every scan (persistence = recurrence). Second
+# registered edge class; needs NO odds credits. Measurement only.
+event_group_consistency:
+  enabled: true
+  event_pages: 3
+  page_size: 100
+  min_leg_count: 3
+  deviation_threshold_per_basket: 0.002
+  max_ledger_rows: 100000
 historical_price_history:
   clob_base_url: https://clob.polymarket.com
   max_tokens: 500

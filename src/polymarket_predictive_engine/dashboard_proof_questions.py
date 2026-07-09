@@ -10,7 +10,10 @@ from .utils import now_utc, read_json, safe_float, write_json
 
 OVERLAY_START = "<!-- proof-questions-overlay:start -->"
 OVERLAY_END = "<!-- proof-questions-overlay:end -->"
-PROOF_SECTION = '  <section><h2>Four proof questions</h2><div id="proofQuestions"></div></section>'
+PROOF_SECTION = (
+    '  <section><h2>The $100/month verdict</h2><div id="profitVerdict"></div></section>\n'
+    '  <section><h2>Four proof questions</h2><div id="proofQuestions"></div></section>'
+)
 
 
 def _int(value: Any, default: int = 0) -> int:
@@ -194,6 +197,23 @@ def _overlay_script() -> str:
       + rows.map(row => `<tr><td>${{proofBadge(row.question || 'Proof question', row.severity || 'warn')}}</td><td>${{escProof(row.answer || '-')}}</td><td class="mono">${{escProof(row.key_metric || '-')}}</td><td>${{escProof(row.decision_use || '-')}}</td></tr>`).join('')
       + `</tbody></table></div>`;
   }};
+  const verdictPanel = (verdict) => {{
+    if (!verdict || !verdict.verdict) return '<div class="muted">Verdict engine has not produced output yet.</div>';
+    const state = String(verdict.verdict);
+    const cls = state.startsWith('yes') ? 'good' : state.startsWith('no') ? 'bad' : 'warn';
+    const gates = verdict.gates || {{}};
+    const gateRow = (key) => {{
+      const gate = gates[key] || {{}};
+      const gcls = gate.state === 'pass' ? 'good' : gate.state === 'fail' ? 'bad' : 'warn';
+      return `<tr><td>${{proofBadge(key, gcls)}}</td><td>${{escProof(gate.state || '-')}}</td><td>${{escProof(gate.reason || '-')}}</td></tr>`;
+    }};
+    return `<div class="sectionLead">Pre-registered ${{escProof(verdict.registered_at_utc || '')}}: the conclusive answer to "can this bot generate $${{escProof(verdict.target_monthly_profit_usdc || 100)}}/month?", computed from evidence only. Reporting only; no gate or stake is changed.</div>`
+      + `<div>${{proofBadge(state, cls)}}</div>`
+      + `<div class="tableWrap"><table><thead><tr><th>Gate</th><th>State</th><th>Why</th></tr></thead><tbody>`
+      + ['A_edge_exists', 'B_edge_survives_costs', 'C_scale_feasible'].map(gateRow).join('')
+      + `</tbody></table></div>`
+      + `<div class="muted">${{escProof(verdict.next_evidence || '')}}</div>`;
+  }};
   async function refreshProofQuestions() {{
     const el = document.getElementById('proofQuestions');
     if (!el) return;
@@ -204,6 +224,8 @@ def _overlay_script() -> str:
       const proof = payload.proof_questions || {{}};
       window.__proofQuestionsStatus = proof.status || 'unknown';
       el.innerHTML = proofTable(proof.questions || []);
+      const verdictEl = document.getElementById('profitVerdict');
+      if (verdictEl) verdictEl.innerHTML = verdictPanel(payload.profit_verdict);
     }} catch (err) {{
       el.innerHTML = `<div class="error">Unable to load proof questions: ${{escProof(err.message || err)}}</div>`;
     }}

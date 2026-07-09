@@ -547,6 +547,15 @@ jobs:
               if not isinstance(row, dict):
                   continue
               print(f"- **{row.get('question', 'unknown')}** — `{row.get('severity', 'unknown')}` — {row.get('key_metric', '-')}")
+          verdict = dashboard.get("profit_verdict") if isinstance(dashboard.get("profit_verdict"), dict) else {}
+          if verdict:
+              print("")
+              print("### $100/month verdict (pre-registered gates)")
+              print(f"- Verdict: **{verdict.get('verdict', 'unknown')}**")
+              for gate_key, gate in (verdict.get("gates") or {}).items():
+                  if isinstance(gate, dict):
+                      print(f"- {gate_key}: `{gate.get('state', 'unknown')}` — {gate.get('reason', '-')}")
+              print(f"- Next evidence: {verdict.get('next_evidence', '-')}")
           if warnings:
               print("")
               print("### Warnings")

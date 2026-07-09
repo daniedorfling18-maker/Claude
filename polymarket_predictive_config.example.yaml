@@ -86,6 +86,13 @@ maker_carry_study:
   reaction_minutes: 1
   capital_cap_usd: 500
   target_net_usd_per_day: 3.33
+  # WO-36 step 2 (2026-07-09): empirical markout charge from executed prints
+  # + pre-registered maker gates (M-A needs 7 daily runs at target) + a daily
+  # human quote sheet. Measurement only - the system never places orders.
+  markout_horizon_minutes: 5
+  markout_min_prints: 20
+  min_daily_payout_usd: 1.0
+  gate_min_runs_at_target: 7
 # 2026-07-09 WO-34: negRisk event groups must price to $1; the detector logs
 # net-of-fee deviations every scan (persistence = recurrence). Second
 # registered edge class; needs NO odds credits. Measurement only.

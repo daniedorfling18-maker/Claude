@@ -1377,6 +1377,21 @@ $0/day fast window vs $11.67/day slow window - the worse window is charged).
 The daily history ledger tracks stability. Steps (2)-(3) remain open and are
 required before ANY quoting behaviour is even paper-simulated.
 
+**Steps (2)+(3) SHIPPED 2026-07-09 (same day, second pass)**: (2) empirical
+markout charge - every executed print that swept through the hypothetical
+quote level is marked out at +5 minutes, queue-share weighted against resting
+band depth; the candidate is charged the WORST of bar windows and markout.
+$1/day payout floor enforced in sizing (sub-floor accruals pay nothing).
+(3) pre-registered maker gates (2026-07-09T13:00Z): M-A carry evidence
+(>= 7 daily runs at target incl. latest), M-B adverse realism (every
+portfolio market markout-MEASURED), M-C payout floor (by construction).
+All-pass yields ``evidence_supported_pending_human_decision`` - never an
+order. A daily ``maker_quote_sheet.md`` (research output, standing rules,
+event-risk flags) lets a HUMAN act outside the system if the verdict
+supports it; the repo stays paper-only regardless. First live run of the
+upgraded study: $11.76/day net (~$353/month upper bound) on $490, M-B pass,
+M-A 1/7 - earliest supported verdict ~2026-07-16.
+
 Also from the docs read, smaller: batch endpoints (/books, /prices,
 /midpoints, batch prices-history) to cut poller overhead; klines endpoint;
 sports websocket channel (real-time scores - could reduce Odds API dependence

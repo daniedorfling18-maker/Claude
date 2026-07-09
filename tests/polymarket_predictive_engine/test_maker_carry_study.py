@@ -32,6 +32,10 @@ def _config(tmp_path: Path):
         "max_size_multiple": 5,
         "capital_cap_usd": 500,
         "target_net_usd_per_day": 3.33,
+        "markout_horizon_minutes": 5,
+        "markout_min_prints": 20,
+        "min_daily_payout_usd": 1.0,
+        "gate_min_runs_at_target": 7,
         "request_pause_seconds": 0,
     }
     path = tmp_path / "config.yaml"
@@ -63,7 +67,7 @@ class _Response:
         return self._payload
 
 
-def _fake_requests(monkeypatch, *, markets, books, histories) -> None:
+def _fake_requests(monkeypatch, *, markets, books, histories, prints=None) -> None:
     def fake_get(url: str, params: dict[str, Any] | None = None, timeout: float | None = None):
         params = params or {}
         if url.endswith("/markets"):
@@ -72,6 +76,8 @@ def _fake_requests(monkeypatch, *, markets, books, histories) -> None:
             return _Response(books[str(params["market" if "market" in params else "token_id"])])
         if url.endswith("/prices-history"):
             return _Response({"history": histories[(str(params["market"]), str(params["interval"]))]})
+        if url.endswith("/trades"):
+            return _Response((prints or {}).get(str(params["market"]), []))
         raise AssertionError(f"unexpected url {url}")
 
     monkeypatch.setattr(maker_carry_study.requests, "get", fake_get)
@@ -158,6 +164,65 @@ def test_sized_portfolio_scales_within_capital_cap_and_never_trades(tmp_path, mo
     # A second run appends to the trend ledger instead of overwriting it.
     run_maker_carry_study(cfg)
     assert len(read_csv_rows(cfg.output_root / "maker_carry" / "maker_carry_history.csv")) == 2
+
+
+def test_markout_charges_empirical_pickoffs_and_gates_track_evidence(tmp_path, monkeypatch):
+    """WO-36 step 2: prints that swept through our quote level are charged at
+    their measured markout (queue-share weighted), and the charge wins when it
+    exceeds the bar-based windows. Gates: one good day is never enough."""
+    cfg = _config(tmp_path)
+    markets = [_market("calm bars, hostile prints", "hostile", 1000.0)]
+    books = {"hostile": _deep_book()}
+    # Mids: 0.5 until t=12000, then 0.45. The fast bar window sees ONE 5c move
+    # (excess 3.5c x 100 shares over ~0.21 days ~= $16.9/day). The prints see
+    # sixty fills sweep our bid just before the drop: 60 x 3.5c x 100 shares x
+    # queue share 100/20100, over the floored 1-hour span ~= $25/day - the
+    # empirical charge must WIN the max().
+    dropped = [{"t": i * 60, "p": (0.5 if i * 60 < 12000 else 0.45)} for i in range(300)]
+    histories = {("hostile", "1d"): dropped, ("hostile", "1w"): _flat_history(300)}
+    prints = {
+        "0xhostile": [
+            {"price": 0.484, "size": 100, "side": "SELL", "timestamp": 11700 + j * 5} for j in range(60)
+        ]
+    }
+    _fake_requests(monkeypatch, markets=markets, books=books, histories=histories, prints=prints)
+
+    summary = run_maker_carry_study(cfg)
+
+    row = read_csv_rows(cfg.output_root / "maker_carry" / "maker_carry_candidates.csv")[0]
+    assert row["markout_measured"] == "True"
+    markout_charge = float(row["adverse_usd_per_day_markout"])
+    assert markout_charge > float(row["adverse_usd_per_day_1min_24h"])
+    assert float(row["adverse_selection_usd_per_day"]) == markout_charge
+    # Gates: M-B can pass on measured markout, M-A must stay pending on run 1.
+    gates = summary["maker_gates"]
+    assert gates["M_B_adverse_realism"]["state"] in {"pass", "pending"}
+    assert gates["M_A_carry_evidence"]["state"] == "pending"
+    assert gates["maker_verdict"] == "insufficient_evidence"
+
+
+def test_gate_a_passes_only_after_enough_runs_at_target(tmp_path, monkeypatch):
+    cfg = _config(tmp_path)
+    markets = [_market("deep calm market", "calm", 1000.0)]
+    books = {"calm": _deep_book()}
+    histories = {("calm", "1d"): _flat_history(200), ("calm", "1w"): _flat_history(200)}
+    # 25 quiet prints inside the band edge: markout measured, zero loss.
+    prints = {"0xcalm": [{"price": 0.499, "size": 5, "side": "SELL", "timestamp": 600 + j * 60} for j in range(25)]}
+    _fake_requests(monkeypatch, markets=markets, books=books, histories=histories, prints=prints)
+
+    last = None
+    for _ in range(7):
+        last = run_maker_carry_study(cfg)
+    gates = last["maker_gates"]
+    assert gates["M_A_carry_evidence"]["runs_at_or_above_target"] >= 7
+    assert gates["M_A_carry_evidence"]["state"] == "pass"
+    assert gates["M_B_adverse_realism"]["state"] == "pass"
+    assert gates["maker_verdict"] == "evidence_supported_pending_human_decision"
+    # Even a supported verdict never trades; the sheet says so in print.
+    assert last["paper_trading_invoked"] is False
+    sheet = (cfg.output_root / "maker_carry" / "maker_quote_sheet.md").read_text(encoding="utf-8")
+    assert "NOT ADVICE" in sheet
+    assert "places NO orders" in sheet
 
 
 def test_markets_without_live_pots_or_bands_are_filtered(tmp_path, monkeypatch):

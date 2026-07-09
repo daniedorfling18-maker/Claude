@@ -344,6 +344,10 @@ def build_closing_line_value(
         "focus_mean_clv": round(sum(float(row["clv"]) for row in focus_rows) / len(focus_rows), 6) if focus_rows else None,
         "focus_mean_final_clv": round(sum(float(row["clv"]) for row in focus_final) / len(focus_final), 6) if focus_final else None,
         "focus_beat_close_rate": round(sum(1 for row in focus_rows if row.get("beat_close")) / len(focus_rows), 4) if focus_rows else None,
+        # Finals-only beat rate: the ONLY beat statistic the pre-registered
+        # $100/month verdict may use. The mixed rate above includes provisional
+        # rows, which are diagnostic-only and excluded from evidence CIs.
+        "focus_final_beat_close_rate": round(sum(1 for row in focus_final if row.get("beat_close")) / len(focus_final), 4) if focus_final else None,
         "focus_positive_cohorts": focus_positive,
         "focus_cohorts": sorted({row.get("signal_cohort") or "unknown" for row in focus_rows}),
         "frozen_positions": len(frozen_rows),

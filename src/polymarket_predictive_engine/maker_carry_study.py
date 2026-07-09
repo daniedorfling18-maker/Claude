@@ -14,7 +14,10 @@ Model, per candidate market (all inputs from free, key-less public APIs):
 
 - Pot: Gamma ``clobRewards.rewardsDailyRate`` summed over live reward configs.
 - Our hypothetical quote: ``rewards_min_size`` shares, both sides, at distance
-  s = quote_distance_fraction x v from mid, where v = rewards_max_spread.
+  s = fraction x v from mid, where v = rewards_max_spread. The fraction is
+  SWEPT per market over ``quote_distance_fractions``: tighter quotes earn
+  quadratically more reward share but eat more fills, so each market has its
+  own optimum - the row keeps whichever fraction maximises net carry.
 - Reward share: our quadratic score against the score of every resting order
   currently inside v on the live CLOB book (two-sided pool = min of the side
   totals, mirroring Polymarket's min(Q_bid, Q_ask) per-maker rule).
@@ -91,6 +94,7 @@ CANDIDATE_FIELDS = [
     "rewards_max_spread_cents",
     "mid_price",
     "quote_distance",
+    "quote_distance_fraction",
     "competitor_score_bid",
     "competitor_score_ask",
     "our_score_per_side",
@@ -121,9 +125,9 @@ def _settings(cfg: EngineConfig) -> dict[str, Any]:
         "page_size": 100,
         "min_daily_pot_usd": 25.0,
         "max_book_candidates": 20,
-        # Quote midway into the qualifying band: far enough out to survive
-        # noise, close enough in to score 25% of the max quadratic weight.
-        "quote_distance_fraction": 0.5,
+        # Distances to sweep per market (fractions of the qualifying band):
+        # tighter earns quadratically more share, wider survives more noise.
+        "quote_distance_fractions": [0.25, 0.5, 0.75],
         "reaction_minutes": 1,
         # A raw share above this means the band is nearly empty of resting
         # competition (seen live on in-game esports books): untrusted.
@@ -428,13 +432,15 @@ def _markout_adverse(
 
 def _adverse_selection(
     settings: dict[str, Any],
-    token_id: str,
-    condition_id: str,
+    fast_series: list[tuple[float, float]] | None,
+    slow_series: list[tuple[float, float]] | None,
+    prints: list[dict[str, float]],
     quote_distance: float,
     quote_size: float,
     depth: dict[str, float],
 ) -> dict[str, Any] | None:
-    """Charge the WORST of the three estimates.
+    """Charge the WORST of the three estimates (series/prints pre-fetched so
+    the distance sweep re-prices without re-downloading).
 
     The calm-last-24h failure mode is real (observed live: a market flat for a
     day, then a news gap): the 7-day/10-minute window prices event risk that
@@ -442,15 +448,11 @@ def _adverse_selection(
     prints actually did to the passive side and is the only EMPIRICAL leg.
     """
     fast_fidelity = max(1, int(settings["reaction_minutes"]))
-    fast_series = _price_series(settings, token_id, interval="1d", fidelity_minutes=fast_fidelity)
-    slow_series = _price_series(settings, token_id, interval="1w", fidelity_minutes=10)
     fast = _pickoff_from_series(fast_series, quote_distance, quote_size, fidelity_minutes=fast_fidelity, min_points=30)
     slow = _pickoff_from_series(slow_series, quote_distance, quote_size, fidelity_minutes=10, min_points=30)
     if fast is None and slow is None:
         return None
-    markout = _markout_adverse(
-        settings, _recent_prints(settings, condition_id), fast_series, quote_distance, quote_size, depth
-    )
+    markout = _markout_adverse(settings, prints, fast_series, quote_distance, quote_size, depth)
     charges = [row["adverse_usd_per_day"] for row in (fast, slow) if row is not None]
     if markout is not None:
         charges.append(markout["adverse_usd_per_day_markout"])
@@ -486,61 +488,81 @@ def run_maker_carry_study(cfg: EngineConfig) -> dict[str, Any]:
     universe, errors = _rewarded_universe(settings)
     pause = float(settings["request_pause_seconds"])
     candidates: list[dict[str, Any]] = []
+    fractions = sorted(
+        {float(f) for f in (settings.get("quote_distance_fractions") or [0.5]) if 0 < float(f) < 1}
+    ) or [0.5]
     for market in universe[: int(settings["max_book_candidates"])]:
         v = market["rewards_max_spread_cents"] / 100.0
-        quote_distance = float(settings["quote_distance_fraction"]) * v
         quote_size = market["rewards_min_size_shares"]
-        our_score = _quadratic_score(quote_distance, v, quote_size)
         competition = _book_competition(settings, market["token_id"], v)
-        if competition is None or our_score <= 0:
+        if competition is None:
             continue
         # Polymarket scores each maker at min(Q_bid, Q_ask); the resting pool's
         # two-sided total is bounded by its thinner side.
         pool = min(competition["bid_score"], competition["ask_score"])
-        share = our_score / (our_score + pool) if (our_score + pool) > 0 else 0.0
-        gross = market["pot_usd_per_day"] * share
         depth = {"bid": competition["bid_depth"], "ask": competition["ask_depth"]}
-        adverse = _adverse_selection(
-            settings, market["token_id"], market["condition_id"], quote_distance, quote_size, depth
+        # Fetch market data ONCE; the distance sweep below re-prices freely.
+        fast_series = _price_series(
+            settings, market["token_id"], interval="1d", fidelity_minutes=max(1, int(settings["reaction_minutes"]))
         )
-        row = {
-            **market,
-            "mid_price": round(competition["mid"], 4),
-            "quote_distance": round(quote_distance, 4),
-            "competitor_score_bid": round(competition["bid_score"], 1),
-            "competitor_score_ask": round(competition["ask_score"], 1),
-            "our_score_per_side": round(our_score, 1),
-            "estimated_reward_share": round(share, 5),
-            "gross_reward_usd_per_day": round(gross, 4),
-            # Bid collateral plus inventory to quote the ask, both ~size x price.
-            "capital_usd": round(quote_size * 2 * competition["mid"], 2),
-        }
-        if adverse is None:
-            row.update(
-                {
-                    "history_points": 0,
-                    "pickoff_events_per_day": None,
-                    "adverse_usd_per_day_1min_24h": None,
-                    "adverse_usd_per_day_10min_7d": None,
-                    "adverse_usd_per_day_markout": None,
-                    "band_crossing_prints_per_day": None,
-                    "markout_measured": False,
-                    "adverse_selection_usd_per_day": None,
-                    "net_carry_usd_per_day": None,
-                    "estimate_quality": "no_price_history",
-                }
+        slow_series = _price_series(settings, market["token_id"], interval="1w", fidelity_minutes=10)
+        prints = _recent_prints(settings, market["condition_id"])
+
+        best_row: dict[str, Any] | None = None
+        for fraction in fractions:
+            quote_distance = fraction * v
+            our_score = _quadratic_score(quote_distance, v, quote_size)
+            if our_score <= 0:
+                continue
+            share = our_score / (our_score + pool) if (our_score + pool) > 0 else 0.0
+            gross = market["pot_usd_per_day"] * share
+            adverse = _adverse_selection(
+                settings, fast_series, slow_series, prints, quote_distance, quote_size, depth
             )
-        else:
-            both_windows = adverse.pop("both_windows")
-            row.update(adverse)
-            row["net_carry_usd_per_day"] = round(gross - adverse["adverse_selection_usd_per_day"], 4)
-            if share > float(settings["max_trusted_reward_share"]):
-                row["estimate_quality"] = "thin_book_untrusted"
-            elif not both_windows:
-                row["estimate_quality"] = "single_window_history"
+            row = {
+                **market,
+                "mid_price": round(competition["mid"], 4),
+                "quote_distance": round(quote_distance, 4),
+                "quote_distance_fraction": fraction,
+                "competitor_score_bid": round(competition["bid_score"], 1),
+                "competitor_score_ask": round(competition["ask_score"], 1),
+                "our_score_per_side": round(our_score, 1),
+                "estimated_reward_share": round(share, 5),
+                "gross_reward_usd_per_day": round(gross, 4),
+                # Bid collateral plus inventory to quote the ask, both ~size x price.
+                "capital_usd": round(quote_size * 2 * competition["mid"], 2),
+            }
+            if adverse is None:
+                row.update(
+                    {
+                        "history_points": 0,
+                        "pickoff_events_per_day": None,
+                        "adverse_usd_per_day_1min_24h": None,
+                        "adverse_usd_per_day_10min_7d": None,
+                        "adverse_usd_per_day_markout": None,
+                        "band_crossing_prints_per_day": None,
+                        "markout_measured": False,
+                        "adverse_selection_usd_per_day": None,
+                        "net_carry_usd_per_day": None,
+                        "estimate_quality": "no_price_history",
+                    }
+                )
             else:
-                row["estimate_quality"] = "book_and_history"
-        candidates.append(row)
+                both_windows = adverse.pop("both_windows")
+                row.update(adverse)
+                row["net_carry_usd_per_day"] = round(gross - adverse["adverse_selection_usd_per_day"], 4)
+                if share > float(settings["max_trusted_reward_share"]):
+                    row["estimate_quality"] = "thin_book_untrusted"
+                elif not both_windows:
+                    row["estimate_quality"] = "single_window_history"
+                else:
+                    row["estimate_quality"] = "book_and_history"
+            if best_row is None or (row.get("net_carry_usd_per_day") or -1e18) > (
+                best_row.get("net_carry_usd_per_day") or -1e18
+            ):
+                best_row = row
+        if best_row is not None:
+            candidates.append(best_row)
         if pause:
             time.sleep(pause)
 
@@ -585,6 +607,7 @@ def run_maker_carry_study(cfg: EngineConfig) -> dict[str, Any]:
                 "size_multiple": k,
                 "quote_size_shares": k * row["rewards_min_size_shares"],
                 "quote_distance": row["quote_distance"],
+                "quote_distance_fraction": row["quote_distance_fraction"],
                 "capital_usd": round(k * row["capital_usd"], 2),
                 "net_carry_usd_per_day": round(net_k, 4),
                 "markout_measured": bool(row.get("markout_measured")),
@@ -661,7 +684,7 @@ def run_maker_carry_study(cfg: EngineConfig) -> dict[str, Any]:
             "maker_gates": maker_gates,
             "assumptions": {
                 "quote_size_shares": "rewards_min_size per market, both sides",
-                "quote_distance": f"{settings['quote_distance_fraction']} x rewards_max_spread from mid",
+                "quote_distance": f"per-market best of {fractions} x rewards_max_spread from mid",
                 "share_model": "our quadratic score vs min(bid, ask) resting-book score inside the band",
                 "adverse_selection_model": (
                     f"charge = worst of 24h@{settings['reaction_minutes']}min bars, 7d@10min bars, and the "

@@ -266,6 +266,9 @@ run_trade_prints() {
     # WO-34: negRisk sum-constraint scan rides the same 15-min cadence -
     # deviation persistence is only measurable at print-level frequency.
     timeout "$PRINTS_TIMEOUT" python -m polymarket_predictive_engine.cli scan-event-groups --config "$CONFIG_PATH"
+    # WO-36 step 4: read-only scoreboard of the human's live maker test
+    # (inert until maker_live_test.wallet_address is configured).
+    timeout "$PRINTS_TIMEOUT" python -m polymarket_predictive_engine.cli maker-live-test --config "$CONFIG_PATH"
   ) >> "$LOG_FILE" 2>&1
   CODE=$?
   stamp_status trade_prints "$CODE" "data-api /trades for tracked markets + event-group consistency scan"

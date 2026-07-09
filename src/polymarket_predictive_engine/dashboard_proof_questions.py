@@ -12,6 +12,7 @@ OVERLAY_START = "<!-- proof-questions-overlay:start -->"
 OVERLAY_END = "<!-- proof-questions-overlay:end -->"
 PROOF_SECTION = (
     '  <section><h2>The $100/month verdict</h2><div id="profitVerdict"></div></section>\n'
+    '  <section><h2>Maker lane (WO-36)</h2><div id="makerLane"></div></section>\n'
     '  <section><h2>Four proof questions</h2><div id="proofQuestions"></div></section>'
 )
 
@@ -214,6 +215,33 @@ def _overlay_script() -> str:
       + `</tbody></table></div>`
       + `<div class="muted">${{escProof(verdict.next_evidence || '')}}</div>`;
   }};
+  const makerPanel = (maker) => {{
+    const study = (maker || {{}}).study || {{}};
+    const live = (maker || {{}}).live_test || {{}};
+    if (!study.status) return '<div class="muted">Maker-carry study has not run yet.</div>';
+    const gates = study.maker_gates || {{}};
+    const gateA = gates.M_A_carry_evidence || {{}};
+    const gateB = gates.M_B_adverse_realism || {{}};
+    const mv = String(gates.maker_verdict || 'insufficient_evidence');
+    const mvCls = mv.startsWith('evidence_supported') ? 'good' : 'warn';
+    let html = `<div class="sectionLead">Zero-fee quoting for daily liquidity rewards - measurement only, the system never places orders. Gates pre-registered ${{escProof(gates.registered_at_utc || '')}}.</div>`
+      + `<div>${{proofBadge(mv, mvCls)}} ${{proofBadge('M-A runs ' + (gateA.runs_at_or_above_target || 0) + '/' + (gateA.required_runs || 7), gateA.state === 'pass' ? 'good' : 'warn')}} ${{proofBadge('M-B markout ' + (gateB.state || 'pending'), gateB.state === 'pass' ? 'good' : 'warn')}}</div>`
+      + `<div class="mono">est net carry $${{escProof(study.portfolio_net_carry_usd_per_day ?? '-')}} /day (~$${{escProof(study.portfolio_net_carry_usd_per_month ?? '-')}} /month, UPPER BOUND) on $${{escProof(study.portfolio_capital_usd ?? '-')}} across ${{escProof(study.portfolio_markets ?? 0)}} market(s)</div>`;
+    if (live.status === 'awaiting_wallet_address') {{
+      html += `<div class="muted">Live-test scoreboard idle: no wallet configured (maker_live_test.wallet_address).</div>`;
+    }} else if (live.status === 'ok') {{
+      const sb = String(live.scoreboard || 'no_activity_yet');
+      const sbCls = sb === 'winning_so_far' ? 'good' : (sb === 'no_activity_yet' ? 'warn' : 'bad');
+      html += `<div>${{proofBadge('live test: ' + sb, sbCls)}}</div>`
+        + `<div class="tableWrap"><table><thead><tr><th>(a) rewards</th><th>(b) inventory PnL</th><th>(c) fills 24h vs model</th><th>net score</th></tr></thead><tbody>`
+        + `<tr><td class="mono">$${{escProof(live.rewards_usd_total ?? 0)}} total / $${{escProof(live.rewards_usd_last_24h ?? 0)}} 24h</td>`
+        + `<td class="mono">$${{escProof(live.inventory_pnl_usd ?? 0)}} (value $${{escProof(live.inventory_value_usd ?? 0)}})</td>`
+        + `<td class="mono">${{escProof(live.fills_last_24h ?? 0)}} vs ${{escProof(live.modelled_fills_per_day ?? '-')}}/day${{live.fill_alert ? ' - STOP' : ''}}</td>`
+        + `<td class="mono">$${{escProof(live.net_score_usd ?? 0)}}</td></tr>`
+        + `</tbody></table></div>`;
+    }}
+    return html;
+  }};
   async function refreshProofQuestions() {{
     const el = document.getElementById('proofQuestions');
     if (!el) return;
@@ -226,6 +254,8 @@ def _overlay_script() -> str:
       el.innerHTML = proofTable(proof.questions || []);
       const verdictEl = document.getElementById('profitVerdict');
       if (verdictEl) verdictEl.innerHTML = verdictPanel(payload.profit_verdict);
+      const makerEl = document.getElementById('makerLane');
+      if (makerEl) makerEl.innerHTML = makerPanel(payload.maker_lane);
     }} catch (err) {{
       el.innerHTML = `<div class="error">Unable to load proof questions: ${{escProof(err.message || err)}}</div>`;
     }}

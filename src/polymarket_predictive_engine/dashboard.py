@@ -5450,6 +5450,13 @@ def render_dashboard(cfg: EngineConfig, latest_report: dict[str, Any] | None = N
     from .profit_verdict import build_profit_verdict
 
     payload["profit_verdict"] = build_profit_verdict(cfg)
+    # Maker-lane tiles (WO-36): read the latest study + live-test scoreboard
+    # artifacts if the VPS jobs have produced them; absent files render as an
+    # inert "not run yet" panel. Reporting only.
+    payload["maker_lane"] = {
+        "study": read_json(cfg.output_root / "maker_carry" / "maker_carry_study.json", default={}) or {},
+        "live_test": read_json(cfg.output_root / "maker_carry" / "maker_live_test.json", default={}) or {},
+    }
     html_out = _inject_html_overlay(HTML)
     _write_dashboard_data(out / "dashboard_data.json", payload)
     (out / "index.html").write_text(html_out, encoding="utf-8")

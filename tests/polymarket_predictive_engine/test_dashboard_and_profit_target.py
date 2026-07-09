@@ -3246,3 +3246,9 @@ def test_dashboard_carries_profit_verdict_and_html_panel(tmp_path):
     assert verdict["paper_trading_invoked"] is False
     assert "The $100/month verdict" in html
     assert "profitVerdict" in html
+    # WO-36 maker-lane tiles ride the same payload: study + live-test
+    # scoreboard blocks exist even before the VPS jobs first write them.
+    assert "maker_lane" in data
+    assert data["maker_lane"] == {"study": {}, "live_test": {}}
+    assert "Maker lane (WO-36)" in html
+    assert "makerLane" in html

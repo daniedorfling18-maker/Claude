@@ -57,6 +57,7 @@ from .price_action_scout import build_price_action_scout
 from .price_action_signals import build_price_action_paper_signals
 from .event_group_consistency import scan_event_groups
 from .maker_carry_study import run_maker_carry_study
+from .maker_live_test import run_maker_live_test
 from .price_history_collector import collect_price_history
 from .trade_print_collector import collect_trade_prints
 from .profit_target import reset_profit_target_baseline, write_profit_target_tracker
@@ -96,6 +97,7 @@ COMMANDS = [
     "collect-price-history",
     "collect-trade-prints",
     "maker-carry-study",
+    "maker-live-test",
     "scan-event-groups",
     "build-labels",
     "build-features",
@@ -274,6 +276,8 @@ def main(argv: list[str] | None = None) -> int:
             _print(collect_trade_prints(cfg))
         elif args.command == "maker-carry-study":
             _print(run_maker_carry_study(cfg))
+        elif args.command == "maker-live-test":
+            _print(run_maker_live_test(cfg))
         elif args.command == "scan-event-groups":
             _print(scan_event_groups(cfg))
         elif args.command == "build-labels":

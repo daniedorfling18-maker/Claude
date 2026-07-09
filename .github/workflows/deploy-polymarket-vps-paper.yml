@@ -16,7 +16,10 @@ jobs:
     # 2026-07-07: 20 -> 30. Under VPS memory pressure the post-deploy governance
     # refresh ran 9+ minutes and the whole job was cancelled at exactly 20:00,
     # leaving the deploy unverified. 30 gives the slow-host worst case headroom.
-    timeout-minutes: 30
+    # 2026-07-09: raised 30 -> 40. Deploy durations crept 25.5 -> 29 -> 29.5 min
+    # through 2026-07-08 (image rebuild + slow VPS) and the 04:27 UTC run was
+    # cancelled at the 30-min cap mid-rollout.
+    timeout-minutes: 40
 
     steps:
       - name: Validate deploy secrets

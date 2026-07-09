@@ -82,7 +82,8 @@ maker_carry_study:
   page_size: 100
   min_daily_pot_usd: 25
   max_book_candidates: 20
-  quote_distance_fraction: 0.5
+  # Swept per market; the row keeps the net-carry-maximising fraction.
+  quote_distance_fractions: [0.25, 0.5, 0.75]
   reaction_minutes: 1
   capital_cap_usd: 500
   target_net_usd_per_day: 3.33
@@ -93,6 +94,13 @@ maker_carry_study:
   markout_min_prints: 20
   min_daily_payout_usd: 1.0
   gate_min_runs_at_target: 7
+# WO-36 step 4: read-only scoreboard for a HUMAN-run minimum-size maker
+# experiment. Inert until wallet_address is set. The system never trades;
+# it only watches the wallet via free public endpoints.
+maker_live_test:
+  enabled: true
+  wallet_address: ""
+  fill_alert_multiple: 2.0
 # 2026-07-09 WO-34: negRisk event groups must price to $1; the detector logs
 # net-of-fee deviations every scan (persistence = recurrence). Second
 # registered edge class; needs NO odds credits. Measurement only.

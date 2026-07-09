@@ -26,7 +26,7 @@ def _config(tmp_path: Path):
         "page_size": 100,
         "min_daily_pot_usd": 25,
         "max_book_candidates": 10,
-        "quote_distance_fraction": 0.5,
+        "quote_distance_fractions": [0.5],
         "reaction_minutes": 1,
         "max_trusted_reward_share": 0.05,
         "max_size_multiple": 5,
@@ -223,6 +223,32 @@ def test_gate_a_passes_only_after_enough_runs_at_target(tmp_path, monkeypatch):
     sheet = (cfg.output_root / "maker_carry" / "maker_quote_sheet.md").read_text(encoding="utf-8")
     assert "NOT ADVICE" in sheet
     assert "places NO orders" in sheet
+
+
+def test_distance_sweep_picks_the_net_maximising_fraction(tmp_path, monkeypatch):
+    """Per-market optimisation: bars drift 1.2c/bar, so quoting at 0.25 x 3c
+    (0.75c) is picked off every bar, while 0.5 x 3c (1.5c) rides above the
+    noise; 0.75 x 3c survives too but earns a quadratically smaller share.
+    The sweep must keep the 0.5 row."""
+    cfg = _config(tmp_path)
+    raw = yaml.safe_load((tmp_path / "config.yaml").read_text(encoding="utf-8"))
+    raw["maker_carry_study"]["quote_distance_fractions"] = [0.25, 0.5, 0.75]
+    (tmp_path / "config.yaml").write_text(yaml.safe_dump(raw), encoding="utf-8")
+    from polymarket_predictive_engine.config import load_config as _load
+
+    cfg = _load(tmp_path / "config.yaml")
+    markets = [_market("drifty market", "drifty", 1000.0)]
+    books = {"drifty": _deep_book()}
+    # Mid oscillates +/-1.2c per minute bar around 0.5.
+    zigzag = [{"t": i * 60, "p": 0.5 + (0.012 if i % 2 else 0.0)} for i in range(300)]
+    histories = {("drifty", "1d"): zigzag, ("drifty", "1w"): _flat_history(300)}
+    _fake_requests(monkeypatch, markets=markets, books=books, histories=histories)
+
+    run_maker_carry_study(cfg)
+
+    row = read_csv_rows(cfg.output_root / "maker_carry" / "maker_carry_candidates.csv")[0]
+    assert float(row["quote_distance_fraction"]) == 0.5
+    assert float(row["adverse_usd_per_day_1min_24h"]) == 0.0
 
 
 def test_markets_without_live_pots_or_bands_are_filtered(tmp_path, monkeypatch):

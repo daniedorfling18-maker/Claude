@@ -1331,3 +1331,31 @@ PnL attribution. Spec: (1) build a wallet ledger from resolved markets;
 smart-wallet net positioning per market as a feature. The most venue-specific
 edge available; largest build; collection-first like WO-33, model wiring only
 through the existing validation gates.
+
+---
+
+## WO-36 — Liquidity-rewards making lane (actuarial evaluation first)
+
+Filed 2026-07-09 from the Polymarket API-docs deep read. Two facts invert the
+taking-vs-making economics for a $100/month goal:
+
+1. Takers now pay fees: rate x p x (1-p) per share (sports 3%), i.e. ~1.0-1.5%
+   of turnover at mid prices. The verdict engine charges this as of amendment 4.
+2. Makers pay NOTHING and earn daily liquidity rewards (quadratic in-spread
+   scoring, paid daily at 00:00 UTC, min payout $1). Reward configs per market
+   (rate_per_day, rewards_min_size, rewards_max_spread) are public and free:
+   GET https://clob.polymarket.com/rewards/markets/multi (no auth, paginated).
+
+Spec, evaluation BEFORE any build: (1) daily job pulls reward configs and sizes
+the opportunity actuarially - total daily reward pool on liquid markets, min
+size, max spread, implied competition from the book; (2) paper-simulate a
+two-sided quoting strategy against recorded books + trade prints (inventory
+risk = adverse fills near events; this is the real cost); (3) verdict-style
+gate: expected rewards minus expected adverse-selection loss must be positive
+with the same statistical discipline as the taking lane. No live orders; the
+existing governance gates stay in charge.
+
+Also from the docs read, smaller: batch endpoints (/books, /prices,
+/midpoints, batch prices-history) to cut poller overhead; klines endpoint;
+sports websocket channel (real-time scores - could reduce Odds API dependence
+for in-window pick timing); rate limits confirmed generous for all our pollers.

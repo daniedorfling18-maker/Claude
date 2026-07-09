@@ -57,6 +57,10 @@ DEFAULT_SETTINGS = {
     "sign_test_alpha": 0.10,
     "exit_cost_haircut_per_dollar": 0.005,
     "adverse_selection_haircut_per_dollar": 0.005,
+    # Polymarket taker fee (docs.polymarket.com/trading/fees): takers pay
+    # rate x p x (1-p) per share; per dollar staked that is rate x (1-p).
+    # Sports = 0.03. Makers pay nothing - relevant to the WO-36 making lane.
+    "taker_fee_rate": 0.03,
     "max_stake_per_trade_usdc": 10.0,
     "days_per_month": 30.0,
 }
@@ -73,6 +77,11 @@ REGISTERED_AT_UTC = "2026-07-09T04:00:00Z"
 #   3. Gate C output carries its liquidity regime (world_cup_2026_window), and
 #      an underpowered positive read extends the evidence window to the next
 #      event regime instead of resolving.
+#   4. Gate B charges Polymarket taker fees (verified against the live fee
+#      docs 2026-07-09: sports takers pay rate x p x (1-p) per share, i.e.
+#      rate x (1-p) per dollar staked, computed per final from its actual
+#      entry price). The engine was built on a zero-fee prior that is no
+#      longer true.
 REGISTERED_AMENDMENTS_AT_UTC = "2026-07-09T11:00:00Z"
 
 
@@ -108,13 +117,17 @@ def _entries_per_day(positions_path: Path, diagnostic_substrings: list[str]) -> 
     return len(stamps) / span_days, len(stamps), round(span_days, 2)
 
 
-def _clustered_focus_finals(cfg: EngineConfig, diagnostic_substrings: list[str]) -> dict[str, list[float]]:
+def _clustered_focus_finals(
+    cfg: EngineConfig, diagnostic_substrings: list[str], taker_fee_rate: float
+) -> dict[str, list[tuple[float, float]]]:
     """Settled focus finals grouped into independent units by market.
 
     Reads the append-only final history ledger; excludes frozen diagnostic
-    cohorts; returns market -> [final CLVs]."""
+    cohorts; returns market -> [(final CLV, taker fee per dollar)] where the
+    fee uses each final's actual entry price: rate x (1 - p). Missing entry
+    prices charge the worst case (p -> 0 gives rate x 1) - fail conservative."""
     rows = read_csv_rows(cfg.governance_root / "closing_line_final_history.csv")
-    clusters: dict[str, list[float]] = {}
+    clusters: dict[str, list[tuple[float, float]]] = {}
     for row in rows:
         if str(row.get("line_kind") or "") != "closing":
             continue
@@ -127,7 +140,12 @@ def _clustered_focus_finals(cfg: EngineConfig, diagnostic_substrings: list[str])
         key = str(row.get("market_id") or row.get("market_slug") or row.get("shadow_position_id") or "").strip()
         if not key:
             continue
-        clusters.setdefault(key, []).append(clv)
+        entry_price = safe_float(row.get("entry_price"))
+        if entry_price is not None and 0 < entry_price <= 1:
+            fee_per_dollar = taker_fee_rate * (1.0 - entry_price)
+        else:
+            fee_per_dollar = taker_fee_rate
+        clusters.setdefault(key, []).append((clv, fee_per_dollar))
     return clusters
 
 
@@ -150,14 +168,18 @@ def build_profit_verdict(cfg: EngineConfig) -> dict[str, Any]:
         if str(sub).strip()
     ]
 
+    taker_fee_rate = float(settings["taker_fee_rate"])
+
     # Gate A - edge existence, on INDEPENDENT units (registered amendment 1):
     # finals cluster by market; one market's tokens are one observation, so
     # correlated finals cannot inflate the sign test or reach the floor early.
-    clusters = _clustered_focus_finals(cfg, diagnostic_substrings)
+    clusters = _clustered_focus_finals(cfg, diagnostic_substrings, taker_fee_rate)
     finals_total = sum(len(values) for values in clusters.values())
-    unit_means = [sum(values) / len(values) for values in clusters.values()]
+    unit_means = [sum(clv for clv, _ in values) / len(values) for values in clusters.values()]
+    unit_fee_means = [sum(fee for _, fee in values) / len(values) for values in clusters.values()]
     n_units = len(unit_means)
     mean_final_clv = round(sum(unit_means) / n_units, 6) if unit_means else None
+    mean_taker_fee = round(sum(unit_fee_means) / n_units, 6) if unit_fee_means else None
     beaten_units = sum(1 for value in unit_means if value > 0)
     sign_p = _sign_test_p(beaten_units, n_units) if n_units else None
     if n_units < minimum_samples:
@@ -185,16 +207,18 @@ def build_profit_verdict(cfg: EngineConfig) -> dict[str, Any]:
             f"{round(sign_p, 4) if sign_p is not None else 'n/a'} > {alpha}; more settled units required."
         )
 
-    # Gate B - net of execution costs. Entry-side costs live inside shadow
-    # fills; the haircut covers the exit side PLUS a registered
-    # adverse-selection charge (amendment 2: real fills cluster when wrong).
+    # Gate B - net of execution costs. Entry-side slippage lives inside shadow
+    # fills; the charges here are the exit haircut, the registered
+    # adverse-selection charge (amendment 2), and Polymarket taker fees
+    # (amendment 4: rate x (1-p) per dollar from each final's entry price).
     net_edge_per_dollar: float | None = None
     if gate_a == "pass" and mean_final_clv is not None:
-        net_edge_per_dollar = mean_final_clv - haircut
+        fee_charge = mean_taker_fee if mean_taker_fee is not None else taker_fee_rate
+        net_edge_per_dollar = mean_final_clv - haircut - fee_charge
         gate_b = "pass" if net_edge_per_dollar > 0 else "fail"
         gate_b_reason = (
-            f"edge/dollar {mean_final_clv} minus haircuts (exit {exit_haircut} + adverse selection "
-            f"{adverse_haircut}) = {round(net_edge_per_dollar, 6)}"
+            f"edge/dollar {mean_final_clv} minus taker fees {fee_charge} and haircuts (exit {exit_haircut} "
+            f"+ adverse selection {adverse_haircut}) = {round(net_edge_per_dollar, 6)}"
         )
     else:
         gate_b = "pending" if gate_a != "fail" else "not_evaluated"
@@ -257,8 +281,10 @@ def build_profit_verdict(cfg: EngineConfig) -> dict[str, Any]:
                 "reason": gate_b_reason,
                 "exit_cost_haircut_per_dollar": exit_haircut,
                 "adverse_selection_haircut_per_dollar": adverse_haircut,
+                "taker_fee_rate": taker_fee_rate,
+                "mean_taker_fee_per_dollar": mean_taker_fee,
                 "net_edge_per_dollar": round(net_edge_per_dollar, 6) if net_edge_per_dollar is not None else None,
-                "note": "entry-side costs are embedded in shadow fills; adverse-selection charge covers fill-quality bias shadow entries cannot experience.",
+                "note": "entry-side costs are embedded in shadow fills; adverse-selection charge covers fill-quality bias shadow entries cannot experience; taker fees per live Polymarket fee schedule (makers pay none - see WO-36).",
             },
             "C_scale_feasible": {
                 "state": gate_c,

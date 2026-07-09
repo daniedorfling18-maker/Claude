@@ -63,6 +63,16 @@ historical_backfill:
   request_pause_seconds: 0.1
   gamma_query_params: {}
   max_age_days: 365
+# 2026-07-09: public data-API executed-trade prints (price/size/aggressor side)
+# for the markets the websocket collector already tracks. Free, key-less.
+# Signed flow is training substrate for WO-33; collection only, never trades.
+trade_prints:
+  enabled: true
+  base_url: https://data-api.polymarket.com
+  max_markets: 60
+  limit_per_market: 500
+  request_timeout_seconds: 20
+  max_ledger_rows: 200000
 historical_price_history:
   clob_base_url: https://clob.polymarket.com
   max_tokens: 500

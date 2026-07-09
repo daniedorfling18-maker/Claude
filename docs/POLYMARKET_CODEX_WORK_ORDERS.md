@@ -1310,3 +1310,24 @@ Also filed from the same audit, smaller: trade-print (time & sales) collection
 for signed-flow features and empirical fill/slippage modelling (sharpens verdict
 Gate B), and a guarded partial re-widening of live collection
 (assets 60→90, retention 72→96h) now that the cgroup memory guard is active.
+
+---
+
+## WO-34 — Event-group structure features (sum-to-one violations)
+
+Filed 2026-07-09. Gamma groups related outcomes into events; the outcomes of
+one event obey a bounded-sum constraint. Transient violations across a group
+(sum of asks < 1 already caught by dutch-arb; softer mid-price inconsistencies
+are NOT) are an unexploited mispricing family. Build event-group joins in the
+feature layer and expose group-consistency features to the model. No gates or
+stakes change.
+
+## WO-35 — Wallet intelligence (smart-money positioning)
+
+Filed 2026-07-09. Polymarket positions are public on-chain: the data-API
+holders/positions endpoints plus the full historical trade tape allow per-wallet
+PnL attribution. Spec: (1) build a wallet ledger from resolved markets;
+(2) rank wallets by realised risk-adjusted PnL out-of-sample; (3) expose
+smart-wallet net positioning per market as a feature. The most venue-specific
+edge available; largest build; collection-first like WO-33, model wiring only
+through the existing validation gates.

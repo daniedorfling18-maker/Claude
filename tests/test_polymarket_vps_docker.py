@@ -16,7 +16,14 @@ def test_vps_paper_compose_is_lean_and_paper_only():
     compose = _vps_compose()
     services = compose["services"]
 
-    assert set(services) == {"polymarket-paper-live", "polymarket-dashboard", "superbru-auto-pick-watchdog"}
+    assert set(services) == {
+        "polymarket-paper-live",
+        "polymarket-dashboard",
+        "superbru-auto-pick-watchdog",
+        # 2026-07-09: runs the ex-GitHub recurring jobs locally after the
+        # Actions minutes quota was exhausted; paper-only like everything else.
+        "vps-ops-scheduler",
+    }
 
     paper_env = services["polymarket-paper-live"]["environment"]
     assert paper_env["POLYMARKET_EXECUTE_LIVE"] == "false"
@@ -160,3 +167,28 @@ def test_vps_governance_refresh_workflow_survives_slow_refresh():
     assert "timeout-minutes: 30" in text
     assert "sudo timeout 1500 docker compose" in text
     assert "refresh-governance failed or exceeded 25 minutes" in text
+
+
+def test_vps_ops_scheduler_replaces_github_side_jobs():
+    """2026-07-09: the GitHub Actions minutes quota was exhausted and every
+    scheduled workflow was refused at start. The VPS must be able to run the
+    recurring jobs itself: governance refresh, CLV snapshot, and the
+    locked-card refresh chain, with odds-quota preflights and per-job
+    timeouts inside its own memory cgroup."""
+    import yaml as _yaml
+
+    compose = _yaml.safe_load((ROOT / "docker-compose.vps-paper.yml").read_text(encoding="utf-8"))
+    service = compose["services"]["vps-ops-scheduler"]
+    assert "run_vps_ops_scheduler.sh" in service["command"]
+    assert service["mem_limit"] == "${VPS_OPS_MEM_LIMIT:-2g}"
+    mounts = " ".join(service["volumes"])
+    for needed in ("./outputs:/app/outputs", "./work:/app/work", "./data:/app/data", "./inputs:/app/inputs"):
+        assert needed in mounts, f"ops scheduler missing mount {needed}"
+
+    script = (ROOT / "scripts" / "run_vps_ops_scheduler.sh").read_text(encoding="utf-8")
+    assert "refresh-governance" in script
+    assert "superbru_clv_experiment.py snapshot" in script
+    assert "run_daily_robust_pipeline.py" in script
+    assert "x-requests-remaining" in script  # free-endpoint quota preflight
+    assert 'timeout "$GOVERNANCE_TIMEOUT"' in script
+    assert "status.json" in script

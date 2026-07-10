@@ -3247,9 +3247,10 @@ def test_dashboard_carries_profit_verdict_and_html_panel(tmp_path):
     assert "The $100/month verdict" in html
     assert "profitVerdict" in html
     # WO-36 maker-lane tiles ride the same payload: study + live-test
-    # scoreboard blocks exist even before the VPS jobs first write them.
+    # scoreboard + WO-50 decision-policy blocks exist even before the VPS jobs
+    # first write them.
     assert "maker_lane" in data
-    assert data["maker_lane"] == {"study": {}, "live_test": {}}
+    assert data["maker_lane"] == {"study": {}, "live_test": {}, "decision_policy": {}}
     assert "Maker lane (WO-36)" in html
     assert "makerLane" in html
     # 2026-07-10 focus mode: a decision summary leads the page and the

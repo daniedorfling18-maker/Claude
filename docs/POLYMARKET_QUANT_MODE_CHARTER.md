@@ -467,6 +467,12 @@ volume imbalance percentiles plus wallet-tier markout splits to
 rule 8: do not initiate quotes above `toxicity_score > 0.9`. This is conditioning only; adverse
 charges, gates, sizing, and order paths are unchanged.
 
+**2026-07-10 — WO-50 implemented by Codex.** The registered maker live-test decision policy is now
+mechanised behind CLI `decision-policy`, writing `outputs/maker_carry/decision_policy.json` and a
+quote-sheet/dashboard badge. It evaluates the frozen action table, sizing ladder, quarter-Kelly cap,
+and kill criteria while remaining strictly advisory: no paper/live orders, no gate changes, and no
+automatic funding action.
+
 **2026-07-10 — WO-42 implemented by Codex.** Calibration-bias harvesting now joins clean resolved
 markets to point-in-time pre-close prices and writes
 `outputs/calibration_bias/calibration_curve.csv` plus summary JSON. It reports category/horizon/bin

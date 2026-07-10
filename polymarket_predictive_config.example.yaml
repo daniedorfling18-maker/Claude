@@ -151,6 +151,30 @@ flow_toxicity:
   buckets: 50
   markout_horizon_minutes: 5
 
+# 2026-07-10 WO-50: registered maker live-test decision policy. Frozen
+# defaults; future amendments may only tighten and must carry a dated comment.
+# The policy indicates a human action only. It never trades, sizes live
+# orders, or changes any governance gate.
+decision_policy:
+  enabled: true
+  decision_date: "2026-07-20"
+  composition_stable_days: 7
+  composition_required_recurrence: 4
+  below_target_review_runs: 7
+  below_target_review_threshold: 3
+  stage0_capital_usd: 100.0
+  stage1_capital_usd: 250.0
+  stage2_capital_usd: 500.0
+  stage1_min_consecutive_days: 7
+  stage2_additional_days: 14
+  stage2_reward_realisation_multiple: 0.5
+  kill_cumulative_net_score_usd: -25.0
+  kill_single_day_net_usd: -15.0
+  kill_fill_overrun_days: 2
+  fill_alert_multiple: 2.0
+  kelly_fraction_cap: 1.0
+  quarter_kelly_multiplier: 0.25
+
 # 2026-07-10 WO-42: favourite/longshot calibration bias study from resolved
 # outcomes joined to point-in-time price histories. Study only; no trades.
 calibration_bias:

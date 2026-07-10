@@ -1577,6 +1577,13 @@ Spec:
 
 ## WO-42 — Calibration-curve harvesting (favorite-longshot bias)
 
+Status: IMPLEMENTED by Codex in PR branch
+`agent/wo-42-calibration-bias-study` on 2026-07-10. New CLI
+`calibration-bias-study` joins clean resolutions to pre-close price histories,
+writes `outputs/calibration_bias/calibration_curve.csv` plus summary JSON,
+and applies clustered bootstrap CIs with BH-FDR. Study only; flags are future
+pre-registration candidates, not trades.
+
 The most replicated anomaly in binary markets: longshots overpriced, heavy
 favorites underpriced. The fee schedule is an accelerant on the favorite
 side: fee/dollar = rate x (1-p), so a 90c favorite costs ~0.3c to buy while

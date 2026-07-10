@@ -150,6 +150,15 @@ flow_toxicity:
   volume_bucket_usd: 500
   buckets: 50
   markout_horizon_minutes: 5
+
+# 2026-07-10 WO-42: favourite/longshot calibration bias study from resolved
+# outcomes joined to point-in-time price histories. Study only; no trades.
+calibration_bias:
+  enabled: true
+  price_horizons_hours: [24, 72]
+  min_markets_per_bin: 200
+  price_bins: [0.05, 0.10, 0.15, 0.20, 0.25, 0.30, 0.35, 0.40, 0.45, 0.50, 0.55, 0.60, 0.65, 0.70, 0.75, 0.80, 0.85, 0.90, 0.95]
+  fdr_alpha: 0.10
 # WO-36 step 4: read-only scoreboard for a HUMAN-run minimum-size maker
 # experiment. Inert until wallet_address is set. The system never trades;
 # it only watches the wallet via free public endpoints.

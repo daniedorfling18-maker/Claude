@@ -172,6 +172,14 @@ def _normalise_position_row(position: dict[str, Any]) -> None:
     for key in ("outcome", "close_time", "rule_scope", "time_to_close_hours"):
         if not str(position.get(key) or "").strip() and payload.get(key) not in (None, ""):
             position[key] = payload.get(key)
+    # 2026-07-10: non-crypto positions were born without close_time (the Gate A
+    # pipe bug) - accept any end-date alias the signal payload carries.
+    if not str(position.get("close_time") or "").strip():
+        for alias in ("end_time", "endDate", "endDateIso", "end_date", "end_date_iso", "closedTime", "closed_time"):
+            value = position.get(alias) or payload.get(alias)
+            if value not in (None, ""):
+                position["close_time"] = value
+                break
     if not str(position.get("close_time") or "").strip():
         inferred_close = _crypto_updown_slug_close_time(position.get("market_slug"))
         if inferred_close:

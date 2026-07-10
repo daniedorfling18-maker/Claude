@@ -189,6 +189,53 @@ def test_final_clv_rows_survive_quote_retention_rolloff(tmp_path: Path):
     assert third["final_history_rows"] == 1
 
 
+def test_missing_close_time_is_backfilled_and_cached(tmp_path: Path, monkeypatch):
+    """2026-07-10 Gate A pipe repair: 59 closed positions had NO close_time
+    (only crypto slugs were inferred at the writer), so zero finals were ever
+    graded. The grader must backfill from Gamma once, cache the answer, and
+    then grade a proper closing line."""
+    import polymarket_predictive_engine.closing_line as cl
+
+    cfg = _cfg(tmp_path)
+    calls = {"n": 0}
+
+    def fake_fetch(position, **kwargs):
+        calls["n"] += 1
+        return "2026-07-01T12:00:00Z" if position["market_id"] == "mkt_tokA" else None
+
+    monkeypatch.setattr(cl, "_fetch_gamma_close_time", fake_fetch)
+    write_csv(
+        cfg.output_root / "polymarket_shadow" / "shadow_positions.csv",
+        [
+            _position("tokA", "sports_other|worldcup", entry=0.50, opened="2026-07-01T10:00:00Z", close=""),
+            _position("tokB", "sports_other|tennis", entry=0.40, opened="2026-07-01T10:00:00Z", close=""),
+        ],
+    )
+    write_csv(
+        cfg.output_root / "polymarket_training" / "websocket_market_features.csv",
+        [
+            _quote("tokA", "2026-07-01T11:30:00Z", 0.62, bid=0.61),
+            _quote("tokB", "2026-07-01T11:30:00Z", 0.45, bid=0.44),
+        ],
+    )
+
+    summary = build_closing_line_value(cfg, as_of=AS_OF)
+
+    assert summary["close_time_repair"] == {"backfilled": 1, "still_missing": 1, "lookups": 2}
+    assert summary["final_line_positions"] == 1
+    history = cfg.governance_root / "closing_line_final_history.csv"
+    assert "closing" in history.read_text(encoding="utf-8")
+    repairs = read_json(cfg.governance_root / "close_time_repairs.json")
+    assert repairs["mkt_tokA"] == "2026-07-01T12:00:00Z"
+    assert repairs["mkt_tokB"] == ""  # negative-cached: no repeat lookups
+
+    # Second run: cache answers everything, the fetch is never called again.
+    summary2 = build_closing_line_value(cfg, as_of=AS_OF)
+    assert calls["n"] == 2
+    assert summary2["close_time_repair"]["lookups"] == 0
+    assert summary2["close_time_repair"]["backfilled"] == 1
+
+
 def test_focus_view_excludes_frozen_updown_cohorts(tmp_path: Path):
     cfg = _cfg(tmp_path, settings={"minimum_final_samples": 5, "bootstrap_iterations": 200})
     positions = []

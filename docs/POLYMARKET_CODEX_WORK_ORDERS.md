@@ -1637,6 +1637,13 @@ docs/MARKET_MAKING_MODELS_RESEARCH.md. All batch-1 standing constraints
 
 ## WO-44 — Official order-book history: upgrade replay + depth analytics
 
+Status: IMPLEMENTED by Codex in PR branch `agent/wo-44-official-book-history`
+on 2026-07-10. `maker_fill_replay.py` now supports `book_source:
+archive|official|both`, snapshots official orderbook-history into
+`outputs/maker_carry/official_books/*.csv.gz`, reports per-source replay
+results and `source_agreement`, and degrades to archive replay when the
+official endpoint is unavailable.
+
 The 2026-07-10 assimilation live-verified `GET clob.polymarket.com/
 orderbook-history` (params: `market` or `asset_id`, `startTs`, `limit`
 <= 1000; returns timestamped full bid/ask ladders; 100k+ snapshots observed

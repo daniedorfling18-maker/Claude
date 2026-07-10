@@ -437,6 +437,11 @@ The old same-token share remains as `share_model_legacy` for one-release compari
 ledger records `share_model=published_v2`. Registered M-gates and net-carry gate definitions were
 not loosened.
 
+**2026-07-10 — WO-44 implemented by Codex.** Maker-fill replay now can collect official CLOB
+`orderbook-history` snapshots into `outputs/maker_carry/official_books/*.csv.gz`, replay archive and
+official book states side-by-side, and report per-source realism ratios plus source agreement. Missing
+official history degrades to the existing archive source without failing the measurement lane.
+
 ## Rules of engagement for coding agents
 
 0. **Division of labour**: the orchestrating agent writes/updates this charter and the work orders

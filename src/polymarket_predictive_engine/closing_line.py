@@ -164,6 +164,94 @@ def _backfill_missing_close_times(
     return {"backfilled": backfilled, "still_missing": still_missing, "lookups": lookups}
 
 
+def _fetch_price_history_close_line(
+    token_id: str,
+    close_time: datetime,
+    opened_at: datetime | None,
+    *,
+    timeout_seconds: float = 8.0,
+) -> tuple[str, float] | None:
+    """Closing line from the official CLOB price history; never raises.
+
+    2026-07-10 second-stage pipe repair: 64/69 positions were skipped with
+    no usable quotes because the websocket features table only carries the
+    ~80 currently tracked assets - settled markets roll out and many shadow
+    tokens were never tracked at all. The official /prices-history endpoint
+    covers every token regardless of our collector, so a settled position
+    can always be graded against the venue's own record."""
+    import requests
+
+    start = close_time.timestamp() - 48 * 3600
+    end = close_time.timestamp() + 3600
+    try:
+        response = requests.get(
+            "https://clob.polymarket.com/prices-history",
+            params={"market": token_id, "startTs": int(start), "endTs": int(end), "fidelity": 10},
+            timeout=timeout_seconds,
+        )
+        response.raise_for_status()
+        history = response.json().get("history") or []
+    except Exception:
+        return None
+    best: tuple[str, float] | None = None
+    close_ts = close_time.timestamp()
+    opened_ts = opened_at.timestamp() if opened_at is not None else None
+    for point in history:
+        if not isinstance(point, dict):
+            continue
+        stamp = safe_float(point.get("t"))
+        price = safe_float(point.get("p"))
+        if stamp is None or price is None or not 0 < price < 1:
+            continue
+        if stamp > close_ts:
+            continue
+        if opened_ts is not None and stamp < opened_ts:
+            continue
+        iso = datetime.fromtimestamp(stamp, tz=timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        best = (iso, price)
+    return best
+
+
+def _price_history_final_row(position: dict[str, Any], as_of: datetime) -> dict[str, Any] | None:
+    """Grade one settled, quote-less position from official price history."""
+    entry_price = safe_float(position.get("entry_price"))
+    if entry_price is None or not 0 < entry_price < 1:
+        return None
+    close_time = parse_timestamp(position.get("close_time"))
+    if close_time is None or as_of < close_time:
+        return None
+    token_id = str(position.get("token_id") or "").strip()
+    if not token_id:
+        return None
+    line = _fetch_price_history_close_line(token_id, close_time, parse_timestamp(position.get("opened_at")))
+    if line is None:
+        return None
+    when_iso, line_price = line
+    clv = line_price - entry_price
+    return {
+        "shadow_position_id": position.get("shadow_position_id", ""),
+        "signal_cohort": position.get("signal_cohort", "") or "unknown",
+        "category": position.get("category", "") or "unknown",
+        "market_id": position.get("market_id", ""),
+        "token_id": token_id,
+        "market_slug": position.get("market_slug", ""),
+        "question": position.get("question", ""),
+        "status": position.get("status", ""),
+        "opened_at": position.get("opened_at", ""),
+        "close_time": position.get("close_time", ""),
+        "entry_price": entry_price,
+        "line_price": line_price,
+        "line_bid": "",
+        "line_timestamp": when_iso,
+        "line_kind": "closing",
+        "clv": round(clv, 6),
+        "clv_pct": round(clv / entry_price, 6) if entry_price else "",
+        "clv_vs_bid": "",
+        "beat_close": clv > 0,
+        "quote_count": 0,
+    }
+
+
 def _load_final_history(path: Path) -> dict[str, dict[str, Any]]:
     """Previously recorded final rows keyed by shadow_position_id, types restored.
 
@@ -370,6 +458,10 @@ def build_closing_line_value(
     skipped_no_quotes = 0
     recovered_from_history = 0
     if boolish(settings.get("enabled", True)):
+        fallback_budget = int(settings.get("price_history_fallback_max_lookups", 40))
+        fallback_enabled = boolish(settings.get("price_history_fallback_enabled", True))
+        finals_from_price_history = 0
+        grade_as_of = as_of or datetime.now(timezone.utc)
         for position in positions:
             row = position_clv_row(position, quotes, as_of=as_of)
             if row is None or row.get("line_kind") != "closing":
@@ -380,6 +472,18 @@ def build_closing_line_value(
                     rows.append(dict(persisted))
                     recovered_from_history += 1
                     continue
+            if row is None or row.get("line_kind") != "closing":
+                # Settled but ungradeable locally: the official venue price
+                # history covers every token our collector never tracked.
+                if fallback_enabled and fallback_budget > 0:
+                    close_time = parse_timestamp(position.get("close_time"))
+                    if close_time is not None and grade_as_of >= close_time:
+                        fallback_budget -= 1
+                        official = _price_history_final_row(position, grade_as_of)
+                        if official is not None:
+                            rows.append(official)
+                            finals_from_price_history += 1
+                            continue
             if row is None:
                 skipped_no_quotes += 1
                 continue
@@ -448,6 +552,7 @@ def build_closing_line_value(
         "final_rows_recovered_from_history": recovered_from_history,
         "final_history_rows": len(final_history),
         "close_time_repair": close_time_repair,
+        "finals_recovered_from_price_history": finals_from_price_history,
         "final_history_path": str(history_path),
         "provisional_line_positions": len(rows) - len(final_rows),
         "minimum_final_samples": minimum_final_samples,

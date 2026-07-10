@@ -58,7 +58,7 @@ from .price_action_signals import build_price_action_paper_signals
 from .event_group_consistency import scan_event_groups
 from .implication_consistency import scan_implication_networks
 from .maker_carry_study import run_maker_carry_study
-from .maker_fill_replay import run_maker_fill_replay
+from .maker_fill_replay import run_maker_fill_replay, snapshot_official_books
 from .maker_live_test import run_maker_live_test
 from .price_history_collector import collect_price_history
 from .trade_print_collector import collect_trade_prints
@@ -102,6 +102,7 @@ COMMANDS = [
     "collect-wallet-intel",
     "maker-carry-study",
     "maker-fill-replay",
+    "snapshot-official-books",
     "maker-live-test",
     "scan-event-groups",
     "scan-implication-networks",
@@ -286,6 +287,8 @@ def main(argv: list[str] | None = None) -> int:
             _print(run_maker_carry_study(cfg))
         elif args.command == "maker-fill-replay":
             _print(run_maker_fill_replay(cfg))
+        elif args.command == "snapshot-official-books":
+            _print(snapshot_official_books(cfg))
         elif args.command == "maker-live-test":
             _print(run_maker_live_test(cfg))
         elif args.command == "scan-event-groups":

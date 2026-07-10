@@ -126,6 +126,13 @@ maker_fill_replay:
   enabled: true
   max_markets: 10
   replay_days: 7
+  # 2026-07-10 WO-44: replay official CLOB orderbook-history alongside the
+  # recorded websocket archive when available. Official endpoint failures
+  # degrade to the archive source; this remains measurement-only.
+  book_source: both
+  official_book_limit: 1000
+  official_book_max_pages_per_market: 20
+  max_official_book_rows: 200000
 # WO-36 step 4: read-only scoreboard for a HUMAN-run minimum-size maker
 # experiment. Inert until wallet_address is set. The system never trades;
 # it only watches the wallet via free public endpoints.

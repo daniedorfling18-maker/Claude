@@ -236,6 +236,52 @@ def test_missing_close_time_is_backfilled_and_cached(tmp_path: Path, monkeypatch
     assert summary2["close_time_repair"]["backfilled"] == 1
 
 
+def test_settled_positions_without_local_quotes_grade_from_official_history(tmp_path: Path, monkeypatch):
+    """2026-07-10 second-stage repair: 64/69 live positions were skipped with
+    no usable quotes (websocket table only tracks ~80 assets). A settled
+    position must grade from the official CLOB price history instead, and the
+    final must persist to the append-only history so later runs recover it
+    without re-fetching."""
+    import polymarket_predictive_engine.closing_line as cl
+
+    cfg = _cfg(tmp_path)
+    calls = {"n": 0}
+
+    def fake_fetch(token_id, close_time, opened_at, **kwargs):
+        calls["n"] += 1
+        return ("2026-07-01T11:50:00Z", 0.63)
+
+    monkeypatch.setattr(cl, "_fetch_price_history_close_line", fake_fetch)
+    write_csv(
+        cfg.output_root / "polymarket_shadow" / "shadow_positions.csv",
+        [
+            # Settled, but its token has NO rows in the features table.
+            _position("tokGone", "worldcup", entry=0.50, opened="2026-07-01T10:00:00Z", close="2026-07-01T12:00:00Z"),
+            # Not yet closed: must stay provisional, no fallback fetch.
+            _position("tokOpen", "worldcup", entry=0.40, opened="2026-07-01T10:00:00Z", close="2026-09-01T12:00:00Z"),
+        ],
+    )
+    write_csv(
+        cfg.output_root / "polymarket_training" / "websocket_market_features.csv",
+        [_quote("tokOpen", "2026-07-01T11:30:00Z", 0.45, bid=0.44)],
+    )
+
+    summary = build_closing_line_value(cfg, as_of=AS_OF)
+
+    assert summary["finals_recovered_from_price_history"] == 1
+    assert summary["final_line_positions"] == 1
+    assert summary["positions_skipped_no_usable_quotes"] == 0
+    assert calls["n"] == 1
+    history = (cfg.governance_root / "closing_line_final_history.csv").read_text(encoding="utf-8")
+    assert "tokGone" in history and "closing" in history
+
+    # Second run: the persisted final is recovered; no second fetch.
+    summary2 = build_closing_line_value(cfg, as_of=AS_OF)
+    assert calls["n"] == 1
+    assert summary2["final_rows_recovered_from_history"] == 1
+    assert summary2["finals_recovered_from_price_history"] == 0
+
+
 def test_focus_view_excludes_frozen_updown_cohorts(tmp_path: Path):
     cfg = _cfg(tmp_path, settings={"minimum_final_samples": 5, "bootstrap_iterations": 200})
     positions = []

@@ -142,6 +142,14 @@ maker_fill_replay:
   official_book_limit: 1000
   official_book_max_pages_per_market: 20
   max_official_book_rows: 200000
+
+# 2026-07-10 WO-49: flow-toxicity conditioning for maker quote sheets.
+# Measurement only; does not alter adverse charges, gates, sizing, or orders.
+flow_toxicity:
+  enabled: true
+  volume_bucket_usd: 500
+  buckets: 50
+  markout_horizon_minutes: 5
 # WO-36 step 4: read-only scoreboard for a HUMAN-run minimum-size maker
 # experiment. Inert until wallet_address is set. The system never trades;
 # it only watches the wallet via free public endpoints.

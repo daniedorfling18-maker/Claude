@@ -29,6 +29,7 @@ from .external_signals import normalize_external_signals
 from .family_calibration import build_family_calibration_scorecard
 from .features import build_features
 from .features_v2 import build_features_v2
+from .flow_toxicity import build_flow_toxicity
 from .goal_planner import build_goal_plan
 from .governance import governance_report
 from .historical_backfill import historical_backfill
@@ -104,6 +105,7 @@ COMMANDS = [
     "maker-fill-replay",
     "snapshot-official-books",
     "maker-live-test",
+    "flow-toxicity",
     "scan-event-groups",
     "scan-implication-networks",
     "build-labels",
@@ -291,6 +293,8 @@ def main(argv: list[str] | None = None) -> int:
             _print(snapshot_official_books(cfg))
         elif args.command == "maker-live-test":
             _print(run_maker_live_test(cfg))
+        elif args.command == "flow-toxicity":
+            _print(build_flow_toxicity(cfg))
         elif args.command == "scan-event-groups":
             _print(scan_event_groups(cfg))
         elif args.command == "scan-implication-networks":

@@ -11,9 +11,20 @@ from .utils import now_utc, read_json, safe_float, write_json
 OVERLAY_START = "<!-- proof-questions-overlay:start -->"
 OVERLAY_END = "<!-- proof-questions-overlay:end -->"
 PROOF_SECTION = (
+    '  <section class="primary"><h2>Today\'s decisions</h2><div id="decisionSummary"></div></section>\n'
     '  <section><h2>The $100/month verdict</h2><div id="profitVerdict"></div></section>\n'
     '  <section><h2>Maker lane (WO-36)</h2><div id="makerLane"></div></section>\n'
     '  <section><h2>Four proof questions</h2><div id="proofQuestions"></div></section>'
+)
+
+# Sections that stay expanded in focus mode; everything else collapses into a
+# click-to-open <details> block (content preserved for audits, out of the way
+# for decisions). Matched on lower-cased <h2> text.
+FOCUS_KEEP_TITLES = (
+    "today's decisions",
+    "the $100/month verdict",
+    "maker lane (wo-36)",
+    "four proof questions",
 )
 
 
@@ -184,6 +195,7 @@ def build_proof_questions(
 
 
 def _overlay_script() -> str:
+    focus_keep_js = json.dumps(list(FOCUS_KEEP_TITLES))
     return f"""
 {OVERLAY_START}
 <script>
@@ -242,6 +254,73 @@ def _overlay_script() -> str:
     }}
     return html;
   }};
+  const summaryPanel = (payload) => {{
+    const verdict = payload.profit_verdict || {{}};
+    const gateA = ((verdict.gates || {{}}).A_edge_exists) || {{}};
+    const study = ((payload.maker_lane || {{}}).study) || {{}};
+    const live = ((payload.maker_lane || {{}}).live_test) || {{}};
+    const mGates = study.maker_gates || {{}};
+    const mA = mGates.M_A_carry_evidence || {{}};
+    const alerts = ((payload.oversight_status || {{}}).alerts || []).length;
+    const vState = String(verdict.verdict || 'no data');
+    const vCls = vState.startsWith('yes') ? 'good' : vState.startsWith('no_') ? 'bad' : 'warn';
+    const rows = [
+      ['Taker verdict', `${{vState}} - Gate A units ${{gateA.independent_market_units ?? 0}}/${{gateA.minimum_final_samples ?? 12}} (${{gateA.settled_finals_total ?? 0}} finals settled)`, vCls],
+      ['Maker lane', study.status
+        ? `est $${{study.portfolio_net_carry_usd_per_day ?? '-'}} /day (upper bound) - gate M-A day ${{mA.runs_at_or_above_target ?? 0}}/${{mA.required_runs ?? 7}}`
+        : 'study has NOT run on this box yet - force it or wait for the daily harvest', study.status ? 'good' : 'bad'],
+      ['Live money test', live.status === 'ok' ? `${{live.scoreboard}} - rewards $${{live.rewards_usd_total ?? 0}} / inventory PnL $${{live.inventory_pnl_usd ?? 0}}`
+        : 'not funded (planned post-World Cup)', live.status === 'ok' ? (String(live.scoreboard).startsWith('winning') ? 'good' : 'warn') : 'warn'],
+      ['System health', alerts === 0 ? 'no oversight alerts' : `${{alerts}} oversight alert(s) - open Oversight cockpit below`, alerts === 0 ? 'good' : 'bad'],
+    ];
+    return `<div class="sectionLead">The four numbers that drive decisions. Everything below "Four proof questions" is collapsed drill-down - click any grey heading to expand.</div>`
+      + `<div class="tableWrap"><table><tbody>`
+      + rows.map(([k, v, cls]) => `<tr><td>${{proofBadge(k, cls)}}</td><td>${{escProof(v)}}</td></tr>`).join('')
+      + `</tbody></table></div>`
+      + `<div class="muted">Decision calendar: interim taker read Jul 12-13 - maker gate earliest Jul 16 - WC final (verdict + pot regime change) Jul 19 - funding decision post-WC.</div>`;
+  }};
+  const applyFocusMode = () => {{
+    if (window.__focusModeApplied) return;
+    window.__focusModeApplied = true;
+    const keep = new Set({focus_keep_js});
+    const main = document.querySelector('main') || document.body;
+    const style = document.createElement('style');
+    style.textContent = 'details.focusWrap>summary{{cursor:pointer;opacity:0.65;font-size:0.9em;padding:4px 0;}}details.focusWrap[open]>summary{{opacity:1;}}';
+    document.head.appendChild(style);
+    const collapse = (el, label) => {{
+      if (!el || el.querySelector(':scope > details.focusWrap')) return;
+      const det = document.createElement('details');
+      det.className = 'focusWrap';
+      const sum = document.createElement('summary');
+      sum.textContent = label;
+      det.appendChild(sum);
+      const h2 = el.querySelector(':scope > h2');
+      Array.from(el.childNodes).filter((n) => n !== h2).forEach((n) => det.appendChild(n));
+      el.appendChild(det);
+    }};
+    const cards = document.getElementById('cards');
+    if (cards && cards.parentNode) {{
+      const wrap = document.createElement('section');
+      cards.parentNode.insertBefore(wrap, cards);
+      wrap.appendChild(cards);
+      collapse(wrap, 'legacy status cards (click to expand)');
+    }}
+    const keepEls = [];
+    Array.from(main.querySelectorAll('section')).forEach((sec) => {{
+      const h2 = sec.querySelector(':scope > h2');
+      const title = (h2 ? h2.textContent : '').trim().toLowerCase();
+      if (keep.has(title)) {{ keepEls.push([title, sec]); return; }}
+      if (sec.closest('details.focusWrap') || sec.querySelector(':scope > details.focusWrap > summary')) return;
+      collapse(sec, (h2 ? h2.textContent.trim() : 'detail') + ' (click to expand)');
+      if (h2) h2.style.display = 'none';
+    }});
+    const headerEl = main.querySelector('header');
+    const anchor = headerEl ? headerEl.nextSibling : main.firstChild;
+    Array.from(keep).reverse().forEach((title) => {{
+      const hit = keepEls.find(([t]) => t === title);
+      if (hit) main.insertBefore(hit[1], anchor);
+    }});
+  }};
   async function refreshProofQuestions() {{
     const el = document.getElementById('proofQuestions');
     if (!el) return;
@@ -256,6 +335,9 @@ def _overlay_script() -> str:
       if (verdictEl) verdictEl.innerHTML = verdictPanel(payload.profit_verdict);
       const makerEl = document.getElementById('makerLane');
       if (makerEl) makerEl.innerHTML = makerPanel(payload.maker_lane);
+      const summaryEl = document.getElementById('decisionSummary');
+      if (summaryEl) summaryEl.innerHTML = summaryPanel(payload);
+      applyFocusMode();
     }} catch (err) {{
       el.innerHTML = `<div class="error">Unable to load proof questions: ${{escProof(err.message || err)}}</div>`;
     }}

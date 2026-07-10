@@ -3252,3 +3252,10 @@ def test_dashboard_carries_profit_verdict_and_html_panel(tmp_path):
     assert data["maker_lane"] == {"study": {}, "live_test": {}}
     assert "Maker lane (WO-36)" in html
     assert "makerLane" in html
+    # 2026-07-10 focus mode: a decision summary leads the page and the
+    # overlay collapses every non-decision section client-side.
+    assert "Today's decisions" in html
+    assert "decisionSummary" in html
+    assert "applyFocusMode" in html
+    assert "focusWrap" in html
+    assert "Decision calendar" in html

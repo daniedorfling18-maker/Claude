@@ -467,6 +467,12 @@ volume imbalance percentiles plus wallet-tier markout splits to
 rule 8: do not initiate quotes above `toxicity_score > 0.9`. This is conditioning only; adverse
 charges, gates, sizing, and order paths are unchanged.
 
+**2026-07-10 — WO-51 implemented by Codex.** Maker-carry candidates now carry a tighten-only
+resolution-risk screen: objective Fed/rate, match/game, numeric-close, and election-result wording
+is low by default; subjective UMA-dispute-prone wording is high; and the resolution-quality corpus
+can only escalate low classes to medium. High-risk questions are measured but excluded from the
+quote portfolio and quote sheet rule 9 tells the human to avoid unclear/disputed resolutions.
+
 **2026-07-10 — WO-42 implemented by Codex.** Calibration-bias harvesting now joins clean resolved
 markets to point-in-time pre-close prices and writes
 `outputs/calibration_bias/calibration_curve.csv` plus summary JSON. It reports category/horizon/bin

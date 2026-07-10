@@ -1867,6 +1867,13 @@ Spec:
 
 ## WO-51 — Resolution-risk screen for quoted markets
 
+Status: IMPLEMENTED by Codex in PR branch
+`agent/wo-51-resolution-risk` on 2026-07-10. `maker_carry_study.py`
+now classifies candidate resolution risk, escalates low-risk classes to
+medium when the resolved corpus shows insufficient clean settlement share,
+excludes high-risk wording from the quote portfolio, and adds a
+resolution-risk column plus standing rule 9 to the maker quote sheet.
+
 A maker holding inventory through a DISPUTED UMA resolution loses weeks of
 carry at once. Resolution risk is screenable: objective-source questions
 (published numbers, final scores) resolve cleanly; subjective wording

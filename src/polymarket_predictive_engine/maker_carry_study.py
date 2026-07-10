@@ -18,9 +18,11 @@ Model, per candidate market (all inputs from free, key-less public APIs):
   SWEPT per market over ``quote_distance_fractions``: tighter quotes earn
   quadratically more reward share but eat more fills, so each market has its
   own optimum - the row keeps whichever fraction maximises net carry.
-- Reward share: our quadratic score against the score of every resting order
-  currently inside v on the live CLOB book (two-sided pool = min of the side
-  totals, mirroring Polymarket's min(Q_bid, Q_ask) per-maker rule).
+- Reward share: published-v2 liquidity scoring over the market and its
+  complement (bids on m + asks on m', and the opposite side), with the c=3
+  single-sided rule inside the eligible mid band and strict double-sided
+  scoring outside it. The old same-token min(bid, ask) share is retained as a
+  one-release audit column only.
 - Adverse selection: every mid move larger than s across one bar is assumed
   to fill our full quote on the wrong side at a per-share loss of |move| - s
   (reaction time = one bar). Charged as the WORSE of two windows - 24h of
@@ -89,6 +91,7 @@ CANDIDATE_FIELDS = [
     "question",
     "condition_id",
     "token_id",
+    "complement_token_id",
     "neg_risk",
     "volume_24h_usd",
     "pot_usd_per_day",
@@ -100,6 +103,9 @@ CANDIDATE_FIELDS = [
     "competitor_score_bid",
     "competitor_score_ask",
     "our_score_per_side",
+    "share_model",
+    "share_model_legacy",
+    "band_eligible",
     "estimated_reward_share",
     "gross_reward_usd_per_day",
     "history_points",
@@ -151,6 +157,9 @@ def _settings(cfg: EngineConfig) -> dict[str, Any]:
         "gate_min_runs_at_target": 7,
         "request_timeout_seconds": 20,
         "request_pause_seconds": 0.15,
+        "share_model_c": 3.0,
+        "share_model_mid_band_min": 0.10,
+        "share_model_mid_band_max": 0.90,
     }
     merged.update({k: v for k, v in raw.items() if v is not None})
     return merged
@@ -168,19 +177,24 @@ def _live_pot_usd(market: dict[str, Any], today: str) -> float:
     return total
 
 
-def _first_token_id(market: dict[str, Any]) -> str:
+def _token_ids(market: dict[str, Any]) -> list[str]:
     raw = market.get("clobTokenIds")
     tokens: list[Any]
     if isinstance(raw, str):
         try:
             tokens = json.loads(raw)
         except (ValueError, TypeError):
-            return ""
+            return []
     elif isinstance(raw, list):
         tokens = raw
     else:
-        return ""
-    return str(tokens[0]).strip() if tokens else ""
+        return []
+    return [str(token).strip() for token in tokens if str(token).strip()]
+
+
+def _first_token_id(market: dict[str, Any]) -> str:
+    tokens = _token_ids(market)
+    return tokens[0] if tokens else ""
 
 
 def _rewarded_universe(settings: dict[str, Any]) -> tuple[list[dict[str, Any]], list[str]]:
@@ -217,7 +231,9 @@ def _rewarded_universe(settings: dict[str, Any]) -> tuple[list[dict[str, Any]], 
             pot = _live_pot_usd(market, today)
             min_size = safe_float(market.get("rewardsMinSize")) or 0.0
             max_spread_cents = safe_float(market.get("rewardsMaxSpread")) or 0.0
-            token_id = _first_token_id(market)
+            token_ids = _token_ids(market)
+            token_id = token_ids[0] if token_ids else ""
+            complement_token_id = token_ids[1] if len(token_ids) > 1 else ""
             if pot < float(settings["min_daily_pot_usd"]) or min_size <= 0 or max_spread_cents <= 0 or not token_id:
                 continue
             universe.append(
@@ -225,6 +241,7 @@ def _rewarded_universe(settings: dict[str, Any]) -> tuple[list[dict[str, Any]], 
                     "question": str(market.get("question") or "").strip(),
                     "condition_id": str(market.get("conditionId") or "").strip(),
                     "token_id": token_id,
+                    "complement_token_id": complement_token_id,
                     "neg_risk": bool(market.get("negRisk")),
                     "volume_24h_usd": round(safe_float(market.get("volume24hr")) or 0.0, 2),
                     "pot_usd_per_day": round(pot, 2),
@@ -244,8 +261,178 @@ def _quadratic_score(distance: float, v: float, size: float) -> float:
     return ((v - distance) / v) ** 2 * size
 
 
-def _book_competition(settings: dict[str, Any], token_id: str, v: float) -> dict[str, Any] | None:
-    """Live-book quadratic score already resting inside the qualifying band."""
+def _best_bid_ask(book: dict[str, Any]) -> tuple[float | None, float | None]:
+    bids = book.get("bids") or []
+    asks = book.get("asks") or []
+    bid_prices = [price for level in bids if (price := safe_float(level.get("price"))) is not None]
+    ask_prices = [price for level in asks if (price := safe_float(level.get("price"))) is not None]
+    return (max(bid_prices) if bid_prices else None, min(ask_prices) if ask_prices else None)
+
+
+def _book_levels_score(
+    levels: list[dict[str, Any]],
+    *,
+    mid: float,
+    v: float,
+) -> tuple[float, float]:
+    score = 0.0
+    depth = 0.0
+    for level in levels:
+        price = safe_float(level.get("price"))
+        size = safe_float(level.get("size"))
+        if price is None or size is None:
+            continue
+        distance = abs(mid - price)
+        score += _quadratic_score(distance, v, size)
+        if distance <= v:
+            depth += size
+    return score, depth
+
+
+def _published_q_score(q_one: float, q_two: float, *, mid: float, settings: dict[str, Any]) -> float:
+    band_min = float(settings["share_model_mid_band_min"])
+    band_max = float(settings["share_model_mid_band_max"])
+    if not (band_min <= mid <= band_max):
+        return min(q_one, q_two)
+    c = max(float(settings["share_model_c"]), 1.0)
+    return max(min(q_one, q_two), max(q_one, q_two) / c)
+
+
+def _books_from_payload(payload: Any, token_ids: list[str]) -> dict[str, dict[str, Any]]:
+    books: dict[str, dict[str, Any]] = {}
+    rows: list[Any]
+    if isinstance(payload, list):
+        rows = payload
+    elif isinstance(payload, dict):
+        for key in ("books", "data", "results"):
+            value = payload.get(key)
+            if isinstance(value, list):
+                rows = value
+                break
+        else:
+            rows = [payload]
+    else:
+        rows = []
+    for index, row in enumerate(rows):
+        if not isinstance(row, dict):
+            continue
+        token = str(row.get("asset_id") or row.get("token_id") or row.get("market") or "").strip()
+        if not token and index < len(token_ids):
+            token = token_ids[index]
+        if token:
+            books[token] = row
+    return books
+
+
+def _fetch_books(settings: dict[str, Any], token_ids: list[str]) -> dict[str, dict[str, Any]]:
+    base = str(settings["clob_base_url"]).rstrip("/")
+    timeout = float(settings["request_timeout_seconds"])
+    token_ids = [token for token in token_ids if token]
+    books: dict[str, dict[str, Any]] = {}
+    if len(token_ids) >= 2:
+        try:
+            response = requests.post(
+                f"{base}/books",
+                json=[{"token_id": token} for token in token_ids],
+                timeout=timeout,
+            )
+            response.raise_for_status()
+            books.update(_books_from_payload(response.json(), token_ids))
+        except Exception:
+            books = {}
+    pause = float(settings.get("request_pause_seconds") or 0.0)
+    missing = [token for token in token_ids if token not in books]
+    for index, token in enumerate(missing):
+        try:
+            response = requests.get(f"{base}/book", params={"token_id": token}, timeout=timeout)
+            response.raise_for_status()
+            books[token] = response.json()
+        except Exception:
+            pass
+        if pause and index < len(missing) - 1:
+            time.sleep(max(pause, 0.1))
+    return books
+
+
+def _book_competition(settings: dict[str, Any], token_id: str, complement_token_id: str, v: float) -> dict[str, Any] | None:
+    """Published-v2 reward score for the market + complement book pair."""
+    token_ids = [token_id]
+    if complement_token_id:
+        token_ids.append(complement_token_id)
+    books = _fetch_books(settings, token_ids)
+    book = books.get(token_id)
+    complement = books.get(complement_token_id) if complement_token_id else None
+    if not book:
+        return None
+    bids = book.get("bids") or []
+    asks = book.get("asks") or []
+    if not bids or not asks:
+        return None
+    best_bid, best_ask = _best_bid_ask(book)
+    if best_bid is None or best_ask is None or best_ask <= best_bid:
+        return None
+    mid = (best_bid + best_ask) / 2
+
+    yes_bid_score, bid_depth = _book_levels_score(bids, mid=mid, v=v)
+    yes_ask_score, ask_depth = _book_levels_score(asks, mid=mid, v=v)
+    complement_bid_score = 0.0
+    complement_ask_score = 0.0
+    if complement:
+        comp_bids = complement.get("bids") or []
+        comp_asks = complement.get("asks") or []
+        # Complement token prices are converted to the YES probability axis.
+        complement_ask_score, _ = _book_levels_score(
+            [{"price": 1.0 - (safe_float(level.get("price")) or 0.0), "size": level.get("size")} for level in comp_asks],
+            mid=mid,
+            v=v,
+        )
+        complement_bid_score, _ = _book_levels_score(
+            [{"price": 1.0 - (safe_float(level.get("price")) or 0.0), "size": level.get("size")} for level in comp_bids],
+            mid=mid,
+            v=v,
+        )
+    q_one = yes_bid_score + complement_ask_score
+    q_two = yes_ask_score + complement_bid_score
+    published_pool = _published_q_score(q_one, q_two, mid=mid, settings=settings)
+    legacy_pool = min(yes_bid_score, yes_ask_score)
+    band_min = float(settings["share_model_mid_band_min"])
+    band_max = float(settings["share_model_mid_band_max"])
+    return {
+        "mid": mid,
+        "bid_score": q_one,
+        "ask_score": q_two,
+        "legacy_bid_score": yes_bid_score,
+        "legacy_ask_score": yes_ask_score,
+        "published_pool_score": published_pool,
+        "legacy_pool_score": legacy_pool,
+        "band_eligible": band_min <= mid <= band_max,
+        "bid_depth": bid_depth,
+        "ask_depth": ask_depth,
+    }
+
+
+def _share_from_published_score(
+    settings: dict[str, Any],
+    competition: dict[str, Any],
+    our_score: float,
+) -> tuple[float, float]:
+    q_one = float(competition["bid_score"])
+    q_two = float(competition["ask_score"])
+    mid = float(competition["mid"])
+    pool = float(competition["published_pool_score"])
+    total = _published_q_score(q_one + our_score, q_two + our_score, mid=mid, settings=settings)
+    marginal = max(0.0, total - pool)
+    share = marginal / total if total > 0 else 0.0
+    return share, marginal
+
+
+def _legacy_share(competition: dict[str, Any], our_score: float) -> float:
+    pool = float(competition.get("legacy_pool_score") or 0.0)
+    return our_score / (our_score + pool) if (our_score + pool) > 0 else 0.0
+
+
+def _legacy_book_competition(settings: dict[str, Any], token_id: str, v: float) -> dict[str, Any] | None:
+    """Kept for one-release audit continuity; not used for the live estimate."""
     try:
         response = requests.get(
             f"{str(settings['clob_base_url']).rstrip('/')}/book",
@@ -496,12 +683,9 @@ def run_maker_carry_study(cfg: EngineConfig) -> dict[str, Any]:
     for market in universe[: int(settings["max_book_candidates"])]:
         v = market["rewards_max_spread_cents"] / 100.0
         quote_size = market["rewards_min_size_shares"]
-        competition = _book_competition(settings, market["token_id"], v)
+        competition = _book_competition(settings, market["token_id"], market.get("complement_token_id", ""), v)
         if competition is None:
             continue
-        # Polymarket scores each maker at min(Q_bid, Q_ask); the resting pool's
-        # two-sided total is bounded by its thinner side.
-        pool = min(competition["bid_score"], competition["ask_score"])
         depth = {"bid": competition["bid_depth"], "ask": competition["ask_depth"]}
         # Fetch market data ONCE; the distance sweep below re-prices freely.
         fast_series = _price_series(
@@ -513,10 +697,11 @@ def run_maker_carry_study(cfg: EngineConfig) -> dict[str, Any]:
         best_row: dict[str, Any] | None = None
         for fraction in fractions:
             quote_distance = fraction * v
-            our_score = _quadratic_score(quote_distance, v, quote_size)
-            if our_score <= 0:
+            raw_our_score = _quadratic_score(quote_distance, v, quote_size)
+            if raw_our_score <= 0:
                 continue
-            share = our_score / (our_score + pool) if (our_score + pool) > 0 else 0.0
+            share, our_score = _share_from_published_score(settings, competition, raw_our_score)
+            legacy_share = _legacy_share(competition, raw_our_score)
             gross = market["pot_usd_per_day"] * share
             adverse = _adverse_selection(
                 settings, fast_series, slow_series, prints, quote_distance, quote_size, depth
@@ -529,6 +714,9 @@ def run_maker_carry_study(cfg: EngineConfig) -> dict[str, Any]:
                 "competitor_score_bid": round(competition["bid_score"], 1),
                 "competitor_score_ask": round(competition["ask_score"], 1),
                 "our_score_per_side": round(our_score, 1),
+                "share_model": "published_v2",
+                "share_model_legacy": round(legacy_share, 5),
+                "band_eligible": bool(competition["band_eligible"]),
                 "estimated_reward_share": round(share, 5),
                 "gross_reward_usd_per_day": round(gross, 4),
                 # Bid collateral plus inventory to quote the ask, both ~size x price.
@@ -553,7 +741,9 @@ def run_maker_carry_study(cfg: EngineConfig) -> dict[str, Any]:
                 both_windows = adverse.pop("both_windows")
                 row.update(adverse)
                 row["net_carry_usd_per_day"] = round(gross - adverse["adverse_selection_usd_per_day"], 4)
-                if share > float(settings["max_trusted_reward_share"]):
+                if not competition["band_eligible"]:
+                    row["estimate_quality"] = "band_ineligible"
+                elif share > float(settings["max_trusted_reward_share"]):
                     row["estimate_quality"] = "thin_book_untrusted"
                 elif not both_windows:
                     row["estimate_quality"] = "single_window_history"
@@ -581,6 +771,7 @@ def run_maker_carry_study(cfg: EngineConfig) -> dict[str, Any]:
         r
         for r in candidates
         if (r.get("net_carry_usd_per_day") or 0) > 0 and r.get("estimate_quality") == "book_and_history"
+        and r.get("band_eligible") is True
     ]
     payout_floor = float(settings["min_daily_payout_usd"])
     for row in sorted(trusted, key=lambda r: r["net_carry_usd_per_day"], reverse=True):
@@ -689,11 +880,18 @@ def run_maker_carry_study(cfg: EngineConfig) -> dict[str, Any]:
             "portfolio_net_carry_usd_per_month": round(net_total * 30, 2),
             "target_net_usd_per_day": target,
             "clears_100_per_month_target": bool(portfolio) and net_total >= target,
+            "share_model": "published_v2",
             "maker_gates": maker_gates,
             "assumptions": {
                 "quote_size_shares": "rewards_min_size per market, both sides",
                 "quote_distance": f"per-market best of {fractions} x rewards_max_spread from mid",
-                "share_model": "our quadratic score vs min(bid, ask) resting-book score inside the band",
+                "share_model": "published_v2",
+                "share_model_details": (
+                    "market + complement books; Q_min=max(min(Q1,Q2), max(Q1,Q2)/c) inside "
+                    f"[{settings['share_model_mid_band_min']}, {settings['share_model_mid_band_max']}], "
+                    "strict min outside band; our hypothetical quote enters both sides symmetrically"
+                ),
+                "share_model_legacy": "one-release audit column retained in candidates as old min(same-token bid, ask) share",
                 "adverse_selection_model": (
                     f"charge = worst of 24h@{settings['reaction_minutes']}min bars, 7d@10min bars, and the "
                     f"empirical markout of band-crossing prints at {settings['markout_horizon_minutes']}min, "
@@ -715,6 +913,7 @@ def run_maker_carry_study(cfg: EngineConfig) -> dict[str, Any]:
     # calendar (esp. across the WC window), so keep a one-row-per-run history.
     history_fields = [
         "generated_at_utc",
+        "share_model",
         "universe_rewarded_markets",
         "universe_pot_usd_per_day",
         "portfolio_markets",

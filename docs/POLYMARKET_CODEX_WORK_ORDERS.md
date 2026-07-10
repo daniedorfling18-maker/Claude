@@ -1682,6 +1682,13 @@ Spec (constraint 8 applies - supplementary only):
 
 ## WO-46 — Reward-share model fidelity (published scoring rule)
 
+Status: IMPLEMENTED by Codex in PR branch `agent/wo-46-share-model-fidelity`
+on 2026-07-10. `maker_carry_study.py` now uses `share_model:
+published_v2`, keeps `share_model_legacy` in candidates for comparison, adds
+`share_model` to the history ledger, and marks out-of-band candidates
+`band_ineligible` without changing registered M-gates or portfolio net-carry
+gate definitions.
+
 Our share model approximates the pool as min(bid_score, ask_score) of the
 SAME token's book. The published rule (docs/POLYMARKET_API_ASSIMILATION.md,
 liquidity rewards): scores aggregate across the market AND its complement

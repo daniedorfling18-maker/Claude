@@ -1764,7 +1764,135 @@ Spec:
    score, balanced flow does not (constraint 6 null test), wallet-tier
    split arithmetic, missing-WO-37-data tolerance.
 
-## Priority order for Codex (updated 2026-07-10)
+# Codex batch 3 — filed 2026-07-10 (decision discipline + carry optimization)
+
+Constraints 1-8 bind. One WO per PR.
+
+## WO-50 — Live-test decision policy engine (policy FROZEN in this order)
+
+Converts the July 16-20 evidence into pre-committed action, removing
+decision-under-influence risk. The policy constants below are REGISTERED at
+filing time (2026-07-10); Codex mechanizes evaluation and display. Changes
+may only tighten, with a dated comment.
+
+REGISTERED POLICY:
+- Evidence -> action table (evaluated daily from maker_carry_study.json +
+  maker_carry_history.csv + maker_live_test.json):
+  a. M-A pass AND M-B pass AND composition stable (same top portfolio
+     market on >= 4 of last 7 daily runs) -> indicated_action =
+     "fund_100_min_size_single_calmest_market".
+  b. M-A pass AND M-B pass but composition churning (< 4/7) ->
+     "fund_100_but_only_most_recurrent_market_half_target".
+  c. Any gate pending on 2026-07-20 -> "defer_funding_continue_study".
+  d. Net below target on > 3 of last 7 runs after gates were reachable ->
+     "maker_lane_not_supported_program_review".
+- Sizing ladder (post-funding, uses live-test scoreboard):
+  Stage 0: $100 bankroll, minimum quote size only.
+  Stage 1: $250 after >= 7 consecutive real days with cumulative
+  net_score_usd > 0 AND fills <= 2x modelled rate throughout.
+  Stage 2: $500 after 14 further days meeting the same conditions AND
+  realized rewards >= 0.5x modelled gross.
+  Kelly overlay: stage capital is additionally capped at quarter-Kelly
+  computed from the trend ledger's daily net mean/std via the existing
+  uncertainty-shrunk Kelly module (`kelly_sizing`); the binding cap is the
+  SMALLER of ladder and Kelly.
+- Kill criteria (ANY triggers "stop_quoting_review_before_resume"):
+  cumulative real net_score_usd <= -$25; single-day net <= -$15; fills >
+  2x modelled band-crossing rate on 2 distinct days; any quoted market
+  enters a UMA dispute while inventory is held (exit all, 48h stand-down);
+  live-test scoreboard = STOP_fills_outrunning_model.
+
+Spec:
+1. Module `live_test_decision_policy.py`, CLI `decision-policy`, config
+   `decision_policy:` (enabled; all constants above as defaults, frozen).
+2. Output `outputs/maker_carry/decision_policy.json`: registered_at stamp,
+   inputs snapshot, `indicated_action`, `ladder_stage_permitted`,
+   `kill_criteria_status` (each criterion evaluated when live-test data
+   exists), and `policy_note` ("indicates, never executes - the human
+   decides; the system never trades").
+3. Render on the quote sheet (top) and the dashboard maker panel
+   (indicated_action badge).
+4. Cadence: rides the daily harvest after the study. Tests: each table row
+   (a-d) reachable via synthetic ledgers; ladder promotion arithmetic;
+   quarter-Kelly cap binding vs ladder; each kill criterion trips
+   individually; no-live-data tolerance.
+
+## WO-51 — Resolution-risk screen for quoted markets
+
+A maker holding inventory through a DISPUTED UMA resolution loses weeks of
+carry at once. Resolution risk is screenable: objective-source questions
+(published numbers, final scores) resolve cleanly; subjective wording
+("announce", "officially", "deal", "considers") invites disputes. We
+already grade our own resolved corpus (`resolution_quality_report.csv`).
+
+Spec:
+1. In `maker_carry_study.py`: classify each candidate question into
+   resolution_risk low/medium/high via (a) keyword classes - LOW: fed/rate
+   decision, match/game winner, numeric close above/below, official
+   election result; HIGH: announce/announcement, officially, deal,
+   agreement, ceasefire, blockade, considers, attempts, intends, meeting,
+   talks; MEDIUM: otherwise; (b) corpus overlay: per keyword-class clean
+   settlement share from `resolution_quality_report.csv` when >= 50
+   graded markets exist for the class - a LOW class with measured clean
+   share < 0.9 escalates to MEDIUM (data may only escalate, never
+   downgrade - tighten-only).
+2. Portfolio EXCLUDES high; quote sheet gains a resolution_risk column and
+   standing rule 9: "Only quote markets with objective, verifiable
+   resolution sources and no open clarifications; exit quotes immediately
+   if a proposal on a held market is disputed."
+3. Tests: keyword classes, corpus escalation with sample floor, HIGH
+   exclusion from portfolio, absent-report tolerance.
+
+## WO-52 — Hour-of-day adverse-selection concentration study
+
+Reward sampling pays uniformly across 1,440 minutes; pick-off risk almost
+certainly does not arrive uniformly. If the charge concentrates in
+identifiable UTC hours, calm-hours quoting keeps most reward income while
+shedding most adverse cost - a direct carry improvement with zero new
+data collection.
+
+Spec:
+1. Module `hourly_adverse_study.py`, CLI `hourly-adverse-study`, config
+   `hourly_adverse:` (enabled, min_events_per_bucket 30, fdr_alpha 0.10,
+   markets from the current candidates file).
+2. Inputs: existing 1-min price histories + trade prints. Per UTC hour
+   bucket: band-crossing rate, bar-move pick-off charge share, print
+   volume share. Flag buckets whose charge share exceeds uniform after
+   BH-FDR across the 24 buckets (constraint 7); report a recommended
+   calm-hours window (largest contiguous low-charge span covering >= 50%
+   of reward minutes).
+3. Output `outputs/maker_carry/hourly_adverse.json` + advisory line on the
+   quote sheet ("calm-hours schedule (advisory)"). The study charge is NOT
+   modified (constraint 8); a later dated tightening may apply the
+   schedule.
+4. Planted-truth tests (constraint 6): uniform synthetic flow flags NO
+   buckets; planted 3-hour toxic window recovered; sample-floor respected.
+
+## WO-53 — Intraday competition sampling (second daily study run)
+
+The reward-share estimate reads order books once daily; per-minute reward
+sampling means the truth is the day-long average. A second run ~12h
+offset doubles trend-ledger resolution. M-A counts DISTINCT UTC DAYS, so
+this cannot fast-forward the gate (registered 2026-07-10 clarification).
+
+Spec:
+1. `scripts/run_vps_ops_scheduler.sh`: new stamp `maker_study_intraday`,
+   interval 24h, running `maker-carry-study` only when the last
+   training-harvest stamp is 11-13h old (keeps the two runs ~antipodal).
+2. No schema change (generated_at_utc already distinguishes runs).
+3. Tests: scheduler contains the job + offset guard; vps docker test
+   asserts the new job string; a same-day second run leaves
+   runs_at_or_above_target unchanged (already covered - extend assertion).
+
+## Priority order for Codex (updated 2026-07-10, batch 3 filed)
+
+Batch 3 first, in order: **WO-50 -> WO-51 -> WO-52 -> WO-53** (decision
+discipline before more measurement; 50/51/53 are small). Then the prior
+queue unchanged: WO-41 -> WO-46 -> WO-44 -> WO-45 -> WO-49 -> WO-42 ->
+WO-43; WO-47 anytime; WO-48 BLOCKED until the maker gates read
+evidence-supported; WO-33 last pending the leakage review.
+
+## Superseded priority note (2026-07-10 earlier)
 
 Batch-1 remainder first: **WO-41** (implication networks - structural, high
 prior). Then batch 2 in this order: **WO-46** (share-model fidelity - it

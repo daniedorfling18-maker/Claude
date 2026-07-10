@@ -175,6 +175,15 @@ decision_policy:
   kelly_fraction_cap: 1.0
   quarter_kelly_multiplier: 0.25
 
+# 2026-07-10 WO-52: hourly adverse-selection concentration study. Advisory
+# only; does not alter maker adverse charges, M-gates, sizing, or orders.
+hourly_adverse:
+  enabled: true
+  min_events_per_bucket: 30
+  fdr_alpha: 0.10
+  price_history_paths:
+    - outputs/polymarket_training/historical_price_snapshots.csv
+
 # 2026-07-10 WO-42: favourite/longshot calibration bias study from resolved
 # outcomes joined to point-in-time price histories. Study only; no trades.
 calibration_bias:

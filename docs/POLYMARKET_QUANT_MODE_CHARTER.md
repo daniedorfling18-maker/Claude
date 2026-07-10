@@ -487,6 +487,12 @@ is low by default; subjective UMA-dispute-prone wording is high; and the resolut
 can only escalate low classes to medium. High-risk questions are measured but excluded from the
 quote portfolio and quote sheet rule 9 tells the human to avoid unclear/disputed resolutions.
 
+**2026-07-10 — WO-52 implemented by Codex.** Hour-of-day adverse-selection concentration now runs
+as CLI `hourly-adverse-study`, writing `outputs/maker_carry/hourly_adverse.json`. It compares
+per-UTC-hour band-crossing charge share against a uniform reward-minute null with BH-FDR, reports
+toxic hours and a calm-hours advisory, and patches the maker quote sheet. This is advisory only and
+does not change maker charges, gates, sizing, or order paths.
+
 **2026-07-10 — WO-42 implemented by Codex.** Calibration-bias harvesting now joins clean resolved
 markets to point-in-time pre-close prices and writes
 `outputs/calibration_bias/calibration_curve.csv` plus summary JSON. It reports category/horizon/bin

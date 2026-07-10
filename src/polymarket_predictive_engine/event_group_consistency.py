@@ -71,9 +71,10 @@ def _settings(cfg: EngineConfig) -> dict[str, Any]:
         # appended to the ledger. 0.002 keeps near-misses visible without
         # recording every noisy tick.
         "deviation_threshold_per_basket": 0.002,
-        # Verified live schedule: sports takers pay 0.03 x p x (1-p) per
-        # share. Unknown-but-enabled fee types charge the crypto worst case.
-        "fee_rate_by_type": {"sports_fees_v2": 0.03},
+        # Canonical fees page (2026-07-10 assimilation): sports takers pay
+        # 0.05 x p x (1-p) per share. Unknown-but-enabled types charge the
+        # crypto worst case.
+        "fee_rate_by_type": {"sports_fees_v2": 0.05},
         "fee_rate_when_enabled_unknown": 0.07,
         "max_ledger_rows": 100000,
         "request_timeout_seconds": 20,

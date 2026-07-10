@@ -61,8 +61,11 @@ DEFAULT_SETTINGS = {
     "adverse_selection_haircut_per_dollar": 0.005,
     # Polymarket taker fee (docs.polymarket.com/trading/fees): takers pay
     # rate x p x (1-p) per share; per dollar staked that is rate x (1-p).
-    # Sports = 0.03. Makers pay nothing - relevant to the WO-36 making lane.
-    "taker_fee_rate": 0.03,
+    # Amendment 6 (2026-07-10 full-docs read): the canonical fees page lists
+    # SPORTS at 0.05 (crypto 0.07, finance/politics 0.04, geopolitics 0);
+    # the 0.03 charged since amendment 4 UNDERCHARGED. Tightened to 0.05.
+    # Makers pay nothing - relevant to the WO-36 making lane.
+    "taker_fee_rate": 0.05,
     "max_stake_per_trade_usdc": 10.0,
     "days_per_month": 30.0,
 }
@@ -95,6 +98,9 @@ REGISTERED_AT_UTC = "2026-07-09T04:00:00Z"
 #      fixtures (the existing h2h mapper already joins the new shapes; the
 #      Odds API fetch already pays for soccer_fifa_world_cup h2h). Expansion
 #      only ever adds units THROUGH this tightened clustering.
+#   6. (2026-07-10, still pre-first-verdict-read) Sports taker fee raised
+#      0.03 -> 0.05 per the canonical fees page (full-docs assimilation, see
+#      docs/POLYMARKET_API_ASSIMILATION.md). Tightens Gate B only.
 REGISTERED_AMENDMENTS_AT_UTC = "2026-07-09T11:00:00Z"
 
 

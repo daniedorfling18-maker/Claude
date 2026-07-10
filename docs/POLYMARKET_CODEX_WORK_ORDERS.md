@@ -1941,6 +1941,14 @@ Spec:
 
 ## WO-55 — Reconstructed-signal CLV study (RESEARCH ONLY - never verdict)
 
+Status: IMPLEMENTED by Codex in PR branch
+`agent/wo-55-reconstructed-clv-study` on 2026-07-10. CLI
+`reconstructed-clv-study` writes
+`outputs/polymarket_model_governance/reconstructed_signal_clv.json` and
+`reconstructed_signal_clv_positions.csv`, both stamped
+`evidence_class: reconstructed_research`. It is explicitly non-verdict and
+does not touch `profit_verdict.py` or any paper/live trading path.
+
 We hold the one archive money cannot re-buy: timestamped sharp-anchor odds
 snapshots. Every historical anchor divergence that our thresholds WOULD have
 entered can be reconstructed - entry price from the official price history

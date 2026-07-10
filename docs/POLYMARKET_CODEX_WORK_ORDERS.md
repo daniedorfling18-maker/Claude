@@ -1614,13 +1614,164 @@ Spec:
    the critical false-positive control); planted 2c drift recovered within
    tolerance. Daily cadence with the harvest.
 
-## Priority order for Codex
+# Codex batch 2 — filed 2026-07-10 (post docs-assimilation + MM research)
 
-WO-37 first (last unharvested alpha stream; every day unbuilt is history
-lost), WO-38 second (turns the one live WO-34 finding into an executability
-answer), WO-40 third (hardens the maker number the post-WC funding decision
-rests on), WO-41 fourth (structural, high prior, data already flowing),
-WO-42 fifth and WO-43 sixth (corpus-bound; the 2026-07-10 backfill raise to
-1000/day is filling their bins in the background), WO-39 last (cheap,
-anytime). WO-33 (trainer wiring) stays open and LAST - it needs the leakage
-review and enough resolved-corpus depth, and nothing upstream depends on it.
+Sources: docs/POLYMARKET_API_ASSIMILATION.md and
+docs/MARKET_MAKING_MODELS_RESEARCH.md. All batch-1 standing constraints
+(1-7 above) bind every order below, plus one more:
+
+8. REGISTRATION INTEGRITY: the maker gates (M-A/M-B/M-C) and the taker
+   verdict gates are FROZEN as registered. Orders below that measure new
+   income or refine models must publish their numbers as SUPPLEMENTARY
+   fields next to the registered metric - never fold them into the value a
+   gate reads. Loosening-by-enrichment is still loosening.
+   Process reminder: ONE work order per PR (WO-37..40 landed as a single
+   direct commit - do not repeat that).
+
+## WO-44 — Official order-book history: upgrade replay + depth analytics
+
+The 2026-07-10 assimilation live-verified `GET clob.polymarket.com/
+orderbook-history` (params: `market` or `asset_id`, `startTs`, `limit`
+<= 1000; returns timestamped full bid/ask ladders; 100k+ snapshots observed
+for one WC token). This supersedes the websocket archive as WO-40's data
+source: complete coverage, no gaps from our collector restarts.
+
+Spec:
+1. Extend `maker_fill_replay.py` with a `book_source` setting
+   (`archive` | `official` | `both`, default `both`): fetch official
+   snapshots for the replay window via cursor/timestamp pagination, replay
+   fills against BOTH sources, and report `realism_ratio` per source plus a
+   `source_agreement` diagnostic (fills/day divergence between archive and
+   official books).
+2. New collector function (same module) `snapshot_official_books`: for
+   quote-sheet portfolio markets, pull the last `replay_days` of official
+   book history into `outputs/maker_carry/official_books/{condition_id}.csv.gz`
+   (dedup by timestamp+hash; cap via the training-archive roller).
+3. Respect rate limits: sleep >= 0.1s/page; markets capped at 10.
+4. Tests: paginated fake with `hash` dedup, both-source replay agreement,
+   absent-endpoint tolerance (must degrade to archive silently).
+
+## WO-45 — Supplementary maker income: rebates + holding rewards
+
+The canonical docs add two maker income streams the carry study omits
+(conservative today, but the funding decision deserves the full picture):
+(a) maker REBATES - 15% (sports) to 25% (politics/finance/other) of the
+taker fee generated when OUR resting order is filled, paid daily, $1 floor;
+(b) HOLDING rewards - 4% annualized on position value, sampled hourly.
+
+Spec (constraint 8 applies - supplementary only):
+1. In `maker_carry_study.py`, per candidate compute
+   `supplementary_rebate_usd_per_day` = expected fills/day (band-crossing x
+   queue share, already computed) x fee_equivalent per fill
+   (C x category feeRate x p x (1-p)) x category rebate share. Category and
+   feeRate from the market's `feeType`/`feesEnabled`/fee table
+   (docs/POLYMARKET_API_ASSIMILATION.md).
+2. `supplementary_holding_usd_per_day` = 0.04/365 x capital_usd.
+3. Both appear in candidates CSV, summary, and quote sheet as
+   "uncounted income (not in gates)". `portfolio_net_carry_usd_per_day`
+   and the M-gates remain EXACTLY as registered.
+4. Tests: category rate table lookup, zero for fee-free geopolitics, gates
+   unchanged with/without supplementary fields.
+
+## WO-46 — Reward-share model fidelity (published scoring rule)
+
+Our share model approximates the pool as min(bid_score, ask_score) of the
+SAME token's book. The published rule (docs/POLYMARKET_API_ASSIMILATION.md,
+liquidity rewards): scores aggregate across the market AND its complement
+(bids on m + asks on m'), sample EVERY MINUTE, and inside mid [0.10, 0.90]
+single-sided liquidity scores at 1/3 (Q_min = max(min(Q1,Q2),
+max(Q1,Q2)/c), c = 3.0); outside that band double-sided is required.
+
+Spec:
+1. In `maker_carry_study.py::_book_competition`, fetch BOTH tokens' books
+   (Gamma `clobTokenIds` has both; batch via `POST /books` to halve calls),
+   build Q_one/Q_two per the published equations, and apply the c-rule by
+   mid band. Our own hypothetical quote enters both sides symmetrically.
+2. Emit `share_model: "published_v2"` in the summary assumptions; keep the
+   old share as `share_model_legacy` for one release so the trend ledger
+   can be compared across the change (document the discontinuity in the
+   history CSV via a new `share_model` column).
+3. Candidates outside mid [0.10, 0.90] are marked `band_ineligible` and
+   excluded from the portfolio (matches quote-sheet rule 7 mechanically).
+4. Tests: worked example from the docs (the 0.49/0.48/0.51 order set),
+   single-sided /3 rule inside band, strict min outside band,
+   band-ineligible exclusion.
+
+## WO-47 — Resolution + new-market websocket capture
+
+The market websocket's custom features carry `market_resolved`
+(winning_asset_id - authoritative settlement stamps, faster and cleaner
+than polling Gamma) and `new_market` (fee_schedule incl rebate_rate,
+game_start_time, sports_market_type, tick size at birth).
+
+Spec:
+1. Extend `websocket_collector.py` subscription with
+   `custom_feature_enabled: true`; persist `market_resolved` events to
+   `outputs/polymarket_websocket/resolution_events.csv` (append-only,
+   dedup by market+winning_asset_id) and `new_market` events to
+   `market_births.csv` (question, condition_id, fee_schedule fields,
+   game_start_time, tick size).
+2. Wire NOTHING downstream yet: closing-line grading keeps its current
+   close-time source; these ledgers are validation data first (compare
+   event close stamps vs our derived close_time for amendment-5 fixture
+   clustering QA; a later dated tightening may switch the source).
+3. Tests: fake websocket frames for both event types, dedup, and the
+   existing collector behaviour unchanged when the flag is off.
+
+## WO-48 — Avellaneda-Stoikov quote-sheet layer (research output; POST-GATES)
+
+From docs/MARKET_MAKING_MODELS_RESEARCH.md: reservation price
+r = mid - q*gamma*sigma^2*(T-t); optimal spread gamma*sigma^2*(T-t) +
+(2/gamma)*ln(1+gamma/k). We already estimate sigma (1-min series) and k
+(fill-intensity decay across the three sweep distances).
+
+Spec (BLOCKED until maker_verdict = evidence_supported; build behind
+`enabled: false` default):
+1. Module `maker_quote_advisor.py`, CLI `maker-quote-advisor`, config
+   `maker_quote_advisor:` (enabled false, gamma 0.5, horizon = hours to
+   market close capped at 168h).
+2. Per quote-sheet market: estimate sigma from the 1-min series, fit k by
+   log-linear regression of band-crossing rate vs the three sweep
+   distances, output suggested half-spread and the inventory-skew table
+   (suggested requote mid-shift per 100 shares of inventory).
+3. Output is a section appended to maker_quote_sheet.md labelled
+   "advisory only - the standing rules override this table"; no gate, no
+   order, no study-metric change.
+4. Tests: k-fit on synthetic exponential intensity, skew sign (long
+   inventory -> both quotes shift down), disabled default emits nothing.
+
+## WO-49 — Flow-toxicity conditioning (VPIN-lite + wallet tiers)
+
+WO-37's wallet ledgers now exist. Two toxicity signals per market:
+(a) VPIN-lite: signed volume imbalance over rolling volume buckets from
+trade prints; (b) wallet-tier markout: markout-by-fill where the
+counterparty wallet is in the leaderboard top-100 vs not (the arXiv
+Polymarket microstructure study documents exactly these tiers).
+
+Spec:
+1. Module `flow_toxicity.py`, CLI `flow-toxicity`, config `flow_toxicity:`
+   (enabled, volume_bucket_usd 500, buckets 50, markout_horizon_minutes 5).
+2. Inputs: `trade_prints.csv`, `holders_history.csv` /
+   `leaderboard_history.csv` (WO-37 outputs), 1-min price series.
+   Output per tracked market: `toxicity_score` (0-1 percentile of
+   imbalance), `smart_fill_markout` vs `crowd_fill_markout`, appended to
+   `outputs/maker_carry/flow_toxicity.csv` + summary JSON.
+3. Surface: quote sheet gains a per-market toxicity column and a standing
+   rule 8 ("do not initiate quotes in a market whose toxicity_score >
+   0.9"); the study's adverse charge is NOT modified (constraint 8) - a
+   dated tightening may later take max(charge, toxicity-implied charge).
+4. Cadence: rides the daily harvest. Tests: planted toxic flow raises the
+   score, balanced flow does not (constraint 6 null test), wallet-tier
+   split arithmetic, missing-WO-37-data tolerance.
+
+## Priority order for Codex (updated 2026-07-10)
+
+Batch-1 remainder first: **WO-41** (implication networks - structural, high
+prior). Then batch 2 in this order: **WO-46** (share-model fidelity - it
+changes the accuracy of every number the funding decision reads),
+**WO-44** (official book history - replay realism), **WO-45** (supplementary
+income - completes the income picture without touching gates), **WO-49**
+(toxicity - uses WO-37 data), then batch-1 **WO-42** and **WO-43**
+(corpus-bound studies). **WO-47** anytime (independent). **WO-48** stays
+BLOCKED until the maker gates read evidence-supported. WO-33 remains last
+overall pending the leakage review.

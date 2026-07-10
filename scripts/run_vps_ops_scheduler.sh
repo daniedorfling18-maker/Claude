@@ -249,6 +249,9 @@ run_training_harvest() {
     # WO-55 reconstructed sharp-anchor CLV study: retrospective research only,
     # explicitly non-verdict and non-trading; runs after price histories exist.
     timeout "$HARVEST_TIMEOUT" python -m polymarket_predictive_engine.cli reconstructed-clv-study --config "$CONFIG_PATH"
+    # WO-43 martingale drift scan: study-only timing-edge diagnostics from
+    # harvested price histories; no lane, no gate, no orders.
+    timeout "$HARVEST_TIMEOUT" python -m polymarket_predictive_engine.cli drift-scan --config "$CONFIG_PATH"
     # WO-37 wallet-intelligence collection: leaderboard + holders for tracked
     # markets. Collection only; later leakage-reviewed work decides whether
     # any wallet signal becomes a feature.
@@ -267,7 +270,7 @@ run_training_harvest() {
     timeout "$HARVEST_TIMEOUT" python -m polymarket_predictive_engine.cli calibration-bias-study --config "$CONFIG_PATH"
   ) >> "$LOG_FILE" 2>&1
   CODE=$?
-  stamp_status training_harvest "$CODE" "gamma resolved-markets backfill + clob price histories + wallet intelligence + maker-carry study + maker-fill replay + flow toxicity + reconstructed CLV study + calibration-bias study"
+  stamp_status training_harvest "$CODE" "gamma resolved-markets backfill + clob price histories + wallet intelligence + maker-carry study + maker-fill replay + flow toxicity + reconstructed CLV study + calibration-bias study + martingale drift scan"
   log "training_harvest: exit $CODE"
 }
 

@@ -1610,6 +1610,12 @@ Spec:
 
 ## WO-43 — Martingale drift scan (term-structure of returns)
 
+Status: IMPLEMENTED by Codex in PR branch
+`agent/wo-43-drift-scan-study` on 2026-07-10. CLI `drift-scan` writes
+`outputs/polymarket_model_governance/drift_scan.csv` and `drift_scan.json`
+with market-clustered bootstrap CIs, BH-FDR, and taker-cost-stack flags. Study
+only; no lane, no paper/live trading, no gate changes.
+
 Under efficiency, prices are martingales. Any systematic drift conditional
 on (price level, time-to-close, category) is a timing edge for BOTH lanes:
 entries for the taker, quote-skew for the maker.

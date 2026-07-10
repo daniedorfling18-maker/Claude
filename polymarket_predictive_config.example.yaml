@@ -198,6 +198,39 @@ historical_price_history:
   fidelity_seconds: 300
   request_timeout_seconds: 30
   request_pause_seconds: 0.1
+# 2026-07-10 WO-43: martingale drift scan. Study-only; estimates
+# E[dP | price bin, time-to-close bin, category] from harvested CLOB price
+# histories with market-clustered bootstrap and BH-FDR. It never creates a
+# lane, relaxes a gate, or invokes paper/live trading.
+drift_scan:
+  enabled: true
+  horizons_hours: [24, 48]
+  price_bins:
+  - 0.05
+  - 0.10
+  - 0.15
+  - 0.20
+  - 0.25
+  - 0.30
+  - 0.35
+  - 0.40
+  - 0.45
+  - 0.50
+  - 0.55
+  - 0.60
+  - 0.65
+  - 0.70
+  - 0.75
+  - 0.80
+  - 0.85
+  - 0.90
+  - 0.95
+  time_to_close_bins_hours: [24, 72, 168]
+  min_markets_per_bin: 150
+  fdr_alpha: 0.10
+  taker_fee_rate: 0.05
+  exit_cost_per_dollar: 0.005
+  adverse_cost_per_dollar: 0.005
 splits:
   method: time_based
   train_fraction: 0.6

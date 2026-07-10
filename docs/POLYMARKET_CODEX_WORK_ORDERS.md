@@ -1770,6 +1770,13 @@ Spec (BLOCKED until maker_verdict = evidence_supported; build behind
 
 ## WO-49 — Flow-toxicity conditioning (VPIN-lite + wallet tiers)
 
+Status: IMPLEMENTED by Codex in PR branch `agent/wo-49-flow-toxicity`
+on 2026-07-10. New CLI `flow-toxicity` writes
+`outputs/maker_carry/flow_toxicity.csv` and summary JSON with VPIN-lite
+toxicity percentiles plus smart-wallet/crowd markout splits. The maker quote
+sheet shows a toxicity column and standing rule 8; adverse charges and gates
+are not modified.
+
 WO-37's wallet ledgers now exist. Two toxicity signals per market:
 (a) VPIN-lite: signed volume imbalance over rolling volume buckets from
 trade prints; (b) wallet-tier markout: markout-by-fill where the

@@ -256,9 +256,12 @@ run_training_harvest() {
     # WO-40 maker-fill realism replay: recorded book archive + trade prints,
     # last-in-queue fills. Measurement only; never alters the study charge.
     timeout "$HARVEST_TIMEOUT" python -m polymarket_predictive_engine.cli maker-fill-replay --config "$CONFIG_PATH"
+    # WO-49 flow toxicity: VPIN-lite + wallet-tier markouts for quote-sheet
+    # conditioning only. Never alters adverse charges, gates, or order paths.
+    timeout "$HARVEST_TIMEOUT" python -m polymarket_predictive_engine.cli flow-toxicity --config "$CONFIG_PATH"
   ) >> "$LOG_FILE" 2>&1
   CODE=$?
-  stamp_status training_harvest "$CODE" "gamma resolved-markets backfill + clob price histories + wallet intelligence + maker-carry study + maker-fill replay"
+  stamp_status training_harvest "$CODE" "gamma resolved-markets backfill + clob price histories + wallet intelligence + maker-carry study + maker-fill replay + flow toxicity"
   log "training_harvest: exit $CODE"
 }
 

@@ -1011,6 +1011,11 @@ def _write_quote_sheet(out_root: Path, summary: dict[str, Any], settings: dict[s
     system with their own judgement and capital. The system itself remains
     paper-only and never touches an exchange."""
     gates = summary.get("maker_gates", {})
+    toxicity_rows = {
+        str(row.get("market") or ""): row
+        for row in read_csv_rows(out_root / "flow_toxicity.csv")
+        if row.get("market")
+    }
     lines = [
         "# Maker quote sheet (WO-36) - RESEARCH OUTPUT, NOT ADVICE",
         "",
@@ -1027,15 +1032,19 @@ def _write_quote_sheet(out_root: Path, summary: dict[str, Any], settings: dict[s
         "This system places NO orders. Acting on this sheet is a human decision,",
         "with human money, outside the bot's paper-only governance.",
         "",
-        "| market | quote size (shares/side) | distance from mid | capital | est net/day | uncounted income/day | risk flags |",
-        "|---|---|---|---|---|---|---|",
+        "| market | quote size (shares/side) | distance from mid | capital | est net/day | uncounted income/day | toxicity | risk flags |",
+        "|---|---|---|---|---|---|---|---|",
     ]
     for entry in summary.get("portfolio", []) or []:
-        flags = ", ".join(entry.get("event_risk_flags") or []) or "-"
+        toxicity = toxicity_rows.get(str(entry.get("condition_id") or ""))
+        toxicity_score = safe_float(toxicity.get("toxicity_score")) if toxicity else None
+        toxicity_label = f"{toxicity_score:.2f}" if toxicity_score is not None else "-"
+        toxicity_flags = ["toxicity>0.9"] if toxicity_score is not None and toxicity_score > 0.9 else []
+        flags = ", ".join([*(entry.get("event_risk_flags") or []), *toxicity_flags]) or "-"
         lines.append(
             f"| {entry['question'][:60]} | {entry['quote_size_shares']:.0f} | "
             f"{entry['quote_distance']} | ${entry['capital_usd']} | "
-            f"${entry['net_carry_usd_per_day']} | ${entry.get('uncounted_supplementary_income_usd_per_day', 0.0)} | {flags} |"
+            f"${entry['net_carry_usd_per_day']} | ${entry.get('uncounted_supplementary_income_usd_per_day', 0.0)} | {toxicity_label} | {flags} |"
         )
     lines += [
         "",
@@ -1055,6 +1064,9 @@ def _write_quote_sheet(out_root: Path, summary: dict[str, Any], settings: dict[s
         "   outside it the venue requires double-sided scoring, ticks shift, and",
         "   gamma-to-settlement risk is highest. Exit quotes as price leaves the",
         "   band; do not chase it.",
+        "8. Flow toxicity: do not initiate quotes in a market whose toxicity_score > 0.9.",
+        "   This is a conditioning rule only; the study's adverse charge is not",
+        "   modified unless a later dated tightening explicitly changes it.",
     ]
     (out_root / "maker_quote_sheet.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
 

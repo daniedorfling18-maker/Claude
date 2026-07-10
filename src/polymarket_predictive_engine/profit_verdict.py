@@ -101,7 +101,40 @@ REGISTERED_AT_UTC = "2026-07-09T04:00:00Z"
 #   6. (2026-07-10, still pre-first-verdict-read) Sports taker fee raised
 #      0.03 -> 0.05 per the canonical fees page (full-docs assimilation, see
 #      docs/POLYMARKET_API_ASSIMILATION.md). Tightens Gate B only.
+#   7. (2026-07-10, registered BEFORE the first interim read, first true read
+#      showing 8 units / p=0.637) Operationalizes amendment 3's window
+#      extension so no discretion remains when the final read lands:
+#      - If the final read (end of the World Cup window, 2026-07-19/20)
+#        returns insufficient_evidence (< 12 independent units), the evidence
+#        window extends EXACTLY ONCE: 2026-07-20 through 2026-08-19T23:59Z,
+#        regime post_wc_2026. Gates, metrics, fees, clustering unchanged.
+#        The extension applies regardless of the interim sign of the mean
+#        (n < 12 is uninformative in both directions); this supersedes
+#        amendment 3's "positive read" wording with a stricter rule: one
+#        extension, then forced resolution.
+#      - The 2026-08-19/20 read is TERMINAL: all gates pass -> the YES path;
+#        >= 12 units with any gate failing -> NO; still < 12 units -> NO on
+#        turnover grounds (an edge class that cannot produce 12 independent
+#        graded fixtures in ~6 weeks cannot clear $100/month at the $10
+#        stake cap; Gate C fails by construction).
 REGISTERED_AMENDMENTS_AT_UTC = "2026-07-09T11:00:00Z"
+
+# Amendment 7 terms, machine-readable so the dashboard and audits can show
+# the pre-committed schedule next to every verdict read.
+REGISTERED_EXTENSION_PROTOCOL = {
+    "amendment": 7,
+    "registered_at_utc": "2026-07-10T21:30:00Z",
+    "final_read_due_utc": "2026-07-20T00:00:00Z",
+    "extension_window_start_utc": "2026-07-20T00:00:00Z",
+    "extension_window_end_utc": "2026-08-19T23:59:00Z",
+    "extension_regime": "post_wc_2026",
+    "single_use": True,
+    "terminal_rule": (
+        "at the 2026-08-19/20 read the verdict resolves: all gates pass -> yes path; "
+        ">= 12 units with a failing gate -> no; < 12 units -> no on turnover grounds "
+        "(Gate C by construction)."
+    ),
+}
 
 
 def _settings(cfg: EngineConfig) -> dict[str, Any]:
@@ -379,10 +412,12 @@ def build_profit_verdict(cfg: EngineConfig) -> dict[str, Any]:
         },
         "next_evidence": (
             "World Cup focus finals settle 2026-07-09 through 2026-07-19; each settled market adds a Gate A unit. "
-            "If the tournament ends positive but underpowered, the verdict stays insufficient_evidence and the "
-            "window extends to the next event regime rather than resolving. A YES additionally requires the "
-            "existing governed paper-confirmation round trips before any run-rate claim."
+            "If the final read is underpowered (< 12 units) the window extends exactly once, 2026-07-20 through "
+            "2026-08-19, regime post_wc_2026, then resolves terminally (amendment 7; see "
+            "registered_extension_protocol). A YES additionally requires the existing governed "
+            "paper-confirmation round trips before any run-rate claim."
         ),
+        "registered_extension_protocol": REGISTERED_EXTENSION_PROTOCOL,
         "proof_questions_seen": bool(proof),
         "paper_trading_invoked": False,
         "live_trading_invoked": False,

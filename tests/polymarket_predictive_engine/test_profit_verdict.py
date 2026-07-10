@@ -253,3 +253,26 @@ def test_frozen_cohort_entries_do_not_inflate_achievable_turnover(tmp_path):
     assert gate_c["observed_focus_entries"] == 0
     assert gate_c["state"] == "pending"
     assert verdict["verdict"] == "insufficient_evidence"
+
+
+def test_amendment_7_extension_protocol_is_registered_and_terminal(tmp_path):
+    # Amendment 7 pre-commits the window-extension terms BEFORE the first
+    # interim read: exact dates, single use, forced terminal resolution.
+    # This test pins the registration so the terms cannot silently drift
+    # after evidence arrives.
+    cfg = _config(tmp_path)
+    _write_finals(cfg, {"m0": [0.01]})
+
+    verdict = build_profit_verdict(cfg)
+
+    protocol = verdict["registered_extension_protocol"]
+    assert protocol["amendment"] == 7
+    assert protocol["single_use"] is True
+    assert protocol["extension_window_start_utc"] == "2026-07-20T00:00:00Z"
+    assert protocol["extension_window_end_utc"] == "2026-08-19T23:59:00Z"
+    assert protocol["extension_regime"] == "post_wc_2026"
+    # Registered before the final read it governs.
+    assert protocol["registered_at_utc"] < protocol["final_read_due_utc"]
+    # The terminal rule resolves ALL branches: yes, no, and underpowered-no.
+    for fragment in ("yes path", "failing gate", "< 12 units", "turnover"):
+        assert fragment in protocol["terminal_rule"]

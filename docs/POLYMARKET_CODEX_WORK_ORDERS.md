@@ -1396,3 +1396,120 @@ Also from the docs read, smaller: batch endpoints (/books, /prices,
 /midpoints, batch prices-history) to cut poller overhead; klines endpoint;
 sports websocket channel (real-time scores - could reduce Odds API dependence
 for in-window pick timing); rate limits confirmed generous for all our pollers.
+
+---
+
+# Codex execution batch — filed 2026-07-10
+
+**Standing constraints for EVERY work order below (non-negotiable):**
+
+1. Paper/dry-run only. No order placement, amendment, or cancellation code of
+   any kind; no CLOB auth flows. `paper_trading_invoked` /
+   `live_trading_invoked` are always `False` in every summary artifact.
+2. Never loosen a gate, threshold, stake, or registered amendment. Tightening
+   requires a dated comment explaining why it tightens.
+3. Free key-less public endpoints only (Gamma / data-API / CLOB read paths).
+   Respect rate limits: sleep >= 0.1s between requests; never parallel-hammer.
+4. Follow the collector template (`trade_print_collector.py` /
+   `maker_carry_study.py`): `_settings()` merged from a config block with
+   defaults, summary JSON always written (status `disabled` when off),
+   append-only CSV ledgers with dedup + row caps rolling into the training
+   archive, `main(config_path)` entrypoint, CLI command registered in
+   `cli.py`, VPS cadence via `scripts/run_vps_ops_scheduler.sh` (piggyback an
+   existing job; do NOT add new scheduler intervals), tests in
+   `tests/polymarket_predictive_engine/` with monkeypatched `requests`.
+5. `python -m pytest -q` green before any PR. Config example additions to
+   `polymarket_predictive_config.example.yaml` with a dated comment.
+
+## WO-37 — Wallet-intelligence collection lane (holders + leaderboard)
+
+The build order for WO-35's data layer. The only unconsumed API streams with
+real alpha content are data-API `holders` and `leaderboard`: rank wallets by
+realized PnL, then observe where proven winners are positioned vs the crowd.
+Collection ONLY - no features, no model wiring (that stays WO-35/WO-33 with
+leakage review).
+
+Spec:
+1. Module `wallet_intelligence_collector.py`, CLI `collect-wallet-intel`,
+   config block `wallet_intelligence:` (enabled, max_markets 40,
+   top_holders_per_market 20, leaderboard_limit 100, max_ledger_rows 200000).
+2. Daily leaderboard snapshot: `GET data-api.polymarket.com/leaderboard`
+   (probe `window`/`rankType` params defensively; record raw fields
+   wallet/rank/pnl/volume + snapshot stamp) -> append-only
+   `outputs/wallet_intelligence/leaderboard_history.csv`.
+3. Holder snapshots for tracked markets (reuse `_tracked_markets` pattern
+   from trade prints - the websocket feature table): `GET /holders?market=
+   {condition_id}` -> per-market top-N holders (wallet, outcome, size) ->
+   append-only `holders_history.csv`, dedup by (date, market, wallet).
+4. Summary JSON: markets polled, wallets seen, overlap count between
+   current holders and latest leaderboard top-100 (the first smart-money
+   scalar, reporting only).
+5. Cadence: piggyback `run_training_harvest` (daily). Tests: endpoint fakes,
+   dedup, cap-roll, disabled mode, no-trading invariants.
+
+## WO-38 — Executable-depth capture for flagged event-group deviations
+
+WO-34's detector found a +4.5-5.0c/basket deviation persisting >= 20h on a
+zero-fee politics group. Detection reads Gamma best bid/ask only; the open
+question is DEPTH - was the basket executable at size, or is it a $5 mirage?
+
+Spec:
+1. Extend `event_group_consistency.py`: for each FLAGGED event only (never
+   the full scan set), fetch the CLOB `GET /book?token_id=` for every leg and
+   compute `executable_buy_all_yes_usd`: walk each leg's ask side to the
+   worst price that keeps the basket net-positive after fees; the basket size
+   is the min across legs; record depth-weighted net edge and max basket
+   dollars.
+2. New ledger columns: `executable_basket_usd`, `depth_weighted_net`,
+   `book_fetch_ok`. Old rows keep empty values (append-only schema growth).
+3. Summary gains `flagged_with_executable_depth` and
+   `max_executable_basket_usd`.
+4. Same cadence (rides trade_prints job). Tests: synthetic books where (a)
+   depth confirms the edge, (b) thin books kill it after the first $10.
+
+## WO-39 — Open-interest and market-quality ride-along
+
+Cheap context features for every lane. Data-API open interest + Gamma
+liquidity/volume fields for the markets we already track.
+
+Spec:
+1. Extend `trade_print_collector.py` (same request loop, zero new jobs):
+   after prints, `GET data-api.polymarket.com/oi?market={condition_id}`
+   (probe the exact path/params defensively; if unavailable, record miss and
+   move on) -> append `open_interest_history.csv` (stamp, market, oi).
+2. Summary gains `oi_markets_captured`. Tests: fake payloads, endpoint-miss
+   tolerance (collector must never fail the job over a missing OI endpoint).
+
+## WO-40 — Maker fill realism: replay against the recorded book archive
+
+Strengthens WO-36's M-B gate before any human size-up decision. The markout
+charge assumes fills at our quote whenever a print crosses the level; the
+websocket book archive (the only order-book history that exists) lets us
+replay actual book states and measure queue-position realism.
+
+Spec:
+1. Module `maker_fill_replay.py`, CLI `maker-fill-replay`, config block
+   `maker_fill_replay:` (enabled, max_markets 10, replay_days 7).
+2. For markets in the current quote-sheet portfolio, load archived websocket
+   features (gzip archive + live CSV), reconstruct per-minute best bid/ask
+   and depth-at-level; simulate our resting quote (size and distance from
+   the quote sheet) with LAST-in-queue priority: a fill requires traded
+   volume at our level (from `trade_prints.csv`) to EXCEED the resting depth
+   ahead of us. Mark every simulated fill out at +5/+15/+60 minutes.
+3. Output `outputs/maker_carry/maker_fill_replay.json`: simulated fills/day,
+   markout per fill by horizon, implied adverse $/day - reported NEXT TO the
+   study's charge with a `realism_ratio` (replay / study). Ratio > 1 means
+   the study undercharges; the study is NOT auto-modified (tightening
+   proposals go through a dated amendment, per constraint 2).
+4. Daily cadence with the harvest. Tests: synthetic archive slices proving
+   queue-ahead logic (no fill when depth ahead absorbs the print; fill when
+   volume exceeds it), horizon markouts, absent-archive tolerance.
+
+## Priority order for Codex
+
+WO-37 first (last unharvested alpha stream; every day unbuilt is history
+lost), WO-38 second (turns the one live WO-34 finding into an executability
+answer), WO-40 third (hardens the maker number the funding decision rests
+on), WO-39 last (cheap, anytime). WO-33 (trainer wiring) stays open and
+LAST - it needs the leakage review and enough resolved-corpus depth, and
+nothing upstream depends on it.

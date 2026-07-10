@@ -68,6 +68,7 @@ from .profit_target import reset_profit_target_baseline, write_profit_target_tra
 from .profit_sprint import build_profit_sprint
 from .promotion_review import build_promotion_review
 from .readiness import paper_live_promotion_gate, paper_trade_readiness, readiness_decision
+from .reconstructed_signal_clv import run_reconstructed_clv_study
 from .refresh_governance import refresh_governance
 from .resolution_collector import collect_resolutions
 from .runtime_lock import runtime_lock
@@ -143,6 +144,7 @@ COMMANDS = [
     "price-action-paper-signals",
     "closing-line-value",
     "smart-flow-clv",
+    "reconstructed-clv-study",
     "algo-replay",
     "algo-sweep",
     "edge-attribution",
@@ -421,6 +423,8 @@ def main(argv: list[str] | None = None) -> int:
             _print(build_closing_line_value(cfg, features_input=args.websocket_input))
         elif args.command == "smart-flow-clv":
             _print(build_smart_flow_clv(cfg, fills_input=args.fills_input, features_input=args.websocket_input))
+        elif args.command == "reconstructed-clv-study":
+            _print(run_reconstructed_clv_study(cfg))
         elif args.command == "algo-replay":
             _print(run_replay(cfg, args.strategy or "null", features_input=args.websocket_input))
         elif args.command == "algo-sweep":

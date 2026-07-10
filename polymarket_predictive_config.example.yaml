@@ -379,6 +379,30 @@ sharp_odds_fetch:
   fallback_max_age_hours: 24
   fallback_max_decimal_odds: 1001
   request_timeout_seconds: 20
+# 2026-07-10 WO-55: reconstructed sharp-anchor CLV study. Research-only
+# retrospective datapoints; never Gate A/verdict evidence and never trading.
+# Thresholds mirror the registered live sharp-anchor entry semantics as of
+# 2026-07-10 and may only be tightened with a dated amendment.
+reconstructed_clv:
+  enabled: true
+  snapshot_paths:
+  - inputs/polymarket/sharp_odds.csv
+  - outputs/polymarket_training/sharp_fundamental_probabilities.csv
+  token_map_paths:
+  - outputs/polymarket_training/sharp_fundamental_probabilities.csv
+  price_history_paths:
+  - outputs/polymarket_training/historical_price_snapshots.csv
+  fundamental_probability_haircut: 0.50
+  minimum_fundamental_edge_after_haircut: 0.03
+  minimum_entry_price: 0.05
+  maximum_entry_price: 0.90
+  minimum_units_per_cohort: 8
+  fdr_alpha: 0.10
+  entry_max_lag_minutes: 180
+  max_reconstructed_entries: 1000
+  max_price_history_requests: 50
+  max_gamma_requests: 25
+  request_pause_seconds: 0.1
 dutch_arb:
   # Scanner-only Dutch-book/negative-risk arb monitor. It writes dry-run evidence
   # for human review and dashboard visibility; it never submits orders.

@@ -48,6 +48,7 @@ Any work package below that appears to conflict with these invariants loses; the
 | Microstructure rule lab (train/validation, shadow-only) | `price_action_microstructure.py` |
 | Shadow cohorts + settlement evidence | `shadow_cohort.py` |
 | Closing-line-value (CLV) forward evidence | `closing_line.py` (new, WP1) |
+| Reconstructed sharp-anchor CLV research (non-verdict) | `reconstructed_signal_clv.py` (WO-55) |
 | Pre-trade risk controls + capped/shrunk Kelly sizing | `risk.py` (WP2 adds shrinkage) |
 | VaR/CVaR/drawdown/Sharpe primitives | `quant_lab/risk.py` |
 | Fail-closed governance, promotion gates, audits | `governance.py`, `readiness.py`, `promotion_review.py` |
@@ -334,6 +335,13 @@ wallet fills by CLV using the same settlement-independent line standard as our o
 quote history, aggregate by wallet with bootstrap CIs, and publish
 `smart_flow_clv.json` / `smart_flow_clv_positions.csv` for dashboard review. Positive wallets are
 research/watchlist candidates only; the module cannot place orders or relax promotion gates.
+
+**2026-07-10 — WO-55 implemented by Codex.** `reconstructed_signal_clv.py` and CLI
+`reconstructed-clv-study` reconstruct historical sharp-anchor entries under the frozen 2026-07-10
+entry rules, price them from official CLOB price history, cluster by fixture, and publish
+`reconstructed_signal_clv.json` / `reconstructed_signal_clv_positions.csv` with
+`evidence_class: reconstructed_research`. This is judgment input only: it never touches
+`profit_verdict.py`, never becomes Gate A evidence, and cannot invoke paper/live trading.
 
 **2026-07-03 — WO-23 landed by Codex.** The dashboard now distinguishes the VPS deployment driver
 from local shadow-cycle observability. When the legacy live-loop heartbeat is fresh and the shadow

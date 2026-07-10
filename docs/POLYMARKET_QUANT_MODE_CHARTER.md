@@ -423,6 +423,13 @@ snapshots from data-API `/oi`, appending `outputs/polymarket_trade_prints/open_i
 and surfacing `oi_markets_captured` plus fail-soft `oi_errors` in the summary. Missing OI endpoints
 do not fail the print job by themselves.
 
+**2026-07-10 — WO-41 implemented by Codex.** The implication-network scanner now measures
+Frechet/Boole consistency across linked World Cup-style markets: monotone winner/final/semifinal
+chains, continent-winner aggregation, and exact-final-matchup sums. CLI `scan-implication-networks`
+writes `outputs/implication_consistency/implication_deviations.csv` and
+`outputs/implication_consistency/implication_scan.json`, rides the trade-print cadence, and remains
+measurement-only with no signal/gate/order side effects.
+
 ## Rules of engagement for coding agents
 
 0. **Division of labour**: the orchestrating agent writes/updates this charter and the work orders

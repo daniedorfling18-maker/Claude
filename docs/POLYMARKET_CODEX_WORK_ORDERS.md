@@ -1541,6 +1541,13 @@ Spec:
 
 ## WO-41 — Implication-network arbitrage scanner (generalises WO-34)
 
+Status: IMPLEMENTED by Codex in PR branch `agent/wo-41-implication-networks`
+on 2026-07-10. Artifacts:
+`outputs/implication_consistency/implication_deviations.csv` and
+`outputs/implication_consistency/implication_scan.json`. CLI:
+`scan-implication-networks`. Measurement only; no paper/live trading path
+invoked.
+
 Sum-to-one partitions are the trivial case. Binary markets on logically
 linked events must satisfy Frechet-Boole inequalities, and Polymarket runs
 dozens of linked families simultaneously (verified live 2026-07-10: Winner /

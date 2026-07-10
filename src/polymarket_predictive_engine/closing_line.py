@@ -34,7 +34,7 @@ from pathlib import Path
 from typing import Any
 
 from .config import EngineConfig, load_config
-from .utils import boolish, git_commit_hash, now_utc, parse_timestamp, read_csv_rows, safe_float, write_csv, write_json
+from .utils import boolish, git_commit_hash, now_utc, parse_timestamp, read_csv_rows, read_json, safe_float, write_csv, write_json
 
 POSITION_FIELDS = [
     "shadow_position_id",
@@ -84,6 +84,84 @@ def _is_diagnostic_cohort(name: object, substrings: list[str]) -> bool:
 # position whose pre-close quotes aged out of the feature file silently loses its
 # final line on the next rebuild (observed live: focus finals dropped 2 -> 0).
 FINAL_HISTORY_FILENAME = "closing_line_final_history.csv"
+
+# 2026-07-10 pipe repair: positions were being opened WITHOUT close_time for
+# every non-crypto cohort (the writer only inferred crypto up/down windows),
+# so position_clv_row could never emit line_kind=="closing" - the final
+# history stayed empty and Gate A starved at 0 units while matches settled.
+# The grader now backfills missing close times from Gamma (closedTime, else
+# endDate), idempotently cached so each market is looked up at most once.
+CLOSE_TIME_REPAIRS_FILENAME = "close_time_repairs.json"
+
+
+def _fetch_gamma_close_time(position: dict[str, Any], *, timeout_seconds: float = 6.0) -> str | None:
+    """Best-effort close-time lookup for one position; never raises."""
+    import requests
+
+    slug = str(position.get("market_slug") or "").strip()
+    market_id = str(position.get("market_id") or "").strip()
+    attempts: list[dict[str, str]] = []
+    if slug:
+        attempts.append({"slug": slug})
+    if market_id.startswith("0x"):
+        attempts.append({"condition_ids": market_id})
+    elif market_id.isdigit():
+        attempts.append({"id": market_id})
+    for params in attempts:
+        try:
+            response = requests.get(
+            "https://gamma-api.polymarket.com/markets", params=params, timeout=timeout_seconds
+            )
+            response.raise_for_status()
+            markets = response.json()
+        except Exception:
+            continue
+        for market in markets if isinstance(markets, list) else []:
+            for key in ("closedTime", "closed_time", "endDate", "end_date_iso", "endDateIso"):
+                stamp = str(market.get(key) or "").strip()
+                if stamp and parse_timestamp(stamp) is not None:
+                    return stamp
+    return None
+
+
+def _backfill_missing_close_times(
+    cfg: EngineConfig, positions: list[dict[str, Any]], settings: dict[str, Any]
+) -> dict[str, Any]:
+    """Repair positions lacking close_time via a cached Gamma map.
+
+    Conservative by construction: a repaired close time can only move a
+    provisional line to a properly anchored closing line; failures leave the
+    position exactly as it was. The cache makes reruns free and offline-safe."""
+    if not boolish(settings.get("close_time_backfill_enabled", True)):
+        return {"backfilled": 0, "still_missing": 0, "lookups": 0}
+    repairs_path = cfg.governance_root / CLOSE_TIME_REPAIRS_FILENAME
+    repairs = read_json(repairs_path, default={}) or {}
+    max_lookups = int(settings.get("close_time_backfill_max_lookups", 25))
+    lookups = 0
+    backfilled = 0
+    still_missing = 0
+    dirty = False
+    for position in positions:
+        if parse_timestamp(position.get("close_time")) is not None:
+            continue
+        key = str(position.get("market_id") or position.get("market_slug") or "").strip()
+        if not key:
+            still_missing += 1
+            continue
+        stamp = repairs.get(key)
+        if stamp is None and lookups < max_lookups:
+            lookups += 1
+            stamp = _fetch_gamma_close_time(position)
+            repairs[key] = stamp or ""
+            dirty = True
+        if stamp and parse_timestamp(stamp) is not None:
+            position["close_time"] = stamp
+            backfilled += 1
+        else:
+            still_missing += 1
+    if dirty:
+        write_json(repairs_path, repairs)
+    return {"backfilled": backfilled, "still_missing": still_missing, "lookups": lookups}
 
 
 def _load_final_history(path: Path) -> dict[str, dict[str, Any]]:
@@ -281,6 +359,7 @@ def build_closing_line_value(
     positions_path = cfg.output_root / "polymarket_shadow" / "shadow_positions.csv"
     features_path = Path(features_input) if features_input else cfg.output_root / "polymarket_training" / "websocket_market_features.csv"
     positions = read_csv_rows(positions_path)
+    close_time_repair = _backfill_missing_close_times(cfg, positions, settings)
     quote_rows = read_csv_rows(features_path)
     quotes = build_quote_history(quote_rows)
 
@@ -368,6 +447,7 @@ def build_closing_line_value(
         "final_line_positions": len(final_rows),
         "final_rows_recovered_from_history": recovered_from_history,
         "final_history_rows": len(final_history),
+        "close_time_repair": close_time_repair,
         "final_history_path": str(history_path),
         "provisional_line_positions": len(rows) - len(final_rows),
         "minimum_final_samples": minimum_final_samples,

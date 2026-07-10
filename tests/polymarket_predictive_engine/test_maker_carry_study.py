@@ -43,12 +43,23 @@ def _config(tmp_path: Path):
     return load_config(path)
 
 
-def _market(question: str, token: str, pot: float, *, min_size: float = 100, max_spread: float = 3.0) -> dict[str, Any]:
+def _market(
+    question: str,
+    token: str,
+    pot: float,
+    *,
+    min_size: float = 100,
+    max_spread: float = 3.0,
+    fees_enabled: bool = True,
+    fee_type: str = "sports_fees_v2",
+) -> dict[str, Any]:
     return {
         "question": question,
         "conditionId": f"0x{token}",
         "clobTokenIds": json.dumps([token, f"{token}-no"]),
         "negRisk": False,
+        "feesEnabled": fees_enabled,
+        "feeType": fee_type,
         "volume24hr": 50000,
         "rewardsMinSize": min_size,
         "rewardsMaxSpread": max_spread,
@@ -192,6 +203,34 @@ def test_band_ineligible_candidate_is_excluded_from_portfolio(tmp_path, monkeypa
     assert row["band_eligible"] == "False"
     assert row["estimate_quality"] == "band_ineligible"
     assert summary["portfolio_markets"] == 0
+def test_supplementary_fee_and_rebate_tables_are_category_aware(tmp_path):
+    cfg = _config(tmp_path)
+    settings = maker_carry_study._settings(cfg)
+    sports = {"fees_enabled": True, "fee_type": "sports_fees_v2"}
+    unknown_enabled = {"fees_enabled": True, "fee_type": "other_fees_v1"}
+
+    assert maker_carry_study._market_fee_rate(sports, settings) == 0.05
+    assert maker_carry_study._maker_rebate_share(sports, settings) == 0.15
+    assert maker_carry_study._market_fee_rate(unknown_enabled, settings) == 0.07
+    assert maker_carry_study._maker_rebate_share(unknown_enabled, settings) == 0.25
+
+
+def test_fee_free_markets_have_zero_supplementary_rebate(tmp_path):
+    cfg = _config(tmp_path)
+    settings = maker_carry_study._settings(cfg)
+    row = {
+        "fees_enabled": False,
+        "fee_type": "",
+        "capital_usd": 100.0,
+        "rewards_min_size_shares": 100.0,
+        "mid_price": 0.5,
+        "band_crossing_prints_per_day": 50.0,
+    }
+
+    supplement = maker_carry_study._supplementary_income(row, settings, {"bid": 0.0, "ask": 0.0})
+
+    assert supplement["supplementary_rebate_usd_per_day"] == 0.0
+    assert supplement["supplementary_holding_usd_per_day"] > 0.0
 
 
 def test_thin_book_share_is_untrusted_and_kept_out_of_portfolio(tmp_path, monkeypatch):
@@ -263,6 +302,31 @@ def test_sized_portfolio_scales_within_capital_cap_and_never_trades(tmp_path, mo
     # A second run appends to the trend ledger instead of overwriting it.
     run_maker_carry_study(cfg)
     assert len(read_csv_rows(cfg.output_root / "maker_carry" / "maker_carry_history.csv")) == 2
+
+
+def test_supplementary_income_does_not_change_registered_gates_or_net_carry(tmp_path, monkeypatch):
+    cfg = _config(tmp_path)
+    raw = yaml.safe_load((tmp_path / "config.yaml").read_text(encoding="utf-8"))
+    raw["maker_carry_study"]["target_net_usd_per_day"] = 10_000.0
+    raw["maker_carry_study"]["holding_reward_apr"] = 3650.0
+    raw["maker_carry_study"]["maker_rebate_share_by_fee_type"] = {"sports_fees_v2": 1_000.0}
+    (tmp_path / "config.yaml").write_text(yaml.safe_dump(raw), encoding="utf-8")
+    cfg = load_config(tmp_path / "config.yaml")
+    markets = [_market("deep calm market", "calm", 1000.0)]
+    books = {"calm": _deep_book()}
+    histories = {("calm", "1d"): _flat_history(200), ("calm", "1w"): _flat_history(200)}
+    # Quiet fills create measured band crossings for rebate estimation.
+    prints = {"0xcalm": [{"price": 0.499, "size": 5, "side": "SELL", "timestamp": 600 + j * 60} for j in range(25)]}
+    _fake_requests(monkeypatch, markets=markets, books=books, histories=histories, prints=prints)
+
+    summary = run_maker_carry_study(cfg)
+
+    assert summary["portfolio_uncounted_supplementary_income_usd_per_day"] > summary["portfolio_net_carry_usd_per_day"]
+    assert summary["clears_100_per_month_target"] is False
+    assert summary["maker_gates"]["M_A_carry_evidence"]["state"] == "pending"
+    assert "uncounted income" in summary["assumptions"]["supplementary_income"]
+    sheet = (cfg.output_root / "maker_carry" / "maker_quote_sheet.md").read_text(encoding="utf-8")
+    assert "NOT included in gates or net carry" in sheet
 
 
 def test_markout_charges_empirical_pickoffs_and_gates_track_evidence(tmp_path, monkeypatch):

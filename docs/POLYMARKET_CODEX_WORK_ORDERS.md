@@ -1667,6 +1667,13 @@ Spec:
 
 ## WO-45 — Supplementary maker income: rebates + holding rewards
 
+Status: IMPLEMENTED by Codex in PR branch
+`agent/wo-45-supplementary-maker-income` on 2026-07-10.
+`maker_carry_study.py` now reports supplementary maker rebates and holding
+rewards in candidates, summary totals, and quote sheet rows as uncounted
+income. Registered M-gates and `portfolio_net_carry_usd_per_day` remain
+unchanged.
+
 The canonical docs add two maker income streams the carry study omits
 (conservative today, but the funding decision deserves the full picture):
 (a) maker REBATES - 15% (sports) to 25% (politics/finance/other) of the

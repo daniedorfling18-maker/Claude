@@ -57,7 +57,10 @@ resolution:
   settlement_loss_threshold: 0.02
 historical_backfill:
   gamma_base_url: https://gamma-api.polymarket.com/markets
-  max_closed_markets: 250
+  # 2026-07-10: 250 -> 1000/day. The WO-42 calibration study and WO-43 drift
+  # scan are corpus-bound; at 250/day the resolved corpus reaches useful bin
+  # depth in months, at 1000/day in weeks. ~10 extra key-less Gamma pages/day.
+  max_closed_markets: 1000
   page_size: 100
   request_timeout_seconds: 30
   request_pause_seconds: 0.1

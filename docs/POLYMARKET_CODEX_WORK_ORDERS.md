@@ -1420,6 +1420,18 @@ for in-window pick timing); rate limits confirmed generous for all our pollers.
    `tests/polymarket_predictive_engine/` with monkeypatched `requests`.
 5. `python -m pytest -q` green before any PR. Config example additions to
    `polymarket_predictive_config.example.yaml` with a dated comment.
+6. Every STUDY work order (anything that estimates an effect from data) must
+   ship a planted-truth test: a synthetic dataset with a KNOWN effect that
+   the estimator must recover within tolerance, and a null dataset (pure
+   martingale / unbiased coin) on which it must flag NOTHING. A backtest
+   harness is not trusted until it fails to find edges that do not exist.
+7. Multiple-testing registry (registered 2026-07-10, before any new-lane
+   data): the edge-class family currently under test is {sharp-anchor taker,
+   event-group partitions, maker carry, implication networks, calibration
+   bias, drift term-structure}. Any study claiming an effect uses
+   Benjamini-Hochberg FDR at 10% ACROSS the bins/lanes it scans, and states
+   its minimum sample floor up front. Scanning many bins and reporting the
+   best one raw is how false edges are manufactured; it is prohibited.
 
 ## WO-37 — Wallet-intelligence collection lane (holders + leaderboard)
 
@@ -1505,11 +1517,88 @@ Spec:
    queue-ahead logic (no fill when depth ahead absorbs the print; fill when
    volume exceeds it), horizon markouts, absent-archive tolerance.
 
+## WO-41 — Implication-network arbitrage scanner (generalises WO-34)
+
+Sum-to-one partitions are the trivial case. Binary markets on logically
+linked events must satisfy Frechet-Boole inequalities, and Polymarket runs
+dozens of linked families simultaneously (verified live 2026-07-10: Winner /
+Nation To Reach Semifinals / Finals Exact Matchup / continent-winner all
+trade at once). Every violated inequality is a model-free spread with a
+known worst case.
+
+Spec:
+1. Module `implication_consistency.py`, CLI `scan-implication-networks`,
+   config block `implication_networks:` (enabled, event_pages 3,
+   deviation_threshold_per_basket 0.005, max_ledger_rows 100000).
+2. Build the linkage graph from Gamma events + question parsing (reuse the
+   team-key helpers in `sharp_anchor.py`). Checks, all net of per-leg taker
+   fees (reuse the WO-34 fee model):
+   a. Monotone chains per team T: P(T wins) <= P(T reaches final)
+      <= P(T reaches SF). Violation trade: buy the cheap senior leg / the
+      implied spread; record both directions.
+   b. Aggregation identities: P(continent wins) vs sum of member-nation
+      win markets (equality both directions for exhaustive members).
+   c. Matchup consistency: sum over Y of P(final = T vs Y) vs
+      P(T reaches final).
+3. Append-only deviations ledger with persistence stamps (same shape as
+   WO-34); summary JSON with best net violation per class.
+4. Cadence: rides the trade_prints 15-min job. Tests: planted violations of
+   each class recovered; consistent synthetic families flag NOTHING
+   (constraint 6); malformed/partial families skipped, never crash.
+
+## WO-42 — Calibration-curve harvesting (favorite-longshot bias)
+
+The most replicated anomaly in binary markets: longshots overpriced, heavy
+favorites underpriced. The fee schedule is an accelerant on the favorite
+side: fee/dollar = rate x (1-p), so a 90c favorite costs ~0.3c to buy while
+documented FLB at that end runs 1-3c.
+
+Spec:
+1. Module `calibration_bias_study.py`, CLI `calibration-bias-study`, config
+   block `calibration_bias:` (enabled, price_horizons_hours [24, 72],
+   min_markets_per_bin 200, price_bins [0.05..0.95 by 0.05], fdr_alpha 0.10).
+2. Corpus join: resolved outcomes (`outputs/polymarket_training/
+   market_resolutions.csv`) x price at each horizon before close (from the
+   harvested CLOB price histories). Skip markets without both.
+3. Fit isotonic regression price -> realised frequency per category and
+   horizon; bootstrap CIs CLUSTERED BY MARKET (never by row - correlated
+   tokens are one observation, same discipline as Gate A).
+4. Report: curve tables; bins where the CI excludes the diagonal AFTER
+   BH-FDR across all bins (constraint 7) AND the deviation exceeds the full
+   taker cost stack (fee + 0.5c exit + 0.5c adverse). Those bins - if any -
+   are candidate edges for a future pre-registered lane; the study itself
+   trades nothing.
+5. Planted-truth tests (constraint 6): synthetic corpus with a known bias
+   curve recovered within tolerance; unbiased synthetic corpus yields zero
+   flagged bins. Daily cadence with the harvest.
+
+## WO-43 — Martingale drift scan (term-structure of returns)
+
+Under efficiency, prices are martingales. Any systematic drift conditional
+on (price level, time-to-close, category) is a timing edge for BOTH lanes:
+entries for the taker, quote-skew for the maker.
+
+Spec:
+1. Module `drift_scan_study.py`, CLI `drift-scan`, config block
+   `drift_scan:` (enabled, horizons_hours [24, 48], price_bins as WO-42,
+   time_to_close_bins_hours [24, 72, 168], min_markets_per_bin 150,
+   fdr_alpha 0.10).
+2. Input: harvested price histories with close times. Estimate
+   E[dP | price bin, time-to-close bin, category] with cluster-robust
+   errors (cluster by market).
+3. Report bins where drift CI excludes 0 after BH-FDR AND |drift| exceeds
+   the taker cost stack. Study only; no lane, no trades.
+4. Planted-truth tests: synthetic martingale corpus flags NOTHING (this is
+   the critical false-positive control); planted 2c drift recovered within
+   tolerance. Daily cadence with the harvest.
+
 ## Priority order for Codex
 
 WO-37 first (last unharvested alpha stream; every day unbuilt is history
 lost), WO-38 second (turns the one live WO-34 finding into an executability
-answer), WO-40 third (hardens the maker number the funding decision rests
-on), WO-39 last (cheap, anytime). WO-33 (trainer wiring) stays open and
-LAST - it needs the leakage review and enough resolved-corpus depth, and
-nothing upstream depends on it.
+answer), WO-40 third (hardens the maker number the post-WC funding decision
+rests on), WO-41 fourth (structural, high prior, data already flowing),
+WO-42 fifth and WO-43 sixth (corpus-bound; the 2026-07-10 backfill raise to
+1000/day is filling their bins in the background), WO-39 last (cheap,
+anytime). WO-33 (trainer wiring) stays open and LAST - it needs the leakage
+review and enough resolved-corpus depth, and nothing upstream depends on it.

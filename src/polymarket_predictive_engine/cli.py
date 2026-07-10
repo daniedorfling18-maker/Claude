@@ -9,6 +9,7 @@ from .algo.replay import run_replay
 from .algo.sweep import run_algo_sweep
 from .anchored_edge import run as run_anchored_edge
 from .backtest import backtest
+from .calibration_bias_study import build_calibration_bias_study
 from .closing_line import build_closing_line_value
 from .collection_only import run_collection_only
 from .config import config_check, load_config
@@ -109,6 +110,7 @@ COMMANDS = [
     "flow-toxicity",
     "scan-event-groups",
     "scan-implication-networks",
+    "calibration-bias-study",
     "build-labels",
     "build-features",
     "build-features-v2",
@@ -301,6 +303,8 @@ def main(argv: list[str] | None = None) -> int:
             _print(scan_event_groups(cfg))
         elif args.command == "scan-implication-networks":
             _print(scan_implication_networks(cfg))
+        elif args.command == "calibration-bias-study":
+            _print(build_calibration_bias_study(cfg))
         elif args.command == "build-labels":
             _print({"labels": len(build_labels(cfg))})
         elif args.command == "build-features":

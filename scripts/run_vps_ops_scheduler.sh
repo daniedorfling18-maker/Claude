@@ -262,9 +262,12 @@ run_training_harvest() {
     # WO-49 flow toxicity: VPIN-lite + wallet-tier markouts for quote-sheet
     # conditioning only. Never alters adverse charges, gates, or order paths.
     timeout "$HARVEST_TIMEOUT" python -m polymarket_predictive_engine.cli flow-toxicity --config "$CONFIG_PATH"
+    # WO-42 favourite/longshot calibration bias study. Corpus-bound and
+    # study-only; flags are candidates for future pre-registration, not trades.
+    timeout "$HARVEST_TIMEOUT" python -m polymarket_predictive_engine.cli calibration-bias-study --config "$CONFIG_PATH"
   ) >> "$LOG_FILE" 2>&1
   CODE=$?
-  stamp_status training_harvest "$CODE" "gamma resolved-markets backfill + clob price histories + wallet intelligence + maker-carry study + maker-fill replay + flow toxicity + reconstructed CLV study"
+  stamp_status training_harvest "$CODE" "gamma resolved-markets backfill + clob price histories + wallet intelligence + maker-carry study + maker-fill replay + flow toxicity + reconstructed CLV study + calibration-bias study"
   log "training_harvest: exit $CODE"
 }
 

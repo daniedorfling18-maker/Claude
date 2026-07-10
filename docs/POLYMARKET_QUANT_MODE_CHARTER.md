@@ -461,6 +461,12 @@ volume imbalance percentiles plus wallet-tier markout splits to
 rule 8: do not initiate quotes above `toxicity_score > 0.9`. This is conditioning only; adverse
 charges, gates, sizing, and order paths are unchanged.
 
+**2026-07-10 — WO-42 implemented by Codex.** Calibration-bias harvesting now joins clean resolved
+markets to point-in-time pre-close prices and writes
+`outputs/calibration_bias/calibration_curve.csv` plus summary JSON. It reports category/horizon/bin
+calibration, isotonic-smoothed frequencies, clustered bootstrap CIs, and BH-FDR-filtered candidate
+bins. This is study-only and does not authorise trades.
+
 ## Rules of engagement for coding agents
 
 0. **Division of labour**: the orchestrating agent writes/updates this charter and the work orders

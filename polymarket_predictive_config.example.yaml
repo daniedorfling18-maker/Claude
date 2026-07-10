@@ -76,6 +76,18 @@ trade_prints:
   limit_per_market: 500
   request_timeout_seconds: 20
   max_ledger_rows: 200000
+  open_interest_enabled: true
+# 2026-07-10 WO-37: collection-only wallet intelligence. Leaderboard +
+# holder snapshots are raw alpha substrate for later leakage-reviewed feature
+# work; this block never feeds gates or order paths directly.
+wallet_intelligence:
+  enabled: true
+  base_url: https://data-api.polymarket.com
+  max_markets: 40
+  top_holders_per_market: 20
+  leaderboard_limit: 100
+  request_timeout_seconds: 20
+  max_ledger_rows: 200000
 # 2026-07-09 WO-36: maker-carry actuarial study. Measures (never trades) whether
 # zero-fee quoting for daily liquidity rewards clears $100/month net of a
 # pick-off charge estimated from 1-min price history. Free key-less endpoints.
@@ -101,6 +113,13 @@ maker_carry_study:
   markout_min_prints: 20
   min_daily_payout_usd: 1.0
   gate_min_runs_at_target: 7
+# 2026-07-10 WO-40: replay maker quote fills against recorded websocket
+# book states + trade prints. Measurement only; does not alter WO-36 charges
+# automatically.
+maker_fill_replay:
+  enabled: true
+  max_markets: 10
+  replay_days: 7
 # WO-36 step 4: read-only scoreboard for a HUMAN-run minimum-size maker
 # experiment. Inert until wallet_address is set. The system never trades;
 # it only watches the wallet via free public endpoints.
@@ -113,6 +132,7 @@ maker_live_test:
 # registered edge class; needs NO odds credits. Measurement only.
 event_group_consistency:
   enabled: true
+  clob_base_url: https://clob.polymarket.com
   event_pages: 3
   page_size: 100
   min_leg_count: 3

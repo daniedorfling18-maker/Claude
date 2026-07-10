@@ -401,6 +401,28 @@ The `$100/month` state now requires enough audited, quote-consistent paper round
 conflicts/unverified exits, and sufficient tracking time before the dashboard can treat the
 run-rate as verified progress.
 
+**2026-07-10 — WO-37 landed by Codex.** The wallet-intelligence collection lane now snapshots
+data-API leaderboard and holder streams into `outputs/wallet_intelligence/leaderboard_history.csv`
+and `outputs/wallet_intelligence/holders_history.csv`, with
+`wallet_intelligence_summary.json` reporting tracked markets, wallets seen, and holder/leaderboard
+overlap. It is collection-only and cannot touch paper/live execution.
+
+**2026-07-10 — WO-38 landed by Codex.** Event-group deviations now fetch CLOB books only for
+already-flagged groups and record executable basket depth in the existing ledger via
+`executable_basket_usd`, `depth_weighted_net`, and `book_fetch_ok`. The summary reports executable
+depth coverage without changing any gate, threshold, or order path.
+
+**2026-07-10 — WO-40 landed by Codex.** Maker fill realism replay now reconstructs archived/live
+websocket book states for the current quote-sheet portfolio, applies last-in-queue fill logic to
+trade prints, and writes `outputs/maker_carry/maker_fill_replay.json` with fills/day, horizon
+markouts, implied adverse dollars/day, and the replay/study realism ratio. It reports evidence only;
+the maker study is not auto-modified.
+
+**2026-07-10 — WO-39 landed by Codex.** Trade-print collection now rides along with open-interest
+snapshots from data-API `/oi`, appending `outputs/polymarket_trade_prints/open_interest_history.csv`
+and surfacing `oi_markets_captured` plus fail-soft `oi_errors` in the summary. Missing OI endpoints
+do not fail the print job by themselves.
+
 ## Rules of engagement for coding agents
 
 0. **Division of labour**: the orchestrating agent writes/updates this charter and the work orders

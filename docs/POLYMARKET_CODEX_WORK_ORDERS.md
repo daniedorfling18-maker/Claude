@@ -1435,6 +1435,12 @@ for in-window pick timing); rate limits confirmed generous for all our pollers.
 
 ## WO-37 — Wallet-intelligence collection lane (holders + leaderboard)
 
+Status: LANDED by Codex on 2026-07-10. Artifacts:
+`outputs/wallet_intelligence/leaderboard_history.csv`,
+`outputs/wallet_intelligence/holders_history.csv`, and
+`outputs/wallet_intelligence/wallet_intelligence_summary.json`. CLI:
+`collect-wallet-intel`. Collection only; no paper/live trading path invoked.
+
 The build order for WO-35's data layer. The only unconsumed API streams with
 real alpha content are data-API `holders` and `leaderboard`: rank wallets by
 realized PnL, then observe where proven winners are positioned vs the crowd.
@@ -1461,6 +1467,11 @@ Spec:
 
 ## WO-38 — Executable-depth capture for flagged event-group deviations
 
+Status: LANDED by Codex on 2026-07-10. The event-group ledger now carries
+`executable_basket_usd`, `depth_weighted_net`, and `book_fetch_ok`, and the
+summary reports `flagged_with_executable_depth` plus
+`max_executable_basket_usd`. Measurement only; no gate/threshold/order changes.
+
 WO-34's detector found a +4.5-5.0c/basket deviation persisting >= 20h on a
 zero-fee politics group. Detection reads Gamma best bid/ask only; the open
 question is DEPTH - was the basket executable at size, or is it a $5 mirage?
@@ -1481,6 +1492,12 @@ Spec:
 
 ## WO-39 — Open-interest and market-quality ride-along
 
+Status: LANDED by Codex on 2026-07-10. `trade_print_collector.py` now appends
+`outputs/polymarket_trade_prints/open_interest_history.csv` during the same
+collection loop and reports `oi_markets_captured`/`oi_errors` in the trade
+print summary. Missing OI endpoints are tolerated and cannot fail the print job
+by themselves.
+
 Cheap context features for every lane. Data-API open interest + Gamma
 liquidity/volume fields for the markets we already track.
 
@@ -1493,6 +1510,11 @@ Spec:
    tolerance (collector must never fail the job over a missing OI endpoint).
 
 ## WO-40 — Maker fill realism: replay against the recorded book archive
+
+Status: LANDED by Codex on 2026-07-10. CLI `maker-fill-replay` writes
+`outputs/maker_carry/maker_fill_replay.json` from archived/live websocket
+features and trade prints, using last-in-queue fill logic and +5/+15/+60
+markouts. It reports realism only and does not auto-modify the study or gates.
 
 Strengthens WO-36's M-B gate before any human size-up decision. The markout
 charge assumes fills at our quote whenever a print crosses the level; the

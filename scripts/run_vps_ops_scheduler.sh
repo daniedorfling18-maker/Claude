@@ -246,12 +246,19 @@ run_training_harvest() {
     set -e
     timeout "$HARVEST_TIMEOUT" python -m polymarket_predictive_engine.cli backfill-resolved-markets --config "$CONFIG_PATH"
     timeout "$HARVEST_TIMEOUT" python -m polymarket_predictive_engine.cli collect-price-history --config "$CONFIG_PATH"
+    # WO-37 wallet-intelligence collection: leaderboard + holders for tracked
+    # markets. Collection only; later leakage-reviewed work decides whether
+    # any wallet signal becomes a feature.
+    timeout "$HARVEST_TIMEOUT" python -m polymarket_predictive_engine.cli collect-wallet-intel --config "$CONFIG_PATH"
     # WO-36 maker-carry actuarial study: daily measurement (never trading) of
     # reward pots, band competition, and pick-off costs. Free public APIs.
     timeout "$HARVEST_TIMEOUT" python -m polymarket_predictive_engine.cli maker-carry-study --config "$CONFIG_PATH"
+    # WO-40 maker-fill realism replay: recorded book archive + trade prints,
+    # last-in-queue fills. Measurement only; never alters the study charge.
+    timeout "$HARVEST_TIMEOUT" python -m polymarket_predictive_engine.cli maker-fill-replay --config "$CONFIG_PATH"
   ) >> "$LOG_FILE" 2>&1
   CODE=$?
-  stamp_status training_harvest "$CODE" "gamma resolved-markets backfill + clob price histories + maker-carry study"
+  stamp_status training_harvest "$CODE" "gamma resolved-markets backfill + clob price histories + wallet intelligence + maker-carry study + maker-fill replay"
   log "training_harvest: exit $CODE"
 }
 

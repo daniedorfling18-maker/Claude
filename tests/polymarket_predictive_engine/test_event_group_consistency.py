@@ -33,8 +33,10 @@ def _config(tmp_path: Path):
     return load_config(path)
 
 
-def _leg(bid: float | None, ask: float | None, *, fees: bool = False) -> dict[str, Any]:
+def _leg(bid: float | None, ask: float | None, *, fees: bool = False, token_id: str = "") -> dict[str, Any]:
     leg: dict[str, Any] = {"closed": False, "feesEnabled": fees}
+    if token_id:
+        leg["clobTokenIds"] = [token_id]
     if fees:
         leg["feeType"] = "sports_fees_v2"
     if bid is not None:
@@ -63,6 +65,20 @@ def _fake_requests(monkeypatch, events: list[dict[str, Any]]) -> None:
     def fake_get(url: str, params: dict[str, Any] | None = None, timeout: float | None = None):
         assert url.endswith("/events")
         return _Response(events if int((params or {}).get("offset", 0)) == 0 else [])
+
+    monkeypatch.setattr(event_group_consistency.requests, "get", fake_get)
+
+
+def _fake_requests_with_books(monkeypatch, events: list[dict[str, Any]], books: dict[str, list[tuple[float, float]]]) -> None:
+    def fake_get(url: str, params: dict[str, Any] | None = None, timeout: float | None = None):
+        params = params or {}
+        if url.endswith("/events"):
+            return _Response(events if int(params.get("offset", 0)) == 0 else [])
+        if url.endswith("/book"):
+            token_id = str(params.get("token_id") or "")
+            asks = [{"price": price, "size": size} for price, size in books[token_id]]
+            return _Response({"asks": asks, "bids": [{"price": "0.01", "size": "1"}]})
+        raise AssertionError(url)
 
     monkeypatch.setattr(event_group_consistency.requests, "get", fake_get)
 
@@ -134,3 +150,68 @@ def test_non_negrisk_and_small_groups_are_skipped_and_ledger_accrues(tmp_path, m
     assert summary["neg_risk_groups_scanned"] == 1
     # Persistence evidence: the same deviation appended once per scan.
     assert summary["ledger_rows"] == 2
+
+
+def test_flagged_event_depth_confirms_executable_buy_all_yes_edge(tmp_path, monkeypatch):
+    cfg = _config(tmp_path)
+    events = [
+        _event(
+            "cheap-with-depth",
+            [
+                _leg(0.28, 0.30, token_id="tok-a"),
+                _leg(0.28, 0.30, token_id="tok-b"),
+                _leg(0.30, 0.35, token_id="tok-c"),
+            ],
+        )
+    ]
+    _fake_requests_with_books(
+        monkeypatch,
+        events,
+        {
+            "tok-a": [(0.30, 100)],
+            "tok-b": [(0.30, 60)],
+            "tok-c": [(0.35, 50)],
+        },
+    )
+
+    summary = scan_event_groups(cfg)
+
+    assert summary["flagged_deviations"] == 1
+    assert summary["flagged_with_executable_depth"] == 1
+    assert summary["max_executable_basket_usd"] == 47.5
+    row = read_csv_rows(cfg.output_root / "event_group_consistency" / "event_group_deviations.csv")[0]
+    assert row["book_fetch_ok"] == "True"
+    assert row["executable_basket_usd"] == "47.5"
+    assert row["depth_weighted_net"] == "0.05"
+
+
+def test_flagged_event_depth_stops_when_thin_books_kill_edge(tmp_path, monkeypatch):
+    cfg = _config(tmp_path)
+    events = [
+        _event(
+            "cheap-but-thin",
+            [
+                _leg(0.28, 0.30, token_id="tok-a"),
+                _leg(0.28, 0.30, token_id="tok-b"),
+                _leg(0.30, 0.35, token_id="tok-c"),
+            ],
+        )
+    ]
+    _fake_requests_with_books(
+        monkeypatch,
+        events,
+        {
+            "tok-a": [(0.30, 10), (0.60, 100)],
+            "tok-b": [(0.30, 10), (0.60, 100)],
+            "tok-c": [(0.35, 10), (0.60, 100)],
+        },
+    )
+
+    summary = scan_event_groups(cfg)
+
+    assert summary["flagged_with_executable_depth"] == 1
+    assert summary["max_executable_basket_usd"] == 9.5
+    row = read_csv_rows(cfg.output_root / "event_group_consistency" / "event_group_deviations.csv")[0]
+    assert row["book_fetch_ok"] == "True"
+    assert row["executable_basket_usd"] == "9.5"
+    assert row["depth_weighted_net"] == "0.05"

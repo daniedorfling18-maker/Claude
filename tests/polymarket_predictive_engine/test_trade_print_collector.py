@@ -89,3 +89,84 @@ def test_provider_errors_are_fail_soft_and_reported(tmp_path, monkeypatch):
     assert summary["status"] == "failed"
     assert summary["errors"] and "data-api unreachable" in summary["errors"][0]
     assert summary["new_prints"] == 0
+
+
+def test_open_interest_rides_along_with_trade_print_collection(tmp_path, monkeypatch):
+    cfg = _config(tmp_path)
+    write_csv(
+        cfg.output_root / "polymarket_websocket" / "websocket_features.csv",
+        [{"market": "0xcond1", "asset_id": "tok"}],
+        fieldnames=["market", "asset_id"],
+    )
+
+    def fake_get(url, params=None, timeout=None):
+        market = params["market"]
+        if url.endswith("/trades"):
+            return _FakeResponse([
+                {
+                    "id": "trade-1",
+                    "market": market,
+                    "asset": "tok",
+                    "side": "BUY",
+                    "price": "0.51",
+                    "size": "4",
+                    "timestamp": "1783590000",
+                }
+            ])
+        if url.endswith("/oi"):
+            return _FakeResponse({"market": market, "openInterest": "1234.5", "timestamp": "1783590001"})
+        raise AssertionError(url)
+
+    monkeypatch.setattr(trade_print_collector.requests, "get", fake_get)
+
+    summary = trade_print_collector.collect_trade_prints(cfg)
+
+    assert summary["status"] == "ok"
+    assert summary["oi_markets_captured"] == 1
+    assert summary["oi_ledger_rows"] == 1
+    assert summary["paper_trading_invoked"] is False
+    assert summary["live_trading_invoked"] is False
+    rows = read_csv_rows(cfg.output_root / "polymarket_trade_prints" / "open_interest_history.csv")
+    assert rows == [
+        {
+            "market": "0xcond1",
+            "open_interest": "1234.5",
+            "timestamp": "1783590001",
+            "collected_at_utc": rows[0]["collected_at_utc"],
+        }
+    ]
+
+
+def test_open_interest_endpoint_miss_is_tolerated(tmp_path, monkeypatch):
+    cfg = _config(tmp_path)
+    write_csv(
+        cfg.output_root / "polymarket_websocket" / "websocket_features.csv",
+        [{"market": "0xcond1", "asset_id": "tok"}],
+        fieldnames=["market", "asset_id"],
+    )
+
+    def fake_get(url, params=None, timeout=None):
+        if url.endswith("/trades"):
+            return _FakeResponse([
+                {
+                    "id": "trade-1",
+                    "market": params["market"],
+                    "asset": "tok",
+                    "side": "SELL",
+                    "price": "0.49",
+                    "size": "3",
+                    "timestamp": "1783590000",
+                }
+            ])
+        if url.endswith("/oi"):
+            raise RuntimeError("oi unavailable")
+        raise AssertionError(url)
+
+    monkeypatch.setattr(trade_print_collector.requests, "get", fake_get)
+
+    summary = trade_print_collector.collect_trade_prints(cfg)
+
+    assert summary["status"] == "ok"
+    assert summary["new_prints"] == 1
+    assert summary["oi_markets_captured"] == 0
+    assert summary["oi_errors"] and "oi unavailable" in summary["oi_errors"][0]

@@ -36,6 +36,13 @@ PRINT_FIELDS = [
     "collected_at_utc",
 ]
 
+OI_FIELDS = [
+    "market",
+    "open_interest",
+    "timestamp",
+    "collected_at_utc",
+]
+
 
 def _settings(cfg: EngineConfig) -> dict[str, Any]:
     raw = cfg.raw.get("trade_prints", {}) if isinstance(cfg.raw.get("trade_prints"), dict) else {}
@@ -46,6 +53,7 @@ def _settings(cfg: EngineConfig) -> dict[str, Any]:
         "limit_per_market": 500,
         "request_timeout_seconds": 20,
         "max_ledger_rows": 200000,
+        "open_interest_enabled": True,
     }
     merged.update({k: v for k, v in raw.items() if v is not None})
     return merged
@@ -87,9 +95,85 @@ def _print_row(trade: dict[str, Any], market: str) -> dict[str, Any] | None:
     }
 
 
+def _payload_items(payload: Any) -> list[Any]:
+    if isinstance(payload, list):
+        return payload
+    if not isinstance(payload, dict):
+        return []
+    for key in ("data", "openInterest", "open_interest", "oi", "results"):
+        value = payload.get(key)
+        if isinstance(value, list):
+            return value
+        if isinstance(value, dict):
+            return [value]
+    return [payload]
+
+
+def _open_interest_row(item: dict[str, Any], market: str, collected_at: str) -> dict[str, Any] | None:
+    value = None
+    for key in ("open_interest", "openInterest", "oi", "value", "amount", "total"):
+        value = safe_float(item.get(key))
+        if value is not None:
+            break
+    if value is None:
+        return None
+    return {
+        "market": str(item.get("market") or item.get("conditionId") or market),
+        "open_interest": value,
+        "timestamp": str(item.get("timestamp") or item.get("updatedAt") or item.get("date") or ""),
+        "collected_at_utc": collected_at,
+    }
+
+
+def _collect_open_interest(
+    *,
+    base_url: str,
+    timeout: float,
+    markets: list[str],
+    ledger_path: Path,
+    max_rows: int,
+) -> tuple[int, int, list[str]]:
+    existing = read_csv_rows(ledger_path)
+    new_rows: list[dict[str, Any]] = []
+    errors: list[str] = []
+    collected_at = now_utc()
+
+    for market in markets:
+        try:
+            response = requests.get(
+                f"{base_url}/oi",
+                params={"market": market},
+                timeout=timeout,
+            )
+            response.raise_for_status()
+            payload = response.json()
+        except Exception as exc:
+            errors.append(f"{market}: {type(exc).__name__}: {exc}")
+            continue
+        row_added = False
+        for item in _payload_items(payload):
+            if not isinstance(item, dict):
+                continue
+            row = _open_interest_row(item, market, collected_at)
+            if row is None:
+                continue
+            new_rows.append(row)
+            row_added = True
+        if not row_added:
+            errors.append(f"{market}: no_open_interest_value")
+
+    combined = [*existing, *new_rows]
+    if max_rows > 0 and len(combined) > max_rows:
+        combined = combined[-max_rows:]
+    write_csv(ledger_path, combined, fieldnames=OI_FIELDS)
+    captured_markets = len({str(row.get("market") or "") for row in new_rows if row.get("market")})
+    return captured_markets, len(combined), errors
+
+
 def collect_trade_prints(cfg: EngineConfig) -> dict[str, Any]:
     settings = _settings(cfg)
     ledger_path = cfg.output_root / "polymarket_trade_prints" / "trade_prints.csv"
+    oi_path = cfg.output_root / "polymarket_trade_prints" / "open_interest_history.csv"
     summary_path = cfg.output_root / "polymarket_trade_prints" / "trade_prints_summary.json"
     summary: dict[str, Any] = {
         "status": "disabled",
@@ -97,6 +181,9 @@ def collect_trade_prints(cfg: EngineConfig) -> dict[str, Any]:
         "markets_polled": 0,
         "new_prints": 0,
         "ledger_rows": 0,
+        "oi_markets_captured": 0,
+        "oi_ledger_rows": 0,
+        "oi_errors": [],
         "errors": [],
         "paper_trading_invoked": False,
         "live_trading_invoked": False,
@@ -110,6 +197,7 @@ def collect_trade_prints(cfg: EngineConfig) -> dict[str, Any]:
     seen = {str(row.get("trade_id") or "") for row in existing}
     base_url = str(settings["base_url"]).rstrip("/")
     timeout = float(settings["request_timeout_seconds"])
+    max_rows = int(safe_float(settings.get("max_ledger_rows")) or 0)
     new_rows: list[dict[str, Any]] = []
     errors: list[str] = []
 
@@ -135,8 +223,19 @@ def collect_trade_prints(cfg: EngineConfig) -> dict[str, Any]:
             seen.add(row["trade_id"])
             new_rows.append(row)
 
+    oi_markets_captured = 0
+    oi_ledger_rows = 0
+    oi_errors: list[str] = []
+    if str(settings.get("open_interest_enabled", True)).strip().lower() not in {"0", "false", "no"}:
+        oi_markets_captured, oi_ledger_rows, oi_errors = _collect_open_interest(
+            base_url=base_url,
+            timeout=timeout,
+            markets=markets,
+            ledger_path=oi_path,
+            max_rows=max_rows,
+        )
+
     combined = [*existing, *new_rows]
-    max_rows = int(safe_float(settings.get("max_ledger_rows")) or 0)
     if max_rows > 0 and len(combined) > max_rows:
         # Oldest rows roll into the same compressed training archive used by
         # the websocket feature substrate, then leave the live ledger.
@@ -158,6 +257,10 @@ def collect_trade_prints(cfg: EngineConfig) -> dict[str, Any]:
             "new_prints": len(new_rows),
             "ledger_rows": len(combined),
             "ledger_path": str(ledger_path),
+            "oi_markets_captured": oi_markets_captured,
+            "oi_ledger_rows": oi_ledger_rows,
+            "oi_path": str(oi_path),
+            "oi_errors": oi_errors[:10],
             "errors": errors[:10],
         }
     )

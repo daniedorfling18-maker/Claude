@@ -30,6 +30,7 @@ verdict gates first (see WO-34).
 """
 from __future__ import annotations
 
+import json
 import time
 from typing import Any
 
@@ -39,6 +40,7 @@ from .config import EngineConfig, load_config
 from .utils import now_utc, read_csv_rows, safe_float, write_csv, write_json
 
 DEFAULT_GAMMA_BASE_URL = "https://gamma-api.polymarket.com"
+DEFAULT_CLOB_BASE_URL = "https://clob.polymarket.com"
 
 LEDGER_FIELDS = [
     "scanned_at_utc",
@@ -53,6 +55,9 @@ LEDGER_FIELDS = [
     "net_buy_all_yes_per_basket",
     "net_sell_all_yes_per_basket",
     "flagged_side",
+    "executable_basket_usd",
+    "depth_weighted_net",
+    "book_fetch_ok",
     "fee_type",
     "fees_enabled",
     "volume_24h_usd",
@@ -64,6 +69,7 @@ def _settings(cfg: EngineConfig) -> dict[str, Any]:
     merged = {
         "enabled": True,
         "gamma_base_url": DEFAULT_GAMMA_BASE_URL,
+        "clob_base_url": DEFAULT_CLOB_BASE_URL,
         "event_pages": 3,
         "page_size": 100,
         "min_leg_count": 3,
@@ -97,6 +103,111 @@ def _fee_rate(market: dict[str, Any], settings: dict[str, Any]) -> float:
 
 def _taker_fee_per_share(rate: float, price: float) -> float:
     return rate * price * (1.0 - price)
+
+
+def _first_token_id(market: dict[str, Any]) -> str:
+    raw = market.get("clobTokenIds") or market.get("clob_token_ids") or market.get("token_id")
+    if isinstance(raw, str):
+        raw = raw.strip()
+        if raw.startswith("["):
+            try:
+                tokens = json.loads(raw)
+            except (TypeError, ValueError):
+                tokens = []
+        else:
+            tokens = [raw]
+    elif isinstance(raw, list):
+        tokens = raw
+    else:
+        tokens = []
+    return str(tokens[0]).strip() if tokens else ""
+
+
+def _book_asks(settings: dict[str, Any], token_id: str) -> list[tuple[float, float]] | None:
+    try:
+        response = requests.get(
+            f"{str(settings['clob_base_url']).rstrip('/')}/book",
+            params={"token_id": token_id},
+            timeout=float(settings["request_timeout_seconds"]),
+        )
+        response.raise_for_status()
+        book = response.json()
+    except Exception:
+        return None
+    asks: list[tuple[float, float]] = []
+    for level in book.get("asks") or []:
+        if not isinstance(level, dict):
+            continue
+        price = safe_float(level.get("price"))
+        size = safe_float(level.get("size"))
+        if price is not None and size is not None and 0 < price < 1 and size > 0:
+            asks.append((price, size))
+    asks.sort(key=lambda item: item[0])
+    return asks
+
+
+def _cost_for_quantity(levels: list[tuple[float, float]], quantity: float, fee_rate: float) -> float | None:
+    remaining = quantity
+    total = 0.0
+    for price, size in levels:
+        take = min(size, remaining)
+        total += take * (price + _taker_fee_per_share(fee_rate, price))
+        remaining -= take
+        if remaining <= 1e-9:
+            return total
+    return None
+
+
+def _executable_buy_all_yes_depth(
+    markets: list[dict[str, Any]],
+    settings: dict[str, Any],
+) -> dict[str, Any]:
+    """Depth check for a flagged buy-all-YES basket.
+
+    The basket is executable only while buying one share of every leg remains
+    net-positive after taker fees. We consume asks on every leg up to common
+    basket quantities and report the largest positive quantity's notional plus
+    its depth-weighted net per $1 basket.
+    """
+    leg_books: list[tuple[list[tuple[float, float]], float]] = []
+    candidate_quantities: set[float] = set()
+    for market in markets:
+        token_id = _first_token_id(market)
+        if not token_id:
+            return {"book_fetch_ok": False, "executable_basket_usd": None, "depth_weighted_net": None}
+        asks = _book_asks(settings, token_id)
+        if not asks:
+            return {"book_fetch_ok": False, "executable_basket_usd": None, "depth_weighted_net": None}
+        running = 0.0
+        for _, size in asks:
+            running += size
+            candidate_quantities.add(round(running, 10))
+        leg_books.append((asks, _fee_rate(market, settings)))
+
+    best: dict[str, Any] | None = None
+    for quantity in sorted(candidate_quantities):
+        leg_costs: list[float] = []
+        for asks, rate in leg_books:
+            cost = _cost_for_quantity(asks, quantity, rate)
+            if cost is None:
+                leg_costs = []
+                break
+            leg_costs.append(cost)
+        if not leg_costs:
+            continue
+        basket_cost = sum(leg_costs)
+        cost_per_basket = basket_cost / quantity
+        net_per_basket = 1.0 - cost_per_basket
+        if net_per_basket <= 0:
+            continue
+        best = {
+            "book_fetch_ok": True,
+            "executable_basket_usd": round(basket_cost, 2),
+            "depth_weighted_net": round(net_per_basket, 6),
+        }
+    if best is not None:
+        return best
+    return {"book_fetch_ok": True, "executable_basket_usd": 0.0, "depth_weighted_net": 0.0}
 
 
 def _scan_event(event: dict[str, Any], settings: dict[str, Any]) -> dict[str, Any] | None:
@@ -135,6 +246,9 @@ def _scan_event(event: dict[str, Any], settings: dict[str, Any]) -> dict[str, An
         flagged_side = "buy_all_yes"
     if net_sell is not None and net_sell > threshold and (net_buy is None or net_sell > net_buy):
         flagged_side = "sell_all_yes"
+    depth = {"executable_basket_usd": None, "depth_weighted_net": None, "book_fetch_ok": None}
+    if flagged_side == "buy_all_yes":
+        depth = _executable_buy_all_yes_depth(markets, settings)
     first = markets[0]
     return {
         "scanned_at_utc": now_utc(),
@@ -149,6 +263,7 @@ def _scan_event(event: dict[str, Any], settings: dict[str, Any]) -> dict[str, An
         "net_buy_all_yes_per_basket": net_buy,
         "net_sell_all_yes_per_basket": net_sell,
         "flagged_side": flagged_side,
+        **depth,
         "fee_type": str(first.get("feeType") or ""),
         "fees_enabled": bool(first.get("feesEnabled")),
         "volume_24h_usd": round(safe_float(event.get("volume24hr")) or 0.0, 2),
@@ -222,6 +337,15 @@ def scan_event_groups(cfg: EngineConfig) -> dict[str, Any]:
             "groups_with_complete_ask_side": len(net_buys),
             "groups_with_complete_bid_side": len(net_sells),
             "flagged_deviations": len(flagged),
+            "flagged_with_executable_depth": sum(
+                1
+                for row in flagged
+                if row.get("book_fetch_ok") is True and (safe_float(row.get("executable_basket_usd")) or 0.0) > 0
+            ),
+            "max_executable_basket_usd": max(
+                [safe_float(row.get("executable_basket_usd")) or 0.0 for row in flagged],
+                default=0.0,
+            ),
             "flagged_events": [row["event_slug"] for row in flagged][:20],
             "best_net_buy_all_yes": max(net_buys) if net_buys else None,
             "best_net_sell_all_yes": max(net_sells) if net_sells else None,

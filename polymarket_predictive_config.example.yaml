@@ -138,6 +138,20 @@ event_group_consistency:
   min_leg_count: 3
   deviation_threshold_per_basket: 0.002
   max_ledger_rows: 100000
+# 2026-07-10 WO-41: Frechet/Boole implication consistency scan across linked
+# World Cup markets. Measurement only; reports structural deviations but
+# cannot create signals, change gates, or place/amend/cancel orders.
+implication_networks:
+  enabled: true
+  gamma_base_url: https://gamma-api.polymarket.com
+  event_pages: 3
+  page_size: 100
+  deviation_threshold_per_basket: 0.005
+  max_ledger_rows: 100000
+  request_timeout_seconds: 20
+  request_pause_seconds: 0.1
+  min_continent_member_markets: 2
+  min_matchups_per_team: 2
 historical_price_history:
   clob_base_url: https://clob.polymarket.com
   max_tokens: 500

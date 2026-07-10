@@ -56,6 +56,7 @@ from .price_action_model import train_price_action_model
 from .price_action_scout import build_price_action_scout
 from .price_action_signals import build_price_action_paper_signals
 from .event_group_consistency import scan_event_groups
+from .implication_consistency import scan_implication_networks
 from .maker_carry_study import run_maker_carry_study
 from .maker_fill_replay import run_maker_fill_replay
 from .maker_live_test import run_maker_live_test
@@ -103,6 +104,7 @@ COMMANDS = [
     "maker-fill-replay",
     "maker-live-test",
     "scan-event-groups",
+    "scan-implication-networks",
     "build-labels",
     "build-features",
     "build-features-v2",
@@ -288,6 +290,8 @@ def main(argv: list[str] | None = None) -> int:
             _print(run_maker_live_test(cfg))
         elif args.command == "scan-event-groups":
             _print(scan_event_groups(cfg))
+        elif args.command == "scan-implication-networks":
+            _print(scan_implication_networks(cfg))
         elif args.command == "build-labels":
             _print({"labels": len(build_labels(cfg))})
         elif args.command == "build-features":

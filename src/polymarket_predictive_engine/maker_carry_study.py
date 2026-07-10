@@ -769,6 +769,14 @@ def _write_quote_sheet(out_root: Path, summary: dict[str, Any], settings: dict[s
         "4. If realised fills exceed the modelled band-crossing rate, stop: the",
         "   markout model is being beaten by faster flow.",
         "5. Re-read this sheet daily; pots and competition move with the calendar.",
+        "6. Inventory skew (Ho-Stoll/Avellaneda-Stoikov): once filled on one side,",
+        "   requote to REDUCE the position, never to add. Binary markets settle at",
+        "   0 or 1 - unhedged inventory at resolution is a directional bet, not",
+        "   market making.",
+        "7. Band discipline: quote only while the mid is inside [0.10, 0.90] -",
+        "   outside it the venue requires double-sided scoring, ticks shift, and",
+        "   gamma-to-settlement risk is highest. Exit quotes as price leaves the",
+        "   band; do not chase it.",
     ]
     (out_root / "maker_quote_sheet.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
 

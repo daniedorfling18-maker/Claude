@@ -467,6 +467,12 @@ volume imbalance percentiles plus wallet-tier markout splits to
 rule 8: do not initiate quotes above `toxicity_score > 0.9`. This is conditioning only; adverse
 charges, gates, sizing, and order paths are unchanged.
 
+**2026-07-10 — WO-52 implemented by Codex.** Hour-of-day adverse-selection concentration now runs
+as CLI `hourly-adverse-study`, writing `outputs/maker_carry/hourly_adverse.json`. It compares
+per-UTC-hour band-crossing charge share against a uniform reward-minute null with BH-FDR, reports
+toxic hours and a calm-hours advisory, and patches the maker quote sheet. This is advisory only and
+does not change maker charges, gates, sizing, or order paths.
+
 **2026-07-10 — WO-42 implemented by Codex.** Calibration-bias harvesting now joins clean resolved
 markets to point-in-time pre-close prices and writes
 `outputs/calibration_bias/calibration_curve.csv` plus summary JSON. It reports category/horizon/bin

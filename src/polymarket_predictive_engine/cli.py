@@ -35,6 +35,7 @@ from .flow_toxicity import build_flow_toxicity
 from .goal_planner import build_goal_plan
 from .governance import governance_report
 from .historical_backfill import historical_backfill
+from .hourly_adverse_study import run_hourly_adverse_study
 from .labels import build_labels
 from .live_mispricing import run_live_mispricing, scan_live_mispricing
 from .longshot_bias import build_longshot_bias_scan
@@ -109,6 +110,7 @@ COMMANDS = [
     "snapshot-official-books",
     "maker-live-test",
     "flow-toxicity",
+    "hourly-adverse-study",
     "scan-event-groups",
     "scan-implication-networks",
     "calibration-bias-study",
@@ -301,6 +303,8 @@ def main(argv: list[str] | None = None) -> int:
             _print(run_maker_live_test(cfg))
         elif args.command == "flow-toxicity":
             _print(build_flow_toxicity(cfg))
+        elif args.command == "hourly-adverse-study":
+            _print(run_hourly_adverse_study(cfg))
         elif args.command == "scan-event-groups":
             _print(scan_event_groups(cfg))
         elif args.command == "scan-implication-networks":

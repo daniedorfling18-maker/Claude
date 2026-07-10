@@ -93,6 +93,8 @@ CANDIDATE_FIELDS = [
     "token_id",
     "complement_token_id",
     "neg_risk",
+    "fee_type",
+    "fees_enabled",
     "volume_24h_usd",
     "pot_usd_per_day",
     "rewards_min_size_shares",
@@ -116,6 +118,9 @@ CANDIDATE_FIELDS = [
     "band_crossing_prints_per_day",
     "markout_measured",
     "adverse_selection_usd_per_day",
+    "supplementary_rebate_usd_per_day",
+    "supplementary_holding_usd_per_day",
+    "supplementary_income_usd_per_day",
     "net_carry_usd_per_day",
     "capital_usd",
     "estimate_quality",
@@ -155,6 +160,13 @@ def _settings(cfg: EngineConfig) -> dict[str, Any]:
         "min_daily_payout_usd": 1.0,
         # Gate M-A: daily runs at/above target required for the maker verdict.
         "gate_min_runs_at_target": 7,
+        # WO-45 supplementary maker income (reporting only, excluded from all
+        # registered M-gates and portfolio net-carry calculations).
+        "fee_rate_by_type": {"sports_fees_v2": 0.05},
+        "fee_rate_when_enabled_unknown": 0.07,
+        "maker_rebate_share_by_fee_type": {"sports_fees_v2": 0.15},
+        "maker_rebate_share_when_enabled_unknown": 0.25,
+        "holding_reward_apr": 0.04,
         "request_timeout_seconds": 20,
         "request_pause_seconds": 0.15,
         "share_model_c": 3.0,
@@ -243,6 +255,8 @@ def _rewarded_universe(settings: dict[str, Any]) -> tuple[list[dict[str, Any]], 
                     "token_id": token_id,
                     "complement_token_id": complement_token_id,
                     "neg_risk": bool(market.get("negRisk")),
+                    "fee_type": str(market.get("feeType") or "").strip(),
+                    "fees_enabled": bool(market.get("feesEnabled")),
                     "volume_24h_usd": round(safe_float(market.get("volume24hr")) or 0.0, 2),
                     "pot_usd_per_day": round(pot, 2),
                     "rewards_min_size_shares": min_size,
@@ -470,6 +484,52 @@ def _legacy_book_competition(settings: dict[str, Any], token_id: str, v: float) 
         "ask_score": scores["ask"],
         "bid_depth": depth["bid"],
         "ask_depth": depth["ask"],
+    }
+
+
+def _market_fee_rate(row: dict[str, Any], settings: dict[str, Any]) -> float:
+    if not row.get("fees_enabled"):
+        return 0.0
+    by_type = settings.get("fee_rate_by_type") or {}
+    fee_type = str(row.get("fee_type") or "")
+    rate = safe_float(by_type.get(fee_type))
+    if rate is not None:
+        return rate
+    return float(settings["fee_rate_when_enabled_unknown"])
+
+
+def _maker_rebate_share(row: dict[str, Any], settings: dict[str, Any]) -> float:
+    if not row.get("fees_enabled"):
+        return 0.0
+    by_type = settings.get("maker_rebate_share_by_fee_type") or {}
+    fee_type = str(row.get("fee_type") or "")
+    share = safe_float(by_type.get(fee_type))
+    if share is not None:
+        return share
+    return float(settings["maker_rebate_share_when_enabled_unknown"])
+
+
+def _supplementary_income(row: dict[str, Any], settings: dict[str, Any], depth: dict[str, float]) -> dict[str, float]:
+    """Uncounted maker income streams from rebates + holding rewards.
+
+    These numbers are deliberately excluded from `net_carry_usd_per_day` and
+    every registered maker gate. They exist so the funding decision can see
+    the full income picture without silently loosening the evidence rules.
+    """
+    capital = safe_float(row.get("capital_usd")) or 0.0
+    quote_size = safe_float(row.get("rewards_min_size_shares")) or 0.0
+    mid = safe_float(row.get("mid_price")) or 0.0
+    crossings = safe_float(row.get("band_crossing_prints_per_day")) or 0.0
+    bid_queue_share = quote_size / (quote_size + max(depth.get("bid", 0.0), 0.0)) if quote_size > 0 else 0.0
+    ask_queue_share = quote_size / (quote_size + max(depth.get("ask", 0.0), 0.0)) if quote_size > 0 else 0.0
+    expected_fills_per_day = crossings * ((bid_queue_share + ask_queue_share) / 2.0)
+    fee_equivalent_per_fill = quote_size * _market_fee_rate(row, settings) * mid * (1.0 - mid)
+    rebate = expected_fills_per_day * fee_equivalent_per_fill * _maker_rebate_share(row, settings)
+    holding = (float(settings["holding_reward_apr"]) / 365.0) * capital
+    return {
+        "supplementary_rebate_usd_per_day": round(rebate, 6),
+        "supplementary_holding_usd_per_day": round(holding, 6),
+        "supplementary_income_usd_per_day": round(rebate + holding, 6),
     }
 
 
@@ -749,6 +809,7 @@ def run_maker_carry_study(cfg: EngineConfig) -> dict[str, Any]:
                     row["estimate_quality"] = "single_window_history"
                 else:
                     row["estimate_quality"] = "book_and_history"
+            row.update(_supplementary_income(row, settings, depth))
             if best_row is None or (row.get("net_carry_usd_per_day") or -1e18) > (
                 best_row.get("net_carry_usd_per_day") or -1e18
             ):
@@ -803,6 +864,9 @@ def run_maker_carry_study(cfg: EngineConfig) -> dict[str, Any]:
                 "quote_distance_fraction": row["quote_distance_fraction"],
                 "capital_usd": round(k * row["capital_usd"], 2),
                 "net_carry_usd_per_day": round(net_k, 4),
+                "uncounted_supplementary_income_usd_per_day": round(k * (row.get("supplementary_income_usd_per_day") or 0.0), 4),
+                "uncounted_rebate_usd_per_day": round(k * (row.get("supplementary_rebate_usd_per_day") or 0.0), 4),
+                "uncounted_holding_usd_per_day": round(k * (row.get("supplementary_holding_usd_per_day") or 0.0), 4),
                 "markout_measured": bool(row.get("markout_measured")),
                 "event_risk_flags": [
                     keyword for keyword in EVENT_RISK_KEYWORDS if keyword in row["question"].lower()
@@ -878,6 +942,15 @@ def run_maker_carry_study(cfg: EngineConfig) -> dict[str, Any]:
             "portfolio_capital_usd": round(capital, 2),
             "portfolio_net_carry_usd_per_day": net_total,
             "portfolio_net_carry_usd_per_month": round(net_total * 30, 2),
+            "portfolio_uncounted_supplementary_income_usd_per_day": round(
+                sum(r.get("uncounted_supplementary_income_usd_per_day", 0.0) for r in portfolio), 4
+            ),
+            "portfolio_uncounted_rebate_usd_per_day": round(
+                sum(r.get("uncounted_rebate_usd_per_day", 0.0) for r in portfolio), 4
+            ),
+            "portfolio_uncounted_holding_usd_per_day": round(
+                sum(r.get("uncounted_holding_usd_per_day", 0.0) for r in portfolio), 4
+            ),
             "target_net_usd_per_day": target,
             "clears_100_per_month_target": bool(portfolio) and net_total >= target,
             "share_model": "published_v2",
@@ -898,6 +971,10 @@ def run_maker_carry_study(cfg: EngineConfig) -> dict[str, Any]:
                     f"queue-share weighted against resting band depth"
                 ),
                 "thin_book_guard": f"raw share > {settings['max_trusted_reward_share']} excluded from portfolio",
+                "supplementary_income": (
+                    "rebates + holding rewards are reported as uncounted income only; "
+                    "they are excluded from portfolio_net_carry_usd_per_day and every M-gate"
+                ),
             },
             "honesty_clause": (
                 "Simulated maker fills are unverifiable (queue position, intra-minute jumps, competitor "
@@ -944,19 +1021,21 @@ def _write_quote_sheet(out_root: Path, summary: dict[str, Any], settings: dict[s
         f"Estimated portfolio net carry: ${summary.get('portfolio_net_carry_usd_per_day')}/day "
         f"(~${summary.get('portfolio_net_carry_usd_per_month')}/month) on "
         f"${summary.get('portfolio_capital_usd')} capital - UPPER BOUND, see honesty clause.",
+        f"Uncounted supplementary income shown separately: ${summary.get('portfolio_uncounted_supplementary_income_usd_per_day', 0.0)}/day "
+        "(rebates + holding rewards; NOT included in gates or net carry).",
         "",
         "This system places NO orders. Acting on this sheet is a human decision,",
         "with human money, outside the bot's paper-only governance.",
         "",
-        "| market | quote size (shares/side) | distance from mid | capital | est net/day | risk flags |",
-        "|---|---|---|---|---|---|",
+        "| market | quote size (shares/side) | distance from mid | capital | est net/day | uncounted income/day | risk flags |",
+        "|---|---|---|---|---|---|---|",
     ]
     for entry in summary.get("portfolio", []) or []:
         flags = ", ".join(entry.get("event_risk_flags") or []) or "-"
         lines.append(
             f"| {entry['question'][:60]} | {entry['quote_size_shares']:.0f} | "
             f"{entry['quote_distance']} | ${entry['capital_usd']} | "
-            f"${entry['net_carry_usd_per_day']} | {flags} |"
+            f"${entry['net_carry_usd_per_day']} | ${entry.get('uncounted_supplementary_income_usd_per_day', 0.0)} | {flags} |"
         )
     lines += [
         "",

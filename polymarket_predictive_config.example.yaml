@@ -119,6 +119,15 @@ maker_carry_study:
   share_model_c: 3.0
   share_model_mid_band_min: 0.10
   share_model_mid_band_max: 0.90
+  # 2026-07-10 WO-45: supplementary maker income, reported only. These
+  # rebate/holding estimates are explicitly excluded from net carry and gates.
+  holding_reward_apr: 0.04
+  fee_rate_by_type:
+    sports_fees_v2: 0.05
+  fee_rate_when_enabled_unknown: 0.07
+  maker_rebate_share_by_fee_type:
+    sports_fees_v2: 0.15
+  maker_rebate_share_when_enabled_unknown: 0.25
 # 2026-07-10 WO-40: replay maker quote fills against recorded websocket
 # book states + trade prints. Measurement only; does not alter WO-36 charges
 # automatically.

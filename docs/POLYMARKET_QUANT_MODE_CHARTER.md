@@ -423,6 +423,7 @@ snapshots from data-API `/oi`, appending `outputs/polymarket_trade_prints/open_i
 and surfacing `oi_markets_captured` plus fail-soft `oi_errors` in the summary. Missing OI endpoints
 do not fail the print job by themselves.
 
+<<<<<<< HEAD
 **2026-07-10 — WO-41 implemented by Codex.** The implication-network scanner now measures
 Frechet/Boole consistency across linked World Cup-style markets: monotone winner/final/semifinal
 chains, continent-winner aggregation, and exact-final-matchup sums. CLI `scan-implication-networks`
@@ -441,6 +442,12 @@ not loosened.
 `orderbook-history` snapshots into `outputs/maker_carry/official_books/*.csv.gz`, replay archive and
 official book states side-by-side, and report per-source realism ratios plus source agreement. Missing
 official history degrades to the existing archive source without failing the measurement lane.
+=======
+**2026-07-10 — WO-45 implemented by Codex.** Maker-carry candidates and quote sheets now show
+supplementary maker rebates and holding rewards as uncounted income, with portfolio-level rebate,
+holding, and total supplementary summaries. These values are explicitly excluded from registered
+M-gates and from `portfolio_net_carry_usd_per_day`.
+>>>>>>> 8c9a225 (Implement WO-45 supplementary maker income)
 
 ## Rules of engagement for coding agents
 

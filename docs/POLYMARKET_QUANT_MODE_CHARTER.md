@@ -430,6 +430,13 @@ writes `outputs/implication_consistency/implication_deviations.csv` and
 `outputs/implication_consistency/implication_scan.json`, rides the trade-print cadence, and remains
 measurement-only with no signal/gate/order side effects.
 
+**2026-07-10 — WO-46 implemented by Codex.** Maker-carry reward share now follows the published
+liquidity-scoring rule: market plus complement books, c=3 single-sided scoring inside the eligible
+mid band, strict double-sided scoring outside, and `band_ineligible` exclusion from the portfolio.
+The old same-token share remains as `share_model_legacy` for one-release comparison, and the history
+ledger records `share_model=published_v2`. Registered M-gates and net-carry gate definitions were
+not loosened.
+
 ## Rules of engagement for coding agents
 
 0. **Division of labour**: the orchestrating agent writes/updates this charter and the work orders

@@ -68,19 +68,38 @@ class _Response:
 
 
 def _fake_requests(monkeypatch, *, markets, books, histories, prints=None) -> None:
+    def book_for(token_id: str) -> dict[str, Any]:
+        if token_id in books:
+            book = dict(books[token_id])
+        elif token_id.endswith("-no") and token_id[:-3] in books:
+            # Existing WO-36 tests cared only about the YES token. Mirror the
+            # book for the complement so WO-46 exercises the two-token model
+            # without changing those tests' economic setup.
+            book = dict(books[token_id[:-3]])
+        else:
+            book = {}
+        return {"token_id": token_id, **book}
+
     def fake_get(url: str, params: dict[str, Any] | None = None, timeout: float | None = None):
         params = params or {}
         if url.endswith("/markets"):
             return _Response(markets if int(params.get("offset", 0)) == 0 else [])
         if url.endswith("/book"):
-            return _Response(books[str(params["market" if "market" in params else "token_id"])])
+            return _Response(book_for(str(params["market" if "market" in params else "token_id"])))
         if url.endswith("/prices-history"):
             return _Response({"history": histories[(str(params["market"]), str(params["interval"]))]})
         if url.endswith("/trades"):
             return _Response((prints or {}).get(str(params["market"]), []))
         raise AssertionError(f"unexpected url {url}")
 
+    def fake_post(url: str, json: Any = None, timeout: float | None = None):
+        if url.endswith("/books"):
+            requested = [str(row.get("token_id") or row.get("market") or "") for row in (json or [])]
+            return _Response([book_for(token_id) for token_id in requested])
+        raise AssertionError(f"unexpected url {url}")
+
     monkeypatch.setattr(maker_carry_study.requests, "get", fake_get)
+    monkeypatch.setattr(maker_carry_study.requests, "post", fake_post)
 
 
 def _flat_history(points: int, price: float = 0.5) -> list[dict[str, float]]:
@@ -93,6 +112,86 @@ def _deep_book(mid: float = 0.5) -> dict[str, Any]:
         "bids": [{"price": f"{mid - 0.005:.3f}", "size": "20000"}],
         "asks": [{"price": f"{mid + 0.005:.3f}", "size": "20000"}],
     }
+
+
+def test_published_share_model_worked_example_uses_market_and_complement(tmp_path, monkeypatch):
+    cfg = _config(tmp_path)
+    settings = maker_carry_study._settings(cfg)
+    books = {
+        "yes": {"bids": [{"price": "0.49", "size": "100"}], "asks": [{"price": "0.51", "size": "100"}]},
+        "no": {"bids": [{"price": "0.49", "size": "100"}], "asks": [{"price": "0.51", "size": "100"}]},
+    }
+
+    def fake_post(url: str, json: Any = None, timeout: float | None = None):
+        return _Response([{"token_id": row["token_id"], **books[row["token_id"]]} for row in json])
+
+    monkeypatch.setattr(maker_carry_study.requests, "post", fake_post)
+
+    competition = maker_carry_study._book_competition(settings, "yes", "no", 0.02)
+    assert competition["band_eligible"] is True
+    # 0.49 bid + complement 0.51 ask both map to the same YES-side score.
+    assert round(competition["bid_score"], 6) == 50.0
+    assert round(competition["ask_score"], 6) == 50.0
+    share, marginal = maker_carry_study._share_from_published_score(settings, competition, 25.0)
+    assert marginal == 25.0
+    assert round(share, 6) == round(25.0 / 75.0, 6)
+
+
+def test_single_sided_liquidity_scores_one_third_inside_band(tmp_path, monkeypatch):
+    cfg = _config(tmp_path)
+    settings = maker_carry_study._settings(cfg)
+    # YES bid at 0.49 contributes Q_one=25. Ask exists only to form the mid.
+    books = {
+        "yes": {"bids": [{"price": "0.49", "size": "100"}], "asks": [{"price": "0.51", "size": "0"}]},
+        "no": {"bids": [], "asks": []},
+    }
+
+    def fake_post(url: str, json: Any = None, timeout: float | None = None):
+        return _Response([{"token_id": row["token_id"], **books[row["token_id"]]} for row in json])
+
+    monkeypatch.setattr(maker_carry_study.requests, "post", fake_post)
+
+    competition = maker_carry_study._book_competition(settings, "yes", "no", 0.02)
+    assert competition["band_eligible"] is True
+    assert round(competition["bid_score"], 6) == 25.0
+    assert round(competition["ask_score"], 6) == 0.0
+    assert round(competition["published_pool_score"], 6) == round(25.0 / 3.0, 6)
+
+
+def test_outside_band_requires_strict_two_sided_score(tmp_path, monkeypatch):
+    cfg = _config(tmp_path)
+    settings = maker_carry_study._settings(cfg)
+    books = {
+        "yes": {"bids": [{"price": "0.94", "size": "100"}], "asks": [{"price": "0.96", "size": "0"}]},
+        "no": {"bids": [], "asks": []},
+    }
+
+    def fake_post(url: str, json: Any = None, timeout: float | None = None):
+        return _Response([{"token_id": row["token_id"], **books[row["token_id"]]} for row in json])
+
+    monkeypatch.setattr(maker_carry_study.requests, "post", fake_post)
+
+    competition = maker_carry_study._book_competition(settings, "yes", "no", 0.02)
+    assert competition["band_eligible"] is False
+    assert competition["published_pool_score"] == 0.0
+
+
+def test_band_ineligible_candidate_is_excluded_from_portfolio(tmp_path, monkeypatch):
+    cfg = _config(tmp_path)
+    markets = [_market("outside band", "outside", 1000.0)]
+    books = {
+        "outside": {"bids": [{"price": "0.94", "size": "20000"}], "asks": [{"price": "0.96", "size": "20000"}]},
+        "outside-no": {"bids": [{"price": "0.04", "size": "20000"}], "asks": [{"price": "0.06", "size": "20000"}]},
+    }
+    histories = {("outside", "1d"): _flat_history(200, price=0.95), ("outside", "1w"): _flat_history(200, price=0.95)}
+    _fake_requests(monkeypatch, markets=markets, books=books, histories=histories)
+
+    summary = run_maker_carry_study(cfg)
+
+    row = read_csv_rows(cfg.output_root / "maker_carry" / "maker_carry_candidates.csv")[0]
+    assert row["band_eligible"] == "False"
+    assert row["estimate_quality"] == "band_ineligible"
+    assert summary["portfolio_markets"] == 0
 
 
 def test_thin_book_share_is_untrusted_and_kept_out_of_portfolio(tmp_path, monkeypatch):

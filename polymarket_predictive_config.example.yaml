@@ -113,6 +113,12 @@ maker_carry_study:
   markout_min_prints: 20
   min_daily_payout_usd: 1.0
   gate_min_runs_at_target: 7
+  # 2026-07-10 WO-46: published liquidity-reward share model. It aggregates
+  # market + complement books, applies the c=3 single-sided rule inside the
+  # eligible mid band, and mechanically excludes rows outside [0.10, 0.90].
+  share_model_c: 3.0
+  share_model_mid_band_min: 0.10
+  share_model_mid_band_max: 0.90
 # 2026-07-10 WO-40: replay maker quote fills against recorded websocket
 # book states + trade prints. Measurement only; does not alter WO-36 charges
 # automatically.

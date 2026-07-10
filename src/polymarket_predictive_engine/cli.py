@@ -20,6 +20,7 @@ from .crypto_updown_labels import build_crypto_updown_proxy_labels
 from .dashboard import render_dashboard
 from .data_inventory import inventory
 from .data_quality import data_quality
+from .drift_scan_study import run_drift_scan
 from .dutch_arb_monitor import run_dutch_arb_monitor
 from .edge_attribution import build_edge_attribution
 from .evidence_history import append_evidence_history
@@ -171,6 +172,7 @@ COMMANDS = [
     "market-making-pnl",
     "dutch-arb-monitor",
     "longshot-bias-scan",
+    "drift-scan",
     "resolve-websocket-markets",
     "collect-snapshot-labels",
     "collect-overnight",
@@ -513,6 +515,8 @@ def main(argv: list[str] | None = None) -> int:
                                          alert_annualised=args.alert_annualised))
         elif args.command == "longshot-bias-scan":
             _print(build_longshot_bias_scan(cfg))
+        elif args.command == "drift-scan":
+            _print(run_drift_scan(cfg))
         elif args.command == "resolve-websocket-markets":
             _print(collect_websocket_resolutions(cfg))
         elif args.command == "collect-snapshot-labels":

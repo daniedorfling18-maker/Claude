@@ -49,6 +49,7 @@ Any work package below that appears to conflict with these invariants loses; the
 | Shadow cohorts + settlement evidence | `shadow_cohort.py` |
 | Closing-line-value (CLV) forward evidence | `closing_line.py` (new, WP1) |
 | Reconstructed sharp-anchor CLV research (non-verdict) | `reconstructed_signal_clv.py` (WO-55) |
+| Martingale drift scan (term-structure research) | `drift_scan_study.py` (WO-43) |
 | Pre-trade risk controls + capped/shrunk Kelly sizing | `risk.py` (WP2 adds shrinkage) |
 | VaR/CVaR/drawdown/Sharpe primitives | `quant_lab/risk.py` |
 | Fail-closed governance, promotion gates, audits | `governance.py`, `readiness.py`, `promotion_review.py` |
@@ -342,6 +343,11 @@ entry rules, price them from official CLOB price history, cluster by fixture, an
 `reconstructed_signal_clv.json` / `reconstructed_signal_clv_positions.csv` with
 `evidence_class: reconstructed_research`. This is judgment input only: it never touches
 `profit_verdict.py`, never becomes Gate A evidence, and cannot invoke paper/live trading.
+**2026-07-10 — WO-43 implemented by Codex.** `drift_scan_study.py` and CLI `drift-scan` estimate
+martingale drift from harvested CLOB price histories by price bin, time-to-close bin, category, and
+horizon. The scan uses market-clustered bootstrap CIs, BH-FDR across tested bins, and only reports a
+research flag when drift exceeds the configured taker cost stack. It is study-only: no lane, no gate
+change, no paper/live trading.
 
 **2026-07-03 — WO-23 landed by Codex.** The dashboard now distinguishes the VPS deployment driver
 from local shadow-cycle observability. When the legacy live-loop heartbeat is fresh and the shadow

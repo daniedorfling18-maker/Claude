@@ -1884,13 +1884,66 @@ Spec:
    asserts the new job string; a same-day second run leaves
    runs_at_or_above_target unchanged (already covered - extend assertion).
 
+## WO-54 — Deep trade-print backfill (backsolve markout/toxicity history)
+
+The data-API /trades endpoint serves deep per-market history via pagination;
+our 15-min collector only keeps recent prints. Backfilling turns weeks of
+already-recorded venue history into usable markout and toxicity datapoints
+TODAY instead of accruing them forward.
+
+Spec:
+1. Extend `trade_print_collector.py` with `backfill_trade_prints(cfg)` (CLI
+   `backfill-trade-prints`): for the maker-study candidate markets plus the
+   quote-sheet portfolio, page /trades with offset/limit until exhausted or
+   `backfill_max_prints_per_market` (default 5,000) is reached; dedup into
+   the existing ledger; respect rate limits (sleep >= 0.1s/page; /trades cap
+   200 req/10s).
+2. One-shot + idempotent: a stamp file marks completed markets so reruns
+   skip them; new markets entering the study get backfilled on the next run.
+3. Cadence: rides the daily harvest AFTER the study selects candidates.
+4. Tests: pagination fake with exhaustion, dedup against existing ledger,
+   stamp skip, cap respected.
+
+## WO-55 — Reconstructed-signal CLV study (RESEARCH ONLY - never verdict)
+
+We hold the one archive money cannot re-buy: timestamped sharp-anchor odds
+snapshots. Every historical anchor divergence that our thresholds WOULD have
+entered can be reconstructed - entry price from the official price history
+at signal time, closing line at market close - multiplying CLV research
+sample size far beyond the 8 forward units.
+
+HARD CONSTRAINT (this is the entire point): reconstructed entries are
+research datapoints, NEVER Gate A evidence. The verdict is pre-registered on
+forward-stamped entries precisely because retro-selection and look-ahead
+cannot be excluded from reconstructions. Outputs live in their own artifact,
+labelled non-verdict, and profit_verdict.py is NOT touched.
+
+Spec:
+1. Module `reconstructed_signal_clv.py`, CLI `reconstructed-clv-study`,
+   config `reconstructed_clv:` (enabled, thresholds MIRRORING the live
+   anchor entry rules as of 2026-07-10 - frozen in config, tighten-only).
+2. Inputs: stored sharp-anchor snapshot artifacts (odds + mapped tokens +
+   timestamps), official /prices-history for entry/close lines, Gamma
+   closedTime. Cluster by fixture (reuse amendment-5 union-find via
+   profit_verdict helpers) and report unit mean CLV, beat rate, sign-test p
+   - clearly stamped `evidence_class: reconstructed_research`.
+3. Constraint 6/7 discipline: planted-truth test (synthetic snapshots with
+   known CLV recovered; martingale null flags nothing) and BH-FDR if
+   multiple thresholds/cohorts are scanned.
+4. Value: a power-multiplied read on the anchor mechanism BEFORE the next
+   event regime, informing whether the extended taker window is worth
+   keeping open - as judgment input, not as gate input.
+
 ## Priority order for Codex (updated 2026-07-10, batch 3 filed)
 
 Batch 3 first, in order: **WO-50 -> WO-51 -> WO-52 -> WO-53** (decision
-discipline before more measurement; 50/51/53 are small). Then the prior
-queue unchanged: WO-41 -> WO-46 -> WO-44 -> WO-45 -> WO-49 -> WO-42 ->
-WO-43; WO-47 anytime; WO-48 BLOCKED until the maker gates read
-evidence-supported; WO-33 last pending the leakage review.
+discipline before more measurement; 50/51/53 are small). Then **WO-54**
+(deep print backfill - backsolves markout/toxicity history for everything
+downstream) and the prior queue: WO-41 -> WO-46 -> WO-44 -> WO-45 -> WO-49
+-> **WO-55** (reconstructed-signal research read before the taker window
+extension decision) -> WO-42 -> WO-43; WO-47 anytime; WO-48 BLOCKED until
+the maker gates read evidence-supported; WO-33 last pending the leakage
+review.
 
 ## Superseded priority note (2026-07-10 earlier)
 

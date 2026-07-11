@@ -240,3 +240,16 @@ def test_vps_telemetry_push_script_is_single_commit_and_actions_free():
         ), f"heavy dir {excluded} must not be whitelisted"
     # official book snapshots live under maker_carry but stay on the VPS
     assert "official_books" in script
+
+
+def test_vps_diagnostic_script_rides_telemetry_and_stays_capped():
+    # The diagnostic must land where the telemetry whitelist ships it, stay
+    # under the bridge's per-file cap, and never hard-fail on a missing tool.
+    script = Path("scripts/vps_diagnostic.sh").read_text(encoding="utf-8")
+    assert "outputs/ops_scheduler/vps_diagnostic.log" in script
+    assert "280" in script  # trim guard under the 300KB telemetry cap
+    for fail_soft in ("docker unavailable", "systemctl unavailable", "no status.json"):
+        assert fail_soft in script
+    # report covers host, docker, container, and app layers
+    for section in ("HOST:", "DOCKER:", "CONTAINER", "APP:"):
+        assert section in script

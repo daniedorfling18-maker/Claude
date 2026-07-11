@@ -21,6 +21,7 @@ from .crypto_updown_labels import build_crypto_updown_proxy_labels
 from .dashboard import render_dashboard
 from .data_inventory import inventory
 from .data_quality import data_quality
+from .disaster_recovery import create_ledger_archive, verify_and_restore_archive
 from .drift_scan_study import run_drift_scan
 from .dutch_arb_monitor import run_dutch_arb_monitor
 from .edge_attribution import build_edge_attribution
@@ -125,6 +126,8 @@ COMMANDS = [
     "reconcile-wallet",
     "add-cost",
     "sync-cost-ledger",
+    "snapshot-ledger-archive",
+    "verify-ledger-archive",
     "hourly-adverse-study",
     "scan-event-groups",
     "scan-implication-networks",
@@ -218,6 +221,10 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--cost-usd", type=float, default=None, help="add-cost: positive USD amount")
     parser.add_argument("--cost-ref", default=None, help="add-cost: required unique idempotency reference")
     parser.add_argument("--cost-note", default="", help="add-cost: optional audit note")
+    parser.add_argument("--archive-path", default=None, help="verify-ledger-archive: tar.gz archive to verify")
+    parser.add_argument("--restore-output-root", default=None, help="verify-ledger-archive: empty destination for an applied restore")
+    parser.add_argument("--apply-restore", action="store_true", help="verify-ledger-archive: copy verified files into --restore-output-root")
+    parser.add_argument("--force-archive", action="store_true", help="snapshot-ledger-archive: build even if the active RPO is not due")
     parser.add_argument("--allow-data-quality-warnings", action="store_true")
     parser.add_argument("--resolution-limit", type=int, default=None)
     parser.add_argument("--historical-limit", type=int, default=None)
@@ -353,6 +360,21 @@ def main(argv: list[str] | None = None) -> int:
             )
         elif args.command == "sync-cost-ledger":
             _print(sync_cost_ledger(cfg))
+        elif args.command == "snapshot-ledger-archive":
+            _print(create_ledger_archive(cfg, force=args.force_archive))
+        elif args.command == "verify-ledger-archive":
+            if not str(args.archive_path or "").strip():
+                raise ValueError("verify-ledger-archive requires --archive-path")
+            if args.apply_restore and not str(args.restore_output_root or "").strip():
+                raise ValueError("--apply-restore requires --restore-output-root")
+            _print(
+                verify_and_restore_archive(
+                    cfg,
+                    args.archive_path,
+                    dry_run=not args.apply_restore,
+                    destination_output_root=args.restore_output_root,
+                )
+            )
         elif args.command == "hourly-adverse-study":
             _print(run_hourly_adverse_study(cfg))
         elif args.command == "scan-event-groups":

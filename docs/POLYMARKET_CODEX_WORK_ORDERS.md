@@ -2337,6 +2337,15 @@ Spec:
 
 ## WO-65 — Disaster recovery: full state snapshot + tested restore
 
+Status: IMPLEMENTED by Codex on 2026-07-11. CLI `snapshot-ledger-archive`
+packages the complete historical WO-61 manifest set under a hard 50MB cap;
+the host telemetry cadence force-replaces a one-commit `vps-archive` branch
+only when the active RPO is due. `scripts/restore_from_archive.sh --dry-run`
+validates archive digests and runs WO-61 prefix verification through the
+snapshot date before any apply. Paper RPO is 168h, with a fail-closed <=24h
+obligation when a live wallet/mode is configured. Failures are stamped into
+telemetry-visible status; recovery instructions live in `docs/RESTORE.md`.
+
 One VPS is one lightning strike away from an unprovable track record.
 
 Spec:

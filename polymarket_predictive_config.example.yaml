@@ -230,6 +230,23 @@ ledger_anchor:
     - {glob: performance/cost_ledger.csv, mode: append_only}
     - {glob: performance/cost_ledger_summary.json, mode: snapshot}
 
+# 2026-07-11 WO-65: weekly, ledger-only disaster-recovery snapshot. The active
+# paper-stage RPO is 7 days and the compressed archive is capped at 50MB.
+# BEFORE any wallet/live capital is configured, active_rpo_hours MUST be
+# tightened to <=24 with a dated config change; code fails closed otherwise.
+disaster_recovery:
+  enabled: true
+  archive_file: performance/ledger_state_archive.tar.gz
+  archive_manifest_file: performance/ledger_state_archive_manifest.json
+  status_file: performance/disaster_recovery_status.json
+  restore_status_file: performance/restore_verification_status.json
+  archive_branch: vps-archive
+  size_cap_mb: 50
+  active_rpo_hours: 168
+  paper_stage_max_rpo_hours: 168
+  pre_live_max_rpo_hours: 24
+  lock_stale_seconds: 3600
+
 # 2026-07-11 WO-64: generate the investment policy directly from frozen code
 # constants plus the loaded effective VPS configuration. Reporting only; no
 # gate, sizing rule, broker, or order path reads the output.

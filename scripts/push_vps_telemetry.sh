@@ -40,6 +40,14 @@ if [ "${VPS_TELEMETRY_PUSH_ANCHOR:-true}" != "false" ] && [ -f "$ANCHOR_SCRIPT" 
   VPS_ANCHOR_REPO_DIR="$REPO_DIR" sh "$ANCHOR_SCRIPT" || true
 fi
 
+# WO-65: the existing host telemetry cadence also checks the active archive
+# RPO. The sibling script builds only when due, force-replaces the bounded
+# vps-archive branch, and stamps every failure before telemetry is collected.
+ARCHIVE_SCRIPT="$REPO_DIR/scripts/push_vps_archive.sh"
+if [ "${VPS_TELEMETRY_PUSH_ARCHIVE:-true}" != "false" ] && [ -f "$ARCHIVE_SCRIPT" ]; then
+  VPS_ARCHIVE_REPO_DIR="$REPO_DIR" sh "$ARCHIVE_SCRIPT" || true
+fi
+
 # mkdir is atomic: poor-man's flock that works on any POSIX sh.
 if ! mkdir "$LOCK_DIR" 2>/dev/null; then
   echo "another telemetry push is running; skipping" >&2

@@ -36,6 +36,7 @@ from .goal_planner import build_goal_plan
 from .governance import governance_report
 from .historical_backfill import historical_backfill
 from .hourly_adverse_study import run_hourly_adverse_study
+from .ips_render import render_ips
 from .labels import build_labels
 from .ledger_anchor import anchor_ledgers, verify_ledger_chain
 from .live_mispricing import run_live_mispricing, scan_live_mispricing
@@ -118,6 +119,7 @@ COMMANDS = [
     "performance-factsheet",
     "anchor-ledgers",
     "verify-ledger-chain",
+    "render-ips",
     "hourly-adverse-study",
     "scan-event-groups",
     "scan-implication-networks",
@@ -322,6 +324,8 @@ def main(argv: list[str] | None = None) -> int:
             _print(anchor_ledgers(cfg))
         elif args.command == "verify-ledger-chain":
             _print(verify_ledger_chain(cfg, as_of_date=args.as_of_date))
+        elif args.command == "render-ips":
+            _print(render_ips(cfg))
         elif args.command == "hourly-adverse-study":
             _print(run_hourly_adverse_study(cfg))
         elif args.command == "scan-event-groups":

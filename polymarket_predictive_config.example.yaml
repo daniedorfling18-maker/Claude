@@ -221,6 +221,16 @@ ledger_anchor:
     - {glob: maker_carry/maker_carry_history.csv, mode: append_only}
     - {glob: maker_carry/maker_live_test_history.csv, mode: append_only}
     - {glob: maker_carry/decision_policy.json, mode: snapshot}
+    - {glob: performance/investment_policy_statement.md, mode: snapshot}
+    - {glob: performance/investment_policy_statement_summary.json, mode: snapshot}
+
+# 2026-07-11 WO-64: generate the investment policy directly from frozen code
+# constants plus the loaded effective VPS configuration. Reporting only; no
+# gate, sizing rule, broker, or order path reads the output.
+ips_render:
+  enabled: true
+  output_file: performance/investment_policy_statement.md
+  summary_file: performance/investment_policy_statement_summary.json
 
 # 2026-07-10 WO-52: hourly adverse-selection concentration study. Advisory
 # only; does not alter maker adverse charges, M-gates, sizing, or orders.

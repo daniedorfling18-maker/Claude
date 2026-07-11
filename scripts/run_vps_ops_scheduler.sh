@@ -280,13 +280,16 @@ run_training_harvest() {
     # WO-60 evidence-classed performance factsheet. Packaging/reporting only;
     # no gate, sizing rule, policy, broker, or order path reads it.
     timeout "$HARVEST_TIMEOUT" python -m polymarket_predictive_engine.cli performance-factsheet --config "$CONFIG_PATH"
+    # WO-64 code-generated investment policy statement. Reads current policy,
+    # risk, and capacity artifacts for reporting only.
+    timeout "$HARVEST_TIMEOUT" python -m polymarket_predictive_engine.cli render-ips --config "$CONFIG_PATH"
     # WO-61 tamper-evident ledger chain. Prefix hashes are generated only after
     # the daily evidence writers finish. The existing host telemetry pusher
     # then timestamps the head on vps-anchor (the container has no Git metadata).
     timeout "$HARVEST_TIMEOUT" python -m polymarket_predictive_engine.cli anchor-ledgers --config "$CONFIG_PATH"
   ) >> "$LOG_FILE" 2>&1
   CODE=$?
-  stamp_status training_harvest "$CODE" "gamma resolved-markets backfill + clob price histories + wallet intelligence + maker-carry study + deep trade-print backfill + maker-fill replay + flow toxicity + decision policy + reconstructed CLV study + calibration-bias study + martingale drift scan + performance factsheet + ledger anchor"
+  stamp_status training_harvest "$CODE" "gamma resolved-markets backfill + clob price histories + wallet intelligence + maker-carry study + deep trade-print backfill + maker-fill replay + flow toxicity + decision policy + reconstructed CLV study + calibration-bias study + martingale drift scan + performance factsheet + investment policy statement + ledger anchor"
   log "training_harvest: exit $CODE"
 }
 

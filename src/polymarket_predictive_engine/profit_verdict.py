@@ -40,6 +40,7 @@ baskets across the whole snapshot ledger) and crypto up/down intraday
 (frozen after the execution-cost audit) are both NO independently of the
 gates above.
 """
+
 from __future__ import annotations
 
 import re
@@ -136,6 +137,73 @@ REGISTERED_EXTENSION_PROTOCOL = {
     ),
 }
 
+VERDICT_GATE_DEFINITIONS: list[dict[str, Any]] = [
+    {
+        "id": "A_edge_exists",
+        "rule": "Use equal-weight independent fixture units; pass only with positive mean final CLV and the registered one-sided sign-test threshold after the sample floor.",
+        "setting_keys": ["minimum_final_samples", "sign_test_alpha"],
+    },
+    {
+        "id": "B_edge_survives_costs",
+        "rule": "Pass only when final CLV remains positive after the exit, adverse-selection, and taker-fee charges.",
+        "setting_keys": [
+            "exit_cost_haircut_per_dollar",
+            "adverse_selection_haircut_per_dollar",
+            "taker_fee_rate",
+        ],
+    },
+    {
+        "id": "C_scale_feasible",
+        "rule": "Pass only when observed focus-entry capacity at the registered per-trade cap can fund the monthly target turnover.",
+        "setting_keys": ["max_stake_per_trade_usdc", "days_per_month"],
+    },
+]
+
+REGISTERED_AMENDMENTS: list[dict[str, Any]] = [
+    {
+        "number": 1,
+        "registered_at_utc": REGISTERED_AMENDMENTS_AT_UTC,
+        "effect": "Gate A clusters correlated finals into one market-level unit before sample counting and the sign test.",
+        "direction": "tighten_only",
+    },
+    {
+        "number": 2,
+        "registered_at_utc": REGISTERED_AMENDMENTS_AT_UTC,
+        "effect": "Gate B adds an adverse-selection haircut for preferential real-world fills absent from shadow execution.",
+        "direction": "tighten_only",
+    },
+    {
+        "number": 3,
+        "registered_at_utc": REGISTERED_AMENDMENTS_AT_UTC,
+        "effect": "Gate C labels the World Cup liquidity regime and requires an underpowered read to extend rather than resolve.",
+        "direction": "tighten_only",
+    },
+    {
+        "number": 4,
+        "registered_at_utc": REGISTERED_AMENDMENTS_AT_UTC,
+        "effect": "Gate B charges the actual outcome-price-dependent Polymarket taker fee.",
+        "direction": "tighten_only",
+    },
+    {
+        "number": 5,
+        "registered_at_utc": REGISTERED_AMENDMENTS_AT_UTC,
+        "effect": "Gate A transitively merges markets sharing a real-world fixture so side markets cannot inflate independence.",
+        "direction": "tighten_only",
+    },
+    {
+        "number": 6,
+        "registered_at_utc": "2026-07-10T00:00:00Z",
+        "effect": "The registered sports taker-fee rate increases from 0.03 to 0.05 under the canonical venue fee schedule.",
+        "direction": "tighten_only",
+    },
+    {
+        "number": 7,
+        "registered_at_utc": str(REGISTERED_EXTENSION_PROTOCOL["registered_at_utc"]),
+        "effect": "The evidence window may extend exactly once through 2026-08-19, after which the verdict resolves terminally.",
+        "direction": "tighten_only",
+    },
+]
+
 
 def _settings(cfg: EngineConfig) -> dict[str, Any]:
     raw = cfg.raw.get("profit_verdict", {}) if isinstance(cfg.raw.get("profit_verdict"), dict) else {}
@@ -144,12 +212,20 @@ def _settings(cfg: EngineConfig) -> dict[str, Any]:
     return merged
 
 
+def effective_verdict_settings(cfg: EngineConfig) -> dict[str, Any]:
+    return _settings(cfg)
+
+
+def verdict_gate_definition(gate_id: str) -> dict[str, Any]:
+    return next(row for row in VERDICT_GATE_DEFINITIONS if row["id"] == gate_id)
+
+
 def _sign_test_p(successes: int, trials: int) -> float | None:
     """One-sided exact binomial P(X >= successes) under p=0.5."""
     if trials <= 0 or successes < 0 or successes > trials:
         return None
     total = sum(comb(trials, k) for k in range(successes, trials + 1))
-    return total / (2 ** trials)
+    return total / (2**trials)
 
 
 def _entries_per_day(positions_path: Path, diagnostic_substrings: list[str]) -> tuple[float | None, int, float | None]:
@@ -185,12 +261,7 @@ def _fixture_tags(row: dict[str, Any]) -> set[str]:
     question = str(row.get("question") or "")
     slug = str(row.get("market_slug") or "")
     teams: set[str] = set()
-    pair = (
-        _match_subject_from_question(question)
-        or _event_teams_from_question(question)
-        or _event_teams_from_text(question)
-        or _event_teams_from_text(slug)
-    )
+    pair = _match_subject_from_question(question) or _event_teams_from_question(question) or _event_teams_from_text(question) or _event_teams_from_text(slug)
     if pair:
         teams.update(pair)
     single = re.match(r"^will\s+(.+?)\s+(?:win|advance|qualify|beat|defeat)\b", question.strip().lower())
@@ -199,9 +270,7 @@ def _fixture_tags(row: dict[str, Any]) -> set[str]:
     return {f"{_team_key(team)}:{day}" for team in teams if _team_key(team)}
 
 
-def _clustered_focus_finals(
-    cfg: EngineConfig, diagnostic_substrings: list[str], taker_fee_rate: float
-) -> dict[str, list[tuple[float, float]]]:
+def _clustered_focus_finals(cfg: EngineConfig, diagnostic_substrings: list[str], taker_fee_rate: float) -> dict[str, list[tuple[float, float]]]:
     """Settled focus finals grouped into independent fixture-level units.
 
     Reads the append-only final history ledger; excludes frozen diagnostic
@@ -256,7 +325,7 @@ def _clustered_focus_finals(
 
 
 def build_profit_verdict(cfg: EngineConfig) -> dict[str, Any]:
-    settings = _settings(cfg)
+    settings = effective_verdict_settings(cfg)
     target = safe_float((cfg.raw.get("profit_tracking", {}) or {}).get("target_monthly_profit_usdc")) or 100.0
     clv_summary = read_json(cfg.governance_root / "closing_line_value.json", default={}) or {}
     focus = clv_summary.get("focus_view", {}) if isinstance(clv_summary.get("focus_view"), dict) else {}
@@ -269,9 +338,7 @@ def build_profit_verdict(cfg: EngineConfig) -> dict[str, Any]:
     haircut = exit_haircut + adverse_haircut
 
     diagnostic_substrings = [
-        str(sub).lower().strip()
-        for sub in (focus.get("diagnostic_cohort_substrings") or ["updown", "up_down", "up-down"])
-        if str(sub).strip()
+        str(sub).lower().strip() for sub in (focus.get("diagnostic_cohort_substrings") or ["updown", "up_down", "up-down"]) if str(sub).strip()
     ]
 
     taker_fee_rate = float(settings["taker_fee_rate"])
@@ -291,10 +358,7 @@ def build_profit_verdict(cfg: EngineConfig) -> dict[str, Any]:
     sign_p = _sign_test_p(beaten_units, n_units) if n_units else None
     if n_units < minimum_samples:
         gate_a = "pending"
-        gate_a_reason = (
-            f"{n_units}/{minimum_samples} independent settled market units "
-            f"({finals_total} finals); verdict needs the unit floor."
-        )
+        gate_a_reason = f"{n_units}/{minimum_samples} independent settled market units ({finals_total} finals); verdict needs the unit floor."
     elif mean_final_clv is None or mean_final_clv <= 0:
         gate_a = "fail"
         gate_a_reason = (
@@ -304,8 +368,7 @@ def build_profit_verdict(cfg: EngineConfig) -> dict[str, Any]:
     elif sign_p is not None and sign_p <= alpha:
         gate_a = "pass"
         gate_a_reason = (
-            f"unit mean final CLV {mean_final_clv} > 0 with sign-test p={round(sign_p, 4)} <= {alpha} "
-            f"on {beaten_units}/{n_units} independent market units."
+            f"unit mean final CLV {mean_final_clv} > 0 with sign-test p={round(sign_p, 4)} <= {alpha} on {beaten_units}/{n_units} independent market units."
         )
     else:
         gate_a = "pending"
@@ -332,17 +395,13 @@ def build_profit_verdict(cfg: EngineConfig) -> dict[str, Any]:
         gate_b_reason = "evaluated only after Gate A passes."
 
     # Gate C - scale feasibility.
-    entries_per_day, focus_entries_seen, observed_span_days = _entries_per_day(
-        cfg.governance_root / "closing_line_value_positions.csv", diagnostic_substrings
-    )
+    entries_per_day, focus_entries_seen, observed_span_days = _entries_per_day(cfg.governance_root / "closing_line_value_positions.csv", diagnostic_substrings)
     required_turnover: float | None = None
     achievable_turnover: float | None = None
     if gate_b == "pass" and net_edge_per_dollar and net_edge_per_dollar > 0:
         required_turnover = target / net_edge_per_dollar
         if entries_per_day is not None:
-            achievable_turnover = (
-                entries_per_day * float(settings["max_stake_per_trade_usdc"]) * float(settings["days_per_month"])
-            )
+            achievable_turnover = entries_per_day * float(settings["max_stake_per_trade_usdc"]) * float(settings["days_per_month"])
             gate_c = "pass" if achievable_turnover >= required_turnover else "fail"
             gate_c_reason = (
                 f"required ${round(required_turnover, 2)}/month vs achievable "
@@ -372,6 +431,7 @@ def build_profit_verdict(cfg: EngineConfig) -> dict[str, Any]:
         "target_monthly_profit_usdc": target,
         "gates": {
             "A_edge_exists": {
+                "registered_rule": verdict_gate_definition("A_edge_exists")["rule"],
                 "state": gate_a,
                 "reason": gate_a_reason,
                 "independent_market_units": n_units,
@@ -384,6 +444,7 @@ def build_profit_verdict(cfg: EngineConfig) -> dict[str, Any]:
                 "note": "units cluster finals by market AND merge markets sharing a fixture (team + settlement date), so neither correlated tokens nor same-match side markets can inflate significance.",
             },
             "B_edge_survives_costs": {
+                "registered_rule": verdict_gate_definition("B_edge_survives_costs")["rule"],
                 "state": gate_b,
                 "reason": gate_b_reason,
                 "exit_cost_haircut_per_dollar": exit_haircut,
@@ -394,6 +455,7 @@ def build_profit_verdict(cfg: EngineConfig) -> dict[str, Any]:
                 "note": "entry-side costs are embedded in shadow fills; adverse-selection charge covers fill-quality bias shadow entries cannot experience; taker fees per live Polymarket fee schedule (makers pay none - see WO-36).",
             },
             "C_scale_feasible": {
+                "registered_rule": verdict_gate_definition("C_scale_feasible")["rule"],
                 "state": gate_c,
                 "reason": gate_c_reason,
                 "regime": "world_cup_2026_window",

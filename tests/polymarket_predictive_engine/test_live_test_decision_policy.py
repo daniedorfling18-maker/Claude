@@ -1,0 +1,312 @@
+"""WO-50 registered maker live-test decision policy tests."""
+from __future__ import annotations
+
+from pathlib import Path
+from typing import Any
+
+import yaml
+
+from polymarket_predictive_engine import live_test_decision_policy as policy
+from polymarket_predictive_engine.cli import COMMANDS
+from polymarket_predictive_engine.config import load_config
+from polymarket_predictive_engine.dashboard import render_dashboard
+from polymarket_predictive_engine.live_test_decision_policy import run_decision_policy
+from polymarket_predictive_engine.utils import read_json, write_csv, write_json
+
+
+def _config(tmp_path: Path):
+    tmp_path.mkdir(parents=True, exist_ok=True)
+    raw = yaml.safe_load(Path("polymarket_predictive_config.example.yaml").read_text(encoding="utf-8"))
+    raw["paths"]["data_root"] = str(tmp_path)
+    raw["paths"]["output_root"] = str(tmp_path / "outputs")
+    raw["paths"]["database_path"] = str(tmp_path / "work" / "paper.sqlite")
+    raw["decision_policy"] = {
+        "enabled": True,
+        "decision_date": "2026-07-20",
+        "composition_stable_days": 7,
+        "composition_required_recurrence": 4,
+        "below_target_review_runs": 7,
+        "below_target_review_threshold": 3,
+        "stage0_capital_usd": 100.0,
+        "stage1_capital_usd": 250.0,
+        "stage2_capital_usd": 500.0,
+        "stage1_min_consecutive_days": 7,
+        "stage2_additional_days": 14,
+        "stage2_reward_realisation_multiple": 0.5,
+        "kill_cumulative_net_score_usd": -25.0,
+        "kill_single_day_net_usd": -15.0,
+        "kill_fill_overrun_days": 2,
+        "fill_alert_multiple": 2.0,
+        "kelly_fraction_cap": 1.0,
+        "quarter_kelly_multiplier": 0.25,
+    }
+    path = tmp_path / "config.yaml"
+    path.write_text(yaml.safe_dump(raw), encoding="utf-8")
+    return load_config(path)
+
+
+def _out(cfg) -> Path:
+    out = cfg.output_root / "maker_carry"
+    out.mkdir(parents=True, exist_ok=True)
+    return out
+
+
+def _study(gate_a: str = "pass", gate_b: str = "pass", *, top: str = "0xm1", net: float = 5.0) -> dict[str, Any]:
+    return {
+        "status": "ok",
+        "generated_at_utc": "2026-07-19T08:00:00Z",
+        "target_net_usd_per_day": 3.33,
+        "portfolio": [
+            {
+                "condition_id": top,
+                "question": f"top market {top}",
+                "net_carry_usd_per_day": net,
+            }
+        ],
+        "portfolio_net_carry_usd_per_day": net,
+        "maker_gates": {
+            "M_A_carry_evidence": {"state": gate_a},
+            "M_B_adverse_realism": {"state": gate_b},
+        },
+        "paper_trading_invoked": False,
+        "live_trading_invoked": False,
+    }
+
+
+def _write_study(cfg, payload: dict[str, Any]) -> None:
+    write_json(_out(cfg) / "maker_carry_study.json", payload)
+
+
+def _write_carry_history(cfg, rows: list[dict[str, Any]]) -> None:
+    write_csv(
+        _out(cfg) / "maker_carry_history.csv",
+        rows,
+        fieldnames=[
+            "generated_at_utc",
+            "share_model",
+            "portfolio_net_carry_usd_per_day",
+            "top_portfolio_market",
+            "top_portfolio_question",
+        ],
+    )
+
+
+def _history(markets: list[str], *, nets: list[float] | None = None) -> list[dict[str, Any]]:
+    nets = nets or [5.0] * len(markets)
+    return [
+        {
+            "generated_at_utc": f"2026-07-{10 + idx:02d}T08:00:00Z",
+            "share_model": "published_v2",
+            "portfolio_net_carry_usd_per_day": nets[idx],
+            "top_portfolio_market": market,
+            "top_portfolio_question": f"question {market}",
+        }
+        for idx, market in enumerate(markets)
+    ]
+
+
+def _write_live_history(cfg, rows: list[dict[str, Any]]) -> None:
+    write_csv(
+        _out(cfg) / "maker_live_test_history.csv",
+        rows,
+        fieldnames=[
+            "generated_at_utc",
+            "net_score_usd",
+            "daily_net_score_usd",
+            "fills_last_24h",
+            "modelled_fills_per_day",
+            "fill_alert",
+            "fill_alert_multiple",
+            "scoreboard",
+        ],
+    )
+
+
+def _live_rows(days: int, *, net: float = 1.0, fills: float = 1.0, modelled: float = 1.0) -> list[dict[str, Any]]:
+    return [
+        {
+            "generated_at_utc": f"2026-07-{idx + 1:02d}T08:00:00Z",
+            "net_score_usd": net + idx,
+            "daily_net_score_usd": net,
+            "fills_last_24h": fills,
+            "modelled_fills_per_day": modelled,
+            "fill_alert": False,
+            "fill_alert_multiple": 2.0,
+            "scoreboard": "winning_so_far",
+        }
+        for idx in range(days)
+    ]
+
+
+def test_policy_table_stable_pass_funds_single_calmest_market(tmp_path):
+    cfg = _config(tmp_path)
+    _write_study(cfg, _study(top="0xm1"))
+    _write_carry_history(cfg, _history(["0xm1", "0xm1", "0xm2", "0xm1", "0xm3", "0xm1"]))
+
+    result = run_decision_policy(cfg)
+
+    assert result["indicated_action"] == "fund_100_min_size_single_calmest_market"
+    assert result["composition_stability"]["most_recurrent_market"] == "0xm1"
+    assert result["composition_stability"]["most_recurrent_count"] >= 4
+    assert result["paper_trading_invoked"] is False
+    assert result["live_trading_invoked"] is False
+
+
+def test_policy_table_churning_pass_halves_recurrent_market_target(tmp_path):
+    cfg = _config(tmp_path)
+    _write_study(cfg, _study(top="0xm7"))
+    _write_carry_history(cfg, _history(["0xm1", "0xm2", "0xm3", "0xm4", "0xm5", "0xm6"]))
+
+    result = run_decision_policy(cfg)
+
+    assert result["indicated_action"] == "fund_100_but_only_most_recurrent_market_half_target"
+    assert result["composition_stability"]["stable"] is False
+
+
+def test_policy_table_pending_on_registered_decision_date_defers(tmp_path, monkeypatch):
+    cfg = _config(tmp_path)
+    _write_study(cfg, _study(gate_a="pending", gate_b="pass"))
+    _write_carry_history(cfg, _history(["0xm1", "0xm1", "0xm1", "0xm1"]))
+    monkeypatch.setattr(policy, "now_utc", lambda: "2026-07-20T12:00:00Z")
+
+    result = run_decision_policy(cfg)
+
+    assert result["indicated_action"] == "defer_funding_continue_study"
+    assert result["action_reason"] == "policy_decision_date_reached_with_pending_maker_gate"
+
+
+def test_policy_table_below_target_after_gates_reachable_triggers_review(tmp_path):
+    cfg = _config(tmp_path)
+    _write_study(cfg, _study(top="0xm1", net=5.0))
+    _write_carry_history(cfg, _history(["0xm1"] * 7, nets=[2.0, 2.5, 1.0, 2.2, 5.0, 6.0, 7.0]))
+
+    result = run_decision_policy(cfg)
+
+    assert result["indicated_action"] == "maker_lane_not_supported_program_review"
+    assert result["inputs_snapshot"]["recent_below_target_runs"] == 4
+
+
+def test_ladder_promotion_arithmetic_and_stage2_reward_floor(tmp_path):
+    cfg = _config(tmp_path)
+    _write_study(cfg, _study(top="0xm1"))
+    _write_carry_history(cfg, _history(["0xm1"] * 7))
+    _write_live_history(cfg, _live_rows(7))
+
+    stage1 = run_decision_policy(cfg)
+
+    assert stage1["ladder_stage_permitted"] == 1
+    assert stage1["ladder"]["ladder_capital_usd"] == 250.0
+
+    write_csv(
+        _out(cfg) / "maker_carry_candidates.csv",
+        [{"condition_id": "0xm1", "gross_reward_usd_per_day": 4.0}],
+        fieldnames=["condition_id", "gross_reward_usd_per_day"],
+    )
+    write_json(_out(cfg) / "maker_live_test.json", {"status": "ok", "rewards_usd_total": 42.0})
+    _write_live_history(cfg, _live_rows(21))
+
+    stage2 = run_decision_policy(cfg)
+
+    assert stage2["ladder_stage_permitted"] == 2
+    assert stage2["ladder"]["ladder_capital_usd"] == 500.0
+    assert stage2["ladder"]["stage2_reward_floor_usd"] == 42.0
+
+
+def test_quarter_kelly_cap_binds_below_ladder(tmp_path):
+    cfg = _config(tmp_path)
+    _write_study(cfg, _study(top="0xm1"))
+    _write_carry_history(cfg, _history(["0xm1"] * 7, nets=[1.0, 9.0, 1.0, 9.0, 1.0, 9.0, 1.0]))
+    _write_live_history(cfg, _live_rows(7))
+
+    result = run_decision_policy(cfg)
+
+    assert result["ladder_stage_permitted"] == 1
+    assert result["sizing"]["binding_cap"] == "quarter_kelly"
+    assert result["sizing"]["binding_capital_usd"] < result["ladder"]["ladder_capital_usd"]
+
+
+def test_each_kill_criterion_trips_individually(tmp_path):
+    cases = [
+        (
+            "cumulative_real_net_score",
+            {"status": "ok", "net_score_usd": -25.0},
+            _live_rows(1, net=1.0),
+        ),
+        (
+            "single_day_net_score",
+            {"status": "ok", "net_score_usd": 1.0},
+            [{"generated_at_utc": "2026-07-01T08:00:00Z", "net_score_usd": 1.0, "daily_net_score_usd": -15.0}],
+        ),
+        (
+            "fills_outrunning_model_two_days",
+            {"status": "ok", "net_score_usd": 1.0},
+            [
+                {"generated_at_utc": "2026-07-01T08:00:00Z", "net_score_usd": 1.0, "daily_net_score_usd": 1.0, "fills_last_24h": 3.0, "modelled_fills_per_day": 1.0},
+                {"generated_at_utc": "2026-07-02T08:00:00Z", "net_score_usd": 2.0, "daily_net_score_usd": 1.0, "fills_last_24h": 3.0, "modelled_fills_per_day": 1.0},
+            ],
+        ),
+        (
+            "uma_dispute_inventory",
+            {"status": "ok", "net_score_usd": 1.0, "uma_dispute_detected": True},
+            _live_rows(1, net=1.0),
+        ),
+        (
+            "scoreboard_stop",
+            {"status": "ok", "net_score_usd": 1.0, "scoreboard": "STOP_fills_outrunning_model"},
+            _live_rows(1, net=1.0),
+        ),
+    ]
+    for name, live_test, live_rows in cases:
+        cfg = _config(tmp_path / name)
+        _write_study(cfg, _study(top="0xm1"))
+        _write_carry_history(cfg, _history(["0xm1"] * 7))
+        write_json(_out(cfg) / "maker_live_test.json", live_test)
+        _write_live_history(cfg, live_rows)
+
+        result = run_decision_policy(cfg)
+
+        assert result["indicated_action"] == "stop_quoting_review_before_resume"
+        assert result["kill_criteria_status"]["criteria"][name]["triggered"] is True
+
+
+def test_no_live_data_tolerance_and_missing_study(tmp_path):
+    cfg = _config(tmp_path)
+
+    result = run_decision_policy(cfg)
+
+    assert result["status"] == "ok"
+    assert result["indicated_action"] == "collect_maker_carry_study"
+    assert result["ladder_stage_permitted"] == 0
+    assert result["kill_criteria_status"]["status"] == "clear"
+    assert read_json(_out(cfg) / "decision_policy.json")["paper_trading_invoked"] is False
+
+
+def test_quote_sheet_patch_is_top_of_sheet_and_idempotent(tmp_path):
+    cfg = _config(tmp_path)
+    _write_study(cfg, _study(top="0xm1"))
+    _write_carry_history(cfg, _history(["0xm1"] * 7))
+    (_out(cfg) / "maker_quote_sheet.md").write_text("# Maker quote sheet\n\nExisting content\n", encoding="utf-8")
+
+    run_decision_policy(cfg)
+    run_decision_policy(cfg)
+
+    sheet = (_out(cfg) / "maker_quote_sheet.md").read_text(encoding="utf-8")
+    assert sheet.count("<!-- decision-policy:start -->") == 1
+    assert "Registered decision policy (WO-50)" in sheet
+    assert "fund_100_min_size_single_calmest_market" in sheet
+
+
+def test_cli_and_dashboard_payload_surface_decision_policy(tmp_path):
+    cfg = _config(tmp_path)
+    _write_study(cfg, _study(top="0xm1"))
+    _write_carry_history(cfg, _history(["0xm1"] * 7))
+    result = run_decision_policy(cfg)
+
+    rendered = render_dashboard(cfg)
+
+    data = read_json(cfg.output_root / "polymarket_dashboard" / "dashboard_data.json")
+    html = Path(rendered["dashboard_file"]).read_text(encoding="utf-8")
+    assert "decision-policy" in COMMANDS
+    assert data["maker_lane"]["decision_policy"]["indicated_action"] == result["indicated_action"]
+    assert "policy: " in html
+    assert "makerPolicy" in html

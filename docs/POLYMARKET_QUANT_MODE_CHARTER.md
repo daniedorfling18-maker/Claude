@@ -493,6 +493,11 @@ per-UTC-hour band-crossing charge share against a uniform reward-minute null wit
 toxic hours and a calm-hours advisory, and patches the maker quote sheet. This is advisory only and
 does not change maker charges, gates, sizing, or order paths.
 
+**2026-07-10 — WO-53 implemented by Codex.** The VPS ops scheduler now runs an intraday
+`maker-carry-study` sample on its own `maker_study_intraday` 24h stamp only when the last daily
+training harvest is 11-13 hours old. This improves maker reward-competition sampling without
+changing schemas or fast-forwarding M-A, which remains distinct-UTC-day based.
+
 **2026-07-10 — WO-42 implemented by Codex.** Calibration-bias harvesting now joins clean resolved
 markets to point-in-time pre-close prices and writes
 `outputs/calibration_bias/calibration_curve.csv` plus summary JSON. It reports category/horizon/bin

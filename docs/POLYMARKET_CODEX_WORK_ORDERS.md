@@ -1941,6 +1941,13 @@ Spec:
 
 ## WO-53 — Intraday competition sampling (second daily study run)
 
+Status: IMPLEMENTED by Codex in PR branch
+`agent/wo-53-intraday-maker-study` on 2026-07-10. The VPS ops scheduler
+now has a `maker_study_intraday` stamp and runs a second
+`maker-carry-study` only when the last `training_harvest` stamp is 11-13
+hours old. The maker-carry M-A gate remains distinct-UTC-day based, so
+same-day re-runs cannot fast-forward the verdict.
+
 The reward-share estimate reads order books once daily; per-minute reward
 sampling means the truth is the day-long average. A second run ~12h
 offset doubles trend-ledger resolution. M-A counts DISTINCT UTC DAYS, so

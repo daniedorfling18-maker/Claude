@@ -474,6 +474,7 @@ def test_gate_a_passes_only_after_enough_distinct_days_at_target(tmp_path, monke
     monkeypatch.setattr(maker_carry_study, "now_utc", lambda: "2026-07-10T08:00:00Z")
     for _ in range(7):
         same_day = run_maker_carry_study(cfg)
+    assert len(read_csv_rows(cfg.output_root / "maker_carry" / "maker_carry_history.csv")) == 7
     assert same_day["maker_gates"]["M_A_carry_evidence"]["runs_at_or_above_target"] == 1
     assert same_day["maker_gates"]["M_A_carry_evidence"]["state"] == "pending"
 

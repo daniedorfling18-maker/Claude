@@ -66,7 +66,7 @@ from .maker_carry_study import run_maker_carry_study
 from .maker_fill_replay import run_maker_fill_replay, snapshot_official_books
 from .maker_live_test import run_maker_live_test
 from .price_history_collector import collect_price_history
-from .trade_print_collector import collect_trade_prints
+from .trade_print_collector import backfill_trade_prints, collect_trade_prints
 from .wallet_intelligence_collector import collect_wallet_intelligence
 from .profit_target import reset_profit_target_baseline, write_profit_target_tracker
 from .profit_sprint import build_profit_sprint
@@ -105,6 +105,7 @@ COMMANDS = [
     "backfill-resolved-markets",
     "collect-price-history",
     "collect-trade-prints",
+    "backfill-trade-prints",
     "collect-wallet-intel",
     "maker-carry-study",
     "maker-fill-replay",
@@ -293,6 +294,8 @@ def main(argv: list[str] | None = None) -> int:
             _print(summary)
         elif args.command == "collect-trade-prints":
             _print(collect_trade_prints(cfg))
+        elif args.command == "backfill-trade-prints":
+            _print(backfill_trade_prints(cfg))
         elif args.command == "collect-wallet-intel":
             _print(collect_wallet_intelligence(cfg))
         elif args.command == "maker-carry-study":

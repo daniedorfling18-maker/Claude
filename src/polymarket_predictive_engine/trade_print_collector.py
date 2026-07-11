@@ -16,12 +16,13 @@ Collection only: no labels, no gates, no trading behaviour of any kind.
 from __future__ import annotations
 
 from pathlib import Path
+import time
 from typing import Any
 
 import requests
 
 from .config import EngineConfig, load_config
-from .utils import now_utc, read_csv_rows, safe_float, write_csv, write_json
+from .utils import now_utc, read_csv_rows, read_json, safe_float, write_csv, write_json
 
 DEFAULT_BASE_URL = "https://data-api.polymarket.com"
 
@@ -54,6 +55,11 @@ def _settings(cfg: EngineConfig) -> dict[str, Any]:
         "request_timeout_seconds": 20,
         "max_ledger_rows": 200000,
         "open_interest_enabled": True,
+        # WO-54: one-shot deep backfill for maker-study markets. Collection
+        # only; the ledger is training substrate, never a trading signal.
+        "backfill_max_prints_per_market": 5000,
+        "backfill_limit_per_page": 500,
+        "backfill_request_pause_seconds": 0.1,
     }
     merged.update({k: v for k, v in raw.items() if v is not None})
     return merged
@@ -107,6 +113,18 @@ def _payload_items(payload: Any) -> list[Any]:
         if isinstance(value, dict):
             return [value]
     return [payload]
+
+
+def _trade_items(payload: Any) -> list[Any]:
+    if isinstance(payload, list):
+        return payload
+    if not isinstance(payload, dict):
+        return []
+    for key in ("trades", "data", "results"):
+        value = payload.get(key)
+        if isinstance(value, list):
+            return value
+    return []
 
 
 def _open_interest_row(item: dict[str, Any], market: str, collected_at: str) -> dict[str, Any] | None:
@@ -261,6 +279,159 @@ def collect_trade_prints(cfg: EngineConfig) -> dict[str, Any]:
             "oi_ledger_rows": oi_ledger_rows,
             "oi_path": str(oi_path),
             "oi_errors": oi_errors[:10],
+            "errors": errors[:10],
+        }
+    )
+    write_json(summary_path, summary)
+    return summary
+
+
+def _maker_backfill_markets(cfg: EngineConfig) -> list[str]:
+    markets: dict[str, None] = {}
+    for row in read_csv_rows(cfg.output_root / "maker_carry" / "maker_carry_candidates.csv"):
+        market = str(row.get("condition_id") or row.get("market") or "").strip()
+        if market:
+            markets[market] = None
+    study = read_json(cfg.output_root / "maker_carry" / "maker_carry_study.json", default={}) or {}
+    if isinstance(study, dict):
+        portfolio = study.get("portfolio") if isinstance(study.get("portfolio"), list) else []
+        for row in portfolio:
+            if not isinstance(row, dict):
+                continue
+            market = str(row.get("condition_id") or row.get("market") or "").strip()
+            if market:
+                markets[market] = None
+    return list(markets)
+
+
+def _read_completed_backfills(path: Path) -> set[str]:
+    if not path.exists():
+        return set()
+    return {line.strip() for line in path.read_text(encoding="utf-8").splitlines() if line.strip()}
+
+
+def _write_completed_backfills(path: Path, markets: set[str]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("\n".join(sorted(markets)) + ("\n" if markets else ""), encoding="utf-8")
+
+
+def backfill_trade_prints(cfg: EngineConfig) -> dict[str, Any]:
+    """Deep one-shot trade-print backfill for maker-study markets.
+
+    This extends the same public trade-print ledger used by the rolling
+    collector. It does not label, score, gate, paper trade, or live trade.
+    """
+
+    settings = _settings(cfg)
+    ledger_path = cfg.output_root / "polymarket_trade_prints" / "trade_prints.csv"
+    stamp_path = cfg.output_root / "polymarket_trade_prints" / "backfill_completed_markets.txt"
+    summary_path = cfg.output_root / "polymarket_trade_prints" / "trade_print_backfill_summary.json"
+    summary: dict[str, Any] = {
+        "status": "disabled",
+        "generated_at_utc": now_utc(),
+        "candidate_markets": 0,
+        "markets_attempted": 0,
+        "markets_skipped_completed": 0,
+        "markets_completed": 0,
+        "new_prints": 0,
+        "ledger_rows": 0,
+        "completed_stamp": str(stamp_path),
+        "errors": [],
+        "paper_trading_invoked": False,
+        "live_trading_invoked": False,
+    }
+    if str(settings.get("enabled", True)).strip().lower() in {"0", "false", "no"}:
+        write_json(summary_path, summary)
+        return summary
+
+    candidate_markets = _maker_backfill_markets(cfg)
+    completed = _read_completed_backfills(stamp_path)
+    todo = [market for market in candidate_markets if market not in completed]
+    existing = read_csv_rows(ledger_path)
+    seen = {str(row.get("trade_id") or "") for row in existing}
+    base_url = str(settings["base_url"]).rstrip("/")
+    timeout = float(settings["request_timeout_seconds"])
+    cap = max(1, int(safe_float(settings.get("backfill_max_prints_per_market")) or 5000))
+    page_limit = max(1, int(safe_float(settings.get("backfill_limit_per_page")) or 500))
+    pause = max(0.1, float(safe_float(settings.get("backfill_request_pause_seconds")) or 0.1))
+    max_rows = int(safe_float(settings.get("max_ledger_rows")) or 0)
+    new_rows: list[dict[str, Any]] = []
+    errors: list[str] = []
+    completed_this_run: set[str] = set()
+    cap_hit_markets: list[str] = []
+
+    for market in todo:
+        fetched = 0
+        offset = 0
+        market_failed = False
+        while fetched < cap:
+            limit = min(page_limit, cap - fetched)
+            try:
+                response = requests.get(
+                    f"{base_url}/trades",
+                    params={"market": market, "limit": limit, "offset": offset},
+                    timeout=timeout,
+                )
+                response.raise_for_status()
+                payload = response.json()
+            except Exception as exc:
+                errors.append(f"{market}: {type(exc).__name__}: {exc}")
+                market_failed = True
+                break
+            trades = _trade_items(payload)
+            if not trades:
+                break
+            fetched += len(trades)
+            for trade in trades:
+                if not isinstance(trade, dict):
+                    continue
+                row = _print_row(trade, market)
+                if row is None or row["trade_id"] in seen:
+                    continue
+                seen.add(row["trade_id"])
+                new_rows.append(row)
+            time.sleep(pause)
+            if len(trades) < limit:
+                break
+            offset += limit
+        if not market_failed:
+            completed_this_run.add(market)
+            if fetched >= cap:
+                cap_hit_markets.append(market)
+
+    combined = [*existing, *new_rows]
+    if max_rows > 0 and len(combined) > max_rows:
+        overflow = combined[:-max_rows]
+        combined = combined[-max_rows:]
+        from .websocket_normaliser import _archive_expiring_features
+
+        _archive_expiring_features(
+            cfg,
+            {"training_archive_enabled": True, "training_archive_max_mb": 1024},
+            [{"collected_at_utc": row.get("collected_at_utc"), **row} for row in overflow],
+        )
+
+    completed.update(completed_this_run)
+    write_csv(ledger_path, combined, fieldnames=PRINT_FIELDS)
+    _write_completed_backfills(stamp_path, completed)
+    status = "ok"
+    if errors:
+        status = "partial" if completed_this_run or new_rows or existing else "failed"
+    elif not candidate_markets:
+        status = "no_candidate_markets"
+    elif not todo:
+        status = "skipped_all_completed"
+    summary.update(
+        {
+            "status": status,
+            "candidate_markets": len(candidate_markets),
+            "markets_attempted": len(todo),
+            "markets_skipped_completed": len(candidate_markets) - len(todo),
+            "markets_completed": len(completed_this_run),
+            "cap_hit_markets": cap_hit_markets,
+            "new_prints": len(new_rows),
+            "ledger_rows": len(combined),
+            "ledger_path": str(ledger_path),
             "errors": errors[:10],
         }
     )

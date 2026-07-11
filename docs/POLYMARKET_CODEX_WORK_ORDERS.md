@@ -2122,9 +2122,55 @@ constraint: the binding cap may only get SMALLER for the same inputs).
 Tests: shrunk cap <= inline cap on short histories; equality in the
 large-sample limit; ladder still binds when smaller.
 
+## WO-60 — Per-system performance factsheet (Sharpe, Sortino, investment stats)
+
+Fund-grade descriptive statistics for every money-shaped series the system
+produces, honestly labelled by evidence class, and packaged so that IF the
+live test ever earns real numbers, the factsheet is already accumulating
+them in presentable form.
+
+Spec:
+1. Module `performance_factsheet.py`, CLI `performance-factsheet`, config
+   `performance_factsheet:` (enabled, risk_free_rate_annual 0.0,
+   min_daily_observations 20, bootstrap_iterations 2000,
+   periods_per_year 365 - prediction markets trade every day).
+2. Series registry - one factsheet section per system:
+   a. `paper_portfolio` - last equity per UTC day from
+      `outputs/polymarket_portfolio/portfolio_snapshots.csv`;
+      evidence_class "paper".
+   b. `shadow_signal_cohorts` - per-family daily PnL from
+      `shadow_signal_cohort_pnl.csv` plus the aggregate;
+      evidence_class "shadow".
+   c. `maker_carry_model` - daily modelled net from
+      `maker_carry_history.csv`; evidence_class "modeled" (explicitly NOT
+      performance - it is a model output).
+   d. `maker_live_test` - daily net_score from the live-test history once
+      a wallet exists; evidence_class "live_real_money". The ONLY series
+      ever eligible for external presentation.
+3. Stats per series, daily granularity: n_days, span, cumulative return,
+   mean/vol of daily returns, annualised Sharpe, Sortino (downside
+   deviation vs 0), max drawdown depth AND duration, Calmar, hit rate,
+   profit factor, best/worst day, bootstrap 90% CI on the Sharpe.
+4. HONESTY GUARDS (non-negotiable):
+   - annualised figures render null with a reason when
+     n_days < min_daily_observations (a 10-day annualised Sharpe is
+     marketing, not measurement);
+   - every section stamps its evidence_class and the banner
+     "SIMULATED - paper/model results do not represent live trading"
+     on everything except live_real_money;
+   - the bootstrap CI always renders next to the point estimate.
+5. Outputs: `outputs/performance/performance_factsheet.json` +
+   `performance_factsheet.md` (the packaging artifact), a dashboard
+   section, riding the daily harvest. Constraint 8: reporting only - no
+   gate, sizing rule, or policy reads it.
+6. Tests (constraint 6): synthetic series with known Sharpe/Sortino
+   recovered within tolerance; zero-edge synthetic series yields a CI
+   covering 0; hand-built drawdown series returns exact depth/duration;
+   sample floor suppresses annualisation; evidence-class banners present.
+
 ## Priority order for Codex (updated 2026-07-11, batch 4 filed)
 
-Batch 4 in order: **WO-58 -> WO-56 -> WO-57 -> WO-59** (58 is a
+Batch 4 in order: **WO-58 -> WO-56 -> WO-57 -> WO-59 -> WO-60** (58 is a
 five-line unblock for the toxicity lane; 56 changes what tomorrow's runs
 measure, so it should land before more days accrue; 57 feeds the Jul 20
 judgment; 59 must land before any funding stage could ever bind). Then

@@ -204,6 +204,24 @@ performance_factsheet:
   bootstrap_seed: 20260711
   periods_per_year: 365
 
+# 2026-07-11 WO-61: daily tamper-evident prefix hashes for the investor-facing
+# ledger set. Reporting infrastructure only; no gate, sizing rule, policy,
+# broker, or order path reads it. State tables that are legitimately rewritten
+# use immutable daily snapshots; every other enrolled file is prefix-verified.
+ledger_anchor:
+  enabled: true
+  external_anchor_branch: vps-anchor
+  ledger_globs:
+    - {glob: polymarket_portfolio/portfolio_snapshots.csv, mode: append_only}
+    - {glob: polymarket_portfolio/cash_ledger.csv, mode: append_only}
+    - {glob: polymarket_portfolio/paper_fills.csv, mode: append_only}
+    - {glob: polymarket_portfolio/settlements.csv, mode: append_only}
+    - {glob: polymarket_shadow/shadow_positions.csv, mode: snapshot}
+    - {glob: polymarket_shadow/shadow_fills.csv, mode: append_only}
+    - {glob: maker_carry/maker_carry_history.csv, mode: append_only}
+    - {glob: maker_carry/maker_live_test_history.csv, mode: append_only}
+    - {glob: maker_carry/decision_policy.json, mode: snapshot}
+
 # 2026-07-10 WO-52: hourly adverse-selection concentration study. Advisory
 # only; does not alter maker adverse charges, M-gates, sizing, or orders.
 hourly_adverse:

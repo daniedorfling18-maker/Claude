@@ -32,6 +32,14 @@ LOCK_DIR="${TMPDIR:-/tmp}/push_vps_telemetry.lock"
 GIT_DIR="$REPO_DIR/.git"
 [ -d "$GIT_DIR" ] || { echo "no git repo at $REPO_DIR" >&2; exit 0; }
 
+# WO-61: this script already runs from the HOST (where .git credentials live),
+# while the daily harvest runs inside a container without Git metadata. Push
+# any pending daily chain head to the dedicated append-only branch first.
+ANCHOR_SCRIPT="$REPO_DIR/scripts/push_vps_anchor.sh"
+if [ "${VPS_TELEMETRY_PUSH_ANCHOR:-true}" != "false" ] && [ -f "$ANCHOR_SCRIPT" ]; then
+  VPS_ANCHOR_REPO_DIR="$REPO_DIR" sh "$ANCHOR_SCRIPT" || true
+fi
+
 # mkdir is atomic: poor-man's flock that works on any POSIX sh.
 if ! mkdir "$LOCK_DIR" 2>/dev/null; then
   echo "another telemetry push is running; skipping" >&2
@@ -61,6 +69,7 @@ outputs/drift_scan
 outputs/event_group_consistency
 outputs/reconstructed_signal_clv
 outputs/polymarket_shadow
+outputs/performance
 "
 
 copy_capped() {

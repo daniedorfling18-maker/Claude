@@ -15,7 +15,7 @@ flowchart TD
         SB[SuperBru]
     end
     subgraph VPS
-        LOOP[paper-live loop<br/>collector + models + governance<br/>~95% CPU, capped 3 cores]
+        LOOP[paper-live loop<br/>collector + models + governance<br/>~95% CPU, cpu_shares soft priority (host: 1 vCPU)]
         SCHED[ops scheduler<br/>13 daily/15-min lanes]
         DASH[dashboard :8765]
         WATCH[superbru watchdog]
@@ -84,7 +84,7 @@ prior audit said this in different words; the map shows it structurally.
 |---|---|---|
 | One VPS | all collection + runtime | Telemetry preserves decisions; WO-65 archives full ledgers; restore runbook |
 | Gamma as settlement-truth source | grading pipeline | Price-history fallback live; WO-47 adds websocket resolution events (second source) |
-| Collector-computer coupling (one process) | collection gaps on compute crash | Fail-closed restarts + CPU cap; revisit only if restarts recur at the cap |
+| Collector-computer coupling (one process) | collection gaps on compute crash | Fail-closed restarts + cpu_shares soft priority (host is 1 vCPU; hard caps meaningless); revisit if restarts persist |
 | Orchestrator context | continuity of judgment | Charter + WO docs + this map are the durable memory; sessions are disposable |
 | Self-merge (author=reviewer=merger) | code defects reaching main | Acceptable at $0 live; **must add independent review before live capital** |
 | SA→Polymarket access assumption | the entire live branch | UNVERIFIED. The $10 deposit test resolves it |

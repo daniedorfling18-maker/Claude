@@ -2118,6 +2118,12 @@ tolerance stays, parsed rows land in the ledger.
 
 ## WO-59 — Patch: WO-50 Kelly overlay tightening (dated)
 
+Status: IMPLEMENTED by Codex on 2026-07-11. The advisory decision policy now
+routes its existing inline quarter-Kelly ceiling through
+`risk.shrunk_kelly_fraction`, shrinking toward no edge until 20 distinct daily
+observations. The ladder, registered policy table, gates, and order paths are
+unchanged.
+
 `live_test_decision_policy._quarter_kelly_cap` inlines plain quarter-Kelly
 (mean/std^2 x 0.25). The registered policy says the overlay uses the
 EXISTING uncertainty-shrunk Kelly module (`risk.shrunk_kelly_fraction`

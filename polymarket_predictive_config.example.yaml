@@ -190,6 +190,9 @@ decision_policy:
   fill_alert_multiple: 2.0
   kelly_fraction_cap: 1.0
   quarter_kelly_multiplier: 0.25
+  # 2026-07-11 WO-59 tighten-only: shrink the advisory Kelly ceiling toward
+  # no edge until 20 distinct daily observations. Values below 20 are clamped.
+  kelly_full_weight_days: 20
 
 # 2026-07-10 WO-52: hourly adverse-selection concentration study. Advisory
 # only; does not alter maker adverse charges, M-gates, sizing, or orders.

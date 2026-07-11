@@ -203,6 +203,11 @@ def test_vps_ops_scheduler_replaces_github_side_jobs():
     # consistency scan at print cadence (persistence needs frequency).
     assert "maker-carry-study" in script
     assert "decision-policy" in script
+    assert "maker_study_intraday" in script
+    assert "OPS_MAKER_STUDY_INTRADAY_INTERVAL_SECONDS" in script
+    assert "OPS_MAKER_STUDY_INTRADAY_OFFSET_MIN_SECONDS" in script
+    assert "OPS_MAKER_STUDY_INTRADAY_OFFSET_MAX_SECONDS" in script
+    assert "11-13h offset guard" in script
     assert "scan-event-groups" in script
     assert "maker-live-test" in script  # WO-36 step 4 scoreboard, inert without a wallet
 

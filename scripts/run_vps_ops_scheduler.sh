@@ -25,6 +25,9 @@ CLV_INTERVAL="${OPS_CLV_SNAPSHOT_INTERVAL_SECONDS:-28800}"
 CARD_INTERVAL="${OPS_CARD_REFRESH_INTERVAL_SECONDS:-43200}"
 HARVEST_INTERVAL="${OPS_TRAINING_HARVEST_INTERVAL_SECONDS:-86400}"
 HARVEST_TIMEOUT="${OPS_TRAINING_HARVEST_TIMEOUT_SECONDS:-1800}"
+MAKER_STUDY_INTRADAY_INTERVAL="${OPS_MAKER_STUDY_INTRADAY_INTERVAL_SECONDS:-86400}"
+MAKER_STUDY_INTRADAY_OFFSET_MIN="${OPS_MAKER_STUDY_INTRADAY_OFFSET_MIN_SECONDS:-39600}"
+MAKER_STUDY_INTRADAY_OFFSET_MAX="${OPS_MAKER_STUDY_INTRADAY_OFFSET_MAX_SECONDS:-46800}"
 PRINTS_INTERVAL="${OPS_TRADE_PRINTS_INTERVAL_SECONDS:-900}"
 PRINTS_TIMEOUT="${OPS_TRADE_PRINTS_TIMEOUT_SECONDS:-300}"
 GOVERNANCE_TIMEOUT="${OPS_GOVERNANCE_TIMEOUT_SECONDS:-1500}"
@@ -277,6 +280,18 @@ run_training_harvest() {
   log "training_harvest: exit $CODE"
 }
 
+run_maker_study_intraday() {
+  # WO-53: a second maker-carry snapshot ~12h after the daily harvest samples
+  # intraday competition without fast-forwarding M-A, because M-A counts
+  # distinct UTC days in maker_carry_study.py.
+  TRAINING_AGE="$(seconds_since_stamp training_harvest)"
+  log "maker_study_intraday: starting (training_harvest_age=${TRAINING_AGE}s)"
+  timeout "$HARVEST_TIMEOUT" python -m polymarket_predictive_engine.cli maker-carry-study --config "$CONFIG_PATH" >> "$LOG_FILE" 2>&1
+  CODE=$?
+  stamp_status maker_study_intraday "$CODE" "intraday maker-carry-study; training_harvest_age=${TRAINING_AGE}s; 11-13h offset guard"
+  log "maker_study_intraday: exit $CODE"
+}
+
 run_trade_prints() {
   # Public data-API, no key, no odds credits: executed trades (price/size/side)
   # for the markets the websocket collector already tracks. Signed flow is
@@ -319,6 +334,13 @@ while :; do
   if [ "$(seconds_since_stamp training_harvest)" -ge "$HARVEST_INTERVAL" ]; then
     touch_stamp training_harvest
     run_training_harvest
+  fi
+  if [ "$(seconds_since_stamp maker_study_intraday)" -ge "$MAKER_STUDY_INTRADAY_INTERVAL" ]; then
+    TRAINING_AGE="$(seconds_since_stamp training_harvest)"
+    if [ "$TRAINING_AGE" -ge "$MAKER_STUDY_INTRADAY_OFFSET_MIN" ] && [ "$TRAINING_AGE" -le "$MAKER_STUDY_INTRADAY_OFFSET_MAX" ]; then
+      touch_stamp maker_study_intraday
+      run_maker_study_intraday
+    fi
   fi
   if [ "$(seconds_since_stamp trade_prints)" -ge "$PRINTS_INTERVAL" ]; then
     touch_stamp trade_prints

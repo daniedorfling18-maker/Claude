@@ -1818,6 +1818,14 @@ Constraints 1-8 bind. One WO per PR.
 
 ## WO-50 — Live-test decision policy engine (policy FROZEN in this order)
 
+Status: IMPLEMENTED by Codex in PR branch
+`agent/wo-50-decision-policy` on 2026-07-10. New CLI
+`decision-policy` writes `outputs/maker_carry/decision_policy.json`,
+patches the maker quote sheet with the registered action indication, rides
+the VPS daily harvest, and surfaces the indicated-action badge in the maker
+dashboard panel. The output remains advisory only and explicitly records
+`paper_trading_invoked=false` and `live_trading_invoked=false`.
+
 Converts the July 16-20 evidence into pre-committed action, removing
 decision-under-influence risk. The policy constants below are REGISTERED at
 filing time (2026-07-10); Codex mechanizes evaluation and display. Changes
@@ -1866,6 +1874,13 @@ Spec:
    individually; no-live-data tolerance.
 
 ## WO-51 — Resolution-risk screen for quoted markets
+
+Status: IMPLEMENTED by Codex in PR branch
+`agent/wo-51-resolution-risk` on 2026-07-10. `maker_carry_study.py`
+now classifies candidate resolution risk, escalates low-risk classes to
+medium when the resolved corpus shows insufficient clean settlement share,
+excludes high-risk wording from the quote portfolio, and adds a
+resolution-risk column plus standing rule 9 to the maker quote sheet.
 
 A maker holding inventory through a DISPUTED UMA resolution loses weeks of
 carry at once. Resolution risk is screenable: objective-source questions

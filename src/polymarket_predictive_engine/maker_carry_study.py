@@ -65,6 +65,7 @@ placement of any kind. The live-trading gates in AGENTS.md are untouched.
 from __future__ import annotations
 
 import json
+import re
 import time
 from pathlib import Path
 from typing import Any
@@ -86,6 +87,23 @@ EVENT_RISK_KEYWORDS = (
     "fed", "rate", "cpi", "meeting", "announce", "decision", "election",
     "vote", "jobs report", "opec", "earnings",
 )
+
+RESOLUTION_HIGH_KEYWORDS = (
+    "announce",
+    "announcement",
+    "officially",
+    "deal",
+    "agreement",
+    "ceasefire",
+    "blockade",
+    "considers",
+    "attempts",
+    "intends",
+    "meeting",
+    "talks",
+)
+RESOLUTION_CORPUS_SAMPLE_FLOOR = 50
+RESOLUTION_MIN_CLEAN_SHARE = 0.90
 
 CANDIDATE_FIELDS = [
     "question",
@@ -121,6 +139,11 @@ CANDIDATE_FIELDS = [
     "supplementary_rebate_usd_per_day",
     "supplementary_holding_usd_per_day",
     "supplementary_income_usd_per_day",
+    "resolution_risk",
+    "resolution_risk_class",
+    "resolution_risk_reason",
+    "resolution_risk_sample_markets",
+    "resolution_risk_clean_share",
     "net_carry_usd_per_day",
     "capital_usd",
     "estimate_quality",
@@ -187,6 +210,122 @@ def _live_pot_usd(market: dict[str, Any], today: str) -> float:
         if rate > 0 and (not end_date or end_date >= today):
             total += rate
     return total
+
+
+def _word_in(text: str, word: str) -> bool:
+    return bool(re.search(rf"\b{re.escape(word)}\b", text))
+
+
+def _base_resolution_class(question: str) -> dict[str, str]:
+    """Classify objective resolution risk from the market wording alone.
+
+    The order is intentional: specific objective classes win before broad
+    subjective/high-risk words such as "meeting" or "decision" fire. Corpus
+    evidence may later escalate LOW to MEDIUM, never downgrade it.
+    """
+
+    text = re.sub(r"[^a-z0-9$%.]+", " ", str(question or "").lower()).strip()
+    if (
+        ("fed" in text or "fomc" in text or "federal reserve" in text)
+        and any(token in text for token in ("rate", "interest", "hike", "cut", "hold", "no change", "decision"))
+    ):
+        return {
+            "resolution_risk": "low",
+            "resolution_risk_class": "fed_rate_decision",
+            "resolution_risk_reason": "objective Fed/rate decision wording",
+        }
+    if (
+        any(token in text for token in ("match", "game"))
+        and any(token in text for token in ("winner", "win", "beat", "defeat"))
+    ):
+        return {
+            "resolution_risk": "low",
+            "resolution_risk_class": "match_game_winner",
+            "resolution_risk_reason": "objective match/game winner wording",
+        }
+    if (
+        any(token in text for token in ("above", "below", "over", "under"))
+        and re.search(r"\d", text)
+        and any(token in text for token in ("close", "closing", "end", "finish", "price"))
+    ):
+        return {
+            "resolution_risk": "low",
+            "resolution_risk_class": "numeric_close_above_below",
+            "resolution_risk_reason": "objective numeric close above/below wording",
+        }
+    if "election" in text and any(token in text for token in ("result", "winner", "win")):
+        return {
+            "resolution_risk": "low",
+            "resolution_risk_class": "official_election_result",
+            "resolution_risk_reason": "objective election result wording",
+        }
+    for keyword in RESOLUTION_HIGH_KEYWORDS:
+        if _word_in(text, keyword):
+            return {
+                "resolution_risk": "high",
+                "resolution_risk_class": f"subjective_{keyword}",
+                "resolution_risk_reason": f"subjective/dispute-prone wording contains '{keyword}'",
+            }
+    return {
+        "resolution_risk": "medium",
+        "resolution_risk_class": "other",
+        "resolution_risk_reason": "no pre-registered low/high resolution-risk keyword class matched",
+    }
+
+
+def _resolution_quality_class_stats(cfg: EngineConfig) -> dict[str, dict[str, float]]:
+    rows = read_csv_rows(cfg.governance_root / "resolution_quality_report.csv")
+    by_class: dict[str, dict[str, float]] = {}
+    seen: set[str] = set()
+    for row in rows:
+        quality = str(row.get("resolution_quality") or "").strip().lower()
+        if not quality or quality == "unresolved_active":
+            continue
+        text = str(row.get("question") or row.get("market_slug") or row.get("condition_id") or "")
+        if not text:
+            continue
+        key = str(row.get("market_slug") or row.get("condition_id") or text)
+        if key in seen:
+            continue
+        seen.add(key)
+        class_name = _base_resolution_class(text)["resolution_risk_class"]
+        bucket = by_class.setdefault(class_name, {"markets": 0.0, "clean": 0.0})
+        bucket["markets"] += 1
+        if quality == "clean_settlement":
+            bucket["clean"] += 1
+    for bucket in by_class.values():
+        markets = max(bucket["markets"], 1.0)
+        bucket["clean_share"] = bucket["clean"] / markets
+    return by_class
+
+
+def _resolution_risk_for_question(
+    question: str,
+    class_stats: dict[str, dict[str, float]] | None = None,
+) -> dict[str, Any]:
+    base = _base_resolution_class(question)
+    stats = (class_stats or {}).get(str(base["resolution_risk_class"]), {})
+    sample = int(stats.get("markets", 0) or 0)
+    clean_share = stats.get("clean_share")
+    if (
+        base["resolution_risk"] == "low"
+        and sample >= RESOLUTION_CORPUS_SAMPLE_FLOOR
+        and clean_share is not None
+        and float(clean_share) < RESOLUTION_MIN_CLEAN_SHARE
+    ):
+        base = {
+            **base,
+            "resolution_risk": "medium",
+            "resolution_risk_reason": (
+                f"{base['resolution_risk_reason']}; escalated by corpus clean-settlement share "
+                f"{float(clean_share):.3f} over {sample} markets"
+            ),
+        }
+    return {
+        **base,
+        "resolution_risk_sample_markets": sample,
+        "resolution_risk_clean_share": "" if clean_share is None else round(float(clean_share), 4),
+    }
 
 
 def _token_ids(market: dict[str, Any]) -> list[str]:
@@ -737,10 +876,12 @@ def run_maker_carry_study(cfg: EngineConfig) -> dict[str, Any]:
     universe, errors = _rewarded_universe(settings)
     pause = float(settings["request_pause_seconds"])
     candidates: list[dict[str, Any]] = []
+    resolution_class_stats = _resolution_quality_class_stats(cfg)
     fractions = sorted(
         {float(f) for f in (settings.get("quote_distance_fractions") or [0.5]) if 0 < float(f) < 1}
     ) or [0.5]
     for market in universe[: int(settings["max_book_candidates"])]:
+        resolution_risk = _resolution_risk_for_question(market.get("question", ""), resolution_class_stats)
         v = market["rewards_max_spread_cents"] / 100.0
         quote_size = market["rewards_min_size_shares"]
         competition = _book_competition(settings, market["token_id"], market.get("complement_token_id", ""), v)
@@ -768,6 +909,7 @@ def run_maker_carry_study(cfg: EngineConfig) -> dict[str, Any]:
             )
             row = {
                 **market,
+                **resolution_risk,
                 "mid_price": round(competition["mid"], 4),
                 "quote_distance": round(quote_distance, 4),
                 "quote_distance_fraction": fraction,
@@ -833,6 +975,7 @@ def run_maker_carry_study(cfg: EngineConfig) -> dict[str, Any]:
         for r in candidates
         if (r.get("net_carry_usd_per_day") or 0) > 0 and r.get("estimate_quality") == "book_and_history"
         and r.get("band_eligible") is True
+        and r.get("resolution_risk") != "high"
     ]
     payout_floor = float(settings["min_daily_payout_usd"])
     for row in sorted(trusted, key=lambda r: r["net_carry_usd_per_day"], reverse=True):
@@ -868,6 +1011,8 @@ def run_maker_carry_study(cfg: EngineConfig) -> dict[str, Any]:
                 "uncounted_rebate_usd_per_day": round(k * (row.get("supplementary_rebate_usd_per_day") or 0.0), 4),
                 "uncounted_holding_usd_per_day": round(k * (row.get("supplementary_holding_usd_per_day") or 0.0), 4),
                 "markout_measured": bool(row.get("markout_measured")),
+                "resolution_risk": row.get("resolution_risk", "medium"),
+                "resolution_risk_class": row.get("resolution_risk_class", "other"),
                 "event_risk_flags": [
                     keyword for keyword in EVENT_RISK_KEYWORDS if keyword in row["question"].lower()
                 ],
@@ -877,6 +1022,7 @@ def run_maker_carry_study(cfg: EngineConfig) -> dict[str, Any]:
 
     net_total = round(sum(r["net_carry_usd_per_day"] for r in portfolio), 2)
     target = float(settings["target_net_usd_per_day"])
+    top_portfolio = portfolio[0] if portfolio else {}
 
     # MAKER GATES - pre-registered 2026-07-09 (see module docstring). The
     # trend ledger is read BEFORE this run appends. Evidence counts distinct
@@ -937,11 +1083,16 @@ def run_maker_carry_study(cfg: EngineConfig) -> dict[str, Any]:
             "candidates_thin_book_untrusted": sum(
                 1 for r in candidates if r.get("estimate_quality") == "thin_book_untrusted"
             ),
+            "candidates_resolution_high_risk": sum(
+                1 for r in candidates if r.get("resolution_risk") == "high"
+            ),
             "portfolio_markets": len(portfolio),
             "portfolio": portfolio,
             "portfolio_capital_usd": round(capital, 2),
             "portfolio_net_carry_usd_per_day": net_total,
             "portfolio_net_carry_usd_per_month": round(net_total * 30, 2),
+            "top_portfolio_market": top_portfolio.get("condition_id", ""),
+            "top_portfolio_question": top_portfolio.get("question", ""),
             "portfolio_uncounted_supplementary_income_usd_per_day": round(
                 sum(r.get("uncounted_supplementary_income_usd_per_day", 0.0) for r in portfolio), 4
             ),
@@ -975,6 +1126,10 @@ def run_maker_carry_study(cfg: EngineConfig) -> dict[str, Any]:
                     "rebates + holding rewards are reported as uncounted income only; "
                     "they are excluded from portfolio_net_carry_usd_per_day and every M-gate"
                 ),
+                "resolution_risk": (
+                    "WO-51 screen: high subjective/UMA-dispute-prone wording is excluded from the "
+                    "quote portfolio; corpus evidence may only escalate LOW classes to MEDIUM."
+                ),
             },
             "honesty_clause": (
                 "Simulated maker fills are unverifiable (queue position, intra-minute jumps, competitor "
@@ -996,6 +1151,8 @@ def run_maker_carry_study(cfg: EngineConfig) -> dict[str, Any]:
         "portfolio_markets",
         "portfolio_capital_usd",
         "portfolio_net_carry_usd_per_day",
+        "top_portfolio_market",
+        "top_portfolio_question",
         "clears_100_per_month_target",
     ]
     prior_runs.append({field: summary.get(field) for field in history_fields})
@@ -1032,19 +1189,21 @@ def _write_quote_sheet(out_root: Path, summary: dict[str, Any], settings: dict[s
         "This system places NO orders. Acting on this sheet is a human decision,",
         "with human money, outside the bot's paper-only governance.",
         "",
-        "| market | quote size (shares/side) | distance from mid | capital | est net/day | uncounted income/day | toxicity | risk flags |",
-        "|---|---|---|---|---|---|---|---|",
+        "| market | quote size (shares/side) | distance from mid | capital | est net/day | uncounted income/day | resolution risk | toxicity | risk flags |",
+        "|---|---|---|---|---|---|---|---|---|",
     ]
     for entry in summary.get("portfolio", []) or []:
         toxicity = toxicity_rows.get(str(entry.get("condition_id") or ""))
         toxicity_score = safe_float(toxicity.get("toxicity_score")) if toxicity else None
         toxicity_label = f"{toxicity_score:.2f}" if toxicity_score is not None else "-"
+        resolution_label = f"{entry.get('resolution_risk', 'medium')} ({entry.get('resolution_risk_class', 'other')})"
         toxicity_flags = ["toxicity>0.9"] if toxicity_score is not None and toxicity_score > 0.9 else []
         flags = ", ".join([*(entry.get("event_risk_flags") or []), *toxicity_flags]) or "-"
         lines.append(
             f"| {entry['question'][:60]} | {entry['quote_size_shares']:.0f} | "
             f"{entry['quote_distance']} | ${entry['capital_usd']} | "
-            f"${entry['net_carry_usd_per_day']} | ${entry.get('uncounted_supplementary_income_usd_per_day', 0.0)} | {toxicity_label} | {flags} |"
+            f"${entry['net_carry_usd_per_day']} | ${entry.get('uncounted_supplementary_income_usd_per_day', 0.0)} | "
+            f"{resolution_label} | {toxicity_label} | {flags} |"
         )
     lines += [
         "",
@@ -1067,6 +1226,9 @@ def _write_quote_sheet(out_root: Path, summary: dict[str, Any], settings: dict[s
         "8. Flow toxicity: do not initiate quotes in a market whose toxicity_score > 0.9.",
         "   This is a conditioning rule only; the study's adverse charge is not",
         "   modified unless a later dated tightening explicitly changes it.",
+        "9. Resolution risk: only quote markets with objective, verifiable",
+        "   resolution sources and no open clarifications; exit quotes",
+        "   immediately if a proposal on a held market is disputed.",
     ]
     (out_root / "maker_quote_sheet.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
 

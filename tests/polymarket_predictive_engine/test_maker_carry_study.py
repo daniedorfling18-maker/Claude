@@ -12,7 +12,7 @@ import yaml
 from polymarket_predictive_engine import maker_carry_study
 from polymarket_predictive_engine.config import load_config
 from polymarket_predictive_engine.maker_carry_study import run_maker_carry_study
-from polymarket_predictive_engine.utils import read_csv_rows, read_json
+from polymarket_predictive_engine.utils import read_csv_rows, read_json, write_csv
 
 
 def _config(tmp_path: Path):
@@ -233,6 +233,80 @@ def test_fee_free_markets_have_zero_supplementary_rebate(tmp_path):
     assert supplement["supplementary_holding_usd_per_day"] > 0.0
 
 
+def test_resolution_risk_keyword_classes_and_absent_report_tolerance(tmp_path):
+    cfg = _config(tmp_path)
+    stats = maker_carry_study._resolution_quality_class_stats(cfg)
+
+    fed = maker_carry_study._resolution_risk_for_question(
+        "Will the Fed leave interest rates unchanged after the July decision?",
+        stats,
+    )
+    match = maker_carry_study._resolution_risk_for_question("Will Arsenal beat Chelsea in the match?", stats)
+    numeric = maker_carry_study._resolution_risk_for_question("Will ETH close above $4,000 on July 31?", stats)
+    election = maker_carry_study._resolution_risk_for_question("Who will win the official election result?", stats)
+    high = maker_carry_study._resolution_risk_for_question("Will X officially announce a ceasefire deal?", stats)
+    medium = maker_carry_study._resolution_risk_for_question("Will a minister visit Paris?", stats)
+
+    assert fed["resolution_risk"] == "low"
+    assert fed["resolution_risk_class"] == "fed_rate_decision"
+    assert match["resolution_risk_class"] == "match_game_winner"
+    assert numeric["resolution_risk_class"] == "numeric_close_above_below"
+    assert election["resolution_risk_class"] == "official_election_result"
+    assert high["resolution_risk"] == "high"
+    assert high["resolution_risk_class"] == "subjective_announce"
+    assert medium["resolution_risk"] == "medium"
+    assert fed["resolution_risk_sample_markets"] == 0
+
+
+def test_resolution_risk_corpus_overlay_escalates_low_only_after_sample_floor(tmp_path):
+    cfg = _config(tmp_path)
+    fields = ["market_slug", "question", "resolution_quality"]
+    base_question = "Will ABC close above $100 on January 1?"
+    rows = [
+        {
+            "market_slug": f"m-{idx}",
+            "question": base_question,
+            "resolution_quality": "clean_settlement" if idx < 44 else "ambiguous_settlement_vector",
+        }
+        for idx in range(49)
+    ]
+    write_csv(cfg.governance_root / "resolution_quality_report.csv", rows, fieldnames=fields)
+
+    below_floor = maker_carry_study._resolution_risk_for_question(
+        base_question,
+        maker_carry_study._resolution_quality_class_stats(cfg),
+    )
+
+    assert below_floor["resolution_risk"] == "low"
+    assert below_floor["resolution_risk_sample_markets"] == 49
+
+    rows.append(
+        {
+            "market_slug": "m-49",
+            "question": base_question,
+            "resolution_quality": "ambiguous_settlement_vector",
+        }
+    )
+    write_csv(cfg.governance_root / "resolution_quality_report.csv", rows, fieldnames=fields)
+
+    escalated = maker_carry_study._resolution_risk_for_question(
+        base_question,
+        maker_carry_study._resolution_quality_class_stats(cfg),
+    )
+    high = maker_carry_study._resolution_risk_for_question(
+        "Will X officially announce a ceasefire deal?",
+        maker_carry_study._resolution_quality_class_stats(cfg),
+    )
+
+    assert escalated["resolution_risk"] == "medium"
+    assert escalated["resolution_risk_sample_markets"] == 50
+    assert escalated["resolution_risk_clean_share"] == 0.88
+    assert "escalated by corpus" in escalated["resolution_risk_reason"]
+    # Tighten-only: the clean numeric-close corpus cannot downgrade subjective
+    # wording to low/medium.
+    assert high["resolution_risk"] == "high"
+
+
 def test_thin_book_share_is_untrusted_and_kept_out_of_portfolio(tmp_path, monkeypatch):
     """Observed live: an in-game esports book with an empty band implied a 40-86%
     reward share on a $2k pot. Free money on a snapshot is a danger signal."""
@@ -298,10 +372,33 @@ def test_sized_portfolio_scales_within_capital_cap_and_never_trades(tmp_path, mo
     assert persisted["portfolio_net_carry_usd_per_day"] == summary["portfolio_net_carry_usd_per_day"]
     history = read_csv_rows(cfg.output_root / "maker_carry" / "maker_carry_history.csv")
     assert len(history) == 1
+    assert history[0]["top_portfolio_market"] == "0xcalm"
+    assert history[0]["top_portfolio_question"] == "deep calm market"
 
     # A second run appends to the trend ledger instead of overwriting it.
     run_maker_carry_study(cfg)
     assert len(read_csv_rows(cfg.output_root / "maker_carry" / "maker_carry_history.csv")) == 2
+
+
+def test_resolution_high_risk_candidate_is_excluded_from_portfolio(tmp_path, monkeypatch):
+    cfg = _config(tmp_path)
+    markets = [_market("Will X officially announce a ceasefire deal?", "deal", 1000.0)]
+    books = {"deal": _deep_book()}
+    histories = {("deal", "1d"): _flat_history(200), ("deal", "1w"): _flat_history(200)}
+    _fake_requests(monkeypatch, markets=markets, books=books, histories=histories)
+
+    summary = run_maker_carry_study(cfg)
+
+    row = read_csv_rows(cfg.output_root / "maker_carry" / "maker_carry_candidates.csv")[0]
+    assert row["resolution_risk"] == "high"
+    assert row["resolution_risk_class"] == "subjective_announce"
+    assert row["estimate_quality"] == "book_and_history"
+    assert float(row["net_carry_usd_per_day"]) > 0
+    assert summary["candidates_resolution_high_risk"] == 1
+    assert summary["portfolio_markets"] == 0
+    sheet = (cfg.output_root / "maker_carry" / "maker_quote_sheet.md").read_text(encoding="utf-8")
+    assert "Resolution risk" in sheet
+    assert "if a proposal on a held market is disputed" in sheet
 
 
 def test_supplementary_income_does_not_change_registered_gates_or_net_carry(tmp_path, monkeypatch):

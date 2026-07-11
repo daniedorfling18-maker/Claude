@@ -343,6 +343,14 @@ entry rules, price them from official CLOB price history, cluster by fixture, an
 `reconstructed_signal_clv.json` / `reconstructed_signal_clv_positions.csv` with
 `evidence_class: reconstructed_research`. This is judgment input only: it never touches
 `profit_verdict.py`, never becomes Gate A evidence, and cannot invoke paper/live trading.
+**2026-07-11 — VPS telemetry bridge.** `scripts/push_vps_telemetry.sh` (host cron, every 30 min)
+force-pushes a single parentless commit of decision summaries — governance/verdict JSONs, maker-carry
+study + gates, quote sheet, study outputs, scheduler status — to the `vps-telemetry` branch, so
+remote orchestration sessions read live VPS state through the private repo. Zero Actions cost
+(workflows are dispatch-only + `[skip ci]`), zero history growth (branch always holds exactly one
+commit), heavy collection corpora (training archive, websocket features, trade prints, official book
+snapshots) never leave the VPS.
+
 **2026-07-10 — WO-43 implemented by Codex.** `drift_scan_study.py` and CLI `drift-scan` estimate
 martingale drift from harvested CLOB price histories by price bin, time-to-close bin, category, and
 horizon. The scan uses market-clustered bootstrap CIs, BH-FDR across tested bins, and only reports a
@@ -472,6 +480,18 @@ as CLI `hourly-adverse-study`, writing `outputs/maker_carry/hourly_adverse.json`
 per-UTC-hour band-crossing charge share against a uniform reward-minute null with BH-FDR, reports
 toxic hours and a calm-hours advisory, and patches the maker quote sheet. This is advisory only and
 does not change maker charges, gates, sizing, or order paths.
+
+**2026-07-10 — WO-50 implemented by Codex.** The registered maker live-test decision policy is now
+mechanised behind CLI `decision-policy`, writing `outputs/maker_carry/decision_policy.json` and a
+quote-sheet/dashboard badge. It evaluates the frozen action table, sizing ladder, quarter-Kelly cap,
+and kill criteria while remaining strictly advisory: no paper/live orders, no gate changes, and no
+automatic funding action.
+
+**2026-07-10 — WO-51 implemented by Codex.** Maker-carry candidates now carry a tighten-only
+resolution-risk screen: objective Fed/rate, match/game, numeric-close, and election-result wording
+is low by default; subjective UMA-dispute-prone wording is high; and the resolution-quality corpus
+can only escalate low classes to medium. High-risk questions are measured but excluded from the
+quote portfolio and quote sheet rule 9 tells the human to avoid unclear/disputed resolutions.
 
 **2026-07-10 — WO-42 implemented by Codex.** Calibration-bias harvesting now joins clean resolved
 markets to point-in-time pre-close prices and writes

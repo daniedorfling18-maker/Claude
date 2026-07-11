@@ -39,6 +39,7 @@ from .hourly_adverse_study import run_hourly_adverse_study
 from .labels import build_labels
 from .live_mispricing import run_live_mispricing, scan_live_mispricing
 from .longshot_bias import build_longshot_bias_scan
+from .live_test_decision_policy import run_decision_policy
 from .market_making_pnl import evaluate_market_making
 from .mispricing_alpha import apply_mispricing_alpha, train_mispricing_alpha_model
 from .models.calibrated import load_prediction_models, train_model, write_predictions
@@ -111,6 +112,7 @@ COMMANDS = [
     "maker-live-test",
     "flow-toxicity",
     "hourly-adverse-study",
+    "decision-policy",
     "scan-event-groups",
     "scan-implication-networks",
     "calibration-bias-study",
@@ -305,6 +307,8 @@ def main(argv: list[str] | None = None) -> int:
             _print(build_flow_toxicity(cfg))
         elif args.command == "hourly-adverse-study":
             _print(run_hourly_adverse_study(cfg))
+        elif args.command == "decision-policy":
+            _print(run_decision_policy(cfg))
         elif args.command == "scan-event-groups":
             _print(scan_event_groups(cfg))
         elif args.command == "scan-implication-networks":

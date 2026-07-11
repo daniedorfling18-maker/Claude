@@ -37,6 +37,7 @@ from .governance import governance_report
 from .historical_backfill import historical_backfill
 from .hourly_adverse_study import run_hourly_adverse_study
 from .labels import build_labels
+from .ledger_anchor import anchor_ledgers, verify_ledger_chain
 from .live_mispricing import run_live_mispricing, scan_live_mispricing
 from .longshot_bias import build_longshot_bias_scan
 from .live_test_decision_policy import run_decision_policy
@@ -115,6 +116,8 @@ COMMANDS = [
     "flow-toxicity",
     "decision-policy",
     "performance-factsheet",
+    "anchor-ledgers",
+    "verify-ledger-chain",
     "hourly-adverse-study",
     "scan-event-groups",
     "scan-implication-networks",
@@ -202,6 +205,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="polymarket-engine")
     parser.add_argument("command", choices=COMMANDS)
     parser.add_argument("--config", default="polymarket_predictive_config.example.yaml")
+    parser.add_argument("--as-of-date", default=None, help="verify-ledger-chain: verify through this UTC date (YYYY-MM-DD)")
     parser.add_argument("--allow-data-quality-warnings", action="store_true")
     parser.add_argument("--resolution-limit", type=int, default=None)
     parser.add_argument("--historical-limit", type=int, default=None)
@@ -314,6 +318,10 @@ def main(argv: list[str] | None = None) -> int:
             _print(run_decision_policy(cfg))
         elif args.command == "performance-factsheet":
             _print(build_performance_factsheet(cfg))
+        elif args.command == "anchor-ledgers":
+            _print(anchor_ledgers(cfg))
+        elif args.command == "verify-ledger-chain":
+            _print(verify_ledger_chain(cfg, as_of_date=args.as_of_date))
         elif args.command == "hourly-adverse-study":
             _print(run_hourly_adverse_study(cfg))
         elif args.command == "scan-event-groups":

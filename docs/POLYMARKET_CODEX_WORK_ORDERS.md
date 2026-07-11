@@ -2210,6 +2210,13 @@ not jump ahead of WO-56/57 in the queue.
 
 ## WO-61 — Tamper-evident ledger anchoring (hash chain)
 
+Status: IMPLEMENTED by Codex on 2026-07-11. CLI commands `anchor-ledgers` and
+`verify-ledger-chain` write the daily prefix-hash chain under
+`outputs/performance/`; legitimately mutable state files use immutable dated
+copies, and `scripts/push_vps_anchor.sh` preserves each head as a child commit
+on the dedicated non-force `vps-anchor` branch. Reporting only; no trading or
+governance path reads these artifacts.
+
 An external reader must be able to verify the track record was not edited
 after the fact.
 

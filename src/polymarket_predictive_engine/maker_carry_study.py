@@ -74,7 +74,7 @@ from typing import Any
 import requests
 
 from .config import EngineConfig, load_config
-from .utils import now_utc, read_csv_rows, safe_float, write_csv, write_json
+from .utils import now_utc, read_csv_rows, read_json, safe_float, write_csv, write_json
 
 DEFAULT_GAMMA_BASE_URL = "https://gamma-api.polymarket.com"
 DEFAULT_CLOB_BASE_URL = "https://clob.polymarket.com"
@@ -1458,6 +1458,21 @@ def run_maker_carry_study(cfg: EngineConfig) -> dict[str, Any]:
     return summary
 
 
+def _wallet_reconciliation_quote_alert(out_root: Path) -> str:
+    reconciliation = read_json(out_root.parent / "performance" / "wallet_reconciliation.json", default={}) or {}
+    if not isinstance(reconciliation, dict):
+        return ""
+    discrepancy = safe_float(reconciliation.get("unexplained_discrepancy_usd"))
+    threshold = safe_float(reconciliation.get("discrepancy_threshold_usd")) or 1.0
+    if (
+        str(reconciliation.get("reconciliation_status") or "") == "DISCREPANCY"
+        and discrepancy is not None
+        and discrepancy > threshold
+    ):
+        return f"> 🔴 **WALLET RECONCILIATION DISCREPANCY — ${discrepancy:.2f} unexplained. Human review required.**"
+    return ""
+
+
 def _write_quote_sheet(out_root: Path, summary: dict[str, Any], settings: dict[str, Any]) -> None:
     """Human-readable daily quote sheet - research output, never an order.
 
@@ -1492,6 +1507,9 @@ def _write_quote_sheet(out_root: Path, summary: dict[str, Any], settings: dict[s
         "| market | quote size (shares/side) | distance from mid | capital | est net/day | uncounted income/day | resolution risk | toxicity | risk flags |",
         "|---|---|---|---|---|---|---|---|---|",
     ]
+    reconciliation_alert = _wallet_reconciliation_quote_alert(out_root)
+    if reconciliation_alert:
+        lines[2:2] = [reconciliation_alert, ""]
     for entry in summary.get("portfolio", []) or []:
         toxicity = toxicity_rows.get(str(entry.get("condition_id") or ""))
         toxicity_score = safe_float(toxicity.get("toxicity_score")) if toxicity else None

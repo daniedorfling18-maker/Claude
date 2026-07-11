@@ -91,6 +91,7 @@ from .strategy_v2_evidence import build_strategy_v2_forward_evidence
 from .strategy_v2_round_trip import build_strategy_v2_round_trip_evidence
 from .validation import validate_model
 from .validation_report import build_validation_report
+from .wallet_reconciliation import reconcile_wallet
 from .websocket_collector import collect_websocket
 from .websocket_normaliser import normalize_websocket_file
 from .websocket_resolution_collector import collect_websocket_resolutions
@@ -120,6 +121,7 @@ COMMANDS = [
     "anchor-ledgers",
     "verify-ledger-chain",
     "render-ips",
+    "reconcile-wallet",
     "hourly-adverse-study",
     "scan-event-groups",
     "scan-implication-networks",
@@ -326,6 +328,8 @@ def main(argv: list[str] | None = None) -> int:
             _print(verify_ledger_chain(cfg, as_of_date=args.as_of_date))
         elif args.command == "render-ips":
             _print(render_ips(cfg))
+        elif args.command == "reconcile-wallet":
+            _print(reconcile_wallet(cfg))
         elif args.command == "hourly-adverse-study":
             _print(run_hourly_adverse_study(cfg))
         elif args.command == "scan-event-groups":

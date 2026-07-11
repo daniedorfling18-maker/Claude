@@ -223,6 +223,10 @@ ledger_anchor:
     - {glob: maker_carry/decision_policy.json, mode: snapshot}
     - {glob: performance/investment_policy_statement.md, mode: snapshot}
     - {glob: performance/investment_policy_statement_summary.json, mode: snapshot}
+    - {glob: performance/wallet_reconciliation.json, mode: snapshot}
+    - {glob: performance/wallet_contract_registry.json, mode: snapshot}
+    - {glob: performance/wallet_reconciliation_history.csv, mode: append_only}
+    - {glob: performance/wallet_gas_observations.csv, mode: append_only}
 
 # 2026-07-11 WO-64: generate the investment policy directly from frozen code
 # constants plus the loaded effective VPS configuration. Reporting only; no
@@ -256,6 +260,35 @@ maker_live_test:
   enabled: true
   wallet_address: ""
   fill_alert_multiple: 2.0
+
+# 2026-07-11 WO-62: read-only three-way NAV reconciliation for a configured
+# human maker-test wallet. Contract addresses are fetched from Polymarket's
+# official contracts page; no remembered venue address is accepted. Missing
+# RPC/data degrades to partial and never changes a gate or invokes trading.
+wallet_reconciliation:
+  enabled: true
+  data_api_base_url: https://data-api.polymarket.com
+  official_contracts_url: https://docs.polymarket.com/resources/contracts
+  polygon_rpc_url: https://polygon-rpc.com
+  request_timeout_seconds: 20
+  request_pause_seconds: 0.1
+  positions_page_limit: 500
+  activity_page_limit: 500
+  max_pages: 20
+  activity_start_epoch: 1
+  max_onchain_positions: 100
+  collateral_decimals: 6
+  position_decimals: 6
+  discrepancy_threshold_usd: 1.0
+  starting_nav_usd:
+  baseline_epoch: 1
+  gas_capture_enabled: true
+  gas_scan_max_transactions: 50
+  # Optional signer/EOA addresses whose gas is investor-paid. Relayer-paid
+  # transactions remain observed but are not attributed as a true cost.
+  gas_payer_addresses: []
+  max_history_rows: 10000
+  max_gas_rows: 100000
 # 2026-07-09 WO-34: negRisk event groups must price to $1; the detector logs
 # net-of-fee deviations every scan (persistence = recurrence). Second
 # registered edge class; needs NO odds credits. Measurement only.

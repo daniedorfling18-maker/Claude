@@ -2246,6 +2246,13 @@ Spec:
 
 ## WO-62 — Live-wallet reconciliation (three-way, on-chain)
 
+Status: IMPLEMENTED by Codex on 2026-07-11. CLI `reconcile-wallet` performs
+read-only internal/data-API/Polygon NAV comparison, resolves pUSD and CTF
+addresses only from the official contracts page (with provenance-stamped
+cache fallback), records the WO-63 gas-cost hook, and raises reporting-only
+factsheet/quote-sheet alerts above the registered $1 tolerance. It remains
+inert until `maker_live_test.wallet_address` is configured.
+
 Paper stats are self-reported; live stats must reconcile against records
 we do not control. Polygon is public - use it.
 

@@ -41,6 +41,17 @@ class _FakeResponse:
         return self._payload
 
 
+class _ErrorResponse:
+    def __init__(self, message: str = "not found"):
+        self.message = message
+
+    def raise_for_status(self):
+        raise RuntimeError(self.message)
+
+    def json(self):
+        return {}
+
+
 def _seed_tracked_markets(cfg) -> None:
     write_csv(
         cfg.output_root / "polymarket_websocket" / "websocket_features.csv",
@@ -105,6 +116,61 @@ def test_collects_leaderboard_and_holder_overlap_without_trading(tmp_path, monke
     assert read_json(cfg.output_root / "wallet_intelligence" / "wallet_intelligence_summary.json")[
         "paper_trading_invoked"
     ] is False
+
+
+def test_leaderboard_probe_uses_v1_before_legacy_and_falls_back(tmp_path, monkeypatch):
+    cfg = _config(tmp_path)
+    _seed_tracked_markets(cfg)
+    calls: list[tuple[str, dict]] = []
+
+    def fake_get(url, params=None, timeout=None):
+        calls.append((url, dict(params or {})))
+        if url.endswith("/v1/leaderboard"):
+            return _ErrorResponse("temporary v1 miss")
+        if url.endswith("/leaderboard"):
+            return _FakeResponse({"data": [{"proxyWallet": "0xSmart", "rank": 1, "pnl": "1", "vol": "10"}]})
+        if url.endswith("/holders"):
+            return _FakeResponse({"holders": [{"wallet": "0xSmart", "size": "3"}]})
+        raise AssertionError(url)
+
+    monkeypatch.setattr(wallet_intelligence_collector.requests, "get", fake_get)
+
+    summary = wallet_intelligence_collector.collect_wallet_intelligence(cfg)
+
+    leaderboard_calls = [call for call in calls if "leaderboard" in call[0]]
+    assert leaderboard_calls[0][0].endswith("/v1/leaderboard")
+    assert any(call[0].endswith("/leaderboard") and not call[0].endswith("/v1/leaderboard") for call in leaderboard_calls)
+    assert summary["leaderboard_rows_added"] == 1
+    assert summary["leaderboard_probe_params"]["path"] == "/leaderboard"
+
+
+def test_wallet_markets_fall_back_to_maker_carry_candidates_when_websocket_empty(tmp_path, monkeypatch):
+    cfg = _config(tmp_path)
+    write_csv(
+        cfg.output_root / "maker_carry" / "maker_carry_candidates.csv",
+        [
+            {"condition_id": "0xmaker1", "question": "maker one"},
+            {"condition_id": "0xmaker2", "question": "maker two"},
+        ],
+        fieldnames=["condition_id", "question"],
+    )
+    holder_markets: list[str] = []
+
+    def fake_get(url, params=None, timeout=None):
+        if url.endswith("/v1/leaderboard"):
+            return _FakeResponse({"data": [{"proxyWallet": "0xSmart", "rank": 1, "pnl": "1", "vol": "10"}]})
+        if url.endswith("/holders"):
+            holder_markets.append(params["market"])
+            return _FakeResponse({"holders": [{"wallet": "0xSmart", "size": "3"}]})
+        raise AssertionError(url)
+
+    monkeypatch.setattr(wallet_intelligence_collector.requests, "get", fake_get)
+
+    summary = wallet_intelligence_collector.collect_wallet_intelligence(cfg)
+
+    assert summary["markets_polled"] == 2
+    assert holder_markets == ["0xmaker1", "0xmaker2"]
+    assert summary["tracked_market_sources"] == {"maker_carry_candidates": 2}
 
 
 def test_daily_dedupe_and_row_cap_are_enforced(tmp_path, monkeypatch):

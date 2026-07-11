@@ -18,7 +18,7 @@ import requests
 
 from .config import EngineConfig, load_config
 from .trade_print_collector import _tracked_markets
-from .utils import now_utc, read_csv_rows, safe_float, write_csv, write_json
+from .utils import now_utc, read_csv_rows, read_json, safe_float, write_csv, write_json
 
 DEFAULT_BASE_URL = "https://data-api.polymarket.com"
 
@@ -51,6 +51,9 @@ def _settings(cfg: EngineConfig) -> dict[str, Any]:
         "max_markets": 40,
         "top_holders_per_market": 20,
         "leaderboard_limit": 100,
+        # 2026-07-11 WO-58: production data-API serves trader rankings at
+        # /v1/leaderboard; keep the legacy path as a fail-soft fallback.
+        "leaderboard_paths": ["/v1/leaderboard", "/leaderboard"],
         "max_ledger_rows": 200000,
         "request_timeout_seconds": 20,
     }
@@ -137,19 +140,28 @@ def _fetch_leaderboard(settings: dict[str, Any], snapshot_at: str) -> tuple[list
     base_url = str(settings["base_url"]).rstrip("/")
     timeout = float(settings["request_timeout_seconds"])
     limit = int(settings["leaderboard_limit"])
-    probes = [
-        {"limit": limit, "window": "all", "rankType": "pnl"},
-        {"limit": limit, "window": "all", "rank_type": "pnl"},
-        {"limit": limit},
+    paths = settings.get("leaderboard_paths") or ["/v1/leaderboard", "/leaderboard"]
+    if isinstance(paths, str):
+        paths = [paths]
+    path_list = [str(path).strip() for path in paths if str(path).strip()]
+    probes: list[tuple[str, dict[str, Any]]] = [
+        (path, params)
+        for path in path_list
+        for params in (
+            {"limit": limit},
+            {"limit": limit, "window": "all", "rankType": "pnl"},
+            {"limit": limit, "window": "all", "rank_type": "pnl"},
+        )
     ]
     last_error = ""
-    for params in probes:
+    for path, params in probes:
+        endpoint = f"{base_url}/{path.lstrip('/')}"
         try:
-            response = requests.get(f"{base_url}/leaderboard", params=params, timeout=timeout)
+            response = requests.get(endpoint, params=params, timeout=timeout)
             response.raise_for_status()
             rows = _payload_rows(response.json(), "leaderboard", "data", "results")
         except Exception as exc:  # noqa: BLE001 - endpoint probing must be fail-soft
-            last_error = f"{type(exc).__name__}: {exc}"
+            last_error = f"{path}: {type(exc).__name__}: {exc}"
             continue
         parsed = [
             parsed_row
@@ -157,8 +169,58 @@ def _fetch_leaderboard(settings: dict[str, Any], snapshot_at: str) -> tuple[list
             if (parsed_row := _leaderboard_row(row, snapshot_at=snapshot_at, params=params)) is not None
         ]
         if parsed:
-            return parsed, params, ""
+            return parsed, {**params, "path": path}, ""
     return [], {}, last_error or "empty leaderboard response"
+
+
+def _append_markets(markets: dict[str, str], rows: list[dict[str, Any]], keys: tuple[str, ...], source: str, limit: int) -> None:
+    for row in rows:
+        for key in keys:
+            market = str(row.get(key) or "").strip()
+            if market and market not in markets:
+                markets[market] = source
+                break
+        if len(markets) >= limit:
+            return
+
+
+def _wallet_tracked_markets(cfg: EngineConfig, max_markets: int) -> tuple[list[str], dict[str, int]]:
+    """Markets for holder polling, with VPS-safe fallbacks when websocket rows are absent.
+
+    WO-37 originally reused the websocket feature table only. On the VPS, that
+    table can be empty while the maker-carry and trade-print ledgers are
+    populated, causing wallet intelligence to report zero markets forever.
+    """
+    markets: dict[str, str] = {}
+    for market in _tracked_markets(cfg, max_markets):
+        markets[market] = "websocket_features"
+    if len(markets) < max_markets:
+        _append_markets(
+            markets,
+            read_csv_rows(cfg.output_root / "maker_carry" / "maker_carry_candidates.csv"),
+            ("condition_id", "market"),
+            "maker_carry_candidates",
+            max_markets,
+        )
+    if len(markets) < max_markets:
+        summary = read_json(cfg.output_root / "maker_carry" / "maker_carry_study.json", default={})
+        portfolio = summary.get("portfolio") if isinstance(summary, dict) else []
+        if isinstance(portfolio, list):
+            _append_markets(markets, [row for row in portfolio if isinstance(row, dict)], ("condition_id", "market"), "maker_carry_portfolio", max_markets)
+        if isinstance(summary, dict):
+            _append_markets(markets, [summary], ("top_portfolio_market",), "maker_carry_summary", max_markets)
+    if len(markets) < max_markets:
+        _append_markets(
+            markets,
+            list(reversed(read_csv_rows(cfg.output_root / "polymarket_trade_prints" / "trade_prints.csv"))),
+            ("market", "condition_id"),
+            "trade_prints",
+            max_markets,
+        )
+    counts: dict[str, int] = {}
+    for source in markets.values():
+        counts[source] = counts.get(source, 0) + 1
+    return list(markets)[:max_markets], counts
 
 
 def _fetch_holders(settings: dict[str, Any], market: str, snapshot_at: str) -> tuple[list[dict[str, Any]], str]:
@@ -212,7 +274,7 @@ def collect_wallet_intelligence(cfg: EngineConfig) -> dict[str, Any]:
     )
     write_csv(leaderboard_path, combined_leaderboard, fieldnames=LEADERBOARD_FIELDS)
 
-    markets = _tracked_markets(cfg, int(settings["max_markets"]))
+    markets, market_sources = _wallet_tracked_markets(cfg, int(settings["max_markets"]))
     holder_rows: list[dict[str, Any]] = []
     errors: list[str] = []
     if leaderboard_error:
@@ -244,6 +306,7 @@ def collect_wallet_intelligence(cfg: EngineConfig) -> dict[str, Any]:
             "holder_leaderboard_overlap_count": len(overlap),
             "holder_leaderboard_overlap_wallets": overlap[:20],
             "leaderboard_probe_params": leaderboard_params,
+            "tracked_market_sources": market_sources,
             "leaderboard_history_path": str(leaderboard_path),
             "holders_history_path": str(holders_path),
             "errors": errors[:20],

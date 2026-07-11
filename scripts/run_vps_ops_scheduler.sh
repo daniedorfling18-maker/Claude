@@ -262,6 +262,9 @@ run_training_harvest() {
     # WO-36 maker-carry actuarial study: daily measurement (never trading) of
     # reward pots, band competition, and pick-off costs. Free public APIs.
     timeout "$HARVEST_TIMEOUT" python -m polymarket_predictive_engine.cli maker-carry-study --config "$CONFIG_PATH"
+    # WO-54 deep trade-print backfill: one-shot historical /trades pages for
+    # maker-study candidates and the quote-sheet portfolio. Collection only.
+    timeout "$HARVEST_TIMEOUT" python -m polymarket_predictive_engine.cli backfill-trade-prints --config "$CONFIG_PATH"
     # WO-40 maker-fill realism replay: recorded book archive + trade prints,
     # last-in-queue fills. Measurement only; never alters the study charge.
     timeout "$HARVEST_TIMEOUT" python -m polymarket_predictive_engine.cli maker-fill-replay --config "$CONFIG_PATH"
@@ -276,7 +279,7 @@ run_training_harvest() {
     timeout "$HARVEST_TIMEOUT" python -m polymarket_predictive_engine.cli calibration-bias-study --config "$CONFIG_PATH"
   ) >> "$LOG_FILE" 2>&1
   CODE=$?
-  stamp_status training_harvest "$CODE" "gamma resolved-markets backfill + clob price histories + wallet intelligence + maker-carry study + maker-fill replay + flow toxicity + decision policy + reconstructed CLV study + calibration-bias study + martingale drift scan"
+  stamp_status training_harvest "$CODE" "gamma resolved-markets backfill + clob price histories + wallet intelligence + maker-carry study + deep trade-print backfill + maker-fill replay + flow toxicity + decision policy + reconstructed CLV study + calibration-bias study + martingale drift scan"
   log "training_harvest: exit $CODE"
 }
 

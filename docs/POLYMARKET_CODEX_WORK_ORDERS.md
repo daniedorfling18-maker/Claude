@@ -1964,6 +1964,15 @@ Spec:
 
 ## WO-54 — Deep trade-print backfill (backsolve markout/toxicity history)
 
+Status: IMPLEMENTED by Codex in PR branch
+`agent/wo-54-backfill-trade-prints` on 2026-07-11. New CLI
+`backfill-trade-prints` paginates public data-API `/trades` for the
+maker-study candidates plus quote-sheet portfolio, dedups into
+`outputs/polymarket_trade_prints/trade_prints.csv`, and records completed
+markets in `backfill_completed_markets.txt` so reruns skip already backfilled
+markets while new candidates are picked up. The VPS daily harvest runs it
+after `maker-carry-study`.
+
 The data-API /trades endpoint serves deep per-market history via pagination;
 our 15-min collector only keeps recent prints. Backfilling turns weeks of
 already-recorded venue history into usable markout and toxicity datapoints

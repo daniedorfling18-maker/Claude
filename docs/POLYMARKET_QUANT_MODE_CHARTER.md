@@ -498,6 +498,13 @@ does not change maker charges, gates, sizing, or order paths.
 training harvest is 11-13 hours old. This improves maker reward-competition sampling without
 changing schemas or fast-forwarding M-A, which remains distinct-UTC-day based.
 
+**2026-07-11 — WO-54 implemented by Codex.** Trade-print collection now has CLI
+`backfill-trade-prints`, which pages data-API `/trades` for current maker-study candidates and the
+quote-sheet portfolio, dedups into `outputs/polymarket_trade_prints/trade_prints.csv`, and stamps
+completed markets for idempotent reruns. The VPS daily harvest runs it immediately after
+`maker-carry-study`, turning venue history into markout/toxicity substrate without changing gates or
+orders.
+
 **2026-07-10 — WO-42 implemented by Codex.** Calibration-bias harvesting now joins clean resolved
 markets to point-in-time pre-close prices and writes
 `outputs/calibration_bias/calibration_curve.csv` plus summary JSON. It reports category/horizon/bin

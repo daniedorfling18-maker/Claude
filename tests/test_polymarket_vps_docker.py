@@ -208,6 +208,7 @@ def test_vps_ops_scheduler_replaces_github_side_jobs():
     assert "OPS_MAKER_STUDY_INTRADAY_OFFSET_MIN_SECONDS" in script
     assert "OPS_MAKER_STUDY_INTRADAY_OFFSET_MAX_SECONDS" in script
     assert "11-13h offset guard" in script
+    assert "backfill-trade-prints" in script
     assert "scan-event-groups" in script
     assert "maker-live-test" in script  # WO-36 step 4 scoreboard, inert without a wallet
 

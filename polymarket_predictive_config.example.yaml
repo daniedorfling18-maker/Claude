@@ -91,6 +91,9 @@ wallet_intelligence:
   max_markets: 40
   top_holders_per_market: 20
   leaderboard_limit: 100
+  # 2026-07-11 WO-58: production trader leaderboard is /v1/leaderboard;
+  # legacy /leaderboard remains a fail-soft fallback.
+  leaderboard_paths: [/v1/leaderboard, /leaderboard]
   request_timeout_seconds: 20
   max_ledger_rows: 200000
 # 2026-07-09 WO-36: maker-carry actuarial study. Measures (never trades) whether

@@ -180,6 +180,11 @@ services:
     environment:
       POLYMARKET_CONFIG_PATH: /app/polymarket_predictive_config.example.yaml
       OPS_GOVERNANCE_INTERVAL_SECONDS: ${OPS_GOVERNANCE_INTERVAL_SECONDS:-21600}
+      # 2026-07-11 diagnostic: the full governance refresh timed out at the
+      # 1500s default while competing with the paper-live loop's ~95% CPU.
+      # The in-loop refresh covers the artifacts; this raise lets the
+      # scheduler's full pass finish too instead of stamping exit 124.
+      OPS_GOVERNANCE_TIMEOUT_SECONDS: ${OPS_GOVERNANCE_TIMEOUT_SECONDS:-2400}
       OPS_CLV_SNAPSHOT_INTERVAL_SECONDS: ${OPS_CLV_SNAPSHOT_INTERVAL_SECONDS:-28800}
       OPS_CARD_REFRESH_INTERVAL_SECONDS: ${OPS_CARD_REFRESH_INTERVAL_SECONDS:-43200}
       SUPERBRU_PLAYER_NAME: ${SUPERBRU_PLAYER_NAME:-Danie}

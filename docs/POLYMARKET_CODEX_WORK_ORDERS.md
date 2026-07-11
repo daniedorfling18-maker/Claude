@@ -2041,6 +2041,13 @@ Constraints 1-8 bind. One WO per PR.
 
 ## WO-56 — Yield-first rewarded-universe scan (find under-competed pots)
 
+Status: LANDED by Codex on 2026-07-11 in PR #134. Maker-carry discovery now
+pre-screens rewarded markets by achievable gross at minimum quote size, records
+pot/yield ranks and scan mode, and fails softly to pot ranking. The registered
+$500 metric and all maker guards remain unchanged. Artifacts are
+`outputs/maker_carry/maker_carry_study.json`, `maker_carry_candidates.csv`, and
+`maker_carry_history.csv`.
+
 The universe scan ranks by pot size and measures the top 40. Under the
 published rule that ranking is adversarial to us: the biggest pots attract
 proportionally the deepest maker competition (observed shares 0.01-0.3%).

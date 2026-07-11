@@ -1908,6 +1908,14 @@ Spec:
 
 ## WO-52 — Hour-of-day adverse-selection concentration study
 
+Status: IMPLEMENTED by Codex in PR branch
+`agent/wo-52-hourly-adverse` on 2026-07-10. New CLI
+`hourly-adverse-study` writes
+`outputs/maker_carry/hourly_adverse.json`, flags UTC hours with
+concentrated pick-off charge after BH-FDR, reports a calm-hours advisory,
+and patches the maker quote sheet with a study-only calm-hours line. It
+does not modify maker charges, gates, sizing, or orders.
+
 Reward sampling pays uniformly across 1,440 minutes; pick-off risk almost
 certainly does not arrive uniformly. If the charge concentrates in
 identifiable UTC hours, calm-hours quoting keeps most reward income while

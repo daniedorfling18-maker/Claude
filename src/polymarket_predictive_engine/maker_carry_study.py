@@ -115,6 +115,9 @@ CANDIDATE_FIELDS = [
     "fees_enabled",
     "volume_24h_usd",
     "pot_usd_per_day",
+    "pot_rank",
+    "yield_rank",
+    "expected_gross_at_min_size",
     "rewards_min_size_shares",
     "rewards_max_spread_cents",
     "mid_price",
@@ -161,6 +164,10 @@ def _settings(cfg: EngineConfig) -> dict[str, Any]:
         "page_size": 100,
         "min_daily_pot_usd": 25.0,
         "max_book_candidates": 20,
+        # 2026-07-11 WO-56: widen coverage by pre-screening rewarded
+        # markets by achievable gross at min quote size, then run the
+        # expensive history/markout study on the yield-ranked shortlist.
+        "yield_scan_max_markets": 200,
         # Distances to sweep per market (fractions of the qualifying band):
         # tighter earns quadratically more share, wider survives more noise.
         "quote_distance_fractions": [0.25, 0.5, 0.75],
@@ -405,6 +412,10 @@ def _rewarded_universe(settings: dict[str, Any]) -> tuple[list[dict[str, Any]], 
         if pause:
             time.sleep(pause)
     universe.sort(key=lambda row: row["pot_usd_per_day"], reverse=True)
+    for rank, row in enumerate(universe, start=1):
+        row["pot_rank"] = rank
+        row["yield_rank"] = ""
+        row["expected_gross_at_min_size"] = ""
     return universe, errors
 
 
@@ -507,12 +518,14 @@ def _fetch_books(settings: dict[str, Any], token_ids: list[str]) -> dict[str, di
     return books
 
 
-def _book_competition(settings: dict[str, Any], token_id: str, complement_token_id: str, v: float) -> dict[str, Any] | None:
+def _book_competition_from_books(
+    settings: dict[str, Any],
+    token_id: str,
+    complement_token_id: str,
+    v: float,
+    books: dict[str, dict[str, Any]],
+) -> dict[str, Any] | None:
     """Published-v2 reward score for the market + complement book pair."""
-    token_ids = [token_id]
-    if complement_token_id:
-        token_ids.append(complement_token_id)
-    books = _fetch_books(settings, token_ids)
     book = books.get(token_id)
     complement = books.get(complement_token_id) if complement_token_id else None
     if not book:
@@ -564,6 +577,14 @@ def _book_competition(settings: dict[str, Any], token_id: str, complement_token_
     }
 
 
+def _book_competition(settings: dict[str, Any], token_id: str, complement_token_id: str, v: float) -> dict[str, Any] | None:
+    token_ids = [token_id]
+    if complement_token_id:
+        token_ids.append(complement_token_id)
+    books = _fetch_books(settings, token_ids)
+    return _book_competition_from_books(settings, token_id, complement_token_id, v, books)
+
+
 def _share_from_published_score(
     settings: dict[str, Any],
     competition: dict[str, Any],
@@ -582,6 +603,106 @@ def _share_from_published_score(
 def _legacy_share(competition: dict[str, Any], our_score: float) -> float:
     pool = float(competition.get("legacy_pool_score") or 0.0)
     return our_score / (our_score + pool) if (our_score + pool) > 0 else 0.0
+
+
+def _yield_first_shortlist(
+    settings: dict[str, Any],
+    universe: list[dict[str, Any]],
+    fractions: list[float],
+) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    max_candidates = int(settings["max_book_candidates"])
+    max_scan = max(max_candidates, int(settings.get("yield_scan_max_markets") or max_candidates))
+    scan_universe = universe[:max_scan]
+    if not scan_universe:
+        return [], {
+            "universe_scan_mode": "yield_first_v1",
+            "yield_scan_considered_markets": 0,
+            "yield_scan_scored_markets": 0,
+            "yield_scan_selected_markets": 0,
+            "yield_scan_fallback": False,
+        }
+
+    token_ids: list[str] = []
+    for market in scan_universe:
+        for token in (market.get("token_id"), market.get("complement_token_id")):
+            token = str(token or "").strip()
+            if token and token not in token_ids:
+                token_ids.append(token)
+
+    try:
+        books = _fetch_books(settings, token_ids)
+        scored: list[tuple[float, dict[str, Any]]] = []
+        for market in scan_universe:
+            v = float(market["rewards_max_spread_cents"]) / 100.0
+            quote_size = float(market["rewards_min_size_shares"])
+            competition = _book_competition_from_books(
+                settings,
+                str(market["token_id"]),
+                str(market.get("complement_token_id") or ""),
+                v,
+                books,
+            )
+            if competition is None:
+                continue
+            best_gross = 0.0
+            for fraction in fractions:
+                quote_distance = fraction * v
+                raw_our_score = _quadratic_score(quote_distance, v, quote_size)
+                if raw_our_score <= 0:
+                    continue
+                share, _ = _share_from_published_score(settings, competition, raw_our_score)
+                best_gross = max(best_gross, float(market["pot_usd_per_day"]) * share)
+            if best_gross > 0:
+                scored.append((best_gross, market))
+    except Exception as exc:  # noqa: BLE001 - prescreen must fail soft to registered pot ranking
+        selected = [dict(row) for row in universe[:max_candidates]]
+        return selected, {
+            "universe_scan_mode": "pot_rank_fallback",
+            "yield_scan_considered_markets": len(scan_universe),
+            "yield_scan_scored_markets": 0,
+            "yield_scan_selected_markets": len(selected),
+            "yield_scan_fallback": True,
+            "yield_scan_error": f"{type(exc).__name__}: {exc}",
+        }
+
+    if not scored:
+        selected = [dict(row) for row in universe[:max_candidates]]
+        return selected, {
+            "universe_scan_mode": "pot_rank_fallback",
+            "yield_scan_considered_markets": len(scan_universe),
+            "yield_scan_scored_markets": 0,
+            "yield_scan_selected_markets": len(selected),
+            "yield_scan_fallback": True,
+            "yield_scan_error": "no prescreen books scored",
+        }
+
+    scored.sort(key=lambda item: item[0], reverse=True)
+    selected: list[dict[str, Any]] = []
+    selected_keys: set[str] = set()
+    for yield_rank, (gross, market) in enumerate(scored, start=1):
+        if len(selected) >= max_candidates:
+            break
+        row = dict(market)
+        row["yield_rank"] = yield_rank
+        row["expected_gross_at_min_size"] = round(gross, 4)
+        selected.append(row)
+        selected_keys.add(str(row.get("condition_id") or row.get("token_id") or ""))
+
+    for market in universe:
+        if len(selected) >= max_candidates:
+            break
+        key = str(market.get("condition_id") or market.get("token_id") or "")
+        if key not in selected_keys:
+            selected.append(dict(market))
+            selected_keys.add(key)
+
+    return selected, {
+        "universe_scan_mode": "yield_first_v1",
+        "yield_scan_considered_markets": len(scan_universe),
+        "yield_scan_scored_markets": len(scored),
+        "yield_scan_selected_markets": len(selected),
+        "yield_scan_fallback": False,
+    }
 
 
 def _legacy_book_competition(settings: dict[str, Any], token_id: str, v: float) -> dict[str, Any] | None:
@@ -880,7 +1001,10 @@ def run_maker_carry_study(cfg: EngineConfig) -> dict[str, Any]:
     fractions = sorted(
         {float(f) for f in (settings.get("quote_distance_fractions") or [0.5]) if 0 < float(f) < 1}
     ) or [0.5]
-    for market in universe[: int(settings["max_book_candidates"])]:
+    measurement_universe, yield_scan = _yield_first_shortlist(settings, universe, fractions)
+    if yield_scan.get("yield_scan_error"):
+        errors.append(f"yield prescreen: {yield_scan['yield_scan_error']}")
+    for market in measurement_universe:
         resolution_risk = _resolution_risk_for_question(market.get("question", ""), resolution_class_stats)
         v = market["rewards_max_spread_cents"] / 100.0
         quote_size = market["rewards_min_size_shares"]
@@ -1077,8 +1201,13 @@ def run_maker_carry_study(cfg: EngineConfig) -> dict[str, Any]:
     summary.update(
         {
             "status": "ok" if candidates else ("failed" if errors else "no_candidates"),
+            "universe_scan_mode": yield_scan["universe_scan_mode"],
             "universe_rewarded_markets": len(universe),
             "universe_pot_usd_per_day": round(sum(m["pot_usd_per_day"] for m in universe), 2),
+            "yield_scan_considered_markets": yield_scan["yield_scan_considered_markets"],
+            "yield_scan_scored_markets": yield_scan["yield_scan_scored_markets"],
+            "yield_scan_selected_markets": yield_scan["yield_scan_selected_markets"],
+            "yield_scan_fallback": yield_scan["yield_scan_fallback"],
             "candidates_measured": len(candidates),
             "candidates_thin_book_untrusted": sum(
                 1 for r in candidates if r.get("estimate_quality") == "thin_book_untrusted"
@@ -1107,6 +1236,12 @@ def run_maker_carry_study(cfg: EngineConfig) -> dict[str, Any]:
             "share_model": "published_v2",
             "maker_gates": maker_gates,
             "assumptions": {
+                "universe_scan_mode": yield_scan["universe_scan_mode"],
+                "universe_scan_mode_note": (
+                    "2026-07-11 WO-56 coverage change only: rewarded markets are pre-screened by "
+                    "pot x published-rule min-size share before the existing expensive history/markout study. "
+                    "The registered gate metric remains the sized portfolio net carry at the $500 cap."
+                ),
                 "quote_size_shares": "rewards_min_size per market, both sides",
                 "quote_distance": f"per-market best of {fractions} x rewards_max_spread from mid",
                 "share_model": "published_v2",
@@ -1146,6 +1281,7 @@ def run_maker_carry_study(cfg: EngineConfig) -> dict[str, Any]:
     history_fields = [
         "generated_at_utc",
         "share_model",
+        "universe_scan_mode",
         "universe_rewarded_markets",
         "universe_pot_usd_per_day",
         "portfolio_markets",

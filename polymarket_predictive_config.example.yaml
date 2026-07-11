@@ -109,6 +109,10 @@ maker_carry_study:
   # per day); mid-tier pots with thin competition are exactly where a small
   # maker's share is largest.
   max_book_candidates: 40
+  # 2026-07-11 WO-56: pre-screen up to this many rewarded markets by
+  # achievable gross at min quote size before expensive history/markout
+  # measurement. Coverage only; registered maker gates remain unchanged.
+  yield_scan_max_markets: 200
   # Swept per market; the row keeps the net-carry-maximising fraction.
   quote_distance_fractions: [0.25, 0.5, 0.75]
   reaction_minutes: 1

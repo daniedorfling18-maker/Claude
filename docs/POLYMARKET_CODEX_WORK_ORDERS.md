@@ -2278,6 +2278,14 @@ Spec:
 
 ## WO-63 — True-net cost ledger
 
+Status: IMPLEMENTED by Codex on 2026-07-11. The append-only
+`outputs/performance/cost_ledger.csv` accepts idempotent manual costs through
+CLI `add-cost`; scheduled `sync-cost-ledger` converts only investor-attributed
+WO-62 gas observations through CoinGecko simple-price and fails soft to an
+explicit manual-entry queue. WO-60 now reports gross, booked costs, and net-net
+for live evidence, while simulated sections carry a clearly hypothetical
+registered fee/haircut drag. Reporting only; no gate or trading path reads it.
+
 Investor returns are net of EVERYTHING: gas, deposit/withdrawal rails,
 data subscriptions.
 

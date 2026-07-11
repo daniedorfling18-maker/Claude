@@ -277,6 +277,9 @@ run_training_harvest() {
     # WO-62 read-only three-way live-wallet reconciliation. Inert until the
     # human maker-test wallet is configured; missing RPC degrades to partial.
     timeout "$HARVEST_TIMEOUT" python -m polymarket_predictive_engine.cli reconcile-wallet --config "$CONFIG_PATH"
+    # WO-63 true-net cost ledger: convert newly observed investor-paid gas to
+    # USD after WO-62, before the factsheet. Relayer gas is never charged.
+    timeout "$HARVEST_TIMEOUT" python -m polymarket_predictive_engine.cli sync-cost-ledger --config "$CONFIG_PATH"
     # WO-42 favourite/longshot calibration bias study. Corpus-bound and
     # study-only; flags are candidates for future pre-registration, not trades.
     timeout "$HARVEST_TIMEOUT" python -m polymarket_predictive_engine.cli calibration-bias-study --config "$CONFIG_PATH"
@@ -292,7 +295,7 @@ run_training_harvest() {
     timeout "$HARVEST_TIMEOUT" python -m polymarket_predictive_engine.cli anchor-ledgers --config "$CONFIG_PATH"
   ) >> "$LOG_FILE" 2>&1
   CODE=$?
-  stamp_status training_harvest "$CODE" "gamma resolved-markets backfill + clob price histories + wallet intelligence + maker-carry study + deep trade-print backfill + maker-fill replay + flow toxicity + decision policy + wallet reconciliation + reconstructed CLV study + calibration-bias study + martingale drift scan + performance factsheet + investment policy statement + ledger anchor"
+  stamp_status training_harvest "$CODE" "gamma resolved-markets backfill + clob price histories + wallet intelligence + maker-carry study + deep trade-print backfill + maker-fill replay + flow toxicity + decision policy + wallet reconciliation + true-net cost ledger + reconstructed CLV study + calibration-bias study + martingale drift scan + performance factsheet + investment policy statement + ledger anchor"
   log "training_harvest: exit $CODE"
 }
 

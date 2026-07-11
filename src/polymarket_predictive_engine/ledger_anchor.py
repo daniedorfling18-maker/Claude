@@ -51,6 +51,8 @@ DEFAULT_LEDGER_REGISTRY: list[dict[str, str]] = [
     {"glob": "maker_carry/maker_carry_history.csv", "mode": "append_only"},
     {"glob": "maker_carry/maker_live_test_history.csv", "mode": "append_only"},
     {"glob": "maker_carry/decision_policy.json", "mode": "snapshot"},
+    {"glob": "performance/cost_ledger.csv", "mode": "append_only"},
+    {"glob": "performance/cost_ledger_summary.json", "mode": "snapshot"},
 ]
 
 

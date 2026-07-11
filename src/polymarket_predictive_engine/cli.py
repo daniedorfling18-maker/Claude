@@ -14,6 +14,7 @@ from .closing_line import build_closing_line_value
 from .collection_only import run_collection_only
 from .config import config_check, load_config
 from .collection_coverage import build_collection_coverage
+from .cost_ledger import add_manual_cost, sync_cost_ledger
 from .crypto_fundamental import build_crypto_fundamental
 from .crypto_targets import build_crypto_targets
 from .crypto_updown_labels import build_crypto_updown_proxy_labels
@@ -122,6 +123,8 @@ COMMANDS = [
     "verify-ledger-chain",
     "render-ips",
     "reconcile-wallet",
+    "add-cost",
+    "sync-cost-ledger",
     "hourly-adverse-study",
     "scan-event-groups",
     "scan-implication-networks",
@@ -210,6 +213,11 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("command", choices=COMMANDS)
     parser.add_argument("--config", default="polymarket_predictive_config.example.yaml")
     parser.add_argument("--as-of-date", default=None, help="verify-ledger-chain: verify through this UTC date (YYYY-MM-DD)")
+    parser.add_argument("--cost-date", default=None, help="add-cost: UTC cost date (YYYY-MM-DD; defaults to today)")
+    parser.add_argument("--cost-category", choices=["gas", "rail", "subscription", "other"], default=None)
+    parser.add_argument("--cost-usd", type=float, default=None, help="add-cost: positive USD amount")
+    parser.add_argument("--cost-ref", default=None, help="add-cost: required unique idempotency reference")
+    parser.add_argument("--cost-note", default="", help="add-cost: optional audit note")
     parser.add_argument("--allow-data-quality-warnings", action="store_true")
     parser.add_argument("--resolution-limit", type=int, default=None)
     parser.add_argument("--historical-limit", type=int, default=None)
@@ -330,6 +338,21 @@ def main(argv: list[str] | None = None) -> int:
             _print(render_ips(cfg))
         elif args.command == "reconcile-wallet":
             _print(reconcile_wallet(cfg))
+        elif args.command == "add-cost":
+            if args.cost_category is None or args.cost_usd is None or not str(args.cost_ref or "").strip():
+                raise ValueError("add-cost requires --cost-category, --cost-usd, and --cost-ref")
+            _print(
+                add_manual_cost(
+                    cfg,
+                    category=args.cost_category,
+                    usd=args.cost_usd,
+                    cost_ref=args.cost_ref,
+                    note=args.cost_note,
+                    cost_date=args.cost_date,
+                )
+            )
+        elif args.command == "sync-cost-ledger":
+            _print(sync_cost_ledger(cfg))
         elif args.command == "hourly-adverse-study":
             _print(run_hourly_adverse_study(cfg))
         elif args.command == "scan-event-groups":

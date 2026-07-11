@@ -343,6 +343,14 @@ entry rules, price them from official CLOB price history, cluster by fixture, an
 `reconstructed_signal_clv.json` / `reconstructed_signal_clv_positions.csv` with
 `evidence_class: reconstructed_research`. This is judgment input only: it never touches
 `profit_verdict.py`, never becomes Gate A evidence, and cannot invoke paper/live trading.
+**2026-07-11 — VPS telemetry bridge.** `scripts/push_vps_telemetry.sh` (host cron, every 30 min)
+force-pushes a single parentless commit of decision summaries — governance/verdict JSONs, maker-carry
+study + gates, quote sheet, study outputs, scheduler status — to the `vps-telemetry` branch, so
+remote orchestration sessions read live VPS state through the private repo. Zero Actions cost
+(workflows are dispatch-only + `[skip ci]`), zero history growth (branch always holds exactly one
+commit), heavy collection corpora (training archive, websocket features, trade prints, official book
+snapshots) never leave the VPS.
+
 **2026-07-10 — WO-43 implemented by Codex.** `drift_scan_study.py` and CLI `drift-scan` estimate
 martingale drift from harvested CLOB price histories by price bin, time-to-close bin, category, and
 horizon. The scan uses market-clustered bootstrap CIs, BH-FDR across tested bins, and only reports a

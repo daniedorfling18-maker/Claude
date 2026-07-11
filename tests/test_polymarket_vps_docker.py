@@ -204,3 +204,32 @@ def test_vps_ops_scheduler_replaces_github_side_jobs():
     assert "maker-carry-study" in script
     assert "scan-event-groups" in script
     assert "maker-live-test" in script  # WO-36 step 4 scoreboard, inert without a wallet
+
+
+def test_vps_telemetry_push_script_is_single_commit_and_actions_free():
+    # The telemetry bridge exists because the sandbox cannot reach the VPS and
+    # GitHub Actions minutes are exhausted: it must never grow branch history,
+    # never trigger workflows, and never ship the heavy collection corpora.
+    script = Path("scripts/push_vps_telemetry.sh").read_text(encoding="utf-8")
+    # parentless commit force-pushed => branch always holds exactly one commit
+    assert "commit-tree" in script
+    assert '"+$COMMIT:refs/heads/$BRANCH"' in script
+    # belt-and-braces against workflow triggers (all are dispatch-only anyway)
+    assert "[skip ci]" in script
+    # decision summaries in, collection corpora out
+    for included in (
+        "outputs/polymarket_model_governance",
+        "outputs/maker_carry",
+        "outputs/ops_scheduler",
+    ):
+        assert included in script
+    for excluded in (
+        "polymarket_training",
+        "polymarket_websocket",
+        "polymarket_trade_prints",
+    ):
+        assert excluded not in script.replace(
+            "outputs/polymarket_training archive", ""
+        ), f"heavy dir {excluded} must not be whitelisted"
+    # official book snapshots live under maker_carry but stay on the VPS
+    assert "official_books" in script

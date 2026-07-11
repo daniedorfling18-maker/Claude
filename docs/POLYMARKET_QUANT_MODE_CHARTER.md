@@ -511,6 +511,12 @@ markets to point-in-time pre-close prices and writes
 calibration, isotonic-smoothed frequencies, clustered bootstrap CIs, and BH-FDR-filtered candidate
 bins. This is study-only and does not authorise trades.
 
+**2026-07-11 — WO-56 landed by Codex in PR #134.** Maker-carry coverage now pre-screens rewarded
+markets by achievable gross at minimum quote size, records pot/yield rank and scan mode, and falls
+back to pot ranking if book screening fails. All thin-book, band, resolution, adverse-selection,
+payout, registered-$500, and distinct-day gate semantics remain unchanged. Evidence stays under
+`outputs/maker_carry/`.
+
 **2026-07-11 — WO-57 implemented by Codex.** Maker-carry reporting now emits a supplementary
 capital-to-target curve at $250/$500/$1,000/$2,000/$5,000 caps in
 `outputs/maker_carry/maker_carry_study.json` and the human quote sheet. The registered $500

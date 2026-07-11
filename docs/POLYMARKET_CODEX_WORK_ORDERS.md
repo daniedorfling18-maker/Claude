@@ -2107,6 +2107,12 @@ Spec (constraint 8: supplementary reporting only):
 
 ## WO-58 — Patch: wallet-intelligence leaderboard host (WO-37 follow-up)
 
+Status: LANDED by Codex on 2026-07-11 in PR #131. Leaderboard collection now
+probes public `/v1/leaderboard` before the legacy path, and empty websocket
+tracking falls back through maker-carry candidates/study and trade-print
+ledgers. Artifacts remain `outputs/wallet_intelligence/leaderboard_history.csv`,
+`holders_history.csv`, and `wallet_intelligence_summary.json`.
+
 `GET data-api.polymarket.com/leaderboard` 404s in production (see
 wallet_intelligence_summary.json errors). Find the correct public
 leaderboard endpoint (the docs assimilation catalogue lists a dedicated

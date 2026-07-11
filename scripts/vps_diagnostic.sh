@@ -29,6 +29,7 @@ sec() {
 
   sec "HOST: kernel / uptime / load"
   uname -a 2>/dev/null || true
+  echo "cpu_count: $(nproc 2>/dev/null || echo unknown)"
   uptime 2>/dev/null || true
 
   sec "HOST: memory (MB)"

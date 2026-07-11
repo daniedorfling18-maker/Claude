@@ -2135,6 +2135,13 @@ large-sample limit; ladder still binds when smaller.
 
 ## WO-60 — Per-system performance factsheet (Sharpe, Sortino, investment stats)
 
+Status: IMPLEMENTED by Codex on 2026-07-11. CLI `performance-factsheet`
+writes `outputs/performance/performance_factsheet.json` and `.md`, classifies
+paper/shadow/modeled/live-real-money evidence, enforces the daily sample floor,
+and renders a dashboard section. Shadow cohort CSV evidence now accrues one
+latest snapshot per cohort per UTC day. Reporting only; no gate or policy reads
+these artifacts.
+
 Fund-grade descriptive statistics for every money-shaped series the system
 produces, honestly labelled by evidence class, and packaged so that IF the
 live test ever earns real numbers, the factsheet is already accumulating

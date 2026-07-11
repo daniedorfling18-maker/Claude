@@ -522,6 +522,13 @@ through `risk.shrunk_kelly_fraction`, using a tighten-only 20-daily-observation 
 Short histories shrink toward the no-edge prior, while 20+ observations reproduce the registered
 inline value. The frozen ladder remains the outer cap; no gate, action table, or order path changed.
 
+**2026-07-11 — WO-60 implemented by Codex.** CLI `performance-factsheet` packages daily Sharpe,
+Sortino, drawdown, Calmar, hit-rate, profit-factor, and bootstrap Sharpe intervals in
+`outputs/performance/performance_factsheet.json` and `.md`, with an evidence-classed dashboard
+section. Annualised fields stay null below 20 daily observations; every paper/shadow/modeled row is
+stamped simulated, and only sample-qualified `maker_live_test` evidence can ever be presentation
+ready. This reporting artifact is not read by any gate, policy, sizing, broker, or order path.
+
 ## Rules of engagement for coding agents
 
 0. **Division of labour**: the orchestrating agent writes/updates this charter and the work orders

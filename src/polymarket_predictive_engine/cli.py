@@ -52,6 +52,7 @@ from .paper_cycle import run_paper_cycle
 from .paper_edge_simulator import simulate_paper_edge
 from .paper_round_trip import build_paper_round_trip_evidence
 from .paper_session import run_paper_session
+from .performance_factsheet import build_performance_factsheet
 from .pipeline_health import pipeline_health
 from .pipeline_inventory import pipeline_inventory
 from .portfolio import portfolio_snapshot, reconciliation_report
@@ -113,6 +114,7 @@ COMMANDS = [
     "maker-live-test",
     "flow-toxicity",
     "decision-policy",
+    "performance-factsheet",
     "hourly-adverse-study",
     "scan-event-groups",
     "scan-implication-networks",
@@ -310,6 +312,8 @@ def main(argv: list[str] | None = None) -> int:
             _print(build_flow_toxicity(cfg))
         elif args.command == "decision-policy":
             _print(run_decision_policy(cfg))
+        elif args.command == "performance-factsheet":
+            _print(build_performance_factsheet(cfg))
         elif args.command == "hourly-adverse-study":
             _print(run_hourly_adverse_study(cfg))
         elif args.command == "scan-event-groups":

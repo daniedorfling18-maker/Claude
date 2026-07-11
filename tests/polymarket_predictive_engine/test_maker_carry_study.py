@@ -125,6 +125,74 @@ def _deep_book(mid: float = 0.5) -> dict[str, Any]:
     }
 
 
+def _scan_market(token: str, pot: float, pot_rank: int) -> dict[str, Any]:
+    return {
+        "question": f"{token} market",
+        "condition_id": f"0x{token}",
+        "token_id": token,
+        "complement_token_id": f"{token}-no",
+        "pot_usd_per_day": pot,
+        "pot_rank": pot_rank,
+        "yield_rank": "",
+        "expected_gross_at_min_size": "",
+        "rewards_min_size_shares": 10.0,
+        "rewards_max_spread_cents": 2.0,
+    }
+
+
+def test_yield_first_scan_selects_smaller_under_competed_pot(tmp_path, monkeypatch):
+    cfg = _config(tmp_path)
+    settings = maker_carry_study._settings(cfg)
+    settings["max_book_candidates"] = 1
+    settings["yield_scan_max_markets"] = 2
+    universe = [_scan_market("crowded", 1_000.0, 1), _scan_market("open", 100.0, 2)]
+    books = {
+        "crowded": _deep_book(),
+        "crowded-no": _deep_book(),
+        "open": {
+            "bids": [{"price": "0.49", "size": "200"}],
+            "asks": [{"price": "0.51", "size": "200"}],
+        },
+        "open-no": {
+            "bids": [{"price": "0.49", "size": "200"}],
+            "asks": [{"price": "0.51", "size": "200"}],
+        },
+    }
+    monkeypatch.setattr(maker_carry_study, "_fetch_books", lambda _settings, _tokens: books)
+
+    selected, scan = maker_carry_study._yield_first_shortlist(settings, universe, [0.5])
+
+    assert selected[0]["condition_id"] == "0xopen"
+    assert selected[0]["pot_rank"] == 2
+    assert selected[0]["yield_rank"] == 1
+    assert selected[0]["expected_gross_at_min_size"] > 0
+    assert scan["universe_scan_mode"] == "yield_first_v1"
+    assert scan["yield_scan_considered_markets"] == 2
+    assert scan["yield_scan_scored_markets"] == 2
+    assert scan["yield_scan_fallback"] is False
+
+
+def test_yield_first_scan_fails_soft_to_pot_rank(tmp_path, monkeypatch):
+    cfg = _config(tmp_path)
+    settings = maker_carry_study._settings(cfg)
+    settings["max_book_candidates"] = 1
+    settings["yield_scan_max_markets"] = 2
+    universe = [_scan_market("large", 1_000.0, 1), _scan_market("small", 100.0, 2)]
+
+    def fail_books(_settings, _tokens):
+        raise RuntimeError("synthetic book outage")
+
+    monkeypatch.setattr(maker_carry_study, "_fetch_books", fail_books)
+
+    selected, scan = maker_carry_study._yield_first_shortlist(settings, universe, [0.5])
+
+    assert selected[0]["condition_id"] == "0xlarge"
+    assert selected[0]["pot_rank"] == 1
+    assert scan["universe_scan_mode"] == "pot_rank_fallback"
+    assert scan["yield_scan_fallback"] is True
+    assert "synthetic book outage" in scan["yield_scan_error"]
+
+
 def test_published_share_model_worked_example_uses_market_and_complement(tmp_path, monkeypatch):
     cfg = _config(tmp_path)
     settings = maker_carry_study._settings(cfg)
@@ -356,6 +424,8 @@ def test_sized_portfolio_scales_within_capital_cap_and_never_trades(tmp_path, mo
     summary = run_maker_carry_study(cfg)
 
     assert summary["status"] == "ok"
+    assert summary["universe_scan_mode"] == "yield_first_v1"
+    assert summary["yield_scan_fallback"] is False
     assert summary["portfolio_markets"] == 1
     entry = summary["portfolio"][0]
     # Zero measured pick-off + diminishing share returns: size to the largest
@@ -372,8 +442,12 @@ def test_sized_portfolio_scales_within_capital_cap_and_never_trades(tmp_path, mo
     assert persisted["portfolio_net_carry_usd_per_day"] == summary["portfolio_net_carry_usd_per_day"]
     history = read_csv_rows(cfg.output_root / "maker_carry" / "maker_carry_history.csv")
     assert len(history) == 1
+    assert history[0]["universe_scan_mode"] == "yield_first_v1"
     assert history[0]["top_portfolio_market"] == "0xcalm"
     assert history[0]["top_portfolio_question"] == "deep calm market"
+    candidate = read_csv_rows(cfg.output_root / "maker_carry" / "maker_carry_candidates.csv")[0]
+    assert candidate["pot_rank"] == "1"
+    assert candidate["yield_rank"] == "1"
 
     # A second run appends to the trend ledger instead of overwriting it.
     run_maker_carry_study(cfg)

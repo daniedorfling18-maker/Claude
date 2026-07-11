@@ -227,6 +227,8 @@ ledger_anchor:
     - {glob: performance/wallet_contract_registry.json, mode: snapshot}
     - {glob: performance/wallet_reconciliation_history.csv, mode: append_only}
     - {glob: performance/wallet_gas_observations.csv, mode: append_only}
+    - {glob: performance/cost_ledger.csv, mode: append_only}
+    - {glob: performance/cost_ledger_summary.json, mode: snapshot}
 
 # 2026-07-11 WO-64: generate the investment policy directly from frozen code
 # constants plus the loaded effective VPS configuration. Reporting only; no
@@ -289,6 +291,21 @@ wallet_reconciliation:
   gas_payer_addresses: []
   max_history_rows: 10000
   max_gas_rows: 100000
+
+# 2026-07-11 WO-63: append-only investor cost accounting. Only gas paid by the
+# configured wallet/signers is booked; relayer-paid transactions stay visible
+# in WO-62 observations but are excluded. CoinGecko is key-less and fail-soft:
+# if POL/USD is unavailable the summary names each required manual entry.
+cost_ledger:
+  enabled: true
+  ledger_file: performance/cost_ledger.csv
+  summary_file: performance/cost_ledger_summary.json
+  gas_observations_file: performance/wallet_gas_observations.csv
+  coingecko_simple_price_url: https://api.coingecko.com/api/v3/simple/price
+  pol_coin_id: polygon-ecosystem-token
+  request_timeout_seconds: 20
+  request_pause_seconds: 0.1
+  lock_stale_seconds: 1800
 # 2026-07-09 WO-34: negRisk event groups must price to $1; the detector logs
 # net-of-fee deviations every scan (persistence = recurrence). Second
 # registered edge class; needs NO odds credits. Measurement only.

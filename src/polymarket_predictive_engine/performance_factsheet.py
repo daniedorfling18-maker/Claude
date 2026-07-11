@@ -16,6 +16,7 @@ import random
 from typing import Any, Callable
 
 from .config import EngineConfig, load_config
+from .cost_ledger import aggregate_costs, registered_hypothetical_cost_stack
 from .utils import now_utc, parse_timestamp, read_csv_rows, read_json, safe_float, write_json
 
 
@@ -256,6 +257,8 @@ def _metric_section(
     return_basis: str,
     unavailable_reason: str = "",
     external_ready_prerequisite: bool = True,
+    hypothetical_turnover_usd: float | None = None,
+    hypothetical_turnover_basis: str = "",
 ) -> dict[str, Any]:
     stats = _performance_stats(returns, dates=dates, settings=settings, series_id=series_id)
     is_live = evidence_class == "live_real_money"
@@ -271,6 +274,10 @@ def _metric_section(
         "status": "ok" if stats["n_days"] else "insufficient_daily_data",
         "unavailable_reason": unavailable_reason if not stats["n_days"] else "",
         "cumulative_pnl_usd": round(sum(daily_pnl), 8) if daily_pnl else None,
+        "hypothetical_turnover_usd": (
+            None if hypothetical_turnover_usd is None else round(max(0.0, hypothetical_turnover_usd), 8)
+        ),
+        "hypothetical_turnover_basis": hypothetical_turnover_basis,
         "external_presentation_eligible": is_live,
         "external_presentation_ready": bool(
             is_live and external_ready_prerequisite and stats["annualised_metrics_available"]
@@ -301,6 +308,8 @@ def _paper_section(cfg: EngineConfig, settings: dict[str, Any]) -> dict[str, Any
         returns.append(current / previous - 1.0)
         dates.append(day)
         pnl.append(current - previous)
+    fills = read_csv_rows(cfg.output_root / "polymarket_portfolio" / "paper_fills.csv")
+    turnover = sum(abs(safe_float(row.get("gross_notional_usdc")) or 0.0) for row in fills)
     return _metric_section(
         system_id="paper_portfolio",
         series_id="paper_portfolio",
@@ -314,6 +323,8 @@ def _paper_section(cfg: EngineConfig, settings: dict[str, Any]) -> dict[str, Any
         settings=settings,
         return_basis="last paper equity per UTC day; close-to-close percentage return",
         unavailable_reason="need at least two UTC days with positive paper equity",
+        hypothetical_turnover_usd=turnover,
+        hypothetical_turnover_basis="sum of absolute paper fill gross notional across both sides",
     )
 
 
@@ -382,6 +393,7 @@ def _shadow_sections(cfg: EngineConfig, settings: dict[str, Any]) -> list[dict[s
     for cohort, cohort_rows in sorted(by_cohort.items()):
         daily = _last_per_day(cohort_rows)
         returns, dates, pnl = _level_returns(daily, _shadow_level, _shadow_cumulative_pnl)
+        turnover = max((safe_float(row.get("shadow_total_buy_cost_usdc")) or 0.0 for row in cohort_rows), default=0.0)
         sections.append(
             _metric_section(
                 system_id="shadow_signal_cohorts",
@@ -396,6 +408,8 @@ def _shadow_sections(cfg: EngineConfig, settings: dict[str, Any]) -> list[dict[s
                 settings=settings,
                 return_basis="dated cumulative shadow ROI snapshots converted to daily returns",
                 unavailable_reason="shadow cohort CSV has no dated daily ROI/PnL history",
+                hypothetical_turnover_usd=turnover,
+                hypothetical_turnover_basis="latest cumulative shadow buy cost for this cohort",
             )
         )
         for day, row in daily:
@@ -438,6 +452,11 @@ def _shadow_sections(cfg: EngineConfig, settings: dict[str, Any]) -> list[dict[s
         settings=settings,
         return_basis="capital-weighted aggregate of dated cumulative shadow cohort ROI snapshots",
         unavailable_reason="shadow cohort CSV has no dated daily ROI/PnL history",
+        hypothetical_turnover_usd=sum(
+            max((safe_float(row.get("shadow_total_buy_cost_usdc")) or 0.0 for row in cohort_rows), default=0.0)
+            for cohort_rows in by_cohort.values()
+        ),
+        hypothetical_turnover_basis="sum of latest cumulative shadow buy cost across cohorts",
     )
     return [aggregate, *sections]
 
@@ -456,6 +475,7 @@ def _maker_model_section(cfg: EngineConfig, settings: dict[str, Any]) -> dict[st
         returns.append(net / capital)
         dates.append(day)
         pnl.append(net)
+    modeled_capital = max((safe_float(row.get("portfolio_capital_usd")) or 0.0 for row in rows), default=0.0)
     return _metric_section(
         system_id="maker_carry_model",
         series_id="maker_carry_model",
@@ -469,6 +489,8 @@ def _maker_model_section(cfg: EngineConfig, settings: dict[str, Any]) -> dict[st
         settings=settings,
         return_basis="daily modelled net carry divided by modelled portfolio capital",
         unavailable_reason="need dated maker model rows with positive portfolio capital",
+        hypothetical_turnover_usd=modeled_capital,
+        hypothetical_turnover_basis="one conservative turn of maximum modeled portfolio capital",
     )
 
 
@@ -514,6 +536,59 @@ def _maker_live_section(cfg: EngineConfig, settings: dict[str, Any]) -> dict[str
         unavailable_reason="no dated maker live-test history from a configured wallet",
         external_ready_prerequisite=wallet_configured,
     )
+
+
+def _apply_cost_accounting(
+    cfg: EngineConfig,
+    series: list[dict[str, Any]],
+) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    """Add actual live costs and scenario-only simulated execution drag."""
+
+    stack = registered_hypothetical_cost_stack(cfg)
+    rate = float(stack["registered_ceiling_per_dollar"])
+    for row in series:
+        gross = safe_float(row.get("cumulative_pnl_usd"))
+        if row.get("evidence_class") == "live_real_money":
+            costs = aggregate_costs(
+                cfg,
+                start_date=row.get("start_date"),
+                end_date=row.get("end_date"),
+            )
+            booked = float(costs["total_usd"])
+            row.update(
+                {
+                    "gross_cumulative_pnl_usd": None if gross is None else round(gross, 8),
+                    "booked_costs_usd": round(booked, 8),
+                    "net_net_cumulative_pnl_usd": None if gross is None else round(gross - booked, 8),
+                    "net_of_all_costs": {
+                        "gross_usd": None if gross is None else round(gross, 8),
+                        "booked_costs_usd": round(booked, 8),
+                        "net_net_usd": None if gross is None else round(gross - booked, 8),
+                        "window": {"start_date": row.get("start_date"), "end_date": row.get("end_date")},
+                        "by_category_usd": costs["by_category_usd"],
+                        "actual_booked_costs": True,
+                    },
+                }
+            )
+            row.pop("hypothetical_turnover_usd", None)
+            row.pop("hypothetical_turnover_basis", None)
+            continue
+
+        turnover = safe_float(row.get("hypothetical_turnover_usd")) or 0.0
+        drag = turnover * rate
+        row["hypothetical_cost_drag"] = {
+            "turnover_usd": round(turnover, 8),
+            "turnover_basis": row.get("hypothetical_turnover_basis") or "turnover unavailable",
+            "registered_ceiling_per_dollar": round(rate, 8),
+            "usd_per_100_turnover": stack["usd_per_100_turnover"],
+            "components": stack["components"],
+            "estimated_drag_usd": round(drag, 8),
+            "gross_cumulative_pnl_usd": None if gross is None else round(gross, 8),
+            "hypothetical_net_after_drag_usd": None if gross is None else round(gross - drag, 8),
+            "scenario_only": True,
+            "booked_to_cost_ledger": False,
+        }
+    return series, stack
 
 
 def _fmt(value: Any, *, percent: bool = False) -> str:
@@ -578,8 +653,22 @@ def _write_markdown(path: Path, payload: dict[str, Any]) -> None:
             f"- Annualisation note: {row.get('annualised_metrics_reason') or 'sample floor met'}",
             f"- Return basis: {row.get('return_basis')}",
             f"- External presentation ready: **{str(bool(row.get('external_presentation_ready'))).lower()}**",
-            "",
         ]
+        if row.get("evidence_class") == "live_real_money":
+            net = row.get("net_of_all_costs") or {}
+            lines.append(
+                f"- Net of all costs: gross {_fmt_usd(net.get('gross_usd'))} - booked costs "
+                f"{_fmt_usd(net.get('booked_costs_usd'))} = **net-net {_fmt_usd(net.get('net_net_usd'))}**"
+            )
+        else:
+            drag = row.get("hypothetical_cost_drag") or {}
+            lines.append(
+                f"- Hypothetical cost drag: {_fmt_usd(drag.get('estimated_drag_usd'))} on "
+                f"{_fmt_usd(drag.get('turnover_usd'))} turnover at the registered "
+                f"{_fmt(drag.get('registered_ceiling_per_dollar'), percent=True)} ceiling "
+                "(scenario only; not booked)"
+            )
+        lines.append("")
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text("\n".join(lines).rstrip() + "\n", encoding="utf-8")
 
@@ -590,6 +679,7 @@ def build_performance_factsheet(cfg: EngineConfig) -> dict[str, Any]:
     json_path = out_root / "performance_factsheet.json"
     markdown_path = out_root / "performance_factsheet.md"
     wallet_reconciliation = read_json(out_root / "wallet_reconciliation.json", default={}) or {}
+    cost_ledger_summary = read_json(out_root / "cost_ledger_summary.json", default={}) or {}
     payload: dict[str, Any] = {
         "status": "disabled",
         "generated_at_utc": now_utc(),
@@ -599,6 +689,7 @@ def build_performance_factsheet(cfg: EngineConfig) -> dict[str, Any]:
         "paper_trading_invoked": False,
         "live_trading_invoked": False,
         "wallet_reconciliation": wallet_reconciliation,
+        "cost_ledger": cost_ledger_summary,
     }
     if str(settings.get("enabled", True)).strip().lower() in {"0", "false", "no", "off"}:
         write_json(json_path, payload)
@@ -611,6 +702,7 @@ def build_performance_factsheet(cfg: EngineConfig) -> dict[str, Any]:
         _maker_model_section(cfg, settings),
         _maker_live_section(cfg, settings),
     ]
+    series, hypothetical_cost_stack = _apply_cost_accounting(cfg, series)
     payload.update(
         {
             "status": "ok",
@@ -622,6 +714,7 @@ def build_performance_factsheet(cfg: EngineConfig) -> dict[str, Any]:
                 "periods_per_year": int(settings["periods_per_year"]),
             },
             "series": series,
+            "registered_hypothetical_cost_stack": hypothetical_cost_stack,
             "series_count": len(series),
             "annualised_series_count": sum(1 for row in series if row.get("annualised_metrics_available")),
             "external_presentation_ready_series": [

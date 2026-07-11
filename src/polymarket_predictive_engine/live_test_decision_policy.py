@@ -16,9 +16,11 @@ import re
 from typing import Any
 
 from .config import EngineConfig, load_config
+from .risk import shrunk_kelly_fraction
 from .utils import now_utc, parse_timestamp, read_csv_rows, read_json, safe_float, write_json
 
 REGISTERED_AT_UTC = "2026-07-10T00:00:00Z"
+KELLY_FULL_WEIGHT_DAYS_FLOOR = 20
 
 DEFAULT_SETTINGS: dict[str, Any] = {
     "enabled": True,
@@ -39,6 +41,10 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     "fill_alert_multiple": 2.0,
     "kelly_fraction_cap": 1.0,
     "quarter_kelly_multiplier": 0.25,
+    # 2026-07-11 WO-59 tighten-only amendment: short maker histories are
+    # shrunk toward the no-edge prior. Overrides may lengthen, never shorten,
+    # the 20-observation evidence floor.
+    "kelly_full_weight_days": KELLY_FULL_WEIGHT_DAYS_FLOOR,
 }
 
 
@@ -231,6 +237,10 @@ def _quarter_kelly_cap(history: list[dict[str, Any]], ladder_cap: float, setting
             "daily_net_mean_usd": values[0] if values else None,
             "daily_net_std_usd": None,
             "quarter_kelly_fraction": None,
+            "inline_quarter_kelly_fraction": None,
+            "kelly_shrinkage": None,
+            "kelly_observations": len(values),
+            "kelly_lineage": "risk.shrunk_kelly_fraction",
             "kelly_capital_usd": ladder_cap,
             "binding_capital_usd": ladder_cap,
             "binding_cap": "ladder_no_kelly_history",
@@ -242,13 +252,39 @@ def _quarter_kelly_cap(history: list[dict[str, Any]], ladder_cap: float, setting
         raw_fraction = float(settings["kelly_fraction_cap"]) if mean > 0 else 0.0
     else:
         raw_fraction = max(0.0, mean / (std * std))
-    quarter = min(float(settings["kelly_fraction_cap"]), raw_fraction * float(settings["quarter_kelly_multiplier"]))
+    fraction_cap = min(1.0, max(0.0, float(settings["kelly_fraction_cap"])))
+    inline_quarter = min(fraction_cap, raw_fraction * float(settings["quarter_kelly_multiplier"]))
+    full_weight_days = max(
+        KELLY_FULL_WEIGHT_DAYS_FLOOR,
+        int(settings.get("kelly_full_weight_days") or KELLY_FULL_WEIGHT_DAYS_FLOOR),
+    )
+    shrinkage = max(0.0, min(1.0, 1.0 - len(values) / full_weight_days))
+    # 2026-07-11 WO-59 tighten-only adapter: at a 0.50 no-edge price,
+    # p=0.50+f/2 has plain Kelly fraction f. The shared uncertainty shrinker
+    # therefore pulls the old inline quarter-Kelly ceiling toward zero and is
+    # mathematically incapable of making it larger. At the evidence floor,
+    # shrinkage reaches zero and reproduces the registered inline value.
+    effective_probability = 0.5 + inline_quarter / 2.0
+    quarter = min(
+        inline_quarter,
+        shrunk_kelly_fraction(
+            effective_probability,
+            0.5,
+            fraction_cap,
+            shrinkage=shrinkage,
+        ),
+    )
     kelly_capital = round(ladder_cap * quarter, 4)
     binding = min(ladder_cap, kelly_capital)
     return {
         "daily_net_mean_usd": round(mean, 6),
         "daily_net_std_usd": round(std, 6),
         "quarter_kelly_fraction": round(quarter, 6),
+        "inline_quarter_kelly_fraction": round(inline_quarter, 6),
+        "kelly_shrinkage": round(shrinkage, 6),
+        "kelly_observations": len(values),
+        "kelly_full_weight_days": full_weight_days,
+        "kelly_lineage": "risk.shrunk_kelly_fraction",
         "kelly_capital_usd": kelly_capital,
         "binding_capital_usd": binding,
         "binding_cap": "quarter_kelly" if kelly_capital < ladder_cap else "ladder",

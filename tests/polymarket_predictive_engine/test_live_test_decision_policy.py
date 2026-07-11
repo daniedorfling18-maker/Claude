@@ -223,6 +223,47 @@ def test_quarter_kelly_cap_binds_below_ladder(tmp_path):
     assert result["ladder_stage_permitted"] == 1
     assert result["sizing"]["binding_cap"] == "quarter_kelly"
     assert result["sizing"]["binding_capital_usd"] < result["ladder"]["ladder_capital_usd"]
+    assert result["sizing"]["quarter_kelly_fraction"] < result["sizing"]["inline_quarter_kelly_fraction"]
+    assert result["sizing"]["kelly_lineage"] == "risk.shrunk_kelly_fraction"
+
+
+def test_short_history_shrunk_kelly_cannot_exceed_inline_cap():
+    settings = dict(policy.DEFAULT_SETTINGS)
+    settings["kelly_full_weight_days"] = 2  # tighten-only floor must ignore this loosening attempt
+    history = _history(["0xm1"] * 7, nets=[1.0, 9.0, 1.0, 9.0, 1.0, 9.0, 1.0])
+
+    sizing = policy._quarter_kelly_cap(history, 250.0, settings)
+
+    assert sizing["kelly_observations"] == 7
+    assert sizing["kelly_full_weight_days"] == 20
+    assert sizing["kelly_shrinkage"] == 0.65
+    assert 0 < sizing["quarter_kelly_fraction"] < sizing["inline_quarter_kelly_fraction"]
+    assert sizing["kelly_capital_usd"] <= 250.0 * sizing["inline_quarter_kelly_fraction"]
+
+
+def test_shrunk_kelly_equals_inline_at_large_sample_floor():
+    settings = dict(policy.DEFAULT_SETTINGS)
+    history = _history(["0xm1"] * 20, nets=[1.0, 9.0] * 10)
+
+    sizing = policy._quarter_kelly_cap(history, 250.0, settings)
+
+    assert sizing["kelly_observations"] == 20
+    assert sizing["kelly_shrinkage"] == 0.0
+    assert sizing["quarter_kelly_fraction"] == sizing["inline_quarter_kelly_fraction"]
+
+
+def test_ladder_still_binds_when_it_is_the_smaller_ceiling():
+    settings = dict(policy.DEFAULT_SETTINGS)
+    settings["quarter_kelly_multiplier"] = 1.0
+    history = _history(["0xm1"] * 20, nets=[5.0] * 20)
+
+    sizing = policy._quarter_kelly_cap(history, 100.0, settings)
+
+    assert sizing["inline_quarter_kelly_fraction"] == 1.0
+    assert sizing["quarter_kelly_fraction"] == 1.0
+    assert sizing["kelly_capital_usd"] == 100.0
+    assert sizing["binding_capital_usd"] == 100.0
+    assert sizing["binding_cap"] == "ladder"
 
 
 def test_each_kill_criterion_trips_individually(tmp_path):

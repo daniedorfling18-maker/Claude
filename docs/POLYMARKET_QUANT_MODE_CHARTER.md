@@ -517,6 +517,11 @@ capital-to-target curve at $250/$500/$1,000/$2,000/$5,000 caps in
 `portfolio_net_carry_usd_per_day` calculation and every M-gate use the same unchanged sizing path;
 the curve is explicitly an uncounted planning aid and is never read by policy or gate code.
 
+**2026-07-11 — WO-59 implemented by Codex.** The WO-50 advisory quarter-Kelly ceiling now passes
+through `risk.shrunk_kelly_fraction`, using a tighten-only 20-daily-observation evidence floor.
+Short histories shrink toward the no-edge prior, while 20+ observations reproduce the registered
+inline value. The frozen ladder remains the outer cap; no gate, action table, or order path changed.
+
 ## Rules of engagement for coding agents
 
 0. **Division of labour**: the orchestrating agent writes/updates this charter and the work orders

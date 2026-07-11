@@ -413,3 +413,13 @@ Personal unlimited relayer txns via Relayer API key without routing for others.
 | GET | `/tags` | List tags | gamma |
 | GET | `/builder/trades` | Get builder trades | clob |
 | GET | `/data/trades` | Get trades | clob |
+
+
+## Errata (2026-07-11)
+
+- Collateral: Polymarket trading collateral is **pUSD** (ERC-20 on
+  Polygon, backed 1:1 by USDC.e via onramp
+  0x93070a847efEf7F70739046A929D47a521F5B8ee; see
+  docs.polymarket.com/concepts/pusd). Earlier sections of this file
+  that say USDC/USDC.e describe the pre-pUSD arrangement; deposits in
+  USDC.e auto-wrap 1:1, so funding-path guidance is unchanged.

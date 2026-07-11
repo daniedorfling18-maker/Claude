@@ -14,7 +14,7 @@ zombie grinding, no sunk-cost continuation.
    AI-orchestrated quant shop — orchestrator agent as quant lead, builder
    agent executing written work orders, human as operator — governed by
    pre-registered gates, tighten-only amendments, planted-truth tests,
-   FDR discipline, telemetry, tamper-evident records (batch 5). Built by
+   FDR discipline, telemetry, tamper-evident records (batch 5 - specified, in build). Built by
    one person in under two weeks. **This is rarer than the edge.**
 3. **A data asset that compounds daily**: full-ladder order-book history,
    reward-pool competition dynamics, print-level flow toxicity, resolved

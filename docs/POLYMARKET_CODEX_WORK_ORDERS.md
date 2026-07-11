@@ -1,6 +1,7 @@
 # Polymarket Codex Work Orders
 
-Last updated: 2026-07-05 (WO-1..WO-30 landed; **WO-31 is the only open work order**; WP13 is a venue
+Last updated: 2026-07-11 (WO-1..WO-60 landed; **open queue: batch 5 WO-61..65, then WO-47**;
+WO-48 blocked behind maker gates, WO-33 last pending leakage review; WP13 is a venue
 decision, not a WO. Crypto up/down is frozen as a diagnostic — see `AGENTS.md`. Read
 `docs/POLYMARKET_EDGE_STRATEGY_RESET.md` first.)
 
@@ -2217,11 +2218,19 @@ Spec:
    (enabled, ledger globs: portfolio snapshots, cash ledger, paper fills,
    settlements, shadow positions/fills, maker_carry_history, live-test
    history, decision_policy.json).
-2. Daily: compute sha256 per ledger + a chain head
-   H_today = sha256(H_yesterday || all file hashes || date). Append to
-   `outputs/performance/ledger_anchor_chain.csv` (append-only). The chain
-   head rides the telemetry push, so every day's head is timestamped in
-   git history on GitHub - an external, hard-to-rewrite anchor.
+2. Daily, PER LEDGER: record (byte_length, sha256 of the first
+   byte_length bytes). Append-only ledgers legitimately grow, so whole-file
+   hashes go stale on every append; prefix hashes stay verifiable forever:
+   today's file's first N bytes must still hash to day N's prefix hash.
+   Chain head H_today = sha256(H_yesterday || all (path, len, hash) tuples
+   || date), appended to `outputs/performance/ledger_anchor_chain.csv`.
+   (2026-07-11 pre-build amendment from the builder's audit.)
+2b. External anchor: push each day's chain-head file as a CHILD commit to a
+   dedicated `vps-anchor` branch (append-only history; commits are tiny).
+   The telemetry branch is force-replaced by design and is NOT a durable
+   anchor - do not use it for this. (Same amendment.)
+2c. The ledger registry is config-extensible so WO-63's cost ledger (and
+   future ledgers) enrol without code changes.
 3. CLI `verify-ledger-chain` recomputes and reports the first broken link
    if any ledger changed retroactively.
 4. Tests: chain verifies on untouched ledgers; single-byte edit in an old
@@ -2236,10 +2245,17 @@ we do not control. Polygon is public - use it.
 Spec:
 1. Module `wallet_reconciliation.py`, CLI `reconcile-wallet`, inert until
    `maker_live_test.wallet_address` is set (mirrors WO-36's guard).
-2. Daily three-way check: (a) internal live-test scoreboard net;
-   (b) data-api /activity + /positions for the wallet; (c) on-chain USDC
-   balance via a key-less Polygon RPC (POL/USDC balanceOf) + collateral
-   in positions. Report per-day deltas and a reconciliation_status
+2. Daily three-way check, in LIKE-FOR-LIKE NAV terms (2026-07-11
+   pre-build amendment, verified against docs.polymarket.com/concepts/pusd:
+   trading collateral is pUSD, an ERC-20 on Polygon backed 1:1 by USDC.e
+   via onramp 0x93070a847efEf7F70739046A929D47a521F5B8ee / offramp):
+   (a) internal live-test scoreboard NAV (cash + marked positions + accrued
+   rewards, adjusted for deposits/withdrawals);
+   (b) data-api /activity + /positions NAV for the wallet;
+   (c) on-chain NAV via key-less Polygon RPC: pUSD balanceOf + marked
+   ERC-1155 position values. Collateral/CTF contract addresses read from
+   the official contracts page at build time - never hardcoded from
+   memory. Report per-day deltas and reconciliation_status
    (clean / explained / DISCREPANCY with $ size).
 3. Any unexplained discrepancy > $1 renders a red banner in the factsheet
    and quote sheet (reporting only - humans act).
@@ -2253,8 +2269,13 @@ data subscriptions.
 
 Spec:
 1. `outputs/performance/cost_ledger.csv` (append-only; date, category
-   [gas|rail|subscription|other], usd, note) + CLI `add-cost` for manual
-   entries (rails) and automatic gas capture from the WO-62 on-chain scan.
+   [gas|rail|subscription|other], usd, cost_ref, note). `cost_ref` is a
+   unique idempotency key (e.g. tx hash) so re-scans never double-count.
+   CLI `add-cost` for manual entries (rails, subscriptions); automatic gas
+   capture is a HOOK filled by WO-62's on-chain scan (build order moved to
+   after WO-62 accordingly - 2026-07-11 pre-build amendment). POL-to-USD
+   conversion via a named key-less source (CoinGecko simple-price),
+   fail-soft to manual entry when unavailable.
 2. WO-60's factsheet gains a "net of all costs" line per live section:
    gross, costs, net-net. Paper/model sections show hypothetical cost
    drag using the registered fee/haircut stack.
@@ -2270,8 +2291,14 @@ Spec:
 1. Module `ips_render.py`, CLI `render-ips`: reads the FROZEN WO-50 policy
    constants, maker gates registration, verdict gates + amendments 1-7,
    quote-sheet standing rules, and kill criteria, and renders
-   `outputs/performance/investment_policy_statement.md` with a sha256 of
-   the source constants embedded ("these limits are code; hash X").
+   `outputs/performance/investment_policy_statement.md` with TWO sha256
+   hashes embedded: source defaults AND the effective VPS configuration
+   (config overrides included) - the IPS must describe the policy as
+   deployed, not just as coded. (2026-07-11 pre-build amendment.)
+1b. Prerequisite refactor: extract the quote-sheet standing rules from the
+   generated markdown into a structured constant (list of rule dicts) that
+   BOTH the quote sheet and the IPS render from - never parse generated
+   prose. (Same amendment.)
 2. Includes the risk annex: current exposure/concentration from the
    portfolio ledgers and the WO-12 VaR machinery, capacity statement from
    WO-57's capital curve.
@@ -2289,7 +2316,12 @@ Spec:
    `vps-archive` branch (single-commit, force-pushed, same pattern as
    telemetry; size-capped, ledgers only - never the heavy corpora).
 2. `scripts/restore_from_archive.sh --dry-run` verifies the archive
-   unpacks and the WO-61 chain still verifies against it.
+   unpacks and the WO-61 chain verifies AS OF the snapshot date (prefix
+   hashes make this well-defined). Explicit parameters (2026-07-11
+   pre-build amendment): RPO = 7 days at paper stage, MUST tighten to
+   24h before live capital (dated change); archive size cap 50MB
+   (ledgers only, incl. the WO-63 cost ledger); on failure the job exits
+   nonzero, stamps status, and the miss is telemetry-visible.
 3. Docs: a RESTORE.md runbook (fresh VPS to running stack, RTO target
    < 1 day).
 4. Tests: snapshot round-trip in tmpdir; chain verification post-restore;
@@ -2298,8 +2330,9 @@ Spec:
 ## Priority order for Codex (updated 2026-07-11, batch 4 filed)
 
 Batch 4 in order: **WO-58 -> WO-56 -> WO-57 -> WO-59 -> WO-60**. Then batch 5
-(investor-grade evidence infra): **WO-61 -> WO-64 -> WO-63 -> WO-65 -> WO-62**
-(62 last - it is inert until a wallet exists) (58 is a
+(investor-grade evidence infra): **WO-61 -> WO-64 -> WO-62 -> WO-63 -> WO-65**
+(2026-07-11 reorder from the builder's audit: 63's gas capture hangs off 62's
+on-chain scan; 62 stays inert until a wallet exists but its code builds now) (58 is a
 five-line unblock for the toxicity lane; 56 changes what tomorrow's runs
 measure, so it should land before more days accrue; 57 feeds the Jul 20
 judgment; 59 must land before any funding stage could ever bind). Then

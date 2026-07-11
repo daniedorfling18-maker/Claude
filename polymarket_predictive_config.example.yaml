@@ -118,6 +118,10 @@ maker_carry_study:
   reaction_minutes: 1
   capital_cap_usd: 500
   target_net_usd_per_day: 3.33
+  # 2026-07-11 WO-57: supplementary bankroll planning only. These caps do
+  # not change the registered $500 maker metric or any M-gate input.
+  capital_curve_enabled: true
+  capital_curve_caps_usd: [250, 500, 1000, 2000, 5000]
   # WO-36 step 2 (2026-07-09): empirical markout charge from executed prints
   # + pre-registered maker gates (M-A needs 7 daily runs at target) + a daily
   # human quote sheet. Measurement only - the system never places orders.

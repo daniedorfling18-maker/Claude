@@ -454,6 +454,65 @@ def test_sized_portfolio_scales_within_capital_cap_and_never_trades(tmp_path, mo
     assert len(read_csv_rows(cfg.output_root / "maker_carry" / "maker_carry_history.csv")) == 2
 
 
+def test_capital_curve_recovers_target_cap_and_diminishing_yield(tmp_path, monkeypatch):
+    cfg = _config(tmp_path)
+    markets = [_market("deep calm market", "calm", 1000.0)]
+    books = {"calm": _deep_book()}
+    histories = {("calm", "1d"): _flat_history(200), ("calm", "1w"): _flat_history(200)}
+    _fake_requests(monkeypatch, markets=markets, books=books, histories=histories)
+
+    summary = run_maker_carry_study(cfg)
+
+    curve = summary["capital_curve"]
+    assert [row["capital_cap_usd"] for row in curve] == [250.0, 500.0, 1000.0, 2000.0, 5000.0]
+    net = [row["net_usd_per_day"] for row in curve]
+    assert net == sorted(net)
+    yields = [row["net_per_day_per_capital_used"] for row in curve]
+    assert all(left >= right for left, right in zip(yields, yields[1:]))
+    # At $250 only 2 x $100 quote units fit; at $500 all five fit. The
+    # planted calm $1,000 pot therefore first clears $3.33/day at $500.
+    assert net[0] == 1.8
+    assert net[1] == 4.48
+    assert summary["capital_for_100_per_month"] == 500.0
+    assert curve[1]["net_usd_per_day"] == summary["portfolio_net_carry_usd_per_day"]
+    sheet = (cfg.output_root / "maker_carry" / "maker_quote_sheet.md").read_text(encoding="utf-8")
+    assert "planning aid - uncounted, not a gate input" in sheet
+
+
+def test_capital_curve_toggle_cannot_change_registered_metric(tmp_path, monkeypatch):
+    cfg = _config(tmp_path)
+    markets = [_market("deep calm market", "calm", 1000.0)]
+    books = {"calm": _deep_book()}
+    histories = {("calm", "1d"): _flat_history(200), ("calm", "1w"): _flat_history(200)}
+    _fake_requests(monkeypatch, markets=markets, books=books, histories=histories)
+    enabled = run_maker_carry_study(cfg)
+
+    raw = yaml.safe_load((tmp_path / "config.yaml").read_text(encoding="utf-8"))
+    raw["maker_carry_study"]["capital_curve_enabled"] = False
+    (tmp_path / "config.yaml").write_text(yaml.safe_dump(raw), encoding="utf-8")
+    disabled = run_maker_carry_study(load_config(tmp_path / "config.yaml"))
+
+    assert disabled["capital_curve"] == []
+    assert disabled["capital_for_100_per_month"] is None
+    assert disabled["portfolio"] == enabled["portfolio"]
+    assert disabled["portfolio_net_carry_usd_per_day"] == enabled["portfolio_net_carry_usd_per_day"]
+    assert disabled["maker_gates"]["M_C_payout_floor"] == enabled["maker_gates"]["M_C_payout_floor"]
+
+
+def test_capital_curve_returns_null_when_largest_cap_cannot_clear_target(tmp_path, monkeypatch):
+    cfg = _config(tmp_path)
+    markets = [_market("small calm pot", "small", 25.0)]
+    books = {"small": _deep_book()}
+    histories = {("small", "1d"): _flat_history(200), ("small", "1w"): _flat_history(200)}
+    _fake_requests(monkeypatch, markets=markets, books=books, histories=histories)
+
+    summary = run_maker_carry_study(cfg)
+
+    assert [row["net_usd_per_day"] for row in summary["capital_curve"]] == [0, 0, 0, 0, 0]
+    assert summary["capital_for_100_per_month"] is None
+    assert summary["portfolio_net_carry_usd_per_day"] == 0
+
+
 def test_resolution_high_risk_candidate_is_excluded_from_portfolio(tmp_path, monkeypatch):
     cfg = _config(tmp_path)
     markets = [_market("Will X officially announce a ceasefire deal?", "deal", 1000.0)]

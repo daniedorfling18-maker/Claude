@@ -21,6 +21,11 @@ services:
     image: polymarket-paper-vps:latest
     container_name: polymarket-paper-live
     mem_limit: ${PM_PAPER_MEM_LIMIT:-4g}
+    # 2026-07-11 systems audit: the loop runs ~95% CPU continuously and was
+    # starving the scheduler (governance exit 124) and its own restarts under
+    # load. Cap at 3 of the host's 4 cores so evidence collection never
+    # monopolises the box; the loop's cycle cadence absorbs the difference.
+    cpus: ${PM_PAPER_CPUS:-3.0}
     env_file:
       - .env
     working_dir: /app

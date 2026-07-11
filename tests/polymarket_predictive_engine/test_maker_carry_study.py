@@ -607,3 +607,35 @@ def test_markets_without_live_pots_or_bands_are_filtered(tmp_path, monkeypatch):
 
     assert summary["universe_rewarded_markets"] == 0
     assert summary["candidates_measured"] == 0
+
+
+def test_legacy_share_model_days_never_count_toward_gate_a(tmp_path, monkeypatch):
+    # 2026-07-11 dated tightening: the Jul 10 legacy-model day cleared target
+    # under a share model later shown to overstate shares 3-9x. Only
+    # published_v2 days may count, or M-A could pass on 6 honest days plus
+    # one discredited one.
+    cfg = _config(tmp_path)
+    markets = [_market("deep calm market", "calm", 1000.0)]
+    books = {"calm": _deep_book()}
+    histories = {("calm", "1d"): _flat_history(200), ("calm", "1w"): _flat_history(200)}
+    prints = {"0xcalm": [{"price": 0.499, "size": 5, "side": "SELL", "timestamp": 600 + j * 60} for j in range(25)]}
+    _fake_requests(monkeypatch, markets=markets, books=books, histories=histories, prints=prints)
+
+    # Seed a legacy-era at-target day (share_model empty, hugely over target).
+    out_root = cfg.output_root / "maker_carry"
+    out_root.mkdir(parents=True, exist_ok=True)
+    (out_root / "maker_carry_history.csv").write_text(
+        "generated_at_utc,share_model,universe_rewarded_markets,universe_pot_usd_per_day,"
+        "portfolio_markets,portfolio_capital_usd,portfolio_net_carry_usd_per_day,clears_100_per_month_target\n"
+        "2026-07-10T08:14:00Z,,3,1000.0,3,500.0,58.99,True\n",
+        encoding="utf-8",
+    )
+
+    monkeypatch.setattr(maker_carry_study, "now_utc", lambda: "2026-07-11T08:00:00Z")
+    summary = run_maker_carry_study(cfg)
+
+    gate_a = summary["maker_gates"]["M_A_carry_evidence"]
+    # Today's published_v2 run counts; the legacy day must not.
+    assert gate_a["runs_at_or_above_target"] == 1
+    assert gate_a["share_model_scope"] == "published_v2_only"
+    assert gate_a["state"] == "pending"

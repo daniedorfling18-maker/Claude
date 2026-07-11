@@ -2029,7 +2029,111 @@ Spec:
    event regime, informing whether the extended taker window is worth
    keeping open - as judgment input, not as gate input.
 
-## Priority order for Codex (updated 2026-07-10, batch 3 filed)
+# Codex batch 4 — filed 2026-07-11 (response to the published-share repricing)
+
+Context: WO-46's published share model repriced the maker lane from
+$58.99/day (legacy, 3 markets) to $0.93/day (1 market). The collapse is not
+a bug - it is the honest number once complement-book competition is
+counted. It exposes the binding variable: pot-weighted COMPETITION, not pot
+size. The two orders below attack exactly that variable and complete the
+picture the Jul 20 policy date and the post-WC funding judgment will read.
+Constraints 1-8 bind. One WO per PR.
+
+## WO-56 — Yield-first rewarded-universe scan (find under-competed pots)
+
+The universe scan ranks by pot size and measures the top 40. Under the
+published rule that ranking is adversarial to us: the biggest pots attract
+proportionally the deepest maker competition (observed shares 0.01-0.3%).
+The metric that pays is achievable gross = pot x share(min_size), which is
+large exactly where the pool is thin relative to the pot.
+
+Spec:
+1. In `maker_carry_study.py::_rewarded_universe` collection stays as-is
+   (pot floor `min_daily_pot_usd` unchanged). Add a cheap pre-screen pass
+   over up to `yield_scan_max_markets` (default 200) rewarded markets:
+   batch-fetch books via POST /books (reuse `_fetch_books`), compute the
+   published-rule pool score and `expected_gross_at_min_size =
+   pot x share(min_size quote)`, then select the top `max_book_candidates`
+   by THAT ranking for the full (expensive) history/markout measurement.
+2. Every existing guard is unchanged and still binds: thin-book trust
+   (>5% share untrusted), band eligibility [0.10, 0.90], resolution-risk
+   HIGH exclusion (WO-51), worst-of-three adverse charging, payout floor.
+   A thin pool that is thin because nobody sane quotes there must still
+   die at the guards, not sneak in through the ranking.
+3. Registration integrity note (constraint 8): the gate METRIC is
+   unchanged (net carry of the sized portfolio at the registered $500 cap,
+   distinct-UTC-days counting). Only measurement COVERAGE widens - the
+   registered study always intended to scan the rewarded universe; the
+   pot-rank top-40 was a compute budget, not a registered choice. Stamp
+   the change: summary assumptions gain `universe_scan_mode:
+   "yield_first_v1"`, candidates CSV gains `pot_rank` and `yield_rank`,
+   and the history CSV gains a `universe_scan_mode` column (same
+   discontinuity discipline as `share_model`).
+4. API budget: pre-screen adds only batched /books calls; respect
+   `request_pause_seconds`; cap total pre-screen fetches at
+   `yield_scan_max_markets`; fail-soft to the pot ranking when the
+   pre-screen errors.
+5. Tests: synthetic universe where a small-pot/empty-pool market
+   out-yields a big-pot/crowded market and is selected; trust guards still
+   exclude a degenerate empty book (share ~1 -> untrusted); scan-mode
+   stamped in summary + history; fail-soft path returns pot ranking.
+
+## WO-57 — Capital-to-target curve (what bankroll would the honest model need?)
+
+The repriced lane returns ~5-6%/month on capital but cannot reach $100
+absolute at a $500 cap. The funding judgment needs the curve, not my
+linear guess.
+
+Spec (constraint 8: supplementary reporting only):
+1. In `maker_carry_study.py`, after the registered sized portfolio,
+   re-run the greedy sizing at capital caps [250, 500, 1000, 2000, 5000]
+   using the same concave share function share(k) = k*ours/(k*ours+pool)
+   and the same guards/floors. Emit `capital_curve`: net_usd_per_day per
+   cap and `capital_for_100_per_month` (smallest cap whose net >= target,
+   null when none).
+2. The registered metric `portfolio_net_carry_usd_per_day` (at the $500
+   registered cap) and every M-gate stay byte-identical. The curve appears
+   in the summary and as one quote-sheet line labelled
+   "planning aid - uncounted, not a gate input".
+3. Tests: curve monotone non-decreasing and concave (per-dollar yield
+   falls with capital); registered metric identical with the feature on
+   and off; `capital_for_100_per_month` solves correctly on synthetic
+   books; null when even $5000 cannot reach target.
+
+## WO-58 — Patch: wallet-intelligence leaderboard host (WO-37 follow-up)
+
+`GET data-api.polymarket.com/leaderboard` 404s in production (see
+wallet_intelligence_summary.json errors). Find the correct public
+leaderboard endpoint (the docs assimilation catalogue lists a dedicated
+leaderboard API host; probe it key-less), fix `_fetch_leaderboard`
+probes, and investigate why `markets_polled` was 0 (the `_tracked_markets`
+source came up empty on the VPS - trace what it reads and point it at a
+populated ledger). Tests: probe fallback order, empty-tracked-markets
+tolerance stays, parsed rows land in the ledger.
+
+## WO-59 — Patch: WO-50 Kelly overlay tightening (dated)
+
+`live_test_decision_policy._quarter_kelly_cap` inlines plain quarter-Kelly
+(mean/std^2 x 0.25). The registered policy says the overlay uses the
+EXISTING uncertainty-shrunk Kelly module (`risk.shrunk_kelly_fraction`
+lineage) - which is strictly tighter on small samples. Swap the inline
+computation for the shrunk module with a dated comment (tighten-only,
+constraint: the binding cap may only get SMALLER for the same inputs).
+Tests: shrunk cap <= inline cap on short histories; equality in the
+large-sample limit; ladder still binds when smaller.
+
+## Priority order for Codex (updated 2026-07-11, batch 4 filed)
+
+Batch 4 in order: **WO-58 -> WO-56 -> WO-57 -> WO-59** (58 is a
+five-line unblock for the toxicity lane; 56 changes what tomorrow's runs
+measure, so it should land before more days accrue; 57 feeds the Jul 20
+judgment; 59 must land before any funding stage could ever bind). Then
+**WO-47** (still the best unbuilt order - fee schedule + rebate rate at
+market birth, authoritative settlement stamps). WO-48 stays BLOCKED until
+the maker gates read evidence-supported. WO-33 last pending the leakage
+review.
+
+## Superseded priority note (2026-07-10, batch 3)
 
 Batch 3 first, in order: **WO-50 -> WO-51 -> WO-52 -> WO-53** (decision
 discipline before more measurement; 50/51/53 are small). Then **WO-54**

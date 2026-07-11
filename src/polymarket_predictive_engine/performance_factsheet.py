@@ -16,7 +16,7 @@ import random
 from typing import Any, Callable
 
 from .config import EngineConfig, load_config
-from .utils import now_utc, parse_timestamp, read_csv_rows, safe_float, write_json
+from .utils import now_utc, parse_timestamp, read_csv_rows, read_json, safe_float, write_json
 
 
 SIMULATED_BANNER = "SIMULATED - paper/model results do not represent live trading"
@@ -530,6 +530,21 @@ def _fmt_usd(value: Any) -> str:
     return "n/a" if number is None else f"${number:.2f}"
 
 
+def _wallet_reconciliation_alert(payload: dict[str, Any]) -> str:
+    reconciliation = payload.get("wallet_reconciliation")
+    if not isinstance(reconciliation, dict):
+        return ""
+    discrepancy = safe_float(reconciliation.get("unexplained_discrepancy_usd"))
+    threshold = safe_float(reconciliation.get("discrepancy_threshold_usd")) or 1.0
+    if (
+        str(reconciliation.get("reconciliation_status") or "") == "DISCREPANCY"
+        and discrepancy is not None
+        and discrepancy > threshold
+    ):
+        return f"> 🔴 **WALLET RECONCILIATION DISCREPANCY — ${discrepancy:.2f} unexplained. Human review required.**"
+    return ""
+
+
 def _write_markdown(path: Path, payload: dict[str, Any]) -> None:
     lines = [
         "# Performance factsheet (WO-60)",
@@ -539,6 +554,9 @@ def _write_markdown(path: Path, payload: dict[str, Any]) -> None:
         "**REPORTING ONLY — no gate, sizing rule, policy, or broker reads this artifact.**",
         "",
     ]
+    alert = _wallet_reconciliation_alert(payload)
+    if alert:
+        lines += [alert, ""]
     for row in payload.get("series", []):
         ci = row.get("bootstrap_sharpe_90_ci") or {}
         lines += [
@@ -571,6 +589,7 @@ def build_performance_factsheet(cfg: EngineConfig) -> dict[str, Any]:
     out_root = cfg.output_root / "performance"
     json_path = out_root / "performance_factsheet.json"
     markdown_path = out_root / "performance_factsheet.md"
+    wallet_reconciliation = read_json(out_root / "wallet_reconciliation.json", default={}) or {}
     payload: dict[str, Any] = {
         "status": "disabled",
         "generated_at_utc": now_utc(),
@@ -579,6 +598,7 @@ def build_performance_factsheet(cfg: EngineConfig) -> dict[str, Any]:
         "policy_or_gate_inputs": False,
         "paper_trading_invoked": False,
         "live_trading_invoked": False,
+        "wallet_reconciliation": wallet_reconciliation,
     }
     if str(settings.get("enabled", True)).strip().lower() in {"0", "false", "no", "off"}:
         write_json(json_path, payload)

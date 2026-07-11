@@ -1,0 +1,123 @@
+#!/usr/bin/env sh
+# Push a compact, decision-relevant snapshot of VPS outputs to the
+# `vps-telemetry` branch so remote orchestration sessions (which cannot reach
+# the VPS network directly) can read live state through the private repo.
+#
+# Cost/safety properties:
+#   - Zero GitHub Actions cost: every workflow in this repo is
+#     workflow_dispatch-only (2026-07-09 billing wall), and the commit message
+#     carries [skip ci] as belt-and-braces.
+#   - Zero history bloat: each push is a fresh parentless commit force-pushed
+#     to the branch, so `vps-telemetry` always contains exactly one commit.
+#   - Read-only everywhere else: never touches the working tree, index, or
+#     any other branch; uses a private temp index and git plumbing only.
+#   - Fail-soft: any missing file is skipped; any error exits quietly so a
+#     cron/scheduler wrapper never wedges.
+#
+# Install on the VPS as the repo-owning user (opc):
+#   crontab -e
+#   */30 * * * * /home/opc/Claude/scripts/push_vps_telemetry.sh >> "$HOME/vps_telemetry_push.log" 2>&1
+#
+# The push uses the repo's existing `origin` credentials. If the stored
+# credential is read-only, mint a fine-grained PAT with contents:write for
+# this one repository.
+set -u
+
+REPO_DIR="${VPS_TELEMETRY_REPO_DIR:-$HOME/Claude}"
+BRANCH="${VPS_TELEMETRY_BRANCH:-vps-telemetry}"
+MAX_FILE_KB="${VPS_TELEMETRY_MAX_FILE_KB:-300}"
+CSV_TAIL_LINES="${VPS_TELEMETRY_CSV_TAIL_LINES:-200}"
+LOCK_DIR="${TMPDIR:-/tmp}/push_vps_telemetry.lock"
+
+GIT_DIR="$REPO_DIR/.git"
+[ -d "$GIT_DIR" ] || { echo "no git repo at $REPO_DIR" >&2; exit 0; }
+
+# mkdir is atomic: poor-man's flock that works on any POSIX sh.
+if ! mkdir "$LOCK_DIR" 2>/dev/null; then
+  echo "another telemetry push is running; skipping" >&2
+  exit 0
+fi
+SNAP=""
+cleanup() {
+  rmdir "$LOCK_DIR" 2>/dev/null || true
+  [ -n "$SNAP" ] && rm -rf "$SNAP"
+}
+trap cleanup EXIT INT TERM
+
+SNAP=$(mktemp -d) || exit 0
+STAMP=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+
+# Whitelisted output directories: decision summaries only, never the heavy
+# collection corpora (training archive, websocket features, trade prints,
+# official book snapshots stay on the VPS).
+TELEMETRY_DIRS="
+outputs/ops_scheduler
+outputs/polymarket_model_governance
+outputs/maker_carry
+outputs/wallet_intelligence
+outputs/implication_consistency
+outputs/calibration_bias
+outputs/drift_scan
+outputs/event_group_consistency
+outputs/reconstructed_signal_clv
+outputs/polymarket_shadow
+"
+
+copy_capped() {
+  # $1 = repo-relative path. Copies whole file if small, else skips (JSON) or
+  # keeps header + tail (CSV) so ledgers stay readable without getting huge.
+  rel="$1"
+  src="$REPO_DIR/$rel"
+  [ -f "$src" ] || return 0
+  dst="$SNAP/telemetry/$rel"
+  mkdir -p "$(dirname "$dst")"
+  size_kb=$(du -k "$src" 2>/dev/null | cut -f1)
+  [ -n "$size_kb" ] || return 0
+  if [ "$size_kb" -le "$MAX_FILE_KB" ]; then
+    cp "$src" "$dst"
+    return 0
+  fi
+  case "$rel" in
+    *.csv)
+      { head -n 1 "$src"; tail -n "$CSV_TAIL_LINES" "$src"; } > "$dst"
+      ;;
+    *)
+      : # oversized non-CSV summaries are skipped rather than truncated
+      ;;
+  esac
+}
+
+for dir in $TELEMETRY_DIRS; do
+  [ -d "$REPO_DIR/$dir" ] || continue
+  find "$REPO_DIR/$dir" -maxdepth 2 -type f \
+    \( -name '*.json' -o -name '*.md' -o -name '*.csv' -o -name '*.log' \) \
+    2>/dev/null | while IFS= read -r abs; do
+      case "$abs" in
+        *official_books*) continue ;;
+      esac
+      copy_capped "${abs#"$REPO_DIR"/}"
+    done
+done
+
+mkdir -p "$SNAP/telemetry"
+{
+  printf '{\n'
+  printf '  "pushed_at_utc": "%s",\n' "$STAMP"
+  printf '  "deployed_git_rev": "%s",\n' "$(git --git-dir="$GIT_DIR" rev-parse --short HEAD 2>/dev/null || echo unknown)"
+  printf '  "host": "%s",\n' "$(hostname 2>/dev/null || echo unknown)"
+  printf '  "disk_used_percent": "%s"\n' "$(df -P / 2>/dev/null | awk 'NR==2 {print $5}')"
+  printf '}\n'
+} > "$SNAP/telemetry/manifest.json"
+
+# Build a parentless commit with plumbing: temp index, no working-tree touch.
+export GIT_INDEX_FILE="$SNAP/.gitindex"
+( cd "$SNAP" && git --git-dir="$GIT_DIR" --work-tree="$SNAP" add -f telemetry ) || exit 0
+TREE=$(git --git-dir="$GIT_DIR" write-tree) || exit 0
+COMMIT=$(git --git-dir="$GIT_DIR" \
+  -c user.name="vps-telemetry" -c user.email="vps-telemetry@localhost" \
+  commit-tree -m "vps telemetry snapshot $STAMP [skip ci]" "$TREE") || exit 0
+if git --git-dir="$GIT_DIR" push -q origin "+$COMMIT:refs/heads/$BRANCH"; then
+  echo "$STAMP pushed telemetry snapshot $COMMIT to $BRANCH"
+else
+  echo "$STAMP push failed (network or credential scope); will retry next cycle" >&2
+fi

@@ -372,6 +372,8 @@ def test_sized_portfolio_scales_within_capital_cap_and_never_trades(tmp_path, mo
     assert persisted["portfolio_net_carry_usd_per_day"] == summary["portfolio_net_carry_usd_per_day"]
     history = read_csv_rows(cfg.output_root / "maker_carry" / "maker_carry_history.csv")
     assert len(history) == 1
+    assert history[0]["top_portfolio_market"] == "0xcalm"
+    assert history[0]["top_portfolio_question"] == "deep calm market"
 
     # A second run appends to the trend ledger instead of overwriting it.
     run_maker_carry_study(cfg)

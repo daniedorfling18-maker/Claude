@@ -1022,6 +1022,7 @@ def run_maker_carry_study(cfg: EngineConfig) -> dict[str, Any]:
 
     net_total = round(sum(r["net_carry_usd_per_day"] for r in portfolio), 2)
     target = float(settings["target_net_usd_per_day"])
+    top_portfolio = portfolio[0] if portfolio else {}
 
     # MAKER GATES - pre-registered 2026-07-09 (see module docstring). The
     # trend ledger is read BEFORE this run appends. Evidence counts distinct
@@ -1090,6 +1091,8 @@ def run_maker_carry_study(cfg: EngineConfig) -> dict[str, Any]:
             "portfolio_capital_usd": round(capital, 2),
             "portfolio_net_carry_usd_per_day": net_total,
             "portfolio_net_carry_usd_per_month": round(net_total * 30, 2),
+            "top_portfolio_market": top_portfolio.get("condition_id", ""),
+            "top_portfolio_question": top_portfolio.get("question", ""),
             "portfolio_uncounted_supplementary_income_usd_per_day": round(
                 sum(r.get("uncounted_supplementary_income_usd_per_day", 0.0) for r in portfolio), 4
             ),
@@ -1148,6 +1151,8 @@ def run_maker_carry_study(cfg: EngineConfig) -> dict[str, Any]:
         "portfolio_markets",
         "portfolio_capital_usd",
         "portfolio_net_carry_usd_per_day",
+        "top_portfolio_market",
+        "top_portfolio_question",
         "clears_100_per_month_target",
     ]
     prior_runs.append({field: summary.get(field) for field in history_fields})

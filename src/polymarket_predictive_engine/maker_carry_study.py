@@ -182,6 +182,10 @@ def _settings(cfg: EngineConfig) -> dict[str, Any]:
         "max_size_multiple": 5,
         "capital_cap_usd": 500.0,
         "target_net_usd_per_day": 3.33,
+        # 2026-07-11 WO-57: supplementary planning curve only. The
+        # registered maker metric continues to use capital_cap_usd above.
+        "capital_curve_enabled": True,
+        "capital_curve_caps_usd": [250, 500, 1000, 2000, 5000],
         # Markout (empirical adverse selection from executed prints).
         "markout_horizon_minutes": 5,
         "markout_min_prints": 20,
@@ -979,6 +983,122 @@ def _adverse_selection(
     }
 
 
+def _size_portfolio(
+    settings: dict[str, Any],
+    candidates: list[dict[str, Any]],
+    capital_cap_usd: float,
+) -> tuple[list[dict[str, Any]], float, float]:
+    """Run the registered greedy maker sizing at one capital cap.
+
+    WO-57 calls this same function for supplementary planning caps so the
+    registered $500 result and every M-gate retain exactly one implementation.
+    """
+    portfolio: list[dict[str, Any]] = []
+    capital = 0.0
+    max_multiple = max(1, int(settings["max_size_multiple"]))
+    trusted = [
+        row
+        for row in candidates
+        if (row.get("net_carry_usd_per_day") or 0) > 0
+        and row.get("estimate_quality") == "book_and_history"
+        and row.get("band_eligible") is True
+        and row.get("resolution_risk") != "high"
+    ]
+    payout_floor = float(settings["min_daily_payout_usd"])
+    for row in sorted(trusted, key=lambda candidate: candidate["net_carry_usd_per_day"], reverse=True):
+        ours = row["our_score_per_side"]
+        pool_implied = ours / row["estimated_reward_share"] - ours if row["estimated_reward_share"] > 0 else 0.0
+        best: tuple[float, int] | None = None
+        for k in range(1, max_multiple + 1):
+            if capital + k * row["capital_usd"] > capital_cap_usd:
+                break
+            share_k = (k * ours) / (k * ours + pool_implied) if (k * ours + pool_implied) > 0 else 0.0
+            gross_k = row["pot_usd_per_day"] * share_k
+            if gross_k < payout_floor:
+                # Gate M-C by construction: accruals below Polymarket's $1/day
+                # minimum are never paid, so this size earns exactly nothing.
+                continue
+            net_k = gross_k - k * row["adverse_selection_usd_per_day"]
+            if best is None or net_k > best[0]:
+                best = (net_k, k)
+        if best is None or best[0] <= 0:
+            continue
+        net_k, k = best
+        portfolio.append(
+            {
+                "question": row["question"],
+                "condition_id": row["condition_id"],
+                "size_multiple": k,
+                "quote_size_shares": k * row["rewards_min_size_shares"],
+                "quote_distance": row["quote_distance"],
+                "quote_distance_fraction": row["quote_distance_fraction"],
+                "capital_usd": round(k * row["capital_usd"], 2),
+                "net_carry_usd_per_day": round(net_k, 4),
+                "uncounted_supplementary_income_usd_per_day": round(
+                    k * (row.get("supplementary_income_usd_per_day") or 0.0), 4
+                ),
+                "uncounted_rebate_usd_per_day": round(
+                    k * (row.get("supplementary_rebate_usd_per_day") or 0.0), 4
+                ),
+                "uncounted_holding_usd_per_day": round(
+                    k * (row.get("supplementary_holding_usd_per_day") or 0.0), 4
+                ),
+                "markout_measured": bool(row.get("markout_measured")),
+                "resolution_risk": row.get("resolution_risk", "medium"),
+                "resolution_risk_class": row.get("resolution_risk_class", "other"),
+                "event_risk_flags": [
+                    keyword for keyword in EVENT_RISK_KEYWORDS if keyword in row["question"].lower()
+                ],
+            }
+        )
+        capital += k * row["capital_usd"]
+
+    net_total = round(sum(row["net_carry_usd_per_day"] for row in portfolio), 2)
+    return portfolio, capital, net_total
+
+
+def _capital_curve(
+    settings: dict[str, Any],
+    candidates: list[dict[str, Any]],
+    target_net_usd_per_day: float,
+) -> tuple[list[dict[str, Any]], float | None]:
+    enabled = str(settings.get("capital_curve_enabled", True)).strip().lower() not in {
+        "0",
+        "false",
+        "no",
+        "off",
+    }
+    if not enabled:
+        return [], None
+    caps = sorted(
+        {
+            float(cap)
+            for cap in (settings.get("capital_curve_caps_usd") or [250, 500, 1000, 2000, 5000])
+            if (safe_float(cap) or 0.0) > 0
+        }
+    )
+    curve: list[dict[str, Any]] = []
+    for cap in caps:
+        portfolio, capital_used, net_per_day = _size_portfolio(settings, candidates, cap)
+        curve.append(
+            {
+                "capital_cap_usd": round(cap, 2),
+                "capital_used_usd": round(capital_used, 2),
+                "portfolio_markets": len(portfolio),
+                "net_usd_per_day": net_per_day,
+                "net_usd_per_month": round(net_per_day * 30, 2),
+                "net_per_day_per_capital_used": (
+                    round(net_per_day / capital_used, 8) if capital_used > 0 else None
+                ),
+            }
+        )
+    capital_for_target = next(
+        (row["capital_cap_usd"] for row in curve if row["net_usd_per_day"] >= target_net_usd_per_day),
+        None,
+    )
+    return curve, capital_for_target
+
+
 def run_maker_carry_study(cfg: EngineConfig) -> dict[str, Any]:
     settings = _settings(cfg)
     out_root = cfg.output_root / "maker_carry"
@@ -1085,67 +1205,12 @@ def run_maker_carry_study(cfg: EngineConfig) -> dict[str, Any]:
         if pause:
             time.sleep(pause)
 
-    # Greedy sized portfolio: fully trusted estimates only (both history
-    # windows, credible competition), quote size chosen per market to maximise
-    # net carry inside the capital cap. share(k) = k*ours / (k*ours + pool)
-    # has diminishing returns while the pick-off charge scales linearly, so
-    # each market has a finite optimal size.
-    portfolio: list[dict[str, Any]] = []
-    capital = 0.0
+    # Registered sizing is still evaluated only at capital_cap_usd. WO-57
+    # reuses this exact function for supplementary planning caps below.
     cap = float(settings["capital_cap_usd"])
-    max_multiple = max(1, int(settings["max_size_multiple"]))
-    trusted = [
-        r
-        for r in candidates
-        if (r.get("net_carry_usd_per_day") or 0) > 0 and r.get("estimate_quality") == "book_and_history"
-        and r.get("band_eligible") is True
-        and r.get("resolution_risk") != "high"
-    ]
-    payout_floor = float(settings["min_daily_payout_usd"])
-    for row in sorted(trusted, key=lambda r: r["net_carry_usd_per_day"], reverse=True):
-        ours = row["our_score_per_side"]
-        pool_implied = ours / row["estimated_reward_share"] - ours if row["estimated_reward_share"] > 0 else 0.0
-        best: tuple[float, int] | None = None
-        for k in range(1, max_multiple + 1):
-            if capital + k * row["capital_usd"] > cap:
-                break
-            share_k = (k * ours) / (k * ours + pool_implied) if (k * ours + pool_implied) > 0 else 0.0
-            gross_k = row["pot_usd_per_day"] * share_k
-            if gross_k < payout_floor:
-                # Gate M-C by construction: accruals below Polymarket's $1/day
-                # minimum are never paid, so this size earns exactly nothing.
-                continue
-            net_k = gross_k - k * row["adverse_selection_usd_per_day"]
-            if best is None or net_k > best[0]:
-                best = (net_k, k)
-        if best is None or best[0] <= 0:
-            continue
-        net_k, k = best
-        portfolio.append(
-            {
-                "question": row["question"],
-                "condition_id": row["condition_id"],
-                "size_multiple": k,
-                "quote_size_shares": k * row["rewards_min_size_shares"],
-                "quote_distance": row["quote_distance"],
-                "quote_distance_fraction": row["quote_distance_fraction"],
-                "capital_usd": round(k * row["capital_usd"], 2),
-                "net_carry_usd_per_day": round(net_k, 4),
-                "uncounted_supplementary_income_usd_per_day": round(k * (row.get("supplementary_income_usd_per_day") or 0.0), 4),
-                "uncounted_rebate_usd_per_day": round(k * (row.get("supplementary_rebate_usd_per_day") or 0.0), 4),
-                "uncounted_holding_usd_per_day": round(k * (row.get("supplementary_holding_usd_per_day") or 0.0), 4),
-                "markout_measured": bool(row.get("markout_measured")),
-                "resolution_risk": row.get("resolution_risk", "medium"),
-                "resolution_risk_class": row.get("resolution_risk_class", "other"),
-                "event_risk_flags": [
-                    keyword for keyword in EVENT_RISK_KEYWORDS if keyword in row["question"].lower()
-                ],
-            }
-        )
-        capital += k * row["capital_usd"]
-
-    net_total = round(sum(r["net_carry_usd_per_day"] for r in portfolio), 2)
+    portfolio, capital, net_total = _size_portfolio(settings, candidates, cap)
     target = float(settings["target_net_usd_per_day"])
+    capital_curve, capital_for_target = _capital_curve(settings, candidates, target)
     top_portfolio = portfolio[0] if portfolio else {}
 
     # MAKER GATES - pre-registered 2026-07-09 (see module docstring). The
@@ -1220,6 +1285,8 @@ def run_maker_carry_study(cfg: EngineConfig) -> dict[str, Any]:
             "portfolio_capital_usd": round(capital, 2),
             "portfolio_net_carry_usd_per_day": net_total,
             "portfolio_net_carry_usd_per_month": round(net_total * 30, 2),
+            "capital_curve": capital_curve,
+            "capital_for_100_per_month": capital_for_target,
             "top_portfolio_market": top_portfolio.get("condition_id", ""),
             "top_portfolio_question": top_portfolio.get("question", ""),
             "portfolio_uncounted_supplementary_income_usd_per_day": round(
@@ -1260,6 +1327,10 @@ def run_maker_carry_study(cfg: EngineConfig) -> dict[str, Any]:
                 "supplementary_income": (
                     "rebates + holding rewards are reported as uncounted income only; "
                     "they are excluded from portfolio_net_carry_usd_per_day and every M-gate"
+                ),
+                "capital_curve": (
+                    "2026-07-11 WO-57 planning aid only: each listed cap reruns the registered "
+                    "greedy sizing, but no curve value is read by an M-gate or policy."
                 ),
                 "resolution_risk": (
                     "WO-51 screen: high subjective/UMA-dispute-prone wording is excluded from the "
@@ -1321,6 +1392,16 @@ def _write_quote_sheet(out_root: Path, summary: dict[str, Any], settings: dict[s
         f"${summary.get('portfolio_capital_usd')} capital - UPPER BOUND, see honesty clause.",
         f"Uncounted supplementary income shown separately: ${summary.get('portfolio_uncounted_supplementary_income_usd_per_day', 0.0)}/day "
         "(rebates + holding rewards; NOT included in gates or net carry).",
+        "Capital curve (planning aid - uncounted, not a gate input): "
+        + "; ".join(
+            f"${row['capital_cap_usd']:.0f} cap -> ${row['net_usd_per_day']:.2f}/day"
+            for row in (summary.get("capital_curve") or [])
+        )
+        + (
+            f"; first cap meeting $100/month target: ${summary['capital_for_100_per_month']:.0f}."
+            if summary.get("capital_for_100_per_month") is not None
+            else "; $100/month target not reached by the largest measured cap."
+        ),
         "",
         "This system places NO orders. Acting on this sheet is a human decision,",
         "with human money, outside the bot's paper-only governance.",

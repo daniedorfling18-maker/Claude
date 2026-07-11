@@ -511,6 +511,12 @@ markets to point-in-time pre-close prices and writes
 calibration, isotonic-smoothed frequencies, clustered bootstrap CIs, and BH-FDR-filtered candidate
 bins. This is study-only and does not authorise trades.
 
+**2026-07-11 — WO-57 implemented by Codex.** Maker-carry reporting now emits a supplementary
+capital-to-target curve at $250/$500/$1,000/$2,000/$5,000 caps in
+`outputs/maker_carry/maker_carry_study.json` and the human quote sheet. The registered $500
+`portfolio_net_carry_usd_per_day` calculation and every M-gate use the same unchanged sizing path;
+the curve is explicitly an uncounted planning aid and is never read by policy or gate code.
+
 ## Rules of engagement for coding agents
 
 0. **Division of labour**: the orchestrating agent writes/updates this charter and the work orders

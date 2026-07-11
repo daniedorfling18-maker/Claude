@@ -2080,6 +2080,11 @@ Spec:
 
 ## WO-57 — Capital-to-target curve (what bankroll would the honest model need?)
 
+Status: IMPLEMENTED by Codex on 2026-07-11. `maker_carry_study.py` now emits
+the supplementary `capital_curve` and `capital_for_100_per_month`, and the
+human quote sheet labels the curve as an uncounted planning aid. The registered
+$500 portfolio metric and every M-gate remain unchanged.
+
 The repriced lane returns ~5-6%/month on capital but cannot reach $100
 absolute at a $500 cap. The funding judgment needs the curve, not my
 linear guess.

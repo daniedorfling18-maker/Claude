@@ -1,6 +1,6 @@
 # Polymarket Codex Work Orders
 
-Last updated: 2026-07-11 (WO-1..WO-60 landed; **open queue: batch 5 WO-61..65, then WO-47**;
+Last updated: 2026-07-11 (batch 5 WO-61..65 and WO-47 landed;
 WO-48 blocked behind maker gates, WO-33 last pending leakage review; WP13 is a venue
 decision, not a WO. Crypto up/down is frozen as a diagnostic — see `AGENTS.md`. Read
 `docs/POLYMARKET_EDGE_STRATEGY_RESET.md` first.)
@@ -1740,6 +1740,14 @@ Spec:
    band-ineligible exclusion.
 
 ## WO-47 — Resolution + new-market websocket capture
+
+Status: IMPLEMENTED by Codex on 2026-07-11. The market-channel subscription now
+requests custom features for both configured and dynamically selected assets.
+`outputs/polymarket_websocket/resolution_events.csv` records authoritative
+market/winner stamps, while `market_births.csv` records condition, fee/rebate,
+sports timing/type, and birth tick metadata. Both ledgers append without rewriting
+existing bytes and deduplicate repeated lifecycle frames. They remain validation-only:
+no feature, closing-line, governance, broker, or order path reads them.
 
 The market websocket's custom features carry `market_resolved`
 (winning_asset_id - authoritative settlement stamps, faster and cleaner

@@ -1357,6 +1357,8 @@ websocket_market_data:
   subscription_message:
     assets_ids: *id001
     type: market
+    # 2026-07-11 WO-47: enables validation-only market birth/resolution capture.
+    # Lifecycle rows stay isolated from features, closing-line grading, and trades.
     custom_feature_enabled: true
 paper_edge_simulator:
   minimum_edge: 0.03

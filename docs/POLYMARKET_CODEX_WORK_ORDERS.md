@@ -2168,9 +2168,107 @@ Spec:
    covering 0; hand-built drawdown series returns exact depth/duration;
    sample floor suppresses annualisation; evidence-class banners present.
 
+# Codex batch 5 — filed 2026-07-11 (investor-grade evidence infrastructure)
+
+Purpose: make the record AUDITABLE, not just honest. Everything below is
+reporting/infrastructure - no gate, sizing rule, or policy may read any of
+it (constraint 8). These are preconditions for ever presenting results
+externally; they are NOT preconditions for the $100/month verdict and must
+not jump ahead of WO-56/57 in the queue.
+
+## WO-61 — Tamper-evident ledger anchoring (hash chain)
+
+An external reader must be able to verify the track record was not edited
+after the fact.
+
+Spec:
+1. Module `ledger_anchor.py`, CLI `anchor-ledgers`, config `ledger_anchor:`
+   (enabled, ledger globs: portfolio snapshots, cash ledger, paper fills,
+   settlements, shadow positions/fills, maker_carry_history, live-test
+   history, decision_policy.json).
+2. Daily: compute sha256 per ledger + a chain head
+   H_today = sha256(H_yesterday || all file hashes || date). Append to
+   `outputs/performance/ledger_anchor_chain.csv` (append-only). The chain
+   head rides the telemetry push, so every day's head is timestamped in
+   git history on GitHub - an external, hard-to-rewrite anchor.
+3. CLI `verify-ledger-chain` recomputes and reports the first broken link
+   if any ledger changed retroactively.
+4. Tests: chain verifies on untouched ledgers; single-byte edit in an old
+   ledger is detected with the correct first-broken date; missing-file
+   tolerance.
+
+## WO-62 — Live-wallet reconciliation (three-way, on-chain)
+
+Paper stats are self-reported; live stats must reconcile against records
+we do not control. Polygon is public - use it.
+
+Spec:
+1. Module `wallet_reconciliation.py`, CLI `reconcile-wallet`, inert until
+   `maker_live_test.wallet_address` is set (mirrors WO-36's guard).
+2. Daily three-way check: (a) internal live-test scoreboard net;
+   (b) data-api /activity + /positions for the wallet; (c) on-chain USDC
+   balance via a key-less Polygon RPC (POL/USDC balanceOf) + collateral
+   in positions. Report per-day deltas and a reconciliation_status
+   (clean / explained / DISCREPANCY with $ size).
+3. Any unexplained discrepancy > $1 renders a red banner in the factsheet
+   and quote sheet (reporting only - humans act).
+4. Tests: synthetic three-way agreement passes; planted $5 mismatch flags;
+   missing RPC degrades to two-way with status "partial".
+
+## WO-63 — True-net cost ledger
+
+Investor returns are net of EVERYTHING: gas, deposit/withdrawal rails,
+data subscriptions.
+
+Spec:
+1. `outputs/performance/cost_ledger.csv` (append-only; date, category
+   [gas|rail|subscription|other], usd, note) + CLI `add-cost` for manual
+   entries (rails) and automatic gas capture from the WO-62 on-chain scan.
+2. WO-60's factsheet gains a "net of all costs" line per live section:
+   gross, costs, net-net. Paper/model sections show hypothetical cost
+   drag using the registered fee/haircut stack.
+3. Tests: cost aggregation windows, factsheet net-net arithmetic,
+   append-only discipline.
+
+## WO-64 — Investment policy statement generator (code-is-policy)
+
+The risk limits shown to an external reader must be GENERATED from the
+enforced constants, never hand-written.
+
+Spec:
+1. Module `ips_render.py`, CLI `render-ips`: reads the FROZEN WO-50 policy
+   constants, maker gates registration, verdict gates + amendments 1-7,
+   quote-sheet standing rules, and kill criteria, and renders
+   `outputs/performance/investment_policy_statement.md` with a sha256 of
+   the source constants embedded ("these limits are code; hash X").
+2. Includes the risk annex: current exposure/concentration from the
+   portfolio ledgers and the WO-12 VaR machinery, capacity statement from
+   WO-57's capital curve.
+3. Tests: rendered constants match live module values (drift test fails
+   if code and IPS diverge); hash stability; annex tolerates missing
+   inputs.
+
+## WO-65 — Disaster recovery: full state snapshot + tested restore
+
+One VPS is one lightning strike away from an unprovable track record.
+
+Spec:
+1. Extend the telemetry push (or a sibling daily job) with a weekly FULL
+   ledger snapshot: tar.gz of the WO-61 ledger set to a dedicated
+   `vps-archive` branch (single-commit, force-pushed, same pattern as
+   telemetry; size-capped, ledgers only - never the heavy corpora).
+2. `scripts/restore_from_archive.sh --dry-run` verifies the archive
+   unpacks and the WO-61 chain still verifies against it.
+3. Docs: a RESTORE.md runbook (fresh VPS to running stack, RTO target
+   < 1 day).
+4. Tests: snapshot round-trip in tmpdir; chain verification post-restore;
+   dry-run exits nonzero on corrupt archive.
+
 ## Priority order for Codex (updated 2026-07-11, batch 4 filed)
 
-Batch 4 in order: **WO-58 -> WO-56 -> WO-57 -> WO-59 -> WO-60** (58 is a
+Batch 4 in order: **WO-58 -> WO-56 -> WO-57 -> WO-59 -> WO-60**. Then batch 5
+(investor-grade evidence infra): **WO-61 -> WO-64 -> WO-63 -> WO-65 -> WO-62**
+(62 last - it is inert until a wallet exists) (58 is a
 five-line unblock for the toxicity lane; 56 changes what tomorrow's runs
 measure, so it should land before more days accrue; 57 feeds the Jul 20
 judgment; 59 must land before any funding stage could ever bind). Then

@@ -126,6 +126,7 @@ HTML = """<!doctype html>
   <section><h2>Sharp sports edge funnel</h2><div id="sharpSportsFunnel"></div></section>
   <section><h2>Dutch-book arb watch</h2><div id="dutchArbWatch"></div></section>
   <section><h2>Longshot-bias shadow lane</h2><div id="longshotBias"></div></section>
+  <section><h2>Performance factsheet</h2><div id="performanceFactsheet"></div></section>
   <div class="two">
     <section><h2>$100/month price-change route</h2><div id="goalPlan"></div></section>
     <section><h2>Model & evidence health</h2><div id="modelHealth"></div></section>
@@ -278,6 +279,7 @@ async function load() {
     const smartFlowClv = data.smart_flow_clv || {};
     const dutchArb = data.dutch_arb || {};
     const longshotBias = data.longshot_bias || data.forward_paper_cycle?.longshot_bias || {};
+    const performanceFactsheet = data.performance_factsheet || {};
     const edgeAttribution = data.edge_attribution || {};
     const riskState = data.risk_state || {};
     const portfolioRisk = riskState.portfolio_risk || {};
@@ -1839,6 +1841,23 @@ async function load() {
       ["Winner joins","worldcup_winner_token_joins"],
       ["Incomplete rows","incomplete_market_rows"]
     ]);
+    const performanceRows = Array.isArray(performanceFactsheet.series) ? performanceFactsheet.series : [];
+    document.getElementById("performanceFactsheet").innerHTML =
+      `<div class="muted">Reporting only. Paper, shadow, and modeled rows are simulated; only a sample-qualified live-real-money row can ever be externally presentable.</div>` +
+      `<div style="height:12px"></div>` +
+      table(performanceRows, [
+        ["Series","label", v=>longText(v, 140)],
+        ["Evidence","evidence_class"],
+        ["Days","n_days"],
+        ["Cumulative","cumulative_return", v=>v === null || v === undefined ? "n/a" : fmtNum(Number(v) * 100, 2) + "%"],
+        ["Sharpe (90% CI)","annualised_sharpe", (v,row)=>v === null || v === undefined
+          ? `n/a (${escapeHtml(row.annualised_metrics_reason || "insufficient daily data")})`
+          : `${fmtNum(v, 2)} [${fmtNum(row.bootstrap_sharpe_90_ci?.low, 2)}, ${fmtNum(row.bootstrap_sharpe_90_ci?.high, 2)}]`],
+        ["Sortino","annualised_sortino", v=>fmtNum(v, 2)],
+        ["Max DD","max_drawdown_depth", (v,row)=>`${fmtNum(Number(v) * 100, 2)}% / ${plain(row.max_drawdown_duration_days)}d`],
+        ["Profit factor","profit_factor", v=>fmtNum(v, 2)],
+        ["External ready","external_presentation_ready", v=>v ? "yes" : "no"]
+      ]);
     document.getElementById("edgeSearch").innerHTML = table(data.edge_strategy_search?.top_rules || [], [
       ["Rule","rule_value"], ["Promotable","promotable"], ["Holdout ROI","holdout_roi", v=>fmtNum(Number(v) * 100, 2) + "%"],
       ["Dev ROI","dev_roi", v=>fmtNum(Number(v) * 100, 2) + "%"], ["Holdout rows","holdout_rows"],
@@ -5243,6 +5262,9 @@ def render_dashboard(cfg: EngineConfig, latest_report: dict[str, Any] | None = N
             "paper_trading_invoked": False,
             "live_trading_invoked": False,
         }
+    performance_factsheet = read_json(cfg.output_root / "performance" / "performance_factsheet.json", default={}) or {}
+    if not isinstance(performance_factsheet, dict):
+        performance_factsheet = {}
     edge_attribution = read_json(governance / "edge_attribution.json", default={}) or {}
     if not isinstance(edge_attribution, dict):
         edge_attribution = {}
@@ -5404,6 +5426,7 @@ def render_dashboard(cfg: EngineConfig, latest_report: dict[str, Any] | None = N
         "smart_flow_clv": smart_flow_clv,
         "dutch_arb": dutch_arb,
         "longshot_bias": longshot_bias,
+        "performance_factsheet": performance_factsheet,
         "edge_attribution": edge_attribution,
         "family_calibration": family_calibration,
         "collection_coverage": collection_coverage,

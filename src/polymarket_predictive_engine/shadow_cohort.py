@@ -45,6 +45,43 @@ def _fills_path(cfg: EngineConfig) -> Path:
     return _root(cfg) / str(_settings(cfg).get("fills_file", "shadow_fills.csv"))
 
 
+def _write_shadow_pnl_history(cfg: EngineConfig, summary: dict[str, Any]) -> None:
+    """Keep one latest cohort P&L snapshot per UTC day for WO-60.
+
+    The JSON remains the current snapshot. The existing CSV becomes the dated,
+    deduplicated daily series its name implied, preserving legacy undated rows
+    while future factsheet runs accrue real history instead of overwriting it.
+    """
+    path = cfg.governance_root / "shadow_signal_cohort_pnl.csv"
+    generated = str(summary.get("generated_at_utc") or now_utc())
+    day = generated[:10]
+    current = [
+        {"generated_at_utc": generated, **row}
+        for row in (summary.get("cohorts") or [])
+        if isinstance(row, dict)
+    ]
+    prior = read_csv_rows(path)
+    current_keys = {
+        (day, str(row.get("signal_cohort") or "unknown"))
+        for row in current
+    }
+    kept = [
+        row
+        for row in prior
+        if (str(row.get("generated_at_utc") or "")[:10], str(row.get("signal_cohort") or "unknown"))
+        not in current_keys
+    ]
+    combined = kept + current
+    max_rows = 200_000
+    if len(combined) > max_rows:
+        overflow = combined[:-max_rows]
+        archive_path = cfg.output_root / "polymarket_training_archive" / "shadow_signal_cohort_pnl_overflow.csv"
+        archived = read_csv_rows(archive_path)
+        write_csv(archive_path, archived + overflow)
+        combined = combined[-max_rows:]
+    write_csv(path, combined)
+
+
 def _shadow_slippage(cfg: EngineConfig, prediction: dict[str, Any], *, stake_usdc: float | None = None) -> float:
     configured = max(0.0, float(cfg.raw.get("costs", {}).get("slippage", 0.0)))
     estimate = estimate_execution_cost(
@@ -1025,6 +1062,6 @@ def update_shadow_cohort_evidence(cfg: EngineConfig, predictions: list[dict[str,
     write_csv(_fills_path(cfg), fills)
     summary_file = str(settings.get("summary_file", "shadow_signal_cohort_pnl.json"))
     write_json(cfg.governance_root / summary_file, summary)
-    write_csv(cfg.governance_root / "shadow_signal_cohort_pnl.csv", summary.get("cohorts", []))
+    _write_shadow_pnl_history(cfg, summary)
     write_json(cfg.governance_root / "shadow_cohort_update_summary.json", summary)
     return summary

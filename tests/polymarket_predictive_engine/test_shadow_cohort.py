@@ -4,7 +4,7 @@ from pathlib import Path
 import json
 
 from polymarket_predictive_engine.config import EngineConfig
-from polymarket_predictive_engine.shadow_cohort import update_shadow_cohort_evidence
+from polymarket_predictive_engine.shadow_cohort import _write_shadow_pnl_history, update_shadow_cohort_evidence
 from polymarket_predictive_engine.utils import read_csv_rows
 
 
@@ -42,6 +42,32 @@ def _cfg(tmp_path: Path) -> EngineConfig:
         },
         path=tmp_path / "config.yaml",
     )
+
+
+def test_shadow_pnl_csv_accrues_one_latest_row_per_cohort_day(tmp_path):
+    cfg = _cfg(tmp_path)
+    first = {
+        "generated_at_utc": "2026-07-10T08:00:00Z",
+        "cohorts": [{"signal_cohort": "family_a", "shadow_total_pnl_usdc": 1.0, "shadow_roi": 0.01}],
+    }
+    replacement = {
+        "generated_at_utc": "2026-07-10T20:00:00Z",
+        "cohorts": [{"signal_cohort": "family_a", "shadow_total_pnl_usdc": 2.0, "shadow_roi": 0.02}],
+    }
+    next_day = {
+        "generated_at_utc": "2026-07-11T08:00:00Z",
+        "cohorts": [{"signal_cohort": "family_a", "shadow_total_pnl_usdc": 3.0, "shadow_roi": 0.03}],
+    }
+
+    _write_shadow_pnl_history(cfg, first)
+    _write_shadow_pnl_history(cfg, replacement)
+    _write_shadow_pnl_history(cfg, next_day)
+
+    rows = read_csv_rows(cfg.governance_root / "shadow_signal_cohort_pnl.csv")
+    assert len(rows) == 2
+    assert rows[0]["generated_at_utc"] == "2026-07-10T20:00:00Z"
+    assert rows[0]["shadow_total_pnl_usdc"] == "2.0"
+    assert rows[1]["generated_at_utc"] == "2026-07-11T08:00:00Z"
 
 
 def test_near_miss_candidates_open_distinct_shadow_evidence_cohort(tmp_path):

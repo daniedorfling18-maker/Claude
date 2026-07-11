@@ -481,6 +481,12 @@ quote-sheet/dashboard badge. It evaluates the frozen action table, sizing ladder
 and kill criteria while remaining strictly advisory: no paper/live orders, no gate changes, and no
 automatic funding action.
 
+**2026-07-10 — WO-51 implemented by Codex.** Maker-carry candidates now carry a tighten-only
+resolution-risk screen: objective Fed/rate, match/game, numeric-close, and election-result wording
+is low by default; subjective UMA-dispute-prone wording is high; and the resolution-quality corpus
+can only escalate low classes to medium. High-risk questions are measured but excluded from the
+quote portfolio and quote sheet rule 9 tells the human to avoid unclear/disputed resolutions.
+
 **2026-07-10 — WO-42 implemented by Codex.** Calibration-bias harvesting now joins clean resolved
 markets to point-in-time pre-close prices and writes
 `outputs/calibration_bias/calibration_curve.csv` plus summary JSON. It reports category/horizon/bin

@@ -1219,10 +1219,17 @@ def run_maker_carry_study(cfg: EngineConfig) -> dict[str, Any]:
     # clock, and a single day can never satisfy M-A.
     history_path = out_root / "maker_carry_history.csv"
     prior_runs = read_csv_rows(history_path)
+    # 2026-07-11 dated tightening (pre-commitment audit): only days measured
+    # under the CURRENT published share model count toward M-A. The 2026-07-10
+    # legacy-model day cleared target under a share model later shown to
+    # overstate shares 3-9x (WO-46); letting it count would allow the gate to
+    # pass on 6 honest days plus 1 discredited one. Tighten-only: this can
+    # only reduce the day count, never raise it.
     days_at_target = {
         str(run.get("generated_at_utc") or "")[:10]
         for run in prior_runs
         if (safe_float(run.get("portfolio_net_carry_usd_per_day")) or 0.0) >= target
+        and str(run.get("share_model") or "") == "published_v2"
     }
     days_at_target.discard("")
     latest_at_target = bool(portfolio) and net_total >= target
@@ -1245,6 +1252,7 @@ def run_maker_carry_study(cfg: EngineConfig) -> dict[str, Any]:
             "state": gate_a_state,
             "runs_at_or_above_target": runs_at_target,
             "counting": "distinct_utc_days",
+            "share_model_scope": "published_v2_only",
             "required_runs": required_runs,
             "latest_run_at_target": latest_at_target,
         },

@@ -540,6 +540,13 @@ section. Annualised fields stay null below 20 daily observations; every paper/sh
 stamped simulated, and only sample-qualified `maker_live_test` evidence can ever be presentation
 ready. This reporting artifact is not read by any gate, policy, sizing, broker, or order path.
 
+**2026-07-11 — WO-47 implemented by Codex.** The market websocket now requests custom lifecycle
+events even when asset IDs come from dynamic liquidity/position selection. Authoritative
+`market_resolved` stamps append to `outputs/polymarket_websocket/resolution_events.csv`; complete
+`new_market` birth metadata, including fee schedule/rebate rate, sports timing/type, and tick size,
+append to `market_births.csv`. Both ledgers are deduplicated and byte-append-only. They are isolated
+validation evidence and are not consumed by features, closing-line grading, governance, or trading.
+
 ## Rules of engagement for coding agents
 
 0. **Division of labour**: the orchestrating agent writes/updates this charter and the work orders

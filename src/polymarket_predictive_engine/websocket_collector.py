@@ -1,14 +1,18 @@
 from __future__ import annotations
 
 import asyncio
+import csv
 import importlib
 import json
+import os
 import sqlite3
 import time
-from typing import Any
+from pathlib import Path
+from typing import Any, Callable
 
 from .config import EngineConfig, load_config
-from .utils import now_utc, parse_timestamp, read_csv_rows, read_json, safe_float, write_csv, write_json
+from .runtime_lock import runtime_lock
+from .utils import csv_columns, now_utc, parse_timestamp, read_csv_rows, read_json, safe_float, serialize_value, write_csv, write_json
 
 _TARGET_DECISIONS = {"collect_settlement_evidence", "candidate_for_focus"}
 _PROFIT_SPRINT_TARGET_ACTIONS = {"WAIT_ACTIVE_WINDOW", "SHADOW_LABEL_GATE", "SHADOW_EDGE_WATCH"}
@@ -32,6 +36,55 @@ _FEEDBACK_TARGET_LEARNING_STATES = {
     "suppress_negative_price_action_and_broaden",
     "collect_model_validation_gap_price_action_evidence",
 }
+
+# WO-47 lifecycle ledgers are deliberately isolated from model/trading inputs.
+# They preserve the venue's authoritative market-birth and resolution events for
+# later validation without changing the closing-line or settlement source.
+RESOLUTION_EVENT_FIELDS = [
+    "captured_at_utc",
+    "source_timestamp",
+    "event_id",
+    "market",
+    "question",
+    "slug",
+    "description",
+    "assets_ids_json",
+    "outcomes_json",
+    "winning_asset_id",
+    "winning_outcome",
+    "event_message",
+    "raw_event_json",
+]
+
+MARKET_BIRTH_FIELDS = [
+    "captured_at_utc",
+    "source_timestamp",
+    "event_id",
+    "market",
+    "condition_id",
+    "question",
+    "slug",
+    "description",
+    "assets_ids_json",
+    "outcomes_json",
+    "clob_token_ids_json",
+    "tags_json",
+    "active",
+    "sports_market_type",
+    "line",
+    "game_start_time",
+    "order_price_min_tick_size",
+    "group_item_title",
+    "taker_base_fee",
+    "fees_enabled",
+    "fee_schedule_exponent",
+    "fee_schedule_rate",
+    "fee_schedule_taker_only",
+    "fee_schedule_rebate_rate",
+    "fee_schedule_json",
+    "event_message",
+    "raw_event_json",
+]
 
 
 async def _collect_messages(
@@ -103,6 +156,221 @@ def _json_dict(value: Any) -> dict[str, Any]:
     except (TypeError, ValueError, json.JSONDecodeError):
         return {}
     return decoded if isinstance(decoded, dict) else {}
+
+
+def _canonical_json(value: Any) -> str:
+    if value is None or value == "":
+        return ""
+    return json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+
+
+def _event_message(value: Any) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, (dict, list, tuple)):
+        return _canonical_json(value)
+    return str(value)
+
+
+def _decode_lifecycle_events(raw_message: Any) -> list[dict[str, Any]]:
+    """Decode one raw socket frame without changing normaliser behaviour."""
+
+    if isinstance(raw_message, (bytes, bytearray)):
+        try:
+            raw_message = raw_message.decode("utf-8")
+        except UnicodeDecodeError:
+            return []
+    if isinstance(raw_message, str):
+        stripped = raw_message.strip()
+        if not stripped or stripped.upper() in {"PING", "PONG"}:
+            return []
+        try:
+            payload = json.loads(stripped)
+        except (TypeError, ValueError, json.JSONDecodeError):
+            return []
+    else:
+        payload = raw_message
+    events = payload if isinstance(payload, list) else [payload]
+    return [event for event in events if isinstance(event, dict)]
+
+
+def _resolution_event_row(captured_at_utc: str, event: dict[str, Any]) -> dict[str, Any] | None:
+    market = str(event.get("market") or "").strip()
+    winning_asset_id = str(event.get("winning_asset_id") or "").strip()
+    if not market or not winning_asset_id:
+        return None
+    return {
+        "captured_at_utc": captured_at_utc,
+        "source_timestamp": event.get("timestamp", ""),
+        "event_id": event.get("id", ""),
+        "market": market,
+        "question": event.get("question", ""),
+        "slug": event.get("slug", ""),
+        "description": event.get("description", ""),
+        "assets_ids_json": _canonical_json(event.get("assets_ids") or event.get("asset_ids")),
+        "outcomes_json": _canonical_json(event.get("outcomes")),
+        "winning_asset_id": winning_asset_id,
+        "winning_outcome": event.get("winning_outcome", ""),
+        "event_message": _event_message(event.get("event_message")),
+        "raw_event_json": _canonical_json(event),
+    }
+
+
+def _market_birth_row(captured_at_utc: str, event: dict[str, Any]) -> dict[str, Any] | None:
+    market = str(event.get("market") or "").strip()
+    condition_id = str(event.get("condition_id") or "").strip()
+    event_id = str(event.get("id") or "").strip()
+    if not (condition_id or market or event_id):
+        return None
+    fee_schedule = _json_dict(event.get("fee_schedule"))
+    return {
+        "captured_at_utc": captured_at_utc,
+        "source_timestamp": event.get("timestamp", ""),
+        "event_id": event_id,
+        "market": market,
+        "condition_id": condition_id,
+        "question": event.get("question", ""),
+        "slug": event.get("slug", ""),
+        "description": event.get("description", ""),
+        "assets_ids_json": _canonical_json(event.get("assets_ids") or event.get("asset_ids")),
+        "outcomes_json": _canonical_json(event.get("outcomes")),
+        "clob_token_ids_json": _canonical_json(event.get("clob_token_ids")),
+        "tags_json": _canonical_json(event.get("tags")),
+        "active": event.get("active", ""),
+        "sports_market_type": event.get("sports_market_type", ""),
+        "line": event.get("line", ""),
+        "game_start_time": event.get("game_start_time", ""),
+        "order_price_min_tick_size": event.get("order_price_min_tick_size", event.get("tick_size", "")),
+        "group_item_title": event.get("group_item_title", ""),
+        "taker_base_fee": event.get("taker_base_fee", ""),
+        "fees_enabled": event.get("fees_enabled", ""),
+        "fee_schedule_exponent": fee_schedule.get("exponent", ""),
+        "fee_schedule_rate": fee_schedule.get("rate", ""),
+        "fee_schedule_taker_only": fee_schedule.get("taker_only", ""),
+        "fee_schedule_rebate_rate": fee_schedule.get("rebate_rate", ""),
+        "fee_schedule_json": _canonical_json(fee_schedule),
+        "event_message": _event_message(event.get("event_message")),
+        "raw_event_json": _canonical_json(event),
+    }
+
+
+def _resolution_key(row: dict[str, Any]) -> tuple[str, ...] | None:
+    market = str(row.get("market") or "").strip()
+    winning_asset_id = str(row.get("winning_asset_id") or "").strip()
+    return (market, winning_asset_id) if market and winning_asset_id else None
+
+
+def _market_birth_key(row: dict[str, Any]) -> tuple[str, ...] | None:
+    identifier = str(row.get("condition_id") or row.get("market") or row.get("event_id") or "").strip()
+    return (identifier,) if identifier else None
+
+
+def _append_unique_lifecycle_rows(
+    path: Path,
+    rows: list[dict[str, Any]],
+    *,
+    fieldnames: list[str],
+    key_fn: Callable[[dict[str, Any]], tuple[str, ...] | None],
+) -> tuple[int, int, int]:
+    """Append unique rows while preserving every existing ledger byte."""
+
+    header = csv_columns(path)
+    if header and header != fieldnames:
+        raise ValueError(f"websocket lifecycle ledger header drift at {path}: expected {fieldnames}, found {header}")
+    existing_keys = {key for row in read_csv_rows(path) if (key := key_fn(row)) is not None}
+    added: list[dict[str, Any]] = []
+    duplicates = 0
+    invalid = 0
+    for row in rows:
+        key = key_fn(row)
+        if key is None:
+            invalid += 1
+            continue
+        if key in existing_keys:
+            duplicates += 1
+            continue
+        existing_keys.add(key)
+        added.append(row)
+    if not added:
+        return 0, duplicates, invalid
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    needs_header = not path.exists() or path.stat().st_size == 0
+    with path.open("a", newline="", encoding="utf-8") as handle:
+        writer = csv.DictWriter(handle, fieldnames=fieldnames, extrasaction="ignore")
+        if needs_header:
+            writer.writeheader()
+        for row in added:
+            writer.writerow({field: serialize_value(row.get(field, "")) for field in fieldnames})
+        handle.flush()
+        os.fsync(handle.fileno())
+    return len(added), duplicates, invalid
+
+
+def _persist_lifecycle_events(cfg: EngineConfig, captured_rows: list[dict[str, Any]]) -> dict[str, Any]:
+    resolution_rows: list[dict[str, Any]] = []
+    market_birth_rows: list[dict[str, Any]] = []
+    resolution_received = 0
+    market_births_received = 0
+    resolution_invalid = 0
+    market_births_invalid = 0
+
+    for captured in captured_rows:
+        captured_at_utc = str(captured.get("collected_at_utc") or "")
+        for event in _decode_lifecycle_events(captured.get("message")):
+            event_type = str(event.get("event_type") or "").strip()
+            if event_type == "market_resolved":
+                resolution_received += 1
+                row = _resolution_event_row(captured_at_utc, event)
+                if row is None:
+                    resolution_invalid += 1
+                else:
+                    resolution_rows.append(row)
+            elif event_type == "new_market":
+                market_births_received += 1
+                row = _market_birth_row(captured_at_utc, event)
+                if row is None:
+                    market_births_invalid += 1
+                else:
+                    market_birth_rows.append(row)
+
+    resolution_path = cfg.output_root / "polymarket_websocket" / "resolution_events.csv"
+    market_birth_path = cfg.output_root / "polymarket_websocket" / "market_births.csv"
+    resolution_added = resolution_duplicates = 0
+    market_births_added = market_births_duplicates = 0
+    if resolution_rows or market_birth_rows:
+        with runtime_lock(cfg, "websocket_lifecycle_capture", stale_after_seconds=600) as lock:
+            if not lock.acquired:
+                raise RuntimeError("websocket lifecycle capture lock is already held")
+            resolution_added, resolution_duplicates, resolution_key_invalid = _append_unique_lifecycle_rows(
+                resolution_path,
+                resolution_rows,
+                fieldnames=RESOLUTION_EVENT_FIELDS,
+                key_fn=_resolution_key,
+            )
+            market_births_added, market_births_duplicates, market_birth_key_invalid = _append_unique_lifecycle_rows(
+                market_birth_path,
+                market_birth_rows,
+                fieldnames=MARKET_BIRTH_FIELDS,
+                key_fn=_market_birth_key,
+            )
+            resolution_invalid += resolution_key_invalid
+            market_births_invalid += market_birth_key_invalid
+
+    return {
+        "custom_feature_enabled": True,
+        "downstream_wired": False,
+        "resolution_events_received": resolution_received,
+        "resolution_events_appended": resolution_added,
+        "resolution_events_duplicates": resolution_duplicates,
+        "resolution_events_invalid": resolution_invalid,
+        "resolution_events_file": str(resolution_path),
+        "market_births_received": market_births_received,
+        "market_births_appended": market_births_added,
+        "market_births_duplicates": market_births_duplicates,
+        "market_births_invalid": market_births_invalid,
+        "market_births_file": str(market_birth_path),
+    }
 
 
 def _first_text(row: dict[str, Any], keys: tuple[str, ...]) -> str:
@@ -1421,15 +1689,34 @@ def _position_target_counts(rows: list[dict[str, Any]]) -> dict[str, int]:
     return dict(sorted(counts.items()))
 
 
+def _custom_feature_enabled(settings: dict[str, Any]) -> bool:
+    if "custom_feature_enabled" in settings:
+        return _boolish(settings.get("custom_feature_enabled"))
+    configured = settings.get("subscription_message")
+    if isinstance(configured, dict):
+        return _boolish(configured.get("custom_feature_enabled"))
+    return False
+
+
 def _subscription_variants(asset_ids: list[str], settings: dict[str, Any], *, dynamic_ids: bool) -> list[dict[str, Any]]:
+    custom_feature_enabled = _custom_feature_enabled(settings)
     if not dynamic_ids:
         configured = settings.get("subscription_message")
-        return [configured] if isinstance(configured, dict) else [{"markets": asset_ids, "type": "market"}]
-    return [
+        if isinstance(configured, dict):
+            return [configured]
+        fallback = {"markets": asset_ids, "type": "market"}
+        if custom_feature_enabled:
+            fallback["custom_feature_enabled"] = True
+        return [fallback]
+    variants = [
         {"assets_ids": asset_ids, "type": "market"},
         {"asset_ids": asset_ids, "type": "market"},
         {"markets": asset_ids, "type": "market"},
     ]
+    if custom_feature_enabled:
+        for variant in variants:
+            variant["custom_feature_enabled"] = True
+    return variants
 
 
 def _collect_with_variants(
@@ -1564,6 +1851,7 @@ def collect_websocket(cfg: EngineConfig, websocket_seconds: int = 60) -> dict[st
         }
         write_json(out_root / "websocket_summary.json", summary)
         return summary
+    lifecycle_capture = _persist_lifecycle_events(cfg, new_rows) if _custom_feature_enabled(settings) else {}
     combined_rows = existing_rows + new_rows
     max_messages = int(settings.get("max_messages", 0) or 0)
     dropped_messages = 0
@@ -1601,6 +1889,8 @@ def collect_websocket(cfg: EngineConfig, websocket_seconds: int = 60) -> dict[st
         "subscription_attempts": len(variants),
         "subscription_errors": variant_errors[-5:],
     }
+    if lifecycle_capture:
+        summary["lifecycle_capture"] = lifecycle_capture
     write_json(out_root / "websocket_summary.json", summary)
     return summary
 

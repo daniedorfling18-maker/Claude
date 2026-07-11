@@ -62,6 +62,7 @@ and an approximation for the pick-off charge. A YES here justifies a deeper
 study and nothing else. Measurement only: no labels, no gates, no order
 placement of any kind. The live-trading gates in AGENTS.md are untouched.
 """
+
 from __future__ import annotations
 
 import json
@@ -81,11 +82,114 @@ DEFAULT_DATA_API_BASE_URL = "https://data-api.polymarket.com"
 
 MAKER_GATES_REGISTERED_AT_UTC = "2026-07-09T13:00:00Z"
 
+MAKER_POLICY_DEFAULTS: dict[str, Any] = {
+    "max_trusted_reward_share": 0.05,
+    "max_size_multiple": 5,
+    "capital_cap_usd": 500.0,
+    "target_net_usd_per_day": 3.33,
+    "min_daily_payout_usd": 1.0,
+    "gate_min_runs_at_target": 7,
+    "share_model_c": 3.0,
+    "share_model_mid_band_min": 0.10,
+    "share_model_mid_band_max": 0.90,
+}
+
+MAKER_GATE_REGISTRATION: list[dict[str, Any]] = [
+    {
+        "id": "M_A_carry_evidence",
+        "registered_at_utc": MAKER_GATES_REGISTERED_AT_UTC,
+        "rule": "Trusted net carry must meet the daily target on the required number of distinct UTC days, including the latest run.",
+        "threshold_config_key": "gate_min_runs_at_target",
+        "counting": "distinct_utc_days",
+        "share_model_scope": "published_v2_only",
+    },
+    {
+        "id": "M_B_adverse_realism",
+        "registered_at_utc": MAKER_GATES_REGISTERED_AT_UTC,
+        "rule": "Every portfolio market must carry a measured empirical markout charge.",
+    },
+    {
+        "id": "M_C_payout_floor",
+        "registered_at_utc": MAKER_GATES_REGISTERED_AT_UTC,
+        "rule": "Every sized market must clear the venue's daily reward payout floor.",
+        "threshold_config_key": "min_daily_payout_usd",
+        "enforcement": "pass_by_construction",
+    },
+]
+
+# WO-64 source of truth: both the human quote sheet and the generated IPS
+# render these structured rules. No consumer may parse generated prose.
+QUOTE_SHEET_STANDING_RULES: list[dict[str, Any]] = [
+    {
+        "number": 1,
+        "title": "Scheduled announcement",
+        "text_template": ("Never quote through a scheduled announcement; pull flagged rows at least 24h before the event and stay out until it settles."),
+    },
+    {
+        "number": 2,
+        "title": "Minimum-size start",
+        "text_template": "Start at minimum size for a full reward day before any size-up.",
+    },
+    {
+        "number": 3,
+        "title": "Payout floor",
+        "text_template": ("Rewards below ${min_daily_payout_usd}/market/day pay NOTHING; stay above the floor."),
+    },
+    {
+        "number": 4,
+        "title": "Fill-model breach",
+        "text_template": ("If realised fills exceed the modelled band-crossing rate, stop: faster flow is beating the markout model."),
+    },
+    {
+        "number": 5,
+        "title": "Daily refresh",
+        "text_template": "Re-read the sheet daily because reward pots and competition move with the calendar.",
+    },
+    {
+        "number": 6,
+        "title": "Inventory skew",
+        "text_template": (
+            "Once filled on one side, requote to REDUCE the position, never to add; unhedged binary inventory at "
+            "resolution is a directional bet, not market making."
+        ),
+    },
+    {
+        "number": 7,
+        "title": "Band discipline",
+        "text_template": ("Quote only while the mid is inside [0.10, 0.90]; exit as price leaves the band and do not chase it."),
+    },
+    {
+        "number": 8,
+        "title": "Flow toxicity",
+        "text_template": (
+            "Do not initiate quotes where toxicity_score > 0.9. This conditions human action only; the registered "
+            "study charge is unchanged absent a later dated tightening."
+        ),
+    },
+    {
+        "number": 9,
+        "title": "Resolution risk",
+        "text_template": (
+            "Only quote markets with objective, verifiable resolution sources and no open clarifications; exit "
+            "immediately if a proposal on a held market is disputed."
+        ),
+    },
+]
+
 # Markets whose question suggests scheduled binary announcements: quoting
 # through the event is the classic maker blow-up, so the quote sheet flags it.
 EVENT_RISK_KEYWORDS = (
-    "fed", "rate", "cpi", "meeting", "announce", "decision", "election",
-    "vote", "jobs report", "opec", "earnings",
+    "fed",
+    "rate",
+    "cpi",
+    "meeting",
+    "announce",
+    "decision",
+    "election",
+    "vote",
+    "jobs report",
+    "opec",
+    "earnings",
 )
 
 RESOLUTION_HIGH_KEYWORDS = (
@@ -207,8 +311,32 @@ def _settings(cfg: EngineConfig) -> dict[str, Any]:
         "share_model_mid_band_min": 0.10,
         "share_model_mid_band_max": 0.90,
     }
+    # Policy-bearing defaults come from one structured source so the generated
+    # IPS and the enforced study cannot drift apart.
+    merged.update(MAKER_POLICY_DEFAULTS)
     merged.update({k: v for k, v in raw.items() if v is not None})
     return merged
+
+
+def maker_policy_settings(cfg: EngineConfig) -> dict[str, Any]:
+    settings = _settings(cfg)
+    return {key: settings[key] for key in MAKER_POLICY_DEFAULTS}
+
+
+def maker_gate_registration(gate_id: str) -> dict[str, Any]:
+    return next(row for row in MAKER_GATE_REGISTRATION if row["id"] == gate_id)
+
+
+def quote_sheet_standing_rules(settings: dict[str, Any]) -> list[dict[str, Any]]:
+    values = {"min_daily_payout_usd": settings.get("min_daily_payout_usd", 1.0)}
+    return [
+        {
+            "number": int(rule["number"]),
+            "title": str(rule["title"]),
+            "text": str(rule["text_template"]).format(**values),
+        }
+        for rule in QUOTE_SHEET_STANDING_RULES
+    ]
 
 
 def _live_pot_usd(market: dict[str, Any], today: str) -> float:
@@ -236,19 +364,15 @@ def _base_resolution_class(question: str) -> dict[str, str]:
     """
 
     text = re.sub(r"[^a-z0-9$%.]+", " ", str(question or "").lower()).strip()
-    if (
-        ("fed" in text or "fomc" in text or "federal reserve" in text)
-        and any(token in text for token in ("rate", "interest", "hike", "cut", "hold", "no change", "decision"))
+    if ("fed" in text or "fomc" in text or "federal reserve" in text) and any(
+        token in text for token in ("rate", "interest", "hike", "cut", "hold", "no change", "decision")
     ):
         return {
             "resolution_risk": "low",
             "resolution_risk_class": "fed_rate_decision",
             "resolution_risk_reason": "objective Fed/rate decision wording",
         }
-    if (
-        any(token in text for token in ("match", "game"))
-        and any(token in text for token in ("winner", "win", "beat", "defeat"))
-    ):
+    if any(token in text for token in ("match", "game")) and any(token in text for token in ("winner", "win", "beat", "defeat")):
         return {
             "resolution_risk": "low",
             "resolution_risk_class": "match_game_winner",
@@ -328,8 +452,7 @@ def _resolution_risk_for_question(
             **base,
             "resolution_risk": "medium",
             "resolution_risk_reason": (
-                f"{base['resolution_risk_reason']}; escalated by corpus clean-settlement share "
-                f"{float(clean_share):.3f} over {sample} markets"
+                f"{base['resolution_risk_reason']}; escalated by corpus clean-settlement share {float(clean_share):.3f} over {sample} markets"
             ),
         }
     return {
@@ -797,9 +920,7 @@ def _supplementary_income(row: dict[str, Any], settings: dict[str, Any], depth: 
     }
 
 
-def _price_series(
-    settings: dict[str, Any], token_id: str, *, interval: str, fidelity_minutes: int
-) -> list[tuple[float, float]] | None:
+def _price_series(settings: dict[str, Any], token_id: str, *, interval: str, fidelity_minutes: int) -> list[tuple[float, float]] | None:
     """(unix seconds, price) mid series from the public prices-history feed."""
     try:
         response = requests.get(
@@ -1034,21 +1155,13 @@ def _size_portfolio(
                 "quote_distance_fraction": row["quote_distance_fraction"],
                 "capital_usd": round(k * row["capital_usd"], 2),
                 "net_carry_usd_per_day": round(net_k, 4),
-                "uncounted_supplementary_income_usd_per_day": round(
-                    k * (row.get("supplementary_income_usd_per_day") or 0.0), 4
-                ),
-                "uncounted_rebate_usd_per_day": round(
-                    k * (row.get("supplementary_rebate_usd_per_day") or 0.0), 4
-                ),
-                "uncounted_holding_usd_per_day": round(
-                    k * (row.get("supplementary_holding_usd_per_day") or 0.0), 4
-                ),
+                "uncounted_supplementary_income_usd_per_day": round(k * (row.get("supplementary_income_usd_per_day") or 0.0), 4),
+                "uncounted_rebate_usd_per_day": round(k * (row.get("supplementary_rebate_usd_per_day") or 0.0), 4),
+                "uncounted_holding_usd_per_day": round(k * (row.get("supplementary_holding_usd_per_day") or 0.0), 4),
                 "markout_measured": bool(row.get("markout_measured")),
                 "resolution_risk": row.get("resolution_risk", "medium"),
                 "resolution_risk_class": row.get("resolution_risk_class", "other"),
-                "event_risk_flags": [
-                    keyword for keyword in EVENT_RISK_KEYWORDS if keyword in row["question"].lower()
-                ],
+                "event_risk_flags": [keyword for keyword in EVENT_RISK_KEYWORDS if keyword in row["question"].lower()],
             }
         )
         capital += k * row["capital_usd"]
@@ -1070,13 +1183,7 @@ def _capital_curve(
     }
     if not enabled:
         return [], None
-    caps = sorted(
-        {
-            float(cap)
-            for cap in (settings.get("capital_curve_caps_usd") or [250, 500, 1000, 2000, 5000])
-            if (safe_float(cap) or 0.0) > 0
-        }
-    )
+    caps = sorted({float(cap) for cap in (settings.get("capital_curve_caps_usd") or [250, 500, 1000, 2000, 5000]) if (safe_float(cap) or 0.0) > 0})
     curve: list[dict[str, Any]] = []
     for cap in caps:
         portfolio, capital_used, net_per_day = _size_portfolio(settings, candidates, cap)
@@ -1087,9 +1194,7 @@ def _capital_curve(
                 "portfolio_markets": len(portfolio),
                 "net_usd_per_day": net_per_day,
                 "net_usd_per_month": round(net_per_day * 30, 2),
-                "net_per_day_per_capital_used": (
-                    round(net_per_day / capital_used, 8) if capital_used > 0 else None
-                ),
+                "net_per_day_per_capital_used": (round(net_per_day / capital_used, 8) if capital_used > 0 else None),
             }
         )
     capital_for_target = next(
@@ -1118,9 +1223,7 @@ def run_maker_carry_study(cfg: EngineConfig) -> dict[str, Any]:
     pause = float(settings["request_pause_seconds"])
     candidates: list[dict[str, Any]] = []
     resolution_class_stats = _resolution_quality_class_stats(cfg)
-    fractions = sorted(
-        {float(f) for f in (settings.get("quote_distance_fractions") or [0.5]) if 0 < float(f) < 1}
-    ) or [0.5]
+    fractions = sorted({float(f) for f in (settings.get("quote_distance_fractions") or [0.5]) if 0 < float(f) < 1}) or [0.5]
     measurement_universe, yield_scan = _yield_first_shortlist(settings, universe, fractions)
     if yield_scan.get("yield_scan_error"):
         errors.append(f"yield prescreen: {yield_scan['yield_scan_error']}")
@@ -1133,9 +1236,7 @@ def run_maker_carry_study(cfg: EngineConfig) -> dict[str, Any]:
             continue
         depth = {"bid": competition["bid_depth"], "ask": competition["ask_depth"]}
         # Fetch market data ONCE; the distance sweep below re-prices freely.
-        fast_series = _price_series(
-            settings, market["token_id"], interval="1d", fidelity_minutes=max(1, int(settings["reaction_minutes"]))
-        )
+        fast_series = _price_series(settings, market["token_id"], interval="1d", fidelity_minutes=max(1, int(settings["reaction_minutes"])))
         slow_series = _price_series(settings, market["token_id"], interval="1w", fidelity_minutes=10)
         prints = _recent_prints(settings, market["condition_id"])
 
@@ -1148,9 +1249,7 @@ def run_maker_carry_study(cfg: EngineConfig) -> dict[str, Any]:
             share, our_score = _share_from_published_score(settings, competition, raw_our_score)
             legacy_share = _legacy_share(competition, raw_our_score)
             gross = market["pot_usd_per_day"] * share
-            adverse = _adverse_selection(
-                settings, fast_series, slow_series, prints, quote_distance, quote_size, depth
-            )
+            adverse = _adverse_selection(settings, fast_series, slow_series, prints, quote_distance, quote_size, depth)
             row = {
                 **market,
                 **resolution_risk,
@@ -1196,9 +1295,7 @@ def run_maker_carry_study(cfg: EngineConfig) -> dict[str, Any]:
                 else:
                     row["estimate_quality"] = "book_and_history"
             row.update(_supplementary_income(row, settings, depth))
-            if best_row is None or (row.get("net_carry_usd_per_day") or -1e18) > (
-                best_row.get("net_carry_usd_per_day") or -1e18
-            ):
+            if best_row is None or (row.get("net_carry_usd_per_day") or -1e18) > (best_row.get("net_carry_usd_per_day") or -1e18):
                 best_row = row
         if best_row is not None:
             candidates.append(best_row)
@@ -1228,8 +1325,7 @@ def run_maker_carry_study(cfg: EngineConfig) -> dict[str, Any]:
     days_at_target = {
         str(run.get("generated_at_utc") or "")[:10]
         for run in prior_runs
-        if (safe_float(run.get("portfolio_net_carry_usd_per_day")) or 0.0) >= target
-        and str(run.get("share_model") or "") == "published_v2"
+        if (safe_float(run.get("portfolio_net_carry_usd_per_day")) or 0.0) >= target and str(run.get("share_model") or "") == "published_v2"
     }
     days_at_target.discard("")
     latest_at_target = bool(portfolio) and net_total >= target
@@ -1238,17 +1334,12 @@ def run_maker_carry_study(cfg: EngineConfig) -> dict[str, Any]:
     runs_at_target = len(days_at_target)
     required_runs = int(settings["gate_min_runs_at_target"])
     gate_a_state = "pass" if latest_at_target and runs_at_target >= required_runs else "pending"
-    gate_b_state = (
-        "pass" if portfolio and all(entry["markout_measured"] for entry in portfolio) else "pending"
-    )
-    maker_verdict = (
-        "evidence_supported_pending_human_decision"
-        if gate_a_state == "pass" and gate_b_state == "pass"
-        else "insufficient_evidence"
-    )
+    gate_b_state = "pass" if portfolio and all(entry["markout_measured"] for entry in portfolio) else "pending"
+    maker_verdict = "evidence_supported_pending_human_decision" if gate_a_state == "pass" and gate_b_state == "pass" else "insufficient_evidence"
     maker_gates = {
         "registered_at_utc": MAKER_GATES_REGISTERED_AT_UTC,
         "M_A_carry_evidence": {
+            "registered_rule": maker_gate_registration("M_A_carry_evidence")["rule"],
             "state": gate_a_state,
             "runs_at_or_above_target": runs_at_target,
             "counting": "distinct_utc_days",
@@ -1257,10 +1348,12 @@ def run_maker_carry_study(cfg: EngineConfig) -> dict[str, Any]:
             "latest_run_at_target": latest_at_target,
         },
         "M_B_adverse_realism": {
+            "registered_rule": maker_gate_registration("M_B_adverse_realism")["rule"],
             "state": gate_b_state,
             "note": "every portfolio market must carry a MEASURED markout charge (empirical fills).",
         },
         "M_C_payout_floor": {
+            "registered_rule": maker_gate_registration("M_C_payout_floor")["rule"],
             "state": "pass_by_construction",
             "min_daily_payout_usd": float(settings["min_daily_payout_usd"]),
         },
@@ -1282,12 +1375,8 @@ def run_maker_carry_study(cfg: EngineConfig) -> dict[str, Any]:
             "yield_scan_selected_markets": yield_scan["yield_scan_selected_markets"],
             "yield_scan_fallback": yield_scan["yield_scan_fallback"],
             "candidates_measured": len(candidates),
-            "candidates_thin_book_untrusted": sum(
-                1 for r in candidates if r.get("estimate_quality") == "thin_book_untrusted"
-            ),
-            "candidates_resolution_high_risk": sum(
-                1 for r in candidates if r.get("resolution_risk") == "high"
-            ),
+            "candidates_thin_book_untrusted": sum(1 for r in candidates if r.get("estimate_quality") == "thin_book_untrusted"),
+            "candidates_resolution_high_risk": sum(1 for r in candidates if r.get("resolution_risk") == "high"),
             "portfolio_markets": len(portfolio),
             "portfolio": portfolio,
             "portfolio_capital_usd": round(capital, 2),
@@ -1297,15 +1386,9 @@ def run_maker_carry_study(cfg: EngineConfig) -> dict[str, Any]:
             "capital_for_100_per_month": capital_for_target,
             "top_portfolio_market": top_portfolio.get("condition_id", ""),
             "top_portfolio_question": top_portfolio.get("question", ""),
-            "portfolio_uncounted_supplementary_income_usd_per_day": round(
-                sum(r.get("uncounted_supplementary_income_usd_per_day", 0.0) for r in portfolio), 4
-            ),
-            "portfolio_uncounted_rebate_usd_per_day": round(
-                sum(r.get("uncounted_rebate_usd_per_day", 0.0) for r in portfolio), 4
-            ),
-            "portfolio_uncounted_holding_usd_per_day": round(
-                sum(r.get("uncounted_holding_usd_per_day", 0.0) for r in portfolio), 4
-            ),
+            "portfolio_uncounted_supplementary_income_usd_per_day": round(sum(r.get("uncounted_supplementary_income_usd_per_day", 0.0) for r in portfolio), 4),
+            "portfolio_uncounted_rebate_usd_per_day": round(sum(r.get("uncounted_rebate_usd_per_day", 0.0) for r in portfolio), 4),
+            "portfolio_uncounted_holding_usd_per_day": round(sum(r.get("uncounted_holding_usd_per_day", 0.0) for r in portfolio), 4),
             "target_net_usd_per_day": target,
             "clears_100_per_month_target": bool(portfolio) and net_total >= target,
             "share_model": "published_v2",
@@ -1333,8 +1416,7 @@ def run_maker_carry_study(cfg: EngineConfig) -> dict[str, Any]:
                 ),
                 "thin_book_guard": f"raw share > {settings['max_trusted_reward_share']} excluded from portfolio",
                 "supplementary_income": (
-                    "rebates + holding rewards are reported as uncounted income only; "
-                    "they are excluded from portfolio_net_carry_usd_per_day and every M-gate"
+                    "rebates + holding rewards are reported as uncounted income only; they are excluded from portfolio_net_carry_usd_per_day and every M-gate"
                 ),
                 "capital_curve": (
                     "2026-07-11 WO-57 planning aid only: each listed cap reruns the registered "
@@ -1383,11 +1465,7 @@ def _write_quote_sheet(out_root: Path, summary: dict[str, Any], settings: dict[s
     system with their own judgement and capital. The system itself remains
     paper-only and never touches an exchange."""
     gates = summary.get("maker_gates", {})
-    toxicity_rows = {
-        str(row.get("market") or ""): row
-        for row in read_csv_rows(out_root / "flow_toxicity.csv")
-        if row.get("market")
-    }
+    toxicity_rows = {str(row.get("market") or ""): row for row in read_csv_rows(out_root / "flow_toxicity.csv") if row.get("market")}
     lines = [
         "# Maker quote sheet (WO-36) - RESEARCH OUTPUT, NOT ADVICE",
         "",
@@ -1401,10 +1479,7 @@ def _write_quote_sheet(out_root: Path, summary: dict[str, Any], settings: dict[s
         f"Uncounted supplementary income shown separately: ${summary.get('portfolio_uncounted_supplementary_income_usd_per_day', 0.0)}/day "
         "(rebates + holding rewards; NOT included in gates or net carry).",
         "Capital curve (planning aid - uncounted, not a gate input): "
-        + "; ".join(
-            f"${row['capital_cap_usd']:.0f} cap -> ${row['net_usd_per_day']:.2f}/day"
-            for row in (summary.get("capital_curve") or [])
-        )
+        + "; ".join(f"${row['capital_cap_usd']:.0f} cap -> ${row['net_usd_per_day']:.2f}/day" for row in (summary.get("capital_curve") or []))
         + (
             f"; first cap meeting $100/month target: ${summary['capital_for_100_per_month']:.0f}."
             if summary.get("capital_for_100_per_month") is not None
@@ -1430,31 +1505,8 @@ def _write_quote_sheet(out_root: Path, summary: dict[str, Any], settings: dict[s
             f"${entry['net_carry_usd_per_day']} | ${entry.get('uncounted_supplementary_income_usd_per_day', 0.0)} | "
             f"{resolution_label} | {toxicity_label} | {flags} |"
         )
-    lines += [
-        "",
-        "Standing rules (non-negotiable if a human ever acts on this):",
-        "1. Never quote through a scheduled announcement (any flagged row: pull",
-        "   quotes at least 24h before the event and stay out until it settles).",
-        "2. Start at minimum size for a full reward day before any size-up.",
-        f"3. Rewards below ${settings['min_daily_payout_usd']}/market/day pay NOTHING - stay above the floor.",
-        "4. If realised fills exceed the modelled band-crossing rate, stop: the",
-        "   markout model is being beaten by faster flow.",
-        "5. Re-read this sheet daily; pots and competition move with the calendar.",
-        "6. Inventory skew (Ho-Stoll/Avellaneda-Stoikov): once filled on one side,",
-        "   requote to REDUCE the position, never to add. Binary markets settle at",
-        "   0 or 1 - unhedged inventory at resolution is a directional bet, not",
-        "   market making.",
-        "7. Band discipline: quote only while the mid is inside [0.10, 0.90] -",
-        "   outside it the venue requires double-sided scoring, ticks shift, and",
-        "   gamma-to-settlement risk is highest. Exit quotes as price leaves the",
-        "   band; do not chase it.",
-        "8. Flow toxicity: do not initiate quotes in a market whose toxicity_score > 0.9.",
-        "   This is a conditioning rule only; the study's adverse charge is not",
-        "   modified unless a later dated tightening explicitly changes it.",
-        "9. Resolution risk: only quote markets with objective, verifiable",
-        "   resolution sources and no open clarifications; exit quotes",
-        "   immediately if a proposal on a held market is disputed.",
-    ]
+    lines += ["", "Standing rules (non-negotiable if a human ever acts on this):"]
+    lines.extend(f"{rule['number']}. {rule['title']}: {rule['text']}" for rule in quote_sheet_standing_rules(settings))
     (out_root / "maker_quote_sheet.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 

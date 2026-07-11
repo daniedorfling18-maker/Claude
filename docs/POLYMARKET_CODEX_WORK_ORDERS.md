@@ -2291,6 +2291,13 @@ Spec:
 
 ## WO-64 — Investment policy statement generator (code-is-policy)
 
+Status: IMPLEMENTED by Codex on 2026-07-11. CLI `render-ips` generates
+`outputs/performance/investment_policy_statement.md` from the registered
+action table, maker/verdict gates, amendments, kill criteria, and the same
+structured quote rules used by the daily quote sheet. It embeds source-default
+and effective-config hashes plus the current WO-12 risk and WO-57 capacity
+annexes. Reporting only; no trading or governance path reads the IPS.
+
 The risk limits shown to an external reader must be GENERATED from the
 enforced constants, never hand-written.
 

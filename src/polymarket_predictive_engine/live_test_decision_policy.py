@@ -47,12 +47,105 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     "kelly_full_weight_days": KELLY_FULL_WEIGHT_DAYS_FLOOR,
 }
 
+REGISTERED_ACTION_POLICY: list[dict[str, Any]] = [
+    {
+        "priority": 1,
+        "id": "kill_criteria",
+        "condition": "Any registered kill criterion is triggered.",
+        "indicated_action": "stop_quoting_review_before_resume",
+        "reason": "one_or_more_registered_kill_criteria_triggered",
+    },
+    {
+        "priority": 2,
+        "id": "post_gate_below_target",
+        "condition": "M-A and M-B pass, but net is below target on more than the registered recent-run threshold.",
+        "indicated_action": "maker_lane_not_supported_program_review",
+        "reason": "net_below_target_on_more_than_three_of_last_seven_runs_after_gates_reachable",
+    },
+    {
+        "priority": 3,
+        "id": "gates_pass_composition_stable",
+        "condition": "M-A and M-B pass and the top portfolio market meets the registered recurrence floor.",
+        "indicated_action": "fund_100_min_size_single_calmest_market",
+        "reason": "M_A_and_M_B_pass_with_stable_top_portfolio_market",
+    },
+    {
+        "priority": 4,
+        "id": "gates_pass_composition_churning",
+        "condition": "M-A and M-B pass but portfolio composition is not stable.",
+        "indicated_action": "fund_100_but_only_most_recurrent_market_half_target",
+        "reason": "M_A_and_M_B_pass_but_portfolio_composition_churning",
+    },
+    {
+        "priority": 5,
+        "id": "decision_date_pending_gate",
+        "condition": "The registered decision date is reached while M-A or M-B remains pending.",
+        "indicated_action": "defer_funding_continue_study",
+        "reason": "policy_decision_date_reached_with_pending_maker_gate",
+    },
+    {
+        "priority": 6,
+        "id": "study_missing",
+        "condition": "The maker-carry study artifact is absent.",
+        "indicated_action": "collect_maker_carry_study",
+        "reason": "maker_carry_study_artifact_missing",
+    },
+    {
+        "priority": 7,
+        "id": "pre_decision_evidence_pending",
+        "condition": "No earlier policy row binds before the registered decision date.",
+        "indicated_action": "continue_study_until_policy_date",
+        "reason": "maker_gates_not_yet_passed_before_registered_decision_date",
+    },
+]
+
+KILL_CRITERIA_REGISTRATION: list[dict[str, Any]] = [
+    {
+        "id": "cumulative_real_net_score",
+        "rule": "Stop when cumulative real net score is at or below the registered loss floor.",
+        "threshold_config_key": "kill_cumulative_net_score_usd",
+    },
+    {
+        "id": "single_day_net_score",
+        "rule": "Stop when any single UTC-day net score is at or below the registered loss floor.",
+        "threshold_config_key": "kill_single_day_net_usd",
+    },
+    {
+        "id": "fills_outrunning_model_two_days",
+        "rule": "Stop when realised fills outrun the model for the registered number of days.",
+        "threshold_config_key": "kill_fill_overrun_days",
+    },
+    {
+        "id": "uma_dispute_inventory",
+        "rule": "Stop on a UMA dispute affecting held inventory.",
+    },
+    {
+        "id": "scoreboard_stop",
+        "rule": "Stop when the read-only live-test scoreboard emits its registered STOP state.",
+    },
+]
+
 
 def _settings(cfg: EngineConfig) -> dict[str, Any]:
     raw = cfg.raw.get("decision_policy", {}) if isinstance(cfg.raw.get("decision_policy"), dict) else {}
     merged = dict(DEFAULT_SETTINGS)
     merged.update({key: value for key, value in raw.items() if value is not None})
     return merged
+
+
+def effective_policy_settings(cfg: EngineConfig) -> dict[str, Any]:
+    """Return policy settings after the same tighten-only clamps used at runtime."""
+
+    settings = _settings(cfg)
+    settings["kelly_full_weight_days"] = max(
+        KELLY_FULL_WEIGHT_DAYS_FLOOR,
+        int(settings.get("kelly_full_weight_days") or KELLY_FULL_WEIGHT_DAYS_FLOOR),
+    )
+    return settings
+
+
+def _policy_row(policy_id: str) -> dict[str, Any]:
+    return next(row for row in REGISTERED_ACTION_POLICY if row["id"] == policy_id)
 
 
 def _out_root(cfg: EngineConfig) -> Path:
@@ -73,23 +166,11 @@ def _latest_top_market(study: dict[str, Any]) -> str:
     if not portfolio:
         return ""
     first = portfolio[0] if isinstance(portfolio[0], dict) else {}
-    return str(
-        first.get("condition_id")
-        or first.get("market_id")
-        or first.get("market_slug")
-        or first.get("question")
-        or ""
-    ).strip()
+    return str(first.get("condition_id") or first.get("market_id") or first.get("market_slug") or first.get("question") or "").strip()
 
 
 def _history_top_market(row: dict[str, Any]) -> str:
-    return str(
-        row.get("top_portfolio_market")
-        or row.get("top_condition_id")
-        or row.get("top_market")
-        or row.get("condition_id")
-        or ""
-    ).strip()
+    return str(row.get("top_portfolio_market") or row.get("top_condition_id") or row.get("top_market") or row.get("condition_id") or "").strip()
 
 
 def _latest_per_utc_day(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -227,11 +308,7 @@ def _ladder_stage(
 
 def _quarter_kelly_cap(history: list[dict[str, Any]], ladder_cap: float, settings: dict[str, Any]) -> dict[str, Any]:
     daily = _latest_per_utc_day(history)
-    values = [
-        safe_float(row.get("portfolio_net_carry_usd_per_day"))
-        for row in daily
-        if safe_float(row.get("portfolio_net_carry_usd_per_day")) is not None
-    ]
+    values = [safe_float(row.get("portfolio_net_carry_usd_per_day")) for row in daily if safe_float(row.get("portfolio_net_carry_usd_per_day")) is not None]
     if len(values) < 2:
         return {
             "daily_net_mean_usd": values[0] if values else None,
@@ -295,11 +372,7 @@ def _kill_criteria(live_test: dict[str, Any], live_history: list[dict[str, Any]]
     daily = _daily_net_rows(live_history)
     latest = live_test or (daily[-1] if daily else {})
     cumulative_net = safe_float(latest.get("net_score_usd"))
-    single_day_values = [
-        safe_float(row.get("_daily_net_score_usd"))
-        for row in daily
-        if safe_float(row.get("_daily_net_score_usd")) is not None
-    ]
+    single_day_values = [safe_float(row.get("_daily_net_score_usd")) for row in daily if safe_float(row.get("_daily_net_score_usd")) is not None]
     fill_overrun_days = 0
     for row in daily:
         modelled = safe_float(row.get("modelled_fills_per_day"))
@@ -338,6 +411,9 @@ def _kill_criteria(live_test: dict[str, Any], live_history: list[dict[str, Any]]
             "value": live_test.get("scoreboard", ""),
         },
     }
+    registered_ids = {str(row["id"]) for row in KILL_CRITERIA_REGISTRATION}
+    if set(criteria) != registered_ids:
+        raise RuntimeError("kill-criteria code and registration have drifted")
     triggered = [name for name, row in criteria.items() if row["triggered"]]
     return {"triggered": triggered, "status": "triggered" if triggered else "clear", "criteria": criteria}
 
@@ -378,7 +454,7 @@ def _patch_quote_sheet(out_root: Path, policy: dict[str, Any]) -> None:
 
 
 def run_decision_policy(cfg: EngineConfig) -> dict[str, Any]:
-    settings = _settings(cfg)
+    settings = effective_policy_settings(cfg)
     out_root = _out_root(cfg)
     path = out_root / "decision_policy.json"
     if str(settings.get("enabled", True)).strip().lower() in {"0", "false", "no", "off"}:
@@ -400,15 +476,11 @@ def run_decision_policy(cfg: EngineConfig) -> dict[str, Any]:
     gate_a = _state(gates, "M_A_carry_evidence", "state") or "pending"
     gate_b = _state(gates, "M_B_adverse_realism", "state") or "pending"
     gates_pass = gate_a == "pass" and gate_b == "pass"
-    target = safe_float(study.get("target_net_usd_per_day")) or float(
-        (cfg.raw.get("maker_carry_study", {}) or {}).get("target_net_usd_per_day", 3.33)
-    )
+    target = safe_float(study.get("target_net_usd_per_day")) or float((cfg.raw.get("maker_carry_study", {}) or {}).get("target_net_usd_per_day", 3.33))
     composition = _composition(study, carry_history, settings)
     recent = _latest_per_utc_day(carry_history)[-int(settings["below_target_review_runs"]) :]
     below_target = [
-        row
-        for row in recent
-        if (safe_float(row.get("portfolio_net_carry_usd_per_day")) is not None and float(row["portfolio_net_carry_usd_per_day"]) < target)
+        row for row in recent if (safe_float(row.get("portfolio_net_carry_usd_per_day")) is not None and float(row["portfolio_net_carry_usd_per_day"]) < target)
     ]
     kill = _kill_criteria(live_test, live_history, settings)
     ladder = _ladder_stage(cfg, study, live_test, live_history, settings)
@@ -417,26 +489,21 @@ def run_decision_policy(cfg: EngineConfig) -> dict[str, Any]:
     decision_date = _policy_date(settings)
 
     if kill["triggered"]:
-        indicated = "stop_quoting_review_before_resume"
-        reason = "one_or_more_registered_kill_criteria_triggered"
+        policy_row = _policy_row("kill_criteria")
     elif gates_pass and len(below_target) > int(settings["below_target_review_threshold"]):
-        indicated = "maker_lane_not_supported_program_review"
-        reason = "net_below_target_on_more_than_three_of_last_seven_runs_after_gates_reachable"
+        policy_row = _policy_row("post_gate_below_target")
     elif gates_pass and composition["stable"]:
-        indicated = "fund_100_min_size_single_calmest_market"
-        reason = "M_A_and_M_B_pass_with_stable_top_portfolio_market"
+        policy_row = _policy_row("gates_pass_composition_stable")
     elif gates_pass:
-        indicated = "fund_100_but_only_most_recurrent_market_half_target"
-        reason = "M_A_and_M_B_pass_but_portfolio_composition_churning"
+        policy_row = _policy_row("gates_pass_composition_churning")
     elif today >= decision_date and (gate_a == "pending" or gate_b == "pending"):
-        indicated = "defer_funding_continue_study"
-        reason = "policy_decision_date_reached_with_pending_maker_gate"
+        policy_row = _policy_row("decision_date_pending_gate")
     elif not study:
-        indicated = "collect_maker_carry_study"
-        reason = "maker_carry_study_artifact_missing"
+        policy_row = _policy_row("study_missing")
     else:
-        indicated = "continue_study_until_policy_date"
-        reason = "maker_gates_not_yet_passed_before_registered_decision_date"
+        policy_row = _policy_row("pre_decision_evidence_pending")
+    indicated = str(policy_row["indicated_action"])
+    reason = str(policy_row["reason"])
 
     payload = {
         "status": "ok",

@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import py_compile
 from pathlib import Path
 
 FILES = [
@@ -27,7 +26,14 @@ def main() -> int:
         if not path.exists():
             missing.append(file_name)
             continue
-        py_compile.compile(str(path), doraise=True)
+        # Syntax-check without writing bytecode: py_compile writes .pyc into
+        # scripts/__pycache__, which is read-only inside the VPS containers
+        # (./scripts is bind-mounted :ro) and killed the locked-card chain
+        # with OSError 30. compile() raises the same SyntaxError and touches
+        # nothing on disk.
+        # utf-8-sig strips the BOM some of these files carry (py_compile's
+        # tokenizer did the same silently).
+        compile(path.read_text(encoding="utf-8-sig"), str(path), "exec")
         print(f"OK {file_name}")
 
     if missing:

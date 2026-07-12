@@ -146,6 +146,29 @@ def test_offline_runner_cannot_be_reported_as_enforced() -> None:
     assert result["checks"]["runner_online"] is False
 
 
+def test_active_or_failed_pr_does_not_erase_prior_successful_gate_proof() -> None:
+    runs = {
+        "workflow_runs": [
+            {"id": 125, "event": "pull_request", "status": "in_progress", "conclusion": None},
+            {"id": 124, "event": "pull_request", "status": "completed", "conclusion": "failure"},
+            {"id": 123, "event": "pull_request", "status": "completed", "conclusion": "success"},
+        ]
+    }
+
+    result = merge_gate.evaluate_merge_gate(
+        workflow_text=_workflow(),
+        runners_payload=_runners(),
+        protection_payload=_protection(),
+        runs_payload=runs,
+    )
+
+    assert result["enforced"] is True
+    assert result["checks"]["latest_gate_success"] is True
+    assert result["latest_gate_run"]["id"] == 125
+    assert result["latest_successful_gate_run"]["id"] == 123
+    assert result["active_gate_run_count"] == 1
+
+
 def test_registered_protection_payload_has_no_owner_or_review_bypass() -> None:
     payload = merge_gate.branch_protection_payload()
     assert payload["required_status_checks"]["contexts"] == [merge_gate.REQUIRED_CONTEXT]

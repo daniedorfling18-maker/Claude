@@ -131,19 +131,27 @@ def evaluate_merge_gate(
     bypass_count = _bypass_count(reviews)
     direct_push_forbidden = branch_protection_enabled and independent_review_required and admins_enforced and bypass_count == 0
 
-    workflow_runs = (_mapping(runs_payload).get("workflow_runs") or []) if runs_payload else []
-    latest_run = _mapping(workflow_runs[0]) if workflow_runs else {}
-    latest_gate_success = (
-        str(latest_run.get("event") or "") == "pull_request"
-        and str(latest_run.get("conclusion") or "") == "success"
+    workflow_runs = [_mapping(row) for row in (_mapping(runs_payload).get("workflow_runs") or [])] if runs_payload else []
+    latest_run = workflow_runs[0] if workflow_runs else {}
+    active_run_count = sum(str(row.get("status") or "").lower() in {"queued", "in_progress", "waiting", "requested"} for row in workflow_runs)
+    latest_successful_run = next(
+        (
+            row
+            for row in workflow_runs
+            if str(row.get("event") or "") == "pull_request"
+            and str(row.get("status") or "") == "completed"
+            and str(row.get("conclusion") or "") == "success"
+        ),
+        {},
     )
+    successful_gate_run_exists = bool(latest_successful_run)
 
     plan_blocked = "upgrade to github pro" in protection_error.lower() or "make this repository public" in protection_error.lower()
     checks = {
         "workflow_configured": workflow_configured,
         "runner_registered": bool(matching_runners),
         "runner_online": runner_online,
-        "latest_gate_success": latest_gate_success,
+        "latest_gate_success": successful_gate_run_exists,
         "branch_protection_enabled": branch_protection_enabled,
         "required_check_enforced": required_check_enforced,
         "independent_review_required": independent_review_required,
@@ -171,6 +179,14 @@ def evaluate_merge_gate(
             "conclusion": latest_run.get("conclusion"),
             "html_url": latest_run.get("html_url"),
         },
+        "latest_successful_gate_run": {
+            "id": latest_successful_run.get("id"),
+            "event": latest_successful_run.get("event"),
+            "status": latest_successful_run.get("status"),
+            "conclusion": latest_successful_run.get("conclusion"),
+            "html_url": latest_successful_run.get("html_url"),
+        },
+        "active_gate_run_count": active_run_count,
         "checks": checks,
         "blockers": blockers,
         "platform_blocker": protection_error.strip() if plan_blocked else "",
@@ -208,7 +224,7 @@ def audit(repo: str, workflow_path: Path, *, apply_protection: bool = False) -> 
         apply_error = ""
     runners, runners_error = _gh_api(f"repos/{repo}/actions/runners")
     protection, protection_error = _gh_api(f"repos/{repo}/branches/main/protection")
-    runs, runs_error = _gh_api(f"repos/{repo}/actions/workflows/required-pr-gate.yml/runs?event=pull_request&per_page=1")
+    runs, runs_error = _gh_api(f"repos/{repo}/actions/workflows/required-pr-gate.yml/runs?event=pull_request&per_page=20")
     result = evaluate_merge_gate(
         workflow_text=workflow_path.read_text(encoding="utf-8"),
         runners_payload=runners,

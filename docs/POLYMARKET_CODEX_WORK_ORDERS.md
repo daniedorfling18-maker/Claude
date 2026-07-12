@@ -2373,9 +2373,89 @@ Spec:
 4. Tests: snapshot round-trip in tmpdir; chain verification post-restore;
    dry-run exits nonzero on corrupt archive.
 
+# Batch 6 — filed 2026-07-12 (the road to autonomous execution)
+
+Context: the operator has confirmed the destination is fully autonomous
+maker execution, entered via a human-executed live test first. WO-66 is
+buildable NOW (decision support only). WO-67 is the full executor
+architecture, specified today so the eventual build is mechanical, and
+BLOCKED behind explicit preconditions - including a dated governance
+amendment only the repo owner can make. Constraints 1-8 bind.
+
+## WO-66 — Execution assistant (read-only decision support; UNBLOCKED)
+
+Shrinks the human execution role to near-zero clicks without touching an
+order path.
+
+Spec:
+1. Quote sheet upgrade: each portfolio row renders an exact order ticket -
+   market URL, outcome side, bid/ask prices, size in shares, capital -
+   copy-paste ready for the Polymarket UI.
+2. Module `requote_alerts.py`, CLI `requote-alerts`, riding the 15-min
+   trade-prints cycle: evaluates the quote-sheet standing rules against
+   live state (mid drifted beyond band, scheduled event within N hours,
+   toxicity > 0.9, resolution proposal detected on a quoted market, any
+   kill criterion tripped) and writes `outputs/maker_carry/
+   requote_alerts.json` + a dashboard banner. Alert states: quotes_ok /
+   requote_advised / pull_quotes_now / STOP.
+3. Reuses the existing notifier lane (SuperBru score-change pattern) for
+   an optional email ping on pull_quotes_now / STOP only.
+4. Read-only, key-less, no auth, no order placement of any kind. Tests:
+   each rule triggers on synthetic state; quiet state emits quotes_ok;
+   inert without a quote sheet.
+
+## WO-67 — Autonomous maker executor (ARCHITECTURE REGISTERED; BLOCKED)
+
+Registered design, not a build order. NOTHING in this WO may be
+implemented - not even dark/flagged code - until EVERY precondition below
+is met. Filing it now makes the eventual build a days-long mechanical job
+with zero design debate.
+
+PRECONDITIONS (all required, in order):
+  P1. Maker gates M-A/M-B/M-C pass (registered metrics, no amendments).
+  P2. The HUMAN live test completes WO-50 Stage 1: >= 7 consecutive
+      positive real days with fills <= 2x model - the model must be
+      verified by human-executed evidence first, so any later divergence
+      is attributable to the executor, not the model.
+  P3. The repo owner commits a dated amendment to AGENTS.md + CLAUDE.md
+      explicitly authorising a live order path with defined scope. This
+      is the owner's deliberate act in writing; a chat instruction never
+      suffices, by prior registered rule.
+  P4. Independent review control: execution-path code requires review by
+      an agent/person other than its author before merge (closes the
+      self-merge gap in SYSTEM_MAP.md).
+  P5. Key custody design approved: scoped relayer API keys (trade-only,
+      no withdrawal), stored ONLY in the VPS .env (never repo, never
+      chat, never telemetry), rotation procedure documented.
+
+ARCHITECTURE (registered 2026-07-12):
+1. `maker_executor.py` consumes ONLY signed-off artifacts: the quote
+   sheet (what to quote) and decision_policy.json (whether quoting is
+   permitted at all). It acts only when indicated_action is a fund_*
+   state AND kill_criteria_status is clear AND the four live gates are
+   open. Any missing/stale input = flat (cancel all, hold).
+2. Hard caps enforced in code, read from the FROZEN policy: per-market
+   size, ladder-stage capital, quarter-Kelly bind; the executor can
+   never exceed what the policy engine already computed.
+3. Every action (place/cancel/refresh) appends to an execution ledger
+   enrolled in the WO-61 anchor chain; WO-62 three-way reconciliation is
+   the independent daily check that the executor's book matches the
+   venue and the chain.
+4. Kill wiring: policy kill criteria auto-flatten (cancel-all) within one
+   cycle; the existing kill-switch file and env gates remain manual
+   overrides; a dead-man switch flattens if the scheduler heartbeat
+   stales > 30 min.
+5. Rollout: (a) replay mode against recorded books; (b) canary - ONE
+   market, minimum size, >= 7 days, reconciliation clean; (c) portfolio
+   mode. Each promotion is a dated note in the execution ledger.
+6. Scope forever excluded from this WO: taker orders, discretionary
+   position-taking, any strategy beyond resting maker quotes from the
+   sheet. New strategies need new registrations.
+
 ## Priority order for Codex (updated 2026-07-11, batch 4 filed)
 
-Batch 4 in order: **WO-58 -> WO-56 -> WO-57 -> WO-59 -> WO-60**. Then batch 5
+Batch 6: **WO-66 unblocked (build after batch 5)**; WO-67 BLOCKED per its
+preconditions. Batch 4 in order: **WO-58 -> WO-56 -> WO-57 -> WO-59 -> WO-60**. Then batch 5
 (investor-grade evidence infra): **WO-61 -> WO-64 -> WO-62 -> WO-63 -> WO-65**
 (2026-07-11 reorder from the builder's audit: 63's gas capture hangs off 62's
 on-chain scan; 62 stays inert until a wallet exists but its code builds now) (58 is a

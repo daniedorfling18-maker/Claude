@@ -239,6 +239,8 @@ def test_fetch_uses_fallback_csv_when_provider_errors(tmp_path, monkeypatch):
     assert summary["errors"] == 1
     assert summary["rows"] == 2
     assert summary["fallback_rows"] == 2
+    assert summary["source_rows_fetched"] == 2
+    assert summary["source_rows_normalized"] == 2
     assert api_key not in summary["per_sport"][0]["error"]
 
     out = list(csv.DictReader(open(output, encoding="utf-8-sig")))
@@ -288,11 +290,14 @@ def test_fallback_csv_rejections_are_reported(tmp_path, monkeypatch):
     assert summary["status"] == "missing_api_key"
     assert summary["rows"] == 0
     assert summary["fallback_rejected_rows"] == 2
+    assert summary["source_rows_fetched"] == 2
+    assert summary["source_rows_normalized"] == 0
     assert summary["fallback_rejection_reasons"]["stale_anchor_timestamp"] == 1
     assert summary["fallback_rejection_reasons"]["missing_market_slug"] == 1
     rejections = list(csv.DictReader(open(summary["fallback_rejections_path"], encoding="utf-8-sig")))
     assert len(rejections) == 2
     assert "decimal_odds_not_greater_than_one" in rejections[1]["reasons"]
+    assert rejections[0]["anchor_source"] == "manual_pinnacle_snapshot"
 
 
 def test_budget_skips_chain_and_carry_quota_reading(tmp_path, monkeypatch):
@@ -441,6 +446,24 @@ def test_fetch_skips_unknown_provider_sport_but_fetches_known_sports(tmp_path, m
     rows = list(csv.DictReader(open(output, encoding="utf-8-sig")))
     assert {row["sport"] for row in rows} == {"basketball_nba"}
     assert {row["market_key"] for row in rows} == {"h2h"}
+    assert all(row["anchor_timestamp_utc"] for row in rows)
+    assert {row["anchor_source"] for row in rows} == {"pinnacle"}
+    funnel = summary["per_source_sport_market"]
+    assert funnel == [
+        {
+            "source": "pinnacle",
+            "sport": "basketball_nba",
+            "market_key": "h2h",
+            "events_fetched": 1,
+            "source_rows_fetched": 3,
+            "source_rows_normalized": 3,
+            "normalization_rejections": 0,
+            "fetch_status": "ok",
+            "fetched_at_utc": summary["generated_at_utc"],
+        }
+    ]
+    assert summary["paper_trading_invoked"] is False
+    assert summary["live_trading_invoked"] is False
 
 
 def test_summary_reports_minimum_requests_remaining(tmp_path, monkeypatch):

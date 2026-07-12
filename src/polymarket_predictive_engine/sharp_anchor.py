@@ -44,6 +44,25 @@ OUTCOME_FIELDS = ["outcome", "selection", "team", "runner", "name", "question"]
 DECIMAL_ODDS_FIELDS = ["decimal_odds", "odds", "price_decimal", "decimal"]
 IMPLIED_FIELDS = ["implied_probability", "implied", "fair_probability", "probability"]
 TOKEN_FIELDS = ["token_id", "asset_id", "clob_token_id"]
+MAPPING_AUDIT_FIELDS = [
+    "source",
+    "sport",
+    "market_key",
+    "market_slug",
+    "outcome",
+    "anchor_timestamp_utc",
+    "normalized_row",
+    "priced_row",
+    "complete_market_row",
+    "polymarket_token_eligible",
+    "mapped_row",
+    "joined_row",
+    "token_id",
+    "join_source",
+    "anchor_probability",
+    "mapping_status",
+    "blocker",
+]
 TEAM_ALIASES = {
     "usa": "unitedstates",
     "us": "unitedstates",
@@ -869,12 +888,16 @@ def build_sharp_anchor(cfg: EngineConfig, *, input_path: str | None = None) -> d
     in_path = Path(input_path or settings.get("input_path") or "inputs/polymarket/sharp_odds.csv")
     out_dir = cfg.output_root / "polymarket_training"
     out_path = out_dir / "sharp_fundamental_probabilities.csv"
+    mapping_audit_path = cfg.governance_root / "sharp_anchor_mapping_audit.csv"
 
     rows = read_csv_rows(in_path)
     if not rows:
         write_csv(out_path, [])
+        write_csv(mapping_audit_path, [], fieldnames=MAPPING_AUDIT_FIELDS)
         summary = {"status": "no_input", "input_path": str(in_path), "rows_in": 0,
-                   "fundamental_rows": 0, "output_file": str(out_path), "generated_at_utc": now_utc()}
+                   "fundamental_rows": 0, "output_file": str(out_path),
+                   "mapping_audit_path": str(mapping_audit_path), "generated_at_utc": now_utc(),
+                   "paper_trading_invoked": False, "live_trading_invoked": False}
         write_json(cfg.governance_root / "sharp_anchor_summary.json", summary)
         return summary
 
@@ -889,6 +912,31 @@ def build_sharp_anchor(cfg: EngineConfig, *, input_path: str | None = None) -> d
     h2h_public_tokens, h2h_public_search = _h2h_match_tokens_from_public_search(settings, rows)
     worldcup_winner_tokens = _worldcup_winner_token_map(cfg, settings)
     coverage_by_sport_market: dict[tuple[str, str], dict[str, Any]] = {}
+
+    mapping_audit: list[dict[str, Any]] = []
+    audit_by_row_id: dict[int, dict[str, Any]] = {}
+    for row in rows:
+        audit = {
+            "source": str(row.get("anchor_source") or row.get("bookmaker") or source_name).strip() or source_name,
+            "sport": str(row.get("sport") or row.get("sport_title") or "unknown").strip() or "unknown",
+            "market_key": str(row.get("market_key") or row.get("market") or "unknown").strip() or "unknown",
+            "market_slug": str(row.get(group_col, "") if group_col else "all"),
+            "outcome": str(row.get(outcome_col, "") if outcome_col else ""),
+            "anchor_timestamp_utc": str(row.get("anchor_timestamp_utc") or ""),
+            "normalized_row": 1,
+            "priced_row": 0,
+            "complete_market_row": 0,
+            "polymarket_token_eligible": 0,
+            "mapped_row": 0,
+            "joined_row": 0,
+            "token_id": "",
+            "join_source": "",
+            "anchor_probability": "",
+            "mapping_status": "pending",
+            "blocker": "",
+        }
+        mapping_audit.append(audit)
+        audit_by_row_id[id(row)] = audit
 
     groups: dict[str, list[dict[str, Any]]] = defaultdict(list)
     for row in rows:
@@ -917,10 +965,14 @@ def build_sharp_anchor(cfg: EngineConfig, *, input_path: str | None = None) -> d
             if implied is None or not 0.0 < implied < 1.0:
                 skipped_unpriced += 1
                 coverage["skipped_unpriced"] += 1
+                audit_by_row_id[id(row)].update(
+                    {"mapping_status": "rejected_unpriced", "blocker": "missing_or_invalid_price"}
+                )
                 continue
             raw.append(implied)
             kept.append(row)
             coverage["priced_rows"] += 1
+            audit_by_row_id[id(row)]["priced_row"] = 1
         if not raw:
             continue
         raw_sum = sum(raw)
@@ -929,6 +981,18 @@ def build_sharp_anchor(cfg: EngineConfig, *, input_path: str | None = None) -> d
             skipped_incomplete_market_rows += len(kept)
             for row in kept:
                 _coverage_bucket(coverage_by_sport_market, row)["incomplete_market_rows"] += 1
+                audit_by_row_id[id(row)].update(
+                    {
+                        "mapping_status": "rejected_incomplete_market",
+                        "blocker": (
+                            "too_few_priced_outcomes"
+                            if len(raw) < min_outcomes_per_market
+                            else "implied_sum_below_complete_market_floor"
+                            if raw_sum < min_market_implied_sum
+                            else "implied_sum_above_sanity_ceiling"
+                        ),
+                    }
+                )
             if len(incomplete_market_samples) < 20:
                 incomplete_market_samples.append(
                     {
@@ -970,6 +1034,9 @@ def build_sharp_anchor(cfg: EngineConfig, *, input_path: str | None = None) -> d
             output_source = source_name
             output_outcome = row.get(outcome_col, "") if outcome_col else ""
             output_extra: dict[str, Any] = {}
+            audit = audit_by_row_id[id(row)]
+            audit["complete_market_row"] = 1
+            audit["anchor_probability"] = round(prob, 6)
             if token:
                 direct_token_joins += 1
                 join_source = "direct_token_joins"
@@ -1035,6 +1102,12 @@ def build_sharp_anchor(cfg: EngineConfig, *, input_path: str | None = None) -> d
                     if outcome_col
                     else ""
                 ) or "unmapped_sharp_anchor_row"
+                audit.update(
+                    {
+                        "mapping_status": "ambiguous" if "ambiguous" in skip_reason else "unmapped",
+                        "blocker": skip_reason,
+                    }
+                )
                 if len(skipped_no_token_samples) < 20:
                     skipped_no_token_samples.append(
                         {
@@ -1058,11 +1131,35 @@ def build_sharp_anchor(cfg: EngineConfig, *, input_path: str | None = None) -> d
                 "raw_implied_probability": round(implied, 6),
                 "devig_method": method,
                 "source": output_source,
+                "anchor_source": audit["source"],
+                "bookmaker": row.get("bookmaker", ""),
+                "sport": audit["sport"],
+                "sport_title": row.get("sport_title", ""),
+                "market_key": audit["market_key"],
+                "commence_time": row.get("commence_time", ""),
+                "anchor_timestamp_utc": audit["anchor_timestamp_utc"],
+                "join_source": join_source,
             }
             out_row.update(output_extra)
             out_rows.append(out_row)
+            audit.update(
+                {
+                    "polymarket_token_eligible": 1,
+                    "mapped_row": 1,
+                    "joined_row": 1,
+                    "token_id": token,
+                    "join_source": join_source,
+                    "anchor_probability": round(output_probability, 6),
+                    "mapping_status": "joined",
+                    "blocker": "",
+                }
+            )
 
     write_csv(out_path, out_rows)
+    pending = [row for row in mapping_audit if row["mapping_status"] == "pending"]
+    if pending:
+        raise AssertionError(f"sharp-anchor mapping audit left {len(pending)} normalized row(s) unclassified")
+    write_csv(mapping_audit_path, mapping_audit, fieldnames=MAPPING_AUDIT_FIELDS)
     token_join_parts: list[str] = []
     if direct_token_joins or has_direct_tokens:
         token_join_parts.append("direct_token_id")
@@ -1115,10 +1212,17 @@ def build_sharp_anchor(cfg: EngineConfig, *, input_path: str | None = None) -> d
         ),
         "worldcup_winner_tokens_available": len(worldcup_winner_tokens),
         "worldcup_winner_token_joins": worldcup_winner_token_joins,
+        "mapping_audit_path": str(mapping_audit_path),
+        "mapping_audit_rows": len(mapping_audit),
+        "mapping_audit_conservation_ok": len(mapping_audit) == len(rows),
+        "ambiguous_rows": sum(1 for row in mapping_audit if row["mapping_status"] == "ambiguous"),
+        "unmapped_or_rejected_rows": sum(1 for row in mapping_audit if row["mapping_status"] != "joined"),
         "output_file": str(out_path),
         "note": "De-vigged sharp-book fair probabilities in the fundamental contract. Point "
                 "mispricing_alpha.fundamental_probability_paths at output_file to use as the anchor.",
         "generated_at_utc": now_utc(),
+        "paper_trading_invoked": False,
+        "live_trading_invoked": False,
     }
     write_json(cfg.governance_root / "sharp_anchor_summary.json", summary)
     return summary

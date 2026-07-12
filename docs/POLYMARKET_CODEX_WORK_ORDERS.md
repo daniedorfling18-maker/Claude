@@ -1259,6 +1259,17 @@ paper P&L positive after governed probes? — plus a scheduled `polymarket-vps-p
 (every 6h) that alerts on stale artifacts, bad proof status, or `sharp_fetch_health=attention`. No
 gate/threshold/live-path change; full suite green (552).
 
+**Extended 2026-07-12 (external-audit P2 remediation):** the reconciliation now preserves the
+independent stage denominators by anchor source, sport, and market type: raw provider outcomes,
+normalised rows, mapping-audit rows, mapped rows, current Polymarket joins, and current eligible
+Polymarket tokens. `sharp_anchor_mapping_audit.csv` classifies every normalised row exactly once;
+`sharp_anchor_funnel_history.csv` records idempotent source/sport/market snapshots. The JSON and
+dashboard also expose ambiguity, anchor/price staleness, missing timestamps, actual ask-side
+divergence, current bid/ask actionability, zero joins, and explicit denominator-conservation
+failures. Cross-stage count mismatches are reported as incomplete rather than silently deriving one
+denominator from another. These additions are reporting-only: historical rows are not retroactively
+promoted, no fetch config is edited automatically, and no paper/live gate or order path changes.
+
 ## WP13 (decision, not a work order) — per-match sports belongs on Kalshi/Betfair
 
 The market-structure finding means the per-match sharp-anchor edge cannot be harvested on Polymarket

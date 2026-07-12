@@ -596,6 +596,16 @@ sharp_odds_fetch:
   fallback_max_age_hours: 24
   fallback_max_decimal_odds: 1001
   request_timeout_seconds: 20
+# 2026-07-12 external-audit anchor reconciliation: reporting-only definitions
+# for current overlap and executable divergence. These mirror existing alpha
+# filters and do not authorise, size, or promote a signal.
+sharp_anchor_coverage:
+  zero_join_cycles_before_flag: 5
+  max_anchor_age_seconds: 21600
+  max_price_age_seconds: 300
+  minimum_executable_divergence: 0.03
+  max_actionable_spread: 0.04
+  min_actionable_liquidity: 100
 # 2026-07-10 WO-55: reconstructed sharp-anchor CLV study. Research-only
 # retrospective datapoints; never Gate A/verdict evidence and never trading.
 # Thresholds mirror the registered live sharp-anchor entry semantics as of

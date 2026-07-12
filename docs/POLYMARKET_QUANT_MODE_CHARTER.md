@@ -572,6 +572,17 @@ GitHub returns HTTP 403 for private-repository branch protection/rulesets on the
 Upgrade to Pro/Team and a clean `--apply-protection` audit are mandatory before further live capital;
 the repository must not be made public as a workaround.
 
+**2026-07-12 — external-audit P2/P6 remediation implemented by Codex.** Sharp-anchor coverage now
+reconciles independently observed raw-fetch, normalisation, mapping-audit, mapped-token, current
+prediction-join, and executable bid/ask stages by source/sport/market. It emits
+`sharp_anchor_mapping_audit.csv`, `sharp_anchor_coverage.json`, and the idempotent
+`sharp_anchor_funnel_history.csv`; missing timestamps or non-conserving cross-stage counts make the
+accounting explicitly incomplete. The dashboard shows the same funnel and uses actual ask-side
+divergence for buy actionability. Research is frozen to exactly the three prospective primary
+hypotheses in `docs/EXPERIMENT_REGISTRY.md`; all pre-freeze H2/H3 observations remain diagnostic,
+and the registered legacy taker verdict runs only as a stopping-rule obligation. No threshold,
+paper/live gate, sizing path, or order path changed.
+
 ## Rules of engagement for coding agents
 
 0. **Division of labour**: the orchestrating agent writes/updates this charter and the work orders

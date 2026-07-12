@@ -54,6 +54,9 @@ FALLBACK_REJECTION_FIELDS = [
     "outcome",
     "decimal_odds",
     "bookmaker",
+    "anchor_source",
+    "sport",
+    "market_key",
     "anchor_timestamp_utc",
     "reasons",
 ]
@@ -149,6 +152,33 @@ def parse_odds_api_events(
     return rows
 
 
+def _source_fetch_counts(
+    events: Iterable[Mapping[str, Any]],
+    *,
+    bookmaker_priority: Sequence[str],
+    market_key: str,
+) -> tuple[Counter[str], Counter[str]]:
+    """Raw selected-book outcomes and contributing events by source.
+
+    These are the pre-normalisation denominators. They intentionally count
+    malformed/unpriced outcomes that ``parse_odds_api_events`` rejects.
+    """
+    rows: Counter[str] = Counter()
+    event_counts: Counter[str] = Counter()
+    for event in events:
+        if not isinstance(event, Mapping):
+            continue
+        book = _select_bookmaker(event.get("bookmakers", []) or [], bookmaker_priority)
+        if book is None:
+            continue
+        source = str(book.get("key") or "unknown").strip().lower() or "unknown"
+        outcomes = _market_outcomes(book, market_key)
+        rows[source] += len(outcomes)
+        if outcomes:
+            event_counts[source] += 1
+    return rows, event_counts
+
+
 def _settings(cfg: EngineConfig) -> dict[str, Any]:
     return cfg.raw.get("sharp_odds_fetch", {}) or {}
 
@@ -230,6 +260,9 @@ def _budget_skip_summary(cfg: EngineConfig, settings: Mapping[str, Any]) -> dict
         "fetch_interval_minutes": interval_minutes,
         "seconds_until_next_fetch": round(wait_seconds, 3),
         "per_sport": [],
+        "per_source_sport_market": previous.get("per_source_sport_market", []),
+        "source_rows_fetched": previous.get("source_rows_fetched", previous.get("rows", 0)),
+        "source_rows_normalized": previous.get("source_rows_normalized", previous.get("rows", 0)),
         "fallback_rows": 0,
         "fallback_sources": [],
         "fallback_rejected_rows": 0,
@@ -238,6 +271,8 @@ def _budget_skip_summary(cfg: EngineConfig, settings: Mapping[str, Any]) -> dict
         "output_path": str(settings.get("output_path") or "inputs/polymarket/sharp_odds.csv"),
         "note": "Skipped provider fetch to preserve The Odds API request budget; using existing sharp odds input.",
         "generated_at_utc": now_utc(),
+        "paper_trading_invoked": False,
+        "live_trading_invoked": False,
     }
 
 
@@ -334,6 +369,11 @@ def _normalise_fallback_row(
             "outcome": outcome,
             "decimal_odds": "" if decimal_odds is None else decimal_odds,
             "bookmaker": bookmaker,
+            "anchor_source": str(
+                row.get("anchor_source") or row.get("source") or bookmaker or source_path.name
+            ).strip(),
+            "sport": str(row.get("sport") or "").strip(),
+            "market_key": str(row.get("market_key") or row.get("market_type") or "").strip(),
             "anchor_timestamp_utc": timestamp_text,
             "reasons": "; ".join(reasons),
         }
@@ -415,6 +455,8 @@ def fetch_sharp_odds(cfg: EngineConfig) -> dict[str, Any]:
 
     rows: list[dict[str, Any]] = []
     per_sport: list[dict[str, Any]] = []
+    per_source_sport_market: list[dict[str, Any]] = []
+    fetch_stamp = now_utc()
     provider_status = "not_attempted"
     provider_sports_status: dict[str, Any] = {"status": "not_checked"}
     requests_used = 0
@@ -457,7 +499,37 @@ def fetch_sharp_odds(cfg: EngineConfig) -> dict[str, Any]:
                 events = response.json()
                 sport_rows: list[dict[str, Any]] = []
                 for market_key in markets:
-                    sport_rows.extend(parse_odds_api_events(events, bookmaker_priority=priority, market_key=market_key))
+                    parsed = parse_odds_api_events(events, bookmaker_priority=priority, market_key=market_key)
+                    for row in parsed:
+                        row["anchor_source"] = str(row.get("bookmaker") or "unknown")
+                        row["anchor_timestamp_utc"] = fetch_stamp
+                    sport_rows.extend(parsed)
+                    raw_counts, event_counts = _source_fetch_counts(
+                        events if isinstance(events, list) else [],
+                        bookmaker_priority=priority,
+                        market_key=market_key,
+                    )
+                    normalized_counts = Counter(
+                        str(row.get("bookmaker") or "unknown").strip().lower() or "unknown"
+                        for row in parsed
+                    )
+                    for source in sorted(set(raw_counts) | set(normalized_counts)):
+                        per_source_sport_market.append(
+                            {
+                                "source": source,
+                                "sport": sport,
+                                "market_key": market_key,
+                                "events_fetched": event_counts.get(source, 0),
+                                "source_rows_fetched": raw_counts.get(source, 0),
+                                "source_rows_normalized": normalized_counts.get(source, 0),
+                                "normalization_rejections": max(
+                                    0,
+                                    raw_counts.get(source, 0) - normalized_counts.get(source, 0),
+                                ),
+                                "fetch_status": "ok",
+                                "fetched_at_utc": fetch_stamp,
+                            }
+                        )
                 rows.extend(sport_rows)
                 per_sport.append(
                     {
@@ -490,6 +562,47 @@ def fetch_sharp_odds(cfg: EngineConfig) -> dict[str, Any]:
     if not rows:
         fallback_rows, fallback_sources, fallback_rejections = load_fallback_sharp_odds(settings)
         rows.extend(fallback_rows)
+        fallback_counts = Counter(
+            (
+                (str(row.get("anchor_source") or row.get("bookmaker") or "fallback").strip() or "fallback").lower(),
+                (str(row.get("sport") or "unknown").strip() or "unknown").lower(),
+                (str(row.get("market_key") or "unknown").strip() or "unknown").lower(),
+            )
+            for row in fallback_rows
+        )
+        fallback_rejection_counts = Counter(
+            (
+                (str(row.get("anchor_source") or row.get("bookmaker") or "fallback").strip() or "fallback").lower(),
+                (str(row.get("sport") or "unknown").strip() or "unknown").lower(),
+                (str(row.get("market_key") or "unknown").strip() or "unknown").lower(),
+            )
+            for row in fallback_rejections
+        )
+        for source, sport, market_key in sorted(set(fallback_counts) | set(fallback_rejection_counts)):
+            normalized_count = fallback_counts[(source, sport, market_key)]
+            rejected_count = fallback_rejection_counts[(source, sport, market_key)]
+            per_source_sport_market.append(
+                {
+                    "source": source,
+                    "sport": sport,
+                    "market_key": market_key,
+                    "events_fetched": None,
+                    "source_rows_fetched": normalized_count + rejected_count,
+                    "source_rows_normalized": normalized_count,
+                    "normalization_rejections": rejected_count,
+                    "fetch_status": "fallback_loaded",
+                    "fetched_at_utc": max(
+                        (
+                            str(row.get("anchor_timestamp_utc") or "")
+                            for row in fallback_rows
+                            if (str(row.get("anchor_source") or row.get("bookmaker") or "fallback").strip() or "fallback").lower() == source
+                            and (str(row.get("sport") or "unknown").strip() or "unknown").lower() == sport
+                            and (str(row.get("market_key") or "unknown").strip() or "unknown").lower() == market_key
+                        ),
+                        default="",
+                    ),
+                }
+            )
 
     out_path.parent.mkdir(parents=True, exist_ok=True)
     write_csv(out_path, rows, fieldnames=SHARP_ODDS_FIELDS)
@@ -541,6 +654,9 @@ def fetch_sharp_odds(cfg: EngineConfig) -> dict[str, Any]:
         "requests_remaining": requests_remaining,
         "provider_sports_status": provider_sports_status,
         "per_sport": per_sport,
+        "per_source_sport_market": per_source_sport_market,
+        "source_rows_fetched": sum(int(item.get("source_rows_fetched") or 0) for item in per_source_sport_market),
+        "source_rows_normalized": sum(int(item.get("source_rows_normalized") or 0) for item in per_source_sport_market),
         "configured_sports": sport_configs,
         "max_requests_per_run": max_requests,
         "requests_used": requests_used,
@@ -561,8 +677,10 @@ def fetch_sharp_odds(cfg: EngineConfig) -> dict[str, Any]:
         "output_path": str(out_path),
         "note": "Run build-sharp-anchor next to de-vig these into the fundamental slot. "
                 "If the provider fails, fallback_input_paths can feed manually validated bookmaker odds.",
-        "budget_reference_at_utc": now_utc() if provider_status == "attempted" and requests_used > 0 else None,
-        "generated_at_utc": now_utc(),
+        "budget_reference_at_utc": fetch_stamp if provider_status == "attempted" and requests_used > 0 else None,
+        "generated_at_utc": fetch_stamp,
+        "paper_trading_invoked": False,
+        "live_trading_invoked": False,
     }
     write_json(_fetch_summary_path(cfg), summary)
     return summary

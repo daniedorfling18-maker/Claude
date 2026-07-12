@@ -1,7 +1,9 @@
 # Claude Research Engines
 
-> **Current active work:** Polymarket predictive engine in automated **shadow-research mode**.
-> The system is **not approved for paper trading** and must not be used for live trading.
+> **Current active work:** Polymarket predictive engine — shadow/paper-gated research with a
+> pre-registered $100/month verdict engine, a maker-carry lane, and READ-ONLY live-wallet
+> monitoring. The system has never placed an order and has no live order path.
+> **The authoritative operating state lives in [`docs/OPERATING_STATE.md`](docs/OPERATING_STATE.md).**
 > Start here: [`docs/POLYMARKET_CURRENT_STATE.md`](docs/POLYMARKET_CURRENT_STATE.md) and [`AGENTS.md`](AGENTS.md).
 
 This repository contains two related local-first research systems:
@@ -15,7 +17,7 @@ The repo is local-first. Docker is for deployment scenarios only, not normal loc
 
 ## Current Polymarket state
 
-Last project state update: **2026-06-28**.
+Authoritative operating state: **`docs/OPERATING_STATE.md`** (2026-07-12; external-audit correction — this README had drifted).
 
 The Polymarket system is now in a much better place than when debugging began:
 

@@ -12,7 +12,14 @@ mode**. Do not treat the bot as ready for paper trading or live trading. The cur
 paper_allowed = false
 paper_trading_invoked = false
 live_trading_invoked = false
+live_wallet_monitoring = read_only_active   # 2026-07-12: WO-36/62; public address, no keys
+human_live_test = operator_domain           # outside system control; system watches only
+autonomous_execution = blocked_wo67         # P1-P5 incl. dated owner amendment required
 ```
+
+The point-in-time operating state is maintained in `docs/OPERATING_STATE.md`
+(2026-07-12 external audit: prose status lines here and in README had gone
+stale; that file is now canonical for "what is authorised and running").
 
 The reason is not a broken broker. The infrastructure now works. The blocker is insufficient positive
 forward evidence: `sports_other` has accepted shadow candidates, but the cohort is still negative and

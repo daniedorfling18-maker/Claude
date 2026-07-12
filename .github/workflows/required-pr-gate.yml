@@ -1,0 +1,61 @@
+name: Required PR Gate
+
+on:
+  pull_request:
+    branches:
+      - main
+    types: [opened, synchronize, reopened, ready_for_review]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: required-pr-gate-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  guard-and-invariants:
+    name: WO-69 guard and invariants
+    runs-on: [self-hosted, Windows, X64, polymarket-ci]
+    timeout-minutes: 12
+
+    steps:
+      - name: Check out proposed merge
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Build isolated gate environment
+        shell: pwsh
+        run: |
+          python -m venv .ci-venv
+          .\.ci-venv\Scripts\python.exe -m pip install --disable-pip-version-check --upgrade pip
+          .\.ci-venv\Scripts\python.exe -m pip install --disable-pip-version-check -e ".[dev]"
+
+      - name: Ruff guard
+        shell: pwsh
+        run: .\.ci-venv\Scripts\python.exe -m ruff check .
+
+      - name: Validate effective configs
+        shell: pwsh
+        run: |
+          .\.ci-venv\Scripts\python.exe -m polymarket_predictive_engine.cli config-check --config polymarket_predictive_config.example.yaml
+          .\.ci-venv\Scripts\python.exe -m superbru_score_engine config-check --config config.yaml --profiles calibration_profiles.yaml
+
+      - name: Run governance guards and invariants
+        shell: pwsh
+        run: |
+          .\.ci-venv\Scripts\python.exe -m pytest -q `
+            tests/polymarket_predictive_engine/test_operating_state.py `
+            tests/polymarket_predictive_engine/test_execution_governance_storage.py `
+            tests/polymarket_predictive_engine/test_safety_invariants.py `
+            tests/polymarket_predictive_engine/test_promotion_gate.py `
+            tests/test_polymarket_vps_docker.py `
+            tests/test_auto_pick_workflow_schedule.py `
+            tests/test_required_pr_gate.py

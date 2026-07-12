@@ -2,15 +2,15 @@
 
 Configure these secrets in **Settings → Secrets and variables → Actions** on the repository.
 
-The repository runs nine workflows. The sections below list secrets required for required checks and for authenticated workflow paths.
+The repository runs ten workflows. The sections below list secrets required for authenticated workflow paths.
 
-## `ci.yml` (push / pull request)
+## `required-pr-gate.yml` (pull request)
 
-| Secret | Required | Description |
-|--------|----------|-------------|
-| `THE_ODDS_API_KEY` | **Yes** | Used by the online smoke prediction step. Without it, CI intentionally fails before the online smoke can run. |
+No secrets. The WO-69 gate runs only deterministic lint, config validation, and governance/invariant tests on the repository-scoped Windows self-hosted runner. Its `GITHUB_TOKEN` permission is read-only and checkout credentials are not persisted.
 
-> The offline tests and offline smoke prediction do not need secrets, but the current CI workflow includes the online smoke as a required check.
+## `ci.yml` (manual comprehensive suite)
+
+No secrets. The 1,000+ test suite and offline smoke prediction remain manual while GitHub-hosted minutes are unavailable; they are not the small mandatory PR gate.
 
 ## `refresh-locked-superbru-card.yml` (scheduled, twice daily)
 
@@ -64,4 +64,6 @@ The workflow pulls `main`, rebuilds `docker-compose.vps-paper.yml`, forces a das
 
 ## No secrets required
 
+- `required-pr-gate.yml` runs deterministic PR guards on the repository-scoped self-hosted runner.
+- `ci.yml` runs the comprehensive offline suite only when manually dispatched.
 - `repo-audit-bundle.yml` only archives and audits the tracked source tree.

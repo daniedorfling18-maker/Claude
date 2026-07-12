@@ -4,9 +4,9 @@
 # the VPS network directly) can read live state through the private repo.
 #
 # Cost/safety properties:
-#   - Zero GitHub Actions cost: every workflow in this repo is
-#     workflow_dispatch-only (2026-07-09 billing wall), and the commit message
-#     carries [skip ci] as belt-and-braces.
+#   - Zero GitHub Actions cost: operational workflows are dispatch-only and
+#     WO-69's self-hosted gate triggers only on pull requests. This force-push
+#     is neither, while [skip ci] remains belt-and-braces.
 #   - Zero history bloat: each push is a fresh parentless commit force-pushed
 #     to the branch, so `vps-telemetry` always contains exactly one commit.
 #   - Read-only everywhere else: never touches the working tree, index, or

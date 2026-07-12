@@ -2487,11 +2487,21 @@ Spec:
    planted stale claim; missing-artifact tolerance (fields render UNKNOWN,
    never guessed).
 
-## WO-69 — Independent merge gate (external audit P0; BLOCKED on owner infra choice)
+## WO-69 — Independent merge gate (external audit P0; runner built, enforcement blocked on GitHub plan)
 
-Merges currently rest on the builder's self-reported local suite (Actions
-quota exhausted 2026-07-09; workflows dispatch-only). Before ANY live
-capital beyond the operator pipe test, an independent gate must exist.
+Status: IMPLEMENTED TO THE PLATFORM BOUNDARY by Codex on 2026-07-12; NOT
+ENFORCED and therefore NOT COMPLETE. Owner option (c) is installed: the
+repository-scoped Windows runner is online and the minimal PR workflow, exact
+protection payload, fail-closed audit, generated P4 artifact, tests, and runbook
+are implemented. GitHub's protection and ruleset APIs both return HTTP 403 for
+this private Free-plan repository. The repository must be upgraded to Pro/Team
+and `scripts/audit_github_merge_gate.py --apply-protection` must report
+`status=enforced` before live capital. Making the repository public is rejected.
+
+Merges previously rested on the builder's self-reported local suite (hosted
+Actions quota exhausted 2026-07-09; operational workflows dispatch-only).
+Before ANY live capital beyond the operator pipe test, an independent gate
+must exist.
 
 1. OWNER CHOICE required first (this blocks the WO):
    (a) GitHub-hosted minutes: free quota resets monthly; the minimal gate
@@ -2509,9 +2519,11 @@ capital beyond the operator pipe test, an independent gate must exist.
    pushes, require one review not authored by the building agent
    (orchestrator reviews Codex; Codex pre-build-audits orchestrator
    specs - the bidirectional loop already demonstrated).
-4. Until WO-69 lands, the interim compensating controls stay: full local
-   suite before merge, cross-agent audits, ledger anchoring, and the
-   operating-state deployed-SHA check.
+4. Until the WO-69 artifact reports `status=enforced`, the interim
+   compensating controls stay: full local suite before merge, cross-agent
+   audits, ledger anchoring, and the operating-state deployed-SHA check.
+
+Implementation/runbook: `docs/WO69_CI_ENFORCEMENT.md`.
 
 ## WO-70 — Reproducibility and identity cleanup (accepted, deferred to post-proof phase)
 

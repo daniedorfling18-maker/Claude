@@ -1142,7 +1142,57 @@ def _stale_background_summary(
     }
 
 
-def _exit_for_stale_background_job() -> None:
+BACKGROUND_TIMEOUT_INCIDENT_FIELDS = [
+    "incident_id",
+    "generated_at_utc",
+    "job",
+    "started_at_utc",
+    "running_seconds",
+    "max_runtime_seconds",
+    "live_iteration",
+    "exit_code",
+    "paper_trading_invoked",
+    "live_trading_invoked",
+]
+
+
+def _record_background_timeout_incident(cfg, summary: dict[str, Any], *, live_iteration: int) -> Path:
+    """Append supervisor exits to the investor-auditable ledger.
+
+    The hard exit can strand atomic-write temp files, so the incident is
+    flushed before ``os._exit``. Stable IDs make a retried write idempotent.
+    """
+    path = cfg.output_root / "performance" / "background_timeout_incidents.csv"
+    seed = "|".join(
+        (
+            str(summary.get("job") or "unknown"),
+            str(summary.get("started_at_utc") or ""),
+            str(live_iteration),
+        )
+    )
+    incident_id = "timeout_" + hashlib.sha256(seed.encode("utf-8")).hexdigest()[:24]
+    rows = read_csv_rows(path)
+    if any(str(row.get("incident_id") or "") == incident_id for row in rows):
+        return path
+    rows.append(
+        {
+            "incident_id": incident_id,
+            "generated_at_utc": str(summary.get("generated_at_utc") or now_utc()),
+            "job": str(summary.get("job") or "unknown"),
+            "started_at_utc": str(summary.get("started_at_utc") or ""),
+            "running_seconds": summary.get("running_seconds", 0.0),
+            "max_runtime_seconds": summary.get("max_runtime_seconds", 0.0),
+            "live_iteration": int(live_iteration),
+            "exit_code": 75,
+            "paper_trading_invoked": False,
+            "live_trading_invoked": False,
+        }
+    )
+    write_csv(path, rows, fieldnames=BACKGROUND_TIMEOUT_INCIDENT_FIELDS)
+    return path
+
+
+def _exit_for_stale_background_job(cfg, summary: dict[str, Any], *, live_iteration: int) -> None:
     """Hard-exit so Docker/Task Scheduler restarts the loop and kills stuck workers.
 
     Python cannot safely terminate an already-running thread in a
@@ -1150,6 +1200,7 @@ def _exit_for_stale_background_job() -> None:
     CPU/memory.  The local/VPS runner is supervised, so the fail-closed action is
     to publish the stale heartbeat and exit the process.
     """
+    _record_background_timeout_incident(cfg, summary, live_iteration=live_iteration)
     os._exit(75)
 
 
@@ -1487,7 +1538,7 @@ def main(argv: list[str] | None = None) -> int:
                         error="discovery_max_runtime_exceeded",
                         started_at_utc=discovery_started_at_utc,
                     )
-                    _exit_for_stale_background_job()
+                    _exit_for_stale_background_job(cfg, last_discovery_summary, live_iteration=iteration)
                 if _future_exceeded_runtime(
                     prediction_future,
                     started_ts=prediction_started_ts,
@@ -1515,7 +1566,7 @@ def main(argv: list[str] | None = None) -> int:
                             "error": "prediction_max_runtime_exceeded",
                         },
                     )
-                    _exit_for_stale_background_job()
+                    _exit_for_stale_background_job(cfg, last_prediction_summary, live_iteration=iteration)
                 if _future_exceeded_runtime(
                     governance_future,
                     started_ts=governance_started_ts,
@@ -1541,7 +1592,7 @@ def main(argv: list[str] | None = None) -> int:
                         error="governance_max_runtime_exceeded",
                         started_at_utc=governance_started_at_utc,
                     )
-                    _exit_for_stale_background_job()
+                    _exit_for_stale_background_job(cfg, last_governance_summary, live_iteration=iteration)
                 if discovery_future is not None and discovery_future.done():
                     try:
                         discovery_iteration, last_discovery_summary = discovery_future.result()

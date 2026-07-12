@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import os
+from datetime import datetime, timezone
 from pathlib import Path
 import re
 from typing import Any, Mapping
@@ -22,6 +23,19 @@ OUTPUT_JSON = "performance/operating_state.json"
 OUTPUT_MARKDOWN = "performance/operating_state.md"
 OWNER_AUTH_MARKER = "AUTONOMOUS_MAKER_EXECUTION_AUTHORISED = true"
 OWNER_AUTH_DATE_PATTERN = re.compile(r"AUTONOMOUS_MAKER_EXECUTION_AUTHORISED_AT\s*=\s*\d{4}-\d{2}-\d{2}", re.IGNORECASE)
+
+# 2026-07-12 WO-68b registered reporting targets. Config may tighten these
+# maxima but cannot widen them. They alert a human only and are never read by a
+# gate, broker, sizing rule, or order path.
+REGISTERED_SLO_TARGETS: dict[str, float] = {
+    "quote_sheet_max_age_seconds": 26 * 3600,
+    "governance_refresh_max_duration_seconds": 2400,
+    "max_consecutive_skipped_scheduler_cycles": 0,
+    "websocket_max_gap_seconds": 300,
+    "dashboard_max_age_seconds": 300,
+    "reconciliation_max_age_seconds": 26 * 3600,
+    "ledger_anchor_max_age_seconds": 36 * 3600,
+}
 
 _DRIFT_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
     ("dated_project_state", re.compile(r"last project state update\s*:", re.IGNORECASE)),
@@ -76,6 +90,226 @@ def _timestamp(payload: Mapping[str, Any]) -> str:
         or payload.get("updated_at_utc")
         or ""
     ).strip()
+
+
+def _slo_settings(cfg: EngineConfig) -> dict[str, float]:
+    configured = _mapping(cfg.raw.get("operating_state_slos"))
+    targets: dict[str, float] = {}
+    for key, registered in REGISTERED_SLO_TARGETS.items():
+        try:
+            candidate = float(configured.get(key, registered))
+        except (TypeError, ValueError):
+            candidate = registered
+        if candidate < 0:
+            candidate = registered
+        targets[key] = min(float(registered), candidate)
+    return targets
+
+
+def _path_timestamp(path: Path, *, fields: tuple[str, ...] = ()) -> tuple[datetime | None, str]:
+    if not path.exists():
+        return None, ""
+    payload = read_json(path, default={})
+    if isinstance(payload, Mapping):
+        for field in fields:
+            raw = str(payload.get(field) or "").strip()
+            parsed = parse_timestamp(raw)
+            if parsed is not None:
+                return parsed, raw
+    stamp = datetime.fromtimestamp(path.stat().st_mtime, timezone.utc)
+    return stamp, stamp.strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def _slo_row(
+    identifier: str,
+    metric: str,
+    *,
+    target: float,
+    measured: float | None,
+    unit: str,
+    source: str,
+    observed_at_utc: str = "",
+) -> dict[str, Any]:
+    breach = None if measured is None else bool(measured > target)
+    return {
+        "id": identifier,
+        "metric": metric,
+        "target": target,
+        "measured": None if measured is None else round(float(measured), 3),
+        "unit": unit,
+        "breach": breach,
+        "state": UNKNOWN if breach is None else ("BREACH" if breach else "OK"),
+        "source": source,
+        "observed_at_utc": observed_at_utc or UNKNOWN,
+    }
+
+
+def _age_slo_row(
+    identifier: str,
+    metric: str,
+    *,
+    target: float,
+    observed: datetime | None,
+    observed_raw: str,
+    as_of: datetime,
+    source: str,
+) -> dict[str, Any]:
+    age = max(0.0, (as_of - observed).total_seconds()) if observed is not None else None
+    return _slo_row(
+        identifier,
+        metric,
+        target=target,
+        measured=age,
+        unit="seconds",
+        source=source,
+        observed_at_utc=observed_raw,
+    )
+
+
+def _latest_websocket_timestamp(cfg: EngineConfig) -> tuple[datetime | None, str, str]:
+    latest_path = cfg.output_root / "polymarket_websocket" / "websocket_messages_latest.json"
+    messages = read_json(latest_path, default=[])
+    candidates: list[tuple[datetime, str]] = []
+    if isinstance(messages, list):
+        for row in messages:
+            if not isinstance(row, Mapping):
+                continue
+            raw = str(row.get("collected_at_utc") or "").strip()
+            parsed = parse_timestamp(raw)
+            if parsed is not None:
+                candidates.append((parsed, raw))
+    if candidates:
+        candidates.sort(key=lambda item: item[0])
+        return candidates[-1][0], candidates[-1][1], str(latest_path)
+    summary_path = cfg.output_root / "polymarket_websocket" / "websocket_summary.json"
+    observed, raw = _path_timestamp(summary_path, fields=("generated_at_utc", "collected_at_utc"))
+    return observed, raw, str(summary_path)
+
+
+def _build_slo_block(cfg: EngineConfig, *, as_of: datetime) -> dict[str, Any]:
+    targets = _slo_settings(cfg)
+    output_root = cfg.output_root
+
+    quote_path = output_root / "maker_carry" / "maker_quote_sheet.md"
+    quote_at, quote_raw = _path_timestamp(quote_path)
+
+    ops_path = output_root / "ops_scheduler" / "status.json"
+    ops = _artifact(ops_path)
+    jobs = _mapping(ops.get("jobs"))
+    governance_job = _mapping(jobs.get("governance_refresh"))
+    governance_duration: float | None = None
+    governance_observed = str(governance_job.get("last_run_utc") or "")
+    try:
+        if governance_job.get("duration_seconds") is not None:
+            governance_duration = max(0.0, float(governance_job["duration_seconds"]))
+    except (TypeError, ValueError):
+        governance_duration = None
+    governance_source = str(ops_path)
+    if governance_duration is None:
+        heartbeat_path = cfg.governance_root / "governance_refresh_heartbeat.json"
+        heartbeat = _artifact(heartbeat_path)
+        started = parse_timestamp(heartbeat.get("started_at_utc"))
+        ended = as_of if str(heartbeat.get("status") or "").lower() == "running" else parse_timestamp(heartbeat.get("generated_at_utc"))
+        if started is not None and ended is not None:
+            governance_duration = max(0.0, (ended - started).total_seconds())
+            governance_observed = str(heartbeat.get("generated_at_utc") or heartbeat.get("started_at_utc") or "")
+        governance_source = str(heartbeat_path)
+
+    skip_counts: list[int] = []
+    for name, value in jobs.items():
+        if name == "scheduler" or not isinstance(value, Mapping) or "consecutive_skipped_cycles" not in value:
+            continue
+        try:
+            skip_counts.append(max(0, int(value.get("consecutive_skipped_cycles") or 0)))
+        except (TypeError, ValueError):
+            continue
+    consecutive_skips = float(sum(skip_counts)) if skip_counts else None
+
+    websocket_at, websocket_raw, websocket_source = _latest_websocket_timestamp(cfg)
+    dashboard_path = output_root / "polymarket_dashboard" / "dashboard_data.json"
+    dashboard_at, dashboard_raw = _path_timestamp(dashboard_path, fields=("generated_at_utc",))
+    reconciliation_path = output_root / "performance" / "wallet_reconciliation.json"
+    reconciliation_at, reconciliation_raw = _path_timestamp(reconciliation_path, fields=("generated_at_utc",))
+    anchor_path = output_root / "performance" / "ledger_anchor_head.json"
+    anchor_at, anchor_raw = _path_timestamp(anchor_path, fields=("anchored_at_utc", "generated_at_utc"))
+
+    rows = [
+        _age_slo_row(
+            "quote_sheet_age",
+            "Quote-sheet age",
+            target=targets["quote_sheet_max_age_seconds"],
+            observed=quote_at,
+            observed_raw=quote_raw,
+            as_of=as_of,
+            source=str(quote_path),
+        ),
+        _slo_row(
+            "governance_refresh_duration",
+            "Governance-refresh duration",
+            target=targets["governance_refresh_max_duration_seconds"],
+            measured=governance_duration,
+            unit="seconds",
+            source=governance_source,
+            observed_at_utc=governance_observed,
+        ),
+        _slo_row(
+            "skipped_scheduler_cycles",
+            "Consecutive skipped scheduler cycles",
+            target=targets["max_consecutive_skipped_scheduler_cycles"],
+            measured=consecutive_skips,
+            unit="cycles",
+            source=str(ops_path),
+            observed_at_utc=_timestamp(ops),
+        ),
+        _age_slo_row(
+            "websocket_gap",
+            "Websocket observation gap",
+            target=targets["websocket_max_gap_seconds"],
+            observed=websocket_at,
+            observed_raw=websocket_raw,
+            as_of=as_of,
+            source=websocket_source,
+        ),
+        _age_slo_row(
+            "dashboard_staleness",
+            "Dashboard staleness",
+            target=targets["dashboard_max_age_seconds"],
+            observed=dashboard_at,
+            observed_raw=dashboard_raw,
+            as_of=as_of,
+            source=str(dashboard_path),
+        ),
+        _age_slo_row(
+            "reconciliation_age",
+            "Wallet-reconciliation age",
+            target=targets["reconciliation_max_age_seconds"],
+            observed=reconciliation_at,
+            observed_raw=reconciliation_raw,
+            as_of=as_of,
+            source=str(reconciliation_path),
+        ),
+        _age_slo_row(
+            "ledger_anchor_age",
+            "Ledger-anchor age",
+            target=targets["ledger_anchor_max_age_seconds"],
+            observed=anchor_at,
+            observed_raw=anchor_raw,
+            as_of=as_of,
+            source=str(anchor_path),
+        ),
+    ]
+    breach_count = sum(row["breach"] is True for row in rows)
+    unknown_count = sum(row["breach"] is None for row in rows)
+    return {
+        "status": "breach" if breach_count else ("incomplete_unknown_inputs" if unknown_count else "ok"),
+        "targets_tighten_only": True,
+        "breach_count": breach_count,
+        "unknown_count": unknown_count,
+        "rows": rows,
+        "reporting_only": True,
+        "paper_trading_invoked": False,
+        "live_trading_invoked": False,
+    }
 
 
 def _latest_timestamp(payloads: Mapping[str, Mapping[str, Any]]) -> tuple[str, list[str]]:
@@ -259,6 +493,23 @@ def _write_markdown(path: Path, payload: Mapping[str, Any]) -> None:
     lines.extend(
         [
             "",
+            "## Operating SLOs (reporting only)",
+            "",
+            "A breach alerts the operator; it never changes a gate, size, broker, or order path.",
+            "",
+            "| Metric | State | Target | Measured | Unit | Source | Observed at |",
+            "|---|---|---:|---:|---|---|---|",
+        ]
+    )
+    for row in _mapping(payload.get("slo")).get("rows", []):
+        lines.append(
+            f"| {_md(row.get('metric'))} | **{_md(row.get('state'))}** | {_md(row.get('target'))} | "
+            f"{_md(row.get('measured'))} | {_md(row.get('unit'))} | `{_md(row.get('source'))}` | "
+            f"{_md(row.get('observed_at_utc'))} |"
+        )
+    lines.extend(
+        [
+            "",
             "## WO-67 autonomous-execution preconditions",
             "",
             "WO-67 remains blocked unless every precondition is independently `met`. This report never authorises execution.",
@@ -281,6 +532,8 @@ def _write_markdown(path: Path, payload: Mapping[str, Any]) -> None:
 
 
 def build_operating_state(cfg: EngineConfig) -> dict[str, Any]:
+    generated_at = now_utc()
+    as_of = parse_timestamp(generated_at) or datetime.now(timezone.utc)
     output_root = cfg.output_root
     governance = cfg.governance_root
     performance = output_root / "performance"
@@ -392,6 +645,10 @@ def build_operating_state(cfg: EngineConfig) -> dict[str, Any]:
         autonomous_state = "BLOCKED_UNKNOWN"
 
     telemetry_sha = str(telemetry_manifest.get("deployed_git_rev") or "").strip()
+    source_sha = str(telemetry_manifest.get("source_git_rev") or "").strip()
+    checkout_sha = str(telemetry_manifest.get("checkout_git_rev") or "").strip()
+    source_observed_at = str(telemetry_manifest.get("source_observed_at_utc") or "").strip()
+    divergence_started_at = str(telemetry_manifest.get("divergence_started_at_utc") or "").strip()
     expected_sha = str(os.getenv("PM_VPS_DEPLOYED_SHA") or "").strip()
     image_sha = str(os.getenv("PM_IMAGE_BUILD_SHA") or "").strip()
     deployed_sha = telemetry_sha or expected_sha or image_sha or UNKNOWN
@@ -405,6 +662,21 @@ def build_operating_state(cfg: EngineConfig) -> dict[str, Any]:
         f"telemetry={telemetry_sha or UNKNOWN}; expected={expected_sha or UNKNOWN}; "
         f"image={image_sha or UNKNOWN}; aligned="
         f"{deployment_markers_aligned if deployment_markers_aligned is not None else UNKNOWN}"
+    )
+    if not source_sha or not telemetry_sha or "unknown" in {source_sha.lower(), telemetry_sha.lower()}:
+        source_deployed_state = UNKNOWN
+        divergence_age_seconds: float | None = None
+    elif _sha_matches(source_sha, telemetry_sha):
+        source_deployed_state = "ALIGNED"
+        divergence_age_seconds = 0.0
+    else:
+        source_deployed_state = "DIVERGED"
+        divergence_started = parse_timestamp(divergence_started_at)
+        divergence_age_seconds = max(0.0, (as_of - divergence_started).total_seconds()) if divergence_started else None
+    source_deployed_evidence = (
+        f"source={source_sha or UNKNOWN}; checkout={checkout_sha or UNKNOWN}; deployed={telemetry_sha or UNKNOWN}; "
+        f"divergence_started_at_utc={divergence_started_at or UNKNOWN}; "
+        f"divergence_age_seconds={round(divergence_age_seconds, 3) if divergence_age_seconds is not None else UNKNOWN}"
     )
     latest_evidence, latest_sources = _latest_timestamp(artifacts)
     maker_gates = _mapping(maker_study.get("maker_gates"))
@@ -425,15 +697,35 @@ def build_operating_state(cfg: EngineConfig) -> dict[str, Any]:
             f"{telemetry_manifest_path} + PM_VPS_DEPLOYED_SHA/PM_IMAGE_BUILD_SHA",
             _timestamp(telemetry_manifest),
         ),
+        _row(
+            "source_vs_deployed_sha",
+            "Source vs deployed SHA",
+            source_deployed_state,
+            source_deployed_evidence,
+            str(telemetry_manifest_path),
+            source_observed_at or _timestamp(telemetry_manifest),
+        ),
         _row("latest_verified_evidence", "Latest verified evidence timestamp", latest_evidence, ", ".join(latest_sources) or UNKNOWN, "artifact generated_at_utc", latest_evidence if latest_evidence != UNKNOWN else ""),
     ]
 
+    slo = _build_slo_block(cfg, as_of=as_of)
+
     payload = {
         "status": "ok" if not missing_inputs and all(row["state"] != UNKNOWN for row in rows) else "incomplete_unknown_inputs",
-        "generated_at_utc": now_utc(),
+        "generated_at_utc": generated_at,
         "source": "point_in_time_config_and_artifacts",
         "rows": rows,
         "wo67_preconditions": preconditions,
+        "slo": slo,
+        "deployment": {
+            "status": source_deployed_state,
+            "source_git_rev": source_sha or UNKNOWN,
+            "checkout_git_rev": checkout_sha or UNKNOWN,
+            "deployed_git_rev": telemetry_sha or UNKNOWN,
+            "source_observed_at_utc": source_observed_at or UNKNOWN,
+            "divergence_started_at_utc": divergence_started_at or UNKNOWN,
+            "divergence_age_seconds": divergence_age_seconds,
+        },
         "missing_inputs": sorted(set(missing_inputs)),
         "taker_verdict": {
             "verdict": profit_verdict.get("verdict", UNKNOWN),

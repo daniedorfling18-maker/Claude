@@ -204,6 +204,18 @@ performance_factsheet:
   bootstrap_seed: 20260711
   periods_per_year: 365
 
+# 2026-07-12 WO-68b: human-alert SLO targets for generated operating state.
+# These are registered maxima; effective-config overrides can only tighten.
+# No gate, broker, sizing rule, policy, or order path reads this block.
+operating_state_slos:
+  quote_sheet_max_age_seconds: 93600
+  governance_refresh_max_duration_seconds: 2400
+  max_consecutive_skipped_scheduler_cycles: 0
+  websocket_max_gap_seconds: 300
+  dashboard_max_age_seconds: 300
+  reconciliation_max_age_seconds: 93600
+  ledger_anchor_max_age_seconds: 129600
+
 # 2026-07-11 WO-61: daily tamper-evident prefix hashes for the investor-facing
 # ledger set. Reporting infrastructure only; no gate, sizing rule, policy,
 # broker, or order path reads it. State tables that are legitimately rewritten
@@ -228,6 +240,9 @@ ledger_anchor:
     - {glob: performance/wallet_reconciliation_history.csv, mode: append_only}
     - {glob: performance/wallet_gas_observations.csv, mode: append_only}
     - {glob: performance/cost_ledger.csv, mode: append_only}
+    # 2026-07-12 WO-68b: persist every fail-closed exit-75 supervisor event so
+    # clean Docker restarts remain attributable after container replacement.
+    - {glob: performance/background_timeout_incidents.csv, mode: append_only}
     - {glob: performance/cost_ledger_summary.json, mode: snapshot}
 
 # 2026-07-11 WO-65: weekly, ledger-only disaster-recovery snapshot. The active

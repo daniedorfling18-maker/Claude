@@ -44,7 +44,7 @@ log() {
 }
 
 stamp_status() {
-  JOB="$1" EXIT_CODE="$2" DETAIL="${3:-}" OUT_DIR="$OUT_DIR" python - <<'PY'
+  JOB="$1" EXIT_CODE="$2" DETAIL="${3:-}" STARTED_AT="${4:-}" OUT_DIR="$OUT_DIR" python - <<'PY'
 import json
 import os
 from datetime import datetime, timezone
@@ -55,13 +55,40 @@ try:
     payload = json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
 except Exception:
     payload = {}
-payload.setdefault("jobs", {})[os.environ["JOB"]] = {
-    "last_run_utc": datetime.now(timezone.utc).isoformat(),
-    "last_exit_code": int(os.environ["EXIT_CODE"]),
-    "detail": os.environ.get("DETAIL", ""),
+jobs = payload.setdefault("jobs", {})
+job_name = os.environ["JOB"]
+previous = jobs.get(job_name, {}) if isinstance(jobs.get(job_name), dict) else {}
+now = datetime.now(timezone.utc)
+started_raw = os.environ.get("STARTED_AT", "")
+try:
+    started = datetime.fromisoformat(started_raw.replace("Z", "+00:00")) if started_raw else None
+except ValueError:
+    started = None
+detail = os.environ.get("DETAIL", "")
+exit_code = int(os.environ["EXIT_CODE"])
+skipped = "skipped" in detail.lower()
+
+def count(name):
+    try:
+        return int(previous.get(name, 0) or 0)
+    except (TypeError, ValueError):
+        return 0
+
+jobs[job_name] = {
+    "last_run_utc": now.isoformat(),
+    "started_at_utc": started.isoformat() if started else "",
+    "duration_seconds": round((now - started).total_seconds(), 3) if started else None,
+    "last_exit_code": exit_code,
+    "detail": detail,
+    "runs_total": count("runs_total") + 1,
+    "skipped_cycles_total": count("skipped_cycles_total") + int(skipped),
+    "consecutive_skipped_cycles": count("consecutive_skipped_cycles") + 1 if skipped else 0,
+    "failed_cycles_total": count("failed_cycles_total") + int(exit_code != 0),
 }
 payload["mode"] = "vps_ops_scheduler"
-payload["generated_at_utc"] = datetime.now(timezone.utc).isoformat()
+payload["generated_at_utc"] = now.isoformat()
+payload["paper_trading_invoked"] = False
+payload["live_trading_invoked"] = False
 path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
 PY
 }
@@ -94,9 +121,15 @@ odds_quota_available() {
 
 run_governance_refresh() {
   log "governance_refresh: starting"
-  timeout "$GOVERNANCE_TIMEOUT" python -m polymarket_predictive_engine.cli refresh-governance --config "$CONFIG_PATH" >> "$LOG_FILE" 2>&1
+  STARTED_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+  (
+    set -e
+    timeout "$GOVERNANCE_TIMEOUT" python -m polymarket_predictive_engine.cli refresh-governance --config "$CONFIG_PATH"
+    timeout 300 python -m polymarket_predictive_engine.cli operating-state --config "$CONFIG_PATH"
+    timeout 300 python scripts/render_polymarket_dashboard.py --config "$CONFIG_PATH"
+  ) >> "$LOG_FILE" 2>&1
   CODE=$?
-  stamp_status governance_refresh "$CODE" "refresh-governance via ops scheduler"
+  stamp_status governance_refresh "$CODE" "refresh-governance + operating-state + dashboard via ops scheduler" "$STARTED_AT"
   log "governance_refresh: exit $CODE"
 }
 

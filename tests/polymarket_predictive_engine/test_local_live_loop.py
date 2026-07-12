@@ -8,6 +8,8 @@ from concurrent.futures import Future
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
+import pytest
+
 from polymarket_predictive_engine.config import EngineConfig
 from polymarket_predictive_engine.runtime_lock import runtime_lock_path
 from polymarket_predictive_engine.utils import read_csv_rows, read_json
@@ -558,6 +560,33 @@ def test_background_future_timeout_helper_is_fail_closed():
     assert summary["live_trading_invoked"] is False
     assert summary["running_seconds"] == 901.235
     assert "fail-closed" in summary["message"]
+
+
+def test_background_timeout_exit_is_recorded_before_hard_exit(tmp_path, monkeypatch):
+    loop = _load_loop_module()
+    cfg = EngineConfig(
+        raw={"paths": {"output_root": str(tmp_path / "outputs")}},
+        path=tmp_path / "cfg.yaml",
+    )
+    summary = loop._stale_background_summary(
+        job_name="governance",
+        started_at_utc="2026-07-12T10:00:00Z",
+        running_seconds=601.0,
+        max_runtime_seconds=600.0,
+    )
+    monkeypatch.setattr(loop.os, "_exit", lambda code: (_ for _ in ()).throw(SystemExit(code)))
+
+    with pytest.raises(SystemExit) as exc:
+        loop._exit_for_stale_background_job(cfg, summary, live_iteration=9)
+
+    assert exc.value.code == 75
+    rows = read_csv_rows(cfg.output_root / "performance" / "background_timeout_incidents.csv")
+    assert len(rows) == 1
+    assert rows[0]["job"] == "governance"
+    assert rows[0]["live_iteration"] == "9"
+    assert rows[0]["exit_code"] == "75"
+    assert rows[0]["paper_trading_invoked"] == "False"
+    assert rows[0]["live_trading_invoked"] == "False"
 
 
 def test_degraded_discovery_refresh_keeps_fast_updown_fresh(tmp_path, monkeypatch):

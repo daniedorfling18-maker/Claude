@@ -35,7 +35,7 @@ def test_vps_paper_compose_is_lean_and_paper_only():
     assert "--discovery-max-runtime-seconds $${POLYMARKET_DISCOVERY_MAX_RUNTIME_SECONDS}" in services["polymarket-paper-live"]["command"]
     assert "--prediction-max-runtime-seconds $${POLYMARKET_PREDICTION_MAX_RUNTIME_SECONDS}" in services["polymarket-paper-live"]["command"]
     assert "--governance-max-runtime-seconds $${POLYMARKET_GOVERNANCE_MAX_RUNTIME_SECONDS}" in services["polymarket-paper-live"]["command"]
-    assert paper_env["POLYMARKET_GOVERNANCE_REFRESH_SECONDS"] == "${POLYMARKET_GOVERNANCE_REFRESH_SECONDS:-120}"
+    assert paper_env["POLYMARKET_GOVERNANCE_REFRESH_SECONDS"] == "${POLYMARKET_GOVERNANCE_REFRESH_SECONDS:-0}"
     assert paper_env["POLYMARKET_DISCOVERY_MAX_RUNTIME_SECONDS"] == "${POLYMARKET_DISCOVERY_MAX_RUNTIME_SECONDS:-900}"
     assert paper_env["POLYMARKET_PREDICTION_MAX_RUNTIME_SECONDS"] == "${POLYMARKET_PREDICTION_MAX_RUNTIME_SECONDS:-600}"
     assert paper_env["POLYMARKET_GOVERNANCE_MAX_RUNTIME_SECONDS"] == "${POLYMARKET_GOVERNANCE_MAX_RUNTIME_SECONDS:-600}"
@@ -73,7 +73,9 @@ def test_vps_env_example_keeps_live_credentials_empty():
     assert "CLOB_API_KEY=" in text
     assert "PM_PAPER_MEM_LIMIT=4g" in text
     assert "SUPERBRU_AUTO_PICK_MEM_LIMIT=1g" in text
-    assert "POLYMARKET_GOVERNANCE_REFRESH_SECONDS=120" in text
+    assert "POLYMARKET_GOVERNANCE_REFRESH_SECONDS=0" in text
+    assert "PM_VPS_MIN_VCPUS=2" in text
+    assert "PM_VPS_MIN_FREE_DISK=6g" in text
     assert "POLYMARKET_DISCOVERY_MAX_RUNTIME_SECONDS=900" in text
     assert "POLYMARKET_PREDICTION_MAX_RUNTIME_SECONDS=600" in text
     assert "POLYMARKET_GOVERNANCE_MAX_RUNTIME_SECONDS=600" in text
@@ -101,6 +103,22 @@ def test_vps_bootstrap_script_starts_only_lean_paper_stack():
     assert "POLYMARKET_EXECUTE_LIVE=true" not in text
     assert "PM_PAPER_MEM_LIMIT 2g" in text
     assert "POLYMARKET_WEBSOCKET_MAX_ASSETS 80" in text
+    preflight = text.index("preflight_vps_capacity.py")
+    checkout = text.index('git checkout "$REPO_BRANCH"')
+    compose_up = text.index('compose -f "$COMPOSE_FILE" up -d --build')
+    assert preflight < checkout < compose_up
+    assert "outputs/performance/deployed_git_rev" in text
+
+
+def test_vps_deploy_preflight_runs_before_compose_replacement():
+    text = (ROOT / ".github" / "workflows" / "deploy-polymarket-vps-paper.yml").read_text(encoding="utf-8")
+
+    preflight = text.index('python3 "$PREFLIGHT_DIR/preflight_vps_capacity.py"')
+    checkout = text.index("git checkout main")
+    compose_up = text.index('$DOCKER compose -f "$COMPOSE_FILE" up -d --build')
+    assert preflight < checkout < compose_up
+    assert "outputs/performance/deployed_git_rev" in text
+    assert "REFUSE_DEPLOY_KEEP_EXISTING_STACK" in (ROOT / "scripts" / "preflight_vps_capacity.py").read_text(encoding="utf-8")
 
 
 def test_vps_health_script_checks_dashboard_and_heartbeat_files():
@@ -192,6 +210,9 @@ def test_vps_ops_scheduler_replaces_github_side_jobs():
     assert "x-requests-remaining" in script  # free-endpoint quota preflight
     assert 'timeout "$GOVERNANCE_TIMEOUT"' in script
     assert "status.json" in script
+    assert "consecutive_skipped_cycles" in script
+    assert "duration_seconds" in script
+    assert "polymarket_predictive_engine.cli operating-state" in script
     # 2026-07-09: daily resolved-market harvest (Gamma backfill + CLOB price
     # histories) - free, key-less, outcome-labelled training corpus.
     assert "backfill-resolved-markets" in script
@@ -240,6 +261,11 @@ def test_vps_telemetry_push_script_is_single_commit_and_actions_free():
         ), f"heavy dir {excluded} must not be whitelisted"
     # official book snapshots live under maker_carry but stay on the VPS
     assert "official_books" in script
+    assert "source_git_rev" in script
+    assert "divergence_started_at_utc" in script
+    assert "ls-remote origin refs/heads/main" in script
+    assert "rev-parse HEAD" in script
+    assert "outputs/performance/deployed_git_rev" in script
 
 
 def test_vps_diagnostic_script_rides_telemetry_and_stays_capped():

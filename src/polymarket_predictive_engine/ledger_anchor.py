@@ -38,8 +38,8 @@ CHAIN_FIELDS = [
 ]
 
 # Most sources are append-only.  ``shadow_positions.csv`` is a state table and
-# ``decision_policy.json`` is regenerated, so immutable daily copies are
-# anchored for those two sources instead of falsely treating an authorised
+# ``decision_policy.json`` and WO-66 ``requote_alerts.json`` are regenerated,
+# so immutable daily copies are anchored for state-table sources instead of falsely treating an authorised
 # rewrite as retroactive tampering.
 DEFAULT_LEDGER_REGISTRY: list[dict[str, str]] = [
     {"glob": "polymarket_portfolio/portfolio_snapshots.csv", "mode": "append_only"},
@@ -51,6 +51,7 @@ DEFAULT_LEDGER_REGISTRY: list[dict[str, str]] = [
     {"glob": "maker_carry/maker_carry_history.csv", "mode": "append_only"},
     {"glob": "maker_carry/maker_live_test_history.csv", "mode": "append_only"},
     {"glob": "maker_carry/decision_policy.json", "mode": "snapshot"},
+    {"glob": "maker_carry/requote_alerts.json", "mode": "snapshot"},
     {"glob": "performance/cost_ledger.csv", "mode": "append_only"},
     {"glob": "performance/background_timeout_incidents.csv", "mode": "append_only"},
     {"glob": "performance/cost_ledger_summary.json", "mode": "snapshot"},

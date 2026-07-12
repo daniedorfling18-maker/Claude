@@ -1,0 +1,578 @@
+"""WO-66 keyless execution assistant: human requote/pull/STOP alerts only.
+
+The module reads the generated maker quote sheet, websocket top-of-book
+features, flow toxicity, public Gamma resolution state, and the registered
+decision-policy kill artifact. It never authenticates, signs, places, amends,
+or cancels an order. Its strongest output is a human instruction to pull.
+"""
+from __future__ import annotations
+
+from datetime import datetime, timezone
+import hashlib
+import json
+from pathlib import Path
+import re
+from typing import Any, Mapping
+
+import requests
+
+from .config import EngineConfig, load_config
+from .utils import now_utc, parse_timestamp, read_csv_rows, read_json, safe_float, write_json
+
+DEFAULT_GAMMA_BASE_URL = "https://gamma-api.polymarket.com"
+ALERT_PRIORITY = {
+    "quotes_ok": 0,
+    "requote_advised": 1,
+    "pull_quotes_now": 2,
+    "STOP": 3,
+}
+RESOLUTION_PULL_STATES = {
+    "proposed",
+    "disputed",
+    "challenged",
+    "resolved",
+}
+
+
+def _boolish(value: Any, default: bool = False) -> bool:
+    if value is None:
+        return default
+    if isinstance(value, bool):
+        return value
+    return str(value).strip().lower() in {"1", "true", "yes", "y", "on"}
+
+
+def _settings(cfg: EngineConfig) -> dict[str, Any]:
+    raw = cfg.raw.get("requote_alerts", {}) if isinstance(cfg.raw.get("requote_alerts"), dict) else {}
+    maker = (
+        cfg.raw.get("maker_carry_study", {})
+        if isinstance(cfg.raw.get("maker_carry_study"), dict)
+        else {}
+    )
+    # Every override is tighten-only. Earlier pull windows are larger; stale
+    # and drift tolerances are smaller; the toxicity trigger cannot exceed the
+    # registered standing-rule value of 0.9.
+    scheduled_raw = safe_float(raw.get("scheduled_event_hours"))
+    quote_age_raw = safe_float(raw.get("max_live_quote_age_seconds"))
+    drift_raw = safe_float(raw.get("mid_drift_distance_multiple"))
+    toxicity_raw = safe_float(raw.get("toxicity_threshold"))
+    band_min_raw = safe_float(maker.get("share_model_mid_band_min"))
+    band_max_raw = safe_float(maker.get("share_model_mid_band_max"))
+    scheduled_hours = max(24.0, scheduled_raw if scheduled_raw is not None else 24.0)
+    quote_age = min(1800.0, quote_age_raw if quote_age_raw is not None else 1800.0)
+    drift_multiple = min(1.0, drift_raw if drift_raw is not None else 1.0)
+    toxicity = min(0.9, toxicity_raw if toxicity_raw is not None else 0.9)
+    band_min = max(0.10, band_min_raw if band_min_raw is not None else 0.10)
+    band_max = min(0.90, band_max_raw if band_max_raw is not None else 0.90)
+    return {
+        "enabled": _boolish(raw.get("enabled"), True),
+        "scheduled_event_hours": scheduled_hours,
+        "max_live_quote_age_seconds": max(1.0, quote_age),
+        "mid_drift_distance_multiple": max(0.0, drift_multiple),
+        "toxicity_threshold": max(0.0, toxicity),
+        "quote_band_min": band_min,
+        "quote_band_max": band_max,
+        "gamma_base_url": str(raw.get("gamma_base_url") or DEFAULT_GAMMA_BASE_URL).rstrip("/"),
+        "request_timeout_seconds": max(
+            1.0,
+            safe_float(raw.get("request_timeout_seconds")) or 10.0,
+        ),
+        "query_resolution_status": _boolish(raw.get("query_resolution_status"), True),
+        "notification_enabled": _boolish(raw.get("notification_enabled"), False),
+    }
+
+
+def _as_utc(value: Any) -> datetime | None:
+    numeric = safe_float(value)
+    if numeric is not None:
+        seconds = numeric / 1000.0 if numeric > 10_000_000_000 else numeric
+        try:
+            return datetime.fromtimestamp(seconds, tz=timezone.utc)
+        except (OSError, OverflowError, ValueError):
+            return None
+    return parse_timestamp(value)
+
+
+def _latest_quotes(cfg: EngineConfig) -> dict[str, dict[str, Any]]:
+    path = cfg.output_root / "polymarket_training" / "websocket_market_features.csv"
+    latest_complete: dict[str, dict[str, Any]] = {}
+    latest_any: dict[str, dict[str, Any]] = {}
+    for row in read_csv_rows(path):
+        token = str(row.get("asset_id") or row.get("token_id") or "").strip()
+        stamp = _as_utc(row.get("source_timestamp") or row.get("collected_at_utc"))
+        if not token or stamp is None:
+            continue
+        current = latest_any.get(token)
+        if current is None or stamp > current["_stamp"]:
+            latest_any[token] = {**row, "_stamp": stamp}
+        if safe_float(row.get("best_bid")) is None or safe_float(row.get("best_ask")) is None:
+            continue
+        current = latest_complete.get(token)
+        if current is None or stamp > current["_stamp"]:
+            latest_complete[token] = {**row, "_stamp": stamp}
+    return {token: latest_complete.get(token, row) for token, row in latest_any.items()}
+
+
+def _toxicity_by_market(cfg: EngineConfig) -> dict[str, float]:
+    values: dict[str, float] = {}
+    for row in read_csv_rows(cfg.output_root / "maker_carry" / "flow_toxicity.csv"):
+        score = safe_float(row.get("toxicity_score"))
+        for key in (row.get("market"), row.get("asset_id"), row.get("condition_id")):
+            identifier = str(key or "").strip()
+            if identifier and score is not None:
+                values[identifier] = score
+    return values
+
+
+def _resolved_markets(cfg: EngineConfig) -> set[str]:
+    resolved: set[str] = set()
+    path = cfg.output_root / "polymarket_websocket" / "resolution_events.csv"
+    for row in read_csv_rows(path):
+        for key in ("market", "condition_id", "winning_asset_id"):
+            identifier = str(row.get(key) or "").strip()
+            if identifier:
+                resolved.add(identifier)
+    return resolved
+
+
+def _gamma_resolution_state(
+    settings: Mapping[str, Any],
+    condition_ids: list[str],
+) -> tuple[dict[str, dict[str, Any]], list[str]]:
+    if not condition_ids or not settings["query_resolution_status"]:
+        return {}, []
+    try:
+        response = requests.get(
+            f"{settings['gamma_base_url']}/markets",
+            params={"condition_ids": condition_ids, "limit": len(condition_ids)},
+            timeout=float(settings["request_timeout_seconds"]),
+        )
+        response.raise_for_status()
+        payload = response.json()
+    except Exception as exc:  # noqa: BLE001 - public resolution lookup fails soft into visible diagnostics
+        return {}, [f"{type(exc).__name__}: {exc}"]
+    rows = payload if isinstance(payload, list) else []
+    by_condition: dict[str, dict[str, Any]] = {}
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        condition = str(row.get("conditionId") or "").strip()
+        if condition:
+            by_condition[condition] = row
+    return by_condition, []
+
+
+def _market_state(current: str, proposed: str) -> str:
+    return proposed if ALERT_PRIORITY[proposed] > ALERT_PRIORITY[current] else current
+
+
+def _alert(
+    alerts: list[dict[str, Any]],
+    *,
+    state: str,
+    rule: str,
+    message: str,
+    value: Any = None,
+    threshold: Any = None,
+) -> None:
+    alerts.append(
+        {
+            "state": state,
+            "rule": rule,
+            "message": message,
+            "value": value,
+            "threshold": threshold,
+        }
+    )
+
+
+def _scheduled_time(ticket: Mapping[str, Any], live: Mapping[str, Any]) -> datetime | None:
+    for value in (
+        ticket.get("event_start_time_utc"),
+        live.get("close_time"),
+        ticket.get("end_date_utc"),
+    ):
+        stamp = _as_utc(value)
+        if stamp is not None:
+            return stamp
+    return None
+
+
+def _ticket_alerts(
+    ticket: Mapping[str, Any],
+    *,
+    live: Mapping[str, Any],
+    toxicity: Mapping[str, float],
+    gamma_market: Mapping[str, Any],
+    resolved: set[str],
+    settings: Mapping[str, Any],
+    as_of: datetime,
+) -> dict[str, Any]:
+    condition_id = str(ticket.get("condition_id") or "").strip()
+    token_id = str(ticket.get("token_id") or "").strip()
+    alerts: list[dict[str, Any]] = []
+    state = "quotes_ok"
+
+    if str(ticket.get("order_ticket_status") or "") != "exact":
+        _alert(
+            alerts,
+            state="pull_quotes_now",
+            rule="incomplete_order_ticket",
+            message="The generated ticket is missing a public URL, outcome/token, tick, bid, or ask.",
+        )
+
+    live_stamp = live.get("_stamp") if isinstance(live.get("_stamp"), datetime) else None
+    bid = safe_float(live.get("best_bid"))
+    ask = safe_float(live.get("best_ask"))
+    midpoint = safe_float(live.get("midpoint"))
+    if midpoint is None and bid is not None and ask is not None:
+        midpoint = (bid + ask) / 2.0
+    if live_stamp is None or bid is None or ask is None or midpoint is None:
+        _alert(
+            alerts,
+            state="requote_advised",
+            rule="missing_live_bid_ask",
+            message="No complete websocket bid/ask state is available for this ticket.",
+        )
+        quote_age = None
+    else:
+        quote_age = max(0.0, (as_of - live_stamp).total_seconds())
+        if quote_age > float(settings["max_live_quote_age_seconds"]):
+            _alert(
+                alerts,
+                state="requote_advised",
+                rule="stale_live_bid_ask",
+                message="The latest websocket bid/ask is too old to trust.",
+                value=round(quote_age, 3),
+                threshold=settings["max_live_quote_age_seconds"],
+            )
+        if not float(settings["quote_band_min"]) <= midpoint <= float(settings["quote_band_max"]):
+            _alert(
+                alerts,
+                state="pull_quotes_now",
+                rule="mid_outside_registered_band",
+                message="The live midpoint left the registered maker-reward price band.",
+                value=round(midpoint, 6),
+                threshold=[settings["quote_band_min"], settings["quote_band_max"]],
+            )
+        reference_mid = safe_float(ticket.get("reference_mid_price"))
+        quote_distance = safe_float(ticket.get("quote_distance"))
+        if reference_mid is not None and quote_distance is not None:
+            drift_limit = quote_distance * float(settings["mid_drift_distance_multiple"])
+            drift = abs(midpoint - reference_mid)
+            if drift > drift_limit:
+                _alert(
+                    alerts,
+                    state="requote_advised",
+                    rule="mid_drifted_beyond_quote_band",
+                    message="The live midpoint moved beyond the ticket's registered quote-distance band.",
+                    value=round(drift, 6),
+                    threshold=round(drift_limit, 6),
+                )
+
+    event_time = _scheduled_time(ticket, live)
+    hours_to_event = None
+    if event_time is not None:
+        hours_to_event = (event_time - as_of).total_seconds() / 3600.0
+        if hours_to_event <= float(settings["scheduled_event_hours"]):
+            _alert(
+                alerts,
+                state="pull_quotes_now",
+                rule="scheduled_event_within_window",
+                message="The quoted market is inside the mandatory pre-event pull window.",
+                value=round(hours_to_event, 3),
+                threshold=settings["scheduled_event_hours"],
+            )
+
+    toxicity_score = next(
+        (
+            toxicity[key]
+            for key in (condition_id, token_id)
+            if key and key in toxicity
+        ),
+        None,
+    )
+    if toxicity_score is not None and toxicity_score > float(settings["toxicity_threshold"]):
+        _alert(
+            alerts,
+            state="pull_quotes_now",
+            rule="flow_toxicity_above_limit",
+            message="Flow toxicity exceeded the registered standing-rule threshold.",
+            value=toxicity_score,
+            threshold=settings["toxicity_threshold"],
+        )
+
+    uma_status = str(
+        gamma_market.get("umaResolutionStatus")
+        or ticket.get("uma_resolution_status")
+        or ""
+    ).strip().lower()
+    resolution_hit = bool({condition_id, token_id}.intersection(resolved))
+    if uma_status in RESOLUTION_PULL_STATES or resolution_hit or _boolish(gamma_market.get("closed")):
+        _alert(
+            alerts,
+            state="pull_quotes_now",
+            rule="resolution_proposal_or_resolution_detected",
+            message="A public UMA proposal/dispute or authoritative resolution exists for this market.",
+            value=uma_status or "market_resolved_websocket_event",
+        )
+
+    for item in alerts:
+        state = _market_state(state, str(item["state"]))
+    return {
+        "condition_id": condition_id,
+        "token_id": token_id,
+        "market_url": ticket.get("market_url", ""),
+        "question": ticket.get("question", ""),
+        "outcome": ticket.get("outcome", ""),
+        "alert_state": state,
+        "alerts": alerts,
+        "live_bid": bid,
+        "live_ask": ask,
+        "live_midpoint": midpoint,
+        "live_quote_age_seconds": round(quote_age, 3) if quote_age is not None else None,
+        "hours_to_scheduled_event": round(hours_to_event, 3) if hours_to_event is not None else None,
+        "toxicity_score": toxicity_score,
+        "uma_resolution_status": uma_status,
+    }
+
+
+def _notification(
+    cfg: EngineConfig,
+    payload: Mapping[str, Any],
+    *,
+    enabled: bool,
+) -> dict[str, Any]:
+    out_root = cfg.output_root / "maker_carry"
+    state_path = out_root / "requote_alert_notification_state.json"
+    body_path = out_root / "requote_alert_notification.md"
+    critical = str(payload.get("alert_state") or "") in {"pull_quotes_now", "STOP"}
+    digest_input = {
+        "notification_enabled": enabled,
+        "alert_state": payload.get("alert_state"),
+        "markets": [
+            {
+                "condition_id": row.get("condition_id"),
+                "alert_state": row.get("alert_state"),
+                "rules": [alert.get("rule") for alert in row.get("alerts", [])],
+            }
+            for row in payload.get("markets", [])
+            if isinstance(row, Mapping)
+        ],
+        "kill_criteria": payload.get("kill_criteria_triggered", []),
+    }
+    digest = hashlib.sha256(
+        json.dumps(digest_input, sort_keys=True, default=str).encode("utf-8")
+    ).hexdigest()
+    previous = read_json(state_path, default={}) or {}
+    state_changed = str(previous.get("digest") or "") != digest
+    notify = bool(enabled and critical and state_changed)
+    lines = [
+        "# Polymarket maker quote alert",
+        "",
+        f"State: **{payload.get('alert_state', 'quotes_ok')}**",
+        f"Generated: `{payload.get('generated_at_utc', '')}`",
+        "",
+    ]
+    for row in payload.get("markets", []):
+        if not isinstance(row, Mapping) or row.get("alert_state") == "quotes_ok":
+            continue
+        lines.append(f"- {row.get('question') or row.get('condition_id')}: **{row.get('alert_state')}**")
+        for item in row.get("alerts", []):
+            if isinstance(item, Mapping):
+                lines.append(f"  - {item.get('rule')}: {item.get('message')}")
+    if payload.get("kill_criteria_triggered"):
+        lines.append(f"- Kill criteria: {', '.join(payload['kill_criteria_triggered'])}")
+    lines += ["", "Human action only. This system cannot place, amend, cancel, or sign orders."]
+    body_path.parent.mkdir(parents=True, exist_ok=True)
+    body_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    write_json(
+        state_path,
+        {
+            "digest": digest,
+            "alert_state": payload.get("alert_state"),
+            "generated_at_utc": payload.get("generated_at_utc"),
+        },
+    )
+    return {
+        "enabled": enabled,
+        "eligible": critical,
+        "notify": notify,
+        "state_changed": state_changed,
+        "subject": f"Polymarket maker quotes: {payload.get('alert_state', 'quotes_ok')}",
+        "body_file": str(body_path),
+        "pattern": "superbru_score_change_state_digest",
+    }
+
+
+def _patch_quote_sheet(path: Path, payload: Mapping[str, Any]) -> None:
+    if not path.exists():
+        return
+    text = path.read_text(encoding="utf-8")
+    start = "<!-- requote-alerts:start -->"
+    end = "<!-- requote-alerts:end -->"
+    block = "\n".join(
+        [
+            start,
+            f"> **WO-66 live quote alert: {payload.get('alert_state', 'quotes_ok')}** — "
+            f"{payload.get('headline', '')}",
+            end,
+            "",
+        ]
+    )
+    pattern = re.compile(r"<!-- requote-alerts:start -->.*?<!-- requote-alerts:end -->\n?", re.S)
+    if start in text and end in text:
+        text = pattern.sub(block, text)
+    else:
+        parts = text.split("\n", 2)
+        text = "\n".join(parts[:2]) + "\n\n" + block + (parts[2] if len(parts) > 2 else "")
+    path.write_text(text, encoding="utf-8")
+
+
+def build_requote_alerts(
+    cfg: EngineConfig,
+    *,
+    as_of: datetime | None = None,
+) -> dict[str, Any]:
+    settings = _settings(cfg)
+    out_root = cfg.output_root / "maker_carry"
+    output_path = out_root / "requote_alerts.json"
+    quote_sheet_path = out_root / "maker_quote_sheet.md"
+    generated_at = now_utc()
+    base: dict[str, Any] = {
+        "status": "disabled",
+        "alert_state": "quotes_ok",
+        "generated_at_utc": generated_at,
+        "work_order": "WO-66",
+        "read_only": True,
+        "keyless": True,
+        "paper_trading_invoked": False,
+        "live_trading_invoked": False,
+        "order_placement_invoked": False,
+        "order_amendment_invoked": False,
+        "order_cancellation_invoked": False,
+    }
+    if not settings["enabled"]:
+        write_json(output_path, base)
+        return base
+    if not quote_sheet_path.exists():
+        base.update(
+            {
+                "status": "inert_no_quote_sheet",
+                "headline": "No maker quote sheet exists; no alert or notification was emitted.",
+                "markets": [],
+                "notification": {
+                    "enabled": settings["notification_enabled"],
+                    "eligible": False,
+                    "notify": False,
+                },
+            }
+        )
+        write_json(output_path, base)
+        return base
+
+    study = read_json(out_root / "maker_carry_study.json", default={}) or {}
+    portfolio = study.get("portfolio") if isinstance(study.get("portfolio"), list) else []
+    if not portfolio:
+        base.update(
+            {
+                "status": "inert_empty_quote_sheet",
+                "headline": "The maker quote sheet has no portfolio tickets.",
+                "markets": [],
+                "notification": {
+                    "enabled": settings["notification_enabled"],
+                    "eligible": False,
+                    "notify": False,
+                },
+            }
+        )
+        write_json(output_path, base)
+        return base
+
+    now = (as_of or datetime.now(timezone.utc)).astimezone(timezone.utc)
+    latest_quotes = _latest_quotes(cfg)
+    toxicity = _toxicity_by_market(cfg)
+    resolved = _resolved_markets(cfg)
+    condition_ids = sorted(
+        {
+            str(row.get("condition_id") or "").strip()
+            for row in portfolio
+            if isinstance(row, Mapping) and str(row.get("condition_id") or "").strip()
+        }
+    )
+    gamma_markets, resolution_errors = _gamma_resolution_state(settings, condition_ids)
+    market_rows: list[dict[str, Any]] = []
+    state = "quotes_ok"
+    for ticket in portfolio:
+        if not isinstance(ticket, Mapping):
+            continue
+        token_id = str(ticket.get("token_id") or "").strip()
+        condition_id = str(ticket.get("condition_id") or "").strip()
+        row = _ticket_alerts(
+            ticket,
+            live=latest_quotes.get(token_id, {}),
+            toxicity=toxicity,
+            gamma_market=gamma_markets.get(condition_id, {}),
+            resolved=resolved,
+            settings=settings,
+            as_of=now,
+        )
+        market_rows.append(row)
+        state = _market_state(state, str(row["alert_state"]))
+
+    decision = read_json(out_root / "decision_policy.json", default={}) or {}
+    kill = decision.get("kill_criteria_status") if isinstance(decision.get("kill_criteria_status"), dict) else {}
+    triggered = kill.get("triggered") if isinstance(kill.get("triggered"), list) else []
+    if str(kill.get("status") or "").lower() == "triggered" or triggered:
+        state = "STOP"
+
+    non_ok = sum(row["alert_state"] != "quotes_ok" for row in market_rows)
+    headline = {
+        "quotes_ok": "All quoted markets pass the current read-only checks.",
+        "requote_advised": "One or more tickets need a human price refresh before remaining in market.",
+        "pull_quotes_now": "Pull the flagged human-entered quotes now and review before resuming.",
+        "STOP": "Registered kill criteria fired: stop quoting and review before any resume.",
+    }[state]
+    payload = {
+        **base,
+        "status": "ok" if not resolution_errors else "partial_resolution_lookup_error",
+        "alert_state": state,
+        "headline": headline,
+        "quote_sheet_path": str(quote_sheet_path),
+        "quote_sheet_generated_at_utc": study.get("generated_at_utc"),
+        "markets": market_rows,
+        "markets_checked": len(market_rows),
+        "markets_requiring_action": non_ok,
+        "kill_criteria_triggered": triggered,
+        "resolution_lookup_errors": resolution_errors,
+        "thresholds": {
+            key: settings[key]
+            for key in (
+                "scheduled_event_hours",
+                "max_live_quote_age_seconds",
+                "mid_drift_distance_multiple",
+                "toxicity_threshold",
+                "quote_band_min",
+                "quote_band_max",
+            )
+        },
+        "decision_use": "human decision support only; never order authorisation or execution",
+    }
+    payload["notification"] = _notification(
+        cfg,
+        payload,
+        enabled=bool(settings["notification_enabled"]),
+    )
+    # Match the existing SuperBru score-change notifier contract so an
+    # external mail/local-notification wrapper can consume this artifact
+    # without giving the trading engine SMTP credentials.
+    payload["notify"] = payload["notification"]["notify"]
+    payload["body_file"] = payload["notification"]["body_file"]
+    payload["state_changed"] = payload["notification"]["state_changed"]
+    write_json(output_path, payload)
+    _patch_quote_sheet(quote_sheet_path, payload)
+    return payload
+
+
+def main(config_path: str) -> dict[str, Any]:
+    return build_requote_alerts(load_config(config_path))

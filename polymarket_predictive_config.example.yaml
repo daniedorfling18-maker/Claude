@@ -167,6 +167,21 @@ flow_toxicity:
   buckets: 50
   markout_horizon_minutes: 5
 
+# 2026-07-12 WO-66: keyless/read-only human execution assistant. It reads
+# quote tickets plus websocket/flow/public-resolution state and can only emit
+# quotes_ok / requote_advised / pull_quotes_now / STOP. Overrides are clamped
+# tighten-only; no auth, signing, placement, amendment, or cancellation path.
+requote_alerts:
+  enabled: true
+  scheduled_event_hours: 24
+  max_live_quote_age_seconds: 1800
+  mid_drift_distance_multiple: 1.0
+  toxicity_threshold: 0.9
+  query_resolution_status: true
+  request_timeout_seconds: 10
+  # Existing notifier artifact pattern; no SMTP is invoked by the engine.
+  notification_enabled: false
+
 # 2026-07-10 WO-50: registered maker live-test decision policy. Frozen
 # defaults; future amendments may only tighten and must carry a dated comment.
 # The policy indicates a human action only. It never trades, sizes live
@@ -233,6 +248,7 @@ ledger_anchor:
     - {glob: maker_carry/maker_carry_history.csv, mode: append_only}
     - {glob: maker_carry/maker_live_test_history.csv, mode: append_only}
     - {glob: maker_carry/decision_policy.json, mode: snapshot}
+    - {glob: maker_carry/requote_alerts.json, mode: snapshot}
     - {glob: performance/investment_policy_statement.md, mode: snapshot}
     - {glob: performance/investment_policy_statement_summary.json, mode: snapshot}
     - {glob: performance/wallet_reconciliation.json, mode: snapshot}

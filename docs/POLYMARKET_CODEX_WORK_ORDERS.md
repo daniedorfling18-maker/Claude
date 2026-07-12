@@ -2393,7 +2393,7 @@ architecture, specified today so the eventual build is mechanical, and
 BLOCKED behind explicit preconditions - including a dated governance
 amendment only the repo owner can make. Constraints 1-8 bind.
 
-## WO-66 — Execution assistant (read-only decision support; UNBLOCKED)
+## WO-66 — Execution assistant (read-only decision support) — `done` (2026-07-12)
 
 Shrinks the human execution role to near-zero clicks without touching an
 order path.
@@ -2414,6 +2414,24 @@ Spec:
 4. Read-only, key-less, no auth, no order placement of any kind. Tests:
    each rule triggers on synthetic state; quiet state emits quotes_ok;
    inert without a quote sheet.
+
+**Implemented 2026-07-12 by Codex:** maker-carry portfolio rows now retain a
+public Polymarket URL, outcome/token, authoritative tick, reference book,
+rounded-away-from-mid bid/ask, shares, and capital; the Markdown sheet renders
+copy-ready human tickets. New module/CLI `requote_alerts.py` / `requote-alerts`
+runs after the read-only live-test and decision-policy refresh on the 15-minute
+trade-print cycle. It combines current websocket bid/ask, scheduled close,
+flow toxicity, public Gamma `umaResolutionStatus`, authoritative websocket
+resolution events, and registered kill criteria into exactly `quotes_ok`,
+`requote_advised`, `pull_quotes_now`, or `STOP`. It writes
+`outputs/maker_carry/requote_alerts.json`, patches the quote sheet, and drives
+the dashboard banner; daily immutable copies are enrolled in the WO-61 anchor.
+Optional notification output mirrors the existing
+SuperBru state-digest/body-file contract only for new `pull_quotes_now`/`STOP`
+states; the engine has no SMTP, key, auth, signing, placement, amendment, or
+cancellation path. Synthetic tests cover every rule, quiet/inert states,
+tighten-only overrides, one-shot notification, scheduler wiring, and the
+no-order contract. WO-67 remains untouched and blocked.
 
 ## WO-67 — Autonomous maker executor (ARCHITECTURE REGISTERED; BLOCKED)
 

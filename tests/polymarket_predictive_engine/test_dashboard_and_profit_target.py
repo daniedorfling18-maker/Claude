@@ -3330,9 +3330,15 @@ def test_dashboard_carries_profit_verdict_and_html_panel(tmp_path):
     # scoreboard + WO-50 decision-policy blocks exist even before the VPS jobs
     # first write them.
     assert "maker_lane" in data
-    assert data["maker_lane"] == {"study": {}, "live_test": {}, "decision_policy": {}}
+    assert data["maker_lane"] == {
+        "study": {},
+        "live_test": {},
+        "decision_policy": {},
+        "requote_alerts": {},
+    }
     assert "Maker lane (WO-36)" in html
     assert "makerLane" in html
+    assert "WO-66:" in html
     # 2026-07-10 focus mode: a decision summary leads the page and the
     # overlay collapses every non-decision section client-side.
     assert "Today's decisions" in html
@@ -3340,3 +3346,26 @@ def test_dashboard_carries_profit_verdict_and_html_panel(tmp_path):
     assert "applyFocusMode" in html
     assert "focusWrap" in html
     assert "Decision calendar" in html
+
+
+def test_dashboard_surfaces_wo66_requote_banner_payload(tmp_path):
+    cfg = _config(tmp_path)
+    write_json(
+        cfg.output_root / "maker_carry" / "requote_alerts.json",
+        {
+            "status": "ok",
+            "alert_state": "pull_quotes_now",
+            "headline": "Pull the flagged human-entered quotes now.",
+            "markets_checked": 2,
+            "markets_requiring_action": 1,
+            "paper_trading_invoked": False,
+            "live_trading_invoked": False,
+        },
+    )
+
+    result = render_dashboard(cfg)
+    data = read_json(result["dashboard_data"])
+    html = Path(result["dashboard_file"]).read_text(encoding="utf-8")
+
+    assert data["maker_lane"]["requote_alerts"]["alert_state"] == "pull_quotes_now"
+    assert "human action only, no cancel/order path" in html

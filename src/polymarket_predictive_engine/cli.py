@@ -78,6 +78,7 @@ from .profit_target import reset_profit_target_baseline, write_profit_target_tra
 from .profit_sprint import build_profit_sprint
 from .promotion_review import build_promotion_review
 from .readiness import paper_live_promotion_gate, paper_trade_readiness, readiness_decision
+from .requote_alerts import build_requote_alerts
 from .reconstructed_signal_clv import run_reconstructed_clv_study
 from .refresh_governance import refresh_governance
 from .resolution_collector import collect_resolutions
@@ -120,6 +121,7 @@ COMMANDS = [
     "maker-live-test",
     "flow-toxicity",
     "decision-policy",
+    "requote-alerts",
     "performance-factsheet",
     "operating-state",
     "anchor-ledgers",
@@ -337,6 +339,8 @@ def main(argv: list[str] | None = None) -> int:
             _print(build_flow_toxicity(cfg))
         elif args.command == "decision-policy":
             _print(run_decision_policy(cfg))
+        elif args.command == "requote-alerts":
+            _print(build_requote_alerts(cfg))
         elif args.command == "performance-factsheet":
             _print(build_performance_factsheet(cfg))
         elif args.command == "operating-state":

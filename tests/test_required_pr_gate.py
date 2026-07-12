@@ -53,9 +53,13 @@ def test_registered_workflow_is_minimal_self_hosted_and_secretless() -> None:
     assert merge_gate.workflow_is_configured(workflow)
     assert "pull_request:" in workflow
     assert "runs-on: [self-hosted, Windows, X64, polymarket-ci]" in workflow
-    assert "timeout-minutes: 12" in workflow
+    assert "timeout-minutes: 8" in workflow
     assert "permissions:\n  contents: read" in workflow
     assert "secrets." not in workflow
+    assert "actions/setup-python" not in workflow
+    assert "venv --system-site-packages" in workflow
+    assert "pip install --disable-pip-version-check --no-deps" in workflow
+    assert "pip check" in workflow
     assert "pytest -q" in workflow
     assert "test_operating_state.py" in workflow
     assert "test_safety_invariants.py" in workflow

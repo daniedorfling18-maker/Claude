@@ -19,6 +19,11 @@ the current-user scheduled task `GitHub Polymarket CI Runner`. It has no reposit
 grants only `contents: read` and does not persist checkout credentials. If the laptop is offline, the
 check queues instead of silently passing.
 
+The runner is provisioned with Python 3.12 and the repository's development dependencies. Each job
+creates a disposable venv using those system packages, installs the proposed repository with
+`--no-deps`, and runs `pip check`. This avoids a network download bottleneck while failing closed if
+the provisioned environment no longer satisfies `pyproject.toml`.
+
 Operator checks:
 
 ```powershell

@@ -17,7 +17,7 @@ jobs:
   guard-and-invariants:
     name: WO-69 guard and invariants
     runs-on: [self-hosted, Windows, X64, polymarket-ci]
-    timeout-minutes: 12
+    timeout-minutes: 8
 
     steps:
       - name: Check out proposed merge
@@ -25,18 +25,16 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
-          cache: pip
+      - name: Verify provisioned Python
+        shell: pwsh
+        run: python -c "import sys; print(sys.version); assert sys.version_info >= (3, 10)"
 
       - name: Build isolated gate environment
         shell: pwsh
         run: |
-          python -m venv .ci-venv
-          .\.ci-venv\Scripts\python.exe -m pip install --disable-pip-version-check --upgrade pip
-          .\.ci-venv\Scripts\python.exe -m pip install --disable-pip-version-check -e ".[dev]"
+          python -m venv --system-site-packages .ci-venv
+          .\.ci-venv\Scripts\python.exe -m pip install --disable-pip-version-check --no-deps -e ".[dev]"
+          .\.ci-venv\Scripts\python.exe -m pip check
 
       - name: Ruff guard
         shell: pwsh

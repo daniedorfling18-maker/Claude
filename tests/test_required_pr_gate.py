@@ -52,6 +52,8 @@ def test_registered_workflow_is_minimal_self_hosted_and_secretless() -> None:
     workflow = _workflow()
     assert merge_gate.workflow_is_configured(workflow)
     assert "pull_request:" in workflow
+    assert "types: [opened, synchronize, reopened]" in workflow
+    assert "ready_for_review" not in workflow
     assert "runs-on: [self-hosted, Windows, X64, polymarket-ci]" in workflow
     assert "timeout-minutes: 8" in workflow
     assert "permissions:\n  contents: read" in workflow

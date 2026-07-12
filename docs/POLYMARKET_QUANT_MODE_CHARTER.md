@@ -555,6 +555,15 @@ daily harvest refreshes it and the dashboard renders the same JSON. README and A
 only pointers; a drift test rejects planted or future hard-coded state claims. Missing evidence is
 reported as `UNKNOWN`, and this reporting path cannot invoke paper or live trading.
 
+**2026-07-12 — WO-68b implemented by Codex.** The same generated state now reports seven
+tighten-only human-alert SLOs (quote sheet, governance duration, scheduler skips, websocket,
+dashboard, reconciliation, and anchor) plus `origin/main`, host-checkout, and last-successfully-
+deployed SHAs with divergence age. `scripts/preflight_vps_capacity.py` evaluates the target Compose
+revision before checkout mutation or service replacement and refuses under-capacity deploys while
+leaving the healthy stack running. Exit-75 supervisor events append to the WO-61-anchored
+`outputs/performance/background_timeout_incidents.csv`; full governance has one VPS owner, the ops
+scheduler. These controls remain reporting/operations-only and cannot invoke paper/live trading.
+
 **2026-07-12 — WO-69 implemented to the platform boundary by Codex.** A repository-scoped Windows
 self-hosted runner now serves the deterministic `Required PR Gate`: ruff, config validation, and the
 registered governance/invariant subset. `scripts/audit_github_merge_gate.py` writes the WO-68 P4

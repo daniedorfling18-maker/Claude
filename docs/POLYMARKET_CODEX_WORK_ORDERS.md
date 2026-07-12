@@ -2489,6 +2489,16 @@ Spec:
 
 ## WO-68b — Operating-state follow-up (filed 2026-07-12, AFTER the WO-68 build merged)
 
+Status: IMPLEMENTED by Codex on 2026-07-12. Generated operating state now
+contains the seven registered tighten-only reporting SLOs and a source / host
+checkout / successfully deployed SHA comparison with divergence age. Target-
+revision capacity preflight runs before checkout mutation or Compose
+replacement and writes `outputs/performance/vps_capacity_preflight.json`.
+Exit-75 restart forensics are preserved in the WO-61-enrolled
+`outputs/performance/background_timeout_incidents.csv`; the duplicate in-loop
+governance owner is disabled on VPS while the ops scheduler remains canonical.
+No trading or governance gate consumes these artifacts.
+
 Filed concurrently with the WO-68 implementation, so these three additive
 items became a follow-up order rather than an amendment. All from the full
 external-audit text (§3.3, P1):

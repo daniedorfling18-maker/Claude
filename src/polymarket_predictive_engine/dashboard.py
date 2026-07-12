@@ -557,6 +557,14 @@ async function load() {
         ["Source","source", v=>longText(v, 160)],
         ["Verified","verified_at_utc"]
       ]) : `<div class="muted">Generated operating state is missing. Treat every current authorisation claim as UNKNOWN.</div>`}
+      ${titledTable("Operating SLOs (reporting only)", operatingState.slo?.rows || [], [
+        ["Metric","metric", v=>longText(v, 150)],
+        ["State","state"],
+        ["Target","target"],
+        ["Measured","measured"],
+        ["Unit","unit"],
+        ["Observed","observed_at_utc"]
+      ], 7)}
       ${titledTable("WO-67 autonomous-execution preconditions", operatingState.wo67_preconditions || [], [
         ["ID","id"],
         ["Precondition","title", v=>longText(v, 180)],

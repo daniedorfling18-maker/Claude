@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+import os
+from datetime import datetime, timezone
 from pathlib import Path
 
 import pytest
@@ -90,7 +92,15 @@ def _write_complete_evidence(cfg: EngineConfig) -> None:
     )
     write_json(
         performance / "vps_telemetry_manifest.json",
-        {"pushed_at_utc": "2026-07-12T09:01:00Z", "deployed_git_rev": "abcdef1", "host": "paper-vps"},
+        {
+            "pushed_at_utc": "2026-07-12T09:01:00Z",
+            "source_observed_at_utc": "2026-07-12T09:01:00Z",
+            "source_git_rev": "abcdef1",
+            "checkout_git_rev": "abcdef1",
+            "deployed_git_rev": "abcdef1",
+            "divergence_started_at_utc": "",
+            "host": "paper-vps",
+        },
     )
     write_csv(
         cfg.output_root / "polymarket_portfolio" / "paper_fills.csv",
@@ -128,6 +138,7 @@ def test_operating_state_derives_rows_and_wo67_preconditions(tmp_path: Path, mon
     assert rows["live_wallet_monitoring"]["state"] == "ACTIVE_READ_ONLY:ok"
     assert rows["live_orders_submitted"]["state"] == "RECORDED_ORDERS=0"
     assert rows["latest_deployed_sha"]["state"] == "abcdef1"
+    assert rows["source_vs_deployed_sha"]["state"] == "ALIGNED"
     assert "aligned=True" in rows["latest_deployed_sha"]["evidence"]
     assert rows["autonomous_execution"]["state"] == "PRECONDITIONS_MET_EXECUTOR_NOT_IMPLEMENTED"
     assert {identifier: row["state"] for identifier, row in preconditions.items()} == {
@@ -144,6 +155,7 @@ def test_operating_state_derives_rows_and_wo67_preconditions(tmp_path: Path, mon
     markdown = (cfg.output_root / "performance" / "operating_state.md").read_text(encoding="utf-8")
     assert "Generated operating state" in markdown
     assert "WO-67 autonomous-execution preconditions" in markdown
+    assert "Operating SLOs (reporting only)" in markdown
 
 
 def test_operating_state_missing_artifacts_are_unknown_never_guessed(tmp_path: Path) -> None:
@@ -163,9 +175,94 @@ def test_operating_state_missing_artifacts_are_unknown_never_guessed(tmp_path: P
     assert rows["paper_activity"]["state"] == "UNKNOWN"
     assert rows["live_orders_submitted"]["state"] == "UNKNOWN"
     assert rows["latest_deployed_sha"]["state"] == "UNKNOWN"
+    assert rows["source_vs_deployed_sha"]["state"] == "UNKNOWN"
     assert rows["autonomous_execution"]["state"] == "BLOCKED_UNKNOWN"
     assert "vps_telemetry_manifest" in result["missing_inputs"]
     assert all(row["state"] == "UNKNOWN" for row in result["wo67_preconditions"])
+    assert result["slo"]["unknown_count"] == 7
+    assert all(row["breach"] is None for row in result["slo"]["rows"])
+
+
+def test_operating_slos_measure_breaches_and_targets_only_tighten(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    cfg = _config(tmp_path)
+    cfg.raw["operating_state_slos"] = {
+        "dashboard_max_age_seconds": 9999,
+        "websocket_max_gap_seconds": 60,
+    }
+    _write_complete_evidence(cfg)
+    fixed_now = "2026-07-12T10:00:00Z"
+    monkeypatch.setattr("polymarket_predictive_engine.operating_state.now_utc", lambda: fixed_now)
+
+    quote_path = cfg.output_root / "maker_carry" / "maker_quote_sheet.md"
+    quote_path.write_text("# Quote sheet\n", encoding="utf-8")
+    quote_stamp = datetime(2026, 7, 12, 9, 59, tzinfo=timezone.utc).timestamp()
+    os.utime(quote_path, (quote_stamp, quote_stamp))
+    write_json(
+        cfg.output_root / "ops_scheduler" / "status.json",
+        {
+            "generated_at_utc": "2026-07-12T09:59:50Z",
+            "jobs": {
+                "governance_refresh": {
+                    "last_run_utc": "2026-07-12T09:59:50Z",
+                    "duration_seconds": 2501,
+                    "consecutive_skipped_cycles": 0,
+                },
+                "clv_snapshot": {"consecutive_skipped_cycles": 1},
+            },
+        },
+    )
+    write_json(
+        cfg.output_root / "polymarket_websocket" / "websocket_messages_latest.json",
+        [{"collected_at_utc": "2026-07-12T09:59:30Z", "message": "{}"}],
+    )
+    write_json(
+        cfg.output_root / "polymarket_dashboard" / "dashboard_data.json",
+        {"generated_at_utc": "2026-07-12T09:54:00Z"},
+    )
+    write_json(
+        cfg.output_root / "performance" / "wallet_reconciliation.json",
+        {"generated_at_utc": "2026-07-12T09:00:00Z"},
+    )
+    write_json(
+        cfg.output_root / "performance" / "ledger_anchor_head.json",
+        {"anchored_at_utc": "2026-07-12T09:00:00Z"},
+    )
+
+    result = build_operating_state(cfg)
+    slos = {row["id"]: row for row in result["slo"]["rows"]}
+
+    assert result["slo"]["status"] == "breach"
+    assert result["slo"]["breach_count"] == 3
+    assert slos["governance_refresh_duration"]["breach"] is True
+    assert slos["skipped_scheduler_cycles"]["breach"] is True
+    assert slos["dashboard_staleness"]["breach"] is True
+    assert slos["websocket_gap"]["breach"] is False
+    assert slos["dashboard_staleness"]["target"] == 300
+    assert slos["websocket_gap"]["target"] == 60
+
+
+def test_source_deployed_divergence_age_is_explicit(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    cfg = _config(tmp_path)
+    _write_complete_evidence(cfg)
+    write_json(
+        cfg.output_root / "performance" / "vps_telemetry_manifest.json",
+        {
+            "pushed_at_utc": "2026-07-12T09:55:00Z",
+            "source_observed_at_utc": "2026-07-12T09:55:00Z",
+            "source_git_rev": "f" * 40,
+            "checkout_git_rev": "a" * 40,
+            "deployed_git_rev": "a" * 40,
+            "divergence_started_at_utc": "2026-07-12T09:30:00Z",
+        },
+    )
+    monkeypatch.setattr("polymarket_predictive_engine.operating_state.now_utc", lambda: "2026-07-12T10:00:00Z")
+
+    result = build_operating_state(cfg)
+    rows = {row["key"]: row for row in result["rows"]}
+
+    assert rows["source_vs_deployed_sha"]["state"] == "DIVERGED"
+    assert result["deployment"]["divergence_age_seconds"] == 1800.0
+    assert result["deployment"]["checkout_git_rev"] == "a" * 40
 
 
 def test_front_door_drift_test_trips_on_planted_stale_claim() -> None:
@@ -207,6 +304,7 @@ def test_dashboard_and_daily_harvest_consume_generated_operating_state(tmp_path:
     assert dashboard_data["operating_state"] == generated
     assert "Canonical operating state" in html
     assert 'id="operatingState"' in html
+    assert "Operating SLOs (reporting only)" in html
     assert "operating-state" in COMMANDS
     scheduler = (REPO_ROOT / "scripts" / "run_vps_ops_scheduler.sh").read_text(encoding="utf-8")
     assert "polymarket_predictive_engine.cli operating-state" in scheduler

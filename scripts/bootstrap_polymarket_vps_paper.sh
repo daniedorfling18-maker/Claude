@@ -123,10 +123,8 @@ docker_cmd() {
 
 clone_or_update_repo() {
   if [ -d "$REPO_DIR/.git" ]; then
-    log "Updating repo at $REPO_DIR"
+    log "Fetching target revision without changing the running checkout at $REPO_DIR"
     git -C "$REPO_DIR" fetch origin "$REPO_BRANCH"
-    git -C "$REPO_DIR" checkout "$REPO_BRANCH"
-    git -C "$REPO_DIR" pull --ff-only origin "$REPO_BRANCH"
   else
     log "Cloning repo to $REPO_DIR"
     git clone --branch "$REPO_BRANCH" "$REPO_URL" "$REPO_DIR"
@@ -168,8 +166,28 @@ configure_env_if_new() {
 start_stack() {
   cd "$REPO_DIR"
   mkdir -p outputs work inputs/polymarket
+  preflight_dir=$(mktemp -d)
+  trap 'rm -rf "$preflight_dir"' EXIT INT TERM
+  git show "origin/$REPO_BRANCH:scripts/preflight_vps_capacity.py" > "$preflight_dir/preflight_vps_capacity.py"
+  git show "origin/$REPO_BRANCH:$COMPOSE_FILE" > "$preflight_dir/compose.yml"
+  log "Checking host capacity against the target revision before changing the running checkout"
+  python3 "$preflight_dir/preflight_vps_capacity.py" \
+    --compose "$preflight_dir/compose.yml" \
+    --env-file .env \
+    --output outputs/performance/vps_capacity_preflight.json \
+    --root .
+  rm -rf "$preflight_dir"
+  trap - EXIT INT TERM
+
+  git checkout "$REPO_BRANCH"
+  git pull --ff-only origin "$REPO_BRANCH"
+  deployed_sha=$(git rev-parse HEAD)
+  set_env_value PM_VPS_DEPLOYED_SHA "$deployed_sha" .env
   log "Starting Docker stack: $COMPOSE_FILE"
   docker_cmd compose -f "$COMPOSE_FILE" up -d --build
+  marker_tmp="outputs/performance/deployed_git_rev.tmp.$$"
+  printf '%s\n' "$deployed_sha" > "$marker_tmp"
+  mv "$marker_tmp" outputs/performance/deployed_git_rev
 }
 
 wait_for_dashboard() {

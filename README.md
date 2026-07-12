@@ -1,9 +1,8 @@
 # Claude Research Engines
 
-> **Current active work:** Polymarket predictive engine — shadow/paper-gated research with a
-> pre-registered $100/month verdict engine, a maker-carry lane, and READ-ONLY live-wallet
-> monitoring. The system has never placed an order and has no live order path.
-> **The authoritative operating state lives in [`docs/OPERATING_STATE.md`](docs/OPERATING_STATE.md).**
+> **Operating state is generated, not maintained in prose.** Read
+> `outputs/performance/operating_state.md` (or the matching JSON/dashboard panel) for the
+> point-in-time state. [`docs/OPERATING_STATE.md`](docs/OPERATING_STATE.md) defines that control.
 > Start here: [`docs/POLYMARKET_CURRENT_STATE.md`](docs/POLYMARKET_CURRENT_STATE.md) and [`AGENTS.md`](AGENTS.md).
 
 This repository contains two related local-first research systems:
@@ -17,42 +16,20 @@ The repo is local-first. Docker is for deployment scenarios only, not normal loc
 
 ## Current Polymarket state
 
-Authoritative operating state: **`docs/OPERATING_STATE.md`** (2026-07-12; external-audit correction — this README had drifted).
-
-The Polymarket system is now in a much better place than when debugging began:
+Do not copy a point-in-time status into this file. Generate and read:
 
 ```text
-websocket collection: working
-metadata enrichment: working
-broad liquidity discovery: working
-family-balanced websocket targets: working
-prediction pipeline: working
-mispricing-alpha scoring: working
-shadow evidence capture: working
-scheduled local automation: working
-local-history audit: working
-paper trading: blocked by governance
-live trading: not invoked
+outputs/performance/operating_state.md
+outputs/performance/operating_state.json
 ```
 
-The important conclusion is:
+The report derives configuration, governance, evidence, deployment markers, and WO-67
+preconditions from machine-readable inputs. A missing input is rendered as `UNKNOWN`, never
+reconstructed from an old README claim. Run it with:
 
-```text
-The broker is not broken.
-The websocket route is not the current blocker.
-The current blocker is insufficient positive forward evidence.
+```bash
+python -m polymarket_predictive_engine.cli operating-state --config polymarket_predictive_config.example.yaml
 ```
-
-Current expected audit result:
-
-```text
-paper_allowed = false
-paper_reason = no approved trade_signals rows; sports_other shadow evidence is not positive; sports_other has no closed/settled positions yet
-paper_trading_invoked = false
-live_trading_invoked = false
-```
-
-That is the correct fail-closed state.
 
 ---
 

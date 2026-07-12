@@ -52,6 +52,7 @@ from .models.category_calibration import train_category_calibration
 from .models.optimized import train_optimized_model
 from .models.skill_model import train_skill_model
 from .overnight_collection import run_collection_only_overnight
+from .operating_state import build_operating_state
 from .paper_cycle import run_paper_cycle
 from .paper_edge_simulator import simulate_paper_edge
 from .paper_round_trip import build_paper_round_trip_evidence
@@ -120,6 +121,7 @@ COMMANDS = [
     "flow-toxicity",
     "decision-policy",
     "performance-factsheet",
+    "operating-state",
     "anchor-ledgers",
     "verify-ledger-chain",
     "render-ips",
@@ -337,6 +339,8 @@ def main(argv: list[str] | None = None) -> int:
             _print(run_decision_policy(cfg))
         elif args.command == "performance-factsheet":
             _print(build_performance_factsheet(cfg))
+        elif args.command == "operating-state":
+            _print(build_operating_state(cfg))
         elif args.command == "anchor-ledgers":
             _print(anchor_ledgers(cfg))
         elif args.command == "verify-ledger-chain":

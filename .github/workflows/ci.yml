@@ -1,10 +1,9 @@
 name: CI
 
 on:
-  # 2026-07-09: fully dispatch-only. The Actions quota was exhausted, so even
-  # PR-triggered runs just fail instantly at the billing wall; the local full
-  # test suite is the gate before every merge. Re-add pull_request here when
-  # billed CI is wanted again.
+  # The comprehensive suite remains manual because hosted Actions minutes are
+  # exhausted. WO-69's separate required-pr-gate.yml is the small PR-triggered
+  # self-hosted guard; do not expand it into this 1,000+ test workflow.
   workflow_dispatch:
 
 permissions:
@@ -54,6 +53,7 @@ jobs:
               'deploy-polymarket-vps-paper.yml',
               'polymarket-vps-governance-refresh.yml',
               'polymarket-vps-proof-health.yml',
+              'required-pr-gate.yml',
               'refresh-locked-superbru-card.yml',
               'repo-audit-bundle.yml',
               'superbru-clv-snapshot.yml',
@@ -75,6 +75,7 @@ jobs:
               'ci.yml': {'workflow_dispatch'},
               'polymarket-vps-governance-refresh.yml': {'workflow_dispatch'},
               'polymarket-vps-proof-health.yml': {'workflow_dispatch'},
+              'required-pr-gate.yml': {'pull_request'},
               'refresh-locked-superbru-card.yml': {'workflow_dispatch'},
               'repo-audit-bundle.yml': {'workflow_dispatch'},
               'superbru-clv-snapshot.yml': {'workflow_dispatch'},
@@ -123,6 +124,8 @@ jobs:
               'refresh-locked-superbru-card.yml',
               'polymarket-vps-governance-refresh.yml',
               'polymarket-vps-proof-health.yml',
+              'ci.yml',
+              'repo-audit-bundle.yml',
               'superbru-clv-snapshot.yml',
           }
           for name in sorted(expected & present):

@@ -10,9 +10,9 @@ VPS_WATCHDOG = ROOT / "scripts" / "run_superbru_auto_pick_watchdog.sh"
 
 def test_auto_pick_has_no_github_schedule_actions_is_dispatch_only() -> None:
     """2026-07-09: the Actions minutes quota was exhausted, so ALL recurring
-    jobs moved to the VPS ops scheduler and every workflow became
-    dispatch-only. A reintroduced cron here would silently start burning paid
-    minutes again; the VPS watchdog container is the pick lane."""
+    jobs moved to the VPS ops scheduler and operational workflows became
+    dispatch-only. WO-69's self-hosted PR guard is the deliberate exception;
+    a reintroduced cron here would silently burn hosted minutes again."""
     text = WORKFLOW.read_text(encoding="utf-8")
     crons = re.findall(r"cron:\s*'([^']+)'", text)
 

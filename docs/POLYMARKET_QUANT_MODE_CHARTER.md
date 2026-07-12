@@ -347,7 +347,8 @@ entry rules, price them from official CLOB price history, cluster by fixture, an
 force-pushes a single parentless commit of decision summaries — governance/verdict JSONs, maker-carry
 study + gates, quote sheet, study outputs, scheduler status — to the `vps-telemetry` branch, so
 remote orchestration sessions read live VPS state through the private repo. Zero Actions cost
-(workflows are dispatch-only + `[skip ci]`), zero history growth (branch always holds exactly one
+(operational workflows are dispatch-only; the WO-69 self-hosted gate is PR-only; `[skip ci]` remains
+belt-and-braces), zero history growth (branch always holds exactly one
 commit), heavy collection corpora (training archive, websocket features, trade prints, official book
 snapshots) never leave the VPS.
 
@@ -553,6 +554,14 @@ artifacts, execution ledgers, WO-67 P1-P5 checks, and the host telemetry deploym
 daily harvest refreshes it and the dashboard renders the same JSON. README and AGENTS now contain
 only pointers; a drift test rejects planted or future hard-coded state claims. Missing evidence is
 reported as `UNKNOWN`, and this reporting path cannot invoke paper or live trading.
+
+**2026-07-12 — WO-69 implemented to the platform boundary by Codex.** A repository-scoped Windows
+self-hosted runner now serves the deterministic `Required PR Gate`: ruff, config validation, and the
+registered governance/invariant subset. `scripts/audit_github_merge_gate.py` writes the WO-68 P4
+artifact and can apply the exact protection payload. Enforcement remains fail-closed and incomplete:
+GitHub returns HTTP 403 for private-repository branch protection/rulesets on the current Free plan.
+Upgrade to Pro/Team and a clean `--apply-protection` audit are mandatory before further live capital;
+the repository must not be made public as a workaround.
 
 ## Rules of engagement for coding agents
 

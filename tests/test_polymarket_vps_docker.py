@@ -221,7 +221,7 @@ def test_vps_telemetry_push_script_is_single_commit_and_actions_free():
     # parentless commit force-pushed => branch always holds exactly one commit
     assert "commit-tree" in script
     assert '"+$COMMIT:refs/heads/$BRANCH"' in script
-    # belt-and-braces against workflow triggers (all are dispatch-only anyway)
+    # belt-and-braces: the one automatic workflow is PR-only, never telemetry.
     assert "[skip ci]" in script
     # decision summaries in, collection corpora out
     for included in (

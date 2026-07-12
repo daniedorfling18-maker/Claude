@@ -2452,9 +2452,74 @@ ARCHITECTURE (registered 2026-07-12):
    position-taking, any strategy beyond resting maker quotes from the
    sheet. New strategies need new registrations.
 
+# Batch 7 — filed 2026-07-12 (external-audit corrections)
+
+Source: first independent external LLM audit of the full repository. Its
+two structural findings are accepted: (1) the operating-state documentation
+had drifted three weeks behind the system; (2) merges rest on self-reported
+local test runs with no independent gate. Constraints 1-8 bind.
+
+## WO-68 — Generated operating state (kill documentation drift permanently)
+
+Manual v1 exists at docs/OPERATING_STATE.md. Replace it with a generated
+artifact so drift is impossible.
+
+Spec:
+1. Module `operating_state.py`, CLI `operating-state`, riding the daily
+   harvest: derives every row of the state table FROM artifacts - config
+   (paper/live flags, wallet address set), governance outputs
+   (paper_allowed), WO-67 precondition checks, verdict and maker gate
+   summaries, telemetry manifest SHA - and writes
+   `outputs/performance/operating_state.md` plus `.json`.
+2. Drift test (the teeth): a pytest asserts README and AGENTS.md contain
+   no hard-coded status claims beyond pointers to the generated file -
+   grep for the forbidden stale patterns ("not approved for paper",
+   a dated "Last project state update", etc.).
+3. Dashboard focus panel consumes the same JSON.
+4. Tests: state derivation from synthetic artifacts; drift test trips on a
+   planted stale claim; missing-artifact tolerance (fields render UNKNOWN,
+   never guessed).
+
+## WO-69 — Independent merge gate (external audit P0; BLOCKED on owner infra choice)
+
+Merges currently rest on the builder's self-reported local suite (Actions
+quota exhausted 2026-07-09; workflows dispatch-only). Before ANY live
+capital beyond the operator pipe test, an independent gate must exist.
+
+1. OWNER CHOICE required first (this blocks the WO):
+   (a) GitHub-hosted minutes: free quota resets monthly; the minimal gate
+       below costs roughly 3-5 min per PR, well inside the free tier; or
+   (b) a self-hosted runner on the VPS restricted to the minimal gate
+       (the 1-vCPU host can afford ruff + guard tests, not the full
+       suite); or
+   (c) a runner on the Windows box.
+2. Minimal mandatory PR gate (fast, deterministic): ruff check; the guard
+   and invariant test subset (gate registrations, no-live-path tests,
+   telemetry whitelist tests, docker/scheduler string tests); config
+   validation; the WO-68 drift test. Full 1,000+ suite stays local or
+   nightly dispatch.
+3. Branch protection on main: require the gate check, forbid direct
+   pushes, require one review not authored by the building agent
+   (orchestrator reviews Codex; Codex pre-build-audits orchestrator
+   specs - the bidirectional loop already demonstrated).
+4. Until WO-69 lands, the interim compensating controls stay: full local
+   suite before merge, cross-agent audits, ledger anchoring, and the
+   operating-state deployed-SHA check.
+
+## WO-70 — Reproducibility and identity cleanup (accepted, deferred to post-proof phase)
+
+External audit findings accepted but scheduled after the live proof phase:
+lock files per layer (base/research/deploy/live), pin the live extra,
+rename the package from superbru-score-engine to reflect the real system
+(or split the two applications), progressively widen ruff rule classes,
+single tested Python version documented. Nothing here changes numbers;
+it changes reproducibility. Do not let it jump the evidence work.
+
 ## Priority order for Codex (updated 2026-07-11, batch 4 filed)
 
-Batch 6: **WO-66 unblocked (build after batch 5)**; WO-67 BLOCKED per its
+Batch 7 first: **WO-68** (operating state - audit P1), then **WO-66**;
+WO-69 BLOCKED on the owner's CI infrastructure choice; WO-70 deferred
+post-proof. Batch 6: WO-66 unblocked; WO-67 BLOCKED per its
 preconditions. Batch 4 in order: **WO-58 -> WO-56 -> WO-57 -> WO-59 -> WO-60**. Then batch 5
 (investor-grade evidence infra): **WO-61 -> WO-64 -> WO-62 -> WO-63 -> WO-65**
 (2026-07-11 reorder from the builder's audit: 63's gas capture hangs off 62's

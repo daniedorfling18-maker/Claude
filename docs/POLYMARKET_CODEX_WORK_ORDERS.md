@@ -2487,6 +2487,27 @@ Spec:
    planted stale claim; missing-artifact tolerance (fields render UNKNOWN,
    never guessed).
 
+## WO-68b — Operating-state follow-up (filed 2026-07-12, AFTER the WO-68 build merged)
+
+Filed concurrently with the WO-68 implementation, so these three additive
+items became a follow-up order rather than an amendment. All from the full
+external-audit text (§3.3, P1):
+
+1. SLO block in the generated state: for each of quote-sheet age,
+   governance-refresh duration, skipped scheduler cycles, websocket gap,
+   dashboard staleness, reconciliation age, and ledger-anchor age — a
+   registered target, the measured value, and a breach flag. REPORTING
+   ONLY: a breach alerts a human; it never gates or orders anything.
+2. Report BOTH the source SHA (origin/main HEAD at generation) and the
+   deployed SHA (telemetry `manifest.json`), plus divergence age, so
+   "what is running" vs "what is merged" is one line, not an
+   investigation. (Skip whatever the WO-68 build already covers via the
+   telemetry manifest; additive only.)
+3. Deploy preflight (the 2026-07-11 cpus:3.0 outage class): a tiny script
+   run BEFORE `docker compose up` replaces a running service — checks
+   nproc / memory / disk headroom against what the compose file asks for
+   and refuses the deploy instead of killing a healthy container.
+
 ## WO-69 — Independent merge gate (external audit P0; runner built, enforcement blocked on GitHub plan)
 
 Status: IMPLEMENTED TO THE PLATFORM BOUNDARY by Codex on 2026-07-12; NOT
@@ -2534,11 +2555,55 @@ rename the package from superbru-score-engine to reflect the real system
 single tested Python version documented. Nothing here changes numbers;
 it changes reproducibility. Do not let it jump the evidence work.
 
-## Priority order for Codex (updated 2026-07-11, batch 4 filed)
+# Batch 8 — filed 2026-07-12 (full external-audit text; deltas only)
 
-Batch 7 first: **WO-68** (operating state - audit P1), then **WO-66**;
-WO-69 BLOCKED on the owner's CI infrastructure choice; WO-70 deferred
-post-proof. Batch 6: WO-66 unblocked; WO-67 BLOCKED per its
+The full audit text added four points the batch-7 triage had not covered:
+an experiment registry (now docs/EXPERIMENT_REGISTRY.md — a doc, no build
+needed), SLOs + dual-SHA + deploy preflight (WO-68b above, since the WO-68
+build merged concurrently), coverage-driven spend suppression, and a
+failure-injection drill suite. The audit's own warning binds: this is a
+proof phase, not a construction sprint — batch 8 is two small orders and
+both serve the value loop directly.
+
+## WO-71 — Collection hygiene: spend suppression + corpus retention
+
+Two small items, one theme: stop paying (API calls, disk) for data that
+cannot change a decision.
+
+1. Coverage-driven suppression (audit P2 delta): using the WO-31 coverage
+   artifacts, auto-suppress API spend on persistently unmappable markets —
+   a market family with N consecutive zero-join cycles drops to a slow
+   probe cadence until a join succeeds. Suppression list is an output
+   artifact (reviewable), never a silent config change.
+2. Corpus retention (ops finding 2026-07-12): host disk went 72% -> 84%
+   in ~1 day of collection. Add registered retention windows for the heavy
+   corpora (training archive, websocket features, trade prints, official
+   book snapshots): raw kept N days on host, daily compaction to the
+   WO-65 bounded archive, then pruned. Retention must NEVER touch the
+   append-only decision ledgers (anchored; WO-61 verifies exactly that).
+3. Tests: suppression enters/exits on synthetic coverage histories;
+   retention never deletes a ledger-anchored path; disk projection in the
+   diagnostic log.
+
+## WO-72 — Failure-injection drill suite (DEFERRED: pre-WO-67 requirement, post-ladder)
+
+The audit is right that the risk controls "have only been exercised using
+simulated or paper artifacts". Before the WO-67 executor could ever be
+unblocked, each drill below must have a dated PASS artifact: stale quote,
+missing anchor, inconsistent wallet balance, duplicated fill, partial
+fill, delayed cancellation, ledger write failure, anchor push failure,
+recovery from stale archive, configuration mismatch, wrong-chain RPC
+response, host restart during reconciliation. Build AFTER the human
+live-test ladder starts producing real artifacts to replay against; file
+here now so it is sequenced as a WO-67 precondition input (P4 review
+evidence), not an afterthought. Do not build during the proof phase.
+
+## Priority order for Codex (updated 2026-07-12, batch 8 filed)
+
+WO-68 and WO-69 built 2026-07-12 (69 not enforced pending GitHub plan
+upgrade). Next: **WO-71** (disk is at 84% and climbing — item 2 is
+time-sensitive), then **WO-68b**, then **WO-66**; WO-70 deferred
+post-proof; WO-72 DEFERRED (pre-WO-67 requirement, build post-ladder). Batch 6: WO-66 unblocked; WO-67 BLOCKED per its
 preconditions. Batch 4 in order: **WO-58 -> WO-56 -> WO-57 -> WO-59 -> WO-60**. Then batch 5
 (investor-grade evidence infra): **WO-61 -> WO-64 -> WO-62 -> WO-63 -> WO-65**
 (2026-07-11 reorder from the builder's audit: 63's gas capture hangs off 62's

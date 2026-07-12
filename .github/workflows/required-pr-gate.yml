@@ -26,28 +26,28 @@ jobs:
           persist-credentials: false
 
       - name: Verify provisioned Python
-        shell: pwsh
+        shell: powershell
         run: python -c "import sys; print(sys.version); assert sys.version_info >= (3, 10)"
 
       - name: Build isolated gate environment
-        shell: pwsh
+        shell: powershell
         run: |
           python -m venv --system-site-packages .ci-venv
           .\.ci-venv\Scripts\python.exe -m pip install --disable-pip-version-check --no-deps -e ".[dev]"
           .\.ci-venv\Scripts\python.exe -m pip check
 
       - name: Ruff guard
-        shell: pwsh
+        shell: powershell
         run: .\.ci-venv\Scripts\python.exe -m ruff check .
 
       - name: Validate effective configs
-        shell: pwsh
+        shell: powershell
         run: |
           .\.ci-venv\Scripts\python.exe -m polymarket_predictive_engine.cli config-check --config polymarket_predictive_config.example.yaml
           .\.ci-venv\Scripts\python.exe -m superbru_score_engine config-check --config config.yaml --profiles calibration_profiles.yaml
 
       - name: Run governance guards and invariants
-        shell: pwsh
+        shell: powershell
         run: |
           .\.ci-venv\Scripts\python.exe -m pytest -q `
             tests/polymarket_predictive_engine/test_operating_state.py `

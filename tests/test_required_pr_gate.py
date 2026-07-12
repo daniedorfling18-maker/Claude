@@ -57,6 +57,8 @@ def test_registered_workflow_is_minimal_self_hosted_and_secretless() -> None:
     assert "permissions:\n  contents: read" in workflow
     assert "secrets." not in workflow
     assert "actions/setup-python" not in workflow
+    assert "shell: pwsh" not in workflow
+    assert workflow.count("shell: powershell") == 5
     assert "venv --system-site-packages" in workflow
     assert "pip install --disable-pip-version-check --no-deps" in workflow
     assert "pip check" in workflow

@@ -277,7 +277,10 @@ calibration_bias:
 # it only watches the wallet via free public endpoints.
 maker_live_test:
   enabled: true
-  wallet_address: ""
+  # 2026-07-12: Danie's Polymarket account API/profile address (public
+  # identifier, read-only monitoring). Deposits go via the bridge, never
+  # to this address. Set during the R250 pipe test; SA access verified.
+  wallet_address: "0xD2EC3c8f541ad3aaC9396d63650D9d297bd55D2f"
   fill_alert_multiple: 2.0
 
 # 2026-07-11 WO-62: read-only three-way NAV reconciliation for a configured

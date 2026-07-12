@@ -23,3 +23,23 @@ live trading.
 
 README.md and AGENTS.md may point here or to the generated files, but must not restate dynamic values.
 The drift test enforces that rule.
+
+## Document hierarchy (2026-07-12 external audit §6)
+
+Exactly five documents are authoritative, in this order of precedence for
+their own domain; every other file under `docs/` is a design note, work
+order, implementation record, runbook, or generated artifact and must not
+be treated as a statement of current state:
+
+1. `README.md` — what the repository is (points here for state).
+2. `AGENTS.md` — how code-changing agents must behave (invariants live here).
+3. `docs/OPERATING_STATE.md` — this control document; current values live
+   only in the generated `outputs/performance/operating_state.md`/`.json`.
+4. `docs/EXPERIMENT_REGISTRY.md` — which hypotheses exist, their
+   registered gates, stopping rules, and status. No lane may be promoted
+   without a registered entry.
+5. `docs/SYSTEM_MAP.md` — architecture, loops, and single points of failure.
+
+Capital policy is defined by the generated IPS
+(`outputs/performance/investment_policy_statement.md`), which derives from
+the registered WO-50 decision policy and is reporting-only.

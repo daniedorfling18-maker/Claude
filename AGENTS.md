@@ -133,6 +133,9 @@ None of those is local dev. If you *are* deploying with Docker:
 - Do not loosen alpha thresholds, same-category gates, cohort-promotion gates, or family exclusions to
   force activity.
 - Do not treat `unknown` or bad 5-minute crypto families as actionable just because they are liquid.
+- The research surface is frozen to exactly the three primary hypotheses in
+  `docs/EXPERIMENT_REGISTRY.md`. Unregistered lanes are diagnostic/parked and
+  cannot consume promotion-oriented modelling work or be promoted from old data.
 
 ## Focus discipline — crypto up/down is FROZEN as a diagnostic (2026-07-05)
 

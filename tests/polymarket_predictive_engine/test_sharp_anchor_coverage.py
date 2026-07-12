@@ -1,10 +1,11 @@
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from pathlib import Path
 
 from polymarket_predictive_engine.config import EngineConfig
 from polymarket_predictive_engine.sharp_anchor_coverage import build_sharp_anchor_coverage
-from polymarket_predictive_engine.utils import read_csv_rows, write_json
+from polymarket_predictive_engine.utils import read_csv_rows, write_csv, write_json
 
 
 def _cfg(tmp_path: Path) -> EngineConfig:
@@ -125,3 +126,201 @@ def test_sharp_anchor_coverage_is_idempotent_for_same_anchor_timestamp(tmp_path:
     assert first["history_rows_appended"] == 2
     assert second["history_rows_appended"] == 0
     assert len(read_csv_rows(governance / "sharp_anchor_coverage_history.csv")) == 2
+
+
+def test_anchor_funnel_preserves_denominators_and_executable_divergence(tmp_path: Path) -> None:
+    cfg = _cfg(tmp_path)
+    cfg.raw["sharp_anchor_coverage"].update(
+        {
+            "max_anchor_age_seconds": 3600,
+            "max_price_age_seconds": 300,
+            "minimum_executable_divergence": 0.03,
+            "max_actionable_spread": 0.04,
+            "min_actionable_liquidity": 100,
+        }
+    )
+    governance = cfg.governance_root
+    stamp = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    audit_path = governance / "sharp_anchor_mapping_audit.csv"
+    write_csv(
+        audit_path,
+        [
+            {
+                "source": "pinnacle",
+                "sport": "soccer_fifa_world_cup",
+                "market_key": "h2h",
+                "market_slug": "spain-vs-france",
+                "outcome": "Spain",
+                "anchor_timestamp_utc": stamp,
+                "mapped_row": 1,
+                "token_id": "T1",
+                "anchor_probability": 0.60,
+                "mapping_status": "joined",
+            },
+            {
+                "source": "pinnacle",
+                "sport": "soccer_fifa_world_cup",
+                "market_key": "h2h",
+                "market_slug": "spain-vs-france",
+                "outcome": "France",
+                "anchor_timestamp_utc": stamp,
+                "mapped_row": 1,
+                "token_id": "T2",
+                "anchor_probability": 0.40,
+                "mapping_status": "joined",
+            },
+            {
+                "source": "pinnacle",
+                "sport": "soccer_fifa_world_cup",
+                "market_key": "h2h",
+                "market_slug": "spain-vs-france",
+                "outcome": "Draw",
+                "anchor_timestamp_utc": stamp,
+                "mapped_row": 0,
+                "token_id": "",
+                "anchor_probability": 0.20,
+                "mapping_status": "ambiguous",
+            },
+        ],
+    )
+    write_json(
+        governance / "sharp_odds_fetch_summary.json",
+        {
+            "generated_at_utc": stamp,
+            "configured_sports": [{"sport": "soccer_fifa_world_cup", "markets": ["h2h"]}],
+            "per_source_sport_market": [
+                {
+                    "source": "pinnacle",
+                    "sport": "soccer_fifa_world_cup",
+                    "market_key": "h2h",
+                    "source_rows_fetched": 4,
+                    "source_rows_normalized": 3,
+                }
+            ],
+        },
+    )
+    write_json(
+        governance / "sharp_anchor_summary.json",
+        {
+            "status": "built",
+            "generated_at_utc": stamp,
+            "mapping_audit_path": str(audit_path),
+            "coverage_by_sport_market": [
+                {
+                    "sport": "soccer_fifa_world_cup",
+                    "market_key": "h2h",
+                    "rows_in": 3,
+                    "priced_rows": 3,
+                    "fundamental_rows": 2,
+                    "skipped_no_token": 1,
+                }
+            ],
+        },
+    )
+    write_csv(
+        cfg.output_root / "polymarket_predictions" / "predictions.csv",
+        [
+            {
+                "token_id": "T1",
+                "prediction_timestamp": stamp,
+                "market_slug": "will-spain-beat-france",
+                "question": "Will Spain beat France?",
+                "category": "soccer",
+                "best_bid": 0.50,
+                "best_ask": 0.52,
+                "market_midpoint": 0.51,
+                "spread": 0.02,
+                "liquidity": 500,
+            },
+            {
+                "token_id": "T2",
+                "prediction_timestamp": stamp,
+                "market_slug": "will-france-beat-spain",
+                "question": "Will France beat Spain?",
+                "category": "soccer",
+                "best_bid": 0.45,
+                "best_ask": 0.47,
+                "market_midpoint": 0.46,
+                "spread": 0.02,
+                "liquidity": 500,
+            },
+        ],
+    )
+
+    result = build_sharp_anchor_coverage(cfg)
+    row = result["source_sport_markets"][0]
+
+    assert result["anchor_funnel"]["status"] == "complete"
+    assert row["source_rows_fetched"] == 4
+    assert row["source_rows_normalized"] == 3
+    assert row["mapping_audit_rows"] == 3
+    assert row["normalization_rejections"] == 1
+    assert row["polymarket_rows_eligible"] == 2
+    assert row["rows_mapped"] == 2
+    assert row["rows_joined"] == 2
+    assert row["unique_markets_mapped"] == 1
+    assert row["mapping_rate"] == 0.666667
+    assert row["join_rate"] == 1.0
+    assert row["ambiguous_rows"] == 1
+    assert row["stale_rows"] == 0
+    assert row["mean_executable_buy_divergence"] == 0.005
+    assert row["zero_current_join"] is False
+    assert row["actionable_rows"] == 1
+    assert row["denominator_conservation_ok"] is True
+    assert row["mapping_audit_matches_normalized"] is True
+    assert result["total_actionable_rows"] == 1
+    assert len(read_csv_rows(governance / "sharp_anchor_funnel_history.csv")) == 1
+
+
+def test_anchor_funnel_detects_stale_cross_stage_denominators(tmp_path: Path) -> None:
+    cfg = _cfg(tmp_path)
+    governance = cfg.governance_root
+    stamp = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    audit_path = governance / "sharp_anchor_mapping_audit.csv"
+    write_csv(
+        audit_path,
+        [
+            {
+                "source": "Pinnacle",
+                "sport": "SOCCER_FIFA_WORLD_CUP",
+                "market_key": "H2H",
+                "anchor_timestamp_utc": stamp,
+                "mapping_status": "unmapped",
+            }
+        ],
+    )
+    write_json(
+        governance / "sharp_odds_fetch_summary.json",
+        {
+            "per_source_sport_market": [
+                {
+                    "source": "pinnacle",
+                    "sport": "soccer_fifa_world_cup",
+                    "market_key": "h2h",
+                    "source_rows_fetched": 3,
+                    "source_rows_normalized": 2,
+                }
+            ]
+        },
+    )
+    write_json(
+        governance / "sharp_anchor_summary.json",
+        {
+            "status": "built",
+            "generated_at_utc": stamp,
+            "mapping_audit_path": str(audit_path),
+        },
+    )
+
+    result = build_sharp_anchor_coverage(cfg)
+    row = result["source_sport_markets"][0]
+
+    assert len(result["source_sport_markets"]) == 1
+    assert row["source"] == "pinnacle"
+    assert row["source_rows_normalized"] == 2
+    assert row["mapping_audit_rows"] == 1
+    assert row["mapping_audit_matches_normalized"] is False
+    assert row["denominator_conservation_ok"] is False
+    assert row["accounting_status"] == "inconsistent_fetch_anchor_artifacts"
+    assert result["anchor_funnel"]["status"] == "incomplete"
+    assert result["anchor_funnel"]["totals"]["accounting_mismatch_count"] == 1

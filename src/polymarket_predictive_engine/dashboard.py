@@ -683,6 +683,11 @@ async function load() {
         ["Query active","query_active"],
         ["Tradable","tradable_liquidity_rows"],
         ["Anchor rows","anchor_rows"],
+        ["PM eligible","polymarket_eligible_rows"],
+        ["Current join","anchor_current_joined_rows"],
+        ["Ambiguous","anchor_ambiguous_rows"],
+        ["Stale","anchor_stale_rows"],
+        ["Actionable","anchor_actionable_rows"],
         ["Scored hits","scored_anchor_hits"],
         ["Shadow","shadow_candidates"],
         ["CLV final","final_clv_rows"],
@@ -1843,6 +1848,7 @@ async function load() {
     document.getElementById("independentFundamentals").innerHTML = fetchHealthBadge + table([
       { anchor: "Sharp odds fetch", ...(anchors.sharp_odds_fetch || {}) },
       { anchor: "Sharp de-vig anchor", ...(anchors.sharp_anchor || {}) },
+      { anchor: "Sharp anchor reconciliation", ...((anchors.sharp_anchor_coverage || {}).anchor_funnel || {}) },
       { anchor: "Crypto target generator", ...(anchors.crypto_targets || {}) },
       { anchor: "Deribit crypto fundamental", ...(anchors.crypto_fundamental || {}) }
     ], [
@@ -1867,6 +1873,27 @@ async function load() {
       ["Token-map joins","token_map_joins"],
       ["Winner joins","worldcup_winner_token_joins"],
       ["Incomplete rows","incomplete_market_rows"]
+    ]) + `<div style="height:12px"></div><h3>Anchor reconciliation by source / sport / market</h3>` +
+    table((anchors.sharp_anchor_coverage || {}).source_sport_markets || [], [
+      ["Source","source", v=>longText(v, 100)],
+      ["Sport","sport", v=>longText(v, 130)],
+      ["Market","market_key"],
+      ["Fetched","source_rows_fetched"],
+      ["Normalised","source_rows_normalized"],
+      ["Audited","mapping_audit_rows"],
+      ["PM eligible","polymarket_rows_eligible"],
+      ["Mapped","rows_mapped"],
+      ["Current join","rows_joined"],
+      ["Map rate","mapping_rate", fmtPct],
+      ["Join rate","join_rate", fmtPct],
+      ["Ambiguous","ambiguous_rows"],
+      ["Stale","stale_rows"],
+      ["Missing timestamp","missing_anchor_timestamp_rows"],
+      ["Ask divergence","mean_executable_buy_divergence", v=>v == null ? "-" : fmtNum(v, 4)],
+      ["Zero join","zero_current_join"],
+      ["Actionable","actionable_rows"],
+      ["Conserved","denominator_conservation_ok"],
+      ["Accounting","accounting_status", v=>longText(v, 130)]
     ]);
     const performanceRows = Array.isArray(performanceFactsheet.series) ? performanceFactsheet.series : [];
     document.getElementById("performanceFactsheet").innerHTML =
@@ -2437,16 +2464,26 @@ def _sport_anchor_rows(coverage_rows: list[dict[str, Any]], anchor_sports: tuple
         "anchor_rows_in": 0,
         "anchor_priced_rows": 0,
         "anchor_no_token_rows": 0,
+        "anchor_current_joined_rows": 0,
+        "anchor_actionable_rows": 0,
+        "anchor_ambiguous_rows": 0,
+        "anchor_stale_rows": 0,
+        "polymarket_eligible_rows": 0,
     }
     sports = {sport.lower() for sport in anchor_sports}
     for row in coverage_rows:
         sport = str(row.get("sport") or "").strip().lower()
         if sport not in sports:
             continue
-        totals["anchor_rows"] += int(safe_float(row.get("fundamental_rows")) or 0)
-        totals["anchor_rows_in"] += int(safe_float(row.get("rows_in")) or 0)
+        totals["anchor_rows"] += int(safe_float(row.get("rows_mapped") or row.get("fundamental_rows")) or 0)
+        totals["anchor_rows_in"] += int(safe_float(row.get("source_rows_normalized") or row.get("rows_in")) or 0)
         totals["anchor_priced_rows"] += int(safe_float(row.get("priced_rows")) or 0)
         totals["anchor_no_token_rows"] += int(safe_float(row.get("skipped_no_token")) or 0)
+        totals["anchor_current_joined_rows"] += int(safe_float(row.get("rows_joined")) or 0)
+        totals["anchor_actionable_rows"] += int(safe_float(row.get("actionable_rows")) or 0)
+        totals["anchor_ambiguous_rows"] += int(safe_float(row.get("ambiguous_rows")) or 0)
+        totals["anchor_stale_rows"] += int(safe_float(row.get("stale_rows")) or 0)
+        totals["polymarket_eligible_rows"] += int(safe_float(row.get("polymarket_rows_eligible")) or 0)
     return totals
 
 
@@ -2472,7 +2509,9 @@ def _sharp_sports_funnel_payload(
     closing_line_value = closing_line_value if isinstance(closing_line_value, dict) else {}
     sharp_anchor = independent_anchor_status.get("sharp_anchor")
     sharp_anchor = sharp_anchor if isinstance(sharp_anchor, dict) else {}
-    coverage_rows = sharp_anchor.get("coverage_by_sport_market")
+    sharp_coverage = independent_anchor_status.get("sharp_anchor_coverage")
+    sharp_coverage = sharp_coverage if isinstance(sharp_coverage, dict) else {}
+    coverage_rows = sharp_coverage.get("source_sport_markets") or sharp_anchor.get("coverage_by_sport_market")
     coverage_rows = coverage_rows if isinstance(coverage_rows, list) else []
     liquidity_rows = liquidity_discovery.get("family_summary")
     liquidity_rows = liquidity_rows if isinstance(liquidity_rows, list) else []
@@ -2587,6 +2626,8 @@ def _sharp_sports_funnel_payload(
         "total_trade_candidates": total_trade,
         "total_shadow_candidates": total_shadow,
         "total_final_clv_rows": total_clv,
+        "anchor_accounting": sharp_coverage.get("anchor_funnel", {}),
+        "anchor_source_sport_markets": sharp_coverage.get("source_sport_markets", []),
         "paper_trading_invoked": False,
         "live_trading_invoked": False,
     }
@@ -2962,6 +3003,7 @@ def _independent_anchor_status(governance: Path) -> dict[str, Any]:
     """Expose the latest independent-anchor summaries even when the heartbeat is settlement-only."""
     sharp_fetch = read_json(governance / "sharp_odds_fetch_summary.json", default={}) or {}
     sharp_anchor = read_json(governance / "sharp_anchor_summary.json", default={}) or {}
+    sharp_anchor_coverage = read_json(governance / "sharp_anchor_coverage.json", default={}) or {}
     crypto_targets = read_json(governance / "crypto_targets_summary.json", default={}) or {}
     crypto = read_json(governance / "crypto_fundamental_summary.json", default={}) or {}
     sharp_anchor_payload = sharp_anchor if isinstance(sharp_anchor, dict) else {}
@@ -2969,6 +3011,7 @@ def _independent_anchor_status(governance: Path) -> dict[str, Any]:
     components = {
         "sharp_odds_fetch": sharp_fetch if isinstance(sharp_fetch, dict) else {},
         "sharp_anchor": sharp_anchor_payload,
+        "sharp_anchor_coverage": sharp_anchor_coverage if isinstance(sharp_anchor_coverage, dict) else {},
         "crypto_targets": crypto_targets if isinstance(crypto_targets, dict) else {},
         "crypto_fundamental": crypto if isinstance(crypto, dict) else {},
     }

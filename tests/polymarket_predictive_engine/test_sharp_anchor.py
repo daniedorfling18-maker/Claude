@@ -103,12 +103,18 @@ def test_build_sharp_anchor_direct_token_id(tmp_path):
     assert summary["fundamental_rows"] == 3
     assert summary["token_join"] == "direct_token_id"
     assert summary["mean_overround_removed"] > 0          # vig was present and removed
+    assert summary["mapping_audit_rows"] == 3
+    assert summary["mapping_audit_conservation_ok"] is True
+    audit = _read(tmp_path / "outputs" / "polymarket_model_governance" / "sharp_anchor_mapping_audit.csv")
+    assert {row["mapping_status"] for row in audit} == {"joined"}
+    assert {row["join_source"] for row in audit} == {"direct_token_joins"}
 
     out = _read(tmp_path / "outputs" / "polymarket_training" / "sharp_fundamental_probabilities.csv")
     probs = {r["token_id"]: float(r["probability"]) for r in out}
     assert set(probs) == {"tokA", "tokB", "tokC"}
     assert sum(probs.values()) == approx(1.0, abs=1e-5)   # de-vigged within the market (6dp output)
     assert probs["tokA"] > probs["tokB"] > probs["tokC"]
+    assert {row["anchor_source"] for row in out} == {"sharp_odds"}
 
 
 def test_build_sharp_anchor_joins_via_token_map(tmp_path):

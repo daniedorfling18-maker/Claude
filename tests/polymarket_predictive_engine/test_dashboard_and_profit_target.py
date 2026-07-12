@@ -2944,6 +2944,33 @@ def test_dashboard_surfaces_sharp_anchor_coverage_by_sport(tmp_path):
             ],
         },
     )
+    write_json(
+        cfg.governance_root / "sharp_anchor_coverage.json",
+        {
+            "status": "ok",
+            "anchor_funnel": {"status": "complete", "totals": {"rows_joined": 20}},
+            "source_sport_markets": [
+                {
+                    "source": "pinnacle",
+                    "sport": "soccer_fifa_world_cup",
+                    "market_key": "h2h",
+                    "source_rows_fetched": 30,
+                    "source_rows_normalized": 27,
+                    "polymarket_rows_eligible": 25,
+                    "rows_mapped": 24,
+                    "rows_joined": 20,
+                    "mapping_rate": 0.888889,
+                    "join_rate": 0.833333,
+                    "ambiguous_rows": 1,
+                    "stale_rows": 2,
+                    "mean_executable_buy_divergence": 0.015,
+                    "zero_current_join": False,
+                    "actionable_rows": 3,
+                    "accounting_status": "complete",
+                }
+            ],
+        },
+    )
 
     result = render_dashboard(cfg)
 
@@ -2952,7 +2979,10 @@ def test_dashboard_surfaces_sharp_anchor_coverage_by_sport(tmp_path):
     coverage = data["independent_anchor_status"]["sharp_anchor"]["coverage_by_sport_market"]
     assert coverage[0]["sport"] == "soccer_fifa_world_cup"
     assert coverage[0]["h2h_public_search_token_joins"] == 24
+    reconciliation = data["independent_anchor_status"]["sharp_anchor_coverage"]
+    assert reconciliation["source_sport_markets"][0]["rows_joined"] == 20
     assert "Sharp anchor coverage by sport" in html
+    assert "Anchor reconciliation by source / sport / market" in html
 
 
 def test_dashboard_normalizes_missing_sharp_anchor_coverage_for_deploy_checks(tmp_path):
@@ -3119,6 +3149,51 @@ def test_dashboard_surfaces_sharp_sports_edge_funnel(tmp_path):
         },
     )
     write_json(
+        cfg.governance_root / "sharp_anchor_coverage.json",
+        {
+            "status": "ok",
+            "anchor_funnel": {"status": "complete", "totals": {"rows_mapped": 7, "rows_joined": 1}},
+            "source_sport_markets": [
+                {
+                    "source": "pinnacle",
+                    "sport": "basketball_nba",
+                    "market_key": "h2h",
+                    "source_rows_normalized": 4,
+                    "polymarket_rows_eligible": 2,
+                    "rows_mapped": 3,
+                    "rows_joined": 1,
+                    "ambiguous_rows": 1,
+                    "stale_rows": 0,
+                    "actionable_rows": 1,
+                },
+                {
+                    "source": "pinnacle",
+                    "sport": "baseball_mlb",
+                    "market_key": "h2h",
+                    "source_rows_normalized": 3,
+                    "polymarket_rows_eligible": 1,
+                    "rows_mapped": 2,
+                    "rows_joined": 0,
+                    "ambiguous_rows": 0,
+                    "stale_rows": 0,
+                    "actionable_rows": 0,
+                },
+                {
+                    "source": "pinnacle",
+                    "sport": "mma_mixed_martial_arts",
+                    "market_key": "h2h",
+                    "source_rows_normalized": 2,
+                    "polymarket_rows_eligible": 1,
+                    "rows_mapped": 2,
+                    "rows_joined": 0,
+                    "ambiguous_rows": 0,
+                    "stale_rows": 0,
+                    "actionable_rows": 0,
+                },
+            ],
+        },
+    )
+    write_json(
         cfg.governance_root / "mispricing_alpha_live_summary.json",
         {
             "status": "scored",
@@ -3183,6 +3258,10 @@ def test_dashboard_surfaces_sharp_sports_edge_funnel(tmp_path):
     assert funnel["total_final_clv_rows"] == 2
     assert nba["query_active"] is True
     assert nba["anchor_rows"] == 3
+    assert nba["polymarket_eligible_rows"] == 2
+    assert nba["anchor_current_joined_rows"] == 1
+    assert nba["anchor_ambiguous_rows"] == 1
+    assert nba["anchor_actionable_rows"] == 1
     assert nba["scored_anchor_hits"] == 1
     assert nba["shadow_candidates"] == 1
     assert nba["final_clv_rows"] == 2
@@ -3191,6 +3270,7 @@ def test_dashboard_surfaces_sharp_sports_edge_funnel(tmp_path):
     assert any(row["lane"] == "Sharp sports edge funnel" for row in data["decision_useful_summary"]["evidence_lanes"])
     assert "Sharp sports edge funnel" in html
     assert "Sharp sports family bottlenecks" in html
+    assert funnel["anchor_accounting"]["status"] == "complete"
 
 
 def test_dashboard_model_staleness_threshold_matches_rescore_cadence(tmp_path):

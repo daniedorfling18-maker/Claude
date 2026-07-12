@@ -5,25 +5,18 @@ anything.** The short version: this repo is **local-first**; Docker is for deplo
 
 ## Current focus and operating state
 
-The current active project is the **Polymarket predictive engine** in automated **shadow-research
-mode**. Do not treat the bot as ready for paper trading or live trading. The current audit state is:
+Never infer the current operating state from this file. The canonical point-in-time report is generated
+at `outputs/performance/operating_state.md`, with structured data at
+`outputs/performance/operating_state.json` and the same rows in the dashboard. The control contract is
+documented in `docs/OPERATING_STATE.md`. Missing or stale generated evidence fails closed as `UNKNOWN`.
 
-```text
-paper_allowed = false
-paper_trading_invoked = false
-live_trading_invoked = false
-live_wallet_monitoring = read_only_active   # 2026-07-12: WO-36/62; public address, no keys
-human_live_test = operator_domain           # outside system control; system watches only
-autonomous_execution = blocked_wo67         # P1-P5 incl. dated owner amendment required
+Regenerate the report after evidence or deployment changes:
+
+```bash
+python -m polymarket_predictive_engine.cli operating-state --config polymarket_predictive_config.example.yaml
 ```
 
-The point-in-time operating state is maintained in `docs/OPERATING_STATE.md`
-(2026-07-12 external audit: prose status lines here and in README had gone
-stale; that file is now canonical for "what is authorised and running").
-
-The reason is not a broken broker. The infrastructure now works. The blocker is insufficient positive
-forward evidence: `sports_other` has accepted shadow candidates, but the cohort is still negative and
-has no closed/settled positions. Start with:
+Repository safety and governance invariants still apply regardless of the generated status. Start with:
 
 - `docs/POLYMARKET_RESEARCH_README.md`
 - `docs/POLYMARKET_CURRENT_STATE.md`

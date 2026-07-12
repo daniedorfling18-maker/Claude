@@ -289,13 +289,16 @@ run_training_harvest() {
     # WO-64 code-generated investment policy statement. Reads current policy,
     # risk, and capacity artifacts for reporting only.
     timeout "$HARVEST_TIMEOUT" python -m polymarket_predictive_engine.cli render-ips --config "$CONFIG_PATH"
+    # WO-68 canonical operating state. Generated from the effective config and
+    # current artifacts; missing inputs remain UNKNOWN and never authorise work.
+    timeout "$HARVEST_TIMEOUT" python -m polymarket_predictive_engine.cli operating-state --config "$CONFIG_PATH"
     # WO-61 tamper-evident ledger chain. Prefix hashes are generated only after
     # the daily evidence writers finish. The existing host telemetry pusher
     # then timestamps the head on vps-anchor (the container has no Git metadata).
     timeout "$HARVEST_TIMEOUT" python -m polymarket_predictive_engine.cli anchor-ledgers --config "$CONFIG_PATH"
   ) >> "$LOG_FILE" 2>&1
   CODE=$?
-  stamp_status training_harvest "$CODE" "gamma resolved-markets backfill + clob price histories + wallet intelligence + maker-carry study + deep trade-print backfill + maker-fill replay + flow toxicity + decision policy + wallet reconciliation + true-net cost ledger + reconstructed CLV study + calibration-bias study + martingale drift scan + performance factsheet + investment policy statement + ledger anchor"
+  stamp_status training_harvest "$CODE" "gamma resolved-markets backfill + clob price histories + wallet intelligence + maker-carry study + deep trade-print backfill + maker-fill replay + flow toxicity + decision policy + wallet reconciliation + true-net cost ledger + reconstructed CLV study + calibration-bias study + martingale drift scan + performance factsheet + investment policy statement + generated operating state + ledger anchor"
   log "training_harvest: exit $CODE"
 }
 

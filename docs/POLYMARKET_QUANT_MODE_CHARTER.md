@@ -547,6 +547,13 @@ events even when asset IDs come from dynamic liquidity/position selection. Autho
 append to `market_births.csv`. Both ledgers are deduplicated and byte-append-only. They are isolated
 validation evidence and are not consumed by features, closing-line grading, governance, or trading.
 
+**2026-07-12 — WO-68 implemented by Codex.** CLI `operating-state` now generates
+`outputs/performance/operating_state.json` and `.md` from effective config, governance and evidence
+artifacts, execution ledgers, WO-67 P1-P5 checks, and the host telemetry deployment manifest. The VPS
+daily harvest refreshes it and the dashboard renders the same JSON. README and AGENTS now contain
+only pointers; a drift test rejects planted or future hard-coded state claims. Missing evidence is
+reported as `UNKNOWN`, and this reporting path cannot invoke paper or live trading.
+
 ## Rules of engagement for coding agents
 
 0. **Division of labour**: the orchestrating agent writes/updates this charter and the work orders

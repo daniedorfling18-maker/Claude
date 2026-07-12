@@ -2461,6 +2461,13 @@ local test runs with no independent gate. Constraints 1-8 bind.
 
 ## WO-68 — Generated operating state (kill documentation drift permanently)
 
+Status: IMPLEMENTED by Codex on 2026-07-12. CLI `operating-state` now derives the
+canonical state and WO-67 P1-P5 checks from effective config, governance/evidence
+artifacts, execution ledgers, and the persisted host telemetry manifest. The daily
+harvest writes `outputs/performance/operating_state.json` plus `.md`; the dashboard
+consumes the same JSON, and tests reject front-door status prose or guessed missing
+inputs. Reporting remains inert: paper/live invocation flags are always false.
+
 Manual v1 exists at docs/OPERATING_STATE.md. Replace it with a generated
 artifact so drift is impossible.
 

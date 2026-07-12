@@ -120,6 +120,7 @@ HTML = """<!doctype html>
   </header>
   <div id="error"></div>
   <div class="grid" id="cards"></div>
+  <section class="primary"><h2>Canonical operating state</h2><div id="operatingState"></div></section>
   <section class="primary"><h2>Decision cockpit</h2><div id="decisionCockpit"></div></section>
   <section><h2>Action board</h2><div id="actionBoard"></div></section>
   <section><h2>Evidence funnel</h2><div id="evidenceFunnel"></div></section>
@@ -280,6 +281,7 @@ async function load() {
     const dutchArb = data.dutch_arb || {};
     const longshotBias = data.longshot_bias || data.forward_paper_cycle?.longshot_bias || {};
     const performanceFactsheet = data.performance_factsheet || {};
+    const operatingState = data.operating_state || {};
     const edgeAttribution = data.edge_attribution || {};
     const riskState = data.risk_state || {};
     const portfolioRisk = riskState.portfolio_risk || {};
@@ -545,6 +547,23 @@ async function load() {
       card("$100/month state", `${fmtUsd(pnl)} audited / ${fmtUsd(decisionRunRate)} run-rate / ${profitProofStatus}`, verifiedEvidenceReady ? "good" : "warn"),
       card("Best edge route", bestEdgeRouteSummary(), "warn")
     ].join("");
+    const operatingRows = Array.isArray(operatingState.rows) ? operatingState.rows : [];
+    document.getElementById("operatingState").innerHTML = `
+      <div class="sectionLead">Generated from effective config and point-in-time artifacts. UNKNOWN means the evidence source is absent; no value is guessed.</div>
+      ${operatingRows.length ? table(operatingRows, [
+        ["Question","question", v=>longText(v, 150)],
+        ["State","state", v=>longText(v, 160)],
+        ["Evidence","evidence", v=>longText(v, 260)],
+        ["Source","source", v=>longText(v, 160)],
+        ["Verified","verified_at_utc"]
+      ]) : `<div class="muted">Generated operating state is missing. Treat every current authorisation claim as UNKNOWN.</div>`}
+      ${titledTable("WO-67 autonomous-execution preconditions", operatingState.wo67_preconditions || [], [
+        ["ID","id"],
+        ["Precondition","title", v=>longText(v, 180)],
+        ["State","state"],
+        ["Evidence","evidence", v=>longText(v, 220)]
+      ], 5)}
+    `;
     document.getElementById("decisionCockpit").innerHTML = `
       <div class="decisionHero">
         <div class="decisionStatus ${tradeDecisionClass}">
@@ -5265,6 +5284,9 @@ def render_dashboard(cfg: EngineConfig, latest_report: dict[str, Any] | None = N
     performance_factsheet = read_json(cfg.output_root / "performance" / "performance_factsheet.json", default={}) or {}
     if not isinstance(performance_factsheet, dict):
         performance_factsheet = {}
+    operating_state = read_json(cfg.output_root / "performance" / "operating_state.json", default={}) or {}
+    if not isinstance(operating_state, dict):
+        operating_state = {}
     edge_attribution = read_json(governance / "edge_attribution.json", default={}) or {}
     if not isinstance(edge_attribution, dict):
         edge_attribution = {}
@@ -5427,6 +5449,7 @@ def render_dashboard(cfg: EngineConfig, latest_report: dict[str, Any] | None = N
         "dutch_arb": dutch_arb,
         "longshot_bias": longshot_bias,
         "performance_factsheet": performance_factsheet,
+        "operating_state": operating_state,
         "edge_attribution": edge_attribution,
         "family_calibration": family_calibration,
         "collection_coverage": collection_coverage,

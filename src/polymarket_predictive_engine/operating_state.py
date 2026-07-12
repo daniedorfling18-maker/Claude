@@ -1,0 +1,461 @@
+"""WO-68 generated operating state.
+
+This module is reporting-only. It reads point-in-time configuration and
+artifacts, renders unknown inputs as UNKNOWN, and never changes a gate, broker,
+order path, or execution permission.
+"""
+
+from __future__ import annotations
+
+import json
+import os
+from pathlib import Path
+import re
+from typing import Any, Mapping
+
+from .config import EngineConfig, load_config
+from .utils import now_utc, parse_timestamp, read_csv_rows, read_json, write_json
+
+
+UNKNOWN = "UNKNOWN"
+OUTPUT_JSON = "performance/operating_state.json"
+OUTPUT_MARKDOWN = "performance/operating_state.md"
+OWNER_AUTH_MARKER = "AUTONOMOUS_MAKER_EXECUTION_AUTHORISED = true"
+OWNER_AUTH_DATE_PATTERN = re.compile(r"AUTONOMOUS_MAKER_EXECUTION_AUTHORISED_AT\s*=\s*\d{4}-\d{2}-\d{2}", re.IGNORECASE)
+
+_DRIFT_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
+    ("dated_project_state", re.compile(r"last project state update\s*:", re.IGNORECASE)),
+    ("hard_coded_paper_prohibition", re.compile(r"not approved for paper trading", re.IGNORECASE)),
+    ("hard_coded_current_audit", re.compile(r"current audit state is\s*:", re.IGNORECASE)),
+    ("hard_coded_expected_audit", re.compile(r"current expected audit result\s*:", re.IGNORECASE)),
+    ("hard_coded_paper_allowed", re.compile(r"paper_allowed\s*=\s*(?:true|false)", re.IGNORECASE)),
+    ("hard_coded_wallet_state", re.compile(r"live_wallet_monitoring\s*=", re.IGNORECASE)),
+    ("hard_coded_human_test_state", re.compile(r"human_live_test\s*=", re.IGNORECASE)),
+    ("hard_coded_autonomous_state", re.compile(r"autonomous_execution\s*=", re.IGNORECASE)),
+)
+
+
+def _mapping(value: Any) -> dict[str, Any]:
+    return dict(value) if isinstance(value, Mapping) else {}
+
+
+def _artifact(path: Path) -> dict[str, Any]:
+    return _mapping(read_json(path, default={}) or {})
+
+
+def _explicit_bool(mapping: Mapping[str, Any], key: str) -> bool | None:
+    if key not in mapping:
+        return None
+    value = mapping.get(key)
+    if isinstance(value, bool):
+        return value
+    text = str(value or "").strip().lower()
+    if text in {"1", "true", "yes", "on"}:
+        return True
+    if text in {"0", "false", "no", "off"}:
+        return False
+    return None
+
+
+def _row(key: str, question: str, state: str, evidence: str, source: str, verified_at: str = "") -> dict[str, str]:
+    return {
+        "key": key,
+        "question": question,
+        "state": state or UNKNOWN,
+        "evidence": evidence or UNKNOWN,
+        "source": source or UNKNOWN,
+        "verified_at_utc": verified_at or UNKNOWN,
+    }
+
+
+def _timestamp(payload: Mapping[str, Any]) -> str:
+    return str(
+        payload.get("generated_at_utc")
+        or payload.get("collected_at_utc")
+        or payload.get("pushed_at_utc")
+        or payload.get("updated_at_utc")
+        or ""
+    ).strip()
+
+
+def _latest_timestamp(payloads: Mapping[str, Mapping[str, Any]]) -> tuple[str, list[str]]:
+    candidates: list[tuple[Any, str, str]] = []
+    for name, payload in payloads.items():
+        raw = _timestamp(payload)
+        parsed = parse_timestamp(raw)
+        if parsed is not None:
+            candidates.append((parsed, raw, name))
+    if not candidates:
+        return UNKNOWN, []
+    candidates.sort(key=lambda item: item[0])
+    latest = candidates[-1]
+    sources = sorted(name for parsed, _, name in candidates if parsed == latest[0])
+    return latest[1], sources
+
+
+def _gate_state(gates: Mapping[str, Any], name: str) -> str:
+    row = _mapping(gates.get(name))
+    return str(row.get("state") or UNKNOWN)
+
+
+def _sha_matches(left: str, right: str) -> bool:
+    left = left.strip().lower()
+    right = right.strip().lower()
+    if not left or not right or UNKNOWN.lower() in {left, right}:
+        return False
+    return left.startswith(right) or right.startswith(left)
+
+
+def _telemetry_manifest(cfg: EngineConfig) -> tuple[dict[str, Any], Path]:
+    configured = str(os.getenv("PM_VPS_TELEMETRY_MANIFEST_PATH") or "").strip()
+    candidates = [
+        Path(configured) if configured else None,
+        cfg.output_root / "performance" / "vps_telemetry_manifest.json",
+        cfg.path.resolve().parent / "telemetry" / "manifest.json",
+    ]
+    for candidate in candidates:
+        if candidate is not None and candidate.exists():
+            return _artifact(candidate), candidate
+    return {}, cfg.output_root / "performance" / "vps_telemetry_manifest.json"
+
+
+def _precondition(identifier: str, title: str, state: str, evidence: str, source: str) -> dict[str, str]:
+    return {
+        "id": identifier,
+        "title": title,
+        "state": state,
+        "evidence": evidence,
+        "source": source,
+    }
+
+
+def _owner_authorisation(repo_root: Path) -> tuple[str, str]:
+    paths = [repo_root / "AGENTS.md", repo_root / "CLAUDE.md"]
+    if not all(path.exists() for path in paths):
+        return UNKNOWN, "AGENTS.md and/or CLAUDE.md is unavailable"
+    texts = [path.read_text(encoding="utf-8-sig", errors="replace") for path in paths]
+    marker_present = all(OWNER_AUTH_MARKER.lower() in text.lower() for text in texts)
+    dated = all(OWNER_AUTH_DATE_PATTERN.search(text) is not None for text in texts)
+    if marker_present and dated:
+        return "met", "dated owner authorisation marker is present in both AGENTS.md and CLAUDE.md"
+    return "not_met", "dated owner authorisation marker is absent from one or both control files"
+
+
+def _wo67_preconditions(
+    cfg: EngineConfig,
+    maker_study: Mapping[str, Any],
+    decision_policy: Mapping[str, Any],
+    merge_gate: Mapping[str, Any],
+    key_custody: Mapping[str, Any],
+) -> list[dict[str, str]]:
+    gates = _mapping(maker_study.get("maker_gates"))
+    gate_names = ("M_A_carry_evidence", "M_B_adverse_realism", "M_C_payout_floor")
+    gate_states = {name: _gate_state(gates, name) for name in gate_names}
+    if not maker_study:
+        p1_state = UNKNOWN
+    else:
+        p1_state = "met" if all(state.startswith("pass") for state in gate_states.values()) else "not_met"
+
+    ladder = _mapping(decision_policy.get("ladder"))
+    stage = decision_policy.get("ladder_stage_permitted", ladder.get("stage"))
+    if not decision_policy or stage in {None, ""}:
+        p2_state = UNKNOWN
+    else:
+        try:
+            p2_state = "met" if int(stage) >= 1 else "not_met"
+        except (TypeError, ValueError):
+            p2_state = UNKNOWN
+
+    p3_state, p3_evidence = _owner_authorisation(cfg.path.resolve().parent)
+
+    if not merge_gate:
+        p4_state = UNKNOWN
+    else:
+        p4_state = (
+            "met"
+            if _explicit_bool(merge_gate, "enforced") is True
+            and _explicit_bool(merge_gate, "branch_protection_enabled") is True
+            and _explicit_bool(merge_gate, "independent_review_required") is True
+            else "not_met"
+        )
+
+    if not key_custody:
+        p5_state = UNKNOWN
+    else:
+        custody_ok = (
+            str(key_custody.get("status") or "").lower() == "approved"
+            and _explicit_bool(key_custody, "scoped_trade_only") is True
+            and _explicit_bool(key_custody, "withdrawal_disabled") is True
+            and str(key_custody.get("storage") or "").lower() == "vps_env"
+            and _explicit_bool(key_custody, "rotation_documented") is True
+        )
+        p5_state = "met" if custody_ok else "not_met"
+
+    consecutive_days = ladder.get("consecutive_live_ok_days", UNKNOWN)
+    p2_evidence = (
+        f"ladder_stage_permitted={stage if stage not in {None, ''} else UNKNOWN}; "
+        f"consecutive_live_ok_days={consecutive_days}; Stage 1 requires >=7 positive real days "
+        "with fills inside the registered 2x-model bound"
+    )
+    return [
+        _precondition("P1", "Maker gates M-A/M-B/M-C pass", p1_state, json.dumps(gate_states, sort_keys=True), "maker_carry_study.json"),
+        _precondition("P2", "Human live-test Stage 1 complete", p2_state, p2_evidence, "decision_policy.json"),
+        _precondition("P3", "Dated owner amendment authorises scoped live path", p3_state, p3_evidence, "AGENTS.md + CLAUDE.md"),
+        _precondition("P4", "Independent merge control enforced", p4_state, f"status={merge_gate.get('status', UNKNOWN) if merge_gate else UNKNOWN}", "independent_merge_gate.json"),
+        _precondition("P5", "Scoped key-custody design approved", p5_state, f"status={key_custody.get('status', UNKNOWN) if key_custody else UNKNOWN}", "key_custody_approval.json"),
+    ]
+
+
+def _front_door_region(text: str, *, stop_heading: str) -> str:
+    marker = f"\n{stop_heading}"
+    return text.split(marker, 1)[0]
+
+
+def front_door_drift_violations(*, readme_text: str, agents_text: str) -> list[str]:
+    regions = {
+        "README.md": _front_door_region(readme_text, stop_heading="## What we learned"),
+        "AGENTS.md": _front_door_region(agents_text, stop_heading="## Run model"),
+    }
+    violations: list[str] = []
+    required_pointer = OUTPUT_MARKDOWN.lower()
+    for name, text in regions.items():
+        lowered = text.lower().replace("`", "")
+        if required_pointer not in lowered:
+            violations.append(f"{name}: missing pointer to {OUTPUT_MARKDOWN}")
+        for label, pattern in _DRIFT_PATTERNS:
+            if pattern.search(text):
+                violations.append(f"{name}: {label}")
+    return violations
+
+
+def assert_front_door_docs_state_pointer_only(repo_root: Path) -> None:
+    readme = (repo_root / "README.md").read_text(encoding="utf-8-sig", errors="replace")
+    agents = (repo_root / "AGENTS.md").read_text(encoding="utf-8-sig", errors="replace")
+    violations = front_door_drift_violations(readme_text=readme, agents_text=agents)
+    if violations:
+        raise AssertionError("front-door operating-state drift: " + "; ".join(violations))
+
+
+def _md(value: Any) -> str:
+    rendered = UNKNOWN if value is None or value == "" else str(value)
+    return rendered.replace("|", "\\|").replace("\n", " ")
+
+
+def _write_markdown(path: Path, payload: Mapping[str, Any]) -> None:
+    lines = [
+        "# Generated operating state",
+        "",
+        f"Generated at: `{_md(payload.get('generated_at_utc'))}`  ",
+        "Source: point-in-time config and artifacts. Missing evidence is `UNKNOWN`; it is never guessed.",
+        "",
+        "| Question | State | Evidence | Source | Verified at |",
+        "|---|---|---|---|---|",
+    ]
+    for row in payload.get("rows", []):
+        lines.append(
+            f"| {_md(row.get('question'))} | **{_md(row.get('state'))}** | {_md(row.get('evidence'))} | "
+            f"`{_md(row.get('source'))}` | {_md(row.get('verified_at_utc'))} |"
+        )
+    lines.extend(
+        [
+            "",
+            "## WO-67 autonomous-execution preconditions",
+            "",
+            "WO-67 remains blocked unless every precondition is independently `met`. This report never authorises execution.",
+            "",
+            "| ID | Precondition | State | Evidence | Source |",
+            "|---|---|---|---|---|",
+        ]
+    )
+    for row in payload.get("wo67_preconditions", []):
+        lines.append(
+            f"| {_md(row.get('id'))} | {_md(row.get('title'))} | **{_md(row.get('state'))}** | "
+            f"{_md(row.get('evidence'))} | `{_md(row.get('source'))}` |"
+        )
+    missing = payload.get("missing_inputs", [])
+    lines.extend(["", "## Missing inputs", ""])
+    lines.extend([f"- `{_md(item)}`" for item in missing] or ["- None"])
+    lines.extend(["", "`paper_trading_invoked=false`; `live_trading_invoked=false`.", ""])
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("\n".join(lines), encoding="utf-8")
+
+
+def build_operating_state(cfg: EngineConfig) -> dict[str, Any]:
+    output_root = cfg.output_root
+    governance = cfg.governance_root
+    performance = output_root / "performance"
+    maker_root = output_root / "maker_carry"
+
+    audit = _artifact(governance / "local_history_audit_summary.json")
+    readiness = _artifact(governance / "paper_trade_readiness.json")
+    profit_verdict = _artifact(governance / "profit_verdict.json")
+    maker_study = _artifact(maker_root / "maker_carry_study.json")
+    maker_live_test = _artifact(maker_root / "maker_live_test.json")
+    decision_policy = _artifact(maker_root / "decision_policy.json")
+    merge_gate = _artifact(performance / "independent_merge_gate.json")
+    key_custody = _artifact(performance / "key_custody_approval.json")
+    telemetry_manifest, telemetry_manifest_path = _telemetry_manifest(cfg)
+    artifacts = {
+        "local_history_audit": audit,
+        "paper_trade_readiness": readiness,
+        "profit_verdict": profit_verdict,
+        "maker_carry_study": maker_study,
+        "maker_live_test": maker_live_test,
+        "decision_policy": decision_policy,
+        "independent_merge_gate": merge_gate,
+        "key_custody_approval": key_custody,
+        "vps_telemetry_manifest": telemetry_manifest,
+    }
+
+    missing_inputs = [name for name, payload in artifacts.items() if not payload]
+    raw = cfg.raw
+    paper_cfg = _mapping(raw.get("paper_trading"))
+    live_cfg = _mapping(raw.get("live_trading"))
+    maker_cfg = _mapping(raw.get("maker_live_test"))
+    trading_cfg = _mapping(raw.get("trading"))
+    paper_enabled = _explicit_bool(paper_cfg, "enabled")
+    live_enabled = _explicit_bool(live_cfg, "enabled")
+    maker_enabled = _explicit_bool(maker_cfg, "enabled")
+    trading_mode = str(trading_cfg.get("mode") or "").strip().lower() or UNKNOWN
+    wallet_configured = bool(str(maker_cfg.get("wallet_address") or "").strip()) if maker_cfg else None
+
+    if trading_mode == UNKNOWN or paper_enabled is None or live_enabled is None:
+        research_mode = UNKNOWN
+    elif trading_mode in {"paper", "backtest"} and paper_enabled and not live_enabled:
+        research_mode = "ACTIVE_SHADOW_PAPER_GATED"
+    elif live_enabled or trading_mode == "live":
+        research_mode = "LIVE_CONFIGURATION_PRESENT"
+    else:
+        research_mode = "INACTIVE_OR_NON_PAPER"
+
+    if paper_enabled is None or trading_mode == UNKNOWN:
+        paper_capability = UNKNOWN
+    else:
+        paper_capability = "PRESENT" if paper_enabled and trading_mode in {"paper", "backtest"} else "DISABLED"
+
+    paper_decision = _mapping(audit.get("paper_decision"))
+    paper_allowed = paper_decision.get("paper_allowed")
+    if isinstance(paper_allowed, bool):
+        governed_paper = "GRANTED" if paper_allowed else "NOT_GRANTED"
+        governed_evidence = str(paper_decision.get("reason") or "paper_decision artifact")
+    else:
+        governed_paper = UNKNOWN
+        governed_evidence = UNKNOWN
+
+    fills_path = output_root / "polymarket_portfolio" / "paper_fills.csv"
+    if fills_path.exists():
+        fill_count = len(read_csv_rows(fills_path))
+        paper_activity = f"RECORDED_FILLS={fill_count}"
+        paper_activity_evidence = str(fills_path)
+    else:
+        paper_activity = UNKNOWN
+        paper_activity_evidence = "paper fill ledger is missing"
+        missing_inputs.append("paper_fills_ledger")
+
+    if maker_enabled is None or wallet_configured is None:
+        human_live_test = UNKNOWN
+    elif maker_enabled and wallet_configured:
+        human_live_test = "OPERATOR_DOMAIN_MONITORED_READ_ONLY"
+    else:
+        human_live_test = "NOT_CONFIGURED"
+
+    if maker_enabled is None or wallet_configured is None:
+        wallet_state = UNKNOWN
+    elif not maker_enabled or not wallet_configured:
+        wallet_state = "NOT_CONFIGURED"
+    elif maker_live_test:
+        wallet_state = f"ACTIVE_READ_ONLY:{maker_live_test.get('status', UNKNOWN)}"
+    else:
+        wallet_state = UNKNOWN
+
+    live_ledger_candidates = [
+        output_root / "maker_carry" / "maker_execution_ledger.csv",
+        output_root / "polymarket_execution" / "live_execution_ledger.csv",
+    ]
+    live_ledger = next((path for path in live_ledger_candidates if path.exists()), None)
+    if live_ledger is None:
+        live_orders = UNKNOWN
+        live_order_evidence = f"no execution ledger; live_config_enabled={live_enabled if live_enabled is not None else UNKNOWN}"
+        missing_inputs.append("live_execution_ledger")
+    else:
+        live_order_count = len(read_csv_rows(live_ledger))
+        live_orders = f"RECORDED_ORDERS={live_order_count}"
+        live_order_evidence = str(live_ledger)
+
+    preconditions = _wo67_preconditions(cfg, maker_study, decision_policy, merge_gate, key_custody)
+    states = [row["state"] for row in preconditions]
+    if all(state == "met" for state in states):
+        autonomous_state = "PRECONDITIONS_MET_EXECUTOR_NOT_IMPLEMENTED"
+    elif any(state == "not_met" for state in states):
+        autonomous_state = "BLOCKED"
+    else:
+        autonomous_state = "BLOCKED_UNKNOWN"
+
+    telemetry_sha = str(telemetry_manifest.get("deployed_git_rev") or "").strip()
+    expected_sha = str(os.getenv("PM_VPS_DEPLOYED_SHA") or "").strip()
+    image_sha = str(os.getenv("PM_IMAGE_BUILD_SHA") or "").strip()
+    deployed_sha = telemetry_sha or expected_sha or image_sha or UNKNOWN
+    comparable_markers = [value for value in (telemetry_sha, expected_sha, image_sha) if value]
+    deployment_markers_aligned = (
+        all(_sha_matches(comparable_markers[0], value) for value in comparable_markers[1:])
+        if len(comparable_markers) > 1
+        else None
+    )
+    deployment_evidence = (
+        f"telemetry={telemetry_sha or UNKNOWN}; expected={expected_sha or UNKNOWN}; "
+        f"image={image_sha or UNKNOWN}; aligned="
+        f"{deployment_markers_aligned if deployment_markers_aligned is not None else UNKNOWN}"
+    )
+    latest_evidence, latest_sources = _latest_timestamp(artifacts)
+    maker_gates = _mapping(maker_study.get("maker_gates"))
+    rows = [
+        _row("research_mode", "Research mode", research_mode, f"trading.mode={trading_mode}; paper.enabled={paper_enabled}; live.enabled={live_enabled}", "effective config"),
+        _row("mechanical_paper_capability", "Mechanical paper capability", paper_capability, str(readiness.get("decision") or UNKNOWN), "config + paper_trade_readiness.json", _timestamp(readiness)),
+        _row("governed_paper_authorisation", "Governed paper authorisation", governed_paper, governed_evidence, "local_history_audit_summary.json", _timestamp(audit)),
+        _row("paper_activity", "Paper activity", paper_activity, paper_activity_evidence, "paper_fills.csv"),
+        _row("human_live_test", "Human live-test authorisation", human_live_test, "human execution is outside system control; system monitoring is read-only", "maker_live_test config"),
+        _row("live_wallet_monitoring", "Live-wallet monitoring", wallet_state, f"wallet_configured={wallet_configured if wallet_configured is not None else UNKNOWN}", "config + maker_live_test.json", _timestamp(maker_live_test)),
+        _row("live_orders_submitted", "Live orders submitted by the system", live_orders, live_order_evidence, str(live_ledger or UNKNOWN)),
+        _row("autonomous_execution", "Autonomous execution authorisation", autonomous_state, ", ".join(f"{row['id']}={row['state']}" for row in preconditions), "WO-67 preconditions"),
+        _row(
+            "latest_deployed_sha",
+            "Latest deployed SHA",
+            deployed_sha,
+            deployment_evidence,
+            f"{telemetry_manifest_path} + PM_VPS_DEPLOYED_SHA/PM_IMAGE_BUILD_SHA",
+            _timestamp(telemetry_manifest),
+        ),
+        _row("latest_verified_evidence", "Latest verified evidence timestamp", latest_evidence, ", ".join(latest_sources) or UNKNOWN, "artifact generated_at_utc", latest_evidence if latest_evidence != UNKNOWN else ""),
+    ]
+
+    payload = {
+        "status": "ok" if not missing_inputs and all(row["state"] != UNKNOWN for row in rows) else "incomplete_unknown_inputs",
+        "generated_at_utc": now_utc(),
+        "source": "point_in_time_config_and_artifacts",
+        "rows": rows,
+        "wo67_preconditions": preconditions,
+        "missing_inputs": sorted(set(missing_inputs)),
+        "taker_verdict": {
+            "verdict": profit_verdict.get("verdict", UNKNOWN),
+            "generated_at_utc": _timestamp(profit_verdict) or UNKNOWN,
+            "gate_a_state": _mapping(_mapping(profit_verdict.get("gates")).get("A_edge_exists")).get("state", UNKNOWN),
+        },
+        "maker_verdict": {
+            "verdict": maker_gates.get("maker_verdict", UNKNOWN),
+            "generated_at_utc": _timestamp(maker_study) or UNKNOWN,
+            "m_a_state": _gate_state(maker_gates, "M_A_carry_evidence"),
+            "m_b_state": _gate_state(maker_gates, "M_B_adverse_realism"),
+            "m_c_state": _gate_state(maker_gates, "M_C_payout_floor"),
+        },
+        "paper_trading_invoked": False,
+        "live_trading_invoked": False,
+    }
+    json_path = output_root / OUTPUT_JSON
+    markdown_path = output_root / OUTPUT_MARKDOWN
+    write_json(json_path, payload)
+    _write_markdown(markdown_path, payload)
+    return payload
+
+
+def main(config_path: str) -> dict[str, Any]:
+    return build_operating_state(load_config(config_path))

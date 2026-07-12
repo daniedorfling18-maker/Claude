@@ -63,6 +63,22 @@ trap cleanup EXIT INT TERM
 SNAP=$(mktemp -d) || exit 0
 STAMP=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 
+# WO-68: persist the same host-derived deployment marker that is published on
+# vps-telemetry. The container-generated operating-state report consumes the
+# previous host snapshot, so it does not have to guess a SHA from prose.
+HOST_MANIFEST="$REPO_DIR/outputs/performance/vps_telemetry_manifest.json"
+HOST_MANIFEST_TMP="$HOST_MANIFEST.tmp.$$"
+mkdir -p "$(dirname "$HOST_MANIFEST")"
+{
+  printf '{\n'
+  printf '  "pushed_at_utc": "%s",\n' "$STAMP"
+  printf '  "deployed_git_rev": "%s",\n' "$(git --git-dir="$GIT_DIR" rev-parse --short HEAD 2>/dev/null || echo unknown)"
+  printf '  "host": "%s",\n' "$(hostname 2>/dev/null || echo unknown)"
+  printf '  "disk_used_percent": "%s"\n' "$(df -P / 2>/dev/null | awk 'NR==2 {print $5}')"
+  printf '}\n'
+} > "$HOST_MANIFEST_TMP"
+mv "$HOST_MANIFEST_TMP" "$HOST_MANIFEST"
+
 # Whitelisted output directories: decision summaries only, never the heavy
 # collection corpora (training archive, websocket features, trade prints,
 # official book snapshots stay on the VPS).
@@ -117,14 +133,7 @@ for dir in $TELEMETRY_DIRS; do
 done
 
 mkdir -p "$SNAP/telemetry"
-{
-  printf '{\n'
-  printf '  "pushed_at_utc": "%s",\n' "$STAMP"
-  printf '  "deployed_git_rev": "%s",\n' "$(git --git-dir="$GIT_DIR" rev-parse --short HEAD 2>/dev/null || echo unknown)"
-  printf '  "host": "%s",\n' "$(hostname 2>/dev/null || echo unknown)"
-  printf '  "disk_used_percent": "%s"\n' "$(df -P / 2>/dev/null | awk 'NR==2 {print $5}')"
-  printf '}\n'
-} > "$SNAP/telemetry/manifest.json"
+cp "$HOST_MANIFEST" "$SNAP/telemetry/manifest.json"
 
 # Build a parentless commit with plumbing: temp index, no working-tree touch.
 export GIT_INDEX_FILE="$SNAP/.gitindex"

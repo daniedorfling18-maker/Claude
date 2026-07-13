@@ -16,8 +16,11 @@ concurrency:
 jobs:
   guard-and-invariants:
     name: WO-69 guard and invariants
-    runs-on: [self-hosted, Windows, X64, polymarket-ci]
-    timeout-minutes: 8
+    runs-on: [self-hosted, Linux, ARM64, polymarket-ci]
+    timeout-minutes: 15
+    container:
+      image: python:3.11-slim
+      options: --cpus 2 --memory 4g
 
     steps:
       - name: Check out proposed merge
@@ -26,34 +29,34 @@ jobs:
           persist-credentials: false
 
       - name: Verify provisioned Python
-        shell: powershell
+        shell: bash
         run: python -c "import sys; print(sys.version); assert sys.version_info >= (3, 10)"
 
       - name: Build isolated gate environment
-        shell: powershell
+        shell: bash
         run: |
-          python -m venv --system-site-packages .ci-venv
-          .\.ci-venv\Scripts\python.exe -m pip install --disable-pip-version-check --no-deps -e ".[dev]"
-          .\.ci-venv\Scripts\python.exe -m pip check
+          python -m venv .ci-venv
+          .ci-venv/bin/python -m pip install --disable-pip-version-check -e ".[dev]"
+          .ci-venv/bin/python -m pip check
 
       - name: Ruff guard
-        shell: powershell
-        run: .\.ci-venv\Scripts\python.exe -m ruff check .
+        shell: bash
+        run: .ci-venv/bin/python -m ruff check .
 
       - name: Validate effective configs
-        shell: powershell
+        shell: bash
         run: |
-          .\.ci-venv\Scripts\python.exe -m polymarket_predictive_engine.cli config-check --config polymarket_predictive_config.example.yaml
-          .\.ci-venv\Scripts\python.exe -m superbru_score_engine config-check --config config.yaml --profiles calibration_profiles.yaml
+          .ci-venv/bin/python -m polymarket_predictive_engine.cli config-check --config polymarket_predictive_config.example.yaml
+          .ci-venv/bin/python -m superbru_score_engine config-check --config config.yaml --profiles calibration_profiles.yaml
 
       - name: Run governance guards and invariants
-        shell: powershell
+        shell: bash
         run: |
-          .\.ci-venv\Scripts\python.exe -m pytest -q `
-            tests/polymarket_predictive_engine/test_operating_state.py `
-            tests/polymarket_predictive_engine/test_execution_governance_storage.py `
-            tests/polymarket_predictive_engine/test_safety_invariants.py `
-            tests/polymarket_predictive_engine/test_promotion_gate.py `
-            tests/test_polymarket_vps_docker.py `
-            tests/test_auto_pick_workflow_schedule.py `
+          .ci-venv/bin/python -m pytest -q \
+            tests/polymarket_predictive_engine/test_operating_state.py \
+            tests/polymarket_predictive_engine/test_execution_governance_storage.py \
+            tests/polymarket_predictive_engine/test_safety_invariants.py \
+            tests/polymarket_predictive_engine/test_promotion_gate.py \
+            tests/test_polymarket_vps_docker.py \
+            tests/test_auto_pick_workflow_schedule.py \
             tests/test_required_pr_gate.py

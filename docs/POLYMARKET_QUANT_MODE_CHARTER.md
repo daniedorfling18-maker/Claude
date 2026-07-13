@@ -564,8 +564,8 @@ leaving the healthy stack running. Exit-75 supervisor events append to the WO-61
 `outputs/performance/background_timeout_incidents.csv`; full governance has one VPS owner, the ops
 scheduler. These controls remain reporting/operations-only and cannot invoke paper/live trading.
 
-**2026-07-12 — WO-69 implemented to the platform boundary by Codex.** A repository-scoped Windows
-self-hosted runner now serves the deterministic `Required PR Gate`: ruff, config validation, and the
+**2026-07-12 — WO-69 implemented to the platform boundary by Codex; runner moved 2026-07-13.** A repository-scoped Linux ARM64
+self-hosted runner on the upgraded VPS now serves the deterministic `Required PR Gate`: ruff, config validation, and the
 registered governance/invariant subset. `scripts/audit_github_merge_gate.py` writes the WO-68 P4
 artifact and can apply the exact protection payload. Enforcement remains fail-closed and incomplete:
 GitHub returns HTTP 403 for private-repository branch protection/rulesets on the current Free plan.

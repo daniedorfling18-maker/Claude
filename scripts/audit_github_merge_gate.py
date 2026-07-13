@@ -16,7 +16,7 @@ from typing import Any, Mapping
 
 
 REQUIRED_CONTEXT = "WO-69 guard and invariants"
-REQUIRED_RUNNER_LABELS = {"self-hosted", "Windows", "X64", "polymarket-ci"}
+REQUIRED_RUNNER_LABELS = {"self-hosted", "Linux", "ARM64", "polymarket-ci"}
 DEFAULT_OUTPUT = Path("outputs/performance/independent_merge_gate.json")
 
 
@@ -52,8 +52,8 @@ def workflow_is_configured(workflow_text: str) -> bool:
         "pull_request:",
         f"name: {REQUIRED_CONTEXT}",
         "self-hosted",
-        "Windows",
-        "X64",
+        "Linux",
+        "ARM64",
         "polymarket-ci",
         "test_operating_state.py",
         "test_execution_governance_storage.py",

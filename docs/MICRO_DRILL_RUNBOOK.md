@@ -97,8 +97,18 @@ completes after the 2026-07-14 match).
    limit orders; displayed buying power can overstate free cash.
 3. First real taker-fee print: $0.06228 on $2.12025 notional (~2.9%),
    consistent with the modeled 2.8% mean taker fee in Gate B.
-4. Share sizing: UI executed 5.14 shares against a 5-share ticket
-   (sized to total, not share count). Immaterial here; matters at size.
+4. Share sizing: UI executed 5.14 shares against a 5-share ticket.
+   ROOT CAUSE identified 2026-07-13 from the operator's Trading
+   settings: "Exact shares on limit buys" is ON — the UI upsizes the
+   order so the NET shares after fees equal the ticket (5.14 x ~2.9%
+   fee ~= 0.14). Executor note: the API path sizes orders directly, so
+   WO-67 must do its own fee-aware sizing; this UI convenience will not
+   exist there.
+   Settlement addendum: the operator account has AUTO-REDEEM WINS
+   enabled (Trading settings, confirmed 2026-07-13), so redemption is
+   automatic at close; WO-67 needs no redemption logic, and the
+   executor sub-account must have the same setting enabled at creation
+   (added to the WO-73 onboarding checklist).
 5. Resting orders are NOT attributable from public data (aggregate book
    depth only); fills ARE (per-wallet trade rows within seconds). This
    confirms the fill-based scoreboard design and means requote

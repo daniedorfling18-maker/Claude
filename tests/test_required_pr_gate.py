@@ -62,7 +62,9 @@ def test_registered_workflow_is_minimal_self_hosted_and_secretless() -> None:
     assert "secrets." not in workflow
     assert "actions/setup-python" not in workflow
     assert "shell: powershell" not in workflow
-    assert workflow.count("shell: bash") == 5
+    assert workflow.count("shell: bash") == 6
+    assert "Provision Git for deploy preservation tests" in workflow
+    assert "apt-get install -y --no-install-recommends git" in workflow
     assert "python -m venv .ci-venv" in workflow
     assert "pip install --disable-pip-version-check -e" in workflow
     assert "pip check" in workflow
@@ -70,6 +72,7 @@ def test_registered_workflow_is_minimal_self_hosted_and_secretless() -> None:
     assert "test_operating_state.py" in workflow
     assert "test_safety_invariants.py" in workflow
     assert "test_polymarket_vps_docker.py" in workflow
+    assert "test_vps_checkout_update.py" in workflow
     assert "ruff check ." in workflow
     assert "config-check --config polymarket_predictive_config.example.yaml" in workflow
 

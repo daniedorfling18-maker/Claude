@@ -66,6 +66,7 @@ placement of any kind. The live-trading gates in AGENTS.md are untouched.
 from __future__ import annotations
 
 import json
+from decimal import Decimal, ROUND_CEILING, ROUND_FLOOR
 import re
 import time
 from pathlib import Path
@@ -211,9 +212,19 @@ RESOLUTION_MIN_CLEAN_SHARE = 0.90
 
 CANDIDATE_FIELDS = [
     "question",
+    "market_id",
     "condition_id",
+    "market_slug",
+    "event_slug",
+    "market_url",
     "token_id",
     "complement_token_id",
+    "outcome",
+    "complement_outcome",
+    "end_date_utc",
+    "event_start_time_utc",
+    "uma_resolution_status",
+    "order_price_min_tick_size",
     "neg_risk",
     "fee_type",
     "fees_enabled",
@@ -225,6 +236,10 @@ CANDIDATE_FIELDS = [
     "rewards_min_size_shares",
     "rewards_max_spread_cents",
     "mid_price",
+    "best_bid",
+    "best_ask",
+    "quote_bid_price",
+    "quote_ask_price",
     "quote_distance",
     "quote_distance_fraction",
     "competitor_score_bid",
@@ -477,6 +492,61 @@ def _token_ids(market: dict[str, Any]) -> list[str]:
     return [str(token).strip() for token in tokens if str(token).strip()]
 
 
+def _outcomes(market: dict[str, Any]) -> list[str]:
+    raw = market.get("outcomes")
+    if isinstance(raw, str):
+        try:
+            values = json.loads(raw)
+        except (TypeError, ValueError, json.JSONDecodeError):
+            return []
+    elif isinstance(raw, list):
+        values = raw
+    else:
+        return []
+    return [str(value).strip() for value in values if str(value).strip()]
+
+
+def _event_slug(market: dict[str, Any]) -> str:
+    direct = str(market.get("eventSlug") or "").strip()
+    if direct:
+        return direct
+    events = market.get("events") if isinstance(market.get("events"), list) else []
+    for event in events:
+        if isinstance(event, dict) and str(event.get("slug") or "").strip():
+            return str(event["slug"]).strip()
+    return ""
+
+
+def _market_url(market: dict[str, Any]) -> str:
+    event_slug = _event_slug(market)
+    market_slug = str(market.get("slug") or "").strip()
+    if event_slug:
+        return f"https://polymarket.com/event/{event_slug}"
+    if market_slug:
+        return f"https://polymarket.com/market/{market_slug}"
+    return ""
+
+
+def _quote_prices(
+    mid: float,
+    distance: float,
+    tick_size: float | None,
+) -> tuple[float | None, float | None]:
+    """Round away from the mid so a human ticket never quotes tighter."""
+
+    if tick_size is None or not 0 < tick_size < 1:
+        return None, None
+    tick = Decimal(str(tick_size))
+    midpoint = Decimal(str(mid))
+    offset = Decimal(str(distance))
+    bid = ((midpoint - offset) / tick).to_integral_value(rounding=ROUND_FLOOR) * tick
+    ask = ((midpoint + offset) / tick).to_integral_value(rounding=ROUND_CEILING) * tick
+    if bid <= 0 or ask >= 1 or bid >= ask:
+        return None, None
+    decimals = max(0, -tick.normalize().as_tuple().exponent)
+    return round(float(bid), decimals), round(float(ask), decimals)
+
+
 def _first_token_id(market: dict[str, Any]) -> str:
     tokens = _token_ids(market)
     return tokens[0] if tokens else ""
@@ -517,6 +587,7 @@ def _rewarded_universe(settings: dict[str, Any]) -> tuple[list[dict[str, Any]], 
             min_size = safe_float(market.get("rewardsMinSize")) or 0.0
             max_spread_cents = safe_float(market.get("rewardsMaxSpread")) or 0.0
             token_ids = _token_ids(market)
+            outcomes = _outcomes(market)
             token_id = token_ids[0] if token_ids else ""
             complement_token_id = token_ids[1] if len(token_ids) > 1 else ""
             if pot < float(settings["min_daily_pot_usd"]) or min_size <= 0 or max_spread_cents <= 0 or not token_id:
@@ -524,9 +595,27 @@ def _rewarded_universe(settings: dict[str, Any]) -> tuple[list[dict[str, Any]], 
             universe.append(
                 {
                     "question": str(market.get("question") or "").strip(),
+                    "market_id": str(market.get("id") or "").strip(),
                     "condition_id": str(market.get("conditionId") or "").strip(),
+                    "market_slug": str(market.get("slug") or "").strip(),
+                    "event_slug": _event_slug(market),
+                    "market_url": _market_url(market),
                     "token_id": token_id,
                     "complement_token_id": complement_token_id,
+                    "outcome": outcomes[0] if outcomes else "",
+                    "complement_outcome": outcomes[1] if len(outcomes) > 1 else "",
+                    "end_date_utc": str(
+                        market.get("endDateIso") or market.get("endDate") or ""
+                    ).strip(),
+                    "event_start_time_utc": str(
+                        market.get("eventStartTime") or market.get("gameStartTime") or ""
+                    ).strip(),
+                    "uma_resolution_status": str(
+                        market.get("umaResolutionStatus") or ""
+                    ).strip().lower(),
+                    "order_price_min_tick_size": safe_float(
+                        market.get("orderPriceMinTickSize")
+                    ),
                     "neg_risk": bool(market.get("negRisk")),
                     "fee_type": str(market.get("feeType") or "").strip(),
                     "fees_enabled": bool(market.get("feesEnabled")),
@@ -692,6 +781,9 @@ def _book_competition_from_books(
     band_max = float(settings["share_model_mid_band_max"])
     return {
         "mid": mid,
+        "best_bid": best_bid,
+        "best_ask": best_ask,
+        "tick_size": safe_float(book.get("tick_size")),
         "bid_score": q_one,
         "ask_score": q_two,
         "legacy_bid_score": yes_bid_score,
@@ -1148,11 +1240,28 @@ def _size_portfolio(
         portfolio.append(
             {
                 "question": row["question"],
+                "market_id": row.get("market_id", ""),
                 "condition_id": row["condition_id"],
+                "market_slug": row.get("market_slug", ""),
+                "event_slug": row.get("event_slug", ""),
+                "market_url": row.get("market_url", ""),
+                "token_id": row.get("token_id", ""),
+                "complement_token_id": row.get("complement_token_id", ""),
+                "outcome": row.get("outcome", ""),
+                "complement_outcome": row.get("complement_outcome", ""),
+                "end_date_utc": row.get("end_date_utc", ""),
+                "event_start_time_utc": row.get("event_start_time_utc", ""),
+                "uma_resolution_status": row.get("uma_resolution_status", ""),
                 "size_multiple": k,
                 "quote_size_shares": k * row["rewards_min_size_shares"],
+                "reference_mid_price": row.get("mid_price"),
+                "reference_best_bid": row.get("best_bid"),
+                "reference_best_ask": row.get("best_ask"),
                 "quote_distance": row["quote_distance"],
                 "quote_distance_fraction": row["quote_distance_fraction"],
+                "order_price_min_tick_size": row.get("order_price_min_tick_size"),
+                "quote_bid_price": row.get("quote_bid_price"),
+                "quote_ask_price": row.get("quote_ask_price"),
                 "capital_usd": round(k * row["capital_usd"], 2),
                 "net_carry_usd_per_day": round(net_k, 4),
                 "uncounted_supplementary_income_usd_per_day": round(k * (row.get("supplementary_income_usd_per_day") or 0.0), 4),
@@ -1162,6 +1271,15 @@ def _size_portfolio(
                 "resolution_risk": row.get("resolution_risk", "medium"),
                 "resolution_risk_class": row.get("resolution_risk_class", "other"),
                 "event_risk_flags": [keyword for keyword in EVENT_RISK_KEYWORDS if keyword in row["question"].lower()],
+                "order_ticket_status": (
+                    "exact"
+                    if row.get("market_url")
+                    and row.get("token_id")
+                    and row.get("outcome")
+                    and safe_float(row.get("quote_bid_price")) is not None
+                    and safe_float(row.get("quote_ask_price")) is not None
+                    else "incomplete_missing_public_market_metadata_or_tick"
+                ),
             }
         )
         capital += k * row["capital_usd"]
@@ -1254,6 +1372,8 @@ def run_maker_carry_study(cfg: EngineConfig) -> dict[str, Any]:
                 **market,
                 **resolution_risk,
                 "mid_price": round(competition["mid"], 4),
+                "best_bid": competition["best_bid"],
+                "best_ask": competition["best_ask"],
                 "quote_distance": round(quote_distance, 4),
                 "quote_distance_fraction": fraction,
                 "competitor_score_bid": round(competition["bid_score"], 1),
@@ -1267,6 +1387,21 @@ def run_maker_carry_study(cfg: EngineConfig) -> dict[str, Any]:
                 # Bid collateral plus inventory to quote the ask, both ~size x price.
                 "capital_usd": round(quote_size * 2 * competition["mid"], 2),
             }
+            ticket_tick = safe_float(competition.get("tick_size")) or safe_float(
+                market.get("order_price_min_tick_size")
+            )
+            quote_bid, quote_ask = _quote_prices(
+                float(competition["mid"]),
+                quote_distance,
+                ticket_tick,
+            )
+            row.update(
+                {
+                    "order_price_min_tick_size": ticket_tick,
+                    "quote_bid_price": quote_bid,
+                    "quote_ask_price": quote_ask,
+                }
+            )
             if adverse is None:
                 row.update(
                     {
@@ -1504,8 +1639,12 @@ def _write_quote_sheet(out_root: Path, summary: dict[str, Any], settings: dict[s
         "This system places NO orders. Acting on this sheet is a human decision,",
         "with human money, outside the bot's paper-only governance.",
         "",
-        "| market | quote size (shares/side) | distance from mid | capital | est net/day | uncounted income/day | resolution risk | toxicity | risk flags |",
-        "|---|---|---|---|---|---|---|---|---|",
+        "## Exact human order tickets (WO-66)",
+        "",
+        "Each row is a decision-support ticket only: BUY the named outcome at the bid and SELL it at the ask. Re-check the live alert before touching the UI.",
+        "",
+        "| market URL | outcome side | bid | ask | size (shares/order) | capital | reference mid | est net/day | resolution risk | toxicity | risk flags | ticket |",
+        "|---|---|---:|---:|---:|---:|---:|---:|---|---:|---|---|",
     ]
     reconciliation_alert = _wallet_reconciliation_quote_alert(out_root)
     if reconciliation_alert:
@@ -1517,11 +1656,19 @@ def _write_quote_sheet(out_root: Path, summary: dict[str, Any], settings: dict[s
         resolution_label = f"{entry.get('resolution_risk', 'medium')} ({entry.get('resolution_risk_class', 'other')})"
         toxicity_flags = ["toxicity>0.9"] if toxicity_score is not None and toxicity_score > 0.9 else []
         flags = ", ".join([*(entry.get("event_risk_flags") or []), *toxicity_flags]) or "-"
+        market_url = str(entry.get("market_url") or "").strip()
+        market_label = str(entry.get("question") or "market")[:60].replace("|", "/")
+        market_link = f"[{market_label}]({market_url})" if market_url else market_label
+        outcome = str(entry.get("outcome") or "-").replace("|", "/")
+        bid = safe_float(entry.get("quote_bid_price"))
+        ask = safe_float(entry.get("quote_ask_price"))
+        bid_label = f"{bid:.4f}" if bid is not None else "-"
+        ask_label = f"{ask:.4f}" if ask is not None else "-"
         lines.append(
-            f"| {entry['question'][:60]} | {entry['quote_size_shares']:.0f} | "
-            f"{entry['quote_distance']} | ${entry['capital_usd']} | "
-            f"${entry['net_carry_usd_per_day']} | ${entry.get('uncounted_supplementary_income_usd_per_day', 0.0)} | "
-            f"{resolution_label} | {toxicity_label} | {flags} |"
+            f"| {market_link} | {outcome} | {bid_label} | {ask_label} | "
+            f"{entry['quote_size_shares']:.0f} | ${entry['capital_usd']} | "
+            f"{entry.get('reference_mid_price', '-')} | ${entry['net_carry_usd_per_day']} | "
+            f"{resolution_label} | {toxicity_label} | {flags} | {entry.get('order_ticket_status', '-')} |"
         )
     lines += ["", "Standing rules (non-negotiable if a human ever acts on this):"]
     lines.extend(f"{rule['number']}. {rule['title']}: {rule['text']}" for rule in quote_sheet_standing_rules(settings))

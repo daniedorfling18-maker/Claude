@@ -54,9 +54,15 @@ def _market(
     fee_type: str = "sports_fees_v2",
 ) -> dict[str, Any]:
     return {
+        "id": f"market-{token}",
         "question": question,
         "conditionId": f"0x{token}",
+        "slug": f"market-{token}",
+        "events": [{"slug": f"event-{token}"}],
+        "outcomes": json.dumps(["Yes", "No"]),
         "clobTokenIds": json.dumps([token, f"{token}-no"]),
+        "endDate": "2500-12-31T00:00:00Z",
+        "orderPriceMinTickSize": 0.01,
         "negRisk": False,
         "feesEnabled": fees_enabled,
         "feeType": fee_type,
@@ -120,6 +126,7 @@ def _flat_history(points: int, price: float = 0.5) -> list[dict[str, float]]:
 def _deep_book(mid: float = 0.5) -> dict[str, Any]:
     # Heavy resting competition just inside the band on both sides.
     return {
+        "tick_size": "0.01",
         "bids": [{"price": f"{mid - 0.005:.3f}", "size": "20000"}],
         "asks": [{"price": f"{mid + 0.005:.3f}", "size": "20000"}],
     }
@@ -432,6 +439,13 @@ def test_sized_portfolio_scales_within_capital_cap_and_never_trades(tmp_path, mo
     # multiple the $500 cap allows (100 shares x 2 x 0.5 mid = $100/unit).
     assert entry["size_multiple"] == 5
     assert entry["capital_usd"] == 500.0
+    assert entry["market_url"] == "https://polymarket.com/event/event-calm"
+    assert entry["outcome"] == "Yes"
+    assert entry["token_id"] == "calm"
+    assert entry["quote_bid_price"] == 0.48
+    assert entry["quote_ask_price"] == 0.52
+    assert entry["quote_size_shares"] == 500
+    assert entry["order_ticket_status"] == "exact"
     assert summary["portfolio_capital_usd"] <= 500.0
     assert summary["portfolio_net_carry_usd_per_day"] > 0
     # Measurement only - the study can never flip a trading switch.
@@ -448,6 +462,10 @@ def test_sized_portfolio_scales_within_capital_cap_and_never_trades(tmp_path, mo
     candidate = read_csv_rows(cfg.output_root / "maker_carry" / "maker_carry_candidates.csv")[0]
     assert candidate["pot_rank"] == "1"
     assert candidate["yield_rank"] == "1"
+    sheet = (cfg.output_root / "maker_carry" / "maker_quote_sheet.md").read_text(encoding="utf-8")
+    assert "Exact human order tickets (WO-66)" in sheet
+    assert "[deep calm market](https://polymarket.com/event/event-calm)" in sheet
+    assert "| Yes | 0.4800 | 0.5200 | 500 |" in sheet
 
     # A second run appends to the trend ledger instead of overwriting it.
     run_maker_carry_study(cfg)

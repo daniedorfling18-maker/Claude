@@ -583,6 +583,17 @@ hypotheses in `docs/EXPERIMENT_REGISTRY.md`; all pre-freeze H2/H3 observations r
 and the registered legacy taker verdict runs only as a stopping-rule obligation. No threshold,
 paper/live gate, sizing path, or order path changed.
 
+**2026-07-12 — WO-66 implemented by Codex.** Maker portfolio rows now produce exact public human
+order tickets (URL, outcome/token, tick-rounded bid/ask, shares, and capital). CLI
+`requote-alerts` rides the 15-minute trade-print cycle and writes
+`outputs/maker_carry/requote_alerts.json` from current websocket bid/ask, scheduled-event timing,
+toxicity, public Gamma UMA proposal/dispute state, lifecycle resolution events, and the registered
+kill artifact. The dashboard and quote sheet show one of `quotes_ok`, `requote_advised`,
+`pull_quotes_now`, or `STOP`; state-deduplicated notifier artifacts are eligible only for the two
+critical states, and daily alert snapshots are WO-61 anchored. This is keyless human decision support: no SMTP credential, exchange auth,
+signature, placement, amendment, cancellation, paper, or live order path exists. WO-67 remains
+blocked and unimplemented.
+
 ## Rules of engagement for coding agents
 
 0. **Division of labour**: the orchestrating agent writes/updates this charter and the work orders

@@ -231,17 +231,23 @@ def _overlay_script() -> str:
     const study = (maker || {{}}).study || {{}};
     const live = (maker || {{}}).live_test || {{}};
     const policy = (maker || {{}}).decision_policy || {{}};
+    const requote = (maker || {{}}).requote_alerts || {{}};
+    const requoteState = String(requote.alert_state || 'not_run');
+    const requoteCls = requoteState === 'quotes_ok' ? 'good' : (requoteState === 'requote_advised' || requoteState === 'not_run' ? 'warn' : 'bad');
+    const requoteBanner = `<div>${{proofBadge('WO-66: ' + requoteState, requoteCls)}} <strong>${{escProof(requote.headline || 'Read-only quote alert has not run yet.')}}</strong></div>`
+      + `<div class="muted">${{escProof(requote.markets_checked ?? 0)}} ticket(s) checked · ${{escProof(requote.markets_requiring_action ?? 0)}} requiring action · human action only, no cancel/order path.</div>`;
     const action = String(policy.indicated_action || 'policy_not_run_yet');
     const actionCls = action.startsWith('fund_') ? 'good' : (action.startsWith('stop_') || action.includes('not_supported') ? 'bad' : 'warn');
     const policyLine = `<div>${{proofBadge('policy: ' + action, actionCls)}} ${{proofBadge('ladder stage ' + (policy.ladder_stage_permitted ?? '-'), 'warn')}} ${{proofBadge('kill ' + ((policy.kill_criteria_status || {{}}).status || '-'), ((policy.kill_criteria_status || {{}}).status === 'clear') ? 'good' : 'bad')}}</div>`
       + `<div class="muted">${{escProof(policy.action_reason || policy.policy_note || 'Registered decision policy has not produced output yet.')}}</div>`;
-    if (!study.status) return policyLine + '<div class="muted">Maker-carry study has not run yet.</div>';
+    if (!study.status) return requoteBanner + policyLine + '<div class="muted">Maker-carry study has not run yet.</div>';
     const gates = study.maker_gates || {{}};
     const gateA = gates.M_A_carry_evidence || {{}};
     const gateB = gates.M_B_adverse_realism || {{}};
     const mv = String(gates.maker_verdict || 'insufficient_evidence');
     const mvCls = mv.startsWith('evidence_supported') ? 'good' : 'warn';
     let html = `<div class="sectionLead">Zero-fee quoting for daily liquidity rewards - measurement only, the system never places orders. Gates pre-registered ${{escProof(gates.registered_at_utc || '')}}.</div>`
+      + requoteBanner
       + policyLine
       + `<div>${{proofBadge(mv, mvCls)}} ${{proofBadge('M-A runs ' + (gateA.runs_at_or_above_target || 0) + '/' + (gateA.required_runs || 7), gateA.state === 'pass' ? 'good' : 'warn')}} ${{proofBadge('M-B markout ' + (gateB.state || 'pending'), gateB.state === 'pass' ? 'good' : 'warn')}}</div>`
       + `<div class="mono">est net carry $${{escProof(study.portfolio_net_carry_usd_per_day ?? '-')}} /day (~$${{escProof(study.portfolio_net_carry_usd_per_month ?? '-')}} /month, UPPER BOUND) on $${{escProof(study.portfolio_capital_usd ?? '-')}} across ${{escProof(study.portfolio_markets ?? 0)}} market(s)</div>`;
@@ -266,6 +272,7 @@ def _overlay_script() -> str:
     const study = ((payload.maker_lane || {{}}).study) || {{}};
     const live = ((payload.maker_lane || {{}}).live_test) || {{}};
     const makerPolicy = ((payload.maker_lane || {{}}).decision_policy) || {{}};
+    const makerRequote = ((payload.maker_lane || {{}}).requote_alerts) || {{}};
     const mGates = study.maker_gates || {{}};
     const mA = mGates.M_A_carry_evidence || {{}};
     const alerts = ((payload.oversight_status || {{}}).alerts || []).length;
@@ -274,8 +281,9 @@ def _overlay_script() -> str:
     const rows = [
       ['Taker verdict', `${{vState}} - Gate A units ${{gateA.independent_market_units ?? 0}}/${{gateA.minimum_final_samples ?? 12}} (${{gateA.settled_finals_total ?? 0}} finals settled)`, vCls],
       ['Maker lane', study.status
-        ? `policy ${{makerPolicy.indicated_action || 'not_run'}} - est $${{study.portfolio_net_carry_usd_per_day ?? '-'}} /day (upper bound) - gate M-A day ${{mA.runs_at_or_above_target ?? 0}}/${{mA.required_runs ?? 7}}`
-        : 'study has NOT run on this box yet - force it or wait for the daily harvest', study.status ? 'good' : 'bad'],
+        ? `alert ${{makerRequote.alert_state || 'not_run'}} - policy ${{makerPolicy.indicated_action || 'not_run'}} - est $${{study.portfolio_net_carry_usd_per_day ?? '-'}} /day (upper bound) - gate M-A day ${{mA.runs_at_or_above_target ?? 0}}/${{mA.required_runs ?? 7}}`
+        : 'study has NOT run on this box yet - force it or wait for the daily harvest',
+        ['pull_quotes_now', 'STOP'].includes(String(makerRequote.alert_state || '')) ? 'bad' : (study.status ? 'good' : 'bad')],
       ['Live money test', live.status === 'ok' ? `${{live.scoreboard}} - rewards $${{live.rewards_usd_total ?? 0}} / inventory PnL $${{live.inventory_pnl_usd ?? 0}}`
         : 'not funded (planned post-World Cup)', live.status === 'ok' ? (String(live.scoreboard).startsWith('winning') ? 'good' : 'warn') : 'warn'],
       ['System health', alerts === 0 ? 'no oversight alerts' : `${{alerts}} oversight alert(s) - open Oversight cockpit below`, alerts === 0 ? 'good' : 'bad'],

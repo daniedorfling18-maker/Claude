@@ -240,6 +240,19 @@ history with train-only selection and out-of-sample validation. Both are diagnos
 authorise paper or live trading; collection steering consumes them after the WO-11 research-focus
 wiring.
 
+### 2026-07-13 governance-refresh recovery
+
+The strict price-action model became stale even while websocket collection and the dashboard stayed
+fresh. The failure was operational, not evidence-positive: paper fills used market slugs while
+snapshots used condition ids, so the intentional token-id alias lookup repeatedly scanned the full
+multi-gigabyte snapshot ledger. Full governance timed out before reaching model training.
+
+The durable recovery adds the missing `(token_id, collected_at)` index, an OS-released cross-process
+governance lock, and `outputs/polymarket_model_governance/governance_refresh_status.json` with the
+active stage and stage durations. The model-critical stages now run before slower research/reporting
+stages, so a later report failure cannot leave the strict model timestamp stale. These changes alter
+neither evidence thresholds nor paper/live gates and invoke no trading path.
+
 ## Why $100/month is not solved yet
 
 At the current probationary stake of $2, a 3% ROI produces only $0.06 per trade. Hitting $100/month at that level would require about 1,667 trades/month, which is not realistic. The route to the target is therefore:

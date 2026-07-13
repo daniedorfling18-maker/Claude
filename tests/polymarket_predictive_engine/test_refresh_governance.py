@@ -2,8 +2,10 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from polymarket_predictive_engine import cli as engine_cli
 from polymarket_predictive_engine import refresh_governance as refresh_module
 from polymarket_predictive_engine.config import EngineConfig
+from polymarket_predictive_engine.utils import read_json
 
 
 def test_refresh_governance_rebuilds_price_action_paper_signals_before_audit(tmp_path, monkeypatch):
@@ -141,6 +143,7 @@ def test_refresh_governance_rebuilds_price_action_paper_signals_before_audit(tmp
     assert order.index("price_action_scout") < order.index("price_action_model")
     assert order.index("price_action_microstructure") < order.index("price_action_model")
     assert order.index("paper_round_trip") < order.index("price_action_model")
+    assert order.index("price_action_model") < order.index("closing_line_value")
     assert order.index("price_action_feedback") < order.index("price_action_paper_signals")
     assert order.index("price_action_paper_signals") < order.index("trade_signal_audit")
     assert order.index("trade_signal_audit") < order.index("dashboard")
@@ -168,6 +171,62 @@ def test_refresh_governance_rebuilds_price_action_paper_signals_before_audit(tmp
     assert result["algo_sweep_decision"] == "no_sweep_candidate_reached_minimum_train_fills"
     assert Path(cfg.governance_root / "closing_line_value.json").exists()
     assert Path(cfg.governance_root / "governance_refresh.json").exists()
+    refresh_status = read_json(cfg.governance_root / "governance_refresh_status.json", default={})
+    assert refresh_status["status"] == "ok"
+    assert refresh_status["current_stage"] == "complete"
+    assert refresh_status["completed_stages"][:4] == [
+        "paper_round_trip_evidence",
+        "price_action_scout",
+        "price_action_microstructure",
+        "price_action_model",
+    ]
+    assert result["completed_stages"][:4] == refresh_status["completed_stages"][:4]
+    assert set(result["stage_durations_seconds"]) == set(result["completed_stages"])
+
+
+def test_refresh_governance_skips_when_another_process_owns_lock(tmp_path):
+    cfg = EngineConfig(
+        raw={
+            "paths": {
+                "output_root": str(tmp_path / "outputs"),
+                "database_path": str(tmp_path / "work" / "paper.sqlite"),
+            }
+        },
+        path=tmp_path / "config.yaml",
+    )
+    lock = refresh_module._GovernanceRefreshLock(cfg.governance_root / "governance_refresh.lock")
+    assert lock.acquire() is True
+    try:
+        result = refresh_module.refresh_governance(cfg)
+    finally:
+        lock.release()
+
+    assert result["status"] == "skipped_already_running"
+    assert result["paper_trading_invoked"] is False
+    assert result["live_trading_invoked"] is False
+    contention = read_json(cfg.governance_root / "governance_refresh_contention.json", default={})
+    assert contention["status"] == "skipped_already_running"
+    assert not (cfg.governance_root / "governance_refresh_status.json").exists()
+
+
+def test_engine_cli_returns_temporary_failure_for_governance_lock_contention(tmp_path, monkeypatch):
+    cfg = EngineConfig(
+        raw={
+            "paths": {
+                "output_root": str(tmp_path / "outputs"),
+                "database_path": str(tmp_path / "work" / "paper.sqlite"),
+            }
+        },
+        path=tmp_path / "config.yaml",
+    )
+    monkeypatch.setattr(engine_cli, "load_config", lambda _path: cfg)
+    monkeypatch.setattr(
+        engine_cli,
+        "refresh_governance",
+        lambda _cfg, refresh_dashboard=True: {"status": "skipped_already_running"},
+    )
+
+    assert engine_cli.main(["refresh-governance", "--config", str(cfg.path)]) == 75
 
 
 def assert_order_contains(order: list[str], required: list[str]) -> None:

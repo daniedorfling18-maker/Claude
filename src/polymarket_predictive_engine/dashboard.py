@@ -3808,6 +3808,7 @@ def _dashboard_oversight_status(
     live_loop_status: str,
     heartbeat: dict[str, Any],
     shadow_research: dict[str, Any],
+    governance_refresh: dict[str, Any],
     price_action_model: dict[str, Any],
     price_action_paper_signals: dict[str, Any],
     goal_plan: dict[str, Any],
@@ -3820,6 +3821,13 @@ def _dashboard_oversight_status(
     live_age = _age_seconds(heartbeat)
     shadow_status = str(shadow_research.get("effective_status") or shadow_research.get("status") or "unknown")
     shadow_age = safe_float(shadow_research.get("age_seconds"))
+    governance_refresh_status = str(governance_refresh.get("status") or "missing")
+    governance_refresh_stage = str(
+        governance_refresh.get("failed_stage")
+        or governance_refresh.get("current_stage")
+        or "unknown"
+    )
+    governance_refresh_age = _age_seconds(governance_refresh)
     model_age = _age_seconds(price_action_model)
     signal_age = _age_seconds(price_action_paper_signals)
     validation_gap = price_action_model.get("validation_gap", {})
@@ -3912,13 +3920,33 @@ def _dashboard_oversight_status(
                 or "The cycle continued with the latest available liquidity evidence instead of blocking the learning loop."
             ),
         )
+    if governance_refresh_status == "failed":
+        add_alert(
+            "bad",
+            "Governance refresh failed",
+            (
+                f"Stage {governance_refresh_stage} failed: "
+                f"{governance_refresh.get('error_type') or 'error'}: {governance_refresh.get('error') or 'no detail'}"
+            ),
+        )
     if model_age is None:
         add_alert("warn", "Model freshness unknown", "Price-action model summary has no usable timestamp.")
     elif model_age > MODEL_SCORING_STALE_AFTER_SECONDS:
+        refresh_context = ""
+        if governance_refresh_status == "running":
+            refresh_context = (
+                f" Active refresh stage: {governance_refresh_stage}; "
+                f"elapsed {round(safe_float(governance_refresh.get('elapsed_seconds')) or 0.0, 1)} seconds."
+            )
+        elif governance_refresh_status == "failed":
+            refresh_context = f" Last refresh failed at stage {governance_refresh_stage}."
         add_alert(
             "bad",
             "Model scoring is stale",
-            f"Price-action model summary is {round(model_age, 1)} seconds old; re-score before trusting new promotions.",
+            (
+                f"Price-action model summary is {round(model_age, 1)} seconds old; "
+                f"re-score before trusting new promotions.{refresh_context}"
+            ),
         )
     if validation_gap_active:
         add_alert(
@@ -4014,6 +4042,10 @@ def _dashboard_oversight_status(
         "shadow_research_status": shadow_status,
         "shadow_research_age_seconds": shadow_age,
         "shadow_research_reason": shadow_research.get("reason"),
+        "governance_refresh_status": governance_refresh_status,
+        "governance_refresh_stage": governance_refresh_stage,
+        "governance_refresh_age_seconds": governance_refresh_age,
+        "governance_refresh_elapsed_seconds": safe_float(governance_refresh.get("elapsed_seconds")),
         "model_status": price_action_model.get("status"),
         "model_decision": price_action_model.get("decision"),
         "model_age_seconds": model_age,
@@ -4422,6 +4454,26 @@ def _decision_useful_summary(
         )
         next_action = "Let the running shadow cycle finish; do not start a competing governance refresh."
         unlock_condition = "The running cycle must complete and publish fresh model, signal, and dashboard artifacts."
+    elif model_stale and str(oversight_status.get("governance_refresh_status") or "") == "running":
+        refresh_stage = str(oversight_status.get("governance_refresh_stage") or "unknown")
+        refresh_elapsed = safe_float(oversight_status.get("governance_refresh_elapsed_seconds")) or 0.0
+        trade_decision = "WAIT: GOVERNANCE REFRESH RUNNING"
+        decision_class = "warn"
+        headline = "The single-owner governance refresh is rebuilding model evidence"
+        primary_blocker = (
+            f"The previous price-action model is stale; the active refresh is at {refresh_stage} "
+            f"after {round(refresh_elapsed, 1)} seconds."
+        )
+        next_action = "Let the locked refresh finish; do not start a competing refresh."
+        unlock_condition = "The active refresh must publish a fresh model timestamp while governance gates remain unchanged."
+    elif model_stale and str(oversight_status.get("governance_refresh_status") or "") == "failed":
+        refresh_stage = str(oversight_status.get("governance_refresh_stage") or "unknown")
+        trade_decision = "WAIT: GOVERNANCE REFRESH FAILED"
+        decision_class = "bad"
+        headline = "The governed model refresh failed"
+        primary_blocker = f"The latest governance refresh failed at stage {refresh_stage}; the previous model is stale."
+        next_action = "Fix the named failing stage and rerun one locked governance refresh."
+        unlock_condition = "A single governance refresh must complete the model-critical stages and publish a fresh model timestamp."
     elif model_stale:
         trade_decision = "WAIT: MODEL STALE"
         decision_class = "bad"
@@ -5286,6 +5338,9 @@ def render_dashboard(cfg: EngineConfig, latest_report: dict[str, Any] | None = N
     price_action_microstructure_status = _price_action_microstructure_status(cfg)
     price_action_model_status = _price_action_model_status(cfg)
     price_action_paper_signal_status = _price_action_paper_signal_status(cfg)
+    governance_refresh_status = read_json(governance / "governance_refresh_status.json", default={}) or {}
+    if not isinstance(governance_refresh_status, dict):
+        governance_refresh_status = {}
     broker_signal_freshness = _broker_signal_freshness(
         price_action_paper_signal_status,
         broker_summary,
@@ -5409,6 +5464,7 @@ def render_dashboard(cfg: EngineConfig, latest_report: dict[str, Any] | None = N
         live_loop_status=live_loop_status,
         heartbeat=heartbeat if isinstance(heartbeat, dict) else {},
         shadow_research=shadow_research_cycle,
+        governance_refresh=governance_refresh_status,
         price_action_model=price_action_model_status,
         price_action_paper_signals=price_action_paper_signal_status,
         goal_plan=goal_plan,
@@ -5466,6 +5522,7 @@ def render_dashboard(cfg: EngineConfig, latest_report: dict[str, Any] | None = N
         "status": "ok",
         "generated_at_utc": now_utc(),
         "deployment_health": deployment_health,
+        "governance_refresh_status": governance_refresh_status,
         "decision_useful_summary": decision_useful_summary,
         "forward_paper_cycle": forward,
         "paper_trade_refresh": paper_trade_refresh,

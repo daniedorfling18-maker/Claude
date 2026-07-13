@@ -105,6 +105,31 @@ def _insert_snapshot(con, *, snapshot_id: str, collected_at: str, market_id: str
     )
 
 
+def test_snapshot_token_alias_lookup_uses_token_time_index(tmp_path):
+    """Slug/condition-id aliases must never force a full snapshot-ledger scan."""
+    cfg = _cfg(tmp_path)
+    con = connect_db(cfg.database_path)
+    try:
+        indexes = {str(row[1]) for row in con.execute("PRAGMA index_list(market_snapshots)").fetchall()}
+        plan = con.execute(
+            """
+            EXPLAIN QUERY PLAN
+            SELECT collected_at, market_id, best_bid, best_ask, midpoint, spread
+            FROM market_snapshots
+            WHERE token_id = ? AND collected_at >= ? AND collected_at <= ?
+            ORDER BY collected_at, rowid
+            """,
+            ("token-alias", "2026-07-01T00:00:00Z", "2026-07-02T00:00:00Z"),
+        ).fetchall()
+    finally:
+        con.close()
+
+    details = " ".join(str(row[3]) for row in plan)
+    assert "idx_market_snapshots_token_time" in indexes
+    assert "idx_market_snapshots_token_time" in details
+    assert "SCAN TABLE market_snapshots" not in details
+
+
 def test_paper_round_trip_exports_realised_broker_fills_as_strict_feedback(tmp_path):
     cfg = _cfg(tmp_path)
     con = connect_db(cfg.database_path)

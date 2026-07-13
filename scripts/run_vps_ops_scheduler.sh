@@ -375,6 +375,22 @@ run_trade_prints() {
   log "trade_prints: exit $CODE"
 }
 
+run_degraded_state_watchdog() {
+  # WO-78: semantic-health detection runs after producers have stamped their
+  # current status. It only appends incidents and refreshes reporting; it can
+  # never alter the fail-closed source state or invoke a trading path.
+  log "degraded_state_watchdog: starting"
+  STARTED_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+  timeout 120 python -m polymarket_predictive_engine.cli degraded-state-watchdog --config "$CONFIG_PATH" >> "$LOG_FILE" 2>&1
+  CODE=$?
+  if [ "$CODE" -eq 0 ]; then
+    timeout 120 python -m polymarket_predictive_engine.cli operating-state --config "$CONFIG_PATH" >> "$LOG_FILE" 2>&1
+    CODE=$?
+  fi
+  stamp_status degraded_state_watchdog "$CODE" "semantic-health watchdog + generated operating state; reporting only" "$STARTED_AT"
+  log "degraded_state_watchdog: exit $CODE"
+}
+
 log "vps-ops-scheduler starting: governance=${GOVERNANCE_INTERVAL}s clv=${CLV_INTERVAL}s card=${CARD_INTERVAL}s harvest=${HARVEST_INTERVAL}s tick=${TICK_SECONDS}s"
 stamp_status scheduler 0 "started"
 
@@ -406,5 +422,6 @@ while :; do
     touch_stamp trade_prints
     run_trade_prints
   fi
+  run_degraded_state_watchdog
   sleep "$TICK_SECONDS"
 done

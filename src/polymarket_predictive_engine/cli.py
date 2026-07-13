@@ -21,6 +21,7 @@ from .crypto_updown_labels import build_crypto_updown_proxy_labels
 from .dashboard import render_dashboard
 from .data_inventory import inventory
 from .data_quality import data_quality
+from .degraded_state_watchdog import build_degraded_state_watchdog
 from .disaster_recovery import create_ledger_archive, verify_and_restore_archive
 from .drift_scan_study import run_drift_scan
 from .dutch_arb_monitor import run_dutch_arb_monitor
@@ -124,6 +125,7 @@ COMMANDS = [
     "requote-alerts",
     "performance-factsheet",
     "operating-state",
+    "degraded-state-watchdog",
     "anchor-ledgers",
     "verify-ledger-chain",
     "render-ips",
@@ -345,6 +347,8 @@ def main(argv: list[str] | None = None) -> int:
             _print(build_performance_factsheet(cfg))
         elif args.command == "operating-state":
             _print(build_operating_state(cfg))
+        elif args.command == "degraded-state-watchdog":
+            _print(build_degraded_state_watchdog(cfg))
         elif args.command == "anchor-ledgers":
             _print(anchor_ledgers(cfg))
         elif args.command == "verify-ledger-chain":

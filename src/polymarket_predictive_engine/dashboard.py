@@ -282,6 +282,7 @@ async function load() {
     const longshotBias = data.longshot_bias || data.forward_paper_cycle?.longshot_bias || {};
     const performanceFactsheet = data.performance_factsheet || {};
     const operatingState = data.operating_state || {};
+    const degradedWatchdog = data.degraded_state_watchdog || operatingState.degraded_state_watchdog || {};
     const edgeAttribution = data.edge_attribution || {};
     const riskState = data.risk_state || {};
     const portfolioRisk = riskState.portfolio_risk || {};
@@ -359,6 +360,7 @@ async function load() {
       ? oversight.alerts.map(item => alertBox(item.title || "Oversight alert", longText(item.body || "-", 260), item.severity || "warn"))
       : [];
     if (dashboardStale) oversightAlerts.push(alertBox("Dashboard snapshot is stale", `The displayed file is ${fmtAge(dashboardAge)} old. Refresh the dashboard generator before trusting signal counts.`, "bad"));
+    if (String(degradedWatchdog.status || "") === "incident") oversightAlerts.push(alertBox("Persistent degraded-state incident", `${asNumber(degradedWatchdog.active_incident_count)} active incident(s). Fail-closed states remain unchanged; inspect the watchdog panel.`, "bad"));
     if (["needs_attention", "container_unversioned"].includes(String(deploymentHealth.status || ""))) oversightAlerts.push(alertBox("Deployment health needs attention", longText(deploymentHealth.summary || "Deployment metadata is incomplete or stale.", 260), "warn"));
     if (!oversightAlerts.length && modelStale) oversightAlerts.push(alertBox("Model scoring is stale", `Price-action model summary is ${fmtAge(modelAge)} old. Re-score/retrain before promoting any new paper signals.`, "bad"));
     if (!oversightAlerts.length && validationGapActive) oversightAlerts.push(alertBox("Model needs positive validation examples", `Train positives: ${plain(priceActionModel.train_positive_targets)}; validation positives: ${plain(priceActionModel.validation_positive_targets)}. Collect next: ${joinText(validationGap.collection_queries || [])}.`, "warn"));
@@ -565,6 +567,21 @@ async function load() {
         ["Unit","unit"],
         ["Observed","observed_at_utc"]
       ], 7)}
+      ${titledTable("Degraded-state watchdog registrations", degradedWatchdog.evaluations || [], [
+        ["Registration","registration_id", v=>longText(v, 180)],
+        ["State","state"],
+        ["Observed","observed_state", v=>longText(v || "-", 140)],
+        ["Consecutive","consecutive_degraded_observations"],
+        ["Maximum","max_consecutive_degraded_observations"],
+        ["Artifact","artifact", v=>longText(v, 180)]
+      ], 6)}
+      ${titledTable("Active degraded-state incidents", degradedWatchdog.active_incidents || [], [
+        ["Registration","registration_id", v=>longText(v, 170)],
+        ["Entity","entity", v=>longText(v, 150)],
+        ["Reason","reason", v=>longText(v, 260)],
+        ["Detected","detected_at_utc"],
+        ["Source","source_artifact", v=>longText(v, 180)]
+      ], 5)}
       ${titledTable("WO-67 autonomous-execution preconditions", operatingState.wo67_preconditions || [], [
         ["ID","id"],
         ["Precondition","title", v=>longText(v, 180)],
@@ -5393,6 +5410,11 @@ def render_dashboard(cfg: EngineConfig, latest_report: dict[str, Any] | None = N
     operating_state = read_json(cfg.output_root / "performance" / "operating_state.json", default={}) or {}
     if not isinstance(operating_state, dict):
         operating_state = {}
+    degraded_state_watchdog = read_json(
+        cfg.output_root / "ops_scheduler" / "degraded_state_watchdog.json", default={}
+    ) or {}
+    if not isinstance(degraded_state_watchdog, dict):
+        degraded_state_watchdog = {}
     edge_attribution = read_json(governance / "edge_attribution.json", default={}) or {}
     if not isinstance(edge_attribution, dict):
         edge_attribution = {}
@@ -5558,6 +5580,7 @@ def render_dashboard(cfg: EngineConfig, latest_report: dict[str, Any] | None = N
         "longshot_bias": longshot_bias,
         "performance_factsheet": performance_factsheet,
         "operating_state": operating_state,
+        "degraded_state_watchdog": degraded_state_watchdog,
         "edge_attribution": edge_attribution,
         "family_calibration": family_calibration,
         "collection_coverage": collection_coverage,

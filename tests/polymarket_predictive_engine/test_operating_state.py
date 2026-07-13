@@ -102,6 +102,18 @@ def _write_complete_evidence(cfg: EngineConfig) -> None:
             "host": "paper-vps",
         },
     )
+    write_json(
+        cfg.output_root / "ops_scheduler" / "degraded_state_watchdog.json",
+        {
+            "status": "ok",
+            "generated_at_utc": generated,
+            "active_incident_count": 0,
+            "new_incident_count": 0,
+            "active_incidents": [],
+            "paper_trading_invoked": False,
+            "live_trading_invoked": False,
+        },
+    )
     write_csv(
         cfg.output_root / "polymarket_portfolio" / "paper_fills.csv",
         [{"fill_id": "paper-1"}, {"fill_id": "paper-2"}],
@@ -141,6 +153,7 @@ def test_operating_state_derives_rows_and_wo67_preconditions(tmp_path: Path, mon
     assert rows["source_vs_deployed_sha"]["state"] == "ALIGNED"
     assert "aligned=True" in rows["latest_deployed_sha"]["evidence"]
     assert rows["autonomous_execution"]["state"] == "PRECONDITIONS_MET_EXECUTOR_NOT_IMPLEMENTED"
+    assert rows["degraded_state_watchdog"]["state"] == "OK"
     assert {identifier: row["state"] for identifier, row in preconditions.items()} == {
         "P1": "met",
         "P2": "met",
@@ -156,6 +169,7 @@ def test_operating_state_derives_rows_and_wo67_preconditions(tmp_path: Path, mon
     assert "Generated operating state" in markdown
     assert "WO-67 autonomous-execution preconditions" in markdown
     assert "Operating SLOs (reporting only)" in markdown
+    assert "Degraded-state watchdog (reporting only)" in markdown
 
 
 def test_operating_state_missing_artifacts_are_unknown_never_guessed(tmp_path: Path) -> None:
@@ -177,6 +191,7 @@ def test_operating_state_missing_artifacts_are_unknown_never_guessed(tmp_path: P
     assert rows["latest_deployed_sha"]["state"] == "UNKNOWN"
     assert rows["source_vs_deployed_sha"]["state"] == "UNKNOWN"
     assert rows["autonomous_execution"]["state"] == "BLOCKED_UNKNOWN"
+    assert rows["degraded_state_watchdog"]["state"] == "UNKNOWN"
     assert "vps_telemetry_manifest" in result["missing_inputs"]
     assert all(row["state"] == "UNKNOWN" for row in result["wo67_preconditions"])
     assert result["slo"]["unknown_count"] == 7

@@ -70,3 +70,42 @@ mismatch verbatim; a reconciliation that closes to the cent is the pass.
   logged as they land. A failed drill is a finding, not a retry loop.
 - This runbook never authorizes automation. Any automated order path
   remains blocked behind WO-67 P1–P5, including the dated owner amendment.
+
+## Drill log — 2026-07-13 (operator-executed)
+
+Market used: "Will France win on 2026-07-14?" (WC semifinal moneyline,
+$7.4M event volume, 0.25c spread). Wallet balance at start: $12.923349.
+
+**Drill A — PASS.** Limit buy Yes 5 shares @ 36c (5.25c below the 41.25c
+ask). Instant ack; rested 0/5 filled with $1.80 reserved "Until
+cancelled"; visible only as aggregate depth at the 0.36 level in the
+public book; cancelled cleanly; funds restored in full.
+
+**Drill B — PASS.** Limit buy Yes @ 42c filled instantly at the book ask
+0.4125 (price improvement confirmed venue-side). data-api reported
+`TRADE BUY 5.14 @ 0.4125`, usdcSize $2.18253. On-chain pUSD moved
+$12.923349 -> $10.740819 — exact to the cent against the venue debit.
+Position held to resolution per plan (settlement + redemption leg
+completes after the 2026-07-14 match).
+
+**Findings (all at $2 instead of $100):**
+1. Near-identical market variants sit side by side (regulation win vs
+   team-to-advance, ~18c apart); the order panel does not warn when a
+   "limit" order crosses the spread. Ticket discipline must name the
+   exact market question, not the fixture.
+2. "Available to trade" does not visibly deduct reservations for open
+   limit orders; displayed buying power can overstate free cash.
+3. First real taker-fee print: $0.06228 on $2.12025 notional (~2.9%),
+   consistent with the modeled 2.8% mean taker fee in Gate B.
+4. Share sizing: UI executed 5.14 shares against a 5-share ticket
+   (sized to total, not share count). Immaterial here; matters at size.
+5. Resting orders are NOT attributable from public data (aggregate book
+   depth only); fills ARE (per-wallet trade rows within seconds). This
+   confirms the fill-based scoreboard design and means requote
+   compliance can never be externally verified per-order.
+
+Pending legs: scoreboard pickup (next trade_prints cycle), three-way
+harvest reconciliation (2026-07-14 ~07:51Z), settlement stamp +
+redemption (post-match). Drill C (round-trip cost) intentionally not
+run: the taker fee is now measured directly, and the spread is 0.25c;
+skipping preserves balance for the funded stage.

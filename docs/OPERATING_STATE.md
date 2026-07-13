@@ -23,6 +23,14 @@ deployment manifest. It also reports registered reporting-only SLO measurements 
 artifacts render as `UNKNOWN`; prose is never used to fill a gap. The command is reporting-only and
 cannot invoke paper or live trading.
 
+WO-75 adds seven future-executor rows for mode, open orders, exposure versus
+stage cap, last-action age, independent dead-man state, freshness SLO, and kill
+criteria. They are sourced from `outputs/execution/executor_status.json` and
+render `ABSENT` until `outputs/execution/execution_ledger.csv` contains a row.
+The scheduler-owned monitor is documented in
+`docs/EXECUTOR_LIVE_OPS_CONTROL_PLANE.md`; it does not write the future
+executor heartbeat or implement the blocked STOP-binding hook.
+
 WO-73 keeps the operator wallet and isolated executor sub-account in
 separate `operator_wallet_monitoring` and `executor_wallet_monitoring` rows.
 The legacy primary-wallet row remains for compatibility but explicitly names

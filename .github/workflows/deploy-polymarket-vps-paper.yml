@@ -433,9 +433,11 @@ jobs:
             requote_alerts_code=$?
             timeout 300 python -m polymarket_predictive_engine.cli reconcile-wallet --config "$POLYMARKET_CONFIG_PATH"
             reconcile_wallet_code=$?
+            timeout 300 python -m polymarket_predictive_engine.cli executor-ops-monitor --config "$POLYMARKET_CONFIG_PATH"
+            executor_ops_monitor_code=$?
             timeout 300 python -m polymarket_predictive_engine.cli operating-state --config "$POLYMARKET_CONFIG_PATH"
             operating_state_code=$?
-            export maker_carry_study_code decision_policy_code requote_alerts_code reconcile_wallet_code operating_state_code
+            export maker_carry_study_code decision_policy_code requote_alerts_code reconcile_wallet_code executor_ops_monitor_code operating_state_code
             python - <<"PY"
           import json
           import os
@@ -451,6 +453,7 @@ jobs:
                   "decision_policy",
                   "requote_alerts",
                   "reconcile_wallet",
+                  "executor_ops_monitor",
                   "operating_state",
               )
           }
@@ -494,12 +497,14 @@ jobs:
 
           printf '%s' "$html" | grep -q "Proof status"
           printf '%s' "$html" | grep -q "Evidence funnel"
+          printf '%s' "$html" | grep -q "Executor live-ops control plane"
           printf '%s' "$data" | grep -q "profit_target_proof_status"
           printf '%s' "$data" | grep -q "deployment_health"
           printf '%s' "$data" | grep -q "mispricing_alpha_bridge"
           printf '%s' "$data" | grep -q "coverage_by_sport_market"
           printf '%s' "$data" | grep -q "alpha_validated_anchor_rows"
           printf '%s' "$data" | grep -q "sharp_sports_funnel"
+          printf '%s' "$data" | grep -q '"executor_status"'
 
           echo "VPS deploy verified: http://${PM_VPS_HOST}:${port}/"
           REMOTE

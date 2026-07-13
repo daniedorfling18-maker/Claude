@@ -285,6 +285,7 @@ def _producer_cycle_check(cfg: EngineConfig, baseline_at: datetime | None) -> di
         "decision_policy",
         "requote_alerts",
         "reconcile_wallet",
+        "executor_ops_monitor",
         "operating_state",
     )
     defects: list[Any] = []

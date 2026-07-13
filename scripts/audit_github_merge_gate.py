@@ -57,6 +57,7 @@ def workflow_is_configured(workflow_text: str) -> bool:
         "polymarket-ci",
         "test_wo73_controls.py",
         "test_executor_replay_certification.py",
+        "test_executor_ops_monitor.py",
         "test_deploy_acceptance.py",
         "test_collection_hygiene.py",
         "test_degraded_state_watchdog.py",

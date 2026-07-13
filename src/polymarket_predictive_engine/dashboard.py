@@ -121,6 +121,7 @@ HTML = """<!doctype html>
   <div id="error"></div>
   <div class="grid" id="cards"></div>
   <section class="primary"><h2>Canonical operating state</h2><div id="operatingState"></div></section>
+  <section class="primary"><h2>Executor live-ops control plane</h2><div id="executorOps"></div></section>
   <section class="primary"><h2>Decision cockpit</h2><div id="decisionCockpit"></div></section>
   <section><h2>Action board</h2><div id="actionBoard"></div></section>
   <section><h2>Evidence funnel</h2><div id="evidenceFunnel"></div></section>
@@ -282,6 +283,7 @@ async function load() {
     const longshotBias = data.longshot_bias || data.forward_paper_cycle?.longshot_bias || {};
     const performanceFactsheet = data.performance_factsheet || {};
     const operatingState = data.operating_state || {};
+    const executorStatus = data.executor_status || operatingState.executor_status || {};
     const degradedWatchdog = data.degraded_state_watchdog || operatingState.degraded_state_watchdog || {};
     const deployAcceptance = data.deploy_acceptance || operatingState.deploy_acceptance || {};
     const edgeAttribution = data.edge_attribution || {};
@@ -363,6 +365,7 @@ async function load() {
     if (dashboardStale) oversightAlerts.push(alertBox("Dashboard snapshot is stale", `The displayed file is ${fmtAge(dashboardAge)} old. Refresh the dashboard generator before trusting signal counts.`, "bad"));
     if (String(deployAcceptance.status || "").toUpperCase() === "FAIL") oversightAlerts.push(alertBox("Latest deployment failed acceptance", `One or more real-data component contracts failed. Target ${longText(deployAcceptance.target_deploy_sha || "unknown", 20)} remains reversible to ${longText(deployAcceptance.rollback_ref || "unknown", 20)}; inspect the operating-state row before trusting this release.`, "bad"));
     if (String(degradedWatchdog.status || "") === "incident") oversightAlerts.push(alertBox("Persistent degraded-state incident", `${asNumber(degradedWatchdog.active_incident_count)} active incident(s). Fail-closed states remain unchanged; inspect the watchdog panel.`, "bad"));
+    if (String(executorStatus.status || "").toUpperCase() === "ALERT") oversightAlerts.push(alertBox("Executor live-ops alert", `${asNumber(executorStatus.owner_alert_count)} registered executor alert(s) are active. Inspect the executor control plane; this dashboard cannot cancel or trade.`, "bad"));
     if (["needs_attention", "container_unversioned"].includes(String(deploymentHealth.status || ""))) oversightAlerts.push(alertBox("Deployment health needs attention", longText(deploymentHealth.summary || "Deployment metadata is incomplete or stale.", 260), "warn"));
     if (!oversightAlerts.length && modelStale) oversightAlerts.push(alertBox("Model scoring is stale", `Price-action model summary is ${fmtAge(modelAge)} old. Re-score/retrain before promoting any new paper signals.`, "bad"));
     if (!oversightAlerts.length && validationGapActive) oversightAlerts.push(alertBox("Model needs positive validation examples", `Train positives: ${plain(priceActionModel.train_positive_targets)}; validation positives: ${plain(priceActionModel.validation_positive_targets)}. Collect next: ${joinText(validationGap.collection_queries || [])}.`, "warn"));
@@ -552,6 +555,38 @@ async function load() {
       card("Best edge route", bestEdgeRouteSummary(), "warn")
     ].join("");
     const operatingRows = Array.isArray(operatingState.rows) ? operatingState.rows : [];
+    const executorDeadMan = executorStatus.dead_man || {};
+    const executorFreshness = executorStatus.freshness_slo || {};
+    const executorKill = executorStatus.kill_criteria_scoreboard || {};
+    const executorReconciliation = executorStatus.executor_reconciliation || {};
+    const executorAlerts = Array.isArray(executorStatus.owner_alerts) ? executorStatus.owner_alerts : [];
+    const executorAbsent = String(executorStatus.status || "ABSENT").toUpperCase() === "ABSENT";
+    const executorStateClass = String(executorStatus.status || "").toUpperCase() === "ALERT" ? "bad" : executorAbsent ? "warn" : "good";
+    const executorExposure = executorAbsent
+      ? "ABSENT"
+      : `${fmtUsd(executorStatus.exposure_usd)} / ${fmtUsd(executorStatus.stage_cap_usd)} (${plain(executorStatus.exposure_vs_stage_cap_state || "UNKNOWN")})`;
+    document.getElementById("executorOps").innerHTML = `
+      <div class="sectionLead">Independent, read-only monitoring of the future executor ledger and heartbeat. Until that ledger exists, every executor runtime value is intentionally ABSENT.</div>
+      ${facts([
+        ["Monitor state", executorStatus.status || "ABSENT", v=>badge(v, executorStateClass)],
+        ["Mode", executorStatus.mode || "ABSENT"],
+        ["Open orders", executorAbsent ? "ABSENT" : (executorStatus.open_orders ?? "UNKNOWN")],
+        ["Exposure / stage cap", executorExposure, v=>v],
+        ["Last action age", executorAbsent ? "ABSENT" : fmtAge(executorStatus.last_action_age_seconds), v=>v],
+        ["Freshness SLO", executorAbsent ? "ABSENT" : `${executorFreshness.state || "UNKNOWN"} / ${fmtAge(executorFreshness.heartbeat_age_seconds)}`, v=>v],
+        ["Dead-man", executorAbsent ? "ABSENT" : `${executorDeadMan.state || "UNKNOWN"} / ${fmtAge(executorDeadMan.countdown_seconds)} remaining`, v=>v],
+        ["Kill criteria", executorAbsent ? "ABSENT" : (executorKill.status || "UNKNOWN")],
+        ["Executor reconciliation", executorAbsent ? "ABSENT" : `${executorReconciliation.status || "UNKNOWN"} / ${fmtUsd(executorReconciliation.unexplained_discrepancy_usd)}`, v=>v],
+        ["Owner notification", executorStatus.notify ? "NEW ALERT READY" : (executorAlerts.length ? "active / deduplicated" : "none")]
+      ])}
+      ${executorAlerts.length ? `<div class="alertGrid">${executorAlerts.map(item => alertBox(item.title || item.id || "Executor alert", longText(item.reason || "-", 260), item.severity === "critical" ? "bad" : "warn")).join("")}</div>` : `<div class="muted">No active executor live-ops alerts.</div>`}
+      ${titledTable("Kill-criteria scoreboard", executorKill.criteria || [], [
+        ["Criterion","criterion", v=>longText(v, 180)],
+        ["Triggered","triggered"],
+        ["Observed","observed", v=>longText(v, 140)],
+        ["Threshold","threshold", v=>longText(v, 140)]
+      ], 8)}
+    `;
     document.getElementById("operatingState").innerHTML = `
       <div class="sectionLead">Generated from effective config and point-in-time artifacts. UNKNOWN means the evidence source is absent; no value is guessed.</div>
       ${operatingRows.length ? table(operatingRows, [
@@ -5412,6 +5447,9 @@ def render_dashboard(cfg: EngineConfig, latest_report: dict[str, Any] | None = N
     operating_state = read_json(cfg.output_root / "performance" / "operating_state.json", default={}) or {}
     if not isinstance(operating_state, dict):
         operating_state = {}
+    executor_status = read_json(cfg.output_root / "execution" / "executor_status.json", default={}) or {}
+    if not isinstance(executor_status, dict):
+        executor_status = {}
     degraded_state_watchdog = read_json(
         cfg.output_root / "ops_scheduler" / "degraded_state_watchdog.json", default={}
     ) or {}
@@ -5587,6 +5625,7 @@ def render_dashboard(cfg: EngineConfig, latest_report: dict[str, Any] | None = N
         "longshot_bias": longshot_bias,
         "performance_factsheet": performance_factsheet,
         "operating_state": operating_state,
+        "executor_status": executor_status,
         "degraded_state_watchdog": degraded_state_watchdog,
         "deploy_acceptance": deploy_acceptance,
         "edge_attribution": edge_attribution,

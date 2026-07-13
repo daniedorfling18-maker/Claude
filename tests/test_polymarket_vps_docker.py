@@ -141,6 +141,8 @@ def test_vps_health_script_checks_dashboard_and_heartbeat_files():
     assert "coverage_by_sport_market" in text
     assert "alpha_validated_anchor_rows" in text
     assert "sharp_sports_funnel" in text
+    assert "Executor live-ops control plane" in text
+    assert '"executor_status"' in text
     assert "Repair: docker compose -f $COMPOSE_FILE exec -T polymarket-paper-live python scripts/render_polymarket_dashboard.py" in text
 
 
@@ -178,6 +180,7 @@ def test_vps_deploy_runs_real_data_acceptance_after_restart_and_before_success()
     assert "maker-carry-study" in text
     assert "requote-alerts" in text
     assert "reconcile-wallet" in text
+    assert "executor-ops-monitor" in text
     assert "operating-state" in text
     assert 'acceptance_status" != "PASS"' in text
     assert "previous revision $original_head remains the recorded rollback ref" in text

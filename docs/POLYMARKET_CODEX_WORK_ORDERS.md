@@ -2736,13 +2736,37 @@ minimum reward-eligible size, executor account only.
 4. Amendments to this contract: tighten-only before first canary day;
    any loosening requires a dated owner amendment.
 
+## WO-77 — Requote-alert ticket completeness (BUG, blocks the $100 stage)
+
+Observed 2026-07-13: `requote_alerts.json` stuck in `pull_quotes_now`
+three hours after deploy with `incomplete_order_ticket` and
+`missing_live_bid_ask` on every quote-sheet market. Hypothesis: the
+websocket collector's tracked-market set is discovery-selected and does
+not include the quote sheet's carrier markets (long-dated geopolitical),
+so tickets can never complete and the evaluator fails closed forever.
+1. Diagnose: confirm whether the quote-sheet condition_ids are in the
+   websocket subscription set; report the actual gap in the WO record.
+2. Fix: ensure every current quote-sheet/portfolio market has a live
+   bid/ask source — subscribe the websocket to quote-sheet markets on
+   sheet refresh, with a REST book snapshot fallback (rate-limited)
+   when the socket lacks coverage. Populate the full ticket fields
+   (URL, outcome, token, tick, bid, ask) from the same source.
+3. Guard test: a synthetic quote sheet whose market is absent from the
+   socket set must produce a complete ticket via the fallback, and
+   `quotes_ok` must be reachable in test. The fail-closed behaviour on
+   a REAL missing book stays (that part is correct).
+4. Constraint: read-only as ever; no gate or order path touched. This
+   must land before the $100 human stage starts — the requote loop is
+   that stage's safety net.
+
 ## Priority order for Codex (updated 2026-07-12, batch 8 filed)
 
 2026-07-13 update (batch 9 filed): WO-66 and WO-68b built and deployed;
-governance exit-124 resolved on the 4-core host. Queue now: **WO-71**
-(retention + suppression — disk relief holds at 75% but the corpus still
-grows), then batch 9 buildable-now parts in order **WO-73 (items 1-3) ->
-WO-74 -> WO-75 (items 1,3,4)**; WO-76 is a registration effective on
+governance exit-124 resolved on the 4-core host. Queue now: **WO-77
+FIRST** (bug — requote alerts permanently fail-closed; blocks the $100
+stage), then **WO-71** (retention + suppression — disk relief holds at
+75% but the corpus still grows), then batch 9 buildable-now parts in
+order **WO-73 (items 1-3) -> WO-74 -> WO-75 (items 1,3,4)**; WO-76 is a registration effective on
 filing (no build); WO-73 item 4, WO-75 item 2, and WO-67 itself remain
 POST-AMENDMENT; WO-70 deferred post-proof; WO-72 DEFERRED
 (pre-WO-67 requirement, build post-ladder). Batch 6: WO-66 unblocked; WO-67 BLOCKED per its

@@ -2672,6 +2672,24 @@ non-attributable from public data.
 
 ## WO-73 — Two-wallet monitoring, credential guard, rotation drill (buildable NOW except item 4)
 
+Status: ITEMS 1–3 IMPLEMENTED by Codex on 2026-07-13; item 4 remains
+POST-AMENDMENT and is not implemented. Config now accepts only the executor
+sub-account's public wallet identifier. The maker scoreboard, WO-62
+reconciliation, histories, and generated operating state report operator and
+executor roles separately with `wallets_combined=false`; the legacy top-level
+view is explicitly the primary role and never a silent sum. The owner runbook
+requires AUTO-REDEEM WINS during sub-account onboarding. A value-redacting
+credential guard derives the actual telemetry whitelist, scans every eligible
+file plus WO-65 archive manifests, and runs before either host telemetry or
+archive push; any finding refuses both paths. The required ARM64 PR gate runs
+the same scanner and planted-leak fixtures. A keyless rotation/revocation
+harness exercises missing and invalid dummy credentials against a fail-flat
+stub and requires nonzero exit, halt, zero orders/positions/exposure, and no
+order action. Its artifact is telemetry-visible and WO-61 anchored. No real
+credential name/value is loaded, no `.env` executor path exists, and no
+paper/live executor, signing, cancellation, broker, gate, model, or sizing
+path was added.
+
 1. Executor sub-account onboarding: config gains
    `maker_live_test.executor_wallet_address` (public identifier only,
    like the operator address). WO-62 three-way reconciliation, the

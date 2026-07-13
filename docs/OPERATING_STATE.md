@@ -23,6 +23,11 @@ deployment manifest. It also reports registered reporting-only SLO measurements 
 artifacts render as `UNKNOWN`; prose is never used to fill a gap. The command is reporting-only and
 cannot invoke paper or live trading.
 
+WO-73 keeps the operator wallet and isolated executor sub-account in
+separate `operator_wallet_monitoring` and `executor_wallet_monitoring` rows.
+The legacy primary-wallet row remains for compatibility but explicitly names
+its role; wallet NAVs and maker scores are never silently summed.
+
 Deployment capacity is checked against the target revision before the mounted checkout changes. A
 failed `scripts/preflight_vps_capacity.py` run leaves the existing stack and deployed marker intact.
 

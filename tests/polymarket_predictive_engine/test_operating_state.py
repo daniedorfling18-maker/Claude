@@ -148,6 +148,8 @@ def test_operating_state_derives_rows_and_wo67_preconditions(tmp_path: Path, mon
     assert rows["governed_paper_authorisation"]["state"] == "NOT_GRANTED"
     assert rows["paper_activity"]["state"] == "RECORDED_FILLS=2"
     assert rows["live_wallet_monitoring"]["state"] == "ACTIVE_READ_ONLY:ok"
+    assert rows["operator_wallet_monitoring"]["state"] == "ACTIVE_READ_ONLY:ok"
+    assert rows["executor_wallet_monitoring"]["state"] == "NOT_CONFIGURED"
     assert rows["live_orders_submitted"]["state"] == "RECORDED_ORDERS=0"
     assert rows["latest_deployed_sha"]["state"] == "abcdef1"
     assert rows["source_vs_deployed_sha"]["state"] == "ALIGNED"
@@ -173,7 +175,9 @@ def test_operating_state_derives_rows_and_wo67_preconditions(tmp_path: Path, mon
     assert "Degraded-state watchdog (reporting only)" in markdown
 
 
-def test_operating_state_missing_artifacts_are_unknown_never_guessed(tmp_path: Path) -> None:
+def test_operating_state_missing_artifacts_are_unknown_never_guessed(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.delenv("PM_VPS_DEPLOYED_SHA", raising=False)
+    monkeypatch.delenv("PM_IMAGE_BUILD_SHA", raising=False)
     repo_root = tmp_path / "repo"
     repo_root.mkdir()
     cfg = EngineConfig(

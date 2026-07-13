@@ -36,6 +36,7 @@ ERC1155_BALANCE_OF_SELECTOR = "00fdd58e"
 HISTORY_FIELDS = [
     "generated_at_utc",
     "snapshot_date",
+    "wallet_role",
     "wallet_address",
     "reconciliation_status",
     "internal_nav_usd",
@@ -80,6 +81,8 @@ def _settings(cfg: EngineConfig) -> dict[str, Any]:
         "discrepancy_threshold_usd": 1.0,
         "position_quantity_tolerance": 0.000001,
         "starting_nav_usd": None,
+        "operator_starting_nav_usd": None,
+        "executor_starting_nav_usd": None,
         "baseline_epoch": 1,
         "gas_capture_enabled": True,
         "gas_scan_max_transactions": 50,
@@ -95,8 +98,12 @@ def _enabled(value: Any) -> bool:
     return str(value).strip().lower() not in {"0", "false", "no", "off", "disabled"}
 
 
-def _wallet(cfg: EngineConfig) -> str:
-    return str((cfg.raw.get("maker_live_test", {}) or {}).get("wallet_address") or "").strip()
+def _wallets(cfg: EngineConfig) -> dict[str, str]:
+    raw = cfg.raw.get("maker_live_test", {}) if isinstance(cfg.raw.get("maker_live_test"), dict) else {}
+    return {
+        "operator": str(raw.get("wallet_address") or "").strip(),
+        "executor": str(raw.get("executor_wallet_address") or "").strip(),
+    }
 
 
 def _pause(settings: dict[str, Any]) -> None:
@@ -371,9 +378,15 @@ def _internal_snapshot(
     cfg: EngineConfig,
     settings: dict[str, Any],
     api: dict[str, Any],
+    *,
+    wallet_role: str = "operator",
 ) -> dict[str, Any]:
     path = cfg.output_root / "maker_carry" / "maker_live_test.json"
-    scoreboard = read_json(path, default={}) or {}
+    root_scoreboard = read_json(path, default={}) or {}
+    wallet_scoreboards = root_scoreboard.get("wallets") if isinstance(root_scoreboard.get("wallets"), dict) else {}
+    scoreboard = wallet_scoreboards.get(wallet_role) if isinstance(wallet_scoreboards.get(wallet_role), dict) else {}
+    if not scoreboard and wallet_role == "operator":
+        scoreboard = root_scoreboard
     cash = next(
         (
             value
@@ -409,7 +422,10 @@ def _internal_snapshot(
     if cash is not None and positions is not None:
         nav = cash + positions + pending_rewards
     else:
-        starting_nav = safe_float(settings.get("starting_nav_usd"))
+        role_setting = f"{wallet_role}_starting_nav_usd"
+        starting_nav = safe_float(settings.get(role_setting))
+        if starting_nav is None and wallet_role == "operator":
+            starting_nav = safe_float(settings.get("starting_nav_usd"))
         net_score = safe_float(scoreboard.get("net_score_usd"))
         if starting_nav is not None and net_score is not None:
             net_flows = (safe_float(baseline_flows.get("deposits_usd")) or 0.0) - (safe_float(baseline_flows.get("withdrawals_usd")) or 0.0)
@@ -429,6 +445,7 @@ def _internal_snapshot(
         "withdrawals_usd": baseline_flows.get("withdrawals_usd"),
         "explained_adjustment_usd": safe_float(scoreboard.get("reconciliation_explained_adjustment_usd")) or 0.0,
         "scoreboard_generated_at_utc": scoreboard.get("generated_at_utc"),
+        "wallet_role": wallet_role,
     }
 
 
@@ -748,45 +765,15 @@ def _append_history(cfg: EngineConfig, settings: dict[str, Any], payload: dict[s
     )
 
 
-def reconcile_wallet(cfg: EngineConfig) -> dict[str, Any]:
-    settings = _settings(cfg)
-    output_path = cfg.output_root / "performance" / "wallet_reconciliation.json"
-    stamp = now_utc()
-    wallet = _wallet(cfg)
-    payload: dict[str, Any] = {
-        "status": "disabled",
-        "reconciliation_status": "disabled",
-        "generated_at_utc": stamp,
-        "snapshot_date": stamp[:10],
-        "wallet_address": wallet,
-        "paper_trading_invoked": False,
-        "live_trading_invoked": False,
-    }
-    if not _enabled(settings.get("enabled", True)):
-        write_json(output_path, payload)
-        return payload
-    if not wallet:
-        payload.update(
-            {
-                "status": "awaiting_wallet_address",
-                "reconciliation_status": "partial",
-                "note": "Set maker_live_test.wallet_address to activate read-only three-way reconciliation.",
-            }
-        )
-        write_json(output_path, payload)
-        return payload
-    if not WALLET_RE.fullmatch(wallet):
-        payload.update(
-            {
-                "status": "invalid_wallet_address",
-                "reconciliation_status": "partial",
-                "note": "maker_live_test.wallet_address is not a 20-byte 0x Polygon address.",
-            }
-        )
-        write_json(output_path, payload)
-        return payload
-
-    registry = _contract_registry(cfg, settings)
+def _reconcile_one_wallet(
+    cfg: EngineConfig,
+    settings: dict[str, Any],
+    *,
+    wallet_role: str,
+    wallet: str,
+    registry: dict[str, Any],
+    stamp: str,
+) -> dict[str, Any]:
     try:
         api = _data_api_snapshot(settings, wallet)
     except Exception as exc:
@@ -797,7 +784,7 @@ def reconcile_wallet(cfg: EngineConfig) -> dict[str, Any]:
             "activities": [],
             "errors": [f"{type(exc).__name__}: {exc}"],
         }
-    internal = _internal_snapshot(cfg, settings, api)
+    internal = _internal_snapshot(cfg, settings, api, wallet_role=wallet_role)
     api_positions = api.get("positions") or []
     api_activities = api.get("activities") or []
     onchain = _onchain_snapshot(settings, wallet, registry, api_positions)
@@ -816,26 +803,142 @@ def reconcile_wallet(cfg: EngineConfig) -> dict[str, Any]:
             "raw_rows_persisted": False,
         }
     )
-    payload.update(
+    payload = {
+        "status": "ok" if state["reconciliation_status"] in {"clean", "explained"} else state["reconciliation_status"],
+        **state,
+        "generated_at_utc": stamp,
+        "snapshot_date": stamp[:10],
+        "wallet_role": wallet_role,
+        "wallet_address": wallet,
+        "discrepancy_threshold_usd": float(settings["discrepancy_threshold_usd"]),
+        "internal_nav_usd": internal.get("nav_usd"),
+        "data_api_nav_usd": api.get("nav_usd"),
+        "onchain_nav_usd": onchain.get("nav_usd"),
+        "internal": internal,
+        "data_api": public_api,
+        "onchain": onchain,
+        "contract_registry": registry,
+        "contracts_page_sha256": registry.get("source_sha256"),
+        "rpc_chain_id": onchain.get("rpc_chain_id"),
+        "gas_capture_hook": gas,
+        "governance_note": "Reporting only. A discrepancy is a human-review alert and does not alter a gate or place an order.",
+        "paper_trading_invoked": False,
+        "live_trading_invoked": False,
+    }
+    _append_history(cfg, settings, payload)
+    return payload
+
+
+def _unconfigured_wallet(role: str) -> dict[str, Any]:
+    return {
+        "status": "not_configured",
+        "reconciliation_status": "not_configured",
+        "wallet_role": role,
+        "wallet_address": "",
+        "paper_trading_invoked": False,
+        "live_trading_invoked": False,
+    }
+
+
+def reconcile_wallet(cfg: EngineConfig) -> dict[str, Any]:
+    settings = _settings(cfg)
+    output_path = cfg.output_root / "performance" / "wallet_reconciliation.json"
+    stamp = now_utc()
+    wallets = _wallets(cfg)
+    base: dict[str, Any] = {
+        "status": "disabled",
+        "reconciliation_status": "disabled",
+        "generated_at_utc": stamp,
+        "snapshot_date": stamp[:10],
+        "operator_wallet_address": wallets["operator"],
+        "executor_wallet_address": wallets["executor"],
+        "wallets_combined": False,
+        "nav_aggregation_policy": "operator and executor NAVs are reported separately and never summed",
+        "paper_trading_invoked": False,
+        "live_trading_invoked": False,
+    }
+    if not _enabled(settings.get("enabled", True)):
+        base["wallets"] = {role: _unconfigured_wallet(role) for role in wallets}
+        write_json(output_path, base)
+        return base
+    configured = {role: wallet for role, wallet in wallets.items() if wallet}
+    if not configured:
+        base.update(
+            {
+                "status": "awaiting_wallet_address",
+                "reconciliation_status": "partial",
+                "wallet_address": "",
+                "wallet_role": "operator",
+                "wallets": {role: _unconfigured_wallet(role) for role in wallets},
+                "note": (
+                    "Set maker_live_test.wallet_address and/or the public executor_wallet_address "
+                    "to activate separate read-only reconciliations."
+                ),
+            }
+        )
+        write_json(output_path, base)
+        return base
+
+    valid = {role: wallet for role, wallet in configured.items() if WALLET_RE.fullmatch(wallet)}
+    registry = _contract_registry(cfg, settings) if valid else {}
+    results: dict[str, dict[str, Any]] = {}
+    for role, wallet in wallets.items():
+        if not wallet:
+            results[role] = _unconfigured_wallet(role)
+        elif not WALLET_RE.fullmatch(wallet):
+            results[role] = {
+                "status": "invalid_wallet_address",
+                "reconciliation_status": "partial",
+                "generated_at_utc": stamp,
+                "snapshot_date": stamp[:10],
+                "wallet_role": role,
+                "wallet_address": wallet,
+                "note": f"maker_live_test.{('wallet_address' if role == 'operator' else 'executor_wallet_address')} is not a 20-byte 0x Polygon address.",
+                "paper_trading_invoked": False,
+                "live_trading_invoked": False,
+            }
+        else:
+            results[role] = _reconcile_one_wallet(
+                cfg,
+                settings,
+                wallet_role=role,
+                wallet=wallet,
+                registry=registry,
+                stamp=stamp,
+            )
+
+    primary_role = "operator" if wallets["operator"] else "executor"
+    primary = dict(results[primary_role])
+    active_results = [results[role] for role in configured]
+    statuses = [str(row.get("reconciliation_status") or "partial") for row in active_results]
+    if "DISCREPANCY" in statuses:
+        overall = "DISCREPANCY"
+    elif "partial" in statuses:
+        overall = "partial"
+    elif "explained" in statuses:
+        overall = "explained"
+    else:
+        overall = "clean"
+    discrepancies = [
+        value
+        for value in (safe_float(row.get("unexplained_discrepancy_usd")) for row in active_results)
+        if value is not None
+    ]
+    primary.update(base)
+    primary.update(
         {
-            "status": "ok" if state["reconciliation_status"] in {"clean", "explained"} else state["reconciliation_status"],
-            **state,
-            "discrepancy_threshold_usd": float(settings["discrepancy_threshold_usd"]),
-            "internal_nav_usd": internal.get("nav_usd"),
-            "data_api_nav_usd": api.get("nav_usd"),
-            "onchain_nav_usd": onchain.get("nav_usd"),
-            "internal": internal,
-            "data_api": public_api,
-            "onchain": onchain,
-            "contract_registry": registry,
-            "contracts_page_sha256": registry.get("source_sha256"),
-            "rpc_chain_id": onchain.get("rpc_chain_id"),
-            "gas_capture_hook": gas,
-            "governance_note": "Reporting only. A discrepancy is a human-review alert and does not alter a gate or place an order.",
+            "status": "ok" if overall in {"clean", "explained"} else overall,
+            "reconciliation_status": overall,
+            "wallet_address": wallets[primary_role],
+            "wallet_role": primary_role,
+            "primary_wallet_role": primary_role,
+            "wallets": results,
+            "unexplained_discrepancy_usd": max(discrepancies) if discrepancies else None,
+            "work_order": "WO-62+WO-73",
         }
     )
+    payload = primary
     write_json(output_path, payload)
-    _append_history(cfg, settings, payload)
     _patch_quote_sheet(cfg, payload)
     return payload
 

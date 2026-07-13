@@ -13,12 +13,17 @@ from polymarket_predictive_engine.maker_live_test import run_maker_live_test
 from polymarket_predictive_engine.utils import read_csv_rows, read_json, write_csv, write_json
 
 
-def _config(tmp_path: Path, wallet: str = ""):
+def _config(tmp_path: Path, wallet: str = "", executor_wallet: str = ""):
     raw = yaml.safe_load(Path("polymarket_predictive_config.example.yaml").read_text(encoding="utf-8"))
     raw["paths"]["data_root"] = str(tmp_path)
     raw["paths"]["output_root"] = str(tmp_path / "outputs")
     raw["paths"]["database_path"] = str(tmp_path / "work" / "paper.sqlite")
-    raw["maker_live_test"] = {"enabled": True, "wallet_address": wallet, "fill_alert_multiple": 2.0}
+    raw["maker_live_test"] = {
+        "enabled": True,
+        "wallet_address": wallet,
+        "executor_wallet_address": executor_wallet,
+        "fill_alert_multiple": 2.0,
+    }
     path = tmp_path / "config.yaml"
     path.write_text(yaml.safe_dump(raw), encoding="utf-8")
     return load_config(path)
@@ -124,3 +129,35 @@ def test_scoreboard_loses_when_inventory_swamps_rewards(tmp_path, monkeypatch):
     assert summary["fill_alert"] is False
     assert summary["net_score_usd"] == -19.0
     assert summary["scoreboard"] == "losing_so_far"
+
+
+def test_operator_and_executor_scoreboards_are_separate_and_never_summed(tmp_path, monkeypatch):
+    operator = "0xoperator"
+    executor = "0xexecutor"
+    cfg = _config(tmp_path, wallet=operator, executor_wallet=executor)
+    _seed_study(cfg, crossings=100.0)
+
+    def fake_get(url: str, params: dict[str, Any] | None = None, timeout: float | None = None):
+        del timeout
+        params = params or {}
+        user = params.get("user")
+        if url.endswith("/activity"):
+            if params.get("type") == "REWARD":
+                return _Response([{"usdcSize": 3.0 if user == operator else 1.0, "timestamp": 1_800_000_000}])
+            return _Response([])
+        if url.endswith("/positions"):
+            pnl = -1.0 if user == operator else -4.0
+            return _Response([{"size": 10, "currentValue": 5.0, "cashPnl": pnl}])
+        raise AssertionError(url)
+
+    monkeypatch.setattr(maker_live_test.requests, "get", fake_get)
+    summary = run_maker_live_test(cfg)
+
+    assert summary["wallets_combined"] is False
+    assert summary["primary_wallet_role"] == "operator"
+    assert summary["net_score_usd"] == 2.0
+    assert summary["wallets"]["operator"]["net_score_usd"] == 2.0
+    assert summary["wallets"]["executor"]["net_score_usd"] == -3.0
+    assert summary["net_score_usd"] != -1.0
+    history = read_csv_rows(cfg.output_root / "maker_carry" / "maker_live_test_history.csv")
+    assert {row["wallet_role"] for row in history} == {"operator", "executor"}

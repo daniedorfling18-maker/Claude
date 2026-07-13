@@ -29,14 +29,12 @@ from typing import Any
 import requests
 
 from .config import EngineConfig, load_config
-from .utils import now_utc, read_csv_rows, read_json, safe_float, write_csv, write_json
+from .utils import append_csv_rows, now_utc, read_csv_rows, read_json, safe_float, write_json
 
 DEFAULT_DATA_API_BASE_URL = "https://data-api.polymarket.com"
 
-HISTORY_FIELDS = [
+LEGACY_HISTORY_FIELDS = [
     "generated_at_utc",
-    "wallet_role",
-    "wallet_address",
     "rewards_usd_total",
     "rewards_usd_last_24h",
     "inventory_value_usd",
@@ -46,6 +44,12 @@ HISTORY_FIELDS = [
     "fill_alert",
     "net_score_usd",
     "scoreboard",
+]
+WALLET_HISTORY_FIELDS = [
+    "generated_at_utc",
+    "wallet_role",
+    "wallet_address",
+    *LEGACY_HISTORY_FIELDS[1:],
 ]
 
 
@@ -282,13 +286,34 @@ def run_maker_live_test(cfg: EngineConfig) -> dict[str, Any]:
         }
     )
     write_json(summary_path, summary)
-    history_path = out_root / "maker_live_test_history.csv"
-    history = read_csv_rows(history_path)
-    history.extend(
-        {field: row.get(field) for field in HISTORY_FIELDS}
+    # ``maker_live_test_history.csv`` was enrolled as append-only before
+    # WO-73 introduced wallet roles. Keep its original schema immutable and
+    # append only the primary wallet. Role-aware rows live in a new ledger.
+    legacy_path = out_root / "maker_live_test_history.csv"
+    legacy_row = {field: scored[primary_role].get(field) for field in LEGACY_HISTORY_FIELDS}
+    legacy_keys = {
+        tuple(str(row.get(field) or "") for field in LEGACY_HISTORY_FIELDS)
+        for row in read_csv_rows(legacy_path)
+    }
+    legacy_key = tuple(str(legacy_row.get(field) or "") for field in LEGACY_HISTORY_FIELDS)
+    if legacy_key not in legacy_keys:
+        append_csv_rows(legacy_path, [legacy_row], fieldnames=LEGACY_HISTORY_FIELDS)
+
+    wallet_path = out_root / "maker_live_test_wallet_history.csv"
+    wallet_rows = [
+        {field: row.get(field) for field in WALLET_HISTORY_FIELDS}
         for row in scored.values()
-    )
-    write_csv(history_path, history, fieldnames=HISTORY_FIELDS)
+    ]
+    wallet_keys = {
+        tuple(str(row.get(field) or "") for field in WALLET_HISTORY_FIELDS)
+        for row in read_csv_rows(wallet_path)
+    }
+    new_wallet_rows = [
+        row
+        for row in wallet_rows
+        if tuple(str(row.get(field) or "") for field in WALLET_HISTORY_FIELDS) not in wallet_keys
+    ]
+    append_csv_rows(wallet_path, new_wallet_rows, fieldnames=WALLET_HISTORY_FIELDS)
     return summary
 
 

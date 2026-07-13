@@ -113,6 +113,44 @@ def write_csv(path: str | Path, rows: Iterable[Mapping[str, Any]], fieldnames: S
     return path
 
 
+def append_csv_rows(
+    path: str | Path,
+    rows: Iterable[Mapping[str, Any]],
+    *,
+    fieldnames: Sequence[str],
+) -> Path:
+    """Append rows without ever rewriting bytes already present.
+
+    This is the only safe write primitive for a WO-61 ``append_only`` ledger.
+    A schema change must use a new versioned path; changing an existing header
+    would invalidate every historical prefix anchor.
+    """
+
+    path = Path(path)
+    rows = list(rows)
+    expected = [str(field) for field in fieldnames]
+    ensure_dir(path.parent)
+    write_header = not path.exists() or path.stat().st_size == 0
+    if not write_header:
+        actual = csv_columns(path)
+        if actual != expected:
+            raise ValueError(
+                f"append-only CSV schema mismatch for {path}: "
+                f"existing={actual!r}, requested={expected!r}; use a new versioned ledger path"
+            )
+    if not rows:
+        return path
+    with path.open("a", newline="", encoding="utf-8") as f:
+        writer = csv.DictWriter(f, fieldnames=expected, extrasaction="ignore")
+        if write_header:
+            writer.writeheader()
+        for row in rows:
+            writer.writerow({key: serialize_value(row.get(key, "")) for key in expected})
+        f.flush()
+        os.fsync(f.fileno())
+    return path
+
+
 def serialize_value(value: Any) -> str:
     if value is None:
         return ""

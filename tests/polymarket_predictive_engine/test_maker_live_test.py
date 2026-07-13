@@ -136,6 +136,26 @@ def test_operator_and_executor_scoreboards_are_separate_and_never_summed(tmp_pat
     executor = "0xexecutor"
     cfg = _config(tmp_path, wallet=operator, executor_wallet=executor)
     _seed_study(cfg, crossings=100.0)
+    legacy_path = cfg.output_root / "maker_carry" / "maker_live_test_history.csv"
+    write_csv(
+        legacy_path,
+        [
+            {
+                "generated_at_utc": "2026-07-12T06:16:56Z",
+                "rewards_usd_total": 0,
+                "rewards_usd_last_24h": 0,
+                "inventory_value_usd": 0,
+                "inventory_pnl_usd": 0,
+                "fills_last_24h": 0,
+                "modelled_fills_per_day": 1.0,
+                "fill_alert": False,
+                "net_score_usd": 0,
+                "scoreboard": "no_activity_yet",
+            }
+        ],
+        fieldnames=maker_live_test.LEGACY_HISTORY_FIELDS,
+    )
+    anchored_prefix = legacy_path.read_bytes()
 
     def fake_get(url: str, params: dict[str, Any] | None = None, timeout: float | None = None):
         del timeout
@@ -159,5 +179,7 @@ def test_operator_and_executor_scoreboards_are_separate_and_never_summed(tmp_pat
     assert summary["wallets"]["operator"]["net_score_usd"] == 2.0
     assert summary["wallets"]["executor"]["net_score_usd"] == -3.0
     assert summary["net_score_usd"] != -1.0
-    history = read_csv_rows(cfg.output_root / "maker_carry" / "maker_live_test_history.csv")
+    assert legacy_path.read_bytes().startswith(anchored_prefix)
+    assert "wallet_role" not in read_csv_rows(legacy_path)[0]
+    history = read_csv_rows(cfg.output_root / "maker_carry" / "maker_live_test_wallet_history.csv")
     assert {row["wallet_role"] for row in history} == {"operator", "executor"}

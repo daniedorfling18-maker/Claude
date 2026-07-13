@@ -2690,6 +2690,12 @@ credential name/value is loaded, no `.env` executor path exists, and no
 paper/live executor, signing, cancellation, broker, gate, model, or sizing
 path was added.
 
+**2026-07-13 append-only correction:** role-aware fields now use versioned
+maker-scoreboard and wallet-reconciliation ledgers. The pre-WO-73 files keep
+their original schemas and are written with strict byte appends, preventing a
+schema addition from invalidating historical WO-61 prefixes. See
+`docs/incidents/2026-07-13-wo73-append-only-ledger-migration.md`.
+
 1. Executor sub-account onboarding: config gains
    `maker_live_test.executor_wallet_address` (public identifier only,
    like the operator address). WO-62 three-way reconciliation, the

@@ -13,7 +13,7 @@ from polymarket_predictive_engine import wallet_reconciliation as reconciliation
 from polymarket_predictive_engine.cli import COMMANDS
 from polymarket_predictive_engine.config import load_config
 from polymarket_predictive_engine.performance_factsheet import build_performance_factsheet
-from polymarket_predictive_engine.utils import read_csv_rows, read_json, write_json
+from polymarket_predictive_engine.utils import read_csv_rows, read_json, write_csv, write_json
 
 
 WALLET = "0x" + "a" * 40
@@ -312,6 +312,20 @@ def test_empty_wallet_is_inert_and_cli_is_registered(tmp_path: Path, monkeypatch
 
 def test_two_wallet_reconciliation_reports_roles_separately_without_summing(tmp_path: Path, monkeypatch):
     cfg = _config(tmp_path, executor_wallet=EXECUTOR_WALLET)
+    legacy_path = cfg.output_root / "performance" / "wallet_reconciliation_history.csv"
+    write_csv(
+        legacy_path,
+        [
+            {
+                "generated_at_utc": "2026-07-12T07:54:30Z",
+                "snapshot_date": "2026-07-12",
+                "wallet_address": WALLET,
+                "reconciliation_status": "partial",
+            }
+        ],
+        fieldnames=reconciliation.LEGACY_HISTORY_FIELDS,
+    )
+    anchored_prefix = legacy_path.read_bytes()
     write_json(
         cfg.output_root / "maker_carry" / "maker_live_test.json",
         {
@@ -343,5 +357,7 @@ def test_two_wallet_reconciliation_reports_roles_separately_without_summing(tmp_
     assert "combined_nav_usd" not in result
     assert result["wallets"]["operator"]["wallet_address"] == WALLET
     assert result["wallets"]["executor"]["wallet_address"] == EXECUTOR_WALLET
-    history = read_csv_rows(cfg.output_root / "performance" / "wallet_reconciliation_history.csv")
+    assert legacy_path.read_bytes().startswith(anchored_prefix)
+    assert "wallet_role" not in read_csv_rows(legacy_path)[0]
+    history = read_csv_rows(cfg.output_root / "performance" / "wallet_reconciliation_wallet_history.csv")
     assert {row["wallet_role"] for row in history} == {"operator", "executor"}

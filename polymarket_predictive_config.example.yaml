@@ -293,6 +293,9 @@ ledger_anchor:
     - {glob: polymarket_shadow/shadow_fills.csv, mode: append_only}
     - {glob: maker_carry/maker_carry_history.csv, mode: append_only}
     - {glob: maker_carry/maker_live_test_history.csv, mode: append_only}
+    # 2026-07-13: role-aware WO-73 rows use a new path so the pre-WO-73
+    # append-only ledger's anchored header and historical bytes never change.
+    - {glob: maker_carry/maker_live_test_wallet_history.csv, mode: append_only}
     - {glob: maker_carry/decision_policy.json, mode: snapshot}
     - {glob: maker_carry/requote_alerts.json, mode: snapshot}
     - {glob: execution/credential_rotation_drill.json, mode: snapshot}
@@ -304,6 +307,8 @@ ledger_anchor:
     - {glob: performance/wallet_reconciliation.json, mode: snapshot}
     - {glob: performance/wallet_contract_registry.json, mode: snapshot}
     - {glob: performance/wallet_reconciliation_history.csv, mode: append_only}
+    # Same fixed-schema split for WO-62/WO-73 wallet-role history.
+    - {glob: performance/wallet_reconciliation_wallet_history.csv, mode: append_only}
     - {glob: performance/wallet_gas_observations.csv, mode: append_only}
     - {glob: performance/cost_ledger.csv, mode: append_only}
     # 2026-07-12 WO-68b: persist every fail-closed exit-75 supervisor event so
@@ -402,7 +407,8 @@ wallet_reconciliation:
   # Optional signer/EOA addresses whose gas is investor-paid. Relayer-paid
   # transactions remain observed but are not attributed as a true cost.
   gas_payer_addresses: []
-  max_history_rows: 10000
+  # WO-61 histories deliberately do not roll or cap in-place. A future
+  # retention change requires a new versioned path so anchored bytes survive.
   max_gas_rows: 100000
 
 # 2026-07-11 WO-63: append-only investor cost accounting. Only gas paid by the

@@ -23,7 +23,7 @@ from typing import Any, Iterable
 import requests
 
 from .config import EngineConfig, load_config
-from .utils import now_utc, read_csv_rows, read_json, safe_float, write_csv, write_json
+from .utils import append_csv_rows, now_utc, read_csv_rows, read_json, safe_float, write_csv, write_json
 
 
 OFFICIAL_CONTRACTS_URL = "https://docs.polymarket.com/resources/contracts"
@@ -33,10 +33,9 @@ TX_RE = re.compile(r"^0x[a-fA-F0-9]{64}$")
 ERC20_BALANCE_OF_SELECTOR = "70a08231"
 ERC1155_BALANCE_OF_SELECTOR = "00fdd58e"
 
-HISTORY_FIELDS = [
+LEGACY_HISTORY_FIELDS = [
     "generated_at_utc",
     "snapshot_date",
-    "wallet_role",
     "wallet_address",
     "reconciliation_status",
     "internal_nav_usd",
@@ -46,6 +45,12 @@ HISTORY_FIELDS = [
     "unexplained_discrepancy_usd",
     "contracts_page_sha256",
     "rpc_chain_id",
+]
+WALLET_HISTORY_FIELDS = [
+    "generated_at_utc",
+    "snapshot_date",
+    "wallet_role",
+    *LEGACY_HISTORY_FIELDS[2:],
 ]
 
 GAS_FIELDS = [
@@ -87,7 +92,6 @@ def _settings(cfg: EngineConfig) -> dict[str, Any]:
         "gas_capture_enabled": True,
         "gas_scan_max_transactions": 50,
         "gas_payer_addresses": [],
-        "max_history_rows": 10000,
         "max_gas_rows": 100000,
     }
     merged.update({key: value for key, value in raw.items() if value is not None})
@@ -748,20 +752,28 @@ def _patch_quote_sheet(cfg: EngineConfig, payload: dict[str, Any]) -> None:
     path.write_text(text, encoding="utf-8")
 
 
-def _append_history(cfg: EngineConfig, settings: dict[str, Any], payload: dict[str, Any]) -> None:
-    path = cfg.output_root / "performance" / "wallet_reconciliation_history.csv"
+def _append_history_row(path: Path, payload: dict[str, Any], fieldnames: list[str]) -> None:
     rows = read_csv_rows(path)
-    row = {field: payload.get(field) for field in HISTORY_FIELDS}
-    key = tuple(str(row.get(field) or "") for field in HISTORY_FIELDS)
-    if key not in {tuple(str(existing.get(field) or "") for field in HISTORY_FIELDS) for existing in rows}:
-        rows.append(row)
-    _capped_write(
-        cfg,
-        path,
-        rows,
-        fieldnames=HISTORY_FIELDS,
-        max_rows=int(settings["max_history_rows"]),
-        archive_prefix="wallet_reconciliation_history",
+    row = {field: payload.get(field) for field in fieldnames}
+    key = tuple(str(row.get(field) or "") for field in fieldnames)
+    existing = {tuple(str(item.get(field) or "") for field in fieldnames) for item in rows}
+    if key not in existing:
+        append_csv_rows(path, [row], fieldnames=fieldnames)
+
+
+def _append_wallet_history(cfg: EngineConfig, payload: dict[str, Any]) -> None:
+    _append_history_row(
+        cfg.output_root / "performance" / "wallet_reconciliation_wallet_history.csv",
+        payload,
+        WALLET_HISTORY_FIELDS,
+    )
+
+
+def _append_legacy_history(cfg: EngineConfig, payload: dict[str, Any]) -> None:
+    _append_history_row(
+        cfg.output_root / "performance" / "wallet_reconciliation_history.csv",
+        payload,
+        LEGACY_HISTORY_FIELDS,
     )
 
 
@@ -825,7 +837,7 @@ def _reconcile_one_wallet(
         "paper_trading_invoked": False,
         "live_trading_invoked": False,
     }
-    _append_history(cfg, settings, payload)
+    _append_wallet_history(cfg, payload)
     return payload
 
 
@@ -939,6 +951,7 @@ def reconcile_wallet(cfg: EngineConfig) -> dict[str, Any]:
     )
     payload = primary
     write_json(output_path, payload)
+    _append_legacy_history(cfg, results[primary_role])
     _patch_quote_sheet(cfg, payload)
     return payload
 

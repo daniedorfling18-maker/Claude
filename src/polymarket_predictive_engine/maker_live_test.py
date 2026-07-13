@@ -35,6 +35,8 @@ DEFAULT_DATA_API_BASE_URL = "https://data-api.polymarket.com"
 
 HISTORY_FIELDS = [
     "generated_at_utc",
+    "wallet_role",
+    "wallet_address",
     "rewards_usd_total",
     "rewards_usd_last_24h",
     "inventory_value_usd",
@@ -52,6 +54,7 @@ def _settings(cfg: EngineConfig) -> dict[str, Any]:
     merged = {
         "enabled": True,
         "wallet_address": "",
+        "executor_wallet_address": "",
         "data_api_base_url": DEFAULT_DATA_API_BASE_URL,
         "activity_limit": 500,
         "fill_alert_multiple": 2.0,
@@ -120,39 +123,18 @@ def _modelled_fills_per_day(cfg: EngineConfig) -> float | None:
     return round(total, 2) if seen else None
 
 
-def run_maker_live_test(cfg: EngineConfig) -> dict[str, Any]:
-    settings = _settings(cfg)
-    out_root = cfg.output_root / "maker_carry"
-    summary_path = out_root / "maker_live_test.json"
-    summary: dict[str, Any] = {
-        "status": "disabled",
-        "generated_at_utc": now_utc(),
-        "work_order": "WO-36",
-        "paper_trading_invoked": False,
-        "live_trading_invoked": False,
-        "note": (
-            "READ-ONLY scoreboard for a human-run experiment. This system never places orders; "
-            "it only watches the wallet the human chose to trade from."
-        ),
-    }
-    if str(settings.get("enabled", True)).strip().lower() in {"0", "false", "no"}:
-        write_json(summary_path, summary)
-        return summary
-    wallet = str(settings.get("wallet_address") or "").strip()
-    if not wallet:
-        summary.update(
-            {
-                "status": "awaiting_wallet_address",
-                "how_to_enable": "set maker_live_test.wallet_address in config.yaml to the funded wallet, then recreate the containers.",
-            }
-        )
-        write_json(summary_path, summary)
-        return summary
-
+def _wallet_score(
+    cfg: EngineConfig,
+    settings: dict[str, Any],
+    *,
+    wallet_role: str,
+    wallet_address: str,
+    generated_at: str,
+) -> dict[str, Any]:
     limit = int(settings["activity_limit"])
-    rewards = _fetch(settings, "activity", {"user": wallet, "type": "REWARD", "limit": limit})
-    trades = _fetch(settings, "activity", {"user": wallet, "type": "TRADE", "limit": limit})
-    positions = _fetch(settings, "positions", {"user": wallet, "limit": limit})
+    rewards = _fetch(settings, "activity", {"user": wallet_address, "type": "REWARD", "limit": limit})
+    trades = _fetch(settings, "activity", {"user": wallet_address, "type": "TRADE", "limit": limit})
+    positions = _fetch(settings, "positions", {"user": wallet_address, "limit": limit})
 
     now_seconds = max([_stamp(row) for row in rewards + trades] + [0.0])
     day_ago = now_seconds - 86400.0
@@ -179,7 +161,9 @@ def run_maker_live_test(cfg: EngineConfig) -> dict[str, Any]:
 
     modelled = _modelled_fills_per_day(cfg)
     fill_alert = bool(
-        modelled is not None and modelled > 0 and fills_24h > float(settings["fill_alert_multiple"]) * modelled
+        modelled is not None
+        and modelled > 0
+        and fills_24h > float(settings["fill_alert_multiple"]) * modelled
     )
     net_score = round(rewards_total + inventory_pnl, 4)
     if fill_alert:
@@ -190,31 +174,120 @@ def run_maker_live_test(cfg: EngineConfig) -> dict[str, Any]:
         scoreboard = "winning_so_far"
     else:
         scoreboard = "losing_so_far"
+    return {
+        "status": "ok",
+        "generated_at_utc": generated_at,
+        "wallet_role": wallet_role,
+        "wallet_address": wallet_address,
+        "rewards_usd_total": rewards_total,
+        "rewards_usd_last_24h": rewards_24h,
+        "inventory_value_usd": round(inventory_value, 4),
+        "inventory_pnl_usd": round(inventory_pnl, 4),
+        "fills_last_24h": fills_24h,
+        "modelled_fills_per_day": modelled,
+        "fill_alert_multiple": float(settings["fill_alert_multiple"]),
+        "fill_alert": fill_alert,
+        "net_score_usd": net_score,
+        "scoreboard": scoreboard,
+        "scoring_rule": (
+            "winning = cumulative rewards + signed inventory PnL held positive across a week, "
+            "with real fills inside the modelled alert bound."
+        ),
+        "read_only": True,
+        "paper_trading_invoked": False,
+        "live_trading_invoked": False,
+    }
 
+
+def run_maker_live_test(cfg: EngineConfig) -> dict[str, Any]:
+    settings = _settings(cfg)
+    out_root = cfg.output_root / "maker_carry"
+    summary_path = out_root / "maker_live_test.json"
+    summary: dict[str, Any] = {
+        "status": "disabled",
+        "generated_at_utc": now_utc(),
+        "work_order": "WO-36+WO-73",
+        "paper_trading_invoked": False,
+        "live_trading_invoked": False,
+        "note": (
+            "READ-ONLY scoreboard for a human-run experiment. This system never places orders; "
+            "it only watches the wallet the human chose to trade from."
+        ),
+    }
+    if str(settings.get("enabled", True)).strip().lower() in {"0", "false", "no"}:
+        write_json(summary_path, summary)
+        return summary
+    wallets = {
+        "operator": str(settings.get("wallet_address") or "").strip(),
+        "executor": str(settings.get("executor_wallet_address") or "").strip(),
+    }
+    configured = {role: wallet for role, wallet in wallets.items() if wallet}
+    if not configured:
+        summary.update(
+            {
+                "status": "awaiting_wallet_address",
+                "wallets": {
+                    role: {
+                        "status": "not_configured",
+                        "wallet_role": role,
+                        "wallet_address": "",
+                    }
+                    for role in wallets
+                },
+                "wallets_combined": False,
+                "how_to_enable": (
+                    "set maker_live_test.wallet_address and/or the public "
+                    "executor_wallet_address, then recreate the containers"
+                ),
+            }
+        )
+        write_json(summary_path, summary)
+        return summary
+    scored = {
+        role: _wallet_score(
+            cfg,
+            settings,
+            wallet_role=role,
+            wallet_address=wallet,
+            generated_at=summary["generated_at_utc"],
+        )
+        for role, wallet in configured.items()
+    }
+    wallet_rows = {
+        role: scored.get(
+            role,
+            {
+                "status": "not_configured",
+                "wallet_role": role,
+                "wallet_address": "",
+                "paper_trading_invoked": False,
+                "live_trading_invoked": False,
+            },
+        )
+        for role in wallets
+    }
+    primary_role = "operator" if "operator" in scored else "executor"
+    summary.update(scored[primary_role])
     summary.update(
         {
             "status": "ok",
-            "wallet_address": wallet,
-            "rewards_usd_total": rewards_total,
-            "rewards_usd_last_24h": rewards_24h,
-            "inventory_value_usd": round(inventory_value, 4),
-            "inventory_pnl_usd": round(inventory_pnl, 4),
-            "fills_last_24h": fills_24h,
-            "modelled_fills_per_day": modelled,
-            "fill_alert_multiple": float(settings["fill_alert_multiple"]),
-            "fill_alert": fill_alert,
-            "net_score_usd": net_score,
-            "scoreboard": scoreboard,
-            "scoring_rule": (
-                "winning = cumulative rewards + signed inventory PnL held positive across a week, "
-                "with real fills inside the modelled alert bound."
-            ),
+            "work_order": "WO-36+WO-73",
+            "primary_wallet_role": primary_role,
+            "operator_wallet_address": wallets["operator"],
+            "executor_wallet_address": wallets["executor"],
+            "wallets": wallet_rows,
+            "wallets_combined": False,
+            "aggregation_policy": "operator and executor scoreboards are reported separately and never summed",
+            "auto_redeem_wins_owner_check": "required_on_executor_sub_account",
         }
     )
     write_json(summary_path, summary)
     history_path = out_root / "maker_live_test_history.csv"
     history = read_csv_rows(history_path)
-    history.append({field: summary.get(field) for field in HISTORY_FIELDS})
+    history.extend(
+        {field: row.get(field) for field in HISTORY_FIELDS}
+        for row in scored.values()
+    )
     write_csv(history_path, history, fieldnames=HISTORY_FIELDS)
     return summary
 

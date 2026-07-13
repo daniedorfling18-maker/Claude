@@ -274,6 +274,7 @@ ledger_anchor:
     - {glob: maker_carry/maker_live_test_history.csv, mode: append_only}
     - {glob: maker_carry/decision_policy.json, mode: snapshot}
     - {glob: maker_carry/requote_alerts.json, mode: snapshot}
+    - {glob: execution/credential_rotation_drill.json, mode: snapshot}
     - {glob: performance/investment_policy_statement.md, mode: snapshot}
     - {glob: performance/investment_policy_statement_summary.json, mode: snapshot}
     - {glob: performance/wallet_reconciliation.json, mode: snapshot}
@@ -339,6 +340,10 @@ maker_live_test:
   # identifier, read-only monitoring). Deposits go via the bridge, never
   # to this address. Set during the R250 pipe test; SA access verified.
   wallet_address: "0xD2EC3c8f541ad3aaC9396d63650D9d297bd55D2f"
+  # WO-73 public identifier only. Populate after the owner creates the
+  # isolated executor sub-account and enables AUTO-REDEEM WINS in that
+  # account's Trading settings. No credential is loaded by this config.
+  executor_wallet_address: ""
   fill_alert_multiple: 2.0
 
 # 2026-07-11 WO-62: read-only three-way NAV reconciliation for a configured
@@ -364,6 +369,8 @@ wallet_reconciliation:
   position_decimals: 6
   discrepancy_threshold_usd: 1.0
   starting_nav_usd:
+  operator_starting_nav_usd:
+  executor_starting_nav_usd:
   baseline_epoch: 1
   gas_capture_enabled: true
   gas_scan_max_transactions: 50

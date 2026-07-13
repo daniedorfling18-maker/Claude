@@ -21,6 +21,10 @@ exposure via the repository, telemetry, chat, or backups.
    separate from the operator's existing account. Its wallet holds ONLY
    the current ladder-stage capital (Stage 1: $100). The cap is enforced
    by physics: the account cannot spend money it does not hold.
+   During onboarding, the owner enables **AUTO-REDEEM WINS** in that
+   account's Trading settings and records the check; redemption logic is
+   not part of the future executor. The detailed owner procedure and
+   pre-amendment drill live in `EXECUTOR_SUB_ACCOUNT_AND_CREDENTIAL_DRILL.md`.
 2. The operator's existing account (holder of main deposits) never has
    its credentials on any machine. Top-ups of the executor account are
    manual owner actions, sized by the frozen ladder only.

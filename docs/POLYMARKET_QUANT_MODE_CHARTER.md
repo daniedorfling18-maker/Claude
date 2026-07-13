@@ -641,6 +641,17 @@ the socket-coverage miss that caused WO-77. The component is reporting and
 deployment control only: it cannot change gates, models, sizing, credentials,
 paper/live permissions, or orders, and the prior release remains reversible.
 
+**2026-07-13 — WO-73 items 1–3 implemented by Codex.** Read-only wallet
+monitoring now treats the operator and executor sub-account as separate named
+entities throughout scoreboard, reconciliation, histories, and operating
+state; no NAV or score is silently summed. Executor onboarding is public-ID
+only and requires the owner to enable AUTO-REDEEM WINS. Before any telemetry
+or archive push, a redacting guard scans the actual whitelisted surfaces and
+refuses the push on credential-shaped values; the ARM64 PR gate carries clean
+and planted-leak tests. The keyless rotation drill proves an unchanged
+fail-flat contract against missing/invalid dummy credentials. WO-73 item 4
+remains post-amendment: there is no executor credential loading or order path.
+
 ## Rules of engagement for coding agents
 
 0. **Division of labour**: the orchestrating agent writes/updates this charter and the work orders

@@ -17,6 +17,7 @@ from polymarket_predictive_engine.utils import read_csv_rows, read_json, write_j
 
 
 WALLET = "0x" + "a" * 40
+EXECUTOR_WALLET = "0x" + "b" * 40
 PUSD = "0x" + "1" * 40
 CTF = "0x" + "2" * 40
 ASSET = "42"
@@ -37,13 +38,14 @@ class _Response:
         return self._payload
 
 
-def _config(tmp_path: Path, *, wallet: str = WALLET, gas_enabled: bool = False):
+def _config(tmp_path: Path, *, wallet: str = WALLET, executor_wallet: str = "", gas_enabled: bool = False):
     tmp_path.mkdir(parents=True, exist_ok=True)
     raw = yaml.safe_load(Path("polymarket_predictive_config.example.yaml").read_text(encoding="utf-8"))
     raw["paths"]["data_root"] = str(tmp_path)
     raw["paths"]["output_root"] = str(tmp_path / "outputs")
     raw["paths"]["database_path"] = str(tmp_path / "work" / "paper.sqlite")
     raw["maker_live_test"]["wallet_address"] = wallet
+    raw["maker_live_test"]["executor_wallet_address"] = executor_wallet
     raw["wallet_reconciliation"].update(
         {
             "enabled": True,
@@ -306,3 +308,40 @@ def test_empty_wallet_is_inert_and_cli_is_registered(tmp_path: Path, monkeypatch
     assert result["reconciliation_status"] == "partial"
     assert "reconcile-wallet" in COMMANDS
     assert read_json(cfg.output_root / "performance" / "wallet_reconciliation.json")["live_trading_invoked"] is False
+
+
+def test_two_wallet_reconciliation_reports_roles_separately_without_summing(tmp_path: Path, monkeypatch):
+    cfg = _config(tmp_path, executor_wallet=EXECUTOR_WALLET)
+    write_json(
+        cfg.output_root / "maker_carry" / "maker_live_test.json",
+        {
+            "status": "ok",
+            "generated_at_utc": "2026-07-11T11:59:00Z",
+            "wallets_combined": False,
+            "wallets": {
+                role: {
+                    "status": "ok",
+                    "generated_at_utc": "2026-07-11T11:59:00Z",
+                    "cash_usd": 60.0,
+                    "inventory_value_usd": 40.0,
+                    "accrued_rewards_usd": 0.0,
+                }
+                for role in ("operator", "executor")
+            },
+        },
+    )
+    _install_http(monkeypatch)
+
+    result = reconciliation.reconcile_wallet(cfg)
+
+    assert result["status"] == "ok"
+    assert result["primary_wallet_role"] == "operator"
+    assert result["wallets_combined"] is False
+    assert result["internal_nav_usd"] == 100.0
+    assert result["wallets"]["operator"]["internal_nav_usd"] == 100.0
+    assert result["wallets"]["executor"]["internal_nav_usd"] == 100.0
+    assert "combined_nav_usd" not in result
+    assert result["wallets"]["operator"]["wallet_address"] == WALLET
+    assert result["wallets"]["executor"]["wallet_address"] == EXECUTOR_WALLET
+    history = read_csv_rows(cfg.output_root / "performance" / "wallet_reconciliation_history.csv")
+    assert {row["wallet_role"] for row in history} == {"operator", "executor"}

@@ -32,6 +32,18 @@ LOCK_DIR="${TMPDIR:-/tmp}/push_vps_telemetry.lock"
 GIT_DIR="$REPO_DIR/.git"
 [ -d "$GIT_DIR" ] || { echo "no git repo at $REPO_DIR" >&2; exit 0; }
 
+# WO-73: refuse every telemetry/archive push if a credential-shaped value is
+# found in a whitelisted source or archive manifest. The report contains only
+# finding locations/types, never matched values. This runs before either
+# sibling push, so a failure cannot leak via the archive path first.
+CREDENTIAL_GUARD="$REPO_DIR/scripts/check_telemetry_credential_guard.py"
+CREDENTIAL_GUARD_OUTPUT="$REPO_DIR/outputs/ops_scheduler/credential_guard.json"
+if [ ! -f "$CREDENTIAL_GUARD" ] || ! PYTHONPATH="$REPO_DIR/src${PYTHONPATH:+:$PYTHONPATH}" \
+  python3 "$CREDENTIAL_GUARD" --repo-root "$REPO_DIR" --output "$CREDENTIAL_GUARD_OUTPUT"; then
+  echo "WO-73 credential guard failed; refusing telemetry and archive push" >&2
+  exit 1
+fi
+
 # WO-61: this script already runs from the HOST (where .git credentials live),
 # while the daily harvest runs inside a container without Git metadata. Push
 # any pending daily chain head to the dedicated append-only branch first.
@@ -133,6 +145,7 @@ mv "$HOST_MANIFEST_TMP" "$HOST_MANIFEST"
 # official book snapshots stay on the VPS).
 TELEMETRY_DIRS="
 outputs/ops_scheduler
+outputs/execution
 outputs/polymarket_model_governance
 outputs/maker_carry
 outputs/wallet_intelligence

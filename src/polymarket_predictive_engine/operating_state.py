@@ -592,7 +592,13 @@ def build_operating_state(cfg: EngineConfig) -> dict[str, Any]:
     live_enabled = _explicit_bool(live_cfg, "enabled")
     maker_enabled = _explicit_bool(maker_cfg, "enabled")
     trading_mode = str(trading_cfg.get("mode") or "").strip().lower() or UNKNOWN
-    wallet_configured = bool(str(maker_cfg.get("wallet_address") or "").strip()) if maker_cfg else None
+    operator_wallet_configured = bool(str(maker_cfg.get("wallet_address") or "").strip()) if maker_cfg else None
+    executor_wallet_configured = bool(str(maker_cfg.get("executor_wallet_address") or "").strip()) if maker_cfg else None
+    wallet_configured = (
+        None
+        if operator_wallet_configured is None or executor_wallet_configured is None
+        else bool(operator_wallet_configured or executor_wallet_configured)
+    )
 
     if trading_mode == UNKNOWN or paper_enabled is None or live_enabled is None:
         research_mode = UNKNOWN
@@ -634,14 +640,23 @@ def build_operating_state(cfg: EngineConfig) -> dict[str, Any]:
     else:
         human_live_test = "NOT_CONFIGURED"
 
-    if maker_enabled is None or wallet_configured is None:
-        wallet_state = UNKNOWN
-    elif not maker_enabled or not wallet_configured:
-        wallet_state = "NOT_CONFIGURED"
-    elif maker_live_test:
-        wallet_state = f"ACTIVE_READ_ONLY:{maker_live_test.get('status', UNKNOWN)}"
-    else:
-        wallet_state = UNKNOWN
+    monitored_wallets = _mapping(maker_live_test.get("wallets"))
+
+    def monitored_state(role: str, configured: bool | None) -> str:
+        if maker_enabled is None or configured is None:
+            return UNKNOWN
+        if not maker_enabled or not configured:
+            return "NOT_CONFIGURED"
+        role_payload = _mapping(monitored_wallets.get(role))
+        if role_payload:
+            return f"ACTIVE_READ_ONLY:{role_payload.get('status', UNKNOWN)}"
+        if role == "operator" and maker_live_test:
+            return f"ACTIVE_READ_ONLY:{maker_live_test.get('status', UNKNOWN)}"
+        return UNKNOWN
+
+    operator_wallet_state = monitored_state("operator", operator_wallet_configured)
+    executor_wallet_state = monitored_state("executor", executor_wallet_configured)
+    wallet_state = operator_wallet_state if operator_wallet_configured else executor_wallet_state
 
     live_ledger_candidates = [
         output_root / "maker_carry" / "maker_execution_ledger.csv",
@@ -737,7 +752,30 @@ def build_operating_state(cfg: EngineConfig) -> dict[str, Any]:
         _row("governed_paper_authorisation", "Governed paper authorisation", governed_paper, governed_evidence, "local_history_audit_summary.json", _timestamp(audit)),
         _row("paper_activity", "Paper activity", paper_activity, paper_activity_evidence, "paper_fills.csv"),
         _row("human_live_test", "Human live-test authorisation", human_live_test, "human execution is outside system control; system monitoring is read-only", "maker_live_test config"),
-        _row("live_wallet_monitoring", "Live-wallet monitoring", wallet_state, f"wallet_configured={wallet_configured if wallet_configured is not None else UNKNOWN}", "config + maker_live_test.json", _timestamp(maker_live_test)),
+        _row(
+            "live_wallet_monitoring",
+            "Live-wallet monitoring (legacy primary view)",
+            wallet_state,
+            f"primary={'operator' if operator_wallet_configured else 'executor'}; wallets_combined=false",
+            "config + maker_live_test.json",
+            _timestamp(maker_live_test),
+        ),
+        _row(
+            "operator_wallet_monitoring",
+            "Operator wallet monitoring",
+            operator_wallet_state,
+            f"configured={operator_wallet_configured if operator_wallet_configured is not None else UNKNOWN}; role=operator",
+            "maker_live_test.wallet_address + maker_live_test.json",
+            _timestamp(maker_live_test),
+        ),
+        _row(
+            "executor_wallet_monitoring",
+            "Executor sub-account wallet monitoring",
+            executor_wallet_state,
+            f"configured={executor_wallet_configured if executor_wallet_configured is not None else UNKNOWN}; role=executor; auto_redeem_wins=owner_check_required",
+            "maker_live_test.executor_wallet_address + maker_live_test.json",
+            _timestamp(maker_live_test),
+        ),
         _row("live_orders_submitted", "Live orders submitted by the system", live_orders, live_order_evidence, str(live_ledger or UNKNOWN)),
         _row("autonomous_execution", "Autonomous execution authorisation", autonomous_state, ", ".join(f"{row['id']}={row['state']}" for row in preconditions), "WO-67 preconditions"),
         _row(

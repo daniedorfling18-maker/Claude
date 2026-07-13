@@ -645,6 +645,23 @@ sharp_anchor_coverage:
   minimum_executable_divergence: 0.03
   max_actionable_spread: 0.04
   min_actionable_liquidity: 100
+# 2026-07-13 WO-71: reviewable API-spend suppression plus bounded heavy-corpus
+# retention. Coverage suppression never edits the configured sport list; a
+# joined family returns to normal immediately. Retention paths are fixed in
+# code and exclude every WO-61/WO-65 investor ledger. Shorter windows/caps are
+# accepted as tighten-only overrides; longer values are clamped.
+collection_hygiene:
+  spend_suppression_enabled: true
+  zero_join_cycles_before_suppression: 5
+  suppressed_probe_interval_hours: 24
+  corpus_retention_enabled: true
+  websocket_feature_raw_days: 3
+  trade_print_raw_days: 30
+  official_book_raw_days: 14
+  training_archive_compaction_age_hours: 24
+  training_archive_days: 90
+  corpus_archive_max_mb: 1024
+  orphan_temp_max_age_hours: 24
 # 2026-07-10 WO-55: reconstructed sharp-anchor CLV study. Research-only
 # retrospective datapoints; never Gate A/verdict evidence and never trading.
 # Thresholds mirror the registered live sharp-anchor entry semantics as of

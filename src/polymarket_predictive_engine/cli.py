@@ -15,6 +15,7 @@ from .collection_only import run_collection_only
 from .config import config_check, load_config
 from .collection_coverage import build_collection_coverage
 from .cost_ledger import add_manual_cost, sync_cost_ledger
+from .corpus_retention import run_corpus_retention
 from .crypto_fundamental import build_crypto_fundamental
 from .crypto_targets import build_crypto_targets
 from .crypto_updown_labels import build_crypto_updown_proxy_labels
@@ -181,6 +182,7 @@ COMMANDS = [
     "evidence-history",
     "active-window-plan",
     "collection-coverage",
+    "corpus-retention",
     "promotion-gate",
     "validation-report",
     "validate",
@@ -536,6 +538,8 @@ def main(argv: list[str] | None = None) -> int:
             _print(build_active_window_plan(cfg))
         elif args.command == "collection-coverage":
             _print(build_collection_coverage(cfg))
+        elif args.command == "corpus-retention":
+            _print(run_corpus_retention(cfg))
         elif args.command == "promotion-gate":
             _print(paper_live_promotion_gate(cfg))
         elif args.command == "validation-report":

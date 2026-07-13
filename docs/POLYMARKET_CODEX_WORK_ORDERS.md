@@ -2606,6 +2606,25 @@ both serve the value loop directly.
 
 ## WO-71 — Collection hygiene: spend suppression + corpus retention
 
+Status: IMPLEMENTED by Codex on 2026-07-13. The paid sharp-odds fetcher now
+derives a reviewable `sharp_fetch_suppression.json` plan from WO-31 coverage
+history: a family at the registered zero-join threshold stops paid requests,
+receives one slow probe per 24 hours, and returns to normal immediately when a
+join succeeds. Config is never silently edited. Daily CLI `corpus-retention`
+compacts expired trade prints, official-book rows, and immutable training
+chunks into schema-safe daily gzip files before pruning; the live websocket
+writer retains ownership of its atomic row roll-off. Archive age/size and raw
+windows are tighten-only, stale incomplete atomic temp files are reclaimed,
+and the diagnostic history carries disk-growth projection. Fixed writable
+paths plus hard namespace and WO-61 registry checks prevent any decision
+ledger or WO-65 investor archive from being touched. No model/gate/order path
+changed. A write-enabled replay on a disposable copy of the 2026-07-13 VPS
+corpus compacted 658,275 training rows, 10,739 trade prints, and 2,600 official
+book rows in about one minute under a 3GB container limit; the planted
+decision-ledger hash was unchanged. The preceding read-only production replay
+identified 1.10GB across 21 abandoned temp files and projected roughly 21 days
+to 90% host-disk use without this control.
+
 Two small items, one theme: stop paying (API calls, disk) for data that
 cannot change a decision.
 

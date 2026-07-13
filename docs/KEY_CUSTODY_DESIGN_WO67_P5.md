@@ -64,11 +64,11 @@ exposure via the repository, telemetry, chat, or backups.
 
 ## Owner acceptance checklist (all boxes required for APPROVED)
 
-- [ ] Sub-account design accepted (or a written alternative chosen).
-- [ ] Residual risk accepted: the executor signing key can lose at most
+- [X] Sub-account design accepted (or a written alternative chosen).
+- [X] Residual risk accepted: the executor signing key can lose at most
       the stage capital in the executor account.
-- [ ] Rotation + revocation drill procedure accepted.
-- [ ] Telemetry credential-guard test accepted as a WO deliverable.
-- [ ] Understood: this document plus the signed AGENTS.md amendment
+- [X] Rotation + revocation drill procedure accepted.
+- [X] Telemetry credential-guard test accepted as a WO deliverable.
+- [X] Understood: this document plus the signed AGENTS.md amendment
       still do not start trading — P1 (gates) and P2 ($100 human stage)
       remain required by registration.

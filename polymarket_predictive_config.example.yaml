@@ -236,6 +236,19 @@ operating_state_slos:
   reconciliation_max_age_seconds: 93600
   ledger_anchor_max_age_seconds: 129600
 
+# 2026-07-13 WO-78: reporting-only semantic-health watchdog. Registered
+# tolerance maxima can only be tightened. A maximum of 3 means the fourth
+# consecutive degraded producer observation opens an incident. The notifier
+# writes the existing owner-notification artifact contract; it has no SMTP,
+# credential, broker, gate, sizing, signing, cancellation, or order path.
+degraded_state_watchdog:
+  enabled: true
+  notification_enabled: true
+  requote_missing_input_max_consecutive_cycles: 3
+  scheduler_nonzero_max_consecutive_cycles: 0
+  wallet_partial_max_consecutive_harvests: 2
+  operating_unknown_max_consecutive_cycles: 0
+
 # 2026-07-11 WO-61: daily tamper-evident prefix hashes for the investor-facing
 # ledger set. Reporting infrastructure only; no gate, sizing rule, policy,
 # broker, or order path reads it. State tables that are legitimately rewritten
@@ -264,6 +277,8 @@ ledger_anchor:
     # 2026-07-12 WO-68b: persist every fail-closed exit-75 supervisor event so
     # clean Docker restarts remain attributable after container replacement.
     - {glob: performance/background_timeout_incidents.csv, mode: append_only}
+    # WO-78 semantic-health incidents are byte-appended and prefix-anchored.
+    - {glob: performance/degraded_state_incidents.csv, mode: append_only}
     - {glob: performance/cost_ledger_summary.json, mode: snapshot}
 
 # 2026-07-11 WO-65: weekly, ledger-only disaster-recovery snapshot. The active

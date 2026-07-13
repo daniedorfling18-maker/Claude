@@ -507,6 +507,25 @@ def _write_markdown(path: Path, payload: Mapping[str, Any]) -> None:
             f"{_md(row.get('measured'))} | {_md(row.get('unit'))} | `{_md(row.get('source'))}` | "
             f"{_md(row.get('observed_at_utc'))} |"
         )
+    watchdog = _mapping(payload.get("degraded_state_watchdog"))
+    lines.extend(
+        [
+            "",
+            "## Degraded-state watchdog (reporting only)",
+            "",
+            "Persistent semantic-health incidents alert the owner; they never override a fail-closed or risk state.",
+            "",
+            "| Registration | Entity | State | Reason | Source |",
+            "|---|---|---|---|---|",
+        ]
+    )
+    for row in watchdog.get("active_incidents", []):
+        lines.append(
+            f"| {_md(row.get('registration_id'))} | {_md(row.get('entity'))} | **INCIDENT** | "
+            f"{_md(row.get('reason'))} | `{_md(row.get('source_artifact'))}` |"
+        )
+    if not watchdog.get("active_incidents"):
+        lines.append("| - | - | **None active** | - | - |")
     lines.extend(
         [
             "",
@@ -545,6 +564,7 @@ def build_operating_state(cfg: EngineConfig) -> dict[str, Any]:
     maker_study = _artifact(maker_root / "maker_carry_study.json")
     maker_live_test = _artifact(maker_root / "maker_live_test.json")
     decision_policy = _artifact(maker_root / "decision_policy.json")
+    degraded_watchdog = _artifact(output_root / "ops_scheduler" / "degraded_state_watchdog.json")
     merge_gate = _artifact(performance / "independent_merge_gate.json")
     key_custody = _artifact(performance / "key_custody_approval.json")
     telemetry_manifest, telemetry_manifest_path = _telemetry_manifest(cfg)
@@ -558,6 +578,7 @@ def build_operating_state(cfg: EngineConfig) -> dict[str, Any]:
         "independent_merge_gate": merge_gate,
         "key_custody_approval": key_custody,
         "vps_telemetry_manifest": telemetry_manifest,
+        "degraded_state_watchdog": degraded_watchdog,
     }
 
     missing_inputs = [name for name, payload in artifacts.items() if not payload]
@@ -680,6 +701,17 @@ def build_operating_state(cfg: EngineConfig) -> dict[str, Any]:
     )
     latest_evidence, latest_sources = _latest_timestamp(artifacts)
     maker_gates = _mapping(maker_study.get("maker_gates"))
+    if degraded_watchdog:
+        watchdog_count = int(degraded_watchdog.get("active_incident_count") or 0)
+        watchdog_state = "INCIDENT" if watchdog_count else str(degraded_watchdog.get("status") or "OK").upper()
+        watchdog_evidence = (
+            f"active_incidents={watchdog_count}; new_incidents="
+            f"{int(degraded_watchdog.get('new_incident_count') or 0)}"
+        )
+    else:
+        watchdog_count = 0
+        watchdog_state = UNKNOWN
+        watchdog_evidence = "degraded-state watchdog artifact is missing"
     rows = [
         _row("research_mode", "Research mode", research_mode, f"trading.mode={trading_mode}; paper.enabled={paper_enabled}; live.enabled={live_enabled}", "effective config"),
         _row("mechanical_paper_capability", "Mechanical paper capability", paper_capability, str(readiness.get("decision") or UNKNOWN), "config + paper_trade_readiness.json", _timestamp(readiness)),
@@ -689,6 +721,14 @@ def build_operating_state(cfg: EngineConfig) -> dict[str, Any]:
         _row("live_wallet_monitoring", "Live-wallet monitoring", wallet_state, f"wallet_configured={wallet_configured if wallet_configured is not None else UNKNOWN}", "config + maker_live_test.json", _timestamp(maker_live_test)),
         _row("live_orders_submitted", "Live orders submitted by the system", live_orders, live_order_evidence, str(live_ledger or UNKNOWN)),
         _row("autonomous_execution", "Autonomous execution authorisation", autonomous_state, ", ".join(f"{row['id']}={row['state']}" for row in preconditions), "WO-67 preconditions"),
+        _row(
+            "degraded_state_watchdog",
+            "Persistent degraded-state incidents",
+            watchdog_state,
+            watchdog_evidence,
+            "ops_scheduler/degraded_state_watchdog.json",
+            _timestamp(degraded_watchdog),
+        ),
         _row(
             "latest_deployed_sha",
             "Latest deployed SHA",
@@ -717,6 +757,7 @@ def build_operating_state(cfg: EngineConfig) -> dict[str, Any]:
         "rows": rows,
         "wo67_preconditions": preconditions,
         "slo": slo,
+        "degraded_state_watchdog": degraded_watchdog,
         "deployment": {
             "status": source_deployed_state,
             "source_git_rev": source_sha or UNKNOWN,

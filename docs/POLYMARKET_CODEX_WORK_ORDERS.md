@@ -2784,6 +2784,18 @@ Both WOs are reporting/alerting only; nothing here gates or orders.
 
 ## WO-78 — Degraded-state watchdog (runtime detection)
 
+Status: IMPLEMENTED by Codex on 2026-07-13. CLI
+`degraded-state-watchdog` evaluates distinct producer observations against a
+fixed, tighten-only semantic-health table. It opens incidents on the fourth
+consecutive missing-input requote cycle, the first non-zero scheduler exit,
+the third consecutive partial wallet harvest, or a previously known operating
+row becoming `UNKNOWN`. Incidents byte-append to
+`performance/degraded_state_incidents.csv`, are enrolled in the WO-61 prefix
+anchor, surface in generated operating state and the dashboard, and emit the
+existing state-deduplicated owner-notification artifact. Risk-only quote
+states remain valid, all source states remain fail-closed, and no gate,
+broker, sizing, credential, cancellation, paper, or live path changed.
+
 The SLO framework tracks AGE; it must also track SEMANTIC health.
 1. A registered degraded-state table (config, tighten-only): artifact,
    its healthy reachable states, and the max consecutive

@@ -604,6 +604,18 @@ The websocket live loop reserves first-priority slots for current or repaired
 quote-sheet tokens. Missing public books still fail closed; the change is
 read-only and does not alter gates, sizing, policy, credentials, or orders.
 
+**2026-07-13 — WO-78 implemented by Codex.** CLI `degraded-state-watchdog` now
+runs after every VPS scheduler tick and distinguishes persistent missing-input
+fail-closed states from legitimate risk reasons. Tighten-only registrations
+open an incident on requote cycle four, the first non-zero scheduler exit,
+wallet partial harvest three, or a known operating row regressing to
+`UNKNOWN`. The byte-append-only
+`outputs/performance/degraded_state_incidents.csv` is WO-61 prefix-anchored;
+current incidents appear in the canonical operating state and dashboard and
+emit the existing owner-notification artifact contract. Polls never inflate
+counts, repeat incidents deduplicate, and the component cannot alter source
+states, gates, sizing, credentials, paper/live trading, or orders.
+
 ## Rules of engagement for coding agents
 
 0. **Division of labour**: the orchestrating agent writes/updates this charter and the work orders

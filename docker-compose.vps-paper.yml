@@ -21,11 +21,9 @@ services:
     image: polymarket-paper-vps:latest
     container_name: polymarket-paper-live
     mem_limit: ${PM_PAPER_MEM_LIMIT:-4g}
-    # 2026-07-11 systems audit, corrected same day: the host has ONE vCPU
-    # (the cpus:3.0 hard cap failed to deploy and revealed it), so a hard
-    # cap is the wrong primitive on this box. cpu_shares is a soft weight:
-    # at half the default 1024, the loop yields to the scheduler/dashboard
-    # under contention but still uses 100% of an idle core.
+    # Use a soft CPU weight rather than a host-specific hard core cap. This
+    # remains valid after resizing the VPS: the live loop yields to governance
+    # and dashboard work under contention but can use otherwise-idle capacity.
     cpu_shares: ${PM_PAPER_CPU_SHARES:-512}
     env_file:
       - .env

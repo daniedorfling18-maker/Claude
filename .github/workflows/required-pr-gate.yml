@@ -32,6 +32,13 @@ jobs:
         shell: bash
         run: python -c "import sys; print(sys.version); assert sys.version_info >= (3, 10)"
 
+      - name: Provision Git for deploy preservation tests
+        shell: bash
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends git
+          rm -rf /var/lib/apt/lists/*
+
       - name: Build isolated gate environment
         shell: bash
         run: |
@@ -58,5 +65,6 @@ jobs:
             tests/polymarket_predictive_engine/test_safety_invariants.py \
             tests/polymarket_predictive_engine/test_promotion_gate.py \
             tests/test_polymarket_vps_docker.py \
+            tests/test_vps_checkout_update.py \
             tests/test_auto_pick_workflow_schedule.py \
             tests/test_required_pr_gate.py

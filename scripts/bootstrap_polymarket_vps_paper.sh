@@ -169,6 +169,7 @@ start_stack() {
   preflight_dir=$(mktemp -d)
   trap 'rm -rf "$preflight_dir"' EXIT INT TERM
   git show "origin/$REPO_BRANCH:scripts/preflight_vps_capacity.py" > "$preflight_dir/preflight_vps_capacity.py"
+  git show "origin/$REPO_BRANCH:scripts/update_vps_checkout_preserving_runtime.py" > "$preflight_dir/update_vps_checkout_preserving_runtime.py"
   git show "origin/$REPO_BRANCH:$COMPOSE_FILE" > "$preflight_dir/compose.yml"
   log "Checking host capacity against the target revision before changing the running checkout"
   python3 "$preflight_dir/preflight_vps_capacity.py" \
@@ -176,11 +177,15 @@ start_stack() {
     --env-file .env \
     --output outputs/performance/vps_capacity_preflight.json \
     --root .
+
+  log "Updating source while preserving VPS runtime evidence"
+  python3 "$preflight_dir/update_vps_checkout_preserving_runtime.py" \
+    --repo . \
+    --target-ref "origin/$REPO_BRANCH" \
+    --branch "$REPO_BRANCH" \
+    --report outputs/performance/vps_checkout_update.json
   rm -rf "$preflight_dir"
   trap - EXIT INT TERM
-
-  git checkout "$REPO_BRANCH"
-  git pull --ff-only origin "$REPO_BRANCH"
   deployed_sha=$(git rev-parse HEAD)
   set_env_value PM_VPS_DEPLOYED_SHA "$deployed_sha" .env
   log "Starting Docker stack: $COMPOSE_FILE"

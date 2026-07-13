@@ -104,21 +104,23 @@ def test_vps_bootstrap_script_starts_only_lean_paper_stack():
     assert "PM_PAPER_MEM_LIMIT 2g" in text
     assert "POLYMARKET_WEBSOCKET_MAX_ASSETS 80" in text
     preflight = text.index("preflight_vps_capacity.py")
-    checkout = text.index('git checkout "$REPO_BRANCH"')
+    checkout = text.index("update_vps_checkout_preserving_runtime.py")
     compose_up = text.index('compose -f "$COMPOSE_FILE" up -d --build')
     assert preflight < checkout < compose_up
     assert "outputs/performance/deployed_git_rev" in text
+    assert "git pull --ff-only" not in text
 
 
 def test_vps_deploy_preflight_runs_before_compose_replacement():
     text = (ROOT / ".github" / "workflows" / "deploy-polymarket-vps-paper.yml").read_text(encoding="utf-8")
 
     preflight = text.index('python3 "$PREFLIGHT_DIR/preflight_vps_capacity.py"')
-    checkout = text.index("git checkout main")
+    checkout = text.index('python3 "$PREFLIGHT_DIR/update_vps_checkout_preserving_runtime.py"')
     compose_up = text.index('$DOCKER compose -f "$COMPOSE_FILE" up -d --build')
     assert preflight < checkout < compose_up
     assert "outputs/performance/deployed_git_rev" in text
     assert "REFUSE_DEPLOY_KEEP_EXISTING_STACK" in (ROOT / "scripts" / "preflight_vps_capacity.py").read_text(encoding="utf-8")
+    assert "git pull --ff-only" not in text
 
 
 def test_vps_health_script_checks_dashboard_and_heartbeat_files():
@@ -139,8 +141,11 @@ def test_vps_health_script_checks_dashboard_and_heartbeat_files():
 def test_vps_deploy_workflow_requires_current_dashboard_schema():
     text = (ROOT / ".github" / "workflows" / "deploy-polymarket-vps-paper.yml").read_text(encoding="utf-8")
 
-    assert "refresh-governance" in text
-    assert "render-only can leave stale decisions" in text
+    assert "scheduler-owned post-deploy model refresh" in text
+    assert "governance_refresh_status.json" in text
+    assert "price_action_model_summary.json" in text
+    assert "did not publish a post-deploy price-action model" in text
+    assert "exec -T polymarket-paper-live" not in text
     assert "deployment_health" in text
     assert "mispricing_alpha_bridge" in text
     assert "coverage_by_sport_market" in text

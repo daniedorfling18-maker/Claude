@@ -115,12 +115,18 @@ def test_vps_deploy_preflight_runs_before_compose_replacement():
     text = (ROOT / ".github" / "workflows" / "deploy-polymarket-vps-paper.yml").read_text(encoding="utf-8")
 
     preflight = text.index('python3 "$PREFLIGHT_DIR/preflight_vps_capacity.py"')
+    quiesce = text.index('compose -f "$COMPOSE_FILE" stop --timeout 60')
     checkout = text.index('python3 "$PREFLIGHT_DIR/update_vps_checkout_preserving_runtime.py"')
     compose_up = text.index('$DOCKER compose -f "$COMPOSE_FILE" up -d --build')
-    assert preflight < checkout < compose_up
+    assert preflight < quiesce < checkout < compose_up
     assert "outputs/performance/deployed_git_rev" in text
     assert "REFUSE_DEPLOY_KEEP_EXISTING_STACK" in (ROOT / "scripts" / "preflight_vps_capacity.py").read_text(encoding="utf-8")
     assert "git pull --ff-only" not in text
+    assert "runs-on: [self-hosted, Linux, ARM64, polymarket-ci]" in text
+    assert "runs-on: ubuntu-latest" not in text
+    assert "source unchanged after refusal; restoring previous paper stack" in text
+    assert 'printf \'0\\n\' | $SUDO tee "$governance_stamp"' in text
+    assert 'compose -f "$COMPOSE_FILE" up -d --no-build' in text
 
 
 def test_vps_health_script_checks_dashboard_and_heartbeat_files():

@@ -203,6 +203,7 @@ jobs:
 
           cd "$REPO_DIR"
           git fetch --prune origin main
+          git cat-file -e "${GITHUB_SHA}^{commit}"
 
           if [ ! -f .env ]; then
             cp .env.vps-paper.example .env
@@ -214,8 +215,9 @@ jobs:
           # remain byte-for-byte untouched.
           PREFLIGHT_DIR=$(mktemp -d)
           trap 'rm -rf "$PREFLIGHT_DIR" "$ENV_PATCH"' EXIT
-          git show "origin/main:scripts/preflight_vps_capacity.py" > "$PREFLIGHT_DIR/preflight_vps_capacity.py"
-          git show "origin/main:$COMPOSE_FILE" > "$PREFLIGHT_DIR/compose.yml"
+          git show "${GITHUB_SHA}:scripts/preflight_vps_capacity.py" > "$PREFLIGHT_DIR/preflight_vps_capacity.py"
+          git show "${GITHUB_SHA}:scripts/update_vps_checkout_preserving_runtime.py" > "$PREFLIGHT_DIR/update_vps_checkout_preserving_runtime.py"
+          git show "${GITHUB_SHA}:$COMPOSE_FILE" > "$PREFLIGHT_DIR/compose.yml"
           echo "[deploy] checking host capacity against target compose commitments"
           python3 "$PREFLIGHT_DIR/preflight_vps_capacity.py" \
             --compose "$PREFLIGHT_DIR/compose.yml" \
@@ -223,8 +225,12 @@ jobs:
             --output outputs/performance/vps_capacity_preflight.json \
             --root .
 
-          git checkout main
-          git pull --ff-only origin main
+          echo "[deploy] updating source while preserving tracked and untracked runtime evidence"
+          python3 "$PREFLIGHT_DIR/update_vps_checkout_preserving_runtime.py" \
+            --repo . \
+            --target-ref "$GITHUB_SHA" \
+            --branch main \
+            --report outputs/performance/vps_checkout_update.json
 
           if [ "$(git rev-parse HEAD)" != "$GITHUB_SHA" ]; then
             echo "::error::VPS checked out $(git rev-parse HEAD), expected $GITHUB_SHA"
@@ -311,30 +317,53 @@ jobs:
           rm -rf "$PREFLIGHT_DIR"
           trap - EXIT
 
+          # Make the scheduler the single owner of the first post-deploy full
+          # governance pass. Preserve the previous cadence stamp for audit,
+          # then age the active stamp so the restarted scheduler runs now.
+          deploy_started_epoch="$(date -u +%s)"
+          governance_stamp="outputs/ops_scheduler/last_governance_refresh"
+          mkdir -p outputs/ops_scheduler/deploy_stamp_history
+          if [ -f "$governance_stamp" ]; then
+            cp -p "$governance_stamp" \
+              "outputs/ops_scheduler/deploy_stamp_history/last_governance_refresh.${GITHUB_RUN_ID}"
+          fi
+          printf '0\n' > "$governance_stamp"
+
           echo "[deploy] building and (re)starting stack from $(git rev-parse --short HEAD)"
           $DOCKER compose -f "$COMPOSE_FILE" up -d --build
           marker_tmp="outputs/performance/deployed_git_rev.tmp.$$"
           printf '%s\n' "$GITHUB_SHA" > "$marker_tmp"
           mv "$marker_tmp" outputs/performance/deployed_git_rev
 
-          # Force a governance + dashboard artifact refresh after the code update;
-          # the dashboard reads generated governance files such as the proof-first
-          # paper_profit_goal_plan, so render-only can leave stale decisions. This CLI
-          # run can be silent for several minutes; SSH keepalives (client side) keep the
-          # channel alive, and the marker below localises any failure to this step.
-          # Best-effort with a hard cap: right after a container restart the loop's first
-          # full-scan iteration owns the core, and this exec contending with it has ground
-          # 10-20+ minutes repeatedly (2026-07-07: one deploy cancelled at the job timeout
-          # during this exact step, twice). Full governance is refreshed through
-          # the ops scheduler, so a timed-out deploy-time refresh only delays
-          # artifacts until that scheduler's next pass - it must not kill an
-          # otherwise-successful deploy.
-          echo "[deploy] refreshing governance + dashboard artifacts (best-effort, 10-min cap)"
-          if ! timeout 600 $DOCKER compose -f "$COMPOSE_FILE" exec -T polymarket-paper-live \
-            python -m polymarket_predictive_engine.cli refresh-governance \
-            --config /app/polymarket_predictive_config.example.yaml; then
-            echo "::warning::Deploy-time governance refresh timed out or failed; the VPS ops scheduler owns the next full refresh."
+          # Wait for the scheduler-owned critical model stage. This verifies
+          # that a deploy cannot report success while retaining a stale model,
+          # without launching a competing refresh process. The remainder of
+          # the full governance pass may continue after this proof point.
+          model_path="outputs/polymarket_price_action/price_action_model_summary.json"
+          model_fresh=false
+          echo "[deploy] waiting for scheduler-owned post-deploy model refresh"
+          for attempt in $(seq 1 180); do
+            if [ -f "$model_path" ] && [ "$(stat -c %Y "$model_path")" -ge "$deploy_started_epoch" ]; then
+              model_fresh=true
+              break
+            fi
+            if [ $((attempt % 12)) -eq 0 ]; then
+              stage="$(python3 -c 'import json,pathlib; p=pathlib.Path("outputs/polymarket_model_governance/governance_refresh_status.json"); d=json.loads(p.read_text()) if p.exists() else {}; print(str(d.get("status", "waiting"))+":"+str(d.get("current_stage", "not_started")))' 2>/dev/null || echo waiting:not_started)"
+              echo "[deploy] governance progress: $stage"
+            fi
+            sleep 5
+          done
+          if [ "$model_fresh" != true ]; then
+            echo "::error::The scheduler did not publish a post-deploy price-action model within 15 minutes."
+            exit 1
           fi
+
+          # The dashboard renderer is reporting-only. Refresh it after the
+          # model proof point so the served cockpit immediately exposes the
+          # new timestamp while the scheduler finishes slower reports.
+          $DOCKER compose -f "$COMPOSE_FILE" exec -T polymarket-dashboard \
+            python scripts/render_polymarket_dashboard.py \
+            --config /app/polymarket_predictive_config.example.yaml
 
           echo "[deploy] verifying paper stack health"
           bash scripts/check_polymarket_vps_paper.sh

@@ -6,7 +6,10 @@ paper stage the maximum recovery-point objective (RPO) is **7 days / 168
 hours**. Before any wallet or other live capital is configured,
 `disaster_recovery.active_rpo_hours` must be changed, with a dated config
 comment, to **24 hours or less**; the archive builder refuses to proceed if
-that tightening has not happened.
+that tightening has not happened. The tracked VPS configuration was tightened
+to **24 hours on 2026-07-13** when the public maker-test wallet became
+configured; the 168-hour value remains only the maximum for a wallet-free
+paper stage.
 
 The current snapshot is force-replaced on the private `vps-archive` branch to
 bound storage. Historical proof does not depend on that branch's Git history:

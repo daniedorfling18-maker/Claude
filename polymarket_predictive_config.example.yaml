@@ -315,8 +315,9 @@ ledger_anchor:
 
 # 2026-07-11 WO-65: weekly, ledger-only disaster-recovery snapshot. The active
 # paper-stage RPO is 7 days and the compressed archive is capped at 50MB.
-# BEFORE any wallet/live capital is configured, active_rpo_hours MUST be
-# tightened to <=24 with a dated config change; code fails closed otherwise.
+# 2026-07-13: tightened to 24h when the public maker-test wallet became
+# configured. This satisfies the pre-live maximum; code fails closed if a
+# future effective config tries to widen it while any wallet remains present.
 disaster_recovery:
   enabled: true
   archive_file: performance/ledger_state_archive.tar.gz
@@ -325,7 +326,7 @@ disaster_recovery:
   restore_status_file: performance/restore_verification_status.json
   archive_branch: vps-archive
   size_cap_mb: 50
-  active_rpo_hours: 168
+  active_rpo_hours: 24
   paper_stage_max_rpo_hours: 168
   pre_live_max_rpo_hours: 24
   lock_stale_seconds: 3600

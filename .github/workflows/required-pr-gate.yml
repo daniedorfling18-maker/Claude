@@ -58,5 +58,6 @@ jobs:
             tests/polymarket_predictive_engine/test_safety_invariants.py \
             tests/polymarket_predictive_engine/test_promotion_gate.py \
             tests/test_polymarket_vps_docker.py \
+            tests/test_vps_checkout_update.py \
             tests/test_auto_pick_workflow_schedule.py \
             tests/test_required_pr_gate.py

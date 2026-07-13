@@ -652,6 +652,15 @@ and planted-leak tests. The keyless rotation drill proves an unchanged
 fail-flat contract against missing/invalid dummy credentials. WO-73 item 4
 remains post-amendment: there is no executor credential loading or order path.
 
+**2026-07-13 — WO-74 implemented by Codex.** A keyless, executor-independent
+replay-certification harness now combines recorded WO-44 official-book windows
+with every registered stress case and verifies exact ticket boundaries,
+policy caps, 5-share multiples, pull/STOP cancellation, flat stale/missing
+behavior, heartbeat dead-man behavior, and one-to-one action-ledger appends.
+Its dated PASS/FAIL artifact is a canary prerequisite, never authorisation.
+The bundled reference stub proves only the harness; no credentials, executor,
+broker, paper/live trading, signing, cancellation, or order path exists.
+
 ## Rules of engagement for coding agents
 
 0. **Division of labour**: the orchestrating agent writes/updates this charter and the work orders

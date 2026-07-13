@@ -249,6 +249,13 @@ degraded_state_watchdog:
   wallet_partial_max_consecutive_harvests: 2
   operating_unknown_max_consecutive_cycles: 0
 
+# 2026-07-13 WO-79: reporting-only post-deploy acceptance. The VPS deploy
+# runner invokes existing real-data producers and this component checks their
+# declared fields/freshness/coverage. A failure emits the owner-notification
+# artifact contract and fails the deploy; it cannot trade or loosen a gate.
+deploy_acceptance:
+  notification_enabled: true
+
 # 2026-07-11 WO-61: daily tamper-evident prefix hashes for the investor-facing
 # ledger set. Reporting infrastructure only; no gate, sizing rule, policy,
 # broker, or order path reads it. State tables that are legitimately rewritten

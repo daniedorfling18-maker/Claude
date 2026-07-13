@@ -60,6 +60,7 @@ jobs:
         shell: bash
         run: |
           .ci-venv/bin/python -m pytest -q \
+            tests/polymarket_predictive_engine/test_deploy_acceptance.py \
             tests/polymarket_predictive_engine/test_collection_hygiene.py \
             tests/polymarket_predictive_engine/test_degraded_state_watchdog.py \
             tests/polymarket_predictive_engine/test_operating_state.py \

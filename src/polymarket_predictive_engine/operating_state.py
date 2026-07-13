@@ -565,6 +565,7 @@ def build_operating_state(cfg: EngineConfig) -> dict[str, Any]:
     maker_live_test = _artifact(maker_root / "maker_live_test.json")
     decision_policy = _artifact(maker_root / "decision_policy.json")
     degraded_watchdog = _artifact(output_root / "ops_scheduler" / "degraded_state_watchdog.json")
+    deploy_acceptance = _artifact(output_root / "ops_scheduler" / "deploy_acceptance.json")
     merge_gate = _artifact(performance / "independent_merge_gate.json")
     key_custody = _artifact(performance / "key_custody_approval.json")
     telemetry_manifest, telemetry_manifest_path = _telemetry_manifest(cfg)
@@ -712,6 +713,24 @@ def build_operating_state(cfg: EngineConfig) -> dict[str, Any]:
         watchdog_count = 0
         watchdog_state = UNKNOWN
         watchdog_evidence = "degraded-state watchdog artifact is missing"
+    if deploy_acceptance:
+        deploy_acceptance_state = str(deploy_acceptance.get("status") or UNKNOWN).upper()
+        failed_checks = [
+            str(item.get("id") or "unknown")
+            for item in deploy_acceptance.get("checks", [])
+            if isinstance(item, Mapping) and str(item.get("status") or "").upper() == "FAIL"
+        ]
+        deploy_acceptance_evidence = (
+            f"target={deploy_acceptance.get('target_deploy_sha') or UNKNOWN}; "
+            f"failed_checks={','.join(failed_checks) if failed_checks else 'none'}; "
+            f"rollback_ref={deploy_acceptance.get('rollback_ref') or UNKNOWN}"
+        )
+    else:
+        # A checkout can legitimately predate its first WO-79 deploy. This is
+        # explicit rather than UNKNOWN so the acceptance check is not
+        # self-referential on its first run.
+        deploy_acceptance_state = "NOT_RUN"
+        deploy_acceptance_evidence = "no post-deploy acceptance artifact has been produced yet"
     rows = [
         _row("research_mode", "Research mode", research_mode, f"trading.mode={trading_mode}; paper.enabled={paper_enabled}; live.enabled={live_enabled}", "effective config"),
         _row("mechanical_paper_capability", "Mechanical paper capability", paper_capability, str(readiness.get("decision") or UNKNOWN), "config + paper_trade_readiness.json", _timestamp(readiness)),
@@ -728,6 +747,14 @@ def build_operating_state(cfg: EngineConfig) -> dict[str, Any]:
             watchdog_evidence,
             "ops_scheduler/degraded_state_watchdog.json",
             _timestamp(degraded_watchdog),
+        ),
+        _row(
+            "deploy_acceptance",
+            "Latest post-deploy acceptance",
+            deploy_acceptance_state,
+            deploy_acceptance_evidence,
+            "ops_scheduler/deploy_acceptance.json",
+            _timestamp(deploy_acceptance),
         ),
         _row(
             "latest_deployed_sha",
@@ -758,6 +785,7 @@ def build_operating_state(cfg: EngineConfig) -> dict[str, Any]:
         "wo67_preconditions": preconditions,
         "slo": slo,
         "degraded_state_watchdog": degraded_watchdog,
+        "deploy_acceptance": deploy_acceptance,
         "deployment": {
             "status": source_deployed_state,
             "source_git_rev": source_sha or UNKNOWN,

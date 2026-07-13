@@ -1,0 +1,213 @@
+"""WO-79 producer/consumer contracts for the first three runtime interfaces.
+
+The registry is deliberately small.  It declares the fields, freshness clock,
+and coverage obligation for interfaces that have already failed in production.
+It is reporting/test infrastructure only and cannot alter a gate or trade.
+"""
+
+from __future__ import annotations
+
+from copy import deepcopy
+from typing import Any, Mapping
+
+from .config import EngineConfig, load_config
+from .utils import now_utc, safe_float, write_json
+
+
+WORK_ORDER = "WO-79"
+OUTPUT_FILE = "ops_scheduler/producer_consumer_contracts.json"
+
+CONTRACT_REGISTRY: tuple[dict[str, Any], ...] = (
+    {
+        "id": "quote_sheet_to_requote_alerts",
+        "producer": {
+            "component": "maker_carry_study",
+            "artifact": "maker_carry/maker_carry_study.json",
+            "record_path": "portfolio[]",
+            "declared_fields": [
+                "condition_id",
+                "market_url",
+                "outcome",
+                "token_id",
+                "order_price_min_tick_size",
+                "quote_bid_price",
+                "quote_ask_price",
+            ],
+            "freshness": {"field": "generated_at_utc", "maximum_age_seconds": 93600},
+            "coverage": "every portfolio ticket, including markets absent from the websocket subscription set",
+        },
+        "consumer": {
+            "component": "requote_alerts",
+            "required_fields": [
+                "condition_id",
+                "market_url",
+                "outcome",
+                "token_id",
+                "order_price_min_tick_size",
+                "quote_bid_price",
+                "quote_ask_price",
+            ],
+            "coverage": "one evaluated requote row per portfolio condition_id",
+            "current_book_fallback": "websocket bid/ask OR bounded public CLOB REST book",
+        },
+    },
+    {
+        "id": "scheduler_jobs_to_status_alerting",
+        "producer": {
+            "component": "vps_ops_scheduler",
+            "artifact": "ops_scheduler/status.json",
+            "record_path": "jobs{job_name}",
+            "declared_fields": ["job_name", "last_run_utc", "last_exit_code", "detail"],
+            "freshness": {"field": "generated_at_utc", "maximum_age_seconds": 300},
+            "coverage": "every job stamped by the scheduler",
+        },
+        "consumer": {
+            "component": "degraded_state_watchdog",
+            "required_fields": ["job_name", "last_run_utc", "last_exit_code"],
+            "coverage": "every stamped scheduler job is inspected; every non-zero exit alerts immediately",
+        },
+    },
+    {
+        "id": "reconciliation_legs_to_nav",
+        "producer": {
+            "component": "wallet_reconciliation",
+            "artifact": "performance/wallet_reconciliation.json",
+            "record_path": "internal|data_api|onchain",
+            "declared_fields": ["leg_name", "status", "nav_usd"],
+            "freshness": {"field": "generated_at_utc", "maximum_age_seconds": 93600},
+            "coverage": "exactly the internal, Data API, and on-chain legs on every enabled reconciliation",
+        },
+        "consumer": {
+            "component": "reconciled_nav",
+            "required_fields": ["leg_name", "status", "nav_usd"],
+            "output_fields": [
+                "internal_nav_usd",
+                "data_api_nav_usd",
+                "onchain_nav_usd",
+                "reconciliation_status",
+            ],
+            "coverage": "all three legs are represented before NAV status is reported",
+        },
+    },
+)
+
+
+def _mapping(value: Any) -> dict[str, Any]:
+    return dict(value) if isinstance(value, Mapping) else {}
+
+
+def _field_missing(record: Mapping[str, Any], field: str) -> bool:
+    if field not in record:
+        return True
+    value = record.get(field)
+    return value is None or (isinstance(value, str) and not value.strip())
+
+
+def _contract(identifier: str) -> dict[str, Any]:
+    for row in CONTRACT_REGISTRY:
+        if row["id"] == identifier:
+            return row
+    raise KeyError(f"unknown producer/consumer contract: {identifier}")
+
+
+def validate_contract_declarations() -> list[dict[str, Any]]:
+    """Return declaration defects; an empty list is the PR-gate condition."""
+    defects: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for contract in CONTRACT_REGISTRY:
+        identifier = str(contract.get("id") or "")
+        if not identifier or identifier in seen:
+            defects.append({"contract_id": identifier or "missing", "reason": "missing_or_duplicate_id"})
+        seen.add(identifier)
+        producer = _mapping(contract.get("producer"))
+        consumer = _mapping(contract.get("consumer"))
+        declared = set(producer.get("declared_fields") or [])
+        required = set(consumer.get("required_fields") or [])
+        missing = sorted(required - declared)
+        if missing:
+            defects.append(
+                {
+                    "contract_id": identifier,
+                    "reason": "consumer_requirement_not_declared_by_producer",
+                    "fields": missing,
+                }
+            )
+        freshness = _mapping(producer.get("freshness"))
+        if not freshness.get("field") or safe_float(freshness.get("maximum_age_seconds")) is None:
+            defects.append({"contract_id": identifier, "reason": "freshness_contract_missing"})
+        if not str(producer.get("coverage") or "").strip() or not str(consumer.get("coverage") or "").strip():
+            defects.append({"contract_id": identifier, "reason": "coverage_contract_missing"})
+    return defects
+
+
+def validate_contract_fixture(identifier: str, payload: Mapping[str, Any]) -> dict[str, Any]:
+    """Validate one synthetic or runtime payload against its registered shape."""
+    contract = _contract(identifier)
+    defects: list[dict[str, Any]] = []
+    if identifier == "quote_sheet_to_requote_alerts":
+        rows = payload.get("portfolio") if isinstance(payload.get("portfolio"), list) else []
+        required = _mapping(contract.get("consumer")).get("required_fields") or []
+        for index, raw in enumerate(rows):
+            row = _mapping(raw)
+            missing = [field for field in required if _field_missing(row, str(field))]
+            bid = safe_float(row.get("quote_bid_price"))
+            ask = safe_float(row.get("quote_ask_price"))
+            tick = safe_float(row.get("order_price_min_tick_size"))
+            if bid is not None and ask is not None and not 0 < bid < ask < 1:
+                missing.append("valid_quote_bid_lt_quote_ask")
+            if tick is not None and not 0 < tick < 1:
+                missing.append("valid_order_price_min_tick_size")
+            if missing:
+                defects.append({"record": index, "condition_id": row.get("condition_id"), "missing_or_invalid": sorted(set(missing))})
+    elif identifier == "scheduler_jobs_to_status_alerting":
+        jobs = payload.get("jobs") if isinstance(payload.get("jobs"), Mapping) else {}
+        for job_name, raw in jobs.items():
+            row = _mapping(raw)
+            missing = [field for field in ("last_run_utc", "last_exit_code") if _field_missing(row, field)]
+            if not str(job_name).strip():
+                missing.append("job_name")
+            if missing:
+                defects.append({"record": str(job_name), "missing_or_invalid": sorted(set(missing))})
+    elif identifier == "reconciliation_legs_to_nav":
+        top_fields = _mapping(contract.get("consumer")).get("output_fields") or []
+        for field in top_fields:
+            if field not in payload:
+                defects.append({"record": "reconciled_nav", "missing_or_invalid": [field]})
+        top_name = {"internal": "internal_nav_usd", "data_api": "data_api_nav_usd", "onchain": "onchain_nav_usd"}
+        for leg, top_field in top_name.items():
+            row = _mapping(payload.get(leg))
+            missing = [field for field in ("status", "nav_usd") if field not in row]
+            if not row:
+                missing.append("leg_name")
+            nested_nav = safe_float(row.get("nav_usd"))
+            top_nav = safe_float(payload.get(top_field))
+            if nested_nav is not None and top_nav != nested_nav:
+                missing.append(f"{top_field}_matches_{leg}.nav_usd")
+            if missing:
+                defects.append({"record": leg, "missing_or_invalid": sorted(set(missing))})
+    return {
+        "contract_id": identifier,
+        "status": "PASS" if not defects else "FAIL",
+        "defects": defects,
+    }
+
+
+def build_contract_registry(cfg: EngineConfig) -> dict[str, Any]:
+    defects = validate_contract_declarations()
+    payload = {
+        "work_order": WORK_ORDER,
+        "generated_at_utc": now_utc(),
+        "status": "PASS" if not defects else "FAIL",
+        "contracts": deepcopy(list(CONTRACT_REGISTRY)),
+        "declaration_defects": defects,
+        "scope": [row["id"] for row in CONTRACT_REGISTRY],
+        "decision_use": "schema/freshness/coverage audit and PR-gate tests only",
+        "paper_trading_invoked": False,
+        "live_trading_invoked": False,
+    }
+    write_json(cfg.output_root / OUTPUT_FILE, payload)
+    return payload
+
+
+def main(config_path: str) -> dict[str, Any]:
+    return build_contract_registry(load_config(config_path))

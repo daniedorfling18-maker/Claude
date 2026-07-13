@@ -69,6 +69,7 @@ def test_registered_workflow_is_minimal_self_hosted_and_secretless() -> None:
     assert "pip install --disable-pip-version-check -e" in workflow
     assert "pip check" in workflow
     assert "pytest -q" in workflow
+    assert "test_deploy_acceptance.py" in workflow
     assert "test_collection_hygiene.py" in workflow
     assert "test_degraded_state_watchdog.py" in workflow
     assert "test_operating_state.py" in workflow

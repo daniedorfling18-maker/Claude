@@ -238,6 +238,40 @@ jobs:
           # reapply. If the updater refuses before moving HEAD, restore the old
           # containers from their existing image before failing the job.
           original_head="$(git rev-parse HEAD)"
+          echo "[deploy] capturing pre-deploy operating-state acceptance baseline"
+          ORIGINAL_HEAD="$original_head" python3 - <<'PY'
+          import json
+          import os
+          from datetime import datetime, timezone
+          from pathlib import Path
+
+          source = Path("outputs/performance/operating_state.json")
+          target = Path("outputs/ops_scheduler/deploy_acceptance_baseline.json")
+          target.parent.mkdir(parents=True, exist_ok=True)
+          try:
+              operating_state = json.loads(source.read_text(encoding="utf-8")) if source.exists() else {}
+          except (OSError, ValueError):
+              operating_state = {}
+          deployed_marker = Path("outputs/performance/deployed_git_rev")
+          previous_deployed_sha = (
+              deployed_marker.read_text(encoding="utf-8").strip()
+              if deployed_marker.exists()
+              else os.environ.get("ORIGINAL_HEAD", "")
+          )
+          payload = {
+              "work_order": "WO-79",
+              "captured_at_utc": datetime.now(timezone.utc).isoformat(),
+              "previous_checkout_sha": os.environ.get("ORIGINAL_HEAD", ""),
+              "previous_deployed_sha": previous_deployed_sha,
+              "target_deploy_sha": os.environ.get("GITHUB_SHA", ""),
+              "operating_state": operating_state,
+              "paper_trading_invoked": False,
+              "live_trading_invoked": False,
+          }
+          temporary = target.with_name(target.name + ".tmp")
+          temporary.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+          temporary.replace(target)
+          PY
           echo "[deploy] quiescing paper writers for a consistent runtime snapshot"
           $DOCKER compose -f "$COMPOSE_FILE" stop --timeout 60
           echo "[deploy] updating source while preserving tracked and untracked runtime evidence"
@@ -383,12 +417,72 @@ jobs:
             exit 1
           fi
 
+          # WO-79: exercise the three component boundaries on real current
+          # data. Capture every producer exit before evaluating, so a stale
+          # artifact cannot make a failed producer look healthy. All commands
+          # are read-only/reporting-only; no broker or execution command is in
+          # this acceptance path.
+          echo "[deploy] running real-data component acceptance cycle"
+          $DOCKER compose -f "$COMPOSE_FILE" exec -T vps-ops-scheduler sh -lc '
+            set +e
+            timeout 300 python -m polymarket_predictive_engine.cli maker-carry-study --config "$POLYMARKET_CONFIG_PATH"
+            maker_carry_study_code=$?
+            timeout 300 python -m polymarket_predictive_engine.cli decision-policy --config "$POLYMARKET_CONFIG_PATH"
+            decision_policy_code=$?
+            timeout 300 python -m polymarket_predictive_engine.cli requote-alerts --config "$POLYMARKET_CONFIG_PATH"
+            requote_alerts_code=$?
+            timeout 300 python -m polymarket_predictive_engine.cli reconcile-wallet --config "$POLYMARKET_CONFIG_PATH"
+            reconcile_wallet_code=$?
+            timeout 300 python -m polymarket_predictive_engine.cli operating-state --config "$POLYMARKET_CONFIG_PATH"
+            operating_state_code=$?
+            export maker_carry_study_code decision_policy_code requote_alerts_code reconcile_wallet_code operating_state_code
+            python - <<"PY"
+          import json
+          import os
+          from datetime import datetime, timezone
+          from pathlib import Path
+
+          target = Path("/app/outputs/ops_scheduler/deploy_acceptance_cycle.json")
+          target.parent.mkdir(parents=True, exist_ok=True)
+          commands = {
+              name: {"exit_code": int(os.environ[f"{name}_code"])}
+              for name in (
+                  "maker_carry_study",
+                  "decision_policy",
+                  "requote_alerts",
+                  "reconcile_wallet",
+                  "operating_state",
+              )
+          }
+          payload = {
+              "work_order": "WO-79",
+              "generated_at_utc": datetime.now(timezone.utc).isoformat(),
+              "commands": commands,
+              "paper_trading_invoked": False,
+              "live_trading_invoked": False,
+          }
+          temporary = target.with_name(target.name + ".tmp")
+          temporary.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+          temporary.replace(target)
+          PY
+            set -e
+            python -m polymarket_predictive_engine.cli artifact-contracts --config "$POLYMARKET_CONFIG_PATH"
+            python -m polymarket_predictive_engine.cli deploy-acceptance --config "$POLYMARKET_CONFIG_PATH"
+            python -m polymarket_predictive_engine.cli operating-state --config "$POLYMARKET_CONFIG_PATH"
+          '
+
           # The dashboard renderer is reporting-only. Refresh it after the
           # model proof point so the served cockpit immediately exposes the
           # new timestamp while the scheduler finishes slower reports.
           $DOCKER compose -f "$COMPOSE_FILE" exec -T polymarket-dashboard \
             python scripts/render_polymarket_dashboard.py \
             --config /app/polymarket_predictive_config.example.yaml
+
+          acceptance_status="$(python3 -c 'import json; d=json.load(open("outputs/ops_scheduler/deploy_acceptance.json", encoding="utf-8")); print(d.get("status", "FAIL") if d.get("target_deploy_sha") == "'"$GITHUB_SHA"'" else "FAIL")' 2>/dev/null || echo FAIL)"
+          if [ "$acceptance_status" != "PASS" ]; then
+            echo "::error::WO-79 post-deploy acceptance failed. Inspect outputs/ops_scheduler/deploy_acceptance.json; previous revision $original_head remains the recorded rollback ref."
+            exit 1
+          fi
 
           echo "[deploy] verifying paper stack health"
           bash scripts/check_polymarket_vps_paper.sh

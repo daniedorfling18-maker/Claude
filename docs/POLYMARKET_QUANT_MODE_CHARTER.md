@@ -628,6 +628,19 @@ archive are excluded by construction. The live websocket producer remains the
 sole writer of its active table. This is collection operations only and cannot
 alter models, evidence gates, paper/live permissions, sizing, or orders.
 
+**2026-07-13 — WO-79 implemented by Codex.** Deployment now has a final
+real-current-data acceptance boundary. The runner captures the pre-deploy
+operating state and rollback SHA, records independent exit codes for the
+quote-sheet/requote/reconciliation/operating producers after restart, and
+fails success unless ticket completeness, legitimate requote state,
+three-leg reconciliation coverage, and no-new-UNKNOWN comparison all pass.
+FAIL is persisted, owner-notifiable, and visible in the cockpit before the
+workflow exits. A three-interface producer/consumer registry makes fields,
+freshness, and coverage machine-testable; its ARM64 PR-gate fixtures include
+the socket-coverage miss that caused WO-77. The component is reporting and
+deployment control only: it cannot change gates, models, sizing, credentials,
+paper/live permissions, or orders, and the prior release remains reversible.
+
 ## Rules of engagement for coding agents
 
 0. **Division of labour**: the orchestrating agent writes/updates this charter and the work orders

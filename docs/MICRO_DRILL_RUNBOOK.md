@@ -129,6 +129,20 @@ Partial-position sell handled cleanly; position row updated to the
 (unplanned Drill C equivalent): ~13.5c on ~$2.10 notional (~6.4%),
 dominated by the symmetric ~2.9% fees.
 
+**Drill E — reward-accrual pipe test (REGISTERED 2026-07-13, runs only
+on explicit owner go; NOT yet run).** Purpose: the H1 revenue mechanism
+(reward payments) has never been observed — `paid_rewards_usd` has only
+ever read zero. Ticket: single-sided resting bid, 20 shares at one tick
+below best bid on the CHEAP side of a band-eligible rewarded market
+(2026-07-13 candidate: "Iran full airspace closure by August 31?",
+~33c, ~$6.60 reserved), held across a UTC day boundary, then cancelled.
+PASS = a nonzero reward payment appears in data-api activity and flows
+to the scoreboard and cost ledger. Registered risk: headline market;
+worst case the bid is filled on news and the position marks against us
+(max $6.60, realistically cents of markout; exit next day in one
+5-share-multiple lot). This drill's exposure is registered SEPARATELY
+from the A-D $8 aggregate, with its own cap of $7.
+
 **Additional findings:**
 6. Venue MINIMUM 5 SHARES for limit orders, buys and sells alike.
    Consequences for the funded stage: kill-criteria flattening happens

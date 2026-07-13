@@ -322,7 +322,10 @@ wallet_reconciliation:
   enabled: true
   data_api_base_url: https://data-api.polymarket.com
   official_contracts_url: https://docs.polymarket.com/resources/contracts
-  polygon_rpc_url: https://polygon-rpc.com
+  # 2026-07-13: polygon-rpc.com began requiring an API key (HTTP 401), which
+  # broke the on-chain leg of the reconciliation. publicnode is key-less;
+  # https://1rpc.io/matic verified as a working manual fallback.
+  polygon_rpc_url: https://polygon-bor-rpc.publicnode.com
   request_timeout_seconds: 20
   request_pause_seconds: 0.1
   positions_page_limit: 500

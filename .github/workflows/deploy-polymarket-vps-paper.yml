@@ -12,7 +12,10 @@ concurrency:
 
 jobs:
   deploy:
-    runs-on: ubuntu-latest
+    # The account's GitHub-hosted minutes can be exhausted independently of
+    # repository health. The provisioned VPS runner is outside the paper
+    # compose stack, so it remains available while those containers restart.
+    runs-on: [self-hosted, Linux, ARM64, polymarket-ci]
     # 2026-07-07: 20 -> 30. Under VPS memory pressure the post-deploy governance
     # refresh ran 9+ minutes and the whole job was cancelled at exactly 20:00,
     # leaving the deploy unverified. 30 gives the slow-host worst case headroom.
@@ -196,6 +199,11 @@ jobs:
           else
             DOCKER="sudo docker"
           fi
+          if [ "$(id -u)" -eq 0 ]; then
+            SUDO=""
+          else
+            SUDO="sudo"
+          fi
 
           if [ ! -d "$REPO_DIR/.git" ]; then
             git clone "https://github.com/${GITHUB_REPOSITORY}.git" "$REPO_DIR"
@@ -225,12 +233,25 @@ jobs:
             --output outputs/performance/vps_capacity_preflight.json \
             --root .
 
+          # Freeze bind-mounted writers only after target-revision capacity
+          # has passed. This prevents files changing between stash capture and
+          # reapply. If the updater refuses before moving HEAD, restore the old
+          # containers from their existing image before failing the job.
+          original_head="$(git rev-parse HEAD)"
+          echo "[deploy] quiescing paper writers for a consistent runtime snapshot"
+          $DOCKER compose -f "$COMPOSE_FILE" stop --timeout 60
           echo "[deploy] updating source while preserving tracked and untracked runtime evidence"
-          python3 "$PREFLIGHT_DIR/update_vps_checkout_preserving_runtime.py" \
+          if ! python3 "$PREFLIGHT_DIR/update_vps_checkout_preserving_runtime.py" \
             --repo . \
             --target-ref "$GITHUB_SHA" \
             --branch main \
-            --report outputs/performance/vps_checkout_update.json
+            --report outputs/performance/vps_checkout_update.json; then
+            if [ "$(git rev-parse HEAD)" = "$original_head" ]; then
+              echo "[deploy] source unchanged after refusal; restoring previous paper stack"
+              $DOCKER compose -f "$COMPOSE_FILE" up -d --no-build || true
+            fi
+            exit 1
+          fi
 
           if [ "$(git rev-parse HEAD)" != "$GITHUB_SHA" ]; then
             echo "::error::VPS checked out $(git rev-parse HEAD), expected $GITHUB_SHA"
@@ -322,15 +343,19 @@ jobs:
           # then age the active stamp so the restarted scheduler runs now.
           deploy_started_epoch="$(date -u +%s)"
           governance_stamp="outputs/ops_scheduler/last_governance_refresh"
-          mkdir -p outputs/ops_scheduler/deploy_stamp_history
-          if [ -f "$governance_stamp" ]; then
-            cp -p "$governance_stamp" \
+          $SUDO mkdir -p outputs/ops_scheduler/deploy_stamp_history
+          if $SUDO test -f "$governance_stamp"; then
+            $SUDO cp -p "$governance_stamp" \
               "outputs/ops_scheduler/deploy_stamp_history/last_governance_refresh.${GITHUB_RUN_ID}"
           fi
-          printf '0\n' > "$governance_stamp"
+          printf '0\n' | $SUDO tee "$governance_stamp" >/dev/null
 
           echo "[deploy] building and (re)starting stack from $(git rev-parse --short HEAD)"
-          $DOCKER compose -f "$COMPOSE_FILE" up -d --build
+          if ! $DOCKER compose -f "$COMPOSE_FILE" up -d --build; then
+            echo "::warning::Initial compose recreation failed; retrying once from the completed image build."
+            sleep 3
+            $DOCKER compose -f "$COMPOSE_FILE" up -d --no-build
+          fi
           marker_tmp="outputs/performance/deployed_git_rev.tmp.$$"
           printf '%s\n' "$GITHUB_SHA" > "$marker_tmp"
           mv "$marker_tmp" outputs/performance/deployed_git_rev

@@ -89,7 +89,7 @@ Required repository secrets:
 
 ```text
 PM_VPS_HOST=129.151.178.42
-PM_VPS_USER=ubuntu
+PM_VPS_USER=opc
 PM_VPS_SSH_PRIVATE_KEY=<the private key matching the VPS public key>
 ```
 
@@ -106,10 +106,15 @@ PM_VPS_PORT=22
 PM_VPS_REPO_DIR=~/Claude
 ```
 
-The workflow pulls `main`, injects `THE_ODDS_API_KEY` into the VPS `.env`,
-rebuilds `docker-compose.vps-paper.yml`, forces a dashboard render, runs
-`scripts/check_polymarket_vps_paper.sh`, and verifies that the served dashboard
-contains the current proof-gate and evidence-funnel sections.
+The workflow itself runs on the provisioned `oracle-vps-polymarket-ci` runner,
+not billable `ubuntu-latest` capacity. It validates target capacity before
+touching the healthy stack, quiesces bind-mounted writers, preserves runtime
+evidence while fast-forwarding `main`, injects sealed secrets into `.env`, and
+rebuilds `docker-compose.vps-paper.yml`. The scheduler owns exactly one
+post-deploy governance refresh; deployment waits for a fresh price-action
+model, renders the dashboard, runs `scripts/check_polymarket_vps_paper.sh`, and
+verifies the current proof/evidence schema. A checkout refusal restores the
+previous stack when HEAD was not changed.
 
 ## Dashboard access
 
@@ -132,9 +137,9 @@ For a longer-running setup, prefer one of:
 
 Preferred path: set `PM_VPS_SSH_PRIVATE_KEY` in GitHub Actions secrets and run the manual
 `deploy-polymarket-vps-paper.yml` workflow. The workflow injects `THE_ODDS_API_KEY` into the VPS
-`.env`, rebuilds the Docker stack, forces a dashboard render, and verifies the current dashboard
-schema. If the deploy private key is missing, GitHub can see the sealed odds key but cannot deliver
-it to the VPS.
+`.env`, rebuilds the Docker stack, waits for the scheduler-owned model refresh, and verifies the
+current dashboard schema. If the deploy private key is missing, GitHub can see the sealed odds key
+but cannot deliver it to the VPS.
 
 Manual fallback: place any key the containers need (today: `THE_ODDS_API_KEY` for the sharp-anchor
 pipeline) in the `.env` file next to the compose file by hand:

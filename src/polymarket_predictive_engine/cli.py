@@ -80,7 +80,7 @@ from .promotion_review import build_promotion_review
 from .readiness import paper_live_promotion_gate, paper_trade_readiness, readiness_decision
 from .requote_alerts import build_requote_alerts
 from .reconstructed_signal_clv import run_reconstructed_clv_study
-from .refresh_governance import refresh_governance
+from .refresh_governance import LOCK_CONTENTION_EXIT_CODE, refresh_governance
 from .resolution_collector import collect_resolutions
 from .runtime_lock import runtime_lock
 from .sharp_anchor import build_sharp_anchor
@@ -456,7 +456,10 @@ def main(argv: list[str] | None = None) -> int:
         elif args.command == "strategy-v2-round-trip":
             _print(build_strategy_v2_round_trip_evidence(cfg))
         elif args.command == "refresh-governance":
-            _print(refresh_governance(cfg, refresh_dashboard=not args.skip_dashboard))
+            payload = refresh_governance(cfg, refresh_dashboard=not args.skip_dashboard)
+            _print(payload)
+            if payload.get("status") == "skipped_already_running":
+                return LOCK_CONTENTION_EXIT_CODE
         elif args.command == "promotion-review":
             _print(build_promotion_review(cfg))
         elif args.command == "goal-plan":

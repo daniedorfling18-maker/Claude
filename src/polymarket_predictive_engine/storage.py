@@ -189,6 +189,11 @@ INDEX_STATEMENTS = [
     "CREATE INDEX IF NOT EXISTS idx_cash_ledger_created ON cash_ledger(created_at)",
     "CREATE INDEX IF NOT EXISTS idx_predictions_market_token_time ON model_predictions(market_id, token_id, prediction_timestamp)",
     "CREATE INDEX IF NOT EXISTS idx_market_snapshots_market_token_time ON market_snapshots(market_id, token_id, collected_at)",
+    # Paper fills historically used a market slug while websocket snapshots
+    # used the condition id.  The round-trip audit intentionally falls back to
+    # the globally unique token id in that case.  Without this index every
+    # fallback is a full scan of the (multi-gigabyte) snapshot ledger.
+    "CREATE INDEX IF NOT EXISTS idx_market_snapshots_token_time ON market_snapshots(token_id, collected_at)",
 ]
 
 TABLES = [f"legacy_{table}" for table in LEGACY_TABLES] + [
@@ -329,6 +334,10 @@ def init_db(path: str | Path) -> None:
         con.execute(
             "INSERT OR IGNORE INTO schema_migrations(migration_id) VALUES (?)",
             ("typed_paper_ledger_v2_paper_broker",),
+        )
+        con.execute(
+            "INSERT OR IGNORE INTO schema_migrations(migration_id) VALUES (?)",
+            ("typed_paper_ledger_v3_snapshot_token_time_index",),
         )
         con.commit()
     finally:

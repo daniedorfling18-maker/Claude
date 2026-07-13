@@ -3311,6 +3311,39 @@ def test_dashboard_model_staleness_threshold_matches_rescore_cadence(tmp_path):
     assert any(alert["title"] == "Model scoring is stale" for alert in data["oversight_status"]["alerts"])
 
 
+def test_dashboard_attributes_stale_model_to_active_governance_stage(tmp_path):
+    cfg = _config(tmp_path)
+    write_json(
+        cfg.output_root / "polymarket_price_action" / "price_action_model_summary.json",
+        {
+            "status": "trained",
+            "generated_at_utc": (datetime.now(timezone.utc) - timedelta(hours=13)).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        },
+    )
+    write_json(
+        cfg.governance_root / "governance_refresh_status.json",
+        {
+            "status": "running",
+            "generated_at_utc": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+            "current_stage": "paper_round_trip_evidence",
+            "elapsed_seconds": 42.5,
+            "paper_trading_invoked": False,
+            "live_trading_invoked": False,
+        },
+    )
+
+    result = render_dashboard(cfg)
+    data = read_json(result["dashboard_data"])
+
+    assert data["governance_refresh_status"]["current_stage"] == "paper_round_trip_evidence"
+    assert data["oversight_status"]["governance_refresh_status"] == "running"
+    assert data["oversight_status"]["governance_refresh_stage"] == "paper_round_trip_evidence"
+    assert data["decision_useful_summary"]["trade_decision"] == "WAIT: GOVERNANCE REFRESH RUNNING"
+    assert "paper_round_trip_evidence" in data["decision_useful_summary"]["primary_blocker"]
+    stale_alert = next(alert for alert in data["oversight_status"]["alerts"] if alert["title"] == "Model scoring is stale")
+    assert "Active refresh stage: paper_round_trip_evidence" in stale_alert["body"]
+
+
 def test_dashboard_carries_profit_verdict_and_html_panel(tmp_path):
     """The pre-registered $100/month verdict must ride every render path (same
     clobber-proofing as proof_questions) and surface as a dashboard panel."""

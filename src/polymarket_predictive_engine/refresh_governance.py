@@ -1,8 +1,12 @@
 from __future__ import annotations
 
 import argparse
+import errno
 import json
-from typing import Any
+import os
+from pathlib import Path
+import time
+from typing import Any, BinaryIO, Callable, TypeVar
 
 from .algo.sweep import run_algo_sweep
 from .config import EngineConfig, load_config
@@ -33,6 +37,116 @@ from .trade_signal_audit import build_trade_signal_audit
 from .utils import now_utc, write_json
 
 
+T = TypeVar("T")
+LOCK_CONTENTION_EXIT_CODE = 75
+
+
+class _GovernanceRefreshLock:
+    """Non-blocking process lock released by the OS even after timeout/kill."""
+
+    def __init__(self, path: Path):
+        self.path = path
+        self.handle: BinaryIO | None = None
+
+    def acquire(self) -> bool:
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        handle = self.path.open("a+b")
+        try:
+            if os.name == "nt":
+                import msvcrt
+
+                handle.seek(0, os.SEEK_END)
+                if handle.tell() == 0:
+                    handle.write(b"\0")
+                    handle.flush()
+                handle.seek(0)
+                msvcrt.locking(handle.fileno(), msvcrt.LK_NBLCK, 1)
+            else:
+                import fcntl
+
+                fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except OSError as exc:
+            handle.close()
+            if exc.errno in {errno.EACCES, errno.EAGAIN, 13, 36}:
+                return False
+            raise
+        self.handle = handle
+        return True
+
+    def release(self) -> None:
+        handle = self.handle
+        self.handle = None
+        if handle is None:
+            return
+        try:
+            if os.name == "nt":
+                import msvcrt
+
+                handle.seek(0)
+                msvcrt.locking(handle.fileno(), msvcrt.LK_UNLCK, 1)
+            else:
+                import fcntl
+
+                fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+        finally:
+            handle.close()
+
+
+class _GovernanceRefreshProgress:
+    """Durable stage heartbeat for attribution and fail-closed freshness."""
+
+    def __init__(self, cfg: EngineConfig):
+        self.path = cfg.governance_root / "governance_refresh_status.json"
+        self.started_at_utc = now_utc()
+        self.started_monotonic = time.monotonic()
+        self.current_stage = "starting"
+        self.completed_stages: list[str] = []
+        self.stage_durations_seconds: dict[str, float] = {}
+        self._write("running")
+
+    def _payload(self, status: str, **extra: Any) -> dict[str, Any]:
+        return {
+            "status": status,
+            "generated_at_utc": now_utc(),
+            "started_at_utc": self.started_at_utc,
+            "elapsed_seconds": round(time.monotonic() - self.started_monotonic, 3),
+            "current_stage": self.current_stage,
+            "completed_stages": list(self.completed_stages),
+            "stage_durations_seconds": dict(self.stage_durations_seconds),
+            "pid": os.getpid(),
+            "paper_trading_invoked": False,
+            "live_trading_invoked": False,
+            **extra,
+        }
+
+    def _write(self, status: str, **extra: Any) -> None:
+        write_json(self.path, self._payload(status, **extra))
+
+    def run(self, name: str, callback: Callable[[], T]) -> T:
+        self.current_stage = name
+        self._write("running", stage_started_at_utc=now_utc())
+        started = time.monotonic()
+        try:
+            result = callback()
+        except Exception as exc:
+            self.stage_durations_seconds[name] = round(time.monotonic() - started, 3)
+            self._write(
+                "failed",
+                failed_stage=name,
+                error_type=type(exc).__name__,
+                error=str(exc),
+            )
+            raise
+        self.stage_durations_seconds[name] = round(time.monotonic() - started, 3)
+        self.completed_stages.append(name)
+        self._write("running")
+        return result
+
+    def finish(self) -> None:
+        self.current_stage = "complete"
+        self._write("ok", completed_at_utc=now_utc())
+
+
 def _cohort_counts(signal_cohort_pnl: dict[str, Any]) -> dict[str, Any]:
     cohorts = signal_cohort_pnl.get("cohorts", []) if isinstance(signal_cohort_pnl, dict) else []
     if not isinstance(cohorts, list):
@@ -46,52 +160,75 @@ def _cohort_counts(signal_cohort_pnl: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def refresh_governance(cfg: EngineConfig, *, refresh_dashboard: bool = True) -> dict[str, Any]:
+def _refresh_governance_locked(
+    cfg: EngineConfig,
+    progress: _GovernanceRefreshProgress,
+    *,
+    refresh_dashboard: bool = True,
+) -> dict[str, Any]:
     """Rebuild governance files in dependency order without changing trade gates.
 
     This command is intentionally conservative. It only recomputes governance and
     dashboard artefacts from existing paper/shadow evidence; it does not generate
     new trade signals, execute paper orders, change thresholds, or affect live
-    trading settings.
+    trading settings. The model-critical path is published before slower reporting
+    stages so a non-critical report cannot make executable model evidence stale.
     """
-    paper_round_trip = build_paper_round_trip_evidence(cfg)
-    closing_line = build_closing_line_value(cfg)
-    smart_flow_clv = build_smart_flow_clv(cfg)
-    edge_attribution = build_edge_attribution(cfg)
-    algo_sweep = run_algo_sweep(cfg)
-    family_calibration = build_family_calibration_scorecard(cfg)
-    collection_coverage = build_collection_coverage(cfg)
-    sharp_anchor_coverage = build_sharp_anchor_coverage(cfg)
-    evidence_history = append_evidence_history(cfg)
+    # Critical freshness path: these are the only prerequisites of the strict
+    # ask-in/bid-out model. Keep them ahead of slower attribution/report lanes.
+    paper_round_trip = progress.run("paper_round_trip_evidence", lambda: build_paper_round_trip_evidence(cfg))
+    price_action_scout = progress.run("price_action_scout", lambda: build_price_action_scout(cfg))
+    price_action_microstructure = progress.run(
+        "price_action_microstructure",
+        lambda: build_microstructure_edge_lab(cfg),
+    )
+    price_action_model = progress.run("price_action_model", lambda: train_price_action_model(cfg))
+
+    # Research/reporting path. These stages remain strict dependencies of the
+    # final promotion decision, but cannot prevent the model timestamp above
+    # from being refreshed and audited.
+    closing_line = progress.run("closing_line_value", lambda: build_closing_line_value(cfg))
+    smart_flow_clv = progress.run("smart_flow_clv", lambda: build_smart_flow_clv(cfg))
+    edge_attribution = progress.run("edge_attribution", lambda: build_edge_attribution(cfg))
+    algo_sweep = progress.run("algo_sweep", lambda: run_algo_sweep(cfg))
+    family_calibration = progress.run("family_calibration", lambda: build_family_calibration_scorecard(cfg))
+    collection_coverage = progress.run("collection_coverage", lambda: build_collection_coverage(cfg))
+    sharp_anchor_coverage = progress.run("sharp_anchor_coverage", lambda: build_sharp_anchor_coverage(cfg))
+    evidence_history = progress.run("evidence_history", lambda: append_evidence_history(cfg))
 
     con = connect_db(cfg.database_path)
     try:
-        signal_cohort_pnl = write_signal_cohort_pnl(con, cfg)
+        signal_cohort_pnl = progress.run("signal_cohort_pnl", lambda: write_signal_cohort_pnl(con, cfg))
     finally:
         con.close()
 
-    price_action_scout = build_price_action_scout(cfg)
-    price_action_microstructure = build_microstructure_edge_lab(cfg)
-    price_action_model = train_price_action_model(cfg)
-    price_action_feedback = build_price_action_feedback(cfg)
-    price_action_paper_signals = build_price_action_paper_signals(cfg)
-    quant_research_status = build_quant_research_status(cfg)
-    trade_signal_audit = build_trade_signal_audit(cfg)
-    promotion_review = build_promotion_review(cfg)
-    goal_plan = build_goal_plan(cfg)
-    profit_sprint = build_profit_sprint(cfg)
-    research_focus = build_research_focus(cfg)
-    promotion_gate = paper_live_promotion_gate(cfg)
-    governance = governance_report(cfg)
+    price_action_feedback = progress.run("price_action_feedback", lambda: build_price_action_feedback(cfg))
+    price_action_paper_signals = progress.run("price_action_paper_signals", lambda: build_price_action_paper_signals(cfg))
+    quant_research_status = progress.run("quant_research_status", lambda: build_quant_research_status(cfg))
+    trade_signal_audit = progress.run("trade_signal_audit", lambda: build_trade_signal_audit(cfg))
+    promotion_review = progress.run("promotion_review", lambda: build_promotion_review(cfg))
+    goal_plan = progress.run("goal_plan", lambda: build_goal_plan(cfg))
+    profit_sprint = progress.run("profit_sprint", lambda: build_profit_sprint(cfg))
+    research_focus = progress.run("research_focus", lambda: build_research_focus(cfg))
+    promotion_gate = progress.run("promotion_gate", lambda: paper_live_promotion_gate(cfg))
+    governance = progress.run("governance_report", lambda: governance_report(cfg))
     # render_dashboard builds the four proof questions into its single compact write and
     # writes the governance proof_questions.json artifact itself, so no separate apply
     # pass is needed here (a second pass re-wrote the payload pretty-printed, breaking
     # the compact/capped invariant until the live loop's next render).
-    dashboard = render_dashboard(cfg) if refresh_dashboard else {"status": "skipped"}
+    dashboard = (
+        progress.run("dashboard", lambda: render_dashboard(cfg))
+        if refresh_dashboard
+        else {"status": "skipped"}
+    )
 
     result = {
         "status": "ok",
         "generated_at_utc": now_utc(),
+        "started_at_utc": progress.started_at_utc,
+        "elapsed_seconds": round(time.monotonic() - progress.started_monotonic, 3),
+        "completed_stages": list(progress.completed_stages),
+        "stage_durations_seconds": dict(progress.stage_durations_seconds),
         "database_path": str(cfg.database_path),
         "refreshed": {
             "signal_cohort_pnl": True,
@@ -176,7 +313,29 @@ def refresh_governance(cfg: EngineConfig, *, refresh_dashboard: bool = True) -> 
         ],
     }
     write_json(cfg.governance_root / "governance_refresh.json", result)
+    progress.finish()
     return result
+
+
+def refresh_governance(cfg: EngineConfig, *, refresh_dashboard: bool = True) -> dict[str, Any]:
+    """Run exactly one full governance refresh across local/VPS producers."""
+    lock = _GovernanceRefreshLock(cfg.governance_root / "governance_refresh.lock")
+    if not lock.acquire():
+        payload = {
+            "status": "skipped_already_running",
+            "generated_at_utc": now_utc(),
+            "reason": "another governance refresh owns the cross-process lock",
+            "lock_file": str(lock.path),
+            "paper_trading_invoked": False,
+            "live_trading_invoked": False,
+        }
+        write_json(cfg.governance_root / "governance_refresh_contention.json", payload)
+        return payload
+    try:
+        progress = _GovernanceRefreshProgress(cfg)
+        return _refresh_governance_locked(cfg, progress, refresh_dashboard=refresh_dashboard)
+    finally:
+        lock.release()
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -185,8 +344,9 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--skip-dashboard", action="store_true")
     args = parser.parse_args(argv)
     cfg = load_config(args.config)
-    print(json.dumps(refresh_governance(cfg, refresh_dashboard=not args.skip_dashboard), indent=2, sort_keys=True, default=str))
-    return 0
+    result = refresh_governance(cfg, refresh_dashboard=not args.skip_dashboard)
+    print(json.dumps(result, indent=2, sort_keys=True, default=str))
+    return LOCK_CONTENTION_EXIT_CODE if result.get("status") == "skipped_already_running" else 0
 
 
 if __name__ == "__main__":

@@ -616,6 +616,18 @@ emit the existing owner-notification artifact contract. Polls never inflate
 counts, repeat incidents deduplicate, and the component cannot alter source
 states, gates, sizing, credentials, paper/live trading, or orders.
 
+**2026-07-13 — WO-71 implemented by Codex.** WO-31 zero-join histories now
+drive a persisted, reviewable paid-request suppression plan: persistently
+unmappable sport/market families drop to a 24-hour probe cadence and recover
+normal cadence on the first successful join without editing config. Daily CLI
+`corpus-retention` compacts expired high-volume research rows into a separate
+bounded daily gzip archive before source pruning, removes only stale invalid
+atomic temp files, and logs host-disk projection. Its writable surface is
+fixed; WO-61 paths, investor evidence namespaces, and the WO-65 recovery
+archive are excluded by construction. The live websocket producer remains the
+sole writer of its active table. This is collection operations only and cannot
+alter models, evidence gates, paper/live permissions, sizing, or orders.
+
 ## Rules of engagement for coding agents
 
 0. **Division of labour**: the orchestrating agent writes/updates this charter and the work orders

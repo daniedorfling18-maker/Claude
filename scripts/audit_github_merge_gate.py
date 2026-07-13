@@ -55,6 +55,7 @@ def workflow_is_configured(workflow_text: str) -> bool:
         "Linux",
         "ARM64",
         "polymarket-ci",
+        "test_collection_hygiene.py",
         "test_degraded_state_watchdog.py",
         "test_operating_state.py",
         "test_execution_governance_storage.py",

@@ -447,6 +447,31 @@ def _managed_bytes(cfg: EngineConfig) -> int:
     return total
 
 
+def _recent_managed_write_bytes(cfg: EngineConfig, current: datetime) -> int:
+    """Conservative first-run daily-growth proxy from recently written files."""
+    cutoff = current - timedelta(days=1)
+    roots = [
+        cfg.output_root / "polymarket_training",
+        cfg.output_root / "polymarket_websocket",
+        cfg.output_root / "polymarket_trade_prints",
+        cfg.output_root / "maker_carry" / "official_books",
+        cfg.output_root / ARCHIVE_ROOT,
+    ]
+    total = 0
+    seen: set[Path] = set()
+    for root in roots:
+        if not root.exists():
+            continue
+        for path in root.rglob("*"):
+            if path in seen or not path.is_file():
+                continue
+            seen.add(path)
+            modified = datetime.fromtimestamp(path.stat().st_mtime, timezone.utc)
+            if modified >= cutoff and not path.name.endswith(".tmp"):
+                total += path.stat().st_size
+    return total
+
+
 def _disk_projection(
     cfg: EngineConfig,
     *,
@@ -466,8 +491,9 @@ def _disk_projection(
         daily_growth = max(0.0, (bytes_before - previous_after) / elapsed_days)
         basis = "prior_retention_run"
     else:
-        daily_growth = 0.0
-        basis = "first_run_no_growth_baseline"
+        current_time = current_time or datetime.now(timezone.utc)
+        daily_growth = float(_recent_managed_write_bytes(cfg, current_time))
+        basis = "first_run_recent_file_write_footprint"
     threshold_bytes = disk_after.total * 0.90
     headroom = max(0.0, threshold_bytes - disk_after.used)
     days_to_90 = headroom / daily_growth if daily_growth > 0 else None

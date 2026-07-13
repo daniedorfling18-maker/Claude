@@ -274,6 +274,8 @@ def _retire_rows(
             "rows_retained": len(retained),
         }
     )
+    if dry_run and expired:
+        result["bytes_pruned_raw"] = int(path.stat().st_size * len(expired) / max(len(rows), 1))
     if not expired or dry_run:
         return result
     before = path.stat().st_size
@@ -313,29 +315,37 @@ def _compact_training_archive(
     bytes_archived = 0
     bytes_pruned = 0
     archive_files: set[str] = set()
-    for path in sources:
-        if _protected(cfg, path):
-            continue
-        rows = _read_csv_any(path)
+    eligible_sources = [path for path in sources if not _protected(cfg, path)]
+    source_bytes = sum(path.stat().st_size for path in eligible_sources)
+    all_rows: list[dict[str, Any]] = []
+    for path in eligible_sources:
+        rows = [dict(row) for row in _read_csv_any(path)]
         rows_archived += len(rows)
-        if dry_run:
-            continue
+        if not dry_run:
+            all_rows.extend(rows)
+    if dry_run:
+        bytes_pruned = source_bytes
+    elif all_rows:
+        # One grouped write avoids repeatedly decompressing and rewriting the
+        # same daily archive when hundreds of small producer chunks accrued.
         added, paths = _archive_rows(
             cfg,
             corpus="training_archive",
-            rows=[dict(row) for row in rows],
+            rows=all_rows,
             timestamp_fields=TIMESTAMP_FIELDS["training_archive"],
-            fallback_day=datetime.fromtimestamp(path.stat().st_mtime, timezone.utc),
+            fallback_day=current,
         )
         bytes_archived += added
-        size = path.stat().st_size
-        path.unlink()
-        bytes_pruned += size
         archive_files.update(paths)
+        # Sources are deleted only after every daily archive write succeeds.
+        for path in eligible_sources:
+            size = path.stat().st_size
+            path.unlink()
+            bytes_pruned += size
     return {
         "corpus": "training_archive",
         "status": "would_compact" if dry_run and sources else "ok",
-        "source_files": len(sources),
+        "source_files": len(eligible_sources),
         "rows_archived": rows_archived,
         "bytes_archived": bytes_archived,
         "bytes_pruned_raw": bytes_pruned,

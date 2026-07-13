@@ -2658,7 +2658,11 @@ non-attributable from public data.
    like the operator address). WO-62 three-way reconciliation, the
    maker-live-test scoreboard, and the operating state all become
    two-wallet aware (operator wallet vs executor wallet reported
-   separately, never summed silently).
+   separately, never summed silently). Onboarding checklist for the
+   owner at account creation: enable AUTO-REDEEM WINS in the
+   sub-account's Trading settings (confirmed account-level on the
+   operator account 2026-07-13; removes any redemption logic from
+   WO-67's scope).
 2. Credential guard test (promised in the approved P5 doc): a pytest
    that scans every telemetry-whitelisted directory and the archive
    manifest for credential-shaped strings (hex keys, api key/secret/

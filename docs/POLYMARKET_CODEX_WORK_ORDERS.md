@@ -2637,12 +2637,111 @@ live-test ladder starts producing real artifacts to replay against; file
 here now so it is sequenced as a WO-67 precondition input (P4 review
 evidence), not an afterthought. Do not build during the proof phase.
 
+# Batch 9 — filed 2026-07-13 (go-live infrastructure around the blocked executor)
+
+Design principle: MINIMIZE THE POST-AMENDMENT DELTA. Everything keyless
+and read-only around the executor is specced now and buildable now, so
+the only code written after the owner signs P3 is `maker_executor.py`
+itself plus its credential loading and binding hooks — the registration's
+"days-long mechanical job". NOTHING in this batch adds a live order path;
+WO-67 remains the only order-placing WO and stays BLOCKED behind P1-P5.
+Micro-drill findings 1-7 (docs/MICRO_DRILL_RUNBOOK.md) bind as design
+inputs: 5-share order minimum (size in multiples of 5; sub-5 tails ride
+to resolution), orderbook clears at event start, symmetric ~2.9% taker
+fees, reservations invisible in displayed buying power, resting orders
+non-attributable from public data.
+
+## WO-73 — Two-wallet monitoring, credential guard, rotation drill (buildable NOW except item 4)
+
+1. Executor sub-account onboarding: config gains
+   `maker_live_test.executor_wallet_address` (public identifier only,
+   like the operator address). WO-62 three-way reconciliation, the
+   maker-live-test scoreboard, and the operating state all become
+   two-wallet aware (operator wallet vs executor wallet reported
+   separately, never summed silently).
+2. Credential guard test (promised in the approved P5 doc): a pytest
+   that scans every telemetry-whitelisted directory and the archive
+   manifest for credential-shaped strings (hex keys, api key/secret/
+   passphrase patterns) and fails the suite on any hit. Runs in the
+   WO-69 PR gate.
+3. Rotation/revocation drill scripts (keyless scaffolding): a runbook +
+   script skeleton that verifies the executor container fails FLAT when
+   credentials are absent/invalid — testable pre-amendment with dummy
+   env vars against a stub, because fail-flat is a property of the
+   harness, not of real keys.
+4. POST-AMENDMENT ONLY: the actual `.env` credential loading in the
+   executor process. Everything else in this WO ships first.
+
+## WO-74 — Executor replay-certification harness (buildable NOW; executor plugs in later)
+
+Rollout phase (a) of the registered WO-67 architecture, built as a
+harness the executor must later pass rather than code inside it:
+1. Scenario corpus: recorded official-book windows (WO-44 data) plus
+   synthetic stress scenarios encoding the drill findings — event-start
+   book clear, 5-share minimum, sub-5 tails, spread crossings, news gap
+   through the quote, stale websocket, kill-criteria day.
+2. Certification contract (the harness asserts, on a candidate
+   executor's decision log): never quotes outside the sheet; never
+   exceeds policy caps; sizes in multiples of 5 shares; cancels within
+   one cycle of pull_quotes_now/STOP; goes flat on missing/stale input;
+   dead-man flatten fires on heartbeat gap; ledger rows append for every
+   action.
+3. Output: `outputs/execution/replay_certification.json` — a dated PASS/
+   FAIL artifact per candidate build; a FAIL blocks canary by
+   registration.
+4. Buildable now against a stub decision log; the real executor must
+   pass unchanged post-amendment.
+
+## WO-75 — Live-ops control plane (monitoring parts NOW; binding hooks post-amendment)
+
+1. Executor status surface: dashboard panel + operating-state rows —
+   mode (absent/replay/canary/portfolio), open orders, exposure vs stage
+   cap, last action age, dead-man countdown, kill-criteria scoreboard.
+   Reads the (future) execution ledger; renders ABSENT until one exists.
+2. STOP propagation contract: requote_alerts `pull_quotes_now`/`STOP`
+   and decision-policy kill states become BINDING inputs for the
+   executor (cancel-all within one cycle) while remaining advisory for
+   the human lane. Registered here; wired post-amendment.
+3. Owner alerting: kill trigger, dead-man trigger, reconciliation
+   discrepancy > threshold, or SLO breach on executor freshness sends
+   the existing notification path (email) — alert plumbing buildable now
+   against synthetic events.
+4. Heartbeat spec: executor writes a heartbeat file each cycle; the ops
+   scheduler (already the watchdog for everything else) alarms on gap >
+   30 min INDEPENDENTLY of the executor's own dead-man logic — two
+   separate processes must both fail for a silent stall.
+
+## WO-76 — Pre-registered canary promotion/demotion contract (REGISTRATION, effective on filing)
+
+Registered now so no discretion exists later. Canary = ONE market,
+minimum reward-eligible size, executor account only.
+1. PROMOTION canary -> portfolio requires ALL, measured over >= 7
+   consecutive canary days: three-way reconciliation clean every day
+   (incl. executor wallet); fills <= 2x model; measured post-fill
+   markout within the charged adverse-selection budget; reward receipts
+   >= 0.5x model; zero uncontrolled states (every halt explained in the
+   anchored ledger); replay certification still green on the deployed
+   SHA.
+2. DEMOTION canary -> halt + human review on ANY of: kill criterion
+   fires; reconciliation discrepancy > $1 unexplained for 24h; two
+   consecutive days fills > 2x model; any action outside the quote
+   sheet (auto-halt, no threshold).
+3. Portfolio mode inherits the same daily checks at WO-50 ladder
+   capital; ladder progression stays owner-confirmed per the frozen
+   policy.
+4. Amendments to this contract: tighten-only before first canary day;
+   any loosening requires a dated owner amendment.
+
 ## Priority order for Codex (updated 2026-07-12, batch 8 filed)
 
-WO-68 and WO-69 built 2026-07-12 (69 not enforced pending GitHub plan
-upgrade). Next: **WO-71** (disk is at 84% and climbing — item 2 is
-time-sensitive), then **WO-68b**, then **WO-66**; WO-70 deferred
-post-proof; WO-72 DEFERRED (pre-WO-67 requirement, build post-ladder). Batch 6: WO-66 unblocked; WO-67 BLOCKED per its
+2026-07-13 update (batch 9 filed): WO-66 and WO-68b built and deployed;
+governance exit-124 resolved on the 4-core host. Queue now: **WO-71**
+(retention + suppression — disk relief holds at 75% but the corpus still
+grows), then batch 9 buildable-now parts in order **WO-73 (items 1-3) ->
+WO-74 -> WO-75 (items 1,3,4)**; WO-76 is a registration effective on
+filing (no build); WO-73 item 4, WO-75 item 2, and WO-67 itself remain
+POST-AMENDMENT; WO-70 deferred post-proof; WO-72 DEFERRED
+(pre-WO-67 requirement, build post-ladder). Batch 6: WO-66 unblocked; WO-67 BLOCKED per its
 preconditions. Batch 4 in order: **WO-58 -> WO-56 -> WO-57 -> WO-59 -> WO-60**. Then batch 5
 (investor-grade evidence infra): **WO-61 -> WO-64 -> WO-62 -> WO-63 -> WO-65**
 (2026-07-11 reorder from the builder's audit: 63's gas capture hangs off 62's

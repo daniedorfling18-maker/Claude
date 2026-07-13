@@ -218,6 +218,14 @@ jobs:
             chmod 600 .env
           fi
 
+          # Bind-mounted containers can create these status directories as
+          # root. The host-side preflight/baseline writers use atomic sibling
+          # temp files, so restore ownership to the SSH deployment account
+          # before any write. Scope is deliberately limited to generated
+          # reporting directories; runtime ledgers and source are untouched.
+          $SUDO install -d -m 0775 -o "$(id -u)" -g "$(id -g)" \
+            outputs/performance outputs/ops_scheduler
+
           # Validate the TARGET revision without changing the mounted checkout.
           # If this refuses, every existing container and its deployed marker
           # remain byte-for-byte untouched.

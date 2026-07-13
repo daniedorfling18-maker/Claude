@@ -73,7 +73,7 @@ untrue, regardless of signatures.
 |---|---|---|
 | P1 | Maker gates evidence-supported | `maker_carry_study.json` with M-A/M-B/M-C pass, dated within 48h of signing |
 | P2 | Human Stage-1 ladder complete | Micro-drill runbook results logged + $100 human stage executed with clean reconciliation and kill criteria untriggered |
-| P4 | Independent review of executor code | Executor PR built by one agent, audited and approved by a different agent, merged through the WO-69 gate; PR link |
+| P4 | Independent review of executor code | Executor PR built by one agent on a branch, audited and approved by a different agent, WO-69 gate green — but NOT merged: the no-live-order-path invariant forbids merging before this amendment is in effect. The approved PR merges immediately after the amendment; PR link |
 | P5 | Custody design approved | Written custody document reviewed and accepted by the owner; link |
 | — | Failure drills passed | WO-72 drill suite has dated PASS artifacts for the executor-relevant failure modes |
 | — | Operating state agrees | Generated `operating_state.json` shows deployed SHA = main, reconciliation clean, no active SLO breach |

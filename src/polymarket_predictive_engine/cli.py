@@ -30,6 +30,7 @@ from .drift_scan_study import run_drift_scan
 from .dutch_arb_monitor import run_dutch_arb_monitor
 from .edge_attribution import build_edge_attribution
 from .evidence_history import append_evidence_history
+from .executor_replay_certification import certify_executor_replay
 from .execution.live import live_trade
 from .execution.paper import paper_trade_report
 from .external_feed_collector import collect_external_feeds
@@ -131,6 +132,7 @@ COMMANDS = [
     "degraded-state-watchdog",
     "artifact-contracts",
     "deploy-acceptance",
+    "executor-replay-certification",
     "anchor-ledgers",
     "verify-ledger-chain",
     "render-ips",
@@ -237,6 +239,14 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--restore-output-root", default=None, help="verify-ledger-archive: empty destination for an applied restore")
     parser.add_argument("--apply-restore", action="store_true", help="verify-ledger-archive: copy verified files into --restore-output-root")
     parser.add_argument("--force-archive", action="store_true", help="snapshot-ledger-archive: build even if the active RPO is not due")
+    parser.add_argument("--executor-decision-log", default=None, help="executor-replay-certification: candidate decision-log JSON")
+    parser.add_argument("--executor-ledger", default=None, help="executor-replay-certification: candidate action-ledger CSV")
+    parser.add_argument("--candidate-build-id", default=None, help="executor-replay-certification: exact candidate build identifier")
+    parser.add_argument(
+        "--generate-replay-stub",
+        action="store_true",
+        help="executor-replay-certification: generate and certify the keyless WO-74 reference stub",
+    )
     parser.add_argument("--allow-data-quality-warnings", action="store_true")
     parser.add_argument("--resolution-limit", type=int, default=None)
     parser.add_argument("--historical-limit", type=int, default=None)
@@ -359,6 +369,16 @@ def main(argv: list[str] | None = None) -> int:
             _print(build_contract_registry(cfg))
         elif args.command == "deploy-acceptance":
             _print(build_deploy_acceptance(cfg))
+        elif args.command == "executor-replay-certification":
+            _print(
+                certify_executor_replay(
+                    cfg,
+                    decision_log_path=args.executor_decision_log,
+                    execution_ledger_path=args.executor_ledger,
+                    generate_reference_stub=args.generate_replay_stub,
+                    candidate_build_id=args.candidate_build_id,
+                )
+            )
         elif args.command == "anchor-ledgers":
             _print(anchor_ledgers(cfg))
         elif args.command == "verify-ledger-chain":

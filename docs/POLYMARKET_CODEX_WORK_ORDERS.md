@@ -2715,6 +2715,19 @@ path was added.
 
 ## WO-74 — Executor replay-certification harness (buildable NOW; executor plugs in later)
 
+Status: IMPLEMENTED by Codex on 2026-07-13. CLI
+`executor-replay-certification` generates a versioned corpus from recorded
+WO-44 official-book windows plus all registered synthetic stress families and
+certifies an external candidate decision log/action ledger against an unchanged
+contract. Exact quote-sheet membership, policy caps, 5-share multiples,
+one-cycle pull/STOP cancellation, flat missing/stale behavior, heartbeat
+dead-man flattening, and one-to-one action-ledger appends are independently
+reported in `outputs/execution/replay_certification.json`. The keyless
+reference stub proves only the harness; a missing official window or any
+contract defect FAILS and blocks canary by registration. No executor,
+credential, broker, signing, paper, live, cancellation, or order path was
+introduced.
+
 Rollout phase (a) of the registered WO-67 architecture, built as a
 harness the executor must later pass rather than code inside it:
 1. Scenario corpus: recorded official-book windows (WO-44 data) plus

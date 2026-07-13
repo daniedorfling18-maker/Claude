@@ -30,6 +30,10 @@ orders, zero positions, zero exposure, and a halted state. The result is
 written to `outputs/execution/credential_rotation_drill.json`. No real key,
 secret, passphrase, or `.env` value is read or persisted.
 
+Separately, run the unchanged replay contract in
+`docs/EXECUTOR_REPLAY_CERTIFICATION.md`. A reference-stub PASS proves the
+harness only; a real candidate build must later pass the same contract.
+
 ## Rotation/revocation procedure for the future executor
 
 Only after the owner amendment and WO-67 implementation:

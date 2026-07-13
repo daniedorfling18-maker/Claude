@@ -21,9 +21,9 @@ def _runners(status: str = "online") -> dict:
     return {
         "runners": [
             {
-                "name": "danie-windows-polymarket-ci",
+                "name": "oracle-vps-polymarket-ci",
                 "status": status,
-                "labels": [{"name": label} for label in ("self-hosted", "Windows", "X64", "polymarket-ci")],
+                "labels": [{"name": label} for label in ("self-hosted", "Linux", "ARM64", "polymarket-ci")],
             }
         ]
     }
@@ -54,15 +54,17 @@ def test_registered_workflow_is_minimal_self_hosted_and_secretless() -> None:
     assert "pull_request:" in workflow
     assert "types: [opened, synchronize, reopened]" in workflow
     assert "ready_for_review" not in workflow
-    assert "runs-on: [self-hosted, Windows, X64, polymarket-ci]" in workflow
-    assert "timeout-minutes: 8" in workflow
+    assert "runs-on: [self-hosted, Linux, ARM64, polymarket-ci]" in workflow
+    assert "timeout-minutes: 15" in workflow
+    assert "image: python:3.11-slim" in workflow
+    assert "options: --cpus 2 --memory 4g" in workflow
     assert "permissions:\n  contents: read" in workflow
     assert "secrets." not in workflow
     assert "actions/setup-python" not in workflow
-    assert "shell: pwsh" not in workflow
-    assert workflow.count("shell: powershell") == 5
-    assert "venv --system-site-packages" in workflow
-    assert "pip install --disable-pip-version-check --no-deps" in workflow
+    assert "shell: powershell" not in workflow
+    assert workflow.count("shell: bash") == 5
+    assert "python -m venv .ci-venv" in workflow
+    assert "pip install --disable-pip-version-check -e" in workflow
     assert "pip check" in workflow
     assert "pytest -q" in workflow
     assert "test_operating_state.py" in workflow

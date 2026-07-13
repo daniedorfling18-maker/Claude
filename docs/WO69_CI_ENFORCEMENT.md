@@ -8,26 +8,27 @@ pre-merge control.
 
 ## Runner
 
-The selected owner-infrastructure option is a repository-scoped Windows self-hosted runner labelled:
+The selected owner-infrastructure option is a repository-scoped Linux ARM64 runner on the upgraded
+Oracle VPS, labelled:
 
 ```text
-self-hosted, Windows, X64, polymarket-ci
+self-hosted, Linux, ARM64, polymarket-ci
 ```
 
-It is installed outside the repository at `%USERPROFILE%\actions-runner-polymarket-ci` and starts as
-the current-user scheduled task `GitHub Polymarket CI Runner`. It has no repository secrets; the job
-grants only `contents: read` and does not persist checkout credentials. If the laptop is offline, the
-check queues instead of silently passing.
+It is installed outside the repository at `/opt/actions-runner-polymarket-ci-vps` and starts as the
+systemd service `actions.runner.daniedorfling18-maker-Claude.oracle-vps-polymarket-ci.service`, running
+as `opc`. It has no repository or trading secrets; the job grants only `contents: read` and does not
+persist checkout credentials. Each gate runs in a disposable `python:3.11-slim` container capped at
+2 CPUs and 4 GiB, so CI no longer depends on the laptop and cannot consume the whole VPS.
 
-The runner is provisioned with Python 3.12 and the repository's development dependencies. Each job
-creates a disposable venv using those system packages, installs the proposed repository with
-`--no-deps`, and runs `pip check`. This avoids a network download bottleneck while failing closed if
-the provisioned environment no longer satisfies `pyproject.toml`.
+Each job creates a disposable virtual environment in that container, installs the proposed
+repository and development dependencies from `pyproject.toml`, and runs `pip check`. The first run
+may populate Docker/Python caches; the 15-minute job limit remains fail-closed.
 
 Operator checks:
 
-```powershell
-Get-ScheduledTask -TaskName "GitHub Polymarket CI Runner"
+```bash
+sudo systemctl status actions.runner.daniedorfling18-maker-Claude.oracle-vps-polymarket-ci.service
 gh api repos/daniedorfling18-maker/Claude/actions/runners
 ```
 

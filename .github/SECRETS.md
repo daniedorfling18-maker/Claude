@@ -6,7 +6,7 @@ The repository runs ten workflows. The sections below list secrets required for 
 
 ## `required-pr-gate.yml` (pull request)
 
-No secrets. The WO-69 gate runs only deterministic lint, config validation, and governance/invariant tests on the repository-scoped Windows self-hosted runner. Its `GITHUB_TOKEN` permission is read-only and checkout credentials are not persisted.
+No secrets. The WO-69 gate runs only deterministic lint, config validation, and governance/invariant tests in a disposable container on the repository-scoped Linux ARM64 VPS runner. Its `GITHUB_TOKEN` permission is read-only and checkout credentials are not persisted.
 
 ## `ci.yml` (manual comprehensive suite)
 

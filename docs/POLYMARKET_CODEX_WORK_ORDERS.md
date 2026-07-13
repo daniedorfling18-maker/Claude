@@ -2550,8 +2550,8 @@ external-audit text (§3.3, P1):
 ## WO-69 — Independent merge gate (external audit P0; runner built, enforcement blocked on GitHub plan)
 
 Status: IMPLEMENTED TO THE PLATFORM BOUNDARY by Codex on 2026-07-12; NOT
-ENFORCED and therefore NOT COMPLETE. Owner option (c) is installed: the
-repository-scoped Windows runner is online and the minimal PR workflow, exact
+ENFORCED and therefore NOT COMPLETE. Owner option (b) is installed: after the
+2026-07-13 VPS upgrade, the repository-scoped Linux ARM64 runner is online and the minimal PR workflow, exact
 protection payload, fail-closed audit, generated P4 artifact, tests, and runbook
 are implemented. GitHub's protection and ruleset APIs both return HTTP 403 for
 this private Free-plan repository. The repository must be upgraded to Pro/Team

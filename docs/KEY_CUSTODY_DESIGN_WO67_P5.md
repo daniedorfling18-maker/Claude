@@ -5,7 +5,7 @@ and authorizes nothing. P5 is satisfied when the owner approves a final
 version of this document. Approval is recorded by the owner merging the
 edit that changes Status below to APPROVED, from the owner's own account.
 
-**Status: DRAFT — not approved.**
+**Status: APPROVED — Danie Dörfling, 2026-07-13.**
 
 ## Design goal
 
@@ -64,11 +64,11 @@ exposure via the repository, telemetry, chat, or backups.
 
 ## Owner acceptance checklist (all boxes required for APPROVED)
 
-- [ ] Sub-account design accepted (or a written alternative chosen).
-- [ ] Residual risk accepted: the executor signing key can lose at most
+- [X] Sub-account design accepted (or a written alternative chosen).
+- [X] Residual risk accepted: the executor signing key can lose at most
       the stage capital in the executor account.
-- [ ] Rotation + revocation drill procedure accepted.
-- [ ] Telemetry credential-guard test accepted as a WO deliverable.
-- [ ] Understood: this document plus the signed AGENTS.md amendment
+- [X] Rotation + revocation drill procedure accepted.
+- [X] Telemetry credential-guard test accepted as a WO deliverable.
+- [X] Understood: this document plus the signed AGENTS.md amendment
       still do not start trading — P1 (gates) and P2 ($100 human stage)
       remain required by registration.

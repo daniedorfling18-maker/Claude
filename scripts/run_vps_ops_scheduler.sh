@@ -322,6 +322,10 @@ run_training_harvest() {
     # WO-64 code-generated investment policy statement. Reads current policy,
     # risk, and capacity artifacts for reporting only.
     timeout "$HARVEST_TIMEOUT" python -m polymarket_predictive_engine.cli render-ips --config "$CONFIG_PATH"
+    # WO-71 bounded corpus retention: compact expired high-volume research
+    # rows, bound the training archive, remove stale atomic temp files, and
+    # log disk projection. Fixed paths exclude every WO-61 decision ledger.
+    timeout "$HARVEST_TIMEOUT" python -m polymarket_predictive_engine.cli corpus-retention --config "$CONFIG_PATH"
     # WO-68 canonical operating state. Generated from the effective config and
     # current artifacts; missing inputs remain UNKNOWN and never authorise work.
     timeout "$HARVEST_TIMEOUT" python -m polymarket_predictive_engine.cli operating-state --config "$CONFIG_PATH"
@@ -331,7 +335,7 @@ run_training_harvest() {
     timeout "$HARVEST_TIMEOUT" python -m polymarket_predictive_engine.cli anchor-ledgers --config "$CONFIG_PATH"
   ) >> "$LOG_FILE" 2>&1
   CODE=$?
-  stamp_status training_harvest "$CODE" "gamma resolved-markets backfill + clob price histories + wallet intelligence + maker-carry study + deep trade-print backfill + maker-fill replay + flow toxicity + decision policy + wallet reconciliation + true-net cost ledger + reconstructed CLV study + calibration-bias study + martingale drift scan + performance factsheet + investment policy statement + generated operating state + ledger anchor"
+  stamp_status training_harvest "$CODE" "gamma resolved-markets backfill + clob price histories + wallet intelligence + maker-carry study + deep trade-print backfill + maker-fill replay + flow toxicity + decision policy + wallet reconciliation + true-net cost ledger + reconstructed CLV study + calibration-bias study + martingale drift scan + performance factsheet + investment policy statement + bounded corpus retention + generated operating state + ledger anchor"
   log "training_harvest: exit $CODE"
 }
 

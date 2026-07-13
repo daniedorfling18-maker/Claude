@@ -24,6 +24,11 @@ from typing import Any, Iterable, Mapping, Sequence
 import requests
 
 from .config import EngineConfig, load_config
+from .sharp_spend_suppression import (
+    build_sharp_spend_suppression,
+    finalize_sharp_spend_suppression,
+    permitted_markets,
+)
 from .utils import normalize_slug, now_utc, parse_timestamp, read_csv_rows, read_json, safe_float, write_csv, write_json
 
 DEFAULT_BASE_URL = "https://api.the-odds-api.com/v4"
@@ -457,14 +462,31 @@ def fetch_sharp_odds(cfg: EngineConfig) -> dict[str, Any]:
     per_sport: list[dict[str, Any]] = []
     per_source_sport_market: list[dict[str, Any]] = []
     fetch_stamp = now_utc()
+    fetch_time = parse_timestamp(fetch_stamp) or datetime.now(timezone.utc)
+    suppression_plan = build_sharp_spend_suppression(cfg, sport_configs, as_of=fetch_time)
+    attempted_families: list[tuple[str, str]] = []
+    requests_suppressed = 0
     provider_status = "not_attempted"
     provider_sports_status: dict[str, Any] = {"status": "not_checked"}
     requests_used = 0
     skipped_unknown_sports: list[str] = []
     skipped_budget_sports: list[str] = []
+    skipped_coverage_sports: list[str] = []
     if api_key and sport_configs:
         budget_skip = _budget_skip_summary(cfg, settings)
         if budget_skip is not None:
+            suppression = finalize_sharp_spend_suppression(
+                cfg,
+                suppression_plan,
+                attempted_families=[],
+                requests_suppressed=0,
+                as_of=fetch_time,
+            )
+            budget_skip["spend_suppression"] = {
+                "status": suppression["status"],
+                "artifact": str(cfg.governance_root / "sharp_fetch_suppression.json"),
+                "requests_suppressed_this_run": 0,
+            }
             write_json(_fetch_summary_path(cfg), budget_skip)
             return budget_skip
         provider_status = "attempted"
@@ -473,7 +495,21 @@ def fetch_sharp_odds(cfg: EngineConfig) -> dict[str, Any]:
             available_sports, provider_sports_status = _provider_sports(base_url=base_url, api_key=api_key, timeout=timeout)
         for config in sport_configs:
             sport = str(config.get("sport") or "").strip()
-            markets = _split_markets(config.get("markets"), settings.get("markets", "h2h"))
+            configured_markets = _split_markets(config.get("markets"), settings.get("markets", "h2h"))
+            markets, suppressed_markets = permitted_markets(suppression_plan, sport, configured_markets)
+            if not markets:
+                skipped_coverage_sports.append(sport)
+                requests_suppressed += 1
+                per_sport.append(
+                    {
+                        "sport": sport,
+                        "markets": ",".join(configured_markets),
+                        "status": "skipped_coverage_suppression",
+                        "suppressed_markets": suppressed_markets,
+                        "rows": 0,
+                    }
+                )
+                continue
             if available_sports is not None and sport not in available_sports:
                 skipped_unknown_sports.append(sport)
                 per_sport.append({"sport": sport, "markets": ",".join(markets), "status": "skipped_unknown_sport", "rows": 0})
@@ -483,6 +519,7 @@ def fetch_sharp_odds(cfg: EngineConfig) -> dict[str, Any]:
                 per_sport.append({"sport": sport, "markets": ",".join(markets), "status": "skipped_budget", "rows": 0})
                 continue
             requests_used += 1
+            attempted_families.extend((sport, market_key) for market_key in markets)
             try:
                 response = requests.get(
                     f"{base_url}/sports/{sport}/odds",
@@ -613,7 +650,8 @@ def fetch_sharp_odds(cfg: EngineConfig) -> dict[str, Any]:
     provider_request_statuses = [
         str(item.get("status") or "")
         for item in per_sport
-        if str(item.get("status") or "") not in {"skipped_unknown_sport", "skipped_budget"}
+        if str(item.get("status") or "")
+        not in {"skipped_unknown_sport", "skipped_budget", "skipped_coverage_suppression"}
     ]
     if fallback_rows:
         status = "fallback_loaded"
@@ -621,6 +659,8 @@ def fetch_sharp_odds(cfg: EngineConfig) -> dict[str, Any]:
         status = "missing_api_key"
     elif provider_status == "no_sports_configured":
         status = "no_sports_configured"
+    elif per_sport and not provider_request_statuses and skipped_coverage_sports:
+        status = "skipped_coverage_suppression"
     elif per_sport and not provider_request_statuses and skipped_budget_sports:
         status = "skipped_budget"
     elif per_sport and not provider_request_statuses and skipped_unknown_sports:
@@ -644,6 +684,13 @@ def fetch_sharp_odds(cfg: EngineConfig) -> dict[str, Any]:
                 continue
     requests_remaining = min(remaining_values) if remaining_values else ""
 
+    suppression = finalize_sharp_spend_suppression(
+        cfg,
+        suppression_plan,
+        attempted_families=attempted_families,
+        requests_suppressed=requests_suppressed,
+        as_of=fetch_time,
+    )
     summary = {
         "status": status,
         "rows": len(rows),
@@ -662,6 +709,15 @@ def fetch_sharp_odds(cfg: EngineConfig) -> dict[str, Any]:
         "requests_used": requests_used,
         "skipped_unknown_sports": skipped_unknown_sports,
         "skipped_budget_sports": skipped_budget_sports,
+        "skipped_coverage_sports": skipped_coverage_sports,
+        "spend_suppression": {
+            "status": suppression["status"],
+            "artifact": str(cfg.governance_root / "sharp_fetch_suppression.json"),
+            "suppressed_family_count": suppression["suppressed_family_count"],
+            "slow_probe_family_count": suppression["slow_probe_family_count"],
+            "requests_suppressed_this_run": suppression["requests_suppressed_this_run"],
+            "config_changed": False,
+        },
         "fallback_rows": len(fallback_rows),
         "fallback_sources": fallback_sources,
         "fallback_rejected_rows": len(fallback_rejections),

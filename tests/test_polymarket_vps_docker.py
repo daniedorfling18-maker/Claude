@@ -141,8 +141,6 @@ def test_vps_health_script_checks_dashboard_and_heartbeat_files():
     assert "coverage_by_sport_market" in text
     assert "alpha_validated_anchor_rows" in text
     assert "sharp_sports_funnel" in text
-    assert "Executor live-ops control plane" in text
-    assert '"executor_status"' in text
     assert "Repair: docker compose -f $COMPOSE_FILE exec -T polymarket-paper-live python scripts/render_polymarket_dashboard.py" in text
 
 
@@ -159,6 +157,8 @@ def test_vps_deploy_workflow_requires_current_dashboard_schema():
     assert "coverage_by_sport_market" in text
     assert "alpha_validated_anchor_rows" in text
     assert "sharp_sports_funnel" in text
+    assert "Executor live-ops control plane" in text
+    assert '"executor_status"' in text
     assert "SUPERBRU_PASSWORD" in text
     assert "VPS auto-pick watchdog" in text
     assert "json.dumps(updates" in text

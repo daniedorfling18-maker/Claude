@@ -594,6 +594,16 @@ critical states, and daily alert snapshots are WO-61 anchored. This is keyless h
 signature, placement, amendment, cancellation, paper, or live order path exists. WO-67 remains
 blocked and unimplemented.
 
+**2026-07-13 — WO-77 implemented by Codex.** The production gap was confirmed:
+neither current maker carrier condition ID appeared in the 126-token websocket
+target set, and the legacy portfolio artifact lacked every executable ticket
+field. `requote-alerts` now enriches that legacy metadata from public Gamma,
+uses one bounded batch CLOB-book fallback per cycle for uncovered tokens, and
+persists exact URL/outcome/token/tick/bid/ask fields with their live source.
+The websocket live loop reserves first-priority slots for current or repaired
+quote-sheet tokens. Missing public books still fail closed; the change is
+read-only and does not alter gates, sizing, policy, credentials, or orders.
+
 ## Rules of engagement for coding agents
 
 0. **Division of labour**: the orchestrating agent writes/updates this charter and the work orders

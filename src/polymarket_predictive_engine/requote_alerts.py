@@ -17,9 +17,11 @@ from typing import Any, Mapping
 import requests
 
 from .config import EngineConfig, load_config
+from .maker_carry_study import _market_url, _outcomes, _quote_prices, _token_ids
 from .utils import now_utc, parse_timestamp, read_csv_rows, read_json, safe_float, write_json
 
 DEFAULT_GAMMA_BASE_URL = "https://gamma-api.polymarket.com"
+DEFAULT_CLOB_BASE_URL = "https://clob.polymarket.com"
 ALERT_PRIORITY = {
     "quotes_ok": 0,
     "requote_advised": 1,
@@ -73,9 +75,18 @@ def _settings(cfg: EngineConfig) -> dict[str, Any]:
         "quote_band_min": band_min,
         "quote_band_max": band_max,
         "gamma_base_url": str(raw.get("gamma_base_url") or DEFAULT_GAMMA_BASE_URL).rstrip("/"),
+        "clob_base_url": str(raw.get("clob_base_url") or DEFAULT_CLOB_BASE_URL).rstrip("/"),
         "request_timeout_seconds": max(
             1.0,
             safe_float(raw.get("request_timeout_seconds")) or 10.0,
+        ),
+        "rest_book_fallback_enabled": _boolish(raw.get("rest_book_fallback_enabled"), True),
+        # One POST /books call covers the bounded token set. The hard ceiling
+        # prevents a malformed/stale sheet from turning the safety fallback
+        # into an unbounded poller; deferred tokens stay visibly fail-closed.
+        "rest_book_fallback_max_tokens_per_cycle": min(
+            16,
+            max(1, int(safe_float(raw.get("rest_book_fallback_max_tokens_per_cycle")) or 8)),
         ),
         "query_resolution_status": _boolish(raw.get("query_resolution_status"), True),
         "notification_enabled": _boolish(raw.get("notification_enabled"), False),
@@ -162,6 +173,194 @@ def _gamma_resolution_state(
     return by_condition, []
 
 
+def _book_snapshot(payload: Mapping[str, Any], *, as_of: datetime) -> dict[str, Any] | None:
+    """Normalise one public CLOB book into the live-quote contract.
+
+    CLOB currently returns bids low-to-high and asks high-to-low, but the
+    contract deliberately computes extrema instead of depending on ordering.
+    """
+
+    bids = [
+        value
+        for row in (payload.get("bids") if isinstance(payload.get("bids"), list) else [])
+        if isinstance(row, Mapping) and (value := safe_float(row.get("price"))) is not None
+    ]
+    asks = [
+        value
+        for row in (payload.get("asks") if isinstance(payload.get("asks"), list) else [])
+        if isinstance(row, Mapping) and (value := safe_float(row.get("price"))) is not None
+    ]
+    if not bids or not asks:
+        return None
+    bid = max(bids)
+    ask = min(asks)
+    if not 0 < bid < ask < 1:
+        return None
+    return {
+        "asset_id": str(payload.get("asset_id") or payload.get("token_id") or "").strip(),
+        "market": str(payload.get("market") or "").strip(),
+        "best_bid": bid,
+        "best_ask": ask,
+        "midpoint": (bid + ask) / 2.0,
+        "tick_size": safe_float(payload.get("tick_size")),
+        "source_timestamp": as_of.isoformat().replace("+00:00", "Z"),
+        "_stamp": as_of,
+        "_source": "rest_book_fallback",
+    }
+
+
+def _rest_book_snapshots(
+    settings: Mapping[str, Any],
+    token_ids: list[str],
+    *,
+    as_of: datetime,
+) -> tuple[dict[str, dict[str, Any]], dict[str, Any]]:
+    """Fetch uncovered quote-sheet books with at most one public REST call."""
+
+    unique = list(dict.fromkeys(str(token).strip() for token in token_ids if str(token).strip()))
+    limit = int(settings["rest_book_fallback_max_tokens_per_cycle"])
+    selected = unique[:limit]
+    diagnostics: dict[str, Any] = {
+        "enabled": bool(settings["rest_book_fallback_enabled"]),
+        "request_limit_per_cycle": 1,
+        "requests_made": 0,
+        "tokens_needed": len(unique),
+        "tokens_requested": len(selected),
+        "tokens_deferred": unique[limit:],
+        "books_received": 0,
+        "errors": [],
+    }
+    if not selected or not settings["rest_book_fallback_enabled"]:
+        return {}, diagnostics
+    try:
+        diagnostics["requests_made"] = 1
+        response = requests.post(
+            f"{settings['clob_base_url']}/books",
+            json=[{"token_id": token} for token in selected],
+            timeout=float(settings["request_timeout_seconds"]),
+        )
+        response.raise_for_status()
+        payload = response.json()
+    except Exception as exc:  # noqa: BLE001 - missing public book remains visibly fail-closed
+        diagnostics["errors"] = [f"{type(exc).__name__}: {exc}"]
+        return {}, diagnostics
+
+    rows = payload if isinstance(payload, list) else []
+    books: dict[str, dict[str, Any]] = {}
+    for index, row in enumerate(rows):
+        if not isinstance(row, Mapping):
+            continue
+        token = str(row.get("asset_id") or row.get("token_id") or "").strip()
+        if not token and index < len(selected):
+            token = selected[index]
+        snapshot = _book_snapshot(row, as_of=as_of)
+        if token and snapshot is not None:
+            snapshot["asset_id"] = token
+            books[token] = snapshot
+    diagnostics["books_received"] = len(books)
+    diagnostics["missing_tokens"] = [token for token in selected if token not in books]
+    return books, diagnostics
+
+
+def _enrich_ticket_metadata(
+    ticket: Mapping[str, Any],
+    gamma_market: Mapping[str, Any],
+) -> dict[str, Any]:
+    """Fill legacy WO-66 ticket metadata from the same public Gamma row."""
+
+    enriched = dict(ticket)
+    sources: list[str] = ["maker_carry_study"]
+    tokens = _token_ids(dict(gamma_market))
+    outcomes = _outcomes(dict(gamma_market))
+    token = str(enriched.get("token_id") or "").strip()
+    outcome = str(enriched.get("outcome") or "").strip()
+    index: int | None = None
+    if token and token in tokens:
+        index = tokens.index(token)
+    elif outcome and outcome in outcomes:
+        index = outcomes.index(outcome)
+    elif tokens:
+        index = 0
+    if not token and index is not None and index < len(tokens):
+        enriched["token_id"] = tokens[index]
+        token = tokens[index]
+        sources.append("gamma_token")
+    if not outcome and index is not None and index < len(outcomes):
+        enriched["outcome"] = outcomes[index]
+        sources.append("gamma_outcome")
+
+    if not str(enriched.get("market_url") or "").strip():
+        url = _market_url(dict(gamma_market))
+        if url:
+            enriched["market_url"] = url
+            sources.append("gamma_url")
+    if safe_float(enriched.get("order_price_min_tick_size")) is None:
+        tick = safe_float(
+            gamma_market.get("orderPriceMinTickSize")
+            or gamma_market.get("minimumTickSize")
+        )
+        if tick is not None:
+            enriched["order_price_min_tick_size"] = tick
+            sources.append("gamma_tick")
+    if not str(enriched.get("end_date_utc") or "").strip():
+        end_date = gamma_market.get("endDate") or gamma_market.get("endDateIso")
+        if end_date:
+            enriched["end_date_utc"] = end_date
+    if not str(enriched.get("event_start_time_utc") or "").strip():
+        event_start = gamma_market.get("gameStartTime")
+        if event_start:
+            enriched["event_start_time_utc"] = event_start
+    enriched["ticket_metadata_sources"] = sources
+    return enriched
+
+
+def _complete_ticket_from_live(
+    ticket: Mapping[str, Any],
+    live: Mapping[str, Any],
+) -> dict[str, Any]:
+    """Complete quote prices conservatively and recompute the exactness flag."""
+
+    enriched = dict(ticket)
+    tick = safe_float(enriched.get("order_price_min_tick_size"))
+    if tick is None:
+        tick = safe_float(live.get("tick_size"))
+        if tick is not None:
+            enriched["order_price_min_tick_size"] = tick
+    bid = safe_float(live.get("best_bid"))
+    ask = safe_float(live.get("best_ask"))
+    midpoint = safe_float(live.get("midpoint"))
+    if midpoint is None and bid is not None and ask is not None:
+        midpoint = (bid + ask) / 2.0
+    if safe_float(enriched.get("reference_mid_price")) is None and midpoint is not None:
+        enriched["reference_mid_price"] = midpoint
+    if safe_float(enriched.get("reference_best_bid")) is None and bid is not None:
+        enriched["reference_best_bid"] = bid
+    if safe_float(enriched.get("reference_best_ask")) is None and ask is not None:
+        enriched["reference_best_ask"] = ask
+
+    quote_bid = safe_float(enriched.get("quote_bid_price"))
+    quote_ask = safe_float(enriched.get("quote_ask_price"))
+    distance = safe_float(enriched.get("quote_distance"))
+    if (quote_bid is None or quote_ask is None) and midpoint is not None and distance is not None:
+        quote_bid, quote_ask = _quote_prices(midpoint, distance, tick)
+        enriched["quote_bid_price"] = quote_bid
+        enriched["quote_ask_price"] = quote_ask
+
+    exact = bool(
+        str(enriched.get("market_url") or "").strip()
+        and str(enriched.get("token_id") or "").strip()
+        and str(enriched.get("outcome") or "").strip()
+        and tick is not None
+        and 0 < tick < 1
+        and safe_float(enriched.get("quote_bid_price")) is not None
+        and safe_float(enriched.get("quote_ask_price")) is not None
+    )
+    enriched["order_ticket_status"] = (
+        "exact" if exact else "incomplete_missing_public_market_metadata_tick_or_quotes"
+    )
+    return enriched
+
+
 def _market_state(current: str, proposed: str) -> str:
     return proposed if ALERT_PRIORITY[proposed] > ALERT_PRIORITY[current] else current
 
@@ -232,7 +431,10 @@ def _ticket_alerts(
             alerts,
             state="requote_advised",
             rule="missing_live_bid_ask",
-            message="No complete websocket bid/ask state is available for this ticket.",
+            message=(
+                "No complete websocket bid/ask or bounded public REST book snapshot "
+                "is available for this ticket."
+            ),
         )
         quote_age = None
     else:
@@ -325,11 +527,21 @@ def _ticket_alerts(
         "market_url": ticket.get("market_url", ""),
         "question": ticket.get("question", ""),
         "outcome": ticket.get("outcome", ""),
+        "order_price_min_tick_size": safe_float(ticket.get("order_price_min_tick_size")),
+        "quote_bid_price": safe_float(ticket.get("quote_bid_price")),
+        "quote_ask_price": safe_float(ticket.get("quote_ask_price")),
+        "quote_size_shares": safe_float(ticket.get("quote_size_shares")),
+        "capital_usd": safe_float(ticket.get("capital_usd")),
+        "order_ticket_status": ticket.get("order_ticket_status", ""),
+        "ticket_metadata_sources": ticket.get("ticket_metadata_sources", []),
+        "end_date_utc": ticket.get("end_date_utc", ""),
+        "event_start_time_utc": ticket.get("event_start_time_utc", ""),
         "alert_state": state,
         "alerts": alerts,
         "live_bid": bid,
         "live_ask": ask,
         "live_midpoint": midpoint,
+        "live_price_source": live.get("_source", "websocket" if live else "missing"),
         "live_quote_age_seconds": round(quote_age, 3) if quote_age is not None else None,
         "hours_to_scheduled_event": round(hours_to_event, 3) if hours_to_event is not None else None,
         "toxicity_score": toxicity_score,
@@ -444,6 +656,7 @@ def build_requote_alerts(
         "alert_state": "quotes_ok",
         "generated_at_utc": generated_at,
         "work_order": "WO-66",
+        "ticket_completeness_work_order": "WO-77",
         "read_only": True,
         "keyless": True,
         "paper_trading_invoked": False,
@@ -501,16 +714,43 @@ def build_requote_alerts(
         }
     )
     gamma_markets, resolution_errors = _gamma_resolution_state(settings, condition_ids)
+    enriched_tickets = [
+        _enrich_ticket_metadata(
+            ticket,
+            gamma_markets.get(str(ticket.get("condition_id") or "").strip(), {}),
+        )
+        for ticket in portfolio
+        if isinstance(ticket, Mapping)
+    ]
+    missing_tokens = []
+    for ticket in enriched_tickets:
+        token = str(ticket.get("token_id") or "").strip()
+        live = latest_quotes.get(token, {})
+        if token and (
+            safe_float(live.get("best_bid")) is None
+            or safe_float(live.get("best_ask")) is None
+        ):
+            missing_tokens.append(token)
+    rest_books, rest_diagnostics = _rest_book_snapshots(
+        settings,
+        missing_tokens,
+        as_of=now,
+    )
     market_rows: list[dict[str, Any]] = []
     state = "quotes_ok"
-    for ticket in portfolio:
-        if not isinstance(ticket, Mapping):
-            continue
+    for ticket in enriched_tickets:
         token_id = str(ticket.get("token_id") or "").strip()
         condition_id = str(ticket.get("condition_id") or "").strip()
+        live = latest_quotes.get(token_id, {})
+        if (
+            safe_float(live.get("best_bid")) is None
+            or safe_float(live.get("best_ask")) is None
+        ):
+            live = rest_books.get(token_id, {})
+        ticket = _complete_ticket_from_live(ticket, live)
         row = _ticket_alerts(
             ticket,
-            live=latest_quotes.get(token_id, {}),
+            live=live,
             toxicity=toxicity,
             gamma_market=gamma_markets.get(condition_id, {}),
             resolved=resolved,
@@ -535,7 +775,11 @@ def build_requote_alerts(
     }[state]
     payload = {
         **base,
-        "status": "ok" if not resolution_errors else "partial_resolution_lookup_error",
+        "status": (
+            "ok"
+            if not resolution_errors and not rest_diagnostics.get("errors")
+            else "partial_public_lookup_error"
+        ),
         "alert_state": state,
         "headline": headline,
         "quote_sheet_path": str(quote_sheet_path),
@@ -545,6 +789,7 @@ def build_requote_alerts(
         "markets_requiring_action": non_ok,
         "kill_criteria_triggered": triggered,
         "resolution_lookup_errors": resolution_errors,
+        "rest_book_fallback": rest_diagnostics,
         "thresholds": {
             key: settings[key]
             for key in (

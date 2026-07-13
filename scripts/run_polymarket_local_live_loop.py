@@ -201,6 +201,42 @@ def _add_tokens_from_csv(path: Path, tokens: dict[str, str], source: str, *, ski
                 tokens.setdefault(token, source)
 
 
+def _add_maker_quote_sheet_tokens(cfg, tokens: dict[str, str]) -> None:
+    """Reserve websocket slots for every current human quote ticket.
+
+    Requote output is read first because WO-77 may have repaired a legacy
+    maker-carry artifact from public Gamma metadata. A fresh maker study is
+    the canonical source thereafter. Closed tickets are never subscribed.
+    """
+
+    sources = [
+        (
+            cfg.output_root / "maker_carry" / "requote_alerts.json",
+            "markets",
+            "maker_requote_ticket",
+        ),
+        (
+            cfg.output_root / "maker_carry" / "maker_carry_study.json",
+            "portfolio",
+            "maker_quote_sheet",
+        ),
+    ]
+    for path, key, source in sources:
+        payload = read_json(path, default={}) or {}
+        rows = payload.get(key, []) if isinstance(payload, dict) else []
+        if not isinstance(rows, list):
+            continue
+        for row in rows:
+            if not isinstance(row, dict):
+                continue
+            close_aware = {**row, "close_time": row.get("close_time") or row.get("end_date_utc")}
+            if _row_has_closed(close_aware):
+                continue
+            token = str(row.get("token_id") or row.get("asset_id") or "").strip()
+            if token:
+                tokens.setdefault(token, source)
+
+
 def _fast_updown_snapshot_path(cfg) -> Path:
     return cfg.output_root / "polymarket_fast_updown" / "fast_updown_market_snapshot.csv"
 
@@ -413,6 +449,10 @@ def discover_websocket_asset_ids(cfg, *, include_static_config: bool = False, ma
     then broader scanner/model-probability context.
     """
     tokens: dict[str, str] = {}
+    # WO-77 safety reservation: quote-sheet markets must not be crowded out
+    # by discovery-selected families. The read-only alert loop cannot verify
+    # a human quote unless its token receives a live book.
+    _add_maker_quote_sheet_tokens(cfg, tokens)
     model_csv = ROOT / os.environ.get("POLYMARKET_MODEL_PROBABILITIES_CSV", "inputs/polymarket/model_probabilities.csv")
     candidates = [
         (cfg.output_root / "polymarket_portfolio" / "positions.csv", "open_positions"),

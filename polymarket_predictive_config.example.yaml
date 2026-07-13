@@ -179,6 +179,11 @@ requote_alerts:
   toxicity_threshold: 0.9
   query_resolution_status: true
   request_timeout_seconds: 10
+  # WO-77: one public /books batch per alert cycle repairs missing websocket
+  # coverage. The hard token cap is tighten-only and excess markets stay
+  # fail-closed rather than creating an unbounded poller.
+  rest_book_fallback_enabled: true
+  rest_book_fallback_max_tokens_per_cycle: 8
   # Existing notifier artifact pattern; no SMTP is invoked by the engine.
   notification_enabled: false
 

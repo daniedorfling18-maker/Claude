@@ -2748,6 +2748,16 @@ harness the executor must later pass rather than code inside it:
 
 ## WO-75 — Live-ops control plane (monitoring parts NOW; binding hooks post-amendment)
 
+Status: ITEMS 1, 3, AND 4 IMPLEMENTED by Codex on 2026-07-13. The independent
+VPS scheduler now reads the registered future execution-ledger and heartbeat
+contracts every five minutes, renders `ABSENT` until a ledger exists, and
+publishes mode, orders, exposure/cap, action age, freshness, dead-man,
+kill-scoreboard, reconciliation, and deduplicated owner-alert evidence to
+`outputs/execution/executor_status.json`, generated operating state, and the
+dashboard. The scheduler never writes the heartbeat. WO-75 item 2 remains
+POST-AMENDMENT and is machine-marked false; no executor, credential, signer,
+broker, cancellation, paper, or live order path was added.
+
 1. Executor status surface: dashboard panel + operating-state rows —
    mode (absent/replay/canary/portfolio), open orders, exposure vs stage
    cap, last action age, dead-man countdown, kill-criteria scoreboard.

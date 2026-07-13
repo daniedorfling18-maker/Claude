@@ -269,6 +269,14 @@ executor_replay_certification:
   execution_ledger_file: execution/replay_candidate_ledger.csv
   certification_file: execution/replay_certification.json
 
+# 2026-07-13 WO-75: independent, read-only monitoring contract for the
+# future executor. These registered maxima can only be tightened. The monitor
+# reads a future execution ledger and heartbeat and renders ABSENT until the
+# ledger exists; it never writes the heartbeat or invokes an execution path.
+executor_ops:
+  dead_man_gap_seconds: 1800
+  executor_freshness_slo_seconds: 600
+
 # 2026-07-11 WO-61: daily tamper-evident prefix hashes for the investor-facing
 # ledger set. Reporting infrastructure only; no gate, sizing rule, policy,
 # broker, or order path reads it. State tables that are legitimately rewritten
@@ -289,6 +297,8 @@ ledger_anchor:
     - {glob: maker_carry/requote_alerts.json, mode: snapshot}
     - {glob: execution/credential_rotation_drill.json, mode: snapshot}
     - {glob: execution/replay_certification.json, mode: snapshot}
+    - {glob: execution/execution_ledger.csv, mode: append_only}
+    - {glob: execution/executor_status.json, mode: snapshot}
     - {glob: performance/investment_policy_statement.md, mode: snapshot}
     - {glob: performance/investment_policy_statement_summary.json, mode: snapshot}
     - {glob: performance/wallet_reconciliation.json, mode: snapshot}

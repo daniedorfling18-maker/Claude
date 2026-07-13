@@ -1,4 +1,4 @@
-"""WO-79 producer/consumer contracts for the first three runtime interfaces.
+"""WO-79 producer/consumer contracts for registered runtime interfaces.
 
 The registry is deliberately small.  It declares the fields, freshness clock,
 and coverage obligation for interfaces that have already failed in production.
@@ -87,6 +87,40 @@ CONTRACT_REGISTRY: tuple[dict[str, Any], ...] = (
                 "reconciliation_status",
             ],
             "coverage": "all three legs are represented before NAV status is reported",
+        },
+    },
+    {
+        "id": "executor_runtime_to_ops_status",
+        "producer": {
+            "component": "future_executor",
+            "artifact": "execution/execution_ledger.csv + execution/executor_heartbeat.json",
+            "record_path": "execution_ledger[] + heartbeat{}",
+            "declared_fields": [
+                "recorded_at_utc",
+                "mode",
+                "action_type",
+                "open_orders_after",
+                "exposure_usd_after",
+                "heartbeat_at_utc",
+                "cycle_id",
+                "executor_build_id",
+            ],
+            "freshness": {"field": "heartbeat_at_utc", "maximum_age_seconds": 600},
+            "coverage": "every ledger-enabled executor cycle emits a heartbeat and every action appends one ledger row",
+        },
+        "consumer": {
+            "component": "executor_ops_monitor",
+            "required_fields": [
+                "recorded_at_utc",
+                "mode",
+                "action_type",
+                "open_orders_after",
+                "exposure_usd_after",
+                "heartbeat_at_utc",
+                "cycle_id",
+                "executor_build_id",
+            ],
+            "coverage": "every ledger-enabled runtime receives a status evaluation; no ledger renders ABSENT",
         },
     },
 )
@@ -185,6 +219,33 @@ def validate_contract_fixture(identifier: str, payload: Mapping[str, Any]) -> di
                 missing.append(f"{top_field}_matches_{leg}.nav_usd")
             if missing:
                 defects.append({"record": leg, "missing_or_invalid": sorted(set(missing))})
+    elif identifier == "executor_runtime_to_ops_status":
+        ledger = payload.get("execution_ledger") if isinstance(payload.get("execution_ledger"), list) else []
+        heartbeat = _mapping(payload.get("heartbeat"))
+        ledger_fields = (
+            "recorded_at_utc",
+            "mode",
+            "action_type",
+            "open_orders_after",
+            "exposure_usd_after",
+        )
+        heartbeat_fields = ("heartbeat_at_utc", "mode", "cycle_id", "executor_build_id")
+        if not ledger:
+            defects.append({"record": "execution_ledger", "missing_or_invalid": ["at_least_one_action_row"]})
+        for index, raw in enumerate(ledger):
+            row = _mapping(raw)
+            missing = [field for field in ledger_fields if _field_missing(row, field)]
+            if str(row.get("mode") or "").lower() not in {"replay", "canary", "portfolio"}:
+                missing.append("registered_mode")
+            if missing:
+                defects.append({"record": f"execution_ledger[{index}]", "missing_or_invalid": sorted(set(missing))})
+        heartbeat_missing = [field for field in heartbeat_fields if _field_missing(heartbeat, field)]
+        if heartbeat_missing:
+            defects.append({"record": "heartbeat", "missing_or_invalid": sorted(set(heartbeat_missing))})
+        ledger_mode = str(_mapping(ledger[-1] if ledger else {}).get("mode") or "").lower()
+        heartbeat_mode = str(heartbeat.get("mode") or "").lower()
+        if ledger_mode and heartbeat_mode and ledger_mode != heartbeat_mode:
+            defects.append({"record": "heartbeat", "missing_or_invalid": ["mode_matches_latest_ledger"]})
     return {
         "contract_id": identifier,
         "status": "PASS" if not defects else "FAIL",

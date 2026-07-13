@@ -31,6 +31,7 @@ from .dutch_arb_monitor import run_dutch_arb_monitor
 from .edge_attribution import build_edge_attribution
 from .evidence_history import append_evidence_history
 from .executor_replay_certification import certify_executor_replay
+from .executor_ops_monitor import build_executor_ops_status
 from .execution.live import live_trade
 from .execution.paper import paper_trade_report
 from .external_feed_collector import collect_external_feeds
@@ -133,6 +134,7 @@ COMMANDS = [
     "artifact-contracts",
     "deploy-acceptance",
     "executor-replay-certification",
+    "executor-ops-monitor",
     "anchor-ledgers",
     "verify-ledger-chain",
     "render-ips",
@@ -379,6 +381,8 @@ def main(argv: list[str] | None = None) -> int:
                     candidate_build_id=args.candidate_build_id,
                 )
             )
+        elif args.command == "executor-ops-monitor":
+            _print(build_executor_ops_status(cfg))
         elif args.command == "anchor-ledgers":
             _print(anchor_ledgers(cfg))
         elif args.command == "verify-ledger-chain":

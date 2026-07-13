@@ -380,18 +380,37 @@ run_trade_prints() {
 }
 
 run_degraded_state_watchdog() {
-  # WO-78: semantic-health detection runs after producers have stamped their
-  # current status. It only appends incidents and refreshes reporting; it can
-  # never alter the fail-closed source state or invoke a trading path.
-  log "degraded_state_watchdog: starting"
+  # WO-75: the executor monitor is a scheduler-owned process, independent of
+  # the future executor that owns the ledger and heartbeat. It runs every tick
+  # and only reports/alerts; it never writes the heartbeat or controls orders.
+  # WO-78 then inspects the freshly stamped scheduler result. Operating state
+  # and the dashboard are refreshed regardless, so an alerting failure cannot
+  # leave the oversight surface stale.
+  log "executor_ops_monitor: starting"
   STARTED_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+  timeout 120 python -m polymarket_predictive_engine.cli executor-ops-monitor --config "$CONFIG_PATH" >> "$LOG_FILE" 2>&1
+  MONITOR_CODE=$?
+  stamp_status executor_ops_monitor "$MONITOR_CODE" "independent future-executor ledger/heartbeat monitor; read-only" "$STARTED_AT"
+  log "executor_ops_monitor: exit $MONITOR_CODE"
+
+  log "degraded_state_watchdog: starting"
   timeout 120 python -m polymarket_predictive_engine.cli degraded-state-watchdog --config "$CONFIG_PATH" >> "$LOG_FILE" 2>&1
-  CODE=$?
-  if [ "$CODE" -eq 0 ]; then
-    timeout 120 python -m polymarket_predictive_engine.cli operating-state --config "$CONFIG_PATH" >> "$LOG_FILE" 2>&1
-    CODE=$?
+  WATCHDOG_CODE=$?
+  timeout 120 python -m polymarket_predictive_engine.cli operating-state --config "$CONFIG_PATH" >> "$LOG_FILE" 2>&1
+  OPERATING_CODE=$?
+  timeout 120 python scripts/render_polymarket_dashboard.py --config "$CONFIG_PATH" >> "$LOG_FILE" 2>&1
+  DASHBOARD_CODE=$?
+
+  CODE=0
+  for COMPONENT_CODE in "$MONITOR_CODE" "$WATCHDOG_CODE" "$OPERATING_CODE" "$DASHBOARD_CODE"; do
+    if [ "$COMPONENT_CODE" -ne 0 ] && [ "$CODE" -eq 0 ]; then
+      CODE="$COMPONENT_CODE"
+    fi
+  done
+  if [ "$WATCHDOG_CODE" -ne 0 ]; then
+    log "degraded_state_watchdog: watchdog exit $WATCHDOG_CODE"
   fi
-  stamp_status degraded_state_watchdog "$CODE" "semantic-health watchdog + generated operating state; reporting only" "$STARTED_AT"
+  stamp_status degraded_state_watchdog "$CODE" "executor monitor + semantic watchdog + operating state + dashboard; reporting only" "$STARTED_AT"
   log "degraded_state_watchdog: exit $CODE"
 }
 

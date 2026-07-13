@@ -99,6 +99,7 @@ def _seed_acceptance(
                     "decision_policy",
                     "requote_alerts",
                     "reconcile_wallet",
+                    "executor_ops_monitor",
                     "operating_state",
                 )
             },
@@ -147,11 +148,12 @@ def _seed_acceptance(
     )
 
 
-def test_three_registered_contracts_are_satisfiable_on_synthetic_fixtures() -> None:
+def test_registered_contracts_are_satisfiable_on_synthetic_fixtures() -> None:
     assert [row["id"] for row in CONTRACT_REGISTRY] == [
         "quote_sheet_to_requote_alerts",
         "scheduler_jobs_to_status_alerting",
         "reconciliation_legs_to_nav",
+        "executor_runtime_to_ops_status",
     ]
     assert validate_contract_declarations() == []
 
@@ -176,6 +178,26 @@ def test_three_registered_contracts_are_satisfiable_on_synthetic_fixtures() -> N
     assert _reconciliation_state(
         reconciliation["internal"], reconciliation["data_api"], reconciliation["onchain"], threshold=0.01
     )["reconciliation_status"] == "clean"
+    executor_fixture = {
+        "execution_ledger": [
+            {
+                "recorded_at_utc": "2026-07-13T12:00:00Z",
+                "mode": "canary",
+                "action_type": "place",
+                "open_orders_after": 1,
+                "exposure_usd_after": 25.0,
+            }
+        ],
+        "heartbeat": {
+            "heartbeat_at_utc": "2026-07-13T12:00:01Z",
+            "mode": "canary",
+            "cycle_id": "cycle-1",
+            "executor_build_id": "candidate-sha",
+        },
+    }
+    assert validate_contract_fixture("executor_runtime_to_ops_status", executor_fixture)["status"] == "PASS"
+    executor_fixture["heartbeat"] = {"mode": "portfolio"}
+    assert validate_contract_fixture("executor_runtime_to_ops_status", executor_fixture)["status"] == "FAIL"
 
 
 def test_quote_contract_covers_sheet_market_absent_from_socket_set(

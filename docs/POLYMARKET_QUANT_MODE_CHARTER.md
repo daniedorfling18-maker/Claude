@@ -635,7 +635,7 @@ quote-sheet/requote/reconciliation/operating producers after restart, and
 fails success unless ticket completeness, legitimate requote state,
 three-leg reconciliation coverage, and no-new-UNKNOWN comparison all pass.
 FAIL is persisted, owner-notifiable, and visible in the cockpit before the
-workflow exits. A three-interface producer/consumer registry makes fields,
+workflow exits. The initial three-interface producer/consumer registry makes fields,
 freshness, and coverage machine-testable; its ARM64 PR-gate fixtures include
 the socket-coverage miss that caused WO-77. The component is reporting and
 deployment control only: it cannot change gates, models, sizing, credentials,
@@ -660,6 +660,18 @@ behavior, heartbeat dead-man behavior, and one-to-one action-ledger appends.
 Its dated PASS/FAIL artifact is a canary prerequisite, never authorisation.
 The bundled reference stub proves only the harness; no credentials, executor,
 broker, paper/live trading, signing, cancellation, or order path exists.
+
+**2026-07-13 — WO-75 items 1, 3, and 4 implemented by Codex.** The VPS ops
+scheduler now independently consumes the future executor ledger/heartbeat
+contract and publishes an `ABSENT`-until-present live-ops surface covering
+mode, open orders, exposure versus stage cap, last-action age, heartbeat
+freshness/dead-man countdown, decision-policy kill criteria, and isolated
+executor-wallet reconciliation. Registered alert transitions emit the existing
+owner-notification artifact contract and deduplicate unchanged incidents. The
+fourth producer/consumer contract makes the future ledger/heartbeat schema,
+freshness, and coverage PR-gate testable. The monitor and dashboard cannot
+write the heartbeat or invoke execution. WO-75
+item 2 remains post-amendment and false in the artifact; WO-67 remains blocked.
 
 ## Rules of engagement for coding agents
 

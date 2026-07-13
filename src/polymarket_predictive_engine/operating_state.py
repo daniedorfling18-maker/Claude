@@ -564,6 +564,26 @@ def build_operating_state(cfg: EngineConfig) -> dict[str, Any]:
     maker_study = _artifact(maker_root / "maker_carry_study.json")
     maker_live_test = _artifact(maker_root / "maker_live_test.json")
     decision_policy = _artifact(maker_root / "decision_policy.json")
+    executor_status_path = output_root / "execution" / "executor_status.json"
+    executor_ledger_path = output_root / "execution" / "execution_ledger.csv"
+    executor_status_artifact = _artifact(executor_status_path)
+    future_executor_rows = read_csv_rows(executor_ledger_path)
+    if executor_status_artifact:
+        executor_status = executor_status_artifact
+    elif future_executor_rows:
+        executor_status = {
+            "status": UNKNOWN,
+            "mode": UNKNOWN,
+            "executor_present": True,
+            "execution_ledger_rows": len(future_executor_rows),
+        }
+    else:
+        executor_status = {
+            "status": "ABSENT",
+            "mode": "ABSENT",
+            "executor_present": False,
+            "execution_ledger_rows": 0,
+        }
     degraded_watchdog = _artifact(output_root / "ops_scheduler" / "degraded_state_watchdog.json")
     deploy_acceptance = _artifact(output_root / "ops_scheduler" / "deploy_acceptance.json")
     merge_gate = _artifact(performance / "independent_merge_gate.json")
@@ -581,8 +601,12 @@ def build_operating_state(cfg: EngineConfig) -> dict[str, Any]:
         "vps_telemetry_manifest": telemetry_manifest,
         "degraded_state_watchdog": degraded_watchdog,
     }
+    if executor_status_artifact:
+        artifacts["executor_status"] = executor_status_artifact
 
     missing_inputs = [name for name, payload in artifacts.items() if not payload]
+    if future_executor_rows and not executor_status_artifact:
+        missing_inputs.append("executor_status")
     raw = cfg.raw
     paper_cfg = _mapping(raw.get("paper_trading"))
     live_cfg = _mapping(raw.get("live_trading"))
@@ -659,6 +683,7 @@ def build_operating_state(cfg: EngineConfig) -> dict[str, Any]:
     wallet_state = operator_wallet_state if operator_wallet_configured else executor_wallet_state
 
     live_ledger_candidates = [
+        executor_ledger_path,
         output_root / "maker_carry" / "maker_execution_ledger.csv",
         output_root / "polymarket_execution" / "live_execution_ledger.csv",
     ]
@@ -671,6 +696,42 @@ def build_operating_state(cfg: EngineConfig) -> dict[str, Any]:
         live_order_count = len(read_csv_rows(live_ledger))
         live_orders = f"RECORDED_ORDERS={live_order_count}"
         live_order_evidence = str(live_ledger)
+
+    executor_present = bool(executor_status.get("executor_present"))
+    executor_absent = not executor_present and str(executor_status.get("status") or "").upper() == "ABSENT"
+    executor_mode = "ABSENT" if executor_absent else str(executor_status.get("mode") or UNKNOWN).upper()
+    executor_open_orders = executor_status.get("open_orders")
+    executor_open_orders_state = (
+        "ABSENT" if executor_absent else (UNKNOWN if executor_open_orders is None else str(executor_open_orders))
+    )
+    executor_exposure = executor_status.get("exposure_usd")
+    executor_stage_cap = executor_status.get("stage_cap_usd")
+    executor_exposure_state = str(executor_status.get("exposure_vs_stage_cap_state") or UNKNOWN).upper()
+    executor_exposure_view = (
+        "ABSENT"
+        if executor_absent
+        else (
+            UNKNOWN
+            if executor_exposure is None or executor_stage_cap is None
+            else f"{executor_exposure_state}: ${executor_exposure} / ${executor_stage_cap}"
+        )
+    )
+    executor_last_action_age = executor_status.get("last_action_age_seconds")
+    executor_last_action_state = (
+        "ABSENT"
+        if executor_absent
+        else (UNKNOWN if executor_last_action_age is None else f"{executor_last_action_age}s")
+    )
+    executor_dead_man = _mapping(executor_status.get("dead_man"))
+    executor_freshness = _mapping(executor_status.get("freshness_slo"))
+    executor_kill = _mapping(executor_status.get("kill_criteria_scoreboard"))
+    executor_dead_man_state = (
+        "ABSENT" if executor_absent else str(executor_dead_man.get("state") or UNKNOWN).upper()
+    )
+    executor_freshness_state = (
+        "ABSENT" if executor_absent else str(executor_freshness.get("state") or UNKNOWN).upper()
+    )
+    executor_kill_state = "ABSENT" if executor_absent else str(executor_kill.get("status") or UNKNOWN).upper()
 
     preconditions = _wo67_preconditions(cfg, maker_study, decision_policy, merge_gate, key_custody)
     states = [row["state"] for row in preconditions]
@@ -777,6 +838,69 @@ def build_operating_state(cfg: EngineConfig) -> dict[str, Any]:
             _timestamp(maker_live_test),
         ),
         _row("live_orders_submitted", "Live orders submitted by the system", live_orders, live_order_evidence, str(live_ledger or UNKNOWN)),
+        _row(
+            "executor_mode",
+            "Future executor mode",
+            executor_mode,
+            f"status={executor_status.get('status', UNKNOWN)}; ledger_rows={executor_status.get('execution_ledger_rows', 0)}",
+            "execution/executor_status.json",
+            _timestamp(executor_status),
+        ),
+        _row(
+            "executor_open_orders",
+            "Future executor open orders",
+            executor_open_orders_state,
+            f"ledger_rows={executor_status.get('execution_ledger_rows', 0)}",
+            "execution/executor_status.json",
+            _timestamp(executor_status),
+        ),
+        _row(
+            "executor_exposure_vs_stage_cap",
+            "Future executor exposure vs stage cap",
+            executor_exposure_view,
+            f"cap_source={executor_status.get('stage_cap_source', UNKNOWN)}",
+            "execution/executor_status.json + maker_carry/decision_policy.json",
+            _timestamp(executor_status),
+        ),
+        _row(
+            "executor_last_action_age",
+            "Future executor last action age",
+            executor_last_action_state,
+            f"last_action_at_utc={executor_status.get('last_action_at_utc') or UNKNOWN}",
+            "execution/executor_status.json",
+            _timestamp(executor_status),
+        ),
+        _row(
+            "executor_dead_man",
+            "Independent executor dead-man monitor",
+            executor_dead_man_state,
+            (
+                f"heartbeat_age_seconds={executor_dead_man.get('heartbeat_age_seconds', UNKNOWN)}; "
+                f"countdown_seconds={executor_dead_man.get('countdown_seconds', UNKNOWN)}; "
+                f"threshold_seconds={executor_dead_man.get('gap_threshold_seconds', 1800)}"
+            ),
+            "execution/executor_heartbeat.json read by vps_ops_scheduler",
+            _timestamp(executor_status),
+        ),
+        _row(
+            "executor_freshness_slo",
+            "Future executor freshness SLO",
+            executor_freshness_state,
+            (
+                f"heartbeat_age_seconds={executor_freshness.get('heartbeat_age_seconds', UNKNOWN)}; "
+                f"slo_seconds={executor_freshness.get('slo_seconds', 600)}"
+            ),
+            "execution/executor_status.json",
+            _timestamp(executor_status),
+        ),
+        _row(
+            "executor_kill_criteria",
+            "Future executor kill-criteria scoreboard",
+            executor_kill_state,
+            f"triggered={','.join(str(value) for value in executor_kill.get('triggered', [])) or 'none'}",
+            "maker_carry/decision_policy.json via executor monitor",
+            _timestamp(executor_status),
+        ),
         _row("autonomous_execution", "Autonomous execution authorisation", autonomous_state, ", ".join(f"{row['id']}={row['state']}" for row in preconditions), "WO-67 preconditions"),
         _row(
             "degraded_state_watchdog",
@@ -824,6 +948,7 @@ def build_operating_state(cfg: EngineConfig) -> dict[str, Any]:
         "slo": slo,
         "degraded_state_watchdog": degraded_watchdog,
         "deploy_acceptance": deploy_acceptance,
+        "executor_status": executor_status,
         "deployment": {
             "status": source_deployed_state,
             "source_git_rev": source_sha or UNKNOWN,

@@ -104,8 +104,28 @@ completes after the 2026-07-14 match).
    confirms the fill-based scoreboard design and means requote
    compliance can never be externally verified per-order.
 
-Pending legs: scoreboard pickup (next trade_prints cycle), three-way
-harvest reconciliation (2026-07-14 ~07:51Z), settlement stamp +
-redemption (post-match). Drill C (round-trip cost) intentionally not
-run: the taker fee is now measured directly, and the spread is 0.25c;
-skipping preserves balance for the funded stage.
+Pending legs: settlement stamp + redemption (post-match, on the
+remaining 0.14-share tail), full three-way harvest reconciliation
+(2026-07-14 ~07:51Z with the fixed RPC). Scoreboard pickup CONFIRMED
+(data-api activity_rows visible to the reconciliation on 2026-07-13).
+
+**Drill D — exit mechanics (added 2026-07-13, PASS).** Limit SELL 5
+shares @ 40c filled at the 41c bid (price improvement symmetric).
+data-api: `TRADE SELL 5 @ 0.41`, usdcSize $1.98953 -> sell fee $0.06047
+(~2.9%, symmetric with the buy side). On-chain closed exact:
+12.923349 - 2.18253 + 1.98953 = $12.730349 = UI cash to six decimals.
+Partial-position sell handled cleanly; position row updated to the
+0.14-share tail immediately. Measured round-trip cost at minimum size
+(unplanned Drill C equivalent): ~13.5c on ~$2.10 notional (~6.4%),
+dominated by the symmetric ~2.9% fees.
+
+**Additional findings:**
+6. Venue MINIMUM 5 SHARES for limit orders, buys and sells alike.
+   Consequences for the funded stage: kill-criteria flattening happens
+   in >=5-share chunks; position tails under 5 shares cannot be
+   limit-sold and must ride to resolution; plan sizes in multiples of
+   5 shares to avoid stranded tails.
+7. The venue clears the entire orderbook at event start ("orderbook
+   will clear at 21:00 GMT+2"): resting maker quotes on sports markets
+   die automatically at kickoff — no manual pull needed at event
+   start, and no reward accrual after it.

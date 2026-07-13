@@ -26,6 +26,18 @@ from polymarket_predictive_engine.utils import read_json, write_json
 ROOT = Path(__file__).resolve().parents[2]
 
 
+def test_tracked_vps_config_meets_pre_live_rpo_after_wallet_configuration() -> None:
+    raw = yaml.safe_load(
+        (ROOT / "polymarket_predictive_config.example.yaml").read_text(encoding="utf-8")
+    )
+
+    assert raw["maker_live_test"]["wallet_address"]
+    assert raw["disaster_recovery"]["active_rpo_hours"] == 24
+    assert raw["disaster_recovery"]["active_rpo_hours"] <= raw["disaster_recovery"][
+        "pre_live_max_rpo_hours"
+    ]
+
+
 def _config(tmp_path: Path, *, wallet: str = ""):
     raw = yaml.safe_load((ROOT / "polymarket_predictive_config.example.yaml").read_text(encoding="utf-8"))
     raw["paths"]["data_root"] = str(tmp_path)

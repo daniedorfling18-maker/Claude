@@ -2759,14 +2759,78 @@ so tickets can never complete and the evaluator fails closed forever.
    must land before the $100 human stage starts — the requote loop is
    that stage's safety net.
 
+# Batch 10 — filed 2026-07-13 (never again: silent degraded states)
+
+Encoded lesson: two incidents in 24h shared one shape — a component sat
+in a failed or fail-closed state (governance exit-124 overnight;
+requote alerts stuck pull_quotes_now for hours) and no machine noticed;
+humans found both by reading artifacts. Fail-closed is correct;
+SILENT, PERSISTENT fail-closed is a defect. Secondary lesson for the
+orchestrator's own audit checklist: unit-green components can still
+break at their data contracts — WO-66 was audited "clean" without
+asserting that every quote-sheet market has a live book source.
+Both WOs are reporting/alerting only; nothing here gates or orders.
+
+## WO-78 — Degraded-state watchdog (runtime detection)
+
+The SLO framework tracks AGE; it must also track SEMANTIC health.
+1. A registered degraded-state table (config, tighten-only): artifact,
+   its healthy reachable states, and the max consecutive
+   cycles/duration it may report a degraded state before that becomes
+   an INCIDENT. Initial registrations:
+   - requote_alerts.alert_state == pull_quotes_now/STOP with
+     missing-input reasons (not risk reasons) for > 3 cycles;
+   - any ops_scheduler job last_exit_code != 0 (immediately — this
+     alone would have caught exit-124 at 02:10 instead of 07:3x);
+   - wallet_reconciliation.status == partial for > 2 consecutive
+     harvests;
+   - operating_state rows UNKNOWN that were known in the previous run.
+2. Incidents append to an anchored incident ledger (extend
+   background_timeout_incidents.csv or sibling), surface in the
+   operating state and dashboard, and fire the owner notification
+   path.
+3. Crucial distinction preserved: a degraded state for a LEGITIMATE
+   reason (real missing market data, real risk signal) stays a valid
+   state — the watchdog alarms on PERSISTENCE, never overrides the
+   fail-closed behaviour itself.
+4. Tests: synthetic stuck states trip at exactly the registered
+   thresholds; legitimate transient degradation does not; incident
+   rows are anchored.
+
+## WO-79 — Deploy acceptance + cross-component contract tests
+
+1. Post-deploy acceptance pass: the deploy workflow's final step (VPS
+   runner) waits for/triggers one cycle of the critical paths on REAL
+   current data and asserts completeness — quote-sheet tickets carry
+   URL/token/tick/bid/ask; the requote evaluator reaches a
+   non-fail-closed state OR reports a specific legitimate blocker;
+   reconciliation runs all three legs; operating state introduces no
+   new UNKNOWNs vs pre-deploy. Writes
+   `outputs/ops_scheduler/deploy_acceptance.json` (PASS/FAIL + diffs);
+   FAIL alerts the owner and is shown in the operating state. Deploys
+   remain reversible per #170's restore path.
+2. Producer/consumer contract registry: artifacts that feed other
+   components declare their contract (fields, freshness, coverage);
+   a PR-gate test asserts every registered consumer's requirements are
+   satisfiable by its producer's declared output ON SYNTHETIC FIXTURES
+   — the WO-77 class (sheet markets absent from the socket set)
+   becomes a test failure, not a production discovery.
+3. Scope control: start with the three contracts that already bit us
+   (quote sheet -> requote alerts; scheduler jobs -> status/alerting;
+   reconciliation legs -> NAV). Do not boil the ocean; add contracts
+   only when a WO touches the pair.
+
 ## Priority order for Codex (updated 2026-07-12, batch 8 filed)
 
 2026-07-13 update (batch 9 filed): WO-66 and WO-68b built and deployed;
 governance exit-124 resolved on the 4-core host. Queue now: **WO-77
 FIRST** (bug — requote alerts permanently fail-closed; blocks the $100
-stage), then **WO-71** (retention + suppression — disk relief holds at
-75% but the corpus still grows), then batch 9 buildable-now parts in
-order **WO-73 (items 1-3) -> WO-74 -> WO-75 (items 1,3,4)**; WO-76 is a registration effective on
+stage), then **WO-78** (degraded-state watchdog — would have caught
+both of this weekend's incidents), then **WO-71** (retention +
+suppression — disk relief holds at 75% but the corpus still grows),
+then **WO-79** (deploy acceptance + contract tests; its contract test
+presumes WO-77's fix), then batch 9 buildable-now parts in order
+**WO-73 (items 1-3) -> WO-74 -> WO-75 (items 1,3,4)**; WO-76 is a registration effective on
 filing (no build); WO-73 item 4, WO-75 item 2, and WO-67 itself remain
 POST-AMENDMENT; WO-70 deferred post-proof; WO-72 DEFERRED
 (pre-WO-67 requirement, build post-ladder). Batch 6: WO-66 unblocked; WO-67 BLOCKED per its

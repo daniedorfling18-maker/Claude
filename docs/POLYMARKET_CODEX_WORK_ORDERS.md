@@ -2841,6 +2841,25 @@ The SLO framework tracks AGE; it must also track SEMANTIC health.
 
 ## WO-79 — Deploy acceptance + cross-component contract tests
 
+Status: IMPLEMENTED by Codex on 2026-07-13. The self-hosted ARM64 VPS deploy
+now captures the pre-deploy generated operating state before quiescing
+writers, preserves the prior revision as the rollback reference, and after
+restart runs a bounded real-data cycle of maker quote generation, decision
+policy, requote evaluation, three-way wallet reconciliation, and operating
+state. Producer exits are recorded independently so stale artifacts cannot
+mask a failed command. `deploy_acceptance.json` compares every quote-sheet
+condition with an exact URL/token/tick/bid/ask ticket, permits only a healthy
+requote state or a named registered risk blocker, requires all three
+reconciliation legs, and rejects new UNKNOWN operating rows. FAIL emits the
+owner-notification artifact, appears in the operating-state/dashboard, and
+fails deployment after the cockpit is rerendered; #170's preserved prior SHA
+remains the rollback path. A deliberately limited producer/consumer registry
+declares fields, freshness, and coverage for quote sheet -> requote,
+scheduler status -> alerting, and reconciliation legs -> NAV. The required PR
+gate exercises these contracts on synthetic fixtures, including a quote-sheet
+market absent from the websocket set. This is acceptance/reporting only and
+contains no paper/live broker, signing, order, gate, model, or sizing path.
+
 1. Post-deploy acceptance pass: the deploy workflow's final step (VPS
    runner) waits for/triggers one cycle of the critical paths on REAL
    current data and asserts completeness — quote-sheet tickets carry

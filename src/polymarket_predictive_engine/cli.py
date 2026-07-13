@@ -8,6 +8,7 @@ from .active_window_plan import build_active_window_plan
 from .algo.replay import run_replay
 from .algo.sweep import run_algo_sweep
 from .anchored_edge import run as run_anchored_edge
+from .artifact_contracts import build_contract_registry
 from .backtest import backtest
 from .calibration_bias_study import build_calibration_bias_study
 from .closing_line import build_closing_line_value
@@ -23,6 +24,7 @@ from .dashboard import render_dashboard
 from .data_inventory import inventory
 from .data_quality import data_quality
 from .degraded_state_watchdog import build_degraded_state_watchdog
+from .deploy_acceptance import build_deploy_acceptance
 from .disaster_recovery import create_ledger_archive, verify_and_restore_archive
 from .drift_scan_study import run_drift_scan
 from .dutch_arb_monitor import run_dutch_arb_monitor
@@ -127,6 +129,8 @@ COMMANDS = [
     "performance-factsheet",
     "operating-state",
     "degraded-state-watchdog",
+    "artifact-contracts",
+    "deploy-acceptance",
     "anchor-ledgers",
     "verify-ledger-chain",
     "render-ips",
@@ -351,6 +355,10 @@ def main(argv: list[str] | None = None) -> int:
             _print(build_operating_state(cfg))
         elif args.command == "degraded-state-watchdog":
             _print(build_degraded_state_watchdog(cfg))
+        elif args.command == "artifact-contracts":
+            _print(build_contract_registry(cfg))
+        elif args.command == "deploy-acceptance":
+            _print(build_deploy_acceptance(cfg))
         elif args.command == "anchor-ledgers":
             _print(anchor_ledgers(cfg))
         elif args.command == "verify-ledger-chain":

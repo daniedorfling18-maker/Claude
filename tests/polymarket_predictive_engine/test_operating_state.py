@@ -154,6 +154,7 @@ def test_operating_state_derives_rows_and_wo67_preconditions(tmp_path: Path, mon
     assert "aligned=True" in rows["latest_deployed_sha"]["evidence"]
     assert rows["autonomous_execution"]["state"] == "PRECONDITIONS_MET_EXECUTOR_NOT_IMPLEMENTED"
     assert rows["degraded_state_watchdog"]["state"] == "OK"
+    assert rows["deploy_acceptance"]["state"] == "NOT_RUN"
     assert {identifier: row["state"] for identifier, row in preconditions.items()} == {
         "P1": "met",
         "P2": "met",
@@ -192,10 +193,33 @@ def test_operating_state_missing_artifacts_are_unknown_never_guessed(tmp_path: P
     assert rows["source_vs_deployed_sha"]["state"] == "UNKNOWN"
     assert rows["autonomous_execution"]["state"] == "BLOCKED_UNKNOWN"
     assert rows["degraded_state_watchdog"]["state"] == "UNKNOWN"
+    assert rows["deploy_acceptance"]["state"] == "NOT_RUN"
     assert "vps_telemetry_manifest" in result["missing_inputs"]
     assert all(row["state"] == "UNKNOWN" for row in result["wo67_preconditions"])
     assert result["slo"]["unknown_count"] == 7
     assert all(row["breach"] is None for row in result["slo"]["rows"])
+
+
+def test_failed_deploy_acceptance_is_explicit_in_operating_state(tmp_path: Path) -> None:
+    cfg = _config(tmp_path)
+    _write_complete_evidence(cfg)
+    write_json(
+        cfg.output_root / "ops_scheduler" / "deploy_acceptance.json",
+        {
+            "status": "FAIL",
+            "generated_at_utc": "2026-07-13T12:00:00Z",
+            "target_deploy_sha": "badsha",
+            "rollback_ref": "goodsha",
+            "checks": [{"id": "requote_evaluator_state", "status": "FAIL"}],
+        },
+    )
+
+    result = build_operating_state(cfg)
+    row = {item["key"]: item for item in result["rows"]}["deploy_acceptance"]
+
+    assert row["state"] == "FAIL"
+    assert "requote_evaluator_state" in row["evidence"]
+    assert "rollback_ref=goodsha" in row["evidence"]
 
 
 def test_operating_slos_measure_breaches_and_targets_only_tighten(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -311,13 +335,17 @@ def test_dashboard_and_daily_harvest_consume_generated_operating_state(tmp_path:
         "wo67_preconditions": [{"id": "P1", "title": "Maker gates", "state": "UNKNOWN", "evidence": "missing"}],
     }
     write_json(cfg.output_root / "performance" / "operating_state.json", generated)
+    acceptance = {"status": "FAIL", "target_deploy_sha": "badsha", "rollback_ref": "goodsha"}
+    write_json(cfg.output_root / "ops_scheduler" / "deploy_acceptance.json", acceptance)
 
     render_dashboard(cfg)
 
     dashboard_data = read_json(cfg.output_root / "polymarket_dashboard" / "dashboard_data.json")
     html = (cfg.output_root / "polymarket_dashboard" / "index.html").read_text(encoding="utf-8")
     assert dashboard_data["operating_state"] == generated
+    assert dashboard_data["deploy_acceptance"] == acceptance
     assert "Canonical operating state" in html
+    assert "Latest deployment failed acceptance" in html
     assert 'id="operatingState"' in html
     assert "Operating SLOs (reporting only)" in html
     assert "operating-state" in COMMANDS

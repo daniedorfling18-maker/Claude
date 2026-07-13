@@ -162,6 +162,27 @@ def test_vps_deploy_workflow_requires_current_dashboard_schema():
     assert "json.dumps(updates" in text
 
 
+def test_vps_deploy_runs_real_data_acceptance_after_restart_and_before_success():
+    text = (ROOT / ".github" / "workflows" / "deploy-polymarket-vps-paper.yml").read_text(encoding="utf-8")
+
+    baseline = text.index("deploy_acceptance_baseline.json")
+    quiesce = text.index('compose -f "$COMPOSE_FILE" stop --timeout 60')
+    compose_up = text.index('$DOCKER compose -f "$COMPOSE_FILE" up -d --build')
+    producer_cycle = text.index("running real-data component acceptance cycle")
+    acceptance = text.index("polymarket_predictive_engine.cli deploy-acceptance")
+    render = text.index("python scripts/render_polymarket_dashboard.py", acceptance)
+    success = text.index("VPS deploy verified")
+
+    assert baseline < quiesce < compose_up < producer_cycle < acceptance < render < success
+    assert "deploy_acceptance_cycle.json" in text
+    assert "maker-carry-study" in text
+    assert "requote-alerts" in text
+    assert "reconcile-wallet" in text
+    assert "operating-state" in text
+    assert 'acceptance_status" != "PASS"' in text
+    assert "previous revision $original_head remains the recorded rollback ref" in text
+
+
 def test_vps_deploy_workflow_writes_public_dashboard_url():
     text = (ROOT / ".github" / "workflows" / "deploy-polymarket-vps-paper.yml").read_text(encoding="utf-8")
 

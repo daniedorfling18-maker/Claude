@@ -283,6 +283,7 @@ async function load() {
     const performanceFactsheet = data.performance_factsheet || {};
     const operatingState = data.operating_state || {};
     const degradedWatchdog = data.degraded_state_watchdog || operatingState.degraded_state_watchdog || {};
+    const deployAcceptance = data.deploy_acceptance || operatingState.deploy_acceptance || {};
     const edgeAttribution = data.edge_attribution || {};
     const riskState = data.risk_state || {};
     const portfolioRisk = riskState.portfolio_risk || {};
@@ -360,6 +361,7 @@ async function load() {
       ? oversight.alerts.map(item => alertBox(item.title || "Oversight alert", longText(item.body || "-", 260), item.severity || "warn"))
       : [];
     if (dashboardStale) oversightAlerts.push(alertBox("Dashboard snapshot is stale", `The displayed file is ${fmtAge(dashboardAge)} old. Refresh the dashboard generator before trusting signal counts.`, "bad"));
+    if (String(deployAcceptance.status || "").toUpperCase() === "FAIL") oversightAlerts.push(alertBox("Latest deployment failed acceptance", `One or more real-data component contracts failed. Target ${longText(deployAcceptance.target_deploy_sha || "unknown", 20)} remains reversible to ${longText(deployAcceptance.rollback_ref || "unknown", 20)}; inspect the operating-state row before trusting this release.`, "bad"));
     if (String(degradedWatchdog.status || "") === "incident") oversightAlerts.push(alertBox("Persistent degraded-state incident", `${asNumber(degradedWatchdog.active_incident_count)} active incident(s). Fail-closed states remain unchanged; inspect the watchdog panel.`, "bad"));
     if (["needs_attention", "container_unversioned"].includes(String(deploymentHealth.status || ""))) oversightAlerts.push(alertBox("Deployment health needs attention", longText(deploymentHealth.summary || "Deployment metadata is incomplete or stale.", 260), "warn"));
     if (!oversightAlerts.length && modelStale) oversightAlerts.push(alertBox("Model scoring is stale", `Price-action model summary is ${fmtAge(modelAge)} old. Re-score/retrain before promoting any new paper signals.`, "bad"));
@@ -5415,6 +5417,11 @@ def render_dashboard(cfg: EngineConfig, latest_report: dict[str, Any] | None = N
     ) or {}
     if not isinstance(degraded_state_watchdog, dict):
         degraded_state_watchdog = {}
+    deploy_acceptance = read_json(
+        cfg.output_root / "ops_scheduler" / "deploy_acceptance.json", default={}
+    ) or {}
+    if not isinstance(deploy_acceptance, dict):
+        deploy_acceptance = {}
     edge_attribution = read_json(governance / "edge_attribution.json", default={}) or {}
     if not isinstance(edge_attribution, dict):
         edge_attribution = {}
@@ -5581,6 +5588,7 @@ def render_dashboard(cfg: EngineConfig, latest_report: dict[str, Any] | None = N
         "performance_factsheet": performance_factsheet,
         "operating_state": operating_state,
         "degraded_state_watchdog": degraded_state_watchdog,
+        "deploy_acceptance": deploy_acceptance,
         "edge_attribution": edge_attribution,
         "family_calibration": family_calibration,
         "collection_coverage": collection_coverage,

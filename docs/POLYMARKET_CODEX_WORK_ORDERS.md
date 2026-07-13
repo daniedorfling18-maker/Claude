@@ -2738,6 +2738,17 @@ minimum reward-eligible size, executor account only.
 
 ## WO-77 — Requote-alert ticket completeness (BUG, blocks the $100 stage)
 
+Status: IMPLEMENTED by Codex on 2026-07-13. Production diagnosis confirmed
+the two current carrier condition IDs were absent from all 126 websocket
+targets, while the persisted pre-WO-66 portfolio had blank token, URL,
+outcome, tick, bid, and ask fields. Requote evaluation now repairs legacy
+metadata from the matching public Gamma row, uses at most one bounded batch
+`/books` request per cycle when websocket coverage is absent, and records the
+source plus complete ticket fields in `requote_alerts.json`. Repaired/current
+quote-sheet tokens receive first-priority websocket slots on every live-loop
+asset refresh. A real missing Gamma/CLOB book remains fail-closed; no gate,
+order, signing, credential, paper, or live path changed.
+
 Observed 2026-07-13: `requote_alerts.json` stuck in `pull_quotes_now`
 three hours after deploy with `incomplete_order_ticket` and
 `missing_live_bid_ask` on every quote-sheet market. Hypothesis: the

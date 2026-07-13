@@ -191,6 +191,151 @@ def test_later_trade_tick_does_not_hide_latest_complete_book(
     assert result["markets"][0]["live_ask"] == 0.51
 
 
+def test_missing_websocket_uses_one_batched_rest_book_and_reaches_quotes_ok(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    cfg = _cfg(tmp_path)
+    _seed(cfg)
+    (cfg.output_root / "polymarket_training" / "websocket_market_features.csv").unlink()
+    calls: list[list[dict[str, str]]] = []
+
+    def fake_get(url: str, params: dict[str, Any], timeout: float) -> _Response:
+        assert url.endswith("/markets")
+        return _Response([{"conditionId": "0xmarket", "closed": False}])
+
+    def fake_post(
+        url: str,
+        json: list[dict[str, str]],
+        timeout: float,
+    ) -> _Response:
+        assert url.endswith("/books")
+        calls.append(json)
+        return _Response(
+            [
+                {
+                    "asset_id": "YES",
+                    "market": "0xmarket",
+                    "tick_size": "0.01",
+                    "bids": [{"price": "0.49", "size": "100"}],
+                    "asks": [{"price": "0.51", "size": "100"}],
+                }
+            ]
+        )
+
+    monkeypatch.setattr(requote_alerts.requests, "get", fake_get)
+    monkeypatch.setattr(requote_alerts.requests, "post", fake_post)
+
+    result = build_requote_alerts(cfg, as_of=AS_OF)
+
+    assert result["alert_state"] == "quotes_ok"
+    assert result["markets"][0]["live_price_source"] == "rest_book_fallback"
+    assert result["markets"][0]["live_bid"] == 0.49
+    assert result["markets"][0]["live_ask"] == 0.51
+    assert result["rest_book_fallback"]["requests_made"] == 1
+    assert result["rest_book_fallback"]["books_received"] == 1
+    assert calls == [[{"token_id": "YES"}]]
+
+
+def test_legacy_incomplete_ticket_is_enriched_from_gamma_and_rest_book(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    cfg = _cfg(tmp_path)
+    legacy = {
+        "question": "Will Team A win?",
+        "condition_id": "0xmarket",
+        "quote_distance": 0.02,
+        "quote_size_shares": 100,
+        "capital_usd": 100,
+        "order_ticket_status": "incomplete_missing_public_market_metadata_or_tick",
+    }
+    _seed(cfg, ticket=legacy)
+    (cfg.output_root / "polymarket_training" / "websocket_market_features.csv").unlink()
+
+    def fake_get(url: str, params: dict[str, Any], timeout: float) -> _Response:
+        assert url.endswith("/markets")
+        return _Response(
+            [
+                {
+                    "conditionId": "0xmarket",
+                    "question": "Will Team A win?",
+                    "slug": "team-a-team-b",
+                    "clobTokenIds": '["gamma-yes", "gamma-no"]',
+                    "outcomes": '["Yes", "No"]',
+                    "orderPriceMinTickSize": 0.01,
+                    "endDate": "2026-08-01T12:00:00Z",
+                    "closed": False,
+                }
+            ]
+        )
+
+    def fake_post(
+        url: str,
+        json: list[dict[str, str]],
+        timeout: float,
+    ) -> _Response:
+        assert json == [{"token_id": "gamma-yes"}]
+        return _Response(
+            [
+                {
+                    "asset_id": "gamma-yes",
+                    "market": "0xmarket",
+                    "tick_size": "0.01",
+                    "bids": [
+                        {"price": "0.10", "size": "100"},
+                        {"price": "0.49", "size": "100"},
+                    ],
+                    "asks": [
+                        {"price": "0.90", "size": "100"},
+                        {"price": "0.51", "size": "100"},
+                    ],
+                }
+            ]
+        )
+
+    monkeypatch.setattr(requote_alerts.requests, "get", fake_get)
+    monkeypatch.setattr(requote_alerts.requests, "post", fake_post)
+
+    result = build_requote_alerts(cfg, as_of=AS_OF)
+    market = result["markets"][0]
+
+    assert result["alert_state"] == "quotes_ok"
+    assert market["order_ticket_status"] == "exact"
+    assert market["market_url"] == "https://polymarket.com/market/team-a-team-b"
+    assert market["outcome"] == "Yes"
+    assert market["token_id"] == "gamma-yes"
+    assert market["order_price_min_tick_size"] == 0.01
+    assert market["quote_bid_price"] == 0.48
+    assert market["quote_ask_price"] == 0.52
+    assert market["live_price_source"] == "rest_book_fallback"
+
+
+def test_real_missing_rest_book_remains_fail_closed(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    cfg = _cfg(tmp_path)
+    _seed(cfg)
+    (cfg.output_root / "polymarket_training" / "websocket_market_features.csv").unlink()
+
+    def fake_get(url: str, params: dict[str, Any], timeout: float) -> _Response:
+        return _Response([{"conditionId": "0xmarket", "closed": False}])
+
+    def fail_post(url: str, json: list[dict[str, str]], timeout: float) -> _Response:
+        raise RuntimeError("book unavailable")
+
+    monkeypatch.setattr(requote_alerts.requests, "get", fake_get)
+    monkeypatch.setattr(requote_alerts.requests, "post", fail_post)
+
+    result = build_requote_alerts(cfg, as_of=AS_OF)
+
+    assert result["alert_state"] == "requote_advised"
+    assert result["status"] == "partial_public_lookup_error"
+    assert result["markets"][0]["alerts"][0]["rule"] == "missing_live_bid_ask"
+    assert result["rest_book_fallback"]["requests_made"] == 1
+
+
 def test_mid_drift_beyond_ticket_band_advises_requote(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -289,6 +434,7 @@ def test_requote_threshold_overrides_cannot_widen_registered_controls(tmp_path: 
             "max_live_quote_age_seconds": 9999,
             "mid_drift_distance_multiple": 2,
             "toxicity_threshold": 0.99,
+            "rest_book_fallback_max_tokens_per_cycle": 999,
         }
     )
 
@@ -298,6 +444,7 @@ def test_requote_threshold_overrides_cannot_widen_registered_controls(tmp_path: 
     assert settings["max_live_quote_age_seconds"] == 1800
     assert settings["mid_drift_distance_multiple"] == 1.0
     assert settings["toxicity_threshold"] == 0.9
+    assert settings["rest_book_fallback_max_tokens_per_cycle"] == 16
 
 
 def test_cli_and_vps_cycle_wire_read_only_requote_alerts() -> None:

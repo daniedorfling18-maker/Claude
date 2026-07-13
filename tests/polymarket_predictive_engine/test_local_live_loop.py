@@ -12,7 +12,7 @@ import pytest
 
 from polymarket_predictive_engine.config import EngineConfig
 from polymarket_predictive_engine.runtime_lock import runtime_lock_path
-from polymarket_predictive_engine.utils import read_csv_rows, read_json
+from polymarket_predictive_engine.utils import read_csv_rows, read_json, write_json
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -115,6 +115,83 @@ def test_websocket_asset_discovery_prefers_fresh_scanner_context(tmp_path, monke
         "fresh-scanner-1": "scanner_snapshot",
         "fresh-scanner-2": "scanner_snapshot",
     }
+
+
+def test_websocket_asset_discovery_reserves_slots_for_quote_sheet_markets(
+    tmp_path,
+    monkeypatch,
+):
+    loop = _load_loop_module()
+    monkeypatch.setenv(
+        "POLYMARKET_MODEL_PROBABILITIES_CSV",
+        str(tmp_path / "missing_model_probabilities.csv"),
+    )
+    cfg = EngineConfig(
+        raw={"paths": {"output_root": str(tmp_path / "outputs")}},
+        path=tmp_path / "cfg.yaml",
+    )
+    write_json(
+        cfg.output_root / "maker_carry" / "maker_carry_study.json",
+        {
+            "portfolio": [
+                {
+                    "token_id": "maker-ticket-1",
+                    "end_date_utc": "2099-01-01T00:00:00Z",
+                },
+                {
+                    "token_id": "maker-ticket-2",
+                    "end_date_utc": "2099-01-01T00:00:00Z",
+                },
+            ]
+        },
+    )
+    _write_csv(
+        cfg.output_root / "polymarket_portfolio" / "positions.csv",
+        [{"token_id": "open-position-token", "market_slug": "open-paper-position"}],
+    )
+
+    asset_ids, sources = loop.discover_websocket_asset_ids(cfg, max_assets=2)
+
+    assert asset_ids == ["maker-ticket-1", "maker-ticket-2"]
+    assert sources == {
+        "maker-ticket-1": "maker_quote_sheet",
+        "maker-ticket-2": "maker_quote_sheet",
+    }
+
+
+def test_websocket_asset_discovery_uses_repaired_legacy_requote_token(
+    tmp_path,
+    monkeypatch,
+):
+    loop = _load_loop_module()
+    monkeypatch.setenv(
+        "POLYMARKET_MODEL_PROBABILITIES_CSV",
+        str(tmp_path / "missing_model_probabilities.csv"),
+    )
+    cfg = EngineConfig(
+        raw={"paths": {"output_root": str(tmp_path / "outputs")}},
+        path=tmp_path / "cfg.yaml",
+    )
+    write_json(
+        cfg.output_root / "maker_carry" / "requote_alerts.json",
+        {
+            "markets": [
+                {
+                    "token_id": "gamma-repaired-token",
+                    "end_date_utc": "2099-01-01T00:00:00Z",
+                }
+            ]
+        },
+    )
+    write_json(
+        cfg.output_root / "maker_carry" / "maker_carry_study.json",
+        {"portfolio": [{"condition_id": "legacy-condition", "token_id": ""}]},
+    )
+
+    asset_ids, sources = loop.discover_websocket_asset_ids(cfg, max_assets=1)
+
+    assert asset_ids == ["gamma-repaired-token"]
+    assert sources["gamma-repaired-token"] == "maker_requote_ticket"
 
 
 def test_websocket_asset_discovery_prioritises_governance_targets(tmp_path, monkeypatch):

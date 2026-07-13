@@ -184,6 +184,8 @@ def test_vps_deploy_runs_real_data_acceptance_after_restart_and_before_success()
     assert "operating-state" in text
     assert 'acceptance_status" != "PASS"' in text
     assert "previous revision $original_head remains the recorded rollback ref" in text
+    assert 'install -d -m 0775 -o "$(id -u)" -g "$(id -g)"' in text
+    assert "outputs/performance outputs/ops_scheduler" in text
 
 
 def test_vps_deploy_workflow_writes_public_dashboard_url():

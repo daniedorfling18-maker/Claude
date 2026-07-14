@@ -474,7 +474,7 @@ jobs:
             exit 1
           fi
 
-          # WO-79: exercise the three component boundaries on real current
+          # WO-79/WO-83: exercise the registered component boundaries on real current
           # data. Capture every producer exit before evaluating, so a stale
           # artifact cannot make a failed producer look healthy. All commands
           # are read-only/reporting-only; no broker or execution command is in
@@ -484,6 +484,10 @@ jobs:
             set +e
             timeout 300 python -m polymarket_predictive_engine.cli maker-carry-study --config "$POLYMARKET_CONFIG_PATH"
             maker_carry_study_code=$?
+            timeout 300 python -m polymarket_predictive_engine.cli collect-maker-replay-data --config "$POLYMARKET_CONFIG_PATH"
+            collect_maker_replay_data_code=$?
+            timeout 300 python -m polymarket_predictive_engine.cli maker-fill-replay --config "$POLYMARKET_CONFIG_PATH"
+            maker_fill_replay_code=$?
             timeout 300 python -m polymarket_predictive_engine.cli decision-policy --config "$POLYMARKET_CONFIG_PATH"
             decision_policy_code=$?
             timeout 300 python -m polymarket_predictive_engine.cli requote-alerts --config "$POLYMARKET_CONFIG_PATH"
@@ -494,7 +498,7 @@ jobs:
             executor_ops_monitor_code=$?
             timeout 300 python -m polymarket_predictive_engine.cli operating-state --config "$POLYMARKET_CONFIG_PATH"
             operating_state_code=$?
-            export maker_carry_study_code decision_policy_code requote_alerts_code reconcile_wallet_code executor_ops_monitor_code operating_state_code
+            export maker_carry_study_code collect_maker_replay_data_code maker_fill_replay_code decision_policy_code requote_alerts_code reconcile_wallet_code executor_ops_monitor_code operating_state_code
             python - <<"PY"
           import json
           import os
@@ -507,6 +511,8 @@ jobs:
               name: {"exit_code": int(os.environ[f"{name}_code"])}
               for name in (
                   "maker_carry_study",
+                  "collect_maker_replay_data",
+                  "maker_fill_replay",
                   "decision_policy",
                   "requote_alerts",
                   "reconcile_wallet",

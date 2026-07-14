@@ -150,6 +150,46 @@ def _quote_ticket_check(
     }
 
 
+def _maker_replay_collection_check(
+    study: Mapping[str, Any],
+    collection: Mapping[str, Any],
+    baseline_at: datetime | None,
+) -> dict[str, Any]:
+    portfolio = study.get("portfolio") if isinstance(study.get("portfolio"), list) else []
+    windows = collection.get("market_windows") if isinstance(collection.get("market_windows"), list) else []
+    contract = validate_contract_fixture(
+        "maker_replay_collection_to_fill_replay",
+        {"portfolio": portfolio, "market_windows": windows},
+    )
+    fresh, observed_at = _fresh_after(collection, baseline_at)
+    defects: list[Any] = []
+    if contract["status"] != "PASS":
+        defects.append({"contract_defects": contract["defects"]})
+    if not fresh:
+        defects.append({"reason": observed_at})
+    if portfolio:
+        uncovered = [
+            str(row.get("condition_id") or "")
+            for row in windows
+            if isinstance(row, Mapping) and row.get("covered") is not True
+        ]
+        if str(collection.get("status") or "") != "ok":
+            defects.append({"collection_status": collection.get("status") or "missing"})
+        if uncovered:
+            defects.append({"uncovered_conditions": sorted(uncovered)})
+    return {
+        "id": "maker_replay_exact_portfolio_collection",
+        "status": "PASS" if not defects else "FAIL",
+        "observed_at_utc": observed_at,
+        "portfolio_markets": len(portfolio),
+        "collection_windows": len(windows),
+        "windows_covered": sum(
+            bool(row.get("covered")) for row in windows if isinstance(row, Mapping)
+        ),
+        "defects": defects,
+    }
+
+
 def _requote_rules(requote: Mapping[str, Any]) -> set[str]:
     rules: set[str] = set()
     rows = requote.get("markets") if isinstance(requote.get("markets"), list) else []
@@ -287,6 +327,8 @@ def _producer_cycle_check(cfg: EngineConfig, baseline_at: datetime | None) -> di
     commands = _mapping(payload.get("commands"))
     required = (
         "maker_carry_study",
+        "collect_maker_replay_data",
+        "maker_fill_replay",
         "decision_policy",
         "requote_alerts",
         "reconcile_wallet",
@@ -409,6 +451,9 @@ def build_deploy_acceptance(
     baseline_at = parse_timestamp(baseline.get("captured_at_utc"))
 
     study = _mapping(read_json(cfg.output_root / "maker_carry" / "maker_carry_study.json", default={}) or {})
+    maker_collection = _mapping(
+        read_json(cfg.output_root / "maker_carry" / "maker_replay_collection.json", default={}) or {}
+    )
     requote = _mapping(read_json(cfg.output_root / "maker_carry" / "requote_alerts.json", default={}) or {})
     reconciliation = _mapping(read_json(cfg.output_root / "performance" / "wallet_reconciliation.json", default={}) or {})
     operating = _mapping(read_json(cfg.output_root / "performance" / "operating_state.json", default={}) or {})
@@ -418,6 +463,7 @@ def build_deploy_acceptance(
         _governance_docs_readable_check(cfg),
         _producer_cycle_check(cfg, baseline_at),
         _quote_ticket_check(study, requote, generated_at=generated_dt),
+        _maker_replay_collection_check(study, maker_collection, baseline_at),
         _requote_state_check(requote, baseline_at),
         _reconciliation_check(reconciliation, baseline_at),
         _operating_unknown_check(baseline, operating, baseline_at),

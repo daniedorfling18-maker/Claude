@@ -191,6 +191,8 @@ def test_vps_deploy_runs_real_data_acceptance_after_restart_and_before_success()
     assert baseline < quiesce < compose_up < producer_cycle < acceptance < render < success
     assert "deploy_acceptance_cycle.json" in text
     assert "maker-carry-study" in text
+    assert "collect-maker-replay-data" in text
+    assert "maker-fill-replay" in text
     assert "requote-alerts" in text
     assert "reconcile-wallet" in text
     assert "executor-ops-monitor" in text

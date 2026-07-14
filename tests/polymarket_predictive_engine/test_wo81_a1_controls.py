@@ -84,8 +84,22 @@ def test_a1_sweep_advisory_fails_closed_on_stale_or_unclean_reconciliation(tmp_p
     _reconciliation(cfg, nav=112.0, cash=20.0, state="DISCREPANCY")
 
     unclean = build_a1_sweep_advisory(cfg, as_of=AS_OF)
-    assert unclean["status"] == "unknown"
+    assert unclean["status"] == "withheld_reconciliation_not_clean"
+    assert unclean["reason"] == "wallet reconciliation is not clean/explained: discrepancy"
     assert unclean["suggested_sweep_usd"] == 0.0
+    assert unclean["notification_eligible"] is False
+    assert unclean["human_action_required"] is False
+    for key in (
+        "credential_loading_invoked",
+        "transfer_invoked",
+        "withdrawal_invoked",
+        "paper_trading_invoked",
+        "live_trading_invoked",
+        "order_placement_invoked",
+        "order_amendment_invoked",
+        "order_cancellation_invoked",
+    ):
+        assert unclean[key] is False
 
     payload = read_json(cfg.output_root / "performance" / "wallet_reconciliation.json")
     payload["reconciliation_status"] = "clean"

@@ -61,7 +61,10 @@ services:
       # governance pass competed with discovery/prediction. The ops scheduler
       # is the sole owner of full governance refreshes; the live container
       # keeps websocket marking and the 30s paper bridge hot.
-      POLYMARKET_GOVERNANCE_REFRESH_SECONDS: ${POLYMARKET_GOVERNANCE_REFRESH_SECONDS:-0}
+      # The ops scheduler is the sole governance-refresh owner. Hard-code this
+      # disablement so a stale host .env override cannot reintroduce a second
+      # writer inside the websocket loop.
+      POLYMARKET_GOVERNANCE_REFRESH_SECONDS: "0"
       POLYMARKET_PREDICTION_GOVERNANCE_BLOCK_SECONDS: ${POLYMARKET_PREDICTION_GOVERNANCE_BLOCK_SECONDS:-90}
       POLYMARKET_DISCOVERY_GOVERNANCE_BLOCK_SECONDS: ${POLYMARKET_DISCOVERY_GOVERNANCE_BLOCK_SECONDS:-90}
       POLYMARKET_DISCOVERY_MAX_RUNTIME_SECONDS: ${POLYMARKET_DISCOVERY_MAX_RUNTIME_SECONDS:-900}

@@ -68,6 +68,8 @@ jobs:
             tests/polymarket_predictive_engine/test_degraded_state_watchdog.py \
             tests/polymarket_predictive_engine/test_operating_state.py \
             tests/polymarket_predictive_engine/test_execution_governance_storage.py \
+            tests/polymarket_predictive_engine/test_refresh_governance.py \
+            tests/polymarket_predictive_engine/test_wo81_a1_controls.py \
             tests/polymarket_predictive_engine/test_safety_invariants.py \
             tests/polymarket_predictive_engine/test_promotion_gate.py \
             tests/test_polymarket_vps_docker.py \

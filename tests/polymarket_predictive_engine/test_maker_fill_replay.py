@@ -104,6 +104,47 @@ def _seed_official_books(cfg) -> None:
     )
 
 
+def test_replay_loaders_stream_and_filter_before_materialising(tmp_path, monkeypatch):
+    cfg = _config(tmp_path)
+    _seed_archive(cfg)
+    write_csv(
+        cfg.output_root / "polymarket_trade_prints" / "trade_prints.csv",
+        [
+            {"market": "0xcond", "asset_id": "tok1", "side": "SELL", "price": 0.49, "size": 25, "timestamp": 1_000},
+            {"market": "other", "asset_id": "noise", "side": "BUY", "price": 0.10, "size": 1_000, "timestamp": 1_001},
+        ],
+        fieldnames=["market", "asset_id", "side", "price", "size", "timestamp"],
+    )
+
+    def fail_materialisation(_path):
+        raise AssertionError("replay must not materialise complete source files")
+
+    monkeypatch.setattr(maker_fill_replay, "_read_csv_any", fail_materialisation)
+
+    states = maker_fill_replay._book_states(cfg, {"tok1"}, replay_days=7)
+    trades = maker_fill_replay._trades(cfg, {"0xcond"}, {"tok1"})
+
+    assert set(states) == {"tok1"}
+    assert len(states["tok1"]) == 4
+    assert [(trade["market"], trade["token_id"]) for trade in trades] == [("0xcond", "tok1")]
+
+
+def test_book_state_stream_keeps_latest_timestamp_per_token_minute():
+    rows = iter(
+        [
+            {"source_timestamp": 119, "asset_id": "tok1", "best_bid": 0.48, "best_ask": 0.52},
+            {"source_timestamp": 61, "asset_id": "tok1", "best_bid": 0.47, "best_ask": 0.53},
+            {"source_timestamp": 120, "asset_id": "tok1", "best_bid": 0.46, "best_ask": 0.54},
+            {"source_timestamp": 121, "asset_id": "noise", "best_bid": 0.10, "best_ask": 0.20},
+        ]
+    )
+
+    states = maker_fill_replay._book_states_from_rows(rows, {"tok1"}, replay_days=7)
+
+    assert [state["stamp"] for state in states["tok1"]] == [119.0, 120.0]
+    assert states["tok1"][0]["best_bid"] == 0.48
+
+
 class _Response:
     def __init__(self, payload):
         self._payload = payload

@@ -398,8 +398,12 @@ wallet_reconciliation:
   collateral_decimals: 6
   position_decimals: 6
   discrepancy_threshold_usd: 1.0
-  starting_nav_usd:
-  operator_starting_nav_usd:
+  # 2026-07-14: internal-leg baseline = the verified on-chain deposit of
+  # 2026-07-13 ($12.923349 pUSD, confirmed by two independent RPCs and the
+  # venue debit math to six decimals). Registering it completes the third
+  # NAV view and lets the wallet_reconciliation_partial incident close.
+  starting_nav_usd: 12.923349
+  operator_starting_nav_usd: 12.923349
   executor_starting_nav_usd:
   baseline_epoch: 1
   gas_capture_enabled: true

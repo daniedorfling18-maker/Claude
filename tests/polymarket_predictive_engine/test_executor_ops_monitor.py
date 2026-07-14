@@ -241,6 +241,45 @@ def test_operating_state_and_dashboard_expose_absent_executor(tmp_path: Path) ->
     assert 'id="executorOps"' in dashboard_html
 
 
+def test_a1_human_advisory_does_not_turn_absent_executor_rows_unknown(tmp_path: Path) -> None:
+    cfg = _cfg(tmp_path)
+    write_json(
+        cfg.output_root / "execution" / "executor_status.json",
+        {
+            "generated_at_utc": "2026-07-14T10:50:52Z",
+            "status": "A1_ADVISORY",
+            "mode": "ABSENT",
+            "executor_present": False,
+            "execution_ledger_rows": 0,
+            "open_orders": None,
+            "exposure_usd": None,
+            "stage_cap_usd": 0.3065,
+            "last_action_age_seconds": None,
+            "dead_man": {"state": "ABSENT"},
+            "freshness_slo": {"state": "ABSENT"},
+            "kill_criteria_scoreboard": {"status": "clear", "triggered": []},
+            "a1_sweep_advisory": {"status": "sweep_advised", "reporting_only": True},
+            "paper_trading_invoked": False,
+            "live_trading_invoked": False,
+        },
+    )
+
+    operating = build_operating_state(cfg)
+    rows = {row["key"]: row for row in operating["rows"]}
+
+    for key in (
+        "executor_mode",
+        "executor_open_orders",
+        "executor_exposure_vs_stage_cap",
+        "executor_last_action_age",
+        "executor_dead_man",
+        "executor_freshness_slo",
+        "executor_kill_criteria",
+    ):
+        assert rows[key]["state"] == "ABSENT"
+    assert operating["executor_status"]["status"] == "A1_ADVISORY"
+
+
 def test_scheduler_monitor_is_independent_and_refreshes_oversight_each_tick() -> None:
     scheduler = (REPO_ROOT / "scripts" / "run_vps_ops_scheduler.sh").read_text(encoding="utf-8")
     block = scheduler.split("run_degraded_state_watchdog() {", 1)[1].split(

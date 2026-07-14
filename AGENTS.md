@@ -80,8 +80,9 @@ docker stats --no-stream
 
 ## Research focus
 
-The promotion-oriented research surface is frozen by
-`docs/EXPERIMENT_REGISTRY.md` to exactly three hypotheses:
+The promotion-oriented research surface is
+frozen to exactly the three primary hypotheses
+in `docs/EXPERIMENT_REGISTRY.md`:
 
 1. sharp-anchor maker carry;
 2. persistent dutch-book consistency opportunities;

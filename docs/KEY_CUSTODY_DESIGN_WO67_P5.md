@@ -66,6 +66,44 @@ exposure via the repository, telemetry, chat, or backups.
   rejected permanently; violates the foundational invariant regardless
   of size.
 
+## Amendment A1 — single project account (UNSIGNED DRAFT, 2026-07-13)
+
+Exercises the "written alternative chosen" option of the checklist
+below. Rationale, argued by the owner and accepted by the orchestrator:
+(1) the Polymarket and VALR accounts were created solely for this
+project — the entire balance is risk capital and there is no separate
+treasury for a sub-account to protect; (2) venue terms and the reward
+program's sybil enforcement make a second reward-earning account for
+one person a program-level risk (restriction or reward disqualification
+would be worse than any custody benefit); (3) the owner accepts
+abandon-and-restart as the compromise response.
+
+Decision: the future executor uses the EXISTING project account. The
+sub-account sections above are superseded for account structure;
+every credential-handling rule in this document still binds unchanged
+(offline L1 key, VPS-only runtime credentials mode 0600, no
+repo/telemetry/chat exposure, rotation and fail-flat drills,
+credential-guard test).
+
+Compensating controls, binding on WO-67's build:
+1. SEQUENCING FOR ATTRIBUTION: the human $100 stage completes BEFORE
+   the canary's first order; human and executor trading never run
+   concurrently on the account. Attribution = registered time windows
+   + the anchored execution ledger.
+2. BALANCE DISCIPLINE: the account balance is kept at or near the
+   active stage cap; excess (profits, rewards) is swept OUT via the
+   withdrawal rail to VALR on the registered accounting cadence —
+   which also finally exercises the untested exit rail.
+3. COMPROMISE RESPONSE: revoke L2 credentials, withdraw the remainder,
+   abandon the account. The owner accepts the record-migration cost
+   in advance.
+4. WO-73's `executor_wallet_address` stays unset; the executor rows in
+   monitoring read the single project wallet after the WO-67
+   amendment, with mode labels distinguishing executor-era activity.
+
+**Signature: [UNSIGNED — the owner signs by editing this line to
+"APPROVED — name, date" from their own GitHub account and merging.]**
+
 ## Owner acceptance checklist (all boxes required for APPROVED)
 
 - [X] Sub-account design accepted (or a written alternative chosen).

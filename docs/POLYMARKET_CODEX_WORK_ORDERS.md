@@ -2888,7 +2888,32 @@ structure. Documents and specs that still assume it must be reconciled
    fixtures. P4's row explains that its artifact appears only when
    `audit_github_merge_gate.py` runs, instead of bare UNKNOWN.
    UNKNOWN must keep meaning "cannot determine", never "done but
-   unreadable".
+   unreadable". 2026-07-14 addendum from the live row "AGENTS.md
+   and/or CLAUDE.md is unavailable": the container evidently lacks
+   read access to the governance docs, so P3 can NEVER resolve in
+   production — mount the needed docs read-only (or evaluate the doc
+   checks host-side) as part of this item, with a deploy-acceptance
+   check that the mounts exist.
+7. DASHBOARD ROW CLARITY (2026-07-14 owner-requested critical review):
+   (a) the capability row's raw evidence string
+   "APPROVED_FOR_PAPER_TRADING" (quoted from
+   paper_trade_readiness.json) reads as an authorisation on a
+   dashboard — rename the surfaced label to mechanical_readiness=ready
+   and keep authorisation exclusively on the authorisation row;
+   (b) "Governed paper authorisation" evidence was last verified
+   2026-07-02 — twelve days stale on the most sensitive row; the
+   verification must re-run in the harvest cycle so the date is never
+   older than one day;
+   (c) "Paper activity RECORDED_FILLS=49" next to NOT_GRANTED needs a
+   lane annotation (which registered experiment produced the fills)
+   so the juxtaposition cannot read as unauthorised activity.
+8. SLO SKIP TAXONOMY: the skipped-cycles SLO (target 0) breaches
+   permanently on DESIGNED quota skips — alarm fatigue is the exact
+   failure mode SLOs exist to prevent. Split the counter:
+   `skipped_intentional` (quota/preflight declines, reported
+   informationally) vs `skipped_overrun` (due jobs missed for
+   capacity/timing, the SLO input, target 0). Tighten-only: the
+   overrun target stays 0.
 
 ## WO-82 — Human Stage-1 operator runbook + generated daily stage log
 

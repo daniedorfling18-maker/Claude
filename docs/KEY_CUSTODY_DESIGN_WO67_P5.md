@@ -66,7 +66,9 @@ exposure via the repository, telemetry, chat, or backups.
   rejected permanently; violates the foundational invariant regardless
   of size.
 
-## Amendment A1 — single project account (UNSIGNED DRAFT, 2026-07-13)
+## Amendment A1 — single project account 
+
+**Status: APPROVED — Danie Dörfling, 2026-07-13.**
 
 Exercises the "written alternative chosen" option of the checklist
 below. Rationale, argued by the owner and accepted by the orchestrator:
@@ -99,10 +101,9 @@ Compensating controls, binding on WO-67's build:
    in advance.
 4. WO-73's `executor_wallet_address` stays unset; the executor rows in
    monitoring read the single project wallet after the WO-67
-   amendment, with mode labels distinguishing executor-era activity.
+   amendment, with mode labels distinguishing executor-era
 
-**Signature: [UNSIGNED — the owner signs by editing this line to
-"APPROVED — name, date" from their own GitHub account and merging.]**
+   **Status: APPROVED — Danie Dörfling, 2026-07-13.**
 
 ## Owner acceptance checklist (all boxes required for APPROVED)
 

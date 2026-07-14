@@ -1,11 +1,12 @@
 # Polymarket Codex Work Orders
 
 Last updated: 2026-07-14 (WO-80, WO-82, WO-81 landed; WO-83 implemented in
-PR #203. No additional work order is currently authorized for build. WO-33
-remains pending a registered leakage review, with WO-34/35 model wiring bound
-to that review and the three-hypothesis freeze. WO-48 and WO-67 are blocked;
-WO-70 and WO-72 are deferred; WO-76 is registration-only. Crypto up/down is
-frozen as a diagnostic — see `AGENTS.md`.)
+PR #203. NEW BUILDABLE: **WO-84** (reconciliation bridge-deposit blindness +
+watchdog coverage gap). WO-33 remains pending a registered leakage review,
+with WO-34/35 model wiring bound to that review and the three-hypothesis
+freeze. WO-48 and WO-67 are blocked; WO-70 and WO-72 are deferred; WO-76 is
+registration-only. Crypto up/down is frozen as a diagnostic — see
+`AGENTS.md`.)
 
 Mechanical, file-level implementation instructions for coding agents (Codex or any other code
 changer). The architecture and priorities live in `docs/POLYMARKET_QUANT_MODE_CHARTER.md`; this file
@@ -2855,6 +2856,47 @@ so tickets can never complete and the evaluator fails closed forever.
    must land before the $100 human stage starts — the requote loop is
    that stage's safety net.
 
+## WO-84 — Reconciliation bridge-deposit blindness + watchdog coverage gap (audit 2026-07-14)
+
+Full-system gremlin audit found two linked reporting-only defects. Both
+are the same class: a real not-clean state that is either false or
+silently unmonitored. No gate/order/sizing impact.
+
+FINDING 1 — data_api leg is structurally blind to bridge deposits.
+After the internal NAV baseline was registered (#193), the three-way
+reconciliation reads `DISCREPANCY` permanently: internal=$12.923349 and
+onchain=$12.787217 agree within the ~$0.14 drill cost, but the data_api
+leg reconstructs cash from the venue ACTIVITY FEED, which never shows a
+Solana-bridge deposit, so it reports nav=-$0.14 with
+`activity_complete=true` (it wrongly believes it is complete). A
+permanent false-red (a) withholds the A1 sweep advisory forever and
+(b) masks any FUTURE real discrepancy behind an always-red signal.
+Fix: make the data_api leg deposit-aware — either apply the same
+configured external-deposit baseline the internal leg uses, or, when a
+configured external deposit exists that the activity feed did not
+capture, classify the leg `reconstruction_incomplete_external_deposit`
+(a known-incomplete leg) so the three-way reports CLEAN on
+internal≈onchain with data_api explicitly flagged incomplete — never a
+false DISCREPANCY between three "complete" legs. `discrepancy_note` must
+state the cause instead of `None`.
+
+FINDING 2 — the degraded-state watchdog only matches `partial`.
+`degraded_state_watchdog.py:366` sets `degraded = status == "partial"`.
+When the reconciliation moved partial -> DISCREPANCY, the watchdog went
+`healthy_or_out_of_scope` — a genuinely not-clean reconciliation is now
+UNMONITORED because the state transitioned out of the one watched value.
+This is the general gremlin: monitoring keyed to one specific degraded
+label misses sibling degraded labels. Fix: the reconciliation
+registration (and a review of every WO-78 registration) must flag ANY
+not-clean terminal state — `partial` OR `discrepancy` OR `unavailable`
+OR `error` — not a single hard-coded string. Registered healthy states
+should be an allowlist; anything outside it is degraded.
+
+Tests: (a) synthetic reconciliation with a configured external deposit
+the activity feed lacks reads CLEAN with data_api flagged incomplete;
+(b) a DISCREPANCY reconciliation trips the watchdog; (c) the healthy
+allowlist rejects an unknown status.
+
 ## WO-83 — Make Tier-0 maker validation functional (fill-replay coverage)
 
 Status: IMPLEMENTED by Codex on 2026-07-14 in PR #203. CLI
@@ -3133,8 +3175,8 @@ contains no paper/live broker, signing, order, gate, model, or sizing path.
 
 ## Current queue for Codex (reconciled 2026-07-14)
 
-**Next buildable: none currently filed.** WO-83 is implemented in PR #203.
-Do not infer follow-on capital, gate, model, or executor work from its
+**Next buildable: WO-84** (audit fixes). WO-83 is implemented in PR #203.
+Do not infer follow-on capital, gate, model, or executor work from WO-83's
 diagnostics; the queue below remains binding.
 
 - **Pending review, not build permission:** WO-33. WO-34/35 model wiring shares

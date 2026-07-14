@@ -112,6 +112,22 @@ def test_workflow_inventory_has_only_registered_triggers() -> None:
             assert required in text, f"{name} is missing {required}"
 
 
+def test_workflows_use_node24_action_majors() -> None:
+    workflow_dir = ROOT / ".github" / "workflows"
+    workflow_text = "\n".join(
+        path.read_text(encoding="utf-8") for path in sorted(workflow_dir.glob("*.y*ml"))
+    )
+    expected_versions = {
+        "actions/checkout": "v6",
+        "actions/setup-python": "v6",
+        "actions/upload-artifact": "v7",
+    }
+
+    for action, expected_version in expected_versions.items():
+        versions = set(re.findall(rf"{re.escape(action)}@(v\d+)", workflow_text))
+        assert versions == {expected_version}, f"{action} versions: {sorted(versions)}"
+
+
 def test_merge_gate_is_enforced_only_when_every_control_is_proven() -> None:
     result = merge_gate.evaluate_merge_gate(
         workflow_text=_workflow(),

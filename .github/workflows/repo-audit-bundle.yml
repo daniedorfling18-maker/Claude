@@ -19,7 +19,7 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           fetch-depth: 0
 
@@ -118,7 +118,7 @@ jobs:
           PY
 
       - name: Upload repo audit bundle
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: repo-audit-bundle-${{ github.run_number }}
           path: outputs/repo_audit_bundle/

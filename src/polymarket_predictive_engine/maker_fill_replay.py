@@ -92,13 +92,22 @@ def _minute(stamp: float) -> float:
     return float(int(stamp // 60) * 60)
 
 
-def _read_csv_any(path: Path) -> list[dict[str, str]]:
+def _iter_csv_any(path: Path) -> Iterable[dict[str, str]]:
     if not path.exists() or path.stat().st_size == 0:
-        return []
+        return
     if path.suffix == ".gz":
-        with gzip.open(path, "rt", encoding="utf-8-sig", errors="replace", newline="") as handle:
-            return [{str(k): "" if v is None else str(v) for k, v in row.items()} for row in csv.DictReader(handle)]
-    return read_csv_rows(path)
+        handle_context = gzip.open(path, "rt", encoding="utf-8-sig", errors="replace", newline="")
+    else:
+        handle_context = path.open("rt", encoding="utf-8-sig", errors="replace", newline="")
+    with handle_context as handle:
+        for row in csv.DictReader(handle):
+            yield {str(key): "" if value is None else str(value) for key, value in row.items()}
+
+
+def _read_csv_any(path: Path) -> list[dict[str, str]]:
+    """Materialize one bounded file for append/rewrite call sites only."""
+
+    return list(_iter_csv_any(path))
 
 
 def _write_gzip_csv(path: Path, rows: list[dict[str, Any]], fieldnames: list[str]) -> Path:
@@ -124,9 +133,13 @@ def _official_book_files(cfg: EngineConfig) -> list[Path]:
     return sorted(root.glob("*.csv.gz")) if root.exists() else []
 
 
-def _book_states_from_rows(rows: list[dict[str, Any]], token_ids: set[str], replay_days: float) -> dict[str, list[dict[str, float]]]:
-    parsed: list[dict[str, float]] = []
+def _book_states_from_rows(
+    rows: Iterable[dict[str, Any]],
+    token_ids: set[str],
+    replay_days: float,
+) -> dict[str, list[dict[str, float]]]:
     max_stamp = 0.0
+    latest_by_minute: dict[tuple[str, float], dict[str, float]] = {}
     for row in rows:
         token_id = str(row.get("asset_id") or row.get("token_id") or "").strip()
         if token_id not in token_ids:
@@ -143,55 +156,49 @@ def _book_states_from_rows(rows: list[dict[str, Any]], token_ids: set[str], repl
             continue
         midpoint = midpoint if midpoint is not None else (bid + ask) / 2.0
         max_stamp = max(max_stamp, stamp)
-        parsed.append(
-            {
-                "stamp": stamp,
-                "minute": _minute(stamp),
-                "token_id": token_id,
-                "best_bid": bid,
-                "best_ask": ask,
-                "midpoint": midpoint,
-                "bid_depth": safe_float(row.get("resting_bid_depth_at_quote"))
-                or safe_float(row.get("top_bid_size"))
-                or safe_float(row.get("bid_depth_1pct"))
-                or 0.0,
-                "ask_depth": safe_float(row.get("resting_ask_depth_at_quote"))
-                or safe_float(row.get("top_ask_size"))
-                or safe_float(row.get("ask_depth_1pct"))
-                or 0.0,
-            }
-        )
+        parsed = {
+            "stamp": stamp,
+            "minute": _minute(stamp),
+            "token_id": token_id,
+            "best_bid": bid,
+            "best_ask": ask,
+            "midpoint": midpoint,
+            "bid_depth": safe_float(row.get("resting_bid_depth_at_quote"))
+            or safe_float(row.get("top_bid_size"))
+            or safe_float(row.get("bid_depth_1pct"))
+            or 0.0,
+            "ask_depth": safe_float(row.get("resting_ask_depth_at_quote"))
+            or safe_float(row.get("top_ask_size"))
+            or safe_float(row.get("ask_depth_1pct"))
+            or 0.0,
+        }
+        key = (token_id, parsed["minute"])
+        previous = latest_by_minute.get(key)
+        if previous is None or parsed["stamp"] >= previous["stamp"]:
+            latest_by_minute[key] = parsed
     cutoff = max_stamp - replay_days * 86400.0 if max_stamp and replay_days > 0 else float("-inf")
-    latest_by_minute: dict[tuple[str, float], dict[str, float]] = {}
-    for row in parsed:
-        if row["stamp"] >= cutoff:
-            latest_by_minute[(str(row["token_id"]), row["minute"])] = row
     by_token: dict[str, list[dict[str, float]]] = {}
     for row in latest_by_minute.values():
-        by_token.setdefault(str(row["token_id"]), []).append(row)
+        if row["stamp"] >= cutoff:
+            by_token.setdefault(str(row["token_id"]), []).append(row)
     for token_rows in by_token.values():
         token_rows.sort(key=lambda item: item["stamp"])
     return by_token
 
 
 def _book_states(cfg: EngineConfig, token_ids: set[str], replay_days: float) -> dict[str, list[dict[str, float]]]:
-    rows: list[dict[str, Any]] = []
-    for path in _feature_files(cfg):
-        rows.extend(_read_csv_any(path))
+    rows = (row for path in _feature_files(cfg) for row in _iter_csv_any(path))
     return _book_states_from_rows(rows, token_ids, replay_days)
 
 
 def _official_book_states(cfg: EngineConfig, token_ids: set[str], replay_days: float) -> dict[str, list[dict[str, float]]]:
-    rows: list[dict[str, Any]] = []
-    for path in _official_book_files(cfg):
-        rows.extend(_read_csv_any(path))
+    rows = (row for path in _official_book_files(cfg) for row in _iter_csv_any(path))
     return _book_states_from_rows(rows, token_ids, replay_days)
 
 
 def _trades(cfg: EngineConfig, markets: set[str], token_ids: set[str]) -> list[dict[str, Any]]:
-    rows = read_csv_rows(cfg.output_root / "polymarket_trade_prints" / "trade_prints.csv")
     trades: list[dict[str, Any]] = []
-    for row in rows:
+    for row in _iter_csv_any(cfg.output_root / "polymarket_trade_prints" / "trade_prints.csv"):
         market = str(row.get("market") or "").strip()
         token_id = str(row.get("asset_id") or row.get("token_id") or "").strip()
         if market not in markets and token_id not in token_ids:
@@ -208,14 +215,12 @@ def _trades(cfg: EngineConfig, markets: set[str], token_ids: set[str]) -> list[d
 
 
 def _state_at_or_before(states: list[dict[str, float]], stamp: float) -> dict[str, float] | None:
-    stamps = [row["stamp"] for row in states]
-    index = bisect_right(stamps, stamp) - 1
+    index = bisect_right(states, stamp, key=lambda row: row["stamp"]) - 1
     return states[index] if index >= 0 else None
 
 
 def _state_at_or_after(states: list[dict[str, float]], stamp: float) -> dict[str, float] | None:
-    stamps = [row["stamp"] for row in states]
-    index = bisect_left(stamps, stamp)
+    index = bisect_left(states, stamp, key=lambda row: row["stamp"])
     return states[index] if index < len(states) else None
 
 
@@ -642,9 +647,14 @@ def _coverage_slice(rows: list[dict[str, Any]], portfolio: list[dict[str, Any]])
 
 
 def _collection_coverage(cfg: EngineConfig, portfolio: list[dict[str, Any]], regime_days: float) -> dict[str, Any]:
-    rows = read_csv_rows(cfg.output_root / "maker_carry" / "maker_replay_collection_windows.csv")
     current = {str(entry["condition_id"]) for entry in portfolio}
-    rows = [row for row in rows if str(row.get("condition_id") or "") in current]
+    rows = [
+        row
+        for row in _iter_csv_any(
+            cfg.output_root / "maker_carry" / "maker_replay_collection_windows.csv"
+        )
+        if str(row.get("condition_id") or "") in current
+    ]
     stamps = [stamp for row in rows if (stamp := _stamp(row.get("collected_at_utc"))) is not None]
     cutoff = max(stamps) - regime_days * 86400.0 if stamps else None
     recent = [row for row in rows if cutoff is not None and (_stamp(row.get("collected_at_utc")) or 0.0) >= cutoff]

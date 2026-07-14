@@ -2879,6 +2879,16 @@ structure. Documents and specs that still assume it must be reconciled
    rail (Polymarket -> Solana -> VALR -> ZAR) whose first execution is
    the registered exit-rail test; door-to-door costs land in the WO-63
    cost ledger like the inbound leg did.
+6. PRECONDITION EVIDENCE PLUMBING (2026-07-14 finding: the operating
+   state reports P5 UNKNOWN although the custody amendment is signed):
+   the generator's P3/P5 checks read their signed Status/amendment
+   lines from the repo checkout (custody doc Status lines for P5;
+   the AGENTS.md owner-amendments section for P3), with the exact
+   grep patterns registered and tested against planted signed/unsigned
+   fixtures. P4's row explains that its artifact appears only when
+   `audit_github_merge_gate.py` runs, instead of bare UNKNOWN.
+   UNKNOWN must keep meaning "cannot determine", never "done but
+   unreadable".
 
 ## WO-82 — Human Stage-1 operator runbook + generated daily stage log
 

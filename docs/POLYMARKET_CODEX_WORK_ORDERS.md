@@ -1,7 +1,9 @@
 # Polymarket Codex Work Orders
 
 Last updated: 2026-07-14 (WO-80, WO-82, WO-81 landed; WO-83 implemented in
-PR #203; WO-84 implemented in PR #205. NEXT BUILDABLE: WO-86 (kill-switch staleness guard, safety-critical)
+PR #203; WO-84 implemented in PR #205. HEADLINE DECISION REQUIRED: WO-87 (Gate A grades settlement return,
+not closing-line value -- owner+governance call, moves the verdict).
+NEXT BUILDABLE: WO-86 (kill-switch staleness guard, safety-critical)
 and WO-85 (harvest resilience + freshness alarm + Gate-A clustering guard). WO-33 remains pending a registered leakage review, with
 WO-34/35 model wiring bound to that review and the three-hypothesis freeze.
 WO-48 and WO-67 are blocked; WO-70 and WO-72 are deferred; WO-76 is
@@ -2856,6 +2858,60 @@ so tickets can never complete and the evaluator fails closed forever.
    must land before the $100 human stage starts — the requote loop is
    that stage's safety net.
 
+## WO-87 — Gate A grades settlement return, not closing-line value (HEADLINE audit finding 2026-07-14; owner+governance decision required)
+
+The most consequential finding of the deep audit. Empirical, from
+`closing_line_final_history.csv` (61 finals):
+- 51/61 finals grade against a NEAR-SETTLED price: 26 at line_price<0.10,
+  25 at >0.90 (values like 0.001 and ~1.0).
+- 43/61 have |clv|>0.3 (e.g., entry 0.47 -> line 1.0 -> clv +0.53; entry
+  0.48 -> line 0.001 -> clv -0.48).
+
+Mechanism: prediction markets trade THROUGH the event to resolution, and
+`closing_line._fetch_price_history_close_line` grades against the last
+tradeable price at/before `close_time` (the market's actual close, which
+is near settlement). The `0 < price < 1` filter excludes only EXACTLY 0/1,
+so a resolved-NO market at 0.001 passes. Result: the quantity registered,
+documented, and interpreted as "closing line value / beat-close" is in
+practice PER-DOLLAR SETTLEMENT RETURN, and `beat_close` is effectively
+"was the position profitable at its entry price." The Gate A sign test is
+therefore a WIN-RATE test, not a test of beating a sharp pre-event
+closing consensus.
+
+Why material (affects the 2026-07-19/20 verdict's MEANING, not plumbing):
+1. Semantics: a position can settle profitably yet have had NEGATIVE true
+   CLV (overpaid vs the pre-event line; underdog won) and vice versa. The
+   current metric conflates "model has pricing edge" with "model picked
+   the winner".
+2. Statistics: settlement returns are high-variance/outcome-driven, not
+   small line-moves; the registered sign-test threshold and the mean's
+   interpretation were framed in CLV (line-move) terms and need review
+   under settlement-return semantics.
+
+NOT unilaterally a code bug -- grading actual profitability is arguably a
+MORE honest $100/month test than sports-CLV. This is a
+registration/semantics mismatch whose resolution is an owner + governance
+call and CANNOT be changed silently (it moves the verdict). Options to
+decide, dated and tighten-only per the amendment protocol:
+  (A) Keep settlement grading but RELABEL honestly: it is "net settlement
+      return per dollar", the gate is a win-rate + positive-return test;
+      re-examine the sign-test alpha and the mean threshold for the
+      higher-variance distribution; update docstring, registered rule,
+      and payload field names so nothing is called "closing line value"
+      that is not.
+  (B) Restore true CLV: define a pre-convergence reference (e.g., the line
+      at event-start / last price with the market still competitive, e.g.
+      within [0.05,0.95] a registered N hours before close) and grade
+      against THAT, so CLV measures pre-event line-move edge. Keep
+      settlement return as a SEPARATE reported metric.
+  (C) Report BOTH as distinct, separately-registered metrics and decide
+      which one Gate A binds on.
+Until decided, the interim read must state the caveat: the current
+"mean CLV" (+0.038, ~48% of units positive) is a SETTLEMENT-RETURN
+statistic near break-even, not a closing-line-edge statistic.
+No code change ships under this WO without the dated owner+governance
+decision; it never places or authorises an order.
+
 ## WO-86 — Kill-switch staleness guard: stale safety data must STOP, never clear (decision-policy audit 2026-07-14)
 
 MATERIAL, safety-critical for the live stage. Found by line-reading
@@ -3272,7 +3328,7 @@ contains no paper/live broker, signing, order, gate, model, or sizing path.
 
 ## Current queue for Codex (reconciled 2026-07-14)
 
-**Next buildable: WO-86.** WO-83 is implemented in PR #203 and
+**Next buildable: WO-86 (WO-87 is owner+governance decision, not a silent build).** WO-83 is implemented in PR #203 and
 WO-84 is implemented in PR #205. Do not infer follow-on capital, gate, model,
 or executor work from their diagnostics; the queue below remains binding.
 

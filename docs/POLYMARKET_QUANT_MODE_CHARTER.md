@@ -463,7 +463,21 @@ not loosened.
 **2026-07-10 — WO-44 implemented by Codex.** Maker-fill replay now can collect official CLOB
 `orderbook-history` snapshots into `outputs/maker_carry/official_books/*.csv.gz`, replay archive and
 official book states side-by-side, and report per-source realism ratios plus source agreement. Missing
-official history degrades to the existing archive source without failing the measurement lane.
+official history degrades to the existing archive source without failing the measurement lane. This
+legacy collection/fallback description is superseded by WO-83 below; it is retained as implementation
+history and no longer defines validation coverage.
+
+**2026-07-14 — WO-83 implemented by Codex.** Tier-0 maker validation now polls the documented
+current CLOB `/book`/`/books` API and public trade prints for exactly the active quote-sheet portfolio
+on its 15-minute monitoring cadence. Venue change time and local observation time remain distinct, so
+an unchanged book observed again is valid point-in-time coverage without look-ahead. The matched
+collection ledger is `outputs/maker_carry/maker_replay_collection_windows.csv`; replay output at
+`outputs/maker_carry/maker_fill_replay.json` contains per-market windows covered/simulated,
+last-in-queue confirmed-fill ratio, 5/15/60-minute markout distributions, a last-seven-days/prior cut,
+and the reported simulation-to-reality haircut. A nonzero simulation with no 5-minute coverage is
+`insufficient_coverage`, and persistent blindness opens a WO-78 incident. The haircut is never
+auto-applied: only a dated tighten-only M-B amendment could act on it. No registered gate, sizing,
+paper/live permission, credential, or order path changed.
 
 **2026-07-10 — WO-45 implemented by Codex.** Maker-carry candidates and quote sheets now show
 supplementary maker rebates and holding rewards as uncounted income, with portfolio-level rebate,

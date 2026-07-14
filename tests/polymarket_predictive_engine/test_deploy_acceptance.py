@@ -165,6 +165,7 @@ def test_registered_contracts_are_satisfiable_on_synthetic_fixtures() -> None:
         "quote_sheet_to_requote_alerts",
         "scheduler_jobs_to_status_alerting",
         "reconciliation_legs_to_nav",
+        "maker_replay_collection_to_fill_replay",
         "executor_runtime_to_ops_status",
     ]
     assert validate_contract_declarations() == []
@@ -190,6 +191,26 @@ def test_registered_contracts_are_satisfiable_on_synthetic_fixtures() -> None:
     assert _reconciliation_state(
         reconciliation["internal"], reconciliation["data_api"], reconciliation["onchain"], threshold=0.01
     )["reconciliation_status"] == "clean"
+    maker_replay_fixture = {
+        "portfolio": [_ticket()],
+        "market_windows": [
+            {
+                "condition_id": "0xmarket",
+                "asset_id": "token-yes",
+                "collected_at_utc": "2026-07-13T12:00:00Z",
+                "book_poll_status": "ok",
+                "trade_poll_status": "ok",
+                "covered": True,
+            }
+        ],
+    }
+    assert validate_contract_fixture(
+        "maker_replay_collection_to_fill_replay", maker_replay_fixture
+    )["status"] == "PASS"
+    maker_replay_fixture["market_windows"] = []
+    assert validate_contract_fixture(
+        "maker_replay_collection_to_fill_replay", maker_replay_fixture
+    )["status"] == "FAIL"
     executor_fixture = {
         "execution_ledger": [
             {

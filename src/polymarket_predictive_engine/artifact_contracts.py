@@ -90,6 +90,36 @@ CONTRACT_REGISTRY: tuple[dict[str, Any], ...] = (
         },
     },
     {
+        "id": "maker_replay_collection_to_fill_replay",
+        "producer": {
+            "component": "collect_maker_replay_data",
+            "artifact": "maker_carry/maker_replay_collection.json",
+            "record_path": "market_windows[]",
+            "declared_fields": [
+                "condition_id",
+                "asset_id",
+                "collected_at_utc",
+                "book_poll_status",
+                "trade_poll_status",
+                "covered",
+            ],
+            "freshness": {"field": "generated_at_utc", "maximum_age_seconds": 1800},
+            "coverage": "exactly one matched collection result per current quote-sheet condition on each run",
+        },
+        "consumer": {
+            "component": "maker_fill_replay",
+            "required_fields": [
+                "condition_id",
+                "asset_id",
+                "collected_at_utc",
+                "book_poll_status",
+                "trade_poll_status",
+                "covered",
+            ],
+            "coverage": "every current quote-sheet condition is represented and failed polls remain explicit",
+        },
+    },
+    {
         "id": "executor_runtime_to_ops_status",
         "producer": {
             "component": "future_executor",
@@ -219,6 +249,44 @@ def validate_contract_fixture(identifier: str, payload: Mapping[str, Any]) -> di
                 missing.append(f"{top_field}_matches_{leg}.nav_usd")
             if missing:
                 defects.append({"record": leg, "missing_or_invalid": sorted(set(missing))})
+    elif identifier == "maker_replay_collection_to_fill_replay":
+        portfolio = payload.get("portfolio") if isinstance(payload.get("portfolio"), list) else []
+        windows = payload.get("market_windows") if isinstance(payload.get("market_windows"), list) else []
+        expected = {
+            str(row.get("condition_id") or "")
+            for raw in portfolio
+            if isinstance(raw, Mapping)
+            for row in [_mapping(raw)]
+            if str(row.get("condition_id") or "")
+        }
+        required = _mapping(contract.get("consumer")).get("required_fields") or []
+        observed: list[str] = []
+        for index, raw in enumerate(windows):
+            row = _mapping(raw)
+            condition_id = str(row.get("condition_id") or "")
+            observed.append(condition_id)
+            missing = [field for field in required if _field_missing(row, str(field))]
+            expected_covered = row.get("book_poll_status") == "ok" and row.get("trade_poll_status") == "ok"
+            if row.get("covered") is not expected_covered:
+                missing.append("covered_matches_poll_statuses")
+            if missing:
+                defects.append(
+                    {
+                        "record": f"market_windows[{index}]",
+                        "condition_id": condition_id,
+                        "missing_or_invalid": sorted(set(missing)),
+                    }
+                )
+        observed_set = {condition_id for condition_id in observed if condition_id}
+        if observed_set != expected or len(observed) != len(expected):
+            defects.append(
+                {
+                    "record": "market_windows",
+                    "missing_or_invalid": ["exact_current_portfolio_coverage"],
+                    "missing_conditions": sorted(expected - observed_set),
+                    "extra_conditions": sorted(observed_set - expected),
+                }
+            )
     elif identifier == "executor_runtime_to_ops_status":
         ledger = payload.get("execution_ledger") if isinstance(payload.get("execution_ledger"), list) else []
         heartbeat = _mapping(payload.get("heartbeat"))

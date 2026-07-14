@@ -1,8 +1,8 @@
 # Polymarket Codex Work Orders
 
 Last updated: 2026-07-14 (WO-80, WO-82, WO-81 landed; WO-83 implemented in
-PR #203; WO-84 implemented in PR #205. NEXT BUILDABLE: WO-85 (harvest
-resilience + freshness alarm + Gate-A clustering guard, deep-dive audit). WO-33 remains pending a registered leakage review, with
+PR #203; WO-84 implemented in PR #205. NEXT BUILDABLE: WO-86 (kill-switch staleness guard, safety-critical)
+and WO-85 (harvest resilience + freshness alarm + Gate-A clustering guard). WO-33 remains pending a registered leakage review, with
 WO-34/35 model wiring bound to that review and the three-hypothesis freeze.
 WO-48 and WO-67 are blocked; WO-70 and WO-72 are deferred; WO-76 is
 registration-only. Crypto up/down is frozen as a diagnostic — see
@@ -2856,6 +2856,39 @@ so tickets can never complete and the evaluator fails closed forever.
    must land before the $100 human stage starts — the requote loop is
    that stage's safety net.
 
+## WO-86 — Kill-switch staleness guard: stale safety data must STOP, never clear (decision-policy audit 2026-07-14)
+
+MATERIAL, safety-critical for the live stage. Found by line-reading
+`live_test_decision_policy.py::_kill_criteria`. The kill criteria evaluate
+whatever `maker_live_test.json` / live-history data is present, with NO
+freshness check. Pre-live (no data ever) it correctly reads `clear`. But
+once a LIVE stage is active, if that scoreboard data goes stale (trade_prints
+stall, container kill, harvest tail-starvation recurrence, API outage), then
+`net_score` reads None, the daily list is empty, every criterion evaluates
+`not triggered`, and kill silently returns `clear` — the money-protecting
+kill switch disengages exactly when it is needed, reading old data that
+predates the problem. Same silent-staleness class as WO-84/85, but this one
+guards real capital.
+
+Registered fix (fail-safe = STOP when blind):
+1. Distinguish "never had data" (pre-live: clear is correct) from "had data,
+   now stale" (live: must stop). Activate the guard once live trading is
+   configured or a live stage is active (ladder_stage_permitted > 0 or a
+   live-execution ledger/heartbeat exists).
+2. When active, if the kill-input data (maker_live_test / live-history
+   latest observation) is older than a registered freshness threshold,
+   force `stop_quoting_review_before_resume` and set an explicit
+   `kill_data_stale` flag with the measured age. The decision policy must
+   NEVER emit a fund_* or continue action on stale safety data.
+3. The freshness threshold is registered and tighten-only; the dead-man
+   switch (30-min heartbeat) and requote STOP remain independent layers —
+   this closes the gap that all three read data that could itself be stale.
+4. Wire a WO-78 registration: kill-input staleness during a live stage is
+   an immediate INCIDENT + owner alert.
+Tests: (a) pre-live empty data still reads clear; (b) live stage + stale
+kill-input forces stop with kill_data_stale; (c) fresh data preserves the
+existing behaviour exactly (no change to a live, fresh evaluation).
+
 ## WO-85 — Harvest resilience + freshness alarm + Gate-A clustering guard (deep-dive audit 2026-07-14)
 
 Deep process audit found the daily `training_harvest` had not produced
@@ -3239,7 +3272,7 @@ contains no paper/live broker, signing, order, gate, model, or sizing path.
 
 ## Current queue for Codex (reconciled 2026-07-14)
 
-**Next buildable: WO-85.** WO-83 is implemented in PR #203 and
+**Next buildable: WO-86.** WO-83 is implemented in PR #203 and
 WO-84 is implemented in PR #205. Do not infer follow-on capital, gate, model,
 or executor work from their diagnostics; the queue below remains binding.
 

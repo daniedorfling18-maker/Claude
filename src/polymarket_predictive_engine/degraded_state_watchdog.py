@@ -34,6 +34,7 @@ REGISTERED_MAXIMA: dict[str, int] = {
     "scheduler_nonzero_max_consecutive_cycles": 0,
     "wallet_partial_max_consecutive_harvests": 2,
     "operating_unknown_max_consecutive_cycles": 0,
+    "maker_replay_insufficient_coverage_max_consecutive_cycles": 3,
 }
 
 MISSING_INPUT_RULES = frozenset(
@@ -109,6 +110,20 @@ def _registrations(settings: Mapping[str, Any]) -> list[dict[str, Any]]:
             ],
             "incident_on_observation": settings["requote_missing_input_max_consecutive_cycles"] + 1,
             "observation_unit": "producer cycle",
+        },
+        {
+            "id": "maker_replay_insufficient_coverage",
+            "artifact": "maker_carry/maker_fill_replay.json",
+            "healthy_reachable_states": ["covered", "partial", "no_simulated_fill_opportunities"],
+            "degraded_condition": "nonzero simulated fill opportunities with zero 5m replay coverage",
+            "max_consecutive_degraded_observations": settings[
+                "maker_replay_insufficient_coverage_max_consecutive_cycles"
+            ],
+            "incident_on_observation": settings[
+                "maker_replay_insufficient_coverage_max_consecutive_cycles"
+            ]
+            + 1,
+            "observation_unit": "distinct maker replay",
         },
         {
             "id": "scheduler_nonzero_exit",
@@ -353,6 +368,58 @@ def _evaluate_scheduler(
     )
 
 
+def _evaluate_maker_replay(
+    cfg: EngineConfig,
+    state: dict[str, Any],
+    settings: Mapping[str, Any],
+    generated_at: str,
+) -> tuple[dict[str, Any], dict[str, dict[str, Any]]]:
+    relative = "maker_carry/maker_fill_replay.json"
+    payload = _mapping(read_json(cfg.output_root / relative, default={}) or {})
+    token = _stamp(payload)
+    observed = str(payload.get("coverage_status") or payload.get("status") or "unobserved")
+    degraded = observed == "insufficient_coverage" or str(payload.get("status") or "") == "insufficient_coverage"
+    counters = state.setdefault("counters", {})
+    counter = _advance_counter(
+        _mapping(counters.get("maker_replay_insufficient_coverage")),
+        token=token,
+        degraded=degraded,
+    )
+    counters["maker_replay_insufficient_coverage"] = counter
+    maximum = int(settings["maker_replay_insufficient_coverage_max_consecutive_cycles"])
+    count = int(counter["consecutive_degraded_observations"])
+    incidents: dict[str, dict[str, Any]] = {}
+    if token and degraded and count > maximum:
+        row = _incident(
+            generated_at=generated_at,
+            registration_id="maker_replay_insufficient_coverage",
+            entity="maker_fill_replay",
+            source_artifact=relative,
+            observation_token=token,
+            episode_start=str(counter["episode_start_token"]),
+            degraded_state=observed,
+            reason=(
+                "maker replay has simulated fill opportunities but no covered 5m official-book window; "
+                "a zero realism ratio must not be interpreted as evidence"
+            ),
+            count=count,
+            maximum=maximum,
+        )
+        incidents[row["incident_id"]] = row
+    return (
+        {
+            "registration_id": "maker_replay_insufficient_coverage",
+            "artifact": relative,
+            "observed_state": observed,
+            "observation_token": token or None,
+            "consecutive_degraded_observations": count,
+            "max_consecutive_degraded_observations": maximum,
+            "state": "incident" if incidents else ("degraded_within_tolerance" if degraded else ("healthy" if token else "unobserved")),
+        },
+        incidents,
+    )
+
+
 def _evaluate_wallet(
     cfg: EngineConfig,
     state: dict[str, Any],
@@ -584,6 +651,7 @@ def build_degraded_state_watchdog(
         active_by_id: dict[str, dict[str, Any]] = {}
         for evaluator in (
             _evaluate_requote,
+            _evaluate_maker_replay,
             _evaluate_scheduler,
             _evaluate_wallet,
             _evaluate_operating_state,

@@ -5682,6 +5682,7 @@ def render_dashboard(cfg: EngineConfig, latest_report: dict[str, Any] | None = N
         "live_test": read_json(cfg.output_root / "maker_carry" / "maker_live_test.json", default={}) or {},
         "decision_policy": read_json(cfg.output_root / "maker_carry" / "decision_policy.json", default={}) or {},
         "requote_alerts": read_json(cfg.output_root / "maker_carry" / "requote_alerts.json", default={}) or {},
+        "fill_replay": read_json(cfg.output_root / "maker_carry" / "maker_fill_replay.json", default={}) or {},
     }
     html_out = _inject_html_overlay(HTML)
     _write_dashboard_data(out / "dashboard_data.json", payload)

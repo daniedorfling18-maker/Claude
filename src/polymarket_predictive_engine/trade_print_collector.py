@@ -188,11 +188,35 @@ def _collect_open_interest(
     return captured_markets, len(combined), errors
 
 
-def collect_trade_prints(cfg: EngineConfig) -> dict[str, Any]:
+def _maker_portfolio_markets(cfg: EngineConfig, max_markets: int) -> list[str]:
+    """Condition IDs on the current maker quote sheet, in sheet order."""
+
+    study = read_json(cfg.output_root / "maker_carry" / "maker_carry_study.json", default={}) or {}
+    portfolio = study.get("portfolio") if isinstance(study, dict) and isinstance(study.get("portfolio"), list) else []
+    markets: dict[str, None] = {}
+    for row in portfolio:
+        if not isinstance(row, dict):
+            continue
+        market = str(row.get("condition_id") or row.get("market") or "").strip()
+        if market:
+            markets[market] = None
+        if len(markets) >= max_markets:
+            break
+    return list(markets)
+
+
+def collect_trade_prints(
+    cfg: EngineConfig,
+    *,
+    markets: list[str] | None = None,
+    market_scope: str = "websocket",
+    summary_filename: str = "trade_prints_summary.json",
+    collect_open_interest: bool = True,
+) -> dict[str, Any]:
     settings = _settings(cfg)
     ledger_path = cfg.output_root / "polymarket_trade_prints" / "trade_prints.csv"
     oi_path = cfg.output_root / "polymarket_trade_prints" / "open_interest_history.csv"
-    summary_path = cfg.output_root / "polymarket_trade_prints" / "trade_prints_summary.json"
+    summary_path = cfg.output_root / "polymarket_trade_prints" / summary_filename
     summary: dict[str, Any] = {
         "status": "disabled",
         "generated_at_utc": now_utc(),
@@ -203,6 +227,8 @@ def collect_trade_prints(cfg: EngineConfig) -> dict[str, Any]:
         "oi_ledger_rows": 0,
         "oi_errors": [],
         "errors": [],
+        "market_scope": market_scope,
+        "market_polls": [],
         "paper_trading_invoked": False,
         "live_trading_invoked": False,
     }
@@ -210,7 +236,12 @@ def collect_trade_prints(cfg: EngineConfig) -> dict[str, Any]:
         write_json(summary_path, summary)
         return summary
 
-    markets = _tracked_markets(cfg, int(settings["max_markets"]))
+    if markets is None:
+        markets = _tracked_markets(cfg, int(settings["max_markets"]))
+    else:
+        markets = list(dict.fromkeys(str(market).strip() for market in markets if str(market).strip()))[
+            : int(settings["max_markets"])
+        ]
     existing = read_csv_rows(ledger_path)
     seen = {str(row.get("trade_id") or "") for row in existing}
     base_url = str(settings["base_url"]).rstrip("/")
@@ -218,8 +249,10 @@ def collect_trade_prints(cfg: EngineConfig) -> dict[str, Any]:
     max_rows = int(safe_float(settings.get("max_ledger_rows")) or 0)
     new_rows: list[dict[str, Any]] = []
     errors: list[str] = []
+    market_polls: list[dict[str, Any]] = []
 
     for market in markets:
+        market_new_before = len(new_rows)
         try:
             response = requests.get(
                 f"{base_url}/trades",
@@ -230,6 +263,15 @@ def collect_trade_prints(cfg: EngineConfig) -> dict[str, Any]:
             payload = response.json()
         except Exception as exc:
             errors.append(f"{market}: {type(exc).__name__}: {exc}")
+            market_polls.append(
+                {
+                    "condition_id": market,
+                    "status": "failed",
+                    "prints_returned": 0,
+                    "new_prints": 0,
+                    "error": f"{type(exc).__name__}: {exc}",
+                }
+            )
             continue
         trades = payload if isinstance(payload, list) else payload.get("trades") or payload.get("data") or []
         for trade in trades:
@@ -240,11 +282,20 @@ def collect_trade_prints(cfg: EngineConfig) -> dict[str, Any]:
                 continue
             seen.add(row["trade_id"])
             new_rows.append(row)
+        market_polls.append(
+            {
+                "condition_id": market,
+                "status": "ok",
+                "prints_returned": len(trades),
+                "new_prints": len(new_rows) - market_new_before,
+                "error": "",
+            }
+        )
 
     oi_markets_captured = 0
     oi_ledger_rows = 0
     oi_errors: list[str] = []
-    if str(settings.get("open_interest_enabled", True)).strip().lower() not in {"0", "false", "no"}:
+    if collect_open_interest and str(settings.get("open_interest_enabled", True)).strip().lower() not in {"0", "false", "no"}:
         oi_markets_captured, oi_ledger_rows, oi_errors = _collect_open_interest(
             base_url=base_url,
             timeout=timeout,
@@ -280,10 +331,30 @@ def collect_trade_prints(cfg: EngineConfig) -> dict[str, Any]:
             "oi_path": str(oi_path),
             "oi_errors": oi_errors[:10],
             "errors": errors[:10],
+            "market_polls": market_polls,
         }
     )
     write_json(summary_path, summary)
     return summary
+
+
+def collect_maker_portfolio_trade_prints(cfg: EngineConfig) -> dict[str, Any]:
+    """Poll prints for exactly the current maker quote-sheet markets.
+
+    This dedicated scope makes a successful zero-print response distinguishable
+    from a collection gap. It appends to the canonical print ledger and never
+    labels, scores, gates, or trades.
+    """
+
+    settings = _settings(cfg)
+    markets = _maker_portfolio_markets(cfg, int(settings["max_markets"]))
+    return collect_trade_prints(
+        cfg,
+        markets=markets,
+        market_scope="maker_quote_sheet",
+        summary_filename="maker_portfolio_trade_prints_summary.json",
+        collect_open_interest=False,
+    )
 
 
 def _maker_backfill_markets(cfg: EngineConfig) -> list[str]:

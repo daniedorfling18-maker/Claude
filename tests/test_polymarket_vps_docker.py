@@ -220,6 +220,16 @@ def test_vps_deploy_compose_exec_cannot_consume_remaining_remote_script():
     assert acceptance_exec < acceptance_stdin_closed < dashboard_exec < dashboard_stdin_closed < status_gate < success
 
 
+def test_vps_deploy_dashboard_probes_cannot_sigpipe_under_pipefail():
+    text = (ROOT / ".github" / "workflows" / "deploy-polymarket-vps-paper.yml").read_text(encoding="utf-8")
+
+    assert 'printf \'%s\' "$html" | grep -q' not in text
+    assert 'printf \'%s\' "$data" | grep -q' not in text
+    assert 'grep -Fq -- "Proof status" <<<"$html"' in text
+    assert 'grep -Fq -- "profit_target_proof_status" <<<"$data"' in text
+    assert "grep -Fq -- '\"executor_status\"' <<<\"$data\"" in text
+
+
 def test_vps_deploy_remote_script_is_valid_bash():
     text = (ROOT / ".github" / "workflows" / "deploy-polymarket-vps-paper.yml").read_text(encoding="utf-8")
     lines = text.splitlines()

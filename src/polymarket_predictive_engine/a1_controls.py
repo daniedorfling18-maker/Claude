@@ -176,7 +176,10 @@ def build_a1_sweep_advisory(
             reason = "wallet reconciliation timestamp is missing"
         elif reconciliation_age is not None and reconciliation_age > float(settings["reconciliation_max_age_seconds"]):
             reason = "wallet reconciliation is too old for withdrawal advice"
+        elif not reconciliation_state:
+            reason = "wallet reconciliation status is missing"
         elif reconciliation_state not in {"clean", "explained"}:
+            status = "withheld_reconciliation_not_clean"
             reason = f"wallet reconciliation is not clean/explained: {reconciliation_state or 'unknown'}"
         else:
             nav, _ = _reconciled_nav(reconciliation)

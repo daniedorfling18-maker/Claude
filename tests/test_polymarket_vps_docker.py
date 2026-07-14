@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import subprocess
+import textwrap
 from pathlib import Path
 
 import yaml
@@ -35,7 +37,7 @@ def test_vps_paper_compose_is_lean_and_paper_only():
     assert "--discovery-max-runtime-seconds $${POLYMARKET_DISCOVERY_MAX_RUNTIME_SECONDS}" in services["polymarket-paper-live"]["command"]
     assert "--prediction-max-runtime-seconds $${POLYMARKET_PREDICTION_MAX_RUNTIME_SECONDS}" in services["polymarket-paper-live"]["command"]
     assert "--governance-max-runtime-seconds $${POLYMARKET_GOVERNANCE_MAX_RUNTIME_SECONDS}" in services["polymarket-paper-live"]["command"]
-    assert paper_env["POLYMARKET_GOVERNANCE_REFRESH_SECONDS"] == "${POLYMARKET_GOVERNANCE_REFRESH_SECONDS:-0}"
+    assert paper_env["POLYMARKET_GOVERNANCE_REFRESH_SECONDS"] == "0"
     assert paper_env["POLYMARKET_DISCOVERY_MAX_RUNTIME_SECONDS"] == "${POLYMARKET_DISCOVERY_MAX_RUNTIME_SECONDS:-900}"
     assert paper_env["POLYMARKET_PREDICTION_MAX_RUNTIME_SECONDS"] == "${POLYMARKET_PREDICTION_MAX_RUNTIME_SECONDS:-600}"
     assert paper_env["POLYMARKET_GOVERNANCE_MAX_RUNTIME_SECONDS"] == "${POLYMARKET_GOVERNANCE_MAX_RUNTIME_SECONDS:-600}"
@@ -114,11 +116,13 @@ def test_vps_bootstrap_script_starts_only_lean_paper_stack():
 def test_vps_deploy_preflight_runs_before_compose_replacement():
     text = (ROOT / ".github" / "workflows" / "deploy-polymarket-vps-paper.yml").read_text(encoding="utf-8")
 
+    builder_prune = text.index("$DOCKER builder prune --force")
     preflight = text.index('python3 "$PREFLIGHT_DIR/preflight_vps_capacity.py"')
     quiesce = text.index('compose -f "$COMPOSE_FILE" stop --timeout 60')
     checkout = text.index('python3 "$PREFLIGHT_DIR/update_vps_checkout_preserving_runtime.py"')
     compose_up = text.index('$DOCKER compose -f "$COMPOSE_FILE" up -d --build')
-    assert preflight < quiesce < checkout < compose_up
+    assert builder_prune < preflight < quiesce < checkout < compose_up
+    assert "docker system prune" not in text.lower()
     assert "outputs/performance/deployed_git_rev" in text
     assert "REFUSE_DEPLOY_KEEP_EXISTING_STACK" in (ROOT / "scripts" / "preflight_vps_capacity.py").read_text(encoding="utf-8")
     assert "git pull --ff-only" not in text
@@ -147,10 +151,13 @@ def test_vps_health_script_checks_dashboard_and_heartbeat_files():
 def test_vps_deploy_workflow_requires_current_dashboard_schema():
     text = (ROOT / ".github" / "workflows" / "deploy-polymarket-vps-paper.yml").read_text(encoding="utf-8")
 
-    assert "scheduler-owned post-deploy model refresh" in text
+    assert "scheduler-owned post-deploy governance refresh" in text
+    assert "outputs/ops_scheduler/status.json" in text
+    assert 'job.get("last_exit_code")' in text
+    assert "late-stage failure must make the deploy red" in text
     assert "governance_refresh_status.json" in text
     assert "price_action_model_summary.json" in text
-    assert "did not publish a post-deploy price-action model" in text
+    assert "did not publish a fresh price-action model" in text
     assert "exec -T polymarket-paper-live" not in text
     assert "deployment_health" in text
     assert "mispricing_alpha_bridge" in text
@@ -162,6 +169,7 @@ def test_vps_deploy_workflow_requires_current_dashboard_schema():
     assert "SUPERBRU_PASSWORD" in text
     assert "VPS auto-pick watchdog" in text
     assert "json.dumps(updates" in text
+    assert 'updates["POLYMARKET_GOVERNANCE_REFRESH_SECONDS"] = "0"' in text
 
 
 def test_vps_deploy_runs_real_data_acceptance_after_restart_and_before_success():
@@ -186,6 +194,40 @@ def test_vps_deploy_runs_real_data_acceptance_after_restart_and_before_success()
     assert "previous revision $original_head remains the recorded rollback ref" in text
     assert 'install -d -m 0775 -o "$(id -u)" -g "$(id -g)"' in text
     assert "outputs/performance outputs/ops_scheduler" in text
+
+
+def test_vps_deploy_compose_exec_cannot_consume_remaining_remote_script():
+    text = (ROOT / ".github" / "workflows" / "deploy-polymarket-vps-paper.yml").read_text(encoding="utf-8")
+
+    acceptance_exec = text.index('exec -T vps-ops-scheduler sh -lc')
+    acceptance_stdin_closed = text.index("' </dev/null", acceptance_exec)
+    dashboard_exec = text.index("exec -T polymarket-dashboard", acceptance_stdin_closed)
+    dashboard_stdin_closed = text.index(
+        "--config /app/polymarket_predictive_config.example.yaml </dev/null",
+        dashboard_exec,
+    )
+    status_gate = text.index('acceptance_status="', dashboard_stdin_closed)
+    success = text.index("VPS deploy verified", status_gate)
+
+    assert acceptance_exec < acceptance_stdin_closed < dashboard_exec < dashboard_stdin_closed < status_gate < success
+
+
+def test_vps_deploy_remote_script_is_valid_bash():
+    text = (ROOT / ".github" / "workflows" / "deploy-polymarket-vps-paper.yml").read_text(encoding="utf-8")
+    lines = text.splitlines()
+    start = next(index for index, line in enumerate(lines) if "<<'REMOTE'" in line) + 1
+    end = next(index for index in range(start, len(lines)) if lines[index].strip() == "REMOTE")
+    remote_script = textwrap.dedent("\n".join(lines[start:end])) + "\n"
+
+    result = subprocess.run(
+        ["bash", "-n"],
+        input=remote_script,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
 
 
 def test_vps_deploy_workflow_writes_public_dashboard_url():

@@ -76,6 +76,8 @@ def test_registered_workflow_is_minimal_self_hosted_and_secretless() -> None:
     assert "test_collection_hygiene.py" in workflow
     assert "test_degraded_state_watchdog.py" in workflow
     assert "test_operating_state.py" in workflow
+    assert "test_refresh_governance.py" in workflow
+    assert "test_wo81_a1_controls.py" in workflow
     assert "test_safety_invariants.py" in workflow
     assert "test_polymarket_vps_docker.py" in workflow
     assert "test_vps_checkout_update.py" in workflow

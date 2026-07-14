@@ -259,6 +259,16 @@ def _reconciliation_check(payload: Mapping[str, Any], baseline_at: datetime | No
         legs[name] = {"status": row.get("status"), "nav_usd": row.get("nav_usd")}
         if not str(row.get("status") or "").strip():
             defects.append({"leg": name, "reason": "leg_not_attempted_or_status_missing"})
+    data_api = _mapping(payload.get("data_api"))
+    if data_api.get("status") == "reconstruction_incomplete_external_deposit":
+        if not str(data_api.get("reconstruction_note") or "").strip():
+            defects.append({"leg": "data_api", "reason": "known_incomplete_reason_missing"})
+        if (safe_float(data_api.get("external_deposit_baseline_applied_usd")) or 0.0) <= 0:
+            defects.append({"leg": "data_api", "reason": "external_deposit_baseline_not_applied"})
+        if data_api.get("activity_complete") is not False:
+            defects.append({"leg": "data_api", "reason": "known_incomplete_activity_claimed_complete"})
+        if not str(payload.get("discrepancy_note") or "").strip():
+            defects.append({"reason": "known_incomplete_discrepancy_note_missing"})
     if not fresh:
         defects.append({"reason": observed_at})
     return {

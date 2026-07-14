@@ -9,7 +9,10 @@ from polymarket_predictive_engine.cli import COMMANDS
 from polymarket_predictive_engine.config import EngineConfig
 from polymarket_predictive_engine.degraded_state_watchdog import (
     INCIDENT_LEDGER,
+    LEGACY_WALLET_REGISTRATION_ID,
     REGISTERED_MAXIMA,
+    WALLET_HEALTHY_STATES,
+    WALLET_REGISTRATION_ID,
     _settings,
     build_degraded_state_watchdog,
 )
@@ -57,7 +60,7 @@ def test_registered_maxima_only_tighten() -> None:
         raw={
             "degraded_state_watchdog": {
                 "requote_missing_input_max_consecutive_cycles": 999,
-                "wallet_partial_max_consecutive_harvests": 1,
+                "wallet_not_clean_max_consecutive_harvests": 1,
                 "maker_replay_insufficient_coverage_max_consecutive_cycles": 999,
             }
         },
@@ -69,10 +72,16 @@ def test_registered_maxima_only_tighten() -> None:
     assert settings["requote_missing_input_max_consecutive_cycles"] == REGISTERED_MAXIMA[
         "requote_missing_input_max_consecutive_cycles"
     ]
-    assert settings["wallet_partial_max_consecutive_harvests"] == 1
+    assert settings["wallet_not_clean_max_consecutive_harvests"] == 1
     assert settings["maker_replay_insufficient_coverage_max_consecutive_cycles"] == REGISTERED_MAXIMA[
         "maker_replay_insufficient_coverage_max_consecutive_cycles"
     ]
+
+    legacy = EngineConfig(
+        raw={"degraded_state_watchdog": {"wallet_partial_max_consecutive_harvests": 1}},
+        path=Path("legacy-config.yaml"),
+    )
+    assert _settings(legacy)["wallet_not_clean_max_consecutive_harvests"] == 1
 
 
 def test_requote_missing_input_trips_on_fourth_distinct_cycle_and_deduplicates(tmp_path: Path) -> None:
@@ -206,13 +215,88 @@ def test_wallet_partial_counts_distinct_harvests_not_watchdog_polls(tmp_path: Pa
             assert result["status"] == "ok"
             polled = build_degraded_state_watchdog(cfg, as_of=f"2026-07-{10 + harvest}T02:04:01Z")
             wallet_eval = next(
-                row for row in polled["evaluations"] if row["registration_id"] == "wallet_reconciliation_partial"
+                row for row in polled["evaluations"] if row["registration_id"] == WALLET_REGISTRATION_ID
             )
             assert wallet_eval["consecutive_degraded_observations"] == harvest
 
     assert result["status"] == "incident"
-    wallet_eval = next(row for row in result["evaluations"] if row["registration_id"] == "wallet_reconciliation_partial")
+    wallet_eval = next(row for row in result["evaluations"] if row["registration_id"] == WALLET_REGISTRATION_ID)
     assert wallet_eval["consecutive_degraded_observations"] == 3
+
+
+def test_wallet_discrepancy_and_unknown_status_are_outside_healthy_allowlist(tmp_path: Path) -> None:
+    cfg = _cfg(tmp_path)
+    wallet_path = cfg.output_root / "performance" / "wallet_reconciliation.json"
+    for harvest in range(1, 4):
+        write_json(
+            wallet_path,
+            {
+                "generated_at_utc": f"2026-07-{10 + harvest}T03:00:00Z",
+                "reconciliation_status": "DISCREPANCY",
+                "discrepancy_note": "synthetic normalized NAV mismatch",
+            },
+        )
+        result = build_degraded_state_watchdog(cfg, as_of=f"2026-07-{10 + harvest}T03:00:01Z")
+
+    assert result["status"] == "incident"
+    wallet_eval = next(row for row in result["evaluations"] if row["registration_id"] == WALLET_REGISTRATION_ID)
+    assert wallet_eval["observed_state"] == "DISCREPANCY"
+    assert wallet_eval["healthy_reachable_states"] == sorted(WALLET_HEALTHY_STATES)
+    assert result["active_incidents"][0]["reason"] == "synthetic normalized NAV mismatch"
+
+    write_json(
+        wallet_path,
+        {
+            "generated_at_utc": "2026-07-14T03:05:00Z",
+            "reconciliation_status": "clean",
+        },
+    )
+    assert build_degraded_state_watchdog(cfg, as_of="2026-07-14T03:05:01Z")["status"] == "ok"
+
+    write_json(
+        wallet_path,
+        {
+            "generated_at_utc": "2026-07-14T03:10:00Z",
+            "reconciliation_status": "future_unknown_terminal_state",
+        },
+    )
+    unknown = build_degraded_state_watchdog(cfg, as_of="2026-07-14T03:10:01Z")
+    wallet_eval = next(row for row in unknown["evaluations"] if row["registration_id"] == WALLET_REGISTRATION_ID)
+    assert wallet_eval["state"] == "degraded_within_tolerance"
+    assert wallet_eval["consecutive_degraded_observations"] == 1
+
+
+def test_wallet_counter_migrates_from_legacy_partial_registration(tmp_path: Path) -> None:
+    cfg = _cfg(tmp_path)
+    write_json(
+        cfg.output_root / "ops_scheduler" / "degraded_state_watchdog_state.json",
+        {
+            "counters": {
+                LEGACY_WALLET_REGISTRATION_ID: {
+                    "last_observation_token": "2026-07-13T02:00:00Z",
+                    "consecutive_degraded_observations": 1,
+                    "episode_start_token": "2026-07-13T02:00:00Z",
+                    "currently_degraded": True,
+                }
+            }
+        },
+    )
+    write_json(
+        cfg.output_root / "performance" / "wallet_reconciliation.json",
+        {
+            "generated_at_utc": "2026-07-14T02:00:00Z",
+            "reconciliation_status": "error",
+        },
+    )
+
+    result = build_degraded_state_watchdog(cfg, as_of="2026-07-14T02:00:01Z")
+
+    wallet_eval = next(row for row in result["evaluations"] if row["registration_id"] == WALLET_REGISTRATION_ID)
+    assert wallet_eval["migrated_legacy_counter"] is True
+    assert wallet_eval["consecutive_degraded_observations"] == 2
+    state = read_json(cfg.output_root / "ops_scheduler" / "degraded_state_watchdog_state.json")
+    assert WALLET_REGISTRATION_ID in state["counters"]
+    assert LEGACY_WALLET_REGISTRATION_ID not in state["counters"]
 
 
 def test_previously_known_operating_row_becoming_unknown_is_incident(tmp_path: Path) -> None:

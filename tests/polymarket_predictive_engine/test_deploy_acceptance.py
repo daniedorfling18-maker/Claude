@@ -14,7 +14,7 @@ from polymarket_predictive_engine.artifact_contracts import (
 )
 from polymarket_predictive_engine.config import EngineConfig
 from polymarket_predictive_engine.degraded_state_watchdog import build_degraded_state_watchdog
-from polymarket_predictive_engine.deploy_acceptance import build_deploy_acceptance
+from polymarket_predictive_engine.deploy_acceptance import _reconciliation_check, build_deploy_acceptance
 from polymarket_predictive_engine.requote_alerts import build_requote_alerts
 from polymarket_predictive_engine.utils import read_json, write_json
 from polymarket_predictive_engine.wallet_reconciliation import _reconciliation_state
@@ -250,6 +250,34 @@ def test_registered_contracts_are_satisfiable_on_synthetic_fixtures() -> None:
     assert validate_contract_fixture("executor_runtime_to_ops_status", executor_fixture)["status"] == "PASS"
     executor_fixture["heartbeat"] = {"mode": "portfolio"}
     assert validate_contract_fixture("executor_runtime_to_ops_status", executor_fixture)["status"] == "FAIL"
+
+
+def test_deploy_acceptance_requires_provenance_for_known_incomplete_deposit_leg() -> None:
+    payload = {
+        "generated_at_utc": "2026-07-13T12:01:20Z",
+        "reconciliation_status": "clean",
+        "discrepancy_note": "The public activity feed omits the configured bridge deposit.",
+        "internal_nav_usd": 12.923349,
+        "data_api_nav_usd": 12.787217,
+        "onchain_nav_usd": 12.787217,
+        "internal": {"status": "ok", "nav_usd": 12.923349},
+        "data_api": {
+            "status": "reconstruction_incomplete_external_deposit",
+            "nav_usd": 12.787217,
+            "activity_complete": False,
+            "reconstruction_note": "Configured external deposit baseline applied.",
+            "external_deposit_baseline_applied_usd": 12.923349,
+        },
+        "onchain": {"status": "ok", "nav_usd": 12.787217},
+    }
+
+    accepted = _reconciliation_check(payload, datetime(2026, 7, 13, 12, 0, tzinfo=timezone.utc))
+    assert accepted["status"] == "PASS"
+
+    payload["data_api"].pop("reconstruction_note")
+    rejected = _reconciliation_check(payload, datetime(2026, 7, 13, 12, 0, tzinfo=timezone.utc))
+    assert rejected["status"] == "FAIL"
+    assert {row["reason"] for row in rejected["defects"]} == {"known_incomplete_reason_missing"}
 
 
 def test_quote_contract_covers_sheet_market_absent_from_socket_set(

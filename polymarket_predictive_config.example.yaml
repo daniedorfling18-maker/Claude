@@ -242,12 +242,14 @@ operating_state_slos:
 # consecutive degraded producer observation opens an incident. The notifier
 # writes the existing owner-notification artifact contract; it has no SMTP,
 # credential, broker, gate, sizing, signing, cancellation, or order path.
+# WO-84 broadens wallet monitoring from one label to every state outside the
+# clean/explained allowlist; the old wallet_partial key remains a read alias.
 degraded_state_watchdog:
   enabled: true
   notification_enabled: true
   requote_missing_input_max_consecutive_cycles: 3
   scheduler_nonzero_max_consecutive_cycles: 0
-  wallet_partial_max_consecutive_harvests: 2
+  wallet_not_clean_max_consecutive_harvests: 2
   operating_unknown_max_consecutive_cycles: 0
   maker_replay_insufficient_coverage_max_consecutive_cycles: 3
 
@@ -413,7 +415,7 @@ wallet_reconciliation:
   # 2026-07-14: internal-leg baseline = the verified on-chain deposit of
   # 2026-07-13 ($12.923349 pUSD, confirmed by two independent RPCs and the
   # venue debit math to six decimals). Registering it completes the third
-  # NAV view and lets the wallet_reconciliation_partial incident close.
+  # NAV view and lets the wallet_reconciliation_not_clean incident close.
   starting_nav_usd: 12.923349
   operator_starting_nav_usd: 12.923349
   executor_starting_nav_usd:

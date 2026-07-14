@@ -2836,6 +2836,25 @@ so tickets can never complete and the evaluator fails closed forever.
    must land before the $100 human stage starts — the requote loop is
    that stage's safety net.
 
+## WO-80 — Candidate staleness guard (defect, small)
+
+Observed 2026-07-13 18:05 candidates: "Iran military action against a
+Gulf State on July 9?" — an event four days past — still ranked in the
+top-40 rewarded candidates with a $100/day pot, band_eligible=true,
+resolution_risk_class="other". A past-dated or resolution-pending
+market must never be a quoting candidate: its "carry" is fictional and
+quoting into UMA limbo is pure resolution risk.
+1. Add an event-date/close-time sanity filter to the yield-first scan:
+   candidates whose title date or venue close time is in the past, or
+   whose resolution is proposed/disputed, are excluded and counted in
+   an `excluded_stale` diagnostic.
+2. Regression test seeds a past-dated rewarded market and asserts
+   exclusion.
+3. Reporting-only change to candidate SELECTION inputs; the M-A/B/C
+   gate definitions and their history are untouched (exclusion filters
+   are part of the registered universe definition: "existing
+   resolution ... exclusions" per the registry's H1 universe).
+
 # Batch 10 — filed 2026-07-13 (never again: silent degraded states)
 
 Encoded lesson: two incidents in 24h shared one shape — a component sat

@@ -51,6 +51,18 @@ that merge commit. This prevents retroactive hypothesis registration.
 - Abandonment action: `maker_lane_not_supported_program_review`.
 - Status: active registered study; only forward, distinct-UTC-day evidence is
   eligible.
+- Validation protocol (registered 2026-07-14): the study's net carry is a
+  simulation UPPER BOUND until validated by a three-tier ladder, each tier
+  gating the next. Tier 0 — fill-replay against recorded book/prints
+  (last-in-queue), free, runs on history; produces confirmed-fill ratio,
+  realized markout, and a reported (never auto-applied, tighten-only)
+  simulation-to-reality haircut (WO-83). Tier 1 — reward-receipt test:
+  rest minimum size on a CALM wide-band rewarded market across one reward
+  epoch, compare paid reward to predicted share (isolates the reward half
+  at low adverse-selection exposure). Tier 2 — real fill markout via the
+  P2 $100 human stage (the only true test of the adverse-selection half).
+  A Tier-0 result showing the fill model is wildly optimistic can retire
+  the lane with zero capital.
 
 ## H2 — PRIMARY: Persistent dutch-book consistency opportunities
 

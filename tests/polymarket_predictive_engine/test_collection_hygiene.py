@@ -8,6 +8,7 @@ import gzip
 import os
 from pathlib import Path
 
+from polymarket_predictive_engine import corpus_retention
 from polymarket_predictive_engine.cli import COMMANDS
 from polymarket_predictive_engine.config import EngineConfig
 from polymarket_predictive_engine.corpus_retention import (
@@ -233,6 +234,82 @@ def test_retention_compacts_before_prune_keeps_fresh_rows_and_never_touches_ledg
     assert "projected_daily_growth_bytes" in result["disk_projection"]
     assert result["paper_trading_invoked"] is False
     assert result["live_trading_invoked"] is False
+
+
+def test_retention_counts_producer_managed_websocket_rows_without_materialising(tmp_path: Path, monkeypatch) -> None:
+    cfg = _cfg(tmp_path)
+    websocket_path = cfg.output_root / "polymarket_training" / "websocket_market_features.csv"
+    write_csv(
+        websocket_path,
+        [
+            {"asset_id": "a", "source_timestamp": "2026-07-12T00:00:00Z"},
+            {"asset_id": "b", "source_timestamp": "2026-07-12T00:01:00Z"},
+        ],
+    )
+    original = corpus_retention.read_csv_rows
+
+    def guarded_read(path):
+        if Path(path) == websocket_path:
+            raise AssertionError("producer-managed websocket rows must be streamed")
+        return original(path)
+
+    monkeypatch.setattr(corpus_retention, "read_csv_rows", guarded_read)
+
+    result = run_corpus_retention(
+        cfg,
+        as_of=datetime(2026, 7, 13, tzinfo=timezone.utc),
+        dry_run=True,
+    )
+
+    websocket = next(row for row in result["corpora"] if row["corpus"] == "websocket_features")
+    assert websocket["rows_seen"] == 2
+    assert websocket["rows_retained"] == 2
+
+
+def test_training_archive_compaction_streams_and_deduplicates_across_runs(tmp_path: Path, monkeypatch) -> None:
+    cfg = _cfg(tmp_path)
+    root = cfg.output_root / "polymarket_training_archive"
+    first = root / "features_first.csv.gz"
+    second = root / "features_second.csv.gz"
+    duplicate = {"asset_id": "a", "source_timestamp": "2026-07-09T00:00:00Z", "best_bid": "0.4"}
+    _gzip_csv(first, [duplicate, {"asset_id": "b", "source_timestamp": "2026-07-09T00:01:00Z", "best_bid": "0.5"}])
+    _gzip_csv(second, [duplicate])
+    old_mtime = datetime(2026, 7, 9, tzinfo=timezone.utc).timestamp()
+    os.utime(first, (old_mtime, old_mtime))
+    os.utime(second, (old_mtime, old_mtime))
+    original = corpus_retention._read_csv_any
+
+    def guarded_materialisation(path):
+        if Path(path).name.startswith(("features_", "daily_training_archive_")):
+            raise AssertionError("training archive compaction must stream")
+        return original(path)
+
+    monkeypatch.setattr(corpus_retention, "_read_csv_any", guarded_materialisation)
+
+    first_run = run_corpus_retention(
+        cfg,
+        as_of=datetime(2026, 7, 13, tzinfo=timezone.utc),
+    )
+
+    archives = list(root.glob("daily_training_archive_*.csv.gz"))
+    assert len(archives) == 1
+    with gzip.open(archives[0], "rt", encoding="utf-8", newline="") as handle:
+        assert [row["asset_id"] for row in csv.DictReader(handle)] == ["a", "b"]
+    training = next(row for row in first_run["corpora"] if row["corpus"] == "training_archive")
+    assert training["rows_archived"] == 3
+    assert not first.exists()
+    assert not second.exists()
+
+    third = root / "features_third.csv.gz"
+    _gzip_csv(third, [duplicate, {"asset_id": "c", "source_timestamp": "2026-07-09T00:02:00Z", "best_bid": "0.6"}])
+    os.utime(third, (old_mtime, old_mtime))
+    run_corpus_retention(
+        cfg,
+        as_of=datetime(2026, 7, 13, 0, 5, tzinfo=timezone.utc),
+    )
+
+    with gzip.open(archives[0], "rt", encoding="utf-8", newline="") as handle:
+        assert [row["asset_id"] for row in csv.DictReader(handle)] == ["a", "b", "c"]
 
 
 def test_archive_age_bound_and_dry_run_are_deterministic(tmp_path: Path) -> None:

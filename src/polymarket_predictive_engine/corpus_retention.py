@@ -8,6 +8,7 @@ outside the writable surface.
 
 from __future__ import annotations
 
+from contextlib import ExitStack
 import csv
 from datetime import datetime, timedelta, timezone
 import gzip
@@ -16,6 +17,8 @@ import os
 from pathlib import Path, PurePosixPath
 import re
 import shutil
+import sqlite3
+import tempfile
 from typing import Any, Iterable, Mapping, Sequence
 
 from .config import EngineConfig, load_config
@@ -111,16 +114,94 @@ def _iso(value: datetime) -> str:
     return value.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
+def _iter_csv_any(path: Path) -> Iterable[dict[str, str]]:
+    if not path.exists() or path.stat().st_size == 0:
+        return
+    if path.suffix == ".gz":
+        handle_context = gzip.open(path, "rt", encoding="utf-8-sig", errors="replace", newline="")
+    else:
+        handle_context = path.open("rt", encoding="utf-8-sig", errors="replace", newline="")
+    with handle_context as handle:
+        for row in csv.DictReader(handle):
+            yield {str(key): "" if value is None else str(value) for key, value in row.items()}
+
+
 def _read_csv_any(path: Path) -> list[dict[str, str]]:
+    """Materialize only bounded corpora whose rewrite requires complete rows."""
+
+    return list(_iter_csv_any(path))
+
+
+def _count_csv_rows(path: Path) -> int:
+    return sum(1 for _ in _iter_csv_any(path))
+
+
+def _csv_fieldnames(path: Path) -> list[str]:
     if not path.exists() or path.stat().st_size == 0:
         return []
     if path.suffix == ".gz":
-        with gzip.open(path, "rt", encoding="utf-8-sig", errors="replace", newline="") as handle:
-            return [
-                {str(key): "" if value is None else str(value) for key, value in row.items()}
-                for row in csv.DictReader(handle)
-            ]
-    return read_csv_rows(path)
+        handle_context = gzip.open(path, "rt", encoding="utf-8-sig", errors="replace", newline="")
+    else:
+        handle_context = path.open("rt", encoding="utf-8-sig", errors="replace", newline="")
+    with handle_context as handle:
+        return [str(field) for field in (csv.DictReader(handle).fieldnames or [])]
+
+
+def _row_digest(row: Mapping[str, Any], fields: Sequence[str]) -> bytes:
+    digest = hashlib.blake2b(digest_size=16)
+    for field in fields:
+        value = str(row.get(field) or "").encode("utf-8", errors="replace")
+        digest.update(len(value).to_bytes(8, "big"))
+        digest.update(value)
+    return digest.digest()
+
+
+def _merge_gzip_archive(
+    path: Path,
+    incoming: Path,
+    fields: Sequence[str],
+    scratch_root: Path,
+) -> int:
+    """Merge one spool into a daily archive with disk-backed exact dedup."""
+
+    ensure_dir(path.parent)
+    fieldnames = [str(field) for field in fields]
+    existing_fields = _csv_fieldnames(path)
+    if existing_fields and set(existing_fields) != set(fieldnames):
+        raise ValueError(f"archive schema mismatch for {path}")
+    before = path.stat().st_size if path.exists() else 0
+    temporary = path.with_name(f".{path.name}.{os.getpid()}.tmp")
+    seen_path = scratch_root / f"seen_{hashlib.sha256(path.name.encode()).hexdigest()[:16]}.sqlite"
+    connection = sqlite3.connect(seen_path)
+    try:
+        connection.execute("PRAGMA journal_mode=OFF")
+        connection.execute("PRAGMA synchronous=OFF")
+        connection.execute("PRAGMA temp_store=FILE")
+        connection.execute("CREATE TABLE seen (digest BLOB PRIMARY KEY) WITHOUT ROWID")
+        cursor = connection.cursor()
+        accepted = 0
+        with gzip.open(temporary, "wt", encoding="utf-8", newline="") as handle:
+            writer = csv.DictWriter(handle, fieldnames=fieldnames, extrasaction="ignore")
+            writer.writeheader()
+            sources = [path, incoming] if path.exists() else [incoming]
+            for source in sources:
+                for row in _iter_csv_any(source):
+                    cursor.execute("INSERT OR IGNORE INTO seen(digest) VALUES (?)", (_row_digest(row, fieldnames),))
+                    if cursor.rowcount != 1:
+                        continue
+                    writer.writerow({field: serialize_value(row.get(field, "")) for field in fieldnames})
+                    accepted += 1
+                    if accepted % 10_000 == 0:
+                        connection.commit()
+        connection.commit()
+        os.replace(temporary, path)
+    finally:
+        connection.close()
+        try:
+            temporary.unlink()
+        except FileNotFoundError:
+            pass
+    return max(0, path.stat().st_size - before)
 
 
 def _fieldnames(rows: Iterable[Mapping[str, Any]], existing: Sequence[str] = ()) -> list[str]:
@@ -317,31 +398,63 @@ def _compact_training_archive(
     archive_files: set[str] = set()
     eligible_sources = [path for path in sources if not _protected(cfg, path)]
     source_bytes = sum(path.stat().st_size for path in eligible_sources)
-    all_rows: list[dict[str, Any]] = []
-    for path in eligible_sources:
-        rows = [dict(row) for row in _read_csv_any(path)]
-        rows_archived += len(rows)
-        if not dry_run:
-            all_rows.extend(rows)
     if dry_run:
+        rows_archived = sum(_count_csv_rows(path) for path in eligible_sources)
         bytes_pruned = source_bytes
-    elif all_rows:
-        # One grouped write avoids repeatedly decompressing and rewriting the
-        # same daily archive when hundreds of small producer chunks accrued.
-        added, paths = _archive_rows(
-            cfg,
-            corpus="training_archive",
-            rows=all_rows,
-            timestamp_fields=TIMESTAMP_FIELDS["training_archive"],
-            fallback_day=current,
-        )
-        bytes_archived += added
-        archive_files.update(paths)
-        # Sources are deleted only after every daily archive write succeeds.
-        for path in eligible_sources:
-            size = path.stat().st_size
-            path.unlink()
-            bytes_pruned += size
+    elif eligible_sources:
+        # Spool by day/schema while streaming producer chunks. The previous
+        # implementation accumulated every decompressed row in one list; the
+        # production corpus can expand far beyond the scheduler's cgroup cap.
+        ensure_dir(root)
+        with tempfile.TemporaryDirectory(prefix=".corpus_retention.", dir=root) as scratch_name:
+            scratch_root = Path(scratch_name)
+            groups: dict[tuple[str, str], dict[str, Any]] = {}
+            with ExitStack() as stack:
+                for source in eligible_sources:
+                    for row in _iter_csv_any(source):
+                        fields = tuple(sorted(str(key) for key in row))
+                        observed = _row_time(row, TIMESTAMP_FIELDS["training_archive"]) or current
+                        day = observed.astimezone(timezone.utc).strftime("%Y%m%d")
+                        schema = hashlib.sha256("|".join(fields).encode("utf-8")).hexdigest()[:12]
+                        key = (day, schema)
+                        group = groups.get(key)
+                        if group is None:
+                            spool_path = scratch_root / f"incoming_{day}_{schema}.csv.gz"
+                            handle = stack.enter_context(gzip.open(spool_path, "wt", encoding="utf-8", newline=""))
+                            writer = csv.DictWriter(handle, fieldnames=list(fields), extrasaction="ignore")
+                            writer.writeheader()
+                            group = {
+                                "fields": fields,
+                                "path": spool_path,
+                                "rows": 0,
+                                "writer": writer,
+                            }
+                            groups[key] = group
+                        group["writer"].writerow(
+                            {field: serialize_value(row.get(field, "")) for field in group["fields"]}
+                        )
+                        group["rows"] = int(group["rows"]) + 1
+                        rows_archived += 1
+
+            for (day, schema), group in sorted(groups.items()):
+                target = root / f"daily_training_archive_{day}_{schema}.csv.gz"
+                if _protected(cfg, target):
+                    raise PermissionError(f"refusing to archive into protected path: {target}")
+                bytes_archived += _merge_gzip_archive(
+                    target,
+                    Path(group["path"]),
+                    list(group["fields"]),
+                    scratch_root,
+                )
+                archive_files.add(str(target))
+
+            if groups:
+                # Sources are deleted only after every spool has merged and
+                # atomically replaced its bounded daily archive.
+                for source in eligible_sources:
+                    size = source.stat().st_size
+                    source.unlink()
+                    bytes_pruned += size
     return {
         "corpus": "training_archive",
         "status": "would_compact" if dry_run and sources else "ok",
@@ -588,7 +701,7 @@ def run_corpus_retention(
         corpora: list[dict[str, Any]] = []
         websocket_path = cfg.output_root / "polymarket_training" / "websocket_market_features.csv"
         websocket_cfg = _mapping(cfg.raw.get("websocket_market_data"))
-        websocket_rows = read_csv_rows(websocket_path)
+        websocket_row_count = _count_csv_rows(websocket_path)
         writer_hours = safe_float(websocket_cfg.get("feature_retention_hours"))
         writer_compliant = (
             not websocket_path.exists()
@@ -602,9 +715,9 @@ def run_corpus_retention(
                 "registered_raw_days": float(settings["websocket_feature_raw_days"]),
                 "effective_writer_retention_hours": writer_hours,
                 "writer_retention_compliant": writer_compliant,
-                "rows_seen": len(websocket_rows),
+                "rows_seen": websocket_row_count,
                 "rows_archived": 0,
-                "rows_retained": len(websocket_rows),
+                "rows_retained": websocket_row_count,
                 "bytes_archived": 0,
                 "bytes_pruned_raw": 0,
                 "note": "The live normaliser atomically compacts expired rows; the daily job bounds its immutable archive without racing the producer.",

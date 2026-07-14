@@ -1,7 +1,7 @@
 # Polymarket Codex Work Orders
 
 Last updated: 2026-07-14 (WO-80, WO-82, WO-81 landed. NEW BUILDABLE:
-**WO-83** — make the Tier-0 maker fill-replay functional; it is currently
+**WO-84** (reconciliation bridge-deposit blindness + watchdog coverage gap) and **WO-83** (make the Tier-0 maker fill-replay functional); it is currently
 blind (`realism_ratio=0.0` from a book-poller coverage gap), so the maker
 lane's central "upper bound" claim is untested. Free, diagnostic, gates
 untouched. WO-33 remains pending a registered leakage review, with WO-34/35
@@ -2857,6 +2857,47 @@ so tickets can never complete and the evaluator fails closed forever.
    must land before the $100 human stage starts — the requote loop is
    that stage's safety net.
 
+## WO-84 — Reconciliation bridge-deposit blindness + watchdog coverage gap (audit 2026-07-14)
+
+Full-system gremlin audit found two linked reporting-only defects. Both
+are the same class: a real not-clean state that is either false or
+silently unmonitored. No gate/order/sizing impact.
+
+FINDING 1 — data_api leg is structurally blind to bridge deposits.
+After the internal NAV baseline was registered (#193), the three-way
+reconciliation reads `DISCREPANCY` permanently: internal=$12.923349 and
+onchain=$12.787217 agree within the ~$0.14 drill cost, but the data_api
+leg reconstructs cash from the venue ACTIVITY FEED, which never shows a
+Solana-bridge deposit, so it reports nav=-$0.14 with
+`activity_complete=true` (it wrongly believes it is complete). A
+permanent false-red (a) withholds the A1 sweep advisory forever and
+(b) masks any FUTURE real discrepancy behind an always-red signal.
+Fix: make the data_api leg deposit-aware — either apply the same
+configured external-deposit baseline the internal leg uses, or, when a
+configured external deposit exists that the activity feed did not
+capture, classify the leg `reconstruction_incomplete_external_deposit`
+(a known-incomplete leg) so the three-way reports CLEAN on
+internal≈onchain with data_api explicitly flagged incomplete — never a
+false DISCREPANCY between three "complete" legs. `discrepancy_note` must
+state the cause instead of `None`.
+
+FINDING 2 — the degraded-state watchdog only matches `partial`.
+`degraded_state_watchdog.py:366` sets `degraded = status == "partial"`.
+When the reconciliation moved partial -> DISCREPANCY, the watchdog went
+`healthy_or_out_of_scope` — a genuinely not-clean reconciliation is now
+UNMONITORED because the state transitioned out of the one watched value.
+This is the general gremlin: monitoring keyed to one specific degraded
+label misses sibling degraded labels. Fix: the reconciliation
+registration (and a review of every WO-78 registration) must flag ANY
+not-clean terminal state — `partial` OR `discrepancy` OR `unavailable`
+OR `error` — not a single hard-coded string. Registered healthy states
+should be an allowlist; anything outside it is degraded.
+
+Tests: (a) synthetic reconciliation with a configured external deposit
+the activity feed lacks reads CLEAN with data_api flagged incomplete;
+(b) a DISCREPANCY reconciliation trips the watchdog; (c) the healthy
+allowlist rejects an unknown status.
+
 ## WO-83 — Make Tier-0 maker validation functional (fill-replay coverage)
 
 The whole maker case rests on simulated net carry that the honesty_clause
@@ -3122,7 +3163,7 @@ contains no paper/live broker, signing, order, gate, model, or sizing path.
 
 ## Current queue for Codex (reconciled 2026-07-14)
 
-**Next buildable: WO-83** (Tier-0 maker validation — restore fill-replay
+**Next buildable: WO-84** (audit fixes) and **WO-83** (Tier-0 maker validation — restore fill-replay
 coverage so the maker "upper bound" is finally tested; free, diagnostic,
 tighten-only). After WO-80/82/81 landed it is the one authorized build.
 

@@ -2838,6 +2838,14 @@ so tickets can never complete and the evaluator fails closed forever.
 
 ## WO-80 — Candidate staleness guard (defect, small)
 
+Status: IMPLEMENTED by Codex on 2026-07-14 in PR #194. The rewarded
+maker-carry universe now excludes otherwise eligible markets when the venue
+close timestamp or latest explicit title date is past, or UMA resolution is
+proposed/disputed. The study summary reports `excluded_stale`, reason counts,
+and bounded examples. Registered maker gates, sizing, and all paper/live
+controls are unchanged. Ruff, config validation, the WO-80 regression suite,
+the full 1,144-test ARM64/Python 3.11 suite, and the WO-69 PR gate passed.
+
 Observed 2026-07-13 18:05 candidates: "Iran military action against a
 Gulf State on July 9?" — an event four days past — still ranked in the
 top-40 rewarded candidates with a $100/day pot, band_eligible=true,

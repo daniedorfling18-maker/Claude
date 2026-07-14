@@ -101,7 +101,7 @@ Compensating controls, binding on WO-67's build:
    in advance.
 4. WO-73's `executor_wallet_address` stays unset; the executor rows in
    monitoring read the single project wallet after the WO-67
-   amendment, with mode labels distinguishing executor-era
+   amendment, with mode labels distinguishing executor-era activity.
 
    **Status: APPROVED — Danie Dörfling, 2026-07-13.**
 

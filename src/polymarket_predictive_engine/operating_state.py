@@ -818,7 +818,11 @@ def build_operating_state(cfg: EngineConfig) -> dict[str, Any]:
         live_orders = f"RECORDED_ORDERS={live_order_count}"
         live_order_evidence = str(live_ledger)
 
-    executor_absent = not executor_present and str(executor_status.get("status") or "").upper() == "ABSENT"
+    # The monitor's top-level status may be A1_ADVISORY for a human custody
+    # sweep while the executor itself is deliberately absent.  Presence is
+    # established by the explicit executor flag and mode, never by unrelated
+    # advisory state.
+    executor_absent = not executor_present and str(executor_status.get("mode") or "").upper() == "ABSENT"
     executor_mode = "ABSENT" if executor_absent else str(executor_status.get("mode") or UNKNOWN).upper()
     executor_open_orders = executor_status.get("open_orders")
     executor_open_orders_state = (

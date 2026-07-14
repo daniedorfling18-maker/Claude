@@ -1,5 +1,9 @@
 # Polymarket predictive paper-trading loop
 
+> **Retired local runbook.** Do not run this stack locally. The active paper
+> system uses `docker-compose.vps-paper.yml` on the VPS and the guarded deploy
+> workflow described in `AGENTS.md`. The commands below remain for history only.
+
 This workflow is strictly paper trading and is intended to run locally through
 Docker. It scans live Polymarket order books, stores the snapshot, predicts from
 the deployed model, gates signals through the risk controls, and records fills in

@@ -1,260 +1,82 @@
 # Claude Research Engines
 
-> **Operating state is generated, not maintained in prose.** Read
-> `outputs/performance/operating_state.md` (or the matching JSON/dashboard panel) for the
-> point-in-time state. [`docs/OPERATING_STATE.md`](docs/OPERATING_STATE.md) defines that control.
-> Start here: [`docs/POLYMARKET_CURRENT_STATE.md`](docs/POLYMARKET_CURRENT_STATE.md) and [`AGENTS.md`](AGENTS.md).
+This repository contains two related systems:
 
-This repository contains two related local-first research systems:
+1. the Polymarket predictive/paper-trading research engine; and
+2. the World Cup/SuperBru score engine and VPS auto-pick watchdog.
 
-1. **Polymarket predictive engine** — current focus. It discovers liquid Polymarket opportunities, builds point-in-time features, scores mispricing candidates, captures forward shadow evidence, and audits whether paper trading is allowed.
-2. **World Cup / SuperBru score engine** — legacy-but-still-useful score-prediction engine that converts bookmaker odds into calibrated scoreline distributions and maximises expected SuperBru points.
+## Start with generated state
 
-The repo is local-first. Docker is for deployment scenarios only, not normal local development.
-
----
-
-## Current Polymarket state
-
-Do not copy a point-in-time status into this file. Generate and read:
+Point-in-time operating state is generated from runtime evidence, not maintained
+in README prose. Read the VPS dashboard or these files in `/home/opc/Claude`:
 
 ```text
+http://129.151.178.42:8765/
 outputs/performance/operating_state.md
 outputs/performance/operating_state.json
 ```
 
-The report derives configuration, governance, evidence, deployment markers, and WO-67
-preconditions from machine-readable inputs. A missing input is rendered as `UNKNOWN`, never
-reconstructed from an old README claim. Run it with:
+[`docs/OPERATING_STATE.md`](docs/OPERATING_STATE.md) defines the control, and
+[`AGENTS.md`](AGENTS.md) defines how agents operate the repository.
 
-```bash
-python -m polymarket_predictive_engine.cli operating-state --config polymarket_predictive_config.example.yaml
-```
+## Runtime model
 
----
+Production and verification are VPS-only. Do not run Python engines, tests,
+Docker, dashboards, scheduled tasks, collectors, model training, brokers, or
+watchdogs on the local workstation. Local work is limited to code inspection and
+editing, Git/GitHub operations, and SSH control.
 
-## What we learned
+The production stack is deployed from reviewed `main` through
+`Deploy Polymarket VPS Paper` using `docker-compose.vps-paper.yml`. The guarded
+workflow preserves ledgers, records the deployed SHA, verifies current data
+contracts, and retains rollback state.
 
-### 1. No-trade was caused upstream, not at the broker
+## Quant/research contract
 
-The paper broker had cash/equity, but no approved signals reached it. Rejections were caused by alpha, validation, cohort-promotion, liquidity, spread, model-window, and same-category evidence gates.
+The system seeks executable mispricing—not mere probability movement. Entry and
+exit evidence uses actual bid/ask prices, spread, depth, fees, adverse selection,
+and cost attribution. Historical/model/reconstructed/shadow/paper/live evidence
+classes remain separate, and promotion requires prospective out-of-sample proof.
 
-### 2. Bad 5-minute crypto families remain excluded
+Promotion-oriented research is frozen to the three hypotheses registered in
+[`docs/EXPERIMENT_REGISTRY.md`](docs/EXPERIMENT_REGISTRY.md):
 
-The following fast 5-minute crypto families showed poor evidence and should not be treated as actionable just because they are liquid:
+1. sharp-anchor maker carry;
+2. persistent dutch-book consistency opportunities;
+3. structural-bias/smart-flow cohorts with positive executable CLV.
 
-```text
-crypto_btc_updown_5m
-crypto_sol_updown_5m
-crypto_xrp_updown_5m
-crypto_updown_5m
-```
+Crypto up/down and unregistered lanes are diagnostic only. No gate may be
+loosened to force trades or a `$100/month` headline.
 
-They may still appear in diagnostics, but they should not crowd out research slots or get promoted without new evidence.
+## Safety status
 
-### 3. `unknown` is research-only
+The engine is shadow/dry-run/paper-gated. WO-67 is a blocked architecture
+registration; there is no approved autonomous live-order path. Missing or stale
+evidence fails closed as `UNKNOWN`.
 
-Some liquid markets are currently classified as `unknown`, including esports, tennis outrights, legal/policy, and other event types. These are useful for classifier expansion, but not actionable until they have a real family classification and family-specific validation path.
+## Work and verification
 
-### 4. `sports_other` is the first real alpha-shadow candidate
+- Read [`docs/POLYMARKET_CODEX_WORK_ORDERS.md`](docs/POLYMARKET_CODEX_WORK_ORDERS.md).
+- Use one work order per branch/PR.
+- Run target/full tests in an isolated ARM64/Python 3.11 VPS checkout.
+- Require the WO-69 PR gate to pass before merge.
+- Deploy merged `main` with the guarded VPS workflow and inspect post-deploy
+  acceptance plus the generated operating state.
 
-The strongest accepted alpha-shadow candidates are currently World Cup round-of-16 style `sports_other` markets. They are real candidates, but the cohort is still open, negative mark-to-market, and not settled. This means it cannot yet support paper promotion.
+## Key references
 
-### 5. BTC 15-minute Up/Down is a timing diagnostic, not the strategy
-
-`crypto_btc_updown_15m` is currently the main fast-feedback family because it is liquid and closes soon. It is useful for testing whether short-window data, model timing, and scoring work. It is not the system's target strategy by itself.
-
-### 6. Discovery is now broad by default
-
-The system should look for **all plausible liquid Polymarket opportunities**, not only BTC Up/Down. Liquidity discovery now scans broad areas including sports, soccer, football, basketball, baseball, tennis, golf, UFC, esports, World Cup, politics, elections, Trump, Fed, inflation, economy, stocks, crypto, BTC/ETH/SOL/XRP, AI, OpenAI, SpaceX, weather, and culture.
-
-Websocket targets are now selected across all liquid non-excluded families with a per-family cap, so one family cannot consume every slot.
-
----
-
-## Current safe workflow
-
-Install or refresh the scheduled local shadow-research task:
-
-```powershell
-.\scripts\install_polymarket_shadow_research_task.ps1 `
-  -IntervalMinutes 15 `
-  -WebsocketSeconds 30
-```
-
-Check latest status:
-
-```powershell
-Get-Content .\work\shadow_research_cycle_latest_status.json -Raw
-```
-
-Run one manual diagnostic cycle:
-
-```powershell
-.\scripts\run_polymarket_shadow_research_cycle.ps1 `
-  -ConfigPath polymarket_predictive_config.example.yaml `
-  -WebsocketSeconds 30
-```
-
-Read the audit:
-
-```powershell
-Get-Content .\outputs\polymarket_model_governance\local_history_audit_report.md -Raw
-```
-
-Check discovery and target balance:
-
-```powershell
-$liq = Get-Content .\outputs\polymarket_model_governance\liquidity_discovery_summary.json -Raw | ConvertFrom-Json
-$liq.model_target_queue |
-  Select-Object family, status, tradable_tokens, fast_feedback_tradable_tokens, shortest_time_to_close_hours, recommendation |
-  Format-Table -AutoSize
-
-Import-Csv .\outputs\polymarket_model_governance\websocket_liquidity_targets.csv |
-  Group-Object family |
-  Sort-Object Count -Descending |
-  Select-Object Count, Name |
-  Format-Table -AutoSize
-```
-
-Do **not** start the old local live loop as the default workflow. The current workflow is shadow research plus audit.
-
----
-
-## What must happen before paper trading can be considered
-
-Do not paper trade until the audit allows it and a human review confirms the relevant family. The minimum evidence shape is:
-
-```text
-paper_allowed = true
-approved_signals > 0
-family-specific shadow evidence is positive
-closed/settled fills exist
-ROI clears the configured threshold
-monthly run-rate is plausible
-cohort is probationary/promoted by governance
-```
-
-Even then, the next step is tiny probationary paper, not live trading.
-
----
-
-## Why the $100/month target is not solved yet
-
-At the configured probationary stake of `$2`, a 3% ROI produces only `$0.06` per trade. Hitting `$100/month` at that stake would require roughly 1,667 trades per month, which is unrealistic.
-
-The path is therefore:
-
-```text
-1. Discover broad liquid opportunities.
-2. Classify them into reliable families.
-3. Prove one family in shadow with positive closed evidence.
-4. Move only that family to tiny probationary paper.
-5. Scale stake only after evidence remains positive.
-```
-
-Stake scaling before evidence would scale losses, not expected value.
-
----
-
-## Important Polymarket files
-
-| Purpose | File |
+| Topic | File |
 |---|---|
-| Current project state | `docs/POLYMARKET_CURRENT_STATE.md` |
-| Operating runbook | `docs/POLYMARKET_SHADOW_RESEARCH_RUNBOOK.md` |
-| Agent instructions | `AGENTS.md` |
-| Scheduled shadow runner | `scripts/run_polymarket_shadow_research_cycle.ps1` |
-| Scheduled task installer | `scripts/install_polymarket_shadow_research_task.ps1` |
-| Liquidity discovery | `scripts/run_polymarket_liquidity_discovery.py` |
-| Local history audit | `scripts/audit_polymarket_local_history.py` |
-| Alpha candidate shadow bridge | `scripts/run_alpha_candidate_shadow_evidence.py` |
-| Engine CLI | `src/polymarket_predictive_engine/cli.py` |
-| Websocket collector | `src/polymarket_predictive_engine/websocket_collector.py` |
-| Mispricing alpha | `src/polymarket_predictive_engine/mispricing_alpha.py` |
-| Shadow cohort ledger | `src/polymarket_predictive_engine/shadow_cohort.py` |
+| Agent operating rules | `AGENTS.md` |
+| Generated operating-state contract | `docs/OPERATING_STATE.md` |
+| Work orders | `docs/POLYMARKET_CODEX_WORK_ORDERS.md` |
+| Experiment registry | `docs/EXPERIMENT_REGISTRY.md` |
+| Quant-mode charter | `docs/POLYMARKET_QUANT_MODE_CHARTER.md` |
+| Edge reset | `docs/POLYMARKET_EDGE_STRATEGY_RESET.md` |
+| VPS setup | `docs/ORACLE_VPS_SETUP.md` |
+| Docker safety | `docs/POLYMARKET_DOCKER_SAFETY_AUDIT.md` |
+| Polymarket CLI | `src/polymarket_predictive_engine/cli.py` |
+| SuperBru package | `src/superbru_score_engine` |
 
-Important outputs:
-
-```text
-work/shadow_research_cycle_latest_status.json
-outputs/polymarket_model_governance/local_history_audit_report.md
-outputs/polymarket_model_governance/liquidity_discovery_summary.json
-outputs/polymarket_model_governance/websocket_liquidity_targets.csv
-outputs/polymarket_model_governance/alpha_candidate_shadow_evidence_inputs.csv
-outputs/polymarket_shadow/shadow_positions.csv
-outputs/polymarket_shadow/shadow_fills.csv
-outputs/polymarket_predictions/mispricing_alpha_scores.csv
-outputs/polymarket_predictions/rejected_signals.csv
-outputs/polymarket_predictions/trade_signals.csv
-```
-
-`trade_signals.csv` being empty is currently expected.
-
----
-
-## Safety rules
-
-- Do not weaken gates to force trades.
-- Do not remove same-category validation.
-- Do not bypass cohort promotion.
-- Do not treat `unknown` as actionable.
-- Do not trust bad 5-minute crypto families because they are liquid.
-- Do not raise stake before positive closed evidence exists.
-- Do not add or enable a live order path.
-
----
-
-## SuperBru score engine quick start
-
-The legacy SuperBru engine remains available.
-
-Linux / macOS:
-
-```bash
-python -m venv .venv
-source .venv/bin/activate
-pip install -e .
-cp config.example.yaml config.yaml
-python -m superbru_score_engine config-check --config config.yaml --profiles calibration_profiles.yaml
-python -m superbru_score_engine predict --config config.yaml --fixtures examples/fixtures.csv --odds-json examples/odds_snapshot.json --out-dir outputs
-```
-
-Windows PowerShell:
-
-```powershell
-python -m venv .venv
-.\.venv\Scripts\Activate.ps1
-pip install -e .
-copy config.example.yaml config.yaml
-python -m superbru_score_engine config-check --config config.yaml --profiles calibration_profiles.yaml
-python -m superbru_score_engine predict --config config.yaml --fixtures examples/fixtures.csv --odds-json examples/odds_snapshot.json --out-dir outputs
-```
-
-The SuperBru engine converts bookmaker odds into calibrated scoreline distributions and selects the score prediction that maximises expected SuperBru points. It is not a most-likely-score picker.
-
-Key SuperBru commands:
-
-| Command | Purpose |
-|---|---|
-| `config-check` | Validate config against calibration profile |
-| `fetch-odds` | Fetch live odds, write fixtures/odds JSON |
-| `predict` | Run decision engine, output predictions |
-| `results` | Fetch completed scores, update ratings store |
-| `backtest` | Score predictions against historical results |
-| `tune` | Hyperparameter calibration sweep |
-| `football-data-backtest` | World Cup proxy calibration via Football-Data |
-| `football-data-league-backtest` | Big Five league calibration sweep |
-| `the-odds-api-historical-backtest` | Historical odds snapshot comparison |
-| `public-results-backtest` | Ratings-only backtest from public results CSV |
-
----
-
-## Local-first development
-
-```bash
-pip install -e ".[dev]"
-pytest
-```
-
-Do not use Docker for local development. Use Docker only for deployment-like scenarios and only with the existing safety guidance.
+Legacy local scripts remain for history and regression coverage only. Their
+presence is not an active run instruction.

@@ -1,5 +1,10 @@
 # Polymarket Research README
 
+> **Historical snapshot.** Do not use the local commands or point-in-time status
+> below as operating instructions. Runtime and verification are VPS-only under
+> `AGENTS.md`; current state is generated at
+> `outputs/performance/operating_state.md` on the VPS.
+
 Last updated: 2026-06-28
 
 This is the dedicated README for the Polymarket predictive engine. It documents where the system is now, what we learned, what is automated, and what must happen before any paper-risk step is considered.

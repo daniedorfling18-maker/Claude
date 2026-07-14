@@ -1,5 +1,10 @@
 # Polymarket Shadow Research Runbook
 
+> **Retired local runbook.** Do not execute these Windows/local commands. Since
+> 2026-07-14, all runtime, testing, dashboard, scheduler, model, collector, and
+> broker work is VPS-only under `AGENTS.md`. This file is retained as historical
+> implementation context.
+
 This runbook describes the current local operating flow for the Polymarket engine. It is intentionally shadow-first and fail-closed.
 
 ## Do not start the old local live loop

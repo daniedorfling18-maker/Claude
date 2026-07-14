@@ -79,6 +79,7 @@ def test_registered_workflow_is_minimal_self_hosted_and_secretless() -> None:
     assert "test_safety_invariants.py" in workflow
     assert "test_polymarket_vps_docker.py" in workflow
     assert "test_vps_checkout_update.py" in workflow
+    assert "test_vps_only_operating_docs.py" in workflow
     assert "ruff check ." in workflow
     assert "config-check --config polymarket_predictive_config.example.yaml" in workflow
 

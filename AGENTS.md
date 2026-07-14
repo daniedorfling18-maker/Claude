@@ -1,183 +1,121 @@
-# AGENTS.md — how to run and work in this repo
+# AGENTS.md — how to run and change this repository
 
-Canonical instructions for Codex and any coding agent. **Read this before suggesting how to run
-anything.** The short version: this repo is **local-first**; Docker is for deployment only.
+This is the canonical instruction file for every coding agent.
 
-## Current focus and operating state
+## Non-negotiable operating rule: VPS only
 
-Never infer the current operating state from this file. The canonical point-in-time report is generated
-at `outputs/performance/operating_state.md`, with structured data at
-`outputs/performance/operating_state.json` and the same rows in the dashboard. The control contract is
-documented in `docs/OPERATING_STATE.md`. Missing or stale generated evidence fails closed as `UNKNOWN`.
+All Polymarket and SuperBru runtime work runs on the Oracle VPS. The local
+workstation is a control surface for reading/editing code, Git operations, GitHub
+review, and SSH administration only.
 
-Regenerate the report after evidence or deployment changes:
+Do not start any of the following on the local workstation:
+
+- Python engines, collectors, model training, test suites, brokers, or watchdogs;
+- Docker or Compose stacks;
+- dashboard servers;
+- Windows scheduled tasks or any legacy local launcher.
+
+Run verification in an isolated VPS container or through the self-hosted ARM64
+required PR gate. Run production only through the guarded VPS deployment.
+
+## Authoritative operating state
+
+Never infer current state from prose or a Git checkout. WO-68 generates the
+point-in-time report from runtime evidence:
+
+```text
+/home/opc/Claude/outputs/performance/operating_state.md
+/home/opc/Claude/outputs/performance/operating_state.json
+```
+
+The dashboard serves the same evidence at:
+
+```text
+http://129.151.178.42:8765/
+```
+
+Missing or stale evidence is `UNKNOWN` and fails closed. The control contract is
+documented in `docs/OPERATING_STATE.md`.
+
+## VPS production contract
+
+- Repository: `/home/opc/Claude`
+- Compose file: `docker-compose.vps-paper.yml`
+- Long-running services: `polymarket-paper-live`, `polymarket-dashboard`,
+  `vps-ops-scheduler`, and `superbru-auto-pick-watchdog`
+- One production Compose stack only; never start a duplicate writer.
+- Secrets live only in the VPS `.env` or GitHub repository secrets. Never print,
+  copy into source, commit, or place them in telemetry.
+- Deploy from a reviewed, merged `main` with the
+  `Deploy Polymarket VPS Paper` workflow. That path preserves runtime ledgers,
+  stamps `PM_VPS_DEPLOYED_SHA`, runs post-deploy acceptance, and retains a
+  rollback revision. Do not replace it with an ad-hoc pull/rebuild.
+
+Read-only operator checks after SSHing to the VPS:
 
 ```bash
-python -m polymarket_predictive_engine.cli operating-state --config polymarket_predictive_config.example.yaml
+cd /home/opc/Claude
+docker compose -f docker-compose.vps-paper.yml ps
+docker stats --no-stream
 ```
 
-Repository safety and governance invariants still apply regardless of the generated status. Start with:
+## Safety and governance
 
-- `docs/POLYMARKET_RESEARCH_README.md`
-- `docs/POLYMARKET_CURRENT_STATE.md`
-- `docs/POLYMARKET_SHADOW_RESEARCH_RUNBOOK.md`
+- The system is shadow/dry-run/paper-gated by default. There is no approved
+  autonomous live order path.
+- WO-67 is architecture registration only and remains blocked until every P1-P5
+  precondition passes. Do not add even dormant executor, signer, cancellation,
+  credential-loading, or live-order code before that registered authorization.
+- Do not loosen alpha, liquidity, validation, cohort, maker, risk, stake, or
+  promotion controls to manufacture activity.
+- New features must be point-in-time. Labels may only become available at their
+  real observation time; validation is chronological and out-of-sample by market.
+- Forward evidence classes stay distinct: historical, modeled, reconstructed,
+  shadow, paper, and live-real-money evidence may not be relabelled upward.
+- Every new artifact is fail-closed and states
+  `paper_trading_invoked=false` and `live_trading_invoked=false` unless an
+  already-authorized paper path genuinely produced it.
+- Never expose private keys, API keys, passwords, passphrases, cookies, or `.env`
+  values in chat, logs, artifacts, tests, Git, or dashboard data.
 
-## Run model — local-first for development
+## Research focus
 
-Run plain Python for development, validation, and watching the research cycle. **Do not spin up Docker
-for local work.** Docker is only for deployment scenarios.
+The promotion-oriented research surface is frozen by
+`docs/EXPERIMENT_REGISTRY.md` to exactly three hypotheses:
 
-```bash
-pip install -e ".[dev]"                                  # one-time setup
-pytest                                                   # tests (or: python -m pytest -q)
-```
+1. sharp-anchor maker carry;
+2. persistent dutch-book consistency opportunities;
+3. structural-bias/smart-flow cohorts with positive executable CLV.
 
-### Current Polymarket workflow: shadow research cycle
+Crypto up/down is a timing/infrastructure diagnostic with negative forward
+evidence. Do not spend modelling or collection-priority work trying to revive it.
+Unregistered lanes are diagnostic/parked and cannot consume promotion-oriented
+work or capital.
 
-Use this scheduled-task workflow instead of starting the old local live loop:
+## Work-order and Git discipline
 
-```powershell
-# Install or refresh the Windows scheduled task.
-.\scripts\install_polymarket_shadow_research_task.ps1 `
-  -IntervalMinutes 15 `
-  -WebsocketSeconds 30
+- Read `docs/POLYMARKET_CODEX_WORK_ORDERS.md` and the relevant registered design
+  before changing code.
+- One work order per branch and PR. Do not combine WOs or add drive-by refactors.
+- Preserve unrelated/user changes in every checkout.
+- Use the required PR gate; do not merge red checks.
+- Run target tests and the full suite in an isolated ARM64/Python 3.11 VPS
+  checkout when the change warrants it. Record exact results in the PR/WO status.
+- Never use destructive Git commands to deal with runtime data.
 
-# Check latest status.
-Get-Content .\work\shadow_research_cycle_latest_status.json -Raw
-
-# Check detailed audit.
-Get-Content .\outputs\polymarket_model_governance\local_history_audit_report.md -Raw
-```
-
-Manual one-cycle run for diagnostics only:
-
-```powershell
-.\scripts\run_polymarket_shadow_research_cycle.ps1 `
-  -ConfigPath polymarket_predictive_config.example.yaml `
-  -WebsocketSeconds 30
-```
-
-This cycle performs broad liquidity discovery, websocket collection, normalisation, feature build,
-prediction, mispricing-alpha scoring, dry/governance signal generation, alpha-candidate shadow evidence,
-and the local-history audit. It explicitly writes `paper_trading_invoked=false` and
-`live_trading_invoked=false`.
-
-## Do not use the old Polymarket live-loop entry points as the default
-
-These entry points exist, but they are **not** the current safe default:
-
-```powershell
-powershell -ExecutionPolicy Bypass -File scripts/start_polymarket_local_live.ps1
-start_polymarket_bot.cmd
-python scripts/run_polymarket_local_live_loop.py --config polymarket_predictive_config.example.yaml --max-assets 20
-```
-
-Only use them after a human review confirms that the audit permits paper trading and the relevant family
-has positive closed/settled shadow evidence. Do not use them to bypass the shadow-research gate.
-
-The dashboard is at `http://127.0.0.1:8765/`. For visibility only, prefer the lightweight dashboard
-server task instead of the old local live loop:
-
-```powershell
-.\scripts\install_polymarket_dashboard_task.ps1 -StartNow
-```
-
-The dashboard runner serves existing dashboard artifacts only. It does not invoke paper trading, live
-trading, Docker, or the old local live loop, and it refuses to start when memory is at or above its
-guardrail. The current recommended research workflow remains the scheduled shadow/Strategy V2 cycle
-and file-based audit status.
-
-For lightweight local paper-broker/dashboard maintenance without heavy discovery/model scanning, use:
-
-```powershell
-.\scripts\install_polymarket_paper_maintenance_task.ps1 -IntervalMinutes 1
-```
-
-This task only runs the paper broker when fresh paper signals are pending or an open paper-confirmation
-probe has reached its fixed exit horizon; otherwise it only refreshes the static dashboard artifact.
-It is still paper-only and guarded by local memory pressure.
-
-## When to use Docker — and when NOT to
-
-**Do NOT use Docker for local development.** It is only worth it for:
-
-1. **Unattended 24/7 on a remote VPS** (`restart: unless-stopped` survives crashes/reboots).
-2. **Reproducible deploy** to a fresh host that lacks the right Python/deps.
-3. **Live trading from a non-geoblocked cloud region** (the US is geoblocked).
-
-None of those is local dev. If you *are* deploying with Docker:
-
-- Run **one** compose stack at a time (duplicate-writer rule — see `docs/POLYMARKET_DOCKER_SAFETY_AUDIT.md`).
-- **Never** run `docker-compose.polymarket-wide-raw.yml` whole (20 services ≈ 10 GB).
-- Every service caps at `mem_limit: ${PM_MEM_LIMIT:-512m}`; budget = (containers) × cap.
-- Full guidance: **`docs/RUNNING_LEAN.md`**.
-
-## Memory discipline
-
-- Prefer the local process over containers; don't run multiple stacks.
-- `runtime_resource_guard` in the config backs the bot off at high memory — lower
-  `max_memory_percent` (e.g. 85) if you keep hitting the ceiling. It throttles the bot only; it
-  cannot shrink Docker or Codex.
-- Keep one Codex session; stop stray background agents.
-
-## Safety / governance — do not weaken these
-
-- Everything is **shadow / dry-run / paper-gated by default**. The engine has **no approved live order path**.
-- Live trading remains gated four independent ways and must stay so: kill switch off
-  (`POLYMARKET_KILL_SWITCH` ≠ 1), `trading.mode: live`, `POLYMARKET_LIVE_TRADING=1`, and a human
-  approval file. The bot's `LiveExecutor` additionally needs `PM_MODE=live` +
-  `POLYMARKET_EXECUTE_LIVE=true` + a non-geoblocked IP + key + SDK. Keep dry-run.
-- No label leakage: point-in-time features only; validation is out-of-sample by market with bootstrap
-  CIs; trade/rule promotion requires **forward shadow evidence**, not in-sample backtest ROI.
-- Do not paste PowerShell launcher scripts into a shell. Run them with `-File` or by script path.
-- Do not loosen alpha thresholds, same-category gates, cohort-promotion gates, or family exclusions to
-  force activity.
-- Do not treat `unknown` or bad 5-minute crypto families as actionable just because they are liquid.
-- The research surface is frozen to exactly the three primary hypotheses in
-  `docs/EXPERIMENT_REGISTRY.md`. Unregistered lanes are diagnostic/parked and
-  cannot consume promotion-oriented modelling work or be promoted from old data.
-
-## Focus discipline — crypto up/down is FROZEN as a diagnostic (2026-07-05)
-
-Crypto up/down (all intervals: 5m, 15m, daily, event) is a **timing/infrastructure diagnostic
-only**. Its forward evidence is negative on every stream (shadow cohorts negative, CLV mean
-negative, replay negative, out-of-sample sweep failed) — it is priced off the same Binance feed the
-bot reads by faster participants, so there is no plausible retail edge there. See
-`docs/POLYMARKET_EDGE_STRATEGY_RESET.md`.
-
-Therefore, for any coding agent: **do NOT spend work on improving up/down "evidence targeting",
-up/down candidate selection, up/down collection prioritisation, or up/down model tuning.** That is
-motion without progress and it crowds out the only paths with a real edge prior. Effort belongs on,
-in order: (1) the sharp-anchor outright/advance path on markets Polymarket actually lists
-(WO-30 landed), (2) the dutch-book/consistency arb scanner, (3) CLV-measured structural-bias and
-smart-flow research. If a task's net effect is "the bot pays more attention to crypto up/down",
-stop — it is the wrong task.
-
-## Where things are
+## Stable references
 
 | Topic | File |
 |---|---|
-| Dedicated Polymarket README | `docs/POLYMARKET_RESEARCH_README.md` |
-| Current Polymarket state | `docs/POLYMARKET_CURRENT_STATE.md` |
-| Quant trading contract | `docs/POLYMARKET_QUANT_TRADING_CONTRACT.md` |
-| Quant-mode charter / agent work packages | `docs/POLYMARKET_QUANT_MODE_CHARTER.md` |
-| Shadow research runbook | `docs/POLYMARKET_SHADOW_RESEARCH_RUNBOOK.md` |
-| Running lean / memory | `docs/RUNNING_LEAN.md` |
-| Alpha approach + audit | `docs/ACTUARIAL_AUDIT_PREDICTIVE_VALUE.md` |
-| Independent signals (sharp odds, Deribit) | `docs/POLYMARKET_SHARP_ANCHOR.md` |
-| Governance + live approval | `docs/POLYMARKET_ACTUARIAL_MODEL_GOVERNANCE.md`, `docs/POLYMARKET_LIVE_TRADING_APPROVAL_CHECKLIST.md` |
-| Docker (deploy only) | `docs/LIVE_DUTCH_ARB_DOCKER.md`, `docs/ORACLE_VPS_SETUP.md` |
-| Engine commands | `src/polymarket_predictive_engine/cli.py` (`COMMANDS`) |
-| Shadow research cycle | `scripts/run_polymarket_shadow_research_cycle.ps1`, `scripts/install_polymarket_shadow_research_task.ps1` |
-| Agent lane / why-no-trade trace | `src/polymarket_predictive_engine/decision_trace.py` |
+| Generated-state contract | `docs/OPERATING_STATE.md` |
+| Work-order queue and constraints | `docs/POLYMARKET_CODEX_WORK_ORDERS.md` |
+| Experiment freeze | `docs/EXPERIMENT_REGISTRY.md` |
+| Quant contract | `docs/POLYMARKET_QUANT_TRADING_CONTRACT.md` |
+| Quant-mode charter | `docs/POLYMARKET_QUANT_MODE_CHARTER.md` |
+| Edge reset and exclusions | `docs/POLYMARKET_EDGE_STRATEGY_RESET.md` |
+| VPS setup/deployment | `docs/ORACLE_VPS_SETUP.md` |
+| Docker safety | `docs/POLYMARKET_DOCKER_SAFETY_AUDIT.md` |
+| Engine commands | `src/polymarket_predictive_engine/cli.py` |
 
-The repo has two parts: the **SuperBru score engine** (`src/superbru_score_engine`, see `README.md`)
-and the **Polymarket predictive engine** (`src/polymarket_predictive_engine`, current focus). Both run
-locally; neither requires Docker for development.
-
-## Before pushing
-
-- Run `pytest` where practical.
-- Keep changes leakage-safe and dry-run/shadow-safe.
-- Do not add a live order path or relax the gates above.
-- When changing Polymarket discovery, prefer broad opportunity discovery plus family-balanced target selection over single-family concentration.
+Legacy local launchers and runbooks remain only for repository history and
+regression coverage. Their presence is not permission to run them locally.

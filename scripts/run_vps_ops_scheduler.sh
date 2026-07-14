@@ -339,6 +339,9 @@ run_training_harvest() {
     # WO-36 maker-carry actuarial study: daily measurement (never trading) of
     # reward pots, band competition, and pick-off costs. Free public APIs.
     timeout "$HARVEST_TIMEOUT" python -m polymarket_predictive_engine.cli maker-carry-study --config "$CONFIG_PATH"
+    # WO-83: immediately bind the refreshed quote sheet to matched official
+    # books and public prints. Coverage is diagnostic and never changes M-B.
+    timeout "$PRINTS_TIMEOUT" python -m polymarket_predictive_engine.cli collect-maker-replay-data --config "$CONFIG_PATH"
     # WO-54 deep trade-print backfill: one-shot historical /trades pages for
     # maker-study candidates and the quote-sheet portfolio. Collection only.
     timeout "$HARVEST_TIMEOUT" python -m polymarket_predictive_engine.cli backfill-trade-prints --config "$CONFIG_PATH"
@@ -386,7 +389,7 @@ run_training_harvest() {
     timeout "$HARVEST_TIMEOUT" python -m polymarket_predictive_engine.cli anchor-ledgers --config "$CONFIG_PATH"
   ) >> "$LOG_FILE" 2>&1
   CODE=$?
-  stamp_status training_harvest "$CODE" "gamma resolved-markets backfill + clob price histories + wallet intelligence + maker-carry study + deep trade-print backfill + maker-fill replay + flow toxicity + decision policy + wallet reconciliation + true-net cost ledger + Stage-1 operator page + reconstructed CLV study + calibration-bias study + martingale drift scan + performance factsheet + investment policy statement + bounded corpus retention + governed paper audit refresh + generated operating state + ledger anchor"
+  stamp_status training_harvest "$CODE" "gamma resolved-markets backfill + clob price histories + wallet intelligence + maker-carry study + matched Tier-0 maker collection + deep trade-print backfill + maker-fill replay + flow toxicity + decision policy + wallet reconciliation + true-net cost ledger + Stage-1 operator page + reconstructed CLV study + calibration-bias study + martingale drift scan + performance factsheet + investment policy statement + bounded corpus retention + governed paper audit refresh + generated operating state + ledger anchor"
   log "training_harvest: exit $CODE"
 }
 
@@ -396,7 +399,12 @@ run_maker_study_intraday() {
   # distinct UTC days in maker_carry_study.py.
   TRAINING_AGE="$(seconds_since_stamp training_harvest)"
   log "maker_study_intraday: starting (training_harvest_age=${TRAINING_AGE}s)"
-  timeout "$HARVEST_TIMEOUT" python -m polymarket_predictive_engine.cli maker-carry-study --config "$CONFIG_PATH" >> "$LOG_FILE" 2>&1
+  (
+    set -e
+    timeout "$HARVEST_TIMEOUT" python -m polymarket_predictive_engine.cli maker-carry-study --config "$CONFIG_PATH"
+    timeout "$PRINTS_TIMEOUT" python -m polymarket_predictive_engine.cli collect-maker-replay-data --config "$CONFIG_PATH"
+    timeout "$PRINTS_TIMEOUT" python -m polymarket_predictive_engine.cli maker-fill-replay --config "$CONFIG_PATH"
+  ) >> "$LOG_FILE" 2>&1
   CODE=$?
   stamp_status maker_study_intraday "$CODE" "intraday maker-carry-study; training_harvest_age=${TRAINING_AGE}s; 11-13h offset guard"
   log "maker_study_intraday: exit $CODE"
@@ -410,6 +418,10 @@ run_trade_prints() {
   (
     set -e
     timeout "$PRINTS_TIMEOUT" python -m polymarket_predictive_engine.cli collect-trade-prints --config "$CONFIG_PATH"
+    # WO-83: exact quote-sheet coverage, independent of websocket discovery.
+    # A successful zero-print poll is evidence; a failed poll is a visible gap.
+    timeout "$PRINTS_TIMEOUT" python -m polymarket_predictive_engine.cli collect-maker-replay-data --config "$CONFIG_PATH"
+    timeout "$PRINTS_TIMEOUT" python -m polymarket_predictive_engine.cli maker-fill-replay --config "$CONFIG_PATH"
     # WO-34: negRisk sum-constraint scan rides the same 15-min cadence -
     # deviation persistence is only measurable at print-level frequency.
     timeout "$PRINTS_TIMEOUT" python -m polymarket_predictive_engine.cli scan-event-groups --config "$CONFIG_PATH"
@@ -426,7 +438,7 @@ run_trade_prints() {
     timeout "$PRINTS_TIMEOUT" python -m polymarket_predictive_engine.cli requote-alerts --config "$CONFIG_PATH"
   ) >> "$LOG_FILE" 2>&1
   CODE=$?
-  stamp_status trade_prints "$CODE" "data-api /trades + consistency scans + read-only WO-66 requote alerts"
+  stamp_status trade_prints "$CODE" "data-api /trades + exact Tier-0 maker book/print coverage + fill replay + consistency scans + read-only WO-66 requote alerts"
   log "trade_prints: exit $CODE"
 }
 

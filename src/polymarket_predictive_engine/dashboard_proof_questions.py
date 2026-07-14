@@ -232,6 +232,7 @@ def _overlay_script() -> str:
     const live = (maker || {{}}).live_test || {{}};
     const policy = (maker || {{}}).decision_policy || {{}};
     const requote = (maker || {{}}).requote_alerts || {{}};
+    const replay = (maker || {{}}).fill_replay || {{}};
     const requoteState = String(requote.alert_state || 'not_run');
     const requoteCls = requoteState === 'quotes_ok' ? 'good' : (requoteState === 'requote_advised' || requoteState === 'not_run' ? 'warn' : 'bad');
     const requoteBanner = `<div>${{proofBadge('WO-66: ' + requoteState, requoteCls)}} <strong>${{escProof(requote.headline || 'Read-only quote alert has not run yet.')}}</strong></div>`
@@ -244,12 +245,19 @@ def _overlay_script() -> str:
     const gates = study.maker_gates || {{}};
     const gateA = gates.M_A_carry_evidence || {{}};
     const gateB = gates.M_B_adverse_realism || {{}};
+    const replayState = String(replay.coverage_status || replay.status || 'not_run');
+    const replayCls = replayState === 'covered' ? 'good' : (replayState === 'insufficient_coverage' ? 'bad' : 'warn');
+    const replayCoverage = replay.coverage || {{}};
+    const haircut = replay.simulation_to_reality_haircut;
+    const haircutText = (haircut === null || haircut === undefined) ? '-' : String(haircut);
     const mv = String(gates.maker_verdict || 'insufficient_evidence');
     const mvCls = mv.startsWith('evidence_supported') ? 'good' : 'warn';
     let html = `<div class="sectionLead">Zero-fee quoting for daily liquidity rewards - measurement only, the system never places orders. Gates pre-registered ${{escProof(gates.registered_at_utc || '')}}.</div>`
       + requoteBanner
       + policyLine
-      + `<div>${{proofBadge(mv, mvCls)}} ${{proofBadge('M-A runs ' + (gateA.runs_at_or_above_target || 0) + '/' + (gateA.required_runs || 7), gateA.state === 'pass' ? 'good' : 'warn')}} ${{proofBadge('M-B markout ' + (gateB.state || 'pending'), gateB.state === 'pass' ? 'good' : 'warn')}}</div>`
+      + `<div>${{proofBadge(mv, mvCls)}} ${{proofBadge('M-A runs ' + (gateA.runs_at_or_above_target || 0) + '/' + (gateA.required_runs || 7), gateA.state === 'pass' ? 'good' : 'warn')}} ${{proofBadge('M-B markout ' + (gateB.state || 'pending'), gateB.state === 'pass' ? 'good' : 'warn')}} ${{proofBadge('Tier-0 ' + replayState, replayCls)}}</div>`
+      + `<div class="mono">Tier-0 confirmed-fill ratio ${{escProof(replay.confirmed_fill_ratio ?? '-')}} Â· replay windows ${{escProof(replayCoverage.windows_covered ?? 0)}}/${{escProof(replayCoverage.windows_simulated ?? 0)}} Â· simulation-to-reality haircut ${{escProof(haircutText)}}</div>`
+      + `<div class="muted">Haircut is reported next to M-B only. It is never auto-applied; any tightening requires a dated amendment and can only make the gate harder.</div>`
       + `<div class="mono">est net carry $${{escProof(study.portfolio_net_carry_usd_per_day ?? '-')}} /day (~$${{escProof(study.portfolio_net_carry_usd_per_month ?? '-')}} /month, UPPER BOUND) on $${{escProof(study.portfolio_capital_usd ?? '-')}} across ${{escProof(study.portfolio_markets ?? 0)}} market(s)</div>`;
     if (live.status === 'awaiting_wallet_address') {{
       html += `<div class="muted">Live-test scoreboard idle: no wallet configured (maker_live_test.wallet_address).</div>`;
@@ -273,6 +281,7 @@ def _overlay_script() -> str:
     const live = ((payload.maker_lane || {{}}).live_test) || {{}};
     const makerPolicy = ((payload.maker_lane || {{}}).decision_policy) || {{}};
     const makerRequote = ((payload.maker_lane || {{}}).requote_alerts) || {{}};
+    const makerReplay = ((payload.maker_lane || {{}}).fill_replay) || {{}};
     const mGates = study.maker_gates || {{}};
     const mA = mGates.M_A_carry_evidence || {{}};
     const alerts = ((payload.oversight_status || {{}}).alerts || []).length;
@@ -281,7 +290,7 @@ def _overlay_script() -> str:
     const rows = [
       ['Taker verdict', `${{vState}} - Gate A units ${{gateA.independent_market_units ?? 0}}/${{gateA.minimum_final_samples ?? 12}} (${{gateA.settled_finals_total ?? 0}} finals settled)`, vCls],
       ['Maker lane', study.status
-        ? `alert ${{makerRequote.alert_state || 'not_run'}} - policy ${{makerPolicy.indicated_action || 'not_run'}} - est $${{study.portfolio_net_carry_usd_per_day ?? '-'}} /day (upper bound) - gate M-A day ${{mA.runs_at_or_above_target ?? 0}}/${{mA.required_runs ?? 7}}`
+        ? `alert ${{makerRequote.alert_state || 'not_run'}} - Tier-0 ${{makerReplay.coverage_status || makerReplay.status || 'not_run'}} - policy ${{makerPolicy.indicated_action || 'not_run'}} - est $${{study.portfolio_net_carry_usd_per_day ?? '-'}} /day (upper bound) - gate M-A day ${{mA.runs_at_or_above_target ?? 0}}/${{mA.required_runs ?? 7}}`
         : 'study has NOT run on this box yet - force it or wait for the daily harvest',
         ['pull_quotes_now', 'STOP'].includes(String(makerRequote.alert_state || '')) ? 'bad' : (study.status ? 'good' : 'bad')],
       ['Live money test', live.status === 'ok' ? `${{live.scoreboard}} - rewards $${{live.rewards_usd_total ?? 0}} / inventory PnL $${{live.inventory_pnl_usd ?? 0}}`

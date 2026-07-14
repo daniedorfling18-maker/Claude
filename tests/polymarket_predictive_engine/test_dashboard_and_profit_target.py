@@ -3368,10 +3368,13 @@ def test_dashboard_carries_profit_verdict_and_html_panel(tmp_path):
         "live_test": {},
         "decision_policy": {},
         "requote_alerts": {},
+        "fill_replay": {},
     }
     assert "Maker lane (WO-36)" in html
     assert "makerLane" in html
     assert "WO-66:" in html
+    assert "Tier-0 confirmed-fill ratio" in html
+    assert "never auto-applied" in html
     # 2026-07-10 focus mode: a decision summary leads the page and the
     # overlay collapses every non-decision section client-side.
     assert "Today's decisions" in html

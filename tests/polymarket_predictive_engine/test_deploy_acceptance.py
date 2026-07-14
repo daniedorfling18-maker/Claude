@@ -108,6 +108,8 @@ def _seed_acceptance(
                 name: {"exit_code": 0}
                 for name in (
                     "maker_carry_study",
+                    "collect_maker_replay_data",
+                    "maker_fill_replay",
                     "decision_policy",
                     "requote_alerts",
                     "reconcile_wallet",
@@ -121,6 +123,23 @@ def _seed_acceptance(
     write_json(
         cfg.output_root / "maker_carry" / "maker_carry_study.json",
         {"generated_at_utc": "2026-07-13T12:00:30Z", "portfolio": [ticket]},
+    )
+    write_json(
+        cfg.output_root / "maker_carry" / "maker_replay_collection.json",
+        {
+            "generated_at_utc": "2026-07-13T12:00:40Z",
+            "status": "ok",
+            "market_windows": [
+                {
+                    "condition_id": "0xmarket",
+                    "asset_id": "token-yes",
+                    "collected_at_utc": "2026-07-13T12:00:40Z",
+                    "book_poll_status": "ok",
+                    "trade_poll_status": "ok",
+                    "covered": True,
+                }
+            ],
+        },
     )
     alert = (
         [{"state": requote_state, "rule": requote_rule, "message": "registered blocker"}]
@@ -165,6 +184,7 @@ def test_registered_contracts_are_satisfiable_on_synthetic_fixtures() -> None:
         "quote_sheet_to_requote_alerts",
         "scheduler_jobs_to_status_alerting",
         "reconciliation_legs_to_nav",
+        "maker_replay_collection_to_fill_replay",
         "executor_runtime_to_ops_status",
     ]
     assert validate_contract_declarations() == []
@@ -190,6 +210,26 @@ def test_registered_contracts_are_satisfiable_on_synthetic_fixtures() -> None:
     assert _reconciliation_state(
         reconciliation["internal"], reconciliation["data_api"], reconciliation["onchain"], threshold=0.01
     )["reconciliation_status"] == "clean"
+    maker_replay_fixture = {
+        "portfolio": [_ticket()],
+        "market_windows": [
+            {
+                "condition_id": "0xmarket",
+                "asset_id": "token-yes",
+                "collected_at_utc": "2026-07-13T12:00:00Z",
+                "book_poll_status": "ok",
+                "trade_poll_status": "ok",
+                "covered": True,
+            }
+        ],
+    }
+    assert validate_contract_fixture(
+        "maker_replay_collection_to_fill_replay", maker_replay_fixture
+    )["status"] == "PASS"
+    maker_replay_fixture["market_windows"] = []
+    assert validate_contract_fixture(
+        "maker_replay_collection_to_fill_replay", maker_replay_fixture
+    )["status"] == "FAIL"
     executor_fixture = {
         "execution_ledger": [
             {
@@ -285,6 +325,30 @@ def test_real_data_deploy_acceptance_passes_and_records_rollback_ref(tmp_path: P
     assert result["paper_trading_invoked"] is False
     assert result["live_trading_invoked"] is False
     assert read_json(cfg.output_root / "ops_scheduler" / "deploy_acceptance.json")["status"] == "PASS"
+
+
+def test_deploy_acceptance_fails_when_maker_replay_collection_misses_sheet_market(tmp_path: Path) -> None:
+    cfg = _cfg(tmp_path)
+    _seed_acceptance(cfg)
+    write_json(
+        cfg.output_root / "maker_carry" / "maker_replay_collection.json",
+        {
+            "generated_at_utc": "2026-07-13T12:00:40Z",
+            "status": "failed",
+            "market_windows": [],
+        },
+    )
+
+    result = build_deploy_acceptance(cfg, expected_deploy_sha="newsha", as_of=AS_OF)
+
+    assert result["status"] == "FAIL"
+    check = next(row for row in result["checks"] if row["id"] == "maker_replay_exact_portfolio_collection")
+    assert check["status"] == "FAIL"
+    assert check["defects"]
+    assert result["notification"]["notify"] is True
+    assert result["paper_trading_invoked"] is False
+    assert result["live_trading_invoked"] is False
+    assert read_json(cfg.output_root / "ops_scheduler" / "deploy_acceptance.json")["status"] == "FAIL"
 
 
 def test_deploy_acceptance_fails_when_governance_docs_are_not_mounted(tmp_path: Path) -> None:

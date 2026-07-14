@@ -1,13 +1,12 @@
 # Polymarket Codex Work Orders
 
-Last updated: 2026-07-14 (WO-80, WO-82, WO-81 landed. NEW BUILDABLE:
-**WO-84** (reconciliation bridge-deposit blindness + watchdog coverage gap) and **WO-83** (make the Tier-0 maker fill-replay functional); it is currently
-blind (`realism_ratio=0.0` from a book-poller coverage gap), so the maker
-lane's central "upper bound" claim is untested. Free, diagnostic, gates
-untouched. WO-33 remains pending a registered leakage review, with WO-34/35
-model wiring bound to that review and the three-hypothesis freeze. WO-48 and
-WO-67 are blocked; WO-70 and WO-72 are deferred; WO-76 is registration-only.
-Crypto up/down is frozen as a diagnostic — see `AGENTS.md`.)
+Last updated: 2026-07-14 (WO-80, WO-82, WO-81 landed; WO-83 implemented in
+PR #203. NEW BUILDABLE: **WO-84** (reconciliation bridge-deposit blindness +
+watchdog coverage gap). WO-33 remains pending a registered leakage review,
+with WO-34/35 model wiring bound to that review and the three-hypothesis
+freeze. WO-48 and WO-67 are blocked; WO-70 and WO-72 are deferred; WO-76 is
+registration-only. Crypto up/down is frozen as a diagnostic — see
+`AGENTS.md`.)
 
 Mechanical, file-level implementation instructions for coding agents (Codex or any other code
 changer). The architecture and priorities live in `docs/POLYMARKET_QUANT_MODE_CHARTER.md`; this file
@@ -2900,6 +2899,19 @@ allowlist rejects an unknown status.
 
 ## WO-83 — Make Tier-0 maker validation functional (fill-replay coverage)
 
+Status: IMPLEMENTED by Codex on 2026-07-14 in PR #203. CLI
+`collect-maker-replay-data` now polls the documented official CLOB book and
+public trade prints for exactly the current quote-sheet markets on the
+15-minute monitoring cadence, recording matched point-in-time windows in
+`outputs/maker_carry/maker_replay_collection_windows.csv`. CLI
+`maker-fill-replay` reports per-market coverage, last-in-queue confirmed-fill
+ratios, 5/15/60-minute markout distributions, a seven-day/prior regime cut,
+and a reporting-only tighten-only haircut in
+`outputs/maker_carry/maker_fill_replay.json`. Nonzero simulated opportunities
+with no 5-minute coverage emit `insufficient_coverage`; persistent blindness
+is registered with WO-78. M-A/M-B/M-C, sizing, paper/live permissions, and all
+order paths are unchanged.
+
 The whole maker case rests on simulated net carry that the honesty_clause
 itself calls an UPPER BOUND. WO-40 `maker_fill_replay` exists to test that
 bound against reality — but on 2026-07-13 it reported `realism_ratio=0.0`,
@@ -3163,9 +3175,9 @@ contains no paper/live broker, signing, order, gate, model, or sizing path.
 
 ## Current queue for Codex (reconciled 2026-07-14)
 
-**Next buildable: WO-84** (audit fixes) and **WO-83** (Tier-0 maker validation — restore fill-replay
-coverage so the maker "upper bound" is finally tested; free, diagnostic,
-tighten-only). After WO-80/82/81 landed it is the one authorized build.
+**Next buildable: WO-84** (audit fixes). WO-83 is implemented in PR #203.
+Do not infer follow-on capital, gate, model, or executor work from WO-83's
+diagnostics; the queue below remains binding.
 
 - **Pending review, not build permission:** WO-33. WO-34/35 model wiring shares
   its leakage-review dependency and must stay inside H1-H3. H2/H3 still need

@@ -151,13 +151,14 @@ maker_fill_replay:
   enabled: true
   max_markets: 10
   replay_days: 7
-  # 2026-07-10 WO-44: replay official CLOB orderbook-history alongside the
-  # recorded websocket archive when available. Official endpoint failures
-  # degrade to the archive source; this remains measurement-only.
+  # 2026-07-14 WO-83: repeated point-in-time snapshots from the documented
+  # official CLOB /book(s) API form the validation history. The archive is
+  # diagnostic only and cannot mask missing official-book coverage.
   book_source: both
-  official_book_limit: 1000
-  official_book_max_pages_per_market: 20
   max_official_book_rows: 200000
+  max_collection_window_rows: 200000
+  max_book_state_lag_seconds: 1800
+  regime_days: 7
 
 # 2026-07-10 WO-49: flow-toxicity conditioning for maker quote sheets.
 # Measurement only; does not alter adverse charges, gates, sizing, or orders.
@@ -248,6 +249,7 @@ degraded_state_watchdog:
   scheduler_nonzero_max_consecutive_cycles: 0
   wallet_partial_max_consecutive_harvests: 2
   operating_unknown_max_consecutive_cycles: 0
+  maker_replay_insufficient_coverage_max_consecutive_cycles: 3
 
 # 2026-07-13 WO-79: reporting-only post-deploy acceptance. The VPS deploy
 # runner invokes existing real-data producers and this component checks their

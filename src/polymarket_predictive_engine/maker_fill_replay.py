@@ -20,7 +20,8 @@ from typing import Any, Iterable
 import requests
 
 from .config import EngineConfig, load_config
-from .utils import now_utc, parse_timestamp, read_csv_rows, read_json, safe_float, write_json
+from .trade_print_collector import collect_maker_portfolio_trade_prints
+from .utils import now_utc, parse_timestamp, read_csv_rows, read_json, safe_float, write_csv, write_json
 
 DEFAULT_CLOB_BASE_URL = "https://clob.polymarket.com"
 
@@ -29,6 +30,7 @@ OFFICIAL_BOOK_FIELDS = [
     "condition_id",
     "asset_id",
     "source_timestamp",
+    "observation_timestamp",
     "hash",
     "best_bid",
     "best_ask",
@@ -38,6 +40,22 @@ OFFICIAL_BOOK_FIELDS = [
     "bids_json",
     "asks_json",
     "collected_at_utc",
+]
+
+COLLECTION_WINDOW_FIELDS = [
+    "window_id",
+    "condition_id",
+    "asset_id",
+    "portfolio_generated_at_utc",
+    "collected_at_utc",
+    "quote_bid_price",
+    "quote_ask_price",
+    "quote_size_shares",
+    "book_poll_status",
+    "book_snapshot_rows",
+    "trade_poll_status",
+    "trade_prints_returned",
+    "covered",
 ]
 
 
@@ -51,9 +69,12 @@ def _settings(cfg: EngineConfig) -> dict[str, Any]:
         "clob_base_url": DEFAULT_CLOB_BASE_URL,
         "request_timeout_seconds": 20,
         "request_pause_seconds": 0.1,
-        "official_book_limit": 1000,
-        "official_book_max_pages_per_market": 20,
         "max_official_book_rows": 200000,
+        "max_collection_window_rows": 200000,
+        # Twice the 15-minute collection cadence: observations outside this
+        # envelope are missing coverage, not a licence to reuse a stale book.
+        "max_book_state_lag_seconds": 1800,
+        "regime_days": 7,
     }
     merged.update({k: v for k, v in raw.items() if v is not None})
     return merged
@@ -110,7 +131,11 @@ def _book_states_from_rows(rows: list[dict[str, Any]], token_ids: set[str], repl
         token_id = str(row.get("asset_id") or row.get("token_id") or "").strip()
         if token_id not in token_ids:
             continue
-        stamp = _stamp(row.get("source_timestamp") or row.get("collected_at_utc"))
+        # Official point snapshots retain the venue's last-change timestamp,
+        # but replay coverage is bounded by when this system observed the book.
+        stamp = _stamp(
+            row.get("observation_timestamp") or row.get("source_timestamp") or row.get("collected_at_utc")
+        )
         bid = safe_float(row.get("best_bid"))
         ask = safe_float(row.get("best_ask"))
         midpoint = safe_float(row.get("midpoint"))
@@ -247,6 +272,7 @@ def _best_level(levels: list[dict[str, Any]], *, side: str) -> tuple[float | Non
 
 def _official_row(snapshot: dict[str, Any], *, condition_id: str, token_id: str, collected_at: str) -> dict[str, Any] | None:
     stamp = _stamp(snapshot.get("timestamp") or snapshot.get("t") or snapshot.get("createdAt") or snapshot.get("created_at"))
+    observation_stamp = _stamp(collected_at)
     bids = _levels(snapshot.get("bids"))
     asks = _levels(snapshot.get("asks"))
     bid, bid_size = _best_level(bids, side="bid")
@@ -257,6 +283,7 @@ def _official_row(snapshot: dict[str, Any], *, condition_id: str, token_id: str,
         "condition_id": condition_id,
         "asset_id": str(snapshot.get("asset_id") or snapshot.get("token_id") or snapshot.get("market") or token_id),
         "source_timestamp": stamp,
+        "observation_timestamp": observation_stamp if observation_stamp is not None else stamp,
         "hash": str(snapshot.get("hash") or snapshot.get("book_hash") or f"{int(stamp)}:{bid}:{ask}"),
         "best_bid": bid,
         "best_ask": ask,
@@ -269,7 +296,26 @@ def _official_row(snapshot: dict[str, Any], *, condition_id: str, token_id: str,
     }
 
 
+def _books_by_token(payload: Any, token_ids: list[str]) -> dict[str, dict[str, Any]]:
+    snapshots = _payload_snapshots(payload)
+    books: dict[str, dict[str, Any]] = {}
+    for index, snapshot in enumerate(snapshots):
+        token_id = str(snapshot.get("asset_id") or snapshot.get("token_id") or "").strip()
+        if not token_id and index < len(token_ids):
+            token_id = token_ids[index]
+        if token_id:
+            books[token_id] = snapshot
+    return books
+
+
 def snapshot_official_books(cfg: EngineConfig) -> dict[str, Any]:
+    """Append one current official CLOB book for every quote-sheet market.
+
+    WO-83 deliberately uses the documented current ``/book``/``/books`` API.
+    Repeated cadence snapshots create the history; an undocumented historical
+    endpoint must not be treated as coverage.
+    """
+
     settings = _settings(cfg)
     out_root = cfg.output_root / "maker_carry"
     summary_path = out_root / "official_book_snapshot.json"
@@ -277,7 +323,7 @@ def snapshot_official_books(cfg: EngineConfig) -> dict[str, Any]:
     summary: dict[str, Any] = {
         "status": "disabled",
         "generated_at_utc": generated_at,
-        "work_order": "WO-44",
+        "work_order": "WO-44/WO-83",
         "paper_trading_invoked": False,
         "live_trading_invoked": False,
     }
@@ -289,82 +335,330 @@ def snapshot_official_books(cfg: EngineConfig) -> dict[str, Any]:
         maker_summary = {}
     portfolio = _portfolio(maker_summary, _candidate_map(cfg), int(settings["max_markets"]))
     if not portfolio:
-        summary.update({"status": "no_portfolio", "markets_polled": 0, "rows_added": 0, "errors": []})
+        summary.update(
+            {
+                "status": "no_portfolio",
+                "markets_polled": 0,
+                "rows_added": 0,
+                "market_polls": [],
+                "errors": [],
+            }
+        )
         write_json(summary_path, summary)
         return summary
 
     base = str(settings["clob_base_url"]).rstrip("/")
     timeout = float(settings["request_timeout_seconds"])
-    pause = max(float(settings["request_pause_seconds"]), 0.1)
-    limit = int(settings["official_book_limit"])
-    max_pages = int(settings["official_book_max_pages_per_market"])
-    start_base = int(_stamp(generated_at) or time.time()) - int(float(settings["replay_days"]) * 86400)
+    pause = max(float(settings["request_pause_seconds"]), 0.0)
+    token_ids = [str(entry["token_id"]) for entry in portfolio]
+    books: dict[str, dict[str, Any]] = {}
+    batch_error = ""
+    if len(token_ids) > 1:
+        try:
+            response = requests.post(
+                f"{base}/books",
+                json=[{"token_id": token_id} for token_id in token_ids],
+                timeout=timeout,
+            )
+            response.raise_for_status()
+            books.update(_books_by_token(response.json(), token_ids))
+        except Exception as exc:
+            batch_error = f"{type(exc).__name__}: {exc}"
+
+    missing = [token_id for token_id in token_ids if token_id not in books]
+    fetch_errors: dict[str, str] = {}
+    for index, token_id in enumerate(missing):
+        try:
+            response = requests.get(f"{base}/book", params={"token_id": token_id}, timeout=timeout)
+            response.raise_for_status()
+            payload = response.json()
+            if isinstance(payload, dict):
+                books[token_id] = payload
+            else:
+                fetch_errors[token_id] = "invalid_book_payload"
+        except Exception as exc:
+            fetch_errors[token_id] = f"{type(exc).__name__}: {exc}"
+        if pause and index < len(missing) - 1:
+            time.sleep(max(pause, 0.1))
+
     rows_added = 0
-    errors: list[str] = []
     files_written: list[str] = []
-    for entry in portfolio[: int(settings["max_markets"])]:
-        condition_id = entry["condition_id"]
-        token_id = entry["token_id"]
+    market_polls: list[dict[str, Any]] = []
+    errors: list[str] = []
+    for entry in portfolio:
+        condition_id = str(entry["condition_id"])
+        token_id = str(entry["token_id"])
+        snapshot = books.get(token_id)
+        error = fetch_errors.get(token_id, "")
+        row = (
+            _official_row(snapshot, condition_id=condition_id, token_id=token_id, collected_at=generated_at)
+            if isinstance(snapshot, dict)
+            else None
+        )
+        if row is None:
+            error = error or "invalid_or_empty_book"
+            errors.append(f"{condition_id}: {error}")
+            market_polls.append(
+                {
+                    "condition_id": condition_id,
+                    "asset_id": token_id,
+                    "status": "failed",
+                    "rows_added": 0,
+                    "error": error,
+                }
+            )
+            continue
+
         path = out_root / "official_books" / f"{condition_id}.csv.gz"
         existing = _read_csv_any(path)
-        new_rows: list[dict[str, Any]] = []
-        next_start = start_base
-        for page in range(max_pages):
-            try:
-                response = requests.get(
-                    f"{base}/orderbook-history",
-                    params={"asset_id": token_id, "startTs": next_start, "limit": limit},
-                    timeout=timeout,
-                )
-                response.raise_for_status()
-                snapshots = _payload_snapshots(response.json())
-            except Exception as exc:
-                errors.append(f"{condition_id}: {type(exc).__name__}: {exc}")
-                break
-            parsed = [
-                row
-                for snapshot in snapshots
-                if (row := _official_row(snapshot, condition_id=condition_id, token_id=token_id, collected_at=generated_at)) is not None
-            ]
-            if not parsed:
-                break
-            new_rows.extend(parsed)
-            max_stamp = max(float(row["source_timestamp"]) for row in parsed)
-            if len(parsed) < limit or max_stamp < next_start:
-                break
-            next_start = int(max_stamp) + 1
-            time.sleep(pause)
-        if not existing and not new_rows:
-            continue
+        existing_keys = {
+            (
+                str(item.get("observation_timestamp") or item.get("source_timestamp") or ""),
+                str(item.get("hash") or ""),
+            )
+            for item in existing
+        }
         dedup: dict[tuple[str, str], dict[str, Any]] = {}
-        for row in [*existing, *new_rows]:
-            key = (str(row.get("source_timestamp") or ""), str(row.get("hash") or ""))
+        for item in [*existing, row]:
+            key = (
+                str(item.get("observation_timestamp") or item.get("source_timestamp") or ""),
+                str(item.get("hash") or ""),
+            )
             if all(key):
-                dedup[key] = row
-        combined = sorted(dedup.values(), key=lambda row: safe_float(row.get("source_timestamp")) or 0.0)
+                dedup[key] = item
+        combined = sorted(
+            dedup.values(),
+            key=lambda item: safe_float(item.get("observation_timestamp"))
+            or safe_float(item.get("source_timestamp"))
+            or 0.0,
+        )
         max_rows = int(settings["max_official_book_rows"])
         if max_rows > 0 and len(combined) > max_rows:
             combined = combined[-max_rows:]
         _write_gzip_csv(path, combined, OFFICIAL_BOOK_FIELDS)
-        rows_added += len(new_rows)
+        added = int((str(row["observation_timestamp"]), str(row["hash"])) not in existing_keys)
+        rows_added += added
         files_written.append(str(path))
+        market_polls.append(
+            {
+                "condition_id": condition_id,
+                "asset_id": token_id,
+                "status": "ok",
+                "rows_added": added,
+                "error": "",
+            }
+        )
+
+    successful = sum(row["status"] == "ok" for row in market_polls)
+    status = "ok" if successful == len(portfolio) else ("partial" if successful else "failed")
     summary.update(
         {
-            "status": "ok" if files_written or not errors else "failed",
-            "markets_polled": len(portfolio[: int(settings["max_markets"])]),
+            "status": status,
+            "markets_polled": len(portfolio),
+            "markets_succeeded": successful,
             "rows_added": rows_added,
             "files_written": files_written,
+            "market_polls": market_polls,
+            "batch_fallback_reason": batch_error,
             "errors": errors[:10],
-            "note": "Official orderbook-history snapshots for maker-fill replay only. No orders or gates are touched.",
+            "note": (
+                "Current official CLOB books for exactly the maker quote-sheet portfolio. "
+                "Repeated point-in-time snapshots form the replay archive; no orders or gates are touched."
+            ),
         }
     )
     write_json(summary_path, summary)
     return summary
 
 
+def collect_maker_replay_data(cfg: EngineConfig) -> dict[str, Any]:
+    """Collect matched book/print observations for the current quote sheet."""
+
+    settings = _settings(cfg)
+    out_root = cfg.output_root / "maker_carry"
+    summary_path = out_root / "maker_replay_collection.json"
+    ledger_path = out_root / "maker_replay_collection_windows.csv"
+    generated_at = now_utc()
+    maker_summary = read_json(out_root / "maker_carry_study.json", default={}) or {}
+    if not isinstance(maker_summary, dict):
+        maker_summary = {}
+    portfolio = _portfolio(maker_summary, _candidate_map(cfg), int(settings["max_markets"]))
+    base: dict[str, Any] = {
+        "status": "disabled",
+        "generated_at_utc": generated_at,
+        "work_order": "WO-83",
+        "portfolio_generated_at_utc": str(maker_summary.get("generated_at_utc") or ""),
+        "paper_trading_invoked": False,
+        "live_trading_invoked": False,
+    }
+    if str(settings.get("enabled", True)).strip().lower() in {"0", "false", "no"}:
+        write_json(summary_path, base)
+        return base
+    if not portfolio:
+        payload = {**base, "status": "no_portfolio", "markets_polled": 0, "windows_covered": 0}
+        write_json(summary_path, payload)
+        return payload
+
+    book_summary = snapshot_official_books(cfg)
+    trade_summary = collect_maker_portfolio_trade_prints(cfg)
+    books = {
+        str(row.get("condition_id") or ""): row
+        for row in (book_summary.get("market_polls") or [])
+        if isinstance(row, dict)
+    }
+    prints = {
+        str(row.get("condition_id") or ""): row
+        for row in (trade_summary.get("market_polls") or [])
+        if isinstance(row, dict)
+    }
+    rows: list[dict[str, Any]] = []
+    for entry in portfolio:
+        condition_id = str(entry["condition_id"])
+        book = books.get(condition_id, {})
+        trade = prints.get(condition_id, {})
+        covered = book.get("status") == "ok" and trade.get("status") == "ok"
+        rows.append(
+            {
+                "window_id": generated_at,
+                "condition_id": condition_id,
+                "asset_id": entry["token_id"],
+                "portfolio_generated_at_utc": str(maker_summary.get("generated_at_utc") or ""),
+                "collected_at_utc": generated_at,
+                "quote_bid_price": entry.get("quote_bid_price", ""),
+                "quote_ask_price": entry.get("quote_ask_price", ""),
+                "quote_size_shares": entry.get("quote_size_shares", ""),
+                "book_poll_status": str(book.get("status") or "not_observed"),
+                "book_snapshot_rows": int(safe_float(book.get("rows_added")) or 0),
+                "trade_poll_status": str(trade.get("status") or "not_observed"),
+                "trade_prints_returned": int(safe_float(trade.get("prints_returned")) or 0),
+                "covered": covered,
+            }
+        )
+
+    existing = read_csv_rows(ledger_path)
+    dedup = {
+        (str(row.get("window_id") or ""), str(row.get("condition_id") or "")): row
+        for row in [*existing, *rows]
+        if row.get("window_id") and row.get("condition_id")
+    }
+    combined = sorted(dedup.values(), key=lambda row: str(row.get("collected_at_utc") or ""))
+    max_rows = int(settings["max_collection_window_rows"])
+    if max_rows > 0 and len(combined) > max_rows:
+        combined = combined[-max_rows:]
+    write_csv(ledger_path, combined, fieldnames=COLLECTION_WINDOW_FIELDS)
+    covered_count = sum(bool(row["covered"]) for row in rows)
+    payload = {
+        **base,
+        "status": "ok" if covered_count == len(rows) else ("partial" if covered_count else "failed"),
+        "markets_polled": len(rows),
+        "windows_simulated": len(rows),
+        "windows_covered": covered_count,
+        "coverage_ratio": round(covered_count / len(rows), 6) if rows else None,
+        "market_windows": rows,
+        "book_snapshot": book_summary,
+        "trade_print_collection": trade_summary,
+        "collection_ledger": str(ledger_path),
+        "note": "Matched official-book and public-print polls only; a successful zero-print response is covered.",
+    }
+    write_json(summary_path, payload)
+    return payload
+
+
 def _mean(values: Iterable[float]) -> float | None:
     vals = list(values)
     return round(sum(vals) / len(vals), 6) if vals else None
+
+
+def _percentile(values: Iterable[float], quantile: float) -> float | None:
+    ordered = sorted(float(value) for value in values)
+    if not ordered:
+        return None
+    position = (len(ordered) - 1) * quantile
+    lower = int(position)
+    upper = min(lower + 1, len(ordered) - 1)
+    weight = position - lower
+    return round(ordered[lower] * (1.0 - weight) + ordered[upper] * weight, 6)
+
+
+def _distribution(values: Iterable[float]) -> dict[str, Any]:
+    observed = [float(value) for value in values]
+    return {
+        "count": len(observed),
+        "mean": _mean(observed),
+        "min": round(min(observed), 6) if observed else None,
+        "p25": _percentile(observed, 0.25),
+        "median": _percentile(observed, 0.5),
+        "p75": _percentile(observed, 0.75),
+        "p95": _percentile(observed, 0.95),
+        "max": round(max(observed), 6) if observed else None,
+    }
+
+
+def _truthy(value: Any) -> bool:
+    return value is True or str(value).strip().lower() in {"1", "true", "yes"}
+
+
+def _coverage_slice(rows: list[dict[str, Any]], portfolio: list[dict[str, Any]]) -> dict[str, Any]:
+    by_condition: dict[str, dict[str, Any]] = {
+        str(entry["condition_id"]): {
+            "condition_id": str(entry["condition_id"]),
+            "asset_id": str(entry["token_id"]),
+            "question": str(entry.get("question") or ""),
+            "windows_simulated": 0,
+            "windows_covered": 0,
+        }
+        for entry in portfolio
+    }
+    for row in rows:
+        condition_id = str(row.get("condition_id") or "")
+        target = by_condition.get(condition_id)
+        if target is None:
+            continue
+        target["windows_simulated"] += 1
+        target["windows_covered"] += int(_truthy(row.get("covered")))
+    per_market = []
+    for target in by_condition.values():
+        simulated = int(target["windows_simulated"])
+        covered = int(target["windows_covered"])
+        target["coverage_ratio"] = round(covered / simulated, 6) if simulated else None
+        per_market.append(target)
+    simulated_total = sum(int(row["windows_simulated"]) for row in per_market)
+    covered_total = sum(int(row["windows_covered"]) for row in per_market)
+    if simulated_total == 0:
+        status = "not_observed"
+    elif covered_total == simulated_total:
+        status = "covered"
+    elif covered_total:
+        status = "partial"
+    else:
+        status = "insufficient_coverage"
+    return {
+        "status": status,
+        "windows_simulated": simulated_total,
+        "windows_covered": covered_total,
+        "coverage_ratio": round(covered_total / simulated_total, 6) if simulated_total else None,
+        "per_market": per_market,
+    }
+
+
+def _collection_coverage(cfg: EngineConfig, portfolio: list[dict[str, Any]], regime_days: float) -> dict[str, Any]:
+    rows = read_csv_rows(cfg.output_root / "maker_carry" / "maker_replay_collection_windows.csv")
+    current = {str(entry["condition_id"]) for entry in portfolio}
+    rows = [row for row in rows if str(row.get("condition_id") or "") in current]
+    stamps = [stamp for row in rows if (stamp := _stamp(row.get("collected_at_utc"))) is not None]
+    cutoff = max(stamps) - regime_days * 86400.0 if stamps else None
+    recent = [row for row in rows if cutoff is not None and (_stamp(row.get("collected_at_utc")) or 0.0) >= cutoff]
+    prior = [row for row in rows if cutoff is not None and (_stamp(row.get("collected_at_utc")) or 0.0) < cutoff]
+    return {
+        **_coverage_slice(rows, portfolio),
+        "regime_cut": {
+            "cutoff_utc": (
+                time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(cutoff)) if cutoff is not None else None
+            ),
+            "last_7_days": _coverage_slice(recent, portfolio),
+            "prior_to_last_7_days": _coverage_slice(prior, portfolio),
+        },
+    }
 
 
 def _study_charge(cfg: EngineConfig, portfolio: list[dict[str, Any]]) -> float:
@@ -385,39 +679,94 @@ def _replay_against_states(
     trades: list[dict[str, Any]],
     portfolio: list[dict[str, Any]],
     study_charge: float,
+    max_state_lag_seconds: float,
+    start_stamp: float | None = None,
+    end_stamp: float | None = None,
 ) -> dict[str, Any]:
     portfolio_by_token = {row["token_id"]: row for row in portfolio}
+    coverage_by_token: dict[str, dict[str, Any]] = {
+        str(row["token_id"]): {
+            "condition_id": str(row["condition_id"]),
+            "asset_id": str(row["token_id"]),
+            "question": str(row.get("question") or ""),
+            "simulated_fill_opportunities": 0,
+            "last_in_queue_evaluable_opportunities": 0,
+            "confirmed_fills": 0,
+            "windows_simulated": 0,
+            "windows_covered": 0,
+            "by_horizon": {
+                f"{horizon}m": {"windows_simulated": 0, "windows_covered": 0}
+                for horizon in HORIZONS_MINUTES
+            },
+        }
+        for row in portfolio
+    }
     fills: list[dict[str, Any]] = []
+    simulated_fill_opportunities = 0
+    last_in_queue_evaluable_opportunities = 0
+    relevant_trades: list[dict[str, Any]] = []
     for trade in trades:
+        if start_stamp is not None and trade["stamp"] < start_stamp:
+            continue
+        if end_stamp is not None and trade["stamp"] >= end_stamp:
+            continue
         entry = portfolio_by_token.get(trade["token_id"])
         if entry is None:
             continue
+        relevant_trades.append(trade)
         states = states_by_token.get(trade["token_id"]) or []
         state = _state_at_or_before(states, trade["stamp"])
-        if state is None:
+        if state is not None and trade["stamp"] - state["stamp"] > max_state_lag_seconds:
+            state = None
+        bid_quote = safe_float(entry.get("quote_bid_price"))
+        ask_quote = safe_float(entry.get("quote_ask_price"))
+        if (bid_quote is None or ask_quote is None) and state is not None:
+            bid_quote = state["midpoint"] - float(entry["quote_distance"])
+            ask_quote = state["midpoint"] + float(entry["quote_distance"])
+        if bid_quote is None or ask_quote is None or ask_quote <= bid_quote:
             continue
-        bid_quote = state["midpoint"] - float(entry["quote_distance"])
-        ask_quote = state["midpoint"] + float(entry["quote_distance"])
         if trade["side"] == "SELL" and trade["price"] <= bid_quote:
-            depth_ahead = state["bid_depth"]
             fill_price = bid_quote
             direction = "bid_fill"
         elif trade["side"] == "BUY" and trade["price"] >= ask_quote:
-            depth_ahead = state["ask_depth"]
             fill_price = ask_quote
             direction = "ask_fill"
         else:
             continue
+        simulated_fill_opportunities += 1
+        market_coverage = coverage_by_token[str(entry["token_id"])]
+        market_coverage["simulated_fill_opportunities"] += 1
+        later_by_horizon: dict[int, dict[str, float]] = {}
+        for horizon in HORIZONS_MINUTES:
+            key = f"{horizon}m"
+            market_coverage["windows_simulated"] += 1
+            market_coverage["by_horizon"][key]["windows_simulated"] += 1
+            if state is None:
+                continue
+            target_stamp = trade["stamp"] + horizon * 60.0
+            later = _state_at_or_after(states, target_stamp)
+            if later is None or later["stamp"] - target_stamp > max_state_lag_seconds:
+                continue
+            later_by_horizon[horizon] = later
+            market_coverage["windows_covered"] += 1
+            market_coverage["by_horizon"][key]["windows_covered"] += 1
+
+        if state is None:
+            continue
+        last_in_queue_evaluable_opportunities += 1
+        market_coverage["last_in_queue_evaluable_opportunities"] += 1
+        depth_ahead = state["bid_depth"] if direction == "bid_fill" else state["ask_depth"]
         fillable = trade["size"] - depth_ahead
         if fillable <= 0:
             continue
         fill_size = min(float(entry["quote_size_shares"]), fillable)
         if fill_size <= 0:
             continue
+        market_coverage["confirmed_fills"] += 1
         markouts: dict[str, float] = {}
         adverse_usd: dict[str, float] = {}
         for horizon in HORIZONS_MINUTES:
-            later = _state_at_or_after(states, trade["stamp"] + horizon * 60.0)
+            later = later_by_horizon.get(horizon)
             if later is None:
                 continue
             if direction == "bid_fill":
@@ -442,14 +791,109 @@ def _replay_against_states(
             }
         )
 
-    all_stamps = [row["stamp"] for rows in states_by_token.values() for row in rows]
+    all_stamps = [
+        row["stamp"]
+        for rows in states_by_token.values()
+        for row in rows
+        if (start_stamp is None or row["stamp"] >= start_stamp - max_state_lag_seconds)
+        and (end_stamp is None or row["stamp"] < end_stamp + 60 * max(HORIZONS_MINUTES) + max_state_lag_seconds)
+    ]
+    if not all_stamps:
+        all_stamps = [trade["stamp"] for trade in relevant_trades]
     span_days = max((max(all_stamps) - min(all_stamps)) / 86400.0, 1.0 / 1440.0) if all_stamps else 1.0
     adverse_5m = sum((fill.get("adverse_usd") or {}).get("5m", 0.0) for fill in fills)
-    implied_adverse = round(adverse_5m / span_days, 6)
-    realism_ratio = round(implied_adverse / study_charge, 6) if study_charge > 0 else None
+    realized_adverse = round(max(0.0, adverse_5m / span_days), 6)
+
+    per_market_coverage: list[dict[str, Any]] = []
+    for row in coverage_by_token.values():
+        opportunities = int(row["simulated_fill_opportunities"])
+        evaluable = int(row["last_in_queue_evaluable_opportunities"])
+        confirmed = int(row["confirmed_fills"])
+        simulated_windows = int(row["windows_simulated"])
+        covered_windows = int(row["windows_covered"])
+        for horizon in HORIZONS_MINUTES:
+            horizon_row = row["by_horizon"][f"{horizon}m"]
+            denominator = int(horizon_row["windows_simulated"])
+            horizon_row["coverage_ratio"] = (
+                round(int(horizon_row["windows_covered"]) / denominator, 6) if denominator else None
+            )
+        haircut_windows = int(row["by_horizon"]["5m"]["windows_covered"])
+        row["confirmed_fill_ratio"] = round(confirmed / evaluable, 6) if evaluable else None
+        row["confirmed_fill_ratio_status"] = "observed" if evaluable else (
+            "insufficient_coverage" if opportunities else "no_simulated_fill_opportunities"
+        )
+        row["coverage_ratio"] = round(covered_windows / simulated_windows, 6) if simulated_windows else None
+        if opportunities and haircut_windows == 0:
+            row["coverage_status"] = "insufficient_coverage"
+        elif opportunities and covered_windows < simulated_windows:
+            row["coverage_status"] = "partial"
+        elif opportunities:
+            row["coverage_status"] = "covered"
+        else:
+            row["coverage_status"] = "no_simulated_fill_opportunities"
+        per_market_coverage.append(row)
+
+    windows_simulated = sum(int(row["windows_simulated"]) for row in per_market_coverage)
+    windows_covered = sum(int(row["windows_covered"]) for row in per_market_coverage)
+    by_horizon = {
+        f"{horizon}m": {
+            "windows_simulated": sum(
+                int(row["by_horizon"][f"{horizon}m"]["windows_simulated"])
+                for row in per_market_coverage
+            ),
+            "windows_covered": sum(
+                int(row["by_horizon"][f"{horizon}m"]["windows_covered"])
+                for row in per_market_coverage
+            ),
+        }
+        for horizon in HORIZONS_MINUTES
+    }
+    for row in by_horizon.values():
+        row["coverage_ratio"] = (
+            round(row["windows_covered"] / row["windows_simulated"], 6)
+            if row["windows_simulated"]
+            else None
+        )
+    haircut_coverage = int(by_horizon["5m"]["windows_covered"])
+    insufficient = simulated_fill_opportunities > 0 and haircut_coverage == 0
+    if insufficient:
+        coverage_status = "insufficient_coverage"
+        haircut: float | str | None = "insufficient_coverage"
+    else:
+        coverage_status = (
+            "covered"
+            if windows_simulated and windows_covered == windows_simulated
+            else ("partial" if windows_covered else "no_simulated_fill_opportunities")
+        )
+        haircut = round(realized_adverse / study_charge, 6) if study_charge > 0 else None
+
+    markout_distribution = {
+        f"{horizon}m": _distribution(
+            (fill.get("markout_per_share") or {}).get(f"{horizon}m")
+            for fill in fills
+            if (fill.get("markout_per_share") or {}).get(f"{horizon}m") is not None
+        )
+        for horizon in HORIZONS_MINUTES
+    }
     return {
+        "status": "insufficient_coverage" if insufficient else "ok",
         "source": source,
         "book_states": sum(len(rows) for rows in states_by_token.values()),
+        "simulated_fill_opportunities": simulated_fill_opportunities,
+        "last_in_queue_evaluable_opportunities": last_in_queue_evaluable_opportunities,
+        "confirmed_fills": len(fills),
+        "confirmed_fill_ratio": (
+            round(len(fills) / last_in_queue_evaluable_opportunities, 6)
+            if last_in_queue_evaluable_opportunities
+            else None
+        ),
+        "confirmed_fill_ratio_status": (
+            "observed"
+            if last_in_queue_evaluable_opportunities
+            else ("insufficient_coverage" if simulated_fill_opportunities else "no_simulated_fill_opportunities")
+        ),
+        # Backward-compatible names: these have always represented fills that
+        # survive the last-in-queue depth test, not all crossing opportunities.
         "simulated_fills": len(fills),
         "simulated_fills_per_day": round(len(fills) / span_days, 6),
         "markout_per_fill": {
@@ -460,9 +904,21 @@ def _replay_against_states(
             )
             for horizon in HORIZONS_MINUTES
         },
-        "implied_adverse_usd_per_day": implied_adverse,
+        "realized_markout_distribution": markout_distribution,
+        "realized_adverse_usd_per_day": realized_adverse,
+        "simulated_adverse_charge_usd_per_day": round(study_charge, 6),
+        "simulation_to_reality_haircut": haircut,
+        "coverage_status": coverage_status,
+        "coverage": {
+            "windows_simulated": windows_simulated,
+            "windows_covered": windows_covered,
+            "coverage_ratio": round(windows_covered / windows_simulated, 6) if windows_simulated else None,
+            "by_horizon": by_horizon,
+        },
+        "per_market_coverage": per_market_coverage,
+        "implied_adverse_usd_per_day": realized_adverse,
         "study_adverse_usd_per_day": round(study_charge, 6),
-        "realism_ratio": realism_ratio,
+        "realism_ratio": haircut,
         "fills_preview": fills[:20],
     }
 
@@ -475,9 +931,10 @@ def run_maker_fill_replay(cfg: EngineConfig) -> dict[str, Any]:
     payload: dict[str, Any] = {
         "status": "disabled",
         "generated_at_utc": generated_at,
-        "work_order": "WO-40/WO-44",
+        "work_order": "WO-40/WO-44/WO-83",
         "paper_trading_invoked": False,
         "live_trading_invoked": False,
+        "order_placement_invoked": False,
     }
     if str(settings.get("enabled", True)).strip().lower() in {"0", "false", "no"}:
         write_json(summary_path, payload)
@@ -496,6 +953,8 @@ def run_maker_fill_replay(cfg: EngineConfig) -> dict[str, Any]:
                 "simulated_fills_per_day": 0.0,
                 "implied_adverse_usd_per_day": 0.0,
                 "realism_ratio": None,
+                "simulation_to_reality_haircut": None,
+                "coverage_status": "no_portfolio",
                 "note": "No current maker-carry quote-sheet portfolio with token IDs was available to replay.",
             }
         )
@@ -505,25 +964,16 @@ def run_maker_fill_replay(cfg: EngineConfig) -> dict[str, Any]:
     token_ids = {row["token_id"] for row in portfolio}
     markets = {row["condition_id"] for row in portfolio}
     trades = _trades(cfg, markets, token_ids)
+    collection_coverage = _collection_coverage(cfg, portfolio, float(settings["regime_days"]))
     requested_source = str(settings.get("book_source") or "both").strip().lower()
     if requested_source not in {"archive", "official", "both"}:
         requested_source = "both"
     states_by_source: dict[str, dict[str, list[dict[str, float]]]] = {}
-    official_snapshot: dict[str, Any] | None = None
-    if requested_source in {"archive", "both", "official"}:
-        archive_states = _book_states(cfg, token_ids, float(settings["replay_days"]))
-        if archive_states:
-            states_by_source["archive"] = archive_states
+    if requested_source in {"archive", "both"}:
+        states_by_source["archive"] = _book_states(cfg, token_ids, 0.0)
     if requested_source in {"official", "both"}:
-        official_snapshot = snapshot_official_books(cfg)
-        official_states = _official_book_states(cfg, token_ids, float(settings["replay_days"]))
-        if official_states:
-            states_by_source["official"] = official_states
-    if requested_source == "archive":
-        states_by_source = {key: value for key, value in states_by_source.items() if key == "archive"}
-    elif requested_source == "official" and "official" in states_by_source:
-        states_by_source = {"official": states_by_source["official"], **({"archive": states_by_source["archive"]} if "archive" in states_by_source else {})}
-    if not states_by_source or not trades:
+        states_by_source["official"] = _official_book_states(cfg, token_ids, 0.0)
+    if not trades:
         payload.update(
             {
                 "status": "no_replay_data",
@@ -532,13 +982,17 @@ def run_maker_fill_replay(cfg: EngineConfig) -> dict[str, Any]:
                 "simulated_fills_per_day": 0.0,
                 "implied_adverse_usd_per_day": 0.0,
                 "realism_ratio": None,
-                "note": "Recorded book archive or trade prints were absent for the quote-sheet portfolio.",
+                "simulation_to_reality_haircut": None,
+                "coverage_status": "no_trade_prints",
+                "collection_coverage": collection_coverage,
+                "note": "No public trade prints were recorded for the current quote-sheet portfolio.",
             }
         )
         write_json(summary_path, payload)
         return payload
 
     study_charge = _study_charge(cfg, portfolio)
+    max_state_lag = float(settings["max_book_state_lag_seconds"])
     source_results = {
         source: _replay_against_states(
             source=source,
@@ -546,15 +1000,16 @@ def run_maker_fill_replay(cfg: EngineConfig) -> dict[str, Any]:
             trades=trades,
             portfolio=portfolio,
             study_charge=study_charge,
+            max_state_lag_seconds=max_state_lag,
         )
         for source, states in states_by_source.items()
     }
     if requested_source == "archive":
         primary_source = "archive"
-    elif "official" in source_results:
-        primary_source = "official"
     else:
-        primary_source = "archive"
+        # WO-83: archive evidence remains diagnostic, but it may not mask a
+        # missing official-book validation window.
+        primary_source = "official"
     primary = source_results[primary_source]
     source_agreement = None
     if "archive" in source_results and "official" in source_results:
@@ -565,30 +1020,92 @@ def run_maker_fill_replay(cfg: EngineConfig) -> dict[str, Any]:
             "official_fills_per_day": official_fills,
             "fills_per_day_divergence": round(abs(archive_fills - official_fills), 6),
         }
+
+    observed_stamps = [trade["stamp"] for trade in trades]
+    observed_stamps.extend(
+        row["stamp"] for states in states_by_source.values() for rows in states.values() for row in rows
+    )
+    cutoff = max(observed_stamps) - float(settings["regime_days"]) * 86400.0
+    regime_cut_by_source = {
+        source: {
+            "last_7_days": _replay_against_states(
+                source=source,
+                states_by_token=states,
+                trades=trades,
+                portfolio=portfolio,
+                study_charge=study_charge,
+                max_state_lag_seconds=max_state_lag,
+                start_stamp=cutoff,
+            ),
+            "prior_to_last_7_days": _replay_against_states(
+                source=source,
+                states_by_token=states,
+                trades=trades,
+                portfolio=portfolio,
+                study_charge=study_charge,
+                max_state_lag_seconds=max_state_lag,
+                end_stamp=cutoff,
+            ),
+        }
+        for source, states in states_by_source.items()
+    }
+    cutoff_utc = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(cutoff))
     payload.update(
         {
-            "status": "ok",
+            "status": primary["status"],
             "portfolio_markets": len(portfolio),
-            "replay_days": float(settings["replay_days"]),
+            "replay_days": float(settings["regime_days"]),
             "book_source_requested": requested_source,
             "primary_book_source": primary_source,
-            "available_book_sources": sorted(source_results),
-            "official_snapshot": official_snapshot,
+            "available_book_sources": sorted(
+                source for source, states in states_by_source.items() if any(states.values())
+            ),
+            "evaluated_book_sources": sorted(source_results),
+            "official_snapshot": read_json(out_root / "official_book_snapshot.json", default={}) or {},
             "book_states": primary["book_states"],
             "trade_prints_seen": len(trades),
+            "simulated_fill_opportunities": primary["simulated_fill_opportunities"],
+            "last_in_queue_evaluable_opportunities": primary[
+                "last_in_queue_evaluable_opportunities"
+            ],
+            "confirmed_fills": primary["confirmed_fills"],
+            "confirmed_fill_ratio": primary["confirmed_fill_ratio"],
+            "confirmed_fill_ratio_status": primary["confirmed_fill_ratio_status"],
             "simulated_fills": primary["simulated_fills"],
             "simulated_fills_per_day": primary["simulated_fills_per_day"],
             "markout_per_fill": primary["markout_per_fill"],
+            "realized_markout_distribution": primary["realized_markout_distribution"],
+            "realized_adverse_usd_per_day": primary["realized_adverse_usd_per_day"],
+            "simulated_adverse_charge_usd_per_day": primary["simulated_adverse_charge_usd_per_day"],
+            "simulation_to_reality_haircut": primary["simulation_to_reality_haircut"],
+            "coverage_status": primary["coverage_status"],
+            "coverage": primary["coverage"],
+            "per_market_coverage": primary["per_market_coverage"],
+            "collection_coverage": collection_coverage,
             "implied_adverse_usd_per_day": primary["implied_adverse_usd_per_day"],
             "study_adverse_usd_per_day": primary["study_adverse_usd_per_day"],
             "realism_ratio": primary["realism_ratio"],
             "realism_ratio_by_source": {source: result["realism_ratio"] for source, result in source_results.items()},
             "source_results": source_results,
             "source_agreement": source_agreement,
+            "regime_cut": {
+                "cutoff_utc": cutoff_utc,
+                "last_7_days": regime_cut_by_source[primary_source]["last_7_days"],
+                "prior_to_last_7_days": regime_cut_by_source[primary_source]["prior_to_last_7_days"],
+                "by_source": regime_cut_by_source,
+            },
+            "haircut_policy": {
+                "reported_only": True,
+                "automatically_applied_to_gate": False,
+                "tightening_requires": "dated M-B governance amendment",
+                "permitted_direction": "tighten_only",
+                "gate_changed_by_this_report": False,
+            },
             "fills_preview": primary["fills_preview"],
             "note": (
-                "Last-in-queue replay against recorded/official book states. Ratio > 1 means the maker-carry "
-                "study may undercharge adverse selection; this report does not alter the study automatically."
+                "Tier-0 last-in-queue replay. A numeric haircut above 1 means the maker-carry study may "
+                "undercharge adverse selection. The haircut is reporting-only and can only support a future "
+                "dated tighten-only amendment; it never changes M-B automatically."
             ),
         }
     )

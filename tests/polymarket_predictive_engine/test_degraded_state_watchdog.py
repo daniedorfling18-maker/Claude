@@ -58,6 +58,7 @@ def test_registered_maxima_only_tighten() -> None:
             "degraded_state_watchdog": {
                 "requote_missing_input_max_consecutive_cycles": 999,
                 "wallet_partial_max_consecutive_harvests": 1,
+                "maker_replay_insufficient_coverage_max_consecutive_cycles": 999,
             }
         },
         path=Path("config.yaml"),
@@ -69,6 +70,9 @@ def test_registered_maxima_only_tighten() -> None:
         "requote_missing_input_max_consecutive_cycles"
     ]
     assert settings["wallet_partial_max_consecutive_harvests"] == 1
+    assert settings["maker_replay_insufficient_coverage_max_consecutive_cycles"] == REGISTERED_MAXIMA[
+        "maker_replay_insufficient_coverage_max_consecutive_cycles"
+    ]
 
 
 def test_requote_missing_input_trips_on_fourth_distinct_cycle_and_deduplicates(tmp_path: Path) -> None:
@@ -113,6 +117,47 @@ def test_legitimate_risk_reason_and_transient_missing_input_do_not_incident(tmp_
     recovered = build_degraded_state_watchdog(cfg, as_of="2026-07-13T00:10:30Z")
     assert recovered["status"] == "ok"
     assert not (cfg.output_root / INCIDENT_LEDGER).exists()
+
+
+def test_persistent_maker_replay_insufficient_coverage_trips_on_fourth_replay(tmp_path: Path) -> None:
+    cfg = _cfg(tmp_path)
+    path = cfg.output_root / "maker_carry" / "maker_fill_replay.json"
+    results = []
+    for cycle in range(1, 5):
+        write_json(
+            path,
+            {
+                "generated_at_utc": f"2026-07-13T00:0{cycle}:00Z",
+                "status": "insufficient_coverage",
+                "coverage_status": "insufficient_coverage",
+                "simulated_fill_opportunities": 10,
+                "coverage": {"windows_simulated": 30, "windows_covered": 0},
+                "realism_ratio": "insufficient_coverage",
+                "paper_trading_invoked": False,
+                "live_trading_invoked": False,
+            },
+        )
+        results.append(build_degraded_state_watchdog(cfg, as_of=f"2026-07-13T00:0{cycle}:30Z"))
+
+    assert [result["status"] for result in results] == ["ok", "ok", "ok", "incident"]
+    evaluation = next(
+        row
+        for row in results[-1]["evaluations"]
+        if row["registration_id"] == "maker_replay_insufficient_coverage"
+    )
+    assert evaluation["consecutive_degraded_observations"] == 4
+    assert results[-1]["active_incidents"][0]["entity"] == "maker_fill_replay"
+
+    write_json(
+        path,
+        {
+            "generated_at_utc": "2026-07-13T00:05:00Z",
+            "status": "ok",
+            "coverage_status": "covered",
+        },
+    )
+    recovered = build_degraded_state_watchdog(cfg, as_of="2026-07-13T00:05:30Z")
+    assert recovered["status"] == "ok"
 
 
 def test_scheduler_nonzero_exit_is_immediate_and_recovery_clears_active_incident(tmp_path: Path) -> None:

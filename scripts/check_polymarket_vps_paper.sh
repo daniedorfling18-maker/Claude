@@ -6,6 +6,14 @@ set -eu
 REPO_DIR="${PM_VPS_REPO_DIR:-$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)}"
 COMPOSE_FILE="${PM_VPS_COMPOSE_FILE:-docker-compose.vps-paper.yml}"
 
+# A tilde produced by variable expansion is not expanded by the shell. Accept
+# the documented/default ~/Claude form without dynamic command execution, and
+# leave absolute/custom paths untouched.
+case "$REPO_DIR" in
+  "~") REPO_DIR="$HOME" ;;
+  "~/"*) REPO_DIR="$HOME${REPO_DIR#?}" ;;
+esac
+
 if [ "$(id -u)" -eq 0 ]; then
   SUDO=""
 else

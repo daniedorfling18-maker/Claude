@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+import os
 import subprocess
 import textwrap
 from pathlib import Path
@@ -146,6 +148,9 @@ def test_vps_health_script_checks_dashboard_and_heartbeat_files():
     assert "alpha_validated_anchor_rows" in text
     assert "sharp_sports_funnel" in text
     assert "Repair: docker compose -f $COMPOSE_FILE exec -T polymarket-paper-live python scripts/render_polymarket_dashboard.py" in text
+    assert 'case "$REPO_DIR" in' in text
+    assert '"~/"*) REPO_DIR="$HOME${REPO_DIR#?}" ;;' in text
+    assert "eval " not in text
 
 
 def test_vps_deploy_workflow_requires_current_dashboard_schema():
@@ -194,6 +199,7 @@ def test_vps_deploy_runs_real_data_acceptance_after_restart_and_before_success()
     assert "previous revision $original_head remains the recorded rollback ref" in text
     assert 'install -d -m 0775 -o "$(id -u)" -g "$(id -g)"' in text
     assert "outputs/performance outputs/ops_scheduler" in text
+    assert 'PM_VPS_REPO_DIR="$REPO_DIR" bash scripts/check_polymarket_vps_paper.sh' in text
 
 
 def test_vps_deploy_compose_exec_cannot_consume_remaining_remote_script():
@@ -325,6 +331,56 @@ def test_vps_ops_scheduler_replaces_github_side_jobs():
     assert "backfill-trade-prints" in script
     assert "scan-event-groups" in script
     assert "maker-live-test" in script  # WO-36 step 4 scoreboard, inert without a wallet
+
+
+def test_deploy_forced_governance_refresh_is_not_counted_as_scheduler_overrun(tmp_path):
+    out_dir = tmp_path / "ops"
+    out_dir.mkdir()
+    (out_dir / "last_governance_refresh").write_text("0\n", encoding="utf-8")
+    (out_dir / "status.json").write_text(
+        json.dumps(
+            {
+                "jobs": {
+                    "governance_refresh": {
+                        "consecutive_skipped_cycles": 2,
+                        "consecutive_skipped_overrun": 2,
+                        "skipped_cycles_total": 3,
+                        "skipped_overrun_total": 3,
+                    }
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    script = ROOT / "scripts" / "run_vps_ops_scheduler.sh"
+    env = {
+        **os.environ,
+        "OPS_SCHEDULER_LIBRARY_ONLY": "1",
+        "OPS_SCHEDULER_OUT_DIR": str(out_dir),
+    }
+
+    result = subprocess.run(
+        [
+            "sh",
+            "-c",
+            '. "$1"; JOB_SCHEDULE_SKIP_KIND="$(schedule_skip_kind governance_refresh 21600)"; '
+            'stamp_status governance_refresh 0 "forced deployment refresh"',
+            "sh",
+            str(script),
+        ],
+        env=env,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+    job = json.loads((out_dir / "status.json").read_text(encoding="utf-8"))["jobs"]["governance_refresh"]
+    assert job["skip_kind"] == "none"
+    assert job["skipped_overrun"] is False
+    assert job["consecutive_skipped_overrun"] == 0
+    assert job["consecutive_skipped_cycles"] == 0
+    assert job["skipped_overrun_total"] == 3
 
 
 def test_vps_telemetry_push_script_is_single_commit_and_actions_free():

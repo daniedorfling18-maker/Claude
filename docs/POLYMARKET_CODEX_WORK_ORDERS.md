@@ -1,10 +1,11 @@
 # Polymarket Codex Work Orders
 
 Last updated: 2026-07-14 (WO-80, WO-82, WO-81 landed; WO-83 implemented in
-PR #203; WO-84 implemented in PR #205. HEADLINE DECISION REQUIRED: WO-87 (Gate A grades settlement return,
-not closing-line value -- owner+governance call, moves the verdict).
-NEXT BUILDABLE: WO-86 (kill-switch staleness guard, safety-critical)
-and WO-85 (harvest resilience + freshness alarm + Gate-A clustering guard). WO-33 remains pending a registered leakage review, with
+PR #203; WO-84 implemented in PR #205. WO-87 DECIDED 2026-07-14 (relabel + pre-event CLV diagnostic; spec in
+the WO). BUILD ORDER: WO-85 first (disk at 81% again — the harvest tail
+fragility is live), then WO-87 (must deploy before the 2026-07-19/20
+read so the verdict renders with honest labels), then WO-86 (must land
+before any funded live stage). Also buildable: WO-85 (harvest resilience + freshness alarm + Gate-A clustering guard). WO-33 remains pending a registered leakage review, with
 WO-34/35 model wiring bound to that review and the three-hypothesis freeze.
 WO-48 and WO-67 are blocked; WO-70 and WO-72 are deferred; WO-76 is
 registration-only. Crypto up/down is frozen as a diagnostic — see
@@ -2912,6 +2913,37 @@ statistic near break-even, not a closing-line-edge statistic.
 No code change ships under this WO without the dated owner+governance
 decision; it never places or authorises an order.
 
+**DECIDED 2026-07-14 (owner, adopting the orchestrator recommendation =
+option C, tighten-only form). Now BUILDABLE with this exact spec:**
+1. RELABEL, DON'T SWAP. Gate A continues to bind on the metric it has
+   always computed — now honestly named. The registered rule text,
+   module docstrings, payload field labels, dashboard rendering, and
+   reports must call it what it is: unit mean NET SETTLEMENT RETURN per
+   dollar (pre-fee), with `beat_close` renamed/labelled
+   `settled_profitable`. JSON field names may keep one release of
+   legacy aliases for downstream compatibility, but every displayed
+   label and registered rule string changes. Binding metric, thresholds,
+   alpha, floors: UNCHANGED (a mid-study metric swap would be data
+   snooping under the registry's legacy-adjudication rule).
+2. ADD the separately-registered diagnostic: TRUE PRE-EVENT CLV.
+   Reference line = the last official price-history observation at or
+   before (close_time − 6h), additionally required to lie within
+   [0.05, 0.95]; if no qualifying observation exists the unit is
+   `pre_event_clv_ungradeable` (never guessed, never defaulted).
+   pre_event_clv = reference_line_price − entry_price, same token,
+   same clustering into units as Gate A. Reported per unit and in
+   aggregate ALONGSIDE the gate metric; feeds NO gate in this study;
+   its purpose is to show whether pricing edge exists distinct from
+   outcome luck, and to inform any future taker registration.
+3. CAVEAT IS MANDATORY: every interim/final verdict rendering carries
+   one registered sentence stating the gate metric is settlement
+   return, not closing-line edge, with pre-event CLV shown beside it.
+4. Tests: relabeled strings asserted; a synthetic near-settled final
+   grades identically under the renamed gate metric; a synthetic
+   pre-convergence history produces the correct pre_event_clv; a
+   history with no qualifying pre-event observation yields
+   ungradeable; gate thresholds byte-identical to the registration.
+
 ## WO-86 — Kill-switch staleness guard: stale safety data must STOP, never clear (decision-policy audit 2026-07-14)
 
 MATERIAL, safety-critical for the live stage. Found by line-reading
@@ -3328,7 +3360,7 @@ contains no paper/live broker, signing, order, gate, model, or sizing path.
 
 ## Current queue for Codex (reconciled 2026-07-14)
 
-**Next buildable: WO-86 (WO-87 is owner+governance decision, not a silent build).** WO-83 is implemented in PR #203 and
+**Next buildable, in order: WO-85 -> WO-87 (decided 2026-07-14) -> WO-86.** WO-83 is implemented in PR #203 and
 WO-84 is implemented in PR #205. Do not infer follow-on capital, gate, model,
 or executor work from their diagnostics; the queue below remains binding.
 

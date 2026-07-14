@@ -32,6 +32,7 @@ WALLET_RE = re.compile(r"^0x[a-fA-F0-9]{40}$")
 TX_RE = re.compile(r"^0x[a-fA-F0-9]{64}$")
 ERC20_BALANCE_OF_SELECTOR = "70a08231"
 ERC1155_BALANCE_OF_SELECTOR = "00fdd58e"
+KNOWN_INCOMPLETE_EXTERNAL_DEPOSIT = "reconstruction_incomplete_external_deposit"
 
 LEGACY_HISTORY_FIELDS = [
     "generated_at_utc",
@@ -108,6 +109,14 @@ def _wallets(cfg: EngineConfig) -> dict[str, str]:
         "operator": str(raw.get("wallet_address") or "").strip(),
         "executor": str(raw.get("executor_wallet_address") or "").strip(),
     }
+
+
+def _configured_starting_nav(settings: dict[str, Any], wallet_role: str) -> float | None:
+    role_setting = f"{wallet_role}_starting_nav_usd"
+    starting_nav = safe_float(settings.get(role_setting))
+    if starting_nav is None and wallet_role == "operator":
+        starting_nav = safe_float(settings.get("starting_nav_usd"))
+    return starting_nav
 
 
 def _pause(settings: dict[str, Any]) -> None:
@@ -315,7 +324,12 @@ def _positions_value(rows: list[dict[str, Any]]) -> tuple[float, list[dict[str, 
     return round(total, 8), marked, errors
 
 
-def _data_api_snapshot(settings: dict[str, Any], wallet: str) -> dict[str, Any]:
+def _data_api_snapshot(
+    settings: dict[str, Any],
+    wallet: str,
+    *,
+    wallet_role: str = "operator",
+) -> dict[str, Any]:
     errors: list[str] = []
     positions: list[dict[str, Any]] = []
     activities: list[dict[str, Any]] = []
@@ -356,22 +370,51 @@ def _data_api_snapshot(settings: dict[str, Any], wallet: str) -> dict[str, Any]:
     activities = _dedup_rows(activities)
     positions_value, marked_positions, mark_errors = _positions_value(positions)
     cash = _activity_cash(activities, baseline_epoch=int(settings["activity_start_epoch"]))
-    reconstruction_complete = bool(activity_complete and positions_complete and not cash["unknown_activity_types"])
-    nav = cash["reconstructed_cash_usd"] + positions_value if reconstruction_complete else None
+    transport_complete = bool(activity_complete and positions_complete and not cash["unknown_activity_types"])
+    configured_external_deposit = _configured_starting_nav(settings, wallet_role)
+    observed_deposits = safe_float(cash.get("deposits_usd")) or 0.0
+    missing_external_deposit = (
+        max(0.0, configured_external_deposit - observed_deposits)
+        if configured_external_deposit is not None and configured_external_deposit > 0
+        else 0.0
+    )
+    external_deposit_unobserved = bool(transport_complete and missing_external_deposit > 0.000001)
+    raw_reconstructed_cash = safe_float(cash.get("reconstructed_cash_usd")) or 0.0
+    reconstructed_cash = raw_reconstructed_cash + missing_external_deposit
+    nav = reconstructed_cash + positions_value if transport_complete else None
+    if nav is None or errors or mark_errors:
+        status = "partial"
+    elif external_deposit_unobserved:
+        status = KNOWN_INCOMPLETE_EXTERNAL_DEPOSIT
+    else:
+        status = "ok"
+    reconstruction_note = (
+        "The public activity feed omits part or all of the configured external-deposit baseline; "
+        f"${missing_external_deposit:.8f} was added to the activity reconstruction without claiming feed completeness."
+        if external_deposit_unobserved
+        else None
+    )
     return {
-        "status": "ok" if nav is not None and not errors and not mark_errors else "partial",
+        "status": status,
         "nav_usd": None if nav is None else round(nav, 8),
         "positions_value_usd": positions_value,
         "official_positions_value_usd": official_positions_value,
         "positions_value_delta_usd": None if official_positions_value is None else round(positions_value - official_positions_value, 8),
-        "reconstructed_cash_usd": cash["reconstructed_cash_usd"],
+        "reconstructed_cash_usd": round(reconstructed_cash, 8),
+        "raw_activity_reconstructed_cash_usd": round(raw_reconstructed_cash, 8),
+        "configured_external_deposit_baseline_usd": configured_external_deposit,
+        "external_deposit_baseline_applied_usd": round(missing_external_deposit, 8),
+        "external_deposit_observed_by_activity_feed": not external_deposit_unobserved,
+        "reconstruction_complete": bool(transport_complete and not external_deposit_unobserved),
+        "reconstruction_note": reconstruction_note,
         "deposits_usd": cash["deposits_usd"],
         "withdrawals_usd": cash["withdrawals_usd"],
         "paid_rewards_usd": cash["paid_rewards_usd"],
         "positions": marked_positions,
         "activities": activities,
         "positions_complete": positions_complete,
-        "activity_complete": activity_complete,
+        "activity_page_complete": activity_complete,
+        "activity_complete": bool(activity_complete and not external_deposit_unobserved),
         "unknown_activity_types": cash["unknown_activity_types"],
         "unmarked_assets": mark_errors,
         "errors": errors,
@@ -426,10 +469,7 @@ def _internal_snapshot(
     if cash is not None and positions is not None:
         nav = cash + positions + pending_rewards
     else:
-        role_setting = f"{wallet_role}_starting_nav_usd"
-        starting_nav = safe_float(settings.get(role_setting))
-        if starting_nav is None and wallet_role == "operator":
-            starting_nav = safe_float(settings.get("starting_nav_usd"))
+        starting_nav = _configured_starting_nav(settings, wallet_role)
         net_score = safe_float(scoreboard.get("net_score_usd"))
         if starting_nav is not None and net_score is not None:
             net_flows = (safe_float(baseline_flows.get("deposits_usd")) or 0.0) - (safe_float(baseline_flows.get("withdrawals_usd")) or 0.0)
@@ -689,13 +729,30 @@ def _reconciliation_state(
     available = {key: value for key, value in values.items() if value is not None}
     deltas = _pairwise(available) if len(available) >= 2 else {}
     max_delta = max(deltas.values()) if deltas else None
-    if len(available) < 3 or api.get("status") != "ok" or onchain.get("status") != "ok":
+    leg_statuses = {
+        "internal": str(internal.get("status") or "unavailable").strip().lower(),
+        "data_api": str(api.get("status") or "unavailable").strip().lower(),
+        "onchain": str(onchain.get("status") or "unavailable").strip().lower(),
+    }
+    data_api_known_incomplete = leg_statuses["data_api"] == KNOWN_INCOMPLETE_EXTERNAL_DEPOSIT
+    comparable_statuses = {
+        "internal": leg_statuses["internal"] == "ok",
+        "data_api": leg_statuses["data_api"] in {"ok", KNOWN_INCOMPLETE_EXTERNAL_DEPOSIT},
+        "onchain": leg_statuses["onchain"] == "ok",
+    }
+    known_incomplete_note = str(api.get("reconstruction_note") or "").strip()
+    if len(available) < 3 or not all(comparable_statuses.values()):
+        incomplete = [name for name in values if values[name] is None or not comparable_statuses[name]]
         return {
             "reconciliation_status": "partial",
             "pairwise_deltas_usd": deltas,
             "max_pairwise_delta_usd": max_delta,
             "unexplained_discrepancy_usd": None,
             "explanation": "three complete NAV views are required",
+            "discrepancy_note": "Incomplete reconciliation legs: "
+            + ", ".join(f"{name}={leg_statuses[name]}" for name in incomplete),
+            "comparison_legs": list(available),
+            "known_incomplete_legs": [],
         }
     if max_delta is not None and max_delta <= threshold:
         return {
@@ -703,7 +760,19 @@ def _reconciliation_state(
             "pairwise_deltas_usd": deltas,
             "max_pairwise_delta_usd": max_delta,
             "unexplained_discrepancy_usd": 0.0,
-            "explanation": "all three NAV views agree within tolerance",
+            "explanation": (
+                "normalized NAV views agree within tolerance; the Data API activity reconstruction is explicitly "
+                "known-incomplete"
+                if data_api_known_incomplete
+                else "all three NAV views agree within tolerance"
+            ),
+            "discrepancy_note": (
+                known_incomplete_note
+                if data_api_known_incomplete
+                else "No discrepancy: all three complete NAV views agree within tolerance."
+            ),
+            "comparison_legs": list(available),
+            "known_incomplete_legs": ["data_api"] if data_api_known_incomplete else [],
         }
     adjustment = safe_float(internal.get("explained_adjustment_usd")) or 0.0
     adjusted = dict(available)
@@ -719,6 +788,12 @@ def _reconciliation_state(
             "unexplained_discrepancy_usd": 0.0,
             "explained_adjustment_usd": adjustment,
             "explanation": "the scoreboard's explicit reconciliation adjustment explains the delta",
+            "discrepancy_note": (
+                f"The explicit internal adjustment of ${adjustment:.8f} resolves the normalized NAV delta."
+                + (f" {known_incomplete_note}" if known_incomplete_note else "")
+            ),
+            "comparison_legs": list(available),
+            "known_incomplete_legs": ["data_api"] if data_api_known_incomplete else [],
         }
     return {
         "reconciliation_status": "DISCREPANCY",
@@ -726,6 +801,13 @@ def _reconciliation_state(
         "max_pairwise_delta_usd": max_delta,
         "unexplained_discrepancy_usd": max_delta,
         "explanation": "unexplained three-way NAV difference exceeds tolerance",
+        "discrepancy_note": (
+            f"Maximum normalized NAV delta ${float(max_delta or 0.0):.8f} exceeds the "
+            f"${threshold:.8f} tolerance."
+            + (f" {known_incomplete_note}" if known_incomplete_note else "")
+        ),
+        "comparison_legs": list(available),
+        "known_incomplete_legs": ["data_api"] if data_api_known_incomplete else [],
     }
 
 
@@ -787,7 +869,7 @@ def _reconcile_one_wallet(
     stamp: str,
 ) -> dict[str, Any]:
     try:
-        api = _data_api_snapshot(settings, wallet)
+        api = _data_api_snapshot(settings, wallet, wallet_role=wallet_role)
     except Exception as exc:
         api = {
             "status": "unavailable",
@@ -858,7 +940,7 @@ def reconcile_wallet(cfg: EngineConfig) -> dict[str, Any]:
     stamp = now_utc()
     wallets = _wallets(cfg)
     base: dict[str, Any] = {
-        "work_order": "WO-62+WO-73+WO-81",
+        "work_order": "WO-62+WO-73+WO-81+WO-84",
         "status": "disabled",
         "reconciliation_status": "disabled",
         "generated_at_utc": stamp,
@@ -948,7 +1030,7 @@ def reconcile_wallet(cfg: EngineConfig) -> dict[str, Any]:
             "primary_wallet_role": primary_role,
             "wallets": results,
             "unexplained_discrepancy_usd": max(discrepancies) if discrepancies else None,
-            "work_order": "WO-62+WO-73+WO-81",
+            "work_order": "WO-62+WO-73+WO-81+WO-84",
         }
     )
     payload = primary

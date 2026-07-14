@@ -106,6 +106,8 @@ def _install_http(
     rpc_error: bool = False,
     with_tx: bool = False,
     contracts_error: bool = False,
+    position_rows: list[dict[str, Any]] | None = None,
+    activity_rows: list[dict[str, Any]] | None = None,
 ):
     contracts_text = f"Core Trading Contracts\nConditional Tokens (CTF) {CTF}\nCollateral Contracts\npUSD — CollateralToken (proxy) {PUSD}\n"
 
@@ -116,9 +118,9 @@ def _install_http(
                 raise RuntimeError("contracts unavailable")
             return _Response(text=contracts_text)
         if url.endswith("/positions"):
-            return _Response(_positions())
+            return _Response(_positions() if position_rows is None else position_rows)
         if url.endswith("/activity"):
-            return _Response(_activities(with_tx=with_tx))
+            return _Response(_activities(with_tx=with_tx) if activity_rows is None else activity_rows)
         if url.endswith("/value"):
             return _Response([{"user": WALLET, "value": 40.0}])
         raise AssertionError(f"unexpected GET {url} {params}")
@@ -195,6 +197,46 @@ def test_synthetic_three_way_agreement_is_clean_and_provenance_stamped(tmp_path:
     history = read_csv_rows(cfg.output_root / "performance" / "wallet_reconciliation_history.csv")
     assert len(history) == 1
     assert history[0]["reconciliation_status"] == "clean"
+
+
+def test_missing_bridge_deposit_is_normalized_but_data_api_stays_explicitly_incomplete(
+    tmp_path: Path,
+    monkeypatch,
+):
+    cfg = _config(tmp_path)
+    _write_internal(cfg, cash=12.923349, inventory=0.0)
+    _install_http(
+        monkeypatch,
+        pusd_balance=12.787217,
+        position_size=0.0,
+        position_rows=[],
+        activity_rows=[
+            {
+                "proxyWallet": WALLET,
+                "timestamp": 200,
+                "type": "TRADE",
+                "side": "BUY",
+                "usdcSize": 0.136132,
+            }
+        ],
+    )
+
+    result = reconciliation.reconcile_wallet(cfg)
+
+    assert result["reconciliation_status"] == "clean"
+    assert result["status"] == "ok"
+    assert result["data_api"]["status"] == reconciliation.KNOWN_INCOMPLETE_EXTERNAL_DEPOSIT
+    assert result["data_api"]["activity_page_complete"] is True
+    assert result["data_api"]["activity_complete"] is False
+    assert result["data_api"]["reconstruction_complete"] is False
+    assert result["data_api"]["raw_activity_reconstructed_cash_usd"] == pytest.approx(-0.136132)
+    assert result["data_api"]["external_deposit_baseline_applied_usd"] == pytest.approx(12.923349)
+    assert result["data_api_nav_usd"] == pytest.approx(12.787217)
+    assert result["onchain_nav_usd"] == pytest.approx(12.787217)
+    assert result["known_incomplete_legs"] == ["data_api"]
+    assert "public activity feed omits" in result["discrepancy_note"]
+    assert result["paper_trading_invoked"] is False
+    assert result["live_trading_invoked"] is False
 
 
 def test_planted_five_dollar_mismatch_flags_and_renders_red_banners(tmp_path: Path, monkeypatch):

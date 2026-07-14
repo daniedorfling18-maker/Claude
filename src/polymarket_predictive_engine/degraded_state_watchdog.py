@@ -21,18 +21,21 @@ from .runtime_lock import runtime_lock
 from .utils import ensure_dir, now_utc, read_csv_rows, read_json, serialize_value, write_json
 
 
-WORK_ORDER = "WO-78"
+WORK_ORDER = "WO-78+WO-83+WO-84"
 OUTPUT_FILE = "ops_scheduler/degraded_state_watchdog.json"
 STATE_FILE = "ops_scheduler/degraded_state_watchdog_state.json"
 INCIDENT_LEDGER = "performance/degraded_state_incidents.csv"
 NOTIFICATION_BODY = "ops_scheduler/degraded_state_notification.md"
+WALLET_REGISTRATION_ID = "wallet_reconciliation_not_clean"
+LEGACY_WALLET_REGISTRATION_ID = "wallet_reconciliation_partial"
+WALLET_HEALTHY_STATES = frozenset({"clean", "explained"})
 
 # A maximum is the number of consecutive degraded observations tolerated.
 # Therefore max=3 trips on observation four, exactly matching "> 3 cycles".
 REGISTERED_MAXIMA: dict[str, int] = {
     "requote_missing_input_max_consecutive_cycles": 3,
     "scheduler_nonzero_max_consecutive_cycles": 0,
-    "wallet_partial_max_consecutive_harvests": 2,
+    "wallet_not_clean_max_consecutive_harvests": 2,
     "operating_unknown_max_consecutive_cycles": 0,
     "maker_replay_insufficient_coverage_max_consecutive_cycles": 3,
 }
@@ -90,7 +93,10 @@ def _settings(cfg: EngineConfig) -> dict[str, Any]:
     }
     for key, registered in REGISTERED_MAXIMA.items():
         # Configuration can alarm sooner, never later.
-        settings[key] = min(registered, _nonnegative_int(raw.get(key), registered))
+        configured = raw.get(key)
+        if key == "wallet_not_clean_max_consecutive_harvests" and configured is None:
+            configured = raw.get("wallet_partial_max_consecutive_harvests")
+        settings[key] = min(registered, _nonnegative_int(configured, registered))
     return settings
 
 
@@ -110,6 +116,7 @@ def _registrations(settings: Mapping[str, Any]) -> list[dict[str, Any]]:
             ],
             "incident_on_observation": settings["requote_missing_input_max_consecutive_cycles"] + 1,
             "observation_unit": "producer cycle",
+            "evaluation_policy": "registered missing-input predicate with legitimate risk-state exemption",
         },
         {
             "id": "maker_replay_insufficient_coverage",
@@ -124,6 +131,7 @@ def _registrations(settings: Mapping[str, Any]) -> list[dict[str, Any]]:
             ]
             + 1,
             "observation_unit": "distinct maker replay",
+            "evaluation_policy": "registered zero-coverage predicate with no-opportunity exemption",
         },
         {
             "id": "scheduler_nonzero_exit",
@@ -135,17 +143,20 @@ def _registrations(settings: Mapping[str, Any]) -> list[dict[str, Any]]:
             ],
             "incident_on_observation": settings["scheduler_nonzero_max_consecutive_cycles"] + 1,
             "observation_unit": "job completion",
+            "evaluation_policy": "zero-exit allowlist",
         },
         {
-            "id": "wallet_reconciliation_partial",
+            "id": WALLET_REGISTRATION_ID,
             "artifact": "performance/wallet_reconciliation.json",
-            "healthy_reachable_states": ["clean", "explained"],
-            "degraded_condition": "reconciliation_status=partial",
+            "healthy_reachable_states": sorted(WALLET_HEALTHY_STATES),
+            "degraded_condition": "any observed reconciliation status outside the registered healthy allowlist",
             "max_consecutive_degraded_observations": settings[
-                "wallet_partial_max_consecutive_harvests"
+                "wallet_not_clean_max_consecutive_harvests"
             ],
-            "incident_on_observation": settings["wallet_partial_max_consecutive_harvests"] + 1,
+            "incident_on_observation": settings["wallet_not_clean_max_consecutive_harvests"] + 1,
             "observation_unit": "distinct harvest",
+            "evaluation_policy": "healthy-status allowlist; unknown sibling states fail closed",
+            "legacy_registration_id": LEGACY_WALLET_REGISTRATION_ID,
         },
         {
             "id": "operating_state_unknown_regression",
@@ -157,6 +168,7 @@ def _registrations(settings: Mapping[str, Any]) -> list[dict[str, Any]]:
             ],
             "incident_on_observation": settings["operating_unknown_max_consecutive_cycles"] + 1,
             "observation_unit": "generated operating-state run",
+            "evaluation_policy": "known-to-UNKNOWN transition predicate",
         },
     ]
 
@@ -430,40 +442,55 @@ def _evaluate_wallet(
     payload = _mapping(read_json(cfg.output_root / relative, default={}) or {})
     token = _stamp(payload)
     status = str(payload.get("reconciliation_status") or payload.get("status") or "unobserved")
-    degraded = status.lower() == "partial"
+    normalized_status = status.strip().lower()
+    degraded = bool(token) and normalized_status not in WALLET_HEALTHY_STATES
     counters = state.setdefault("counters", {})
+    migrated_legacy_counter = WALLET_REGISTRATION_ID not in counters and LEGACY_WALLET_REGISTRATION_ID in counters
+    previous_counter = _mapping(
+        counters.get(WALLET_REGISTRATION_ID, counters.get(LEGACY_WALLET_REGISTRATION_ID))
+    )
     counter = _advance_counter(
-        _mapping(counters.get("wallet_reconciliation_partial")),
+        previous_counter,
         token=token,
         degraded=degraded,
     )
-    counters["wallet_reconciliation_partial"] = counter
-    maximum = int(settings["wallet_partial_max_consecutive_harvests"])
+    counters[WALLET_REGISTRATION_ID] = counter
+    counters.pop(LEGACY_WALLET_REGISTRATION_ID, None)
+    maximum = int(settings["wallet_not_clean_max_consecutive_harvests"])
     count = int(counter["consecutive_degraded_observations"])
     incidents: dict[str, dict[str, Any]] = {}
     if token and degraded and count > maximum:
         row = _incident(
             generated_at=generated_at,
-            registration_id="wallet_reconciliation_partial",
+            registration_id=WALLET_REGISTRATION_ID,
             entity="wallet_reconciliation",
             source_artifact=relative,
             observation_token=token,
             episode_start=str(counter["episode_start_token"]),
             degraded_state=status,
-            reason=str(payload.get("note") or "wallet reconciliation remained partial"),
+            reason=str(
+                payload.get("discrepancy_note")
+                or payload.get("note")
+                or (
+                    f"wallet reconciliation status {status!r} is outside healthy allowlist "
+                    + ", ".join(sorted(WALLET_HEALTHY_STATES))
+                )
+            ),
             count=count,
             maximum=maximum,
         )
         incidents[row["incident_id"]] = row
     return (
         {
-            "registration_id": "wallet_reconciliation_partial",
+            "registration_id": WALLET_REGISTRATION_ID,
             "artifact": relative,
             "observed_state": status,
+            "healthy_reachable_states": sorted(WALLET_HEALTHY_STATES),
             "observation_token": token or None,
             "consecutive_degraded_observations": count,
             "max_consecutive_degraded_observations": maximum,
-            "state": "incident" if incidents else ("degraded_within_tolerance" if degraded else ("healthy_or_out_of_scope" if token else "unobserved")),
+            "state": "incident" if incidents else ("degraded_within_tolerance" if degraded else ("healthy" if token else "unobserved")),
+            "migrated_legacy_counter": migrated_legacy_counter,
         },
         incidents,
     )

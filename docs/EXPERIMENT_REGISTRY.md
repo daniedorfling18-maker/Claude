@@ -144,6 +144,17 @@ would be data snooping. It is a legacy adjudication obligation, not permission
 for new taker-model breadth. Its result can terminate or reject that legacy
 program; it cannot create a fourth primary hypothesis under this freeze.
 
+Semantics clarification (decided by the owner 2026-07-14, WO-87): the
+quantity this engine has always graded is the last tradeable price at or
+before the market close — empirically a near-settled price for 51/61
+finals — so its gate metric IS unit mean net settlement return per dollar,
+not closing-line edge. The binding metric, thresholds, alpha, and floors
+are unchanged (a mid-study swap would be snooping); all labels are renamed
+to say what the metric is, and a separately-registered diagnostic — true
+pre-event CLV against the last in-band [0.05, 0.95] price at or before
+close_time − 6h — is reported alongside. The diagnostic feeds no gate in
+this study; every verdict rendering carries the settlement-return caveat.
+
 ## Diagnostic / parked surface
 
 - Implication networks, generic calibration bias, drift term structure,

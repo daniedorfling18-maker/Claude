@@ -7,6 +7,7 @@ order path, or execution permission.
 
 from __future__ import annotations
 
+from collections import Counter
 import json
 import os
 from datetime import datetime, timezone
@@ -14,6 +15,7 @@ from pathlib import Path
 import re
 from typing import Any, Mapping
 
+from .a1_controls import build_a1_sweep_advisory
 from .config import EngineConfig, load_config
 from .utils import now_utc, parse_timestamp, read_csv_rows, read_json, write_json
 
@@ -21,8 +23,24 @@ from .utils import now_utc, parse_timestamp, read_csv_rows, read_json, write_jso
 UNKNOWN = "UNKNOWN"
 OUTPUT_JSON = "performance/operating_state.json"
 OUTPUT_MARKDOWN = "performance/operating_state.md"
-OWNER_AUTH_MARKER = "AUTONOMOUS_MAKER_EXECUTION_AUTHORISED = true"
-OWNER_AUTH_DATE_PATTERN = re.compile(r"AUTONOMOUS_MAKER_EXECUTION_AUTHORISED_AT\s*=\s*\d{4}-\d{2}-\d{2}", re.IGNORECASE)
+P3_OWNER_AMENDMENTS_HEADING_PATTERN = re.compile(r"^##\s+Owner amendments\s*$", re.IGNORECASE | re.MULTILINE)
+P3_OWNER_AUTH_TRUE_PATTERN = re.compile(
+    r"^AUTONOMOUS_MAKER_EXECUTION_AUTHORISED\s*=\s*true\s*$",
+    re.IGNORECASE | re.MULTILINE,
+)
+P3_OWNER_AUTH_DATE_PATTERN = re.compile(
+    r"^AUTONOMOUS_MAKER_EXECUTION_AUTHORISED_AT\s*=\s*\d{4}-\d{2}-\d{2}\s*$",
+    re.IGNORECASE | re.MULTILINE,
+)
+P5_APPROVED_STATUS_PATTERN = re.compile(
+    r"^\*\*Status:\s*APPROVED\s*[-\u2013\u2014]\s*[^,\n]+,\s*\d{4}-\d{2}-\d{2}\.\*\*\s*$",
+    re.IGNORECASE | re.MULTILINE,
+)
+P5_A1_HEADING_PATTERN = re.compile(
+    r"^##\s+Amendment A1\s+[-\u2013\u2014]\s+single project account\s*$",
+    re.IGNORECASE | re.MULTILINE,
+)
+GOVERNED_PAPER_MAX_AGE_SECONDS = 24 * 3600
 
 # 2026-07-12 WO-68b registered reporting targets. Config may tighten these
 # maxima but cannot widen them. They alert a human only and are never read by a
@@ -30,7 +48,7 @@ OWNER_AUTH_DATE_PATTERN = re.compile(r"AUTONOMOUS_MAKER_EXECUTION_AUTHORISED_AT\
 REGISTERED_SLO_TARGETS: dict[str, float] = {
     "quote_sheet_max_age_seconds": 26 * 3600,
     "governance_refresh_max_duration_seconds": 2400,
-    "max_consecutive_skipped_scheduler_cycles": 0,
+    "max_consecutive_scheduler_overruns": 0,
     "websocket_max_gap_seconds": 300,
     "dashboard_max_age_seconds": 300,
     "reconciliation_max_age_seconds": 26 * 3600,
@@ -215,15 +233,26 @@ def _build_slo_block(cfg: EngineConfig, *, as_of: datetime) -> dict[str, Any]:
             governance_observed = str(heartbeat.get("generated_at_utc") or heartbeat.get("started_at_utc") or "")
         governance_source = str(heartbeat_path)
 
-    skip_counts: list[int] = []
+    overrun_counts: list[int] = []
+    intentional_counts: list[int] = []
+    overrun_totals: list[int] = []
+    intentional_totals: list[int] = []
     for name, value in jobs.items():
-        if name == "scheduler" or not isinstance(value, Mapping) or "consecutive_skipped_cycles" not in value:
+        if name == "scheduler" or not isinstance(value, Mapping):
             continue
-        try:
-            skip_counts.append(max(0, int(value.get("consecutive_skipped_cycles") or 0)))
-        except (TypeError, ValueError):
-            continue
-    consecutive_skips = float(sum(skip_counts)) if skip_counts else None
+        for key, target in (
+            ("consecutive_skipped_overrun", overrun_counts),
+            ("consecutive_skipped_intentional", intentional_counts),
+            ("skipped_overrun_total", overrun_totals),
+            ("skipped_intentional_total", intentional_totals),
+        ):
+            if key not in value:
+                continue
+            try:
+                target.append(max(0, int(value.get(key) or 0)))
+            except (TypeError, ValueError):
+                continue
+    consecutive_overruns = float(sum(overrun_counts)) if overrun_counts else None
 
     websocket_at, websocket_raw, websocket_source = _latest_websocket_timestamp(cfg)
     dashboard_path = output_root / "polymarket_dashboard" / "dashboard_data.json"
@@ -253,10 +282,10 @@ def _build_slo_block(cfg: EngineConfig, *, as_of: datetime) -> dict[str, Any]:
             observed_at_utc=governance_observed,
         ),
         _slo_row(
-            "skipped_scheduler_cycles",
-            "Consecutive skipped scheduler cycles",
-            target=targets["max_consecutive_skipped_scheduler_cycles"],
-            measured=consecutive_skips,
+            "scheduler_overrun_cycles",
+            "Consecutive scheduler overrun/missed cycles",
+            target=targets["max_consecutive_scheduler_overruns"],
+            measured=consecutive_overruns,
             unit="cycles",
             source=str(ops_path),
             observed_at_utc=_timestamp(ops),
@@ -305,6 +334,13 @@ def _build_slo_block(cfg: EngineConfig, *, as_of: datetime) -> dict[str, Any]:
         "targets_tighten_only": True,
         "breach_count": breach_count,
         "unknown_count": unknown_count,
+        "scheduler_skip_taxonomy": {
+            "intentional_quota_or_preflight_skips_total": sum(intentional_totals),
+            "overrun_or_missed_cycles_total": sum(overrun_totals),
+            "consecutive_intentional_skips": sum(intentional_counts),
+            "consecutive_overrun_or_missed_cycles": sum(overrun_counts),
+            "slo_uses_overrun_only": True,
+        },
         "rows": rows,
         "reporting_only": True,
         "paper_trading_invoked": False,
@@ -363,16 +399,41 @@ def _precondition(identifier: str, title: str, state: str, evidence: str, source
     }
 
 
+def _heading_section(text: str, heading_pattern: re.Pattern[str]) -> str | None:
+    match = heading_pattern.search(text)
+    if match is None:
+        return None
+    tail = text[match.end() :]
+    next_heading = re.search(r"^##\s+", tail, re.MULTILINE)
+    return tail[: next_heading.start()] if next_heading is not None else tail
+
+
 def _owner_authorisation(repo_root: Path) -> tuple[str, str]:
-    paths = [repo_root / "AGENTS.md", repo_root / "CLAUDE.md"]
-    if not all(path.exists() for path in paths):
-        return UNKNOWN, "AGENTS.md and/or CLAUDE.md is unavailable"
-    texts = [path.read_text(encoding="utf-8-sig", errors="replace") for path in paths]
-    marker_present = all(OWNER_AUTH_MARKER.lower() in text.lower() for text in texts)
-    dated = all(OWNER_AUTH_DATE_PATTERN.search(text) is not None for text in texts)
-    if marker_present and dated:
-        return "met", "dated owner authorisation marker is present in both AGENTS.md and CLAUDE.md"
-    return "not_met", "dated owner authorisation marker is absent from one or both control files"
+    path = repo_root / "AGENTS.md"
+    if not path.is_file():
+        return UNKNOWN, "AGENTS.md is unavailable; P3 cannot be determined"
+    text = path.read_text(encoding="utf-8-sig", errors="replace")
+    section = _heading_section(text, P3_OWNER_AMENDMENTS_HEADING_PATTERN)
+    if section is None:
+        return "not_met", "AGENTS.md has no signed Owner amendments section; the WO-67 draft authorises nothing"
+    authorised = P3_OWNER_AUTH_TRUE_PATTERN.search(section) is not None
+    dated = P3_OWNER_AUTH_DATE_PATTERN.search(section) is not None
+    if authorised and dated:
+        return "met", "exact dated P3 authorisation markers are present in AGENTS.md Owner amendments"
+    return "not_met", "exact dated P3 authorisation markers are absent from AGENTS.md Owner amendments"
+
+
+def _key_custody_approval(repo_root: Path) -> tuple[str, str]:
+    path = repo_root / "docs" / "KEY_CUSTODY_DESIGN_WO67_P5.md"
+    if not path.is_file():
+        return UNKNOWN, "signed custody document is unavailable; P5 cannot be determined"
+    text = path.read_text(encoding="utf-8-sig", errors="replace")
+    approved_lines = P5_APPROVED_STATUS_PATTERN.findall(text)
+    a1_section = _heading_section(text, P5_A1_HEADING_PATTERN)
+    a1_approved = bool(a1_section and P5_APPROVED_STATUS_PATTERN.search(a1_section))
+    if len(approved_lines) >= 2 and a1_approved:
+        return "met", "custody design and Amendment A1 both carry exact dated APPROVED status lines"
+    return "not_met", "custody design and/or Amendment A1 lacks the exact dated APPROVED status line"
 
 
 def _wo67_preconditions(
@@ -380,7 +441,6 @@ def _wo67_preconditions(
     maker_study: Mapping[str, Any],
     decision_policy: Mapping[str, Any],
     merge_gate: Mapping[str, Any],
-    key_custody: Mapping[str, Any],
 ) -> list[dict[str, str]]:
     gates = _mapping(maker_study.get("maker_gates"))
     gate_names = ("M_A_carry_evidence", "M_B_adverse_realism", "M_C_payout_floor")
@@ -404,6 +464,10 @@ def _wo67_preconditions(
 
     if not merge_gate:
         p4_state = UNKNOWN
+        p4_evidence = (
+            "independent_merge_gate.json has not been produced in this checkout; "
+            "run scripts/audit_github_merge_gate.py to evaluate P4"
+        )
     else:
         p4_state = (
             "met"
@@ -412,18 +476,14 @@ def _wo67_preconditions(
             and _explicit_bool(merge_gate, "independent_review_required") is True
             else "not_met"
         )
-
-    if not key_custody:
-        p5_state = UNKNOWN
-    else:
-        custody_ok = (
-            str(key_custody.get("status") or "").lower() == "approved"
-            and _explicit_bool(key_custody, "scoped_trade_only") is True
-            and _explicit_bool(key_custody, "withdrawal_disabled") is True
-            and str(key_custody.get("storage") or "").lower() == "vps_env"
-            and _explicit_bool(key_custody, "rotation_documented") is True
+        p4_evidence = (
+            f"status={merge_gate.get('status', UNKNOWN)}; "
+            f"enforced={merge_gate.get('enforced', UNKNOWN)}; "
+            f"branch_protection_enabled={merge_gate.get('branch_protection_enabled', UNKNOWN)}; "
+            f"independent_review_required={merge_gate.get('independent_review_required', UNKNOWN)}"
         )
-        p5_state = "met" if custody_ok else "not_met"
+
+    p5_state, p5_evidence = _key_custody_approval(cfg.path.resolve().parent)
 
     consecutive_days = ladder.get("consecutive_live_ok_days", UNKNOWN)
     p2_evidence = (
@@ -434,9 +494,9 @@ def _wo67_preconditions(
     return [
         _precondition("P1", "Maker gates M-A/M-B/M-C pass", p1_state, json.dumps(gate_states, sort_keys=True), "maker_carry_study.json"),
         _precondition("P2", "Human live-test Stage 1 complete", p2_state, p2_evidence, "decision_policy.json"),
-        _precondition("P3", "Dated owner amendment authorises scoped live path", p3_state, p3_evidence, "AGENTS.md + CLAUDE.md"),
-        _precondition("P4", "Independent merge control enforced", p4_state, f"status={merge_gate.get('status', UNKNOWN) if merge_gate else UNKNOWN}", "independent_merge_gate.json"),
-        _precondition("P5", "Scoped key-custody design approved", p5_state, f"status={key_custody.get('status', UNKNOWN) if key_custody else UNKNOWN}", "key_custody_approval.json"),
+        _precondition("P3", "Dated owner amendment authorises scoped live path", p3_state, p3_evidence, "AGENTS.md Owner amendments"),
+        _precondition("P4", "Independent merge control enforced", p4_state, p4_evidence, "independent_merge_gate.json"),
+        _precondition("P5", "Scoped key-custody design approved", p5_state, p5_evidence, "docs/KEY_CUSTODY_DESIGN_WO67_P5.md"),
     ]
 
 
@@ -468,6 +528,31 @@ def assert_front_door_docs_state_pointer_only(repo_root: Path) -> None:
     violations = front_door_drift_violations(readme_text=readme, agents_text=agents)
     if violations:
         raise AssertionError("front-door operating-state drift: " + "; ".join(violations))
+
+
+def _paper_fill_lanes(fill_rows: list[dict[str, str]], order_rows: list[dict[str, str]]) -> dict[str, int]:
+    orders = {str(row.get("order_id") or ""): row for row in order_rows if str(row.get("order_id") or "")}
+    counts: Counter[str] = Counter()
+    for fill in fill_rows:
+        order = orders.get(str(fill.get("order_id") or ""), {})
+        source: dict[str, Any] = {}
+        try:
+            parsed = json.loads(str(order.get("source_signal_json") or "{}"))
+            source = _mapping(parsed)
+        except (TypeError, ValueError, json.JSONDecodeError):
+            source = {}
+        strategy = str(order.get("strategy_name") or source.get("strategy_name") or "").strip()
+        entry_source = str(source.get("price_action_entry_source") or source.get("source") or "").strip()
+        if strategy and entry_source:
+            lane = f"{strategy}:{entry_source}"
+        elif strategy:
+            lane = strategy
+        elif entry_source:
+            lane = entry_source
+        else:
+            lane = "unattributed_legacy_paper_fill"
+        counts[lane] += 1
+    return dict(sorted(counts.items()))
 
 
 def _md(value: Any) -> str:
@@ -587,7 +672,7 @@ def build_operating_state(cfg: EngineConfig) -> dict[str, Any]:
     degraded_watchdog = _artifact(output_root / "ops_scheduler" / "degraded_state_watchdog.json")
     deploy_acceptance = _artifact(output_root / "ops_scheduler" / "deploy_acceptance.json")
     merge_gate = _artifact(performance / "independent_merge_gate.json")
-    key_custody = _artifact(performance / "key_custody_approval.json")
+    a1_sweep_advisory = build_a1_sweep_advisory(cfg, as_of=as_of)
     telemetry_manifest, telemetry_manifest_path = _telemetry_manifest(cfg)
     artifacts = {
         "local_history_audit": audit,
@@ -597,7 +682,6 @@ def build_operating_state(cfg: EngineConfig) -> dict[str, Any]:
         "maker_live_test": maker_live_test,
         "decision_policy": decision_policy,
         "independent_merge_gate": merge_gate,
-        "key_custody_approval": key_custody,
         "vps_telemetry_manifest": telemetry_manifest,
         "degraded_state_watchdog": degraded_watchdog,
     }
@@ -635,24 +719,50 @@ def build_operating_state(cfg: EngineConfig) -> dict[str, Any]:
 
     if paper_enabled is None or trading_mode == UNKNOWN:
         paper_capability = UNKNOWN
+        mechanical_evidence = "mechanical_readiness=unknown; configuration could not be evaluated"
     else:
-        paper_capability = "PRESENT" if paper_enabled and trading_mode in {"paper", "backtest"} else "DISABLED"
+        mechanically_ready = bool(paper_enabled and trading_mode in {"paper", "backtest"})
+        paper_capability = "READY" if mechanically_ready else "DISABLED"
+        mechanical_evidence = (
+            f"mechanical_readiness={'ready' if mechanically_ready else 'disabled'}; "
+            "capability_only=true; governed_authorisation_is_separate=true"
+        )
 
     paper_decision = _mapping(audit.get("paper_decision"))
     paper_allowed = paper_decision.get("paper_allowed")
-    if isinstance(paper_allowed, bool):
+    audit_at = parse_timestamp(_timestamp(audit))
+    audit_age = max(0.0, (as_of - audit_at).total_seconds()) if audit_at is not None else None
+    if isinstance(paper_allowed, bool) and audit_age is not None and audit_age <= GOVERNED_PAPER_MAX_AGE_SECONDS:
         governed_paper = "GRANTED" if paper_allowed else "NOT_GRANTED"
-        governed_evidence = str(paper_decision.get("reason") or "paper_decision artifact")
+        governed_evidence = (
+            f"{paper_decision.get('reason') or 'paper_decision artifact'}; "
+            f"verification_age_seconds={round(audit_age, 3)}; maximum={GOVERNED_PAPER_MAX_AGE_SECONDS}"
+        )
+    elif isinstance(paper_allowed, bool) and audit_age is not None:
+        governed_paper = "NOT_GRANTED_STALE_EVIDENCE"
+        governed_evidence = (
+            f"paper decision failed closed because verification_age_seconds={round(audit_age, 3)} "
+            f"exceeds maximum={GOVERNED_PAPER_MAX_AGE_SECONDS}"
+        )
     else:
         governed_paper = UNKNOWN
-        governed_evidence = UNKNOWN
+        governed_evidence = "paper decision or its verification timestamp is unavailable"
 
     fills_path = output_root / "polymarket_portfolio" / "paper_fills.csv"
     if fills_path.exists():
-        fill_count = len(read_csv_rows(fills_path))
+        fill_rows = read_csv_rows(fills_path)
+        fill_count = len(fill_rows)
+        lane_counts = _paper_fill_lanes(
+            fill_rows,
+            read_csv_rows(output_root / "polymarket_portfolio" / "paper_orders.csv"),
+        )
         paper_activity = f"RECORDED_FILLS={fill_count}"
-        paper_activity_evidence = str(fills_path)
+        paper_activity_evidence = (
+            f"paper_simulation_only=true; registered_experiment_lanes={json.dumps(lane_counts, sort_keys=True)}; "
+            "does_not_imply_live_or_governed_authorisation=true"
+        )
     else:
+        lane_counts = {}
         paper_activity = UNKNOWN
         paper_activity_evidence = "paper fill ledger is missing"
         missing_inputs.append("paper_fills_ledger")
@@ -679,8 +789,19 @@ def build_operating_state(cfg: EngineConfig) -> dict[str, Any]:
         return UNKNOWN
 
     operator_wallet_state = monitored_state("operator", operator_wallet_configured)
-    executor_wallet_state = monitored_state("executor", executor_wallet_configured)
-    wallet_state = operator_wallet_state if operator_wallet_configured else executor_wallet_state
+    executor_present = bool(executor_status.get("executor_present"))
+    if executor_wallet_configured:
+        executor_wallet_state = "A1_CONFIG_DRIFT_SEPARATE_EXECUTOR_WALLET"
+    elif operator_wallet_configured:
+        operator_payload = _mapping(monitored_wallets.get("operator"))
+        monitored_status = operator_payload.get("status", maker_live_test.get("status", UNKNOWN))
+        window = "EXECUTOR_WINDOW_ACTIVE" if executor_present else "EXECUTOR_WINDOW_INACTIVE"
+        executor_wallet_state = f"A1_SINGLE_PROJECT_WALLET:{window}:{monitored_status}"
+    elif operator_wallet_configured is False:
+        executor_wallet_state = "NOT_CONFIGURED"
+    else:
+        executor_wallet_state = UNKNOWN
+    wallet_state = operator_wallet_state
 
     live_ledger_candidates = [
         executor_ledger_path,
@@ -697,7 +818,6 @@ def build_operating_state(cfg: EngineConfig) -> dict[str, Any]:
         live_orders = f"RECORDED_ORDERS={live_order_count}"
         live_order_evidence = str(live_ledger)
 
-    executor_present = bool(executor_status.get("executor_present"))
     executor_absent = not executor_present and str(executor_status.get("status") or "").upper() == "ABSENT"
     executor_mode = "ABSENT" if executor_absent else str(executor_status.get("mode") or UNKNOWN).upper()
     executor_open_orders = executor_status.get("open_orders")
@@ -733,7 +853,7 @@ def build_operating_state(cfg: EngineConfig) -> dict[str, Any]:
     )
     executor_kill_state = "ABSENT" if executor_absent else str(executor_kill.get("status") or UNKNOWN).upper()
 
-    preconditions = _wo67_preconditions(cfg, maker_study, decision_policy, merge_gate, key_custody)
+    preconditions = _wo67_preconditions(cfg, maker_study, decision_policy, merge_gate)
     states = [row["state"] for row in preconditions]
     if all(state == "met" for state in states):
         autonomous_state = "PRECONDITIONS_MET_EXECUTOR_NOT_IMPLEMENTED"
@@ -809,15 +929,15 @@ def build_operating_state(cfg: EngineConfig) -> dict[str, Any]:
         deploy_acceptance_evidence = "no post-deploy acceptance artifact has been produced yet"
     rows = [
         _row("research_mode", "Research mode", research_mode, f"trading.mode={trading_mode}; paper.enabled={paper_enabled}; live.enabled={live_enabled}", "effective config"),
-        _row("mechanical_paper_capability", "Mechanical paper capability", paper_capability, str(readiness.get("decision") or UNKNOWN), "config + paper_trade_readiness.json", _timestamp(readiness)),
+        _row("mechanical_paper_capability", "Mechanical paper readiness (not authorisation)", paper_capability, mechanical_evidence, "effective config + paper_trade_readiness.json", _timestamp(readiness)),
         _row("governed_paper_authorisation", "Governed paper authorisation", governed_paper, governed_evidence, "local_history_audit_summary.json", _timestamp(audit)),
-        _row("paper_activity", "Paper activity", paper_activity, paper_activity_evidence, "paper_fills.csv"),
+        _row("paper_activity", "Paper-simulation activity by registered lane", paper_activity, paper_activity_evidence, "paper_fills.csv + paper_orders.csv"),
         _row("human_live_test", "Human live-test authorisation", human_live_test, "human execution is outside system control; system monitoring is read-only", "maker_live_test config"),
         _row(
             "live_wallet_monitoring",
             "Live-wallet monitoring (legacy primary view)",
             wallet_state,
-            f"primary={'operator' if operator_wallet_configured else 'executor'}; wallets_combined=false",
+            "primary=single_project_account; custody=A1; attribution=non_overlapping_mode_time_windows",
             "config + maker_live_test.json",
             _timestamp(maker_live_test),
         ),
@@ -825,17 +945,28 @@ def build_operating_state(cfg: EngineConfig) -> dict[str, Any]:
             "operator_wallet_monitoring",
             "Operator wallet monitoring",
             operator_wallet_state,
-            f"configured={operator_wallet_configured if operator_wallet_configured is not None else UNKNOWN}; role=operator",
+            f"configured={operator_wallet_configured if operator_wallet_configured is not None else UNKNOWN}; role=human_operator_window; custody=A1",
             "maker_live_test.wallet_address + maker_live_test.json",
             _timestamp(maker_live_test),
         ),
         _row(
             "executor_wallet_monitoring",
-            "Executor sub-account wallet monitoring",
+            "Executor-era monitoring on the A1 single project wallet",
             executor_wallet_state,
-            f"configured={executor_wallet_configured if executor_wallet_configured is not None else UNKNOWN}; role=executor; auto_redeem_wins=owner_check_required",
-            "maker_live_test.executor_wallet_address + maker_live_test.json",
+            (
+                "configured_from=maker_live_test.wallet_address; legacy_executor_wallet_field_must_remain_empty="
+                f"{not bool(executor_wallet_configured)}; role=executor_mode_time_window; concurrent_human_window_prohibited=true"
+            ),
+            "custody Amendment A1 + maker_live_test.wallet_address + execution ledger mode/time",
             _timestamp(maker_live_test),
+        ),
+        _row(
+            "a1_sweep_advisory",
+            "A1 excess-balance sweep advisory",
+            str(a1_sweep_advisory.get("status") or UNKNOWN).upper(),
+            str(a1_sweep_advisory.get("advice") or a1_sweep_advisory.get("reason") or UNKNOWN),
+            "execution/a1_sweep_advisory.json",
+            _timestamp(a1_sweep_advisory),
         ),
         _row("live_orders_submitted", "Live orders submitted by the system", live_orders, live_order_evidence, str(live_ledger or UNKNOWN)),
         _row(
@@ -949,6 +1080,8 @@ def build_operating_state(cfg: EngineConfig) -> dict[str, Any]:
         "degraded_state_watchdog": degraded_watchdog,
         "deploy_acceptance": deploy_acceptance,
         "executor_status": executor_status,
+        "a1_sweep_advisory": a1_sweep_advisory,
+        "paper_activity_lanes": lane_counts,
         "deployment": {
             "status": source_deployed_state,
             "source_git_rev": source_sha or UNKNOWN,

@@ -2446,10 +2446,11 @@ PRECONDITIONS (all required, in order):
       positive real days with fills <= 2x model - the model must be
       verified by human-executed evidence first, so any later divergence
       is attributable to the executor, not the model.
-  P3. The repo owner commits a dated amendment to AGENTS.md + CLAUDE.md
-      explicitly authorising a live order path with defined scope. This
-      is the owner's deliberate act in writing; a chat instruction never
-      suffices, by prior registered rule.
+  P3. The repo owner commits a dated amendment to the AGENTS.md Owner
+      amendments section explicitly authorising a live order path with
+      defined scope. CLAUDE.md may point to that authoritative section but
+      is not a second signature surface. This is the owner's deliberate act
+      in writing; a chat instruction never suffices, by prior registered rule.
   P4. Independent review control: execution-path code requires review by
       an agent/person other than its author before merge (closes the
       self-merge gap in SYSTEM_MAP.md).
@@ -2784,10 +2785,10 @@ broker, cancellation, paper, or live order path was added.
 ## WO-76 — Pre-registered canary promotion/demotion contract (REGISTRATION, effective on filing)
 
 Registered now so no discretion exists later. Canary = ONE market,
-minimum reward-eligible size, executor account only.
+minimum reward-eligible size, single project account under A1 sequencing.
 1. PROMOTION canary -> portfolio requires ALL, measured over >= 7
    consecutive canary days: three-way reconciliation clean every day
-   (incl. executor wallet); fills <= 2x model; measured post-fill
+   for the single project wallet in its executor mode/time window; fills <= 2x model; measured post-fill
    markout within the charged adverse-selection budget; reward receipts
    >= 0.5x model; zero uncontrolled states (every halt explained in the
    anchored ledger); replay certification still green on the deployed
@@ -2864,6 +2865,17 @@ quoting into UMA limbo is pure resolution risk.
    resolution ... exclusions" per the registry's H1 universe).
 
 ## WO-81 — Reconcile specs and runbooks to custody Amendment A1 (single account)
+
+Status: IMPLEMENTED by Codex on 2026-07-14 in PR #197. The single project
+wallet is now authoritative across the custody drill, live-ops control plane,
+operating state, maker artifacts, and daily Stage-1 page. The ops lane emits a
+human-only excess-balance sweep advisory and the exit rail has a registered
+withdrawal/cost-capture runbook. Signed P3/P5 evidence, P4 explanation,
+governance-document mounts, paper-fill attribution, fresh authorisation, and
+intentional-versus-overrun scheduler accounting are fail-closed and covered by
+deployment acceptance tests. No order, signing, credential, funding movement,
+gate, paper broker, or live-executor path changed. Ruff, config validation, 62
+focused tests, and the full 1,157-test ARM64/Python 3.11 suite passed.
 
 The signed A1 amendment (2026-07-13) superseded the sub-account
 structure. Documents and specs that still assume it must be reconciled

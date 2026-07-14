@@ -1,9 +1,26 @@
-# Executor sub-account onboarding and credential drill (WO-73)
+# Single-project-account credential drill (WO-73, reconciled by WO-81)
 
 This is an owner runbook, not execution authorisation. WO-67 and credential
 loading remain blocked until the registered post-amendment conditions are met.
 
-## Sub-account onboarding
+## Amendment A1 current account structure
+
+Signed custody Amendment A1 supersedes the sub-account onboarding steps below.
+The existing project account is the only account. The human Stage-1 window must
+finish before any future executor canary window starts, and the two modes may
+never overlap. Attribution is by registered UTC window plus the anchored action
+or execution ledger. `maker_live_test.executor_wallet_address` stays empty.
+
+Before a future executor window, the owner confirms AUTO-REDEEM WINS on the
+single project account, keeps only the active ladder-stage capital plus the
+registered $5 sweep buffer, and completes the unchanged fail-flat,
+rotation/revocation, and credential-guard drills below. None of this authorises
+WO-67 or loads a credential.
+
+## Superseded historical sub-account onboarding (do not execute)
+
+These steps are retained for governance history only. Amendment A1 replaced
+them on 2026-07-13.
 
 1. Create a dedicated Polymarket executor account. Never reuse the operator
    account or its credentials.

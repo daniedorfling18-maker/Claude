@@ -239,6 +239,14 @@ def test_vps_ops_scheduler_replaces_github_side_jobs():
     mounts = " ".join(service["volumes"])
     for needed in ("./outputs:/app/outputs", "./work:/app/work", "./data:/app/data", "./inputs:/app/inputs"):
         assert needed in mounts, f"ops scheduler missing mount {needed}"
+    for service_name in ("polymarket-paper-live", "vps-ops-scheduler"):
+        governance_mounts = " ".join(compose["services"][service_name]["volumes"])
+        for needed in (
+            "./AGENTS.md:/app/AGENTS.md:ro",
+            "./CLAUDE.md:/app/CLAUDE.md:ro",
+            "./docs:/app/docs:ro",
+        ):
+            assert needed in governance_mounts, f"{service_name} missing read-only governance mount {needed}"
 
     script = (ROOT / "scripts" / "run_vps_ops_scheduler.sh").read_text(encoding="utf-8")
     assert "refresh-governance" in script
@@ -248,6 +256,12 @@ def test_vps_ops_scheduler_replaces_github_side_jobs():
     assert 'timeout "$GOVERNANCE_TIMEOUT"' in script
     assert "status.json" in script
     assert "consecutive_skipped_cycles" in script
+    assert 'skip_kind == "intentional"' in script
+    assert 'skip_kind == "overrun"' in script
+    assert "consecutive_skipped_intentional" in script
+    assert "consecutive_skipped_overrun" in script
+    assert 'stamp_status clv_snapshot 0 "skipped: odds quota exhausted" "" intentional' in script
+    assert "audit_polymarket_local_history.py" in script
     assert "duration_seconds" in script
     assert "polymarket_predictive_engine.cli operating-state" in script
     # 2026-07-09: daily resolved-market harvest (Gamma backfill + CLOB price

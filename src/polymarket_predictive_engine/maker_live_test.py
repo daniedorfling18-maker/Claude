@@ -210,7 +210,8 @@ def run_maker_live_test(cfg: EngineConfig) -> dict[str, Any]:
     summary: dict[str, Any] = {
         "status": "disabled",
         "generated_at_utc": now_utc(),
-        "work_order": "WO-36+WO-73",
+        "work_order": "WO-36+WO-73+WO-81",
+        "account_structure": "single_project_account_under_custody_amendment_A1",
         "paper_trading_invoked": False,
         "live_trading_invoked": False,
         "note": (
@@ -239,10 +240,7 @@ def run_maker_live_test(cfg: EngineConfig) -> dict[str, Any]:
                     for role in wallets
                 },
                 "wallets_combined": False,
-                "how_to_enable": (
-                    "set maker_live_test.wallet_address and/or the public "
-                    "executor_wallet_address, then recreate the containers"
-                ),
+                "how_to_enable": "set the public maker_live_test.wallet_address, then recreate the containers",
             }
         )
         write_json(summary_path, summary)
@@ -275,14 +273,19 @@ def run_maker_live_test(cfg: EngineConfig) -> dict[str, Any]:
     summary.update(
         {
             "status": "ok",
-            "work_order": "WO-36+WO-73",
+            "work_order": "WO-36+WO-73+WO-81",
+            "account_structure": "single_project_account_under_custody_amendment_A1",
+            "attribution_policy": "human and executor mode/time windows never overlap; anchored ledgers attribute activity",
             "primary_wallet_role": primary_role,
             "operator_wallet_address": wallets["operator"],
             "executor_wallet_address": wallets["executor"],
             "wallets": wallet_rows,
             "wallets_combined": False,
-            "aggregation_policy": "operator and executor scoreboards are reported separately and never summed",
-            "auto_redeem_wins_owner_check": "required_on_executor_sub_account",
+            "aggregation_policy": (
+                "single project wallet under A1; legacy separate-wallet rows are never summed if a superseded field is populated"
+            ),
+            "legacy_executor_wallet_config_drift": bool(wallets["executor"]),
+            "auto_redeem_wins_owner_check": "required_on_single_project_account",
         }
     )
     write_json(summary_path, summary)

@@ -1,9 +1,9 @@
-# Key custody design — WO-67 precondition P5 (DRAFT for owner approval)
+# Key custody design — WO-67 precondition P5 (approved; Amendment A1 active)
 
-Drafted 2026-07-13. This is a design document only; it contains no keys
-and authorizes nothing. P5 is satisfied when the owner approves a final
-version of this document. Approval is recorded by the owner merging the
-edit that changes Status below to APPROVED, from the owner's own account.
+Drafted and approved 2026-07-13. This design contains no keys and does not by
+itself authorise an execution path. P5 approval is recorded by the dated Status
+lines below; P1–P4, including the later AGENTS.md owner amendment for P3, remain
+independent requirements.
 
 **Status: APPROVED — Danie Dörfling, 2026-07-13.**
 
@@ -15,7 +15,7 @@ making four bad outcomes structurally impossible, not merely forbidden:
 registered stage cap, (3) withdrawal of funds by the executor, (4) key
 exposure via the repository, telemetry, chat, or backups.
 
-## Recommended design: dedicated trading sub-account, cap by construction
+## Superseded pre-A1 design: dedicated trading sub-account
 
 1. A NEW Polymarket account ("executor account") is created by the owner,
    separate from the operator's existing account. Its wallet holds ONLY
@@ -108,8 +108,8 @@ Compensating controls, binding on WO-67's build:
 ## Owner acceptance checklist (all boxes required for APPROVED)
 
 - [X] Sub-account design accepted (or a written alternative chosen).
-- [X] Residual risk accepted: the executor signing key can lose at most
-      the stage capital in the executor account.
+- [X] Residual risk accepted: the future executor signing key can lose at most
+      the stage capital retained in the single project account under A1.
 - [X] Rotation + revocation drill procedure accepted.
 - [X] Telemetry credential-guard test accepted as a WO deliverable.
 - [X] Understood: this document plus the signed AGENTS.md amendment

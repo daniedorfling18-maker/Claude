@@ -230,7 +230,7 @@ performance_factsheet:
 operating_state_slos:
   quote_sheet_max_age_seconds: 93600
   governance_refresh_max_duration_seconds: 2400
-  max_consecutive_skipped_scheduler_cycles: 0
+  max_consecutive_scheduler_overruns: 0
   websocket_max_gap_seconds: 300
   dashboard_max_age_seconds: 300
   reconciliation_max_age_seconds: 93600
@@ -277,6 +277,15 @@ executor_ops:
   dead_man_gap_seconds: 1800
   executor_freshness_slo_seconds: 600
 
+# 2026-07-14 WO-81: reporting-only Amendment A1 balance discipline. A clean,
+# fresh three-way NAV above the active stage cap + $5 triggers human advice to
+# sweep back to the stage cap. Overrides may lower either maximum, never raise
+# it. No component can initiate a withdrawal or transfer.
+a1_balance_discipline:
+  enabled: true
+  sweep_threshold_usd: 5.0
+  reconciliation_max_age_seconds: 93600
+
 # 2026-07-11 WO-61: daily tamper-evident prefix hashes for the investor-facing
 # ledger set. Reporting infrastructure only; no gate, sizing rule, policy,
 # broker, or order path reads it. State tables that are legitimately rewritten
@@ -301,6 +310,7 @@ ledger_anchor:
     - {glob: execution/credential_rotation_drill.json, mode: snapshot}
     - {glob: execution/replay_certification.json, mode: snapshot}
     - {glob: execution/execution_ledger.csv, mode: append_only}
+    - {glob: execution/a1_sweep_advisory.json, mode: snapshot}
     - {glob: execution/executor_status.json, mode: snapshot}
     - {glob: performance/investment_policy_statement.md, mode: snapshot}
     - {glob: performance/investment_policy_statement_summary.json, mode: snapshot}
@@ -370,9 +380,9 @@ maker_live_test:
   # identifier, read-only monitoring). Deposits go via the bridge, never
   # to this address. Set during the R250 pipe test; SA access verified.
   wallet_address: "0xD2EC3c8f541ad3aaC9396d63650D9d297bd55D2f"
-  # WO-73 public identifier only. Populate after the owner creates the
-  # isolated executor sub-account and enables AUTO-REDEEM WINS in that
-  # account's Trading settings. No credential is loaded by this config.
+  # Historical WO-73 field, superseded by signed custody Amendment A1. Keep it
+  # empty: any future executor uses wallet_address in a non-overlapping,
+  # mode/time-attributed executor window. No credential is loaded here.
   executor_wallet_address: ""
   fill_alert_multiple: 2.0
 

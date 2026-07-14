@@ -94,6 +94,19 @@ def _seed_complete_inputs(cfg: EngineConfig) -> None:
             }
         ],
     )
+    write_json(
+        performance / "wallet_reconciliation.json",
+        {
+            "generated_at_utc": "2026-07-15T05:59:00Z",
+            "reconciliation_status": "clean",
+            "internal_nav_usd": 106.0,
+            "data_api_nav_usd": 106.1,
+            "onchain_nav_usd": 106.0,
+            "internal": {"status": "ok", "nav_usd": 106.0, "cash_usd": 10.0},
+            "data_api": {"status": "ok", "nav_usd": 106.1, "reconstructed_cash_usd": 10.1},
+            "onchain": {"status": "ok", "nav_usd": 106.0, "pusd_balance_usd": 10.0},
+        },
+    )
     write_csv(
         performance / "cost_ledger.csv",
         [
@@ -120,6 +133,8 @@ def test_stage_day_renders_complete_operator_page(tmp_path: Path, monkeypatch: p
     assert result["cost_delta"]["today_usd"] == 0.25
     assert result["cost_delta"]["yesterday_usd"] == 1.5
     assert result["cost_delta"]["delta_vs_yesterday_usd"] == -1.25
+    assert result["a1_sweep_advisory"]["status"] == "sweep_advised"
+    assert result["a1_sweep_advisory"]["suggested_sweep_usd"] == 6.0
     page = Path(result["page_path"]).read_text(encoding="utf-8")
     for heading in (
         "Order tickets (WO-66)",
@@ -127,6 +142,7 @@ def test_stage_day_renders_complete_operator_page(tmp_path: Path, monkeypatch: p
         "Kill scoreboard",
         "Yesterday's reconciliation",
         "Cost ledger delta",
+        "A1 excess-balance sweep advisory",
         "A1 sequencing and balance discipline",
         "Kill-criteria response",
     ):

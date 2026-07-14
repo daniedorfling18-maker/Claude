@@ -652,6 +652,13 @@ and planted-leak tests. The keyless rotation drill proves an unchanged
 fail-flat contract against missing/invalid dummy credentials. WO-73 item 4
 remains post-amendment: there is no executor credential loading or order path.
 
+**2026-07-14 — custody Amendment A1 reconciliation.** The separate-wallet
+description above is retained as WO-73 implementation history, but A1 now
+governs: one project wallet, non-overlapping human/executor UTC windows, and
+mode/time attribution from anchored ledgers. The legacy
+`executor_wallet_address` stays empty. Fail-flat, rotation, revocation, and
+credential-guard controls remain unchanged.
+
 **2026-07-13 — WO-74 implemented by Codex.** A keyless, executor-independent
 replay-certification harness now combines recorded WO-44 official-book windows
 with every registered stress case and verifies exact ticket boundaries,
@@ -665,8 +672,10 @@ broker, paper/live trading, signing, cancellation, or order path exists.
 scheduler now independently consumes the future executor ledger/heartbeat
 contract and publishes an `ABSENT`-until-present live-ops surface covering
 mode, open orders, exposure versus stage cap, last-action age, heartbeat
-freshness/dead-man countdown, decision-policy kill criteria, and isolated
-executor-wallet reconciliation. Registered alert transitions emit the existing
+freshness/dead-man countdown, decision-policy kill criteria, and executor-era
+project-wallet reconciliation. Under A1 this means executor-era monitoring of
+the same project wallet, never a concurrently active second wallet. Registered
+alert transitions emit the existing
 owner-notification artifact contract and deduplicate unchanged incidents. The
 fourth producer/consumer contract makes the future ledger/heartbeat schema,
 freshness, and coverage PR-gate testable. The monitor and dashboard cannot

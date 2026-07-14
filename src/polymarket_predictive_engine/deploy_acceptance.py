@@ -26,6 +26,11 @@ OUTPUT_FILE = "ops_scheduler/deploy_acceptance.json"
 BASELINE_FILE = "ops_scheduler/deploy_acceptance_baseline.json"
 PRODUCER_CYCLE_FILE = "ops_scheduler/deploy_acceptance_cycle.json"
 NOTIFICATION_BODY = "ops_scheduler/deploy_acceptance_notification.md"
+REQUIRED_GOVERNANCE_DOCS: tuple[tuple[str, str], ...] = (
+    ("AGENTS.md", "outputs/performance/operating_state.md"),
+    ("CLAUDE.md", "AGENTS.md"),
+    ("docs/KEY_CUSTODY_DESIGN_WO67_P5.md", "Amendment A1"),
+)
 
 LEGITIMATE_REQUOTE_RULES = frozenset(
     {
@@ -315,6 +320,31 @@ def _producer_cycle_check(cfg: EngineConfig, baseline_at: datetime | None) -> di
     }
 
 
+def _governance_docs_readable_check(cfg: EngineConfig) -> dict[str, Any]:
+    repo_root = cfg.path.resolve().parent
+    defects: list[dict[str, str]] = []
+    observed: list[dict[str, Any]] = []
+    for relative, required_text in REQUIRED_GOVERNANCE_DOCS:
+        path = repo_root / relative
+        row = {"path": relative, "readable": False, "required_text_present": False}
+        try:
+            text = path.read_text(encoding="utf-8-sig", errors="strict")
+            row["readable"] = True
+            row["required_text_present"] = required_text in text
+            if required_text not in text:
+                defects.append({"path": relative, "reason": f"required marker missing: {required_text}"})
+        except (OSError, UnicodeError) as exc:
+            defects.append({"path": relative, "reason": f"unreadable: {type(exc).__name__}: {exc}"})
+        observed.append(row)
+    return {
+        "id": "governance_documents_mounted_read_only",
+        "status": "PASS" if not defects else "FAIL",
+        "documents": observed,
+        "expected_container_mode": "read_only_bind_mount",
+        "defects": defects,
+    }
+
+
 def _notification(
     cfg: EngineConfig,
     *,
@@ -385,6 +415,7 @@ def build_deploy_acceptance(
     registry = build_contract_registry(cfg)
 
     checks = [
+        _governance_docs_readable_check(cfg),
         _producer_cycle_check(cfg, baseline_at),
         _quote_ticket_check(study, requote, generated_at=generated_dt),
         _requote_state_check(requote, baseline_at),

@@ -16,6 +16,7 @@ import time
 from typing import Any, Mapping
 from uuid import uuid4
 
+from .a1_controls import build_a1_sweep_advisory
 from .config import EngineConfig, load_config
 from .cost_ledger import aggregate_costs
 from .runtime_lock import runtime_lock
@@ -289,6 +290,7 @@ def _render_markdown(payload: Mapping[str, Any]) -> str:
     kill = _mapping(payload.get("kill_scoreboard"))
     reconciliation = _mapping(payload.get("yesterday_reconciliation"))
     costs = _mapping(payload.get("cost_delta"))
+    sweep = _mapping(payload.get("a1_sweep_advisory"))
     lines = [
         "# Human Stage-1 operating page",
         "",
@@ -359,6 +361,15 @@ def _render_markdown(payload: Mapping[str, Any]) -> str:
         f"- Today ({_md(costs.get('today_date'))}): {_money(costs.get('today_usd'))}",
         f"- Yesterday ({_md(costs.get('yesterday_date'))}): {_money(costs.get('yesterday_usd'))}",
         f"- Delta versus yesterday: {_money(costs.get('delta_vs_yesterday_usd'))}",
+        "",
+        "## A1 excess-balance sweep advisory",
+        "",
+        f"- State: **{_md(sweep.get('status'))}**",
+        f"- Reconciled NAV / active stage cap: {_money(sweep.get('reconciled_nav_usd'))} / "
+        f"{_money(sweep.get('active_stage_cap_usd'))}",
+        f"- Registered trigger buffer: {_money(sweep.get('sweep_threshold_usd'))}",
+        f"- Human advice: **{_md(sweep.get('advice'))}**",
+        "- This is reporting only; the system cannot initiate the withdrawal.",
         "",
         "## Actions recorded today",
         "",
@@ -434,6 +445,7 @@ def build_stage_day(cfg: EngineConfig, *, stage_date: str | None = None) -> dict
             "kill_scoreboard": _kill_view(policy),
             "yesterday_reconciliation": _yesterday_reconciliation(cfg, target),
             "cost_delta": _cost_delta(cfg, target),
+            "a1_sweep_advisory": build_a1_sweep_advisory(cfg, as_of=generated_at),
             "actions_today": _actions_for_date(ledger_path, target),
             "a1_reminders": A1_REMINDERS,
             "kill_response_steps": KILL_RESPONSE_STEPS,

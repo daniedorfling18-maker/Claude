@@ -99,7 +99,7 @@ def _seed_runtime(
         {
             "generated_at_utc": _stamp(30),
             "wallets": {
-                "executor": {
+                "operator": {
                     "reconciliation_status": "DISCREPANCY" if discrepancy_usd > 1.0 else "clean",
                     "unexplained_discrepancy_usd": discrepancy_usd,
                 }
@@ -195,6 +195,7 @@ def test_threshold_overrides_can_only_tighten(tmp_path: Path) -> None:
     assert result["dead_man"]["gap_threshold_seconds"] == 1800.0
     assert result["freshness_slo"]["slo_seconds"] == 600.0
     assert result["executor_reconciliation"]["threshold_usd"] == 1.0
+    assert result["executor_reconciliation"]["wallet_source_role"] == "operator_project_wallet_A1"
     assert "executor_freshness_slo_breach" in identifiers
     assert "executor_reconciliation_discrepancy" in identifiers
     assert "dead_man_triggered" not in identifiers
@@ -274,4 +275,3 @@ def test_wo75_is_registered_without_an_execution_client() -> None:
     assert "from .execution" not in source
     assert "web3" not in source.lower()
     assert "clobclient" not in source.lower()
-

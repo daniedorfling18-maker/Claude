@@ -313,6 +313,10 @@ run_training_harvest() {
     # WO-63 true-net cost ledger: convert newly observed investor-paid gas to
     # USD after WO-62, before the factsheet. Relayer gas is never charged.
     timeout "$HARVEST_TIMEOUT" python -m polymarket_predictive_engine.cli sync-cost-ledger --config "$CONFIG_PATH"
+    # WO-82 human Stage-1 operating page: current exact tickets, requote/kill
+    # state, prior-day reconciliation, and cost delta. It only renders and
+    # reads the append-only human action log; it cannot mutate venue orders.
+    timeout "$HARVEST_TIMEOUT" python -m polymarket_predictive_engine.cli stage-day --config "$CONFIG_PATH"
     # WO-42 favourite/longshot calibration bias study. Corpus-bound and
     # study-only; flags are candidates for future pre-registration, not trades.
     timeout "$HARVEST_TIMEOUT" python -m polymarket_predictive_engine.cli calibration-bias-study --config "$CONFIG_PATH"
@@ -335,7 +339,7 @@ run_training_harvest() {
     timeout "$HARVEST_TIMEOUT" python -m polymarket_predictive_engine.cli anchor-ledgers --config "$CONFIG_PATH"
   ) >> "$LOG_FILE" 2>&1
   CODE=$?
-  stamp_status training_harvest "$CODE" "gamma resolved-markets backfill + clob price histories + wallet intelligence + maker-carry study + deep trade-print backfill + maker-fill replay + flow toxicity + decision policy + wallet reconciliation + true-net cost ledger + reconstructed CLV study + calibration-bias study + martingale drift scan + performance factsheet + investment policy statement + bounded corpus retention + generated operating state + ledger anchor"
+  stamp_status training_harvest "$CODE" "gamma resolved-markets backfill + clob price histories + wallet intelligence + maker-carry study + deep trade-print backfill + maker-fill replay + flow toxicity + decision policy + wallet reconciliation + true-net cost ledger + Stage-1 operator page + reconstructed CLV study + calibration-bias study + martingale drift scan + performance factsheet + investment policy statement + bounded corpus retention + generated operating state + ledger anchor"
   log "training_harvest: exit $CODE"
 }
 

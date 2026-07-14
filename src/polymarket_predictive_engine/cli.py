@@ -94,6 +94,7 @@ from .sharp_odds_fetch import fetch_sharp_odds
 from .smart_flow_clv import build_smart_flow_clv
 from .snapshot_ingest import ingest_scanner_snapshot
 from .snapshot_label_collector import collect_snapshot_labels
+from .stage_operator import ACTION_SIDES, ACTION_TYPES, run_stage_day
 from .storage import init_db
 from .strategy import generate_signals
 from .strategy_search import run_edge_strategy_search
@@ -128,6 +129,7 @@ COMMANDS = [
     "flow-toxicity",
     "decision-policy",
     "requote-alerts",
+    "stage-day",
     "performance-factsheet",
     "operating-state",
     "degraded-state-watchdog",
@@ -237,6 +239,14 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--cost-usd", type=float, default=None, help="add-cost: positive USD amount")
     parser.add_argument("--cost-ref", default=None, help="add-cost: required unique idempotency reference")
     parser.add_argument("--cost-note", default="", help="add-cost: optional audit note")
+    parser.add_argument("--stage-date", default=None, help="stage-day: UTC stage date (YYYY-MM-DD; defaults to today)")
+    parser.add_argument("--record-action", choices=ACTION_TYPES, default=None, help="stage-day: append a human action to the WO-82 log")
+    parser.add_argument("--action-at-utc", default=None, help="stage-day: action timestamp (defaults to now; must match --stage-date)")
+    parser.add_argument("--action-market-id", default="", help="stage-day: condition/market ID for the recorded human action")
+    parser.add_argument("--action-side", choices=ACTION_SIDES, default="n/a", help="stage-day: bid, ask, both, or n/a")
+    parser.add_argument("--action-price", type=float, default=None, help="stage-day: human-entered quote price")
+    parser.add_argument("--action-size-shares", type=float, default=None, help="stage-day: human-entered quote size in shares")
+    parser.add_argument("--action-note", default="", help="stage-day: concise operator note; never include credentials")
     parser.add_argument("--archive-path", default=None, help="verify-ledger-archive: tar.gz archive to verify")
     parser.add_argument("--restore-output-root", default=None, help="verify-ledger-archive: empty destination for an applied restore")
     parser.add_argument("--apply-restore", action="store_true", help="verify-ledger-archive: copy verified files into --restore-output-root")
@@ -361,6 +371,20 @@ def main(argv: list[str] | None = None) -> int:
             _print(run_decision_policy(cfg))
         elif args.command == "requote-alerts":
             _print(build_requote_alerts(cfg))
+        elif args.command == "stage-day":
+            _print(
+                run_stage_day(
+                    cfg,
+                    stage_date=args.stage_date,
+                    action_type=args.record_action,
+                    action_at_utc=args.action_at_utc,
+                    market_id=args.action_market_id,
+                    side=args.action_side,
+                    price=args.action_price,
+                    size_shares=args.action_size_shares,
+                    note=args.action_note,
+                )
+            )
         elif args.command == "performance-factsheet":
             _print(build_performance_factsheet(cfg))
         elif args.command == "operating-state":

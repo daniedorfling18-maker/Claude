@@ -429,6 +429,17 @@ cost_ledger:
   request_timeout_seconds: 20
   request_pause_seconds: 0.1
   lock_stale_seconds: 1800
+
+# 2026-07-14 WO-82: generated Human Stage-1 page plus an append-only,
+# anchor-enrolled record of actions performed manually in the venue UI.
+# Reporting/recording only: this module has no order or credential path.
+stage_operator:
+  enabled: true
+  page_directory: execution/stage_days
+  summary_file: execution/stage_day.json
+  action_ledger_file: execution/stage_operator_log.csv
+  lock_stale_seconds: 1800
+
 # 2026-07-09 WO-34: negRisk event groups must price to $1; the detector logs
 # net-of-fee deviations every scan (persistence = recurrence). Second
 # registered edge class; needs NO odds credits. Measurement only.

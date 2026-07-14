@@ -273,7 +273,7 @@ def collect_trade_prints(
                 }
             )
             continue
-        trades = payload if isinstance(payload, list) else payload.get("trades") or payload.get("data") or []
+        trades = _trade_items(payload)
         for trade in trades:
             if not isinstance(trade, dict):
                 continue

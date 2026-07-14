@@ -191,7 +191,7 @@ def test_absent_archive_is_tolerated(tmp_path):
     assert persisted["live_trading_invoked"] is False
 
 
-def test_snapshot_official_books_uses_current_documented_book_and_deduplicates_hash(tmp_path, monkeypatch):
+def test_snapshot_official_books_retains_repeated_observations_of_unchanged_book(tmp_path, monkeypatch):
     cfg = _config(tmp_path)
     raw = yaml.safe_load((tmp_path / "config.yaml").read_text(encoding="utf-8"))
     raw["maker_fill_replay"].update({"book_source": "official", "request_pause_seconds": 0})
@@ -199,7 +199,8 @@ def test_snapshot_official_books_uses_current_documented_book_and_deduplicates_h
     cfg = load_config(tmp_path / "config.yaml")
     _seed_maker_portfolio(cfg)
     monkeypatch.setattr(maker_fill_replay.time, "sleep", lambda _: None)
-    monkeypatch.setattr(maker_fill_replay, "now_utc", lambda: "1970-01-01T00:16:00Z")
+    observation_times = iter(["1970-01-01T00:16:00Z", "1970-01-01T00:31:00Z"])
+    monkeypatch.setattr(maker_fill_replay, "now_utc", lambda: next(observation_times))
     calls = []
 
     def fake_get(url, params=None, timeout=None):
@@ -221,9 +222,13 @@ def test_snapshot_official_books_uses_current_documented_book_and_deduplicates_h
 
     assert summary["status"] == "ok"
     rows = maker_fill_replay._read_csv_any(cfg.output_root / "maker_carry" / "official_books" / "0xcond.csv.gz")
-    assert [(row["source_timestamp"], row["hash"]) for row in rows] == [("1000.0", "h1")]
+    assert [(row["source_timestamp"], row["hash"]) for row in rows] == [
+        ("1000.0", "h1"),
+        ("1000.0", "h1"),
+    ]
+    assert [row["observation_timestamp"] for row in rows] == ["960.0", "1860.0"]
     assert summary["rows_added"] == 1
-    assert repeated["rows_added"] == 0
+    assert repeated["rows_added"] == 1
     assert len(calls) == 2
     assert summary["paper_trading_invoked"] is False
     assert summary["live_trading_invoked"] is False

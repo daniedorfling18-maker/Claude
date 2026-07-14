@@ -30,6 +30,7 @@ OFFICIAL_BOOK_FIELDS = [
     "condition_id",
     "asset_id",
     "source_timestamp",
+    "observation_timestamp",
     "hash",
     "best_bid",
     "best_ask",
@@ -130,7 +131,11 @@ def _book_states_from_rows(rows: list[dict[str, Any]], token_ids: set[str], repl
         token_id = str(row.get("asset_id") or row.get("token_id") or "").strip()
         if token_id not in token_ids:
             continue
-        stamp = _stamp(row.get("source_timestamp") or row.get("collected_at_utc"))
+        # Official point snapshots retain the venue's last-change timestamp,
+        # but replay coverage is bounded by when this system observed the book.
+        stamp = _stamp(
+            row.get("observation_timestamp") or row.get("source_timestamp") or row.get("collected_at_utc")
+        )
         bid = safe_float(row.get("best_bid"))
         ask = safe_float(row.get("best_ask"))
         midpoint = safe_float(row.get("midpoint"))
@@ -267,6 +272,7 @@ def _best_level(levels: list[dict[str, Any]], *, side: str) -> tuple[float | Non
 
 def _official_row(snapshot: dict[str, Any], *, condition_id: str, token_id: str, collected_at: str) -> dict[str, Any] | None:
     stamp = _stamp(snapshot.get("timestamp") or snapshot.get("t") or snapshot.get("createdAt") or snapshot.get("created_at"))
+    observation_stamp = _stamp(collected_at)
     bids = _levels(snapshot.get("bids"))
     asks = _levels(snapshot.get("asks"))
     bid, bid_size = _best_level(bids, side="bid")
@@ -277,6 +283,7 @@ def _official_row(snapshot: dict[str, Any], *, condition_id: str, token_id: str,
         "condition_id": condition_id,
         "asset_id": str(snapshot.get("asset_id") or snapshot.get("token_id") or snapshot.get("market") or token_id),
         "source_timestamp": stamp,
+        "observation_timestamp": observation_stamp if observation_stamp is not None else stamp,
         "hash": str(snapshot.get("hash") or snapshot.get("book_hash") or f"{int(stamp)}:{bid}:{ask}"),
         "best_bid": bid,
         "best_ask": ask,
@@ -405,19 +412,31 @@ def snapshot_official_books(cfg: EngineConfig) -> dict[str, Any]:
         path = out_root / "official_books" / f"{condition_id}.csv.gz"
         existing = _read_csv_any(path)
         existing_keys = {
-            (str(item.get("source_timestamp") or ""), str(item.get("hash") or "")) for item in existing
+            (
+                str(item.get("observation_timestamp") or item.get("source_timestamp") or ""),
+                str(item.get("hash") or ""),
+            )
+            for item in existing
         }
         dedup: dict[tuple[str, str], dict[str, Any]] = {}
         for item in [*existing, row]:
-            key = (str(item.get("source_timestamp") or ""), str(item.get("hash") or ""))
+            key = (
+                str(item.get("observation_timestamp") or item.get("source_timestamp") or ""),
+                str(item.get("hash") or ""),
+            )
             if all(key):
                 dedup[key] = item
-        combined = sorted(dedup.values(), key=lambda item: safe_float(item.get("source_timestamp")) or 0.0)
+        combined = sorted(
+            dedup.values(),
+            key=lambda item: safe_float(item.get("observation_timestamp"))
+            or safe_float(item.get("source_timestamp"))
+            or 0.0,
+        )
         max_rows = int(settings["max_official_book_rows"])
         if max_rows > 0 and len(combined) > max_rows:
             combined = combined[-max_rows:]
         _write_gzip_csv(path, combined, OFFICIAL_BOOK_FIELDS)
-        added = int((str(row["source_timestamp"]), str(row["hash"])) not in existing_keys)
+        added = int((str(row["observation_timestamp"]), str(row["hash"])) not in existing_keys)
         rows_added += added
         files_written.append(str(path))
         market_polls.append(
@@ -671,6 +690,7 @@ def _replay_against_states(
             "asset_id": str(row["token_id"]),
             "question": str(row.get("question") or ""),
             "simulated_fill_opportunities": 0,
+            "last_in_queue_evaluable_opportunities": 0,
             "confirmed_fills": 0,
             "windows_simulated": 0,
             "windows_covered": 0,
@@ -683,6 +703,7 @@ def _replay_against_states(
     }
     fills: list[dict[str, Any]] = []
     simulated_fill_opportunities = 0
+    last_in_queue_evaluable_opportunities = 0
     relevant_trades: list[dict[str, Any]] = []
     for trade in trades:
         if start_stamp is not None and trade["stamp"] < start_stamp:
@@ -732,6 +753,8 @@ def _replay_against_states(
 
         if state is None:
             continue
+        last_in_queue_evaluable_opportunities += 1
+        market_coverage["last_in_queue_evaluable_opportunities"] += 1
         depth_ahead = state["bid_depth"] if direction == "bid_fill" else state["ask_depth"]
         fillable = trade["size"] - depth_ahead
         if fillable <= 0:
@@ -784,6 +807,7 @@ def _replay_against_states(
     per_market_coverage: list[dict[str, Any]] = []
     for row in coverage_by_token.values():
         opportunities = int(row["simulated_fill_opportunities"])
+        evaluable = int(row["last_in_queue_evaluable_opportunities"])
         confirmed = int(row["confirmed_fills"])
         simulated_windows = int(row["windows_simulated"])
         covered_windows = int(row["windows_covered"])
@@ -794,7 +818,10 @@ def _replay_against_states(
                 round(int(horizon_row["windows_covered"]) / denominator, 6) if denominator else None
             )
         haircut_windows = int(row["by_horizon"]["5m"]["windows_covered"])
-        row["confirmed_fill_ratio"] = round(confirmed / opportunities, 6) if opportunities else None
+        row["confirmed_fill_ratio"] = round(confirmed / evaluable, 6) if evaluable else None
+        row["confirmed_fill_ratio_status"] = "observed" if evaluable else (
+            "insufficient_coverage" if opportunities else "no_simulated_fill_opportunities"
+        )
         row["coverage_ratio"] = round(covered_windows / simulated_windows, 6) if simulated_windows else None
         if opportunities and haircut_windows == 0:
             row["coverage_status"] = "insufficient_coverage"
@@ -853,9 +880,17 @@ def _replay_against_states(
         "source": source,
         "book_states": sum(len(rows) for rows in states_by_token.values()),
         "simulated_fill_opportunities": simulated_fill_opportunities,
+        "last_in_queue_evaluable_opportunities": last_in_queue_evaluable_opportunities,
         "confirmed_fills": len(fills),
         "confirmed_fill_ratio": (
-            round(len(fills) / simulated_fill_opportunities, 6) if simulated_fill_opportunities else None
+            round(len(fills) / last_in_queue_evaluable_opportunities, 6)
+            if last_in_queue_evaluable_opportunities
+            else None
+        ),
+        "confirmed_fill_ratio_status": (
+            "observed"
+            if last_in_queue_evaluable_opportunities
+            else ("insufficient_coverage" if simulated_fill_opportunities else "no_simulated_fill_opportunities")
         ),
         # Backward-compatible names: these have always represented fills that
         # survive the last-in-queue depth test, not all crossing opportunities.
@@ -1030,8 +1065,12 @@ def run_maker_fill_replay(cfg: EngineConfig) -> dict[str, Any]:
             "book_states": primary["book_states"],
             "trade_prints_seen": len(trades),
             "simulated_fill_opportunities": primary["simulated_fill_opportunities"],
+            "last_in_queue_evaluable_opportunities": primary[
+                "last_in_queue_evaluable_opportunities"
+            ],
             "confirmed_fills": primary["confirmed_fills"],
             "confirmed_fill_ratio": primary["confirmed_fill_ratio"],
+            "confirmed_fill_ratio_status": primary["confirmed_fill_ratio_status"],
             "simulated_fills": primary["simulated_fills"],
             "simulated_fills_per_day": primary["simulated_fills_per_day"],
             "markout_per_fill": primary["markout_per_fill"],

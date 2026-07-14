@@ -2855,6 +2855,50 @@ quoting into UMA limbo is pure resolution risk.
    are part of the registered universe definition: "existing
    resolution ... exclusions" per the registry's H1 universe).
 
+## WO-81 — Reconcile specs and runbooks to custody Amendment A1 (single account)
+
+The signed A1 amendment (2026-07-13) superseded the sub-account
+structure. Documents and specs that still assume it must be reconciled
+— the drift philosophy applies to our own governance docs first.
+1. `EXECUTOR_SUB_ACCOUNT_AND_CREDENTIAL_DRILL.md`: sub-account
+   onboarding steps superseded (note, don't delete — history);
+   fail-flat drill, rotation procedure, and credential-guard steps
+   remain binding verbatim for the single project account.
+2. WO-76 canary contract wording: "executor account only" becomes
+   "single project account under A1 sequencing" — thresholds and rules
+   otherwise UNTOUCHED (tighten-only applies).
+3. WO-75 control-plane doc + operating-state executor rows: the
+   executor wallet IS the operator wallet post-amendment; rows label
+   executor-era activity by mode/time window per A1 control 1.
+4. SWEEP ADVISORY (A1 control 2, reporting-only): when account balance
+   exceeds the active stage cap by a registered threshold, the ops
+   monitor emits "sweep $X to VALR" advice in the daily artifacts and
+   notification path. The human executes withdrawals; nothing
+   automated moves funds.
+5. WITHDRAWAL RUNBOOK + cost capture: an operator runbook for the exit
+   rail (Polymarket -> Solana -> VALR -> ZAR) whose first execution is
+   the registered exit-rail test; door-to-door costs land in the WO-63
+   cost ledger like the inbound leg did.
+
+## WO-82 — Human Stage-1 operator runbook + generated daily stage log
+
+If the gates pass on 2026-07-17..20, the $100 human stage starts within
+days. The operator needs one page per day, generated, not improvised:
+1. `stage-day` CLI riding the existing cycles: renders TODAY's page —
+   order tickets (from WO-66), current requote/alert state, kill
+   scoreboard, yesterday's reconciliation result, cost ledger delta,
+   and the A1 sequencing/balance-discipline reminders.
+2. A daily operator log artifact (append-only, anchored): the operator
+   records actions taken (quotes placed/pulled, sizes, times) against
+   the generated page; this is the P2 evidence record and the baseline
+   the canary will later be compared to.
+3. Kill-criteria response procedure written as numbered steps (what to
+   click, in what order, what to record) — a kill event at 02:00 must
+   be executable half-asleep.
+4. Tests: page renders complete from synthetic artifacts; missing
+   inputs render UNKNOWN; log ledger is anchor-enrolled.
+Build BEFORE 2026-07-17 so the stage starts on rails, not on chat.
+
 # Batch 10 — filed 2026-07-13 (never again: silent degraded states)
 
 Encoded lesson: two incidents in 24h shared one shape — a component sat
@@ -2949,15 +2993,11 @@ contains no paper/live broker, signing, order, gate, model, or sizing path.
 
 ## Priority order for Codex (updated 2026-07-12, batch 8 filed)
 
-2026-07-13 update (batch 9 filed): WO-66 and WO-68b built and deployed;
-governance exit-124 resolved on the 4-core host. Queue now: **WO-77
-FIRST** (bug — requote alerts permanently fail-closed; blocks the $100
-stage), then **WO-78** (degraded-state watchdog — would have caught
-both of this weekend's incidents), then **WO-71** (retention +
-suppression — disk relief holds at 75% but the corpus still grows),
-then **WO-79** (deploy acceptance + contract tests; its contract test
-presumes WO-77's fix), then batch 9 buildable-now parts in order
-**WO-73 (items 1-3) -> WO-74 -> WO-75 (items 1,3,4)**; WO-76 is a registration effective on
+2026-07-13 late update: WO-77/78/71/79/73(1-3)/74/75(1,3,4) ALL BUILT,
+audited, and deployed same day. Queue now: **WO-80** (staleness guard,
+small) -> **WO-82** (Stage-1 operator runbook + daily stage log — MUST
+land before 2026-07-17) -> **WO-81** (A1 reconciliation + sweep
+advisory + withdrawal runbook). WO-76 is a registration effective on
 filing (no build); WO-73 item 4, WO-75 item 2, and WO-67 itself remain
 POST-AMENDMENT; WO-70 deferred post-proof; WO-72 DEFERRED
 (pre-WO-67 requirement, build post-ladder). Batch 6: WO-66 unblocked; WO-67 BLOCKED per its

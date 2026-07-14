@@ -318,6 +318,13 @@ def test_real_data_deploy_acceptance_passes_and_records_rollback_ref(tmp_path: P
     assert result["status"] == "PASS"
     assert result["rollback_ref"] == "oldsha"
     assert all(row["status"] == "PASS" for row in result["checks"])
+    assert {
+        row["id"]: row["status"] for row in result["checks"]
+    }["governance_documents_mounted_read_only"] == "PASS"
+    assert result["notification"]["notify"] is False
+    assert result["paper_trading_invoked"] is False
+    assert result["live_trading_invoked"] is False
+    assert read_json(cfg.output_root / "ops_scheduler" / "deploy_acceptance.json")["status"] == "PASS"
 
 
 def test_deploy_acceptance_fails_when_maker_replay_collection_misses_sheet_market(tmp_path: Path) -> None:
@@ -338,13 +345,10 @@ def test_deploy_acceptance_fails_when_maker_replay_collection_misses_sheet_marke
     check = next(row for row in result["checks"] if row["id"] == "maker_replay_exact_portfolio_collection")
     assert check["status"] == "FAIL"
     assert check["defects"]
-    assert {
-        row["id"]: row["status"] for row in result["checks"]
-    }["governance_documents_mounted_read_only"] == "PASS"
-    assert result["notification"]["notify"] is False
+    assert result["notification"]["notify"] is True
     assert result["paper_trading_invoked"] is False
     assert result["live_trading_invoked"] is False
-    assert read_json(cfg.output_root / "ops_scheduler" / "deploy_acceptance.json")["status"] == "PASS"
+    assert read_json(cfg.output_root / "ops_scheduler" / "deploy_acceptance.json")["status"] == "FAIL"
 
 
 def test_deploy_acceptance_fails_when_governance_docs_are_not_mounted(tmp_path: Path) -> None:

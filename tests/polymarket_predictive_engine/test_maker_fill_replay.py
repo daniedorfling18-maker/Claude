@@ -292,7 +292,7 @@ def test_known_fraction_of_crossings_is_confirmed_last_in_queue(tmp_path):
         cfg.output_root / "polymarket_trade_prints" / "trade_prints.csv",
         [
             {"market": "0xcond", "asset_id": "tok1", "side": "SELL", "price": 0.49, "size": 25, "timestamp": 1_000},
-            {"market": "0xcond", "asset_id": "tok1", "side": "SELL", "price": 0.49, "size": 20, "timestamp": 1_001},
+            {"market": "0xcond", "asset_id": "tok1", "side": "SELL", "price": 0.49, "size": 20, "timestamp": 1_000},
         ],
         fieldnames=["market", "asset_id", "side", "price", "size", "timestamp"],
     )

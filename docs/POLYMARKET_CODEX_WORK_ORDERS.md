@@ -1,10 +1,10 @@
 # Polymarket Codex Work Orders
 
 Last updated: 2026-07-14 (WO-80, WO-82, WO-81 landed; WO-83 implemented in
-PR #203. NEW BUILDABLE: **WO-84** (reconciliation bridge-deposit blindness +
-watchdog coverage gap). WO-33 remains pending a registered leakage review,
-with WO-34/35 model wiring bound to that review and the three-hypothesis
-freeze. WO-48 and WO-67 are blocked; WO-70 and WO-72 are deferred; WO-76 is
+PR #203; WO-84 implemented in PR #205. No additional work order is currently
+authorized for build. WO-33 remains pending a registered leakage review, with
+WO-34/35 model wiring bound to that review and the three-hypothesis freeze.
+WO-48 and WO-67 are blocked; WO-70 and WO-72 are deferred; WO-76 is
 registration-only. Crypto up/down is frozen as a diagnostic — see
 `AGENTS.md`.)
 
@@ -2858,6 +2858,19 @@ so tickets can never complete and the evaluator fails closed forever.
 
 ## WO-84 — Reconciliation bridge-deposit blindness + watchdog coverage gap (audit 2026-07-14)
 
+Status: IMPLEMENTED by Codex on 2026-07-14 in PR #205. The Data API leg now
+retains its raw activity-only cash, normalizes NAV with the already registered
+external-deposit baseline when the feed is short of it, and explicitly reports
+`reconstruction_incomplete_external_deposit` rather than claiming the feed is
+complete. Deploy acceptance requires that provenance. The WO-78 wallet
+registration now uses a clean/explained allowlist, migrates the legacy partial
+counter, and monitors discrepancy, unavailable, error, and unknown sibling
+states under the existing tighten-only timing. A copied real-wallet replay
+changed the false $13.059481 discrepancy to clean while preserving the raw
+-$0.193 activity reconstruction and naming the $12.923349 baseline adjustment.
+No gate, sizing, signing, funding, paper broker, live order, or cancellation
+path changed.
+
 Full-system gremlin audit found two linked reporting-only defects. Both
 are the same class: a real not-clean state that is either false or
 silently unmonitored. No gate/order/sizing impact.
@@ -3175,9 +3188,9 @@ contains no paper/live broker, signing, order, gate, model, or sizing path.
 
 ## Current queue for Codex (reconciled 2026-07-14)
 
-**Next buildable: WO-84** (audit fixes). WO-83 is implemented in PR #203.
-Do not infer follow-on capital, gate, model, or executor work from WO-83's
-diagnostics; the queue below remains binding.
+**Next buildable: none currently filed.** WO-83 is implemented in PR #203 and
+WO-84 is implemented in PR #205. Do not infer follow-on capital, gate, model,
+or executor work from their diagnostics; the queue below remains binding.
 
 - **Pending review, not build permission:** WO-33. WO-34/35 model wiring shares
   its leakage-review dependency and must stay inside H1-H3. H2/H3 still need

@@ -12,6 +12,8 @@ from polymarket_predictive_engine.cli import COMMANDS
 from polymarket_predictive_engine.config import EngineConfig, load_config
 from polymarket_predictive_engine.dashboard import render_dashboard
 from polymarket_predictive_engine.operating_state import (
+    _key_custody_approval,
+    _owner_authorisation,
     assert_front_door_docs_state_pointer_only,
     build_operating_state,
     front_door_drift_violations,
@@ -81,13 +83,17 @@ def _write_complete_evidence(cfg: EngineConfig) -> None:
         },
     )
     write_json(
-        performance / "key_custody_approval.json",
+        performance / "wallet_reconciliation.json",
         {
-            "status": "approved",
-            "scoped_trade_only": True,
-            "withdrawal_disabled": True,
-            "storage": "vps_env",
-            "rotation_documented": True,
+            "status": "ok",
+            "reconciliation_status": "clean",
+            "generated_at_utc": generated,
+            "internal_nav_usd": 100.0,
+            "data_api_nav_usd": 100.0,
+            "onchain_nav_usd": 100.0,
+            "internal": {"status": "ok", "nav_usd": 100.0, "cash_usd": 100.0},
+            "data_api": {"status": "ok", "nav_usd": 100.0, "reconstructed_cash_usd": 100.0},
+            "onchain": {"status": "ok", "nav_usd": 100.0, "pusd_balance_usd": 100.0},
         },
     )
     write_json(
@@ -116,8 +122,24 @@ def _write_complete_evidence(cfg: EngineConfig) -> None:
     )
     write_csv(
         cfg.output_root / "polymarket_portfolio" / "paper_fills.csv",
-        [{"fill_id": "paper-1"}, {"fill_id": "paper-2"}],
-        fieldnames=["fill_id"],
+        [
+            {"fill_id": "paper-1", "order_id": "order-1"},
+            {"fill_id": "paper-2", "order_id": "order-1"},
+        ],
+        fieldnames=["fill_id", "order_id"],
+    )
+    write_csv(
+        cfg.output_root / "polymarket_portfolio" / "paper_orders.csv",
+        [
+            {
+                "order_id": "order-1",
+                "strategy_name": "price_action_round_trip",
+                "source_signal_json": json.dumps(
+                    {"price_action_entry_source": "paper_confirmation_current_candidate"}
+                ),
+            }
+        ],
+        fieldnames=["order_id", "strategy_name", "source_signal_json"],
     )
     write_csv(
         cfg.output_root / "maker_carry" / "maker_execution_ledger.csv",
@@ -125,11 +147,21 @@ def _write_complete_evidence(cfg: EngineConfig) -> None:
         fieldnames=["order_id", "created_at_utc"],
     )
     owner_text = (
+        "## Owner amendments\n\n"
         "AUTONOMOUS_MAKER_EXECUTION_AUTHORISED = true\n"
         "AUTONOMOUS_MAKER_EXECUTION_AUTHORISED_AT = 2026-07-12\n"
     )
     (cfg.path.parent / "AGENTS.md").write_text(owner_text, encoding="utf-8")
-    (cfg.path.parent / "CLAUDE.md").write_text(owner_text, encoding="utf-8")
+    (cfg.path.parent / "CLAUDE.md").write_text("Follow AGENTS.md.\n", encoding="utf-8")
+    docs = cfg.path.parent / "docs"
+    docs.mkdir(parents=True, exist_ok=True)
+    (docs / "KEY_CUSTODY_DESIGN_WO67_P5.md").write_text(
+        "# Custody\n\n"
+        "**Status: APPROVED — Danie Dörfling, 2026-07-13.**\n\n"
+        "## Amendment A1 — single project account\n\n"
+        "**Status: APPROVED — Danie Dörfling, 2026-07-13.**\n",
+        encoding="utf-8",
+    )
 
 
 def test_operating_state_derives_rows_and_wo67_preconditions(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -137,6 +169,7 @@ def test_operating_state_derives_rows_and_wo67_preconditions(tmp_path: Path, mon
     _write_complete_evidence(cfg)
     monkeypatch.setenv("PM_VPS_DEPLOYED_SHA", "abcdef123456")
     monkeypatch.setenv("PM_IMAGE_BUILD_SHA", "abcdef1")
+    monkeypatch.setattr("polymarket_predictive_engine.operating_state.now_utc", lambda: "2026-07-12T10:00:00Z")
 
     result = build_operating_state(cfg)
 
@@ -144,12 +177,15 @@ def test_operating_state_derives_rows_and_wo67_preconditions(tmp_path: Path, mon
     preconditions = {row["id"]: row for row in result["wo67_preconditions"]}
     assert result["status"] == "ok"
     assert rows["research_mode"]["state"] == "ACTIVE_SHADOW_PAPER_GATED"
-    assert rows["mechanical_paper_capability"]["state"] == "PRESENT"
+    assert rows["mechanical_paper_capability"]["state"] == "READY"
+    assert rows["mechanical_paper_capability"]["evidence"].startswith("mechanical_readiness=ready")
+    assert "APPROVED_FOR_PAPER_TRADING" not in rows["mechanical_paper_capability"]["evidence"]
     assert rows["governed_paper_authorisation"]["state"] == "NOT_GRANTED"
     assert rows["paper_activity"]["state"] == "RECORDED_FILLS=2"
     assert rows["live_wallet_monitoring"]["state"] == "ACTIVE_READ_ONLY:ok"
     assert rows["operator_wallet_monitoring"]["state"] == "ACTIVE_READ_ONLY:ok"
-    assert rows["executor_wallet_monitoring"]["state"] == "NOT_CONFIGURED"
+    assert rows["executor_wallet_monitoring"]["state"].startswith("A1_SINGLE_PROJECT_WALLET:EXECUTOR_WINDOW_INACTIVE")
+    assert rows["a1_sweep_advisory"]["state"] == "NOT_REQUIRED"
     assert rows["live_orders_submitted"]["state"] == "RECORDED_ORDERS=0"
     assert rows["latest_deployed_sha"]["state"] == "abcdef1"
     assert rows["source_vs_deployed_sha"]["state"] == "ALIGNED"
@@ -165,6 +201,9 @@ def test_operating_state_derives_rows_and_wo67_preconditions(tmp_path: Path, mon
         "P5": "met",
     }
     assert "consecutive_live_ok_days=7" in preconditions["P2"]["evidence"]
+    assert result["paper_activity_lanes"] == {
+        "price_action_round_trip:paper_confirmation_current_candidate": 2
+    }
     assert result["paper_trading_invoked"] is False
     assert result["live_trading_invoked"] is False
     assert read_json(cfg.output_root / "performance" / "operating_state.json") == result
@@ -202,6 +241,67 @@ def test_operating_state_missing_artifacts_are_unknown_never_guessed(tmp_path: P
     assert all(row["state"] == "UNKNOWN" for row in result["wo67_preconditions"])
     assert result["slo"]["unknown_count"] == 7
     assert all(row["breach"] is None for row in result["slo"]["rows"])
+
+
+def test_p3_and_p5_exact_doc_patterns_distinguish_signed_unsigned_and_unreadable(tmp_path: Path) -> None:
+    repo = tmp_path / "repo"
+    docs = repo / "docs"
+    docs.mkdir(parents=True)
+
+    assert _owner_authorisation(repo)[0] == "UNKNOWN"
+    assert _key_custody_approval(repo)[0] == "UNKNOWN"
+
+    (repo / "AGENTS.md").write_text(
+        "## Owner amendments\n\nAUTONOMOUS_MAKER_EXECUTION_AUTHORISED = false\n"
+        "AUTONOMOUS_MAKER_EXECUTION_AUTHORISED_AT = YYYY-MM-DD\n",
+        encoding="utf-8",
+    )
+    (docs / "KEY_CUSTODY_DESIGN_WO67_P5.md").write_text(
+        "**Status: DRAFT for owner approval.**\n\n"
+        "## Amendment A1 — single project account\n\n**Status: UNSIGNED.**\n",
+        encoding="utf-8",
+    )
+    assert _owner_authorisation(repo)[0] == "not_met"
+    assert _key_custody_approval(repo)[0] == "not_met"
+
+    (repo / "AGENTS.md").write_text(
+        "## Owner amendments\n\nAUTONOMOUS_MAKER_EXECUTION_AUTHORISED = true\n"
+        "AUTONOMOUS_MAKER_EXECUTION_AUTHORISED_AT = 2026-07-17\n",
+        encoding="utf-8",
+    )
+    (docs / "KEY_CUSTODY_DESIGN_WO67_P5.md").write_text(
+        "**Status: APPROVED — Owner, 2026-07-13.**\n\n"
+        "## Amendment A1 — single project account\n\n"
+        "**Status: APPROVED — Owner, 2026-07-13.**\n",
+        encoding="utf-8",
+    )
+    assert _owner_authorisation(repo)[0] == "met"
+    assert _key_custody_approval(repo)[0] == "met"
+
+
+def test_missing_p4_artifact_names_the_generator_instead_of_bare_unknown(tmp_path: Path) -> None:
+    cfg = _config(tmp_path)
+    _write_complete_evidence(cfg)
+    (cfg.output_root / "performance" / "independent_merge_gate.json").unlink()
+
+    result = build_operating_state(cfg)
+    p4 = next(row for row in result["wo67_preconditions"] if row["id"] == "P4")
+
+    assert p4["state"] == "UNKNOWN"
+    assert "scripts/audit_github_merge_gate.py" in p4["evidence"]
+
+
+def test_governed_paper_authorisation_fails_closed_after_one_day(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    cfg = _config(tmp_path)
+    _write_complete_evidence(cfg)
+    monkeypatch.setattr("polymarket_predictive_engine.operating_state.now_utc", lambda: "2026-07-13T10:00:01Z")
+
+    result = build_operating_state(cfg)
+    row = {item["key"]: item for item in result["rows"]}["governed_paper_authorisation"]
+
+    assert row["state"] == "NOT_GRANTED_STALE_EVIDENCE"
+    assert "failed closed" in row["evidence"]
+    assert "maximum=86400" in row["evidence"]
 
 
 def test_failed_deploy_acceptance_is_explicit_in_operating_state(tmp_path: Path) -> None:
@@ -248,9 +348,23 @@ def test_operating_slos_measure_breaches_and_targets_only_tighten(tmp_path: Path
                 "governance_refresh": {
                     "last_run_utc": "2026-07-12T09:59:50Z",
                     "duration_seconds": 2501,
-                    "consecutive_skipped_cycles": 0,
+                    "consecutive_skipped_overrun": 0,
+                    "consecutive_skipped_intentional": 0,
+                    "skipped_overrun_total": 0,
+                    "skipped_intentional_total": 0,
                 },
-                "clv_snapshot": {"consecutive_skipped_cycles": 1},
+                "clv_snapshot": {
+                    "consecutive_skipped_overrun": 0,
+                    "consecutive_skipped_intentional": 1,
+                    "skipped_overrun_total": 0,
+                    "skipped_intentional_total": 3,
+                },
+                "trade_prints": {
+                    "consecutive_skipped_overrun": 1,
+                    "consecutive_skipped_intentional": 0,
+                    "skipped_overrun_total": 1,
+                    "skipped_intentional_total": 0,
+                },
             },
         },
     )
@@ -277,7 +391,8 @@ def test_operating_slos_measure_breaches_and_targets_only_tighten(tmp_path: Path
     assert result["slo"]["status"] == "breach"
     assert result["slo"]["breach_count"] == 3
     assert slos["governance_refresh_duration"]["breach"] is True
-    assert slos["skipped_scheduler_cycles"]["breach"] is True
+    assert slos["scheduler_overrun_cycles"]["breach"] is True
+    assert result["slo"]["scheduler_skip_taxonomy"]["intentional_quota_or_preflight_skips_total"] == 3
     assert slos["dashboard_staleness"]["breach"] is True
     assert slos["websocket_gap"]["breach"] is False
     assert slos["dashboard_staleness"]["target"] == 300

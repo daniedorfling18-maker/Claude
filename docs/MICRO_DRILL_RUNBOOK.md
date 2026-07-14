@@ -106,9 +106,9 @@ completes after the 2026-07-14 match).
    exist there.
    Settlement addendum: the operator account has AUTO-REDEEM WINS
    enabled (Trading settings, confirmed 2026-07-13), so redemption is
-   automatic at close; WO-67 needs no redemption logic, and the
-   executor sub-account must have the same setting enabled at creation
-   (added to the WO-73 onboarding checklist).
+   automatic at close; WO-67 needs no redemption logic. Signed custody
+   Amendment A1 later selected this same project account for any future
+   non-overlapping executor window, so no second account is created.
 5. Resting orders are NOT attributable from public data (aggregate book
    depth only); fills ARE (per-wallet trade rows within seconds). This
    confirms the fill-based scoreboard design and means requote

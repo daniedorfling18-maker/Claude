@@ -49,7 +49,8 @@ detail in an operator note.
   venue accepted it. Venue state, the public activity feed, reconciliation,
   and the anchored log are checked together.
 - Keep the single project account at or near the active stage cap. Any future
-  sweep advisory is executed manually through the registered withdrawal rail.
+  sweep advisory is executed manually through
+  `docs/A1_WITHDRAWAL_AND_EXIT_RAIL_RUNBOOK.md`.
 
 ## Kill-criteria response — execute in this order
 
@@ -90,7 +91,8 @@ detail in an operator note.
 
 - Human Stage 1 completes before any future executor canary begins.
 - Human and executor trading never overlap on the single project account.
-- Excess balance is swept manually to VALR under the registered threshold and
-  withdrawal runbook; no repository component moves funds.
+- Excess balance is swept manually to VALR under the registered $5 threshold
+  and `docs/A1_WITHDRAWAL_AND_EXIT_RAIL_RUNBOOK.md`; no repository component
+  moves funds.
 - A credential compromise means revoke, withdraw the remainder, and abandon
   the account as specified in `docs/KEY_CUSTODY_DESIGN_WO67_P5.md`.

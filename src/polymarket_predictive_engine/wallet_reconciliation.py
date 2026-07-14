@@ -858,6 +858,7 @@ def reconcile_wallet(cfg: EngineConfig) -> dict[str, Any]:
     stamp = now_utc()
     wallets = _wallets(cfg)
     base: dict[str, Any] = {
+        "work_order": "WO-62+WO-73+WO-81",
         "status": "disabled",
         "reconciliation_status": "disabled",
         "generated_at_utc": stamp,
@@ -865,7 +866,11 @@ def reconcile_wallet(cfg: EngineConfig) -> dict[str, Any]:
         "operator_wallet_address": wallets["operator"],
         "executor_wallet_address": wallets["executor"],
         "wallets_combined": False,
-        "nav_aggregation_policy": "operator and executor NAVs are reported separately and never summed",
+        "account_structure": "single_project_account_under_custody_amendment_A1",
+        "nav_aggregation_policy": (
+            "single project wallet; legacy separate-wallet rows are never summed if a superseded field is populated"
+        ),
+        "legacy_executor_wallet_config_drift": bool(wallets["executor"]),
         "paper_trading_invoked": False,
         "live_trading_invoked": False,
     }
@@ -882,10 +887,7 @@ def reconcile_wallet(cfg: EngineConfig) -> dict[str, Any]:
                 "wallet_address": "",
                 "wallet_role": "operator",
                 "wallets": {role: _unconfigured_wallet(role) for role in wallets},
-                "note": (
-                    "Set maker_live_test.wallet_address and/or the public executor_wallet_address "
-                    "to activate separate read-only reconciliations."
-                ),
+                "note": "Set maker_live_test.wallet_address to activate A1 single-project-wallet reconciliation.",
             }
         )
         write_json(output_path, base)
@@ -946,7 +948,7 @@ def reconcile_wallet(cfg: EngineConfig) -> dict[str, Any]:
             "primary_wallet_role": primary_role,
             "wallets": results,
             "unexplained_discrepancy_usd": max(discrepancies) if discrepancies else None,
-            "work_order": "WO-62+WO-73",
+            "work_order": "WO-62+WO-73+WO-81",
         }
     )
     payload = primary

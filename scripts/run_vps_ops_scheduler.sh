@@ -38,13 +38,18 @@ export PYTHONPATH="${PYTHONPATH:-scripts:src}"
 
 mkdir -p "$OUT_DIR"
 LOG_FILE="$OUT_DIR/ops_scheduler.log"
+JOB_SCHEDULE_SKIP_KIND=""
 
 log() {
   echo "$(date -u +%Y-%m-%dT%H:%M:%SZ) $*" | tee -a "$LOG_FILE"
 }
 
 stamp_status() {
-  JOB="$1" EXIT_CODE="$2" DETAIL="${3:-}" STARTED_AT="${4:-}" OUT_DIR="$OUT_DIR" python - <<'PY'
+  EXPLICIT_SKIP_KIND="${5:-}"
+  if [ -z "$EXPLICIT_SKIP_KIND" ]; then
+    EXPLICIT_SKIP_KIND="$JOB_SCHEDULE_SKIP_KIND"
+  fi
+  JOB="$1" EXIT_CODE="$2" DETAIL="${3:-}" STARTED_AT="${4:-}" SKIP_KIND="$EXPLICIT_SKIP_KIND" OUT_DIR="$OUT_DIR" python - <<'PY'
 import json
 import os
 from datetime import datetime, timezone
@@ -66,7 +71,14 @@ except ValueError:
     started = None
 detail = os.environ.get("DETAIL", "")
 exit_code = int(os.environ["EXIT_CODE"])
-skipped = "skipped" in detail.lower()
+skip_kind = os.environ.get("SKIP_KIND", "").strip().lower()
+if exit_code == 124 and not skip_kind:
+    skip_kind = "overrun"
+if skip_kind not in {"", "intentional", "overrun"}:
+    raise ValueError(f"invalid scheduler skip kind: {skip_kind}")
+skipped_intentional = skip_kind == "intentional"
+skipped_overrun = skip_kind == "overrun"
+skipped = skipped_intentional or skipped_overrun
 
 def count(name):
     try:
@@ -80,7 +92,16 @@ jobs[job_name] = {
     "duration_seconds": round((now - started).total_seconds(), 3) if started else None,
     "last_exit_code": exit_code,
     "detail": detail,
+    "skip_kind": skip_kind or "none",
+    "skipped_intentional": skipped_intentional,
+    "skipped_overrun": skipped_overrun,
     "runs_total": count("runs_total") + 1,
+    "skipped_intentional_total": count("skipped_intentional_total") + int(skipped_intentional),
+    "consecutive_skipped_intentional": count("consecutive_skipped_intentional") + 1 if skipped_intentional else 0,
+    "skipped_overrun_total": count("skipped_overrun_total") + int(skipped_overrun),
+    "consecutive_skipped_overrun": count("consecutive_skipped_overrun") + 1 if skipped_overrun else 0,
+    # Backward-compatible aggregate fields. The SLO deliberately ignores
+    # these because intentional quota/preflight declines are not incidents.
     "skipped_cycles_total": count("skipped_cycles_total") + int(skipped),
     "consecutive_skipped_cycles": count("consecutive_skipped_cycles") + 1 if skipped else 0,
     "failed_cycles_total": count("failed_cycles_total") + int(exit_code != 0),
@@ -106,6 +127,21 @@ seconds_since_stamp() {
 
 touch_stamp() {
   date -u +%s > "$OUT_DIR/last_$1"
+}
+
+schedule_skip_kind() {
+  STAMP_FILE="$OUT_DIR/last_$1"
+  INTERVAL="$2"
+  if [ ! -f "$STAMP_FILE" ]; then
+    echo ""
+    return
+  fi
+  AGE="$(seconds_since_stamp "$1")"
+  if [ "$AGE" -gt $((INTERVAL + TICK_SECONDS)) ]; then
+    echo "overrun"
+  else
+    echo ""
+  fi
 }
 
 odds_quota_available() {
@@ -135,7 +171,7 @@ run_governance_refresh() {
 
 run_clv_snapshot() {
   if ! odds_quota_available; then
-    stamp_status clv_snapshot 0 "skipped: odds quota exhausted"
+    stamp_status clv_snapshot 0 "skipped: odds quota exhausted" "" intentional
     log "clv_snapshot: skipped (no odds credits)"
     return
   fi
@@ -153,7 +189,7 @@ run_clv_snapshot() {
 
 run_locked_card_refresh() {
   if ! odds_quota_available; then
-    stamp_status locked_card_refresh 0 "skipped: odds quota exhausted"
+    stamp_status locked_card_refresh 0 "skipped: odds quota exhausted" "" intentional
     log "locked_card_refresh: skipped (no odds credits)"
     return
   fi
@@ -330,6 +366,9 @@ run_training_harvest() {
     # rows, bound the training archive, remove stale atomic temp files, and
     # log disk projection. Fixed paths exclude every WO-61 decision ledger.
     timeout "$HARVEST_TIMEOUT" python -m polymarket_predictive_engine.cli corpus-retention --config "$CONFIG_PATH"
+    # WO-81: refresh the governed paper decision in the daily harvest so the
+    # authorisation row can never rely on evidence older than one day.
+    timeout "$HARVEST_TIMEOUT" python scripts/audit_polymarket_local_history.py "$CONFIG_PATH"
     # WO-68 canonical operating state. Generated from the effective config and
     # current artifacts; missing inputs remain UNKNOWN and never authorise work.
     timeout "$HARVEST_TIMEOUT" python -m polymarket_predictive_engine.cli operating-state --config "$CONFIG_PATH"
@@ -339,7 +378,7 @@ run_training_harvest() {
     timeout "$HARVEST_TIMEOUT" python -m polymarket_predictive_engine.cli anchor-ledgers --config "$CONFIG_PATH"
   ) >> "$LOG_FILE" 2>&1
   CODE=$?
-  stamp_status training_harvest "$CODE" "gamma resolved-markets backfill + clob price histories + wallet intelligence + maker-carry study + deep trade-print backfill + maker-fill replay + flow toxicity + decision policy + wallet reconciliation + true-net cost ledger + Stage-1 operator page + reconstructed CLV study + calibration-bias study + martingale drift scan + performance factsheet + investment policy statement + bounded corpus retention + generated operating state + ledger anchor"
+  stamp_status training_harvest "$CODE" "gamma resolved-markets backfill + clob price histories + wallet intelligence + maker-carry study + deep trade-print backfill + maker-fill replay + flow toxicity + decision policy + wallet reconciliation + true-net cost ledger + Stage-1 operator page + reconstructed CLV study + calibration-bias study + martingale drift scan + performance factsheet + investment policy statement + bounded corpus retention + governed paper audit refresh + generated operating state + ledger anchor"
   log "training_harvest: exit $CODE"
 }
 
@@ -423,31 +462,43 @@ stamp_status scheduler 0 "started"
 
 while :; do
   if [ "$(seconds_since_stamp governance_refresh)" -ge "$GOVERNANCE_INTERVAL" ]; then
+    JOB_SCHEDULE_SKIP_KIND="$(schedule_skip_kind governance_refresh "$GOVERNANCE_INTERVAL")"
     touch_stamp governance_refresh
     run_governance_refresh
+    JOB_SCHEDULE_SKIP_KIND=""
   fi
   if [ "$(seconds_since_stamp clv_snapshot)" -ge "$CLV_INTERVAL" ]; then
+    JOB_SCHEDULE_SKIP_KIND="$(schedule_skip_kind clv_snapshot "$CLV_INTERVAL")"
     touch_stamp clv_snapshot
     run_clv_snapshot
+    JOB_SCHEDULE_SKIP_KIND=""
   fi
   if [ "$(seconds_since_stamp locked_card_refresh)" -ge "$CARD_INTERVAL" ]; then
+    JOB_SCHEDULE_SKIP_KIND="$(schedule_skip_kind locked_card_refresh "$CARD_INTERVAL")"
     touch_stamp locked_card_refresh
     run_locked_card_refresh
+    JOB_SCHEDULE_SKIP_KIND=""
   fi
   if [ "$(seconds_since_stamp training_harvest)" -ge "$HARVEST_INTERVAL" ]; then
+    JOB_SCHEDULE_SKIP_KIND="$(schedule_skip_kind training_harvest "$HARVEST_INTERVAL")"
     touch_stamp training_harvest
     run_training_harvest
+    JOB_SCHEDULE_SKIP_KIND=""
   fi
   if [ "$(seconds_since_stamp maker_study_intraday)" -ge "$MAKER_STUDY_INTRADAY_INTERVAL" ]; then
     TRAINING_AGE="$(seconds_since_stamp training_harvest)"
     if [ "$TRAINING_AGE" -ge "$MAKER_STUDY_INTRADAY_OFFSET_MIN" ] && [ "$TRAINING_AGE" -le "$MAKER_STUDY_INTRADAY_OFFSET_MAX" ]; then
+      JOB_SCHEDULE_SKIP_KIND="$(schedule_skip_kind maker_study_intraday "$MAKER_STUDY_INTRADAY_INTERVAL")"
       touch_stamp maker_study_intraday
       run_maker_study_intraday
+      JOB_SCHEDULE_SKIP_KIND=""
     fi
   fi
   if [ "$(seconds_since_stamp trade_prints)" -ge "$PRINTS_INTERVAL" ]; then
+    JOB_SCHEDULE_SKIP_KIND="$(schedule_skip_kind trade_prints "$PRINTS_INTERVAL")"
     touch_stamp trade_prints
     run_trade_prints
+    JOB_SCHEDULE_SKIP_KIND=""
   fi
   run_degraded_state_watchdog
   sleep "$TICK_SECONDS"

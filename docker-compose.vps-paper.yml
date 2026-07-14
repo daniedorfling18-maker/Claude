@@ -89,6 +89,9 @@ services:
       --optimize-model"
     volumes:
       - ./polymarket_predictive_config.example.yaml:/app/polymarket_predictive_config.example.yaml:ro
+      - ./AGENTS.md:/app/AGENTS.md:ro
+      - ./CLAUDE.md:/app/CLAUDE.md:ro
+      - ./docs:/app/docs:ro
       - ./src:/app/src:ro
       - ./scripts:/app/scripts:ro
       - ./outputs:/app/outputs
@@ -205,6 +208,9 @@ services:
     volumes:
       - ./polymarket_predictive_config.example.yaml:/app/polymarket_predictive_config.example.yaml:ro
       - ./config.yaml:/app/config.yaml:ro
+      - ./AGENTS.md:/app/AGENTS.md:ro
+      - ./CLAUDE.md:/app/CLAUDE.md:ro
+      - ./docs:/app/docs:ro
       - ./scripts:/app/scripts:ro
       - ./src:/app/src:ro
       - ./outputs:/app/outputs

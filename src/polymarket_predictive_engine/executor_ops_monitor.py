@@ -14,6 +14,7 @@ import json
 from pathlib import Path
 from typing import Any, Mapping
 
+from .a1_controls import build_a1_sweep_advisory
 from .config import EngineConfig, load_config
 from .utils import ensure_dir, parse_timestamp, read_csv_rows, read_json, safe_float, safe_int, write_json
 
@@ -172,14 +173,27 @@ def _kill_scoreboard(cfg: EngineConfig) -> dict[str, Any]:
 def _executor_discrepancy(cfg: EngineConfig) -> dict[str, Any]:
     payload = _mapping(read_json(cfg.output_root / "performance" / "wallet_reconciliation.json", default={}) or {})
     wallets = _mapping(payload.get("wallets"))
-    executor = _mapping(wallets.get("executor"))
-    if not executor and str(payload.get("primary_wallet_role") or "") == "executor":
+    # Custody Amendment A1 uses the operator/project wallet in a distinct
+    # executor mode/time window. The old executor-wallet branch is retained
+    # only as a clearly labelled legacy fallback for historical fixtures.
+    executor = _mapping(wallets.get("operator"))
+    source_role = "operator_project_wallet_A1"
+    if (
+        not executor
+        and str(payload.get("primary_wallet_role") or "operator") == "operator"
+        and any(key in payload for key in ("reconciliation_status", "unexplained_discrepancy_usd", "internal_nav_usd"))
+    ):
         executor = payload
+    if not executor:
+        executor = _mapping(wallets.get("executor"))
+        source_role = "legacy_pre_A1_executor_wallet"
     return {
         "status": str(executor.get("reconciliation_status") or executor.get("status") or "unobserved"),
         "unexplained_discrepancy_usd": safe_float(executor.get("unexplained_discrepancy_usd")),
         "generated_at_utc": executor.get("generated_at_utc") or payload.get("generated_at_utc"),
         "executor_wallet_present": bool(executor),
+        "wallet_source_role": source_role,
+        "account_structure": "single_project_account_under_custody_amendment_A1",
     }
 
 
@@ -204,7 +218,7 @@ def _notification(
     eligible = bool(alerts)
     notify = bool(enabled and eligible and state_changed)
     lines = [
-        "# Polymarket executor live-ops alert",
+        "# Polymarket A1 / executor operations alert",
         "",
         f"Generated: `{generated_at}`",
         f"Executor mode: **{mode}**",
@@ -312,6 +326,7 @@ def build_executor_ops_status(
     }
     kill = _kill_scoreboard(cfg)
     reconciliation = _executor_discrepancy(cfg)
+    sweep_advisory = build_a1_sweep_advisory(cfg, as_of=observed_at)
     alerts: list[dict[str, str]] = []
     if executor_present and kill["triggered"]:
         alerts.append(
@@ -363,6 +378,15 @@ def build_executor_ops_status(
                 f"ledger mode {raw_mode or 'missing'} is outside replay/canary/portfolio",
             )
         )
+    if sweep_advisory.get("notification_eligible") is True:
+        alerts.append(
+            _alert(
+                "a1_sweep_advisory",
+                "Custody A1 excess-balance sweep advised",
+                str(sweep_advisory.get("advice") or "review the A1 sweep advisory"),
+                severity="advisory",
+            )
+        )
     notification = _notification(
         cfg,
         generated_at=generated_at,
@@ -370,7 +394,12 @@ def build_executor_ops_status(
         alerts=alerts,
         enabled=bool(settings["notification_enabled"]),
     )
-    status = "ABSENT" if not executor_present else ("ALERT" if alerts else "OK")
+    executor_alerts = [row for row in alerts if row.get("id") != "a1_sweep_advisory"]
+    status = (
+        "A1_ADVISORY"
+        if not executor_present and sweep_advisory.get("notification_eligible") is True
+        else ("ABSENT" if not executor_present else ("ALERT" if executor_alerts else "OK"))
+    )
     payload = {
         "work_order": WORK_ORDER,
         "generated_at_utc": generated_at,
@@ -394,6 +423,7 @@ def build_executor_ops_status(
             **reconciliation,
             "threshold_usd": discrepancy_limit,
         },
+        "a1_sweep_advisory": sweep_advisory,
         "owner_alerts": alerts,
         "owner_alert_count": len(alerts),
         "notification": notification,

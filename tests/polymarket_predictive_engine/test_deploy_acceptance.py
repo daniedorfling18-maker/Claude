@@ -75,6 +75,18 @@ def _seed_acceptance(
     requote_rule: str | None = None,
     post_operating_state: str = "ALIGNED",
 ) -> None:
+    repo_root = cfg.path.resolve().parent
+    (repo_root / "AGENTS.md").write_text(
+        "Generated state: `outputs/performance/operating_state.md`\n",
+        encoding="utf-8",
+    )
+    (repo_root / "CLAUDE.md").write_text("Follow AGENTS.md.\n", encoding="utf-8")
+    docs = repo_root / "docs"
+    docs.mkdir(parents=True, exist_ok=True)
+    (docs / "KEY_CUSTODY_DESIGN_WO67_P5.md").write_text(
+        "# Custody\n\n## Amendment A1 — single project account\n",
+        encoding="utf-8",
+    )
     write_json(
         cfg.output_root / "ops_scheduler" / "deploy_acceptance_baseline.json",
         {
@@ -266,10 +278,26 @@ def test_real_data_deploy_acceptance_passes_and_records_rollback_ref(tmp_path: P
     assert result["status"] == "PASS"
     assert result["rollback_ref"] == "oldsha"
     assert all(row["status"] == "PASS" for row in result["checks"])
+    assert {
+        row["id"]: row["status"] for row in result["checks"]
+    }["governance_documents_mounted_read_only"] == "PASS"
     assert result["notification"]["notify"] is False
     assert result["paper_trading_invoked"] is False
     assert result["live_trading_invoked"] is False
     assert read_json(cfg.output_root / "ops_scheduler" / "deploy_acceptance.json")["status"] == "PASS"
+
+
+def test_deploy_acceptance_fails_when_governance_docs_are_not_mounted(tmp_path: Path) -> None:
+    cfg = _cfg(tmp_path)
+    _seed_acceptance(cfg)
+    (cfg.path.resolve().parent / "AGENTS.md").unlink()
+
+    result = build_deploy_acceptance(cfg, expected_deploy_sha="newsha", as_of=AS_OF)
+    check = {row["id"]: row for row in result["checks"]}["governance_documents_mounted_read_only"]
+
+    assert result["status"] == "FAIL"
+    assert check["status"] == "FAIL"
+    assert check["defects"][0]["path"] == "AGENTS.md"
 
 
 def test_registered_risk_blocker_passes_but_missing_input_and_new_unknown_fail(tmp_path: Path) -> None:

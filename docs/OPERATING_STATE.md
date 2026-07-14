@@ -31,10 +31,24 @@ The scheduler-owned monitor is documented in
 `docs/EXECUTOR_LIVE_OPS_CONTROL_PLANE.md`; it does not write the future
 executor heartbeat or implement the blocked STOP-binding hook.
 
-WO-73 keeps the operator wallet and isolated executor sub-account in
-separate `operator_wallet_monitoring` and `executor_wallet_monitoring` rows.
-The legacy primary-wallet row remains for compatibility but explicitly names
-its role; wallet NAVs and maker scores are never silently summed.
+Signed custody Amendment A1 supersedes WO-73's isolated executor sub-account.
+`operator_wallet_monitoring` and `executor_wallet_monitoring` now describe
+non-overlapping human/executor mode-time windows on the same single project
+wallet; `maker_live_test.executor_wallet_address` remains empty. The legacy
+primary-wallet row remains for compatibility and explicitly names the A1
+single-account structure. The A1 sweep row is reporting-only and can only tell
+the human to use the registered exit-rail runbook.
+
+WO-81 reads P3 from exact dated markers inside the `AGENTS.md` Owner amendments
+section and P5 from exact dated APPROVED lines in
+`docs/KEY_CUSTODY_DESIGN_WO67_P5.md`. Missing files remain `UNKNOWN`; an
+unsigned or absent marker is `not_met`. P4 names the merge-gate audit command
+when its generated artifact is absent. The required governance documents are
+mounted read-only in the VPS services and checked during deploy acceptance.
+
+Scheduler reporting separates intentional quota/preflight skips from
+capacity/timing overruns. Only consecutive overruns feed the target-zero SLO;
+intentional skips remain visible informational telemetry.
 
 Deployment capacity is checked against the target revision before the mounted checkout changes. A
 failed `scripts/preflight_vps_capacity.py` run leaves the existing stack and deployed marker intact.

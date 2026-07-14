@@ -1,10 +1,13 @@
 # Polymarket Codex Work Orders
 
-Last updated: 2026-07-14 (WO-80, WO-82, and WO-81 landed; there is no
-currently authorized, buildable WO. WO-33 remains pending a registered leakage
-review, with WO-34/35 model wiring bound to that review and the three-hypothesis
-freeze. WO-48 and WO-67 are blocked; WO-70 and WO-72 are deferred; WO-76 is
-registration-only. Crypto up/down is frozen as a diagnostic — see `AGENTS.md`.)
+Last updated: 2026-07-14 (WO-80, WO-82, WO-81 landed. NEW BUILDABLE:
+**WO-83** — make the Tier-0 maker fill-replay functional; it is currently
+blind (`realism_ratio=0.0` from a book-poller coverage gap), so the maker
+lane's central "upper bound" claim is untested. Free, diagnostic, gates
+untouched. WO-33 remains pending a registered leakage review, with WO-34/35
+model wiring bound to that review and the three-hypothesis freeze. WO-48 and
+WO-67 are blocked; WO-70 and WO-72 are deferred; WO-76 is registration-only.
+Crypto up/down is frozen as a diagnostic — see `AGENTS.md`.)
 
 Mechanical, file-level implementation instructions for coding agents (Codex or any other code
 changer). The architecture and priorities live in `docs/POLYMARKET_QUANT_MODE_CHARTER.md`; this file
@@ -2854,6 +2857,50 @@ so tickets can never complete and the evaluator fails closed forever.
    must land before the $100 human stage starts — the requote loop is
    that stage's safety net.
 
+## WO-83 — Make Tier-0 maker validation functional (fill-replay coverage)
+
+The whole maker case rests on simulated net carry that the honesty_clause
+itself calls an UPPER BOUND. WO-40 `maker_fill_replay` exists to test that
+bound against reality — but on 2026-07-13 it reported `realism_ratio=0.0`,
+`markout_per_fill=None` across 108 simulated fills. Root cause diagnosed:
+the carrier market churns ~5x/day while the official book poller covers
+only ~2 markets sampled with lag, so the replay almost never has book/print
+data for the same market+window the study simulated. The validation layer
+is blind, not passing. This WO restores its sight. NO capital; diagnostic
+only; the M-gates and study are untouched (reporting-only, per WO-40).
+
+1. COVERAGE: continuously snapshot the official book + capture trade prints
+   for exactly the current quote-sheet/portfolio markets, on the sheet's
+   own refresh cadence, so every simulated-fill window has real book/print
+   data to replay against. Record per-market coverage (windows covered /
+   windows simulated) in the replay output.
+2. REPLAY OUTPUT: with data present, emit the two numbers the maker case
+   actually needs — confirmed-fill ratio (last-in-queue) and realized
+   markout distribution at 5/15/60m — plus a `simulation_to_reality_haircut`
+   = realized adverse cost / simulated adverse charge.
+3. TIGHTEN-ONLY WIRING (registration, not silent): the haircut is REPORTED
+   next to the gate, never auto-applied. If it shows the study understates
+   adverse selection, that is a candidate M-B tightening requiring a dated
+   amendment — it may only make the gate harder, never easier.
+4. REGIME CUT: report the replay separately for the last 7 days vs prior,
+   so the post-World-Cup regime question (is carry event-beta or edge?)
+   gets a read from history without waiting.
+5. GUARD: `realism_ratio=0.0` with nonzero simulated fills AND zero coverage
+   must render as `insufficient_coverage`, never as a silent zero — the
+   degraded-state watchdog (WO-78) alarms on persistent insufficient
+   coverage so this blindness can never recur unnoticed.
+6. Tests: synthetic book/print fixtures where a known fraction of simulated
+   fills are corroborated; coverage accounting; haircut computed correctly;
+   insufficient-coverage sentinel trips.
+
+Registered maker validation protocol (recorded in EXPERIMENT_REGISTRY H1):
+Tier 0 = this replay (free, history). Tier 1 = reward-receipt test (rest
+minimum size on a CALM wide-band rewarded market across one reward epoch,
+compare paid reward to predicted share; low adverse-selection exposure) —
+the refined Drill E. Tier 2 = real fill markout via the $100 human stage
+(P2). Each tier gates the next; a Tier-0 result showing the fill model is
+wildly optimistic can retire the maker lane with zero capital.
+
 ## WO-80 — Candidate staleness guard (defect, small)
 
 Status: IMPLEMENTED by Codex on 2026-07-14 in PR #194. The rewarded
@@ -3075,7 +3122,9 @@ contains no paper/live broker, signing, order, gate, model, or sizing path.
 
 ## Current queue for Codex (reconciled 2026-07-14)
 
-There is no authorized, buildable WO after WO-80, WO-82, and WO-81 landed.
+**Next buildable: WO-83** (Tier-0 maker validation — restore fill-replay
+coverage so the maker "upper bound" is finally tested; free, diagnostic,
+tighten-only). After WO-80/82/81 landed it is the one authorized build.
 
 - **Pending review, not build permission:** WO-33. WO-34/35 model wiring shares
   its leakage-review dependency and must stay inside H1-H3. H2/H3 still need

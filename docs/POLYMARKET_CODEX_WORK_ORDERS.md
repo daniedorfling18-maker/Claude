@@ -2925,6 +2925,16 @@ structure. Documents and specs that still assume it must be reconciled
 
 ## WO-82 — Human Stage-1 operator runbook + generated daily stage log
 
+Status: IMPLEMENTED by Codex on 2026-07-14 in PR #196. CLI `stage-day` renders
+a dated operator page from WO-66 tickets, requote state, kill criteria, prior-day
+operator reconciliation, WO-63 cost deltas, and A1 reminders. Human-reported
+actions append under a runtime lock to the anchor-enrolled
+`execution/stage_operator_log.csv`; no order, signing, credential, broker, or
+funding path is invoked. The daily harvest scheduler refreshes the page without
+adding another interval. The exact human kill procedure is registered in
+`docs/HUMAN_STAGE1_OPERATOR_RUNBOOK.md`. Ruff, config validation, all six
+WO-82 regression tests, and the full 1,150-test ARM64/Python 3.11 suite passed.
+
 If the gates pass on 2026-07-17..20, the $100 human stage starts within
 days. The operator needs one page per day, generated, not improvised:
 1. `stage-day` CLI riding the existing cycles: renders TODAY's page —

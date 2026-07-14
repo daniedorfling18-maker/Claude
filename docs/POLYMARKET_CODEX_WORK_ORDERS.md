@@ -2859,6 +2859,46 @@ so tickets can never complete and the evaluator fails closed forever.
    must land before the $100 human stage starts — the requote loop is
    that stage's safety net.
 
+## WO-88 — Attribution-aware kill scoreboard under A1 (live false-STOP 2026-07-14)
+
+OBSERVED IN PRODUCTION 16:26Z: the kill scoreboard fired
+`STOP_fills_outrunning_model` (fills_last_24h=2 vs modelled 0.85x2.0)
+on the OWNER'S OWN micro-drill fills — the 2026-07-13 drill buy+sell on
+the shared A1 account. Advisory-only today (no live stage, no resting
+quotes), but during a funded stage the same mechanism would (a) fire a
+false kill halting the stage and (b) break the WO-50 consecutive-ok-day
+ladder every time the owner drills, sweeps, or redeems. This is exactly
+the attribution consequence Amendment A1 registered ("sequencing for
+attribution"; "mode labels distinguishing executor-era activity") — now
+with its first live demonstration.
+
+Registered fix (fail-safe direction preserved):
+1. Fills are attributed against the ANCHORED operator log (the WO-82
+   stage/drill log): a fill whose timestamp falls inside a registered,
+   owner-recorded drill/maintenance window AND matches a logged owner
+   action is classified `owner_activity` and excluded from the
+   fills-outrunning-model kill count; it is still reported, separately.
+2. FAIL-SAFE DEFAULT: any fill NOT matched to a logged owner action
+   still counts as a maker-test fill — unknown fills must keep tripping
+   the alarm. Exclusion is only ever earned by the anchored log entry,
+   never inferred.
+3. The 2026-07-14 STOP itself is adjudicated by this WO's registered
+   review note: cause = drill fills, no quotes were live, no capital at
+   risk; scoreboard may reset to ok once the drill fills age out of the
+   window or are matched under (1). This note satisfies the registered
+   "review before any resume" requirement for THIS event.
+4. Tests: logged drill fill excluded; unlogged fill still trips;
+   mixed window counts only unlogged; ladder consecutive-day logic
+   ignores owner_activity days rather than breaking the streak.
+
+Also appended to WO-85 (same incident family, observed again today):
+the harvest interval stamp is touched at START (touch-before-run), so a
+container restart mid-harvest consumes the day's slot and silently skips
+the whole day; today's harvest has not COMPLETED since 2026-07-13 08:24
+while every other job runs. WO-85's completion-freshness alarm must key
+on successful COMPLETION stamps, and the interval check must re-arm when
+a started run never completed.
+
 ## WO-87 — Gate A grades settlement return, not closing-line value (HEADLINE audit finding 2026-07-14; owner+governance decision required)
 
 The most consequential finding of the deep audit. Empirical, from
@@ -3360,7 +3400,7 @@ contains no paper/live broker, signing, order, gate, model, or sizing path.
 
 ## Current queue for Codex (reconciled 2026-07-14)
 
-**Next buildable, in order: WO-85 -> WO-87 (decided 2026-07-14) -> WO-86.** WO-83 is implemented in PR #203 and
+**Next buildable, in order: WO-85 -> WO-87 (decided 2026-07-14) -> WO-86 -> WO-88.** WO-83 is implemented in PR #203 and
 WO-84 is implemented in PR #205. Do not infer follow-on capital, gate, model,
 or executor work from their diagnostics; the queue below remains binding.
 

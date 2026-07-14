@@ -1,9 +1,10 @@
 # Polymarket Codex Work Orders
 
-Last updated: 2026-07-11 (batch 5 WO-61..65 and WO-47 landed;
-WO-48 blocked behind maker gates, WO-33 last pending leakage review; WP13 is a venue
-decision, not a WO. Crypto up/down is frozen as a diagnostic — see `AGENTS.md`. Read
-`docs/POLYMARKET_EDGE_STRATEGY_RESET.md` first.)
+Last updated: 2026-07-14 (WO-80, WO-82, and WO-81 landed; there is no
+currently authorized, buildable WO. WO-33 remains pending a registered leakage
+review, with WO-34/35 model wiring bound to that review and the three-hypothesis
+freeze. WO-48 and WO-67 are blocked; WO-70 and WO-72 are deferred; WO-76 is
+registration-only. Crypto up/down is frozen as a diagnostic — see `AGENTS.md`.)
 
 Mechanical, file-level implementation instructions for coding agents (Codex or any other code
 changer). The architecture and priorities live in `docs/POLYMARKET_QUANT_MODE_CHARTER.md`; this file
@@ -1302,6 +1303,12 @@ WP7/WP8 and the algo track (WP9–WP11) have all landed.
 
 ## WO-33 — Wire the resolved-market corpus into the trainer (leakage-reviewed)
 
+Status: PENDING REVIEW, not authorized for implementation. Collection and
+retention plumbing has landed, but the training-set assembly must first receive
+the registered point-in-time leakage review and must map to one of H1-H3 in
+`docs/EXPERIMENT_REGISTRY.md`. Do not treat this open text as permission for a
+generic fourth modelling lane.
+
 Filed 2026-07-09. The training-data audit found the harvest machinery parked and
 the live feature substrate being destroyed on retention roll-off. Both are fixed
 operationally (features now archive to `outputs/polymarket_training_archive`
@@ -1327,6 +1334,11 @@ Gate B), and a guarded partial re-widening of live collection
 
 ## WO-34 — Event-group structure features (sum-to-one violations)
 
+Status: DETECTION/COLLECTION IMPLEMENTED; model wiring remains pending with
+WO-33. H2's dedicated post-registration OOS evaluator is not supplied by the
+historical detector and must follow the exact H2 contract before it can count as
+edge evidence.
+
 Filed 2026-07-09. Gamma groups related outcomes into events; the outcomes of
 one event obey a bounded-sum constraint. Transient violations across a group
 (sum of asks < 1 already caught by dutch-arb; softer mid-price inconsistencies
@@ -1344,6 +1356,11 @@ deep enough to be an edge class, or stale-quote mirages? Feature wiring into
 the model remains open (leakage review with WO-33).
 
 ## WO-35 — Wallet intelligence (smart-money positioning)
+
+Status: COLLECTION IMPLEMENTED through WO-37/58; model wiring remains pending
+with WO-33. Existing wallet outputs are diagnostic history. H3 requires its
+registered post-freeze clustering, chronological discovery/validation split,
+costs, concentration limit, and FDR evaluator before any cohort can count.
 
 Filed 2026-07-09. Polymarket positions are public on-chain: the data-API
 holders/positions endpoints plus the full historical trade tape allow per-wallet
@@ -2659,7 +2676,7 @@ evidence), not an afterthought. Do not build during the proof phase.
 
 # Batch 9 — filed 2026-07-13 (go-live infrastructure around the blocked executor)
 
-Design principle: MINIMIZE THE POST-AMENDMENT DELTA. Everything keyless
+Historical design principle: MINIMIZE THE POST-P3 DELTA. Everything keyless
 and read-only around the executor is specced now and buildable now, so
 the only code written after the owner signs P3 is `maker_executor.py`
 itself plus its credential loading and binding hooks — the registration's
@@ -2671,15 +2688,13 @@ to resolution), orderbook clears at event start, symmetric ~2.9% taker
 fees, reservations invisible in displayed buying power, resting orders
 non-attributable from public data.
 
-## WO-73 — Two-wallet monitoring, credential guard, rotation drill (buildable NOW except item 4)
+## WO-73 — Role-aware monitoring, credential guard, rotation drill (items 1–3 done; item 4 blocked)
 
-Status: ITEMS 1–3 IMPLEMENTED by Codex on 2026-07-13; item 4 remains
-POST-AMENDMENT and is not implemented. Config now accepts only the executor
-sub-account's public wallet identifier. The maker scoreboard, WO-62
-reconciliation, histories, and generated operating state report operator and
-executor roles separately with `wallets_combined=false`; the legacy top-level
-view is explicitly the primary role and never a silent sum. The owner runbook
-requires AUTO-REDEEM WINS during sub-account onboarding. A value-redacting
+Status: ITEMS 1–3 IMPLEMENTED by Codex on 2026-07-13 and reconciled to custody
+Amendment A1 by WO-81 on 2026-07-14; item 4 remains BLOCKED with WO-67. The
+single project wallet is authoritative and the historical
+`executor_wallet_address` must stay empty. Role-aware maker/reconciliation
+ledgers remain for mode/time attribution without silently summing accounts. A value-redacting
 credential guard derives the actual telemetry whitelist, scans every eligible
 file plus WO-65 archive manifests, and runs before either host telemetry or
 archive push; any finding refuses both paths. The required ARM64 PR gate runs
@@ -2717,8 +2732,9 @@ schema addition from invalidating historical WO-61 prefixes. See
    credentials are absent/invalid — testable pre-amendment with dummy
    env vars against a stub, because fail-flat is a property of the
    harness, not of real keys.
-4. POST-AMENDMENT ONLY: the actual `.env` credential loading in the
-   executor process. Everything else in this WO ships first.
+4. WO-67 AUTHORIZATION ONLY: actual `.env` credential loading in an executor
+   process remains prohibited until every P1-P5 precondition passes, including
+   the distinct dated P3 owner amendment authorizing a live order path.
 
 ## WO-74 — Executor replay-certification harness (buildable NOW; executor plugs in later)
 
@@ -2753,7 +2769,7 @@ harness the executor must later pass rather than code inside it:
 4. Buildable now against a stub decision log; the real executor must
    pass unchanged post-amendment.
 
-## WO-75 — Live-ops control plane (monitoring parts NOW; binding hooks post-amendment)
+## WO-75 — Live-ops control plane (monitoring done; binding hooks blocked with WO-67)
 
 Status: ITEMS 1, 3, AND 4 IMPLEMENTED by Codex on 2026-07-13. The independent
 VPS scheduler now reads the registered future execution-ledger and heartbeat
@@ -2762,7 +2778,8 @@ publishes mode, orders, exposure/cap, action age, freshness, dead-man,
 kill-scoreboard, reconciliation, and deduplicated owner-alert evidence to
 `outputs/execution/executor_status.json`, generated operating state, and the
 dashboard. The scheduler never writes the heartbeat. WO-75 item 2 remains
-POST-AMENDMENT and is machine-marked false; no executor, credential, signer,
+BLOCKED with WO-67 until every P1-P5 precondition passes and is machine-marked
+false; no executor, credential, signer,
 broker, cancellation, paper, or live order path was added.
 
 1. Executor status surface: dashboard panel + operating-state rows —
@@ -3056,27 +3073,24 @@ contains no paper/live broker, signing, order, gate, model, or sizing path.
    reconciliation legs -> NAV). Do not boil the ocean; add contracts
    only when a WO touches the pair.
 
-## Priority order for Codex (updated 2026-07-12, batch 8 filed)
+## Current queue for Codex (reconciled 2026-07-14)
 
-2026-07-13 late update: WO-77/78/71/79/73(1-3)/74/75(1,3,4) ALL BUILT,
-audited, and deployed same day. Queue now: **WO-80** (staleness guard,
-small) -> **WO-82** (Stage-1 operator runbook + daily stage log — MUST
-land before 2026-07-17) -> **WO-81** (A1 reconciliation + sweep
-advisory + withdrawal runbook). WO-76 is a registration effective on
-filing (no build); WO-73 item 4, WO-75 item 2, and WO-67 itself remain
-POST-AMENDMENT; WO-70 deferred post-proof; WO-72 DEFERRED
-(pre-WO-67 requirement, build post-ladder). Batch 6: WO-66 unblocked; WO-67 BLOCKED per its
-preconditions. Batch 4 in order: **WO-58 -> WO-56 -> WO-57 -> WO-59 -> WO-60**. Then batch 5
-(investor-grade evidence infra): **WO-61 -> WO-64 -> WO-62 -> WO-63 -> WO-65**
-(2026-07-11 reorder from the builder's audit: 63's gas capture hangs off 62's
-on-chain scan; 62 stays inert until a wallet exists but its code builds now) (58 is a
-five-line unblock for the toxicity lane; 56 changes what tomorrow's runs
-measure, so it should land before more days accrue; 57 feeds the Jul 20
-judgment; 59 must land before any funding stage could ever bind). Then
-**WO-47** (still the best unbuilt order - fee schedule + rebate rate at
-market birth, authoritative settlement stamps). WO-48 stays BLOCKED until
-the maker gates read evidence-supported. WO-33 last pending the leakage
-review.
+There is no authorized, buildable WO after WO-80, WO-82, and WO-81 landed.
+
+- **Pending review, not build permission:** WO-33. WO-34/35 model wiring shares
+  its leakage-review dependency and must stay inside H1-H3. H2/H3 still need
+  dedicated post-registration OOS evaluators, but no numbered build order for
+  those evaluators is filed here.
+- **Blocked:** WO-48 (maker evidence gates); WO-67 (all P1-P5); WO-73 item 4 and
+  WO-75 item 2 (part of the blocked executor authorization path).
+- **Deferred:** WO-70 until post-proof; WO-72 until the human ladder produces
+  the registered drill inputs.
+- **Registration only:** WO-76; no code build is attached to filing it.
+- **Decision, not a WO:** WP13 venue expansion requires an explicit owner go.
+
+Do not infer a new build from the superseded priority notes below or from an
+existing diagnostic module. A newly filed WO or an explicit prerequisite
+transition must change this queue first.
 
 ## Superseded priority note (2026-07-10, batch 3)
 

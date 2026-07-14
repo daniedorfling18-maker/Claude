@@ -1,5 +1,8 @@
 # Polymarket runtime context and learnings — 2026-06-28
 
+> **Archived context.** Do not execute the local startup commands below. The
+> active 2026-07-14 operating contract is VPS-only and lives in `AGENTS.md`.
+
 This note captures the current operating state, lessons learned, and safe next actions for the Polymarket paper-trading/research system. It is intended to preserve repo context so future work does not rely on chat history.
 
 ## Current objective

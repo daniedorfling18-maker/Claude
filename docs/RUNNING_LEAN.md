@@ -1,5 +1,9 @@
 # Running lean — keeping memory off 99%
 
+> **Historical local-capacity guide.** Do not start these stacks locally. The
+> current system runs only on the upgraded VPS under the single-stack and
+> resource controls in `AGENTS.md` and `docker-compose.vps-paper.yml`.
+
 Two things eat the RAM: **Docker containers** (up to ~35 are defined across the compose files) and
 **Codex** (a separate heavyweight agent). With no caps, a few stacks plus Codex peg an 8–16 GB box.
 This guide keeps a useful subset running inside a fixed memory budget.

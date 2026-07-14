@@ -4,6 +4,7 @@ reward shares, and a calm last-24h window hiding news-gap pick-off risk."""
 from __future__ import annotations
 
 import json
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -198,6 +199,46 @@ def test_yield_first_scan_fails_soft_to_pot_rank(tmp_path, monkeypatch):
     assert scan["universe_scan_mode"] == "pot_rank_fallback"
     assert scan["yield_scan_fallback"] is True
     assert "synthetic book outage" in scan["yield_scan_error"]
+
+
+def test_candidate_staleness_reasons_cover_close_and_resolution_states():
+    as_of = datetime(2026, 7, 13, 12, tzinfo=timezone.utc)
+
+    assert maker_carry_study._candidate_staleness_reasons(
+        {"question": "Will X happen?", "endDate": "2026-07-13T11:59:59Z"},
+        as_of=as_of,
+    ) == ["venue_close_time_past"]
+    assert maker_carry_study._candidate_staleness_reasons(
+        {"question": "Will X happen?", "endDate": "2026-07-20T00:00:00Z", "umaResolutionStatus": "proposed"},
+        as_of=as_of,
+    ) == ["resolution_proposed"]
+    assert maker_carry_study._candidate_staleness_reasons(
+        {"question": "Will X happen?", "endDate": "2026-07-20T00:00:00Z", "umaResolutionStatus": "DISPUTED"},
+        as_of=as_of,
+    ) == ["resolution_disputed"]
+
+
+def test_past_dated_rewarded_market_is_excluded_before_selection(tmp_path, monkeypatch):
+    cfg = _config(tmp_path)
+    market = _market(
+        "Will Iran take military action against a Gulf State on July 9?",
+        "past-date",
+        100.0,
+    )
+    # A late venue resolution deadline must not make a past event date look
+    # quoteable. This is the exact pathology observed in the 2026-07-13 scan.
+    market["endDate"] = "2026-12-31T00:00:00Z"
+    market["clobRewards"] = [{"rewardsDailyRate": 100.0, "endDate": "2026-12-31"}]
+    monkeypatch.setattr(maker_carry_study, "now_utc", lambda: "2026-07-13T12:00:00Z")
+    _fake_requests(monkeypatch, markets=[market], books={}, histories={})
+
+    summary = run_maker_carry_study(cfg)
+
+    assert summary["universe_rewarded_markets"] == 0
+    assert summary["excluded_stale"] == 1
+    assert summary["excluded_stale_by_reason"] == {"title_date_past": 1}
+    assert summary["yield_scan_considered_markets"] == 0
+    assert read_csv_rows(cfg.output_root / "maker_carry" / "maker_carry_candidates.csv") == []
 
 
 def test_published_share_model_worked_example_uses_market_and_complement(tmp_path, monkeypatch):

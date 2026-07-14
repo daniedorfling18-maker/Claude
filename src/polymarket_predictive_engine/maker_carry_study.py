@@ -66,6 +66,7 @@ placement of any kind. The live-trading gates in AGENTS.md are untouched.
 from __future__ import annotations
 
 import json
+from datetime import date, datetime, timezone
 from decimal import Decimal, ROUND_CEILING, ROUND_FLOOR
 import re
 import time
@@ -75,7 +76,7 @@ from typing import Any
 import requests
 
 from .config import EngineConfig, load_config
-from .utils import now_utc, read_csv_rows, read_json, safe_float, write_csv, write_json
+from .utils import now_utc, parse_timestamp, read_csv_rows, read_json, safe_float, write_csv, write_json
 
 DEFAULT_GAMMA_BASE_URL = "https://gamma-api.polymarket.com"
 DEFAULT_CLOB_BASE_URL = "https://clob.polymarket.com"
@@ -209,6 +210,44 @@ RESOLUTION_HIGH_KEYWORDS = (
 )
 RESOLUTION_CORPUS_SAMPLE_FLOOR = 50
 RESOLUTION_MIN_CLEAN_SHARE = 0.90
+
+STALE_RESOLUTION_STATUSES = {"proposed", "disputed"}
+_MONTH_NUMBERS = {
+    "jan": 1,
+    "january": 1,
+    "feb": 2,
+    "february": 2,
+    "mar": 3,
+    "march": 3,
+    "apr": 4,
+    "april": 4,
+    "may": 5,
+    "jun": 6,
+    "june": 6,
+    "jul": 7,
+    "july": 7,
+    "aug": 8,
+    "august": 8,
+    "sep": 9,
+    "sept": 9,
+    "september": 9,
+    "oct": 10,
+    "october": 10,
+    "nov": 11,
+    "november": 11,
+    "dec": 12,
+    "december": 12,
+}
+_MONTH_PATTERN = "|".join(sorted(_MONTH_NUMBERS, key=len, reverse=True))
+_TITLE_MONTH_DAY_RE = re.compile(
+    rf"\b(?P<month>{_MONTH_PATTERN})\.?\s+(?P<day>\d{{1,2}})(?:st|nd|rd|th)?(?:,?\s+(?P<year>20\d{{2}}))?\b",
+    re.IGNORECASE,
+)
+_TITLE_DAY_MONTH_RE = re.compile(
+    rf"\b(?P<day>\d{{1,2}})(?:st|nd|rd|th)?\s+(?P<month>{_MONTH_PATTERN})\.?(?:,?\s+(?P<year>20\d{{2}}))?\b",
+    re.IGNORECASE,
+)
+_TITLE_ISO_DATE_RE = re.compile(r"\b(?P<year>20\d{2})-(?P<month>\d{1,2})-(?P<day>\d{1,2})\b")
 
 CANDIDATE_FIELDS = [
     "question",
@@ -364,6 +403,82 @@ def _live_pot_usd(market: dict[str, Any], today: str) -> float:
         if rate > 0 and (not end_date or end_date >= today):
             total += rate
     return total
+
+
+def _inferred_title_date(month: int, day: int, *, as_of: datetime, close_at: datetime | None) -> date | None:
+    """Resolve a title date without a year against the closest sensible year.
+
+    Polymarket questions commonly say ``on July 9`` without a year.  The
+    venue close timestamp is the strongest year hint; otherwise choose the
+    date nearest to the current UTC date so a December scan does not reject a
+    forthcoming January market as eleven months old.
+    """
+
+    reference = (close_at or as_of).date()
+    candidates: list[date] = []
+    for year in (reference.year - 1, reference.year, reference.year + 1):
+        try:
+            candidates.append(date(year, month, day))
+        except ValueError:
+            continue
+    return min(candidates, key=lambda value: abs((value - reference).days)) if candidates else None
+
+
+def _title_dates(question: str, *, as_of: datetime, close_at: datetime | None) -> list[date]:
+    dates: set[date] = set()
+    occupied: list[tuple[int, int]] = []
+    for match in _TITLE_ISO_DATE_RE.finditer(str(question or "")):
+        try:
+            dates.add(date(int(match.group("year")), int(match.group("month")), int(match.group("day"))))
+            occupied.append(match.span())
+        except ValueError:
+            continue
+
+    for pattern in (_TITLE_MONTH_DAY_RE, _TITLE_DAY_MONTH_RE):
+        for match in pattern.finditer(str(question or "")):
+            if any(start <= match.start() < end for start, end in occupied):
+                continue
+            month = _MONTH_NUMBERS[match.group("month").lower().rstrip(".")]
+            day = int(match.group("day"))
+            year_text = match.group("year")
+            try:
+                parsed = (
+                    date(int(year_text), month, day)
+                    if year_text
+                    else _inferred_title_date(month, day, as_of=as_of, close_at=close_at)
+                )
+            except ValueError:
+                parsed = None
+            if parsed is not None:
+                dates.add(parsed)
+    return sorted(dates)
+
+
+def _candidate_staleness_reasons(market: dict[str, Any], *, as_of: datetime) -> list[str]:
+    """Return tighten-only WO-80 exclusion reasons for a rewarded market."""
+
+    as_of = as_of.astimezone(timezone.utc)
+    close_at = parse_timestamp(market.get("endDateIso") or market.get("endDate"))
+    if close_at is not None:
+        close_at = close_at.astimezone(timezone.utc)
+
+    reasons: list[str] = []
+    if close_at is not None and close_at < as_of:
+        reasons.append("venue_close_time_past")
+
+    title_dates = _title_dates(str(market.get("question") or ""), as_of=as_of, close_at=close_at)
+    # A range remains live through its latest explicit title date.  This
+    # still rejects the observed single-day July 9 market on July 13 while
+    # avoiding false rejection of an in-progress July 9-20 window.
+    if title_dates and max(title_dates) < as_of.date():
+        reasons.append("title_date_past")
+
+    resolution_status = str(
+        market.get("umaResolutionStatus") or market.get("uma_resolution_status") or ""
+    ).strip().lower()
+    if resolution_status in STALE_RESOLUTION_STATUSES:
+        reasons.append(f"resolution_{resolution_status}")
+    return reasons
 
 
 def _word_in(text: str, word: str) -> bool:
@@ -552,14 +667,21 @@ def _first_token_id(market: dict[str, Any]) -> str:
     return tokens[0] if tokens else ""
 
 
-def _rewarded_universe(settings: dict[str, Any]) -> tuple[list[dict[str, Any]], list[str]]:
+def _rewarded_universe(
+    settings: dict[str, Any],
+) -> tuple[list[dict[str, Any]], list[str], dict[str, Any]]:
     """Active markets carrying a live maker-reward pot, largest pots first."""
     base = str(settings["gamma_base_url"]).rstrip("/")
     timeout = float(settings["request_timeout_seconds"])
     pause = float(settings["request_pause_seconds"])
-    today = now_utc()[:10]
+    observed_at = now_utc()
+    today = observed_at[:10]
+    as_of = parse_timestamp(observed_at) or datetime.now(timezone.utc)
     universe: list[dict[str, Any]] = []
     errors: list[str] = []
+    excluded_stale = 0
+    excluded_by_reason: dict[str, int] = {}
+    excluded_examples: list[dict[str, Any]] = []
     for page in range(int(settings["universe_pages"])):
         try:
             response = requests.get(
@@ -591,6 +713,20 @@ def _rewarded_universe(settings: dict[str, Any]) -> tuple[list[dict[str, Any]], 
             token_id = token_ids[0] if token_ids else ""
             complement_token_id = token_ids[1] if len(token_ids) > 1 else ""
             if pot < float(settings["min_daily_pot_usd"]) or min_size <= 0 or max_spread_cents <= 0 or not token_id:
+                continue
+            stale_reasons = _candidate_staleness_reasons(market, as_of=as_of)
+            if stale_reasons:
+                excluded_stale += 1
+                for reason in stale_reasons:
+                    excluded_by_reason[reason] = excluded_by_reason.get(reason, 0) + 1
+                if len(excluded_examples) < 10:
+                    excluded_examples.append(
+                        {
+                            "market_id": str(market.get("id") or "").strip(),
+                            "question": str(market.get("question") or "").strip(),
+                            "reasons": stale_reasons,
+                        }
+                    )
                 continue
             universe.append(
                 {
@@ -632,7 +768,11 @@ def _rewarded_universe(settings: dict[str, Any]) -> tuple[list[dict[str, Any]], 
         row["pot_rank"] = rank
         row["yield_rank"] = ""
         row["expected_gross_at_min_size"] = ""
-    return universe, errors
+    return universe, errors, {
+        "excluded_stale": excluded_stale,
+        "excluded_stale_by_reason": excluded_by_reason,
+        "excluded_stale_examples": excluded_examples,
+    }
 
 
 def _quadratic_score(distance: float, v: float, size: float) -> float:
@@ -1337,7 +1477,7 @@ def run_maker_carry_study(cfg: EngineConfig) -> dict[str, Any]:
         write_json(summary_path, summary)
         return summary
 
-    universe, errors = _rewarded_universe(settings)
+    universe, errors, stale_diagnostic = _rewarded_universe(settings)
     pause = float(settings["request_pause_seconds"])
     candidates: list[dict[str, Any]] = []
     resolution_class_stats = _resolution_quality_class_stats(cfg)
@@ -1505,6 +1645,9 @@ def run_maker_carry_study(cfg: EngineConfig) -> dict[str, Any]:
             "universe_scan_mode": yield_scan["universe_scan_mode"],
             "universe_rewarded_markets": len(universe),
             "universe_pot_usd_per_day": round(sum(m["pot_usd_per_day"] for m in universe), 2),
+            "excluded_stale": stale_diagnostic["excluded_stale"],
+            "excluded_stale_by_reason": stale_diagnostic["excluded_stale_by_reason"],
+            "excluded_stale_examples": stale_diagnostic["excluded_stale_examples"],
             "yield_scan_considered_markets": yield_scan["yield_scan_considered_markets"],
             "yield_scan_scored_markets": yield_scan["yield_scan_scored_markets"],
             "yield_scan_selected_markets": yield_scan["yield_scan_selected_markets"],
@@ -1534,6 +1677,11 @@ def run_maker_carry_study(cfg: EngineConfig) -> dict[str, Any]:
                     "2026-07-11 WO-56 coverage change only: rewarded markets are pre-screened by "
                     "pot x published-rule min-size share before the existing expensive history/markout study. "
                     "The registered gate metric remains the sized portfolio net carry at the $500 cap."
+                ),
+                "staleness_guard": (
+                    "2026-07-14 WO-80 tighten-only universe filter: otherwise eligible rewarded markets "
+                    "are excluded when their latest explicit title date or venue close time is past, or "
+                    "when UMA resolution is proposed/disputed. Registered M-gates are unchanged."
                 ),
                 "quote_size_shares": "rewards_min_size per market, both sides",
                 "quote_distance": f"per-market best of {fractions} x rewards_max_spread from mid",

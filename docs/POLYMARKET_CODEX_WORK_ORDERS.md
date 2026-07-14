@@ -1,8 +1,8 @@
 # Polymarket Codex Work Orders
 
 Last updated: 2026-07-14 (WO-80, WO-82, WO-81 landed; WO-83 implemented in
-PR #203; WO-84 implemented in PR #205. No additional work order is currently
-authorized for build. WO-33 remains pending a registered leakage review, with
+PR #203; WO-84 implemented in PR #205. NEXT BUILDABLE: WO-85 (harvest
+resilience + freshness alarm + Gate-A clustering guard, deep-dive audit). WO-33 remains pending a registered leakage review, with
 WO-34/35 model wiring bound to that review and the three-hypothesis freeze.
 WO-48 and WO-67 are blocked; WO-70 and WO-72 are deferred; WO-76 is
 registration-only. Crypto up/down is frozen as a diagnostic — see
@@ -2856,6 +2856,57 @@ so tickets can never complete and the evaluator fails closed forever.
    must land before the $100 human stage starts — the requote loop is
    that stage's safety net.
 
+## WO-85 — Harvest resilience + freshness alarm + Gate-A clustering guard (deep-dive audit 2026-07-14)
+
+Deep process audit found the daily `training_harvest` had not produced
+fresh output in ~27h (factsheet, ledger anchor stale; disk climbed to
+84%) while all short-cadence jobs were current. Root-cause CLASS, not
+just the trigger:
+
+1. `set -e` ALL-OR-NOTHING TAIL STARVATION. The harvest is one
+   `( set -e; <20 timeout'd steps> )` subshell. The FIRST step that
+   times out (exit 124) or errors aborts every remaining step. The two
+   most safety-relevant steps run LAST — `corpus-retention` (step 19,
+   disk) and `anchor-ledgers` (step 20, tamper-evidence) — so any early
+   slowdown/failure silently starves disk cleanup AND anchoring. This
+   exactly matches the observed disk-climb + stale-anchor signature.
+   The immediate trigger (maker-fill-replay OOM in the 2g scheduler cap)
+   is addressed by PR #207, but the fragility is independent of trigger.
+   Fix: guarantee the disk/anchor tail runs regardless of earlier-step
+   outcome — a `trap`/`finally` that always executes retention +
+   anchor, OR make every step best-effort (drop `set -e`) with a
+   recorded per-step sub-status so a failing step is VISIBLE, not
+   silently swallowed by an aborted run. Record each step's exit in an
+   artifact so a partial harvest is legible.
+
+2. NO WHOLE-JOB TIME BUDGET. 20 x up-to-1800s is an unbounded wall
+   clock that can overrun into the next daily cycle. Add an overall
+   harvest deadline; steps beyond it are skipped-with-reason, not
+   killed mid-write.
+
+3. NO HARVEST-COMPLETION FRESHNESS ALARM (the monitoring gap that let
+   this run ~27h unnoticed). WO-78 catches a job that RUNS and exits
+   nonzero, never a scheduled job that silently stops COMPLETING. Add a
+   registered freshness rule: `training_harvest` must record a
+   successful completion within 25h, else INCIDENT + owner alert. Apply
+   the same "expected-cadence job completed within N" check to every
+   daily/periodic job, not just the harvest — the general fix for
+   silently-stalled dispatch.
+
+4. LATENT GATE-A CLUSTERING GUARD (profit_verdict `_clustered_focus_finals`).
+   The unit key falls back `market_id -> market_slug -> shadow_position_id`.
+   If `market_id`/`slug` ever stop populating, each final becomes its own
+   unit and INFLATES the sign test (anti-conservative — could make the
+   verdict pass too easily). Not currently active (29 units < 42 finals
+   proves clustering works). Guard: if a material fraction of finals
+   fall back to per-row position-id nodes, mark Gate A
+   `insufficient_clustering_coverage` rather than counting inflated
+   units. Tighten-only; reporting/gate-safety only.
+
+Tests: (a) a harvest step failing mid-list still runs retention+anchor
+and records the failure; (b) freshness rule trips at 25h; (c) planted
+finals with missing market_id trip the Gate-A clustering guard.
+
 ## WO-84 — Reconciliation bridge-deposit blindness + watchdog coverage gap (audit 2026-07-14)
 
 Status: IMPLEMENTED by Codex on 2026-07-14 in PR #205. The Data API leg now
@@ -3188,7 +3239,7 @@ contains no paper/live broker, signing, order, gate, model, or sizing path.
 
 ## Current queue for Codex (reconciled 2026-07-14)
 
-**Next buildable: none currently filed.** WO-83 is implemented in PR #203 and
+**Next buildable: WO-85.** WO-83 is implemented in PR #203 and
 WO-84 is implemented in PR #205. Do not infer follow-on capital, gate, model,
 or executor work from their diagnostics; the queue below remains binding.
 

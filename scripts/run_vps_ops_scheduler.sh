@@ -136,6 +136,14 @@ schedule_skip_kind() {
     echo ""
     return
   fi
+  # A zero stamp is the registered deploy signal for "run immediately". It is
+  # deliberate, not a missed cadence, so a successful forced refresh must
+  # clear rather than increment the consecutive-overrun SLO counter.
+  STAMP_VALUE="$(cat "$STAMP_FILE" 2>/dev/null || echo 0)"
+  if [ "$STAMP_VALUE" = "0" ]; then
+    echo ""
+    return
+  fi
   AGE="$(seconds_since_stamp "$1")"
   if [ "$AGE" -gt $((INTERVAL + TICK_SECONDS)) ]; then
     echo "overrun"
@@ -456,6 +464,10 @@ run_degraded_state_watchdog() {
   stamp_status degraded_state_watchdog "$CODE" "executor monitor + semantic watchdog + operating state + dashboard; reporting only" "$STARTED_AT"
   log "degraded_state_watchdog: exit $CODE"
 }
+
+if [ "${OPS_SCHEDULER_LIBRARY_ONLY:-0}" = "1" ]; then
+  return 0 2>/dev/null || exit 0
+fi
 
 log "vps-ops-scheduler starting: governance=${GOVERNANCE_INTERVAL}s clv=${CLV_INTERVAL}s card=${CARD_INTERVAL}s harvest=${HARVEST_INTERVAL}s tick=${TICK_SECONDS}s"
 stamp_status scheduler 0 "started"

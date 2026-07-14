@@ -545,7 +545,7 @@ jobs:
           fi
 
           echo "[deploy] verifying paper stack health"
-          bash scripts/check_polymarket_vps_paper.sh
+          PM_VPS_REPO_DIR="$REPO_DIR" bash scripts/check_polymarket_vps_paper.sh
 
           port="$(grep -E '^POLYMARKET_DASHBOARD_PORT=' .env | tail -n 1 | cut -d= -f2-)"
           port="${port:-8765}"

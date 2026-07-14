@@ -558,16 +558,19 @@ jobs:
           html="$(curl -fsS --max-time 10 "http://127.0.0.1:${port}/")"
           data="$(curl -fsS --max-time 10 "http://127.0.0.1:${port}/dashboard_data.json")"
 
-          printf '%s' "$html" | grep -q "Proof status"
-          printf '%s' "$html" | grep -q "Evidence funnel"
-          printf '%s' "$html" | grep -q "Executor live-ops control plane"
-          printf '%s' "$data" | grep -q "profit_target_proof_status"
-          printf '%s' "$data" | grep -q "deployment_health"
-          printf '%s' "$data" | grep -q "mispricing_alpha_bridge"
-          printf '%s' "$data" | grep -q "coverage_by_sport_market"
-          printf '%s' "$data" | grep -q "alpha_validated_anchor_rows"
-          printf '%s' "$data" | grep -q "sharp_sports_funnel"
-          printf '%s' "$data" | grep -q '"executor_status"'
+          # With pipefail, `printf | grep -q` can return 141 after grep exits
+          # on its first match and closes the pipe. Here-strings preserve the
+          # schema assertions without an upstream process that can SIGPIPE.
+          grep -Fq -- "Proof status" <<<"$html"
+          grep -Fq -- "Evidence funnel" <<<"$html"
+          grep -Fq -- "Executor live-ops control plane" <<<"$html"
+          grep -Fq -- "profit_target_proof_status" <<<"$data"
+          grep -Fq -- "deployment_health" <<<"$data"
+          grep -Fq -- "mispricing_alpha_bridge" <<<"$data"
+          grep -Fq -- "coverage_by_sport_market" <<<"$data"
+          grep -Fq -- "alpha_validated_anchor_rows" <<<"$data"
+          grep -Fq -- "sharp_sports_funnel" <<<"$data"
+          grep -Fq -- '"executor_status"' <<<"$data"
 
           echo "VPS deploy verified: http://${PM_VPS_HOST}:${port}/"
           REMOTE

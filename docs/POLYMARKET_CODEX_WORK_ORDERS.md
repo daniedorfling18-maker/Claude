@@ -3033,7 +3033,8 @@ was added.
 
 ## WO-85 — Harvest resilience + freshness alarm + Gate-A clustering guard (deep-dive audit 2026-07-14)
 
-Status: IMPLEMENTED by Codex on 2026-07-15. CLI `training-harvest` now writes
+Status: IMPLEMENTED by Codex on 2026-07-15, including the completion-stamp
+correction. CLI `training-harvest` now writes
 `outputs/ops_scheduler/training_harvest.json` after every child, continues
 after failures, applies a tighten-only six-hour start deadline, and always
 attempts corpus retention and ledger anchoring as its final two steps. The
@@ -3043,6 +3044,11 @@ incident when any registered periodic lane exceeds its completion ceiling
 `insufficient_clustering_coverage` when more than 10% of eligible finals use
 per-position fallback identities. No threshold was loosened and no paper/live
 or order path was invoked.
+
+The scheduler now keys the 24-hour harvest interval and the intraday offset on
+the last successful completion, persisted in `last_success_training_harvest`
+and migrated from `status.json` when necessary. A start writes only an attempt
+stamp; a failed or interrupted run cannot consume the next daily slot.
 
 Deep process audit found the daily `training_harvest` had not produced
 fresh output in ~27h (factsheet, ledger anchor stale; disk climbed to

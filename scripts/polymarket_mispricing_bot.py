@@ -63,11 +63,6 @@ class BotConfig:
     positions_csv: Path
     output_dir: Path
     wallet_address: str
-    private_key: str
-    clob_api_key: str
-    clob_api_secret: str
-    clob_api_passphrase: str
-    chain_id: int
     allow_sell_without_position: bool
     geoblock_required: bool
 
@@ -99,11 +94,6 @@ class BotConfig:
             positions_csv=Path(os.getenv("POLYMARKET_POSITIONS_CSV", "inputs/polymarket/positions.csv")),
             output_dir=Path(os.getenv("POLYMARKET_OUTPUT_DIR", "outputs/polymarket")),
             wallet_address=os.getenv("POLYMARKET_WALLET_ADDRESS", "").strip(),
-            private_key=os.getenv("POLYMARKET_PRIVATE_KEY", os.getenv("PK", "")).strip(),
-            clob_api_key=os.getenv("CLOB_API_KEY", "").strip(),
-            clob_api_secret=os.getenv("CLOB_SECRET", "").strip(),
-            clob_api_passphrase=os.getenv("CLOB_PASS_PHRASE", "").strip(),
-            chain_id=int(os.getenv("POLYMARKET_CHAIN_ID", "137")),
             allow_sell_without_position=_env_bool("POLYMARKET_ALLOW_SELL_WITHOUT_POSITION", default=False),
             geoblock_required=_env_bool("POLYMARKET_GEOBLOCK_REQUIRED", default=True),
         )

@@ -39,11 +39,6 @@ def _config(scanner, query: str):
         positions_csv=Path("missing.csv"),
         output_dir=Path("outputs/polymarket"),
         wallet_address="",
-        private_key="",
-        clob_api_key="",
-        clob_api_secret="",
-        clob_api_passphrase="",
-        chain_id=137,
         allow_sell_without_position=False,
         geoblock_required=False,
     )

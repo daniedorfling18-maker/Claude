@@ -2874,56 +2874,85 @@ so tickets can never complete and the evaluator fails closed forever.
    must land before the $100 human stage starts — the requote loop is
    that stage's safety net.
 
-## WO-89 — Venue activity timestamp units: phantom 24h fills + WO-88 matching cannot fire (post-deploy telemetry read 2026-07-15)
+## WO-89 — Self-anchored 24h activity window: phantom fills never expire (post-deploy telemetry read 2026-07-15; ROOT CAUSE CORRECTED by line audit same day)
 
 OBSERVED IN PRODUCTION (vps-telemetry snapshot 2026-07-15T13:00Z, deployed
 f5241c8): `maker_live_test_attribution_history.csv` shows
 `fills_last_24h_raw=2` on EVERY refresh from 08:00Z through 12:55Z — the two
-2026-07-13 operator drill fills, more than 36 hours old. Under correct
-second-based stamps both fills leave the 24h window on 2026-07-14. At 08:50Z
-`modelled_fills_per_day` dropped to 0.39 and the phantom count re-fired
+2026-07-13 operator drill fills, more than 36 hours old. At 08:50Z
+`modelled_fills_per_day` dipped to 0.39 and the phantom count re-fired
 `STOP_fills_outrunning_model`.
 
-ROOT CAUSE: the data-api activity `timestamp` field arrives at millisecond
-scale, and `maker_live_test._stamp` is `safe_float(timestamp) or 0.0` with no
-unit detection, so every activity row compares greater than any seconds-based
-`day_ago` forever. Consequences, all in the over-alarm direction but wrong:
+ROOT CAUSE (corrected 2026-07-15 by the orchestrator's line audit; the
+initially filed millisecond-unit theory is WRONG and is disproven by the
+same data — the two drill fills are hours apart, and a millisecond-scale
+`- 86400` window spans only ~86 seconds, so at most one could have counted):
+`maker_live_test._wallet_score` computes
 
-1. `fills_last_24h` never decays: permanent phantom fill counts, recurring
-   false STOPs whenever the modelled rate dips, and during a live stage a
-   permanently broken WO-50 consecutive-ok-day ladder.
-2. `rewards_usd_24h` equals all-time rewards (same `_stamp` on reward rows).
-3. `owner_activity_attribution._trade_fields` feeds the raw millisecond stamp
-   into the registered ±300 s matching window against seconds-based anchored
-   operator-log times, so owner exclusion is STRUCTURALLY impossible — even a
-   perfect anchored log entry can never match.
+    now_seconds = max(activity stamps);  day_ago = now_seconds - 86400
+
+anchoring the "last 24h" window to the NEWEST VENUE ACTIVITY STAMP instead
+of the wall clock. On a quiet account the newest fill IS "now" forever, so
+the final day of activity never ages out. Consequences:
+1. `fills_last_24h` never decays on a quiet account: permanent phantom fill
+   counts, recurring false STOPs whenever the modelled rate dips, and during
+   a live stage a broken WO-50 consecutive-ok-day ladder. On an active
+   account the window slides with each new fill, also inflating the count.
+2. `rewards_usd_last_24h` equals all-time rewards on a quiet account.
+3. NOT affected (correcting the earlier filing): WO-88 owner-activity
+   matching is sound — venue activity stamps are unix seconds and compare
+   correctly against the anchored operator log inside the registered ±300 s
+   window. No change to `owner_activity_attribution` is required.
 
 REGISTERED FIX (single small change; thresholds and windows untouched):
-- One shared timestamp normalization used by `maker_live_test._stamp` and
-  `owner_activity_attribution._trade_fields`, following the convention already
-  registered in `corpus_retention._row_time`: numeric value > 10_000_000_000
-  is milliseconds and divides by 1000; ISO-string fallback via
-  `parse_timestamp` stays. NOTHING else changes: `fill_alert_multiple`, the
-  86400 s window, the ±300 s match window, and every kill threshold are
-  byte-identical.
-- Fail-safe preserved exactly: an unparseable stamp remains 0.0/None — never
-  counted as recent, never matched, stays in the maker-test population.
-- Registered consequence: with correct units the 2026-07-13 drill fills age
-  out immediately, which resolves the 2026-07-14 STOP by the aging-out arm of
-  WO-88's registered review note. NO retroactive operator-log entry may be
-  created for those drills: the log is append-only and anchored, and a
-  today-logged entry could never honestly match a 2026-07-13 trade inside
-  ±300 s. The runbook remains the human record for pre-WO-82 drills.
+- `day_ago` derives from the wall clock: `datetime.now(timezone.utc)`
+  (or the run's `generated_at` stamp) minus 86400 — never from the maximum
+  observed activity stamp. The 86400 s window, `fill_alert_multiple`, and
+  every kill threshold stay byte-identical.
+- Defensive-only hardening allowed alongside: normalize any stamp
+  > 10_000_000_000 as milliseconds (the registered
+  `corpus_retention._row_time` convention) before comparison, so a future
+  venue unit change cannot silently re-freeze the window in either
+  direction. This must not alter behaviour for current second-scale stamps.
+- Fail-safe preserved exactly: an unparseable stamp remains 0.0 — never
+  counted as recent, and (unchanged) unmatched fills stay maker_test.
+- Registered consequence: with a wall-clock window the 2026-07-13 drill
+  fills age out immediately, which resolves the 2026-07-14 STOP by the
+  aging-out arm of WO-88's registered review note. NO retroactive
+  operator-log entry may be created for those drills (append-only anchored
+  log; a today-logged entry cannot honestly match a 2026-07-13 trade inside
+  ±300 s). The runbook remains the human record for pre-WO-82 drills.
 - Non-defect noted for the record: `operator_log_not_anchored` in the same
   snapshot is CORRECT behavior — `execution/stage_operator_log.csv` does not
   exist because the drills predate WO-82 usage. Future owner drills must be
-  logged through the stage-operator path before execution.
+  logged through the stage-operator path (`drill_trade`/`maintenance_trade`)
+  before execution.
 
-Tests: (a) millisecond-scale fixtures (~1.78e12) age out of the 24h window on
-schedule; (b) second-scale fixtures behave identically to today; (c) an
-anchored logged action matches a millisecond trade stamp inside ±300 s;
-(d) unparseable stamps are excluded and remain maker_test; (e) rewards_24h
-windows correctly under millisecond stamps.
+Tests: (a) fills/rewards older than 24h of WALL-CLOCK time are excluded even
+when they are the newest activity on the account; (b) fresh fills within the
+wall-clock day still count and still trip the alert against the modelled
+rate; (c) second-scale stamps behave identically before/after the defensive
+millisecond normalization; (d) millisecond-scale fixtures normalize and age
+out on schedule; (e) unparseable stamps are excluded and remain maker_test.
+
+## WO-90 — Atomic quote-sheet writes (concurrent decision-policy under the WO-85 safety pulse)
+
+Small hardening found by the same line audit. The WO-85 safety pulse runs
+`decision-policy` on a 15-minute cadence while the daily harvest may run its
+own `decision_policy` step concurrently. All JSON artifacts already write
+atomically (temp + `os.replace`), but `outputs/maker_carry/maker_quote_sheet.md`
+does not: `maker_carry_study._write_quote_sheet` uses a plain `write_text`,
+and `live_test_decision_policy._patch_quote_sheet` does a non-atomic
+read-modify-write of the same file. A concurrent pair can produce a torn or
+stale-patched human quote sheet for one cycle (reporting-only; self-heals on
+the next refresh; no gate reads the sheet).
+
+Fix: write the sheet via temp-file + `os.replace` in BOTH writers (the
+`_patch_quote_sheet` read still races benignly; after this change the worst
+case is a sheet missing the newest policy block for one cycle, never a torn
+file). No content, threshold, or policy change. Tests: patching a sheet
+mid-write cannot leave partial content; both writers produce byte-complete
+files under interleaving.
 
 ## WO-88 — Attribution-aware kill scoreboard under A1 (live false-STOP 2026-07-14)
 
@@ -3528,8 +3557,8 @@ pre-target scoreboard gap without authorising or placing an order.
 
 ## Current queue for Codex (reconciled 2026-07-15)
 
-**Next buildable: WO-89** (single small timestamp-unit fix; evidence and
-registered fix above). WO-85, WO-87, WO-86, and
+**Next buildable: WO-89 -> WO-90** (two small fixes; WO-89's root cause was
+corrected by the 2026-07-15 line audit — build from the corrected spec). WO-85, WO-87, WO-86, and
 WO-88 are implemented on 2026-07-15; WO-83 is implemented in PR #203 and
 WO-84 is implemented in PR #205. Do not infer follow-on capital, gate, model,
 or executor work from their diagnostics; the queue below remains binding.

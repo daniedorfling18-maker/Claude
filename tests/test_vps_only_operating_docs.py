@@ -49,7 +49,8 @@ def test_work_order_queue_distinguishes_non_buildable_states() -> None:
     work_orders = _text("docs/POLYMARKET_CODEX_WORK_ORDERS.md")
 
     assert "Current queue for Codex (reconciled 2026-07-15)" in work_orders
-    assert "Next buildable: WO-89" in work_orders
+    assert "Next buildable: WO-89 -> WO-90" in work_orders
+    assert "ROOT CAUSE CORRECTED by line audit" in work_orders
     assert "WO-85, WO-87, WO-86, and" in work_orders
     assert "WO-88 are implemented on 2026-07-15" in work_orders
     assert "WO-83 is implemented in PR #203" in work_orders

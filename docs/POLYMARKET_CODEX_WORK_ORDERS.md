@@ -1830,6 +1830,16 @@ toxicity percentiles plus smart-wallet/crowd markout splits. The maker quote
 sheet shows a toxicity column and standing rule 8; adverse charges and gates
 are not modified.
 
+**2026-07-15 completion correction.** Production evidence showed the original
+reader decompressed every retained feature archive into Python lists and the
+WO-49 child was killed at the scheduler's 2 GiB cgroup boundary. Feature and
+trade corpora are now streamed; required markout prices are held in a bounded,
+temporary disk-backed index and the summary reports scan/index counts plus
+temporary index size. The 2 GiB scheduler limit remains the acceptance
+constraint, so the fix proves bounded behavior instead of hiding the defect by
+widening the container limit. No toxicity rule, gate, sizing, or order path is
+changed.
+
 WO-37's wallet ledgers now exist. Two toxicity signals per market:
 (a) VPIN-lite: signed volume imbalance over rolling volume buckets from
 trade prints; (b) wallet-tier markout: markout-by-fill where the

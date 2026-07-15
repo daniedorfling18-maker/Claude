@@ -12,9 +12,11 @@ from __future__ import annotations
 
 import csv
 import gzip
-from bisect import bisect_left, bisect_right
+import sqlite3
+from collections.abc import Iterator
 from pathlib import Path
 from statistics import mean
+from tempfile import TemporaryDirectory
 from typing import Any
 
 from .config import EngineConfig, load_config
@@ -64,13 +66,17 @@ def _wallet(row: dict[str, Any]) -> str:
     return ""
 
 
-def _read_csv_any(path: Path) -> list[dict[str, str]]:
+def _iter_csv_any(path: Path) -> Iterator[dict[str, str]]:
     if not path.exists() or path.stat().st_size == 0:
-        return []
+        return
     if path.suffix == ".gz":
         with gzip.open(path, "rt", encoding="utf-8-sig", errors="replace", newline="") as handle:
-            return [{str(k): "" if v is None else str(v) for k, v in row.items()} for row in csv.DictReader(handle)]
-    return read_csv_rows(path)
+            for row in csv.DictReader(handle):
+                yield {str(k): "" if v is None else str(v) for k, v in row.items()}
+        return
+    with path.open("r", encoding="utf-8-sig", errors="replace", newline="") as handle:
+        for row in csv.DictReader(handle):
+            yield {str(k): "" if v is None else str(v) for k, v in row.items()}
 
 
 def _top_wallets(cfg: EngineConfig, limit: int = 100) -> tuple[set[str], bool]:
@@ -84,39 +90,157 @@ def _top_wallets(cfg: EngineConfig, limit: int = 100) -> tuple[set[str], bool]:
     return {str(row.get("wallet") or "").lower() for row in latest_rows[:limit] if row.get("wallet")}, False
 
 
-def _feature_rows(cfg: EngineConfig) -> list[dict[str, str]]:
-    rows: list[dict[str, str]] = []
+def _feature_paths(cfg: EngineConfig) -> Iterator[Path]:
     archive = cfg.output_root / "polymarket_training_archive"
     if archive.exists():
         for path in sorted(archive.glob("*.csv.gz")):
-            rows.extend(_read_csv_any(path))
+            yield path
     live = cfg.output_root / "polymarket_training" / "websocket_market_features.csv"
-    rows.extend(_read_csv_any(live))
-    return rows
+    if live.exists():
+        yield live
 
 
-def _price_series(cfg: EngineConfig) -> dict[str, list[tuple[float, float]]]:
-    series: dict[str, list[tuple[float, float]]] = {}
-    for row in _feature_rows(cfg):
-        token = str(row.get("asset_id") or row.get("token_id") or "").strip()
-        stamp = _stamp(row.get("source_timestamp") or row.get("collected_at_utc"))
-        midpoint = safe_float(row.get("midpoint"))
-        if not token or stamp is None or midpoint is None:
-            continue
-        series.setdefault(token, []).append((stamp, midpoint))
-    for values in series.values():
-        values.sort(key=lambda item: item[0])
-    return series
+def _price_target_bounds(
+    trades: list[dict[str, Any]],
+    horizon_seconds: float,
+) -> dict[str, tuple[float, float]]:
+    bounds: dict[str, tuple[float, float]] = {}
+    for trade in trades:
+        token = str(trade["asset_id"])
+        target = float(trade["stamp"]) + horizon_seconds
+        current = bounds.get(token)
+        if current is None:
+            bounds[token] = (target, target)
+        else:
+            bounds[token] = (min(current[0], target), max(current[1], target))
+    return bounds
 
 
-def _mid_at_or_after(series: list[tuple[float, float]], stamp: float) -> float | None:
-    index = bisect_left(series, (stamp, -1.0))
-    return series[index][1] if index < len(series) else None
+def _build_price_index(
+    cfg: EngineConfig,
+    connection: sqlite3.Connection,
+    target_bounds: dict[str, tuple[float, float]],
+) -> tuple[int, int]:
+    """Stream feature corpora into a bounded, disk-backed lookup index.
+
+    Only points inside a token's required markout interval are retained. One
+    earliest tail point is also kept so the final trade target can still be
+    marked when its next observation falls after the interval. This preserves
+    the original first-midpoint-at-or-after lookup without holding every
+    decompressed archive row in RAM.
+    """
+
+    connection.executescript(
+        """
+        PRAGMA journal_mode = OFF;
+        PRAGMA synchronous = OFF;
+        PRAGMA temp_store = FILE;
+        PRAGMA cache_size = -32768;
+        PRAGMA mmap_size = 0;
+        CREATE TABLE feature_prices (
+            asset_id TEXT NOT NULL,
+            stamp REAL NOT NULL,
+            midpoint REAL NOT NULL,
+            source_order INTEGER NOT NULL
+        );
+        """
+    )
+    batch: list[tuple[str, float, float, int]] = []
+    tail_candidates: dict[str, tuple[float, float, int]] = {}
+    scanned_rows = 0
+    indexed_rows = 0
+
+    def flush() -> None:
+        nonlocal indexed_rows
+        if not batch:
+            return
+        connection.executemany(
+            "INSERT INTO feature_prices(asset_id, stamp, midpoint, source_order) VALUES (?, ?, ?, ?)",
+            batch,
+        )
+        indexed_rows += len(batch)
+        batch.clear()
+
+    for path in _feature_paths(cfg):
+        for row in _iter_csv_any(path):
+            scanned_rows += 1
+            token = str(row.get("asset_id") or row.get("token_id") or "").strip()
+            bounds = target_bounds.get(token)
+            if bounds is None:
+                continue
+            stamp = _stamp(row.get("source_timestamp") or row.get("collected_at_utc"))
+            midpoint = safe_float(row.get("midpoint"))
+            if stamp is None or midpoint is None or stamp < bounds[0]:
+                continue
+            source_order = scanned_rows
+            if stamp <= bounds[1]:
+                batch.append((token, stamp, midpoint, source_order))
+                if len(batch) >= 10_000:
+                    flush()
+                continue
+            candidate = (stamp, midpoint, source_order)
+            current = tail_candidates.get(token)
+            if current is None or candidate < current:
+                tail_candidates[token] = candidate
+
+    for token, (stamp, midpoint, source_order) in tail_candidates.items():
+        batch.append((token, stamp, midpoint, source_order))
+    flush()
+    connection.commit()
+    connection.execute(
+        "CREATE INDEX feature_prices_token_stamp_idx "
+        "ON feature_prices(asset_id, stamp, midpoint, source_order)"
+    )
+    connection.commit()
+    return scanned_rows, indexed_rows
 
 
-def _mid_at_or_before(series: list[tuple[float, float]], stamp: float) -> float | None:
-    index = bisect_right(series, (stamp, float("inf"))) - 1
-    return series[index][1] if index >= 0 else None
+def _markout_stats(
+    connection: sqlite3.Connection,
+    trades: list[dict[str, Any]],
+    top_wallets: set[str],
+    horizon_seconds: float,
+) -> dict[str, dict[str, float | int]]:
+    trades_by_token: dict[str, list[dict[str, Any]]] = {}
+    for trade in trades:
+        trades_by_token.setdefault(str(trade["asset_id"]), []).append(trade)
+
+    stats: dict[str, dict[str, float | int]] = {}
+    for token, token_trades in trades_by_token.items():
+        feature_rows = iter(
+            connection.execute(
+                "SELECT stamp, midpoint FROM feature_prices "
+                "WHERE asset_id = ? ORDER BY stamp, midpoint, source_order",
+                (token,),
+            )
+        )
+        current_feature = next(feature_rows, None)
+        for trade in sorted(token_trades, key=lambda row: float(row["stamp"])):
+            target = float(trade["stamp"]) + horizon_seconds
+            while current_feature is not None and float(current_feature[0]) < target:
+                current_feature = next(feature_rows, None)
+            market = str(trade["market"])
+            market_stats = stats.setdefault(
+                market,
+                {
+                    "smart_count": 0,
+                    "smart_sum": 0.0,
+                    "crowd_count": 0,
+                    "crowd_sum": 0.0,
+                    "missing_prices": 0,
+                },
+            )
+            if current_feature is None:
+                market_stats["missing_prices"] += 1
+                continue
+            later = float(current_feature[1])
+            markout = later - float(trade["price"])
+            if trade["side"] == "SELL":
+                markout = -markout
+            tier = "smart" if trade["wallet"] and trade["wallet"] in top_wallets else "crowd"
+            market_stats[f"{tier}_count"] += 1
+            market_stats[f"{tier}_sum"] += markout
+    return stats
 
 
 def _vpin_raw(trades: list[dict[str, Any]], bucket_usd: float, bucket_count: int) -> tuple[float, int]:
@@ -153,9 +277,9 @@ def _percentiles(raw_by_market: dict[str, float]) -> dict[str, float]:
 
 
 def _trade_rows(cfg: EngineConfig) -> list[dict[str, Any]]:
-    rows = read_csv_rows(cfg.output_root / "polymarket_trade_prints" / "trade_prints.csv")
     parsed: list[dict[str, Any]] = []
-    for row in rows:
+    path = cfg.output_root / "polymarket_trade_prints" / "trade_prints.csv"
+    for row in _iter_csv_any(path):
         market = str(row.get("market") or "").strip()
         token = str(row.get("asset_id") or row.get("token_id") or "").strip()
         price = safe_float(row.get("price"))
@@ -196,7 +320,6 @@ def build_flow_toxicity(cfg: EngineConfig) -> dict[str, Any]:
         write_json(summary_path, summary)
         return summary
     trades = _trade_rows(cfg)
-    price_by_token = _price_series(cfg)
     top_wallets, missing_wallet_data = _top_wallets(cfg)
     by_market: dict[str, list[dict[str, Any]]] = {}
     for trade in trades:
@@ -207,26 +330,33 @@ def build_flow_toxicity(cfg: EngineConfig) -> dict[str, Any]:
     }
     toxicity = _percentiles(raw_vpin)
     horizon = float(settings["markout_horizon_minutes"]) * 60.0
+    markout_by_market: dict[str, dict[str, float | int]] = {}
+    feature_rows_scanned = 0
+    feature_rows_indexed = 0
+    price_index_disk_bytes = 0
+    if trades:
+        with TemporaryDirectory(prefix="polymarket-flow-toxicity-") as temp_dir:
+            database_path = Path(temp_dir) / "price_index.sqlite3"
+            connection = sqlite3.connect(database_path)
+            try:
+                feature_rows_scanned, feature_rows_indexed = _build_price_index(
+                    cfg,
+                    connection,
+                    _price_target_bounds(trades, horizon),
+                )
+                markout_by_market = _markout_stats(connection, trades, top_wallets, horizon)
+                price_index_disk_bytes = database_path.stat().st_size
+            finally:
+                connection.close()
     rows_out: list[dict[str, Any]] = []
     for market, rows in sorted(by_market.items()):
-        smart_markouts: list[float] = []
-        crowd_markouts: list[float] = []
-        missing_prices = 0
+        markouts = markout_by_market.get(market, {})
+        smart_count = int(markouts.get("smart_count", 0))
+        smart_sum = float(markouts.get("smart_sum", 0.0))
+        crowd_count = int(markouts.get("crowd_count", 0))
+        crowd_sum = float(markouts.get("crowd_sum", 0.0))
+        missing_prices = int(markouts.get("missing_prices", len(rows)))
         asset_id = rows[0]["asset_id"] if rows else ""
-        for trade in rows:
-            series = price_by_token.get(trade["asset_id"]) or []
-            later = _mid_at_or_after(series, trade["stamp"] + horizon)
-            if later is None:
-                missing_prices += 1
-                continue
-            if trade["side"] == "BUY":
-                markout = later - trade["price"]
-            else:
-                markout = trade["price"] - later
-            if trade["wallet"] and trade["wallet"] in top_wallets:
-                smart_markouts.append(markout)
-            else:
-                crowd_markouts.append(markout)
         _, bucket_n = _vpin_raw(rows, float(settings["volume_bucket_usd"]), int(settings["buckets"]))
         rows_out.append(
             {
@@ -237,10 +367,10 @@ def build_flow_toxicity(cfg: EngineConfig) -> dict[str, Any]:
                 "vpin_raw": raw_vpin.get(market, 0.0),
                 "volume_buckets": bucket_n,
                 "trades_seen": len(rows),
-                "smart_fill_count": len(smart_markouts),
-                "crowd_fill_count": len(crowd_markouts),
-                "smart_fill_markout": round(mean(smart_markouts), 6) if smart_markouts else None,
-                "crowd_fill_markout": round(mean(crowd_markouts), 6) if crowd_markouts else None,
+                "smart_fill_count": smart_count,
+                "crowd_fill_count": crowd_count,
+                "smart_fill_markout": round(smart_sum / smart_count, 6) if smart_count else None,
+                "crowd_fill_markout": round(crowd_sum / crowd_count, 6) if crowd_count else None,
                 "missing_price_points": missing_prices,
             }
         )
@@ -251,6 +381,10 @@ def build_flow_toxicity(cfg: EngineConfig) -> dict[str, Any]:
             "markets_scored": len(rows_out),
             "trades_seen": len(trades),
             "missing_wallet_data": missing_wallet_data,
+            "price_index_strategy": "disk_backed_streaming_sqlite",
+            "feature_rows_scanned": feature_rows_scanned,
+            "feature_rows_indexed": feature_rows_indexed,
+            "price_index_disk_bytes": price_index_disk_bytes,
             "max_toxicity_score": max([safe_float(row.get("toxicity_score")) or 0.0 for row in rows_out], default=0.0),
             "output_path": str(path),
             "note": (

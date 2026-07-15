@@ -2942,6 +2942,46 @@ rate; (c) second-scale stamps behave identically before/after the defensive
 millisecond normalization; (d) millisecond-scale fixtures normalize and age
 out on schedule; (e) unparseable stamps are excluded and remain maker_test.
 
+## WO-92 — Make the WO-89 defect class mechanically catchable (recorded fixtures + clock-advance tests + boundary sweep)
+
+Registered 2026-07-15 together with `docs/ENGINEERING_STANDARDS.md` (binding
+on all future WOs). Three same-week production defects (WO-89 window
+anchoring, WO-90 non-atomic shared writes, WO-91 corpus starvation) shared
+one cause: system invariants nobody specified, so no test could fail. This
+WO retrofits the standards onto the EXISTING codebase so this class is
+caught by machinery, not by post-deploy telemetry reads.
+
+Scope (reporting/test infrastructure only; no gate, threshold, policy, or
+order-path change; every item tighten-only):
+1. RECORDED FIXTURE CORPUS: capture real (sanitized) payloads from the four
+   external surfaces — data-api `/activity`, `/positions`, `/trades`; CLOB
+   `/book(s)` and `/prices-history`; Gamma `/markets` — into
+   `tests/fixtures/recorded/`, with a small README stating capture date and
+   sanitization rule. Every existing parser of these payloads gains at least
+   one test that replays the recorded fixture (S4). Hand-written fixtures
+   may remain, but cannot be the only coverage for a parser.
+2. CLOCK-ADVANCE PROPERTY TESTS: for every existing time-window computation
+   (maker_live_test 24h fills/rewards, decision-policy kill-input freshness,
+   watchdog completion freshness, requote staleness, candidate staleness,
+   corpus retention ages): assert an event inside the window, advance the
+   injected clock past the boundary, assert it leaves (S1). Code that cannot
+   inject a clock gets the minimal seam to allow it (injection parameter
+   defaulting to wall clock — no behavior change).
+3. BOUNDARY NORMALIZATION SWEEP: one shared helper for external-timestamp
+   normalization (ms/seconds/ISO, fail-safe on unparseable); every ingestion
+   site of venue timestamps routes through it; a grep-style guard test pins
+   that `maker_live_test`, `owner_activity_attribution`, `flow_toxicity`,
+   `trade_print_collector`, and `wallet_reconciliation` contain no ad-hoc
+   `safe_float(row.get("timestamp"))` pattern outside the helper.
+4. SHARED-WRITE AUDIT TEST: a test enumerates writers of artifacts under
+   `outputs/` reachable from two schedule paths (safety pulse + harvest) and
+   asserts each uses an atomic write utility (S2), so the WO-90 class cannot
+   silently return with the next new writer.
+Day-after check: `outputs/ops_scheduler/training_harvest.json` shows the new
+test files in a green full-suite VPS run recorded in the PR; subsequent
+deploys keep `deployment_health` green with no new watchdog incident
+class regressions.
+
 ## WO-91 — Pre-event CLV diagnostic starved: frozen crypto up/down floods the price-history collection cap (telemetry read 2026-07-15)
 
 OBSERVED IN PRODUCTION (verdict artifact 2026-07-15T15:30Z on deployed
@@ -3614,8 +3654,13 @@ pre-target scoreboard gap without authorising or placing an order.
 
 ## Current queue for Codex (reconciled 2026-07-15)
 
-**Next buildable: WO-91** (pre-event CLV collection coverage; must land
-before the 2026-07-19/20 final read). WO-89 and WO-90 are implemented on 2026-07-15.
+Every WO below and every future WO must comply with
+`docs/ENGINEERING_STANDARDS.md` (S1-S7), including the mandatory
+`Day-after check:` line. Reviews verify compliance item by item.
+
+**Next buildable: WO-91 -> WO-92** (WO-91 before the 2026-07-19/20 final
+read; WO-92 retrofits `docs/ENGINEERING_STANDARDS.md` onto the existing
+code so the WO-89/90/91 defect class is caught by tests, not telemetry). WO-89 and WO-90 are implemented on 2026-07-15.
 WO-85, WO-87, WO-86, and
 WO-88 are implemented on 2026-07-15; WO-83 is implemented in PR #203 and
 WO-84 is implemented in PR #205. Do not infer follow-on capital, gate, model,

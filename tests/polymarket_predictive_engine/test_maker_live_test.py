@@ -6,6 +6,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+import pytest
 import yaml
 
 from polymarket_predictive_engine import maker_live_test
@@ -14,6 +15,13 @@ from polymarket_predictive_engine.ledger_anchor import anchor_ledgers
 from polymarket_predictive_engine.maker_live_test import run_maker_live_test
 from polymarket_predictive_engine.stage_operator import build_stage_day, record_stage_action
 from polymarket_predictive_engine.utils import read_csv_rows, read_json, write_csv, write_json
+
+RUN_AT = "2026-07-15T12:00:00Z"
+
+
+@pytest.fixture(autouse=True)
+def _fixed_scoreboard_time(monkeypatch):
+    monkeypatch.setattr(maker_live_test, "now_utc", lambda: RUN_AT)
 
 
 def _config(tmp_path: Path, wallet: str = "", executor_wallet: str = ""):
@@ -123,7 +131,7 @@ def test_without_wallet_the_module_is_fully_inert(tmp_path):
 def test_scoreboard_wins_when_rewards_beat_inventory_losses(tmp_path, monkeypatch):
     cfg = _config(tmp_path, wallet="0xabc")
     _seed_study(cfg)
-    now = 1_800_000_000
+    now = _epoch(RUN_AT)
     rewards = [
         {"usdcSize": 2.5, "timestamp": now - 3000, "type": "REWARD"},
         {"usdcSize": 1.5, "timestamp": now - 90000, "type": "REWARD"},  # older than 24h
@@ -152,7 +160,7 @@ def test_scoreboard_wins_when_rewards_beat_inventory_losses(tmp_path, monkeypatc
 def test_scoreboard_loses_when_inventory_swamps_rewards(tmp_path, monkeypatch):
     cfg = _config(tmp_path, wallet="0xabc")
     _seed_study(cfg, crossings=100.0)
-    now = 1_800_000_000
+    now = _epoch(RUN_AT)
     rewards = [{"usdcSize": 1.0, "timestamp": now - 1000, "type": "REWARD"}]
     trades = [{"size": 100, "price": 0.5, "timestamp": now - 2000, "type": "TRADE"}]
     positions = [{"size": 200, "curPrice": 0.40, "avgPrice": 0.5}]  # -$20 at mark
@@ -163,6 +171,78 @@ def test_scoreboard_loses_when_inventory_swamps_rewards(tmp_path, monkeypatch):
     assert summary["fill_alert"] is False
     assert summary["net_score_usd"] == -19.0
     assert summary["scoreboard"] == "losing_so_far"
+
+
+def test_quiet_wallet_old_newest_activity_ages_out_against_wall_clock(tmp_path, monkeypatch):
+    cfg = _config(tmp_path, wallet="0xabc")
+    _seed_study(cfg, crossings=4.0)
+    old = _epoch(RUN_AT) - (36 * 3600)
+    rewards = [{"usdcSize": 2.5, "timestamp": old, "type": "REWARD"}]
+    trades = [{"size": 5, "price": 0.5, "timestamp": old, "type": "TRADE"}]
+    _fake_requests(monkeypatch, rewards=rewards, trades=trades, positions=[])
+
+    summary = run_maker_live_test(cfg)
+
+    assert summary["rewards_usd_total"] == 2.5
+    assert summary["rewards_usd_last_24h"] == 0.0
+    assert summary["fills_last_24h_raw"] == 0
+    assert summary["maker_test_fills_last_24h"] == 0
+    assert summary["fill_alert"] is False
+
+
+def test_second_scale_activity_timestamp_is_unchanged():
+    seconds = float(_epoch(RUN_AT) - 60)
+
+    assert maker_live_test._stamp({"timestamp": seconds}) == seconds
+
+
+def test_millisecond_activity_timestamps_normalize_and_age_out(tmp_path, monkeypatch):
+    cfg = _config(tmp_path, wallet="0xabc")
+    _seed_study(cfg, crossings=4.0)
+    now = _epoch(RUN_AT)
+    old_ms = (now - 90000) * 1000
+    fresh_ms = (now - 60) * 1000
+    rewards = [
+        {"usdcSize": 3.0, "timestamp": old_ms, "type": "REWARD"},
+        {"usdcSize": 1.0, "timestamp": fresh_ms, "type": "REWARD"},
+    ]
+    trades = [
+        {"size": 5, "price": 0.5, "timestamp": old_ms, "type": "TRADE"},
+        {"size": 5, "price": 0.5, "timestamp": fresh_ms, "type": "TRADE"},
+    ]
+    _fake_requests(monkeypatch, rewards=rewards, trades=trades, positions=[])
+
+    summary = run_maker_live_test(cfg)
+
+    assert summary["rewards_usd_total"] == 4.0
+    assert summary["rewards_usd_last_24h"] == 1.0
+    assert summary["fills_last_24h_raw"] == 1
+    assert summary["maker_test_fills_last_24h"] == 1
+    assert maker_live_test._stamp({"timestamp": fresh_ms}) == float(now - 60)
+
+
+def test_unparseable_activity_stamp_is_excluded_without_earning_owner_attribution(tmp_path, monkeypatch):
+    cfg = _config(tmp_path, wallet="0xabc")
+    _seed_study(cfg, crossings=4.0)
+    trades = [
+        {"size": 5, "price": 0.5, "timestamp": "not-a-time", "type": "TRADE"},
+        {
+            "size": 5,
+            "price": 0.5,
+            "timestamp": _epoch(RUN_AT) - 60,
+            "type": "TRADE",
+            "conditionId": "0xm1",
+            "side": "BUY",
+        },
+    ]
+    _fake_requests(monkeypatch, rewards=[], trades=trades, positions=[])
+
+    summary = run_maker_live_test(cfg)
+
+    assert maker_live_test._stamp(trades[0]) == 0.0
+    assert summary["fills_last_24h_raw"] == 1
+    assert summary["owner_activity_fills_last_24h"] == 0
+    assert summary["maker_test_fills_last_24h"] == 1
 
 
 def test_anchored_logged_drill_fill_is_reported_but_excluded_from_kill_count(tmp_path, monkeypatch):
@@ -344,7 +424,9 @@ def test_operator_and_executor_scoreboards_are_separate_and_never_summed(tmp_pat
         user = params.get("user")
         if url.endswith("/activity"):
             if params.get("type") == "REWARD":
-                return _Response([{"usdcSize": 3.0 if user == operator else 1.0, "timestamp": 1_800_000_000}])
+                return _Response(
+                    [{"usdcSize": 3.0 if user == operator else 1.0, "timestamp": _epoch(RUN_AT) - 1000}]
+                )
             return _Response([])
         if url.endswith("/positions"):
             pnl = -1.0 if user == operator else -4.0

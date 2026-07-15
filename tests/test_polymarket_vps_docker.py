@@ -343,6 +343,94 @@ def test_vps_ops_scheduler_replaces_github_side_jobs():
     assert "backfill-trade-prints" in script
     assert "scan-event-groups" in script
     assert "maker-live-test" in script  # WO-36 step 4 scoreboard, inert without a wallet
+    # WO-85 completion correction: long jobs stay serialized, but a bounded
+    # child wait keeps the safety/dashboard pulse live. Maker attribution is
+    # no longer hidden at the tail of the heavy trade-print pipeline.
+    assert "wait_with_safety_pulses" in script
+    assert 'SAFETY_PULSE_INTERVAL="${OPS_SAFETY_PULSE_INTERVAL_SECONDS:-300}"' in script
+    assert 'MAKER_SAFETY_INTERVAL="${OPS_MAKER_SAFETY_INTERVAL_SECONDS:-900}"' in script
+    assert "run_maker_safety_refresh" in script
+    trade_prints_body = script.split("run_trade_prints() {", 1)[1].split("run_maker_safety_refresh() {", 1)[0]
+    maker_safety_body = script.split("run_maker_safety_refresh() {", 1)[1].split(
+        "run_degraded_state_watchdog() {", 1
+    )[0]
+    assert "maker-live-test" not in trade_prints_body
+    assert "decision-policy" not in trade_prints_body
+    assert "requote-alerts" not in trade_prints_body
+    for command in ("maker-live-test", "decision-policy", "requote-alerts"):
+        assert command in maker_safety_body
+
+
+def test_long_scheduler_job_wait_keeps_safety_pulse_live(tmp_path):
+    trace = tmp_path / "safety-pulse.log"
+    out_dir = tmp_path / "ops"
+    out_dir.mkdir()
+    script = ROOT / "scripts" / "run_vps_ops_scheduler.sh"
+    env = {
+        **os.environ,
+        "OPS_SCHEDULER_LIBRARY_ONLY": "1",
+        "OPS_SCHEDULER_OUT_DIR": str(out_dir),
+        "OPS_SAFETY_PULSE_INTERVAL_SECONDS": "1",
+        "OPS_SAFETY_POLL_SECONDS": "1",
+        "TRACE": str(trace),
+    }
+
+    result = subprocess.run(
+        [
+            "sh",
+            "-c",
+            '. "$1"; '
+            'run_maker_safety_refresh() { printf "maker\\n" >> "$TRACE"; }; '
+            'run_degraded_state_watchdog() { printf "watchdog\\n" >> "$TRACE"; }; '
+            '(sleep 2) & child=$!; wait_with_safety_pulses "$child" synthetic_long_job',
+            "sh",
+            str(script),
+        ],
+        env=env,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+    pulses = trace.read_text(encoding="utf-8").splitlines()
+    assert "maker" in pulses
+    assert "watchdog" in pulses
+
+
+def test_failed_training_harvest_rearms_after_bounded_retry_backoff(tmp_path):
+    out_dir = tmp_path / "ops"
+    out_dir.mkdir()
+    attempt_stamp = out_dir / "last_attempt_training_harvest"
+    script = ROOT / "scripts" / "run_vps_ops_scheduler.sh"
+    env = {
+        **os.environ,
+        "OPS_SCHEDULER_LIBRARY_ONLY": "1",
+        "OPS_SCHEDULER_OUT_DIR": str(out_dir),
+        "OPS_TRAINING_HARVEST_RETRY_SECONDS": "900",
+    }
+
+    # A future stamp is defensively clamped to age zero, so it remains inside
+    # the retry window even under the suite's fixed wall clock.
+    attempt_stamp.write_text("9999999999\n", encoding="utf-8")
+    blocked = subprocess.run(
+        ["sh", "-c", '. "$1"; training_harvest_retry_ready', "sh", str(script)],
+        env=env,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    assert blocked.returncode == 1
+
+    attempt_stamp.write_text("1\n", encoding="utf-8")
+    ready = subprocess.run(
+        ["sh", "-c", '. "$1"; training_harvest_retry_ready', "sh", str(script)],
+        env=env,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    assert ready.returncode == 0, ready.stderr
 
 
 def test_deploy_forced_governance_refresh_is_not_counted_as_scheduler_overrun(tmp_path):

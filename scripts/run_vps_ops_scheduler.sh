@@ -28,11 +28,33 @@ HARVEST_TIMEOUT="${OPS_TRAINING_HARVEST_TIMEOUT_SECONDS:-1800}"
 # WO-85 (2026-07-15): registered whole-harvest start budget. The Python
 # orchestrator caps this at six hours, so configuration can only tighten it.
 HARVEST_DEADLINE="${OPS_TRAINING_HARVEST_DEADLINE_SECONDS:-21600}"
+# A failed/interrupted attempt remains due from its last successful completion,
+# but must not hammer the host in a zero-backoff retry loop. Keep retries within
+# a registered 15-60 minute recovery window (30 minutes by default).
+HARVEST_RETRY_INTERVAL="${OPS_TRAINING_HARVEST_RETRY_SECONDS:-1800}"
+case "$HARVEST_RETRY_INTERVAL" in ''|*[!0-9]*) HARVEST_RETRY_INTERVAL=1800 ;; esac
+[ "$HARVEST_RETRY_INTERVAL" -ge 900 ] 2>/dev/null || HARVEST_RETRY_INTERVAL=900
+[ "$HARVEST_RETRY_INTERVAL" -le 3600 ] || HARVEST_RETRY_INTERVAL=3600
 MAKER_STUDY_INTRADAY_INTERVAL="${OPS_MAKER_STUDY_INTRADAY_INTERVAL_SECONDS:-86400}"
 MAKER_STUDY_INTRADAY_OFFSET_MIN="${OPS_MAKER_STUDY_INTRADAY_OFFSET_MIN_SECONDS:-39600}"
 MAKER_STUDY_INTRADAY_OFFSET_MAX="${OPS_MAKER_STUDY_INTRADAY_OFFSET_MAX_SECONDS:-46800}"
 PRINTS_INTERVAL="${OPS_TRADE_PRINTS_INTERVAL_SECONDS:-900}"
 PRINTS_TIMEOUT="${OPS_TRADE_PRINTS_TIMEOUT_SECONDS:-300}"
+# WO-85/WO-86 completion correction: safety reporting must remain live while
+# a bounded long job (especially the daily harvest) is running. Configuration
+# may tighten these registered maxima, never widen them.
+MAKER_SAFETY_INTERVAL="${OPS_MAKER_SAFETY_INTERVAL_SECONDS:-900}"
+SAFETY_PULSE_INTERVAL="${OPS_SAFETY_PULSE_INTERVAL_SECONDS:-300}"
+SAFETY_POLL_SECONDS="${OPS_SAFETY_POLL_SECONDS:-5}"
+case "$MAKER_SAFETY_INTERVAL" in ''|*[!0-9]*) MAKER_SAFETY_INTERVAL=900 ;; esac
+case "$SAFETY_PULSE_INTERVAL" in ''|*[!0-9]*) SAFETY_PULSE_INTERVAL=300 ;; esac
+case "$SAFETY_POLL_SECONDS" in ''|*[!0-9]*) SAFETY_POLL_SECONDS=5 ;; esac
+[ "$MAKER_SAFETY_INTERVAL" -gt 0 ] 2>/dev/null || MAKER_SAFETY_INTERVAL=900
+[ "$SAFETY_PULSE_INTERVAL" -gt 0 ] 2>/dev/null || SAFETY_PULSE_INTERVAL=300
+[ "$SAFETY_POLL_SECONDS" -gt 0 ] 2>/dev/null || SAFETY_POLL_SECONDS=5
+[ "$MAKER_SAFETY_INTERVAL" -le 900 ] || MAKER_SAFETY_INTERVAL=900
+[ "$SAFETY_PULSE_INTERVAL" -le 300 ] || SAFETY_PULSE_INTERVAL=300
+[ "$SAFETY_POLL_SECONDS" -le 5 ] || SAFETY_POLL_SECONDS=5
 GOVERNANCE_TIMEOUT="${OPS_GOVERNANCE_TIMEOUT_SECONDS:-1500}"
 CLV_TIMEOUT="${OPS_CLV_TIMEOUT_SECONDS:-900}"
 CARD_TIMEOUT="${OPS_CARD_TIMEOUT_SECONDS:-2400}"
@@ -187,6 +209,29 @@ touch_attempt_stamp() {
   date -u +%s > "$OUT_DIR/last_attempt_$1"
 }
 
+seconds_since_attempt_stamp() {
+  ATTEMPT_STAMP="$OUT_DIR/last_attempt_$1"
+  if [ ! -f "$ATTEMPT_STAMP" ]; then
+    echo 999999999
+    return
+  fi
+  NOW=$(date -u +%s)
+  THEN=$(cat "$ATTEMPT_STAMP" 2>/dev/null || echo 0)
+  case "${THEN:-}" in
+    ''|*[!0-9]*) THEN=0 ;;
+  esac
+  AGE=$((NOW - THEN))
+  if [ "$AGE" -lt 0 ]; then
+    AGE=0
+  fi
+  echo "$AGE"
+}
+
+training_harvest_retry_ready() {
+  [ "$(seconds_since_success_stamp training_harvest)" -ge "$HARVEST_INTERVAL" ] || return 1
+  [ "$(seconds_since_attempt_stamp training_harvest)" -ge "$HARVEST_RETRY_INTERVAL" ]
+}
+
 successful_schedule_skip_kind() {
   THEN=$(successful_completion_epoch "$1")
   case "${THEN:-}" in
@@ -241,15 +286,17 @@ odds_quota_available() {
 
 run_governance_refresh() {
   log "governance_refresh: starting"
-  STARTED_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+  GOVERNANCE_STARTED_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)
   (
     set -e
     timeout "$GOVERNANCE_TIMEOUT" python -m polymarket_predictive_engine.cli refresh-governance --config "$CONFIG_PATH"
     timeout 300 python -m polymarket_predictive_engine.cli operating-state --config "$CONFIG_PATH"
     timeout 300 python scripts/render_polymarket_dashboard.py --config "$CONFIG_PATH"
-  ) >> "$LOG_FILE" 2>&1
+  ) >> "$LOG_FILE" 2>&1 &
+  JOB_PID=$!
+  wait_with_safety_pulses "$JOB_PID" governance_refresh
   CODE=$?
-  stamp_status governance_refresh "$CODE" "refresh-governance + operating-state + dashboard via ops scheduler" "$STARTED_AT"
+  stamp_status governance_refresh "$CODE" "refresh-governance + operating-state + dashboard via ops scheduler" "$GOVERNANCE_STARTED_AT"
   log "governance_refresh: exit $CODE"
 }
 
@@ -265,7 +312,9 @@ run_clv_snapshot() {
     timeout "$CLV_TIMEOUT" python scripts/superbru_clv_experiment.py snapshot
     timeout "$CLV_TIMEOUT" python scripts/superbru_clv_experiment.py extract-picks || true
     timeout "$CLV_TIMEOUT" python scripts/superbru_clv_experiment.py report
-  ) >> "$LOG_FILE" 2>&1
+  ) >> "$LOG_FILE" 2>&1 &
+  JOB_PID=$!
+  wait_with_safety_pulses "$JOB_PID" clv_snapshot
   CODE=$?
   stamp_status clv_snapshot "$CODE" "snapshot + report (extract-picks best-effort: VPS-side card edits are uncommitted)"
   log "clv_snapshot: exit $CODE"
@@ -385,7 +434,9 @@ PY
       --allow-source-unavailable || echo "oddspedia validation unavailable (non-blocking)"
 
     python scripts/audit_superbru_validation_data_freshness.py || true
-  ) >> "$LOG_FILE" 2>&1
+  ) >> "$LOG_FILE" 2>&1 &
+  JOB_PID=$!
+  wait_with_safety_pulses "$JOB_PID" locked_card_refresh
   CODE=$?
   stamp_status locked_card_refresh "$CODE" "full locked-card chain (see ops_scheduler.log)"
   log "locked_card_refresh: exit $CODE"
@@ -398,7 +449,7 @@ run_training_harvest() {
   # validation-gap and cohort-transfer blockers. Harvest accrues to outputs;
   # trainer wiring is a separate leakage-reviewed work order (WO-33).
   log "training_harvest: starting"
-  STARTED_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+  HARVEST_STARTED_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)
   # WO-85: every child result is persisted, earlier failures do not starve
   # later evidence, ordinary work not started before the whole-job deadline
   # is skipped explicitly, and retention + anchoring are always attempted last.
@@ -411,13 +462,16 @@ run_training_harvest() {
   # python -m polymarket_predictive_engine.cli stage-day
   # python -m polymarket_predictive_engine.cli corpus-retention
   # python -m polymarket_predictive_engine.cli anchor-ledgers
-  OPS_TRAINING_HARVEST_TIMEOUT_SECONDS="$HARVEST_TIMEOUT" \
-  OPS_TRADE_PRINTS_TIMEOUT_SECONDS="$PRINTS_TIMEOUT" \
-  OPS_TRAINING_HARVEST_DEADLINE_SECONDS="$HARVEST_DEADLINE" \
-    python -m polymarket_predictive_engine.cli training-harvest --config "$CONFIG_PATH" \
-    >> "$LOG_FILE" 2>&1
+  (
+    OPS_TRAINING_HARVEST_TIMEOUT_SECONDS="$HARVEST_TIMEOUT" \
+    OPS_TRADE_PRINTS_TIMEOUT_SECONDS="$PRINTS_TIMEOUT" \
+    OPS_TRAINING_HARVEST_DEADLINE_SECONDS="$HARVEST_DEADLINE" \
+      python -m polymarket_predictive_engine.cli training-harvest --config "$CONFIG_PATH"
+  ) >> "$LOG_FILE" 2>&1 &
+  JOB_PID=$!
+  wait_with_safety_pulses "$JOB_PID" training_harvest
   CODE=$?
-  stamp_status training_harvest "$CODE" "WO-85 resilient per-step harvest; see ops_scheduler/training_harvest.json; bounded corpus retention + ledger anchor always attempted" "$STARTED_AT"
+  stamp_status training_harvest "$CODE" "WO-85 resilient per-step harvest; see ops_scheduler/training_harvest.json; bounded corpus retention + ledger anchor always attempted" "$HARVEST_STARTED_AT"
   if [ "$CODE" -eq 0 ]; then
     touch_success_stamp training_harvest
   fi
@@ -435,7 +489,9 @@ run_maker_study_intraday() {
     timeout "$HARVEST_TIMEOUT" python -m polymarket_predictive_engine.cli maker-carry-study --config "$CONFIG_PATH"
     timeout "$PRINTS_TIMEOUT" python -m polymarket_predictive_engine.cli collect-maker-replay-data --config "$CONFIG_PATH"
     timeout "$PRINTS_TIMEOUT" python -m polymarket_predictive_engine.cli maker-fill-replay --config "$CONFIG_PATH"
-  ) >> "$LOG_FILE" 2>&1
+  ) >> "$LOG_FILE" 2>&1 &
+  JOB_PID=$!
+  wait_with_safety_pulses "$JOB_PID" maker_study_intraday
   CODE=$?
   stamp_status maker_study_intraday "$CODE" "intraday maker-carry-study; training_harvest_age=${TRAINING_AGE}s; 11-13h offset guard"
   log "maker_study_intraday: exit $CODE"
@@ -459,18 +515,29 @@ run_trade_prints() {
     # WO-41: implication-network Frechet/Boole consistency scan rides the same
     # cadence. Measurement only; no signals, gates, or order paths.
     timeout "$PRINTS_TIMEOUT" python -m polymarket_predictive_engine.cli scan-implication-networks --config "$CONFIG_PATH"
-    # WO-36 step 4: read-only scoreboard of the human's live maker test
-    # (inert until maker_live_test.wallet_address is configured).
+  ) >> "$LOG_FILE" 2>&1 &
+  JOB_PID=$!
+  wait_with_safety_pulses "$JOB_PID" trade_prints
+  CODE=$?
+  stamp_status trade_prints "$CODE" "data-api /trades + exact Tier-0 maker book/print coverage + fill replay + consistency scans"
+  log "trade_prints: exit $CODE"
+}
+
+run_maker_safety_refresh() {
+  # WO-85/WO-86/WO-88: keep the human maker scoreboard, fail-safe kill
+  # decision, and pull/STOP advice on their own short cadence. This lane is
+  # reporting-only and remains live while collection/research jobs run.
+  log "maker_safety_refresh: starting"
+  STARTED_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+  (
+    set -e
     timeout "$PRINTS_TIMEOUT" python -m polymarket_predictive_engine.cli maker-live-test --config "$CONFIG_PATH"
-    # WO-66: refresh registered kill criteria, then evaluate the human quote
-    # sheet against current websocket/flow/resolution state. Keyless and
-    # read-only: this can only write advice to pull/STOP; it cannot cancel.
     timeout "$PRINTS_TIMEOUT" python -m polymarket_predictive_engine.cli decision-policy --config "$CONFIG_PATH"
     timeout "$PRINTS_TIMEOUT" python -m polymarket_predictive_engine.cli requote-alerts --config "$CONFIG_PATH"
   ) >> "$LOG_FILE" 2>&1
   CODE=$?
-  stamp_status trade_prints "$CODE" "data-api /trades + exact Tier-0 maker book/print coverage + fill replay + consistency scans + read-only WO-66 requote alerts"
-  log "trade_prints: exit $CODE"
+  stamp_status maker_safety_refresh "$CODE" "read-only maker attribution + kill decision + requote advice" "$STARTED_AT"
+  log "maker_safety_refresh: exit $CODE"
 }
 
 run_degraded_state_watchdog() {
@@ -508,6 +575,40 @@ run_degraded_state_watchdog() {
   log "degraded_state_watchdog: exit $CODE"
 }
 
+run_safety_pulse() {
+  # Preserve the parent job's schedule classification. Safety jobs are
+  # independent cadence owners and must never inherit an overrun/intentional
+  # marker from the long job whose child process is being observed.
+  PARENT_SCHEDULE_SKIP_KIND="$JOB_SCHEDULE_SKIP_KIND"
+  JOB_SCHEDULE_SKIP_KIND=""
+  if [ "$(seconds_since_stamp maker_safety_refresh)" -ge "$MAKER_SAFETY_INTERVAL" ]; then
+    touch_stamp maker_safety_refresh
+    run_maker_safety_refresh
+  fi
+  run_degraded_state_watchdog
+  JOB_SCHEDULE_SKIP_KIND="$PARENT_SCHEDULE_SKIP_KIND"
+}
+
+wait_with_safety_pulses() {
+  # Long jobs remain serialized exactly as before, but they run as a bounded
+  # child so the parent can keep the fail-safe reporting loop alive. Polling
+  # only observes/reaps this scheduler-owned child; it never starts a second
+  # copy of the long job.
+  OBSERVED_PID="$1"
+  OBSERVED_JOB="$2"
+  LAST_SAFETY_PULSE=0
+  while kill -0 "$OBSERVED_PID" 2>/dev/null; do
+    NOW_EPOCH=$(date -u +%s)
+    if [ $((NOW_EPOCH - LAST_SAFETY_PULSE)) -ge "$SAFETY_PULSE_INTERVAL" ]; then
+      log "$OBSERVED_JOB: long job active; running independent safety pulse"
+      run_safety_pulse
+      LAST_SAFETY_PULSE=$(date -u +%s)
+    fi
+    sleep "$SAFETY_POLL_SECONDS"
+  done
+  wait "$OBSERVED_PID"
+}
+
 if [ "${OPS_SCHEDULER_LIBRARY_ONLY:-0}" = "1" ]; then
   return 0 2>/dev/null || exit 0
 fi
@@ -534,7 +635,7 @@ while :; do
     run_locked_card_refresh
     JOB_SCHEDULE_SKIP_KIND=""
   fi
-  if [ "$(seconds_since_success_stamp training_harvest)" -ge "$HARVEST_INTERVAL" ]; then
+  if training_harvest_retry_ready; then
     JOB_SCHEDULE_SKIP_KIND="$(successful_schedule_skip_kind training_harvest "$HARVEST_INTERVAL")"
     touch_attempt_stamp training_harvest
     run_training_harvest
@@ -555,6 +656,6 @@ while :; do
     run_trade_prints
     JOB_SCHEDULE_SKIP_KIND=""
   fi
-  run_degraded_state_watchdog
+  run_safety_pulse
   sleep "$TICK_SECONDS"
 done

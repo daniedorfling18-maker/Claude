@@ -3062,6 +3062,16 @@ the last successful completion, persisted in `last_success_training_harvest`
 and migrated from `status.json` when necessary. A start writes only an attempt
 stamp; a failed or interrupted run cannot consume the next daily slot.
 
+**2026-07-15 completion correction.** Long scheduler jobs remain serialized,
+but now execute as bounded child processes while the parent runs the registered
+five-minute degraded-state/dashboard pulse. The read-only maker attribution,
+kill-input, and requote pipeline has an independent 15-minute cadence, so a
+multi-hour harvest cannot starve WO-86/WO-88 safety evidence. The trade-print
+collector no longer duplicates that maker-safety writer. Failed or interrupted
+harvests remain due from the last successful completion, but a registered
+15-60 minute retry backoff (30 minutes by default) prevents a zero-delay heavy
+retry loop.
+
 Deep process audit found the daily `training_harvest` had not produced
 fresh output in ~27h (factsheet, ledger anchor stale; disk climbed to
 84%) while all short-cadence jobs were current. Root-cause CLASS, not

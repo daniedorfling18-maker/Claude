@@ -2942,6 +2942,50 @@ rate; (c) second-scale stamps behave identically before/after the defensive
 millisecond normalization; (d) millisecond-scale fixtures normalize and age
 out on schedule; (e) unparseable stamps are excluded and remain maker_test.
 
+## WO-91 — Pre-event CLV diagnostic starved: frozen crypto up/down floods the price-history collection cap (telemetry read 2026-07-15)
+
+OBSERVED IN PRODUCTION (verdict artifact 2026-07-15T15:30Z on deployed
+3419fd0): `pre_event_clv_diagnostic` reports 0/31 units gradeable — all 45
+finals `no_official_in_band_observation_at_or_before_cutoff` — so the WO-87
+diagnostic renders empty on every dashboard. Same snapshot,
+`historical_price_history_quality.csv`: ALL 500 requested tokens are crypto
+`*-updown-5m` markets (fetch_source `short_close_window`, ~4 points each,
+2,146 snapshot rows total).
+
+ROOT CAUSE: `price_history_collector._clean_resolution_rows` ranks clean
+settlements by close_time DESCENDING and keeps `[:max_tokens=500]`. The
+FROZEN crypto up/down diagnostic lane settles a market every five minutes,
+so the newest-500 window contains nothing else; Gate-A focus finals never
+enter the snapshots corpus, and the pre-event diagnostic is structurally
+ungradeable. Secondary waste: the entire daily collection budget (500
+fetches) is spent producing 5-point histories for a lane AGENTS.md freezes
+against further collection priority.
+
+REGISTERED FIX (collection-side only; no gate, threshold, or diagnostic
+definition changes):
+1. PRIORITY SLOTS: every distinct `token_id` present in
+   `governance/closing_line_final_history.csv` (the Gate-A grading ledger)
+   is ALWAYS included in the collector's requested token set, deduped,
+   before any general slot is filled. The registered [0.05, 0.95] /
+   close−6h diagnostic definition is untouched — this only guarantees its
+   input coverage.
+2. EXCLUDE the frozen crypto up/down family (updown slug/cohort family)
+   from the general newest-500 fill. Their settlement artifacts already
+   exist; the freeze forbids spending collection priority on them.
+3. The corpus write stays overwrite-per-run; with priority tokens
+   guaranteed each run, rotation is no longer a coverage risk.
+
+Deadline note: must land before the 2026-07-19/20 final taker read — the
+diagnostic's entire registered purpose is to stand beside the
+settlement-return gate AT that read to separate pricing edge from outcome
+luck.
+
+Tests: (a) focus-final tokens are requested even when >500 updown
+settlements are newer; (b) updown tokens cannot displace priority tokens;
+(c) a synthetic focus final grades end-to-end (collector corpus ->
+diagnostic `gradeable`) after the change; (d) the quality report labels
+priority vs general tokens so starvation is visible if it ever recurs.
+
 ## WO-90 — Atomic quote-sheet writes (concurrent decision-policy under the WO-85 safety pulse)
 
 **2026-07-15 — WO-90 implemented by Codex.** Both registered quote-sheet writers now publish a
@@ -3570,7 +3614,8 @@ pre-target scoreboard gap without authorising or placing an order.
 
 ## Current queue for Codex (reconciled 2026-07-15)
 
-**Next buildable: none.** WO-89 and WO-90 are implemented on 2026-07-15.
+**Next buildable: WO-91** (pre-event CLV collection coverage; must land
+before the 2026-07-19/20 final read). WO-89 and WO-90 are implemented on 2026-07-15.
 WO-85, WO-87, WO-86, and
 WO-88 are implemented on 2026-07-15; WO-83 is implemented in PR #203 and
 WO-84 is implemented in PR #205. Do not infer follow-on capital, gate, model,

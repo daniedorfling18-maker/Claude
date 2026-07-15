@@ -1,9 +1,9 @@
 # Polymarket Codex Work Orders
 
-Last updated: 2026-07-15 (WO-85, WO-87, and WO-86 implemented; WO-80, WO-82, WO-81 landed; WO-83 implemented in
+Last updated: 2026-07-15 (WO-85, WO-87, WO-86, and WO-88 implemented; WO-80, WO-82, WO-81 landed; WO-83 implemented in
 PR #203; WO-84 implemented in PR #205. WO-87 now relabels the unchanged legacy verdict metric honestly and
-reports non-binding true pre-event CLV on the same units. BUILD ORDER: WO-88 next (it must
-land before any funded live stage). WO-33 remains pending a registered leakage review, with
+reports non-binding true pre-event CLV on the same units. No numbered work order is currently
+buildable. WO-33 remains pending a registered leakage review, with
 WO-34/35 model wiring bound to that review and the three-hypothesis freeze.
 WO-48 and WO-67 are blocked; WO-70 and WO-72 are deferred; WO-76 is
 registration-only. Crypto up/down is frozen as a diagnostic — see
@@ -2889,6 +2889,18 @@ Registered fix (fail-safe direction preserved):
    mixed window counts only unlogged; ladder consecutive-day logic
    ignores owner_activity days rather than breaking the streak.
 
+**Implemented by Codex 2026-07-15.** The immutable WO-82 operator-log schema
+now accepts explicit `drill_trade` and `maintenance_trade` action values. A
+fixed five-minute matcher requires an exact anchored-prefix human row plus
+time, condition, side, price, and cumulative-size agreement before classifying
+a public activity-feed trade as `owner_activity`. Raw, owner, and maker-test
+counts are reported separately in `outputs/maker_carry/maker_live_test.json`
+and append to the new anchor-enrolled
+`outputs/maker_carry/maker_live_test_attribution_history.csv`; all unmatched or
+unanchored fills remain maker-test fills. Owner-only days neither earn nor
+break ladder evidence. No normal quote action, gate threshold, sizing, broker,
+credential, cancellation, paper/live permission, or order path changed.
+
 Also appended to WO-85 (same incident family, observed again today):
 the harvest interval stamp is touched at START (touch-before-run), so a
 container restart mid-harvest consumes the day's slot and silently skips
@@ -3431,7 +3443,8 @@ contains no paper/live broker, signing, order, gate, model, or sizing path.
 
 ## Current queue for Codex (reconciled 2026-07-15)
 
-**Next buildable, in order: WO-88.** WO-85, WO-87, and WO-86 are implemented on 2026-07-15; WO-83 is implemented in PR #203 and
+**No buildable work order is currently queued.** WO-85, WO-87, WO-86, and
+WO-88 are implemented on 2026-07-15; WO-83 is implemented in PR #203 and
 WO-84 is implemented in PR #205. Do not infer follow-on capital, gate, model,
 or executor work from their diagnostics; the queue below remains binding.
 

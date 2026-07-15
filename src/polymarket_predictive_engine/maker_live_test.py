@@ -29,6 +29,7 @@ from typing import Any
 import requests
 
 from .config import EngineConfig, load_config
+from .owner_activity_attribution import attribute_owner_activity
 from .utils import append_csv_rows, now_utc, read_csv_rows, read_json, safe_float, write_json
 
 DEFAULT_DATA_API_BASE_URL = "https://data-api.polymarket.com"
@@ -50,6 +51,22 @@ WALLET_HISTORY_FIELDS = [
     "wallet_role",
     "wallet_address",
     *LEGACY_HISTORY_FIELDS[1:],
+]
+ATTRIBUTION_HISTORY_FIELDS = [
+    "generated_at_utc",
+    "wallet_role",
+    "fills_last_24h_raw",
+    "owner_activity_fills_last_24h",
+    "maker_test_fills_last_24h",
+    "owner_activity_only",
+    "modelled_fills_per_day",
+    "fill_alert_multiple",
+    "fill_alert",
+    "scoreboard",
+    "operator_log_anchor_state",
+    "operator_log_anchor_date",
+    "matched_action_entry_ids",
+    "matched_transaction_hashes",
 ]
 
 
@@ -144,7 +161,12 @@ def _wallet_score(
     day_ago = now_seconds - 86400.0
     rewards_total = round(sum(_usd(row) for row in rewards), 4)
     rewards_24h = round(sum(_usd(row) for row in rewards if _stamp(row) >= day_ago), 4)
-    fills_24h = sum(1 for row in trades if _stamp(row) >= day_ago)
+    recent_trades = [row for row in trades if _stamp(row) >= day_ago]
+    attribution = attribute_owner_activity(cfg, recent_trades, wallet_role=wallet_role)
+    raw_fills_24h = int(attribution["raw_fills"])
+    owner_activity_fills_24h = int(attribution["owner_activity_fills"])
+    fills_24h = int(attribution["maker_test_fills"])
+    owner_activity_only = bool(raw_fills_24h > 0 and owner_activity_fills_24h == raw_fills_24h)
 
     inventory_value = 0.0
     inventory_pnl = 0.0
@@ -172,6 +194,8 @@ def _wallet_score(
     net_score = round(rewards_total + inventory_pnl, 4)
     if fill_alert:
         scoreboard = "STOP_fills_outrunning_model"
+    elif owner_activity_only:
+        scoreboard = "owner_activity_only"
     elif not rewards and not trades and not positions:
         scoreboard = "no_activity_yet"
     elif net_score >= 0:
@@ -188,6 +212,15 @@ def _wallet_score(
         "inventory_value_usd": round(inventory_value, 4),
         "inventory_pnl_usd": round(inventory_pnl, 4),
         "fills_last_24h": fills_24h,
+        "maker_test_fills_last_24h": fills_24h,
+        "fills_last_24h_raw": raw_fills_24h,
+        "owner_activity_fills_last_24h": owner_activity_fills_24h,
+        "owner_activity_only": owner_activity_only,
+        "fill_attribution": {
+            key: value
+            for key, value in attribution.items()
+            if key not in {"owner_activity_trades", "maker_test_trades"}
+        },
         "modelled_fills_per_day": modelled,
         "fill_alert_multiple": float(settings["fill_alert_multiple"]),
         "fill_alert": fill_alert,
@@ -210,7 +243,7 @@ def run_maker_live_test(cfg: EngineConfig) -> dict[str, Any]:
     summary: dict[str, Any] = {
         "status": "disabled",
         "generated_at_utc": now_utc(),
-        "work_order": "WO-36+WO-73+WO-81",
+        "work_order": "WO-36+WO-73+WO-81+WO-88",
         "account_structure": "single_project_account_under_custody_amendment_A1",
         "paper_trading_invoked": False,
         "live_trading_invoked": False,
@@ -273,7 +306,7 @@ def run_maker_live_test(cfg: EngineConfig) -> dict[str, Any]:
     summary.update(
         {
             "status": "ok",
-            "work_order": "WO-36+WO-73+WO-81",
+            "work_order": "WO-36+WO-73+WO-81+WO-88",
             "account_structure": "single_project_account_under_custody_amendment_A1",
             "attribution_policy": "human and executor mode/time windows never overlap; anchored ledgers attribute activity",
             "primary_wallet_role": primary_role,
@@ -317,6 +350,55 @@ def run_maker_live_test(cfg: EngineConfig) -> dict[str, Any]:
         if tuple(str(row.get(field) or "") for field in WALLET_HISTORY_FIELDS) not in wallet_keys
     ]
     append_csv_rows(wallet_path, new_wallet_rows, fieldnames=WALLET_HISTORY_FIELDS)
+
+    # The legacy and role-aware score ledgers are already prefix-anchored with
+    # immutable schemas. Persist WO-88 attribution in a new versioned ledger
+    # rather than rewriting either historical header.
+    attribution_path = out_root / "maker_live_test_attribution_history.csv"
+    attribution_rows: list[dict[str, Any]] = []
+    for role, row in scored.items():
+        detail = row.get("fill_attribution") if isinstance(row.get("fill_attribution"), dict) else {}
+        anchor = detail.get("operator_log_anchor") if isinstance(detail.get("operator_log_anchor"), dict) else {}
+        matches = detail.get("owner_activity_matches") if isinstance(detail.get("owner_activity_matches"), list) else []
+        attribution_rows.append(
+            {
+                "generated_at_utc": row.get("generated_at_utc"),
+                "wallet_role": role,
+                "fills_last_24h_raw": row.get("fills_last_24h_raw"),
+                "owner_activity_fills_last_24h": row.get("owner_activity_fills_last_24h"),
+                "maker_test_fills_last_24h": row.get("maker_test_fills_last_24h"),
+                "owner_activity_only": row.get("owner_activity_only"),
+                "modelled_fills_per_day": row.get("modelled_fills_per_day"),
+                "fill_alert_multiple": row.get("fill_alert_multiple"),
+                "fill_alert": row.get("fill_alert"),
+                "scoreboard": row.get("scoreboard"),
+                "operator_log_anchor_state": anchor.get("state"),
+                "operator_log_anchor_date": anchor.get("anchor_date"),
+                "matched_action_entry_ids": "|".join(
+                    str(match.get("action_entry_id") or "") for match in matches if isinstance(match, dict)
+                ),
+                "matched_transaction_hashes": "|".join(
+                    str(match.get("transaction_hash") or "")
+                    for match in matches
+                    if isinstance(match, dict) and str(match.get("transaction_hash") or "")
+                ),
+            }
+        )
+    existing_attribution = {
+        tuple(str(row.get(field) or "") for field in ATTRIBUTION_HISTORY_FIELDS)
+        for row in read_csv_rows(attribution_path)
+    }
+    new_attribution_rows = [
+        row
+        for row in attribution_rows
+        if tuple(str(row.get(field) or "") for field in ATTRIBUTION_HISTORY_FIELDS)
+        not in existing_attribution
+    ]
+    append_csv_rows(
+        attribution_path,
+        new_attribution_rows,
+        fieldnames=ATTRIBUTION_HISTORY_FIELDS,
+    )
     return summary
 
 

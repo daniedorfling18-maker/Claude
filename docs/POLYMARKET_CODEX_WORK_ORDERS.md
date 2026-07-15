@@ -1,7 +1,7 @@
 # Polymarket Codex Work Orders
 
 Last updated: 2026-07-15 (WO-85, WO-87, WO-86, and WO-88 implemented; WO-80, WO-82, WO-81 landed; WO-83 implemented in
-PR #203; WO-84 implemented in PR #205. WO-87 now relabels the unchanged legacy verdict metric honestly and
+PR #203; WO-84 implemented in PR #205; WO-89 through WO-92 implemented. WO-87 now relabels the unchanged legacy verdict metric honestly and
 reports non-binding true pre-event CLV on the same units. No numbered work order is currently
 buildable. WO-33 remains pending a registered leakage review, with
 WO-34/35 model wiring bound to that review and the three-hypothesis freeze.
@@ -2942,7 +2942,7 @@ rate; (c) second-scale stamps behave identically before/after the defensive
 millisecond normalization; (d) millisecond-scale fixtures normalize and age
 out on schedule; (e) unparseable stamps are excluded and remain maker_test.
 
-## WO-92 — Make the WO-89 defect class mechanically catchable (recorded fixtures + clock-advance tests + boundary sweep)
+## WO-92 — Make the WO-89 defect class mechanically catchable (recorded fixtures + clock-advance tests + boundary sweep) — done (2026-07-15, PR #234)
 
 Registered 2026-07-15 together with `docs/ENGINEERING_STANDARDS.md` (binding
 on all future WOs). Three same-week production defects (WO-89 window
@@ -3748,9 +3748,10 @@ Every WO below and every future WO must comply with
 `docs/ENGINEERING_STANDARDS.md` (S1-S7), including the mandatory
 `Day-after check:` line. Reviews verify compliance item by item.
 
-**Next buildable: WO-92** (WO-91 is implemented before the 2026-07-19/20
-final read; WO-92 retrofits `docs/ENGINEERING_STANDARDS.md` onto the existing
-code so the WO-89/90/91 defect class is caught by tests, not telemetry). WO-89 and WO-90 are implemented on 2026-07-15.
+**No numbered work order is currently buildable.** WO-89 through WO-92 are
+implemented as of 2026-07-15. Do not infer another build from WO-92's
+retrospective engineering-standard retrofit or from the 2026-07-19/20 final-read
+schedule.
 WO-85, WO-87, WO-86, and
 WO-88 are implemented on 2026-07-15; WO-83 is implemented in PR #203 and
 WO-84 is implemented in PR #205. Do not infer follow-on capital, gate, model,

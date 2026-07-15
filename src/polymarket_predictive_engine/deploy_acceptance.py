@@ -18,7 +18,7 @@ from typing import Any, Mapping
 from .artifact_contracts import build_contract_registry, validate_contract_fixture
 from .config import EngineConfig, load_config
 from .degraded_state_watchdog import MISSING_INPUT_RULES
-from .utils import ensure_dir, parse_timestamp, read_json, safe_float, write_json
+from .utils import ensure_dir, parse_timestamp, read_csv_rows, read_json, safe_float, write_json
 
 
 WORK_ORDER = "WO-79"
@@ -42,6 +42,13 @@ LEGITIMATE_REQUOTE_RULES = frozenset(
     }
 )
 LEGITIMATE_INERT_STATUSES = frozenset({"inert_no_quote_sheet", "inert_empty_quote_sheet"})
+MAKER_ATTRIBUTION_FIELDS = (
+    "fills_last_24h_raw",
+    "owner_activity_fills_last_24h",
+    "maker_test_fills_last_24h",
+    "owner_activity_only",
+    "fill_attribution",
+)
 
 
 def _mapping(value: Any) -> dict[str, Any]:
@@ -339,6 +346,7 @@ def _producer_cycle_check(cfg: EngineConfig, baseline_at: datetime | None) -> di
         "maker_carry_study",
         "collect_maker_replay_data",
         "maker_fill_replay",
+        "maker_live_test",
         "decision_policy",
         "requote_alerts",
         "reconcile_wallet",
@@ -368,6 +376,93 @@ def _producer_cycle_check(cfg: EngineConfig, baseline_at: datetime | None) -> di
         "status": "PASS" if not defects else "FAIL",
         "observed_at_utc": observed_at,
         "commands": commands,
+        "defects": defects,
+    }
+
+
+def _maker_attribution_check(
+    cfg: EngineConfig,
+    payload: Mapping[str, Any],
+    baseline_at: datetime | None,
+) -> dict[str, Any]:
+    settings = _mapping(cfg.raw.get("maker_live_test"))
+    enabled = str(settings.get("enabled", True)).strip().lower() not in {
+        "0",
+        "false",
+        "no",
+        "off",
+        "disabled",
+    }
+    configured = enabled and bool(
+        str(settings.get("wallet_address") or "").strip()
+        or str(settings.get("executor_wallet_address") or "").strip()
+    )
+    fresh, observed_at = _fresh_after(payload, baseline_at)
+    status = str(payload.get("status") or "missing")
+    defects: list[Any] = []
+    missing_fields = sorted(field for field in MAKER_ATTRIBUTION_FIELDS if field not in payload)
+
+    if not fresh:
+        defects.append({"reason": observed_at})
+    if "WO-88" not in str(payload.get("work_order") or ""):
+        defects.append({"reason": "WO-88 producer marker missing"})
+    if payload.get("paper_trading_invoked") is not False or payload.get("live_trading_invoked") is not False:
+        defects.append({"reason": "maker scoreboard must remain read-only"})
+
+    raw_fills = owner_fills = maker_fills = None
+    history_fresh = False
+    history_rows = read_csv_rows(
+        cfg.output_root / "maker_carry" / "maker_live_test_attribution_history.csv"
+    )
+    if configured:
+        if status != "ok":
+            defects.append({"producer_status": status, "expected": "ok"})
+        if missing_fields:
+            defects.append({"missing_attribution_fields": missing_fields})
+        else:
+            raw_fills = safe_float(payload.get("fills_last_24h_raw"))
+            owner_fills = safe_float(payload.get("owner_activity_fills_last_24h"))
+            maker_fills = safe_float(payload.get("maker_test_fills_last_24h"))
+            if None in {raw_fills, owner_fills, maker_fills}:
+                defects.append({"reason": "fill attribution counts are not numeric"})
+            elif raw_fills != owner_fills + maker_fills:
+                defects.append(
+                    {
+                        "reason": "raw fills must equal owner plus maker-test fills",
+                        "raw": raw_fills,
+                        "owner": owner_fills,
+                        "maker_test": maker_fills,
+                    }
+                )
+            if safe_float(payload.get("fills_last_24h")) != maker_fills:
+                defects.append({"reason": "legacy kill count must equal maker-test fills"})
+            if not isinstance(payload.get("owner_activity_only"), bool):
+                defects.append({"reason": "owner_activity_only must be boolean"})
+            if not isinstance(payload.get("fill_attribution"), Mapping):
+                defects.append({"reason": "fill_attribution detail must be an object"})
+
+        primary_role = str(payload.get("primary_wallet_role") or payload.get("wallet_role") or "").strip()
+        history_fresh = any(
+            (not primary_role or str(row.get("wallet_role") or "").strip() == primary_role)
+            and _fresh_after(row, baseline_at)[0]
+            for row in history_rows
+        )
+        if not history_fresh:
+            defects.append({"reason": "fresh WO-88 attribution history row missing"})
+    elif status not in {"awaiting_wallet_address", "disabled", "ok"}:
+        defects.append({"producer_status": status, "expected": "configured or explicitly inert"})
+
+    return {
+        "id": "maker_live_test_attribution_freshness",
+        "status": "PASS" if not defects else "FAIL",
+        "producer_status": status,
+        "configured": configured,
+        "observed_at_utc": observed_at,
+        "fills_last_24h_raw": raw_fills,
+        "owner_activity_fills_last_24h": owner_fills,
+        "maker_test_fills_last_24h": maker_fills,
+        "attribution_history_rows": len(history_rows),
+        "attribution_history_fresh": history_fresh if configured else None,
         "defects": defects,
     }
 
@@ -465,6 +560,9 @@ def build_deploy_acceptance(
         read_json(cfg.output_root / "maker_carry" / "maker_replay_collection.json", default={}) or {}
     )
     requote = _mapping(read_json(cfg.output_root / "maker_carry" / "requote_alerts.json", default={}) or {})
+    maker_live_test = _mapping(
+        read_json(cfg.output_root / "maker_carry" / "maker_live_test.json", default={}) or {}
+    )
     reconciliation = _mapping(read_json(cfg.output_root / "performance" / "wallet_reconciliation.json", default={}) or {})
     operating = _mapping(read_json(cfg.output_root / "performance" / "operating_state.json", default={}) or {})
     registry = build_contract_registry(cfg)
@@ -472,6 +570,7 @@ def build_deploy_acceptance(
     checks = [
         _governance_docs_readable_check(cfg),
         _producer_cycle_check(cfg, baseline_at),
+        _maker_attribution_check(cfg, maker_live_test, baseline_at),
         _quote_ticket_check(study, requote, generated_at=generated_dt),
         _maker_replay_collection_check(study, maker_collection, baseline_at),
         _requote_state_check(requote, baseline_at),

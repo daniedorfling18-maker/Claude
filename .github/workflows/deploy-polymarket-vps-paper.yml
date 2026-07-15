@@ -409,6 +409,10 @@ jobs:
           marker_tmp="outputs/performance/deployed_git_rev.tmp.$$"
           printf '%s\n' "$GITHUB_SHA" > "$marker_tmp"
           mv "$marker_tmp" outputs/performance/deployed_git_rev
+          echo "[deploy] refreshing host-observed WO-68 deployment manifest"
+          python3 scripts/write_vps_telemetry_manifest.py \
+            --repo-root . \
+            --output outputs/performance/vps_telemetry_manifest.json
 
           # Wait for the scheduler-owned full governance job, not merely the
           # early model file. A late-stage failure must make the deploy red.

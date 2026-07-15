@@ -2518,6 +2518,13 @@ harvest writes `outputs/performance/operating_state.json` plus `.md`; the dashbo
 consumes the same JSON, and tests reject front-door status prose or guessed missing
 inputs. Reporting remains inert: paper/live invocation flags are always false.
 
+**2026-07-15 deployment-freshness correction.** The telemetry cron and guarded
+deployment now call one atomic host-manifest writer. After Compose starts and
+the successful deployed marker is recorded, deployment refreshes source,
+checkout, and deployed SHAs before the scheduler's fresh operating-state pass.
+This removes the bounded false-DIVERGED window without guessing a SHA or
+changing any trading/gate path.
+
 Manual v1 exists at docs/OPERATING_STATE.md. Replace it with a generated
 artifact so drift is impossible.
 

@@ -76,69 +76,15 @@ SNAP=$(mktemp -d) || exit 0
 STAMP=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 
 # WO-68: persist the same host-derived deployment marker that is published on
-# vps-telemetry. The container-generated operating-state report consumes the
-# previous host snapshot, so it does not have to guess a SHA from prose.
+# vps-telemetry. The guarded deploy calls this same writer before post-deploy
+# operating-state acceptance, so definitions cannot drift between paths.
 HOST_MANIFEST="$REPO_DIR/outputs/performance/vps_telemetry_manifest.json"
-HOST_MANIFEST_TMP="$HOST_MANIFEST.tmp.$$"
-mkdir -p "$(dirname "$HOST_MANIFEST")"
-CHECKOUT_GIT_REV=$(git --git-dir="$GIT_DIR" rev-parse HEAD 2>/dev/null || echo unknown)
-DEPLOYED_MARKER="$REPO_DIR/outputs/performance/deployed_git_rev"
-if [ -s "$DEPLOYED_MARKER" ]; then
-  DEPLOYED_GIT_REV=$(tr -d '[:space:]' < "$DEPLOYED_MARKER")
-else
-  DEPLOYED_GIT_REV=$(awk -F= '$1=="PM_VPS_DEPLOYED_SHA" {value=$2} END {gsub(/^[[:space:]]+|[[:space:]]+$/, "", value); gsub(/^"|"$/, "", value); gsub(/^'"'"'|'"'"'$/, "", value); print value}' "$REPO_DIR/.env" 2>/dev/null)
+MANIFEST_WRITER="$REPO_DIR/scripts/write_vps_telemetry_manifest.py"
+if [ ! -f "$MANIFEST_WRITER" ] || ! python3 "$MANIFEST_WRITER" \
+  --repo-root "$REPO_DIR" --output "$HOST_MANIFEST" --as-of "$STAMP"; then
+  echo "WO-68 host manifest refresh failed; refusing to publish stale telemetry" >&2
+  exit 0
 fi
-DEPLOYED_GIT_REV="${DEPLOYED_GIT_REV:-unknown}"
-SOURCE_GIT_REV=$(git --git-dir="$GIT_DIR" ls-remote origin refs/heads/main 2>/dev/null | awk 'NR==1 {print $1}')
-SOURCE_GIT_REV="${SOURCE_GIT_REV:-unknown}"
-HOST_NAME=$(hostname 2>/dev/null || echo unknown)
-DISK_USED_PERCENT=$(df -P / 2>/dev/null | awk 'NR==2 {print $5}')
-STAMP="$STAMP" DEPLOYED_GIT_REV="$DEPLOYED_GIT_REV" CHECKOUT_GIT_REV="$CHECKOUT_GIT_REV" SOURCE_GIT_REV="$SOURCE_GIT_REV" \
-  HOST_NAME="$HOST_NAME" DISK_USED_PERCENT="$DISK_USED_PERCENT" \
-  HOST_MANIFEST="$HOST_MANIFEST" HOST_MANIFEST_TMP="$HOST_MANIFEST_TMP" python3 - <<'PY'
-import json
-import os
-from pathlib import Path
-
-path = Path(os.environ["HOST_MANIFEST"])
-temporary = Path(os.environ["HOST_MANIFEST_TMP"])
-try:
-    previous = json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
-except Exception:
-    previous = {}
-
-stamp = os.environ["STAMP"]
-deployed = os.environ.get("DEPLOYED_GIT_REV", "unknown") or "unknown"
-source = os.environ.get("SOURCE_GIT_REV", "unknown") or "unknown"
-known = source != "unknown" and deployed != "unknown"
-if known and source == deployed:
-    divergence_started = ""
-elif known:
-    prior_source = str(previous.get("source_git_rev") or "")
-    prior_deployed = str(previous.get("deployed_git_rev") or "")
-    divergence_started = (
-        str(previous.get("divergence_started_at_utc") or "")
-        if prior_source and prior_deployed and prior_source != prior_deployed
-        else stamp
-    )
-else:
-    divergence_started = str(previous.get("divergence_started_at_utc") or "")
-
-payload = {
-    "pushed_at_utc": stamp,
-    "source_observed_at_utc": stamp if source != "unknown" else "unknown",
-    "source_git_rev": source,
-    "deployed_git_rev": deployed,
-    "checkout_git_rev": os.environ.get("CHECKOUT_GIT_REV", "unknown"),
-    "divergence_started_at_utc": divergence_started,
-    "host": os.environ.get("HOST_NAME", "unknown"),
-    "disk_used_percent": os.environ.get("DISK_USED_PERCENT", ""),
-    "paper_trading_invoked": False,
-    "live_trading_invoked": False,
-}
-temporary.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
-PY
-mv "$HOST_MANIFEST_TMP" "$HOST_MANIFEST"
 
 # Whitelisted output directories: decision summaries only, never the heavy
 # collection corpora (training archive, websocket features, trade prints,

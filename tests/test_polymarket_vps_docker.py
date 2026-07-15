@@ -124,6 +124,10 @@ def test_vps_deploy_preflight_runs_before_compose_replacement():
     checkout = text.index('python3 "$PREFLIGHT_DIR/update_vps_checkout_preserving_runtime.py"')
     compose_up = text.index('$DOCKER compose -f "$COMPOSE_FILE" up -d --build')
     assert builder_prune < preflight < quiesce < checkout < compose_up
+    deployed_marker = text.index('mv "$marker_tmp" outputs/performance/deployed_git_rev')
+    manifest_refresh = text.index("python3 scripts/write_vps_telemetry_manifest.py")
+    governance_wait = text.index("waiting for scheduler-owned post-deploy governance refresh")
+    assert compose_up < deployed_marker < manifest_refresh < governance_wait
     assert "docker system prune" not in text.lower()
     assert "outputs/performance/deployed_git_rev" in text
     assert "REFUSE_DEPLOY_KEEP_EXISTING_STACK" in (ROOT / "scripts" / "preflight_vps_capacity.py").read_text(encoding="utf-8")
@@ -488,6 +492,7 @@ def test_vps_telemetry_push_script_is_single_commit_and_actions_free():
     # GitHub Actions minutes are exhausted: it must never grow branch history,
     # never trigger workflows, and never ship the heavy collection corpora.
     script = Path("scripts/push_vps_telemetry.sh").read_text(encoding="utf-8")
+    writer = Path("scripts/write_vps_telemetry_manifest.py").read_text(encoding="utf-8")
     # parentless commit force-pushed => branch always holds exactly one commit
     assert "commit-tree" in script
     assert '"+$COMMIT:refs/heads/$BRANCH"' in script
@@ -510,11 +515,12 @@ def test_vps_telemetry_push_script_is_single_commit_and_actions_free():
         ), f"heavy dir {excluded} must not be whitelisted"
     # official book snapshots live under maker_carry but stay on the VPS
     assert "official_books" in script
-    assert "source_git_rev" in script
-    assert "divergence_started_at_utc" in script
-    assert "ls-remote origin refs/heads/main" in script
-    assert "rev-parse HEAD" in script
-    assert "outputs/performance/deployed_git_rev" in script
+    assert "write_vps_telemetry_manifest.py" in script
+    assert "source_git_rev" in writer
+    assert "divergence_started_at_utc" in writer
+    assert '"ls-remote", "origin", "refs/heads/main"' in writer
+    assert '"rev-parse", "HEAD"' in writer
+    assert "deployed_git_rev" in writer
 
 
 def test_vps_diagnostic_script_rides_telemetry_and_stays_capped():

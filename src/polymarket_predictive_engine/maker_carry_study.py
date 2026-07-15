@@ -76,7 +76,7 @@ from typing import Any
 import requests
 
 from .config import EngineConfig, load_config
-from .utils import now_utc, parse_timestamp, read_csv_rows, read_json, safe_float, write_csv, write_json
+from .utils import now_utc, parse_timestamp, read_csv_rows, read_json, safe_float, write_csv, write_json, write_text_atomic
 
 DEFAULT_GAMMA_BASE_URL = "https://gamma-api.polymarket.com"
 DEFAULT_CLOB_BASE_URL = "https://clob.polymarket.com"
@@ -1820,7 +1820,7 @@ def _write_quote_sheet(out_root: Path, summary: dict[str, Any], settings: dict[s
         )
     lines += ["", "Standing rules (non-negotiable if a human ever acts on this):"]
     lines.extend(f"{rule['number']}. {rule['title']}: {rule['text']}" for rule in quote_sheet_standing_rules(settings))
-    (out_root / "maker_quote_sheet.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
+    write_text_atomic(out_root / "maker_quote_sheet.md", "\n".join(lines) + "\n")
 
 
 def main(config_path: str) -> dict[str, Any]:

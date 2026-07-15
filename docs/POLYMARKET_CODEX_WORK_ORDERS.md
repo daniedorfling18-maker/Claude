@@ -3571,10 +3571,10 @@ pre-target scoreboard gap without authorising or placing an order.
 ## Current queue for Codex (reconciled 2026-07-15)
 
 **Next buildable: none.** WO-89 and WO-90 are implemented on 2026-07-15.
-WO-85, WO-87, WO-86, and WO-88 are implemented on 2026-07-15; WO-83 is
-implemented in PR #203 and WO-84 is implemented in PR #205. Do not infer
-follow-on capital, gate, model, or executor work from their diagnostics; the
-queue below remains binding.
+WO-85, WO-87, WO-86, and
+WO-88 are implemented on 2026-07-15; WO-83 is implemented in PR #203 and
+WO-84 is implemented in PR #205. Do not infer follow-on capital, gate, model,
+or executor work from their diagnostics; the queue below remains binding.
 
 - **Pending review, not build permission:** WO-33. WO-34/35 model wiring shares
   its leakage-review dependency and must stay inside H1-H3. H2/H3 still need

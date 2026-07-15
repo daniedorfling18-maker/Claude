@@ -209,6 +209,10 @@ decision_policy:
   kill_single_day_net_usd: -15.0
   kill_fill_overrun_days: 2
   fill_alert_multiple: 2.0
+  # 2026-07-14 WO-86: once live monitoring/staging is active, kill inputs
+  # older than 30 minutes force STOP. This is a maximum: overrides may alarm
+  # sooner but can never widen the blind-safety window.
+  kill_input_max_age_seconds: 1800
   kelly_fraction_cap: 1.0
   quarter_kelly_multiplier: 0.25
   # 2026-07-11 WO-59 tighten-only: shrink the advisory Kelly ceiling toward

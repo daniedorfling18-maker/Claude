@@ -1,8 +1,8 @@
 # Polymarket Codex Work Orders
 
-Last updated: 2026-07-15 (WO-85 and WO-87 implemented; WO-80, WO-82, WO-81 landed; WO-83 implemented in
+Last updated: 2026-07-15 (WO-85, WO-87, and WO-86 implemented; WO-80, WO-82, WO-81 landed; WO-83 implemented in
 PR #203; WO-84 implemented in PR #205. WO-87 now relabels the unchanged legacy verdict metric honestly and
-reports non-binding true pre-event CLV on the same units. BUILD ORDER: WO-86 next, then WO-88 (both must
+reports non-binding true pre-event CLV on the same units. BUILD ORDER: WO-88 next (it must
 land before any funded live stage). WO-33 remains pending a registered leakage review, with
 WO-34/35 model wiring bound to that review and the three-hypothesis freeze.
 WO-48 and WO-67 are blocked; WO-70 and WO-72 are deferred; WO-76 is
@@ -3022,6 +3022,15 @@ Tests: (a) pre-live empty data still reads clear; (b) live stage + stale
 kill-input forces stop with kill_data_stale; (c) fresh data preserves the
 existing behaviour exactly (no change to a live, fresh evaluation).
 
+**Implemented by Codex 2026-07-15.** A registered, tighten-only 30-minute
+maximum now activates when a human maker-test/live configuration, positive
+ladder stage, or executor ledger/heartbeat evidences live operation. Missing
+or stale latest maker-live input sets `kill_data_stale`, triggers the registered
+kill row, and forces `stop_quoting_review_before_resume`; fresh and genuinely
+pre-live evaluations retain their prior decisions. WO-78 opens an immediate,
+deduplicated owner-alert incident from this state. No executor or order path
+was added.
+
 ## WO-85 — Harvest resilience + freshness alarm + Gate-A clustering guard (deep-dive audit 2026-07-14)
 
 Status: IMPLEMENTED by Codex on 2026-07-15. CLI `training-harvest` now writes
@@ -3416,7 +3425,7 @@ contains no paper/live broker, signing, order, gate, model, or sizing path.
 
 ## Current queue for Codex (reconciled 2026-07-15)
 
-**Next buildable, in order: WO-86 -> WO-88.** WO-85 and WO-87 are implemented on 2026-07-15; WO-83 is implemented in PR #203 and
+**Next buildable, in order: WO-88.** WO-85, WO-87, and WO-86 are implemented on 2026-07-15; WO-83 is implemented in PR #203 and
 WO-84 is implemented in PR #205. Do not infer follow-on capital, gate, model,
 or executor work from their diagnostics; the queue below remains binding.
 

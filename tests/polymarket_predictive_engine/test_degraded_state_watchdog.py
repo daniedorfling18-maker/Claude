@@ -198,6 +198,57 @@ def test_scheduler_nonzero_exit_is_immediate_and_recovery_clears_active_incident
     assert len(read_csv_rows(cfg.output_root / INCIDENT_LEDGER)) == 1
 
 
+def test_live_kill_input_staleness_is_immediate_incident_and_owner_alert(tmp_path: Path) -> None:
+    cfg = _cfg(tmp_path)
+    policy_path = cfg.output_root / "maker_carry" / "decision_policy.json"
+    write_json(
+        policy_path,
+        {
+            "generated_at_utc": "2026-07-14T11:00:00Z",
+            "indicated_action": "stop_quoting_review_before_resume",
+            "kill_data_stale": True,
+            "kill_criteria_status": {
+                "status": "triggered",
+                "kill_data_stale": True,
+                "kill_input_freshness": {
+                    "state": "stale",
+                    "guard_active": True,
+                    "latest_observation_utc": "2026-07-14T10:00:00Z",
+                    "age_seconds": 3600.0,
+                    "maximum_age_seconds": 1800.0,
+                },
+            },
+        },
+    )
+
+    result = build_degraded_state_watchdog(cfg, as_of="2026-07-14T11:00:01Z")
+    evaluation = next(
+        row
+        for row in result["evaluations"]
+        if row["registration_id"] == "kill_input_stale_live_stage"
+    )
+    incident = next(
+        row
+        for row in result["active_incidents"]
+        if row["registration_id"] == "kill_input_stale_live_stage"
+    )
+
+    assert result["status"] == "incident"
+    assert result["new_incident_count"] == 1
+    assert result["notification"]["notify"] is True
+    assert evaluation["state"] == "incident"
+    assert evaluation["kill_data_stale"] is True
+    assert evaluation["indicated_action"] == "stop_quoting_review_before_resume"
+    assert incident["owner_notification_eligible"] is True
+    assert "measured age 3600.0 seconds" in incident["reason"]
+
+    repeated = build_degraded_state_watchdog(cfg, as_of="2026-07-14T11:05:00Z")
+    assert repeated["status"] == "incident"
+    assert repeated["new_incident_count"] == 0
+    assert repeated["notification"]["notify"] is False
+    assert len(read_csv_rows(cfg.output_root / INCIDENT_LEDGER)) == 1
+
+
 def test_wallet_partial_counts_distinct_harvests_not_watchdog_polls(tmp_path: Path) -> None:
     cfg = _cfg(tmp_path)
     wallet_path = cfg.output_root / "performance" / "wallet_reconciliation.json"

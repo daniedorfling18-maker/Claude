@@ -719,6 +719,17 @@ or before close minus six hours, aggregated on the exact Gate A units. Missing
 references remain `pre_event_clv_ungradeable`; no gate, sizing, broker,
 paper/live permission, or order path changed.
 
+**2026-07-15 — WO-86 implemented by Codex.** The advisory maker decision
+policy now has an independent fail-safe freshness criterion for its kill
+inputs. Once a human maker-test/live configuration, positive ladder stage, or
+executor ledger/heartbeat makes the guard active, an absent or older-than-30m
+maker-live observation sets `kill_data_stale` and forces
+`stop_quoting_review_before_resume`; effective-config overrides may shorten
+but never widen that maximum. WO-78 turns the same condition into an immediate,
+deduplicated owner-alert incident. Pre-live empty data remains clear and fresh
+evaluations are unchanged. This adds no execution, cancellation, credential,
+signing, or order path.
+
 ## Rules of engagement for coding agents
 
 0. **Division of labour**: the orchestrating agent writes/updates this charter and the work orders

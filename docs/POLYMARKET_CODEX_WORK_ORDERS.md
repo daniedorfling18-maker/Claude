@@ -2984,6 +2984,14 @@ class regressions.
 
 ## WO-91 — Pre-event CLV diagnostic starved: frozen crypto up/down floods the price-history collection cap (telemetry read 2026-07-15)
 
+**2026-07-15 — WO-91 implemented by Codex.** The price-history collector now
+requests every distinct final-ledger token first, labels that coverage
+`focus_final`, and excludes frozen crypto up/down contracts from the general
+newest-token fill. Missing, malformed, empty, and failed priority inputs remain
+explicitly ungradeable. Verification on the ARM64 VPS passed focused lint, 62
+collector/closing-line/verdict tests, repository lint, and the full 1,217-test
+suite, including replay of a sanitized recorded CLOB `/prices-history` payload.
+
 OBSERVED IN PRODUCTION (verdict artifact 2026-07-15T15:30Z on deployed
 3419fd0): `pre_event_clv_diagnostic` reports 0/31 units gradeable — all 45
 finals `no_official_in_band_observation_at_or_before_cutoff` — so the WO-87
@@ -3688,8 +3696,8 @@ Every WO below and every future WO must comply with
 `docs/ENGINEERING_STANDARDS.md` (S1-S7), including the mandatory
 `Day-after check:` line. Reviews verify compliance item by item.
 
-**Next buildable: WO-91 -> WO-92** (WO-91 before the 2026-07-19/20 final
-read; WO-92 retrofits `docs/ENGINEERING_STANDARDS.md` onto the existing
+**Next buildable: WO-92** (WO-91 is implemented before the 2026-07-19/20
+final read; WO-92 retrofits `docs/ENGINEERING_STANDARDS.md` onto the existing
 code so the WO-89/90/91 defect class is caught by tests, not telemetry). WO-89 and WO-90 are implemented on 2026-07-15.
 WO-85, WO-87, WO-86, and
 WO-88 are implemented on 2026-07-15; WO-83 is implemented in PR #203 and

@@ -7,6 +7,7 @@ from typing import Any
 import requests
 
 from .config import EngineConfig, load_config
+from .crypto_updown_model import is_crypto_updown_contract
 from .utils import now_utc, parse_timestamp, read_csv_rows, safe_float, write_csv, write_json
 
 DEFAULT_CLOB_BASE_URL = "https://clob.polymarket.com"
@@ -36,6 +37,19 @@ FORBIDDEN_PRICE_HISTORY_FIELDS = {
     "payout",
     "final_result",
 }
+COLLECTION_PRIORITY_FOCUS_FINAL = "focus_final"
+COLLECTION_PRIORITY_GENERAL = "general"
+QUALITY_FIELDS = [
+    "token_id",
+    "market_slug",
+    "close_time",
+    "collection_priority",
+    "status",
+    "history_points",
+    "fetch_source",
+    "error",
+]
+FROZEN_UPDOWN_MARKERS = ("updown", "up_down", "up-down", "up or down")
 
 
 def _dt(value: Any) -> datetime | None:
@@ -79,6 +93,106 @@ def _clean_resolution_rows(cfg: EngineConfig) -> list[dict[str, str]]:
     sorted_rows = sorted(unique, key=close_key, reverse=True)
     recent = [row for row in sorted_rows if min_close and close_key(row) >= min_close]
     return recent or sorted_rows
+
+
+def _is_frozen_updown_row(row: dict[str, Any]) -> bool:
+    if is_crypto_updown_contract(dict(row)):
+        return True
+    family_text = " ".join(
+        str(row.get(key) or "")
+        for key in ("signal_cohort", "cohort", "family", "market_slug", "question")
+    ).lower()
+    return any(marker in family_text for marker in FROZEN_UPDOWN_MARKERS)
+
+
+def _close_key(row: dict[str, Any]) -> datetime:
+    return _dt(row.get("close_time") or row.get("resolution_time")) or datetime(1970, 1, 1, tzinfo=timezone.utc)
+
+
+def _priority_final_rows(
+    cfg: EngineConfig,
+    resolution_rows: list[dict[str, str]],
+) -> list[dict[str, Any]]:
+    resolution_by_token: dict[str, dict[str, str]] = {}
+    for row in resolution_rows:
+        token_id = str(row.get("token_id") or "").strip()
+        if token_id and token_id not in resolution_by_token:
+            resolution_by_token[token_id] = row
+
+    final_rows = sorted(
+        read_csv_rows(cfg.governance_root / "closing_line_final_history.csv"),
+        key=_close_key,
+        reverse=True,
+    )
+    priority_rows: list[dict[str, Any]] = []
+    seen_tokens: set[str] = set()
+    for final in final_rows:
+        token_id = str(final.get("token_id") or "").strip()
+        if not token_id or token_id in seen_tokens:
+            continue
+        seen_tokens.add(token_id)
+        row: dict[str, Any] = dict(resolution_by_token.get(token_id, {}))
+        row["token_id"] = token_id
+        for target, source in (
+            ("market_slug", "market_slug"),
+            ("condition_id", "market_id"),
+            ("category", "category"),
+            ("close_time", "close_time"),
+            ("question", "question"),
+            ("signal_cohort", "signal_cohort"),
+        ):
+            value = str(final.get(source) or "").strip()
+            if value:
+                row[target] = value
+        if not row.get("resolution_time") and row.get("close_time"):
+            row["resolution_time"] = row["close_time"]
+        row["collection_priority"] = COLLECTION_PRIORITY_FOCUS_FINAL
+        priority_rows.append(row)
+    return priority_rows
+
+
+def _collection_rows(
+    cfg: EngineConfig,
+    max_tokens: int,
+) -> tuple[list[dict[str, Any]], dict[str, int]]:
+    resolution_rows = _clean_resolution_rows(cfg)
+    priority_rows = _priority_final_rows(cfg, resolution_rows)
+    priority_ids = {str(row.get("token_id") or "") for row in priority_rows}
+
+    general_rows: list[dict[str, Any]] = []
+    seen_tokens = set(priority_ids)
+    excluded_updown_tokens: set[str] = set()
+    for source_row in resolution_rows:
+        token_id = str(source_row.get("token_id") or "").strip()
+        if not token_id or token_id in seen_tokens:
+            continue
+        seen_tokens.add(token_id)
+        if _is_frozen_updown_row(source_row):
+            excluded_updown_tokens.add(token_id)
+            continue
+        row: dict[str, Any] = dict(source_row)
+        row["collection_priority"] = COLLECTION_PRIORITY_GENERAL
+        general_rows.append(row)
+
+    general_slots = max(0, max_tokens - len(priority_rows))
+    requested_general = general_rows[:general_slots]
+    selected = [*priority_rows, *requested_general]
+    selected_priority_ids = {
+        str(row.get("token_id") or "")
+        for row in selected
+        if row.get("collection_priority") == COLLECTION_PRIORITY_FOCUS_FINAL
+    }
+    return selected, {
+        "priority_tokens_available": len(priority_ids),
+        "priority_tokens_requested": len(selected_priority_ids),
+        "priority_tokens_missing": len(priority_ids - selected_priority_ids),
+        "priority_updown_tokens_requested": sum(1 for row in priority_rows if _is_frozen_updown_row(row)),
+        "general_tokens_available": len(general_rows),
+        "general_tokens_requested": len(requested_general),
+        "general_tokens_truncated": max(0, len(general_rows) - len(requested_general)),
+        "general_updown_tokens_excluded": len(excluded_updown_tokens),
+        "general_updown_tokens_requested": sum(1 for row in requested_general if _is_frozen_updown_row(row)),
+    }
 
 
 def _epoch_to_timestamp(value: Any) -> str:
@@ -215,7 +329,7 @@ def collect_price_history(
     lookahead_days = int(settings.get("lookahead_days_after_close", 3))
     progress_every = int(settings.get("progress_every_tokens", 10))
 
-    clean_rows = _clean_resolution_rows(cfg)[:max_tokens]
+    clean_rows, selection = _collection_rows(cfg, max_tokens)
     snapshots: list[dict[str, Any]] = []
     quality: list[dict[str, Any]] = []
     errors = 0
@@ -252,9 +366,11 @@ def collect_price_history(
                     "token_id": token_id,
                     "market_slug": resolution.get("market_slug", ""),
                     "close_time": resolution.get("close_time", ""),
+                    "collection_priority": resolution.get("collection_priority", COLLECTION_PRIORITY_GENERAL),
                     "status": status,
                     "history_points": len(points),
                     "fetch_source": source,
+                    "error": "",
                 }
             )
         except Exception as exc:
@@ -264,7 +380,10 @@ def collect_price_history(
                     "token_id": token_id,
                     "market_slug": resolution.get("market_slug", ""),
                     "close_time": resolution.get("close_time", ""),
+                    "collection_priority": resolution.get("collection_priority", COLLECTION_PRIORITY_GENERAL),
                     "status": "fetch_error",
+                    "history_points": 0,
+                    "fetch_source": "",
                     "error": str(exc),
                 }
             )
@@ -279,16 +398,31 @@ def collect_price_history(
     out_root = cfg.output_root / "polymarket_training"
     gov_root = cfg.governance_root
     write_csv(out_root / "historical_price_snapshots.csv", snapshots, fieldnames=SNAPSHOT_FIELDS)
-    write_csv(gov_root / "historical_price_history_quality.csv", quality)
+    write_csv(gov_root / "historical_price_history_quality.csv", quality, fieldnames=QUALITY_FIELDS)
+    priority_with_history = sum(
+        1
+        for row in quality
+        if row.get("collection_priority") == COLLECTION_PRIORITY_FOCUS_FINAL and row.get("status") == "ok"
+    )
     summary = {
+        "work_order": "WO-91",
         "requested_tokens": len(clean_rows),
         "snapshot_rows": len(snapshots),
         "quality_rows": len(quality),
         "empty_history_count": empty,
         "error_count": errors,
+        **selection,
+        "priority_tokens_with_history": priority_with_history,
+        "priority_tokens_empty_or_error": selection["priority_tokens_requested"] - priority_with_history,
+        "collection_priority_counts": {
+            COLLECTION_PRIORITY_FOCUS_FINAL: selection["priority_tokens_requested"],
+            COLLECTION_PRIORITY_GENERAL: selection["general_tokens_requested"],
+        },
         "collected_at_utc": now_utc(),
         "output_file": str(out_root / "historical_price_snapshots.csv"),
         "quality_file": str(gov_root / "historical_price_history_quality.csv"),
+        "paper_trading_invoked": False,
+        "live_trading_invoked": False,
     }
     write_json(gov_root / "historical_price_history_summary.json", summary)
     return snapshots, quality, summary

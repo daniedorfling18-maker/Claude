@@ -61,3 +61,8 @@ def test_work_order_queue_distinguishes_non_buildable_states() -> None:
     assert "WO-73 item 4 and" in work_orders
     assert "WO-75 item 2" in work_orders
     assert "Queue now: **WO-80**" not in work_orders
+
+    wo91 = work_orders.split("## WO-91", 1)[1].split("## WO-90", 1)[0]
+    assert "Fail-safe direction:" in wo91
+    assert "Day-after check:" in wo91
+    assert "recorded CLOB `/prices-history` payload" in wo91

@@ -416,6 +416,9 @@ wallet_reconciliation:
   # 2026-07-13 ($12.923349 pUSD, confirmed by two independent RPCs and the
   # venue debit math to six decimals). Registering it completes the third
   # NAV view and lets the wallet_reconciliation_not_clean incident close.
+  # MAINTENANCE RULE (WO-84): these baselines must equal CUMULATIVE external
+  # deposits for the wallet. Bump them on every new deposit; a lagging value
+  # fails visibly as a reconciliation DISCREPANCY (never a silent pass).
   starting_nav_usd: 12.923349
   operator_starting_nav_usd: 12.923349
   executor_starting_nav_usd:

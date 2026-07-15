@@ -49,7 +49,10 @@ def test_work_order_queue_distinguishes_non_buildable_states() -> None:
     work_orders = _text("docs/POLYMARKET_CODEX_WORK_ORDERS.md")
 
     assert "Current queue for Codex (reconciled 2026-07-15)" in work_orders
-    assert "Next buildable: WO-92" in work_orders
+    assert "No numbered work order is currently buildable." in work_orders
+    assert "Next buildable: WO-92" not in work_orders
+    wo92_heading = work_orders.split("## WO-92", 1)[1].splitlines()[0]
+    assert "done (2026-07-15, PR #234)" in wo92_heading
     assert "ENGINEERING_STANDARDS.md" in work_orders
     assert "ROOT CAUSE CORRECTED by line audit" in work_orders
     assert "WO-85, WO-87, WO-86, and" in work_orders

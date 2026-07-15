@@ -40,6 +40,32 @@ venue: they cannot place, amend, cancel, sign, or authenticate an order.
 Never put an API key, private key, secret, passphrase, session token, or login
 detail in an operator note.
 
+## Owner drill and maintenance attribution (WO-88)
+
+Normal Stage-1 quote actions remain maker-test evidence. Use `drill_trade` or
+`maintenance_trade` only for an owner action that must not be attributed to the
+maker experiment, and record its actual UTC time, market, one side, price, and
+size exactly:
+
+```bash
+python -m polymarket_predictive_engine.cli stage-day \
+  --config polymarket_predictive_config.example.yaml \
+  --record-action drill_trade \
+  --action-at-utc 2026-07-15T06:01:00Z \
+  --action-market-id CONDITION_ID \
+  --action-side bid \
+  --action-price 0.48 \
+  --action-size-shares 5 \
+  --action-note "owner micro-drill; no stage quotes live"
+```
+
+The exclusion is fail-safe and retrospective. The activity-feed fill must
+match that row's market, BUY/bid or SELL/ask side, price, cumulative size, and
+fixed five-minute time window. The row must also be covered by the latest
+verified WO-61 byte-prefix anchor. Until then—or on any mismatch—the fill
+continues to count against the maker-test fills alarm. Never label a normal
+Stage-1 quote as drill or maintenance activity.
+
 ## During the day
 
 - Re-open the generated page before every placement or replacement.

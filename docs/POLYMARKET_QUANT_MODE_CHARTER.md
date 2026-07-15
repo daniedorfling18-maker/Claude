@@ -736,6 +736,18 @@ deduplicated owner-alert incident. Pre-live empty data remains clear and fresh
 evaluations are unchanged. This adds no execution, cancellation, credential,
 signing, or order path.
 
+**2026-07-15 — WO-88 implemented by Codex.** The read-only maker scoreboard
+now partitions public activity-feed trades into raw, owner activity, and
+maker-test counts. Exclusion requires an explicit `drill_trade` or
+`maintenance_trade` row from the immutable WO-82 log, covered by the latest
+verified WO-61 byte-prefix anchor and matching within the fixed five-minute
+time, condition, side, price, and cumulative-size contract. Unknown,
+malformed, unanchored, and unmatched fills continue to trip the maker alarm;
+owner-only days are skipped rather than earned or broken in the ladder. The
+current JSON and new anchor-enrolled attribution history preserve both counts.
+No gate, sizing, broker, credential, paper/live permission, cancellation, or
+order path changed.
+
 ## Rules of engagement for coding agents
 
 0. **Division of labour**: the orchestrating agent writes/updates this charter and the work orders

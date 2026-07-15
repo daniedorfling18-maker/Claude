@@ -313,11 +313,16 @@ ledger_anchor:
     # 2026-07-13: role-aware WO-73 rows use a new path so the pre-WO-73
     # append-only ledger's anchored header and historical bytes never change.
     - {glob: maker_carry/maker_live_test_wallet_history.csv, mode: append_only}
+    # WO-88 keeps raw/owner/maker fill attribution in a new immutable ledger.
+    - {glob: maker_carry/maker_live_test_attribution_history.csv, mode: append_only}
     - {glob: maker_carry/decision_policy.json, mode: snapshot}
     - {glob: maker_carry/requote_alerts.json, mode: snapshot}
     - {glob: execution/credential_rotation_drill.json, mode: snapshot}
     - {glob: execution/replay_certification.json, mode: snapshot}
     - {glob: execution/execution_ledger.csv, mode: append_only}
+    # WO-82/WO-88 human actions must be anchored before they can earn an
+    # owner-activity exclusion from the maker-test kill count.
+    - {glob: execution/stage_operator_log.csv, mode: append_only}
     - {glob: execution/a1_sweep_advisory.json, mode: snapshot}
     - {glob: execution/executor_status.json, mode: snapshot}
     - {glob: performance/investment_policy_statement.md, mode: snapshot}

@@ -220,6 +220,22 @@ def test_ladder_promotion_arithmetic_and_stage2_reward_floor(tmp_path):
     assert stage2["ladder"]["stage2_reward_floor_usd"] == 42.0
 
 
+def test_ladder_ignores_owner_activity_only_day_without_breaking_streak(tmp_path):
+    cfg = _config(tmp_path)
+    _write_study(cfg, _study(top="0xm1"))
+    _write_carry_history(cfg, _history(["0xm1"] * 8))
+    rows = _live_rows(8)
+    rows[3]["scoreboard"] = "owner_activity_only"
+    rows[3]["fills_last_24h"] = 0
+    _write_live_history(cfg, rows)
+
+    result = run_decision_policy(cfg)
+
+    assert result["ladder_stage_permitted"] == 1
+    assert result["ladder"]["consecutive_live_ok_days"] == 7
+    assert result["ladder"]["owner_activity_days_ignored"] == 1
+
+
 def test_quarter_kelly_cap_binds_below_ladder(tmp_path):
     cfg = _config(tmp_path)
     _write_study(cfg, _study(top="0xm1"))

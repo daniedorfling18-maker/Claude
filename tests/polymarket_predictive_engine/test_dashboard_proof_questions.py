@@ -88,3 +88,5 @@ def test_apply_dashboard_proof_questions_writes_data_and_html_overlay(tmp_path: 
     html = (dashboard_root / "index.html").read_text(encoding="utf-8")
     assert "Four proof questions" in html
     assert "proof-questions-overlay:start" in html
+    assert "maker ${escProof(live.maker_test_fills_last_24h" in html
+    assert "owner ${escProof(live.owner_activity_fills_last_24h" in html

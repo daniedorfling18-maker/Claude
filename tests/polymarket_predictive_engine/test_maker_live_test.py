@@ -2,6 +2,7 @@
 plus signed inventory PnL scored against the study's modelled fill rate."""
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -9,7 +10,9 @@ import yaml
 
 from polymarket_predictive_engine import maker_live_test
 from polymarket_predictive_engine.config import load_config
+from polymarket_predictive_engine.ledger_anchor import anchor_ledgers
 from polymarket_predictive_engine.maker_live_test import run_maker_live_test
+from polymarket_predictive_engine.stage_operator import build_stage_day, record_stage_action
 from polymarket_predictive_engine.utils import read_csv_rows, read_json, write_csv, write_json
 
 
@@ -72,6 +75,37 @@ def _fake_requests(monkeypatch, *, rewards, trades, positions) -> None:
     monkeypatch.setattr(maker_live_test.requests, "get", fake_get)
 
 
+def _epoch(value: str) -> int:
+    return int(datetime.fromisoformat(value.replace("Z", "+00:00")).astimezone(timezone.utc).timestamp())
+
+
+def _anchor_owner_trade(
+    cfg,
+    *,
+    action_at_utc: str = "2026-07-15T06:00:00Z",
+    action_type: str = "drill_trade",
+    market_id: str = "0xm1",
+    side: str = "bid",
+    price: float = 0.5,
+    size_shares: float = 5.0,
+):
+    stage_date = action_at_utc[:10]
+    build_stage_day(cfg, stage_date=stage_date)
+    action = record_stage_action(
+        cfg,
+        action_type=action_type,
+        stage_date=stage_date,
+        action_at_utc=action_at_utc,
+        market_id=market_id,
+        side=side,
+        price=price,
+        size_shares=size_shares,
+        note="owner micro-drill; no stage quotes live",
+    )
+    anchor_ledgers(cfg, anchor_date=stage_date)
+    return action
+
+
 def test_without_wallet_the_module_is_fully_inert(tmp_path):
     cfg = _config(tmp_path)
 
@@ -129,6 +163,153 @@ def test_scoreboard_loses_when_inventory_swamps_rewards(tmp_path, monkeypatch):
     assert summary["fill_alert"] is False
     assert summary["net_score_usd"] == -19.0
     assert summary["scoreboard"] == "losing_so_far"
+
+
+def test_anchored_logged_drill_fill_is_reported_but_excluded_from_kill_count(tmp_path, monkeypatch):
+    cfg = _config(tmp_path, wallet="0xabc")
+    _seed_study(cfg, crossings=4.0)
+    action = _anchor_owner_trade(cfg)
+    trade = {
+        "type": "TRADE",
+        "timestamp": _epoch("2026-07-15T06:01:00Z"),
+        "conditionId": "0xm1",
+        "side": "BUY",
+        "price": 0.5,
+        "size": 5.0,
+        "transactionHash": "0xdrill",
+    }
+    _fake_requests(monkeypatch, rewards=[], trades=[trade], positions=[])
+
+    summary = run_maker_live_test(cfg)
+
+    assert summary["fills_last_24h_raw"] == 1
+    assert summary["owner_activity_fills_last_24h"] == 1
+    assert summary["maker_test_fills_last_24h"] == 0
+    assert summary["fills_last_24h"] == 0
+    assert summary["fill_alert"] is False
+    assert summary["scoreboard"] == "owner_activity_only"
+    assert summary["fill_attribution"]["operator_log_anchor"]["state"] == "anchored_prefix_verified"
+    assert summary["fill_attribution"]["owner_activity_matches"][0]["action_entry_id"] == action["entry_id"]
+    history = read_csv_rows(
+        cfg.output_root / "maker_carry" / "maker_live_test_attribution_history.csv"
+    )
+    assert history[-1]["fills_last_24h_raw"] == "1"
+    assert history[-1]["owner_activity_fills_last_24h"] == "1"
+    assert history[-1]["maker_test_fills_last_24h"] == "0"
+
+
+def test_unlogged_fill_remains_maker_test_and_still_trips_stop(tmp_path, monkeypatch):
+    cfg = _config(tmp_path, wallet="0xabc")
+    _seed_study(cfg, crossings=4.0)
+    trade = {
+        "type": "TRADE",
+        "timestamp": _epoch("2026-07-15T06:01:00Z"),
+        "conditionId": "0xm1",
+        "side": "BUY",
+        "price": 0.5,
+        "size": 5.0,
+        "transactionHash": "0xunknown",
+    }
+    _fake_requests(monkeypatch, rewards=[], trades=[trade], positions=[])
+
+    summary = run_maker_live_test(cfg)
+
+    assert summary["fills_last_24h_raw"] == 1
+    assert summary["owner_activity_fills_last_24h"] == 0
+    assert summary["maker_test_fills_last_24h"] == 1
+    assert summary["fill_alert"] is True
+    assert summary["scoreboard"] == "STOP_fills_outrunning_model"
+
+
+def test_mixed_window_counts_only_unlogged_fill_as_maker_test(tmp_path, monkeypatch):
+    cfg = _config(tmp_path, wallet="0xabc")
+    _seed_study(cfg, crossings=10.0)
+    _anchor_owner_trade(cfg)
+    timestamp = _epoch("2026-07-15T06:01:00Z")
+    trades = [
+        {
+            "type": "TRADE",
+            "timestamp": timestamp,
+            "conditionId": "0xm1",
+            "side": "BUY",
+            "price": 0.5,
+            "size": 5.0,
+            "transactionHash": "0xdrill",
+        },
+        {
+            "type": "TRADE",
+            "timestamp": timestamp + 1,
+            "conditionId": "0xm1",
+            "side": "SELL",
+            "price": 0.5,
+            "size": 5.0,
+            "transactionHash": "0xunlogged",
+        },
+    ]
+    _fake_requests(monkeypatch, rewards=[], trades=trades, positions=[])
+
+    summary = run_maker_live_test(cfg)
+
+    assert summary["fills_last_24h_raw"] == 2
+    assert summary["owner_activity_fills_last_24h"] == 1
+    assert summary["maker_test_fills_last_24h"] == 1
+    assert summary["fills_last_24h"] == 1
+    assert summary["fill_alert"] is False
+    assert summary["scoreboard"] == "winning_so_far"
+
+
+def test_logged_but_not_yet_anchored_drill_fill_remains_maker_test(tmp_path, monkeypatch):
+    cfg = _config(tmp_path, wallet="0xabc")
+    _seed_study(cfg, crossings=4.0)
+    build_stage_day(cfg, stage_date="2026-07-15")
+    record_stage_action(
+        cfg,
+        action_type="drill_trade",
+        stage_date="2026-07-15",
+        action_at_utc="2026-07-15T06:00:00Z",
+        market_id="0xm1",
+        side="bid",
+        price=0.5,
+        size_shares=5.0,
+    )
+    trade = {
+        "type": "TRADE",
+        "timestamp": _epoch("2026-07-15T06:01:00Z"),
+        "conditionId": "0xm1",
+        "side": "BUY",
+        "price": 0.5,
+        "size": 5.0,
+    }
+    _fake_requests(monkeypatch, rewards=[], trades=[trade], positions=[])
+
+    summary = run_maker_live_test(cfg)
+
+    assert summary["owner_activity_fills_last_24h"] == 0
+    assert summary["maker_test_fills_last_24h"] == 1
+    assert summary["fill_alert"] is True
+    assert summary["fill_attribution"]["operator_log_anchor"]["state"] == "operator_log_not_anchored"
+
+
+def test_anchored_drill_fill_outside_registered_window_remains_maker_test(tmp_path, monkeypatch):
+    cfg = _config(tmp_path, wallet="0xabc")
+    _seed_study(cfg, crossings=4.0)
+    _anchor_owner_trade(cfg)
+    trade = {
+        "type": "TRADE",
+        "timestamp": _epoch("2026-07-15T06:05:01Z"),
+        "conditionId": "0xm1",
+        "side": "BUY",
+        "price": 0.5,
+        "size": 5.0,
+    }
+    _fake_requests(monkeypatch, rewards=[], trades=[trade], positions=[])
+
+    summary = run_maker_live_test(cfg)
+
+    assert summary["fill_attribution"]["registered_match_window_seconds"] == 300
+    assert summary["owner_activity_fills_last_24h"] == 0
+    assert summary["maker_test_fills_last_24h"] == 1
+    assert summary["scoreboard"] == "STOP_fills_outrunning_model"
 
 
 def test_operator_and_executor_scoreboards_are_separate_and_never_summed(tmp_path, monkeypatch):

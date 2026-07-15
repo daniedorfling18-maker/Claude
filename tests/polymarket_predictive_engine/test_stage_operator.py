@@ -199,6 +199,39 @@ def test_recorded_human_actions_append_and_are_anchor_enrolled(tmp_path: Path, m
     assert anchor["live_trading_invoked"] is False
 
 
+def test_owner_activity_action_is_explicit_and_keeps_anchored_schema(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    cfg = _config(tmp_path)
+    _seed_complete_inputs(cfg)
+    monkeypatch.setattr("polymarket_predictive_engine.stage_operator.now_utc", lambda: FIXED_NOW)
+    build_stage_day(cfg)
+
+    row = record_stage_action(
+        cfg,
+        action_type="drill_trade",
+        action_at_utc="2026-07-15T06:01:00Z",
+        market_id="0xmarket",
+        side="bid",
+        price=0.48,
+        size_shares=5,
+        note="owner drill",
+    )
+
+    assert row["action_type"] == "drill_trade"
+    assert row["human_action_recorded"] is True
+    ledger = cfg.output_root / "execution" / "stage_operator_log.csv"
+    assert list(read_csv_rows(ledger)[0]) == list(row)
+    with pytest.raises(ValueError, match="exactly one of bid or ask"):
+        record_stage_action(
+            cfg,
+            action_type="maintenance_trade",
+            action_at_utc="2026-07-15T06:02:00Z",
+            market_id="0xmarket",
+            side="both",
+            price=0.48,
+            size_shares=5,
+        )
+
+
 def test_stage_day_action_is_logged_then_shown_on_regenerated_page(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     cfg = _config(tmp_path)
     _seed_complete_inputs(cfg)
@@ -268,4 +301,9 @@ def test_stage_day_is_registered_on_existing_harvest_and_runbook_is_explicit() -
     assert "Open Orders" in runbook
     assert "Cancel all" in runbook
     assert "record-action kill_acknowledged" in runbook
+    assert "record-action drill_trade" in runbook
+    assert "fixed five-minute time window" in runbook
     assert "cannot place, amend, cancel, sign, or authenticate" in runbook
+    config = (ROOT / "polymarket_predictive_config.example.yaml").read_text(encoding="utf-8")
+    assert "execution/stage_operator_log.csv" in config
+    assert "maker_carry/maker_live_test_attribution_history.csv" in config

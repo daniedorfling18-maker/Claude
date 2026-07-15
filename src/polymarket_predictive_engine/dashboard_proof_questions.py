@@ -270,12 +270,12 @@ def _overlay_script() -> str:
       html += `<div class="muted">Live-test scoreboard idle: no wallet configured (maker_live_test.wallet_address).</div>`;
     }} else if (live.status === 'ok') {{
       const sb = String(live.scoreboard || 'no_activity_yet');
-      const sbCls = sb === 'winning_so_far' ? 'good' : (sb === 'no_activity_yet' ? 'warn' : 'bad');
+      const sbCls = sb === 'winning_so_far' ? 'good' : (sb === 'no_activity_yet' || sb === 'owner_activity_only' ? 'warn' : 'bad');
       html += `<div>${{proofBadge('live test: ' + sb, sbCls)}}</div>`
         + `<div class="tableWrap"><table><thead><tr><th>(a) rewards</th><th>(b) inventory PnL</th><th>(c) fills 24h vs model</th><th>net score</th></tr></thead><tbody>`
         + `<tr><td class="mono">$${{escProof(live.rewards_usd_total ?? 0)}} total / $${{escProof(live.rewards_usd_last_24h ?? 0)}} 24h</td>`
         + `<td class="mono">$${{escProof(live.inventory_pnl_usd ?? 0)}} (value $${{escProof(live.inventory_value_usd ?? 0)}})</td>`
-        + `<td class="mono">${{escProof(live.fills_last_24h ?? 0)}} vs ${{escProof(live.modelled_fills_per_day ?? '-')}}/day${{live.fill_alert ? ' - STOP' : ''}}</td>`
+        + `<td class="mono">maker ${{escProof(live.maker_test_fills_last_24h ?? live.fills_last_24h ?? 0)}} / raw ${{escProof(live.fills_last_24h_raw ?? live.fills_last_24h ?? 0)}} / owner ${{escProof(live.owner_activity_fills_last_24h ?? 0)}} vs ${{escProof(live.modelled_fills_per_day ?? '-')}}/day${{live.fill_alert ? ' - STOP' : ''}}</td>`
         + `<td class="mono">$${{escProof(live.net_score_usd ?? 0)}}</td></tr>`
         + `</tbody></table></div>`;
     }}

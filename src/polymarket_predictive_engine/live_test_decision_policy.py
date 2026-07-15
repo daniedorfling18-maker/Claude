@@ -282,6 +282,12 @@ def _live_ok_day(row: dict[str, Any], settings: dict[str, Any]) -> bool:
     return cumulative is not None and cumulative > 0
 
 
+def _owner_activity_only_day(row: dict[str, Any]) -> bool:
+    """WO-88 owner drills neither earn nor break ladder evidence."""
+
+    return str(row.get("scoreboard") or "").strip().lower() == "owner_activity_only"
+
+
 def _ladder_stage(
     cfg: EngineConfig,
     study: dict[str, Any],
@@ -291,7 +297,11 @@ def _ladder_stage(
 ) -> dict[str, Any]:
     daily = _daily_net_rows(live_history)
     ok_tail = 0
+    owner_activity_days_ignored = 0
     for row in reversed(daily):
+        if _owner_activity_only_day(row):
+            owner_activity_days_ignored += 1
+            continue
         if not _live_ok_day(row, settings):
             break
         ok_tail += 1
@@ -317,6 +327,7 @@ def _ladder_stage(
         "stage": stage,
         "ladder_capital_usd": ladder_cap,
         "consecutive_live_ok_days": ok_tail,
+        "owner_activity_days_ignored": owner_activity_days_ignored,
         "stage_reason": reason,
         "modelled_gross_usd_per_day": modelled_gross,
         "stage2_reward_floor_usd": None if reward_floor is None else round(reward_floor, 4),

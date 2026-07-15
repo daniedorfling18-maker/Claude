@@ -19,6 +19,7 @@ from uuid import uuid4
 from .a1_controls import build_a1_sweep_advisory
 from .config import EngineConfig, load_config
 from .cost_ledger import aggregate_costs
+from .owner_activity_attribution import OWNER_ACTIVITY_ACTION_TYPES
 from .runtime_lock import runtime_lock
 from .utils import (
     append_csv_rows,
@@ -33,7 +34,7 @@ from .utils import (
 )
 
 
-WORK_ORDER = "WO-82"
+WORK_ORDER = "WO-82+WO-88"
 UNKNOWN = "UNKNOWN"
 ACTION_TYPES = (
     "quote_placed",
@@ -44,6 +45,7 @@ ACTION_TYPES = (
     "inventory_observed",
     "no_action",
     "note",
+    *OWNER_ACTIVITY_ACTION_TYPES,
 )
 ACTION_SIDES = ("bid", "ask", "both", "n/a")
 ACTION_FIELDS = [
@@ -481,7 +483,8 @@ def record_stage_action(
     if side_text not in ACTION_SIDES:
         raise ValueError(f"side must be one of: {', '.join(ACTION_SIDES)}")
     market_text = str(market_id or "").strip()
-    if action in {"quote_placed", "quote_pulled", "quote_repriced", "size_changed"} and not market_text:
+    fill_actions = {"quote_placed", "quote_repriced", *OWNER_ACTIVITY_ACTION_TYPES}
+    if action in {"quote_placed", "quote_pulled", "quote_repriced", "size_changed", *OWNER_ACTIVITY_ACTION_TYPES} and not market_text:
         raise ValueError(f"{action} requires market_id")
     parsed_price = safe_float(price)
     parsed_size = safe_float(size_shares)
@@ -489,10 +492,12 @@ def record_stage_action(
         raise ValueError("price must be strictly between 0 and 1")
     if parsed_size is not None and parsed_size <= 0:
         raise ValueError("size_shares must be positive")
-    if action in {"quote_placed", "quote_repriced"} and (parsed_price is None or parsed_size is None):
+    if action in fill_actions and (parsed_price is None or parsed_size is None):
         raise ValueError(f"{action} requires price and size_shares")
-    if action in {"quote_placed", "quote_repriced"} and side_text == "n/a":
+    if action in fill_actions and side_text == "n/a":
         raise ValueError(f"{action} requires bid, ask, or both side")
+    if action in OWNER_ACTIVITY_ACTION_TYPES and side_text not in {"bid", "ask"}:
+        raise ValueError(f"{action} requires exactly one of bid or ask side")
     if action == "size_changed" and parsed_size is None:
         raise ValueError("size_changed requires size_shares")
     if action == "note" and not str(note or "").strip():

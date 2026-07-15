@@ -18,7 +18,7 @@ from typing import Any
 from .config import EngineConfig, load_config
 from .executor_ops_monitor import EXECUTION_LEDGER, EXECUTOR_HEARTBEAT
 from .risk import shrunk_kelly_fraction
-from .utils import boolish, now_utc, parse_timestamp, read_csv_rows, read_json, safe_float, write_json
+from .utils import boolish, now_utc, parse_timestamp, read_csv_rows, read_json, safe_float, write_json, write_text_atomic
 
 REGISTERED_AT_UTC = "2026-07-10T00:00:00Z"
 KELLY_FULL_WEIGHT_DAYS_FLOOR = 20
@@ -607,7 +607,7 @@ def _patch_quote_sheet(out_root: Path, policy: dict[str, Any]) -> None:
     else:
         parts = text.split("\n", 2)
         text = "\n".join(parts[:2]) + "\n\n" + block + (parts[2] if len(parts) > 2 else "")
-    path.write_text(text, encoding="utf-8")
+    write_text_atomic(path, text)
 
 
 def run_decision_policy(cfg: EngineConfig) -> dict[str, Any]:

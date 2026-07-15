@@ -113,6 +113,25 @@ def write_csv(path: str | Path, rows: Iterable[Mapping[str, Any]], fieldnames: S
     return path
 
 
+def write_text_atomic(path: str | Path, text: str, *, encoding: str = "utf-8") -> Path:
+    """Replace a text artifact only after its complete sibling temp file is durable."""
+    path = Path(path)
+    ensure_dir(path.parent)
+    temp_path = path.with_name(f".{path.name}.{os.getpid()}.{time.time_ns()}.tmp")
+    try:
+        with temp_path.open("w", encoding=encoding, newline="\n") as handle:
+            handle.write(text)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temp_path, path)
+    finally:
+        try:
+            temp_path.unlink()
+        except FileNotFoundError:
+            pass
+    return path
+
+
 def append_csv_rows(
     path: str | Path,
     rows: Iterable[Mapping[str, Any]],

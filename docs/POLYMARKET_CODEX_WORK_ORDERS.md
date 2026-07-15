@@ -2944,6 +2944,12 @@ out on schedule; (e) unparseable stamps are excluded and remain maker_test.
 
 ## WO-90 — Atomic quote-sheet writes (concurrent decision-policy under the WO-85 safety pulse)
 
+**2026-07-15 — WO-90 implemented by Codex.** Both registered quote-sheet writers now publish a
+fully written, flushed sibling temp file with `os.replace`, so concurrent decision-policy and
+daily-harvest refreshes can produce a benign stale patch but never a torn human sheet. No sheet
+content, threshold, policy, gate, or trading path changed. ARM64/Python 3.11 verification passed:
+focused lint, 44 focused writer/policy/study tests, repository lint, and the full 1,211-test suite.
+
 Small hardening found by the same line audit. The WO-85 safety pulse runs
 `decision-policy` on a 15-minute cadence while the daily harvest may run its
 own `decision_policy` step concurrently. All JSON artifacts already write
@@ -3564,8 +3570,8 @@ pre-target scoreboard gap without authorising or placing an order.
 
 ## Current queue for Codex (reconciled 2026-07-15)
 
-**Next buildable: WO-89 -> WO-90** (two small fixes; WO-89's root cause was
-corrected by the 2026-07-15 line audit — build from the corrected spec). WO-85, WO-87, WO-86, and
+**Next buildable: none.** WO-89 and WO-90 are implemented on 2026-07-15.
+WO-85, WO-87, WO-86, and
 WO-88 are implemented on 2026-07-15; WO-83 is implemented in PR #203 and
 WO-84 is implemented in PR #205. Do not infer follow-on capital, gate, model,
 or executor work from their diagnostics; the queue below remains binding.

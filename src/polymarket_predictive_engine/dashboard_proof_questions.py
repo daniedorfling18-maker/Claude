@@ -215,6 +215,11 @@ def _overlay_script() -> str:
     const state = String(verdict.verdict);
     const cls = state.startsWith('yes') ? 'good' : state.startsWith('no') ? 'bad' : 'warn';
     const gates = verdict.gates || {{}};
+    const gateA = gates.A_edge_exists || {{}};
+    const preEvent = verdict.pre_event_clv_diagnostic || {{}};
+    const preEventMean = (preEvent.unit_mean_pre_event_clv === null || preEvent.unit_mean_pre_event_clv === undefined)
+      ? 'ungradeable'
+      : String(preEvent.unit_mean_pre_event_clv);
     const gateRow = (key) => {{
       const gate = gates[key] || {{}};
       const gcls = gate.state === 'pass' ? 'good' : gate.state === 'fail' ? 'bad' : 'warn';
@@ -222,6 +227,8 @@ def _overlay_script() -> str:
     }};
     return `<div class="sectionLead">Pre-registered ${{escProof(verdict.registered_at_utc || '')}}: the conclusive answer to "can this bot generate $${{escProof(verdict.target_monthly_profit_usdc || 100)}}/month?", computed from evidence only. Reporting only; no gate or stake is changed.</div>`
       + `<div>${{proofBadge(state, cls)}}</div>`
+      + `<div class="muted"><strong>Registered semantics caveat:</strong> ${{escProof(verdict.semantics_caveat || 'Gate A measures settlement return, not closing-line edge; true pre-event CLV is non-binding.')}}</div>`
+      + `<div class="mono">Gate A unit mean net settlement return/dollar (pre-fee): ${{escProof(gateA.unit_mean_net_settlement_return_per_dollar ?? '-')}} | settled-profitable units ${{escProof(gateA.units_settled_profitable ?? 0)}}/${{escProof(gateA.independent_market_units ?? 0)}}<br>True pre-event CLV (non-binding): ${{escProof(preEventMean)}} | gradeable units ${{escProof(preEvent.units_gradeable ?? 0)}}/${{escProof(preEvent.units_total ?? 0)}}</div>`
       + `<div class="tableWrap"><table><thead><tr><th>Gate</th><th>State</th><th>Why</th></tr></thead><tbody>`
       + ['A_edge_exists', 'B_edge_survives_costs', 'C_scale_feasible'].map(gateRow).join('')
       + `</tbody></table></div>`
@@ -288,7 +295,7 @@ def _overlay_script() -> str:
     const vState = String(verdict.verdict || 'no data');
     const vCls = vState.startsWith('yes') ? 'good' : vState.startsWith('no_') ? 'bad' : 'warn';
     const rows = [
-      ['Taker verdict', `${{vState}} - Gate A units ${{gateA.independent_market_units ?? 0}}/${{gateA.minimum_final_samples ?? 12}} (${{gateA.settled_finals_total ?? 0}} finals settled)`, vCls],
+      ['Taker verdict', `${{vState}} - Gate A settlement units ${{gateA.independent_market_units ?? 0}}/${{gateA.minimum_final_samples ?? 12}} (${{gateA.settled_finals_total ?? 0}} finals settled)`, vCls],
       ['Maker lane', study.status
         ? `alert ${{makerRequote.alert_state || 'not_run'}} - Tier-0 ${{makerReplay.coverage_status || makerReplay.status || 'not_run'}} - policy ${{makerPolicy.indicated_action || 'not_run'}} - est $${{study.portfolio_net_carry_usd_per_day ?? '-'}} /day (upper bound) - gate M-A day ${{mA.runs_at_or_above_target ?? 0}}/${{mA.required_runs ?? 7}}`
         : 'study has NOT run on this box yet - force it or wait for the daily harvest',

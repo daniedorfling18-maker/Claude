@@ -708,6 +708,17 @@ per-position clustering fallback. These are operational and statistical
 safety tightenings only; no evidence threshold, sizing, broker, paper/live, or
 order path changed.
 
+**2026-07-15 — WO-87 implemented by Codex.** The legacy taker verdict keeps
+its registered arithmetic, alpha, sample floor, clustering, and thresholds,
+but now labels the binding quantity honestly as unit mean net settlement
+return per dollar (pre-fee) and labels positive units
+`settled_profitable`. `profit_verdict.json` and the dashboard carry the
+mandatory settlement-return caveat plus a separately registered, non-binding
+true pre-event CLV diagnostic: the last official same-token in-band price at
+or before close minus six hours, aggregated on the exact Gate A units. Missing
+references remain `pre_event_clv_ungradeable`; no gate, sizing, broker,
+paper/live permission, or order path changed.
+
 ## Rules of engagement for coding agents
 
 0. **Division of labour**: the orchestrating agent writes/updates this charter and the work orders

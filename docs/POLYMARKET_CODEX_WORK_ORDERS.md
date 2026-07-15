@@ -1,9 +1,8 @@
 # Polymarket Codex Work Orders
 
-Last updated: 2026-07-15 (WO-85 implemented; WO-80, WO-82, WO-81 landed; WO-83 implemented in
-PR #203; WO-84 implemented in PR #205. WO-87 DECIDED 2026-07-14 (relabel + pre-event CLV diagnostic; spec in
-the WO). BUILD ORDER: WO-87 next (must deploy before the 2026-07-19/20
-read so the verdict renders with honest labels), then WO-86 and WO-88 (must
+Last updated: 2026-07-15 (WO-85 and WO-87 implemented; WO-80, WO-82, WO-81 landed; WO-83 implemented in
+PR #203; WO-84 implemented in PR #205. WO-87 now relabels the unchanged legacy verdict metric honestly and
+reports non-binding true pre-event CLV on the same units. BUILD ORDER: WO-86 next, then WO-88 (both must
 land before any funded live stage). WO-33 remains pending a registered leakage review, with
 WO-34/35 model wiring bound to that review and the three-hypothesis freeze.
 WO-48 and WO-67 are blocked; WO-70 and WO-72 are deferred; WO-76 is
@@ -2983,6 +2982,13 @@ option C, tighten-only form). Now BUILDABLE with this exact spec:**
    history with no qualifying pre-event observation yields
    ungradeable; gate thresholds byte-identical to the registration.
 
+**Implemented by Codex 2026-07-15.** The binding arithmetic, thresholds,
+alpha, sample floor, clustering, and order permissions remain unchanged.
+`profit_verdict.json` now exposes honest settlement-return primary fields,
+one-release legacy aliases, the mandatory caveat, and a same-unit non-binding
+pre-event CLV diagnostic sourced only from official in-band history at or
+before close minus six hours. The decision dashboard renders both metrics.
+
 ## WO-86 — Kill-switch staleness guard: stale safety data must STOP, never clear (decision-policy audit 2026-07-14)
 
 MATERIAL, safety-critical for the live stage. Found by line-reading
@@ -3408,9 +3414,9 @@ contains no paper/live broker, signing, order, gate, model, or sizing path.
    reconciliation legs -> NAV). Do not boil the ocean; add contracts
    only when a WO touches the pair.
 
-## Current queue for Codex (reconciled 2026-07-14)
+## Current queue for Codex (reconciled 2026-07-15)
 
-**Next buildable, in order: WO-87 (decided 2026-07-14) -> WO-86 -> WO-88.** WO-85 is implemented on 2026-07-15; WO-83 is implemented in PR #203 and
+**Next buildable, in order: WO-86 -> WO-88.** WO-85 and WO-87 are implemented on 2026-07-15; WO-83 is implemented in PR #203 and
 WO-84 is implemented in PR #205. Do not infer follow-on capital, gate, model,
 or executor work from their diagnostics; the queue below remains binding.
 

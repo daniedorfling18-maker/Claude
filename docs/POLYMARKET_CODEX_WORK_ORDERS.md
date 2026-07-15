@@ -3437,6 +3437,13 @@ gate exercises these contracts on synthetic fixtures, including a quote-sheet
 market absent from the websocket set. This is acceptance/reporting only and
 contains no paper/live broker, signing, order, gate, model, or sizing path.
 
+**2026-07-15 acceptance-freshness correction.** The real-data deploy cycle now
+runs the read-only maker scoreboard before decision policy. Acceptance fails
+unless the target generation reports fresh WO-88 raw/owner/maker-test fill
+accounting, internally reconciles those counts, and appends a fresh attribution
+ledger row; the served dashboard must expose the same fields. This closes the
+pre-target scoreboard gap without authorising or placing an order.
+
 1. Post-deploy acceptance pass: the deploy workflow's final step (VPS
    runner) waits for/triggers one cycle of the critical paths on REAL
    current data and asserts completeness — quote-sheet tickets carry

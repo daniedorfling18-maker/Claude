@@ -16,7 +16,7 @@ from polymarket_predictive_engine.config import EngineConfig
 from polymarket_predictive_engine.degraded_state_watchdog import build_degraded_state_watchdog
 from polymarket_predictive_engine.deploy_acceptance import _reconciliation_check, build_deploy_acceptance
 from polymarket_predictive_engine.requote_alerts import build_requote_alerts
-from polymarket_predictive_engine.utils import read_json, write_json
+from polymarket_predictive_engine.utils import read_json, write_csv, write_json
 from polymarket_predictive_engine.wallet_reconciliation import _reconciliation_state
 
 
@@ -45,6 +45,11 @@ def _cfg(tmp_path: Path) -> EngineConfig:
             },
             "degraded_state_watchdog": {"notification_enabled": True},
             "deploy_acceptance": {"notification_enabled": True},
+            "maker_live_test": {
+                "enabled": True,
+                "wallet_address": "0x1111111111111111111111111111111111111111",
+                "executor_wallet_address": "",
+            },
         },
         path=tmp_path / "cfg.yaml",
     )
@@ -110,6 +115,7 @@ def _seed_acceptance(
                     "maker_carry_study",
                     "collect_maker_replay_data",
                     "maker_fill_replay",
+                    "maker_live_test",
                     "decision_policy",
                     "requote_alerts",
                     "reconcile_wallet",
@@ -123,6 +129,44 @@ def _seed_acceptance(
     write_json(
         cfg.output_root / "maker_carry" / "maker_carry_study.json",
         {"generated_at_utc": "2026-07-13T12:00:30Z", "portfolio": [ticket]},
+    )
+    write_json(
+        cfg.output_root / "maker_carry" / "maker_live_test.json",
+        {
+            "generated_at_utc": "2026-07-13T12:01:05Z",
+            "status": "ok",
+            "work_order": "WO-36+WO-73+WO-81+WO-88",
+            "primary_wallet_role": "operator",
+            "fills_last_24h": 1,
+            "fills_last_24h_raw": 2,
+            "owner_activity_fills_last_24h": 1,
+            "maker_test_fills_last_24h": 1,
+            "owner_activity_only": False,
+            "fill_attribution": {"operator_log_anchor": {"state": "verified_prefix"}},
+            "paper_trading_invoked": False,
+            "live_trading_invoked": False,
+        },
+    )
+    write_csv(
+        cfg.output_root / "maker_carry" / "maker_live_test_attribution_history.csv",
+        [
+            {
+                "generated_at_utc": "2026-07-13T12:01:05Z",
+                "wallet_role": "operator",
+                "fills_last_24h_raw": 2,
+                "owner_activity_fills_last_24h": 1,
+                "maker_test_fills_last_24h": 1,
+                "owner_activity_only": False,
+            }
+        ],
+        fieldnames=[
+            "generated_at_utc",
+            "wallet_role",
+            "fills_last_24h_raw",
+            "owner_activity_fills_last_24h",
+            "maker_test_fills_last_24h",
+            "owner_activity_only",
+        ],
     )
     write_json(
         cfg.output_root / "maker_carry" / "maker_replay_collection.json",
@@ -377,6 +421,34 @@ def test_deploy_acceptance_fails_when_maker_replay_collection_misses_sheet_marke
     assert result["paper_trading_invoked"] is False
     assert result["live_trading_invoked"] is False
     assert read_json(cfg.output_root / "ops_scheduler" / "deploy_acceptance.json")["status"] == "FAIL"
+
+
+def test_deploy_acceptance_rejects_pre_wo88_maker_scoreboard(tmp_path: Path) -> None:
+    cfg = _cfg(tmp_path)
+    _seed_acceptance(cfg)
+    write_json(
+        cfg.output_root / "maker_carry" / "maker_live_test.json",
+        {
+            "generated_at_utc": "2026-07-13T12:01:05Z",
+            "status": "ok",
+            "work_order": "WO-36+WO-73+WO-81",
+            "fills_last_24h": 2,
+            "paper_trading_invoked": False,
+            "live_trading_invoked": False,
+        },
+    )
+
+    result = build_deploy_acceptance(cfg, expected_deploy_sha="newsha", as_of=AS_OF)
+    check = {row["id"]: row for row in result["checks"]}[
+        "maker_live_test_attribution_freshness"
+    ]
+
+    assert result["status"] == "FAIL"
+    assert check["status"] == "FAIL"
+    assert {next(iter(row)) for row in check["defects"]} >= {
+        "reason",
+        "missing_attribution_fields",
+    }
 
 
 def test_deploy_acceptance_fails_when_governance_docs_are_not_mounted(tmp_path: Path) -> None:

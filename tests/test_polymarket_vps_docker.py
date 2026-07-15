@@ -167,6 +167,10 @@ def test_vps_deploy_workflow_requires_current_dashboard_schema():
     assert "governance_refresh_status.json" in text
     assert "price_action_model_summary.json" in text
     assert "did not publish a fresh price-action model" in text
+    assert "polymarket_predictive_engine.cli maker-live-test" in text
+    assert "maker_live_test_code" in text
+    assert '"fills_last_24h_raw"' in text
+    assert '"maker_test_fills_last_24h"' in text
     assert "exec -T polymarket-paper-live" not in text
     assert "deployment_health" in text
     assert "mispricing_alpha_bridge" in text

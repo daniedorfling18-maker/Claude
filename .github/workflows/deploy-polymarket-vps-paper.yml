@@ -492,6 +492,8 @@ jobs:
             collect_maker_replay_data_code=$?
             timeout 300 python -m polymarket_predictive_engine.cli maker-fill-replay --config "$POLYMARKET_CONFIG_PATH"
             maker_fill_replay_code=$?
+            timeout 300 python -m polymarket_predictive_engine.cli maker-live-test --config "$POLYMARKET_CONFIG_PATH"
+            maker_live_test_code=$?
             timeout 300 python -m polymarket_predictive_engine.cli decision-policy --config "$POLYMARKET_CONFIG_PATH"
             decision_policy_code=$?
             timeout 300 python -m polymarket_predictive_engine.cli requote-alerts --config "$POLYMARKET_CONFIG_PATH"
@@ -502,7 +504,7 @@ jobs:
             executor_ops_monitor_code=$?
             timeout 300 python -m polymarket_predictive_engine.cli operating-state --config "$POLYMARKET_CONFIG_PATH"
             operating_state_code=$?
-            export maker_carry_study_code collect_maker_replay_data_code maker_fill_replay_code decision_policy_code requote_alerts_code reconcile_wallet_code executor_ops_monitor_code operating_state_code
+            export maker_carry_study_code collect_maker_replay_data_code maker_fill_replay_code maker_live_test_code decision_policy_code requote_alerts_code reconcile_wallet_code executor_ops_monitor_code operating_state_code
             python - <<"PY"
           import json
           import os
@@ -517,6 +519,7 @@ jobs:
                   "maker_carry_study",
                   "collect_maker_replay_data",
                   "maker_fill_replay",
+                  "maker_live_test",
                   "decision_policy",
                   "requote_alerts",
                   "reconcile_wallet",
@@ -575,6 +578,8 @@ jobs:
           grep -Fq -- "alpha_validated_anchor_rows" <<<"$data"
           grep -Fq -- "sharp_sports_funnel" <<<"$data"
           grep -Fq -- '"executor_status"' <<<"$data"
+          grep -Fq -- '"fills_last_24h_raw"' <<<"$data"
+          grep -Fq -- '"maker_test_fills_last_24h"' <<<"$data"
 
           echo "VPS deploy verified: http://${PM_VPS_HOST}:${port}/"
           REMOTE

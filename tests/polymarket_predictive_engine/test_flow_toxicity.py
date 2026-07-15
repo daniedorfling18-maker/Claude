@@ -1,10 +1,12 @@
 """WO-49 flow-toxicity conditioning tests."""
 from __future__ import annotations
 
+import gzip
 from pathlib import Path
 
 import yaml
 
+from polymarket_predictive_engine import flow_toxicity
 from polymarket_predictive_engine import maker_carry_study
 from polymarket_predictive_engine.cli import COMMANDS
 from polymarket_predictive_engine.config import load_config
@@ -110,6 +112,49 @@ def test_missing_wallet_intelligence_is_tolerated(tmp_path):
     assert summary["missing_wallet_data"] is True
     row = read_csv_rows(cfg.output_root / "maker_carry" / "flow_toxicity.csv")[0]
     assert row["crowd_fill_count"] == "1"
+
+
+def test_feature_archives_and_trade_prints_are_streamed_not_bulk_loaded(tmp_path, monkeypatch):
+    cfg = _config(tmp_path)
+    _leaderboard(cfg)
+    archive = cfg.output_root / "polymarket_training_archive"
+    archive.mkdir(parents=True, exist_ok=True)
+    with gzip.open(archive / "features_20260710T000000Z.csv.gz", "wt", encoding="utf-8", newline="") as handle:
+        handle.write("source_timestamp,asset_id,midpoint\n400,tok1,0.6\n")
+    write_csv(
+        cfg.output_root / "polymarket_trade_prints" / "trade_prints.csv",
+        [
+            {
+                "market": "0xcond",
+                "asset_id": "tok1",
+                "side": "BUY",
+                "price": 0.5,
+                "size": 100,
+                "timestamp": 100,
+                "counterparty_wallet": "smart1",
+            }
+        ],
+        fieldnames=["market", "asset_id", "side", "price", "size", "timestamp", "counterparty_wallet"],
+    )
+    original_read_csv_rows = flow_toxicity.read_csv_rows
+
+    def guarded_bulk_reader(path, *args, **kwargs):
+        candidate = Path(path)
+        if candidate.suffix == ".gz" or candidate.name in {"trade_prints.csv", "websocket_market_features.csv"}:
+            raise AssertionError(f"bulk reader used for growing corpus: {candidate}")
+        return original_read_csv_rows(path, *args, **kwargs)
+
+    monkeypatch.setattr(flow_toxicity, "read_csv_rows", guarded_bulk_reader)
+
+    summary = flow_toxicity.build_flow_toxicity(cfg)
+
+    assert summary["status"] == "ok"
+    assert summary["price_index_strategy"] == "disk_backed_streaming_sqlite"
+    assert summary["feature_rows_scanned"] == 1
+    assert summary["feature_rows_indexed"] == 1
+    assert summary["price_index_disk_bytes"] > 0
+    row = read_csv_rows(cfg.output_root / "maker_carry" / "flow_toxicity.csv")[0]
+    assert float(row["smart_fill_markout"]) == 0.1
 
 
 def test_quote_sheet_surfaces_toxicity_column_and_rule(tmp_path):

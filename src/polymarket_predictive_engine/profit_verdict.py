@@ -7,23 +7,25 @@ be fitted to the data after the fact.
 
 Decision rules (all thresholds config-overridable under ``profit_verdict:``):
 
-Gate A - edge existence (settlement-independent):
-    Uses the closing-line focus view (frozen diagnostic cohorts excluded).
+Gate A - edge existence (settlement return; outcome-dependent):
+    Uses settled focus rows (frozen diagnostic cohorts excluded).
     PENDING until ``focus_final_positions >= minimum_final_samples`` (12).
-    PASS  when mean final CLV > 0 AND a one-sided sign test on beat-close
-          among finals gives p <= ``sign_test_alpha`` (0.10).
-    FAIL  when the sample floor is met and mean final CLV <= 0.
+    PASS  when unit mean net settlement return per dollar (pre-fee) > 0 AND
+          a one-sided sign test on settled-profitable units gives
+          p <= ``sign_test_alpha`` (0.10).
+    FAIL  when the sample floor is met and mean settlement return <= 0.
     Otherwise (mean > 0 but not significant) stays PENDING: more finals.
 
 Gate B - edge survives execution costs (evaluated only after A passes):
     Shadow entry fills already embed entry-side costs (ask + slippage), so
-    the haircut covers the exit side only. Edge per dollar of turnover is
-    taken as mean final CLV directly (conservative: buying price p <= 1
-    yields >= CLV per dollar).
-    PASS when mean_final_clv - exit_cost_haircut_per_dollar > 0.
+    the haircut covers the exit side only. The registered settlement-return
+    statistic is retained unchanged so the in-flight study is not swapped
+    after observation.
+    PASS when mean settlement return - execution-cost charges > 0.
 
 Gate C - scale feasibility (evaluated only after B passes):
-    required_monthly_turnover = target_usd / net_edge_per_dollar.
+    required_monthly_turnover = target_usd /
+        net_settlement_return_after_costs_per_dollar.
     achievable_monthly_turnover = observed focus entries/day (from shadow
     position entry timestamps) x per-trade stake cap x 30.
     PASS when achievable >= required.
@@ -43,8 +45,9 @@ gates above.
 
 from __future__ import annotations
 
+import csv
 import re
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from math import comb
 from pathlib import Path
 from typing import Any
@@ -78,10 +81,23 @@ REGISTERED_AT_UTC = "2026-07-09T04:00:00Z"
 # material coverage gap and can only hold Gate A pending; it never helps pass.
 REGISTERED_MAX_POSITION_ID_FALLBACK_FRACTION = 0.10
 
+# WO-87 (owner decision 2026-07-14): the legacy adjudication keeps its exact
+# arithmetic and thresholds, but names the outcome-dependent quantity honestly.
+# True pre-event CLV is a separate, non-binding diagnostic on the same units.
+PRE_EVENT_REFERENCE_HOURS = 6
+PRE_EVENT_MIN_PRICE = 0.05
+PRE_EVENT_MAX_PRICE = 0.95
+PRE_EVENT_OFFICIAL_SOURCE_PREFIX = "polymarket_clob_prices_history:"
+GATE_A_SEMANTICS_CAVEAT = (
+    "Gate A measures unit mean net settlement return per dollar (pre-fee), not "
+    "closing-line edge; true pre-event CLV is shown beside it and feeds no gate in this study."
+)
+
 # Amendments registered 2026-07-09 BEFORE the first focus final settled
 # (validity review; all three tighten the gates, none loosen them):
-#   1. Gate A clusters finals by market: one unit per market (mean CLV of its
-#      finals), sign test and the 12-sample floor apply to independent units,
+#   1. Gate A clusters finals by market: one unit per market (mean net
+#      settlement return of its finals), sign test and the 12-sample floor
+#      apply to independent units,
 #      so correlated tokens from one market cannot inflate significance.
 #   2. Gate B adds an adverse-selection haircut (shadow fills never experience
 #      being filled preferentially when wrong; real fills do).
@@ -145,12 +161,12 @@ REGISTERED_EXTENSION_PROTOCOL = {
 VERDICT_GATE_DEFINITIONS: list[dict[str, Any]] = [
     {
         "id": "A_edge_exists",
-        "rule": "Use equal-weight independent fixture units; pass only with positive mean final CLV and the registered one-sided sign-test threshold after the sample floor.",
+        "rule": "Use equal-weight independent fixture units; pass only with positive unit mean net settlement return per dollar (pre-fee) and the registered one-sided sign-test threshold on settled-profitable units after the sample floor.",
         "setting_keys": ["minimum_final_samples", "sign_test_alpha"],
     },
     {
         "id": "B_edge_survives_costs",
-        "rule": "Pass only when final CLV remains positive after the exit, adverse-selection, and taker-fee charges.",
+        "rule": "Pass only when unit mean net settlement return per dollar remains positive after the exit, adverse-selection, and taker-fee charges.",
         "setting_keys": [
             "exit_cost_haircut_per_dollar",
             "adverse_selection_haircut_per_dollar",
@@ -279,13 +295,19 @@ def _clustered_focus_finals(
     cfg: EngineConfig,
     diagnostic_substrings: list[str],
     taker_fee_rate: float,
-) -> tuple[dict[str, list[tuple[float, float]]], dict[str, Any]]:
+) -> tuple[
+    dict[str, list[tuple[float, float]]],
+    dict[str, Any],
+    dict[str, list[dict[str, Any]]],
+]:
     """Settled focus finals grouped into independent fixture-level units.
 
     Reads the append-only final history ledger; excludes frozen diagnostic
-    cohorts; returns unit -> [(final CLV, taker fee per dollar)] where the
-    fee uses each final's actual entry price: rate x (1 - p). Missing entry
-    prices charge the worst case (p -> 0 gives rate x 1) - fail conservative.
+    cohorts; returns unit -> [(net settlement return per dollar pre-fee,
+    taker fee per dollar)] plus the source rows assigned to the exact same
+    units. The fee uses each final's actual entry price: rate x (1 - p).
+    Missing entry prices charge the worst case (p -> 0 gives rate x 1) - fail
+    conservative.
 
     Units start as markets (amendment 1) and merge transitively across
     markets sharing a fixture tag (amendment 5) via union-find."""
@@ -304,7 +326,7 @@ def _clustered_focus_finals(
         if root_left != root_right:
             parent[root_right] = root_left
 
-    entries: list[tuple[str, float, float]] = []
+    entries: list[tuple[str, float, float, dict[str, Any]]] = []
     eligible_finals = 0
     position_id_fallback_finals = 0
     for row in rows:
@@ -313,8 +335,8 @@ def _clustered_focus_finals(
         cohort = str(row.get("signal_cohort") or "").lower()
         if any(sub in cohort for sub in diagnostic_substrings):
             continue
-        clv = safe_float(row.get("clv"))
-        if clv is None:
+        settlement_return = safe_float(row.get("clv"))
+        if settlement_return is None:
             continue
         market_key = str(row.get("market_id") or row.get("market_slug") or "").strip()
         position_key = str(row.get("shadow_position_id") or "").strip()
@@ -334,11 +356,14 @@ def _clustered_focus_finals(
             fee_per_dollar = taker_fee_rate * (1.0 - entry_price)
         else:
             fee_per_dollar = taker_fee_rate
-        entries.append((node, clv, fee_per_dollar))
+        entries.append((node, settlement_return, fee_per_dollar, dict(row)))
 
     clusters: dict[str, list[tuple[float, float]]] = {}
-    for node, clv, fee_per_dollar in entries:
-        clusters.setdefault(find(node), []).append((clv, fee_per_dollar))
+    cluster_rows: dict[str, list[dict[str, Any]]] = {}
+    for node, settlement_return, fee_per_dollar, row in entries:
+        root = find(node)
+        clusters.setdefault(root, []).append((settlement_return, fee_per_dollar))
+        cluster_rows.setdefault(root, []).append(row)
     fallback_fraction = (
         position_id_fallback_finals / eligible_finals if eligible_finals else 0.0
     )
@@ -353,7 +378,170 @@ def _clustered_focus_finals(
         "position_id_fallback_fraction": round(fallback_fraction, 6),
         "maximum_position_id_fallback_fraction": REGISTERED_MAX_POSITION_ID_FALLBACK_FRACTION,
     }
-    return clusters, coverage
+    return clusters, coverage, cluster_rows
+
+
+def _build_pre_event_clv_diagnostic(
+    cfg: EngineConfig,
+    cluster_rows: dict[str, list[dict[str, Any]]],
+) -> dict[str, Any]:
+    """Grade true pre-event CLV without changing any registered verdict gate.
+
+    A final is gradeable only from the last official same-token history point
+    at or before close minus six hours whose price is inside the registered
+    [0.05, 0.95] band. A unit is gradeable only when all of its constituent
+    finals are gradeable, preventing selective missing-token coverage from
+    improving the diagnostic.
+    """
+    history_path = cfg.output_root / "polymarket_training" / "historical_price_snapshots.csv"
+    target_tokens = {
+        str(row.get("token_id") or "").strip()
+        for rows in cluster_rows.values()
+        for row in rows
+        if str(row.get("token_id") or "").strip()
+    }
+    histories: dict[str, list[tuple[datetime, float]]] = {}
+    # Stream the potentially large history corpus and retain only Gate A
+    # tokens, keeping dashboard/verdict refresh memory bounded on the VPS.
+    if history_path.exists() and target_tokens:
+        with history_path.open("r", encoding="utf-8-sig", newline="") as handle:
+            for row in csv.DictReader(handle):
+                if not str(row.get("source") or "").startswith(PRE_EVENT_OFFICIAL_SOURCE_PREFIX):
+                    continue
+                token_id = str(row.get("token_id") or "").strip()
+                if token_id not in target_tokens:
+                    continue
+                observed_at = parse_timestamp(row.get("timestamp"))
+                price = safe_float(row.get("price"))
+                if (
+                    observed_at is None
+                    or price is None
+                    or not PRE_EVENT_MIN_PRICE <= price <= PRE_EVENT_MAX_PRICE
+                ):
+                    continue
+                histories.setdefault(token_id, []).append((observed_at, price))
+    for token_history in histories.values():
+        token_history.sort(key=lambda point: point[0])
+
+    units: list[dict[str, Any]] = []
+    gradeable_unit_means: list[float] = []
+    finals_total = 0
+    finals_gradeable = 0
+    for unit_id in sorted(cluster_rows):
+        source_rows = cluster_rows[unit_id]
+        final_diagnostics: list[dict[str, Any]] = []
+        unit_clvs: list[float] = []
+        settlement_returns = [
+            value
+            for value in (safe_float(row.get("clv")) for row in source_rows)
+            if value is not None
+        ]
+        for row in source_rows:
+            finals_total += 1
+            token_id = str(row.get("token_id") or "").strip()
+            close_time = parse_timestamp(row.get("close_time"))
+            entry_price = safe_float(row.get("entry_price"))
+            base = {
+                "shadow_position_id": str(row.get("shadow_position_id") or ""),
+                "token_id": token_id,
+                "settled_profitable": (safe_float(row.get("clv")) or 0.0) > 0,
+            }
+            if not token_id:
+                final_diagnostics.append(
+                    {**base, "status": "pre_event_clv_ungradeable", "reason": "missing_token_id"}
+                )
+                continue
+            if close_time is None:
+                final_diagnostics.append(
+                    {**base, "status": "pre_event_clv_ungradeable", "reason": "invalid_close_time"}
+                )
+                continue
+            if entry_price is None or not 0 < entry_price < 1:
+                final_diagnostics.append(
+                    {**base, "status": "pre_event_clv_ungradeable", "reason": "invalid_entry_price"}
+                )
+                continue
+            cutoff = close_time - timedelta(hours=PRE_EVENT_REFERENCE_HOURS)
+            eligible = [point for point in histories.get(token_id, []) if point[0] <= cutoff]
+            if not eligible:
+                final_diagnostics.append(
+                    {
+                        **base,
+                        "status": "pre_event_clv_ungradeable",
+                        "reason": "no_official_in_band_observation_at_or_before_cutoff",
+                        "cutoff_utc": cutoff.isoformat().replace("+00:00", "Z"),
+                    }
+                )
+                continue
+            reference_at, reference_price = eligible[-1]
+            pre_event_clv = round(reference_price - entry_price, 6)
+            finals_gradeable += 1
+            unit_clvs.append(pre_event_clv)
+            final_diagnostics.append(
+                {
+                    **base,
+                    "status": "gradeable",
+                    "entry_price": entry_price,
+                    "reference_line_price": reference_price,
+                    "reference_line_timestamp_utc": reference_at.isoformat().replace("+00:00", "Z"),
+                    "cutoff_utc": cutoff.isoformat().replace("+00:00", "Z"),
+                    "pre_event_clv": pre_event_clv,
+                }
+            )
+
+        fully_gradeable = bool(source_rows) and len(unit_clvs) == len(source_rows)
+        unit_mean_pre_event_clv = (
+            round(sum(unit_clvs) / len(unit_clvs), 6) if fully_gradeable else None
+        )
+        if unit_mean_pre_event_clv is not None:
+            gradeable_unit_means.append(unit_mean_pre_event_clv)
+        unit_settlement_return = (
+            round(sum(settlement_returns) / len(settlement_returns), 6)
+            if settlement_returns
+            else None
+        )
+        units.append(
+            {
+                "unit_id": unit_id,
+                "status": "gradeable" if fully_gradeable else "pre_event_clv_ungradeable",
+                "finals_total": len(source_rows),
+                "finals_gradeable": len(unit_clvs),
+                "unit_mean_net_settlement_return_per_dollar": unit_settlement_return,
+                "settled_profitable": bool(
+                    unit_settlement_return is not None and unit_settlement_return > 0
+                ),
+                "unit_mean_pre_event_clv": unit_mean_pre_event_clv,
+                "finals": final_diagnostics,
+            }
+        )
+
+    aggregate_pre_event_clv = (
+        round(sum(gradeable_unit_means) / len(gradeable_unit_means), 6)
+        if gradeable_unit_means
+        else None
+    )
+    return {
+        "status": "ok" if gradeable_unit_means else "pre_event_clv_ungradeable",
+        "registered_on": "2026-07-14",
+        "gate_binding": False,
+        "reference_definition": "last official same-token price at or before close_time minus 6h, within [0.05, 0.95]",
+        "reference_hours_before_close": PRE_EVENT_REFERENCE_HOURS,
+        "reference_price_band": [PRE_EVENT_MIN_PRICE, PRE_EVENT_MAX_PRICE],
+        "official_source_prefix": PRE_EVENT_OFFICIAL_SOURCE_PREFIX,
+        "source_artifact": str(history_path),
+        "same_clustering_as_gate_a": True,
+        "units_total": len(units),
+        "units_gradeable": len(gradeable_unit_means),
+        "units_ungradeable": len(units) - len(gradeable_unit_means),
+        "finals_total": finals_total,
+        "finals_gradeable": finals_gradeable,
+        "finals_ungradeable": finals_total - finals_gradeable,
+        "unit_mean_pre_event_clv": aggregate_pre_event_clv,
+        "units_positive_pre_event_clv": sum(1 for value in gradeable_unit_means if value > 0),
+        "units": units,
+        "paper_trading_invoked": False,
+        "live_trading_invoked": False,
+    }
 
 
 def build_profit_verdict(cfg: EngineConfig) -> dict[str, Any]:
@@ -379,17 +567,22 @@ def build_profit_verdict(cfg: EngineConfig) -> dict[str, Any]:
     # finals cluster by market, and markets sharing a fixture merge into one
     # unit, so neither correlated tokens nor per-match side markets can
     # inflate the sign test or reach the floor early.
-    clusters, clustering_coverage = _clustered_focus_finals(
+    clusters, clustering_coverage, cluster_rows = _clustered_focus_finals(
         cfg, diagnostic_substrings, taker_fee_rate
     )
     finals_total = sum(len(values) for values in clusters.values())
-    unit_means = [sum(clv for clv, _ in values) / len(values) for values in clusters.values()]
+    unit_means = [
+        sum(settlement_return for settlement_return, _ in values) / len(values)
+        for values in clusters.values()
+    ]
     unit_fee_means = [sum(fee for _, fee in values) / len(values) for values in clusters.values()]
     n_units = len(unit_means)
-    mean_final_clv = round(sum(unit_means) / n_units, 6) if unit_means else None
+    mean_net_settlement_return_per_dollar = (
+        round(sum(unit_means) / n_units, 6) if unit_means else None
+    )
     mean_taker_fee = round(sum(unit_fee_means) / n_units, 6) if unit_fee_means else None
-    beaten_units = sum(1 for value in unit_means if value > 0)
-    sign_p = _sign_test_p(beaten_units, n_units) if n_units else None
+    settled_profitable_units = sum(1 for value in unit_means if value > 0)
+    sign_p = _sign_test_p(settled_profitable_units, n_units) if n_units else None
     if clustering_coverage["state"] != "sufficient":
         gate_a = "pending"
         gate_a_reason = (
@@ -402,36 +595,50 @@ def build_profit_verdict(cfg: EngineConfig) -> dict[str, Any]:
     elif n_units < minimum_samples:
         gate_a = "pending"
         gate_a_reason = f"{n_units}/{minimum_samples} independent settled market units ({finals_total} finals); verdict needs the unit floor."
-    elif mean_final_clv is None or mean_final_clv <= 0:
+    elif (
+        mean_net_settlement_return_per_dollar is None
+        or mean_net_settlement_return_per_dollar <= 0
+    ):
         gate_a = "fail"
         gate_a_reason = (
-            f"{n_units} independent settled market units with equal-weight mean final CLV "
-            f"{mean_final_clv if mean_final_clv is not None else 'unavailable'} <= 0: entries do not beat the close."
+            f"{n_units} independent settled market units with equal-weight unit mean net "
+            "settlement return per dollar (pre-fee) "
+            f"{mean_net_settlement_return_per_dollar if mean_net_settlement_return_per_dollar is not None else 'unavailable'} "
+            "<= 0: the settled positions were not profitable on average."
         )
     elif sign_p is not None and sign_p <= alpha:
         gate_a = "pass"
         gate_a_reason = (
-            f"unit mean final CLV {mean_final_clv} > 0 with sign-test p={round(sign_p, 4)} <= {alpha} on {beaten_units}/{n_units} independent market units."
+            "unit mean net settlement return per dollar (pre-fee) "
+            f"{mean_net_settlement_return_per_dollar} > 0 with sign-test p={round(sign_p, 4)} "
+            f"<= {alpha} on {settled_profitable_units}/{n_units} settled-profitable independent market units."
         )
     else:
         gate_a = "pending"
         gate_a_reason = (
-            f"unit mean final CLV {mean_final_clv} > 0 but sign-test p="
+            "unit mean net settlement return per dollar (pre-fee) "
+            f"{mean_net_settlement_return_per_dollar} > 0 but settled-profitable sign-test p="
             f"{round(sign_p, 4) if sign_p is not None else 'n/a'} > {alpha}; more settled units required."
         )
+
+    pre_event_clv_diagnostic = _build_pre_event_clv_diagnostic(cfg, cluster_rows)
 
     # Gate B - net of execution costs. Entry-side slippage lives inside shadow
     # fills; the charges here are the exit haircut, the registered
     # adverse-selection charge (amendment 2), and Polymarket taker fees
     # (amendment 4: rate x (1-p) per dollar from each final's entry price).
-    net_edge_per_dollar: float | None = None
-    if gate_a == "pass" and mean_final_clv is not None:
+    net_settlement_return_after_costs_per_dollar: float | None = None
+    if gate_a == "pass" and mean_net_settlement_return_per_dollar is not None:
         fee_charge = mean_taker_fee if mean_taker_fee is not None else taker_fee_rate
-        net_edge_per_dollar = mean_final_clv - haircut - fee_charge
-        gate_b = "pass" if net_edge_per_dollar > 0 else "fail"
+        net_settlement_return_after_costs_per_dollar = (
+            mean_net_settlement_return_per_dollar - haircut - fee_charge
+        )
+        gate_b = "pass" if net_settlement_return_after_costs_per_dollar > 0 else "fail"
         gate_b_reason = (
-            f"edge/dollar {mean_final_clv} minus taker fees {fee_charge} and haircuts (exit {exit_haircut} "
-            f"+ adverse selection {adverse_haircut}) = {round(net_edge_per_dollar, 6)}"
+            "net settlement return/dollar (pre-fee) "
+            f"{mean_net_settlement_return_per_dollar} minus taker fees {fee_charge} and haircuts "
+            f"(exit {exit_haircut} + adverse selection {adverse_haircut}) = "
+            f"{round(net_settlement_return_after_costs_per_dollar, 6)}"
         )
     else:
         gate_b = "pending" if gate_a != "fail" else "not_evaluated"
@@ -441,8 +648,12 @@ def build_profit_verdict(cfg: EngineConfig) -> dict[str, Any]:
     entries_per_day, focus_entries_seen, observed_span_days = _entries_per_day(cfg.governance_root / "closing_line_value_positions.csv", diagnostic_substrings)
     required_turnover: float | None = None
     achievable_turnover: float | None = None
-    if gate_b == "pass" and net_edge_per_dollar and net_edge_per_dollar > 0:
-        required_turnover = target / net_edge_per_dollar
+    if (
+        gate_b == "pass"
+        and net_settlement_return_after_costs_per_dollar
+        and net_settlement_return_after_costs_per_dollar > 0
+    ):
+        required_turnover = target / net_settlement_return_after_costs_per_dollar
         if entries_per_day is not None:
             achievable_turnover = entries_per_day * float(settings["max_stake_per_trade_usdc"]) * float(settings["days_per_month"])
             gate_c = "pass" if achievable_turnover >= required_turnover else "fail"
@@ -472,6 +683,8 @@ def build_profit_verdict(cfg: EngineConfig) -> dict[str, Any]:
         "registered_amendments_at_utc": REGISTERED_AMENDMENTS_AT_UTC,
         "question": "Can this bot generate $100/month profit?",
         "target_monthly_profit_usdc": target,
+        "semantics_caveat": GATE_A_SEMANTICS_CAVEAT,
+        "pre_event_clv_diagnostic": pre_event_clv_diagnostic,
         "gates": {
             "A_edge_exists": {
                 "registered_rule": verdict_gate_definition("A_edge_exists")["rule"],
@@ -480,12 +693,18 @@ def build_profit_verdict(cfg: EngineConfig) -> dict[str, Any]:
                 "independent_market_units": n_units,
                 "settled_finals_total": finals_total,
                 "minimum_final_samples": minimum_samples,
-                "unit_mean_final_clv": mean_final_clv,
-                "units_beating_close": beaten_units,
+                "unit_mean_net_settlement_return_per_dollar": mean_net_settlement_return_per_dollar,
+                "units_settled_profitable": settled_profitable_units,
+                # WO-87 one-release compatibility aliases. They preserve the
+                # historical JSON contract only; rendered labels use the
+                # honest settlement-return names above.
+                "unit_mean_final_clv": mean_net_settlement_return_per_dollar,
+                "units_beating_close": settled_profitable_units,
+                "legacy_alias_notice": "unit_mean_final_clv and units_beating_close are one-release compatibility aliases for the settlement-return fields; they are not true pre-event CLV.",
                 "sign_test_p": round(sign_p, 6) if sign_p is not None else None,
                 "sign_test_alpha": alpha,
                 "clustering_coverage": clustering_coverage,
-                "note": "units cluster finals by market AND merge markets sharing a fixture (team + settlement date), so neither correlated tokens nor same-match side markets can inflate significance.",
+                "note": f"{GATE_A_SEMANTICS_CAVEAT} Units cluster finals by market AND merge markets sharing a fixture (team + settlement date), so neither correlated tokens nor same-match side markets can inflate significance.",
             },
             "B_edge_survives_costs": {
                 "registered_rule": verdict_gate_definition("B_edge_survives_costs")["rule"],
@@ -495,7 +714,15 @@ def build_profit_verdict(cfg: EngineConfig) -> dict[str, Any]:
                 "adverse_selection_haircut_per_dollar": adverse_haircut,
                 "taker_fee_rate": taker_fee_rate,
                 "mean_taker_fee_per_dollar": mean_taker_fee,
-                "net_edge_per_dollar": round(net_edge_per_dollar, 6) if net_edge_per_dollar is not None else None,
+                "net_settlement_return_after_costs_per_dollar": round(
+                    net_settlement_return_after_costs_per_dollar, 6
+                )
+                if net_settlement_return_after_costs_per_dollar is not None
+                else None,
+                "net_edge_per_dollar": round(net_settlement_return_after_costs_per_dollar, 6)
+                if net_settlement_return_after_costs_per_dollar is not None
+                else None,
+                "legacy_alias_notice": "net_edge_per_dollar is a one-release compatibility alias for net_settlement_return_after_costs_per_dollar.",
                 "note": "entry-side costs are embedded in shadow fills; adverse-selection charge covers fill-quality bias shadow entries cannot experience; taker fees per live Polymarket fee schedule (makers pay none - see WO-36).",
             },
             "C_scale_feasible": {

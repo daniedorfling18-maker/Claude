@@ -3357,8 +3357,14 @@ def test_dashboard_carries_profit_verdict_and_html_panel(tmp_path):
     assert verdict["verdict"] == "insufficient_evidence"
     assert verdict["gates"]["A_edge_exists"]["state"] == "pending"
     assert verdict["paper_trading_invoked"] is False
+    assert "settlement return" in verdict["semantics_caveat"]
+    assert verdict["pre_event_clv_diagnostic"]["gate_binding"] is False
     assert "The $100/month verdict" in html
     assert "profitVerdict" in html
+    assert "Registered semantics caveat" in html
+    assert "Gate A unit mean net settlement return/dollar (pre-fee)" in html
+    assert "True pre-event CLV (non-binding)" in html
+    assert "Gate A settlement units" in html
     # WO-36 maker-lane tiles ride the same payload: study + live-test
     # scoreboard + WO-50 decision-policy blocks exist even before the VPS jobs
     # first write them.

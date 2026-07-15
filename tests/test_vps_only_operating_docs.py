@@ -48,8 +48,9 @@ def test_legacy_local_runbooks_are_loudly_archived() -> None:
 def test_work_order_queue_distinguishes_non_buildable_states() -> None:
     work_orders = _text("docs/POLYMARKET_CODEX_WORK_ORDERS.md")
 
-    assert "Current queue for Codex (reconciled 2026-07-14)" in work_orders
-    assert "Next buildable, in order: WO-87 (decided 2026-07-14) -> WO-86 -> WO-88" in work_orders
+    assert "Current queue for Codex (reconciled 2026-07-15)" in work_orders
+    assert "Next buildable, in order: WO-86 -> WO-88" in work_orders
+    assert "WO-85 and WO-87 are implemented on 2026-07-15" in work_orders
     assert "WO-83 is implemented in PR #203" in work_orders
     assert "WO-84 is implemented in PR #205" in work_orders
     assert "Pending review, not build permission" in work_orders

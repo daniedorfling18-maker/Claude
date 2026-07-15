@@ -4,13 +4,20 @@ Amendments registered 2026-07-09 pre-data: market-clustered Gate A units,
 adverse-selection haircut in Gate B, regime-stamped Gate C."""
 from __future__ import annotations
 
+import json
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import yaml
 
 from polymarket_predictive_engine.config import load_config
-from polymarket_predictive_engine.profit_verdict import _sign_test_p, build_profit_verdict
+from polymarket_predictive_engine.profit_verdict import (
+    DEFAULT_SETTINGS,
+    GATE_A_SEMANTICS_CAVEAT,
+    VERDICT_GATE_DEFINITIONS,
+    _sign_test_p,
+    build_profit_verdict,
+)
 from polymarket_predictive_engine.utils import read_json, write_csv
 
 
@@ -31,8 +38,9 @@ def _write_finals(
     entry_price: float = 0.8,
     questions: dict[str, str] | None = None,
     close_times: dict[str, str] | None = None,
+    token_ids: dict[str, str] | None = None,
 ) -> None:
-    """Write the append-only final-history ledger: market -> final CLVs.
+    """Write the append-only final-history ledger: market -> settlement returns.
 
     entry_price drives the taker-fee charge (rate x (1 - p) per dollar);
     0.8 gives 0.01 at the amendment-6 sports rate of 0.05. questions/close_times
@@ -45,11 +53,14 @@ def _write_finals(
                     "shadow_position_id": f"{market}-pos-{i}",
                     "signal_cohort": cohort,
                     "market_id": market,
+                    "token_id": (token_ids or {}).get(market, f"token-{market}"),
                     "question": (questions or {}).get(market, ""),
                     "close_time": (close_times or {}).get(market, ""),
                     "line_kind": "closing",
                     "clv": clv,
                     "entry_price": entry_price,
+                    "line_price": entry_price + clv,
+                    "settled_profitable": clv > 0,
                     "beat_close": clv > 0,
                 }
             )
@@ -60,13 +71,24 @@ def _write_finals(
             "shadow_position_id",
             "signal_cohort",
             "market_id",
+            "token_id",
             "question",
             "close_time",
             "line_kind",
             "clv",
             "entry_price",
+            "line_price",
+            "settled_profitable",
             "beat_close",
         ],
+    )
+
+
+def _write_price_history(cfg, rows: list[dict[str, object]]) -> None:
+    write_csv(
+        cfg.output_root / "polymarket_training" / "historical_price_snapshots.csv",
+        rows,
+        fieldnames=["token_id", "timestamp", "price", "source"],
     )
 
 
@@ -88,9 +110,105 @@ def _write_positions(cfg, *, count: int, span_days: float) -> None:
 
 
 def test_sign_test_matches_exact_binomial():
-    # 10 of 12 beating the close under a fair coin: p = C(12,10)+C(12,11)+C(12,12) / 2^12
+    # 10 of 12 settled-profitable units under a fair coin.
     assert abs(_sign_test_p(10, 12) - (66 + 12 + 1) / 4096) < 1e-12
     assert _sign_test_p(0, 0) is None
+
+
+def test_wo87_relabels_gate_without_changing_registered_threshold_bytes(tmp_path):
+    expected = (
+        b'{"adverse_selection_haircut_per_dollar":0.005,"days_per_month":30.0,'
+        b'"exit_cost_haircut_per_dollar":0.005,"max_stake_per_trade_usdc":10.0,'
+        b'"minimum_final_samples":12,"sign_test_alpha":0.1,"taker_fee_rate":0.05}'
+    )
+    assert json.dumps(DEFAULT_SETTINGS, sort_keys=True, separators=(",", ":")).encode() == expected
+
+    cfg = _config(tmp_path)
+    _write_finals(cfg, {f"near-settled-{index}": [0.499] for index in range(12)}, entry_price=0.5)
+    verdict = build_profit_verdict(cfg)
+    gate_a = verdict["gates"]["A_edge_exists"]
+
+    assert gate_a["state"] == "pass"
+    assert gate_a["unit_mean_net_settlement_return_per_dollar"] == 0.499
+    assert gate_a["units_settled_profitable"] == 12
+    # One-release aliases prove the same near-settled observations grade
+    # identically; only their labels changed.
+    assert gate_a["unit_mean_final_clv"] == gate_a["unit_mean_net_settlement_return_per_dollar"]
+    assert gate_a["units_beating_close"] == gate_a["units_settled_profitable"]
+    assert gate_a["sign_test_p"] == round(_sign_test_p(12, 12), 6)
+    assert verdict["semantics_caveat"] == GATE_A_SEMANTICS_CAVEAT
+    assert "settlement return" in gate_a["registered_rule"]
+    assert "settled-profitable" in gate_a["registered_rule"]
+    assert "final CLV" not in gate_a["registered_rule"]
+    assert "beat-close" not in gate_a["registered_rule"]
+    assert all("final CLV" not in row["rule"] for row in VERDICT_GATE_DEFINITIONS[:2])
+
+
+def test_true_pre_event_clv_uses_last_official_in_band_point_before_cutoff(tmp_path):
+    cfg = _config(tmp_path)
+    market = "world-cup-final"
+    close_time = "2026-07-10T18:00:00Z"
+    token_id = "token-world-cup-final"
+    _write_finals(
+        cfg,
+        {market: [0.599]},
+        entry_price=0.4,
+        close_times={market: close_time},
+        token_ids={market: token_id},
+    )
+    _write_price_history(
+        cfg,
+        [
+            {"token_id": token_id, "timestamp": "2026-07-10T10:00:00Z", "price": 0.52, "source": "polymarket_clob_prices_history:interval=1h"},
+            {"token_id": token_id, "timestamp": "2026-07-10T11:59:00Z", "price": 0.56, "source": "polymarket_clob_prices_history:interval=1h"},
+            {"token_id": token_id, "timestamp": "2026-07-10T11:59:30Z", "price": 0.60, "source": "unofficial_fixture"},
+            {"token_id": token_id, "timestamp": "2026-07-10T12:01:00Z", "price": 0.70, "source": "polymarket_clob_prices_history:interval=1h"},
+        ],
+    )
+
+    verdict = build_profit_verdict(cfg)
+    diagnostic = verdict["pre_event_clv_diagnostic"]
+    unit = diagnostic["units"][0]
+
+    assert diagnostic["gate_binding"] is False
+    assert diagnostic["same_clustering_as_gate_a"] is True
+    assert diagnostic["units_gradeable"] == 1
+    assert diagnostic["unit_mean_pre_event_clv"] == 0.16
+    assert unit["unit_mean_net_settlement_return_per_dollar"] == 0.599
+    assert unit["unit_mean_pre_event_clv"] == 0.16
+    assert unit["finals"][0]["reference_line_timestamp_utc"] == "2026-07-10T11:59:00Z"
+    assert unit["finals"][0]["reference_line_price"] == 0.56
+
+
+def test_true_pre_event_clv_never_guesses_when_no_point_qualifies(tmp_path):
+    cfg = _config(tmp_path)
+    market = "ungradeable-final"
+    token_id = "token-ungradeable-final"
+    _write_finals(
+        cfg,
+        {market: [0.499]},
+        entry_price=0.5,
+        close_times={market: "2026-07-10T18:00:00Z"},
+        token_ids={market: token_id},
+    )
+    _write_price_history(
+        cfg,
+        [
+            {"token_id": token_id, "timestamp": "2026-07-10T11:59:00Z", "price": 0.99, "source": "polymarket_clob_prices_history:interval=1h"},
+            {"token_id": token_id, "timestamp": "2026-07-10T12:01:00Z", "price": 0.60, "source": "polymarket_clob_prices_history:interval=1h"},
+        ],
+    )
+
+    diagnostic = build_profit_verdict(cfg)["pre_event_clv_diagnostic"]
+    unit = diagnostic["units"][0]
+
+    assert diagnostic["status"] == "pre_event_clv_ungradeable"
+    assert diagnostic["unit_mean_pre_event_clv"] is None
+    assert diagnostic["units_gradeable"] == 0
+    assert unit["status"] == "pre_event_clv_ungradeable"
+    assert unit["unit_mean_pre_event_clv"] is None
+    assert unit["finals"][0]["status"] == "pre_event_clv_ungradeable"
+    assert unit["finals"][0]["reason"] == "no_official_in_band_observation_at_or_before_cutoff"
 
 
 def test_correlated_finals_collapse_to_market_units(tmp_path):

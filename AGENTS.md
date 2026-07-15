@@ -97,6 +97,9 @@ work or capital.
 
 - Read `docs/POLYMARKET_CODEX_WORK_ORDERS.md` and the relevant registered design
   before changing code.
+- Every work order and review complies with `docs/ENGINEERING_STANDARDS.md`
+  (clock/unit rules, atomic writes, data-dependency contracts,
+  recorded-reality fixtures, fail-safe statements, day-after checks).
 - One work order per branch and PR. Do not combine WOs or add drive-by refactors.
 - Preserve unrelated/user changes in every checkout.
 - Use the required PR gate; do not merge red checks.
@@ -110,6 +113,7 @@ work or capital.
 |---|---|
 | Generated-state contract | `docs/OPERATING_STATE.md` |
 | Work-order queue and constraints | `docs/POLYMARKET_CODEX_WORK_ORDERS.md` |
+| Binding engineering standards | `docs/ENGINEERING_STANDARDS.md` |
 | Experiment freeze | `docs/EXPERIMENT_REGISTRY.md` |
 | Quant contract | `docs/POLYMARKET_QUANT_TRADING_CONTRACT.md` |
 | Quant-mode charter | `docs/POLYMARKET_QUANT_MODE_CHARTER.md` |

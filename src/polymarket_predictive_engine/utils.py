@@ -3,6 +3,7 @@ from __future__ import annotations
 import csv
 import hashlib
 import json
+import math
 import os
 import re
 import subprocess
@@ -39,6 +40,35 @@ def parse_timestamp(value: Any) -> datetime | None:
         except ValueError:
             pass
     return None
+
+
+def normalize_external_timestamp(value: Any) -> float | None:
+    """Return an external venue timestamp as UTC epoch seconds.
+
+    Venue payloads currently mix seconds, milliseconds, and ISO strings.
+    Normalize once at the ingestion boundary so downstream windows cannot
+    silently compare different units. Missing, negative, non-finite, or
+    unparseable values return ``None`` and therefore stay on the conservative
+    side of freshness and attribution checks.
+    """
+
+    if isinstance(value, bool):
+        return None
+    numeric = safe_float(value)
+    if numeric is not None:
+        if not math.isfinite(numeric) or numeric < 0:
+            return None
+        seconds = numeric / 1000.0 if numeric > 10_000_000_000 else numeric
+        try:
+            datetime.fromtimestamp(seconds, timezone.utc)
+        except (OSError, OverflowError, ValueError):
+            return None
+        return seconds
+    parsed = parse_timestamp(value)
+    if parsed is None:
+        return None
+    seconds = parsed.astimezone(timezone.utc).timestamp()
+    return seconds if math.isfinite(seconds) and seconds >= 0 else None
 
 
 def ensure_dir(path: str | Path) -> Path:

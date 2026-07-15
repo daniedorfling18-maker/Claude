@@ -34,7 +34,18 @@ from pathlib import Path
 from typing import Any
 
 from .config import EngineConfig, load_config
-from .utils import boolish, git_commit_hash, now_utc, parse_timestamp, read_csv_rows, read_json, safe_float, write_csv, write_json
+from .utils import (
+    boolish,
+    git_commit_hash,
+    normalize_external_timestamp,
+    now_utc,
+    parse_timestamp,
+    read_csv_rows,
+    read_json,
+    safe_float,
+    write_csv,
+    write_json,
+)
 
 POSITION_FIELDS = [
     "shadow_position_id",
@@ -118,9 +129,10 @@ def _fetch_gamma_close_time(position: dict[str, Any], *, timeout_seconds: float 
             continue
         for market in markets if isinstance(markets, list) else []:
             for key in ("closedTime", "closed_time", "endDate", "end_date_iso", "endDateIso"):
-                stamp = str(market.get(key) or "").strip()
-                if stamp and parse_timestamp(stamp) is not None:
-                    return stamp
+                raw = market.get(key)
+                seconds = normalize_external_timestamp(raw)
+                if seconds is not None:
+                    return datetime.fromtimestamp(seconds, timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     return None
 
 
@@ -199,7 +211,7 @@ def _fetch_price_history_close_line(
     for point in history:
         if not isinstance(point, dict):
             continue
-        stamp = safe_float(point.get("t"))
+        stamp = normalize_external_timestamp(point.get("t"))
         price = safe_float(point.get("p"))
         if stamp is None or price is None or not 0 < price < 1:
             continue

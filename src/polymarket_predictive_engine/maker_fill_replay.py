@@ -21,7 +21,15 @@ import requests
 
 from .config import EngineConfig, load_config
 from .trade_print_collector import collect_maker_portfolio_trade_prints
-from .utils import now_utc, parse_timestamp, read_csv_rows, read_json, safe_float, write_csv, write_json
+from .utils import (
+    normalize_external_timestamp,
+    now_utc,
+    read_csv_rows,
+    read_json,
+    safe_float,
+    write_csv,
+    write_json,
+)
 
 DEFAULT_CLOB_BASE_URL = "https://clob.polymarket.com"
 
@@ -81,11 +89,7 @@ def _settings(cfg: EngineConfig) -> dict[str, Any]:
 
 
 def _stamp(value: Any) -> float | None:
-    numeric = safe_float(value)
-    if numeric is not None:
-        return numeric / 1000.0 if numeric > 10_000_000_000 else numeric
-    parsed = parse_timestamp(value)
-    return parsed.timestamp() if parsed is not None else None
+    return normalize_external_timestamp(value)
 
 
 def _minute(stamp: float) -> float:
@@ -433,8 +437,8 @@ def snapshot_official_books(cfg: EngineConfig) -> dict[str, Any]:
                 dedup[key] = item
         combined = sorted(
             dedup.values(),
-            key=lambda item: safe_float(item.get("observation_timestamp"))
-            or safe_float(item.get("source_timestamp"))
+            key=lambda item: _stamp(item.get("observation_timestamp"))
+            or _stamp(item.get("source_timestamp"))
             or 0.0,
         )
         max_rows = int(settings["max_official_book_rows"])

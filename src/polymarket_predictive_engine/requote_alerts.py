@@ -18,7 +18,15 @@ import requests
 
 from .config import EngineConfig, load_config
 from .maker_carry_study import _market_url, _outcomes, _quote_prices, _token_ids
-from .utils import now_utc, parse_timestamp, read_csv_rows, read_json, safe_float, write_json
+from .utils import (
+    normalize_external_timestamp,
+    now_utc,
+    read_csv_rows,
+    read_json,
+    safe_float,
+    write_json,
+    write_text_atomic,
+)
 
 DEFAULT_GAMMA_BASE_URL = "https://gamma-api.polymarket.com"
 DEFAULT_CLOB_BASE_URL = "https://clob.polymarket.com"
@@ -94,14 +102,10 @@ def _settings(cfg: EngineConfig) -> dict[str, Any]:
 
 
 def _as_utc(value: Any) -> datetime | None:
-    numeric = safe_float(value)
-    if numeric is not None:
-        seconds = numeric / 1000.0 if numeric > 10_000_000_000 else numeric
-        try:
-            return datetime.fromtimestamp(seconds, tz=timezone.utc)
-        except (OSError, OverflowError, ValueError):
-            return None
-    return parse_timestamp(value)
+    seconds = normalize_external_timestamp(value)
+    if seconds is None:
+        return None
+    return datetime.fromtimestamp(seconds, tz=timezone.utc)
 
 
 def _latest_quotes(cfg: EngineConfig) -> dict[str, dict[str, Any]]:
@@ -596,8 +600,7 @@ def _notification(
     if payload.get("kill_criteria_triggered"):
         lines.append(f"- Kill criteria: {', '.join(payload['kill_criteria_triggered'])}")
     lines += ["", "Human action only. This system cannot place, amend, cancel, or sign orders."]
-    body_path.parent.mkdir(parents=True, exist_ok=True)
-    body_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    write_text_atomic(body_path, "\n".join(lines) + "\n")
     write_json(
         state_path,
         {
@@ -638,7 +641,7 @@ def _patch_quote_sheet(path: Path, payload: Mapping[str, Any]) -> None:
     else:
         parts = text.split("\n", 2)
         text = "\n".join(parts[:2]) + "\n\n" + block + (parts[2] if len(parts) > 2 else "")
-    path.write_text(text, encoding="utf-8")
+    write_text_atomic(path, text)
 
 
 def build_requote_alerts(

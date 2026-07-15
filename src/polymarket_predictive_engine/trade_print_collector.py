@@ -22,7 +22,15 @@ from typing import Any
 import requests
 
 from .config import EngineConfig, load_config
-from .utils import now_utc, read_csv_rows, read_json, safe_float, write_csv, write_json
+from .utils import (
+    normalize_external_timestamp,
+    now_utc,
+    read_csv_rows,
+    read_json,
+    safe_float,
+    write_csv,
+    write_json,
+)
 
 DEFAULT_BASE_URL = "https://data-api.polymarket.com"
 
@@ -78,6 +86,13 @@ def _tracked_markets(cfg: EngineConfig, max_markets: int) -> list[str]:
     return list(markets)
 
 
+def _timestamp_text(value: Any) -> str:
+    stamp = normalize_external_timestamp(value)
+    if stamp is None:
+        return ""
+    return str(int(stamp)) if stamp.is_integer() else str(stamp)
+
+
 def _print_row(trade: dict[str, Any], market: str) -> dict[str, Any] | None:
     trade_id = str(
         trade.get("id")
@@ -96,7 +111,7 @@ def _print_row(trade: dict[str, Any], market: str) -> dict[str, Any] | None:
         "side": str(trade.get("side") or "").upper(),
         "price": price,
         "size": size,
-        "timestamp": str(trade.get("timestamp") or trade.get("matchTime") or ""),
+        "timestamp": _timestamp_text(trade.get("timestamp") or trade.get("matchTime")),
         "collected_at_utc": now_utc(),
     }
 
@@ -138,7 +153,7 @@ def _open_interest_row(item: dict[str, Any], market: str, collected_at: str) -> 
     return {
         "market": str(item.get("market") or item.get("conditionId") or market),
         "open_interest": value,
-        "timestamp": str(item.get("timestamp") or item.get("updatedAt") or item.get("date") or ""),
+        "timestamp": _timestamp_text(item.get("timestamp") or item.get("updatedAt") or item.get("date")),
         "collected_at_utc": collected_at,
     }
 

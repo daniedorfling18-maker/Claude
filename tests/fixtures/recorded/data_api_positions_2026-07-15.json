@@ -1,0 +1,29 @@
+[
+  {
+    "proxyWallet": "0x1111111111111111111111111111111111111111",
+    "asset": "11111111111111111111111111111111111111111111111111111111111111111",
+    "conditionId": "0x2222222222222222222222222222222222222222222222222222222222222222",
+    "size": 12.5,
+    "avgPrice": 0.24,
+    "initialValue": 3.0,
+    "currentValue": 3.25,
+    "cashPnl": 0.25,
+    "percentPnl": 8.333333,
+    "totalBought": 12.5,
+    "realizedPnl": 0,
+    "percentRealizedPnl": 0,
+    "curPrice": 0.26,
+    "redeemable": false,
+    "mergeable": false,
+    "title": "Sanitized recorded market",
+    "slug": "sanitized-recorded-market",
+    "icon": "https://example.invalid/recorded.png",
+    "eventSlug": "sanitized-recorded-event",
+    "outcome": "Yes",
+    "outcomeIndex": 0,
+    "oppositeOutcome": "No",
+    "oppositeAsset": "22222222222222222222222222222222222222222222222222222222222222222",
+    "endDate": "2026-07-20T00:00:00Z",
+    "negativeRisk": false
+  }
+]

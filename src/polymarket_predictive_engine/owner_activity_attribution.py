@@ -17,7 +17,7 @@ from collections.abc import Mapping, Sequence
 from typing import Any
 
 from .config import EngineConfig
-from .utils import boolish, parse_timestamp, read_csv_rows, safe_float
+from .utils import boolish, normalize_external_timestamp, parse_timestamp, read_csv_rows, safe_float
 
 
 WORK_ORDER = "WO-88"
@@ -135,10 +135,7 @@ def _eligible_action(row: Mapping[str, Any]) -> dict[str, Any] | None:
 
 
 def _trade_fields(row: Mapping[str, Any]) -> dict[str, Any] | None:
-    timestamp = safe_float(row.get("timestamp"))
-    if timestamp is None:
-        parsed = parse_timestamp(row.get("timestamp"))
-        timestamp = parsed.timestamp() if parsed is not None else None
+    timestamp = normalize_external_timestamp(row.get("timestamp"))
     condition_id = str(row.get("conditionId") or row.get("condition_id") or "").strip().lower()
     side = str(row.get("side") or "").strip().upper()
     price = safe_float(row.get("price"))
@@ -182,7 +179,10 @@ def attribute_owner_activity(
     matches: list[dict[str, Any]] = []
     ordered = sorted(
         enumerate(raw_trades),
-        key=lambda item: (safe_float(item[1].get("timestamp")) or 0.0, item[0]),
+        key=lambda item: (
+            normalize_external_timestamp(item[1].get("timestamp")) or 0.0,
+            item[0],
+        ),
     )
     for index, raw_trade in ordered:
         trade = _trade_fields(raw_trade)

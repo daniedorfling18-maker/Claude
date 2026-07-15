@@ -20,7 +20,7 @@ from tempfile import TemporaryDirectory
 from typing import Any
 
 from .config import EngineConfig, load_config
-from .utils import now_utc, parse_timestamp, read_csv_rows, safe_float, write_csv, write_json
+from .utils import normalize_external_timestamp, now_utc, read_csv_rows, safe_float, write_csv, write_json
 
 TOXICITY_FIELDS = [
     "generated_at_utc",
@@ -51,11 +51,7 @@ def _settings(cfg: EngineConfig) -> dict[str, Any]:
 
 
 def _stamp(value: Any) -> float | None:
-    numeric = safe_float(value)
-    if numeric is not None:
-        return numeric / 1000.0 if numeric > 10_000_000_000 else numeric
-    parsed = parse_timestamp(value)
-    return parsed.timestamp() if parsed is not None else None
+    return normalize_external_timestamp(value)
 
 
 def _wallet(row: dict[str, Any]) -> str:

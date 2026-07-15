@@ -8,7 +8,7 @@ import requests
 
 from .config import EngineConfig, load_config
 from .crypto_updown_model import is_crypto_updown_contract
-from .utils import now_utc, parse_timestamp, read_csv_rows, safe_float, write_csv, write_json
+from .utils import normalize_external_timestamp, now_utc, parse_timestamp, read_csv_rows, safe_float, write_csv, write_json
 
 DEFAULT_CLOB_BASE_URL = "https://clob.polymarket.com"
 SNAPSHOT_FIELDS = [
@@ -196,10 +196,10 @@ def _collection_rows(
 
 
 def _epoch_to_timestamp(value: Any) -> str:
-    raw = float(value)
-    if raw > 10_000_000_000:
-        raw = raw / 1000.0
-    return datetime.fromtimestamp(raw, timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    seconds = normalize_external_timestamp(value)
+    if seconds is None:
+        return ""
+    return datetime.fromtimestamp(seconds, timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
 def normalize_price_history_payload(payload: Any) -> list[dict[str, Any]]:
@@ -216,16 +216,7 @@ def normalize_price_history_payload(payload: Any) -> list[dict[str, Any]]:
             continue
         ts_raw = point.get("t") or point.get("timestamp") or point.get("time") or point.get("created_at")
         price = safe_float(point.get("p") or point.get("price") or point.get("midpoint") or point.get("close"))
-        ts = parse_timestamp(ts_raw)
-        if ts is None and ts_raw not in (None, ""):
-            try:
-                ts_text = _epoch_to_timestamp(ts_raw)
-            except Exception:
-                ts_text = ""
-        elif ts is not None:
-            ts_text = ts.strftime("%Y-%m-%dT%H:%M:%SZ")
-        else:
-            ts_text = ""
+        ts_text = _epoch_to_timestamp(ts_raw)
 
         if not ts_text or price is None:
             continue

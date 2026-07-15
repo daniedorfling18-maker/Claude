@@ -14,7 +14,14 @@ from pathlib import Path
 from typing import Any
 
 from .config import EngineConfig, load_config
-from .utils import now_utc, parse_timestamp, read_csv_rows, safe_float, write_json
+from .utils import (
+    normalize_external_timestamp,
+    now_utc,
+    read_csv_rows,
+    safe_float,
+    write_json,
+    write_text_atomic,
+)
 
 DEFAULT_SETTINGS: dict[str, Any] = {
     "enabled": True,
@@ -63,18 +70,8 @@ def _expand_paths(cfg: EngineConfig, configured: Any) -> list[Path]:
 
 
 def _timestamp(value: Any) -> datetime | None:
-    parsed = parse_timestamp(value)
-    if parsed is not None:
-        return parsed.astimezone(timezone.utc)
-    numeric = safe_float(value)
-    if numeric is None:
-        return None
-    if numeric > 10_000_000_000:
-        numeric = numeric / 1000.0
-    try:
-        return datetime.fromtimestamp(numeric, timezone.utc)
-    except (OverflowError, OSError, ValueError):
-        return None
+    seconds = normalize_external_timestamp(value)
+    return datetime.fromtimestamp(seconds, timezone.utc) if seconds is not None else None
 
 
 def _candidate_rows(cfg: EngineConfig) -> list[dict[str, Any]]:
@@ -282,7 +279,7 @@ def _patch_quote_sheet(cfg: EngineConfig, payload: dict[str, Any]) -> None:
         text = text.replace(marker, block + marker, 1)
     else:
         text = text.rstrip() + "\n\n" + block
-    path.write_text(text, encoding="utf-8")
+    write_text_atomic(path, text)
 
 
 def run_hourly_adverse_study(cfg: EngineConfig) -> dict[str, Any]:

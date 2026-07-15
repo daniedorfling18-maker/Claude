@@ -412,12 +412,20 @@ def _fmt_utc(dt) -> str:
     return dt.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ") if dt is not None else ""
 
 
+def _run_as_of(value: datetime | str | None = None) -> datetime:
+    parsed = parse_timestamp(value) if value is not None else parse_timestamp(now_utc())
+    if parsed is None:
+        raise ValueError("as_of must be a valid UTC timestamp")
+    return parsed.astimezone(timezone.utc)
+
+
 def _retention_write_due(
     *,
     settings: dict[str, Any],
     previous_summary: dict[str, Any],
     features_path: Path,
     return_latest_features_only: bool,
+    as_of: datetime | str | None = None,
 ) -> tuple[bool, dict[str, Any]]:
     interval = safe_float(settings.get("feature_retention_write_interval_seconds"))
     if interval is None or interval <= 0:
@@ -429,7 +437,7 @@ def _retention_write_due(
     last_write = parse_timestamp(previous_summary.get("feature_retention_last_write_utc") or previous_summary.get("collected_at_utc"))
     if last_write is None:
         return True, {"feature_retention_write_interval_seconds": interval}
-    age = max(0.0, (datetime.now(timezone.utc) - last_write.astimezone(timezone.utc)).total_seconds())
+    age = max(0.0, (_run_as_of(as_of) - last_write.astimezone(timezone.utc)).total_seconds())
     return age >= float(interval), {
         "feature_retention_write_interval_seconds": interval,
         "feature_retention_last_write_utc": _fmt_utc(last_write),
@@ -509,6 +517,7 @@ def _retained_feature_rows(
     *,
     features_path: Path,
     new_features: list[dict[str, Any]],
+    as_of: datetime | str | None = None,
 ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
     """Merge current websocket features with prior feature rows.
 
@@ -516,7 +525,8 @@ def _retained_feature_rows(
     cannot grow forever. The model, however, needs several days of bid/ask
     variation. This retention layer keeps the normalised feature history as the
     reusable training substrate, without adding settlement labels or changing
-    trade gates.
+    trade gates. Retention is anchored to the run clock, never to the newest
+    observed row; ``as_of`` exists only for deterministic clock-advance tests.
     """
     settings = _normaliser_settings(cfg)
     enabled = str(settings.get("retain_existing_features", True)).strip().lower() not in {"0", "false", "no"}
@@ -528,16 +538,15 @@ def _retained_feature_rows(
     cutoff = None
     expired_rows: list[dict[str, Any]] = []
     if retention_hours is not None and retention_hours > 0 and combined:
-        latest = max((_feature_time(row) for row in combined if _feature_time(row) is not None), default=None)
-        if latest is not None:
-            cutoff = latest - timedelta(hours=float(retention_hours))
-            kept: list[dict[str, Any]] = []
-            for row in combined:
-                if _feature_time(row) is None or _feature_time(row) >= cutoff:
-                    kept.append(row)
-                else:
-                    expired_rows.append(row)
-            combined = kept
+        cutoff = _run_as_of(as_of) - timedelta(hours=float(retention_hours))
+        kept: list[dict[str, Any]] = []
+        for row in combined:
+            row_time = _feature_time(row)
+            if row_time is None or row_time >= cutoff:
+                kept.append(row)
+            else:
+                expired_rows.append(row)
+        combined = kept
 
     deduped: dict[tuple[str, ...], dict[str, Any]] = {}
     for row in combined:
@@ -579,10 +588,17 @@ def _retained_feature_rows(
     return retained, diagnostics
 
 
-def normalize_websocket_file(cfg: EngineConfig, input_path: str | Path | None = None) -> tuple[list[dict[str, Any]], list[dict[str, Any]], dict[str, Any]]:
+def normalize_websocket_file(
+    cfg: EngineConfig,
+    input_path: str | Path | None = None,
+    *,
+    as_of: datetime | str | None = None,
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]], dict[str, Any]]:
     """Read captured websocket messages and write the feature table, quality report
     and summary. Returns (features, quality, summary)."""
     settings = _normaliser_settings(cfg)
+    run_at = _run_as_of(as_of)
+    generated_at = _fmt_utc(run_at)
     input_scope = "explicit"
     if input_path is None:
         latest_path = cfg.output_root / "polymarket_websocket" / "websocket_messages_latest.json"
@@ -629,12 +645,18 @@ def normalize_websocket_file(cfg: EngineConfig, input_path: str | Path | None = 
         previous_summary=previous_summary,
         features_path=features_path,
         return_latest_features_only=return_latest_features_only,
+        as_of=run_at,
     )
     if retention_due:
-        retained_features, retention = _retained_feature_rows(cfg, features_path=features_path, new_features=features)
+        retained_features, retention = _retained_feature_rows(
+            cfg,
+            features_path=features_path,
+            new_features=features,
+            as_of=run_at,
+        )
         _assert_no_leakage(retained_features)
         write_csv(features_path, retained_features, fieldnames=FEATURE_FIELDS)
-        feature_retention_last_write_utc = now_utc()
+        feature_retention_last_write_utc = generated_at
         event_type_counts = Counter(row["event_type"] for row in retained_features)
         category_counts = Counter(str(row.get("category") or "unknown") for row in retained_features)
         retained_feature_count = len(retained_features)
@@ -664,7 +686,7 @@ def normalize_websocket_file(cfg: EngineConfig, input_path: str | Path | None = 
     issue_type_counts = Counter(row["issue_type"] for row in quality)
     summary = {
         "status": "ok",
-        "collected_at_utc": now_utc(),
+        "collected_at_utc": generated_at,
         "input_file": str(input_path),
         "input_scope": input_scope,
         "input_exists": input_path.exists(),

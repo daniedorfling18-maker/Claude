@@ -85,8 +85,8 @@ public book; cancelled cleanly; funds restored in full.
 0.4125 (price improvement confirmed venue-side). data-api reported
 `TRADE BUY 5.14 @ 0.4125`, usdcSize $2.18253. On-chain pUSD moved
 $12.923349 -> $10.740819 — exact to the cent against the venue debit.
-Position held to resolution per plan (settlement + redemption leg
-completes after the 2026-07-14 match).
+Position held to resolution per plan; settlement leg completed
+2026-07-14 (see settlement addendum below Drill D).
 
 **Findings (all at $2 instead of $100):**
 1. Near-identical market variants sit side by side (regulation win vs
@@ -114,10 +114,12 @@ completes after the 2026-07-14 match).
    confirms the fill-based scoreboard design and means requote
    compliance can never be externally verified per-order.
 
-Pending legs: settlement stamp + redemption (post-match, on the
-remaining 0.14-share tail), full three-way harvest reconciliation
-(2026-07-14 ~07:51Z with the fixed RPC). Scoreboard pickup CONFIRMED
-(data-api activity_rows visible to the reconciliation on 2026-07-13).
+Operator-side legs all complete as of 2026-07-14 (settlement addendum
+below Drill D). Scoreboard pickup CONFIRMED (data-api activity_rows
+visible to the reconciliation on 2026-07-13). Still outstanding on the
+system side: the automated harvest reconciliation + settlement stamp,
+gated on harvest completion (WO-85) and the WO-84 data_api fix being
+deployed.
 
 **Drill D — exit mechanics (added 2026-07-13, PASS).** Limit SELL 5
 shares @ 40c filled at the 41c bid (price improvement symmetric).
@@ -128,6 +130,25 @@ Partial-position sell handled cleanly; position row updated to the
 0.14-share tail immediately. Measured round-trip cost at minimum size
 (unplanned Drill C equivalent): ~13.5c on ~$2.10 notional (~6.4%),
 dominated by the symmetric ~2.9% fees.
+
+**Drill B settlement leg — COMPLETE 2026-07-14 (PASS).** Spain won the
+semifinal, so "Will France win on 2026-07-14?" resolved NO and the
+remaining 0.14-share Yes tail settled to zero — the pre-budgeted
+~$0.057 loss, exactly the "either outcome completes the test" design.
+Verified across all three views post-settlement: data-api positions
+shows no open positions, data-api /value reports $0, and on-chain pUSD
+balanceOf is $12.730349 — unchanged from the post-Drill-D cash figure,
+correct because a losing position redeems nothing (auto-redeem had
+nothing to claim, and no gas/fee was charged). Final drill ledger:
+12.923349 − 2.18253 (buy) + 1.98953 (sell) − 0.057 (settled tail)
+≈ 12.730349 cash + $0 positions. Total cost of the full drill program
+A/B/D ≈ $0.193 (fees $0.123 + spread ~$0.013 + zeroed tail ~$0.057).
+The complete order lifecycle is now exercised end to end at minimum
+size: ack → rest → cancel → marketable fill → partial exit →
+settlement-to-zero, with UI, data-api, and on-chain agreeing to six
+decimals at every checkpoint. The automated settlement stamp in the
+harvest remains to be observed once WO-85 restores harvest completion;
+that is a system-verification item, not an operator drill leg.
 
 **Drill E — reward-accrual pipe test (REGISTERED 2026-07-13, runs only
 on explicit owner go; NOT yet run).** Purpose: the H1 revenue mechanism

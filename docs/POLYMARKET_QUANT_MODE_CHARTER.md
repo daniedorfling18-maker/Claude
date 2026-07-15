@@ -696,6 +696,18 @@ freshness, and coverage PR-gate testable. The monitor and dashboard cannot
 write the heartbeat or invoke execution. WO-75
 item 2 remains post-amendment and false in the artifact; WO-67 remains blocked.
 
+**2026-07-15 — WO-85 implemented by Codex.** The daily training harvest is
+now a bounded, per-step CLI orchestration with durable progress in
+`outputs/ops_scheduler/training_harvest.json`: an early failure cannot starve
+later work, ordinary steps beyond the six-hour start budget are explicitly
+skipped, and corpus retention plus ledger anchoring are always attempted last.
+The scheduler records last successful completion separately from attempts;
+WO-78 registers fixed cadence freshness ceilings and immediately alerts after
+25 hours without a successful harvest. Gate A fails closed on material
+per-position clustering fallback. These are operational and statistical
+safety tightenings only; no evidence threshold, sizing, broker, paper/live, or
+order path changed.
+
 ## Rules of engagement for coding agents
 
 0. **Division of labour**: the orchestrating agent writes/updates this charter and the work orders

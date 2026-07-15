@@ -73,6 +73,11 @@ DEFAULT_SETTINGS = {
 
 REGISTERED_AT_UTC = "2026-07-09T04:00:00Z"
 
+# WO-85 (registered 2026-07-15): per-position fallback identities can turn
+# correlated finals into fake independent units. More than 10% fallback is a
+# material coverage gap and can only hold Gate A pending; it never helps pass.
+REGISTERED_MAX_POSITION_ID_FALLBACK_FRACTION = 0.10
+
 # Amendments registered 2026-07-09 BEFORE the first focus final settled
 # (validity review; all three tighten the gates, none loosen them):
 #   1. Gate A clusters finals by market: one unit per market (mean CLV of its
@@ -270,7 +275,11 @@ def _fixture_tags(row: dict[str, Any]) -> set[str]:
     return {f"{_team_key(team)}:{day}" for team in teams if _team_key(team)}
 
 
-def _clustered_focus_finals(cfg: EngineConfig, diagnostic_substrings: list[str], taker_fee_rate: float) -> dict[str, list[tuple[float, float]]]:
+def _clustered_focus_finals(
+    cfg: EngineConfig,
+    diagnostic_substrings: list[str],
+    taker_fee_rate: float,
+) -> tuple[dict[str, list[tuple[float, float]]], dict[str, Any]]:
     """Settled focus finals grouped into independent fixture-level units.
 
     Reads the append-only final history ledger; excludes frozen diagnostic
@@ -296,6 +305,8 @@ def _clustered_focus_finals(cfg: EngineConfig, diagnostic_substrings: list[str],
             parent[root_right] = root_left
 
     entries: list[tuple[str, float, float]] = []
+    eligible_finals = 0
+    position_id_fallback_finals = 0
     for row in rows:
         if str(row.get("line_kind") or "") != "closing":
             continue
@@ -305,10 +316,17 @@ def _clustered_focus_finals(cfg: EngineConfig, diagnostic_substrings: list[str],
         clv = safe_float(row.get("clv"))
         if clv is None:
             continue
-        key = str(row.get("market_id") or row.get("market_slug") or row.get("shadow_position_id") or "").strip()
+        market_key = str(row.get("market_id") or row.get("market_slug") or "").strip()
+        position_key = str(row.get("shadow_position_id") or "").strip()
+        key = market_key or position_key
         if not key:
             continue
-        node = f"market:{key}"
+        eligible_finals += 1
+        if market_key:
+            node = f"market:{key}"
+        else:
+            node = f"position:{key}"
+            position_id_fallback_finals += 1
         for tag in _fixture_tags(row):
             union(node, f"fixture:{tag}")
         entry_price = safe_float(row.get("entry_price"))
@@ -321,7 +339,21 @@ def _clustered_focus_finals(cfg: EngineConfig, diagnostic_substrings: list[str],
     clusters: dict[str, list[tuple[float, float]]] = {}
     for node, clv, fee_per_dollar in entries:
         clusters.setdefault(find(node), []).append((clv, fee_per_dollar))
-    return clusters
+    fallback_fraction = (
+        position_id_fallback_finals / eligible_finals if eligible_finals else 0.0
+    )
+    coverage = {
+        "state": (
+            "sufficient"
+            if fallback_fraction <= REGISTERED_MAX_POSITION_ID_FALLBACK_FRACTION
+            else "insufficient_clustering_coverage"
+        ),
+        "eligible_finals": eligible_finals,
+        "position_id_fallback_finals": position_id_fallback_finals,
+        "position_id_fallback_fraction": round(fallback_fraction, 6),
+        "maximum_position_id_fallback_fraction": REGISTERED_MAX_POSITION_ID_FALLBACK_FRACTION,
+    }
+    return clusters, coverage
 
 
 def build_profit_verdict(cfg: EngineConfig) -> dict[str, Any]:
@@ -347,7 +379,9 @@ def build_profit_verdict(cfg: EngineConfig) -> dict[str, Any]:
     # finals cluster by market, and markets sharing a fixture merge into one
     # unit, so neither correlated tokens nor per-match side markets can
     # inflate the sign test or reach the floor early.
-    clusters = _clustered_focus_finals(cfg, diagnostic_substrings, taker_fee_rate)
+    clusters, clustering_coverage = _clustered_focus_finals(
+        cfg, diagnostic_substrings, taker_fee_rate
+    )
     finals_total = sum(len(values) for values in clusters.values())
     unit_means = [sum(clv for clv, _ in values) / len(values) for values in clusters.values()]
     unit_fee_means = [sum(fee for _, fee in values) / len(values) for values in clusters.values()]
@@ -356,7 +390,16 @@ def build_profit_verdict(cfg: EngineConfig) -> dict[str, Any]:
     mean_taker_fee = round(sum(unit_fee_means) / n_units, 6) if unit_fee_means else None
     beaten_units = sum(1 for value in unit_means if value > 0)
     sign_p = _sign_test_p(beaten_units, n_units) if n_units else None
-    if n_units < minimum_samples:
+    if clustering_coverage["state"] != "sufficient":
+        gate_a = "pending"
+        gate_a_reason = (
+            "insufficient_clustering_coverage: "
+            f"{clustering_coverage['position_id_fallback_finals']}/"
+            f"{clustering_coverage['eligible_finals']} eligible finals fell back to per-position "
+            f"identity ({clustering_coverage['position_id_fallback_fraction']}); maximum registered "
+            f"fraction is {clustering_coverage['maximum_position_id_fallback_fraction']}."
+        )
+    elif n_units < minimum_samples:
         gate_a = "pending"
         gate_a_reason = f"{n_units}/{minimum_samples} independent settled market units ({finals_total} finals); verdict needs the unit floor."
     elif mean_final_clv is None or mean_final_clv <= 0:
@@ -441,6 +484,7 @@ def build_profit_verdict(cfg: EngineConfig) -> dict[str, Any]:
                 "units_beating_close": beaten_units,
                 "sign_test_p": round(sign_p, 6) if sign_p is not None else None,
                 "sign_test_alpha": alpha,
+                "clustering_coverage": clustering_coverage,
                 "note": "units cluster finals by market AND merge markets sharing a fixture (team + settlement date), so neither correlated tokens nor same-match side markets can inflate significance.",
             },
             "B_edge_survives_costs": {

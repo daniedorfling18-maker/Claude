@@ -79,6 +79,7 @@ from .maker_fill_replay import collect_maker_replay_data, run_maker_fill_replay,
 from .maker_live_test import run_maker_live_test
 from .price_history_collector import collect_price_history
 from .trade_print_collector import backfill_trade_prints, collect_trade_prints
+from .training_harvest import run_training_harvest
 from .wallet_intelligence_collector import collect_wallet_intelligence
 from .profit_target import reset_profit_target_baseline, write_profit_target_tracker
 from .profit_sprint import build_profit_sprint
@@ -194,6 +195,7 @@ COMMANDS = [
     "active-window-plan",
     "collection-coverage",
     "corpus-retention",
+    "training-harvest",
     "promotion-gate",
     "validation-report",
     "validate",
@@ -599,6 +601,11 @@ def main(argv: list[str] | None = None) -> int:
             _print(build_collection_coverage(cfg))
         elif args.command == "corpus-retention":
             _print(run_corpus_retention(cfg))
+        elif args.command == "training-harvest":
+            harvest = run_training_harvest(cfg, config_path=args.config)
+            _print(harvest)
+            if harvest.get("status") != "ok":
+                return 1
         elif args.command == "promotion-gate":
             _print(paper_live_promotion_gate(cfg))
         elif args.command == "validation-report":

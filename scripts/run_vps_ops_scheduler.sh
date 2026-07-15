@@ -25,6 +25,9 @@ CLV_INTERVAL="${OPS_CLV_SNAPSHOT_INTERVAL_SECONDS:-28800}"
 CARD_INTERVAL="${OPS_CARD_REFRESH_INTERVAL_SECONDS:-43200}"
 HARVEST_INTERVAL="${OPS_TRAINING_HARVEST_INTERVAL_SECONDS:-86400}"
 HARVEST_TIMEOUT="${OPS_TRAINING_HARVEST_TIMEOUT_SECONDS:-1800}"
+# WO-85 (2026-07-15): registered whole-harvest start budget. The Python
+# orchestrator caps this at six hours, so configuration can only tighten it.
+HARVEST_DEADLINE="${OPS_TRAINING_HARVEST_DEADLINE_SECONDS:-21600}"
 MAKER_STUDY_INTRADAY_INTERVAL="${OPS_MAKER_STUDY_INTRADAY_INTERVAL_SECONDS:-86400}"
 MAKER_STUDY_INTRADAY_OFFSET_MIN="${OPS_MAKER_STUDY_INTRADAY_OFFSET_MIN_SECONDS:-39600}"
 MAKER_STUDY_INTRADAY_OFFSET_MAX="${OPS_MAKER_STUDY_INTRADAY_OFFSET_MAX_SECONDS:-46800}"
@@ -91,6 +94,8 @@ jobs[job_name] = {
     "started_at_utc": started.isoformat() if started else "",
     "duration_seconds": round((now - started).total_seconds(), 3) if started else None,
     "last_exit_code": exit_code,
+    # Failed attempts must not make a periodic job look freshly successful.
+    "last_success_utc": now.isoformat() if exit_code == 0 else str(previous.get("last_success_utc") or ""),
     "detail": detail,
     "skip_kind": skip_kind or "none",
     "skipped_intentional": skipped_intentional,
@@ -322,74 +327,26 @@ run_training_harvest() {
   # validation-gap and cohort-transfer blockers. Harvest accrues to outputs;
   # trainer wiring is a separate leakage-reviewed work order (WO-33).
   log "training_harvest: starting"
-  (
-    set -e
-    timeout "$HARVEST_TIMEOUT" python -m polymarket_predictive_engine.cli backfill-resolved-markets --config "$CONFIG_PATH"
-    timeout "$HARVEST_TIMEOUT" python -m polymarket_predictive_engine.cli collect-price-history --config "$CONFIG_PATH"
-    # WO-55 reconstructed sharp-anchor CLV study: retrospective research only,
-    # explicitly non-verdict and non-trading; runs after price histories exist.
-    timeout "$HARVEST_TIMEOUT" python -m polymarket_predictive_engine.cli reconstructed-clv-study --config "$CONFIG_PATH"
-    # WO-43 martingale drift scan: study-only timing-edge diagnostics from
-    # harvested price histories; no lane, no gate, no orders.
-    timeout "$HARVEST_TIMEOUT" python -m polymarket_predictive_engine.cli drift-scan --config "$CONFIG_PATH"
-    # WO-37 wallet-intelligence collection: leaderboard + holders for tracked
-    # markets. Collection only; later leakage-reviewed work decides whether
-    # any wallet signal becomes a feature.
-    timeout "$HARVEST_TIMEOUT" python -m polymarket_predictive_engine.cli collect-wallet-intel --config "$CONFIG_PATH"
-    # WO-36 maker-carry actuarial study: daily measurement (never trading) of
-    # reward pots, band competition, and pick-off costs. Free public APIs.
-    timeout "$HARVEST_TIMEOUT" python -m polymarket_predictive_engine.cli maker-carry-study --config "$CONFIG_PATH"
-    # WO-83: immediately bind the refreshed quote sheet to matched official
-    # books and public prints. Coverage is diagnostic and never changes M-B.
-    timeout "$PRINTS_TIMEOUT" python -m polymarket_predictive_engine.cli collect-maker-replay-data --config "$CONFIG_PATH"
-    # WO-54 deep trade-print backfill: one-shot historical /trades pages for
-    # maker-study candidates and the quote-sheet portfolio. Collection only.
-    timeout "$HARVEST_TIMEOUT" python -m polymarket_predictive_engine.cli backfill-trade-prints --config "$CONFIG_PATH"
-    # WO-40 maker-fill realism replay: recorded book archive + trade prints,
-    # last-in-queue fills. Measurement only; never alters the study charge.
-    timeout "$HARVEST_TIMEOUT" python -m polymarket_predictive_engine.cli maker-fill-replay --config "$CONFIG_PATH"
-    # WO-49 flow toxicity: VPIN-lite + wallet-tier markouts for quote-sheet
-    # conditioning only. Never alters adverse charges, gates, or order paths.
-    timeout "$HARVEST_TIMEOUT" python -m polymarket_predictive_engine.cli flow-toxicity --config "$CONFIG_PATH"
-    # WO-50 registered maker live-test decision policy: advisory-only
-    # funding/stand-down indication after the daily maker evidence refresh.
-    timeout "$HARVEST_TIMEOUT" python -m polymarket_predictive_engine.cli decision-policy --config "$CONFIG_PATH"
-    # WO-62 read-only three-way live-wallet reconciliation. Inert until the
-    # human maker-test wallet is configured; missing RPC degrades to partial.
-    timeout "$HARVEST_TIMEOUT" python -m polymarket_predictive_engine.cli reconcile-wallet --config "$CONFIG_PATH"
-    # WO-63 true-net cost ledger: convert newly observed investor-paid gas to
-    # USD after WO-62, before the factsheet. Relayer gas is never charged.
-    timeout "$HARVEST_TIMEOUT" python -m polymarket_predictive_engine.cli sync-cost-ledger --config "$CONFIG_PATH"
-    # WO-82 human Stage-1 operating page: current exact tickets, requote/kill
-    # state, prior-day reconciliation, and cost delta. It only renders and
-    # reads the append-only human action log; it cannot mutate venue orders.
-    timeout "$HARVEST_TIMEOUT" python -m polymarket_predictive_engine.cli stage-day --config "$CONFIG_PATH"
-    # WO-42 favourite/longshot calibration bias study. Corpus-bound and
-    # study-only; flags are candidates for future pre-registration, not trades.
-    timeout "$HARVEST_TIMEOUT" python -m polymarket_predictive_engine.cli calibration-bias-study --config "$CONFIG_PATH"
-    # WO-60 evidence-classed performance factsheet. Packaging/reporting only;
-    # no gate, sizing rule, policy, broker, or order path reads it.
-    timeout "$HARVEST_TIMEOUT" python -m polymarket_predictive_engine.cli performance-factsheet --config "$CONFIG_PATH"
-    # WO-64 code-generated investment policy statement. Reads current policy,
-    # risk, and capacity artifacts for reporting only.
-    timeout "$HARVEST_TIMEOUT" python -m polymarket_predictive_engine.cli render-ips --config "$CONFIG_PATH"
-    # WO-71 bounded corpus retention: compact expired high-volume research
-    # rows, bound the training archive, remove stale atomic temp files, and
-    # log disk projection. Fixed paths exclude every WO-61 decision ledger.
-    timeout "$HARVEST_TIMEOUT" python -m polymarket_predictive_engine.cli corpus-retention --config "$CONFIG_PATH"
-    # WO-81: refresh the governed paper decision in the daily harvest so the
-    # authorisation row can never rely on evidence older than one day.
-    timeout "$HARVEST_TIMEOUT" python scripts/audit_polymarket_local_history.py "$CONFIG_PATH"
-    # WO-68 canonical operating state. Generated from the effective config and
-    # current artifacts; missing inputs remain UNKNOWN and never authorise work.
-    timeout "$HARVEST_TIMEOUT" python -m polymarket_predictive_engine.cli operating-state --config "$CONFIG_PATH"
-    # WO-61 tamper-evident ledger chain. Prefix hashes are generated only after
-    # the daily evidence writers finish. The existing host telemetry pusher
-    # then timestamps the head on vps-anchor (the container has no Git metadata).
-    timeout "$HARVEST_TIMEOUT" python -m polymarket_predictive_engine.cli anchor-ledgers --config "$CONFIG_PATH"
-  ) >> "$LOG_FILE" 2>&1
+  STARTED_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+  # WO-85: every child result is persisted, earlier failures do not starve
+  # later evidence, ordinary work not started before the whole-job deadline
+  # is skipped explicitly, and retention + anchoring are always attempted last.
+  # The registered child list includes scripts/audit_polymarket_local_history.py
+  # before operating-state; see training_harvest.py for the complete order.
+  # Contract markers retained for the scheduler audit: backfill-resolved-markets,
+  # collect-price-history, maker-carry-study, decision-policy, and
+  # backfill-trade-prints are all registered children of that orchestrator.
+  # Its exact safety/report children include:
+  # python -m polymarket_predictive_engine.cli stage-day
+  # python -m polymarket_predictive_engine.cli corpus-retention
+  # python -m polymarket_predictive_engine.cli anchor-ledgers
+  OPS_TRAINING_HARVEST_TIMEOUT_SECONDS="$HARVEST_TIMEOUT" \
+  OPS_TRADE_PRINTS_TIMEOUT_SECONDS="$PRINTS_TIMEOUT" \
+  OPS_TRAINING_HARVEST_DEADLINE_SECONDS="$HARVEST_DEADLINE" \
+    python -m polymarket_predictive_engine.cli training-harvest --config "$CONFIG_PATH" \
+    >> "$LOG_FILE" 2>&1
   CODE=$?
-  stamp_status training_harvest "$CODE" "gamma resolved-markets backfill + clob price histories + wallet intelligence + maker-carry study + matched Tier-0 maker collection + deep trade-print backfill + maker-fill replay + flow toxicity + decision policy + wallet reconciliation + true-net cost ledger + Stage-1 operator page + reconstructed CLV study + calibration-bias study + martingale drift scan + performance factsheet + investment policy statement + bounded corpus retention + governed paper audit refresh + generated operating state + ledger anchor"
+  stamp_status training_harvest "$CODE" "WO-85 resilient per-step harvest; see ops_scheduler/training_harvest.json; bounded corpus retention + ledger anchor always attempted" "$STARTED_AT"
   log "training_harvest: exit $CODE"
 }
 

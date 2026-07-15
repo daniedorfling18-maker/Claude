@@ -112,15 +112,22 @@ def test_scheduler_uses_registered_resilient_harvest_entrypoint() -> None:
 def test_scheduler_rearms_harvest_from_successful_completion_not_start() -> None:
     script = Path("scripts/run_vps_ops_scheduler.sh").read_text(encoding="utf-8")
     loop = script.split("while :; do", 1)[1]
-    harvest_block = loop.split('if [ "$(seconds_since_success_stamp training_harvest)"', 1)[1].split(
-        "run_degraded_state_watchdog", 1
+    harvest_block = loop.split("if training_harvest_retry_ready; then", 1)[1].split(
+        'if [ "$(seconds_since_stamp maker_study_intraday)"', 1
+    )[0]
+    retry_gate = script.split("training_harvest_retry_ready() {", 1)[1].split(
+        "successful_schedule_skip_kind() {", 1
     )[0]
     function = script.split("run_training_harvest() {", 1)[1].split(
         "run_maker_study_intraday() {", 1
     )[0]
 
     assert "successful_completion_epoch" in script
-    assert 'if [ "$(seconds_since_success_stamp training_harvest)" -ge "$HARVEST_INTERVAL" ]' in loop
+    assert '$(seconds_since_success_stamp training_harvest)' in retry_gate
+    assert '$(seconds_since_attempt_stamp training_harvest)' in retry_gate
+    assert '"$HARVEST_INTERVAL"' in retry_gate
+    assert '"$HARVEST_RETRY_INTERVAL"' in retry_gate
+    assert "if training_harvest_retry_ready; then" in loop
     assert "touch_attempt_stamp training_harvest" in harvest_block
     assert "touch_stamp training_harvest" not in harvest_block
     assert 'if [ "$CODE" -eq 0 ]; then\n    touch_success_stamp training_harvest' in function

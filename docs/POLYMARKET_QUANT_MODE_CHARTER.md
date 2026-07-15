@@ -708,6 +708,12 @@ per-position clustering fallback. These are operational and statistical
 safety tightenings only; no evidence threshold, sizing, broker, paper/live, or
 order path changed.
 
+**2026-07-15 — WO-85 completion-stamp correction.** Daily-harvest cadence and
+the intraday offset now read the last successful completion rather than a
+touch-before-run stamp. Starts write a separate attempt stamp and only an exit
+zero advances `last_success_training_harvest`, so a container restart or failed
+harvest re-arms instead of silently consuming the next 24-hour slot.
+
 **2026-07-15 — WO-87 implemented by Codex.** The legacy taker verdict keeps
 its registered arithmetic, alpha, sample floor, clustering, and thresholds,
 but now labels the binding quantity honestly as unit mean net settlement

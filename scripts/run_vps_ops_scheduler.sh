@@ -134,6 +134,77 @@ touch_stamp() {
   date -u +%s > "$OUT_DIR/last_$1"
 }
 
+# WO-85 completion-stamp correction (2026-07-15): the daily harvest is due
+# from its last successful COMPLETION, never from a start/attempt timestamp.
+# A missing dedicated completion stamp is migrated read-only from status.json;
+# if neither exists the job is immediately due. This makes a container restart
+# during the harvest re-arm the job instead of consuming the next 24-hour slot.
+successful_completion_epoch() {
+  SUCCESS_STAMP="$OUT_DIR/last_success_$1"
+  if [ -f "$SUCCESS_STAMP" ]; then
+    cat "$SUCCESS_STAMP" 2>/dev/null || echo 0
+    return
+  fi
+  JOB="$1" OUT_DIR="$OUT_DIR" python - <<'PY'
+import json
+import os
+from datetime import datetime
+from pathlib import Path
+
+path = Path(os.environ["OUT_DIR"]) / "status.json"
+try:
+    payload = json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
+    value = str(payload.get("jobs", {}).get(os.environ["JOB"], {}).get("last_success_utc") or "")
+    parsed = datetime.fromisoformat(value.replace("Z", "+00:00")) if value else None
+    print(int(parsed.timestamp()) if parsed is not None else 0)
+except (AttributeError, OSError, TypeError, ValueError, json.JSONDecodeError):
+    print(0)
+PY
+}
+
+seconds_since_success_stamp() {
+  NOW=$(date -u +%s)
+  THEN=$(successful_completion_epoch "$1")
+  case "${THEN:-}" in
+    ''|*[!0-9]*) THEN=0 ;;
+  esac
+  if [ "${THEN:-0}" -le 0 ]; then
+    echo 999999999
+    return
+  fi
+  AGE=$((NOW - THEN))
+  if [ "$AGE" -lt 0 ]; then
+    AGE=0
+  fi
+  echo "$AGE"
+}
+
+touch_success_stamp() {
+  date -u +%s > "$OUT_DIR/last_success_$1"
+}
+
+touch_attempt_stamp() {
+  date -u +%s > "$OUT_DIR/last_attempt_$1"
+}
+
+successful_schedule_skip_kind() {
+  THEN=$(successful_completion_epoch "$1")
+  case "${THEN:-}" in
+    ''|*[!0-9]*) THEN=0 ;;
+  esac
+  if [ "${THEN:-0}" -le 0 ]; then
+    echo ""
+    return
+  fi
+  INTERVAL="$2"
+  AGE=$(seconds_since_success_stamp "$1")
+  if [ "$AGE" -gt $((INTERVAL + TICK_SECONDS)) ]; then
+    echo "overrun"
+  else
+    echo ""
+  fi
+}
+
 schedule_skip_kind() {
   STAMP_FILE="$OUT_DIR/last_$1"
   INTERVAL="$2"
@@ -347,6 +418,9 @@ run_training_harvest() {
     >> "$LOG_FILE" 2>&1
   CODE=$?
   stamp_status training_harvest "$CODE" "WO-85 resilient per-step harvest; see ops_scheduler/training_harvest.json; bounded corpus retention + ledger anchor always attempted" "$STARTED_AT"
+  if [ "$CODE" -eq 0 ]; then
+    touch_success_stamp training_harvest
+  fi
   log "training_harvest: exit $CODE"
 }
 
@@ -354,7 +428,7 @@ run_maker_study_intraday() {
   # WO-53: a second maker-carry snapshot ~12h after the daily harvest samples
   # intraday competition without fast-forwarding M-A, because M-A counts
   # distinct UTC days in maker_carry_study.py.
-  TRAINING_AGE="$(seconds_since_stamp training_harvest)"
+  TRAINING_AGE="$(seconds_since_success_stamp training_harvest)"
   log "maker_study_intraday: starting (training_harvest_age=${TRAINING_AGE}s)"
   (
     set -e
@@ -460,14 +534,14 @@ while :; do
     run_locked_card_refresh
     JOB_SCHEDULE_SKIP_KIND=""
   fi
-  if [ "$(seconds_since_stamp training_harvest)" -ge "$HARVEST_INTERVAL" ]; then
-    JOB_SCHEDULE_SKIP_KIND="$(schedule_skip_kind training_harvest "$HARVEST_INTERVAL")"
-    touch_stamp training_harvest
+  if [ "$(seconds_since_success_stamp training_harvest)" -ge "$HARVEST_INTERVAL" ]; then
+    JOB_SCHEDULE_SKIP_KIND="$(successful_schedule_skip_kind training_harvest "$HARVEST_INTERVAL")"
+    touch_attempt_stamp training_harvest
     run_training_harvest
     JOB_SCHEDULE_SKIP_KIND=""
   fi
   if [ "$(seconds_since_stamp maker_study_intraday)" -ge "$MAKER_STUDY_INTRADAY_INTERVAL" ]; then
-    TRAINING_AGE="$(seconds_since_stamp training_harvest)"
+    TRAINING_AGE="$(seconds_since_success_stamp training_harvest)"
     if [ "$TRAINING_AGE" -ge "$MAKER_STUDY_INTRADAY_OFFSET_MIN" ] && [ "$TRAINING_AGE" -le "$MAKER_STUDY_INTRADAY_OFFSET_MAX" ]; then
       JOB_SCHEDULE_SKIP_KIND="$(schedule_skip_kind maker_study_intraday "$MAKER_STUDY_INTRADAY_INTERVAL")"
       touch_stamp maker_study_intraday

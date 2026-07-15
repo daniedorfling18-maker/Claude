@@ -107,3 +107,24 @@ def test_scheduler_uses_registered_resilient_harvest_entrypoint() -> None:
     )[0]
     assert "set -e" not in function
     assert "polymarket_predictive_engine.cli backfill-resolved-markets" not in function
+
+
+def test_scheduler_rearms_harvest_from_successful_completion_not_start() -> None:
+    script = Path("scripts/run_vps_ops_scheduler.sh").read_text(encoding="utf-8")
+    loop = script.split("while :; do", 1)[1]
+    harvest_block = loop.split('if [ "$(seconds_since_success_stamp training_harvest)"', 1)[1].split(
+        "run_degraded_state_watchdog", 1
+    )[0]
+    function = script.split("run_training_harvest() {", 1)[1].split(
+        "run_maker_study_intraday() {", 1
+    )[0]
+
+    assert "successful_completion_epoch" in script
+    assert 'if [ "$(seconds_since_success_stamp training_harvest)" -ge "$HARVEST_INTERVAL" ]' in loop
+    assert "touch_attempt_stamp training_harvest" in harvest_block
+    assert "touch_stamp training_harvest" not in harvest_block
+    assert 'if [ "$CODE" -eq 0 ]; then\n    touch_success_stamp training_harvest' in function
+    assert function.index("stamp_status training_harvest") < function.index(
+        "touch_success_stamp training_harvest"
+    )
+    assert 'TRAINING_AGE="$(seconds_since_success_stamp training_harvest)"' in script

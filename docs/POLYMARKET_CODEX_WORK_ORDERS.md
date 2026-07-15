@@ -3026,6 +3026,36 @@ settlements are newer; (b) updown tokens cannot displace priority tokens;
 diagnostic `gradeable`) after the change; (d) the quality report labels
 priority vs general tokens so starvation is visible if it ever recurs.
 
+Engineering-standards contract (registered before implementation, 2026-07-15):
+- **Clock and units (S1):** this change adds no recency window; priority is
+  ledger membership. Existing close timestamps remain UTC-parsed and are used
+  only to request the recorded close-relative history window.
+- **Shared writes (S2):** the only written artifacts are
+  `historical_price_snapshots.csv`, `historical_price_history_quality.csv`, and
+  `historical_price_history_summary.json`; they retain `write_csv`/`write_json`
+  atomic replacement. No cadence or second writer is added, so an interleaving
+  reader sees one complete old or new artifact, never a partial file.
+- **Dependency and recorded reality (S3/S4):** the producer is
+  `price_history_collector`; the consumer is `profit_verdict`'s
+  `pre_event_clv_diagnostic`; coverage is every distinct final-ledger token.
+  Collector tests replay a sanitized recorded CLOB `/prices-history` payload in
+  addition to the required synthetic end-to-end focus-final case.
+- **Fail-safe direction:** when the final ledger is missing or a final token is
+  malformed, no priority row is invented and the summary reports zero available
+  priority tokens; when a priority fetch is missing, empty, or fails, its quality
+  row says `empty_history`/`fetch_error` and the diagnostic remains
+  `pre_event_clv_ungradeable`. Frozen up/down rows are never used to disguise
+  either failure.
+
+Day-after check: `outputs/polymarket_model_governance/historical_price_history_summary.json`
+has `priority_tokens_missing=0`, `priority_tokens_requested=priority_tokens_available`,
+and `general_updown_tokens_requested=0`; every priority token has a
+`collection_priority=focus_final` row in
+`historical_price_history_quality.csv`. The next
+`outputs/polymarket_model_governance/profit_verdict.json` either increases
+`pre_event_clv_diagnostic.finals_gradeable` or remains explicitly ungradeable
+only where that priority quality row reports `empty_history`/`fetch_error`.
+
 ## WO-90 — Atomic quote-sheet writes (concurrent decision-policy under the WO-85 safety pulse)
 
 **2026-07-15 — WO-90 implemented by Codex.** Both registered quote-sheet writers now publish a

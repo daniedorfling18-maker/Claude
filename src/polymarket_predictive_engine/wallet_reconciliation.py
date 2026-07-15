@@ -23,7 +23,17 @@ from typing import Any, Iterable
 import requests
 
 from .config import EngineConfig, load_config
-from .utils import append_csv_rows, now_utc, read_csv_rows, read_json, safe_float, write_csv, write_json
+from .utils import (
+    append_csv_rows,
+    normalize_external_timestamp,
+    now_utc,
+    read_csv_rows,
+    read_json,
+    safe_float,
+    write_csv,
+    write_json,
+    write_text_atomic,
+)
 
 
 OFFICIAL_CONTRACTS_URL = "https://docs.polymarket.com/resources/contracts"
@@ -264,7 +274,7 @@ def _activity_cash(rows: list[dict[str, Any]], *, baseline_epoch: int = 1) -> di
     positive = {"DEPOSIT", "REWARD", "YIELD", "MAKER_REBATE", "TAKER_REBATE", "REFERRAL_REWARD", "REDEEM", "MERGE"}
     negative = {"WITHDRAWAL", "SPLIT"}
     for row in rows:
-        timestamp = int(safe_float(row.get("timestamp")) or 0)
+        timestamp = int(normalize_external_timestamp(row.get("timestamp")) or 0)
         if timestamp < baseline_epoch:
             continue
         activity_type = str(row.get("type") or "").strip().upper()
@@ -651,7 +661,11 @@ def _capture_gas(
     if not _enabled(settings.get("gas_capture_enabled", True)) or rpc_chain_id != 137:
         return {"status": "disabled_or_rpc_unavailable", "new_rows": 0, "ledger_path": str(path), "errors": []}
     candidates: dict[str, dict[str, Any]] = {}
-    for row in sorted(activities, key=lambda item: safe_float(item.get("timestamp")) or 0.0, reverse=True):
+    for row in sorted(
+        activities,
+        key=lambda item: normalize_external_timestamp(item.get("timestamp")) or 0.0,
+        reverse=True,
+    ):
         tx_hash = str(row.get("transactionHash") or "").strip().lower()
         if TX_RE.fullmatch(tx_hash) and tx_hash not in seen:
             candidates.setdefault(tx_hash, row)
@@ -678,7 +692,7 @@ def _capture_gas(
             new_rows.append(
                 {
                     "transaction_hash": tx_hash,
-                    "activity_timestamp": activity.get("timestamp"),
+                    "activity_timestamp": normalize_external_timestamp(activity.get("timestamp")),
                     "payer_address": payer,
                     "attributed_to_wallet": payer in payer_addresses,
                     "gas_used": gas_used,
@@ -831,7 +845,7 @@ def _patch_quote_sheet(cfg: EngineConfig, payload: dict[str, Any]) -> None:
     else:
         parts = text.split("\n", 2)
         text = "\n".join(parts[:2]) + "\n\n" + block + "\n\n" + (parts[2] if len(parts) > 2 else "")
-    path.write_text(text, encoding="utf-8")
+    write_text_atomic(path, text)
 
 
 def _append_history_row(path: Path, payload: dict[str, Any], fieldnames: list[str]) -> None:

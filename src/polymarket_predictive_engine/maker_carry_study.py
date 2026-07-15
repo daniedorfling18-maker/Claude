@@ -76,7 +76,17 @@ from typing import Any
 import requests
 
 from .config import EngineConfig, load_config
-from .utils import now_utc, parse_timestamp, read_csv_rows, read_json, safe_float, write_csv, write_json, write_text_atomic
+from .utils import (
+    normalize_external_timestamp,
+    now_utc,
+    parse_timestamp,
+    read_csv_rows,
+    read_json,
+    safe_float,
+    write_csv,
+    write_json,
+    write_text_atomic,
+)
 
 DEFAULT_GAMMA_BASE_URL = "https://gamma-api.polymarket.com"
 DEFAULT_CLOB_BASE_URL = "https://clob.polymarket.com"
@@ -458,9 +468,8 @@ def _candidate_staleness_reasons(market: dict[str, Any], *, as_of: datetime) -> 
     """Return tighten-only WO-80 exclusion reasons for a rewarded market."""
 
     as_of = as_of.astimezone(timezone.utc)
-    close_at = parse_timestamp(market.get("endDateIso") or market.get("endDate"))
-    if close_at is not None:
-        close_at = close_at.astimezone(timezone.utc)
+    close_seconds = normalize_external_timestamp(market.get("endDateIso") or market.get("endDate"))
+    close_at = datetime.fromtimestamp(close_seconds, timezone.utc) if close_seconds is not None else None
 
     reasons: list[str] = []
     if close_at is not None and close_at < as_of:
@@ -1168,7 +1177,7 @@ def _price_series(settings: dict[str, Any], token_id: str, *, interval: str, fid
     for point in history:
         if not isinstance(point, dict):
             continue
-        stamp = safe_float(point.get("t"))
+        stamp = normalize_external_timestamp(point.get("t"))
         price = safe_float(point.get("p"))
         if stamp is not None and price is not None:
             series.append((stamp, price))
@@ -1239,7 +1248,7 @@ def _recent_prints(settings: dict[str, Any], condition_id: str) -> list[dict[str
             continue
         price = safe_float(trade.get("price"))
         size = safe_float(trade.get("size"))
-        stamp = safe_float(trade.get("timestamp") or trade.get("matchTime"))
+        stamp = normalize_external_timestamp(trade.get("timestamp") or trade.get("matchTime"))
         side = str(trade.get("side") or "").upper()
         if price is None or size is None or stamp is None or side not in {"BUY", "SELL"}:
             continue

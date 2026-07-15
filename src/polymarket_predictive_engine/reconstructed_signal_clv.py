@@ -24,6 +24,7 @@ from .profit_verdict import _fixture_tags, _sign_test_p
 from .sharp_anchor import devig
 from .utils import (
     find_first_column,
+    normalize_external_timestamp,
     now_utc,
     parse_timestamp,
     read_csv_rows,
@@ -158,9 +159,9 @@ def _row_time(row: dict[str, Any]) -> datetime | None:
 
 def _row_close_time(row: dict[str, Any]) -> datetime | None:
     for key in ("close_time", "closedTime", "closed_time", "endDate", "end_date_iso", "endDateIso"):
-        parsed = parse_timestamp(row.get(key))
-        if parsed is not None:
-            return parsed.astimezone(timezone.utc)
+        seconds = normalize_external_timestamp(row.get(key))
+        if seconds is not None:
+            return datetime.fromtimestamp(seconds, timezone.utc)
     return None
 
 

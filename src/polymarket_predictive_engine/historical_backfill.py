@@ -7,7 +7,7 @@ import requests
 
 from .config import EngineConfig, load_config
 from .resolution_collector import infer_market_resolution_rows
-from .utils import now_utc, parse_timestamp, write_csv, write_json
+from .utils import normalize_external_timestamp, now_utc, write_csv, write_json
 
 DEFAULT_GAMMA_BASE_URL = "https://gamma-api.polymarket.com/markets"
 
@@ -20,9 +20,9 @@ def _truthy(value: Any) -> bool:
 
 def _market_close_dt(market: dict[str, Any]) -> datetime:
     for key in ("closedTime", "closed_time", "endDate", "endDateIso", "updatedAt", "createdAt"):
-        parsed = parse_timestamp(market.get(key))
-        if parsed is not None:
-            return parsed
+        seconds = normalize_external_timestamp(market.get(key))
+        if seconds is not None:
+            return datetime.fromtimestamp(seconds, timezone.utc)
     return datetime(1970, 1, 1, tzinfo=timezone.utc)
 
 

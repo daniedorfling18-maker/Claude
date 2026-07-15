@@ -31,7 +31,16 @@ import requests
 
 from .config import EngineConfig, load_config
 from .owner_activity_attribution import attribute_owner_activity
-from .utils import append_csv_rows, now_utc, parse_timestamp, read_csv_rows, read_json, safe_float, write_json
+from .utils import (
+    append_csv_rows,
+    normalize_external_timestamp,
+    now_utc,
+    parse_timestamp,
+    read_csv_rows,
+    read_json,
+    safe_float,
+    write_json,
+)
 
 DEFAULT_DATA_API_BASE_URL = "https://data-api.polymarket.com"
 
@@ -112,8 +121,7 @@ def _usd(row: dict[str, Any]) -> float:
 
 
 def _stamp(row: dict[str, Any]) -> float:
-    value = safe_float(row.get("timestamp")) or 0.0
-    return value / 1000.0 if value > 10_000_000_000 else value
+    return normalize_external_timestamp(row.get("timestamp")) or 0.0
 
 
 def _modelled_fills_per_day(cfg: EngineConfig) -> float | None:

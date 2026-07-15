@@ -2982,6 +2982,58 @@ test files in a green full-suite VPS run recorded in the PR; subsequent
 deploys keep `deployment_health` green with no new watchdog incident
 class regressions.
 
+**2026-07-15 — WO-92 implemented by Codex.** Sanitized payloads recorded from
+Data API `/activity`, `/positions`, and `/trades`, CLOB `/book`, `/books`, and
+`/prices-history`, and Gamma `/markets` now replay through the current parser
+inventory. Venue seconds, milliseconds, and ISO strings enter through
+`utils.normalize_external_timestamp`; malformed, negative, and non-finite
+values return `None`. Clock-advance properties cover maker-live 24-hour
+reward/fill counts, decision-policy freshness, scheduler-completion freshness,
+requote age, candidate close age, corpus retention, and websocket feature
+retention. The latter now anchors to the injected run clock rather than the
+newest observed row. A static writer registry covers every current quote-sheet
+writer reachable from the harvest/safety-pulse paths and the secondary hourly
+patch; all publish complete text via `write_text_atomic`. No gate, threshold,
+registered policy constant, signal, sizing, broker, credential, cancellation,
+paper/live permission, or order path changed.
+
+S7 written review (methods and bounded findings):
+1. **S1 — static read + ARM64 tests:** `utils.normalize_external_timestamp`
+   owns the `>10_000_000_000` millisecond rule; ingestion adapters call it,
+   and `websocket_normaliser._retained_feature_rows(..., as_of=...)` derives
+   its cutoff from the run clock. Seven boundary tests advance past each
+   registered edge and observe the row/count becoming stale or excluded.
+2. **S2 — static read + interleaving regression:** maker study, decision
+   policy, requote, reconciliation, hourly-adverse, and requote-notification
+   text writers call `write_text_atomic`; the audit test rejects plain
+   `.write_text(` in this registry. JSON/CSV paths retain the existing atomic
+   utilities. The worst remaining read-modify-write race is a complete but
+   one-cycle-stale human patch, never a torn file.
+3. **S3 — static dependency inventory:** recorded surface -> parser mappings
+   are explicit in `RECORDED_PARSER_COVERAGE`; the only producer-side change
+   is clock normalization/retention, and absent coverage remains empty,
+   ungradeable, stale, or retained-unknown rather than promoted.
+4. **S4 — recorded replay + property tests:** seven dated recorded fixture
+   files preserve live response nesting/scalar types, and the parser suite
+   replays them through Data API, CLOB, and Gamma consumers. Synthetic tests
+   remain only as additional edge-case coverage.
+5. **S5 — static path review + tests:** malformed timestamps become `None`;
+   they cannot earn freshness or owner attribution, cannot form a valid book
+   row, and are retained rather than silently deleted by corpus hygiene.
+   Missing/malformed endpoint payloads keep their existing empty/pending or
+   ungradeable behavior.
+6. **S6 — spec/read:** the exact day-after artifacts remain
+   `outputs/ops_scheduler/training_harvest.json` and deployment-health/
+   watchdog telemetry as registered above; production verification follows
+   the guarded main deployment.
+7. **Frozen surfaces + executed verification:** diff review found no changes
+   to gates, thresholds, policy constants, or order paths. On the ARM64 VPS
+   (Python 3.11), repository Ruff passed; the new/retention suite passed 30/30,
+   the touched-component suite passed 201/201, a concurrency/broker harness
+   confirmation passed 45/45, and the full suite passed 1,233/1,233. These
+   methods found no further defect in the reviewed scope; they do not prove
+   absence of defects outside it.
+
 ## WO-91 — Pre-event CLV diagnostic starved: frozen crypto up/down floods the price-history collection cap (telemetry read 2026-07-15)
 
 **2026-07-15 — WO-91 implemented by Codex.** The price-history collector now

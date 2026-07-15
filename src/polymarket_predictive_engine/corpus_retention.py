@@ -24,7 +24,16 @@ from typing import Any, Iterable, Mapping, Sequence
 from .config import EngineConfig, load_config
 from .ledger_anchor import DEFAULT_LEDGER_REGISTRY
 from .runtime_lock import runtime_lock
-from .utils import ensure_dir, parse_timestamp, read_csv_rows, safe_float, serialize_value, write_csv, write_json
+from .utils import (
+    ensure_dir,
+    normalize_external_timestamp,
+    parse_timestamp,
+    read_csv_rows,
+    safe_float,
+    serialize_value,
+    write_csv,
+    write_json,
+)
 
 
 OUTPUT_FILE = "ops_scheduler/corpus_retention.json"
@@ -232,17 +241,9 @@ def _write_gzip(path: Path, rows: list[Mapping[str, Any]], fields: Sequence[str]
 
 def _row_time(row: Mapping[str, Any], fields: Sequence[str]) -> datetime | None:
     for field in fields:
-        raw = row.get(field)
-        parsed = parse_timestamp(raw)
-        if parsed is not None:
-            return parsed.astimezone(timezone.utc)
-        numeric = safe_float(raw)
-        if numeric is not None and numeric > 0:
-            seconds = numeric / 1000.0 if numeric > 10_000_000_000 else numeric
-            try:
-                return datetime.fromtimestamp(seconds, timezone.utc)
-            except (OSError, OverflowError, ValueError):
-                continue
+        seconds = normalize_external_timestamp(row.get(field))
+        if seconds is not None:
+            return datetime.fromtimestamp(seconds, timezone.utc)
     return None
 
 

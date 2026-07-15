@@ -1,0 +1,23 @@
+[
+  {
+    "proxyWallet": "0x1111111111111111111111111111111111111111",
+    "side": "BUY",
+    "asset": "11111111111111111111111111111111111111111111111111111111111111111",
+    "conditionId": "0x2222222222222222222222222222222222222222222222222222222222222222",
+    "size": 12.5,
+    "price": 0.26,
+    "timestamp": 1784135092,
+    "title": "Sanitized recorded market",
+    "slug": "sanitized-recorded-market",
+    "icon": "https://example.invalid/recorded.png",
+    "eventSlug": "sanitized-recorded-event",
+    "outcome": "Yes",
+    "outcomeIndex": 0,
+    "name": "Recorded User",
+    "pseudonym": "Recorded",
+    "bio": "",
+    "profileImage": "",
+    "profileImageOptimized": "",
+    "transactionHash": "0x3333333333333333333333333333333333333333333333333333333333333333"
+  }
+]

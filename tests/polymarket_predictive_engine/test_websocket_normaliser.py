@@ -148,7 +148,9 @@ def test_output_files_are_feature_only_no_label_columns(tmp_path):
     input_path = tmp_path / "websocket_messages.json"
     input_path.write_text(json.dumps(messages))
 
-    features, quality, summary = normalize_websocket_file(cfg, input_path=input_path)
+    features, quality, summary = normalize_websocket_file(
+        cfg, input_path=input_path, as_of="2026-06-24T00:01:00Z"
+    )
 
     feat_csv = tmp_path / "polymarket_training" / "websocket_market_features.csv"
     qual_csv = tmp_path / "polymarket_model_governance" / "websocket_feature_quality_report.csv"
@@ -212,7 +214,9 @@ def test_normaliser_retains_existing_feature_history_for_multi_day_repricing(tmp
         encoding="utf-8",
     )
 
-    features, _, summary = normalize_websocket_file(cfg, input_path=input_path)
+    features, _, summary = normalize_websocket_file(
+        cfg, input_path=input_path, as_of="2026-06-24T00:01:00Z"
+    )
     persisted = read_csv_rows(features_path)
 
     assert {row["asset_id"] for row in persisted} == {"old-token", "tok-1"}
@@ -261,7 +265,9 @@ def test_normaliser_can_return_latest_rows_while_retaining_history(tmp_path):
         encoding="utf-8",
     )
 
-    features, _, summary = normalize_websocket_file(cfg, input_path=input_path)
+    features, _, summary = normalize_websocket_file(
+        cfg, input_path=input_path, as_of="2026-06-24T00:01:00Z"
+    )
     persisted = read_csv_rows(features_path)
 
     assert {row["asset_id"] for row in persisted} == {"old-token", "tok-1"}
@@ -324,7 +330,9 @@ def test_normaliser_can_skip_retained_history_rewrite_between_live_ticks(tmp_pat
         encoding="utf-8",
     )
 
-    features, _, summary = normalize_websocket_file(cfg, input_path=input_path)
+    features, _, summary = normalize_websocket_file(
+        cfg, input_path=input_path, as_of="2026-06-24T00:01:00Z"
+    )
     persisted = read_csv_rows(features_path)
 
     assert {str(row["asset_id"]) for row in features} == {"tok-1"}
@@ -385,7 +393,9 @@ def test_retained_history_rewrite_updates_last_write_timestamp(tmp_path):
         encoding="utf-8",
     )
 
-    _, _, summary = normalize_websocket_file(cfg, input_path=input_path)
+    _, _, summary = normalize_websocket_file(
+        cfg, input_path=input_path, as_of="2026-06-24T00:01:00Z"
+    )
 
     assert summary["feature_retention_write_skipped"] is False
     assert summary["feature_retention_last_write_utc"] != "2000-01-01T00:00:00Z"
@@ -429,7 +439,12 @@ def test_expiring_feature_rows_are_archived_not_destroyed(tmp_path):
     old_row = {"collected_at_utc": "2026-07-01T00:00:00Z", "source_timestamp": "1", "market": "m", "asset_id": "a", "best_bid": "0.4"}
     fresh_row = {"collected_at_utc": "2026-07-09T00:00:00Z", "source_timestamp": "2", "market": "m", "asset_id": "a", "best_bid": "0.5"}
 
-    retained, diagnostics = _retained_feature_rows(cfg, features_path=features_path, new_features=[old_row, fresh_row])
+    retained, diagnostics = _retained_feature_rows(
+        cfg,
+        features_path=features_path,
+        new_features=[old_row, fresh_row],
+        as_of="2026-07-09T12:00:00Z",
+    )
 
     assert [row["collected_at_utc"] for row in retained] == ["2026-07-09T00:00:00Z"]
     archive = diagnostics["training_archive"]
@@ -441,7 +456,12 @@ def test_expiring_feature_rows_are_archived_not_destroyed(tmp_path):
 
     # Disabled flag must skip archiving without touching retention behaviour.
     cfg.raw["websocket_market_data"]["training_archive_enabled"] = False
-    retained2, diagnostics2 = _retained_feature_rows(cfg, features_path=features_path, new_features=[old_row, fresh_row])
+    retained2, diagnostics2 = _retained_feature_rows(
+        cfg,
+        features_path=features_path,
+        new_features=[old_row, fresh_row],
+        as_of="2026-07-09T12:00:00Z",
+    )
     assert diagnostics2["training_archive"]["archived_rows"] == 0
     assert [row["collected_at_utc"] for row in retained2] == ["2026-07-09T00:00:00Z"]
 

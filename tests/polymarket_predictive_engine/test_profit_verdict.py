@@ -150,6 +150,47 @@ def test_frozen_cohort_finals_are_excluded_from_units(tmp_path):
     assert verdict["verdict"] == "insufficient_evidence"
 
 
+def test_position_id_fallback_cannot_inflate_gate_a_units(tmp_path):
+    cfg = _config(tmp_path)
+    rows = [
+        {
+            "shadow_position_id": f"position-{index}",
+            "signal_cohort": "sharp_anchor_wc",
+            "market_id": "",
+            "market_slug": "",
+            "question": "",
+            "close_time": "",
+            "line_kind": "closing",
+            "clv": 0.05,
+            "entry_price": 0.8,
+            "beat_close": True,
+        }
+        for index in range(12)
+    ]
+    write_csv(
+        cfg.governance_root / "closing_line_final_history.csv",
+        rows,
+        fieldnames=list(rows[0]),
+    )
+
+    verdict = build_profit_verdict(cfg)
+    gate_a = verdict["gates"]["A_edge_exists"]
+
+    # The legacy fallback would count 12 apparent units and pass the sample
+    # floor. WO-85 preserves the count for audit but holds the gate pending.
+    assert gate_a["independent_market_units"] == 12
+    assert gate_a["clustering_coverage"] == {
+        "state": "insufficient_clustering_coverage",
+        "eligible_finals": 12,
+        "position_id_fallback_finals": 12,
+        "position_id_fallback_fraction": 1.0,
+        "maximum_position_id_fallback_fraction": 0.1,
+    }
+    assert gate_a["state"] == "pending"
+    assert "insufficient_clustering_coverage" in gate_a["reason"]
+    assert verdict["verdict"] == "insufficient_evidence"
+
+
 def test_verdict_is_no_when_unit_floor_met_and_clv_nonpositive(tmp_path):
     cfg = _config(tmp_path)
     _write_finals(cfg, {f"m{m}": [-0.004] for m in range(14)})

@@ -21,7 +21,7 @@ from .runtime_lock import runtime_lock
 from .utils import ensure_dir, now_utc, read_csv_rows, read_json, serialize_value, write_json
 
 
-WORK_ORDER = "WO-78+WO-83+WO-84"
+WORK_ORDER = "WO-78+WO-83+WO-84+WO-85"
 OUTPUT_FILE = "ops_scheduler/degraded_state_watchdog.json"
 STATE_FILE = "ops_scheduler/degraded_state_watchdog_state.json"
 INCIDENT_LEDGER = "performance/degraded_state_incidents.csv"
@@ -38,6 +38,20 @@ REGISTERED_MAXIMA: dict[str, int] = {
     "wallet_not_clean_max_consecutive_harvests": 2,
     "operating_unknown_max_consecutive_cycles": 0,
     "maker_replay_insufficient_coverage_max_consecutive_cycles": 3,
+}
+
+# WO-85 (registered 2026-07-15): every recurring scheduler lane has a
+# completion-freshness ceiling. These are fixed maxima; there is no config
+# path that can widen them. The daily harvest's exact SLO is 25 hours.
+REGISTERED_JOB_FRESHNESS_MAX_SECONDS: dict[str, int] = {
+    "governance_refresh": 7 * 60 * 60,
+    "clv_snapshot": 9 * 60 * 60,
+    "locked_card_refresh": 13 * 60 * 60,
+    "training_harvest": 25 * 60 * 60,
+    "maker_study_intraday": 25 * 60 * 60,
+    "trade_prints": 20 * 60,
+    "executor_ops_monitor": 15 * 60,
+    "degraded_state_watchdog": 15 * 60,
 }
 
 MISSING_INPUT_RULES = frozenset(
@@ -146,6 +160,17 @@ def _registrations(settings: Mapping[str, Any]) -> list[dict[str, Any]]:
             "evaluation_policy": "zero-exit allowlist",
         },
         {
+            "id": "scheduler_completion_freshness",
+            "artifact": "ops_scheduler/status.json",
+            "healthy_reachable_states": ["last successful completion is within the registered job ceiling"],
+            "degraded_condition": "a periodic job has no successful completion inside its registered ceiling",
+            "max_consecutive_degraded_observations": 0,
+            "incident_on_observation": 1,
+            "observation_unit": "watchdog wall-clock observation",
+            "evaluation_policy": "immediate incident once completion age exceeds the fixed per-job maximum",
+            "registered_job_maximum_seconds": REGISTERED_JOB_FRESHNESS_MAX_SECONDS,
+        },
+        {
             "id": WALLET_REGISTRATION_ID,
             "artifact": "performance/wallet_reconciliation.json",
             "healthy_reachable_states": sorted(WALLET_HEALTHY_STATES),
@@ -190,6 +215,19 @@ def _as_of_stamp(as_of: datetime | str | None) -> str:
     if isinstance(as_of, str):
         return as_of
     return as_of.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def _parse_stamp(value: Any) -> datetime | None:
+    text = str(value or "").strip()
+    if not text:
+        return None
+    try:
+        parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
 
 
 def _incident_id(registration_id: str, entity: str, episode_start: str) -> str:
@@ -375,6 +413,120 @@ def _evaluate_scheduler(
             "state": "incident" if failing else ("healthy" if jobs else "unobserved"),
             "max_consecutive_degraded_observations": maximum,
             "failing_jobs": failing,
+        },
+        incidents,
+    )
+
+
+def _evaluate_scheduler_freshness(
+    cfg: EngineConfig,
+    state: dict[str, Any],
+    settings: Mapping[str, Any],
+    generated_at: str,
+) -> tuple[dict[str, Any], dict[str, dict[str, Any]]]:
+    """Trip immediately when a periodic job stops completing successfully."""
+
+    del settings  # fixed registration; configuration cannot widen freshness
+    relative = "ops_scheduler/status.json"
+    payload = _mapping(read_json(cfg.output_root / relative, default={}) or {})
+    jobs = _mapping(payload.get("jobs"))
+    if not jobs:
+        # A missing scheduler artifact is already UNKNOWN in WO-68. Do not
+        # manufacture wall-clock ages from unrelated watchdog-only fixtures;
+        # completion freshness activates once the scheduler has evidenced at
+        # least one real periodic job.
+        return (
+            {
+                "registration_id": "scheduler_completion_freshness",
+                "artifact": relative,
+                "state": "unobserved",
+                "jobs": [],
+                "stale_jobs": [],
+            },
+            {},
+        )
+    observed_at = _parse_stamp(generated_at) or datetime.now(timezone.utc)
+    previous_jobs = _mapping(state.get("scheduler_freshness"))
+    next_jobs: dict[str, Any] = {}
+    evaluations: list[dict[str, Any]] = []
+    incidents: dict[str, dict[str, Any]] = {}
+
+    for job_name, maximum in REGISTERED_JOB_FRESHNESS_MAX_SECONDS.items():
+        job = _mapping(jobs.get(job_name))
+        previous = _mapping(previous_jobs.get(job_name))
+        last_success = str(job.get("last_success_utc") or "").strip()
+        if not last_success:
+            try:
+                exit_code = int(job.get("last_exit_code", 1))
+            except (TypeError, ValueError):
+                exit_code = 1
+            if exit_code == 0:
+                # Backward-compatible migration for status artifacts written
+                # before WO-85 added the durable last-success field.
+                last_success = str(job.get("last_run_utc") or "").strip()
+        if not last_success:
+            last_success = str(previous.get("last_success_utc") or "").strip()
+
+        success_at = _parse_stamp(last_success)
+        first_unobserved = str(previous.get("first_unobserved_at_utc") or "").strip()
+        if success_at is not None:
+            first_unobserved = ""
+            age_seconds = max(0.0, (observed_at - success_at).total_seconds())
+            observation_token = last_success
+            observed_state = "fresh" if age_seconds <= maximum else "stale"
+        else:
+            if not first_unobserved:
+                first_unobserved = generated_at
+            first_at = _parse_stamp(first_unobserved) or observed_at
+            age_seconds = max(0.0, (observed_at - first_at).total_seconds())
+            observation_token = first_unobserved
+            observed_state = "unobserved" if age_seconds <= maximum else "stale_unobserved"
+
+        stale = age_seconds > maximum
+        next_jobs[job_name] = {
+            "last_success_utc": last_success,
+            "first_unobserved_at_utc": first_unobserved,
+            "age_seconds": round(age_seconds, 3),
+            "maximum_age_seconds": maximum,
+            "currently_stale": stale,
+        }
+        evaluations.append(
+            {
+                "job": job_name,
+                "state": observed_state,
+                "last_success_utc": last_success or None,
+                "age_seconds": round(age_seconds, 3),
+                "maximum_age_seconds": maximum,
+            }
+        )
+        if not stale:
+            continue
+        row = _incident(
+            generated_at=generated_at,
+            registration_id="scheduler_completion_freshness",
+            entity=job_name,
+            source_artifact=relative,
+            observation_token=observation_token,
+            episode_start=observation_token,
+            degraded_state=observed_state,
+            reason=(
+                f"scheduler job {job_name} has no successful completion within "
+                f"{maximum} seconds; measured age {round(age_seconds, 3)} seconds"
+            ),
+            count=1,
+            maximum=0,
+        )
+        incidents[row["incident_id"]] = row
+
+    state["scheduler_freshness"] = next_jobs
+    stale_jobs = [row for row in evaluations if row["state"].startswith("stale")]
+    return (
+        {
+            "registration_id": "scheduler_completion_freshness",
+            "artifact": relative,
+            "state": "incident" if stale_jobs else "healthy_or_initializing",
+            "jobs": evaluations,
+            "stale_jobs": stale_jobs,
         },
         incidents,
     )
@@ -680,6 +832,7 @@ def build_degraded_state_watchdog(
             _evaluate_requote,
             _evaluate_maker_replay,
             _evaluate_scheduler,
+            _evaluate_scheduler_freshness,
             _evaluate_wallet,
             _evaluate_operating_state,
         ):

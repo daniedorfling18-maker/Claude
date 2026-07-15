@@ -1,11 +1,10 @@
 # Polymarket Codex Work Orders
 
-Last updated: 2026-07-14 (WO-80, WO-82, WO-81 landed; WO-83 implemented in
+Last updated: 2026-07-15 (WO-85 implemented; WO-80, WO-82, WO-81 landed; WO-83 implemented in
 PR #203; WO-84 implemented in PR #205. WO-87 DECIDED 2026-07-14 (relabel + pre-event CLV diagnostic; spec in
-the WO). BUILD ORDER: WO-85 first (disk at 81% again — the harvest tail
-fragility is live), then WO-87 (must deploy before the 2026-07-19/20
-read so the verdict renders with honest labels), then WO-86 (must land
-before any funded live stage). Also buildable: WO-85 (harvest resilience + freshness alarm + Gate-A clustering guard). WO-33 remains pending a registered leakage review, with
+the WO). BUILD ORDER: WO-87 next (must deploy before the 2026-07-19/20
+read so the verdict renders with honest labels), then WO-86 and WO-88 (must
+land before any funded live stage). WO-33 remains pending a registered leakage review, with
 WO-34/35 model wiring bound to that review and the three-hypothesis freeze.
 WO-48 and WO-67 are blocked; WO-70 and WO-72 are deferred; WO-76 is
 registration-only. Crypto up/down is frozen as a diagnostic — see
@@ -3019,6 +3018,17 @@ existing behaviour exactly (no change to a live, fresh evaluation).
 
 ## WO-85 — Harvest resilience + freshness alarm + Gate-A clustering guard (deep-dive audit 2026-07-14)
 
+Status: IMPLEMENTED by Codex on 2026-07-15. CLI `training-harvest` now writes
+`outputs/ops_scheduler/training_harvest.json` after every child, continues
+after failures, applies a tighten-only six-hour start deadline, and always
+attempts corpus retention and ledger anchoring as its final two steps. The
+scheduler preserves `last_success_utc`; WO-78 opens an immediate owner-alert
+incident when any registered periodic lane exceeds its completion ceiling
+(25 hours for the daily harvest). Gate A now remains pending with
+`insufficient_clustering_coverage` when more than 10% of eligible finals use
+per-position fallback identities. No threshold was loosened and no paper/live
+or order path was invoked.
+
 Deep process audit found the daily `training_harvest` had not produced
 fresh output in ~27h (factsheet, ledger anchor stale; disk climbed to
 84%) while all short-cadence jobs were current. Root-cause CLASS, not
@@ -3400,7 +3410,7 @@ contains no paper/live broker, signing, order, gate, model, or sizing path.
 
 ## Current queue for Codex (reconciled 2026-07-14)
 
-**Next buildable, in order: WO-85 -> WO-87 (decided 2026-07-14) -> WO-86 -> WO-88.** WO-83 is implemented in PR #203 and
+**Next buildable, in order: WO-87 (decided 2026-07-14) -> WO-86 -> WO-88.** WO-85 is implemented on 2026-07-15; WO-83 is implemented in PR #203 and
 WO-84 is implemented in PR #205. Do not infer follow-on capital, gate, model,
 or executor work from their diagnostics; the queue below remains binding.
 

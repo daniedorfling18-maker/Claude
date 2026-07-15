@@ -349,6 +349,45 @@ def test_incident_ledger_is_registered_and_prefix_anchored(tmp_path: Path) -> No
     assert verify_ledger_chain(cfg)["status"] == "ok"
 
 
+def test_training_harvest_completion_older_than_25_hours_is_incident(
+    tmp_path: Path,
+) -> None:
+    cfg = _cfg(tmp_path)
+    write_json(
+        cfg.output_root / "ops_scheduler" / "status.json",
+        {
+            "generated_at_utc": "2026-07-15T01:00:01Z",
+            "jobs": {
+                "training_harvest": {
+                    "last_exit_code": 1,
+                    "last_run_utc": "2026-07-15T00:30:00Z",
+                    "last_success_utc": "2026-07-14T00:00:00Z",
+                }
+            },
+        },
+    )
+
+    result = build_degraded_state_watchdog(cfg, as_of="2026-07-15T01:00:01Z")
+
+    freshness = next(
+        row
+        for row in result["evaluations"]
+        if row["registration_id"] == "scheduler_completion_freshness"
+    )
+    harvest = next(row for row in freshness["jobs"] if row["job"] == "training_harvest")
+    assert harvest["age_seconds"] == 90_001.0
+    assert harvest["maximum_age_seconds"] == 90_000
+    assert harvest["state"] == "stale"
+    incident = next(
+        row
+        for row in result["active_incidents"]
+        if row["registration_id"] == "scheduler_completion_freshness"
+        and row["entity"] == "training_harvest"
+    )
+    assert incident["owner_notification_eligible"] is True
+    assert result["status"] == "incident"
+
+
 def test_cli_scheduler_dashboard_and_operating_state_are_wired() -> None:
     scheduler = Path("scripts/run_vps_ops_scheduler.sh").read_text(encoding="utf-8")
     dashboard = Path("src/polymarket_predictive_engine/dashboard.py").read_text(encoding="utf-8")

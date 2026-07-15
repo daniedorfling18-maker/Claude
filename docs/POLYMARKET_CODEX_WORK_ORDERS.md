@@ -2876,6 +2876,13 @@ so tickets can never complete and the evaluator fails closed forever.
 
 ## WO-89 — Self-anchored 24h activity window: phantom fills never expire (post-deploy telemetry read 2026-07-15; ROOT CAUSE CORRECTED by line audit same day)
 
+**2026-07-15 — WO-89 implemented by Codex.** The maker live-test scoreboard now anchors its
+24-hour reward and fill window to the run's wall-clock timestamp, never to the newest venue
+activity. Current second-scale timestamps remain unchanged, future millisecond-scale timestamps
+are normalized defensively, and invalid timestamps remain excluded without changing owner-
+activity attribution or any alert threshold. ARM64/Python 3.11 verification passed: focused lint,
+13 focused maker-live tests, repository lint, and the full 1,210-test suite.
+
 OBSERVED IN PRODUCTION (vps-telemetry snapshot 2026-07-15T13:00Z, deployed
 f5241c8): `maker_live_test_attribution_history.csv` shows
 `fills_last_24h_raw=2` on EVERY refresh from 08:00Z through 12:55Z — the two

@@ -14,7 +14,7 @@ from polymarket_predictive_engine.live_test_decision_policy import run_decision_
 from polymarket_predictive_engine.utils import read_json, write_csv, write_json
 
 
-def _config(tmp_path: Path):
+def _config(tmp_path: Path, *, live_configured: bool = False):
     tmp_path.mkdir(parents=True, exist_ok=True)
     raw = yaml.safe_load(Path("polymarket_predictive_config.example.yaml").read_text(encoding="utf-8"))
     raw["paths"]["data_root"] = str(tmp_path)
@@ -37,9 +37,17 @@ def _config(tmp_path: Path):
         "kill_single_day_net_usd": -15.0,
         "kill_fill_overrun_days": 2,
         "fill_alert_multiple": 2.0,
+        "kill_input_max_age_seconds": 1800,
         "kelly_fraction_cap": 1.0,
         "quarter_kelly_multiplier": 0.25,
     }
+    raw["maker_live_test"]["enabled"] = True
+    raw["maker_live_test"]["wallet_address"] = (
+        "0x1111111111111111111111111111111111111111" if live_configured else ""
+    )
+    raw["maker_live_test"]["executor_wallet_address"] = ""
+    raw["live_trading"]["enabled"] = False
+    raw["trading"]["mode"] = "paper"
     path = tmp_path / "config.yaml"
     path.write_text(yaml.safe_dump(raw), encoding="utf-8")
     return load_config(path)
@@ -319,7 +327,129 @@ def test_no_live_data_tolerance_and_missing_study(tmp_path):
     assert result["indicated_action"] == "collect_maker_carry_study"
     assert result["ladder_stage_permitted"] == 0
     assert result["kill_criteria_status"]["status"] == "clear"
+    assert result["kill_criteria_status"]["kill_input_freshness"]["state"] == "inactive_pre_live"
+    assert result["kill_data_stale"] is False
     assert read_json(_out(cfg) / "decision_policy.json")["paper_trading_invoked"] is False
+
+
+def test_live_stage_with_stale_kill_inputs_forces_stop(tmp_path, monkeypatch):
+    cfg = _config(tmp_path, live_configured=True)
+    _write_study(cfg, _study(top="0xm1"))
+    _write_carry_history(cfg, _history(["0xm1"] * 7))
+    write_json(
+        _out(cfg) / "maker_live_test.json",
+        {
+            "status": "ok",
+            "generated_at_utc": "2026-07-14T10:00:00Z",
+            "net_score_usd": 2.0,
+            "scoreboard": "winning_so_far",
+        },
+    )
+    _write_live_history(
+        cfg,
+        [
+            {
+                "generated_at_utc": "2026-07-14T10:00:00Z",
+                "net_score_usd": 2.0,
+                "daily_net_score_usd": 2.0,
+                "fills_last_24h": 1.0,
+                "modelled_fills_per_day": 1.0,
+                "fill_alert": False,
+                "fill_alert_multiple": 2.0,
+                "scoreboard": "winning_so_far",
+            }
+        ],
+    )
+    monkeypatch.setattr(policy, "now_utc", lambda: "2026-07-14T11:00:00Z")
+
+    result = run_decision_policy(cfg)
+    freshness = result["kill_criteria_status"]["kill_input_freshness"]
+
+    assert result["indicated_action"] == "stop_quoting_review_before_resume"
+    assert result["action_reason"] == "kill_input_data_stale"
+    assert result["kill_data_stale"] is True
+    assert result["kill_criteria_status"]["criteria"]["kill_data_stale"]["triggered"] is True
+    assert freshness["guard_active"] is True
+    assert freshness["age_seconds"] == 3600.0
+    assert freshness["maximum_age_seconds"] == 1800.0
+    assert "maker_live_test_wallet_configured" in freshness["guard_activation_reasons"]
+    assert not result["indicated_action"].startswith(("fund_", "continue_"))
+
+
+def test_live_stage_with_fresh_kill_inputs_preserves_existing_policy(tmp_path, monkeypatch):
+    cfg = _config(tmp_path, live_configured=True)
+    _write_study(cfg, _study(top="0xm1"))
+    _write_carry_history(cfg, _history(["0xm1", "0xm1", "0xm2", "0xm1", "0xm3", "0xm1"]))
+    write_json(
+        _out(cfg) / "maker_live_test.json",
+        {
+            "status": "ok",
+            "generated_at_utc": "2026-07-14T10:50:00Z",
+            "net_score_usd": 2.0,
+            "scoreboard": "winning_so_far",
+        },
+    )
+    _write_live_history(
+        cfg,
+        [
+            {
+                "generated_at_utc": "2026-07-14T10:50:00Z",
+                "net_score_usd": 2.0,
+                "daily_net_score_usd": 2.0,
+                "fills_last_24h": 1.0,
+                "modelled_fills_per_day": 1.0,
+                "fill_alert": False,
+                "fill_alert_multiple": 2.0,
+                "scoreboard": "winning_so_far",
+            }
+        ],
+    )
+    monkeypatch.setattr(policy, "now_utc", lambda: "2026-07-14T11:00:00Z")
+
+    result = run_decision_policy(cfg)
+
+    assert result["indicated_action"] == "fund_100_min_size_single_calmest_market"
+    assert result["action_reason"] == "M_A_and_M_B_pass_with_stable_top_portfolio_market"
+    assert result["kill_criteria_status"]["status"] == "clear"
+    assert result["kill_data_stale"] is False
+    assert result["kill_criteria_status"]["kill_input_freshness"]["state"] == "fresh"
+    assert result["kill_criteria_status"]["kill_input_freshness"]["age_seconds"] == 600.0
+
+
+def test_kill_input_freshness_override_can_only_tighten(tmp_path):
+    cfg = _config(tmp_path)
+    cfg.raw["decision_policy"]["kill_input_max_age_seconds"] = 99_999
+    assert policy.effective_policy_settings(cfg)["kill_input_max_age_seconds"] == 1800
+
+    cfg.raw["decision_policy"]["kill_input_max_age_seconds"] = 300
+    assert policy.effective_policy_settings(cfg)["kill_input_max_age_seconds"] == 300
+
+
+def test_live_guard_activation_covers_config_ladder_ledger_and_heartbeat(tmp_path):
+    configured = _config(tmp_path / "configured", live_configured=True)
+    configured_state = policy._live_stage_activation(configured, {"stage": 0})
+    assert configured_state["active"] is True
+    assert "maker_live_test_wallet_configured" in configured_state["reasons"]
+
+    cfg = _config(tmp_path / "artifacts")
+    assert policy._live_stage_activation(cfg, {"stage": 0})["active"] is False
+    ladder = policy._live_stage_activation(cfg, {"stage": 1})
+    assert "ladder_stage_permitted_above_zero" in ladder["reasons"]
+
+    write_csv(
+        cfg.output_root / policy.EXECUTION_LEDGER,
+        [{"recorded_at_utc": "2026-07-14T10:00:00Z"}],
+        fieldnames=["recorded_at_utc"],
+    )
+    ledger = policy._live_stage_activation(cfg, {"stage": 0})
+    assert "live_execution_ledger_exists" in ledger["reasons"]
+
+    write_json(
+        cfg.output_root / policy.EXECUTOR_HEARTBEAT,
+        {"heartbeat_at_utc": "2026-07-14T10:00:00Z"},
+    )
+    heartbeat = policy._live_stage_activation(cfg, {"stage": 0})
+    assert "live_executor_heartbeat_exists" in heartbeat["reasons"]
 
 
 def test_quote_sheet_patch_is_top_of_sheet_and_idempotent(tmp_path):

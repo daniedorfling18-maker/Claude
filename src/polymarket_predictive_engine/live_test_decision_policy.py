@@ -9,18 +9,20 @@ changes may only tighten with a dated amendment.
 from __future__ import annotations
 
 from collections import Counter
-from datetime import date
+from datetime import date, datetime
 from pathlib import Path
 import math
 import re
 from typing import Any
 
 from .config import EngineConfig, load_config
+from .executor_ops_monitor import EXECUTION_LEDGER, EXECUTOR_HEARTBEAT
 from .risk import shrunk_kelly_fraction
-from .utils import now_utc, parse_timestamp, read_csv_rows, read_json, safe_float, write_json
+from .utils import boolish, now_utc, parse_timestamp, read_csv_rows, read_json, safe_float, write_json
 
 REGISTERED_AT_UTC = "2026-07-10T00:00:00Z"
 KELLY_FULL_WEIGHT_DAYS_FLOOR = 20
+REGISTERED_KILL_INPUT_MAX_AGE_SECONDS = 30 * 60
 
 DEFAULT_SETTINGS: dict[str, Any] = {
     "enabled": True,
@@ -39,6 +41,10 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     "kill_single_day_net_usd": -15.0,
     "kill_fill_overrun_days": 2,
     "fill_alert_multiple": 2.0,
+    # WO-86 (registered 2026-07-14): once a live stage is configured or
+    # observed, blind safety data forces STOP. Configuration may shorten this
+    # maximum but can never widen it.
+    "kill_input_max_age_seconds": REGISTERED_KILL_INPUT_MAX_AGE_SECONDS,
     "kelly_fraction_cap": 1.0,
     "quarter_kelly_multiplier": 0.25,
     # 2026-07-11 WO-59 tighten-only amendment: short maker histories are
@@ -101,6 +107,11 @@ REGISTERED_ACTION_POLICY: list[dict[str, Any]] = [
 
 KILL_CRITERIA_REGISTRATION: list[dict[str, Any]] = [
     {
+        "id": "kill_data_stale",
+        "rule": "Stop when a configured or observed live stage has no kill-input observation inside the registered freshness maximum.",
+        "threshold_config_key": "kill_input_max_age_seconds",
+    },
+    {
         "id": "cumulative_real_net_score",
         "rule": "Stop when cumulative real net score is at or below the registered loss floor.",
         "threshold_config_key": "kill_cumulative_net_score_usd",
@@ -140,6 +151,13 @@ def effective_policy_settings(cfg: EngineConfig) -> dict[str, Any]:
     settings["kelly_full_weight_days"] = max(
         KELLY_FULL_WEIGHT_DAYS_FLOOR,
         int(settings.get("kelly_full_weight_days") or KELLY_FULL_WEIGHT_DAYS_FLOOR),
+    )
+    configured_freshness = safe_float(settings.get("kill_input_max_age_seconds"))
+    settings["kill_input_max_age_seconds"] = min(
+        REGISTERED_KILL_INPUT_MAX_AGE_SECONDS,
+        configured_freshness
+        if configured_freshness is not None and configured_freshness > 0
+        else REGISTERED_KILL_INPUT_MAX_AGE_SECONDS,
     )
     return settings
 
@@ -368,9 +386,119 @@ def _quarter_kelly_cap(history: list[dict[str, Any]], ladder_cap: float, setting
     }
 
 
-def _kill_criteria(live_test: dict[str, Any], live_history: list[dict[str, Any]], settings: dict[str, Any]) -> dict[str, Any]:
+def _observation_timestamp(row: dict[str, Any]) -> datetime | None:
+    for field in ("generated_at_utc", "updated_at_utc", "observed_at_utc", "timestamp"):
+        parsed = parse_timestamp(row.get(field))
+        if parsed is not None:
+            return parsed
+    return None
+
+
+def _latest_live_observation(
+    live_test: dict[str, Any], live_history: list[dict[str, Any]]
+) -> tuple[dict[str, Any], str, datetime | None]:
+    ranked: list[tuple[datetime, int, dict[str, Any], str]] = []
+    if live_test and (stamp := _observation_timestamp(live_test)) is not None:
+        ranked.append((stamp, len(live_history) + 1, live_test, "maker_live_test"))
+    for index, row in enumerate(live_history):
+        if (stamp := _observation_timestamp(row)) is not None:
+            ranked.append((stamp, index, row, "maker_live_test_history"))
+    if ranked:
+        stamp, _, row, source = max(ranked, key=lambda item: (item[0], item[1]))
+        return row, source, stamp
+    fallback = live_test or (live_history[-1] if live_history else {})
+    source = "maker_live_test" if live_test else ("maker_live_test_history" if live_history else "none")
+    return fallback, source, None
+
+
+def _live_stage_activation(cfg: EngineConfig, ladder: dict[str, Any]) -> dict[str, Any]:
+    reasons: list[str] = []
+    live_cfg = cfg.raw.get("live_trading", {}) if isinstance(cfg.raw.get("live_trading"), dict) else {}
+    maker_cfg = cfg.raw.get("maker_live_test", {}) if isinstance(cfg.raw.get("maker_live_test"), dict) else {}
+    if cfg.trading_mode == "live" or boolish(live_cfg.get("enabled")):
+        reasons.append("live_trading_configured")
+    maker_wallet = str(
+        maker_cfg.get("wallet_address") or maker_cfg.get("executor_wallet_address") or ""
+    ).strip()
+    if boolish(maker_cfg.get("enabled")) and maker_wallet:
+        reasons.append("maker_live_test_wallet_configured")
+    stage = int(safe_float(ladder.get("stage")) or 0)
+    if stage > 0:
+        reasons.append("ladder_stage_permitted_above_zero")
+    ledger_path = cfg.output_root / EXECUTION_LEDGER
+    heartbeat_path = cfg.output_root / EXECUTOR_HEARTBEAT
+    if ledger_path.exists():
+        reasons.append("live_execution_ledger_exists")
+    if heartbeat_path.exists():
+        reasons.append("live_executor_heartbeat_exists")
+    return {
+        "active": bool(reasons),
+        "reasons": reasons,
+        "ladder_stage_permitted": stage,
+        "execution_ledger_exists": ledger_path.exists(),
+        "executor_heartbeat_exists": heartbeat_path.exists(),
+    }
+
+
+def _kill_input_freshness(
+    live_test: dict[str, Any],
+    live_history: list[dict[str, Any]],
+    settings: dict[str, Any],
+    activation: dict[str, Any],
+    *,
+    as_of: datetime,
+) -> dict[str, Any]:
+    _, source, latest_at = _latest_live_observation(live_test, live_history)
+    threshold = float(settings["kill_input_max_age_seconds"])
+    age_seconds = (
+        max(0.0, (as_of - latest_at).total_seconds()) if latest_at is not None else None
+    )
+    active = bool(activation.get("active"))
+    stale = bool(active and (age_seconds is None or age_seconds > threshold))
+    if not active:
+        state = "inactive_pre_live"
+    elif latest_at is None:
+        state = "stale_missing"
+    elif stale:
+        state = "stale"
+    else:
+        state = "fresh"
+    return {
+        "state": state,
+        "guard_active": active,
+        "guard_activation_reasons": list(activation.get("reasons") or []),
+        "kill_data_stale": stale,
+        "latest_observation_source": source,
+        "latest_observation_utc": (
+            latest_at.isoformat().replace("+00:00", "Z") if latest_at is not None else None
+        ),
+        "age_seconds": round(age_seconds, 3) if age_seconds is not None else None,
+        "maximum_age_seconds": threshold,
+        "tighten_only_maximum_seconds": REGISTERED_KILL_INPUT_MAX_AGE_SECONDS,
+    }
+
+
+def _kill_criteria(
+    live_test: dict[str, Any],
+    live_history: list[dict[str, Any]],
+    settings: dict[str, Any],
+    freshness: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     daily = _daily_net_rows(live_history)
+    # Preserve every pre-WO-86 fresh-data criterion exactly. The new
+    # freshness guard is additive and may only force STOP when blind.
     latest = live_test or (daily[-1] if daily else {})
+    freshness = freshness or {
+        "state": "inactive_pre_live",
+        "guard_active": False,
+        "guard_activation_reasons": [],
+        "kill_data_stale": False,
+        "latest_observation_source": "none",
+        "latest_observation_utc": None,
+        "age_seconds": None,
+        "maximum_age_seconds": float(settings["kill_input_max_age_seconds"]),
+        "tighten_only_maximum_seconds": REGISTERED_KILL_INPUT_MAX_AGE_SECONDS,
+    }
     cumulative_net = safe_float(latest.get("net_score_usd"))
     single_day_values = [safe_float(row.get("_daily_net_score_usd")) for row in daily if safe_float(row.get("_daily_net_score_usd")) is not None]
     fill_overrun_days = 0
@@ -387,6 +515,14 @@ def _kill_criteria(live_test: dict[str, Any], live_history: list[dict[str, Any]]
         or str(live_test.get("resolution_status") or "").lower() == "disputed"
     )
     criteria = {
+        "kill_data_stale": {
+            "triggered": bool(freshness.get("kill_data_stale")),
+            "guard_active": bool(freshness.get("guard_active")),
+            "age_seconds": freshness.get("age_seconds"),
+            "threshold_seconds": freshness.get("maximum_age_seconds"),
+            "latest_observation_utc": freshness.get("latest_observation_utc"),
+            "latest_observation_source": freshness.get("latest_observation_source"),
+        },
         "cumulative_real_net_score": {
             "triggered": cumulative_net is not None and cumulative_net <= float(settings["kill_cumulative_net_score_usd"]),
             "value": cumulative_net,
@@ -415,7 +551,13 @@ def _kill_criteria(live_test: dict[str, Any], live_history: list[dict[str, Any]]
     if set(criteria) != registered_ids:
         raise RuntimeError("kill-criteria code and registration have drifted")
     triggered = [name for name, row in criteria.items() if row["triggered"]]
-    return {"triggered": triggered, "status": "triggered" if triggered else "clear", "criteria": criteria}
+    return {
+        "triggered": triggered,
+        "status": "triggered" if triggered else "clear",
+        "kill_data_stale": bool(freshness.get("kill_data_stale")),
+        "kill_input_freshness": freshness,
+        "criteria": criteria,
+    }
 
 
 def _policy_date(settings: dict[str, Any]) -> date:
@@ -439,6 +581,10 @@ def _patch_quote_sheet(out_root: Path, policy: dict[str, Any]) -> None:
             f"- Ladder stage permitted: **{policy.get('ladder_stage_permitted', '-')}** "
             f"(binding capital ${policy.get('sizing', {}).get('binding_capital_usd', '-')})",
             f"- Kill criteria: **{policy.get('kill_criteria_status', {}).get('status', '-')}**",
+            f"- Kill-input freshness: **{policy.get('kill_criteria_status', {}).get('kill_input_freshness', {}).get('state', '-')}** "
+            f"(kill_data_stale={policy.get('kill_criteria_status', {}).get('kill_data_stale', False)}, "
+            f"age={policy.get('kill_criteria_status', {}).get('kill_input_freshness', {}).get('age_seconds', '-')}s, "
+            f"max={policy.get('kill_criteria_status', {}).get('kill_input_freshness', {}).get('maximum_age_seconds', '-')}s)",
             "- Policy note: indicates only; the human decides; this system never trades.",
             end,
             "",
@@ -472,6 +618,10 @@ def run_decision_policy(cfg: EngineConfig) -> dict[str, Any]:
     live_test = read_json(out_root / "maker_live_test.json", default={}) or {}
     carry_history = read_csv_rows(out_root / "maker_carry_history.csv")
     live_history = _live_history(cfg)
+    generated_at = now_utc()
+    observed_at = parse_timestamp(generated_at)
+    if observed_at is None:
+        raise RuntimeError("decision-policy clock did not produce a valid timestamp")
     gates = study.get("maker_gates", {}) if isinstance(study.get("maker_gates"), dict) else {}
     gate_a = _state(gates, "M_A_carry_evidence", "state") or "pending"
     gate_b = _state(gates, "M_B_adverse_realism", "state") or "pending"
@@ -482,10 +632,18 @@ def run_decision_policy(cfg: EngineConfig) -> dict[str, Any]:
     below_target = [
         row for row in recent if (safe_float(row.get("portfolio_net_carry_usd_per_day")) is not None and float(row["portfolio_net_carry_usd_per_day"]) < target)
     ]
-    kill = _kill_criteria(live_test, live_history, settings)
     ladder = _ladder_stage(cfg, study, live_test, live_history, settings)
+    activation = _live_stage_activation(cfg, ladder)
+    freshness = _kill_input_freshness(
+        live_test,
+        live_history,
+        settings,
+        activation,
+        as_of=observed_at,
+    )
+    kill = _kill_criteria(live_test, live_history, settings, freshness)
     sizing = _quarter_kelly_cap(carry_history, float(ladder["ladder_capital_usd"]), settings)
-    today = (parse_timestamp(now_utc()) or parse_timestamp("1970-01-01T00:00:00Z")).date()  # type: ignore[union-attr]
+    today = observed_at.date()
     decision_date = _policy_date(settings)
 
     if kill["triggered"]:
@@ -503,15 +661,20 @@ def run_decision_policy(cfg: EngineConfig) -> dict[str, Any]:
     else:
         policy_row = _policy_row("pre_decision_evidence_pending")
     indicated = str(policy_row["indicated_action"])
-    reason = str(policy_row["reason"])
+    reason = "kill_input_data_stale" if kill["kill_data_stale"] else str(policy_row["reason"])
 
     payload = {
         "status": "ok",
         "registered_at_utc": REGISTERED_AT_UTC,
-        "generated_at_utc": now_utc(),
+        "generated_at_utc": generated_at,
         "inputs_snapshot": {
             "maker_carry_study_generated_at_utc": study.get("generated_at_utc"),
             "maker_live_test_generated_at_utc": live_test.get("generated_at_utc"),
+            "kill_input_latest_observation_utc": freshness["latest_observation_utc"],
+            "kill_input_age_seconds": freshness["age_seconds"],
+            "kill_input_maximum_age_seconds": freshness["maximum_age_seconds"],
+            "live_stage_guard_active": freshness["guard_active"],
+            "live_stage_guard_activation_reasons": freshness["guard_activation_reasons"],
             "maker_carry_history_rows": len(carry_history),
             "maker_live_test_history_rows": len(live_history),
             "gate_a_state": gate_a,
@@ -526,6 +689,7 @@ def run_decision_policy(cfg: EngineConfig) -> dict[str, Any]:
         "ladder": ladder,
         "sizing": sizing,
         "kill_criteria_status": kill,
+        "kill_data_stale": kill["kill_data_stale"],
         "policy_note": "indicates, never executes - the human decides; the system never trades",
         "paper_trading_invoked": False,
         "live_trading_invoked": False,

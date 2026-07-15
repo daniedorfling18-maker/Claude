@@ -21,7 +21,7 @@ from .runtime_lock import runtime_lock
 from .utils import ensure_dir, now_utc, read_csv_rows, read_json, serialize_value, write_json
 
 
-WORK_ORDER = "WO-78+WO-83+WO-84+WO-85"
+WORK_ORDER = "WO-78+WO-83+WO-84+WO-85+WO-86"
 OUTPUT_FILE = "ops_scheduler/degraded_state_watchdog.json"
 STATE_FILE = "ops_scheduler/degraded_state_watchdog_state.json"
 INCIDENT_LEDGER = "performance/degraded_state_incidents.csv"
@@ -169,6 +169,16 @@ def _registrations(settings: Mapping[str, Any]) -> list[dict[str, Any]]:
             "observation_unit": "watchdog wall-clock observation",
             "evaluation_policy": "immediate incident once completion age exceeds the fixed per-job maximum",
             "registered_job_maximum_seconds": REGISTERED_JOB_FRESHNESS_MAX_SECONDS,
+        },
+        {
+            "id": "kill_input_stale_live_stage",
+            "artifact": "maker_carry/decision_policy.json",
+            "healthy_reachable_states": ["inactive_pre_live", "fresh"],
+            "degraded_condition": "decision policy reports kill_data_stale while a live-stage guard is active",
+            "max_consecutive_degraded_observations": 0,
+            "incident_on_observation": 1,
+            "observation_unit": "decision-policy refresh",
+            "evaluation_policy": "immediate incident and owner alert; policy action must already be STOP",
         },
         {
             "id": WALLET_REGISTRATION_ID,
@@ -532,6 +542,76 @@ def _evaluate_scheduler_freshness(
     )
 
 
+def _evaluate_kill_input_staleness(
+    cfg: EngineConfig,
+    state: dict[str, Any],
+    settings: Mapping[str, Any],
+    generated_at: str,
+) -> tuple[dict[str, Any], dict[str, dict[str, Any]]]:
+    """Open an immediate owner-alert incident when live safety data is stale."""
+
+    del settings  # policy owns the registered tighten-only freshness maximum
+    relative = "maker_carry/decision_policy.json"
+    payload = _mapping(read_json(cfg.output_root / relative, default={}) or {})
+    kill = _mapping(payload.get("kill_criteria_status"))
+    freshness = _mapping(kill.get("kill_input_freshness"))
+    guard_active = _boolish(freshness.get("guard_active"), False)
+    stale = _boolish(kill.get("kill_data_stale"), False) and guard_active
+    latest_observation = str(freshness.get("latest_observation_utc") or "").strip()
+    observation_token = latest_observation or str(payload.get("generated_at_utc") or "").strip()
+    episode_key = "kill_input_staleness_episode_start"
+    episode_start = str(state.get(episode_key) or "").strip()
+    if stale:
+        if not episode_start:
+            episode_start = latest_observation or generated_at
+        state[episode_key] = episode_start
+    else:
+        state.pop(episode_key, None)
+
+    incidents: dict[str, dict[str, Any]] = {}
+    if stale:
+        age = freshness.get("age_seconds")
+        maximum = freshness.get("maximum_age_seconds")
+        row = _incident(
+            generated_at=generated_at,
+            registration_id="kill_input_stale_live_stage",
+            entity="maker_live_test_kill_inputs",
+            source_artifact=relative,
+            observation_token=observation_token or episode_start,
+            episode_start=episode_start,
+            degraded_state="kill_data_stale",
+            reason=(
+                "live-stage kill inputs are stale or missing; measured age "
+                f"{age} seconds against maximum {maximum} seconds; decision policy "
+                "must remain stop_quoting_review_before_resume"
+            ),
+            count=1,
+            maximum=0,
+        )
+        incidents[row["incident_id"]] = row
+
+    if not payload:
+        observed_state = "unobserved"
+    elif stale:
+        observed_state = "incident"
+    else:
+        observed_state = str(freshness.get("state") or "unknown")
+    return (
+        {
+            "registration_id": "kill_input_stale_live_stage",
+            "artifact": relative,
+            "state": observed_state,
+            "guard_active": guard_active,
+            "kill_data_stale": stale,
+            "latest_observation_utc": latest_observation or None,
+            "age_seconds": freshness.get("age_seconds"),
+            "maximum_age_seconds": freshness.get("maximum_age_seconds"),
+            "indicated_action": payload.get("indicated_action"),
+        },
+        incidents,
+    )
+
+
 def _evaluate_maker_replay(
     cfg: EngineConfig,
     state: dict[str, Any],
@@ -833,6 +913,7 @@ def build_degraded_state_watchdog(
             _evaluate_maker_replay,
             _evaluate_scheduler,
             _evaluate_scheduler_freshness,
+            _evaluate_kill_input_staleness,
             _evaluate_wallet,
             _evaluate_operating_state,
         ):

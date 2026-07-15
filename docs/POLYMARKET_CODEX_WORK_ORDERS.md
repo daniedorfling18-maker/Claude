@@ -2874,6 +2874,57 @@ so tickets can never complete and the evaluator fails closed forever.
    must land before the $100 human stage starts — the requote loop is
    that stage's safety net.
 
+## WO-89 — Venue activity timestamp units: phantom 24h fills + WO-88 matching cannot fire (post-deploy telemetry read 2026-07-15)
+
+OBSERVED IN PRODUCTION (vps-telemetry snapshot 2026-07-15T13:00Z, deployed
+f5241c8): `maker_live_test_attribution_history.csv` shows
+`fills_last_24h_raw=2` on EVERY refresh from 08:00Z through 12:55Z — the two
+2026-07-13 operator drill fills, more than 36 hours old. Under correct
+second-based stamps both fills leave the 24h window on 2026-07-14. At 08:50Z
+`modelled_fills_per_day` dropped to 0.39 and the phantom count re-fired
+`STOP_fills_outrunning_model`.
+
+ROOT CAUSE: the data-api activity `timestamp` field arrives at millisecond
+scale, and `maker_live_test._stamp` is `safe_float(timestamp) or 0.0` with no
+unit detection, so every activity row compares greater than any seconds-based
+`day_ago` forever. Consequences, all in the over-alarm direction but wrong:
+
+1. `fills_last_24h` never decays: permanent phantom fill counts, recurring
+   false STOPs whenever the modelled rate dips, and during a live stage a
+   permanently broken WO-50 consecutive-ok-day ladder.
+2. `rewards_usd_24h` equals all-time rewards (same `_stamp` on reward rows).
+3. `owner_activity_attribution._trade_fields` feeds the raw millisecond stamp
+   into the registered ±300 s matching window against seconds-based anchored
+   operator-log times, so owner exclusion is STRUCTURALLY impossible — even a
+   perfect anchored log entry can never match.
+
+REGISTERED FIX (single small change; thresholds and windows untouched):
+- One shared timestamp normalization used by `maker_live_test._stamp` and
+  `owner_activity_attribution._trade_fields`, following the convention already
+  registered in `corpus_retention._row_time`: numeric value > 10_000_000_000
+  is milliseconds and divides by 1000; ISO-string fallback via
+  `parse_timestamp` stays. NOTHING else changes: `fill_alert_multiple`, the
+  86400 s window, the ±300 s match window, and every kill threshold are
+  byte-identical.
+- Fail-safe preserved exactly: an unparseable stamp remains 0.0/None — never
+  counted as recent, never matched, stays in the maker-test population.
+- Registered consequence: with correct units the 2026-07-13 drill fills age
+  out immediately, which resolves the 2026-07-14 STOP by the aging-out arm of
+  WO-88's registered review note. NO retroactive operator-log entry may be
+  created for those drills: the log is append-only and anchored, and a
+  today-logged entry could never honestly match a 2026-07-13 trade inside
+  ±300 s. The runbook remains the human record for pre-WO-82 drills.
+- Non-defect noted for the record: `operator_log_not_anchored` in the same
+  snapshot is CORRECT behavior — `execution/stage_operator_log.csv` does not
+  exist because the drills predate WO-82 usage. Future owner drills must be
+  logged through the stage-operator path before execution.
+
+Tests: (a) millisecond-scale fixtures (~1.78e12) age out of the 24h window on
+schedule; (b) second-scale fixtures behave identically to today; (c) an
+anchored logged action matches a millisecond trade stamp inside ±300 s;
+(d) unparseable stamps are excluded and remain maker_test; (e) rewards_24h
+windows correctly under millisecond stamps.
+
 ## WO-88 — Attribution-aware kill scoreboard under A1 (live false-STOP 2026-07-14)
 
 OBSERVED IN PRODUCTION 16:26Z: the kill scoreboard fired
@@ -3477,7 +3528,8 @@ pre-target scoreboard gap without authorising or placing an order.
 
 ## Current queue for Codex (reconciled 2026-07-15)
 
-**No buildable work order is currently queued.** WO-85, WO-87, WO-86, and
+**Next buildable: WO-89** (single small timestamp-unit fix; evidence and
+registered fix above). WO-85, WO-87, WO-86, and
 WO-88 are implemented on 2026-07-15; WO-83 is implemented in PR #203 and
 WO-84 is implemented in PR #205. Do not infer follow-on capital, gate, model,
 or executor work from their diagnostics; the queue below remains binding.

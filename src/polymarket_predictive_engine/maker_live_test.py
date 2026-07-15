@@ -24,13 +24,14 @@ module fully inert.
 """
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from typing import Any
 
 import requests
 
 from .config import EngineConfig, load_config
 from .owner_activity_attribution import attribute_owner_activity
-from .utils import append_csv_rows, now_utc, read_csv_rows, read_json, safe_float, write_json
+from .utils import append_csv_rows, now_utc, parse_timestamp, read_csv_rows, read_json, safe_float, write_json
 
 DEFAULT_DATA_API_BASE_URL = "https://data-api.polymarket.com"
 
@@ -111,7 +112,8 @@ def _usd(row: dict[str, Any]) -> float:
 
 
 def _stamp(row: dict[str, Any]) -> float:
-    return safe_float(row.get("timestamp")) or 0.0
+    value = safe_float(row.get("timestamp")) or 0.0
+    return value / 1000.0 if value > 10_000_000_000 else value
 
 
 def _modelled_fills_per_day(cfg: EngineConfig) -> float | None:
@@ -157,7 +159,8 @@ def _wallet_score(
     trades = _fetch(settings, "activity", {"user": wallet_address, "type": "TRADE", "limit": limit})
     positions = _fetch(settings, "positions", {"user": wallet_address, "limit": limit})
 
-    now_seconds = max([_stamp(row) for row in rewards + trades] + [0.0])
+    observed_at = parse_timestamp(generated_at) or datetime.now(timezone.utc)
+    now_seconds = observed_at.timestamp()
     day_ago = now_seconds - 86400.0
     rewards_total = round(sum(_usd(row) for row in rewards), 4)
     rewards_24h = round(sum(_usd(row) for row in rewards if _stamp(row) >= day_ago), 4)
@@ -243,7 +246,7 @@ def run_maker_live_test(cfg: EngineConfig) -> dict[str, Any]:
     summary: dict[str, Any] = {
         "status": "disabled",
         "generated_at_utc": now_utc(),
-        "work_order": "WO-36+WO-73+WO-81+WO-88",
+        "work_order": "WO-36+WO-73+WO-81+WO-88+WO-89",
         "account_structure": "single_project_account_under_custody_amendment_A1",
         "paper_trading_invoked": False,
         "live_trading_invoked": False,
@@ -306,7 +309,7 @@ def run_maker_live_test(cfg: EngineConfig) -> dict[str, Any]:
     summary.update(
         {
             "status": "ok",
-            "work_order": "WO-36+WO-73+WO-81+WO-88",
+            "work_order": "WO-36+WO-73+WO-81+WO-88+WO-89",
             "account_structure": "single_project_account_under_custody_amendment_A1",
             "attribution_policy": "human and executor mode/time windows never overlap; anchored ledgers attribute activity",
             "primary_wallet_role": primary_role,

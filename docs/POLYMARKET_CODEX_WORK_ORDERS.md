@@ -2,8 +2,9 @@
 
 Last updated: 2026-07-16 (owner-authorized corrective batch opened with WO-93; WO-85, WO-87, WO-86, and WO-88 implemented; WO-80, WO-82, WO-81 landed; WO-83 implemented in
 PR #203; WO-84 implemented in PR #205; WO-89 through WO-92 implemented. WO-87 now relabels the unchanged legacy verdict metric honestly and
-reports non-binding true pre-event CLV on the same units. WO-93 is the active
-owner-authorized corrective work order. WO-33 remains pending a registered leakage review, with
+reports non-binding true pre-event CLV on the same units. WO-93 was implemented
+in PR #236; WO-94 is the active owner-authorized corrective work order. WO-33
+remains pending a registered leakage review, with
 WO-34/35 model wiring bound to that review and the three-hypothesis freeze.
 WO-48 and WO-67 are blocked; WO-70 and WO-72 are deferred; WO-76 is
 registration-only. Crypto up/down is frozen as a diagnostic — see

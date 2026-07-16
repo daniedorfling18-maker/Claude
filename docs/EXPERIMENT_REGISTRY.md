@@ -132,7 +132,8 @@ Each live scan uses one UTC timestamp and records every completely priced
 Every leg must have a unique token, a positive displayed best-ask size, and a
 canonical WO-94 fee schedule. The common executable size is the minimum
 displayed top-ask size. Per completed basket, capital is the ask sum plus all
-entry taker fees plus a fixed `0.002` USDC slippage/adverse-selection reserve;
+entry taker fees (with the venue's five-decimal per-order rounding) plus a
+fixed `0.002` USDC slippage/adverse-selection reserve;
 net profit is one USDC minus that all-in capital. The primary metric is net
 return on capital annualised by the positive event-resolution holding time.
 Missing, incomplete, ambiguous, stale, non-finite, already-ended, or otherwise

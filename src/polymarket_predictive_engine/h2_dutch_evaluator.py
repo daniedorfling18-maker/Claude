@@ -73,6 +73,7 @@ OBSERVATION_FIELDS = [
     "common_size",
     "gross_cost_per_set",
     "entry_taker_fees_per_set",
+    "entry_taker_fees_usdc",
     "registered_cost_reserve_per_set",
     "all_in_cost_per_set",
     "gross_profit_per_set",
@@ -106,6 +107,7 @@ EPISODE_FIELDS = [
     "common_size",
     "ask_sum",
     "entry_taker_fees_per_set",
+    "entry_taker_fees_usdc",
     "registered_cost_reserve_per_set",
     "all_in_cost_per_set",
     "net_profit_per_set",
@@ -242,10 +244,10 @@ def build_h2_scan_observation(
             {
                 "outcome": str(getattr(leg, "outcome", "") or ""),
                 "token_id": str(getattr(leg, "token_id", "") or ""),
-                "best_ask": round(ask, 10),
-                "ask_size": round(size, 8),
-                "taker_fee_per_share": round(fee, 10),
-                "taker_fee_rate": round(rate, 10),
+                "best_ask": ask,
+                "ask_size": size,
+                "taker_fee_per_share": fee,
+                "taker_fee_rate": rate,
                 "taker_fee_category": category,
                 "taker_fee_source": source,
                 "taker_fee_enabled": enabled,
@@ -258,7 +260,11 @@ def build_h2_scan_observation(
     if plan_ask_sum is None or not _same(plan_ask_sum, ask_sum):
         return None, "inconsistent_ask_sum"
     common_size = min(float(leg["ask_size"]) for leg in exact_legs)
-    fees_per_set = sum(float(leg["taker_fee_per_share"]) for leg in exact_legs)
+    entry_fees_usdc = sum(
+        round(float(leg["taker_fee_per_share"]) * common_size, 5)
+        for leg in exact_legs
+    )
+    fees_per_set = entry_fees_usdc / common_size
     all_in_cost = ask_sum + fees_per_set + REGISTERED_COST_RESERVE_PER_SET
     if all_in_cost <= 0:
         return None, "invalid_all_in_cost"
@@ -289,6 +295,7 @@ def build_h2_scan_observation(
         "common_size": round(common_size, 8),
         "gross_cost_per_set": round(ask_sum, 10),
         "entry_taker_fees_per_set": round(fees_per_set, 10),
+        "entry_taker_fees_usdc": round(entry_fees_usdc, 8),
         "registered_cost_reserve_per_set": REGISTERED_COST_RESERVE_PER_SET,
         "all_in_cost_per_set": round(all_in_cost, 10),
         "gross_profit_per_set": round(gross_profit_per_set, 10),
@@ -433,7 +440,8 @@ def _parse_observation(raw: dict[str, Any]) -> tuple[dict[str, Any] | None, str]
 
     ask_sum = sum(asks)
     common_size = min(sizes)
-    fees_per_set = sum(fees)
+    entry_fees_usdc = sum(round(fee * common_size, 5) for fee in fees)
+    fees_per_set = entry_fees_usdc / common_size
     reserve = _finite(raw.get("registered_cost_reserve_per_set"))
     all_in_cost = ask_sum + fees_per_set + REGISTERED_COST_RESERVE_PER_SET
     holding_seconds = (resolution_at - observed_at).total_seconds()
@@ -453,6 +461,7 @@ def _parse_observation(raw: dict[str, Any]) -> tuple[dict[str, Any] | None, str]
         "common_size": common_size,
         "gross_cost_per_set": ask_sum,
         "entry_taker_fees_per_set": fees_per_set,
+        "entry_taker_fees_usdc": entry_fees_usdc,
         "all_in_cost_per_set": all_in_cost,
         "gross_profit_per_set": 1.0 - ask_sum,
         "net_profit_per_set": net_profit_per_set,
@@ -490,6 +499,7 @@ def _parse_observation(raw: dict[str, Any]) -> tuple[dict[str, Any] | None, str]
             "common_size": common_size,
             "ask_sum": ask_sum,
             "entry_taker_fees_per_set": fees_per_set,
+            "entry_taker_fees_usdc": entry_fees_usdc,
             "all_in_cost_per_set": all_in_cost,
             "net_profit_per_set": net_profit_per_set,
             "all_in_capital_usdc": all_in_capital,
@@ -585,6 +595,7 @@ def _new_episode(row: dict[str, Any]) -> dict[str, Any]:
         "common_size": round(float(row["common_size"]), 8),
         "ask_sum": round(float(row["ask_sum"]), 10),
         "entry_taker_fees_per_set": round(float(row["entry_taker_fees_per_set"]), 10),
+        "entry_taker_fees_usdc": round(float(row["entry_taker_fees_usdc"]), 8),
         "registered_cost_reserve_per_set": REGISTERED_COST_RESERVE_PER_SET,
         "all_in_cost_per_set": round(float(row["all_in_cost_per_set"]), 10),
         "net_profit_per_set": round(float(row["net_profit_per_set"]), 10),

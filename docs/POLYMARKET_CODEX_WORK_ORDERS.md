@@ -4180,7 +4180,8 @@ Registered implementation contract:
    appends one immutable exact observation per completely priced event per
    scan to `outputs/h2_dutch/h2_scan_observations_v1.csv`. One injected UTC
    clock governs all rows in a scan. Rows preserve event/token identity,
-   per-leg displayed ask/size and WO-94 fee provenance, common size,
+   per-leg displayed ask/size, WO-94 fee provenance and official five-decimal
+   per-order fee rounding, common size,
    resolution time, the fixed 0.002-per-basket cost reserve, all-in capital,
    net profit/return, qualification, and both trading-invoked flags false.
    The producer writes qualifying and complete non-qualifying rows; a missing

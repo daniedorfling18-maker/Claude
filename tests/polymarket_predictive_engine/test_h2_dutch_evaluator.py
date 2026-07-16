@@ -103,19 +103,25 @@ def test_exact_scan_economics_use_common_depth_fees_and_registered_reserve(
     tmp_path: Path,
 ) -> None:
     observed_at = datetime(2026, 7, 13, 0, 0, tzinfo=timezone.utc)
-    plan = _plan("edge", observed_at)
+    plan = _plan("edge", observed_at, sizes=(10.0, 7.3333, 12.0))
     row, reason = build_h2_scan_observation(plan, observed_at=observed_at)
 
     assert reason == ""
     assert row is not None
-    expected_fees = 0.05 * 0.30 * 0.70 * 2 + 0.05 * 0.35 * 0.65
+    common_size = 7.3333
+    expected_fee_usdc = (
+        round(0.05 * 0.30 * 0.70 * common_size, 5) * 2
+        + round(0.05 * 0.35 * 0.65 * common_size, 5)
+    )
+    expected_fees = expected_fee_usdc / common_size
     expected_all_in = 0.95 + expected_fees + 0.002
     expected_net_per_set = 1.0 - expected_all_in
-    assert row["common_size"] == 8.0
+    assert row["common_size"] == common_size
     assert row["entry_taker_fees_per_set"] == approx(expected_fees)
+    assert row["entry_taker_fees_usdc"] == approx(expected_fee_usdc)
     assert row["registered_cost_reserve_per_set"] == REGISTERED_COST_RESERVE_PER_SET
     assert row["all_in_cost_per_set"] == approx(expected_all_in)
-    assert row["net_profit_usdc"] == approx(expected_net_per_set * 8.0)
+    assert row["net_profit_usdc"] == approx(expected_net_per_set * common_size)
     assert row["net_return_on_capital"] == approx(expected_net_per_set / expected_all_in)
     assert row["annualised_net_return_on_capital"] == approx(
         (expected_net_per_set / expected_all_in) * 365.0 / 30.0

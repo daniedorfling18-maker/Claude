@@ -128,16 +128,17 @@ function Get-LiquidityQueryScore {
         [object]$FamilyRows
     )
     $familiesByQuery = @{
-        "btc updown" = @("crypto_btc_updown_5m", "crypto_btc_updown_15m")
-        "xrp updown" = @("crypto_xrp_updown_5m", "crypto_xrp_updown_event")
-        "solana updown" = @("crypto_sol_updown_5m")
-        "eth updown" = @("crypto_eth_updown_5m", "crypto_eth_updown_15m")
-        "bitcoin" = @("crypto_btc_special", "crypto_btc_updown_5m", "crypto_btc_updown_15m")
-        "ethereum" = @("crypto_eth_updown_5m", "crypto_eth_updown_15m")
-        "solana" = @("crypto_sol_updown_5m", "crypto_special")
-        "xrp" = @("crypto_xrp_special", "crypto_xrp_updown_5m")
         "world cup" = @("sports_other", "worldcup")
         "tennis" = @("tennis_itf_total", "tennis_atp_total", "tennis_wta_total", "unknown")
+        "nba" = @("basketball_nba", "basketball")
+        "mlb" = @("baseball_mlb", "baseball")
+        "mma" = @("mma", "ufc")
+        "sports" = @("sports_other", "soccer_match", "tennis_match_winner", "basketball_nba", "baseball_mlb")
+        "politics" = @("politics", "elections")
+        "elections" = @("politics", "elections")
+        "fed" = @("macro_rates")
+        "economy" = @("macro_economy", "macro_rates")
+        "stocks" = @("stocks", "finance")
     }
     $queryKey = $Query.ToLowerInvariant()
     if (-not $familiesByQuery.ContainsKey($queryKey)) {
@@ -170,15 +171,15 @@ function Get-LiquidityQueryScore {
 
 function Set-DefaultResearchScanEnvironment {
     if ([string]::IsNullOrWhiteSpace($env:POLYMARKET_SCAN_QUERY_MODE)) {
-        $env:POLYMARKET_SCAN_QUERY_MODE = "rotate"
+        $env:POLYMARKET_SCAN_QUERY_MODE = "batch"
     }
     if ([string]::IsNullOrWhiteSpace($env:POLYMARKET_MAX_SCAN_QUERIES)) {
-        $env:POLYMARKET_MAX_SCAN_QUERIES = "1"
+        $env:POLYMARKET_MAX_SCAN_QUERIES = "3"
     }
     if (-not [string]::IsNullOrWhiteSpace($env:POLYMARKET_QUERIES)) {
         return
     }
-    $defaultQueries = @("btc updown", "xrp updown", "solana updown", "eth updown", "bitcoin", "ethereum", "solana", "xrp", "world cup", "tennis")
+    $defaultQueries = @("world cup", "tennis", "nba", "mlb", "mma", "sports", "politics", "elections", "fed", "economy", "stocks")
     $liquidityPath = Join-Path $RepoRoot "outputs\polymarket_model_governance\liquidity_discovery_summary.json"
     if (-not (Test-Path -LiteralPath $liquidityPath)) {
         return

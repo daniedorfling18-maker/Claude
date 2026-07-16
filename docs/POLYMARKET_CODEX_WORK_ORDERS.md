@@ -3,8 +3,8 @@
 Last updated: 2026-07-16 (owner-authorized corrective batch opened with WO-93; WO-85, WO-87, WO-86, and WO-88 implemented; WO-80, WO-82, WO-81 landed; WO-83 implemented in
 PR #203; WO-84 implemented in PR #205; WO-89 through WO-92 implemented. WO-87 now relabels the unchanged legacy verdict metric honestly and
 reports non-binding true pre-event CLV on the same units. WO-93 was implemented
-in PR #236; WO-94 is the active owner-authorized corrective work order. WO-33
-remains pending a registered leakage review, with
+in PR #236 and WO-94 in PR #237; WO-95 is the active owner-authorized
+corrective work order. WO-33 remains pending a registered leakage review, with
 WO-34/35 model wiring bound to that review and the three-hypothesis freeze.
 WO-48 and WO-67 are blocked; WO-70 and WO-72 are deferred; WO-76 is
 registration-only. Crypto up/down is frozen as a diagnostic — see
@@ -3861,17 +3861,86 @@ non-empty `taker_fee_model_version`, `taker_fee_source`, and category/rate,
 and `fee_usdc` must equal the documented price-shaped formula (or zero only
 when the row records explicit fee-disabled/exact-zero evidence).
 
+## WO-95 — Remove frozen crypto up/down priority and prevent discovery starvation
+
+Status: IN IMPLEMENTATION by Codex on 2026-07-16.
+
+Owner authorization: the 2026-07-16 instruction to remove frozen up/down
+priority and fix discovery starvation. This is a tighten-only observation-
+routing correction. It does not delete historical up/down data or labels, and
+open positions remain websocket-tracked for risk management, but the frozen
+family cannot consume active discovery, modelling, or websocket-discovery
+priority.
+
+Observed production evidence before implementation: the 2026-07-16T15:36:30Z
+live discovery heartbeat selected `btc updown` in an eight-query cycle. The
+latest liquidity artifact expanded adaptive up/down requests and aliases into
+the front of a 76-query plan. Targeted mode also disabled broad discovery, the
+dedicated up/down refresh ran every discovery pass, and its snapshot preceded
+the general scanner snapshot in the websocket asset budget.
+
+Registered correction:
+
+1. One shared immutable discovery policy excludes crypto up/down wording from
+   configured, environment, adaptive, rejected-query, alias, and token-level
+   active discovery. A stale config cannot widen this freeze. Every exclusion
+   is recorded as `frozen_crypto_updown_no_collection_priority`.
+2. The paper scan and liquidity scan reserve one rotating query per cycle for
+   each registered primary hypothesis: H1 sharp-anchor maker carry, H2
+   persistent dutch consistency, and H3 structural-bias/smart-flow CLV. A
+   three-slot or larger plan is `ok` only when all three lanes are present.
+3. Remove the dedicated fast-up/down refresh from the live discovery path,
+   resource-guard fallback, websocket discovery candidates, and live-feature
+   metadata priority. Existing open positions, governed paper signals, and
+   settlement/label history remain untouched and continue to outrank discovery
+   tokens where required for risk lifecycle coverage.
+4. Targeted liquidity mode may reduce breadth and token limits, but may not
+   disable the three-lane reserve. Round-robin token sampling excludes up/down
+   tokens even when a broad endpoint returns them, so top-active results cannot
+   recreate the starvation through a non-up/down query.
+5. Current config removes direct up/down queries, aliases, date expansion, and
+   rotation controls. Existing thresholds, fees, model gates, capital gates,
+   paper sizing, and every live/order/signer path remain byte-for-byte outside
+   this work order.
+
+Producer/coverage contract: `research_focus.py` produces guarded adaptive
+queries; `run_polymarket_live_paper_loop.py` and
+`run_polymarket_liquidity_discovery.py` consume them. Each consumer must cover
+H1/H2/H3 on every plan with at least three slots and must report excluded
+frozen queries/tokens. When fewer than three slots are configured, coverage is
+explicitly `starved`; no missing lane is silently treated as observed.
+
+Fail-safe sentence: missing or malformed adaptive artifacts contribute no
+priority; up/down-like text is excluded; missing primary-lane config falls back
+to the frozen default three-lane map; and insufficient query capacity reports
+`starved` rather than claiming complete discovery.
+
+Engineering-standards review: S1 adds no time window or timestamp parser. S2
+adds no writer/cadence and retains the existing atomic heartbeat/liquidity
+summary paths. S3 is the producer/consumer contract above. S4 uses sanitized
+recorded VPS discovery telemetry plus deterministic rotation, deduplication,
+capacity, and token-filter properties. S5 is stated above. S7 review must prove
+that gates, thresholds, evidence classes, historical rows, position tracking,
+and order paths are unchanged.
+
+Day-after check: in
+`outputs/polymarket_model_governance/local_live_loop_discovery_heartbeat.json`,
+`scan.scan_plan.frozen_updown.selected_count` is `0` and
+`scan.scan_plan.primary_hypothesis_coverage.status` is `ok`; in
+`liquidity_discovery_summary.json`, `frozen_updown.selected_query_count` is `0`
+and both event/public `primary_hypothesis_coverage.status` fields are `ok`.
+
 ## Current queue for Codex (reconciled 2026-07-16)
 
 Every WO below and every future WO must comply with
 `docs/ENGINEERING_STANDARDS.md` (S1-S7), including the mandatory
 `Day-after check:` line. Reviews verify compliance item by item.
 
-**WO-94 is the active owner-authorized corrective work order.** Later items in
+**WO-95 is the active owner-authorized corrective work order.** Later items in
 the 2026-07-16 owner instruction require their own numbered work order and PR;
 do not combine them into this change. WO-89 through WO-92 were implemented as
 of 2026-07-15.
-WO-93 was implemented in PR #236. WO-85, WO-87, WO-86, and
+WO-93 was implemented in PR #236 and WO-94 in PR #237. WO-85, WO-87, WO-86, and
 WO-88 are implemented on 2026-07-15; WO-83 is implemented in PR #203 and
 WO-84 is implemented in PR #205. Do not infer follow-on capital, gate, model,
 or executor work from their diagnostics; the queue below remains binding.

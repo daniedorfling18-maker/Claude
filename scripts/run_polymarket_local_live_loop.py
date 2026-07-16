@@ -37,6 +37,7 @@ for path in (SRC, SCRIPTS):
 from polymarket_predictive_engine.config import load_config  # noqa: E402
 from polymarket_predictive_engine.cohort_validation import write_signal_cohort_pnl  # noqa: E402
 from polymarket_predictive_engine.dashboard import render_dashboard  # noqa: E402
+from polymarket_predictive_engine.discovery_policy import is_frozen_updown_record  # noqa: E402
 from polymarket_predictive_engine.execution.paper import paper_trade  # noqa: E402
 from polymarket_predictive_engine.paper_cycle import run_paper_cycle  # noqa: E402
 from polymarket_predictive_engine.price_action_signals import build_price_action_paper_signals  # noqa: E402
@@ -191,9 +192,18 @@ def _row_has_closed(row: dict[str, Any], *, now_dt: datetime | None = None) -> b
     return close_time.astimezone(timezone.utc) <= now.astimezone(timezone.utc)
 
 
-def _add_tokens_from_csv(path: Path, tokens: dict[str, str], source: str, *, skip_closed: bool = False) -> None:
+def _add_tokens_from_csv(
+    path: Path,
+    tokens: dict[str, str],
+    source: str,
+    *,
+    skip_closed: bool = False,
+    skip_frozen_updown: bool = False,
+) -> None:
     for row in read_csv_rows(path):
         if skip_closed and _row_has_closed(row):
+            continue
+        if skip_frozen_updown and is_frozen_updown_record(row):
             continue
         for column in ("token_id", "asset_id", "outcome_token_id"):
             token = str(row.get(column) or "").strip()
@@ -455,22 +465,22 @@ def discover_websocket_asset_ids(cfg, *, include_static_config: bool = False, ma
     _add_maker_quote_sheet_tokens(cfg, tokens)
     model_csv = ROOT / os.environ.get("POLYMARKET_MODEL_PROBABILITIES_CSV", "inputs/polymarket/model_probabilities.csv")
     candidates = [
-        (cfg.output_root / "polymarket_portfolio" / "positions.csv", "open_positions"),
-        (cfg.output_root / "polymarket_predictions" / "trade_signals.csv", "trade_signals"),
-        (cfg.governance_root / "websocket_liquidity_targets.csv", "websocket_liquidity_targets"),
-        (_fast_updown_snapshot_path(cfg), "fast_updown_5m"),
-        (cfg.output_root / "polymarket_shadow" / "shadow_positions.csv", "shadow_positions"),
-        (cfg.output_root / "polymarket" / "market_snapshot.csv", "scanner_snapshot"),
-        (model_csv, "model_probabilities"),
-        (cfg.output_root / "polymarket_predictions" / "predictions.csv", "predictions"),
+        (cfg.output_root / "polymarket_portfolio" / "positions.csv", "open_positions", False),
+        (cfg.output_root / "polymarket_predictions" / "trade_signals.csv", "trade_signals", True),
+        (cfg.governance_root / "websocket_liquidity_targets.csv", "websocket_liquidity_targets", True),
+        (cfg.output_root / "polymarket_shadow" / "shadow_positions.csv", "shadow_positions", False),
+        (cfg.output_root / "polymarket" / "market_snapshot.csv", "scanner_snapshot", True),
+        (model_csv, "model_probabilities", True),
+        (cfg.output_root / "polymarket_predictions" / "predictions.csv", "predictions", True),
     ]
-    for path, source in candidates:
+    for path, source, skip_frozen_updown in candidates:
         if path.exists():
             _add_tokens_from_csv(
                 path,
                 tokens,
                 source,
                 skip_closed=source == "websocket_liquidity_targets",
+                skip_frozen_updown=skip_frozen_updown,
             )
 
     if include_static_config:
@@ -505,7 +515,7 @@ def enrich_websocket_features_with_scanner_metadata(cfg, features: list[dict[str
     says "asset 123 moved".
     """
     snapshot_path = cfg.output_root / "polymarket" / "market_snapshot.csv"
-    snapshot_paths = [_fast_updown_snapshot_path(cfg), snapshot_path]
+    snapshot_paths = [snapshot_path]
     metadata_by_token: dict[str, dict[str, Any]] = {}
     for path in snapshot_paths:
         for row in read_csv_rows(path):
@@ -859,12 +869,15 @@ def _run_discovery_iteration(
             )
         else:
             liquidity_discovery = (
-                discovery_loop.run_liquidity_discovery(cfg, mode="targeted-evidence")
+                discovery_loop.run_liquidity_discovery(
+                    cfg,
+                    mode="targeted-evidence",
+                    scan_sequence=next_iteration,
+                )
                 if bool(cfg.raw.get("liquidity_discovery", {}).get("enabled", True))
                 else {"status": "disabled"}
             )
             scan = discovery_loop.scan_once(cfg, scan_sequence=next_iteration)
-            fast_updown = refresh_fast_updown_snapshot(cfg)
             ingest = discovery_loop.ingest_scanner_snapshot(cfg, snapshot_path=scan["snapshot_path"])
             settlement = discovery_loop._run_settlement_only_cycle(cfg)
             summary = {
@@ -875,7 +888,11 @@ def _run_discovery_iteration(
                 "live_trading": False,
                 "resource_guard": guard,
                 "scan": scan,
-                "fast_updown": fast_updown,
+                "fast_updown": {
+                    "status": "disabled_frozen_diagnostic",
+                    "tokens": 0,
+                    "collection_priority": False,
+                },
                 "liquidity_discovery": liquidity_discovery,
                 "ingest": ingest,
                 "settlement": settlement,
@@ -1394,56 +1411,18 @@ def _first_discovery_should_precede_governance(
 
 
 def _degraded_discovery_refresh(cfg, guard: dict[str, Any], *, reason: str) -> dict[str, Any]:
-    """Run the cheapest edge-relevant discovery lane while heavy discovery is guarded off.
-
-    Full scanner discovery can be memory/CPU heavy on a local laptop.  The fast
-    crypto Up/Down lane is deliberately bounded by slots/tokens and is the lane
-    with current positive cohort evidence, so degraded mode should keep it fresh
-    instead of letting the only promoted short-horizon opportunity source go
-    stale.
-    """
-    settings = cfg.raw.get("runtime_resource_guard", {}) or {}
-    if not _truthy_setting(settings.get("allow_degraded_fast_updown_refresh"), default=True):
-        return {
-            "status": "skipped_resource_guard",
-            "mode": "degraded_discovery_disabled",
-            "generated_at_utc": now_utc(),
-            "live_data": False,
-            "live_trading": False,
-            "resource_guard": guard,
-            "message": "Background discovery skipped to protect local machine resources.",
-            "reason": reason,
-        }
-    try:
-        fast_updown = refresh_fast_updown_snapshot(cfg)
-        tokens = int(safe_float(fast_updown.get("tokens")) or 0) if isinstance(fast_updown, dict) else 0
-        return {
-            "status": "ran",
-            "mode": "degraded_fast_updown_refresh",
-            "generated_at_utc": now_utc(),
-            "live_data": tokens > 0,
-            "live_trading": False,
-            "resource_guard": guard,
-            "reason": reason,
-            "scan": {
-                "status": "skipped_resource_guard",
-                "message": "Full scanner discovery skipped; refreshed bounded fast Up/Down lane only.",
-            },
-            "fast_updown": fast_updown,
-            "optimization": {"status": "skipped_resource_guard"},
-        }
-    except Exception as exc:  # noqa: BLE001 - degraded refresh should never stop the live tick
-        return {
-            "status": "error",
-            "mode": "degraded_fast_updown_refresh",
-            "generated_at_utc": now_utc(),
-            "live_data": False,
-            "live_trading": False,
-            "resource_guard": guard,
-            "reason": reason,
-            "error": f"{type(exc).__name__}: {exc}",
-            "message": "Fast Up/Down degraded refresh failed; websocket marking remains live.",
-        }
+    """Pause discovery under resource pressure without reviving a frozen lane."""
+    return {
+        "status": "skipped_resource_guard",
+        "mode": "degraded_discovery_paused",
+        "generated_at_utc": now_utc(),
+        "live_data": False,
+        "live_trading": False,
+        "resource_guard": guard,
+        "message": "Discovery paused under the resource guard; frozen crypto up/down received no fallback priority.",
+        "reason": reason,
+        "frozen_updown": {"selected_count": 0, "collection_priority": False},
+    }
 
 
 def build_parser() -> argparse.ArgumentParser:

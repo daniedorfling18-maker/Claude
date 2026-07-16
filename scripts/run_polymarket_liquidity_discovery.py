@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import argparse
 import dataclasses
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 import sys
 from pathlib import Path
 import traceback
@@ -24,6 +24,14 @@ if str(SCRIPTS) not in sys.path:
 
 import polymarket_mispricing_bot as scanner  # noqa: E402
 from polymarket_predictive_engine.config import EngineConfig, load_config  # noqa: E402
+from polymarket_predictive_engine.discovery_policy import (  # noqa: E402
+    POLICY_VERSION as DISCOVERY_POLICY_VERSION,
+    is_frozen_updown_record,
+    is_frozen_updown_text,
+    partition_active_queries,
+    primary_hypothesis_coverage,
+    primary_hypothesis_targets,
+)
 from polymarket_predictive_engine.strategy_search import _market_family  # noqa: E402
 from polymarket_predictive_engine.utils import (  # noqa: E402
     now_utc,
@@ -76,20 +84,12 @@ _DEFAULT_BROAD_DISCOVERY_QUERIES = [
     "culture",
 ]
 
-_CRYPTO_UPDOWN_QUERY_ASSETS = {
-    "btc": ("bitcoin", "btc"),
-    "bitcoin": ("bitcoin", "btc"),
-    "eth": ("ethereum", "eth"),
-    "ethereum": ("ethereum", "eth"),
-    "sol": ("solana", "sol"),
-    "solana": ("solana", "sol"),
-    "xrp": ("xrp", "xrp"),
-    "ripple": ("xrp", "xrp"),
-}
-
-
 def _settings(cfg: EngineConfig) -> dict[str, Any]:
-    return cfg.raw.get("liquidity_discovery", {}) or {}
+    settings = dict(cfg.raw.get("liquidity_discovery", {}) or {})
+    surface = cfg.raw.get("research_surface_discovery")
+    if isinstance(surface, dict):
+        settings["research_surface_discovery"] = surface
+    return settings
 
 
 def _string_list(value: Any) -> list[str]:
@@ -119,56 +119,7 @@ def _append_query(values: list[str], raw_query: Any) -> None:
 
 
 def _is_crypto_updown_query(query: str) -> bool:
-    text = f" {query.strip().lower()} "
-    compact = text.replace(" ", "")
-    return "updown" in compact or " up or down " in text
-
-
-def _crypto_updown_query_asset(query: str) -> tuple[str, str] | None:
-    text = f" {query.strip().lower()} "
-    for key, aliases in _CRYPTO_UPDOWN_QUERY_ASSETS.items():
-        if f" {key} " in text or text.strip().startswith(f"{key} "):
-            return aliases
-    return None
-
-
-def _crypto_updown_query_aliases(query: str, settings: dict[str, Any], *, include_date_aliases: bool = True) -> list[str]:
-    """Expand model feedback like ``btc updown`` into Polymarket search terms.
-
-    The public search endpoint often ranks noisy 5-minute contracts ahead of the
-    hourly/event markets we need for paper-confirmation evidence. These aliases
-    deliberately focus on the canonical "Up or Down" wording and date windows;
-    they do not add explicit 5-minute aliases unless a caller opts in through
-    liquidity_discovery.include_fast_updown_aliases.
-    """
-
-    if not _is_crypto_updown_query(query):
-        return []
-    asset = _crypto_updown_query_asset(query)
-    if asset is None:
-        return []
-    canonical, ticker = asset
-    aliases = [
-        f"{canonical} up or down",
-        f"{canonical} updown",
-        f"{ticker} up or down",
-        f"{ticker} updown",
-    ]
-    search = settings.get("crypto_updown_date_search", {}) or {}
-    if include_date_aliases and search.get("enabled", True):
-        days_ahead = int(search.get("days_ahead", 2))
-        now = datetime.now(timezone.utc)
-        for day_offset in range(0, max(0, days_ahead) + 1):
-            day = now + timedelta(days=day_offset)
-            date_text = f"{day.strftime('%B')} {day.day} {day.year}"
-            aliases.extend(
-                [
-                    f"{canonical} up or down {date_text}",
-                    f"{canonical} up or down on {date_text}",
-                    f"{canonical} updown {date_text}",
-                ]
-            )
-    return aliases
+    return is_frozen_updown_text(query)
 
 
 def _configured_query_aliases(settings: dict[str, Any], query: str) -> list[str]:
@@ -186,19 +137,18 @@ def _expand_query_aliases(
     queries: list[str],
     settings: dict[str, Any],
     *,
-    include_date_aliases: bool = True,
     max_queries: int | None = None,
 ) -> list[str]:
     expanded: list[str] = []
-    for query in queries:
+    active_queries, _excluded = partition_active_queries(queries, allow_blank=True)
+    for query in active_queries:
         expanded.append(query)
         expanded.extend(_configured_query_aliases(settings, query))
-        expanded.extend(_crypto_updown_query_aliases(query, settings, include_date_aliases=include_date_aliases))
-    deduped = _dedupe_keep_order(expanded)
+    deduped, _alias_exclusions = partition_active_queries(expanded, allow_blank=True)
     return deduped if max_queries is None or max_queries <= 0 else deduped[:max_queries]
 
 
-def _adaptive_collection_queries(cfg: EngineConfig) -> list[str]:
+def _adaptive_collection_query_plan(cfg: EngineConfig) -> dict[str, Any]:
     queries: list[str] = []
     payloads = [
         read_json(cfg.governance_root / "trade_signal_audit.json", default={}) or {},
@@ -237,15 +187,6 @@ def _adaptive_collection_queries(cfg: EngineConfig) -> list[str]:
                 for row in near_positive:
                     if isinstance(row, dict):
                         _append_query(queries, row.get("recommended_collection_query"))
-        guard = payload.get("collection_query_guard", {}) or {}
-        if isinstance(guard, dict):
-            for raw_query in guard.get("raw_collection_queries", []) or []:
-                _append_query(queries, raw_query)
-            rejected = guard.get("rejected_queries", []) or []
-            if isinstance(rejected, list):
-                for row in rejected:
-                    if isinstance(row, dict) and str(row.get("reason") or "") == "max_updown_queries":
-                        _append_query(queries, row.get("query"))
         for raw_query in payload.get("collection_queries", []) or []:
             _append_query(queries, raw_query)
         for raw_query in payload.get("model_validation_gap_queries", []) or []:
@@ -254,25 +195,18 @@ def _adaptive_collection_queries(cfg: EngineConfig) -> list[str]:
         if isinstance(price_action_goal_state, dict):
             for raw_query in price_action_goal_state.get("collection_queries", []) or []:
                 _append_query(queries, raw_query)
-    return _dedupe_keep_order(queries)
+    proposed = _dedupe_keep_order(queries)
+    active, excluded = partition_active_queries(proposed)
+    return {
+        "policy_version": DISCOVERY_POLICY_VERSION,
+        "proposed_queries": proposed,
+        "queries": active,
+        "excluded_frozen_updown_queries": excluded,
+    }
 
 
-def _limit_targeted_updown_queries(queries: list[str], settings: dict[str, Any]) -> list[str]:
-    if not settings.get("adaptive_only", False):
-        return queries
-    max_updown = int(settings.get("targeted_max_updown_queries", 1) or 1)
-    if max_updown <= 0:
-        return [query for query in queries if not _is_crypto_updown_query(query)]
-    updown = [query for query in queries if _is_crypto_updown_query(query)]
-    if len(updown) <= max_updown:
-        return queries
-    keep = set(updown[:max_updown])
-    limited: list[str] = []
-    for query in queries:
-        if _is_crypto_updown_query(query) and query not in keep:
-            continue
-        limited.append(query)
-    return limited
+def _adaptive_collection_queries(cfg: EngineConfig) -> list[str]:
+    return list(_adaptive_collection_query_plan(cfg)["queries"])
 
 
 def _targeted_evidence_settings(settings: dict[str, Any]) -> dict[str, Any]:
@@ -293,7 +227,7 @@ def _targeted_evidence_settings(settings: dict[str, Any]) -> dict[str, Any]:
     targeted["max_event_queries"] = int(settings.get("targeted_max_event_queries", 10) or 10)
     targeted["max_public_search_queries"] = int(settings.get("targeted_max_public_search_queries", 18) or 18)
     targeted["max_broad_public_search_queries"] = 0
-    targeted["targeted_max_updown_queries"] = int(settings.get("targeted_max_updown_queries", 1) or 1)
+    targeted["primary_hypothesis_reserve_enabled"] = True
     return targeted
 
 
@@ -304,7 +238,16 @@ def _broad_queries(settings: dict[str, Any]) -> list[str]:
     return configured or list(_DEFAULT_BROAD_DISCOVERY_QUERIES)
 
 
-def _event_queries(settings: dict[str, Any], adaptive_queries: list[str] | None = None) -> list[str]:
+def _primary_queries(settings: dict[str, Any], *, scan_sequence: int) -> list[str]:
+    return list(primary_hypothesis_targets(settings, scan_sequence=scan_sequence).values())
+
+
+def _event_queries(
+    settings: dict[str, Any],
+    adaptive_queries: list[str] | None = None,
+    *,
+    scan_sequence: int = 1,
+) -> list[str]:
     if settings.get("adaptive_only", False):
         configured_queries = _string_list(settings.get("targeted_fallback_queries"))
     else:
@@ -312,14 +255,18 @@ def _event_queries(settings: dict[str, Any], adaptive_queries: list[str] | None 
         if not isinstance(configured, list):
             configured = [configured]
         configured_queries = [str(query or "").strip() for query in configured]
-    base_queries = _limit_targeted_updown_queries(
-        _dedupe_keep_order([*(adaptive_queries or []), *configured_queries, *_broad_queries(settings)]),
-        settings,
+    base_queries, _excluded = partition_active_queries(
+        [
+            *_primary_queries(settings, scan_sequence=scan_sequence),
+            *(adaptive_queries or []),
+            *configured_queries,
+            *_broad_queries(settings),
+        ],
+        allow_blank=True,
     )
     return _expand_query_aliases(
         base_queries,
         settings,
-        include_date_aliases=False,
         max_queries=int(settings.get("max_event_queries", 28) or 28),
     )
 
@@ -387,85 +334,103 @@ def _public_search_events(bot_config: scanner.BotConfig, query: str, *, limit: i
     return events if isinstance(events, list) else []
 
 
-def _crypto_updown_public_queries(settings: dict[str, Any]) -> list[str]:
-    search = settings.get("crypto_updown_date_search", {}) or {}
-    if not search.get("enabled", True):
-        return []
-    assets = search.get("assets", ["bitcoin", "ethereum", "solana", "xrp"]) or []
-    if not isinstance(assets, list):
-        assets = [assets]
-    days_ahead = int(search.get("days_ahead", 2))
-    now = datetime.now(timezone.utc)
-    queries: list[str] = []
-    for day_offset in range(0, max(0, days_ahead) + 1):
-        day = now + timedelta(days=day_offset)
-        date_text = f"{day.strftime('%B')} {day.day} {day.year}"
-        for asset in assets:
-            clean_asset = str(asset or "").strip()
-            if clean_asset:
-                queries.append(f"{clean_asset} up or down {date_text}")
-                queries.append(f"{clean_asset} up or down on {date_text}")
-                queries.append(f"{clean_asset} updown {date_text}")
-    return queries
-
-
-def _public_search_queries(settings: dict[str, Any], adaptive_queries: list[str] | None = None) -> list[str]:
+def _public_search_queries(
+    settings: dict[str, Any],
+    adaptive_queries: list[str] | None = None,
+    *,
+    scan_sequence: int = 1,
+) -> list[str]:
     queries = (
         _string_list(settings.get("targeted_public_search_queries"))
         if settings.get("adaptive_only", False)
         else _string_list(settings.get("public_search_queries"))
     )
-    confirmation_queries = [
-        query
-        for query in (adaptive_queries or [])
-        if _is_crypto_updown_query(str(query or ""))
-    ]
     broad_queries = [] if settings.get("adaptive_only", False) else _broad_queries(settings)
     max_broad_public_queries = int(settings.get("max_broad_public_search_queries", 18) or 18)
-    base_queries = _limit_targeted_updown_queries(
-        _dedupe_keep_order(
-            [
-                *confirmation_queries,
-                *(adaptive_queries or []),
-                *queries,
-                *broad_queries[:max_broad_public_queries],
-                *_crypto_updown_public_queries(settings),
-            ]
-        ),
-        settings,
+    base_queries, _excluded = partition_active_queries(
+        [
+            *_primary_queries(settings, scan_sequence=scan_sequence),
+            *(adaptive_queries or []),
+            *queries,
+            *broad_queries[:max_broad_public_queries],
+        ],
     )
     return _expand_query_aliases(
         base_queries,
         settings,
-        include_date_aliases=True,
         max_queries=int(settings.get("max_public_search_queries", 48) or 48),
     )
 
 
-def _discover_tokens(cfg: EngineConfig, settings: dict[str, Any]) -> tuple[list[scanner.OutcomeToken], list[dict[str, Any]], list[str]]:
+def _discover_tokens(
+    cfg: EngineConfig,
+    settings: dict[str, Any],
+    *,
+    scan_sequence: int,
+) -> tuple[list[scanner.OutcomeToken], list[dict[str, Any]], list[str], dict[str, Any]]:
     base = _base_config(settings)
-    adaptive_queries = _adaptive_collection_queries(cfg)
-    queries = _event_queries(settings, adaptive_queries=adaptive_queries)
+    adaptive_plan = _adaptive_collection_query_plan(cfg)
+    adaptive_queries = list(adaptive_plan["queries"])
+    queries = _event_queries(
+        settings,
+        adaptive_queries=adaptive_queries,
+        scan_sequence=scan_sequence,
+    )
+    public_queries = (
+        _public_search_queries(
+            settings,
+            adaptive_queries=adaptive_queries,
+            scan_sequence=scan_sequence,
+        )
+        if settings.get("public_search_enabled", True)
+        else []
+    )
     summaries: list[dict[str, Any]] = []
     query_batches: list[list[scanner.OutcomeToken]] = []
+    excluded_token_keys: set[str] = set()
+
+    def active_tokens(events: list[dict[str, Any]]) -> tuple[list[scanner.OutcomeToken], int]:
+        fresh = [token for token in scanner.extract_tokens(events) if _is_fresh(token)]
+        active: list[scanner.OutcomeToken] = []
+        excluded = 0
+        for token in fresh:
+            if is_frozen_updown_record(token):
+                excluded += 1
+                excluded_token_keys.add(_token_key(token))
+                continue
+            active.append(token)
+        return active, excluded
+
     for query in queries:
         clean_query = str(query or "").strip()
         scan_cfg = dataclasses.replace(base, query=clean_query)
         events = scanner.discover_events(scan_cfg)
-        query_tokens = [token for token in scanner.extract_tokens(events) if _is_fresh(token)]
+        query_tokens, excluded_count = active_tokens(events)
         query_batches.append(query_tokens)
         summaries.append(
-            {"source": "events", "query": clean_query or "top_active", "events": len(events), "tokens": len(query_tokens)}
+            {
+                "source": "events",
+                "query": clean_query or "top_active",
+                "events": len(events),
+                "tokens": len(query_tokens),
+                "frozen_updown_tokens_excluded": excluded_count,
+            }
         )
 
-    if settings.get("public_search_enabled", True):
+    if public_queries:
         public_limit = int(settings.get("public_search_limit", 8))
-        for public_query in _public_search_queries(settings, adaptive_queries=adaptive_queries):
+        for public_query in public_queries:
             events = _public_search_events(base, public_query, limit=public_limit)
-            query_tokens = [token for token in scanner.extract_tokens(events) if _is_fresh(token)]
+            query_tokens, excluded_count = active_tokens(events)
             query_batches.append(query_tokens)
             summaries.append(
-                {"source": "public_search", "query": public_query, "events": len(events), "tokens": len(query_tokens)}
+                {
+                    "source": "public_search",
+                    "query": public_query,
+                    "events": len(events),
+                    "tokens": len(query_tokens),
+                    "frozen_updown_tokens_excluded": excluded_count,
+                }
             )
 
     # Sample fairly across configured queries so broad top-active scans do not
@@ -493,7 +458,36 @@ def _discover_tokens(cfg: EngineConfig, settings: dict[str, Any]) -> tuple[list[
                 break
         if not any_remaining or not added_this_round:
             break
-    return tokens, summaries, adaptive_queries
+    configured_candidates: list[Any] = []
+    for key in ("queries", "targeted_fallback_queries", "public_search_queries", "targeted_public_search_queries", "broad_queries"):
+        value = settings.get(key, []) or []
+        configured_candidates.extend(value if isinstance(value, list) else [value])
+    _configured_active, configured_excluded = partition_active_queries(configured_candidates, allow_blank=True)
+    excluded_queries = list(adaptive_plan["excluded_frozen_updown_queries"])
+    seen_excluded = {str(row.get("query") or "").strip().lower() for row in excluded_queries}
+    for row in configured_excluded:
+        key = str(row.get("query") or "").strip().lower()
+        if key not in seen_excluded:
+            excluded_queries.append(row)
+            seen_excluded.add(key)
+    selected_updown = [query for query in [*queries, *public_queries] if _is_crypto_updown_query(query)]
+    audit = {
+        "policy_version": DISCOVERY_POLICY_VERSION,
+        "scan_sequence": scan_sequence,
+        "event_queries": queries,
+        "public_search_queries": public_queries,
+        "event_primary_hypothesis_coverage": primary_hypothesis_coverage(queries, settings),
+        "public_primary_hypothesis_coverage": primary_hypothesis_coverage(public_queries, settings),
+        "frozen_updown": {
+            "excluded_queries": excluded_queries,
+            "excluded_query_count": len(excluded_queries),
+            "selected_queries": selected_updown,
+            "selected_query_count": len(selected_updown),
+            "excluded_token_count": len(excluded_token_keys),
+        },
+        "adaptive_query_plan": adaptive_plan,
+    }
+    return tokens, summaries, adaptive_queries, audit
 
 
 def _row_from_book(token: scanner.OutcomeToken, book: scanner.Book | None, settings: dict[str, Any]) -> dict[str, Any]:
@@ -713,7 +707,12 @@ def _model_target_queue(cfg: EngineConfig, family_summary: list[dict[str, Any]])
     )
 
 
-def run_liquidity_discovery(cfg: EngineConfig, *, mode: str = "full") -> dict[str, Any]:
+def run_liquidity_discovery(
+    cfg: EngineConfig,
+    *,
+    mode: str = "full",
+    scan_sequence: int = 1,
+) -> dict[str, Any]:
     settings = _settings(cfg)
     if not settings.get("enabled", True):
         payload = {"status": "disabled", "generated_at_utc": now_utc()}
@@ -721,7 +720,11 @@ def run_liquidity_discovery(cfg: EngineConfig, *, mode: str = "full") -> dict[st
         return payload
     if mode == "targeted-evidence":
         settings = _targeted_evidence_settings(settings)
-    tokens, query_summaries, adaptive_queries = _discover_tokens(cfg, settings)
+    tokens, query_summaries, adaptive_queries, selection_audit = _discover_tokens(
+        cfg,
+        settings,
+        scan_sequence=scan_sequence,
+    )
     base = _base_config(settings)
     rows: list[dict[str, Any]] = []
     errors: list[dict[str, Any]] = []
@@ -775,6 +778,12 @@ def run_liquidity_discovery(cfg: EngineConfig, *, mode: str = "full") -> dict[st
             "fast_feedback_excluded_families": sorted(_fast_feedback_excluded_families(settings)),
         },
         "query_summaries": query_summaries,
+        "primary_hypothesis_coverage": {
+            "event": selection_audit["event_primary_hypothesis_coverage"],
+            "public_search": selection_audit["public_primary_hypothesis_coverage"],
+        },
+        "frozen_updown": selection_audit["frozen_updown"],
+        "discovery_selection_audit": selection_audit,
         "tokens_scanned": len(tokens),
         "tradable_tokens": len(tradable),
         "fast_feedback_tradable_tokens": len(fast_feedback),

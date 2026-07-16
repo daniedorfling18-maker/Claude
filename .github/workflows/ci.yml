@@ -1,9 +1,9 @@
 name: CI
 
 on:
-  # The comprehensive suite remains manual because hosted Actions minutes are
-  # exhausted. WO-69's separate required-pr-gate.yml is the small PR-triggered
-  # self-hosted guard; do not expand it into this 1,000+ test workflow.
+  # The hosted workflow remains manual because hosted Actions minutes are
+  # exhausted. The required PR gate runs the full pytest suite on the bounded
+  # self-hosted ARM64 runner; this workflow retains the additional smoke jobs.
   workflow_dispatch:
 
 permissions:

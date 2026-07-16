@@ -17,6 +17,10 @@ from typing import Any, Mapping
 
 REQUIRED_CONTEXT = "WO-69 guard and invariants"
 REQUIRED_RUNNER_LABELS = {"self-hosted", "Linux", "ARM64", "polymarket-ci"}
+REQUIRED_GIT_PROVISION_STEP = "name: Provision Git before checkout"
+REQUIRED_CHECKOUT_STEP = "name: Check out proposed merge"
+REQUIRED_FULL_SUITE_STEP = "name: Run full repository suite"
+REQUIRED_FULL_SUITE_COMMAND = "run: .ci-venv/bin/python -m pytest -q"
 DEFAULT_OUTPUT = Path("outputs/performance/independent_merge_gate.json")
 
 
@@ -55,20 +59,26 @@ def workflow_is_configured(workflow_text: str) -> bool:
         "Linux",
         "ARM64",
         "polymarket-ci",
-        "test_wo73_controls.py",
-        "test_executor_replay_certification.py",
-        "test_executor_ops_monitor.py",
-        "test_deploy_acceptance.py",
-        "test_collection_hygiene.py",
-        "test_degraded_state_watchdog.py",
-        "test_operating_state.py",
-        "test_execution_governance_storage.py",
-        "test_safety_invariants.py",
-        "test_polymarket_vps_docker.py",
+        REQUIRED_GIT_PROVISION_STEP,
+        REQUIRED_CHECKOUT_STEP,
+        REQUIRED_FULL_SUITE_STEP,
         "ruff check .",
         "config-check --config polymarket_predictive_config.example.yaml",
     }
-    return "pull_request:" in on_block and all(fragment in workflow_text for fragment in required_fragments)
+    pytest_lines = [
+        line.strip()
+        for line in workflow_text.splitlines()
+        if "pytest" in line and not line.lstrip().startswith("#")
+    ]
+    git_step = workflow_text.find(REQUIRED_GIT_PROVISION_STEP)
+    checkout_step = workflow_text.find(REQUIRED_CHECKOUT_STEP)
+    return (
+        "pull_request:" in on_block
+        and all(fragment in workflow_text for fragment in required_fragments)
+        and 0 <= git_step < checkout_step
+        and pytest_lines == [REQUIRED_FULL_SUITE_COMMAND]
+        and "continue-on-error:" not in workflow_text
+    )
 
 
 def branch_protection_payload() -> dict[str, Any]:

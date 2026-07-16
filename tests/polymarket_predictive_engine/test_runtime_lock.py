@@ -49,6 +49,7 @@ def test_runtime_lock_replaces_same_pid_lock_from_prior_process_start(
     monkeypatch,
 ) -> None:
     cfg = _cfg(tmp_path)
+    monkeypatch.setattr(runtime_lock, "now_utc", lambda: "2026-07-03T05:22:00Z")
     monkeypatch.setattr(runtime_lock, "_PROCESS_STARTED_AT_UTC", "2026-07-03T05:20:00Z")
     _write_lock(cfg, acquired_at_utc="2026-07-03T05:00:00Z")
 
@@ -65,6 +66,7 @@ def test_runtime_lock_keeps_same_process_lock_after_process_start(
     monkeypatch,
 ) -> None:
     cfg = _cfg(tmp_path)
+    monkeypatch.setattr(runtime_lock, "now_utc", lambda: "2026-07-03T05:22:00Z")
     monkeypatch.setattr(runtime_lock, "_PROCESS_STARTED_AT_UTC", "2026-07-03T05:20:00Z")
     _write_lock(cfg, acquired_at_utc="2026-07-03T05:21:00Z")
 

@@ -63,30 +63,49 @@ def test_registered_workflow_is_minimal_self_hosted_and_secretless() -> None:
     assert "actions/setup-python" not in workflow
     assert "shell: powershell" not in workflow
     assert workflow.count("shell: bash") == 6
-    assert "Provision Git for deploy preservation tests" in workflow
-    assert "apt-get install -y --no-install-recommends git" in workflow
+    assert "Provision Git before checkout" in workflow
+    assert "apt-get install -y --no-install-recommends git ca-certificates" in workflow
+    assert workflow.index("name: Provision Git before checkout") < workflow.index(
+        "name: Check out proposed merge"
+    )
     assert "python -m venv .ci-venv" in workflow
     assert "pip install --disable-pip-version-check -e" in workflow
     assert "pip check" in workflow
-    assert "pytest -q" in workflow
-    assert "test_wo73_controls.py" in workflow
-    assert "test_executor_replay_certification.py" in workflow
-    assert "test_executor_ops_monitor.py" in workflow
-    assert "test_deploy_acceptance.py" in workflow
-    assert "test_collection_hygiene.py" in workflow
-    assert "test_degraded_state_watchdog.py" in workflow
-    assert "test_h1_funding_qualification.py" in workflow
-    assert "test_live_test_decision_policy.py" in workflow
-    assert "test_maker_fill_replay.py" in workflow
-    assert "test_operating_state.py" in workflow
-    assert "test_refresh_governance.py" in workflow
-    assert "test_wo81_a1_controls.py" in workflow
-    assert "test_safety_invariants.py" in workflow
-    assert "test_polymarket_vps_docker.py" in workflow
-    assert "test_vps_checkout_update.py" in workflow
-    assert "test_vps_only_operating_docs.py" in workflow
+    assert "Run full repository suite" in workflow
+    assert "run: .ci-venv/bin/python -m pytest -q" in workflow
+    assert "--ignore" not in workflow
+    assert "continue-on-error" not in workflow
+    assert "tests/" not in workflow
     assert "ruff check ." in workflow
     assert "config-check --config polymarket_predictive_config.example.yaml" in workflow
+
+
+def test_workflow_audit_rejects_selective_or_checkout_first_variants() -> None:
+    workflow = _workflow()
+    selective = workflow.replace(
+        "run: .ci-venv/bin/python -m pytest -q",
+        "run: .ci-venv/bin/python -m pytest -q tests/test_required_pr_gate.py",
+    )
+    provision = """      - name: Provision Git before checkout
+        shell: bash
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends git ca-certificates
+          rm -rf /var/lib/apt/lists/*
+"""
+    checkout = """      - name: Check out proposed merge
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+"""
+    checkout_first = workflow.replace(
+        f"{provision}\n{checkout}",
+        f"{checkout}\n{provision}",
+    )
+
+    assert not merge_gate.workflow_is_configured(selective)
+    assert checkout_first != workflow
+    assert not merge_gate.workflow_is_configured(checkout_first)
 
 
 def test_workflow_inventory_has_only_registered_triggers() -> None:

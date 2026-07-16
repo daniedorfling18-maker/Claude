@@ -791,6 +791,14 @@ broker, or order paths. Exact observations, frozen episodes, and the verdict
 are published under `outputs/h2_dutch/`, enrolled in the evidence anchor, and
 shown as the dashboard's H2 authority.
 
+**2026-07-16 - WO-100 implemented by Codex.** Repository evidence is now
+protected by an unfiltered full-suite self-hosted PR gate. Git is provisioned
+before checkout, the two fixed-date runtime-lock tests use an injected fixed
+clock, and the merge-gate audit rejects checkout-first or selectively filtered
+workflow variants. This is repository governance only and changes no model,
+hypothesis, evidence verdict, paper/live gate, stake, funding, signer,
+credential, broker, or order path.
+
 ## Rules of engagement for coding agents
 
 0. **Division of labour**: the orchestrating agent writes/updates this charter and the work orders

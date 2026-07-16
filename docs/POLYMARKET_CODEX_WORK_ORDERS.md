@@ -4275,13 +4275,72 @@ isolated public-network smoke scan discovered 20 negRisk events, priced three
 complete baskets, appended three exact rows, remained `collecting` with zero
 manufactured episodes, and reported both trading-invoked flags false.
 
+## WO-100 - Deterministic full suite and enforceable self-hosted PR gate
+
+Status: IMPLEMENTED by Codex on 2026-07-16; awaiting required gate and review.
+
+Owner authorization: the 2026-07-16 instruction to fix the full-suite tests
+and make the merge gate enforceable. The repeated WO-99 PR #242 failure also
+proved an ordering defect: the job installed Git only after
+`actions/checkout`, so checkout fell back to GitHub's archive API and failed
+three times on a GitHub Unicorn/503 response before any repository code ran.
+This WO changes test and repository-governance infrastructure only. It cannot
+change a hypothesis, model, evidence verdict, promotion gate, threshold,
+stake, funding, signer, credential, broker, paper path, or live-order path.
+
+Registered implementation contract:
+
+1. The two runtime-lock tests inject a fixed current clock around their fixed
+   process-start/acquisition fixtures. They continue testing same-PID process
+   reuse and same-process exclusion, but cannot become stale merely because
+   wall time advances beyond 2026-07-03.
+2. The bounded `python:3.11-slim` required-gate container installs Git and CA
+   certificates before `actions/checkout@v6`. Checkout therefore uses the Git
+   transport and no longer depends on the archive-download fallback created by
+   the prior step ordering.
+3. The required self-hosted ARM64 gate runs the exact unfiltered command
+   `.ci-venv/bin/python -m pytest -q` after Ruff and both effective-config
+   checks. No path selection, `--ignore`, `-k`, xfail, skip, assertion widening,
+   or `continue-on-error` is permitted. The existing two-CPU/four-GiB cap and
+   15-minute timeout remain unchanged.
+4. `audit_github_merge_gate.py` treats the workflow as configured only when
+   Git provisioning precedes checkout and the workflow contains exactly the
+   registered full-suite pytest line. Mechanical tests mutate both conditions
+   and require the audit to fail closed.
+
+Fail-safe sentence: a missing/offline runner, failed checkout, dependency or
+config failure, Ruff error, any failed/skipped-filtered test suite, changed
+step ordering, missing required context, absent branch protection, or missing
+independent review leaves the merge gate non-enforced and the PR unmergeable;
+it cannot be represented as a successful control or bypassed by this WO.
+
+Engineering-standards review plan: S1 fixes both test clocks and preserves the
+production runtime-lock clock. S2 changes no runtime writer. S3 traces PR event
+to bounded runner, checkout, environment, full suite, required status context,
+and branch protection. S4 replays the observed checkout failure structurally
+by rejecting checkout-before-Git and selective-suite workflow variants. S5 is
+the fail-safe sentence above. S6 is the day-after check below. S7 verifies the
+diff contains no prediction, evidence, paper/live, risk, capital, signer,
+credential, broker, or order-path changes.
+
+Day-after check: the first post-merge pull request must show the required
+`WO-69 guard and invariants` context completing successfully with the
+`Provision Git before checkout`, checkout, Ruff, both config checks, and full
+repository suite steps visible; the suite count must equal a clean isolated
+VPS run, and `outputs/performance/independent_merge_gate.json` must report an
+online matching runner, branch protection requiring that exact context, no
+review bypass, and a successful PR run before `status=enforced` is trusted.
+
+Verification: pending isolated ARM64/Python 3.11 focused and full-suite runs,
+an exact workflow-shape reproduction, and the required PR gate.
+
 ## Current queue for Codex (reconciled 2026-07-16)
 
 Every WO below and every future WO must comply with
 `docs/ENGINEERING_STANDARDS.md` (S1-S7), including the mandatory
 `Day-after check:` line. Reviews verify compliance item by item.
 
-**WO-95 was implemented in PR #238, WO-96 merged in PR #239, WO-97 merged in PR #240, and WO-98 is implemented awaiting publication.** Later items in the 2026-07-16 owner
+**WO-95 was implemented in PR #238, WO-96 merged in PR #239, WO-97 merged in PR #240, and WO-98 merged in PR #241.** Later items in the 2026-07-16 owner
 instruction require their own numbered work order and PR; do not combine them
 into this change. WO-89 through WO-92 were implemented as of 2026-07-15.
 WO-93 was implemented in PR #236, WO-94 in PR #237, WO-95 in PR #238, and WO-96 in PR #239. WO-85, WO-87, WO-86, and
@@ -4289,9 +4348,12 @@ WO-88 are implemented on 2026-07-15; WO-83 is implemented in PR #203 and
 WO-84 is implemented in PR #205. Do not infer follow-on capital, gate, model,
 or executor work from their diagnostics; the queue below remains binding.
 
-- **Implemented / publication pending:** WO-98 exact post-registration H2
-  evaluator and dashboard authority. After its one-PR review/merge, continue
-  with owner-ordered WO-99 leakage/corpus/split correction.
+- **Implemented / publication pending:** WO-100 deterministic full suite and
+  enforceable self-hosted gate. It is a prerequisite repair for WO-99 draft PR
+  #242, whose code is validated but whose required check cannot currently
+  check out the proposed merge.
+- **Next after WO-100:** rebase and gate WO-99, then continue with WO-101 S2/S4
+  mechanical guards and WO-102 authenticated HTTPS/private-VPN dashboard.
 - **Pending review, not build permission:** WO-33. WO-34/35 model wiring shares
   its leakage-review dependency and must stay inside H1-H3; WO-99 is the
   owner-authorized corrective implementation. WO-96 is the exact H3 build.

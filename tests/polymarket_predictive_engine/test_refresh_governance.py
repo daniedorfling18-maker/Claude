@@ -58,11 +58,9 @@ def test_refresh_governance_rebuilds_price_action_paper_signals_before_audit(tmp
         return payload
 
     monkeypatch.setattr(refresh_module, "build_closing_line_value", _closing_line)
-    monkeypatch.setattr(
-        refresh_module,
-        "build_smart_flow_clv",
-        lambda _cfg: order.append("smart_flow_clv")
-        or {"status": "ok", "fills_scored": 2, "positive_wallets": ["0xalpha"]},
+    refresh_module.write_json(
+        cfg.output_root / "h3_smart_flow" / "h3_evaluation.json",
+        {"status": "collecting", "final_fills": 2, "passing_cohorts": []},
     )
     monkeypatch.setattr(
         refresh_module,
@@ -134,8 +132,6 @@ def test_refresh_governance_rebuilds_price_action_paper_signals_before_audit(tmp
 
     assert order.index("paper_round_trip") < order.index("signal_cohort_pnl")
     assert order.index("paper_round_trip") < order.index("closing_line_value")
-    assert order.index("closing_line_value") < order.index("smart_flow_clv")
-    assert order.index("smart_flow_clv") < order.index("edge_attribution")
     assert order.index("closing_line_value") < order.index("edge_attribution")
     assert order.index("edge_attribution") < order.index("algo_sweep")
     assert order.index("algo_sweep") < order.index("signal_cohort_pnl")
@@ -154,7 +150,8 @@ def test_refresh_governance_rebuilds_price_action_paper_signals_before_audit(tmp
     assert result["refreshed"]["price_action_microstructure"] is True
     assert result["refreshed"]["paper_round_trip_evidence"] is True
     assert result["refreshed"]["closing_line_value"] is True
-    assert result["refreshed"]["smart_flow_clv"] is True
+    assert result["refreshed"]["smart_flow_clv"] is False
+    assert result["refreshed"]["h3_smart_flow_artifact"] is True
     assert result["refreshed"]["edge_attribution"] is True
     assert result["refreshed"]["algo_sweep"] is True
     assert result["paper_round_trip_closed_trades"] == 2
@@ -163,8 +160,9 @@ def test_refresh_governance_rebuilds_price_action_paper_signals_before_audit(tmp
     assert result["closing_line_final_positions"] == 2
     assert result["closing_line_mean_final_clv"] == 0.0123
     assert result["closing_line_positive_cohorts"] == ["macro_rates"]
-    assert result["smart_flow_fills_scored"] == 2
-    assert result["smart_flow_positive_wallets"] == ["0xalpha"]
+    assert result["h3_smart_flow_status"] == "collecting"
+    assert result["h3_smart_flow_final_fills"] == 2
+    assert result["h3_smart_flow_passing_cohorts"] == []
     assert result["edge_attribution_status"] == "ok"
     assert result["edge_attribution_positions"] == 2
     assert result["edge_attribution_cohort_classes"] == {"macro_rates": "cost_dominated"}

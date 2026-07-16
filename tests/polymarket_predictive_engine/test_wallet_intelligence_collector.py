@@ -84,13 +84,16 @@ def test_collects_leaderboard_and_holder_overlap_without_trading(tmp_path, monke
         if url.endswith("/holders"):
             market = params["market"]
             return _FakeResponse(
-                {
-                    "holders": [
-                        {"wallet": "0xSmart", "outcome": "Yes", "size": "15"},
-                        {"wallet": f"0xHolder{market[-1]}", "outcome": "No", "shares": "3"},
-                        {"wallet": "", "size": "99"},
-                    ]
-                }
+                [
+                    {
+                        "token": f"token-{market}",
+                        "holders": [
+                            {"proxyWallet": "0xSmart", "asset": f"token-{market}", "amount": "15"},
+                            {"proxyWallet": f"0xHolder{market[-1]}", "asset": f"token-{market}", "amount": "3"},
+                            {"proxyWallet": "", "asset": f"token-{market}", "amount": "99"},
+                        ],
+                    }
+                ]
             )
         raise AssertionError(url)
 
@@ -102,6 +105,8 @@ def test_collects_leaderboard_and_holder_overlap_without_trading(tmp_path, monke
     assert summary["markets_polled"] == 2
     assert summary["leaderboard_rows_added"] == 2
     assert summary["holder_rows_added"] == 4
+    assert summary["holder_payload_schema"] == "token_groups"
+    assert summary["holder_groups_seen"] == 2
     assert summary["holder_leaderboard_overlap_count"] == 1
     assert summary["holder_leaderboard_overlap_wallets"] == ["0xsmart"]
     assert summary["paper_trading_invoked"] is False
@@ -113,6 +118,7 @@ def test_collects_leaderboard_and_holder_overlap_without_trading(tmp_path, monke
     holders = read_csv_rows(cfg.output_root / "wallet_intelligence" / "holders_history.csv")
     assert {row["wallet"] for row in leaderboard} == {"0xsmart", "0xother"}
     assert {row["market"] for row in holders} == {"0xcond1", "0xcond2"}
+    assert all(row["token"].startswith("token-") and row["amount"] for row in holders)
     assert read_json(cfg.output_root / "wallet_intelligence" / "wallet_intelligence_summary.json")[
         "paper_trading_invoked"
     ] is False
@@ -142,6 +148,44 @@ def test_leaderboard_probe_uses_v1_before_legacy_and_falls_back(tmp_path, monkey
     assert any(call[0].endswith("/leaderboard") and not call[0].endswith("/v1/leaderboard") for call in leaderboard_calls)
     assert summary["leaderboard_rows_added"] == 1
     assert summary["leaderboard_probe_params"]["path"] == "/leaderboard"
+
+
+def test_v1_leaderboard_paginates_to_cover_registered_rank_51_100(tmp_path, monkeypatch):
+    cfg = _config(tmp_path)
+    cfg.raw["wallet_intelligence"]["leaderboard_limit"] = 100
+    _seed_tracked_markets(cfg)
+    offsets: list[int] = []
+
+    def fake_get(url, params=None, timeout=None):
+        del timeout
+        if url.endswith("/v1/leaderboard"):
+            offset = int(params["offset"])
+            offsets.append(offset)
+            return _FakeResponse(
+                [
+                    {
+                        "proxyWallet": f"0x{offset + index + 1:040x}",
+                        "rank": offset + index + 1,
+                        "pnl": 1,
+                        "vol": 10,
+                    }
+                    for index in range(50)
+                ]
+            )
+        if url.endswith("/holders"):
+            return _FakeResponse([{"token": "token", "holders": []}])
+        raise AssertionError(url)
+
+    monkeypatch.setattr(wallet_intelligence_collector.requests, "get", fake_get)
+
+    summary = wallet_intelligence_collector.collect_wallet_intelligence(cfg)
+
+    assert offsets == [0, 50]
+    assert summary["leaderboard_rows_added"] == 100
+    assert summary["leaderboard_probe_params"]["complete"] is True
+    rows = read_csv_rows(cfg.output_root / "wallet_intelligence" / "leaderboard_history.csv")
+    assert {int(row["rank"]) for row in rows} == set(range(1, 101))
+    assert summary["status"] == "partial"  # holder groups were valid but empty, never silently OK
 
 
 def test_wallet_markets_fall_back_to_maker_carry_candidates_when_websocket_empty(tmp_path, monkeypatch):

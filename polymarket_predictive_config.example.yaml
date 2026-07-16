@@ -1501,6 +1501,25 @@ smart_flow_clv:
   positive_ci_floor: 0.0
   bootstrap_iterations: 1000
   bootstrap_seed: 20260703
+# WO-96 exact prospective H3 evaluator. These values are the registered
+# contract; runtime configuration can only narrow eligibility, increase costs
+# or evidence floors, and never move the fixed 100-fill/90-day stop.
+h3_smart_flow:
+  enabled: true
+  entry_min: 0.05
+  entry_max: 0.90
+  final_quote_max_age_seconds: 3600
+  intelligence_max_age_seconds: 129600
+  minimum_validation_fills: 30
+  minimum_validation_markets: 10
+  minimum_cohort_fills: 20
+  wallet_discovery_fills: 5
+  wallet_discovery_markets: 2
+  fdr_alpha: 0.10
+  maximum_family_concentration: 0.35
+  fixed_exit_cost_per_share: 0.005
+  adverse_cost_per_share: 0.005
+  bootstrap_iterations: 1000
 costs:
   transaction_cost: 0.0
   spread_assumption: 0.02

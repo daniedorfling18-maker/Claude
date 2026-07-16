@@ -22,6 +22,7 @@ from typing import Any
 import requests
 
 from .config import EngineConfig, load_config
+from .runtime_lock import runtime_lock
 from .utils import (
     normalize_external_timestamp,
     now_utc,
@@ -30,6 +31,7 @@ from .utils import (
     safe_float,
     write_csv,
     write_json,
+    write_text_atomic,
 )
 
 DEFAULT_BASE_URL = "https://data-api.polymarket.com"
@@ -38,12 +40,29 @@ PRINT_FIELDS = [
     "trade_id",
     "market",
     "asset_id",
+    "wallet",
     "side",
     "price",
     "size",
     "timestamp",
     "collected_at_utc",
+    "title",
+    "market_slug",
+    "event_slug",
+    "outcome",
+    "outcome_index",
 ]
+
+PRINT_METADATA_FIELDS = (
+    "wallet",
+    "title",
+    "market_slug",
+    "event_slug",
+    "outcome",
+    "outcome_index",
+)
+PRINT_IMMUTABLE_FIELDS = ("market", "asset_id", "side", "price", "size", "timestamp")
+BACKFILL_COMPLETION_FILENAME = "backfill_completed_markets_wallet_v2.txt"
 
 OI_FIELDS = [
     "market",
@@ -108,12 +127,105 @@ def _print_row(trade: dict[str, Any], market: str) -> dict[str, Any] | None:
         "trade_id": trade_id,
         "market": str(trade.get("market") or trade.get("conditionId") or market),
         "asset_id": str(trade.get("asset") or trade.get("asset_id") or trade.get("outcomeIndex") or ""),
+        "wallet": str(
+            trade.get("proxyWallet")
+            or trade.get("proxy_wallet")
+            or trade.get("wallet")
+            or trade.get("address")
+            or ""
+        ).strip().lower(),
         "side": str(trade.get("side") or "").upper(),
         "price": price,
         "size": size,
         "timestamp": _timestamp_text(trade.get("timestamp") or trade.get("matchTime")),
         "collected_at_utc": now_utc(),
+        "title": str(trade.get("title") or trade.get("question") or "").strip(),
+        "market_slug": str(trade.get("slug") or trade.get("marketSlug") or trade.get("market_slug") or "").strip(),
+        "event_slug": str(trade.get("eventSlug") or trade.get("event_slug") or "").strip(),
+        "outcome": str(trade.get("outcome") or "").strip(),
+        "outcome_index": str(
+            trade.get("outcomeIndex") if trade.get("outcomeIndex") is not None else trade.get("outcome_index") or ""
+        ).strip(),
     }
+
+
+def _immutable_value_equal(field: str, left: Any, right: Any) -> bool:
+    if left in (None, "") or right in (None, ""):
+        return left in (None, "") and right in (None, "")
+    if field in {"price", "size"}:
+        left_number = safe_float(left)
+        right_number = safe_float(right)
+        return left_number is not None and right_number is not None and abs(left_number - right_number) <= 1e-12
+    if field == "side":
+        return str(left).strip().upper() == str(right).strip().upper()
+    return str(left).strip() == str(right).strip()
+
+
+def _merge_print_rows(
+    existing: list[dict[str, Any]], incoming: list[dict[str, Any]]
+) -> tuple[list[dict[str, Any]], int, int, int]:
+    """Append unseen IDs and fill blank metadata without revising trade facts."""
+
+    combined = [dict(row) for row in existing]
+    index = {str(row.get("trade_id") or ""): row for row in combined if str(row.get("trade_id") or "")}
+    new_prints = 0
+    enriched_existing = 0
+    immutable_conflicts = 0
+    for candidate in incoming:
+        trade_id = str(candidate.get("trade_id") or "").strip()
+        if not trade_id:
+            continue
+        current = index.get(trade_id)
+        if current is None:
+            current = dict(candidate)
+            combined.append(current)
+            index[trade_id] = current
+            new_prints += 1
+            continue
+        if any(
+            not _immutable_value_equal(field, current.get(field), candidate.get(field))
+            for field in PRINT_IMMUTABLE_FIELDS
+        ):
+            immutable_conflicts += 1
+            continue
+        changed = False
+        for field in PRINT_METADATA_FIELDS:
+            if current.get(field) in (None, "") and candidate.get(field) not in (None, ""):
+                current[field] = candidate[field]
+                changed = True
+        if changed:
+            enriched_existing += 1
+    return combined, new_prints, enriched_existing, immutable_conflicts
+
+
+def _commit_print_rows(
+    cfg: EngineConfig,
+    *,
+    ledger_path: Path,
+    incoming: list[dict[str, Any]],
+    max_rows: int,
+) -> tuple[list[dict[str, Any]], int, int, int, bool]:
+    """Serialize only the short read/merge/replace section across collectors."""
+
+    with runtime_lock(cfg, "trade_print_ledger_commit", stale_after_seconds=300) as lock:
+        if not lock.acquired:
+            return read_csv_rows(ledger_path), 0, 0, 0, True
+        existing = read_csv_rows(ledger_path)
+        combined, new_prints, enriched_existing, immutable_conflicts = _merge_print_rows(existing, incoming)
+        if max_rows > 0 and len(combined) > max_rows:
+            # Oldest rows roll into the same compressed training archive used
+            # by the websocket feature substrate, then leave the live table.
+            overflow = combined[:-max_rows]
+            combined = combined[-max_rows:]
+            from .websocket_normaliser import _archive_expiring_features
+
+            _archive_expiring_features(
+                cfg,
+                {"training_archive_enabled": True, "training_archive_max_mb": 1024},
+                [{"collected_at_utc": row.get("collected_at_utc"), **row} for row in overflow],
+            )
+        write_csv(ledger_path, combined, fieldnames=PRINT_FIELDS)
+    return combined, new_prints, enriched_existing, immutable_conflicts, False
 
 
 def _payload_items(payload: Any) -> list[Any]:
@@ -237,6 +349,10 @@ def collect_trade_prints(
         "generated_at_utc": now_utc(),
         "markets_polled": 0,
         "new_prints": 0,
+        "enriched_existing_prints": 0,
+        "immutable_conflicts": 0,
+        "wallet_rows_observed": 0,
+        "wallet_rows_persisted": 0,
         "ledger_rows": 0,
         "oi_markets_captured": 0,
         "oi_ledger_rows": 0,
@@ -257,17 +373,16 @@ def collect_trade_prints(
         markets = list(dict.fromkeys(str(market).strip() for market in markets if str(market).strip()))[
             : int(settings["max_markets"])
         ]
-    existing = read_csv_rows(ledger_path)
-    seen = {str(row.get("trade_id") or "") for row in existing}
     base_url = str(settings["base_url"]).rstrip("/")
     timeout = float(settings["request_timeout_seconds"])
     max_rows = int(safe_float(settings.get("max_ledger_rows")) or 0)
-    new_rows: list[dict[str, Any]] = []
+    observed_rows: list[dict[str, Any]] = []
+    observed_index: dict[str, dict[str, Any]] = {}
     errors: list[str] = []
     market_polls: list[dict[str, Any]] = []
 
     for market in markets:
-        market_new_before = len(new_rows)
+        market_new_before = len(observed_index)
         try:
             response = requests.get(
                 f"{base_url}/trades",
@@ -293,16 +408,21 @@ def collect_trade_prints(
             if not isinstance(trade, dict):
                 continue
             row = _print_row(trade, market)
-            if row is None or row["trade_id"] in seen:
+            if row is None:
                 continue
-            seen.add(row["trade_id"])
-            new_rows.append(row)
+            trade_id = str(row["trade_id"])
+            existing_observed = observed_index.get(trade_id)
+            if existing_observed is None:
+                observed_index[trade_id] = row
+                observed_rows.append(row)
+            else:
+                _merge_print_rows([existing_observed], [row])
         market_polls.append(
             {
                 "condition_id": market,
                 "status": "ok",
                 "prints_returned": len(trades),
-                "new_prints": len(new_rows) - market_new_before,
+                "new_prints": len(observed_index) - market_new_before,
                 "error": "",
             }
         )
@@ -319,26 +439,23 @@ def collect_trade_prints(
             max_rows=max_rows,
         )
 
-    combined = [*existing, *new_rows]
-    if max_rows > 0 and len(combined) > max_rows:
-        # Oldest rows roll into the same compressed training archive used by
-        # the websocket feature substrate, then leave the live ledger.
-        overflow = combined[:-max_rows]
-        combined = combined[-max_rows:]
-        from .websocket_normaliser import _archive_expiring_features
-
-        _archive_expiring_features(
-            cfg,
-            {"training_archive_enabled": True, "training_archive_max_mb": 1024},
-            [{"collected_at_utc": row.get("collected_at_utc"), **row} for row in overflow],
-        )
-
-    write_csv(ledger_path, combined, fieldnames=PRINT_FIELDS)
+    combined, new_prints, enriched_existing, immutable_conflicts, lock_contended = _commit_print_rows(
+        cfg,
+        ledger_path=ledger_path,
+        incoming=observed_rows,
+        max_rows=max_rows,
+    )
+    if lock_contended:
+        errors.append("trade_print_ledger_commit: lock_contended")
     summary.update(
         {
-            "status": "ok" if not errors else ("partial" if new_rows or combined else "failed"),
+            "status": "ok" if not errors else ("partial" if combined else "failed"),
             "markets_polled": len(markets),
-            "new_prints": len(new_rows),
+            "new_prints": new_prints,
+            "enriched_existing_prints": enriched_existing,
+            "immutable_conflicts": immutable_conflicts,
+            "wallet_rows_observed": sum(1 for row in observed_rows if row.get("wallet")),
+            "wallet_rows_persisted": sum(1 for row in combined if row.get("wallet")),
             "ledger_rows": len(combined),
             "ledger_path": str(ledger_path),
             "oi_markets_captured": oi_markets_captured,
@@ -372,7 +489,7 @@ def collect_maker_portfolio_trade_prints(cfg: EngineConfig) -> dict[str, Any]:
     )
 
 
-def _maker_backfill_markets(cfg: EngineConfig) -> list[str]:
+def _maker_backfill_markets(cfg: EngineConfig, max_markets: int) -> list[str]:
     markets: dict[str, None] = {}
     for row in read_csv_rows(cfg.output_root / "maker_carry" / "maker_carry_candidates.csv"):
         market = str(row.get("condition_id") or row.get("market") or "").strip()
@@ -387,7 +504,16 @@ def _maker_backfill_markets(cfg: EngineConfig) -> list[str]:
             market = str(row.get("condition_id") or row.get("market") or "").strip()
             if market:
                 markets[market] = None
-    return list(markets)
+    # WO-96 must be able to enrich the already collected tape, not only the
+    # current maker sheet. Existing market IDs are collection scope, never a
+    # signal or priority change.
+    for row in reversed(read_csv_rows(cfg.output_root / "polymarket_trade_prints" / "trade_prints.csv")):
+        market = str(row.get("market") or "").strip()
+        if market:
+            markets[market] = None
+        if len(markets) >= max_markets:
+            break
+    return list(markets)[:max_markets]
 
 
 def _read_completed_backfills(path: Path) -> set[str]:
@@ -397,8 +523,7 @@ def _read_completed_backfills(path: Path) -> set[str]:
 
 
 def _write_completed_backfills(path: Path, markets: set[str]) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text("\n".join(sorted(markets)) + ("\n" if markets else ""), encoding="utf-8")
+    write_text_atomic(path, "\n".join(sorted(markets)) + ("\n" if markets else ""))
 
 
 def backfill_trade_prints(cfg: EngineConfig) -> dict[str, Any]:
@@ -410,7 +535,7 @@ def backfill_trade_prints(cfg: EngineConfig) -> dict[str, Any]:
 
     settings = _settings(cfg)
     ledger_path = cfg.output_root / "polymarket_trade_prints" / "trade_prints.csv"
-    stamp_path = cfg.output_root / "polymarket_trade_prints" / "backfill_completed_markets.txt"
+    stamp_path = cfg.output_root / "polymarket_trade_prints" / BACKFILL_COMPLETION_FILENAME
     summary_path = cfg.output_root / "polymarket_trade_prints" / "trade_print_backfill_summary.json"
     summary: dict[str, Any] = {
         "status": "disabled",
@@ -420,6 +545,10 @@ def backfill_trade_prints(cfg: EngineConfig) -> dict[str, Any]:
         "markets_skipped_completed": 0,
         "markets_completed": 0,
         "new_prints": 0,
+        "enriched_existing_prints": 0,
+        "immutable_conflicts": 0,
+        "wallet_rows_observed": 0,
+        "wallet_rows_persisted": 0,
         "ledger_rows": 0,
         "completed_stamp": str(stamp_path),
         "errors": [],
@@ -430,18 +559,17 @@ def backfill_trade_prints(cfg: EngineConfig) -> dict[str, Any]:
         write_json(summary_path, summary)
         return summary
 
-    candidate_markets = _maker_backfill_markets(cfg)
+    candidate_markets = _maker_backfill_markets(cfg, int(settings["max_markets"]))
     completed = _read_completed_backfills(stamp_path)
     todo = [market for market in candidate_markets if market not in completed]
-    existing = read_csv_rows(ledger_path)
-    seen = {str(row.get("trade_id") or "") for row in existing}
     base_url = str(settings["base_url"]).rstrip("/")
     timeout = float(settings["request_timeout_seconds"])
     cap = max(1, int(safe_float(settings.get("backfill_max_prints_per_market")) or 5000))
     page_limit = max(1, int(safe_float(settings.get("backfill_limit_per_page")) or 500))
     pause = max(0.1, float(safe_float(settings.get("backfill_request_pause_seconds")) or 0.1))
     max_rows = int(safe_float(settings.get("max_ledger_rows")) or 0)
-    new_rows: list[dict[str, Any]] = []
+    observed_rows: list[dict[str, Any]] = []
+    observed_index: dict[str, dict[str, Any]] = {}
     errors: list[str] = []
     completed_this_run: set[str] = set()
     cap_hit_markets: list[str] = []
@@ -472,10 +600,15 @@ def backfill_trade_prints(cfg: EngineConfig) -> dict[str, Any]:
                 if not isinstance(trade, dict):
                     continue
                 row = _print_row(trade, market)
-                if row is None or row["trade_id"] in seen:
+                if row is None:
                     continue
-                seen.add(row["trade_id"])
-                new_rows.append(row)
+                trade_id = str(row["trade_id"])
+                existing_observed = observed_index.get(trade_id)
+                if existing_observed is None:
+                    observed_index[trade_id] = row
+                    observed_rows.append(row)
+                else:
+                    _merge_print_rows([existing_observed], [row])
             time.sleep(pause)
             if len(trades) < limit:
                 break
@@ -485,24 +618,20 @@ def backfill_trade_prints(cfg: EngineConfig) -> dict[str, Any]:
             if fetched >= cap:
                 cap_hit_markets.append(market)
 
-    combined = [*existing, *new_rows]
-    if max_rows > 0 and len(combined) > max_rows:
-        overflow = combined[:-max_rows]
-        combined = combined[-max_rows:]
-        from .websocket_normaliser import _archive_expiring_features
-
-        _archive_expiring_features(
-            cfg,
-            {"training_archive_enabled": True, "training_archive_max_mb": 1024},
-            [{"collected_at_utc": row.get("collected_at_utc"), **row} for row in overflow],
-        )
-
+    combined, new_prints, enriched_existing, immutable_conflicts, lock_contended = _commit_print_rows(
+        cfg,
+        ledger_path=ledger_path,
+        incoming=observed_rows,
+        max_rows=max_rows,
+    )
+    if lock_contended:
+        errors.append("trade_print_ledger_commit: lock_contended")
     completed.update(completed_this_run)
-    write_csv(ledger_path, combined, fieldnames=PRINT_FIELDS)
-    _write_completed_backfills(stamp_path, completed)
+    if not lock_contended:
+        _write_completed_backfills(stamp_path, completed)
     status = "ok"
     if errors:
-        status = "partial" if completed_this_run or new_rows or existing else "failed"
+        status = "partial" if completed_this_run or combined else "failed"
     elif not candidate_markets:
         status = "no_candidate_markets"
     elif not todo:
@@ -515,7 +644,11 @@ def backfill_trade_prints(cfg: EngineConfig) -> dict[str, Any]:
             "markets_skipped_completed": len(candidate_markets) - len(todo),
             "markets_completed": len(completed_this_run),
             "cap_hit_markets": cap_hit_markets,
-            "new_prints": len(new_rows),
+            "new_prints": new_prints,
+            "enriched_existing_prints": enriched_existing,
+            "immutable_conflicts": immutable_conflicts,
+            "wallet_rows_observed": sum(1 for row in observed_rows if row.get("wallet")),
+            "wallet_rows_persisted": sum(1 for row in combined if row.get("wallet")),
             "ledger_rows": len(combined),
             "ledger_path": str(ledger_path),
             "errors": errors[:10],

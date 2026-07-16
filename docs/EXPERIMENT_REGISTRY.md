@@ -150,6 +150,35 @@ that merge commit. This prevents retroactive hypothesis registration.
   post-registration evaluator implements the clustering, OOS split, costs,
   concentration, and FDR contract above.
 
+### Exact prospective evaluator amendment (owner-approved 2026-07-16; WO-96)
+
+The H3 registration boundary is `2026-07-12T13:38:47Z`. Eligible observations
+are post-boundary public BUY fills with immutable trade ID and positive size in
+the frozen 0.05–0.90 entry band. The first
+fill per wallet × token × UTC day is the independent row, ordered by normalized
+fill timestamp then immutable trade ID. A final line is the last token-level
+executable bid after entry and at/before close, observed within 60 minutes of
+close; missing/future/mismatched/stale quote data is ungraded, never imputed.
+
+The stopping sample is the first 100 graded independent fills or all eligible
+graded fills entered during the first 90 calendar days, whichever stop occurs
+first. Formal evaluation does not begin early. At stop, the sample freezes:
+the first floor(60%) is discovery and the final remainder is untouched
+validation. Fixed structural cohorts are entry-price bands 0.05–<0.20,
+0.20–0.80, >0.80–0.90; point-in-time leaderboard ranks 1–10, 11–50, 51–100;
+and positively observed top-holder membership. Intelligence snapshots must be
+at/before the fill and at most 36 hours old. Wallet candidates require at least
+five discovery fills in at least two markets. No candidate is selected from
+validation.
+
+Net CLV per share is final bid minus entry price minus canonical WO-94 taker
+fees at both prices, minus 0.005 fixed exit cost and 0.005 adverse-selection
+cost. At stop all fixed and discovery-selected cohorts, including null and
+negative cells, enter complete-family BH-FDR at 10%. The existing sample,
+clustered-bootstrap, concentration, shadow-only pass, and suppression gates
+above remain unchanged. `smart_flow_clv.py` remains legacy diagnostic history;
+only the WO-96 exact artifact may state the H3 registered verdict.
+
 ## Multiple-testing and evidence policy
 
 - Each primary has one primary metric. Secondary cuts are descriptive.

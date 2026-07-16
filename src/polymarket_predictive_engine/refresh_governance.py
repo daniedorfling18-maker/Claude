@@ -31,10 +31,9 @@ from .quant_research_status import build_quant_research_status
 from .readiness import paper_live_promotion_gate
 from .research_focus import build_research_focus
 from .sharp_anchor_coverage import build_sharp_anchor_coverage
-from .smart_flow_clv import build_smart_flow_clv
 from .storage import connect_db
 from .trade_signal_audit import build_trade_signal_audit
-from .utils import now_utc, write_json
+from .utils import now_utc, read_json, write_json
 
 
 T = TypeVar("T")
@@ -188,7 +187,10 @@ def _refresh_governance_locked(
     # final promotion decision, but cannot prevent the model timestamp above
     # from being refreshed and audited.
     closing_line = progress.run("closing_line_value", lambda: build_closing_line_value(cfg))
-    smart_flow_clv = progress.run("smart_flow_clv", lambda: build_smart_flow_clv(cfg))
+    h3_smart_flow = progress.run(
+        "h3_smart_flow_artifact",
+        lambda: read_json(cfg.output_root / "h3_smart_flow" / "h3_evaluation.json", default={}) or {},
+    )
     edge_attribution = progress.run("edge_attribution", lambda: build_edge_attribution(cfg))
     algo_sweep = progress.run("algo_sweep", lambda: run_algo_sweep(cfg))
     family_calibration = progress.run("family_calibration", lambda: build_family_calibration_scorecard(cfg))
@@ -239,7 +241,8 @@ def _refresh_governance_locked(
             "price_action_microstructure": True,
             "paper_round_trip_evidence": True,
             "closing_line_value": True,
-            "smart_flow_clv": True,
+            "smart_flow_clv": False,
+            "h3_smart_flow_artifact": True,
             "edge_attribution": True,
             "algo_sweep": True,
             "family_calibration": True,
@@ -272,8 +275,9 @@ def _refresh_governance_locked(
         "closing_line_final_positions": closing_line.get("final_line_positions"),
         "closing_line_mean_final_clv": closing_line.get("mean_final_clv"),
         "closing_line_positive_cohorts": closing_line.get("positive_clv_cohorts"),
-        "smart_flow_fills_scored": smart_flow_clv.get("fills_scored"),
-        "smart_flow_positive_wallets": smart_flow_clv.get("positive_wallets", []),
+        "h3_smart_flow_status": h3_smart_flow.get("status", "missing"),
+        "h3_smart_flow_final_fills": h3_smart_flow.get("final_fills", 0),
+        "h3_smart_flow_passing_cohorts": h3_smart_flow.get("passing_cohorts", []),
         "edge_attribution_status": edge_attribution.get("status"),
         "edge_attribution_positions": edge_attribution.get("attributed_positions"),
         "edge_attribution_cohort_classes": {

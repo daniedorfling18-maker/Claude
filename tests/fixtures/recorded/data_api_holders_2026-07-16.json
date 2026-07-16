@@ -1,0 +1,39 @@
+[
+  {
+    "token": "11111111111111111111111111111111111111111111111111111111111111111",
+    "holders": [
+      {
+        "proxyWallet": "0x1111111111111111111111111111111111111111",
+        "bio": "",
+        "asset": "11111111111111111111111111111111111111111111111111111111111111111",
+        "pseudonym": "Recorded Holder One",
+        "amount": 10469.8,
+        "displayUsernamePublic": true,
+        "outcomeIndex": 0
+      },
+      {
+        "proxyWallet": "0x2222222222222222222222222222222222222222",
+        "bio": "",
+        "asset": "11111111111111111111111111111111111111111111111111111111111111111",
+        "pseudonym": "Recorded Holder Two",
+        "amount": 75.25,
+        "displayUsernamePublic": false,
+        "outcomeIndex": 0
+      }
+    ]
+  },
+  {
+    "token": "22222222222222222222222222222222222222222222222222222222222222222",
+    "holders": [
+      {
+        "proxyWallet": "0x3333333333333333333333333333333333333333",
+        "bio": "",
+        "asset": "22222222222222222222222222222222222222222222222222222222222222222",
+        "pseudonym": "Recorded Holder Three",
+        "amount": 51.0,
+        "displayUsernamePublic": true,
+        "outcomeIndex": 1
+      }
+    ]
+  }
+]

@@ -205,3 +205,14 @@ def test_targeted_evidence_mode_uses_adaptive_queries_without_broad_search():
     assert discovery.primary_hypothesis_coverage(public_queries, settings)["status"] == "ok"
     assert len(event_queries) <= 10
     assert len(public_queries) <= 18
+
+
+def test_disabled_liquidity_discovery_remains_observation_only(tmp_path):
+    cfg = _cfg(tmp_path)
+    cfg.raw["liquidity_discovery"] = {"enabled": False}
+
+    payload = discovery.run_liquidity_discovery(cfg)
+
+    assert payload["status"] == "disabled"
+    assert payload["paper_trading_invoked"] is False
+    assert payload["live_trading_invoked"] is False

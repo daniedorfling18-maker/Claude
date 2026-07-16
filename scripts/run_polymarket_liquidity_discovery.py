@@ -715,7 +715,12 @@ def run_liquidity_discovery(
 ) -> dict[str, Any]:
     settings = _settings(cfg)
     if not settings.get("enabled", True):
-        payload = {"status": "disabled", "generated_at_utc": now_utc()}
+        payload = {
+            "status": "disabled",
+            "generated_at_utc": now_utc(),
+            "paper_trading_invoked": False,
+            "live_trading_invoked": False,
+        }
         write_json(cfg.governance_root / "liquidity_discovery_summary.json", payload)
         return payload
     if mode == "targeted-evidence":
@@ -759,6 +764,8 @@ def run_liquidity_discovery(
     payload = {
         "status": "computed",
         "generated_at_utc": now_utc(),
+        "paper_trading_invoked": False,
+        "live_trading_invoked": False,
         "mode": mode,
         "settings": {
             "event_limit": int(settings.get("event_limit", 60)),
@@ -829,6 +836,8 @@ def main(argv: list[str] | None = None) -> int:
         payload = {
             "status": "error",
             "generated_at_utc": now_utc(),
+            "paper_trading_invoked": False,
+            "live_trading_invoked": False,
             "error": f"{type(exc).__name__}: {exc}",
             "traceback": trace,
             "diagnostic_note": "Liquidity discovery failed before producing a watchlist. Full traceback is preserved here because some PowerShell wrappers only log the first traceback line.",

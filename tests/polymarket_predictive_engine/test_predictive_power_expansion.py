@@ -1529,6 +1529,7 @@ def test_websocket_reserves_open_position_tokens_before_discovery(tmp_path, monk
     assert len(token_ids) == 4
     assert all(row["selection_reason"] == "open_position" for row in targets[:2])
     assert all(row["websocket_target_reason"] == "open_position" for row in targets[:2])
+    assert targets[1]["family"] == "crypto_eth_updown_daily"
     assert targets[1]["close_time"] == "2099-01-02T00:00:00Z"
     assert subscriptions[0]["assets_ids"][:2] == ["shadow-position-token", "paper-position-token"]
 

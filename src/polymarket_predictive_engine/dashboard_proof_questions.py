@@ -240,13 +240,15 @@ def _overlay_script() -> str:
     const policy = (maker || {{}}).decision_policy || {{}};
     const requote = (maker || {{}}).requote_alerts || {{}};
     const replay = (maker || {{}}).fill_replay || {{}};
+    const h1Funding = policy.h1_funding_qualification || {{}};
     const requoteState = String(requote.alert_state || 'not_run');
     const requoteCls = requoteState === 'quotes_ok' ? 'good' : (requoteState === 'requote_advised' || requoteState === 'not_run' ? 'warn' : 'bad');
     const requoteBanner = `<div>${{proofBadge('WO-66: ' + requoteState, requoteCls)}} <strong>${{escProof(requote.headline || 'Read-only quote alert has not run yet.')}}</strong></div>`
       + `<div class="muted">${{escProof(requote.markets_checked ?? 0)}} ticket(s) checked · ${{escProof(requote.markets_requiring_action ?? 0)}} requiring action · human action only, no cancel/order path.</div>`;
     const action = String(policy.indicated_action || 'policy_not_run_yet');
     const actionCls = action.startsWith('fund_') ? 'good' : (action.startsWith('stop_') || action.includes('not_supported') ? 'bad' : 'warn');
-    const policyLine = `<div>${{proofBadge('policy: ' + action, actionCls)}} ${{proofBadge('ladder stage ' + (policy.ladder_stage_permitted ?? '-'), 'warn')}} ${{proofBadge('kill ' + ((policy.kill_criteria_status || {{}}).status || '-'), ((policy.kill_criteria_status || {{}}).status === 'clear') ? 'good' : 'bad')}}</div>`
+    const h1State = String(h1Funding.state || 'not_run');
+    const policyLine = `<div>${{proofBadge('policy: ' + action, actionCls)}} ${{proofBadge('sharp H1 + Tier-0 ' + h1State, h1State === 'pass' ? 'good' : 'bad')}} ${{proofBadge('ladder stage ' + (policy.ladder_stage_permitted ?? '-'), 'warn')}} ${{proofBadge('kill ' + ((policy.kill_criteria_status || {{}}).status || '-'), ((policy.kill_criteria_status || {{}}).status === 'clear') ? 'good' : 'bad')}}</div>`
       + `<div class="muted">${{escProof(policy.action_reason || policy.policy_note || 'Registered decision policy has not produced output yet.')}}</div>`;
     if (!study.status) return requoteBanner + policyLine + '<div class="muted">Maker-carry study has not run yet.</div>';
     const gates = study.maker_gates || {{}};
@@ -288,7 +290,7 @@ def _overlay_script() -> str:
     const live = ((payload.maker_lane || {{}}).live_test) || {{}};
     const makerPolicy = ((payload.maker_lane || {{}}).decision_policy) || {{}};
     const makerRequote = ((payload.maker_lane || {{}}).requote_alerts) || {{}};
-    const makerReplay = ((payload.maker_lane || {{}}).fill_replay) || {{}};
+    const h1Funding = makerPolicy.h1_funding_qualification || {{}};
     const mGates = study.maker_gates || {{}};
     const mA = mGates.M_A_carry_evidence || {{}};
     const alerts = ((payload.oversight_status || {{}}).alerts || []).length;
@@ -297,7 +299,7 @@ def _overlay_script() -> str:
     const rows = [
       ['Taker verdict', `${{vState}} - Gate A settlement units ${{gateA.independent_market_units ?? 0}}/${{gateA.minimum_final_samples ?? 12}} (${{gateA.settled_finals_total ?? 0}} finals settled)`, vCls],
       ['Maker lane', study.status
-        ? `alert ${{makerRequote.alert_state || 'not_run'}} - Tier-0 ${{makerReplay.coverage_status || makerReplay.status || 'not_run'}} - policy ${{makerPolicy.indicated_action || 'not_run'}} - est $${{study.portfolio_net_carry_usd_per_day ?? '-'}} /day (upper bound) - gate M-A day ${{mA.runs_at_or_above_target ?? 0}}/${{mA.required_runs ?? 7}}`
+        ? `alert ${{makerRequote.alert_state || 'not_run'}} - exact sharp H1/Tier-0 ${{h1Funding.state || 'not_run'}} - policy ${{makerPolicy.indicated_action || 'not_run'}} - est $${{study.portfolio_net_carry_usd_per_day ?? '-'}} /day (upper bound) - gate M-A day ${{mA.runs_at_or_above_target ?? 0}}/${{mA.required_runs ?? 7}}`
         : 'study has NOT run on this box yet - force it or wait for the daily harvest',
         ['pull_quotes_now', 'STOP'].includes(String(makerRequote.alert_state || '')) ? 'bad' : (study.status ? 'good' : 'bad')],
       ['Live money test', live.status === 'ok' ? `${{live.scoreboard}} - rewards $${{live.rewards_usd_total ?? 0}} / inventory PnL $${{live.inventory_pnl_usd ?? 0}}`

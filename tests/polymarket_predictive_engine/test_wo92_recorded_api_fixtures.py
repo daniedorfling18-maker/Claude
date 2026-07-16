@@ -26,6 +26,7 @@ from polymarket_predictive_engine import (
     resolution_collector,
     snapshot_label_collector,
     trade_print_collector,
+    wallet_intelligence_collector,
     wallet_reconciliation,
 )
 from polymarket_predictive_engine.config import EngineConfig
@@ -53,6 +54,9 @@ RECORDED_PARSER_COVERAGE = {
         "flow_toxicity._stamp",
         "maker_carry_study._recent_prints",
         "trade_print_collector._trade_items/_print_row",
+    },
+    "data_api_holders": {
+        "wallet_intelligence_collector._holder_payload_rows/_holder_row",
     },
     "clob_book_or_books": {
         "dutch_arb_monitor._best_ask",
@@ -158,6 +162,10 @@ def test_recorded_data_api_payloads_replay_all_current_parsers(monkeypatch: pyte
     assert print_row is not None
     assert print_row["market"] == CONDITION
     assert print_row["timestamp"] == "1784135092"
+    assert print_row["wallet"] == "0x1111111111111111111111111111111111111111"
+    assert print_row["market_slug"] == "sanitized-recorded-market"
+    assert print_row["event_slug"] == "sanitized-recorded-event"
+    assert print_row["outcome"] == "Yes"
 
     maker_settings = {
         **settings,
@@ -165,7 +173,6 @@ def test_recorded_data_api_payloads_replay_all_current_parsers(monkeypatch: pyte
     }
     prints = maker_carry_study._recent_prints(maker_settings, CONDITION)
     assert prints == [{"price": 0.26, "size": 12.5, "stamp": 1784135092.0, "side": "BUY"}]
-
     monkeypatch.setattr(wallet_reconciliation, "_get_json", lambda settings, url, params: positions if url.endswith("/positions") else activity)
     page_settings = {
         "data_api_base_url": "https://data-api.polymarket.com",
@@ -194,6 +201,25 @@ def test_recorded_data_api_payloads_replay_all_current_parsers(monkeypatch: pyte
     assert value == pytest.approx(3.25)
     assert len(marked) == 1
     assert errors == []
+
+
+def test_recorded_holder_token_groups_preserve_wallet_token_and_amount():
+    payload = _fixture("data_api_holders_2026-07-16.json")
+    rows, schema, groups = wallet_intelligence_collector._holder_payload_rows(payload, limit=20)
+
+    assert schema == "token_groups"
+    assert groups == 2
+    assert len(rows) == 3
+    parsed = wallet_intelligence_collector._holder_row(
+        rows[0],
+        snapshot_at="2026-07-16T10:00:00Z",
+        market=CONDITION,
+    )
+    assert parsed is not None
+    assert parsed["wallet"] == "0x1111111111111111111111111111111111111111"
+    assert parsed["token"] == TOKEN
+    assert parsed["amount"] == pytest.approx(10469.8)
+    assert parsed["size"] == pytest.approx(10469.8)
 
 
 def test_recorded_clob_books_replay_all_current_book_parsers(monkeypatch: pytest.MonkeyPatch) -> None:

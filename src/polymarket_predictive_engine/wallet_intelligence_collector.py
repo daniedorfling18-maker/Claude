@@ -31,14 +31,18 @@ LEADERBOARD_FIELDS = [
     "volume",
     "raw_window",
     "raw_rank_type",
+    "raw_offset",
 ]
 
 HOLDER_FIELDS = [
     "snapshot_date",
     "snapshot_at_utc",
     "market",
+    "token",
+    "outcome_index",
     "wallet",
     "outcome",
+    "amount",
     "size",
 ]
 
@@ -98,24 +102,66 @@ def _leaderboard_row(row: dict[str, Any], *, snapshot_at: str, params: dict[str,
         "rank": rank,
         "pnl": pnl,
         "volume": volume,
-        "raw_window": str(params.get("window") or ""),
-        "raw_rank_type": str(params.get("rankType") or params.get("rank_type") or ""),
+        "raw_window": str(params.get("timePeriod") or params.get("window") or ""),
+        "raw_rank_type": str(params.get("orderBy") or params.get("rankType") or params.get("rank_type") or ""),
+        "raw_offset": str(params.get("offset") or 0),
     }
 
 
 def _holder_row(row: dict[str, Any], *, snapshot_at: str, market: str) -> dict[str, Any] | None:
     wallet = _wallet(row)
-    size = safe_float(row.get("size") or row.get("shares") or row.get("balance") or row.get("position"))
-    if not wallet or size is None:
+    amount = safe_float(
+        row.get("amount")
+        if row.get("amount") not in (None, "")
+        else row.get("size") or row.get("shares") or row.get("balance") or row.get("position")
+    )
+    if not wallet or amount is None or amount < 0:
         return None
+    token = str(row.get("token") or row.get("asset") or row.get("asset_id") or "unknown").strip()
     return {
         "snapshot_date": snapshot_at[:10],
         "snapshot_at_utc": snapshot_at,
         "market": market,
+        "token": token,
+        "outcome_index": str(row.get("outcomeIndex") if row.get("outcomeIndex") is not None else row.get("outcome_index") or ""),
         "wallet": wallet,
-        "outcome": str(row.get("outcome") or row.get("name") or row.get("asset") or row.get("asset_id") or ""),
-        "size": size,
+        "outcome": str(row.get("outcome") or row.get("name") or ""),
+        "amount": amount,
+        # Preserve the WO-37 compatibility column while recording the venue's
+        # actual field name explicitly.
+        "size": amount,
     }
+
+
+def _holder_payload_rows(payload: Any, *, limit: int) -> tuple[list[dict[str, Any]], str, int]:
+    """Flatten the recorded Data API token-group envelope without losing token identity."""
+
+    candidates: list[dict[str, Any]]
+    if isinstance(payload, list):
+        candidates = [row for row in payload if isinstance(row, dict)]
+    elif isinstance(payload, dict):
+        candidates = _payload_rows(payload, "data", "results", "holders")
+    else:
+        return [], "malformed", 0
+
+    groups = [row for row in candidates if isinstance(row.get("holders"), list)]
+    if groups:
+        flattened: list[dict[str, Any]] = []
+        for group in groups:
+            token = str(group.get("token") or group.get("asset") or group.get("asset_id") or "").strip()
+            for holder in [row for row in group.get("holders", []) if isinstance(row, dict)][:limit]:
+                flattened.append(
+                    {
+                        **holder,
+                        "token": str(holder.get("token") or holder.get("asset") or token),
+                        "outcomeIndex": holder.get("outcomeIndex", group.get("outcomeIndex", "")),
+                    }
+                )
+        return flattened, "token_groups", len(groups)
+
+    # Backward-compatible parsing keeps previously recorded flat payloads
+    # legible, but production telemetry identifies which schema was observed.
+    return candidates[:limit], "flat_legacy", 0
 
 
 def _dedupe_latest(rows: list[dict[str, Any]], key_fields: tuple[str, ...]) -> list[dict[str, Any]]:
@@ -139,37 +185,75 @@ def _cap(rows: list[dict[str, Any]], max_rows: int) -> list[dict[str, Any]]:
 def _fetch_leaderboard(settings: dict[str, Any], snapshot_at: str) -> tuple[list[dict[str, Any]], dict[str, Any], str]:
     base_url = str(settings["base_url"]).rstrip("/")
     timeout = float(settings["request_timeout_seconds"])
-    limit = int(settings["leaderboard_limit"])
+    limit = min(100, max(1, int(settings["leaderboard_limit"])))
     paths = settings.get("leaderboard_paths") or ["/v1/leaderboard", "/leaderboard"]
     if isinstance(paths, str):
         paths = [paths]
     path_list = [str(path).strip() for path in paths if str(path).strip()]
-    probes: list[tuple[str, dict[str, Any]]] = [
-        (path, params)
-        for path in path_list
+    last_error = ""
+    for path in path_list:
+        endpoint = f"{base_url}/{path.lstrip('/')}"
+        if path.rstrip("/").endswith("v1/leaderboard"):
+            parsed: list[dict[str, Any]] = []
+            pages = 0
+            page_error = ""
+            for offset in range(0, limit, 50):
+                params = {
+                    "category": "OVERALL",
+                    "timePeriod": "ALL",
+                    "orderBy": "PNL",
+                    "limit": min(50, limit - offset),
+                    "offset": offset,
+                }
+                try:
+                    response = requests.get(endpoint, params=params, timeout=timeout)
+                    response.raise_for_status()
+                    rows = _payload_rows(response.json(), "leaderboard", "data", "results")
+                except Exception as exc:  # noqa: BLE001 - endpoint probing must be fail-soft
+                    page_error = f"{path}: offset={offset}: {type(exc).__name__}: {exc}"
+                    break
+                pages += 1
+                parsed.extend(
+                    parsed_row
+                    for row in rows[: int(params["limit"])]
+                    if (parsed_row := _leaderboard_row(row, snapshot_at=snapshot_at, params=params)) is not None
+                )
+                if len(rows) < int(params["limit"]):
+                    break
+            if parsed:
+                meta = {
+                    "path": path,
+                    "category": "OVERALL",
+                    "timePeriod": "ALL",
+                    "orderBy": "PNL",
+                    "page_limit": 50,
+                    "pages": pages,
+                    "requested_limit": limit,
+                    "complete": not page_error and len(parsed) >= limit,
+                }
+                return parsed[:limit], meta, page_error
+            last_error = page_error or f"{path}: empty leaderboard response"
+            continue
+
         for params in (
             {"limit": limit},
             {"limit": limit, "window": "all", "rankType": "pnl"},
             {"limit": limit, "window": "all", "rank_type": "pnl"},
-        )
-    ]
-    last_error = ""
-    for path, params in probes:
-        endpoint = f"{base_url}/{path.lstrip('/')}"
-        try:
-            response = requests.get(endpoint, params=params, timeout=timeout)
-            response.raise_for_status()
-            rows = _payload_rows(response.json(), "leaderboard", "data", "results")
-        except Exception as exc:  # noqa: BLE001 - endpoint probing must be fail-soft
-            last_error = f"{path}: {type(exc).__name__}: {exc}"
-            continue
-        parsed = [
-            parsed_row
-            for row in rows[:limit]
-            if (parsed_row := _leaderboard_row(row, snapshot_at=snapshot_at, params=params)) is not None
-        ]
-        if parsed:
-            return parsed, {**params, "path": path}, ""
+        ):
+            try:
+                response = requests.get(endpoint, params=params, timeout=timeout)
+                response.raise_for_status()
+                rows = _payload_rows(response.json(), "leaderboard", "data", "results")
+            except Exception as exc:  # noqa: BLE001 - endpoint probing must be fail-soft
+                last_error = f"{path}: {type(exc).__name__}: {exc}"
+                continue
+            parsed = [
+                parsed_row
+                for row in rows[:limit]
+                if (parsed_row := _leaderboard_row(row, snapshot_at=snapshot_at, params=params)) is not None
+            ]
+            if parsed:
+                return parsed, {**params, "path": path, "complete": len(parsed) >= limit}, ""
     return [], {}, last_error or "empty leaderboard response"
 
 
@@ -223,22 +307,24 @@ def _wallet_tracked_markets(cfg: EngineConfig, max_markets: int) -> tuple[list[s
     return list(markets)[:max_markets], counts
 
 
-def _fetch_holders(settings: dict[str, Any], market: str, snapshot_at: str) -> tuple[list[dict[str, Any]], str]:
+def _fetch_holders(
+    settings: dict[str, Any], market: str, snapshot_at: str
+) -> tuple[list[dict[str, Any]], str, dict[str, Any]]:
     base_url = str(settings["base_url"]).rstrip("/")
     timeout = float(settings["request_timeout_seconds"])
     limit = int(settings["top_holders_per_market"])
     try:
         response = requests.get(f"{base_url}/holders", params={"market": market, "limit": limit}, timeout=timeout)
         response.raise_for_status()
-        rows = _payload_rows(response.json(), "holders", "data", "results")
+        rows, schema, groups_seen = _holder_payload_rows(response.json(), limit=limit)
     except Exception as exc:  # noqa: BLE001 - one missing holders endpoint must not fail the daily job
-        return [], f"{market}: {type(exc).__name__}: {exc}"
+        return [], f"{market}: {type(exc).__name__}: {exc}", {"schema": "request_failed", "groups_seen": 0}
     parsed = [
         parsed_row
-        for row in rows[:limit]
+        for row in rows
         if (parsed_row := _holder_row(row, snapshot_at=snapshot_at, market=market)) is not None
     ]
-    return parsed, ""
+    return parsed, "", {"schema": schema, "groups_seen": groups_seen, "payload_rows": len(rows)}
 
 
 def collect_wallet_intelligence(cfg: EngineConfig) -> dict[str, Any]:
@@ -255,6 +341,9 @@ def collect_wallet_intelligence(cfg: EngineConfig) -> dict[str, Any]:
         "markets_polled": 0,
         "leaderboard_rows_added": 0,
         "holder_rows_added": 0,
+        "holder_groups_seen": 0,
+        "holder_payload_schema": "not_run",
+        "holder_empty_successes": 0,
         "wallets_seen": 0,
         "holder_leaderboard_overlap_count": 0,
         "errors": [],
@@ -277,16 +366,23 @@ def collect_wallet_intelligence(cfg: EngineConfig) -> dict[str, Any]:
     markets, market_sources = _wallet_tracked_markets(cfg, int(settings["max_markets"]))
     holder_rows: list[dict[str, Any]] = []
     errors: list[str] = []
+    holder_groups_seen = 0
+    holder_schemas: set[str] = set()
+    holder_empty_successes = 0
     if leaderboard_error:
         errors.append(f"leaderboard: {leaderboard_error}")
     for market in markets:
-        rows, error = _fetch_holders(settings, market, snapshot_at)
+        rows, error, telemetry = _fetch_holders(settings, market, snapshot_at)
         holder_rows.extend(rows)
+        holder_groups_seen += int(telemetry.get("groups_seen") or 0)
+        holder_schemas.add(str(telemetry.get("schema") or "unknown"))
+        if not error and not rows:
+            holder_empty_successes += 1
         if error:
             errors.append(error)
     existing_holders = read_csv_rows(holders_path)
     combined_holders = _cap(
-        _dedupe_latest([*existing_holders, *holder_rows], ("snapshot_date", "market", "wallet")),
+        _dedupe_latest([*existing_holders, *holder_rows], ("snapshot_date", "market", "token", "wallet")),
         max_rows,
     )
     write_csv(holders_path, combined_holders, fieldnames=HOLDER_FIELDS)
@@ -296,10 +392,21 @@ def collect_wallet_intelligence(cfg: EngineConfig) -> dict[str, Any]:
     overlap = sorted(latest_leaderboard & current_holders)
     summary.update(
         {
-            "status": "ok" if (leaderboard_rows or holder_rows or not errors) else "failed",
+            "status": (
+                "failed"
+                if not leaderboard_rows and not holder_rows and errors
+                else "partial"
+                if errors or (markets and holder_empty_successes == len(markets))
+                else "ok"
+            ),
             "markets_polled": len(markets),
             "leaderboard_rows_added": len(leaderboard_rows),
             "holder_rows_added": len(holder_rows),
+            "holder_groups_seen": holder_groups_seen,
+            "holder_payload_schema": (
+                next(iter(holder_schemas)) if len(holder_schemas) == 1 else "+".join(sorted(holder_schemas))
+            ),
+            "holder_empty_successes": holder_empty_successes,
             "leaderboard_rows": len(combined_leaderboard),
             "holder_rows": len(combined_holders),
             "wallets_seen": len({*latest_leaderboard, *current_holders}),

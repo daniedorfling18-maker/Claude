@@ -59,6 +59,7 @@ DEFAULT_LEDGER_REGISTRY: list[dict[str, str]] = [
     {"glob": "execution/a1_sweep_advisory.json", "mode": "snapshot"},
     {"glob": "execution/executor_status.json", "mode": "snapshot"},
     {"glob": "performance/cost_ledger.csv", "mode": "append_only"},
+    {"glob": "h3_smart_flow/h3_final_fills.csv", "mode": "append_only"},
     {"glob": "performance/background_timeout_incidents.csv", "mode": "append_only"},
     {"glob": "performance/degraded_state_incidents.csv", "mode": "append_only"},
     {"glob": "performance/wallet_reconciliation_history.csv", "mode": "append_only"},

@@ -9,7 +9,7 @@ import yaml
 from polymarket_predictive_engine import trade_print_collector
 from polymarket_predictive_engine.cli import COMMANDS
 from polymarket_predictive_engine.config import load_config
-from polymarket_predictive_engine.utils import read_csv_rows, read_json, write_csv, write_json
+from polymarket_predictive_engine.utils import read_csv_rows, read_json, safe_float, write_csv, write_json
 
 
 def _config(tmp_path: Path):
@@ -90,6 +90,46 @@ def test_provider_errors_are_fail_soft_and_reported(tmp_path, monkeypatch):
     assert summary["status"] == "failed"
     assert summary["errors"] and "data-api unreachable" in summary["errors"][0]
     assert summary["new_prints"] == 0
+
+
+def test_reobserved_trade_enriches_only_blank_metadata_and_rejects_fact_conflict(tmp_path):
+    cfg = _config(tmp_path)
+    ledger = cfg.output_root / "polymarket_trade_prints" / "trade_prints.csv"
+    original = {
+        "trade_id": "trade-1",
+        "market": "0xmarket",
+        "asset_id": "token-1",
+        "wallet": "",
+        "side": "BUY",
+        "price": "0.4",
+        "size": "10",
+        "timestamp": "1784135092",
+        "collected_at_utc": "2026-07-16T10:00:00Z",
+    }
+    write_csv(ledger, [original], fieldnames=trade_print_collector.PRINT_FIELDS)
+
+    enriched = {**original, "wallet": "0xabc", "title": "Recorded title", "price": 0.4, "size": 10.0}
+    combined, new_rows, enriched_rows, conflicts, contended = trade_print_collector._commit_print_rows(
+        cfg,
+        ledger_path=ledger,
+        incoming=[enriched],
+        max_rows=100,
+    )
+    assert (new_rows, enriched_rows, conflicts, contended) == (0, 1, 0, False)
+    assert combined[0]["wallet"] == "0xabc"
+    assert combined[0]["price"] == "0.4"
+    assert combined[0]["collected_at_utc"] == "2026-07-16T10:00:00Z"
+
+    conflict = {**enriched, "price": 0.41, "wallet": "0xdef"}
+    combined, new_rows, enriched_rows, conflicts, contended = trade_print_collector._commit_print_rows(
+        cfg,
+        ledger_path=ledger,
+        incoming=[conflict],
+        max_rows=100,
+    )
+    assert (new_rows, enriched_rows, conflicts, contended) == (0, 0, 1, False)
+    assert combined[0]["wallet"] == "0xabc"
+    assert safe_float(combined[0]["price"]) == 0.4
 
 
 def test_open_interest_rides_along_with_trade_print_collection(tmp_path, monkeypatch):
@@ -245,7 +285,9 @@ def test_backfill_trade_prints_paginates_deduplicates_and_stamps(tmp_path, monke
     assert all(seconds >= 0.1 for seconds in sleeps)
     rows = read_csv_rows(cfg.output_root / "polymarket_trade_prints" / "trade_prints.csv")
     assert {row["trade_id"] for row in rows} == {"0xaaa-0", "0xaaa-1", "0xaaa-2"}
-    stamp = (cfg.output_root / "polymarket_trade_prints" / "backfill_completed_markets.txt").read_text(encoding="utf-8")
+    stamp = (
+        cfg.output_root / "polymarket_trade_prints" / trade_print_collector.BACKFILL_COMPLETION_FILENAME
+    ).read_text(encoding="utf-8")
     assert "0xaaa" in stamp and "0xbbb" in stamp
     persisted = read_json(cfg.output_root / "polymarket_trade_prints" / "trade_print_backfill_summary.json")
     assert persisted["paper_trading_invoked"] is False
@@ -257,7 +299,7 @@ def test_backfill_trade_prints_skips_stamped_markets_and_picks_up_new_candidates
     cfg.raw["trade_prints"].update({"backfill_limit_per_page": 2, "backfill_max_prints_per_market": 10})
     candidate_path = cfg.output_root / "maker_carry" / "maker_carry_candidates.csv"
     write_csv(candidate_path, [{"condition_id": "0xold"}], fieldnames=["condition_id"])
-    stamp_path = cfg.output_root / "polymarket_trade_prints" / "backfill_completed_markets.txt"
+    stamp_path = cfg.output_root / "polymarket_trade_prints" / trade_print_collector.BACKFILL_COMPLETION_FILENAME
     stamp_path.parent.mkdir(parents=True, exist_ok=True)
     stamp_path.write_text("0xold\n", encoding="utf-8")
     calls = []

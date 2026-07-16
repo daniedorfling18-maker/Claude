@@ -10,6 +10,8 @@ credentials, private account data, or request headers are stored.
   seconds timestamp and activity-type shape.
 - `data_api_positions_2026-07-15.json`: Data API `GET /positions` list.
 - `data_api_trades_2026-07-15.json`: Data API `GET /trades` list with a seconds timestamp.
+- `data_api_holders_2026-07-16.json`: Data API `GET /holders` list of token groups, preserving
+  the nested `holders`, `proxyWallet`, `asset`, `amount`, and outcome-index shape.
 - `clob_book_2026-07-15.json`: CLOB `GET /book` object with a millisecond timestamp string.
 - `clob_books_2026-07-15.json`: CLOB `POST /books` list envelope.
 - `clob_prices_history_2026-07-15.json`: CLOB `GET /prices-history` object; five ordered history

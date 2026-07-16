@@ -279,7 +279,8 @@ async function load() {
     const quantResearch = data.quant_research_status || {};
     const alphaBridge = data.mispricing_alpha_bridge || {};
     const closingLine = data.closing_line_value || {};
-    const smartFlowClv = data.smart_flow_clv || {};
+    const smartFlowClv = data.h3_smart_flow || {};
+    const legacySmartFlowClv = data.smart_flow_clv_legacy || {};
     const dutchArb = data.dutch_arb || {};
     const longshotBias = data.longshot_bias || data.forward_paper_cycle?.longshot_bias || {};
     const performanceFactsheet = data.performance_factsheet || {};
@@ -992,39 +993,34 @@ async function load() {
           ["Evidence","clv_evidence", v=>longText(v, 150)]
         ], 8)
       : `<div class="sectionLead">No CLV evidence yet. The next governance refresh should build closing_line_value.json once shadow positions and bid/ask features exist.</div>`;
-    const smartFlowWallets = Array.isArray(smartFlowClv.wallets) ? smartFlowClv.wallets : [];
-    const smartFlowWatchlist = Array.isArray(smartFlowClv.watchlist) ? smartFlowClv.watchlist : [];
+    const h3Cohorts = Array.isArray(smartFlowClv.cohorts) ? smartFlowClv.cohorts : [];
+    const h3Coverage = smartFlowClv.coverage || {};
     document.getElementById("smartFlowClv").innerHTML = Object.keys(smartFlowClv).length
-      ? `<div class="sectionLead">Scores public wallet fills by closing-line value. A positive wallet is a research target only; it does not authorise paper/live trading.</div>` + facts([
+      ? `<div class="sectionLead">Exact registered H3 test: observed public BUY versus the executable bid at close, net of entry/exit taker fees and fixed costs. It never uses midpoint or resolution labels and cannot authorise paper/live trading.</div>` + facts([
           ["Status", smartFlowClv.status || "-"],
           ["Generated", smartFlowClv.generated_at_utc || "-"],
-          ["Fills seen/scored", `${smartFlowClv.fills_seen ?? 0} / ${smartFlowClv.fills_scored ?? 0}`],
-          ["Final-line fills", smartFlowClv.final_line_fills],
-          ["Minimum final fills/wallet", smartFlowClv.minimum_final_samples_per_wallet],
-          ["Positive wallets", smartFlowClv.positive_wallets || [], joinText],
-          ["Skipped", smartFlowClv.positions_skipped || {}, v=>longText(JSON.stringify(v), 220)],
-          ["Governance note", smartFlowClv.governance_note || "Diagnostic only; no trading gate changed.", v=>longText(v, 260)]
-        ]) + titledTable("Smart-flow wallet watchlist", smartFlowWatchlist, [
-          ["Wallet","wallet", v=>longText(v, 120)],
-          ["Fills","fills"],
-          ["Final","final_fills"],
-          ["Mean final CLV","mean_final_clv", v=>fmtNum(v, 4)],
-          ["CI low","final_clv_ci_low", v=>fmtNum(v, 4)],
-          ["CI high","final_clv_ci_high", v=>fmtNum(v, 4)],
-          ["Beat close","beat_close_rate", fmtPct],
-          ["Evidence","clv_evidence"],
-          ["Action","recommended_action", v=>longText(v, 160)]
-        ], 8) + titledTable("All scored smart-flow wallets", smartFlowWallets, [
-          ["Wallet","wallet", v=>longText(v, 120)],
-          ["Fills","fills"],
-          ["Final","final_fills"],
-          ["Mean CLV","mean_clv", v=>fmtNum(v, 4)],
-          ["Mean final CLV","mean_final_clv", v=>fmtNum(v, 4)],
-          ["Evidence","clv_evidence"],
-          ["Need","final_samples_needed"],
+          ["Formal evaluation started", smartFlowClv.formal_evaluation_started === true ? "yes" : "no - validation remains sealed"],
+          ["Final executable fills", `${smartFlowClv.final_fills ?? 0} / ${smartFlowClv.critical_settings?.stop_fills ?? 100}`],
+          ["Fills remaining", smartFlowClv.final_fills_remaining],
+          ["Stop", `${smartFlowClv.stop_reason || "not_reached"} · deadline ${smartFlowClv.stop_deadline_utc || "-"}`],
+          ["Decision", smartFlowClv.decision || "collect_more"],
+          ["Passing cohorts", smartFlowClv.passing_cohorts || [], joinText],
+          ["Coverage", h3Coverage, v=>longText(JSON.stringify(v), 300)],
+          ["Legacy diagnostic", Object.keys(legacySmartFlowClv).length ? `${legacySmartFlowClv.fills_scored ?? 0} midpoint-era rows retained for provenance only` : "none"],
+          ["Governance note", smartFlowClv.governance_note || "Shadow research only; no trading gate changed.", v=>longText(v, 260)]
+        ]) + titledTable("Exact H3 untouched-validation cohorts", h3Cohorts, [
+          ["Cohort","cohort", v=>longText(v, 150)],
+          ["Type","cohort_type"],
+          ["Fills","validation_fills"],
+          ["Markets","validation_markets"],
+          ["Mean net CLV","mean_net_clv", v=>fmtNum(v, 5)],
+          ["90% CI low","cluster_bootstrap_ci_low_90", v=>fmtNum(v, 5)],
+          ["FDR pass","bh_fdr_pass"],
+          ["Concentration","maximum_positive_family_share", fmtPct],
+          ["Gate","support_gate_pass"],
           ["Action","recommended_action", v=>longText(v, 160)]
         ], 8)
-      : `<div class="sectionLead">No smart-flow CLV evidence yet. Add public wallet fills to the configured input to score whether outside traders are beating the line.</div>`;
+      : `<div class="sectionLead">No exact H3 artifact yet. The next daily training harvest must collect wallet-bearing trades and publish h3_evaluation.json; legacy midpoint output is not a substitute.</div>`;
     const correlatedExposure = Array.isArray(portfolioRisk.exposure_by_correlation_key) ? portfolioRisk.exposure_by_correlation_key : [];
     const categoryExposure = Array.isArray(portfolioRisk.exposure_by_category) ? portfolioRisk.exposure_by_category : [];
     document.getElementById("portfolioRisk").innerHTML = Object.keys(portfolioRisk).length
@@ -5426,9 +5422,17 @@ def render_dashboard(cfg: EngineConfig, latest_report: dict[str, Any] | None = N
     closing_line_value = read_json(governance / "closing_line_value.json", default={}) or {}
     if not isinstance(closing_line_value, dict):
         closing_line_value = {}
-    smart_flow_clv = read_json(governance / "smart_flow_clv.json", default={}) or {}
-    if not isinstance(smart_flow_clv, dict):
-        smart_flow_clv = {}
+    smart_flow_clv_legacy = read_json(governance / "smart_flow_clv.json", default={}) or {}
+    if not isinstance(smart_flow_clv_legacy, dict):
+        smart_flow_clv_legacy = {}
+    h3_smart_flow = read_json(cfg.output_root / "h3_smart_flow" / "h3_evaluation.json", default={}) or {}
+    if not isinstance(h3_smart_flow, dict):
+        h3_smart_flow = {}
+    if h3_smart_flow:
+        h3_smart_flow = {
+            **h3_smart_flow,
+            "cohorts": read_csv_rows(cfg.output_root / "h3_smart_flow" / "h3_cohorts.csv"),
+        }
     dutch_arb = read_json(cfg.output_root / "polymarket_arbitrage" / "dutch_arb_monitor_summary.json", default={}) or {}
     if not isinstance(dutch_arb, dict):
         dutch_arb = {}
@@ -5628,7 +5632,8 @@ def render_dashboard(cfg: EngineConfig, latest_report: dict[str, Any] | None = N
         "mispricing_alpha_summary": mispricing_alpha_summary,
         "mispricing_alpha_bridge": alpha_bridge,
         "closing_line_value": closing_line_value,
-        "smart_flow_clv": smart_flow_clv,
+        "h3_smart_flow": h3_smart_flow,
+        "smart_flow_clv_legacy": smart_flow_clv_legacy,
         "dutch_arb": dutch_arb,
         "longshot_bias": longshot_bias,
         "performance_factsheet": performance_factsheet,

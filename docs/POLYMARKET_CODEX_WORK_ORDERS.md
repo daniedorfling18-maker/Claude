@@ -3930,13 +3930,121 @@ Day-after check: in
 `liquidity_discovery_summary.json`, `frozen_updown.selected_query_count` is `0`
 and both event/public `primary_hypothesis_coverage.status` fields are `ok`.
 
+## WO-96 — Repair wallet evidence producers and implement exact H3 OOS evaluation
+
+Status: IN IMPLEMENTATION by Codex on 2026-07-16.
+
+Owner authorization: the 2026-07-16 instruction to repair WO-37/58 holder
+ingestion, retain wallet identity on public trades, and then build the exact H3
+evaluator. This is collection and shadow-research infrastructure only. It does
+not create signals, approve paper/live trading, size capital, or place orders.
+
+Observed production defects before implementation:
+
+1. The public `/holders` response is a list of token groups containing nested
+   `holders` rows and uses `amount`; the WO-37 parser expected flat holder rows
+   and `size`, so production polled 40 markets and silently wrote zero holders.
+2. The public `/trades` response carries `proxyWallet`, title/slug/outcome, and
+   token metadata, but `trade_print_collector.py` discarded those fields. The
+   canonical tape therefore could not support the registered first-fill-per-
+   wallet independent unit.
+3. Legacy `smart_flow_clv.py` reads a manually supplied file, scores midpoint
+   CLV, and lacks the registered prospective split, costs, market clustering,
+   concentration cap, and complete-family FDR. It remains diagnostic history.
+
+Registered implementation contract:
+
+1. Parse the current recorded Data API holders shape as token groups. Persist
+   condition, token, outcome index, wallet, and `amount` without flattening
+   away token identity. An HTTP-success payload with tracked markets but no
+   parseable holder rows is `partial`, with explicit schema/empty counters.
+2. Extend the canonical trade-print schema with wallet, title, market/event
+   slug, outcome, and outcome index. Re-observing an existing `trade_id` may
+   fill only previously blank metadata; price, size, side, market, asset, and
+   timestamps are immutable. The existing bounded ledger remains an atomic
+   state table, not an append-only evidence ledger.
+3. Exact H3 eligibility starts strictly after
+   `2026-07-12T13:38:47Z`, the merge-time boundary of the registered H3
+   contract. Eligible observations are BUY trades with wallet, token, market,
+   finite price in the frozen 0.05–0.90 entry band, and normalized timestamp.
+   The independent unit is the earliest eligible fill per wallet × token × UTC
+   day, deterministically ordered by timestamp then trade ID.
+4. A final executable line is the last valid `best_bid` after entry and at or
+   before the market close, observed no more than 60 minutes before close.
+   Market/token identity and close time must agree with the stored feature row.
+   No resolution label or midpoint is used. A graded row is appended once to
+   `outputs/h3_smart_flow/h3_final_fills.csv` and never revised.
+5. Net CLV per share is final bid minus observed BUY price minus the canonical
+   WO-94 category/price-aware taker fee at entry and exit, minus 0.005 fixed
+   exit cost and 0.005 adverse-selection cost. Exact fee metadata is preferred;
+   absent/malformed metadata follows the canonical conservative fallback.
+6. The stopping sample is the first 100 graded independent fills, or all
+   graded fills whose entry is within 90 calendar days of registration when
+   that deadline arrives, whichever occurs first. Only at stopping is the
+   sample frozen chronologically: first floor(60%) discovery, final remainder
+   untouched validation. Before stopping, the formal verdict is `collecting`
+   and no validation statistics or passing cohort are emitted.
+7. Pre-specified structural cohorts are entry-price bands 0.05–<0.20,
+   0.20–0.80, and >0.80–0.90; point-in-time leaderboard ranks 1–10, 11–50,
+   and 51–100; and observed top-holder membership. Intelligence snapshots must
+   be at or before entry and no older than 36 hours. Absence from a top-N
+   holder response is unknown, not a negative cohort assignment. Individual
+   wallet candidates require at least five discovery fills across two markets
+   and are selected without inspecting validation.
+8. At stop, every selected wallet and every fixed structural cohort is tested
+   on untouched validation, including null/negative cells. Passing requires at
+   least 30 validation fills over at least 10 markets overall, at least 20
+   validation fills for the cohort, positive mean net CLV, a market-clustered
+   bootstrap 90% lower bound above zero, BH-FDR at 10%, and no market family
+   supplying more than 35% of positive CLV. Passing produces a shadow research
+   candidate only. If no cohort passes at stop, H3 is suppressed and cohort
+   definitions may not be changed on the same window.
+9. The exact evaluator runs once in the daily training harvest after wallet and
+   trade collection. The frequent governance refresh only consumes its last
+   atomically completed summary; it must not repeatedly rescan the full tape.
+   The dashboard identifies legacy smart-flow output as diagnostic and uses
+   the exact H3 artifact for H3 status.
+
+Producer/coverage contract: `trade_print_collector.py` produces wallet-bearing
+public fills; `wallet_intelligence_collector.py` produces point-in-time rank and
+holder snapshots; `websocket_normaliser.py` produces token-level executable
+bid history and close metadata. The evaluator requires all identity/time fields
+and a fresh pre-close bid for grading. Missing coverage is counted by reason
+and remains pending/ineligible; it cannot be imputed from later snapshots.
+
+Fail-safe sentence: missing, stale, future-dated, malformed, schema-incompatible,
+or identity-mismatched inputs are excluded and surfaced as counters; before the
+registered stop the verdict is `collecting`; at stop, insufficient or failed
+evidence is `suppress`; no failure path emits a candidate or authorizes risk.
+
+Engineering-standards review: S1 uses one run `generated_at_utc`, normalizes
+external timestamps at ingestion, and tests clock advancement across entry,
+close, snapshot-age, and 90-day boundaries. S2 atomically writes the canonical
+state tables, summaries, cohort table, and completion stamp; only the H3 final
+ledger uses locked append-only writes. S3 is the contract above. S4 uses
+sanitized recorded `/holders` and `/trades` payloads plus planted-edge, null,
+deduplication, future-snapshot, stale-quote, and clock-advance properties. S5
+is stated above. S7 must verify H1/H2, every trading/capital gate, paper sizing,
+historical rows, and every live/order/signer/credential path are unchanged.
+
+Day-after check: inspect
+`outputs/wallet_intelligence/wallet_intelligence_summary.json` and require
+`holder_payload_schema=token_groups`, `holder_groups_seen>0`, and
+`holder_rows_added>0` when groups are returned; inspect
+`outputs/polymarket_trade_prints/trade_prints_summary.json` and require
+`wallet_rows_observed>0`; then inspect
+`outputs/h3_smart_flow/h3_evaluation.json` and require
+`status` in `{collecting,evaluated,suppressed}`, `formal_evaluation_started`
+false until the registered stop, all missing-coverage counters present, and
+both trading-invoked flags false.
+
 ## Current queue for Codex (reconciled 2026-07-16)
 
 Every WO below and every future WO must comply with
 `docs/ENGINEERING_STANDARDS.md` (S1-S7), including the mandatory
 `Day-after check:` line. Reviews verify compliance item by item.
 
-**WO-95 was implemented in PR #238.** Later items in the 2026-07-16 owner
+**WO-95 was implemented in PR #238 and WO-96 is in implementation.** Later items in the 2026-07-16 owner
 instruction require their own numbered work order and PR; do not combine them
 into this change. WO-89 through WO-92 were implemented as of 2026-07-15.
 WO-93 was implemented in PR #236, WO-94 in PR #237, and WO-95 in PR #238. WO-85, WO-87, WO-86, and
@@ -3945,9 +4053,8 @@ WO-84 is implemented in PR #205. Do not infer follow-on capital, gate, model,
 or executor work from their diagnostics; the queue below remains binding.
 
 - **Pending review, not build permission:** WO-33. WO-34/35 model wiring shares
-  its leakage-review dependency and must stay inside H1-H3. H2/H3 still need
-  dedicated post-registration OOS evaluators, but no numbered build order for
-  those evaluators is filed here.
+  its leakage-review dependency and must stay inside H1-H3. H2 still needs a
+  dedicated post-registration OOS evaluator; WO-96 is the filed exact H3 build.
 - **Blocked:** WO-48 (maker evidence gates); WO-67 (all P1-P5); WO-73 item 4 and
   WO-75 item 2 (part of the blocked executor authorization path).
 - **Deferred:** WO-70 until post-proof; WO-72 until the human ladder produces

@@ -165,6 +165,7 @@ def test_alpha_edge_and_strategy_priority_charge_taker_fee_once(tmp_path):
                 "liquidity": "1000",
                 "time_to_close_hours": "24",
                 "confidence": "1",
+                **_book("0.50"),
             }
         ],
         output_path=str(prediction_path),

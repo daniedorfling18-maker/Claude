@@ -4331,8 +4331,15 @@ VPS run, and `outputs/performance/independent_merge_gate.json` must report an
 online matching runner, branch protection requiring that exact context, no
 review bypass, and a successful PR run before `status=enforced` is trusted.
 
-Verification: pending isolated ARM64/Python 3.11 focused and full-suite runs,
-an exact workflow-shape reproduction, and the required PR gate.
+Verification: in a disposable two-CPU/four-GiB ARM64 `python:3.11-slim`
+container, pre-test Git provisioning and `pip check` passed, Ruff passed, both
+effective-config checks passed, and 19 focused clock/workflow/documentation
+tests passed. The first full run from a linked Git worktree produced the known
+restore-test harness rejection because `/app/.git` pointed to an unmounted host
+worktree path; that assertion was not changed or skipped. From a normal
+standalone clone of the same commit, the restore test passed independently and
+the exact unfiltered suite passed 1,296 tests in 107.42 seconds. The required
+PR gate remains pending.
 
 ## Current queue for Codex (reconciled 2026-07-16)
 

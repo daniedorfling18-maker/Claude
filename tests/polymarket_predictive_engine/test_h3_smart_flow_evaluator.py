@@ -176,6 +176,43 @@ def test_clock_advance_grades_bid_not_midpoint_and_freezes_append_only_row(tmp_p
     assert read_csv_rows(cfg.output_root / "h3_smart_flow" / "h3_final_fills.csv")[0]["final_bid"] == "0.55"
 
 
+def test_stale_final_bid_and_future_intelligence_fail_on_conservative_side(tmp_path: Path) -> None:
+    cfg = _config(tmp_path)
+    _seed_one_fill(cfg)
+    features_path = cfg.output_root / "polymarket_training" / "websocket_market_features.csv"
+    features = read_csv_rows(features_path)
+    features[0]["source_timestamp"] = "2026-07-13T20:00:00Z"
+    write_csv(features_path, features, fieldnames=list(features[0]))
+    leaderboard_path = cfg.output_root / "wallet_intelligence" / "leaderboard_history.csv"
+    leaderboard = read_csv_rows(leaderboard_path)
+    leaderboard[0]["snapshot_at_utc"] = "2026-07-13T00:30:00Z"
+    write_csv(leaderboard_path, leaderboard, fieldnames=list(leaderboard[0]))
+    holders_path = cfg.output_root / "wallet_intelligence" / "holders_history.csv"
+    holders = read_csv_rows(holders_path)
+    holders[0]["snapshot_at_utc"] = "2026-07-13T00:30:00Z"
+    write_csv(holders_path, holders, fieldnames=list(holders[0]))
+
+    stale = evaluate_h3_smart_flow(
+        cfg,
+        as_of=datetime(2026, 7, 14, 0, 0, 1, tzinfo=timezone.utc),
+    )
+    assert stale["final_fills"] == 0
+    assert stale["coverage"]["stale_or_missing_pre_close_bid"] == 1
+
+    features[0]["source_timestamp"] = "2026-07-13T23:30:00Z"
+    write_csv(features_path, features, fieldnames=list(features[0]))
+    graded = evaluate_h3_smart_flow(
+        cfg,
+        as_of=datetime(2026, 7, 14, 0, 0, 1, tzinfo=timezone.utc),
+    )
+    assert graded["final_fills"] == 1
+    assert graded["coverage"]["leaderboard_snapshot_missing_or_stale"] == 1
+    assert graded["coverage"]["holder_snapshot_missing_or_stale"] == 1
+    row = read_csv_rows(cfg.output_root / "h3_smart_flow" / "h3_final_fills.csv")[0]
+    assert row["rank_cohort"] == ""
+    assert row["top_holder_observed"] == "False"
+
+
 def _final_rows(*, positive: bool) -> list[dict]:
     rows: list[dict] = []
     for index in range(100):

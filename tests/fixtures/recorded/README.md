@@ -1,6 +1,6 @@
 # Sanitized recorded API fixtures
 
-These payloads were captured from Polymarket's unauthenticated public endpoints on 2026-07-15.
+These payloads were captured from Polymarket's unauthenticated public endpoints on 2026-07-15 and 2026-07-16.
 They preserve the real response nesting, field names, timestamp units, and scalar types for parser
 regression tests. Sanitization replaces public wallet, token, condition, transaction, profile, and
 URL identifiers with deterministic inert values; it does not reshape payloads or change types. No

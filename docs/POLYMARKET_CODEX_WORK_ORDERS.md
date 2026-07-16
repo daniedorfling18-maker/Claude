@@ -3965,8 +3965,9 @@ Registered implementation contract:
    state table, not an append-only evidence ledger.
 3. Exact H3 eligibility starts strictly after
    `2026-07-12T13:38:47Z`, the merge-time boundary of the registered H3
-   contract. Eligible observations are BUY trades with wallet, token, market,
-   finite price in the frozen 0.05–0.90 entry band, and normalized timestamp.
+   contract. Eligible observations are BUY trades with immutable trade ID,
+   wallet, token, market, positive finite size, finite price in the frozen
+   0.05–0.90 entry band, and normalized timestamp.
    The independent unit is the earliest eligible fill per wallet × token × UTC
    day, deterministically ordered by timestamp then trade ID.
 4. A final executable line is the last valid `best_bid` after entry and at or

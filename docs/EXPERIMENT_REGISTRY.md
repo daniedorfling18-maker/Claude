@@ -153,7 +153,8 @@ that merge commit. This prevents retroactive hypothesis registration.
 ### Exact prospective evaluator amendment (owner-approved 2026-07-16; WO-96)
 
 The H3 registration boundary is `2026-07-12T13:38:47Z`. Eligible observations
-are post-boundary public BUY fills in the frozen 0.05–0.90 entry band. The first
+are post-boundary public BUY fills with immutable trade ID and positive size in
+the frozen 0.05–0.90 entry band. The first
 fill per wallet × token × UTC day is the independent row, ordered by normalized
 fill timestamp then immutable trade ID. A final line is the last token-level
 executable bid after entry and at/before close, observed within 60 minutes of

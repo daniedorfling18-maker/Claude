@@ -221,6 +221,9 @@ def _fetch_leaderboard(settings: dict[str, Any], snapshot_at: str) -> tuple[list
                 if len(rows) < int(params["limit"]):
                     break
             if parsed:
+                coverage_error = page_error
+                if limit >= 100 and len(parsed) < limit and not coverage_error:
+                    coverage_error = f"{path}: incomplete top-{limit} coverage ({len(parsed)} rows)"
                 meta = {
                     "path": path,
                     "category": "OVERALL",
@@ -231,7 +234,7 @@ def _fetch_leaderboard(settings: dict[str, Any], snapshot_at: str) -> tuple[list
                     "requested_limit": limit,
                     "complete": not page_error and len(parsed) >= limit,
                 }
-                return parsed[:limit], meta, page_error
+                return parsed[:limit], meta, coverage_error
             last_error = page_error or f"{path}: empty leaderboard response"
             continue
 
@@ -253,7 +256,12 @@ def _fetch_leaderboard(settings: dict[str, Any], snapshot_at: str) -> tuple[list
                 if (parsed_row := _leaderboard_row(row, snapshot_at=snapshot_at, params=params)) is not None
             ]
             if parsed:
-                return parsed, {**params, "path": path, "complete": len(parsed) >= limit}, ""
+                coverage_error = (
+                    f"{path}: incomplete top-{limit} coverage ({len(parsed)} rows)"
+                    if limit >= 100 and len(parsed) < limit
+                    else ""
+                )
+                return parsed, {**params, "path": path, "complete": len(parsed) >= limit}, coverage_error
     return [], {}, last_error or "empty leaderboard response"
 
 

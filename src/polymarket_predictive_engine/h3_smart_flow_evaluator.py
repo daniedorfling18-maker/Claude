@@ -126,12 +126,14 @@ FIXED_COHORTS = (
 
 COVERAGE_KEYS = (
     "fills_seen",
+    "missing_trade_id",
     "duplicate_trade_ids",
     "non_buy",
     "missing_wallet",
     "missing_token",
     "missing_market",
     "missing_or_invalid_entry_price",
+    "missing_or_invalid_size",
     "outside_entry_band",
     "missing_or_invalid_entry_timestamp",
     "pre_registration",
@@ -334,6 +336,9 @@ def _eligible_fills(
     coverage["fills_seen"] = len(rows)
     for raw in rows:
         trade_id = str(raw.get("trade_id") or "").strip()
+        if not trade_id:
+            coverage["missing_trade_id"] += 1
+            continue
         if trade_id and trade_id in seen_trade_ids:
             coverage["duplicate_trade_ids"] += 1
             continue
@@ -357,6 +362,10 @@ def _eligible_fills(
         price = safe_float(raw.get("price") or raw.get("entry_price"))
         if price is None or not 0 < price < 1:
             coverage["missing_or_invalid_entry_price"] += 1
+            continue
+        size = safe_float(raw.get("size") or raw.get("quantity"))
+        if size is None or size <= 0:
+            coverage["missing_or_invalid_size"] += 1
             continue
         if not float(settings["entry_min"]) <= price <= float(settings["entry_max"]):
             coverage["outside_entry_band"] += 1
@@ -382,6 +391,7 @@ def _eligible_fills(
                 "token": token,
                 "market": market,
                 "entry_price": price,
+                "entry_size": size,
                 "entry_dt": entered_at,
             }
         )
@@ -558,7 +568,7 @@ def _grade_rows(
                 "entry_timestamp_utc": _iso(fill["entry_dt"]),
                 "entry_day_utc": fill["entry_dt"].date().isoformat(),
                 "entry_price": round(entry_price, 8),
-                "size": safe_float(fill.get("size")) or 0.0,
+                "size": fill["entry_size"],
                 "title": str(fill.get("title") or quote.get("question") or ""),
                 "market_slug": str(fill.get("market_slug") or quote.get("market_slug") or ""),
                 "event_slug": str(fill.get("event_slug") or quote.get("event_slug") or ""),

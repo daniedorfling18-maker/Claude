@@ -127,7 +127,7 @@ HTML = """<!doctype html>
   <section><h2>Action board</h2><div id="actionBoard"></div></section>
   <section><h2>Evidence funnel</h2><div id="evidenceFunnel"></div></section>
   <section><h2>Sharp sports edge funnel</h2><div id="sharpSportsFunnel"></div></section>
-  <section><h2>Dutch-book arb watch</h2><div id="dutchArbWatch"></div></section>
+  <section><h2>H2 Dutch consistency (exact)</h2><div id="dutchArbWatch"></div></section>
   <section><h2>Longshot-bias shadow lane</h2><div id="longshotBias"></div></section>
   <section><h2>Performance factsheet</h2><div id="performanceFactsheet"></div></section>
   <div class="two">
@@ -281,6 +281,7 @@ async function load() {
     const closingLine = data.closing_line_value || {};
     const smartFlowClv = data.h3_smart_flow || {};
     const legacySmartFlowClv = data.smart_flow_clv_legacy || {};
+    const h2Dutch = data.h2_dutch || {};
     const dutchArb = data.dutch_arb || {};
     const longshotBias = data.longshot_bias || data.forward_paper_cycle?.longshot_bias || {};
     const performanceFactsheet = data.performance_factsheet || {};
@@ -761,9 +762,43 @@ async function load() {
     const dutchPersistent = Array.isArray(dutchArb.persistent_alerts) ? dutchArb.persistent_alerts : [];
     const dutchTop = Array.isArray(dutchArb.top_opportunities) ? dutchArb.top_opportunities : [];
     const fmtPct = v => v === null || v === undefined || v === "" || Number.isNaN(Number(v)) ? "-" : fmtNum(Number(v) * 100, 2) + "%";
-    const dutchCaveat = "Observed ask baskets; execution, fees, and fill reality are untested — shadow evidence only.";
-    document.getElementById("dutchArbWatch").innerHTML = Object.keys(dutchArb).length
-      ? `<div class="sectionLead">${dutchCaveat}</div>` + facts([
+    const h2Support = h2Dutch.support || {};
+    const h2Checks = h2Support.support_checks || {};
+    const h2Episodes = Array.isArray(h2Dutch.episode_preview) ? h2Dutch.episode_preview : [];
+    const exactH2 = Object.keys(h2Dutch).length
+      ? `<div class="sectionLead">Registered H2 authority: exact complete common-size plans after canonical per-leg fees and the fixed 0.002 USDC/basket reserve. This is shadow research only.</div>` + facts([
+          ["Registered status", h2Dutch.status || "-"],
+          ["Exact artifact generated", h2Dutch.generated_at_utc || "-"],
+          ["Latest exact scan", h2Dutch.latest_exact_observation_at_utc || "none"],
+          ["Formal evaluation started", h2Dutch.formal_evaluation_started ? "yes" : "no - stopping sample remains sealed"],
+          ["Stop rule", h2Dutch.stop_reason || `first 100 episodes or ${h2Dutch.registered_stop_at_utc || "registered deadline"}`],
+          ["Independent episodes", `${h2Dutch.independent_episodes ?? 0} / ${h2Dutch.critical_settings?.stop_episodes ?? 100}`],
+          ["Persistent 3-scan episodes", `${h2Dutch.persistent_episodes_current ?? 0} / ${h2Dutch.critical_settings?.minimum_persistent_episodes ?? 10}`],
+          ["Calendar span", `${h2Support.calendar_span_days ?? 0} / ${h2Dutch.critical_settings?.minimum_calendar_span_days ?? 14} days`],
+          ["Aggregate exact net profit", h2Support.aggregate_net_profit_usdc, fmtUsd],
+          ["Mean annualised net ROC", h2Support.mean_annualised_net_return_on_capital, fmtPct],
+          ["Event-clustered 90% interval", h2Support.event_clustered_ci_low_90 === null || h2Support.event_clustered_ci_low_90 === undefined ? "not evaluated" : `[${fmtPct(h2Support.event_clustered_ci_low_90)}, ${fmtPct(h2Support.event_clustered_ci_high_90)}]`],
+          ["Max positive-profit event share", h2Support.maximum_positive_event_profit_share, fmtPct],
+          ["Support checks", h2Checks, v=>longText(v, 300)],
+          ["FDR", h2Dutch.fdr_status || "not applicable"],
+          ["Frozen evidence anchored", h2Dutch.evidence_anchor_pass ? "yes" : (h2Dutch.evidence_anchor_reason || "not yet")],
+          ["Exact exclusions / coverage", h2Dutch.coverage || {}, v=>longText(v, 320)],
+          ["Next condition", h2Dutch.next_unmet_condition || "-", v=>longText(v, 320)],
+          ["No order authority", (h2Dutch.live_trading_invoked || h2Dutch.paper_trading_invoked) ? "unexpected invocation flag" : "confirmed - shadow research only"]
+        ]) + titledTable("Current exact H2 episodes", h2Episodes, [
+          ["Start","episode_start_at_utc"],
+          ["Event","event_title", v=>longText(v, 180)],
+          ["Legs","leg_count"],
+          ["Ask sum","ask_sum", v=>fmtNum(v, 4)],
+          ["Fees/set","entry_taker_fees_per_set", v=>fmtNum(v, 4)],
+          ["Net profit","net_profit_usdc", fmtUsd],
+          ["Annualised net ROC","annualised_net_return_on_capital", fmtPct],
+          ["3-scan persistent","persistent_three_scans"]
+        ], 8)
+      : `<div class="sectionLead">No exact H2 artifact exists yet. The registered H2 verdict is unavailable; legacy gross rows cannot substitute.</div>`;
+    const dutchCaveat = "Observed ask baskets (gross only). This live watch does not include the exact registered H2 costs or episode verdict.";
+    const grossDiagnostic = Object.keys(dutchArb).length
+      ? `<details class="expand"><summary>Dutch-book arb watch - live gross diagnostic only</summary><div class="sectionLead">${dutchCaveat}</div>` + facts([
           ["Status", dutchArb.status || "-"],
           ["Last scan", dutchArb.generated_at_utc || dutchArb.last_scan_at_utc || "-"],
           ["Events discovered", dutchStats.discovered ?? dutchArb.events_scanned ?? "-"],
@@ -786,8 +821,9 @@ async function load() {
           ["Capital","capital_usdc", fmtUsd],
           ["Profit","profit_usdc", fmtUsd],
           ["Days","days_to_resolution"]
-        ], 5)
-      : `<div class="sectionLead">No Dutch-book arb scan yet. The VPS loop will run a bounded dry-run pass when the configured cadence is due.</div>`;
+        ], 5) + `</details>`
+      : `<details class="expand"><summary>Dutch-book arb watch - live gross diagnostic only</summary><div class="sectionLead">No gross Dutch-book scan yet. The VPS loop will run a bounded dry-run pass when due.</div></details>`;
+    document.getElementById("dutchArbWatch").innerHTML = exactH2 + grossDiagnostic;
     const longshotPreview = Array.isArray(longshotBias.candidate_preview) ? longshotBias.candidate_preview : [];
     const longshotCandidates = longshotBias.candidates ?? longshotPreview.length ?? "-";
     document.getElementById("longshotBias").innerHTML = Object.keys(longshotBias).length
@@ -5433,6 +5469,16 @@ def render_dashboard(cfg: EngineConfig, latest_report: dict[str, Any] | None = N
             **h3_smart_flow,
             "cohorts": read_csv_rows(cfg.output_root / "h3_smart_flow" / "h3_cohorts.csv"),
         }
+    h2_dutch = read_json(cfg.output_root / "h2_dutch" / "h2_evaluation.json", default={}) or {}
+    if not isinstance(h2_dutch, dict):
+        h2_dutch = {}
+    if h2_dutch:
+        h2_dutch = {
+            **h2_dutch,
+            "episode_preview": read_csv_rows(
+                cfg.output_root / "h2_dutch" / "h2_episode_state.csv"
+            )[-20:],
+        }
     dutch_arb = read_json(cfg.output_root / "polymarket_arbitrage" / "dutch_arb_monitor_summary.json", default={}) or {}
     if not isinstance(dutch_arb, dict):
         dutch_arb = {}
@@ -5634,6 +5680,7 @@ def render_dashboard(cfg: EngineConfig, latest_report: dict[str, Any] | None = N
         "closing_line_value": closing_line_value,
         "h3_smart_flow": h3_smart_flow,
         "smart_flow_clv_legacy": smart_flow_clv_legacy,
+        "h2_dutch": h2_dutch,
         "dutch_arb": dutch_arb,
         "longshot_bias": longshot_bias,
         "performance_factsheet": performance_factsheet,

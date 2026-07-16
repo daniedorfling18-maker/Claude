@@ -916,6 +916,65 @@ def test_dashboard_surfaces_dutch_arb_watch(tmp_path):
     assert "Observed ask baskets" in html
 
 
+def test_dashboard_uses_exact_h2_artifact_as_authority(tmp_path):
+    cfg = _config(tmp_path)
+    write_json(
+        cfg.output_root / "h2_dutch" / "h2_evaluation.json",
+        {
+            "work_order": "WO-98",
+            "status": "collecting",
+            "generated_at_utc": "2026-07-16T12:00:00Z",
+            "registered_stop_at_utc": "2026-09-10T13:38:47Z",
+            "formal_evaluation_started": False,
+            "independent_episodes": 7,
+            "persistent_episodes_current": 2,
+            "latest_exact_observation_at_utc": "2026-07-16T11:45:00Z",
+            "critical_settings": {
+                "stop_episodes": 100,
+                "minimum_persistent_episodes": 10,
+                "minimum_calendar_span_days": 14,
+                "registered_cost_reserve_per_set": 0.002,
+            },
+            "coverage": {"eligible_exact_rows": 19, "complete_nonqualifying_clear_rows": 4},
+            "support": {},
+            "fdr_status": "not_applicable_single_registered_primary_test",
+            "evidence_anchor_pass": False,
+            "evidence_anchor_reason": "not_required_until_statistical_support",
+            "next_unmet_condition": "collect exact complete scans until 100 independent episodes",
+            "paper_trading_invoked": False,
+            "live_trading_invoked": False,
+        },
+    )
+    write_csv(
+        cfg.output_root / "h2_dutch" / "h2_episode_state.csv",
+        [
+            {
+                "episode_start_at_utc": "2026-07-16T11:45:00Z",
+                "event_title": "Exact complete event",
+                "leg_count": 3,
+                "ask_sum": 0.95,
+                "entry_taker_fees_per_set": 0.032375,
+                "net_profit_usdc": 0.125,
+                "annualised_net_return_on_capital": 0.19,
+                "persistent_three_scans": True,
+            }
+        ],
+    )
+
+    result = render_dashboard(cfg)
+    data = read_json(result["dashboard_data"])
+    html = Path(result["dashboard_file"]).read_text(encoding="utf-8")
+
+    assert data["h2_dutch"]["work_order"] == "WO-98"
+    assert data["h2_dutch"]["independent_episodes"] == 7
+    assert data["h2_dutch"]["episode_preview"][0]["event_title"] == "Exact complete event"
+    assert data["h2_dutch"]["paper_trading_invoked"] is False
+    assert "H2 Dutch consistency (exact)" in html
+    assert "Registered H2 authority" in html
+    assert "Current exact H2 episodes" in html
+    assert "legacy gross rows cannot substitute" in html
+
+
 def test_dashboard_surfaces_edge_lane_runtime_fallbacks(tmp_path):
     cfg = _config(tmp_path)
     write_json(

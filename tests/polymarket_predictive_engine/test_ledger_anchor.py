@@ -9,7 +9,11 @@ import yaml
 
 from polymarket_predictive_engine.cli import COMMANDS
 from polymarket_predictive_engine.config import load_config
-from polymarket_predictive_engine.ledger_anchor import anchor_ledgers, verify_ledger_chain
+from polymarket_predictive_engine.ledger_anchor import (
+    DEFAULT_LEDGER_REGISTRY,
+    anchor_ledgers,
+    verify_ledger_chain,
+)
 from polymarket_predictive_engine.utils import read_csv_rows, read_json
 
 
@@ -152,3 +156,10 @@ def test_cli_and_external_anchor_script_preserve_append_only_history():
     assert 'push -q origin "+$COMMIT:refs/heads/$BRANCH"' not in script
     telemetry = Path("scripts/push_vps_telemetry.sh").read_text(encoding="utf-8")
     assert 'VPS_ANCHOR_REPO_DIR="$REPO_DIR" sh "$ANCHOR_SCRIPT"' in telemetry
+
+
+def test_exact_h2_ledgers_are_enrolled_with_correct_mutability_modes():
+    registry = {row["glob"]: row["mode"] for row in DEFAULT_LEDGER_REGISTRY}
+    assert registry["h2_dutch/h2_scan_observations_v1.csv"] == "append_only"
+    assert registry["h2_dutch/h2_final_episodes_v1.csv"] == "append_only"
+    assert registry["h2_dutch/h2_final_sample_manifest.json"] == "snapshot"

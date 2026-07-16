@@ -114,9 +114,55 @@ that merge commit. This prevents retroactive hypothesis registration.
 - Stopping rule: evaluate at 100 independent episodes or 60 calendar days,
   whichever comes first. If the support gate is not met, return the lane to
   diagnostic status; no threshold tuning on that window.
-- Status: primary hypothesis registered; current scanner artifacts remain
-  diagnostic until a dedicated post-registration OOS evaluator implements
-  this exact contract.
+- Status: primary hypothesis registered; WO-98 implements the dedicated exact
+  post-registration evaluator. Only `outputs/h2_dutch/h2_evaluation.json` may
+  state the registered H2 verdict; legacy gross scanner artifacts remain
+  diagnostic.
+
+### Exact prospective evaluator amendment (owner-approved 2026-07-16; WO-98)
+
+The H2 registration boundary is `2026-07-12T13:38:47Z`; the fixed calendar
+stop is `2026-09-10T13:38:47Z`. Existing gross scanner rows are diagnostic and
+ungradable because they do not preserve exact per-leg fees, the registered
+cost reserve, complete clear scans, or one shared observation clock. The exact
+ledger therefore begins with WO-98, while retaining the original registration
+boundary and rejecting every pre-boundary or future-dated row.
+
+Each live scan uses one UTC timestamp and records every completely priced
+3--80-leg negRisk event, including non-opportunities needed to prove a clear.
+Every leg must have a unique token, a positive displayed best-ask size, and a
+canonical WO-94 fee schedule. The common executable size is the minimum
+displayed top-ask size. Per completed basket, capital is the ask sum plus all
+entry taker fees (with the venue's five-decimal per-order rounding) plus a
+fixed `0.002` USDC slippage/adverse-selection reserve;
+net profit is one USDC minus that all-in capital. The primary metric is net
+return on capital annualised by the positive event-resolution holding time.
+Missing, incomplete, ambiguous, stale, non-finite, already-ended, or otherwise
+unpriceable scans are excluded and cannot prove a clear.
+
+An episode starts at the first qualifying complete scan whose all-in net profit
+is positive. Its first qualifying execution plan and economics are frozen. A
+later episode for the same event requires at least one intervening complete
+non-qualifying scan; an absent or malformed scan never proves a clear. At most
+one episode per event x UTC day is independent. Persistence requires three
+qualifying scans in the same uncleared episode with both adjacent gaps between
+10 and 20 minutes; a missing/late scan breaks the persistence run but does not
+create a new episode.
+
+The formal sample is the first 100 independent episodes in chronological order
+or all eligible episode starts no later than the fixed 60-day stop, whichever
+occurs first. Evaluation stays sealed before either stop. Support requires at
+least 30 episodes, a first-to-last episode-day span of at least 14 calendar
+days, at least 10 three-scan-persistent episodes, complete common-size plans
+for every episode, positive aggregate net profit, an event-clustered bootstrap
+90% lower bound above zero for mean annualised net return on capital, and no
+event contributing more than 35% of positive net profit. The bootstrap uses
+1,000 deterministic iterations with seed `20260716`. No partitions are
+registered for H2, so FDR is explicitly not applicable; adding a partition
+would require a new prospective registration and complete-family BH-FDR at
+10%. A pass creates a shadow research candidate only. Failure suppresses H2;
+neither outcome can invoke paper/live trading, alter a gate, or authorize
+capital.
 
 ## H3 — PRIMARY: Structural-bias / smart-flow cohorts with positive CLV
 

@@ -30,6 +30,7 @@ from polymarket_predictive_engine import (
     wallet_reconciliation,
 )
 from polymarket_predictive_engine.config import EngineConfig
+from polymarket_predictive_engine.h2_dutch_evaluator import build_h2_scan_observation
 from polymarket_predictive_engine.utils import normalize_external_timestamp
 
 
@@ -115,6 +116,7 @@ def test_recorded_fixture_inventory_and_timestamp_units() -> None:
         "clob_books_2026-07-15.json",
         "clob_prices_history_2026-07-15.json",
         "gamma_markets_2026-07-15.json",
+        "gamma_negrisk_event_2026-07-16.json",
     }
     assert expected <= {path.name for path in FIXTURE_ROOT.iterdir()}
     assert all(RECORDED_PARSER_COVERAGE.values())
@@ -275,6 +277,44 @@ def test_recorded_clob_books_replay_all_current_book_parsers(monkeypatch: pytest
         TOKEN,
     )
     assert asks == [(0.26, 95.25), (0.27, 310.0)]
+
+
+def test_recorded_negrisk_event_builds_fee_bearing_exact_h2_plan(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    event = _fixture("gamma_negrisk_event_2026-07-16.json")
+    book = _fixture("clob_book_2026-07-15.json")
+
+    def fake_get(url: str, *args: Any, **kwargs: Any) -> Any:
+        del args, kwargs
+        return event if url == dutch_arb_monitor.GAMMA_EVENTS else book
+
+    monkeypatch.setattr(dutch_arb_monitor, "_get", fake_get)
+    observed_at = datetime(2026, 7, 16, 12, 0, tzinfo=timezone.utc)
+    plan, reason = dutch_arb_monitor.price_event(
+        event["id"],
+        pause=0,
+        max_outcomes=80,
+        min_ask_sum=0.85,
+        timeout=1,
+        observed_at=observed_at,
+    )
+
+    assert reason == "ok"
+    assert plan is not None
+    assert plan.complete is True
+    assert plan.resolution_at_utc == "2026-07-29T00:00:00Z"
+    assert len(plan.legs) == 5
+    assert all(leg.taker_fee_category == "economics" for leg in plan.legs)
+    assert all(leg.taker_fee_source == "documented_category_fallback" for leg in plan.legs)
+    assert all(leg.taker_fee_per_share == pytest.approx(0.05 * 0.26 * 0.74) for leg in plan.legs)
+
+    exact, exclusion = build_h2_scan_observation(plan, observed_at=observed_at)
+    assert exclusion == ""
+    assert exact is not None
+    assert exact["leg_count"] == 5
+    assert exact["qualifying"] is False
+    assert exact["complete_common_size_plan"] is True
 
 
 def test_recorded_price_history_replays_all_current_history_parsers(monkeypatch: pytest.MonkeyPatch) -> None:

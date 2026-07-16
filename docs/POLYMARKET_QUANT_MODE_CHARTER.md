@@ -779,6 +779,18 @@ trade/OI ledgers, and fail-soft per-market OI behavior are unchanged. This is
 collection-only and changes no hypothesis, signal, gate, threshold, sizing,
 capital, credential, broker, or order path.
 
+**2026-07-16 - WO-98 implemented by Codex.** H2 now has a frozen
+prospective evaluator contract: exact complete-basket top-ask depth, canonical
+per-leg fees, a fixed adverse/slippage reserve, explicit clear scans,
+event-day episode independence, three-scan persistence, a deterministic
+event-clustered interval, concentration control, and the original 100-episode/
+60-day stop. The exact artifact will become the dashboard's H2 authority;
+legacy gross scanner output remains diagnostic. The lane is shadow research
+only and cannot alter paper/live, gate, sizing, funding, signer, credential,
+broker, or order paths. Exact observations, frozen episodes, and the verdict
+are published under `outputs/h2_dutch/`, enrolled in the evidence anchor, and
+shown as the dashboard's H2 authority.
+
 ## Rules of engagement for coding agents
 
 0. **Division of labour**: the orchestrating agent writes/updates this charter and the work orders

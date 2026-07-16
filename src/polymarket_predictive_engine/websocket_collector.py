@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 from .config import EngineConfig, load_config
+from .discovery_policy import is_frozen_updown_record, is_frozen_updown_text
 from .runtime_lock import runtime_lock
 from .utils import csv_columns, now_utc, parse_timestamp, read_csv_rows, read_json, safe_float, serialize_value, write_csv, write_json
 
@@ -19,9 +20,6 @@ _PROFIT_SPRINT_TARGET_ACTIONS = {"WAIT_ACTIVE_WINDOW", "SHADOW_LABEL_GATE", "SHA
 _DEFAULT_TARGET_FAMILIES = {
     "sports_other",
     "crypto_btc_special",
-    "crypto_btc_updown_15m",
-    "crypto_eth_updown_15m",
-    "crypto_updown_event",
 }
 # These are families where local evidence already showed poor behaviour or where the
 # current classifier is too generic for paper-quality routing. They can still appear
@@ -723,7 +721,7 @@ def _feedback_collection_queries(payload: dict[str, Any], focus_payload: dict[st
             _append_unique(queries, raw_query)
     for raw_query in _historical_breadth_collection_queries(focus_payload):
         _append_unique(queries, raw_query)
-    return queries
+    return [query for query in queries if not is_frozen_updown_text(query)]
 
 
 def _historical_breadth_collection_queries(focus_payload: dict[str, Any]) -> list[str]:
@@ -813,32 +811,20 @@ def _row_search_text(row: dict[str, Any]) -> str:
 
 
 def _query_requires_updown(query: str) -> bool:
-    text = str(query or "").strip().lower().replace("-", " ")
-    compact = text.replace(" ", "")
-    return "updown" in compact or "up or down" in text
+    return is_frozen_updown_text(query)
 
 
 def _row_is_updown(row: dict[str, Any]) -> bool:
-    text = _row_search_text(row).replace("-", " ")
-    compact = text.replace(" ", "")
-    return "updown" in compact or "up or down" in text
+    return is_frozen_updown_record(row)
 
 
 def _feedback_query_match_score(query: str, row: dict[str, Any]) -> float | None:
+    if _query_requires_updown(query) or _row_is_updown(row):
+        return None
     prefixes = _family_prefixes_for_collection_query(query)
     if not _matches_feedback_broaden_family(row, prefixes):
         return None
     score = 10.0
-    if _query_requires_updown(query):
-        if not _row_is_updown(row):
-            return None
-        score += 100.0
-    elif _row_is_updown(row):
-        # A broad "bitcoin" style query can still use up/down rows, but an
-        # explicit "btc updown" query should outrank generic crypto markets.
-        score += 5.0
-    if any(str(row.get("family") or "").lower().startswith(prefix + "_updown") for prefix in prefixes):
-        score += 15.0
     if str(row.get("market_slug") or "").strip():
         score += 1.0
     return score
@@ -895,7 +881,7 @@ def _feedback_broaden_rows(cfg: EngineConfig, settings: dict[str, Any], candidat
 
     def add_query(raw_query: Any, priority: float) -> None:
         query = str(raw_query or "").strip()
-        if not query:
+        if not query or _query_requires_updown(query):
             return
         key = query.lower()
         query_priorities[key] = max(priority, query_priorities.get(key, 0.0))
@@ -1443,7 +1429,7 @@ def _liquidity_target_rows(cfg: EngineConfig, settings: dict[str, Any]) -> list[
     if not _boolish(settings.get("use_liquidity_targets", True)):
         return _with_position_targets(cfg, settings, [], max_assets=max_assets)
     watchlist_path = cfg.output_root / "polymarket_liquidity_discovery" / "liquidity_watchlist.csv"
-    rows = read_csv_rows(watchlist_path)
+    rows = [row for row in read_csv_rows(watchlist_path) if not is_frozen_updown_record(row)]
     target_all_liquid_families = _boolish(settings.get("target_all_liquid_families", True))
     families = set() if target_all_liquid_families else _target_families(cfg, settings)
     max_per_family = int(settings.get("max_liquidity_target_assets_per_family", 4) or 4)
@@ -1464,10 +1450,22 @@ def _liquidity_target_rows(cfg: EngineConfig, settings: dict[str, Any]) -> list[
         candidates.append(row)
     candidates.sort(key=_candidate_rank, reverse=True)
 
-    current_analogue_rows = _current_positive_analogue_priority_rows(cfg, settings)
-    paper_blocker_rows = _paper_confirmation_blocker_priority_rows(cfg, settings, liquidity_rows=rows)
-    historical_breadth_rows = _historical_breadth_priority_rows(cfg, settings, candidates)
-    strategy_v2_rows = _strategy_v2_priority_rows(cfg, settings)
+    current_analogue_rows = [
+        row for row in _current_positive_analogue_priority_rows(cfg, settings) if not is_frozen_updown_record(row)
+    ]
+    paper_blocker_rows = [
+        row
+        for row in _paper_confirmation_blocker_priority_rows(cfg, settings, liquidity_rows=rows)
+        if not is_frozen_updown_record(row)
+    ]
+    historical_breadth_rows = [
+        row
+        for row in _historical_breadth_priority_rows(cfg, settings, candidates)
+        if not is_frozen_updown_record(row)
+    ]
+    strategy_v2_rows = [
+        row for row in _strategy_v2_priority_rows(cfg, settings) if not is_frozen_updown_record(row)
+    ]
     priority_rows = _profit_sprint_priority_rows(cfg, candidates)
     forced_rows: list[dict[str, Any]] = []
     forced_ids: set[str] = set()

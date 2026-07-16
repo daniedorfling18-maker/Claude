@@ -55,9 +55,10 @@ def test_liquidity_discovery_prepends_model_validation_gap_queries(tmp_path):
     )
 
     assert adaptive_queries == ["fed", "ethereum", "esports", "economy"]
-    assert event_queries[:4] == ["fed", "ethereum", "esports", "economy"]
-    assert event_queries[-1] == "world cup"
-    assert public_queries[:4] == ["fed", "ethereum", "esports", "economy"]
+    assert event_queries[:3] == ["world cup", "sports", "politics"]
+    assert event_queries[3:] == ["fed", "ethereum", "esports", "economy"]
+    assert public_queries[:3] == ["world cup", "sports", "politics"]
+    assert public_queries[3:7] == ["fed", "ethereum", "esports", "economy"]
     assert public_queries[-1] == "bitcoin"
 
 
@@ -88,13 +89,17 @@ def test_liquidity_discovery_prioritises_missing_confirmation_queries(tmp_path):
         },
     )
 
-    adaptive_queries = discovery._adaptive_collection_queries(cfg)
+    plan = discovery._adaptive_collection_query_plan(cfg)
+    adaptive_queries = plan["queries"]
 
-    assert adaptive_queries[:3] == ["solana updown", "ethereum updown", "bitcoin"]
-    assert adaptive_queries.count("solana updown") == 1
+    assert adaptive_queries == ["bitcoin", "fed"]
+    assert [row["query"] for row in plan["excluded_frozen_updown_queries"]] == [
+        "solana updown",
+        "ethereum updown",
+    ]
 
 
-def test_liquidity_discovery_expands_updown_feedback_queries_without_5m_aliases(tmp_path):
+def test_liquidity_discovery_hard_excludes_updown_feedback_and_aliases(tmp_path):
     cfg = _cfg(tmp_path)
     write_json(
         cfg.governance_root / "price_action_feedback.json",
@@ -121,22 +126,15 @@ def test_liquidity_discovery_expands_updown_feedback_queries_without_5m_aliases(
         adaptive_queries=adaptive_queries,
     )
 
+    assert adaptive_queries == []
     for queries in (event_queries, public_queries):
-        assert "btc updown" in queries
-        assert "bitcoin up or down" in queries
-        assert "bitcoin updown" in queries
-        assert "solana updown" in queries
-        assert "solana up or down" in queries
-        assert all("5m" not in query for query in queries)
-    assert not any(query.startswith("bitcoin up or down July") for query in event_queries)
-    assert not any(query.startswith("solana up or down July") for query in event_queries)
-    assert any(query.startswith("bitcoin up or down July") for query in public_queries)
-    assert any(query.startswith("solana up or down July") for query in public_queries)
+        assert queries == ["world cup", "sports", "politics"]
+        assert all("updown" not in query and "up or down" not in query for query in queries)
     assert len(event_queries) <= 28
     assert len(public_queries) <= 48
 
 
-def test_targeted_liquidity_prioritises_historical_breadth_updown_under_cap(tmp_path):
+def test_targeted_liquidity_freezes_historical_breadth_updown_and_reserves_hypotheses(tmp_path):
     cfg = _cfg(tmp_path)
     write_json(
         cfg.governance_root / "research_focus.json",
@@ -176,15 +174,12 @@ def test_targeted_liquidity_prioritises_historical_breadth_updown_under_cap(tmp_
     event_queries = discovery._event_queries(settings, adaptive_queries=adaptive_queries)
     public_queries = discovery._public_search_queries(settings, adaptive_queries=adaptive_queries)
 
-    assert adaptive_queries[:5] == ["solana updown", "btc updown", "xrp updown", "eth updown", "esports"]
-    assert "solana updown" in event_queries
-    assert "solana updown" in public_queries
-    assert "btc updown" not in event_queries
-    assert "xrp updown" not in event_queries
-    assert "eth updown" not in event_queries
-    assert "btc updown" not in public_queries
-    assert "xrp updown" not in public_queries
-    assert "eth updown" not in public_queries
+    assert adaptive_queries == ["esports", "economy", "bitcoin"]
+    assert event_queries[:3] == ["world cup", "sports", "politics"]
+    assert public_queries[:3] == ["world cup", "sports", "politics"]
+    assert discovery.primary_hypothesis_coverage(event_queries, settings)["status"] == "ok"
+    assert discovery.primary_hypothesis_coverage(public_queries, settings)["status"] == "ok"
+    assert all(not discovery._is_crypto_updown_query(query) for query in [*event_queries, *public_queries])
 
 
 def test_targeted_evidence_mode_uses_adaptive_queries_without_broad_search():
@@ -204,12 +199,20 @@ def test_targeted_evidence_mode_uses_adaptive_queries_without_broad_search():
 
     assert settings["event_limit"] == 24
     assert settings["token_limit"] == 48
-    assert "solana updown" in event_queries
-    assert "solana up or down" in event_queries
-    assert "world cup" not in event_queries
-    assert "sports" not in event_queries
-    assert "politics" not in event_queries
-    assert "world cup" not in public_queries
-    assert any(query.startswith("solana up or down") for query in public_queries)
+    assert event_queries == ["world cup", "sports", "politics"]
+    assert public_queries == ["world cup", "sports", "politics"]
+    assert discovery.primary_hypothesis_coverage(event_queries, settings)["status"] == "ok"
+    assert discovery.primary_hypothesis_coverage(public_queries, settings)["status"] == "ok"
     assert len(event_queries) <= 10
     assert len(public_queries) <= 18
+
+
+def test_disabled_liquidity_discovery_remains_observation_only(tmp_path):
+    cfg = _cfg(tmp_path)
+    cfg.raw["liquidity_discovery"] = {"enabled": False}
+
+    payload = discovery.run_liquidity_discovery(cfg)
+
+    assert payload["status"] == "disabled"
+    assert payload["paper_trading_invoked"] is False
+    assert payload["live_trading_invoked"] is False

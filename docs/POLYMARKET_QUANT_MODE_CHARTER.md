@@ -1,6 +1,6 @@
 # Polymarket Quant Mode Charter
 
-Last updated: 2026-07-03
+Last updated: 2026-07-16
 
 This is the **orchestration charter** for turning the Polymarket predictive engine into a full quant
 trading system. It is written for every coding agent working on this repo — Claude, Codex, or any
@@ -747,6 +747,19 @@ owner-only days are skipped rather than earned or broken in the ladder. The
 current JSON and new anchor-enrolled attribution history preserve both counts.
 No gate, sizing, broker, credential, paper/live permission, cancellation, or
 order path changed.
+
+**2026-07-16 — WO-95 implemented by Codex in PR #238.** Active discovery now
+hard-excludes the frozen crypto up/down family while retaining historical
+rows, labels, settlement logic, and websocket coverage for existing open
+positions. The paper and liquidity scanners reserve deterministic coverage
+for H1 sharp-anchor maker carry, H2 dutch consistency, and H3
+structural-bias/smart-flow research, with explicit `ok` or `starved` coverage
+telemetry. Primary artifacts are
+`outputs/polymarket_model_governance/local_live_loop_discovery_heartbeat.json`
+and
+`outputs/polymarket_model_governance/liquidity_discovery_summary.json`; both
+remain observation-only and cannot alter gates, sizing, paper/live permission,
+credentials, or order paths.
 
 ## Rules of engagement for coding agents
 

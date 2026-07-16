@@ -12,6 +12,7 @@ import sys
 from typing import Any
 
 from .config import EngineConfig
+from .discovery_policy import partition_active_queries, primary_hypothesis_targets
 from .utils import now_utc, parse_timestamp, read_csv_rows, read_json, safe_float, serialize_value, write_json
 from .worldcup_validation import is_worldcup_winner_market
 
@@ -351,7 +352,12 @@ async function load() {
     const approvedSignals = Number(oversight.approved_signal_count ?? data.forward_paper_cycle?.signals_approved ?? priceActionPaper.signals ?? diag.approved_signals_count ?? 0);
     const selectedQueries = currentScan.scan_plan?.selected_queries || lastScan.scan_plan?.selected_queries || scanner.scan?.scan_plan?.selected_queries || scanner.scan?.queries || [];
     const injectedQueries = currentScan.scan_plan?.injected_research_focus_queries || lastScan.scan_plan?.injected_research_focus_queries || scanner.scan?.scan_plan?.injected_research_focus_queries || [];
-    const adaptiveQueries = data.research_focus?.collection_queries || data.liquidity_discovery?.settings?.adaptive_collection_queries || priceActionFeedback.collection_queries || priceActionGoal.collection_queries || validationGap.collection_queries || [];
+    const activeDiscoveryQueries = values => (Array.isArray(values) ? values : []).filter(value => {
+      const normalized = String(value || "").toLowerCase().split("_").join(" ").split("/").join(" ").split("-").join(" ");
+      const compact = normalized.split(" ").join("");
+      return !compact.includes("updown") && !compact.includes("upordown");
+    });
+    const adaptiveQueries = activeDiscoveryQueries(data.research_focus?.collection_queries || data.liquidity_discovery?.settings?.adaptive_collection_queries || priceActionFeedback.collection_queries || priceActionGoal.collection_queries || validationGap.collection_queries || []);
     const displayedQueries = selectedQueries.length ? selectedQueries : adaptiveQueries;
     const brokerNeedsWork = Boolean(priceActionPaper.broker_refresh_needed || priceActionPaper.pending_broker_signals || priceActionPaper.pending_broker_confirmation_signals || priceActionPaper.pending_broker_exit_probes || approvedSignals > 0);
     const brokerRefreshLabel = priceActionPaper.broker_refresh_needed ? `${priceActionPaper.pending_broker_signals ?? 0} pending` : brokerNeedsWork ? "fresh" : "idle";
@@ -510,23 +516,23 @@ async function load() {
       : approvedSignals > 0
         ? (brokerWorkPending ? "Approved signal rows exist and need the paper broker refresh to execute/record them." : "Approved signal rows exist. Monitor fills, exits, spread, and realised P&L.")
         : trustedEdgeMissingFresh
-          ? "Trusted shadow repricing evidence exists, but there is no fresh open executable paper-confirmation candidate yet. The bot should collect BTC/SOL updown bid/ask rows rather than force a stale or closed trade."
+          ? "Trusted shadow repricing evidence exists, but there is no fresh open executable paper-confirmation candidate yet. Collect executable bid/ask rows across the registered H1/H2/H3 hypotheses rather than force a stale or closed trade."
           : (priceActionPaper.decision || diag.main_blocker || goalPlan.main_gap || "Current evidence gates are blocking entries.");
     const blockerText = decisionSummary.primary_blocker || rawBlockerText;
     const nextAction = decisionSummary.next_action || tradeSignalAudit.next_action || goalPlan.recommended_action || priceActionFeedback.next_action || diag.recommended_action || "Keep collecting live bid/ask evidence until a validated cohort produces executable positive paper signals.";
-    const rawCollectQueries = tradeSignalAudit.missing_confirmation_queries?.length
+    const rawCollectQueries = activeDiscoveryQueries(tradeSignalAudit.missing_confirmation_queries?.length
       ? tradeSignalAudit.missing_confirmation_queries
       : displayedQueries.length
         ? displayedQueries
-        : adaptiveQueries;
+        : adaptiveQueries);
     const collectQueries = Array.isArray(decisionSummary.collect_now) && decisionSummary.collect_now.length
-      ? decisionSummary.collect_now
+      ? activeDiscoveryQueries(decisionSummary.collect_now)
       : rawCollectQueries;
     const transferReason = priceActionModel.cohort_transfer?.reason || validationGap.reason || "";
     const rawUnlockCondition = approvedSignals > 0
       ? (brokerWorkPending ? "Paper broker refresh must run and record the fill/exit evidence." : "Keep this cohort under forward paper supervision.")
       : trustedEdgeMissingFresh
-        ? "Find an open, non-excluded BTC/SOL updown candidate with executable bid and ask, acceptable spread, and matching trusted confirmation cohort."
+        ? "Find an open H1/H2/H3 candidate with executable bid and ask, acceptable spread, and matching trusted confirmation evidence."
       : validationGapActive
         ? (validationGap.reason || "The model still needs positive validation examples before promotion.")
         : transferReason
@@ -4401,16 +4407,17 @@ def _decision_useful_summary(
             and confirmation_missing_targets > 0
         )
     )
-    collect_now = _compact_list(
-        _first_non_empty_list(
-            research_focus.get("collection_queries"),
-            trade_signal_audit.get("missing_confirmation_queries"),
-            price_action_goal.get("collection_queries"),
-            price_action_feedback.get("collection_queries"),
-            validation_gap.get("collection_queries"),
-        ),
-        limit=6,
+    proposed_collect_now = _first_non_empty_list(
+        research_focus.get("collection_queries"),
+        trade_signal_audit.get("missing_confirmation_queries"),
+        price_action_goal.get("collection_queries"),
+        price_action_feedback.get("collection_queries"),
+        validation_gap.get("collection_queries"),
     )
+    active_collect_now, frozen_collect_exclusions = partition_active_queries(proposed_collect_now)
+    if not active_collect_now:
+        active_collect_now = list(primary_hypothesis_targets({}, scan_sequence=1).values())
+    collect_now = _compact_list(active_collect_now, limit=6)
 
     target_monthly = safe_float(actual_target.get("target_monthly_profit_usdc")) or safe_float(
         goal_plan.get("target_monthly_profit_usdc")
@@ -4954,6 +4961,7 @@ def _decision_useful_summary(
         "next_action": next_action,
         "unlock_condition": unlock_condition,
         "collect_now": collect_now,
+        "frozen_updown_collection_queries_excluded": frozen_collect_exclusions,
         "learning_verdict": learning_verdict,
         "approved_signals": approved_signals,
         "rejected_signals": rejected_signals,

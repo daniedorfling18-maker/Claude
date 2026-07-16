@@ -194,7 +194,7 @@ def test_websocket_asset_discovery_uses_repaired_legacy_requote_token(
     assert sources["gamma-repaired-token"] == "maker_requote_ticket"
 
 
-def test_websocket_asset_discovery_prioritises_governance_targets(tmp_path, monkeypatch):
+def test_websocket_asset_discovery_excludes_frozen_governance_targets(tmp_path, monkeypatch):
     loop = _load_loop_module()
     monkeypatch.setenv("POLYMARKET_MODEL_PROBABILITIES_CSV", str(tmp_path / "missing_model_probabilities.csv"))
     cfg = EngineConfig(
@@ -226,8 +226,8 @@ def test_websocket_asset_discovery_prioritises_governance_targets(tmp_path, monk
 
     asset_ids, sources = loop.discover_websocket_asset_ids(cfg, max_assets=2)
 
-    assert asset_ids == ["proof-target-token", "shadow-token"]
-    assert sources["proof-target-token"] == "websocket_liquidity_targets"
+    assert asset_ids == ["shadow-token", "scanner-token"]
+    assert "proof-target-token" not in sources
 
 
 def test_websocket_asset_discovery_keeps_open_positions_ahead_of_governance_targets(tmp_path, monkeypatch):
@@ -256,9 +256,9 @@ def test_websocket_asset_discovery_keeps_open_positions_ahead_of_governance_targ
 
     asset_ids, sources = loop.discover_websocket_asset_ids(cfg, max_assets=2)
 
-    assert asset_ids == ["open-position-token", "proof-target-token"]
+    assert asset_ids == ["open-position-token"]
     assert sources["open-position-token"] == "open_positions"
-    assert sources["proof-target-token"] == "websocket_liquidity_targets"
+    assert "proof-target-token" not in sources
 
 
 def test_websocket_asset_discovery_skips_closed_governance_targets(tmp_path, monkeypatch):
@@ -294,9 +294,9 @@ def test_websocket_asset_discovery_skips_closed_governance_targets(tmp_path, mon
 
     asset_ids, sources = loop.discover_websocket_asset_ids(cfg, max_assets=2)
 
-    assert asset_ids == ["open-proof-target", "scanner-token"]
+    assert asset_ids == ["scanner-token"]
     assert "closed-proof-target" not in sources
-    assert sources["open-proof-target"] == "websocket_liquidity_targets"
+    assert "open-proof-target" not in sources
 
 
 def test_websocket_asset_discovery_skips_closed_governance_targets_from_unix_slug(tmp_path, monkeypatch):
@@ -330,9 +330,9 @@ def test_websocket_asset_discovery_skips_closed_governance_targets_from_unix_slu
 
     asset_ids, sources = loop.discover_websocket_asset_ids(cfg, max_assets=2)
 
-    assert asset_ids == ["future-unix-proof-target", "scanner-token"]
+    assert asset_ids == ["scanner-token"]
     assert "closed-unix-proof-target" not in sources
-    assert sources["future-unix-proof-target"] == "websocket_liquidity_targets"
+    assert "future-unix-proof-target" not in sources
 
 
 def test_timestamp_updown_slug_stays_open_until_interval_end():
@@ -388,9 +388,9 @@ def test_websocket_asset_discovery_skips_closed_governance_targets_from_et_slug(
 
     asset_ids, sources = loop.discover_websocket_asset_ids(cfg, max_assets=2)
 
-    assert asset_ids == ["future-et-proof-target", "scanner-token"]
+    assert asset_ids == ["scanner-token"]
     assert "closed-et-proof-target" not in sources
-    assert sources["future-et-proof-target"] == "websocket_liquidity_targets"
+    assert "future-et-proof-target" not in sources
 
 
 def test_websocket_asset_discovery_skips_closed_governance_targets_from_date_only_slug(tmp_path, monkeypatch):
@@ -518,7 +518,7 @@ def test_fast_updown_targets_follow_price_action_validation_positive_intervals(t
     assert not any(slug.startswith("btc-updown-15m-") for slug in slugs)
 
 
-def test_websocket_asset_discovery_prefers_fast_updown_snapshot(tmp_path, monkeypatch):
+def test_websocket_asset_discovery_does_not_consume_fast_updown_snapshot(tmp_path, monkeypatch):
     loop = _load_loop_module()
     monkeypatch.setenv("POLYMARKET_MODEL_PROBABILITIES_CSV", str(tmp_path / "missing_model_probabilities.csv"))
     cfg = EngineConfig(
@@ -540,8 +540,8 @@ def test_websocket_asset_discovery_prefers_fast_updown_snapshot(tmp_path, monkey
 
     asset_ids, sources = loop.discover_websocket_asset_ids(cfg, max_assets=2)
 
-    assert asset_ids == ["fast-5m-token", "scanner-token"]
-    assert sources["fast-5m-token"] == "fast_updown_5m"
+    assert asset_ids == ["scanner-token"]
+    assert "fast-5m-token" not in sources
 
 
 def test_websocket_asset_discovery_includes_shadow_positions(tmp_path, monkeypatch):
@@ -666,17 +666,13 @@ def test_background_timeout_exit_is_recorded_before_hard_exit(tmp_path, monkeypa
     assert rows[0]["live_trading_invoked"] == "False"
 
 
-def test_degraded_discovery_refresh_keeps_fast_updown_fresh(tmp_path, monkeypatch):
+def test_degraded_discovery_refresh_pauses_without_reviving_frozen_updown(tmp_path, monkeypatch):
     loop = _load_loop_module()
     cfg = EngineConfig(
         raw={"paths": {"output_root": str(tmp_path / "outputs")}},
         path=tmp_path / "cfg.yaml",
     )
-    monkeypatch.setattr(
-        loop,
-        "refresh_fast_updown_snapshot",
-        lambda _cfg: {"status": "ok", "tokens": 4, "markets_found": 2},
-    )
+    monkeypatch.setattr(loop, "refresh_fast_updown_snapshot", lambda _cfg: pytest.fail("must not refresh frozen up/down"))
 
     summary = loop._degraded_discovery_refresh(
         cfg,
@@ -684,11 +680,10 @@ def test_degraded_discovery_refresh_keeps_fast_updown_fresh(tmp_path, monkeypatc
         reason="scheduled_discovery_due",
     )
 
-    assert summary["status"] == "ran"
-    assert summary["mode"] == "degraded_fast_updown_refresh"
-    assert summary["live_data"] is True
-    assert summary["fast_updown"]["tokens"] == 4
-    assert summary["scan"]["status"] == "skipped_resource_guard"
+    assert summary["status"] == "skipped_resource_guard"
+    assert summary["mode"] == "degraded_discovery_paused"
+    assert summary["live_data"] is False
+    assert summary["frozen_updown"] == {"selected_count": 0, "collection_priority": False}
 
 
 def test_degraded_discovery_refresh_can_be_disabled(tmp_path, monkeypatch):
@@ -717,7 +712,7 @@ def test_degraded_discovery_refresh_can_be_disabled(tmp_path, monkeypatch):
 
     assert called is False
     assert summary["status"] == "skipped_resource_guard"
-    assert summary["mode"] == "degraded_discovery_disabled"
+    assert summary["mode"] == "degraded_discovery_paused"
 
 
 def test_degraded_prediction_refresh_setting_defaults_to_enabled(tmp_path):
@@ -1003,7 +998,7 @@ def test_refresh_fast_updown_snapshot_fetches_positive_cohort_slots(tmp_path, mo
 def test_discovery_scheduler_uses_its_own_iteration_counter(monkeypatch, tmp_path):
     loop = _load_loop_module()
     seen: list[int] = []
-    liquidity_modes: list[str] = []
+    liquidity_modes: list[tuple[str, int]] = []
     cfg = EngineConfig(
         raw={"paths": {"output_root": str(tmp_path / "outputs")}},
         path=tmp_path / "cfg.yaml",
@@ -1019,11 +1014,11 @@ def test_discovery_scheduler_uses_its_own_iteration_counter(monkeypatch, tmp_pat
     monkeypatch.setattr(loop.discovery_loop, "_resource_guard", lambda _cfg: {"skip_cycle": False})
     monkeypatch.setattr(loop.discovery_loop, "_scheduled", lambda *_args, **_kwargs: False)
     monkeypatch.setattr(loop.discovery_loop, "scan_once", fake_scan_once)
-    monkeypatch.setattr(loop, "refresh_fast_updown_snapshot", lambda _cfg: {"status": "ok", "tokens": 2})
     monkeypatch.setattr(
         loop.discovery_loop,
         "run_liquidity_discovery",
-        lambda _cfg, *, mode: liquidity_modes.append(mode) or {"status": "computed", "mode": mode, "tokens_scanned": 9},
+        lambda _cfg, *, mode, scan_sequence: liquidity_modes.append((mode, scan_sequence))
+        or {"status": "computed", "mode": mode, "tokens_scanned": 9},
     )
     monkeypatch.setattr(loop.discovery_loop, "ingest_scanner_snapshot", lambda *_args, **_kwargs: {"status": "ok"})
     monkeypatch.setattr(loop.discovery_loop, "_run_settlement_only_cycle", lambda _cfg: {"status": "settlement_only"})
@@ -1044,7 +1039,7 @@ def test_discovery_scheduler_uses_its_own_iteration_counter(monkeypatch, tmp_pat
     assert seen == [1, 2]
     assert discovery_iteration == 2
     assert summary["scan"]["tokens"] == 7
-    assert liquidity_modes == ["targeted-evidence", "targeted-evidence"]
+    assert liquidity_modes == [("targeted-evidence", 1), ("targeted-evidence", 2)]
     assert summary["liquidity_discovery"]["mode"] == "targeted-evidence"
     assert summary["scanner_iteration"] == 4
     assert summary["mode"] == "background_lightweight_discovery"

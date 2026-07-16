@@ -186,7 +186,6 @@ def _metadata_paths(cfg: EngineConfig) -> list[Path]:
         cfg.governance_root / "websocket_liquidity_targets.csv",
         cfg.output_root / "polymarket_liquidity_discovery" / "liquidity_watchlist.csv",
         cfg.output_root / "polymarket" / "market_snapshot.csv",
-        cfg.output_root / "polymarket_fast_updown" / "fast_updown_market_snapshot.csv",
     ]
 
 

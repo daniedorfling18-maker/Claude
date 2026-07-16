@@ -8,6 +8,7 @@ from zoneinfo import ZoneInfo
 from polymarket_common.fees import resolve_taker_fee_schedule, taker_fee_per_share
 
 from .config import EngineConfig, load_config
+from .discovery_policy import is_frozen_updown_record
 from .price_action_microstructure import build_latest_microstructure_features
 from .utils import boolish, now_utc, parse_timestamp, read_csv_rows, read_json, safe_float, write_csv, write_json
 from .worldcup_validation import classify_market_family, is_worldcup_market
@@ -18,7 +19,6 @@ SCOUT_ROUND_TRIP_FILE = "price_action_scout_round_trip_evidence.csv"
 SCOUT_ENTRY_FILE = "price_action_scout_entries.csv"
 MICROSTRUCTURE_CURRENT_FILE = "microstructure_current_candidates.csv"
 MICROSTRUCTURE_TRADE_EVENTS_FILE = "microstructure_trade_events.csv"
-FAST_UPDOWN_SNAPSHOT_FILE = "fast_updown_market_snapshot.csv"
 MODEL_SUMMARY_JSON = "price_action_model_summary.json"
 SIGNALS_FILE = "price_action_paper_signals.csv"
 REJECTIONS_FILE = "price_action_paper_rejections.csv"
@@ -302,12 +302,6 @@ def _market_family(row: dict[str, Any]) -> str:
     return raw or classified or "unknown"
 
 
-def _format_utc(dt: datetime | None) -> str:
-    if dt is None:
-        return ""
-    return dt.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-
-
 def _current_row_time(row: dict[str, Any]) -> datetime | None:
     return parse_timestamp(
         row.get("entry_time_utc")
@@ -318,76 +312,16 @@ def _current_row_time(row: dict[str, Any]) -> datetime | None:
     )
 
 
-def _fast_updown_snapshot_features(cfg: EngineConfig) -> list[dict[str, Any]]:
-    """Expose focused fast-UpDown orderbook snapshots as current executable rows.
-
-    These rows are deliberately not used as training labels.  They are only a
-    point-in-time quote source for the paper-confirmation bridge, which still
-    requires the existing trusted-shadow cohort, entry-price band, closed-market
-    filter, and positive historical analogue gates.
-    """
-    path = cfg.output_root / "polymarket_fast_updown" / FAST_UPDOWN_SNAPSHOT_FILE
-    features: list[dict[str, Any]] = []
-    for row in read_csv_rows(path):
-        token = _token_id(row)
-        bid = safe_float(row.get("best_bid"))
-        ask = safe_float(row.get("best_ask"))
-        if not token or bid is None or ask is None or not 0 < bid < ask < 1:
-            continue
-        spread = safe_float(row.get("spread"))
-        if spread is None:
-            spread = max(0.0, ask - bid)
-        midpoint = (bid + ask) / 2.0
-        timestamp = _format_utc(parse_timestamp(row.get("timestamp"))) or now_utc()
-        feature = {
-            "source": "fast_updown_snapshot",
-            "token_id": token,
-            "asset_id": token,
-            "market_slug": row.get("market_slug", ""),
-            "question": row.get("question", ""),
-            "event_slug": row.get("event_slug", ""),
-            "event_title": row.get("event_title", ""),
-            "close_time": row.get("close_time", ""),
-            "outcome": row.get("outcome", ""),
-            "selection": row.get("outcome", ""),
-            "entry_time_utc": timestamp,
-            "latest_time_utc": timestamp,
-            "entry_bid": bid,
-            "entry_ask": ask,
-            "entry_midpoint": midpoint,
-            "entry_spread": spread,
-            "latest_bid": bid,
-            "latest_ask": ask,
-            "latest_midpoint": midpoint,
-            "latest_spread": spread,
-            "relative_spread": _relative_spread(spread, ask),
-            "lookback_observations": 0,
-            "bid_move_abs": "",
-            "mid_move_abs": "",
-            "ask_move_abs": "",
-            "spread_change": "",
-            "net_buy_events": "",
-            "net_buy_size": "",
-            "current_side": "BUY",
-            "price_change_side": "BUY",
-            "current_price_change_size": "",
-        }
-        family = _market_family(feature)
-        feature["family"] = row.get("family") or row.get("category") or family
-        feature["category"] = row.get("category") or row.get("family") or family
-        features.append(feature)
-    return features
-
-
 def _latest_executable_price_action_rows(cfg: EngineConfig) -> list[dict[str, Any]]:
-    """Return current executable quote rows from websocket history plus snapshots."""
-    rows = [*build_latest_microstructure_features(cfg), *_fast_updown_snapshot_features(cfg)]
+    """Return current executable rows without reviving frozen up/down discovery."""
+    rows = [
+        row
+        for row in build_latest_microstructure_features(cfg)
+        if not is_frozen_updown_record(row)
+    ]
     min_time = datetime.min.replace(tzinfo=timezone.utc)
     rows.sort(
-        key=lambda row: (
-            _current_row_time(row) or min_time,
-            1 if str(row.get("source") or "") == "fast_updown_snapshot" else 0,
-        ),
+        key=lambda row: _current_row_time(row) or min_time,
         reverse=True,
     )
     deduped: list[dict[str, Any]] = []

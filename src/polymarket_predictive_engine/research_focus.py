@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from .discovery_policy import FROZEN_UPDOWN_REASON, is_frozen_updown_text
 from .goal_planner import build_goal_plan
 from .promotion_review import build_promotion_review
 from .utils import now_utc, read_csv_rows, read_json, safe_float, write_json
@@ -22,11 +23,12 @@ DEFAULT_BROAD_BASE_QUERIES = (
     "nba",
     "mlb",
     "mma",
+    "sports",
+    "politics",
     "fed",
     "economy",
     "esports",
     "ai",
-    "politics",
     "elections",
     "stocks",
 )
@@ -80,6 +82,8 @@ def _cohort_query(cohort: str) -> str:
     # Unknown near-miss evidence is not actionable until it maps to a real family.
     if text.startswith("near_miss_learning|unknown"):
         return ""
+    if is_frozen_updown_text(text):
+        return ""
     if "btc" in text or "bitcoin" in text:
         return "btc updown" if "updown" in text else "bitcoin"
     if "xrp" in text or "ripple" in text:
@@ -125,8 +129,7 @@ def _query_key(query: str) -> str:
 
 
 def _is_updown_query(query: str) -> bool:
-    text = f" {_query_key(query)} "
-    return "updown" in text or " up/down " in text or " up or down " in text
+    return is_frozen_updown_text(query)
 
 
 def _query_family(query: str) -> str:
@@ -197,7 +200,8 @@ def _guard_collection_queries(cfg, proposed_queries: list[str]) -> tuple[list[st
     settings = _research_focus_settings(cfg)
     max_per_family = max(1, _int_setting(settings, "max_queries_per_family", 2))
     min_distinct_families = max(1, _int_setting(settings, "min_distinct_families", 4))
-    max_updown_queries = max(0, _int_setting(settings, "max_updown_queries", 1))
+    requested_max_updown_queries = max(0, _int_setting(settings, "max_updown_queries", 0))
+    max_updown_queries = 0
 
     raw_queries: list[str] = []
     seen_raw: set[str] = set()
@@ -221,8 +225,8 @@ def _guard_collection_queries(cfg, proposed_queries: list[str]) -> tuple[list[st
         if not key or key in guarded_keys:
             return False, "duplicate"
         family = _query_family(query)
-        if _is_updown_query(query) and updown_count >= max_updown_queries:
-            return False, "max_updown_queries"
+        if _is_updown_query(query):
+            return False, FROZEN_UPDOWN_REASON
         if family_counts.get(family, 0) >= max_per_family:
             return False, "max_queries_per_family"
         guarded.append(query)
@@ -260,6 +264,7 @@ def _guard_collection_queries(cfg, proposed_queries: list[str]) -> tuple[list[st
             "max_queries_per_family": max_per_family,
             "min_distinct_families": min_distinct_families,
             "max_updown_queries": max_updown_queries,
+            "requested_max_updown_queries": requested_max_updown_queries,
         },
         "raw_collection_queries": raw_queries,
         "guarded_collection_queries": guarded,

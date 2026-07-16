@@ -1035,7 +1035,6 @@ runtime_resource_guard:
   degraded_max_websocket_assets: 20
   skip_prediction_on_high_memory: true
   skip_discovery_on_high_memory: true
-  allow_degraded_fast_updown_refresh: true
   allow_degraded_websocket_prediction_refresh: true
   degraded_prediction_cycle_seconds: 60
   prediction_cycle_lock_stale_seconds: 1800
@@ -1063,6 +1062,26 @@ runtime_schedule:
   promoted_rule_shadow_every_iterations: 3
   liquidity_discovery_every_iterations: 12
   dashboard_render_every_iterations: 2
+research_surface_discovery:
+  # WO-95: every active discovery plan mechanically reserves one rotating
+  # query for each registered primary hypothesis. Crypto up/down is frozen in
+  # code and cannot be restored by widening this configuration.
+  policy_version: wo95_primary_hypothesis_discovery_v1
+  primary_hypothesis_queries:
+    h1_sharp_anchor:
+    - world cup
+    - tennis
+    - nba
+    - mlb
+    - mma
+    h2_dutch_consistency:
+    - sports
+    h3_structural_smart_flow:
+    - politics
+    - elections
+    - fed
+    - economy
+    - stocks
 paper_market_scan:
   # Local opportunity discovery. "batch" scans the strongest evidence families together so the
   # paper bot can find valid probes faster while the runtime resource guard still skips work when
@@ -1084,107 +1103,22 @@ paper_market_scan:
   research_focus_validation_gap_priority_value: 50.0
   research_focus_reserve_enabled: true
   research_focus_reserve_slots: 3
-  # Keep the anti-concentration cap of one up/down query per batch, but rotate
-  # that evidence slot across BTC/SOL/ETH/XRP when the research-focus guard has
-  # suppressed additional up/down targets. This prevents BTC from permanently
-  # starving other assets while preserving the concentration control.
-  evidence_updown_rotation_enabled: true
-  evidence_updown_rotation_slots: 1
-  # Focused websocket snapshots should follow the UpDown intervals where the
-  # strict price-action model has validation-positive repricing evidence. This
-  # is collection-only: it does not approve trades or relax paper gates.
-  fast_updown_use_price_action_validation_targets: true
-  # 2026-07-07: dropped 5m from the fast up/down collection intervals. Crypto up/down is
-  # FROZEN as a diagnostic (AGENTS.md focus discipline) and the 5m lane churns a new
-  # market every five minutes - the single highest discovery/websocket/scoring load in
-  # the loop, now the loop is CPU-bound. 15m/4h keep the timing diagnostic alive.
-  fast_updown_intervals:
-  - 15m
-  - 4h
-  fast_updown_non_5m_slots_ahead: 4
-  fast_updown_slots_ahead_by_interval:
-    15m: 8
-    4h: 3
-  fast_updown_max_asset_interval_targets: 8
-  # Repricing is learned across the full liquid event universe, not only the
-  # current best crypto/World Cup lane. This reserve keeps one discovery slot
-  # rotating through broad event families while downstream governance still
-  # promotes only cohorts with positive bid/ask validation.
-  broad_repricing_reserve_enabled: true
-  broad_repricing_reserve_slots: 2
-  broad_repricing_queries:
-  - ''
-  - fifa world cup
-  - world cup winner
-  - world cup
-  - tennis
-  - nba
-  - mlb
-  - mma
-  - fed
-  - economy
-  - esports
-  - ai
-  - crypto
-  - sports
-  - politics
-  - elections
-  - stocks
-  - business
+  # Historical helper code remains for audit/replay, but the active dedicated
+  # refresh is disabled and no websocket discovery slot reads its snapshot.
+  fast_updown_5m_enabled: false
   queries:
-  - fifa world cup
-  - world cup winner
   - world cup
-  - btc updown
-  - xrp updown
-  - solana updown
-  - eth updown
-  - bitcoin
-  - ethereum
-  - solana
-  - xrp
   - tennis
   - nba
   - mlb
   - mma
-  - fed
-  - economy
-  - esports
-  - ai
   - sports
   - politics
   - elections
+  - fed
+  - economy
   - stocks
-  - business
   query_aliases:
-    btc updown:
-    - bitcoin updown
-    - btc updown 5m
-    - bitcoin up or down
-    xrp updown:
-    - ripple updown
-    - xrp updown 5m
-    - xrp up or down
-    solana updown:
-    - sol updown
-    - solana updown 5m
-    - solana up or down
-    eth updown:
-    - ethereum updown
-    - eth updown 5m
-    - ethereum up or down
-    bitcoin:
-    - btc
-    - crypto
-    ethereum:
-    - eth
-    - crypto
-    solana:
-    - sol
-    - crypto
-    xrp:
-    - ripple
-    - crypto
     nba:
     - basketball
     - nba basketball
@@ -1239,18 +1173,17 @@ research_focus:
   # from collapsing into one family such as crypto up/down.
   max_queries_per_family: 2
   min_distinct_families: 4
-  max_updown_queries: 1
+  max_updown_queries: 0
   broad_base_queries:
   - world cup
   - tennis
   - nba
   - mlb
   - mma
+  - sports
+  - politics
   - fed
   - economy
-  - esports
-  - ai
-  - politics
   - elections
   - stocks
 cohort_promotion:
@@ -1412,36 +1345,21 @@ liquidity_discovery:
   max_spread: 0.04
   max_relative_spread: 0.15
   min_price: 0.02
-  targeted_max_updown_queries: 1
   public_search_enabled: true
   public_search_limit: 8
-  crypto_updown_date_search:
-    enabled: true
-    days_ahead: 2
-    assets:
-    - bitcoin
-    - ethereum
-    - solana
-    - xrp
   queries:
   - ''
   - world cup
-  - crypto
-  - updown
-  - btc updown
-  - xrp updown
-  - eth updown
-  - solana updown
-  - sports
   - tennis
-  - fed
-  - economy
-  - esports
-  - ai
+  - nba
+  - mlb
+  - mma
+  - sports
   - politics
   - elections
+  - fed
+  - economy
   - stocks
-  - business
 market_relative_validation:
   bucket_count: 10
   min_rows: 100

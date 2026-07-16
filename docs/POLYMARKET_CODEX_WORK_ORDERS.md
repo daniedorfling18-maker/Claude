@@ -3932,7 +3932,7 @@ and both event/public `primary_hypothesis_coverage.status` fields are `ok`.
 
 ## WO-96 — Repair wallet evidence producers and implement exact H3 OOS evaluation
 
-Status: IN IMPLEMENTATION by Codex on 2026-07-16.
+Status: IMPLEMENTED by Codex in PR #239 on 2026-07-16; awaiting required gate and review.
 
 Owner authorization: the 2026-07-16 instruction to repair WO-37/58 holder
 ingestion, retain wallet identity on public trades, and then build the exact H3
@@ -4038,6 +4038,24 @@ Day-after check: inspect
 `status` in `{collecting,evaluated,suppressed}`, `formal_evaluation_started`
 false until the registered stop, all missing-coverage counters present, and
 both trading-invoked flags false.
+
+S7 implementation review for PR #239: S1 was statically traced through
+`normalize_external_timestamp`, the single injected `as_of` clock, strict
+registration/deadline comparisons, and the close/snapshot-age tests. S2 was
+verified by static read of atomic state-table writers, the short shared
+trade-ledger commit lock, atomic completion stamp, and locked append-only H3
+ledger. S3 was verified against the three producers named above and explicit
+missing-coverage counters. S4 replays sanitized recorded `/holders` and
+`/trades` payloads and executes planted-edge, null, dedup, clock-advance,
+future-snapshot, stale-bid, immutable-rerun, and tighten-only tests. S5 matches
+each exclusion/error path; no failure path emits a passing cohort. S6 is the
+day-after check above. S7 frozen-surface diff review found no changes to H1/H2,
+paper/live gates, stakes, capital policy, signer, credentials, or order paths.
+Verification methods: static diff/read, Ruff in an isolated VPS container,
+1,281 repository tests plus the unaffected runtime-lock test, and six
+Git-dependent deployment tests in that container. The two pre-existing
+calendar-fragile runtime-lock cases remain explicitly assigned to WO-100; this
+review claims no findings under those methods, not absence of all defects.
 
 ## Current queue for Codex (reconciled 2026-07-16)
 

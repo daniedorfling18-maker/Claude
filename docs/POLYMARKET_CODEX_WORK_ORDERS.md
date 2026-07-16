@@ -3796,7 +3796,8 @@ Tier-0 coverage leaves `decision_policy.sizing.binding_capital_usd == 0`.
 
 ## WO-94 — Category- and price-aware taker fees in scoring and paper fills
 
-Status: IMPLEMENTED by Codex on 2026-07-16; pending PR review and merge.
+Status: IMPLEMENTED by Codex on 2026-07-16 in draft PR #237; pending review
+and merge.
 
 Owner authorization: the 2026-07-16 instruction to implement category/price-
 aware taker fees in signal scoring and paper fills. This is a prospective,

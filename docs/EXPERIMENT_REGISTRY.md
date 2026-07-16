@@ -114,9 +114,10 @@ that merge commit. This prevents retroactive hypothesis registration.
 - Stopping rule: evaluate at 100 independent episodes or 60 calendar days,
   whichever comes first. If the support gate is not met, return the lane to
   diagnostic status; no threshold tuning on that window.
-- Status: primary hypothesis registered; current scanner artifacts remain
-  diagnostic until a dedicated post-registration OOS evaluator implements
-  this exact contract.
+- Status: primary hypothesis registered; WO-98 implements the dedicated exact
+  post-registration evaluator. Only `outputs/h2_dutch/h2_evaluation.json` may
+  state the registered H2 verdict; legacy gross scanner artifacts remain
+  diagnostic.
 
 ### Exact prospective evaluator amendment (owner-approved 2026-07-16; WO-98)
 

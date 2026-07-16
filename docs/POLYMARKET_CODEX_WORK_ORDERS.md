@@ -4,7 +4,7 @@ Last updated: 2026-07-16 (owner-authorized corrective batch opened with WO-93; W
 PR #203; WO-84 implemented in PR #205; WO-89 through WO-92 implemented. WO-87 now relabels the unchanged legacy verdict metric honestly and
 reports non-binding true pre-event CLV on the same units. WO-93 was implemented
 in PR #236, WO-94 in PR #237, WO-95 in PR #238, and WO-96 in PR #239. WO-97 was
-implemented in PR #240. WO-33 remains pending a
+implemented in PR #240. WO-98 is implemented and awaiting publication. WO-33 remains pending a
 registered leakage review, with
 WO-34/35 model wiring bound to that review and the three-hypothesis freeze.
 WO-48 and WO-67 are blocked; WO-70 and WO-72 are deferred; WO-76 is
@@ -4156,7 +4156,7 @@ not absence of all defects.
 
 ## WO-98 - Exact post-registration H2 evaluator and dashboard authority
 
-Status: REGISTERED / IN BUILD by Codex on 2026-07-16.
+Status: IMPLEMENTED by Codex on 2026-07-16; awaiting required gate and review.
 
 Owner authorization: the 2026-07-16 instruction to build the exact
 post-registration H2 evaluator and point the dashboard to it. This is
@@ -4238,13 +4238,50 @@ trading flags false; require `h2_evaluation.json` newer than that harvest,
 explicit coverage counters, and the dashboard H2 panel to cite that exact
 artifact while labelling the old gross watch diagnostic.
 
+Landed implementation: the 15-minute Dutch monitor now records every complete
+fee-bearing basket scan, including complete non-opportunities that can prove a
+clear, in `outputs/h2_dutch/h2_scan_observations_v1.csv`. The exact evaluator
+reconstructs event-day episodes, enforces the frozen persistence and stop
+rules, writes atomic current state, freezes its formal sample in
+`h2_final_episodes_v1.csv`, requires a verified ledger anchor before a
+statistical pass can become a shadow candidate, and publishes
+`h2_evaluation.json`. Canonical category/price-aware fees use the venue's
+five-decimal per-order rounding. CLI, the resilient daily harvest, the WO-61
+anchor registry, and the dashboard all consume the exact lane; the gross watch
+is visibly diagnostic. No paper/live order path consumes H2.
+
+S7 implementation review: S1 was traced through one injected scan timestamp,
+strict registration/future/deadline comparisons, fixed 10--20 minute gaps, and
+clock-advance/stop tests. S2 uses a shared observation lock, append-only
+schema-checked observation/final ledgers, a manifest-before-append crash
+recovery boundary, and atomic current JSON/CSV; lock contention fails closed.
+S3 was verified against the Gamma event/CLOB book producer and the single
+exact ledger/evaluator/dashboard consumer path. S4 replays a sanitized live
+five-leg negRisk Gamma event plus recorded CLOB book and covers hand-computed
+rounded fees, clears, missing scans, same-day recurrence, malformed economics,
+locks, null/deadline suppression, planted support, concentration, anchor
+transition, immutable rerun, and tighten-only settings. S5 is the fail-safe
+sentence above. S6 remains the post-merge day-after check above. S7 frozen-
+surface search found no readiness, risk-decision, signal, paper/live gate,
+stake, capital-policy, signer, credential, broker, or order-path consumer.
+
+Verification: Ruff passed across `src` and `tests`; 100 focused tests passed;
+1,292 repository tests excluding the three-case runtime-lock file plus its one
+unaffected case passed; all six Git-dependent deployment tests passed in the
+isolated container after installing Git. The two calendar-fragile runtime-lock
+tests are unchanged, fail only because their July 3 wall-clock fixture now
+exceeds a nominal 999,999-second age, and remain assigned to WO-100. An
+isolated public-network smoke scan discovered 20 negRisk events, priced three
+complete baskets, appended three exact rows, remained `collecting` with zero
+manufactured episodes, and reported both trading-invoked flags false.
+
 ## Current queue for Codex (reconciled 2026-07-16)
 
 Every WO below and every future WO must comply with
 `docs/ENGINEERING_STANDARDS.md` (S1-S7), including the mandatory
 `Day-after check:` line. Reviews verify compliance item by item.
 
-**WO-95 was implemented in PR #238, WO-96 merged in PR #239, WO-97 merged in PR #240, and WO-98 is the active registered build.** Later items in the 2026-07-16 owner
+**WO-95 was implemented in PR #238, WO-96 merged in PR #239, WO-97 merged in PR #240, and WO-98 is implemented awaiting publication.** Later items in the 2026-07-16 owner
 instruction require their own numbered work order and PR; do not combine them
 into this change. WO-89 through WO-92 were implemented as of 2026-07-15.
 WO-93 was implemented in PR #236, WO-94 in PR #237, WO-95 in PR #238, and WO-96 in PR #239. WO-85, WO-87, WO-86, and
@@ -4252,9 +4289,9 @@ WO-88 are implemented on 2026-07-15; WO-83 is implemented in PR #203 and
 WO-84 is implemented in PR #205. Do not infer follow-on capital, gate, model,
 or executor work from their diagnostics; the queue below remains binding.
 
-- **Active build:** WO-98 exact post-registration H2 evaluator and dashboard
-  authority, one PR, followed by the owner-ordered WO-99 leakage/corpus/split
-  correction.
+- **Implemented / publication pending:** WO-98 exact post-registration H2
+  evaluator and dashboard authority. After its one-PR review/merge, continue
+  with owner-ordered WO-99 leakage/corpus/split correction.
 - **Pending review, not build permission:** WO-33. WO-34/35 model wiring shares
   its leakage-review dependency and must stay inside H1-H3; WO-99 is the
   owner-authorized corrective implementation. WO-96 is the exact H3 build.

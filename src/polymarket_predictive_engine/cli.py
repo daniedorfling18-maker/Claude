@@ -44,6 +44,7 @@ from .goal_planner import build_goal_plan
 from .governance import governance_report
 from .historical_backfill import historical_backfill
 from .hourly_adverse_study import run_hourly_adverse_study
+from .h2_dutch_evaluator import evaluate_h2_dutch
 from .h3_smart_flow_evaluator import evaluate_h3_smart_flow
 from .ips_render import render_ips
 from .labels import build_labels
@@ -188,6 +189,7 @@ COMMANDS = [
     "closing-line-value",
     "smart-flow-clv",
     "h3-smart-flow-evaluate",
+    "h2-dutch-evaluate",
     "reconstructed-clv-study",
     "algo-replay",
     "algo-sweep",
@@ -593,6 +595,8 @@ def main(argv: list[str] | None = None) -> int:
                     features_input=args.websocket_input,
                 )
             )
+        elif args.command == "h2-dutch-evaluate":
+            _print(evaluate_h2_dutch(cfg))
         elif args.command == "reconstructed-clv-study":
             _print(run_reconstructed_clv_study(cfg))
         elif args.command == "algo-replay":

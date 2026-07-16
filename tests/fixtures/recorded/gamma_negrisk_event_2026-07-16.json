@@ -1,0 +1,48 @@
+{
+  "id": "287395",
+  "title": "Fed Decision in July?",
+  "negRisk": true,
+  "endDate": "2026-07-29T00:00:00Z",
+  "markets": [
+    {
+      "question": "Will the Fed decrease interest rates by 50+ bps after the July 2026 meeting?",
+      "groupItemTitle": "50+ bps decrease",
+      "clobTokenIds": "[\"70000000000000000000000000000000000000000000000000000000000000001\", \"80000000000000000000000000000000000000000000000000000000000000001\"]",
+      "feesEnabled": true,
+      "category": null,
+      "slug": "will-the-fed-decrease-interest-rates-by-50-bps-after-the-july-2026-meeting"
+    },
+    {
+      "question": "Will the Fed decrease interest rates by 25 bps after the July 2026 meeting?",
+      "groupItemTitle": "25 bps decrease",
+      "clobTokenIds": "[\"70000000000000000000000000000000000000000000000000000000000000002\", \"80000000000000000000000000000000000000000000000000000000000000002\"]",
+      "feesEnabled": true,
+      "category": null,
+      "slug": "will-the-fed-decrease-interest-rates-by-25-bps-after-the-july-2026-meeting"
+    },
+    {
+      "question": "Will there be no change in Fed interest rates after the July 2026 meeting?",
+      "groupItemTitle": "No change",
+      "clobTokenIds": "[\"70000000000000000000000000000000000000000000000000000000000000003\", \"80000000000000000000000000000000000000000000000000000000000000003\"]",
+      "feesEnabled": true,
+      "category": null,
+      "slug": "will-there-be-no-change-in-fed-interest-rates-after-the-july-2026-meeting"
+    },
+    {
+      "question": "Will the Fed increase interest rates by 25 bps after the July 2026 meeting?",
+      "groupItemTitle": "25 bps increase",
+      "clobTokenIds": "[\"70000000000000000000000000000000000000000000000000000000000000004\", \"80000000000000000000000000000000000000000000000000000000000000004\"]",
+      "feesEnabled": true,
+      "category": null,
+      "slug": "will-the-fed-increase-interest-rates-by-25-bps-after-the-july-2026-meeting"
+    },
+    {
+      "question": "Will the Fed increase interest rates by 50+ bps after the July 2026 meeting?",
+      "groupItemTitle": "50+ bps increase",
+      "clobTokenIds": "[\"70000000000000000000000000000000000000000000000000000000000000005\", \"80000000000000000000000000000000000000000000000000000000000000005\"]",
+      "feesEnabled": true,
+      "category": null,
+      "slug": "will-the-fed-increase-interest-rates-by-50-bps-after-the-july-2026-meeting"
+    }
+  ]
+}

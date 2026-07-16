@@ -22,15 +22,27 @@ import itertools
 import time
 from collections import deque
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Iterable, Mapping, Sequence
+from typing import Any, Callable, Iterable, Mapping, Sequence
 
 import requests
 
+from polymarket_common.fees import resolve_taker_fee_schedule, taker_fee_per_share
 from superbru_score_engine.betting.long_short import dutch_arb
 
 from .config import EngineConfig, kill_switch_active, load_config
-from .utils import ensure_dir, now_utc, read_json, safe_float, serialize_value, write_csv, write_json
+from .h2_dutch_evaluator import evaluate_h2_dutch, record_h2_scan_observations
+from .utils import (
+    ensure_dir,
+    now_utc,
+    parse_timestamp,
+    read_json,
+    safe_float,
+    serialize_value,
+    write_csv,
+    write_json,
+)
 
 GAMMA_MARKETS = "https://gamma-api.polymarket.com/markets"
 GAMMA_EVENTS = "https://gamma-api.polymarket.com/events"
@@ -47,6 +59,12 @@ class ArbLeg:
     token_id: str
     best_ask: float
     ask_size: float
+    taker_fee_per_share: float | None = None
+    taker_fee_rate: float | None = None
+    taker_fee_category: str = ""
+    taker_fee_source: str = ""
+    taker_fee_enabled: bool | None = None
+    taker_fee_model_version: str = ""
 
 
 @dataclass(frozen=True)
@@ -65,6 +83,7 @@ class ExecutionPlan:
     profit_usdc: float
     days_to_resolution: int | None
     annualised_return_on_capital: float | None
+    resolution_at_utc: str = ""
 
     def as_row(self) -> dict[str, Any]:
         return {
@@ -97,8 +116,15 @@ def annualised_return_on_capital(lock_per_set: float, ask_sum: float, days: int 
     return round(roi * 365.0 / days, 4)
 
 
-def build_execution_plan(event_id: str, event_title: str, legs: Sequence[ArbLeg],
-                         days_to_resolution: int | None, *, min_ask_sum: float = 0.85) -> ExecutionPlan:
+def build_execution_plan(
+    event_id: str,
+    event_title: str,
+    legs: Sequence[ArbLeg],
+    days_to_resolution: int | None,
+    *,
+    min_ask_sum: float = 0.85,
+    resolution_at_utc: str = "",
+) -> ExecutionPlan:
     """Assemble the dry-run plan from fully-priced legs.
 
     Every outcome must already be priced (the caller drops events with an unpriceable leg),
@@ -128,6 +154,7 @@ def build_execution_plan(event_id: str, event_title: str, legs: Sequence[ArbLeg]
         profit_usdc=profit,
         days_to_resolution=days_to_resolution,
         annualised_return_on_capital=ann,
+        resolution_at_utc=resolution_at_utc,
     )
 
 
@@ -281,19 +308,26 @@ def discover_event_ids(max_pages: int, timeout: int) -> list[str]:
     return ids
 
 
-def _days_to(end: str) -> int | None:
-    from datetime import datetime, timezone
-    if not end:
+def _event_end(end: Any) -> datetime | None:
+    parsed = parse_timestamp(end)
+    if parsed is None:
         return None
-    try:
-        dt = datetime.fromisoformat(end.replace("Z", "+00:00"))
-        return max(1, (dt - datetime.now(timezone.utc)).days)
-    except Exception:
+    return parsed.astimezone(timezone.utc)
+
+
+def _days_to(end: Any, *, as_of: datetime | None = None) -> int | None:
+    resolution = _event_end(end)
+    if resolution is None:
         return None
+    reference = (as_of or datetime.now(timezone.utc)).astimezone(timezone.utc)
+    seconds = (resolution - reference).total_seconds()
+    if seconds <= 0:
+        return None
+    return max(1, int(seconds // 86_400))
 
 
 def price_event(event_id: str, *, pause: float, max_outcomes: int, min_ask_sum: float,
-                timeout: int) -> tuple[ExecutionPlan | None, str]:
+                timeout: int, observed_at: datetime | None = None) -> tuple[ExecutionPlan | None, str]:
     """Fetch an event's complete outcome set and price every leg. Returns ``(plan, "ok")`` for a
     tradeable complete basket, else ``(None, reason)`` so the caller can tally *why* an event was
     skipped (not negRisk, wrong cardinality, a leg with no tokens, or an unbuyable leg)."""
@@ -313,20 +347,42 @@ def price_event(event_id: str, *, pause: float, max_outcomes: int, min_ask_sum: 
         best = _best_ask(str(toks[0]), timeout)
         if best is None:
             return None, "unpriceable_leg"          # a leg you cannot buy -> basket not lockable
+        fee_schedule = resolve_taker_fee_schedule(m)
         legs.append(ArbLeg(outcome=(m.get("groupItemTitle") or m.get("question") or "")[:40],
-                           token_id=str(toks[0]), best_ask=best[0], ask_size=best[1]))
+                           token_id=str(toks[0]), best_ask=best[0], ask_size=best[1],
+                           taker_fee_per_share=taker_fee_per_share(
+                               price=best[0], schedule=fee_schedule
+                           ),
+                           taker_fee_rate=fee_schedule.rate,
+                           taker_fee_category=fee_schedule.category,
+                           taker_fee_source=fee_schedule.source,
+                           taker_fee_enabled=fee_schedule.enabled,
+                           taker_fee_model_version=fee_schedule.model_version))
         if pause:
             time.sleep(pause)
-    days = _days_to(event.get("endDate") or event.get("endDateIso") or "")
-    return build_execution_plan(event_id, event.get("title") or "", legs, days, min_ask_sum=min_ask_sum), "ok"
+    end_value = event.get("endDate") or event.get("endDateIso") or ""
+    resolution = _event_end(end_value)
+    days = _days_to(end_value, as_of=observed_at)
+    resolution_at_utc = (
+        resolution.strftime("%Y-%m-%dT%H:%M:%SZ") if resolution is not None else ""
+    )
+    return build_execution_plan(
+        event_id,
+        event.get("title") or "",
+        legs,
+        days,
+        min_ask_sum=min_ask_sum,
+        resolution_at_utc=resolution_at_utc,
+    ), "ok"
 
 
 def scan_once(cfg: EngineConfig, *, max_pages: int = 4, max_events: int = 20, max_outcomes: int = 80,
               pause: float = 0.02, min_ask_sum: float = 0.85,
-              timeout: int = 20) -> tuple[list[ExecutionPlan], dict[str, int]]:
+              timeout: int = 20, observed_at: datetime | None = None) -> tuple[list[ExecutionPlan], dict[str, int]]:
     """One full pass: discover liquid negRisk events and build a plan for each, returning the plans
     plus skip-reason counts so a "no arbs" result is interpretable (efficient pricing vs illiquid
     legs vs oversized baskets) rather than a silent zero."""
+    scan_at = (observed_at or datetime.now(timezone.utc)).astimezone(timezone.utc)
     ids = discover_event_ids(max_pages, timeout)[:max_events]
     plans: list[ExecutionPlan] = []
     stats: dict[str, int] = {"discovered": len(ids), "priced_complete": 0, "skipped_not_negrisk": 0,
@@ -335,7 +391,8 @@ def scan_once(cfg: EngineConfig, *, max_pages: int = 4, max_events: int = 20, ma
     for eid in ids:
         try:
             plan, reason = price_event(eid, pause=pause, max_outcomes=max_outcomes,
-                                       min_ask_sum=min_ask_sum, timeout=timeout)
+                                       min_ask_sum=min_ask_sum, timeout=timeout,
+                                       observed_at=scan_at)
         except Exception:
             stats["skipped_error"] += 1
             continue
@@ -354,7 +411,8 @@ def _monitor_summary(cfg: EngineConfig, *, polls: int, poll_seconds: int, min_an
                      alerts_total: int, polls_run: int, interrupted: bool,
                      active_arb_ids: Iterable[str] = (),
                      alert_persistence_counts: Mapping[str, int] | None = None,
-                     persistent_alerts: Sequence[dict[str, Any]] = ()) -> dict[str, Any]:
+                     persistent_alerts: Sequence[dict[str, Any]] = (),
+                     h2_exact_scan: Mapping[str, Any] | None = None) -> dict[str, Any]:
     top = latest_ranked[0] if latest_ranked else None
     return {
         "status": "paper_analysis",
@@ -381,6 +439,7 @@ def _monitor_summary(cfg: EngineConfig, *, polls: int, poll_seconds: int, min_an
         "alert_persistence_counts": dict(alert_persistence_counts or {}),
         "persistent_alert_count": len(persistent_alerts),
         "persistent_alerts": list(persistent_alerts),
+        "h2_exact_scan": dict(h2_exact_scan or {}),
         "best_annualised_return_on_capital": top.annualised_return_on_capital if top else 0.0,
         "best_opportunity": top.as_row() if top else None,
         "best_execution_plan": dry_run_orders(top) if top else [],
@@ -394,7 +453,8 @@ def run_dutch_arb_monitor(cfg: EngineConfig, *, polls: int = 1, poll_seconds: in
                           max_pages: int = 4, max_events: int = 20, max_outcomes: int = 80,
                           min_ask_sum: float = 0.85, min_annualised: float = 0.0,
                           alert_annualised: float = 0.10, pause: float = 0.02,
-                          timeout: int = 20, max_alerts: int = 1000) -> dict[str, Any]:
+                          timeout: int = 20, max_alerts: int = 1000,
+                          clock: Callable[[], datetime] | None = None) -> dict[str, Any]:
     """Poll the live book, ranking and diffing complete-set dutch-book arbs and alerting when one
     clears ``alert_annualised``. ``polls <= 0`` runs continuously until interrupted (the Docker
     mode); a bounded ``polls`` runs that many times. State (opportunities, alerts, summary) is
@@ -419,13 +479,33 @@ def run_dutch_arb_monitor(cfg: EngineConfig, *, polls: int = 1, poll_seconds: in
     alerts_total = 0
     polls_run = 0
     interrupted = False
+    h2_exact_scan: dict[str, Any] = {}
+    clock_fn = clock or (lambda: datetime.now(timezone.utc))
 
     poll_iter: Iterable[int] = itertools.count(1) if polls <= 0 else range(1, polls + 1)
     try:
         for poll in poll_iter:
+            scan_at = clock_fn()
+            if scan_at.tzinfo is None:
+                scan_at = scan_at.replace(tzinfo=timezone.utc)
+            scan_at = scan_at.astimezone(timezone.utc).replace(microsecond=0)
             plans, latest_stats = scan_once(cfg, max_pages=max_pages, max_events=max_events,
                                             max_outcomes=max_outcomes, pause=pause,
-                                            min_ask_sum=min_ask_sum, timeout=timeout)
+                                            min_ask_sum=min_ask_sum, timeout=timeout,
+                                            observed_at=scan_at)
+            h2_exact_scan = record_h2_scan_observations(
+                cfg,
+                plans,
+                observed_at=scan_at,
+            )
+            h2_evaluation = evaluate_h2_dutch(cfg, as_of=scan_at)
+            h2_exact_scan = {
+                **h2_exact_scan,
+                "evaluation_status": h2_evaluation.get("status"),
+                "independent_episodes": h2_evaluation.get("independent_episodes", 0),
+                "persistent_episodes": h2_evaluation.get("persistent_episodes_current", 0),
+                "next_unmet_condition": h2_evaluation.get("next_unmet_condition"),
+            }
             ranked = rank_plans(plans, min_annualised=min_annualised)
             diff = diff_states(prev_arb_ids, plans)
             if diff.appeared or diff.cleared:
@@ -501,7 +581,7 @@ def run_dutch_arb_monitor(cfg: EngineConfig, *, polls: int = 1, poll_seconds: in
                 alert_annualised=alert_annualised, latest_ranked=latest_ranked, latest_stats=latest_stats,
                 transitions=transitions, alerts_total=alerts_total, polls_run=polls_run, interrupted=False,
                 active_arb_ids=active_arb_ids, alert_persistence_counts=alert_persistence_counts,
-                persistent_alerts=persistent_alerts,
+                persistent_alerts=persistent_alerts, h2_exact_scan=h2_exact_scan,
             )
             write_json(out_dir / "dutch_arb_monitor_summary.json", summary)
             write_json(out_dir / "dutch_arb_latest.json", summary)
@@ -518,7 +598,8 @@ def run_dutch_arb_monitor(cfg: EngineConfig, *, polls: int = 1, poll_seconds: in
                                polls_run=polls_run, interrupted=interrupted,
                                active_arb_ids=active_arb_ids,
                                alert_persistence_counts=alert_persistence_counts,
-                               persistent_alerts=persistent_alerts)
+                               persistent_alerts=persistent_alerts,
+                               h2_exact_scan=h2_exact_scan)
     write_json(out_dir / "dutch_arb_monitor_summary.json", summary)
     write_json(out_dir / "dutch_arb_latest.json", summary)
     return summary

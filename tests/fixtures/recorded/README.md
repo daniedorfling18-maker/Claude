@@ -20,6 +20,9 @@ credentials, private account data, or request headers are stored.
   observations are retained and the public token/query parameters are omitted.
 - `gamma_markets_2026-07-15.json`: Gamma `GET /markets` list, including JSON-encoded outcome and
   token arrays, ISO timestamps, nested event metadata, and the live reward-object shape.
+- `gamma_negrisk_event_2026-07-16.json`: Gamma `GET /events` object recorded from a five-leg
+  negRisk event, preserving the event envelope, JSON-encoded token pairs, fee-enabled booleans,
+  null category values, and grouped outcome titles; public token identifiers were replaced.
 - `vps_discovery_starvation_2026-07-16.json`: sanitized governance telemetry from the paper VPS
   showing the former frozen up/down rotation and the adaptive-query ordering that starved the
   registered H1/H2/H3 research lanes. No credentials, account identifiers, or market token IDs

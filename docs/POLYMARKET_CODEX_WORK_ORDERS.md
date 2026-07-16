@@ -4060,7 +4060,7 @@ review claims no findings under those methods, not absence of all defects.
 
 ## WO-97 — Correct WO-39 to the canonical websocket feature producer path
 
-Status: IMPLEMENTED by Codex in PR #240 on 2026-07-16; awaiting required gate and review.
+Status: MERGED in PR #240 on 2026-07-16.
 
 Owner authorization: the 2026-07-16 instruction to correct WO-39's producer
 path. This is collection and evidence-integrity infrastructure only. It does
@@ -4154,13 +4154,96 @@ calendar-sensitive runtime-lock cases assigned to WO-100, and the unaffected
 runtime-lock test separately. This records no findings under those methods,
 not absence of all defects.
 
+## WO-98 - Exact post-registration H2 evaluator and dashboard authority
+
+Status: REGISTERED / IN BUILD by Codex on 2026-07-16.
+
+Owner authorization: the 2026-07-16 instruction to build the exact
+post-registration H2 evaluator and point the dashboard to it. This is
+prospective shadow-research measurement only. It cannot create a signal,
+change a gate or threshold outside this H2 contract, approve paper/live
+trading, size/fund capital, or place an order.
+
+Files: `docs/EXPERIMENT_REGISTRY.md`, this register,
+`docs/POLYMARKET_QUANT_MODE_CHARTER.md`,
+`src/polymarket_predictive_engine/dutch_arb_monitor.py`, new
+`src/polymarket_predictive_engine/h2_dutch_evaluator.py`,
+`src/polymarket_predictive_engine/cli.py`,
+`src/polymarket_predictive_engine/training_harvest.py`,
+`src/polymarket_predictive_engine/dashboard.py`,
+`src/polymarket_predictive_engine/ledger_anchor.py`, and focused tests for the
+producer, evaluator, harvest, CLI/ledger registration, and dashboard.
+
+Registered implementation contract:
+
+1. The live Dutch monitor keeps its legacy gross watch diagnostic, but also
+   appends one immutable exact observation per completely priced event per
+   scan to `outputs/h2_dutch/h2_scan_observations_v1.csv`. One injected UTC
+   clock governs all rows in a scan. Rows preserve event/token identity,
+   per-leg displayed ask/size and WO-94 fee provenance, common size,
+   resolution time, the fixed 0.002-per-basket cost reserve, all-in capital,
+   net profit/return, qualification, and both trading-invoked flags false.
+   The producer writes qualifying and complete non-qualifying rows; a missing
+   event is not relabelled as a clear.
+2. New `h2_dutch_evaluator.py` consumes only that exact append-only ledger.
+   It rejects pre-registration, post-window, future, duplicate, malformed,
+   incomplete, non-unique-token, nonpositive-depth, nonpositive-horizon, or
+   internally inconsistent rows with explicit coverage counters. It
+   deterministically reconstructs episodes and persistence exactly as filed
+   in the H2 amendment in `docs/EXPERIMENT_REGISTRY.md`.
+3. The evaluator atomically writes current episode state and
+   `outputs/h2_dutch/h2_evaluation.json`. At the registered stop it freezes
+   the formal first-100/deadline sample in append-only
+   `h2_final_episodes_v1.csv`; reruns cannot revise frozen episode economics.
+   Its event-clustered bootstrap is deterministic, the single registered H2
+   test reports FDR not applicable, and failure stays suppressed. Both
+   append-only ledgers join the WO-61 anchor registry.
+4. Add CLI `h2-dutch-evaluate` and run it after live collection in the daily
+   resilient training harvest. The harvest child remains bounded and
+   fail-visible. No broker, strategy, readiness, risk, execution, signer,
+   credential, capital, or order path may import or consume the verdict.
+5. `dashboard.py` reads the exact H2 artifact as the primary Dutch evidence
+   authority. It shows collecting/pass/suppressed state, stop progress,
+   coverage/exclusions, episode/day/persistence floors, exact cost model,
+   aggregate net profit, clustered 90% interval, concentration, and the next
+   unmet condition. The old gross scanner is labelled live diagnostic
+   collection only and cannot display a registered H2 verdict.
+
+Fail-safe sentence: absent, stale, future-dated, malformed, internally
+inconsistent, incomplete, unanchored, or lock-contended evidence cannot pass
+H2; missing scans cannot prove a clear or persistence; early samples remain
+collecting; every stopped sample that misses any registered support condition
+is suppressed; every artifact remains shadow-only with paper/live invocation
+flags false.
+
+Engineering-standards review plan: S1 traces the registration boundary,
+single scan/evaluation clocks, exact 10--20 minute persistence gaps, 60-day
+deadline, and future-row exclusions. S2 uses runtime locks plus append-only
+observation/final ledgers and atomic current JSON/CSV state; producer/evaluator
+interleavings are tested. S3 names the live Gamma/CLOB producer and exact
+ledger/evaluator/dashboard consumers with no alternate legacy input. S4 uses
+recorded Gamma/CLOB fixture shapes plus hand-computed planted-edge, null,
+clear, missing-scan, duplicate-day, persistence-gap, fee, concentration,
+clock-advance, stop, immutable-rerun, and tighten-only cases. S5 is the
+fail-safe sentence above. S7 must verify all H1/H3, paper/live, gate, stake,
+capital, signer, credential, broker, and order surfaces are unchanged.
+
+Day-after check: require a post-deploy row in
+`outputs/h2_dutch/h2_scan_observations_v1.csv` with unique event/token
+identity, complete plan, canonical fee provenance, positive common size,
+fixed reserve 0.002, internally reconciling all-in capital/net profit, and both
+trading flags false; require `h2_evaluation.json` newer than that harvest,
+`status=collecting` before the stop, nondecreasing independent episode count,
+explicit coverage counters, and the dashboard H2 panel to cite that exact
+artifact while labelling the old gross watch diagnostic.
+
 ## Current queue for Codex (reconciled 2026-07-16)
 
 Every WO below and every future WO must comply with
 `docs/ENGINEERING_STANDARDS.md` (S1-S7), including the mandatory
 `Day-after check:` line. Reviews verify compliance item by item.
 
-**WO-95 was implemented in PR #238, WO-96 merged in PR #239, and WO-97 was implemented in PR #240.** Later items in the 2026-07-16 owner
+**WO-95 was implemented in PR #238, WO-96 merged in PR #239, WO-97 merged in PR #240, and WO-98 is the active registered build.** Later items in the 2026-07-16 owner
 instruction require their own numbered work order and PR; do not combine them
 into this change. WO-89 through WO-92 were implemented as of 2026-07-15.
 WO-93 was implemented in PR #236, WO-94 in PR #237, WO-95 in PR #238, and WO-96 in PR #239. WO-85, WO-87, WO-86, and
@@ -4168,9 +4251,12 @@ WO-88 are implemented on 2026-07-15; WO-83 is implemented in PR #203 and
 WO-84 is implemented in PR #205. Do not infer follow-on capital, gate, model,
 or executor work from their diagnostics; the queue below remains binding.
 
+- **Active build:** WO-98 exact post-registration H2 evaluator and dashboard
+  authority, one PR, followed by the owner-ordered WO-99 leakage/corpus/split
+  correction.
 - **Pending review, not build permission:** WO-33. WO-34/35 model wiring shares
-  its leakage-review dependency and must stay inside H1-H3. H2 still needs a
-  dedicated post-registration OOS evaluator; WO-96 is the filed exact H3 build.
+  its leakage-review dependency and must stay inside H1-H3; WO-99 is the
+  owner-authorized corrective implementation. WO-96 is the exact H3 build.
 - **Blocked:** WO-48 (maker evidence gates); WO-67 (all P1-P5); WO-73 item 4 and
   WO-75 item 2 (part of the blocked executor authorization path).
 - **Deferred:** WO-70 until post-proof; WO-72 until the human ladder produces

@@ -67,6 +67,7 @@ def _steps(config_path: str) -> list[HarvestStep]:
         ),
         HarvestStep("backfill_trade_prints", _engine_command("backfill-trade-prints", config_path)),
         HarvestStep("h3_smart_flow_evaluate", _engine_command("h3-smart-flow-evaluate", config_path)),
+        HarvestStep("h2_dutch_evaluate", _engine_command("h2-dutch-evaluate", config_path)),
         HarvestStep("maker_fill_replay", _engine_command("maker-fill-replay", config_path)),
         HarvestStep("flow_toxicity", _engine_command("flow-toxicity", config_path)),
         HarvestStep("decision_policy", _engine_command("decision-policy", config_path)),

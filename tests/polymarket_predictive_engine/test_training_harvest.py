@@ -91,7 +91,7 @@ def test_deadline_skips_unstarted_work_but_not_mandatory_tail(
     assert payload["deadline_seconds"] == 1
     assert payload["status"] == "deadline_exceeded"
     assert calls == ["backfill-resolved-markets", "corpus-retention", "anchor-ledgers"]
-    assert len(payload["skipped_deadline_steps"]) == 20
+    assert len(payload["skipped_deadline_steps"]) == 23
     assert payload["mandatory_tail_completed"] is True
 
 
@@ -101,6 +101,8 @@ def test_scheduler_uses_registered_resilient_harvest_entrypoint() -> None:
     assert "training-harvest" in COMMANDS
     assert "h3-smart-flow-evaluate" in COMMANDS
     assert "h2-dutch-evaluate" in COMMANDS
+    assert "collect-historical-bid-ask" in COMMANDS
+    assert "build-leakage-safe-training" in COMMANDS
     assert "OPS_TRAINING_HARVEST_DEADLINE_SECONDS:-21600" in script
     assert "polymarket_predictive_engine.cli training-harvest" in script
     assert '"last_success_utc": now.isoformat() if exit_code == 0' in script

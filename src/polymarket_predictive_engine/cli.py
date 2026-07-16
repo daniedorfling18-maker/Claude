@@ -43,11 +43,13 @@ from .flow_toxicity import build_flow_toxicity
 from .goal_planner import build_goal_plan
 from .governance import governance_report
 from .historical_backfill import historical_backfill
+from .historical_bid_ask import collect_historical_bid_ask
 from .hourly_adverse_study import run_hourly_adverse_study
 from .h2_dutch_evaluator import evaluate_h2_dutch
 from .h3_smart_flow_evaluator import evaluate_h3_smart_flow
 from .ips_render import render_ips
 from .labels import build_labels
+from .leakage_safe_training import build_leakage_safe_training
 from .ledger_anchor import anchor_ledgers, verify_ledger_chain
 from .live_mispricing import run_live_mispricing, scan_live_mispricing
 from .longshot_bias import build_longshot_bias_scan
@@ -122,6 +124,8 @@ COMMANDS = [
     "collect-resolutions",
     "backfill-resolved-markets",
     "collect-price-history",
+    "collect-historical-bid-ask",
+    "build-leakage-safe-training",
     "collect-trade-prints",
     "backfill-trade-prints",
     "collect-wallet-intel",
@@ -358,6 +362,10 @@ def main(argv: list[str] | None = None) -> int:
         elif args.command == "collect-price-history":
             _, _, summary = collect_price_history(cfg, historical_limit=args.historical_limit)
             _print(summary)
+        elif args.command == "collect-historical-bid-ask":
+            _print(collect_historical_bid_ask(cfg))
+        elif args.command == "build-leakage-safe-training":
+            _print(build_leakage_safe_training(cfg))
         elif args.command == "collect-trade-prints":
             _print(collect_trade_prints(cfg))
         elif args.command == "backfill-trade-prints":

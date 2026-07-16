@@ -225,6 +225,31 @@ clustered-bootstrap, concentration, shadow-only pass, and suppression gates
 above remain unchanged. `smart_flow_clv.py` remains legacy diagnostic history;
 only the WO-96 exact artifact may state the H3 registered verdict.
 
+### Resolved-corpus diagnostic amendment (owner-approved 2026-07-16; WO-99)
+
+WO-99 resolves the historical trainer's point-in-time leakage defect without
+changing the prospective H3 test above. Resolution states are preserved in a
+versioned append-only observation ledger. Model features come only from
+timestamped two-sided CLOB quotes captured by the public websocket/order-book
+producer; the venue's single-price historical `{t,p}` response cannot
+substitute for a bid or ask. Features and terminal labels are written to
+separate artifacts.
+
+The diagnostic split is whole-market and chronological. The latest 30% of
+markets are validation; a training market is retained only if its terminal
+label became available strictly before the earliest validation feature minus a
+24-hour embargo. Markets with overlapping label intervals are purged. Input
+rows are limited to exact quotes no more than seven days before close and are
+thinned to one deterministic quote per token-hour. Configuration is
+tighten-only.
+
+This model is H3 structural-bias feature-discovery substrate, not a fourth
+primary and not registered H3 evidence. Its execution diagnostic may buy only
+at the recorded ask and must apply the canonical category/price-aware taker
+fee. No result from this retrospective terminal-resolution corpus can replace
+the WO-96 prospective fill-to-final-bid CLV verdict, alter a promotion gate, or
+authorize paper/live capital.
+
 ## Multiple-testing and evidence policy
 
 - Each primary has one primary metric. Secondary cuts are descriptive.

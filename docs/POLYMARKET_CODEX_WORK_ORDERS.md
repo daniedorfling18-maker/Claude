@@ -4,9 +4,9 @@ Last updated: 2026-07-16 (owner-authorized corrective batch opened with WO-93; W
 PR #203; WO-84 implemented in PR #205; WO-89 through WO-92 implemented. WO-87 now relabels the unchanged legacy verdict metric honestly and
 reports non-binding true pre-event CLV on the same units. WO-93 was implemented
 in PR #236, WO-94 in PR #237, WO-95 in PR #238, and WO-96 in PR #239. WO-97 was
-implemented in PR #240. WO-98 is implemented and awaiting publication. WO-33 remains pending a
-registered leakage review, with
-WO-34/35 model wiring bound to that review and the three-hypothesis freeze.
+implemented in PR #240 and WO-98 in PR #241. WO-99 implements the
+owner-authorized WO-33 leakage correction and is awaiting publication; any
+WO-34/35 model use remains bound to the three-hypothesis freeze.
 WO-48 and WO-67 are blocked; WO-70 and WO-72 are deferred; WO-76 is
 registration-only. Crypto up/down is frozen as a diagnostic — see
 `AGENTS.md`.)
@@ -1308,11 +1308,10 @@ WP7/WP8 and the algo track (WP9–WP11) have all landed.
 
 ## WO-33 — Wire the resolved-market corpus into the trainer (leakage-reviewed)
 
-Status: PENDING REVIEW, not authorized for implementation. Collection and
-retention plumbing has landed, but the training-set assembly must first receive
-the registered point-in-time leakage review and must map to one of H1-H3 in
-`docs/EXPERIMENT_REGISTRY.md`. Do not treat this open text as permission for a
-generic fourth modelling lane.
+Status: IMPLEMENTED by owner-authorized corrective WO-99 on 2026-07-16;
+awaiting required gate and review. The resulting model is diagnostic H3
+structural-bias substrate only, not a generic fourth lane and not the exact H3
+verdict authority.
 
 Filed 2026-07-09. The training-data audit found the harvest machinery parked and
 the live feature substrate being destroyed on retention roll-off. Both are fixed
@@ -4156,7 +4155,7 @@ not absence of all defects.
 
 ## WO-98 - Exact post-registration H2 evaluator and dashboard authority
 
-Status: IMPLEMENTED by Codex on 2026-07-16; awaiting required gate and review.
+Status: MERGED in PR #241 on 2026-07-16.
 
 Owner authorization: the 2026-07-16 instruction to build the exact
 post-registration H2 evaluator and point the dashboard to it. This is
@@ -4275,13 +4274,118 @@ isolated public-network smoke scan discovered 20 negRisk events, priced three
 complete baskets, appended three exact rows, remained `collecting` with zero
 manufactured episodes, and reported both trading-invoked flags false.
 
+## WO-99 — Leakage-safe resolved corpus, executable quote history, and purged split
+
+Status: IMPLEMENTED by Codex on 2026-07-16; awaiting required gate and review.
+
+Owner authorization: the 2026-07-16 instruction to resolve WO-33 leakage,
+preserve an append-only resolution corpus, collect historical bid/ask rather
+than midpoint only, and implement a purged chronological split. This is
+diagnostic H3 structural-bias research substrate only. It cannot replace the
+WO-96 exact prospective H3 evaluator, create a fourth hypothesis, change a
+gate/threshold/stake, authorize paper/live trading, fund capital, or place an
+order.
+
+Files: new `resolution_corpus.py`, `historical_bid_ask.py`, and
+`leakage_safe_training.py`; `resolution_collector.py`,
+`historical_backfill.py`, `models/skill_model.py`, `training_harvest.py`, CLI,
+ledger anchoring, producer/consumer contracts, example configuration, the H3
+registry note, charter, and focused tests.
+
+Registered implementation contract:
+
+1. Both Gamma resolution producers keep their legacy current-run snapshots for
+   compatibility, but append every distinct token-level state under one shared
+   lock to versioned
+   `outputs/polymarket_training/resolution_corpus_v1.csv`. A content-derived
+   observation id deduplicates the same state across producers while a changed
+   target, quality, or resolution timestamp remains a new immutable row.
+   Producers inject one run clock into every row. Conflicting clean targets are
+   preserved in evidence and excluded downstream; history is never corrected
+   by rewriting prior bytes.
+2. The official CLOB `prices-history` response is retained as a single-price
+   diagnostic and is explicitly not treated as an executable quote. New
+   `collect-historical-bid-ask` streams the canonical WO-97 live feature table
+   plus immutable `features_*` and `daily_training_archive_*` gzip files. It
+   appends only valid, timestamped, two-sided books to versioned
+   `historical_bid_ask_v1.csv`; no side may be imputed from a midpoint. A
+   disk-backed exact dedup index bounds memory, an atomic source fingerprint
+   state avoids rescanning unchanged archives, and a shared lock serializes
+   the append-only writer.
+3. New `build-leakage-safe-training` reads only the two versioned ledgers. It
+   requires exact token/market identity, clean binary settlement, both close
+   and resolution times, an observed quote strictly before both, and a real
+   bid/ask inside the fixed seven-day pre-close window. It keeps the first
+   deterministic quote per token-hour and atomically writes separate
+   feature-only `resolved_corpus_features_v1.csv`, label-only
+   `resolved_corpus_labels_v1.csv`, and market-level
+   `resolved_corpus_split_v1.csv` audit files.
+4. Whole markets are sorted by terminal label-availability time. The latest
+   30% (ceil, with at least one earlier market) are validation. A provisional
+   training market survives only when its label became available strictly
+   before the earliest validation feature minus a 24-hour embargo; overlapping
+   markets are explicitly purged. Configuration may shorten the seven-day
+   window, lengthen the embargo, enlarge validation to at most 50%, or thin
+   more coarsely, but cannot widen any registered boundary.
+5. `train-skill-model` now refuses the legacy `features_v2.csv`/`labels.csv`
+   path and consumes only the preassigned WO-99 feature/label files. The market
+   midpoint remains a forecasting baseline, but diagnostic ROI buys only at
+   the recorded best ask and charges the canonical category/price-aware,
+   five-decimal taker fee. It never fabricates a complement at `1-midpoint`.
+   Outputs state diagnostic H3 substrate, no registered-H3 verdict authority,
+   and no promotion authority.
+6. The resilient daily harvest runs resolution backfill, legacy descriptive
+   price history, exact bid/ask ingestion, leakage-safe assembly, and the
+   diagnostic trainer in dependency order. Both append-only ledgers join the
+   WO-61 anchor registry and the WO-79 producer/consumer registry states exact
+   coverage and conservative absence behavior.
+
+Fail-safe sentence: missing, stale, future-dated, malformed, one-sided,
+crossed, post-close, out-of-window, identity-mismatched, unlabelled, ambiguous,
+conflicting, lock-contended, or temporally overlapping evidence is excluded or
+left collecting; it cannot be imputed, promoted, or traded. A missing archive
+state causes a recoverable deduplicated rescan, never deletion or duplication
+of prior ledger bytes.
+
+Engineering-standards review plan: S1 traces one producer/collector/assembler
+clock, external millisecond normalization, strict pre-close comparisons, and a
+clock-advance test. S2 inventories the two locked append-only ledgers, atomic
+fingerprint/summary/feature/label/split files, and crash recovery by ledger
+dedup before state advance. S3 registers Gamma→resolution corpus and
+websocket/archive→quote corpus→assembler coverage contracts. S4 replays the
+recorded public CLOB book and tests immutable prefixes, dedup, conflicts,
+future rows, midpoint-only rows, identity mismatch, thinning, purge/embargo,
+tighten-only settings, and zero market overlap. S5 is the fail-safe sentence
+above. S7 verifies all H1/H2/H3 exact verdict, readiness, risk, stake, funding,
+signer, credential, broker, and order surfaces remain unchanged.
+
+Day-after check: in
+`outputs/polymarket_model_governance/leakage_safe_training_summary.json`,
+require `work_order=WO-99`, both input artifacts present with nonzero byte
+length/SHA-256, `midpoint_only_rows_accepted=0`,
+`split.market_overlap_count=0`, and both trading flags false; require
+`historical_bid_ask_summary.json.rows_appended` to become positive after new
+websocket quote variation and the two versioned ledgers to pass the next WO-61
+prefix-anchor verification. `status=collecting` is valid until clean resolved
+tokens overlap the exact quote history; it must not be relabelled as edge.
+
+Landed implementation: both resolution lanes append distinct states, exact
+websocket/archive quotes are ingested with disk-backed dedup, and the daily
+harvest builds a separated feature/label corpus with a whole-market purged
+chronological split before running the diagnostic skill model. The execution
+diagnostic uses recorded ask plus canonical taker fee. No exact H3 evaluator or
+trading surface imports this lane.
+
+Verification: pending isolated VPS target/full-suite execution and the required
+PR gate. Static review found no frozen-surface consumer of the WO-99 artifacts.
+
 ## Current queue for Codex (reconciled 2026-07-16)
 
 Every WO below and every future WO must comply with
 `docs/ENGINEERING_STANDARDS.md` (S1-S7), including the mandatory
 `Day-after check:` line. Reviews verify compliance item by item.
 
-**WO-95 was implemented in PR #238, WO-96 merged in PR #239, WO-97 merged in PR #240, and WO-98 is implemented awaiting publication.** Later items in the 2026-07-16 owner
+**WO-95 was implemented in PR #238, WO-96 merged in PR #239, WO-97 merged in PR #240, WO-98 merged in PR #241, and WO-99 is implemented awaiting publication.** Later items in the 2026-07-16 owner
 instruction require their own numbered work order and PR; do not combine them
 into this change. WO-89 through WO-92 were implemented as of 2026-07-15.
 WO-93 was implemented in PR #236, WO-94 in PR #237, WO-95 in PR #238, and WO-96 in PR #239. WO-85, WO-87, WO-86, and
@@ -4289,12 +4393,12 @@ WO-88 are implemented on 2026-07-15; WO-83 is implemented in PR #203 and
 WO-84 is implemented in PR #205. Do not infer follow-on capital, gate, model,
 or executor work from their diagnostics; the queue below remains binding.
 
-- **Implemented / publication pending:** WO-98 exact post-registration H2
-  evaluator and dashboard authority. After its one-PR review/merge, continue
-  with owner-ordered WO-99 leakage/corpus/split correction.
-- **Pending review, not build permission:** WO-33. WO-34/35 model wiring shares
-  its leakage-review dependency and must stay inside H1-H3; WO-99 is the
-  owner-authorized corrective implementation. WO-96 is the exact H3 build.
+- **Implemented / publication pending:** WO-99 leakage-safe resolved corpus,
+  exact historical bid/ask ledger, and purged chronological diagnostic split.
+  After its one-PR review/merge, continue with owner-ordered WO-100 full-suite
+  and enforceable merge-gate correction.
+- **Resolved by WO-99:** WO-33. WO-34/35 model use remains diagnostic inside
+  H1-H3; WO-96 remains the only exact H3 verdict build.
 - **Blocked:** WO-48 (maker evidence gates); WO-67 (all P1-P5); WO-73 item 4 and
   WO-75 item 2 (part of the blocked executor authorization path).
 - **Deferred:** WO-70 until post-proof; WO-72 until the human ladder produces

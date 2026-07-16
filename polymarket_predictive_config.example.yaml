@@ -513,6 +513,17 @@ historical_price_history:
   fidelity_seconds: 300
   request_timeout_seconds: 30
   request_pause_seconds: 0.1
+
+# WO-99: terminal-resolution diagnostic training uses only archived executable
+# bid/ask observations. The public prices-history {t,p} lane remains useful for
+# descriptive studies but cannot substitute for either side of the spread.
+# Overrides are tighten-only: shorter lookback, longer embargo, larger
+# validation fraction, or coarser thinning.
+leakage_safe_training:
+  max_lookback_hours: 168
+  embargo_hours: 24
+  validation_fraction: 0.30
+  thin_bucket_seconds: 3600
 # 2026-07-10 WO-43: martingale drift scan. Study-only; estimates
 # E[dP | price bin, time-to-close bin, category] from harvested CLOB price
 # histories with market-clustered bootstrap and BH-FDR. It never creates a

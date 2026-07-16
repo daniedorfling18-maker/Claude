@@ -3,8 +3,8 @@
 Last updated: 2026-07-16 (owner-authorized corrective batch opened with WO-93; WO-85, WO-87, WO-86, and WO-88 implemented; WO-80, WO-82, WO-81 landed; WO-83 implemented in
 PR #203; WO-84 implemented in PR #205; WO-89 through WO-92 implemented. WO-87 now relabels the unchanged legacy verdict metric honestly and
 reports non-binding true pre-event CLV on the same units. WO-93 was implemented
-in PR #236 and WO-94 in PR #237; WO-95 is the active owner-authorized
-corrective work order. WO-33 remains pending a registered leakage review, with
+in PR #236, WO-94 in PR #237, and WO-95 in PR #238. WO-33 remains pending a
+registered leakage review, with
 WO-34/35 model wiring bound to that review and the three-hypothesis freeze.
 WO-48 and WO-67 are blocked; WO-70 and WO-72 are deferred; WO-76 is
 registration-only. Crypto up/down is frozen as a diagnostic — see
@@ -3863,7 +3863,7 @@ when the row records explicit fee-disabled/exact-zero evidence).
 
 ## WO-95 — Remove frozen crypto up/down priority and prevent discovery starvation
 
-Status: IN IMPLEMENTATION by Codex on 2026-07-16.
+Status: IMPLEMENTED by Codex in PR #238 on 2026-07-16.
 
 Owner authorization: the 2026-07-16 instruction to remove frozen up/down
 priority and fix discovery starvation. This is a tighten-only observation-
@@ -3936,11 +3936,10 @@ Every WO below and every future WO must comply with
 `docs/ENGINEERING_STANDARDS.md` (S1-S7), including the mandatory
 `Day-after check:` line. Reviews verify compliance item by item.
 
-**WO-95 is the active owner-authorized corrective work order.** Later items in
-the 2026-07-16 owner instruction require their own numbered work order and PR;
-do not combine them into this change. WO-89 through WO-92 were implemented as
-of 2026-07-15.
-WO-93 was implemented in PR #236 and WO-94 in PR #237. WO-85, WO-87, WO-86, and
+**WO-95 was implemented in PR #238.** Later items in the 2026-07-16 owner
+instruction require their own numbered work order and PR; do not combine them
+into this change. WO-89 through WO-92 were implemented as of 2026-07-15.
+WO-93 was implemented in PR #236, WO-94 in PR #237, and WO-95 in PR #238. WO-85, WO-87, WO-86, and
 WO-88 are implemented on 2026-07-15; WO-83 is implemented in PR #203 and
 WO-84 is implemented in PR #205. Do not infer follow-on capital, gate, model,
 or executor work from their diagnostics; the queue below remains binding.

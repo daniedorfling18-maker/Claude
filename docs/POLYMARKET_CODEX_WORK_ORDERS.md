@@ -4296,8 +4296,8 @@ charter, and focused tests.
 Registered implementation contract:
 
 1. All three Gamma-backed resolution producers keep their legacy current-run
-   snapshots for compatibility, but append every distinct token-level state under one shared
-   lock to versioned
+   snapshots for compatibility, but append every distinct token-level state
+   under one shared lock to versioned
    `outputs/polymarket_training/resolution_corpus_v1.csv`. A content-derived
    observation id deduplicates the same state across producers while a changed
    target, quality, or resolution timestamp remains a new immutable row.
@@ -4379,8 +4379,18 @@ and running the diagnostic skill model. The execution diagnostic uses recorded
 ask plus canonical taker fee. No exact H3 evaluator or trading surface imports
 this lane.
 
-Verification: pending isolated VPS target/full-suite execution and the required
-PR gate. Static review found no frozen-surface consumer of the WO-99 artifacts.
+Verification: on the isolated VPS checkout, Ruff passed across `src` and
+`tests`; 31 focused WO-99/dependency tests passed; the full unaffected suite
+passed 1,301 tests in 114.12 seconds; and the unaffected runtime-lock test
+passed separately. The two calendar-fragile runtime-lock fixtures remain
+assigned to WO-100. Under a one-CPU/two-GiB one-shot container with production
+outputs mounted read-only, first-run archive ingestion remained below 27 MiB
+RAM and produced 601,592 exact two-sided quote observations. A fresh Gamma scan
+of the 86 websocket tokens matched 14 current rows but zero clean settlements,
+so the assembler correctly remained `collecting`: zero midpoint-only rows were
+accepted, zero train/validation markets overlapped, and both trading flags were
+false. Static review found no frozen-surface consumer of the WO-99 artifacts;
+the required PR gate remains pending.
 
 ## Current queue for Codex (reconciled 2026-07-16)
 

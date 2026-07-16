@@ -4,6 +4,7 @@ from datetime import datetime, timedelta, timezone
 import json
 from pathlib import Path
 
+from polymarket_predictive_engine import websocket_resolution_collector
 from polymarket_predictive_engine.config import EngineConfig
 from polymarket_predictive_engine.historical_bid_ask import (
     QUOTE_FIELDS,
@@ -203,6 +204,47 @@ def test_recorded_public_book_becomes_exact_quote_never_midpoint_reconstruction(
     )
     assert midpoint_only is None
     assert exclusion == "midpoint_or_one_sided_only"
+
+
+def test_websocket_resolution_producer_appends_to_canonical_corpus(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    cfg = _cfg(tmp_path)
+    token = "websocket-token"
+    write_csv(
+        cfg.output_root / WEBSOCKET_FEATURES_RELATIVE_PATH,
+        [{"market": "condition-ws", "asset_id": token}],
+    )
+    market = {
+        "id": "gamma-ws",
+        "slug": "market-ws",
+        "conditionId": "condition-ws",
+        "questionID": "question-ws",
+        "question": "Websocket tracked market",
+        "category": "sports",
+        "closed": True,
+        "active": False,
+        "outcomes": '["Yes", "No"]',
+        "clobTokenIds": f'["{token}", "other-token"]',
+        "outcomePrices": '["1", "0"]',
+        "closedTime": "2026-07-16T10:00:00Z",
+        "endDate": "2026-07-16T10:00:00Z",
+    }
+
+    def fake_scan(**kwargs):
+        requested = kwargs["token_ids"]
+        return ({requested_token: market for requested_token in requested}, {"matched_tokens": len(requested)})
+
+    monkeypatch.setattr(websocket_resolution_collector, "_scan_gamma_for_tokens", fake_scan)
+    result = websocket_resolution_collector.collect_websocket_resolutions(cfg)
+
+    corpus = read_csv_rows(cfg.output_root / RESOLUTION_CORPUS_RELATIVE_PATH)
+    assert result["append_only_resolution_corpus"]["rows_appended"] == 2
+    assert {row["token_id"] for row in corpus} == {token, "other-token"}
+    assert {row["producer"] for row in corpus} == {"websocket_resolution_collector"}
+    assert result["paper_trading_invoked"] is False
+    assert result["live_trading_invoked"] is False
 
 
 def test_historical_quote_collector_appends_once_and_rejects_future(tmp_path: Path) -> None:

@@ -798,7 +798,10 @@ separate feature and label files, and a whole-market purged chronological
 split with a 24-hour embargo. The venue's single-price history remains
 diagnostic and cannot be treated as a spread. The resulting skill model is H3
 structural-bias diagnostic substrate only; WO-96 remains the exact H3 verdict
-authority and every paper/live invocation flag remains false.
+authority and every paper/live invocation flag remains false. All three
+Gamma-backed resolution paths, including the websocket-token resolver, append
+to the same locked corpus, and the daily harvest invokes that resolver before
+quote assembly.
 
 ## Rules of engagement for coding agents
 

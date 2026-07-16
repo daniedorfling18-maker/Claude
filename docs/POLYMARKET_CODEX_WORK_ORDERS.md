@@ -4288,14 +4288,15 @@ order.
 
 Files: new `resolution_corpus.py`, `historical_bid_ask.py`, and
 `leakage_safe_training.py`; `resolution_collector.py`,
-`historical_backfill.py`, `models/skill_model.py`, `training_harvest.py`, CLI,
-ledger anchoring, producer/consumer contracts, example configuration, the H3
-registry note, charter, and focused tests.
+`historical_backfill.py`, `websocket_resolution_collector.py`,
+`models/skill_model.py`, `training_harvest.py`, CLI, ledger anchoring,
+producer/consumer contracts, example configuration, the H3 registry note,
+charter, and focused tests.
 
 Registered implementation contract:
 
-1. Both Gamma resolution producers keep their legacy current-run snapshots for
-   compatibility, but append every distinct token-level state under one shared
+1. All three Gamma-backed resolution producers keep their legacy current-run
+   snapshots for compatibility, but append every distinct token-level state under one shared
    lock to versioned
    `outputs/polymarket_training/resolution_corpus_v1.csv`. A content-derived
    observation id deduplicates the same state across producers while a changed
@@ -4334,11 +4335,12 @@ Registered implementation contract:
    five-decimal taker fee. It never fabricates a complement at `1-midpoint`.
    Outputs state diagnostic H3 substrate, no registered-H3 verdict authority,
    and no promotion authority.
-6. The resilient daily harvest runs resolution backfill, legacy descriptive
-   price history, exact bid/ask ingestion, leakage-safe assembly, and the
-   diagnostic trainer in dependency order. Both append-only ledgers join the
-   WO-61 anchor registry and the WO-79 producer/consumer registry states exact
-   coverage and conservative absence behavior.
+6. The resilient daily harvest runs broad resolution backfill, websocket-token
+   resolution, legacy descriptive price history, exact bid/ask ingestion,
+   leakage-safe assembly, and the diagnostic trainer in dependency order. Both
+   append-only ledgers join the WO-61 anchor registry and the WO-79
+   producer/consumer registry states exact coverage and conservative absence
+   behavior.
 
 Fail-safe sentence: missing, stale, future-dated, malformed, one-sided,
 crossed, post-close, out-of-window, identity-mismatched, unlabelled, ambiguous,
@@ -4369,12 +4371,13 @@ websocket quote variation and the two versioned ledgers to pass the next WO-61
 prefix-anchor verification. `status=collecting` is valid until clean resolved
 tokens overlap the exact quote history; it must not be relabelled as edge.
 
-Landed implementation: both resolution lanes append distinct states, exact
-websocket/archive quotes are ingested with disk-backed dedup, and the daily
-harvest builds a separated feature/label corpus with a whole-market purged
-chronological split before running the diagnostic skill model. The execution
-diagnostic uses recorded ask plus canonical taker fee. No exact H3 evaluator or
-trading surface imports this lane.
+Landed implementation: all three Gamma-backed resolution lanes append distinct
+states, exact websocket/archive quotes are ingested with disk-backed dedup, and
+the daily harvest resolves the websocket-token universe before building a
+separated feature/label corpus with a whole-market purged chronological split
+and running the diagnostic skill model. The execution diagnostic uses recorded
+ask plus canonical taker fee. No exact H3 evaluator or trading surface imports
+this lane.
 
 Verification: pending isolated VPS target/full-suite execution and the required
 PR gate. Static review found no frozen-surface consumer of the WO-99 artifacts.

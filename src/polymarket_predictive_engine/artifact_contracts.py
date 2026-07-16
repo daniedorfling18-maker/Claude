@@ -156,7 +156,10 @@ CONTRACT_REGISTRY: tuple[dict[str, Any], ...] = (
     {
         "id": "resolution_corpus_to_leakage_safe_training",
         "producer": {
-            "component": "resolution_collector + historical_backfill",
+            "component": (
+                "resolution_collector + historical_backfill + "
+                "websocket_resolution_collector"
+            ),
             "artifact": "polymarket_training/resolution_corpus_v1.csv",
             "record_path": "rows[]",
             "declared_fields": [
@@ -170,7 +173,7 @@ CONTRACT_REGISTRY: tuple[dict[str, Any], ...] = (
                 "target",
             ],
             "freshness": {"field": "resolution_observed_at_utc", "maximum_age_seconds": 172800},
-            "coverage": "every distinct Gamma token-level resolution state seen by either producer is appended; conflicting clean states remain visible",
+            "coverage": "every distinct Gamma token-level resolution state seen by any of the three producers is appended; conflicting clean states remain visible",
         },
         "consumer": {
             "component": "leakage_safe_training",

@@ -55,6 +55,10 @@ def _engine_command(name: str, config_path: str) -> tuple[str, ...]:
 def _steps(config_path: str) -> list[HarvestStep]:
     regular = [
         HarvestStep("backfill_resolved_markets", _engine_command("backfill-resolved-markets", config_path)),
+        HarvestStep(
+            "resolve_websocket_markets",
+            _engine_command("resolve-websocket-markets", config_path),
+        ),
         HarvestStep("collect_price_history", _engine_command("collect-price-history", config_path)),
         HarvestStep(
             "collect_historical_bid_ask",

@@ -50,6 +50,13 @@ def test_failed_middle_step_still_runs_retention_and_anchor(tmp_path: Path) -> N
 
     assert payload["status"] == "partial_failure"
     assert payload["failed_steps"] == ["maker_fill_replay"]
+    assert calls[:5] == [
+        "backfill-resolved-markets",
+        "resolve-websocket-markets",
+        "collect-price-history",
+        "collect-historical-bid-ask",
+        "build-leakage-safe-training",
+    ]
     assert calls[-2:] == ["corpus-retention", "anchor-ledgers"]
     assert payload["mandatory_tail_completed"] is True
     by_step = {row["step"]: row for row in payload["steps"]}
@@ -91,7 +98,7 @@ def test_deadline_skips_unstarted_work_but_not_mandatory_tail(
     assert payload["deadline_seconds"] == 1
     assert payload["status"] == "deadline_exceeded"
     assert calls == ["backfill-resolved-markets", "corpus-retention", "anchor-ledgers"]
-    assert len(payload["skipped_deadline_steps"]) == 23
+    assert len(payload["skipped_deadline_steps"]) == 24
     assert payload["mandatory_tail_completed"] is True
 
 
@@ -101,6 +108,7 @@ def test_scheduler_uses_registered_resilient_harvest_entrypoint() -> None:
     assert "training-harvest" in COMMANDS
     assert "h3-smart-flow-evaluate" in COMMANDS
     assert "h2-dutch-evaluate" in COMMANDS
+    assert "resolve-websocket-markets" in COMMANDS
     assert "collect-historical-bid-ask" in COMMANDS
     assert "build-leakage-safe-training" in COMMANDS
     assert "OPS_TRAINING_HARVEST_DEADLINE_SECONDS:-21600" in script

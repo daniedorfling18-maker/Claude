@@ -17,7 +17,7 @@ def _load_loop_module():
     return module
 
 
-def test_adaptive_scan_priority_prefers_positive_near_promoted_cohorts(tmp_path, monkeypatch):
+def test_frozen_updown_cohorts_cannot_drive_adaptive_scan_priority(tmp_path, monkeypatch):
     loop = _load_loop_module()
     monkeypatch.delenv("POLYMARKET_QUERIES", raising=False)
     monkeypatch.delenv("POLYMARKET_SCAN_QUERY_MODE", raising=False)
@@ -77,11 +77,10 @@ def test_adaptive_scan_priority_prefers_positive_near_promoted_cohorts(tmp_path,
 
     selected, plan = loop._select_scan_queries(cfg, "world cup", scan_sequence=1)
 
-    assert selected == ["bitcoin"]
-    assert plan["adaptive_priority"]["priority_queries"] == ["bitcoin", "xrp"]
-    assert "ethereum" not in plan["adaptive_priority"]["priority_queries"]
-    assert plan["ordered_queries"][:2] == ["bitcoin", "xrp"]
-    assert plan["adaptive_priority"]["top_cohorts"][0]["probationary"] is True
+    assert selected == ["world cup"]
+    assert plan["adaptive_priority"]["priority_queries"] == []
+    assert plan["adaptive_priority"]["top_cohorts"] == []
+    assert plan["primary_hypothesis_coverage"]["status"] == "starved"
 
 
 def test_query_attempts_include_family_alias_fallbacks(tmp_path):
@@ -112,7 +111,7 @@ def test_worldcup_cohort_prioritises_exact_winner_queries():
     assert "worldcup" in keys
 
 
-def test_static_scan_queries_can_target_worldcup_winner_before_generic_worldcup(tmp_path, monkeypatch):
+def test_primary_hypothesis_reserve_prevents_static_h1_queries_from_starving_h2_h3(tmp_path, monkeypatch):
     loop = _load_loop_module()
     monkeypatch.delenv("POLYMARKET_QUERIES", raising=False)
     monkeypatch.delenv("POLYMARKET_SCAN_QUERY_MODE", raising=False)
@@ -133,11 +132,12 @@ def test_static_scan_queries_can_target_worldcup_winner_before_generic_worldcup(
 
     selected, plan = loop._select_scan_queries(cfg, "world cup", scan_sequence=1)
 
-    assert selected == ["fifa world cup", "world cup winner", "world cup"]
+    assert selected == ["world cup", "sports", "politics"]
     assert plan["configured_queries"][:3] == ["fifa world cup", "world cup winner", "world cup"]
+    assert plan["primary_hypothesis_coverage"]["status"] == "ok"
 
 
-def test_batch_mode_scans_top_evidence_families_together(tmp_path, monkeypatch):
+def test_batch_mode_reserves_all_primary_hypotheses_ahead_of_frozen_evidence(tmp_path, monkeypatch):
     loop = _load_loop_module()
     monkeypatch.delenv("POLYMARKET_SCAN_QUERY_MODE", raising=False)
     monkeypatch.delenv("POLYMARKET_MAX_SCAN_QUERIES", raising=False)
@@ -192,12 +192,13 @@ def test_batch_mode_scans_top_evidence_families_together(tmp_path, monkeypatch):
 
     selected, plan = loop._select_scan_queries(cfg, "world cup", scan_sequence=1)
 
-    assert selected == ["bitcoin", "xrp", "solana"]
+    assert selected == ["world cup", "sports", "politics"]
     assert plan["scan_sequence"] == 1
-    assert plan["adaptive_priority"]["priority_queries"][:3] == ["bitcoin", "xrp", "solana"]
+    assert plan["adaptive_priority"]["priority_queries"] == []
+    assert plan["primary_hypothesis_coverage"]["status"] == "ok"
 
 
-def test_batch_mode_targets_updown_queries_for_positive_updown_cohorts(tmp_path, monkeypatch):
+def test_batch_mode_hard_excludes_updown_queries_even_with_positive_historical_cohorts(tmp_path, monkeypatch):
     loop = _load_loop_module()
     monkeypatch.delenv("POLYMARKET_SCAN_QUERY_MODE", raising=False)
     monkeypatch.delenv("POLYMARKET_MAX_SCAN_QUERIES", raising=False)
@@ -260,8 +261,14 @@ def test_batch_mode_targets_updown_queries_for_positive_updown_cohorts(tmp_path,
 
     selected, plan = loop._select_scan_queries(cfg, "world cup", scan_sequence=1)
 
-    assert selected == ["btc updown", "xrp updown", "solana updown"]
-    assert plan["adaptive_priority"]["priority_queries"][:3] == ["btc updown", "xrp updown", "solana updown"]
+    assert selected == ["world cup", "sports", "politics"]
+    assert plan["adaptive_priority"]["priority_queries"] == []
+    assert plan["frozen_updown"]["selected_count"] == 0
+    assert {row["query"] for row in plan["frozen_updown"]["excluded_queries"]} == {
+        "btc updown",
+        "xrp updown",
+        "solana updown",
+    }
 
 
 def test_blank_environment_overrides_do_not_disable_live_batch_mode(tmp_path, monkeypatch):
@@ -307,8 +314,8 @@ def test_blank_environment_overrides_do_not_disable_live_batch_mode(tmp_path, mo
     assert plan["mode"] == "batch"
     assert plan["max_queries_per_cycle"] == 2
     assert plan["adaptive_priority"]["enabled"] is True
-    assert selected[0] == "bitcoin"
-    assert len(selected) == 2
+    assert selected == ["world cup", "sports"]
+    assert plan["primary_hypothesis_coverage"]["status"] == "starved"
 
 
 def test_research_focus_feedback_queries_priority_and_suppression(tmp_path, monkeypatch):
@@ -348,9 +355,10 @@ def test_research_focus_feedback_queries_priority_and_suppression(tmp_path, monk
 
     selected, plan = loop._select_scan_queries(cfg, "world cup", scan_sequence=1)
 
-    assert selected == ["tennis", "world cup", "bitcoin"]
+    assert selected == ["world cup", "sports", "politics"]
     assert plan["adaptive_priority"]["research_focus_queries"] == ["tennis"]
     assert plan["adaptive_priority"]["suppressed_queries"] == ["bitcoin"]
+    assert plan["primary_hypothesis_coverage"]["status"] == "ok"
 
 
 def test_validation_gap_research_queries_are_injected_and_prioritised(tmp_path, monkeypatch):
@@ -391,12 +399,13 @@ def test_validation_gap_research_queries_are_injected_and_prioritised(tmp_path, 
 
     selected, plan = loop._select_scan_queries(cfg, "world cup", scan_sequence=1)
 
-    assert selected == ["fed", "ethereum", "esports"]
+    assert selected == ["world cup", "sports", "politics"]
     assert plan["configured_queries"] == ["world cup", "ethereum", "bitcoin"]
     assert plan["injected_research_focus_queries"] == ["fed", "esports"]
     assert plan["adaptive_priority"]["research_focus_queries"] == ["fed", "ethereum", "esports"]
     assert plan["adaptive_priority"]["research_focus_validation_gap_needs_collection"] is True
     assert plan["adaptive_priority"]["top_cohorts"][0]["validation_gap_needs_collection"] is True
+    assert plan["primary_hypothesis_coverage"]["status"] == "ok"
 
 
 def test_quarantined_5m_crypto_cohorts_do_not_drive_scan_priority(tmp_path, monkeypatch):
@@ -502,13 +511,13 @@ def test_feedback_broaden_state_reserves_exploration_slot_in_batch_scan(tmp_path
 
     selected, plan = loop._select_scan_queries(cfg, "world cup", scan_sequence=1)
 
-    assert set(selected[:2]) == {"btc updown", "solana updown"}
-    assert selected[2] == "world cup"
+    assert selected == ["world cup", "sports", "politics"]
+    assert plan["frozen_updown"]["selected_count"] == 0
     assert plan["adaptive_priority"]["feedback_learning_state"] == "suppress_negative_price_action_and_broaden"
     assert plan["adaptive_priority"]["feedback_broaden_queries"][:2] == ["world cup", "tennis"]
 
 
-def test_broad_repricing_reserve_keeps_cross_event_scan_slot(tmp_path, monkeypatch):
+def test_legacy_broad_repricing_setting_cannot_displace_primary_hypothesis_reserve(tmp_path, monkeypatch):
     loop = _load_loop_module()
     monkeypatch.delenv("POLYMARKET_SCAN_QUERY_MODE", raising=False)
     monkeypatch.delenv("POLYMARKET_MAX_SCAN_QUERIES", raising=False)
@@ -559,11 +568,10 @@ def test_broad_repricing_reserve_keeps_cross_event_scan_slot(tmp_path, monkeypat
 
     selected, plan = loop._select_scan_queries(cfg, "world cup", scan_sequence=1)
 
-    assert set(selected[:2]) == {"btc updown", "solana updown"}
-    assert selected[2] == "fed"
+    assert selected == ["world cup", "sports", "politics"]
     assert plan["injected_broad_repricing_queries"] == ["fed", "tennis"]
-    assert plan["broad_repricing_reserved_queries"] == ["fed"]
-    assert plan["broad_repricing_reserve_enabled"] is True
+    assert "broad_repricing_reserved_queries" not in plan
+    assert plan["primary_hypothesis_coverage"]["status"] == "ok"
 
 
 def test_research_focus_reserve_keeps_current_collection_targets_in_batch_scan(tmp_path, monkeypatch):
@@ -647,23 +655,23 @@ def test_research_focus_reserve_keeps_current_collection_targets_in_batch_scan(t
     selected, plan = loop._select_scan_queries(cfg, "world cup", scan_sequence=1)
 
     assert set(selected) == {
-        "solana updown",
         "ethereum",
         "bitcoin",
         "world cup",
         "fed",
         "tennis",
         "nba",
-        "mlb",
+        "sports",
+        "politics",
     }
     assert len(selected) == 8
     assert plan["research_focus_reserved_queries"] == ["nba", "mlb"]
     assert plan["research_focus_reserve_enabled"] is True
-    assert "btc updown" not in selected
-    assert "xrp updown" not in selected
+    assert not any(loop._is_updown_query(query) for query in selected)
+    assert plan["primary_hypothesis_coverage"]["status"] == "ok"
 
 
-def test_research_focus_rotates_guarded_updown_evidence_slot(tmp_path, monkeypatch):
+def test_research_focus_cannot_restore_frozen_updown_rotation(tmp_path, monkeypatch):
     loop = _load_loop_module()
     monkeypatch.delenv("POLYMARKET_SCAN_QUERY_MODE", raising=False)
     monkeypatch.delenv("POLYMARKET_MAX_SCAN_QUERIES", raising=False)
@@ -729,15 +737,15 @@ def test_research_focus_rotates_guarded_updown_evidence_slot(tmp_path, monkeypat
 
     selected, plan = loop._select_scan_queries(cfg, "world cup", scan_sequence=3)
 
-    assert [query for query in selected if loop._is_updown_query(query)] == ["solana updown"]
-    assert "btc updown" not in selected
-    assert "xrp updown" not in selected
-    assert "eth updown" not in selected
+    assert selected[:3] == ["nba", "sports", "fed"]
+    assert not any(loop._is_updown_query(query) for query in selected)
     assert "solana updown" in plan["injected_research_focus_queries"]
-    assert plan["adaptive_priority"]["evidence_updown_queries"] == [
+    assert {row["query"] for row in plan["frozen_updown"]["excluded_queries"]} >= {
         "btc updown",
         "xrp updown",
         "solana updown",
         "eth updown",
-    ]
-    assert plan["evidence_updown_rotated_queries"] == ["solana updown"]
+    }
+    assert "evidence_updown_queries" not in plan["adaptive_priority"]
+    assert "evidence_updown_rotated_queries" not in plan
+    assert plan["primary_hypothesis_coverage"]["status"] == "ok"

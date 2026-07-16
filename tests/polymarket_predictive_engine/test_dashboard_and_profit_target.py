@@ -1365,7 +1365,11 @@ def test_dashboard_emits_decision_useful_summary_for_missing_fresh_candidate(tmp
     assert "Decision evidence drill-down" in html
     assert summary["trade_decision"] == "COLLECT FRESH CANDIDATE"
     assert "fresh open market row" in summary["primary_blocker"]
-    assert summary["collect_now"] == ["btc updown", "solana updown"]
+    assert summary["collect_now"] == ["world cup", "sports", "politics"]
+    assert [row["query"] for row in summary["frozen_updown_collection_queries_excluded"]] == [
+        "btc updown",
+        "solana updown",
+    ]
     assert summary["decision_cards"][0]["label"] == "Can paper trade now?"
     assert summary["decision_cards"][0]["value"].startswith("No - COLLECT FRESH CANDIDATE")
     assert any(row["question"] == "What unlocks the next trade?" for row in summary["decision_questions"])
@@ -1444,9 +1448,10 @@ def test_dashboard_collect_now_prefers_research_focus_queue_over_raw_missing_que
     data = read_json(result["dashboard_data"])
     summary = data["decision_useful_summary"]
     assert summary["trade_decision"] == "COLLECT FRESH CANDIDATE"
-    assert summary["collect_now"] == ["solana updown", "esports", "economy"]
-    assert summary["decision_questions"][2]["answer"] == "solana updown, esports, economy"
-    assert summary["state_badges"][-1]["label"] == "collect: solana updown, esports, economy"
+    assert summary["collect_now"] == ["esports", "economy"]
+    assert summary["decision_questions"][2]["answer"] == "esports, economy"
+    assert summary["state_badges"][-1]["label"] == "collect: esports, economy"
+    assert [row["query"] for row in summary["frozen_updown_collection_queries_excluded"]] == ["solana updown"]
 
 
 def test_dashboard_reports_blocked_candidates_when_fresh_targets_exist(tmp_path):

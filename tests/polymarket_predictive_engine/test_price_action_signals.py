@@ -839,7 +839,7 @@ def test_paper_confirmation_current_candidate_requires_positive_historical_analo
     assert float(signals[0]["max_stake_usdc"]) == 1.0
 
 
-def test_paper_confirmation_current_candidate_filters_closed_updown_slug(tmp_path):
+def test_paper_confirmation_current_candidate_filters_frozen_updown_and_closed_rows(tmp_path):
     cfg = _cfg(tmp_path)
     cfg.raw["price_action_microstructure"] = {
         "enabled": True,
@@ -957,8 +957,8 @@ def test_paper_confirmation_current_candidate_filters_closed_updown_slug(tmp_pat
     assert summary["signals"] == 1
     assert summary["paper_confirmation_current_candidates"] == 1
     assert analogue["fresh_matches"] == 1
-    assert analogue["stale_current_rows_filtered"] == 2
-    assert summary["current_historical_analogue_scan"]["stale_current_rows_filtered"] == 2
+    assert analogue["stale_current_rows_filtered"] == 1
+    assert summary["current_historical_analogue_scan"]["stale_current_rows_filtered"] == 1
     assert signals[0]["market_slug"] == "bitcoin-above-open-test"
     assert signals[0]["token_id"] == "open-btc-token"
 
@@ -1826,7 +1826,7 @@ def test_paper_confirmation_rejection_preserves_side_agnostic_analogue_context(t
     assert "side_missing_positive_historical_analogue_shadow_only" in rejections[0]["rejection_reason"]
 
 
-def test_eth_updown_confirmation_query_matches_current_eth_rows_by_outcome(tmp_path):
+def test_eth_updown_confirmation_query_cannot_restore_frozen_current_rows(tmp_path):
     cfg = _cfg(tmp_path)
     cfg.raw["price_action_microstructure"] = {
         "enabled": True,
@@ -1949,15 +1949,12 @@ def test_eth_updown_confirmation_query_matches_current_eth_rows_by_outcome(tmp_p
     summary = build_price_action_paper_signals(cfg)
     signals = read_csv_rows(root / "price_action_paper_signals.csv")
 
-    assert summary["signals"] == 1
-    assert summary["paper_confirmation_current_historical_analogue"]["fresh_matches"] == 1
-    assert signals[0]["market_slug"] == "eth-updown-15m-4102444800"
-    assert signals[0]["outcome"] == "Up"
-    assert signals[0]["token_id"] == "eth-up-token"
-    assert "outcome=up" in signals[0]["signal_cohort"]
+    assert summary["signals"] == 0
+    assert summary["paper_confirmation_current_historical_analogue"]["fresh_matches"] == 0
+    assert signals == []
 
 
-def test_paper_confirmation_current_candidate_uses_fast_updown_snapshot_when_websocket_latest_is_absent(tmp_path):
+def test_paper_confirmation_current_candidate_does_not_consume_fast_updown_snapshot(tmp_path):
     cfg = _cfg(tmp_path)
     cfg.raw["price_action_paper"].update(
         {
@@ -2047,16 +2044,13 @@ def test_paper_confirmation_current_candidate_uses_fast_updown_snapshot_when_web
     signals = read_csv_rows(root / "price_action_paper_signals.csv")
     analogue = summary["paper_confirmation_current_historical_analogue"]
 
-    assert summary["signals"] == 1
-    assert summary["paper_confirmation_signals"] == 1
-    assert analogue["fresh_matches"] == 1
-    assert analogue["selected"] == 1
-    assert analogue["current_quote_sources"] == {"fast_updown_snapshot": 1}
-    assert summary["current_historical_analogue_scan"]["current_quote_sources"] == {"fast_updown_snapshot": 1}
-    assert signals[0]["market_slug"] == "sol-updown-15m-4102444800"
-    assert signals[0]["outcome"] == "Up"
-    assert signals[0]["token_id"] == "sol-up-token"
-    assert "crypto_sol_updown_15m" in signals[0]["signal_cohort"]
+    assert summary["signals"] == 0
+    assert summary["paper_confirmation_signals"] == 0
+    assert analogue["fresh_matches"] == 0
+    assert analogue["selected"] == 0
+    assert analogue["current_quote_sources"] == {}
+    assert summary["current_historical_analogue_scan"]["current_quote_sources"] == {}
+    assert signals == []
 
 
 def test_paper_confirmation_rejects_mutually_exclusive_same_market_probe(tmp_path):

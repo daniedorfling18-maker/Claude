@@ -572,10 +572,11 @@ def test_websocket_reserves_feedback_broaden_targets_when_price_action_negative(
     targets = websocket_collector._liquidity_target_rows(cfg, cfg.raw["websocket_market_data"])
     token_ids = {row["token_id"] for row in targets}
 
-    assert len(targets) == 4
+    assert len(targets) == 3
     assert "worldcup-token" in token_ids
     assert "tennis-token" in token_ids
     assert sum(1 for row in targets if row.get("feedback_broaden_target") is True) == 2
+    assert not any("updown" in str(row.get("family") or "") for row in targets)
 
 
 def test_websocket_reserves_paper_confirmation_targets_from_price_action_feedback(tmp_path):
@@ -617,7 +618,9 @@ def test_websocket_reserves_paper_confirmation_targets_from_price_action_feedbac
             },
             {
                 "token_id": "btc-token",
-                "family": "crypto_btc_updown_daily",
+                "family": "crypto_btc_special",
+                "market_slug": "will-bitcoin-reach-100000",
+                "question": "Will Bitcoin reach 100000?",
                 "tradable_liquidity_candidate": "true",
                 "liquidity": "800",
                 "spread": "0.02",
@@ -625,7 +628,9 @@ def test_websocket_reserves_paper_confirmation_targets_from_price_action_feedbac
             },
             {
                 "token_id": "sol-token",
-                "family": "crypto_sol_updown_daily",
+                "family": "crypto_sol_special",
+                "market_slug": "will-solana-reach-400",
+                "question": "Will Solana reach 400?",
                 "tradable_liquidity_candidate": "true",
                 "liquidity": "700",
                 "spread": "0.02",
@@ -642,7 +647,7 @@ def test_websocket_reserves_paper_confirmation_targets_from_price_action_feedbac
     assert sum(1 for row in targets if row.get("feedback_broaden_target") is True) == 2
 
 
-def test_websocket_prefers_updown_rows_for_updown_feedback_queries(tmp_path):
+def test_websocket_freezes_updown_rows_and_uses_only_active_feedback_queries(tmp_path):
     import yaml
 
     cfg_path = make_cfg(tmp_path)
@@ -727,11 +732,12 @@ def test_websocket_prefers_updown_rows_for_updown_feedback_queries(tmp_path):
     feedback_targets = [row for row in targets if row.get("feedback_broaden_target") is True]
     token_ids = {row["token_id"] for row in feedback_targets}
 
-    assert token_ids == {"btc-updown-token", "sol-updown-token"}
-    assert {row.get("feedback_broaden_query") for row in feedback_targets} == {"btc updown", "solana updown"}
+    assert token_ids == {"btc-special-token"}
+    assert {row.get("feedback_broaden_query") for row in feedback_targets} == {"bitcoin"}
+    assert {"btc-updown-token", "sol-updown-token"}.isdisjoint({row["token_id"] for row in targets})
 
 
-def test_websocket_reserves_paper_proof_blocker_updown_target_from_research_focus(tmp_path):
+def test_websocket_does_not_reserve_frozen_updown_proof_targets(tmp_path):
     import yaml
 
     cfg_path = make_cfg(tmp_path)
@@ -816,9 +822,9 @@ def test_websocket_reserves_paper_proof_blocker_updown_target_from_research_focu
     targets = websocket_collector._liquidity_target_rows(cfg, cfg.raw["websocket_market_data"])
     feedback_targets = [row for row in targets if row.get("feedback_broaden_target") is True]
 
-    assert [row["token_id"] for row in feedback_targets] == ["sol-updown-token"]
-    assert feedback_targets[0]["feedback_broaden_query"] == "solana updown"
-    assert "sol-updown-token" in {row["token_id"] for row in targets}
+    assert feedback_targets == []
+    assert {"btc-updown-token", "sol-updown-token"}.isdisjoint({row["token_id"] for row in targets})
+    assert {row["token_id"] for row in targets} == {"sol-special-token", "macro-token"}
 
 
 def test_websocket_reserves_validation_gap_targets_from_research_focus(tmp_path):
@@ -1059,7 +1065,7 @@ def test_websocket_reserves_current_positive_analogue_tokens(tmp_path):
     assert analogue_targets[0]["websocket_target_reason"] == "reserve_current_positive_analogue_for_forward_bid_tracking"
 
 
-def test_websocket_reserves_historical_breadth_learning_targets(tmp_path):
+def test_websocket_does_not_reserve_frozen_updown_historical_breadth_targets(tmp_path):
     import yaml
 
     cfg_path = make_cfg(tmp_path)
@@ -1133,18 +1139,12 @@ def test_websocket_reserves_historical_breadth_learning_targets(tmp_path):
     targets = websocket_collector._liquidity_target_rows(cfg, cfg.raw["websocket_market_data"])
     breadth_targets = [row for row in targets if row.get("historical_breadth_target") is True]
 
-    assert {row["token_id"] for row in breadth_targets} == {"btc-breadth-token", "sol-breadth-token"}
-    assert {row["historical_breadth_query"] for row in breadth_targets} == {"btc updown", "solana updown"}
-    assert {row["websocket_target_reason"] for row in breadth_targets} == {
-        "reserve_historical_breadth_for_forward_bid_tracking",
-    }
-    assert websocket_collector._historical_breadth_counts(targets) == {
-        "crypto_btc_updown_event": 1,
-        "crypto_sol_updown_daily": 1,
-    }
+    assert breadth_targets == []
+    assert [row["token_id"] for row in targets] == ["generic-token"]
+    assert websocket_collector._historical_breadth_counts(targets) == {}
 
 
-def test_websocket_reserves_in_band_paper_confirmation_blocker_tokens(tmp_path):
+def test_websocket_does_not_reserve_in_band_frozen_updown_blocker_tokens(tmp_path):
     import yaml
 
     cfg_path = make_cfg(tmp_path)
@@ -1237,13 +1237,10 @@ def test_websocket_reserves_in_band_paper_confirmation_blocker_tokens(tmp_path):
     token_ids = [row["token_id"] for row in targets]
     proof_targets = [row for row in targets if row.get("paper_confirmation_blocker_target") is True]
 
-    assert token_ids[0] == "proof-direct-in-band-token"
+    assert token_ids == ["fallback-token"]
     assert "proof-entry-band-wait-token" not in token_ids
-    assert len(proof_targets) == 1
-    assert proof_targets[0]["paper_confirmation_blocker_gate"] == "no_positive_historical_analogue_examples"
-    assert proof_targets[0]["paper_confirmation_blocker_query"] == "btc updown"
-    assert proof_targets[0]["websocket_target_match_source"] == "direct_token"
-    assert proof_targets[0]["websocket_target_reason"] == "reserve_paper_confirmation_blocker_for_forward_bid_tracking"
+    assert "proof-direct-in-band-token" not in token_ids
+    assert proof_targets == []
 
 
 def test_websocket_resolves_paper_confirmation_blocker_tokens_from_predictions(tmp_path):

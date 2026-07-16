@@ -353,8 +353,9 @@ async function load() {
     const selectedQueries = currentScan.scan_plan?.selected_queries || lastScan.scan_plan?.selected_queries || scanner.scan?.scan_plan?.selected_queries || scanner.scan?.queries || [];
     const injectedQueries = currentScan.scan_plan?.injected_research_focus_queries || lastScan.scan_plan?.injected_research_focus_queries || scanner.scan?.scan_plan?.injected_research_focus_queries || [];
     const activeDiscoveryQueries = values => (Array.isArray(values) ? values : []).filter(value => {
-      const normalized = String(value || "").toLowerCase().replace(/[_\/-]+/g, " ");
-      return !/\bup\s*(?:or\s+)?down\b/.test(normalized);
+      const normalized = String(value || "").toLowerCase().split("_").join(" ").split("/").join(" ").split("-").join(" ");
+      const compact = normalized.split(" ").join("");
+      return !compact.includes("updown") && !compact.includes("upordown");
     });
     const adaptiveQueries = activeDiscoveryQueries(data.research_focus?.collection_queries || data.liquidity_discovery?.settings?.adaptive_collection_queries || priceActionFeedback.collection_queries || priceActionGoal.collection_queries || validationGap.collection_queries || []);
     const displayedQueries = selectedQueries.length ? selectedQueries : adaptiveQueries;
@@ -4415,7 +4416,7 @@ def _decision_useful_summary(
     )
     active_collect_now, frozen_collect_exclusions = partition_active_queries(proposed_collect_now)
     if not active_collect_now:
-        active_collect_now = list(primary_hypothesis_targets(cfg.raw, scan_sequence=1).values())
+        active_collect_now = list(primary_hypothesis_targets({}, scan_sequence=1).values())
     collect_now = _compact_list(active_collect_now, limit=6)
 
     target_monthly = safe_float(actual_target.get("target_monthly_profit_usdc")) or safe_float(

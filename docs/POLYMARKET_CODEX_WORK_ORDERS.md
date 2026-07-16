@@ -3796,7 +3796,7 @@ Tier-0 coverage leaves `decision_policy.sizing.binding_capital_usd == 0`.
 
 ## WO-94 — Category- and price-aware taker fees in scoring and paper fills
 
-Status: IN IMPLEMENTATION by Codex on 2026-07-16.
+Status: IMPLEMENTED by Codex on 2026-07-16; pending PR review and merge.
 
 Owner authorization: the 2026-07-16 instruction to implement category/price-
 aware taker fees in signal scoring and paper fills. This is a prospective,
@@ -3828,6 +3828,14 @@ funding, live-execution, gate-loosening, or promotion path.
    tests cover the symmetric price curve, category/family classification,
    malformed fail-safe behavior, fee-disabled markets, five-decimal rounding,
    budget-safe sizing, one-time signal deduction, and paper-fill audit fields.
+
+Verification: the isolated VPS container passed Ruff, both effective-config
+checks, all 107 focused fee/scoring/broker tests, and all 166 tests in the
+required PR gate. The full suite passed 1,267 tests. Its apparent restore-test
+failure was specific to the linked-worktree harness and passed independently
+from a normal clone of the same commit. The only remaining full-suite failures
+are the two pre-existing date-dependent runtime-lock tests, outside this WO and
+reserved for the owner-authorized full-suite/merge-gate correction.
 
 Producer/coverage contract: Gamma discovery produces fee enablement/category
 for every scanner token; the raw-snapshot/features/prediction chain preserves

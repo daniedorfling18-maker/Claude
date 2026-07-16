@@ -3744,8 +3744,7 @@ pre-target scoreboard gap without authorising or placing an order.
 
 ## WO-93 — Bind WO-50 funding to exact sharp-qualified H1 and Tier-0 evidence
 
-Status: IMPLEMENTED by Codex on 2026-07-16 on branch
-`agent/wo-93-h1-tier0-funding` (PR number is recorded when published).
+Status: IMPLEMENTED by Codex on 2026-07-16 in PR #236.
 
 Owner authorization: the 2026-07-16 instruction to bind WO-50 funding to
 sharp-qualified H1 and Tier-0 evidence. This is a tighten-only correction to

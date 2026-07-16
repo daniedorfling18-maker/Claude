@@ -4,6 +4,8 @@ from collections import Counter
 import re
 from typing import Any
 
+from polymarket_common.fees import resolve_taker_fee_schedule, taker_fee_per_share
+
 from .config import EngineConfig, load_config
 from .execution_costs import estimate_execution_cost
 from .models.calibration_v2 import joined_feature_label_rows
@@ -260,12 +262,27 @@ def generate_signals(
         alpha_edge = safe_float(prediction.get(edge_field))
         raw_edge = safe_float(prediction.get("edge"))
         gross_edge = alpha_edge if alpha_edge is not None else raw_edge
+        executable_price = safe_float(prediction.get("executable_price"))
+        fee_schedule = resolve_taker_fee_schedule(prediction)
+        fee_per_share = (
+            taker_fee_per_share(price=executable_price, schedule=fee_schedule)
+            if executable_price is not None and 0 < executable_price < 1
+            else 0.0
+        )
+        fee_already_in_edge = boolish(prediction.get("taker_fee_in_edge"))
+        edge_after_taker_fee = (
+            None
+            if gross_edge is None
+            else gross_edge
+            if fee_already_in_edge
+            else gross_edge - fee_per_share
+        )
         estimated_slippage = _estimated_slippage(
             default_slippage,
             prediction,
             stake_usdc=safe_float(prediction.get("max_stake_usdc")) or probationary_default_max_stake,
         )
-        edge = None if gross_edge is None else gross_edge - estimated_slippage
+        edge = None if edge_after_taker_fee is None else edge_after_taker_fee - estimated_slippage
         alpha_probability = safe_float(prediction.get("alpha_probability"))
         confidence = (
             max(0.0, min(1.0, 2.0 * abs(alpha_probability - 0.5)))
@@ -290,9 +307,17 @@ def generate_signals(
             "calibrated_probability": prediction.get("calibrated_probability", ""),
             "uncertainty_low": prediction.get("uncertainty_low", ""),
             "uncertainty_high": prediction.get("uncertainty_high", ""),
-            "gross_edge_before_slippage": 0.0 if gross_edge is None else gross_edge,
+            "gross_edge_before_taker_fee_and_slippage": 0.0 if gross_edge is None else gross_edge,
+            "edge_after_taker_fee_before_slippage": 0.0 if edge_after_taker_fee is None else edge_after_taker_fee,
+            "gross_edge_before_slippage": 0.0 if edge_after_taker_fee is None else edge_after_taker_fee,
             "edge": 0.0 if edge is None else edge,
             "expected_value_per_share": 0.0 if edge is None else edge,
+            "taker_fee_in_edge": True,
+            **(
+                fee_schedule.audit_fields(price=executable_price)
+                if executable_price is not None and 0 < executable_price < 1
+                else fee_schedule.audit_fields()
+            ),
             "liquidity": prediction.get("liquidity", ""),
             "spread": prediction.get("spread", ""),
             "best_bid": prediction.get("best_bid", ""),
@@ -492,5 +517,3 @@ def generate_signals(
 
 def main(config_path: str) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     return generate_signals(load_config(config_path))
-
-

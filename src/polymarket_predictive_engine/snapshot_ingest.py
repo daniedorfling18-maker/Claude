@@ -13,6 +13,9 @@ from .utils import now_utc, read_csv_rows, safe_float, write_csv, write_json
 
 
 def _infer_snapshot_category(row: dict[str, Any]) -> str:
+    explicit = str(row.get("category") or "").strip()
+    if explicit and explicit.lower() not in {"unknown", "uncategorised", "uncategorized"}:
+        return explicit
     text = " ".join(
         str(row.get(key) or "")
         for key in ("event_slug", "event_title", "market_slug", "question", "outcome")
@@ -80,6 +83,11 @@ def ingest_scanner_snapshot(
             "ask_size": ask_size,
             "liquidity": bid_size + ask_size,
             "close_time": row.get("close_time", ""),
+            "fees_enabled": row.get("fees_enabled", row.get("feesEnabled", "")),
+            "fee_type": row.get("fee_type", row.get("feeType", "")),
+            "fee_schedule_rate": row.get("fee_schedule_rate", ""),
+            "fee_schedule_exponent": row.get("fee_schedule_exponent", ""),
+            "fee_schedule_taker_only": row.get("fee_schedule_taker_only", ""),
             "source": "polymarket_mispricing_bot",
             "_raw_row_json": json.dumps(row, sort_keys=True),
         }

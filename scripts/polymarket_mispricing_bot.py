@@ -112,6 +112,9 @@ class OutcomeToken:
     gamma_price: float | None
     tick_size: str
     neg_risk: bool
+    category: str
+    fees_enabled: bool | None
+    fee_type: str
 
 
 @dataclass(frozen=True)
@@ -426,6 +429,16 @@ def extract_tokens(events: list[dict[str, Any]]) -> list[OutcomeToken]:
                 or "0.01"
             )
             neg_risk = parse_bool(market.get("neg_risk") or market.get("negRisk"), default=False)
+            category = str(market.get("category") or event.get("category") or "").strip()
+            fees_enabled_raw = (
+                market.get("feesEnabled")
+                if "feesEnabled" in market
+                else market.get("fees_enabled")
+                if "fees_enabled" in market
+                else None
+            )
+            fees_enabled = None if fees_enabled_raw is None else parse_bool(fees_enabled_raw)
+            fee_type = str(market.get("feeType") or market.get("fee_type") or "").strip()
 
             if len(token_ids) != len(outcomes):
                 continue
@@ -447,6 +460,9 @@ def extract_tokens(events: list[dict[str, Any]]) -> list[OutcomeToken]:
                         gamma_price=gamma_price,
                         tick_size=tick_size,
                         neg_risk=neg_risk,
+                        category=category,
+                        fees_enabled=fees_enabled,
+                        fee_type=fee_type,
                     )
                 )
 
@@ -662,6 +678,9 @@ def token_snapshot_row(token: OutcomeToken, book: Book | None, fair: float | Non
         "ask_size": "" if book is None else f"{book.ask_size:.6f}",
         "tick_size": token.tick_size if book is None else book.tick_size,
         "neg_risk": token.neg_risk if book is None else book.neg_risk,
+        "category": token.category,
+        "fees_enabled": "" if token.fees_enabled is None else token.fees_enabled,
+        "fee_type": token.fee_type,
     }
 
 
@@ -716,6 +735,9 @@ def run_once(config: BotConfig, live_executor: LiveExecutor | None = None) -> tu
             "ask_size",
             "tick_size",
             "neg_risk",
+            "category",
+            "fees_enabled",
+            "fee_type",
         ],
     )
     write_csv(

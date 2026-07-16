@@ -1,22 +1,12 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Mapping
 
-CATEGORY_TAKER_FEE_RATES: Mapping[str, float] = {
-    "crypto": 0.07,
-    "sports": 0.03,
-    "finance": 0.04,
-    "politics": 0.04,
-    "economics": 0.05,
-    "culture": 0.05,
-    "weather": 0.05,
-    "other": 0.05,
-    "general": 0.05,
-    "mentions": 0.04,
-    "tech": 0.04,
-    "geopolitics": 0.0,
-}
+from polymarket_common.fees import (
+    CATEGORY_TAKER_FEE_RATES,
+    polymarket_taker_fee_usdc,
+    taker_fee_rate_for_category,
+)
 
 
 @dataclass(frozen=True)
@@ -39,37 +29,6 @@ class PolymarketFlatStakeTrade:
     def expected_pnl(self, model_probability: float) -> float:
         probability = _validate_probability(model_probability, name="model_probability")
         return probability * self.win_net_pnl_usdc + (1.0 - probability) * self.lose_net_pnl_usdc
-
-
-def taker_fee_rate_for_category(category: str) -> float:
-    """Return the current documented Polymarket taker fee rate for a category."""
-
-    key = str(category or "other").strip().lower().replace(" / ", "_").replace(" ", "_")
-    if key in {"other_general", "other__general"}:
-        key = "other"
-    return float(CATEGORY_TAKER_FEE_RATES.get(key, CATEGORY_TAKER_FEE_RATES["other"]))
-
-
-def polymarket_taker_fee_usdc(
-    *,
-    shares: float,
-    price: float,
-    taker_fee_rate: float,
-    fees_enabled: bool = True,
-) -> float:
-    """Calculate the Polymarket taker fee in USDC.
-
-    Formula: fee = shares * taker_fee_rate * price * (1 - price).
-    Polymarket rounds fees to 5 decimal places, and values that round to zero
-    are treated as zero.
-    """
-
-    share_count = _validate_non_negative(shares, name="shares")
-    share_price = _validate_probability(price, name="price")
-    fee_rate = _validate_non_negative(taker_fee_rate, name="taker_fee_rate")
-    if not fees_enabled or share_count == 0.0 or fee_rate == 0.0:
-        return 0.0
-    return round(share_count * fee_rate * share_price * (1.0 - share_price), 5)
 
 
 def build_flat_stake_yes_trade(

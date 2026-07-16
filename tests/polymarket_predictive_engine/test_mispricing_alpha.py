@@ -137,6 +137,87 @@ def test_alpha_bias_model_creates_conservative_edge_lower_bound(tmp_path):
     assert scored[0]["alpha_trade_candidate"] is True
 
 
+def test_alpha_edge_and_strategy_priority_charge_taker_fee_once(tmp_path):
+    cfg = _config(tmp_path)
+    _write_training_set(cfg)
+    train_mispricing_alpha_model(cfg)
+    cfg.raw["costs"]["slippage"] = 0.0
+    cfg.raw["mispricing_alpha"]["require_same_category_labels_for_trading"] = False
+    cfg.raw["cohort_promotion"]["require_positive_forward_pnl"] = False
+    prediction_path = cfg.output_root / "polymarket_predictions" / "predictions.csv"
+
+    scored = apply_mispricing_alpha(
+        cfg,
+        [
+            {
+                "market_id": "fee-market",
+                "market_slug": "tennis-fee-market",
+                "question": "Will Player One win?",
+                "token_id": "fee-token",
+                "prediction_timestamp": "2026-02-01T00:00:00Z",
+                "category": "synthetic",
+                "market_midpoint": "0.5",
+                "raw_probability": "0.5",
+                "calibrated_probability": "0.5",
+                "model_probability": "0.5",
+                "executable_price": "0.5",
+                "spread": "0.01",
+                "liquidity": "1000",
+                "time_to_close_hours": "24",
+                "confidence": "1",
+                **_book("0.50"),
+            }
+        ],
+        output_path=str(prediction_path),
+    )
+
+    assert scored[0]["taker_fee_rate"] == 0.05
+    assert scored[0]["taker_fee_per_share"] == pytest.approx(0.0125)
+    assert float(scored[0]["edge_lower_bound_before_taker_fee"]) - float(scored[0]["edge_lower_bound"]) == pytest.approx(
+        0.0125
+    )
+    approved, rejected = generate_signals(
+        cfg,
+        readiness={"approved_for_paper_trading": True, "blockers": []},
+    )
+    assert rejected == []
+    assert len(approved) == 1
+    assert float(approved[0]["edge"]) == pytest.approx(float(scored[0]["edge_lower_bound"]))
+    assert float(approved[0]["taker_fee_per_share"]) == pytest.approx(0.0125)
+
+
+def test_alpha_explicit_fee_free_market_does_not_invent_taker_cost(tmp_path):
+    cfg = _config(tmp_path)
+    _write_training_set(cfg)
+    train_mispricing_alpha_model(cfg)
+
+    scored = apply_mispricing_alpha(
+        cfg,
+        [
+            {
+                "market_id": "fee-free-market",
+                "token_id": "fee-free-token",
+                "prediction_timestamp": "2026-02-01T00:00:00Z",
+                "category": "crypto",
+                "fees_enabled": False,
+                "market_midpoint": "0.5",
+                "raw_probability": "0.5",
+                "calibrated_probability": "0.5",
+                "model_probability": "0.5",
+                "executable_price": "0.5",
+                "spread": "0.01",
+                "liquidity": "1000",
+                "time_to_close_hours": "24",
+                "confidence": "1",
+            }
+        ],
+    )
+
+    assert scored[0]["taker_fee_rate"] == 0
+    assert scored[0]["taker_fee_source"] == "explicit_fees_disabled"
+    assert scored[0]["edge_lower_bound"] == pytest.approx(scored[0]["edge_lower_bound_before_taker_fee"])
+
+
 def test_alpha_scoring_penalises_shallow_execution_depth(tmp_path):
     cfg = _config(tmp_path)
     cfg.raw["mispricing_alpha"]["model_residual_shrinkage"] = 1.0
@@ -294,9 +375,9 @@ def test_near_miss_learning_lane_records_liquid_uncertain_edge(tmp_path):
                 "prediction_timestamp": "2026-02-01T00:00:00Z",
                 "category": "crypto",
                 "market_midpoint": "0.50",
-                "raw_probability": "0.56",
-                "calibrated_probability": "0.56",
-                "model_probability": "0.56",
+                "raw_probability": "0.58",
+                "calibrated_probability": "0.58",
+                "model_probability": "0.58",
                 "executable_price": "0.50",
                 "spread": "0.01",
                 "liquidity": "1000",
@@ -434,8 +515,9 @@ def test_alpha_uses_capped_fundamental_probability_overlay(tmp_path):
     assert float(scored[0]["fundamental_probability"]) == 0.70
     assert float(scored[0]["fundamental_adjustment"]) == 0.04
     assert float(scored[0]["alpha_probability"]) == 0.44
-    assert float(scored[0]["edge_lower_bound"]) > 0.03
-    assert scored[0]["alpha_trade_candidate"] is True
+    assert float(scored[0]["edge_lower_bound_before_taker_fee"]) > 0.03
+    assert float(scored[0]["edge_lower_bound"]) == pytest.approx(0.028)
+    assert scored[0]["alpha_trade_candidate"] is False
 
 
 def test_sharp_anchor_non_worldcup_market_can_feed_shadow_evidence(tmp_path):
@@ -621,7 +703,7 @@ def test_alpha_uses_crypto_updown_contract_model_overlay(tmp_path, monkeypatch):
     assert scored[0]["crypto_model_status"] == "scored"
     assert float(scored[0]["crypto_model_adjustment"]) == 0.2
     assert round(float(scored[0]["alpha_probability"]), 6) == 0.6
-    assert float(scored[0]["edge_lower_bound"]) > 0.19
+    assert float(scored[0]["edge_lower_bound"]) > 0.18
     assert scored[0]["alpha_trade_candidate"] is True
     assert scored[0]["shadow_trade_candidate"] is True
     assert scored[0]["shadow_candidate_reason"] == "shadow_eligible"
@@ -1313,6 +1395,10 @@ def test_strategy_proxies_promoted_near_miss_learning_to_base_cohort(tmp_path):
                 "executable_price": "0.50",
                 "edge": "0.009",
                 "edge_lower_bound": "0.009",
+                "taker_fee_in_edge": "true",
+                "taker_fee_rate": "0.07",
+                "taker_fee_category": "crypto",
+                "taker_fee_source": "documented_category_fallback",
                 "alpha_trade_candidate": "false",
                 "near_miss_learning_candidate": "true",
                 "validation_layer_pass": "true",

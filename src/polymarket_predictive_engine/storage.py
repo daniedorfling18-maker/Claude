@@ -65,6 +65,11 @@ SCHEMA_STATEMENTS = [
         fee_usdc REAL NOT NULL DEFAULT 0 CHECK (fee_usdc >= 0),
         slippage_usdc REAL NOT NULL DEFAULT 0 CHECK (slippage_usdc >= 0),
         fill_model TEXT NOT NULL DEFAULT '',
+        taker_fee_rate REAL NOT NULL DEFAULT 0 CHECK (taker_fee_rate >= 0),
+        taker_fee_exponent REAL NOT NULL DEFAULT 1 CHECK (taker_fee_exponent > 0),
+        taker_fee_category TEXT NOT NULL DEFAULT '',
+        taker_fee_source TEXT NOT NULL DEFAULT '',
+        taker_fee_model_version TEXT NOT NULL DEFAULT '',
         FOREIGN KEY(order_id) REFERENCES orders(order_id)
     )
     """,
@@ -232,6 +237,11 @@ MIGRATION_COLUMNS = {
         ("fee_usdc", "REAL NOT NULL DEFAULT 0"),
         ("slippage_usdc", "REAL NOT NULL DEFAULT 0"),
         ("fill_model", "TEXT NOT NULL DEFAULT ''"),
+        ("taker_fee_rate", "REAL NOT NULL DEFAULT 0"),
+        ("taker_fee_exponent", "REAL NOT NULL DEFAULT 1"),
+        ("taker_fee_category", "TEXT NOT NULL DEFAULT ''"),
+        ("taker_fee_source", "TEXT NOT NULL DEFAULT ''"),
+        ("taker_fee_model_version", "TEXT NOT NULL DEFAULT ''"),
     ],
     "positions": [
         ("category", "TEXT NOT NULL DEFAULT ''"),

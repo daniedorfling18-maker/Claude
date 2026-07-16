@@ -3,11 +3,16 @@ from __future__ import annotations
 from pathlib import Path
 from datetime import datetime, timedelta, timezone
 
+import pytest
 import yaml
 
 from polymarket_predictive_engine.config import EngineConfig, load_config
 from polymarket_predictive_engine.paper_broker import run_paper_broker
-from polymarket_predictive_engine.price_action_signals import _row_implies_closed_market, build_price_action_paper_signals
+from polymarket_predictive_engine.price_action_signals import (
+    _build_signal,
+    _row_implies_closed_market,
+    build_price_action_paper_signals,
+)
 from polymarket_predictive_engine.utils import read_csv_rows, write_csv, write_json
 
 
@@ -30,6 +35,61 @@ def _cfg(tmp_path: Path) -> EngineConfig:
         },
         path=tmp_path / "cfg.yaml",
     )
+
+
+def test_price_action_signal_scores_expected_round_trip_net_of_both_taker_fees() -> None:
+    row = {
+        "token_id": "crypto-fee-token",
+        "market_slug": "bitcoin-repricing",
+        "question": "Will Bitcoin reprice?",
+        "outcome": "Yes",
+        "family": "crypto",
+        "latest_bid": "0.49",
+        "latest_ask": "0.50",
+        "latest_spread": "0.01",
+        "latest_time_utc": "2026-07-16T12:00:00Z",
+        "source": "microstructure_current_candidate",
+    }
+    settings = {
+        "take_profit_return": 0.08,
+        "stop_loss_return": 0.06,
+        "take_profit_min_usdc": 0.01,
+        "max_stake_usdc": 2.0,
+        "minimum_price_edge": 0.005,
+        "maximum_price_edge": 0.08,
+        "microstructure_liquidity_proxy": 1000,
+    }
+
+    signal = _build_signal(row, cohort={}, entry=row, settings=settings)
+
+    assert signal is not None
+    assert signal["taker_fee_rate"] == 0.07
+    assert signal["gross_edge_before_taker_fee_and_slippage"] == pytest.approx(0.04)
+    assert signal["taker_fee_entry_per_share"] == pytest.approx(0.0175)
+    assert signal["taker_fee_exit_per_share"] == pytest.approx(0.07 * 0.54 * 0.46)
+    assert signal["edge"] == pytest.approx(
+        0.04 - signal["taker_fee_entry_per_share"] - signal["taker_fee_exit_per_share"]
+    )
+
+
+def test_price_action_signal_is_suppressed_when_repricing_cannot_cover_round_trip_fees() -> None:
+    row = {
+        "token_id": "crypto-fee-token",
+        "market_slug": "bitcoin-repricing",
+        "family": "crypto",
+        "latest_bid": "0.49",
+        "latest_ask": "0.50",
+        "latest_spread": "0.01",
+        "source": "microstructure_current_candidate",
+    }
+    settings = {
+        "take_profit_return": 0.03,
+        "max_stake_usdc": 2.0,
+        "minimum_price_edge": 0.005,
+        "maximum_price_edge": 0.08,
+    }
+
+    assert _build_signal(row, cohort={}, entry=row, settings=settings) is None
 
 
 def _round_trip_row(**overrides: str) -> dict[str, str]:
@@ -713,7 +773,8 @@ def test_paper_confirmation_current_candidate_requires_positive_historical_analo
             "paper_confirmation_require_positive_historical_analogue": True,
             "paper_confirmation_min_historical_analogue_validation_rows": 3,
             "paper_confirmation_min_historical_analogue_positive_rows": 1,
-            "low_price_tick_probe_enabled": False,
+                "low_price_tick_probe_enabled": False,
+                "take_profit_return": 0.20,
         }
     )
     root = cfg.output_root / "polymarket_price_action"
@@ -2000,6 +2061,7 @@ def test_paper_confirmation_current_candidate_uses_fast_updown_snapshot_when_web
 
 def test_paper_confirmation_rejects_mutually_exclusive_same_market_probe(tmp_path):
     cfg = _cfg(tmp_path)
+    cfg.raw["price_action_paper"]["take_profit_return"] = 0.15
     root = cfg.output_root / "polymarket_price_action"
     feedback = _paper_confirmation_feedback_payload(
         cohort="exploratory_crypto_updown_live_model|crypto_btc_updown_daily|outcome=down"
@@ -2024,9 +2086,10 @@ def test_paper_confirmation_rejects_mutually_exclusive_same_market_probe(tmp_pat
                 question="Bitcoin Up or Down on July 1?",
                 outcome="Down",
                 token_id="btc-down-token",
-                latest_bid="0.32",
-                latest_ask="0.33",
-                latest_spread="0.01",
+                    latest_bid="0.32",
+                    latest_ask="0.33",
+                    latest_spread="0.01",
+                    take_profit_return="0.15",
             ),
             _round_trip_row(
                 source="profit_sprint_target",
@@ -2036,9 +2099,10 @@ def test_paper_confirmation_rejects_mutually_exclusive_same_market_probe(tmp_pat
                 question="Bitcoin Up or Down on July 1?",
                 outcome="Up",
                 token_id="btc-up-token",
-                latest_bid="0.67",
-                latest_ask="0.68",
-                latest_spread="0.01",
+                    latest_bid="0.67",
+                    latest_ask="0.68",
+                    latest_spread="0.01",
+                    take_profit_return="0.15",
             ),
         ],
     )
@@ -2251,9 +2315,9 @@ def test_paper_broker_fills_price_action_signal_and_exits_from_websocket_bid(tmp
                 "asset_id": "eth-token",
                 "market_slug": "eth-updown-test",
                 "selection": "Up",
-                "best_bid": "0.55",
-                "best_ask": "0.56",
-                "midpoint": "0.555",
+                "best_bid": "0.61",
+                "best_ask": "0.62",
+                "midpoint": "0.615",
                 "spread": "0.01",
             }
         ],

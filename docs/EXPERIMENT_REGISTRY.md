@@ -160,6 +160,19 @@ that merge commit. This prevents retroactive hypothesis registration.
 - A promising diagnostic can become a primary only through a future
   pre-observation amendment and a fresh OOS window.
 
+### Prospective taker-fee correction (owner-approved 2026-07-16; WO-94)
+
+All prospective taker signal scores and paper fills after the WO-94 merge use
+the venue's category- and price-aware V2 taker fee. Alpha entry edge is net of
+one taker fee; price-action expected round-trip edge is net of entry and exit
+taker fees. Exact market fee metadata is authoritative, with documented
+category rates as the missing-metadata fallback and a non-zero conservative
+fallback for malformed/unknown inputs. This is a cost correction, not a new
+hypothesis or a threshold amendment. Historical fills remain immutable and the
+registered legacy verdict engine retains its frozen cost constants to avoid a
+mid-study rule change; its results must continue to be labelled under that
+registered assumption.
+
 ## Mandatory legacy adjudication (not a fourth primary)
 
 The registered taker `$100/month` CLV verdict engine must run to its existing

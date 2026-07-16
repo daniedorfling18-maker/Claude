@@ -15,6 +15,8 @@ from collections import defaultdict
 from pathlib import Path
 from typing import Any
 
+from polymarket_common.fees import resolve_taker_fee_schedule, taker_fee_per_share
+
 from .config import EngineConfig, load_config
 from .crypto_updown_model import is_crypto_updown_contract, score_crypto_updown_prediction
 from .execution_costs import estimate_execution_cost
@@ -830,7 +832,10 @@ def apply_mispricing_alpha(
             + float(row.get("alpha_microstructure_penalty", 0.0))
             + cross_penalty
         )
-        edge_lower_bound = raw_alpha_edge - total_penalty
+        fee_schedule = resolve_taker_fee_schedule(row)
+        fee_per_share = taker_fee_per_share(price=price, schedule=fee_schedule)
+        edge_before_taker_fee = raw_alpha_edge - total_penalty
+        edge_lower_bound = edge_before_taker_fee - fee_per_share
         alpha_score = edge_lower_bound / max(0.01, math.sqrt(max(price * (1 - price), 1e-6)))
         validation_layer_pass = bool(
             row.get("bookmaker_cross_check_pass")
@@ -838,7 +843,10 @@ def apply_mispricing_alpha(
             and row.get("cohort_evidence_filter_pass", True)
             and row.get("crypto_model_gate_pass", True)
         )
-        fundamental_edge_for_shadow = safe_float(row.get("fundamental_edge_after_haircut"))
+        fundamental_edge_for_shadow_gross = safe_float(row.get("fundamental_edge_after_haircut"))
+        fundamental_edge_for_shadow = (
+            None if fundamental_edge_for_shadow_gross is None else fundamental_edge_for_shadow_gross - fee_per_share
+        )
         crypto_edge_for_shadow = safe_float(row.get("crypto_model_edge_after_cost"))
         crypto_shadow_mode = bool(
             crypto_shadow_enabled
@@ -951,8 +959,14 @@ def apply_mispricing_alpha(
                 "complete_set_discount": complete_set_discount,
                 "alpha_cross_market_penalty": cross_penalty,
                 "alpha_total_penalty": total_penalty,
+                "edge_lower_bound_before_taker_fee": edge_before_taker_fee,
+                "taker_fee_in_edge": True,
+                **fee_schedule.audit_fields(price=price),
                 "edge_lower_bound": edge_lower_bound,
                 "alpha_score": alpha_score,
+                "fundamental_edge_after_haircut_after_taker_fee": ""
+                if fundamental_edge_for_shadow is None
+                else fundamental_edge_for_shadow,
                 "validation_layer_pass": validation_layer_pass,
                 "alpha_trade_candidate": alpha_trade_candidate,
                 "near_miss_learning_candidate": near_miss_learning_candidate,

@@ -184,6 +184,11 @@ def _normalise_rows_from_file(cfg: EngineConfig, path: Path) -> list[dict[str, A
     tick_col = find_first_column(cols, ["tick_size", "order_price_min_tick_size"])
     category_col = find_first_column(cols, ["category"])
     outcome_col = find_first_column(cols, ["outcome", "selection", "runner", "label"])
+    fees_enabled_col = find_first_column(cols, ["fees_enabled", "feesEnabled"])
+    fee_type_col = find_first_column(cols, ["fee_type", "feeType"])
+    fee_rate_col = find_first_column(cols, ["fee_schedule_rate", "taker_fee_rate", "fee_rate"])
+    fee_exponent_col = find_first_column(cols, ["fee_schedule_exponent", "taker_fee_exponent"])
+    fee_taker_only_col = find_first_column(cols, ["fee_schedule_taker_only", "taker_fee_taker_only"])
 
     event_type_col = find_first_column(cols, ["event_type"])
     source_ts_col = find_first_column(cols, ["source_timestamp"])
@@ -285,6 +290,11 @@ def _normalise_rows_from_file(cfg: EngineConfig, path: Path) -> list[dict[str, A
                 "price_change_side": row.get(price_change_side_col or "", ""),
                 "price_change_price": safe_float(row.get(price_change_price_col or "")) or "",
                 "price_change_size": price_change_size if price_change_size is not None else "",
+                "fees_enabled": row.get(fees_enabled_col or "", ""),
+                "fee_type": row.get(fee_type_col or "", ""),
+                "fee_schedule_rate": row.get(fee_rate_col or "", ""),
+                "fee_schedule_exponent": row.get(fee_exponent_col or "", ""),
+                "fee_schedule_taker_only": row.get(fee_taker_only_col or "", ""),
             }
         )
     return normalised
@@ -398,6 +408,11 @@ def build_features_v2(
             "price_change_price": row.get("price_change_price", ""),
             "price_change_size": row.get("price_change_size", ""),
             "tick_size": row["tick_size"],
+            "fees_enabled": row.get("fees_enabled", ""),
+            "fee_type": row.get("fee_type", ""),
+            "fee_schedule_rate": row.get("fee_schedule_rate", ""),
+            "fee_schedule_exponent": row.get("fee_schedule_exponent", ""),
+            "fee_schedule_taker_only": row.get("fee_schedule_taker_only", ""),
             "hours_to_close": hours_to_close,
             "days_to_close": (hours_to_close / 24) if hours_to_close != "" else "",
             "is_last_24h": int(hours_to_close != "" and 0 <= hours_to_close <= 24),

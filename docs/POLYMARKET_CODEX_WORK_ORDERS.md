@@ -3,8 +3,8 @@
 Last updated: 2026-07-16 (owner-authorized corrective batch opened with WO-93; WO-85, WO-87, WO-86, and WO-88 implemented; WO-80, WO-82, WO-81 landed; WO-83 implemented in
 PR #203; WO-84 implemented in PR #205; WO-89 through WO-92 implemented. WO-87 now relabels the unchanged legacy verdict metric honestly and
 reports non-binding true pre-event CLV on the same units. WO-93 was implemented
-in PR #236, WO-94 in PR #237, WO-95 in PR #238, and WO-96 in PR #239. WO-97 is
-the active producer-path correction for WO-39. WO-33 remains pending a
+in PR #236, WO-94 in PR #237, WO-95 in PR #238, and WO-96 in PR #239. WO-97 was
+implemented in PR #240. WO-33 remains pending a
 registered leakage review, with
 WO-34/35 model wiring bound to that review and the three-hypothesis freeze.
 WO-48 and WO-67 are blocked; WO-70 and WO-72 are deferred; WO-76 is
@@ -4060,7 +4060,7 @@ review claims no findings under those methods, not absence of all defects.
 
 ## WO-97 — Correct WO-39 to the canonical websocket feature producer path
 
-Status: IN IMPLEMENTATION by Codex on 2026-07-16.
+Status: IMPLEMENTED by Codex in PR #240 on 2026-07-16; awaiting required gate and review.
 
 Owner authorization: the 2026-07-16 instruction to correct WO-39's producer
 path. This is collection and evidence-integrity infrastructure only. It does
@@ -4135,13 +4135,32 @@ trading-invoked flags false; require `oi_ledger_rows>0` and a data row newer tha
 the deployment in
 `outputs/polymarket_trade_prints/open_interest_history.csv`.
 
+S7 implementation review for PR #240: S1 adds no clock or window and leaves
+normalised external timestamps unchanged. S2 was verified by static read: the
+normaliser, trade/OI ledgers, and summary retain their existing atomic writers,
+with no new cadence or concurrent path. S3 was verified against read-only VPS
+telemetry: the fresh 24.7 MB canonical producer had market rows while the old
+consumer path did not exist; producer and consumer now share one exported
+constant. S4 replays the public `/oi` list/`market`/numeric-`value` shape
+recorded on 2026-07-16 and covers canonical, legacy-decoy, missing, empty, and
+malformed source properties. S5's no-poll/non-OK behavior is asserted for every
+source failure state, while per-market OI misses remain fail-soft. S6 is the
+day-after check above. S7 frozen-surface diff review found no changes to H1/H2/
+H3 evaluation, signals, models, paper/live gates, thresholds, stakes, capital
+policy, signer, credentials, broker, or order paths. Verification methods were
+static diff/read, read-only production telemetry, official endpoint-contract
+comparison, Ruff, 39 focused tests, 1,284 repository tests excluding the two
+calendar-sensitive runtime-lock cases assigned to WO-100, and the unaffected
+runtime-lock test separately. This records no findings under those methods,
+not absence of all defects.
+
 ## Current queue for Codex (reconciled 2026-07-16)
 
 Every WO below and every future WO must comply with
 `docs/ENGINEERING_STANDARDS.md` (S1-S7), including the mandatory
 `Day-after check:` line. Reviews verify compliance item by item.
 
-**WO-95 was implemented in PR #238, WO-96 merged in PR #239, and WO-97 is in implementation.** Later items in the 2026-07-16 owner
+**WO-95 was implemented in PR #238, WO-96 merged in PR #239, and WO-97 was implemented in PR #240.** Later items in the 2026-07-16 owner
 instruction require their own numbered work order and PR; do not combine them
 into this change. WO-89 through WO-92 were implemented as of 2026-07-15.
 WO-93 was implemented in PR #236, WO-94 in PR #237, WO-95 in PR #238, and WO-96 in PR #239. WO-85, WO-87, WO-86, and

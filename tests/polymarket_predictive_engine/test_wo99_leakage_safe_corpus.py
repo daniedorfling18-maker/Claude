@@ -299,6 +299,7 @@ def test_overlap_is_purged_conflicts_excluded_and_settings_cannot_widen(tmp_path
 
     closes = [
         datetime(2026, 1, 1, 12, tzinfo=timezone.utc),
+        datetime(2026, 1, 2, 12, tzinfo=timezone.utc),
         datetime(2026, 1, 10, 0, tzinfo=timezone.utc),
         datetime(2026, 1, 10, 12, tzinfo=timezone.utc),
         datetime(2026, 1, 20, 12, tzinfo=timezone.utc),
@@ -332,7 +333,7 @@ def test_overlap_is_purged_conflicts_excluded_and_settings_cannot_widen(tmp_path
 
     assert result["coverage"]["conflicting_clean_resolution_tokens"] == 1
     assert result["split"]["purged_markets"] == 1
-    assert next(row for row in split if row["market_id"] == "m1")["split"] == "purged"
+    assert next(row for row in split if row["market_id"] == "m2")["split"] == "purged"
     assert not any(row["market_id"] == "m0" for row in split)
     assert result["split"]["market_overlap_count"] == 0
 

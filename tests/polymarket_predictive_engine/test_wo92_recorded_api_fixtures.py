@@ -58,6 +58,9 @@ RECORDED_PARSER_COVERAGE = {
     "data_api_holders": {
         "wallet_intelligence_collector._holder_payload_rows/_holder_row",
     },
+    "data_api_oi": {
+        "trade_print_collector._payload_items/_open_interest_row",
+    },
     "clob_book_or_books": {
         "dutch_arb_monitor._best_ask",
         "event_group_consistency._book_asks",
@@ -107,6 +110,7 @@ def test_recorded_fixture_inventory_and_timestamp_units() -> None:
         "data_api_activity_2026-07-15.json",
         "data_api_positions_2026-07-15.json",
         "data_api_trades_2026-07-15.json",
+        "data_api_oi_2026-07-16.json",
         "clob_book_2026-07-15.json",
         "clob_books_2026-07-15.json",
         "clob_prices_history_2026-07-15.json",
@@ -130,6 +134,7 @@ def test_recorded_data_api_payloads_replay_all_current_parsers(monkeypatch: pyte
     activity = _fixture("data_api_activity_2026-07-15.json")
     positions = _fixture("data_api_positions_2026-07-15.json")
     trades = _fixture("data_api_trades_2026-07-15.json")
+    open_interest = _fixture("data_api_oi_2026-07-16.json")
 
     def fake_get(url: str, **kwargs: Any) -> _Response:
         params = kwargs.get("params") or {}
@@ -166,6 +171,18 @@ def test_recorded_data_api_payloads_replay_all_current_parsers(monkeypatch: pyte
     assert print_row["market_slug"] == "sanitized-recorded-market"
     assert print_row["event_slug"] == "sanitized-recorded-event"
     assert print_row["outcome"] == "Yes"
+
+    oi_items = trade_print_collector._payload_items(open_interest)
+    assert len(oi_items) == 1
+    oi_row = trade_print_collector._open_interest_row(
+        oi_items[0], CONDITION, "2026-07-16T19:40:00Z"
+    )
+    assert oi_row == {
+        "market": CONDITION,
+        "open_interest": pytest.approx(592802.115597),
+        "timestamp": "",
+        "collected_at_utc": "2026-07-16T19:40:00Z",
+    }
 
     maker_settings = {
         **settings,

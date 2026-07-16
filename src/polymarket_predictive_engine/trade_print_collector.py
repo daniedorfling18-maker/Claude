@@ -24,6 +24,7 @@ import requests
 from .config import EngineConfig, load_config
 from .runtime_lock import runtime_lock
 from .utils import (
+    csv_columns,
     normalize_external_timestamp,
     now_utc,
     read_csv_rows,
@@ -33,6 +34,7 @@ from .utils import (
     write_json,
     write_text_atomic,
 )
+from .websocket_normaliser import WEBSOCKET_FEATURES_RELATIVE_PATH
 
 DEFAULT_BASE_URL = "https://data-api.polymarket.com"
 
@@ -92,17 +94,36 @@ def _settings(cfg: EngineConfig) -> dict[str, Any]:
     return merged
 
 
-def _tracked_markets(cfg: EngineConfig, max_markets: int) -> list[str]:
-    """Markets currently in the websocket feature table, most recent first."""
-    features_path = cfg.output_root / "polymarket_websocket" / "websocket_features.csv"
+def _tracked_market_source(cfg: EngineConfig, max_markets: int) -> tuple[list[str], Path, str]:
+    """Read the normaliser's canonical feature table, most recent market first.
+
+    The returned coverage state is deliberately separate from the rows so a
+    producer-path regression cannot look like a successful zero-market poll.
+    """
+    features_path = cfg.output_root / WEBSOCKET_FEATURES_RELATIVE_PATH
+    if not features_path.is_file():
+        return [], features_path, "missing"
+    try:
+        columns = csv_columns(features_path)
+        rows = read_csv_rows(features_path)
+    except (OSError, UnicodeError):
+        return [], features_path, "malformed"
+    if "market" not in columns:
+        return [], features_path, "malformed"
     markets: dict[str, None] = {}
-    for row in reversed(read_csv_rows(features_path)):
+    for row in reversed(rows):
         market = str(row.get("market") or "").strip()
         if market and market not in markets:
             markets[market] = None
         if len(markets) >= max_markets:
             break
-    return list(markets)
+    return list(markets), features_path, "ok" if markets else "empty"
+
+
+def _tracked_markets(cfg: EngineConfig, max_markets: int) -> list[str]:
+    """Markets currently in the canonical websocket feature table."""
+    markets, _, _ = _tracked_market_source(cfg, max_markets)
+    return markets
 
 
 def _timestamp_text(value: Any) -> str:
@@ -341,6 +362,8 @@ def collect_trade_prints(
     collect_open_interest: bool = True,
 ) -> dict[str, Any]:
     settings = _settings(cfg)
+    uses_websocket_source = markets is None
+    logical_market_source_path = (Path("outputs") / WEBSOCKET_FEATURES_RELATIVE_PATH).as_posix()
     ledger_path = cfg.output_root / "polymarket_trade_prints" / "trade_prints.csv"
     oi_path = cfg.output_root / "polymarket_trade_prints" / "open_interest_history.csv"
     summary_path = cfg.output_root / "polymarket_trade_prints" / summary_filename
@@ -359,6 +382,10 @@ def collect_trade_prints(
         "oi_errors": [],
         "errors": [],
         "market_scope": market_scope,
+        "market_source": "websocket_normaliser" if uses_websocket_source else "explicit",
+        "market_source_path": logical_market_source_path if uses_websocket_source else "",
+        "market_source_exists": None,
+        "market_source_status": "not_checked",
         "market_polls": [],
         "paper_trading_invoked": False,
         "live_trading_invoked": False,
@@ -367,18 +394,25 @@ def collect_trade_prints(
         write_json(summary_path, summary)
         return summary
 
-    if markets is None:
-        markets = _tracked_markets(cfg, int(settings["max_markets"]))
+    errors: list[str] = []
+    if uses_websocket_source:
+        markets, market_source_path, market_source_status = _tracked_market_source(
+            cfg, int(settings["max_markets"])
+        )
+        summary["market_source_exists"] = market_source_path.is_file()
+        summary["market_source_status"] = market_source_status
+        if market_source_status != "ok":
+            errors.append(f"market_source_{market_source_status}: {logical_market_source_path}")
     else:
         markets = list(dict.fromkeys(str(market).strip() for market in markets if str(market).strip()))[
             : int(settings["max_markets"])
         ]
+        summary["market_source_status"] = "ok" if markets else "empty"
     base_url = str(settings["base_url"]).rstrip("/")
     timeout = float(settings["request_timeout_seconds"])
     max_rows = int(safe_float(settings.get("max_ledger_rows")) or 0)
     observed_rows: list[dict[str, Any]] = []
     observed_index: dict[str, dict[str, Any]] = {}
-    errors: list[str] = []
     market_polls: list[dict[str, Any]] = []
 
     for market in markets:

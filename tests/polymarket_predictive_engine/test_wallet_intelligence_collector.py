@@ -54,7 +54,7 @@ class _ErrorResponse:
 
 def _seed_tracked_markets(cfg) -> None:
     write_csv(
-        cfg.output_root / "polymarket_websocket" / "websocket_features.csv",
+        cfg.output_root / "polymarket_training" / "websocket_market_features.csv",
         [
             {"market": "0xold", "asset_id": "tok0"},
             {"market": "0xcond1", "asset_id": "tok1"},

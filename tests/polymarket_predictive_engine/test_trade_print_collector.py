@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
 import yaml
 
 from polymarket_predictive_engine import trade_print_collector
@@ -36,7 +37,7 @@ class _FakeResponse:
 def test_collects_deduplicates_and_persists_prints(tmp_path, monkeypatch):
     cfg = _config(tmp_path)
     write_csv(
-        cfg.output_root / "polymarket_websocket" / "websocket_features.csv",
+        cfg.output_root / "polymarket_training" / "websocket_market_features.csv",
         [
             {"market": "0xcond1", "asset_id": "tok1"},
             {"market": "0xcond2", "asset_id": "tok2"},
@@ -61,6 +62,10 @@ def test_collects_deduplicates_and_persists_prints(tmp_path, monkeypatch):
 
     assert summary["status"] == "ok"
     assert summary["markets_polled"] == 2
+    assert summary["market_source"] == "websocket_normaliser"
+    assert summary["market_source_path"] == "outputs/polymarket_training/websocket_market_features.csv"
+    assert summary["market_source_exists"] is True
+    assert summary["market_source_status"] == "ok"
     assert summary["new_prints"] == 2  # one per market; dupes and blank ids dropped
     assert summary["paper_trading_invoked"] is False
     rows = read_csv_rows(cfg.output_root / "polymarket_trade_prints" / "trade_prints.csv")
@@ -75,7 +80,7 @@ def test_collects_deduplicates_and_persists_prints(tmp_path, monkeypatch):
 def test_provider_errors_are_fail_soft_and_reported(tmp_path, monkeypatch):
     cfg = _config(tmp_path)
     write_csv(
-        cfg.output_root / "polymarket_websocket" / "websocket_features.csv",
+        cfg.output_root / "polymarket_training" / "websocket_market_features.csv",
         [{"market": "0xbad", "asset_id": "tok"}],
         fieldnames=["market", "asset_id"],
     )
@@ -135,7 +140,7 @@ def test_reobserved_trade_enriches_only_blank_metadata_and_rejects_fact_conflict
 def test_open_interest_rides_along_with_trade_print_collection(tmp_path, monkeypatch):
     cfg = _config(tmp_path)
     write_csv(
-        cfg.output_root / "polymarket_websocket" / "websocket_features.csv",
+        cfg.output_root / "polymarket_training" / "websocket_market_features.csv",
         [{"market": "0xcond1", "asset_id": "tok"}],
         fieldnames=["market", "asset_id"],
     )
@@ -181,7 +186,7 @@ def test_open_interest_rides_along_with_trade_print_collection(tmp_path, monkeyp
 def test_open_interest_endpoint_miss_is_tolerated(tmp_path, monkeypatch):
     cfg = _config(tmp_path)
     write_csv(
-        cfg.output_root / "polymarket_websocket" / "websocket_features.csv",
+        cfg.output_root / "polymarket_training" / "websocket_market_features.csv",
         [{"market": "0xcond1", "asset_id": "tok"}],
         fieldnames=["market", "asset_id"],
     )
@@ -211,6 +216,40 @@ def test_open_interest_endpoint_miss_is_tolerated(tmp_path, monkeypatch):
     assert summary["new_prints"] == 1
     assert summary["oi_markets_captured"] == 0
     assert summary["oi_errors"] and "oi unavailable" in summary["oi_errors"][0]
+
+
+@pytest.mark.parametrize(
+    ("source_state", "expected_exists"),
+    [("missing", False), ("empty", True), ("malformed", True)],
+)
+def test_canonical_market_source_failures_are_visible_and_legacy_decoy_is_ignored(
+    tmp_path, monkeypatch, source_state, expected_exists
+):
+    cfg = _config(tmp_path)
+    canonical = cfg.output_root / "polymarket_training" / "websocket_market_features.csv"
+    legacy_decoy = cfg.output_root / "polymarket_websocket" / "websocket_features.csv"
+    write_csv(legacy_decoy, [{"market": "0xlegacy-decoy"}], fieldnames=["market"])
+    if source_state == "empty":
+        write_csv(canonical, [], fieldnames=["market", "asset_id"])
+    elif source_state == "malformed":
+        write_csv(canonical, [{"condition_id": "0xwrong-column"}], fieldnames=["condition_id"])
+
+    def unexpected_get(*args, **kwargs):
+        raise AssertionError("a missing/empty/malformed canonical source must not poll the API")
+
+    monkeypatch.setattr(trade_print_collector.requests, "get", unexpected_get)
+    summary = trade_print_collector.collect_trade_prints(cfg)
+
+    assert summary["status"] == "failed"
+    assert summary["markets_polled"] == 0
+    assert summary["market_source_status"] == source_state
+    assert summary["market_source_exists"] is expected_exists
+    assert summary["errors"] == [
+        f"market_source_{source_state}: outputs/polymarket_training/websocket_market_features.csv"
+    ]
+    assert summary["market_polls"] == []
+    assert summary["paper_trading_invoked"] is False
+    assert summary["live_trading_invoked"] is False
 
 
 def test_backfill_trade_prints_paginates_deduplicates_and_stamps(tmp_path, monkeypatch):

@@ -3,7 +3,8 @@
 Last updated: 2026-07-16 (owner-authorized corrective batch opened with WO-93; WO-85, WO-87, WO-86, and WO-88 implemented; WO-80, WO-82, WO-81 landed; WO-83 implemented in
 PR #203; WO-84 implemented in PR #205; WO-89 through WO-92 implemented. WO-87 now relabels the unchanged legacy verdict metric honestly and
 reports non-binding true pre-event CLV on the same units. WO-93 was implemented
-in PR #236, WO-94 in PR #237, and WO-95 in PR #238. WO-33 remains pending a
+in PR #236, WO-94 in PR #237, WO-95 in PR #238, and WO-96 in PR #239. WO-97 is
+the active producer-path correction for WO-39. WO-33 remains pending a
 registered leakage review, with
 WO-34/35 model wiring bound to that review and the three-hypothesis freeze.
 WO-48 and WO-67 are blocked; WO-70 and WO-72 are deferred; WO-76 is
@@ -3932,7 +3933,7 @@ and both event/public `primary_hypothesis_coverage.status` fields are `ok`.
 
 ## WO-96 — Repair wallet evidence producers and implement exact H3 OOS evaluation
 
-Status: IMPLEMENTED by Codex in PR #239 on 2026-07-16; awaiting required gate and review.
+Status: MERGED in PR #239 on 2026-07-16 as `9960da7`.
 
 Owner authorization: the 2026-07-16 instruction to repair WO-37/58 holder
 ingestion, retain wallet identity on public trades, and then build the exact H3
@@ -4057,16 +4058,93 @@ Git-dependent deployment tests in that container. The two pre-existing
 calendar-fragile runtime-lock cases remain explicitly assigned to WO-100; this
 review claims no findings under those methods, not absence of all defects.
 
+## WO-97 — Correct WO-39 to the canonical websocket feature producer path
+
+Status: IN IMPLEMENTATION by Codex on 2026-07-16.
+
+Owner authorization: the 2026-07-16 instruction to correct WO-39's producer
+path. This is collection and evidence-integrity infrastructure only. It does
+not create a signal, alter a gate or threshold, approve paper/live trading,
+size capital, or place an order.
+
+Observed production defect before implementation: the live websocket
+normaliser writes
+`outputs/polymarket_training/websocket_market_features.csv`, but WO-39's
+shared `_tracked_markets()` consumer read the nonexistent
+`outputs/polymarket_websocket/websocket_features.csv`. On the VPS at
+2026-07-16T19:19:59Z, the canonical 24.7 MB feature table was current while
+`trade_prints_summary.json` reported `markets_polled=0`,
+`oi_markets_captured=0`, and `status=ok`; `open_interest_history.csv` contained
+only its 49-byte header. The maker-specific collector still polled two markets,
+which masked the broad producer failure at scheduler level.
+
+Registered implementation contract:
+
+1. Export one literal websocket feature-table relative path from
+   `websocket_normaliser.py`. The normaliser writer and WO-39 consumer both use
+   that constant. The canonical path is
+   `polymarket_training/websocket_market_features.csv`; the nonexistent legacy
+   path is not a fallback because accepting it would hide recurrence of the
+   producer/consumer mismatch.
+2. `collect_trade_prints()` continues to select the most recently observed
+   unique condition IDs, capped by the existing `max_markets`. Its summary
+   reports the producer name, canonical relative path, existence, and coverage
+   state. A missing or present-but-empty canonical producer is explicit in
+   `errors` and cannot report `status=ok`.
+3. The existing 15-minute scheduler, request limits, Data API `/trades` and
+   `/oi` behavior, atomic bounded ledgers, maker-specific collector, and
+   fail-soft per-market OI errors remain unchanged. There is no new job, writer,
+   API family, or cadence. `wallet_intelligence_collector.py` may consume the
+   repaired shared market list before its already registered fallbacks; this
+   changes coverage only, never scoring or eligibility.
+4. Add a sanitized fixture recorded from the public Data API `/oi` endpoint on
+   2026-07-16, preserving the actual list envelope and `market`/`value` scalar
+   types. Tests prove the exact normaliser path is consumed, a decoy legacy path
+   is ignored, missing/empty coverage is fail-visible, endpoint misses remain
+   fail-soft, and all collection/trading invocation flags remain false.
+
+Producer/coverage contract: `websocket_normaliser.normalise_websocket_messages`
+atomically produces the canonical feature table with a `market` condition ID
+for every parseable tracked book/price event. `trade_print_collector` consumes
+up to the newest 60 unique IDs on each scheduled run and writes the bounded
+trade and OI state tables plus its atomic summary. When that producer coverage
+is absent, the broad collection summary is failed/partial with zero markets;
+maker-sheet rows are not silently relabelled as websocket coverage.
+
+Fail-safe sentence: when the canonical producer is missing, empty, malformed,
+or contains no market identifiers, broad WO-39 collection performs no outbound
+market polls and reports a non-OK summary with the exact producer state; an
+individual missing/malformed OI response remains counted in `oi_errors` and
+does not invalidate successfully collected public trades; no failure path
+invokes paper/live trading or changes a decision gate.
+
+Engineering-standards review plan: S1 adds no time window and preserves the
+normaliser's ingestion timestamp handling. S2 adds no artifact or concurrent
+writer; the existing atomic feature, trade, OI, and summary writes and their
+interleaving are unchanged. S3 is the literal producer/consumer contract above.
+S4 replays the sanitized recorded `/oi` payload and tests canonical/legacy/
+missing path properties. S5 is stated above. S7 must verify H1/H2/H3, all
+trading/capital gates, paper sizing, registered thresholds, signer, credential,
+and order paths are unchanged.
+
+Day-after check: in
+`outputs/polymarket_trade_prints/trade_prints_summary.json`, require
+`market_source_path=outputs/polymarket_training/websocket_market_features.csv`,
+`market_source_status=ok`, `markets_polled>0`, `oi_markets_captured>0`, and both
+trading-invoked flags false; require `oi_ledger_rows>0` and a data row newer than
+the deployment in
+`outputs/polymarket_trade_prints/open_interest_history.csv`.
+
 ## Current queue for Codex (reconciled 2026-07-16)
 
 Every WO below and every future WO must comply with
 `docs/ENGINEERING_STANDARDS.md` (S1-S7), including the mandatory
 `Day-after check:` line. Reviews verify compliance item by item.
 
-**WO-95 was implemented in PR #238 and WO-96 is in implementation.** Later items in the 2026-07-16 owner
+**WO-95 was implemented in PR #238, WO-96 merged in PR #239, and WO-97 is in implementation.** Later items in the 2026-07-16 owner
 instruction require their own numbered work order and PR; do not combine them
 into this change. WO-89 through WO-92 were implemented as of 2026-07-15.
-WO-93 was implemented in PR #236, WO-94 in PR #237, and WO-95 in PR #238. WO-85, WO-87, WO-86, and
+WO-93 was implemented in PR #236, WO-94 in PR #237, WO-95 in PR #238, and WO-96 in PR #239. WO-85, WO-87, WO-86, and
 WO-88 are implemented on 2026-07-15; WO-83 is implemented in PR #203 and
 WO-84 is implemented in PR #205. Do not infer follow-on capital, gate, model,
 or executor work from their diagnostics; the queue below remains binding.

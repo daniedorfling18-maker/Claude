@@ -675,15 +675,18 @@ def _collection_coverage(cfg: EngineConfig, portfolio: list[dict[str, Any]], reg
     }
 
 
-def _study_charge(cfg: EngineConfig, portfolio: list[dict[str, Any]]) -> float:
+def _study_charge_by_condition(
+    cfg: EngineConfig, portfolio: list[dict[str, Any]]
+) -> dict[str, float]:
     candidates = _candidate_map(cfg)
-    charge_total = 0.0
+    charges: dict[str, float] = {}
     for entry in portfolio:
-        candidate = candidates.get(entry["condition_id"], {})
+        condition_id = str(entry["condition_id"])
+        candidate = candidates.get(condition_id, {})
         charge = safe_float(candidate.get("adverse_selection_usd_per_day")) or 0.0
         size_multiple = safe_float(entry.get("size_multiple")) or 1.0
-        charge_total += charge * size_multiple
-    return charge_total
+        charges[condition_id] = charges.get(condition_id, 0.0) + charge * size_multiple
+    return charges
 
 
 def _replay_against_states(
@@ -693,6 +696,7 @@ def _replay_against_states(
     trades: list[dict[str, Any]],
     portfolio: list[dict[str, Any]],
     study_charge: float,
+    study_charge_by_condition: dict[str, float],
     max_state_lag_seconds: float,
     start_stamp: float | None = None,
     end_stamp: float | None = None,
@@ -845,6 +849,47 @@ def _replay_against_states(
             row["coverage_status"] = "covered"
         else:
             row["coverage_status"] = "no_simulated_fill_opportunities"
+        token_fills = [
+            fill for fill in fills if str(fill.get("token_id") or "") == str(row["asset_id"])
+        ]
+        row["realized_markout_distribution"] = {
+            f"{horizon}m": _distribution(
+                (fill.get("markout_per_share") or {}).get(f"{horizon}m")
+                for fill in token_fills
+                if (fill.get("markout_per_share") or {}).get(f"{horizon}m") is not None
+            )
+            for horizon in HORIZONS_MINUTES
+        }
+        market_adverse_5m = sum(
+            (fill.get("adverse_usd") or {}).get("5m", 0.0) for fill in token_fills
+        )
+        market_stamps = [
+            state["stamp"] for state in states_by_token.get(str(row["asset_id"]), [])
+        ]
+        market_stamps.extend(
+            trade["stamp"]
+            for trade in relevant_trades
+            if str(trade.get("token_id") or "") == str(row["asset_id"])
+        )
+        market_span_days = (
+            max((max(market_stamps) - min(market_stamps)) / 86400.0, 1.0 / 1440.0)
+            if market_stamps
+            else 1.0
+        )
+        market_realized_adverse = round(
+            max(0.0, market_adverse_5m / market_span_days), 6
+        )
+        market_study_charge = round(
+            float(study_charge_by_condition.get(str(row["condition_id"]), 0.0)), 6
+        )
+        row["realized_adverse_usd_per_day"] = market_realized_adverse
+        row["simulated_adverse_charge_usd_per_day"] = market_study_charge
+        row["replay_span_days"] = round(market_span_days, 6)
+        row["simulation_to_reality_haircut"] = (
+            round(market_realized_adverse / market_study_charge, 6)
+            if market_study_charge > 0 and haircut_windows > 0
+            else None
+        )
         per_market_coverage.append(row)
 
     windows_simulated = sum(int(row["windows_simulated"]) for row in per_market_coverage)
@@ -957,6 +1002,7 @@ def run_maker_fill_replay(cfg: EngineConfig) -> dict[str, Any]:
     maker_summary = read_json(out_root / "maker_carry_study.json", default={}) or {}
     if not isinstance(maker_summary, dict):
         maker_summary = {}
+    payload["portfolio_generated_at_utc"] = str(maker_summary.get("generated_at_utc") or "")
     portfolio = _portfolio(maker_summary, _candidate_map(cfg), int(settings["max_markets"]))
     if not portfolio:
         payload.update(
@@ -1005,7 +1051,8 @@ def run_maker_fill_replay(cfg: EngineConfig) -> dict[str, Any]:
         write_json(summary_path, payload)
         return payload
 
-    study_charge = _study_charge(cfg, portfolio)
+    study_charge_by_condition = _study_charge_by_condition(cfg, portfolio)
+    study_charge = sum(study_charge_by_condition.values())
     max_state_lag = float(settings["max_book_state_lag_seconds"])
     source_results = {
         source: _replay_against_states(
@@ -1014,6 +1061,7 @@ def run_maker_fill_replay(cfg: EngineConfig) -> dict[str, Any]:
             trades=trades,
             portfolio=portfolio,
             study_charge=study_charge,
+            study_charge_by_condition=study_charge_by_condition,
             max_state_lag_seconds=max_state_lag,
         )
         for source, states in states_by_source.items()
@@ -1048,6 +1096,7 @@ def run_maker_fill_replay(cfg: EngineConfig) -> dict[str, Any]:
                 trades=trades,
                 portfolio=portfolio,
                 study_charge=study_charge,
+                study_charge_by_condition=study_charge_by_condition,
                 max_state_lag_seconds=max_state_lag,
                 start_stamp=cutoff,
             ),
@@ -1057,6 +1106,7 @@ def run_maker_fill_replay(cfg: EngineConfig) -> dict[str, Any]:
                 trades=trades,
                 portfolio=portfolio,
                 study_charge=study_charge,
+                study_charge_by_condition=study_charge_by_condition,
                 max_state_lag_seconds=max_state_lag,
                 end_stamp=cutoff,
             ),

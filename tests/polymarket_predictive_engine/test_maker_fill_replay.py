@@ -202,6 +202,7 @@ def test_fill_when_trade_volume_exceeds_depth_ahead_and_markouts_are_reported(tm
     assert summary["realism_ratio"] == 2.4
     assert summary["simulation_to_reality_haircut"] == 2.4
     assert summary["confirmed_fill_ratio"] == 1.0
+    assert summary["portfolio_generated_at_utc"] == "2026-07-10T00:00:00Z"
     assert summary["coverage"] == {
         "windows_simulated": 3,
         "windows_covered": 3,
@@ -217,6 +218,12 @@ def test_fill_when_trade_volume_exceeds_depth_ahead_and_markouts_are_reported(tm
     assert summary["regime_cut"]["prior_to_last_7_days"]["confirmed_fills"] == 0
     assert summary["fills_preview"][0]["fill_size"] == 5.0
     assert summary["fills_preview"][0]["depth_ahead"] == 20.0
+    market = summary["per_market_coverage"][0]
+    assert market["realized_markout_distribution"]["5m"]["count"] == 1
+    assert market["realized_markout_distribution"]["60m"]["mean"] == 0.09
+    assert market["realized_adverse_usd_per_day"] == 4.8
+    assert market["simulated_adverse_charge_usd_per_day"] == 2.0
+    assert market["simulation_to_reality_haircut"] == 2.4
 
 
 def test_absent_archive_is_tolerated(tmp_path):
@@ -350,6 +357,66 @@ def test_known_fraction_of_crossings_is_confirmed_last_in_queue(tmp_path):
     assert summary["confirmed_fill_ratio"] == 0.5
     assert summary["per_market_coverage"][0]["windows_simulated"] == 6
     assert summary["per_market_coverage"][0]["windows_covered"] == 6
+
+
+def test_market_haircut_uses_market_span_not_other_portfolio_history():
+    states = {
+        "tok1": [
+            {"stamp": 1_000.0, "midpoint": 0.50, "bid_depth": 20.0, "ask_depth": 20.0},
+            {"stamp": 1_300.0, "midpoint": 0.45, "bid_depth": 20.0, "ask_depth": 20.0},
+            {"stamp": 1_900.0, "midpoint": 0.44, "bid_depth": 20.0, "ask_depth": 20.0},
+            {"stamp": 4_600.0, "midpoint": 0.40, "bid_depth": 20.0, "ask_depth": 20.0},
+        ],
+        "tok2": [
+            {"stamp": 1.0, "midpoint": 0.50, "bid_depth": 20.0, "ask_depth": 20.0},
+            {"stamp": 864_001.0, "midpoint": 0.50, "bid_depth": 20.0, "ask_depth": 20.0},
+        ],
+    }
+    trades = [
+        {
+            "market": "0xcond1",
+            "token_id": "tok1",
+            "side": "SELL",
+            "price": 0.49,
+            "size": 25.0,
+            "stamp": 1_000.0,
+        }
+    ]
+    portfolio = [
+        {
+            "condition_id": "0xcond1",
+            "token_id": "tok1",
+            "question": "short history",
+            "quote_size_shares": 10.0,
+            "quote_distance": 0.01,
+            "quote_bid_price": 0.49,
+            "quote_ask_price": 0.51,
+        },
+        {
+            "condition_id": "0xcond2",
+            "token_id": "tok2",
+            "question": "long unrelated history",
+            "quote_size_shares": 10.0,
+            "quote_distance": 0.01,
+            "quote_bid_price": 0.49,
+            "quote_ask_price": 0.51,
+        },
+    ]
+
+    result = maker_fill_replay._replay_against_states(
+        source="official",
+        states_by_token=states,
+        trades=trades,
+        portfolio=portfolio,
+        study_charge=4.0,
+        study_charge_by_condition={"0xcond1": 2.0, "0xcond2": 2.0},
+        max_state_lag_seconds=1800,
+    )
+
+    by_market = {row["condition_id"]: row for row in result["per_market_coverage"]}
+    assert by_market["0xcond1"]["replay_span_days"] == round(1 / 24, 6)
+    assert by_market["0xcond1"]["realized_adverse_usd_per_day"] == 4.8
+    assert by_market["0xcond1"]["simulation_to_reality_haircut"] == 2.4
 
 
 def test_nonzero_simulated_fills_without_coverage_use_explicit_sentinel(tmp_path):

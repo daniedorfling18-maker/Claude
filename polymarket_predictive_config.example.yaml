@@ -218,6 +218,20 @@ decision_policy:
   # 2026-07-11 WO-59 tighten-only: shrink the advisory Kelly ceiling toward
   # no edge until 20 distinct daily observations. Values below 20 are clamped.
   kelly_full_weight_days: 20
+  # 2026-07-16 WO-93 tighten-only H1 prerequisite. Funding is capped at zero
+  # unless the exact current candidate has a fresh sharp fair inside its
+  # proposed maker quote band and sufficient market-specific official-book
+  # Tier-0 replay. Age/disagreement/haircut maximums may only decrease;
+  # evidence/coverage minimums may only increase.
+  h1_max_anchor_age_seconds: 21600
+  h1_max_price_age_seconds: 300
+  h1_tier0_max_replay_age_seconds: 1800
+  h1_future_timestamp_tolerance_seconds: 60
+  h1_max_anchor_disagreement: 0.03
+  h1_tier0_min_evaluable_opportunities: 30
+  h1_tier0_min_confirmed_fills: 10
+  h1_tier0_min_horizon_coverage_ratio: 0.80
+  h1_tier0_max_simulation_to_reality_haircut: 1.0
 
 # 2026-07-11 WO-60: evidence-classed performance packaging only. No gate,
 # sizing rule, policy, broker, or order path reads these statistics.
@@ -316,6 +330,7 @@ ledger_anchor:
     # WO-88 keeps raw/owner/maker fill attribution in a new immutable ledger.
     - {glob: maker_carry/maker_live_test_attribution_history.csv, mode: append_only}
     - {glob: maker_carry/decision_policy.json, mode: snapshot}
+    - {glob: maker_carry/h1_funding_qualification.json, mode: snapshot}
     - {glob: maker_carry/requote_alerts.json, mode: snapshot}
     - {glob: execution/credential_rotation_drill.json, mode: snapshot}
     - {glob: execution/replay_certification.json, mode: snapshot}

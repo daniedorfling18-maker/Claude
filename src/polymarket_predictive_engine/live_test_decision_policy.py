@@ -17,6 +17,7 @@ from typing import Any
 
 from .config import EngineConfig, load_config
 from .executor_ops_monitor import EXECUTION_LEDGER, EXECUTOR_HEARTBEAT
+from .h1_funding_qualification import evaluate_h1_funding_qualification
 from .risk import shrunk_kelly_fraction
 from .utils import boolish, now_utc, parse_timestamp, read_csv_rows, read_json, safe_float, write_json, write_text_atomic
 
@@ -70,34 +71,50 @@ REGISTERED_ACTION_POLICY: list[dict[str, Any]] = [
     },
     {
         "priority": 3,
+        "id": "h1_or_tier0_not_qualified",
+        "condition": (
+            "M-A and M-B pass, but the exact proposed funding market lacks sharp-qualified H1 "
+            "or sufficient official-book Tier-0 evidence."
+        ),
+        "indicated_action": "defer_funding_collect_sharp_h1_and_tier0",
+        "reason": "exact_funding_market_not_sharp_and_tier0_qualified",
+    },
+    {
+        "priority": 4,
         "id": "gates_pass_composition_stable",
-        "condition": "M-A and M-B pass and the top portfolio market meets the registered recurrence floor.",
+        "condition": (
+            "M-A and M-B pass, exact-market sharp H1 and Tier-0 evidence pass, and the top "
+            "portfolio market meets the registered recurrence floor."
+        ),
         "indicated_action": "fund_100_min_size_single_calmest_market",
         "reason": "M_A_and_M_B_pass_with_stable_top_portfolio_market",
     },
     {
-        "priority": 4,
+        "priority": 5,
         "id": "gates_pass_composition_churning",
-        "condition": "M-A and M-B pass but portfolio composition is not stable.",
+        "condition": (
+            "M-A and M-B plus exact-market sharp H1 and Tier-0 evidence pass, but portfolio "
+            "composition is not stable."
+        ),
         "indicated_action": "fund_100_but_only_most_recurrent_market_half_target",
         "reason": "M_A_and_M_B_pass_but_portfolio_composition_churning",
     },
     {
-        "priority": 5,
+        "priority": 6,
         "id": "decision_date_pending_gate",
         "condition": "The registered decision date is reached while M-A or M-B remains pending.",
         "indicated_action": "defer_funding_continue_study",
         "reason": "policy_decision_date_reached_with_pending_maker_gate",
     },
     {
-        "priority": 6,
+        "priority": 7,
         "id": "study_missing",
         "condition": "The maker-carry study artifact is absent.",
         "indicated_action": "collect_maker_carry_study",
         "reason": "maker_carry_study_artifact_missing",
     },
     {
-        "priority": 7,
+        "priority": 8,
         "id": "pre_decision_evidence_pending",
         "condition": "No earlier policy row binds before the registered decision date.",
         "indicated_action": "continue_study_until_policy_date",
@@ -223,6 +240,22 @@ def _composition(study: dict[str, Any], history: list[dict[str, Any]], settings:
         "stable": bool(count >= required),
         "recent_top_markets": top_markets,
     }
+
+
+def _funding_candidate_condition_id(
+    study: dict[str, Any], composition: dict[str, Any]
+) -> str:
+    """Name the exact current portfolio market to which WO-50 would allocate.
+
+    The registered actions refer to the most recurrent market.  A historical
+    market that has left the current portfolio is not silently replaced with a
+    different market; qualification will fail closed instead.
+    """
+
+    recurrent = str(composition.get("most_recurrent_market") or "").strip()
+    if recurrent:
+        return recurrent
+    return _latest_top_market(study)
 
 
 def _daily_net_rows(history: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -596,6 +629,8 @@ def _patch_quote_sheet(out_root: Path, policy: dict[str, Any]) -> None:
             f"(kill_data_stale={policy.get('kill_criteria_status', {}).get('kill_data_stale', False)}, "
             f"age={policy.get('kill_criteria_status', {}).get('kill_input_freshness', {}).get('age_seconds', '-')}s, "
             f"max={policy.get('kill_criteria_status', {}).get('kill_input_freshness', {}).get('maximum_age_seconds', '-')}s)",
+            f"- Sharp H1 + Tier-0 prerequisite: **{policy.get('h1_funding_qualification', {}).get('state', '-')}** "
+            f"(candidate={policy.get('h1_funding_qualification', {}).get('funding_candidate_condition_id', '-')})",
             "- Policy note: indicates only; the human decides; this system never trades.",
             end,
             "",
@@ -639,6 +674,14 @@ def run_decision_policy(cfg: EngineConfig) -> dict[str, Any]:
     gates_pass = gate_a == "pass" and gate_b == "pass"
     target = safe_float(study.get("target_net_usd_per_day")) or float((cfg.raw.get("maker_carry_study", {}) or {}).get("target_net_usd_per_day", 3.33))
     composition = _composition(study, carry_history, settings)
+    funding_candidate_condition_id = _funding_candidate_condition_id(study, composition)
+    h1_qualification = evaluate_h1_funding_qualification(
+        cfg,
+        study,
+        funding_candidate_condition_id,
+        observed_at=observed_at,
+    )
+    h1_evidence_pass = h1_qualification.get("state") == "pass"
     recent = _latest_per_utc_day(carry_history)[-int(settings["below_target_review_runs"]) :]
     below_target = [
         row for row in recent if (safe_float(row.get("portfolio_net_carry_usd_per_day")) is not None and float(row["portfolio_net_carry_usd_per_day"]) < target)
@@ -661,9 +704,11 @@ def run_decision_policy(cfg: EngineConfig) -> dict[str, Any]:
         policy_row = _policy_row("kill_criteria")
     elif gates_pass and len(below_target) > int(settings["below_target_review_threshold"]):
         policy_row = _policy_row("post_gate_below_target")
-    elif gates_pass and composition["stable"]:
+    elif gates_pass and not h1_evidence_pass:
+        policy_row = _policy_row("h1_or_tier0_not_qualified")
+    elif gates_pass and h1_evidence_pass and composition["stable"]:
         policy_row = _policy_row("gates_pass_composition_stable")
-    elif gates_pass:
+    elif gates_pass and h1_evidence_pass:
         policy_row = _policy_row("gates_pass_composition_churning")
     elif today >= decision_date and (gate_a == "pending" or gate_b == "pending"):
         policy_row = _policy_row("decision_date_pending_gate")
@@ -673,6 +718,18 @@ def run_decision_policy(cfg: EngineConfig) -> dict[str, Any]:
         policy_row = _policy_row("pre_decision_evidence_pending")
     indicated = str(policy_row["indicated_action"])
     reason = "kill_input_data_stale" if kill["kill_data_stale"] else str(policy_row["reason"])
+    pre_policy_capital = safe_float(sizing.get("binding_capital_usd")) or 0.0
+    funding_action = indicated.startswith("fund_")
+    if not (funding_action and h1_evidence_pass):
+        sizing["pre_policy_binding_capital_usd"] = pre_policy_capital
+        sizing["binding_capital_usd"] = 0.0
+        sizing["binding_cap"] = (
+            "h1_sharp_tier0_evidence_gate"
+            if not h1_evidence_pass
+            else "non_funding_policy_action"
+        )
+    sizing["funding_action_selected"] = funding_action
+    sizing["h1_sharp_tier0_evidence_supported"] = h1_evidence_pass
 
     payload = {
         "status": "ok",
@@ -692,6 +749,8 @@ def run_decision_policy(cfg: EngineConfig) -> dict[str, Any]:
             "gate_b_state": gate_b,
             "target_net_usd_per_day": target,
             "recent_below_target_runs": len(below_target),
+            "funding_candidate_condition_id": funding_candidate_condition_id,
+            "h1_sharp_tier0_state": h1_qualification.get("state"),
         },
         "indicated_action": indicated,
         "action_reason": reason,
@@ -699,6 +758,11 @@ def run_decision_policy(cfg: EngineConfig) -> dict[str, Any]:
         "ladder_stage_permitted": ladder["stage"],
         "ladder": ladder,
         "sizing": sizing,
+        "h1_funding_qualification": h1_qualification,
+        "funding_evidence_supported": h1_evidence_pass,
+        "funding_capital_permitted_usd": (
+            sizing["binding_capital_usd"] if funding_action and h1_evidence_pass else 0.0
+        ),
         "kill_criteria_status": kill,
         "kill_data_stale": kill["kill_data_stale"],
         "policy_note": "indicates, never executes - the human decides; the system never trades",

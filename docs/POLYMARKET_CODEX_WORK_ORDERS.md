@@ -1,9 +1,9 @@
 # Polymarket Codex Work Orders
 
-Last updated: 2026-07-15 (WO-85, WO-87, WO-86, and WO-88 implemented; WO-80, WO-82, WO-81 landed; WO-83 implemented in
+Last updated: 2026-07-16 (owner-authorized corrective batch opened with WO-93; WO-85, WO-87, WO-86, and WO-88 implemented; WO-80, WO-82, WO-81 landed; WO-83 implemented in
 PR #203; WO-84 implemented in PR #205; WO-89 through WO-92 implemented. WO-87 now relabels the unchanged legacy verdict metric honestly and
-reports non-binding true pre-event CLV on the same units. No numbered work order is currently
-buildable. WO-33 remains pending a registered leakage review, with
+reports non-binding true pre-event CLV on the same units. WO-93 is the active
+owner-authorized corrective work order. WO-33 remains pending a registered leakage review, with
 WO-34/35 model wiring bound to that review and the three-hypothesis freeze.
 WO-48 and WO-67 are blocked; WO-70 and WO-72 are deferred; WO-76 is
 registration-only. Crypto up/down is frozen as a diagnostic — see
@@ -3742,16 +3742,67 @@ pre-target scoreboard gap without authorising or placing an order.
    reconciliation legs -> NAV). Do not boil the ocean; add contracts
    only when a WO touches the pair.
 
-## Current queue for Codex (reconciled 2026-07-15)
+## WO-93 — Bind WO-50 funding to exact sharp-qualified H1 and Tier-0 evidence
+
+Status: IMPLEMENTED by Codex on 2026-07-16 in PR #236.
+
+Owner authorization: the 2026-07-16 instruction to bind WO-50 funding to
+sharp-qualified H1 and Tier-0 evidence. This is a tighten-only correction to
+the frozen WO-50 policy and the registered H1 validation ladder. It changes no
+paper/live order, executor, threshold-loosening, or automatic funding path.
+
+1. Name one exact funding candidate from the registered WO-50 composition
+   rule. A recurrent historical market absent from the current portfolio is a
+   blocker, not permission to substitute the current top market.
+2. Require an exact-token, fresh, unambiguous bookmaker anchor; fresh current
+   executable Polymarket bid/ask; and the sharp consensus fair inside the
+   proposed maker quote band. Aggregate funnel counts cannot satisfy this
+   test.
+3. Require exact-market Tier-0 replay from the official book, generated for
+   the same current portfolio: >=30 last-in-queue evaluable opportunities,
+   >=10 confirmed fills, >=80% coverage and >=10 markouts at each 5/15/60m
+   horizon, and market-level adverse-selection haircut <=1.0.
+4. Insert the prerequisite before both WO-50 `fund_100*` rows. Every non-fund
+   action and every failed prerequisite emits binding capital zero while
+   retaining the pre-policy sizing value for audit.
+5. Publish atomic snapshot
+   `outputs/maker_carry/h1_funding_qualification.json`; surface the state in
+   the decision artifact and quote sheet. No consumer may infer qualification
+   from aggregate sharp/replay status.
+6. Settings are mechanically tighten-only. Missing, stale, future-dated,
+   malformed, ambiguous, under-covered, or adverse evidence fails closed.
+7. Tests cover the exact pass case and each fail-safe class, market-level
+   replay accounting, time-boundary advancement, config clamps, policy capital
+   zero, and unchanged no-order flags.
+
+Producer/coverage contract: `sharp_anchor_mapping_audit.csv` plus current
+`predictions.csv` produce the exact-token sharp side; `maker_fill_replay.json`
+produces exact-market official-book coverage/fills/markouts/haircut. Coverage
+is the named current condition+token only; empty or duplicate matches fail.
+
+Fail-safe sentence: missing, stale, future-dated, ambiguous, malformed,
+under-covered, or adverse sharp/Tier-0 evidence forces qualification FAIL and
+WO-50 binding capital to $0.
+
+Frozen surfaces reviewed: M-A/M-B/M-C formulas and thresholds, reward/carry
+model, quote prices/sizes, Kelly formula, kill thresholds, paper/live modes,
+all signer/order paths, and Tier-1/Tier-2 requirements remain unchanged.
+
+Day-after check: on the first complete UTC-day harvest after deployment,
+verify that `h1_funding_qualification.json` names the same condition/token as
+WO-50, that every reported input age advances, and that insufficient live
+Tier-0 coverage leaves `decision_policy.sizing.binding_capital_usd == 0`.
+
+## Current queue for Codex (reconciled 2026-07-16)
 
 Every WO below and every future WO must comply with
 `docs/ENGINEERING_STANDARDS.md` (S1-S7), including the mandatory
 `Day-after check:` line. Reviews verify compliance item by item.
 
-**No numbered work order is currently buildable.** WO-89 through WO-92 are
-implemented as of 2026-07-15. Do not infer another build from WO-92's
-retrospective engineering-standard retrofit or from the 2026-07-19/20 final-read
-schedule.
+**WO-93 is the active owner-authorized corrective work order.** Later items in
+the 2026-07-16 owner instruction require their own numbered work order and PR;
+do not combine them into this change. WO-89 through WO-92 were implemented as
+of 2026-07-15.
 WO-85, WO-87, WO-86, and
 WO-88 are implemented on 2026-07-15; WO-83 is implemented in PR #203 and
 WO-84 is implemented in PR #205. Do not infer follow-on capital, gate, model,

@@ -773,7 +773,8 @@ def test_paper_confirmation_current_candidate_requires_positive_historical_analo
             "paper_confirmation_require_positive_historical_analogue": True,
             "paper_confirmation_min_historical_analogue_validation_rows": 3,
             "paper_confirmation_min_historical_analogue_positive_rows": 1,
-            "low_price_tick_probe_enabled": False,
+                "low_price_tick_probe_enabled": False,
+                "take_profit_return": 0.20,
         }
     )
     root = cfg.output_root / "polymarket_price_action"
@@ -2060,6 +2061,7 @@ def test_paper_confirmation_current_candidate_uses_fast_updown_snapshot_when_web
 
 def test_paper_confirmation_rejects_mutually_exclusive_same_market_probe(tmp_path):
     cfg = _cfg(tmp_path)
+    cfg.raw["price_action_paper"]["take_profit_return"] = 0.15
     root = cfg.output_root / "polymarket_price_action"
     feedback = _paper_confirmation_feedback_payload(
         cohort="exploratory_crypto_updown_live_model|crypto_btc_updown_daily|outcome=down"
@@ -2311,9 +2313,9 @@ def test_paper_broker_fills_price_action_signal_and_exits_from_websocket_bid(tmp
                 "asset_id": "eth-token",
                 "market_slug": "eth-updown-test",
                 "selection": "Up",
-                "best_bid": "0.55",
-                "best_ask": "0.56",
-                "midpoint": "0.555",
+                "best_bid": "0.61",
+                "best_ask": "0.62",
+                "midpoint": "0.615",
                 "spread": "0.01",
             }
         ],

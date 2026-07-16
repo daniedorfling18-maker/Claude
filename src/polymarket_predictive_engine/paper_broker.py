@@ -911,7 +911,13 @@ def _exit_reason(position, quote: dict[str, Any], prediction: dict[str, Any], se
         minimum_hold = 0.0 if price_action_signal else 15.0
     if _position_age_minutes(position) < float(minimum_hold):
         return None
-    exit_value = quantity * bid
+    exit_fee_schedule = resolve_taker_fee_schedule({**prediction, "category": position["category"]})
+    expected_exit_fee = polymarket_taker_fee_usdc(
+        shares=quantity,
+        price=bid,
+        schedule=exit_fee_schedule,
+    )
+    exit_value = quantity * bid - expected_exit_fee
     pnl = exit_value - cost_basis
     return_pct = pnl / cost_basis
     hard_stop_loss_return = safe_float(settings.get("hard_stop_loss_return"))

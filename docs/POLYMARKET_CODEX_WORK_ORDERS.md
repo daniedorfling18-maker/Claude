@@ -3793,17 +3793,75 @@ verify that `h1_funding_qualification.json` names the same condition/token as
 WO-50, that every reported input age advances, and that insufficient live
 Tier-0 coverage leaves `decision_policy.sizing.binding_capital_usd == 0`.
 
+## WO-94 — Category- and price-aware taker fees in scoring and paper fills
+
+Status: IN IMPLEMENTATION by Codex on 2026-07-16.
+
+Owner authorization: the 2026-07-16 instruction to implement category/price-
+aware taker fees in signal scoring and paper fills. This is a prospective,
+tighten-only cost-model correction. It creates no order, signer, credential,
+funding, live-execution, gate-loosening, or promotion path.
+
+1. One shared venue primitive implements the current documented V2 formula
+   `shares * rate * price * (1-price)`, aggregate 5-decimal fill rounding, and
+   the current category rates. Exact market `fd.r`/fee-schedule metadata wins;
+   explicit fee-disabled markets are zero; absent metadata uses category; and
+   malformed metadata uses the conservative maximum fallback.
+2. Preserve Gamma `category`, `feesEnabled`, and `feeType` from discovery
+   through scanner snapshots, canonical raw snapshots, features, predictions,
+   signals, and order-source audit JSON. Flattened CLOB fee-schedule fields are
+   retained when a producer supplies them.
+3. Score alpha signals net of entry taker fee before candidate/risk/priority
+   decisions. Score price-action round trips net of both expected taker legs;
+   suppress a probe whose predicted repricing cannot cover both fees. A
+   `taker_fee_in_edge` marker prevents downstream double charging.
+4. Replace the paper broker's incorrect flat-notional `transaction_cost` with
+   budget-safe V2 entry sizing and aggregate rounded entry/exit fees. New fill
+   columns record rate, exponent, category, source, and model version.
+   Existing fills receive schema defaults only and are never rewritten.
+5. Frozen registered verdicts and historical studies keep their registered
+   cost assumptions. This WO changes prospective signal/fill economics only;
+   no historical result is relabelled or recomputed into a higher evidence
+   class.
+6. Recorded-reality fixtures cover Gamma and CLOB V2 payload shapes. Property
+   tests cover the symmetric price curve, category/family classification,
+   malformed fail-safe behavior, fee-disabled markets, five-decimal rounding,
+   budget-safe sizing, one-time signal deduction, and paper-fill audit fields.
+
+Producer/coverage contract: Gamma discovery produces fee enablement/category
+for every scanner token; the raw-snapshot/features/prediction chain preserves
+those fields for the same token. CLOB `fd` is authoritative when present. If
+exact metadata is absent, the scorer/broker must still cover every signal via
+the documented category fallback; it may never default an unknown market to
+zero.
+
+Fail-safe sentence: missing exact metadata charges the documented category
+rate, unknown categories charge the conservative Other rate, and malformed or
+conflicting exact metadata charges the 0.07 conservative maximum; only an
+explicit valid zero/disabled market is fee-free.
+
+Frozen surfaces reviewed: M-A/M-B/M-C, WO-50 action rows and sizing ladder,
+legacy taker verdict constants, alpha/liquidity/cohort/risk thresholds, paper
+stake caps, every live/order/signer/credential path, and H1-H3 registration
+remain unchanged.
+
+Day-after check: after the first deployed prospective paper cycle, inspect
+`outputs/polymarket_portfolio/paper_fills.csv`; every new BUY/SELL row must have
+non-empty `taker_fee_model_version`, `taker_fee_source`, and category/rate,
+and `fee_usdc` must equal the documented price-shaped formula (or zero only
+when the row records explicit fee-disabled/exact-zero evidence).
+
 ## Current queue for Codex (reconciled 2026-07-16)
 
 Every WO below and every future WO must comply with
 `docs/ENGINEERING_STANDARDS.md` (S1-S7), including the mandatory
 `Day-after check:` line. Reviews verify compliance item by item.
 
-**WO-93 is the active owner-authorized corrective work order.** Later items in
+**WO-94 is the active owner-authorized corrective work order.** Later items in
 the 2026-07-16 owner instruction require their own numbered work order and PR;
 do not combine them into this change. WO-89 through WO-92 were implemented as
 of 2026-07-15.
-WO-85, WO-87, WO-86, and
+WO-93 was implemented in PR #236. WO-85, WO-87, WO-86, and
 WO-88 are implemented on 2026-07-15; WO-83 is implemented in PR #203 and
 WO-84 is implemented in PR #205. Do not infer follow-on capital, gate, model,
 or executor work from their diagnostics; the queue below remains binding.

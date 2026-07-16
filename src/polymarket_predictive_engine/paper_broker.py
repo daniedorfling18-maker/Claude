@@ -8,6 +8,8 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
+from polymarket_common.fees import polymarket_taker_fee_usdc, resolve_taker_fee_schedule, size_taker_buy
+
 from .cohort_validation import write_signal_cohort_pnl
 from .config import EngineConfig
 from .crypto_updown_settlement import (
@@ -996,9 +998,11 @@ def close_paper_position(con, cfg: EngineConfig, position, reason: str, quote: d
             "token_id": existing["token_id"],
         }
 
-    fee_rate = float(cfg.raw.get("costs", {}).get("transaction_cost", 0.0))
+    entry_signal = _latest_order_signal_payload(con, str(position["market_id"]), str(position["token_id"]))
+    fee_basis = {**prediction, **entry_signal, "category": position["category"]}
+    fee_schedule = resolve_taker_fee_schedule(fee_basis)
     gross_notional = quantity * fill_price
-    fee = gross_notional * fee_rate
+    fee = polymarket_taker_fee_usdc(shares=quantity, price=fill_price, schedule=fee_schedule)
     net_credit = gross_notional - fee
     realised = net_credit - cost_basis
     cash = _current_cash(con, cfg)
@@ -1014,6 +1018,7 @@ def close_paper_position(con, cfg: EngineConfig, position, reason: str, quote: d
         "quote": quote,
         "latest_prediction": prediction,
         "position_id": position["position_id"],
+        **fee_schedule.audit_fields(price=fill_price),
     }
     risk_decision = {
         "approved": True,
@@ -1055,8 +1060,9 @@ def close_paper_position(con, cfg: EngineConfig, position, reason: str, quote: d
         INSERT INTO fills(
             fill_id, order_id, idempotency_key, created_at, market_id, token_id,
             side, fill_price, quantity, gross_notional_usdc, fee_usdc,
-            slippage_usdc, fill_model
-        ) VALUES (?, ?, ?, ?, ?, ?, 'SELL_YES', ?, ?, ?, ?, ?, 'exit_taker')
+            slippage_usdc, fill_model, taker_fee_rate, taker_fee_exponent,
+            taker_fee_category, taker_fee_source, taker_fee_model_version
+        ) VALUES (?, ?, ?, ?, ?, ?, 'SELL_YES', ?, ?, ?, ?, ?, 'exit_taker', ?, ?, ?, ?, ?)
         """,
         (
             fill_id,
@@ -1070,6 +1076,11 @@ def close_paper_position(con, cfg: EngineConfig, position, reason: str, quote: d
             gross_notional,
             fee,
             quantity * exit_slippage,
+            fee_schedule.rate,
+            fee_schedule.exponent,
+            fee_schedule.category,
+            fee_schedule.source,
+            fee_schedule.model_version,
         ),
     )
     _capture_execution_quote_snapshot(
@@ -1100,7 +1111,10 @@ def close_paper_position(con, cfg: EngineConfig, position, reason: str, quote: d
         balance_after=cash + net_credit,
         order_id=order_id,
         fill_id=fill_id,
-        note=f"Closed paper position at {fill_price:.6f}; reason={reason}; realised_pnl={realised:.6f}",
+        note=(
+            f"Closed paper position at {fill_price:.6f}; fee={fee:.5f}; "
+            f"reason={reason}; realised_pnl={realised:.6f}"
+        ),
     )
     return {
         "status": "closed",
@@ -1112,6 +1126,8 @@ def close_paper_position(con, cfg: EngineConfig, position, reason: str, quote: d
         "fill_price": fill_price,
         "quantity": quantity,
         "gross_notional_usdc": gross_notional,
+        "fee_usdc": fee,
+        **fee_schedule.audit_fields(price=fill_price),
         "net_credit_usdc": net_credit,
         "cost_basis_usdc": cost_basis,
         "realised_pnl_usdc": realised,
@@ -1307,7 +1323,6 @@ def submit_paper_signal(con, cfg: EngineConfig, signal: dict[str, Any]) -> dict[
 
     price = float(decision["limit_price"])
     fill_price = min(0.999999, price + slippage)
-    fee_rate = float(costs.get("transaction_cost", 0.0))
     cash = float(state["cash"])
     budget = min(float(decision["stake_usdc"]), cash)
     max_position_cost = safe_float(paper_settings.get("maximum_position_cost_usdc"))
@@ -1324,10 +1339,12 @@ def submit_paper_signal(con, cfg: EngineConfig, signal: dict[str, Any]) -> dict[
         existing_cost = safe_float(existing_cost_row["cost"] if existing_cost_row else 0.0) or 0.0
         remaining_budget = max(0.0, max_position_cost - existing_cost)
         budget = min(budget, remaining_budget)
-    quantity = budget / (fill_price * (1 + fee_rate)) if fill_price > 0 else 0.0
-    gross_notional = quantity * fill_price
-    fee = gross_notional * fee_rate
-    total_debit = gross_notional + fee
+    fee_schedule = resolve_taker_fee_schedule(enriched)
+    quantity, gross_notional, fee, total_debit = size_taker_buy(
+        total_budget_usdc=budget,
+        price=fill_price,
+        schedule=fee_schedule,
+    )
     if quantity <= 0 or total_debit <= 0:
         return {"status": "rejected", "reason": "insufficient paper cash after costs"}
 
@@ -1375,7 +1392,7 @@ def submit_paper_signal(con, cfg: EngineConfig, signal: dict[str, Any]) -> dict[
             signal.get("model_version", ""),
             prediction_timestamp,
             _json(decision),
-            _json(signal),
+            _json({**signal, **fee_schedule.audit_fields(price=fill_price)}),
         ),
     )
     con.execute(
@@ -1383,8 +1400,9 @@ def submit_paper_signal(con, cfg: EngineConfig, signal: dict[str, Any]) -> dict[
         INSERT INTO fills(
             fill_id, order_id, idempotency_key, created_at, market_id, token_id,
             side, fill_price, quantity, gross_notional_usdc, fee_usdc,
-            slippage_usdc, fill_model
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            slippage_usdc, fill_model, taker_fee_rate, taker_fee_exponent,
+            taker_fee_category, taker_fee_source, taker_fee_model_version
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             fill_id,
@@ -1400,6 +1418,11 @@ def submit_paper_signal(con, cfg: EngineConfig, signal: dict[str, Any]) -> dict[
             fee,
             quantity * slippage,
             "taker_immediate",
+            fee_schedule.rate,
+            fee_schedule.exponent,
+            fee_schedule.category,
+            fee_schedule.source,
+            fee_schedule.model_version,
         ),
     )
     _capture_execution_quote_snapshot(
@@ -1447,6 +1470,9 @@ def submit_paper_signal(con, cfg: EngineConfig, signal: dict[str, Any]) -> dict[
         "fill_price": fill_price,
         "quantity": quantity,
         "stake_usdc": total_debit,
+        "gross_notional_usdc": gross_notional,
+        "fee_usdc": fee,
+        **fee_schedule.audit_fields(price=fill_price),
         "effective_slippage": slippage,
         "edge": edge,
         "raw_expected_lower_bound_profit_usdc": raw_expected_lower_bound_profit,

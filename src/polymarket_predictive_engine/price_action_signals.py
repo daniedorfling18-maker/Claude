@@ -5,6 +5,8 @@ from datetime import datetime, timedelta, timezone
 from typing import Any
 from zoneinfo import ZoneInfo
 
+from polymarket_common.fees import resolve_taker_fee_schedule, taker_fee_per_share
+
 from .config import EngineConfig, load_config
 from .price_action_microstructure import build_latest_microstructure_features
 from .utils import boolish, now_utc, parse_timestamp, read_csv_rows, read_json, safe_float, write_csv, write_json
@@ -39,8 +41,23 @@ SIGNAL_FIELDS = [
     "model_probability",
     "calibrated_probability",
     "gross_edge_before_slippage",
+    "gross_edge_before_taker_fee_and_slippage",
+    "edge_after_taker_fee_before_slippage",
     "edge",
     "expected_value_per_share",
+    "taker_fee_in_edge",
+    "taker_fee_rate",
+    "taker_fee_category",
+    "taker_fee_source",
+    "taker_fee_enabled",
+    "taker_fee_exponent",
+    "taker_fee_taker_only",
+    "taker_fee_model_version",
+    "taker_fee_per_share",
+    "taker_fee_per_notional_usdc",
+    "taker_fee_entry_per_share",
+    "taker_fee_exit_per_share",
+    "taker_fee_round_trip_per_share",
     "liquidity",
     "spread",
     "best_bid",
@@ -1743,12 +1760,21 @@ def _build_signal(
     liquidity = entry.get("liquidity", "")
     if not str(liquidity or "").strip() and source in {"microstructure_current_candidate", "paper_confirmation_current_candidate", "low_price_tick_probe"}:
         liquidity = settings.get("microstructure_liquidity_proxy", "")
-    priority_score = max_stake * edge / max(ask, 0.05)
+    category = _market_family(row) if _raw_family(row) else _market_family(entry)
+    fee_schedule = resolve_taker_fee_schedule({**entry, **row, "category": category})
+    target_exit_price = max(0.001, min(0.999, ask + edge))
+    entry_fee_per_share = taker_fee_per_share(price=ask, schedule=fee_schedule)
+    exit_fee_per_share = taker_fee_per_share(price=target_exit_price, schedule=fee_schedule)
+    round_trip_fee_per_share = entry_fee_per_share + exit_fee_per_share
+    edge_after_taker_fee = edge - round_trip_fee_per_share
+    if edge_after_taker_fee <= 0:
+        return None
+    priority_score = max_stake * edge_after_taker_fee / max(ask, 0.05)
     return {
         "market_id": market_slug or token,
         "market_slug": market_slug,
         "question": entry.get("question", ""),
-        "category": _market_family(row) if _raw_family(row) else _market_family(entry),
+        "category": category,
         "event_id": "",
         "correlation_key": market_slug or token,
         "signal_cohort": signal_cohort,
@@ -1760,9 +1786,16 @@ def _build_signal(
         "executable_price": ask,
         "model_probability": probability_proxy,
         "calibrated_probability": probability_proxy,
-        "gross_edge_before_slippage": edge,
-        "edge": edge,
-        "expected_value_per_share": edge,
+        "gross_edge_before_taker_fee_and_slippage": edge,
+        "edge_after_taker_fee_before_slippage": edge_after_taker_fee,
+        "gross_edge_before_slippage": edge_after_taker_fee,
+        "edge": edge_after_taker_fee,
+        "expected_value_per_share": edge_after_taker_fee,
+        "taker_fee_in_edge": True,
+        **fee_schedule.audit_fields(price=ask),
+        "taker_fee_entry_per_share": entry_fee_per_share,
+        "taker_fee_exit_per_share": exit_fee_per_share,
+        "taker_fee_round_trip_per_share": round_trip_fee_per_share,
         "liquidity": liquidity,
         "spread": spread,
         "best_bid": "" if bid is None else bid,
@@ -1780,7 +1813,7 @@ def _build_signal(
         "slippage": 0.0,
         "confidence": confidence,
         "alpha_probability": probability_proxy,
-        "edge_lower_bound": edge,
+        "edge_lower_bound": edge_after_taker_fee,
         "model_version": "price_action_round_trip_v1",
         "feature_set_version": "low_price_tick_v1" if source == "low_price_tick_probe" else "websocket_bid_ask_v1",
         "data_snapshot_timestamp": data_timestamp,

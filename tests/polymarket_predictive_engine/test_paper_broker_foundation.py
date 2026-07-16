@@ -284,7 +284,16 @@ def test_existing_payload_tables_are_preserved_during_typed_migration(tmp_path):
         typed_columns = {
             row[1] for row in con.execute("PRAGMA table_info(fills)").fetchall()
         }
-        assert {"fill_id", "order_id", "fill_price", "quantity"}.issubset(typed_columns)
+        assert {
+            "fill_id",
+            "order_id",
+            "fill_price",
+            "quantity",
+            "taker_fee_rate",
+            "taker_fee_category",
+            "taker_fee_source",
+            "taker_fee_model_version",
+        }.issubset(typed_columns)
     finally:
         con.close()
 
@@ -298,6 +307,21 @@ def test_forward_paper_cycle_is_persistent_idempotent_and_settles(tmp_path):
     assert first["predictions"] == 1
     assert first["signals_approved"] == 1
     assert first["broker"]["orders_filled"] == 1
+
+    con = connect_db(cfg.database_path)
+    try:
+        fill = con.execute(
+            "SELECT fill_price, quantity, fee_usdc, taker_fee_rate, taker_fee_category, "
+            "taker_fee_source, taker_fee_model_version FROM fills"
+        ).fetchone()
+        assert fill["taker_fee_rate"] == 0.05
+        assert fill["taker_fee_category"] == "sports"
+        assert fill["taker_fee_source"] == "documented_category_fallback"
+        assert fill["taker_fee_model_version"]
+        expected_fee = round(fill["quantity"] * 0.05 * fill["fill_price"] * (1 - fill["fill_price"]), 5)
+        assert fill["fee_usdc"] == expected_fee
+    finally:
+        con.close()
 
     prediction = read_csv_rows(
         cfg.output_root / "polymarket_predictions" / "predictions.csv"

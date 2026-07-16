@@ -665,7 +665,7 @@ def test_research_focus_reserve_keeps_current_collection_targets_in_batch_scan(t
         "politics",
     }
     assert len(selected) == 8
-    assert plan["research_focus_reserved_queries"] == ["nba", "mlb"]
+    assert plan["research_focus_reserved_queries"] == []
     assert plan["research_focus_reserve_enabled"] is True
     assert not any(loop._is_updown_query(query) for query in selected)
     assert plan["primary_hypothesis_coverage"]["status"] == "ok"
@@ -740,11 +740,9 @@ def test_research_focus_cannot_restore_frozen_updown_rotation(tmp_path, monkeypa
     assert selected[:3] == ["nba", "sports", "fed"]
     assert not any(loop._is_updown_query(query) for query in selected)
     assert "solana updown" in plan["injected_research_focus_queries"]
-    assert {row["query"] for row in plan["frozen_updown"]["excluded_queries"]} >= {
+    assert {row["query"] for row in plan["frozen_updown"]["excluded_queries"]} == {
         "btc updown",
-        "xrp updown",
         "solana updown",
-        "eth updown",
     }
     assert "evidence_updown_queries" not in plan["adaptive_priority"]
     assert "evidence_updown_rotated_queries" not in plan

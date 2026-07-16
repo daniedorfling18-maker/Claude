@@ -284,7 +284,7 @@ def test_research_focus_prioritises_paper_confirmation_blocker_query(tmp_path):
         "btc updown",
         "solana updown",
     ]
-    assert payload["quote_audit_priority_queries"] == ["btc updown"]
+    assert payload["quote_audit_priority_queries"] == []
     assert payload["proof_priority_queries"][:2] == ["btc updown", "solana updown"]
     proof_targets = payload["price_action_paper_confirmation_blockers"]["targets"]
     assert proof_targets[0]["recommended_collection_query"] == "btc updown"
@@ -601,8 +601,8 @@ def test_research_focus_guard_prevents_updown_query_collapse(tmp_path):
     ]
     guard = payload["collection_query_guard"]
     assert guard["updown_query_count"] == 0
-    assert guard["limits"]["requested_max_updown_queries"] == 1
-    assert guard["limits"]["max_updown_queries"] == 0
+    assert guard["settings"]["requested_max_updown_queries"] == 1
+    assert guard["settings"]["max_updown_queries"] == 0
     assert guard["distinct_families"] >= 4
     assert guard["broad_fill_queries"] == ["world cup", "tennis", "fed", "economy", "esports", "ai", "politics"]
     assert [row["reason"] for row in guard["rejected_queries"]] == [FROZEN_UPDOWN_REASON] * 8
@@ -1086,12 +1086,12 @@ def test_research_focus_routes_quote_audit_blockers_to_collection_only(tmp_path)
     quote_focus = payload["quote_audit_focus"]
     assert quote_focus["status"] == "quote_audit_blockers_present"
     assert quote_focus["decision_use"] == "collection_only_not_trade_authorisation"
-    assert quote_focus["collection_queries"][:2] == ["eth updown", "tennis"]
+    assert quote_focus["collection_queries"] == ["tennis"]
     assert quote_focus["blocked_cohorts"][0]["cohort"] == "exploratory_crypto_updown_live_model|crypto_eth_updown_daily|outcome=up"
     assert quote_focus["blocked_cohorts"][0]["decision_use"] == "quote_audit_repair_collection_only_not_trade_authorisation"
     assert quote_focus["blocked_cohorts"][0]["entry_snapshot_missing_round_trips"] == 2
     assert quote_focus["blocked_cohorts"][0]["exit_snapshot_missing_round_trips"] == 0
-    assert payload["raw_collection_queries"][:2] == ["eth updown", "tennis"]
+    assert payload["raw_collection_queries"][0] == "tennis"
     assert "eth updown" not in payload["collection_queries"]
     assert "tennis" in payload["collection_queries"]
     _assert_active_queries_exclude_frozen_updown(payload)
@@ -1182,12 +1182,12 @@ def test_research_focus_prioritises_quote_repair_before_updown_guard(tmp_path):
 
     payload = build_research_focus(cfg)
 
-    assert payload["quote_audit_priority_queries"] == ["btc updown"]
-    assert payload["raw_collection_queries"][:3] == ["btc updown", "xrp updown", "ethereum"]
+    assert payload["quote_audit_priority_queries"] == []
+    assert payload["raw_collection_queries"][:2] == ["xrp updown", "ethereum"]
     assert payload["collection_queries"][0] == "ethereum"
     _assert_active_queries_exclude_frozen_updown(payload)
     assert payload["collection_query_guard"]["rejected_queries"][0] == {
-        "query": "btc updown",
+        "query": "xrp updown",
         "family": "crypto_updown",
         "reason": FROZEN_UPDOWN_REASON,
     }

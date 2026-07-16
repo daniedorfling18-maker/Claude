@@ -761,6 +761,24 @@ and
 remain observation-only and cannot alter gates, sizing, paper/live permission,
 credentials, or order paths.
 
+**2026-07-16 — WO-96 merged in PR #239.** Wallet intelligence now parses the
+recorded nested holder-token groups, public trade rows retain wallet and market
+metadata without revising immutable facts, and the registered H3 evaluator
+uses first eligible wallet-token-day fills with executable pre-close bids,
+frozen chronological discovery/validation, market-clustered uncertainty, FDR,
+and concentration controls. The evaluator remains shadow research only and
+cannot promote, size, or execute risk.
+
+**2026-07-16 — WO-97 implemented by Codex in PR #240.** WO-39 now consumes the
+normaliser's actual
+`outputs/polymarket_training/websocket_market_features.csv` producer through a
+shared path constant. Missing, empty, or malformed producer coverage is
+explicitly non-OK instead of a successful zero-market poll; the summary exposes
+the path and coverage state. The 15-minute cadence, API limits, atomic bounded
+trade/OI ledgers, and fail-soft per-market OI behavior are unchanged. This is
+collection-only and changes no hypothesis, signal, gate, threshold, sizing,
+capital, credential, broker, or order path.
+
 ## Rules of engagement for coding agents
 
 0. **Division of labour**: the orchestrating agent writes/updates this charter and the work orders

@@ -61,6 +61,11 @@ FEATURE_FIELDS = [
     "price_change_size",
 ]
 
+# WO-97: this is the producer-side source of truth for the live feature table.
+# Consumers import the relative path instead of duplicating a path literal that
+# can silently drift away from the normaliser's actual output.
+WEBSOCKET_FEATURES_RELATIVE_PATH = Path("polymarket_training") / "websocket_market_features.csv"
+
 QUALITY_FIELDS = [
     "collected_at_utc",
     "source_timestamp",
@@ -629,9 +634,8 @@ def normalize_websocket_file(
     metadata_enriched_rows, metadata_index_keys = _apply_metadata(cfg, features)
     _assert_no_leakage(features)
 
-    train_root = cfg.output_root / "polymarket_training"
     gov_root = cfg.governance_root
-    features_path = train_root / "websocket_market_features.csv"
+    features_path = cfg.output_root / WEBSOCKET_FEATURES_RELATIVE_PATH
     quality_path = gov_root / "websocket_feature_quality_report.csv"
     summary_path = gov_root / "websocket_feature_summary.json"
     previous_summary = read_json(summary_path, default={}) or {}

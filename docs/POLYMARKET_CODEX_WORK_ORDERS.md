@@ -4399,6 +4399,10 @@ or executor work from their diagnostics; the queue below remains binding.
   and enforceable merge-gate correction.
 - **Resolved by WO-99:** WO-33. WO-34/35 model use remains diagnostic inside
   H1-H3; WO-96 remains the only exact H3 verdict build.
+- **Pending review, not build permission:** any further WO-34/35 feature wiring
+  beyond WO-99's diagnostic H3 substrate still requires a separately numbered,
+  prospectively registered work order; it cannot be inferred from WO-33's
+  resolution.
 - **Blocked:** WO-48 (maker evidence gates); WO-67 (all P1-P5); WO-73 item 4 and
   WO-75 item 2 (part of the blocked executor authorization path).
 - **Deferred:** WO-70 until post-proof; WO-72 until the human ladder produces

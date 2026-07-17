@@ -14,6 +14,7 @@ from polymarket_predictive_engine.config import load_config
 from polymarket_predictive_engine.profit_verdict import (
     DEFAULT_SETTINGS,
     GATE_A_SEMANTICS_CAVEAT,
+    REGISTERED_AMENDMENTS,
     VERDICT_GATE_DEFINITIONS,
     _sign_test_p,
     build_profit_verdict,
@@ -432,6 +433,14 @@ def test_amendment_7_extension_protocol_is_registered_and_terminal(tmp_path):
     assert protocol["extension_regime"] == "post_wc_2026"
     # Registered before the final read it governs.
     assert protocol["registered_at_utc"] < protocol["final_read_due_utc"]
-    # The terminal rule resolves ALL branches: yes, no, and underpowered-no.
-    for fragment in ("yes path", "failing gate", "< 12 units", "turnover"):
+    # Amendment 8 (2026-07-17, owner-approved PR, registered before the
+    # 2026-07-19/20 final read) closed the pending-on-significance gap: the
+    # terminal rule now resolves EVERY branch, and the final read extends on
+    # any verdict other than all-gates-pass.
+    for fragment in ("yes path", "ANY other outcome", "pending significance", "amendment 8"):
         assert fragment in protocol["terminal_rule"]
+    for fragment in ("other than all-gates-pass", "single extension", "pending on significance"):
+        assert fragment in protocol["final_read_rule"]
+    amendment_8 = next(row for row in REGISTERED_AMENDMENTS if row["number"] == 8)
+    assert amendment_8["direction"] == "tighten_only"
+    assert amendment_8["registered_at_utc"] < "2026-07-19T00:00:00Z"

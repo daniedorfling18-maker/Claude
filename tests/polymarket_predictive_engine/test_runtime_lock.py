@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from polymarket_predictive_engine import runtime_lock
@@ -44,13 +45,22 @@ def test_runtime_lock_blocks_second_acquire_in_same_process(tmp_path: Path) -> N
     runtime_lock.release_runtime_lock(third)
 
 
+def _iso_minutes_ago(minutes: float) -> str:
+    stamp = datetime.now(timezone.utc) - timedelta(minutes=minutes)
+    return stamp.strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
 def test_runtime_lock_replaces_same_pid_lock_from_prior_process_start(
     tmp_path: Path,
     monkeypatch,
 ) -> None:
+    # S1 (ENGINEERING_STANDARDS): fixtures are clock-relative. The original
+    # hardcoded 2026-07-03 stamps became a time bomb — once wall-clock age
+    # crossed the 999999s staleness window (2026-07-14), the age branch won
+    # and the same-pid branch under test was never reached.
     cfg = _cfg(tmp_path)
-    monkeypatch.setattr(runtime_lock, "_PROCESS_STARTED_AT_UTC", "2026-07-03T05:20:00Z")
-    _write_lock(cfg, acquired_at_utc="2026-07-03T05:00:00Z")
+    monkeypatch.setattr(runtime_lock, "_PROCESS_STARTED_AT_UTC", _iso_minutes_ago(10))
+    _write_lock(cfg, acquired_at_utc=_iso_minutes_ago(30))
 
     lock = runtime_lock.acquire_runtime_lock(cfg, "prediction_cycle", stale_after_seconds=999999)
 
@@ -65,8 +75,8 @@ def test_runtime_lock_keeps_same_process_lock_after_process_start(
     monkeypatch,
 ) -> None:
     cfg = _cfg(tmp_path)
-    monkeypatch.setattr(runtime_lock, "_PROCESS_STARTED_AT_UTC", "2026-07-03T05:20:00Z")
-    _write_lock(cfg, acquired_at_utc="2026-07-03T05:21:00Z")
+    monkeypatch.setattr(runtime_lock, "_PROCESS_STARTED_AT_UTC", _iso_minutes_ago(30))
+    _write_lock(cfg, acquired_at_utc=_iso_minutes_ago(10))
 
     lock = runtime_lock.acquire_runtime_lock(cfg, "prediction_cycle", stale_after_seconds=999999)
 

@@ -18,7 +18,7 @@ from typing import Any, Mapping
 from .artifact_contracts import build_contract_registry, validate_contract_fixture
 from .config import EngineConfig, load_config
 from .degraded_state_watchdog import MISSING_INPUT_RULES
-from .utils import ensure_dir, parse_timestamp, read_csv_rows, read_json, safe_float, write_json
+from .utils import ensure_dir, parse_timestamp, read_csv_rows, read_json, safe_float, write_json, write_text_atomic
 
 
 WORK_ORDER = "WO-79"
@@ -518,7 +518,7 @@ def _notification(
         "Human operations alert only. This acceptance pass cannot trade or alter a gate.",
     ]
     ensure_dir(body_path.parent)
-    body_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    write_text_atomic(body_path, "\n".join(lines) + "\n")
     digest_material = json.dumps(
         {"status": payload.get("status"), "failures": failures, "target": payload.get("target_deploy_sha")},
         sort_keys=True,

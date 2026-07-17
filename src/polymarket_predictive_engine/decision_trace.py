@@ -7,7 +7,7 @@ from typing import Any
 
 from .config import EngineConfig, live_trading_allowed
 from .research_focus import build_research_focus
-from .utils import now_utc, parse_timestamp, read_csv_rows, read_json, safe_float, write_json
+from .utils import now_utc, parse_timestamp, read_csv_rows, read_json, safe_float, write_json, write_text_atomic
 
 TRACE_LIMIT = 30
 
@@ -303,7 +303,7 @@ async function load(){
 load(); setInterval(load, 5000);
 </script></body></html>
 """
-    (out / "agent_status.html").write_text(html, encoding="utf-8")
+    write_text_atomic(out / "agent_status.html", html)
 
 
 def build_agent_status(cfg: EngineConfig, trace: dict[str, Any] | None = None) -> dict[str, Any]:

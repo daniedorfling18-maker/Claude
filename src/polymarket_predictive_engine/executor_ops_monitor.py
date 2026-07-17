@@ -16,7 +16,7 @@ from typing import Any, Mapping
 
 from .a1_controls import build_a1_sweep_advisory
 from .config import EngineConfig, load_config
-from .utils import ensure_dir, parse_timestamp, read_csv_rows, read_json, safe_float, safe_int, write_json
+from .utils import ensure_dir, parse_timestamp, read_csv_rows, read_json, safe_float, safe_int, write_json, write_text_atomic
 
 
 WORK_ORDER = "WO-75"
@@ -233,7 +233,7 @@ def _notification(
         "Human operations alert only. This monitor cannot place, amend, cancel, sign, or authenticate orders.",
     ]
     ensure_dir(body_path.parent)
-    body_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    write_text_atomic(body_path, "\n".join(lines) + "\n")
     write_json(
         state_path,
         {

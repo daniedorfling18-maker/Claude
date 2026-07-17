@@ -1,0 +1,39 @@
+{
+  "events": [
+    {
+      "id": "recorded-event-1",
+      "slug": "world-cup-winner",
+      "title": "World Cup Winner ",
+      "markets": [
+        {
+          "id": "recorded-market-1",
+          "question": "Will Spain win the 2026 FIFA World Cup?",
+          "slug": "will-spain-win-the-2026-fifa-world-cup-963",
+          "outcomes": "[\"Yes\", \"No\"]",
+          "outcomePrices": "[\"0.5835\", \"0.4165\"]",
+          "clobTokenIds": "[\"11111111111111111111111111111111111111111111111111111111111111111\", \"22222222222222222222222222222222222222222222222222222222222222222\"]",
+          "active": true,
+          "closed": false,
+          "acceptingOrders": true,
+          "groupItemTitle": "Spain"
+        },
+        {
+          "id": "recorded-market-2",
+          "question": "Will England win the 2026 FIFA World Cup?",
+          "slug": "will-england-win-the-2026-fifa-world-cup-937",
+          "outcomes": "[\"Yes\", \"No\"]",
+          "outcomePrices": "[\"0\", \"1\"]",
+          "clobTokenIds": "[\"33333333333333333333333333333333333333333333333333333333333333333\", \"44444444444444444444444444444444444444444444444444444444444444444\"]",
+          "active": true,
+          "closed": true,
+          "acceptingOrders": false,
+          "groupItemTitle": "England"
+        }
+      ]
+    }
+  ],
+  "pagination": {
+    "hasMore": true,
+    "totalResults": 40
+  }
+}

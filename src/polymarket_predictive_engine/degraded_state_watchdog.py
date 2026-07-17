@@ -18,7 +18,7 @@ from typing import Any, Mapping
 
 from .config import EngineConfig, load_config
 from .runtime_lock import runtime_lock
-from .utils import ensure_dir, now_utc, read_csv_rows, read_json, serialize_value, write_json
+from .utils import ensure_dir, now_utc, read_csv_rows, read_json, serialize_value, write_json, write_text_atomic
 
 
 WORK_ORDER = "WO-78+WO-83+WO-84+WO-85+WO-86"
@@ -838,7 +838,7 @@ def _notification(
         "Human review only. Fail-closed and risk states remain unchanged; this watchdog cannot trade or cancel orders.",
     ]
     ensure_dir(body_path.parent)
-    body_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    write_text_atomic(body_path, "\n".join(lines) + "\n")
     notify = bool(enabled and new)
     return {
         "enabled": enabled,

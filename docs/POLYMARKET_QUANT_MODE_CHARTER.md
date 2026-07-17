@@ -791,6 +791,20 @@ broker, or order paths. Exact observations, frozen episodes, and the verdict
 are published under `outputs/h2_dutch/`, enrolled in the evidence anchor, and
 shown as the dashboard's H2 authority.
 
+**2026-07-16 - WO-101 implemented by Codex; publication pending WO-100.**
+S2/S4 enforcement now inventories every syntax-visible direct writer and
+HTTP/websocket ingestion call in the runtime package by qualified call site
+and count. Shared final text/HTML/dashboard outputs use atomic replacement;
+the maker replay gzip now stages and fsyncs before `os.replace`. A
+machine-readable manifest contracts every intentional append/archive/lock
+write and every external surface to recorded, sanitized payload provenance,
+an executable replay test, and fail-safe behavior. Mutation tests prove that
+an unregistered writer or duplicate HTTP call fails. This is engineering
+governance only: no model, hypothesis, signal, fee, gate, threshold, sizing,
+capital, paper/live permission, credential, signer, broker, or order path is
+changed. Merge must follow WO-100 so the unfiltered full-suite required gate
+actually enforces these tests.
+
 ## Rules of engagement for coding agents
 
 0. **Division of labour**: the orchestrating agent writes/updates this charter and the work orders

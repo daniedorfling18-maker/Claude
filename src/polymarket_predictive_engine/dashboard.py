@@ -13,7 +13,7 @@ from typing import Any
 
 from .config import EngineConfig
 from .discovery_policy import partition_active_queries, primary_hypothesis_targets
-from .utils import now_utc, parse_timestamp, read_csv_rows, read_json, safe_float, serialize_value, write_json
+from .utils import now_utc, parse_timestamp, read_csv_rows, read_json, safe_float, serialize_value, write_json, write_text_atomic
 from .worldcup_validation import is_worldcup_winner_market
 
 
@@ -5349,12 +5349,10 @@ def _write_dashboard_data(path: Path, payload: dict[str, Any]) -> Path:
             "truncated_lists": limits[:100],
             "source_artifacts_complete": True,
         }
-    path.parent.mkdir(parents=True, exist_ok=True)
-    temp_path = path.with_name(f".{path.name}.{os.getpid()}.tmp")
-    with temp_path.open("w", encoding="utf-8") as f:
-        json.dump(trimmed, f, sort_keys=True, separators=(",", ":"), default=serialize_value)
-    temp_path.replace(path)
-    return path
+    return write_text_atomic(
+        path,
+        json.dumps(trimmed, sort_keys=True, separators=(",", ":"), default=serialize_value),
+    )
 
 
 def render_dashboard(cfg: EngineConfig, latest_report: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -5746,7 +5744,7 @@ def render_dashboard(cfg: EngineConfig, latest_report: dict[str, Any] | None = N
     }
     html_out = _inject_html_overlay(HTML)
     _write_dashboard_data(out / "dashboard_data.json", payload)
-    (out / "index.html").write_text(html_out, encoding="utf-8")
+    write_text_atomic(out / "index.html", html_out)
     # The governance proof_questions.json artifact is written here rather than in a separate
     # post-render step, so it always matches the served dashboard on every render path and
     # refresh_governance no longer needs a second apply pass (which re-wrote the payload

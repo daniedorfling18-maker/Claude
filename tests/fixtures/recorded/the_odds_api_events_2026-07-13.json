@@ -1,0 +1,36 @@
+[
+  {
+    "id": "recorded-fixture-1",
+    "sport_key": "soccer_fifa_world_cup",
+    "sport_title": "FIFA World Cup",
+    "commence_time": "2026-07-14T19:00:00Z",
+    "home_team": "France",
+    "away_team": "Spain",
+    "bookmakers": [
+      {
+        "key": "pinnacle",
+        "title": "Pinnacle",
+        "last_update": "2026-07-13T08:12:33Z",
+        "markets": [
+          {
+            "key": "h2h",
+            "last_update": "2026-07-13T08:12:33Z",
+            "outcomes": [
+              {"name": "France", "price": 2.37},
+              {"name": "Spain", "price": 3.31},
+              {"name": "Draw", "price": 3.24}
+            ]
+          },
+          {
+            "key": "totals",
+            "last_update": "2026-07-13T08:12:33Z",
+            "outcomes": [
+              {"name": "Over", "price": 1.89, "point": 2.5},
+              {"name": "Under", "price": 1.99, "point": 2.5}
+            ]
+          }
+        ]
+      }
+    ]
+  }
+]

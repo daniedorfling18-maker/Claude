@@ -6,7 +6,7 @@ import re
 from typing import Any, Mapping
 
 from .config import EngineConfig, load_config
-from .utils import now_utc, read_json, safe_float, write_json
+from .utils import now_utc, read_json, safe_float, write_json, write_text_atomic
 
 OVERLAY_START = "<!-- proof-questions-overlay:start -->"
 OVERLAY_END = "<!-- proof-questions-overlay:end -->"
@@ -434,16 +434,16 @@ def apply_dashboard_proof_questions(
     proof = build_proof_questions(cfg, dashboard_data=data, sharp_anchor_coverage=sharp_anchor_coverage)
     data["proof_questions"] = proof
     data_path.parent.mkdir(parents=True, exist_ok=True)
-    data_path.write_text(
+    write_text_atomic(
+        data_path,
         json.dumps(data, sort_keys=True, separators=(",", ":"), default=str),
-        encoding="utf-8",
     )
     write_json(cfg.governance_root / "proof_questions.json", proof)
 
     html_status = "missing_html"
     if html_path.exists():
         html = html_path.read_text(encoding="utf-8")
-        html_path.write_text(_inject_html_overlay(html), encoding="utf-8")
+        write_text_atomic(html_path, _inject_html_overlay(html))
         html_status = "overlay_written"
 
     return {

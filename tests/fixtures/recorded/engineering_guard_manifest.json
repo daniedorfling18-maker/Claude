@@ -1,0 +1,319 @@
+{
+  "version": 1,
+  "s2_direct_writes": {
+    "config.py:write_risk_event:path.open:a": {
+      "count": 1,
+      "classification": "append_only",
+      "artifact": "outputs/polymarket_model_governance/risk_events.jsonl",
+      "cadence": "only when a guarded live-capability check records a blocked action",
+      "interleaving": "append-only one-line audit event; multiple concurrent writers are not authorized and readers treat an incomplete trailing line as pending"
+    },
+    "corpus_retention.py:_compact_training_archive:gzip.open:wt": {
+      "count": 1,
+      "classification": "archive_staging",
+      "artifact": "work/corpus_retention compacted gzip temporary sibling",
+      "cadence": "bounded corpus-retention maintenance",
+      "interleaving": "writes a private temporary archive which is published only by replacement after close"
+    },
+    "corpus_retention.py:_merge_gzip_archive:gzip.open:wt": {
+      "count": 1,
+      "classification": "archive_staging",
+      "artifact": "work/corpus_retention merged gzip temporary sibling",
+      "cadence": "bounded corpus-retention maintenance",
+      "interleaving": "writes an unadvertised temporary archive before atomic replacement; readers retain the prior complete archive"
+    },
+    "corpus_retention.py:_write_gzip:gzip.open:wt": {
+      "count": 1,
+      "classification": "archive_staging",
+      "artifact": "work/corpus_retention unique gzip spool",
+      "cadence": "bounded corpus-retention maintenance",
+      "interleaving": "unique spool path is not a shared latest artifact and is consumed only after the writer closes it"
+    },
+    "cost_ledger.py:_append_entries:path.open:a": {
+      "count": 1,
+      "classification": "append_only",
+      "artifact": "outputs/performance/cost_ledger.csv",
+      "cadence": "daily cost sync or explicit human cost registration",
+      "interleaving": "registered single scheduler/human writer appends fsynced rows; historical bytes are never rewritten and duplicate cost_ref values are rejected"
+    },
+    "degraded_state_watchdog.py:_append_incidents:path.open:a": {
+      "count": 1,
+      "classification": "append_only",
+      "artifact": "outputs/polymarket_model_governance/degraded_state_incidents.csv",
+      "cadence": "VPS safety pulse",
+      "interleaving": "single scheduler lane appends deduplicated fsynced incident rows; dashboard readers may observe either the old file or complete appended rows"
+    },
+    "disaster_recovery.py:_materialise_files:write_bytes": {
+      "count": 1,
+      "classification": "restore_target",
+      "artifact": "operator-selected offline disaster-restore root",
+      "cadence": "explicit restore drill or human recovery only",
+      "interleaving": "restore is prohibited against the running production root, so no concurrent runtime reader is permitted"
+    },
+    "disaster_recovery.py:_write_archive:tarfile.open:w:gz": {
+      "count": 1,
+      "classification": "archive_staging",
+      "artifact": "outputs/disaster_recovery private snapshot temporary file",
+      "cadence": "registered state snapshot",
+      "interleaving": "archive is built at a private temporary path and only the closed file is published"
+    },
+    "dutch_arb_monitor.py:_append_csv:path.open:a": {
+      "count": 1,
+      "classification": "append_only",
+      "artifact": "outputs/dutch_arb_monitor/dutch_arb_opportunities.csv",
+      "cadence": "one registered dutch-arb monitor process per scan window",
+      "interleaving": "the monitor is the sole writer and appends complete flushed rows; overlapping monitor writers are prohibited"
+    },
+    "ledger_anchor.py:_append_chain_row:path.open:a": {
+      "count": 1,
+      "classification": "append_only",
+      "artifact": "outputs/ledger_anchor/ledger_anchor_chain.csv",
+      "cadence": "daily anchored-ledger run under its runtime lock",
+      "interleaving": "runtime lock serializes chain-head calculation and append; prior bytes remain immutable and the row is fsynced before head publication"
+    },
+    "maker_fill_replay.py:_write_gzip_csv:gzip.open:wt": {
+      "count": 1,
+      "classification": "atomic_staging",
+      "artifact": "outputs/maker_carry/official_book_archive/*.csv.gz temporary sibling",
+      "cadence": "maker fill-replay book snapshot",
+      "interleaving": "gzip is written and fsynced at a unique sibling path then os.replace publishes it, so readers keep the previous complete gzip until replacement"
+    },
+    "refresh_governance.py:_GovernanceRefreshLock.acquire:path.open:a+b": {
+      "count": 1,
+      "classification": "exclusive_lock",
+      "artifact": "governance refresh lock file",
+      "cadence": "each governance refresh attempt",
+      "interleaving": "the file descriptor is the cross-process lock primitive and carries no concurrently consumed telemetry payload"
+    },
+    "runtime_lock.py:_try_acquire:os.open:flags": {
+      "count": 1,
+      "classification": "exclusive_lock",
+      "artifact": "runtime lock sentinel selected by lock name",
+      "cadence": "each guarded scheduled command",
+      "interleaving": "O_CREAT|O_EXCL makes acquisition exclusive; a losing writer fails closed rather than sharing the path"
+    },
+    "stage_operator.py:_atomic_write_text:path.open:w": {
+      "count": 1,
+      "classification": "atomic_staging",
+      "artifact": "outputs/execution/stage_day.md temporary sibling",
+      "cadence": "human stage-day render",
+      "interleaving": "private sibling is fsynced and replaced atomically; readers see the old or new complete page"
+    },
+    "utils.py:append_csv_rows:path.open:a": {
+      "count": 1,
+      "classification": "append_only",
+      "artifact": "registered append-only CSV path supplied by caller",
+      "cadence": "caller-defined append-only ledger cadence",
+      "interleaving": "schema is verified, historical bytes are preserved, rows are flushed and fsynced; callers must serialize multiple writers"
+    },
+    "utils.py:write_csv:path.open:w": {
+      "count": 1,
+      "classification": "atomic_helper",
+      "artifact": "unique sibling temporary file for any write_csv destination",
+      "cadence": "caller-defined",
+      "interleaving": "temporary CSV is fsynced and replace_with_retry publishes it atomically"
+    },
+    "utils.py:write_json:path.open:w": {
+      "count": 1,
+      "classification": "atomic_helper",
+      "artifact": "unique sibling temporary file for any write_json destination",
+      "cadence": "caller-defined",
+      "interleaving": "temporary JSON is fsynced and replace_with_retry publishes it atomically"
+    },
+    "utils.py:write_text_atomic:path.open:w": {
+      "count": 1,
+      "classification": "atomic_helper",
+      "artifact": "unique sibling temporary file for any write_text_atomic destination",
+      "cadence": "caller-defined",
+      "interleaving": "temporary text is fsynced and os.replace publishes it atomically"
+    },
+    "wallet_reconciliation.py:_archive_overflow:gzip.open:wt": {
+      "count": 1,
+      "classification": "archive_staging",
+      "artifact": "outputs/polymarket_training_archive/wallet_*_<UTC>.csv.gz",
+      "cadence": "wallet-ledger cap overflow only",
+      "interleaving": "timestamped immutable archive is not advertised as latest and the capped live CSV is published only after archive close"
+    },
+    "websocket_collector.py:_append_unique_lifecycle_rows:path.open:a": {
+      "count": 1,
+      "classification": "append_only",
+      "artifact": "outputs/polymarket_websocket/resolution_events.csv and market_births.csv",
+      "cadence": "live websocket lifecycle batches",
+      "interleaving": "websocket_lifecycle_capture runtime lock serializes both ledgers; deduplicated rows are flushed and fsynced before lock release"
+    }
+  },
+  "s4_recorded_surfaces": {
+    "binance_klines": {
+      "endpoint": "Binance GET /api/v3/klines",
+      "fixtures": ["binance_klines_2026-07-16.json"],
+      "replay_test": "tests/polymarket_predictive_engine/test_wo101_recorded_surfaces.py::test_recorded_public_market_data_surfaces_replay",
+      "fail_safe": "missing or malformed candles yield no model/settlement price and cannot authorize a trade"
+    },
+    "clob_books": {
+      "endpoint": "CLOB GET /book and POST /books",
+      "fixtures": ["clob_book_2026-07-15.json", "clob_books_2026-07-15.json"],
+      "replay_test": "tests/polymarket_predictive_engine/test_wo92_recorded_api_fixtures.py::test_recorded_clob_books_replay_all_current_book_parsers",
+      "fail_safe": "missing, malformed, or one-sided executable books exclude the candidate or mark the scan incomplete"
+    },
+    "clob_prices_history": {
+      "endpoint": "CLOB GET /prices-history",
+      "fixtures": ["clob_prices_history_2026-07-15.json"],
+      "replay_test": "tests/polymarket_predictive_engine/test_wo92_recorded_api_fixtures.py::test_recorded_price_history_replays_all_current_history_parsers",
+      "fail_safe": "missing or malformed history leaves closing-line/repricing evidence unavailable"
+    },
+    "clob_websocket": {
+      "endpoint": "CLOB market-channel websocket",
+      "fixtures": ["clob_websocket_book_2026-07-16.json"],
+      "replay_test": "tests/polymarket_predictive_engine/test_wo101_recorded_surfaces.py::test_recorded_websocket_book_replays_real_string_envelope",
+      "fail_safe": "unparseable messages generate no feature row and remain visible in data-quality telemetry"
+    },
+    "coingecko_simple_price": {
+      "endpoint": "CoinGecko GET /api/v3/simple/price",
+      "fixtures": ["coingecko_simple_price_2026-07-16.json"],
+      "replay_test": "tests/polymarket_predictive_engine/test_wo101_recorded_surfaces.py::test_recorded_public_market_data_surfaces_replay",
+      "fail_safe": "missing or non-positive POL/USD leaves costs unavailable rather than substituting a favorable rate"
+    },
+    "coinbase_candles": {
+      "endpoint": "Coinbase Exchange GET /products/{product}/candles",
+      "fixtures": ["coinbase_candles_2026-07-16.json"],
+      "replay_test": "tests/polymarket_predictive_engine/test_wo101_recorded_surfaces.py::test_recorded_public_market_data_surfaces_replay",
+      "fail_safe": "missing or malformed fallback candles yield no proxy settlement price"
+    },
+    "data_api_account": {
+      "endpoint": "Data API GET /activity and /positions",
+      "fixtures": ["data_api_activity_2026-07-15.json", "data_api_positions_2026-07-15.json"],
+      "replay_test": "tests/polymarket_predictive_engine/test_wo92_recorded_api_fixtures.py::test_recorded_data_api_payloads_replay_all_current_parsers",
+      "fail_safe": "incomplete account pages remain explicitly incomplete and cannot clear reconciliation"
+    },
+    "data_api_leaderboard": {
+      "endpoint": "Data API GET /v1/leaderboard and legacy /leaderboard",
+      "fixtures": ["data_api_leaderboard_2026-07-16.json"],
+      "replay_test": "tests/polymarket_predictive_engine/test_wo101_recorded_surfaces.py::test_recorded_wallet_leaderboard_replays",
+      "fail_safe": "empty, malformed, or incomplete pages remain an error/partial coverage state"
+    },
+    "data_api_holders": {
+      "endpoint": "Data API GET /holders",
+      "fixtures": ["data_api_holders_2026-07-16.json"],
+      "replay_test": "tests/polymarket_predictive_engine/test_wo92_recorded_api_fixtures.py::test_recorded_holder_token_groups_preserve_wallet_token_and_amount",
+      "fail_safe": "unmatched or malformed holder rows stay absent from smart-flow evidence rather than being inferred"
+    },
+    "data_api_trades_and_oi": {
+      "endpoint": "Data API GET /trades and /oi",
+      "fixtures": ["data_api_trades_2026-07-15.json", "data_api_oi_2026-07-16.json"],
+      "replay_test": "tests/polymarket_predictive_engine/test_wo92_recorded_api_fixtures.py::test_recorded_data_api_payloads_replay_all_current_parsers",
+      "fail_safe": "malformed trade/OI rows are excluded and coverage remains incomplete"
+    },
+    "data_api_wallet_account": {
+      "endpoint": "Data API GET /activity, /positions, and /value",
+      "fixtures": ["data_api_activity_2026-07-15.json", "data_api_positions_2026-07-15.json", "data_api_value_2026-07-16.json"],
+      "replay_test": "tests/polymarket_predictive_engine/test_wo101_recorded_surfaces.py::test_recorded_contracts_and_polygon_rpc_replay",
+      "fail_safe": "missing account legs keep wallet reconciliation unavailable or explicitly incomplete"
+    },
+    "deribit_book_summary": {
+      "endpoint": "Deribit GET /api/v2/public/get_book_summary_by_currency",
+      "fixtures": ["deribit_book_summary_2026-07-16.json"],
+      "replay_test": "tests/polymarket_predictive_engine/test_wo101_recorded_surfaces.py::test_recorded_public_market_data_surfaces_replay",
+      "fail_safe": "missing/unparseable option rows produce no fundamental probability"
+    },
+    "gamma_events": {
+      "endpoint": "Gamma GET /events",
+      "fixtures": ["gamma_negrisk_event_2026-07-16.json"],
+      "replay_test": "tests/polymarket_predictive_engine/test_wo101_recorded_surfaces.py::test_recorded_gamma_event_replays_network_scanners",
+      "fail_safe": "malformed or incomplete event baskets are skipped and cannot become executable evidence"
+    },
+    "gamma_events_and_clob_books": {
+      "endpoint": "Gamma GET /events plus CLOB GET /book used by the dutch scanner helper",
+      "fixtures": ["gamma_negrisk_event_2026-07-16.json", "clob_book_2026-07-15.json"],
+      "replay_test": "tests/polymarket_predictive_engine/test_wo92_recorded_api_fixtures.py::test_recorded_negrisk_event_builds_fee_bearing_exact_h2_plan",
+      "fail_safe": "any missing event leg/book makes the basket incomplete and non-qualifying"
+    },
+    "gamma_markets": {
+      "endpoint": "Gamma GET /markets",
+      "fixtures": ["gamma_markets_2026-07-15.json"],
+      "replay_test": "tests/polymarket_predictive_engine/test_wo92_recorded_api_fixtures.py::test_recorded_gamma_markets_replay_all_current_market_parsers",
+      "fail_safe": "missing or ambiguous market state produces no resolution/anchor and remains unresolved"
+    },
+    "gamma_public_search": {
+      "endpoint": "Gamma GET /public-search",
+      "fixtures": ["gamma_public_search_2026-07-16.json"],
+      "replay_test": "tests/polymarket_predictive_engine/test_wo101_recorded_surfaces.py::test_recorded_gamma_public_search_replays",
+      "fail_safe": "unmatched search rows remain unmapped and cannot inherit an anchor or settlement"
+    },
+    "generic_public_json": {
+      "endpoint": "configured external JSON/CSV feed URL (recorded JSON shape uses CoinGecko)",
+      "fixtures": ["coingecko_simple_price_2026-07-16.json"],
+      "replay_test": "tests/polymarket_predictive_engine/test_wo101_recorded_surfaces.py::test_recorded_public_market_data_surfaces_replay",
+      "fail_safe": "feed failures are recorded as quality errors and contribute zero rows"
+    },
+    "official_contracts": {
+      "endpoint": "Polymarket official contracts documentation page",
+      "fixtures": ["official_contracts_excerpt_2026-07-16.html"],
+      "replay_test": "tests/polymarket_predictive_engine/test_wo101_recorded_surfaces.py::test_recorded_contracts_and_polygon_rpc_replay",
+      "fail_safe": "missing named pUSD/CTF addresses blocks live contract reconciliation unless a matching official cached registry exists"
+    },
+    "polygon_rpc": {
+      "endpoint": "Polygon JSON-RPC",
+      "fixtures": ["polygon_rpc_chain_id_2026-07-16.json"],
+      "replay_test": "tests/polymarket_predictive_engine/test_wo101_recorded_surfaces.py::test_recorded_contracts_and_polygon_rpc_replay",
+      "fail_safe": "RPC errors or non-hex results leave the on-chain reconciliation leg unavailable"
+    },
+    "the_odds_api_events": {
+      "endpoint": "The Odds API GET /v4/sports/{sport}/odds",
+      "fixtures": ["the_odds_api_events_2026-07-13.json"],
+      "replay_test": "tests/polymarket_predictive_engine/test_wo101_recorded_surfaces.py::test_recorded_odds_api_catalogue_and_events_replay",
+      "fail_safe": "unknown sports, absent priority books, or malformed prices produce no sharp anchor row"
+    },
+    "the_odds_api_sports": {
+      "endpoint": "The Odds API GET /v4/sports",
+      "fixtures": ["the_odds_api_sports_2026-07-16.json"],
+      "replay_test": "tests/polymarket_predictive_engine/test_wo101_recorded_surfaces.py::test_recorded_odds_api_catalogue_and_events_replay",
+      "fail_safe": "catalogue failure is visible and configured unknown sports are skipped rather than charged/fetched blindly"
+    }
+  },
+  "s4_external_ingestion": {
+    "closing_line.py:_fetch_gamma_close_time:requests.get": {"count": 1, "surface": "gamma_markets"},
+    "closing_line.py:_fetch_price_history_close_line:requests.get": {"count": 1, "surface": "clob_prices_history"},
+    "cost_ledger.py:_fetch_pol_usd:requests.get": {"count": 1, "surface": "coingecko_simple_price"},
+    "crypto_fundamental.py:fetch_deribit_book:requests.get": {"count": 1, "surface": "deribit_book_summary"},
+    "crypto_updown_model.py:_fetch_json:urllib.request.urlopen": {"count": 1, "surface": "binance_klines"},
+    "crypto_updown_settlement.py:_fetch_binance_window_prices:urllib.request.urlopen": {"count": 1, "surface": "binance_klines"},
+    "crypto_updown_settlement.py:_fetch_coinbase_window_prices:urllib.request.urlopen": {"count": 1, "surface": "coinbase_candles"},
+    "dutch_arb_monitor.py:_get:requests.get": {"count": 1, "surface": "gamma_events_and_clob_books"},
+    "event_group_consistency.py:_book_asks:requests.get": {"count": 1, "surface": "clob_books"},
+    "event_group_consistency.py:scan_event_groups:requests.get": {"count": 1, "surface": "gamma_events"},
+    "external_feed_collector.py:_fetch_url:requests.get": {"count": 1, "surface": "generic_public_json"},
+    "historical_backfill.py:_fetch_page:requests.get": {"count": 1, "surface": "gamma_markets"},
+    "implication_consistency.py:scan_implication_networks:requests.get": {"count": 1, "surface": "gamma_events"},
+    "maker_carry_study.py:_fetch_books:requests.get": {"count": 1, "surface": "clob_books"},
+    "maker_carry_study.py:_fetch_books:requests.post": {"count": 1, "surface": "clob_books"},
+    "maker_carry_study.py:_legacy_book_competition:requests.get": {"count": 1, "surface": "clob_books"},
+    "maker_carry_study.py:_price_series:requests.get": {"count": 1, "surface": "clob_prices_history"},
+    "maker_carry_study.py:_recent_prints:requests.get": {"count": 1, "surface": "data_api_trades_and_oi"},
+    "maker_carry_study.py:_rewarded_universe:requests.get": {"count": 1, "surface": "gamma_markets"},
+    "maker_fill_replay.py:snapshot_official_books:requests.get": {"count": 1, "surface": "clob_books"},
+    "maker_fill_replay.py:snapshot_official_books:requests.post": {"count": 1, "surface": "clob_books"},
+    "maker_live_test.py:_fetch:requests.get": {"count": 1, "surface": "data_api_account"},
+    "price_history_collector.py:_request_history:requests.get": {"count": 1, "surface": "clob_prices_history"},
+    "reconstructed_signal_clv.py:_fetch_gamma_close_time:requests.get": {"count": 1, "surface": "gamma_markets"},
+    "reconstructed_signal_clv.py:_official_price_history:requests.get": {"count": 1, "surface": "clob_prices_history"},
+    "requote_alerts.py:_gamma_resolution_state:requests.get": {"count": 1, "surface": "gamma_markets"},
+    "requote_alerts.py:_rest_book_snapshots:requests.post": {"count": 1, "surface": "clob_books"},
+    "resolution_collector.py:fetch_gamma_market:urllib.request.urlopen": {"count": 1, "surface": "gamma_markets"},
+    "shadow_cohort.py:_public_search_market_by_slug:urllib.request.urlopen": {"count": 1, "surface": "gamma_public_search"},
+    "sharp_anchor.py:_h2h_match_tokens_from_public_search:requests.get": {"count": 1, "surface": "gamma_public_search"},
+    "sharp_anchor.py:_worldcup_winner_tokens_from_public_search:requests.get": {"count": 1, "surface": "gamma_public_search"},
+    "sharp_odds_fetch.py:_provider_sports:requests.get": {"count": 1, "surface": "the_odds_api_sports"},
+    "sharp_odds_fetch.py:fetch_sharp_odds:requests.get": {"count": 1, "surface": "the_odds_api_events"},
+    "snapshot_label_collector.py:_fetch_gamma_market_by_slug:session.get": {"count": 1, "surface": "gamma_markets"},
+    "trade_print_collector.py:_collect_open_interest:requests.get": {"count": 1, "surface": "data_api_trades_and_oi"},
+    "trade_print_collector.py:backfill_trade_prints:requests.get": {"count": 1, "surface": "data_api_trades_and_oi"},
+    "trade_print_collector.py:collect_trade_prints:requests.get": {"count": 1, "surface": "data_api_trades_and_oi"},
+    "wallet_intelligence_collector.py:_fetch_holders:requests.get": {"count": 1, "surface": "data_api_holders"},
+    "wallet_intelligence_collector.py:_fetch_leaderboard:requests.get": {"count": 2, "surface": "data_api_leaderboard"},
+    "wallet_reconciliation.py:_contract_registry:requests.get": {"count": 1, "surface": "official_contracts"},
+    "wallet_reconciliation.py:_get_json:requests.get": {"count": 1, "surface": "data_api_wallet_account"},
+    "wallet_reconciliation.py:_rpc:requests.post": {"count": 1, "surface": "polygon_rpc"},
+    "websocket_collector.py:_collect_messages:websockets.connect": {"count": 1, "surface": "clob_websocket"},
+    "websocket_resolution_collector.py:_fetch_page:requests.get": {"count": 1, "surface": "gamma_markets"}
+  }
+}

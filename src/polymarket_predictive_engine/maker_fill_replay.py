@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import csv
 import gzip
+import os
 import time
 from bisect import bisect_left, bisect_right
 from pathlib import Path
@@ -116,10 +117,17 @@ def _read_csv_any(path: Path) -> list[dict[str, str]]:
 
 def _write_gzip_csv(path: Path, rows: list[dict[str, Any]], fieldnames: list[str]) -> Path:
     path.parent.mkdir(parents=True, exist_ok=True)
-    with gzip.open(path, "wt", encoding="utf-8", newline="") as handle:
-        writer = csv.DictWriter(handle, fieldnames=fieldnames, extrasaction="ignore")
-        writer.writeheader()
-        writer.writerows(rows)
+    temporary = path.with_name(f".{path.name}.{os.getpid()}.{time.time_ns()}.tmp")
+    try:
+        with gzip.open(temporary, "wt", encoding="utf-8", newline="") as handle:
+            writer = csv.DictWriter(handle, fieldnames=fieldnames, extrasaction="ignore")
+            writer.writeheader()
+            writer.writerows(rows)
+        with temporary.open("rb") as handle:
+            os.fsync(handle.fileno())
+        os.replace(temporary, path)
+    finally:
+        temporary.unlink(missing_ok=True)
     return path
 
 

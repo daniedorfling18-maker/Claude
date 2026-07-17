@@ -17,7 +17,7 @@ from typing import Any, Callable
 
 from .config import EngineConfig, load_config
 from .cost_ledger import aggregate_costs, registered_hypothetical_cost_stack
-from .utils import now_utc, parse_timestamp, read_csv_rows, read_json, safe_float, write_json
+from .utils import now_utc, parse_timestamp, read_csv_rows, read_json, safe_float, write_json, write_text_atomic
 
 
 SIMULATED_BANNER = "SIMULATED - paper/model results do not represent live trading"
@@ -670,7 +670,7 @@ def _write_markdown(path: Path, payload: dict[str, Any]) -> None:
             )
         lines.append("")
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text("\n".join(lines).rstrip() + "\n", encoding="utf-8")
+    write_text_atomic(path, "\n".join(lines).rstrip() + "\n")
 
 
 def build_performance_factsheet(cfg: EngineConfig) -> dict[str, Any]:

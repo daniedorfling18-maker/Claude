@@ -5,7 +5,7 @@ from pathlib import Path
 from typing import Any
 
 from .config import EngineConfig, load_config
-from .utils import discover_files, load_yaml, write_csv, write_json
+from .utils import discover_files, load_yaml, write_csv, write_json, write_text_atomic
 
 SERVICE_FIELDS = ["service_name", "image_name", "command", "script_entry_point", "category_covered", "input_files", "output_files", "polling_frequency", "environment_variables_used", "writes_raw_data", "writes_transformed_data", "writes_ml_predictions", "writes_opportunities", "writes_execution_logs", "writes_state_files", "can_place_orders", "monitor_only", "paper_only", "has_live_trading_path", "secrets_required", "data_timestamped_point_in_time", "suitable_for_model_training", "suitable_only_for_diagnostics", "known_failure_modes", "duplicate_writer_risk", "conflicting_signal_risk"]
 
@@ -137,7 +137,7 @@ def write_pipeline_map(path: Path, rows: list[dict[str, Any]]) -> None:
     for row in rows:
         lines.append(f"| {row.get('service_name','')} | {row.get('category_covered','')} | {row.get('can_place_orders','')} | {row.get('suitable_for_model_training','')} | {row.get('output_files','')} |")
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    write_text_atomic(path, "\n".join(lines) + "\n")
 
 
 def main(config_path: str) -> list[dict[str, Any]]:

@@ -6,7 +6,7 @@ from statistics import median
 from typing import Any
 
 from .config import EngineConfig, load_config
-from .utils import boolish, now_utc, read_csv_rows, safe_float, write_csv, write_json
+from .utils import boolish, now_utc, read_csv_rows, safe_float, write_csv, write_json, write_text_atomic
 from .worldcup_validation import classify_market_family, is_worldcup_market
 
 OUTPUT_DIRNAME = "polymarket_strategy_v2"
@@ -827,7 +827,7 @@ def _write_markdown(path: Path, report: dict[str, Any]) -> None:
             "This report is shadow-only research evidence. It is not permission to paper trade or live trade.",
         ]
     )
-    path.write_text("\n".join(lines), encoding="utf-8")
+    write_text_atomic(path, "\n".join(lines))
 
 
 def run(config_path: str = "polymarket_predictive_config.example.yaml") -> dict[str, Any]:

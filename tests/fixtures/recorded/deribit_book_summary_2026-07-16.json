@@ -1,0 +1,27 @@
+{
+  "jsonrpc": "2.0",
+  "result": [
+    {
+      "instrument_name": "BTC-18JUL26-55000-C",
+      "mark_price": 0.13923316,
+      "underlying_price": 63879.7,
+      "creation_timestamp": 1784243640568
+    },
+    {
+      "instrument_name": "BTC-18JUL26-56000-C",
+      "mark_price": 0.12358375,
+      "underlying_price": 63879.7,
+      "creation_timestamp": 1784243640567
+    },
+    {
+      "instrument_name": "BTC-18JUL26-57000-C",
+      "mark_price": 0.10793552,
+      "underlying_price": 63879.7,
+      "creation_timestamp": 1784243640570
+    }
+  ],
+  "usIn": 1784243641009167,
+  "usOut": 1784243641009352,
+  "usDiff": 185,
+  "testnet": false
+}

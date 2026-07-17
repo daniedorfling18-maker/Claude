@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import Any, Mapping
 
 from .config import EngineConfig
-from .utils import parse_timestamp, read_json, safe_float, write_json
+from .utils import parse_timestamp, read_json, safe_float, write_json, write_text_atomic
 
 
 WORK_ORDER = "WO-81"
@@ -139,7 +139,7 @@ def _write_markdown(path: Path, payload: Mapping[str, Any]) -> None:
         "",
     ]
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text("\n".join(lines), encoding="utf-8")
+    write_text_atomic(path, "\n".join(lines))
 
 
 def build_a1_sweep_advisory(

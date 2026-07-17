@@ -4275,13 +4275,122 @@ isolated public-network smoke scan discovered 20 negRisk events, priced three
 complete baskets, appended three exact rows, remained `collecting` with zero
 manufactured episodes, and reported both trading-invoked flags false.
 
+## WO-101 - Extend S2/S4 mechanical guards across runtime call sites
+
+Status: IMPLEMENTED by Codex on 2026-07-16; publication is blocked on the
+independent review/merge of WO-100 so the required PR gate runs the unfiltered
+full suite.
+
+Owner authorization: the 2026-07-16 corrective instruction to extend the S2
+and S4 mechanical guards. This WO is engineering governance and atomic-write
+hardening only. It cannot change a model, hypothesis, signal, alpha/fee/gate
+threshold, stake, capital rule, paper/live permission, credential, signer,
+broker, cancellation, or order path.
+
+Files: this register, `docs/ENGINEERING_STANDARDS.md`,
+`docs/POLYMARKET_QUANT_MODE_CHARTER.md`, new
+`engineering_standards_guard.py`, the recorded fixture corpus and provenance
+README, the machine-readable engineering guard manifest, the WO-101 guard and
+replay tests, and runtime modules whose final text/HTML/gzip publication was
+made atomic.
+
+Registered implementation contract:
+
+1. The offline AST scanner inventories every syntax-visible direct
+   `write_text`, `write_bytes`, write/append `open`, gzip/tar writer, and
+   exclusive `os.open` call in `src/polymarket_predictive_engine`, keyed by
+   file, qualified function, primitive/mode, and count. The actual inventory
+   must exactly equal the reviewed S2 manifest. A new call or a second call in
+   an existing function fails the full suite.
+2. The same scanner inventories direct `requests`, `urllib`, session, and CLOB
+   websocket ingress boundaries by qualified call site and count. Each site
+   names one recorded surface. Every surface names its real endpoint, one or
+   more sanitized recorded fixtures, README provenance, an executable replay
+   test, and conservative failure behavior. Unknown, stale/unreferenced, or
+   incomplete manifest entries fail.
+3. Shared final outputs changed from direct publication to
+   `write_text_atomic`: `execution/a1_sweep_advisory.md`,
+   `polymarket_strategy_v2/anchored_edge_report.md`,
+   `ops_scheduler/deploy_acceptance_notification.md`, governance
+   `agent_status.html`, dashboard `dashboard_data.json` and `index.html`
+   (including proof-question retrofit),
+   `ops_scheduler/degraded_state_notification.md`,
+   `execution/executor_ops_notification.md`,
+   `performance/investment_policy_statement.md`,
+   `polymarket_strategy_v2/opportunity_audit_report.md`,
+   `performance/performance_factsheet.md`,
+   `performance/operating_state.md`, and both generated
+   `docs/POLYMARKET_PIPELINE_MAP.md` paths. For every path, an overlapping
+   reader sees the previous complete artifact or the new complete artifact,
+   never the writer's partial body.
+4. `maker_carry/official_book_archive/*.csv.gz` now writes a unique sibling,
+   closes and fsyncs it, then publishes with `os.replace`; a reader retains
+   the prior valid gzip until replacement. Existing append-only ledgers,
+   archive spools, restore targets, and lock sentinels are not relabelled
+   atomic: every remaining primitive is explicitly classified with artifact,
+   cadence, and interleaving in the manifest. The manifest is review evidence,
+   not permission to register an unsafe shared-final write.
+5. Recorded-reality coverage adds the real response shapes for Binance,
+   Coinbase, CoinGecko, Deribit, Gamma public search, The Odds API catalogue
+   and odds events, Data API leaderboard/value, official contracts HTML,
+   Polygon JSON-RPC, and the live CLOB websocket string envelope. Identifiers
+   and identities are inert; field names, nesting, timestamp units, scalar
+   types, quote ordering, and odds remain faithful. No fixture capture tool,
+   API key, request header, or raw private/account identity is committed.
+6. Mutation tests plant a direct writer and two requests in one function. The
+   scanner must report the writer and a request count of two. Atomic helper
+   calls must not be false positives. These tests run only through WO-100's
+   exact unfiltered required gate; WO-101 must not merge first into a selective
+   gate that could omit them.
+
+Artifact/interleaving audit: the fourteen shared final outputs and maker gzip
+are listed in items 3-4. The only new repository artifacts are static fixtures,
+their README, and `engineering_guard_manifest.json`; they have no runtime
+writer or concurrent reader. Remaining direct runtime primitives are exactly
+the 20 manifest entries: atomic helper staging, append-only ledgers, unique
+archive staging, offline restore targets, and exclusive lock sentinels. Each
+entry names its cadence and interleaving; a count drift fails CI.
+
+Fail-safe sentence: when the manifest is missing or malformed, a discovered
+site/count differs, fixture/provenance/replay coverage is absent, or an
+external payload is missing/stale/malformed, the observable behavior is a red
+required gate and no merge; runtime parsers retain their existing conservative
+exclude/pending/error behavior, and no failure path invokes paper/live trading
+or changes a decision gate.
+
+Engineering-standards review: S1 adds no runtime clock/window and preserves
+the recorded seconds/milliseconds/microseconds/string timestamp types in
+replay. S2 is the exact direct-call inventory plus atomic final-output changes
+and manifest interleavings above. S3 contracts scanner producer = checked-in
+runtime source, manifest producer = reviewed WO-101 JSON, and consumers =
+unfiltered pytest/required PR gate; absent coverage is a failing test, never an
+implicit pass. S4 uses sanitized payloads recorded from every newly covered
+surface and mutation properties for omitted/duplicate sites. S5 is the
+fail-safe sentence above. S6 is the day-after check below. S7 static diff
+review found no edits to H1/H2/H3 evaluation, model features/training,
+signals, fees, risk/readiness gates, thresholds, stakes, capital policy,
+credentials, signer, broker, paper/live permission, or order paths. Methods
+are static source/diff review and isolated VPS tests; this states no findings
+under those methods, not absence of all defects.
+
+Day-after check: after WO-100 then WO-101 merge, require the next GitHub
+`Required PR Gate / required-pr-gate` conclusion to be `success` with one
+unfiltered `pytest -q` summary that includes both WO-101 test modules. After
+the guarded VPS deploy, require
+`outputs/ops_scheduler/deploy_acceptance.json.status=PASS`, a post-deploy
+`outputs/performance/operating_state.json.generated_at_utc`, and a post-deploy
+parseable `outputs/polymarket_dashboard/dashboard_data.json`; the degraded
+state artifact must contain no new malformed/JSON-read incident for those
+paths. Any missing/stale/unparseable artifact is failure, not evidence of
+atomic publication.
+
 ## Current queue for Codex (reconciled 2026-07-16)
 
 Every WO below and every future WO must comply with
 `docs/ENGINEERING_STANDARDS.md` (S1-S7), including the mandatory
 `Day-after check:` line. Reviews verify compliance item by item.
 
-**WO-95 was implemented in PR #238, WO-96 merged in PR #239, WO-97 merged in PR #240, and WO-98 is implemented awaiting publication.** Later items in the 2026-07-16 owner
+**WO-95 was implemented in PR #238, WO-96 merged in PR #239, WO-97 merged in PR #240, and WO-98 merged in PR #241. WO-99 is open in PR #242; WO-100 is green in PR #243 but awaits independent review; WO-101 is implemented on its own branch and must publish after WO-100.** Later items in the 2026-07-16 owner
 instruction require their own numbered work order and PR; do not combine them
 into this change. WO-89 through WO-92 were implemented as of 2026-07-15.
 WO-93 was implemented in PR #236, WO-94 in PR #237, WO-95 in PR #238, and WO-96 in PR #239. WO-85, WO-87, WO-86, and
@@ -4289,9 +4398,9 @@ WO-88 are implemented on 2026-07-15; WO-83 is implemented in PR #203 and
 WO-84 is implemented in PR #205. Do not infer follow-on capital, gate, model,
 or executor work from their diagnostics; the queue below remains binding.
 
-- **Implemented / publication pending:** WO-98 exact post-registration H2
-  evaluator and dashboard authority. After its one-PR review/merge, continue
-  with owner-ordered WO-99 leakage/corpus/split correction.
+- **Review / publication order:** independently review and merge WO-100; rebase,
+  run the repaired required gate, review, and merge WO-99; then publish WO-101
+  so its guards are enforced by WO-100's unfiltered suite. Keep one WO per PR.
 - **Pending review, not build permission:** WO-33. WO-34/35 model wiring shares
   its leakage-review dependency and must stay inside H1-H3; WO-99 is the
   owner-authorized corrective implementation. WO-96 is the exact H3 build.

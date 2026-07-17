@@ -37,7 +37,7 @@ from .profit_verdict import (
     VERDICT_GATE_DEFINITIONS,
     effective_verdict_settings,
 )
-from .utils import now_utc, read_csv_rows, read_json, safe_float, write_json
+from .utils import now_utc, read_csv_rows, read_json, safe_float, write_json, write_text_atomic
 
 
 RISK_POLICY_KEYS = [
@@ -399,7 +399,7 @@ def render_ips(cfg: EngineConfig) -> dict[str, Any]:
         }
     )
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    output_path.write_text(_render_markdown(payload), encoding="utf-8")
+    write_text_atomic(output_path, _render_markdown(payload))
     write_json(summary_path, payload)
     return payload
 

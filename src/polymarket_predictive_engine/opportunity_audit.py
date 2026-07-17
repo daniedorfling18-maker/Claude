@@ -5,7 +5,7 @@ from pathlib import Path
 from typing import Any
 
 from .config import EngineConfig, load_config
-from .utils import now_utc, read_csv_rows, read_json, safe_float, write_csv, write_json
+from .utils import now_utc, read_csv_rows, read_json, safe_float, write_csv, write_json, write_text_atomic
 
 OUTPUT_DIRNAME = "polymarket_strategy_v2"
 REPORT_JSON = "opportunity_audit_report.json"
@@ -303,7 +303,7 @@ def _write_markdown(path: Path, report: dict[str, Any]) -> None:
         "",
         "This audit is read-only research evidence. It is not permission to paper trade or live trade.",
     ])
-    path.write_text("\n".join(lines), encoding="utf-8")
+    write_text_atomic(path, "\n".join(lines))
 
 
 def build_opportunity_audit(cfg: EngineConfig) -> dict[str, Any]:

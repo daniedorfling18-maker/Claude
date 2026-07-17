@@ -17,7 +17,7 @@ from typing import Any, Mapping
 
 from .a1_controls import build_a1_sweep_advisory
 from .config import EngineConfig, load_config
-from .utils import now_utc, parse_timestamp, read_csv_rows, read_json, write_json
+from .utils import now_utc, parse_timestamp, read_csv_rows, read_json, write_json, write_text_atomic
 
 
 UNKNOWN = "UNKNOWN"
@@ -632,7 +632,7 @@ def _write_markdown(path: Path, payload: Mapping[str, Any]) -> None:
     lines.extend([f"- `{_md(item)}`" for item in missing] or ["- None"])
     lines.extend(["", "`paper_trading_invoked=false`; `live_trading_invoked=false`.", ""])
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text("\n".join(lines), encoding="utf-8")
+    write_text_atomic(path, "\n".join(lines))
 
 
 def build_operating_state(cfg: EngineConfig) -> dict[str, Any]:

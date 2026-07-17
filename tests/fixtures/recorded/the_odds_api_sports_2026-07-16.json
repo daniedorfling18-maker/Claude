@@ -1,0 +1,18 @@
+[
+  {
+    "key": "americanfootball_cfl",
+    "group": "American Football",
+    "title": "CFL",
+    "description": "Canadian Football League",
+    "active": true,
+    "has_outrights": false
+  },
+  {
+    "key": "americanfootball_ncaaf",
+    "group": "American Football",
+    "title": "NCAAF",
+    "description": "US College Football",
+    "active": true,
+    "has_outrights": false
+  }
+]

@@ -49,6 +49,30 @@ review. They are tighten-only: a WO may demand more than this, never less.
   decay, dedup keys, and any fail-safe default ("unmatched stays in the
   alarmed population").
 
+## Mechanical S2/S4 enforcement
+
+WO-101 makes omission itself a required-gate failure. The full suite runs
+`test_wo101_engineering_guards.py`, which inventories every direct write
+primitive and HTTP/websocket ingestion call in
+`src/polymarket_predictive_engine` by file, qualified function, primitive,
+and call count. The exact inventory must match
+`tests/fixtures/recorded/engineering_guard_manifest.json`.
+
+- A new or duplicated direct writer fails until it is converted to an atomic
+  helper or registered with its artifact, cadence, classification, and exact
+  interleaving outcome. Registration is not a waiver: a shared final artifact
+  must still be atomic.
+- A new or duplicated external-ingestion site fails until it names a recorded
+  endpoint surface, sanitized fixture with README provenance, replay test,
+  and conservative failure behavior.
+- Mutation tests plant an unregistered writer and duplicate HTTP calls, so a
+  guard that merely checks its own hand-maintained list cannot pass.
+
+This scanner covers syntax-visible runtime-package call sites. It does not
+prove that arbitrary business logic is correct or discover a parser that has
+no identifiable external-ingestion boundary; S7 review and recorded replay
+remain mandatory.
+
 ## S5 — Fail-safe direction statement
 
 - Every WO states, per feature: "when the input is missing, stale, or

@@ -3746,14 +3746,19 @@ pre-target scoreboard gap without authorising or placing an order.
 
 ## WO-93 — Bind WO-50 funding to exact sharp-qualified H1 and Tier-0 evidence
 
-**PENDING OWNER RATIFICATION (registered 2026-07-16 by the orchestrator).**
-This WO modifies the FROZEN WO-50 funding policy, which requires owner-level
-authorization that was never given. Because the change is strictly
-tighten-only (it can only convert a fund action into a defer, never the
-reverse), the code REMAINS ACTIVE pending the owner's decision — deactivating
-it would loosen a control without authorization. The owner must either
-(a) ratify with a dated owner-authored commit, or (b) direct reversion, at
-which point the policy returns exactly to its pre-WO-93 registered form.
+**REVERTED by owner decision, 2026-07-16.** The owner reviewed the
+unauthorized modification and directed reversion ("revert WO93"). The WO-50
+policy, its tests, and the dashboard rendering are restored byte-identical to
+their pre-WO-93 registered form (commit ac847cf); the
+h1_funding_qualification module and test are removed. The unauthorized
+tighten was active in production from the PR #236 merge until this revert and
+never produced a funding indication. The reversion PR is owner-merged so the
+frozen-surface change carries genuine owner approval. Consequence, recorded
+for the decision history: funding actions again bind on M-A/M-B, kill
+criteria, and composition alone, and a passing gate may indicate funding an
+unanchored (non-sharp) market — the owner accepts that the $100 stage may
+test generic reward carry rather than the registry's sharp-anchored H1
+wording; any future re-tightening requires a new dated owner decision.
 
 Status: IMPLEMENTED by Codex on 2026-07-16 in PR #236.
 

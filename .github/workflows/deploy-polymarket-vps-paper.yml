@@ -237,11 +237,17 @@ jobs:
           git show "${GITHUB_SHA}:scripts/preflight_vps_capacity.py" > "$PREFLIGHT_DIR/preflight_vps_capacity.py"
           git show "${GITHUB_SHA}:scripts/update_vps_checkout_preserving_runtime.py" > "$PREFLIGHT_DIR/update_vps_checkout_preserving_runtime.py"
           git show "${GITHUB_SHA}:$COMPOSE_FILE" > "$PREFLIGHT_DIR/compose.yml"
-          # Reclaim only dangling builder cache before measuring deploy
-          # capacity. Production images, containers, volumes, and evidence
-          # ledgers are outside this narrowly scoped cleanup.
-          echo "[deploy] reclaiming unused Docker builder cache"
+          # Reclaim dangling builder cache AND dangling images before measuring
+          # deploy capacity. The stack rebuilds one tag (polymarket-paper-vps:
+          # latest) every deploy, so each prior build's layers become dangling
+          # and were never reclaimed (observed: disk 76%->83% in two days,
+          # 2026-07-17 preflight refusal at 5.49GB free vs the 6GB floor).
+          # Dangling-only pruning cannot touch tagged or in-use images, and the
+          # rollback contract is git-revision-based (rebuilt on demand), so
+          # production containers, volumes, and evidence ledgers stay intact.
+          echo "[deploy] reclaiming unused Docker builder cache and dangling images"
           $DOCKER builder prune --force
+          $DOCKER image prune --force
           echo "[deploy] checking host capacity against target compose commitments"
           python3 "$PREFLIGHT_DIR/preflight_vps_capacity.py" \
             --compose "$PREFLIGHT_DIR/compose.yml" \

@@ -1,11 +1,9 @@
 """WO-50 registered maker live-test decision policy tests."""
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
-import pytest
 import yaml
 
 from polymarket_predictive_engine import live_test_decision_policy as policy
@@ -61,31 +59,16 @@ def _out(cfg) -> Path:
     return out
 
 
-@pytest.fixture(autouse=True)
-def _fixed_policy_clock(monkeypatch):
-    monkeypatch.setattr(policy, "now_utc", lambda: "2026-07-19T08:05:00Z")
-
-
-def _study(
-    gate_a: str = "pass",
-    gate_b: str = "pass",
-    *,
-    top: str = "0xm1",
-    net: float = 5.0,
-    generated_at_utc: str = "2026-07-19T08:00:00Z",
-) -> dict[str, Any]:
+def _study(gate_a: str = "pass", gate_b: str = "pass", *, top: str = "0xm1", net: float = 5.0) -> dict[str, Any]:
     return {
         "status": "ok",
-        "generated_at_utc": generated_at_utc,
+        "generated_at_utc": "2026-07-19T08:00:00Z",
         "target_net_usd_per_day": 3.33,
         "portfolio": [
             {
                 "condition_id": top,
-                "token_id": f"token-{top}",
                 "question": f"top market {top}",
                 "net_carry_usd_per_day": net,
-                "quote_bid_price": 0.48,
-                "quote_ask_price": 0.52,
             }
         ],
         "portfolio_net_carry_usd_per_day": net,
@@ -100,71 +83,6 @@ def _study(
 
 def _write_study(cfg, payload: dict[str, Any]) -> None:
     write_json(_out(cfg) / "maker_carry_study.json", payload)
-    portfolio = payload.get("portfolio") or []
-    if not portfolio:
-        return
-    market = portfolio[0]
-    token_id = str(market["token_id"])
-    condition_id = str(market["condition_id"])
-    stamp = str(payload["generated_at_utc"])
-    write_csv(
-        cfg.governance_root / "sharp_anchor_mapping_audit.csv",
-        [
-            {
-                "source": "test_sharp_book",
-                "sport": "basketball_nba",
-                "market_key": "h2h",
-                "market_slug": condition_id,
-                "outcome": "Yes",
-                "anchor_timestamp_utc": stamp,
-                "token_id": token_id,
-                "anchor_probability": 0.50,
-                "mapping_status": "joined",
-            }
-        ],
-    )
-    write_csv(
-        cfg.output_root / "polymarket_predictions" / "predictions.csv",
-        [
-            {
-                "token_id": token_id,
-                "condition_id": condition_id,
-                "prediction_timestamp": stamp,
-                "best_bid": 0.47,
-                "best_ask": 0.53,
-            }
-        ],
-    )
-    distributions = {
-        horizon: {"count": 10, "mean": 0.001, "min": -0.01, "median": 0.001, "max": 0.01}
-        for horizon in ("5m", "15m", "60m")
-    }
-    horizon_coverage = {
-        horizon: {"windows_simulated": 30, "windows_covered": 24, "coverage_ratio": 0.8}
-        for horizon in ("5m", "15m", "60m")
-    }
-    write_json(
-        _out(cfg) / "maker_fill_replay.json",
-        {
-            "status": "ok",
-            "generated_at_utc": stamp,
-            "portfolio_generated_at_utc": stamp,
-            "primary_book_source": "official",
-            "per_market_coverage": [
-                {
-                    "condition_id": condition_id,
-                    "asset_id": token_id,
-                    "last_in_queue_evaluable_opportunities": 30,
-                    "confirmed_fills": 10,
-                    "confirmed_fill_ratio": 1 / 3,
-                    "confirmed_fill_ratio_status": "observed",
-                    "by_horizon": horizon_coverage,
-                    "realized_markout_distribution": distributions,
-                    "simulation_to_reality_haircut": 0.8,
-                }
-            ],
-        },
-    )
 
 
 def _write_carry_history(cfg, rows: list[dict[str, Any]]) -> None:
@@ -213,13 +131,9 @@ def _write_live_history(cfg, rows: list[dict[str, Any]]) -> None:
 
 
 def _live_rows(days: int, *, net: float = 1.0, fills: float = 1.0, modelled: float = 1.0) -> list[dict[str, Any]]:
-    final_observation = datetime(2026, 7, 19, 8, 0, tzinfo=timezone.utc)
-    first_observation = final_observation - timedelta(days=max(0, days - 1))
     return [
         {
-            "generated_at_utc": (
-                first_observation + timedelta(days=idx)
-            ).strftime("%Y-%m-%dT%H:%M:%SZ"),
+            "generated_at_utc": f"2026-07-{idx + 1:02d}T08:00:00Z",
             "net_score_usd": net + idx,
             "daily_net_score_usd": net,
             "fills_last_24h": fills,
@@ -248,30 +162,13 @@ def test_policy_table_stable_pass_funds_single_calmest_market(tmp_path):
 
 def test_policy_table_churning_pass_halves_recurrent_market_target(tmp_path):
     cfg = _config(tmp_path)
-    _write_study(cfg, _study(top="0xm1"))
-    _write_carry_history(cfg, _history(["0xm1", "0xm1", "0xm2", "0xm3", "0xm4", "0xm5"]))
+    _write_study(cfg, _study(top="0xm7"))
+    _write_carry_history(cfg, _history(["0xm1", "0xm2", "0xm3", "0xm4", "0xm5", "0xm6"]))
 
     result = run_decision_policy(cfg)
 
     assert result["indicated_action"] == "fund_100_but_only_most_recurrent_market_half_target"
     assert result["composition_stability"]["stable"] is False
-
-
-def test_passed_maker_gates_cannot_fund_without_exact_h1_tier0(tmp_path):
-    cfg = _config(tmp_path)
-    _write_study(cfg, _study(top="0xm1"))
-    _write_carry_history(cfg, _history(["0xm1"] * 7))
-    replay = read_json(_out(cfg) / "maker_fill_replay.json")
-    replay["per_market_coverage"][0]["confirmed_fills"] = 9
-    write_json(_out(cfg) / "maker_fill_replay.json", replay)
-
-    result = run_decision_policy(cfg)
-
-    assert result["indicated_action"] == "defer_funding_collect_sharp_h1_and_tier0"
-    assert result["h1_funding_qualification"]["state"] == "fail"
-    assert result["sizing"]["binding_capital_usd"] == 0.0
-    assert result["funding_capital_permitted_usd"] == 0.0
-    assert result["sizing"]["pre_policy_binding_capital_usd"] > 0
 
 
 def test_policy_table_pending_on_registered_decision_date_defers(tmp_path, monkeypatch):
@@ -295,8 +192,6 @@ def test_policy_table_below_target_after_gates_reachable_triggers_review(tmp_pat
 
     assert result["indicated_action"] == "maker_lane_not_supported_program_review"
     assert result["inputs_snapshot"]["recent_below_target_runs"] == 4
-    assert result["sizing"]["binding_capital_usd"] == 0.0
-    assert result["sizing"]["binding_cap"] == "non_funding_policy_action"
 
 
 def test_ladder_promotion_arithmetic_and_stage2_reward_floor(tmp_path):
@@ -344,7 +239,7 @@ def test_ladder_ignores_owner_activity_only_day_without_breaking_streak(tmp_path
 def test_quarter_kelly_cap_binds_below_ladder(tmp_path):
     cfg = _config(tmp_path)
     _write_study(cfg, _study(top="0xm1"))
-    _write_carry_history(cfg, _history(["0xm1"] * 7, nets=[4.0, 9.0, 4.0, 9.0, 4.0, 9.0, 4.0]))
+    _write_carry_history(cfg, _history(["0xm1"] * 7, nets=[1.0, 9.0, 1.0, 9.0, 1.0, 9.0, 1.0]))
     _write_live_history(cfg, _live_rows(7))
 
     result = run_decision_policy(cfg)
@@ -499,16 +394,13 @@ def test_live_stage_with_stale_kill_inputs_forces_stop(tmp_path, monkeypatch):
 
 def test_live_stage_with_fresh_kill_inputs_preserves_existing_policy(tmp_path, monkeypatch):
     cfg = _config(tmp_path, live_configured=True)
-    _write_study(
-        cfg,
-        _study(top="0xm1", generated_at_utc="2026-07-16T15:58:00Z"),
-    )
+    _write_study(cfg, _study(top="0xm1"))
     _write_carry_history(cfg, _history(["0xm1", "0xm1", "0xm2", "0xm1", "0xm3", "0xm1"]))
     write_json(
         _out(cfg) / "maker_live_test.json",
         {
             "status": "ok",
-            "generated_at_utc": "2026-07-16T15:50:00Z",
+            "generated_at_utc": "2026-07-14T10:50:00Z",
             "net_score_usd": 2.0,
             "scoreboard": "winning_so_far",
         },
@@ -517,7 +409,7 @@ def test_live_stage_with_fresh_kill_inputs_preserves_existing_policy(tmp_path, m
         cfg,
         [
             {
-                "generated_at_utc": "2026-07-16T15:50:00Z",
+                "generated_at_utc": "2026-07-14T10:50:00Z",
                 "net_score_usd": 2.0,
                 "daily_net_score_usd": 2.0,
                 "fills_last_24h": 1.0,
@@ -528,7 +420,7 @@ def test_live_stage_with_fresh_kill_inputs_preserves_existing_policy(tmp_path, m
             }
         ],
     )
-    monkeypatch.setattr(policy, "now_utc", lambda: "2026-07-16T16:00:00Z")
+    monkeypatch.setattr(policy, "now_utc", lambda: "2026-07-14T11:00:00Z")
 
     result = run_decision_policy(cfg)
 

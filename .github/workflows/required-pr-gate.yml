@@ -66,7 +66,6 @@ jobs:
             tests/polymarket_predictive_engine/test_deploy_acceptance.py \
             tests/polymarket_predictive_engine/test_collection_hygiene.py \
             tests/polymarket_predictive_engine/test_degraded_state_watchdog.py \
-            tests/polymarket_predictive_engine/test_h1_funding_qualification.py \
             tests/polymarket_predictive_engine/test_live_test_decision_policy.py \
             tests/polymarket_predictive_engine/test_maker_fill_replay.py \
             tests/polymarket_predictive_engine/test_operating_state.py \

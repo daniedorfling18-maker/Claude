@@ -23,6 +23,19 @@ from .utils import boolish, now_utc, parse_timestamp, read_csv_rows, read_json, 
 REGISTERED_AT_UTC = "2026-07-10T00:00:00Z"
 KELLY_FULL_WEIGHT_DAYS_FLOOR = 20
 REGISTERED_KILL_INPUT_MAX_AGE_SECONDS = 30 * 60
+# Owner decision 2026-07-17 (owner-approved PR; an interpretation, not a
+# threshold change): the registered stage instrument is ONE minimum-size
+# quote on the indicated market. The WO-59 quarter-Kelly overlay caps every
+# size-up ABOVE the venue minimum but does not veto the minimum-size stage
+# entry — at short histories the shrunk fraction is deliberately near zero,
+# and reading it as an entry veto would deadlock the registered fund_*
+# actions the policy table indicates. Tighten-only in effect: the overlay
+# still binds all sizing above the venue minimum.
+KELLY_OVERLAY_INTERPRETATION = (
+    "Owner decision 2026-07-17: binding_capital_usd caps size-ups above the venue "
+    "minimum; the minimum-size stage quote indicated by a fund_* action is the "
+    "registered floor and is not vetoed by the overlay."
+)
 
 DEFAULT_SETTINGS: dict[str, Any] = {
     "enabled": True,
@@ -698,7 +711,7 @@ def run_decision_policy(cfg: EngineConfig) -> dict[str, Any]:
         "composition_stability": composition,
         "ladder_stage_permitted": ladder["stage"],
         "ladder": ladder,
-        "sizing": sizing,
+        "sizing": {**sizing, "kelly_overlay_interpretation": KELLY_OVERLAY_INTERPRETATION},
         "kill_criteria_status": kill,
         "kill_data_stale": kill["kill_data_stale"],
         "policy_note": "indicates, never executes - the human decides; the system never trades",

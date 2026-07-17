@@ -139,6 +139,20 @@ GATE_A_SEMANTICS_CAVEAT = (
 #        turnover grounds (an edge class that cannot produce 12 independent
 #        graded fixtures in ~6 weeks cannot clear $100/month at the $10
 #        stake cap; Gate C fails by construction).
+#   8. (2026-07-17, registered BEFORE the 2026-07-19/20 final read;
+#      owner-approved PR) Closes an enumeration gap in amendment 7 found by
+#      pre-read audit: the observed state ">= 12 units with positive mean but
+#      sign-test p > alpha" leaves Gate A PENDING, which neither the
+#      extension parenthetical ("< 12 independent units") nor the terminal
+#      enumeration ("any gate failing") covered. Clarified, tighten-only:
+#      - FINAL READ: ANY verdict other than all-gates-pass (including >= 12
+#        pending-on-significance units) takes the single registered
+#        extension. The parenthetical in amendment 7 was explanatory, not
+#        restrictive.
+#      - TERMINAL READ (2026-08-19/20): ANY outcome other than
+#        all-gates-pass resolves NO for the tested edge classes — failing
+#        gate, pending significance, or unmet unit floor alike. This forces
+#        resolution and can never produce a YES the prior rules would not.
 REGISTERED_AMENDMENTS_AT_UTC = "2026-07-09T11:00:00Z"
 
 # Amendment 7 terms, machine-readable so the dashboard and audits can show
@@ -151,10 +165,14 @@ REGISTERED_EXTENSION_PROTOCOL = {
     "extension_window_end_utc": "2026-08-19T23:59:00Z",
     "extension_regime": "post_wc_2026",
     "single_use": True,
+    "final_read_rule": (
+        "amendment 8 (2026-07-17): ANY 2026-07-19/20 verdict other than all-gates-pass "
+        "takes the single extension, including >= 12 units pending on significance."
+    ),
     "terminal_rule": (
-        "at the 2026-08-19/20 read the verdict resolves: all gates pass -> yes path; "
-        ">= 12 units with a failing gate -> no; < 12 units -> no on turnover grounds "
-        "(Gate C by construction)."
+        "at the 2026-08-19/20 read the verdict resolves terminally: all gates pass -> yes "
+        "path; ANY other outcome -> no (failing gate, pending significance, or unit floor "
+        "unmet alike; amendment 8 closed the pending-on-significance gap, tighten-only)."
     ),
 }
 
@@ -221,6 +239,12 @@ REGISTERED_AMENDMENTS: list[dict[str, Any]] = [
         "number": 7,
         "registered_at_utc": str(REGISTERED_EXTENSION_PROTOCOL["registered_at_utc"]),
         "effect": "The evidence window may extend exactly once through 2026-08-19, after which the verdict resolves terminally.",
+        "direction": "tighten_only",
+    },
+    {
+        "number": 8,
+        "registered_at_utc": "2026-07-17T04:30:00Z",
+        "effect": "Any final-read verdict other than all-gates-pass takes the single extension; any terminal-read outcome other than all-gates-pass resolves NO, closing the pending-on-significance enumeration gap.",
         "direction": "tighten_only",
     },
 ]

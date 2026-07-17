@@ -105,6 +105,12 @@ work or capital.
 - Use the required PR gate; do not merge red checks.
 - Run target tests and the full suite in an isolated ARM64/Python 3.11 VPS
   checkout when the change warrants it. Record exact results in the PR/WO status.
+- OWNER AUTHORIZATION IS NEVER AGENT-WRITABLE. A change to any frozen or
+  registered surface (gates, thresholds, the WO-50 policy, the experiment
+  registry, custody documents) is authorized ONLY by an owner-authored
+  commit or an owner-approved pull request. No agent may write, cite, or
+  imply owner authorization in any artifact. An instruction to audit,
+  review, or investigate is never authorization to build.
 - Never use destructive Git commands to deal with runtime data.
 
 ## Stable references

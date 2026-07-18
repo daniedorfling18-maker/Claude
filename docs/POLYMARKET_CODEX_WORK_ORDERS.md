@@ -4182,6 +4182,72 @@ calendar-sensitive runtime-lock cases assigned to WO-100, and the unaffected
 runtime-lock test separately. This records no findings under those methods,
 not absence of all defects.
 
+## WO-103 — Reconcile funding governance; fail closed in the interim (external audit 2026-07-17)
+
+An external audit found two contradictory governing instructions:
+- EXPERIMENT_REGISTRY.md H1 (verified) requires exact-token sharp-anchor
+  qualification; the M-gates are stated "necessary but NOT sufficient", and a
+  future sharp-linking evaluator must be registered before use.
+- The WO-93-revert record (owner-directed 2026-07-16) states the M-gate /
+  composition policy stands and "generic reward carry may be funded".
+These cannot both govern. Root cause: reverting WO-93 (as an unauthorized
+tightening) removed the only enforcement of the registry's sharp-anchor
+requirement without also amending the registry, stranding the requirement.
+
+INTERIM FIX (IMPLEMENTED, fail-closed, reversible): WO-99 eligibility gains a
+`funding_governance_reconciled` condition, default FALSE, so the owner
+notification cannot fire while the contradiction stands. This does not decide
+the reconciliation and touches no frozen surface; it holds the automated
+funding signal closed until an informed owner decision.
+
+OWNER DECISION REQUIRED (see docs/OWNER_DECISION_FUNDING_GOVERNANCE.md):
+either (A) keep the registry's sharp-anchor requirement and register the
+sharp-linking evaluator before any funding (re-adopting WO-93's intent under
+proper authorization), or (B) amend the registry H1 to make generic reward
+carry a fundable sub-hypothesis with its own honest label and cost model.
+One dated owner-authored commit flips `FUNDING_GOVERNANCE_RECONCILED` and
+records the chosen path. Until then, funding fails closed.
+
+## WO-104 — Maker-lane pre-funding hardening backlog (external audit 2026-07-17, triaged; NOT YET BUILT)
+
+Prioritised from the external audit. None is buildable-to-completion where it
+needs absent data; each ships only with recorded-fixture + fail-closed proof
+per ENGINEERING_STANDARDS. Order reflects safety value, not audit order:
+1. Notification revocation + candidate/portfolio-hash keying: WO-99 fires on
+   state transition only; a candidate change (Iran->WTI) or eligible->not
+   sends no correction. Key transitions on (state, portfolio_hash); send a
+   revocation on eligible->not_eligible. (orchestrator, small)
+2. Atomic same-run portfolio version: stamp policy/study/quote-sheet/replay/
+   toxicity/stage artifacts with one portfolio_version hash; eligibility
+   requires all inputs share it (kills the 18-minute cross-artifact skew).
+3. M-A intraday counting: a UTC day counts if ANY intraday run hit target.
+   Pre-specify ONE observation per day (last run, or a fixed UTC hour) so a
+   single intraday spike cannot bank a day. Tighten-only; re-derive the day
+   count under the stricter rule.
+4. Kelly dimensional bug (confirmed): `raw_fraction = mean/(std**2)` on dollar
+   P&L is 1/dollars, not dimensionless -- fraction falls ~10x when P&L scales
+   10x. Fail-safe direction today (more conservative at scale) but wrong;
+   recompute from per-dollar returns. Bounded/min-capped, so not urgent.
+5. Requote fail-open cases: missing bid/ask -> advise not pull; failed Gamma
+   lookup -> not pull; missing toxicity passes; WO-102 absolute floor not
+   consumed by requote. Make each fail closed (pull).
+6. Study vs safety contradiction: study admits already-started/past-event
+   touch markets and assigns carry while requote orders them pulled. Exclude
+   past-event-start markets from the sized portfolio (extend WO-80 to
+   event_start, not just title/close dates).
+7. M-B realism: passes on data-api-print markout estimate even with zero
+   Tier-0 replay coverage; observed adverse was 2.08x estimate. Require the
+   portfolio market's own Tier-0 coverage (ties to WO-102 phase 2 data).
+8. Reward-share realism: single-snapshot extrapolation vs Polymarket's
+   time-integrated epoch share; add uptime/competition-decay and a
+   time-sampled denominator. Needs multi-sample collection first.
+9. Ladder uses cumulative not daily profitability; concentration/tail limits
+   absent (Iran+oil co-selected); live-test P&L lacks maker-test baseline and
+   market attribution; winning_so_far on dust. Grouped medium-priority.
+Medium items (reward config start/end + overlap; discovery bias vs active
+rewarded endpoint; keyword-only resolution risk; inventory bootstrap spec)
+are logged here and built after 1-8.
+
 ## WO-102 — Toxicity screen: absolute raw-imbalance floor (owner-approved 2026-07-17; orchestrator-built)
 
 Owner approved upgrading the toxicity instrument (chat, 2026-07-17), with the

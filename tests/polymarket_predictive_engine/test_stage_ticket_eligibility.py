@@ -55,7 +55,8 @@ def _write_healthy_inputs(cfg: EngineConfig, **overrides) -> None:
     )
 
 
-def test_all_conditions_pass_reads_eligible(tmp_path: Path) -> None:
+def test_all_conditions_pass_reads_eligible(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setattr(mod, "FUNDING_GOVERNANCE_RECONCILED", True)
     cfg = _cfg(tmp_path)
     _write_healthy_inputs(cfg)
     state, rows, summary = mod.evaluate_stage_ticket_eligibility(cfg, as_of=NOW)
@@ -92,6 +93,7 @@ def test_missing_artifacts_evaluate_not_eligible(tmp_path: Path) -> None:
 
 
 def test_notification_fires_only_on_transition(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setattr(mod, "FUNDING_GOVERNANCE_RECONCILED", True)
     cfg = _cfg(tmp_path)
     _write_healthy_inputs(cfg)
     sent: list[str] = []
@@ -114,6 +116,7 @@ def test_notification_fires_only_on_transition(tmp_path: Path, monkeypatch) -> N
 
 
 def test_unset_env_never_attempts_send(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setattr(mod, "FUNDING_GOVERNANCE_RECONCILED", True)
     cfg = _cfg(tmp_path)
     _write_healthy_inputs(cfg)
     monkeypatch.delenv(mod.NTFY_ENV_VAR, raising=False)
@@ -123,6 +126,7 @@ def test_unset_env_never_attempts_send(tmp_path: Path, monkeypatch) -> None:
 
 
 def test_send_failure_never_blocks_the_run(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setattr(mod, "FUNDING_GOVERNANCE_RECONCILED", True)
     cfg = _cfg(tmp_path)
     _write_healthy_inputs(cfg)
     monkeypatch.setenv(mod.NTFY_ENV_VAR, "https://ntfy.sh/test-topic")
@@ -131,3 +135,15 @@ def test_send_failure_never_blocks_the_run(tmp_path: Path, monkeypatch) -> None:
     assert payload["state"] == "eligible"
     assert payload["notification"]["attempted"] is True
     assert payload["notification"]["delivered"] is False
+
+
+def test_governance_contradiction_fails_closed(tmp_path: Path, monkeypatch) -> None:
+    # With the registry/WO-93 contradiction unresolved, a fully healthy ticket
+    # still reads not_eligible on the governance condition alone.
+    monkeypatch.setattr(mod, "FUNDING_GOVERNANCE_RECONCILED", False)
+    cfg = _cfg(tmp_path)
+    _write_healthy_inputs(cfg)
+    state, rows, _ = mod.evaluate_stage_ticket_eligibility(cfg, as_of=NOW)
+    assert state == "not_eligible"
+    gov = next(r for r in rows if r["condition"] == "funding_governance_reconciled")
+    assert gov["passed"] is False

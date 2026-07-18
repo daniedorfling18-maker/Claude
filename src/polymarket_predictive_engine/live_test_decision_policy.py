@@ -348,6 +348,28 @@ def _ladder_stage(
     }
 
 
+def _daily_net_returns(daily: list[dict[str, Any]]) -> list[float]:
+    """Per-day portfolio returns (P&L / capital base) for the Kelly overlay.
+
+    Kelly is a dimensionless fraction, so it must be computed from RETURNS, not
+    from raw dollar P&L. Each observation is normalised by its own
+    ``portfolio_capital_usd`` base, so the fraction is invariant to a change of
+    units (dollars->cents) or a change of the deployed capital base. Rows that
+    lack a positive capital base cannot yield a return and are dropped rather
+    than assumed - the caller falls back to a strictly more conservative
+    dollar-based estimate when too few return observations survive.
+    """
+
+    returns: list[float] = []
+    for row in daily:
+        net = safe_float(row.get("portfolio_net_carry_usd_per_day"))
+        capital = safe_float(row.get("portfolio_capital_usd"))
+        if net is None or capital is None or capital <= 0:
+            continue
+        returns.append(net / capital)
+    return returns
+
+
 def _quarter_kelly_cap(history: list[dict[str, Any]], ladder_cap: float, settings: dict[str, Any]) -> dict[str, Any]:
     daily = _latest_per_utc_day(history)
     values = [safe_float(row.get("portfolio_net_carry_usd_per_day")) for row in daily if safe_float(row.get("portfolio_net_carry_usd_per_day")) is not None]
@@ -367,9 +389,29 @@ def _quarter_kelly_cap(history: list[dict[str, Any]], ladder_cap: float, setting
     mean = sum(values) / len(values)
     variance = sum((value - mean) ** 2 for value in values) / max(1, len(values) - 1)
     std = math.sqrt(variance)
-    if std <= 0:
+    # 2026-07-18 dated correction (WO-104 item 4; authorization = owner merge
+    # of this frozen-surface PR, not agent self-merge): Kelly is
+    # dimensionless, so it must be computed from RETURNS (P&L / capital base),
+    # not raw dollar P&L. The previous `mean / std**2` on dollars was
+    # unit-dependent (dollars->cents changed the fraction 100x). We normalise
+    # each observation by its own portfolio capital so the fraction is
+    # unit-invariant. DIRECTION DISCLOSURE: this is NOT tighten-only — removing
+    # the over-conservative dollar bug raises the overlay from a sub-dollar
+    # value toward a sane fraction of the stage cap. Absolute exposure stays
+    # bounded by the ladder cap via `binding = min(ladder_cap, kelly_capital)`.
+    return_values = _daily_net_returns(daily)
+    if len(return_values) >= 2:
+        mean_ret = sum(return_values) / len(return_values)
+        var_ret = sum((r - mean_ret) ** 2 for r in return_values) / max(1, len(return_values) - 1)
+        if var_ret <= 0:
+            raw_fraction = float(settings["kelly_fraction_cap"]) if mean_ret > 0 else 0.0
+        else:
+            raw_fraction = max(0.0, mean_ret / var_ret)
+    elif std <= 0:
         raw_fraction = float(settings["kelly_fraction_cap"]) if mean > 0 else 0.0
     else:
+        # Fail-safe fallback when per-row capital is unavailable: retain the
+        # bounded legacy estimate rather than guessing a return.
         raw_fraction = max(0.0, mean / (std * std))
     fraction_cap = min(1.0, max(0.0, float(settings["kelly_fraction_cap"])))
     inline_quarter = min(fraction_cap, raw_fraction * float(settings["quarter_kelly_multiplier"]))

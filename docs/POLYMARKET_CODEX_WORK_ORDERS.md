@@ -4256,18 +4256,32 @@ per ENGINEERING_STANDARDS. Order reflects safety value, not audit order:
    decision policy's consumed study run (inputs_snapshot) to equal the
    current study generated_at, failing closed on the ~18-minute churn skew.
    Implemented via the existing run stamp rather than re-plumbing writers.
-3. ESCALATED to owner (not built): changes the FROZEN M-A gate's day-counting
-   arithmetic. Tighten-only in intent, but it alters a registered gate, so it
-   needs a dated owner-registered amendment (like amendments 1-8), not a
-   unilateral orchestrator change. Proposed rule: count a day only from a
-   pre-specified daily observation (last run of the UTC day) so an intraday
-   spike cannot bank a day. Awaiting owner registration.
-4. ESCALATED to owner (not built): the WO-59 Kelly overlay is money-sizing on
-   the frozen WO-50 surface, and the dimensionally-correct fix is NOT
-   guaranteed tighten-only (correcting mean/std^2-on-dollars to per-dollar
-   returns could raise the fraction in some regime). A change that could
-   loosen sizing needs a dated owner decision. Confirmed real; awaiting owner
-   registration. Bounded/min-capped today, so not urgent.
+3. BUILT 2026-07-18 (orchestrator), AWAITING OWNER MERGE (frozen-surface PR):
+   changes the FROZEN M-A gate's day-counting arithmetic. Tighten-only, but it
+   alters a registered gate, so authorization is the owner's merge of the PR,
+   not a unilateral orchestrator change. Implemented as maker-gate amendment
+   M-A.1: extracted `_distinct_days_at_target` in `maker_carry_study.py`, which
+   counts a UTC day only from its LAST published_v2 run (the pre-specified
+   daily observation) so an intraday spike that later faded cannot bank a day.
+   The current run is by construction today's last observation and governs
+   today's membership. 4 tests added (intraday spike does not bank; last run
+   at target counts; today governed by current run not earlier spike; legacy
+   model day excluded). Docstring amendment registered in the module. Cannot
+   raise the day count.
+4. BUILT 2026-07-18 (orchestrator), AWAITING OWNER MERGE (frozen-surface PR):
+   the WO-59 Kelly overlay is money-sizing on the frozen WO-50 surface. The
+   dimensionally-correct fix is confirmed NOT tighten-only — it LOOSENS: the
+   old `mean/std^2` on raw dollars was unit-dependent and absurdly small
+   ($0.46 binding), so normalising to per-dollar returns raises the fraction.
+   DIRECTION DISCLOSED in-code and here; authorization is the owner's merge.
+   Implemented: `_daily_net_returns` divides each carry-history row's
+   `portfolio_net_carry_usd_per_day` by its `portfolio_capital_usd`, so the
+   fraction is unit-invariant; when per-row capital is unavailable it falls
+   back to the strictly-more-conservative legacy dollar estimate. Absolute
+   exposure stays bounded by the ladder cap (`binding = min(ladder_cap,
+   kelly_capital)`). 4 tests added (drops rows without positive capital;
+   unit-invariance dollars-vs-cents; loosens vs the dollar fallback; never
+   exceeds the ladder cap).
 5. PARTIALLY DONE 2026-07-18 (orchestrator): missing live bid/ask now PULLS
    (loss of book visibility = cannot manage risk), and the requote screen now
    consumes the WO-102 absolute raw-imbalance floor and composite block

@@ -290,6 +290,72 @@ def test_ladder_still_binds_when_it_is_the_smaller_ceiling():
     assert sizing["binding_cap"] == "ladder"
 
 
+def _history_with_capital(nets: list[float], capital: list[float]) -> list[dict[str, Any]]:
+    rows = _history(["0xm1"] * len(nets), nets=nets)
+    for row, cap in zip(rows, capital):
+        row["portfolio_capital_usd"] = cap
+    return rows
+
+
+def test_daily_net_returns_drops_rows_without_positive_capital():
+    rows = [
+        {"portfolio_net_carry_usd_per_day": 5.0, "portfolio_capital_usd": 100.0},
+        {"portfolio_net_carry_usd_per_day": 5.0, "portfolio_capital_usd": 0.0},
+        {"portfolio_net_carry_usd_per_day": 5.0, "portfolio_capital_usd": None},
+        {"portfolio_net_carry_usd_per_day": 5.0},
+        {"portfolio_net_carry_usd_per_day": None, "portfolio_capital_usd": 100.0},
+    ]
+
+    assert policy._daily_net_returns(rows) == [0.05]
+
+
+def test_kelly_fraction_is_unit_invariant_when_capital_present():
+    # WO-104 item 4: Kelly is dimensionless. The same economics expressed in
+    # dollars vs cents must produce an identical fraction; the old dollar-based
+    # ``mean / std**2`` failed this by a factor of 100.
+    settings = dict(policy.DEFAULT_SETTINGS)
+    nets = [2.0, 4.0, 2.0, 4.0, 2.0, 4.0, 2.0]
+    dollars = _history_with_capital(nets, [100.0] * 7)
+    cents = _history_with_capital([n * 100 for n in nets], [10000.0] * 7)
+
+    in_dollars = policy._quarter_kelly_cap(dollars, 250.0, settings)
+    in_cents = policy._quarter_kelly_cap(cents, 250.0, settings)
+
+    assert in_dollars["quarter_kelly_fraction"] == in_cents["quarter_kelly_fraction"]
+    assert in_dollars["inline_quarter_kelly_fraction"] == in_cents["inline_quarter_kelly_fraction"]
+    assert in_dollars["binding_capital_usd"] == in_cents["binding_capital_usd"]
+
+
+def test_returns_normalised_kelly_loosens_versus_dollar_fallback():
+    # Direction disclosure (owner-merged): normalising by capital removes the
+    # unit-dependent under-sizing, so the returns-based overlay is >= the
+    # retained conservative dollar fallback used when capital is unavailable.
+    settings = dict(policy.DEFAULT_SETTINGS)
+    nets = [2.0, 4.0, 2.0, 4.0, 2.0, 4.0, 2.0]
+    with_capital = _history_with_capital(nets, [100.0] * 7)
+    without_capital = _history(["0xm1"] * 7, nets=nets)
+
+    loosened = policy._quarter_kelly_cap(with_capital, 250.0, settings)
+    fallback = policy._quarter_kelly_cap(without_capital, 250.0, settings)
+
+    assert loosened["binding_capital_usd"] >= fallback["binding_capital_usd"]
+    assert loosened["quarter_kelly_fraction"] >= fallback["quarter_kelly_fraction"]
+
+
+def test_returns_kelly_never_exceeds_ladder_cap():
+    # Safety invariant survives the loosening: absolute exposure is bounded by
+    # the ladder cap via ``binding = min(ladder_cap, kelly_capital)``, even when
+    # the returns-based fraction saturates its own cap under a large multiplier.
+    settings = dict(policy.DEFAULT_SETTINGS)
+    settings["quarter_kelly_multiplier"] = 4.0
+    history = _history_with_capital([4.0, 6.0] * 10, [100.0] * 20)
+
+    sizing = policy._quarter_kelly_cap(history, 100.0, settings)
+
+    assert sizing["binding_capital_usd"] <= 100.0
+    assert sizing["kelly_capital_usd"] >= 0.0
+
+
 def test_each_kill_criterion_trips_individually(tmp_path):
     cases = [
         (

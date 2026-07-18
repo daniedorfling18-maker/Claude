@@ -54,10 +54,16 @@ that merge commit. This prevents retroactive hypothesis registration.
   under H1; testing it would require a separate, freshly pre-registered
   hypothesis (Route B, not adopted). The WO-93-revert record's contrary
   "generic reward carry may be funded" statement is SUPERSEDED by this
-  owner decision. Funding remains fail-closed
-  (`FUNDING_GOVERNANCE_RECONCILED = False`) until the evaluator is built,
-  passing, and a market qualifies; the flag flips only in the commit that
-  lands the passing evaluator. Tighten-only: this adds a funding
+  owner decision. The evaluator is now BUILT and landed
+  (`src/polymarket_predictive_engine/sharp_linking_evaluator.py`, WO-105),
+  publishing `sharp_linking_qualification.json` and feeding the WO-99 gate as
+  the `sharp_linking_qualified` precondition. The reconciliation flag is
+  therefore `FUNDING_GOVERNANCE_RECONCILED = True` (flipped in the same commit
+  that landed the passing evaluator, per the amendment). This does NOT open
+  funding: the evaluator is itself fail-closed and holds the ticket
+  not_eligible until §1 (exact-token sharp anchor) and §2 (exact-market Tier-0
+  sufficiency) both pass on real data — which cannot happen until Tier-0
+  markout coverage matures on the VPS. Tighten-only: this adds a funding
   precondition and loosens nothing.
 - Decision/stopping rule: the frozen WO-50 policy table and dated decision
   process in `live_test_decision_policy.py`.

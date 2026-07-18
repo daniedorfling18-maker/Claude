@@ -31,14 +31,20 @@ NTFY_MESSAGE = "Polymarket stage ticket eligible - read the quote sheet."
 NTFY_REVOKE_MESSAGE = "Polymarket stage ticket NO LONGER eligible - do not act on the prior notice."
 HEALTHY_RECONCILIATION = {"clean", "explained"}
 
-# WO-103 (2026-07-17): the experiment registry H1 requires exact-token
-# sharp-anchor qualification (M-gates "necessary but not sufficient"), while
-# the WO-93-revert record states generic reward carry may be funded. These
-# are contradictory governing instructions. Per fail-closed policy, the owner
-# notification cannot fire until ONE dated owner decision reconciles them.
-# The owner flips this to True as part of that reconciliation; it is the only
-# lever, and it holds even an otherwise-eligible ticket.
-FUNDING_GOVERNANCE_RECONCILED = False
+# WO-103/WO-105 (reconciled 2026-07-18, Route A): the experiment registry H1
+# sharp-anchor requirement was contradicted by the WO-93-revert generic-carry
+# record. The owner signed Route A
+# (`docs/OWNER_AMENDMENT_SHARP_LINKING_EVALUATOR.md`): the sharp-anchor
+# requirement STANDS and is now enforced by the registered sharp-linking
+# evaluator (WO-105), added below as the `sharp_linking_qualified` condition.
+# The contradiction is resolved, so this reconciliation flag is True. Funding
+# does NOT thereby open: the evaluator condition is itself fail-closed and
+# holds the ticket not_eligible until §1 (exact-token sharp anchor) and §2
+# (exact-market Tier-0 sufficiency) both pass on real data - which cannot
+# happen until Tier-0 markout coverage matures on the VPS. This flag flips
+# in the same commit that lands the passing evaluator, per the amendment.
+FUNDING_GOVERNANCE_RECONCILED = True
+MAX_QUALIFICATION_AGE_SECONDS = 30 * 60
 HEALTHY_FRESHNESS = {"fresh", "inactive_pre_live"}
 
 
@@ -226,6 +232,36 @@ def evaluate_stage_ticket_eligibility(
             "requote_not_pulling_candidate",
             requote_state is not None and requote_state not in {"pull_quotes_now", "STOP"},
             f"candidate_requote_state={requote_state or 'missing'}",
+        )
+    )
+
+    # WO-105 Route A: the sharp-linking evaluator grades the ONE exact market
+    # WO-50 would fund against registry H1 §1 (exact-token sharp anchor) and §2
+    # (exact-market Tier-0 sufficiency). Require its published qualification to
+    # be fresh, qualified, and about THIS exact candidate. Fail-closed: a
+    # missing, stale, unqualified, or candidate-mismatched artifact blocks the
+    # ticket. This is the added funding precondition the reconciliation adopts;
+    # it never loosens any existing condition.
+    qualification = read_json(out_root / "sharp_linking_qualification.json", default={}) or {}
+    qual_generated = parse_timestamp(qualification.get("generated_at_utc"))
+    qual_age = (now - qual_generated.astimezone(timezone.utc)).total_seconds() if qual_generated is not None else None
+    qual_candidate = str(qualification.get("candidate_condition_id") or "").strip()
+    sharp_qualified = (
+        bool(qualification.get("qualified"))
+        and bool(candidate_id)
+        and qual_candidate == candidate_id
+        and qual_age is not None
+        and 0 <= qual_age <= MAX_QUALIFICATION_AGE_SECONDS
+    )
+    rows.append(
+        _condition(
+            "sharp_linking_qualified",
+            sharp_qualified,
+            f"qualified={bool(qualification.get('qualified'))}; "
+            f"qual_candidate={qual_candidate or 'missing'}; "
+            f"age={round(qual_age, 1) if qual_age is not None else 'missing'}s "
+            f"(max {MAX_QUALIFICATION_AGE_SECONDS:g}); "
+            f"first_failing={qualification.get('first_failing_check') or 'none'}",
         )
     )
 

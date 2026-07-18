@@ -680,6 +680,9 @@ def test_gate_a_passes_only_after_enough_distinct_days_at_target(tmp_path, monke
     assert gates["M_A_carry_evidence"]["state"] == "pass"
     assert gates["M_B_adverse_realism"]["state"] == "pass"
     assert gates["maker_verdict"] == "evidence_supported_pending_human_decision"
+    ticket = last["portfolio"][0]
+    assert ticket["rewards_min_size_shares"] == 100
+    assert ticket["mid_price"] == ticket["reference_mid_price"]
     # Even a supported verdict never trades; the sheet says so in print.
     assert last["paper_trading_invoked"] is False
     sheet = (cfg.output_root / "maker_carry" / "maker_quote_sheet.md").read_text(encoding="utf-8")

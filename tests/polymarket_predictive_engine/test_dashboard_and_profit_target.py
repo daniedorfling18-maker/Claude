@@ -3420,6 +3420,7 @@ def test_dashboard_carries_profit_verdict_and_html_panel(tmp_path):
         "study": {},
         "live_test": {},
         "decision_policy": {},
+        "stage_ticket_eligibility": {},
         "requote_alerts": {},
         "fill_replay": {},
     }
@@ -3458,3 +3459,26 @@ def test_dashboard_surfaces_wo66_requote_banner_payload(tmp_path):
 
     assert data["maker_lane"]["requote_alerts"]["alert_state"] == "pull_quotes_now"
     assert "human action only, no cancel/order path" in html
+
+
+def test_dashboard_surfaces_wo99_stage_ticket_banner_payload(tmp_path):
+    cfg = _config(tmp_path)
+    write_json(
+        cfg.output_root / "maker_carry" / "stage_ticket_eligibility.json",
+        {
+            "status": "ok",
+            "state": "not_eligible",
+            "first_failing_condition": "minimum_quote_capital_within_stage",
+            "paper_trading_invoked": False,
+            "live_trading_invoked": False,
+        },
+    )
+
+    result = render_dashboard(cfg)
+    data = read_json(result["dashboard_data"])
+    html = Path(result["dashboard_file"]).read_text(encoding="utf-8")
+
+    assert data["maker_lane"]["stage_ticket_eligibility"]["state"] == "not_eligible"
+    assert "WO-99: " in html
+    assert "Stage ticket not executable" in html
+    assert "cannot gate, size, fund, sign, or place an order" in html

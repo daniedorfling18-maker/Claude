@@ -1402,7 +1402,12 @@ def _size_portfolio(
                 "event_start_time_utc": row.get("event_start_time_utc", ""),
                 "uma_resolution_status": row.get("uma_resolution_status", ""),
                 "size_multiple": k,
+                # WO-99 carries the exact minimum-size capital inputs inside
+                # the same atomic study snapshot. The eligibility evaluator
+                # never has to join a concurrently refreshed candidate CSV.
+                "rewards_min_size_shares": row["rewards_min_size_shares"],
                 "quote_size_shares": k * row["rewards_min_size_shares"],
+                "mid_price": row.get("mid_price"),
                 "reference_mid_price": row.get("mid_price"),
                 "reference_best_bid": row.get("best_bid"),
                 "reference_best_ask": row.get("best_ask"),
@@ -1435,6 +1440,45 @@ def _size_portfolio(
 
     net_total = round(sum(row["net_carry_usd_per_day"] for row in portfolio), 2)
     return portfolio, capital, net_total
+
+
+def _attach_portfolio_toxicity(
+    out_root: Path,
+    portfolio: list[dict[str, Any]],
+) -> None:
+    """Snapshot existing WO-49 conditioning onto current portfolio rows.
+
+    Coverage is intentionally not manufactured: a portfolio market with no
+    measured flow row remains without a score and WO-99 therefore evaluates
+    it ``not_eligible``. This metadata is reporting-only and is attached only
+    after the registered portfolio selection and sizing have completed.
+    """
+
+    rows = read_csv_rows(out_root / "flow_toxicity.csv")
+    for entry in portfolio:
+        condition_id = str(entry.get("condition_id") or "").strip()
+        tokens = {
+            str(entry.get(key) or "").strip()
+            for key in ("token_id", "complement_token_id")
+            if str(entry.get(key) or "").strip()
+        }
+        matches: list[tuple[Any, float, str]] = []
+        for row in rows:
+            market = str(row.get("market") or row.get("condition_id") or "").strip()
+            asset = str(row.get("asset_id") or "").strip()
+            if not ((condition_id and market == condition_id) or (asset and asset in tokens)):
+                continue
+            score = safe_float(row.get("toxicity_score"))
+            observed_at = parse_timestamp(row.get("generated_at_utc"))
+            if score is None or observed_at is None or not 0.0 <= score <= 1.0:
+                continue
+            matches.append((observed_at, score, str(row.get("generated_at_utc") or "")))
+        if not matches:
+            continue
+        latest = max(item[0] for item in matches)
+        current = [item for item in matches if item[0] == latest]
+        entry["toxicity_score"] = max(item[1] for item in current)
+        entry["toxicity_generated_at_utc"] = current[0][2]
 
 
 def _capital_curve(
@@ -1590,6 +1634,7 @@ def run_maker_carry_study(cfg: EngineConfig) -> dict[str, Any]:
     # reuses this exact function for supplementary planning caps below.
     cap = float(settings["capital_cap_usd"])
     portfolio, capital, net_total = _size_portfolio(settings, candidates, cap)
+    _attach_portfolio_toxicity(out_root, portfolio)
     target = float(settings["target_net_usd_per_day"])
     capital_curve, capital_for_target = _capital_curve(settings, candidates, target)
     top_portfolio = portfolio[0] if portfolio else {}

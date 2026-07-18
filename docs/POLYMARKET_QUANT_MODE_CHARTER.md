@@ -791,6 +791,20 @@ broker, or order paths. Exact observations, frozen episodes, and the verdict
 are published under `outputs/h2_dutch/`, enrolled in the evidence anchor, and
 shown as the dashboard's H2 authority.
 
+**2026-07-18 — WO-99 implemented by Codex; awaiting review.** The registered
+maker funding action now has a separate, reporting-only executable-ticket
+check. It requires the funding action and clear kills, the named recurrent
+market in the current portfolio, measured toxicity at or below 0.9,
+non-high resolution risk, more than 48 hours to scheduled risk, minimum quote
+capital at or below $100, fresh kill inputs, and clean/explained wallet
+reconciliation. Missing or malformed evidence stays `not_eligible`. The
+atomic artifact is
+`outputs/maker_carry/stage_ticket_eligibility.json`; a verified transition also
+writes an anchored owner-alert artifact and may send the fixed non-sensitive
+message through an environment-only ntfy topic. The dashboard/quote sheet
+surface this state, but no gate, policy threshold, sizing, capital, broker,
+signer, credential, or order path consumes it.
+
 ## Rules of engagement for coding agents
 
 0. **Division of labour**: the orchestrating agent writes/updates this charter and the work orders

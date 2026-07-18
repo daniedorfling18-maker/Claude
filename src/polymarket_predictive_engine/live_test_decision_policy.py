@@ -18,6 +18,7 @@ from typing import Any
 from .config import EngineConfig, load_config
 from .executor_ops_monitor import EXECUTION_LEDGER, EXECUTOR_HEARTBEAT
 from .risk import shrunk_kelly_fraction
+from .stage_ticket_eligibility import CONDITION_ORDER, evaluate_stage_ticket_eligibility
 from .utils import boolish, now_utc, parse_timestamp, read_csv_rows, read_json, safe_float, write_json, write_text_atomic
 
 REGISTERED_AT_UTC = "2026-07-10T00:00:00Z"
@@ -589,31 +590,60 @@ def _policy_date(settings: dict[str, Any]) -> date:
     return (parsed or parse_timestamp("2026-07-20T00:00:00Z")).date()  # type: ignore[union-attr]
 
 
-def _patch_quote_sheet(out_root: Path, policy: dict[str, Any]) -> None:
+def _patch_quote_sheet(
+    out_root: Path,
+    policy: dict[str, Any],
+    stage_ticket: dict[str, Any] | None = None,
+) -> None:
     path = out_root / "maker_quote_sheet.md"
     if not path.exists():
         return
     text = path.read_text(encoding="utf-8")
     start = "<!-- decision-policy:start -->"
     end = "<!-- decision-policy:end -->"
-    block = "\n".join(
+    stage_ticket = stage_ticket or {}
+    stage_conditions = (
+        stage_ticket.get("conditions")
+        if isinstance(stage_ticket.get("conditions"), dict)
+        else {}
+    )
+    block_lines = [
+        start,
+        "## Registered decision policy (WO-50)",
+        "",
+        f"- Indicated action: **{policy.get('indicated_action', '-')}**",
+        f"- Ladder stage permitted: **{policy.get('ladder_stage_permitted', '-')}** "
+        f"(binding capital ${policy.get('sizing', {}).get('binding_capital_usd', '-')})",
+        f"- Kill criteria: **{policy.get('kill_criteria_status', {}).get('status', '-')}**",
+        f"- Kill-input freshness: **{policy.get('kill_criteria_status', {}).get('kill_input_freshness', {}).get('state', '-')}** "
+        f"(kill_data_stale={policy.get('kill_criteria_status', {}).get('kill_data_stale', False)}, "
+        f"age={policy.get('kill_criteria_status', {}).get('kill_input_freshness', {}).get('age_seconds', '-')}s, "
+        f"max={policy.get('kill_criteria_status', {}).get('kill_input_freshness', {}).get('maximum_age_seconds', '-')}s)",
+        "- Policy note: indicates only; the human decides; this system never trades.",
+        "",
+        "### Stage-ticket eligibility (WO-99)",
+        f"- State: **{stage_ticket.get('state', 'not_evaluated')}**",
+        f"- First failing condition: **{stage_ticket.get('first_failing_condition') or 'none'}**",
+    ]
+    for name in CONDITION_ORDER:
+        condition = stage_conditions.get(name) if isinstance(stage_conditions.get(name), dict) else {}
+        block_lines.append(
+            f"- Condition `{name}`: **{'pass' if condition.get('passed') else 'fail'}**"
+        )
+    notification = (
+        stage_ticket.get("notification")
+        if isinstance(stage_ticket.get("notification"), dict)
+        else {}
+    )
+    block_lines.extend(
         [
-            start,
-            "## Registered decision policy (WO-50)",
-            "",
-            f"- Indicated action: **{policy.get('indicated_action', '-')}**",
-            f"- Ladder stage permitted: **{policy.get('ladder_stage_permitted', '-')}** "
-            f"(binding capital ${policy.get('sizing', {}).get('binding_capital_usd', '-')})",
-            f"- Kill criteria: **{policy.get('kill_criteria_status', {}).get('status', '-')}**",
-            f"- Kill-input freshness: **{policy.get('kill_criteria_status', {}).get('kill_input_freshness', {}).get('state', '-')}** "
-            f"(kill_data_stale={policy.get('kill_criteria_status', {}).get('kill_data_stale', False)}, "
-            f"age={policy.get('kill_criteria_status', {}).get('kill_input_freshness', {}).get('age_seconds', '-')}s, "
-            f"max={policy.get('kill_criteria_status', {}).get('kill_input_freshness', {}).get('maximum_age_seconds', '-')}s)",
-            "- Policy note: indicates only; the human decides; this system never trades.",
+            f"- Owner push: **{notification.get('delivery_state', 'not_configured')}**",
+            "- Stage-ticket note: reporting and owner notification only; no gate, sizing, funding, or order path reads this artifact.",
             end,
             "",
         ]
     )
+    block = "\n".join(block_lines)
     pattern = re.compile(r"<!-- decision-policy:start -->.*?<!-- decision-policy:end -->\n?", re.S)
     if start in text and end in text:
         text = pattern.sub(block, text)
@@ -628,14 +658,23 @@ def run_decision_policy(cfg: EngineConfig) -> dict[str, Any]:
     out_root = _out_root(cfg)
     path = out_root / "decision_policy.json"
     if str(settings.get("enabled", True)).strip().lower() in {"0", "false", "no", "off"}:
+        generated_at = now_utc()
         payload = {
             "status": "disabled",
             "registered_at_utc": REGISTERED_AT_UTC,
-            "generated_at_utc": now_utc(),
+            "generated_at_utc": generated_at,
             "paper_trading_invoked": False,
             "live_trading_invoked": False,
         }
         write_json(path, payload)
+        study = read_json(out_root / "maker_carry_study.json", default={}) or {}
+        stage_ticket = evaluate_stage_ticket_eligibility(
+            cfg,
+            decision_policy=payload,
+            study=study if isinstance(study, dict) else {},
+            as_of=generated_at,
+        )
+        _patch_quote_sheet(out_root, payload, stage_ticket)
         return payload
 
     study = read_json(out_root / "maker_carry_study.json", default={}) or {}
@@ -719,7 +758,13 @@ def run_decision_policy(cfg: EngineConfig) -> dict[str, Any]:
         "live_trading_invoked": False,
     }
     write_json(path, payload)
-    _patch_quote_sheet(out_root, payload)
+    stage_ticket = evaluate_stage_ticket_eligibility(
+        cfg,
+        decision_policy=payload,
+        study=study,
+        as_of=observed_at,
+    )
+    _patch_quote_sheet(out_root, payload, stage_ticket)
     return payload
 
 

@@ -163,3 +163,9 @@ def test_exact_h2_ledgers_are_enrolled_with_correct_mutability_modes():
     assert registry["h2_dutch/h2_scan_observations_v1.csv"] == "append_only"
     assert registry["h2_dutch/h2_final_episodes_v1.csv"] == "append_only"
     assert registry["h2_dutch/h2_final_sample_manifest.json"] == "snapshot"
+
+
+def test_wo99_stage_ticket_and_owner_alert_are_enrolled_as_snapshots():
+    registry = {row["glob"]: row["mode"] for row in DEFAULT_LEDGER_REGISTRY}
+    assert registry["maker_carry/stage_ticket_eligibility.json"] == "snapshot"
+    assert registry["maker_carry/stage_ticket_owner_alert.json"] == "snapshot"

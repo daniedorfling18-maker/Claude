@@ -497,3 +497,78 @@ def test_cli_and_dashboard_payload_surface_decision_policy(tmp_path):
     assert data["maker_lane"]["decision_policy"]["indicated_action"] == result["indicated_action"]
     assert "policy: " in html
     assert "makerPolicy" in html
+
+
+def test_decision_policy_writes_same_run_stage_ticket_and_quote_sheet_evidence(
+    tmp_path,
+    monkeypatch,
+):
+    cfg = _config(tmp_path, live_configured=True)
+    study = _study(top="0xm1")
+    study["generated_at_utc"] = "2026-07-20T08:00:00Z"
+    study["portfolio"][0].update(
+        {
+            "resolution_risk": "low",
+            "event_start_time_utc": "2026-07-23T12:00:00Z",
+            "rewards_min_size_shares": 50.0,
+            "mid_price": 0.5,
+            "toxicity_score": 0.5,
+            "toxicity_generated_at_utc": "2026-07-20T11:00:00Z",
+        }
+    )
+    _write_study(cfg, study)
+    _write_carry_history(
+        cfg,
+        _history(["0xm1", "0xm1", "0xm2", "0xm1", "0xm3", "0xm1"]),
+    )
+    write_json(
+        _out(cfg) / "maker_live_test.json",
+        {
+            "status": "ok",
+            "generated_at_utc": "2026-07-20T11:50:00Z",
+            "net_score_usd": 2.0,
+            "scoreboard": "winning_so_far",
+        },
+    )
+    _write_live_history(
+        cfg,
+        [
+            {
+                "generated_at_utc": "2026-07-20T11:50:00Z",
+                "net_score_usd": 2.0,
+                "daily_net_score_usd": 2.0,
+                "fills_last_24h": 1.0,
+                "modelled_fills_per_day": 1.0,
+                "fill_alert": False,
+                "fill_alert_multiple": 2.0,
+                "scoreboard": "winning_so_far",
+            }
+        ],
+    )
+    write_json(
+        cfg.output_root / "performance" / "wallet_reconciliation.json",
+        {
+            "status": "ok",
+            "reconciliation_status": "clean",
+            "generated_at_utc": "2026-07-20T11:55:00Z",
+        },
+    )
+    (_out(cfg) / "maker_quote_sheet.md").write_text(
+        "# Maker quote sheet\n\nExisting content\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(policy, "now_utc", lambda: "2026-07-20T12:00:00Z")
+
+    decision = run_decision_policy(cfg)
+    stage = read_json(_out(cfg) / "stage_ticket_eligibility.json")
+    sheet = (_out(cfg) / "maker_quote_sheet.md").read_text(encoding="utf-8")
+
+    assert decision["indicated_action"] == "fund_100_min_size_single_calmest_market"
+    assert stage["state"] == "eligible"
+    assert stage["decision_policy_generated_at_utc"] == decision["generated_at_utc"]
+    assert all(row["passed"] for row in stage["conditions"].values())
+    assert "Stage-ticket eligibility (WO-99)" in sheet
+    assert sheet.count("**pass**") == 4
+    assert "- State: **eligible**" in sheet
+    assert stage["paper_trading_invoked"] is False
+    assert stage["live_trading_invoked"] is False

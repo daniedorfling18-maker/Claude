@@ -1,10 +1,10 @@
 # Polymarket Codex Work Orders
 
-Last updated: 2026-07-16 (owner-authorized corrective batch opened with WO-93; WO-85, WO-87, WO-86, and WO-88 implemented; WO-80, WO-82, WO-81 landed; WO-83 implemented in
+Last updated: 2026-07-18 (owner-authorized corrective batch opened with WO-93; WO-85, WO-87, WO-86, and WO-88 implemented; WO-80, WO-82, WO-81 landed; WO-83 implemented in
 PR #203; WO-84 implemented in PR #205; WO-89 through WO-92 implemented. WO-87 now relabels the unchanged legacy verdict metric honestly and
 reports non-binding true pre-event CLV on the same units. WO-93 was implemented
 in PR #236, WO-94 in PR #237, WO-95 in PR #238, and WO-96 in PR #239. WO-97 was
-implemented in PR #240. WO-98 is implemented and awaiting publication. WO-33 remains pending a
+implemented in PR #240. WO-98 merged in PR #241. WO-99 stage-ticket notification is implemented and awaiting review. WO-33 remains pending a
 registered leakage review, with
 WO-34/35 model wiring bound to that review and the three-hypothesis freeze.
 WO-48 and WO-67 are blocked; WO-70 and WO-72 are deferred; WO-76 is
@@ -4184,6 +4184,8 @@ not absence of all defects.
 
 ## WO-99 — Owner push notification when a stage ticket becomes executable (filed 2026-07-17)
 
+Status: IMPLEMENTED by Codex on 2026-07-18; awaiting one-PR review and merge.
+
 The maker gate passed 2026-07-17 with `fund_100_but_only_most_recurrent_market_half_target`
 indicated, but the ticket was not executable: the named market carried
 toxicity 0.97 (standing rule 8 bars > 0.9) and both portfolio markets'
@@ -4222,6 +4224,46 @@ sizing, or order surface reads the eligibility artifact.
 Day-after check: `stage_ticket_eligibility.json` exists with per-condition
 booleans matching the same run's decision_policy.json and quote sheet; with
 the env var set, a forced test transition delivers exactly one ntfy message.
+
+Implementation and engineering review record: the decision-policy run now
+writes atomic `maker_carry/stage_ticket_eligibility.json`; a verified
+`not_eligible -> eligible` transition also writes atomic
+`maker_carry/stage_ticket_owner_alert.json`. Both are snapshot-enrolled in the
+WO-61 anchor registry. The current maker-study portfolio now carries its exact
+minimum-size/midpoint inputs and any already-measured WO-49 toxicity snapshot,
+after portfolio selection and sizing, so this metadata cannot change M-A/M-B,
+candidate selection, or capital allocation. The dashboard and quote sheet show
+the current state, four condition booleans, and first failure. The ntfy topic
+exists only in process environment; artifacts contain no URL, and transport
+errors persist only an exception type.
+
+S1: one policy `generated_at_utc` clock governs study/reconciliation future
+checks and the 48-hour event boundary. `parse_timestamp` normalizes artifact
+timestamps; missing, malformed, and future values fail. The exact-48-hour and
+clock-advance test proves the boundary leaves eligibility as time advances.
+S2: both new JSON paths use `write_json`; the quote-sheet extension reuses the
+existing decision-policy writer/cadence and its atomic text replacement. The
+maker study exposes all capital inputs in its existing atomic study snapshot.
+The eligibility state is durably advanced before the external POST, making a
+crash fail toward a missed alert rather than a duplicate push; neither new path
+has another writer. S3 producers are WO-50 decision policy, WO-36 current
+portfolio, WO-49 measured flow toxicity, and WO-62/73/81/84 wallet
+reconciliation. Missing producer coverage displays `not_eligible` with the
+first missing condition; no score is manufactured. S4 consumes no ntfy
+response payload/schema, only generic HTTP success status. Offline tests cover
+the exact fixed request message, transition deduplication, send failure,
+clock/window behavior, conservative duplicate toxicity, and parameterized
+missing/unsafe inputs. S5 is the registered fail-safe sentence above. S6 is
+the unchanged day-after check above. S7 static diff review found no change to
+registered maker gates, action-policy rows, kill thresholds, Kelly rules,
+paper/live permissions, broker, signer, credentials, stake, or order paths.
+
+Verification: Ruff passed across `src` and `tests`; 140 focused tests passed;
+and 1,311 repository tests passed in a bounded production-like VPS
+container with a real Git clone. The real ntfy delivery remains the named
+day-after production check because the private topic is intentionally absent
+from repository test environments. These methods found no additional defects;
+they do not prove absence of every defect.
 
 ## WO-98 - Exact post-registration H2 evaluator and dashboard authority
 
@@ -4353,8 +4395,10 @@ Every WO below and every future WO must comply with
 `docs/ENGINEERING_STANDARDS.md` (S1-S7), including the mandatory
 `Day-after check:` line. Reviews verify compliance item by item.
 
-**Next buildable: WO-99** (owner push notification on stage-ticket
-eligibility; small, reporting-only). WO-95 was implemented in PR #238, WO-96 merged in PR #239, WO-97 merged in PR #240, and WO-98 was merged in PR #241. Later items in the 2026-07-16 owner
+**Current build: WO-99 implemented, awaiting required review/merge** (owner
+push notification on stage-ticket eligibility; small, reporting-only).
+WO-95 was implemented in PR #238, WO-96 merged in PR #239, WO-97 merged in PR #240,
+and WO-98 merged in PR #241. Later items in the 2026-07-16 owner
 instruction require their own numbered work order and PR; do not combine them
 into this change. WO-89 through WO-92 were implemented as of 2026-07-15.
 WO-93 was implemented in PR #236, WO-94 in PR #237, WO-95 in PR #238, and WO-96 in PR #239. WO-85, WO-87, WO-86, and
@@ -4362,12 +4406,17 @@ WO-88 are implemented on 2026-07-15; WO-83 is implemented in PR #203 and
 WO-84 is implemented in PR #205. Do not infer follow-on capital, gate, model,
 or executor work from their diagnostics; the queue below remains binding.
 
-- **Implemented / publication pending:** WO-98 exact post-registration H2
-  evaluator and dashboard authority. After its one-PR review/merge, continue
-  with owner-ordered WO-99 leakage/corpus/split correction.
+- **Implemented / publication pending:** WO-99 stage-ticket eligibility and
+  owner push. It remains reporting-only until reviewed and merged.
+- **Number collision requiring explicit reconciliation:** the older open
+  leakage/corpus/split branch/PR also used the label WO-99 before this owner
+  notification WO was registered on main. Do not conflate or silently merge
+  them; that branch must receive a unique owner-approved number before further
+  implementation/publication work.
 - **Pending review, not build permission:** WO-33. WO-34/35 model wiring shares
-  its leakage-review dependency and must stay inside H1-H3; WO-99 is the
-  owner-authorized corrective implementation. WO-96 is the exact H3 build.
+  its leakage-review dependency and must stay inside H1-H3. The duplicated
+  leakage/corpus/split branch label is not new build permission. WO-96 is the
+  exact H3 build.
 - **Blocked:** WO-48 (maker evidence gates); WO-67 (all P1-P5); WO-73 item 4 and
   WO-75 item 2 (part of the blocked executor authorization path).
 - **Deferred:** WO-70 until post-proof; WO-72 until the human ladder produces

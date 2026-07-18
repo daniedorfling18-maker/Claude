@@ -37,9 +37,17 @@ def _write_healthy_inputs(cfg: EngineConfig, **overrides) -> None:
         "capital_usd": overrides.get("capital_usd", 80.0),
     }
     write_json(out / "maker_carry_study.json", {"portfolio": [portfolio_row]})
+    toxicity = overrides.get("toxicity", 0.5)
+    raw_imbalance = overrides.get("raw_imbalance", 0.4)
+    blocked = toxicity > 0.9 or raw_imbalance >= 0.9
     write_csv(
         out / "flow_toxicity.csv",
-        [{"market": CANDIDATE, "toxicity_score": overrides.get("toxicity", 0.5)}],
+        [{
+            "market": CANDIDATE,
+            "toxicity_score": toxicity,
+            "vpin_raw": raw_imbalance,
+            "toxic_blocked": blocked,
+        }],
     )
     write_json(
         cfg.output_root / "performance" / "wallet_reconciliation.json",
@@ -62,6 +70,7 @@ def test_each_registered_condition_fails_closed(tmp_path: Path) -> None:
         {"kill": "triggered"},
         {"candidate": "0xother"},
         {"toxicity": 0.97},
+        {"raw_imbalance": 0.977},
         {"resolution_risk": "high"},
         {"event_start": (NOW + timedelta(hours=12)).strftime("%Y-%m-%dT%H:%M:%SZ")},
         {"capital_usd": 420.0},

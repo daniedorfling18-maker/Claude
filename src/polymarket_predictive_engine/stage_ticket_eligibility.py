@@ -24,6 +24,7 @@ OUTPUT_RELATIVE = "maker_carry/stage_ticket_eligibility.json"
 ALERT_RELATIVE = "ops_scheduler/stage_ticket_notification.md"
 STAGE_BUDGET_USD = 100.0
 MAX_TOXICITY = 0.9
+MAX_RAW_IMBALANCE = 0.9
 EVENT_START_BUFFER_HOURS = 48.0
 NTFY_ENV_VAR = "OPS_OWNER_NTFY_TOPIC_URL"
 NTFY_MESSAGE = "Polymarket stage ticket eligible - read the quote sheet."
@@ -50,7 +51,7 @@ def evaluate_stage_ticket_eligibility(
         cfg.output_root / "performance" / "wallet_reconciliation.json", default={}
     ) or {}
     toxicity_rows = {
-        str(row.get("market") or ""): safe_float(row.get("toxicity_score"))
+        str(row.get("market") or ""): row
         for row in read_csv_rows(out_root / "flow_toxicity.csv")
         if row.get("market")
     }
@@ -89,12 +90,31 @@ def evaluate_stage_ticket_eligibility(
 
     summary: dict[str, Any] = {"candidate_condition_id": candidate_id or None}
     if candidate is not None:
-        toxicity = toxicity_rows.get(candidate_id)
+        # WO-102 composite screen (tighten-only): block on the absolute
+        # raw-imbalance floor OR the universe-relative percentile, and treat
+        # an unmeasured market as blocked (fail-closed). Reading the flow
+        # module's own `toxic_blocked` keeps the veto in lockstep with the
+        # instrument, but the percentile is also re-checked here directly so a
+        # stale/partial row cannot silently clear a candidate.
+        tox_row = toxicity_rows.get(candidate_id) or {}
+        percentile = safe_float(tox_row.get("toxicity_score"))
+        raw_imbalance = safe_float(tox_row.get("vpin_raw"))
+        flagged = str(tox_row.get("toxic_blocked") or "").strip().lower() in {"true", "1", "yes"}
+        measured = bool(tox_row) and percentile is not None
+        clean = (
+            measured
+            and not flagged
+            and percentile <= MAX_TOXICITY
+            and (raw_imbalance is None or raw_imbalance < MAX_RAW_IMBALANCE)
+        )
         rows.append(
             _condition(
-                "toxicity_at_or_below_registered_maximum",
-                toxicity is not None and toxicity <= MAX_TOXICITY,
-                f"toxicity={toxicity if toxicity is not None else 'unmeasured'} vs max {MAX_TOXICITY}",
+                "toxicity_screen_clear",
+                clean,
+                f"measured={measured}; toxic_blocked={flagged}; percentile="
+                f"{percentile if percentile is not None else 'unmeasured'} (max {MAX_TOXICITY}); "
+                f"raw_imbalance={raw_imbalance if raw_imbalance is not None else 'unmeasured'} "
+                f"(floor {MAX_RAW_IMBALANCE})",
             )
         )
         resolution_risk = str(candidate.get("resolution_risk") or "").lower()

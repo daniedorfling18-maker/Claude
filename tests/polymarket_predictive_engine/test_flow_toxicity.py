@@ -194,3 +194,32 @@ def test_quote_sheet_surfaces_toxicity_column_and_rule(tmp_path):
 
 def test_cli_exposes_flow_toxicity():
     assert "flow-toxicity" in COMMANDS
+
+
+def test_absolute_floor_blocks_one_sided_market_the_percentile_would_de_veto(tmp_path):
+    # WO-102 de-veto hole: a fully one-sided market measured alongside equally
+    # toxic peers gets a LOW percentile rank (index/(n-1)), which the old
+    # percentile-only rule would clear. The absolute raw-imbalance floor must
+    # still block it, universe-independent.
+    cfg = _config(tmp_path)
+    _leaderboard(cfg)
+    trades = []
+    for market in ("0xtarget", "0xpeer1", "0xpeer2"):
+        for i in range(20):
+            trades.append({"market": market, "asset_id": f"tok-{market}", "side": "BUY",
+                           "price": 0.5, "size": 100, "timestamp": i})
+    write_csv(
+        cfg.output_root / "polymarket_trade_prints" / "trade_prints.csv",
+        trades,
+        fieldnames=["market", "asset_id", "side", "price", "size", "timestamp"],
+    )
+
+    build_flow_toxicity(cfg)
+
+    rows = {row["market"]: row for row in read_csv_rows(cfg.output_root / "maker_carry" / "flow_toxicity.csv")}
+    target = rows["0xtarget"]
+    # Fully one-sided flow, but ranked lowest among equally-toxic peers.
+    assert float(target["vpin_raw"]) >= 0.9
+    assert float(target["toxicity_score"]) < 0.9  # percentile alone would clear it
+    assert str(target["toxic_blocked"]).lower() == "true"  # absolute floor blocks
+    assert "raw_imbalance" in target["toxicity_block_reasons"]

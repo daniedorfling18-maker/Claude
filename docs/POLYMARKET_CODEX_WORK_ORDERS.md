@@ -4354,7 +4354,18 @@ Every WO below and every future WO must comply with
 `Day-after check:` line. Reviews verify compliance item by item.
 
 **Next buildable: WO-99** (owner push notification on stage-ticket
-eligibility; small, reporting-only). WO-95 was implemented in PR #238, WO-96 merged in PR #239, WO-97 merged in PR #240, and WO-98 was merged in PR #241. Later items in the 2026-07-16 owner
+eligibility; small, reporting-only — the ledger entry below is the ONLY
+WO-99; build exactly it).
+
+Numbering collision, resolved 2026-07-17: Codex self-assigned "WO-99" to a
+leakage-safe training corpus (draft PR #242) and "WO-100" to a full-suite PR
+gate (PR #243) before this ledger's WO-99 was filed; both branches predate
+the 2026-07-17 governance corrections. Dispositions: the corpus work is
+renumbered **WO-101** and the gate work keeps **WO-100**; both PRs must be
+rebased onto current main (>= dbbd61e), renamed accordingly, drop any
+runtime-lock fixture edits (superseded by the clock-relative fix on main),
+and re-run their suites before review. Neither may merge before the ledger
+WO-99 (notification) is built and reviewed. WO-95 was implemented in PR #238, WO-96 merged in PR #239, WO-97 merged in PR #240, and WO-98 was merged in PR #241. Later items in the 2026-07-16 owner
 instruction require their own numbered work order and PR; do not combine them
 into this change. WO-89 through WO-92 were implemented as of 2026-07-15.
 WO-93 was implemented in PR #236, WO-94 in PR #237, WO-95 in PR #238, and WO-96 in PR #239. WO-85, WO-87, WO-86, and

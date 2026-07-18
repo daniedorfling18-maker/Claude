@@ -128,14 +128,20 @@ def _latest_quotes(cfg: EngineConfig) -> dict[str, dict[str, Any]]:
     return {token: latest_complete.get(token, row) for token, row in latest_any.items()}
 
 
-def _toxicity_by_market(cfg: EngineConfig) -> dict[str, float]:
-    values: dict[str, float] = {}
+def _toxicity_by_market(cfg: EngineConfig) -> dict[str, dict[str, Any]]:
+    """Per-market toxicity: percentile score, absolute raw imbalance, and the
+    WO-102 composite block flag, keyed by every market/token identifier."""
+    values: dict[str, dict[str, Any]] = {}
     for row in read_csv_rows(cfg.output_root / "maker_carry" / "flow_toxicity.csv"):
-        score = safe_float(row.get("toxicity_score"))
+        record = {
+            "score": safe_float(row.get("toxicity_score")),
+            "vpin_raw": safe_float(row.get("vpin_raw")),
+            "toxic_blocked": str(row.get("toxic_blocked") or "").strip().lower() in {"true", "1", "yes"},
+        }
         for key in (row.get("market"), row.get("asset_id"), row.get("condition_id")):
             identifier = str(key or "").strip()
-            if identifier and score is not None:
-                values[identifier] = score
+            if identifier:
+                values[identifier] = record
     return values
 
 
@@ -431,13 +437,16 @@ def _ticket_alerts(
     if midpoint is None and bid is not None and ask is not None:
         midpoint = (bid + ask) / 2.0
     if live_stamp is None or bid is None or ask is None or midpoint is None:
+        # WO-104 item 5: fail closed. A maker that cannot see a current book
+        # cannot manage resting-quote risk, so missing bid/ask is a PULL, not
+        # advice to requote.
         _alert(
             alerts,
-            state="requote_advised",
+            state="pull_quotes_now",
             rule="missing_live_bid_ask",
             message=(
                 "No complete websocket bid/ask or bounded public REST book snapshot "
-                "is available for this ticket."
+                "is available; pull resting quotes until the book is visible again."
             ),
         )
         quote_age = None
@@ -490,14 +499,12 @@ def _ticket_alerts(
                 threshold=settings["scheduled_event_hours"],
             )
 
-    toxicity_score = next(
-        (
-            toxicity[key]
-            for key in (condition_id, token_id)
-            if key and key in toxicity
-        ),
+    tox_record = next(
+        (toxicity[key] for key in (condition_id, token_id) if key and key in toxicity),
         None,
     )
+    toxicity_score = tox_record.get("score") if tox_record else None
+    raw_imbalance = tox_record.get("vpin_raw") if tox_record else None
     if toxicity_score is not None and toxicity_score > float(settings["toxicity_threshold"]):
         _alert(
             alerts,
@@ -506,6 +513,25 @@ def _ticket_alerts(
             message="Flow toxicity exceeded the registered standing-rule threshold.",
             value=toxicity_score,
             threshold=settings["toxicity_threshold"],
+        )
+    # WO-104 item 5 + WO-102: the requote screen must also honour the absolute
+    # raw-imbalance floor and the composite block, and must fail closed when
+    # toxicity is unmeasured for a market we are quoting.
+    if raw_imbalance is not None and raw_imbalance >= float(settings["toxicity_threshold"]):
+        _alert(
+            alerts,
+            state="pull_quotes_now",
+            rule="flow_toxicity_absolute_floor",
+            message="Absolute raw order-flow imbalance is at or above the registered floor.",
+            value=raw_imbalance,
+            threshold=settings["toxicity_threshold"],
+        )
+    if tox_record is not None and bool(tox_record.get("toxic_blocked")):
+        _alert(
+            alerts,
+            state="pull_quotes_now",
+            rule="flow_toxicity_composite_block",
+            message="WO-102 composite toxicity screen flagged this market.",
         )
 
     uma_status = str(

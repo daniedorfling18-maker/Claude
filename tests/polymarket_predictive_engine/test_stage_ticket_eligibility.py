@@ -19,6 +19,7 @@ def _cfg(tmp_path: Path) -> EngineConfig:
 
 def _write_healthy_inputs(cfg: EngineConfig, **overrides) -> None:
     out = cfg.output_root / "maker_carry"
+    run_stamp = overrides.get("run_stamp", "2026-07-17T11:45:00Z")
     policy = {
         "indicated_action": overrides.get("indicated_action", "fund_100_min_size_single_calmest_market"),
         "kill_criteria_status": {
@@ -26,6 +27,7 @@ def _write_healthy_inputs(cfg: EngineConfig, **overrides) -> None:
             "kill_input_freshness": {"state": overrides.get("freshness", "fresh")},
         },
         "composition_stability": {"most_recurrent_market": overrides.get("candidate", CANDIDATE)},
+        "inputs_snapshot": {"maker_carry_study_generated_at_utc": overrides.get("policy_study_ref", run_stamp)},
     }
     write_json(out / "decision_policy.json", policy)
     portfolio_row = {
@@ -36,7 +38,7 @@ def _write_healthy_inputs(cfg: EngineConfig, **overrides) -> None:
         "size_multiple": overrides.get("size_multiple", 2),
         "capital_usd": overrides.get("capital_usd", 80.0),
     }
-    write_json(out / "maker_carry_study.json", {"portfolio": [portfolio_row]})
+    write_json(out / "maker_carry_study.json", {"generated_at_utc": run_stamp, "portfolio": [portfolio_row]})
     toxicity = overrides.get("toxicity", 0.5)
     raw_imbalance = overrides.get("raw_imbalance", 0.4)
     blocked = toxicity > 0.9 or raw_imbalance >= 0.9
@@ -52,6 +54,11 @@ def _write_healthy_inputs(cfg: EngineConfig, **overrides) -> None:
     write_json(
         cfg.output_root / "performance" / "wallet_reconciliation.json",
         {"reconciliation_status": overrides.get("reconciliation", "clean")},
+    )
+    write_json(
+        out / "requote_alerts.json",
+        {"markets": [{"condition_id": overrides.get("candidate", CANDIDATE),
+                      "alert_state": overrides.get("requote_state", "quotes_ok")}]},
     )
 
 
@@ -77,6 +84,7 @@ def test_each_registered_condition_fails_closed(tmp_path: Path) -> None:
         {"capital_usd": 420.0},
         {"freshness": "stale"},
         {"reconciliation": "DISCREPANCY"},
+        {"requote_state": "pull_quotes_now"},
     ]
     for index, overrides in enumerate(cases):
         cfg = _cfg(tmp_path / f"case{index}")
@@ -101,7 +109,7 @@ def test_notification_fires_only_on_transition(tmp_path: Path, monkeypatch) -> N
     monkeypatch.setattr(
         mod,
         "_notify",
-        lambda url: sent.append(url) or {"attempted": True, "delivered": True},
+        lambda url, message: sent.append(message) or {"attempted": True, "delivered": True},
     )
     first = mod.run_stage_ticket_eligibility(cfg, as_of=NOW)
     assert first["state"] == "eligible" and first["transitioned_to_eligible"] is True
@@ -120,7 +128,7 @@ def test_unset_env_never_attempts_send(tmp_path: Path, monkeypatch) -> None:
     cfg = _cfg(tmp_path)
     _write_healthy_inputs(cfg)
     monkeypatch.delenv(mod.NTFY_ENV_VAR, raising=False)
-    monkeypatch.setattr(mod, "_notify", lambda url: (_ for _ in ()).throw(AssertionError("must not send")))
+    monkeypatch.setattr(mod, "_notify", lambda url, message: (_ for _ in ()).throw(AssertionError("must not send")))
     payload = mod.run_stage_ticket_eligibility(cfg, as_of=NOW)
     assert payload["notification"] == {"attempted": False, "channel_configured": False}
 
@@ -147,3 +155,60 @@ def test_governance_contradiction_fails_closed(tmp_path: Path, monkeypatch) -> N
     assert state == "not_eligible"
     gov = next(r for r in rows if r["condition"] == "funding_governance_reconciled")
     assert gov["passed"] is False
+
+
+def test_revocation_notification_on_eligible_to_not_eligible(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setattr(mod, "FUNDING_GOVERNANCE_RECONCILED", True)
+    cfg = _cfg(tmp_path)
+    _write_healthy_inputs(cfg)
+    sent: list[str] = []
+    monkeypatch.setenv(mod.NTFY_ENV_VAR, "https://ntfy.sh/test-topic")
+    monkeypatch.setattr(mod, "_notify", lambda url, message: sent.append(message) or {"attempted": True, "delivered": True})
+    first = mod.run_stage_ticket_eligibility(cfg, as_of=NOW)
+    assert first["state"] == "eligible" and sent[-1] == mod.NTFY_MESSAGE
+    # Make the candidate toxic -> not_eligible; a revocation must fire once.
+    _write_healthy_inputs(cfg, toxicity=0.97)
+    second = mod.run_stage_ticket_eligibility(cfg, as_of=NOW)
+    assert second["state"] == "not_eligible" and second["revoked"] is True
+    assert sent[-1] == mod.NTFY_REVOKE_MESSAGE
+    assert second["notification"]["kind"] == "revocation"
+
+
+def test_candidate_change_while_eligible_renotifies(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setattr(mod, "FUNDING_GOVERNANCE_RECONCILED", True)
+    cfg = _cfg(tmp_path)
+    _write_healthy_inputs(cfg)
+    sent: list[str] = []
+    monkeypatch.setenv(mod.NTFY_ENV_VAR, "https://ntfy.sh/test-topic")
+    monkeypatch.setattr(mod, "_notify", lambda url, message: sent.append(message) or {"attempted": True, "delivered": True})
+    mod.run_stage_ticket_eligibility(cfg, as_of=NOW)
+    assert len(sent) == 1
+    # Swap the eligible candidate to a different market; still eligible, but a
+    # new eligible notice must fire (keyed on candidate, not just state).
+    out = cfg.output_root / "maker_carry"
+    write_json(out / "decision_policy.json", {
+        "indicated_action": "fund_100_min_size_single_calmest_market",
+        "kill_criteria_status": {"status": "clear", "kill_input_freshness": {"state": "fresh"}},
+        "composition_stability": {"most_recurrent_market": "0xdef"},
+        "inputs_snapshot": {"maker_carry_study_generated_at_utc": "2026-07-17T12:15:00Z"},
+    })
+    write_json(out / "maker_carry_study.json", {"generated_at_utc": "2026-07-17T12:15:00Z", "portfolio": [{
+        "condition_id": "0xdef", "question": "Other calm market?", "resolution_risk": "medium",
+        "event_start_time_utc": "", "size_multiple": 2, "capital_usd": 80.0}]})
+    write_csv(out / "flow_toxicity.csv", [{"market": "0xdef", "toxicity_score": 0.5, "vpin_raw": 0.4, "toxic_blocked": False}])
+    write_json(out / "requote_alerts.json", {"markets": [{"condition_id": "0xdef", "alert_state": "quotes_ok"}]})
+    third = mod.run_stage_ticket_eligibility(cfg, as_of=NOW)
+    assert third["state"] == "eligible" and third["candidate_changed_while_eligible"] is True
+    assert len(sent) == 2  # re-notified on the candidate change
+
+
+def test_stale_policy_vs_study_run_fails_closed(tmp_path: Path, monkeypatch) -> None:
+    # Policy consumed an older study run than the current study on disk (the
+    # ~18-min churn skew) -> not_eligible on the coherence condition.
+    monkeypatch.setattr(mod, "FUNDING_GOVERNANCE_RECONCILED", True)
+    cfg = _cfg(tmp_path)
+    _write_healthy_inputs(cfg, policy_study_ref="2026-07-17T11:15:00Z", run_stamp="2026-07-17T11:45:00Z")
+    state, rows, _ = mod.evaluate_stage_ticket_eligibility(cfg, as_of=NOW)
+    assert state == "not_eligible"
+    coh = next(r for r in rows if r["condition"] == "policy_and_study_same_run")
+    assert coh["passed"] is False

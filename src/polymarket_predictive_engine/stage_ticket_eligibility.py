@@ -28,6 +28,7 @@ MAX_RAW_IMBALANCE = 0.9
 EVENT_START_BUFFER_HOURS = 48.0
 NTFY_ENV_VAR = "OPS_OWNER_NTFY_TOPIC_URL"
 NTFY_MESSAGE = "Polymarket stage ticket eligible - read the quote sheet."
+NTFY_REVOKE_MESSAGE = "Polymarket stage ticket NO LONGER eligible - do not act on the prior notice."
 HEALTHY_RECONCILIATION = {"clean", "explained"}
 
 # WO-103 (2026-07-17): the experiment registry H1 requires exact-token
@@ -192,13 +193,49 @@ def evaluate_stage_ticket_eligibility(
         )
     )
 
+    # WO-104 item 2: same-run coherence. The decision policy records the study
+    # run it consumed; require it to match the current study so a portfolio
+    # that churned between the policy and study writes (the observed ~18-min
+    # skew) cannot produce an eligible read from mismatched artifacts.
+    study_generated = str(study.get("generated_at_utc") or "").strip()
+    policy_study_ref = str(
+        (policy.get("inputs_snapshot") or {}).get("maker_carry_study_generated_at_utc") or ""
+    ).strip()
+    coherent = bool(study_generated) and study_generated == policy_study_ref
+    rows.append(
+        _condition(
+            "policy_and_study_same_run",
+            coherent,
+            f"study_generated={study_generated or 'missing'}; policy_consumed={policy_study_ref or 'missing'}",
+        )
+    )
+
+    # WO-104 item 6: resolve the study-vs-safety contradiction at the funding
+    # decision. The requote system may flag a candidate market pull_quotes_now
+    # (e.g. past/imminent event start) while the study still assigns it carry.
+    # Never fund a market safety is actively telling the human to pull; require
+    # a present, non-pull requote state for the exact candidate (fail-closed).
+    requote = read_json(out_root / "requote_alerts.json", default={}) or {}
+    requote_state = None
+    for row in requote.get("markets") or []:
+        if isinstance(row, dict) and str(row.get("condition_id") or "").strip() == candidate_id:
+            requote_state = str(row.get("alert_state") or "").strip()
+            break
+    rows.append(
+        _condition(
+            "requote_not_pulling_candidate",
+            requote_state is not None and requote_state not in {"pull_quotes_now", "STOP"},
+            f"candidate_requote_state={requote_state or 'missing'}",
+        )
+    )
+
     state = "eligible" if rows and all(row["passed"] for row in rows) else "not_eligible"
     return state, rows, summary
 
 
-def _notify(url: str) -> dict[str, Any]:
+def _notify(url: str, message: str) -> dict[str, Any]:
     try:
-        response = requests.post(url, data=NTFY_MESSAGE, timeout=10)
+        response = requests.post(url, data=message, timeout=10)
         return {"attempted": True, "delivered": response.status_code < 300, "status_code": response.status_code}
     except Exception as exc:  # noqa: BLE001 - send failure must never block the policy step
         return {"attempted": True, "delivered": False, "error": f"{type(exc).__name__}"}
@@ -213,21 +250,43 @@ def run_stage_ticket_eligibility(
     path = cfg.output_root / OUTPUT_RELATIVE
     previous = read_json(path, default={}) or {}
     previous_state = str(previous.get("state") or "not_eligible")
+    previous_candidate = str(previous.get("candidate_condition_id") or "")
     state, rows, summary = evaluate_stage_ticket_eligibility(cfg, as_of=as_of)
     first_failing = next((row["condition"] for row in rows if not row["passed"]), None)
-    transitioned = previous_state != "eligible" and state == "eligible"
+    candidate_id = str(summary.get("candidate_condition_id") or "")
+
+    # WO-104 item 1: key transitions on (state, candidate) so a candidate
+    # change while still "eligible" (e.g. Iran -> WTI) is not silently
+    # swallowed, and send a revocation when a previously-eligible ticket
+    # stops being eligible so the owner is never left holding a stale "go".
+    became_eligible = previous_state != "eligible" and state == "eligible"
+    candidate_changed_while_eligible = (
+        previous_state == "eligible" and state == "eligible" and candidate_id != previous_candidate
+    )
+    eligible_event = became_eligible or candidate_changed_while_eligible
+    revoked_event = previous_state == "eligible" and state != "eligible"
 
     url = str(os.environ.get(NTFY_ENV_VAR) or "").strip()
     notification: dict[str, Any] = {"attempted": False, "channel_configured": bool(url)}
-    if url and (transitioned or send_test):
-        notification = {**_notify(url), "channel_configured": True, "test": bool(send_test)}
+    if url and (eligible_event or revoked_event or send_test):
+        message = NTFY_REVOKE_MESSAGE if (revoked_event and not send_test) else NTFY_MESSAGE
+        notification = {
+            **_notify(url, message),
+            "channel_configured": True,
+            "test": bool(send_test),
+            "kind": "revocation" if (revoked_event and not send_test) else "eligible",
+        }
 
     payload = {
         "work_order": WORK_ORDER,
         "generated_at_utc": now_utc(),
         "state": state,
         "previous_state": previous_state,
-        "transitioned_to_eligible": transitioned,
+        "candidate_condition_id": candidate_id or None,
+        "previous_candidate_condition_id": previous_candidate or None,
+        "transitioned_to_eligible": eligible_event,
+        "candidate_changed_while_eligible": candidate_changed_while_eligible,
+        "revoked": revoked_event,
         "first_failing_condition": first_failing,
         "conditions": rows,
         "candidate": summary,
@@ -237,16 +296,24 @@ def run_stage_ticket_eligibility(
         "live_trading_invoked": False,
     }
     write_json(path, payload)
-    if transitioned:
+    if eligible_event or revoked_event:
         alert_path = cfg.output_root / ALERT_RELATIVE
         alert_path.parent.mkdir(parents=True, exist_ok=True)
-        alert_path.write_text(
-            "# Stage ticket eligible\n\n"
-            f"Generated: `{payload['generated_at_utc']}`\n\n"
-            "All registered WO-99 conditions passed. Read the quote sheet before acting.\n"
-            "Human decision only; the system never trades.\n",
-            encoding="utf-8",
-        )
+        if revoked_event:
+            body = (
+                "# Stage ticket NO LONGER eligible\n\n"
+                f"Generated: `{payload['generated_at_utc']}`\n\n"
+                f"A previously-eligible ticket is now not_eligible "
+                f"(first failing: {first_failing}). Do not act on the prior notice.\n"
+            )
+        else:
+            body = (
+                "# Stage ticket eligible\n\n"
+                f"Generated: `{payload['generated_at_utc']}`\n\n"
+                "All registered WO-99 conditions passed. Read the quote sheet before acting.\n"
+                "Human decision only; the system never trades.\n"
+            )
+        alert_path.write_text(body, encoding="utf-8")
     return payload
 
 

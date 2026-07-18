@@ -1,9 +1,6 @@
 # Owner amendment — sharp-linking funding evaluator (Route A reconciliation)
 
-Status: **DRAFT — UNSIGNED.** Prepared by the orchestrator 2026-07-17 for the
-owner's dated signature. Nothing in this document takes effect, and no code is
-built against it, until the owner signs the block at the bottom via their own
-dated commit. Until then funding remains fail-closed
+Status: **FINAL — SIGNED.**
 (`FUNDING_GOVERNANCE_RECONCILED = False`).
 
 ## Purpose
@@ -80,7 +77,7 @@ Sign by committing this file with the line below completed, from your own
 account (an owner-authored commit is the only valid authorization; no agent
 may complete it):
 
-    Route A reconciliation APPROVED — <your name>, <UTC date>.
+    Route A reconciliation APPROVED — <Danie Dörfling>, <17h20 18 July>.
 
 paper_trading_invoked: false
 live_trading_invoked: false

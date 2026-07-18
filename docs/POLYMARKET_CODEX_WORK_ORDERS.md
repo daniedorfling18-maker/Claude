@@ -4182,6 +4182,47 @@ calendar-sensitive runtime-lock cases assigned to WO-100, and the unaffected
 runtime-lock test separately. This records no findings under those methods,
 not absence of all defects.
 
+## WO-99 — Owner push notification when a stage ticket becomes executable (filed 2026-07-17)
+
+The maker gate passed 2026-07-17 with `fund_100_but_only_most_recurrent_market_half_target`
+indicated, but the ticket was not executable: the named market carried
+toxicity 0.97 (standing rule 8 bars > 0.9) and both portfolio markets'
+minimum quotes exceeded the $100 stage budget. The owner's registered next
+step is "wait for an executable ticket" — and no push channel exists; the
+eligibility signal lives only in artifacts a human must open. Close that gap.
+
+REGISTERED ELIGIBILITY CONDITIONS (all must hold on one policy run; evaluated
+from existing artifacts only, no new judgment surface):
+1. `indicated_action` starts with `fund_` and kill status is `clear`.
+2. The named funding-candidate market (WO-50 most-recurrent rule) is in the
+   CURRENT portfolio with `toxicity_score <= 0.9` (standing rule 8),
+   `resolution_risk != high`, and no event-start inside 48h.
+3. Its minimum quote capital (`rewards_min_size x 2 x mid`) fits the stage:
+   <= $100.
+4. Kill-input freshness `fresh`; reconciliation `clean` or `explained`.
+
+BUILD:
+1. A small evaluator in the decision-policy step writes
+   `outputs/maker_carry/stage_ticket_eligibility.json` (atomic; states
+   `eligible` / `not_eligible` with per-condition booleans and the first
+   failing condition named) and a dashboard banner row.
+2. PUSH CHANNEL (optional, env-gated): when state transitions
+   not_eligible -> eligible (transition only, never repeats while unchanged),
+   POST a fixed short message to an ntfy topic from
+   `OPS_OWNER_NTFY_TOPIC_URL` in the VPS `.env` (never in config, telemetry,
+   or repo). Message contains NO amounts, market names, keys, or balances:
+   "Polymarket stage ticket eligible - read the quote sheet." Failure to
+   send is logged, never blocks the policy step. If the env var is unset the
+   feature is dashboard-only.
+3. The same transition writes a WO-78-style owner-alert artifact so the
+   notification also exists as an auditable file.
+Fail-safe sentence: missing, stale, or malformed inputs evaluate
+not_eligible; the push fires only on a verified transition; no gate,
+sizing, or order surface reads the eligibility artifact.
+Day-after check: `stage_ticket_eligibility.json` exists with per-condition
+booleans matching the same run's decision_policy.json and quote sheet; with
+the env var set, a forced test transition delivers exactly one ntfy message.
+
 ## WO-98 - Exact post-registration H2 evaluator and dashboard authority
 
 Status: IMPLEMENTED by Codex on 2026-07-16; awaiting required gate and review.
@@ -4312,7 +4353,8 @@ Every WO below and every future WO must comply with
 `docs/ENGINEERING_STANDARDS.md` (S1-S7), including the mandatory
 `Day-after check:` line. Reviews verify compliance item by item.
 
-**WO-95 was implemented in PR #238, WO-96 merged in PR #239, WO-97 merged in PR #240, and WO-98 is implemented awaiting publication.** Later items in the 2026-07-16 owner
+**Next buildable: WO-99** (owner push notification on stage-ticket
+eligibility; small, reporting-only). WO-95 was implemented in PR #238, WO-96 merged in PR #239, WO-97 merged in PR #240, and WO-98 was merged in PR #241. Later items in the 2026-07-16 owner
 instruction require their own numbered work order and PR; do not combine them
 into this change. WO-89 through WO-92 were implemented as of 2026-07-15.
 WO-93 was implemented in PR #236, WO-94 in PR #237, WO-95 in PR #238, and WO-96 in PR #239. WO-85, WO-87, WO-86, and

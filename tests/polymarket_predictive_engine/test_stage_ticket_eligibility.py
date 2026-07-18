@@ -60,6 +60,18 @@ def _write_healthy_inputs(cfg: EngineConfig, **overrides) -> None:
         {"markets": [{"condition_id": overrides.get("candidate", CANDIDATE),
                       "alert_state": overrides.get("requote_state", "quotes_ok")}]},
     )
+    # WO-105 sharp-linking qualification: healthy path publishes a fresh,
+    # qualified artifact for the exact candidate. Overrides let a test make it
+    # unqualified / stale / mismatched to exercise the fail-closed condition.
+    write_json(
+        out / "sharp_linking_qualification.json",
+        {
+            "qualified": overrides.get("sharp_qualified", True),
+            "candidate_condition_id": overrides.get("qual_candidate", overrides.get("candidate", CANDIDATE)),
+            "generated_at_utc": overrides.get("qual_generated", run_stamp),
+            "first_failing_check": overrides.get("qual_first_failing"),
+        },
+    )
 
 
 def test_all_conditions_pass_reads_eligible(tmp_path: Path, monkeypatch) -> None:
@@ -85,6 +97,9 @@ def test_each_registered_condition_fails_closed(tmp_path: Path) -> None:
         {"freshness": "stale"},
         {"reconciliation": "DISCREPANCY"},
         {"requote_state": "pull_quotes_now"},
+        {"sharp_qualified": False},
+        {"qual_generated": "2026-07-17T10:00:00Z"},  # stale qualification (>30m)
+        {"qual_candidate": "0xmismatch"},  # qualification about a different market
     ]
     for index, overrides in enumerate(cases):
         cfg = _cfg(tmp_path / f"case{index}")
@@ -197,6 +212,8 @@ def test_candidate_change_while_eligible_renotifies(tmp_path: Path, monkeypatch)
         "event_start_time_utc": "", "size_multiple": 2, "capital_usd": 80.0}]})
     write_csv(out / "flow_toxicity.csv", [{"market": "0xdef", "toxicity_score": 0.5, "vpin_raw": 0.4, "toxic_blocked": False}])
     write_json(out / "requote_alerts.json", {"markets": [{"condition_id": "0xdef", "alert_state": "quotes_ok"}]})
+    write_json(out / "sharp_linking_qualification.json", {
+        "qualified": True, "candidate_condition_id": "0xdef", "generated_at_utc": "2026-07-17T11:50:00Z"})
     third = mod.run_stage_ticket_eligibility(cfg, as_of=NOW)
     assert third["state"] == "eligible" and third["candidate_changed_while_eligible"] is True
     assert len(sent) == 2  # re-notified on the candidate change

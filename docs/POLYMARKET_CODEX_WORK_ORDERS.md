@@ -4189,19 +4189,37 @@ calendar-sensitive runtime-lock cases assigned to WO-100, and the unaffected
 runtime-lock test separately. This records no findings under those methods,
 not absence of all defects.
 
-## WO-105 — Sharp-linking funding evaluator (Route A; DRAFT awaiting owner signature)
+## WO-105 — Sharp-linking funding evaluator (Route A; SIGNED + BUILT 2026-07-18)
 
-The orchestrator's recommended reconciliation of WO-103 is Route A: keep the
+Route A was chosen and owner-signed
+(`docs/OWNER_AMENDMENT_SHARP_LINKING_EVALUATOR.md`, commit de1872e): keep the
 registry H1 sharp-anchor requirement and register the sharp-linking evaluator
-H1 already anticipates. Drafted UNSIGNED for the owner at
-`docs/OWNER_AMENDMENT_SHARP_LINKING_EVALUATOR.md`. Nothing is built and
-`FUNDING_GOVERNANCE_RECONCILED` stays False until the owner signs with a dated
-owner-authored commit. On signing: record the reconciliation in the registry,
-build the evaluator to the drafted contract (recorded-fixture + fail-closed,
-after the WO-104 Tier-0-coverage dependency), and flip the reconciliation flag
-only in the commit that lands the passing evaluator. Tighten-only; adds a
-funding precondition, loosens nothing; does not touch WO-67, the M-gates, or
-the WO-50 action table.
+H1 anticipated. Reconciliation recorded in the registry (#256).
+
+BUILT 2026-07-18 (orchestrator), AWAITING OWNER MERGE (frozen-surface PR — it
+lands a new WO-99 gate condition and flips the governance flag):
+`src/polymarket_predictive_engine/sharp_linking_evaluator.py` grades the ONE
+exact market WO-50 would fund (`decision_policy` composition
+`most_recurrent_market`, confirmed in the study portfolio) against registry H1
+§1 (exact-token sharp anchor: fresh <=6h joined anchor, anchors agree within
+0.03, fresh <=5m executable PM bid/ask, consensus fair inside the maker quote
+band) and §2 (exact-market Tier-0 sufficiency: replay <=30m old, identifies and
+postdates the current portfolio version, official primary source, >=30
+evaluable, >=10 confirmed fills, >=80% coverage, >=10 markout windows at each
+of 5/15/60m, adverse haircut <=1.0). Publishes
+`sharp_linking_qualification.json` (atomic, fail-closed) and feeds WO-99 as the
+`sharp_linking_qualified` precondition (requires a fresh, qualified,
+candidate-matched artifact). Registered constants are tighten-only (maxima only
+shrink, minima only grow; invalid overrides fall back to the registered
+default). `FUNDING_GOVERNANCE_RECONCILED` flipped True in this commit; funding
+stays closed because the evaluator is fail-closed until Tier-0 coverage matures
+on the VPS. CLI: `sharp-linking-evaluator`, wired to run before
+`stage-ticket-eligibility`. 21 recorded-fixture tests (happy path + each
+precondition fail-closed + tighten-only pins). Does not touch WO-67, the
+M-gates, or the WO-50 action table. Scheduler wired:
+`run_vps_ops_scheduler.sh` runs `sharp-linking-evaluator` in
+`maker_safety_refresh` immediately before the WO-99 step, so the qualification
+artifact is fresh when the gate reads it.
 
 ## WO-103 — Reconcile funding governance; fail closed in the interim (external audit 2026-07-17)
 

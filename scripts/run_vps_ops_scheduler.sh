@@ -534,6 +534,9 @@ run_maker_safety_refresh() {
     timeout "$PRINTS_TIMEOUT" python -m polymarket_predictive_engine.cli maker-live-test --config "$CONFIG_PATH"
     timeout "$PRINTS_TIMEOUT" python -m polymarket_predictive_engine.cli decision-policy --config "$CONFIG_PATH"
     timeout "$PRINTS_TIMEOUT" python -m polymarket_predictive_engine.cli requote-alerts --config "$CONFIG_PATH"
+    # WO-105: sharp-linking funding evaluator (fail-closed) BEFORE WO-99 so the
+    # qualification artifact is fresh when the eligibility gate reads it.
+    timeout "$PRINTS_TIMEOUT" python -m polymarket_predictive_engine.cli sharp-linking-evaluator --config "$CONFIG_PATH"
     # WO-99: owner stage-ticket eligibility + transition-only ntfy push.
     timeout "$PRINTS_TIMEOUT" python -m polymarket_predictive_engine.cli stage-ticket-eligibility --config "$CONFIG_PATH"
   ) >> "$LOG_FILE" 2>&1

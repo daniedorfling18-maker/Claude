@@ -88,6 +88,7 @@ from .profit_sprint import build_profit_sprint
 from .promotion_review import build_promotion_review
 from .readiness import paper_live_promotion_gate, paper_trade_readiness, readiness_decision
 from .requote_alerts import build_requote_alerts
+from .sharp_linking_evaluator import run_sharp_linking_evaluator
 from .stage_ticket_eligibility import run_stage_ticket_eligibility
 from .reconstructed_signal_clv import run_reconstructed_clv_study
 from .refresh_governance import LOCK_CONTENTION_EXIT_CODE, refresh_governance
@@ -134,6 +135,7 @@ COMMANDS = [
     "flow-toxicity",
     "decision-policy",
     "requote-alerts",
+    "sharp-linking-evaluator",
     "stage-ticket-eligibility",
     "stage-day",
     "performance-factsheet",
@@ -382,6 +384,8 @@ def main(argv: list[str] | None = None) -> int:
             _print(run_decision_policy(cfg))
         elif args.command == "requote-alerts":
             _print(build_requote_alerts(cfg))
+        elif args.command == "sharp-linking-evaluator":
+            _print(run_sharp_linking_evaluator(cfg))
         elif args.command == "stage-ticket-eligibility":
             _print(run_stage_ticket_eligibility(cfg))
         elif args.command == "stage-day":

@@ -46,6 +46,19 @@ that merge commit. This prevents retroactive hypothesis registration.
   for the newly named sharp-anchor-qualified hypothesis. Pre-freeze anchor
   observations are diagnostic and cannot prove that qualification; a future
   evaluator must be registered before it links anchor state to maker markout.
+- Funding reconciliation (owner-signed 2026-07-18, Route A;
+  `docs/OWNER_AMENDMENT_SHARP_LINKING_EVALUATOR.md`): this sharp-anchor
+  requirement is CONFIRMED as binding for funding. The sharp-linking
+  evaluator anticipated above is registered (WO-105) and is a funding
+  precondition. Generic (non-sharp-anchored) reward carry is NOT fundable
+  under H1; testing it would require a separate, freshly pre-registered
+  hypothesis (Route B, not adopted). The WO-93-revert record's contrary
+  "generic reward carry may be funded" statement is SUPERSEDED by this
+  owner decision. Funding remains fail-closed
+  (`FUNDING_GOVERNANCE_RECONCILED = False`) until the evaluator is built,
+  passing, and a market qualifies; the flag flips only in the commit that
+  lands the passing evaluator. Tighten-only: this adds a funding
+  precondition and loosens nothing.
 - Decision/stopping rule: the frozen WO-50 policy table and dated decision
   process in `live_test_decision_policy.py`.
 - Abandonment action: `maker_lane_not_supported_program_review`.

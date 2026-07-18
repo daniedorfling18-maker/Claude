@@ -3760,6 +3760,13 @@ unanchored (non-sharp) market — the owner accepts that the $100 stage may
 test generic reward carry rather than the registry's sharp-anchored H1
 wording; any future re-tightening requires a new dated owner decision.
 
+SUPERSEDED 2026-07-18 by the owner-signed Route A reconciliation
+(`docs/OWNER_AMENDMENT_SHARP_LINKING_EVALUATOR.md`, WO-103/WO-105): the
+"generic reward carry may be funded" consequence above no longer holds.
+The registry H1 sharp-anchor requirement binds; generic carry is not
+fundable; funding requires the registered sharp-linking evaluator to pass.
+Funding stays fail-closed until then.
+
 Status: IMPLEMENTED by Codex on 2026-07-16 in PR #236.
 
 Provenance correction (2026-07-16, orchestrator, confirmed with the owner):

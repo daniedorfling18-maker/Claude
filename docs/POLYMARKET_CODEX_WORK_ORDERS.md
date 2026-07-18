@@ -4182,6 +4182,20 @@ calendar-sensitive runtime-lock cases assigned to WO-100, and the unaffected
 runtime-lock test separately. This records no findings under those methods,
 not absence of all defects.
 
+## WO-105 — Sharp-linking funding evaluator (Route A; DRAFT awaiting owner signature)
+
+The orchestrator's recommended reconciliation of WO-103 is Route A: keep the
+registry H1 sharp-anchor requirement and register the sharp-linking evaluator
+H1 already anticipates. Drafted UNSIGNED for the owner at
+`docs/OWNER_AMENDMENT_SHARP_LINKING_EVALUATOR.md`. Nothing is built and
+`FUNDING_GOVERNANCE_RECONCILED` stays False until the owner signs with a dated
+owner-authored commit. On signing: record the reconciliation in the registry,
+build the evaluator to the drafted contract (recorded-fixture + fail-closed,
+after the WO-104 Tier-0-coverage dependency), and flip the reconciliation flag
+only in the commit that lands the passing evaluator. Tighten-only; adds a
+funding precondition, loosens nothing; does not touch WO-67, the M-gates, or
+the WO-50 action table.
+
 ## WO-103 — Reconcile funding governance; fail closed in the interim (external audit 2026-07-17)
 
 An external audit found two contradictory governing instructions:

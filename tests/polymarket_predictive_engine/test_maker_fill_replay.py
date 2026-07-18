@@ -481,3 +481,60 @@ def test_cli_exposes_maker_fill_replay():
     assert "maker-fill-replay" in COMMANDS
     assert "snapshot-official-books" in COMMANDS
     assert "collect-maker-replay-data" in COMMANDS
+
+
+def test_recent_market_stays_on_snapshot_watchlist_but_stale_one_drops(tmp_path, monkeypatch):
+    # WO-104: a market that churned out of the current portfolio but whose
+    # book file was appended within the regime window must remain on the
+    # snapshot watchlist (so Tier-0 coverage keeps accumulating); a market
+    # whose book file is older than the window drops off.
+    import os
+    import time as _time
+
+    cfg = _config(tmp_path)
+    raw = yaml.safe_load((tmp_path / "config.yaml").read_text(encoding="utf-8"))
+    raw["maker_fill_replay"].update({"book_source": "official", "request_pause_seconds": 0, "regime_days": 7})
+    (tmp_path / "config.yaml").write_text(yaml.safe_dump(raw), encoding="utf-8")
+    cfg = load_config(tmp_path / "config.yaml")
+
+    # Current portfolio is empty (top market churned away).
+    write_json(
+        cfg.output_root / "maker_carry" / "maker_carry_study.json",
+        {"portfolio": [], "paper_trading_invoked": False, "live_trading_invoked": False},
+    )
+    write_csv(
+        cfg.output_root / "maker_carry" / "maker_carry_candidates.csv",
+        [
+            {"condition_id": "0xrecent", "token_id": "tokR", "adverse_selection_usd_per_day": 2.0},
+            {"condition_id": "0xstale", "token_id": "tokS", "adverse_selection_usd_per_day": 2.0},
+        ],
+        fieldnames=["condition_id", "token_id", "adverse_selection_usd_per_day"],
+    )
+    book_fields = ["condition_id", "asset_id", "source_timestamp", "observation_timestamp", "hash", "best_bid", "best_ask", "midpoint", "top_bid_size", "top_ask_size", "bids_json", "asks_json", "collected_at_utc"]
+    for cond, tok in (("0xrecent", "tokR"), ("0xstale", "tokS")):
+        _write_gzip_csv(
+            cfg.output_root / "maker_carry" / "official_books" / f"{cond}.csv.gz",
+            [{"condition_id": cond, "asset_id": tok, "source_timestamp": "1000.0", "observation_timestamp": "960.0", "hash": "h0", "best_bid": "0.48", "best_ask": "0.52", "midpoint": "0.5", "top_bid_size": "20", "top_ask_size": "20", "bids_json": "[]", "asks_json": "[]", "collected_at_utc": "1970-01-01T00:16:00Z"}],
+            fieldnames=book_fields,
+        )
+    # Age the stale market's file beyond the regime window.
+    stale_path = cfg.output_root / "maker_carry" / "official_books" / "0xstale.csv.gz"
+    old = _time.time() - 8 * 86400
+    os.utime(stale_path, (old, old))
+
+    monkeypatch.setattr(maker_fill_replay.time, "sleep", lambda _: None)
+    monkeypatch.setattr(maker_fill_replay, "now_utc", lambda: "1970-01-01T00:46:00Z")
+    calls: list[dict] = []
+
+    def fake_get(url, params=None, timeout=None):
+        calls.append(dict(params or {}))
+        return _Response({"asset_id": params["token_id"], "timestamp": 2000, "hash": "h1", "bids": [{"price": "0.48", "size": "20"}], "asks": [{"price": "0.52", "size": "20"}]})
+
+    monkeypatch.setattr(maker_fill_replay.requests, "get", fake_get)
+
+    summary = maker_fill_replay.snapshot_official_books(cfg)
+
+    assert summary["status"] == "ok"
+    polled = {c.get("token_id") for c in calls}
+    assert "tokR" in polled  # churned-but-recent market kept on the watchlist
+    assert "tokS" not in polled  # market older than the regime window drops off

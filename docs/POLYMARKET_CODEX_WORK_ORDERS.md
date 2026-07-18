@@ -4234,6 +4234,21 @@ records the chosen path. Until then, funding fails closed.
 Prioritised from the external audit. None is buildable-to-completion where it
 needs absent data; each ships only with recorded-fixture + fail-closed proof
 per ENGINEERING_STANDARDS. Order reflects safety value, not audit order:
+0. Tier-0 coverage persistence (DONE 2026-07-18, orchestrator): root cause was
+   structural, not a units bug — `snapshot_official_books` only polled the
+   current churny portfolio, so no market persisted long enough to accumulate
+   the 5/15/60-min book history markouts need (compounded by collection only
+   starting ~2026-07-14). Fix: the snapshot watchlist now persists any market
+   whose official-book file was appended within the regime window (bounded by
+   max_markets), so a recurring/persistent market keeps accumulating coverage
+   across portfolio churn. Two self-inflicted bugs the new test caught and
+   fixed pre-merge: `path.stem` left `.csv`, and the watchlist was computed
+   but not wired into the poll list / write loop / status. HONEST BOUNDARY:
+   this ENABLES coverage to accumulate; it cannot manufacture it. Whether
+   coverage reaches the evaluator thresholds is a VPS-time day-after check
+   (coverage_ratio rising over days on a persistent market), NOT asserted
+   here. A churny market still never qualifies — correct, since only
+   persistent markets are fundable.
 1. Notification revocation + candidate/portfolio-hash keying: WO-99 fires on
    state transition only; a candidate change (Iran->WTI) or eligible->not
    sends no correction. Key transitions on (state, portfolio_hash); send a

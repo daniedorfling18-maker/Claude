@@ -248,6 +248,48 @@ def _portfolio(summary: dict[str, Any], candidates: dict[str, dict[str, str]], m
     return portfolio
 
 
+def _recent_book_markets(
+    cfg: EngineConfig,
+    settings: dict[str, Any],
+    *,
+    exclude: set[str],
+) -> list[dict[str, Any]]:
+    """Markets whose official-book file was appended within the regime window.
+
+    WO-104: Tier-0 markouts need CONTINUOUS book history around trades, but the
+    study portfolio churns daily, so a market that leaves the top portfolio
+    used to stop being snapshotted and its coverage never matured. Keeping a
+    recently-active market on the snapshot watchlist for the regime window lets
+    a persistent/recurring market accumulate the coverage the evaluator needs.
+    Recency uses file mtime (cheap); the token id comes from the candidate map,
+    falling back to the file's last recorded asset id. Read-only collection;
+    no gate, sizing, or order path reads it.
+    """
+    books_dir = cfg.output_root / "maker_carry" / "official_books"
+    if not books_dir.exists():
+        return []
+    horizon = float(settings["regime_days"]) * 86400.0
+    now = time.time()
+    candidates = _candidate_map(cfg)
+    watchlist: list[dict[str, Any]] = []
+    for path in sorted(books_dir.glob("*.csv.gz")):
+        condition_id = path.name[: -len(".csv.gz")]  # .stem strips only ".gz"
+        if condition_id in exclude:
+            continue
+        try:
+            if now - path.stat().st_mtime > horizon:
+                continue
+        except OSError:
+            continue
+        token_id = str(candidates.get(condition_id, {}).get("token_id") or "").strip()
+        if not token_id:
+            rows = _read_csv_any(path)
+            token_id = str(rows[-1].get("asset_id") or "").strip() if rows else ""
+        if token_id:
+            watchlist.append({"condition_id": condition_id, "token_id": token_id})
+    return watchlist
+
+
 def _payload_snapshots(payload: Any) -> list[dict[str, Any]]:
     if isinstance(payload, list):
         return [row for row in payload if isinstance(row, dict)]
@@ -343,7 +385,14 @@ def snapshot_official_books(cfg: EngineConfig) -> dict[str, Any]:
     if not isinstance(maker_summary, dict):
         maker_summary = {}
     portfolio = _portfolio(maker_summary, _candidate_map(cfg), int(settings["max_markets"]))
-    if not portfolio:
+    # WO-104: keep recently-active markets on the watchlist so a persistent or
+    # recurring market accumulates continuous Tier-0 book coverage across
+    # portfolio churn, bounded by max_markets.
+    persistent = _recent_book_markets(
+        cfg, settings, exclude={str(entry["condition_id"]) for entry in portfolio}
+    )
+    watchlist = (portfolio + persistent)[: int(settings["max_markets"])]
+    if not watchlist:
         summary.update(
             {
                 "status": "no_portfolio",
@@ -359,7 +408,7 @@ def snapshot_official_books(cfg: EngineConfig) -> dict[str, Any]:
     base = str(settings["clob_base_url"]).rstrip("/")
     timeout = float(settings["request_timeout_seconds"])
     pause = max(float(settings["request_pause_seconds"]), 0.0)
-    token_ids = [str(entry["token_id"]) for entry in portfolio]
+    token_ids = [str(entry["token_id"]) for entry in watchlist]
     books: dict[str, dict[str, Any]] = {}
     batch_error = ""
     if len(token_ids) > 1:
@@ -394,7 +443,7 @@ def snapshot_official_books(cfg: EngineConfig) -> dict[str, Any]:
     files_written: list[str] = []
     market_polls: list[dict[str, Any]] = []
     errors: list[str] = []
-    for entry in portfolio:
+    for entry in watchlist:
         condition_id = str(entry["condition_id"])
         token_id = str(entry["token_id"])
         snapshot = books.get(token_id)
@@ -459,11 +508,11 @@ def snapshot_official_books(cfg: EngineConfig) -> dict[str, Any]:
         )
 
     successful = sum(row["status"] == "ok" for row in market_polls)
-    status = "ok" if successful == len(portfolio) else ("partial" if successful else "failed")
+    status = "ok" if successful == len(watchlist) else ("partial" if successful else "failed")
     summary.update(
         {
             "status": status,
-            "markets_polled": len(portfolio),
+            "markets_polled": len(watchlist),
             "markets_succeeded": successful,
             "rows_added": rows_added,
             "files_written": files_written,

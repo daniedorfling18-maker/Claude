@@ -4182,6 +4182,45 @@ calendar-sensitive runtime-lock cases assigned to WO-100, and the unaffected
 runtime-lock test separately. This records no findings under those methods,
 not absence of all defects.
 
+## WO-102 — Toxicity screen: absolute raw-imbalance floor (owner-approved 2026-07-17; orchestrator-built)
+
+Owner approved upgrading the toxicity instrument (chat, 2026-07-17), with the
+explicit condition that it must not become a funding accelerant or a rule-8
+loosening. Built by the orchestrator (Codex paused).
+
+MATERIAL LATENT-BUG FIX (phase 1, IMPLEMENTED): `toxicity_score` is a
+universe-relative percentile `index / (n-1)`. Standing rule 8 blocked on
+`toxicity_score > 0.9`, so a genuinely one-sided market could be silently
+DE-VETOED merely by measuring more calm markets alongside it that day — its
+own flow unchanged. `flow_toxicity` now also emits an ABSOLUTE, universe-
+independent `vpin_raw >= 0.90` floor and a composite `toxic_blocked`
+(raw floor OR percentile), plus `raw_imbalance_block`, `percentile_block`,
+`markout_coverage_ratio`, and `toxicity_block_reasons`. WO-99 eligibility
+consumes the composite and treats an unmeasured market as blocked
+(fail-closed). Strictly TIGHTEN-ONLY: strictly more markets block than under
+the percentile-only rule, never fewer; the 0.90 percentile rule is unchanged.
+
+Fail-safe sentence: a market with high raw imbalance, an unmeasured/absent
+toxicity row, or any parse failure evaluates blocked; the screen can only add
+blocks, never clear a market the prior rule blocked.
+Day-after check: `flow_toxicity.csv` carries `vpin_raw`, `toxic_blocked`, and
+`toxicity_block_reasons`; the WTI/one-sided candidate shows
+`toxic_blocked=true` with `raw_imbalance>=0.9` in reasons regardless of how
+many calm markets are measured.
+
+DEFERRED (phase 2, NOT built — needs data plumbing and cannot be validated
+today): the markout-economics gate the owner also listed — YES/NO direction
+normalization of the imbalance sign across complementary tokens, 5/15/60-min
+markout coverage with minimum-sample and coverage-ratio requirements,
+separate bid-side/ask-side toxicity, post-fill loss vs modelled reward
+income, and confidence intervals. BLOCKER: markout coverage is currently
+~0% (observed 1,694/1,694 missing on the WTI candidate), so an economics gate
+cannot be verified against real data now and must not ship untested. When a
+markout-coverage collection fix lands, this phase builds as a strictly
+ADDITIVE block (it may add economic blocks; it may never clear a market the
+phase-1 raw/percentile screen flags), i.e. still tighten-only. Not buildable
+until coverage exists.
+
 ## WO-99 — Owner push notification when a stage ticket becomes executable (filed 2026-07-17)
 
 The maker gate passed 2026-07-17 with `fund_100_but_only_most_recurrent_market_half_target`

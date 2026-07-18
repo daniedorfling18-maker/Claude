@@ -35,7 +35,23 @@ TOXICITY_FIELDS = [
     "smart_fill_markout",
     "crowd_fill_markout",
     "missing_price_points",
+    "raw_imbalance_block",
+    "percentile_block",
+    "markout_coverage_ratio",
+    "toxic_blocked",
+    "toxicity_block_reasons",
 ]
+
+# WO-102 (2026-07-17): the historical toxicity_score is a UNIVERSE-RELATIVE
+# percentile (index / (n-1)). A genuinely one-sided market can silently fall
+# BELOW the standing-rule-8 percentile threshold simply because more calm
+# markets were measured alongside it that day -- de-vetoing a toxic market
+# with no change in its own flow. This adds an ABSOLUTE, universe-independent
+# raw-imbalance floor so the veto cannot drift. The composite screen is
+# strictly TIGHTEN-ONLY: a market is blocked if the percentile rule OR the
+# absolute floor fires. It never clears a market the old rule blocked.
+REGISTERED_RAW_IMBALANCE_FLOOR = 0.90
+REGISTERED_PERCENTILE_BLOCK = 0.90
 
 
 def _settings(cfg: EngineConfig) -> dict[str, Any]:
@@ -354,13 +370,24 @@ def build_flow_toxicity(cfg: EngineConfig) -> dict[str, Any]:
         missing_prices = int(markouts.get("missing_prices", len(rows)))
         asset_id = rows[0]["asset_id"] if rows else ""
         _, bucket_n = _vpin_raw(rows, float(settings["volume_bucket_usd"]), int(settings["buckets"]))
+        market_vpin = raw_vpin.get(market, 0.0)
+        market_percentile = toxicity.get(market, 0.0)
+        measured_markouts = smart_count + crowd_count
+        coverage_ratio = round(measured_markouts / len(rows), 6) if rows else 0.0
+        raw_block = market_vpin >= REGISTERED_RAW_IMBALANCE_FLOOR
+        pct_block = market_percentile > REGISTERED_PERCENTILE_BLOCK
+        reasons = []
+        if raw_block:
+            reasons.append(f"raw_imbalance>={REGISTERED_RAW_IMBALANCE_FLOOR:g}")
+        if pct_block:
+            reasons.append(f"percentile>{REGISTERED_PERCENTILE_BLOCK:g}")
         rows_out.append(
             {
                 "generated_at_utc": generated_at,
                 "market": market,
                 "asset_id": asset_id,
-                "toxicity_score": toxicity.get(market, 0.0),
-                "vpin_raw": raw_vpin.get(market, 0.0),
+                "toxicity_score": market_percentile,
+                "vpin_raw": market_vpin,
                 "volume_buckets": bucket_n,
                 "trades_seen": len(rows),
                 "smart_fill_count": smart_count,
@@ -368,6 +395,11 @@ def build_flow_toxicity(cfg: EngineConfig) -> dict[str, Any]:
                 "smart_fill_markout": round(smart_sum / smart_count, 6) if smart_count else None,
                 "crowd_fill_markout": round(crowd_sum / crowd_count, 6) if crowd_count else None,
                 "missing_price_points": missing_prices,
+                "raw_imbalance_block": raw_block,
+                "percentile_block": pct_block,
+                "markout_coverage_ratio": coverage_ratio,
+                "toxic_blocked": raw_block or pct_block,
+                "toxicity_block_reasons": ";".join(reasons),
             }
         )
     write_csv(path, rows_out, fieldnames=TOXICITY_FIELDS)

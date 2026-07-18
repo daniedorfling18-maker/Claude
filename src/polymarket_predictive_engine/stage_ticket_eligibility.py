@@ -29,6 +29,15 @@ EVENT_START_BUFFER_HOURS = 48.0
 NTFY_ENV_VAR = "OPS_OWNER_NTFY_TOPIC_URL"
 NTFY_MESSAGE = "Polymarket stage ticket eligible - read the quote sheet."
 HEALTHY_RECONCILIATION = {"clean", "explained"}
+
+# WO-103 (2026-07-17): the experiment registry H1 requires exact-token
+# sharp-anchor qualification (M-gates "necessary but not sufficient"), while
+# the WO-93-revert record states generic reward carry may be funded. These
+# are contradictory governing instructions. Per fail-closed policy, the owner
+# notification cannot fire until ONE dated owner decision reconciles them.
+# The owner flips this to True as part of that reconciliation; it is the only
+# lever, and it holds even an otherwise-eligible ticket.
+FUNDING_GOVERNANCE_RECONCILED = False
 HEALTHY_FRESHNESS = {"fresh", "inactive_pre_live"}
 
 
@@ -57,6 +66,15 @@ def evaluate_stage_ticket_eligibility(
     }
 
     rows: list[dict[str, Any]] = []
+
+    rows.append(
+        _condition(
+            "funding_governance_reconciled",
+            bool(FUNDING_GOVERNANCE_RECONCILED),
+            "registry H1 sharp-anchor requirement vs WO-93-revert generic-carry "
+            "record must be reconciled by one dated owner decision before funding",
+        )
+    )
 
     indicated = str(policy.get("indicated_action") or "")
     kill_status = str((policy.get("kill_criteria_status") or {}).get("status") or "")

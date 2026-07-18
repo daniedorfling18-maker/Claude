@@ -757,3 +757,32 @@ def test_legacy_share_model_days_never_count_toward_gate_a(tmp_path, monkeypatch
     assert gate_a["runs_at_or_above_target"] == 1
     assert gate_a["share_model_scope"] == "published_v2_only"
     assert gate_a["state"] == "pending"
+
+
+def _ma_run(day: str, net: float, *, model: str = "published_v2", hour: str = "12:00:00") -> dict[str, Any]:
+    return {"generated_at_utc": f"{day}T{hour}Z", "portfolio_net_carry_usd_per_day": net, "share_model": model}
+
+
+def test_ma_intraday_spike_does_not_bank_a_day() -> None:
+    # Maker-gate amendment M-A.1: a day counts only if its LAST published_v2
+    # run met target. A noon spike that faded by the last run must not count.
+    prior = [_ma_run("2026-07-11", 10.0, hour="12:00:00"), _ma_run("2026-07-11", 1.0, hour="20:00:00")]
+    days = maker_carry_study._distinct_days_at_target(prior, 3.33, current_day="2026-07-12", latest_at_target=False)
+    assert days == set()
+
+
+def test_ma_last_run_at_target_counts_the_day() -> None:
+    prior = [_ma_run("2026-07-11", 1.0, hour="12:00:00"), _ma_run("2026-07-11", 5.0, hour="20:00:00")]
+    days = maker_carry_study._distinct_days_at_target(prior, 3.33, current_day="2026-07-12", latest_at_target=False)
+    assert days == {"2026-07-11"}
+
+
+def test_ma_today_governed_by_current_run_not_earlier_spike() -> None:
+    prior = [_ma_run("2026-07-12", 9.0, hour="08:00:00")]
+    assert maker_carry_study._distinct_days_at_target(prior, 3.33, current_day="2026-07-12", latest_at_target=False) == set()
+    assert maker_carry_study._distinct_days_at_target(prior, 3.33, current_day="2026-07-12", latest_at_target=True) == {"2026-07-12"}
+
+
+def test_ma_legacy_model_day_excluded() -> None:
+    prior = [_ma_run("2026-07-10", 8.0, model="legacy", hour="20:00:00")]
+    assert maker_carry_study._distinct_days_at_target(prior, 3.33, current_day="2026-07-12", latest_at_target=False) == set()

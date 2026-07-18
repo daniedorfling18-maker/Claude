@@ -48,6 +48,11 @@ so re-running the study intraday can never fast-forward the clock):
   M-A carry evidence  - trusted net carry at/above target on at least
                         ``gate_min_runs_at_target`` distinct UTC days,
                         including the latest run.
+    M-A.1 amendment (2026-07-18; authorization = owner merge of this
+    frozen-surface PR): a UTC day counts only when its LAST published_v2 run
+    met target - an intraday spike that later faded cannot bank the day.
+    Closes the external-audit cherry-pick finding. Tighten-only: can only
+    reduce the day count.
   M-B adverse realism - every portfolio market carries a MEASURED markout
                         charge (empirical fills, not just bar approximations).
   M-C payout floor    - enforced by construction in the sizing loop.
@@ -1471,6 +1476,48 @@ def _capital_curve(
     return curve, capital_for_target
 
 
+def _distinct_days_at_target(
+    prior_runs: list[dict[str, Any]],
+    target: float,
+    *,
+    current_day: str,
+    latest_at_target: bool,
+) -> set[str]:
+    """Distinct UTC days whose LAST published_v2 run met the target.
+
+    2026-07-18 maker-gate amendment M-A.1 (authorization = owner merge of this
+    frozen-surface PR): closes the intraday cherry-picking the external audit
+    flagged. A day counts only when
+    its last published_v2 observation is at/above target, not when any intraday
+    spike touched target. The current run is by construction today's last
+    observation, so it governs today's membership regardless of an earlier
+    spike. Tighten-only: it can only reduce the day count. The published_v2
+    restriction (2026-07-11 amendment) is preserved.
+    """
+    last_run_by_day: dict[str, dict[str, Any]] = {}
+    for run in prior_runs:
+        stamp = str(run.get("generated_at_utc") or "")
+        day = stamp[:10]
+        if not day:
+            continue
+        previous = last_run_by_day.get(day)
+        if previous is None or stamp >= str(previous.get("generated_at_utc") or ""):
+            last_run_by_day[day] = run
+    days_at_target = {
+        day
+        for day, run in last_run_by_day.items()
+        if (safe_float(run.get("portfolio_net_carry_usd_per_day")) or 0.0) >= target
+        and str(run.get("share_model") or "") == "published_v2"
+    }
+    days_at_target.discard("")
+    if current_day:
+        if latest_at_target:
+            days_at_target.add(current_day)
+        else:
+            days_at_target.discard(current_day)
+    return days_at_target
+
+
 def run_maker_carry_study(cfg: EngineConfig) -> dict[str, Any]:
     settings = _settings(cfg)
     out_root = cfg.output_root / "maker_carry"
@@ -1606,15 +1653,11 @@ def run_maker_carry_study(cfg: EngineConfig) -> dict[str, Any]:
     # overstate shares 3-9x (WO-46); letting it count would allow the gate to
     # pass on 6 honest days plus 1 discredited one. Tighten-only: this can
     # only reduce the day count, never raise it.
-    days_at_target = {
-        str(run.get("generated_at_utc") or "")[:10]
-        for run in prior_runs
-        if (safe_float(run.get("portfolio_net_carry_usd_per_day")) or 0.0) >= target and str(run.get("share_model") or "") == "published_v2"
-    }
-    days_at_target.discard("")
     latest_at_target = bool(portfolio) and net_total >= target
-    if latest_at_target:
-        days_at_target.add(str(summary["generated_at_utc"])[:10])
+    today = str(summary["generated_at_utc"])[:10]
+    days_at_target = _distinct_days_at_target(
+        prior_runs, target, current_day=today, latest_at_target=latest_at_target
+    )
     runs_at_target = len(days_at_target)
     required_runs = int(settings["gate_min_runs_at_target"])
     gate_a_state = "pass" if latest_at_target and runs_at_target >= required_runs else "pending"

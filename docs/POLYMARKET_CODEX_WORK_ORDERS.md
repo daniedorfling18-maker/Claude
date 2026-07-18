@@ -4249,28 +4249,38 @@ per ENGINEERING_STANDARDS. Order reflects safety value, not audit order:
    (coverage_ratio rising over days on a persistent market), NOT asserted
    here. A churny market still never qualifies — correct, since only
    persistent markets are fundable.
-1. Notification revocation + candidate/portfolio-hash keying: WO-99 fires on
-   state transition only; a candidate change (Iran->WTI) or eligible->not
-   sends no correction. Key transitions on (state, portfolio_hash); send a
-   revocation on eligible->not_eligible. (orchestrator, small)
-2. Atomic same-run portfolio version: stamp policy/study/quote-sheet/replay/
-   toxicity/stage artifacts with one portfolio_version hash; eligibility
-   requires all inputs share it (kills the 18-minute cross-artifact skew).
-3. M-A intraday counting: a UTC day counts if ANY intraday run hit target.
-   Pre-specify ONE observation per day (last run, or a fixed UTC hour) so a
-   single intraday spike cannot bank a day. Tighten-only; re-derive the day
-   count under the stricter rule.
-4. Kelly dimensional bug (confirmed): `raw_fraction = mean/(std**2)` on dollar
-   P&L is 1/dollars, not dimensionless -- fraction falls ~10x when P&L scales
-   10x. Fail-safe direction today (more conservative at scale) but wrong;
-   recompute from per-dollar returns. Bounded/min-capped, so not urgent.
-5. Requote fail-open cases: missing bid/ask -> advise not pull; failed Gamma
-   lookup -> not pull; missing toxicity passes; WO-102 absolute floor not
-   consumed by requote. Make each fail closed (pull).
-6. Study vs safety contradiction: study admits already-started/past-event
-   touch markets and assigns carry while requote orders them pulled. Exclude
-   past-event-start markets from the sized portfolio (extend WO-80 to
-   event_start, not just title/close dates).
+1. DONE 2026-07-18 (orchestrator): WO-99 now keys transitions on
+   (state, candidate); a candidate change while eligible re-notifies, and an
+   eligible->not_eligible drop sends a revocation push + alert artifact.
+2. DONE 2026-07-18 (orchestrator): WO-99 eligibility now requires the
+   decision policy's consumed study run (inputs_snapshot) to equal the
+   current study generated_at, failing closed on the ~18-minute churn skew.
+   Implemented via the existing run stamp rather than re-plumbing writers.
+3. ESCALATED to owner (not built): changes the FROZEN M-A gate's day-counting
+   arithmetic. Tighten-only in intent, but it alters a registered gate, so it
+   needs a dated owner-registered amendment (like amendments 1-8), not a
+   unilateral orchestrator change. Proposed rule: count a day only from a
+   pre-specified daily observation (last run of the UTC day) so an intraday
+   spike cannot bank a day. Awaiting owner registration.
+4. ESCALATED to owner (not built): the WO-59 Kelly overlay is money-sizing on
+   the frozen WO-50 surface, and the dimensionally-correct fix is NOT
+   guaranteed tighten-only (correcting mean/std^2-on-dollars to per-dollar
+   returns could raise the fraction in some regime). A change that could
+   loosen sizing needs a dated owner decision. Confirmed real; awaiting owner
+   registration. Bounded/min-capped today, so not urgent.
+5. PARTIALLY DONE 2026-07-18 (orchestrator): missing live bid/ask now PULLS
+   (loss of book visibility = cannot manage risk), and the requote screen now
+   consumes the WO-102 absolute raw-imbalance floor and composite block
+   (pull). NOT changed: "missing toxicity -> pull" was rejected as
+   over-tightening (toxicity is a supplementary signal; blanket-pull would
+   make the sheet all-pull noise) and "failed Gamma lookup -> pull" is
+   deferred (needs a lookup-failure flag threaded through; smaller follow-up).
+6. DONE 2026-07-18 (orchestrator), resolved at the decision point rather than
+   the frozen study: WO-99 eligibility now refuses a candidate whose exact
+   requote alert_state is pull_quotes_now/STOP (fail-closed on a missing
+   requote row). This prevents funding a market safety wants pulled without
+   changing the study's event-start semantics (which differ by market type
+   and would risk wrongly excluding valid continuous/touch markets).
 7. M-B realism: passes on data-api-print markout estimate even with zero
    Tier-0 replay coverage; observed adverse was 2.08x estimate. Require the
    portfolio market's own Tier-0 coverage (ties to WO-102 phase 2 data).

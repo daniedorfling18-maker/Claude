@@ -330,7 +330,9 @@ def test_real_missing_rest_book_remains_fail_closed(
 
     result = build_requote_alerts(cfg, as_of=AS_OF)
 
-    assert result["alert_state"] == "requote_advised"
+    # WO-104 item 5: loss of book visibility now fails closed to a PULL, not
+    # merely requote advice — a maker blind to the book cannot manage risk.
+    assert result["alert_state"] == "pull_quotes_now"
     assert result["status"] == "partial_public_lookup_error"
     assert result["markets"][0]["alerts"][0]["rule"] == "missing_live_bid_ask"
     assert result["rest_book_fallback"]["requests_made"] == 1

@@ -4353,9 +4353,10 @@ Every WO below and every future WO must comply with
 `docs/ENGINEERING_STANDARDS.md` (S1-S7), including the mandatory
 `Day-after check:` line. Reviews verify compliance item by item.
 
-**Next buildable: WO-99** (owner push notification on stage-ticket
-eligibility; small, reporting-only — the ledger entry below is the ONLY
-WO-99; build exactly it).
+**Next buildable: WO-99** — IMPLEMENTED by the orchestrator on 2026-07-17
+(owner directive: "perform the workorders yourself"). Codex tasking is
+PAUSED by owner decision until further notice; WO-100 (PR #243) and WO-101
+(PR #242) stay parked un-merged pending owner go.
 
 Numbering collision, resolved 2026-07-17: Codex self-assigned "WO-99" to a
 leakage-safe training corpus (draft PR #242) and "WO-100" to a full-suite PR

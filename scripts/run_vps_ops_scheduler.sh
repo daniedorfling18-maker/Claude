@@ -534,6 +534,8 @@ run_maker_safety_refresh() {
     timeout "$PRINTS_TIMEOUT" python -m polymarket_predictive_engine.cli maker-live-test --config "$CONFIG_PATH"
     timeout "$PRINTS_TIMEOUT" python -m polymarket_predictive_engine.cli decision-policy --config "$CONFIG_PATH"
     timeout "$PRINTS_TIMEOUT" python -m polymarket_predictive_engine.cli requote-alerts --config "$CONFIG_PATH"
+    # WO-99: owner stage-ticket eligibility + transition-only ntfy push.
+    timeout "$PRINTS_TIMEOUT" python -m polymarket_predictive_engine.cli stage-ticket-eligibility --config "$CONFIG_PATH"
   ) >> "$LOG_FILE" 2>&1
   CODE=$?
   stamp_status maker_safety_refresh "$CODE" "read-only maker attribution + kill decision + requote advice" "$STARTED_AT"

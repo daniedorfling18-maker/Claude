@@ -457,17 +457,46 @@ def test_nan_cumulative_score_reports_missing_not_comparing_false(tmp_path):
     assert criteria["value"] is None  # missing, not NaN
 
 
-def test_nan_carry_rows_drop_from_kelly_observations():
-    # A NaN carry row must not enter the dollar fallback's mean/std nor inflate
-    # kelly_observations (which would REDUCE shrinkage — a loosening).
+def test_nan_carry_rows_fail_kelly_overlay_closed():
+    # A supplied NaN is corrupted risk input. Filtering it must not turn the
+    # remaining rows into a less-shrunk or full-ladder allocation.
     settings = dict(policy.DEFAULT_SETTINGS)
     history = _history(["0xm1"] * 7, nets=[2.0, 4.0, 2.0, 4.0, 2.0, 4.0, 2.0])
     history[2]["portfolio_net_carry_usd_per_day"] = "nan"
 
     sizing = policy._quarter_kelly_cap(history, 250.0, settings)
 
-    assert sizing["kelly_observations"] == 6  # NaN row excluded
-    assert sizing["daily_net_mean_usd"] == sizing["daily_net_mean_usd"]  # not NaN
+    assert sizing["kelly_observations"] == 6
+    assert sizing["invalid_kelly_observations"] == 1
+    assert sizing["quarter_kelly_fraction"] == 0.0
+    assert sizing["binding_capital_usd"] == 0.0
+    assert sizing["binding_cap"] == "invalid_kelly_history"
+
+
+def test_one_finite_and_one_nonfinite_row_cannot_restore_ladder_cap():
+    settings = dict(policy.DEFAULT_SETTINGS)
+    history = _history(["0xm1", "0xm1"], nets=[2.0, 4.0])
+    history[1]["portfolio_net_carry_usd_per_day"] = "inf"
+
+    sizing = policy._quarter_kelly_cap(history, 250.0, settings)
+
+    assert sizing["kelly_observations"] == 1
+    assert sizing["invalid_kelly_observations"] == 1
+    assert sizing["kelly_capital_usd"] == 0.0
+    assert sizing["binding_capital_usd"] == 0.0
+    assert sizing["binding_cap"] == "invalid_kelly_history"
+
+
+def test_nonfinite_capital_fails_kelly_overlay_closed():
+    settings = dict(policy.DEFAULT_SETTINGS)
+    history = _history(["0xm1", "0xm1"], nets=[2.0, 4.0])
+    history[1]["portfolio_capital_usd"] = "nan"
+
+    sizing = policy._quarter_kelly_cap(history, 250.0, settings)
+
+    assert sizing["invalid_kelly_observations"] == 1
+    assert sizing["binding_capital_usd"] == 0.0
+    assert sizing["binding_cap"] == "invalid_kelly_history"
 
 
 def test_nan_capital_rows_drop_from_returns():

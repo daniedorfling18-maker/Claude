@@ -342,6 +342,22 @@ def test_returns_normalised_kelly_loosens_versus_dollar_fallback():
     assert loosened["quarter_kelly_fraction"] >= fallback["quarter_kelly_fraction"]
 
 
+def test_kelly_observation_count_follows_usable_returns_not_dollar_rows():
+    # #259: when only some rows carry capital, the shrinkage and reported
+    # observation count must reflect the USABLE return observations, not the
+    # larger dollar-row count (fewer observations => more shrinkage => tighter).
+    settings = dict(policy.DEFAULT_SETTINGS)
+    history = _history(["0xm1"] * 5, nets=[2.0, 4.0, 2.0, 4.0, 2.0])
+    for row in history[:3]:  # older rows lack capital
+        row["portfolio_capital_usd"] = ""
+    for row in history[3:]:  # only the two newest rows have capital
+        row["portfolio_capital_usd"] = 100.0
+
+    sizing = policy._quarter_kelly_cap(history, 250.0, settings)
+
+    assert sizing["kelly_observations"] == 2  # not 5
+
+
 def test_returns_kelly_never_exceeds_ladder_cap():
     # Safety invariant survives the loosening: absolute exposure is bounded by
     # the ladder cap via ``binding = min(ladder_cap, kelly_capital)``, even when

@@ -125,12 +125,16 @@ def evaluate_stage_ticket_eligibility(
         percentile = safe_float(tox_row.get("toxicity_score"))
         raw_imbalance = safe_float(tox_row.get("vpin_raw"))
         flagged = str(tox_row.get("toxic_blocked") or "").strip().lower() in {"true", "1", "yes"}
-        measured = bool(tox_row) and percentile is not None
+        # #253/#252 fail-closed: BOTH the percentile and the WO-102 absolute
+        # raw-imbalance floor must be present to clear the screen. A stale
+        # pre-WO-102 row (no vpin_raw) no longer passes on a low percentile
+        # alone, so the absolute floor cannot be silently bypassed.
+        measured = bool(tox_row) and percentile is not None and raw_imbalance is not None
         clean = (
             measured
             and not flagged
             and percentile <= MAX_TOXICITY
-            and (raw_imbalance is None or raw_imbalance < MAX_RAW_IMBALANCE)
+            and raw_imbalance < MAX_RAW_IMBALANCE
         )
         rows.append(
             _condition(
@@ -246,12 +250,28 @@ def evaluate_stage_ticket_eligibility(
     qual_generated = parse_timestamp(qualification.get("generated_at_utc"))
     qual_age = (now - qual_generated.astimezone(timezone.utc)).total_seconds() if qual_generated is not None else None
     qual_candidate = str(qualification.get("candidate_condition_id") or "").strip()
+    # #260 version-binding: the qualification must have been computed against
+    # the CURRENT study and replay versions, not merely be recent and about the
+    # same candidate. Otherwise a study/replay regenerated within the 30-min
+    # window (a new quote band or Tier-0 row) leaves a stale qualification that
+    # still reads eligible. Bind it to both consumed timestamps (fail-closed).
+    replay = read_json(out_root / "maker_fill_replay.json", default={}) or {}
+    current_replay_generated = str(replay.get("generated_at_utc") or "").strip()
+    qual_study = str(qualification.get("consumed_study_generated_at") or "").strip()
+    qual_replay = str(qualification.get("consumed_replay_generated_at") or "").strip()
+    version_bound = (
+        bool(study_generated)
+        and qual_study == study_generated
+        and bool(current_replay_generated)
+        and qual_replay == current_replay_generated
+    )
     sharp_qualified = (
         bool(qualification.get("qualified"))
         and bool(candidate_id)
         and qual_candidate == candidate_id
         and qual_age is not None
         and 0 <= qual_age <= MAX_QUALIFICATION_AGE_SECONDS
+        and version_bound
     )
     rows.append(
         _condition(
@@ -260,7 +280,7 @@ def evaluate_stage_ticket_eligibility(
             f"qualified={bool(qualification.get('qualified'))}; "
             f"qual_candidate={qual_candidate or 'missing'}; "
             f"age={round(qual_age, 1) if qual_age is not None else 'missing'}s "
-            f"(max {MAX_QUALIFICATION_AGE_SECONDS:g}); "
+            f"(max {MAX_QUALIFICATION_AGE_SECONDS:g}); version_bound={version_bound}; "
             f"first_failing={qualification.get('first_failing_check') or 'none'}",
         )
     )

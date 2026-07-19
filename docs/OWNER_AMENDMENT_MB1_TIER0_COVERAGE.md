@@ -45,7 +45,12 @@ share one bar:
 | simulation-to-reality adverse haircut | ≤ 1.0 | tighten-only (may shrink) |
 
 Config overrides may only tighten (maxima shrink, minima grow); an invalid or
-loosening override falls back to the registered default.
+loosening override falls back to the registered default. A zero-valued maximum
+IS a valid (extreme) tightening and is honored; only negative or non-finite
+overrides fall back. Non-finite (NaN/inf) Tier-0 values are treated as missing,
+so an unknown coverage/haircut fails the gate closed rather than slipping past
+a `<`/`>` comparison (Codex-review hardening, both here and in the WO-105
+evaluator's §2).
 
 ### Data-dependency ordering (deliberate)
 

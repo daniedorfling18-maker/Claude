@@ -78,6 +78,7 @@ placement of any kind. The live-trading gates in AGENTS.md are untouched.
 from __future__ import annotations
 
 import json
+import math
 from datetime import date, datetime, timezone
 from decimal import Decimal, ROUND_CEILING, ROUND_FLOOR
 import re
@@ -1500,11 +1501,28 @@ def _capital_curve(
     return curve, capital_for_target
 
 
-def _mb_tighter_max(settings: dict[str, Any], key: str, registered: float) -> float:
-    """A configured maximum may only shrink the registered one (tighten-only)."""
+def _mb_finite(value: Any) -> float | None:
+    """safe_float that also rejects non-finite (NaN/inf) values.
 
-    value = safe_float(settings.get(key))
-    if value is None or value <= 0:
+    A NaN in a `<`/`>` threshold comparison makes it False, which would let an
+    unknown Tier-0 value pass a fail-closed gate; treat non-finite as missing.
+    """
+
+    parsed = safe_float(value)
+    if parsed is None or not math.isfinite(parsed):
+        return None
+    return parsed
+
+
+def _mb_tighter_max(settings: dict[str, Any], key: str, registered: float) -> float:
+    """A configured maximum may only shrink the registered one (tighten-only).
+
+    Zero is a valid (extreme) tightening for these non-negative maxima and is
+    honored; only a negative or non-finite override falls back to the default.
+    """
+
+    value = _mb_finite(settings.get(key))
+    if value is None or value < 0:
         return registered
     return min(registered, value)
 
@@ -1512,7 +1530,7 @@ def _mb_tighter_max(settings: dict[str, Any], key: str, registered: float) -> fl
 def _mb_tighter_min(settings: dict[str, Any], key: str, registered: float) -> float:
     """A configured minimum may only grow the registered one (tighten-only)."""
 
-    value = safe_float(settings.get(key))
+    value = _mb_finite(settings.get(key))
     if value is None or value < 0:
         return registered
     return max(registered, value)
@@ -1576,10 +1594,10 @@ def _mb_tier0_coverage_sufficient(
         row = by_market.get(condition_id) or by_market.get(token_id)
         if row is None:
             return False
-        evaluable = safe_float(row.get("last_in_queue_evaluable_opportunities"))
-        confirmed = safe_float(row.get("confirmed_fills"))
-        coverage = safe_float(row.get("coverage_ratio"))
-        haircut = safe_float(row.get("simulation_to_reality_haircut"))
+        evaluable = _mb_finite(row.get("last_in_queue_evaluable_opportunities"))
+        confirmed = _mb_finite(row.get("confirmed_fills"))
+        coverage = _mb_finite(row.get("coverage_ratio"))
+        haircut = _mb_finite(row.get("simulation_to_reality_haircut"))
         if evaluable is None or evaluable < min_evaluable:
             return False
         if confirmed is None or confirmed < min_confirmed:
@@ -1592,7 +1610,7 @@ def _mb_tier0_coverage_sufficient(
         if not isinstance(by_horizon, dict):
             return False
         for horizon in MB_TIER0_HORIZONS:
-            windows = safe_float((by_horizon.get(f"{horizon}m") or {}).get("windows_covered"))
+            windows = _mb_finite((by_horizon.get(f"{horizon}m") or {}).get("windows_covered"))
             if windows is None or windows < min_markouts:
                 return False
     return True

@@ -28,5 +28,25 @@ The Docker build context excludes runtime corpora, ledgers, tests, docs, Git
 history, and `.env`; this prevents multi-gigabyte paper datasets from being
 uploaded into BuildKit on every deploy. After restart, `vps-ops-scheduler` is
 the sole full-governance owner. Deployment waits for a newly generated
-price-action model and then performs a reporting-only dashboard render; it
-does not launch a competing governance refresh.
+price-action model, stops the recurring scheduler, and runs component
+acceptance in the profiled one-shot `vps-deploy-acceptance` service. The
+scheduler must be absent before that service starts and is restarted only
+after acceptance passes.
+
+The deploy workflow requires the run ID of the successful `Independently
+Reviewed PR Merge` run that produced the exact current `main` SHA. It verifies
+the workflow identity and its `merge-attestation.json` before contacting the
+VPS. Missing, malformed, stale-SHA, non-independent, or non-successful
+attestation evidence refuses deployment.
+
+Before quiescing the stack, deployment requires the checkout and deployed
+marker to match, snapshots `.env` and the marker with owner-only permissions,
+and tags the running image as `polymarket-paper-vps:rollback-last-known-good`.
+Every non-zero exit after that boundary automatically runs
+`scripts/rollback_vps_paper_deploy.py`: source returns to the captured commit
+without deleting runtime roots, the exact environment and marker are restored,
+the prior image is retagged, all four production services are recreated, and
+the ordinary VPS health check must pass. A failed rollback remains a failed
+deployment, writes `outputs/performance/vps_deploy_rollback.json`, and retains
+secret-bearing recovery material mode-0700 for manual intervention; it never
+prints that material.

@@ -2,8 +2,14 @@ name: Deploy Polymarket VPS Paper
 
 on:
   workflow_dispatch:
+    inputs:
+      acceptance_run_id:
+        description: Successful Independently Reviewed PR Merge run that produced this exact main SHA
+        required: true
+        type: string
 
 permissions:
+  actions: read
   contents: read
 
 concurrency:
@@ -25,6 +31,76 @@ jobs:
     timeout-minutes: 40
 
     steps:
+      - name: Download independent-main acceptance
+        uses: actions/download-artifact@v8
+        with:
+          name: independent-main-acceptance-${{ inputs.acceptance_run_id }}
+          path: ${{ runner.temp }}/independent-main-acceptance
+          github-token: ${{ github.token }}
+          repository: ${{ github.repository }}
+          run-id: ${{ inputs.acceptance_run_id }}
+
+      - name: Bind deployment to independently accepted main
+        env:
+          ACCEPTANCE_RUN_ID: ${{ inputs.acceptance_run_id }}
+          GITHUB_TOKEN: ${{ github.token }}
+          TARGET_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json
+          import os
+          import re
+          from pathlib import Path
+          from urllib.request import Request, urlopen
+
+          run_id = os.environ["ACCEPTANCE_RUN_ID"]
+          if not re.fullmatch(r"[1-9][0-9]*", run_id):
+              raise SystemExit("acceptance_run_id must be a positive GitHub Actions run ID")
+          request = Request(
+              f"https://api.github.com/repos/{os.environ['GITHUB_REPOSITORY']}/actions/runs/{run_id}",
+              headers={
+                  "Accept": "application/vnd.github+json",
+                  "Authorization": f"Bearer {os.environ['GITHUB_TOKEN']}",
+                  "User-Agent": "polymarket-vps-deploy-acceptance",
+                  "X-GitHub-Api-Version": "2022-11-28",
+              },
+          )
+          with urlopen(request, timeout=30) as response:  # noqa: S310 - fixed GitHub API origin
+              run = json.loads(response.read().decode("utf-8"))
+          expected_path = ".github/workflows/independent-pr-merge.yml"
+          if run.get("path") != expected_path or run.get("event") != "workflow_dispatch":
+              raise SystemExit("acceptance artifact did not originate from the registered merge workflow")
+          if run.get("status") != "completed" or run.get("conclusion") != "success":
+              raise SystemExit("independent merge workflow is not a completed success")
+
+          artifact = Path(os.environ["RUNNER_TEMP"]) / "independent-main-acceptance" / "merge-attestation.json"
+          attestation = json.loads(artifact.read_text(encoding="utf-8"))
+          target = os.environ["TARGET_SHA"].lower()
+          actor = str((run.get("actor") or {}).get("login") or "")
+          triggering_actor = str((run.get("triggering_actor") or {}).get("login") or "")
+          author = str(attestation.get("pull_request_author") or "")
+          reviewers = {str(value).casefold() for value in attestation.get("eligible_reviewers", [])}
+          checks = attestation.get("checks") if isinstance(attestation.get("checks"), dict) else {}
+          if attestation.get("status") != "merged" or attestation.get("merged") is not True:
+              raise SystemExit("independent merge attestation does not record a completed merge")
+          if str(attestation.get("merge_commit_sha") or "").lower() != target:
+              raise SystemExit("independent merge attestation is for a different main SHA")
+          if attestation.get("blockers"):
+              raise SystemExit("independent merge attestation contains blockers")
+          if not checks or not all(value is True for value in checks.values()):
+              raise SystemExit("independent merge attestation contains an unsatisfied control")
+          if not actor or actor.casefold() == author.casefold() or actor.casefold() not in reviewers:
+              raise SystemExit("merge workflow actor was not an independent current-head approver")
+          if (
+              not triggering_actor
+              or triggering_actor.casefold() == author.casefold()
+              or triggering_actor.casefold() not in reviewers
+          ):
+              raise SystemExit("merge workflow triggering actor was not an independent current-head approver")
+          print(f"Independent acceptance verified for main {target[:12]} via run {run_id}")
+          PY
+
       - name: Validate deploy secrets
         env:
           PM_VPS_HOST: ${{ secrets.PM_VPS_HOST }}
@@ -215,6 +291,11 @@ jobs:
           cd "$REPO_DIR"
           git fetch --prune origin main
           git cat-file -e "${GITHUB_SHA}^{commit}"
+          accepted_main_sha="$(git rev-parse origin/main)"
+          if [ "$GITHUB_SHA" != "$accepted_main_sha" ]; then
+            echo "::error::Deploy target $GITHUB_SHA is not current accepted main $accepted_main_sha."
+            exit 1
+          fi
 
           if [ ! -f .env ]; then
             cp .env.vps-paper.example .env
@@ -243,7 +324,7 @@ jobs:
           # and were never reclaimed (observed: disk 76%->83% in two days,
           # 2026-07-17 preflight refusal at 5.49GB free vs the 6GB floor).
           # Dangling-only pruning cannot touch tagged or in-use images, and the
-          # rollback contract is git-revision-based (rebuilt on demand), so
+          # rollback contract preserves the running image under a durable tag, so
           # production containers, volumes, and evidence ledgers stay intact.
           echo "[deploy] reclaiming unused Docker builder cache and dangling images"
           $DOCKER builder prune --force
@@ -260,6 +341,15 @@ jobs:
           # reapply. If the updater refuses before moving HEAD, restore the old
           # containers from their existing image before failing the job.
           original_head="$(git rev-parse HEAD)"
+          previous_deployed_sha="$(cat outputs/performance/deployed_git_rev 2>/dev/null || true)"
+          if [ -z "$previous_deployed_sha" ] || [ "$previous_deployed_sha" != "$original_head" ]; then
+            echo "::error::Cannot arm rollback: checkout $original_head and deployed marker ${previous_deployed_sha:-missing} are not aligned."
+            exit 1
+          fi
+          if ! git merge-base --is-ancestor "$original_head" "$GITHUB_SHA"; then
+            echo "::error::Deploy target is not a fast-forward descendant of the last-known-good revision."
+            exit 1
+          fi
           echo "[deploy] capturing pre-deploy operating-state acceptance baseline"
           ORIGINAL_HEAD="$original_head" python3 - <<'PY'
           import json
@@ -294,6 +384,78 @@ jobs:
           temporary.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
           temporary.replace(target)
           PY
+
+          # Arm rollback before the first mutating operation. Preserve the
+          # exact environment, deployed marker, source revision, and running
+          # image. Any later non-zero exit invokes the target revision's
+          # tested rollback utility and restores the prior production stack.
+          ROLLBACK_DIR="$(mktemp -d)"
+          ROLLBACK_ENV="$ROLLBACK_DIR/.env.last-known-good"
+          ROLLBACK_MARKER="$ROLLBACK_DIR/deployed_git_rev.last-known-good"
+          ROLLBACK_SCRIPT="$ROLLBACK_DIR/rollback_vps_paper_deploy.py"
+          ROLLBACK_IMAGE_TAG="polymarket-paper-vps:rollback-last-known-good"
+          chmod 0700 "$ROLLBACK_DIR"
+          ROLLBACK_ARMED=false
+          DEPLOY_COMMITTED=false
+
+          deploy_exit() {
+            deploy_status="$1"
+            trap - EXIT
+            set +e
+            preserve_recovery=false
+            if [ "$deploy_status" -ne 0 ] && [ "${ROLLBACK_ARMED:-false}" = true ] && [ "${DEPLOY_COMMITTED:-false}" != true ]; then
+              echo "::warning::Candidate deploy failed; restoring last-known-good revision $original_head."
+              python3 "$ROLLBACK_SCRIPT" \
+                --repo "$REPO_DIR" \
+                --rollback-ref "$original_head" \
+                --branch main \
+                --compose-file "$COMPOSE_FILE" \
+                --env-backup "$ROLLBACK_ENV" \
+                --marker-backup "$ROLLBACK_MARKER" \
+                --marker-was-present \
+                --image-backup-tag "$ROLLBACK_IMAGE_TAG" \
+                --docker-command "$DOCKER" \
+                --failed-target-sha "$GITHUB_SHA" \
+                --required-service polymarket-paper-live \
+                --required-service polymarket-dashboard \
+                --required-service superbru-auto-pick-watchdog \
+                --required-service vps-ops-scheduler \
+                --report outputs/performance/vps_deploy_rollback.json
+              rollback_status=$?
+              if [ "$rollback_status" -ne 0 ]; then
+                recovery_parent="$HOME/.polymarket-deploy-recovery"
+                recovery_dir="$recovery_parent/$GITHUB_RUN_ID"
+                install -d -m 0700 "$recovery_parent"
+                rm -rf "$recovery_dir"
+                mv "$ROLLBACK_DIR" "$recovery_dir"
+                preserve_recovery=true
+                echo "::error::Automatic rollback failed; secret-bearing recovery material was not printed and is retained mode-0700 at $recovery_dir."
+                deploy_status=70
+              else
+                echo "::warning::Automatic rollback completed and the previous stack passed its health check."
+              fi
+            fi
+            rm -f "$ENV_PATCH"
+            rm -rf "$PREFLIGHT_DIR"
+            if [ "$preserve_recovery" != true ]; then
+              rm -rf "$ROLLBACK_DIR"
+            fi
+            exit "$deploy_status"
+          }
+          trap 'deploy_exit $?' EXIT
+
+          install -m 0600 .env "$ROLLBACK_ENV"
+          install -m 0600 outputs/performance/deployed_git_rev "$ROLLBACK_MARKER"
+          git show "${GITHUB_SHA}:scripts/rollback_vps_paper_deploy.py" > "$ROLLBACK_SCRIPT"
+          chmod 0700 "$ROLLBACK_SCRIPT"
+          previous_image_id="$($DOCKER inspect --format '{{.Image}}' polymarket-paper-live)"
+          if [ -z "$previous_image_id" ]; then
+            echo "::error::Cannot arm rollback: current paper image ID is unavailable."
+            exit 1
+          fi
+          $DOCKER image tag "$previous_image_id" "$ROLLBACK_IMAGE_TAG"
+          ROLLBACK_ARMED=true
+
           echo "[deploy] quiescing paper writers for a consistent runtime snapshot"
           $DOCKER compose -f "$COMPOSE_FILE" stop --timeout 60
           echo "[deploy] updating source while preserving tracked and untracked runtime evidence"
@@ -392,7 +554,6 @@ jobs:
           PY
           rm -f "$ENV_PATCH"
           rm -rf "$PREFLIGHT_DIR"
-          trap - EXIT
 
           # Make the scheduler the single owner of the first post-deploy full
           # governance pass. Preserve the previous cadence stamp for audit,
@@ -484,71 +645,21 @@ jobs:
             exit 1
           fi
 
-          # WO-79/WO-83: exercise the registered component boundaries on real current
-          # data. Capture every producer exit before evaluating, so a stale
-          # artifact cannot make a failed producer look healthy. All commands
-          # are read-only/reporting-only; no broker or execution command is in
-          # this acceptance path.
-          echo "[deploy] running real-data component acceptance cycle"
-          $DOCKER compose -f "$COMPOSE_FILE" exec -T vps-ops-scheduler sh -lc '
-            set +e
-            timeout 300 python -m polymarket_predictive_engine.cli maker-carry-study --config "$POLYMARKET_CONFIG_PATH"
-            maker_carry_study_code=$?
-            timeout 300 python -m polymarket_predictive_engine.cli collect-maker-replay-data --config "$POLYMARKET_CONFIG_PATH"
-            collect_maker_replay_data_code=$?
-            timeout 300 python -m polymarket_predictive_engine.cli maker-fill-replay --config "$POLYMARKET_CONFIG_PATH"
-            maker_fill_replay_code=$?
-            timeout 300 python -m polymarket_predictive_engine.cli maker-live-test --config "$POLYMARKET_CONFIG_PATH"
-            maker_live_test_code=$?
-            timeout 300 python -m polymarket_predictive_engine.cli decision-policy --config "$POLYMARKET_CONFIG_PATH"
-            decision_policy_code=$?
-            timeout 300 python -m polymarket_predictive_engine.cli requote-alerts --config "$POLYMARKET_CONFIG_PATH"
-            requote_alerts_code=$?
-            timeout 300 python -m polymarket_predictive_engine.cli reconcile-wallet --config "$POLYMARKET_CONFIG_PATH"
-            reconcile_wallet_code=$?
-            timeout 300 python -m polymarket_predictive_engine.cli executor-ops-monitor --config "$POLYMARKET_CONFIG_PATH"
-            executor_ops_monitor_code=$?
-            timeout 300 python -m polymarket_predictive_engine.cli operating-state --config "$POLYMARKET_CONFIG_PATH"
-            operating_state_code=$?
-            export maker_carry_study_code collect_maker_replay_data_code maker_fill_replay_code maker_live_test_code decision_policy_code requote_alerts_code reconcile_wallet_code executor_ops_monitor_code operating_state_code
-            python - <<"PY"
-          import json
-          import os
-          from datetime import datetime, timezone
-          from pathlib import Path
-
-          target = Path("/app/outputs/ops_scheduler/deploy_acceptance_cycle.json")
-          target.parent.mkdir(parents=True, exist_ok=True)
-          commands = {
-              name: {"exit_code": int(os.environ[f"{name}_code"])}
-              for name in (
-                  "maker_carry_study",
-                  "collect_maker_replay_data",
-                  "maker_fill_replay",
-                  "maker_live_test",
-                  "decision_policy",
-                  "requote_alerts",
-                  "reconcile_wallet",
-                  "executor_ops_monitor",
-                  "operating_state",
-              )
-          }
-          payload = {
-              "work_order": "WO-79",
-              "generated_at_utc": datetime.now(timezone.utc).isoformat(),
-              "commands": commands,
-              "paper_trading_invoked": False,
-              "live_trading_invoked": False,
-          }
-          temporary = target.with_name(target.name + ".tmp")
-          temporary.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
-          temporary.replace(target)
-          PY
-            set -e
-            python -m polymarket_predictive_engine.cli artifact-contracts --config "$POLYMARKET_CONFIG_PATH"
-            python -m polymarket_predictive_engine.cli deploy-acceptance --config "$POLYMARKET_CONFIG_PATH"
-            python -m polymarket_predictive_engine.cli operating-state --config "$POLYMARKET_CONFIG_PATH"
-          ' </dev/null
+          # Exercise the registered component boundaries in a dedicated
+          # one-shot container. Stop the recurring scheduler first and prove it
+          # is absent, so deploy acceptance has one owner and cannot race a
+          # continuous scheduler child. The profiled service contains no
+          # broker, signer, cancellation, paper-order, or live-order command.
+          echo "[deploy] isolating scheduler and running one-shot real-data acceptance"
+          $DOCKER compose -f "$COMPOSE_FILE" stop --timeout 60 vps-ops-scheduler
+          running_services="$($DOCKER compose -f "$COMPOSE_FILE" ps --services --status running)"
+          if grep -Fxq vps-ops-scheduler <<<"$running_services"; then
+            echo "::error::Recurring scheduler remained active; refusing concurrent deploy acceptance."
+            exit 1
+          fi
+          $DOCKER compose -f "$COMPOSE_FILE" --profile deploy-acceptance run \
+            --rm --no-deps --no-build vps-deploy-acceptance </dev/null
+          $DOCKER compose -f "$COMPOSE_FILE" up -d --no-build vps-ops-scheduler
 
           # The dashboard renderer is reporting-only. Refresh it after the
           # completed scheduler pass so acceptance and the served cockpit read
@@ -559,7 +670,7 @@ jobs:
 
           acceptance_status="$(python3 -c 'import json; d=json.load(open("outputs/ops_scheduler/deploy_acceptance.json", encoding="utf-8")); print(d.get("status", "FAIL") if d.get("target_deploy_sha") == "'"$GITHUB_SHA"'" else "FAIL")' 2>/dev/null || echo FAIL)"
           if [ "$acceptance_status" != "PASS" ]; then
-            echo "::error::WO-79 post-deploy acceptance failed. Inspect outputs/ops_scheduler/deploy_acceptance.json; previous revision $original_head remains the recorded rollback ref."
+            echo "::error::WO-79 post-deploy acceptance failed; automatic rollback is armed for $original_head."
             exit 1
           fi
 
@@ -587,5 +698,6 @@ jobs:
           grep -Fq -- '"fills_last_24h_raw"' <<<"$data"
           grep -Fq -- '"maker_test_fills_last_24h"' <<<"$data"
 
+          DEPLOY_COMMITTED=true
           echo "VPS deploy verified: http://${PM_VPS_HOST}:${port}/"
           REMOTE

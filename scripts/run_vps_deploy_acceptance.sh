@@ -1,0 +1,123 @@
+#!/usr/bin/env sh
+# Dedicated one-shot deployment acceptance lane.
+#
+# This script is intentionally not sourced by or executed inside the recurring
+# VPS scheduler.  The deploy workflow stops that scheduler first, then starts
+# the profiled vps-deploy-acceptance service for exactly one bounded cycle.
+# Every command below is reporting/read-only; there is no broker, signer,
+# cancellation, paper-order, or live-order command in this lane.
+
+set -u
+
+CONFIG_PATH="${POLYMARKET_CONFIG_PATH:-/app/polymarket_predictive_config.example.yaml}"
+OUT_PATH="${DEPLOY_ACCEPTANCE_CYCLE_PATH:-/app/outputs/ops_scheduler/deploy_acceptance_cycle.json}"
+COMMAND_TIMEOUT="${DEPLOY_ACCEPTANCE_COMMAND_TIMEOUT_SECONDS:-300}"
+
+case "${POLYMARKET_EXECUTE_LIVE:-false}" in
+  1|true|TRUE|yes|YES)
+    printf '%s\n' "deploy acceptance refuses POLYMARKET_EXECUTE_LIVE=${POLYMARKET_EXECUTE_LIVE}" >&2
+    exit 64
+    ;;
+esac
+case "${POLYMARKET_LIVE_TRADING:-0}" in
+  1|true|TRUE|yes|YES)
+    printf '%s\n' "deploy acceptance refuses POLYMARKET_LIVE_TRADING=${POLYMARKET_LIVE_TRADING}" >&2
+    exit 64
+    ;;
+esac
+
+set +e
+timeout "$COMMAND_TIMEOUT" python -m polymarket_predictive_engine.cli maker-carry-study --config "$CONFIG_PATH"
+maker_carry_study_code=$?
+timeout "$COMMAND_TIMEOUT" python -m polymarket_predictive_engine.cli collect-maker-replay-data --config "$CONFIG_PATH"
+collect_maker_replay_data_code=$?
+timeout "$COMMAND_TIMEOUT" python -m polymarket_predictive_engine.cli maker-fill-replay --config "$CONFIG_PATH"
+maker_fill_replay_code=$?
+timeout "$COMMAND_TIMEOUT" python -m polymarket_predictive_engine.cli maker-live-test --config "$CONFIG_PATH"
+maker_live_test_code=$?
+timeout "$COMMAND_TIMEOUT" python -m polymarket_predictive_engine.cli decision-policy --config "$CONFIG_PATH"
+decision_policy_code=$?
+timeout "$COMMAND_TIMEOUT" python -m polymarket_predictive_engine.cli requote-alerts --config "$CONFIG_PATH"
+requote_alerts_code=$?
+timeout "$COMMAND_TIMEOUT" python -m polymarket_predictive_engine.cli reconcile-wallet --config "$CONFIG_PATH"
+reconcile_wallet_code=$?
+timeout "$COMMAND_TIMEOUT" python -m polymarket_predictive_engine.cli executor-ops-monitor --config "$CONFIG_PATH"
+executor_ops_monitor_code=$?
+timeout "$COMMAND_TIMEOUT" python -m polymarket_predictive_engine.cli operating-state --config "$CONFIG_PATH"
+operating_state_code=$?
+set -e
+
+export OUT_PATH maker_carry_study_code collect_maker_replay_data_code
+export maker_fill_replay_code maker_live_test_code decision_policy_code
+export requote_alerts_code reconcile_wallet_code executor_ops_monitor_code
+export operating_state_code
+python - <<'PY'
+import json
+import os
+from datetime import datetime, timezone
+from pathlib import Path
+
+target = Path(os.environ["OUT_PATH"])
+target.parent.mkdir(parents=True, exist_ok=True)
+commands = {
+    name: {"exit_code": int(os.environ[f"{name}_code"])}
+    for name in (
+        "maker_carry_study",
+        "collect_maker_replay_data",
+        "maker_fill_replay",
+        "maker_live_test",
+        "decision_policy",
+        "requote_alerts",
+        "reconcile_wallet",
+        "executor_ops_monitor",
+        "operating_state",
+    )
+}
+payload = {
+    "work_order": "WO-79-deployment-controls",
+    "generated_at_utc": datetime.now(timezone.utc).isoformat(),
+    "execution_lane": "dedicated_one_shot_container",
+    "scheduler_isolated": True,
+    "commands": commands,
+    "paper_trading_invoked": False,
+    "live_trading_invoked": False,
+}
+temporary = target.with_name(target.name + ".tmp")
+temporary.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+temporary.replace(target)
+PY
+
+python -m polymarket_predictive_engine.cli artifact-contracts --config "$CONFIG_PATH"
+python -m polymarket_predictive_engine.cli deploy-acceptance --config "$CONFIG_PATH"
+python -m polymarket_predictive_engine.cli operating-state --config "$CONFIG_PATH"
+
+python - "$OUT_PATH" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+cycle = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
+acceptance_path = Path(sys.argv[1]).with_name("deploy_acceptance.json")
+acceptance = json.loads(acceptance_path.read_text(encoding="utf-8"))
+nonzero = {
+    name: row.get("exit_code")
+    for name, row in cycle.get("commands", {}).items()
+    if row.get("exit_code") != 0
+}
+if nonzero or acceptance.get("status") != "PASS":
+    print(
+        json.dumps(
+            {
+                "status": "FAIL",
+                "nonzero_producers": nonzero,
+                "acceptance_status": acceptance.get("status"),
+                "paper_trading_invoked": False,
+                "live_trading_invoked": False,
+            },
+            sort_keys=True,
+        ),
+        file=sys.stderr,
+    )
+    raise SystemExit(1)
+print(json.dumps({"status": "PASS", "scheduler_isolated": True}, sort_keys=True))
+PY

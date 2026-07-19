@@ -5059,6 +5059,39 @@ frozen-surface change.
 5. **Deployment controls:** implement an actual tested rollback, isolate
    deploy acceptance from the continuously running scheduler, and deploy only
    an independently accepted main revision.
+
+   **Implemented 2026-07-19, pending independent review/merge and production
+   deployment:** the deploy workflow now requires the exact successful
+   independent-merge attestation for the target `main` SHA. Before cutover it
+   snapshots the aligned source/deployed marker, mode-0600 environment, and
+   last-known-good image; every post-cutover failure invokes a tested backward
+   checkout that preserves all runtime roots, restores env/marker/image,
+   recreates all four production services, and requires the ordinary health
+   check. Real-data acceptance moved out of the continuous scheduler into the
+   profiled, one-shot `vps-deploy-acceptance` service; the workflow stops and
+   proves the scheduler absent before starting it. No broker, signer,
+   cancellation, paper-order, live-order, gate, threshold, stake, or funding
+   path changed. Missing/malformed attestation or rollback prerequisites stop
+   before cutover; any later failure rolls back, and an unprovable rollback
+   remains failed and retains mode-0700 recovery material for an operator.
+
+   Producer/consumer contract: `independent-pr-merge.yml` produces
+   `merge-attestation.json` as a run-scoped GitHub artifact; the deploy workflow
+   consumes only the explicitly named run after verifying its workflow path,
+   success, distinct current-head approver/actor, all controls, and exact merge
+   SHA. The scheduler produces the fresh governance pass; only after that
+   producer completes is it stopped, and the one-shot acceptance service owns
+   `deploy_acceptance_cycle.json`, `deploy_acceptance.json`, and the final
+   operating-state update without a concurrent scheduler writer.
+
+   **Day-after check:** in
+   `outputs/ops_scheduler/deploy_acceptance_cycle.json`,
+   `execution_lane=dedicated_one_shot_container`, `scheduler_isolated=true`,
+   and every command exit is zero; `outputs/ops_scheduler/deploy_acceptance.json`
+   is `PASS` for the deployed marker. If rollback was exercised,
+   `outputs/performance/vps_deploy_rollback.json` must be `PASS` with
+   `decision=ROLLED_BACK_TO_LAST_KNOWN_GOOD`, and checkout, environment, marker,
+   image-backed services, and health check must all be restored.
 6. **Dashboard transport:** remove the public unauthenticated HTTP exposure and
    serve the dashboard through authenticated HTTPS or a private VPN.
 7. **Review hygiene:** adjudicate every surviving review thread against current

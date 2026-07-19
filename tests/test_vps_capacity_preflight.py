@@ -94,5 +94,6 @@ def test_real_compose_declares_memory_for_every_service() -> None:
         "polymarket-dashboard",
         "superbru-auto-pick-watchdog",
         "vps-ops-scheduler",
+        "vps-deploy-acceptance",
     }
     assert sum(row["bytes"] for row in limits) > 7 * preflight.GIB

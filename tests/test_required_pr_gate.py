@@ -240,6 +240,7 @@ def test_workflows_use_node24_action_majors() -> None:
     expected_versions = {
         "actions/checkout": "v6",
         "actions/setup-python": "v6",
+        "actions/download-artifact": "v8",
         "actions/upload-artifact": "v7",
     }
 

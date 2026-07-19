@@ -64,6 +64,8 @@ FEATURE_FIELDS = [
     "fee_schedule_rate",
     "fee_schedule_exponent",
     "fee_schedule_taker_only",
+    "paper_trading_invoked",
+    "live_trading_invoked",
 ]
 
 LABEL_FIELDS = [
@@ -78,6 +80,8 @@ LABEL_FIELDS = [
     "resolution_observed_at_utc",
     "resolution_observation_id",
     "resolution_quality",
+    "paper_trading_invoked",
+    "live_trading_invoked",
 ]
 
 SPLIT_FIELDS = [
@@ -92,6 +96,8 @@ SPLIT_FIELDS = [
     "validation_feature_start_utc",
     "embargo_cutoff_utc",
     "row_count",
+    "paper_trading_invoked",
+    "live_trading_invoked",
 ]
 
 
@@ -223,6 +229,14 @@ def _resolution_index(
         markets = {str(row["market_id_canonical"]) for row in rows}
         if len(targets) != 1 or len(markets) != 1:
             counts["conflicting_clean_resolution_tokens"] += 1
+            continue
+        close_times = {row["close_at"] for row in rows}
+        if len(close_times) != 1:
+            # A later correction can move the true pre-close boundary earlier.
+            # Combining the first observed target with its superseded later
+            # close would admit post-close quotes. Quarantine the entire token
+            # instead of guessing which clean state is authoritative.
+            counts["conflicting_clean_close_time_tokens"] += 1
             continue
         rows.sort(
             key=lambda row: (
@@ -399,6 +413,8 @@ def _split_markets(
                 "validation_feature_start_utc": _iso(validation_start),
                 "embargo_cutoff_utc": _iso(cutoff),
                 "row_count": len(market_rows),
+                "paper_trading_invoked": "false",
+                "live_trading_invoked": "false",
             }
         )
     return assignments, split_rows, {
@@ -495,6 +511,8 @@ def build_leakage_safe_training(
                 "fee_schedule_rate": quote.get("fee_schedule_rate", ""),
                 "fee_schedule_exponent": quote.get("fee_schedule_exponent", ""),
                 "fee_schedule_taker_only": quote.get("fee_schedule_taker_only", ""),
+                "paper_trading_invoked": "false",
+                "live_trading_invoked": "false",
             }
         )
         labels.append(
@@ -510,6 +528,8 @@ def build_leakage_safe_training(
                 "resolution_observed_at_utc": _iso(resolution["resolution_observed_at"]),
                 "resolution_observation_id": resolution.get("resolution_observation_id", ""),
                 "resolution_quality": "clean_settlement",
+                "paper_trading_invoked": "false",
+                "live_trading_invoked": "false",
             }
         )
 

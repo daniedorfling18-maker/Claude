@@ -450,6 +450,10 @@ def test_training_assembly_has_purged_market_split_and_separate_labels(tmp_path:
     assert all(row["executable_buy_price"] == row["best_ask"] for row in features)
     assert all("target" not in row and "resolution_time" not in row for row in features)
     assert {row["target"] for row in labels if row["split"] == "train"} == {"0", "1"}
+    for snapshot in (features, labels, split):
+        assert snapshot
+        assert {row["paper_trading_invoked"] for row in snapshot} == {"false"}
+        assert {row["live_trading_invoked"] for row in snapshot} == {"false"}
     assert result["midpoint_only_rows_accepted"] == 0
     assert result["registered_h3_verdict_authority"] is False
 
@@ -501,6 +505,37 @@ def test_resolution_timestamp_must_also_be_available_by_assembly_clock(tmp_path:
     assert before == {}
     assert before_counts["resolution_label_not_available_by_assembly_clock"] == 1
     assert "future-label-token" in after
+
+
+def test_divergent_clean_close_times_quarantine_the_entire_token(tmp_path: Path) -> None:
+    cfg = _cfg(tmp_path)
+    corrected_close = datetime(2026, 2, 3, 12, tzinfo=timezone.utc)
+    original_close = corrected_close + timedelta(hours=3)
+    original = _resolution("revised-close-market", "revised-close-token", 1, original_close)
+    corrected = dict(original)
+    corrected["end_time"] = _iso(corrected_close)
+    corrected["close_time"] = _iso(corrected_close)
+    append_resolution_observations(
+        cfg,
+        [original],
+        producer="original_close_fixture",
+        observed_at_utc=original_close + timedelta(minutes=10),
+    )
+    append_resolution_observations(
+        cfg,
+        [corrected],
+        producer="corrected_close_fixture",
+        observed_at_utc=original_close + timedelta(minutes=20),
+    )
+
+    index, counts = _resolution_index(
+        cfg.output_root / RESOLUTION_CORPUS_RELATIVE_PATH,
+        as_of=original_close + timedelta(minutes=30),
+    )
+
+    assert "revised-close-token" not in index
+    assert counts["conflicting_clean_close_time_tokens"] == 1
+    assert counts["clean_resolution_tokens"] == 0
 
 
 def test_split_collects_until_ten_independent_validation_markets_exist(

@@ -97,23 +97,26 @@ def evaluate_stage_ticket_eligibility(
         (policy.get("composition_stability") or {}).get("most_recurrent_market") or ""
     ).strip()
     portfolio = study.get("portfolio") if isinstance(study.get("portfolio"), list) else []
-    candidate = next(
-        (
-            row
-            for row in portfolio
-            if isinstance(row, dict) and str(row.get("condition_id") or "").strip() == candidate_id
-        ),
-        None,
-    )
+    candidate_rows = [
+        row
+        for row in portfolio
+        if isinstance(row, dict) and str(row.get("condition_id") or "").strip() == candidate_id
+    ]
+    candidate = candidate_rows[0] if len(candidate_rows) == 1 else None
+    candidate_token = str((candidate or {}).get("token_id") or "").strip()
     rows.append(
         _condition(
             "candidate_in_current_portfolio",
-            bool(candidate_id) and candidate is not None,
-            f"candidate={candidate_id or 'missing'}; in_portfolio={candidate is not None}",
+            bool(candidate_id) and candidate is not None and bool(candidate_token),
+            f"candidate={candidate_id or 'missing'}; token={candidate_token or 'missing'}; "
+            f"portfolio_matches={len(candidate_rows)}",
         )
     )
 
-    summary: dict[str, Any] = {"candidate_condition_id": candidate_id or None}
+    summary: dict[str, Any] = {
+        "candidate_condition_id": candidate_id or None,
+        "candidate_token_id": candidate_token or None,
+    }
     if candidate is not None:
         # WO-102 composite screen (tighten-only): block on the absolute
         # raw-imbalance floor OR the universe-relative percentile, and treat
@@ -250,6 +253,7 @@ def evaluate_stage_ticket_eligibility(
     qual_generated = parse_timestamp(qualification.get("generated_at_utc"))
     qual_age = (now - qual_generated.astimezone(timezone.utc)).total_seconds() if qual_generated is not None else None
     qual_candidate = str(qualification.get("candidate_condition_id") or "").strip()
+    qual_token = str(qualification.get("candidate_token_id") or "").strip()
     # #260 version-binding: the qualification must have been computed against
     # the CURRENT study and replay versions, not merely be recent and about the
     # same candidate. Otherwise a study/replay regenerated within the 30-min
@@ -269,6 +273,8 @@ def evaluate_stage_ticket_eligibility(
         bool(qualification.get("qualified"))
         and bool(candidate_id)
         and qual_candidate == candidate_id
+        and bool(candidate_token)
+        and qual_token == candidate_token
         and qual_age is not None
         and 0 <= qual_age <= MAX_QUALIFICATION_AGE_SECONDS
         and version_bound
@@ -279,6 +285,7 @@ def evaluate_stage_ticket_eligibility(
             sharp_qualified,
             f"qualified={bool(qualification.get('qualified'))}; "
             f"qual_candidate={qual_candidate or 'missing'}; "
+            f"qual_token={qual_token or 'missing'}; expected_token={candidate_token or 'missing'}; "
             f"age={round(qual_age, 1) if qual_age is not None else 'missing'}s "
             f"(max {MAX_QUALIFICATION_AGE_SECONDS:g}); version_bound={version_bound}; "
             f"first_failing={qualification.get('first_failing_check') or 'none'}",
@@ -307,9 +314,11 @@ def run_stage_ticket_eligibility(
     previous = read_json(path, default={}) or {}
     previous_state = str(previous.get("state") or "not_eligible")
     previous_candidate = str(previous.get("candidate_condition_id") or "")
+    previous_token = str(previous.get("candidate_token_id") or "")
     state, rows, summary = evaluate_stage_ticket_eligibility(cfg, as_of=as_of)
     first_failing = next((row["condition"] for row in rows if not row["passed"]), None)
     candidate_id = str(summary.get("candidate_condition_id") or "")
+    candidate_token = str(summary.get("candidate_token_id") or "")
 
     # WO-104 item 1: key transitions on (state, candidate) so a candidate
     # change while still "eligible" (e.g. Iran -> WTI) is not silently
@@ -317,7 +326,9 @@ def run_stage_ticket_eligibility(
     # stops being eligible so the owner is never left holding a stale "go".
     became_eligible = previous_state != "eligible" and state == "eligible"
     candidate_changed_while_eligible = (
-        previous_state == "eligible" and state == "eligible" and candidate_id != previous_candidate
+        previous_state == "eligible"
+        and state == "eligible"
+        and (candidate_id, candidate_token) != (previous_candidate, previous_token)
     )
     eligible_event = became_eligible or candidate_changed_while_eligible
     revoked_event = previous_state == "eligible" and state != "eligible"
@@ -339,7 +350,9 @@ def run_stage_ticket_eligibility(
         "state": state,
         "previous_state": previous_state,
         "candidate_condition_id": candidate_id or None,
+        "candidate_token_id": candidate_token or None,
         "previous_candidate_condition_id": previous_candidate or None,
+        "previous_candidate_token_id": previous_token or None,
         "transitioned_to_eligible": eligible_event,
         "candidate_changed_while_eligible": candidate_changed_while_eligible,
         "revoked": revoked_event,

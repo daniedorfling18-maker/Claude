@@ -5109,9 +5109,9 @@ request.
    unapproved dispatch/queue-driver protocol from PR #263 without reverting its
    safety fixes. PR #281 restored the protocol and accepted `AGENTS.md` names
    that PR's owner merge as the authorization event, but there is no separate
-   explicit owner-authored approval text. PR #305 therefore removes the
-   surviving protocol instead of relying on merge provenance alone. Pending
-   that correction, this Codex queue accepts assignments only from direct
+   explicit owner-authored approval text. PR #305 therefore proposes removal
+   of the surviving protocol instead of relying on merge provenance alone.
+   Pending that correction, this Codex queue accepts assignments only from direct
    owner-authored requests and never from bridge/queue-driver text.
    One-scope-per-PR remains binding.
 2. **Initial review-remediation set — ACCEPTED, follow-up defects remain:**

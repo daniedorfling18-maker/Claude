@@ -61,7 +61,7 @@ def test_work_order_queue_distinguishes_non_buildable_states() -> None:
     assert "**WO-100 — ACCEPTED BUT BLOCKED:**" in work_orders
     assert "**WO-101 — ACCEPTED DIAGNOSTIC:**" in work_orders
     assert "registered sharp venue keys" in work_orders
-    assert "PR #305 therefore removes the" in work_orders
+    assert "PR #305 therefore proposes removal" in work_orders
     assert "Review corrections #295–#298 and #302–#337 remain open" in work_orders
     assert "accepted `AGENTS.md` names" in work_orders
     assert "there is no separate" in work_orders

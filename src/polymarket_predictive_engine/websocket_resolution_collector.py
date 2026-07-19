@@ -133,7 +133,6 @@ def _dedupe_resolution_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
 
 
 def collect_websocket_resolutions(cfg: EngineConfig) -> dict[str, Any]:
-    run_at = now_utc()
     settings = cfg.raw.get("websocket_resolution", {})
     base_url = str(settings.get("gamma_base_url", cfg.raw.get("historical_backfill", {}).get("gamma_base_url", DEFAULT_GAMMA_BASE_URL)))
     page_size = int(settings.get("page_size", 100))
@@ -146,6 +145,7 @@ def collect_websocket_resolutions(cfg: EngineConfig) -> dict[str, Any]:
     gov_root = cfg.governance_root
 
     if not token_ids:
+        run_at = now_utc()
         summary = {
             "status": "skipped",
             "reason": "no websocket token ids found",
@@ -188,6 +188,9 @@ def collect_websocket_resolutions(cfg: EngineConfig) -> dict[str, Any]:
         matched.update(found)
         scans.append(meta)
 
+    # The availability clock must follow the final paginated Gamma response;
+    # scan-start time would make later labels appear known too early.
+    run_at = now_utc()
     resolution_rows: list[dict[str, Any]] = []
     quality_rows: list[dict[str, Any]] = []
 

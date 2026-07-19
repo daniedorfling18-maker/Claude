@@ -4878,11 +4878,7 @@ larger validation fractions are honoured up to the one-train-market boundary;
 and the diagnostic trainer writes a WO-101-specific summary that cannot feed
 either legacy readiness or canonical validation promotion.
 
-Owner authorization: the 2026-07-19 instruction to rebuild closed PR #242 from
-current main with observation-time label availability, append-only resolution
-history, historical bid/ask rather than midpoint-only inputs, a purged
-chronological split, and a minimum number of distinct independent validation
-markets. This is diagnostic H3 structural-bias research substrate only. It
+Scope boundary: this is diagnostic H3 structural-bias research substrate only. It
 cannot replace the WO-96 exact prospective H3 evaluator, create a fourth
 hypothesis, change a gate/threshold/stake, authorize paper/live trading, fund
 capital, or place an order. Funding remains CLOSED and WO-67 remains BLOCKED.

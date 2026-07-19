@@ -244,7 +244,7 @@ clustered-bootstrap, concentration, shadow-only pass, and suppression gates
 above remain unchanged. `smart_flow_clv.py` remains legacy diagnostic history;
 only the WO-96 exact artifact may state the H3 registered verdict.
 
-### Resolved-corpus diagnostic amendment (owner-approved 2026-07-19; WO-101)
+### Resolved-corpus diagnostic amendment (WO-101)
 
 WO-101 resolves the historical trainer's point-in-time leakage defect without
 changing the prospective H3 test above. Resolution states are preserved in a

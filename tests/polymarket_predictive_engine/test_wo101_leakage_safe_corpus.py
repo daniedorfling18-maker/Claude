@@ -5,6 +5,7 @@ import json
 from pathlib import Path
 
 import polymarket_predictive_engine.historical_backfill as historical_backfill_module
+import polymarket_predictive_engine.resolution_collector as resolution_collector
 from polymarket_predictive_engine import websocket_resolution_collector
 from polymarket_predictive_engine.config import EngineConfig
 from polymarket_predictive_engine.historical_bid_ask import (
@@ -199,6 +200,62 @@ def test_historical_backfill_observation_clock_is_after_gamma_response(
     assert summary["collected_at_utc"] == "2026-07-16T12:00:01Z"
 
 
+def test_resolution_collector_clock_is_after_all_gamma_responses(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    cfg = _cfg(tmp_path)
+    cfg.raw["resolution"] = {"request_pause_seconds": 0}
+    sequence: list[str] = []
+
+    def fake_fetch(slug, **_kwargs):
+        sequence.append(f"gamma_response:{slug}")
+        return {
+            "id": f"gamma-{slug}",
+            "slug": slug,
+            "conditionId": f"condition-{slug}",
+            "questionID": f"question-{slug}",
+            "question": slug,
+            "category": "sports",
+            "closed": True,
+            "active": False,
+            "outcomes": '["Yes", "No"]',
+            "clobTokenIds": f'["yes-{slug}", "no-{slug}"]',
+            "outcomePrices": '["1", "0"]',
+            "closedTime": "2026-07-16T10:00:00Z",
+            "endDate": "2026-07-16T10:00:00Z",
+        }
+
+    real_clock = resolution_collector.canonical_utc
+
+    def fake_clock(value=None):
+        if value is None:
+            sequence.append("observation_clock")
+            return "2026-07-16T12:00:01Z"
+        return real_clock(value)
+
+    monkeypatch.setattr(
+        resolution_collector,
+        "_unique_raw_slugs",
+        lambda _cfg: {"first": "sports", "second": "sports"},
+    )
+    monkeypatch.setattr(resolution_collector, "fetch_gamma_market", fake_fetch)
+    monkeypatch.setattr(resolution_collector, "canonical_utc", fake_clock)
+
+    _, _, summary = resolution_collector.collect_resolutions(cfg)
+    corpus = read_csv_rows(cfg.output_root / RESOLUTION_CORPUS_RELATIVE_PATH)
+
+    assert sequence[:3] == [
+        "gamma_response:first",
+        "gamma_response:second",
+        "observation_clock",
+    ]
+    assert summary["generated_at_utc"] == "2026-07-16T12:00:01Z"
+    assert {row["resolution_observed_at_utc"] for row in corpus} == {
+        "2026-07-16T12:00:01Z"
+    }
+
+
 def test_recorded_public_book_becomes_exact_quote_never_midpoint_reconstruction() -> None:
     book = json.loads((FIXTURE_ROOT / "clob_book_2026-07-15.json").read_text(encoding="utf-8"))
     official = _official_row(
@@ -265,17 +322,29 @@ def test_websocket_resolution_producer_appends_to_canonical_corpus(
         "endDate": "2026-07-16T10:00:00Z",
     }
 
+    sequence: list[str] = []
+
     def fake_scan(**kwargs):
+        sequence.append("gamma_response")
         requested = kwargs["token_ids"]
         return ({requested_token: market for requested_token in requested}, {"matched_tokens": len(requested)})
 
+    def fake_clock():
+        sequence.append("observation_clock")
+        return "2026-07-16T12:00:01Z"
+
     monkeypatch.setattr(websocket_resolution_collector, "_scan_gamma_for_tokens", fake_scan)
+    monkeypatch.setattr(websocket_resolution_collector, "now_utc", fake_clock)
     result = websocket_resolution_collector.collect_websocket_resolutions(cfg)
 
     corpus = read_csv_rows(cfg.output_root / RESOLUTION_CORPUS_RELATIVE_PATH)
     assert result["append_only_resolution_corpus"]["rows_appended"] == 2
     assert {row["token_id"] for row in corpus} == {token, "other-token"}
     assert {row["producer"] for row in corpus} == {"websocket_resolution_collector"}
+    assert {row["resolution_observed_at_utc"] for row in corpus} == {
+        "2026-07-16T12:00:01Z"
+    }
+    assert sequence == ["gamma_response", "observation_clock"]
     assert result["paper_trading_invoked"] is False
     assert result["live_trading_invoked"] is False
 

@@ -205,7 +205,11 @@ def collect_resolutions(
         limit = configured_limit if configured_limit > 0 else None
     selected = list(slugs.items())[:limit]
 
-    run_at = canonical_utc(as_of)
+    # An explicit clock is a deterministic replay boundary.  Production
+    # collection deliberately waits until every Gamma response has returned
+    # before assigning one conservative availability timestamp to the batch.
+    replay_at = canonical_utc(as_of) if as_of is not None else ""
+    fetched_markets: list[tuple[dict[str, Any], str]] = []
     rows: list[dict[str, Any]] = []
     quality: list[dict[str, Any]] = []
     errors: list[dict[str, Any]] = []
@@ -215,6 +219,15 @@ def collect_resolutions(
             if not market:
                 errors.append({"market_slug": slug, "resolution_quality": "gamma_not_found", "resolution_quality_reason": "empty response"})
                 continue
+            fetched_markets.append((market, category))
+            if pause:
+                time.sleep(pause)
+        except Exception as exc:
+            errors.append({"market_slug": slug, "resolution_quality": "gamma_fetch_error", "resolution_quality_reason": str(exc)})
+
+    run_at = replay_at or canonical_utc()
+    for market, category in fetched_markets:
+        try:
             r, q = infer_market_resolution_rows(
                 market,
                 category_hint=category,
@@ -224,10 +237,12 @@ def collect_resolutions(
             )
             rows.extend(r)
             quality.extend(q)
-            if pause:
-                time.sleep(pause)
         except Exception as exc:
-            errors.append({"market_slug": slug, "resolution_quality": "gamma_fetch_error", "resolution_quality_reason": str(exc)})
+            errors.append({
+                "market_slug": _as_text(market.get("slug")),
+                "resolution_quality": "gamma_classification_error",
+                "resolution_quality_reason": str(exc),
+            })
     quality.extend(errors)
 
     out_root = cfg.output_root / "polymarket_training"

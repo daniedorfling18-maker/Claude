@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import argparse
 from datetime import datetime, timezone
+from fnmatch import fnmatchcase
 import json
 from pathlib import Path
 import subprocess
@@ -159,6 +160,45 @@ def _bypass_count(reviews: Mapping[str, Any]) -> int:
     return sum(len(allowances.get(key, []) or []) for key in ("users", "teams", "apps"))
 
 
+def _ruleset_targets_main(ruleset: Mapping[str, Any]) -> bool:
+    if str(ruleset.get("enforcement") or "").lower() != "active":
+        return False
+    if str(ruleset.get("target") or "branch").lower() != "branch":
+        return False
+    ref_name = _mapping(_mapping(ruleset.get("conditions")).get("ref_name"))
+    includes = [str(value) for value in ref_name.get("include", []) or []]
+    excludes = [str(value) for value in ref_name.get("exclude", []) or []]
+
+    def matches(pattern: str) -> bool:
+        return pattern in {"~ALL", "~DEFAULT_BRANCH"} or fnmatchcase(
+            "refs/heads/main", pattern
+        )
+
+    return any(matches(pattern) for pattern in includes) and not any(
+        matches(pattern) for pattern in excludes
+    )
+
+
+def _ruleset_requires_registered_workflow(ruleset: Mapping[str, Any]) -> bool:
+    if not _ruleset_targets_main(ruleset) or (ruleset.get("bypass_actors") or []):
+        return False
+    for raw_rule in ruleset.get("rules", []) or []:
+        rule = _mapping(raw_rule)
+        if str(rule.get("type") or "").lower() != "workflows":
+            continue
+        workflows = _mapping(rule.get("parameters")).get("workflows", []) or []
+        for raw_workflow in workflows:
+            workflow = _mapping(raw_workflow)
+            path = str(workflow.get("path") or "").split("@", 1)[0]
+            ref = str(workflow.get("ref") or "refs/heads/main")
+            if path == str(INDEPENDENT_MERGE_WORKFLOW.with_name("required-pr-gate.yml")) and ref in {
+                "main",
+                "refs/heads/main",
+            }:
+                return True
+    return False
+
+
 def evaluate_merge_gate(
     *,
     workflow_text: str,
@@ -168,6 +208,8 @@ def evaluate_merge_gate(
     runs_payload: Mapping[str, Any] | None = None,
     independent_merge_workflow_text: str = "",
     collaborators_payload: Sequence[Mapping[str, Any]] | None = None,
+    rulesets_payload: Sequence[Mapping[str, Any]] | None = None,
+    rulesets_error: str = "",
 ) -> dict[str, Any]:
     workflow_configured = workflow_is_configured(workflow_text)
     runners = (_mapping(runners_payload).get("runners") or []) if runners_payload else []
@@ -186,11 +228,15 @@ def evaluate_merge_gate(
     legacy_required_context_registered = (
         REQUIRED_CONTEXT in _required_contexts(protection) and strict_status_checks
     )
-    # A GitHub Actions check registered through the legacy branch-protection
-    # contexts/checks API is app-bound at best. Any workflow in the proposed
-    # revision can publish the same job name, so this is deliberately never
-    # accepted as proof that required-pr-gate.yml ran.
-    required_workflow_identity_enforced = False
+    # Legacy status checks are name/app-bound, not workflow-file-bound. Only an
+    # active, no-bypass ruleset targeting main and naming the exact accepted
+    # workflow can satisfy workflow identity.
+    matching_required_workflow_rulesets = [
+        _mapping(row)
+        for row in rulesets_payload or []
+        if _ruleset_requires_registered_workflow(_mapping(row))
+    ]
+    required_workflow_identity_enforced = bool(matching_required_workflow_rulesets)
     reviews = _mapping(protection.get("required_pull_request_reviews"))
     required_review_count = int(reviews.get("required_approving_review_count") or 0)
     stale_reviews_dismissed = reviews.get("dismiss_stale_reviews") is True
@@ -231,7 +277,13 @@ def evaluate_merge_gate(
         and latest_gate_success
     )
 
-    plan_blocked = "upgrade to github pro" in protection_error.lower() or "make this repository public" in protection_error.lower()
+    combined_platform_error = "\n".join(
+        part for part in (protection_error, rulesets_error) if part
+    )
+    plan_blocked = (
+        "upgrade to github pro" in combined_platform_error.lower()
+        or "make this repository public" in combined_platform_error.lower()
+    )
     checks = {
         "workflow_configured": workflow_configured,
         "independent_merge_process_configured": independent_process_configured,
@@ -269,6 +321,9 @@ def evaluate_merge_gate(
         "required_check_enforced": required_workflow_identity_enforced,
         "legacy_required_context_registered": legacy_required_context_registered,
         "required_workflow_identity_enforced": required_workflow_identity_enforced,
+        "required_workflow_ruleset_ids": [
+            row.get("id") for row in matching_required_workflow_rulesets
+        ],
         "independent_review_required": independent_review_required,
         "direct_push_forbidden": direct_push_forbidden,
         "independent_merge_process_configured": independent_process_configured,
@@ -294,7 +349,7 @@ def evaluate_merge_gate(
         "active_gate_run_count": active_run_count,
         "checks": checks,
         "blockers": blockers,
-        "platform_blocker": protection_error.strip() if plan_blocked else "",
+        "platform_blocker": combined_platform_error.strip() if plan_blocked else "",
         "legacy_status_context_risk": (
             "GitHub legacy required-status checks do not bind the check name to "
             ".github/workflows/required-pr-gate.yml; "
@@ -344,6 +399,22 @@ def audit(repo: str, workflow_path: Path, *, apply_protection: bool = False) -> 
     protection, protection_error = _gh_api(f"repos/{repo}/branches/main/protection")
     runs, runs_error = _gh_api(f"repos/{repo}/actions/workflows/required-pr-gate.yml/runs?event=pull_request&per_page=20")
     collaborators, collaborators_error = _gh_api(f"repos/{repo}/collaborators?affiliation=all&per_page=100")
+    ruleset_summaries, rulesets_error = _gh_api(
+        f"repos/{repo}/rulesets?includes_parents=true&per_page=100"
+    )
+    rulesets: list[dict[str, Any]] = []
+    ruleset_detail_errors: list[str] = []
+    if isinstance(ruleset_summaries, list):
+        for raw_summary in ruleset_summaries:
+            ruleset_id = _mapping(raw_summary).get("id")
+            if not ruleset_id:
+                ruleset_detail_errors.append("ruleset summary missing id")
+                continue
+            detail, detail_error = _gh_api(f"repos/{repo}/rulesets/{ruleset_id}")
+            if detail_error:
+                ruleset_detail_errors.append(f"ruleset {ruleset_id}: {detail_error}")
+            elif isinstance(detail, Mapping):
+                rulesets.append(_mapping(detail))
     independent_workflow_path = workflow_path.with_name(INDEPENDENT_MERGE_WORKFLOW.name)
     result = evaluate_merge_gate(
         workflow_text=workflow_path.read_text(encoding="utf-8"),
@@ -355,6 +426,10 @@ def audit(repo: str, workflow_path: Path, *, apply_protection: bool = False) -> 
             independent_workflow_path.read_text(encoding="utf-8") if independent_workflow_path.exists() else ""
         ),
         collaborators_payload=collaborators if isinstance(collaborators, list) else [],
+        rulesets_payload=rulesets,
+        rulesets_error="\n".join(
+            part for part in (rulesets_error, *ruleset_detail_errors) if part
+        ),
     )
     result.update(
         {
@@ -365,6 +440,9 @@ def audit(repo: str, workflow_path: Path, *, apply_protection: bool = False) -> 
                 "runners": runners_error,
                 "workflow_runs": runs_error,
                 "collaborators": collaborators_error,
+                "rulesets": "\n".join(
+                    part for part in (rulesets_error, *ruleset_detail_errors) if part
+                ),
             },
             "protection_apply_attempted": apply_protection,
         }

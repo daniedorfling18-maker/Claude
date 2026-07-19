@@ -70,6 +70,31 @@ def _collaborators() -> list[dict]:
     ]
 
 
+def _required_workflow_ruleset(*, bypass: bool = False) -> dict:
+    return {
+        "id": 901,
+        "name": "exact required workflow",
+        "target": "branch",
+        "enforcement": "active",
+        "bypass_actors": ([{"actor_id": 1, "actor_type": "RepositoryRole"}] if bypass else []),
+        "conditions": {"ref_name": {"include": ["~DEFAULT_BRANCH"], "exclude": []}},
+        "rules": [
+            {
+                "type": "workflows",
+                "parameters": {
+                    "workflows": [
+                        {
+                            "path": ".github/workflows/required-pr-gate.yml",
+                            "ref": "refs/heads/main",
+                            "repository_id": 123,
+                        }
+                    ]
+                },
+            }
+        ],
+    }
+
+
 def test_registered_workflow_is_minimal_self_hosted_and_secretless() -> None:
     workflow = _workflow()
     assert merge_gate.workflow_is_configured(workflow)
@@ -185,6 +210,38 @@ def test_legacy_context_never_claims_workflow_identity_enforcement() -> None:
     assert result["independent_process_operational"] is True
     assert "required_workflow_identity_enforced" in result["blockers"]
     assert "same-named GitHub Actions job" in result["legacy_status_context_risk"]
+
+
+def test_active_no_bypass_ruleset_can_prove_required_workflow_identity() -> None:
+    result = merge_gate.evaluate_merge_gate(
+        workflow_text=_workflow(),
+        runners_payload=_runners(),
+        protection_payload=_protection(),
+        runs_payload=_successful_run(),
+        independent_merge_workflow_text=_independent_workflow(),
+        collaborators_payload=_collaborators(),
+        rulesets_payload=[_required_workflow_ruleset()],
+    )
+
+    assert result["enforced"] is True
+    assert result["status"] == "enforced"
+    assert result["required_workflow_identity_enforced"] is True
+    assert result["required_workflow_ruleset_ids"] == [901]
+
+
+def test_required_workflow_ruleset_with_bypass_is_not_enforcement() -> None:
+    result = merge_gate.evaluate_merge_gate(
+        workflow_text=_workflow(),
+        runners_payload=_runners(),
+        protection_payload=_protection(),
+        runs_payload=_successful_run(),
+        independent_merge_workflow_text=_independent_workflow(),
+        collaborators_payload=_collaborators(),
+        rulesets_payload=[_required_workflow_ruleset(bypass=True)],
+    )
+
+    assert result["enforced"] is False
+    assert result["required_workflow_identity_enforced"] is False
 
 
 def test_private_free_plan_blocker_stays_explicit_and_fail_closed() -> None:
@@ -385,6 +442,18 @@ def test_independent_merge_candidate_requires_exact_current_head_evidence() -> N
     assert result["wo67_status"] == "BLOCKED"
 
 
+def test_actions_workflow_path_ref_suffix_is_normalized() -> None:
+    evidence = _candidate_evidence()
+    evidence["workflow_runs"][0]["path"] = (
+        f"{independent_merge.REQUIRED_WORKFLOW}@refs/pull/321/merge"
+    )
+
+    result = independent_merge.evaluate_merge_candidate(**evidence)
+
+    assert result["eligible"] is True
+    assert result["checks"]["latest_exact_head_workflow_passed"] is True
+
+
 def test_stale_approval_and_author_dispatch_are_both_rejected() -> None:
     evidence = _candidate_evidence()
     evidence["actor"] = "author"
@@ -460,6 +529,27 @@ def test_candidate_cannot_replace_the_trusted_merge_control() -> None:
     assert "pull_request_changes_trusted_merge_control" in result["blockers"]
 
 
+@pytest.mark.parametrize(
+    "path",
+    [
+        "conftest.py",
+        "tests/integration/conftest.py",
+        "pytest.ini",
+        "pyproject.toml",
+        "sitecustomize.py",
+    ],
+)
+def test_candidate_cannot_change_pytest_execution_controls(path: str) -> None:
+    evidence = _candidate_evidence()
+    evidence["changed_files"] = [{"filename": path}]
+
+    result = independent_merge.evaluate_merge_candidate(**evidence)
+
+    assert result["eligible"] is False
+    assert result["protected_control_changes"] == [path]
+    assert "pull_request_changes_trusted_merge_control" in result["blockers"]
+
+
 def test_atomic_squash_uses_verified_tree_parent_and_non_force_ref_update() -> None:
     head = "a" * 40
     main = "b" * 40
@@ -485,6 +575,8 @@ def test_atomic_squash_uses_verified_tree_parent_and_non_force_ref_update() -> N
             if path.endswith("/git/refs/heads/main") and method == "PATCH":
                 assert payload == {"sha": merged, "force": False}
                 return {"object": {"sha": merged}}
+            if path.endswith("/pulls/321") and method == "GET":
+                return {"state": "open", "head": {"sha": head}}
             if path.endswith("/pulls/321") and method == "PATCH":
                 assert payload == {"state": "closed"}
                 return {"state": "closed"}
@@ -503,6 +595,52 @@ def test_atomic_squash_uses_verified_tree_parent_and_non_force_ref_update() -> N
     assert result["merge_commit_sha"] == merged
     assert result["verified_main_parent_sha"] == main
     assert result["merge_method"] == "atomic_fast_forward_squash"
+    assert result["pull_request_close_skipped_reason"] == ""
+
+
+def test_atomic_squash_leaves_pr_open_if_head_changes_after_main_update() -> None:
+    head = "a" * 40
+    changed_head = "e" * 40
+    main = "b" * 40
+    tree = "c" * 40
+    merged = "d" * 40
+
+    class HeadRaceClient:
+        def __init__(self) -> None:
+            self.close_called = False
+
+        def request(self, path, *, method="GET", payload=None):
+            if path.endswith(f"/git/commits/{head}") and method == "GET":
+                return {"sha": head, "tree": {"sha": tree}}
+            if path.endswith("/git/commits") and method == "POST":
+                return {
+                    "sha": merged,
+                    "tree": {"sha": tree},
+                    "parents": [{"sha": main}],
+                }
+            if path.endswith("/git/refs/heads/main") and method == "PATCH":
+                return {"object": {"sha": merged}}
+            if path.endswith("/pulls/321") and method == "GET":
+                return {"state": "open", "head": {"sha": changed_head}}
+            if path.endswith("/pulls/321") and method == "PATCH":
+                self.close_called = True
+            raise AssertionError((path, method, payload))
+
+    client = HeadRaceClient()
+    result = independent_merge.atomic_squash_merge(
+        client,
+        repo="owner/repo",
+        pull_request={"number": 321, "title": "Verified change"},
+        expected_head=head,
+        expected_main=main,
+    )
+
+    assert result["merged"] is True
+    assert client.close_called is False
+    assert (
+        result["pull_request_close_skipped_reason"]
+        == "pull_request_head_changed_after_atomic_merge"
+    )
 
 
 def test_atomic_squash_fails_closed_if_main_advances_before_ref_update() -> None:

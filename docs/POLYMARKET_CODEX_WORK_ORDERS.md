@@ -5024,7 +5024,12 @@ frozen-surface change.
    exact-head check/workflow results, an up-to-date main ancestry, and resolved
    threads to an atomic non-force main update whose only parent is the verified
    main SHA. It validates the actual rerun initiator and rejects PRs that alter
-   its trusted workflows/scripts. The lane remains BLOCKED while the
+   its trusted workflows/scripts or any pytest collection/execution control.
+   Review remediation on 2026-07-19 also normalizes GitHub's real
+   `workflow-path@ref` response, audits active no-bypass required-workflow
+   rulesets rather than hard-coding enforcement false, and leaves a PR open if
+   its head changes after the atomic main update but before administrative
+   closure. The lane remains BLOCKED while the
    repository has only one push-capable identity, and the audit continues to
    report the unavailable private-Free required-workflow protection honestly.
    A legacy name/app-bound required context is explicitly insufficient because
@@ -5040,8 +5045,10 @@ frozen-surface change.
    remain false unless a workflow-identity-capable required-workflow ruleset is
    independently verified. No merge is eligible without an exact-head
    successful gate, a distinct current-head approver/rerun initiator, unchanged
-   trusted merge control, and an unchanged main ref at the atomic update. A
-   successful merge run must also contain the exact-SHA deployment attestation.
+   trusted merge control, and an unchanged main ref at the atomic update. Test
+   a suffixed real Actions workflow path, a pytest-control change, and a
+   post-update PR-head race before relying on the lane. A successful merge run
+   must also contain the exact-SHA deployment attestation.
 4. **WO-101:** rebuild closed PR #242 from current main — IMPLEMENTED; review
    pending. The rebuild uses observation-time label availability, append-only
    resolution history, exact historical bid/ask, a purged chronological split,

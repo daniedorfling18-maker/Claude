@@ -29,6 +29,12 @@ PROTECTED_CONTROL_PATHS = {
     ".github/workflows/independent-pr-merge.yml",
     "scripts/audit_github_merge_gate.py",
     "scripts/merge_independently_reviewed_pr.py",
+    "pyproject.toml",
+    "pytest.ini",
+    "setup.cfg",
+    "sitecustomize.py",
+    "tox.ini",
+    "usercustomize.py",
 }
 TRUSTED_REVIEW_ASSOCIATIONS = {"COLLABORATOR", "MEMBER", "OWNER"}
 CONTROL_REVIEW_STATES = {"APPROVED", "CHANGES_REQUESTED", "DISMISSED"}
@@ -52,6 +58,20 @@ def _ordered(rows: Sequence[Mapping[str, Any]]) -> list[dict[str, Any]]:
         (_mapping(row) for row in rows),
         key=lambda row: (str(row.get("submitted_at") or row.get("started_at") or ""), int(row.get("id") or 0)),
     )
+
+
+def _workflow_path(value: Any) -> str:
+    """Normalize Actions' ``path@ref`` response to the registered file path."""
+
+    return str(value or "").split("@", 1)[0]
+
+
+def _protected_control_path(path: str) -> bool:
+    normalized = path.strip().replace("\\", "/")
+    while normalized.startswith("./"):
+        normalized = normalized[2:]
+    normalized = normalized.lstrip("/")
+    return normalized in PROTECTED_CONTROL_PATHS or normalized.rsplit("/", 1)[-1] == "conftest.py"
 
 
 def evaluate_merge_candidate(
@@ -129,7 +149,7 @@ def evaluate_merge_candidate(
         for row in _ordered(workflow_runs)
         if str(row.get("event") or "") == "pull_request"
         and str(row.get("head_sha") or "").lower() == expected
-        and str(row.get("path") or "") == REQUIRED_WORKFLOW
+        and _workflow_path(row.get("path")) == REQUIRED_WORKFLOW
     ]
     latest_workflow_run = matching_workflow_runs[-1] if matching_workflow_runs else {}
     exact_head_workflow_passed = (
@@ -175,7 +195,7 @@ def evaluate_merge_candidate(
         for field in ("filename", "previous_filename")
         if str(row.get(field) or "").strip()
     }
-    protected_control_changes = sorted(changed_paths & PROTECTED_CONTROL_PATHS)
+    protected_control_changes = sorted(path for path in changed_paths if _protected_control_path(path))
     if protected_control_changes:
         blockers.append("pull_request_changes_trusted_merge_control")
 
@@ -415,12 +435,18 @@ def atomic_squash_merge(
         raise MergeGateError("GitHub did not confirm the atomic main ref update")
 
     close_warning = ""
+    close_skipped_reason = ""
     try:
-        client.request(
-            f"repos/{repo}/pulls/{number}",
-            method="PATCH",
-            payload={"state": "closed"},
-        )
+        latest_pr = _mapping(client.request(f"repos/{repo}/pulls/{number}"))
+        latest_head = str(_mapping(latest_pr.get("head")).get("sha") or "").lower()
+        if latest_head != expected:
+            close_skipped_reason = "pull_request_head_changed_after_atomic_merge"
+        else:
+            client.request(
+                f"repos/{repo}/pulls/{number}",
+                method="PATCH",
+                payload={"state": "closed"},
+            )
     except MergeGateError as exc:
         # The immutable code update already succeeded. Preserve that fact and
         # surface the administrative follow-up without attempting a rollback.
@@ -432,6 +458,7 @@ def atomic_squash_merge(
         "verified_head_tree_sha": tree_sha,
         "verified_main_parent_sha": parent,
         "pull_request_close_warning": close_warning,
+        "pull_request_close_skipped_reason": close_skipped_reason,
     }
 
 

@@ -24,6 +24,7 @@ NOW = datetime(2026, 7, 18, 12, 0, tzinfo=timezone.utc)
 CAND = "0xcand"
 TOKEN = "0xtok"
 STUDY_STAMP = "2026-07-18T11:55:00Z"
+POLICY_STAMP = "2026-07-18T11:56:00Z"
 
 
 def _cfg(tmp_path: Path, extra: dict[str, Any] | None = None) -> EngineConfig:
@@ -70,7 +71,10 @@ def _setup(cfg: EngineConfig, **o: Any) -> None:
 
     write_json(
         out / "decision_policy.json",
-        {"composition_stability": {"most_recurrent_market": o.get("policy_candidate", CAND)}},
+        {
+            "generated_at_utc": o.get("policy_stamp", POLICY_STAMP),
+            "composition_stability": {"most_recurrent_market": o.get("policy_candidate", CAND)},
+        },
     )
     portfolio_row = {
         "condition_id": CAND,
@@ -152,6 +156,7 @@ def test_happy_path_qualifies(tmp_path: Path) -> None:
     assert summary["candidate_token_id"] == TOKEN
     assert summary["consensus_sharp_fair"] == 0.5
     assert summary["qualifying_sharp_sources"] == ["pinnacle"]
+    assert summary["consumed_policy_generated_at"] == POLICY_STAMP
 
 
 @pytest.mark.parametrize(
@@ -311,6 +316,8 @@ def test_missing_all_artifacts_fails_closed(tmp_path: Path) -> None:
 FAIL_CASES = [
     ({"in_portfolio": False}, "candidate_market_identified"),
     ({"policy_candidate": "0xother"}, "candidate_market_identified"),
+    ({"policy_stamp": ""}, "candidate_policy_version_identified"),
+    ({"policy_stamp": "not-a-timestamp"}, "candidate_policy_version_identified"),
     ({"anchor_stamp": "2026-07-18T00:00:00Z"}, "exact_token_fresh_anchor"),
     (
         {
@@ -407,3 +414,4 @@ def test_run_writes_atomic_fail_closed_artifact(tmp_path: Path) -> None:
     # so the WO-99 gate can bind to the current artifacts.
     assert payload["consumed_study_generated_at"] == STUDY_STAMP
     assert payload["consumed_replay_generated_at"] == "2026-07-18T11:59:00Z"
+    assert payload["consumed_policy_generated_at"] == POLICY_STAMP

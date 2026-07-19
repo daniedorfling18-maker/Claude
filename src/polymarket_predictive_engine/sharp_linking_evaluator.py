@@ -208,6 +208,8 @@ def evaluate_sharp_linking(
     candidate_id = str(
         (policy.get("composition_stability") or {}).get("most_recurrent_market") or ""
     ).strip()
+    policy_generated = str(policy.get("generated_at_utc") or "").strip()
+    policy_stamp = parse_timestamp(policy_generated)
     portfolio = study.get("portfolio") if isinstance(study.get("portfolio"), list) else []
     candidate_rows = [
         row
@@ -222,6 +224,13 @@ def evaluate_sharp_linking(
             bool(candidate_id) and candidate is not None and bool(token_id),
             f"candidate={candidate_id or 'missing'}; token={token_id or 'missing'}; "
             f"portfolio_matches={len(candidate_rows)}",
+        )
+    )
+    checks.append(
+        _condition(
+            "candidate_policy_version_identified",
+            bool(policy_generated) and policy_stamp is not None,
+            f"policy_generated_at={policy_generated or 'missing'}",
         )
     )
 
@@ -440,6 +449,7 @@ def evaluate_sharp_linking(
     # study/replay and reject a stale (regenerated-within-window) qualification.
     summary["consumed_study_generated_at"] = study_generated or None
     summary["consumed_replay_generated_at"] = str(replay.get("generated_at_utc") or "") or None
+    summary["consumed_policy_generated_at"] = policy_generated or None
 
     qualified = bool(checks) and all(row["passed"] for row in checks)
     return qualified, checks, summary
@@ -459,6 +469,7 @@ def run_sharp_linking_evaluator(
         "qualified": qualified,
         "candidate_condition_id": summary.get("candidate_condition_id"),
         "candidate_token_id": summary.get("candidate_token_id"),
+        "consumed_policy_generated_at": summary.get("consumed_policy_generated_at"),
         "consumed_study_generated_at": summary.get("consumed_study_generated_at"),
         "consumed_replay_generated_at": summary.get("consumed_replay_generated_at"),
         "first_failing_check": first_failing,

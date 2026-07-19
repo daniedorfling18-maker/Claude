@@ -72,6 +72,10 @@ def _settings(cfg: EngineConfig) -> dict[str, Any]:
     merged = {
         "enabled": True,
         "max_markets": 10,
+        # WO-104 fix: reserved budget for recently-active (persistent) markets
+        # so a churned-out recurring market keeps maturing Tier-0 coverage even
+        # when the current portfolio already fills max_markets.
+        "max_persistent_markets": 10,
         "replay_days": 7,
         "book_source": "both",
         "clob_base_url": DEFAULT_CLOB_BASE_URL,
@@ -391,7 +395,11 @@ def snapshot_official_books(cfg: EngineConfig) -> dict[str, Any]:
     persistent = _recent_book_markets(
         cfg, settings, exclude={str(entry["condition_id"]) for entry in portfolio}
     )
-    watchlist = (portfolio + persistent)[: int(settings["max_markets"])]
+    # Always cover the FULL current portfolio (already capped at max_markets),
+    # then reserve a separate budget for persistent markets so a full portfolio
+    # can no longer crowd recently-active recurring markets off the watchlist.
+    persistent_cap = max(0, int(settings.get("max_persistent_markets", settings["max_markets"])))
+    watchlist = portfolio + persistent[:persistent_cap]
     if not watchlist:
         summary.update(
             {
@@ -553,7 +561,18 @@ def collect_maker_replay_data(cfg: EngineConfig) -> dict[str, Any]:
         write_json(summary_path, base)
         return base
     if not portfolio:
-        payload = {**base, "status": "no_portfolio", "markets_polled": 0, "windows_covered": 0}
+        # Churn gap: the current quote sheet is empty, but snapshot_official_books
+        # still refreshes recently-active (persistent) markets via its watchlist,
+        # so Tier-0 coverage keeps maturing across the gap. Previously this
+        # early return skipped the snapshot entirely on the scheduled path.
+        book_summary = snapshot_official_books(cfg)
+        payload = {
+            **base,
+            "status": "no_portfolio",
+            "markets_polled": int(book_summary.get("markets_polled") or 0),
+            "windows_covered": 0,
+            "persistent_snapshot_status": book_summary.get("status"),
+        }
         write_json(summary_path, payload)
         return payload
 

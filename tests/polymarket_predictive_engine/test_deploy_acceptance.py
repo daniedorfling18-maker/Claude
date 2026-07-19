@@ -487,3 +487,15 @@ def test_registered_risk_blocker_passes_but_missing_input_and_new_unknown_fail(t
     by_id = {row["id"]: row for row in failed["checks"]}
     assert by_id["requote_evaluator_state"]["status"] == "FAIL"
     assert by_id["operating_state_unknown_regression"]["new_unknown_rows"] == ["source_vs_deployed_sha"]
+
+
+def test_wo102_toxicity_floor_rules_are_legitimate_requote_reasons(tmp_path: Path) -> None:
+    # #258 fix: the WO-102 raw-imbalance floor and composite block are
+    # legitimate tighten-only pull reasons; deploy acceptance must not classify
+    # them as unknown requote rules (which would fail the deploy gate on a
+    # correct safety pull).
+    cfg = _cfg(tmp_path)
+    for rule in ("flow_toxicity_absolute_floor", "flow_toxicity_composite_block"):
+        _seed_acceptance(cfg, requote_state="pull_quotes_now", requote_rule=rule)
+        result = build_deploy_acceptance(cfg, expected_deploy_sha="newsha", as_of=AS_OF)
+        assert result["status"] == "PASS", rule

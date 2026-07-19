@@ -38,6 +38,10 @@ LEGITIMATE_REQUOTE_RULES = frozenset(
         "mid_drifted_beyond_quote_band",
         "scheduled_event_within_window",
         "flow_toxicity_above_limit",
+        # WO-102 raw-imbalance floor and composite block are legitimate
+        # tighten-only pull reasons (else deploy-acceptance flags them unknown).
+        "flow_toxicity_absolute_floor",
+        "flow_toxicity_composite_block",
         "resolution_proposal_or_resolution_detected",
     }
 )

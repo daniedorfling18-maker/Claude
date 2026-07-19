@@ -5743,6 +5743,12 @@ def render_dashboard(cfg: EngineConfig, latest_report: dict[str, Any] | None = N
         "decision_policy": read_json(cfg.output_root / "maker_carry" / "decision_policy.json", default={}) or {},
         "requote_alerts": read_json(cfg.output_root / "maker_carry" / "requote_alerts.json", default={}) or {},
         "fill_replay": read_json(cfg.output_root / "maker_carry" / "maker_fill_replay.json", default={}) or {},
+        # WO-99 stage-ticket eligibility, so the eligible/not_eligible signal is
+        # visible in the dashboard data even on VPSes with no ntfy topic
+        # configured (the push channel is otherwise the only surfacing path).
+        "stage_ticket_eligibility": read_json(
+            cfg.output_root / "maker_carry" / "stage_ticket_eligibility.json", default={}
+        ) or {},
     }
     html_out = _inject_html_overlay(HTML)
     _write_dashboard_data(out / "dashboard_data.json", payload)

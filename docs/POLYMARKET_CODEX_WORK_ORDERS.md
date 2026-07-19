@@ -4259,6 +4259,7 @@ else is a bug):
 - NEW `src/polymarket_predictive_engine/reward_epoch_sampler.py`
 - `src/polymarket_predictive_engine/cli.py` (add command, import, dispatch)
 - `src/polymarket_predictive_engine/ledger_anchor.py` (enroll new CSV append_only)
+- `scripts/run_vps_ops_scheduler.sh` (wire the command after maker-carry-study)
 - NEW `tests/polymarket_predictive_engine/test_reward_epoch_sampler.py`
 
 Reads (do not write to these):
@@ -4301,7 +4302,22 @@ no gate, sizing, or order surface reads this artifact."
 CLI: add `"reward-epoch-sample"` to `COMMANDS` immediately after
 `"maker-carry-study"`; import `run_reward_epoch_sample`; dispatch
 `elif args.command == "reward-epoch-sample": _print(run_reward_epoch_sample(cfg))`.
-(Scheduler wiring is a separate orchestrator step — do NOT edit the scheduler.)
+
+Scheduler wiring (REQUIRED — a collector nobody runs produces nothing): in
+`scripts/run_vps_ops_scheduler.sh`, add
+`python -m polymarket_predictive_engine.cli reward-epoch-sample --config "$CONFIG_PATH"`
+in the harvest block IMMEDIATELY AFTER the `maker-carry-study` invocation (so it
+samples the fresh candidate set each cycle), inside the same `set -e` subshell.
+Add `scripts/run_vps_ops_scheduler.sh` to the touched-files list. Do NOT touch
+any other scheduler block. Day-after check to record in the WO status: after
+one deployed cadence, `reward_epoch_samples.csv` gains ≥1 new row per run and
+`total_rows` climbs across runs.
+
+Concurrency note (idempotency guard): the scheduler runs this command
+sequentially inside one subshell, never concurrently, so the read-then-append
+`(study_generated_at_utc, condition_id)` guard is sufficient in the deployed
+context. Do NOT add a lock. State this sequential-execution assumption in the
+module docstring; concurrent invocation is explicitly out of scope.
 
 ledger_anchor: add `{"glob": "maker_carry/reward_epoch_samples.csv", "mode":
 "append_only"}` next to the other `maker_carry/*history.csv` entries.

@@ -130,6 +130,9 @@ def test_missing_recorded_official_book_window_fails_closed(tmp_path: Path) -> N
         ("stale_not_flat", "flat_on_missing_or_stale_input"),
         ("dead_man_missing", "dead_man_flatten"),
         ("ledger_row_missing", "action_ledger_completeness"),
+        ("ledger_side_mismatch", "action_ledger_completeness"),
+        ("ledger_price_mismatch", "action_ledger_completeness"),
+        ("ledger_shares_mismatch", "action_ledger_completeness"),
     ],
 )
 def test_each_executor_contract_defect_fails_certification(tmp_path: Path, mutation: str, failed_rule: str) -> None:
@@ -158,6 +161,14 @@ def test_each_executor_contract_defect_fails_certification(tmp_path: Path, mutat
         decision["dead_man_triggered"] = False
     elif mutation == "ledger_row_missing":
         ledger = ledger[1:]
+    elif mutation in {"ledger_side_mismatch", "ledger_price_mismatch", "ledger_shares_mismatch"}:
+        ledger_row = next(row for row in ledger if row["action_type"] == "place")
+        if mutation == "ledger_side_mismatch":
+            ledger_row["side"] = "SELL" if ledger_row["side"] == "BUY" else "BUY"
+        elif mutation == "ledger_price_mismatch":
+            ledger_row["price"] = str(float(ledger_row["price"]) + 0.01)
+        else:
+            ledger_row["shares"] = str(float(ledger_row["shares"]) + 5.0)
 
     write_json(decision_path, decisions)
     write_csv(ledger_path, ledger, fieldnames=list(ledger[0]) if ledger else [
@@ -197,4 +208,3 @@ def test_cli_and_source_remain_keyless_and_executor_free() -> None:
     assert "POLYMARKET_LIVE_TRADING" not in source
     assert "private_key" not in source
     assert "api_secret" not in source
-

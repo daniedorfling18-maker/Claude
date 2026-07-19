@@ -4268,6 +4268,37 @@ dispatch Codex work DIRECTLY via GitHub — issues/PR comments mentioning
    the owner is the sole authority on frozen surfaces and may revoke this
    bridge at any time by saying so (record the revocation here, dated).
 
+### Queue-driver wakeup (owner-configured; canonical prompt)
+
+The owner asked (chat, 2026-07-19) for the orchestrator to run WO cycles
+without per-WO prompting. The durable mechanism is an owner-configured
+scheduled trigger on the Claude Code environment (claude.ai/code →
+environment → triggers; docs:
+https://code.claude.com/docs/en/claude-code-on-the-web). The orchestrator
+must NOT self-provision recurring autonomy; the trigger — its existence,
+cadence, and revocation — is owner-controlled. Canonical trigger prompt
+(paste verbatim; keep in sync with this file):
+
+> Queue-driver cycle (standing owner instruction 2026-07-19; protocol:
+> "Dispatch bridge" in docs/POLYMARKET_CODEX_WORK_ORDERS.md — read it and
+> AGENTS.md first). ONE cycle: (1) Check open PRs and dispatch issues for
+> Codex activity. (2) If Codex opened/updated a WO PR: line-audit against the
+> registered WO spec; non-frozen + CI green + clean audit → squash-merge and
+> mark the WO done in the doc; defective → request fixes in a PR comment
+> beginning "[orchestrator-dispatch] Posted by the orchestrator (Claude), not
+> the owner." tagging @codex. (3) Frozen surfaces: never merge or modify; if
+> a frozen PR awaits the owner, leave it untouched. (4) If the active WO
+> merged and the queue registers a next NON-FROZEN WO as ISSUED, dispatch it
+> via the bridge; never invent or dispatch unregistered work. (5) Nothing
+> actionable → end quietly: no posts, no commits.
+
+Owner-notification note: to receive phone pushes from queue-driver runs
+(e.g. "frozen PR awaits your merge"), set `OPS_OWNER_NTFY_TOPIC_URL` as an
+environment variable in the Claude Code environment settings — same custody
+rule as the VPS `.env`: the topic URL never enters the repo, config, chat,
+or telemetry. Absent that variable, the notification channel is GitHub
+itself (PR state + review requests).
+
 ## WO-106 — Reward-epoch time-series collector (ISSUED to Codex; NON-FROZEN; collection-only)
 
 Purpose (external-audit item 8 prerequisite): the maker study estimates reward

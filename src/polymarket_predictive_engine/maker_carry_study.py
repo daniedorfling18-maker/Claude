@@ -140,7 +140,7 @@ MAKER_GATE_REGISTRATION: list[dict[str, Any]] = [
     {
         "id": "M_A_carry_evidence",
         "registered_at_utc": MAKER_GATES_REGISTERED_AT_UTC,
-        "rule": "Trusted net carry must meet the daily target on the required number of distinct UTC days, including the latest run.",
+        "rule": "Trusted net carry must meet the daily target on the required number of distinct UTC days, including the latest run, and each counted day's portfolio markout must be measured (an observed markout, not merely the minimum print count).",
         "threshold_config_key": "gate_min_runs_at_target",
         "counting": "distinct_utc_days",
         "share_model_scope": "published_v2_only",
@@ -1675,9 +1675,8 @@ def _distinct_days_at_target(
     spike. Tighten-only: it can only reduce the day count. The published_v2
     restriction (2026-07-11 amendment) is preserved.
 
-    2026-07-19 amendment (authorization = owner merge of this frozen-surface
-    PR): a day counts only when its markout was actually MEASURED
-    (``portfolio_markout_measured``). PR #283's exact-token isolation can drop
+    2026-07-19 amendment: a day counts only when its markout was actually
+    MEASURED (``portfolio_markout_measured``). PR #283's exact-token isolation can drop
     the isolated print count below the markout minimum, which silently removes
     the markout leg from ``max(charges)`` and sets the adverse charge to 0,
     inflating net carry; without this condition such a day would still count
@@ -1847,8 +1846,8 @@ def run_maker_carry_study(cfg: EngineConfig) -> dict[str, Any]:
     # overstate shares 3-9x (WO-46); letting it count would allow the gate to
     # pass on 6 honest days plus 1 discredited one. Tighten-only: this can
     # only reduce the day count, never raise it.
-    # 2026-07-19 amendment (frozen-surface, owner merge): M-A also requires the
-    # run's markout to be MEASURED, mirroring M-B. Without it, #283's exact-token
+    # 2026-07-19 amendment: M-A also requires the run's markout to be MEASURED,
+    # mirroring M-B. Without it, #283's exact-token
     # isolation dropping the isolated print count below the markout minimum
     # silently zeroes the adverse charge, inflates net carry, and lets an
     # unmeasured day count toward M-A. Tighten-only.

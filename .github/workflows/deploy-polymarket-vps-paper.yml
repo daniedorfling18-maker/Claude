@@ -393,6 +393,7 @@ jobs:
           ROLLBACK_ENV="$ROLLBACK_DIR/.env.last-known-good"
           ROLLBACK_MARKER="$ROLLBACK_DIR/deployed_git_rev.last-known-good"
           ROLLBACK_SCRIPT="$ROLLBACK_DIR/rollback_vps_paper_deploy.py"
+          ROLLBACK_TELEMETRY_WRITER="$ROLLBACK_DIR/write_vps_telemetry_manifest.py"
           ROLLBACK_IMAGE_TAG="polymarket-paper-vps:rollback-last-known-good"
           chmod 0700 "$ROLLBACK_DIR"
           ROLLBACK_ARMED=false
@@ -404,24 +405,32 @@ jobs:
             set +e
             preserve_recovery=false
             if [ "$deploy_status" -ne 0 ] && [ "${ROLLBACK_ARMED:-false}" = true ] && [ "${DEPLOY_COMMITTED:-false}" != true ]; then
-              echo "::warning::Candidate deploy failed; restoring last-known-good revision $original_head."
-              python3 "$ROLLBACK_SCRIPT" \
-                --repo "$REPO_DIR" \
-                --rollback-ref "$original_head" \
-                --branch main \
-                --compose-file "$COMPOSE_FILE" \
-                --env-backup "$ROLLBACK_ENV" \
-                --marker-backup "$ROLLBACK_MARKER" \
-                --marker-was-present \
-                --image-backup-tag "$ROLLBACK_IMAGE_TAG" \
-                --docker-command "$DOCKER" \
-                --failed-target-sha "$GITHUB_SHA" \
-                --required-service polymarket-paper-live \
-                --required-service polymarket-dashboard \
-                --required-service superbru-auto-pick-watchdog \
-                --required-service vps-ops-scheduler \
-                --report outputs/performance/vps_deploy_rollback.json
-              rollback_status=$?
+              failed_checkout="$(git rev-parse HEAD 2>/dev/null || true)"
+              if [ "$failed_checkout" = "$original_head" ]; then
+                echo "::warning::Candidate deploy failed before checkout changed; ensuring the last-known-good stack is running without invoking rollback."
+                $DOCKER compose -f "$COMPOSE_FILE" up -d --no-build
+                rollback_status=$?
+              else
+                echo "::warning::Candidate deploy failed; restoring last-known-good revision $original_head."
+                python3 "$ROLLBACK_SCRIPT" \
+                  --repo "$REPO_DIR" \
+                  --rollback-ref "$original_head" \
+                  --branch main \
+                  --compose-file "$COMPOSE_FILE" \
+                  --env-backup "$ROLLBACK_ENV" \
+                  --marker-backup "$ROLLBACK_MARKER" \
+                  --marker-was-present \
+                  --image-backup-tag "$ROLLBACK_IMAGE_TAG" \
+                  --docker-command "$DOCKER" \
+                  --failed-target-sha "$GITHUB_SHA" \
+                  --telemetry-writer "$ROLLBACK_TELEMETRY_WRITER" \
+                  --required-service polymarket-paper-live \
+                  --required-service polymarket-dashboard \
+                  --required-service superbru-auto-pick-watchdog \
+                  --required-service vps-ops-scheduler \
+                  --report outputs/performance/vps_deploy_rollback.json
+                rollback_status=$?
+              fi
               if [ "$rollback_status" -ne 0 ]; then
                 recovery_parent="$HOME/.polymarket-deploy-recovery"
                 recovery_dir="$recovery_parent/$GITHUB_RUN_ID"
@@ -447,7 +456,9 @@ jobs:
           install -m 0600 .env "$ROLLBACK_ENV"
           install -m 0600 outputs/performance/deployed_git_rev "$ROLLBACK_MARKER"
           git show "${GITHUB_SHA}:scripts/rollback_vps_paper_deploy.py" > "$ROLLBACK_SCRIPT"
+          git show "${GITHUB_SHA}:scripts/write_vps_telemetry_manifest.py" > "$ROLLBACK_TELEMETRY_WRITER"
           chmod 0700 "$ROLLBACK_SCRIPT"
+          chmod 0700 "$ROLLBACK_TELEMETRY_WRITER"
           previous_image_id="$($DOCKER inspect --format '{{.Image}}' polymarket-paper-live)"
           if [ -z "$previous_image_id" ]; then
             echo "::error::Cannot arm rollback: current paper image ID is unavailable."
@@ -657,8 +668,9 @@ jobs:
             echo "::error::Recurring scheduler remained active; refusing concurrent deploy acceptance."
             exit 1
           fi
-          $DOCKER compose -f "$COMPOSE_FILE" --profile deploy-acceptance run \
-            --rm --no-deps --no-build vps-deploy-acceptance </dev/null
+          timeout --signal=TERM --kill-after=30s 600 \
+            $DOCKER compose -f "$COMPOSE_FILE" --profile deploy-acceptance run \
+              --rm --no-deps --no-build vps-deploy-acceptance </dev/null
           $DOCKER compose -f "$COMPOSE_FILE" up -d --no-build vps-ops-scheduler
 
           # The dashboard renderer is reporting-only. Refresh it after the

@@ -108,6 +108,8 @@ def _rollback(
         "polymarket-paper-vps:rollback-last-known-good",
         "--docker-command",
         str(fake_docker),
+        "--telemetry-writer",
+        str(ROOT / "scripts" / "write_vps_telemetry_manifest.py"),
         "--failed-target-sha",
         candidate,
         "--health-attempts",
@@ -143,6 +145,14 @@ def test_actual_rollback_restores_source_env_marker_image_and_stack(tmp_path: Pa
     assert report["decision"] == "ROLLED_BACK_TO_LAST_KNOWN_GOOD"
     assert report["runtime_evidence_deleted"] is False
     assert report["restored_image_id"] == "sha256:last-known-good"
+    assert report["telemetry_manifest_refreshed"] is True
+    manifest = json.loads(
+        (repo / "outputs/performance/vps_telemetry_manifest.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    assert manifest["checkout_git_rev"] == old
+    assert manifest["deployed_git_rev"] == old
     assert report["paper_trading_invoked"] is False
     assert report["live_trading_invoked"] is False
 

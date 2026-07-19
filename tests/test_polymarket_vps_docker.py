@@ -150,6 +150,9 @@ def test_vps_deploy_preflight_runs_before_compose_replacement():
     assert "rollback_vps_paper_deploy.py" in text
     assert "rollback-last-known-good" in text
     assert "trap 'deploy_exit $?' EXIT" in text
+    assert 'failed_checkout="$(git rev-parse HEAD 2>/dev/null || true)"' in text
+    assert 'if [ "$failed_checkout" = "$original_head" ]; then' in text
+    assert "--telemetry-writer" in text
     assert "ROLLED_BACK_TO_LAST_KNOWN_GOOD" in (
         ROOT / "scripts" / "rollback_vps_paper_deploy.py"
     ).read_text(encoding="utf-8")
@@ -229,6 +232,9 @@ def test_vps_deploy_runs_real_data_acceptance_after_restart_and_before_success()
     assert "reconcile-wallet" in acceptance_script
     assert "executor-ops-monitor" in acceptance_script
     assert "operating-state" in acceptance_script
+    assert 'TOTAL_TIMEOUT="${DEPLOY_ACCEPTANCE_TOTAL_TIMEOUT_SECONDS:-420}"' in acceptance_script
+    assert "run_bounded" in acceptance_script
+    assert "timeout --signal=TERM --kill-after=30s 600" in text
     assert 'acceptance_status" != "PASS"' in text
     assert "automatic rollback is armed for $original_head" in text
     assert 'install -d -m 0775 -o "$(id -u)" -g "$(id -g)"' in text

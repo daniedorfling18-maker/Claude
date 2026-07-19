@@ -271,6 +271,30 @@ def rollback(args: argparse.Namespace) -> dict[str, Any]:
         if missing:
             raise RollbackError(f"rollback stack is missing running services: {missing}")
 
+        if not args.telemetry_writer.is_file():
+            raise RollbackError(f"rollback telemetry writer is missing: {args.telemetry_writer}")
+        telemetry_path = repo / "outputs" / "performance" / "vps_telemetry_manifest.json"
+        _run(
+            (
+                sys.executable,
+                str(args.telemetry_writer),
+                "--repo-root",
+                str(repo),
+                "--output",
+                "outputs/performance/vps_telemetry_manifest.json",
+            ),
+            cwd=repo,
+        )
+        try:
+            telemetry = json.loads(telemetry_path.read_text(encoding="utf-8"))
+        except (OSError, ValueError) as exc:
+            raise RollbackError("rollback telemetry manifest was not readable") from exc
+        if (
+            str(telemetry.get("checkout_git_rev") or "") != checkout["rollback_head"]
+            or str(telemetry.get("deployed_git_rev") or "") != checkout["rollback_head"]
+        ):
+            raise RollbackError("rollback telemetry does not identify the restored revision")
+
         health_script = repo / args.health_script
         if not health_script.is_file():
             raise RollbackError(f"rollback health script is missing: {args.health_script}")
@@ -287,6 +311,9 @@ def rollback(args: argparse.Namespace) -> dict[str, Any]:
                 "restored_services": sorted(running),
                 "health_check_exit_code": health.returncode,
                 "restored_image_id": live_image_id,
+                "telemetry_manifest_refreshed": True,
+                "telemetry_checkout_git_rev": telemetry.get("checkout_git_rev"),
+                "telemetry_deployed_git_rev": telemetry.get("deployed_git_rev"),
                 "environment_restored": (repo / ".env").read_bytes() == args.env_backup.read_bytes(),
                 "marker_restored": (
                     marker.read_bytes() == args.marker_backup.read_bytes()
@@ -323,6 +350,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--image-backup-tag", required=True)
     parser.add_argument("--image-live-tag", default="polymarket-paper-vps:latest")
     parser.add_argument("--docker-command", default="docker")
+    parser.add_argument("--telemetry-writer", type=Path, required=True)
     parser.add_argument("--failed-target-sha", required=True)
     parser.add_argument("--report", type=Path, default=Path("outputs/performance/vps_deploy_rollback.json"))
     parser.add_argument("--required-service", action="append", default=[])

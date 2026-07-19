@@ -11,7 +11,29 @@ set -u
 
 CONFIG_PATH="${POLYMARKET_CONFIG_PATH:-/app/polymarket_predictive_config.example.yaml}"
 OUT_PATH="${DEPLOY_ACCEPTANCE_CYCLE_PATH:-/app/outputs/ops_scheduler/deploy_acceptance_cycle.json}"
-COMMAND_TIMEOUT="${DEPLOY_ACCEPTANCE_COMMAND_TIMEOUT_SECONDS:-300}"
+COMMAND_TIMEOUT="${DEPLOY_ACCEPTANCE_COMMAND_TIMEOUT_SECONDS:-120}"
+TOTAL_TIMEOUT="${DEPLOY_ACCEPTANCE_TOTAL_TIMEOUT_SECONDS:-420}"
+
+case "$COMMAND_TIMEOUT:$TOTAL_TIMEOUT" in
+  *[!0-9:]*|:*|*:) printf '%s\n' "deploy acceptance timeouts must be positive integers" >&2; exit 64 ;;
+esac
+if [ "$COMMAND_TIMEOUT" -lt 1 ] || [ "$TOTAL_TIMEOUT" -lt 1 ]; then
+  printf '%s\n' "deploy acceptance timeouts must be positive integers" >&2
+  exit 64
+fi
+acceptance_deadline=$(( $(date -u +%s) + TOTAL_TIMEOUT ))
+
+run_bounded() {
+  remaining=$(( acceptance_deadline - $(date -u +%s) ))
+  if [ "$remaining" -le 0 ]; then
+    return 124
+  fi
+  limit="$COMMAND_TIMEOUT"
+  if [ "$remaining" -lt "$limit" ]; then
+    limit="$remaining"
+  fi
+  timeout --signal=TERM --kill-after=10s "$limit" "$@"
+}
 
 case "${POLYMARKET_EXECUTE_LIVE:-false}" in
   1|true|TRUE|yes|YES)
@@ -27,23 +49,23 @@ case "${POLYMARKET_LIVE_TRADING:-0}" in
 esac
 
 set +e
-timeout "$COMMAND_TIMEOUT" python -m polymarket_predictive_engine.cli maker-carry-study --config "$CONFIG_PATH"
+run_bounded python -m polymarket_predictive_engine.cli maker-carry-study --config "$CONFIG_PATH"
 maker_carry_study_code=$?
-timeout "$COMMAND_TIMEOUT" python -m polymarket_predictive_engine.cli collect-maker-replay-data --config "$CONFIG_PATH"
+run_bounded python -m polymarket_predictive_engine.cli collect-maker-replay-data --config "$CONFIG_PATH"
 collect_maker_replay_data_code=$?
-timeout "$COMMAND_TIMEOUT" python -m polymarket_predictive_engine.cli maker-fill-replay --config "$CONFIG_PATH"
+run_bounded python -m polymarket_predictive_engine.cli maker-fill-replay --config "$CONFIG_PATH"
 maker_fill_replay_code=$?
-timeout "$COMMAND_TIMEOUT" python -m polymarket_predictive_engine.cli maker-live-test --config "$CONFIG_PATH"
+run_bounded python -m polymarket_predictive_engine.cli maker-live-test --config "$CONFIG_PATH"
 maker_live_test_code=$?
-timeout "$COMMAND_TIMEOUT" python -m polymarket_predictive_engine.cli decision-policy --config "$CONFIG_PATH"
+run_bounded python -m polymarket_predictive_engine.cli decision-policy --config "$CONFIG_PATH"
 decision_policy_code=$?
-timeout "$COMMAND_TIMEOUT" python -m polymarket_predictive_engine.cli requote-alerts --config "$CONFIG_PATH"
+run_bounded python -m polymarket_predictive_engine.cli requote-alerts --config "$CONFIG_PATH"
 requote_alerts_code=$?
-timeout "$COMMAND_TIMEOUT" python -m polymarket_predictive_engine.cli reconcile-wallet --config "$CONFIG_PATH"
+run_bounded python -m polymarket_predictive_engine.cli reconcile-wallet --config "$CONFIG_PATH"
 reconcile_wallet_code=$?
-timeout "$COMMAND_TIMEOUT" python -m polymarket_predictive_engine.cli executor-ops-monitor --config "$CONFIG_PATH"
+run_bounded python -m polymarket_predictive_engine.cli executor-ops-monitor --config "$CONFIG_PATH"
 executor_ops_monitor_code=$?
-timeout "$COMMAND_TIMEOUT" python -m polymarket_predictive_engine.cli operating-state --config "$CONFIG_PATH"
+run_bounded python -m polymarket_predictive_engine.cli operating-state --config "$CONFIG_PATH"
 operating_state_code=$?
 set -e
 
@@ -87,11 +109,11 @@ temporary.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encod
 temporary.replace(target)
 PY
 
-python -m polymarket_predictive_engine.cli artifact-contracts --config "$CONFIG_PATH"
-python -m polymarket_predictive_engine.cli deploy-acceptance --config "$CONFIG_PATH"
-python -m polymarket_predictive_engine.cli operating-state --config "$CONFIG_PATH"
+run_bounded python -m polymarket_predictive_engine.cli artifact-contracts --config "$CONFIG_PATH"
+run_bounded python -m polymarket_predictive_engine.cli deploy-acceptance --config "$CONFIG_PATH"
+run_bounded python -m polymarket_predictive_engine.cli operating-state --config "$CONFIG_PATH"
 
-python - "$OUT_PATH" <<'PY'
+run_bounded python - "$OUT_PATH" <<'PY'
 import json
 import sys
 from pathlib import Path

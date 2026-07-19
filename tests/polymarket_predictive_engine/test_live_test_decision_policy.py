@@ -416,6 +416,71 @@ def test_each_kill_criterion_trips_individually(tmp_path):
         assert result["kill_criteria_status"]["criteria"][name]["triggered"] is True
 
 
+def test_nan_first_day_cannot_mask_single_day_kill(tmp_path):
+    # NaN fail-open (local-audit follow-up): a NaN first daily value used to
+    # poison min() (min([nan, -20]) == nan; nan <= -15 is False), silently
+    # disabling the single-day kill even with a real -$20 day on record. The
+    # finite filter drops the NaN row so the losing day still triggers.
+    cfg = _config(tmp_path)
+    _write_study(cfg, _study(top="0xm1"))
+    _write_carry_history(cfg, _history(["0xm1"] * 7))
+    write_json(_out(cfg) / "maker_live_test.json", {"status": "ok", "net_score_usd": 1.0})
+    _write_live_history(
+        cfg,
+        [
+            {"generated_at_utc": "2026-07-01T08:00:00Z", "net_score_usd": 1.0, "daily_net_score_usd": "nan"},
+            {"generated_at_utc": "2026-07-02T08:00:00Z", "net_score_usd": 1.0, "daily_net_score_usd": -20.0},
+        ],
+    )
+
+    result = run_decision_policy(cfg)
+
+    criteria = result["kill_criteria_status"]["criteria"]["single_day_net_score"]
+    assert criteria["triggered"] is True
+    assert criteria["worst_day"] == -20.0
+    assert result["indicated_action"] == "stop_quoting_review_before_resume"
+
+
+def test_nan_cumulative_score_reports_missing_not_comparing_false(tmp_path):
+    # A NaN cumulative net_score_usd must be treated as MISSING (value None),
+    # not slip through `is not None` into a permanently-False comparison.
+    cfg = _config(tmp_path)
+    _write_study(cfg, _study(top="0xm1"))
+    _write_carry_history(cfg, _history(["0xm1"] * 7))
+    write_json(_out(cfg) / "maker_live_test.json", {"status": "ok", "net_score_usd": "nan"})
+    _write_live_history(cfg, _live_rows(1, net=1.0))
+
+    result = run_decision_policy(cfg)
+
+    criteria = result["kill_criteria_status"]["criteria"]["cumulative_real_net_score"]
+    assert criteria["triggered"] is False
+    assert criteria["value"] is None  # missing, not NaN
+
+
+def test_nan_carry_rows_drop_from_kelly_observations():
+    # A NaN carry row must not enter the dollar fallback's mean/std nor inflate
+    # kelly_observations (which would REDUCE shrinkage — a loosening).
+    settings = dict(policy.DEFAULT_SETTINGS)
+    history = _history(["0xm1"] * 7, nets=[2.0, 4.0, 2.0, 4.0, 2.0, 4.0, 2.0])
+    history[2]["portfolio_net_carry_usd_per_day"] = "nan"
+
+    sizing = policy._quarter_kelly_cap(history, 250.0, settings)
+
+    assert sizing["kelly_observations"] == 6  # NaN row excluded
+    assert sizing["daily_net_mean_usd"] == sizing["daily_net_mean_usd"]  # not NaN
+
+
+def test_nan_capital_rows_drop_from_returns():
+    # _daily_net_returns must skip rows whose net or capital is non-finite.
+    rows = [
+        {"portfolio_net_carry_usd_per_day": 5.0, "portfolio_capital_usd": 100.0},
+        {"portfolio_net_carry_usd_per_day": "nan", "portfolio_capital_usd": 100.0},
+        {"portfolio_net_carry_usd_per_day": 5.0, "portfolio_capital_usd": "inf"},
+    ]
+
+    assert policy._daily_net_returns(rows) == [0.05]
+
+
 def test_no_live_data_tolerance_and_missing_study(tmp_path):
     cfg = _config(tmp_path)
 

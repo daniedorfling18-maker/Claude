@@ -4451,6 +4451,34 @@ Do NOT: touch any gate (`maker_carry_study.py` gate logic, M-A/M-B/M-C),
 any order path. Do NOT build the realism consumer or change the study's reward
 estimate — that is a separate future WO that depends on this data existing.
 
+## WO-108 — NaN fail-open residuals in WO-50 policy/kill surfaces (FROZEN; tighten-only; orchestrator-built, AWAITING OWNER MERGE)
+
+Origin: the owner's LOCAL 5-agent audit (2026-07-19) drafted a NaN fail-closed
+WO grounded against main@9ab58fd (pre-#263). Orchestrator adjudication against
+current main: 2 of its 4 sites were already fixed by #263 (M-B `_mb_finite`,
+evaluator `_finite_float` windows); 2 were REAL residuals, and the follow-up
+sweep found 2 MORE the draft missed — both in the registered KILL criteria:
+
+1. `_kill_criteria` cumulative check: NaN `net_score_usd` passed `is not None`
+   then made `<= kill_threshold` permanently False — the cumulative kill switch
+   silently could not trigger. Now `_finite`-parsed; non-finite = missing
+   (value None), governed by the WO-86 staleness guard.
+2. `_kill_criteria` single-day check: a NaN FIRST element poisons `min()`
+   (min([nan, -20]) == nan), disabling the single-day kill despite a real
+   losing day on record. Now finite-filtered; the losing day triggers.
+3. `_quarter_kelly_cap` dollar-values comprehension: `is not None` admitted NaN
+   into mean/std and inflated `kelly_observations` (less shrinkage = looser).
+   Finite-filtered; dropping the row is strictly tighter.
+4. `_daily_net_returns`: NaN net/capital produced NaN returns. Finite-guarded.
+
+All four in `live_test_decision_policy.py` via one `_finite` helper mirroring
+the evaluator's. Tighten-only/fail-safe throughout: unknown values become
+missing, never silently-False comparisons. 4 tests added (NaN-first-day kill
+trigger; NaN cumulative reports missing; NaN row drops from observations; NaN
+capital drops from returns). Full suite 1360. Owner-merge (frozen WO-50
+surface). Companion governance-doc draft (provisional WO-109) remains with the
+owner for wording confirmation before registration.
+
 ## WO-107 — M-B.1: require the portfolio market's own Tier-0 coverage (FROZEN M-B; tighten-only; BUILT by orchestrator, AWAITING OWNER MERGE)
 
 External-audit item 7: M-B could pass on a data-api-print markout estimate with

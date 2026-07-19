@@ -4718,6 +4718,12 @@ from existing artifacts only, no new judgment surface):
 3. Its minimum quote capital (`rewards_min_size x 2 x mid`) fits the stage:
    <= $100.
 4. Kill-input freshness `fresh`; reconciliation `clean` or `explained`.
+5. Every source artifact consumed by the evaluator is timestamp-fresh at the
+   evaluation instant. The tighten-only registered maxima are 30 minutes for
+   decision policy, requote advice, maker replay, and sharp qualification (two
+   15-minute producer cadences), and 26 hours for maker study, candidate
+   toxicity, and wallet reconciliation (the registered daily-producer SLO).
+   Missing, malformed, or future timestamps fail this condition.
 
 BUILD:
 1. A small evaluator in the decision-policy step writes
@@ -4740,6 +4746,19 @@ sizing, or order surface reads the eligibility artifact.
 Day-after check: `stage_ticket_eligibility.json` exists with per-condition
 booleans matching the same run's decision_policy.json and quote sheet; with
 the env var set, a forced test transition delivers exactly one ntfy message.
+
+**2026-07-19 source-freshness remediation (pending owner merge):** the
+evaluator now publishes one `*_source_fresh` condition and an age diagnostic
+for every consumed policy/study/toxicity/reconciliation/requote/replay/
+qualification source. This is additive and tighten-only: stale evidence can
+revoke eligibility, but it can never clear an existing blocker. Funding stays
+CLOSED and WO-67 stays BLOCKED.
+
+**Day-after check:** in
+`outputs/maker_carry/stage_ticket_eligibility.json`, inspect
+`candidate.source_freshness`; every source must show `fresh=true`, a
+non-negative `age_seconds`, and its registered `maximum_age_seconds` before an
+eligible transition may be reported.
 
 ## WO-98 - Exact post-registration H2 evaluator and dashboard authority
 

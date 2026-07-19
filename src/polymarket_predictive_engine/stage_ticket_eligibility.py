@@ -47,9 +47,55 @@ FUNDING_GOVERNANCE_RECONCILED = True
 MAX_QUALIFICATION_AGE_SECONDS = 30 * 60
 HEALTHY_FRESHNESS = {"fresh", "inactive_pre_live"}
 
+# Tighten-only source ages derived from registered VPS producer cadences. The
+# safety and trade-print lanes run at most every 15 minutes, so two cadences is
+# the hard ceiling for their outputs. Study, toxicity, and reconciliation are
+# daily producers; the existing WO-68 quote/reconciliation SLO allows 26 hours
+# so one delayed scheduler tick does not manufacture a false transition.
+SOURCE_MAX_AGE_SECONDS: dict[str, float] = {
+    "decision_policy": 30 * 60,
+    "maker_carry_study": 26 * 60 * 60,
+    "candidate_flow_toxicity": 26 * 60 * 60,
+    "wallet_reconciliation": 26 * 60 * 60,
+    "requote_alerts": 30 * 60,
+    "maker_fill_replay": 30 * 60,
+    "sharp_linking_qualification": 30 * 60,
+}
+
 
 def _condition(name: str, passed: bool, detail: str) -> dict[str, Any]:
     return {"condition": name, "passed": bool(passed), "detail": detail}
+
+
+def _source_freshness(
+    name: str,
+    raw_timestamp: Any,
+    *,
+    now: datetime,
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    maximum_age = SOURCE_MAX_AGE_SECONDS[name]
+    observed = parse_timestamp(raw_timestamp)
+    age_seconds = (
+        (now - observed.astimezone(timezone.utc)).total_seconds()
+        if observed is not None
+        else None
+    )
+    fresh = age_seconds is not None and 0 <= age_seconds <= maximum_age
+    diagnostic = {
+        "generated_at_utc": str(raw_timestamp or "") or None,
+        "age_seconds": round(age_seconds, 3) if age_seconds is not None else None,
+        "maximum_age_seconds": maximum_age,
+        "fresh": fresh,
+    }
+    age_display = f"{round(age_seconds, 1)}s" if age_seconds is not None else "missing"
+    condition = _condition(
+        f"{name}_source_fresh",
+        fresh,
+        f"generated_at={raw_timestamp or 'missing'}; "
+        f"age={age_display}; "
+        f"max={maximum_age:g}s",
+    )
+    return condition, diagnostic
 
 
 def evaluate_stage_ticket_eligibility(
@@ -66,6 +112,9 @@ def evaluate_stage_ticket_eligibility(
     reconciliation = read_json(
         cfg.output_root / "performance" / "wallet_reconciliation.json", default={}
     ) or {}
+    requote = read_json(out_root / "requote_alerts.json", default={}) or {}
+    replay = read_json(out_root / "maker_fill_replay.json", default={}) or {}
+    qualification = read_json(out_root / "sharp_linking_qualification.json", default={}) or {}
     toxicity_rows = {
         str(row.get("market") or ""): row
         for row in read_csv_rows(out_root / "flow_toxicity.csv")
@@ -117,6 +166,23 @@ def evaluate_stage_ticket_eligibility(
         "candidate_condition_id": candidate_id or None,
         "candidate_token_id": candidate_token or None,
     }
+    tox_row = toxicity_rows.get(candidate_id) or {}
+    source_timestamps = {
+        "decision_policy": policy.get("generated_at_utc"),
+        "maker_carry_study": study.get("generated_at_utc"),
+        "candidate_flow_toxicity": tox_row.get("generated_at_utc"),
+        "wallet_reconciliation": reconciliation.get("generated_at_utc"),
+        "requote_alerts": requote.get("generated_at_utc"),
+        "maker_fill_replay": replay.get("generated_at_utc"),
+        "sharp_linking_qualification": qualification.get("generated_at_utc"),
+    }
+    source_freshness: dict[str, Any] = {}
+    for source_name, source_timestamp in source_timestamps.items():
+        condition, diagnostic = _source_freshness(source_name, source_timestamp, now=now)
+        rows.append(condition)
+        source_freshness[source_name] = diagnostic
+    summary["source_freshness"] = source_freshness
+
     if candidate is not None:
         # WO-102 composite screen (tighten-only): block on the absolute
         # raw-imbalance floor OR the universe-relative percentile, and treat
@@ -124,7 +190,6 @@ def evaluate_stage_ticket_eligibility(
         # module's own `toxic_blocked` keeps the veto in lockstep with the
         # instrument, but the percentile is also re-checked here directly so a
         # stale/partial row cannot silently clear a candidate.
-        tox_row = toxicity_rows.get(candidate_id) or {}
         percentile = safe_float(tox_row.get("toxicity_score"))
         raw_imbalance = safe_float(tox_row.get("vpin_raw"))
         flagged = str(tox_row.get("toxic_blocked") or "").strip().lower() in {"true", "1", "yes"}
@@ -228,7 +293,6 @@ def evaluate_stage_ticket_eligibility(
     # (e.g. past/imminent event start) while the study still assigns it carry.
     # Never fund a market safety is actively telling the human to pull; require
     # a present, non-pull requote state for the exact candidate (fail-closed).
-    requote = read_json(out_root / "requote_alerts.json", default={}) or {}
     requote_state = None
     for row in requote.get("markets") or []:
         if isinstance(row, dict) and str(row.get("condition_id") or "").strip() == candidate_id:
@@ -249,7 +313,6 @@ def evaluate_stage_ticket_eligibility(
     # missing, stale, unqualified, or candidate-mismatched artifact blocks the
     # ticket. This is the added funding precondition the reconciliation adopts;
     # it never loosens any existing condition.
-    qualification = read_json(out_root / "sharp_linking_qualification.json", default={}) or {}
     qual_generated = parse_timestamp(qualification.get("generated_at_utc"))
     qual_age = (now - qual_generated.astimezone(timezone.utc)).total_seconds() if qual_generated is not None else None
     qual_candidate = str(qualification.get("candidate_condition_id") or "").strip()
@@ -260,7 +323,6 @@ def evaluate_stage_ticket_eligibility(
     # window (a new quote band or Tier-0 row) leaves a stale qualification that
     # still reads eligible. Bind it to the consumed policy, study, and replay
     # timestamps (fail-closed).
-    replay = read_json(out_root / "maker_fill_replay.json", default={}) or {}
     current_replay_generated = str(replay.get("generated_at_utc") or "").strip()
     current_policy_generated = str(policy.get("generated_at_utc") or "").strip()
     qual_policy = str(qualification.get("consumed_policy_generated_at") or "").strip()

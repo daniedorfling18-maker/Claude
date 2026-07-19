@@ -10,13 +10,16 @@ short-lived workflow token supplied through ``GITHUB_TOKEN``.
 from __future__ import annotations
 
 import argparse
+import base64
+import binascii
 import json
 import os
 import re
 import sys
+import time
 from typing import Any, Mapping, Sequence
 from urllib.error import HTTPError, URLError
-from urllib.parse import quote, urlencode
+from urllib.parse import parse_qsl, quote, urlencode, urlsplit, urlunsplit
 from urllib.request import Request, urlopen
 
 
@@ -24,6 +27,8 @@ API_ROOT = "https://api.github.com"
 GRAPHQL_URL = "https://api.github.com/graphql"
 REQUIRED_CONTEXT = "WO-69 guard and invariants"
 REQUIRED_WORKFLOW = ".github/workflows/required-pr-gate.yml"
+INDEPENDENT_WORKFLOW = ".github/workflows/independent-pr-merge.yml"
+OIDC_ISSUER = "https://token.actions.githubusercontent.com"
 PROTECTED_CONTROL_PATHS = {
     ".github/workflows/required-pr-gate.yml",
     ".github/workflows/independent-pr-merge.yml",
@@ -31,6 +36,7 @@ PROTECTED_CONTROL_PATHS = {
     "scripts/merge_independently_reviewed_pr.py",
     "pyproject.toml",
     "pytest.ini",
+    "setup.py",
     "setup.cfg",
     "sitecustomize.py",
     "tox.ini",
@@ -41,7 +47,7 @@ PROTECTED_CONTROL_PATHS = {
 # with the same name wins module resolution and can return success without
 # running the accepted tool.  Protect both ``name.py`` and every path below a
 # top-level ``name/`` package.
-PROTECTED_PYTHON_ENTRYPOINTS = {"pip", "pytest", "ruff"}
+PROTECTED_PYTHON_ENTRYPOINTS = {"pip", "pytest", "ruff", "setuptools", "wheel"}
 TRUSTED_REVIEW_ASSOCIATIONS = {"COLLABORATOR", "MEMBER", "OWNER"}
 CONTROL_REVIEW_STATES = {"APPROVED", "CHANGES_REQUESTED", "DISMISSED"}
 SHA_PATTERN = re.compile(r"^[0-9a-f]{40}$")
@@ -77,9 +83,10 @@ def _protected_control_path(path: str) -> bool:
     while normalized.startswith("./"):
         normalized = normalized[2:]
     normalized = normalized.lstrip("/")
-    top_level = normalized.split("/", 1)[0]
+    parts = normalized.split("/")
+    import_root = parts[1] if len(parts) > 1 and parts[0] == "src" else parts[0]
     shadows_python_entrypoint = any(
-        top_level in {entrypoint, f"{entrypoint}.py"}
+        import_root in {entrypoint, f"{entrypoint}.py"}
         for entrypoint in PROTECTED_PYTHON_ENTRYPOINTS
     )
     return (
@@ -89,12 +96,106 @@ def _protected_control_path(path: str) -> bool:
     )
 
 
+def _decode_oidc_payload(token: str) -> dict[str, Any]:
+    parts = token.split(".")
+    if len(parts) != 3:
+        raise MergeGateError("GitHub OIDC provider returned a malformed token")
+    try:
+        header = json.loads(base64.urlsafe_b64decode(parts[0] + "=" * (-len(parts[0]) % 4)))
+        claims = json.loads(base64.urlsafe_b64decode(parts[1] + "=" * (-len(parts[1]) % 4)))
+    except (binascii.Error, ValueError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise MergeGateError("GitHub OIDC token payload could not be decoded") from exc
+    if _mapping(header).get("alg") != "RS256" or not _mapping(header).get("kid"):
+        raise MergeGateError("GitHub OIDC token header is not an identified RS256 key")
+    if not isinstance(claims, Mapping):
+        raise MergeGateError("GitHub OIDC token claims are not an object")
+    return _mapping(claims)
+
+
+def _validate_oidc_claims(
+    claims: Mapping[str, Any],
+    *,
+    repo: str,
+    audience: str,
+    now_epoch: int | None = None,
+) -> dict[str, Any]:
+    """Validate current-job claims returned over the authenticated OIDC endpoint."""
+
+    payload = _mapping(claims)
+    now = int(time.time()) if now_epoch is None else int(now_epoch)
+    expected_workflow_ref = f"{repo}/{INDEPENDENT_WORKFLOW}@refs/heads/main"
+    try:
+        expires = int(payload.get("exp"))
+        issued = int(payload.get("iat"))
+        not_before = int(payload.get("nbf"))
+    except (TypeError, ValueError) as exc:
+        raise MergeGateError("GitHub OIDC token time claims are missing or invalid") from exc
+    required = {
+        "iss": OIDC_ISSUER,
+        "aud": audience,
+        "repository": repo,
+        "event_name": "workflow_dispatch",
+        "ref": "refs/heads/main",
+        "workflow_ref": expected_workflow_ref,
+    }
+    mismatches = [key for key, value in required.items() if str(payload.get(key) or "") != value]
+    if mismatches:
+        raise MergeGateError(
+            "GitHub OIDC identity does not match the accepted main workflow: "
+            + ", ".join(sorted(mismatches))
+        )
+    if expires <= now or issued > now + 30 or not_before > now + 30:
+        raise MergeGateError("GitHub OIDC token is expired or not currently valid")
+    if not str(payload.get("run_id") or "").isdigit():
+        raise MergeGateError("GitHub OIDC token run_id is missing")
+    if not SHA_PATTERN.fullmatch(str(payload.get("workflow_sha") or "").lower()):
+        raise MergeGateError("GitHub OIDC token workflow_sha is invalid")
+    if not _login({"login": payload.get("actor")}):
+        raise MergeGateError("GitHub OIDC token actor is missing")
+    return payload
+
+
+def request_current_workflow_identity(repo: str) -> dict[str, Any]:
+    """Request a current-job OIDC token directly from GitHub over fixed HTTPS."""
+
+    raw_url = os.environ.get("ACTIONS_ID_TOKEN_REQUEST_URL", "")
+    request_token = os.environ.get("ACTIONS_ID_TOKEN_REQUEST_TOKEN", "")
+    parsed = urlsplit(raw_url)
+    if (
+        parsed.scheme != "https"
+        or not parsed.hostname
+        or not parsed.hostname.endswith(".actions.githubusercontent.com")
+        or not request_token
+    ):
+        raise MergeGateError("GitHub OIDC request endpoint or bearer token is unavailable")
+    audience = f"https://github.com/{repo}/independent-merge"
+    query = dict(parse_qsl(parsed.query, keep_blank_values=True))
+    query["audience"] = audience
+    request_url = urlunsplit((parsed.scheme, parsed.netloc, parsed.path, urlencode(query), ""))
+    request = Request(
+        request_url,
+        headers={
+            "Accept": "application/json",
+            "Authorization": f"Bearer {request_token}",
+            "User-Agent": "polymarket-independent-merge-identity",
+        },
+    )
+    try:
+        with urlopen(request, timeout=30) as response:  # noqa: S310 - constrained GitHub host
+            response_payload = _mapping(json.loads(response.read().decode("utf-8")))
+    except (HTTPError, URLError, TimeoutError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise MergeGateError("GitHub OIDC identity request failed") from exc
+    claims = _decode_oidc_payload(str(response_payload.get("value") or ""))
+    return _validate_oidc_claims(claims, repo=repo, audience=audience)
+
+
 def evaluate_merge_candidate(
     *,
+    repository: str,
     pull_request: Mapping[str, Any],
     expected_head: str,
-    actor: str,
-    triggering_actor: str,
+    workflow_identity: Mapping[str, Any],
+    merge_workflow_run: Mapping[str, Any],
     main_ref: Mapping[str, Any],
     comparison: Mapping[str, Any],
     check_runs: Sequence[Mapping[str, Any]],
@@ -111,10 +212,33 @@ def evaluate_merge_candidate(
     base_sha = str(base.get("sha") or "").lower()
     current_main_sha = str(_mapping(main_ref.get("object")).get("sha") or "").lower()
     author = _login(pr.get("user"))
-    normalized_actor = actor.strip()
-    normalized_triggering_actor = triggering_actor.strip()
+    identity = _mapping(workflow_identity)
+    workflow_run = _mapping(merge_workflow_run)
+    normalized_actor = _login(workflow_run.get("actor"))
+    normalized_triggering_actor = _login(workflow_run.get("triggering_actor"))
     expected = expected_head.strip().lower()
     blockers: list[str] = []
+
+    workflow_run_id = str(workflow_run.get("id") or "")
+    identity_run_id = str(identity.get("run_id") or "")
+    identity_workflow_sha = str(identity.get("workflow_sha") or "").lower()
+    run_head_sha = str(workflow_run.get("head_sha") or "").lower()
+    accepted_workflow_run = (
+        str(identity.get("repository") or "") == repository
+        and str(identity.get("event_name") or "") == "workflow_dispatch"
+        and str(identity.get("ref") or "") == "refs/heads/main"
+        and str(identity.get("workflow_ref") or "")
+        == f"{repository}/{INDEPENDENT_WORKFLOW}@refs/heads/main"
+        and identity_run_id == workflow_run_id
+        and str(workflow_run.get("event") or "") == "workflow_dispatch"
+        and str(workflow_run.get("path") or "") == INDEPENDENT_WORKFLOW
+        and str(workflow_run.get("head_branch") or "") == "main"
+        and identity_workflow_sha == current_main_sha
+        and run_head_sha == current_main_sha
+        and str(identity.get("actor") or "").casefold() == normalized_actor.casefold()
+    )
+    if not accepted_workflow_run:
+        blockers.append("merge_workflow_identity_is_not_accepted_current_main")
 
     if not SHA_PATTERN.fullmatch(expected):
         blockers.append("expected_head_must_be_a_40_character_lowercase_sha")
@@ -230,6 +354,7 @@ def evaluate_merge_candidate(
         in {reviewer.casefold() for reviewer in eligible_reviewers},
         "triggering_actor_is_current_head_approver": normalized_triggering_actor.casefold()
         in {reviewer.casefold() for reviewer in eligible_reviewers},
+        "merge_workflow_is_accepted_current_main": accepted_workflow_run,
         "trusted_merge_control_unchanged": not protected_control_changes,
         "all_review_threads_resolved": not unresolved_threads,
     }
@@ -242,6 +367,8 @@ def evaluate_merge_candidate(
         "pull_request_author": author,
         "merge_actor": normalized_actor,
         "merge_triggering_actor": normalized_triggering_actor,
+        "merge_workflow_run_id": workflow_run_id,
+        "merge_workflow_sha": identity_workflow_sha,
         "eligible_reviewers": eligible_reviewers,
         "unresolved_change_request_reviewers": unresolved_change_requests,
         "unresolved_review_thread_ids": unresolved_threads,
@@ -351,7 +478,14 @@ def _split_repo(repo: str) -> tuple[str, str]:
     return parts[0], parts[1]
 
 
-def collect_evidence(client: GitHubClient, repo: str, number: int, expected_head: str) -> dict[str, Any]:
+def collect_evidence(
+    client: GitHubClient,
+    repo: str,
+    number: int,
+    expected_head: str,
+    *,
+    merge_run_id: str,
+) -> dict[str, Any]:
     owner, name = _split_repo(repo)
     escaped_head = quote(expected_head, safe="")
     run_query = urlencode({"event": "pull_request", "head_sha": expected_head})
@@ -370,11 +504,15 @@ def collect_evidence(client: GitHubClient, repo: str, number: int, expected_head
     if int(workflow_payload.get("total_count") or 0) > len(workflow_runs):
         raise MergeGateError("More than 100 exact-head workflow runs exist; evidence is incomplete")
     return {
+        "repository": repo,
         "pull_request": pull_request,
         "main_ref": main_ref,
         "comparison": comparison,
         "check_runs": check_runs,
         "workflow_runs": workflow_runs,
+        "merge_workflow_run": _mapping(
+            client.request(f"repos/{repo}/actions/runs/{quote(merge_run_id, safe='')}")
+        ),
         "reviews": client.paginated_list(f"repos/{repo}/pulls/{number}/reviews"),
         "review_threads": client.review_threads(owner, name, number),
         "changed_files": client.paginated_list(f"repos/{repo}/pulls/{number}/files"),
@@ -485,28 +623,35 @@ def main() -> int:
     parser.add_argument("--merge", action="store_true")
     args = parser.parse_args()
 
-    actor = os.environ.get("MERGE_ACTOR", "")
-    triggering_actor = os.environ.get("MERGE_TRIGGERING_ACTOR", "")
-    if args.merge:
-        if os.environ.get("MERGE_EVENT") != "workflow_dispatch" or not os.environ.get("MERGE_RUN_ID", "").isdigit():
-            raise MergeGateError("mutating mode is restricted to the registered workflow_dispatch lane")
+    workflow_identity = request_current_workflow_identity(args.repo)
+    merge_run_id = str(workflow_identity.get("run_id") or "")
     client = GitHubClient(os.environ.get("GITHUB_TOKEN", ""))
-    evidence = collect_evidence(client, args.repo, args.pr, args.expected_head)
+    evidence = collect_evidence(
+        client,
+        args.repo,
+        args.pr,
+        args.expected_head,
+        merge_run_id=merge_run_id,
+    )
     result = evaluate_merge_candidate(
         expected_head=args.expected_head,
-        actor=actor,
-        triggering_actor=triggering_actor,
+        workflow_identity=workflow_identity,
         **evidence,
     )
     if not result["eligible"]:
         print(json.dumps(result, indent=2, sort_keys=True))
         return 2
     if args.merge:
-        refreshed = collect_evidence(client, args.repo, args.pr, args.expected_head)
+        refreshed = collect_evidence(
+            client,
+            args.repo,
+            args.pr,
+            args.expected_head,
+            merge_run_id=merge_run_id,
+        )
         result = evaluate_merge_candidate(
             expected_head=args.expected_head,
-            actor=actor,
-            triggering_actor=triggering_actor,
+            workflow_identity=workflow_identity,
             **refreshed,
         )
         if not result["eligible"]:

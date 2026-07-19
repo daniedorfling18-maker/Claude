@@ -16,6 +16,7 @@ permissions:
   actions: read
   checks: read
   contents: write
+  id-token: write
   pull-requests: write
 
 concurrency:
@@ -41,16 +42,12 @@ jobs:
         shell: bash
         env:
           GITHUB_TOKEN: ${{ github.token }}
-          MERGE_ACTOR: ${{ github.actor }}
-          MERGE_TRIGGERING_ACTOR: ${{ github.triggering_actor }}
-          MERGE_EVENT: ${{ github.event_name }}
-          MERGE_RUN_ID: ${{ github.run_id }}
         run: |
           set -euo pipefail
           mkdir -p "$RUNNER_TEMP/independent-main-acceptance"
           docker run --rm --cpus 1 --memory 512m --pids-limit 128 \
-            -e GITHUB_TOKEN -e MERGE_ACTOR -e MERGE_TRIGGERING_ACTOR \
-            -e MERGE_EVENT -e MERGE_RUN_ID \
+            -e GITHUB_TOKEN -e ACTIONS_ID_TOKEN_REQUEST_URL \
+            -e ACTIONS_ID_TOKEN_REQUEST_TOKEN \
             -v "${GITHUB_WORKSPACE}/merge-utility:/src:ro" \
             python:3.11-slim python /src/scripts/merge_independently_reviewed_pr.py \
               --repo daniedorfling18-maker/Claude \

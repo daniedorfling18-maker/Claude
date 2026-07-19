@@ -149,8 +149,9 @@ def test_independent_merge_workflow_is_manual_exact_head_and_second_identity_onl
     assert "expected_head_sha:" in workflow
     assert "path: merge-utility" in workflow
     assert "fetch-depth: 0" in workflow
-    assert "MERGE_ACTOR: ${{ github.actor }}" in workflow
-    assert "MERGE_TRIGGERING_ACTOR: ${{ github.triggering_actor }}" in workflow
+    assert "id-token: write" in workflow
+    assert "ACTIONS_ID_TOKEN_REQUEST_URL" in workflow
+    assert "ACTIONS_ID_TOKEN_REQUEST_TOKEN" in workflow
     assert "scripts/merge_independently_reviewed_pr.py" in workflow
     assert "--merge" in workflow
     assert "set -euo pipefail" in workflow
@@ -159,6 +160,46 @@ def test_independent_merge_workflow_is_manual_exact_head_and_second_identity_onl
     assert "independent-main-acceptance-${{ github.run_id }}" in workflow
     assert "if-no-files-found: error" in workflow
     assert "secrets." not in workflow
+
+
+def test_oidc_identity_requires_the_accepted_main_workflow() -> None:
+    now = 1_800_000_000
+    audience = "https://github.com/owner/repo/independent-merge"
+    claims = {
+        "iss": independent_merge.OIDC_ISSUER,
+        "aud": audience,
+        "repository": "owner/repo",
+        "event_name": "workflow_dispatch",
+        "ref": "refs/heads/main",
+        "workflow_ref": (
+            "owner/repo/.github/workflows/independent-pr-merge.yml@refs/heads/main"
+        ),
+        "workflow_sha": "b" * 40,
+        "run_id": "9001",
+        "actor": "reviewer",
+        "iat": now - 10,
+        "nbf": now - 10,
+        "exp": now + 300,
+    }
+
+    accepted = independent_merge._validate_oidc_claims(
+        claims,
+        repo="owner/repo",
+        audience=audience,
+        now_epoch=now,
+    )
+    assert accepted["run_id"] == "9001"
+
+    claims["workflow_ref"] = (
+        "owner/repo/.github/workflows/independent-pr-merge.yml@refs/heads/attacker"
+    )
+    with pytest.raises(independent_merge.MergeGateError, match="workflow_ref"):
+        independent_merge._validate_oidc_claims(
+            claims,
+            repo="owner/repo",
+            audience=audience,
+            now_epoch=now,
+        )
 
 
 def test_workflow_inventory_has_only_registered_triggers() -> None:
@@ -486,6 +527,7 @@ def _candidate_evidence() -> dict:
     head = "a" * 40
     main = "b" * 40
     return {
+        "repository": "owner/repo",
         "pull_request": {
             "number": 321,
             "title": "Verified change",
@@ -497,8 +539,26 @@ def _candidate_evidence() -> dict:
             "base": {"ref": "main", "sha": main},
         },
         "expected_head": head,
-        "actor": "reviewer",
-        "triggering_actor": "reviewer",
+        "workflow_identity": {
+            "repository": "owner/repo",
+            "event_name": "workflow_dispatch",
+            "ref": "refs/heads/main",
+            "workflow_ref": (
+                "owner/repo/.github/workflows/independent-pr-merge.yml@refs/heads/main"
+            ),
+            "workflow_sha": main,
+            "run_id": "9001",
+            "actor": "reviewer",
+        },
+        "merge_workflow_run": {
+            "id": 9001,
+            "event": "workflow_dispatch",
+            "path": independent_merge.INDEPENDENT_WORKFLOW,
+            "head_branch": "main",
+            "head_sha": main,
+            "actor": {"login": "reviewer"},
+            "triggering_actor": {"login": "reviewer"},
+        },
         "main_ref": {"object": {"sha": main}},
         "comparison": {"status": "ahead", "behind_by": 0},
         "check_runs": [
@@ -561,7 +621,8 @@ def test_actions_workflow_path_ref_suffix_is_normalized() -> None:
 
 def test_stale_approval_and_author_dispatch_are_both_rejected() -> None:
     evidence = _candidate_evidence()
-    evidence["actor"] = "author"
+    evidence["workflow_identity"]["actor"] = "author"
+    evidence["merge_workflow_run"]["actor"] = {"login": "author"}
     evidence["reviews"][0]["commit_id"] = "c" * 40
 
     result = independent_merge.evaluate_merge_candidate(**evidence)
@@ -606,13 +667,44 @@ def test_unresolved_thread_or_behind_head_blocks_merge() -> None:
 
 def test_rerun_initiator_must_be_an_independent_current_head_approver() -> None:
     evidence = _candidate_evidence()
-    evidence["triggering_actor"] = "author"
+    evidence["merge_workflow_run"]["triggering_actor"] = {"login": "author"}
 
     result = independent_merge.evaluate_merge_candidate(**evidence)
 
     assert result["eligible"] is False
     assert "merge_triggering_actor_is_pull_request_author" in result["blockers"]
     assert "merge_triggering_actor_did_not_approve_current_head" in result["blockers"]
+
+
+def test_branch_dispatched_workflow_cannot_supply_reviewer_identity() -> None:
+    evidence = _candidate_evidence()
+    evidence["workflow_identity"].update(
+        {
+            "ref": "refs/heads/attacker-branch",
+            "workflow_ref": (
+                "owner/repo/.github/workflows/independent-pr-merge.yml"
+                "@refs/heads/attacker-branch"
+            ),
+            "workflow_sha": "c" * 40,
+            "actor": "author",
+        }
+    )
+    evidence["merge_workflow_run"].update(
+        {
+            "head_branch": "attacker-branch",
+            "head_sha": "c" * 40,
+            "actor": {"login": "author"},
+            # A branch copy may hard-code reviewer strings elsewhere, but the
+            # server-reported triggering actor remains the author.
+            "triggering_actor": {"login": "author"},
+        }
+    )
+
+    result = independent_merge.evaluate_merge_candidate(**evidence)
+
+    assert result["eligible"] is False
+    assert "merge_workflow_identity_is_not_accepted_current_main" in result["blockers"]
+    assert "merge_actor_is_pull_request_author" in result["blockers"]
 
 
 def test_candidate_cannot_replace_the_trusted_merge_control() -> None:
@@ -641,12 +733,17 @@ def test_candidate_cannot_replace_the_trusted_merge_control() -> None:
         "tests/integration/conftest.py",
         "pip.py",
         "pip/__main__.py",
+        "setup.py",
+        "setuptools/__init__.py",
+        "src/pip.py",
         "pytest.py",
         "pytest/__main__.py",
+        "src/pytest.py",
         "pytest.ini",
         "pyproject.toml",
         "ruff.py",
         "ruff/__main__.py",
+        "src/ruff.py",
         "sitecustomize.py",
     ],
 )

@@ -170,6 +170,16 @@ def test_independent_merge_workflow_is_default_branch_owner_comment_and_second_i
     assert "secrets." not in workflow
 
 
+def test_canonical_standards_describe_the_default_branch_owner_comment_lane() -> None:
+    standards = (ROOT / "docs" / "ENGINEERING_STANDARDS.md").read_text(
+        encoding="utf-8"
+    )
+    assert "`/independent-merge <40-character-lowercase-head-sha>`" in standards
+    assert "GitHub loads this `issue_comment` workflow from the default" in standards
+    assert "original workflow actor and actual `github.triggering_actor`" in standards
+    assert "dispatch `.github/workflows/independent-pr-merge.yml`" not in standards
+
+
 @pytest.mark.parametrize(
     "comment",
     [

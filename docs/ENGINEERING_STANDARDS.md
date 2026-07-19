@@ -110,14 +110,17 @@ is not enforcement; a foreign-repository or stale-workflow pin must fail
 closed.
 
 Until protected `main` is available, direct/manual merges are prohibited. A
-second push-capable GitHub identity must review the exact current head and then
-dispatch `.github/workflows/independent-pr-merge.yml` with the PR number and
-that 40-character head SHA. The lane fails closed unless all of the following
-remain true immediately before its atomic SHA-bound merge:
+second push-capable GitHub identity must approve the exact current head. The
+repository owner must then post exactly
+`/independent-merge <40-character-lowercase-head-sha>` as a comment on that
+pull request. GitHub loads this `issue_comment` workflow from the default
+branch, so the candidate branch cannot select or replace the write-capable
+workflow definition. The lane fails closed unless all of the following remain
+true immediately before its atomic SHA-bound merge:
 
-1. the dispatcher is not the PR author and is the trusted approver of the
-   current head; the actual `github.triggering_actor` for a rerun must satisfy
-   the same rule;
+1. the original workflow actor and actual `github.triggering_actor` are the
+   repository owner, while the trusted approver of the current head is a
+   distinct push-capable identity who is neither the owner nor the PR author;
 2. current `main` is contained in the head, so the tested branch is not behind;
 3. the newest required check and required workflow run on that exact head both
    succeeded;

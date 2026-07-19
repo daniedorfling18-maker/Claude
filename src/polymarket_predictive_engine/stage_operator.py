@@ -438,6 +438,12 @@ def build_stage_day(cfg: EngineConfig, *, stage_date: str | None = None) -> dict
         for name, value in (("maker_carry_study", maker), ("requote_alerts", requote), ("decision_policy", policy))
         if not value
     ]
+    yesterday_reconciliation = _yesterday_reconciliation(cfg, target)
+    cost_delta = _cost_delta(cfg, target)
+    if yesterday_reconciliation.get("state") == UNKNOWN:
+        missing_inputs.append("yesterday_reconciliation")
+    if cost_delta.get("state") == UNKNOWN:
+        missing_inputs.append("cost_ledger")
     payload.update(
         {
             "status": "ok" if not missing_inputs else "incomplete_unknown_inputs",
@@ -445,8 +451,8 @@ def build_stage_day(cfg: EngineConfig, *, stage_date: str | None = None) -> dict
             "order_tickets": _ticket_view(maker),
             "requote": _requote_view(requote),
             "kill_scoreboard": _kill_view(policy),
-            "yesterday_reconciliation": _yesterday_reconciliation(cfg, target),
-            "cost_delta": _cost_delta(cfg, target),
+            "yesterday_reconciliation": yesterday_reconciliation,
+            "cost_delta": cost_delta,
             "a1_sweep_advisory": build_a1_sweep_advisory(cfg, as_of=generated_at),
             "actions_today": _actions_for_date(ledger_path, target),
             "a1_reminders": A1_REMINDERS,

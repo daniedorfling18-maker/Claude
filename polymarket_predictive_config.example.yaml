@@ -319,10 +319,16 @@ ledger_anchor:
     - {glob: polymarket_portfolio/portfolio_snapshots.csv, mode: append_only}
     - {glob: polymarket_portfolio/cash_ledger.csv, mode: append_only}
     - {glob: polymarket_portfolio/paper_fills.csv, mode: append_only}
+    # WO-110: full taker-fee fills export is a regenerated dump - snapshot,
+    # never append_only (the 2026-07-19 paper_fills chain-break lesson).
+    - {glob: polymarket_portfolio/paper_fills_v2.csv, mode: snapshot}
     - {glob: polymarket_portfolio/settlements.csv, mode: append_only}
     - {glob: polymarket_shadow/shadow_positions.csv, mode: snapshot}
     - {glob: polymarket_shadow/shadow_fills.csv, mode: append_only}
     - {glob: maker_carry/maker_carry_history.csv, mode: append_only}
+    # WO-106 reward-epoch time series (was enrolled only in the code default,
+    # which this explicit list overrides - #269 review finding).
+    - {glob: maker_carry/reward_epoch_samples.csv, mode: append_only}
     - {glob: maker_carry/maker_live_test_history.csv, mode: append_only}
     # 2026-07-13: role-aware WO-73 rows use a new path so the pre-WO-73
     # append-only ledger's anchored header and historical bytes never change.
@@ -354,6 +360,13 @@ ledger_anchor:
     - {glob: performance/background_timeout_incidents.csv, mode: append_only}
     # WO-78 semantic-health incidents are byte-appended and prefix-anchored.
     - {glob: performance/degraded_state_incidents.csv, mode: append_only}
+    # #269 review follow-up: these four H2/H3 registered-hypothesis evidence
+    # ledgers were enrolled only in the code default, which this explicit list
+    # overrides - they were never anchored in production until now.
+    - {glob: h3_smart_flow/h3_final_fills.csv, mode: append_only}
+    - {glob: h2_dutch/h2_scan_observations_v1.csv, mode: append_only}
+    - {glob: h2_dutch/h2_final_episodes_v1.csv, mode: append_only}
+    - {glob: h2_dutch/h2_final_sample_manifest.json, mode: snapshot}
     - {glob: performance/cost_ledger_summary.json, mode: snapshot}
 
 # 2026-07-11 WO-65: weekly, ledger-only disaster-recovery snapshot. The active

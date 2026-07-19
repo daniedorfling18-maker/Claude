@@ -163,3 +163,20 @@ def test_exact_h2_ledgers_are_enrolled_with_correct_mutability_modes():
     assert registry["h2_dutch/h2_scan_observations_v1.csv"] == "append_only"
     assert registry["h2_dutch/h2_final_episodes_v1.csv"] == "append_only"
     assert registry["h2_dutch/h2_final_sample_manifest.json"] == "snapshot"
+
+
+def test_deployed_config_covers_every_default_ledger_enrollment():
+    # #269 Codex-review P1 (confirmed): the example config's explicit
+    # ledger_globs list replaces DEFAULT_LEDGER_REGISTRY wholesale, so a
+    # code-default enrollment absent from the config is silently inert in
+    # production. Both paper_fills_v2 (WO-110) and reward_epoch_samples
+    # (WO-106) had this gap. Pin the deployed config as a mode-matched
+    # superset of the code default so the two surfaces can never drift again.
+    from polymarket_predictive_engine import ledger_anchor as mod
+    from polymarket_predictive_engine.config import load_config
+
+    cfg = load_config("polymarket_predictive_config.example.yaml")
+    settings = mod._settings(cfg)
+    effective = {str(e["glob"]): str(e["mode"]) for e in settings["ledger_globs"]}
+    for entry in mod.DEFAULT_LEDGER_REGISTRY:
+        assert effective.get(str(entry["glob"])) == str(entry["mode"]), entry

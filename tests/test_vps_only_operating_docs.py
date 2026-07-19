@@ -51,6 +51,10 @@ def test_work_order_queue_distinguishes_non_buildable_states() -> None:
     assert "Current queue for Codex (reconciled 2026-07-19)" in work_orders
     assert "remains CLOSED and WO-67 remains BLOCKED" in work_orders
     assert "Each scope requires its own PR" in work_orders
+    assert "Never install dependencies, run the engine, or run tests on the local" in work_orders
+    assert "complete unfiltered `python -m pytest -q`" in work_orders
+    assert "bounded, isolated VPS" in work_orders
+    assert 'Run `pip install -e ".[dev]"` once, then `pytest` before pushing' not in work_orders
     assert "This queue reports accepted and open work; it does not grant authorization" in work_orders
     assert "every frozen/registered-surface change" in work_orders
     assert "owner-authored commit or an owner-approved pull" in work_orders

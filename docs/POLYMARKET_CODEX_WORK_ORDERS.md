@@ -32,7 +32,11 @@ tells you exactly what to build, where, and how to prove it works. Read `AGENTS.
 ## Ground rules (apply to every work order)
 
 1. **One work order per branch/PR.** Do not combine work orders or drive-by refactor.
-2. **Run `pip install -e ".[dev]"` once, then `pytest` before pushing. All tests must pass.**
+2. **Never install dependencies, run the engine, or run tests on the local
+   workstation.** Use local only as the control plane for editing, Git, review,
+   and SSH. Verify the exact proposed commit only in a bounded, isolated VPS
+   ARM64/Python 3.11 container: run `pip install -e ".[dev]"`, then the complete
+   unfiltered `python -m pytest -q`; every test must pass before pushing.
 3. **Never touch gate logic**: no changes to `readiness.py` promotion gates, `risk_decision` check
    thresholds, `_paper_decision` blockers in the audit script, config gate defaults, or anything in
    `execution/live.py`. If a work order seems to require it, stop — the work order is wrong.
@@ -61,7 +65,8 @@ Answer every question. A single "no" means stop and re-read the work order.
 4. Do all your new artifact JSONs carry `"paper_trading_invoked": false` and
    `"live_trading_invoked": false`?
 5. Are your tests asserting exact values computed by hand in the test body — not just "no crash"?
-6. Does `pytest` pass in full, offline, from a clean checkout?
+6. Does the complete unfiltered `pytest` suite pass offline from a clean
+   checkout of the exact commit in the bounded, isolated VPS container?
 7. Did you flip the work-order status here AND the WP status in the charter, with a dated
    "Landed:" note saying what exists now and where?
 
@@ -816,7 +821,8 @@ schema safety over 200 seeded samples.
 Work the queue in the Sequencing order below. For each work order:
 
 1. Fresh branch from latest `main`, named `codex/wo-<n>-<slug>`.
-2. Implement exactly per spec. Run the FULL `pytest` suite.
+2. Implement exactly per spec. Run the FULL `pytest` suite only in the bounded,
+   isolated VPS container required by the ground rules.
 3. Green -> push, open the PR, flip the statuses (here + charter) with a dated `Landed:` note,
    move on.
 4. Red and the failure is yours -> fix or revert your change. NEVER widen an existing assertion,
@@ -1466,7 +1472,8 @@ for in-window pick timing); rate limits confirmed generous for all our pollers.
    `cli.py`, VPS cadence via `scripts/run_vps_ops_scheduler.sh` (piggyback an
    existing job; do NOT add new scheduler intervals), tests in
    `tests/polymarket_predictive_engine/` with monkeypatched `requests`.
-5. `python -m pytest -q` green before any PR. Config example additions to
+5. `python -m pytest -q` green in the bounded, isolated VPS container before
+   any PR. Config example additions to
    `polymarket_predictive_config.example.yaml` with a dated comment.
 6. Every STUDY work order (anything that estimates an effect from data) must
    ship a planted-truth test: a synthetic dataset with a KNOWN effect that
@@ -4459,8 +4466,10 @@ Tests (offline, fixture CSVs, exact hand-computed assertions — imitate
 7. JSON carries `paper_trading_invoked`/`live_trading_invoked` == false.
 
 Merge: NON-FROZEN. Open a normal PR titled "WO-106: reward-epoch time-series
-collector". The orchestrator audits and merges — no owner merge required. Full
-`pytest` must pass offline from a clean checkout; record exact counts in the PR.
+collector". Non-frozen status does not authorize the builder or orchestrator to
+self-merge; use the independently reviewed accepted-merge process. Full
+`pytest` must pass offline from a clean checkout in the bounded, isolated VPS
+container; record exact counts in the PR.
 
 Do NOT: touch any gate (`maker_carry_study.py` gate logic, M-A/M-B/M-C),
 `live_test_decision_policy.py`, the evaluator, the registry, the scheduler, or

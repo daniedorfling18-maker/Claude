@@ -1531,17 +1531,49 @@ def write_portfolio_snapshot(con, cfg: EngineConfig) -> dict[str, Any]:
     return payload
 
 
+# WO-110 (2026-07-19): every export backing a WO-61 append_only-enrolled
+# ledger pins its column list FOREVER. This is the WO-73 invariant applied to
+# DB exports: an enrolled append-only header is immutable, so a table schema
+# change must create a NEW versioned export path - never widen an enrolled
+# one. WO-94's taker-fee columns reached the deployed `SELECT *` at the
+# 2026-07-19 deploy and rewrote paper_fills.csv's anchored bytes, breaking
+# the WO-61 chain at its 2026-07-12 link. Pinning the legacy projection
+# regenerates the original bytes from the intact SQLite ledger
+# (self-healing); the full row lives in paper_fills_v2.csv, enrolled as
+# SNAPSHOT mode because a regenerated dump can never honestly be append_only.
+LEGACY_FILLS_COLUMNS = (
+    "fill_id, order_id, idempotency_key, created_at, market_id, token_id, "
+    "side, fill_price, quantity, gross_notional_usdc, fee_usdc, "
+    "slippage_usdc, fill_model"
+)
+PINNED_CASH_LEDGER_COLUMNS = (
+    "cash_entry_id, idempotency_key, created_at, entry_type, amount_usdc, "
+    "cash_balance_after_usdc, order_id, fill_id, note"
+)
+PINNED_SETTLEMENTS_COLUMNS = (
+    "settlement_id, idempotency_key, created_at, market_id, token_id, "
+    "target, quantity, cost_basis_usdc, payout_usdc, realised_pnl_usdc, "
+    "resolution_source"
+)
+PINNED_SNAPSHOT_COLUMNS = (
+    "snapshot_id, created_at, cash_usdc, equity_usdc, open_order_count, "
+    "position_count, total_exposure_usdc, realised_pnl_usdc, "
+    "unrealised_pnl_usdc, daily_loss_usdc, drawdown, risk_usage_json"
+)
+EXPORT_QUERIES = {
+    "paper_orders.csv": "SELECT * FROM orders WHERE mode = 'paper' ORDER BY created_at, order_id",
+    "paper_fills.csv": f"SELECT {LEGACY_FILLS_COLUMNS} FROM fills ORDER BY created_at, fill_id",
+    "paper_fills_v2.csv": "SELECT * FROM fills ORDER BY created_at, fill_id",
+    "positions.csv": "SELECT * FROM positions ORDER BY market_id, token_id, side",
+    "cash_ledger.csv": f"SELECT {PINNED_CASH_LEDGER_COLUMNS} FROM cash_ledger ORDER BY created_at, rowid",
+    "settlements.csv": f"SELECT {PINNED_SETTLEMENTS_COLUMNS} FROM settlements ORDER BY created_at, settlement_id",
+    "portfolio_snapshots.csv": f"SELECT {PINNED_SNAPSHOT_COLUMNS} FROM portfolio_snapshots ORDER BY created_at, snapshot_id",
+}
+
+
 def export_ledger(con, cfg: EngineConfig) -> None:
     out = cfg.output_root / "polymarket_portfolio"
-    queries = {
-        "paper_orders.csv": "SELECT * FROM orders WHERE mode = 'paper' ORDER BY created_at, order_id",
-        "paper_fills.csv": "SELECT * FROM fills ORDER BY created_at, fill_id",
-        "positions.csv": "SELECT * FROM positions ORDER BY market_id, token_id, side",
-        "cash_ledger.csv": "SELECT * FROM cash_ledger ORDER BY created_at, rowid",
-        "settlements.csv": "SELECT * FROM settlements ORDER BY created_at, settlement_id",
-        "portfolio_snapshots.csv": "SELECT * FROM portfolio_snapshots ORDER BY created_at, snapshot_id",
-    }
-    for name, query in queries.items():
+    for name, query in EXPORT_QUERIES.items():
         rows = [dict(row) for row in con.execute(query).fetchall()]
         write_csv(out / name, rows)
 

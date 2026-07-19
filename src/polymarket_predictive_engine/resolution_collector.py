@@ -136,7 +136,10 @@ def infer_market_resolution_rows(
         "active": active,
         "archived": _as_bool(market.get("archived")),
         "end_time": _as_text(market.get("endDate")),
-        "close_time": _as_text(market.get("closedTime")) or _as_text(market.get("endDate")),
+        # endDate is the last admissible pre-close boundary.  closedTime is
+        # when Gamma later observed/finalised closure and belongs only to the
+        # label-availability side of the join.
+        "close_time": _as_text(market.get("endDate")) or _as_text(market.get("closedTime")),
         "resolution_time": _as_text(market.get("closedTime")),
         "resolution_source": _as_text(market.get("resolutionSource")),
         "resolved_by": _as_text(market.get("resolvedBy")),

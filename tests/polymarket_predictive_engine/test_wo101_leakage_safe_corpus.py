@@ -171,6 +171,30 @@ def test_resolution_corpus_is_append_only_deduped_and_uses_one_clock(tmp_path: P
     assert len(read_csv_rows(path)) == 3
 
 
+def test_gamma_end_time_is_the_pre_close_boundary_not_later_settlement() -> None:
+    market = {
+        "id": "gamma-boundary",
+        "slug": "market-boundary",
+        "conditionId": "condition-boundary",
+        "question": "Boundary fixture",
+        "closed": True,
+        "active": False,
+        "outcomes": '["Yes", "No"]',
+        "clobTokenIds": '["yes-boundary", "no-boundary"]',
+        "outcomePrices": '["1", "0"]',
+        "endDate": "2026-07-16T10:00:00Z",
+        "closedTime": "2026-07-16T10:15:00Z",
+    }
+
+    rows, _ = infer_market_resolution_rows(
+        market,
+        observed_at_utc="2026-07-16T10:20:00Z",
+    )
+
+    assert {row["close_time"] for row in rows} == {"2026-07-16T10:00:00Z"}
+    assert {row["resolution_time"] for row in rows} == {"2026-07-16T10:15:00Z"}
+
+
 def test_historical_backfill_observation_clock_is_after_gamma_response(
     tmp_path: Path,
     monkeypatch,

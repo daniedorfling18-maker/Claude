@@ -2611,7 +2611,8 @@ Free-plan repository. The repository must be upgraded to Pro/Team and
 `scripts/audit_github_merge_gate.py --apply-protection` must report
 `status=enforced` before live capital. Making the repository public is rejected.
 Until then, direct merges are prohibited and the documented exact-head merge
-workflow requires a distinct current-head approver to dispatch it. The
+workflow requires a distinct current-head approver plus an owner-authored
+exact-head PR comment loaded from the default branch. The
 repository currently has only one push-capable identity, so that fallback is
 configured but operationally BLOCKED rather than represented as enforcement.
 
@@ -5020,10 +5021,14 @@ frozen-surface change.
    do not claim GitHub-plan controls that the repository cannot enforce.
    **Implemented 2026-07-19, pending independent review/merge:** the ARM64 gate
    now runs the complete unfiltered suite in a bounded Python 3.11 container,
-   and the manual merge lane binds a second identity's approval, the latest
+   and the merge lane binds a second identity's approval, the latest
    exact-head check/workflow results, an up-to-date main ancestry, and resolved
    threads to an atomic non-force main update whose only parent is the verified
-   main SHA. It validates the actual rerun initiator and rejects PRs that alter
+   main SHA. A 2026-07-19 correction replaces branch-selectable manual dispatch
+   with an owner-only `/independent-merge <exact-head-sha>` PR comment. GitHub
+   loads that `issue_comment` workflow only from the default branch; both the
+   original actor and rerun initiator must be the repository owner, while the
+   exact-head approver must be a distinct trusted identity. It rejects PRs that alter
    its trusted workflows/scripts or any pytest collection/execution control.
    Review remediation on 2026-07-19 also normalizes GitHub's real
    `workflow-path@ref` response, audits active no-bypass required-workflow
@@ -5047,7 +5052,8 @@ frozen-surface change.
    remain false unless a workflow-identity-capable required-workflow ruleset is
    independently verified against the exact repository ID and accepted
    workflow commit. No merge is eligible without an exact-head
-   successful gate, a distinct current-head approver/rerun initiator, unchanged
+   successful gate, a distinct current-head approver, an owner-originated
+   default-branch comment run and rerun, unchanged
    trusted merge control, and an unchanged main ref at the atomic update. Test
    a suffixed real Actions workflow path, a pytest-control change, and a
    post-update PR-head race before relying on the lane. A successful merge run

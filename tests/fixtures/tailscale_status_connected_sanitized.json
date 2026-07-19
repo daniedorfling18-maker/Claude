@@ -1,0 +1,12 @@
+{
+  "Version": "1.96.2",
+  "BackendState": "Running",
+  "TailscaleIPs": ["100.64.12.34"],
+  "Self": {
+    "HostName": "polymarket-trader",
+    "DNSName": "polymarket-trader.example-tailnet.ts.net.",
+    "OS": "linux",
+    "TailscaleIPs": ["100.64.12.34"]
+  },
+  "MagicDNSSuffix": "example-tailnet.ts.net"
+}

@@ -8,6 +8,9 @@ Canonical outputs:
 - `outputs/performance/operating_state.md` — operator-readable report.
 - `outputs/performance/operating_state.json` — dashboard and automation source.
 - Dashboard section **Canonical operating state** — a rendering of the same JSON.
+- `outputs/performance/dashboard_private_transport.json` — fail-closed proof
+  that the dashboard has a loopback-only Docker binding and an authenticated,
+  tailnet-only Tailscale Serve HTTPS route with Funnel disabled.
 
 Generate or refresh them with:
 

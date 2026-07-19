@@ -214,6 +214,10 @@ jobs:
           # The VPS ops scheduler is the single governance-refresh owner. This
           # also repairs historical .env files that predate that invariant.
           updates["POLYMARKET_GOVERNANCE_REFRESH_SECONDS"] = "0"
+          # Compose hard-codes loopback independently, and this repairs stale
+          # host documentation without allowing an environment override to
+          # widen the listener.
+          updates["POLYMARKET_DASHBOARD_HOST"] = "127.0.0.1"
           Path(os.environ["RUNNER_TEMP"], "polymarket-vps-env.patch").write_text(
               json.dumps(updates, ensure_ascii=False),
               encoding="utf-8",
@@ -336,6 +340,69 @@ jobs:
             --output outputs/performance/vps_capacity_preflight.json \
             --root .
 
+          # Private transport is a pre-cutover requirement. A missing or
+          # logged-out Tailscale node must leave the existing stack untouched.
+          if ! command -v tailscale >/dev/null 2>&1; then
+            echo "::error::Tailscale is not installed; refusing to expose or deploy the dashboard."
+            exit 1
+          fi
+          $SUDO tailscale status --json > "$PREFLIGHT_DIR/tailscale-status.json"
+          dashboard_dns="$(python3 - "$PREFLIGHT_DIR/tailscale-status.json" <<'PY'
+          import json
+          import sys
+
+          payload = json.load(open(sys.argv[1], encoding="utf-8"))
+          state = str(payload.get("BackendState") or "")
+          dns_name = str((payload.get("Self") or {}).get("DNSName") or "").strip().rstrip(".").lower()
+          ips = [str(value) for value in payload.get("TailscaleIPs", []) if value]
+          if state != "Running" or not dns_name.endswith(".ts.net") or not ips:
+              raise SystemExit("Tailscale must be authenticated with MagicDNS/HTTPS before deployment")
+          print(dns_name)
+          PY
+          )"
+          dashboard_private_url="https://${dashboard_dns}/"
+          dashboard_port="$(python3 - <<'PY'
+          from pathlib import Path
+
+          value = ""
+          for raw_line in Path(".env").read_text(encoding="utf-8").splitlines():
+              stripped = raw_line.strip()
+              if not stripped or stripped.startswith("#") or "=" not in stripped:
+                  continue
+              key, raw_value = stripped.split("=", 1)
+              if key.strip() != "POLYMARKET_DASHBOARD_PORT":
+                  continue
+              value = raw_value.strip()
+              if len(value) >= 2 and value[0] == value[-1] and value[0] in {"'", '"'}:
+                  value = value[1:-1].strip()
+          print(value or "8765")
+          PY
+          )"
+          case "$dashboard_port" in
+            *[!0-9]*|'') echo "::error::Invalid dashboard port: $dashboard_port"; exit 1 ;;
+          esac
+          if [ "$dashboard_port" -lt 1 ] || [ "$dashboard_port" -gt 65535 ]; then
+            echo "::error::Dashboard port is outside 1-65535: $dashboard_port"
+            exit 1
+          fi
+
+          # Stage private transport values in the already mode-0600 deploy
+          # patch. Do not mutate .env or Tailscale before rollback is armed.
+          DASHBOARD_PRIVATE_URL="$dashboard_private_url" ENV_PATCH_PATH="$ENV_PATCH" python3 - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          patch_path = Path(os.environ["ENV_PATCH_PATH"])
+          updates = json.loads(patch_path.read_text(encoding="utf-8"))
+          updates["POLYMARKET_DASHBOARD_HOST"] = "127.0.0.1"
+          updates["PM_DASHBOARD_PUBLIC_URL"] = os.environ["DASHBOARD_PRIVATE_URL"]
+          temporary = patch_path.with_name(patch_path.name + ".private-transport.tmp")
+          temporary.write_text(json.dumps(updates, ensure_ascii=False), encoding="utf-8")
+          temporary.chmod(0o600)
+          temporary.replace(patch_path)
+          PY
+
           # Freeze bind-mounted writers only after target-revision capacity
           # has passed. This prevents files changing between stash capture and
           # reapply. If the updater refuses before moving HEAD, restore the old
@@ -385,15 +452,16 @@ jobs:
           temporary.replace(target)
           PY
 
-          # Arm rollback before the first mutating operation. Preserve the
-          # exact environment, deployed marker, source revision, and running
-          # image. Any later non-zero exit invokes the target revision's
-          # tested rollback utility and restores the prior production stack.
+          # Arm rollback before the first persistent transport/deploy mutation.
+          # Preserve the environment (plus a tighten-only private overlay),
+          # deployed marker, source revision, and running image. Any later
+          # non-zero exit invokes the target revision's tested rollback utility.
           ROLLBACK_DIR="$(mktemp -d)"
           ROLLBACK_ENV="$ROLLBACK_DIR/.env.last-known-good"
           ROLLBACK_MARKER="$ROLLBACK_DIR/deployed_git_rev.last-known-good"
           ROLLBACK_SCRIPT="$ROLLBACK_DIR/rollback_vps_paper_deploy.py"
           ROLLBACK_TELEMETRY_WRITER="$ROLLBACK_DIR/write_vps_telemetry_manifest.py"
+          ROLLBACK_TRANSPORT_VALIDATOR="$ROLLBACK_DIR/validate_dashboard_private_transport.py"
           ROLLBACK_IMAGE_TAG="polymarket-paper-vps:rollback-last-known-good"
           chmod 0700 "$ROLLBACK_DIR"
           ROLLBACK_ARMED=false
@@ -422,8 +490,11 @@ jobs:
                   --marker-was-present \
                   --image-backup-tag "$ROLLBACK_IMAGE_TAG" \
                   --docker-command "$DOCKER" \
-                  --failed-target-sha "$GITHUB_SHA" \
                   --telemetry-writer "$ROLLBACK_TELEMETRY_WRITER" \
+                  --tailscale-command "$SUDO tailscale" \
+                  --transport-validator "$ROLLBACK_TRANSPORT_VALIDATOR" \
+                  --private-dashboard-url "$dashboard_private_url" \
+                  --failed-target-sha "$GITHUB_SHA" \
                   --required-service polymarket-paper-live \
                   --required-service polymarket-dashboard \
                   --required-service superbru-auto-pick-watchdog \
@@ -454,11 +525,43 @@ jobs:
           trap 'deploy_exit $?' EXIT
 
           install -m 0600 .env "$ROLLBACK_ENV"
+          # Rollback restores the last-known-good runtime with a tighten-only
+          # private URL overlay, even when the old revision predates it.
+          DASHBOARD_PRIVATE_URL="$dashboard_private_url" ENV_PATH="$ROLLBACK_ENV" python3 - <<'PY'
+          import os
+          from pathlib import Path
+
+          path = Path(os.environ["ENV_PATH"])
+          updates = {
+              "POLYMARKET_DASHBOARD_HOST": "127.0.0.1",
+              "PM_DASHBOARD_PUBLIC_URL": os.environ["DASHBOARD_PRIVATE_URL"],
+          }
+          lines = path.read_text(encoding="utf-8").splitlines()
+          rendered = []
+          seen = set()
+          for line in lines:
+              if not line.lstrip().startswith("#") and "=" in line:
+                  key = line.split("=", 1)[0]
+                  if key in updates:
+                      rendered.append(f"{key}={updates[key]}")
+                      seen.add(key)
+                      continue
+              rendered.append(line)
+          for key, value in updates.items():
+              if key not in seen:
+                  rendered.append(f"{key}={value}")
+          temporary = path.with_name(path.name + ".secure.tmp")
+          temporary.write_text("\n".join(rendered) + "\n", encoding="utf-8")
+          temporary.chmod(0o600)
+          temporary.replace(path)
+          PY
           install -m 0600 outputs/performance/deployed_git_rev "$ROLLBACK_MARKER"
           git show "${GITHUB_SHA}:scripts/rollback_vps_paper_deploy.py" > "$ROLLBACK_SCRIPT"
           git show "${GITHUB_SHA}:scripts/write_vps_telemetry_manifest.py" > "$ROLLBACK_TELEMETRY_WRITER"
+          git show "${GITHUB_SHA}:scripts/validate_dashboard_private_transport.py" > "$ROLLBACK_TRANSPORT_VALIDATOR"
           chmod 0700 "$ROLLBACK_SCRIPT"
           chmod 0700 "$ROLLBACK_TELEMETRY_WRITER"
+          chmod 0700 "$ROLLBACK_TRANSPORT_VALIDATOR"
           previous_image_id="$($DOCKER inspect --format '{{.Image}}' polymarket-paper-live)"
           if [ -z "$previous_image_id" ]; then
             echo "::error::Cannot arm rollback: current paper image ID is unavailable."
@@ -466,6 +569,13 @@ jobs:
           fi
           $DOCKER image tag "$previous_image_id" "$ROLLBACK_IMAGE_TAG"
           ROLLBACK_ARMED=true
+
+          # Tailscale and persistent environment changes are recoverable from
+          # this point. Prove the private route against the still-running
+          # last-known-good backend before quiescing any writer.
+          $SUDO tailscale funnel --https=443 off >/dev/null 2>&1 || true
+          $SUDO tailscale serve --bg --yes --https=443 "http://127.0.0.1:${dashboard_port}"
+          curl -fsS --max-time 20 "$dashboard_private_url" >/dev/null
 
           echo "[deploy] quiescing paper writers for a consistent runtime snapshot"
           $DOCKER compose -f "$COMPOSE_FILE" stop --timeout 60
@@ -533,36 +643,6 @@ jobs:
           env_path.chmod(0o600)
           PY
 
-          python3 - <<'PY'
-          import os
-          from pathlib import Path
-
-          env_path = Path(".env")
-          host = os.environ.get("PM_VPS_HOST", "").strip()
-          if host:
-              lines = env_path.read_text(encoding="utf-8").splitlines()
-              values: dict[str, str] = {}
-              for line in lines:
-                  stripped = line.strip()
-                  if not stripped or stripped.startswith("#") or "=" not in stripped:
-                      continue
-                  key, value = stripped.split("=", 1)
-                  values[key] = value.strip().strip('"').strip("'")
-              port = values.get("POLYMARKET_DASHBOARD_PORT") or "8765"
-              public_url = f"http://{host}:{port}/"
-              rendered: list[str] = []
-              wrote = False
-              for line in lines:
-                  if line.startswith("PM_DASHBOARD_PUBLIC_URL="):
-                      rendered.append(f"PM_DASHBOARD_PUBLIC_URL={public_url}")
-                      wrote = True
-                  else:
-                      rendered.append(line)
-              if not wrote:
-                  rendered.append(f"PM_DASHBOARD_PUBLIC_URL={public_url}")
-              env_path.write_text("\n".join(rendered) + "\n", encoding="utf-8")
-              env_path.chmod(0o600)
-          PY
           rm -f "$ENV_PATCH"
           rm -rf "$PREFLIGHT_DIR"
 
@@ -584,6 +664,8 @@ jobs:
             sleep 3
             $DOCKER compose -f "$COMPOSE_FILE" up -d --no-build
           fi
+          echo "[deploy] enforcing tailnet-only authenticated HTTPS dashboard transport"
+          PM_VPS_REPO_DIR="$REPO_DIR" bash scripts/configure_polymarket_dashboard_tailscale.sh
           marker_tmp="outputs/performance/deployed_git_rev.tmp.$$"
           printf '%s\n' "$GITHUB_SHA" > "$marker_tmp"
           mv "$marker_tmp" outputs/performance/deployed_git_rev
@@ -689,8 +771,10 @@ jobs:
           echo "[deploy] verifying paper stack health"
           PM_VPS_REPO_DIR="$REPO_DIR" bash scripts/check_polymarket_vps_paper.sh
 
-          port="$(grep -E '^POLYMARKET_DASHBOARD_PORT=' .env | tail -n 1 | cut -d= -f2-)"
-          port="${port:-8765}"
+          # Reuse the already parsed and range-checked dotenv value. Re-reading
+          # it with grep would reintroduce quotes from valid values such as
+          # POLYMARKET_DASHBOARD_PORT="8765".
+          port="$dashboard_port"
           html="$(curl -fsS --max-time 10 "http://127.0.0.1:${port}/")"
           data="$(curl -fsS --max-time 10 "http://127.0.0.1:${port}/dashboard_data.json")"
 
@@ -711,5 +795,5 @@ jobs:
           grep -Fq -- '"maker_test_fills_last_24h"' <<<"$data"
 
           DEPLOY_COMMITTED=true
-          echo "VPS deploy verified: http://${PM_VPS_HOST}:${port}/"
+          echo "VPS deploy verified: ${dashboard_private_url} (tailnet-authenticated HTTPS)"
           REMOTE

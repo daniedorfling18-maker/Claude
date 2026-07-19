@@ -56,6 +56,9 @@ def test_vps_paper_compose_is_lean_and_paper_only():
     dashboard_command = services["polymarket-dashboard"]["command"]
     assert "render_polymarket_dashboard.py" in dashboard_command
     assert "if [ ! -f /app/outputs/polymarket_dashboard/index.html ]" not in dashboard_command
+    assert services["polymarket-dashboard"]["ports"] == [
+        "127.0.0.1:${POLYMARKET_DASHBOARD_PORT:-8765}:8765"
+    ]
     superbru = services["superbru-auto-pick-watchdog"]
     assert "run_superbru_auto_pick_watchdog.sh" in superbru["command"]
     assert superbru["environment"]["SUPERBRU_AUTO_PICK_ENABLED"] == "${SUPERBRU_AUTO_PICK_ENABLED:-true}"
@@ -99,6 +102,8 @@ def test_vps_env_example_keeps_live_credentials_empty():
     assert "SUPERBRU_EMAIL=" in text
     assert "SUPERBRU_PASSWORD=" in text
     assert "SUPERBRU_POOL_URL=" in text
+    assert "POLYMARKET_DASHBOARD_HOST=127.0.0.1" in text
+    assert "PM_DASHBOARD_PUBLIC_URL=" in text
 
 
 def test_vps_bootstrap_script_starts_only_lean_paper_stack():
@@ -115,6 +120,8 @@ def test_vps_bootstrap_script_starts_only_lean_paper_stack():
     assert "docker-compose.monitor.yml" not in text
     assert "POLYMARKET_LIVE_TRADING=1" not in text
     assert "POLYMARKET_EXECUTE_LIVE=true" not in text
+    assert "api.ipify.org" not in text
+    assert "configure_polymarket_dashboard_tailscale.sh" in text
     assert "PM_PAPER_MEM_LIMIT 2g" in text
     assert "POLYMARKET_WEBSOCKET_MAX_ASSETS 80" in text
     preflight = text.index("preflight_vps_capacity.py")
@@ -174,6 +181,14 @@ def test_vps_health_script_checks_dashboard_and_heartbeat_files():
     assert 'case "$REPO_DIR" in' in text
     assert '"~/"*) REPO_DIR="$HOME${REPO_DIR#?}" ;;' in text
     assert "eval " not in text
+    assert "validate_dashboard_private_transport.py" in text
+    assert "tailscale serve status" in text
+    assert "tailscale funnel status" in text
+    assert "--configured-url \"$private_dashboard_url\"" in text
+    assert "private_https_reachable=false" in text
+    assert 'curl -fsS --max-time 10 "$probe_url"' in text
+    assert "printf '{}\\n' > \"$transport_tmp/tailscale-status.json\"" in text
+    assert text.count("validate_dashboard_private_transport.py") == 1
 
 
 def test_vps_deploy_workflow_requires_current_dashboard_schema():
@@ -311,12 +326,57 @@ def test_vps_deploy_remote_script_is_valid_bash():
     assert result.returncode == 0, result.stderr
 
 
-def test_vps_deploy_workflow_writes_public_dashboard_url():
+def test_vps_deploy_workflow_enforces_private_dashboard_url():
     text = (ROOT / ".github" / "workflows" / "deploy-polymarket-vps-paper.yml").read_text(encoding="utf-8")
 
-    assert "PM_VPS_HOST='$PM_VPS_HOST'" in text
-    assert "PM_DASHBOARD_PUBLIC_URL=" in text
-    assert "public_url = f\"http://{host}:{port}/\"" in text
+    assert 'updates["POLYMARKET_DASHBOARD_HOST"] = "127.0.0.1"' in text
+    assert 'updates["PM_DASHBOARD_PUBLIC_URL"] = os.environ["DASHBOARD_PRIVATE_URL"]' in text
+    assert 'dashboard_private_url="https://${dashboard_dns}/"' in text
+    assert "configure_polymarket_dashboard_tailscale.sh" in text
+    assert "public_url =" not in text
+    assert "http://${PM_VPS_HOST}" not in text
+    assert "tailnet-authenticated HTTPS" in text
+
+    rollback_armed = text.index("ROLLBACK_ARMED=true")
+    funnel_mutation = text.index("tailscale funnel --https=443 off")
+    serve_mutation = text.index("tailscale serve --bg --yes --https=443")
+    live_env_write = text.index('env_path.write_text("\\n".join(rendered) + "\\n"')
+    assert rollback_armed < funnel_mutation < serve_mutation < live_env_write
+    assert 'ENV_PATCH_PATH="$ENV_PATCH"' in text
+    assert ".env.private-transport.tmp" not in text
+    assert "value[0] == value[-1]" in text
+    assert 'port="$dashboard_port"' in text
+    assert "grep -E '^POLYMARKET_DASHBOARD_PORT='" not in text
+
+
+def test_private_dashboard_setup_restores_env_until_transport_is_proven():
+    text = (ROOT / "scripts" / "configure_polymarket_dashboard_tailscale.sh").read_text(
+        encoding="utf-8"
+    )
+
+    backup = text.index('install -m 0600 .env "$env_backup"')
+    failure_trap = text.index("trap 'restore_env_on_failure' EXIT")
+    env_write = text.index('ENV_PATH="$REPO_DIR/.env" PRIVATE_URL="$private_url"')
+    compose_recreate = text.index("--force-recreate polymarket-dashboard")
+    failing_evidence = text.index(
+        "# Until a live HTTPS request succeeds, publish explicit failing evidence."
+    )
+    private_probe = text.index('curl -fsS --max-time 10 "$private_url"')
+    reachable_proof = text.index("--private-https-reachable")
+    commit = text.index("env_committed=true")
+    assert (
+        backup
+        < failure_trap
+        < env_write
+        < compose_recreate
+        < failing_evidence
+        < private_probe
+        < reachable_proof
+        < commit
+    )
+    assert 'install -m 0600 "$env_backup" .env' in text
+    assert "value[0] == value[-1]" in text
+    assert text.count("validate_dashboard_private_transport.py") == 2
 
 
 def test_vps_deploy_workflow_validates_private_key_secret():

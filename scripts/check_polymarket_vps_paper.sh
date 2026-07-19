@@ -36,7 +36,12 @@ env_value() {
   key="$1"
   file="$2"
   if [ -f "$file" ]; then
-    grep -E "^${key}=" "$file" | tail -n 1 | cut -d= -f2- || true
+    value="$(grep -E "^${key}=" "$file" | tail -n 1 | cut -d= -f2- || true)"
+    case "$value" in
+      \"*\") value="${value#\"}"; value="${value%\"}" ;;
+      \'*\') value="${value#\'}"; value="${value%\'}" ;;
+    esac
+    printf '%s' "$value"
   fi
 }
 
@@ -56,6 +61,7 @@ cd "$REPO_DIR"
 port="$(env_value POLYMARKET_DASHBOARD_PORT .env)"
 port="${port:-8765}"
 dashboard_url="http://127.0.0.1:${port}/"
+private_dashboard_url="$(env_value PM_DASHBOARD_PUBLIC_URL .env)"
 heartbeat="outputs/polymarket_model_governance/local_live_loop_heartbeat.json"
 forward_cycle="outputs/polymarket_model_governance/forward_paper_cycle.json"
 dashboard_data="outputs/polymarket_dashboard/dashboard_data.json"
@@ -69,9 +75,79 @@ if [ -n "${deployed_sha:-}" ]; then
   printf '%s\n' "Deploy SHA: $deployed_sha"
 fi
 printf '%s\n' "Compose: $COMPOSE_FILE"
-printf '%s\n' "Dashboard: $dashboard_url"
+printf '%s\n' "Dashboard backend: $dashboard_url"
+printf '%s\n' "Dashboard private HTTPS: ${private_dashboard_url:-not configured}"
 
 docker_cmd compose -f "$COMPOSE_FILE" ps
+
+printf '%s\n' ""
+printf '%s\n' "Private dashboard transport:"
+transport_tmp="$(mktemp -d)"
+trap 'rm -rf "$transport_tmp"' EXIT INT TERM
+printf '{}\n' > "$transport_tmp/tailscale-status.json"
+: > "$transport_tmp/tailscale-serve-status.txt"
+: > "$transport_tmp/dashboard-bindings.txt"
+transport_inputs_ready=true
+if ! command -v tailscale >/dev/null 2>&1; then
+  printf '%s\n' "  FAIL: Tailscale is not installed; public dashboard exposure remains forbidden."
+  exit_code=1
+  transport_inputs_ready=false
+else
+  if ! $SUDO tailscale status --json > "$transport_tmp/tailscale-status.json"; then
+    printf '%s\n' "  FAIL: Tailscale status is unavailable or the node is logged out."
+    exit_code=1
+    transport_inputs_ready=false
+  fi
+  if ! $SUDO tailscale serve status > "$transport_tmp/tailscale-serve-status.txt"; then
+    printf '%s\n' "  FAIL: Tailscale Serve status is unavailable."
+    exit_code=1
+    transport_inputs_ready=false
+  fi
+  $SUDO tailscale funnel status >> "$transport_tmp/tailscale-serve-status.txt" 2>/dev/null || true
+  if ! docker_cmd port polymarket-dashboard 8765/tcp > "$transport_tmp/dashboard-bindings.txt"; then
+    printf '%s\n' "  FAIL: dashboard Docker binding is unavailable."
+    exit_code=1
+    transport_inputs_ready=false
+  fi
+fi
+
+private_https_reachable=false
+if [ "$transport_inputs_ready" = true ]; then
+  probe_url="$(python3 - "$transport_tmp/tailscale-status.json" <<'PY'
+import json
+import sys
+
+try:
+    payload = json.load(open(sys.argv[1], encoding="utf-8"))
+except (OSError, ValueError):
+    payload = {}
+dns_name = str((payload.get("Self") or {}).get("DNSName") or "").strip().rstrip(".").lower()
+print(f"https://{dns_name}/" if dns_name.endswith(".ts.net") else "")
+PY
+)"
+  if [ -n "$probe_url" ] && curl -fsS --max-time 10 "$probe_url" >/dev/null 2>&1; then
+    private_https_reachable=true
+  fi
+fi
+
+if [ "$private_https_reachable" = true ]; then
+  probe_argument="--private-https-reachable"
+else
+  probe_argument=""
+fi
+if python3 scripts/validate_dashboard_private_transport.py \
+  --tailscale-status "$transport_tmp/tailscale-status.json" \
+  --serve-status "$transport_tmp/tailscale-serve-status.txt" \
+  --docker-bindings "$transport_tmp/dashboard-bindings.txt" \
+  --expected-port "$port" \
+  --configured-url "$private_dashboard_url" \
+  ${probe_argument:+$probe_argument} \
+  --output outputs/performance/dashboard_private_transport.json; then
+  printf '%s\n' "  PASS: loopback-only Docker binding and reachable authenticated tailnet HTTPS verified."
+else
+  printf '%s\n' "  FAIL: private HTTPS transport did not satisfy the registered checks."
+  exit_code=1
+fi
 
 printf '%s\n' ""
 printf '%s\n' "Secrets check (.env -> container):"
@@ -180,4 +256,6 @@ if [ -z "${heartbeat_age:-}" ] && [ -z "${forward_age:-}" ]; then
   exit_code=1
 fi
 
+rm -rf "$transport_tmp"
+trap - EXIT INT TERM
 exit "${exit_code:-0}"

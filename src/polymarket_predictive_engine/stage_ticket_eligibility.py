@@ -258,13 +258,18 @@ def evaluate_stage_ticket_eligibility(
     # the CURRENT study and replay versions, not merely be recent and about the
     # same candidate. Otherwise a study/replay regenerated within the 30-min
     # window (a new quote band or Tier-0 row) leaves a stale qualification that
-    # still reads eligible. Bind it to both consumed timestamps (fail-closed).
+    # still reads eligible. Bind it to the consumed policy, study, and replay
+    # timestamps (fail-closed).
     replay = read_json(out_root / "maker_fill_replay.json", default={}) or {}
     current_replay_generated = str(replay.get("generated_at_utc") or "").strip()
+    current_policy_generated = str(policy.get("generated_at_utc") or "").strip()
+    qual_policy = str(qualification.get("consumed_policy_generated_at") or "").strip()
     qual_study = str(qualification.get("consumed_study_generated_at") or "").strip()
     qual_replay = str(qualification.get("consumed_replay_generated_at") or "").strip()
     version_bound = (
-        bool(study_generated)
+        bool(current_policy_generated)
+        and qual_policy == current_policy_generated
+        and bool(study_generated)
         and qual_study == study_generated
         and bool(current_replay_generated)
         and qual_replay == current_replay_generated
@@ -288,6 +293,8 @@ def evaluate_stage_ticket_eligibility(
             f"qual_token={qual_token or 'missing'}; expected_token={candidate_token or 'missing'}; "
             f"age={round(qual_age, 1) if qual_age is not None else 'missing'}s "
             f"(max {MAX_QUALIFICATION_AGE_SECONDS:g}); version_bound={version_bound}; "
+            f"policy_generated={current_policy_generated or 'missing'}; "
+            f"qual_policy={qual_policy or 'missing'}; "
             f"first_failing={qualification.get('first_failing_check') or 'none'}",
         )
     )

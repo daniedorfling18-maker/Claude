@@ -21,7 +21,9 @@ def _cfg(tmp_path: Path) -> EngineConfig:
 def _write_healthy_inputs(cfg: EngineConfig, **overrides) -> None:
     out = cfg.output_root / "maker_carry"
     run_stamp = overrides.get("run_stamp", "2026-07-17T11:45:00Z")
+    policy_stamp = overrides.get("policy_stamp", "2026-07-17T11:46:00Z")
     policy = {
+        "generated_at_utc": policy_stamp,
         "indicated_action": overrides.get("indicated_action", "fund_100_min_size_single_calmest_market"),
         "kill_criteria_status": {
             "status": overrides.get("kill", "clear"),
@@ -76,6 +78,7 @@ def _write_healthy_inputs(cfg: EngineConfig, **overrides) -> None:
             "candidate_condition_id": overrides.get("qual_candidate", overrides.get("candidate", CANDIDATE)),
             "candidate_token_id": overrides.get("qual_token", overrides.get("token", TOKEN)),
             "generated_at_utc": overrides.get("qual_generated", run_stamp),
+            "consumed_policy_generated_at": overrides.get("qual_policy", policy_stamp),
             "consumed_study_generated_at": overrides.get("qual_study", run_stamp),
             "consumed_replay_generated_at": overrides.get("qual_replay", replay_stamp),
             "first_failing_check": overrides.get("qual_first_failing"),
@@ -111,6 +114,7 @@ def test_each_registered_condition_fails_closed(tmp_path: Path) -> None:
         {"qual_generated": "2026-07-17T10:00:00Z"},  # stale qualification (>30m)
         {"qual_candidate": "0xmismatch"},  # qualification about a different market
         {"qual_token": "0xother-token"},  # qualification about the other outcome token
+        {"qual_policy": "2026-07-17T09:00:00Z"},  # qualification bound to an older policy version
         {"qual_study": "2026-07-17T09:00:00Z"},  # qualification bound to an older study version
         {"qual_replay": "2026-07-17T09:00:00Z"},  # qualification bound to an older replay version
         {"raw_imbalance": None},  # missing vpin_raw -> toxicity screen fails closed
@@ -216,6 +220,7 @@ def test_candidate_change_while_eligible_renotifies(tmp_path: Path, monkeypatch)
     # new eligible notice must fire (keyed on candidate, not just state).
     out = cfg.output_root / "maker_carry"
     write_json(out / "decision_policy.json", {
+        "generated_at_utc": "2026-07-17T12:16:00Z",
         "indicated_action": "fund_100_min_size_single_calmest_market",
         "kill_criteria_status": {"status": "clear", "kill_input_freshness": {"state": "fresh"}},
         "composition_stability": {"most_recurrent_market": "0xdef"},
@@ -230,6 +235,7 @@ def test_candidate_change_while_eligible_renotifies(tmp_path: Path, monkeypatch)
     write_json(out / "sharp_linking_qualification.json", {
         "qualified": True, "candidate_condition_id": "0xdef", "candidate_token_id": "0xdef-token",
         "generated_at_utc": "2026-07-17T11:50:00Z",
+        "consumed_policy_generated_at": "2026-07-17T12:16:00Z",
         "consumed_study_generated_at": "2026-07-17T12:15:00Z", "consumed_replay_generated_at": "2026-07-17T11:55:00Z"})
     third = mod.run_stage_ticket_eligibility(cfg, as_of=NOW)
     assert third["state"] == "eligible" and third["candidate_changed_while_eligible"] is True

@@ -217,7 +217,10 @@ def paper_live_promotion_gate(cfg: EngineConfig) -> dict[str, Any]:
     labels = count_clean_resolved_labels(cfg)
     legacy = read_json(cfg.governance_root / "skill_model_summary.json", default={}) or {}
     legacy_oos = legacy.get("oos_vs_market", {}) if isinstance(legacy, dict) else {}
-    legacy_skill = bool(legacy_oos.get("beats_market_significantly"))
+    legacy_skill = bool(
+        legacy_oos.get("beats_market_significantly")
+        and legacy.get("promotion_authority") is not False
+    )
 
     market_validation = _market_relative_validation_summary(cfg)
     market_oos = market_validation.get("oos", {}) if isinstance(market_validation, dict) else {}

@@ -26,10 +26,18 @@ def _write_resolutions(tmp_path, n_markets):
         w.writerows(rows)
 
 
-def _write_skill(tmp_path, significant):
+def _write_skill(tmp_path, significant, *, promotion_authority=None):
     gov = tmp_path / "outputs" / "polymarket_model_governance"
-    write_json(gov / "skill_model_summary.json",
-               {"status": "ok", "oos_vs_market": {"beats_market_significantly": significant, "brier_skill_vs_market": 0.08}})
+    payload = {
+        "status": "ok",
+        "oos_vs_market": {
+            "beats_market_significantly": significant,
+            "brier_skill_vs_market": 0.08,
+        },
+    }
+    if promotion_authority is not None:
+        payload["promotion_authority"] = promotion_authority
+    write_json(gov / "skill_model_summary.json", payload)
 
 
 def test_count_clean_resolved_labels(tmp_path):
@@ -61,3 +69,14 @@ def test_paper_approved_but_live_needs_more_labels_and_approval(tmp_path):
     assert gate["approved_for_paper_trading"] is True
     assert gate["approved_for_live_trading"] is False
     assert any("below live target" in r for r in gate["live_blockers"])
+
+
+def test_diagnostic_skill_artifact_cannot_authorise_promotion(tmp_path):
+    _write_resolutions(tmp_path, 60)
+    _write_skill(tmp_path, significant=True, promotion_authority=False)
+
+    gate = paper_live_promotion_gate(_cfg(tmp_path))
+
+    assert gate["oos_beats_market_significantly"] is False
+    assert gate["approved_for_paper_trading"] is False
+    assert any("out-of-sample skill" in reason for reason in gate["paper_blockers"])

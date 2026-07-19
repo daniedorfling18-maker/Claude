@@ -4,10 +4,12 @@ import json
 import time
 import urllib.parse
 import urllib.request
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
 from .config import EngineConfig, load_config
+from .resolution_corpus import append_resolution_observations, canonical_utc
 from .utils import boolish, discover_files, infer_category, now_utc, read_csv_rows, safe_float, write_csv, write_json
 
 DEFAULT_GAMMA_BASE_URL = "https://gamma-api.polymarket.com/markets"
@@ -60,6 +62,7 @@ def infer_market_resolution_rows(
     category_hint: str = "",
     win_threshold: float = 0.98,
     loss_threshold: float = 0.02,
+    observed_at_utc: str | datetime | None = None,
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     """Convert one Gamma market payload into token-level resolution rows.
 
@@ -67,6 +70,7 @@ def infer_market_resolution_rows(
     settlement vector has exactly one near-one outcome and all remaining outcomes are near-zero. Active or
     ambiguous markets are retained as metadata but remain unlabelled.
     """
+    observed_at = canonical_utc(observed_at_utc)
     slug = _as_text(market.get("slug"))
     outcomes = [_as_text(x) for x in _parse_jsonish(market.get("outcomes"))]
     token_ids = [_as_text(x) for x in _parse_jsonish(market.get("clobTokenIds"))]
@@ -132,7 +136,10 @@ def infer_market_resolution_rows(
         "active": active,
         "archived": _as_bool(market.get("archived")),
         "end_time": _as_text(market.get("endDate")),
-        "close_time": _as_text(market.get("closedTime")) or _as_text(market.get("endDate")),
+        # endDate is the last admissible pre-close boundary.  closedTime is
+        # when Gamma later observed/finalised closure and belongs only to the
+        # label-availability side of the join.
+        "close_time": _as_text(market.get("endDate")) or _as_text(market.get("closedTime")),
         "resolution_time": _as_text(market.get("closedTime")),
         "resolution_source": _as_text(market.get("resolutionSource")),
         "resolved_by": _as_text(market.get("resolvedBy")),
@@ -144,7 +151,7 @@ def infer_market_resolution_rows(
         "winning_token_id": winning_token_id,
         "resolution_quality": quality,
         "resolution_quality_reason": "; ".join(reasons),
-        "resolution_collected_at_utc": now_utc(),
+        "resolution_collected_at_utc": observed_at,
     }
     row_count = max(len(outcomes), len(token_ids), len(prices), 1)
     rows: list[dict[str, Any]] = []
@@ -183,7 +190,12 @@ def _unique_raw_slugs(cfg: EngineConfig) -> dict[str, str]:
     return slugs
 
 
-def collect_resolutions(cfg: EngineConfig, limit: int | None = None) -> tuple[list[dict[str, Any]], list[dict[str, Any]], dict[str, Any]]:
+def collect_resolutions(
+    cfg: EngineConfig,
+    limit: int | None = None,
+    *,
+    as_of: str | datetime | None = None,
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]], dict[str, Any]]:
     settings = cfg.raw.get("resolution", {})
     base_url = str(settings.get("gamma_base_url", DEFAULT_GAMMA_BASE_URL))
     timeout = int(settings.get("request_timeout_seconds", 20))
@@ -196,6 +208,11 @@ def collect_resolutions(cfg: EngineConfig, limit: int | None = None) -> tuple[li
         limit = configured_limit if configured_limit > 0 else None
     selected = list(slugs.items())[:limit]
 
+    # An explicit clock is a deterministic replay boundary.  Production
+    # collection deliberately waits until every Gamma response has returned
+    # before assigning one conservative availability timestamp to the batch.
+    replay_at = canonical_utc(as_of) if as_of is not None else ""
+    fetched_markets: list[tuple[dict[str, Any], str]] = []
     rows: list[dict[str, Any]] = []
     quality: list[dict[str, Any]] = []
     errors: list[dict[str, Any]] = []
@@ -205,20 +222,45 @@ def collect_resolutions(cfg: EngineConfig, limit: int | None = None) -> tuple[li
             if not market:
                 errors.append({"market_slug": slug, "resolution_quality": "gamma_not_found", "resolution_quality_reason": "empty response"})
                 continue
-            r, q = infer_market_resolution_rows(market, category_hint=category, win_threshold=win_threshold, loss_threshold=loss_threshold)
-            rows.extend(r)
-            quality.extend(q)
+            fetched_markets.append((market, category))
             if pause:
                 time.sleep(pause)
         except Exception as exc:
             errors.append({"market_slug": slug, "resolution_quality": "gamma_fetch_error", "resolution_quality_reason": str(exc)})
+
+    run_at = replay_at or canonical_utc()
+    for market, category in fetched_markets:
+        try:
+            r, q = infer_market_resolution_rows(
+                market,
+                category_hint=category,
+                win_threshold=win_threshold,
+                loss_threshold=loss_threshold,
+                observed_at_utc=run_at,
+            )
+            rows.extend(r)
+            quality.extend(q)
+        except Exception as exc:
+            errors.append({
+                "market_slug": _as_text(market.get("slug")),
+                "resolution_quality": "gamma_classification_error",
+                "resolution_quality_reason": str(exc),
+            })
     quality.extend(errors)
 
     out_root = cfg.output_root / "polymarket_training"
     gov_root = cfg.governance_root
     write_csv(out_root / "market_resolutions.csv", rows)
     write_csv(gov_root / "resolution_quality_report.csv", quality)
+    corpus = append_resolution_observations(
+        cfg,
+        rows,
+        producer="collect_resolutions",
+        observed_at_utc=run_at,
+    )
     summary = {
+        "work_order": "WO-101",
+        "generated_at_utc": run_at,
         "requested_markets": len(selected),
         "resolution_rows": len(rows),
         "clean_settlement_markets": len({r["market_slug"] for r in rows if r.get("resolution_quality") == "clean_settlement"}),
@@ -226,6 +268,9 @@ def collect_resolutions(cfg: EngineConfig, limit: int | None = None) -> tuple[li
         "error_count": len(errors),
         "output_file": str(out_root / "market_resolutions.csv"),
         "quality_file": str(gov_root / "resolution_quality_report.csv"),
+        "append_only_resolution_corpus": corpus,
+        "paper_trading_invoked": False,
+        "live_trading_invoked": False,
     }
     write_json(gov_root / "gamma_resolution_summary.json", summary)
     return rows, quality, summary

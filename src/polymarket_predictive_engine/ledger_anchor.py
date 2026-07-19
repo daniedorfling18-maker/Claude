@@ -67,6 +67,8 @@ DEFAULT_LEDGER_REGISTRY: list[dict[str, str]] = [
     {"glob": "h2_dutch/h2_scan_observations_v1.csv", "mode": "append_only"},
     {"glob": "h2_dutch/h2_final_episodes_v1.csv", "mode": "append_only"},
     {"glob": "h2_dutch/h2_final_sample_manifest.json", "mode": "snapshot"},
+    {"glob": "polymarket_training/resolution_corpus_v1.csv", "mode": "append_only"},
+    {"glob": "polymarket_training/historical_bid_ask_v1.csv", "mode": "append_only"},
     {"glob": "performance/background_timeout_incidents.csv", "mode": "append_only"},
     {"glob": "performance/degraded_state_incidents.csv", "mode": "append_only"},
     {"glob": "performance/wallet_reconciliation_history.csv", "mode": "append_only"},

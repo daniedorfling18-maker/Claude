@@ -791,6 +791,17 @@ broker, or order paths. Exact observations, frozen episodes, and the verdict
 are published under `outputs/h2_dutch/`, enrolled in the evidence anchor, and
 shown as the dashboard's H2 authority.
 
+**2026-07-19 - WO-101 rebuilt by Codex.** The resolved-market diagnostic
+trainer now has explicit point-in-time provenance: append-only resolution
+states whose labels cannot predate their first observation, append-only
+executable bid/ask observations from the live websocket/archive, separate
+feature and label files, and a whole-market purged chronological split with a
+24-hour embargo and at least 10 independent validation markets. The venue's
+single-price history remains diagnostic and cannot be treated as a spread.
+The resulting skill model is H3 structural-bias diagnostic substrate only;
+WO-96 remains the exact H3 verdict authority and every paper/live invocation
+flag remains false. Funding remains closed and WO-67 remains blocked.
+
 ## Rules of engagement for coding agents
 
 0. **Division of labour**: the orchestrating agent writes/updates this charter and the work orders

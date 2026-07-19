@@ -10,8 +10,9 @@ Design choices that keep the test honest:
   - Baseline = the market price itself (``implied_probability``/``midpoint``), not uniform.
   - L2-regularised logistic regression on leakage-screened numeric features
     (``numeric_model_feature_columns``), always including the market logit.
-  - Temporal split **by market**: the earliest markets train, the latest test, and no
-    market's snapshots straddle the split (prevents within-market leakage).
+  - WO-101's precomputed split is chronological **by market**, purges every
+    training label interval that overlaps the validation feature window plus
+    embargo, and never lets a market straddle both sides.
   - Skill = 1 - model_brier / market_brier, with a paired, market-clustered bootstrap
     CI so "beats the market" means statistically, not by luck.
   - Skill is also reported on the uncertain region (market prob in [0.15, 0.85]) where
@@ -24,12 +25,20 @@ from typing import Any
 
 import numpy as np
 
-from ..config import EngineConfig, load_config
-from ..utils import now_utc, read_csv_rows, safe_float, write_csv, write_json
-from .calibration_v2 import joined_feature_label_rows, numeric_model_feature_columns
+from polymarket_common.fees import polymarket_taker_fee_usdc, resolve_taker_fee_schedule
 
-MODEL_VERSION = "pm-skill-logit-v1"
+from ..config import EngineConfig, load_config
+from ..leakage_safe_training import (
+    FEATURES_RELATIVE_PATH,
+    LABELS_RELATIVE_PATH,
+    REGISTERED_MIN_VALIDATION_MARKETS,
+)
+from ..utils import now_utc, read_csv_rows, safe_float, write_csv, write_json
+from .calibration_v2 import numeric_model_feature_columns
+
+MODEL_VERSION = "pm-skill-logit-v2-wo101"
 MARKET_PROB_FIELDS = ("implied_probability", "midpoint")
+DIAGNOSTIC_SKILL_SUMMARY_NAME = "wo101_diagnostic_skill_model_summary.json"
 
 
 def _market_probability(row: dict[str, Any]) -> float | None:
@@ -66,6 +75,7 @@ def select_feature_columns(rows: list[dict[str, Any]]) -> list[str]:
         "best_bid",
         "best_ask",
         "executable_buy_price",
+        "executable_sell_price",
         "executable_price",
         "last_trade_price",
         "price_change_price",
@@ -134,6 +144,65 @@ def _temporal_market_split(rows: list[dict[str, Any]], test_fraction: float) -> 
         key = str(row.get("market_id") or row.get("market_slug") or "")
         (train_idx if key in train_markets else test_idx).append(i)
     return train_idx, test_idx
+
+
+def _joined_registered_rows(feature_path: str, label_path: str) -> list[dict[str, Any]]:
+    """Join separated WO-101 files by immutable quote-derived row identity."""
+
+    labels: dict[str, dict[str, Any]] = {}
+    duplicate_ids: set[str] = set()
+    for label in read_csv_rows(label_path):
+        row_id = str(label.get("training_row_id") or "")
+        if not row_id:
+            continue
+        if row_id in labels:
+            duplicate_ids.add(row_id)
+            continue
+        labels[row_id] = label
+
+    joined: list[dict[str, Any]] = []
+    for feature in read_csv_rows(feature_path):
+        row_id = str(feature.get("training_row_id") or "")
+        if not row_id or row_id in duplicate_ids:
+            continue
+        label = labels.get(row_id)
+        if label is None:
+            continue
+        split = str(feature.get("split") or "")
+        if split not in {"train", "validation"} or split != str(label.get("split") or ""):
+            continue
+        if any(
+            str(feature.get(field) or "") != str(label.get(field) or "")
+            for field in ("market_id", "token_id", "prediction_timestamp")
+        ):
+            continue
+        target = safe_float(label.get("target"))
+        if target not in {0.0, 1.0}:
+            continue
+        joined.append({**feature, "target": int(target)})
+    return joined
+
+
+def _registered_split_indices(
+    rows: list[dict[str, Any]],
+) -> tuple[list[int], list[int], set[str]]:
+    train_idx = [
+        index for index, row in enumerate(rows) if str(row.get("split") or "") == "train"
+    ]
+    validation_idx = [
+        index
+        for index, row in enumerate(rows)
+        if str(row.get("split") or "") == "validation"
+    ]
+    train_markets = {
+        str(rows[index].get("market_id") or rows[index].get("market_slug") or "")
+        for index in train_idx
+    }
+    validation_markets = {
+        str(rows[index].get("market_id") or rows[index].get("market_slug") or "")
+        for index in validation_idx
+    }
+    return train_idx, validation_idx, train_markets & validation_markets
 
 
 def _standardize(matrix: np.ndarray) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
@@ -307,29 +376,138 @@ def _edge_roi(model_p: list[float], market_p: list[float], y: list[int], markets
             "roi": roi, "roi_ci95": [lo, hi], "profitable_significantly": bool(lo is not None and lo > 0)}
 
 
+def _executable_edge_roi(
+    model_p: list[float],
+    rows: list[dict[str, Any]],
+    y: list[int],
+    markets: list[str],
+    threshold: float,
+    n_boot: int = 5000,
+    seed: int = 20260719,
+) -> dict[str, Any]:
+    """Long token-level diagnostic ROI at recorded ask plus canonical taker fee.
+
+    Binary complements are separate token rows. The evaluator buys only the
+    observed token when model fair clears its actual ask; it never manufactures
+    a complement quote from one minus midpoint.
+    """
+
+    import random
+
+    profit: list[float] = []
+    staked: list[float] = []
+    bet_markets: list[str] = []
+    charged_fees: list[float] = []
+    fee_sources: dict[str, int] = {}
+    for probability, row, target, market_id in zip(model_p, rows, y, markets):
+        ask = safe_float(row.get("best_ask"))
+        if ask is None or not 0.0 < ask < 1.0 or probability - ask <= threshold:
+            continue
+        schedule = resolve_taker_fee_schedule(row)
+        fee = polymarket_taker_fee_usdc(shares=1.0, price=ask, schedule=schedule)
+        cost = ask + fee
+        if cost <= 0:
+            continue
+        profit.append(float(target) - cost)
+        staked.append(cost)
+        bet_markets.append(market_id)
+        charged_fees.append(fee)
+        fee_sources[schedule.source] = fee_sources.get(schedule.source, 0) + 1
+
+    if not staked:
+        return {
+            "threshold": threshold,
+            "n_bets": 0,
+            "roi": None,
+            "roi_ci95": [None, None],
+            "entry_price": "recorded_best_ask",
+            "fee_model": "canonical_category_price_aware_taker_fee_one_share_5dp",
+        }
+
+    roi = sum(profit) / sum(staked)
+    by_market: dict[str, list[int]] = {}
+    for index, market_id in enumerate(bet_markets):
+        by_market.setdefault(market_id, []).append(index)
+    keys = list(by_market)
+    rng = random.Random(seed)
+    rois: list[float] = []
+    for _ in range(n_boot):
+        sampled_profit = 0.0
+        sampled_stake = 0.0
+        for _ in range(len(keys)):
+            for index in by_market[keys[rng.randrange(len(keys))]]:
+                sampled_profit += profit[index]
+                sampled_stake += staked[index]
+        if sampled_stake > 0:
+            rois.append(sampled_profit / sampled_stake)
+    rois.sort()
+    low = rois[int(0.025 * len(rois))] if rois else None
+    high = rois[int(0.975 * len(rois))] if rois else None
+    return {
+        "threshold": threshold,
+        "n_bets": len(staked),
+        "n_markets": len(keys),
+        "roi": roi,
+        "roi_ci95": [low, high],
+        "profitable_significantly": bool(low is not None and low > 0),
+        "entry_price": "recorded_best_ask",
+        "fee_model": "canonical_category_price_aware_taker_fee_one_share_5dp",
+        "mean_fee_per_share": sum(charged_fees) / len(charged_fees),
+        "fee_sources": dict(sorted(fee_sources.items())),
+    }
+
+
 def train_skill_model(cfg: EngineConfig, test_fraction: float = 0.3, l2: float = 5.0,
                       uncertain_band: tuple[float, float] = (0.15, 0.85),
                       max_rows_per_token: int = 12) -> dict[str, Any]:
-    train_root = cfg.output_root / "polymarket_training"
-    rows = joined_feature_label_rows(str(train_root / "features_v2.csv"), str(train_root / "labels.csv"))
+    feature_path = cfg.output_root / FEATURES_RELATIVE_PATH
+    label_path = cfg.output_root / LABELS_RELATIVE_PATH
+    rows = _joined_registered_rows(str(feature_path), str(label_path))
     feature_columns = select_feature_columns(rows) if rows else []
     design = _thin_by_token(build_design(rows, feature_columns), max_rows_per_token)
 
     out_dir = cfg.output_root / "polymarket_models"
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    train_idx, test_idx = _temporal_market_split(design, test_fraction)
+    train_idx, test_idx, market_overlap = _registered_split_indices(design)
     n_markets = len({str(r.get("market_id") or r.get("market_slug")) for r in design})
-    if len(design) < 50 or not test_idx or len({design[i]["_y"] for i in train_idx}) < 2:
+    train_markets = {
+        str(design[index].get("market_id") or design[index].get("market_slug") or "")
+        for index in train_idx
+    }
+    validation_markets = {
+        str(design[index].get("market_id") or design[index].get("market_slug") or "")
+        for index in test_idx
+    }
+    if (
+        len(design) < 50
+        or len(validation_markets) < REGISTERED_MIN_VALIDATION_MARKETS
+        or len({design[i]["_y"] for i in train_idx}) < 2
+        or market_overlap
+    ):
         summary = {
             "status": "insufficient_data",
             "model_version": MODEL_VERSION,
             "joined_rows": len(design),
             "markets": n_markets,
-            "reason": "need >=50 joined rows, both classes in train, and a non-empty market-held-out test set",
+            "reason": (
+                "need >=50 WO-101 exact bid/ask rows, both classes in the purged "
+                "train split, at least 10 distinct registered validation markets, "
+                "and zero market overlap"
+            ),
+            "minimum_validation_markets_required": REGISTERED_MIN_VALIDATION_MARKETS,
+            "validation_markets": len(validation_markets),
+            "market_overlap": sorted(market_overlap),
+            "input_features": str(feature_path),
+            "input_labels": str(label_path),
+            "evidence_class": "diagnostic_h3_structural_bias_substrate",
+            "registered_h3_verdict_authority": False,
+            "promotion_authority": False,
             "generated_at_utc": now_utc(),
+            "paper_trading_invoked": False,
+            "live_trading_invoked": False,
         }
-        write_json(cfg.governance_root / "skill_model_summary.json", summary)
+        write_json(cfg.governance_root / DIAGNOSTIC_SKILL_SUMMARY_NAME, summary)
         return summary
 
     x_train = np.array([design[i]["_x"] for i in train_idx], dtype=float)
@@ -369,6 +547,8 @@ def train_skill_model(cfg: EngineConfig, test_fraction: float = 0.3, l2: float =
     write_csv(out_dir / "skill_model_oos_predictions.csv", [
         {"market_id": markets[i], "token_id": test[i].get("token_id", ""),
          "prediction_timestamp": test[i].get("prediction_timestamp", ""),
+         "best_bid": test[i].get("best_bid", ""), "best_ask": test[i].get("best_ask", ""),
+         "executable_entry_price": test[i].get("best_ask", ""),
          "market_probability": round(market_p[i], 6), "model_probability": round(model_p[i], 6),
          "target": y_test[i]} for i in range(len(test))
     ])
@@ -379,7 +559,7 @@ def train_skill_model(cfg: EngineConfig, test_fraction: float = 0.3, l2: float =
         key=lambda d: abs(d["std_weight"]), reverse=True,
     )
     htc_keys = [_htc_bucket(safe_float(r.get("hours_to_close"))) for r in test]
-    cat_keys = ["worldcup" if str(r.get("category")) == "worldcup" else "other" for r in test]
+    cat_keys = [str(r.get("category") or "unknown") for r in test]
     diagnostics = {
         "market_reliability_oos": _reliability(market_p, y_test),
         "skill_by_time_to_close": _subgroup_brier(htc_keys, model_p, market_p, y_test),
@@ -392,13 +572,27 @@ def train_skill_model(cfg: EngineConfig, test_fraction: float = 0.3, l2: float =
         "status": "ok",
         "model_version": MODEL_VERSION,
         "generated_at_utc": now_utc(),
+        "input_contract": (
+            "WO-101 append-only resolutions + exact historical bid/ask + "
+            "purged chronological split"
+        ),
+        "evidence_class": "diagnostic_h3_structural_bias_substrate",
+        "registered_h3_verdict_authority": False,
+        "promotion_authority": False,
         "joined_rows": len(design),
         "markets": n_markets,
         "feature_columns": feature_columns,
         "l2": l2,
-        "test_fraction": test_fraction,
-        "split": {"train_rows": len(train_idx), "test_rows": len(test_idx),
-                  "train_markets": n_markets - len(set(markets)), "test_markets": len(set(markets))},
+        "requested_test_fraction_ignored": test_fraction,
+        "split": {
+            "policy": "precomputed WO-101 whole-market purged chronological split",
+            "train_rows": len(train_idx),
+            "test_rows": len(test_idx),
+            "train_markets": len(train_markets),
+            "test_markets": len(validation_markets),
+            "minimum_validation_markets_required": REGISTERED_MIN_VALIDATION_MARKETS,
+            "market_overlap_count": len(market_overlap),
+        },
         "oos_vs_market": {
             "n": len(y_test),
             "base_rate": sum(y_test) / len(y_test),
@@ -413,17 +607,24 @@ def train_skill_model(cfg: EngineConfig, test_fraction: float = 0.3, l2: float =
         "oos_uncertain_region": unc_block,
         "diagnostics": diagnostics,
         "oos_edge_roi": {
-            "note": "Trade model-vs-obtainable-price disagreements, settle at resolution. "
-                    "fee approximates taker cost/half-spread; betting at the line itself is ~0-EV.",
-            "by_threshold": [_edge_roi(model_p, market_p, y_test, markets, thr, fee=0.01)
-                             for thr in (0.03, 0.05, 0.08)],
+            "note": (
+                "Diagnostic only: buy the observed token at its recorded best ask, "
+                "charge the canonical category/price-aware taker fee, and settle at "
+                "resolution. No midpoint is executable."
+            ),
+            "by_threshold": [
+                _executable_edge_roi(model_p, test, y_test, markets, threshold)
+                for threshold in (0.03, 0.05, 0.08)
+            ],
         },
         "verdict": (
             "model beats market OOS (95% CI excludes 0)" if lo > 0
             else "no statistically significant edge over the market OOS"
         ),
+        "paper_trading_invoked": False,
+        "live_trading_invoked": False,
     }
-    write_json(cfg.governance_root / "skill_model_summary.json", summary)
+    write_json(cfg.governance_root / DIAGNOSTIC_SKILL_SUMMARY_NAME, summary)
     return summary
 
 

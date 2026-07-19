@@ -55,6 +55,13 @@ so re-running the study intraday can never fast-forward the clock):
     reduce the day count.
   M-B adverse realism - every portfolio market carries a MEASURED markout
                         charge (empirical fills, not just bar approximations).
+    M-B.1 amendment (2026-07-18; authorization = owner merge of this
+    frozen-surface PR): M-B additionally requires each portfolio market's OWN
+    recent official-book Tier-0 last-in-queue coverage (evaluable/confirmed-
+    fill/coverage/markout-window/haircut minima), read from the prior cycle's
+    replay. Closes the audit finding that M-B could pass on a print-markout
+    estimate with zero Tier-0 coverage (observed adverse ran 2.08x estimate).
+    Tighten-only AND with the markout condition; fail-closed.
   M-C payout floor    - enforced by construction in the sizing loop.
 All three passing yields ``evidence_supported_pending_human_decision`` -
 never an order. Acting on the daily quote sheet is a human decision made
@@ -98,6 +105,23 @@ DEFAULT_CLOB_BASE_URL = "https://clob.polymarket.com"
 DEFAULT_DATA_API_BASE_URL = "https://data-api.polymarket.com"
 
 MAKER_GATES_REGISTERED_AT_UTC = "2026-07-09T13:00:00Z"
+
+# M-B.1 amendment (2026-07-18) registered Tier-0 minima. These MIRROR the
+# WO-105 evaluator's §2 registered thresholds so M-B and the funding evaluator
+# use one consistent bar; kept as local constants to avoid an upstream->
+# downstream import. Mechanically tighten-only: maxima may only shrink, minima
+# may only grow (see `_mb_tighter_max`/`_mb_tighter_min`); invalid overrides
+# fall back to the registered default. The replay-age bound here is coarse
+# (M-B is a necessary-not-sufficient gate); exact-version + 30-min freshness is
+# separately enforced at the funding decision by the evaluator.
+MB_TIER0_REQUIRED_SOURCE = "official"
+MB_TIER0_MAX_REPLAY_AGE_SECONDS = 26 * 3600
+MB_TIER0_MIN_EVALUABLE = 30
+MB_TIER0_MIN_CONFIRMED_FILLS = 10
+MB_TIER0_MIN_COVERAGE_RATIO = 0.80
+MB_TIER0_MIN_MARKOUT_WINDOWS = 10
+MB_TIER0_MAX_HAIRCUT = 1.0
+MB_TIER0_HORIZONS = (5, 15, 60)
 
 MAKER_POLICY_DEFAULTS: dict[str, Any] = {
     "max_trusted_reward_share": 0.05,
@@ -1476,6 +1500,104 @@ def _capital_curve(
     return curve, capital_for_target
 
 
+def _mb_tighter_max(settings: dict[str, Any], key: str, registered: float) -> float:
+    """A configured maximum may only shrink the registered one (tighten-only)."""
+
+    value = safe_float(settings.get(key))
+    if value is None or value <= 0:
+        return registered
+    return min(registered, value)
+
+
+def _mb_tighter_min(settings: dict[str, Any], key: str, registered: float) -> float:
+    """A configured minimum may only grow the registered one (tighten-only)."""
+
+    value = safe_float(settings.get(key))
+    if value is None or value < 0:
+        return registered
+    return max(registered, value)
+
+
+def _mb_tier0_coverage_sufficient(
+    replay: dict[str, Any],
+    portfolio: list[dict[str, Any]],
+    *,
+    study_generated_at: str,
+    settings: dict[str, Any],
+) -> bool:
+    """M-B.1 (2026-07-18): every portfolio market must carry its OWN sufficient
+    Tier-0 last-in-queue coverage from a recent official-book replay.
+
+    Fail-closed and tighten-only. The study reads the PRIOR pipeline cycle's
+    ``maker_fill_replay.json`` (this cycle's replay runs afterward), so an
+    exact-portfolio-version match is impossible here; instead the replay must
+    be official-sourced and recent (age bounded against the study clock), and
+    every current portfolio market must have a per-market coverage row clearing
+    the registered minima. Exact-version and 30-minute freshness are separately
+    enforced at the funding decision by the WO-105 evaluator. A portfolio
+    market with missing, stale, wrong-source, or insufficient Tier-0 coverage
+    evaluates M-B as pending; the requirement can only withhold a pass, never
+    create one.
+    """
+
+    if not portfolio or not isinstance(replay, dict):
+        return False
+    if str(replay.get("primary_book_source") or "").strip().lower() != MB_TIER0_REQUIRED_SOURCE:
+        return False
+    study_stamp = parse_timestamp(study_generated_at)
+    replay_stamp = parse_timestamp(replay.get("generated_at_utc"))
+    if study_stamp is None or replay_stamp is None:
+        return False
+    max_age = _mb_tighter_max(settings, "mb_tier0_max_replay_age_seconds", MB_TIER0_MAX_REPLAY_AGE_SECONDS)
+    age = (study_stamp - replay_stamp).total_seconds()
+    if age < 0 or age > max_age:
+        return False
+    rows = replay.get("per_market_coverage")
+    if not isinstance(rows, list):
+        return False
+    by_market: dict[str, dict[str, Any]] = {}
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        condition_id = str(row.get("condition_id") or "").strip()
+        asset_id = str(row.get("asset_id") or "").strip()
+        if condition_id:
+            by_market[condition_id] = row
+        if asset_id:
+            by_market[asset_id] = row
+    min_evaluable = _mb_tighter_min(settings, "mb_tier0_min_evaluable", MB_TIER0_MIN_EVALUABLE)
+    min_confirmed = _mb_tighter_min(settings, "mb_tier0_min_confirmed_fills", MB_TIER0_MIN_CONFIRMED_FILLS)
+    min_coverage = _mb_tighter_min(settings, "mb_tier0_min_coverage_ratio", MB_TIER0_MIN_COVERAGE_RATIO)
+    min_markouts = _mb_tighter_min(settings, "mb_tier0_min_markout_windows", MB_TIER0_MIN_MARKOUT_WINDOWS)
+    max_haircut = _mb_tighter_max(settings, "mb_tier0_max_haircut", MB_TIER0_MAX_HAIRCUT)
+    for entry in portfolio:
+        condition_id = str(entry.get("condition_id") or "").strip()
+        token_id = str(entry.get("token_id") or "").strip()
+        row = by_market.get(condition_id) or by_market.get(token_id)
+        if row is None:
+            return False
+        evaluable = safe_float(row.get("last_in_queue_evaluable_opportunities"))
+        confirmed = safe_float(row.get("confirmed_fills"))
+        coverage = safe_float(row.get("coverage_ratio"))
+        haircut = safe_float(row.get("simulation_to_reality_haircut"))
+        if evaluable is None or evaluable < min_evaluable:
+            return False
+        if confirmed is None or confirmed < min_confirmed:
+            return False
+        if coverage is None or coverage < min_coverage:
+            return False
+        if haircut is None or haircut > max_haircut:
+            return False
+        by_horizon = row.get("by_horizon")
+        if not isinstance(by_horizon, dict):
+            return False
+        for horizon in MB_TIER0_HORIZONS:
+            windows = safe_float((by_horizon.get(f"{horizon}m") or {}).get("windows_covered"))
+            if windows is None or windows < min_markouts:
+                return False
+    return True
+
+
 def _distinct_days_at_target(
     prior_runs: list[dict[str, Any]],
     target: float,
@@ -1661,7 +1783,20 @@ def run_maker_carry_study(cfg: EngineConfig) -> dict[str, Any]:
     runs_at_target = len(days_at_target)
     required_runs = int(settings["gate_min_runs_at_target"])
     gate_a_state = "pass" if latest_at_target and runs_at_target >= required_runs else "pending"
-    gate_b_state = "pass" if portfolio and all(entry["markout_measured"] for entry in portfolio) else "pending"
+    # M-B.1 amendment (2026-07-18; authorization = owner merge of this
+    # frozen-surface PR): M-B now ALSO requires each portfolio market's own
+    # recent official-book Tier-0 coverage, not just a measured print markout.
+    # Reads the PRIOR pipeline cycle's replay (this cycle's runs afterward);
+    # tighten-only AND with the existing markout condition, fail-closed.
+    replay = read_json(out_root / "maker_fill_replay.json", default={}) or {}
+    mb_tier0_ok = _mb_tier0_coverage_sufficient(
+        replay, portfolio, study_generated_at=str(summary["generated_at_utc"]), settings=settings
+    )
+    gate_b_state = (
+        "pass"
+        if portfolio and all(entry["markout_measured"] for entry in portfolio) and mb_tier0_ok
+        else "pending"
+    )
     maker_verdict = "evidence_supported_pending_human_decision" if gate_a_state == "pass" and gate_b_state == "pass" else "insufficient_evidence"
     maker_gates = {
         "registered_at_utc": MAKER_GATES_REGISTERED_AT_UTC,
@@ -1677,7 +1812,11 @@ def run_maker_carry_study(cfg: EngineConfig) -> dict[str, Any]:
         "M_B_adverse_realism": {
             "registered_rule": maker_gate_registration("M_B_adverse_realism")["rule"],
             "state": gate_b_state,
-            "note": "every portfolio market must carry a MEASURED markout charge (empirical fills).",
+            "note": (
+                "every portfolio market must carry a MEASURED markout charge (empirical fills) "
+                "AND (M-B.1 amendment) its own recent official-book Tier-0 coverage."
+            ),
+            "mb1_tier0_coverage_sufficient": mb_tier0_ok,
         },
         "M_C_payout_floor": {
             "registered_rule": maker_gate_registration("M_C_payout_floor")["rule"],

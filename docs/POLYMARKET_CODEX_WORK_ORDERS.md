@@ -4328,20 +4328,33 @@ Do NOT: touch any gate (`maker_carry_study.py` gate logic, M-A/M-B/M-C),
 any order path. Do NOT build the realism consumer or change the study's reward
 estimate — that is a separate future WO that depends on this data existing.
 
-## WO-107 — M-B.1: require the portfolio market's own Tier-0 coverage (ORCHESTRATOR-OWNED; FROZEN M-B; NOT for Codex)
+## WO-107 — M-B.1: require the portfolio market's own Tier-0 coverage (FROZEN M-B; tighten-only; BUILT by orchestrator, AWAITING OWNER MERGE)
 
-Recorded here for visibility; NOT issued to Codex. This tightens the FROZEN
-M-B gate (external-audit item 7: M-B can pass on a data-api-print markout
-estimate with zero Tier-0 last-in-queue coverage; observed adverse ran 2.08x
-the estimate). It is tighten-only but carries a data-dependency-ordering
-judgment call: `maker_carry_study.py` would read `maker_fill_replay.json`,
-which lags the study by one cycle, so an exact-portfolio-version match is
-impossible within a run and the correct spec needs a staleness bound instead.
-That design choice, plus the frozen-gate authorization (owner merge, registered
-M-B.1 amendment, no agent-written authorization), stays with the orchestrator,
-which will build it following the M-A.1 pattern. Note: the WO-105 evaluator
-already enforces exact-market Tier-0 sufficiency at the FUNDING decision, so
-this M-B tightening is defence-in-depth, not the sole guard.
+External-audit item 7: M-B could pass on a data-api-print markout estimate with
+zero Tier-0 last-in-queue coverage (observed adverse ran 2.08x the estimate).
+
+BUILT 2026-07-18 by the orchestrator (NOT Codex — frozen gate with a
+data-dependency-ordering judgment call). `maker_carry_study.py` now reads the
+prior cycle's `maker_fill_replay.json` and requires, via
+`_mb_tier0_coverage_sufficient`, that EACH portfolio market has its own recent
+(<=26h) official-book Tier-0 coverage clearing the registered minima
+(>=30 evaluable, >=10 confirmed fills, >=80% coverage, >=10 markout windows at
+each of 5/15/60m, adverse haircut <=1.0) — as a logical AND with the existing
+markout-measured condition. Tighten-only (pass->pending only), fail-closed.
+Exact-portfolio-version match is impossible inside the study (the replay lags
+one cycle), so M-B uses a coarse recency bound; exact-version + 30-min
+freshness stay enforced downstream by the WO-105 evaluator, so this is
+defence-in-depth, not the sole guard. Constants mirror the evaluator's §2 and
+are mechanically tighten-only.
+
+Amendment drafted UNSIGNED at `docs/OWNER_AMENDMENT_MB1_TIER0_COVERAGE.md`;
+authorization is the owner's merge (no agent-written authorization). Tests: 11
+direct-helper cases (sufficient passes; no-replay/low-coverage/stale/missing-
+row/non-official/thin-windows/high-haircut fail closed; every portfolio market
+must be covered; tighten-only override pins) plus the M-A/M-B integration test
+extended to show M-B pending without a replay and passing once a qualifying
+replay is written. Does not touch M-A, M-C, the evaluator, the WO-50 policy,
+the registry, or any order path.
 
 ## WO-103 — Reconcile funding governance; fail closed in the interim (external audit 2026-07-17)
 

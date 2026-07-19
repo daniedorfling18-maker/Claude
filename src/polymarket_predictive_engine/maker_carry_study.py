@@ -1664,6 +1664,17 @@ def _distinct_days_at_target(
     observation, so it governs today's membership regardless of an earlier
     spike. Tighten-only: it can only reduce the day count. The published_v2
     restriction (2026-07-11 amendment) is preserved.
+
+    2026-07-19 amendment (authorization = owner merge of this frozen-surface
+    PR): a day counts only when its markout was actually MEASURED
+    (``portfolio_markout_measured``). PR #283's exact-token isolation can drop
+    the isolated print count below the markout minimum, which silently removes
+    the markout leg from ``max(charges)`` and sets the adverse charge to 0,
+    inflating net carry; without this condition such a day would still count
+    toward M-A even though M-B correctly stays pending. This mirrors M-B's
+    existing measured-markout requirement. Tighten-only: it can only reduce the
+    day count, and history rows written before this field existed do not count
+    (fail-closed).
     """
     last_run_by_day: dict[str, dict[str, Any]] = {}
     for run in prior_runs:
@@ -1679,6 +1690,8 @@ def _distinct_days_at_target(
         for day, run in last_run_by_day.items()
         if (safe_float(run.get("portfolio_net_carry_usd_per_day")) or 0.0) >= target
         and str(run.get("share_model") or "") == "published_v2"
+        and str(run.get("portfolio_markout_measured") or "").strip().lower()
+        in {"true", "1", "yes"}
     }
     days_at_target.discard("")
     if current_day:
@@ -1824,7 +1837,17 @@ def run_maker_carry_study(cfg: EngineConfig) -> dict[str, Any]:
     # overstate shares 3-9x (WO-46); letting it count would allow the gate to
     # pass on 6 honest days plus 1 discredited one. Tighten-only: this can
     # only reduce the day count, never raise it.
-    latest_at_target = bool(portfolio) and net_total >= target
+    # 2026-07-19 amendment (frozen-surface, owner merge): M-A also requires the
+    # run's markout to be MEASURED, mirroring M-B. Without it, #283's exact-token
+    # isolation dropping the isolated print count below the markout minimum
+    # silently zeroes the adverse charge, inflates net carry, and lets an
+    # unmeasured day count toward M-A. Tighten-only.
+    portfolio_markout_measured = bool(portfolio) and all(
+        entry.get("markout_measured") for entry in portfolio
+    )
+    latest_at_target = (
+        bool(portfolio) and net_total >= target and portfolio_markout_measured
+    )
     today = str(summary["generated_at_utc"])[:10]
     days_at_target = _distinct_days_at_target(
         prior_runs, target, current_day=today, latest_at_target=latest_at_target
@@ -1843,7 +1866,7 @@ def run_maker_carry_study(cfg: EngineConfig) -> dict[str, Any]:
     )
     gate_b_state = (
         "pass"
-        if portfolio and all(entry["markout_measured"] for entry in portfolio) and mb_tier0_ok
+        if portfolio_markout_measured and mb_tier0_ok
         else "pending"
     )
     maker_verdict = "evidence_supported_pending_human_decision" if gate_a_state == "pass" and gate_b_state == "pass" else "insufficient_evidence"
@@ -1899,6 +1922,7 @@ def run_maker_carry_study(cfg: EngineConfig) -> dict[str, Any]:
             "portfolio": portfolio,
             "portfolio_capital_usd": round(capital, 2),
             "portfolio_net_carry_usd_per_day": net_total,
+            "portfolio_markout_measured": portfolio_markout_measured,
             "portfolio_net_carry_usd_per_month": round(net_total * 30, 2),
             "capital_curve": capital_curve,
             "capital_for_100_per_month": capital_for_target,
@@ -1971,6 +1995,7 @@ def run_maker_carry_study(cfg: EngineConfig) -> dict[str, Any]:
         "portfolio_markets",
         "portfolio_capital_usd",
         "portfolio_net_carry_usd_per_day",
+        "portfolio_markout_measured",
         "top_portfolio_market",
         "top_portfolio_question",
         "clears_100_per_month_target",

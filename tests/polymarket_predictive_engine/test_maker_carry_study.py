@@ -745,6 +745,40 @@ def test_markout_charges_empirical_pickoffs_and_gates_track_evidence(tmp_path, m
     assert gates["maker_verdict"] == "insufficient_evidence"
 
 
+def test_distinct_days_require_measured_markout() -> None:
+    # Red-team #283 regression: a day whose net cleared target only because its
+    # markout was UNMEASURED (isolated prints below the minimum -> adverse leg
+    # dropped from max(charges) -> adverse 0 -> inflated net) must not count
+    # toward M-A. A measured day counts; a legacy row predating the field fails
+    # closed (does not count).
+    target = 3.0
+    runs = [
+        {
+            "generated_at_utc": "2026-07-17T10:00:00Z",
+            "portfolio_net_carry_usd_per_day": "5.0",
+            "share_model": "published_v2",
+            "portfolio_markout_measured": "True",
+        },
+        {
+            "generated_at_utc": "2026-07-18T10:00:00Z",
+            "portfolio_net_carry_usd_per_day": "5.0",
+            "share_model": "published_v2",
+            "portfolio_markout_measured": "False",
+        },
+        {
+            "generated_at_utc": "2026-07-16T10:00:00Z",
+            "portfolio_net_carry_usd_per_day": "5.0",
+            "share_model": "published_v2",
+        },
+    ]
+
+    days = maker_carry_study._distinct_days_at_target(
+        runs, target, current_day="", latest_at_target=False
+    )
+
+    assert days == {"2026-07-17"}
+
+
 def test_gate_a_passes_only_after_enough_distinct_days_at_target(tmp_path, monkeypatch):
     cfg = _config(tmp_path)
     markets = [_market("deep calm market", "calm", 1000.0)]
@@ -907,8 +941,8 @@ def test_legacy_share_model_days_never_count_toward_gate_a(tmp_path, monkeypatch
     assert gate_a["state"] == "pending"
 
 
-def _ma_run(day: str, net: float, *, model: str = "published_v2", hour: str = "12:00:00") -> dict[str, Any]:
-    return {"generated_at_utc": f"{day}T{hour}Z", "portfolio_net_carry_usd_per_day": net, "share_model": model}
+def _ma_run(day: str, net: float, *, model: str = "published_v2", hour: str = "12:00:00", markout_measured: str = "True") -> dict[str, Any]:
+    return {"generated_at_utc": f"{day}T{hour}Z", "portfolio_net_carry_usd_per_day": net, "share_model": model, "portfolio_markout_measured": markout_measured}
 
 
 def test_ma_intraday_spike_does_not_bank_a_day() -> None:

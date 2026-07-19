@@ -8,6 +8,8 @@ secrets and writes a fail-closed status artifact consumed by WO-68.
 from __future__ import annotations
 
 import argparse
+import base64
+import binascii
 from datetime import datetime, timezone
 from fnmatch import fnmatchcase
 import json
@@ -25,6 +27,20 @@ DEFAULT_OUTPUT = Path("outputs/performance/independent_merge_gate.json")
 
 def _mapping(value: Any) -> dict[str, Any]:
     return dict(value) if isinstance(value, Mapping) else {}
+
+
+def _github_file_text(payload: Any, *, label: str) -> tuple[str, str]:
+    """Decode one GitHub contents response or return a fail-closed error."""
+
+    item = _mapping(payload)
+    if item.get("type") != "file" or item.get("encoding") != "base64":
+        return "", f"{label}: GitHub contents response is not a base64 file"
+    content = str(item.get("content") or "")
+    try:
+        decoded = base64.b64decode("".join(content.split()), validate=True).decode("utf-8")
+    except (binascii.Error, UnicodeDecodeError, ValueError) as exc:
+        return "", f"{label}: cannot decode accepted workflow contents ({type(exc).__name__})"
+    return decoded, ""
 
 
 def _enabled(value: Any) -> bool:
@@ -436,6 +452,41 @@ def audit(repo: str, workflow_path: Path, *, apply_protection: bool = False) -> 
     accepted_workflow_sha = ""
     if isinstance(workflow_revisions, list) and workflow_revisions:
         accepted_workflow_sha = str(_mapping(workflow_revisions[0]).get("sha") or "")
+    accepted_workflow_text = ""
+    accepted_independent_workflow_text = ""
+    accepted_workflow_contents_error = ""
+    accepted_independent_contents_error = ""
+    if accepted_workflow_sha:
+        workflow_contents, workflow_contents_error = _gh_api(
+            "repos/"
+            f"{repo}/contents/.github/workflows/required-pr-gate.yml"
+            f"?ref={accepted_workflow_sha}"
+        )
+        independent_contents, independent_contents_error = _gh_api(
+            "repos/"
+            f"{repo}/contents/.github/workflows/{INDEPENDENT_MERGE_WORKFLOW.name}"
+            f"?ref={accepted_workflow_sha}"
+        )
+        if workflow_contents_error:
+            accepted_workflow_contents_error = workflow_contents_error
+        else:
+            accepted_workflow_text, accepted_workflow_contents_error = _github_file_text(
+                workflow_contents,
+                label="accepted required workflow",
+            )
+        if independent_contents_error:
+            accepted_independent_contents_error = independent_contents_error
+        else:
+            (
+                accepted_independent_workflow_text,
+                accepted_independent_contents_error,
+            ) = _github_file_text(
+                independent_contents,
+                label="accepted independent merge workflow",
+            )
+    else:
+        accepted_workflow_contents_error = "accepted required workflow revision is missing"
+        accepted_independent_contents_error = "accepted workflow revision is missing"
     ruleset_summaries, rulesets_error = _gh_api(
         f"repos/{repo}/rulesets?includes_parents=true&per_page=100"
     )
@@ -452,16 +503,13 @@ def audit(repo: str, workflow_path: Path, *, apply_protection: bool = False) -> 
                 ruleset_detail_errors.append(f"ruleset {ruleset_id}: {detail_error}")
             elif isinstance(detail, Mapping):
                 rulesets.append(_mapping(detail))
-    independent_workflow_path = workflow_path.with_name(INDEPENDENT_MERGE_WORKFLOW.name)
     result = evaluate_merge_gate(
-        workflow_text=workflow_path.read_text(encoding="utf-8"),
+        workflow_text=accepted_workflow_text,
         runners_payload=_mapping(runners),
         protection_payload=_mapping(protection),
         protection_error="\n".join(part for part in (apply_error, protection_error) if part),
         runs_payload=_mapping(runs),
-        independent_merge_workflow_text=(
-            independent_workflow_path.read_text(encoding="utf-8") if independent_workflow_path.exists() else ""
-        ),
+        independent_merge_workflow_text=accepted_independent_workflow_text,
         collaborators_payload=collaborators if isinstance(collaborators, list) else [],
         rulesets_payload=rulesets,
         rulesets_error="\n".join(
@@ -471,6 +519,8 @@ def audit(repo: str, workflow_path: Path, *, apply_protection: bool = False) -> 
                 *ruleset_detail_errors,
                 repository_error,
                 workflow_revision_error,
+                accepted_workflow_contents_error,
+                accepted_independent_contents_error,
             )
             if part
         ),
@@ -488,6 +538,8 @@ def audit(repo: str, workflow_path: Path, *, apply_protection: bool = False) -> 
                 "collaborators": collaborators_error,
                 "repository_identity": repository_error,
                 "accepted_workflow_revision": workflow_revision_error,
+                "accepted_required_workflow_contents": accepted_workflow_contents_error,
+                "accepted_independent_workflow_contents": accepted_independent_contents_error,
                 "rulesets": "\n".join(
                     part for part in (rulesets_error, *ruleset_detail_errors) if part
                 ),

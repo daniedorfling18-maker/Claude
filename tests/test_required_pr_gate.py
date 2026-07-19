@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import base64
 import importlib.util
 from pathlib import Path
 import re
@@ -29,6 +30,14 @@ def _workflow() -> str:
 
 def _independent_workflow() -> str:
     return (ROOT / ".github" / "workflows" / "independent-pr-merge.yml").read_text(encoding="utf-8")
+
+
+def _contents(text: str) -> dict:
+    return {
+        "type": "file",
+        "encoding": "base64",
+        "content": base64.b64encode(text.encode("utf-8")).decode("ascii"),
+    }
 
 
 def _runners(status: str = "online") -> dict:
@@ -292,6 +301,7 @@ def test_required_workflow_ruleset_must_match_repository_and_accepted_revision(
 
 def test_audit_fetches_repository_identity_and_latest_accepted_workflow_revision(
     monkeypatch,
+    tmp_path: Path,
 ) -> None:
     ruleset = _required_workflow_ruleset()
 
@@ -307,6 +317,12 @@ def test_audit_fetches_repository_identity_and_latest_accepted_workflow_revision
             "repos/owner/repo/commits?path=.github/workflows/required-pr-gate.yml&sha=main&per_page=1": [
                 {"sha": ACCEPTED_WORKFLOW_SHA}
             ],
+            f"repos/owner/repo/contents/.github/workflows/required-pr-gate.yml?ref={ACCEPTED_WORKFLOW_SHA}": _contents(
+                _workflow()
+            ),
+            f"repos/owner/repo/contents/.github/workflows/independent-pr-merge.yml?ref={ACCEPTED_WORKFLOW_SHA}": _contents(
+                _independent_workflow()
+            ),
             "repos/owner/repo/rulesets?includes_parents=true&per_page=100": [
                 {"id": ruleset["id"]}
             ],
@@ -316,14 +332,21 @@ def test_audit_fetches_repository_identity_and_latest_accepted_workflow_revision
 
     monkeypatch.setattr(merge_gate, "_gh_api", fake_gh_api)
 
-    result = merge_gate.audit(
-        "owner/repo",
-        ROOT / ".github" / "workflows" / "required-pr-gate.yml",
+    stale_workflow = tmp_path / ".github" / "workflows" / "required-pr-gate.yml"
+    stale_workflow.parent.mkdir(parents=True)
+    stale_workflow.write_text("name: stale local workflow\n", encoding="utf-8")
+    stale_workflow.with_name("independent-pr-merge.yml").write_text(
+        "name: stale local sibling\n",
+        encoding="utf-8",
     )
+
+    result = merge_gate.audit("owner/repo", stale_workflow)
 
     assert result["enforced"] is True
     assert result["expected_required_workflow_repository_id"] == REPOSITORY_ID
     assert result["accepted_required_workflow_sha"] == ACCEPTED_WORKFLOW_SHA
+    assert result["independent_merge_process_configured"] is True
+    assert result["query_errors"]["accepted_required_workflow_contents"] == ""
 
 
 def test_private_free_plan_blocker_stays_explicit_and_fail_closed() -> None:
@@ -616,8 +639,14 @@ def test_candidate_cannot_replace_the_trusted_merge_control() -> None:
     [
         "conftest.py",
         "tests/integration/conftest.py",
+        "pip.py",
+        "pip/__main__.py",
+        "pytest.py",
+        "pytest/__main__.py",
         "pytest.ini",
         "pyproject.toml",
+        "ruff.py",
+        "ruff/__main__.py",
         "sitecustomize.py",
     ],
 )

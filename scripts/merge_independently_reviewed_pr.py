@@ -36,6 +36,12 @@ PROTECTED_CONTROL_PATHS = {
     "tox.ini",
     "usercustomize.py",
 }
+# The trusted workflow invokes these tools through ``python -m`` while its
+# current directory is the candidate checkout.  A top-level module/package
+# with the same name wins module resolution and can return success without
+# running the accepted tool.  Protect both ``name.py`` and every path below a
+# top-level ``name/`` package.
+PROTECTED_PYTHON_ENTRYPOINTS = {"pip", "pytest", "ruff"}
 TRUSTED_REVIEW_ASSOCIATIONS = {"COLLABORATOR", "MEMBER", "OWNER"}
 CONTROL_REVIEW_STATES = {"APPROVED", "CHANGES_REQUESTED", "DISMISSED"}
 SHA_PATTERN = re.compile(r"^[0-9a-f]{40}$")
@@ -71,7 +77,16 @@ def _protected_control_path(path: str) -> bool:
     while normalized.startswith("./"):
         normalized = normalized[2:]
     normalized = normalized.lstrip("/")
-    return normalized in PROTECTED_CONTROL_PATHS or normalized.rsplit("/", 1)[-1] == "conftest.py"
+    top_level = normalized.split("/", 1)[0]
+    shadows_python_entrypoint = any(
+        top_level in {entrypoint, f"{entrypoint}.py"}
+        for entrypoint in PROTECTED_PYTHON_ENTRYPOINTS
+    )
+    return (
+        normalized in PROTECTED_CONTROL_PATHS
+        or normalized.rsplit("/", 1)[-1] == "conftest.py"
+        or shadows_python_entrypoint
+    )
 
 
 def evaluate_merge_candidate(

@@ -1,8 +1,8 @@
 """WO-106 append-only reward-epoch time-series collection.
 
-The VPS scheduler invokes this collector sequentially immediately after the
-maker-carry study. Concurrent invocation is explicitly out of scope, so the
-read-then-append idempotency guard does not require a second lock.
+The VPS has more than one producer cadence. A runtime lock covers the complete
+read/dedupe/append transaction so overlapping invocations cannot append the
+same study/condition key twice.
 
 Collection only: missing or empty candidates/study inputs append nothing and report status no_candidates/no_study; malformed numeric fields are written through unchanged; no gate, sizing, or order surface reads this artifact.
 """
@@ -12,10 +12,13 @@ from __future__ import annotations
 from typing import Any
 
 from .config import EngineConfig
+from .runtime_lock import runtime_lock
 from .utils import append_csv_rows, now_utc, read_csv_rows, read_json, write_json
 
 
 WORK_ORDER = "WO-106"
+LOCK_NAME = "reward_epoch_sampler"
+LOCK_STALE_SECONDS = 15 * 60
 CANDIDATE_COPY_FIELDS = [
     "condition_id",
     "token_id",
@@ -40,10 +43,14 @@ FAIL_SAFE_NOTE = (
 )
 
 
-def run_reward_epoch_sample(cfg: EngineConfig) -> dict[str, Any]:
-    """Append one idempotent sample per candidate for the current study run."""
+def _run_reward_epoch_sample_locked(
+    cfg: EngineConfig,
+    *,
+    sampled_at: str,
+    lock_details: dict[str, Any],
+) -> dict[str, Any]:
+    """Append one sample while the caller owns the sampler transaction lock."""
 
-    sampled_at = now_utc()
     out_root = cfg.output_root / "maker_carry"
     candidates_path = out_root / "maker_carry_candidates.csv"
     study_path = out_root / "maker_carry_study.json"
@@ -99,9 +106,42 @@ def run_reward_epoch_sample(cfg: EngineConfig) -> dict[str, Any]:
         "study_generated_at_utc": study_generated_at,
         "rows_sampled": len(rows_to_append),
         "total_rows": len(existing) + len(rows_to_append),
+        "runtime_lock": lock_details,
         "note": FAIL_SAFE_NOTE,
         "paper_trading_invoked": False,
         "live_trading_invoked": False,
     }
     write_json(summary_path, payload)
     return payload
+
+
+def run_reward_epoch_sample(cfg: EngineConfig) -> dict[str, Any]:
+    """Append one process-safe idempotent sample for the current study run."""
+
+    sampled_at = now_utc()
+    with runtime_lock(
+        cfg,
+        LOCK_NAME,
+        stale_after_seconds=LOCK_STALE_SECONDS,
+    ) as lock:
+        lock_details = lock.as_dict()
+        if not lock.acquired:
+            # Do not overwrite the successful holder's summary while it is
+            # still completing the transaction.
+            return {
+                "work_order": WORK_ORDER,
+                "status": "skipped_lock_held",
+                "generated_at_utc": sampled_at,
+                "study_generated_at_utc": None,
+                "rows_sampled": 0,
+                "total_rows": None,
+                "runtime_lock": lock_details,
+                "note": FAIL_SAFE_NOTE,
+                "paper_trading_invoked": False,
+                "live_trading_invoked": False,
+            }
+        return _run_reward_epoch_sample_locked(
+            cfg,
+            sampled_at=sampled_at,
+            lock_details=lock_details,
+        )

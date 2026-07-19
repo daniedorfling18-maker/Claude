@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
+from threading import Event
 
 import pytest
 
@@ -113,6 +115,42 @@ def test_same_study_stamp_is_idempotent(tmp_path: Path) -> None:
     assert second["rows_sampled"] == 0
     assert second["total_rows"] == 1
     assert len(_sample_rows(cfg)) == 1
+
+
+def test_overlapping_invocations_append_each_key_once(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    cfg = _cfg(tmp_path)
+    _write_candidates(cfg, [_candidate("condition-1", "token-1", "Question?")])
+    _write_study(cfg)
+    append_entered = Event()
+    release_append = Event()
+    original_append = reward_epoch_sampler.append_csv_rows
+
+    def blocking_append(*args, **kwargs):
+        append_entered.set()
+        assert release_append.wait(timeout=5)
+        return original_append(*args, **kwargs)
+
+    monkeypatch.setattr(reward_epoch_sampler, "append_csv_rows", blocking_append)
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        first_future = pool.submit(run_reward_epoch_sample, cfg)
+        assert append_entered.wait(timeout=5)
+        second_future = pool.submit(run_reward_epoch_sample, cfg)
+        try:
+            second = second_future.result(timeout=5)
+        finally:
+            release_append.set()
+        first = first_future.result(timeout=5)
+
+    assert first["status"] == "ok"
+    assert first["runtime_lock"]["acquired"] is True
+    assert second["status"] == "skipped_lock_held"
+    assert second["runtime_lock"]["acquired"] is False
+    assert len(_sample_rows(cfg)) == 1
+    assert read_json(cfg.output_root / "maker_carry" / "reward_epoch_sampler.json") == first
 
 
 def test_new_study_stamp_appends_fresh_sample(tmp_path: Path) -> None:

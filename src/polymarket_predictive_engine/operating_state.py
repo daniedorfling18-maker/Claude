@@ -507,7 +507,10 @@ def _front_door_region(text: str, *, stop_heading: str) -> str:
 
 def front_door_drift_violations(*, readme_text: str, agents_text: str) -> list[str]:
     regions = {
-        "README.md": _front_door_region(readme_text, stop_heading="## What we learned"),
+        # README is short, operator-facing, and entirely front-door prose.
+        # Scan the whole file so stale dynamic claims cannot hide below a
+        # historical heading while the generated-state pointer remains clean.
+        "README.md": readme_text,
         "AGENTS.md": _front_door_region(agents_text, stop_heading="## Run model"),
     }
     violations: list[str] = []

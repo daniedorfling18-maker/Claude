@@ -118,20 +118,41 @@ previous stack when HEAD was not changed.
 
 ## Dashboard access
 
-The dashboard container listens on port `8765`.
+The dashboard backend is deliberately bound only to VPS loopback on port
+`8765`. There is no supported public-IP HTTP route. Authenticated HTTPS is
+provided by Tailscale Serve, which is tailnet-only; Tailscale Funnel is
+explicitly forbidden.
 
-If the VPS firewall allows the port, open:
+One-time setup on the VPS:
 
-```text
-http://<VPS_PUBLIC_IP>:8765/
+```bash
+# Install from the official Linux instructions if tailscale is not present:
+# https://tailscale.com/download/linux
+sudo tailscale up
+# Complete the browser login, using the same tailnet as the phone/laptop.
+cd /home/opc/Claude
+bash scripts/configure_polymarket_dashboard_tailscale.sh
 ```
 
-Do not leave this publicly open forever. It can expose strategy state and P&L.
-For a longer-running setup, prefer one of:
+The script closes any old Docker public binding before enabling Serve, disables
+Funnel on HTTPS port 443, writes the node's `https://...ts.net/` URL to
+`PM_DASHBOARD_PUBLIC_URL`, verifies the exact Serve target and Docker binding,
+and writes `outputs/performance/dashboard_private_transport.json`. It refuses
+to proceed when the node is not authenticated.
 
-- a firewall rule that allows only your current IP;
-- Tailscale on the VPS and your phone, then open `http://<tailscale-ip>:8765/`;
-- a reverse proxy with authentication.
+Install Tailscale on the phone, join the same tailnet, and open the private URL
+printed by the script. Remove the old Oracle Cloud ingress rule for TCP `8765`;
+the loopback binding already blocks it, and removing the rule gives a second
+independent control. Operators can read the configured URL without exposing
+other `.env` values:
+
+```bash
+grep '^PM_DASHBOARD_PUBLIC_URL=' /home/opc/Claude/.env
+```
+
+Every deploy requires an authenticated Tailscale node before quiescing the
+current stack and revalidates loopback binding, Serve HTTPS, URL provenance,
+and Funnel-off state before reporting success.
 
 ## Secrets on the VPS
 

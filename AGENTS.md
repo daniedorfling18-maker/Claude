@@ -31,8 +31,13 @@ point-in-time report from runtime evidence:
 The dashboard serves the same evidence at:
 
 ```text
-http://129.151.178.42:8765/
+PM_DASHBOARD_PUBLIC_URL from /home/opc/Claude/.env
 ```
+
+That URL must be `https://<node>.<tailnet>.ts.net/` and is reachable only by
+authenticated members of the same Tailscale tailnet. Port `8765` is bound to
+VPS loopback only; never publish it on the VPS public address and never enable
+Tailscale Funnel.
 
 Missing or stale evidence is `UNKNOWN` and fails closed. The control contract is
 documented in `docs/OPERATING_STATE.md`.

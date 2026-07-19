@@ -27,6 +27,8 @@ def test_vps_paper_compose_is_lean_and_paper_only():
         # 2026-07-09: runs the ex-GitHub recurring jobs locally after the
         # Actions minutes quota was exhausted; paper-only like everything else.
         "vps-ops-scheduler",
+        # Explicit-profile one-shot service; ordinary compose up omits it.
+        "vps-deploy-acceptance",
     }
 
     paper_env = services["polymarket-paper-live"]["environment"]
@@ -54,10 +56,21 @@ def test_vps_paper_compose_is_lean_and_paper_only():
     dashboard_command = services["polymarket-dashboard"]["command"]
     assert "render_polymarket_dashboard.py" in dashboard_command
     assert "if [ ! -f /app/outputs/polymarket_dashboard/index.html ]" not in dashboard_command
+    assert services["polymarket-dashboard"]["ports"] == [
+        "127.0.0.1:${POLYMARKET_DASHBOARD_PORT:-8765}:8765"
+    ]
     superbru = services["superbru-auto-pick-watchdog"]
     assert "run_superbru_auto_pick_watchdog.sh" in superbru["command"]
     assert superbru["environment"]["SUPERBRU_AUTO_PICK_ENABLED"] == "${SUPERBRU_AUTO_PICK_ENABLED:-true}"
     assert "POLYMARKET_LIVE_TRADING" not in superbru["environment"]
+    acceptance = services["vps-deploy-acceptance"]
+    assert acceptance["profiles"] == ["deploy-acceptance"]
+    assert acceptance["x-capacity-replaces"] == "vps-ops-scheduler"
+    assert acceptance["restart"] == "no"
+    assert acceptance["environment"]["POLYMARKET_EXECUTE_LIVE"] == "false"
+    assert acceptance["environment"]["POLYMARKET_LIVE_TRADING"] == "0"
+    assert "env_file" not in acceptance
+    assert acceptance["command"] == "sh scripts/run_vps_deploy_acceptance.sh"
 
 
 def test_dashboard_renderer_prefers_mounted_src_on_vps():
@@ -89,6 +102,8 @@ def test_vps_env_example_keeps_live_credentials_empty():
     assert "SUPERBRU_EMAIL=" in text
     assert "SUPERBRU_PASSWORD=" in text
     assert "SUPERBRU_POOL_URL=" in text
+    assert "POLYMARKET_DASHBOARD_HOST=127.0.0.1" in text
+    assert "PM_DASHBOARD_PUBLIC_URL=" in text
 
 
 def test_vps_bootstrap_script_starts_only_lean_paper_stack():
@@ -105,6 +120,8 @@ def test_vps_bootstrap_script_starts_only_lean_paper_stack():
     assert "docker-compose.monitor.yml" not in text
     assert "POLYMARKET_LIVE_TRADING=1" not in text
     assert "POLYMARKET_EXECUTE_LIVE=true" not in text
+    assert "api.ipify.org" not in text
+    assert "configure_polymarket_dashboard_tailscale.sh" in text
     assert "PM_PAPER_MEM_LIMIT 2g" in text
     assert "POLYMARKET_WEBSOCKET_MAX_ASSETS 80" in text
     preflight = text.index("preflight_vps_capacity.py")
@@ -137,6 +154,15 @@ def test_vps_deploy_preflight_runs_before_compose_replacement():
     assert "source unchanged after refusal; restoring previous paper stack" in text
     assert 'printf \'0\\n\' | $SUDO tee "$governance_stamp"' in text
     assert 'compose -f "$COMPOSE_FILE" up -d --no-build' in text
+    assert "rollback_vps_paper_deploy.py" in text
+    assert "rollback-last-known-good" in text
+    assert "trap 'deploy_exit $?' EXIT" in text
+    assert 'failed_checkout="$(git rev-parse HEAD 2>/dev/null || true)"' in text
+    assert 'if [ "$failed_checkout" = "$original_head" ]; then' in text
+    assert "--telemetry-writer" in text
+    assert "ROLLED_BACK_TO_LAST_KNOWN_GOOD" in (
+        ROOT / "scripts" / "rollback_vps_paper_deploy.py"
+    ).read_text(encoding="utf-8")
 
 
 def test_vps_health_script_checks_dashboard_and_heartbeat_files():
@@ -155,6 +181,14 @@ def test_vps_health_script_checks_dashboard_and_heartbeat_files():
     assert 'case "$REPO_DIR" in' in text
     assert '"~/"*) REPO_DIR="$HOME${REPO_DIR#?}" ;;' in text
     assert "eval " not in text
+    assert "validate_dashboard_private_transport.py" in text
+    assert "tailscale serve status" in text
+    assert "tailscale funnel status" in text
+    assert "--configured-url \"$private_dashboard_url\"" in text
+    assert "private_https_reachable=false" in text
+    assert 'curl -fsS --max-time 10 "$probe_url"' in text
+    assert "printf '{}\\n' > \"$transport_tmp/tailscale-status.json\"" in text
+    assert text.count("validate_dashboard_private_transport.py") == 1
 
 
 def test_vps_deploy_workflow_requires_current_dashboard_schema():
@@ -167,11 +201,16 @@ def test_vps_deploy_workflow_requires_current_dashboard_schema():
     assert "governance_refresh_status.json" in text
     assert "price_action_model_summary.json" in text
     assert "did not publish a fresh price-action model" in text
-    assert "polymarket_predictive_engine.cli maker-live-test" in text
-    assert "maker_live_test_code" in text
+    acceptance_script = (ROOT / "scripts" / "run_vps_deploy_acceptance.sh").read_text(
+        encoding="utf-8"
+    )
+    assert "polymarket_predictive_engine.cli maker-live-test" in acceptance_script
+    assert "maker_live_test_code" in acceptance_script
     assert '"fills_last_24h_raw"' in text
     assert '"maker_test_fills_last_24h"' in text
     assert "exec -T polymarket-paper-live" not in text
+    assert "exec -T vps-ops-scheduler" not in text
+    assert "--profile deploy-acceptance run" in text
     assert "deployment_health" in text
     assert "mispricing_alpha_bridge" in text
     assert "coverage_by_sport_market" in text
@@ -191,32 +230,41 @@ def test_vps_deploy_runs_real_data_acceptance_after_restart_and_before_success()
     baseline = text.index("deploy_acceptance_baseline.json")
     quiesce = text.index('compose -f "$COMPOSE_FILE" stop --timeout 60')
     compose_up = text.index('$DOCKER compose -f "$COMPOSE_FILE" up -d --build')
-    producer_cycle = text.index("running real-data component acceptance cycle")
-    acceptance = text.index("polymarket_predictive_engine.cli deploy-acceptance")
+    producer_cycle = text.index("one-shot real-data acceptance")
+    acceptance = text.index("--profile deploy-acceptance run")
     render = text.index("python scripts/render_polymarket_dashboard.py", acceptance)
     success = text.index("VPS deploy verified")
 
     assert baseline < quiesce < compose_up < producer_cycle < acceptance < render < success
-    assert "deploy_acceptance_cycle.json" in text
-    assert "maker-carry-study" in text
-    assert "collect-maker-replay-data" in text
-    assert "maker-fill-replay" in text
-    assert "requote-alerts" in text
-    assert "reconcile-wallet" in text
-    assert "executor-ops-monitor" in text
-    assert "operating-state" in text
+    acceptance_script = (ROOT / "scripts" / "run_vps_deploy_acceptance.sh").read_text(
+        encoding="utf-8"
+    )
+    assert "deploy_acceptance_cycle.json" in acceptance_script
+    assert "maker-carry-study" in acceptance_script
+    assert "collect-maker-replay-data" in acceptance_script
+    assert "maker-fill-replay" in acceptance_script
+    assert "requote-alerts" in acceptance_script
+    assert "reconcile-wallet" in acceptance_script
+    assert "executor-ops-monitor" in acceptance_script
+    assert "operating-state" in acceptance_script
+    assert 'TOTAL_TIMEOUT="${DEPLOY_ACCEPTANCE_TOTAL_TIMEOUT_SECONDS:-420}"' in acceptance_script
+    assert "run_bounded" in acceptance_script
+    assert "timeout --signal=TERM --kill-after=30s 600" in text
     assert 'acceptance_status" != "PASS"' in text
-    assert "previous revision $original_head remains the recorded rollback ref" in text
+    assert "automatic rollback is armed for $original_head" in text
     assert 'install -d -m 0775 -o "$(id -u)" -g "$(id -g)"' in text
     assert "outputs/performance outputs/ops_scheduler" in text
     assert 'PM_VPS_REPO_DIR="$REPO_DIR" bash scripts/check_polymarket_vps_paper.sh' in text
 
 
-def test_vps_deploy_compose_exec_cannot_consume_remaining_remote_script():
+def test_vps_deploy_acceptance_is_scheduler_isolated_and_stdin_closed():
     text = (ROOT / ".github" / "workflows" / "deploy-polymarket-vps-paper.yml").read_text(encoding="utf-8")
 
-    acceptance_exec = text.index('exec -T vps-ops-scheduler sh -lc')
-    acceptance_stdin_closed = text.index("' </dev/null", acceptance_exec)
+    scheduler_stop = text.index("stop --timeout 60 vps-ops-scheduler")
+    scheduler_absent = text.index("Recurring scheduler remained active", scheduler_stop)
+    acceptance_exec = text.index("--profile deploy-acceptance run", scheduler_absent)
+    acceptance_stdin_closed = text.index("vps-deploy-acceptance </dev/null", acceptance_exec)
+    scheduler_restart = text.index("up -d --no-build vps-ops-scheduler", acceptance_stdin_closed)
     dashboard_exec = text.index("exec -T polymarket-dashboard", acceptance_stdin_closed)
     dashboard_stdin_closed = text.index(
         "--config /app/polymarket_predictive_config.example.yaml </dev/null",
@@ -225,7 +273,29 @@ def test_vps_deploy_compose_exec_cannot_consume_remaining_remote_script():
     status_gate = text.index('acceptance_status="', dashboard_stdin_closed)
     success = text.index("VPS deploy verified", status_gate)
 
-    assert acceptance_exec < acceptance_stdin_closed < dashboard_exec < dashboard_stdin_closed < status_gate < success
+    assert (
+        scheduler_stop
+        < scheduler_absent
+        < acceptance_exec
+        < acceptance_stdin_closed
+        < scheduler_restart
+        < dashboard_exec
+        < dashboard_stdin_closed
+        < status_gate
+        < success
+    )
+    assert "exec -T vps-ops-scheduler" not in text
+
+
+def test_vps_deploy_requires_independent_main_attestation():
+    text = (ROOT / ".github" / "workflows" / "deploy-polymarket-vps-paper.yml").read_text(encoding="utf-8")
+
+    assert "acceptance_run_id" in text
+    assert "independent-main-acceptance-${{ inputs.acceptance_run_id }}" in text
+    assert 'expected_path = ".github/workflows/independent-pr-merge.yml"' in text
+    assert 'attestation.get("merge_commit_sha")' in text
+    assert "merge workflow actor was not an independent current-head approver" in text
+    assert 'accepted_main_sha="$(git rev-parse origin/main)"' in text
 
 
 def test_vps_deploy_dashboard_probes_cannot_sigpipe_under_pipefail():
@@ -256,12 +326,57 @@ def test_vps_deploy_remote_script_is_valid_bash():
     assert result.returncode == 0, result.stderr
 
 
-def test_vps_deploy_workflow_writes_public_dashboard_url():
+def test_vps_deploy_workflow_enforces_private_dashboard_url():
     text = (ROOT / ".github" / "workflows" / "deploy-polymarket-vps-paper.yml").read_text(encoding="utf-8")
 
-    assert "PM_VPS_HOST='$PM_VPS_HOST'" in text
-    assert "PM_DASHBOARD_PUBLIC_URL=" in text
-    assert "public_url = f\"http://{host}:{port}/\"" in text
+    assert 'updates["POLYMARKET_DASHBOARD_HOST"] = "127.0.0.1"' in text
+    assert 'updates["PM_DASHBOARD_PUBLIC_URL"] = os.environ["DASHBOARD_PRIVATE_URL"]' in text
+    assert 'dashboard_private_url="https://${dashboard_dns}/"' in text
+    assert "configure_polymarket_dashboard_tailscale.sh" in text
+    assert "public_url =" not in text
+    assert "http://${PM_VPS_HOST}" not in text
+    assert "tailnet-authenticated HTTPS" in text
+
+    rollback_armed = text.index("ROLLBACK_ARMED=true")
+    funnel_mutation = text.index("tailscale funnel --https=443 off")
+    serve_mutation = text.index("tailscale serve --bg --yes --https=443")
+    live_env_write = text.index('env_path.write_text("\\n".join(rendered) + "\\n"')
+    assert rollback_armed < funnel_mutation < serve_mutation < live_env_write
+    assert 'ENV_PATCH_PATH="$ENV_PATCH"' in text
+    assert ".env.private-transport.tmp" not in text
+    assert "value[0] == value[-1]" in text
+    assert 'port="$dashboard_port"' in text
+    assert "grep -E '^POLYMARKET_DASHBOARD_PORT='" not in text
+
+
+def test_private_dashboard_setup_restores_env_until_transport_is_proven():
+    text = (ROOT / "scripts" / "configure_polymarket_dashboard_tailscale.sh").read_text(
+        encoding="utf-8"
+    )
+
+    backup = text.index('install -m 0600 .env "$env_backup"')
+    failure_trap = text.index("trap 'restore_env_on_failure' EXIT")
+    env_write = text.index('ENV_PATH="$REPO_DIR/.env" PRIVATE_URL="$private_url"')
+    compose_recreate = text.index("--force-recreate polymarket-dashboard")
+    failing_evidence = text.index(
+        "# Until a live HTTPS request succeeds, publish explicit failing evidence."
+    )
+    private_probe = text.index('curl -fsS --max-time 10 "$private_url"')
+    reachable_proof = text.index("--private-https-reachable")
+    commit = text.index("env_committed=true")
+    assert (
+        backup
+        < failure_trap
+        < env_write
+        < compose_recreate
+        < failing_evidence
+        < private_probe
+        < reachable_proof
+        < commit
+    )
+    assert 'install -m 0600 "$env_backup" .env' in text
+    assert "value[0] == value[-1]" in text
+    assert text.count("validate_dashboard_private_transport.py") == 2
 
 
 def test_vps_deploy_workflow_validates_private_key_secret():

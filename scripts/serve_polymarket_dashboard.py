@@ -19,7 +19,10 @@ class NoCacheDashboardHandler(SimpleHTTPRequestHandler):
 def main() -> int:
     parser = argparse.ArgumentParser(description="Serve Polymarket dashboard artifacts with no-cache headers.")
     parser.add_argument("--directory", default="outputs/polymarket_dashboard")
-    parser.add_argument("--host", default="0.0.0.0")
+    # Direct/manual invocation is private by default. Compose may bind the
+    # process to all interfaces *inside* its network namespace, while the
+    # published host socket remains hard-coded to 127.0.0.1.
+    parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=8765)
     args = parser.parse_args()
 

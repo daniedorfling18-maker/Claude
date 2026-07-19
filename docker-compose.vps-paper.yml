@@ -1,8 +1,11 @@
 # Lean VPS deployment for the governed Polymarket paper system.
 #
 # This stack is intentionally small:
-#   1. polymarket-paper-live  - continuous websocket paper/evidence loop, paper-only
-#   2. polymarket-dashboard   - static oversight dashboard on port 8765
+#   1. polymarket-paper-live       - continuous websocket paper/evidence loop, paper-only
+#   2. polymarket-dashboard        - static oversight dashboard on port 8765
+#   3. superbru-auto-pick-watchdog - competition-pick watchdog
+#   4. vps-ops-scheduler           - recurring reporting/research jobs
+# A fifth profiled service is deployment-only and exits after one acceptance cycle.
 #
 # It does NOT start the broad multi-service research stacks and it does NOT enable live trading.
 # Copy .env.vps-paper.example to .env, tune the memory/asset limits, then run:
@@ -131,7 +134,10 @@ services:
       --host 0.0.0.0
       --port 8765"
     ports:
-      - "${POLYMARKET_DASHBOARD_HOST:-0.0.0.0}:${POLYMARKET_DASHBOARD_PORT:-8765}:8765"
+      # The dashboard is never published on a public host interface. Tailscale
+      # Serve is the sole authenticated HTTPS ingress and proxies this
+      # loopback-only listener from within the tailnet.
+      - "127.0.0.1:${POLYMARKET_DASHBOARD_PORT:-8765}:8765"
     volumes:
       - ./polymarket_predictive_config.example.yaml:/app/polymarket_predictive_config.example.yaml:ro
       - ./scripts:/app/scripts:ro
@@ -222,3 +228,40 @@ services:
       polymarket-paper-live:
         condition: service_started
     restart: unless-stopped
+
+  # Deployment-only, one-shot real-data acceptance. The deploy workflow stops
+  # vps-ops-scheduler before explicitly running this profiled service, so
+  # acceptance cannot share a process or race with the recurring scheduler.
+  # It is omitted from ordinary `docker compose up` and contains no execution
+  # command or signing credentials.
+  vps-deploy-acceptance:
+    profiles: ["deploy-acceptance"]
+    # Capacity-only metadata consumed by preflight_vps_capacity.py. The deploy
+    # workflow proves the scheduler stopped before this service is started.
+    x-capacity-replaces: vps-ops-scheduler
+    image: polymarket-paper-vps:latest
+    mem_limit: ${VPS_DEPLOY_ACCEPTANCE_MEM_LIMIT:-2g}
+    working_dir: /app
+    environment:
+      POLYMARKET_CONFIG_PATH: /app/polymarket_predictive_config.example.yaml
+      POLYMARKET_EXECUTE_LIVE: "false"
+      POLYMARKET_LIVE_TRADING: "0"
+      PM_MODE: scan
+      POLYMARKET_MODE: scan
+      THE_ODDS_API_KEY: ${THE_ODDS_API_KEY:-}
+      PM_IMAGE_BUILD_SHA: ${PM_VPS_DEPLOYED_SHA:-unknown}
+      PYTHONPATH: scripts:src
+    command: sh scripts/run_vps_deploy_acceptance.sh
+    volumes:
+      - ./polymarket_predictive_config.example.yaml:/app/polymarket_predictive_config.example.yaml:ro
+      - ./config.yaml:/app/config.yaml:ro
+      - ./AGENTS.md:/app/AGENTS.md:ro
+      - ./CLAUDE.md:/app/CLAUDE.md:ro
+      - ./docs:/app/docs:ro
+      - ./scripts:/app/scripts:ro
+      - ./src:/app/src:ro
+      - ./outputs:/app/outputs
+      - ./work:/app/work
+      - ./data:/app/data
+      - ./inputs:/app/inputs
+    restart: "no"

@@ -112,8 +112,12 @@ def _condition(name: str, passed: bool, detail: str) -> dict[str, Any]:
     return {"check": name, "passed": bool(passed), "detail": detail}
 
 
-def _latest_official_book_row(cfg: EngineConfig, condition_id: str) -> dict[str, str] | None:
-    """Newest official-book observation for the market, or None.
+def _latest_official_book_row(
+    cfg: EngineConfig,
+    condition_id: str,
+    token_id: str,
+) -> dict[str, str] | None:
+    """Newest official-book observation for the exact condition/token, or None.
 
     Reads the append-only per-market gzip book archive
     ``outputs/maker_carry/official_books/<condition_id>.csv.gz`` and returns the
@@ -122,6 +126,8 @@ def _latest_official_book_row(cfg: EngineConfig, condition_id: str) -> dict[str,
     closed rather than trusting a partial file.
     """
 
+    if not condition_id or not token_id:
+        return None
     path = cfg.output_root / "maker_carry" / "official_books" / f"{condition_id}.csv.gz"
     if not path.exists() or path.stat().st_size == 0:
         return None
@@ -131,6 +137,10 @@ def _latest_official_book_row(cfg: EngineConfig, condition_id: str) -> dict[str,
         with gzip.open(path, "rt", encoding="utf-8-sig", errors="replace", newline="") as handle:
             for raw in csv.DictReader(handle):
                 row = {str(k): ("" if v is None else str(v)) for k, v in raw.items()}
+                if str(row.get("condition_id") or "").strip() != condition_id:
+                    continue
+                if str(row.get("asset_id") or row.get("token_id") or "").strip() != token_id:
+                    continue
                 stamp = parse_timestamp(row.get("collected_at_utc") or row.get("observation_timestamp"))
                 if stamp is None:
                     continue
@@ -147,16 +157,16 @@ def _latest_official_book_row(cfg: EngineConfig, condition_id: str) -> dict[str,
 
 def _per_market_row(replay: dict[str, Any], *, condition_id: str, token_id: str) -> dict[str, Any] | None:
     rows = replay.get("per_market_coverage")
-    if not isinstance(rows, list):
+    if not isinstance(rows, list) or not condition_id or not token_id:
         return None
-    for row in rows:
-        if not isinstance(row, dict):
-            continue
-        if str(row.get("condition_id") or "").strip() == condition_id and condition_id:
-            return row
-        if str(row.get("asset_id") or "").strip() == token_id and token_id:
-            return row
-    return None
+    matches = [
+        row
+        for row in rows
+        if isinstance(row, dict)
+        and str(row.get("condition_id") or "").strip() == condition_id
+        and str(row.get("asset_id") or row.get("token_id") or "").strip() == token_id
+    ]
+    return matches[0] if len(matches) == 1 else None
 
 
 def evaluate_sharp_linking(
@@ -181,26 +191,19 @@ def evaluate_sharp_linking(
         (policy.get("composition_stability") or {}).get("most_recurrent_market") or ""
     ).strip()
     portfolio = study.get("portfolio") if isinstance(study.get("portfolio"), list) else []
-    candidate = next(
-        (
-            row
-            for row in portfolio
-            if isinstance(row, dict) and str(row.get("condition_id") or "").strip() == candidate_id
-        ),
-        None,
-    )
+    candidate_rows = [
+        row
+        for row in portfolio
+        if isinstance(row, dict) and str(row.get("condition_id") or "").strip() == candidate_id
+    ]
+    candidate = candidate_rows[0] if len(candidate_rows) == 1 else None
     token_id = str((candidate or {}).get("token_id") or "").strip()
-    if not token_id and candidate_id:
-        for row in read_csv_rows(out_root / "maker_carry_candidates.csv"):
-            if str(row.get("condition_id") or "").strip() == candidate_id:
-                token_id = str(row.get("token_id") or "").strip()
-                break
     checks.append(
         _condition(
             "candidate_market_identified",
             bool(candidate_id) and candidate is not None and bool(token_id),
             f"candidate={candidate_id or 'missing'}; token={token_id or 'missing'}; "
-            f"in_portfolio={candidate is not None}",
+            f"portfolio_matches={len(candidate_rows)}",
         )
     )
 
@@ -265,7 +268,7 @@ def evaluate_sharp_linking(
     summary["consensus_sharp_fair"] = round(consensus_fair, 6) if consensus_fair is not None else None
     summary["maker_quote_band"] = [band_lo, band_hi]
 
-    book_row = _latest_official_book_row(cfg, candidate_id) if candidate_id else None
+    book_row = _latest_official_book_row(cfg, candidate_id, token_id)
     pm_bid = _finite_float((book_row or {}).get("best_bid"))
     pm_ask = _finite_float((book_row or {}).get("best_ask"))
     book_stamp = parse_timestamp((book_row or {}).get("collected_at_utc") or (book_row or {}).get("observation_timestamp"))

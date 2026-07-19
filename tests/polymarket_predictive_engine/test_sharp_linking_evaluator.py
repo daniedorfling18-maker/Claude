@@ -33,7 +33,15 @@ def _cfg(tmp_path: Path, extra: dict[str, Any] | None = None) -> EngineConfig:
     return EngineConfig(raw=raw, path=tmp_path / "c.yaml")
 
 
-def _write_official_book(cfg: EngineConfig, condition_id: str, *, best_bid: float, best_ask: float, collected_at: str) -> None:
+def _write_official_book(
+    cfg: EngineConfig,
+    condition_id: str,
+    *,
+    best_bid: float,
+    best_ask: float,
+    collected_at: str,
+    asset_id: str = TOKEN,
+) -> None:
     path = cfg.output_root / "maker_carry" / "official_books" / f"{condition_id}.csv.gz"
     path.parent.mkdir(parents=True, exist_ok=True)
     with gzip.open(path, "wt", encoding="utf-8", newline="") as handle:
@@ -45,7 +53,7 @@ def _write_official_book(cfg: EngineConfig, condition_id: str, *, best_bid: floa
         writer.writerow(
             {
                 "condition_id": condition_id,
-                "asset_id": TOKEN,
+                "asset_id": asset_id,
                 "observation_timestamp": collected_at,
                 "best_bid": best_bid,
                 "best_ask": best_ask,
@@ -71,10 +79,8 @@ def _setup(cfg: EngineConfig, **o: Any) -> None:
         "quote_ask_price": o.get("band_hi", 0.60),
         "question": "Calm test market?",
     }
-    write_json(
-        out / "maker_carry_study.json",
-        {"generated_at_utc": study_stamp, "portfolio": [portfolio_row] if o.get("in_portfolio", True) else []},
-    )
+    portfolio = o.get("portfolio", [portfolio_row] if o.get("in_portfolio", True) else [])
+    write_json(out / "maker_carry_study.json", {"generated_at_utc": study_stamp, "portfolio": portfolio})
 
     anchor_rows = o.get(
         "anchors",
@@ -92,11 +98,12 @@ def _setup(cfg: EngineConfig, **o: Any) -> None:
         best_bid=o.get("pm_bid", 0.49),
         best_ask=o.get("pm_ask", 0.51),
         collected_at=o.get("book_stamp", "2026-07-18T11:58:00Z"),
+        asset_id=o.get("book_token", TOKEN),
     )
 
     market_row = {
-        "condition_id": CAND,
-        "asset_id": TOKEN,
+        "condition_id": o.get("replay_condition", CAND),
+        "asset_id": o.get("replay_token", TOKEN),
         "last_in_queue_evaluable_opportunities": o.get("evaluable", 35),
         "confirmed_fills": o.get("confirmed", 12),
         "coverage_ratio": o.get("coverage", 0.9),
@@ -126,6 +133,72 @@ def test_happy_path_qualifies(tmp_path: Path) -> None:
     assert summary["candidate_condition_id"] == CAND
     assert summary["candidate_token_id"] == TOKEN
     assert summary["consensus_sharp_fair"] == 0.5
+
+
+def test_candidate_identity_requires_one_portfolio_row_and_no_csv_fallback(tmp_path: Path) -> None:
+    cfg = _cfg(tmp_path)
+    _setup(
+        cfg,
+        portfolio=[
+            {"condition_id": CAND, "token_id": TOKEN, "quote_bid_price": 0.4, "quote_ask_price": 0.6},
+            {"condition_id": CAND, "token_id": "0xother", "quote_bid_price": 0.4, "quote_ask_price": 0.6},
+        ],
+    )
+    qualified, checks, _ = mod.evaluate_sharp_linking(cfg, as_of=NOW)
+    assert qualified is False
+    identity = next(row for row in checks if row["check"] == "candidate_market_identified")
+    assert identity["passed"] is False
+    assert "portfolio_matches=2" in identity["detail"]
+
+    _setup(cfg, token="")
+    write_csv(
+        cfg.output_root / "maker_carry" / "maker_carry_candidates.csv",
+        [{"condition_id": CAND, "token_id": TOKEN}],
+    )
+    qualified, checks, _ = mod.evaluate_sharp_linking(cfg, as_of=NOW)
+    assert qualified is False
+    assert next(row for row in checks if row["check"] == "candidate_market_identified")["passed"] is False
+
+
+@pytest.mark.parametrize(
+    "overrides,failed_check",
+    [
+        ({"book_token": "0xother"}, "fresh_executable_pm_book"),
+        ({"replay_token": "0xother"}, "tier0_market_row_present"),
+        ({"replay_condition": "0xother"}, "tier0_market_row_present"),
+    ],
+)
+def test_every_downstream_row_requires_the_exact_condition_token_pair(
+    tmp_path: Path,
+    overrides: dict[str, Any],
+    failed_check: str,
+) -> None:
+    cfg = _cfg(tmp_path)
+    _setup(cfg, **overrides)
+    qualified, checks, _ = mod.evaluate_sharp_linking(cfg, as_of=NOW)
+    assert qualified is False
+    assert next(row for row in checks if row["check"] == failed_check)["passed"] is False
+
+
+def test_duplicate_exact_replay_rows_are_ambiguous_and_fail_closed(tmp_path: Path) -> None:
+    cfg = _cfg(tmp_path)
+    market_row = {
+        "condition_id": CAND,
+        "asset_id": TOKEN,
+        "last_in_queue_evaluable_opportunities": 35,
+        "confirmed_fills": 12,
+        "coverage_ratio": 0.9,
+        "simulation_to_reality_haircut": 0.8,
+        "by_horizon": {
+            "5m": {"windows_covered": 12},
+            "15m": {"windows_covered": 11},
+            "60m": {"windows_covered": 10},
+        },
+    }
+    _setup(cfg, per_market=[market_row, dict(market_row)])
+    qualified, checks, _ = mod.evaluate_sharp_linking(cfg, as_of=NOW)
+    assert qualified is False
+    assert next(row for row in checks if row["check"] == "tier0_market_row_present")["passed"] is False
 
 
 def test_missing_all_artifacts_fails_closed(tmp_path: Path) -> None:

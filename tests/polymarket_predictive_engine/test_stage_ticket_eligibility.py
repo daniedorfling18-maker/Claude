@@ -11,6 +11,7 @@ from polymarket_predictive_engine.utils import write_csv, write_json
 
 NOW = datetime(2026, 7, 17, 12, 0, tzinfo=timezone.utc)
 CANDIDATE = "0xabc"
+TOKEN = "0xtoken"
 
 
 def _cfg(tmp_path: Path) -> EngineConfig:
@@ -32,13 +33,15 @@ def _write_healthy_inputs(cfg: EngineConfig, **overrides) -> None:
     write_json(out / "decision_policy.json", policy)
     portfolio_row = {
         "condition_id": CANDIDATE,
+        "token_id": overrides.get("token", TOKEN),
         "question": "Calm test market?",
         "resolution_risk": overrides.get("resolution_risk", "medium"),
         "event_start_time_utc": overrides.get("event_start", ""),
         "size_multiple": overrides.get("size_multiple", 2),
         "capital_usd": overrides.get("capital_usd", 80.0),
     }
-    write_json(out / "maker_carry_study.json", {"generated_at_utc": run_stamp, "portfolio": [portfolio_row]})
+    portfolio = overrides.get("portfolio", [portfolio_row])
+    write_json(out / "maker_carry_study.json", {"generated_at_utc": run_stamp, "portfolio": portfolio})
     toxicity = overrides.get("toxicity", 0.5)
     raw_imbalance = overrides.get("raw_imbalance", 0.4)
     blocked = toxicity > 0.9 or (raw_imbalance is not None and raw_imbalance >= 0.9)
@@ -71,6 +74,7 @@ def _write_healthy_inputs(cfg: EngineConfig, **overrides) -> None:
         {
             "qualified": overrides.get("sharp_qualified", True),
             "candidate_condition_id": overrides.get("qual_candidate", overrides.get("candidate", CANDIDATE)),
+            "candidate_token_id": overrides.get("qual_token", overrides.get("token", TOKEN)),
             "generated_at_utc": overrides.get("qual_generated", run_stamp),
             "consumed_study_generated_at": overrides.get("qual_study", run_stamp),
             "consumed_replay_generated_at": overrides.get("qual_replay", replay_stamp),
@@ -87,6 +91,7 @@ def test_all_conditions_pass_reads_eligible(tmp_path: Path, monkeypatch) -> None
     assert state == "eligible"
     assert all(row["passed"] for row in rows)
     assert summary["minimum_quote_capital_usd"] == 40.0
+    assert summary["candidate_token_id"] == TOKEN
 
 
 def test_each_registered_condition_fails_closed(tmp_path: Path) -> None:
@@ -105,6 +110,7 @@ def test_each_registered_condition_fails_closed(tmp_path: Path) -> None:
         {"sharp_qualified": False},
         {"qual_generated": "2026-07-17T10:00:00Z"},  # stale qualification (>30m)
         {"qual_candidate": "0xmismatch"},  # qualification about a different market
+        {"qual_token": "0xother-token"},  # qualification about the other outcome token
         {"qual_study": "2026-07-17T09:00:00Z"},  # qualification bound to an older study version
         {"qual_replay": "2026-07-17T09:00:00Z"},  # qualification bound to an older replay version
         {"raw_imbalance": None},  # missing vpin_raw -> toxicity screen fails closed
@@ -216,17 +222,73 @@ def test_candidate_change_while_eligible_renotifies(tmp_path: Path, monkeypatch)
         "inputs_snapshot": {"maker_carry_study_generated_at_utc": "2026-07-17T12:15:00Z"},
     })
     write_json(out / "maker_carry_study.json", {"generated_at_utc": "2026-07-17T12:15:00Z", "portfolio": [{
-        "condition_id": "0xdef", "question": "Other calm market?", "resolution_risk": "medium",
+        "condition_id": "0xdef", "token_id": "0xdef-token", "question": "Other calm market?", "resolution_risk": "medium",
         "event_start_time_utc": "", "size_multiple": 2, "capital_usd": 80.0}]})
     write_csv(out / "flow_toxicity.csv", [{"market": "0xdef", "toxicity_score": 0.5, "vpin_raw": 0.4, "toxic_blocked": False}])
     write_json(out / "requote_alerts.json", {"markets": [{"condition_id": "0xdef", "alert_state": "quotes_ok"}]})
     write_json(out / "maker_fill_replay.json", {"generated_at_utc": "2026-07-17T11:55:00Z"})
     write_json(out / "sharp_linking_qualification.json", {
-        "qualified": True, "candidate_condition_id": "0xdef", "generated_at_utc": "2026-07-17T11:50:00Z",
+        "qualified": True, "candidate_condition_id": "0xdef", "candidate_token_id": "0xdef-token",
+        "generated_at_utc": "2026-07-17T11:50:00Z",
         "consumed_study_generated_at": "2026-07-17T12:15:00Z", "consumed_replay_generated_at": "2026-07-17T11:55:00Z"})
     third = mod.run_stage_ticket_eligibility(cfg, as_of=NOW)
     assert third["state"] == "eligible" and third["candidate_changed_while_eligible"] is True
     assert len(sent) == 2  # re-notified on the candidate change
+
+
+def test_duplicate_condition_rows_fail_closed_even_when_one_token_matches(tmp_path: Path) -> None:
+    cfg = _cfg(tmp_path)
+    duplicate = {
+        "condition_id": CANDIDATE,
+        "token_id": "0xother-token",
+        "question": "Other outcome?",
+        "resolution_risk": "medium",
+        "event_start_time_utc": "",
+        "size_multiple": 2,
+        "capital_usd": 80.0,
+    }
+    _write_healthy_inputs(
+        cfg,
+        portfolio=[
+            {
+                "condition_id": CANDIDATE,
+                "token_id": TOKEN,
+                "question": "Calm test market?",
+                "resolution_risk": "medium",
+                "event_start_time_utc": "",
+                "size_multiple": 2,
+                "capital_usd": 80.0,
+            },
+            duplicate,
+        ],
+    )
+
+    state, rows, _ = mod.evaluate_stage_ticket_eligibility(cfg, as_of=NOW)
+
+    assert state == "not_eligible"
+    identity = next(row for row in rows if row["condition"] == "candidate_in_current_portfolio")
+    assert identity["passed"] is False
+    assert "portfolio_matches=2" in identity["detail"]
+
+
+def test_same_condition_new_token_renotifies(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setattr(mod, "FUNDING_GOVERNANCE_RECONCILED", True)
+    cfg = _cfg(tmp_path)
+    _write_healthy_inputs(cfg)
+    sent: list[str] = []
+    monkeypatch.setenv(mod.NTFY_ENV_VAR, "https://ntfy.sh/test-topic")
+    monkeypatch.setattr(mod, "_notify", lambda url, message: sent.append(message) or {"attempted": True, "delivered": True})
+    first = mod.run_stage_ticket_eligibility(cfg, as_of=NOW)
+    assert first["candidate_token_id"] == TOKEN
+
+    _write_healthy_inputs(cfg, token="0xreplacement-token")
+    second = mod.run_stage_ticket_eligibility(cfg, as_of=NOW)
+
+    assert second["state"] == "eligible"
+    assert second["candidate_changed_while_eligible"] is True
+    assert second["previous_candidate_token_id"] == TOKEN
+    assert second["candidate_token_id"] == "0xreplacement-token"
+    assert len(sent) == 2
 
 
 def test_stale_policy_vs_study_run_fails_closed(tmp_path: Path, monkeypatch) -> None:

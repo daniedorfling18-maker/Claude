@@ -48,25 +48,23 @@ def test_legacy_local_runbooks_are_loudly_archived() -> None:
 def test_work_order_queue_distinguishes_non_buildable_states() -> None:
     work_orders = _text("docs/POLYMARKET_CODEX_WORK_ORDERS.md")
 
-    assert "Current queue for Codex (reconciled 2026-07-16)" in work_orders
-    assert "WO-95 was implemented in PR #238" in work_orders
-    assert "instruction require their own numbered work order and PR" in work_orders
-    assert "WO-93 was implemented" in work_orders
-    assert "WO-94 in PR #237" in work_orders
-    assert "WO-95 in PR #238" in work_orders
+    assert "Current queue for Codex (reconciled 2026-07-19)" in work_orders
+    assert "remains CLOSED and WO-67 remains BLOCKED" in work_orders
+    assert "Each scope requires its own PR" in work_orders
+    assert "**WO-100:** rebuild closed PR #243 from current main" in work_orders
+    assert "**WO-101:** rebuild closed PR #242 from current main" in work_orders
+    assert "fix exact-token identity, sharp-source" in work_orders
+    assert "implement an actual tested rollback" in work_orders
+    assert "authenticated HTTPS or a private VPN" in work_orders
     assert "Next buildable: WO-92" not in work_orders
     wo92_heading = work_orders.split("## WO-92", 1)[1].splitlines()[0]
     assert "done (2026-07-15, PR #234)" in wo92_heading
     assert "ENGINEERING_STANDARDS.md" in work_orders
     assert "ROOT CAUSE CORRECTED by line audit" in work_orders
-    assert "WO-85, WO-87, WO-86, and" in work_orders
-    assert "WO-88 are implemented on 2026-07-15" in work_orders
-    assert "WO-83 is implemented in PR #203" in work_orders
-    assert "WO-84 is implemented in PR #205" in work_orders
-    assert "Pending review, not build permission" in work_orders
-    assert "Registration only" in work_orders
-    assert "WO-73 item 4 and" in work_orders
-    assert "WO-75 item 2" in work_orders
+    assert "WO-33/34/35 remain governed by WO-101's leakage" in work_orders
+    assert "WO-48, WO-67, WO-73 item 4, and WO-75 item 2 remain" in work_orders
+    assert "WO-70 and WO-72 remain deferred" in work_orders
+    assert "WO-76 remains registration-only" in work_orders
     assert "Queue now: **WO-80**" not in work_orders
 
     wo91 = work_orders.split("## WO-91", 1)[1].split("## WO-90", 1)[0]

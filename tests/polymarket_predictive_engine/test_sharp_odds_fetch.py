@@ -4,6 +4,7 @@ from datetime import datetime, timezone
 from pytest import approx
 
 from polymarket_predictive_engine.sharp_odds_fetch import (
+    DEFAULT_BOOKMAKER_PRIORITY,
     event_market_slug,
     fetch_sharp_odds,
     parse_odds_api_events,
@@ -59,6 +60,11 @@ def _write(path, rows, fields):
 
 def test_event_market_slug_is_normalised():
     assert event_market_slug("Spain", "France") == event_market_slug("spain", "FRANCE")
+
+
+def test_default_bookmakers_match_registered_venue_keys():
+    assert DEFAULT_BOOKMAKER_PRIORITY == ("pinnacle", "betfair_ex_eu", "betfair_ex_uk")
+    assert parse_odds_api_events([_event([_h2h("betfair", 2.2, 3.5, 3.6)])]) == []
 
 
 def test_pinnacle_is_preferred_over_betfair():

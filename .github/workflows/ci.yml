@@ -73,7 +73,7 @@ jobs:
               'auto_pick.yml': {'workflow_dispatch'},
               'check_superbru_fixtures.yml': {'workflow_dispatch'},
               'deploy-polymarket-vps-paper.yml': {'workflow_dispatch'},
-              'independent-pr-merge.yml': {'workflow_dispatch'},
+              'independent-pr-merge.yml': {'issue_comment'},
               'ci.yml': {'workflow_dispatch'},
               'polymarket-vps-governance-refresh.yml': {'workflow_dispatch'},
               'polymarket-vps-proof-health.yml': {'workflow_dispatch'},
@@ -82,7 +82,7 @@ jobs:
               'repo-audit-bundle.yml': {'workflow_dispatch'},
               'superbru-clv-snapshot.yml': {'workflow_dispatch'},
           }
-          possible_triggers = {'schedule', 'push', 'pull_request', 'workflow_dispatch'}
+          possible_triggers = {'schedule', 'push', 'pull_request', 'workflow_dispatch', 'issue_comment'}
 
           def top_level_on_block(text: str) -> str:
               lines = text.splitlines()
@@ -123,7 +123,6 @@ jobs:
               'auto_pick.yml',
               'check_superbru_fixtures.yml',
               'deploy-polymarket-vps-paper.yml',
-              'independent-pr-merge.yml',
               'refresh-locked-superbru-card.yml',
               'polymarket-vps-governance-refresh.yml',
               'polymarket-vps-proof-health.yml',

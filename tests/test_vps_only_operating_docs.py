@@ -71,3 +71,10 @@ def test_work_order_queue_distinguishes_non_buildable_states() -> None:
     assert "Fail-safe direction:" in wo91
     assert "Day-after check:" in wo91
     assert "recorded CLOB `/prices-history` payload" in wo91
+
+
+def test_maker_module_does_not_write_owner_authorization_claims() -> None:
+    source = _text("src/polymarket_predictive_engine/maker_carry_study.py")
+
+    assert "authorization = owner merge" not in source
+    assert "owner merge of this frozen-surface PR" not in source

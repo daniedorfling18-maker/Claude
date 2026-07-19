@@ -48,15 +48,15 @@ so re-running the study intraday can never fast-forward the clock):
   M-A carry evidence  - trusted net carry at/above target on at least
                         ``gate_min_runs_at_target`` distinct UTC days,
                         including the latest run.
-    M-A.1 amendment (2026-07-18; authorization = owner merge of this
-    frozen-surface PR): a UTC day counts only when its LAST published_v2 run
+    M-A.1 amendment (2026-07-18; registered frozen-surface rule): a UTC day
+    counts only when its LAST published_v2 run
     met target - an intraday spike that later faded cannot bank the day.
     Closes the external-audit cherry-pick finding. Tighten-only: can only
     reduce the day count.
   M-B adverse realism - every portfolio market carries a MEASURED markout
                         charge (empirical fills, not just bar approximations).
-    M-B.1 amendment (2026-07-18; authorization = owner merge of this
-    frozen-surface PR): M-B additionally requires each portfolio market's OWN
+    M-B.1 amendment (2026-07-18; registered frozen-surface rule): M-B
+    additionally requires each portfolio market's OWN
     recent official-book Tier-0 last-in-queue coverage (evaluable/confirmed-
     fill/coverage/markout-window/haircut minima), read from the prior cycle's
     replay. Closes the audit finding that M-B could pass on a print-markout
@@ -1666,8 +1666,8 @@ def _distinct_days_at_target(
 ) -> set[str]:
     """Distinct UTC days whose LAST published_v2 run met the target.
 
-    2026-07-18 maker-gate amendment M-A.1 (authorization = owner merge of this
-    frozen-surface PR): closes the intraday cherry-picking the external audit
+    2026-07-18 maker-gate amendment M-A.1 (registered frozen-surface rule):
+    closes the intraday cherry-picking the external audit
     flagged. A day counts only when
     its last published_v2 observation is at/above target, not when any intraday
     spike touched target. The current run is by construction today's last
@@ -1864,8 +1864,8 @@ def run_maker_carry_study(cfg: EngineConfig) -> dict[str, Any]:
     runs_at_target = len(days_at_target)
     required_runs = int(settings["gate_min_runs_at_target"])
     gate_a_state = "pass" if latest_at_target and runs_at_target >= required_runs else "pending"
-    # M-B.1 amendment (2026-07-18; authorization = owner merge of this
-    # frozen-surface PR): M-B now ALSO requires each portfolio market's own
+    # M-B.1 amendment (2026-07-18; registered frozen-surface rule): M-B now
+    # ALSO requires each portfolio market's own
     # recent official-book Tier-0 coverage, not just a measured print markout.
     # Reads the PRIOR pipeline cycle's replay (this cycle's runs afterward);
     # tighten-only AND with the existing markout condition, fail-closed.

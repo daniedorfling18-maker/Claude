@@ -1,11 +1,14 @@
 # Polymarket Codex Work Orders
 
-Last updated: 2026-07-18 (Codex RE-ENGAGED after the pause: active assignment is
-WO-106 only — see "ACTIVE BATCH for Codex" below. WO-104 items 0/1/2/3/4/5/6 and
-WO-105 landed via #257–#260; the funding-governance contradiction is reconciled
-(Route A) and enforced by the fail-closed sharp-linking evaluator with
-`FUNDING_GOVERNANCE_RECONCILED = True`. WO-107 is orchestrator-owned, not for
-Codex.)
+Last updated: 2026-07-19. Accepted `main` through PR #269 contains WO-104
+items 0–6, WO-105, WO-106, WO-107, WO-108, and WO-110. Funding remains
+operationally CLOSED and WO-67 remains BLOCKED behind every registered P1–P5
+precondition. The 2026-07-19 corrective request reopens WO-100 and WO-101 on
+current main and lists the narrowly scoped review remediations under "Current
+queue for Codex" below. Each scope requires its own PR; frozen-surface changes
+remain owner-merge. The unapproved dispatch/queue-driver protocol introduced
+in merged PR #263 is being removed separately in PR #270 without reverting
+#263's safety fixes.
 
 Prior: 2026-07-16 (owner-authorized corrective batch opened with WO-93; WO-85, WO-87, WO-86, and WO-88 implemented; WO-80, WO-82, WO-81 landed; WO-83 implemented in
 PR #203; WO-84 implemented in PR #205; WO-89 through WO-92 implemented. WO-87 now relabels the unchanged legacy verdict metric honestly and
@@ -4203,8 +4206,8 @@ Route A was chosen and owner-signed
 registry H1 sharp-anchor requirement and register the sharp-linking evaluator
 H1 anticipated. Reconciliation recorded in the registry (#256).
 
-BUILT 2026-07-18 (orchestrator), AWAITING OWNER MERGE (frozen-surface PR — it
-lands a new WO-99 gate condition and flips the governance flag):
+MERGED 2026-07-18 in owner-merged PR #260 (frozen-surface PR; it landed a new
+WO-99 gate condition and flipped the governance flag):
 `src/polymarket_predictive_engine/sharp_linking_evaluator.py` grades the ONE
 exact market WO-50 would fund (`decision_policy` composition
 `most_recurrent_market`, confirmed in the study portfolio) against registry H1
@@ -4481,7 +4484,7 @@ Full suite 1361. Day-after check (VPS): after the next export + anchor,
 fallback if float formatting drifted = restore per the 2026-07-13 incident
 pattern from a retained archive.
 
-## WO-108 — NaN fail-open residuals in WO-50 policy/kill surfaces (FROZEN; tighten-only; orchestrator-built, AWAITING OWNER MERGE)
+## WO-108 — NaN fail-open residuals in WO-50 policy/kill surfaces (DONE 2026-07-19; PR #267, FROZEN; tighten-only; owner-merged)
 
 Origin: the owner's LOCAL 5-agent audit (2026-07-19) drafted a NaN fail-closed
 WO grounded against main@9ab58fd (pre-#263). Orchestrator adjudication against
@@ -4505,11 +4508,10 @@ All four in `live_test_decision_policy.py` via one `_finite` helper mirroring
 the evaluator's. Tighten-only/fail-safe throughout: unknown values become
 missing, never silently-False comparisons. 4 tests added (NaN-first-day kill
 trigger; NaN cumulative reports missing; NaN row drops from observations; NaN
-capital drops from returns). Full suite 1360. Owner-merge (frozen WO-50
-surface). Companion governance-doc draft (provisional WO-109) remains with the
-owner for wording confirmation before registration.
+capital drops from returns). Full suite 1360. Merged as frozen-surface PR #267.
+Companion governance-doc draft (provisional WO-109) remains unregistered.
 
-## WO-107 — M-B.1: require the portfolio market's own Tier-0 coverage (FROZEN M-B; tighten-only; BUILT by orchestrator, AWAITING OWNER MERGE)
+## WO-107 — M-B.1: require the portfolio market's own Tier-0 coverage (DONE 2026-07-19; PR #262, FROZEN M-B; tighten-only; owner-merged)
 
 External-audit item 7: M-B could pass on a data-api-print markout estimate with
 zero Tier-0 last-in-queue coverage (observed adverse ran 2.08x the estimate).
@@ -4528,8 +4530,8 @@ freshness stay enforced downstream by the WO-105 evaluator, so this is
 defence-in-depth, not the sole guard. Constants mirror the evaluator's §2 and
 are mechanically tighten-only.
 
-Amendment drafted UNSIGNED at `docs/OWNER_AMENDMENT_MB1_TIER0_COVERAGE.md`;
-authorization is the owner's merge (no agent-written authorization). Tests: 11
+The owner merge of PR #262 is the repository authorization record; no
+agent-authored text is treated as authorization. Tests: 11
 direct-helper cases (sufficient passes; no-replay/low-coverage/stale/missing-
 row/non-official/thin-windows/high-haircut fail closed; every portfolio market
 must be covered; tighten-only override pins) plus the M-A/M-B integration test
@@ -4590,7 +4592,7 @@ per ENGINEERING_STANDARDS. Order reflects safety value, not audit order:
    decision policy's consumed study run (inputs_snapshot) to equal the
    current study generated_at, failing closed on the ~18-minute churn skew.
    Implemented via the existing run stamp rather than re-plumbing writers.
-3. BUILT 2026-07-18 (orchestrator), AWAITING OWNER MERGE (frozen-surface PR):
+3. MERGED 2026-07-18 in owner-merged PR #259 (frozen surface):
    changes the FROZEN M-A gate's day-counting arithmetic. Tighten-only, but it
    alters a registered gate, so authorization is the owner's merge of the PR,
    not a unilateral orchestrator change. Implemented as maker-gate amendment
@@ -4602,7 +4604,7 @@ per ENGINEERING_STANDARDS. Order reflects safety value, not audit order:
    at target counts; today governed by current run not earlier spike; legacy
    model day excluded). Docstring amendment registered in the module. Cannot
    raise the day count.
-4. BUILT 2026-07-18 (orchestrator), AWAITING OWNER MERGE (frozen-surface PR):
+4. MERGED 2026-07-18 in owner-merged PR #259 (frozen surface):
    the WO-59 Kelly overlay is money-sizing on the frozen WO-50 surface. The
    dimensionally-correct fix is confirmed NOT tighten-only — it LOOSENS: the
    old `mean/std^2` on raw dollars was unit-dependent and absurdly small
@@ -4846,45 +4848,48 @@ isolated public-network smoke scan discovered 20 negRisk events, priced three
 complete baskets, appended three exact rows, remained `collecting` with zero
 manufactured episodes, and reported both trading-invoked flags false.
 
-## Current queue for Codex (reconciled 2026-07-16)
+## Current queue for Codex (reconciled 2026-07-19)
 
 Every WO below and every future WO must comply with
 `docs/ENGINEERING_STANDARDS.md` (S1-S7), including the mandatory
 `Day-after check:` line. Reviews verify compliance item by item.
 
-**Next buildable: WO-99** — IMPLEMENTED by the orchestrator on 2026-07-17
-(owner directive: "perform the workorders yourself"). Codex tasking is
-PAUSED by owner decision until further notice; WO-100 (PR #243) and WO-101
-(PR #242) stay parked un-merged pending owner go.
+The 2026-07-19 corrective request is recorded here for owner review and becomes
+repository authorization only through the owner's merge of this PR. Funding
+remains CLOSED and WO-67 remains BLOCKED. No item below authorizes funding,
+live execution, or a gate/threshold loosening. Complete each line as one
+independently reviewable PR, and require an owner merge for every
+frozen-surface change.
 
-Numbering collision, resolved 2026-07-17: Codex self-assigned "WO-99" to a
-leakage-safe training corpus (draft PR #242) and "WO-100" to a full-suite PR
-gate (PR #243) before this ledger's WO-99 was filed; both branches predate
-the 2026-07-17 governance corrections. Dispositions: the corpus work is
-renumbered **WO-101** and the gate work keeps **WO-100**; both PRs must be
-rebased onto current main (>= dbbd61e), renamed accordingly, drop any
-runtime-lock fixture edits (superseded by the clock-relative fix on main),
-and re-run their suites before review. Neither may merge before the ledger
-WO-99 (notification) is built and reviewed. WO-95 was implemented in PR #238, WO-96 merged in PR #239, WO-97 merged in PR #240, and WO-98 was merged in PR #241. Later items in the 2026-07-16 owner
-instruction require their own numbered work order and PR; do not combine them
-into this change. WO-89 through WO-92 were implemented as of 2026-07-15.
-WO-93 was implemented in PR #236, WO-94 in PR #237, WO-95 in PR #238, and WO-96 in PR #239. WO-85, WO-87, WO-86, and
-WO-88 are implemented on 2026-07-15; WO-83 is implemented in PR #203 and
-WO-84 is implemented in PR #205. Do not infer follow-on capital, gate, model,
-or executor work from their diagnostics; the queue below remains binding.
+1. **Governance provenance:** remove the unapproved dispatch/queue-driver
+   protocol from merged PR #263 without reverting its safety fixes (PR #270),
+   then retain the one-scope-per-PR rule prospectively.
+2. **Review-remediation PRs:** fix exact-token identity, sharp-source
+   provenance, qualification-to-current-policy anchoring, maker-markout token
+   contamination, and source freshness. Each defect is a separate PR.
+3. **WO-100:** rebuild closed PR #243 from current main. Enforce the complete,
+   unfiltered suite and latest-review-on-current-head semantics. Establish real
+   branch protection or a documented fail-closed independent merge process;
+   do not claim GitHub-plan controls that the repository cannot enforce.
+4. **WO-101:** rebuild closed PR #242 from current main with observation-time
+   label availability, append-only resolution history, historical bid/ask
+   rather than midpoint-only inputs, a purged chronological split, and a
+   minimum number of distinct independent validation markets.
+5. **Deployment controls:** implement an actual tested rollback, isolate
+   deploy acceptance from the continuously running scheduler, and deploy only
+   an independently accepted main revision.
+6. **Dashboard transport:** remove the public unauthenticated HTTP exposure and
+   serve the dashboard through authenticated HTTPS or a private VPN.
+7. **Review hygiene:** adjudicate every surviving review thread against current
+   main; resolve only findings that are fixed or demonstrably superseded, and
+   fix applicable findings in their own PRs first.
 
-- **Implemented / publication pending:** WO-98 exact post-registration H2
-  evaluator and dashboard authority. After its one-PR review/merge, continue
-  with owner-ordered WO-99 leakage/corpus/split correction.
-- **Pending review, not build permission:** WO-33. WO-34/35 model wiring shares
-  its leakage-review dependency and must stay inside H1-H3; WO-99 is the
-  owner-authorized corrective implementation. WO-96 is the exact H3 build.
-- **Blocked:** WO-48 (maker evidence gates); WO-67 (all P1-P5); WO-73 item 4 and
-  WO-75 item 2 (part of the blocked executor authorization path).
-- **Deferred:** WO-70 until post-proof; WO-72 until the human ladder produces
-  the registered drill inputs.
-- **Registration only:** WO-76; no code build is attached to filing it.
-- **Decision, not a WO:** WP13 venue expansion requires an explicit owner go.
+Completed context: WO-93–WO-110 are merged as recorded in their individual
+sections, except that WO-100 and WO-101 are intentionally being rebuilt from
+their closed historical PRs. WO-33/34/35 remain governed by WO-101's leakage
+review and the H1–H3 freeze. WO-48, WO-67, WO-73 item 4, and WO-75 item 2 remain
+blocked. WO-70 and WO-72 remain deferred; WO-76 remains registration-only;
+WP13 still requires a separate owner decision.
 
 Do not infer a new build from the superseded priority notes below or from an
 existing diagnostic module. A newly filed WO or an explicit prerequisite

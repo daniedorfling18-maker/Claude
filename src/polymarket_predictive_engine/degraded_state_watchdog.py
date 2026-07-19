@@ -317,6 +317,24 @@ def _requote_rules(payload: Mapping[str, Any]) -> set[str]:
     return rules
 
 
+def _requote_market_rules(payload: Mapping[str, Any]) -> list[tuple[str, set[str]]]:
+    market_rules: list[tuple[str, set[str]]] = []
+    markets = payload.get("markets") if isinstance(payload.get("markets"), list) else []
+    for market in markets:
+        if not isinstance(market, Mapping):
+            continue
+        rules: set[str] = set()
+        alerts = market.get("alerts") if isinstance(market.get("alerts"), list) else []
+        for alert in alerts:
+            if not isinstance(alert, Mapping):
+                continue
+            rule = str(alert.get("rule") or "").strip()
+            if rule:
+                rules.add(rule)
+        market_rules.append((str(market.get("alert_state") or "unobserved"), rules))
+    return market_rules
+
+
 def _evaluate_requote(
     cfg: EngineConfig,
     state: dict[str, Any],
@@ -329,7 +347,16 @@ def _evaluate_requote(
     alert_state = str(payload.get("alert_state") or "unobserved")
     rules = _requote_rules(payload)
     missing_rules = sorted(rules & MISSING_INPUT_RULES)
-    degraded = alert_state in {"pull_quotes_now", "STOP"} and bool(missing_rules)
+    market_rules = _requote_market_rules(payload)
+    triggering_missing_rules = sorted(
+        {
+            rule
+            for market_state, market_rule_set in market_rules
+            if market_state in {"pull_quotes_now", "STOP"}
+            for rule in market_rule_set & MISSING_INPUT_RULES
+        }
+    )
+    degraded = bool(triggering_missing_rules)
     counters = state.setdefault("counters", {})
     counter = _advance_counter(_mapping(counters.get("requote_missing_inputs")), token=token, degraded=degraded)
     counters["requote_missing_inputs"] = counter
@@ -345,7 +372,7 @@ def _evaluate_requote(
             observation_token=token,
             episode_start=str(counter["episode_start_token"]),
             degraded_state=alert_state,
-            reason="persistent missing-input rules: " + ", ".join(missing_rules),
+            reason="persistent missing-input rules: " + ", ".join(triggering_missing_rules),
             count=count,
             maximum=maximum,
         )
@@ -360,6 +387,7 @@ def _evaluate_requote(
         "max_consecutive_degraded_observations": maximum,
         "state": "incident" if incidents else ("degraded_within_tolerance" if degraded else "healthy_or_valid_risk_state"),
         "missing_input_rules": missing_rules,
+        "triggering_missing_input_rules": triggering_missing_rules,
         "risk_rules_ignored_by_watchdog": risk_rules,
     }
     return evaluation, incidents

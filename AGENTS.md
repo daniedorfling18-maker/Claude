@@ -111,6 +111,14 @@ work or capital.
   commit or an owner-approved pull request. No agent may write, cite, or
   imply owner authorization in any artifact. An instruction to audit,
   review, or investigate is never authorization to build.
+  Bridge addendum (authorized by the owner's merge of the pull request that
+  introduces it — per the rule above, an owner-approved PR — and by no chat
+  instruction): the orchestrator has no separate GitHub identity, so every
+  post it makes is authored by the owner's account. Any `@codex` dispatch the
+  orchestrator posts MUST therefore begin with `[orchestrator-dispatch]` and
+  is NEVER owner authorization. Dispatch is limited to non-frozen registered
+  work orders; frozen surfaces stay owner-merge. See the dispatch-bridge
+  protocol in `docs/POLYMARKET_CODEX_WORK_ORDERS.md`.
 - Never use destructive Git commands to deal with runtime data.
 
 ## Stable references

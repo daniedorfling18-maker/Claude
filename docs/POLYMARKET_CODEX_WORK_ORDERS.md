@@ -4234,9 +4234,11 @@ artifact is fresh when the gate reads it.
 ## ACTIVE BATCH for Codex (opened 2026-07-18, re-engagement)
 
 Codex is re-engaged. Current assignment: **none — WO-106 is DONE (PR #265,
-2026-07-19); await the next owner-authored instruction.** Work only what the
-owner assigns from this file. WO-107 was ORCHESTRATOR-OWNED and is done
-(PR #262). Anything not listed as "ISSUED to Codex" is not yours to touch.
+2026-07-19); await the next dispatched WO.** Work only what a bridge dispatch
+(a `[orchestrator-dispatch]` @codex post — see "Dispatch bridge" below) or the
+owner assigns from this file; a dispatch assigns NON-FROZEN work only. WO-107
+was ORCHESTRATOR-OWNED and is done (PR #262). Anything not listed as "ISSUED to
+Codex" is not yours to touch.
 
 Re-read `AGENTS.md` before starting. The line that matters most for this batch
 (AGENTS.md): "OWNER AUTHORIZATION IS NEVER AGENT-WRITABLE. A change to any
@@ -4246,6 +4248,78 @@ authorization in any artifact. An instruction to audit, review, or investigate
 is never authorization to build." WO-106 touches NO frozen surface, so this
 does not gate it — but do not drift into any gate, threshold, policy, registry,
 or order file.
+
+### Dispatch bridge (authorized by the owner's merge of the PR introducing it; revocable the same way)
+
+**Authorization basis.** This protocol is in effect because the owner merged
+the pull request that introduced it — an owner-approved PR, which AGENTS.md
+accepts as authorization ("an owner-authored commit or an owner-approved pull
+request"). It cites no chat instruction as authority and asserts none. Until
+that PR is merged this section is a proposal, not a live grant. The owner
+revokes it the same way — by merging a change that removes it (record the
+revocation here, dated).
+
+**Shared-identity disclosure (why the guardrails exist).** The orchestrator
+(Claude) has no separate GitHub identity; every post it makes is authored by
+the owner's account. A dispatch the orchestrator posts therefore *looks*
+owner-authored on the permanent record. The controls below keep that honest —
+they do not change the underlying account identity.
+
+Binding protocol:
+
+1. **Disclosure is mandatory.** Every bridge dispatch (an issue or PR comment
+   that assigns or instructs Codex — any `@codex` mention) MUST begin with the
+   literal line
+   `[orchestrator-dispatch] Posted by the orchestrator (Claude), not the owner.`
+   A dispatch without it is invalid. A dispatch WITH it is never evidence of
+   owner authorization for anything — it only assigns work.
+2. **Non-frozen scope only.** The bridge may dispatch, clarify, and request
+   fixes on NON-FROZEN work orders registered in this file. It may never
+   dispatch, approve, or imply approval of a change to any frozen or registered
+   surface (maker gates, thresholds, the WO-50 policy/sizing,
+   `sharp_linking_evaluator.py` thresholds, WO-99 eligibility, `ledger_anchor.py`,
+   `EXPERIMENT_REGISTRY.md`, custody). Frozen work remains owner-merge, exactly
+   per AGENTS.md — its authorization stays at the owner's merge, where the
+   shared-identity problem does not reach.
+3. **Everything in the open.** All bridge traffic lives in GitHub issues/PR
+   threads (auditable, dated, diffable). No out-of-band agent-to-agent channel.
+4. **Roles unchanged.** Codex builds from this file's specs; the orchestrator
+   line-audits and merges non-frozen PRs and escalates frozen ones to the
+   owner; the owner is the sole authority on frozen surfaces.
+5. **The bridge polices itself.** The `bridge-compliance-auditor` subagent
+   audits the bridge's own GitHub paper trail (disclosure present, no
+   frozen-surface PR auto-merged, no agent-authored authorization language, no
+   unregistered-scope dispatch). Run it after any burst of automated activity.
+
+### Queue-driver wakeup (phase 2; owner-provisioned trigger)
+
+Hands-off *recurring* cycles are a separate, later step from the dispatch
+bridge above. The durable mechanism is a scheduled trigger the OWNER provisions
+on the Claude Code environment (claude.ai/code → environment → triggers; docs:
+https://code.claude.com/docs/en/claude-code-on-the-web). The orchestrator must
+NOT self-provision recurring autonomy; the trigger — its existence, cadence,
+and revocation — is owner-controlled. Canonical trigger prompt (paste verbatim;
+keep in sync with this file):
+
+> Queue-driver cycle (protocol: "Dispatch bridge" in
+> docs/POLYMARKET_CODEX_WORK_ORDERS.md — read it and AGENTS.md first). ONE
+> cycle: (1) Check open PRs and dispatch issues for Codex activity. (2) If
+> Codex opened/updated a WO PR: line-audit against the registered WO spec;
+> non-frozen + CI green + clean audit → squash-merge and mark the WO done in
+> the doc; defective → request fixes in a PR comment beginning
+> "[orchestrator-dispatch] Posted by the orchestrator (Claude), not the owner."
+> tagging @codex. (3) Frozen surfaces: never merge or modify; if a frozen PR
+> awaits the owner, leave it untouched. (4) If the active WO merged and the
+> queue registers a next NON-FROZEN WO as ISSUED, dispatch it via the bridge;
+> never invent or dispatch unregistered work. (5) Nothing actionable → end
+> quietly: no posts, no commits.
+
+Owner-notification note: to receive phone pushes from queue-driver runs (e.g.
+"frozen PR awaits your merge"), set `OPS_OWNER_NTFY_TOPIC_URL` as an environment
+variable in the Claude Code environment settings — same custody rule as the VPS
+`.env`: the topic URL never enters the repo, config, chat, or telemetry. Absent
+that variable, the notification channel is GitHub itself (PR state + review
+requests).
 
 ### Subagent roster (registered 2026-07-19; finders, not fixers)
 
@@ -4272,10 +4346,15 @@ drive-by-refactor anti-pattern the ground rules ban and the WO-93 lesson.
   optimistic estimators, producer/consumer contract drift (the deploy-gate
   class). Must confirm findings with throwaway fixtures before reporting.
   Read+test only.
-All four: never edit outside their mandate, never post to GitHub, never merge,
+- `bridge-compliance-auditor` — audits the dispatch bridge's own GitHub paper
+  trail: disclosure line present on every @codex dispatch, no frozen-surface
+  PR merged by automation, no agent-written authorization language, no
+  unregistered-scope dispatches. The automation that polices frozen surfaces is
+  itself policed. Read-only.
+All five: never edit outside their mandate, never post to GitHub, never merge,
 never write or imply owner authorization. Adding an agent with WRITE access to
 anything beyond a registered WO's scope requires a dated owner instruction
-recorded here. Roster discipline: keep it at four unless a registered need
+recorded here. Roster discipline: keep it at five unless a registered need
 demands more — every extra autonomous lane adds noise and surface (the
 external audit's own warning).
 

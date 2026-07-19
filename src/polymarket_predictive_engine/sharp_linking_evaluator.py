@@ -53,7 +53,7 @@ OUTPUT_RELATIVE = "maker_carry/sharp_linking_qualification.json"
 MAX_ANCHOR_AGE_SECONDS = 6 * 3600
 MAX_ANCHOR_DISAGREEMENT = 0.03
 MAX_PM_BOOK_AGE_SECONDS = 5 * 60
-QUALIFYING_SHARP_SOURCES = frozenset({"pinnacle", "betfair_ex_eu", "betfair_ex_uk", "betfair"})
+QUALIFYING_SHARP_SOURCES = frozenset({"pinnacle", "betfair_ex_eu", "betfair_ex_uk"})
 
 # --- §2 exact-market Tier-0 sufficiency (registered, tighten-only) ---
 MAX_REPLAY_AGE_SECONDS = 30 * 60

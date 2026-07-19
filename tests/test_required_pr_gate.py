@@ -740,6 +740,9 @@ def test_candidate_cannot_replace_the_trusted_merge_control() -> None:
         "pytest/__main__.py",
         "src/pytest.py",
         "pytest.ini",
+        "pytest.toml",
+        "tests/__init__.py",
+        "tests/polymarket_predictive_engine/__init__.py",
         "pyproject.toml",
         "ruff.py",
         "ruff/__main__.py",
@@ -756,6 +759,38 @@ def test_candidate_cannot_change_pytest_execution_controls(path: str) -> None:
     assert result["eligible"] is False
     assert result["protected_control_changes"] == [path]
     assert "pull_request_changes_trusted_merge_control" in result["blockers"]
+
+
+def test_src_package_initializer_is_not_treated_as_merge_control() -> None:
+    # The test-package __init__ protection must not over-reach into ordinary
+    # source packages, or the lane could never merge a normal src change.
+    evidence = _candidate_evidence()
+    evidence["changed_files"] = [
+        {"filename": "src/polymarket_predictive_engine/__init__.py"}
+    ]
+
+    result = independent_merge.evaluate_merge_candidate(**evidence)
+
+    assert result["protected_control_changes"] == []
+    assert "pull_request_changes_trusted_merge_control" not in result["blockers"]
+
+
+def test_merge_workflow_identity_accepts_ref_suffixed_path() -> None:
+    # Actions reports the dispatched workflow path with an @ref suffix; the
+    # merge-identity check must normalize it, or a genuine main dispatch is
+    # rejected as not-accepted-current-main and the lane can never merge.
+    evidence = _candidate_evidence()
+    evidence["merge_workflow_run"]["path"] = (
+        f"{independent_merge.INDEPENDENT_WORKFLOW}@refs/heads/main"
+    )
+
+    result = independent_merge.evaluate_merge_candidate(**evidence)
+
+    assert result["eligible"] is True
+    assert (
+        "merge_workflow_identity_is_not_accepted_current_main"
+        not in result["blockers"]
+    )
 
 
 def test_atomic_squash_uses_verified_tree_parent_and_non_force_ref_update() -> None:

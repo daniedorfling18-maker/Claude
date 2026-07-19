@@ -36,6 +36,7 @@ PROTECTED_CONTROL_PATHS = {
     "scripts/merge_independently_reviewed_pr.py",
     "pyproject.toml",
     "pytest.ini",
+    "pytest.toml",
     "setup.py",
     "setup.cfg",
     "sitecustomize.py",
@@ -89,9 +90,17 @@ def _protected_control_path(path: str) -> bool:
         import_root in {entrypoint, f"{entrypoint}.py"}
         for entrypoint in PROTECTED_PYTHON_ENTRYPOINTS
     )
+    basename = parts[-1]
+    # A test-package initializer (``tests/__init__.py`` or any ``__init__.py``
+    # under a ``tests`` directory) is imported by pytest during collection, so
+    # a candidate can use it to mutate pytest state or skip collection and let
+    # the trusted ``python -m pytest`` pass without running the repository
+    # suite.  Treat it as merge-control input alongside ``conftest.py``.
+    is_test_package_init = basename == "__init__.py" and "tests" in parts[:-1]
     return (
         normalized in PROTECTED_CONTROL_PATHS
-        or normalized.rsplit("/", 1)[-1] == "conftest.py"
+        or basename == "conftest.py"
+        or is_test_package_init
         or shadows_python_entrypoint
     )
 
@@ -231,7 +240,7 @@ def evaluate_merge_candidate(
         == f"{repository}/{INDEPENDENT_WORKFLOW}@refs/heads/main"
         and identity_run_id == workflow_run_id
         and str(workflow_run.get("event") or "") == "workflow_dispatch"
-        and str(workflow_run.get("path") or "") == INDEPENDENT_WORKFLOW
+        and _workflow_path(workflow_run.get("path")) == INDEPENDENT_WORKFLOW
         and str(workflow_run.get("head_branch") or "") == "main"
         and identity_workflow_sha == current_main_sha
         and run_head_sha == current_main_sha

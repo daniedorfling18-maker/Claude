@@ -158,6 +158,49 @@ def test_policy_table_stable_pass_funds_single_calmest_market(tmp_path):
     assert result["composition_stability"]["most_recurrent_count"] >= 4
     assert result["paper_trading_invoked"] is False
     assert result["live_trading_invoked"] is False
+    assert policy.policy_version_matches(result)
+
+
+def test_policy_version_distinguishes_different_outputs_in_the_same_second(
+    tmp_path, monkeypatch
+):
+    cfg = _config(tmp_path)
+    _write_carry_history(cfg, _history(["0xm1"] * 7))
+    monkeypatch.setattr(policy, "now_utc", lambda: "2026-07-19T08:00:00Z")
+
+    _write_study(cfg, _study(top="0xm1"))
+    first = run_decision_policy(cfg)
+    _write_study(cfg, _study(gate_a="pending", gate_b="pass", top="0xm1"))
+    second = run_decision_policy(cfg)
+
+    assert first["generated_at_utc"] == second["generated_at_utc"]
+    assert first["indicated_action"] != second["indicated_action"]
+    assert first["policy_version_sha256"] != second["policy_version_sha256"]
+    assert policy.policy_version_matches(first)
+    assert policy.policy_version_matches(second)
+
+
+def test_policy_version_ignores_only_the_generation_clock() -> None:
+    first = {
+        "status": "ok",
+        "generated_at_utc": "2026-07-19T08:00:00Z",
+        "indicated_action": "continue_study_until_policy_date",
+        "paper_trading_invoked": False,
+        "live_trading_invoked": False,
+    }
+    second = {**first, "generated_at_utc": "2026-07-19T08:00:01Z"}
+
+    assert policy.policy_version_sha256(first) == policy.policy_version_sha256(second)
+
+
+def test_disabled_policy_is_also_content_addressed(tmp_path) -> None:
+    cfg = _config(tmp_path)
+    cfg.raw["decision_policy"]["enabled"] = False
+
+    result = run_decision_policy(cfg)
+
+    assert result["status"] == "disabled"
+    assert policy.policy_version_matches(result)
 
 
 def test_policy_table_churning_pass_halves_recurrent_market_target(tmp_path):

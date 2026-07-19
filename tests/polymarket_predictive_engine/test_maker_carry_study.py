@@ -133,6 +133,78 @@ def _deep_book(mid: float = 0.5) -> dict[str, Any]:
     }
 
 
+def test_recent_prints_retain_only_the_exact_condition_token_pair(tmp_path, monkeypatch) -> None:
+    cfg = _config(tmp_path)
+    trades = [
+        {
+            "price": 0.49,
+            "size": 5,
+            "side": "SELL",
+            "timestamp": 1_700_000_000,
+            "conditionId": "0xcalm",
+            "asset": "calm",
+        },
+        {
+            "price": 0.01,
+            "size": 10_000,
+            "side": "SELL",
+            "timestamp": 1_700_000_001,
+            "conditionId": "0xcalm",
+            "asset": "calm-no",
+        },
+        {
+            "price": 0.02,
+            "size": 10_000,
+            "side": "SELL",
+            "timestamp": 1_700_000_002,
+            "conditionId": "0xother",
+            "asset": "calm",
+        },
+        {
+            "price": 0.03,
+            "size": 10_000,
+            "side": "SELL",
+            "timestamp": 1_700_000_003,
+            "conditionId": "0xcalm",
+        },
+    ]
+    _fake_requests(
+        monkeypatch,
+        markets=[],
+        books={},
+        histories={},
+        prints={"0xcalm": trades},
+    )
+
+    rows = maker_carry_study._recent_prints(
+        maker_carry_study._settings(cfg),
+        "0xcalm",
+        "calm",
+    )
+
+    assert len(rows) == 1
+    assert rows[0]["condition_id"] == "0xcalm"
+    assert rows[0]["token_id"] == "calm"
+    assert rows[0]["price"] == 0.49
+
+
+def test_recent_prints_fail_closed_when_requested_identity_is_missing(tmp_path, monkeypatch) -> None:
+    cfg = _config(tmp_path)
+    called = False
+
+    def fail_get(*args, **kwargs):
+        nonlocal called
+        called = True
+        raise AssertionError("identity check must happen before the request")
+
+    monkeypatch.setattr(maker_carry_study.requests, "get", fail_get)
+    settings = maker_carry_study._settings(cfg)
+
+    assert maker_carry_study._recent_prints(settings, "", "calm") == []
+    assert maker_carry_study._recent_prints(settings, "0xcalm", "") == []
+    assert called is False
+
+
 def _scan_market(token: str, pot: float, pot_rank: int) -> dict[str, Any]:
     return {
         "question": f"{token} market",
@@ -605,7 +677,19 @@ def test_supplementary_income_does_not_change_registered_gates_or_net_carry(tmp_
     books = {"calm": _deep_book()}
     histories = {("calm", "1d"): _flat_history(200), ("calm", "1w"): _flat_history(200)}
     # Quiet fills create measured band crossings for rebate estimation.
-    prints = {"0xcalm": [{"price": 0.499, "size": 5, "side": "SELL", "timestamp": 600 + j * 60} for j in range(25)]}
+    prints = {
+        "0xcalm": [
+            {
+                "price": 0.499,
+                "size": 5,
+                "side": "SELL",
+                "timestamp": 600 + j * 60,
+                "conditionId": "0xcalm",
+                "asset": "calm",
+            }
+            for j in range(25)
+        ]
+    }
     _fake_requests(monkeypatch, markets=markets, books=books, histories=histories, prints=prints)
 
     summary = run_maker_carry_study(cfg)
@@ -634,7 +718,15 @@ def test_markout_charges_empirical_pickoffs_and_gates_track_evidence(tmp_path, m
     histories = {("hostile", "1d"): dropped, ("hostile", "1w"): _flat_history(300)}
     prints = {
         "0xhostile": [
-            {"price": 0.484, "size": 100, "side": "SELL", "timestamp": 11700 + j * 5} for j in range(60)
+            {
+                "price": 0.484,
+                "size": 100,
+                "side": "SELL",
+                "timestamp": 11700 + j * 5,
+                "conditionId": "0xhostile",
+                "asset": "hostile",
+            }
+            for j in range(60)
         ]
     }
     _fake_requests(monkeypatch, markets=markets, books=books, histories=histories, prints=prints)
@@ -659,7 +751,19 @@ def test_gate_a_passes_only_after_enough_distinct_days_at_target(tmp_path, monke
     books = {"calm": _deep_book()}
     histories = {("calm", "1d"): _flat_history(200), ("calm", "1w"): _flat_history(200)}
     # 25 quiet prints inside the band edge: markout measured, zero loss.
-    prints = {"0xcalm": [{"price": 0.499, "size": 5, "side": "SELL", "timestamp": 600 + j * 60} for j in range(25)]}
+    prints = {
+        "0xcalm": [
+            {
+                "price": 0.499,
+                "size": 5,
+                "side": "SELL",
+                "timestamp": 600 + j * 60,
+                "conditionId": "0xcalm",
+                "asset": "calm",
+            }
+            for j in range(25)
+        ]
+    }
     _fake_requests(monkeypatch, markets=markets, books=books, histories=histories, prints=prints)
 
     # Registered clarification: intraday re-runs never fast-forward the clock.
@@ -768,7 +872,19 @@ def test_legacy_share_model_days_never_count_toward_gate_a(tmp_path, monkeypatch
     markets = [_market("deep calm market", "calm", 1000.0)]
     books = {"calm": _deep_book()}
     histories = {("calm", "1d"): _flat_history(200), ("calm", "1w"): _flat_history(200)}
-    prints = {"0xcalm": [{"price": 0.499, "size": 5, "side": "SELL", "timestamp": 600 + j * 60} for j in range(25)]}
+    prints = {
+        "0xcalm": [
+            {
+                "price": 0.499,
+                "size": 5,
+                "side": "SELL",
+                "timestamp": 600 + j * 60,
+                "conditionId": "0xcalm",
+                "asset": "calm",
+            }
+            for j in range(25)
+        ]
+    }
     _fake_requests(monkeypatch, markets=markets, books=books, histories=histories, prints=prints)
 
     # Seed a legacy-era at-target day (share_model empty, hugely over target).

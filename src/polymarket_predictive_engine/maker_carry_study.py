@@ -1259,8 +1259,22 @@ def _pickoff_from_series(
     }
 
 
-def _recent_prints(settings: dict[str, Any], condition_id: str) -> list[dict[str, float]]:
-    """Executed trades (price/size/aggressor side/stamp) from the data-API."""
+def _recent_prints(
+    settings: dict[str, Any],
+    condition_id: str,
+    token_id: str,
+) -> list[dict[str, Any]]:
+    """Exact-token executed trades from the condition-level data-API query.
+
+    Polymarket's data API filters ``market`` by condition ID and returns both
+    outcome assets. Markout prices are token-specific, so every response row
+    must carry the requested condition and asset identity; missing or
+    mismatched identity is discarded rather than contaminating the quoted
+    token with prints from its complement.
+    """
+
+    if not condition_id or not token_id:
+        return []
     try:
         response = requests.get(
             f"{str(settings['data_api_base_url']).rstrip('/')}/trades",
@@ -1272,9 +1286,17 @@ def _recent_prints(settings: dict[str, Any], condition_id: str) -> list[dict[str
     except Exception:
         return []
     trades = payload if isinstance(payload, list) else payload.get("trades") or payload.get("data") or []
-    prints: list[dict[str, float]] = []
+    prints: list[dict[str, Any]] = []
     for trade in trades:
         if not isinstance(trade, dict):
+            continue
+        trade_condition = str(
+            trade.get("conditionId") or trade.get("condition_id") or trade.get("market") or ""
+        ).strip()
+        trade_token = str(
+            trade.get("asset") or trade.get("asset_id") or trade.get("assetId") or trade.get("token_id") or ""
+        ).strip()
+        if trade_condition != condition_id or trade_token != token_id:
             continue
         price = safe_float(trade.get("price"))
         size = safe_float(trade.get("size"))
@@ -1282,13 +1304,22 @@ def _recent_prints(settings: dict[str, Any], condition_id: str) -> list[dict[str
         side = str(trade.get("side") or "").upper()
         if price is None or size is None or stamp is None or side not in {"BUY", "SELL"}:
             continue
-        prints.append({"price": price, "size": size, "stamp": stamp, "side": side})
+        prints.append(
+            {
+                "price": price,
+                "size": size,
+                "stamp": stamp,
+                "side": side,
+                "condition_id": trade_condition,
+                "token_id": trade_token,
+            }
+        )
     return prints
 
 
 def _markout_adverse(
     settings: dict[str, Any],
-    prints: list[dict[str, float]],
+    prints: list[dict[str, Any]],
     series: list[tuple[float, float]] | None,
     quote_distance: float,
     quote_size: float,
@@ -1339,7 +1370,7 @@ def _adverse_selection(
     settings: dict[str, Any],
     fast_series: list[tuple[float, float]] | None,
     slow_series: list[tuple[float, float]] | None,
-    prints: list[dict[str, float]],
+    prints: list[dict[str, Any]],
     quote_distance: float,
     quote_size: float,
     depth: dict[str, float],
@@ -1692,7 +1723,7 @@ def run_maker_carry_study(cfg: EngineConfig) -> dict[str, Any]:
         # Fetch market data ONCE; the distance sweep below re-prices freely.
         fast_series = _price_series(settings, market["token_id"], interval="1d", fidelity_minutes=max(1, int(settings["reaction_minutes"])))
         slow_series = _price_series(settings, market["token_id"], interval="1w", fidelity_minutes=10)
-        prints = _recent_prints(settings, market["condition_id"])
+        prints = _recent_prints(settings, market["condition_id"], market["token_id"])
 
         best_row: dict[str, Any] | None = None
         for fraction in fractions:

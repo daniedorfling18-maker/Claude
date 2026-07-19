@@ -23,11 +23,18 @@ ARCHIVE_MANIFESTS = (
 )
 
 SENSITIVE_KEY_RE = re.compile(
-    r"(?:^|[_\-\s])(private[_\-\s]*key|api[_\-\s]*(?:key|secret)|secret|passphrase|password|credential)(?:$|[_\-\s])",
+    r"(?:^|[_\-\s])("
+    r"private[_\-\s]*key|"
+    r"api[_\-\s]*(?:key|secret|token)|"
+    r"(?:access|auth|bearer|refresh|session|id)[_\-\s]*token|"
+    r"secret|passphrase|password|credential"
+    r")(?:$|[_\-\s])",
     re.IGNORECASE,
 )
 LABELLED_VALUE_RE = re.compile(
-    r"(?i)(?:private[_\-\s]*key|api[_\-\s]*(?:key|secret)|secret|passphrase|password|credential)"
+    r"(?i)(?:private[_\-\s]*key|api[_\-\s]*(?:key|secret|token)|"
+    r"(?:access|auth|bearer|refresh|session|id)[_\-\s]*token|"
+    r"secret|passphrase|password|credential)"
     r"\s*[=:]\s*[\"']?([^\s\"',;}]{8,})"
 )
 HEX_32_BYTE_RE = re.compile(r"(?<![0-9A-Fa-f])(?:0x)?[0-9A-Fa-f]{64}(?![0-9A-Fa-f])")

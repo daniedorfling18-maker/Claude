@@ -24,6 +24,10 @@ REGISTERED_MIN_VCPUS = 2
 REGISTERED_MIN_FREE_DISK_BYTES = 6 * GIB
 REGISTERED_MIN_AVAILABLE_MEMORY_BYTES = 512 * MIB
 MEMORY_LIMIT_PATTERN = re.compile(r"^\s*mem_limit\s*:\s*(?P<value>[^#]+?)\s*$")
+PROFILES_PATTERN = re.compile(r"^\s*profiles\s*:\s*(?P<value>[^#]+?)\s*$")
+CAPACITY_REPLACES_PATTERN = re.compile(
+    r"^\s*x-capacity-replaces\s*:\s*(?P<value>[^#]+?)\s*$"
+)
 INTERPOLATION_PATTERN = re.compile(r"^\$\{(?P<name>[A-Za-z_][A-Za-z0-9_]*)(?::?-)(?P<default>[^}]+)\}$")
 
 
@@ -67,18 +71,64 @@ def read_env_file(path: Path) -> dict[str, str]:
     return values
 
 
+def _inline_items(value: str) -> list[str]:
+    text = value.strip()
+    if text.startswith("[") and text.endswith("]"):
+        text = text[1:-1]
+    return [
+        item.strip().strip('"\'')
+        for item in text.split(",")
+        if item.strip().strip('"\'')
+    ]
+
+
 def compose_memory_limits(compose_path: Path, env_path: Path) -> list[dict[str, Any]]:
     env_file = read_env_file(env_path)
-    limits: list[dict[str, Any]] = []
-    current_service = "unknown"
+    services: dict[str, dict[str, Any]] = {}
+    current: dict[str, Any] | None = None
+    in_services = False
     for line in compose_path.read_text(encoding="utf-8").splitlines():
+        if line.strip() == "services:":
+            in_services = True
+            continue
+        if in_services and line and not line.startswith((" ", "\t", "#")):
+            in_services = False
+            current = None
+        if not in_services:
+            continue
         service_match = re.match(r"^  ([A-Za-z0-9_.-]+):\s*$", line)
         if service_match:
-            current_service = service_match.group(1)
+            service = service_match.group(1)
+            current = {
+                "service": service,
+                "profiles": [],
+                "capacity_replaces": [],
+                "memory_expression": "",
+            }
+            services[service] = current
+            continue
+        if current is None:
+            continue
+        profile_match = PROFILES_PATTERN.match(line)
+        if profile_match:
+            current["profiles"] = _inline_items(profile_match.group("value"))
+            continue
+        replacement_match = CAPACITY_REPLACES_PATTERN.match(line)
+        if replacement_match:
+            current["capacity_replaces"] = _inline_items(
+                replacement_match.group("value")
+            )
+            continue
         match = MEMORY_LIMIT_PATTERN.match(line)
         if not match:
             continue
-        expression = match.group("value").strip().strip('"\'')
+        current["memory_expression"] = match.group("value").strip().strip('"\'')
+
+    limits: list[dict[str, Any]] = []
+    for current in services.values():
+        expression = str(current.get("memory_expression") or "")
+        if not expression:
+            continue
         interpolation = INTERPOLATION_PATTERN.match(expression)
         source = "literal"
         if interpolation:
@@ -88,15 +138,85 @@ def compose_memory_limits(compose_path: Path, env_path: Path) -> list[dict[str, 
             source = name
         limits.append(
             {
-                "service": current_service,
+                "service": current["service"],
                 "configured": expression,
                 "bytes": parse_size(expression),
                 "source": source,
+                "profiles": list(current["profiles"]),
+                "capacity_replaces": list(current["capacity_replaces"]),
             }
         )
     if not limits:
         raise ValueError(f"no mem_limit declarations found in {compose_path}")
     return limits
+
+
+def compose_memory_modes(
+    memory_limits: list[Mapping[str, Any]],
+) -> list[dict[str, Any]]:
+    base = {
+        str(row["service"]): int(row["bytes"])
+        for row in memory_limits
+        if not (row.get("profiles") or [])
+    }
+    profiles = sorted(
+        {
+            str(profile)
+            for row in memory_limits
+            for profile in (row.get("profiles") or [])
+            if str(profile)
+        }
+    )
+    selected_profile_sets = [{profile} for profile in profiles]
+    if len(profiles) > 1:
+        selected_profile_sets.append(set(profiles))
+
+    modes = [
+        {
+            "mode": "default",
+            "profiles": [],
+            "active_services": sorted(base),
+            "replaced_services": [],
+            "bytes": sum(base.values()),
+        }
+    ]
+    for selected_profiles in selected_profile_sets:
+        active_profile_rows = [
+            row
+            for row in memory_limits
+            if selected_profiles.intersection(
+                str(profile) for profile in (row.get("profiles") or [])
+            )
+        ]
+        replacements = {
+            str(service)
+            for row in active_profile_rows
+            for service in (row.get("capacity_replaces") or [])
+            if str(service)
+        }
+        unknown_replacements = sorted(replacements - set(base))
+        if unknown_replacements:
+            raise ValueError(
+                "profile capacity replacement names unknown base services: "
+                + ", ".join(unknown_replacements)
+            )
+        active_base = {
+            service: limit for service, limit in base.items() if service not in replacements
+        }
+        profile_limits = {
+            str(row["service"]): int(row["bytes"]) for row in active_profile_rows
+        }
+        active = {**active_base, **profile_limits}
+        modes.append(
+            {
+                "mode": "profiles:" + ",".join(sorted(selected_profiles)),
+                "profiles": sorted(selected_profiles),
+                "active_services": sorted(active),
+                "replaced_services": sorted(replacements),
+                "bytes": sum(active.values()),
+            }
+        )
+    return modes
 
 
 def _meminfo() -> dict[str, int]:
@@ -145,7 +265,8 @@ def evaluate_capacity(
     environment: Mapping[str, str] | None = None,
 ) -> dict[str, Any]:
     environment = environment or {}
-    requested_memory = sum(int(row["bytes"]) for row in memory_limits)
+    memory_modes = compose_memory_modes(memory_limits)
+    requested_memory = max(int(row["bytes"]) for row in memory_modes)
     requirements = {
         "minimum_vcpus": _tightened_int(environment, "PM_VPS_MIN_VCPUS", REGISTERED_MIN_VCPUS),
         "minimum_total_memory_bytes": requested_memory,
@@ -199,6 +320,7 @@ def evaluate_capacity(
         "host_metrics": dict(metrics),
         "requirements": requirements,
         "compose_memory_limits": [dict(row) for row in memory_limits],
+        "compose_memory_modes": memory_modes,
         "paper_trading_invoked": False,
         "live_trading_invoked": False,
     }

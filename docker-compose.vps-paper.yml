@@ -233,6 +233,9 @@ services:
   # command or signing credentials.
   vps-deploy-acceptance:
     profiles: ["deploy-acceptance"]
+    # Capacity-only metadata consumed by preflight_vps_capacity.py. The deploy
+    # workflow proves the scheduler stopped before this service is started.
+    x-capacity-replaces: vps-ops-scheduler
     image: polymarket-paper-vps:latest
     mem_limit: ${VPS_DEPLOY_ACCEPTANCE_MEM_LIMIT:-2g}
     working_dir: /app

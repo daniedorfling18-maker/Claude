@@ -62,6 +62,7 @@ def test_vps_paper_compose_is_lean_and_paper_only():
     assert "POLYMARKET_LIVE_TRADING" not in superbru["environment"]
     acceptance = services["vps-deploy-acceptance"]
     assert acceptance["profiles"] == ["deploy-acceptance"]
+    assert acceptance["x-capacity-replaces"] == "vps-ops-scheduler"
     assert acceptance["restart"] == "no"
     assert acceptance["environment"]["POLYMARKET_EXECUTE_LIVE"] == "false"
     assert acceptance["environment"]["POLYMARKET_LIVE_TRADING"] == "0"

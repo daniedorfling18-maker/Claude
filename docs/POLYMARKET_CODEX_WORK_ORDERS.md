@@ -5069,7 +5069,10 @@ frozen-surface change.
    recreates all four production services, and requires the ordinary health
    check. Real-data acceptance moved out of the continuous scheduler into the
    profiled, one-shot `vps-deploy-acceptance` service; the workflow stops and
-   proves the scheduler absent before starting it. No broker, signer,
+   proves the scheduler absent before starting it. Capacity preflight models
+   that profile as an alternative to the stopped 2 GiB scheduler, reports each
+   concurrent mode, and therefore does not falsely add both services to the
+   8 GiB host commitment. No broker, signer,
    cancellation, paper-order, live-order, gate, threshold, stake, or funding
    path changed. Missing/malformed attestation or rollback prerequisites stop
    before cutover; any later failure rolls back, and an unprovable rollback

@@ -97,3 +97,46 @@ def test_real_compose_declares_memory_for_every_service() -> None:
         "vps-deploy-acceptance",
     }
     assert sum(row["bytes"] for row in limits) > 7 * preflight.GIB
+    acceptance = next(row for row in limits if row["service"] == "vps-deploy-acceptance")
+    assert acceptance["profiles"] == ["deploy-acceptance"]
+    assert acceptance["capacity_replaces"] == ["vps-ops-scheduler"]
+
+    result = preflight.evaluate_capacity(
+        {
+            "vcpu_count": 2,
+            "memory_total_bytes": 8 * preflight.GIB,
+            "memory_available_bytes": 2 * preflight.GIB,
+            "disk_total_bytes": 40 * preflight.GIB,
+            "disk_free_bytes": 8 * preflight.GIB,
+        },
+        limits,
+    )
+    modes = {row["mode"]: row for row in result["compose_memory_modes"]}
+    expected_concurrent = int(7.25 * preflight.GIB)
+
+    assert result["status"] == "pass"
+    assert result["requirements"]["minimum_total_memory_bytes"] == expected_concurrent
+    assert modes["default"]["bytes"] == expected_concurrent
+    assert modes["profiles:deploy-acceptance"]["bytes"] == expected_concurrent
+    assert modes["profiles:deploy-acceptance"]["replaced_services"] == [
+        "vps-ops-scheduler"
+    ]
+
+
+def test_profile_replacement_must_name_a_declared_base_service() -> None:
+    limits = [
+        {"service": "live", "bytes": 4 * preflight.GIB},
+        {
+            "service": "acceptance",
+            "bytes": 2 * preflight.GIB,
+            "profiles": ["acceptance"],
+            "capacity_replaces": ["missing-scheduler"],
+        },
+    ]
+
+    try:
+        preflight.compose_memory_modes(limits)
+    except ValueError as exc:
+        assert "unknown base services" in str(exc)
+    else:
+        raise AssertionError("unknown profile replacement must fail closed")

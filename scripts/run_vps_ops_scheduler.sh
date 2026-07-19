@@ -58,6 +58,11 @@ case "$SAFETY_POLL_SECONDS" in ''|*[!0-9]*) SAFETY_POLL_SECONDS=5 ;; esac
 GOVERNANCE_TIMEOUT="${OPS_GOVERNANCE_TIMEOUT_SECONDS:-1500}"
 CLV_TIMEOUT="${OPS_CLV_TIMEOUT_SECONDS:-900}"
 CARD_TIMEOUT="${OPS_CARD_TIMEOUT_SECONDS:-2400}"
+# Ledger-anchor cadence: 12h gives three chances inside deploy-acceptance's
+# 36h ledger_anchor_age SLO. Hashing the largest ledger (~17MB) is seconds;
+# 600s bounds a pathological filesystem stall.
+LEDGER_ANCHOR_INTERVAL="${OPS_LEDGER_ANCHOR_INTERVAL_SECONDS:-43200}"
+LEDGER_ANCHOR_TIMEOUT="${OPS_LEDGER_ANCHOR_TIMEOUT_SECONDS:-600}"
 LEADER_PLAYER="${SUPERBRU_PLAYER_NAME:-Danie}"
 export PYTHONPATH="${PYTHONPATH:-scripts:src}"
 
@@ -581,6 +586,28 @@ run_degraded_state_watchdog() {
   log "degraded_state_watchdog: exit $CODE"
 }
 
+run_ledger_anchor() {
+  # 2026-07-19 deploy-acceptance fix: the ledger-anchor lane (WO-61) had NO
+  # recurring owner — the last head predated acceptance's 36h SLO by days and
+  # failed deploy run #99. The CLI refreshes the chained head + snapshots
+  # (in-container safe: writes only under outputs/). The external git push is
+  # host-only (needs the checkout's .git and push credentials); inside the
+  # container push_vps_anchor.sh exits 0 with a log line, so it is best-effort
+  # here and functional when the scheduler runs on the host.
+  log "ledger_anchor: starting"
+  STARTED_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+  (
+    set -e
+    timeout "$LEDGER_ANCHOR_TIMEOUT" python -m polymarket_predictive_engine.cli anchor-ledgers --config "$CONFIG_PATH"
+    sh scripts/push_vps_anchor.sh || true
+  ) >> "$LOG_FILE" 2>&1 &
+  JOB_PID=$!
+  wait_with_safety_pulses "$JOB_PID" ledger_anchor
+  CODE=$?
+  stamp_status ledger_anchor "$CODE" "WO-61 ledger-chain head refresh; external vps-anchor push best-effort" "$STARTED_AT"
+  log "ledger_anchor: exit $CODE"
+}
+
 run_safety_pulse() {
   # Preserve the parent job's schedule classification. Safety jobs are
   # independent cadence owners and must never inherit an overrun/intentional
@@ -660,6 +687,12 @@ while :; do
     JOB_SCHEDULE_SKIP_KIND="$(schedule_skip_kind trade_prints "$PRINTS_INTERVAL")"
     touch_stamp trade_prints
     run_trade_prints
+    JOB_SCHEDULE_SKIP_KIND=""
+  fi
+  if [ "$(seconds_since_stamp ledger_anchor)" -ge "$LEDGER_ANCHOR_INTERVAL" ]; then
+    JOB_SCHEDULE_SKIP_KIND="$(schedule_skip_kind ledger_anchor "$LEDGER_ANCHOR_INTERVAL")"
+    touch_stamp ledger_anchor
+    run_ledger_anchor
     JOB_SCHEDULE_SKIP_KIND=""
   fi
   run_safety_pulse

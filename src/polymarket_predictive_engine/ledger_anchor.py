@@ -45,6 +45,9 @@ DEFAULT_LEDGER_REGISTRY: list[dict[str, str]] = [
     {"glob": "polymarket_portfolio/portfolio_snapshots.csv", "mode": "append_only"},
     {"glob": "polymarket_portfolio/cash_ledger.csv", "mode": "append_only"},
     {"glob": "polymarket_portfolio/paper_fills.csv", "mode": "append_only"},
+    # WO-110: full taker-fee fills export; a regenerated dump is anchored as a
+    # daily snapshot, never append_only (the paper_fills.csv lesson).
+    {"glob": "polymarket_portfolio/paper_fills_v2.csv", "mode": "snapshot"},
     {"glob": "polymarket_portfolio/settlements.csv", "mode": "append_only"},
     {"glob": "polymarket_shadow/shadow_positions.csv", "mode": "snapshot"},
     {"glob": "polymarket_shadow/shadow_fills.csv", "mode": "append_only"},

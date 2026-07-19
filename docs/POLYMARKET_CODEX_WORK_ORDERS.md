@@ -4451,6 +4451,36 @@ Do NOT: touch any gate (`maker_carry_study.py` gate logic, M-A/M-B/M-C),
 any order path. Do NOT build the realism consumer or change the study's reward
 estimate — that is a separate future WO that depends on this data existing.
 
+## WO-110 — Pin enrolled-ledger export projections; version taker-fee fills (DONE 2026-07-19; orchestrator-built)
+
+Incident: deploy #99's acceptance failure exposed a 3-day-stale ledger-anchor
+head; the manual anchor run then failed `blocked_broken_chain` at 2026-07-12 on
+`polymarket_portfolio/paper_fills.csv` ("anchored prefix digest changed").
+Root cause (fully traced): `paper_fills.csv` is a full SQLite export
+(`SELECT * FROM fills`), enrolled append_only — a latent contradiction. WO-94
+(#237) added five taker_fee_* columns to the fills table; the VPS first ran
+that code at deploy #99 (2026-07-19 ~10:05Z), and the first export (mtime
+10:30:05Z) rewrote every anchored byte. The chain verified clean through the
+2026-07-16 anchor on pre-WO-94 code, pinning the change to today. NOT the
+WO-73 incident (different file set) — the same defect CLASS recurring via a
+DB-export path WO-73's `append_csv_rows` correction could not cover. Three
+more enrolled exports (`cash_ledger`, `settlements`, `portfolio_snapshots`)
+carried the identical time bomb, undetonated only because their tables have
+not changed yet.
+
+Fix (self-healing, no manual byte surgery): the four enrolled exports now pin
+explicit column lists (frozen forever; WO-73 invariant applied to DB exports —
+a table schema change must create a NEW versioned export path). The legacy
+projection regenerates paper_fills.csv's original anchored bytes from the
+intact SQLite ledger on the next export cycle, restoring the chain. Full
+taker-fee rows export to `paper_fills_v2.csv`, enrolled SNAPSHOT mode (a
+regenerated dump can never honestly be append_only). Guard test pins the four
+SQL strings + verifies the legacy header excludes and v2 includes taker_fee_*.
+Full suite 1361. Day-after check (VPS): after the next export + anchor,
+`verify-ledger-chain` returns ok and the anchor head advances past 2026-07-16;
+fallback if float formatting drifted = restore per the 2026-07-13 incident
+pattern from a retained archive.
+
 ## WO-108 — NaN fail-open residuals in WO-50 policy/kill surfaces (FROZEN; tighten-only; orchestrator-built, AWAITING OWNER MERGE)
 
 Origin: the owner's LOCAL 5-agent audit (2026-07-19) drafted a NaN fail-closed

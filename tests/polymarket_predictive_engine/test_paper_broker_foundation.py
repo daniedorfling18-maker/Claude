@@ -1007,3 +1007,42 @@ def test_paper_broker_pauses_new_entries_when_clean_forward_pnl_is_below_thresho
     assert result["orders_filled"] == 0
     assert result["signals_processed"] == 0
     assert "pause threshold" in result["entry_pause_reason"]
+
+
+def test_export_pins_enrolled_ledger_columns_and_versions_taker_fees(tmp_path):
+    # WO-110: exports backing WO-61 append_only-enrolled ledgers may never use
+    # SELECT * (a table schema change would rewrite anchored bytes - the
+    # 2026-07-19 paper_fills.csv chain break). Full-schema rows go to the
+    # versioned v2 export instead.
+    from polymarket_predictive_engine import paper_broker
+
+    for name in ("paper_fills.csv", "cash_ledger.csv", "settlements.csv", "portfolio_snapshots.csv"):
+        assert "SELECT *" not in paper_broker.EXPORT_QUERIES[name], name
+    assert paper_broker.EXPORT_QUERIES["paper_fills.csv"] == (
+        "SELECT fill_id, order_id, idempotency_key, created_at, market_id, "
+        "token_id, side, fill_price, quantity, gross_notional_usdc, fee_usdc, "
+        "slippage_usdc, fill_model FROM fills ORDER BY created_at, fill_id"
+    )
+    assert paper_broker.EXPORT_QUERIES["paper_fills_v2.csv"] == "SELECT * FROM fills ORDER BY created_at, fill_id"
+
+    cfg = _config(tmp_path)
+    init_db(cfg.database_path)
+    con = connect_db(cfg.database_path)
+    con.execute("PRAGMA foreign_keys = OFF")  # export projection test only
+    with con:
+        con.execute(
+            "INSERT INTO fills (fill_id, order_id, idempotency_key, created_at, market_id, "
+            "token_id, side, fill_price, quantity, gross_notional_usdc, taker_fee_rate, taker_fee_category) "
+            "VALUES ('f1','o1','k1','2026-07-19T00:00:00Z','m1','t1','BUY',0.5,1.0,0.5,0.02,'sports')"
+        )
+    paper_broker.export_ledger(con, cfg)
+    out = cfg.output_root / "polymarket_portfolio"
+    legacy_header = (out / "paper_fills.csv").read_text(encoding="utf-8").splitlines()[0]
+    assert legacy_header == (
+        "fill_id,order_id,idempotency_key,created_at,market_id,token_id,side,"
+        "fill_price,quantity,gross_notional_usdc,fee_usdc,slippage_usdc,fill_model"
+    )
+    v2_rows = read_csv_rows(out / "paper_fills_v2.csv")
+    assert v2_rows[0]["taker_fee_rate"] == "0.02"
+    assert v2_rows[0]["taker_fee_category"] == "sports"
+    assert "taker_fee_rate" not in read_csv_rows(out / "paper_fills.csv")[0]

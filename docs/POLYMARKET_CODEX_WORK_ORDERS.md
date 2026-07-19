@@ -5027,7 +5027,9 @@ frozen-surface change.
    its trusted workflows/scripts or any pytest collection/execution control.
    Review remediation on 2026-07-19 also normalizes GitHub's real
    `workflow-path@ref` response, audits active no-bypass required-workflow
-   rulesets rather than hard-coding enforcement false, and leaves a PR open if
+   rulesets rather than hard-coding enforcement false, binds the rule to this
+   repository's numeric ID and the latest accepted commit that changed the
+   required workflow, and leaves a PR open if
    its head changes after the atomic main update but before administrative
    closure. The lane remains BLOCKED while the
    repository has only one push-capable identity, and the audit continues to
@@ -5043,7 +5045,8 @@ frozen-surface change.
    `checks.workflow_configured` and `independent_merge_process_configured` must
    be true, while `required_workflow_identity_enforced` and `enforced` must
    remain false unless a workflow-identity-capable required-workflow ruleset is
-   independently verified. No merge is eligible without an exact-head
+   independently verified against the exact repository ID and accepted
+   workflow commit. No merge is eligible without an exact-head
    successful gate, a distinct current-head approver/rerun initiator, unchanged
    trusted merge control, and an unchanged main ref at the atomic update. Test
    a suffixed real Actions workflow path, a pytest-control change, and a

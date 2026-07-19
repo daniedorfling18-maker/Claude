@@ -8,6 +8,8 @@ import pytest
 
 
 ROOT = Path(__file__).resolve().parents[1]
+REPOSITORY_ID = 123
+ACCEPTED_WORKFLOW_SHA = "f" * 40
 MODULE_PATH = ROOT / "scripts" / "audit_github_merge_gate.py"
 SPEC = importlib.util.spec_from_file_location("audit_github_merge_gate", MODULE_PATH)
 assert SPEC and SPEC.loader
@@ -70,7 +72,12 @@ def _collaborators() -> list[dict]:
     ]
 
 
-def _required_workflow_ruleset(*, bypass: bool = False) -> dict:
+def _required_workflow_ruleset(
+    *,
+    bypass: bool = False,
+    repository_id: int = REPOSITORY_ID,
+    sha: str = ACCEPTED_WORKFLOW_SHA,
+) -> dict:
     return {
         "id": 901,
         "name": "exact required workflow",
@@ -86,7 +93,8 @@ def _required_workflow_ruleset(*, bypass: bool = False) -> dict:
                         {
                             "path": ".github/workflows/required-pr-gate.yml",
                             "ref": "refs/heads/main",
-                            "repository_id": 123,
+                            "repository_id": repository_id,
+                            "sha": sha,
                         }
                     ]
                 },
@@ -221,6 +229,8 @@ def test_active_no_bypass_ruleset_can_prove_required_workflow_identity() -> None
         independent_merge_workflow_text=_independent_workflow(),
         collaborators_payload=_collaborators(),
         rulesets_payload=[_required_workflow_ruleset()],
+        repository_id=REPOSITORY_ID,
+        accepted_workflow_sha=ACCEPTED_WORKFLOW_SHA,
     )
 
     assert result["enforced"] is True
@@ -238,10 +248,82 @@ def test_required_workflow_ruleset_with_bypass_is_not_enforcement() -> None:
         independent_merge_workflow_text=_independent_workflow(),
         collaborators_payload=_collaborators(),
         rulesets_payload=[_required_workflow_ruleset(bypass=True)],
+        repository_id=REPOSITORY_ID,
+        accepted_workflow_sha=ACCEPTED_WORKFLOW_SHA,
     )
 
     assert result["enforced"] is False
     assert result["required_workflow_identity_enforced"] is False
+
+
+@pytest.mark.parametrize(
+    ("ruleset_repository_id", "ruleset_sha"),
+    [
+        (999, ACCEPTED_WORKFLOW_SHA),
+        (REPOSITORY_ID, "e" * 40),
+        (REPOSITORY_ID, ""),
+    ],
+)
+def test_required_workflow_ruleset_must_match_repository_and_accepted_revision(
+    ruleset_repository_id: int,
+    ruleset_sha: str,
+) -> None:
+    result = merge_gate.evaluate_merge_gate(
+        workflow_text=_workflow(),
+        runners_payload=_runners(),
+        protection_payload=_protection(),
+        runs_payload=_successful_run(),
+        independent_merge_workflow_text=_independent_workflow(),
+        collaborators_payload=_collaborators(),
+        rulesets_payload=[
+            _required_workflow_ruleset(
+                repository_id=ruleset_repository_id,
+                sha=ruleset_sha,
+            )
+        ],
+        repository_id=REPOSITORY_ID,
+        accepted_workflow_sha=ACCEPTED_WORKFLOW_SHA,
+    )
+
+    assert result["enforced"] is False
+    assert result["required_workflow_identity_enforced"] is False
+    assert result["required_workflow_ruleset_ids"] == []
+
+
+def test_audit_fetches_repository_identity_and_latest_accepted_workflow_revision(
+    monkeypatch,
+) -> None:
+    ruleset = _required_workflow_ruleset()
+
+    def fake_gh_api(path, *, method="GET", payload=None):
+        assert method in {"GET", "PUT"}
+        assert payload is None
+        responses = {
+            "repos/owner/repo/actions/runners": _runners(),
+            "repos/owner/repo/branches/main/protection": _protection(),
+            "repos/owner/repo/actions/workflows/required-pr-gate.yml/runs?event=pull_request&per_page=20": _successful_run(),
+            "repos/owner/repo/collaborators?affiliation=all&per_page=100": _collaborators(),
+            "repos/owner/repo": {"id": REPOSITORY_ID, "default_branch": "main"},
+            "repos/owner/repo/commits?path=.github/workflows/required-pr-gate.yml&sha=main&per_page=1": [
+                {"sha": ACCEPTED_WORKFLOW_SHA}
+            ],
+            "repos/owner/repo/rulesets?includes_parents=true&per_page=100": [
+                {"id": ruleset["id"]}
+            ],
+            f"repos/owner/repo/rulesets/{ruleset['id']}": ruleset,
+        }
+        return responses[path], ""
+
+    monkeypatch.setattr(merge_gate, "_gh_api", fake_gh_api)
+
+    result = merge_gate.audit(
+        "owner/repo",
+        ROOT / ".github" / "workflows" / "required-pr-gate.yml",
+    )
+
+    assert result["enforced"] is True
+    assert result["expected_required_workflow_repository_id"] == REPOSITORY_ID
+    assert result["accepted_required_workflow_sha"] == ACCEPTED_WORKFLOW_SHA
 
 
 def test_private_free_plan_blocker_stays_explicit_and_fail_closed() -> None:

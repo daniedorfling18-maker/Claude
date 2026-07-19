@@ -179,8 +179,18 @@ def _ruleset_targets_main(ruleset: Mapping[str, Any]) -> bool:
     )
 
 
-def _ruleset_requires_registered_workflow(ruleset: Mapping[str, Any]) -> bool:
+def _ruleset_requires_registered_workflow(
+    ruleset: Mapping[str, Any],
+    *,
+    repository_id: int | None,
+    accepted_workflow_sha: str,
+) -> bool:
     if not _ruleset_targets_main(ruleset) or (ruleset.get("bypass_actors") or []):
+        return False
+    accepted_sha = str(accepted_workflow_sha or "").strip().lower()
+    if repository_id is None or len(accepted_sha) != 40 or any(
+        char not in "0123456789abcdef" for char in accepted_sha
+    ):
         return False
     for raw_rule in ruleset.get("rules", []) or []:
         rule = _mapping(raw_rule)
@@ -191,10 +201,17 @@ def _ruleset_requires_registered_workflow(ruleset: Mapping[str, Any]) -> bool:
             workflow = _mapping(raw_workflow)
             path = str(workflow.get("path") or "").split("@", 1)[0]
             ref = str(workflow.get("ref") or "refs/heads/main")
-            if path == str(INDEPENDENT_MERGE_WORKFLOW.with_name("required-pr-gate.yml")) and ref in {
-                "main",
-                "refs/heads/main",
-            }:
+            workflow_sha = str(workflow.get("sha") or "").strip().lower()
+            try:
+                workflow_repository_id = int(workflow.get("repository_id"))
+            except (TypeError, ValueError):
+                workflow_repository_id = None
+            if (
+                path == str(INDEPENDENT_MERGE_WORKFLOW.with_name("required-pr-gate.yml"))
+                and ref in {"main", "refs/heads/main"}
+                and workflow_repository_id == repository_id
+                and workflow_sha == accepted_sha
+            ):
                 return True
     return False
 
@@ -210,6 +227,8 @@ def evaluate_merge_gate(
     collaborators_payload: Sequence[Mapping[str, Any]] | None = None,
     rulesets_payload: Sequence[Mapping[str, Any]] | None = None,
     rulesets_error: str = "",
+    repository_id: int | None = None,
+    accepted_workflow_sha: str = "",
 ) -> dict[str, Any]:
     workflow_configured = workflow_is_configured(workflow_text)
     runners = (_mapping(runners_payload).get("runners") or []) if runners_payload else []
@@ -234,7 +253,11 @@ def evaluate_merge_gate(
     matching_required_workflow_rulesets = [
         _mapping(row)
         for row in rulesets_payload or []
-        if _ruleset_requires_registered_workflow(_mapping(row))
+        if _ruleset_requires_registered_workflow(
+            _mapping(row),
+            repository_id=repository_id,
+            accepted_workflow_sha=accepted_workflow_sha,
+        )
     ]
     required_workflow_identity_enforced = bool(matching_required_workflow_rulesets)
     reviews = _mapping(protection.get("required_pull_request_reviews"))
@@ -324,6 +347,8 @@ def evaluate_merge_gate(
         "required_workflow_ruleset_ids": [
             row.get("id") for row in matching_required_workflow_rulesets
         ],
+        "expected_required_workflow_repository_id": repository_id,
+        "accepted_required_workflow_sha": accepted_workflow_sha,
         "independent_review_required": independent_review_required,
         "direct_push_forbidden": direct_push_forbidden,
         "independent_merge_process_configured": independent_process_configured,
@@ -399,6 +424,18 @@ def audit(repo: str, workflow_path: Path, *, apply_protection: bool = False) -> 
     protection, protection_error = _gh_api(f"repos/{repo}/branches/main/protection")
     runs, runs_error = _gh_api(f"repos/{repo}/actions/workflows/required-pr-gate.yml/runs?event=pull_request&per_page=20")
     collaborators, collaborators_error = _gh_api(f"repos/{repo}/collaborators?affiliation=all&per_page=100")
+    repository, repository_error = _gh_api(f"repos/{repo}")
+    workflow_revisions, workflow_revision_error = _gh_api(
+        f"repos/{repo}/commits?path=.github/workflows/required-pr-gate.yml&sha=main&per_page=1"
+    )
+    repository_id: int | None = None
+    try:
+        repository_id = int(_mapping(repository).get("id"))
+    except (TypeError, ValueError):
+        pass
+    accepted_workflow_sha = ""
+    if isinstance(workflow_revisions, list) and workflow_revisions:
+        accepted_workflow_sha = str(_mapping(workflow_revisions[0]).get("sha") or "")
     ruleset_summaries, rulesets_error = _gh_api(
         f"repos/{repo}/rulesets?includes_parents=true&per_page=100"
     )
@@ -428,8 +465,17 @@ def audit(repo: str, workflow_path: Path, *, apply_protection: bool = False) -> 
         collaborators_payload=collaborators if isinstance(collaborators, list) else [],
         rulesets_payload=rulesets,
         rulesets_error="\n".join(
-            part for part in (rulesets_error, *ruleset_detail_errors) if part
+            part
+            for part in (
+                rulesets_error,
+                *ruleset_detail_errors,
+                repository_error,
+                workflow_revision_error,
+            )
+            if part
         ),
+        repository_id=repository_id,
+        accepted_workflow_sha=accepted_workflow_sha,
     )
     result.update(
         {
@@ -440,6 +486,8 @@ def audit(repo: str, workflow_path: Path, *, apply_protection: bool = False) -> 
                 "runners": runners_error,
                 "workflow_runs": runs_error,
                 "collaborators": collaborators_error,
+                "repository_identity": repository_error,
+                "accepted_workflow_revision": workflow_revision_error,
                 "rulesets": "\n".join(
                     part for part in (rulesets_error, *ruleset_detail_errors) if part
                 ),

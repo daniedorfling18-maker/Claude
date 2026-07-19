@@ -103,6 +103,12 @@ GitHub Actions app ID: it does not bind that context to
 `required_workflow_identity_enforced=false` and must not classify that normal
 merge path as enforced.
 
+Workflow identity means all four immutable coordinates: the exact workflow
+path, this repository's numeric ID, `main`, and the commit SHA of the latest
+accepted revision that changed the required workflow. A path/ref match alone
+is not enforcement; a foreign-repository or stale-workflow pin must fail
+closed.
+
 Until protected `main` is available, direct/manual merges are prohibited. A
 second push-capable GitHub identity must review the exact current head and then
 dispatch `.github/workflows/independent-pr-merge.yml` with the PR number and

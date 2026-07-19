@@ -1,17 +1,19 @@
 """WO-40 maker fill realism replay.
 
 The maker-carry study charges adverse selection from bar moves and trade-print
-markouts. This replay asks a narrower execution question: given the recorded
-top-of-book/depth archive, would a last-in-queue maker quote actually have
-filled when public prints crossed the quote level?
+markouts. This replay asks a narrower execution question: given recorded full
+book levels or explicitly quote-aligned depth, would a last-in-queue maker
+quote actually have filled when public prints crossed the quote level?
 
 Measurement only. The replay reports a realism ratio next to the study charge
 but never modifies the study, gates, quote sheet, or any order path.
 """
 from __future__ import annotations
 
+import ast
 import csv
 import gzip
+import json
 import time
 from bisect import bisect_left, bisect_right
 from pathlib import Path
@@ -141,13 +143,41 @@ def _official_book_files(cfg: EngineConfig) -> list[Path]:
     return sorted(root.glob("*.csv.gz")) if root.exists() else []
 
 
+def _archived_book_levels(value: Any) -> tuple[list[tuple[float, float]], bool]:
+    """Return exact archived levels and whether a level payload was observed."""
+
+    payload = value
+    if isinstance(payload, str):
+        text = payload.strip()
+        if not text:
+            return [], False
+        try:
+            payload = json.loads(text)
+        except (TypeError, ValueError):
+            try:
+                payload = ast.literal_eval(text)
+            except (SyntaxError, ValueError):
+                return [], False
+    if not isinstance(payload, list):
+        return [], False
+    levels: list[tuple[float, float]] = []
+    for level in payload:
+        if not isinstance(level, dict):
+            continue
+        price = safe_float(level.get("price"))
+        size = safe_float(level.get("size"))
+        if price is not None and size is not None and 0 < price < 1 and size > 0:
+            levels.append((price, size))
+    return levels, bool(levels)
+
+
 def _book_states_from_rows(
     rows: Iterable[dict[str, Any]],
     token_ids: set[str],
     replay_days: float,
-) -> dict[str, list[dict[str, float]]]:
+) -> dict[str, list[dict[str, Any]]]:
     max_stamp = 0.0
-    latest_by_minute: dict[tuple[str, float], dict[str, float]] = {}
+    latest_by_minute: dict[tuple[str, float], dict[str, Any]] = {}
     for row in rows:
         token_id = str(row.get("asset_id") or row.get("token_id") or "").strip()
         if token_id not in token_ids:
@@ -163,6 +193,10 @@ def _book_states_from_rows(
         if stamp is None or bid is None or ask is None or ask <= bid:
             continue
         midpoint = midpoint if midpoint is not None else (bid + ask) / 2.0
+        bid_levels, bid_levels_observed = _archived_book_levels(row.get("bids_json"))
+        ask_levels, ask_levels_observed = _archived_book_levels(row.get("asks_json"))
+        resting_bid_depth = safe_float(row.get("resting_bid_depth_at_quote"))
+        resting_ask_depth = safe_float(row.get("resting_ask_depth_at_quote"))
         max_stamp = max(max_stamp, stamp)
         parsed = {
             "stamp": stamp,
@@ -171,21 +205,29 @@ def _book_states_from_rows(
             "best_bid": bid,
             "best_ask": ask,
             "midpoint": midpoint,
-            "bid_depth": safe_float(row.get("resting_bid_depth_at_quote"))
-            or safe_float(row.get("top_bid_size"))
+            "bid_depth": resting_bid_depth
+            if resting_bid_depth is not None
+            else safe_float(row.get("top_bid_size"))
             or safe_float(row.get("bid_depth_1pct"))
             or 0.0,
-            "ask_depth": safe_float(row.get("resting_ask_depth_at_quote"))
-            or safe_float(row.get("top_ask_size"))
+            "ask_depth": resting_ask_depth
+            if resting_ask_depth is not None
+            else safe_float(row.get("top_ask_size"))
             or safe_float(row.get("ask_depth_1pct"))
             or 0.0,
+            "resting_bid_depth_at_quote": resting_bid_depth,
+            "resting_ask_depth_at_quote": resting_ask_depth,
+            "bid_levels": bid_levels,
+            "ask_levels": ask_levels,
+            "bid_levels_observed": bid_levels_observed,
+            "ask_levels_observed": ask_levels_observed,
         }
         key = (token_id, parsed["minute"])
         previous = latest_by_minute.get(key)
         if previous is None or parsed["stamp"] >= previous["stamp"]:
             latest_by_minute[key] = parsed
     cutoff = max_stamp - replay_days * 86400.0 if max_stamp and replay_days > 0 else float("-inf")
-    by_token: dict[str, list[dict[str, float]]] = {}
+    by_token: dict[str, list[dict[str, Any]]] = {}
     for row in latest_by_minute.values():
         if row["stamp"] >= cutoff:
             by_token.setdefault(str(row["token_id"]), []).append(row)
@@ -194,12 +236,12 @@ def _book_states_from_rows(
     return by_token
 
 
-def _book_states(cfg: EngineConfig, token_ids: set[str], replay_days: float) -> dict[str, list[dict[str, float]]]:
+def _book_states(cfg: EngineConfig, token_ids: set[str], replay_days: float) -> dict[str, list[dict[str, Any]]]:
     rows = (row for path in _feature_files(cfg) for row in _iter_csv_any(path))
     return _book_states_from_rows(rows, token_ids, replay_days)
 
 
-def _official_book_states(cfg: EngineConfig, token_ids: set[str], replay_days: float) -> dict[str, list[dict[str, float]]]:
+def _official_book_states(cfg: EngineConfig, token_ids: set[str], replay_days: float) -> dict[str, list[dict[str, Any]]]:
     rows = (row for path in _official_book_files(cfg) for row in _iter_csv_any(path))
     return _book_states_from_rows(rows, token_ids, replay_days)
 
@@ -222,14 +264,41 @@ def _trades(cfg: EngineConfig, markets: set[str], token_ids: set[str]) -> list[d
     return trades
 
 
-def _state_at_or_before(states: list[dict[str, float]], stamp: float) -> dict[str, float] | None:
+def _state_at_or_before(states: list[dict[str, Any]], stamp: float) -> dict[str, Any] | None:
     index = bisect_right(states, stamp, key=lambda row: row["stamp"]) - 1
     return states[index] if index >= 0 else None
 
 
-def _state_at_or_after(states: list[dict[str, float]], stamp: float) -> dict[str, float] | None:
+def _state_at_or_after(states: list[dict[str, Any]], stamp: float) -> dict[str, Any] | None:
     index = bisect_left(states, stamp, key=lambda row: row["stamp"])
     return states[index] if index < len(states) else None
+
+
+def _queue_depth_at_quote(
+    state: dict[str, Any],
+    *,
+    direction: str,
+    quote: float,
+) -> tuple[float | None, str]:
+    """Measure queue ahead only from quote-aligned or full-level evidence."""
+
+    if direction == "bid_fill":
+        aligned = safe_float(state.get("resting_bid_depth_at_quote"))
+        levels = state.get("bid_levels")
+        observed = state.get("bid_levels_observed") is True
+    else:
+        aligned = safe_float(state.get("resting_ask_depth_at_quote"))
+        levels = state.get("ask_levels")
+        observed = state.get("ask_levels_observed") is True
+    if observed and isinstance(levels, list):
+        if direction == "bid_fill":
+            depth = sum(size for price, size in levels if float(price) >= quote - 1e-12)
+        else:
+            depth = sum(size for price, size in levels if float(price) <= quote + 1e-12)
+        return depth, "full_book_levels"
+    if aligned is not None:
+        return aligned, "quote_aligned_depth"
+    return None, "unavailable"
 
 
 def _candidate_map(cfg: EngineConfig) -> dict[str, dict[str, str]]:
@@ -345,8 +414,8 @@ def _official_row(snapshot: dict[str, Any], *, condition_id: str, token_id: str,
         "midpoint": (bid + ask) / 2.0,
         "top_bid_size": bid_size,
         "top_ask_size": ask_size,
-        "bids_json": bids,
-        "asks_json": asks,
+        "bids_json": json.dumps(bids, separators=(",", ":")),
+        "asks_json": json.dumps(asks, separators=(",", ":")),
         "collected_at_utc": collected_at,
     }
 
@@ -760,7 +829,7 @@ def _study_charge_by_condition(
 def _replay_against_states(
     *,
     source: str,
-    states_by_token: dict[str, list[dict[str, float]]],
+    states_by_token: dict[str, list[dict[str, Any]]],
     trades: list[dict[str, Any]],
     portfolio: list[dict[str, Any]],
     study_charge: float,
@@ -777,6 +846,7 @@ def _replay_against_states(
             "question": str(row.get("question") or ""),
             "simulated_fill_opportunities": 0,
             "last_in_queue_evaluable_opportunities": 0,
+            "queue_depth_unavailable_opportunities": 0,
             "confirmed_fills": 0,
             "windows_simulated": 0,
             "windows_covered": 0,
@@ -838,10 +908,18 @@ def _replay_against_states(
             market_coverage["by_horizon"][key]["windows_covered"] += 1
 
         if state is None:
+            market_coverage["queue_depth_unavailable_opportunities"] += 1
+            continue
+        depth_ahead, queue_depth_source = _queue_depth_at_quote(
+            state,
+            direction=direction,
+            quote=fill_price,
+        )
+        if depth_ahead is None:
+            market_coverage["queue_depth_unavailable_opportunities"] += 1
             continue
         last_in_queue_evaluable_opportunities += 1
         market_coverage["last_in_queue_evaluable_opportunities"] += 1
-        depth_ahead = state["bid_depth"] if direction == "bid_fill" else state["ask_depth"]
         fillable = trade["size"] - depth_ahead
         if fillable <= 0:
             continue
@@ -871,6 +949,7 @@ def _replay_against_states(
                 "fill_price": round(fill_price, 6),
                 "fill_size": round(fill_size, 6),
                 "depth_ahead": round(depth_ahead, 6),
+                "queue_depth_source": queue_depth_source,
                 "trade_size": trade["size"],
                 "markout_per_share": markouts,
                 "adverse_usd": adverse_usd,
@@ -1008,6 +1087,10 @@ def _replay_against_states(
         "book_states": sum(len(rows) for rows in states_by_token.values()),
         "simulated_fill_opportunities": simulated_fill_opportunities,
         "last_in_queue_evaluable_opportunities": last_in_queue_evaluable_opportunities,
+        "queue_depth_unavailable_opportunities": (
+            simulated_fill_opportunities - last_in_queue_evaluable_opportunities
+        ),
+        "queue_depth_standard": "full_book_levels_or_quote_aligned_depth_only",
         "confirmed_fills": len(fills),
         "confirmed_fill_ratio": (
             round(len(fills) / last_in_queue_evaluable_opportunities, 6)

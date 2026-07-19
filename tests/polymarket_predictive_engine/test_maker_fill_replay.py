@@ -78,14 +78,16 @@ def _seed_archive(cfg) -> None:
         "midpoint",
         "top_bid_size",
         "top_ask_size",
+        "resting_bid_depth_at_quote",
+        "resting_ask_depth_at_quote",
     ]
     _write_gzip_csv(
         cfg.output_root / "polymarket_training_archive" / "features_synthetic.csv.gz",
         [
-            {"source_timestamp": 1_000, "asset_id": "tok1", "best_bid": 0.48, "best_ask": 0.52, "midpoint": 0.50, "top_bid_size": 20, "top_ask_size": 20},
-            {"source_timestamp": 1_300, "asset_id": "tok1", "best_bid": 0.43, "best_ask": 0.47, "midpoint": 0.45, "top_bid_size": 20, "top_ask_size": 20},
-            {"source_timestamp": 1_900, "asset_id": "tok1", "best_bid": 0.42, "best_ask": 0.46, "midpoint": 0.44, "top_bid_size": 20, "top_ask_size": 20},
-            {"source_timestamp": 4_600, "asset_id": "tok1", "best_bid": 0.38, "best_ask": 0.42, "midpoint": 0.40, "top_bid_size": 20, "top_ask_size": 20},
+            {"source_timestamp": 1_000, "asset_id": "tok1", "best_bid": 0.49, "best_ask": 0.51, "midpoint": 0.50, "top_bid_size": 20, "top_ask_size": 20, "resting_bid_depth_at_quote": 20, "resting_ask_depth_at_quote": 20},
+            {"source_timestamp": 1_300, "asset_id": "tok1", "best_bid": 0.43, "best_ask": 0.47, "midpoint": 0.45, "top_bid_size": 20, "top_ask_size": 20, "resting_bid_depth_at_quote": 20, "resting_ask_depth_at_quote": 20},
+            {"source_timestamp": 1_900, "asset_id": "tok1", "best_bid": 0.42, "best_ask": 0.46, "midpoint": 0.44, "top_bid_size": 20, "top_ask_size": 20, "resting_bid_depth_at_quote": 20, "resting_ask_depth_at_quote": 20},
+            {"source_timestamp": 4_600, "asset_id": "tok1", "best_bid": 0.38, "best_ask": 0.42, "midpoint": 0.40, "top_bid_size": 20, "top_ask_size": 20, "resting_bid_depth_at_quote": 20, "resting_ask_depth_at_quote": 20},
         ],
         fields,
     )
@@ -95,10 +97,10 @@ def _seed_official_books(cfg) -> None:
     _write_gzip_csv(
         cfg.output_root / "maker_carry" / "official_books" / "0xcond.csv.gz",
         [
-            {"condition_id": "0xcond", "source_timestamp": 1_000, "asset_id": "tok1", "best_bid": 0.48, "best_ask": 0.52, "midpoint": 0.50, "top_bid_size": 20, "top_ask_size": 20, "hash": "h1"},
-            {"condition_id": "0xcond", "source_timestamp": 1_300, "asset_id": "tok1", "best_bid": 0.43, "best_ask": 0.47, "midpoint": 0.45, "top_bid_size": 20, "top_ask_size": 20, "hash": "h2"},
-            {"condition_id": "0xcond", "source_timestamp": 1_900, "asset_id": "tok1", "best_bid": 0.42, "best_ask": 0.46, "midpoint": 0.44, "top_bid_size": 20, "top_ask_size": 20, "hash": "h3"},
-            {"condition_id": "0xcond", "source_timestamp": 4_600, "asset_id": "tok1", "best_bid": 0.38, "best_ask": 0.42, "midpoint": 0.40, "top_bid_size": 20, "top_ask_size": 20, "hash": "h4"},
+            {"condition_id": "0xcond", "source_timestamp": 1_000, "asset_id": "tok1", "best_bid": 0.49, "best_ask": 0.51, "midpoint": 0.50, "top_bid_size": 20, "top_ask_size": 20, "bids_json": '[{"price":0.49,"size":20}]', "asks_json": '[{"price":0.51,"size":20}]', "hash": "h1"},
+            {"condition_id": "0xcond", "source_timestamp": 1_300, "asset_id": "tok1", "best_bid": 0.43, "best_ask": 0.47, "midpoint": 0.45, "top_bid_size": 20, "top_ask_size": 20, "bids_json": '[{"price":0.43,"size":20}]', "asks_json": '[{"price":0.47,"size":20}]', "hash": "h2"},
+            {"condition_id": "0xcond", "source_timestamp": 1_900, "asset_id": "tok1", "best_bid": 0.42, "best_ask": 0.46, "midpoint": 0.44, "top_bid_size": 20, "top_ask_size": 20, "bids_json": '[{"price":0.42,"size":20}]', "asks_json": '[{"price":0.46,"size":20}]', "hash": "h3"},
+            {"condition_id": "0xcond", "source_timestamp": 4_600, "asset_id": "tok1", "best_bid": 0.38, "best_ask": 0.42, "midpoint": 0.40, "top_bid_size": 20, "top_ask_size": 20, "bids_json": '[{"price":0.38,"size":20}]', "asks_json": '[{"price":0.42,"size":20}]', "hash": "h4"},
         ],
         maker_fill_replay.OFFICIAL_BOOK_FIELDS,
     )
@@ -143,6 +145,63 @@ def test_book_state_stream_keeps_latest_timestamp_per_token_minute():
 
     assert [state["stamp"] for state in states["tok1"]] == [119.0, 120.0]
     assert states["tok1"][0]["best_bid"] == 0.48
+
+
+def test_replay_uses_all_price_levels_ahead_of_the_quote():
+    rows = [
+        {
+            "source_timestamp": 1_000,
+            "asset_id": "tok1",
+            "best_bid": 0.50,
+            "best_ask": 0.52,
+            "midpoint": 0.51,
+            "top_bid_size": 5,
+            "bids_json": '[{"price":0.50,"size":5},{"price":0.49,"size":15},{"price":0.48,"size":100}]',
+            "asks_json": '[{"price":0.52,"size":20}]',
+        },
+        {"source_timestamp": 1_300, "asset_id": "tok1", "best_bid": 0.44, "best_ask": 0.46, "midpoint": 0.45, "bids_json": "[]", "asks_json": "[]"},
+        {"source_timestamp": 1_900, "asset_id": "tok1", "best_bid": 0.43, "best_ask": 0.45, "midpoint": 0.44, "bids_json": "[]", "asks_json": "[]"},
+        {"source_timestamp": 4_600, "asset_id": "tok1", "best_bid": 0.39, "best_ask": 0.41, "midpoint": 0.40, "bids_json": "[]", "asks_json": "[]"},
+    ]
+    states = maker_fill_replay._book_states_from_rows(iter(rows), {"tok1"}, 7)
+
+    result = maker_fill_replay._replay_against_states(
+        source="official",
+        states_by_token=states,
+        trades=[{"market": "0xcond", "token_id": "tok1", "side": "SELL", "price": 0.49, "size": 25.0, "stamp": 1_000.0}],
+        portfolio=[{"condition_id": "0xcond", "token_id": "tok1", "question": "exact levels", "quote_size_shares": 10.0, "quote_distance": 0.01, "quote_bid_price": 0.49, "quote_ask_price": 0.53}],
+        study_charge=2.0,
+        study_charge_by_condition={"0xcond": 2.0},
+        max_state_lag_seconds=1800,
+    )
+
+    assert result["last_in_queue_evaluable_opportunities"] == 1
+    assert result["fills_preview"][0]["depth_ahead"] == 20.0
+    assert result["fills_preview"][0]["fill_size"] == 5.0
+    assert result["fills_preview"][0]["queue_depth_source"] == "full_book_levels"
+
+
+def test_replay_does_not_substitute_top_size_for_missing_level_history():
+    states = maker_fill_replay._book_states_from_rows(
+        iter([{"source_timestamp": 1_000, "asset_id": "tok1", "best_bid": 0.49, "best_ask": 0.51, "midpoint": 0.50, "top_bid_size": 20, "top_ask_size": 20}]),
+        {"tok1"},
+        7,
+    )
+
+    result = maker_fill_replay._replay_against_states(
+        source="archive",
+        states_by_token=states,
+        trades=[{"market": "0xcond", "token_id": "tok1", "side": "SELL", "price": 0.49, "size": 25.0, "stamp": 1_000.0}],
+        portfolio=[{"condition_id": "0xcond", "token_id": "tok1", "question": "missing levels", "quote_size_shares": 10.0, "quote_distance": 0.01, "quote_bid_price": 0.49, "quote_ask_price": 0.51}],
+        study_charge=2.0,
+        study_charge_by_condition={"0xcond": 2.0},
+        max_state_lag_seconds=1800,
+    )
+
+    assert result["simulated_fill_opportunities"] == 1
+    assert result["last_in_queue_evaluable_opportunities"] == 0
+    assert result["queue_depth_unavailable_opportunities"] == 1
+    assert result["confirmed_fills"] == 0
 
 
 class _Response:
@@ -362,10 +421,10 @@ def test_known_fraction_of_crossings_is_confirmed_last_in_queue(tmp_path):
 def test_market_haircut_uses_market_span_not_other_portfolio_history():
     states = {
         "tok1": [
-            {"stamp": 1_000.0, "midpoint": 0.50, "bid_depth": 20.0, "ask_depth": 20.0},
-            {"stamp": 1_300.0, "midpoint": 0.45, "bid_depth": 20.0, "ask_depth": 20.0},
-            {"stamp": 1_900.0, "midpoint": 0.44, "bid_depth": 20.0, "ask_depth": 20.0},
-            {"stamp": 4_600.0, "midpoint": 0.40, "bid_depth": 20.0, "ask_depth": 20.0},
+            {"stamp": 1_000.0, "midpoint": 0.50, "resting_bid_depth_at_quote": 20.0, "resting_ask_depth_at_quote": 20.0},
+            {"stamp": 1_300.0, "midpoint": 0.45, "resting_bid_depth_at_quote": 20.0, "resting_ask_depth_at_quote": 20.0},
+            {"stamp": 1_900.0, "midpoint": 0.44, "resting_bid_depth_at_quote": 20.0, "resting_ask_depth_at_quote": 20.0},
+            {"stamp": 4_600.0, "midpoint": 0.40, "resting_bid_depth_at_quote": 20.0, "resting_ask_depth_at_quote": 20.0},
         ],
         "tok2": [
             {"stamp": 1.0, "midpoint": 0.50, "bid_depth": 20.0, "ask_depth": 20.0},

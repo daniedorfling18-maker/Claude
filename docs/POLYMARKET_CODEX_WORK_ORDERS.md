@@ -4318,11 +4318,24 @@ drive-by-refactor anti-pattern the ground rules ban and the WO-93 lesson.
 - `wo-spec-drafter` — turns a triaged finding into a mechanical, Codex-ready
   WO spec draft in the house style; the orchestrator registers it (owner
   merges if frozen). Drafts only.
+- `red-team-auditor` — adversarially attacks the tip-state the way the
+  2026-07-17 external audit did: fund-path fail-opens, dimensional/unit
+  errors (the Kelly class), cherry-pickable evidence counters (the M-A class),
+  optimistic estimators, producer/consumer contract drift (the deploy-gate
+  class). Must confirm findings with throwaway fixtures before reporting.
+  Read+test only.
+- `bridge-compliance-auditor` — audits the dispatch bridge's own GitHub paper
+  trail: provenance tags present on every @codex dispatch, no frozen-surface
+  PR merged by automation, no agent-written authorization language, no
+  unregistered-scope dispatches. The automation that polices frozen surfaces
+  is itself policed. Read-only.
 
-All three: never edit outside their mandate, never post to GitHub, never merge,
+All five: never edit outside their mandate, never post to GitHub, never merge,
 never write or imply owner authorization. Adding an agent with WRITE access to
 anything beyond a registered WO's scope requires a dated owner instruction
-recorded here.
+recorded here. Roster discipline: keep it at five unless a registered need
+demands more — every extra autonomous lane adds noise and surface (the
+external audit's own warning).
 
 ## WO-106 — Reward-epoch time-series collector (ISSUED to Codex; NON-FROZEN; collection-only)
 

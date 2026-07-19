@@ -80,8 +80,24 @@ case "$dns_name" in
   *) printf '%s\n' "Refusing non-Tailscale dashboard DNS name: $dns_name" >&2; exit 3 ;;
 esac
 
-port="$(grep -E '^POLYMARKET_DASHBOARD_PORT=' .env | tail -n 1 | cut -d= -f2- || true)"
-port="${port:-8765}"
+port="$(python3 - .env <<'PY'
+from pathlib import Path
+import sys
+
+value = ""
+for raw_line in Path(sys.argv[1]).read_text(encoding="utf-8").splitlines():
+    stripped = raw_line.strip()
+    if not stripped or stripped.startswith("#") or "=" not in stripped:
+        continue
+    key, raw_value = stripped.split("=", 1)
+    if key.strip() != "POLYMARKET_DASHBOARD_PORT":
+        continue
+    value = raw_value.strip()
+    if len(value) >= 2 and value[0] == value[-1] and value[0] in {"'", '"'}:
+        value = value[1:-1].strip()
+print(value or "8765")
+PY
+)"
 case "$port" in
   *[!0-9]*|'') printf '%s\n' "Invalid POLYMARKET_DASHBOARD_PORT: $port" >&2; exit 2 ;;
 esac
@@ -138,17 +154,28 @@ $SUDO tailscale serve status > "$serve_status"
 $SUDO tailscale funnel status >> "$serve_status" 2>/dev/null || true
 docker_cmd port polymarket-dashboard 8765/tcp > "$docker_bindings"
 
+# Until a live HTTPS request succeeds, publish explicit failing evidence. This
+# prevents an older PASS artifact from surviving while the route is being
+# reproved or after the bounded probe ultimately fails.
 python3 scripts/validate_dashboard_private_transport.py \
   --tailscale-status "$status_json" \
   --serve-status "$serve_status" \
   --docker-bindings "$docker_bindings" \
   --expected-port "$port" \
   --configured-url "$private_url" \
-  --output outputs/performance/dashboard_private_transport.json
+  --output outputs/performance/dashboard_private_transport.json >/dev/null 2>&1 || true
 
 attempt=0
 while [ "$attempt" -lt 30 ]; do
   if curl -fsS --max-time 10 "$private_url" >/dev/null 2>&1; then
+    python3 scripts/validate_dashboard_private_transport.py \
+      --tailscale-status "$status_json" \
+      --serve-status "$serve_status" \
+      --docker-bindings "$docker_bindings" \
+      --expected-port "$port" \
+      --configured-url "$private_url" \
+      --private-https-reachable \
+      --output outputs/performance/dashboard_private_transport.json
     printf '%s\n' "Private dashboard ready: $private_url"
     printf '%s\n' "Install Tailscale on your phone, join the same tailnet, then open that HTTPS URL."
     env_committed=true

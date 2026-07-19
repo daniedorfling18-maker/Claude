@@ -22,6 +22,7 @@ def evaluate_private_transport(
     docker_bindings: str,
     expected_port: int,
     configured_url: str,
+    private_https_reachable: bool,
 ) -> dict[str, Any]:
     blockers: list[str] = []
     backend_state = str(tailscale_status.get("BackendState") or "")
@@ -70,6 +71,8 @@ def evaluate_private_transport(
     parsed = urlparse(private_url)
     if parsed.scheme != "https" or parsed.port not in {None, 443}:
         blockers.append("dashboard_private_url_not_https_443")
+    if not private_https_reachable:
+        blockers.append("private_https_reachability_not_proven")
 
     return {
         "work_order": "dashboard-transport",
@@ -82,6 +85,7 @@ def evaluate_private_transport(
         "docker_bindings": bindings,
         "public_listener_present": bool(public_bindings),
         "serve_target_verified": private_url.rstrip("/") in serve_status and backend_url in serve_status,
+        "private_https_reachable": private_https_reachable,
         "blockers": blockers,
         "paper_trading_invoked": False,
         "live_trading_invoked": False,
@@ -102,6 +106,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--docker-bindings", type=Path, required=True)
     parser.add_argument("--expected-port", type=int, default=8765)
     parser.add_argument("--configured-url", required=True)
+    parser.add_argument("--private-https-reachable", action="store_true")
     parser.add_argument("--output", type=Path)
     args = parser.parse_args(argv)
     try:
@@ -121,6 +126,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         ),
         expected_port=args.expected_port,
         configured_url=args.configured_url,
+        private_https_reachable=args.private_https_reachable,
     )
     if parse_error:
         payload["blockers"] = sorted(set([*payload["blockers"], "tailscale_status_malformed"]))

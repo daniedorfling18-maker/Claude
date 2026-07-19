@@ -361,8 +361,23 @@ jobs:
           PY
           )"
           dashboard_private_url="https://${dashboard_dns}/"
-          dashboard_port="$(grep -E '^POLYMARKET_DASHBOARD_PORT=' .env | tail -n 1 | cut -d= -f2- || true)"
-          dashboard_port="${dashboard_port:-8765}"
+          dashboard_port="$(python3 - <<'PY'
+          from pathlib import Path
+
+          value = ""
+          for raw_line in Path(".env").read_text(encoding="utf-8").splitlines():
+              stripped = raw_line.strip()
+              if not stripped or stripped.startswith("#") or "=" not in stripped:
+                  continue
+              key, raw_value = stripped.split("=", 1)
+              if key.strip() != "POLYMARKET_DASHBOARD_PORT":
+                  continue
+              value = raw_value.strip()
+              if len(value) >= 2 and value[0] == value[-1] and value[0] in {"'", '"'}:
+                  value = value[1:-1].strip()
+          print(value or "8765")
+          PY
+          )"
           case "$dashboard_port" in
             *[!0-9]*|'') echo "::error::Invalid dashboard port: $dashboard_port"; exit 1 ;;
           esac
@@ -756,8 +771,10 @@ jobs:
           echo "[deploy] verifying paper stack health"
           PM_VPS_REPO_DIR="$REPO_DIR" bash scripts/check_polymarket_vps_paper.sh
 
-          port="$(grep -E '^POLYMARKET_DASHBOARD_PORT=' .env | tail -n 1 | cut -d= -f2-)"
-          port="${port:-8765}"
+          # Reuse the already parsed and range-checked dotenv value. Re-reading
+          # it with grep would reintroduce quotes from valid values such as
+          # POLYMARKET_DASHBOARD_PORT="8765".
+          port="$dashboard_port"
           html="$(curl -fsS --max-time 10 "http://127.0.0.1:${port}/")"
           data="$(curl -fsS --max-time 10 "http://127.0.0.1:${port}/dashboard_data.json")"
 

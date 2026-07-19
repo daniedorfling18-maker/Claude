@@ -21,6 +21,7 @@ import subprocess
 import sys
 import time
 from typing import Any, Sequence
+from urllib.parse import urlparse
 
 
 RUNTIME_ROOTS = ("data", "inputs", "outputs", "work")
@@ -225,6 +226,8 @@ def _verify_private_dashboard_transport(
     configured_url: str,
     expected_port: int,
     temporary_root: Path,
+    probe_attempts: int,
+    probe_interval_seconds: float,
 ) -> dict[str, Any]:
     if not validator.is_file():
         raise RollbackError(f"private-transport validator is missing: {validator}")
@@ -249,32 +252,67 @@ def _verify_private_dashboard_transport(
     ).stdout
     bindings_path.write_text(bindings, encoding="utf-8")
     transport_output = repo / "outputs" / "performance" / "dashboard_private_transport.json"
+    parsed_url = urlparse(configured_url)
+    try:
+        parsed_hostname = (parsed_url.hostname or "").lower()
+        parsed_port = parsed_url.port
+    except ValueError:
+        parsed_hostname = ""
+        parsed_port = -1
+    safe_private_url = (
+        parsed_url.scheme == "https"
+        and parsed_hostname.endswith(".ts.net")
+        and parsed_port in {None, 443}
+        and parsed_url.path in {"", "/"}
+        and not parsed_url.username
+        and not parsed_url.password
+        and not parsed_url.query
+        and not parsed_url.fragment
+    )
+    private_https_reachable = False
+    if safe_private_url:
+        for _ in range(max(1, min(10, probe_attempts))):
+            probe = _run(
+                ("curl", "-fsS", "--max-time", "10", configured_url),
+                cwd=repo,
+                check=False,
+            )
+            if probe.returncode == 0:
+                private_https_reachable = True
+                break
+            time.sleep(max(0.0, min(10.0, probe_interval_seconds)))
+    validation_command = [
+        sys.executable,
+        str(validator),
+        "--tailscale-status",
+        str(status_path),
+        "--serve-status",
+        str(serve_path),
+        "--docker-bindings",
+        str(bindings_path),
+        "--expected-port",
+        str(expected_port),
+        "--configured-url",
+        configured_url,
+        "--output",
+        str(transport_output),
+    ]
+    if private_https_reachable:
+        validation_command.append("--private-https-reachable")
     validation = _run(
-        (
-            sys.executable,
-            str(validator),
-            "--tailscale-status",
-            str(status_path),
-            "--serve-status",
-            str(serve_path),
-            "--docker-bindings",
-            str(bindings_path),
-            "--expected-port",
-            str(expected_port),
-            "--configured-url",
-            configured_url,
-            "--output",
-            str(transport_output),
-        ),
+        validation_command,
         cwd=repo,
         check=False,
     )
+    if not private_https_reachable:
+        raise RollbackError("rollback private-dashboard HTTPS probe did not succeed")
     if validation.returncode != 0:
         raise RollbackError(
             f"rollback private-dashboard transport validation failed with exit {validation.returncode}"
         )
     return {
         "dashboard_private_transport_verified": True,
+        "dashboard_private_https_reachable": True,
         "dashboard_bindings": [line for line in bindings.splitlines() if line],
         "dashboard_private_url": configured_url,
         "dashboard_backend_url": backend_url,
@@ -416,6 +454,8 @@ def rollback(args: argparse.Namespace) -> dict[str, Any]:
                 configured_url=restored_private_url,
                 expected_port=int(dashboard_port_text),
                 temporary_root=args.env_backup.parent,
+                probe_attempts=args.https_probe_attempts,
+                probe_interval_seconds=args.https_probe_interval_seconds,
             )
         )
 
@@ -478,6 +518,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--tailscale-command", default="tailscale")
     parser.add_argument("--transport-validator", type=Path, required=True)
     parser.add_argument("--private-dashboard-url", required=True)
+    parser.add_argument("--https-probe-attempts", type=int, default=5)
+    parser.add_argument("--https-probe-interval-seconds", type=float, default=2.0)
     parser.add_argument("--failed-target-sha", required=True)
     parser.add_argument("--report", type=Path, default=Path("outputs/performance/vps_deploy_rollback.json"))
     parser.add_argument("--required-service", action="append", default=[])

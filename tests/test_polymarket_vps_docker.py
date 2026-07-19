@@ -185,6 +185,10 @@ def test_vps_health_script_checks_dashboard_and_heartbeat_files():
     assert "tailscale serve status" in text
     assert "tailscale funnel status" in text
     assert "--configured-url \"$private_dashboard_url\"" in text
+    assert "private_https_reachable=false" in text
+    assert 'curl -fsS --max-time 10 "$probe_url"' in text
+    assert "printf '{}\\n' > \"$transport_tmp/tailscale-status.json\"" in text
+    assert text.count("validate_dashboard_private_transport.py") == 1
 
 
 def test_vps_deploy_workflow_requires_current_dashboard_schema():
@@ -340,6 +344,9 @@ def test_vps_deploy_workflow_enforces_private_dashboard_url():
     assert rollback_armed < funnel_mutation < serve_mutation < live_env_write
     assert 'ENV_PATCH_PATH="$ENV_PATCH"' in text
     assert ".env.private-transport.tmp" not in text
+    assert "value[0] == value[-1]" in text
+    assert 'port="$dashboard_port"' in text
+    assert "grep -E '^POLYMARKET_DASHBOARD_PORT='" not in text
 
 
 def test_private_dashboard_setup_restores_env_until_transport_is_proven():
@@ -351,10 +358,25 @@ def test_private_dashboard_setup_restores_env_until_transport_is_proven():
     failure_trap = text.index("trap 'restore_env_on_failure' EXIT")
     env_write = text.index('ENV_PATH="$REPO_DIR/.env" PRIVATE_URL="$private_url"')
     compose_recreate = text.index("--force-recreate polymarket-dashboard")
+    failing_evidence = text.index(
+        "# Until a live HTTPS request succeeds, publish explicit failing evidence."
+    )
     private_probe = text.index('curl -fsS --max-time 10 "$private_url"')
+    reachable_proof = text.index("--private-https-reachable")
     commit = text.index("env_committed=true")
-    assert backup < failure_trap < env_write < compose_recreate < private_probe < commit
+    assert (
+        backup
+        < failure_trap
+        < env_write
+        < compose_recreate
+        < failing_evidence
+        < private_probe
+        < reachable_proof
+        < commit
+    )
     assert 'install -m 0600 "$env_backup" .env' in text
+    assert "value[0] == value[-1]" in text
+    assert text.count("validate_dashboard_private_transport.py") == 2
 
 
 def test_vps_deploy_workflow_validates_private_key_secret():

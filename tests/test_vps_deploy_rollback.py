@@ -108,6 +108,14 @@ def _fixture(tmp_path: Path) -> tuple[Path, str, str, Path, Path, Path, Path]:
         encoding="utf-8",
     )
     fake_tailscale.chmod(0o755)
+    fake_curl = tmp_path / "curl"
+    fake_curl.write_text(
+        "#!/usr/bin/env python3\n"
+        "import os, sys\n"
+        "raise SystemExit(int(os.environ.get('FAKE_CURL_EXIT', '0')))\n",
+        encoding="utf-8",
+    )
+    fake_curl.chmod(0o755)
     return repo, old, candidate, env_backup, marker_backup, fake_docker, fake_tailscale
 
 
@@ -119,9 +127,14 @@ def _rollback(
     marker_backup: Path,
     fake_docker: Path,
     fake_tailscale: Path,
+    *,
+    curl_exit: int = 0,
+    private_dashboard_url: str = "https://polymarket-trader.example-tailnet.ts.net/",
 ) -> subprocess.CompletedProcess[str]:
     env = os.environ.copy()
     env["FAKE_DOCKER_LOG"] = str(fake_docker.with_name("docker.log"))
+    env["FAKE_CURL_EXIT"] = str(curl_exit)
+    env["PATH"] = str(fake_docker.parent) + os.pathsep + env.get("PATH", "")
     command = [
         sys.executable,
         str(ROLLBACK),
@@ -145,7 +158,11 @@ def _rollback(
         "--transport-validator",
         str(ROOT / "scripts" / "validate_dashboard_private_transport.py"),
         "--private-dashboard-url",
-        "https://polymarket-trader.example-tailnet.ts.net/",
+        private_dashboard_url,
+        "--https-probe-attempts",
+        "1",
+        "--https-probe-interval-seconds",
+        "0",
         "--failed-target-sha",
         candidate,
         "--health-attempts",
@@ -208,6 +225,71 @@ def test_actual_rollback_restores_source_env_marker_image_and_stack(tmp_path: Pa
     tailscale_calls = fake_tailscale.with_name("tailscale.log").read_text(encoding="utf-8")
     assert "funnel --https=443 off" in tailscale_calls
     assert "serve --bg --yes --https=443 http://127.0.0.1:8765" in tailscale_calls
+
+
+def test_rollback_fails_and_overwrites_transport_evidence_when_https_is_down(
+    tmp_path: Path,
+) -> None:
+    repo, old, candidate, env_backup, marker_backup, fake_docker, fake_tailscale = _fixture(
+        tmp_path
+    )
+
+    result = _rollback(
+        repo,
+        old,
+        candidate,
+        env_backup,
+        marker_backup,
+        fake_docker,
+        fake_tailscale,
+        curl_exit=22,
+    )
+
+    assert result.returncode == 1
+    report = json.loads((repo / "outputs/performance/vps_deploy_rollback.json").read_text())
+    assert report["status"] == "FAIL"
+    assert "HTTPS probe did not succeed" in report["error"]
+    transport_report = json.loads(
+        (repo / "outputs/performance/dashboard_private_transport.json").read_text()
+    )
+    assert transport_report["status"] == "FAIL"
+    assert "private_https_reachability_not_proven" in transport_report["blockers"]
+
+
+def test_rollback_rejects_malformed_private_https_port_without_crashing(
+    tmp_path: Path,
+) -> None:
+    repo, old, candidate, env_backup, marker_backup, fake_docker, fake_tailscale = _fixture(
+        tmp_path
+    )
+    malformed_url = "https://polymarket-trader.example-tailnet.ts.net:not-a-port/"
+    env_backup.write_text(
+        "PM_VPS_DEPLOYED_SHA=" + old + "\n"
+        "POLYMARKET_DASHBOARD_PORT=8765\n"
+        "PM_DASHBOARD_PUBLIC_URL=" + malformed_url + "\n",
+        encoding="utf-8",
+    )
+
+    command_result = _rollback(
+        repo,
+        old,
+        candidate,
+        env_backup,
+        marker_backup,
+        fake_docker,
+        fake_tailscale,
+        private_dashboard_url=malformed_url,
+    )
+
+    assert command_result.returncode == 1
+    report = json.loads((repo / "outputs/performance/vps_deploy_rollback.json").read_text())
+    assert report["status"] == "FAIL"
+    assert "HTTPS probe did not succeed" in report["error"]
+    transport_report = json.loads(
+        (repo / "outputs/performance/dashboard_private_transport.json").read_text()
+    )
+    assert transport_report["status"] == "FAIL"
+    assert "dashboard_env_private_url_missing_or_mismatch" in transport_report["blockers"]
 
 
 def test_rollback_refuses_source_dirt_before_stopping_stack(tmp_path: Path) -> None:

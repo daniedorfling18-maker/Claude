@@ -36,6 +36,7 @@ def test_private_https_transport_passes_sanitized_cli_shape() -> None:
         docker_bindings="127.0.0.1:8765\n",
         expected_port=8765,
         configured_url="https://polymarket-trader.example-tailnet.ts.net/",
+        private_https_reachable=True,
     )
 
     assert result["status"] == "PASS"
@@ -55,6 +56,7 @@ def test_public_binding_fails_closed() -> None:
         docker_bindings="0.0.0.0:8765\n[::]:8765\n",
         expected_port=8765,
         configured_url="https://polymarket-trader.example-tailnet.ts.net/",
+        private_https_reachable=True,
     )
 
     assert result["status"] == "FAIL"
@@ -71,6 +73,7 @@ def test_logged_out_or_wrong_serve_target_fails_closed() -> None:
         docker_bindings="127.0.0.1:8765\n",
         expected_port=8765,
         configured_url="https://polymarket-trader.example-tailnet.ts.net/",
+        private_https_reachable=True,
     )
 
     assert result["status"] == "FAIL"
@@ -89,6 +92,7 @@ def test_funnel_or_non_tailnet_dns_fails_closed() -> None:
         docker_bindings="127.0.0.1:8765\n",
         expected_port=8765,
         configured_url="https://dashboard.example.com/",
+        private_https_reachable=True,
     )
 
     assert result["status"] == "FAIL"
@@ -107,6 +111,7 @@ def test_funnel_internet_status_fails_closed() -> None:
         docker_bindings="127.0.0.1:8765\n",
         expected_port=8765,
         configured_url="https://polymarket-trader.example-tailnet.ts.net/",
+        private_https_reachable=True,
     )
 
     assert result["status"] == "FAIL"
@@ -120,7 +125,23 @@ def test_stale_configured_url_fails_closed() -> None:
         docker_bindings="127.0.0.1:8765\n",
         expected_port=8765,
         configured_url="https://old-host.example-tailnet.ts.net/",
+        private_https_reachable=True,
     )
 
     assert result["status"] == "FAIL"
     assert "dashboard_env_private_url_missing_or_mismatch" in result["blockers"]
+
+
+def test_static_configuration_without_live_https_probe_fails_closed() -> None:
+    result = transport.evaluate_private_transport(
+        tailscale_status=_status(),
+        serve_status=_serve(),
+        docker_bindings="127.0.0.1:8765\n",
+        expected_port=8765,
+        configured_url="https://polymarket-trader.example-tailnet.ts.net/",
+        private_https_reachable=False,
+    )
+
+    assert result["status"] == "FAIL"
+    assert result["private_https_reachable"] is False
+    assert "private_https_reachability_not_proven" in result["blockers"]

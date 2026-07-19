@@ -326,12 +326,35 @@ def test_vps_deploy_workflow_enforces_private_dashboard_url():
     text = (ROOT / ".github" / "workflows" / "deploy-polymarket-vps-paper.yml").read_text(encoding="utf-8")
 
     assert 'updates["POLYMARKET_DASHBOARD_HOST"] = "127.0.0.1"' in text
-    assert '"PM_DASHBOARD_PUBLIC_URL": private_url' in text
+    assert 'updates["PM_DASHBOARD_PUBLIC_URL"] = os.environ["DASHBOARD_PRIVATE_URL"]' in text
     assert 'dashboard_private_url="https://${dashboard_dns}/"' in text
     assert "configure_polymarket_dashboard_tailscale.sh" in text
     assert "public_url =" not in text
     assert "http://${PM_VPS_HOST}" not in text
     assert "tailnet-authenticated HTTPS" in text
+
+    rollback_armed = text.index("ROLLBACK_ARMED=true")
+    funnel_mutation = text.index("tailscale funnel --https=443 off")
+    serve_mutation = text.index("tailscale serve --bg --yes --https=443")
+    live_env_write = text.index('env_path.write_text("\\n".join(rendered) + "\\n"')
+    assert rollback_armed < funnel_mutation < serve_mutation < live_env_write
+    assert 'ENV_PATCH_PATH="$ENV_PATCH"' in text
+    assert ".env.private-transport.tmp" not in text
+
+
+def test_private_dashboard_setup_restores_env_until_transport_is_proven():
+    text = (ROOT / "scripts" / "configure_polymarket_dashboard_tailscale.sh").read_text(
+        encoding="utf-8"
+    )
+
+    backup = text.index('install -m 0600 .env "$env_backup"')
+    failure_trap = text.index("trap 'restore_env_on_failure' EXIT")
+    env_write = text.index('ENV_PATH="$REPO_DIR/.env" PRIVATE_URL="$private_url"')
+    compose_recreate = text.index("--force-recreate polymarket-dashboard")
+    private_probe = text.index('curl -fsS --max-time 10 "$private_url"')
+    commit = text.index("env_committed=true")
+    assert backup < failure_trap < env_write < compose_recreate < private_probe < commit
+    assert 'install -m 0600 "$env_backup" .env' in text
 
 
 def test_vps_deploy_workflow_validates_private_key_secret():

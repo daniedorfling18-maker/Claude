@@ -12,6 +12,7 @@ import socket
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlparse
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -79,13 +80,34 @@ def local_ip_hint() -> str:
         return "YOUR_COMPUTER_IP"
 
 
+def _is_private_tailnet_url(value: str) -> bool:
+    try:
+        parsed = urlparse(value.strip())
+        host = (parsed.hostname or "").lower().rstrip(".")
+        port = parsed.port
+    except (TypeError, ValueError):
+        return False
+    return (
+        parsed.scheme.lower() == "https"
+        and host.endswith(".ts.net")
+        and host != "ts.net"
+        and parsed.username is None
+        and parsed.password is None
+        and port in {None, 443}
+        and parsed.path in {"", "/"}
+        and not parsed.params
+        and not parsed.query
+        and not parsed.fragment
+    )
+
+
 def dashboard_url_hint() -> str:
     explicit = (
         env_value("PM_DASHBOARD_PUBLIC_URL")
         or env_value("POLYMARKET_DASHBOARD_PUBLIC_URL")
         or env_value("DASHBOARD_PUBLIC_URL")
     )
-    if explicit:
+    if explicit and _is_private_tailnet_url(explicit):
         return explicit.rstrip("/") + "/"
     port = env_value("POLYMARKET_DASHBOARD_PORT") or env_value("DASHBOARD_PORT") or "8765"
     # Never infer a remotely reachable URL from a public VPS address. The only

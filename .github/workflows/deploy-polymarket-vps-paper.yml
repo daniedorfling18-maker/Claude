@@ -361,41 +361,6 @@ jobs:
           PY
           )"
           dashboard_private_url="https://${dashboard_dns}/"
-
-          # Establish the private route while the last-known-good dashboard is
-          # still running, and persist the private URL before capturing the
-          # rollback environment. A later rollback therefore cannot restore a
-          # public URL hint, even when the previous source revision predates
-          # the loopback-only Compose invariant.
-          DASHBOARD_PRIVATE_URL="$dashboard_private_url" python3 - <<'PY'
-          import os
-          from pathlib import Path
-
-          env_path = Path(".env")
-          private_url = os.environ["DASHBOARD_PRIVATE_URL"]
-          lines = env_path.read_text(encoding="utf-8").splitlines()
-          updates = {
-              "POLYMARKET_DASHBOARD_HOST": "127.0.0.1",
-              "PM_DASHBOARD_PUBLIC_URL": private_url,
-          }
-          rendered: list[str] = []
-          seen: set[str] = set()
-          for line in lines:
-              if not line.lstrip().startswith("#") and "=" in line:
-                  key = line.split("=", 1)[0]
-                  if key in updates:
-                      rendered.append(f"{key}={updates[key]}")
-                      seen.add(key)
-                      continue
-              rendered.append(line)
-          for key, value in updates.items():
-              if key not in seen:
-                  rendered.append(f"{key}={value}")
-          temporary = env_path.with_name(".env.private-transport.tmp")
-          temporary.write_text("\n".join(rendered) + "\n", encoding="utf-8")
-          temporary.chmod(0o600)
-          temporary.replace(env_path)
-          PY
           dashboard_port="$(grep -E '^POLYMARKET_DASHBOARD_PORT=' .env | tail -n 1 | cut -d= -f2- || true)"
           dashboard_port="${dashboard_port:-8765}"
           case "$dashboard_port" in
@@ -405,9 +370,23 @@ jobs:
             echo "::error::Dashboard port is outside 1-65535: $dashboard_port"
             exit 1
           fi
-          $SUDO tailscale funnel --https=443 off >/dev/null 2>&1 || true
-          $SUDO tailscale serve --bg --yes --https=443 "http://127.0.0.1:${dashboard_port}"
-          curl -fsS --max-time 20 "$dashboard_private_url" >/dev/null
+
+          # Stage private transport values in the already mode-0600 deploy
+          # patch. Do not mutate .env or Tailscale before rollback is armed.
+          DASHBOARD_PRIVATE_URL="$dashboard_private_url" ENV_PATCH_PATH="$ENV_PATCH" python3 - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          patch_path = Path(os.environ["ENV_PATCH_PATH"])
+          updates = json.loads(patch_path.read_text(encoding="utf-8"))
+          updates["POLYMARKET_DASHBOARD_HOST"] = "127.0.0.1"
+          updates["PM_DASHBOARD_PUBLIC_URL"] = os.environ["DASHBOARD_PRIVATE_URL"]
+          temporary = patch_path.with_name(patch_path.name + ".private-transport.tmp")
+          temporary.write_text(json.dumps(updates, ensure_ascii=False), encoding="utf-8")
+          temporary.chmod(0o600)
+          temporary.replace(patch_path)
+          PY
 
           # Freeze bind-mounted writers only after target-revision capacity
           # has passed. This prevents files changing between stash capture and
@@ -458,10 +437,10 @@ jobs:
           temporary.replace(target)
           PY
 
-          # Arm rollback before the first mutating operation. Preserve the
-          # exact environment, deployed marker, source revision, and running
-          # image. Any later non-zero exit invokes the target revision's
-          # tested rollback utility and restores the prior production stack.
+          # Arm rollback before the first persistent transport/deploy mutation.
+          # Preserve the environment (plus a tighten-only private overlay),
+          # deployed marker, source revision, and running image. Any later
+          # non-zero exit invokes the target revision's tested rollback utility.
           ROLLBACK_DIR="$(mktemp -d)"
           ROLLBACK_ENV="$ROLLBACK_DIR/.env.last-known-good"
           ROLLBACK_MARKER="$ROLLBACK_DIR/deployed_git_rev.last-known-good"
@@ -531,6 +510,36 @@ jobs:
           trap 'deploy_exit $?' EXIT
 
           install -m 0600 .env "$ROLLBACK_ENV"
+          # Rollback restores the last-known-good runtime with a tighten-only
+          # private URL overlay, even when the old revision predates it.
+          DASHBOARD_PRIVATE_URL="$dashboard_private_url" ENV_PATH="$ROLLBACK_ENV" python3 - <<'PY'
+          import os
+          from pathlib import Path
+
+          path = Path(os.environ["ENV_PATH"])
+          updates = {
+              "POLYMARKET_DASHBOARD_HOST": "127.0.0.1",
+              "PM_DASHBOARD_PUBLIC_URL": os.environ["DASHBOARD_PRIVATE_URL"],
+          }
+          lines = path.read_text(encoding="utf-8").splitlines()
+          rendered = []
+          seen = set()
+          for line in lines:
+              if not line.lstrip().startswith("#") and "=" in line:
+                  key = line.split("=", 1)[0]
+                  if key in updates:
+                      rendered.append(f"{key}={updates[key]}")
+                      seen.add(key)
+                      continue
+              rendered.append(line)
+          for key, value in updates.items():
+              if key not in seen:
+                  rendered.append(f"{key}={value}")
+          temporary = path.with_name(path.name + ".secure.tmp")
+          temporary.write_text("\n".join(rendered) + "\n", encoding="utf-8")
+          temporary.chmod(0o600)
+          temporary.replace(path)
+          PY
           install -m 0600 outputs/performance/deployed_git_rev "$ROLLBACK_MARKER"
           git show "${GITHUB_SHA}:scripts/rollback_vps_paper_deploy.py" > "$ROLLBACK_SCRIPT"
           git show "${GITHUB_SHA}:scripts/write_vps_telemetry_manifest.py" > "$ROLLBACK_TELEMETRY_WRITER"
@@ -545,6 +554,13 @@ jobs:
           fi
           $DOCKER image tag "$previous_image_id" "$ROLLBACK_IMAGE_TAG"
           ROLLBACK_ARMED=true
+
+          # Tailscale and persistent environment changes are recoverable from
+          # this point. Prove the private route against the still-running
+          # last-known-good backend before quiescing any writer.
+          $SUDO tailscale funnel --https=443 off >/dev/null 2>&1 || true
+          $SUDO tailscale serve --bg --yes --https=443 "http://127.0.0.1:${dashboard_port}"
+          curl -fsS --max-time 20 "$dashboard_private_url" >/dev/null
 
           echo "[deploy] quiescing paper writers for a consistent runtime snapshot"
           $DOCKER compose -f "$COMPOSE_FILE" stop --timeout 60

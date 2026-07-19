@@ -37,7 +37,24 @@ if [ ! -f .env ]; then
 fi
 
 tmp_dir="$(mktemp -d)"
-trap 'rm -rf "$tmp_dir"' EXIT INT TERM
+env_backup="$tmp_dir/.env.pre-private-transport"
+install -m 0600 .env "$env_backup"
+env_committed=false
+
+restore_env_on_failure() {
+  status=$?
+  trap - EXIT INT TERM
+  if [ "$status" -ne 0 ] && [ "$env_committed" != true ]; then
+    printf '%s\n' "Private dashboard setup failed; restoring the pre-setup environment." >&2
+    install -m 0600 "$env_backup" .env 2>/dev/null || true
+  fi
+  rm -rf "$tmp_dir"
+  exit "$status"
+}
+
+trap 'restore_env_on_failure' EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
 status_json="$tmp_dir/tailscale-status.json"
 serve_status="$tmp_dir/tailscale-serve-status.txt"
 docker_bindings="$tmp_dir/dashboard-bindings.txt"
@@ -134,6 +151,7 @@ while [ "$attempt" -lt 30 ]; do
   if curl -fsS --max-time 10 "$private_url" >/dev/null 2>&1; then
     printf '%s\n' "Private dashboard ready: $private_url"
     printf '%s\n' "Install Tailscale on your phone, join the same tailnet, then open that HTTPS URL."
+    env_committed=true
     exit 0
   fi
   attempt=$((attempt + 1))

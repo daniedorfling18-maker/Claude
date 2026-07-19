@@ -457,6 +457,73 @@ def test_nan_cumulative_score_reports_missing_not_comparing_false(tmp_path):
     assert criteria["value"] is None  # missing, not NaN
 
 
+def test_active_live_stage_nonfinite_cumulative_score_forces_stop(tmp_path, monkeypatch):
+    cfg = _config(tmp_path, live_configured=True)
+    _write_study(cfg, _study(top="0xm1"))
+    _write_carry_history(cfg, _history(["0xm1"] * 7))
+    write_json(
+        _out(cfg) / "maker_live_test.json",
+        {
+            "status": "ok",
+            "generated_at_utc": "2026-07-14T10:50:00Z",
+            "net_score_usd": "-inf",
+        },
+    )
+    _write_live_history(
+        cfg,
+        [
+            {
+                "generated_at_utc": "2026-07-14T10:50:00Z",
+                "net_score_usd": 2.0,
+                "daily_net_score_usd": 2.0,
+            }
+        ],
+    )
+    monkeypatch.setattr(policy, "now_utc", lambda: "2026-07-14T11:00:00Z")
+
+    result = run_decision_policy(cfg)
+    criterion = result["kill_criteria_status"]["criteria"]["cumulative_real_net_score"]
+
+    assert result["kill_criteria_status"]["kill_input_freshness"]["state"] == "fresh"
+    assert criterion["triggered"] is True
+    assert criterion["invalid_input"] is True
+    assert criterion["value"] is None
+    assert result["indicated_action"] == "stop_quoting_review_before_resume"
+
+
+def test_active_live_stage_nonfinite_daily_score_forces_stop(tmp_path, monkeypatch):
+    cfg = _config(tmp_path, live_configured=True)
+    _write_study(cfg, _study(top="0xm1"))
+    _write_carry_history(cfg, _history(["0xm1"] * 7))
+    write_json(
+        _out(cfg) / "maker_live_test.json",
+        {
+            "status": "ok",
+            "generated_at_utc": "2026-07-14T10:50:00Z",
+            "net_score_usd": 2.0,
+        },
+    )
+    _write_live_history(
+        cfg,
+        [
+            {
+                "generated_at_utc": "2026-07-14T10:50:00Z",
+                "net_score_usd": 2.0,
+                "daily_net_score_usd": "nan",
+            }
+        ],
+    )
+    monkeypatch.setattr(policy, "now_utc", lambda: "2026-07-14T11:00:00Z")
+
+    result = run_decision_policy(cfg)
+    criterion = result["kill_criteria_status"]["criteria"]["single_day_net_score"]
+
+    assert result["kill_criteria_status"]["kill_input_freshness"]["state"] == "fresh"
+    assert criterion["triggered"] is True
+    assert criterion["invalid_input_count"] == 1
+    assert result["indicated_action"] == "stop_quoting_review_before_resume"
+
+
 def test_nan_carry_rows_drop_from_kelly_observations():
     # A NaN carry row must not enter the dollar fallback's mean/std nor inflate
     # kelly_observations (which would REDUCE shrinkage — a loosening).

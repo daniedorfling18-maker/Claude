@@ -71,6 +71,14 @@ rejected by this lane and require a separately reviewed control-plane bootstrap
 until workflow-identity protection exists. Because the repository has only one
 push-capable identity today, the lane is configured but BLOCKED.
 
+On a successful atomic update, the workflow publishes the evaluator's complete
+JSON result as the run-scoped artifact
+`independent-main-acceptance-<run-id>/merge-attestation.json`. The artifact
+binds the exact merge commit, verified head/tree, prior main parent, distinct
+current-head approver/dispatcher, checks, and blockers. Deployment consumers
+must verify both the originating workflow run and exact merge SHA; an artifact
+name copied from another run is not acceptance.
+
 After the owner upgrades the repository, establish a required-workflow ruleset
 that binds enforcement to `.github/workflows/required-pr-gate.yml`. The
 legacy policy can still be applied as review/direct-push hardening from the VPS,

@@ -111,6 +111,11 @@ def test_independent_merge_workflow_is_manual_exact_head_and_second_identity_onl
     assert "MERGE_TRIGGERING_ACTOR: ${{ github.triggering_actor }}" in workflow
     assert "scripts/merge_independently_reviewed_pr.py" in workflow
     assert "--merge" in workflow
+    assert "set -euo pipefail" in workflow
+    assert '| tee "$RUNNER_TEMP/independent-main-acceptance/merge-attestation.json"' in workflow
+    assert "actions/upload-artifact@v7" in workflow
+    assert "independent-main-acceptance-${{ github.run_id }}" in workflow
+    assert "if-no-files-found: error" in workflow
     assert "secrets." not in workflow
 
 

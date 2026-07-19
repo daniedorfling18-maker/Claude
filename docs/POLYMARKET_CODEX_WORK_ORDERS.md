@@ -5028,7 +5028,10 @@ frozen-surface change.
    repository has only one push-capable identity, and the audit continues to
    report the unavailable private-Free required-workflow protection honestly.
    A legacy name/app-bound required context is explicitly insufficient because
-   another GitHub Actions workflow can publish the same job name.
+   another GitHub Actions workflow can publish the same job name. A successful
+   atomic update also publishes the complete evaluator result as the run-scoped
+   `independent-main-acceptance-<run-id>/merge-attestation.json` artifact, so a
+   deploy can bind the exact accepted main SHA to the registered workflow run.
 
    **Day-after check:** inspect
    `outputs/performance/independent_merge_gate.json`;
@@ -5037,7 +5040,8 @@ frozen-surface change.
    remain false unless a workflow-identity-capable required-workflow ruleset is
    independently verified. No merge is eligible without an exact-head
    successful gate, a distinct current-head approver/rerun initiator, unchanged
-   trusted merge control, and an unchanged main ref at the atomic update.
+   trusted merge control, and an unchanged main ref at the atomic update. A
+   successful merge run must also contain the exact-SHA deployment attestation.
 4. **WO-101:** rebuild closed PR #242 from current main — IMPLEMENTED; review
    pending. The rebuild uses observation-time label availability, append-only
    resolution history, exact historical bid/ask, a purged chronological split,

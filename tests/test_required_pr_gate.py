@@ -11,6 +11,7 @@ import pytest
 ROOT = Path(__file__).resolve().parents[1]
 REPOSITORY_ID = 123
 ACCEPTED_WORKFLOW_SHA = "f" * 40
+ACCEPTED_INDEPENDENT_WORKFLOW_SHA = "e" * 40
 MODULE_PATH = ROOT / "scripts" / "audit_github_merge_gate.py"
 SPEC = importlib.util.spec_from_file_location("audit_github_merge_gate", MODULE_PATH)
 assert SPEC and SPEC.loader
@@ -408,10 +409,13 @@ def test_audit_fetches_repository_identity_and_latest_accepted_workflow_revision
             "repos/owner/repo/commits?path=.github/workflows/required-pr-gate.yml&sha=main&per_page=1": [
                 {"sha": ACCEPTED_WORKFLOW_SHA}
             ],
+            "repos/owner/repo/commits?path=.github/workflows/independent-pr-merge.yml&sha=main&per_page=1": [
+                {"sha": ACCEPTED_INDEPENDENT_WORKFLOW_SHA}
+            ],
             f"repos/owner/repo/contents/.github/workflows/required-pr-gate.yml?ref={ACCEPTED_WORKFLOW_SHA}": _contents(
                 _workflow()
             ),
-            f"repos/owner/repo/contents/.github/workflows/independent-pr-merge.yml?ref={ACCEPTED_WORKFLOW_SHA}": _contents(
+            f"repos/owner/repo/contents/.github/workflows/independent-pr-merge.yml?ref={ACCEPTED_INDEPENDENT_WORKFLOW_SHA}": _contents(
                 _independent_workflow()
             ),
             "repos/owner/repo/rulesets?includes_parents=true&per_page=100": [
@@ -436,8 +440,13 @@ def test_audit_fetches_repository_identity_and_latest_accepted_workflow_revision
     assert result["enforced"] is True
     assert result["expected_required_workflow_repository_id"] == REPOSITORY_ID
     assert result["accepted_required_workflow_sha"] == ACCEPTED_WORKFLOW_SHA
+    assert (
+        result["accepted_independent_merge_workflow_sha"]
+        == ACCEPTED_INDEPENDENT_WORKFLOW_SHA
+    )
     assert result["independent_merge_process_configured"] is True
     assert result["query_errors"]["accepted_required_workflow_contents"] == ""
+    assert result["query_errors"]["accepted_independent_workflow_contents"] == ""
 
 
 def test_private_free_plan_blocker_stays_explicit_and_fail_closed() -> None:

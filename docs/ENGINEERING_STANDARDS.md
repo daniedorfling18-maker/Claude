@@ -86,3 +86,45 @@ by themselves. That bar additionally requires an ENFORCED merge gate
 (branch protection; currently advisory-only on the GitHub Free plan), more
 than one reviewing human, and time-in-production. The registered capital
 gates exist precisely so that scaling waits for that proof.
+
+## Independent merge control
+
+The preferred control is protected `main` with a workflow-identity-capable
+required-workflow ruleset,
+stale-review dismissal, approval after the latest push, resolved conversations,
+admin enforcement, and no bypass actors. GitHub does not expose those controls
+for this private repository on its current Free plan, so their absence must be
+reported as a blocker rather than inferred from a green workflow.
+
+Legacy branch protection that requires only the check context
+`WO-69 guard and invariants` is insufficient even when GitHub records the
+GitHub Actions app ID: it does not bind that context to
+`.github/workflows/required-pr-gate.yml`. The audit must report
+`required_workflow_identity_enforced=false` and must not classify that normal
+merge path as enforced.
+
+Until protected `main` is available, direct/manual merges are prohibited. A
+second push-capable GitHub identity must review the exact current head and then
+dispatch `.github/workflows/independent-pr-merge.yml` with the PR number and
+that 40-character head SHA. The lane fails closed unless all of the following
+remain true immediately before its atomic SHA-bound merge:
+
+1. the dispatcher is not the PR author and is the trusted approver of the
+   current head; the actual `github.triggering_actor` for a rerun must satisfy
+   the same rule;
+2. current `main` is contained in the head, so the tested branch is not behind;
+3. the newest required check and required workflow run on that exact head both
+   succeeded;
+4. no latest review requests changes and every review thread is resolved; and
+5. the PR is open, non-draft, targets `main`, and remains mergeable;
+6. the PR does not change either merge workflow or either merge-control script;
+   and
+7. the squash-equivalent commit uses the verified main SHA as its only parent
+   and updates `refs/heads/main` non-force, so a concurrent main advance makes
+   the final update fail rather than silently changing the tested base.
+
+The repository currently has only one push-capable identity, so this fallback
+is configured but operationally BLOCKED until an independent reviewer is added.
+It is not branch protection and cannot technically prevent the owner from
+bypassing it; the audit and operating state must continue to say so. Funding
+remains CLOSED and WO-67 remains BLOCKED regardless of merge-lane state.

@@ -1,0 +1,57 @@
+name: Independently Reviewed PR Merge
+
+on:
+  workflow_dispatch:
+    inputs:
+      pr_number:
+        description: Open pull request number targeting main
+        required: true
+        type: string
+      expected_head_sha:
+        description: Exact 40-character PR head SHA reviewed by the operator
+        required: true
+        type: string
+
+permissions:
+  actions: read
+  checks: read
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: independent-pr-merge-${{ inputs.pr_number }}
+  cancel-in-progress: false
+
+jobs:
+  independently-reviewed-merge:
+    name: Verify current-head review and merge
+    runs-on: [self-hosted, Linux, ARM64, polymarket-ci]
+    timeout-minutes: 10
+
+    steps:
+      - name: Check out accepted merge utility
+        uses: actions/checkout@v6
+        with:
+          ref: main
+          path: merge-utility
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Verify and merge the exact reviewed head
+        shell: bash
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          MERGE_ACTOR: ${{ github.actor }}
+          MERGE_TRIGGERING_ACTOR: ${{ github.triggering_actor }}
+          MERGE_EVENT: ${{ github.event_name }}
+          MERGE_RUN_ID: ${{ github.run_id }}
+        run: |
+          docker run --rm --cpus 1 --memory 512m --pids-limit 128 \
+            -e GITHUB_TOKEN -e MERGE_ACTOR -e MERGE_TRIGGERING_ACTOR \
+            -e MERGE_EVENT -e MERGE_RUN_ID \
+            -v "${GITHUB_WORKSPACE}/merge-utility:/src:ro" \
+            python:3.11-slim python /src/scripts/merge_independently_reviewed_pr.py \
+              --repo daniedorfling18-maker/Claude \
+              --pr "${{ inputs.pr_number }}" \
+              --expected-head "${{ inputs.expected_head_sha }}" \
+              --merge

@@ -12,11 +12,13 @@ from datetime import datetime, timezone
 import json
 from pathlib import Path
 import subprocess
-from typing import Any, Mapping
+from typing import Any, Mapping, Sequence
 
 
 REQUIRED_CONTEXT = "WO-69 guard and invariants"
 REQUIRED_RUNNER_LABELS = {"self-hosted", "Linux", "ARM64", "polymarket-ci"}
+REQUIRED_FULL_SUITE_COMMAND = "/tmp/ci-venv/bin/python -m pytest -q"
+INDEPENDENT_MERGE_WORKFLOW = Path(".github/workflows/independent-pr-merge.yml")
 DEFAULT_OUTPUT = Path("outputs/performance/independent_merge_gate.json")
 
 
@@ -50,29 +52,77 @@ def workflow_is_configured(workflow_text: str) -> bool:
     on_block = _top_level_on_block(workflow_text)
     required_fragments = {
         "pull_request:",
+        "types: [opened, synchronize, reopened, ready_for_review]",
         f"name: {REQUIRED_CONTEXT}",
         "self-hosted",
         "Linux",
         "ARM64",
         "polymarket-ci",
-        "test_wo73_controls.py",
-        "test_executor_replay_certification.py",
-        "test_executor_ops_monitor.py",
-        "test_deploy_acceptance.py",
-        "test_collection_hygiene.py",
-        "test_degraded_state_watchdog.py",
-        "test_operating_state.py",
-        "test_execution_governance_storage.py",
-        "test_safety_invariants.py",
-        "test_polymarket_vps_docker.py",
+        "name: Run complete isolated repository gate",
+        "docker run --rm --cpus 2 --memory 4g --pids-limit 512",
+        "path: proposed-merge",
+        "fetch-depth: 0",
+        '${GITHUB_WORKSPACE}/proposed-merge:/src:ro',
+        "python:3.11-slim",
+        "apt-get install -y -qq --no-install-recommends git ca-certificates",
         "ruff check .",
         "config-check --config polymarket_predictive_config.example.yaml",
     }
-    return "pull_request:" in on_block and all(fragment in workflow_text for fragment in required_fragments)
+    pytest_lines = [
+        line.strip()
+        for line in workflow_text.splitlines()
+        if "pytest" in line and not line.lstrip().startswith("#")
+    ]
+    checkout_step = workflow_text.find("name: Check out proposed merge")
+    full_suite_step = workflow_text.find("name: Run complete isolated repository gate")
+    return (
+        "pull_request:" in on_block
+        and all(fragment in workflow_text for fragment in required_fragments)
+        and 0 <= checkout_step < full_suite_step
+        and pytest_lines == [REQUIRED_FULL_SUITE_COMMAND]
+        and "continue-on-error:" not in workflow_text
+        and "    container:" not in workflow_text
+    )
+
+
+def independent_merge_workflow_is_configured(workflow_text: str) -> bool:
+    """Return whether the registered second-identity merge lane is fail closed."""
+
+    on_block = _top_level_on_block(workflow_text)
+    required_fragments = {
+        "workflow_dispatch:",
+        "expected_head_sha:",
+        "actions: read",
+        "checks: read",
+        "contents: write",
+        "pull-requests: write",
+        "runs-on: [self-hosted, Linux, ARM64, polymarket-ci]",
+        "path: merge-utility",
+        "fetch-depth: 0",
+        "MERGE_ACTOR: ${{ github.actor }}",
+        "MERGE_TRIGGERING_ACTOR: ${{ github.triggering_actor }}",
+        "MERGE_EVENT: ${{ github.event_name }}",
+        "MERGE_RUN_ID: ${{ github.run_id }}",
+        "scripts/merge_independently_reviewed_pr.py",
+        "--expected-head",
+        "--merge",
+    }
+    return (
+        "workflow_dispatch:" in on_block
+        and "pull_request:" not in on_block
+        and all(fragment in workflow_text for fragment in required_fragments)
+        and "continue-on-error:" not in workflow_text
+    )
 
 
 def branch_protection_payload() -> dict[str, Any]:
-    """Return the exact fail-closed protection policy registered by WO-69."""
+    """Return the strongest available legacy branch-protection policy.
+
+    GitHub's legacy required-status API binds a context (and optionally an app),
+    not the workflow file that produced it.  This payload is useful for review,
+    stale-approval, admin, and direct-push controls, but the audit must never
+    classify its name-only status context as workflow-identity enforcement.
+    """
     return {
         "required_status_checks": {"strict": True, "contexts": [REQUIRED_CONTEXT]},
         "enforce_admins": True,
@@ -116,6 +166,8 @@ def evaluate_merge_gate(
     protection_payload: Mapping[str, Any] | None,
     protection_error: str = "",
     runs_payload: Mapping[str, Any] | None = None,
+    independent_merge_workflow_text: str = "",
+    collaborators_payload: Sequence[Mapping[str, Any]] | None = None,
 ) -> dict[str, Any]:
     workflow_configured = workflow_is_configured(workflow_text)
     runners = (_mapping(runners_payload).get("runners") or []) if runners_payload else []
@@ -129,53 +181,100 @@ def evaluate_merge_gate(
 
     protection = _mapping(protection_payload)
     branch_protection_enabled = bool(protection)
-    required_check_enforced = REQUIRED_CONTEXT in _required_contexts(protection)
+    status_checks = _mapping(protection.get("required_status_checks"))
+    strict_status_checks = status_checks.get("strict") is True
+    legacy_required_context_registered = (
+        REQUIRED_CONTEXT in _required_contexts(protection) and strict_status_checks
+    )
+    # A GitHub Actions check registered through the legacy branch-protection
+    # contexts/checks API is app-bound at best. Any workflow in the proposed
+    # revision can publish the same job name, so this is deliberately never
+    # accepted as proof that required-pr-gate.yml ran.
+    required_workflow_identity_enforced = False
     reviews = _mapping(protection.get("required_pull_request_reviews"))
     required_review_count = int(reviews.get("required_approving_review_count") or 0)
-    independent_review_required = required_review_count >= 1
+    stale_reviews_dismissed = reviews.get("dismiss_stale_reviews") is True
+    last_push_approval_required = reviews.get("require_last_push_approval") is True
+    independent_review_required = required_review_count >= 1 and stale_reviews_dismissed and last_push_approval_required
+    conversation_resolution_required = _enabled(protection.get("required_conversation_resolution"))
     admins_enforced = _enabled(protection.get("enforce_admins"))
     bypass_count = _bypass_count(reviews)
-    direct_push_forbidden = branch_protection_enabled and independent_review_required and admins_enforced and bypass_count == 0
+    direct_push_forbidden = (
+        branch_protection_enabled
+        and independent_review_required
+        and conversation_resolution_required
+        and admins_enforced
+        and bypass_count == 0
+    )
 
     workflow_runs = [_mapping(row) for row in (_mapping(runs_payload).get("workflow_runs") or [])] if runs_payload else []
     latest_run = workflow_runs[0] if workflow_runs else {}
     active_run_count = sum(str(row.get("status") or "").lower() in {"queued", "in_progress", "waiting", "requested"} for row in workflow_runs)
-    latest_successful_run = next(
-        (
-            row
-            for row in workflow_runs
-            if str(row.get("event") or "") == "pull_request"
-            and str(row.get("status") or "") == "completed"
-            and str(row.get("conclusion") or "") == "success"
-        ),
-        {},
+    latest_gate_success = (
+        str(latest_run.get("event") or "") == "pull_request"
+        and str(latest_run.get("status") or "") == "completed"
+        and str(latest_run.get("conclusion") or "") == "success"
     )
-    successful_gate_run_exists = bool(latest_successful_run)
+    latest_successful_run = latest_run if latest_gate_success else {}
+
+    independent_process_configured = independent_merge_workflow_is_configured(independent_merge_workflow_text)
+    push_capable_collaborators = sorted(
+        str(_mapping(row).get("login") or "")
+        for row in collaborators_payload or []
+        if _mapping(_mapping(row).get("permissions")).get("push") is True and _mapping(row).get("login")
+    )
+    independent_identity_available = len({login.casefold() for login in push_capable_collaborators}) >= 2
+    independent_process_operational = (
+        independent_process_configured
+        and independent_identity_available
+        and runner_online
+        and latest_gate_success
+    )
 
     plan_blocked = "upgrade to github pro" in protection_error.lower() or "make this repository public" in protection_error.lower()
     checks = {
         "workflow_configured": workflow_configured,
+        "independent_merge_process_configured": independent_process_configured,
         "runner_registered": bool(matching_runners),
         "runner_online": runner_online,
-        "latest_gate_success": successful_gate_run_exists,
+        "latest_gate_success": latest_gate_success,
         "branch_protection_enabled": branch_protection_enabled,
-        "required_check_enforced": required_check_enforced,
+        "required_workflow_identity_enforced": required_workflow_identity_enforced,
         "independent_review_required": independent_review_required,
+        "stale_reviews_dismissed": stale_reviews_dismissed,
+        "last_push_approval_required": last_push_approval_required,
+        "conversation_resolution_required": conversation_resolution_required,
         "admin_enforcement_enabled": admins_enforced,
         "direct_push_forbidden": direct_push_forbidden,
         "review_bypass_count_zero": bypass_count == 0,
     }
     enforced = all(checks.values())
     blockers = [name for name, passed in checks.items() if not passed]
-    status = "enforced" if enforced else ("blocked_github_plan" if plan_blocked else "incomplete")
+    if enforced:
+        status = "enforced"
+    elif independent_process_operational:
+        status = "documented_independent_process_only"
+    elif plan_blocked and not independent_identity_available:
+        status = "blocked_github_plan_and_independent_identity"
+    elif branch_protection_enabled and legacy_required_context_registered:
+        status = "blocked_legacy_status_not_workflow_bound"
+    else:
+        status = "incomplete"
     return {
         "status": status,
         "enforced": enforced,
         "required_check_context": REQUIRED_CONTEXT,
         "branch_protection_enabled": branch_protection_enabled,
-        "required_check_enforced": required_check_enforced,
+        # Backward-compatible field consumed only as a fail-closed boolean.
+        "required_check_enforced": required_workflow_identity_enforced,
+        "legacy_required_context_registered": legacy_required_context_registered,
+        "required_workflow_identity_enforced": required_workflow_identity_enforced,
         "independent_review_required": independent_review_required,
         "direct_push_forbidden": direct_push_forbidden,
+        "independent_merge_process_configured": independent_process_configured,
+        "independent_identity_available": independent_identity_available,
+        "independent_process_operational": independent_process_operational,
+        "push_capable_collaborators": push_capable_collaborators,
         "runner_online": runner_online,
         "runner_names": [str(row.get("name") or "") for row in matching_runners],
         "latest_gate_run": {
@@ -196,9 +295,21 @@ def evaluate_merge_gate(
         "checks": checks,
         "blockers": blockers,
         "platform_blocker": protection_error.strip() if plan_blocked else "",
+        "legacy_status_context_risk": (
+            "GitHub legacy required-status checks do not bind the check name to "
+            ".github/workflows/required-pr-gate.yml; "
+            "a same-named GitHub Actions job is not accepted as merge proof."
+            if legacy_required_context_registered
+            else ""
+        ),
         "owner_action": (
-            "Upgrade the private repository to GitHub Pro/Team, then rerun this utility with --apply-protection."
-            if plan_blocked
+            "Upgrade to a workflow-identity-capable required-workflow ruleset, or add "
+            "a second push-capable reviewer and use only the registered independent "
+            "merge workflow; never use the normal merge path from a legacy green context."
+            if plan_blocked and not independent_identity_available
+            else "Use only the registered independent merge workflow until a "
+            "workflow-identity-capable required-workflow ruleset is verified."
+            if independent_process_operational or legacy_required_context_registered
             else ("None" if enforced else "Resolve every named blocker before live capital.")
         ),
         "paper_trading_invoked": False,
@@ -206,17 +317,18 @@ def evaluate_merge_gate(
     }
 
 
-def _gh_api(path: str, *, method: str = "GET", payload: Mapping[str, Any] | None = None) -> tuple[dict[str, Any], str]:
+def _gh_api(path: str, *, method: str = "GET", payload: Mapping[str, Any] | None = None) -> tuple[Any, str]:
     command = ["gh", "api", path, "--method", method, "-H", "Accept: application/vnd.github+json", "-H", "X-GitHub-Api-Version: 2022-11-28"]
     input_text = None
     if payload is not None:
         command.extend(["--input", "-"])
         input_text = json.dumps(payload)
     completed = subprocess.run(command, input=input_text, text=True, capture_output=True, check=False)
-    parsed: dict[str, Any] = {}
+    parsed: Any = {}
     if completed.returncode == 0 and completed.stdout.strip():
         try:
-            parsed = _mapping(json.loads(completed.stdout))
+            candidate = json.loads(completed.stdout)
+            parsed = candidate if isinstance(candidate, (dict, list)) else {}
         except json.JSONDecodeError:
             parsed = {}
     error = "\n".join(part for part in (completed.stdout.strip() if completed.returncode else "", completed.stderr.strip()) if part)
@@ -231,19 +343,29 @@ def audit(repo: str, workflow_path: Path, *, apply_protection: bool = False) -> 
     runners, runners_error = _gh_api(f"repos/{repo}/actions/runners")
     protection, protection_error = _gh_api(f"repos/{repo}/branches/main/protection")
     runs, runs_error = _gh_api(f"repos/{repo}/actions/workflows/required-pr-gate.yml/runs?event=pull_request&per_page=20")
+    collaborators, collaborators_error = _gh_api(f"repos/{repo}/collaborators?affiliation=all&per_page=100")
+    independent_workflow_path = workflow_path.with_name(INDEPENDENT_MERGE_WORKFLOW.name)
     result = evaluate_merge_gate(
         workflow_text=workflow_path.read_text(encoding="utf-8"),
-        runners_payload=runners,
-        protection_payload=protection,
+        runners_payload=_mapping(runners),
+        protection_payload=_mapping(protection),
         protection_error="\n".join(part for part in (apply_error, protection_error) if part),
-        runs_payload=runs,
+        runs_payload=_mapping(runs),
+        independent_merge_workflow_text=(
+            independent_workflow_path.read_text(encoding="utf-8") if independent_workflow_path.exists() else ""
+        ),
+        collaborators_payload=collaborators if isinstance(collaborators, list) else [],
     )
     result.update(
         {
             "generated_at_utc": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
             "repository": repo,
             "workflow_path": str(workflow_path),
-            "query_errors": {"runners": runners_error, "workflow_runs": runs_error},
+            "query_errors": {
+                "runners": runners_error,
+                "workflow_runs": runs_error,
+                "collaborators": collaborators_error,
+            },
             "protection_apply_attempted": apply_protection,
         }
     )

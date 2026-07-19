@@ -578,13 +578,23 @@ leaving the healthy stack running. Exit-75 supervisor events append to the WO-61
 `outputs/performance/background_timeout_incidents.csv`; full governance has one VPS owner, the ops
 scheduler. These controls remain reporting/operations-only and cannot invoke paper/live trading.
 
-**2026-07-12 — WO-69 implemented to the platform boundary by Codex; runner moved 2026-07-13.** A repository-scoped Linux ARM64
-self-hosted runner on the upgraded VPS now serves the deterministic `Required PR Gate`: ruff, config validation, and the
-registered governance/invariant subset. `scripts/audit_github_merge_gate.py` writes the WO-68 P4
-artifact and can apply the exact protection payload. Enforcement remains fail-closed and incomplete:
-GitHub returns HTTP 403 for private-repository branch protection/rulesets on the current Free plan.
-Upgrade to Pro/Team and a clean `--apply-protection` audit are mandatory before further live capital;
-the repository must not be made public as a workaround.
+**2026-07-12 — WO-69 implemented to the platform boundary by Codex; WO-100 rebuilt the gate on
+2026-07-19.** A repository-scoped Linux ARM64 self-hosted runner on the upgraded VPS serves the
+deterministic `Required PR Gate`: Ruff, both config validations, and the complete unfiltered suite in
+a bounded Python 3.11 container. `scripts/audit_github_merge_gate.py` writes the WO-68 P4 artifact and
+can apply a legacy review/direct-push hardening payload. It now rejects reuse
+of an older successful run, audits latest-push review semantics, and refuses to
+treat a name/app-bound status context as proof that the required workflow ran.
+Enforcement remains fail-closed and incomplete: GitHub returns HTTP 403
+for private-repository branch protection/rulesets on the current Free plan. The documented fallback
+requires a second identity to approve and dispatch an exact-head merge; it remains blocked while the
+repository has only one push-capable identity. The lane also authorizes the
+actual rerun initiator, rejects candidate changes to its trusted control files,
+and performs a non-force squash-equivalent ref update parented to the verified
+main SHA, so a concurrent main advance fails closed. A workflow-identity-capable
+required-workflow ruleset, not a legacy same-name context, is mandatory before
+the protected-branch path can report enforced; the repository must not be made
+public as a workaround.
 
 **2026-07-12 — external-audit P2/P6 remediation implemented by Codex.** Sharp-anchor coverage now
 reconciles independently observed raw-fetch, normalisation, mapping-audit, mapped-token, current

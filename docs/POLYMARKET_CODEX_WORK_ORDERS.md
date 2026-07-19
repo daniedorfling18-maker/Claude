@@ -2599,39 +2599,27 @@ external-audit text (§3.3, P1):
 
 ## WO-69 — Independent merge gate (external audit P0; runner built, enforcement blocked on GitHub plan)
 
-Status: IMPLEMENTED TO THE PLATFORM BOUNDARY by Codex on 2026-07-12; NOT
-ENFORCED and therefore NOT COMPLETE. Owner option (b) is installed: after the
-2026-07-13 VPS upgrade, the repository-scoped Linux ARM64 runner is online and the minimal PR workflow, exact
-protection payload, fail-closed audit, generated P4 artifact, tests, and runbook
-are implemented. GitHub's protection and ruleset APIs both return HTTP 403 for
-this private Free-plan repository. The repository must be upgraded to Pro/Team
-and `scripts/audit_github_merge_gate.py --apply-protection` must report
+Status: IMPLEMENTED TO THE PLATFORM BOUNDARY by Codex on 2026-07-12 and
+REBUILT by WO-100 on 2026-07-19; NOT ENFORCED and therefore NOT COMPLETE. The
+repository-scoped Linux ARM64 runner executes Ruff, both config checks, and the
+complete unfiltered suite in a bounded Python 3.11 container. The audit rejects
+older-success reuse and requires strict current-head review semantics in the
+registered protection payload.
+
+GitHub's protection and ruleset APIs both return HTTP 403 for this private
+Free-plan repository. The repository must be upgraded to Pro/Team and
+`scripts/audit_github_merge_gate.py --apply-protection` must report
 `status=enforced` before live capital. Making the repository public is rejected.
+Until then, direct merges are prohibited and the documented exact-head merge
+workflow requires a distinct current-head approver to dispatch it. The
+repository currently has only one push-capable identity, so that fallback is
+configured but operationally BLOCKED rather than represented as enforcement.
 
-Merges previously rested on the builder's self-reported local suite (hosted
-Actions quota exhausted 2026-07-09; operational workflows dispatch-only).
-Before ANY live capital beyond the operator pipe test, an independent gate
-must exist.
-
-1. OWNER CHOICE required first (this blocks the WO):
-   (a) GitHub-hosted minutes: free quota resets monthly; the minimal gate
-       below costs roughly 3-5 min per PR, well inside the free tier; or
-   (b) a self-hosted runner on the VPS restricted to the minimal gate
-       (the 1-vCPU host can afford ruff + guard tests, not the full
-       suite); or
-   (c) a runner on the Windows box.
-2. Minimal mandatory PR gate (fast, deterministic): ruff check; the guard
-   and invariant test subset (gate registrations, no-live-path tests,
-   telemetry whitelist tests, docker/scheduler string tests); config
-   validation; the WO-68 drift test. Full 1,000+ suite stays local or
-   nightly dispatch.
-3. Branch protection on main: require the gate check, forbid direct
-   pushes, require one review not authored by the building agent
-   (orchestrator reviews Codex; Codex pre-build-audits orchestrator
-   specs - the bidirectional loop already demonstrated).
-4. Until the WO-69 artifact reports `status=enforced`, the interim
-   compensating controls stay: full local suite before merge, cross-agent
-   audits, ledger anchoring, and the operating-state deployed-SHA check.
+**Day-after check:**
+`outputs/performance/independent_merge_gate.json` must report the complete
+workflow and independent process as configured, must identify the actual
+push-capable identities, and must keep `enforced=false` until protection is
+returned by GitHub. Funding remains CLOSED and WO-67 remains BLOCKED.
 
 Implementation/runbook: `docs/WO69_CI_ENFORCEMENT.md`.
 
@@ -5030,6 +5018,26 @@ frozen-surface change.
    unfiltered suite and latest-review-on-current-head semantics. Establish real
    branch protection or a documented fail-closed independent merge process;
    do not claim GitHub-plan controls that the repository cannot enforce.
+   **Implemented 2026-07-19, pending independent review/merge:** the ARM64 gate
+   now runs the complete unfiltered suite in a bounded Python 3.11 container,
+   and the manual merge lane binds a second identity's approval, the latest
+   exact-head check/workflow results, an up-to-date main ancestry, and resolved
+   threads to an atomic non-force main update whose only parent is the verified
+   main SHA. It validates the actual rerun initiator and rejects PRs that alter
+   its trusted workflows/scripts. The lane remains BLOCKED while the
+   repository has only one push-capable identity, and the audit continues to
+   report the unavailable private-Free required-workflow protection honestly.
+   A legacy name/app-bound required context is explicitly insufficient because
+   another GitHub Actions workflow can publish the same job name.
+
+   **Day-after check:** inspect
+   `outputs/performance/independent_merge_gate.json`;
+   `checks.workflow_configured` and `independent_merge_process_configured` must
+   be true, while `required_workflow_identity_enforced` and `enforced` must
+   remain false unless a workflow-identity-capable required-workflow ruleset is
+   independently verified. No merge is eligible without an exact-head
+   successful gate, a distinct current-head approver/rerun initiator, unchanged
+   trusted merge control, and an unchanged main ref at the atomic update.
 4. **WO-101:** rebuild closed PR #242 from current main — IMPLEMENTED; review
    pending. The rebuild uses observation-time label availability, append-only
    resolution history, exact historical bid/ask, a purged chronological split,

@@ -185,6 +185,53 @@ def test_each_executor_contract_defect_fails_certification(tmp_path: Path, mutat
     assert result["blocks_canary_by_certification"] is True
 
 
+def test_aggregate_place_notional_must_remain_within_stage_cap(tmp_path: Path) -> None:
+    cfg, corpus, decision_path, ledger_path = _prepared_stub(tmp_path)
+    decisions = read_json(decision_path)
+    ledger = list(csv.DictReader(ledger_path.open("r", encoding="utf-8", newline="")))
+    decision = next(row for row in decisions if any(action["action_type"] == "place" for action in row["actions"]))
+    original = next(action for action in decision["actions"] if action["action_type"] == "place")
+    scenario = next(
+        row
+        for row in corpus["scenarios"]
+        if row["scenario_id"] == decision["scenario_id"]
+    )
+    cycle = next(
+        row
+        for row in scenario["cycles"]
+        if int(row["cycle"]) == int(decision["cycle"])
+    )
+    cap = float(cycle["stage_cap_usd"])
+    notional = float(original["price"]) * float(original["shares"])
+    action_count = int(cap // notional) + 1
+    decision["actions"] = [
+        {**original, "action_id": f"{original['action_id']}-aggregate-{index}"}
+        for index in range(action_count)
+    ]
+    original_ledger = next(row for row in ledger if row["action_id"] == original["action_id"])
+    ledger = [row for row in ledger if row["action_id"] != original["action_id"]]
+    ledger.extend(
+        {**original_ledger, "action_id": action["action_id"]}
+        for action in decision["actions"]
+    )
+    write_json(decision_path, decisions)
+    write_csv(ledger_path, ledger, fieldnames=list(ledger[0]))
+
+    result = certify_executor_replay(
+        cfg,
+        decision_log_path=decision_path,
+        execution_ledger_path=ledger_path,
+        candidate_build_id="wo74-reference-stub",
+    )
+
+    assert result["status"] == "FAIL"
+    assert result["contract_checks"]["policy_caps"]["status"] == "FAIL"
+    assert any(
+        violation["detail"] == "aggregate place notional exceeds stage cap"
+        for violation in result["violations"]
+    )
+
+
 def test_cli_and_source_remain_keyless_and_executor_free() -> None:
     assert "executor-replay-certification" in COMMANDS
     parsed = build_parser().parse_args(
@@ -197,4 +244,3 @@ def test_cli_and_source_remain_keyless_and_executor_free() -> None:
     assert "POLYMARKET_LIVE_TRADING" not in source
     assert "private_key" not in source
     assert "api_secret" not in source
-

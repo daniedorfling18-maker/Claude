@@ -190,8 +190,17 @@ def test_recorded_data_api_payloads_replay_all_current_parsers(monkeypatch: pyte
         **settings,
         "prints_limit": 100,
     }
-    prints = maker_carry_study._recent_prints(maker_settings, CONDITION)
-    assert prints == [{"price": 0.26, "size": 12.5, "stamp": 1784135092.0, "side": "BUY"}]
+    prints = maker_carry_study._recent_prints(maker_settings, CONDITION, TOKEN)
+    assert prints == [
+        {
+            "price": 0.26,
+            "size": 12.5,
+            "stamp": 1784135092.0,
+            "side": "BUY",
+            "condition_id": CONDITION,
+            "token_id": TOKEN,
+        }
+    ]
     monkeypatch.setattr(wallet_reconciliation, "_get_json", lambda settings, url, params: positions if url.endswith("/positions") else activity)
     page_settings = {
         "data_api_base_url": "https://data-api.polymarket.com",

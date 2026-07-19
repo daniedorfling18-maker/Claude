@@ -86,10 +86,28 @@ def _setup(cfg: EngineConfig, **o: Any) -> None:
         "anchors",
         [{"token_id": TOKEN, "probability": o.get("fair", 0.50), "anchor_timestamp_utc": o.get("anchor_stamp", STUDY_STAMP)}],
     )
+    anchor_rows = [
+        {
+            "source": "sharp_odds",
+            "anchor_source": "pinnacle",
+            "bookmaker": "pinnacle",
+            "join_source": "direct_token_joins",
+            **row,
+        }
+        for row in anchor_rows
+    ]
     write_csv(
         cfg.output_root / "polymarket_training" / "sharp_fundamental_probabilities.csv",
         anchor_rows,
-        fieldnames=["token_id", "probability", "anchor_timestamp_utc"],
+        fieldnames=[
+            "token_id",
+            "probability",
+            "anchor_timestamp_utc",
+            "source",
+            "anchor_source",
+            "bookmaker",
+            "join_source",
+        ],
     )
 
     _write_official_book(
@@ -133,6 +151,88 @@ def test_happy_path_qualifies(tmp_path: Path) -> None:
     assert summary["candidate_condition_id"] == CAND
     assert summary["candidate_token_id"] == TOKEN
     assert summary["consensus_sharp_fair"] == 0.5
+    assert summary["qualifying_sharp_sources"] == ["pinnacle"]
+
+
+@pytest.mark.parametrize(
+    "anchor",
+    [
+        {"anchor_source": "", "bookmaker": ""},
+        {"anchor_source": "sharp_odds", "bookmaker": "sharp_odds"},
+        {"anchor_source": "manual_pinnacle_snapshot", "bookmaker": "manual_pinnacle_snapshot"},
+        {"anchor_source": "pinnacle", "bookmaker": "betfair_ex_eu"},
+        {"anchor_source": "soft_book", "bookmaker": "soft_book"},
+    ],
+)
+def test_unverified_or_conflicting_sharp_source_fails_closed(tmp_path: Path, anchor: dict[str, str]) -> None:
+    cfg = _cfg(tmp_path)
+    _setup(
+        cfg,
+        anchors=[
+            {
+                "token_id": TOKEN,
+                "probability": 0.5,
+                "anchor_timestamp_utc": STUDY_STAMP,
+                **anchor,
+            }
+        ],
+    )
+
+    qualified, checks, _ = mod.evaluate_sharp_linking(cfg, as_of=NOW)
+
+    assert qualified is False
+    provenance = next(row for row in checks if row["check"] == "exact_token_anchor_provenance")
+    assert provenance["passed"] is False
+    assert "rejected_provenance=1" in provenance["detail"]
+
+
+def test_all_registered_sharp_books_are_accepted(tmp_path: Path) -> None:
+    for source in sorted(mod.QUALIFYING_SHARP_SOURCES):
+        cfg = _cfg(tmp_path / source)
+        _setup(
+            cfg,
+            anchors=[
+                {
+                    "token_id": TOKEN,
+                    "probability": 0.5,
+                    "anchor_timestamp_utc": STUDY_STAMP,
+                    "anchor_source": source,
+                    "bookmaker": source,
+                }
+            ],
+        )
+        qualified, checks, summary = mod.evaluate_sharp_linking(cfg, as_of=NOW)
+        assert qualified is True, [row for row in checks if not row["passed"]]
+        assert summary["qualifying_sharp_sources"] == [source]
+
+
+def test_one_bad_fresh_source_cannot_hide_behind_one_valid_source(tmp_path: Path) -> None:
+    cfg = _cfg(tmp_path)
+    _setup(
+        cfg,
+        anchors=[
+            {
+                "token_id": TOKEN,
+                "probability": 0.5,
+                "anchor_timestamp_utc": STUDY_STAMP,
+                "anchor_source": "pinnacle",
+                "bookmaker": "pinnacle",
+            },
+            {
+                "token_id": TOKEN,
+                "probability": 0.5,
+                "anchor_timestamp_utc": STUDY_STAMP,
+                "anchor_source": "unknown",
+                "bookmaker": "unknown",
+            },
+        ],
+    )
+
+    qualified, checks, summary = mod.evaluate_sharp_linking(cfg, as_of=NOW)
+
+    assert qualified is False
+    assert summary["qualifying_sharp_sources"] == ["pinnacle"]
+    assert next(row for row in checks if row["check"] == "exact_token_anchor_provenance")["passed"] is False
 
 
 def test_candidate_identity_requires_one_portfolio_row_and_no_csv_fallback(tmp_path: Path) -> None:

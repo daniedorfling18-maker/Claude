@@ -348,6 +348,22 @@ def _ladder_stage(
     }
 
 
+def _finite(value: Any) -> float | None:
+    """safe_float that also rejects non-finite (NaN/inf) values.
+
+    NaN passes an ``is not None`` filter and then makes every ``<=``/``<``
+    comparison False, which silently disables the check it feeds — including
+    registered KILL criteria (a NaN cumulative score can never satisfy
+    ``<= kill_threshold``, and a NaN first element poisons ``min()``).
+    Treat non-finite as missing so the existing missing-data handling governs.
+    """
+
+    parsed = safe_float(value)
+    if parsed is None or not math.isfinite(parsed):
+        return None
+    return parsed
+
+
 def _daily_net_returns(daily: list[dict[str, Any]]) -> list[float]:
     """Per-day portfolio returns (P&L / capital base) for the Kelly overlay.
 
@@ -362,8 +378,8 @@ def _daily_net_returns(daily: list[dict[str, Any]]) -> list[float]:
 
     returns: list[float] = []
     for row in daily:
-        net = safe_float(row.get("portfolio_net_carry_usd_per_day"))
-        capital = safe_float(row.get("portfolio_capital_usd"))
+        net = _finite(row.get("portfolio_net_carry_usd_per_day"))
+        capital = _finite(row.get("portfolio_capital_usd"))
         if net is None or capital is None or capital <= 0:
             continue
         returns.append(net / capital)
@@ -372,7 +388,10 @@ def _daily_net_returns(daily: list[dict[str, Any]]) -> list[float]:
 
 def _quarter_kelly_cap(history: list[dict[str, Any]], ladder_cap: float, settings: dict[str, Any]) -> dict[str, Any]:
     daily = _latest_per_utc_day(history)
-    values = [safe_float(row.get("portfolio_net_carry_usd_per_day")) for row in daily if safe_float(row.get("portfolio_net_carry_usd_per_day")) is not None]
+    # Finite filter (not just `is not None`): a NaN row must not enter the
+    # mean/std fallback or inflate the observation count (less shrinkage =
+    # looser). Dropping it is strictly tighter.
+    values = [value for row in daily for value in [_finite(row.get("portfolio_net_carry_usd_per_day"))] if value is not None]
     if len(values) < 2:
         return {
             "daily_net_mean_usd": values[0] if values else None,
@@ -572,8 +591,11 @@ def _kill_criteria(
         "maximum_age_seconds": float(settings["kill_input_max_age_seconds"]),
         "tighten_only_maximum_seconds": REGISTERED_KILL_INPUT_MAX_AGE_SECONDS,
     }
-    cumulative_net = safe_float(latest.get("net_score_usd"))
-    single_day_values = [safe_float(row.get("_daily_net_score_usd")) for row in daily if safe_float(row.get("_daily_net_score_usd")) is not None]
+    # Finite parses (NaN would silently disable both kill checks: NaN <= t is
+    # False, and a NaN first element poisons min()). Non-finite = missing; the
+    # WO-86 staleness guard separately covers absent safety data.
+    cumulative_net = _finite(latest.get("net_score_usd"))
+    single_day_values = [value for row in daily for value in [_finite(row.get("_daily_net_score_usd"))] if value is not None]
     fill_overrun_days = 0
     for row in daily:
         modelled = safe_float(row.get("modelled_fills_per_day"))

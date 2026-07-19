@@ -116,9 +116,12 @@ work or capital.
   instruction): the orchestrator has no separate GitHub identity, so every
   post it makes is authored by the owner's account. Any `@codex` dispatch the
   orchestrator posts MUST therefore begin with `[orchestrator-dispatch]` and
-  is NEVER owner authorization. Dispatch is limited to non-frozen registered
-  work orders; frozen surfaces stay owner-merge. See the dispatch-bridge
-  protocol in `docs/POLYMARKET_CODEX_WORK_ORDERS.md`.
+  is NEVER owner authorization. The bridge may dispatch fixes/builds on any
+  registered work order (frozen surfaces included), but dispatching work is
+  not authorizing a merge: the orchestrator merges only non-frozen PRs, and
+  every frozen/registered change still requires the owner's merge —
+  authorization lives at the merge, never at the dispatch. See the
+  dispatch-bridge protocol in `docs/POLYMARKET_CODEX_WORK_ORDERS.md`.
 - Never use destructive Git commands to deal with runtime data.
 
 ## Stable references

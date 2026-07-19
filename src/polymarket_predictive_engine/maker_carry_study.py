@@ -1338,6 +1338,7 @@ def _markout_adverse(
     horizon_seconds = float(settings["markout_horizon_minutes"]) * 60.0
     tolerance = 120.0
     crossing = 0
+    observed = 0
     loss_usd = 0.0
     stamps: list[float] = []
     for record in prints:
@@ -1346,6 +1347,7 @@ def _markout_adverse(
         mid_later = _mid_at(series, record["stamp"] + horizon_seconds, tolerance)
         if mid_then is None or mid_later is None:
             continue
+        observed += 1
         if record["side"] == "SELL" and record["price"] <= mid_then - quote_distance:
             fill_price = mid_then - quote_distance
             per_share = fill_price - mid_later  # we bought; positive = loss
@@ -1358,9 +1360,17 @@ def _markout_adverse(
             continue
         crossing += 1
         loss_usd += per_share * min(record["size"], quote_size) * queue_share
+    if observed == 0:
+        # 2026-07-19 (#290 review P1): reaching markout_min_prints is not a
+        # measurement. If no print had BOTH an on-time and a horizon mid in the
+        # fetched series (e.g. prints past the series end), there is no observed
+        # markout at all — returning a zero-valued dict would let the day count
+        # toward M-A/M-B on absent evidence. Fail closed: unmeasured -> None.
+        return None
     span_days = max((max(stamps) - min(stamps)) / 86400.0, 1.0 / 24.0)
     return {
         "prints_seen": len(prints),
+        "markout_observations": observed,
         "band_crossing_prints_per_day": round(crossing / span_days, 2),
         "adverse_usd_per_day_markout": round(max(0.0, loss_usd / span_days), 4),
     }

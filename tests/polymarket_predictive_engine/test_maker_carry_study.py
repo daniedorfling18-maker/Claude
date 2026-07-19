@@ -745,6 +745,31 @@ def test_markout_charges_empirical_pickoffs_and_gates_track_evidence(tmp_path, m
     assert gates["maker_verdict"] == "insufficient_evidence"
 
 
+def test_markout_unmeasured_when_no_print_has_a_horizon_mid() -> None:
+    # #290 review P1: reaching markout_min_prints is not a measurement. If no
+    # print has both an on-time AND a horizon mid (here prints sit far past the
+    # series, so mid_later is None for all), there is no observed markout, and
+    # _markout_adverse must return None so markout_measured stays False and the
+    # day cannot count toward M-A/M-B on absent evidence.
+    settings = {"markout_min_prints": 3, "markout_horizon_minutes": 30}
+    series = [(1000.0, 0.5), (1060.0, 0.5), (1120.0, 0.5)]
+    prints = [
+        {"stamp": 100000.0 + i * 60, "price": 0.5, "size": 5, "side": "SELL"}
+        for i in range(3)
+    ]
+
+    result = maker_carry_study._markout_adverse(
+        settings,
+        prints,
+        series,
+        quote_distance=0.01,
+        quote_size=5.0,
+        depth={"bid": 100.0, "ask": 100.0},
+    )
+
+    assert result is None
+
+
 def test_distinct_days_require_measured_markout() -> None:
     # Red-team #283 regression: a day whose net cleared target only because its
     # markout was UNMEASURED (isolated prints below the minimum -> adverse leg

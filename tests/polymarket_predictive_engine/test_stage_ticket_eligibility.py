@@ -50,6 +50,7 @@ def _write_healthy_inputs(cfg: EngineConfig, **overrides) -> None:
     write_csv(
         out / "flow_toxicity.csv",
         [{
+            "generated_at_utc": overrides.get("toxicity_stamp", run_stamp),
             "market": CANDIDATE,
             "toxicity_score": toxicity,
             "vpin_raw": "" if raw_imbalance is None else raw_imbalance,
@@ -58,12 +59,18 @@ def _write_healthy_inputs(cfg: EngineConfig, **overrides) -> None:
     )
     write_json(
         cfg.output_root / "performance" / "wallet_reconciliation.json",
-        {"reconciliation_status": overrides.get("reconciliation", "clean")},
+        {
+            "generated_at_utc": overrides.get("reconciliation_stamp", run_stamp),
+            "reconciliation_status": overrides.get("reconciliation", "clean"),
+        },
     )
     write_json(
         out / "requote_alerts.json",
-        {"markets": [{"condition_id": overrides.get("candidate", CANDIDATE),
-                      "alert_state": overrides.get("requote_state", "quotes_ok")}]},
+        {
+            "generated_at_utc": overrides.get("requote_stamp", policy_stamp),
+            "markets": [{"condition_id": overrides.get("candidate", CANDIDATE),
+                         "alert_state": overrides.get("requote_state", "quotes_ok")}],
+        },
     )
     # WO-105 sharp-linking qualification: healthy path publishes a fresh,
     # qualified artifact bound to the current study + replay versions. Overrides
@@ -131,6 +138,97 @@ def test_missing_artifacts_evaluate_not_eligible(tmp_path: Path) -> None:
     cfg = _cfg(tmp_path)
     state, _, _ = mod.evaluate_stage_ticket_eligibility(cfg, as_of=NOW)
     assert state == "not_eligible"
+
+
+def test_every_consumed_source_artifact_has_an_independent_staleness_block(tmp_path: Path) -> None:
+    stale_fast = "2026-07-17T11:29:59Z"
+    stale_daily = "2026-07-16T09:59:59Z"
+    fresh_study = "2026-07-17T11:45:00Z"
+    fresh_policy = "2026-07-17T11:46:00Z"
+    cases = [
+        (
+            "decision_policy_source_fresh",
+            {"policy_stamp": stale_fast, "qual_policy": stale_fast},
+        ),
+        (
+            "maker_carry_study_source_fresh",
+            {
+                "run_stamp": stale_daily,
+                "policy_study_ref": stale_daily,
+                "toxicity_stamp": fresh_study,
+                "reconciliation_stamp": fresh_study,
+                "replay_stamp": fresh_study,
+                "qual_generated": fresh_study,
+                "qual_study": stale_daily,
+                "qual_replay": fresh_study,
+            },
+        ),
+        ("candidate_flow_toxicity_source_fresh", {"toxicity_stamp": stale_daily}),
+        ("wallet_reconciliation_source_fresh", {"reconciliation_stamp": stale_daily}),
+        ("requote_alerts_source_fresh", {"requote_stamp": stale_fast}),
+        (
+            "maker_fill_replay_source_fresh",
+            {"replay_stamp": stale_fast, "qual_replay": stale_fast},
+        ),
+        (
+            "sharp_linking_qualification_source_fresh",
+            {"qual_generated": stale_fast},
+        ),
+    ]
+
+    for index, (condition_name, overrides) in enumerate(cases):
+        cfg = _cfg(tmp_path / f"stale{index}")
+        _write_healthy_inputs(
+            cfg,
+            policy_stamp=overrides.get("policy_stamp", fresh_policy),
+            **{key: value for key, value in overrides.items() if key != "policy_stamp"},
+        )
+
+        state, rows, summary = mod.evaluate_stage_ticket_eligibility(cfg, as_of=NOW)
+
+        condition = next(row for row in rows if row["condition"] == condition_name)
+        assert state == "not_eligible", condition_name
+        assert condition["passed"] is False
+        source_name = condition_name.removesuffix("_source_fresh")
+        assert summary["source_freshness"][source_name]["fresh"] is False
+
+
+def test_source_age_boundary_is_inclusive_then_fails_one_second_late(tmp_path: Path) -> None:
+    cfg = _cfg(tmp_path)
+    boundary = "2026-07-17T11:30:00Z"
+    _write_healthy_inputs(cfg, policy_stamp=boundary, qual_policy=boundary)
+
+    state, rows, _ = mod.evaluate_stage_ticket_eligibility(cfg, as_of=NOW)
+
+    condition = next(row for row in rows if row["condition"] == "decision_policy_source_fresh")
+    assert state == "eligible"
+    assert condition["passed"] is True
+    assert "age=1800.0s" in condition["detail"]
+
+    stale = "2026-07-17T11:29:59Z"
+    _write_healthy_inputs(cfg, policy_stamp=stale, qual_policy=stale)
+    state, rows, _ = mod.evaluate_stage_ticket_eligibility(cfg, as_of=NOW)
+    condition = next(row for row in rows if row["condition"] == "decision_policy_source_fresh")
+    assert state == "not_eligible"
+    assert condition["passed"] is False
+
+
+def test_malformed_or_future_source_timestamp_fails_closed(tmp_path: Path) -> None:
+    malformed_cfg = _cfg(tmp_path / "malformed")
+    _write_healthy_inputs(malformed_cfg, policy_stamp="not-a-timestamp", qual_policy="not-a-timestamp")
+    state, rows, _ = mod.evaluate_stage_ticket_eligibility(malformed_cfg, as_of=NOW)
+    policy = next(row for row in rows if row["condition"] == "decision_policy_source_fresh")
+    assert state == "not_eligible"
+    assert policy["passed"] is False
+    assert "age=missing" in policy["detail"]
+
+    future_cfg = _cfg(tmp_path / "future")
+    _write_healthy_inputs(future_cfg, requote_stamp="2026-07-17T12:00:01Z")
+    state, rows, _ = mod.evaluate_stage_ticket_eligibility(future_cfg, as_of=NOW)
+    requote = next(row for row in rows if row["condition"] == "requote_alerts_source_fresh")
+    assert state == "not_eligible"
+    assert requote["passed"] is False
+    assert "age=-1.0s" in requote["detail"]
 
 
 def test_notification_fires_only_on_transition(tmp_path: Path, monkeypatch) -> None:
@@ -220,23 +318,23 @@ def test_candidate_change_while_eligible_renotifies(tmp_path: Path, monkeypatch)
     # new eligible notice must fire (keyed on candidate, not just state).
     out = cfg.output_root / "maker_carry"
     write_json(out / "decision_policy.json", {
-        "generated_at_utc": "2026-07-17T12:16:00Z",
+        "generated_at_utc": "2026-07-17T11:56:00Z",
         "indicated_action": "fund_100_min_size_single_calmest_market",
         "kill_criteria_status": {"status": "clear", "kill_input_freshness": {"state": "fresh"}},
         "composition_stability": {"most_recurrent_market": "0xdef"},
-        "inputs_snapshot": {"maker_carry_study_generated_at_utc": "2026-07-17T12:15:00Z"},
+        "inputs_snapshot": {"maker_carry_study_generated_at_utc": "2026-07-17T11:55:00Z"},
     })
-    write_json(out / "maker_carry_study.json", {"generated_at_utc": "2026-07-17T12:15:00Z", "portfolio": [{
+    write_json(out / "maker_carry_study.json", {"generated_at_utc": "2026-07-17T11:55:00Z", "portfolio": [{
         "condition_id": "0xdef", "token_id": "0xdef-token", "question": "Other calm market?", "resolution_risk": "medium",
         "event_start_time_utc": "", "size_multiple": 2, "capital_usd": 80.0}]})
-    write_csv(out / "flow_toxicity.csv", [{"market": "0xdef", "toxicity_score": 0.5, "vpin_raw": 0.4, "toxic_blocked": False}])
-    write_json(out / "requote_alerts.json", {"markets": [{"condition_id": "0xdef", "alert_state": "quotes_ok"}]})
+    write_csv(out / "flow_toxicity.csv", [{"generated_at_utc": "2026-07-17T11:55:00Z", "market": "0xdef", "toxicity_score": 0.5, "vpin_raw": 0.4, "toxic_blocked": False}])
+    write_json(out / "requote_alerts.json", {"generated_at_utc": "2026-07-17T11:56:00Z", "markets": [{"condition_id": "0xdef", "alert_state": "quotes_ok"}]})
     write_json(out / "maker_fill_replay.json", {"generated_at_utc": "2026-07-17T11:55:00Z"})
     write_json(out / "sharp_linking_qualification.json", {
         "qualified": True, "candidate_condition_id": "0xdef", "candidate_token_id": "0xdef-token",
-        "generated_at_utc": "2026-07-17T11:50:00Z",
-        "consumed_policy_generated_at": "2026-07-17T12:16:00Z",
-        "consumed_study_generated_at": "2026-07-17T12:15:00Z", "consumed_replay_generated_at": "2026-07-17T11:55:00Z"})
+        "generated_at_utc": "2026-07-17T11:56:00Z",
+        "consumed_policy_generated_at": "2026-07-17T11:56:00Z",
+        "consumed_study_generated_at": "2026-07-17T11:55:00Z", "consumed_replay_generated_at": "2026-07-17T11:55:00Z"})
     third = mod.run_stage_ticket_eligibility(cfg, as_of=NOW)
     assert third["state"] == "eligible" and third["candidate_changed_while_eligible"] is True
     assert len(sent) == 2  # re-notified on the candidate change

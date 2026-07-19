@@ -31,6 +31,14 @@ jobs:
     timeout-minutes: 40
 
     steps:
+      - name: Check out accepted deployment verifier
+        uses: actions/checkout@v6
+        with:
+          ref: main
+          path: deploy-control
+          fetch-depth: 1
+          persist-credentials: false
+
       - name: Download independent-main acceptance
         uses: actions/download-artifact@v8
         with:
@@ -47,59 +55,11 @@ jobs:
           TARGET_SHA: ${{ github.sha }}
         run: |
           set -euo pipefail
-          python3 - <<'PY'
-          import json
-          import os
-          import re
-          from pathlib import Path
-          from urllib.request import Request, urlopen
-
-          run_id = os.environ["ACCEPTANCE_RUN_ID"]
-          if not re.fullmatch(r"[1-9][0-9]*", run_id):
-              raise SystemExit("acceptance_run_id must be a positive GitHub Actions run ID")
-          request = Request(
-              f"https://api.github.com/repos/{os.environ['GITHUB_REPOSITORY']}/actions/runs/{run_id}",
-              headers={
-                  "Accept": "application/vnd.github+json",
-                  "Authorization": f"Bearer {os.environ['GITHUB_TOKEN']}",
-                  "User-Agent": "polymarket-vps-deploy-acceptance",
-                  "X-GitHub-Api-Version": "2022-11-28",
-              },
-          )
-          with urlopen(request, timeout=30) as response:  # noqa: S310 - fixed GitHub API origin
-              run = json.loads(response.read().decode("utf-8"))
-          expected_path = ".github/workflows/independent-pr-merge.yml"
-          if run.get("path") != expected_path or run.get("event") != "workflow_dispatch":
-              raise SystemExit("acceptance artifact did not originate from the registered merge workflow")
-          if run.get("status") != "completed" or run.get("conclusion") != "success":
-              raise SystemExit("independent merge workflow is not a completed success")
-
-          artifact = Path(os.environ["RUNNER_TEMP"]) / "independent-main-acceptance" / "merge-attestation.json"
-          attestation = json.loads(artifact.read_text(encoding="utf-8"))
-          target = os.environ["TARGET_SHA"].lower()
-          actor = str((run.get("actor") or {}).get("login") or "")
-          triggering_actor = str((run.get("triggering_actor") or {}).get("login") or "")
-          author = str(attestation.get("pull_request_author") or "")
-          reviewers = {str(value).casefold() for value in attestation.get("eligible_reviewers", [])}
-          checks = attestation.get("checks") if isinstance(attestation.get("checks"), dict) else {}
-          if attestation.get("status") != "merged" or attestation.get("merged") is not True:
-              raise SystemExit("independent merge attestation does not record a completed merge")
-          if str(attestation.get("merge_commit_sha") or "").lower() != target:
-              raise SystemExit("independent merge attestation is for a different main SHA")
-          if attestation.get("blockers"):
-              raise SystemExit("independent merge attestation contains blockers")
-          if not checks or not all(value is True for value in checks.values()):
-              raise SystemExit("independent merge attestation contains an unsatisfied control")
-          if not actor or actor.casefold() == author.casefold() or actor.casefold() not in reviewers:
-              raise SystemExit("merge workflow actor was not an independent current-head approver")
-          if (
-              not triggering_actor
-              or triggering_actor.casefold() == author.casefold()
-              or triggering_actor.casefold() not in reviewers
-          ):
-              raise SystemExit("merge workflow triggering actor was not an independent current-head approver")
-          print(f"Independent acceptance verified for main {target[:12]} via run {run_id}")
-          PY
+          python3 "$GITHUB_WORKSPACE/deploy-control/scripts/verify_independent_main_acceptance.py" \
+            --repo "$GITHUB_REPOSITORY" \
+            --run-id "$ACCEPTANCE_RUN_ID" \
+            --target-sha "$TARGET_SHA" \
+            --artifact "$RUNNER_TEMP/independent-main-acceptance/merge-attestation.json"
 
       - name: Validate deploy secrets
         env:

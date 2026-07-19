@@ -559,6 +559,35 @@ def test_protection_without_latest_push_semantics_is_not_enforced() -> None:
     assert result["checks"]["independent_review_required"] is False
 
 
+@pytest.mark.parametrize(
+    ("field", "check"),
+    [
+        ("allow_force_pushes", "force_pushes_forbidden"),
+        ("allow_deletions", "deletions_forbidden"),
+    ],
+)
+def test_rewrite_or_deletion_enabled_protection_is_not_enforced(
+    field: str,
+    check: str,
+) -> None:
+    protection = _protection()
+    protection[field] = {"enabled": True}
+
+    result = merge_gate.evaluate_merge_gate(
+        workflow_text=_workflow(),
+        runners_payload=_runners(),
+        protection_payload=protection,
+        runs_payload=_successful_run(),
+        independent_merge_workflow_text=_independent_workflow(),
+        collaborators_payload=_collaborators(),
+    )
+
+    assert result["enforced"] is False
+    assert result["checks"][check] is False
+    assert result["checks"]["direct_push_forbidden"] is False
+    assert check in result["blockers"]
+
+
 def test_failed_gh_api_response_cannot_masquerade_as_control_state(monkeypatch) -> None:
     class Failed:
         returncode = 1

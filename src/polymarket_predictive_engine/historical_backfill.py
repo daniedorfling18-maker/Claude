@@ -191,8 +191,10 @@ def historical_backfill(
     allow_old_history: bool = False,
     as_of: datetime | str | None = None,
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]], dict[str, Any]]:
-    run_at = canonical_utc(as_of)
-    run_clock = datetime.fromisoformat(run_at.replace("Z", "+00:00"))
+    # A production observation timestamp must not predate the HTTP response
+    # whose terminal state it records.  Explicit ``as_of`` is retained only as
+    # a deterministic replay/test clock; the CLI never supplies it.
+    replay_run_at = canonical_utc(as_of) if as_of is not None else None
     settings = cfg.raw.get("historical_backfill", {})
     base_url = str(settings.get("gamma_base_url", DEFAULT_GAMMA_BASE_URL))
     requested = int(historical_limit or settings.get("max_closed_markets", 250))
@@ -212,6 +214,8 @@ def historical_backfill(
         requested_closed_markets=requested,
         progress_every_pages=progress_every_pages,
     )
+    run_at = replay_run_at or canonical_utc(None)
+    run_clock = datetime.fromisoformat(run_at.replace("Z", "+00:00"))
     cutoff = run_clock - timedelta(days=max_age_days)
     old_candidates = [market for market in candidates if _market_close_dt(market) < cutoff]
     if old_candidates and not allow_old_history:

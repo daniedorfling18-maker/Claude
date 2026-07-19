@@ -9,7 +9,10 @@ from .models.skill_model import train_skill_model
 
 def _skill_approved(summary: dict[str, Any]) -> bool:
     oos = summary.get("oos_vs_market", {}) if isinstance(summary, dict) else {}
-    return bool(oos.get("beats_market_significantly"))
+    return bool(
+        oos.get("beats_market_significantly")
+        and summary.get("promotion_authority") is not False
+    )
 
 
 def validate_model(cfg: EngineConfig) -> dict[str, Any]:

@@ -2,6 +2,7 @@ import csv
 
 from polymarket_predictive_engine.config import EngineConfig
 from polymarket_predictive_engine.models.skill_model import (
+    DIAGNOSTIC_SKILL_SUMMARY_NAME,
     _edge_roi,
     _executable_edge_roi,
     _temporal_market_split,
@@ -9,6 +10,7 @@ from polymarket_predictive_engine.models.skill_model import (
     select_feature_columns,
     train_skill_model,
 )
+from polymarket_predictive_engine.validation import _skill_approved
 
 
 def _write_csv(path, rows, fields):
@@ -127,6 +129,9 @@ def test_skill_model_beats_market_when_feature_carries_signal(tmp_path):
     assert oos["market_brier"] > 0.2
     assert oos["brier_skill_vs_market"] > 0.3
     assert oos["beats_market_significantly"] is True
+    assert (cfg.governance_root / DIAGNOSTIC_SKILL_SUMMARY_NAME).exists()
+    assert not (cfg.governance_root / "skill_model_summary.json").exists()
+    assert _skill_approved(summary) is False
 
 
 def test_skill_model_no_edge_when_feature_is_noise(tmp_path):
@@ -141,3 +146,5 @@ def test_skill_model_reports_insufficient_data(tmp_path):
     cfg = _synthetic_dataset(tmp_path, n_markets=3, snaps=2, signal=True)
     summary = train_skill_model(cfg)
     assert summary["status"] == "insufficient_data"
+    assert (cfg.governance_root / DIAGNOSTIC_SKILL_SUMMARY_NAME).exists()
+    assert not (cfg.governance_root / "skill_model_summary.json").exists()

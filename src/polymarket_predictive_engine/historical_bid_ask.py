@@ -226,6 +226,11 @@ def collect_historical_bid_ask(
     prior = read_json(state_path, default={})
     prior_sources = prior.get("sources", {}) if isinstance(prior, dict) and isinstance(prior.get("sources"), dict) else {}
     fingerprints = {_source_key(cfg, path): _fingerprint(path) for path in sources}
+    committed_fingerprints = {
+        key: prior_sources[key]
+        for key in fingerprints
+        if key in prior_sources
+    }
     changed = [
         path
         for path in sources
@@ -272,6 +277,7 @@ def collect_historical_bid_ask(
         rows_seen = 0
         exclusions: dict[str, int] = {}
         appended = 0
+        deferred_sources: set[str] = set()
         try:
             connection.execute("PRAGMA journal_mode=OFF")
             connection.execute("PRAGMA synchronous=OFF")
@@ -288,6 +294,7 @@ def collect_historical_bid_ask(
 
             for source in changed:
                 source_name = _source_key(cfg, source)
+                source_has_future_observation = False
                 for raw in iter_csv_rows(source):
                     rows_seen += 1
                     row, reason = quote_observation_from_feature(
@@ -297,6 +304,8 @@ def collect_historical_bid_ask(
                     )
                     if row is None:
                         exclusions[reason] = exclusions.get(reason, 0) + 1
+                        if reason == "future_observation":
+                            source_has_future_observation = True
                         continue
                     connection.execute(
                         "INSERT OR IGNORE INTO pending VALUES (?, ?, ?)",
@@ -308,6 +317,13 @@ def collect_historical_bid_ask(
                     )
                     if rows_seen % 10_000 == 0:
                         connection.commit()
+                if source_has_future_observation:
+                    # Do not acknowledge this exact file version yet.  The
+                    # unchanged source must be revisited when the run clock
+                    # advances far enough for those rows to become observable.
+                    deferred_sources.add(source_name)
+                else:
+                    committed_fingerprints[source_name] = fingerprints[source_name]
             connection.execute(
                 "DELETE FROM pending WHERE observation_id IN (SELECT observation_id FROM seen)"
             )
@@ -330,7 +346,8 @@ def collect_historical_bid_ask(
                 {
                     "work_order": WORK_ORDER,
                     "generated_at_utc": generated_at,
-                    "sources": fingerprints,
+                    "sources": committed_fingerprints,
+                    "deferred_future_observation_sources": sorted(deferred_sources),
                     "ledger_path": str(ledger_path),
                     "paper_trading_invoked": False,
                     "live_trading_invoked": False,
@@ -350,6 +367,8 @@ def collect_historical_bid_ask(
         "rows_appended": appended,
         "duplicate_rows": max(0, rows_seen - sum(exclusions.values()) - appended),
         "exclusions": dict(sorted(exclusions.items())),
+        "source_files_deferred_for_future_observations": len(deferred_sources),
+        "deferred_future_observation_sources": sorted(deferred_sources),
         "midpoint_only_rows_accepted": 0,
     }
     write_json(summary_path, payload)

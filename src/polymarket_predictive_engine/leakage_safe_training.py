@@ -31,7 +31,7 @@ SUMMARY_RELATIVE_PATH = Path("polymarket_model_governance") / "leakage_safe_trai
 REGISTERED_MAX_LOOKBACK_HOURS = 7 * 24
 REGISTERED_MIN_EMBARGO_HOURS = 24
 REGISTERED_MIN_VALIDATION_FRACTION = 0.30
-REGISTERED_MAX_VALIDATION_FRACTION = 0.50
+MAX_VALIDATION_FRACTION_WITH_ONE_TRAIN_MARKET = 1.0
 REGISTERED_MIN_VALIDATION_MARKETS = 10
 REGISTERED_MIN_THIN_BUCKET_SECONDS = 3600
 
@@ -115,7 +115,7 @@ def training_settings(cfg: EngineConfig) -> dict[str, float | int]:
             _positive(raw.get("embargo_hours"), REGISTERED_MIN_EMBARGO_HOURS),
         ),
         "validation_fraction": min(
-            float(REGISTERED_MAX_VALIDATION_FRACTION),
+            float(MAX_VALIDATION_FRACTION_WITH_ONE_TRAIN_MARKET),
             max(
                 float(REGISTERED_MIN_VALIDATION_FRACTION),
                 _positive(raw.get("validation_fraction"), REGISTERED_MIN_VALIDATION_FRACTION),
@@ -203,6 +203,9 @@ def _resolution_index(
             resolution_at.astimezone(timezone.utc),
             observed.astimezone(timezone.utc),
         )
+        if label_available > as_of:
+            counts["resolution_label_not_available_by_assembly_clock"] += 1
+            continue
         candidates[token_id].append(
             {
                 **row,

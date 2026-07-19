@@ -4870,6 +4870,14 @@ manufactured episodes, and reported both trading-invoked flags false.
 Status: IMPLEMENTED by Codex on 2026-07-19; awaiting complete-suite gate and
 independent owner review.
 
+Review remediation on 2026-07-19 corrected five fail-closed defects: Gamma
+backfill now records the production observation clock only after the response;
+source fingerprints remain uncommitted while future quote rows are deferred;
+labels whose computed availability exceeds the assembly clock are excluded;
+larger validation fractions are honoured up to the one-train-market boundary;
+and the diagnostic trainer writes a WO-101-specific summary that cannot feed
+either legacy readiness or canonical validation promotion.
+
 Owner authorization: the 2026-07-19 instruction to rebuild closed PR #242 from
 current main with observation-time label availability, append-only resolution
 history, historical bid/ask rather than midpoint-only inputs, a purged
@@ -4891,7 +4899,8 @@ Registered implementation contract:
    snapshots for compatibility and append each distinct token-level state,
    under one shared lock, to versioned
    `outputs/polymarket_training/resolution_corpus_v1.csv`. One producer clock
-   is injected through every row. A content-derived identifier deduplicates an
+   is captured after the Gamma response and injected through every row. A
+   content-derived identifier deduplicates an
    unchanged state across producers; changed targets, quality, or settlement
    timestamps remain immutable evidence. Conflicting clean targets remain in
    the ledger and are excluded downstream.
@@ -4899,7 +4908,9 @@ Registered implementation contract:
    `max(close_time, resolution_time, resolution_observed_at_utc)`. The first
    observation timestamp is selected for an otherwise identical clean state.
    Future observations cannot enter an earlier as-of run, and an API's
-   historical close timestamp cannot backdate information availability.
+   historical close timestamp cannot backdate information availability. The
+   assembler independently rejects any computed label-availability time later
+   than its own as-of clock.
 3. The official CLOB `prices-history` response remains a single-price
    diagnostic and is never treated as executable. New
    `collect-historical-bid-ask` streams the canonical live feature table and
@@ -4908,7 +4919,9 @@ Registered implementation contract:
    `historical_bid_ask_v1.csv`. No bid or ask is imputed from a midpoint.
    Disk-backed exact deduplication bounds memory, source state advances only
    after successful ledger appends, and an interrupted run safely rescans
-   through the immutable ledger identifier.
+   through the immutable ledger identifier. A source containing any future row
+   deliberately retains its prior fingerprint so the unchanged source is
+   revisited after the run clock advances.
 4. New `build-leakage-safe-training` reads only the two versioned ledgers. It
    requires exact token/market identity, clean binary settlement, both close
    and resolution times, an observed quote strictly before close and label
@@ -4922,14 +4935,19 @@ Registered implementation contract:
    validation feature minus the 24-hour embargo. Overlapping markets are
    purged. With fewer than 11 independent markets, all rows remain collecting.
    Configuration can tighten but cannot reduce the 10-market floor, shorten
-   the embargo, widen the lookback, or thin more finely.
+   the embargo, widen the lookback, or thin more finely. A configured
+   validation fraction above 30% is preserved (capped only at 100%); the split
+   itself always retains at least one potential training market.
 6. `train-skill-model` refuses the legacy feature/label path and consumes only
    the preassigned WO-101 files. It independently requires at least 10
    validation markets and zero market overlap. The midpoint remains a
    forecasting baseline, while diagnostic ROI buys only at the recorded ask
    and charges the canonical category/price-aware taker fee. It never
    fabricates a complement quote. Outputs state diagnostic H3 substrate, no
-   registered-H3 verdict authority, and no promotion authority.
+   registered-H3 verdict authority, and no promotion authority. They are
+   written only to `wo101_diagnostic_skill_model_summary.json`; explicit
+   `promotion_authority=false` is rejected defensively by readiness and
+   validation consumers.
 7. The resilient daily harvest runs resolution backfill, websocket-token
    resolution, legacy descriptive price history, exact bid/ask ingestion,
    leakage-safe assembly, and the diagnostic trainer in dependency order. Both
@@ -4946,7 +4964,8 @@ Engineering-standards review: S1 traces one injected producer clock and proves
 labels wait for actual observation. S2 inventories two locked append-only
 ledgers and atomic mutable snapshots, with dedup-before-state-advance crash
 recovery. S3 registers both producer/consumer paths. S4 replays a recorded
-public book and tests immutable prefixes, exact dedup, conflicts, future rows,
+public book and tests post-response clocks, deferred future-row fingerprints,
+immutable prefixes, exact dedup, conflicts, future labels and quotes,
 midpoint-only rejection, identity mismatch, thinning, embargo purge, the
 10-market floor, tighten-only settings, and zero market overlap. S5 is the
 fail-safe sentence above. S6 is the day-after check below. S7 keeps every exact

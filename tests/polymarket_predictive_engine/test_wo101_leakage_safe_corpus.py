@@ -4,11 +4,13 @@ from datetime import datetime, timedelta, timezone
 import json
 from pathlib import Path
 
+import polymarket_predictive_engine.historical_backfill as historical_backfill_module
 from polymarket_predictive_engine import websocket_resolution_collector
 from polymarket_predictive_engine.config import EngineConfig
 from polymarket_predictive_engine.historical_bid_ask import (
     QUOTE_FIELDS,
     QUOTE_LEDGER_RELATIVE_PATH,
+    QUOTE_STATE_RELATIVE_PATH,
     collect_historical_bid_ask,
     quote_observation_from_feature,
 )
@@ -27,7 +29,7 @@ from polymarket_predictive_engine.resolution_corpus import (
     RESOLUTION_CORPUS_RELATIVE_PATH,
     append_resolution_observations,
 )
-from polymarket_predictive_engine.utils import append_csv_rows, read_csv_rows, write_csv
+from polymarket_predictive_engine.utils import append_csv_rows, read_csv_rows, read_json, write_csv
 from polymarket_predictive_engine.websocket_normaliser import WEBSOCKET_FEATURES_RELATIVE_PATH
 
 
@@ -168,6 +170,35 @@ def test_resolution_corpus_is_append_only_deduped_and_uses_one_clock(tmp_path: P
     assert len(read_csv_rows(path)) == 3
 
 
+def test_historical_backfill_observation_clock_is_after_gamma_response(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    cfg = _cfg(tmp_path)
+    sequence: list[str] = []
+
+    def fake_candidates(**_kwargs):
+        sequence.append("gamma_response")
+        return [], {"strategy": "recorded_test", "scans": []}
+
+    def fake_clock(value=None):
+        assert value is None
+        sequence.append("observation_clock")
+        return "2026-07-16T12:00:01Z"
+
+    monkeypatch.setattr(historical_backfill_module, "_candidate_markets", fake_candidates)
+    monkeypatch.setattr(historical_backfill_module, "canonical_utc", fake_clock)
+
+    _, _, summary = historical_backfill_module.historical_backfill(
+        cfg,
+        historical_limit=1,
+        allow_old_history=True,
+    )
+
+    assert sequence == ["gamma_response", "observation_clock"]
+    assert summary["collected_at_utc"] == "2026-07-16T12:00:01Z"
+
+
 def test_recorded_public_book_becomes_exact_quote_never_midpoint_reconstruction() -> None:
     book = json.loads((FIXTURE_ROOT / "clob_book_2026-07-15.json").read_text(encoding="utf-8"))
     official = _official_row(
@@ -267,12 +298,22 @@ def test_historical_quote_collector_appends_once_and_rejects_future(tmp_path: Pa
 
     first = collect_historical_bid_ask(cfg, as_of=current)
     prefix = (cfg.output_root / QUOTE_LEDGER_RELATIVE_PATH).read_bytes()
+    state_after_first = read_json(cfg.output_root / QUOTE_STATE_RELATIVE_PATH)
     second = collect_historical_bid_ask(cfg, as_of=current)
+    third = collect_historical_bid_ask(cfg, as_of=current + timedelta(minutes=2))
 
     assert first["rows_appended"] == 1
     assert first["exclusions"]["future_observation"] == 1
+    assert first["source_files_deferred_for_future_observations"] == 1
+    assert state_after_first["sources"] == {}
     assert second["rows_appended"] == 0
-    assert (cfg.output_root / QUOTE_LEDGER_RELATIVE_PATH).read_bytes() == prefix
+    assert second["source_files_changed"] == 1
+    assert second["exclusions"]["future_observation"] == 1
+    assert third["rows_appended"] == 1
+    assert third["source_files_deferred_for_future_observations"] == 0
+    assert (cfg.output_root / QUOTE_LEDGER_RELATIVE_PATH).read_bytes().startswith(prefix)
+    assert len(read_csv_rows(cfg.output_root / QUOTE_LEDGER_RELATIVE_PATH)) == 2
+    assert read_json(cfg.output_root / QUOTE_STATE_RELATIVE_PATH)["sources"]
 
 
 def test_training_assembly_has_purged_market_split_and_separate_labels(tmp_path: Path) -> None:
@@ -343,6 +384,32 @@ def test_label_is_available_only_when_resolution_was_first_observed(tmp_path: Pa
     assert after["observed-token"]["label_available_at"] == observed_at
 
 
+def test_resolution_timestamp_must_also_be_available_by_assembly_clock(tmp_path: Path) -> None:
+    cfg = _cfg(tmp_path)
+    close_at = datetime(2026, 2, 3, 12, tzinfo=timezone.utc)
+    producer_observed_at = datetime(2026, 2, 1, 12, tzinfo=timezone.utc)
+    append_resolution_observations(
+        cfg,
+        [_resolution("future-label-market", "future-label-token", 1, close_at)],
+        producer="bad_early_observer_fixture",
+        observed_at_utc=producer_observed_at,
+    )
+    path = cfg.output_root / RESOLUTION_CORPUS_RELATIVE_PATH
+
+    before, before_counts = _resolution_index(
+        path,
+        as_of=datetime(2026, 2, 2, 12, tzinfo=timezone.utc),
+    )
+    after, _ = _resolution_index(
+        path,
+        as_of=datetime(2026, 2, 4, 12, tzinfo=timezone.utc),
+    )
+
+    assert before == {}
+    assert before_counts["resolution_label_not_available_by_assembly_clock"] == 1
+    assert "future-label-token" in after
+
+
 def test_split_collects_until_ten_independent_validation_markets_exist(
     tmp_path: Path,
 ) -> None:
@@ -402,6 +469,14 @@ def test_overlap_is_purged_conflicts_excluded_and_settings_cannot_widen(tmp_path
         "minimum_validation_markets": 10,
         "thin_bucket_seconds": 3600.0,
     }
+    stricter_fraction = training_settings(
+        _cfg(tmp_path / "stricter", {"validation_fraction": 0.80})
+    )
+    assert stricter_fraction["validation_fraction"] == 0.80
+    capped_fraction = training_settings(
+        _cfg(tmp_path / "capped", {"validation_fraction": 1.50})
+    )
+    assert capped_fraction["validation_fraction"] == 1.0
 
     closes = [
         datetime(2026, 1, 1, 12, tzinfo=timezone.utc),

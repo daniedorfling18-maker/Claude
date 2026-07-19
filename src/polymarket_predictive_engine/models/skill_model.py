@@ -38,6 +38,7 @@ from .calibration_v2 import numeric_model_feature_columns
 
 MODEL_VERSION = "pm-skill-logit-v2-wo101"
 MARKET_PROB_FIELDS = ("implied_probability", "midpoint")
+DIAGNOSTIC_SKILL_SUMMARY_NAME = "wo101_diagnostic_skill_model_summary.json"
 
 
 def _market_probability(row: dict[str, Any]) -> float | None:
@@ -506,7 +507,7 @@ def train_skill_model(cfg: EngineConfig, test_fraction: float = 0.3, l2: float =
             "paper_trading_invoked": False,
             "live_trading_invoked": False,
         }
-        write_json(cfg.governance_root / "skill_model_summary.json", summary)
+        write_json(cfg.governance_root / DIAGNOSTIC_SKILL_SUMMARY_NAME, summary)
         return summary
 
     x_train = np.array([design[i]["_x"] for i in train_idx], dtype=float)
@@ -623,7 +624,7 @@ def train_skill_model(cfg: EngineConfig, test_fraction: float = 0.3, l2: float =
         "paper_trading_invoked": False,
         "live_trading_invoked": False,
     }
-    write_json(cfg.governance_root / "skill_model_summary.json", summary)
+    write_json(cfg.governance_root / DIAGNOSTIC_SKILL_SUMMARY_NAME, summary)
     return summary
 
 

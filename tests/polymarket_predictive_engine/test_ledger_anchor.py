@@ -165,6 +165,12 @@ def test_exact_h2_ledgers_are_enrolled_with_correct_mutability_modes():
     assert registry["h2_dutch/h2_final_sample_manifest.json"] == "snapshot"
 
 
+def test_wo101_point_in_time_corpora_are_append_only_enrolled():
+    registry = {row["glob"]: row["mode"] for row in DEFAULT_LEDGER_REGISTRY}
+    assert registry["polymarket_training/resolution_corpus_v1.csv"] == "append_only"
+    assert registry["polymarket_training/historical_bid_ask_v1.csv"] == "append_only"
+
+
 def test_deployed_config_covers_every_default_ledger_enrollment():
     # #269 Codex-review P1 (confirmed): the example config's explicit
     # ledger_globs list replaces DEFAULT_LEDGER_REGISTRY wholesale, so a

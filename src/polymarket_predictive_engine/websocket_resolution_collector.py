@@ -7,6 +7,7 @@ import requests
 
 from .config import EngineConfig, load_config
 from .resolution_collector import DEFAULT_GAMMA_BASE_URL, infer_market_resolution_rows
+from .resolution_corpus import append_resolution_observations
 from .utils import now_utc, read_csv_rows, write_csv, write_json
 
 
@@ -132,6 +133,7 @@ def _dedupe_resolution_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
 
 
 def collect_websocket_resolutions(cfg: EngineConfig) -> dict[str, Any]:
+    run_at = now_utc()
     settings = cfg.raw.get("websocket_resolution", {})
     base_url = str(settings.get("gamma_base_url", cfg.raw.get("historical_backfill", {}).get("gamma_base_url", DEFAULT_GAMMA_BASE_URL)))
     page_size = int(settings.get("page_size", 100))
@@ -150,7 +152,10 @@ def collect_websocket_resolutions(cfg: EngineConfig) -> dict[str, Any]:
             "websocket_tokens": 0,
             "resolution_rows": 0,
             "clean_settlement_markets": 0,
-            "collected_at_utc": now_utc(),
+            "collected_at_utc": run_at,
+            "work_order": "WO-101",
+            "paper_trading_invoked": False,
+            "live_trading_invoked": False,
         }
         write_csv(out_root / "websocket_resolutions.csv", [])
         write_csv(gov_root / "websocket_resolution_quality_report.csv", [])
@@ -198,7 +203,10 @@ def collect_websocket_resolutions(cfg: EngineConfig) -> dict[str, Any]:
             )
             continue
 
-        rows, quality = infer_market_resolution_rows(market)
+        rows, quality = infer_market_resolution_rows(
+            market,
+            observed_at_utc=run_at,
+        )
         resolution_rows.extend(rows)
 
         for row in quality:
@@ -208,6 +216,12 @@ def collect_websocket_resolutions(cfg: EngineConfig) -> dict[str, Any]:
 
     write_csv(out_root / "websocket_resolutions.csv", resolution_rows)
     write_csv(gov_root / "websocket_resolution_quality_report.csv", quality_rows)
+    corpus = append_resolution_observations(
+        cfg,
+        resolution_rows,
+        producer="websocket_resolution_collector",
+        observed_at_utc=run_at,
+    )
 
     clean_markets = len(
         {
@@ -226,6 +240,7 @@ def collect_websocket_resolutions(cfg: EngineConfig) -> dict[str, Any]:
     )
 
     summary = {
+        "work_order": "WO-101",
         "status": "ok",
         "websocket_tokens": len(token_ids),
         "matched_tokens": len(matched),
@@ -234,9 +249,12 @@ def collect_websocket_resolutions(cfg: EngineConfig) -> dict[str, Any]:
         "clean_settlement_markets": clean_markets,
         "unresolved_markets": unresolved_markets,
         "scans": scans,
-        "collected_at_utc": now_utc(),
+        "collected_at_utc": run_at,
         "output_file": str(out_root / "websocket_resolutions.csv"),
         "quality_file": str(gov_root / "websocket_resolution_quality_report.csv"),
+        "append_only_resolution_corpus": corpus,
+        "paper_trading_invoked": False,
+        "live_trading_invoked": False,
     }
 
     write_json(gov_root / "websocket_resolution_summary.json", summary)

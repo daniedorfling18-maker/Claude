@@ -153,6 +153,90 @@ CONTRACT_REGISTRY: tuple[dict[str, Any], ...] = (
             "coverage": "every ledger-enabled runtime receives a status evaluation; no ledger renders ABSENT",
         },
     },
+    {
+        "id": "resolution_corpus_to_leakage_safe_training",
+        "producer": {
+            "component": (
+                "resolution_collector + historical_backfill + "
+                "websocket_resolution_collector"
+            ),
+            "artifact": "polymarket_training/resolution_corpus_v1.csv",
+            "record_path": "rows[]",
+            "declared_fields": [
+                "resolution_observation_id",
+                "resolution_observed_at_utc",
+                "condition_id",
+                "token_id",
+                "close_time",
+                "resolution_time",
+                "resolution_quality",
+                "target",
+            ],
+            "freshness": {
+                "field": "resolution_observed_at_utc",
+                "maximum_age_seconds": 172800,
+            },
+            "coverage": (
+                "every distinct Gamma token-level resolution state seen by any "
+                "registered producer is appended; historical rows remain immutable"
+            ),
+        },
+        "consumer": {
+            "component": "leakage_safe_training",
+            "required_fields": [
+                "resolution_observation_id",
+                "resolution_observed_at_utc",
+                "condition_id",
+                "token_id",
+                "close_time",
+                "resolution_time",
+                "resolution_quality",
+                "target",
+            ],
+            "coverage": (
+                "only clean, closed, non-conflicting token labels observed by the "
+                "run clock may join; label availability includes first observation"
+            ),
+        },
+    },
+    {
+        "id": "websocket_quotes_to_leakage_safe_training",
+        "producer": {
+            "component": "websocket_normaliser + historical_bid_ask",
+            "artifact": "polymarket_training/historical_bid_ask_v1.csv",
+            "record_path": "rows[]",
+            "declared_fields": [
+                "quote_observation_id",
+                "observed_at_utc",
+                "market_id",
+                "token_id",
+                "best_bid",
+                "best_ask",
+                "top_bid_size",
+                "top_ask_size",
+            ],
+            "freshness": {"field": "observed_at_utc", "maximum_age_seconds": 345600},
+            "coverage": (
+                "every changed live/archive producer file is streamed and every "
+                "valid timestamped two-sided quote is appended exactly once"
+            ),
+        },
+        "consumer": {
+            "component": "leakage_safe_training",
+            "required_fields": [
+                "quote_observation_id",
+                "observed_at_utc",
+                "market_id",
+                "token_id",
+                "best_bid",
+                "best_ask",
+            ],
+            "coverage": (
+                "midpoint-only, one-sided, crossed, future, post-close, unmatched, "
+                "and out-of-window rows remain excluded"
+            ),
+        },
+    },
 )
 
 

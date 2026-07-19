@@ -230,6 +230,8 @@ def test_registered_contracts_are_satisfiable_on_synthetic_fixtures() -> None:
         "reconciliation_legs_to_nav",
         "maker_replay_collection_to_fill_replay",
         "executor_runtime_to_ops_status",
+        "resolution_corpus_to_leakage_safe_training",
+        "websocket_quotes_to_leakage_safe_training",
     ]
     assert validate_contract_declarations() == []
 

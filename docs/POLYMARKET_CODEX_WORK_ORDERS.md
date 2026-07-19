@@ -4865,6 +4865,110 @@ isolated public-network smoke scan discovered 20 negRisk events, priced three
 complete baskets, appended three exact rows, remained `collecting` with zero
 manufactured episodes, and reported both trading-invoked flags false.
 
+## WO-101 — Observation-time-safe resolved corpus and independent validation
+
+Status: IMPLEMENTED by Codex on 2026-07-19; awaiting complete-suite gate and
+independent owner review.
+
+Owner authorization: the 2026-07-19 instruction to rebuild closed PR #242 from
+current main with observation-time label availability, append-only resolution
+history, historical bid/ask rather than midpoint-only inputs, a purged
+chronological split, and a minimum number of distinct independent validation
+markets. This is diagnostic H3 structural-bias research substrate only. It
+cannot replace the WO-96 exact prospective H3 evaluator, create a fourth
+hypothesis, change a gate/threshold/stake, authorize paper/live trading, fund
+capital, or place an order. Funding remains CLOSED and WO-67 remains BLOCKED.
+
+Files: new `resolution_corpus.py`, `historical_bid_ask.py`, and
+`leakage_safe_training.py`; the three Gamma-backed resolution producers,
+`models/skill_model.py`, `training_harvest.py`, CLI, ledger anchoring,
+producer/consumer contracts, example configuration, the experiment registry,
+quant charter, and focused tests.
+
+Registered implementation contract:
+
+1. All three Gamma-backed resolution producers retain their legacy current-run
+   snapshots for compatibility and append each distinct token-level state,
+   under one shared lock, to versioned
+   `outputs/polymarket_training/resolution_corpus_v1.csv`. One producer clock
+   is injected through every row. A content-derived identifier deduplicates an
+   unchanged state across producers; changed targets, quality, or settlement
+   timestamps remain immutable evidence. Conflicting clean targets remain in
+   the ledger and are excluded downstream.
+2. A label's availability is
+   `max(close_time, resolution_time, resolution_observed_at_utc)`. The first
+   observation timestamp is selected for an otherwise identical clean state.
+   Future observations cannot enter an earlier as-of run, and an API's
+   historical close timestamp cannot backdate information availability.
+3. The official CLOB `prices-history` response remains a single-price
+   diagnostic and is never treated as executable. New
+   `collect-historical-bid-ask` streams the canonical live feature table and
+   immutable gzip training archives, appending only timestamped, two-sided,
+   non-crossed exact market/token books to versioned
+   `historical_bid_ask_v1.csv`. No bid or ask is imputed from a midpoint.
+   Disk-backed exact deduplication bounds memory, source state advances only
+   after successful ledger appends, and an interrupted run safely rescans
+   through the immutable ledger identifier.
+4. New `build-leakage-safe-training` reads only the two versioned ledgers. It
+   requires exact token/market identity, clean binary settlement, both close
+   and resolution times, an observed quote strictly before close and label
+   availability, and an exact book inside the fixed seven-day pre-close
+   window. It keeps one deterministic quote per token-hour and atomically
+   writes separate feature-only, label-only, and market-split audit snapshots.
+5. Whole canonical markets are ordered by observation-safe label availability.
+   Validation is the larger of the latest 30% and 10 distinct markets, while
+   preserving at least one potential training market. A training market
+   survives only if its label was available strictly before the earliest
+   validation feature minus the 24-hour embargo. Overlapping markets are
+   purged. With fewer than 11 independent markets, all rows remain collecting.
+   Configuration can tighten but cannot reduce the 10-market floor, shorten
+   the embargo, widen the lookback, or thin more finely.
+6. `train-skill-model` refuses the legacy feature/label path and consumes only
+   the preassigned WO-101 files. It independently requires at least 10
+   validation markets and zero market overlap. The midpoint remains a
+   forecasting baseline, while diagnostic ROI buys only at the recorded ask
+   and charges the canonical category/price-aware taker fee. It never
+   fabricates a complement quote. Outputs state diagnostic H3 substrate, no
+   registered-H3 verdict authority, and no promotion authority.
+7. The resilient daily harvest runs resolution backfill, websocket-token
+   resolution, legacy descriptive price history, exact bid/ask ingestion,
+   leakage-safe assembly, and the diagnostic trainer in dependency order. Both
+   append-only ledgers are enrolled in the code-default and deployed-config
+   WO-61 anchor registries and in explicit WO-79 producer/consumer contracts.
+
+Fail-safe sentence: missing, stale, future-dated, malformed, one-sided,
+crossed, post-close, out-of-window, identity-mismatched, unlabelled, ambiguous,
+conflicting, lock-contended, observation-backdated, temporally overlapping, or
+under-supported evidence is excluded or remains collecting; it cannot be
+imputed, promoted, funded, or traded.
+
+Engineering-standards review: S1 traces one injected producer clock and proves
+labels wait for actual observation. S2 inventories two locked append-only
+ledgers and atomic mutable snapshots, with dedup-before-state-advance crash
+recovery. S3 registers both producer/consumer paths. S4 replays a recorded
+public book and tests immutable prefixes, exact dedup, conflicts, future rows,
+midpoint-only rejection, identity mismatch, thinning, embargo purge, the
+10-market floor, tighten-only settings, and zero market overlap. S5 is the
+fail-safe sentence above. S6 is the day-after check below. S7 keeps every exact
+H1/H2/H3 verdict, readiness, risk, stake, funding, signer, credential, broker,
+and order surface unchanged.
+
+Day-after check: require
+`outputs/polymarket_model_governance/leakage_safe_training_summary.json` to
+report `work_order=WO-101`, both input ledgers with nonzero byte length and
+SHA-256, `midpoint_only_rows_accepted=0`,
+`split.market_overlap_count=0`,
+`split.minimum_validation_markets_required=10`, and both trading flags false;
+require new websocket variation eventually to increase
+`historical_bid_ask_summary.json.rows_appended`, and require both append-only
+ledgers to pass the next prefix-anchor verification. `status=collecting` is
+valid until observation-safe resolved labels overlap enough exact quotes; it
+must not be relabelled as edge.
+
+Verification required before publication: Ruff, the focused WO-101 and
+dependency tests, and the complete unfiltered repository suite must all pass
+in the isolated bounded VPS container on the exact proposed commit.
+
 ## Current queue for Codex (reconciled 2026-07-19)
 
 Every WO below and every future WO must comply with
@@ -4888,10 +4992,10 @@ frozen-surface change.
    unfiltered suite and latest-review-on-current-head semantics. Establish real
    branch protection or a documented fail-closed independent merge process;
    do not claim GitHub-plan controls that the repository cannot enforce.
-4. **WO-101:** rebuild closed PR #242 from current main with observation-time
-   label availability, append-only resolution history, historical bid/ask
-   rather than midpoint-only inputs, a purged chronological split, and a
-   minimum number of distinct independent validation markets.
+4. **WO-101:** rebuild closed PR #242 from current main — IMPLEMENTED; review
+   pending. The rebuild uses observation-time label availability, append-only
+   resolution history, exact historical bid/ask, a purged chronological split,
+   and at least 10 distinct independent validation markets.
 5. **Deployment controls:** implement an actual tested rollback, isolate
    deploy acceptance from the continuously running scheduler, and deploy only
    an independently accepted main revision.

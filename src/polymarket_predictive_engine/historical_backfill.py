@@ -7,7 +7,8 @@ import requests
 
 from .config import EngineConfig, load_config
 from .resolution_collector import infer_market_resolution_rows
-from .utils import normalize_external_timestamp, now_utc, write_csv, write_json
+from .resolution_corpus import append_resolution_observations, canonical_utc
+from .utils import normalize_external_timestamp, write_csv, write_json
 
 DEFAULT_GAMMA_BASE_URL = "https://gamma-api.polymarket.com/markets"
 
@@ -188,7 +189,10 @@ def historical_backfill(
     historical_limit: int | None = None,
     *,
     allow_old_history: bool = False,
+    as_of: datetime | str | None = None,
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]], dict[str, Any]]:
+    run_at = canonical_utc(as_of)
+    run_clock = datetime.fromisoformat(run_at.replace("Z", "+00:00"))
     settings = cfg.raw.get("historical_backfill", {})
     base_url = str(settings.get("gamma_base_url", DEFAULT_GAMMA_BASE_URL))
     requested = int(historical_limit or settings.get("max_closed_markets", 250))
@@ -208,7 +212,7 @@ def historical_backfill(
         requested_closed_markets=requested,
         progress_every_pages=progress_every_pages,
     )
-    cutoff = datetime.now(timezone.utc) - timedelta(days=max_age_days)
+    cutoff = run_clock - timedelta(days=max_age_days)
     old_candidates = [market for market in candidates if _market_close_dt(market) < cutoff]
     if old_candidates and not allow_old_history:
         candidates = [market for market in candidates if _market_close_dt(market) >= cutoff]
@@ -219,7 +223,10 @@ def historical_backfill(
 
     for market in candidates:
         try:
-            rows, quality = infer_market_resolution_rows(market)
+            rows, quality = infer_market_resolution_rows(
+                market,
+                observed_at_utc=run_at,
+            )
             resolution_rows.extend(rows)
             quality_rows.extend(quality)
         except Exception as exc:
@@ -238,6 +245,12 @@ def historical_backfill(
     gov_root = cfg.governance_root
     write_csv(out_root / "historical_resolutions.csv", resolution_rows)
     write_csv(gov_root / "historical_resolution_quality_report.csv", quality_rows)
+    corpus = append_resolution_observations(
+        cfg,
+        resolution_rows,
+        producer="historical_backfill",
+        observed_at_utc=run_at,
+    )
 
     clean_markets = len(
         {
@@ -249,6 +262,7 @@ def historical_backfill(
     close_dates = [_market_close_dt(market).isoformat() for market in candidates[:10]]
 
     summary = {
+        "work_order": "WO-101",
         "requested_closed_markets": requested,
         "fetched_markets": len(candidates),
         "resolution_rows": len(resolution_rows),
@@ -260,9 +274,12 @@ def historical_backfill(
         "old_candidates_excluded": 0 if allow_old_history else len(old_candidates),
         "old_history_explicitly_allowed": allow_old_history,
         "newest_candidate_close_times": close_dates,
-        "collected_at_utc": now_utc(),
+        "collected_at_utc": run_at,
         "output_file": str(out_root / "historical_resolutions.csv"),
         "quality_file": str(gov_root / "historical_resolution_quality_report.csv"),
+        "append_only_resolution_corpus": corpus,
+        "paper_trading_invoked": False,
+        "live_trading_invoked": False,
     }
     write_json(gov_root / "historical_resolution_summary.json", summary)
     return resolution_rows, quality_rows, summary

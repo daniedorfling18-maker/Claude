@@ -103,12 +103,17 @@ def workflow_is_configured(workflow_text: str) -> bool:
 
 
 def independent_merge_workflow_is_configured(workflow_text: str) -> bool:
-    """Return whether the registered second-identity merge lane is fail closed."""
+    """Return whether the default-branch owner/reviewer merge lane is fail closed."""
 
     on_block = _top_level_on_block(workflow_text)
     required_fragments = {
-        "workflow_dispatch:",
-        "expected_head_sha:",
+        "issue_comment:",
+        "types: [created]",
+        "github.event.issue.pull_request",
+        "github.actor == github.repository_owner",
+        "github.triggering_actor == github.repository_owner",
+        "startsWith(github.event.comment.body, '/independent-merge ')",
+        "MERGE_COMMAND: ${{ github.event.comment.body }}",
         "actions: read",
         "checks: read",
         "contents: write",
@@ -120,14 +125,16 @@ def independent_merge_workflow_is_configured(workflow_text: str) -> bool:
         "ACTIONS_ID_TOKEN_REQUEST_URL",
         "ACTIONS_ID_TOKEN_REQUEST_TOKEN",
         "scripts/merge_independently_reviewed_pr.py",
-        "--expected-head",
+        "--merge-comment",
         "--merge",
     }
     return (
-        "workflow_dispatch:" in on_block
+        "issue_comment:" in on_block
+        and "workflow_dispatch:" not in on_block
         and "pull_request:" not in on_block
         and all(fragment in workflow_text for fragment in required_fragments)
         and "continue-on-error:" not in workflow_text
+        and "environment:" not in workflow_text
     )
 
 

@@ -1,16 +1,11 @@
 name: Independently Reviewed PR Merge
 
 on:
-  workflow_dispatch:
-    inputs:
-      pr_number:
-        description: Open pull request number targeting main
-        required: true
-        type: string
-      expected_head_sha:
-        description: Exact 40-character PR head SHA reviewed by the operator
-        required: true
-        type: string
+  # GitHub loads issue_comment workflows from the default branch only. A pull
+  # request branch therefore cannot replace this contents:write-capable control
+  # and dispatch its own copy.
+  issue_comment:
+    types: [created]
 
 permissions:
   actions: read
@@ -20,22 +15,19 @@ permissions:
   pull-requests: write
 
 concurrency:
-  group: independent-pr-merge-${{ inputs.pr_number }}
+  group: independent-pr-merge-${{ github.event.issue.number }}
   cancel-in-progress: false
 
 jobs:
   independently-reviewed-merge:
     name: Verify current-head review and merge
+    if: >-
+      github.event.issue.pull_request &&
+      github.actor == github.repository_owner &&
+      github.triggering_actor == github.repository_owner &&
+      startsWith(github.event.comment.body, '/independent-merge ')
     runs-on: [self-hosted, Linux, ARM64, polymarket-ci]
     timeout-minutes: 10
-    # Gate this contents:write-capable job behind an Environment whose
-    # deployment branches are restricted to `main` (repo Settings -> Environments
-    # -> main-merge, "Deployment branches and tags" = Selected -> main). GitHub
-    # enforces that restriction server-side, so a workflow_dispatch that selects
-    # a candidate branch cannot obtain this job's token even if that branch
-    # rewrites this workflow file. Without the Environment configured, the job
-    # will not receive protected credentials.
-    environment: main-merge
 
     steps:
       - name: Check out accepted merge utility
@@ -50,16 +42,12 @@ jobs:
         shell: bash
         env:
           GITHUB_TOKEN: ${{ github.token }}
-          PR_NUMBER: ${{ inputs.pr_number }}
-          EXPECTED_HEAD_SHA: ${{ inputs.expected_head_sha }}
+          PR_NUMBER: ${{ github.event.issue.number }}
+          MERGE_COMMAND: ${{ github.event.comment.body }}
         run: |
           set -euo pipefail
-          # Dispatch inputs arrive ONLY through the environment above; never
-          # interpolate ${{ ... }} into this shell. Validate before use so a
-          # crafted input cannot inject shell metacharacters on the runner.
-          case "$PR_NUMBER" in ''|*[!0-9]*) echo "::error::pr_number must be a positive integer"; exit 1 ;; esac
-          case "$EXPECTED_HEAD_SHA" in *[!0-9a-f]*|'') echo "::error::expected_head_sha must be lowercase hex"; exit 1 ;; esac
-          [ "${#EXPECTED_HEAD_SHA}" -eq 40 ] || { echo "::error::expected_head_sha must be 40 characters"; exit 1; }
+          case "$PR_NUMBER" in ''|*[!0-9]*) echo "::error::PR number must be a positive integer"; exit 1 ;; esac
+          [ "$PR_NUMBER" -gt 0 ] || { echo "::error::PR number must be positive"; exit 1; }
           mkdir -p "$RUNNER_TEMP/independent-main-acceptance"
           docker run --rm --cpus 1 --memory 512m --pids-limit 128 \
             -e GITHUB_TOKEN -e ACTIONS_ID_TOKEN_REQUEST_URL \
@@ -68,7 +56,7 @@ jobs:
             python:3.11-slim python /src/scripts/merge_independently_reviewed_pr.py \
               --repo daniedorfling18-maker/Claude \
               --pr "$PR_NUMBER" \
-              --expected-head "$EXPECTED_HEAD_SHA" \
+              --merge-comment "$MERGE_COMMAND" \
               --merge | tee "$RUNNER_TEMP/independent-main-acceptance/merge-attestation.json"
 
       - name: Publish exact-main deployment attestation

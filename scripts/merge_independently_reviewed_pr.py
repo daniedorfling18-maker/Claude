@@ -1,10 +1,12 @@
 #!/usr/bin/env python3
 """Fail-closed merge lane for an independently reviewed exact PR head.
 
-The only mutating mode is intended for ``independent-pr-merge.yml``.  It
-requires the workflow dispatcher to be a current-head approver who is not the
-pull-request author.  It never reads repository secrets other than the
-short-lived workflow token supplied through ``GITHUB_TOKEN``.
+The only mutating mode is intended for ``independent-pr-merge.yml``. GitHub
+must have loaded that ``issue_comment`` workflow from the accepted default
+branch, the repository owner must have posted and initiated the exact-head
+command, and a distinct trusted identity must have approved that current head.
+It never reads repository secrets other than the short-lived workflow token
+supplied through ``GITHUB_TOKEN``.
 """
 
 from __future__ import annotations
@@ -52,6 +54,7 @@ PROTECTED_PYTHON_ENTRYPOINTS = {"pip", "pytest", "ruff", "setuptools", "wheel"}
 TRUSTED_REVIEW_ASSOCIATIONS = {"COLLABORATOR", "MEMBER", "OWNER"}
 CONTROL_REVIEW_STATES = {"APPROVED", "CHANGES_REQUESTED", "DISMISSED"}
 SHA_PATTERN = re.compile(r"^[0-9a-f]{40}$")
+MERGE_COMMENT_PATTERN = re.compile(r"^/independent-merge ([0-9a-f]{40})$")
 
 
 class MergeGateError(RuntimeError):
@@ -77,6 +80,17 @@ def _workflow_path(value: Any) -> str:
     """Normalize Actions' ``path@ref`` response to the registered file path."""
 
     return str(value or "").split("@", 1)[0]
+
+
+def expected_head_from_merge_comment(value: str) -> str:
+    """Parse the exact owner command without accepting extra text or options."""
+
+    match = MERGE_COMMENT_PATTERN.fullmatch(value)
+    if match is None:
+        raise MergeGateError(
+            "merge comment must be exactly /independent-merge followed by one lowercase 40-character SHA"
+        )
+    return match.group(1)
 
 
 def _protected_control_path(path: str) -> bool:
@@ -143,11 +157,13 @@ def _validate_oidc_claims(
         "iss": OIDC_ISSUER,
         "aud": audience,
         "repository": repo,
-        "event_name": "workflow_dispatch",
+        "event_name": "issue_comment",
         "ref": "refs/heads/main",
         "workflow_ref": expected_workflow_ref,
     }
     mismatches = [key for key, value in required.items() if str(payload.get(key) or "") != value]
+    if str(payload.get("actor") or "").casefold() != repo.split("/", 1)[0].casefold():
+        mismatches.append("actor")
     if mismatches:
         raise MergeGateError(
             "GitHub OIDC identity does not match the accepted main workflow: "
@@ -221,6 +237,7 @@ def evaluate_merge_candidate(
     base_sha = str(base.get("sha") or "").lower()
     current_main_sha = str(_mapping(main_ref.get("object")).get("sha") or "").lower()
     author = _login(pr.get("user"))
+    repository_owner = repository.split("/", 1)[0].strip()
     identity = _mapping(workflow_identity)
     workflow_run = _mapping(merge_workflow_run)
     normalized_actor = _login(workflow_run.get("actor"))
@@ -234,17 +251,19 @@ def evaluate_merge_candidate(
     run_head_sha = str(workflow_run.get("head_sha") or "").lower()
     accepted_workflow_run = (
         str(identity.get("repository") or "") == repository
-        and str(identity.get("event_name") or "") == "workflow_dispatch"
+        and str(identity.get("event_name") or "") == "issue_comment"
         and str(identity.get("ref") or "") == "refs/heads/main"
         and str(identity.get("workflow_ref") or "")
         == f"{repository}/{INDEPENDENT_WORKFLOW}@refs/heads/main"
         and identity_run_id == workflow_run_id
-        and str(workflow_run.get("event") or "") == "workflow_dispatch"
+        and str(workflow_run.get("event") or "") == "issue_comment"
         and _workflow_path(workflow_run.get("path")) == INDEPENDENT_WORKFLOW
         and str(workflow_run.get("head_branch") or "") == "main"
         and identity_workflow_sha == current_main_sha
         and run_head_sha == current_main_sha
         and str(identity.get("actor") or "").casefold() == normalized_actor.casefold()
+        and normalized_actor.casefold() == repository_owner.casefold()
+        and normalized_triggering_actor.casefold() == repository_owner.casefold()
     )
     if not accepted_workflow_run:
         blockers.append("merge_workflow_identity_is_not_accepted_current_main")
@@ -261,12 +280,12 @@ def evaluate_merge_candidate(
         blockers.append("pull_request_head_changed")
     if not normalized_actor:
         blockers.append("merge_actor_missing")
-    elif normalized_actor.casefold() == author.casefold():
-        blockers.append("merge_actor_is_pull_request_author")
+    elif normalized_actor.casefold() != repository_owner.casefold():
+        blockers.append("merge_actor_is_not_repository_owner")
     if not normalized_triggering_actor:
         blockers.append("merge_triggering_actor_missing")
-    elif normalized_triggering_actor.casefold() == author.casefold():
-        blockers.append("merge_triggering_actor_is_pull_request_author")
+    elif normalized_triggering_actor.casefold() != repository_owner.casefold():
+        blockers.append("merge_triggering_actor_is_not_repository_owner")
     if pr.get("mergeable") is not True:
         blockers.append("pull_request_not_currently_mergeable")
     if not current_main_sha or base_sha != current_main_sha:
@@ -325,17 +344,12 @@ def evaluate_merge_candidate(
         and str(review.get("commit_id") or "").lower() == expected
         and str(review.get("author_association") or "").upper() in TRUSTED_REVIEW_ASSOCIATIONS
         and _login(review.get("user")).casefold() != author.casefold()
+        and _login(review.get("user")).casefold() != repository_owner.casefold()
     )
     if unresolved_change_requests:
         blockers.append("unresolved_changes_requested_review")
     if not eligible_reviewers:
         blockers.append("no_independent_approval_on_current_head")
-    if normalized_actor.casefold() not in {reviewer.casefold() for reviewer in eligible_reviewers}:
-        blockers.append("merge_actor_did_not_approve_current_head")
-    if normalized_triggering_actor.casefold() not in {
-        reviewer.casefold() for reviewer in eligible_reviewers
-    }:
-        blockers.append("merge_triggering_actor_did_not_approve_current_head")
 
     changed_paths = {
         str(row.get(field) or "").strip()
@@ -359,10 +373,15 @@ def evaluate_merge_candidate(
         "latest_exact_head_check_passed": exact_head_check_passed,
         "latest_exact_head_workflow_passed": exact_head_workflow_passed,
         "independent_current_head_approval": bool(eligible_reviewers),
-        "dispatcher_is_current_head_approver": normalized_actor.casefold()
-        in {reviewer.casefold() for reviewer in eligible_reviewers},
-        "triggering_actor_is_current_head_approver": normalized_triggering_actor.casefold()
-        in {reviewer.casefold() for reviewer in eligible_reviewers},
+        "merge_actor_is_repository_owner": normalized_actor.casefold()
+        == repository_owner.casefold(),
+        "merge_triggering_actor_is_repository_owner": normalized_triggering_actor.casefold()
+        == repository_owner.casefold(),
+        "independent_reviewer_is_distinct_from_owner": bool(eligible_reviewers)
+        and all(
+            reviewer.casefold() != repository_owner.casefold()
+            for reviewer in eligible_reviewers
+        ),
         "merge_workflow_is_accepted_current_main": accepted_workflow_run,
         "trusted_merge_control_unchanged": not protected_control_changes,
         "all_review_threads_resolved": not unresolved_threads,
@@ -374,6 +393,7 @@ def evaluate_merge_candidate(
         "expected_head_sha": expected,
         "current_main_sha": current_main_sha,
         "pull_request_author": author,
+        "repository_owner": repository_owner,
         "merge_actor": normalized_actor,
         "merge_triggering_actor": normalized_triggering_actor,
         "merge_workflow_run_id": workflow_run_id,
@@ -628,9 +648,10 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--repo", required=True)
     parser.add_argument("--pr", type=int, required=True)
-    parser.add_argument("--expected-head", required=True)
+    parser.add_argument("--merge-comment", required=True)
     parser.add_argument("--merge", action="store_true")
     args = parser.parse_args()
+    expected_head = expected_head_from_merge_comment(args.merge_comment)
 
     workflow_identity = request_current_workflow_identity(args.repo)
     merge_run_id = str(workflow_identity.get("run_id") or "")
@@ -639,11 +660,11 @@ def main() -> int:
         client,
         args.repo,
         args.pr,
-        args.expected_head,
+        expected_head,
         merge_run_id=merge_run_id,
     )
     result = evaluate_merge_candidate(
-        expected_head=args.expected_head,
+        expected_head=expected_head,
         workflow_identity=workflow_identity,
         **evidence,
     )
@@ -655,11 +676,11 @@ def main() -> int:
             client,
             args.repo,
             args.pr,
-            args.expected_head,
+            expected_head,
             merge_run_id=merge_run_id,
         )
         result = evaluate_merge_candidate(
-            expected_head=args.expected_head,
+            expected_head=expected_head,
             workflow_identity=workflow_identity,
             **refreshed,
         )
@@ -670,7 +691,7 @@ def main() -> int:
             client,
             repo=args.repo,
             pull_request=_mapping(refreshed.get("pull_request")),
-            expected_head=args.expected_head,
+            expected_head=expected_head,
             expected_main=str(result.get("current_main_sha") or ""),
         )
         result.update({"status": "merged", **merge_result})

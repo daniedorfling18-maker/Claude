@@ -141,12 +141,20 @@ def test_registered_workflow_is_minimal_self_hosted_and_secretless() -> None:
     assert "config-check --config polymarket_predictive_config.example.yaml" in workflow
 
 
-def test_independent_merge_workflow_is_manual_exact_head_and_second_identity_only() -> None:
+def test_independent_merge_workflow_is_default_branch_owner_comment_and_second_identity_only() -> None:
     workflow = _independent_workflow()
     assert merge_gate.independent_merge_workflow_is_configured(workflow)
-    assert "workflow_dispatch:" in workflow
-    assert "pull_request:" not in merge_gate._top_level_on_block(workflow)
-    assert "expected_head_sha:" in workflow
+    on_block = merge_gate._top_level_on_block(workflow)
+    assert "issue_comment:" in on_block
+    assert "workflow_dispatch:" not in on_block
+    assert "pull_request:" not in on_block
+    assert "github.actor == github.repository_owner" in workflow
+    assert "github.triggering_actor == github.repository_owner" in workflow
+    assert "/independent-merge" in workflow
+    assert "--merge-comment \"$MERGE_COMMAND\"" in workflow
+    assert "environment:" not in workflow
+    assert "ref: main" in workflow
+    assert workflow.count("${{ github.event.comment.body }}") == 1
     assert "path: merge-utility" in workflow
     assert "fetch-depth: 0" in workflow
     assert "id-token: write" in workflow
@@ -162,6 +170,29 @@ def test_independent_merge_workflow_is_manual_exact_head_and_second_identity_onl
     assert "secrets." not in workflow
 
 
+@pytest.mark.parametrize(
+    "comment",
+    [
+        " /independent-merge " + "a" * 40,
+        "/independent-merge  " + "a" * 40,
+        "/independent-merge " + "A" * 40,
+        "/independent-merge " + "a" * 39,
+        "/independent-merge " + "a" * 40 + " --force",
+        "/independent-merge " + "a" * 40 + "\nanything",
+    ],
+)
+def test_merge_comment_parser_rejects_every_nonexact_command(comment: str) -> None:
+    with pytest.raises(independent_merge.MergeGateError, match="merge comment must be exactly"):
+        independent_merge.expected_head_from_merge_comment(comment)
+
+
+def test_merge_comment_parser_returns_only_the_exact_lowercase_head() -> None:
+    head = "a" * 40
+    assert independent_merge.expected_head_from_merge_comment(
+        f"/independent-merge {head}"
+    ) == head
+
+
 def test_oidc_identity_requires_the_accepted_main_workflow() -> None:
     now = 1_800_000_000
     audience = "https://github.com/owner/repo/independent-merge"
@@ -169,14 +200,14 @@ def test_oidc_identity_requires_the_accepted_main_workflow() -> None:
         "iss": independent_merge.OIDC_ISSUER,
         "aud": audience,
         "repository": "owner/repo",
-        "event_name": "workflow_dispatch",
+        "event_name": "issue_comment",
         "ref": "refs/heads/main",
         "workflow_ref": (
             "owner/repo/.github/workflows/independent-pr-merge.yml@refs/heads/main"
         ),
         "workflow_sha": "b" * 40,
         "run_id": "9001",
-        "actor": "reviewer",
+        "actor": "owner",
         "iat": now - 10,
         "nbf": now - 10,
         "exp": now + 300,
@@ -201,6 +232,18 @@ def test_oidc_identity_requires_the_accepted_main_workflow() -> None:
             now_epoch=now,
         )
 
+    claims["workflow_ref"] = (
+        "owner/repo/.github/workflows/independent-pr-merge.yml@refs/heads/main"
+    )
+    claims["actor"] = "reviewer"
+    with pytest.raises(independent_merge.MergeGateError, match="actor"):
+        independent_merge._validate_oidc_claims(
+            claims,
+            repo="owner/repo",
+            audience=audience,
+            now_epoch=now,
+        )
+
 
 def test_workflow_inventory_has_only_registered_triggers() -> None:
     workflow_dir = ROOT / ".github" / "workflows"
@@ -214,7 +257,7 @@ def test_workflow_inventory_has_only_registered_triggers() -> None:
         "refresh-locked-superbru-card.yml": {"workflow_dispatch"},
         "repo-audit-bundle.yml": {"workflow_dispatch"},
         "required-pr-gate.yml": {"pull_request"},
-        "independent-pr-merge.yml": {"workflow_dispatch"},
+        "independent-pr-merge.yml": {"issue_comment"},
         "superbru-clv-snapshot.yml": {"workflow_dispatch"},
     }
     present = {path.name for path in workflow_dir.glob("*.y*ml")}
@@ -224,7 +267,13 @@ def test_workflow_inventory_has_only_registered_triggers() -> None:
         on_block = merge_gate._top_level_on_block(text)
         actual = {
             trigger
-            for trigger in ("schedule", "push", "pull_request", "workflow_dispatch")
+            for trigger in (
+                "schedule",
+                "push",
+                "pull_request",
+                "workflow_dispatch",
+                "issue_comment",
+            )
             if re.search(rf"^  {re.escape(trigger)}\s*:", on_block, flags=re.MULTILINE)
         }
         assert actual == expected, name
@@ -535,30 +584,30 @@ def _candidate_evidence() -> dict:
             "state": "open",
             "draft": False,
             "mergeable": True,
-            "user": {"login": "author"},
+            "user": {"login": "owner"},
             "head": {"sha": head},
             "base": {"ref": "main", "sha": main},
         },
         "expected_head": head,
         "workflow_identity": {
             "repository": "owner/repo",
-            "event_name": "workflow_dispatch",
+            "event_name": "issue_comment",
             "ref": "refs/heads/main",
             "workflow_ref": (
                 "owner/repo/.github/workflows/independent-pr-merge.yml@refs/heads/main"
             ),
             "workflow_sha": main,
             "run_id": "9001",
-            "actor": "reviewer",
+            "actor": "owner",
         },
         "merge_workflow_run": {
             "id": 9001,
-            "event": "workflow_dispatch",
+            "event": "issue_comment",
             "path": independent_merge.INDEPENDENT_WORKFLOW,
             "head_branch": "main",
             "head_sha": main,
-            "actor": {"login": "reviewer"},
-            "triggering_actor": {"login": "reviewer"},
+            "actor": {"login": "owner"},
+            "triggering_actor": {"login": "owner"},
         },
         "main_ref": {"object": {"sha": main}},
         "comparison": {"status": "ahead", "behind_by": 0},
@@ -608,6 +657,18 @@ def test_independent_merge_candidate_requires_exact_current_head_evidence() -> N
     assert result["wo67_status"] == "BLOCKED"
 
 
+def test_owner_cannot_supply_the_independent_review_for_another_author() -> None:
+    evidence = _candidate_evidence()
+    evidence["pull_request"]["user"] = {"login": "contributor"}
+    evidence["reviews"][0]["user"] = {"login": "owner"}
+
+    result = independent_merge.evaluate_merge_candidate(**evidence)
+
+    assert result["eligible"] is False
+    assert result["eligible_reviewers"] == []
+    assert "no_independent_approval_on_current_head" in result["blockers"]
+
+
 def test_actions_workflow_path_ref_suffix_is_normalized() -> None:
     evidence = _candidate_evidence()
     evidence["workflow_runs"][0]["path"] = (
@@ -620,18 +681,17 @@ def test_actions_workflow_path_ref_suffix_is_normalized() -> None:
     assert result["checks"]["latest_exact_head_workflow_passed"] is True
 
 
-def test_stale_approval_and_author_dispatch_are_both_rejected() -> None:
+def test_stale_approval_and_nonowner_merge_attempt_are_both_rejected() -> None:
     evidence = _candidate_evidence()
-    evidence["workflow_identity"]["actor"] = "author"
-    evidence["merge_workflow_run"]["actor"] = {"login": "author"}
+    evidence["workflow_identity"]["actor"] = "reviewer"
+    evidence["merge_workflow_run"]["actor"] = {"login": "reviewer"}
     evidence["reviews"][0]["commit_id"] = "c" * 40
 
     result = independent_merge.evaluate_merge_candidate(**evidence)
 
     assert result["eligible"] is False
-    assert "merge_actor_is_pull_request_author" in result["blockers"]
+    assert "merge_actor_is_not_repository_owner" in result["blockers"]
     assert "no_independent_approval_on_current_head" in result["blockers"]
-    assert "merge_actor_did_not_approve_current_head" in result["blockers"]
 
 
 def test_latest_failed_exact_head_check_cannot_reuse_older_success() -> None:
@@ -666,18 +726,17 @@ def test_unresolved_thread_or_behind_head_blocks_merge() -> None:
     assert "unresolved_review_threads" in result["blockers"]
 
 
-def test_rerun_initiator_must_be_an_independent_current_head_approver() -> None:
+def test_rerun_initiator_must_be_the_repository_owner() -> None:
     evidence = _candidate_evidence()
-    evidence["merge_workflow_run"]["triggering_actor"] = {"login": "author"}
+    evidence["merge_workflow_run"]["triggering_actor"] = {"login": "reviewer"}
 
     result = independent_merge.evaluate_merge_candidate(**evidence)
 
     assert result["eligible"] is False
-    assert "merge_triggering_actor_is_pull_request_author" in result["blockers"]
-    assert "merge_triggering_actor_did_not_approve_current_head" in result["blockers"]
+    assert "merge_triggering_actor_is_not_repository_owner" in result["blockers"]
 
 
-def test_branch_dispatched_workflow_cannot_supply_reviewer_identity() -> None:
+def test_candidate_branch_cannot_supply_the_merge_workflow_identity() -> None:
     evidence = _candidate_evidence()
     evidence["workflow_identity"].update(
         {
@@ -687,17 +746,17 @@ def test_branch_dispatched_workflow_cannot_supply_reviewer_identity() -> None:
                 "@refs/heads/attacker-branch"
             ),
             "workflow_sha": "c" * 40,
-            "actor": "author",
+            "actor": "attacker",
         }
     )
     evidence["merge_workflow_run"].update(
         {
             "head_branch": "attacker-branch",
             "head_sha": "c" * 40,
-            "actor": {"login": "author"},
-            # A branch copy may hard-code reviewer strings elsewhere, but the
-            # server-reported triggering actor remains the author.
-            "triggering_actor": {"login": "author"},
+            "actor": {"login": "attacker"},
+            # A branch copy may hard-code owner strings elsewhere, but the
+            # server-reported triggering actor remains the attacker.
+            "triggering_actor": {"login": "attacker"},
         }
     )
 
@@ -705,7 +764,7 @@ def test_branch_dispatched_workflow_cannot_supply_reviewer_identity() -> None:
 
     assert result["eligible"] is False
     assert "merge_workflow_identity_is_not_accepted_current_main" in result["blockers"]
-    assert "merge_actor_is_pull_request_author" in result["blockers"]
+    assert "merge_actor_is_not_repository_owner" in result["blockers"]
 
 
 def test_candidate_cannot_replace_the_trusted_merge_control() -> None:
@@ -777,8 +836,8 @@ def test_src_package_initializer_is_not_treated_as_merge_control() -> None:
 
 
 def test_merge_workflow_identity_accepts_ref_suffixed_path() -> None:
-    # Actions reports the dispatched workflow path with an @ref suffix; the
-    # merge-identity check must normalize it, or a genuine main dispatch is
+    # Actions can report the workflow path with an @ref suffix; the
+    # merge-identity check must normalize it, or a genuine default-branch run is
     # rejected as not-accepted-current-main and the lane can never merge.
     evidence = _candidate_evidence()
     evidence["merge_workflow_run"]["path"] = (

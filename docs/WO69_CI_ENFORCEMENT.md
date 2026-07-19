@@ -58,14 +58,20 @@ could publish the same check name.
 GitHub returned HTTP 403 for branch protection and rulesets on this private Free-plan repository. Do
 not make the repository public to work around that boundary. WO-100 therefore
 adds `.github/workflows/independent-pr-merge.yml` as a documented fail-closed
-fallback. Direct merges are prohibited: a second push-capable identity must
-approve the exact current head and dispatch the workflow. It verifies the
+fallback. Direct merges are prohibited. A second push-capable identity must
+approve the exact current head, after which the repository owner starts the
+merge by posting exactly `/independent-merge <40-character-lowercase-head-sha>`
+on that pull request. The `issue_comment` event is loaded by GitHub from the
+default branch only, so a candidate branch cannot replace this write-capable
+workflow and run its own copy. It verifies the
 newest exact-head gate, current-main ancestry, latest review state, and resolved
 threads immediately before an atomic non-force update whose new commit has the
 verified main revision as its only parent. If main advances during that final
-window, the ref update is no longer a fast-forward and fails closed. The
-original dispatcher and `github.triggering_actor` must both be current-head
-approvers, so an unauthorized rerun cannot borrow the dispatcher's identity.
+window, the ref update is no longer a fast-forward and fails closed. Both the
+original workflow actor and `github.triggering_actor` must be the repository
+owner, while the exact-head approver must be distinct from both the owner and
+the pull-request author. An unauthorized comment or rerun therefore cannot
+borrow either side of the two-identity control.
 PRs that alter either merge workflow or either merge-control script are
 rejected by this lane and require a separately reviewed control-plane bootstrap
 until workflow-identity protection exists. Because the repository has only one
@@ -75,7 +81,7 @@ On a successful atomic update, the workflow publishes the evaluator's complete
 JSON result as the run-scoped artifact
 `independent-main-acceptance-<run-id>/merge-attestation.json`. The artifact
 binds the exact merge commit, verified head/tree, prior main parent, distinct
-current-head approver/dispatcher, checks, and blockers. Deployment consumers
+current-head approver, owner initiator, checks, and blockers. Deployment consumers
 must verify both the originating workflow run and exact merge SHA; an artifact
 name copied from another run is not acceptance.
 

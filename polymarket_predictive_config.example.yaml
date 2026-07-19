@@ -101,7 +101,10 @@ wallet_intelligence:
 # pick-off charge estimated from 1-min price history. Free key-less endpoints.
 maker_carry_study:
   enabled: true
-  universe_pages: 5
+  # 2026-07-19: 5 -> 8 (owner-approved). Widens the scanned rewarded universe so
+  # a calm, liquid, recurring market is more likely to persist the distinct days
+  # M-A needs. Key-less calls; no maker gate threshold changed.
+  universe_pages: 8
   page_size: 100
   min_daily_pot_usd: 25
   # 2026-07-09: 20 -> 40. Funding is deferred to post-WC, so measurement
@@ -112,7 +115,7 @@ maker_carry_study:
   # 2026-07-11 WO-56: pre-screen up to this many rewarded markets by
   # achievable gross at min quote size before expensive history/markout
   # measurement. Coverage only; registered maker gates remain unchanged.
-  yield_scan_max_markets: 200
+  yield_scan_max_markets: 300
   # Swept per market; the row keeps the net-carry-maximising fraction.
   quote_distance_fractions: [0.25, 0.5, 0.75]
   reaction_minutes: 1
@@ -149,7 +152,13 @@ maker_carry_study:
 # automatically.
 maker_fill_replay:
   enabled: true
-  max_markets: 10
+  # 2026-07-19: aggressive Tier-0 coverage widening (owner-approved) to
+  # accelerate the official-book/print coverage that maker gates M-B and the
+  # sharp-linking qualification wait on. Collection breadth only; no maker gate
+  # threshold changed. Higher VPS book-snapshot + CPU/memory load (bounded by
+  # max_official_book_rows / max_collection_window_rows below).
+  max_markets: 25
+  max_persistent_markets: 25
   replay_days: 7
   # 2026-07-14 WO-83: repeated point-in-time snapshots from the documented
   # official CLOB /book(s) API form the validation history. The archive is
@@ -158,7 +167,9 @@ maker_fill_replay:
   max_official_book_rows: 200000
   max_collection_window_rows: 200000
   max_book_state_lag_seconds: 1800
-  regime_days: 7
+  # 2026-07-19: 7 -> 14 (owner-approved). Doubles the recurring-market coverage
+  # window so churned-out markets keep accumulating Tier-0 evidence.
+  regime_days: 14
 
 # 2026-07-10 WO-49: flow-toxicity conditioning for maker quote sheets.
 # Measurement only; does not alter adverse charges, gates, sizing, or orders.

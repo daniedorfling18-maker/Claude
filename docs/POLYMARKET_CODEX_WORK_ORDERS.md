@@ -8,8 +8,9 @@ through the squash merge of PR #286; PR #287 was merged into #286's stacked
 branch and is not a separate merge in accepted `main`. Funding remains
 operationally CLOSED and WO-67 remains BLOCKED behind every registered P1–P5
 precondition. The dispatch/queue-driver protocol is present on accepted `main`
-after PR #281, but no explicit owner-authored approval for that protocol has
-been recorded. PR #305 removes it under the owner's 2026-07-19 instruction.
+after PR #281, and accepted `AGENTS.md` treats that PR's owner merge as its
+authorization event. No separate explicit owner-authored approval text is
+recorded; PR #305 proposes removal instead of relying on merge provenance alone.
 Review corrections #295–#298 and #302–#337 remain open and are not accepted
 main. Each scope requires its own PR; frozen/registered-surface changes are
 authorized only by an owner-authored commit or an owner-approved pull request,
@@ -5106,11 +5107,13 @@ request.
 
 1. **Governance provenance — OPEN, FAIL CLOSED:** merged PR #270 removed the
    unapproved dispatch/queue-driver protocol from PR #263 without reverting its
-   safety fixes, but PR #281 restored the protocol without an explicit
-   owner-authored approval record. PR #305 removes the surviving protocol from
-   current main. Until #305 is accepted, bridge/queue-driver text is
-   non-authoritative and cannot dispatch work, authorize a merge, or evidence
-   owner approval. One-scope-per-PR remains binding.
+   safety fixes. PR #281 restored the protocol and accepted `AGENTS.md` names
+   that PR's owner merge as the authorization event, but there is no separate
+   explicit owner-authored approval text. PR #305 therefore removes the
+   surviving protocol instead of relying on merge provenance alone. Pending
+   that correction, this Codex queue accepts assignments only from direct
+   owner-authored requests and never from bridge/queue-driver text.
+   One-scope-per-PR remains binding.
 2. **Initial review-remediation set — ACCEPTED, follow-up defects remain:**
    exact-token identity (#272), sharp-source provenance (#277),
    qualification-to-policy anchoring (#280), maker-markout token isolation

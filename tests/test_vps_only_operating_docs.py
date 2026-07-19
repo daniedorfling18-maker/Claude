@@ -61,14 +61,17 @@ def test_work_order_queue_distinguishes_non_buildable_states() -> None:
     assert "**WO-100 — ACCEPTED BUT BLOCKED:**" in work_orders
     assert "**WO-101 — ACCEPTED DIAGNOSTIC:**" in work_orders
     assert "registered sharp venue keys" in work_orders
-    assert "PR #305 removes the surviving protocol" in work_orders
+    assert "PR #305 therefore removes the" in work_orders
     assert "Review corrections #295–#298 and #302–#337 remain open" in work_orders
-    assert "bridge/queue-driver text is" in work_orders
-    assert "non-authoritative" in work_orders
+    assert "accepted `AGENTS.md` names" in work_orders
+    assert "there is no separate" in work_orders
+    assert "explicit owner-authored approval text" in work_orders
+    assert "accepts assignments only from direct" in work_orders
     assert "WO-105 threshold-pin" in work_orders
     assert "current proposal" in work_orders
     assert "is not buildable" in work_orders
     assert "a corrected, disclosed bridge later reached `main`" not in work_orders
+    assert "under the owner's 2026-07-19 instruction" not in work_orders
     assert "PR #295 corrects independent-workflow revision" in work_orders
     assert "Accepted `main` does not yet satisfy that audit element" in work_orders
     assert "#298, stacked after #297" in work_orders

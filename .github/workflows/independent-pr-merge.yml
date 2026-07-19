@@ -1,0 +1,64 @@
+name: Independently Reviewed PR Merge
+
+on:
+  workflow_dispatch:
+    inputs:
+      pr_number:
+        description: Open pull request number targeting main
+        required: true
+        type: string
+      expected_head_sha:
+        description: Exact 40-character PR head SHA reviewed by the operator
+        required: true
+        type: string
+
+permissions:
+  actions: read
+  checks: read
+  contents: write
+  id-token: write
+  pull-requests: write
+
+concurrency:
+  group: independent-pr-merge-${{ inputs.pr_number }}
+  cancel-in-progress: false
+
+jobs:
+  independently-reviewed-merge:
+    name: Verify current-head review and merge
+    runs-on: [self-hosted, Linux, ARM64, polymarket-ci]
+    timeout-minutes: 10
+
+    steps:
+      - name: Check out accepted merge utility
+        uses: actions/checkout@v6
+        with:
+          ref: main
+          path: merge-utility
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Verify and merge the exact reviewed head
+        shell: bash
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/independent-main-acceptance"
+          docker run --rm --cpus 1 --memory 512m --pids-limit 128 \
+            -e GITHUB_TOKEN -e ACTIONS_ID_TOKEN_REQUEST_URL \
+            -e ACTIONS_ID_TOKEN_REQUEST_TOKEN \
+            -v "${GITHUB_WORKSPACE}/merge-utility:/src:ro" \
+            python:3.11-slim python /src/scripts/merge_independently_reviewed_pr.py \
+              --repo daniedorfling18-maker/Claude \
+              --pr "${{ inputs.pr_number }}" \
+              --expected-head "${{ inputs.expected_head_sha }}" \
+              --merge | tee "$RUNNER_TEMP/independent-main-acceptance/merge-attestation.json"
+
+      - name: Publish exact-main deployment attestation
+        uses: actions/upload-artifact@v7
+        with:
+          name: independent-main-acceptance-${{ github.run_id }}
+          path: ${{ runner.temp }}/independent-main-acceptance/merge-attestation.json
+          if-no-files-found: error
+          retention-days: 30

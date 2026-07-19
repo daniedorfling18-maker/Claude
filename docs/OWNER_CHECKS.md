@@ -42,12 +42,19 @@ while the PR gate is advisory.
 
 6. Commission a fresh external LLM audit of the repository (the
    2026-07-12 one materially improved the system; its successor
-   should specifically audit the executor PR and this file's own
-   effectiveness). Independent eyes on the execution code are the
-   substance of P4 — the shared-account review comments are the
-   compensating control, not the ideal.
+   should specifically audit the registered executor design, the
+   independent-review control, and this file's own effectiveness).
+   Executor code is forbidden before signing, so no pre-signing check
+   may require an executor PR to exist.
 7. Verify the attestation checklist rows against artifacts you open
    yourself, not against the orchestrator's summary of them.
+
+## After signing, before any executor merge or canary
+
+8. Commission an independent audit of the actual executor PR and
+   resolve every money-moving or custody finding before merge. This is
+   the code-level P4 evidence; the pre-signing audit proves the review
+   control exists, not that unbuilt code is correct.
 
 ## Structural fixes that reduce your check burden
 

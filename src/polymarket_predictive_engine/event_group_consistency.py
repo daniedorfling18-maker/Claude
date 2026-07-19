@@ -123,7 +123,12 @@ def _first_token_id(market: dict[str, Any]) -> str:
     return str(tokens[0]).strip() if tokens else ""
 
 
-def _book_asks(settings: dict[str, Any], token_id: str) -> list[tuple[float, float]] | None:
+def _book_levels(
+    settings: dict[str, Any],
+    token_id: str,
+    *,
+    side: str,
+) -> list[tuple[float, float]] | None:
     try:
         response = requests.get(
             f"{str(settings['clob_base_url']).rstrip('/')}/book",
@@ -134,16 +139,24 @@ def _book_asks(settings: dict[str, Any], token_id: str) -> list[tuple[float, flo
         book = response.json()
     except Exception:
         return None
-    asks: list[tuple[float, float]] = []
-    for level in book.get("asks") or []:
+    levels: list[tuple[float, float]] = []
+    for level in book.get(side) or []:
         if not isinstance(level, dict):
             continue
         price = safe_float(level.get("price"))
         size = safe_float(level.get("size"))
         if price is not None and size is not None and 0 < price < 1 and size > 0:
-            asks.append((price, size))
-    asks.sort(key=lambda item: item[0])
-    return asks
+            levels.append((price, size))
+    levels.sort(key=lambda item: item[0], reverse=side == "bids")
+    return levels
+
+
+def _book_asks(settings: dict[str, Any], token_id: str) -> list[tuple[float, float]] | None:
+    return _book_levels(settings, token_id, side="asks")
+
+
+def _book_bids(settings: dict[str, Any], token_id: str) -> list[tuple[float, float]] | None:
+    return _book_levels(settings, token_id, side="bids")
 
 
 def _cost_for_quantity(levels: list[tuple[float, float]], quantity: float, fee_rate: float) -> float | None:
@@ -152,6 +165,22 @@ def _cost_for_quantity(levels: list[tuple[float, float]], quantity: float, fee_r
     for price, size in levels:
         take = min(size, remaining)
         total += take * (price + _taker_fee_per_share(fee_rate, price))
+        remaining -= take
+        if remaining <= 1e-9:
+            return total
+    return None
+
+
+def _proceeds_for_quantity(
+    levels: list[tuple[float, float]],
+    quantity: float,
+    fee_rate: float,
+) -> float | None:
+    remaining = quantity
+    total = 0.0
+    for price, size in levels:
+        take = min(size, remaining)
+        total += take * (price - _taker_fee_per_share(fee_rate, price))
         remaining -= take
         if remaining <= 1e-9:
             return total
@@ -210,6 +239,56 @@ def _executable_buy_all_yes_depth(
     return {"book_fetch_ok": True, "executable_basket_usd": 0.0, "depth_weighted_net": 0.0}
 
 
+def _executable_sell_all_yes_depth(
+    markets: list[dict[str, Any]],
+    settings: dict[str, Any],
+) -> dict[str, Any]:
+    """Depth check for selling one complete YES basket into live bids.
+
+    Every leg must fill the same quantity. Proceeds are reduced by taker fees,
+    then compared with the $1 complete-set cost; no ask-side proxy is used.
+    """
+
+    leg_books: list[tuple[list[tuple[float, float]], float]] = []
+    candidate_quantities: set[float] = set()
+    for market in markets:
+        token_id = _first_token_id(market)
+        if not token_id:
+            return {"book_fetch_ok": False, "executable_basket_usd": None, "depth_weighted_net": None}
+        bids = _book_bids(settings, token_id)
+        if not bids:
+            return {"book_fetch_ok": False, "executable_basket_usd": None, "depth_weighted_net": None}
+        running = 0.0
+        for _, size in bids:
+            running += size
+            candidate_quantities.add(round(running, 10))
+        leg_books.append((bids, _fee_rate(market, settings)))
+
+    best: dict[str, Any] | None = None
+    for quantity in sorted(candidate_quantities):
+        leg_proceeds: list[float] = []
+        for bids, rate in leg_books:
+            proceeds = _proceeds_for_quantity(bids, quantity, rate)
+            if proceeds is None:
+                leg_proceeds = []
+                break
+            leg_proceeds.append(proceeds)
+        if not leg_proceeds:
+            continue
+        basket_proceeds = sum(leg_proceeds)
+        net_per_basket = basket_proceeds / quantity - 1.0
+        if net_per_basket <= 0:
+            continue
+        best = {
+            "book_fetch_ok": True,
+            "executable_basket_usd": round(basket_proceeds, 2),
+            "depth_weighted_net": round(net_per_basket, 6),
+        }
+    if best is not None:
+        return best
+    return {"book_fetch_ok": True, "executable_basket_usd": 0.0, "depth_weighted_net": 0.0}
+
+
 def _scan_event(event: dict[str, Any], settings: dict[str, Any]) -> dict[str, Any] | None:
     markets = [m for m in event.get("markets") or [] if isinstance(m, dict) and not m.get("closed")]
     if len(markets) < int(settings["min_leg_count"]):
@@ -249,6 +328,8 @@ def _scan_event(event: dict[str, Any], settings: dict[str, Any]) -> dict[str, An
     depth = {"executable_basket_usd": None, "depth_weighted_net": None, "book_fetch_ok": None}
     if flagged_side == "buy_all_yes":
         depth = _executable_buy_all_yes_depth(markets, settings)
+    elif flagged_side == "sell_all_yes":
+        depth = _executable_sell_all_yes_depth(markets, settings)
     first = markets[0]
     return {
         "scanned_at_utc": now_utc(),

@@ -192,6 +192,48 @@ def _decode_lifecycle_events(raw_message: Any) -> list[dict[str, Any]]:
     return [event for event in events if isinstance(event, dict)]
 
 
+def _partition_best_bid_ask_rows(
+    rows: list[dict[str, Any]],
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """Keep high-churn custom top-of-book frames out of feature replay history."""
+
+    retained: list[dict[str, Any]] = []
+    best_bid_ask: list[dict[str, Any]] = []
+    for row in rows:
+        raw_message = row.get("message")
+        events = _decode_lifecycle_events(raw_message)
+        if not events:
+            retained.append(row)
+            continue
+        bid_ask_events = [
+            event for event in events if str(event.get("event_type") or "").strip() == "best_bid_ask"
+        ]
+        if not bid_ask_events:
+            retained.append(row)
+            continue
+        other_events = [event for event in events if event not in bid_ask_events]
+        source_was_list = False
+        if isinstance(raw_message, str):
+            try:
+                source_was_list = isinstance(json.loads(raw_message), list)
+            except (TypeError, ValueError, json.JSONDecodeError):
+                source_was_list = False
+        elif isinstance(raw_message, list):
+            source_was_list = True
+
+        def partitioned_row(partition: list[dict[str, Any]]) -> dict[str, Any]:
+            payload: Any = partition if source_was_list else partition[0]
+            return {
+                **row,
+                "message": json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False),
+            }
+
+        best_bid_ask.append(partitioned_row(bid_ask_events))
+        if other_events:
+            retained.append(partitioned_row(other_events))
+    return retained, best_bid_ask
+
+
 def _resolution_event_row(captured_at_utc: str, event: dict[str, Any]) -> dict[str, Any] | None:
     market = str(event.get("market") or "").strip()
     winning_asset_id = str(event.get("winning_asset_id") or "").strip()
@@ -1813,7 +1855,9 @@ def collect_websocket(cfg: EngineConfig, websocket_seconds: int = 60) -> dict[st
     variants = _subscription_variants(market_ids, settings, dynamic_ids=bool(dynamic_ids))
     output_file = out_root / "websocket_messages.json"
     latest_output_file = out_root / "websocket_messages_latest.json"
+    best_bid_ask_output_file = out_root / "websocket_best_bid_ask.json"
     existing_rows = _existing_messages(output_file)
+    existing_best_bid_ask_rows = _existing_messages(best_bid_ask_output_file)
     connect_timeout = float(settings.get("connect_timeout_seconds", 8.0))
     new_rows, selected_subscription, variant_errors = _collect_with_variants(
         url=url,
@@ -1850,25 +1894,40 @@ def collect_websocket(cfg: EngineConfig, websocket_seconds: int = 60) -> dict[st
         write_json(out_root / "websocket_summary.json", summary)
         return summary
     lifecycle_capture = _persist_lifecycle_events(cfg, new_rows) if _custom_feature_enabled(settings) else {}
-    combined_rows = existing_rows + new_rows
+    retained_existing_rows, migrated_best_bid_ask_rows = _partition_best_bid_ask_rows(existing_rows)
+    retained_new_rows, new_best_bid_ask_rows = _partition_best_bid_ask_rows(new_rows)
+    combined_rows = retained_existing_rows + retained_new_rows
+    combined_best_bid_ask_rows = (
+        existing_best_bid_ask_rows + migrated_best_bid_ask_rows + new_best_bid_ask_rows
+    )
     max_messages = int(settings.get("max_messages", 0) or 0)
     dropped_messages = 0
     if max_messages > 0 and len(combined_rows) > max_messages:
         dropped_messages = len(combined_rows) - max_messages
         combined_rows = combined_rows[-max_messages:]
+    dropped_best_bid_ask_messages = 0
+    if max_messages > 0 and len(combined_best_bid_ask_rows) > max_messages:
+        dropped_best_bid_ask_messages = len(combined_best_bid_ask_rows) - max_messages
+        combined_best_bid_ask_rows = combined_best_bid_ask_rows[-max_messages:]
     write_json(output_file, combined_rows)
+    write_json(best_bid_ask_output_file, combined_best_bid_ask_rows)
     write_json(latest_output_file, new_rows)
     summary = {
         "status": "collected",
         "messages": len(combined_rows),
         "new_messages": len(new_rows),
         "existing_messages": len(existing_rows),
+        "retained_new_messages": len(retained_new_rows),
+        "best_bid_ask_messages_received": len(new_best_bid_ask_rows),
+        "best_bid_ask_messages_retained": len(combined_best_bid_ask_rows),
+        "dropped_best_bid_ask_messages": dropped_best_bid_ask_messages,
         "dropped_messages": dropped_messages,
         "max_messages": max_messages,
         "total_messages": len(combined_rows),
         "seconds": websocket_seconds,
         "output_file": str(output_file),
         "latest_output_file": str(latest_output_file),
+        "best_bid_ask_output_file": str(best_bid_ask_output_file),
         "append_mode": True,
         "target_source": target_source,
         "target_assets": len(market_ids),

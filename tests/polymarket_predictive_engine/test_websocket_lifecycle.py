@@ -173,6 +173,63 @@ def test_custom_flag_off_preserves_existing_collector_behaviour(tmp_path: Path, 
     assert not (cfg.output_root / "polymarket_websocket" / "market_births.csv").exists()
 
 
+def test_best_bid_ask_frames_do_not_evict_feature_replay_history(tmp_path: Path, monkeypatch) -> None:
+    cfg = _cfg(tmp_path, custom_feature_enabled=True)
+    cfg.raw["websocket_market_data"]["max_messages"] = 2
+    real_import_module = websocket_collector.importlib.import_module
+
+    def fake_import_module(name: str):
+        if name == "websockets":
+            return object()
+        return real_import_module(name)
+
+    async def fake_collect(url, seconds, subscription_message, **kwargs):
+        del url, seconds, subscription_message, kwargs
+        return [
+            {
+                "collected_at_utc": f"2026-07-11T12:00:0{index}Z",
+                "message": json.dumps(
+                    {
+                        "event_type": "best_bid_ask",
+                        "asset_id": "token-1",
+                        "best_bid": f"0.4{index}",
+                        "best_ask": f"0.5{index}",
+                    }
+                ),
+            }
+            for index in range(3)
+        ] + [
+            {
+                "collected_at_utc": "2026-07-11T12:00:03Z",
+                "message": json.dumps(
+                    {
+                        "event_type": "book",
+                        "asset_id": "token-1",
+                        "bids": [{"price": "0.48", "size": "10"}],
+                        "asks": [{"price": "0.52", "size": "10"}],
+                    }
+                ),
+            }
+        ]
+
+    monkeypatch.setattr(websocket_collector.importlib, "import_module", fake_import_module)
+    monkeypatch.setattr(websocket_collector, "_collect_messages", fake_collect)
+
+    result = websocket_collector.collect_websocket(cfg, websocket_seconds=1)
+    raw_history = read_json(cfg.output_root / "polymarket_websocket" / "websocket_messages.json")
+    best_bid_ask_history = read_json(
+        cfg.output_root / "polymarket_websocket" / "websocket_best_bid_ask.json"
+    )
+    latest = read_json(cfg.output_root / "polymarket_websocket" / "websocket_messages_latest.json")
+
+    assert [json.loads(row["message"])["event_type"] for row in raw_history] == ["book"]
+    assert len(best_bid_ask_history) == 2
+    assert len(latest) == 4
+    assert result["retained_new_messages"] == 1
+    assert result["best_bid_ask_messages_received"] == 3
+    assert result["dropped_best_bid_ask_messages"] == 1
+
+
 def test_dynamic_subscriptions_enable_custom_features_only_when_requested() -> None:
     enabled = websocket_collector._subscription_variants(
         ["token-1"],

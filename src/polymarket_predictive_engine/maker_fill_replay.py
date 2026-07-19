@@ -129,7 +129,15 @@ def _write_gzip_csv(path: Path, rows: list[dict[str, Any]], fieldnames: list[str
 
 def _feature_files(cfg: EngineConfig) -> list[Path]:
     archive_root = cfg.output_root / "polymarket_training_archive"
-    files = sorted(archive_root.glob("*.csv.gz")) if archive_root.exists() else []
+    files = (
+        sorted(
+            path
+            for path in archive_root.glob("*.csv.gz")
+            if not path.name.startswith("daily_official_books_")
+        )
+        if archive_root.exists()
+        else []
+    )
     live = cfg.output_root / "polymarket_training" / "websocket_market_features.csv"
     if live.exists():
         files.append(live)

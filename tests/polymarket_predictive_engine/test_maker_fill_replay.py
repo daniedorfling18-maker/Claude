@@ -239,6 +239,19 @@ def test_absent_archive_is_tolerated(tmp_path):
     assert persisted["live_trading_invoked"] is False
 
 
+def test_feature_replay_excludes_compacted_official_book_snapshots(tmp_path):
+    cfg = _config(tmp_path)
+    archive = cfg.output_root / "polymarket_training_archive"
+    feature_path = archive / "features_websocket.csv.gz"
+    official_path = archive / "daily_official_books_2026-07-18.csv.gz"
+    fields = ["source_timestamp", "asset_id", "best_bid", "best_ask"]
+    rows = [{"source_timestamp": 1_000, "asset_id": "tok1", "best_bid": 0.48, "best_ask": 0.52}]
+    _write_gzip_csv(feature_path, rows, fields)
+    _write_gzip_csv(official_path, rows, fields)
+
+    assert maker_fill_replay._feature_files(cfg) == [feature_path]
+
+
 def test_snapshot_official_books_retains_repeated_observations_of_unchanged_book(tmp_path, monkeypatch):
     cfg = _config(tmp_path)
     raw = yaml.safe_load((tmp_path / "config.yaml").read_text(encoding="utf-8"))

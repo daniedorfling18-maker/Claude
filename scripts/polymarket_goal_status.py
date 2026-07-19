@@ -87,15 +87,11 @@ def dashboard_url_hint() -> str:
     )
     if explicit:
         return explicit.rstrip("/") + "/"
-    host = (
-        env_value("PM_VPS_HOST")
-        or env_value("POLYMARKET_DASHBOARD_PUBLIC_HOST")
-        or env_value("VPS_PUBLIC_IP")
-    )
     port = env_value("POLYMARKET_DASHBOARD_PORT") or env_value("DASHBOARD_PORT") or "8765"
-    if host:
-        return f"http://{host}:{port}/"
-    return f"http://{local_ip_hint()}:{port}/"
+    # Never infer a remotely reachable URL from a public VPS address. The only
+    # remote address is the explicit authenticated Tailscale HTTPS URL written
+    # during transport setup; otherwise report the loopback maintenance URL.
+    return f"http://127.0.0.1:{port}/"
 
 
 def first_dict(*values: Any) -> dict[str, Any]:

@@ -205,12 +205,8 @@ wait_for_dashboard() {
   while [ "$i" -lt 60 ]; do
     if curl -fsS --max-time 3 "$url" >/dev/null 2>&1; then
       log "Dashboard is responding locally: $url"
-      public_ip="$(curl -fsS --max-time 3 https://api.ipify.org 2>/dev/null || true)"
-      if [ -n "$public_ip" ]; then
-        log "If your VPS firewall allows it, open: http://${public_ip}:${port}/"
-      else
-        log "Public dashboard URL is http://<VPS_PUBLIC_IP>:${port}/ once the firewall allows it"
-      fi
+      log "Remote access remains closed until authenticated tailnet HTTPS is configured."
+      log "Next: install/enrol Tailscale, then run bash scripts/configure_polymarket_dashboard_tailscale.sh"
       return 0
     fi
     i=$((i + 1))

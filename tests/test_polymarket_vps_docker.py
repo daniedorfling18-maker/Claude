@@ -56,6 +56,9 @@ def test_vps_paper_compose_is_lean_and_paper_only():
     dashboard_command = services["polymarket-dashboard"]["command"]
     assert "render_polymarket_dashboard.py" in dashboard_command
     assert "if [ ! -f /app/outputs/polymarket_dashboard/index.html ]" not in dashboard_command
+    assert services["polymarket-dashboard"]["ports"] == [
+        "127.0.0.1:${POLYMARKET_DASHBOARD_PORT:-8765}:8765"
+    ]
     superbru = services["superbru-auto-pick-watchdog"]
     assert "run_superbru_auto_pick_watchdog.sh" in superbru["command"]
     assert superbru["environment"]["SUPERBRU_AUTO_PICK_ENABLED"] == "${SUPERBRU_AUTO_PICK_ENABLED:-true}"
@@ -99,6 +102,8 @@ def test_vps_env_example_keeps_live_credentials_empty():
     assert "SUPERBRU_EMAIL=" in text
     assert "SUPERBRU_PASSWORD=" in text
     assert "SUPERBRU_POOL_URL=" in text
+    assert "POLYMARKET_DASHBOARD_HOST=127.0.0.1" in text
+    assert "PM_DASHBOARD_PUBLIC_URL=" in text
 
 
 def test_vps_bootstrap_script_starts_only_lean_paper_stack():
@@ -115,6 +120,8 @@ def test_vps_bootstrap_script_starts_only_lean_paper_stack():
     assert "docker-compose.monitor.yml" not in text
     assert "POLYMARKET_LIVE_TRADING=1" not in text
     assert "POLYMARKET_EXECUTE_LIVE=true" not in text
+    assert "api.ipify.org" not in text
+    assert "configure_polymarket_dashboard_tailscale.sh" in text
     assert "PM_PAPER_MEM_LIMIT 2g" in text
     assert "POLYMARKET_WEBSOCKET_MAX_ASSETS 80" in text
     preflight = text.index("preflight_vps_capacity.py")
@@ -174,6 +181,10 @@ def test_vps_health_script_checks_dashboard_and_heartbeat_files():
     assert 'case "$REPO_DIR" in' in text
     assert '"~/"*) REPO_DIR="$HOME${REPO_DIR#?}" ;;' in text
     assert "eval " not in text
+    assert "validate_dashboard_private_transport.py" in text
+    assert "tailscale serve status" in text
+    assert "tailscale funnel status" in text
+    assert "--configured-url \"$private_dashboard_url\"" in text
 
 
 def test_vps_deploy_workflow_requires_current_dashboard_schema():
@@ -311,12 +322,16 @@ def test_vps_deploy_remote_script_is_valid_bash():
     assert result.returncode == 0, result.stderr
 
 
-def test_vps_deploy_workflow_writes_public_dashboard_url():
+def test_vps_deploy_workflow_enforces_private_dashboard_url():
     text = (ROOT / ".github" / "workflows" / "deploy-polymarket-vps-paper.yml").read_text(encoding="utf-8")
 
-    assert "PM_VPS_HOST='$PM_VPS_HOST'" in text
-    assert "PM_DASHBOARD_PUBLIC_URL=" in text
-    assert "public_url = f\"http://{host}:{port}/\"" in text
+    assert 'updates["POLYMARKET_DASHBOARD_HOST"] = "127.0.0.1"' in text
+    assert '"PM_DASHBOARD_PUBLIC_URL": private_url' in text
+    assert 'dashboard_private_url="https://${dashboard_dns}/"' in text
+    assert "configure_polymarket_dashboard_tailscale.sh" in text
+    assert "public_url =" not in text
+    assert "http://${PM_VPS_HOST}" not in text
+    assert "tailnet-authenticated HTTPS" in text
 
 
 def test_vps_deploy_workflow_validates_private_key_secret():

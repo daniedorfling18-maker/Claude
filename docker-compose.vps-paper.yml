@@ -134,7 +134,10 @@ services:
       --host 0.0.0.0
       --port 8765"
     ports:
-      - "${POLYMARKET_DASHBOARD_HOST:-0.0.0.0}:${POLYMARKET_DASHBOARD_PORT:-8765}:8765"
+      # The dashboard is never published on a public host interface. Tailscale
+      # Serve is the sole authenticated HTTPS ingress and proxies this
+      # loopback-only listener from within the tailnet.
+      - "127.0.0.1:${POLYMARKET_DASHBOARD_PORT:-8765}:8765"
     volumes:
       - ./polymarket_predictive_config.example.yaml:/app/polymarket_predictive_config.example.yaml:ro
       - ./scripts:/app/scripts:ro

@@ -5059,7 +5059,6 @@ frozen-surface change.
 5. **Deployment controls:** implement an actual tested rollback, isolate
    deploy acceptance from the continuously running scheduler, and deploy only
    an independently accepted main revision.
-
    **Implemented 2026-07-19, pending independent review/merge and production
    deployment:** the deploy workflow now requires the exact successful
    independent-merge attestation for the target `main` SHA. Before cutover it
@@ -5095,8 +5094,19 @@ frozen-surface change.
    `outputs/performance/vps_deploy_rollback.json` must be `PASS` with
    `decision=ROLLED_BACK_TO_LAST_KNOWN_GOOD`, and checkout, environment, marker,
    image-backed services, and health check must all be restored.
-6. **Dashboard transport:** remove the public unauthenticated HTTP exposure and
-   serve the dashboard through authenticated HTTPS or a private VPN.
+6. **Dashboard transport:** IMPLEMENTED by Codex on 2026-07-19; awaiting the
+   required gate and owner review. Compose hard-codes a loopback-only host
+   binding, authenticated tailnet-only HTTPS is configured with Tailscale
+   Serve, Funnel is rejected, deploys fail before cutover when Tailscale is not
+   enrolled, and host health writes fail-closed transport evidence. This is the
+   registered **authenticated HTTPS or a private VPN** path. Producer:
+   Tailscale status/Serve plus Docker's effective port binding. Consumers:
+   deploy acceptance, VPS health, operator runbooks, and the dashboard URL
+   hint. Fail-safe: missing/stale/mismatched transport blocks deployment health
+   and never falls back to public HTTP. Day-after check: on the deployed VPS,
+   verify the transport artifact is `PASS`, `docker port` is loopback-only,
+   the private URL works from an enrolled phone, the public-IP URL does not,
+   and no Funnel route exists.
 7. **Review hygiene:** adjudicate every surviving review thread against current
    main; resolve only findings that are fixed or demonstrably superseded, and
    fix applicable findings in their own PRs first.

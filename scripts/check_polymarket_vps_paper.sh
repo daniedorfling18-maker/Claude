@@ -56,6 +56,7 @@ cd "$REPO_DIR"
 port="$(env_value POLYMARKET_DASHBOARD_PORT .env)"
 port="${port:-8765}"
 dashboard_url="http://127.0.0.1:${port}/"
+private_dashboard_url="$(env_value PM_DASHBOARD_PUBLIC_URL .env)"
 heartbeat="outputs/polymarket_model_governance/local_live_loop_heartbeat.json"
 forward_cycle="outputs/polymarket_model_governance/forward_paper_cycle.json"
 dashboard_data="outputs/polymarket_dashboard/dashboard_data.json"
@@ -69,9 +70,49 @@ if [ -n "${deployed_sha:-}" ]; then
   printf '%s\n' "Deploy SHA: $deployed_sha"
 fi
 printf '%s\n' "Compose: $COMPOSE_FILE"
-printf '%s\n' "Dashboard: $dashboard_url"
+printf '%s\n' "Dashboard backend: $dashboard_url"
+printf '%s\n' "Dashboard private HTTPS: ${private_dashboard_url:-not configured}"
 
 docker_cmd compose -f "$COMPOSE_FILE" ps
+
+printf '%s\n' ""
+printf '%s\n' "Private dashboard transport:"
+transport_tmp="$(mktemp -d)"
+trap 'rm -rf "$transport_tmp"' EXIT INT TERM
+if ! command -v tailscale >/dev/null 2>&1; then
+  printf '%s\n' "  FAIL: Tailscale is not installed; public dashboard exposure remains forbidden."
+  exit_code=1
+else
+  if ! $SUDO tailscale status --json > "$transport_tmp/tailscale-status.json"; then
+    printf '%s\n' "  FAIL: Tailscale status is unavailable or the node is logged out."
+    exit_code=1
+  fi
+  if ! $SUDO tailscale serve status > "$transport_tmp/tailscale-serve-status.txt"; then
+    printf '%s\n' "  FAIL: Tailscale Serve status is unavailable."
+    exit_code=1
+  fi
+  $SUDO tailscale funnel status >> "$transport_tmp/tailscale-serve-status.txt" 2>/dev/null || true
+  if ! docker_cmd port polymarket-dashboard 8765/tcp > "$transport_tmp/dashboard-bindings.txt"; then
+    printf '%s\n' "  FAIL: dashboard Docker binding is unavailable."
+    exit_code=1
+  fi
+  if [ -f "$transport_tmp/tailscale-status.json" ] \
+    && [ -f "$transport_tmp/tailscale-serve-status.txt" ] \
+    && [ -f "$transport_tmp/dashboard-bindings.txt" ]; then
+    if python3 scripts/validate_dashboard_private_transport.py \
+      --tailscale-status "$transport_tmp/tailscale-status.json" \
+      --serve-status "$transport_tmp/tailscale-serve-status.txt" \
+      --docker-bindings "$transport_tmp/dashboard-bindings.txt" \
+      --expected-port "$port" \
+      --configured-url "$private_dashboard_url" \
+      --output outputs/performance/dashboard_private_transport.json; then
+      printf '%s\n' "  PASS: loopback-only Docker binding and authenticated tailnet HTTPS verified."
+    else
+      printf '%s\n' "  FAIL: private HTTPS transport did not satisfy the registered checks."
+      exit_code=1
+    fi
+  fi
+fi
 
 printf '%s\n' ""
 printf '%s\n' "Secrets check (.env -> container):"
@@ -180,4 +221,6 @@ if [ -z "${heartbeat_age:-}" ] && [ -z "${forward_age:-}" ]; then
   exit_code=1
 fi
 
+rm -rf "$transport_tmp"
+trap - EXIT INT TERM
 exit "${exit_code:-0}"

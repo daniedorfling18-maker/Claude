@@ -6,8 +6,14 @@ Linux uses the `opc` SSH user; Ubuntu uses `ubuntu`.
 
 1. SSH into the VM.
 2. Run `curl -fsSL https://raw.githubusercontent.com/daniedorfling18-maker/Claude/main/scripts/bootstrap_polymarket_vps_paper.sh | sh`.
-3. Review status with `bash ~/Claude/scripts/check_polymarket_vps_paper.sh`.
-4. Open the dashboard at `http://<VPS_PUBLIC_IP>:8765/` after allowing the port or setting up Tailscale.
+3. Install/enrol Tailscale with `sudo tailscale up`, then run
+   `bash ~/Claude/scripts/configure_polymarket_dashboard_tailscale.sh`.
+4. Review status with `bash ~/Claude/scripts/check_polymarket_vps_paper.sh`.
+5. Install Tailscale on the phone/laptop, join the same tailnet, and open the
+   private `https://...ts.net/` URL printed by the setup script.
+
+Do not open TCP `8765` in Oracle Cloud. The Compose binding is loopback-only,
+and Tailscale Funnel must remain disabled.
 
 Full instructions: `docs/POLYMARKET_VPS_DOCKER_RUNBOOK.md`.
 

@@ -17,19 +17,25 @@ def _load_goal_status_module():
     return module
 
 
-def test_goal_status_prefers_explicit_public_dashboard_url(monkeypatch):
+def test_goal_status_prefers_explicit_private_dashboard_url(monkeypatch):
     module = _load_goal_status_module()
 
-    monkeypatch.setenv("PM_DASHBOARD_PUBLIC_URL", "http://129.151.178.42:8765")
+    monkeypatch.setenv(
+        "PM_DASHBOARD_PUBLIC_URL",
+        "https://polymarket-trader.example-tailnet.ts.net",
+    )
 
-    assert module.dashboard_url_hint() == "http://129.151.178.42:8765/"
+    assert (
+        module.dashboard_url_hint()
+        == "https://polymarket-trader.example-tailnet.ts.net/"
+    )
 
 
-def test_goal_status_builds_public_url_from_vps_host(monkeypatch):
+def test_goal_status_never_builds_public_url_from_vps_host(monkeypatch):
     module = _load_goal_status_module()
 
     monkeypatch.delenv("PM_DASHBOARD_PUBLIC_URL", raising=False)
     monkeypatch.setenv("PM_VPS_HOST", "129.151.178.42")
     monkeypatch.setenv("POLYMARKET_DASHBOARD_PORT", "8765")
 
-    assert module.dashboard_url_hint() == "http://129.151.178.42:8765/"
+    assert module.dashboard_url_hint() == "http://127.0.0.1:8765/"

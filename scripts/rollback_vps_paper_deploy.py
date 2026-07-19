@@ -31,6 +31,13 @@ DEFAULT_REQUIRED_SERVICES = (
     "vps-ops-scheduler",
 )
 SHA_LENGTH = 40
+DASHBOARD_SERVICE = "polymarket-dashboard"
+DASHBOARD_CONTAINER_PORT = "8765/tcp"
+DASHBOARD_OVERRIDE = """services:
+  polymarket-dashboard:
+    ports:
+      - \"127.0.0.1:${POLYMARKET_DASHBOARD_PORT:-8765}:8765\"
+"""
 
 
 class RollbackError(RuntimeError):
@@ -177,15 +184,109 @@ def _docker_command(raw: str) -> list[str]:
     return command
 
 
-def _compose(docker: Sequence[str], repo: Path, compose_file: str, *args: str, check: bool = True) -> subprocess.CompletedProcess[str]:
-    return _run((*docker, "compose", "-f", compose_file, *args), cwd=repo, check=check)
+def _tailscale_command(raw: str) -> list[str]:
+    command = shlex.split(raw)
+    if not command or Path(command[-1]).name != "tailscale":
+        raise RollbackError("--tailscale-command must resolve to tailscale or sudo tailscale")
+    return command
+
+
+def _compose(
+    docker: Sequence[str],
+    repo: Path,
+    compose_files: Sequence[str],
+    *args: str,
+    check: bool = True,
+) -> subprocess.CompletedProcess[str]:
+    command = [*docker, "compose"]
+    for compose_file in compose_files:
+        command.extend(("-f", compose_file))
+    return _run((*command, *args), cwd=repo, check=check)
+
+
+def _env_value(path: Path, key: str) -> str:
+    value = ""
+    for line in path.read_text(encoding="utf-8").splitlines():
+        if line.startswith(f"{key}="):
+            value = line.split("=", 1)[1].strip().strip('"').strip("'")
+    return value
+
+
+def _verify_private_dashboard_transport(
+    *,
+    repo: Path,
+    docker: Sequence[str],
+    tailscale: Sequence[str],
+    validator: Path,
+    configured_url: str,
+    expected_port: int,
+    temporary_root: Path,
+) -> dict[str, Any]:
+    if not validator.is_file():
+        raise RollbackError(f"private-transport validator is missing: {validator}")
+    backend_url = f"http://127.0.0.1:{expected_port}"
+    # Reassert Serve after the old source revision has been restored. Funnel
+    # must never become the rollback fallback.
+    _run((*tailscale, "funnel", "--https=443", "off"), cwd=repo, check=False)
+    _run((*tailscale, "serve", "--bg", "--yes", "--https=443", backend_url), cwd=repo)
+    status_path = temporary_root / "rollback-tailscale-status.json"
+    serve_path = temporary_root / "rollback-tailscale-serve-status.txt"
+    bindings_path = temporary_root / "rollback-dashboard-bindings.txt"
+    status_path.write_text(
+        _run((*tailscale, "status", "--json"), cwd=repo).stdout,
+        encoding="utf-8",
+    )
+    serve_status = _run((*tailscale, "serve", "status"), cwd=repo).stdout
+    funnel_status = _run((*tailscale, "funnel", "status"), cwd=repo, check=False).stdout
+    serve_path.write_text(serve_status + funnel_status, encoding="utf-8")
+    bindings = _run(
+        (*docker, "port", DASHBOARD_SERVICE, DASHBOARD_CONTAINER_PORT),
+        cwd=repo,
+    ).stdout
+    bindings_path.write_text(bindings, encoding="utf-8")
+    transport_output = repo / "outputs" / "performance" / "dashboard_private_transport.json"
+    validation = _run(
+        (
+            sys.executable,
+            str(validator),
+            "--tailscale-status",
+            str(status_path),
+            "--serve-status",
+            str(serve_path),
+            "--docker-bindings",
+            str(bindings_path),
+            "--expected-port",
+            str(expected_port),
+            "--configured-url",
+            configured_url,
+            "--output",
+            str(transport_output),
+        ),
+        cwd=repo,
+        check=False,
+    )
+    if validation.returncode != 0:
+        raise RollbackError(
+            f"rollback private-dashboard transport validation failed with exit {validation.returncode}"
+        )
+    return {
+        "dashboard_private_transport_verified": True,
+        "dashboard_bindings": [line for line in bindings.splitlines() if line],
+        "dashboard_private_url": configured_url,
+        "dashboard_backend_url": backend_url,
+    }
 
 
 def rollback(args: argparse.Namespace) -> dict[str, Any]:
     repo = args.repo.resolve()
     report = args.report if args.report.is_absolute() else repo / args.report
     docker = _docker_command(args.docker_command)
+    tailscale = _tailscale_command(args.tailscale_command)
     required_services = set(args.required_service or DEFAULT_REQUIRED_SERVICES)
+    private_override = args.env_backup.parent / "dashboard-private-rollback.override.yml"
+    private_override.write_text(DASHBOARD_OVERRIDE, encoding="utf-8")
+    private_override.chmod(0o600)
+    compose_files = (args.compose_file, str(private_override))
     payload: dict[str, Any] = {
         "work_order": "deployment-controls",
         "status": "STARTED",
@@ -216,7 +317,7 @@ def rollback(args: argparse.Namespace) -> dict[str, Any]:
                 )
             )
 
-        _compose(docker, repo, args.compose_file, "stop", "--timeout", "60")
+        _compose(docker, repo, compose_files, "stop", "--timeout", "60")
         stack_stopped = True
         checkout = _preserve_runtime_and_checkout(repo, args.rollback_ref, args.branch)
         payload.update(checkout)
@@ -243,7 +344,7 @@ def rollback(args: argparse.Namespace) -> dict[str, Any]:
         _compose(
             docker,
             repo,
-            args.compose_file,
+            compose_files,
             "up",
             "-d",
             "--no-build",
@@ -255,7 +356,7 @@ def rollback(args: argparse.Namespace) -> dict[str, Any]:
             observed = _compose(
                 docker,
                 repo,
-                args.compose_file,
+                compose_files,
                 "ps",
                 "--services",
                 "--status",
@@ -294,6 +395,25 @@ def rollback(args: argparse.Namespace) -> dict[str, Any]:
             or str(telemetry.get("deployed_git_rev") or "") != checkout["rollback_head"]
         ):
             raise RollbackError("rollback telemetry does not identify the restored revision")
+
+        restored_env = repo / ".env"
+        dashboard_port_text = _env_value(restored_env, "POLYMARKET_DASHBOARD_PORT") or "8765"
+        if not dashboard_port_text.isdigit() or not 1 <= int(dashboard_port_text) <= 65535:
+            raise RollbackError(f"restored dashboard port is invalid: {dashboard_port_text}")
+        restored_private_url = _env_value(restored_env, "PM_DASHBOARD_PUBLIC_URL")
+        if restored_private_url.rstrip("/") != args.private_dashboard_url.rstrip("/"):
+            raise RollbackError("restored environment does not retain the enrolled private dashboard URL")
+        payload.update(
+            _verify_private_dashboard_transport(
+                repo=repo,
+                docker=docker,
+                tailscale=tailscale,
+                validator=args.transport_validator,
+                configured_url=restored_private_url,
+                expected_port=int(dashboard_port_text),
+                temporary_root=args.env_backup.parent,
+            )
+        )
 
         health_script = repo / args.health_script
         if not health_script.is_file():
@@ -351,6 +471,9 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--image-live-tag", default="polymarket-paper-vps:latest")
     parser.add_argument("--docker-command", default="docker")
     parser.add_argument("--telemetry-writer", type=Path, required=True)
+    parser.add_argument("--tailscale-command", default="tailscale")
+    parser.add_argument("--transport-validator", type=Path, required=True)
+    parser.add_argument("--private-dashboard-url", required=True)
     parser.add_argument("--failed-target-sha", required=True)
     parser.add_argument("--report", type=Path, default=Path("outputs/performance/vps_deploy_rollback.json"))
     parser.add_argument("--required-service", action="append", default=[])

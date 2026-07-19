@@ -32,7 +32,7 @@ def _write(repo: Path, relative: str, value: str) -> None:
     path.write_text(value, encoding="utf-8")
 
 
-def _fixture(tmp_path: Path) -> tuple[Path, str, str, Path, Path, Path]:
+def _fixture(tmp_path: Path) -> tuple[Path, str, str, Path, Path, Path, Path]:
     repo = tmp_path / "deploy"
     repo.mkdir()
     _git(repo, "init", "-b", "main")
@@ -63,7 +63,14 @@ def _fixture(tmp_path: Path) -> tuple[Path, str, str, Path, Path, Path]:
     _write(repo, ".env", "PM_VPS_DEPLOYED_SHA=candidate\nSECRET=target\n")
 
     env_backup = tmp_path / "env.backup"
-    env_backup.write_text("PM_VPS_DEPLOYED_SHA=old\nSECRET=preserved\n", encoding="utf-8")
+    env_backup.write_text(
+        "PM_VPS_DEPLOYED_SHA=old\n"
+        "POLYMARKET_DASHBOARD_HOST=127.0.0.1\n"
+        "POLYMARKET_DASHBOARD_PORT=8765\n"
+        "PM_DASHBOARD_PUBLIC_URL=https://polymarket-trader.example-tailnet.ts.net/\n"
+        "SECRET=preserved\n",
+        encoding="utf-8",
+    )
     marker_backup = tmp_path / "marker.backup"
     marker_backup.write_text(old + "\n", encoding="utf-8")
     docker_log = tmp_path / "docker.log"
@@ -74,12 +81,27 @@ def _fixture(tmp_path: Path) -> tuple[Path, str, str, Path, Path, Path]:
         "pathlib.Path(os.environ['FAKE_DOCKER_LOG']).open('a', encoding='utf-8').write(' '.join(sys.argv[1:]) + '\\n')\n"
         "if len(sys.argv) > 2 and sys.argv[1:3] == ['image', 'inspect']:\n"
         "    print('sha256:last-known-good')\n"
+        "if len(sys.argv) > 1 and sys.argv[1] == 'port':\n"
+        "    print('127.0.0.1:8765')\n"
         "if 'ps' in sys.argv and '--services' in sys.argv:\n"
         f"    print({' '.join(SERVICES)!r}.replace(' ', '\\n'))\n",
         encoding="utf-8",
     )
     fake_docker.chmod(0o755)
-    return repo, old, candidate, env_backup, marker_backup, fake_docker
+    fake_tailscale = tmp_path / "tailscale"
+    fake_tailscale.write_text(
+        "#!/usr/bin/env python3\n"
+        "import json, pathlib, sys\n"
+        "pathlib.Path(__file__).with_name('tailscale.log').open('a', encoding='utf-8').write(' '.join(sys.argv[1:]) + '\\n')\n"
+        "args = sys.argv[1:]\n"
+        "if args == ['status', '--json']:\n"
+        "    print(json.dumps({'BackendState':'Running','TailscaleIPs':['100.64.12.34'],'Self':{'DNSName':'polymarket-trader.example-tailnet.ts.net.'}}))\n"
+        "elif args == ['serve', 'status']:\n"
+        "    print('Available within your tailnet:\\nhttps://polymarket-trader.example-tailnet.ts.net\\n|-- / proxy http://127.0.0.1:8765')\n",
+        encoding="utf-8",
+    )
+    fake_tailscale.chmod(0o755)
+    return repo, old, candidate, env_backup, marker_backup, fake_docker, fake_tailscale
 
 
 def _rollback(
@@ -89,6 +111,7 @@ def _rollback(
     env_backup: Path,
     marker_backup: Path,
     fake_docker: Path,
+    fake_tailscale: Path,
 ) -> subprocess.CompletedProcess[str]:
     env = os.environ.copy()
     env["FAKE_DOCKER_LOG"] = str(fake_docker.with_name("docker.log"))
@@ -110,6 +133,12 @@ def _rollback(
         str(fake_docker),
         "--telemetry-writer",
         str(ROOT / "scripts" / "write_vps_telemetry_manifest.py"),
+        "--tailscale-command",
+        str(fake_tailscale),
+        "--transport-validator",
+        str(ROOT / "scripts" / "validate_dashboard_private_transport.py"),
+        "--private-dashboard-url",
+        "https://polymarket-trader.example-tailnet.ts.net/",
         "--failed-target-sha",
         candidate,
         "--health-attempts",
@@ -123,9 +152,19 @@ def _rollback(
 
 
 def test_actual_rollback_restores_source_env_marker_image_and_stack(tmp_path: Path) -> None:
-    repo, old, candidate, env_backup, marker_backup, fake_docker = _fixture(tmp_path)
+    repo, old, candidate, env_backup, marker_backup, fake_docker, fake_tailscale = _fixture(
+        tmp_path
+    )
 
-    result = _rollback(repo, old, candidate, env_backup, marker_backup, fake_docker)
+    result = _rollback(
+        repo,
+        old,
+        candidate,
+        env_backup,
+        marker_backup,
+        fake_docker,
+        fake_tailscale,
+    )
 
     assert result.returncode == 0, result.stderr or result.stdout
     assert _git(repo, "rev-parse", "HEAD") == old
@@ -136,10 +175,12 @@ def test_actual_rollback_restores_source_env_marker_image_and_stack(tmp_path: Pa
     assert _git(repo, "stash", "list") == ""
 
     calls = fake_docker.with_name("docker.log").read_text(encoding="utf-8")
-    assert "compose -f docker-compose.vps-paper.yml stop --timeout 60" in calls
+    assert "compose -f docker-compose.vps-paper.yml -f " in calls
+    assert "dashboard-private-rollback.override.yml stop --timeout 60" in calls
     assert "image tag polymarket-paper-vps:rollback-last-known-good polymarket-paper-vps:latest" in calls
     assert calls.count("image inspect --format {{.Id}}") == 2
-    assert "compose -f docker-compose.vps-paper.yml up -d --no-build --force-recreate" in calls
+    assert "dashboard-private-rollback.override.yml up -d --no-build --force-recreate" in calls
+    assert "port polymarket-dashboard 8765/tcp" in calls
     report = json.loads((repo / "outputs/performance/vps_deploy_rollback.json").read_text())
     assert report["status"] == "PASS"
     assert report["decision"] == "ROLLED_BACK_TO_LAST_KNOWN_GOOD"
@@ -155,13 +196,28 @@ def test_actual_rollback_restores_source_env_marker_image_and_stack(tmp_path: Pa
     assert manifest["deployed_git_rev"] == old
     assert report["paper_trading_invoked"] is False
     assert report["live_trading_invoked"] is False
+    assert report["dashboard_private_transport_verified"] is True
+    assert report["dashboard_bindings"] == ["127.0.0.1:8765"]
+    tailscale_calls = fake_tailscale.with_name("tailscale.log").read_text(encoding="utf-8")
+    assert "funnel --https=443 off" in tailscale_calls
+    assert "serve --bg --yes --https=443 http://127.0.0.1:8765" in tailscale_calls
 
 
 def test_rollback_refuses_source_dirt_before_stopping_stack(tmp_path: Path) -> None:
-    repo, old, candidate, env_backup, marker_backup, fake_docker = _fixture(tmp_path)
+    repo, old, candidate, env_backup, marker_backup, fake_docker, fake_tailscale = _fixture(
+        tmp_path
+    )
     _write(repo, "src/app.py", "UNREVIEWED LOCAL SOURCE\n")
 
-    result = _rollback(repo, old, candidate, env_backup, marker_backup, fake_docker)
+    result = _rollback(
+        repo,
+        old,
+        candidate,
+        env_backup,
+        marker_backup,
+        fake_docker,
+        fake_tailscale,
+    )
 
     assert result.returncode == 1
     assert _git(repo, "rev-parse", "HEAD") == candidate

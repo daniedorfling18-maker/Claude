@@ -5508,6 +5508,10 @@ def render_dashboard(cfg: EngineConfig, latest_report: dict[str, Any] | None = N
     executor_status = read_json(cfg.output_root / "execution" / "executor_status.json", default={}) or {}
     if not isinstance(executor_status, dict):
         executor_status = {}
+    if not executor_status:
+        embedded_executor_status = operating_state.get("executor_status")
+        if isinstance(embedded_executor_status, dict):
+            executor_status = embedded_executor_status
     degraded_state_watchdog = read_json(
         cfg.output_root / "ops_scheduler" / "degraded_state_watchdog.json", default={}
     ) or {}

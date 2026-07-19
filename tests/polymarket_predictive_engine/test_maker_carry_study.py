@@ -13,7 +13,7 @@ import yaml
 from polymarket_predictive_engine import maker_carry_study
 from polymarket_predictive_engine.config import load_config
 from polymarket_predictive_engine.maker_carry_study import run_maker_carry_study
-from polymarket_predictive_engine.utils import read_csv_rows, read_json, write_csv
+from polymarket_predictive_engine.utils import read_csv_rows, read_json, write_csv, write_json
 
 
 def _config(tmp_path: Path):
@@ -678,7 +678,39 @@ def test_gate_a_passes_only_after_enough_distinct_days_at_target(tmp_path, monke
     assert gates["M_A_carry_evidence"]["runs_at_or_above_target"] == 7
     assert gates["M_A_carry_evidence"]["counting"] == "distinct_utc_days"
     assert gates["M_A_carry_evidence"]["state"] == "pass"
+    # M-B.1: with no Tier-0 replay on disk, M-B is now pending (the closed hole).
+    assert gates["M_B_adverse_realism"]["state"] == "pending"
+    assert gates["M_B_adverse_realism"]["mb1_tier0_coverage_sufficient"] is False
+    assert gates["maker_verdict"] == "insufficient_evidence"
+
+    # Real pipeline runs the Tier-0 replay between study cycles. Write a
+    # qualifying replay for the exact portfolio market(s), then re-run: M-B
+    # passes and the verdict flips to evidence-supported.
+    cov_rows = [
+        {
+            "condition_id": row["condition_id"],
+            "asset_id": row.get("token_id", ""),
+            "last_in_queue_evaluable_opportunities": 40,
+            "confirmed_fills": 15,
+            "coverage_ratio": 0.95,
+            "simulation_to_reality_haircut": 0.7,
+            "by_horizon": {
+                "5m": {"windows_covered": 15},
+                "15m": {"windows_covered": 14},
+                "60m": {"windows_covered": 12},
+            },
+        }
+        for row in last["portfolio"]
+    ]
+    write_json(
+        cfg.output_root / "maker_carry" / "maker_fill_replay.json",
+        {"generated_at_utc": "2026-07-16T06:00:00Z", "primary_book_source": "official", "per_market_coverage": cov_rows},
+    )
+    last = run_maker_carry_study(cfg)
+    gates = last["maker_gates"]
+    assert gates["M_A_carry_evidence"]["state"] == "pass"
     assert gates["M_B_adverse_realism"]["state"] == "pass"
+    assert gates["M_B_adverse_realism"]["mb1_tier0_coverage_sufficient"] is True
     assert gates["maker_verdict"] == "evidence_supported_pending_human_decision"
     # Even a supported verdict never trades; the sheet says so in print.
     assert last["paper_trading_invoked"] is False
@@ -786,3 +818,92 @@ def test_ma_today_governed_by_current_run_not_earlier_spike() -> None:
 def test_ma_legacy_model_day_excluded() -> None:
     prior = [_ma_run("2026-07-10", 8.0, model="legacy", hour="20:00:00")]
     assert maker_carry_study._distinct_days_at_target(prior, 3.33, current_day="2026-07-12", latest_at_target=False) == set()
+
+
+# --- M-B.1 amendment: own Tier-0 coverage requirement -----------------------
+
+_MB_STUDY_STAMP = "2026-07-18T12:00:00Z"
+
+
+def _mb_cov(condition_id: str = "0xc", token_id: str = "0xt", **o: Any) -> dict[str, Any]:
+    return {
+        "condition_id": condition_id,
+        "asset_id": token_id,
+        "last_in_queue_evaluable_opportunities": o.get("evaluable", 35),
+        "confirmed_fills": o.get("confirmed", 12),
+        "coverage_ratio": o.get("coverage", 0.90),
+        "simulation_to_reality_haircut": o.get("haircut", 0.8),
+        "by_horizon": o.get(
+            "by_horizon",
+            {"5m": {"windows_covered": 12}, "15m": {"windows_covered": 11}, "60m": {"windows_covered": 10}},
+        ),
+    }
+
+
+def _mb_replay(rows: list[dict[str, Any]], *, stamp: str = "2026-07-18T06:00:00Z", source: str = "official") -> dict[str, Any]:
+    return {"generated_at_utc": stamp, "primary_book_source": source, "per_market_coverage": rows}
+
+
+_MB_PORT = [{"condition_id": "0xc", "token_id": "0xt", "markout_measured": True}]
+
+
+def _mb_ok(replay: dict[str, Any], portfolio=_MB_PORT, **settings: Any) -> bool:
+    return maker_carry_study._mb_tier0_coverage_sufficient(
+        replay, portfolio, study_generated_at=_MB_STUDY_STAMP, settings=settings
+    )
+
+
+def test_mb1_sufficient_coverage_passes() -> None:
+    assert _mb_ok(_mb_replay([_mb_cov()])) is True
+
+
+def test_mb1_no_replay_fails_closed() -> None:
+    # The exact hole being closed: markout measured but zero Tier-0 coverage.
+    assert _mb_ok({}) is False
+
+
+def test_mb1_low_coverage_ratio_fails() -> None:
+    assert _mb_ok(_mb_replay([_mb_cov(coverage=0.5)])) is False
+
+
+def test_mb1_stale_replay_fails() -> None:
+    # 48h old vs the 26h registered bound.
+    assert _mb_ok(_mb_replay([_mb_cov()], stamp="2026-07-16T12:00:00Z")) is False
+
+
+def test_mb1_missing_market_row_fails() -> None:
+    assert _mb_ok(_mb_replay([_mb_cov(condition_id="0xother", token_id="0xother")])) is False
+
+
+def test_mb1_non_official_source_fails() -> None:
+    assert _mb_ok(_mb_replay([_mb_cov()], source="archive")) is False
+
+
+def test_mb1_insufficient_markout_windows_fail() -> None:
+    thin = _mb_cov(by_horizon={"5m": {"windows_covered": 5}, "15m": {"windows_covered": 11}, "60m": {"windows_covered": 10}})
+    assert _mb_ok(_mb_replay([thin])) is False
+
+
+def test_mb1_haircut_above_ceiling_fails() -> None:
+    assert _mb_ok(_mb_replay([_mb_cov(haircut=1.5)])) is False
+
+
+def test_mb1_every_portfolio_market_must_be_covered() -> None:
+    portfolio = [
+        {"condition_id": "0xc", "token_id": "0xt", "markout_measured": True},
+        {"condition_id": "0xd", "token_id": "0xu", "markout_measured": True},
+    ]
+    # Only the first market has coverage -> M-B stays pending.
+    assert _mb_ok(_mb_replay([_mb_cov()]), portfolio=portfolio) is False
+    assert _mb_ok(_mb_replay([_mb_cov(), _mb_cov("0xd", "0xu")]), portfolio=portfolio) is True
+
+
+def test_mb1_override_cannot_loosen_replay_age() -> None:
+    # A config that tries to WIDEN the age bound is ignored: a 48h replay still
+    # fails the registered 26h ceiling.
+    assert _mb_ok(_mb_replay([_mb_cov()], stamp="2026-07-16T12:00:00Z"), mb_tier0_max_replay_age_seconds=999999) is False
+
+
+def test_mb1_override_can_only_tighten_min_confirmed() -> None:
+    # Raising the confirmed-fill minimum is applied: 12 fills fails at 100.
+    assert _mb_ok(_mb_replay([_mb_cov()]), mb_tier0_min_confirmed_fills=100) is False

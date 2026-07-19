@@ -17,6 +17,13 @@ SERVICES = (
 )
 
 
+def test_private_rollback_override_replaces_legacy_port_list() -> None:
+    source = ROLLBACK.read_text(encoding="utf-8")
+
+    assert "ports: !override" in source
+    assert '127.0.0.1:${POLYMARKET_DASHBOARD_PORT:-8765}:8765' in source
+
+
 def _git(repo: Path, *args: str) -> str:
     return subprocess.run(
         ["git", "-C", str(repo), *args],

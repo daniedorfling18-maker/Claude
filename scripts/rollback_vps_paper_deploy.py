@@ -35,7 +35,11 @@ DASHBOARD_SERVICE = "polymarket-dashboard"
 DASHBOARD_CONTAINER_PORT = "8765/tcp"
 DASHBOARD_OVERRIDE = """services:
   polymarket-dashboard:
-    ports:
+    # Compose otherwise merges unique port entries.  A last-known-good file
+    # with 0.0.0.0:8765 and this loopback entry would therefore retain both
+    # listeners (or fail on the duplicate published port).  Replacement is a
+    # security invariant during rollback, not an additive override.
+    ports: !override
       - \"127.0.0.1:${POLYMARKET_DASHBOARD_PORT:-8765}:8765\"
 """
 

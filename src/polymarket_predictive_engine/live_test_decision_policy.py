@@ -419,7 +419,14 @@ def _quarter_kelly_cap(history: list[dict[str, Any]], ladder_cap: float, setting
         KELLY_FULL_WEIGHT_DAYS_FLOOR,
         int(settings.get("kelly_full_weight_days") or KELLY_FULL_WEIGHT_DAYS_FLOOR),
     )
-    shrinkage = max(0.0, min(1.0, 1.0 - len(values) / full_weight_days))
+    # #259: when the returns path drives the fraction, the uncertainty shrinkage
+    # and reported observation count must reflect the number of USABLE return
+    # observations, not the (possibly larger) dollar-row count. Fewer usable
+    # observations => more shrinkage (tighter); with per-row capital present on
+    # every row (production) the two counts are equal, so this only bites the
+    # mixed-history fallback case, and only in the tightening direction.
+    observations = len(return_values) if len(return_values) >= 2 else len(values)
+    shrinkage = max(0.0, min(1.0, 1.0 - observations / full_weight_days))
     # 2026-07-11 WO-59 tighten-only adapter: at a 0.50 no-edge price,
     # p=0.50+f/2 has plain Kelly fraction f. The shared uncertainty shrinker
     # therefore pulls the old inline quarter-Kelly ceiling toward zero and is
@@ -443,7 +450,7 @@ def _quarter_kelly_cap(history: list[dict[str, Any]], ladder_cap: float, setting
         "quarter_kelly_fraction": round(quarter, 6),
         "inline_quarter_kelly_fraction": round(inline_quarter, 6),
         "kelly_shrinkage": round(shrinkage, 6),
-        "kelly_observations": len(values),
+        "kelly_observations": observations,
         "kelly_full_weight_days": full_weight_days,
         "kelly_lineage": "risk.shrunk_kelly_fraction",
         "kelly_capital_usd": kelly_capital,

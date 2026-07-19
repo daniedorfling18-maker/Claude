@@ -38,6 +38,7 @@ from __future__ import annotations
 
 import csv
 import gzip
+import math
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -71,11 +72,29 @@ def _settings(cfg: EngineConfig) -> dict[str, Any]:
     return raw if isinstance(raw, dict) else {}
 
 
-def _tighter_max(settings: dict[str, Any], key: str, registered: float) -> float:
-    """A configured maximum may only shrink the registered one (tighten-only)."""
+def _finite_float(value: Any) -> float | None:
+    """safe_float that also rejects non-finite (NaN/inf) values.
 
-    value = safe_float(settings.get(key))
-    if value is None or value <= 0:
+    A NaN slipping into a `<`/`>` threshold comparison makes it False, which
+    would let an unknown value pass a fail-closed check; treat non-finite as
+    missing so the caller fails closed.
+    """
+
+    parsed = safe_float(value)
+    if parsed is None or not math.isfinite(parsed):
+        return None
+    return parsed
+
+
+def _tighter_max(settings: dict[str, Any], key: str, registered: float) -> float:
+    """A configured maximum may only shrink the registered one (tighten-only).
+
+    Zero is a valid (extreme) tightening for these non-negative maxima, so it
+    is honored; only a negative or non-finite override is rejected.
+    """
+
+    value = _finite_float(settings.get(key))
+    if value is None or value < 0:
         return registered
     return min(registered, value)
 
@@ -83,7 +102,7 @@ def _tighter_max(settings: dict[str, Any], key: str, registered: float) -> float
 def _tighter_min(settings: dict[str, Any], key: str, registered: float) -> float:
     """A configured minimum may only grow the registered one (tighten-only)."""
 
-    value = safe_float(settings.get(key))
+    value = _finite_float(settings.get(key))
     if value is None or value < 0:
         return registered
     return max(registered, value)
@@ -118,7 +137,10 @@ def _latest_official_book_row(cfg: EngineConfig, condition_id: str) -> dict[str,
                 if best_stamp is None or stamp > best_stamp:
                     best_stamp = stamp
                     best = row
-    except (OSError, csv.Error):
+    except (OSError, csv.Error, EOFError):
+        # EOFError: a truncated .csv.gz mid-write (snapshot race). Fail closed
+        # (return None -> not-qualified) rather than raising, so the scheduler's
+        # `set -e` never skips the fail-closed gate update.
         return None
     return best
 
@@ -198,7 +220,7 @@ def evaluate_sharp_linking(
             if str(row.get("token_id") or "").strip() != token_id:
                 continue
             stamp = parse_timestamp(row.get("anchor_timestamp_utc"))
-            prob = safe_float(row.get("probability"))
+            prob = _finite_float(row.get("probability"))
             if stamp is None or prob is None:
                 continue
             age = (now - stamp.astimezone(timezone.utc)).total_seconds()
@@ -223,8 +245,8 @@ def evaluate_sharp_linking(
     )
 
     consensus_fair = (sum(fresh_fairs) / len(fresh_fairs)) if fresh_fairs else None
-    band_lo = safe_float((candidate or {}).get("quote_bid_price"))
-    band_hi = safe_float((candidate or {}).get("quote_ask_price"))
+    band_lo = _finite_float((candidate or {}).get("quote_bid_price"))
+    band_hi = _finite_float((candidate or {}).get("quote_ask_price"))
     inside_band = (
         consensus_fair is not None
         and band_lo is not None
@@ -244,8 +266,8 @@ def evaluate_sharp_linking(
     summary["maker_quote_band"] = [band_lo, band_hi]
 
     book_row = _latest_official_book_row(cfg, candidate_id) if candidate_id else None
-    pm_bid = safe_float((book_row or {}).get("best_bid"))
-    pm_ask = safe_float((book_row or {}).get("best_ask"))
+    pm_bid = _finite_float((book_row or {}).get("best_bid"))
+    pm_ask = _finite_float((book_row or {}).get("best_ask"))
     book_stamp = parse_timestamp((book_row or {}).get("collected_at_utc") or (book_row or {}).get("observation_timestamp"))
     book_age = (now - book_stamp.astimezone(timezone.utc)).total_seconds() if book_stamp is not None else None
     fresh_book = (
@@ -310,10 +332,10 @@ def evaluate_sharp_linking(
     )
 
     market_row = _per_market_row(replay, condition_id=candidate_id, token_id=token_id)
-    evaluable = safe_float((market_row or {}).get("last_in_queue_evaluable_opportunities"))
-    confirmed = safe_float((market_row or {}).get("confirmed_fills"))
-    coverage_ratio = safe_float((market_row or {}).get("coverage_ratio"))
-    haircut = safe_float((market_row or {}).get("simulation_to_reality_haircut"))
+    evaluable = _finite_float((market_row or {}).get("last_in_queue_evaluable_opportunities"))
+    confirmed = _finite_float((market_row or {}).get("confirmed_fills"))
+    coverage_ratio = _finite_float((market_row or {}).get("coverage_ratio"))
+    haircut = _finite_float((market_row or {}).get("simulation_to_reality_haircut"))
     by_horizon = (market_row or {}).get("by_horizon") if isinstance((market_row or {}).get("by_horizon"), dict) else {}
 
     checks.append(
@@ -348,7 +370,7 @@ def evaluate_sharp_linking(
     horizon_windows: dict[str, Any] = {}
     horizons_ok = bool(by_horizon)
     for horizon in HORIZONS_MINUTES:
-        covered = safe_float((by_horizon.get(f"{horizon}m") or {}).get("windows_covered"))
+        covered = _finite_float((by_horizon.get(f"{horizon}m") or {}).get("windows_covered"))
         horizon_windows[f"{horizon}m"] = covered
         if covered is None or covered < min_markouts:
             horizons_ok = False
@@ -374,6 +396,11 @@ def evaluate_sharp_linking(
         "markout_windows_covered": horizon_windows,
         "simulation_to_reality_haircut": haircut,
     }
+    # #260: record the exact study/replay versions this qualification was
+    # computed against, so the WO-99 gate can bind the artifact to the CURRENT
+    # study/replay and reject a stale (regenerated-within-window) qualification.
+    summary["consumed_study_generated_at"] = study_generated or None
+    summary["consumed_replay_generated_at"] = str(replay.get("generated_at_utc") or "") or None
 
     qualified = bool(checks) and all(row["passed"] for row in checks)
     return qualified, checks, summary
@@ -393,6 +420,8 @@ def run_sharp_linking_evaluator(
         "qualified": qualified,
         "candidate_condition_id": summary.get("candidate_condition_id"),
         "candidate_token_id": summary.get("candidate_token_id"),
+        "consumed_study_generated_at": summary.get("consumed_study_generated_at"),
+        "consumed_replay_generated_at": summary.get("consumed_replay_generated_at"),
         "first_failing_check": first_failing,
         "checks": checks,
         "summary": summary,

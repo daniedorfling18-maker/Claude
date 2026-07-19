@@ -907,3 +907,16 @@ def test_mb1_override_cannot_loosen_replay_age() -> None:
 def test_mb1_override_can_only_tighten_min_confirmed() -> None:
     # Raising the confirmed-fill minimum is applied: 12 fills fails at 100.
     assert _mb_ok(_mb_replay([_mb_cov()]), mb_tier0_min_confirmed_fills=100) is False
+
+
+def test_mb1_non_finite_coverage_fails_closed() -> None:
+    # #262: a NaN coverage/haircut must fail the fail-closed gate, not slip
+    # through because NaN comparisons are all False.
+    assert _mb_ok(_mb_replay([_mb_cov(coverage="nan")])) is False
+    assert _mb_ok(_mb_replay([_mb_cov(haircut="nan")])) is False
+
+
+def test_mb1_zero_valued_max_haircut_override_is_honored() -> None:
+    # #262: a stricter `mb_tier0_max_haircut: 0` must bind (a 0.8 haircut then
+    # fails), not be treated as invalid and restored to the registered 1.0.
+    assert _mb_ok(_mb_replay([_mb_cov(haircut=0.8)]), mb_tier0_max_haircut=0) is False

@@ -607,6 +607,30 @@ def test_dashboard_surfaces_closing_line_value_artifact(tmp_path):
     assert "CLV by cohort" in html
 
 
+def test_dashboard_data_includes_stage_ticket_eligibility(tmp_path):
+    # #252 fix: the dashboard payload must include the WO-99 eligibility
+    # artifact so the eligible/not_eligible signal is visible even when no ntfy
+    # topic is configured (the push channel is otherwise the only surfacing).
+    cfg = _config(tmp_path)
+    write_json(
+        cfg.output_root / "maker_carry" / "stage_ticket_eligibility.json",
+        {
+            "state": "not_eligible",
+            "candidate_condition_id": "0xabc",
+            "first_failing_condition": "sharp_linking_qualified",
+            "paper_trading_invoked": False,
+            "live_trading_invoked": False,
+        },
+    )
+
+    result = render_dashboard(cfg)
+
+    data = read_json(result["dashboard_data"])
+    eligibility = data["maker_lane"]["stage_ticket_eligibility"]
+    assert eligibility["state"] == "not_eligible"
+    assert eligibility["first_failing_condition"] == "sharp_linking_qualified"
+
+
 def test_dashboard_surfaces_exact_h3_smart_flow_artifact(tmp_path):
     cfg = _config(tmp_path)
     write_json(
@@ -3422,6 +3446,7 @@ def test_dashboard_carries_profit_verdict_and_html_panel(tmp_path):
         "decision_policy": {},
         "requote_alerts": {},
         "fill_replay": {},
+        "stage_ticket_eligibility": {},
     }
     assert "Maker lane (WO-36)" in html
     assert "makerLane" in html

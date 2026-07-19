@@ -162,6 +162,8 @@ FAIL_CASES = [
         "tier0_markout_windows_each_horizon",
     ),
     ({"haircut": 1.5}, "tier0_adverse_haircut_within_ceiling"),
+    ({"coverage": "nan"}, "tier0_min_coverage_ratio"),  # #262: NaN must fail closed
+    ({"haircut": "nan"}, "tier0_adverse_haircut_within_ceiling"),  # #262: NaN must fail closed
 ]
 
 
@@ -207,6 +209,17 @@ def test_override_can_only_tighten_minimum(tmp_path: Path) -> None:
     assert confirmed["passed"] is False
 
 
+def test_zero_valued_max_override_is_honored(tmp_path: Path) -> None:
+    # #262: a stricter `max_adverse_haircut: 0` must bind, not be treated as an
+    # invalid override that restores the registered 1.0 ceiling.
+    cfg = _cfg(tmp_path, {"sharp_linking_evaluator": {"max_adverse_haircut": 0}})
+    _setup(cfg, haircut=0.8)
+    qualified, checks, _ = mod.evaluate_sharp_linking(cfg, as_of=NOW)
+    assert qualified is False
+    haircut_check = next(c for c in checks if c["check"] == "tier0_adverse_haircut_within_ceiling")
+    assert haircut_check["passed"] is False
+
+
 def test_run_writes_atomic_fail_closed_artifact(tmp_path: Path) -> None:
     cfg = _cfg(tmp_path)
     _setup(cfg)
@@ -217,3 +230,7 @@ def test_run_writes_atomic_fail_closed_artifact(tmp_path: Path) -> None:
     assert payload["live_trading_invoked"] is False
     assert (cfg.output_root / mod.OUTPUT_RELATIVE).exists()
     assert payload["registered_constants"]["max_anchor_age_seconds"] == 6 * 3600
+    # #260: the qualification records the exact study/replay versions it read,
+    # so the WO-99 gate can bind to the current artifacts.
+    assert payload["consumed_study_generated_at"] == STUDY_STAMP
+    assert payload["consumed_replay_generated_at"] == "2026-07-18T11:59:00Z"

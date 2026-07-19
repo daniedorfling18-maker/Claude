@@ -3,13 +3,16 @@
 Last updated: 2026-07-19. Accepted `main` currently ends at
 `ee30b40c6343242b794bc4e92ead5b2b90663f65` (PR #294). WO-100 was rebuilt
 through PRs #282, #289, and #292; WO-101 was rebuilt through PRs #285 and
-#294; deployment controls landed through PR #286; and the private-dashboard
-stack landed through the merged #286/#287 stack. Funding remains operationally
-CLOSED and WO-67 remains BLOCKED behind every registered P1–P5 precondition.
-The unapproved dispatch/queue-driver protocol from PR #263 was removed by
-merged PR #270. Review corrections #295–#298 remain open and are not accepted
-main. Each scope requires its own PR; frozen/registered-surface changes still
-require an owner-approved PR and this status text does not grant authorization.
+#294. Deployment controls and the private-dashboard transport reached `main`
+through the squash merge of PR #286; PR #287 was merged into #286's stacked
+branch and is not a separate merge in accepted `main`. Funding remains
+operationally CLOSED and WO-67 remains BLOCKED behind every registered P1–P5
+precondition. PR #270 removed the unapproved dispatch/queue-driver protocol
+from PR #263; a corrected, disclosed bridge later reached `main` through the
+owner merge of PR #281. Review corrections #295–#298 remain open and are not
+accepted main. Each scope requires its own PR; frozen/registered-surface
+changes are authorized only by an owner-authored commit or an owner-approved
+pull request, and this status text does not grant authorization.
 
 Prior: 2026-07-16 (owner-authorized corrective batch opened with WO-93; WO-85, WO-87, WO-86, and WO-88 implemented; WO-80, WO-82, WO-81 landed; WO-83 implemented in
 PR #203; WO-84 implemented in PR #205; WO-89 through WO-92 implemented. WO-87 now relabels the unchanged legacy verdict metric honestly and
@@ -4521,7 +4524,7 @@ trigger; NaN cumulative reports missing; NaN row drops from observations; NaN
 capital drops from returns). Full suite 1360. Merged as frozen-surface PR #267.
 Companion governance-doc draft (provisional WO-109) remains unregistered.
 
-## WO-107 — M-B.1: require the portfolio market's own Tier-0 coverage (implementation on main via PR #262; amendment status unreconciled)
+## WO-107 — M-B.1: require the portfolio market's own Tier-0 coverage (MERGED 2026-07-19 in owner-merged PR #262; frozen M-B, tighten-only)
 
 External-audit item 7: M-B could pass on a data-api-print markout estimate with
 zero Tier-0 last-in-queue coverage (observed adverse ran 2.08x the estimate).
@@ -4540,11 +4543,13 @@ freshness stay enforced downstream by the WO-105 evaluator, so this is
 defence-in-depth, not the sole guard. Constants mirror the evaluator's §2 and
 are mechanically tighten-only.
 
-`docs/OWNER_AMENDMENT_MB1_TIER0_COVERAGE.md` still says
-`DRAFT — UNSIGNED (pending owner merge)`. This agent-maintained register does
-not assert or infer authorization for that frozen amendment. The owner must
-reconcile the amendment status in an owner-authored change before an operator
-may treat M-B.1 as authorized. Until then funding remains CLOSED. Tests: 11
+`docs/OWNER_AMENDMENT_MB1_TIER0_COVERAGE.md` defines its signature event as the
+owner's merge of the pull request that lands the amendment, or a separate
+owner-authored signature commit. GitHub records the repository owner as the
+merger of PR #262, so the file's literal pre-merge `DRAFT — UNSIGNED (pending
+owner merge)` heading is stale after the signature event it defines; no agent
+completed its optional signature line. This factual status does not authorize
+funding, which remains CLOSED. Tests: 11
 direct-helper cases (sufficient passes; no-replay/low-coverage/stale/missing-
 row/non-official/thin-windows/high-haircut fail closed; every portfolio market
 must be covered; tighten-only override pins) plus the M-A/M-B integration test
@@ -4892,7 +4897,7 @@ Scope boundary: WO-100 governs repository acceptance evidence only. It cannot
 open funding, satisfy WO-67, deploy a revision, loosen a strategy/risk gate, or
 invoke paper/live trading.
 
-Registered implementation contract:
+Registered target contract (accepted implementation plus open corrections):
 
 1. `.github/workflows/required-pr-gate.yml` checks out the proposed merge with
    no persisted credentials and runs dependency integrity, Ruff, config checks,
@@ -4924,8 +4929,11 @@ Producer/consumer contract: the required PR workflow produces exact-head check
 and run evidence; GitHub reviews/threads and the default-branch OIDC identity
 produce independent control evidence; `merge_independently_reviewed_pr.py`
 consumes those inputs and alone produces the atomic merge attestation. The
-merge-gate audit independently fetches each accepted workflow at its own latest
-`main` revision; it must never reuse one workflow's revision for the other.
+target merge-gate audit independently fetches each accepted workflow at its own
+latest `main` revision and must never reuse one workflow's revision for the
+other. Accepted `main` does not yet satisfy that audit element: it reuses the
+required-workflow revision for the independent workflow. PR #295 is the open,
+single-scope correction; until it is accepted, the audit remains fail-closed.
 
 Fail-safe sentence: missing, stale, failed, branch-supplied, author-approved,
 owner-self-reviewed, unresolved, behind, control-modifying, or otherwise
@@ -4939,10 +4947,12 @@ path suffixes, candidate control files, actor/rerun identity, unresolved
 threads, and update races; the fail-safe sentence and day-after check are
 explicit; no trading/risk/funding surface consumes the result.
 
-Day-after check: `outputs/performance/independent_merge_gate.json` must report
-both workflows configured from their own accepted revisions, the actual
-push-capable identities, and `enforced=false` until an independently verified
-workflow-identity ruleset exists. Any fallback merge must have a run-scoped
+Day-after check: after PR #295 is accepted,
+`outputs/performance/independent_merge_gate.json` must report both workflows
+configured from their own accepted revisions, the actual push-capable
+identities, and `enforced=false` until an independently verified
+workflow-identity ruleset exists. Before then, the revision-provenance defect
+must remain visible and fail closed. Any fallback merge must have a run-scoped
 attestation whose exact merge SHA is accepted `main`; no deploy may substitute
 an owner UI merge or an artifact from another run.
 
@@ -5081,11 +5091,14 @@ This queue reports accepted and open work; it does not grant authorization.
 Funding remains CLOSED and WO-67 remains BLOCKED. No item below authorizes
 funding, live execution, or a gate/threshold loosening. Each correction remains
 one independently reviewable PR, and every frozen/registered-surface change
-still requires an owner-approved PR.
+still requires either an owner-authored commit or an owner-approved pull
+request.
 
 1. **Governance provenance — COMPLETE:** merged PR #270 removed the unapproved
    dispatch/queue-driver protocol from PR #263 without reverting its safety
-   fixes. One-scope-per-PR remains binding.
+   fixes. Owner-merged PR #281 later restored the narrower disclosed bridge,
+   which separates dispatch from merge authorization and leaves recurring
+   queue-driver provisioning owner-only. One-scope-per-PR remains binding.
 2. **Initial review-remediation set — ACCEPTED, follow-up defects remain:**
    exact-token identity (#272), sharp-source provenance (#277),
    qualification-to-policy anchoring (#280), maker-markout token isolation
@@ -5111,9 +5124,11 @@ still requires an owner-approved PR.
    dispatch actor model (#298, stacked after #297). Do not deploy until both
    corrections are accepted and a valid exact-main independent-merge artifact
    exists. No such requirement may be bypassed for convenience.
-6. **Dashboard transport — CODE ACCEPTED, NOT YET PRODUCTION-PROVEN:** the
-   merged #286/#287 stack hard-codes loopback binding and uses authenticated
-   Tailscale HTTPS with Funnel disabled. PR #297 must land before deployment.
+6. **Dashboard transport — CODE ACCEPTED, NOT YET PRODUCTION-PROVEN:** PR #287
+   was merged into the stacked #286 branch; those changes reached accepted
+   `main` only through PR #286's squash. The resulting code hard-codes loopback
+   binding and uses authenticated Tailscale HTTPS with Funnel disabled. PR #297
+   must land before deployment.
    Day-after proof requires a PASS transport artifact, loopback-only
    `docker port`, a working enrolled-phone private URL, a failed public-IP URL,
    and no Funnel route.
@@ -5121,6 +5136,11 @@ still requires an owner-approved PR.
    against current main; resolve only findings fixed on accepted main or
    demonstrably superseded. An open corrective PR is evidence of work, not a
    reason to mark the original finding resolved.
+8. **WO-111 — PROPOSED, NOT ACCEPTED:** open PR #301 proposes registration of
+   forward-only maker-carry membership/markout telemetry. It is not part of the
+   accepted register until owner approval/merge and must remain a separate
+   implementation PR if accepted; it cannot change a gate, threshold, verdict,
+   funding state, or order path.
 
 Completed context: registered WO-93 through WO-108 and WO-110 implementations
 are on main as recorded in their individual sections; provisional WO-109

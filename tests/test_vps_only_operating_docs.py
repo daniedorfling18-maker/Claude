@@ -53,13 +53,17 @@ def test_work_order_queue_distinguishes_non_buildable_states() -> None:
     assert "Each scope requires its own PR" in work_orders
     assert "This queue reports accepted and open work; it does not grant authorization" in work_orders
     assert "every frozen/registered-surface change" in work_orders
-    assert "still requires an owner-approved PR" in work_orders
+    assert "owner-authored commit or an owner-approved pull" in work_orders
     assert "**WO-100 — ACCEPTED BUT BLOCKED:**" in work_orders
     assert "**WO-101 — ACCEPTED DIAGNOSTIC:**" in work_orders
     assert "registered sharp venue keys" in work_orders
     assert "PR #295 corrects independent-workflow revision" in work_orders
+    assert "Accepted `main` does not yet satisfy that audit element" in work_orders
     assert "#298, stacked after #297" in work_orders
     assert "Dashboard transport — CODE ACCEPTED, NOT YET PRODUCTION-PROVEN" in work_orders
+    assert "PR #287" in work_orders
+    assert "merged into the stacked #286 branch" in work_orders
+    assert "**WO-111 — PROPOSED, NOT ACCEPTED:**" in work_orders
     assert "provisional WO-109" in work_orders
     assert "remains unregistered" in work_orders
     assert "Accepted `main` through PR #269" not in work_orders

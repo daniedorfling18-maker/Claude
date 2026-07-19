@@ -130,6 +130,7 @@ def _rollback(
     *,
     curl_exit: int = 0,
     private_dashboard_url: str = "https://polymarket-trader.example-tailnet.ts.net/",
+    failed_target_sha: str | None = None,
 ) -> subprocess.CompletedProcess[str]:
     env = os.environ.copy()
     env["FAKE_DOCKER_LOG"] = str(fake_docker.with_name("docker.log"))
@@ -164,7 +165,7 @@ def _rollback(
         "--https-probe-interval-seconds",
         "0",
         "--failed-target-sha",
-        candidate,
+        failed_target_sha or candidate,
         "--health-attempts",
         "1",
         "--health-interval-seconds",
@@ -225,6 +226,44 @@ def test_actual_rollback_restores_source_env_marker_image_and_stack(tmp_path: Pa
     tailscale_calls = fake_tailscale.with_name("tailscale.log").read_text(encoding="utf-8")
     assert "funnel --https=443 off" in tailscale_calls
     assert "serve --bg --yes --https=443 http://127.0.0.1:8765" in tailscale_calls
+
+
+def test_rollback_resecures_stack_when_checkout_never_changed(tmp_path: Path) -> None:
+    repo, _old, candidate, env_backup, marker_backup, fake_docker, fake_tailscale = _fixture(
+        tmp_path
+    )
+    env_backup.write_text(
+        env_backup.read_text(encoding="utf-8").replace(
+            "PM_VPS_DEPLOYED_SHA=old",
+            f"PM_VPS_DEPLOYED_SHA={candidate}",
+        ),
+        encoding="utf-8",
+    )
+    marker_backup.write_text(candidate + "\n", encoding="utf-8")
+
+    result = _rollback(
+        repo,
+        candidate,
+        candidate,
+        env_backup,
+        marker_backup,
+        fake_docker,
+        fake_tailscale,
+        failed_target_sha="f" * 40,
+    )
+
+    assert result.returncode == 0, result.stderr or result.stdout
+    assert _git(repo, "rev-parse", "HEAD") == candidate
+    report = json.loads((repo / "outputs/performance/vps_deploy_rollback.json").read_text())
+    assert report["status"] == "PASS"
+    assert report["candidate_head"] == candidate
+    assert report["rollback_head"] == candidate
+    assert report["source_checkout_changed"] is False
+    assert report["dashboard_private_transport_verified"] is True
+    assert (repo / ".env").read_bytes() == env_backup.read_bytes()
+    assert (repo / "outputs/performance/deployed_git_rev").read_bytes() == marker_backup.read_bytes()
+    calls = fake_docker.with_name("docker.log").read_text(encoding="utf-8")
+    assert "dashboard-private-rollback.override.yml up -d --no-build --force-recreate" in calls
 
 
 def test_rollback_fails_and_overwrites_transport_evidence_when_https_is_down(

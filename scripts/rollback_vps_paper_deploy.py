@@ -118,8 +118,7 @@ def _preserve_runtime_and_checkout(repo: Path, rollback_ref: str, branch: str) -
     rollback_head = _git(repo, "rev-parse", rollback_ref).stdout.strip()
     if len(candidate_head) != SHA_LENGTH or len(rollback_head) != SHA_LENGTH:
         raise RollbackError("candidate or rollback reference is not an exact commit")
-    if candidate_head == rollback_head:
-        raise RollbackError("candidate and rollback revisions are identical")
+    source_checkout_changed = candidate_head != rollback_head
 
     tracked = _z_paths(repo, "diff", "--name-only", "-z") | _z_paths(
         repo, "diff", "--cached", "--name-only", "-z"
@@ -141,6 +140,25 @@ def _preserve_runtime_and_checkout(repo: Path, rollback_ref: str, branch: str) -
                 sort_keys=True,
             )
         )
+
+    # A failure can occur after private transport has been mutated but before
+    # the source checkout advances.  That path still has to restore the saved
+    # environment/image and force-recreate the stack with the private-port
+    # override.  Skipping only the unnecessary Git move preserves runtime
+    # evidence while allowing the complete rollback contract to run.
+    if not source_checkout_changed:
+        return {
+            "candidate_head": candidate_head,
+            "rollback_head": rollback_head,
+            "source_checkout_changed": False,
+            "tracked_runtime_paths": sorted(
+                path for path in tracked if _runtime_path(path)
+            ),
+            "untracked_runtime_path_count": sum(
+                _runtime_path(path) for path in untracked
+            ),
+            "runtime_stash_used": False,
+        }
 
     stash_commit = ""
     if tracked:
@@ -176,6 +194,7 @@ def _preserve_runtime_and_checkout(repo: Path, rollback_ref: str, branch: str) -
     return {
         "candidate_head": candidate_head,
         "rollback_head": rollback_head,
+        "source_checkout_changed": True,
         "tracked_runtime_paths": sorted(path for path in tracked if _runtime_path(path)),
         "untracked_runtime_path_count": sum(_runtime_path(path) for path in untracked),
         "runtime_stash_used": bool(stash_commit),

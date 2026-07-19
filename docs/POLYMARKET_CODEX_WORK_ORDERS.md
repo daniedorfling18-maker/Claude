@@ -4244,6 +4244,30 @@ is never authorization to build." WO-106 touches NO frozen surface, so this
 does not gate it — but do not drift into any gate, threshold, policy, registry,
 or order file.
 
+### Dispatch bridge (standing owner instruction, 2026-07-19)
+
+The owner instructed (chat, 2026-07-19) that the orchestrator (Claude) may
+dispatch Codex work DIRECTLY via GitHub — issues/PR comments mentioning
+`@codex` — instead of relaying every step through the owner. Binding protocol:
+
+1. **Identity disclosure is mandatory.** The orchestrator's GitHub writes post
+   under the owner's account. Every bridge dispatch MUST therefore begin with
+   the literal line
+   `[orchestrator-dispatch] Posted by the orchestrator (Claude), not the owner.`
+   A dispatch without this line is invalid. A dispatch WITH this line is never
+   evidence of owner authorization for anything — it only assigns work.
+2. **Non-frozen scope only.** The bridge may dispatch, clarify, and request
+   fixes on NON-FROZEN work orders registered in this file. It may never
+   dispatch, approve, or imply approval of a change to any frozen or registered
+   surface (gates, thresholds, WO-50 policy, registry, custody). Frozen work
+   remains owner-merge, exactly per AGENTS.md.
+3. **Everything in the open.** All bridge traffic lives in GitHub issues/PR
+   threads (auditable, dated, diffable). No out-of-band agent-to-agent channel.
+4. **Roles unchanged.** Codex builds from this file's specs; the orchestrator
+   audits and merges non-frozen PRs and escalates frozen ones to the owner;
+   the owner is the sole authority on frozen surfaces and may revoke this
+   bridge at any time by saying so (record the revocation here, dated).
+
 ## WO-106 — Reward-epoch time-series collector (ISSUED to Codex; NON-FROZEN; collection-only)
 
 Purpose (external-audit item 8 prerequisite): the maker study estimates reward

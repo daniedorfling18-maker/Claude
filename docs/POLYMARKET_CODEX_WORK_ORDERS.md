@@ -4222,8 +4222,13 @@ artifact is fresh when the gate reads it.
 
 ## ACTIVE BATCH for Codex (opened 2026-07-18, re-engagement)
 
-Codex is re-engaged. Current assignment: **none — WO-106 is DONE (PR #265,
-2026-07-19); await the next dispatched WO.** Work only what a bridge dispatch
+Codex is re-engaged. Current assignment: **WO-111 — ISSUED to Codex
+2026-07-19 (spec below). Forward-only maker-carry history telemetry
+(persist per-day portfolio membership + per-market markout). Non-frozen —
+adds one auditability column and changes no gate, threshold, share-model
+scope, or verdict — but it sits inside the maker-gate module, so the merge
+routes to the owner after a line-audit + red-team pass; the orchestrator does
+not self-merge it.** Work only what a bridge dispatch
 (a `[orchestrator-dispatch]` @codex post — see "Dispatch bridge" below) or the
 owner assigns from this file; a dispatch may assign any registered WO (frozen
 included), but frozen/registered surfaces stay owner-merge. WO-107
@@ -4463,6 +4468,96 @@ Do NOT: touch any gate (`maker_carry_study.py` gate logic, M-A/M-B/M-C),
 `live_test_decision_policy.py`, the evaluator, the registry, the scheduler, or
 any order path. Do NOT build the realism consumer or change the study's reward
 estimate — that is a separate future WO that depends on this data existing.
+
+## WO-111 — Persist per-day portfolio membership + per-market markout in the maker-carry history ledger (ISSUED 2026-07-19; forward-only telemetry hardening)
+
+Priority: MEDIUM — auditability / anti-regression, not funding-gating.
+Merge classification: NON-FROZEN (adds one telemetry column; changes no gate,
+threshold, share-model scope, verdict, or promotion control). Because it lives
+inside the maker-gate module, require a line-audit + red-team pass before merge
+and route the merge to the OWNER; the orchestrator does not self-merge it.
+
+Problem. `maker_carry_history.csv` persists only portfolio-level aggregates plus
+the *top* market (`maker_carry_study.py` `history_fields`, ~L1998-2011). When
+the 2026-07-19 M-A amendment (WO-40 lineage / PR #290) tightened M-A to require
+`portfolio_markout_measured` per counted day and to fail closed on rows lacking
+it, the entire historical at-target streak (8 distinct UTC days) collapsed to 1
+— not because those days were adverse, but because the ledger never recorded the
+per-market evidence to prove they were sound. Membership, per-market markout,
+and the per-market carry decomposition were all absent, so the reset was
+unrecoverable (verified against the live VPS ledger 2026-07-19: `trade_prints.csv`
+is a rolling ~200k-row window with early-window prints already evicted, and 4 of
+the 7 needed days were multi-market portfolios whose non-top members were never
+persisted). Any future tightening of a per-market condition will orphan the
+streak the same way.
+
+Goal. Persist, going forward, enough per-run detail that a future rule can
+recompute a per-market gate condition from history instead of failing closed:
+the full portfolio membership and each member's `markout_measured`.
+
+Files: `src/polymarket_predictive_engine/maker_carry_study.py`;
+`tests/polymarket_predictive_engine/test_maker_carry_study.py`.
+
+Change (exact). In `run_maker_carry_study`, immediately after
+`portfolio_markout_measured` is computed (~L1854) and alongside the other
+portfolio summary assignments (~L1934), store a pre-serialized JSON string
+derived from the SAME `portfolio` list and the SAME per-entry `markout_measured`
+that feed the aggregate `portfolio_markout_measured` (L1855), so the column and
+the aggregate can never disagree:
+
+```python
+summary["portfolio_members"] = json.dumps(
+    [
+        {"condition_id": str(entry.get("condition_id") or ""),
+         "markout_measured": bool(entry.get("markout_measured"))}
+        for entry in portfolio
+    ],
+    separators=(",", ":"),
+    sort_keys=True,
+)
+```
+
+Empty portfolio -> `"[]"`. Store it as a JSON string (not a Python list) so
+`write_csv`/`serialize_value` never guesses the encoding; `csv.DictWriter` quotes
+the comma-bearing cell and `read_csv_rows` round-trips it back for `json.loads`.
+Append `"portfolio_members"` to the end of `history_fields` (preserve existing
+column order).
+
+Invariants / constraints:
+- FORWARD-ONLY. Do not synthesize values for pre-existing rows. The per-run
+  rewrite (`write_csv(history_path, prior_runs, ...)`, ~L2013) leaves old rows
+  blank (`""`) for the new column; that blank continues to fail closed under
+  every markout rule exactly as today.
+- GATE UNTOUCHED. `_distinct_days_at_target` (L1660-1711) must continue to key
+  only on `portfolio_net_carry_usd_per_day`, `share_model`, and
+  `portfolio_markout_measured`; it must NOT read `portfolio_members`. No gate
+  count changes as a result of this WO.
+- LIST-OF-OBJECTS encoding so a later WO can add per-member fields (Tier-0
+  coverage, resolution_risk) without breaking the parse; adding those fields is
+  explicitly OUT OF SCOPE here.
+
+Tests (all in `test_maker_carry_study.py`):
+1. Two measured members -> `portfolio_members` parses to 2 objects, both
+   `markout_measured=True`; aggregate `portfolio_markout_measured` stays True.
+2. Mixed (one member False) -> column reflects `[True, False]`; aggregate stays
+   False (unchanged behavior).
+3. Empty portfolio -> `portfolio_members == "[]"`; aggregate False; no exception.
+4. CSV round-trip -> write then `read_csv_rows`; `json.loads(row["portfolio_members"])`
+   equals the written membership (proves comma-quoting survives).
+5. Backward-compat + gate-invariance -> seed an existing history CSV whose rows
+   lack the column; run the study; assert (a) the rewritten file has the column
+   with old rows blank, and (b) `_distinct_days_at_target` returns the IDENTICAL
+   day set it returned before the column existed.
+6. Aggregate/column consistency -> for any generated portfolio,
+   `portfolio_markout_measured == all(m["markout_measured"] for m in
+   json.loads(portfolio_members))` (and False when empty).
+
+Fail-safe. This work order is forward-only telemetry persistence. It changes no
+gate, threshold, share-model scope, verdict, or promotion control; it adds one
+auditability column to `maker_carry_history.csv`. Historical rows written before
+it remain blank and continue to fail closed under every markout rule exactly as
+today. `paper_trading_invoked=false` and `live_trading_invoked=false`; no broker,
+signer, cancellation, credential-loading, or live-order path is added.
 
 ## WO-110 — Pin enrolled-ledger export projections; version taker-fee fills (DONE 2026-07-19; orchestrator-built)
 

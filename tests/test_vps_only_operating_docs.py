@@ -51,11 +51,20 @@ def test_work_order_queue_distinguishes_non_buildable_states() -> None:
     assert "Current queue for Codex (reconciled 2026-07-19)" in work_orders
     assert "remains CLOSED and WO-67 remains BLOCKED" in work_orders
     assert "Each scope requires its own PR" in work_orders
-    assert "**WO-100:** rebuild closed PR #243 from current main" in work_orders
-    assert "**WO-101:** rebuild closed PR #242 from current main" in work_orders
-    assert "fix exact-token identity, sharp-source" in work_orders
-    assert "implement an actual tested rollback" in work_orders
-    assert "authenticated HTTPS or a private VPN" in work_orders
+    assert "This queue reports accepted and open work; it does not grant authorization" in work_orders
+    assert "every frozen/registered-surface change" in work_orders
+    assert "still requires an owner-approved PR" in work_orders
+    assert "**WO-100 — ACCEPTED BUT BLOCKED:**" in work_orders
+    assert "**WO-101 — ACCEPTED DIAGNOSTIC:**" in work_orders
+    assert "registered sharp venue keys" in work_orders
+    assert "PR #295 corrects independent-workflow revision" in work_orders
+    assert "#298, stacked after #297" in work_orders
+    assert "Dashboard transport — CODE ACCEPTED, NOT YET PRODUCTION-PROVEN" in work_orders
+    assert "provisional WO-109" in work_orders
+    assert "remains unregistered" in work_orders
+    assert "Accepted `main` through PR #269" not in work_orders
+    assert "pending independent review/merge" not in work_orders
+    assert "WO-98 is implemented and awaiting publication" not in work_orders
     assert "Next buildable: WO-92" not in work_orders
     wo92_heading = work_orders.split("## WO-92", 1)[1].splitlines()[0]
     assert "done (2026-07-15, PR #234)" in wo92_heading

@@ -1,20 +1,21 @@
 # Polymarket Codex Work Orders
 
-Last updated: 2026-07-19. Accepted `main` through PR #269 contains WO-104
-items 0–6, WO-105, WO-106, WO-107, WO-108, and WO-110. Funding remains
-operationally CLOSED and WO-67 remains BLOCKED behind every registered P1–P5
-precondition. The 2026-07-19 corrective request reopens WO-100 and WO-101 on
-current main and lists the narrowly scoped review remediations under "Current
-queue for Codex" below. Each scope requires its own PR; frozen-surface changes
-remain owner-merge. The unapproved dispatch/queue-driver protocol introduced
-in merged PR #263 is being removed separately in PR #270 without reverting
-#263's safety fixes.
+Last updated: 2026-07-19. Accepted `main` currently ends at
+`ee30b40c6343242b794bc4e92ead5b2b90663f65` (PR #294). WO-100 was rebuilt
+through PRs #282, #289, and #292; WO-101 was rebuilt through PRs #285 and
+#294; deployment controls landed through PR #286; and the private-dashboard
+stack landed through the merged #286/#287 stack. Funding remains operationally
+CLOSED and WO-67 remains BLOCKED behind every registered P1–P5 precondition.
+The unapproved dispatch/queue-driver protocol from PR #263 was removed by
+merged PR #270. Review corrections #295–#298 remain open and are not accepted
+main. Each scope requires its own PR; frozen/registered-surface changes still
+require an owner-approved PR and this status text does not grant authorization.
 
 Prior: 2026-07-16 (owner-authorized corrective batch opened with WO-93; WO-85, WO-87, WO-86, and WO-88 implemented; WO-80, WO-82, WO-81 landed; WO-83 implemented in
 PR #203; WO-84 implemented in PR #205; WO-89 through WO-92 implemented. WO-87 now relabels the unchanged legacy verdict metric honestly and
 reports non-binding true pre-event CLV on the same units. WO-93 was implemented
 in PR #236, WO-94 in PR #237, WO-95 in PR #238, and WO-96 in PR #239. WO-97 was
-implemented in PR #240. WO-98 is implemented and awaiting publication. WO-33 remains pending a
+implemented in PR #240. WO-98 merged in PR #241. WO-33 remains pending a
 registered leakage review, with
 WO-34/35 model wiring bound to that review and the three-hypothesis freeze.
 WO-48 and WO-67 are blocked; WO-70 and WO-72 are deferred; WO-76 is
@@ -3820,8 +3821,7 @@ Tier-0 coverage leaves `decision_policy.sizing.binding_capital_usd == 0`.
 
 ## WO-94 — Category- and price-aware taker fees in scoring and paper fills
 
-Status: IMPLEMENTED by Codex on 2026-07-16 in draft PR #237; pending review
-and merge.
+Status: MERGED in PR #237 on 2026-07-16.
 
 Provenance correction (2026-07-16, orchestrator, confirmed with the owner):
 this WO was filed AND built by Codex from its own 2026-07-16 line-audit
@@ -4521,7 +4521,7 @@ trigger; NaN cumulative reports missing; NaN row drops from observations; NaN
 capital drops from returns). Full suite 1360. Merged as frozen-surface PR #267.
 Companion governance-doc draft (provisional WO-109) remains unregistered.
 
-## WO-107 — M-B.1: require the portfolio market's own Tier-0 coverage (DONE 2026-07-19; PR #262, FROZEN M-B; tighten-only; owner-merged)
+## WO-107 — M-B.1: require the portfolio market's own Tier-0 coverage (implementation on main via PR #262; amendment status unreconciled)
 
 External-audit item 7: M-B could pass on a data-api-print markout estimate with
 zero Tier-0 last-in-queue coverage (observed adverse ran 2.08x the estimate).
@@ -4540,8 +4540,11 @@ freshness stay enforced downstream by the WO-105 evaluator, so this is
 defence-in-depth, not the sole guard. Constants mirror the evaluator's §2 and
 are mechanically tighten-only.
 
-The owner merge of PR #262 is the repository authorization record; no
-agent-authored text is treated as authorization. Tests: 11
+`docs/OWNER_AMENDMENT_MB1_TIER0_COVERAGE.md` still says
+`DRAFT — UNSIGNED (pending owner merge)`. This agent-maintained register does
+not assert or infer authorization for that frozen amendment. The owner must
+reconcile the amendment status in an owner-authored change before an operator
+may treat M-B.1 as authorized. Until then funding remains CLOSED. Tests: 11
 direct-helper cases (sufficient passes; no-replay/low-coverage/stale/missing-
 row/non-official/thin-windows/high-haircut fail closed; every portfolio market
 must be covered; tighten-only override pins) plus the M-A/M-B integration test
@@ -4740,7 +4743,7 @@ Day-after check: `stage_ticket_eligibility.json` exists with per-condition
 booleans matching the same run's decision_policy.json and quote sheet; with
 the env var set, a forced test transition delivers exactly one ntfy message.
 
-**2026-07-19 source-freshness remediation (pending owner merge):** the
+**2026-07-19 source-freshness remediation (merged PR #284):** the
 evaluator now publishes one `*_source_fresh` condition and an age diagnostic
 for every consumed policy/study/toxicity/reconciliation/requote/replay/
 qualification source. This is additive and tighten-only: stale evidence can
@@ -4755,7 +4758,7 @@ eligible transition may be reported.
 
 ## WO-98 - Exact post-registration H2 evaluator and dashboard authority
 
-Status: IMPLEMENTED by Codex on 2026-07-16; awaiting required gate and review.
+Status: MERGED in PR #241 on 2026-07-16.
 
 Provenance correction (2026-07-16, orchestrator, confirmed with the owner):
 this WO was filed AND built by Codex from its own 2026-07-16 line-audit
@@ -4877,10 +4880,76 @@ isolated public-network smoke scan discovered 20 negRisk events, priced three
 complete baskets, appended three exact rows, remained `collecting` with zero
 manufactured episodes, and reported both trading-invoked flags false.
 
+## WO-100 — Complete-suite and independent-current-head merge control
+
+Status: IMPLEMENTED on accepted main through PRs #282, #289, and #292 on
+2026-07-19. It remains NOT ENFORCED and operationally BLOCKED: this private
+Free-plan repository has no workflow-identity branch protection/ruleset and
+currently has only one push-capable identity. Open single-scope review
+corrections #295 and #296 must land before the fallback lane is relied on.
+
+Scope boundary: WO-100 governs repository acceptance evidence only. It cannot
+open funding, satisfy WO-67, deploy a revision, loosen a strategy/risk gate, or
+invoke paper/live trading.
+
+Registered implementation contract:
+
+1. `.github/workflows/required-pr-gate.yml` checks out the proposed merge with
+   no persisted credentials and runs dependency integrity, Ruff, config checks,
+   and exactly one complete unfiltered `python -m pytest -q` in the bounded
+   self-hosted ARM64/Python 3.11 container. Candidate changes to pytest/import/
+   workflow control inputs are protected from the fallback merge lane.
+2. The newest required check and newest required workflow run must both be a
+   completed success on the exact current PR head. Older success, a later
+   failure, a stale approval, an unresolved thread, a draft, a behind/diverged
+   head, or a changed PR head fails closed.
+3. While platform protection is unavailable, the write-capable merge workflow
+   starts only from an owner-authored exact
+   `/independent-merge <40-character-lowercase-head-sha>` PR comment loaded
+   from default-branch `main`. The original actor and rerun initiator are the
+   repository owner; the exact-head approver is a distinct trusted identity
+   who is neither owner nor PR author.
+4. The merge utility verifies current-main ancestry, unchanged trusted control
+   files, all current threads, the default-branch workflow identity, and every
+   exact-head check immediately before an atomic non-force squash update. A
+   concurrent main advance makes the update fail rather than changing the
+   tested parent.
+5. A successful fallback merge publishes run-scoped
+   `independent-main-acceptance-<run-id>/merge-attestation.json`, binding the
+   workflow run, reviewed head/tree, prior main parent, merge commit, reviewer,
+   owner actors, controls, and CLOSED/BLOCKED flags. This is deployment input,
+   not trading authorization.
+
+Producer/consumer contract: the required PR workflow produces exact-head check
+and run evidence; GitHub reviews/threads and the default-branch OIDC identity
+produce independent control evidence; `merge_independently_reviewed_pr.py`
+consumes those inputs and alone produces the atomic merge attestation. The
+merge-gate audit independently fetches each accepted workflow at its own latest
+`main` revision; it must never reuse one workflow's revision for the other.
+
+Fail-safe sentence: missing, stale, failed, branch-supplied, author-approved,
+owner-self-reviewed, unresolved, behind, control-modifying, or otherwise
+inexact evidence cannot merge or produce a deployable attestation. Funding
+remains CLOSED and WO-67 remains BLOCKED.
+
+Engineering-standards review: clocks are GitHub server timestamps and exact
+commit identities; the atomic ref update is the only write boundary; producer/
+consumer paths are named above; tests cover stale/latest runs and reviews,
+path suffixes, candidate control files, actor/rerun identity, unresolved
+threads, and update races; the fail-safe sentence and day-after check are
+explicit; no trading/risk/funding surface consumes the result.
+
+Day-after check: `outputs/performance/independent_merge_gate.json` must report
+both workflows configured from their own accepted revisions, the actual
+push-capable identities, and `enforced=false` until an independently verified
+workflow-identity ruleset exists. Any fallback merge must have a run-scoped
+attestation whose exact merge SHA is accepted `main`; no deploy may substitute
+an owner UI merge or an artifact from another run.
+
 ## WO-101 — Observation-time-safe resolved corpus and independent validation
 
-Status: IMPLEMENTED by Codex on 2026-07-19; awaiting complete-suite gate and
-independent owner review.
+Status: IMPLEMENTED and accepted on main through PRs #285 and #294 on
+2026-07-19. It remains diagnostic H3 substrate with no promotion authority.
 
 Review remediation on 2026-07-19 corrected five fail-closed defects: Gamma
 backfill now records the production observation clock only after the response;
@@ -5008,127 +5077,58 @@ Every WO below and every future WO must comply with
 `docs/ENGINEERING_STANDARDS.md` (S1-S7), including the mandatory
 `Day-after check:` line. Reviews verify compliance item by item.
 
-The 2026-07-19 corrective request is recorded here for owner review and becomes
-repository authorization only through the owner's merge of this PR. Funding
-remains CLOSED and WO-67 remains BLOCKED. No item below authorizes funding,
-live execution, or a gate/threshold loosening. Complete each line as one
-independently reviewable PR, and require an owner merge for every
-frozen-surface change.
+This queue reports accepted and open work; it does not grant authorization.
+Funding remains CLOSED and WO-67 remains BLOCKED. No item below authorizes
+funding, live execution, or a gate/threshold loosening. Each correction remains
+one independently reviewable PR, and every frozen/registered-surface change
+still requires an owner-approved PR.
 
-1. **Governance provenance:** remove the unapproved dispatch/queue-driver
-   protocol from merged PR #263 without reverting its safety fixes (PR #270),
-   then retain the one-scope-per-PR rule prospectively.
-2. **Review-remediation PRs:** fix exact-token identity, sharp-source
-   provenance, qualification-to-current-policy anchoring, maker-markout token
-   contamination, and source freshness. Each defect is a separate PR.
-3. **WO-100:** rebuild closed PR #243 from current main. Enforce the complete,
-   unfiltered suite and latest-review-on-current-head semantics. Establish real
-   branch protection or a documented fail-closed independent merge process;
-   do not claim GitHub-plan controls that the repository cannot enforce.
-   **Implemented 2026-07-19, pending independent review/merge:** the ARM64 gate
-   now runs the complete unfiltered suite in a bounded Python 3.11 container,
-   and the merge lane binds a second identity's approval, the latest
-   exact-head check/workflow results, an up-to-date main ancestry, and resolved
-   threads to an atomic non-force main update whose only parent is the verified
-   main SHA. A 2026-07-19 correction replaces branch-selectable manual dispatch
-   with an owner-only `/independent-merge <exact-head-sha>` PR comment. GitHub
-   loads that `issue_comment` workflow only from the default branch; both the
-   original actor and rerun initiator must be the repository owner, while the
-   exact-head approver must be a distinct trusted identity. It rejects PRs that alter
-   its trusted workflows/scripts or any pytest collection/execution control.
-   Review remediation on 2026-07-19 also normalizes GitHub's real
-   `workflow-path@ref` response, audits active no-bypass required-workflow
-   rulesets rather than hard-coding enforcement false, binds the rule to this
-   repository's numeric ID and the latest accepted commit that changed the
-   required workflow, and leaves a PR open if
-   its head changes after the atomic main update but before administrative
-   closure. The lane remains BLOCKED while the
-   repository has only one push-capable identity, and the audit continues to
-   report the unavailable private-Free required-workflow protection honestly.
-   A legacy name/app-bound required context is explicitly insufficient because
-   another GitHub Actions workflow can publish the same job name. A successful
-   atomic update also publishes the complete evaluator result as the run-scoped
-   `independent-main-acceptance-<run-id>/merge-attestation.json` artifact, so a
-   deploy can bind the exact accepted main SHA to the registered workflow run.
+1. **Governance provenance — COMPLETE:** merged PR #270 removed the unapproved
+   dispatch/queue-driver protocol from PR #263 without reverting its safety
+   fixes. One-scope-per-PR remains binding.
+2. **Initial review-remediation set — ACCEPTED, follow-up defects remain:**
+   exact-token identity (#272), sharp-source provenance (#277),
+   qualification-to-policy anchoring (#280), maker-markout token isolation
+   (#283), and stage-source freshness (#284) are on main. Surviving review
+   findings still require separate corrections: registered sharp venue keys
+   (#277), collision-free effective-policy identity (#280), and M-A observable
+   markout plus registered-rule consistency (#290). Do not resolve those
+   threads merely because their original PRs merged.
+3. **WO-100 — ACCEPTED BUT BLOCKED:** PRs #282, #289, and #292 are on main.
+   The platform and second-identity blockers remain exactly as stated in the
+   registered WO-100 section. PR #295 corrects independent-workflow revision
+   provenance; PR #296 corrects the canonical operator procedure. Both are
+   open, single-scope follow-ups and are not accepted main.
+4. **WO-101 — ACCEPTED DIAGNOSTIC:** PRs #285 and #294 are on main. The rebuilt
+   corpus uses observation-time label availability, append-only resolution and
+   exact bid/ask ledgers, a purged chronological split, and at least 10 distinct
+   validation markets. It remains H3 diagnostic substrate with no promotion,
+   funding, paper, or live authority.
+5. **Deployment controls — CODE ACCEPTED, DEPLOYMENT BLOCKED:** PR #286 is on
+   main and provides rollback plus scheduler-isolated one-shot acceptance.
+   Review found two post-merge defects: pre-checkout failures can bypass secure
+   transport rollback (#297), and deploy attestation still expects the old
+   dispatch actor model (#298, stacked after #297). Do not deploy until both
+   corrections are accepted and a valid exact-main independent-merge artifact
+   exists. No such requirement may be bypassed for convenience.
+6. **Dashboard transport — CODE ACCEPTED, NOT YET PRODUCTION-PROVEN:** the
+   merged #286/#287 stack hard-codes loopback binding and uses authenticated
+   Tailscale HTTPS with Funnel disabled. PR #297 must land before deployment.
+   Day-after proof requires a PASS transport artifact, loopback-only
+   `docker port`, a working enrolled-phone private URL, a failed public-IP URL,
+   and no Funnel route.
+7. **Review hygiene — IN PROGRESS:** adjudicate every surviving review thread
+   against current main; resolve only findings fixed on accepted main or
+   demonstrably superseded. An open corrective PR is evidence of work, not a
+   reason to mark the original finding resolved.
 
-   **Day-after check:** inspect
-   `outputs/performance/independent_merge_gate.json`;
-   `checks.workflow_configured` and `independent_merge_process_configured` must
-   be true, while `required_workflow_identity_enforced` and `enforced` must
-   remain false unless a workflow-identity-capable required-workflow ruleset is
-   independently verified against the exact repository ID and accepted
-   workflow commit. No merge is eligible without an exact-head
-   successful gate, a distinct current-head approver, an owner-originated
-   default-branch comment run and rerun, unchanged
-   trusted merge control, and an unchanged main ref at the atomic update. Test
-   a suffixed real Actions workflow path, a pytest-control change, and a
-   post-update PR-head race before relying on the lane. A successful merge run
-   must also contain the exact-SHA deployment attestation.
-4. **WO-101:** rebuild closed PR #242 from current main — IMPLEMENTED; review
-   pending. The rebuild uses observation-time label availability, append-only
-   resolution history, exact historical bid/ask, a purged chronological split,
-   and at least 10 distinct independent validation markets.
-5. **Deployment controls:** implement an actual tested rollback, isolate
-   deploy acceptance from the continuously running scheduler, and deploy only
-   an independently accepted main revision.
-   **Implemented 2026-07-19, pending independent review/merge and production
-   deployment:** the deploy workflow now requires the exact successful
-   independent-merge attestation for the target `main` SHA. Before cutover it
-   snapshots the aligned source/deployed marker, mode-0600 environment, and
-   last-known-good image; every post-cutover failure invokes a tested backward
-   checkout that preserves all runtime roots, restores env/marker/image,
-   recreates all four production services, and requires the ordinary health
-   check. Real-data acceptance moved out of the continuous scheduler into the
-   profiled, one-shot `vps-deploy-acceptance` service; the workflow stops and
-   proves the scheduler absent before starting it. Capacity preflight models
-   that profile as an alternative to the stopped 2 GiB scheduler, reports each
-   concurrent mode, and therefore does not falsely add both services to the
-   8 GiB host commitment. No broker, signer,
-   cancellation, paper-order, live-order, gate, threshold, stake, or funding
-   path changed. Missing/malformed attestation or rollback prerequisites stop
-   before cutover; any later failure rolls back, and an unprovable rollback
-   remains failed and retains mode-0700 recovery material for an operator.
-
-   Producer/consumer contract: `independent-pr-merge.yml` produces
-   `merge-attestation.json` as a run-scoped GitHub artifact; the deploy workflow
-   consumes only the explicitly named run after verifying its workflow path,
-   success, distinct current-head approver/actor, all controls, and exact merge
-   SHA. The scheduler produces the fresh governance pass; only after that
-   producer completes is it stopped, and the one-shot acceptance service owns
-   `deploy_acceptance_cycle.json`, `deploy_acceptance.json`, and the final
-   operating-state update without a concurrent scheduler writer.
-
-   **Day-after check:** in
-   `outputs/ops_scheduler/deploy_acceptance_cycle.json`,
-   `execution_lane=dedicated_one_shot_container`, `scheduler_isolated=true`,
-   and every command exit is zero; `outputs/ops_scheduler/deploy_acceptance.json`
-   is `PASS` for the deployed marker. If rollback was exercised,
-   `outputs/performance/vps_deploy_rollback.json` must be `PASS` with
-   `decision=ROLLED_BACK_TO_LAST_KNOWN_GOOD`, and checkout, environment, marker,
-   image-backed services, and health check must all be restored.
-6. **Dashboard transport:** IMPLEMENTED by Codex on 2026-07-19; awaiting the
-   required gate and owner review. Compose hard-codes a loopback-only host
-   binding, authenticated tailnet-only HTTPS is configured with Tailscale
-   Serve, Funnel is rejected, deploys fail before cutover when Tailscale is not
-   enrolled, and host health writes fail-closed transport evidence. This is the
-   registered **authenticated HTTPS or a private VPN** path. Producer:
-   Tailscale status/Serve plus Docker's effective port binding. Consumers:
-   deploy acceptance, VPS health, operator runbooks, and the dashboard URL
-   hint. Fail-safe: missing/stale/mismatched transport blocks deployment health
-   and never falls back to public HTTP. Day-after check: on the deployed VPS,
-   verify the transport artifact is `PASS`, `docker port` is loopback-only,
-   the private URL works from an enrolled phone, the public-IP URL does not,
-   and no Funnel route exists.
-7. **Review hygiene:** adjudicate every surviving review thread against current
-   main; resolve only findings that are fixed or demonstrably superseded, and
-   fix applicable findings in their own PRs first.
-
-Completed context: WO-93–WO-110 are merged as recorded in their individual
-sections, except that WO-100 and WO-101 are intentionally being rebuilt from
-their closed historical PRs. WO-33/34/35 remain governed by WO-101's leakage
-review and the H1–H3 freeze. WO-48, WO-67, WO-73 item 4, and WO-75 item 2 remain
-blocked. WO-70 and WO-72 remain deferred; WO-76 remains registration-only;
-WP13 still requires a separate owner decision.
+Completed context: registered WO-93 through WO-108 and WO-110 implementations
+are on main as recorded in their individual sections; provisional WO-109
+remains unregistered. WO-100 and WO-101 are the accepted rebuilds described
+above. WO-33/34/35 remain governed by WO-101's leakage review and the H1–H3
+freeze. WO-48, WO-67, WO-73 item 4, and WO-75 item 2 remain blocked.
+WO-70 and WO-72 remain deferred; WO-76 remains registration-only; WP13 still
+requires a separate owner decision.
 
 Do not infer a new build from the superseded priority notes below or from an
 existing diagnostic module. A newly filed WO or an explicit prerequisite

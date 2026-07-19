@@ -4230,10 +4230,10 @@ artifact is fresh when the gate reads it.
 
 ## ACTIVE BATCH for Codex (opened 2026-07-18, re-engagement)
 
-Codex is re-engaged. Current assignment: **WO-106 only.** Do WO-106 as a
-single branch/PR (ground rule 1), pass the pre-flight checklist, and stop.
-WO-107 below is ORCHESTRATOR-OWNED — do NOT build it. Anything not listed as
-"ISSUED to Codex" is not yours to touch.
+Codex is re-engaged. Current assignment: **none — WO-106 is DONE (PR #265,
+2026-07-19); await the next dispatched WO.** Work only what a bridge dispatch
+assigns from this file. WO-107 was ORCHESTRATOR-OWNED and is done (PR #262).
+Anything not listed as "ISSUED to Codex" is not yours to touch.
 
 Re-read `AGENTS.md` before starting. The line that matters most for this batch
 (AGENTS.md): "OWNER AUTHORIZATION IS NEVER AGENT-WRITABLE. A change to any
@@ -4337,7 +4337,21 @@ recorded here. Roster discipline: keep it at five unless a registered need
 demands more — every extra autonomous lane adds noise and surface (the
 external audit's own warning).
 
-## WO-106 — Reward-epoch time-series collector (ISSUED to Codex; NON-FROZEN; collection-only)
+## WO-106 — Reward-epoch time-series collector (DONE 2026-07-19; Codex-built, orchestrator-merged PR #265)
+
+Landed: first work order delivered through the dispatch bridge end-to-end
+(registered spec -> dispatch issue #264 -> owner one-line kickoff -> Codex
+build with isolated-VPS-checkout validation via signed git bundle, production
+untouched -> exhaustive Codex auto-review -> orchestrator line-audit with
+independent 7/7 + 1356/1356 verification -> squash-merge e882479). Spec
+compliance: exactly 5 files on current main, exact fieldnames/order pinned in
+tests, (study_generated_at_utc, condition_id) idempotency verified within-run
+and across-run, fail-safe sentence verbatim and contiguous, scheduler wired
+after the intraday maker-carry-study invocation (the only direct one — spec
+ambiguity Codex correctly resolved), ledger enrolled append_only. Day-after
+check (VPS, after next deploy + intraday cycle): `reward_epoch_samples.csv`
+gains >=1 row per study run and `total_rows` climbs across runs. Original spec
+follows.
 
 Purpose (external-audit item 8 prerequisite): the maker study estimates reward
 share from a SINGLE snapshot and extrapolates it to a full day. The real

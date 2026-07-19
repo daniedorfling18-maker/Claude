@@ -45,6 +45,18 @@ def test_legacy_local_runbooks_are_loudly_archived() -> None:
         assert "AGENTS.md" in first_lines, path
 
 
+def test_dispatch_and_queue_driver_protocol_is_absent() -> None:
+    agents = _text("AGENTS.md")
+    work_orders = _text("docs/POLYMARKET_CODEX_WORK_ORDERS.md")
+
+    for text in (agents, work_orders):
+        assert "[orchestrator-dispatch]" not in text
+        assert "### Dispatch bridge" not in text
+        assert "### Queue-driver wakeup" not in text
+        assert "Bridge addendum" not in text
+    assert not (ROOT / ".claude/agents/bridge-compliance-auditor.md").exists()
+
+
 def test_work_order_queue_distinguishes_non_buildable_states() -> None:
     work_orders = _text("docs/POLYMARKET_CODEX_WORK_ORDERS.md")
 

@@ -7,12 +7,13 @@ through PRs #282, #289, and #292; WO-101 was rebuilt through PRs #285 and
 through the squash merge of PR #286; PR #287 was merged into #286's stacked
 branch and is not a separate merge in accepted `main`. Funding remains
 operationally CLOSED and WO-67 remains BLOCKED behind every registered P1–P5
-precondition. PR #270 removed the unapproved dispatch/queue-driver protocol
-from PR #263; a corrected, disclosed bridge later reached `main` through the
-owner merge of PR #281. Review corrections #295–#298 remain open and are not
-accepted main. Each scope requires its own PR; frozen/registered-surface
-changes are authorized only by an owner-authored commit or an owner-approved
-pull request, and this status text does not grant authorization.
+precondition. The dispatch/queue-driver protocol is present on accepted `main`
+after PR #281, but no explicit owner-authored approval for that protocol has
+been recorded. PR #305 removes it under the owner's 2026-07-19 instruction.
+Review corrections #295–#298 and #302–#337 remain open and are not accepted
+main. Each scope requires its own PR; frozen/registered-surface changes are
+authorized only by an owner-authored commit or an owner-approved pull request,
+and this status text does not grant authorization.
 
 Prior: 2026-07-16 (owner-authorized corrective batch opened with WO-93; WO-85, WO-87, WO-86, and WO-88 implemented; WO-80, WO-82, WO-81 landed; WO-83 implemented in
 PR #203; WO-84 implemented in PR #205; WO-89 through WO-92 implemented. WO-87 now relabels the unchanged legacy verdict metric honestly and
@@ -5103,19 +5104,42 @@ one independently reviewable PR, and every frozen/registered-surface change
 still requires either an owner-authored commit or an owner-approved pull
 request.
 
-1. **Governance provenance — COMPLETE:** merged PR #270 removed the unapproved
-   dispatch/queue-driver protocol from PR #263 without reverting its safety
-   fixes. Owner-merged PR #281 later restored the narrower disclosed bridge,
-   which separates dispatch from merge authorization and leaves recurring
-   queue-driver provisioning owner-only. One-scope-per-PR remains binding.
+1. **Governance provenance — OPEN, FAIL CLOSED:** merged PR #270 removed the
+   unapproved dispatch/queue-driver protocol from PR #263 without reverting its
+   safety fixes, but PR #281 restored the protocol without an explicit
+   owner-authored approval record. PR #305 removes the surviving protocol from
+   current main. Until #305 is accepted, bridge/queue-driver text is
+   non-authoritative and cannot dispatch work, authorize a merge, or evidence
+   owner approval. One-scope-per-PR remains binding.
 2. **Initial review-remediation set — ACCEPTED, follow-up defects remain:**
    exact-token identity (#272), sharp-source provenance (#277),
    qualification-to-policy anchoring (#280), maker-markout token isolation
    (#283), and stage-source freshness (#284) are on main. Surviving review
-   findings still require separate corrections: registered sharp venue keys
-   (#277), collision-free effective-policy identity (#280), and M-A observable
-   markout plus registered-rule consistency (#290). Do not resolve those
-   threads merely because their original PRs merged.
+   findings remain split into these open, single-scope corrections:
+   - evidence identity/provenance: registered sharp venue keys (#302),
+     collision-free effective-policy identity (#303), current qualification
+     ledger anchoring (#306), resolution-question provenance (#317), websocket
+     observation freshness (#319), Gamma event-start provenance (#320),
+     official-book archive isolation (#321), best-bid/ask retention isolation
+     (#325), sharp-coverage blocker correctness (#326), exact queue depth
+     (#335), executable sell-basket depth (#336), and same-month title ranges
+     (#337);
+   - authorization/custody: agent-written authorization claims (#304), the
+     dispatch/queue-driver protocol (#305), force-push/deletion enforcement
+     (#312), credential arrays (#313), full README drift scanning (#314), API
+     token secrecy (#315), owner money-gate config scope (#331), independent
+     executor-review sequencing (#332), runtime credential boundaries (#333),
+     and the WO-102 authorization claim (#334);
+   - fail-closed runtime/reporting: non-finite active kills (#307), non-finite
+     Kelly inputs (#308), partial requote acceptance (#316), timeout hard exits
+     (#318), dashboard executor fallback (#322), replay/live-order separation
+     (#323), missing stage evidence (#324), Drill E payout floor (#327),
+     per-market degraded-state matching (#328), aggregate executor caps (#329),
+     and complete executor-ledger action comparison (#330); and
+   - WO-106 collection integrity: inactive-study rejection (#309), atomic
+     deduplication (#310), and daily post-study sampling (#311).
+   No source review thread may be resolved merely because its corrective PR is
+   open; acceptance into main is still required.
 3. **WO-100 — ACCEPTED BUT BLOCKED:** PRs #282, #289, and #292 are on main.
    The platform and second-identity blockers remain exactly as stated in the
    registered WO-100 section. PR #295 corrects independent-workflow revision
@@ -5144,12 +5168,18 @@ request.
 7. **Review hygiene — IN PROGRESS:** adjudicate every surviving review thread
    against current main; resolve only findings fixed on accepted main or
    demonstrably superseded. An open corrective PR is evidence of work, not a
-   reason to mark the original finding resolved.
+   reason to mark the original finding resolved. The WO-105 threshold-pin
+   thread in PR #255 remains an owner-only decision. PR #301's three threads
+   remain open because the proposed WO-111 would mutate an anchored append-only
+   ledger, omits the required S6 day-after artifact contract, and relies on the
+   protocol being removed by PR #305.
 8. **WO-111 — PROPOSED, NOT ACCEPTED:** open PR #301 proposes registration of
-   forward-only maker-carry membership/markout telemetry. It is not part of the
-   accepted register until owner approval/merge and must remain a separate
-   implementation PR if accepted; it cannot change a gate, threshold, verdict,
-   funding state, or order path.
+   forward-only maker-carry membership/markout telemetry. The current proposal
+   is not buildable for the three review defects recorded above and is not part
+   of the accepted register. No implementation may be issued unless an
+   owner-authored corrected spec is accepted; any later implementation must be
+   a separate PR and cannot change a gate, threshold, verdict, funding state,
+   or order path.
 
 Completed context: registered WO-93 through WO-108 and WO-110 implementations
 are on main as recorded in their individual sections; provisional WO-109

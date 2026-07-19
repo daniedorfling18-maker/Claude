@@ -53,6 +53,7 @@ OUTPUT_RELATIVE = "maker_carry/sharp_linking_qualification.json"
 MAX_ANCHOR_AGE_SECONDS = 6 * 3600
 MAX_ANCHOR_DISAGREEMENT = 0.03
 MAX_PM_BOOK_AGE_SECONDS = 5 * 60
+QUALIFYING_SHARP_SOURCES = frozenset({"pinnacle", "betfair_ex_eu", "betfair_ex_uk", "betfair"})
 
 # --- §2 exact-market Tier-0 sufficiency (registered, tighten-only) ---
 MAX_REPLAY_AGE_SECONDS = 30 * 60
@@ -110,6 +111,23 @@ def _tighter_min(settings: dict[str, Any], key: str, registered: float) -> float
 
 def _condition(name: str, passed: bool, detail: str) -> dict[str, Any]:
     return {"check": name, "passed": bool(passed), "detail": detail}
+
+
+def _qualifying_anchor_source(row: dict[str, Any]) -> str | None:
+    """Return the verified sharp book, never a generic pipeline label.
+
+    ``source`` identifies the transformation (for example an advance-market
+    composite), while ``bookmaker`` and ``anchor_source`` carry the independent
+    upstream book. Funding evidence requires both provenance fields to agree
+    on one registered sharp venue. Missing, generic, manual, or conflicting
+    labels fail closed.
+    """
+
+    bookmaker = str(row.get("bookmaker") or "").strip().lower()
+    anchor_source = str(row.get("anchor_source") or "").strip().lower()
+    if bookmaker != anchor_source or bookmaker not in QUALIFYING_SHARP_SOURCES:
+        return None
+    return bookmaker
 
 
 def _latest_official_book_row(
@@ -218,6 +236,9 @@ def evaluate_sharp_linking(
     max_book_age = _tighter_max(settings, "max_pm_book_age_seconds", MAX_PM_BOOK_AGE_SECONDS)
 
     fresh_fairs: list[float] = []
+    fresh_token_rows = 0
+    rejected_provenance = 0
+    qualifying_sources: set[str] = set()
     if token_id:
         for row in anchors:
             if str(row.get("token_id") or "").strip() != token_id:
@@ -229,12 +250,26 @@ def evaluate_sharp_linking(
             age = (now - stamp.astimezone(timezone.utc)).total_seconds()
             if age < 0 or age > max_anchor_age:
                 continue
+            fresh_token_rows += 1
+            source = _qualifying_anchor_source(row)
+            if source is None:
+                rejected_provenance += 1
+                continue
+            qualifying_sources.add(source)
             fresh_fairs.append(prob)
     checks.append(
         _condition(
             "exact_token_fresh_anchor",
             bool(fresh_fairs),
             f"fresh_joined_anchors={len(fresh_fairs)} (max age {max_anchor_age:g}s)",
+        )
+    )
+    checks.append(
+        _condition(
+            "exact_token_anchor_provenance",
+            bool(fresh_fairs) and rejected_provenance == 0,
+            f"fresh_token_rows={fresh_token_rows}; qualifying_rows={len(fresh_fairs)}; "
+            f"rejected_provenance={rejected_provenance}; sources={sorted(qualifying_sources)}",
         )
     )
 
@@ -266,6 +301,7 @@ def evaluate_sharp_linking(
         )
     )
     summary["consensus_sharp_fair"] = round(consensus_fair, 6) if consensus_fair is not None else None
+    summary["qualifying_sharp_sources"] = sorted(qualifying_sources)
     summary["maker_quote_band"] = [band_lo, band_hi]
 
     book_row = _latest_official_book_row(cfg, candidate_id, token_id)
@@ -432,6 +468,7 @@ def run_sharp_linking_evaluator(
             "max_anchor_age_seconds": MAX_ANCHOR_AGE_SECONDS,
             "max_anchor_disagreement": MAX_ANCHOR_DISAGREEMENT,
             "max_pm_book_age_seconds": MAX_PM_BOOK_AGE_SECONDS,
+            "qualifying_sharp_sources": sorted(QUALIFYING_SHARP_SOURCES),
             "max_replay_age_seconds": MAX_REPLAY_AGE_SECONDS,
             "min_evaluable_opportunities": MIN_EVALUABLE_OPPORTUNITIES,
             "min_confirmed_fills": MIN_CONFIRMED_FILLS,

@@ -4299,6 +4299,31 @@ rule as the VPS `.env`: the topic URL never enters the repo, config, chat,
 or telemetry. Absent that variable, the notification channel is GitHub
 itself (PR state + review requests).
 
+### Subagent roster (registered 2026-07-19; finders, not fixers)
+
+Owner asked for specialized agents to run through the system and improve it.
+Registered as `.claude/agents/*.md` (auto-loaded by local sessions, cloud
+sessions, and routine runs alike), under one binding rule: agents FIND and
+REPORT; improvements flow only through the registered work-order pipeline
+(finding -> orchestrator triage -> registered WO -> build -> audit -> merge).
+Free-roaming "improve as you go" write access is prohibited — it is the
+drive-by-refactor anti-pattern the ground rules ban and the WO-93 lesson.
+
+- `line-auditor` — audits a PR/diff/module against its registered WO spec
+  (touched-files exactness, loosening grep, frozen-boundary check, test
+  quality, NaN fail-open class, artifact flags). Read+test only.
+- `governance-consistency-auditor` — sweeps the governing docs for
+  contradictions, agent-written authorization language, stale statuses, and
+  loosening language (the WO-103 class). Read-only.
+- `wo-spec-drafter` — turns a triaged finding into a mechanical, Codex-ready
+  WO spec draft in the house style; the orchestrator registers it (owner
+  merges if frozen). Drafts only.
+
+All three: never edit outside their mandate, never post to GitHub, never merge,
+never write or imply owner authorization. Adding an agent with WRITE access to
+anything beyond a registered WO's scope requires a dated owner instruction
+recorded here.
+
 ## WO-106 — Reward-epoch time-series collector (ISSUED to Codex; NON-FROZEN; collection-only)
 
 Purpose (external-audit item 8 prerequisite): the maker study estimates reward

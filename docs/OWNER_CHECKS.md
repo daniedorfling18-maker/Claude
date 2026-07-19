@@ -15,9 +15,13 @@ while the PR gate is advisory.
 
 1. Gate-file diff: on GitHub, view the week's history of
    `profit_verdict.py`, `maker_carry_study.py`,
-   `live_test_decision_policy.py`. Any change must have a dated
-   tighten-only justification in its PR. These three files decide
-   money; nothing else outranks this check.
+   `live_test_decision_policy.py`, and
+   `polymarket_predictive_config.example.yaml`. Also compare any
+   separately deployed config with its previously accepted effective
+   values. Any code or config change to a money-gate threshold must
+   have a dated tighten-only justification in its PR. The effective
+   code-plus-config policy decides money; neither side may be reviewed
+   in isolation.
 2. Merge sample: pick any two merged PRs and read them. If a PR
    description says "audited clean", the audit must say WHAT was
    checked (including data contracts, post WO-77). "Tests green"

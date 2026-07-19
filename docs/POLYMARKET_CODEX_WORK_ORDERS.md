@@ -4889,6 +4889,12 @@ larger validation fractions are honoured up to the one-train-market boundary;
 and the diagnostic trainer writes a WO-101-specific summary that cannot feed
 either legacy readiness or canonical validation promotion.
 
+Post-merge review remediation on 2026-07-19 quarantines a token whenever clean
+append-only observations disagree on its close time, so a superseded later
+boundary cannot admit post-close quotes. Every generated feature, label, and
+split CSV row now also carries explicit `paper_trading_invoked=false` and
+`live_trading_invoked=false` fields rather than relying on a separate summary.
+
 Scope boundary: this is diagnostic H3 structural-bias research substrate only. It
 cannot replace the WO-96 exact prospective H3 evaluator, create a fourth
 hypothesis, change a gate/threshold/stake, authorize paper/live trading, fund

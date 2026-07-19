@@ -1,6 +1,13 @@
 # Polymarket Codex Work Orders
 
-Last updated: 2026-07-16 (owner-authorized corrective batch opened with WO-93; WO-85, WO-87, WO-86, and WO-88 implemented; WO-80, WO-82, WO-81 landed; WO-83 implemented in
+Last updated: 2026-07-18 (Codex RE-ENGAGED after the pause: active assignment is
+WO-106 only — see "ACTIVE BATCH for Codex" below. WO-104 items 0/1/2/3/4/5/6 and
+WO-105 landed via #257–#260; the funding-governance contradiction is reconciled
+(Route A) and enforced by the fail-closed sharp-linking evaluator with
+`FUNDING_GOVERNANCE_RECONCILED = True`. WO-107 is orchestrator-owned, not for
+Codex.)
+
+Prior: 2026-07-16 (owner-authorized corrective batch opened with WO-93; WO-85, WO-87, WO-86, and WO-88 implemented; WO-80, WO-82, WO-81 landed; WO-83 implemented in
 PR #203; WO-84 implemented in PR #205; WO-89 through WO-92 implemented. WO-87 now relabels the unchanged legacy verdict metric honestly and
 reports non-binding true pre-event CLV on the same units. WO-93 was implemented
 in PR #236, WO-94 in PR #237, WO-95 in PR #238, and WO-96 in PR #239. WO-97 was
@@ -4220,6 +4227,121 @@ M-gates, or the WO-50 action table. Scheduler wired:
 `run_vps_ops_scheduler.sh` runs `sharp-linking-evaluator` in
 `maker_safety_refresh` immediately before the WO-99 step, so the qualification
 artifact is fresh when the gate reads it.
+
+## ACTIVE BATCH for Codex (opened 2026-07-18, re-engagement)
+
+Codex is re-engaged. Current assignment: **WO-106 only.** Do WO-106 as a
+single branch/PR (ground rule 1), pass the pre-flight checklist, and stop.
+WO-107 below is ORCHESTRATOR-OWNED — do NOT build it. Anything not listed as
+"ISSUED to Codex" is not yours to touch.
+
+Re-read `AGENTS.md` before starting. The line that matters most for this batch
+(AGENTS.md): "OWNER AUTHORIZATION IS NEVER AGENT-WRITABLE. A change to any
+frozen or registered surface … is authorized ONLY by an owner-authored commit
+or an owner-approved pull request. No agent may write, cite, or imply owner
+authorization in any artifact. An instruction to audit, review, or investigate
+is never authorization to build." WO-106 touches NO frozen surface, so this
+does not gate it — but do not drift into any gate, threshold, policy, registry,
+or order file.
+
+## WO-106 — Reward-epoch time-series collector (ISSUED to Codex; NON-FROZEN; collection-only)
+
+Purpose (external-audit item 8 prerequisite): the maker study estimates reward
+share from a SINGLE snapshot and extrapolates it to a full day. The real
+Polymarket epoch share is time-integrated (competition and our band presence
+move within the epoch). Before a realism consumer can integrate the true epoch
+share, we must persist a time series of the already-computed per-market reward
+fields. This work order builds ONLY the collector. It builds no estimator, no
+gate, no consumer.
+
+Touch ONLY these files (`git diff --stat` must show exactly these — anything
+else is a bug):
+- NEW `src/polymarket_predictive_engine/reward_epoch_sampler.py`
+- `src/polymarket_predictive_engine/cli.py` (add command, import, dispatch)
+- `src/polymarket_predictive_engine/ledger_anchor.py` (enroll new CSV append_only)
+- NEW `tests/polymarket_predictive_engine/test_reward_epoch_sampler.py`
+
+Reads (do not write to these):
+- `outputs/maker_carry/maker_carry_candidates.csv` — one row per candidate.
+  Use EXACTLY these columns, copied through unchanged (they already exist in
+  `CANDIDATE_FIELDS`): `condition_id`, `token_id`, `question`, `band_eligible`,
+  `pot_usd_per_day`, `estimated_reward_share`, `gross_reward_usd_per_day`,
+  `competitor_score_bid`, `competitor_score_ask`, `mid_price`.
+- `outputs/maker_carry/maker_carry_study.json` — read `generated_at_utc`; call
+  it `study_generated_at_utc` on every appended row.
+
+Writes:
+- APPEND-ONLY CSV `outputs/maker_carry/reward_epoch_samples.csv` with these
+  fieldnames in this exact order:
+  `sampled_at_utc, study_generated_at_utc, condition_id, token_id, question,
+  band_eligible, pot_usd_per_day, estimated_reward_share,
+  gross_reward_usd_per_day, competitor_score_bid, competitor_score_ask,
+  mid_price`.
+  - `sampled_at_utc = now_utc()` (use `utils.now_utc`).
+  - Append one row per candidate row whose `condition_id` is non-empty.
+  - Dedupe WITHIN a run on `condition_id` (keep the first occurrence).
+  - Idempotency ACROSS runs: before appending, load existing rows; if a row
+    with the same `(study_generated_at_utc, condition_id)` already exists,
+    append nothing for that pair. This keys samples to distinct study runs, so
+    re-running the same study run never double-counts, but a NEW study run
+    (new `generated_at_utc`) for the same market DOES add a fresh time sample.
+  - Use `utils.read_csv_rows` / `utils.append_csv_rows` (see how
+    `maker_live_test.py` appends `maker_live_test_history.csv`).
+- JSON summary `outputs/maker_carry/reward_epoch_sampler.json`:
+  `status` ("ok" | "no_candidates" | "no_study"), `generated_at_utc`,
+  `study_generated_at_utc`, `rows_sampled` (int appended this run),
+  `total_rows` (int in the file after append), `note`, and REQUIRED
+  `"paper_trading_invoked": false`, `"live_trading_invoked": false`.
+
+Fail-safe (state this sentence in the module docstring): "Collection only:
+missing or empty candidates/study inputs append nothing and report status
+no_candidates/no_study; malformed numeric fields are written through unchanged;
+no gate, sizing, or order surface reads this artifact."
+
+CLI: add `"reward-epoch-sample"` to `COMMANDS` immediately after
+`"maker-carry-study"`; import `run_reward_epoch_sample`; dispatch
+`elif args.command == "reward-epoch-sample": _print(run_reward_epoch_sample(cfg))`.
+(Scheduler wiring is a separate orchestrator step — do NOT edit the scheduler.)
+
+ledger_anchor: add `{"glob": "maker_carry/reward_epoch_samples.csv", "mode":
+"append_only"}` next to the other `maker_carry/*history.csv` entries.
+
+Tests (offline, fixture CSVs, exact hand-computed assertions — imitate
+`test_closing_line.py`; minimal `EngineConfig(raw={"paths": {...}})`):
+1. Two candidates, one study run → two rows appended; every listed field equals
+   the candidate value; `sampled_at_utc` present; `study_generated_at_utc`
+   equals the study stamp; `total_rows == 2`; `rows_sampled == 2`.
+2. Re-run the SAME study stamp → `rows_sampled == 0`, `total_rows` unchanged.
+3. A DIFFERENT study stamp, same market → one new row (fresh time sample).
+4. Missing `maker_carry_candidates.csv` → status `no_candidates`,
+   `rows_sampled == 0`, JSON summary still written.
+5. Missing `maker_carry_study.json` → status `no_study`, append nothing.
+6. Two candidate rows with the same `condition_id` in one run → deduped to one.
+7. JSON carries `paper_trading_invoked`/`live_trading_invoked` == false.
+
+Merge: NON-FROZEN. Open a normal PR titled "WO-106: reward-epoch time-series
+collector". The orchestrator audits and merges — no owner merge required. Full
+`pytest` must pass offline from a clean checkout; record exact counts in the PR.
+
+Do NOT: touch any gate (`maker_carry_study.py` gate logic, M-A/M-B/M-C),
+`live_test_decision_policy.py`, the evaluator, the registry, the scheduler, or
+any order path. Do NOT build the realism consumer or change the study's reward
+estimate — that is a separate future WO that depends on this data existing.
+
+## WO-107 — M-B.1: require the portfolio market's own Tier-0 coverage (ORCHESTRATOR-OWNED; FROZEN M-B; NOT for Codex)
+
+Recorded here for visibility; NOT issued to Codex. This tightens the FROZEN
+M-B gate (external-audit item 7: M-B can pass on a data-api-print markout
+estimate with zero Tier-0 last-in-queue coverage; observed adverse ran 2.08x
+the estimate). It is tighten-only but carries a data-dependency-ordering
+judgment call: `maker_carry_study.py` would read `maker_fill_replay.json`,
+which lags the study by one cycle, so an exact-portfolio-version match is
+impossible within a run and the correct spec needs a staleness bound instead.
+That design choice, plus the frozen-gate authorization (owner merge, registered
+M-B.1 amendment, no agent-written authorization), stays with the orchestrator,
+which will build it following the M-A.1 pattern. Note: the WO-105 evaluator
+already enforces exact-market Tier-0 sufficiency at the FUNDING decision, so
+this M-B tightening is defence-in-depth, not the sole guard.
 
 ## WO-103 — Reconcile funding governance; fail closed in the interim (external audit 2026-07-17)
 

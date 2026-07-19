@@ -49,6 +49,7 @@ DEFAULT_LEDGER_REGISTRY: list[dict[str, str]] = [
     {"glob": "polymarket_shadow/shadow_positions.csv", "mode": "snapshot"},
     {"glob": "polymarket_shadow/shadow_fills.csv", "mode": "append_only"},
     {"glob": "maker_carry/maker_carry_history.csv", "mode": "append_only"},
+    {"glob": "maker_carry/reward_epoch_samples.csv", "mode": "append_only"},
     {"glob": "maker_carry/maker_live_test_history.csv", "mode": "append_only"},
     {"glob": "maker_carry/maker_live_test_wallet_history.csv", "mode": "append_only"},
     {"glob": "maker_carry/maker_live_test_attribution_history.csv", "mode": "append_only"},

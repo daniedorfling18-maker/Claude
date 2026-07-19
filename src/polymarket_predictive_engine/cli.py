@@ -88,6 +88,7 @@ from .profit_sprint import build_profit_sprint
 from .promotion_review import build_promotion_review
 from .readiness import paper_live_promotion_gate, paper_trade_readiness, readiness_decision
 from .requote_alerts import build_requote_alerts
+from .reward_epoch_sampler import run_reward_epoch_sample
 from .sharp_linking_evaluator import run_sharp_linking_evaluator
 from .stage_ticket_eligibility import run_stage_ticket_eligibility
 from .reconstructed_signal_clv import run_reconstructed_clv_study
@@ -128,6 +129,7 @@ COMMANDS = [
     "backfill-trade-prints",
     "collect-wallet-intel",
     "maker-carry-study",
+    "reward-epoch-sample",
     "collect-maker-replay-data",
     "maker-fill-replay",
     "snapshot-official-books",
@@ -370,6 +372,8 @@ def main(argv: list[str] | None = None) -> int:
             _print(collect_wallet_intelligence(cfg))
         elif args.command == "maker-carry-study":
             _print(run_maker_carry_study(cfg))
+        elif args.command == "reward-epoch-sample":
+            _print(run_reward_epoch_sample(cfg))
         elif args.command == "collect-maker-replay-data":
             _print(collect_maker_replay_data(cfg))
         elif args.command == "maker-fill-replay":

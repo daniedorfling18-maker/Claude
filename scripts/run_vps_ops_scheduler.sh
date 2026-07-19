@@ -487,6 +487,7 @@ run_maker_study_intraday() {
   (
     set -e
     timeout "$HARVEST_TIMEOUT" python -m polymarket_predictive_engine.cli maker-carry-study --config "$CONFIG_PATH"
+    python -m polymarket_predictive_engine.cli reward-epoch-sample --config "$CONFIG_PATH"
     timeout "$PRINTS_TIMEOUT" python -m polymarket_predictive_engine.cli collect-maker-replay-data --config "$CONFIG_PATH"
     timeout "$PRINTS_TIMEOUT" python -m polymarket_predictive_engine.cli maker-fill-replay --config "$CONFIG_PATH"
   ) >> "$LOG_FILE" 2>&1 &

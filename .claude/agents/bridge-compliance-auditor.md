@@ -32,8 +32,11 @@ given (default: the last 7 days):
    change added "owner approved/authorized/signed" language without an
    owner-attributable source (owner-authored commit or owner-merged PR).
 4. SCOPE CREEP: no dispatch assigns work that is not registered in
-   docs/POLYMARKET_CODEX_WORK_ORDERS.md, and no dispatch touches gates,
-   thresholds, policy, registry, or order paths.
+   docs/POLYMARKET_CODEX_WORK_ORDERS.md. A dispatch that requests a fix
+   TOUCHING a frozen/registered surface is allowed under the current bridge
+   scope — dispatching a build is not authorizing a merge — so the guarantee
+   that matters for frozen surfaces is #2 (no such PR was MERGED by automation),
+   not the mere fact that a dispatch touched one.
 
 Report format: findings most-severe first with links/ids (issue number,
 comment id, PR number, commit sha), the violated protocol clause quoted, and

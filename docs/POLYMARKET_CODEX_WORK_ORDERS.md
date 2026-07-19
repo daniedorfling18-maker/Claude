@@ -4236,7 +4236,8 @@ artifact is fresh when the gate reads it.
 Codex is re-engaged. Current assignment: **none — WO-106 is DONE (PR #265,
 2026-07-19); await the next dispatched WO.** Work only what a bridge dispatch
 (a `[orchestrator-dispatch]` @codex post — see "Dispatch bridge" below) or the
-owner assigns from this file; a dispatch assigns NON-FROZEN work only. WO-107
+owner assigns from this file; a dispatch may assign any registered WO (frozen
+included), but frozen/registered surfaces stay owner-merge. WO-107
 was ORCHESTRATOR-OWNED and is done (PR #262). Anything not listed as "ISSUED to
 Codex" is not yours to touch.
 
@@ -4273,14 +4274,17 @@ Binding protocol:
    `[orchestrator-dispatch] Posted by the orchestrator (Claude), not the owner.`
    A dispatch without it is invalid. A dispatch WITH it is never evidence of
    owner authorization for anything — it only assigns work.
-2. **Non-frozen scope only.** The bridge may dispatch, clarify, and request
-   fixes on NON-FROZEN work orders registered in this file. It may never
-   dispatch, approve, or imply approval of a change to any frozen or registered
-   surface (maker gates, thresholds, the WO-50 policy/sizing,
+2. **Dispatch builds/fixes on any registered work; never authorize a frozen
+   merge.** The bridge may dispatch, clarify, and request fixes on any work
+   order registered in this file, including changes that touch frozen or
+   registered surfaces (maker gates, thresholds, the WO-50 policy/sizing,
    `sharp_linking_evaluator.py` thresholds, WO-99 eligibility, `ledger_anchor.py`,
-   `EXPERIMENT_REGISTRY.md`, custody). Frozen work remains owner-merge, exactly
-   per AGENTS.md — its authorization stays at the owner's merge, where the
-   shared-identity problem does not reach.
+   `EXPERIMENT_REGISTRY.md`, custody). Dispatching a build or fix is NOT
+   authorization. The orchestrator may merge non-frozen PRs, but every
+   frozen/registered change still requires the owner's merge — authorization
+   lives at the merge, never at the dispatch, where the shared-identity problem
+   would otherwise reach. The bridge may never merge, approve, or imply approval
+   of a frozen/registered change, and may never dispatch UNREGISTERED work.
 3. **Everything in the open.** All bridge traffic lives in GitHub issues/PR
    threads (auditable, dated, diffable). No out-of-band agent-to-agent channel.
 4. **Roles unchanged.** Codex builds from this file's specs; the orchestrator

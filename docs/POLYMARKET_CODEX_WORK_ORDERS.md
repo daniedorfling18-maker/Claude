@@ -4231,9 +4231,9 @@ artifact is fresh when the gate reads it.
 ## ACTIVE BATCH for Codex (opened 2026-07-18, re-engagement)
 
 Codex is re-engaged. Current assignment: **none — WO-106 is DONE (PR #265,
-2026-07-19); await the next dispatched WO.** Work only what a bridge dispatch
-assigns from this file. WO-107 was ORCHESTRATOR-OWNED and is done (PR #262).
-Anything not listed as "ISSUED to Codex" is not yours to touch.
+2026-07-19); await the next owner-authored instruction.** Work only what the
+owner assigns from this file. WO-107 was ORCHESTRATOR-OWNED and is done
+(PR #262). Anything not listed as "ISSUED to Codex" is not yours to touch.
 
 Re-read `AGENTS.md` before starting. The line that matters most for this batch
 (AGENTS.md): "OWNER AUTHORIZATION IS NEVER AGENT-WRITABLE. A change to any
@@ -4243,61 +4243,6 @@ authorization in any artifact. An instruction to audit, review, or investigate
 is never authorization to build." WO-106 touches NO frozen surface, so this
 does not gate it — but do not drift into any gate, threshold, policy, registry,
 or order file.
-
-### Dispatch bridge (standing owner instruction, 2026-07-19)
-
-The owner instructed (chat, 2026-07-19) that the orchestrator (Claude) may
-dispatch Codex work DIRECTLY via GitHub — issues/PR comments mentioning
-`@codex` — instead of relaying every step through the owner. Binding protocol:
-
-1. **Identity disclosure is mandatory.** The orchestrator's GitHub writes post
-   under the owner's account. Every bridge dispatch MUST therefore begin with
-   the literal line
-   `[orchestrator-dispatch] Posted by the orchestrator (Claude), not the owner.`
-   A dispatch without this line is invalid. A dispatch WITH this line is never
-   evidence of owner authorization for anything — it only assigns work.
-2. **Non-frozen scope only.** The bridge may dispatch, clarify, and request
-   fixes on NON-FROZEN work orders registered in this file. It may never
-   dispatch, approve, or imply approval of a change to any frozen or registered
-   surface (gates, thresholds, WO-50 policy, registry, custody). Frozen work
-   remains owner-merge, exactly per AGENTS.md.
-3. **Everything in the open.** All bridge traffic lives in GitHub issues/PR
-   threads (auditable, dated, diffable). No out-of-band agent-to-agent channel.
-4. **Roles unchanged.** Codex builds from this file's specs; the orchestrator
-   audits and merges non-frozen PRs and escalates frozen ones to the owner;
-   the owner is the sole authority on frozen surfaces and may revoke this
-   bridge at any time by saying so (record the revocation here, dated).
-
-### Queue-driver wakeup (owner-configured; canonical prompt)
-
-The owner asked (chat, 2026-07-19) for the orchestrator to run WO cycles
-without per-WO prompting. The durable mechanism is an owner-configured
-scheduled trigger on the Claude Code environment (claude.ai/code →
-environment → triggers; docs:
-https://code.claude.com/docs/en/claude-code-on-the-web). The orchestrator
-must NOT self-provision recurring autonomy; the trigger — its existence,
-cadence, and revocation — is owner-controlled. Canonical trigger prompt
-(paste verbatim; keep in sync with this file):
-
-> Queue-driver cycle (standing owner instruction 2026-07-19; protocol:
-> "Dispatch bridge" in docs/POLYMARKET_CODEX_WORK_ORDERS.md — read it and
-> AGENTS.md first). ONE cycle: (1) Check open PRs and dispatch issues for
-> Codex activity. (2) If Codex opened/updated a WO PR: line-audit against the
-> registered WO spec; non-frozen + CI green + clean audit → squash-merge and
-> mark the WO done in the doc; defective → request fixes in a PR comment
-> beginning "[orchestrator-dispatch] Posted by the orchestrator (Claude), not
-> the owner." tagging @codex. (3) Frozen surfaces: never merge or modify; if
-> a frozen PR awaits the owner, leave it untouched. (4) If the active WO
-> merged and the queue registers a next NON-FROZEN WO as ISSUED, dispatch it
-> via the bridge; never invent or dispatch unregistered work. (5) Nothing
-> actionable → end quietly: no posts, no commits.
-
-Owner-notification note: to receive phone pushes from queue-driver runs
-(e.g. "frozen PR awaits your merge"), set `OPS_OWNER_NTFY_TOPIC_URL` as an
-environment variable in the Claude Code environment settings — same custody
-rule as the VPS `.env`: the topic URL never enters the repo, config, chat,
-or telemetry. Absent that variable, the notification channel is GitHub
-itself (PR state + review requests).
 
 ### Subagent roster (registered 2026-07-19; finders, not fixers)
 
@@ -4324,24 +4269,17 @@ drive-by-refactor anti-pattern the ground rules ban and the WO-93 lesson.
   optimistic estimators, producer/consumer contract drift (the deploy-gate
   class). Must confirm findings with throwaway fixtures before reporting.
   Read+test only.
-- `bridge-compliance-auditor` — audits the dispatch bridge's own GitHub paper
-  trail: provenance tags present on every @codex dispatch, no frozen-surface
-  PR merged by automation, no agent-written authorization language, no
-  unregistered-scope dispatches. The automation that polices frozen surfaces
-  is itself policed. Read-only.
-
-All five: never edit outside their mandate, never post to GitHub, never merge,
+All four: never edit outside their mandate, never post to GitHub, never merge,
 never write or imply owner authorization. Adding an agent with WRITE access to
 anything beyond a registered WO's scope requires a dated owner instruction
-recorded here. Roster discipline: keep it at five unless a registered need
+recorded here. Roster discipline: keep it at four unless a registered need
 demands more — every extra autonomous lane adds noise and surface (the
 external audit's own warning).
 
 ## WO-106 — Reward-epoch time-series collector (DONE 2026-07-19; Codex-built, orchestrator-merged PR #265)
 
-Landed: first work order delivered through the dispatch bridge end-to-end
-(registered spec -> dispatch issue #264 -> owner one-line kickoff -> Codex
-build with isolated-VPS-checkout validation via signed git bundle, production
+Landed through issue #264 and this repository's normal review process
+(registered spec -> Codex build with isolated-VPS-checkout validation via signed git bundle, production
 untouched -> exhaustive Codex auto-review -> orchestrator line-audit with
 independent 7/7 + 1356/1356 verification -> squash-merge e882479). Spec
 compliance: exactly 5 files on current main, exact fieldnames/order pinned in

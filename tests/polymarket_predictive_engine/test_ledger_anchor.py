@@ -59,6 +59,44 @@ def test_untouched_append_only_ledgers_verify_across_daily_appends(tmp_path: Pat
     assert first["live_trading_invoked"] is False
 
 
+def test_wo111_portfolio_members_sidecar_enrolled_append_only():
+    # WO-111: the new sidecar must be enrolled append_only in the code default so a
+    # future per-market gate recompute reads tamper-evident membership evidence.
+    assert {
+        "glob": "maker_carry/maker_carry_portfolio_members.csv",
+        "mode": "append_only",
+    } in DEFAULT_LEDGER_REGISTRY
+
+
+def test_wo111_portfolio_members_sidecar_anchors_forward_only(tmp_path: Path):
+    # Enrolling a brand-new (initially empty->one-row) append_only file is anchor-safe,
+    # and appending a second run's row leaves the prior prefix bytes unchanged, so
+    # verify_ledger_chain stays clean across both runs (the fixed two-column schema
+    # never forces a prefix-breaking rewrite).
+    cfg = _config(
+        tmp_path,
+        [{"glob": "maker_carry/maker_carry_portfolio_members.csv", "mode": "append_only"}],
+    )
+    ledger = cfg.output_root / "maker_carry" / "maker_carry_portfolio_members.csv"
+    ledger.parent.mkdir(parents=True)
+    ledger.write_bytes(b"generated_at_utc,portfolio_members\r\n2026-07-20T00:00:00Z,[]\r\n")
+    first = anchor_ledgers(cfg, anchor_date="2026-07-20")
+    ledger.write_bytes(
+        ledger.read_bytes()
+        + b'2026-07-21T00:00:00Z,"[{""condition_id"":""0xc"",""markout_measured"":true}]"\r\n'
+    )
+    second = anchor_ledgers(cfg, anchor_date="2026-07-21")
+    verification = verify_ledger_chain(cfg)
+
+    assert first["status"] == "ok"
+    assert second["status"] == "ok"
+    assert verification["status"] == "ok"
+    rows = read_csv_rows(cfg.output_root / "performance" / "ledger_anchor_chain.csv")
+    manifest_first = json.loads(rows[0]["ledger_manifest_json"])[0]["byte_length"]
+    manifest_second = json.loads(rows[1]["ledger_manifest_json"])[0]["byte_length"]
+    assert manifest_second > manifest_first  # forward-only growth
+
+
 def test_single_byte_retroactive_edit_reports_correct_first_broken_date(tmp_path: Path):
     cfg = _config(tmp_path, ["audit/core.csv"])
     ledger = cfg.output_root / "audit" / "core.csv"

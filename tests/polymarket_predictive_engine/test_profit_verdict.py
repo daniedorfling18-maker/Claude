@@ -415,6 +415,40 @@ def test_frozen_cohort_entries_do_not_inflate_achievable_turnover(tmp_path):
     assert verdict["verdict"] == "insufficient_evidence"
 
 
+def test_terminal_read_forces_pending_verdict_to_no(tmp_path, monkeypatch):
+    # #59 red-team F3: amendment 7/8 is now ENFORCED, not just emitted. At/after the
+    # 2026-08-19/20 terminal read, any non-all-pass outcome resolves terminally to
+    # no_for_tested_edge_classes -- a pending Gate A no longer lingers as
+    # insufficient_evidence.
+    cfg = _config(tmp_path)
+    _write_finals(cfg, {"m0": [0.01]})
+    monkeypatch.setattr(
+        "polymarket_predictive_engine.profit_verdict.now_utc", lambda: "2026-08-20T00:00:00Z"
+    )
+
+    verdict = build_profit_verdict(cfg)
+
+    assert verdict["verdict"] == "no_for_tested_edge_classes"
+    assert verdict["extension_resolution"]["regime"] == "terminal"
+    assert verdict["extension_resolution"]["terminal_no_applied"] is True
+
+
+def test_extension_window_defers_a_pending_read(tmp_path, monkeypatch):
+    # Within the single extension window (2026-07-20 .. 2026-08-18) a pending read takes
+    # the extension and stays insufficient_evidence; it is NOT forced to NO yet.
+    cfg = _config(tmp_path)
+    _write_finals(cfg, {"m0": [0.01]})
+    monkeypatch.setattr(
+        "polymarket_predictive_engine.profit_verdict.now_utc", lambda: "2026-07-25T00:00:00Z"
+    )
+
+    verdict = build_profit_verdict(cfg)
+
+    assert verdict["verdict"] == "insufficient_evidence"
+    assert verdict["extension_resolution"]["regime"] == "extension_window"
+    assert verdict["extension_resolution"]["terminal_no_applied"] is False
+
+
 def test_amendment_7_extension_protocol_is_registered_and_terminal(tmp_path):
     # Amendment 7 pre-commits the window-extension terms BEFORE the first
     # interim read: exact dates, single use, forced terminal resolution.

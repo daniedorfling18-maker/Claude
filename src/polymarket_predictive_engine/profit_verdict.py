@@ -693,15 +693,44 @@ def build_profit_verdict(cfg: EngineConfig) -> dict[str, Any]:
         gate_c = "pending" if gate_b not in ("fail",) and gate_a != "fail" else "not_evaluated"
         gate_c_reason = "evaluated only after Gate B passes."
 
+    all_gates_pass = gate_a == "pass" and gate_b == "pass" and gate_c == "pass"
     if gate_a == "fail" or gate_b == "fail" or gate_c == "fail":
         verdict = "no_for_tested_edge_classes"
-    elif gate_a == "pass" and gate_b == "pass" and gate_c == "pass":
+    elif all_gates_pass:
         verdict = "yes_edge_evidenced_pending_paper_confirmation"
     else:
         verdict = "insufficient_evidence"
 
+    # Amendment 7/8 extension protocol, now ENFORCED in code (previously only emitted
+    # as reference text). After the 2026-07-20 final read a non-all-pass outcome takes
+    # the single extension and stays insufficient_evidence through the window; at/after
+    # the 2026-08-19/20 terminal read ANY outcome other than all-gates-pass resolves
+    # TERMINALLY to no_for_tested_edge_classes (a pending read no longer lingers as
+    # insufficient_evidence). Tighten-only: it can never produce a YES the gate rules
+    # would not, and only makes a non-pass MORE conclusive at the pre-committed date.
+    today = str(now_utc())[:10]
+    final_read_date = str(REGISTERED_EXTENSION_PROTOCOL["final_read_due_utc"])[:10]
+    terminal_date = str(REGISTERED_EXTENSION_PROTOCOL["extension_window_end_utc"])[:10]
+    if all_gates_pass:
+        extension_regime = "resolved_yes_path"
+    elif today >= terminal_date:
+        extension_regime = "terminal"
+        verdict = "no_for_tested_edge_classes"
+    elif today >= final_read_date:
+        extension_regime = "extension_window"
+    else:
+        extension_regime = "pre_final_read"
+    extension_resolution = {
+        "regime": extension_regime,
+        "as_of_date_utc": today,
+        "final_read_due_utc": REGISTERED_EXTENSION_PROTOCOL["final_read_due_utc"],
+        "terminal_read_due_utc": REGISTERED_EXTENSION_PROTOCOL["extension_window_end_utc"],
+        "terminal_no_applied": extension_regime == "terminal" and not all_gates_pass,
+    }
+
     payload = {
         "verdict": verdict,
+        "extension_resolution": extension_resolution,
         "generated_at_utc": now_utc(),
         "registered_at_utc": REGISTERED_AT_UTC,
         "registered_amendments_at_utc": REGISTERED_AMENDMENTS_AT_UTC,

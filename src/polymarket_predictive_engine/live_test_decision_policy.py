@@ -10,6 +10,8 @@ from __future__ import annotations
 
 from collections import Counter
 from datetime import date, datetime
+import hashlib
+import json
 from pathlib import Path
 import math
 import re
@@ -21,6 +23,9 @@ from .risk import shrunk_kelly_fraction
 from .utils import boolish, now_utc, parse_timestamp, read_csv_rows, read_json, safe_float, write_json, write_text_atomic
 
 REGISTERED_AT_UTC = "2026-07-10T00:00:00Z"
+POLICY_VERSION_FIELD = "policy_version_sha256"
+POLICY_VERSION_EXCLUDED_FIELDS = frozenset({"generated_at_utc", POLICY_VERSION_FIELD})
+POLICY_VERSION_PATTERN = re.compile(r"^[0-9a-f]{64}$")
 KELLY_FULL_WEIGHT_DAYS_FLOOR = 20
 REGISTERED_KILL_INPUT_MAX_AGE_SECONDS = 30 * 60
 # Owner decision 2026-07-17 (owner-approved PR; an interpretation, not a
@@ -148,6 +153,48 @@ KILL_CRITERIA_REGISTRATION: list[dict[str, Any]] = [
         "rule": "Stop when the read-only live-test scoreboard emits its registered STOP state.",
     },
 ]
+
+
+def policy_version_sha256(payload: dict[str, Any]) -> str:
+    """Return the content identity of the complete effective policy payload.
+
+    The observation clock and the identity field itself are excluded. Every
+    other top-level field, including input versions and the indicated action,
+    is bound by canonical JSON so two writes in one UTC second cannot collide.
+    """
+
+    effective_payload = {
+        key: value
+        for key, value in payload.items()
+        if key not in POLICY_VERSION_EXCLUDED_FIELDS
+    }
+    encoded = json.dumps(
+        effective_payload,
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=False,
+        allow_nan=False,
+    ).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
+
+
+def is_policy_version_sha256(value: Any) -> bool:
+    return POLICY_VERSION_PATTERN.fullmatch(str(value or "").strip()) is not None
+
+
+def policy_version_matches(payload: dict[str, Any]) -> bool:
+    claimed = str(payload.get(POLICY_VERSION_FIELD) or "").strip()
+    if not is_policy_version_sha256(claimed):
+        return False
+    try:
+        return claimed == policy_version_sha256(payload)
+    except (TypeError, ValueError):
+        return False
+
+
+def _stamp_policy_version(payload: dict[str, Any]) -> dict[str, Any]:
+    payload[POLICY_VERSION_FIELD] = policy_version_sha256(payload)
+    return payload
 
 
 def _settings(cfg: EngineConfig) -> dict[str, Any]:
@@ -706,6 +753,7 @@ def run_decision_policy(cfg: EngineConfig) -> dict[str, Any]:
             "paper_trading_invoked": False,
             "live_trading_invoked": False,
         }
+        _stamp_policy_version(payload)
         write_json(path, payload)
         return payload
 
@@ -796,6 +844,7 @@ def run_decision_policy(cfg: EngineConfig) -> dict[str, Any]:
         "paper_trading_invoked": False,
         "live_trading_invoked": False,
     }
+    _stamp_policy_version(payload)
     write_json(path, payload)
     _patch_quote_sheet(out_root, payload)
     return payload

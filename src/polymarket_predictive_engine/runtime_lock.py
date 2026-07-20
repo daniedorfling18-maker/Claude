@@ -49,19 +49,6 @@ def _lock_age_seconds(payload: dict[str, Any]) -> float | None:
     return max(0.0, (now - acquired_at).total_seconds())
 
 
-def _lock_file_mtime_age_seconds(path: Path) -> float | None:
-    """Wall-clock age of the lock file itself, independent of its payload.
-
-    Used as a fallback when the payload carries no parseable acquisition time so a
-    malformed lock (e.g. one whose JSON body was never written) can still be aged out.
-    """
-    try:
-        mtime = path.stat().st_mtime
-    except OSError:
-        return None
-    return max(0.0, time.time() - mtime)
-
-
 def _same_pid_lock_predates_current_process(payload: dict[str, Any]) -> bool:
     """Detect a persisted lock from a prior process that reused our PID.
 
@@ -86,12 +73,28 @@ def _same_pid_lock_predates_current_process(payload: dict[str, Any]) -> bool:
 
 
 def _try_acquire(path: Path, payload: dict[str, Any]) -> bool:
-    fd = os.open(str(path), os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+    # Publish the lock fully populated in a single atomic step: write the payload to a
+    # sibling temp file, then hard-link it into place. os.link raises FileExistsError if
+    # the lock already exists (preserving exclusive-create semantics), and once the lock
+    # path exists it ALWAYS already contains its payload -- there is no observable
+    # empty-lock window a crash or pause between create and write could leave behind for
+    # another process to misjudge as dead. (The prior O_CREAT|O_EXCL-then-write left
+    # exactly that window.)
+    body = (json.dumps(payload, sort_keys=True, indent=2) + "\n").encode("utf-8")
+    tmp = path.with_name(f".{path.name}.{os.getpid()}.{time.time_ns()}.tmp")
+    fd = os.open(str(tmp), os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o644)
     try:
-        os.write(fd, json.dumps(payload, sort_keys=True, indent=2).encode("utf-8"))
-        os.write(fd, b"\n")
+        os.write(fd, body)
+        os.fsync(fd)
     finally:
         os.close(fd)
+    try:
+        os.link(str(tmp), str(path))
+    finally:
+        try:
+            os.unlink(str(tmp))
+        except FileNotFoundError:
+            pass
     return True
 
 
@@ -121,17 +124,6 @@ def acquire_runtime_lock(
             stale_reason = f"age_seconds>{stale_after_seconds:g}"
         elif _same_pid_lock_predates_current_process(existing_payload):
             stale_reason = "same_pid_lock_predates_current_process"
-        elif age is None and stale_after_seconds > 0:
-            # A lock whose payload carries no parseable acquisition time (e.g. a
-            # process killed after O_CREAT|O_EXCL but before its JSON body was
-            # written) satisfies neither branch above and would otherwise deadlock
-            # every future caller until an operator removes it. Fall back to the
-            # lock file's own mtime so a genuinely abandoned malformed lock is still
-            # reclaimed once it is older than the stale window (a lock mid-write has
-            # a fresh mtime and is left alone).
-            mtime_age = _lock_file_mtime_age_seconds(path)
-            if mtime_age is not None and mtime_age > stale_after_seconds:
-                stale_reason = f"malformed_lock_mtime_age_seconds>{stale_after_seconds:g}"
         if stale_reason:
             try:
                 path.unlink()

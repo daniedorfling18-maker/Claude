@@ -969,6 +969,63 @@ def test_p3_3_commit_re_reads_freshest_rows_inside_the_lock(tmp_path, monkeypatc
     assert len(stamps) == 3
 
 
+def test_p3_3_force_pending_only_downgrades_pass_gates_and_verdict():
+    # #346 Codex P1: an uncommitted run must never publish an evidence-unbacked pass.
+    summary = {
+        "maker_gates": {
+            "M_A_carry_evidence": {"state": "pass", "runs_at_or_above_target": 7},
+            "M_B_adverse_realism": {"state": "pass"},
+            "M_C_payout_floor": {"state": "pass_by_construction"},
+            "maker_verdict": "evidence_supported_pending_human_decision",
+        }
+    }
+
+    maker_carry_study._force_maker_gates_pending_uncommitted(summary)
+
+    mg = summary["maker_gates"]
+    assert mg["M_A_carry_evidence"]["state"] == "pending"
+    assert mg["M_A_carry_evidence"]["uncommitted_ledger_downgrade"] is True
+    assert mg["M_B_adverse_realism"]["state"] == "pending"
+    assert mg["M_C_payout_floor"]["state"] == "pass_by_construction"  # untouched by construction
+    assert mg["maker_verdict"] == "insufficient_evidence"
+
+
+def test_p3_3_lost_ownership_after_members_aborts_history_write(tmp_path, monkeypatch):
+    # #346 Codex P1/P2: if the lock is reclaimed from a paused holder, the holder must
+    # NOT overwrite on resume. With the members-first ordering, a mid-commit abort
+    # leaves at most an orphan members row and NEVER a counted history row without
+    # membership evidence.
+    cfg = _config(tmp_path)
+    _calm_market_requests(monkeypatch)
+
+    calls = {"n": 0}
+
+    def _own(_lock):
+        calls["n"] += 1
+        return calls["n"] == 1  # own for the members write, lost before the history write
+
+    monkeypatch.setattr(maker_carry_study, "_still_holds_ledger_lock", _own)
+    summary = run_maker_carry_study(cfg)
+
+    assert summary["ledger_commit"]["status"] == "skipped_lock_held"
+    assert len(_members_rows(cfg)) == 1  # members written first
+    assert read_csv_rows(cfg.output_root / "maker_carry" / "maker_carry_history.csv") == []  # history aborted
+    assert summary["maker_gates"]["maker_verdict"] == "insufficient_evidence"  # forced pending
+
+
+def test_p3_3_reclaimed_lock_writes_neither_ledger(tmp_path, monkeypatch):
+    # Ownership lost before any write: nothing is committed at all.
+    cfg = _config(tmp_path)
+    _calm_market_requests(monkeypatch)
+
+    monkeypatch.setattr(maker_carry_study, "_still_holds_ledger_lock", lambda _lock: False)
+    summary = run_maker_carry_study(cfg)
+
+    assert summary["ledger_commit"]["status"] == "skipped_lock_held"
+    assert read_csv_rows(cfg.output_root / "maker_carry" / "maker_carry_history.csv") == []
+    assert _members_rows(cfg) == []
+
+
 def test_wo111_sidecar_appends_forward_only_and_round_trips(tmp_path, monkeypatch):
     cfg = _config(tmp_path)
     markets = [_market("deep calm market", "calm", 1000.0)]

@@ -89,7 +89,7 @@ from typing import Any
 import requests
 
 from .config import EngineConfig, load_config
-from .runtime_lock import runtime_lock
+from .runtime_lock import RuntimeLockResult, runtime_lock
 from .utils import (
     normalize_external_timestamp,
     now_utc,
@@ -1775,6 +1775,36 @@ def _distinct_days_at_target(
     return days_at_target
 
 
+def _still_holds_ledger_lock(lock: RuntimeLockResult) -> bool:
+    """True only while the on-disk lock still carries THIS acquisition's payload.
+
+    Guards the stale-timeout reclaim path: if a paused holder's lock was reclaimed
+    by another process, the lock file no longer matches our payload and we must not
+    write, which would otherwise overwrite the reclaimer's freshly committed row.
+    """
+    current = read_json(lock.path, default=None)
+    return isinstance(current, dict) and current == lock.payload
+
+
+def _force_maker_gates_pending_uncommitted(summary: dict[str, Any]) -> None:
+    """Fail-safe for a run whose evidence row was NOT committed (lock held/lost).
+
+    Such a run must not publish an evidence-unbacked gate pass, because
+    run_decision_policy trusts the maker_carry_study.json gate states directly.
+    Only ever downgrades pass -> pending (never the reverse), so this can only
+    tighten the published verdict, never loosen it.
+    """
+    gates = summary.get("maker_gates")
+    if not isinstance(gates, dict):
+        return
+    for key in ("M_A_carry_evidence", "M_B_adverse_realism"):
+        gate = gates.get(key)
+        if isinstance(gate, dict) and gate.get("state") == "pass":
+            gate["state"] = "pending"
+            gate["uncommitted_ledger_downgrade"] = True
+    gates["maker_verdict"] = "insufficient_evidence"
+
+
 def run_maker_carry_study(cfg: EngineConfig) -> dict[str, Any]:
     settings = _settings(cfg)
     out_root = cfg.output_root / "maker_carry"
@@ -2114,29 +2144,41 @@ def run_maker_carry_study(cfg: EngineConfig) -> dict[str, Any]:
     # -> write_csv path was a read-modify-write race: two overlapping study runs read
     # the SAME prior rows and the later full-file rewrite silently dropped the earlier
     # run's appended row. The lock serialises the commit and the in-lock re-read makes
-    # each append land on the freshest committed state. Fail-safe: if a concurrent
-    # commit already holds the lock we SKIP this run's near-duplicate same-window append
-    # (the holder's equivalent row still lands) rather than clobber the ledger; a crashed
-    # holder's lock is reclaimed after MAKER_CARRY_LEDGER_LOCK_STALE_SECONDS. Changes NO
-    # gate (`_distinct_days_at_target` still reads history identically), threshold,
-    # share-model scope, verdict, or order path.
+    # each append land on the freshest committed state.
+    #   - Ordering: the WO-111 members sidecar is written BEFORE the history row, so an
+    #     interrupted commit (crash, or the ownership abort below) leaves at most an
+    #     orphan members row and NEVER a counted history row without membership
+    #     evidence -- a future per-market recompute stays fail-closed.
+    #   - Ownership: we re-verify we still hold the lock immediately before each write,
+    #     so a lock reclaimed from a paused holder can never be overwritten by that
+    #     holder on resume (the stale-timeout reclaim is not, by itself, mutual
+    #     exclusion against a merely-blocked writer).
+    #   - Fail-safe: if the lock is held (or was lost) the run SKIPS its near-duplicate
+    #     append (the holder's equivalent row still lands) and the maker gates are
+    #     forced pending below, so no evidence-unbacked pass is ever published.
+    # Changes NO gate rule (`_distinct_days_at_target` still reads history identically),
+    # threshold, share-model scope, or order path.
+    ledger_committed = False
     with runtime_lock(
         cfg,
         MAKER_CARRY_LEDGER_LOCK,
         stale_after_seconds=MAKER_CARRY_LEDGER_LOCK_STALE_SECONDS,
     ) as lock:
-        ledger_committed = lock.acquired
-        if ledger_committed:
-            committed_history = read_csv_rows(history_path)
-            committed_history.append(history_row)
-            write_csv(history_path, committed_history, fieldnames=history_fields)
+        if lock.acquired and _still_holds_ledger_lock(lock):
             committed_members = read_csv_rows(members_path)
             committed_members.append(members_row)
             write_csv(members_path, committed_members, fieldnames=members_fields)
+            if _still_holds_ledger_lock(lock):
+                committed_history = read_csv_rows(history_path)
+                committed_history.append(history_row)
+                write_csv(history_path, committed_history, fieldnames=history_fields)
+                ledger_committed = True
     summary["ledger_commit"] = {
         "status": "committed" if ledger_committed else "skipped_lock_held",
         "lock": MAKER_CARRY_LEDGER_LOCK,
     }
+    if not ledger_committed:
+        _force_maker_gates_pending_uncommitted(summary)
     write_json(summary_path, summary)
     _write_quote_sheet(out_root, summary, settings)
     return summary

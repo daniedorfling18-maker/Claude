@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -79,6 +80,40 @@ def test_runtime_lock_keeps_same_process_lock_after_process_start(
     _write_lock(cfg, acquired_at_utc=_iso_minutes_ago(10))
 
     lock = runtime_lock.acquire_runtime_lock(cfg, "prediction_cycle", stale_after_seconds=999999)
+
+    assert lock.acquired is False
+    assert lock.stale_lock_replaced is False
+
+
+def test_malformed_timestampless_lock_reclaimed_once_mtime_exceeds_stale_window(tmp_path: Path) -> None:
+    # #346 Codex P2: a process killed after O_CREAT|O_EXCL but before its JSON body
+    # was written leaves a payloadless lock whose age cannot be computed, so neither
+    # age nor same-pid branch fires and every future caller deadlocks. The mtime
+    # fallback must reclaim it once it is older than the stale window.
+    cfg = _cfg(tmp_path)
+    path = runtime_lock.runtime_lock_path(cfg, "prediction_cycle")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(b"")  # created but never populated
+    stale = time.time() - 600
+    os.utime(path, (stale, stale))
+
+    lock = runtime_lock.acquire_runtime_lock(cfg, "prediction_cycle", stale_after_seconds=300)
+
+    assert lock.acquired is True
+    assert lock.stale_lock_replaced is True
+    assert lock.stale_lock_reason.startswith("malformed_lock_mtime_age_seconds")
+    runtime_lock.release_runtime_lock(lock)
+
+
+def test_fresh_malformed_lock_is_left_alone(tmp_path: Path) -> None:
+    # A lock still being written (fresh mtime) must NOT be reclaimed by the fallback,
+    # or a genuine holder mid-write would be stolen.
+    cfg = _cfg(tmp_path)
+    path = runtime_lock.runtime_lock_path(cfg, "prediction_cycle")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(b"")
+
+    lock = runtime_lock.acquire_runtime_lock(cfg, "prediction_cycle", stale_after_seconds=300)
 
     assert lock.acquired is False
     assert lock.stale_lock_replaced is False

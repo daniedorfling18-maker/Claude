@@ -548,8 +548,12 @@ def test_nan_capital_rows_drop_from_returns():
     assert policy._daily_net_returns(rows) == [0.05]
 
 
-def test_no_live_data_tolerance_and_missing_study(tmp_path):
+def test_no_live_data_tolerance_and_missing_study(tmp_path, monkeypatch):
     cfg = _config(tmp_path)
+    # Pin "now" before the registered decision_date (2026-07-20) so the study-missing
+    # rule (priority 6) governs; otherwise, once the suite runs on/after that date,
+    # the decision-date-pending rule (priority 5) fires first (clock-drift, see #338).
+    monkeypatch.setattr(policy, "now_utc", lambda: "2026-07-15T08:00:00Z")
 
     result = run_decision_policy(cfg)
 

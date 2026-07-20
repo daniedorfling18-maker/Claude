@@ -4222,15 +4222,21 @@ artifact is fresh when the gate reads it.
 
 ## ACTIVE BATCH for Codex (opened 2026-07-18, re-engagement)
 
-Codex is re-engaged. Current assignment: **WO-111 (rev.2, anchor-safe) —
-ISSUED to Codex 2026-07-19 (spec below; also in the Current queue for Codex).
-Forward-only maker-carry telemetry: persist per-day portfolio membership +
-per-market markout in a NEW anchor-safe sidecar `maker_carry_portfolio_members.csv`,
-leaving the append_only-anchored `maker_carry_history.csv` byte-identical.
-Changes no gate, threshold, share-model scope, or verdict, but it enrolls a new
-anchored ledger glob and sits in the maker-gate module, so the merge routes to
-the owner after a line-audit + red-team pass; the orchestrator does not
-self-merge it.** Work only what a bridge dispatch
+Codex is re-engaged. Current assignment: **none authorized yet.** A rev.2
+anchor-safe **PROPOSAL** for WO-111 is recorded below (and in the Current queue)
+for review only — it is NOT issued and confers NO authorization to build.
+Because WO-111 enrolls a new anchored ledger glob and sits in the maker-gate
+module, it is a registered/control surface: per the repository rule, an agent
+may build it ONLY after owner authorization, and owner authorization for a
+registered surface exists ONLY through an owner-authored commit or the owner's
+merge of an authorizing PR — never through agent-written queue text or a chat
+message. This queue entry, and any orchestrator dispatch referencing it, is a
+proposal; it becomes an authorized, buildable assignment only when the owner
+merges its registration. Until then no agent builds WO-111. (Forward-only
+maker-carry telemetry: persist per-day portfolio membership + per-market markout
+in a NEW anchor-safe sidecar `maker_carry_portfolio_members.csv`, leaving the
+append_only-anchored `maker_carry_history.csv` byte-identical; changes no gate,
+threshold, share-model scope, or verdict.) Work only what a bridge dispatch
 (a `[orchestrator-dispatch]` @codex post — see "Dispatch bridge" below) or the
 owner assigns from this file; a dispatch may assign any registered WO (frozen
 included), but frozen/registered surfaces stay owner-merge. WO-107
@@ -4471,13 +4477,20 @@ Do NOT: touch any gate (`maker_carry_study.py` gate logic, M-A/M-B/M-C),
 any order path. Do NOT build the realism consumer or change the study's reward
 estimate — that is a separate future WO that depends on this data existing.
 
-## WO-111 — Persist per-day portfolio membership + per-market markout in a NEW anchor-safe sidecar ledger (ISSUED 2026-07-19; rev.2 anchor-safe; forward-only telemetry hardening)
+## WO-111 — Persist per-day portfolio membership + per-market markout in a NEW anchor-safe sidecar ledger (PROPOSAL; rev.2 anchor-safe; forward-only telemetry hardening)
 
 Priority: MEDIUM — auditability / anti-regression, not funding-gating.
-Merge classification: registered/control-surface (adds a new anchor-enrolled
-ledger glob). Changes no gate, threshold, share-model scope, verdict, or
-promotion control. Require a line-audit + red-team pass before merge and route
-the merge to the OWNER; the orchestrator does not self-merge it.
+Authorization status: **PROPOSAL — NOT authorized to build.** This is a
+registered/control surface (it enrolls a new anchor-enrolled ledger glob and
+sits in the maker-gate module). Per the repository rule, authorization for a
+registered surface exists ONLY through an owner-authored commit or the owner's
+merge of an authorizing PR — never through this queue text or a chat message. No
+agent may build WO-111 until that owner authorization exists; the owner's merge
+of the registration is what issues it.
+Merge classification: registered/control-surface. Changes no gate, threshold,
+share-model scope, verdict, or promotion control. Require a line-audit +
+red-team pass before merge and route the merge to the OWNER; the orchestrator
+does not self-merge it.
 
 Rev.2 note (2026-07-19). The rev.1 spec proposed adding a `portfolio_members`
 COLUMN to `maker_carry_history.csv`. That is REJECTED: `maker_carry_history.csv`
@@ -5273,7 +5286,11 @@ frozen-surface change.
 7. **Review hygiene:** adjudicate every surviving review thread against current
    main; resolve only findings that are fixed or demonstrably superseded, and
    fix applicable findings in their own PRs first.
-8. **WO-111 (rev.2, anchor-safe):** persist per-day portfolio membership +
+8. **WO-111 (rev.2, anchor-safe) — PROPOSAL, NOT authorized to build:**
+   because it enrolls a new anchored ledger glob and sits in the maker-gate
+   module, an agent may build it only after owner authorization (an owner
+   commit or the owner's merge of its registration); this queue entry is not
+   that authorization. The proposal: persist per-day portfolio membership +
    per-market markout forward-only in a NEW sidecar
    `maker_carry/maker_carry_portfolio_members.csv` (fixed two-column schema:
    `generated_at_utc`, `portfolio_members` JSON), enrolled `append_only`, leaving

@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
+from threading import Event
 
 import pytest
 
@@ -56,7 +58,7 @@ def _write_candidates(cfg: EngineConfig, rows: list[dict[str, str]]) -> None:
 def _write_study(cfg: EngineConfig, stamp: str = STUDY_AT) -> None:
     write_json(
         cfg.output_root / "maker_carry" / "maker_carry_study.json",
-        {"generated_at_utc": stamp},
+        {"status": "ok", "generated_at_utc": stamp},
     )
 
 
@@ -115,6 +117,42 @@ def test_same_study_stamp_is_idempotent(tmp_path: Path) -> None:
     assert len(_sample_rows(cfg)) == 1
 
 
+def test_overlapping_invocations_append_each_key_once(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    cfg = _cfg(tmp_path)
+    _write_candidates(cfg, [_candidate("condition-1", "token-1", "Question?")])
+    _write_study(cfg)
+    append_entered = Event()
+    release_append = Event()
+    original_append = reward_epoch_sampler.append_csv_rows
+
+    def blocking_append(*args, **kwargs):
+        append_entered.set()
+        assert release_append.wait(timeout=5)
+        return original_append(*args, **kwargs)
+
+    monkeypatch.setattr(reward_epoch_sampler, "append_csv_rows", blocking_append)
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        first_future = pool.submit(run_reward_epoch_sample, cfg)
+        assert append_entered.wait(timeout=5)
+        second_future = pool.submit(run_reward_epoch_sample, cfg)
+        try:
+            second = second_future.result(timeout=5)
+        finally:
+            release_append.set()
+        first = first_future.result(timeout=5)
+
+    assert first["status"] == "ok"
+    assert first["runtime_lock"]["acquired"] is True
+    assert second["status"] == "skipped_lock_held"
+    assert second["runtime_lock"]["acquired"] is False
+    assert len(_sample_rows(cfg)) == 1
+    assert read_json(cfg.output_root / "maker_carry" / "reward_epoch_sampler.json") == first
+
+
 def test_new_study_stamp_appends_fresh_sample(tmp_path: Path) -> None:
     cfg = _cfg(tmp_path)
     _write_candidates(cfg, [_candidate("condition-1", "token-1", "Question?")])
@@ -151,6 +189,27 @@ def test_missing_study_reports_no_study(tmp_path: Path) -> None:
     summary = run_reward_epoch_sample(cfg)
 
     assert summary["status"] == "no_study"
+    assert summary["rows_sampled"] == 0
+    assert summary["total_rows"] == 0
+    assert _sample_rows(cfg) == []
+
+
+@pytest.mark.parametrize("study_status", ["disabled", "failed", "no_candidates", ""])
+def test_inactive_study_does_not_append_stale_candidates(
+    tmp_path: Path,
+    study_status: str,
+) -> None:
+    cfg = _cfg(tmp_path)
+    _write_candidates(cfg, [_candidate("condition-1", "token-1", "Question?")])
+    write_json(
+        cfg.output_root / "maker_carry" / "maker_carry_study.json",
+        {"status": study_status, "generated_at_utc": STUDY_AT},
+    )
+
+    summary = run_reward_epoch_sample(cfg)
+
+    assert summary["status"] == "no_study"
+    assert summary["study_status"] == (study_status or None)
     assert summary["rows_sampled"] == 0
     assert summary["total_rows"] == 0
     assert _sample_rows(cfg) == []

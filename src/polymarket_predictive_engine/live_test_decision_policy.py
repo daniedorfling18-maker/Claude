@@ -512,20 +512,36 @@ def _quarter_kelly_cap(history: list[dict[str, Any]], ladder_cap: float, setting
     # the over-conservative dollar bug raises the overlay from a sub-dollar
     # value toward a sane fraction of the stage cap. Absolute exposure stays
     # bounded by the ladder cap via `binding = min(ladder_cap, kelly_capital)`.
+    #
+    # WO-112 (2026-07-20; red-team iteration 2): when fewer than two
+    # per-row-capital returns are available, NO dimensionally-valid Kelly
+    # fraction exists. The prior `mean / (std * std)` (and the std<=0 cap grant)
+    # fell back to raw dollars, which is unit-dependent (dollars->cents swings it
+    # 100x; low variance saturates it toward the full ladder). Fail the overlay
+    # CLOSED to zero instead of imputing a units-meaningless cap; the downstream
+    # min-quote floor still admits the registered minimum stage quote. Strictly
+    # tighten-only versus the removed dollar fallback (both its saturated and
+    # under-sized cases). mean/std are retained for reporting only.
     return_values = _daily_net_returns(daily)
-    if len(return_values) >= 2:
-        mean_ret = sum(return_values) / len(return_values)
-        var_ret = sum((r - mean_ret) ** 2 for r in return_values) / max(1, len(return_values) - 1)
-        if var_ret <= 0:
-            raw_fraction = float(settings["kelly_fraction_cap"]) if mean_ret > 0 else 0.0
-        else:
-            raw_fraction = max(0.0, mean_ret / var_ret)
-    elif std <= 0:
-        raw_fraction = float(settings["kelly_fraction_cap"]) if mean > 0 else 0.0
+    if len(return_values) < 2:
+        return {
+            "daily_net_mean_usd": round(mean, 6),
+            "daily_net_std_usd": round(std, 6),
+            "quarter_kelly_fraction": 0.0,
+            "inline_quarter_kelly_fraction": 0.0,
+            "kelly_shrinkage": 1.0,
+            "kelly_observations": len(return_values),
+            "kelly_lineage": "risk.shrunk_kelly_fraction",
+            "kelly_capital_usd": 0.0,
+            "binding_capital_usd": 0.0,
+            "binding_cap": "kelly_returns_unavailable",
+        }
+    mean_ret = sum(return_values) / len(return_values)
+    var_ret = sum((r - mean_ret) ** 2 for r in return_values) / max(1, len(return_values) - 1)
+    if var_ret <= 0:
+        raw_fraction = float(settings["kelly_fraction_cap"]) if mean_ret > 0 else 0.0
     else:
-        # Fail-safe fallback when per-row capital is unavailable: retain the
-        # bounded legacy estimate rather than guessing a return.
-        raw_fraction = max(0.0, mean / (std * std))
+        raw_fraction = max(0.0, mean_ret / var_ret)
     fraction_cap = min(1.0, max(0.0, float(settings["kelly_fraction_cap"])))
     inline_quarter = min(fraction_cap, raw_fraction * float(settings["quarter_kelly_multiplier"]))
     full_weight_days = max(

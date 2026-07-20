@@ -157,8 +157,14 @@ ever read zero. Ticket: single-sided resting bid, 20 shares at one tick
 below best bid on the CHEAP side of a band-eligible rewarded market
 (2026-07-13 candidate: "Iran full airspace closure by August 31?",
 ~33c, ~$6.60 reserved), held across a UTC day boundary, then cancelled.
-PASS = a nonzero reward payment appears in data-api activity and flows
-to the scoreboard and cost ledger. Registered risk: headline market;
+Before owner go, the ticket must use the venue's published reward terms
+and minute-sampling formula to show expected eligible reward of at least
+$1.00 for the registered hold window. If no ticket can clear that payout
+floor inside the separate $7 exposure cap, Drill E is
+`BLOCKED_NO_FLOOR_CLEARING_TICKET` and must not run. PASS = after a
+floor-clearing hold, a nonzero reward payment appears in data-api
+activity and flows to the scoreboard and cost ledger. A zero payment on
+a sub-floor hold is INCONCLUSIVE, not a pipeline failure. Registered risk: headline market;
 worst case the bid is filled on news and the position marks against us
 (max $6.60, realistically cents of markout; exit next day in one
 5-share-multiple lot). This drill's exposure is registered SEPARATELY

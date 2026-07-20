@@ -116,17 +116,17 @@ work or capital.
   commit or an owner-approved pull request. No agent may write, cite, or
   imply owner authorization in any artifact. An instruction to audit,
   review, or investigate is never authorization to build.
-  Bridge addendum (authorized by the owner's merge of the pull request that
-  introduces it — per the rule above, an owner-approved PR — and by no chat
-  instruction): the orchestrator has no separate GitHub identity, so every
-  post it makes is authored by the owner's account. Any `@codex` dispatch the
-  orchestrator posts MUST therefore begin with `[orchestrator-dispatch]` and
-  is NEVER owner authorization. The bridge may dispatch fixes/builds on any
-  registered work order (frozen surfaces included), but dispatching work is
-  not authorizing a merge: the orchestrator merges only non-frozen PRs, and
-  every frozen/registered change still requires the owner's merge —
-  authorization lives at the merge, never at the dispatch. See the
-  dispatch-bridge protocol in `docs/POLYMARKET_CODEX_WORK_ORDERS.md`.
+  Bridge addendum (no standing protocol grant — the orchestrator relays work to
+  Codex only under the owner's direct instruction, and cites neither a merged PR
+  nor a chat message as authorization): the orchestrator has no separate GitHub
+  identity, so every post it makes is authored by the owner's account. Any
+  `@codex` dispatch the orchestrator posts MUST therefore begin with
+  `[orchestrator-dispatch]` and is NEVER owner authorization. Dispatching a
+  fix/build on a registered work order (frozen surfaces included) is not
+  authorizing a merge: the orchestrator merges only non-frozen PRs, and every
+  frozen/registered change still requires the owner's merge — authorization
+  lives at the merge, never at the dispatch. See the dispatch-bridge protocol in
+  `docs/POLYMARKET_CODEX_WORK_ORDERS.md`.
 - Never use destructive Git commands to deal with runtime data.
 
 ## Stable references

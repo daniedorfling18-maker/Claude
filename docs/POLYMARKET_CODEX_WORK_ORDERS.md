@@ -1,14 +1,16 @@
 # Polymarket Codex Work Orders
 
-Last updated: 2026-07-19. Accepted `main` through PR #269 contains WO-104
+Last updated: 2026-07-20. Accepted `main` through PR #269 contains WO-104
 items 0–6, WO-105, WO-106, WO-107, WO-108, and WO-110. Funding remains
 operationally CLOSED and WO-67 remains BLOCKED behind every registered P1–P5
 precondition. The 2026-07-19 corrective request reopens WO-100 and WO-101 on
 current main and lists the narrowly scoped review remediations under "Current
 queue for Codex" below. Each scope requires its own PR; frozen-surface changes
 remain owner-merge. The unapproved dispatch/queue-driver protocol introduced
-in merged PR #263 is being removed separately in PR #270 without reverting
-#263's safety fixes.
+in merged PR #263 was removed by PR #270 (merged 2026-07-19) without reverting
+#263's safety fixes; the residual dispatch-bridge authorization-basis claims
+were removed 2026-07-20, leaving the bridge operating only under the owner's
+direct instruction with its disclosure and merge-routing guardrails intact.
 
 Prior: 2026-07-16 (owner-authorized corrective batch opened with WO-93; WO-85, WO-87, WO-86, and WO-88 implemented; WO-80, WO-82, WO-81 landed; WO-83 implemented in
 PR #203; WO-84 implemented in PR #205; WO-89 through WO-92 implemented. WO-87 now relabels the unchanged legacy verdict metric honestly and
@@ -4252,15 +4254,18 @@ is never authorization to build." WO-106 touches NO frozen surface, so this
 does not gate it — but do not drift into any gate, threshold, policy, registry,
 or order file.
 
-### Dispatch bridge (authorized by the owner's merge of the PR introducing it; revocable the same way)
+### Dispatch bridge (no standing grant; operates only under the owner's direct instruction)
 
-**Authorization basis.** This protocol is in effect because the owner merged
-the pull request that introduced it — an owner-approved PR, which AGENTS.md
-accepts as authorization ("an owner-authored commit or an owner-approved pull
-request"). It cites no chat instruction as authority and asserts none. Until
-that PR is merged this section is a proposal, not a live grant. The owner
-revokes it the same way — by merging a change that removes it (record the
-revocation here, dated).
+**No standing grant.** This section describes HOW the orchestrator relays work to
+Codex, not a self-standing authorization to do so. The orchestrator dispatches
+only under the owner's direct instruction, and neither a dispatch nor an
+orchestrator merge is ever authorization for a frozen/registered change — the
+orchestrator never merges one. Authorization for such a change exists only at the
+owner's own merge of it, per AGENTS.md ("an owner-authored commit or an
+owner-approved pull request"). The prior "authorized by the owner's merge of the
+PR introducing it" basis for the bridge itself was removed 2026-07-20 as residue
+to the #263/#270 cleanup. The guardrails below stand on their own and are
+unchanged.
 
 **Shared-identity disclosure (why the guardrails exist).** The orchestrator
 (Claude) has no separate GitHub identity; every post it makes is authored by
@@ -5179,9 +5184,12 @@ live execution, or a gate/threshold loosening. Complete each line as one
 independently reviewable PR, and require an owner merge for every
 frozen-surface change.
 
-1. **Governance provenance:** remove the unapproved dispatch/queue-driver
-   protocol from merged PR #263 without reverting its safety fixes (PR #270),
-   then retain the one-scope-per-PR rule prospectively.
+1. **Governance provenance (DONE — PR #270 merged 2026-07-19):** the unapproved
+   dispatch/queue-driver protocol from merged PR #263 was removed without
+   reverting its safety fixes; the one-scope-per-PR rule is retained
+   prospectively. Residual dispatch-bridge authorization-basis claims were
+   removed 2026-07-20, leaving the bridge under the owner's direct instruction
+   only.
 2. **Review-remediation PRs:** fix exact-token identity, sharp-source
    provenance, qualification-to-current-policy anchoring, maker-markout token
    contamination, and source freshness. Each defect is a separate PR.

@@ -4,7 +4,10 @@ The VPS has more than one producer cadence. A runtime lock covers the complete
 read/dedupe/append transaction so overlapping invocations cannot append the
 same study/condition key twice.
 
-Collection only: missing or empty candidates/study inputs append nothing and report status no_candidates/no_study; malformed numeric fields are written through unchanged; no gate, sizing, or order surface reads this artifact.
+Collection only: missing or empty candidates, or a missing/inactive study,
+append nothing and report status no_candidates/no_study; malformed numeric
+fields are written through unchanged; no gate, sizing, or order surface reads
+this artifact.
 """
 
 from __future__ import annotations
@@ -37,9 +40,10 @@ SAMPLE_FIELDS = [
     *CANDIDATE_COPY_FIELDS,
 ]
 FAIL_SAFE_NOTE = (
-    "Collection only: missing or empty candidates/study inputs append nothing and "
-    "report status no_candidates/no_study; malformed numeric fields are written "
-    "through unchanged; no gate, sizing, or order surface reads this artifact."
+    "Collection only: missing or empty candidates, or a missing/inactive study, "
+    "append nothing and report status no_candidates/no_study; malformed numeric "
+    "fields are written through unchanged; no gate, sizing, or order surface "
+    "reads this artifact."
 )
 
 
@@ -64,13 +68,18 @@ def _run_reward_epoch_sample_locked(
         if isinstance(study, dict)
         else ""
     )
+    study_status = (
+        str(study.get("status") or "").strip().lower()
+        if isinstance(study, dict)
+        else ""
+    )
     existing = read_csv_rows(samples_path)
 
     status = "ok"
     rows_to_append: list[dict[str, Any]] = []
     if not candidates:
         status = "no_candidates"
-    elif not study_generated_at:
+    elif not study_generated_at or study_status != "ok":
         status = "no_study"
     else:
         existing_keys = {
@@ -104,6 +113,7 @@ def _run_reward_epoch_sample_locked(
         "status": status,
         "generated_at_utc": sampled_at,
         "study_generated_at_utc": study_generated_at,
+        "study_status": study_status or None,
         "rows_sampled": len(rows_to_append),
         "total_rows": len(existing) + len(rows_to_append),
         "runtime_lock": lock_details,

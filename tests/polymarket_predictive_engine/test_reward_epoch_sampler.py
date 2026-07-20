@@ -58,7 +58,7 @@ def _write_candidates(cfg: EngineConfig, rows: list[dict[str, str]]) -> None:
 def _write_study(cfg: EngineConfig, stamp: str = STUDY_AT) -> None:
     write_json(
         cfg.output_root / "maker_carry" / "maker_carry_study.json",
-        {"generated_at_utc": stamp},
+        {"status": "ok", "generated_at_utc": stamp},
     )
 
 
@@ -189,6 +189,27 @@ def test_missing_study_reports_no_study(tmp_path: Path) -> None:
     summary = run_reward_epoch_sample(cfg)
 
     assert summary["status"] == "no_study"
+    assert summary["rows_sampled"] == 0
+    assert summary["total_rows"] == 0
+    assert _sample_rows(cfg) == []
+
+
+@pytest.mark.parametrize("study_status", ["disabled", "failed", "no_candidates", ""])
+def test_inactive_study_does_not_append_stale_candidates(
+    tmp_path: Path,
+    study_status: str,
+) -> None:
+    cfg = _cfg(tmp_path)
+    _write_candidates(cfg, [_candidate("condition-1", "token-1", "Question?")])
+    write_json(
+        cfg.output_root / "maker_carry" / "maker_carry_study.json",
+        {"status": study_status, "generated_at_utc": STUDY_AT},
+    )
+
+    summary = run_reward_epoch_sample(cfg)
+
+    assert summary["status"] == "no_study"
+    assert summary["study_status"] == (study_status or None)
     assert summary["rows_sampled"] == 0
     assert summary["total_rows"] == 0
     assert _sample_rows(cfg) == []

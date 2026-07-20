@@ -93,15 +93,21 @@ def _write_carry_history(cfg, rows: list[dict[str, Any]]) -> None:
             "generated_at_utc",
             "share_model",
             "portfolio_net_carry_usd_per_day",
+            # WO-112: production maker_carry_history.csv carries per-row capital
+            # (maker_carry_study history_fields), which the Kelly overlay needs
+            # for its unit-invariant returns path; expose it in the fixture too.
+            "portfolio_capital_usd",
             "top_portfolio_market",
             "top_portfolio_question",
         ],
     )
 
 
-def _history(markets: list[str], *, nets: list[float] | None = None) -> list[dict[str, Any]]:
+def _history(
+    markets: list[str], *, nets: list[float] | None = None, capital: list[float] | None = None
+) -> list[dict[str, Any]]:
     nets = nets or [5.0] * len(markets)
-    return [
+    rows = [
         {
             "generated_at_utc": f"2026-07-{10 + idx:02d}T08:00:00Z",
             "share_model": "published_v2",
@@ -111,6 +117,10 @@ def _history(markets: list[str], *, nets: list[float] | None = None) -> list[dic
         }
         for idx, market in enumerate(markets)
     ]
+    if capital is not None:
+        for row, cap in zip(rows, capital):
+            row["portfolio_capital_usd"] = cap
+    return rows
 
 
 def _write_live_history(cfg, rows: list[dict[str, Any]]) -> None:
@@ -348,7 +358,9 @@ def test_ladder_ignores_owner_activity_only_day_without_breaking_streak(tmp_path
 def test_quarter_kelly_cap_binds_below_ladder(tmp_path):
     cfg = _config(tmp_path)
     _write_study(cfg, _study(top="0xm1"))
-    _write_carry_history(cfg, _history(["0xm1"] * 7, nets=[1.0, 9.0, 1.0, 9.0, 1.0, 9.0, 1.0]))
+    _write_carry_history(
+        cfg, _history(["0xm1"] * 7, nets=[1.0, 9.0, 1.0, 9.0, 1.0, 9.0, 1.0], capital=[100.0] * 7)
+    )
     _write_live_history(cfg, _live_rows(7))
 
     result = run_decision_policy(cfg)
@@ -363,7 +375,9 @@ def test_quarter_kelly_cap_binds_below_ladder(tmp_path):
 def test_short_history_shrunk_kelly_cannot_exceed_inline_cap():
     settings = dict(policy.DEFAULT_SETTINGS)
     settings["kelly_full_weight_days"] = 2  # tighten-only floor must ignore this loosening attempt
-    history = _history(["0xm1"] * 7, nets=[1.0, 9.0, 1.0, 9.0, 1.0, 9.0, 1.0])
+    # WO-112: the Kelly overlay is computed from per-row-capital returns; the
+    # dollar fallback is now failed-closed, so this exercises the returns path.
+    history = _history_with_capital([1.0, 9.0, 1.0, 9.0, 1.0, 9.0, 1.0], [100.0] * 7)
 
     sizing = policy._quarter_kelly_cap(history, 250.0, settings)
 
@@ -376,7 +390,7 @@ def test_short_history_shrunk_kelly_cannot_exceed_inline_cap():
 
 def test_shrunk_kelly_equals_inline_at_large_sample_floor():
     settings = dict(policy.DEFAULT_SETTINGS)
-    history = _history(["0xm1"] * 20, nets=[1.0, 9.0] * 10)
+    history = _history_with_capital([1.0, 9.0] * 10, [100.0] * 20)  # WO-112: returns path
 
     sizing = policy._quarter_kelly_cap(history, 250.0, settings)
 
@@ -388,7 +402,7 @@ def test_shrunk_kelly_equals_inline_at_large_sample_floor():
 def test_ladder_still_binds_when_it_is_the_smaller_ceiling():
     settings = dict(policy.DEFAULT_SETTINGS)
     settings["quarter_kelly_multiplier"] = 1.0
-    history = _history(["0xm1"] * 20, nets=[5.0] * 20)
+    history = _history_with_capital([5.0] * 20, [100.0] * 20)  # WO-112: returns path
 
     sizing = policy._quarter_kelly_cap(history, 100.0, settings)
 
@@ -479,6 +493,29 @@ def test_returns_kelly_never_exceeds_ladder_cap():
 
     assert sizing["binding_capital_usd"] <= 100.0
     assert sizing["kelly_capital_usd"] >= 0.0
+
+
+def test_wo112_overlay_fails_closed_without_per_row_capital():
+    # WO-112: with fewer than two per-row-capital returns no unit-invariant Kelly
+    # exists, so the overlay fails closed to zero (the downstream min-quote floor
+    # still admits the registered minimum stage quote) rather than the removed
+    # unit-dependent dollar mean/std**2 fallback.
+    settings = dict(policy.DEFAULT_SETTINGS)
+    history = _history(["0xm1"] * 7, nets=[1.0, 9.0, 1.0, 9.0, 1.0, 9.0, 1.0])  # no capital column
+    sizing = policy._quarter_kelly_cap(history, 250.0, settings)
+    assert sizing["binding_capital_usd"] == 0.0
+    assert sizing["quarter_kelly_fraction"] == 0.0
+    assert sizing["binding_cap"] == "kelly_returns_unavailable"
+    assert sizing["kelly_observations"] == 0
+
+
+def test_wo112_fail_closed_fallback_is_unit_invariant():
+    # The removed dollar fallback swung 100x between dollars and cents; the
+    # fail-closed replacement is trivially unit-invariant (both -> 0).
+    settings = dict(policy.DEFAULT_SETTINGS)
+    dollars = policy._quarter_kelly_cap(_history(["0xm1"] * 7, nets=[2.0, 4.0] * 3 + [2.0]), 250.0, settings)
+    cents = policy._quarter_kelly_cap(_history(["0xm1"] * 7, nets=[200.0, 400.0] * 3 + [200.0]), 250.0, settings)
+    assert dollars["binding_capital_usd"] == cents["binding_capital_usd"] == 0.0
 
 
 def test_each_kill_criterion_trips_individually(tmp_path):

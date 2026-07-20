@@ -310,9 +310,17 @@ def test_position_id_fallback_cannot_inflate_gate_a_units(tmp_path):
     assert verdict["verdict"] == "insufficient_evidence"
 
 
-def test_verdict_is_no_when_unit_floor_met_and_clv_nonpositive(tmp_path):
+def test_verdict_is_no_when_unit_floor_met_and_clv_nonpositive(tmp_path, monkeypatch):
+    # Amendment 8 defers ANY non-all-pass read to insufficient_evidence inside the
+    # 2026-07-20..2026-08-19 extension window, so a failing gate resolves to
+    # no_for_tested_edge_classes only at an ordinary (pre-final-read) or the terminal
+    # read. This test asserts the ordinary gate->verdict mapping, so it pins the read to
+    # the pre-final-read regime where a fail is distinct from a pending (insufficient).
     cfg = _config(tmp_path)
     _write_finals(cfg, {f"m{m}": [-0.004] for m in range(14)})
+    monkeypatch.setattr(
+        "polymarket_predictive_engine.profit_verdict.now_utc", lambda: "2026-07-01T00:00:00Z"
+    )
 
     verdict = build_profit_verdict(cfg)
 
@@ -320,8 +328,15 @@ def test_verdict_is_no_when_unit_floor_met_and_clv_nonpositive(tmp_path):
     assert verdict["verdict"] == "no_for_tested_edge_classes"
 
 
-def test_verdict_yes_requires_all_three_gates_and_stays_paper_gated(tmp_path):
+def test_verdict_yes_requires_all_three_gates_and_stays_paper_gated(tmp_path, monkeypatch):
     cfg = _config(tmp_path)
+    # Pre-final-read regime: a failing Gate C resolves NO here; inside the extension
+    # window amendment 8 would defer it to insufficient_evidence (see the pre-final-read
+    # note on test_verdict_is_no_when_unit_floor_met_and_clv_nonpositive). The all-pass
+    # branch below resolves the YES path in every regime.
+    monkeypatch.setattr(
+        "polymarket_predictive_engine.profit_verdict.now_utc", lambda: "2026-07-01T00:00:00Z"
+    )
     # 13/14 units beat the close (sign p ~= 0.00092); equal-weight unit mean
     # (13 x 0.036 - 0.05) / 14 ~= 0.0299; net of taker fee 0.01 (entry 0.8,
     # amendment-6 rate 0.05) plus 0.01 haircuts ~= 0.0099 -> required
@@ -352,10 +367,15 @@ def test_verdict_yes_requires_all_three_gates_and_stays_paper_gated(tmp_path):
     assert persisted["verdict"] == verdict["verdict"]
 
 
-def test_adverse_selection_haircut_is_charged_in_gate_b(tmp_path):
+def test_adverse_selection_haircut_is_charged_in_gate_b(tmp_path, monkeypatch):
     """Registered amendment 2: an edge that clears fees + exit haircut but not
     the adverse-selection charge must FAIL Gate B."""
     cfg = _config(tmp_path)
+    # Pre-final-read regime: a failing Gate B resolves NO here; inside the extension
+    # window amendment 8 defers it to insufficient_evidence.
+    monkeypatch.setattr(
+        "polymarket_predictive_engine.profit_verdict.now_utc", lambda: "2026-07-01T00:00:00Z"
+    )
     # Unit mean 0.0175 at entry 0.8: fee 0.01 + exit 0.005 = 0.015 leaves
     # +0.0025 without the adverse charge; with it (0.005) the net is negative.
     _write_finals(cfg, {f"m{m}": [0.0175] for m in range(14)}, entry_price=0.8)

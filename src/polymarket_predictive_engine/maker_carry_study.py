@@ -77,19 +77,23 @@ placement of any kind. The live-trading gates in AGENTS.md are untouched.
 
 from __future__ import annotations
 
+import fcntl
 import json
 import math
+import os
+from contextlib import contextmanager
 from datetime import date, datetime, timezone
 from decimal import Decimal, ROUND_CEILING, ROUND_FLOOR
 import re
 import time
 from pathlib import Path
-from typing import Any
+from typing import Any, Iterator
 
 import requests
 
 from .config import EngineConfig, load_config
 from .utils import (
+    ensure_dir,
     normalize_external_timestamp,
     now_utc,
     parse_timestamp,
@@ -106,6 +110,19 @@ DEFAULT_CLOB_BASE_URL = "https://clob.polymarket.com"
 DEFAULT_DATA_API_BASE_URL = "https://data-api.polymarket.com"
 
 MAKER_GATES_REGISTERED_AT_UTC = "2026-07-09T13:00:00Z"
+
+# P3-3 (red-team ledger write-lock): the two WO-61 append_only-enrolled maker-carry
+# ledgers (history + WO-111 portfolio-members sidecar) are committed while holding an
+# OS advisory lock (flock) across BOTH writes, with the prior rows RE-READ inside the
+# lock immediately before the append, so two overlapping study runs can never clobber
+# each other's row. flock (not a content-file + stale-timeout lock) is used deliberately:
+# it is released by the kernel when the holder's fd closes or the process dies, so there
+# is NO stale-reclaim window a paused holder could resume through (the lost-update race
+# #346 flagged) and NO malformed-lock deadlock. write_csv is preserved (rather than
+# append_csv_rows) because maker_carry_history.csv still carries a legacy-schema upgrade
+# path: a narrower older on-disk header is rewritten to the current fieldnames, which the
+# append-only primitive would instead reject.
+MAKER_CARRY_LEDGER_LOCK = "maker_carry_ledger_commit"
 
 # M-B.1 amendment (2026-07-18) registered Tier-0 minima. These MIRROR the
 # WO-105 evaluator's §2 registered thresholds so M-B and the funding evaluator
@@ -1764,6 +1781,63 @@ def _distinct_days_at_target(
     return days_at_target
 
 
+def _maker_carry_ledger_lock_path(out_root: Path) -> Path:
+    return out_root / ".maker_carry_ledger_commit.lock"
+
+
+@contextmanager
+def _maker_carry_ledger_flock(out_root: Path) -> Iterator[bool]:
+    """Single-host mutual exclusion for the paired append_only ledger commit.
+
+    Holds an OS advisory lock (flock) across BOTH ledger writes. Unlike a
+    content-file lock with a stale timeout, flock is released by the kernel when
+    the holder's fd closes or the process dies, so:
+      - a merely paused/blocked holder keeps the lock (no stale-timeout reclaim,
+        hence no lost-update race when it resumes), and
+      - a dead holder's lock frees immediately (no malformed-lock deadlock).
+    Non-blocking: a concurrent run that finds the lock held yields False and skips
+    its append rather than clobbering the ledger. Advisory locks only exclude other
+    flock callers, which is sufficient because this is the sole writer of these
+    ledgers.
+    """
+    ensure_dir(out_root)
+    fd = os.open(str(_maker_carry_ledger_lock_path(out_root)), os.O_CREAT | os.O_RDWR, 0o644)
+    acquired = False
+    try:
+        try:
+            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            acquired = True
+        except OSError:
+            acquired = False
+        yield acquired
+    finally:
+        if acquired:
+            try:
+                fcntl.flock(fd, fcntl.LOCK_UN)
+            except OSError:
+                pass
+        os.close(fd)
+
+
+def _force_maker_gates_pending_uncommitted(summary: dict[str, Any]) -> None:
+    """Fail-safe for a run whose evidence row was NOT committed (lock held/lost).
+
+    Such a run must not publish an evidence-unbacked gate pass, because
+    run_decision_policy trusts the maker_carry_study.json gate states directly.
+    Only ever downgrades pass -> pending (never the reverse), so this can only
+    tighten the published verdict, never loosen it.
+    """
+    gates = summary.get("maker_gates")
+    if not isinstance(gates, dict):
+        return
+    for key in ("M_A_carry_evidence", "M_B_adverse_realism"):
+        gate = gates.get(key)
+        if isinstance(gate, dict) and gate.get("state") == "pass":
+            gate["state"] = "pending"
+            gate["uncommitted_ledger_downgrade"] = True
+    gates["maker_verdict"] = "insufficient_evidence"
+
+
 def run_maker_carry_study(cfg: EngineConfig) -> dict[str, Any]:
     settings = _settings(cfg)
     out_root = cfg.output_root / "maker_carry"
@@ -2050,7 +2124,6 @@ def run_maker_carry_study(cfg: EngineConfig) -> dict[str, Any]:
         }
     )
     write_csv(out_root / "maker_carry_candidates.csv", candidates, fieldnames=CANDIDATE_FIELDS)
-    write_json(summary_path, summary)
     # Daily trend ledger: pots, competition, and estimated carry move with the
     # calendar (esp. across the WC window), so keep a one-row-per-run history.
     history_fields = [
@@ -2067,8 +2140,7 @@ def run_maker_carry_study(cfg: EngineConfig) -> dict[str, Any]:
         "top_portfolio_question",
         "clears_100_per_month_target",
     ]
-    prior_runs.append({field: summary.get(field) for field in history_fields})
-    write_csv(history_path, prior_runs, fieldnames=history_fields)
+    history_row = {field: summary.get(field) for field in history_fields}
     # WO-111 (rev.2, anchor-safe): persist per-day portfolio membership + each
     # member's markout_measured flag in a SEPARATE sidecar ledger, so a future
     # per-market gate tightening can recompute from history instead of failing
@@ -2094,18 +2166,45 @@ def run_maker_carry_study(cfg: EngineConfig) -> dict[str, Any]:
         sort_keys=True,
     )
     members_path = out_root / "maker_carry_portfolio_members.csv"
-    prior_members = read_csv_rows(members_path)
-    prior_members.append(
-        {
-            "generated_at_utc": summary.get("generated_at_utc"),
-            "portfolio_members": members_json,
-        }
-    )
-    write_csv(
-        members_path,
-        prior_members,
-        fieldnames=["generated_at_utc", "portfolio_members"],
-    )
+    members_fields = ["generated_at_utc", "portfolio_members"]
+    members_row = {
+        "generated_at_utc": summary.get("generated_at_utc"),
+        "portfolio_members": members_json,
+    }
+    # P3-3 (red-team ledger write-lock): commit both append_only ledgers while holding
+    # an OS advisory lock (flock) across BOTH writes, RE-READING the prior rows inside
+    # the lock right before each append. The previous read_csv_rows (near the top of
+    # this function) -> append -> write_csv path was a read-modify-write race: two
+    # overlapping study runs read the SAME prior rows and the later full-file rewrite
+    # silently dropped the earlier run's appended row. flock closes that by construction
+    # (kernel-released on fd close/process death, so no stale-reclaim window a paused
+    # holder could resume through, and no malformed-lock deadlock).
+    #   - Ordering: the WO-111 members sidecar is written BEFORE the history row, so an
+    #     interrupted commit (crash mid-pair) leaves at most an orphan members row and
+    #     NEVER a counted history row without membership evidence -- a future per-market
+    #     recompute stays fail-closed.
+    #   - Fail-safe: if the lock is held the run SKIPS its near-duplicate append (the
+    #     holder's equivalent row still lands) and the maker gates are forced pending
+    #     below, so no evidence-unbacked pass is ever published.
+    # Changes NO gate rule (`_distinct_days_at_target` still reads history identically),
+    # threshold, share-model scope, or order path.
+    ledger_committed = False
+    with _maker_carry_ledger_flock(out_root) as have_lock:
+        if have_lock:
+            committed_members = read_csv_rows(members_path)
+            committed_members.append(members_row)
+            write_csv(members_path, committed_members, fieldnames=members_fields)
+            committed_history = read_csv_rows(history_path)
+            committed_history.append(history_row)
+            write_csv(history_path, committed_history, fieldnames=history_fields)
+            ledger_committed = True
+    summary["ledger_commit"] = {
+        "status": "committed" if ledger_committed else "skipped_lock_held",
+        "lock": MAKER_CARRY_LEDGER_LOCK,
+    }
+    if not ledger_committed:
+        _force_maker_gates_pending_uncommitted(summary)
+    write_json(summary_path, summary)
     _write_quote_sheet(out_root, summary, settings)
     return summary
 

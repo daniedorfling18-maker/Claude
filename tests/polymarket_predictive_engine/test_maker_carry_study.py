@@ -3,7 +3,10 @@ failure modes observed live on 2026-07-09 - thin in-game books faking huge
 reward shares, and a calm last-24h window hiding news-gap pick-off risk."""
 from __future__ import annotations
 
+import fcntl
 import json
+import os
+from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -12,8 +15,18 @@ import yaml
 
 from polymarket_predictive_engine import maker_carry_study
 from polymarket_predictive_engine.config import load_config
-from polymarket_predictive_engine.maker_carry_study import run_maker_carry_study
-from polymarket_predictive_engine.utils import read_csv_rows, read_json, write_csv, write_json
+from polymarket_predictive_engine.maker_carry_study import (
+    MAKER_CARRY_LEDGER_LOCK,
+    _maker_carry_ledger_lock_path,
+    run_maker_carry_study,
+)
+from polymarket_predictive_engine.utils import (
+    csv_columns,
+    read_csv_rows,
+    read_json,
+    write_csv,
+    write_json,
+)
 
 
 def _config(tmp_path: Path):
@@ -868,6 +881,140 @@ def test_wo111_sidecar_empty_portfolio_records_empty_list(tmp_path, monkeypatch)
     assert rows[-1]["portfolio_members"] == "[]"
     assert json.loads(rows[-1]["portfolio_members"]) == []
     assert summary["portfolio_markout_measured"] is False
+
+
+# --- P3-3: red-team maker-carry ledger write-lock ------------------------------
+
+
+def _calm_market_requests(monkeypatch) -> None:
+    markets = [_market("deep calm market", "calm", 1000.0)]
+    books = {"calm": _deep_book()}
+    histories = {("calm", "1d"): _flat_history(200), ("calm", "1w"): _flat_history(200)}
+    _fake_requests(monkeypatch, markets=markets, books=books, histories=histories)
+
+
+def test_p3_3_ledger_commit_reports_committed_and_appends(tmp_path, monkeypatch):
+    cfg = _config(tmp_path)
+    _calm_market_requests(monkeypatch)
+
+    summary = run_maker_carry_study(cfg)
+
+    assert summary["ledger_commit"]["status"] == "committed"
+    assert summary["ledger_commit"]["lock"] == MAKER_CARRY_LEDGER_LOCK
+    assert len(read_csv_rows(cfg.output_root / "maker_carry" / "maker_carry_history.csv")) == 1
+    assert len(_members_rows(cfg)) == 1
+
+
+def test_p3_3_skips_ledger_append_when_commit_flock_is_held(tmp_path, monkeypatch):
+    # Fail-safe: if a concurrent study run already holds the ledger-commit flock,
+    # this run must SKIP its append rather than clobber the ledger, and (#346 Codex P1)
+    # force its maker gates pending so no evidence-unbacked pass is published. The
+    # per-run snapshot artifacts still complete.
+    cfg = _config(tmp_path)
+    _calm_market_requests(monkeypatch)
+
+    out_root = cfg.output_root / "maker_carry"
+    out_root.mkdir(parents=True, exist_ok=True)
+    fd = os.open(str(_maker_carry_ledger_lock_path(out_root)), os.O_CREAT | os.O_RDWR, 0o644)
+    fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)  # a concurrent holder (separate fd)
+    try:
+        summary = run_maker_carry_study(cfg)
+    finally:
+        fcntl.flock(fd, fcntl.LOCK_UN)
+        os.close(fd)
+
+    assert summary["ledger_commit"]["status"] == "skipped_lock_held"
+    assert read_csv_rows(out_root / "maker_carry_history.csv") == []
+    assert read_csv_rows(out_root / "maker_carry_portfolio_members.csv") == []
+    published = read_json(out_root / "maker_carry_study.json")
+    assert published["ledger_commit"]["status"] == "skipped_lock_held"
+    assert published["maker_gates"]["maker_verdict"] == "insufficient_evidence"
+
+
+def test_p3_3_commit_re_reads_freshest_rows_inside_the_lock(tmp_path, monkeypatch):
+    # The race the lock closes: a second run that read the history BEFORE a
+    # concurrent run committed must not clobber that concurrent row. Proven by
+    # injecting a concurrent append AFTER this run's early read but BEFORE it takes
+    # the lock; the in-lock re-read must pick it up so the final ledger keeps it.
+    cfg = _config(tmp_path)
+    _calm_market_requests(monkeypatch)
+    history_path = cfg.output_root / "maker_carry" / "maker_carry_history.csv"
+
+    # Run 1 establishes the ledger with the current schema.
+    monkeypatch.setattr(maker_carry_study, "now_utc", lambda: "2026-07-05T08:00:00Z")
+    run_maker_carry_study(cfg)
+    assert len(read_csv_rows(history_path)) == 1
+
+    real_flock = maker_carry_study._maker_carry_ledger_flock
+
+    @contextmanager
+    def _racing_flock(out_root):
+        # Simulate a concurrent run committing a row in the window between run 2's
+        # early read and its own locked commit.
+        cols = csv_columns(history_path)
+        concurrent = read_csv_rows(history_path)
+        concurrent.append({"generated_at_utc": "2026-07-02T00:00:00Z"})
+        write_csv(history_path, concurrent, fieldnames=cols)
+        with real_flock(out_root) as have_lock:
+            yield have_lock
+
+    monkeypatch.setattr(maker_carry_study, "_maker_carry_ledger_flock", _racing_flock)
+    monkeypatch.setattr(maker_carry_study, "now_utc", lambda: "2026-07-06T08:00:00Z")
+    summary = run_maker_carry_study(cfg)
+
+    stamps = [row["generated_at_utc"] for row in read_csv_rows(history_path)]
+    assert summary["ledger_commit"]["status"] == "committed"
+    assert "2026-07-05T08:00:00Z" in stamps  # run 1
+    assert "2026-07-02T00:00:00Z" in stamps  # concurrent row survived (not clobbered)
+    assert "2026-07-06T08:00:00Z" in stamps  # run 2 appended on top
+    assert len(stamps) == 3
+
+
+def test_p3_3_force_pending_only_downgrades_pass_gates_and_verdict():
+    # #346 Codex P1: an uncommitted run must never publish an evidence-unbacked pass.
+    summary = {
+        "maker_gates": {
+            "M_A_carry_evidence": {"state": "pass", "runs_at_or_above_target": 7},
+            "M_B_adverse_realism": {"state": "pass"},
+            "M_C_payout_floor": {"state": "pass_by_construction"},
+            "maker_verdict": "evidence_supported_pending_human_decision",
+        }
+    }
+
+    maker_carry_study._force_maker_gates_pending_uncommitted(summary)
+
+    mg = summary["maker_gates"]
+    assert mg["M_A_carry_evidence"]["state"] == "pending"
+    assert mg["M_A_carry_evidence"]["uncommitted_ledger_downgrade"] is True
+    assert mg["M_B_adverse_realism"]["state"] == "pending"
+    assert mg["M_C_payout_floor"]["state"] == "pass_by_construction"  # untouched by construction
+    assert mg["maker_verdict"] == "insufficient_evidence"
+
+
+def test_p3_3_members_written_before_history_so_crash_leaves_no_orphan_history(tmp_path, monkeypatch):
+    # #346 Codex P2: the members sidecar is committed BEFORE the history row, so a
+    # failure mid-pair leaves at most an orphan members row and NEVER a counted history
+    # row without membership evidence (fail-closed for a future per-market recompute).
+    cfg = _config(tmp_path)
+    _calm_market_requests(monkeypatch)
+    history_path = cfg.output_root / "maker_carry" / "maker_carry_history.csv"
+
+    real_write_csv = maker_carry_study.write_csv
+
+    def _write_csv(path, rows, **kwargs):
+        if Path(path) == history_path:
+            raise OSError("simulated failure before the history write completes")
+        return real_write_csv(path, rows, **kwargs)
+
+    monkeypatch.setattr(maker_carry_study, "write_csv", _write_csv)
+
+    try:
+        run_maker_carry_study(cfg)
+    except OSError:
+        pass  # the simulated write failure propagates; the invariant is what we assert
+
+    assert len(_members_rows(cfg)) == 1  # members landed first
+    assert read_csv_rows(history_path) == []  # no counted history row without membership
 
 
 def test_wo111_sidecar_appends_forward_only_and_round_trips(tmp_path, monkeypatch):

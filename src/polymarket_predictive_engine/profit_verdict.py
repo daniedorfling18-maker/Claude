@@ -693,16 +693,61 @@ def build_profit_verdict(cfg: EngineConfig) -> dict[str, Any]:
         gate_c = "pending" if gate_b not in ("fail",) and gate_a != "fail" else "not_evaluated"
         gate_c_reason = "evaluated only after Gate B passes."
 
-    if gate_a == "fail" or gate_b == "fail" or gate_c == "fail":
-        verdict = "no_for_tested_edge_classes"
-    elif gate_a == "pass" and gate_b == "pass" and gate_c == "pass":
-        verdict = "yes_edge_evidenced_pending_paper_confirmation"
+    all_gates_pass = gate_a == "pass" and gate_b == "pass" and gate_c == "pass"
+    any_gate_fails = gate_a == "fail" or gate_b == "fail" or gate_c == "fail"
+    # Ordinary three-way read, before the amendment 7/8 window logic applies to it.
+    if any_gate_fails:
+        base_verdict = "no_for_tested_edge_classes"
+    elif all_gates_pass:
+        base_verdict = "yes_edge_evidenced_pending_paper_confirmation"
     else:
+        base_verdict = "insufficient_evidence"
+
+    # Amendment 7/8 extension protocol, ENFORCED in code (previously only emitted as
+    # reference text). Per amendment 8 (2026-07-17, owner-approved PR, registered
+    # BEFORE the final read):
+    #   - FINAL READ / EXTENSION WINDOW (final_read_due .. terminal): ANY verdict other
+    #     than all-gates-pass "takes the single registered extension" -> it defers to
+    #     insufficient_evidence and is NEVER a terminal NO inside the window, including
+    #     a failing gate or a >= 12-unit pending-on-significance read.
+    #   - TERMINAL READ (>= extension_window_end_utc): ANY outcome other than
+    #     all-gates-pass resolves TERMINALLY to no_for_tested_edge_classes.
+    #   - all-gates-pass always resolves the YES path (the extension can never improve
+    #     on it); a pre-final-read read keeps the ordinary base verdict.
+    # Tighten-only: it can never produce a YES the gate rules would not, and only defers
+    # a non-pass NO until the pre-committed terminal read.
+    # Single clock: one UTC instant drives both the regime decision and the artifact
+    # timestamp. Boundaries are compared as parsed instants, not date-truncated, so the
+    # terminal cutoff is the registered 23:59Z instant rather than the start of that day.
+    now_stamp = now_utc()
+    now_instant = parse_timestamp(now_stamp)
+    final_read_instant = parse_timestamp(REGISTERED_EXTENSION_PROTOCOL["final_read_due_utc"])
+    terminal_instant = parse_timestamp(REGISTERED_EXTENSION_PROTOCOL["extension_window_end_utc"])
+    if all_gates_pass:
+        extension_regime = "resolved_yes_path"
+        verdict = base_verdict
+    elif now_instant >= terminal_instant:
+        extension_regime = "terminal"
+        verdict = "no_for_tested_edge_classes"
+    elif now_instant >= final_read_instant:
+        extension_regime = "extension_window"
         verdict = "insufficient_evidence"
+    else:
+        extension_regime = "pre_final_read"
+        verdict = base_verdict
+    extension_resolution = {
+        "regime": extension_regime,
+        "as_of_utc": now_stamp,
+        "as_of_date_utc": now_stamp[:10],
+        "final_read_due_utc": REGISTERED_EXTENSION_PROTOCOL["final_read_due_utc"],
+        "terminal_read_due_utc": REGISTERED_EXTENSION_PROTOCOL["extension_window_end_utc"],
+        "terminal_no_applied": extension_regime == "terminal" and not all_gates_pass,
+    }
 
     payload = {
         "verdict": verdict,
-        "generated_at_utc": now_utc(),
+        "extension_resolution": extension_resolution,
+        "generated_at_utc": now_stamp,
         "registered_at_utc": REGISTERED_AT_UTC,
         "registered_amendments_at_utc": REGISTERED_AMENDMENTS_AT_UTC,
         "question": "Can this bot generate $100/month profit?",

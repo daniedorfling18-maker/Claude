@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from polymarket_predictive_engine.config import EngineConfig
@@ -58,7 +59,13 @@ def _yes_no_market(
         "market_id": market_id,
         "market_slug": slug,
         "question": f"Will {market_id} happen?",
-        "close_time": "2026-07-20T00:00:00Z",
+        # Derive close_time from the requested time-to-close so the fixture stays
+        # valid regardless of the wall-clock date the suite runs on. A hard-coded
+        # calendar date silently expired once "now" reached it, recomputing
+        # time_to_close as <=0 and dropping the candidate (clock-drift, see #338).
+        "close_time": (
+            datetime.now(timezone.utc) + timedelta(hours=time_to_close_hours)
+        ).strftime("%Y-%m-%dT%H:%M:%SZ"),
         "time_to_close_hours": time_to_close_hours,
         "liquidity": liquidity,
         "family": "macro_economy",

@@ -48,15 +48,15 @@ so re-running the study intraday can never fast-forward the clock):
   M-A carry evidence  - trusted net carry at/above target on at least
                         ``gate_min_runs_at_target`` distinct UTC days,
                         including the latest run.
-    M-A.1 amendment (2026-07-18; authorization = owner merge of this
-    frozen-surface PR): a UTC day counts only when its LAST published_v2 run
+    M-A.1 amendment (2026-07-18; registered frozen-surface rule): a UTC day
+    counts only when its LAST published_v2 run
     met target - an intraday spike that later faded cannot bank the day.
     Closes the external-audit cherry-pick finding. Tighten-only: can only
     reduce the day count.
   M-B adverse realism - every portfolio market carries a MEASURED markout
                         charge (empirical fills, not just bar approximations).
-    M-B.1 amendment (2026-07-18; authorization = owner merge of this
-    frozen-surface PR): M-B additionally requires each portfolio market's OWN
+    M-B.1 amendment (2026-07-18; registered frozen-surface rule): M-B
+    additionally requires each portfolio market's OWN
     recent official-book Tier-0 last-in-queue coverage (evaluable/confirmed-
     fill/coverage/markout-window/haircut minima), read from the prior cycle's
     replay. Closes the audit finding that M-B could pass on a print-markout
@@ -1591,6 +1591,20 @@ def _mb_finite(value: Any) -> float | None:
     return parsed
 
 
+def _finite_at_target(value: Any, target: float) -> bool:
+    """True only when ``value`` parses to a FINITE number at/above ``target``.
+
+    Non-finite (NaN/inf) or missing values return False regardless of the sign of
+    ``target`` — keeping the parsed value separate rather than ``_mb_finite(...) or
+    0.0`` so that a zero/negative target override can never let a NaN/-inf carry
+    bank an M-A day. Shared by the prior-run day counter and the current-run
+    ``latest_at_target`` derivation so both fail closed identically.
+    """
+
+    net = _mb_finite(value)
+    return net is not None and net >= target
+
+
 def _mb_tighter_max(settings: dict[str, Any], key: str, registered: float) -> float:
     """A configured maximum may only shrink the registered one (tighten-only).
 
@@ -1702,8 +1716,8 @@ def _distinct_days_at_target(
 ) -> set[str]:
     """Distinct UTC days whose LAST published_v2 run met the target.
 
-    2026-07-18 maker-gate amendment M-A.1 (authorization = owner merge of this
-    frozen-surface PR): closes the intraday cherry-picking the external audit
+    2026-07-18 maker-gate amendment M-A.1 (registered frozen-surface rule):
+    closes the intraday cherry-picking the external audit
     flagged. A day counts only when
     its last published_v2 observation is at/above target, not when any intraday
     spike touched target. The current run is by construction today's last
@@ -1730,14 +1744,17 @@ def _distinct_days_at_target(
         previous = last_run_by_day.get(day)
         if previous is None or stamp >= str(previous.get("generated_at_utc") or ""):
             last_run_by_day[day] = run
-    days_at_target = {
-        day
-        for day, run in last_run_by_day.items()
-        if (safe_float(run.get("portfolio_net_carry_usd_per_day")) or 0.0) >= target
-        and str(run.get("share_model") or "") == "published_v2"
-        and str(run.get("portfolio_markout_measured") or "").strip().lower()
-        in {"true", "1", "yes"}
-    }
+    days_at_target: set[str] = set()
+    for day, run in last_run_by_day.items():
+        # Require a FINITE net carry at/above target (shared guard, robust to a
+        # zero/negative target override; a non-finite/missing value never counts).
+        if not _finite_at_target(run.get("portfolio_net_carry_usd_per_day"), target):
+            continue
+        if str(run.get("share_model") or "") != "published_v2":
+            continue
+        if str(run.get("portfolio_markout_measured") or "").strip().lower() not in {"true", "1", "yes"}:
+            continue
+        days_at_target.add(day)
     days_at_target.discard("")
     if current_day:
         if latest_at_target:
@@ -1890,8 +1907,13 @@ def run_maker_carry_study(cfg: EngineConfig) -> dict[str, Any]:
     portfolio_markout_measured = bool(portfolio) and all(
         entry.get("markout_measured") for entry in portfolio
     )
+    # The current run banks today only on a FINITE net carry at/above target,
+    # via the SAME shared guard _distinct_days_at_target applies to prior rows, so
+    # a computed +inf/NaN net total can never advance M-A (fail-closed / tighten).
     latest_at_target = (
-        bool(portfolio) and net_total >= target and portfolio_markout_measured
+        bool(portfolio)
+        and _finite_at_target(net_total, target)
+        and portfolio_markout_measured
     )
     today = str(summary["generated_at_utc"])[:10]
     days_at_target = _distinct_days_at_target(
@@ -1900,8 +1922,8 @@ def run_maker_carry_study(cfg: EngineConfig) -> dict[str, Any]:
     runs_at_target = len(days_at_target)
     required_runs = int(settings["gate_min_runs_at_target"])
     gate_a_state = "pass" if latest_at_target and runs_at_target >= required_runs else "pending"
-    # M-B.1 amendment (2026-07-18; authorization = owner merge of this
-    # frozen-surface PR): M-B now ALSO requires each portfolio market's own
+    # M-B.1 amendment (2026-07-18; registered frozen-surface rule): M-B now
+    # ALSO requires each portfolio market's own
     # recent official-book Tier-0 coverage, not just a measured print markout.
     # Reads the PRIOR pipeline cycle's replay (this cycle's runs afterward);
     # tighten-only AND with the existing markout condition, fail-closed.
@@ -2047,6 +2069,43 @@ def run_maker_carry_study(cfg: EngineConfig) -> dict[str, Any]:
     ]
     prior_runs.append({field: summary.get(field) for field in history_fields})
     write_csv(history_path, prior_runs, fieldnames=history_fields)
+    # WO-111 (rev.2, anchor-safe): persist per-day portfolio membership + each
+    # member's markout_measured flag in a SEPARATE sidecar ledger, so a future
+    # per-market gate tightening can recompute from history instead of failing
+    # closed and orphaning the at-target streak (the failure that collapsed M-A
+    # 8/7 -> 1/7 when the markout-measured requirement landed with no pre-existing
+    # per-market evidence). The anchored maker_carry_history.csv above is left
+    # BYTE-IDENTICAL (no new column) so its ledger-anchor prefix never changes
+    # (the WO-110 / paper_fills lesson). Members are built from the SAME portfolio
+    # list and per-entry markout_measured that feed the aggregate
+    # portfolio_markout_measured, so the sidecar and the aggregate can never
+    # disagree. Forward-only telemetry: it starts empty and grows one row per run;
+    # it changes NO gate (`_distinct_days_at_target` does not read it), threshold,
+    # share-model scope, or verdict, and no order path.
+    members_json = json.dumps(
+        [
+            {
+                "condition_id": str(entry.get("condition_id") or ""),
+                "markout_measured": bool(entry.get("markout_measured")),
+            }
+            for entry in portfolio
+        ],
+        separators=(",", ":"),
+        sort_keys=True,
+    )
+    members_path = out_root / "maker_carry_portfolio_members.csv"
+    prior_members = read_csv_rows(members_path)
+    prior_members.append(
+        {
+            "generated_at_utc": summary.get("generated_at_utc"),
+            "portfolio_members": members_json,
+        }
+    )
+    write_csv(
+        members_path,
+        prior_members,
+        fieldnames=["generated_at_utc", "portfolio_members"],
+    )
     _write_quote_sheet(out_root, summary, settings)
     return summary
 

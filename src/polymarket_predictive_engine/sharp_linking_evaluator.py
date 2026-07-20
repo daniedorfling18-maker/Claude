@@ -44,6 +44,7 @@ from pathlib import Path
 from typing import Any
 
 from .config import EngineConfig, load_config
+from .live_test_decision_policy import policy_version_matches
 from .utils import now_utc, parse_timestamp, read_csv_rows, read_json, safe_float, write_json
 
 WORK_ORDER = "WO-105"
@@ -53,7 +54,7 @@ OUTPUT_RELATIVE = "maker_carry/sharp_linking_qualification.json"
 MAX_ANCHOR_AGE_SECONDS = 6 * 3600
 MAX_ANCHOR_DISAGREEMENT = 0.03
 MAX_PM_BOOK_AGE_SECONDS = 5 * 60
-QUALIFYING_SHARP_SOURCES = frozenset({"pinnacle", "betfair_ex_eu", "betfair_ex_uk", "betfair"})
+QUALIFYING_SHARP_SOURCES = frozenset({"pinnacle", "betfair_ex_eu", "betfair_ex_uk"})
 
 # --- §2 exact-market Tier-0 sufficiency (registered, tighten-only) ---
 MAX_REPLAY_AGE_SECONDS = 30 * 60
@@ -210,6 +211,8 @@ def evaluate_sharp_linking(
     ).strip()
     policy_generated = str(policy.get("generated_at_utc") or "").strip()
     policy_stamp = parse_timestamp(policy_generated)
+    policy_version = str(policy.get("policy_version_sha256") or "").strip()
+    policy_version_valid = policy_version_matches(policy)
     portfolio = study.get("portfolio") if isinstance(study.get("portfolio"), list) else []
     candidate_rows = [
         row
@@ -229,8 +232,10 @@ def evaluate_sharp_linking(
     checks.append(
         _condition(
             "candidate_policy_version_identified",
-            bool(policy_generated) and policy_stamp is not None,
-            f"policy_generated_at={policy_generated or 'missing'}",
+            bool(policy_generated) and policy_stamp is not None and policy_version_valid,
+            f"policy_generated_at={policy_generated or 'missing'}; "
+            f"policy_version_sha256={policy_version or 'missing'}; "
+            f"content_digest_valid={policy_version_valid}",
         )
     )
 
@@ -450,6 +455,7 @@ def evaluate_sharp_linking(
     summary["consumed_study_generated_at"] = study_generated or None
     summary["consumed_replay_generated_at"] = str(replay.get("generated_at_utc") or "") or None
     summary["consumed_policy_generated_at"] = policy_generated or None
+    summary["consumed_policy_version_sha256"] = policy_version if policy_version_valid else None
 
     qualified = bool(checks) and all(row["passed"] for row in checks)
     return qualified, checks, summary
@@ -470,6 +476,7 @@ def run_sharp_linking_evaluator(
         "candidate_condition_id": summary.get("candidate_condition_id"),
         "candidate_token_id": summary.get("candidate_token_id"),
         "consumed_policy_generated_at": summary.get("consumed_policy_generated_at"),
+        "consumed_policy_version_sha256": summary.get("consumed_policy_version_sha256"),
         "consumed_study_generated_at": summary.get("consumed_study_generated_at"),
         "consumed_replay_generated_at": summary.get("consumed_replay_generated_at"),
         "first_failing_check": first_failing,

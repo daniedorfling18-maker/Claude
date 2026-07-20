@@ -7,7 +7,8 @@ from pathlib import Path
 
 from polymarket_predictive_engine import stage_ticket_eligibility as mod
 from polymarket_predictive_engine.config import EngineConfig
-from polymarket_predictive_engine.utils import write_csv, write_json
+from polymarket_predictive_engine.live_test_decision_policy import policy_version_sha256
+from polymarket_predictive_engine.utils import read_json, write_csv, write_json
 
 NOW = datetime(2026, 7, 17, 12, 0, tzinfo=timezone.utc)
 CANDIDATE = "0xabc"
@@ -32,6 +33,11 @@ def _write_healthy_inputs(cfg: EngineConfig, **overrides) -> None:
         "composition_stability": {"most_recurrent_market": overrides.get("candidate", CANDIDATE)},
         "inputs_snapshot": {"maker_carry_study_generated_at_utc": overrides.get("policy_study_ref", run_stamp)},
     }
+    policy["policy_version_sha256"] = (
+        overrides["policy_version"]
+        if "policy_version" in overrides
+        else policy_version_sha256(policy)
+    )
     write_json(out / "decision_policy.json", policy)
     portfolio_row = {
         "condition_id": CANDIDATE,
@@ -86,6 +92,9 @@ def _write_healthy_inputs(cfg: EngineConfig, **overrides) -> None:
             "candidate_token_id": overrides.get("qual_token", overrides.get("token", TOKEN)),
             "generated_at_utc": overrides.get("qual_generated", run_stamp),
             "consumed_policy_generated_at": overrides.get("qual_policy", policy_stamp),
+            "consumed_policy_version_sha256": overrides.get(
+                "qual_policy_version", policy["policy_version_sha256"]
+            ),
             "consumed_study_generated_at": overrides.get("qual_study", run_stamp),
             "consumed_replay_generated_at": overrides.get("qual_replay", replay_stamp),
             "first_failing_check": overrides.get("qual_first_failing"),
@@ -121,10 +130,12 @@ def test_each_registered_condition_fails_closed(tmp_path: Path) -> None:
         {"qual_generated": "2026-07-17T10:00:00Z"},  # stale qualification (>30m)
         {"qual_candidate": "0xmismatch"},  # qualification about a different market
         {"qual_token": "0xother-token"},  # qualification about the other outcome token
-        {"qual_policy": "2026-07-17T09:00:00Z"},  # qualification bound to an older policy version
+        {"qual_policy_version": "0" * 64},  # qualification bound to an older policy version
         {"qual_study": "2026-07-17T09:00:00Z"},  # qualification bound to an older study version
         {"qual_replay": "2026-07-17T09:00:00Z"},  # qualification bound to an older replay version
         {"raw_imbalance": None},  # missing vpin_raw -> toxicity screen fails closed
+        {"raw_imbalance": float("-inf")},  # P3-4: non-finite raw-imbalance fails closed
+        {"toxicity": float("-inf")},  # P3-4: non-finite toxicity percentile fails closed
     ]
     for index, overrides in enumerate(cases):
         cfg = _cfg(tmp_path / f"case{index}")
@@ -211,6 +222,47 @@ def test_source_age_boundary_is_inclusive_then_fails_one_second_late(tmp_path: P
     condition = next(row for row in rows if row["condition"] == "decision_policy_source_fresh")
     assert state == "not_eligible"
     assert condition["passed"] is False
+
+
+def test_same_second_policy_content_change_revokes_old_qualification(tmp_path: Path) -> None:
+    cfg = _cfg(tmp_path)
+    _write_healthy_inputs(cfg)
+    out = cfg.output_root / "maker_carry"
+    qualification = read_json(out / "sharp_linking_qualification.json")
+    policy = read_json(out / "decision_policy.json")
+    old_version = policy["policy_version_sha256"]
+
+    policy["sizing"] = {"binding_capital_usd": 250.0}
+    policy["policy_version_sha256"] = policy_version_sha256(policy)
+    assert policy["generated_at_utc"] == qualification["consumed_policy_generated_at"]
+    assert policy["policy_version_sha256"] != old_version
+    write_json(out / "decision_policy.json", policy)
+
+    state, rows, _ = mod.evaluate_stage_ticket_eligibility(cfg, as_of=NOW)
+
+    sharp = next(row for row in rows if row["condition"] == "sharp_linking_qualified")
+    assert state == "not_eligible"
+    assert sharp["passed"] is False
+    assert "version_bound=False" in sharp["detail"]
+
+
+def test_clock_only_policy_rewrite_keeps_content_binding(tmp_path: Path) -> None:
+    cfg = _cfg(tmp_path)
+    _write_healthy_inputs(cfg)
+    out = cfg.output_root / "maker_carry"
+    policy = read_json(out / "decision_policy.json")
+    old_version = policy["policy_version_sha256"]
+
+    policy["generated_at_utc"] = "2026-07-17T11:47:00Z"
+    policy["policy_version_sha256"] = policy_version_sha256(policy)
+    assert policy["policy_version_sha256"] == old_version
+    write_json(out / "decision_policy.json", policy)
+
+    state, rows, _ = mod.evaluate_stage_ticket_eligibility(cfg, as_of=NOW)
+
+    sharp = next(row for row in rows if row["condition"] == "sharp_linking_qualified")
+    assert state == "eligible"
+    assert sharp["passed"] is True
 
 
 def test_malformed_or_future_source_timestamp_fails_closed(tmp_path: Path) -> None:
@@ -317,13 +369,15 @@ def test_candidate_change_while_eligible_renotifies(tmp_path: Path, monkeypatch)
     # Swap the eligible candidate to a different market; still eligible, but a
     # new eligible notice must fire (keyed on candidate, not just state).
     out = cfg.output_root / "maker_carry"
-    write_json(out / "decision_policy.json", {
+    policy_payload = {
         "generated_at_utc": "2026-07-17T11:56:00Z",
         "indicated_action": "fund_100_min_size_single_calmest_market",
         "kill_criteria_status": {"status": "clear", "kill_input_freshness": {"state": "fresh"}},
         "composition_stability": {"most_recurrent_market": "0xdef"},
         "inputs_snapshot": {"maker_carry_study_generated_at_utc": "2026-07-17T11:55:00Z"},
-    })
+    }
+    policy_payload["policy_version_sha256"] = policy_version_sha256(policy_payload)
+    write_json(out / "decision_policy.json", policy_payload)
     write_json(out / "maker_carry_study.json", {"generated_at_utc": "2026-07-17T11:55:00Z", "portfolio": [{
         "condition_id": "0xdef", "token_id": "0xdef-token", "question": "Other calm market?", "resolution_risk": "medium",
         "event_start_time_utc": "", "size_multiple": 2, "capital_usd": 80.0}]})
@@ -334,6 +388,7 @@ def test_candidate_change_while_eligible_renotifies(tmp_path: Path, monkeypatch)
         "qualified": True, "candidate_condition_id": "0xdef", "candidate_token_id": "0xdef-token",
         "generated_at_utc": "2026-07-17T11:56:00Z",
         "consumed_policy_generated_at": "2026-07-17T11:56:00Z",
+        "consumed_policy_version_sha256": policy_payload["policy_version_sha256"],
         "consumed_study_generated_at": "2026-07-17T11:55:00Z", "consumed_replay_generated_at": "2026-07-17T11:55:00Z"})
     third = mod.run_stage_ticket_eligibility(cfg, as_of=NOW)
     assert third["state"] == "eligible" and third["candidate_changed_while_eligible"] is True

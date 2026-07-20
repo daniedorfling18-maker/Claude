@@ -1,5 +1,18 @@
 # Owner decision required: funding governance reconciliation
 
+> **RESOLVED / SUPERSEDED (2026-07-18).** This contradiction was reconciled via
+> Route A. Authoritative records: the owner-signed amendment
+> `docs/OWNER_AMENDMENT_SHARP_LINKING_EVALUATOR.md`, the `EXPERIMENT_REGISTRY.md`
+> H1 funding-reconciliation entry, and WO-105 in
+> `docs/POLYMARKET_CODEX_WORK_ORDERS.md`. Outcome: the sharp-anchor requirement
+> STANDS and is enforced by the registered sharp-linking evaluator (WO-105), so
+> `FUNDING_GOVERNANCE_RECONCILED` is `True` in `stage_ticket_eligibility.py`.
+> Funding nonetheless remains CLOSED — the evaluator condition is itself
+> fail-closed and holds the ticket `not_eligible` until the exact-token sharp
+> anchor (§1) and exact-market Tier-0 sufficiency (§2) both pass on real VPS
+> data. The pending-decision text below is retained as the pre-reconciliation
+> record only.
+
 Registered 2026-07-17 after an external audit found two contradictory
 governing instructions for funding the maker lane.
 

@@ -15,9 +15,13 @@ while the PR gate is advisory.
 
 1. Gate-file diff: on GitHub, view the week's history of
    `profit_verdict.py`, `maker_carry_study.py`,
-   `live_test_decision_policy.py`. Any change must have a dated
-   tighten-only justification in its PR. These three files decide
-   money; nothing else outranks this check.
+   `live_test_decision_policy.py`, and
+   `polymarket_predictive_config.example.yaml`. Also compare any
+   separately deployed config with its previously accepted effective
+   values. Any code or config change to a money-gate threshold must
+   have a dated tighten-only justification in its PR. The effective
+   code-plus-config policy decides money; neither side may be reviewed
+   in isolation.
 2. Merge sample: pick any two merged PRs and read them. If a PR
    description says "audited clean", the audit must say WHAT was
    checked (including data contracts, post WO-77). "Tests green"
@@ -42,12 +46,19 @@ while the PR gate is advisory.
 
 6. Commission a fresh external LLM audit of the repository (the
    2026-07-12 one materially improved the system; its successor
-   should specifically audit the executor PR and this file's own
-   effectiveness). Independent eyes on the execution code are the
-   substance of P4 — the shared-account review comments are the
-   compensating control, not the ideal.
+   should specifically audit the registered executor design, the
+   independent-review control, and this file's own effectiveness).
+   Executor code is forbidden before signing, so no pre-signing check
+   may require an executor PR to exist.
 7. Verify the attestation checklist rows against artifacts you open
    yourself, not against the orchestrator's summary of them.
+
+## After signing, before any executor merge or canary
+
+8. Commission an independent audit of the actual executor PR and
+   resolve every money-moving or custody finding before merge. This is
+   the code-level P4 evidence; the pre-signing audit proves the review
+   control exists, not that unbuilt code is correct.
 
 ## Structural fixes that reduce your check burden
 

@@ -761,6 +761,134 @@ def test_markout_charges_empirical_pickoffs_and_gates_track_evidence(tmp_path, m
     assert gates["maker_verdict"] == "insufficient_evidence"
 
 
+# --- WO-111: anchor-safe per-day portfolio-membership sidecar ------------------
+
+_MC_HISTORY_FIELDS = {
+    "generated_at_utc",
+    "share_model",
+    "universe_scan_mode",
+    "universe_rewarded_markets",
+    "universe_pot_usd_per_day",
+    "portfolio_markets",
+    "portfolio_capital_usd",
+    "portfolio_net_carry_usd_per_day",
+    "portfolio_markout_measured",
+    "top_portfolio_market",
+    "top_portfolio_question",
+    "clears_100_per_month_target",
+}
+
+
+def _members_rows(cfg):
+    return read_csv_rows(cfg.output_root / "maker_carry" / "maker_carry_portfolio_members.csv")
+
+
+def _expected_members(summary):
+    return [
+        {
+            "condition_id": str(entry.get("condition_id") or ""),
+            "markout_measured": bool(entry.get("markout_measured")),
+        }
+        for entry in summary["portfolio"]
+    ]
+
+
+def test_wo111_sidecar_mirrors_unmeasured_portfolio_and_leaves_history_untouched(tmp_path, monkeypatch):
+    cfg = _config(tmp_path)
+    markets = [_market("deep calm market", "calm", 1000.0)]
+    books = {"calm": _deep_book()}
+    histories = {("calm", "1d"): _flat_history(200), ("calm", "1w"): _flat_history(200)}
+    _fake_requests(monkeypatch, markets=markets, books=books, histories=histories)
+
+    summary = run_maker_carry_study(cfg)
+
+    rows = _members_rows(cfg)
+    assert len(rows) == 1
+    newest = json.loads(rows[-1]["portfolio_members"])
+    # Sidecar mirrors the run's portfolio exactly, built from the SAME list that
+    # feeds the aggregate flag.
+    assert newest == _expected_members(summary)
+    # Calm market has no prints -> markout unmeasured -> aggregate False.
+    assert newest == [{"condition_id": "0xcalm", "markout_measured": False}]
+    assert summary["portfolio_markout_measured"] is False
+    # Aggregate/sidecar consistency invariant.
+    assert summary["portfolio_markout_measured"] == all(m["markout_measured"] for m in newest)
+    # Sidecar row correlates with the history row by generated_at_utc.
+    history = read_csv_rows(cfg.output_root / "maker_carry" / "maker_carry_history.csv")
+    assert rows[-1]["generated_at_utc"] == history[-1]["generated_at_utc"]
+    # Anchor-safety: maker_carry_history.csv must NOT gain a portfolio_members
+    # column (its append_only anchor prefix stays byte-identical).
+    assert "portfolio_members" not in history[0]
+    assert set(history[0].keys()) == _MC_HISTORY_FIELDS
+
+
+def test_wo111_sidecar_records_measured_members(tmp_path, monkeypatch):
+    cfg = _config(tmp_path)
+    markets = [_market("deep calm market", "calm", 1000.0)]
+    books = {"calm": _deep_book()}
+    histories = {("calm", "1d"): _flat_history(200), ("calm", "1w"): _flat_history(200)}
+    # 25 quiet prints inside the band edge: markout MEASURED, zero loss, so the
+    # market still sizes into the portfolio with markout_measured=True.
+    prints = {
+        "0xcalm": [
+            {
+                "price": 0.499,
+                "size": 5,
+                "side": "SELL",
+                "timestamp": 600 + j * 60,
+                "conditionId": "0xcalm",
+                "asset": "calm",
+            }
+            for j in range(25)
+        ]
+    }
+    _fake_requests(monkeypatch, markets=markets, books=books, histories=histories, prints=prints)
+
+    summary = run_maker_carry_study(cfg)
+
+    newest = json.loads(_members_rows(cfg)[-1]["portfolio_members"])
+    assert newest == _expected_members(summary)
+    assert summary["portfolio"], "expected a sized portfolio for the measured case"
+    assert all(m["markout_measured"] for m in newest)
+    assert summary["portfolio_markout_measured"] is True
+    assert newest[0]["condition_id"] == "0xcalm"
+
+
+def test_wo111_sidecar_empty_portfolio_records_empty_list(tmp_path, monkeypatch):
+    cfg = _config(tmp_path)
+    markets = [_market("in-game thin book", "thin", 2000.0)]
+    books = {"thin": {"bids": [{"price": "0.49", "size": "10"}], "asks": [{"price": "0.51", "size": "10"}]}}
+    histories = {("thin", "1d"): _flat_history(200), ("thin", "1w"): _flat_history(200)}
+    _fake_requests(monkeypatch, markets=markets, books=books, histories=histories)
+
+    summary = run_maker_carry_study(cfg)
+
+    assert summary["portfolio_markets"] == 0
+    rows = _members_rows(cfg)
+    assert rows[-1]["portfolio_members"] == "[]"
+    assert json.loads(rows[-1]["portfolio_members"]) == []
+    assert summary["portfolio_markout_measured"] is False
+
+
+def test_wo111_sidecar_appends_forward_only_and_round_trips(tmp_path, monkeypatch):
+    cfg = _config(tmp_path)
+    markets = [_market("deep calm market", "calm", 1000.0)]
+    books = {"calm": _deep_book()}
+    histories = {("calm", "1d"): _flat_history(200), ("calm", "1w"): _flat_history(200)}
+    _fake_requests(monkeypatch, markets=markets, books=books, histories=histories)
+
+    run_maker_carry_study(cfg)
+    run_maker_carry_study(cfg)
+
+    rows = _members_rows(cfg)
+    assert len(rows) == 2  # forward-only: one row appended per run, never rewritten in place
+    for row in rows:
+        parsed = json.loads(row["portfolio_members"])  # comma-bearing JSON survives CSV quoting
+        assert parsed == [{"condition_id": "0xcalm", "markout_measured": False}]
+    history = read_csv_rows(cfg.output_root / "maker_carry" / "maker_carry_history.csv")
+    assert [r["generated_at_utc"] for r in rows] == [r["generated_at_utc"] for r in history]
+
+
 def test_markout_unmeasured_when_no_print_has_a_horizon_mid() -> None:
     # #290 review P1: reaching markout_min_prints is not a measurement. If no
     # print has both an on-time AND a horizon mid (here prints sit far past the
@@ -984,6 +1112,34 @@ def test_legacy_share_model_days_never_count_toward_gate_a(tmp_path, monkeypatch
 
 def _ma_run(day: str, net: float, *, model: str = "published_v2", hour: str = "12:00:00", markout_measured: str = "True") -> dict[str, Any]:
     return {"generated_at_utc": f"{day}T{hour}Z", "portfolio_net_carry_usd_per_day": net, "share_model": model, "portfolio_markout_measured": markout_measured}
+
+
+def test_ma_nonfinite_net_carry_does_not_bank_a_day() -> None:
+    # Red-team P3-1: a +inf/-inf/NaN net-carry row must NOT count toward M-A.
+    # NaN already failed the >= comparison, but +inf silently passed it before the
+    # finite guard; treat any non-finite net carry as not-at-target (tighten).
+    for bad in (float("inf"), float("-inf"), float("nan")):
+        runs = [_ma_run("2026-07-10", bad)]
+        days = maker_carry_study._distinct_days_at_target(
+            runs, 3.33, current_day="", latest_at_target=False
+        )
+        assert days == set(), bad
+
+
+def test_finite_at_target_guard_is_robust_to_nonpositive_target() -> None:
+    # Codex #342 review (A + B): the shared guard used for BOTH the prior-run day
+    # counter and the current-run latest_at_target derivation must reject
+    # non-finite values regardless of the sign of target. A zero/negative target
+    # override must not let an `or 0.0`-style fallback bank a NaN/-inf day.
+    guard = maker_carry_study._finite_at_target
+    assert guard(5.0, 3.33) is True
+    assert guard(1.0, 3.33) is False
+    for bad in (float("inf"), float("-inf"), float("nan"), None, "", "n/a"):
+        for target in (3.33, 0.0, -1.0, -1e9):
+            assert guard(bad, target) is False, (bad, target)
+    # A genuine finite value still counts at/above a non-positive target.
+    assert guard(0.0, 0.0) is True
+    assert guard(-2.0, -5.0) is True
 
 
 def test_ma_intraday_spike_does_not_bank_a_day() -> None:

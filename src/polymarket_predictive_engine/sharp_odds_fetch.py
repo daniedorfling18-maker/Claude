@@ -32,7 +32,7 @@ from .sharp_spend_suppression import (
 from .utils import normalize_slug, now_utc, parse_timestamp, read_csv_rows, read_json, safe_float, write_csv, write_json
 
 DEFAULT_BASE_URL = "https://api.the-odds-api.com/v4"
-DEFAULT_BOOKMAKER_PRIORITY = ("pinnacle", "betfair_ex_eu", "betfair_ex_uk", "betfair")
+DEFAULT_BOOKMAKER_PRIORITY = ("pinnacle", "betfair_ex_eu", "betfair_ex_uk")
 SHARP_ODDS_FIELDS = [
     "market_slug",
     "outcome",

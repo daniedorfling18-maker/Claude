@@ -10,6 +10,7 @@ inputs evaluate not_eligible (fail-closed).
 
 from __future__ import annotations
 
+import math
 import os
 from datetime import datetime, timedelta, timezone
 from typing import Any
@@ -17,6 +18,7 @@ from typing import Any
 import requests
 
 from .config import EngineConfig, load_config
+from .live_test_decision_policy import is_policy_version_sha256, policy_version_matches
 from .utils import now_utc, parse_timestamp, read_csv_rows, read_json, safe_float, write_json
 
 WORK_ORDER = "WO-99"
@@ -197,7 +199,17 @@ def evaluate_stage_ticket_eligibility(
         # raw-imbalance floor must be present to clear the screen. A stale
         # pre-WO-102 row (no vpin_raw) no longer passes on a low percentile
         # alone, so the absolute floor cannot be silently bypassed.
-        measured = bool(tox_row) and percentile is not None and raw_imbalance is not None
+        # Red-team P3-4: also require both to be FINITE. safe_float returns a
+        # non-None float for "-inf"/"inf"/"nan", and a -inf would satisfy the
+        # `<= MAX_TOXICITY` / `< MAX_RAW_IMBALANCE` comparisons and silently clear
+        # a candidate; treat any non-finite toxicity input as unmeasured (fail-closed).
+        measured = (
+            bool(tox_row)
+            and percentile is not None
+            and math.isfinite(percentile)
+            and raw_imbalance is not None
+            and math.isfinite(raw_imbalance)
+        )
         clean = (
             measured
             and not flagged
@@ -317,20 +329,26 @@ def evaluate_stage_ticket_eligibility(
     qual_age = (now - qual_generated.astimezone(timezone.utc)).total_seconds() if qual_generated is not None else None
     qual_candidate = str(qualification.get("candidate_condition_id") or "").strip()
     qual_token = str(qualification.get("candidate_token_id") or "").strip()
-    # #260 version-binding: the qualification must have been computed against
-    # the CURRENT study and replay versions, not merely be recent and about the
-    # same candidate. Otherwise a study/replay regenerated within the 30-min
-    # window (a new quote band or Tier-0 row) leaves a stale qualification that
-    # still reads eligible. Bind it to the consumed policy, study, and replay
-    # timestamps (fail-closed).
+    # #260/#280 version-binding: the qualification must have been computed
+    # against the CURRENT effective policy contents plus the current study and
+    # replay versions. The policy timestamp remains a freshness/audit clock but
+    # cannot identify content because concurrent writers share second-level
+    # timestamps. Bind policy by its verified canonical digest and retain study
+    # and replay timestamp bindings (fail-closed).
     current_replay_generated = str(replay.get("generated_at_utc") or "").strip()
     current_policy_generated = str(policy.get("generated_at_utc") or "").strip()
-    qual_policy = str(qualification.get("consumed_policy_generated_at") or "").strip()
+    qual_policy_generated = str(qualification.get("consumed_policy_generated_at") or "").strip()
+    current_policy_version = str(policy.get("policy_version_sha256") or "").strip()
+    qual_policy_version = str(
+        qualification.get("consumed_policy_version_sha256") or ""
+    ).strip()
+    current_policy_version_valid = policy_version_matches(policy)
     qual_study = str(qualification.get("consumed_study_generated_at") or "").strip()
     qual_replay = str(qualification.get("consumed_replay_generated_at") or "").strip()
     version_bound = (
-        bool(current_policy_generated)
-        and qual_policy == current_policy_generated
+        current_policy_version_valid
+        and is_policy_version_sha256(qual_policy_version)
+        and qual_policy_version == current_policy_version
         and bool(study_generated)
         and qual_study == study_generated
         and bool(current_replay_generated)
@@ -356,7 +374,9 @@ def evaluate_stage_ticket_eligibility(
             f"age={round(qual_age, 1) if qual_age is not None else 'missing'}s "
             f"(max {MAX_QUALIFICATION_AGE_SECONDS:g}); version_bound={version_bound}; "
             f"policy_generated={current_policy_generated or 'missing'}; "
-            f"qual_policy={qual_policy or 'missing'}; "
+            f"qual_policy_generated={qual_policy_generated or 'missing'}; "
+            f"policy_version={current_policy_version or 'missing'}; "
+            f"qual_policy_version={qual_policy_version or 'missing'}; "
             f"first_failing={qualification.get('first_failing_check') or 'none'}",
         )
     )

@@ -3131,7 +3131,7 @@ def _independent_anchor_status(governance: Path) -> dict[str, Any]:
             blocker = f"{status}: {component.get('errors', '')}".strip()
         elif status in {"missing_api_key", "no_input", "no_targets", "no_terminal_targets"}:
             blocker = status
-        elif rows <= 0 and status:
+        elif rows <= 0 and status and name != "sharp_anchor_coverage":
             blocker = "no usable rows"
         if blocker:
             component.setdefault("blocker", blocker)

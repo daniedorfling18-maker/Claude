@@ -4,7 +4,7 @@ import json
 from pathlib import Path
 
 from polymarket_predictive_engine.config import EngineConfig
-from polymarket_predictive_engine.utils import read_csv_rows, read_json
+from polymarket_predictive_engine.utils import read_csv_rows, read_json, write_json
 import polymarket_predictive_engine.websocket_collector as websocket_collector
 from polymarket_predictive_engine.websocket_normaliser import normalize_websocket_message
 
@@ -171,6 +171,277 @@ def test_custom_flag_off_preserves_existing_collector_behaviour(tmp_path: Path, 
     assert "lifecycle_capture" not in summary
     assert not (cfg.output_root / "polymarket_websocket" / "resolution_events.csv").exists()
     assert not (cfg.output_root / "polymarket_websocket" / "market_births.csv").exists()
+
+
+def test_best_bid_ask_frames_do_not_evict_feature_replay_history(tmp_path: Path, monkeypatch) -> None:
+    cfg = _cfg(tmp_path, custom_feature_enabled=True)
+    cfg.raw["websocket_market_data"]["max_messages"] = 2
+    real_import_module = websocket_collector.importlib.import_module
+
+    def fake_import_module(name: str):
+        if name == "websockets":
+            return object()
+        return real_import_module(name)
+
+    async def fake_collect(url, seconds, subscription_message, **kwargs):
+        del url, seconds, subscription_message, kwargs
+        return [
+            {
+                "collected_at_utc": f"2026-07-11T12:00:0{index}Z",
+                "message": json.dumps(
+                    {
+                        "event_type": "best_bid_ask",
+                        "asset_id": "token-1",
+                        "best_bid": f"0.4{index}",
+                        "best_ask": f"0.5{index}",
+                    }
+                ),
+            }
+            for index in range(3)
+        ] + [
+            {
+                "collected_at_utc": "2026-07-11T12:00:03Z",
+                "message": json.dumps(
+                    {
+                        "event_type": "book",
+                        "asset_id": "token-1",
+                        "bids": [{"price": "0.48", "size": "10"}],
+                        "asks": [{"price": "0.52", "size": "10"}],
+                    }
+                ),
+            }
+        ]
+
+    monkeypatch.setattr(websocket_collector.importlib, "import_module", fake_import_module)
+    monkeypatch.setattr(websocket_collector, "_collect_messages", fake_collect)
+
+    result = websocket_collector.collect_websocket(cfg, websocket_seconds=1)
+    raw_history = read_json(cfg.output_root / "polymarket_websocket" / "websocket_messages.json")
+    best_bid_ask_history = read_json(
+        cfg.output_root / "polymarket_websocket" / "websocket_best_bid_ask.json"
+    )
+    latest = read_json(cfg.output_root / "polymarket_websocket" / "websocket_messages_latest.json")
+
+    assert [json.loads(row["message"])["event_type"] for row in raw_history] == ["book"]
+    # The sidecar is a status envelope, never a bare raw-row list: every emitted
+    # artifact must assert it is a paper/dry-run surface.
+    assert best_bid_ask_history["paper_trading_invoked"] is False
+    assert best_bid_ask_history["live_trading_invoked"] is False
+    assert len(best_bid_ask_history["rows"]) == 2
+    assert len(latest) == 4
+    assert result["retained_new_messages"] == 1
+    assert result["best_bid_ask_messages_received"] == 3
+    assert result["dropped_best_bid_ask_messages"] == 1
+    assert result["max_best_bid_ask_messages"] == 2
+
+
+def test_failed_collection_still_migrates_mixed_history_into_sidecar(tmp_path: Path, monkeypatch) -> None:
+    # A mixed feature-replay history (book + best_bid_ask frames co-mingled) must be
+    # de-polluted even when the subsequent collection fails, so the capped replay
+    # window is not left holding high-churn top-of-book frames.
+    cfg = _cfg(tmp_path, custom_feature_enabled=True)
+    ws_dir = cfg.output_root / "polymarket_websocket"
+    write_json(
+        ws_dir / "websocket_messages.json",
+        [
+            {
+                "collected_at_utc": "2026-07-10T00:00:00Z",
+                "message": json.dumps(
+                    {"event_type": "book", "asset_id": "token-1", "bids": [], "asks": []}
+                ),
+            },
+            {
+                "collected_at_utc": "2026-07-10T00:00:01Z",
+                "message": json.dumps(
+                    {"event_type": "best_bid_ask", "asset_id": "token-1", "best_bid": "0.4", "best_ask": "0.5"}
+                ),
+            },
+        ],
+    )
+    real_import_module = websocket_collector.importlib.import_module
+
+    def fake_import_module(name: str):
+        if name == "websockets":
+            return object()
+        return real_import_module(name)
+
+    async def fake_collect_empty(url, seconds, subscription_message, **kwargs):
+        del url, seconds, subscription_message, kwargs
+        return []
+
+    monkeypatch.setattr(websocket_collector.importlib, "import_module", fake_import_module)
+    monkeypatch.setattr(websocket_collector, "_collect_messages", fake_collect_empty)
+
+    result = websocket_collector.collect_websocket(cfg, websocket_seconds=1)
+    raw_history = read_json(ws_dir / "websocket_messages.json")
+    sidecar = read_json(ws_dir / "websocket_best_bid_ask.json")
+
+    assert result["status"] == "error"
+    assert result["migrated_best_bid_ask_messages"] == 1
+    # feature-replay history is de-polluted despite the failed collection
+    assert [json.loads(row["message"])["event_type"] for row in raw_history] == ["book"]
+    assert sidecar["paper_trading_invoked"] is False
+    assert sidecar["live_trading_invoked"] is False
+    assert [json.loads(row["message"])["event_type"] for row in sidecar["rows"]] == ["best_bid_ask"]
+
+
+def test_best_bid_ask_sidecar_migrates_legacy_bare_list(tmp_path: Path, monkeypatch) -> None:
+    # A pre-existing bare-list sidecar (written before the status envelope existed)
+    # must be read back and re-wrapped without losing captured frames.
+    cfg = _cfg(tmp_path, custom_feature_enabled=True)
+    ws_dir = cfg.output_root / "polymarket_websocket"
+    write_json(
+        ws_dir / "websocket_best_bid_ask.json",
+        [
+            {
+                "collected_at_utc": "2026-07-09T00:00:00Z",
+                "message": json.dumps(
+                    {"event_type": "best_bid_ask", "asset_id": "token-1", "best_bid": "0.3", "best_ask": "0.4"}
+                ),
+            }
+        ],
+    )
+    real_import_module = websocket_collector.importlib.import_module
+
+    def fake_import_module(name: str):
+        if name == "websockets":
+            return object()
+        return real_import_module(name)
+
+    async def fake_collect_empty(url, seconds, subscription_message, **kwargs):
+        del url, seconds, subscription_message, kwargs
+        return []
+
+    monkeypatch.setattr(websocket_collector.importlib, "import_module", fake_import_module)
+    monkeypatch.setattr(websocket_collector, "_collect_messages", fake_collect_empty)
+
+    websocket_collector.collect_websocket(cfg, websocket_seconds=1)
+    sidecar = read_json(ws_dir / "websocket_best_bid_ask.json")
+
+    assert isinstance(sidecar, dict)
+    assert sidecar["paper_trading_invoked"] is False
+    assert len(sidecar["rows"]) == 1
+
+
+def test_mixed_history_de_polluted_before_no_market_ids_skip(tmp_path: Path, monkeypatch) -> None:
+    # De-pollution must run before the no-market-ids early return, so an upgraded VPS
+    # that skips collection still clears best_bid_ask frames from the capped file.
+    cfg = _cfg(tmp_path, custom_feature_enabled=True)
+    cfg.raw["websocket_market_data"]["market_ids"] = []
+    ws_dir = cfg.output_root / "polymarket_websocket"
+    write_json(
+        ws_dir / "websocket_messages.json",
+        [
+            {
+                "collected_at_utc": "2026-07-10T00:00:00Z",
+                "message": json.dumps({"event_type": "book", "asset_id": "token-1", "bids": [], "asks": []}),
+            },
+            {
+                "collected_at_utc": "2026-07-10T00:00:01Z",
+                "message": json.dumps(
+                    {"event_type": "best_bid_ask", "asset_id": "token-1", "best_bid": "0.4", "best_ask": "0.5"}
+                ),
+            },
+        ],
+    )
+    real_import_module = websocket_collector.importlib.import_module
+
+    def fake_import_module(name: str):
+        if name == "websockets":
+            return object()
+        return real_import_module(name)
+
+    monkeypatch.setattr(websocket_collector.importlib, "import_module", fake_import_module)
+
+    result = websocket_collector.collect_websocket(cfg, websocket_seconds=1)
+    raw_history = read_json(ws_dir / "websocket_messages.json")
+    sidecar = read_json(ws_dir / "websocket_best_bid_ask.json")
+
+    assert result["status"] == "skipped"
+    assert [json.loads(row["message"])["event_type"] for row in raw_history] == ["book"]
+    assert [json.loads(row["message"])["event_type"] for row in sidecar["rows"]] == ["best_bid_ask"]
+
+
+def test_crash_between_sidecar_and_primary_writes_does_not_duplicate(tmp_path: Path, monkeypatch) -> None:
+    # The sidecar is persisted before the primary is pruned. If the process dies in
+    # between, the next run re-migrates the still-present frame; dedup must keep the
+    # sidecar idempotent rather than accumulating duplicates.
+    cfg = _cfg(tmp_path, custom_feature_enabled=True)
+    ws_dir = cfg.output_root / "polymarket_websocket"
+    mixed_history = [
+        {
+            "collected_at_utc": "2026-07-10T00:00:00Z",
+            "message": json.dumps({"event_type": "book", "asset_id": "token-1", "bids": [], "asks": []}),
+        },
+        {
+            "collected_at_utc": "2026-07-10T00:00:01Z",
+            "message": json.dumps(
+                {"event_type": "best_bid_ask", "asset_id": "token-1", "best_bid": "0.4", "best_ask": "0.5"}
+            ),
+        },
+    ]
+    write_json(ws_dir / "websocket_messages.json", list(mixed_history))
+    real_import_module = websocket_collector.importlib.import_module
+
+    def fake_import_module(name: str):
+        if name == "websockets":
+            return object()
+        return real_import_module(name)
+
+    async def fake_collect_empty(url, seconds, subscription_message, **kwargs):
+        del url, seconds, subscription_message, kwargs
+        return []
+
+    monkeypatch.setattr(websocket_collector.importlib, "import_module", fake_import_module)
+    monkeypatch.setattr(websocket_collector, "_collect_messages", fake_collect_empty)
+
+    # Run 1: sidecar persisted with the migrated frame, primary de-polluted.
+    websocket_collector.collect_websocket(cfg, websocket_seconds=1)
+    # Simulate a crash after the sidecar write but before the primary prune landed:
+    # the mixed history is still on disk while the sidecar already holds the frame.
+    write_json(ws_dir / "websocket_messages.json", list(mixed_history))
+
+    # Run 2: recovery re-migrates the same frame; it must not duplicate in the sidecar.
+    websocket_collector.collect_websocket(cfg, websocket_seconds=1)
+    sidecar = read_json(ws_dir / "websocket_best_bid_ask.json")
+    raw_history = read_json(ws_dir / "websocket_messages.json")
+
+    assert len(sidecar["rows"]) == 1
+    assert [json.loads(row["message"])["event_type"] for row in raw_history] == ["book"]
+
+
+def test_identical_same_second_live_frames_are_both_retained(tmp_path: Path, monkeypatch) -> None:
+    # now_utc() has whole-second resolution, so a high-rate feed can emit two
+    # byte-identical best_bid_ask frames in the same second. Both are distinct live
+    # observations and must be retained; recovery de-dup applies only to migration.
+    cfg = _cfg(tmp_path, custom_feature_enabled=True)
+    ws_dir = cfg.output_root / "polymarket_websocket"
+    real_import_module = websocket_collector.importlib.import_module
+
+    def fake_import_module(name: str):
+        if name == "websockets":
+            return object()
+        return real_import_module(name)
+
+    identical_frame = {
+        "collected_at_utc": "2026-07-11T12:00:00Z",
+        "message": json.dumps(
+            {"event_type": "best_bid_ask", "asset_id": "token-1", "best_bid": "0.40", "best_ask": "0.50"}
+        ),
+    }
+
+    async def fake_collect(url, seconds, subscription_message, **kwargs):
+        del url, seconds, subscription_message, kwargs
+        return [dict(identical_frame), dict(identical_frame)]
+
+    monkeypatch.setattr(websocket_collector.importlib, "import_module", fake_import_module)
+    monkeypatch.setattr(websocket_collector, "_collect_messages", fake_collect)
+
+    result = websocket_collector.collect_websocket(cfg, websocket_seconds=1)
+    sidecar = read_json(ws_dir / "websocket_best_bid_ask.json")
+
+    assert result["best_bid_ask_messages_received"] == 2
+    assert len(sidecar["rows"]) == 2
 
 
 def test_dynamic_subscriptions_enable_custom_features_only_when_requested() -> None:

@@ -158,6 +158,49 @@ def test_policy_table_stable_pass_funds_single_calmest_market(tmp_path):
     assert result["composition_stability"]["most_recurrent_count"] >= 4
     assert result["paper_trading_invoked"] is False
     assert result["live_trading_invoked"] is False
+    assert policy.policy_version_matches(result)
+
+
+def test_policy_version_distinguishes_different_outputs_in_the_same_second(
+    tmp_path, monkeypatch
+):
+    cfg = _config(tmp_path)
+    _write_carry_history(cfg, _history(["0xm1"] * 7))
+    monkeypatch.setattr(policy, "now_utc", lambda: "2026-07-19T08:00:00Z")
+
+    _write_study(cfg, _study(top="0xm1"))
+    first = run_decision_policy(cfg)
+    _write_study(cfg, _study(gate_a="pending", gate_b="pass", top="0xm1"))
+    second = run_decision_policy(cfg)
+
+    assert first["generated_at_utc"] == second["generated_at_utc"]
+    assert first["indicated_action"] != second["indicated_action"]
+    assert first["policy_version_sha256"] != second["policy_version_sha256"]
+    assert policy.policy_version_matches(first)
+    assert policy.policy_version_matches(second)
+
+
+def test_policy_version_ignores_only_the_generation_clock() -> None:
+    first = {
+        "status": "ok",
+        "generated_at_utc": "2026-07-19T08:00:00Z",
+        "indicated_action": "continue_study_until_policy_date",
+        "paper_trading_invoked": False,
+        "live_trading_invoked": False,
+    }
+    second = {**first, "generated_at_utc": "2026-07-19T08:00:01Z"}
+
+    assert policy.policy_version_sha256(first) == policy.policy_version_sha256(second)
+
+
+def test_disabled_policy_is_also_content_addressed(tmp_path) -> None:
+    cfg = _config(tmp_path)
+    cfg.raw["decision_policy"]["enabled"] = False
+
+    result = run_decision_policy(cfg)
+
+    assert result["status"] == "disabled"
+    assert policy.policy_version_matches(result)
 
 
 def test_policy_table_churning_pass_halves_recurrent_market_target(tmp_path):
@@ -192,6 +235,23 @@ def test_policy_table_below_target_after_gates_reachable_triggers_review(tmp_pat
 
     assert result["indicated_action"] == "maker_lane_not_supported_program_review"
     assert result["inputs_snapshot"]["recent_below_target_runs"] == 4
+
+
+def test_below_target_counter_treats_nonfinite_net_carry_as_below(tmp_path):
+    # Red-team P3-2: a non-finite (NaN/Inf) net-carry row must COUNT as below-target
+    # (fail-closed). Six clean at/above-target runs plus one NaN -> exactly one
+    # below-target run; before the _finite guard the NaN was silently treated as
+    # not-below and shrank the withhold-funding streak (the fail-open direction).
+    cfg = _config(tmp_path)
+    _write_study(cfg, _study(top="0xm1", net=5.0))
+    _write_carry_history(
+        cfg,
+        _history(["0xm1"] * 7, nets=[5.0, 6.0, 7.0, 8.0, 5.0, 6.0, float("nan")]),
+    )
+
+    result = run_decision_policy(cfg)
+
+    assert result["inputs_snapshot"]["recent_below_target_runs"] == 1
 
 
 def test_ladder_promotion_arithmetic_and_stage2_reward_floor(tmp_path):
@@ -455,6 +515,73 @@ def test_nan_cumulative_score_reports_missing_not_comparing_false(tmp_path):
     criteria = result["kill_criteria_status"]["criteria"]["cumulative_real_net_score"]
     assert criteria["triggered"] is False
     assert criteria["value"] is None  # missing, not NaN
+
+
+def test_active_live_stage_nonfinite_cumulative_score_forces_stop(tmp_path, monkeypatch):
+    cfg = _config(tmp_path, live_configured=True)
+    _write_study(cfg, _study(top="0xm1"))
+    _write_carry_history(cfg, _history(["0xm1"] * 7))
+    write_json(
+        _out(cfg) / "maker_live_test.json",
+        {
+            "status": "ok",
+            "generated_at_utc": "2026-07-14T10:50:00Z",
+            "net_score_usd": "-inf",
+        },
+    )
+    _write_live_history(
+        cfg,
+        [
+            {
+                "generated_at_utc": "2026-07-14T10:50:00Z",
+                "net_score_usd": 2.0,
+                "daily_net_score_usd": 2.0,
+            }
+        ],
+    )
+    monkeypatch.setattr(policy, "now_utc", lambda: "2026-07-14T11:00:00Z")
+
+    result = run_decision_policy(cfg)
+    criterion = result["kill_criteria_status"]["criteria"]["cumulative_real_net_score"]
+
+    assert result["kill_criteria_status"]["kill_input_freshness"]["state"] == "fresh"
+    assert criterion["triggered"] is True
+    assert criterion["invalid_input"] is True
+    assert criterion["value"] is None
+    assert result["indicated_action"] == "stop_quoting_review_before_resume"
+
+
+def test_active_live_stage_nonfinite_daily_score_forces_stop(tmp_path, monkeypatch):
+    cfg = _config(tmp_path, live_configured=True)
+    _write_study(cfg, _study(top="0xm1"))
+    _write_carry_history(cfg, _history(["0xm1"] * 7))
+    write_json(
+        _out(cfg) / "maker_live_test.json",
+        {
+            "status": "ok",
+            "generated_at_utc": "2026-07-14T10:50:00Z",
+            "net_score_usd": 2.0,
+        },
+    )
+    _write_live_history(
+        cfg,
+        [
+            {
+                "generated_at_utc": "2026-07-14T10:50:00Z",
+                "net_score_usd": 2.0,
+                "daily_net_score_usd": "nan",
+            }
+        ],
+    )
+    monkeypatch.setattr(policy, "now_utc", lambda: "2026-07-14T11:00:00Z")
+
+    result = run_decision_policy(cfg)
+    criterion = result["kill_criteria_status"]["criteria"]["single_day_net_score"]
+
+    assert result["kill_criteria_status"]["kill_input_freshness"]["state"] == "fresh"
+    assert criterion["triggered"] is True
+    assert criterion["invalid_input_count"] == 1
+    assert result["indicated_action"] == "stop_quoting_review_before_resume"
 
 
 def test_nan_carry_rows_fail_kelly_overlay_closed():

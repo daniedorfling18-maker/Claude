@@ -52,11 +52,16 @@ DEFAULT_LEDGER_REGISTRY: list[dict[str, str]] = [
     {"glob": "polymarket_shadow/shadow_positions.csv", "mode": "snapshot"},
     {"glob": "polymarket_shadow/shadow_fills.csv", "mode": "append_only"},
     {"glob": "maker_carry/maker_carry_history.csv", "mode": "append_only"},
+    # WO-111: forward-only per-day portfolio membership + per-market markout sidecar.
+    # Fixed two-column schema so it can never need a column-addition rewrite; a
+    # brand-new (initially empty) append_only file is anchor-safe.
+    {"glob": "maker_carry/maker_carry_portfolio_members.csv", "mode": "append_only"},
     {"glob": "maker_carry/reward_epoch_samples.csv", "mode": "append_only"},
     {"glob": "maker_carry/maker_live_test_history.csv", "mode": "append_only"},
     {"glob": "maker_carry/maker_live_test_wallet_history.csv", "mode": "append_only"},
     {"glob": "maker_carry/maker_live_test_attribution_history.csv", "mode": "append_only"},
     {"glob": "maker_carry/decision_policy.json", "mode": "snapshot"},
+    {"glob": "maker_carry/sharp_linking_qualification.json", "mode": "snapshot"},
     {"glob": "maker_carry/requote_alerts.json", "mode": "snapshot"},
     {"glob": "execution/execution_ledger.csv", "mode": "append_only"},
     {"glob": "execution/stage_operator_log.csv", "mode": "append_only"},

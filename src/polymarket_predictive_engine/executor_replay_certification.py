@@ -490,6 +490,19 @@ def certify_executor_replay(
                 notional = (safe_float(action.get("price")) or 0.0) * shares
                 if notional > cap + 1e-9:
                     violations.append(_violation("policy_caps", "place notional exceeds stage cap", scenario_id=scenario_id, cycle=cycle_number))
+        aggregate_place_notional = sum(
+            (safe_float(action.get("price")) or 0.0) * (safe_float(action.get("shares")) or 0.0)
+            for action in place_actions
+        )
+        if aggregate_place_notional > cap + 1e-9:
+            violations.append(
+                _violation(
+                    "policy_caps",
+                    "aggregate place notional exceeds stage cap",
+                    scenario_id=scenario_id,
+                    cycle=cycle_number,
+                )
+            )
         if not expected_flags.get("quoting_permitted") and place_actions:
             violations.append(_violation("quote_sheet_boundary", "quoting occurred while scenario prohibited quoting", scenario_id=scenario_id, cycle=cycle_number))
         capital_at_risk = safe_float(after.get("capital_at_risk_usd"))
@@ -538,8 +551,22 @@ def certify_executor_replay(
             "action_type": str(action.get("action_type") or ""),
             "condition_id": str(action.get("condition_id") or ""),
             "token_id": str(action.get("token_id") or ""),
+            "side": str(action.get("side") or ""),
         }
-        if any(str(ledger_row.get(key) or "") != value for key, value in expected_fields.items()):
+        text_mismatch = any(str(ledger_row.get(key) or "") != value for key, value in expected_fields.items())
+        numeric_mismatch = False
+        for key in ("price", "shares"):
+            expected_number = safe_float(action.get(key))
+            ledger_number = safe_float(ledger_row.get(key))
+            if expected_number is None:
+                numeric_mismatch = numeric_mismatch or str(ledger_row.get(key) or "") != str(action.get(key) or "")
+            else:
+                numeric_mismatch = (
+                    numeric_mismatch
+                    or ledger_number is None
+                    or abs(ledger_number - expected_number) > 1e-9
+                )
+        if text_mismatch or numeric_mismatch:
             violations.append(_violation("action_ledger_completeness", "ledger row fields do not match decision action"))
 
     checks = {

@@ -10,6 +10,8 @@ from __future__ import annotations
 
 from collections import Counter
 from datetime import date, datetime
+import hashlib
+import json
 from pathlib import Path
 import math
 import re
@@ -21,6 +23,9 @@ from .risk import shrunk_kelly_fraction
 from .utils import boolish, now_utc, parse_timestamp, read_csv_rows, read_json, safe_float, write_json, write_text_atomic
 
 REGISTERED_AT_UTC = "2026-07-10T00:00:00Z"
+POLICY_VERSION_FIELD = "policy_version_sha256"
+POLICY_VERSION_EXCLUDED_FIELDS = frozenset({"generated_at_utc", POLICY_VERSION_FIELD})
+POLICY_VERSION_PATTERN = re.compile(r"^[0-9a-f]{64}$")
 KELLY_FULL_WEIGHT_DAYS_FLOOR = 20
 REGISTERED_KILL_INPUT_MAX_AGE_SECONDS = 30 * 60
 # Owner decision 2026-07-17 (owner-approved PR; an interpretation, not a
@@ -148,6 +153,48 @@ KILL_CRITERIA_REGISTRATION: list[dict[str, Any]] = [
         "rule": "Stop when the read-only live-test scoreboard emits its registered STOP state.",
     },
 ]
+
+
+def policy_version_sha256(payload: dict[str, Any]) -> str:
+    """Return the content identity of the complete effective policy payload.
+
+    The observation clock and the identity field itself are excluded. Every
+    other top-level field, including input versions and the indicated action,
+    is bound by canonical JSON so two writes in one UTC second cannot collide.
+    """
+
+    effective_payload = {
+        key: value
+        for key, value in payload.items()
+        if key not in POLICY_VERSION_EXCLUDED_FIELDS
+    }
+    encoded = json.dumps(
+        effective_payload,
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=False,
+        allow_nan=False,
+    ).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
+
+
+def is_policy_version_sha256(value: Any) -> bool:
+    return POLICY_VERSION_PATTERN.fullmatch(str(value or "").strip()) is not None
+
+
+def policy_version_matches(payload: dict[str, Any]) -> bool:
+    claimed = str(payload.get(POLICY_VERSION_FIELD) or "").strip()
+    if not is_policy_version_sha256(claimed):
+        return False
+    try:
+        return claimed == policy_version_sha256(payload)
+    except (TypeError, ValueError):
+        return False
+
+
+def _stamp_policy_version(payload: dict[str, Any]) -> dict[str, Any]:
+    payload[POLICY_VERSION_FIELD] = policy_version_sha256(payload)
+    return payload
 
 
 def _settings(cfg: EngineConfig) -> dict[str, Any]:
@@ -365,7 +412,7 @@ def _finite(value: Any) -> float | None:
 
 
 def _provided_invalid_number(value: Any) -> bool:
-    """Return True when a supplied numeric observation is not finite."""
+    """Return True when a supplied safety value is not a finite number."""
 
     if value is None or (isinstance(value, str) and not value.strip()):
         return False
@@ -622,9 +669,19 @@ def _kill_criteria(
         "tighten_only_maximum_seconds": REGISTERED_KILL_INPUT_MAX_AGE_SECONDS,
     }
     # Finite parses (NaN would silently disable both kill checks: NaN <= t is
-    # False, and a NaN first element poisons min()). Non-finite = missing; the
-    # WO-86 staleness guard separately covers absent safety data.
-    cumulative_net = _finite(latest.get("net_score_usd"))
+    # False, and a NaN first element poisons min()). During an active live
+    # stage, a supplied malformed/non-finite score is itself a fail-closed kill
+    # input; timestamp freshness must not turn it into an apparently clean
+    # missing value.
+    guard_active = bool(freshness.get("guard_active"))
+    cumulative_raw = latest.get("net_score_usd")
+    cumulative_net = _finite(cumulative_raw)
+    cumulative_invalid = guard_active and _provided_invalid_number(cumulative_raw)
+    invalid_single_day_inputs = sum(
+        1
+        for row in daily
+        if guard_active and _provided_invalid_number(row.get("_daily_net_score_usd"))
+    )
     single_day_values = [value for row in daily for value in [_finite(row.get("_daily_net_score_usd"))] if value is not None]
     fill_overrun_days = 0
     for row in daily:
@@ -649,13 +706,17 @@ def _kill_criteria(
             "latest_observation_source": freshness.get("latest_observation_source"),
         },
         "cumulative_real_net_score": {
-            "triggered": cumulative_net is not None and cumulative_net <= float(settings["kill_cumulative_net_score_usd"]),
+            "triggered": cumulative_invalid
+            or (cumulative_net is not None and cumulative_net <= float(settings["kill_cumulative_net_score_usd"])),
             "value": cumulative_net,
+            "invalid_input": cumulative_invalid,
             "threshold": float(settings["kill_cumulative_net_score_usd"]),
         },
         "single_day_net_score": {
-            "triggered": bool(single_day_values and min(single_day_values) <= float(settings["kill_single_day_net_usd"])),
+            "triggered": bool(invalid_single_day_inputs)
+            or bool(single_day_values and min(single_day_values) <= float(settings["kill_single_day_net_usd"])),
             "worst_day": min(single_day_values) if single_day_values else None,
+            "invalid_input_count": invalid_single_day_inputs,
             "threshold": float(settings["kill_single_day_net_usd"]),
         },
         "fills_outrunning_model_two_days": {
@@ -736,6 +797,7 @@ def run_decision_policy(cfg: EngineConfig) -> dict[str, Any]:
             "paper_trading_invoked": False,
             "live_trading_invoked": False,
         }
+        _stamp_policy_version(payload)
         write_json(path, payload)
         return payload
 
@@ -754,9 +816,16 @@ def run_decision_policy(cfg: EngineConfig) -> dict[str, Any]:
     target = safe_float(study.get("target_net_usd_per_day")) or float((cfg.raw.get("maker_carry_study", {}) or {}).get("target_net_usd_per_day", 3.33))
     composition = _composition(study, carry_history, settings)
     recent = _latest_per_utc_day(carry_history)[-int(settings["below_target_review_runs"]) :]
-    below_target = [
-        row for row in recent if (safe_float(row.get("portfolio_net_carry_usd_per_day")) is not None and float(row["portfolio_net_carry_usd_per_day"]) < target)
-    ]
+    # Fail-closed: a non-finite (NaN/Inf) or unparseable net-carry row must COUNT
+    # as below-target, never be treated as at/above. Otherwise a corrupt row would
+    # shrink the below-target streak and make it easier to keep funding — the
+    # fail-open direction for this withhold-funding safety counter. _finite returns
+    # None for both missing and non-finite, so both conservatively count as below.
+    below_target = []
+    for row in recent:
+        net_carry = _finite(row.get("portfolio_net_carry_usd_per_day"))
+        if net_carry is None or net_carry < target:
+            below_target.append(row)
     ladder = _ladder_stage(cfg, study, live_test, live_history, settings)
     activation = _live_stage_activation(cfg, ladder)
     freshness = _kill_input_freshness(
@@ -819,6 +888,7 @@ def run_decision_policy(cfg: EngineConfig) -> dict[str, Any]:
         "paper_trading_invoked": False,
         "live_trading_invoked": False,
     }
+    _stamp_policy_version(payload)
     write_json(path, payload)
     _patch_quote_sheet(out_root, payload)
     return payload

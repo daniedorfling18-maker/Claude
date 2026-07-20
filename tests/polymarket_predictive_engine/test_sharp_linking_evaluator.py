@@ -18,6 +18,7 @@ import pytest
 
 from polymarket_predictive_engine import sharp_linking_evaluator as mod
 from polymarket_predictive_engine.config import EngineConfig
+from polymarket_predictive_engine.live_test_decision_policy import policy_version_sha256
 from polymarket_predictive_engine.utils import write_csv, write_json
 
 NOW = datetime(2026, 7, 18, 12, 0, tzinfo=timezone.utc)
@@ -69,13 +70,16 @@ def _setup(cfg: EngineConfig, **o: Any) -> None:
     out.mkdir(parents=True, exist_ok=True)
     study_stamp = o.get("study_stamp", STUDY_STAMP)
 
-    write_json(
-        out / "decision_policy.json",
-        {
-            "generated_at_utc": o.get("policy_stamp", POLICY_STAMP),
-            "composition_stability": {"most_recurrent_market": o.get("policy_candidate", CAND)},
-        },
+    policy_payload = {
+        "generated_at_utc": o.get("policy_stamp", POLICY_STAMP),
+        "composition_stability": {"most_recurrent_market": o.get("policy_candidate", CAND)},
+    }
+    policy_payload["policy_version_sha256"] = (
+        o["policy_version"]
+        if "policy_version" in o
+        else policy_version_sha256(policy_payload)
     )
+    write_json(out / "decision_policy.json", policy_payload)
     portfolio_row = {
         "condition_id": CAND,
         "token_id": o.get("token", TOKEN),
@@ -157,6 +161,7 @@ def test_happy_path_qualifies(tmp_path: Path) -> None:
     assert summary["consensus_sharp_fair"] == 0.5
     assert summary["qualifying_sharp_sources"] == ["pinnacle"]
     assert summary["consumed_policy_generated_at"] == POLICY_STAMP
+    assert summary["consumed_policy_version_sha256"]
 
 
 @pytest.mark.parametrize(
@@ -165,6 +170,7 @@ def test_happy_path_qualifies(tmp_path: Path) -> None:
         {"anchor_source": "", "bookmaker": ""},
         {"anchor_source": "sharp_odds", "bookmaker": "sharp_odds"},
         {"anchor_source": "manual_pinnacle_snapshot", "bookmaker": "manual_pinnacle_snapshot"},
+        {"anchor_source": "betfair", "bookmaker": "betfair"},
         {"anchor_source": "pinnacle", "bookmaker": "betfair_ex_eu"},
         {"anchor_source": "soft_book", "bookmaker": "soft_book"},
     ],
@@ -192,6 +198,9 @@ def test_unverified_or_conflicting_sharp_source_fails_closed(tmp_path: Path, anc
 
 
 def test_all_registered_sharp_books_are_accepted(tmp_path: Path) -> None:
+    assert mod.QUALIFYING_SHARP_SOURCES == frozenset(
+        {"pinnacle", "betfair_ex_eu", "betfair_ex_uk"}
+    )
     for source in sorted(mod.QUALIFYING_SHARP_SOURCES):
         cfg = _cfg(tmp_path / source)
         _setup(
@@ -318,6 +327,8 @@ FAIL_CASES = [
     ({"policy_candidate": "0xother"}, "candidate_market_identified"),
     ({"policy_stamp": ""}, "candidate_policy_version_identified"),
     ({"policy_stamp": "not-a-timestamp"}, "candidate_policy_version_identified"),
+    ({"policy_version": ""}, "candidate_policy_version_identified"),
+    ({"policy_version": "0" * 64}, "candidate_policy_version_identified"),
     ({"anchor_stamp": "2026-07-18T00:00:00Z"}, "exact_token_fresh_anchor"),
     (
         {
@@ -415,3 +426,4 @@ def test_run_writes_atomic_fail_closed_artifact(tmp_path: Path) -> None:
     assert payload["consumed_study_generated_at"] == STUDY_STAMP
     assert payload["consumed_replay_generated_at"] == "2026-07-18T11:59:00Z"
     assert payload["consumed_policy_generated_at"] == POLICY_STAMP
+    assert payload["consumed_policy_version_sha256"]

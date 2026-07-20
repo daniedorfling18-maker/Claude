@@ -128,6 +128,39 @@ def test_legitimate_risk_reason_and_transient_missing_input_do_not_incident(tmp_
     assert not (cfg.output_root / INCIDENT_LEDGER).exists()
 
 
+def test_missing_rule_on_advisory_market_does_not_inherit_global_pull_state(tmp_path: Path) -> None:
+    cfg = _cfg(tmp_path)
+    path = cfg.output_root / "maker_carry" / "requote_alerts.json"
+    for cycle in range(1, 5):
+        write_json(
+            path,
+            {
+                "generated_at_utc": f"2026-07-13T00:0{cycle}:00Z",
+                "alert_state": "pull_quotes_now",
+                "markets": [
+                    {
+                        "condition_id": "risk-market",
+                        "alert_state": "pull_quotes_now",
+                        "alerts": [{"rule": "scheduled_event_within_window"}],
+                    },
+                    {
+                        "condition_id": "missing-input-market",
+                        "alert_state": "requote_advised",
+                        "alerts": [{"rule": "missing_live_bid_ask"}],
+                    },
+                ],
+            },
+        )
+        result = build_degraded_state_watchdog(cfg, as_of=f"2026-07-13T00:0{cycle}:30Z")
+
+    evaluation = result["evaluations"][0]
+    assert result["status"] == "ok"
+    assert evaluation["consecutive_degraded_observations"] == 0
+    assert evaluation["missing_input_rules"] == ["missing_live_bid_ask"]
+    assert evaluation["triggering_missing_input_rules"] == []
+    assert not (cfg.output_root / INCIDENT_LEDGER).exists()
+
+
 def test_persistent_maker_replay_insufficient_coverage_trips_on_fourth_replay(tmp_path: Path) -> None:
     cfg = _cfg(tmp_path)
     path = cfg.output_root / "maker_carry" / "maker_fill_replay.json"

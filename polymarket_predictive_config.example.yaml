@@ -1441,6 +1441,12 @@ websocket_market_data:
   # closing_line_final_history.csv and survive retention roll-off; 72h still spans
   # every market's pre-close quote window with margin.
   max_messages: 15000
+  # High-churn top-of-book (best_bid_ask) frames are partitioned out of the capped
+  # feature-replay window into a dedicated websocket_best_bid_ask.json sidecar so
+  # they cannot evict book/price-change replay substrate. The sidecar keeps its own
+  # conservative bound (additionally clamped to max_messages when that is lower) so
+  # it cannot balloon and reintroduce the VPS memory pressure max_messages relieves.
+  max_best_bid_ask_messages: 3000
   retain_existing_features: true
   feature_retention_hours: 72
   max_feature_rows: 60000

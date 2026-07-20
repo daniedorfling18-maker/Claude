@@ -192,6 +192,148 @@ def _decode_lifecycle_events(raw_message: Any) -> list[dict[str, Any]]:
     return [event for event in events if isinstance(event, dict)]
 
 
+def _frame_source_was_list(raw_message: Any) -> bool:
+    """Return True when the raw frame serialised a JSON *array* of events.
+
+    Mirrors ``_decode_lifecycle_events`` by decoding binary frames first, so a
+    ``bytes`` frame carrying a JSON array is not misread as a single event (which
+    would silently drop its sibling events when the frame is reserialised).
+    """
+
+    decoded: Any = raw_message
+    if isinstance(decoded, (bytes, bytearray)):
+        try:
+            decoded = decoded.decode("utf-8")
+        except UnicodeDecodeError:
+            return False
+    if isinstance(decoded, str):
+        try:
+            return isinstance(json.loads(decoded), list)
+        except (TypeError, ValueError, json.JSONDecodeError):
+            return False
+    return isinstance(decoded, list)
+
+
+def _reserialize_partition(
+    row: dict[str, Any], partition: list[dict[str, Any]], *, source_was_list: bool
+) -> dict[str, Any]:
+    payload: Any = partition if source_was_list else partition[0]
+    return {
+        **row,
+        "message": json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False),
+    }
+
+
+def _partition_best_bid_ask_rows(
+    rows: list[dict[str, Any]],
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """Keep high-churn custom top-of-book frames out of feature replay history."""
+
+    retained: list[dict[str, Any]] = []
+    best_bid_ask: list[dict[str, Any]] = []
+    for row in rows:
+        raw_message = row.get("message")
+        events = _decode_lifecycle_events(raw_message)
+        if not events:
+            retained.append(row)
+            continue
+        bid_ask_events = [
+            event for event in events if str(event.get("event_type") or "").strip() == "best_bid_ask"
+        ]
+        if not bid_ask_events:
+            retained.append(row)
+            continue
+        other_events = [event for event in events if event not in bid_ask_events]
+        source_was_list = _frame_source_was_list(raw_message)
+        best_bid_ask.append(
+            _reserialize_partition(row, bid_ask_events, source_was_list=source_was_list)
+        )
+        if other_events:
+            retained.append(
+                _reserialize_partition(row, other_events, source_was_list=source_was_list)
+            )
+    return retained, best_bid_ask
+
+
+_BEST_BID_ASK_STATUS: dict[str, bool] = {
+    "paper_trading_invoked": False,
+    "live_trading_invoked": False,
+}
+_DEFAULT_MAX_BEST_BID_ASK_MESSAGES = 3000
+
+
+def _read_best_bid_ask_sidecar(path) -> list[dict[str, Any]]:
+    """Read retained best-bid-ask rows from the sidecar.
+
+    Accepts both the current status-envelope shape (``{"rows": [...], ...}``) and
+    the legacy bare-list shape written before the envelope existed, so upgrading
+    an in-flight VPS never loses previously captured frames.
+    """
+
+    existing = read_json(path, default=None)
+    if isinstance(existing, dict):
+        rows = existing.get("rows")
+        existing = rows if isinstance(rows, list) else []
+    if not isinstance(existing, list):
+        return []
+    return [row for row in existing if isinstance(row, dict)]
+
+
+def _write_best_bid_ask_sidecar(path, rows: list[dict[str, Any]]) -> None:
+    """Persist the sidecar in a status envelope (never a bare raw-row list).
+
+    Every emitted artifact must assert it is a paper/dry-run surface; a bare list
+    cannot carry that assertion, so the rows are always wrapped.
+    """
+
+    write_json(path, {**_BEST_BID_ASK_STATUS, "rows": list(rows)})
+
+
+def _best_bid_ask_cap(settings: dict[str, Any], max_messages: int) -> int:
+    """Conservative retention cap for the sidecar.
+
+    Defaults to ``_DEFAULT_MAX_BEST_BID_ASK_MESSAGES`` and is additionally bounded
+    by the primary replay cap when that is lower, so high-churn top-of-book frames
+    cannot balloon the sidecar and reintroduce the VPS memory pressure the primary
+    cap exists to prevent.
+    """
+
+    configured = int(settings.get("max_best_bid_ask_messages", _DEFAULT_MAX_BEST_BID_ASK_MESSAGES) or 0)
+    if max_messages > 0:
+        return min(configured, max_messages) if configured > 0 else max_messages
+    return configured
+
+
+def _cap_rows(rows: list[dict[str, Any]], cap: int) -> tuple[list[dict[str, Any]], int]:
+    if cap > 0 and len(rows) > cap:
+        return rows[-cap:], len(rows) - cap
+    return rows, 0
+
+
+def _row_key(row: dict[str, Any]) -> str:
+    return json.dumps(row, sort_keys=True, separators=(",", ":"), ensure_ascii=False, default=str)
+
+
+def _migrated_rows_not_already_sidecar(
+    migrated: list[dict[str, Any]], existing_sidecar: list[dict[str, Any]]
+) -> list[dict[str, Any]]:
+    """Filter re-migrated frames that a prior run already persisted to the sidecar.
+
+    De-duplication is restricted to the cross-file migration case ONLY. The sidecar
+    is written before the primary is pruned, so a crash between the two writes leaves
+    the migrated frames in both files; on the next run the primary is re-partitioned
+    and those frames are dropped here if the sidecar already holds them, keeping
+    crash-recovery idempotent.
+
+    Live observations are never filtered: ``now_utc()`` records only whole seconds,
+    so a high-rate feed can legitimately emit byte-identical best_bid_ask frames in
+    the same second, and each is a distinct row that must be retained.
+    """
+
+    seen = {_row_key(row) for row in existing_sidecar}
+    return [row for row in migrated if _row_key(row) not in seen]
+
+
 def _resolution_event_row(captured_at_utc: str, event: dict[str, Any]) -> dict[str, Any] | None:
     market = str(event.get("market") or "").strip()
     winning_asset_id = str(event.get("winning_asset_id") or "").strip()
@@ -1751,6 +1893,32 @@ def collect_websocket(cfg: EngineConfig, websocket_seconds: int = 60) -> dict[st
     settings = cfg.raw.get("websocket_market_data", {})
     out_root = cfg.output_root / "polymarket_websocket"
     out_root.mkdir(parents=True, exist_ok=True)
+    output_file = out_root / "websocket_messages.json"
+    latest_output_file = out_root / "websocket_messages_latest.json"
+    best_bid_ask_output_file = out_root / "websocket_best_bid_ask.json"
+    max_messages = int(settings.get("max_messages", 0) or 0)
+    max_best_bid_ask_messages = _best_bid_ask_cap(settings, max_messages)
+    existing_rows = _existing_messages(output_file)
+    existing_best_bid_ask_rows = _read_best_bid_ask_sidecar(best_bid_ask_output_file)
+    # De-pollute existing history before ANY early return (dependency-missing skip,
+    # no-market-ids skip, or failed collection): best_bid_ask frames already mixed
+    # into the capped feature-replay file are migrated into the bounded sidecar so
+    # they cannot evict book/price-change replay substrate. The sidecar is written
+    # FIRST (durably) and the primary pruned only afterwards, so a crash or full disk
+    # between the two writes can never drop a migrated frame; _dedupe_rows keeps the
+    # re-migration on the next run idempotent.
+    retained_existing_rows, migrated_best_bid_ask_rows = _partition_best_bid_ask_rows(existing_rows)
+    sidecar_before_new_rows, _ = _cap_rows(
+        existing_best_bid_ask_rows
+        + _migrated_rows_not_already_sidecar(migrated_best_bid_ask_rows, existing_best_bid_ask_rows),
+        max_best_bid_ask_messages,
+    )
+    cleaned_existing_rows, _ = _cap_rows(retained_existing_rows, max_messages)
+    # Only rewrite when a prior history exists: migration exists to de-pollute a
+    # pre-existing mixed file, so a fresh install has nothing to persist yet.
+    if existing_rows or existing_best_bid_ask_rows:
+        _write_best_bid_ask_sidecar(best_bid_ask_output_file, sidecar_before_new_rows)
+        write_json(output_file, cleaned_existing_rows)
     try:
         importlib.import_module("websockets")
     except Exception:
@@ -1811,9 +1979,6 @@ def collect_websocket(cfg: EngineConfig, websocket_seconds: int = 60) -> dict[st
         return summary
     url = str(settings.get("url", "wss://ws-subscriptions-clob.polymarket.com/ws/market"))
     variants = _subscription_variants(market_ids, settings, dynamic_ids=bool(dynamic_ids))
-    output_file = out_root / "websocket_messages.json"
-    latest_output_file = out_root / "websocket_messages_latest.json"
-    existing_rows = _existing_messages(output_file)
     connect_timeout = float(settings.get("connect_timeout_seconds", 8.0))
     new_rows, selected_subscription, variant_errors = _collect_with_variants(
         url=url,
@@ -1826,12 +1991,15 @@ def collect_websocket(cfg: EngineConfig, websocket_seconds: int = 60) -> dict[st
         summary = {
             "status": "error",
             "reason": "; ".join(variant_errors[-5:]) or "websocket returned no messages",
-            "messages": len(existing_rows),
+            "messages": len(cleaned_existing_rows),
             "new_messages": 0,
             "existing_messages": len(existing_rows),
+            "best_bid_ask_messages_retained": len(sidecar_before_new_rows),
+            "migrated_best_bid_ask_messages": len(migrated_best_bid_ask_rows),
             "seconds": websocket_seconds,
             "output_file": str(output_file),
             "latest_output_file": str(latest_output_file),
+            "best_bid_ask_output_file": str(best_bid_ask_output_file),
             "append_mode": True,
             "target_source": target_source,
             "target_assets": len(market_ids),
@@ -1850,12 +2018,19 @@ def collect_websocket(cfg: EngineConfig, websocket_seconds: int = 60) -> dict[st
         write_json(out_root / "websocket_summary.json", summary)
         return summary
     lifecycle_capture = _persist_lifecycle_events(cfg, new_rows) if _custom_feature_enabled(settings) else {}
-    combined_rows = existing_rows + new_rows
-    max_messages = int(settings.get("max_messages", 0) or 0)
-    dropped_messages = 0
-    if max_messages > 0 and len(combined_rows) > max_messages:
-        dropped_messages = len(combined_rows) - max_messages
-        combined_rows = combined_rows[-max_messages:]
+    retained_new_rows, new_best_bid_ask_rows = _partition_best_bid_ask_rows(new_rows)
+    combined_rows, dropped_messages = _cap_rows(
+        retained_existing_rows + retained_new_rows, max_messages
+    )
+    combined_best_bid_ask_rows, dropped_best_bid_ask_messages = _cap_rows(
+        existing_best_bid_ask_rows
+        + _migrated_rows_not_already_sidecar(migrated_best_bid_ask_rows, existing_best_bid_ask_rows)
+        + new_best_bid_ask_rows,
+        max_best_bid_ask_messages,
+    )
+    # Sidecar first (durable), then prune the primary: a crash between the two writes
+    # must never drop migrated best_bid_ask frames from both files.
+    _write_best_bid_ask_sidecar(best_bid_ask_output_file, combined_best_bid_ask_rows)
     write_json(output_file, combined_rows)
     write_json(latest_output_file, new_rows)
     summary = {
@@ -1863,12 +2038,18 @@ def collect_websocket(cfg: EngineConfig, websocket_seconds: int = 60) -> dict[st
         "messages": len(combined_rows),
         "new_messages": len(new_rows),
         "existing_messages": len(existing_rows),
+        "retained_new_messages": len(retained_new_rows),
+        "best_bid_ask_messages_received": len(new_best_bid_ask_rows),
+        "best_bid_ask_messages_retained": len(combined_best_bid_ask_rows),
+        "dropped_best_bid_ask_messages": dropped_best_bid_ask_messages,
         "dropped_messages": dropped_messages,
         "max_messages": max_messages,
+        "max_best_bid_ask_messages": max_best_bid_ask_messages,
         "total_messages": len(combined_rows),
         "seconds": websocket_seconds,
         "output_file": str(output_file),
         "latest_output_file": str(latest_output_file),
+        "best_bid_ask_output_file": str(best_bid_ask_output_file),
         "append_mode": True,
         "target_source": target_source,
         "target_assets": len(market_ids),

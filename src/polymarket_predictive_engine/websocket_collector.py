@@ -310,25 +310,28 @@ def _cap_rows(rows: list[dict[str, Any]], cap: int) -> tuple[list[dict[str, Any]
     return rows, 0
 
 
-def _dedupe_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """Order-preserving de-duplication by canonical row content.
+def _row_key(row: dict[str, Any]) -> str:
+    return json.dumps(row, sort_keys=True, separators=(",", ":"), ensure_ascii=False, default=str)
 
-    The sidecar is persisted *before* the primary history is pruned, so a crash
-    (or full disk) between the two writes leaves the migrated frames in both files.
-    The next run re-partitions the primary and re-appends the same frames; collapsing
-    byte-identical rows here (keeping the earliest occurrence) keeps that
-    crash-recovery idempotent rather than accumulating duplicates.
+
+def _migrated_rows_not_already_sidecar(
+    migrated: list[dict[str, Any]], existing_sidecar: list[dict[str, Any]]
+) -> list[dict[str, Any]]:
+    """Filter re-migrated frames that a prior run already persisted to the sidecar.
+
+    De-duplication is restricted to the cross-file migration case ONLY. The sidecar
+    is written before the primary is pruned, so a crash between the two writes leaves
+    the migrated frames in both files; on the next run the primary is re-partitioned
+    and those frames are dropped here if the sidecar already holds them, keeping
+    crash-recovery idempotent.
+
+    Live observations are never filtered: ``now_utc()`` records only whole seconds,
+    so a high-rate feed can legitimately emit byte-identical best_bid_ask frames in
+    the same second, and each is a distinct row that must be retained.
     """
 
-    seen: set[str] = set()
-    deduped: list[dict[str, Any]] = []
-    for row in rows:
-        key = json.dumps(row, sort_keys=True, separators=(",", ":"), ensure_ascii=False, default=str)
-        if key in seen:
-            continue
-        seen.add(key)
-        deduped.append(row)
-    return deduped
+    seen = {_row_key(row) for row in existing_sidecar}
+    return [row for row in migrated if _row_key(row) not in seen]
 
 
 def _resolution_event_row(captured_at_utc: str, event: dict[str, Any]) -> dict[str, Any] | None:
@@ -1906,7 +1909,8 @@ def collect_websocket(cfg: EngineConfig, websocket_seconds: int = 60) -> dict[st
     # re-migration on the next run idempotent.
     retained_existing_rows, migrated_best_bid_ask_rows = _partition_best_bid_ask_rows(existing_rows)
     sidecar_before_new_rows, _ = _cap_rows(
-        _dedupe_rows(existing_best_bid_ask_rows + migrated_best_bid_ask_rows),
+        existing_best_bid_ask_rows
+        + _migrated_rows_not_already_sidecar(migrated_best_bid_ask_rows, existing_best_bid_ask_rows),
         max_best_bid_ask_messages,
     )
     cleaned_existing_rows, _ = _cap_rows(retained_existing_rows, max_messages)
@@ -2019,9 +2023,9 @@ def collect_websocket(cfg: EngineConfig, websocket_seconds: int = 60) -> dict[st
         retained_existing_rows + retained_new_rows, max_messages
     )
     combined_best_bid_ask_rows, dropped_best_bid_ask_messages = _cap_rows(
-        _dedupe_rows(
-            existing_best_bid_ask_rows + migrated_best_bid_ask_rows + new_best_bid_ask_rows
-        ),
+        existing_best_bid_ask_rows
+        + _migrated_rows_not_already_sidecar(migrated_best_bid_ask_rows, existing_best_bid_ask_rows)
+        + new_best_bid_ask_rows,
         max_best_bid_ask_messages,
     )
     # Sidecar first (durable), then prune the primary: a crash between the two writes

@@ -69,15 +69,23 @@ def _fake_requests(monkeypatch, events: list[dict[str, Any]]) -> None:
     monkeypatch.setattr(event_group_consistency.requests, "get", fake_get)
 
 
-def _fake_requests_with_books(monkeypatch, events: list[dict[str, Any]], books: dict[str, list[tuple[float, float]]]) -> None:
+def _fake_requests_with_books(
+    monkeypatch,
+    events: list[dict[str, Any]],
+    books: dict[str, Any],
+) -> None:
     def fake_get(url: str, params: dict[str, Any] | None = None, timeout: float | None = None):
         params = params or {}
         if url.endswith("/events"):
             return _Response(events if int(params.get("offset", 0)) == 0 else [])
         if url.endswith("/book"):
             token_id = str(params.get("token_id") or "")
-            asks = [{"price": price, "size": size} for price, size in books[token_id]]
-            return _Response({"asks": asks, "bids": [{"price": "0.01", "size": "1"}]})
+            raw = books[token_id]
+            ask_levels = raw.get("asks", []) if isinstance(raw, dict) else raw
+            bid_levels = raw.get("bids", [(0.01, 1)]) if isinstance(raw, dict) else [(0.01, 1)]
+            asks = [{"price": price, "size": size} for price, size in ask_levels]
+            bids = [{"price": price, "size": size} for price, size in bid_levels]
+            return _Response({"asks": asks, "bids": bids})
         raise AssertionError(url)
 
     monkeypatch.setattr(event_group_consistency.requests, "get", fake_get)
@@ -214,4 +222,40 @@ def test_flagged_event_depth_stops_when_thin_books_kill_edge(tmp_path, monkeypat
     row = read_csv_rows(cfg.output_root / "event_group_consistency" / "event_group_deviations.csv")[0]
     assert row["book_fetch_ok"] == "True"
     assert row["executable_basket_usd"] == "9.5"
+    assert row["depth_weighted_net"] == "0.05"
+
+
+def test_flagged_sell_all_yes_uses_bid_depth_for_every_leg(tmp_path, monkeypatch):
+    cfg = _config(tmp_path)
+    events = [
+        _event(
+            "rich-with-depth",
+            [
+                _leg(0.36, 0.40, token_id="tok-a"),
+                _leg(0.36, 0.40, token_id="tok-b"),
+                _leg(0.33, 0.40, token_id="tok-c"),
+            ],
+        )
+    ]
+    _fake_requests_with_books(
+        monkeypatch,
+        events,
+        {
+            "tok-a": {"bids": [(0.36, 100)]},
+            "tok-b": {"bids": [(0.36, 60)]},
+            "tok-c": {"bids": [(0.33, 50)]},
+        },
+    )
+
+    summary = scan_event_groups(cfg)
+
+    assert summary["flagged_deviations"] == 1
+    assert summary["flagged_with_executable_depth"] == 1
+    assert summary["max_executable_basket_usd"] == 52.5
+    row = read_csv_rows(
+        cfg.output_root / "event_group_consistency" / "event_group_deviations.csv"
+    )[0]
+    assert row["flagged_side"] == "sell_all_yes"
+    assert row["book_fetch_ok"] == "True"
+    assert row["executable_basket_usd"] == "52.5"
     assert row["depth_weighted_net"] == "0.05"

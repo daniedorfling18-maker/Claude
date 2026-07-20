@@ -233,6 +233,25 @@ def test_composition_counts_current_top_when_today_absent_from_history():
     assert comp["most_recurrent_count"] == 2  # history day 15 + today 16
 
 
+def test_composition_full_window_recurrence_count_is_tighten_only():
+    # #350 Codex P1: with a full window the per-day dedup must not RAISE a recurrence
+    # count versus the prior append-then-trim windowing. Persisted daily tops
+    # A,A,A,A,C,B,B with today's study top B (day already present) -> the prior code
+    # trimmed the oldest A to a max recurrence of 3 (not stable); the fix must not lift
+    # A to 4 and flip stable true.
+    settings = {"composition_stable_days": 7, "composition_required_recurrence": 4}
+    history = [
+        {"generated_at_utc": f"2026-07-{10 + idx:02d}T08:00:00Z", "top_portfolio_market": market}
+        for idx, market in enumerate(["A", "A", "A", "A", "C", "B", "B"])
+    ]
+    study = {"generated_at_utc": "2026-07-16T08:00:00Z", "portfolio": [{"condition_id": "B"}]}
+
+    comp = policy._composition(study, history, settings)
+
+    assert comp["most_recurrent_count"] == 3
+    assert comp["stable"] is False
+
+
 def test_policy_table_churning_pass_halves_recurrent_market_target(tmp_path):
     cfg = _config(tmp_path)
     _write_study(cfg, _study(top="0xm7"))

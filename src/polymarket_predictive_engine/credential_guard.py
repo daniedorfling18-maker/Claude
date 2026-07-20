@@ -23,11 +23,18 @@ ARCHIVE_MANIFESTS = (
 )
 
 SENSITIVE_KEY_RE = re.compile(
-    r"(?:^|[_\-\s])(private[_\-\s]*key|api[_\-\s]*(?:key|secret)|secret|passphrase|password|credential)(?:$|[_\-\s])",
+    r"(?:^|[_\-\s])("
+    r"private[_\-\s]*key|"
+    r"api[_\-\s]*(?:key|secret|token)|"
+    r"(?:access|auth|bearer|refresh|session|id)[_\-\s]*token|"
+    r"secret|passphrase|password|credential"
+    r")(?:$|[_\-\s])",
     re.IGNORECASE,
 )
 LABELLED_VALUE_RE = re.compile(
-    r"(?i)(?:private[_\-\s]*key|api[_\-\s]*(?:key|secret)|secret|passphrase|password|credential)"
+    r"(?i)(?:private[_\-\s]*key|api[_\-\s]*(?:key|secret|token)|"
+    r"(?:access|auth|bearer|refresh|session|id)[_\-\s]*token|"
+    r"secret|passphrase|password|credential)"
     r"\s*[=:]\s*[\"']?([^\s\"',;}]{8,})"
 )
 HEX_32_BYTE_RE = re.compile(r"(?<![0-9A-Fa-f])(?:0x)?[0-9A-Fa-f]{64}(?![0-9A-Fa-f])")
@@ -149,25 +156,30 @@ def _inspect_field(
     return findings
 
 
-def _walk_json(value: Any, *, prefix: str = "$") -> Iterable[tuple[str, str, Any]]:
+def _walk_json(
+    value: Any,
+    *,
+    prefix: str = "$",
+    parent_key: str = "",
+) -> Iterable[tuple[str, str, Any]]:
     if isinstance(value, Mapping):
         for key, child in value.items():
             location = f"{prefix}.{key}"
             if isinstance(child, (Mapping, list)):
-                yield from _walk_json(child, prefix=location)
+                yield from _walk_json(child, prefix=location, parent_key=str(key))
             else:
                 yield location, str(key), child
     elif isinstance(value, list):
         for index, child in enumerate(value):
             location = f"{prefix}[{index}]"
             if isinstance(child, (Mapping, list)):
-                yield from _walk_json(child, prefix=location)
+                yield from _walk_json(child, prefix=location, parent_key=parent_key)
             else:
                 # Preserve the parent field name for scalar list members. A
                 # bare list index loses the distinction between public venue
                 # identifiers (for example recent_top_markets) and an
                 # unlabeled credential value.
-                yield location, prefix, child
+                yield location, parent_key or prefix, child
 
 
 def _scan_json(path: Path, repo_root: Path) -> list[dict[str, str]]:

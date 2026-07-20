@@ -10,6 +10,7 @@ inputs evaluate not_eligible (fail-closed).
 
 from __future__ import annotations
 
+import math
 import os
 from datetime import datetime, timedelta, timezone
 from typing import Any
@@ -197,7 +198,17 @@ def evaluate_stage_ticket_eligibility(
         # raw-imbalance floor must be present to clear the screen. A stale
         # pre-WO-102 row (no vpin_raw) no longer passes on a low percentile
         # alone, so the absolute floor cannot be silently bypassed.
-        measured = bool(tox_row) and percentile is not None and raw_imbalance is not None
+        # Red-team P3-4: also require both to be FINITE. safe_float returns a
+        # non-None float for "-inf"/"inf"/"nan", and a -inf would satisfy the
+        # `<= MAX_TOXICITY` / `< MAX_RAW_IMBALANCE` comparisons and silently clear
+        # a candidate; treat any non-finite toxicity input as unmeasured (fail-closed).
+        measured = (
+            bool(tox_row)
+            and percentile is not None
+            and math.isfinite(percentile)
+            and raw_imbalance is not None
+            and math.isfinite(raw_imbalance)
+        )
         clean = (
             measured
             and not flagged

@@ -8,7 +8,7 @@ import yaml
 from polymarket_predictive_engine.cli import COMMANDS
 from polymarket_predictive_engine.config import EngineConfig
 from polymarket_predictive_engine.dashboard import render_dashboard
-from polymarket_predictive_engine.executor_ops_monitor import build_executor_ops_status
+from polymarket_predictive_engine.executor_ops_monitor import _policy_cap, build_executor_ops_status
 from polymarket_predictive_engine.ledger_anchor import DEFAULT_LEDGER_REGISTRY
 from polymarket_predictive_engine.operating_state import build_operating_state
 from polymarket_predictive_engine.utils import read_json, write_csv, write_json
@@ -38,6 +38,46 @@ def _cfg(tmp_path: Path) -> EngineConfig:
 
 def _stamp(seconds_ago: float) -> str:
     return (AS_OF - timedelta(seconds=seconds_ago)).isoformat().replace("+00:00", "Z")
+
+
+def _write_policy_sizing(cfg: EngineConfig, binding) -> None:
+    payload = {"generated_at_utc": _stamp(30)}
+    if binding is not None:
+        payload["sizing"] = {"binding_capital_usd": binding}
+    write_json(cfg.output_root / "maker_carry" / "decision_policy.json", payload)
+
+
+def test_policy_cap_zero_binding_floors_at_minimum_quote(tmp_path: Path) -> None:
+    # #56 + registered kelly_overlay_interpretation: a 0.0 binding caps size-ups (the
+    # reported cap drops from the positive stage0 to one minimum-size quote) but does
+    # NOT veto the minimum quote -- so the cap floors at the min-quote capital, not 0.
+    cfg = _cfg(tmp_path)
+    _write_policy_sizing(cfg, 0.0)
+    cap, source = _policy_cap(cfg, {"stage_cap_usd": 100.0})
+    assert cap == 5.0
+    assert source == "decision_policy.sizing.binding_capital_usd"
+
+
+def test_policy_cap_nonfinite_binding_floors_at_minimum_quote(tmp_path: Path) -> None:
+    cfg = _cfg(tmp_path)
+    _write_policy_sizing(cfg, "nan")
+    cap, _ = _policy_cap(cfg, {"stage_cap_usd": 100.0})
+    assert cap == 5.0
+
+
+def test_policy_cap_positive_binding_still_binds(tmp_path: Path) -> None:
+    cfg = _cfg(tmp_path)
+    _write_policy_sizing(cfg, 50.0)
+    cap, source = _policy_cap(cfg, {"stage_cap_usd": 100.0})
+    assert cap == 50.0
+    assert source == "decision_policy.sizing.binding_capital_usd"
+
+
+def test_policy_cap_absent_binding_uses_positive_fallback(tmp_path: Path) -> None:
+    cfg = _cfg(tmp_path)
+    _write_policy_sizing(cfg, None)  # no sizing key
+    cap, _ = _policy_cap(cfg, {"stage_cap_usd": 100.0})
+    assert cap == 100.0
 
 
 def _seed_runtime(

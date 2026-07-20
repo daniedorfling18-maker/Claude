@@ -12,6 +12,7 @@ import csv
 import gzip
 import hashlib
 import json
+import math
 from pathlib import Path
 from typing import Any, Iterable, Mapping
 
@@ -22,6 +23,11 @@ from .utils import now_utc, safe_float, safe_int, write_csv, write_json
 WORK_ORDER = "WO-74"
 DEFAULT_HEARTBEAT_GAP_SECONDS = 1800
 SIZE_MULTIPLE = 5
+# One venue-minimum (five-share) quote at the $1.00 probability-price ceiling. Per the
+# registered kelly_overlay_interpretation the Kelly overlay caps size-ups ABOVE the
+# venue minimum and never vetoes the minimum-size stage quote, so a binding cap floors
+# here rather than collapsing to zero.
+MINIMUM_STAGE_QUOTE_CAPITAL_USD = float(SIZE_MULTIPLE)
 REQUIRED_SYNTHETIC_KINDS = (
     "event_start_book_clear",
     "five_share_minimum",
@@ -68,9 +74,20 @@ def _settings(cfg: EngineConfig) -> dict[str, Any]:
     heartbeat_gap = min(DEFAULT_HEARTBEAT_GAP_SECONDS, configured_gap or DEFAULT_HEARTBEAT_GAP_SECONDS)
     stage_cap = safe_float(decision.get("stage0_capital_usd")) or 100.0
     current_policy = _mapping(_read_json(cfg.output_root / "maker_carry" / "decision_policy.json"))
-    binding_cap = safe_float(_mapping(current_policy.get("sizing")).get("binding_capital_usd"))
-    if binding_cap is not None and binding_cap > 0:
-        stage_cap = min(stage_cap, binding_cap)
+    # An explicit binding_capital_usd caps stage_cap, but per the registered
+    # kelly_overlay_interpretation the overlay caps SIZE-UPS ABOVE the venue minimum and
+    # never vetoes the minimum-size stage quote (a near-zero binding is normal at short
+    # histories). So a present binding floors at one minimum-size quote: a 0.0 or corrupt
+    # binding caps size-ups (stage_cap drops from stage0 to the min-quote floor) while
+    # still admitting the registered minimum quote. The prior `> 0` dropped a 0.0 binding
+    # entirely and left the full positive stage0 -- a size-up fail-open.
+    binding_raw = _mapping(current_policy.get("sizing")).get("binding_capital_usd")
+    if binding_raw is not None and str(binding_raw).strip() != "":
+        binding_cap = safe_float(binding_raw)
+        if binding_cap is not None and math.isfinite(binding_cap) and binding_cap >= 0:
+            stage_cap = min(stage_cap, max(binding_cap, MINIMUM_STAGE_QUOTE_CAPITAL_USD))
+        else:
+            stage_cap = min(stage_cap, MINIMUM_STAGE_QUOTE_CAPITAL_USD)
     return {
         "enabled": bool(raw.get("enabled", True)),
         "heartbeat_gap_seconds": max(1, heartbeat_gap),

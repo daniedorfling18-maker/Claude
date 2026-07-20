@@ -11,6 +11,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 import hashlib
 import json
+import math
 from pathlib import Path
 from typing import Any, Mapping
 
@@ -29,6 +30,11 @@ REGISTERED_DEAD_MAN_SECONDS = 1800
 REGISTERED_FRESHNESS_SLO_SECONDS = 600
 REGISTERED_RECONCILIATION_THRESHOLD_USD = 1.0
 ALLOWED_MODES = frozenset({"replay", "canary", "portfolio"})
+# One venue-minimum (five-share) quote at the $1.00 probability-price ceiling. Per the
+# registered kelly_overlay_interpretation the Kelly overlay caps size-ups ABOVE the
+# venue minimum and never vetoes the minimum-size stage quote, so a binding-derived cap
+# floors here rather than collapsing to zero.
+MINIMUM_STAGE_QUOTE_CAPITAL_USD = 5.0
 
 # The future writer must emit these fields.  Keeping the contract here allows
 # WO-74 and PR-gate fixtures to certify it without implementing that writer.
@@ -128,8 +134,21 @@ def _policy_cap(cfg: EngineConfig, latest: Mapping[str, Any]) -> tuple[float, st
     policy = _mapping(read_json(cfg.output_root / "maker_carry" / "decision_policy.json", default={}) or {})
     configured = _mapping(cfg.raw.get("decision_policy"))
     candidates: list[tuple[float, str]] = []
+    # binding_capital_usd is the authoritative policy sizing output. Per the registered
+    # kelly_overlay_interpretation it caps SIZE-UPS ABOVE the venue minimum and never
+    # vetoes the minimum-size stage quote (a near-zero binding is normal at short
+    # histories), so a present binding floors at one minimum-size quote rather than
+    # collapsing to zero: a 0.0 or corrupt binding still caps size-ups (it wins the
+    # min() over the positive stage0) but reports the min-quote floor, not 0. The prior
+    # uniform `> 0` filter silently dropped a 0.0 binding and fell back to the full
+    # positive stage cap -- a size-up fail-open.
+    binding_raw = _mapping(policy.get("sizing")).get("binding_capital_usd")
+    if binding_raw is not None and str(binding_raw).strip() != "":
+        binding = safe_float(binding_raw)
+        binding_cap = binding if (binding is not None and math.isfinite(binding) and binding >= 0) else 0.0
+        binding_cap = max(binding_cap, MINIMUM_STAGE_QUOTE_CAPITAL_USD)
+        candidates.append((binding_cap, "decision_policy.sizing.binding_capital_usd"))
     for value, source in (
-        (_mapping(policy.get("sizing")).get("binding_capital_usd"), "decision_policy.sizing.binding_capital_usd"),
         (_mapping(policy.get("ladder")).get("ladder_capital_usd"), "decision_policy.ladder.ladder_capital_usd"),
         (configured.get("stage0_capital_usd"), "effective_config.stage0_capital_usd"),
         (latest.get("stage_cap_usd"), "execution_ledger.stage_cap_usd"),

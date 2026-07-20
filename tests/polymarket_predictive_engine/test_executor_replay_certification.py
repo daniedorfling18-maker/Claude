@@ -12,6 +12,7 @@ from polymarket_predictive_engine.cli import COMMANDS, build_parser
 from polymarket_predictive_engine.config import load_config
 from polymarket_predictive_engine.executor_replay_certification import (
     REQUIRED_SYNTHETIC_KINDS,
+    _settings,
     build_replay_scenario_corpus,
     certify_executor_replay,
     write_reference_stub_log,
@@ -20,6 +21,49 @@ from polymarket_predictive_engine.utils import read_json, write_csv, write_json
 
 
 ROOT = Path(__file__).resolve().parents[2]
+
+
+def _write_binding(cfg, binding) -> None:
+    payload = {"generated_at_utc": "2026-07-20T00:00:00Z"}
+    if binding is not None:
+        payload["sizing"] = {"binding_capital_usd": binding}
+    write_json(cfg.output_root / "maker_carry" / "decision_policy.json", payload)
+
+
+def test_settings_zero_binding_floors_at_minimum_quote(tmp_path: Path) -> None:
+    # #56 + registered kelly_overlay_interpretation: a 0.0 binding caps size-ups (the
+    # stage cap drops from stage0 to one minimum-size quote) but must NOT veto the
+    # minimum quote -- so it floors at the min-quote capital, not the 0.01 zero-floor.
+    cfg = _config(tmp_path)
+    _write_binding(cfg, 0.0)
+    assert _settings(cfg)["stage_cap_usd"] == 5.0
+
+
+def test_settings_nonfinite_binding_floors_at_minimum_quote(tmp_path: Path) -> None:
+    cfg = _config(tmp_path)
+    _write_binding(cfg, "nan")
+    assert _settings(cfg)["stage_cap_usd"] == 5.0
+
+
+def test_settings_positive_binding_caps_below_stage0(tmp_path: Path) -> None:
+    cfg = _config(tmp_path)
+    _write_binding(cfg, 25.0)
+    assert _settings(cfg)["stage_cap_usd"] == 25.0
+
+
+def test_certification_passes_with_zero_binding_minimum_quote_not_vetoed(tmp_path: Path) -> None:
+    # #56 + registered kelly_overlay_interpretation: a 0.0 binding must NOT veto the
+    # minimum-size stage quote, so replay certification still PASSES -- the five-share
+    # minimum place fits under the min-quote floor cap.
+    cfg = _config(tmp_path)
+    _seed_official_window(cfg)
+    _write_binding(cfg, 0.0)
+
+    result = certify_executor_replay(cfg, generate_reference_stub=True)
+
+    assert result["status"] == "PASS"
+    assert result["blocks_canary_by_certification"] is False
+    assert _settings(cfg)["stage_cap_usd"] == 5.0
 
 
 def _config(tmp_path: Path):

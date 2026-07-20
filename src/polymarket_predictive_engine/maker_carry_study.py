@@ -1733,7 +1733,7 @@ def _distinct_days_at_target(
     days_at_target = {
         day
         for day, run in last_run_by_day.items()
-        if (safe_float(run.get("portfolio_net_carry_usd_per_day")) or 0.0) >= target
+        if (_mb_finite(run.get("portfolio_net_carry_usd_per_day")) or 0.0) >= target
         and str(run.get("share_model") or "") == "published_v2"
         and str(run.get("portfolio_markout_measured") or "").strip().lower()
         in {"true", "1", "yes"}

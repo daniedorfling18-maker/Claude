@@ -986,6 +986,18 @@ def _ma_run(day: str, net: float, *, model: str = "published_v2", hour: str = "1
     return {"generated_at_utc": f"{day}T{hour}Z", "portfolio_net_carry_usd_per_day": net, "share_model": model, "portfolio_markout_measured": markout_measured}
 
 
+def test_ma_nonfinite_net_carry_does_not_bank_a_day() -> None:
+    # Red-team P3-1: a +inf (or NaN) net-carry row must NOT count toward M-A.
+    # NaN already fails the >= comparison, but +inf silently passed it before the
+    # _mb_finite guard; treat any non-finite net carry as not-at-target (tighten).
+    for bad in (float("inf"), float("nan")):
+        runs = [_ma_run("2026-07-10", bad)]
+        days = maker_carry_study._distinct_days_at_target(
+            runs, 3.33, current_day="", latest_at_target=False
+        )
+        assert days == set(), bad
+
+
 def test_ma_intraday_spike_does_not_bank_a_day() -> None:
     # Maker-gate amendment M-A.1: a day counts only if its LAST published_v2
     # run met target. A noon spike that faded by the last run must not count.

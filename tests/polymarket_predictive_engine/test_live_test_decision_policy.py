@@ -194,6 +194,23 @@ def test_policy_table_below_target_after_gates_reachable_triggers_review(tmp_pat
     assert result["inputs_snapshot"]["recent_below_target_runs"] == 4
 
 
+def test_below_target_counter_treats_nonfinite_net_carry_as_below(tmp_path):
+    # Red-team P3-2: a non-finite (NaN/Inf) net-carry row must COUNT as below-target
+    # (fail-closed). Six clean at/above-target runs plus one NaN -> exactly one
+    # below-target run; before the _finite guard the NaN was silently treated as
+    # not-below and shrank the withhold-funding streak (the fail-open direction).
+    cfg = _config(tmp_path)
+    _write_study(cfg, _study(top="0xm1", net=5.0))
+    _write_carry_history(
+        cfg,
+        _history(["0xm1"] * 7, nets=[5.0, 6.0, 7.0, 8.0, 5.0, 6.0, float("nan")]),
+    )
+
+    result = run_decision_policy(cfg)
+
+    assert result["inputs_snapshot"]["recent_below_target_runs"] == 1
+
+
 def test_ladder_promotion_arithmetic_and_stage2_reward_floor(tmp_path):
     cfg = _config(tmp_path)
     _write_study(cfg, _study(top="0xm1"))

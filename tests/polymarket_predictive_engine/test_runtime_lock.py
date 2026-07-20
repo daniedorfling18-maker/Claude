@@ -5,6 +5,8 @@ import os
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
+import pytest
+
 from polymarket_predictive_engine import runtime_lock
 from polymarket_predictive_engine.config import EngineConfig
 
@@ -117,3 +119,41 @@ def test_preexisting_empty_lock_is_held_fail_closed_not_reclaimed(tmp_path: Path
 
     assert lock.acquired is False
     assert lock.stale_lock_replaced is False
+
+
+def test_short_writes_still_publish_the_complete_payload(tmp_path: Path, monkeypatch) -> None:
+    # #347 Codex P2: os.write may return a short count; the loop must persist the whole
+    # payload before linking, or a truncated (malformed) lock could be published.
+    cfg = _cfg(tmp_path)
+    real_write = os.write
+    monkeypatch.setattr(os, "write", lambda fd, data: real_write(fd, data[:1]))  # 1 byte/call
+
+    lock = runtime_lock.acquire_runtime_lock(cfg, "prediction_cycle", stale_after_seconds=999999)
+    monkeypatch.undo()
+
+    assert lock.acquired is True
+    payload = json.loads(
+        runtime_lock.runtime_lock_path(cfg, "prediction_cycle").read_text(encoding="utf-8")
+    )
+    assert payload["name"] == "prediction_cycle"
+    assert payload["pid"] == os.getpid()
+    runtime_lock.release_runtime_lock(lock)
+
+
+def test_write_failure_leaves_no_lock_and_no_orphan_temp(tmp_path: Path, monkeypatch) -> None:
+    # #347 Codex P2: a write failure after the temp file is created must not leave an
+    # orphan temp (which repeated attempts would accumulate) nor a partial lock.
+    cfg = _cfg(tmp_path)
+
+    def _boom(fd, data):
+        raise OSError("simulated storage failure")
+
+    monkeypatch.setattr(os, "write", _boom)
+    with pytest.raises(OSError):
+        runtime_lock.acquire_runtime_lock(cfg, "prediction_cycle", stale_after_seconds=999999)
+    monkeypatch.undo()
+
+    lock_path = runtime_lock.runtime_lock_path(cfg, "prediction_cycle")
+    assert not lock_path.exists()
+    leftovers = list(lock_path.parent.glob(".*.tmp")) if lock_path.parent.exists() else []
+    assert leftovers == []

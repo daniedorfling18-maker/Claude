@@ -77,20 +77,23 @@ placement of any kind. The live-trading gates in AGENTS.md are untouched.
 
 from __future__ import annotations
 
+import fcntl
 import json
 import math
+import os
+from contextlib import contextmanager
 from datetime import date, datetime, timezone
 from decimal import Decimal, ROUND_CEILING, ROUND_FLOOR
 import re
 import time
 from pathlib import Path
-from typing import Any
+from typing import Any, Iterator
 
 import requests
 
 from .config import EngineConfig, load_config
-from .runtime_lock import RuntimeLockResult, runtime_lock
 from .utils import (
+    ensure_dir,
     normalize_external_timestamp,
     now_utc,
     parse_timestamp,
@@ -109,14 +112,17 @@ DEFAULT_DATA_API_BASE_URL = "https://data-api.polymarket.com"
 MAKER_GATES_REGISTERED_AT_UTC = "2026-07-09T13:00:00Z"
 
 # P3-3 (red-team ledger write-lock): the two WO-61 append_only-enrolled maker-carry
-# ledgers (history + WO-111 portfolio-members sidecar) are committed under this single
-# short-lived lock, with the prior rows RE-READ inside the lock immediately before the
-# append, so two overlapping study runs can never clobber each other's row. write_csv is
-# preserved (rather than append_csv_rows) because maker_carry_history.csv still carries a
-# legacy-schema upgrade path: a narrower older on-disk header is rewritten to the current
-# fieldnames, which the append-only primitive would instead reject.
+# ledgers (history + WO-111 portfolio-members sidecar) are committed while holding an
+# OS advisory lock (flock) across BOTH writes, with the prior rows RE-READ inside the
+# lock immediately before the append, so two overlapping study runs can never clobber
+# each other's row. flock (not a content-file + stale-timeout lock) is used deliberately:
+# it is released by the kernel when the holder's fd closes or the process dies, so there
+# is NO stale-reclaim window a paused holder could resume through (the lost-update race
+# #346 flagged) and NO malformed-lock deadlock. write_csv is preserved (rather than
+# append_csv_rows) because maker_carry_history.csv still carries a legacy-schema upgrade
+# path: a narrower older on-disk header is rewritten to the current fieldnames, which the
+# append-only primitive would instead reject.
 MAKER_CARRY_LEDGER_LOCK = "maker_carry_ledger_commit"
-MAKER_CARRY_LEDGER_LOCK_STALE_SECONDS = 300.0
 
 # M-B.1 amendment (2026-07-18) registered Tier-0 minima. These MIRROR the
 # WO-105 evaluator's §2 registered thresholds so M-B and the funding evaluator
@@ -1775,15 +1781,42 @@ def _distinct_days_at_target(
     return days_at_target
 
 
-def _still_holds_ledger_lock(lock: RuntimeLockResult) -> bool:
-    """True only while the on-disk lock still carries THIS acquisition's payload.
+def _maker_carry_ledger_lock_path(out_root: Path) -> Path:
+    return out_root / ".maker_carry_ledger_commit.lock"
 
-    Guards the stale-timeout reclaim path: if a paused holder's lock was reclaimed
-    by another process, the lock file no longer matches our payload and we must not
-    write, which would otherwise overwrite the reclaimer's freshly committed row.
+
+@contextmanager
+def _maker_carry_ledger_flock(out_root: Path) -> Iterator[bool]:
+    """Single-host mutual exclusion for the paired append_only ledger commit.
+
+    Holds an OS advisory lock (flock) across BOTH ledger writes. Unlike a
+    content-file lock with a stale timeout, flock is released by the kernel when
+    the holder's fd closes or the process dies, so:
+      - a merely paused/blocked holder keeps the lock (no stale-timeout reclaim,
+        hence no lost-update race when it resumes), and
+      - a dead holder's lock frees immediately (no malformed-lock deadlock).
+    Non-blocking: a concurrent run that finds the lock held yields False and skips
+    its append rather than clobbering the ledger. Advisory locks only exclude other
+    flock callers, which is sufficient because this is the sole writer of these
+    ledgers.
     """
-    current = read_json(lock.path, default=None)
-    return isinstance(current, dict) and current == lock.payload
+    ensure_dir(out_root)
+    fd = os.open(str(_maker_carry_ledger_lock_path(out_root)), os.O_CREAT | os.O_RDWR, 0o644)
+    acquired = False
+    try:
+        try:
+            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            acquired = True
+        except OSError:
+            acquired = False
+        yield acquired
+    finally:
+        if acquired:
+            try:
+                fcntl.flock(fd, fcntl.LOCK_UN)
+            except OSError:
+                pass
+        os.close(fd)
 
 
 def _force_maker_gates_pending_uncommitted(summary: dict[str, Any]) -> None:
@@ -2138,41 +2171,33 @@ def run_maker_carry_study(cfg: EngineConfig) -> dict[str, Any]:
         "generated_at_utc": summary.get("generated_at_utc"),
         "portfolio_members": members_json,
     }
-    # P3-3 (red-team ledger write-lock): commit both append_only ledgers under one
-    # short-lived runtime lock, RE-READING the prior rows inside the lock right before
-    # the append. The previous read_csv_rows (near the top of this function) -> append
-    # -> write_csv path was a read-modify-write race: two overlapping study runs read
-    # the SAME prior rows and the later full-file rewrite silently dropped the earlier
-    # run's appended row. The lock serialises the commit and the in-lock re-read makes
-    # each append land on the freshest committed state.
+    # P3-3 (red-team ledger write-lock): commit both append_only ledgers while holding
+    # an OS advisory lock (flock) across BOTH writes, RE-READING the prior rows inside
+    # the lock right before each append. The previous read_csv_rows (near the top of
+    # this function) -> append -> write_csv path was a read-modify-write race: two
+    # overlapping study runs read the SAME prior rows and the later full-file rewrite
+    # silently dropped the earlier run's appended row. flock closes that by construction
+    # (kernel-released on fd close/process death, so no stale-reclaim window a paused
+    # holder could resume through, and no malformed-lock deadlock).
     #   - Ordering: the WO-111 members sidecar is written BEFORE the history row, so an
-    #     interrupted commit (crash, or the ownership abort below) leaves at most an
-    #     orphan members row and NEVER a counted history row without membership
-    #     evidence -- a future per-market recompute stays fail-closed.
-    #   - Ownership: we re-verify we still hold the lock immediately before each write,
-    #     so a lock reclaimed from a paused holder can never be overwritten by that
-    #     holder on resume (the stale-timeout reclaim is not, by itself, mutual
-    #     exclusion against a merely-blocked writer).
-    #   - Fail-safe: if the lock is held (or was lost) the run SKIPS its near-duplicate
-    #     append (the holder's equivalent row still lands) and the maker gates are
-    #     forced pending below, so no evidence-unbacked pass is ever published.
+    #     interrupted commit (crash mid-pair) leaves at most an orphan members row and
+    #     NEVER a counted history row without membership evidence -- a future per-market
+    #     recompute stays fail-closed.
+    #   - Fail-safe: if the lock is held the run SKIPS its near-duplicate append (the
+    #     holder's equivalent row still lands) and the maker gates are forced pending
+    #     below, so no evidence-unbacked pass is ever published.
     # Changes NO gate rule (`_distinct_days_at_target` still reads history identically),
     # threshold, share-model scope, or order path.
     ledger_committed = False
-    with runtime_lock(
-        cfg,
-        MAKER_CARRY_LEDGER_LOCK,
-        stale_after_seconds=MAKER_CARRY_LEDGER_LOCK_STALE_SECONDS,
-    ) as lock:
-        if lock.acquired and _still_holds_ledger_lock(lock):
+    with _maker_carry_ledger_flock(out_root) as have_lock:
+        if have_lock:
             committed_members = read_csv_rows(members_path)
             committed_members.append(members_row)
             write_csv(members_path, committed_members, fieldnames=members_fields)
-            if _still_holds_ledger_lock(lock):
-                committed_history = read_csv_rows(history_path)
-                committed_history.append(history_row)
-                write_csv(history_path, committed_history, fieldnames=history_fields)
-                ledger_committed = True
+            committed_history = read_csv_rows(history_path)
+            committed_history.append(history_row)
+            write_csv(history_path, committed_history, fieldnames=history_fields)
+            ledger_committed = True
     summary["ledger_commit"] = {
         "status": "committed" if ledger_committed else "skipped_lock_held",
         "lock": MAKER_CARRY_LEDGER_LOCK,

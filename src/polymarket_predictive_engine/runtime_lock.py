@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import json
 import os
-import time
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
@@ -47,19 +46,6 @@ def _lock_age_seconds(payload: dict[str, Any]) -> float | None:
     if acquired_at is None or now is None:
         return None
     return max(0.0, (now - acquired_at).total_seconds())
-
-
-def _lock_file_mtime_age_seconds(path: Path) -> float | None:
-    """Wall-clock age of the lock file itself, independent of its payload.
-
-    Used as a fallback when the payload carries no parseable acquisition time so a
-    malformed lock can still be aged out.
-    """
-    try:
-        mtime = path.stat().st_mtime
-    except OSError:
-        return None
-    return max(0.0, time.time() - mtime)
 
 
 def _same_pid_lock_predates_current_process(payload: dict[str, Any]) -> bool:
@@ -121,17 +107,6 @@ def acquire_runtime_lock(
             stale_reason = f"age_seconds>{stale_after_seconds:g}"
         elif _same_pid_lock_predates_current_process(existing_payload):
             stale_reason = "same_pid_lock_predates_current_process"
-        elif age is None and stale_after_seconds > 0:
-            # A lock whose payload carries no parseable acquisition time (e.g. a
-            # process killed after O_CREAT|O_EXCL but before its JSON body was
-            # written) satisfies neither branch above and would otherwise deadlock
-            # every future caller until an operator removes it. Fall back to the
-            # lock file's own mtime so a genuinely abandoned malformed lock is still
-            # reclaimed once it is older than the stale window (a lock mid-write has
-            # a fresh mtime and is left alone).
-            mtime_age = _lock_file_mtime_age_seconds(path)
-            if mtime_age is not None and mtime_age > stale_after_seconds:
-                stale_reason = f"malformed_lock_mtime_age_seconds>{stale_after_seconds:g}"
         if stale_reason:
             try:
                 path.unlink()

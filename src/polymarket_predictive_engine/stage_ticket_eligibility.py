@@ -300,11 +300,16 @@ def evaluate_stage_ticket_eligibility(
         )
     )
 
-    # WO-104 item 6: resolve the study-vs-safety contradiction at the funding
-    # decision. The requote system may flag a candidate market pull_quotes_now
-    # (e.g. past/imminent event start) while the study still assigns it carry.
-    # Never fund a market safety is actively telling the human to pull; require
-    # a present, non-pull requote state for the exact candidate (fail-closed).
+    # WO-104 item 6 (+ red-team hardening): resolve the study-vs-safety
+    # contradiction at the funding decision. The requote producer publishes exactly
+    # one of four states per market -- quotes_ok, requote_advised, pull_quotes_now,
+    # STOP -- and ONLY quotes_ok means the live quote is still valid to fund against.
+    # Require the exact candidate's state to be EXACTLY quotes_ok (allowlist,
+    # fail-closed): requote_advised (stale live book / mid drifted out of the quote
+    # band), pull_quotes_now, STOP, a missing row, an empty state, or any future
+    # non-OK state all block the ticket. The prior denylist ({pull_quotes_now, STOP})
+    # let requote_advised through -- funding a stale/drifted quote, a fund-path
+    # fail-open.
     requote_state = None
     for row in requote.get("markets") or []:
         if isinstance(row, dict) and str(row.get("condition_id") or "").strip() == candidate_id:
@@ -313,7 +318,7 @@ def evaluate_stage_ticket_eligibility(
     rows.append(
         _condition(
             "requote_not_pulling_candidate",
-            requote_state is not None and requote_state not in {"pull_quotes_now", "STOP"},
+            requote_state == "quotes_ok",
             f"candidate_requote_state={requote_state or 'missing'}",
         )
     )

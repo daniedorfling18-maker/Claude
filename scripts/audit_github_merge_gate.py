@@ -289,12 +289,16 @@ def evaluate_merge_gate(
     independent_review_required = required_review_count >= 1 and stale_reviews_dismissed and last_push_approval_required
     conversation_resolution_required = _enabled(protection.get("required_conversation_resolution"))
     admins_enforced = _enabled(protection.get("enforce_admins"))
+    force_pushes_forbidden = not _enabled(protection.get("allow_force_pushes"))
+    deletions_forbidden = not _enabled(protection.get("allow_deletions"))
     bypass_count = _bypass_count(reviews)
     direct_push_forbidden = (
         branch_protection_enabled
         and independent_review_required
         and conversation_resolution_required
         and admins_enforced
+        and force_pushes_forbidden
+        and deletions_forbidden
         and bypass_count == 0
     )
 
@@ -342,6 +346,8 @@ def evaluate_merge_gate(
         "last_push_approval_required": last_push_approval_required,
         "conversation_resolution_required": conversation_resolution_required,
         "admin_enforcement_enabled": admins_enforced,
+        "force_pushes_forbidden": force_pushes_forbidden,
+        "deletions_forbidden": deletions_forbidden,
         "direct_push_forbidden": direct_push_forbidden,
         "review_bypass_count_zero": bypass_count == 0,
     }

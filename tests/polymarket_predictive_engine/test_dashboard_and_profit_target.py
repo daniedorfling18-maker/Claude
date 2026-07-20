@@ -3488,3 +3488,22 @@ def test_dashboard_surfaces_wo66_requote_banner_payload(tmp_path):
 
     assert data["maker_lane"]["requote_alerts"]["alert_state"] == "pull_quotes_now"
     assert "human action only, no cancel/order path" in html
+
+
+def test_dashboard_uses_embedded_executor_status_when_primary_artifact_is_absent(tmp_path):
+    cfg = _config(tmp_path)
+    embedded_status = {
+        "status": "UNKNOWN",
+        "mode": "CANARY",
+        "executor_present": True,
+        "reason": "primary status artifact unavailable",
+    }
+    write_json(
+        cfg.output_root / "performance" / "operating_state.json",
+        {"status": "incomplete_unknown_inputs", "executor_status": embedded_status},
+    )
+
+    result = render_dashboard(cfg)
+    data = read_json(result["dashboard_data"])
+
+    assert data["executor_status"] == embedded_status

@@ -16,6 +16,9 @@ def test_infers_clean_no_winner_from_gamma_payload():
     }
     rows, quality = infer_market_resolution_rows(payload)
     assert quality[0]["resolution_quality"] == "clean_settlement"
+    assert quality[0]["condition_id"] == "0xabc"
+    assert quality[0]["question"] == "Sample?"
+    assert quality[0]["resolution_source"] == ""
     assert rows[0]["target"] == 0
     assert rows[1]["target"] == 1
     assert rows[1]["winning_token_id"] == "no-token"

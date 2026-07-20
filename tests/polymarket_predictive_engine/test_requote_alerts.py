@@ -264,6 +264,7 @@ def test_legacy_incomplete_ticket_is_enriched_from_gamma_and_rest_book(
                     "clobTokenIds": '["gamma-yes", "gamma-no"]',
                     "outcomes": '["Yes", "No"]',
                     "orderPriceMinTickSize": 0.01,
+                    "eventStartTime": "2026-07-20T12:00:00Z",
                     "endDate": "2026-08-01T12:00:00Z",
                     "closed": False,
                 }
@@ -306,6 +307,7 @@ def test_legacy_incomplete_ticket_is_enriched_from_gamma_and_rest_book(
     assert market["outcome"] == "Yes"
     assert market["token_id"] == "gamma-yes"
     assert market["order_price_min_tick_size"] == 0.01
+    assert market["event_start_time_utc"] == "2026-07-20T12:00:00Z"
     assert market["quote_bid_price"] == 0.48
     assert market["quote_ask_price"] == 0.52
     assert market["live_price_source"] == "rest_book_fallback"

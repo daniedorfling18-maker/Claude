@@ -1257,8 +1257,13 @@ def _exit_for_stale_background_job(cfg, summary: dict[str, Any], *, live_iterati
     CPU/memory.  The local/VPS runner is supervised, so the fail-closed action is
     to publish the stale heartbeat and exit the process.
     """
-    _record_background_timeout_incident(cfg, summary, live_iteration=live_iteration)
-    os._exit(75)
+    try:
+        _record_background_timeout_incident(cfg, summary, live_iteration=live_iteration)
+    finally:
+        # The incident ledger is best-effort evidence. A full disk, permission
+        # error, or corrupt ledger must never retain the timed-out worker in
+        # memory and defeat the supervisor restart contract.
+        os._exit(75)
 
 
 def _background_job_blocks_governance(

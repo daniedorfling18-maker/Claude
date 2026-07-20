@@ -385,6 +385,10 @@ def test_recorded_gamma_markets_replay_all_current_market_parsers(monkeypatch: p
     ) == []
 
     monkeypatch.setattr(maker_carry_study.requests, "get", lambda *args, **kwargs: _Response(payload))
+    # Pin the study clock to the fixture's recorded observation date so staleness
+    # is evaluated point-in-time; otherwise the fixture (close 2026-07-20) is
+    # flagged stale once the suite runs on/after that date (clock-drift, see #338).
+    monkeypatch.setattr(maker_carry_study, "now_utc", lambda: "2026-07-15T00:00:00Z")
     universe, errors, diagnostic = maker_carry_study._rewarded_universe(
         {
             "gamma_base_url": "https://gamma-api.polymarket.com",

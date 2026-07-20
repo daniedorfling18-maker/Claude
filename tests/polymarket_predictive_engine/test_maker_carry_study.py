@@ -50,6 +50,12 @@ def _config(tmp_path: Path):
         "markout_min_prints": 20,
         "min_daily_payout_usd": 1.0,
         "gate_min_runs_at_target": 7,
+        # WO-113 depth/stickiness gate off by default here; the dedicated
+        # WO-113 tests set live thresholds and stage a book archive.
+        "maker_min_book_history_hours": 0,
+        "maker_min_book_snapshots": 0,
+        "maker_switch_margin_frac": 0.25,
+        "maker_max_hold_days": 30,
         "request_pause_seconds": 0,
     }
     path = tmp_path / "config.yaml"

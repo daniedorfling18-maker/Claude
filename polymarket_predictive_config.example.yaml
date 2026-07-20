@@ -132,6 +132,21 @@ maker_carry_study:
   markout_min_prints: 20
   min_daily_payout_usd: 1.0
   gate_min_runs_at_target: 7
+  # WO-113 (2026-07-20): measurability-aware maker portfolio. A market is only
+  # eligible to be the MEASURED portfolio pick once its official-book archive
+  # spans >= maker_min_book_history_hours with >= maker_min_book_snapshots
+  # samples, so a freshly-rewarded market (no book depth) can never displace one
+  # that has accumulated the markout evidence M-B needs. Selection stickiness
+  # retains an eligible incumbent unless a challenger's net carry beats it by
+  # >= maker_switch_margin_frac (a ranking-only hysteresis; reported carry is
+  # unchanged), and re-competes after maker_max_hold_days. All four are
+  # tighten-only knobs (raising history/snapshots/margin only shrinks churn);
+  # they change WHICH market is measured, never an M-gate threshold, fee/adverse
+  # constant, or order path.
+  maker_min_book_history_hours: 48
+  maker_min_book_snapshots: 100
+  maker_switch_margin_frac: 0.25
+  maker_max_hold_days: 30
   # 2026-07-10 WO-46: published liquidity-reward share model. It aggregates
   # market + complement books, applies the c=3 single-sided rule inside the
   # eligible mid band, and mechanically excludes rows outside [0.10, 0.90].

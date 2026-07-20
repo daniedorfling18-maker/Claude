@@ -77,7 +77,9 @@ placement of any kind. The live-trading gates in AGENTS.md are untouched.
 
 from __future__ import annotations
 
+import csv
 import fcntl
+import gzip
 import json
 import math
 import os
@@ -148,6 +150,13 @@ MAKER_POLICY_DEFAULTS: dict[str, Any] = {
     "target_net_usd_per_day": 3.33,
     "min_daily_payout_usd": 1.0,
     "gate_min_runs_at_target": 7,
+    # WO-113 (2026-07-20): measurability-aware maker portfolio. Book-history-depth
+    # eligibility + selection stickiness so the MEASURED pick is one that can
+    # actually accumulate M-B markout evidence. Tighten-only knobs.
+    "maker_min_book_history_hours": 48.0,
+    "maker_min_book_snapshots": 100,
+    "maker_switch_margin_frac": 0.25,
+    "maker_max_hold_days": 30,
     "share_model_c": 3.0,
     "share_model_mid_band_min": 0.10,
     "share_model_mid_band_max": 0.90,
@@ -1469,19 +1478,114 @@ def _adverse_selection(
     }
 
 
+def _book_history_depth(out_root: Path, condition_id: str) -> tuple[float, int]:
+    """WO-113: observed official-book archive depth for one market.
+
+    Returns (span_hours, snapshot_count) from
+    ``official_books/{condition_id}.csv.gz``. A market with too little depth
+    cannot yet yield a measured M-B markout, so it must not be the measured
+    portfolio pick. Fail-safe: a missing/unreadable/empty archive reports
+    (0.0, 0) so the market is treated as NOT yet measurement-eligible.
+    """
+    if not condition_id:
+        return 0.0, 0
+    path = out_root / "official_books" / f"{condition_id}.csv.gz"
+    if not path.exists():
+        return 0.0, 0
+    stamps: list[datetime] = []
+    try:
+        with gzip.open(path, "rt", newline="") as handle:
+            for row in csv.DictReader(handle):
+                stamp = parse_timestamp(row.get("collected_at_utc"))
+                if stamp is not None:
+                    stamps.append(stamp)
+    except (OSError, csv.Error, ValueError):
+        return 0.0, 0
+    if not stamps:
+        return 0.0, 0
+    span_hours = (max(stamps) - min(stamps)).total_seconds() / 3600.0
+    return max(0.0, span_hours), len(stamps)
+
+
+def _measurement_eligible(row: dict[str, Any], settings: dict[str, Any]) -> bool:
+    """WO-113: a candidate may only be the MEASURED portfolio pick once its
+    official-book archive is deep enough to bracket a markout. Both thresholds
+    are tighten-only (raising either can only shrink the eligible set)."""
+    min_hours = float(settings.get("maker_min_book_history_hours", 0.0) or 0.0)
+    min_snaps = int(settings.get("maker_min_book_snapshots", 0) or 0)
+    if min_hours <= 0.0 and min_snaps <= 0:
+        # Depth gate disabled (both thresholds zero) -> no depth requirement.
+        return True
+    hours = safe_float(row.get("book_history_hours"))
+    snaps = safe_float(row.get("book_snapshot_count"))
+    if hours is None or snaps is None:
+        return False
+    return hours >= min_hours and int(snaps) >= min_snaps
+
+
+def _incumbent_hold(out_root: Path) -> tuple[set[str], dict[str, int]]:
+    """WO-113 selection stickiness: read the WO-111 membership sidecar and
+    return (incumbent condition_ids from the latest run, consecutive
+    distinct-UTC-day hold count per incumbent). Fail-safe: a missing or
+    unreadable ledger yields no incumbents, so stickiness simply does not apply."""
+    rows = read_csv_rows(out_root / "maker_carry_portfolio_members.csv")
+    by_day: dict[str, set[str]] = {}
+    latest_day = ""
+    latest_members: set[str] = set()
+    for row in rows:
+        day = str(row.get("generated_at_utc") or "")[:10]
+        if not day:
+            continue
+        try:
+            members = json.loads(row.get("portfolio_members") or "[]")
+        except (ValueError, TypeError):
+            members = []
+        cids = {
+            str(member.get("condition_id") or "")
+            for member in members
+            if isinstance(member, dict) and member.get("condition_id")
+        }
+        by_day.setdefault(day, set()).update(cids)
+        if day >= latest_day:
+            latest_day, latest_members = day, cids
+    if not by_day:
+        return set(), {}
+    ordered_days = sorted(by_day)
+    hold: dict[str, int] = {}
+    for cid in latest_members:
+        count = 0
+        for day in reversed(ordered_days):
+            if cid in by_day[day]:
+                count += 1
+            else:
+                break
+        hold[cid] = count
+    return latest_members, hold
+
+
 def _size_portfolio(
     settings: dict[str, Any],
     candidates: list[dict[str, Any]],
     capital_cap_usd: float,
+    incumbents: set[str] | None = None,
+    incumbent_hold_days: dict[str, int] | None = None,
 ) -> tuple[list[dict[str, Any]], float, float]:
     """Run the registered greedy maker sizing at one capital cap.
 
     WO-57 calls this same function for supplementary planning caps so the
     registered $500 result and every M-gate retain exactly one implementation.
+
+    WO-113: only measurement-eligible markets (sufficient official-book depth)
+    may enter the sized portfolio, and an eligible incumbent is retained via a
+    ranking-only hysteresis bonus (its REPORTED net carry is unchanged) unless a
+    challenger beats it by >= maker_switch_margin_frac or it has been held for
+    >= maker_max_hold_days.
     """
     portfolio: list[dict[str, Any]] = []
     capital = 0.0
     max_multiple = max(1, int(settings["max_size_multiple"]))
+    incumbents = incumbents or set()
+    incumbent_hold_days = incumbent_hold_days or {}
     trusted = [
         row
         for row in candidates
@@ -1489,9 +1593,23 @@ def _size_portfolio(
         and row.get("estimate_quality") == "book_and_history"
         and row.get("band_eligible") is True
         and row.get("resolution_risk") != "high"
+        and _measurement_eligible(row, settings)
     ]
     payout_floor = float(settings["min_daily_payout_usd"])
-    for row in sorted(trusted, key=lambda candidate: candidate["net_carry_usd_per_day"], reverse=True):
+    switch_margin = max(0.0, float(settings.get("maker_switch_margin_frac", 0.0) or 0.0))
+    max_hold_days = int(settings.get("maker_max_hold_days", 0) or 0)
+
+    def _rank_key(candidate: dict[str, Any]) -> float:
+        carry = float(candidate["net_carry_usd_per_day"])
+        cid = str(candidate.get("condition_id") or "")
+        held = int(incumbent_hold_days.get(cid, 0))
+        retain = cid in incumbents and (max_hold_days <= 0 or held < max_hold_days)
+        # Ranking-only hysteresis: an eligible incumbent must be beaten by more
+        # than switch_margin before a challenger can outrank it. The carry the
+        # M-gates read (net_carry_usd_per_day below) is never scaled.
+        return carry * (1.0 + switch_margin) if retain else carry
+
+    for row in sorted(trusted, key=_rank_key, reverse=True):
         ours = row["our_score_per_side"]
         pool_implied = ours / row["estimated_reward_share"] - ours if row["estimated_reward_share"] > 0 else 0.0
         best: tuple[float, int] | None = None
@@ -1953,10 +2071,22 @@ def run_maker_carry_study(cfg: EngineConfig) -> dict[str, Any]:
         if pause:
             time.sleep(pause)
 
+    # WO-113: attach observed official-book depth to every candidate, so the
+    # sizer can exclude markets too fresh to yield a measured M-B markout, and
+    # read the prior portfolio for selection stickiness. Reporting-only fields;
+    # they gate WHICH market is measured, never an M-gate threshold.
+    for candidate in candidates:
+        span_hours, snapshot_count = _book_history_depth(out_root, str(candidate.get("condition_id") or ""))
+        candidate["book_history_hours"] = round(span_hours, 4)
+        candidate["book_snapshot_count"] = snapshot_count
+    incumbents, incumbent_hold_days = _incumbent_hold(out_root)
+
     # Registered sizing is still evaluated only at capital_cap_usd. WO-57
     # reuses this exact function for supplementary planning caps below.
     cap = float(settings["capital_cap_usd"])
-    portfolio, capital, net_total = _size_portfolio(settings, candidates, cap)
+    portfolio, capital, net_total = _size_portfolio(
+        settings, candidates, cap, incumbents=incumbents, incumbent_hold_days=incumbent_hold_days
+    )
     target = float(settings["target_net_usd_per_day"])
     capital_curve, capital_for_target = _capital_curve(settings, candidates, target)
     top_portfolio = portfolio[0] if portfolio else {}

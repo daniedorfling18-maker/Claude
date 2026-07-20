@@ -76,6 +76,7 @@ def _ticket() -> dict[str, Any]:
 def _seed_acceptance(
     cfg: EngineConfig,
     *,
+    requote_status: str = "ok",
     requote_state: str = "quotes_ok",
     requote_rule: str | None = None,
     post_operating_state: str = "ALIGNED",
@@ -194,7 +195,7 @@ def _seed_acceptance(
         cfg.output_root / "maker_carry" / "requote_alerts.json",
         {
             "generated_at_utc": "2026-07-13T12:01:10Z",
-            "status": "ok",
+            "status": requote_status,
             "alert_state": requote_state,
             "markets": [{**ticket, "alerts": alert, "alert_state": requote_state}],
             "kill_criteria_triggered": [],
@@ -489,6 +490,23 @@ def test_registered_risk_blocker_passes_but_missing_input_and_new_unknown_fail(t
     by_id = {row["id"]: row for row in failed["checks"]}
     assert by_id["requote_evaluator_state"]["status"] == "FAIL"
     assert by_id["operating_state_unknown_regression"]["new_unknown_rows"] == ["source_vs_deployed_sha"]
+
+
+def test_partial_requote_producer_status_fails_even_when_quotes_look_ok(tmp_path: Path) -> None:
+    cfg = _cfg(tmp_path)
+    _seed_acceptance(
+        cfg,
+        requote_status="partial_public_lookup_error",
+        requote_state="quotes_ok",
+    )
+
+    result = build_deploy_acceptance(cfg, expected_deploy_sha="newsha", as_of=AS_OF)
+    check = {row["id"]: row for row in result["checks"]}["requote_evaluator_state"]
+
+    assert result["status"] == "FAIL"
+    assert check["status"] == "FAIL"
+    assert check["producer_status"] == "partial_public_lookup_error"
+    assert "requote producer status is not complete" in " ".join(check["defects"])
 
 
 def test_wo102_toxicity_floor_rules_are_legitimate_requote_reasons(tmp_path: Path) -> None:

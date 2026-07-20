@@ -230,15 +230,23 @@ def _requote_state_check(requote: Mapping[str, Any], baseline_at: datetime | Non
     if status in LEGITIMATE_INERT_STATUSES:
         acceptable = True
         reason = status
-    elif state in {"quotes_ok", "requote_advised"} and not missing_rules and not unknown_rules:
+    elif status == "ok" and state in {"quotes_ok", "requote_advised"} and not missing_rules and not unknown_rules:
         acceptable = True
         reason = "non_fail_closed_state"
-    elif state in {"pull_quotes_now", "STOP"} and not missing_rules and not unknown_rules and (legitimate_rules or kill):
+    elif (
+        status == "ok"
+        and state in {"pull_quotes_now", "STOP"}
+        and not missing_rules
+        and not unknown_rules
+        and (legitimate_rules or kill)
+    ):
         acceptable = True
         reason = "specific_registered_risk_blocker"
     defects: list[str] = []
     if not fresh:
         defects.append(observed_at)
+    if status not in LEGITIMATE_INERT_STATUSES and status != "ok":
+        defects.append(f"requote producer status is not complete: {status}")
     if missing_rules:
         defects.append("missing-input rule(s): " + ", ".join(missing_rules))
     if unknown_rules:

@@ -279,6 +279,14 @@ _MONTH_NUMBERS = {
     "december": 12,
 }
 _MONTH_PATTERN = "|".join(sorted(_MONTH_NUMBERS, key=len, reverse=True))
+_TITLE_SAME_MONTH_RANGE_RE = re.compile(
+    rf"\b(?P<month>{_MONTH_PATTERN})\.?\s+"
+    r"(?P<start_day>\d{1,2})(?:st|nd|rd|th)?\s*"
+    r"(?:-|\u2013|\u2014|to)\s*"
+    r"(?P<end_day>\d{1,2})(?:st|nd|rd|th)?"
+    r"(?:,?\s+(?P<year>20\d{2}))?\b",
+    re.IGNORECASE,
+)
 _TITLE_MONTH_DAY_RE = re.compile(
     rf"\b(?P<month>{_MONTH_PATTERN})\.?\s+(?P<day>\d{{1,2}})(?:st|nd|rd|th)?(?:,?\s+(?P<year>20\d{{2}}))?\b",
     re.IGNORECASE,
@@ -473,6 +481,34 @@ def _title_dates(question: str, *, as_of: datetime, close_at: datetime | None) -
             occupied.append(match.span())
         except ValueError:
             continue
+
+    for match in _TITLE_SAME_MONTH_RANGE_RE.finditer(str(question or "")):
+        if any(start <= match.start() < end for start, end in occupied):
+            continue
+        month = _MONTH_NUMBERS[match.group("month").lower().rstrip(".")]
+        year_text = match.group("year")
+        try:
+            if year_text:
+                start_date = date(int(year_text), month, int(match.group("start_day")))
+                end_date = date(int(year_text), month, int(match.group("end_day")))
+            else:
+                start_date = _inferred_title_date(
+                    month,
+                    int(match.group("start_day")),
+                    as_of=as_of,
+                    close_at=close_at,
+                )
+                end_date = _inferred_title_date(
+                    month,
+                    int(match.group("end_day")),
+                    as_of=as_of,
+                    close_at=close_at,
+                )
+        except ValueError:
+            continue
+        if start_date is not None and end_date is not None:
+            dates.update((start_date, end_date))
+            occupied.append(match.span())
 
     for pattern in (_TITLE_MONTH_DAY_RE, _TITLE_DAY_MONTH_RE):
         for match in pattern.finditer(str(question or "")):

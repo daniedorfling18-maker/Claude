@@ -463,6 +463,22 @@ def test_front_door_drift_test_trips_on_planted_stale_claim() -> None:
     assert "README.md: dated_project_state" in violations
 
 
+def test_readme_drift_after_historical_heading_is_still_rejected() -> None:
+    readme = (
+        "Generated state: `outputs/performance/operating_state.md`\n"
+        "\n## What we learned\n"
+        "\nLast project state update: 2026-07-01\n"
+    )
+    agents = "Generated state: `outputs/performance/operating_state.md`\n\n## Run model\n"
+
+    violations = front_door_drift_violations(
+        readme_text=readme,
+        agents_text=agents,
+    )
+
+    assert "README.md: dated_project_state" in violations
+
+
 def test_front_door_repo_docs_only_point_to_generated_state() -> None:
     assert_front_door_docs_state_pointer_only(REPO_ROOT)
 

@@ -209,6 +209,11 @@ def test_wo101_point_in_time_corpora_are_append_only_enrolled():
     assert registry["polymarket_training/historical_bid_ask_v1.csv"] == "append_only"
 
 
+def test_current_sharp_qualification_is_snapshot_enrolled():
+    registry = {row["glob"]: row["mode"] for row in DEFAULT_LEDGER_REGISTRY}
+    assert registry["maker_carry/sharp_linking_qualification.json"] == "snapshot"
+
+
 def test_deployed_config_covers_every_default_ledger_enrollment():
     # #269 Codex-review P1 (confirmed): the example config's explicit
     # ledger_globs list replaces DEFAULT_LEDGER_REGISTRY wholesale, so a

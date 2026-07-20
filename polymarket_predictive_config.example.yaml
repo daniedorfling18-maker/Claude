@@ -350,6 +350,10 @@ ledger_anchor:
     # WO-88 keeps raw/owner/maker fill attribution in a new immutable ledger.
     - {glob: maker_carry/maker_live_test_attribution_history.csv, mode: append_only}
     - {glob: maker_carry/decision_policy.json, mode: snapshot}
+    # Current WO-105 funding-qualification evidence. Keep the retired H1
+    # snapshot below enrolled for historical continuity, but do not substitute
+    # it for this artifact consumed by stage-ticket eligibility.
+    - {glob: maker_carry/sharp_linking_qualification.json, mode: snapshot}
     - {glob: maker_carry/h1_funding_qualification.json, mode: snapshot}
     - {glob: maker_carry/requote_alerts.json, mode: snapshot}
     - {glob: execution/credential_rotation_drill.json, mode: snapshot}

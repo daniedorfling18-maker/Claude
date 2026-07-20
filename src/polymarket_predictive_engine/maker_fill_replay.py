@@ -858,6 +858,7 @@ def _replay_against_states(
             "confirmed_fills": 0,
             "windows_simulated": 0,
             "windows_covered": 0,
+            "book_history_span_days": 0.0,
             "by_horizon": {
                 f"{horizon}m": {"windows_simulated": 0, "windows_covered": 0}
                 for horizon in HORIZONS_MINUTES
@@ -865,6 +866,14 @@ def _replay_against_states(
         }
         for row in portfolio
     }
+    # WO-113: record the observed official-book span per market so audits can see
+    # how deep the archive is next to the (window-aligned) coverage ratio.
+    for _token, _cov in coverage_by_token.items():
+        _states = states_by_token.get(_token) or []
+        if len(_states) >= 2:
+            _cov["book_history_span_days"] = round(
+                (_states[-1]["stamp"] - _states[0]["stamp"]) / 86400.0, 4
+            )
     fills: list[dict[str, Any]] = []
     simulated_fill_opportunities = 0
     last_in_queue_evaluable_opportunities = 0
@@ -901,13 +910,21 @@ def _replay_against_states(
         market_coverage = coverage_by_token[str(entry["token_id"])]
         market_coverage["simulated_fill_opportunities"] += 1
         later_by_horizon: dict[int, dict[str, float]] = {}
+        observed_last = states[-1]["stamp"] if states else None
         for horizon in HORIZONS_MINUTES:
             key = f"{horizon}m"
+            target_stamp = trade["stamp"] + horizon * 60.0
+            # WO-113 coverage-window alignment: only windows the OBSERVED official-
+            # book history can bracket enter the denominator. A window needs a
+            # book state at/before the fill (queue depth, `state`) AND observed
+            # history reaching the markout horizon (`observed_last >= target`).
+            # Fills outside that span are physically unmeasurable, so counting
+            # them as "simulated-but-uncovered" made the 80% coverage minimum
+            # unreachable for weeks after a market entered the portfolio.
+            if state is None or observed_last is None or observed_last < target_stamp:
+                continue
             market_coverage["windows_simulated"] += 1
             market_coverage["by_horizon"][key]["windows_simulated"] += 1
-            if state is None:
-                continue
-            target_stamp = trade["stamp"] + horizon * 60.0
             later = _state_at_or_after(states, target_stamp)
             if later is None or later["stamp"] - target_stamp > max_state_lag_seconds:
                 continue

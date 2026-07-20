@@ -17,7 +17,11 @@ from polymarket_predictive_engine import maker_carry_study
 from polymarket_predictive_engine.config import load_config
 from polymarket_predictive_engine.maker_carry_study import (
     MAKER_CARRY_LEDGER_LOCK,
+    _book_history_depth,
+    _incumbent_hold,
     _maker_carry_ledger_lock_path,
+    _measurement_eligible,
+    _size_portfolio,
     run_maker_carry_study,
 )
 from polymarket_predictive_engine.utils import (
@@ -50,6 +54,12 @@ def _config(tmp_path: Path):
         "markout_min_prints": 20,
         "min_daily_payout_usd": 1.0,
         "gate_min_runs_at_target": 7,
+        # WO-113 depth/stickiness gate off by default here; the dedicated
+        # WO-113 tests set live thresholds and stage a book archive.
+        "maker_min_book_history_hours": 0,
+        "maker_min_book_snapshots": 0,
+        "maker_switch_margin_frac": 0.25,
+        "maker_max_hold_days": 30,
         "request_pause_seconds": 0,
     }
     path = tmp_path / "config.yaml"
@@ -1414,3 +1424,122 @@ def test_mb1_zero_valued_max_haircut_override_is_honored() -> None:
     # #262: a stricter `mb_tier0_max_haircut: 0` must bind (a 0.8 haircut then
     # fails), not be treated as invalid and restored to the registered 1.0.
     assert _mb_ok(_mb_replay([_mb_cov(haircut=0.8)]), mb_tier0_max_haircut=0) is False
+
+
+# --- WO-113: measurability-aware maker portfolio (eligibility + stickiness) ---
+
+
+def _wo113_settings(**over: Any) -> dict[str, Any]:
+    settings = {
+        "max_size_multiple": 5,
+        "min_daily_payout_usd": 1.0,
+        "maker_switch_margin_frac": 0.25,
+        "maker_max_hold_days": 30,
+        "maker_min_book_history_hours": 48.0,
+        "maker_min_book_snapshots": 100,
+    }
+    settings.update(over)
+    return settings
+
+
+def _wo113_candidate(cid: str, carry: float, hours: float, snaps: int, capital_usd: float = 20.0) -> dict[str, Any]:
+    return {
+        "condition_id": cid,
+        "question": f"question {cid}",
+        "net_carry_usd_per_day": carry,
+        "estimate_quality": "book_and_history",
+        "band_eligible": True,
+        "resolution_risk": "medium",
+        "book_history_hours": hours,
+        "book_snapshot_count": snaps,
+        "our_score_per_side": 10.0,
+        "estimated_reward_share": 0.02,
+        "pot_usd_per_day": 100.0,
+        "adverse_selection_usd_per_day": 0.5,
+        "capital_usd": capital_usd,
+        "rewards_min_size_shares": 100,
+        "quote_distance": 0.01,
+        "quote_distance_fraction": 0.5,
+    }
+
+
+def test_wo113_book_history_depth_reads_span_and_count(tmp_path):
+    import gzip
+
+    books = tmp_path / "outputs" / "maker_carry" / "official_books"
+    books.mkdir(parents=True)
+    rows = ["condition_id,collected_at_utc"]
+    rows += [f"0xdeep,2026-07-{18 + i:02d}T00:00:00Z" for i in range(3)]  # 3 snaps over 48h
+    (books / "0xdeep.csv.gz").write_bytes(gzip.compress(("\n".join(rows) + "\n").encode()))
+
+    hours, count = _book_history_depth(tmp_path / "outputs" / "maker_carry", "0xdeep")
+    assert count == 3
+    assert abs(hours - 48.0) < 1e-6
+    # Fail-safe: a missing archive reports zero depth, never a phantom pass.
+    assert _book_history_depth(tmp_path / "outputs" / "maker_carry", "0xmissing") == (0.0, 0)
+
+
+def test_wo113_measurement_eligible_gate():
+    settings = _wo113_settings()  # 48h / 100 snapshots
+    assert _measurement_eligible({"book_history_hours": 120.0, "book_snapshot_count": 300}, settings) is True
+    assert _measurement_eligible({"book_history_hours": 5.0, "book_snapshot_count": 18}, settings) is False
+    assert _measurement_eligible({}, settings) is False  # missing depth fails closed
+    disabled = _wo113_settings(maker_min_book_history_hours=0, maker_min_book_snapshots=0)
+    assert _measurement_eligible({}, disabled) is True  # both thresholds zero -> gate off
+
+
+def test_wo113_incumbent_hold_reads_membership_sidecar(tmp_path):
+    out_root = tmp_path / "outputs" / "maker_carry"
+    out_root.mkdir(parents=True)
+    write_csv(
+        out_root / "maker_carry_portfolio_members.csv",
+        [
+            {"generated_at_utc": f"2026-07-{18 + i:02d}T08:00:00Z",
+             "portfolio_members": json.dumps([{"condition_id": "0xA", "markout_measured": i == 2}])}
+            for i in range(3)
+        ],
+        fieldnames=["generated_at_utc", "portfolio_members"],
+    )
+    incumbents, hold = _incumbent_hold(out_root)
+    assert incumbents == {"0xA"}
+    assert hold["0xA"] == 3  # three consecutive distinct UTC days
+
+
+def test_wo113_fresh_market_excluded_even_when_carry_is_highest():
+    settings = _wo113_settings()
+    fresh = _wo113_candidate("0xfresh", carry=5.0, hours=5.0, snaps=18)  # top carry, no depth
+    deep = _wo113_candidate("0xdeep", carry=1.0, hours=120.0, snaps=300)
+    portfolio, _capital, _net = _size_portfolio(settings, [fresh, deep], 1000.0)
+    cids = {entry["condition_id"] for entry in portfolio}
+    assert "0xdeep" in cids
+    assert "0xfresh" not in cids  # eligibility beats headline carry
+
+
+def test_wo113_stickiness_retains_incumbent_within_margin():
+    settings = _wo113_settings(maker_min_book_history_hours=0, maker_min_book_snapshots=0)  # isolate stickiness
+    incumbent = _wo113_candidate("0xinc", carry=1.0, hours=0.0, snaps=0, capital_usd=300.0)
+    challenger = _wo113_candidate("0xchal", carry=1.1, hours=0.0, snaps=0, capital_usd=300.0)  # +10% < 25%
+    portfolio, _capital, _net = _size_portfolio(
+        settings, [incumbent, challenger], 500.0, incumbents={"0xinc"}, incumbent_hold_days={"0xinc": 1}
+    )
+    assert [entry["condition_id"] for entry in portfolio] == ["0xinc"]  # retained despite lower carry
+
+
+def test_wo113_stickiness_switches_when_challenger_clears_margin():
+    settings = _wo113_settings(maker_min_book_history_hours=0, maker_min_book_snapshots=0)
+    incumbent = _wo113_candidate("0xinc", carry=1.0, hours=0.0, snaps=0, capital_usd=300.0)
+    challenger = _wo113_candidate("0xchal", carry=1.3, hours=0.0, snaps=0, capital_usd=300.0)  # +30% > 25%
+    portfolio, _capital, _net = _size_portfolio(
+        settings, [incumbent, challenger], 500.0, incumbents={"0xinc"}, incumbent_hold_days={"0xinc": 1}
+    )
+    assert [entry["condition_id"] for entry in portfolio] == ["0xchal"]
+
+
+def test_wo113_stickiness_bonus_drops_after_max_hold():
+    settings = _wo113_settings(maker_min_book_history_hours=0, maker_min_book_snapshots=0, maker_max_hold_days=30)
+    incumbent = _wo113_candidate("0xinc", carry=1.0, hours=0.0, snaps=0, capital_usd=300.0)
+    challenger = _wo113_candidate("0xchal", carry=1.1, hours=0.0, snaps=0, capital_usd=300.0)
+    portfolio, _capital, _net = _size_portfolio(
+        settings, [incumbent, challenger], 500.0, incumbents={"0xinc"}, incumbent_hold_days={"0xinc": 30}
+    )
+    assert [entry["condition_id"] for entry in portfolio] == ["0xchal"]  # held >= max -> bonus dropped

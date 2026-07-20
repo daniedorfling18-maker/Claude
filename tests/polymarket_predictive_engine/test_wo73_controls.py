@@ -81,6 +81,28 @@ def test_guard_scans_csv_and_archive_manifest_and_redacts_matches(tmp_path: Path
     assert "planted-api-value" not in json.dumps(result)
 
 
+def test_guard_treats_api_and_access_tokens_as_credentials(tmp_path: Path) -> None:
+    repo = _guard_repo(tmp_path)
+    performance = repo / "outputs" / "performance"
+    performance.mkdir(parents=True)
+    secrets = {
+        "api_token": "api-token-test-value-123",
+        "access_token": "access-token-test-value-456",
+        "refresh_token": "refresh-token-test-value-789",
+    }
+    (performance / "sample.json").write_text(json.dumps(secrets), encoding="utf-8")
+
+    result = scan_telemetry_credentials(repo)
+
+    assert result["status"] == "FAIL"
+    assert result["finding_count"] == len(secrets)
+    assert {row["kind"] for row in result["findings"]} == {
+        "nonempty_sensitive_named_field"
+    }
+    rendered = json.dumps(result)
+    assert all(value not in rendered for value in secrets.values())
+
+
 def test_guard_classifies_public_hash_lists_but_rejects_credential_lists(tmp_path: Path) -> None:
     repo = _guard_repo(tmp_path)
     ops = repo / "outputs" / "ops_scheduler"
@@ -108,6 +130,33 @@ def test_guard_classifies_public_hash_lists_but_rejects_credential_lists(tmp_pat
     assert result["findings"][0]["location"] == "line:5"
     assert public_value not in json.dumps(result)
     assert credential_value not in json.dumps(result)
+
+
+def test_guard_preserves_sensitive_parent_name_for_json_array_values(tmp_path: Path) -> None:
+    repo = _guard_repo(tmp_path)
+    ops = repo / "outputs" / "ops_scheduler"
+    ops.mkdir(parents=True)
+    planted = "not-hex-but-still-secret-value"
+    (ops / "status.json").write_text(
+        json.dumps(
+            {
+                "api_key": [planted],
+                "nested": {"private_key": [planted]},
+                "token_ids": ["public-token-id"],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    result = scan_telemetry_credentials(repo)
+
+    assert result["status"] == "FAIL"
+    assert result["finding_count"] == 2
+    assert {row["location"] for row in result["findings"]} == {
+        "$.api_key[0]",
+        "$.nested.private_key[0]",
+    }
+    assert planted not in json.dumps(result)
 
 
 def test_telemetry_push_runs_guard_before_archive_or_snapshot_copy() -> None:

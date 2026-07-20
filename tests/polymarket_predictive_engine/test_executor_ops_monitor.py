@@ -47,21 +47,22 @@ def _write_policy_sizing(cfg: EngineConfig, binding) -> None:
     write_json(cfg.output_root / "maker_carry" / "decision_policy.json", payload)
 
 
-def test_policy_cap_honors_zero_binding_capital(tmp_path: Path) -> None:
-    # #56: an explicit binding_capital_usd=0.0 (invalid Kelly history -> fail-closed)
-    # must clamp the reported cap to 0, not be dropped in favor of a positive stage0.
+def test_policy_cap_zero_binding_floors_at_minimum_quote(tmp_path: Path) -> None:
+    # #56 + registered kelly_overlay_interpretation: a 0.0 binding caps size-ups (the
+    # reported cap drops from the positive stage0 to one minimum-size quote) but does
+    # NOT veto the minimum quote -- so the cap floors at the min-quote capital, not 0.
     cfg = _cfg(tmp_path)
     _write_policy_sizing(cfg, 0.0)
     cap, source = _policy_cap(cfg, {"stage_cap_usd": 100.0})
-    assert cap == 0.0
+    assert cap == 5.0
     assert source == "decision_policy.sizing.binding_capital_usd"
 
 
-def test_policy_cap_nonfinite_binding_fails_closed(tmp_path: Path) -> None:
+def test_policy_cap_nonfinite_binding_floors_at_minimum_quote(tmp_path: Path) -> None:
     cfg = _cfg(tmp_path)
     _write_policy_sizing(cfg, "nan")
     cap, _ = _policy_cap(cfg, {"stage_cap_usd": 100.0})
-    assert cap == 0.0
+    assert cap == 5.0
 
 
 def test_policy_cap_positive_binding_still_binds(tmp_path: Path) -> None:

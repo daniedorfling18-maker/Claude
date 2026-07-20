@@ -30,24 +30,40 @@ def _write_binding(cfg, binding) -> None:
     write_json(cfg.output_root / "maker_carry" / "decision_policy.json", payload)
 
 
-def test_settings_zero_binding_clamps_stage_cap_fail_closed(tmp_path: Path) -> None:
-    # #56: a present binding_capital_usd=0.0 (invalid Kelly -> fail-closed) must clamp
-    # the certification stage cap to the floor (0.01), not leave the positive stage0.
+def test_settings_zero_binding_floors_at_minimum_quote(tmp_path: Path) -> None:
+    # #56 + registered kelly_overlay_interpretation: a 0.0 binding caps size-ups (the
+    # stage cap drops from stage0 to one minimum-size quote) but must NOT veto the
+    # minimum quote -- so it floors at the min-quote capital, not the 0.01 zero-floor.
     cfg = _config(tmp_path)
     _write_binding(cfg, 0.0)
-    assert _settings(cfg)["stage_cap_usd"] == 0.01
+    assert _settings(cfg)["stage_cap_usd"] == 5.0
 
 
-def test_settings_nonfinite_binding_fails_closed(tmp_path: Path) -> None:
+def test_settings_nonfinite_binding_floors_at_minimum_quote(tmp_path: Path) -> None:
     cfg = _config(tmp_path)
     _write_binding(cfg, "nan")
-    assert _settings(cfg)["stage_cap_usd"] == 0.01
+    assert _settings(cfg)["stage_cap_usd"] == 5.0
 
 
 def test_settings_positive_binding_caps_below_stage0(tmp_path: Path) -> None:
     cfg = _config(tmp_path)
     _write_binding(cfg, 25.0)
     assert _settings(cfg)["stage_cap_usd"] == 25.0
+
+
+def test_certification_passes_with_zero_binding_minimum_quote_not_vetoed(tmp_path: Path) -> None:
+    # #56 + registered kelly_overlay_interpretation: a 0.0 binding must NOT veto the
+    # minimum-size stage quote, so replay certification still PASSES -- the five-share
+    # minimum place fits under the min-quote floor cap.
+    cfg = _config(tmp_path)
+    _seed_official_window(cfg)
+    _write_binding(cfg, 0.0)
+
+    result = certify_executor_replay(cfg, generate_reference_stub=True)
+
+    assert result["status"] == "PASS"
+    assert result["blocks_canary_by_certification"] is False
+    assert _settings(cfg)["stage_cap_usd"] == 5.0
 
 
 def _config(tmp_path: Path):

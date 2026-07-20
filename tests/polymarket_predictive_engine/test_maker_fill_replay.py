@@ -701,3 +701,28 @@ def test_persistent_markets_reserved_when_portfolio_fills_max_markets(tmp_path, 
     # Portfolio is already at max_markets=1, yet the persistent market is still
     # polled thanks to its reserved budget (old code truncated it away).
     assert "tokP" in polled and "tokR" in polled
+
+
+def test_wo113_coverage_window_alignment_excludes_unobservable_horizon(tmp_path):
+    # WO-113: observed book states run 1000..4600. A fill at t=3000 has its 5m
+    # (3300) and 15m (3900) markout targets inside that span, but the 60m target
+    # (6600) is beyond the last observed book. The 60m window is physically
+    # unmeasurable, so it must be EXCLUDED from the denominator, not counted as
+    # simulated-but-uncovered (which used to peg the coverage ratio down).
+    cfg = _config(tmp_path)
+    _seed_maker_portfolio(cfg)
+    _seed_archive(cfg)
+    write_csv(
+        cfg.output_root / "polymarket_trade_prints" / "trade_prints.csv",
+        [{"market": "0xcond", "asset_id": "tok1", "side": "SELL", "price": 0.49, "size": 25, "timestamp": 3_000}],
+        fieldnames=["market", "asset_id", "side", "price", "size", "timestamp"],
+    )
+
+    summary = run_maker_fill_replay(cfg)
+
+    by_horizon = summary["coverage"]["by_horizon"]
+    assert by_horizon["5m"]["windows_simulated"] == 1
+    assert by_horizon["15m"]["windows_simulated"] == 1
+    assert by_horizon["60m"]["windows_simulated"] == 0  # beyond observed book span -> excluded
+    assert summary["coverage"]["windows_simulated"] == 2
+    assert summary["per_market_coverage"][0]["book_history_span_days"] > 0.0

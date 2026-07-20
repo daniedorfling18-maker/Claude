@@ -3052,6 +3052,11 @@ def test_dashboard_surfaces_sharp_anchor_coverage_by_sport(tmp_path):
     assert coverage[0]["h2h_public_search_token_joins"] == 24
     reconciliation = data["independent_anchor_status"]["sharp_anchor_coverage"]
     assert reconciliation["source_sport_markets"][0]["rows_joined"] == 20
+    assert reconciliation.get("blocker") is None
+    assert not any(
+        blocker.startswith("sharp_anchor_coverage:")
+        for blocker in data["independent_anchor_status"]["blockers"]
+    )
     assert "Sharp anchor coverage by sport" in html
     assert "Anchor reconciliation by source / sport / market" in html
 

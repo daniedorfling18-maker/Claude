@@ -443,10 +443,32 @@ def _daily_net_returns(daily: list[dict[str, Any]]) -> list[float]:
 
 def _quarter_kelly_cap(history: list[dict[str, Any]], ladder_cap: float, settings: dict[str, Any]) -> dict[str, Any]:
     daily = _latest_per_utc_day(history)
+    invalid_observations = sum(
+        1
+        for row in daily
+        if _provided_invalid_number(row.get("portfolio_net_carry_usd_per_day"))
+        or _provided_invalid_number(row.get("portfolio_capital_usd"))
+    )
     # Finite filter (not just `is not None`): a NaN row must not enter the
     # mean/std fallback or inflate the observation count (less shrinkage =
-    # looser). Dropping it is strictly tighter.
+    # looser). Any supplied non-finite net/capital value now fails the overlay
+    # closed at zero; filtering must never turn corrupted history into the full
+    # ladder cap.
     values = [value for row in daily for value in [_finite(row.get("portfolio_net_carry_usd_per_day"))] if value is not None]
+    if invalid_observations:
+        return {
+            "daily_net_mean_usd": round(sum(values) / len(values), 6) if values else None,
+            "daily_net_std_usd": None,
+            "quarter_kelly_fraction": 0.0,
+            "inline_quarter_kelly_fraction": 0.0,
+            "kelly_shrinkage": 1.0,
+            "kelly_observations": len(values),
+            "invalid_kelly_observations": invalid_observations,
+            "kelly_lineage": "risk.shrunk_kelly_fraction",
+            "kelly_capital_usd": 0.0,
+            "binding_capital_usd": 0.0,
+            "binding_cap": "invalid_kelly_history",
+        }
     if len(values) < 2:
         return {
             "daily_net_mean_usd": values[0] if values else None,

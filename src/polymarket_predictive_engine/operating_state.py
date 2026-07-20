@@ -822,9 +822,21 @@ def build_operating_state(cfg: EngineConfig) -> dict[str, Any]:
         live_order_evidence = f"no execution ledger; live_config_enabled={live_enabled if live_enabled is not None else UNKNOWN}"
         missing_inputs.append("live_execution_ledger")
     else:
-        live_order_count = len(read_csv_rows(live_ledger))
+        live_order_rows = read_csv_rows(live_ledger)
+        if live_ledger == executor_ledger_path:
+            live_order_rows = [
+                row
+                for row in live_order_rows
+                if str(row.get("mode") or "").strip().lower() in {"canary", "portfolio"}
+                and str(row.get("action_type") or "").strip().lower() == "place"
+            ]
+        live_order_count = len(live_order_rows)
         live_orders = f"RECORDED_ORDERS={live_order_count}"
-        live_order_evidence = str(live_ledger)
+        live_order_evidence = (
+            f"{live_ledger}; executor live place rows only"
+            if live_ledger == executor_ledger_path
+            else str(live_ledger)
+        )
 
     # The monitor's top-level status may be A1_ADVISORY for a human custody
     # sweep while the executor itself is deliberately absent.  Presence is

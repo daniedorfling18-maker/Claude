@@ -215,6 +215,43 @@ def test_operating_state_derives_rows_and_wo67_preconditions(tmp_path: Path, mon
     assert "Degraded-state watchdog (reporting only)" in markdown
 
 
+def test_replay_execution_rows_are_not_reported_as_live_orders(tmp_path: Path, monkeypatch) -> None:
+    cfg = _config(tmp_path)
+    _write_complete_evidence(cfg)
+    monkeypatch.setenv("PM_VPS_DEPLOYED_SHA", "abcdef123456")
+    monkeypatch.setenv("PM_IMAGE_BUILD_SHA", "abcdef1")
+    monkeypatch.setattr("polymarket_predictive_engine.operating_state.now_utc", lambda: "2026-07-12T10:00:00Z")
+    ledger = cfg.output_root / "execution" / "execution_ledger.csv"
+    write_csv(
+        ledger,
+        [
+            {"mode": "replay", "action_type": "place", "order_id": "replay-place"},
+            {"mode": "replay", "action_type": "cancel", "order_id": "replay-cancel"},
+        ],
+        fieldnames=["mode", "action_type", "order_id"],
+    )
+
+    result = build_operating_state(cfg)
+    rows = {row["key"]: row for row in result["rows"]}
+
+    assert rows["live_orders_submitted"]["state"] == "RECORDED_ORDERS=0"
+    assert "executor live place rows only" in rows["live_orders_submitted"]["evidence"]
+
+    write_csv(
+        ledger,
+        [
+            {"mode": "replay", "action_type": "place", "order_id": "replay-place"},
+            {"mode": "canary", "action_type": "place", "order_id": "live-place"},
+            {"mode": "portfolio", "action_type": "cancel", "order_id": "live-cancel"},
+        ],
+        fieldnames=["mode", "action_type", "order_id"],
+    )
+
+    result = build_operating_state(cfg)
+    rows = {row["key"]: row for row in result["rows"]}
+    assert rows["live_orders_submitted"]["state"] == "RECORDED_ORDERS=1"
+
+
 def test_operating_state_missing_artifacts_are_unknown_never_guessed(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.delenv("PM_VPS_DEPLOYED_SHA", raising=False)
     monkeypatch.delenv("PM_IMAGE_BUILD_SHA", raising=False)

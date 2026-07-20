@@ -1591,6 +1591,20 @@ def _mb_finite(value: Any) -> float | None:
     return parsed
 
 
+def _finite_at_target(value: Any, target: float) -> bool:
+    """True only when ``value`` parses to a FINITE number at/above ``target``.
+
+    Non-finite (NaN/inf) or missing values return False regardless of the sign of
+    ``target`` — keeping the parsed value separate rather than ``_mb_finite(...) or
+    0.0`` so that a zero/negative target override can never let a NaN/-inf carry
+    bank an M-A day. Shared by the prior-run day counter and the current-run
+    ``latest_at_target`` derivation so both fail closed identically.
+    """
+
+    net = _mb_finite(value)
+    return net is not None and net >= target
+
+
 def _mb_tighter_max(settings: dict[str, Any], key: str, registered: float) -> float:
     """A configured maximum may only shrink the registered one (tighten-only).
 
@@ -1730,14 +1744,17 @@ def _distinct_days_at_target(
         previous = last_run_by_day.get(day)
         if previous is None or stamp >= str(previous.get("generated_at_utc") or ""):
             last_run_by_day[day] = run
-    days_at_target = {
-        day
-        for day, run in last_run_by_day.items()
-        if (safe_float(run.get("portfolio_net_carry_usd_per_day")) or 0.0) >= target
-        and str(run.get("share_model") or "") == "published_v2"
-        and str(run.get("portfolio_markout_measured") or "").strip().lower()
-        in {"true", "1", "yes"}
-    }
+    days_at_target: set[str] = set()
+    for day, run in last_run_by_day.items():
+        # Require a FINITE net carry at/above target (shared guard, robust to a
+        # zero/negative target override; a non-finite/missing value never counts).
+        if not _finite_at_target(run.get("portfolio_net_carry_usd_per_day"), target):
+            continue
+        if str(run.get("share_model") or "") != "published_v2":
+            continue
+        if str(run.get("portfolio_markout_measured") or "").strip().lower() not in {"true", "1", "yes"}:
+            continue
+        days_at_target.add(day)
     days_at_target.discard("")
     if current_day:
         if latest_at_target:
@@ -1890,8 +1907,13 @@ def run_maker_carry_study(cfg: EngineConfig) -> dict[str, Any]:
     portfolio_markout_measured = bool(portfolio) and all(
         entry.get("markout_measured") for entry in portfolio
     )
+    # The current run banks today only on a FINITE net carry at/above target,
+    # via the SAME shared guard _distinct_days_at_target applies to prior rows, so
+    # a computed +inf/NaN net total can never advance M-A (fail-closed / tighten).
     latest_at_target = (
-        bool(portfolio) and net_total >= target and portfolio_markout_measured
+        bool(portfolio)
+        and _finite_at_target(net_total, target)
+        and portfolio_markout_measured
     )
     today = str(summary["generated_at_utc"])[:10]
     days_at_target = _distinct_days_at_target(

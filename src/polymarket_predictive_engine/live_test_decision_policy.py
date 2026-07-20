@@ -724,9 +724,16 @@ def run_decision_policy(cfg: EngineConfig) -> dict[str, Any]:
     target = safe_float(study.get("target_net_usd_per_day")) or float((cfg.raw.get("maker_carry_study", {}) or {}).get("target_net_usd_per_day", 3.33))
     composition = _composition(study, carry_history, settings)
     recent = _latest_per_utc_day(carry_history)[-int(settings["below_target_review_runs"]) :]
-    below_target = [
-        row for row in recent if (safe_float(row.get("portfolio_net_carry_usd_per_day")) is not None and float(row["portfolio_net_carry_usd_per_day"]) < target)
-    ]
+    # Fail-closed: a non-finite (NaN/Inf) or unparseable net-carry row must COUNT
+    # as below-target, never be treated as at/above. Otherwise a corrupt row would
+    # shrink the below-target streak and make it easier to keep funding — the
+    # fail-open direction for this withhold-funding safety counter. _finite returns
+    # None for both missing and non-finite, so both conservatively count as below.
+    below_target = []
+    for row in recent:
+        net_carry = _finite(row.get("portfolio_net_carry_usd_per_day"))
+        if net_carry is None or net_carry < target:
+            below_target.append(row)
     ladder = _ladder_stage(cfg, study, live_test, live_history, settings)
     activation = _live_stage_activation(cfg, ladder)
     freshness = _kill_input_freshness(

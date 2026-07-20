@@ -2069,6 +2069,43 @@ def run_maker_carry_study(cfg: EngineConfig) -> dict[str, Any]:
     ]
     prior_runs.append({field: summary.get(field) for field in history_fields})
     write_csv(history_path, prior_runs, fieldnames=history_fields)
+    # WO-111 (rev.2, anchor-safe): persist per-day portfolio membership + each
+    # member's markout_measured flag in a SEPARATE sidecar ledger, so a future
+    # per-market gate tightening can recompute from history instead of failing
+    # closed and orphaning the at-target streak (the failure that collapsed M-A
+    # 8/7 -> 1/7 when the markout-measured requirement landed with no pre-existing
+    # per-market evidence). The anchored maker_carry_history.csv above is left
+    # BYTE-IDENTICAL (no new column) so its ledger-anchor prefix never changes
+    # (the WO-110 / paper_fills lesson). Members are built from the SAME portfolio
+    # list and per-entry markout_measured that feed the aggregate
+    # portfolio_markout_measured, so the sidecar and the aggregate can never
+    # disagree. Forward-only telemetry: it starts empty and grows one row per run;
+    # it changes NO gate (`_distinct_days_at_target` does not read it), threshold,
+    # share-model scope, or verdict, and no order path.
+    members_json = json.dumps(
+        [
+            {
+                "condition_id": str(entry.get("condition_id") or ""),
+                "markout_measured": bool(entry.get("markout_measured")),
+            }
+            for entry in portfolio
+        ],
+        separators=(",", ":"),
+        sort_keys=True,
+    )
+    members_path = out_root / "maker_carry_portfolio_members.csv"
+    prior_members = read_csv_rows(members_path)
+    prior_members.append(
+        {
+            "generated_at_utc": summary.get("generated_at_utc"),
+            "portfolio_members": members_json,
+        }
+    )
+    write_csv(
+        members_path,
+        prior_members,
+        fieldnames=["generated_at_utc", "portfolio_members"],
+    )
     _write_quote_sheet(out_root, summary, settings)
     return summary
 

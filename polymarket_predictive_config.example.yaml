@@ -337,6 +337,9 @@ ledger_anchor:
     - {glob: polymarket_shadow/shadow_positions.csv, mode: snapshot}
     - {glob: polymarket_shadow/shadow_fills.csv, mode: append_only}
     - {glob: maker_carry/maker_carry_history.csv, mode: append_only}
+    # WO-111 forward-only portfolio-membership + per-market markout sidecar (fixed
+    # two-column schema; anchor-safe new append_only file, history left untouched).
+    - {glob: maker_carry/maker_carry_portfolio_members.csv, mode: append_only}
     # WO-106 reward-epoch time series (was enrolled only in the code default,
     # which this explicit list overrides - #269 review finding).
     - {glob: maker_carry/reward_epoch_samples.csv, mode: append_only}

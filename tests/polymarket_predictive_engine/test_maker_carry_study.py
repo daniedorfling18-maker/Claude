@@ -4,6 +4,7 @@ reward shares, and a calm last-24h window hiding news-gap pick-off risk."""
 from __future__ import annotations
 
 import json
+from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -12,8 +13,21 @@ import yaml
 
 from polymarket_predictive_engine import maker_carry_study
 from polymarket_predictive_engine.config import load_config
-from polymarket_predictive_engine.maker_carry_study import run_maker_carry_study
-from polymarket_predictive_engine.utils import read_csv_rows, read_json, write_csv, write_json
+from polymarket_predictive_engine.maker_carry_study import (
+    MAKER_CARRY_LEDGER_LOCK,
+    run_maker_carry_study,
+)
+from polymarket_predictive_engine.runtime_lock import (
+    acquire_runtime_lock,
+    release_runtime_lock,
+)
+from polymarket_predictive_engine.utils import (
+    csv_columns,
+    read_csv_rows,
+    read_json,
+    write_csv,
+    write_json,
+)
 
 
 def _config(tmp_path: Path):
@@ -868,6 +882,91 @@ def test_wo111_sidecar_empty_portfolio_records_empty_list(tmp_path, monkeypatch)
     assert rows[-1]["portfolio_members"] == "[]"
     assert json.loads(rows[-1]["portfolio_members"]) == []
     assert summary["portfolio_markout_measured"] is False
+
+
+# --- P3-3: red-team maker-carry ledger write-lock ------------------------------
+
+
+def _calm_market_requests(monkeypatch) -> None:
+    markets = [_market("deep calm market", "calm", 1000.0)]
+    books = {"calm": _deep_book()}
+    histories = {("calm", "1d"): _flat_history(200), ("calm", "1w"): _flat_history(200)}
+    _fake_requests(monkeypatch, markets=markets, books=books, histories=histories)
+
+
+def test_p3_3_ledger_commit_reports_committed_and_appends(tmp_path, monkeypatch):
+    cfg = _config(tmp_path)
+    _calm_market_requests(monkeypatch)
+
+    summary = run_maker_carry_study(cfg)
+
+    assert summary["ledger_commit"]["status"] == "committed"
+    assert summary["ledger_commit"]["lock"] == MAKER_CARRY_LEDGER_LOCK
+    assert len(read_csv_rows(cfg.output_root / "maker_carry" / "maker_carry_history.csv")) == 1
+    assert len(_members_rows(cfg)) == 1
+
+
+def test_p3_3_skips_ledger_append_when_commit_lock_is_held(tmp_path, monkeypatch):
+    # Fail-safe: if a concurrent study run already holds the ledger-commit lock,
+    # this run must SKIP its append rather than clobber the ledger via the old
+    # read-modify-write full rewrite. The summary/quote-sheet still complete.
+    cfg = _config(tmp_path)
+    _calm_market_requests(monkeypatch)
+
+    held = acquire_runtime_lock(cfg, MAKER_CARRY_LEDGER_LOCK)
+    assert held.acquired
+    try:
+        summary = run_maker_carry_study(cfg)
+    finally:
+        release_runtime_lock(held)
+
+    assert summary["ledger_commit"]["status"] == "skipped_lock_held"
+    # No row was appended to either append_only ledger while the lock was held.
+    assert read_csv_rows(cfg.output_root / "maker_carry" / "maker_carry_history.csv") == []
+    assert read_csv_rows(cfg.output_root / "maker_carry" / "maker_carry_portfolio_members.csv") == []
+    # The per-run snapshot artifacts are still produced.
+    assert read_json(cfg.output_root / "maker_carry" / "maker_carry_study.json")["ledger_commit"][
+        "status"
+    ] == "skipped_lock_held"
+
+
+def test_p3_3_commit_re_reads_freshest_rows_inside_the_lock(tmp_path, monkeypatch):
+    # The race the lock closes: a second run that read the history BEFORE a
+    # concurrent run committed must not clobber that concurrent row. Proven by
+    # injecting a concurrent append AFTER this run's early read but BEFORE it takes
+    # the lock; the in-lock re-read must pick it up so the final ledger keeps it.
+    cfg = _config(tmp_path)
+    _calm_market_requests(monkeypatch)
+    history_path = cfg.output_root / "maker_carry" / "maker_carry_history.csv"
+
+    # Run 1 (real lock) establishes the ledger with the current schema.
+    monkeypatch.setattr(maker_carry_study, "now_utc", lambda: "2026-07-05T08:00:00Z")
+    run_maker_carry_study(cfg)
+    assert len(read_csv_rows(history_path)) == 1
+
+    real_runtime_lock = maker_carry_study.runtime_lock
+
+    @contextmanager
+    def _racing_lock(*args, **kwargs):
+        # Simulate a concurrent run committing a row in the window between run 2's
+        # early read and its own locked commit.
+        cols = csv_columns(history_path)
+        concurrent = read_csv_rows(history_path)
+        concurrent.append({"generated_at_utc": "2026-07-02T00:00:00Z"})
+        write_csv(history_path, concurrent, fieldnames=cols)
+        with real_runtime_lock(*args, **kwargs) as lock:
+            yield lock
+
+    monkeypatch.setattr(maker_carry_study, "runtime_lock", _racing_lock)
+    monkeypatch.setattr(maker_carry_study, "now_utc", lambda: "2026-07-06T08:00:00Z")
+    summary = run_maker_carry_study(cfg)
+
+    stamps = [row["generated_at_utc"] for row in read_csv_rows(history_path)]
+    assert summary["ledger_commit"]["status"] == "committed"
+    assert "2026-07-05T08:00:00Z" in stamps  # run 1
+    assert "2026-07-02T00:00:00Z" in stamps  # concurrent row survived (not clobbered)
+    assert "2026-07-06T08:00:00Z" in stamps  # run 2 appended on top
+    assert len(stamps) == 3
 
 
 def test_wo111_sidecar_appends_forward_only_and_round_trips(tmp_path, monkeypatch):

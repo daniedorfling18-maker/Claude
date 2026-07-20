@@ -450,6 +450,9 @@ def audit(repo: str, workflow_path: Path, *, apply_protection: bool = False) -> 
     workflow_revisions, workflow_revision_error = _gh_api(
         f"repos/{repo}/commits?path=.github/workflows/required-pr-gate.yml&sha=main&per_page=1"
     )
+    independent_workflow_revisions, independent_workflow_revision_error = _gh_api(
+        f"repos/{repo}/commits?path={INDEPENDENT_MERGE_WORKFLOW}&sha=main&per_page=1"
+    )
     repository_id: int | None = None
     try:
         repository_id = int(_mapping(repository).get("id"))
@@ -458,6 +461,11 @@ def audit(repo: str, workflow_path: Path, *, apply_protection: bool = False) -> 
     accepted_workflow_sha = ""
     if isinstance(workflow_revisions, list) and workflow_revisions:
         accepted_workflow_sha = str(_mapping(workflow_revisions[0]).get("sha") or "")
+    accepted_independent_workflow_sha = ""
+    if isinstance(independent_workflow_revisions, list) and independent_workflow_revisions:
+        accepted_independent_workflow_sha = str(
+            _mapping(independent_workflow_revisions[0]).get("sha") or ""
+        )
     accepted_workflow_text = ""
     accepted_independent_workflow_text = ""
     accepted_workflow_contents_error = ""
@@ -468,11 +476,6 @@ def audit(repo: str, workflow_path: Path, *, apply_protection: bool = False) -> 
             f"{repo}/contents/.github/workflows/required-pr-gate.yml"
             f"?ref={accepted_workflow_sha}"
         )
-        independent_contents, independent_contents_error = _gh_api(
-            "repos/"
-            f"{repo}/contents/.github/workflows/{INDEPENDENT_MERGE_WORKFLOW.name}"
-            f"?ref={accepted_workflow_sha}"
-        )
         if workflow_contents_error:
             accepted_workflow_contents_error = workflow_contents_error
         else:
@@ -480,6 +483,14 @@ def audit(repo: str, workflow_path: Path, *, apply_protection: bool = False) -> 
                 workflow_contents,
                 label="accepted required workflow",
             )
+    else:
+        accepted_workflow_contents_error = "accepted required workflow revision is missing"
+    if accepted_independent_workflow_sha:
+        independent_contents, independent_contents_error = _gh_api(
+            "repos/"
+            f"{repo}/contents/{INDEPENDENT_MERGE_WORKFLOW}"
+            f"?ref={accepted_independent_workflow_sha}"
+        )
         if independent_contents_error:
             accepted_independent_contents_error = independent_contents_error
         else:
@@ -491,8 +502,9 @@ def audit(repo: str, workflow_path: Path, *, apply_protection: bool = False) -> 
                 label="accepted independent merge workflow",
             )
     else:
-        accepted_workflow_contents_error = "accepted required workflow revision is missing"
-        accepted_independent_contents_error = "accepted workflow revision is missing"
+        accepted_independent_contents_error = (
+            "accepted independent merge workflow revision is missing"
+        )
     ruleset_summaries, rulesets_error = _gh_api(
         f"repos/{repo}/rulesets?includes_parents=true&per_page=100"
     )
@@ -538,12 +550,14 @@ def audit(repo: str, workflow_path: Path, *, apply_protection: bool = False) -> 
             "generated_at_utc": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
             "repository": repo,
             "workflow_path": str(workflow_path),
+            "accepted_independent_merge_workflow_sha": accepted_independent_workflow_sha,
             "query_errors": {
                 "runners": runners_error,
                 "workflow_runs": runs_error,
                 "collaborators": collaborators_error,
                 "repository_identity": repository_error,
                 "accepted_workflow_revision": workflow_revision_error,
+                "accepted_independent_workflow_revision": independent_workflow_revision_error,
                 "accepted_required_workflow_contents": accepted_workflow_contents_error,
                 "accepted_independent_workflow_contents": accepted_independent_contents_error,
                 "rulesets": "\n".join(

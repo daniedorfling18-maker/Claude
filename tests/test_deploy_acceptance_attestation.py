@@ -98,6 +98,27 @@ def test_owner_cannot_masquerade_as_independent_reviewer() -> None:
         )
 
 
+@pytest.mark.parametrize(
+    "malformed",
+    ["reviewer", {"reviewer": True}, ["", "  "], [123], None],
+)
+def test_malformed_eligible_reviewers_fail_closed(malformed) -> None:
+    # #298 Codex P2: a non-list (bare string / mapping / null) or a list containing a
+    # non-string / empty login must fail closed. Before the guard a bare string
+    # iterated character-wise into a nonempty reviewer set that excluded owner/author
+    # and returned PASS with no real reviewer identity.
+    attestation = _attestation()
+    attestation["eligible_reviewers"] = malformed
+
+    with pytest.raises(acceptance.AcceptanceError, match="eligible_reviewers"):
+        acceptance.verify_acceptance(
+            run=_run(),
+            attestation=attestation,
+            run_id=RUN_ID,
+            target_sha=TARGET,
+        )
+
+
 def test_old_dispatch_actor_model_is_rejected() -> None:
     run = _run()
     run["actor"] = {"login": "reviewer"}

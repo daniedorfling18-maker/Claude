@@ -119,11 +119,16 @@ def verify_acceptance(
         and attested_triggering_actor.casefold() == triggering_actor.casefold(),
         "attested actors do not match the workflow run",
     )
-    reviewers = {
-        _login(value).casefold()
-        for value in evidence.get("eligible_reviewers", []) or []
-        if _login(value)
-    }
+    raw_reviewers = evidence.get("eligible_reviewers", [])
+    # Fail closed on malformed reviewer evidence: a bare string or mapping would
+    # otherwise iterate character/key-wise into a nonempty reviewer set that could
+    # pass the owner/author-exclusion checks without a real reviewer identity list.
+    _require(isinstance(raw_reviewers, list), "eligible_reviewers attestation is not a list")
+    _require(
+        all(isinstance(value, str) and value.strip() for value in raw_reviewers),
+        "eligible_reviewers attestation is not a list of non-empty login strings",
+    )
+    reviewers = {_login(value).casefold() for value in raw_reviewers}
     _require(bool(reviewers), "no independent current-head reviewer is attested")
     _require(owner.casefold() not in reviewers, "repository owner is listed as reviewer")
     _require(author.casefold() not in reviewers, "pull-request author is listed as reviewer")

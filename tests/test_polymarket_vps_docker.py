@@ -290,12 +290,25 @@ def test_vps_deploy_acceptance_is_scheduler_isolated_and_stdin_closed():
 
 def test_vps_deploy_requires_independent_main_attestation():
     text = (ROOT / ".github" / "workflows" / "deploy-polymarket-vps-paper.yml").read_text(encoding="utf-8")
+    verifier = (ROOT / "scripts" / "verify_independent_main_acceptance.py").read_text(
+        encoding="utf-8"
+    )
 
     assert "acceptance_run_id" in text
     assert "independent-main-acceptance-${{ inputs.acceptance_run_id }}" in text
-    assert 'expected_path = ".github/workflows/independent-pr-merge.yml"' in text
-    assert 'attestation.get("merge_commit_sha")' in text
-    assert "merge workflow actor was not an independent current-head approver" in text
+    assert "name: Check out accepted deployment verifier" in text
+    assert "ref: main" in text
+    assert "persist-credentials: false" in text
+    assert "verify_independent_main_acceptance.py" in text
+    assert 'EXPECTED_WORKFLOW = ".github/workflows/independent-pr-merge.yml"' in verifier
+    assert 'run_payload.get("event") == "issue_comment"' in verifier
+    assert 'run_payload.get("head_branch") == "main"' in verifier
+    assert 'str(evidence.get("merge_workflow_run_id") or "") == run_id' in verifier
+    assert '"verified_main_parent_sha"' in verifier
+    assert 'evidence.get("merge_commit_sha")' in verifier
+    assert "workflow actor and rerun initiator are not the repository owner" in verifier
+    assert "no independent current-head reviewer is attested" in verifier
+    assert "funding state is not CLOSED" in verifier
     assert 'accepted_main_sha="$(git rev-parse origin/main)"' in text
 
 

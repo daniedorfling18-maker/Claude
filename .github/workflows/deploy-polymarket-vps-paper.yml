@@ -473,35 +473,28 @@ jobs:
             set +e
             preserve_recovery=false
             if [ "$deploy_status" -ne 0 ] && [ "${ROLLBACK_ARMED:-false}" = true ] && [ "${DEPLOY_COMMITTED:-false}" != true ]; then
-              failed_checkout="$(git rev-parse HEAD 2>/dev/null || true)"
-              if [ "$failed_checkout" = "$original_head" ]; then
-                echo "::warning::Candidate deploy failed before checkout changed; ensuring the last-known-good stack is running without invoking rollback."
-                $DOCKER compose -f "$COMPOSE_FILE" up -d --no-build
-                rollback_status=$?
-              else
-                echo "::warning::Candidate deploy failed; restoring last-known-good revision $original_head."
-                python3 "$ROLLBACK_SCRIPT" \
-                  --repo "$REPO_DIR" \
-                  --rollback-ref "$original_head" \
-                  --branch main \
-                  --compose-file "$COMPOSE_FILE" \
-                  --env-backup "$ROLLBACK_ENV" \
-                  --marker-backup "$ROLLBACK_MARKER" \
-                  --marker-was-present \
-                  --image-backup-tag "$ROLLBACK_IMAGE_TAG" \
-                  --docker-command "$DOCKER" \
-                  --telemetry-writer "$ROLLBACK_TELEMETRY_WRITER" \
-                  --tailscale-command "$SUDO tailscale" \
-                  --transport-validator "$ROLLBACK_TRANSPORT_VALIDATOR" \
-                  --private-dashboard-url "$dashboard_private_url" \
-                  --failed-target-sha "$GITHUB_SHA" \
-                  --required-service polymarket-paper-live \
-                  --required-service polymarket-dashboard \
-                  --required-service superbru-auto-pick-watchdog \
-                  --required-service vps-ops-scheduler \
-                  --report outputs/performance/vps_deploy_rollback.json
-                rollback_status=$?
-              fi
+              echo "::warning::Candidate deploy failed; restoring and revalidating the secure last-known-good stack at $original_head."
+              python3 "$ROLLBACK_SCRIPT" \
+                --repo "$REPO_DIR" \
+                --rollback-ref "$original_head" \
+                --branch main \
+                --compose-file "$COMPOSE_FILE" \
+                --env-backup "$ROLLBACK_ENV" \
+                --marker-backup "$ROLLBACK_MARKER" \
+                --marker-was-present \
+                --image-backup-tag "$ROLLBACK_IMAGE_TAG" \
+                --docker-command "$DOCKER" \
+                --telemetry-writer "$ROLLBACK_TELEMETRY_WRITER" \
+                --tailscale-command "$SUDO tailscale" \
+                --transport-validator "$ROLLBACK_TRANSPORT_VALIDATOR" \
+                --private-dashboard-url "$dashboard_private_url" \
+                --failed-target-sha "$GITHUB_SHA" \
+                --required-service polymarket-paper-live \
+                --required-service polymarket-dashboard \
+                --required-service superbru-auto-pick-watchdog \
+                --required-service vps-ops-scheduler \
+                --report outputs/performance/vps_deploy_rollback.json
+              rollback_status=$?
               if [ "$rollback_status" -ne 0 ]; then
                 recovery_parent="$HOME/.polymarket-deploy-recovery"
                 recovery_dir="$recovery_parent/$GITHUB_RUN_ID"

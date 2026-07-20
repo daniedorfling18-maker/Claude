@@ -157,8 +157,9 @@ def test_vps_deploy_preflight_runs_before_compose_replacement():
     assert "rollback_vps_paper_deploy.py" in text
     assert "rollback-last-known-good" in text
     assert "trap 'deploy_exit $?' EXIT" in text
-    assert 'failed_checkout="$(git rev-parse HEAD 2>/dev/null || true)"' in text
-    assert 'if [ "$failed_checkout" = "$original_head" ]; then' in text
+    assert "without invoking rollback" not in text
+    assert 'if [ "$failed_checkout" = "$original_head" ]; then' not in text
+    assert "restoring and revalidating the secure last-known-good stack" in text
     assert "--telemetry-writer" in text
     assert "ROLLED_BACK_TO_LAST_KNOWN_GOOD" in (
         ROOT / "scripts" / "rollback_vps_paper_deploy.py"

@@ -126,6 +126,9 @@ def test_each_registered_condition_fails_closed(tmp_path: Path) -> None:
         {"freshness": "stale"},
         {"reconciliation": "DISCREPANCY"},
         {"requote_state": "pull_quotes_now"},
+        {"requote_state": "requote_advised"},  # red-team F1: stale book / mid-drift must not fund (was fail-open)
+        {"requote_state": ""},  # empty/absent requote state fails closed (allowlist)
+        {"requote_state": "some_unregistered_state"},  # any unknown producer state fails closed
         {"sharp_qualified": False},
         {"qual_generated": "2026-07-17T10:00:00Z"},  # stale qualification (>30m)
         {"qual_candidate": "0xmismatch"},  # qualification about a different market
@@ -143,6 +146,24 @@ def test_each_registered_condition_fails_closed(tmp_path: Path) -> None:
         state, rows, _ = mod.evaluate_stage_ticket_eligibility(cfg, as_of=NOW)
         assert state == "not_eligible", overrides
         assert any(not row["passed"] for row in rows)
+
+
+def test_requote_condition_is_an_allowlist_only_quotes_ok_funds(tmp_path: Path) -> None:
+    # Red-team F1: requote_not_pulling_candidate must be an allowlist. Only quotes_ok
+    # passes; requote_advised (stale book / mid drift) previously slipped through the
+    # denylist and read eligible — a fund-path fail-open.
+    def _requote_row(cfg):
+        _, rows, _ = mod.evaluate_stage_ticket_eligibility(cfg, as_of=NOW)
+        return next(r for r in rows if r["condition"] == "requote_not_pulling_candidate")
+
+    ok_cfg = _cfg(tmp_path / "ok")
+    _write_healthy_inputs(ok_cfg, requote_state="quotes_ok")
+    assert _requote_row(ok_cfg)["passed"] is True
+
+    for blocked in ("requote_advised", "pull_quotes_now", "STOP", "", "future_state"):
+        cfg = _cfg(tmp_path / f"blocked_{blocked or 'empty'}")
+        _write_healthy_inputs(cfg, requote_state=blocked)
+        assert _requote_row(cfg)["passed"] is False, blocked
 
 
 def test_missing_artifacts_evaluate_not_eligible(tmp_path: Path) -> None:

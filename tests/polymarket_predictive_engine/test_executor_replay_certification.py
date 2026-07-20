@@ -12,6 +12,7 @@ from polymarket_predictive_engine.cli import COMMANDS, build_parser
 from polymarket_predictive_engine.config import load_config
 from polymarket_predictive_engine.executor_replay_certification import (
     REQUIRED_SYNTHETIC_KINDS,
+    _settings,
     build_replay_scenario_corpus,
     certify_executor_replay,
     write_reference_stub_log,
@@ -20,6 +21,33 @@ from polymarket_predictive_engine.utils import read_json, write_csv, write_json
 
 
 ROOT = Path(__file__).resolve().parents[2]
+
+
+def _write_binding(cfg, binding) -> None:
+    payload = {"generated_at_utc": "2026-07-20T00:00:00Z"}
+    if binding is not None:
+        payload["sizing"] = {"binding_capital_usd": binding}
+    write_json(cfg.output_root / "maker_carry" / "decision_policy.json", payload)
+
+
+def test_settings_zero_binding_clamps_stage_cap_fail_closed(tmp_path: Path) -> None:
+    # #56: a present binding_capital_usd=0.0 (invalid Kelly -> fail-closed) must clamp
+    # the certification stage cap to the floor (0.01), not leave the positive stage0.
+    cfg = _config(tmp_path)
+    _write_binding(cfg, 0.0)
+    assert _settings(cfg)["stage_cap_usd"] == 0.01
+
+
+def test_settings_nonfinite_binding_fails_closed(tmp_path: Path) -> None:
+    cfg = _config(tmp_path)
+    _write_binding(cfg, "nan")
+    assert _settings(cfg)["stage_cap_usd"] == 0.01
+
+
+def test_settings_positive_binding_caps_below_stage0(tmp_path: Path) -> None:
+    cfg = _config(tmp_path)
+    _write_binding(cfg, 25.0)
+    assert _settings(cfg)["stage_cap_usd"] == 25.0
 
 
 def _config(tmp_path: Path):

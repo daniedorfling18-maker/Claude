@@ -11,6 +11,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 import hashlib
 import json
+import math
 from pathlib import Path
 from typing import Any, Mapping
 
@@ -128,8 +129,18 @@ def _policy_cap(cfg: EngineConfig, latest: Mapping[str, Any]) -> tuple[float, st
     policy = _mapping(read_json(cfg.output_root / "maker_carry" / "decision_policy.json", default={}) or {})
     configured = _mapping(cfg.raw.get("decision_policy"))
     candidates: list[tuple[float, str]] = []
+    # binding_capital_usd is the authoritative policy sizing output: when the policy
+    # publishes it, it caps exposure, and an explicit 0.0 (e.g. invalid Kelly history
+    # -> fail-closed) means ZERO exposure, not "no data". Honor a present, finite value
+    # >= 0; a present-but-non-finite/negative value is corrupt risk input -> clamp to
+    # 0.0 (fail-closed). The prior uniform `> 0` filter silently dropped a 0.0 binding
+    # and fell back to a positive stage cap -- a fail-open.
+    binding_raw = _mapping(policy.get("sizing")).get("binding_capital_usd")
+    if binding_raw is not None and str(binding_raw).strip() != "":
+        binding = safe_float(binding_raw)
+        binding_cap = binding if (binding is not None and math.isfinite(binding) and binding >= 0) else 0.0
+        candidates.append((binding_cap, "decision_policy.sizing.binding_capital_usd"))
     for value, source in (
-        (_mapping(policy.get("sizing")).get("binding_capital_usd"), "decision_policy.sizing.binding_capital_usd"),
         (_mapping(policy.get("ladder")).get("ladder_capital_usd"), "decision_policy.ladder.ladder_capital_usd"),
         (configured.get("stage0_capital_usd"), "effective_config.stage0_capital_usd"),
         (latest.get("stage_cap_usd"), "execution_ledger.stage_cap_usd"),

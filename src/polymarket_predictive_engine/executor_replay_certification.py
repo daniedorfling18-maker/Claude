@@ -12,6 +12,7 @@ import csv
 import gzip
 import hashlib
 import json
+import math
 from pathlib import Path
 from typing import Any, Iterable, Mapping
 
@@ -68,9 +69,17 @@ def _settings(cfg: EngineConfig) -> dict[str, Any]:
     heartbeat_gap = min(DEFAULT_HEARTBEAT_GAP_SECONDS, configured_gap or DEFAULT_HEARTBEAT_GAP_SECONDS)
     stage_cap = safe_float(decision.get("stage0_capital_usd")) or 100.0
     current_policy = _mapping(_read_json(cfg.output_root / "maker_carry" / "decision_policy.json"))
-    binding_cap = safe_float(_mapping(current_policy.get("sizing")).get("binding_capital_usd"))
-    if binding_cap is not None and binding_cap > 0:
-        stage_cap = min(stage_cap, binding_cap)
+    # An explicit binding_capital_usd caps stage_cap. A present 0.0 (invalid Kelly
+    # history -> fail-closed) means ZERO, and a present-but-non-finite/negative value
+    # is corrupt risk input -> also clamp to 0. The prior `> 0` dropped a 0.0 binding
+    # and left a positive cap -- a fail-open.
+    binding_raw = _mapping(current_policy.get("sizing")).get("binding_capital_usd")
+    if binding_raw is not None and str(binding_raw).strip() != "":
+        binding_cap = safe_float(binding_raw)
+        if binding_cap is not None and math.isfinite(binding_cap) and binding_cap >= 0:
+            stage_cap = min(stage_cap, binding_cap)
+        else:
+            stage_cap = 0.0
     return {
         "enabled": bool(raw.get("enabled", True)),
         "heartbeat_gap_seconds": max(1, heartbeat_gap),

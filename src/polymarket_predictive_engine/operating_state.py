@@ -186,7 +186,12 @@ def _age_slo_row(
 
 def _latest_websocket_timestamp(cfg: EngineConfig) -> tuple[datetime | None, str, str]:
     latest_path = cfg.output_root / "polymarket_websocket" / "websocket_messages_latest.json"
+    retained_path = cfg.output_root / "polymarket_websocket" / "websocket_messages.json"
     messages = read_json(latest_path, default=[])
+    source_path = latest_path
+    if not isinstance(messages, list) or not messages:
+        messages = read_json(retained_path, default=[])
+        source_path = retained_path
     candidates: list[tuple[datetime, str]] = []
     if isinstance(messages, list):
         for row in messages:
@@ -198,10 +203,10 @@ def _latest_websocket_timestamp(cfg: EngineConfig) -> tuple[datetime | None, str
                 candidates.append((parsed, raw))
     if candidates:
         candidates.sort(key=lambda item: item[0])
-        return candidates[-1][0], candidates[-1][1], str(latest_path)
-    summary_path = cfg.output_root / "polymarket_websocket" / "websocket_summary.json"
-    observed, raw = _path_timestamp(summary_path, fields=("generated_at_utc", "collected_at_utc"))
-    return observed, raw, str(summary_path)
+        return candidates[-1][0], candidates[-1][1], str(source_path)
+    # A refreshed error/summary file is not a market observation. With no
+    # captured message in either window, freshness is unknown and fails closed.
+    return None, "", str(source_path)
 
 
 def _build_slo_block(cfg: EngineConfig, *, as_of: datetime) -> dict[str, Any]:
@@ -507,7 +512,10 @@ def _front_door_region(text: str, *, stop_heading: str) -> str:
 
 def front_door_drift_violations(*, readme_text: str, agents_text: str) -> list[str]:
     regions = {
-        "README.md": _front_door_region(readme_text, stop_heading="## What we learned"),
+        # README is short, operator-facing, and entirely front-door prose.
+        # Scan the whole file so stale dynamic claims cannot hide below a
+        # historical heading while the generated-state pointer remains clean.
+        "README.md": readme_text,
         "AGENTS.md": _front_door_region(agents_text, stop_heading="## Run model"),
     }
     violations: list[str] = []

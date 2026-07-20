@@ -59,6 +59,7 @@ def test_failed_middle_step_still_runs_retention_and_anchor(tmp_path: Path) -> N
         "train-skill-model",
     ]
     assert calls[-2:] == ["corpus-retention", "anchor-ledgers"]
+    assert calls.index("reward-epoch-sample") == calls.index("maker-carry-study") + 1
     assert payload["mandatory_tail_completed"] is True
     by_step = {row["step"]: row for row in payload["steps"]}
     assert by_step["maker_fill_replay"]["exit_code"] == 1
@@ -99,7 +100,7 @@ def test_deadline_skips_unstarted_work_but_not_mandatory_tail(
     assert payload["deadline_seconds"] == 1
     assert payload["status"] == "deadline_exceeded"
     assert calls == ["backfill-resolved-markets", "corpus-retention", "anchor-ledgers"]
-    assert len(payload["skipped_deadline_steps"]) == 24
+    assert len(payload["skipped_deadline_steps"]) == 25
     assert payload["mandatory_tail_completed"] is True
 
 

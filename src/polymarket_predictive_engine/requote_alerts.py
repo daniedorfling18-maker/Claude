@@ -317,7 +317,7 @@ def _enrich_ticket_metadata(
         if end_date:
             enriched["end_date_utc"] = end_date
     if not str(enriched.get("event_start_time_utc") or "").strip():
-        event_start = gamma_market.get("gameStartTime")
+        event_start = gamma_market.get("gameStartTime") or gamma_market.get("eventStartTime")
         if event_start:
             enriched["event_start_time_utc"] = event_start
     enriched["ticket_metadata_sources"] = sources

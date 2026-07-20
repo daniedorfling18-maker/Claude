@@ -290,6 +290,22 @@ def test_candidate_staleness_reasons_cover_close_and_resolution_states():
     ) == ["resolution_disputed"]
 
 
+def test_same_month_title_range_remains_live_through_its_last_day():
+    market = {
+        "question": "Will the event happen July 9-20, 2026?",
+        "endDate": "2026-07-20T23:59:59Z",
+    }
+
+    assert maker_carry_study._candidate_staleness_reasons(
+        market,
+        as_of=datetime(2026, 7, 13, 12, tzinfo=timezone.utc),
+    ) == []
+    assert maker_carry_study._candidate_staleness_reasons(
+        market,
+        as_of=datetime(2026, 7, 21, 12, tzinfo=timezone.utc),
+    ) == ["venue_close_time_past", "title_date_past"]
+
+
 def test_past_dated_rewarded_market_is_excluded_before_selection(tmp_path, monkeypatch):
     cfg = _config(tmp_path)
     market = _market(

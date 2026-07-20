@@ -258,7 +258,13 @@ def test_missing_inputs_render_unknown_and_invalid_action_fails_closed(tmp_path:
     result = build_stage_day(cfg)
 
     assert result["status"] == "incomplete_unknown_inputs"
-    assert result["missing_inputs"] == ["maker_carry_study", "requote_alerts", "decision_policy"]
+    assert result["missing_inputs"] == [
+        "maker_carry_study",
+        "requote_alerts",
+        "decision_policy",
+        "yesterday_reconciliation",
+        "cost_ledger",
+    ]
     assert result["order_tickets"]["state"] == "UNKNOWN"
     assert result["yesterday_reconciliation"]["state"] == "UNKNOWN"
     assert result["cost_delta"]["state"] == "UNKNOWN"
@@ -273,6 +279,30 @@ def test_missing_inputs_render_unknown_and_invalid_action_fails_closed(tmp_path:
             price=0.48,
             size_shares=100,
         )
+
+
+def test_present_maker_artifacts_do_not_hide_missing_reconciliation_and_cost(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    cfg = _config(tmp_path)
+    _seed_complete_inputs(cfg)
+    (cfg.output_root / "performance" / "wallet_reconciliation_wallet_history.csv").unlink()
+    (cfg.output_root / "performance" / "cost_ledger.csv").unlink()
+    monkeypatch.setattr(
+        "polymarket_predictive_engine.stage_operator.now_utc",
+        lambda: FIXED_NOW,
+    )
+
+    result = build_stage_day(cfg)
+
+    assert result["status"] == "incomplete_unknown_inputs"
+    assert result["missing_inputs"] == [
+        "yesterday_reconciliation",
+        "cost_ledger",
+    ]
+    assert result["yesterday_reconciliation"]["state"] == "UNKNOWN"
+    assert result["cost_delta"]["state"] == "UNKNOWN"
 
 
 def test_disabled_stage_operator_still_writes_summary(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

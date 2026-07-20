@@ -110,6 +110,33 @@ def test_guard_classifies_public_hash_lists_but_rejects_credential_lists(tmp_pat
     assert credential_value not in json.dumps(result)
 
 
+def test_guard_preserves_sensitive_parent_name_for_json_array_values(tmp_path: Path) -> None:
+    repo = _guard_repo(tmp_path)
+    ops = repo / "outputs" / "ops_scheduler"
+    ops.mkdir(parents=True)
+    planted = "not-hex-but-still-secret-value"
+    (ops / "status.json").write_text(
+        json.dumps(
+            {
+                "api_key": [planted],
+                "nested": {"private_key": [planted]},
+                "token_ids": ["public-token-id"],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    result = scan_telemetry_credentials(repo)
+
+    assert result["status"] == "FAIL"
+    assert result["finding_count"] == 2
+    assert {row["location"] for row in result["findings"]} == {
+        "$.api_key[0]",
+        "$.nested.private_key[0]",
+    }
+    assert planted not in json.dumps(result)
+
+
 def test_telemetry_push_runs_guard_before_archive_or_snapshot_copy() -> None:
     text = (REPO_ROOT / "scripts" / "push_vps_telemetry.sh").read_text(encoding="utf-8")
 

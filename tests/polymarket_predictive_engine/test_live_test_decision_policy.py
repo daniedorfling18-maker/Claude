@@ -203,6 +203,36 @@ def test_disabled_policy_is_also_content_addressed(tmp_path) -> None:
     assert policy.policy_version_matches(result)
 
 
+def test_composition_does_not_double_count_today_when_history_has_todays_row():
+    # Red-team F2: the scheduler appends today's maker-carry row to history BEFORE the
+    # decision policy runs, so today's top is already in `history`. It must not be
+    # counted a second time via current_top.
+    settings = {"composition_stable_days": 7, "composition_required_recurrence": 4}
+    history = [
+        {"generated_at_utc": "2026-07-15T08:00:00Z", "top_portfolio_market": "0xm1"},
+        {"generated_at_utc": "2026-07-16T08:00:00Z", "top_portfolio_market": "0xm1"},
+    ]
+    study = {"generated_at_utc": "2026-07-16T08:00:00Z", "portfolio": [{"condition_id": "0xm1"}]}
+
+    comp = policy._composition(study, history, settings)
+
+    assert comp["most_recurrent_market"] == "0xm1"
+    assert comp["most_recurrent_count"] == 2  # two distinct UTC days, not three
+    assert comp["observations"] == 2
+
+
+def test_composition_counts_current_top_when_today_absent_from_history():
+    # No regression the other way: when today's row is not yet in history, the study's
+    # current top still contributes its one distinct day.
+    settings = {"composition_stable_days": 7, "composition_required_recurrence": 4}
+    history = [{"generated_at_utc": "2026-07-15T08:00:00Z", "top_portfolio_market": "0xm1"}]
+    study = {"generated_at_utc": "2026-07-16T08:00:00Z", "portfolio": [{"condition_id": "0xm1"}]}
+
+    comp = policy._composition(study, history, settings)
+
+    assert comp["most_recurrent_count"] == 2  # history day 15 + today 16
+
+
 def test_policy_table_churning_pass_halves_recurrent_market_target(tmp_path):
     cfg = _config(tmp_path)
     _write_study(cfg, _study(top="0xm7"))

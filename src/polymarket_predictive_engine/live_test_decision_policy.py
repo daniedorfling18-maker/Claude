@@ -269,7 +269,16 @@ def _composition(study: dict[str, Any], history: list[dict[str, Any]], settings:
     recent = daily[-window:]
     top_markets = [_history_top_market(row) for row in recent if _history_top_market(row)]
     current_top = _latest_top_market(study)
-    if current_top:
+    # Count each distinct UTC day's top exactly once. The scheduler appends today's
+    # maker-carry row to history BEFORE the decision policy runs, so today is usually
+    # already represented in `recent`; OR-in the study's current top only when its day
+    # is NOT already present, otherwise today's top is counted twice -- inflating
+    # most_recurrent_count and declaring composition 'stable' (full-target funding) one
+    # recurrence early, and possibly flipping the most-recurrent market. Fail-closed /
+    # tighten-only: this can only lower a recurrence count, never raise it.
+    study_day = str(study.get("generated_at_utc") or "")[:10]
+    recent_days = {str(row.get("generated_at_utc") or "")[:10] for row in recent}
+    if current_top and study_day and study_day not in recent_days:
         top_markets.append(current_top)
     top_markets = top_markets[-window:]
     counts = Counter(top_markets)

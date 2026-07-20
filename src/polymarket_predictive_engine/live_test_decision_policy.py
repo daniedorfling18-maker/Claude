@@ -411,6 +411,14 @@ def _finite(value: Any) -> float | None:
     return parsed
 
 
+def _provided_invalid_number(value: Any) -> bool:
+    """Return True when a supplied safety value is not a finite number."""
+
+    if value is None or (isinstance(value, str) and not value.strip()):
+        return False
+    return _finite(value) is None
+
+
 def _daily_net_returns(daily: list[dict[str, Any]]) -> list[float]:
     """Per-day portfolio returns (P&L / capital base) for the Kelly overlay.
 
@@ -639,9 +647,19 @@ def _kill_criteria(
         "tighten_only_maximum_seconds": REGISTERED_KILL_INPUT_MAX_AGE_SECONDS,
     }
     # Finite parses (NaN would silently disable both kill checks: NaN <= t is
-    # False, and a NaN first element poisons min()). Non-finite = missing; the
-    # WO-86 staleness guard separately covers absent safety data.
-    cumulative_net = _finite(latest.get("net_score_usd"))
+    # False, and a NaN first element poisons min()). During an active live
+    # stage, a supplied malformed/non-finite score is itself a fail-closed kill
+    # input; timestamp freshness must not turn it into an apparently clean
+    # missing value.
+    guard_active = bool(freshness.get("guard_active"))
+    cumulative_raw = latest.get("net_score_usd")
+    cumulative_net = _finite(cumulative_raw)
+    cumulative_invalid = guard_active and _provided_invalid_number(cumulative_raw)
+    invalid_single_day_inputs = sum(
+        1
+        for row in daily
+        if guard_active and _provided_invalid_number(row.get("_daily_net_score_usd"))
+    )
     single_day_values = [value for row in daily for value in [_finite(row.get("_daily_net_score_usd"))] if value is not None]
     fill_overrun_days = 0
     for row in daily:
@@ -666,13 +684,17 @@ def _kill_criteria(
             "latest_observation_source": freshness.get("latest_observation_source"),
         },
         "cumulative_real_net_score": {
-            "triggered": cumulative_net is not None and cumulative_net <= float(settings["kill_cumulative_net_score_usd"]),
+            "triggered": cumulative_invalid
+            or (cumulative_net is not None and cumulative_net <= float(settings["kill_cumulative_net_score_usd"])),
             "value": cumulative_net,
+            "invalid_input": cumulative_invalid,
             "threshold": float(settings["kill_cumulative_net_score_usd"]),
         },
         "single_day_net_score": {
-            "triggered": bool(single_day_values and min(single_day_values) <= float(settings["kill_single_day_net_usd"])),
+            "triggered": bool(invalid_single_day_inputs)
+            or bool(single_day_values and min(single_day_values) <= float(settings["kill_single_day_net_usd"])),
             "worst_day": min(single_day_values) if single_day_values else None,
+            "invalid_input_count": invalid_single_day_inputs,
             "threshold": float(settings["kill_single_day_net_usd"]),
         },
         "fills_outrunning_model_two_days": {

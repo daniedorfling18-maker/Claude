@@ -73,6 +73,7 @@ def _steps(config_path: str) -> list[HarvestStep]:
         HarvestStep("drift_scan", _engine_command("drift-scan", config_path)),
         HarvestStep("collect_wallet_intel", _engine_command("collect-wallet-intel", config_path)),
         HarvestStep("maker_carry_study", _engine_command("maker-carry-study", config_path)),
+        HarvestStep("reward_epoch_sample", _engine_command("reward-epoch-sample", config_path)),
         HarvestStep(
             "collect_maker_replay_data",
             _engine_command("collect-maker-replay-data", config_path),

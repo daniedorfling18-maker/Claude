@@ -987,15 +987,31 @@ def _ma_run(day: str, net: float, *, model: str = "published_v2", hour: str = "1
 
 
 def test_ma_nonfinite_net_carry_does_not_bank_a_day() -> None:
-    # Red-team P3-1: a +inf (or NaN) net-carry row must NOT count toward M-A.
-    # NaN already fails the >= comparison, but +inf silently passed it before the
-    # _mb_finite guard; treat any non-finite net carry as not-at-target (tighten).
-    for bad in (float("inf"), float("nan")):
+    # Red-team P3-1: a +inf/-inf/NaN net-carry row must NOT count toward M-A.
+    # NaN already failed the >= comparison, but +inf silently passed it before the
+    # finite guard; treat any non-finite net carry as not-at-target (tighten).
+    for bad in (float("inf"), float("-inf"), float("nan")):
         runs = [_ma_run("2026-07-10", bad)]
         days = maker_carry_study._distinct_days_at_target(
             runs, 3.33, current_day="", latest_at_target=False
         )
         assert days == set(), bad
+
+
+def test_finite_at_target_guard_is_robust_to_nonpositive_target() -> None:
+    # Codex #342 review (A + B): the shared guard used for BOTH the prior-run day
+    # counter and the current-run latest_at_target derivation must reject
+    # non-finite values regardless of the sign of target. A zero/negative target
+    # override must not let an `or 0.0`-style fallback bank a NaN/-inf day.
+    guard = maker_carry_study._finite_at_target
+    assert guard(5.0, 3.33) is True
+    assert guard(1.0, 3.33) is False
+    for bad in (float("inf"), float("-inf"), float("nan"), None, "", "n/a"):
+        for target in (3.33, 0.0, -1.0, -1e9):
+            assert guard(bad, target) is False, (bad, target)
+    # A genuine finite value still counts at/above a non-positive target.
+    assert guard(0.0, 0.0) is True
+    assert guard(-2.0, -5.0) is True
 
 
 def test_ma_intraday_spike_does_not_bank_a_day() -> None:

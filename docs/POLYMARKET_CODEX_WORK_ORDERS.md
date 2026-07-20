@@ -4222,13 +4222,15 @@ artifact is fresh when the gate reads it.
 
 ## ACTIVE BATCH for Codex (opened 2026-07-18, re-engagement)
 
-Codex is re-engaged. Current assignment: **WO-111 — ISSUED to Codex
-2026-07-19 (spec below). Forward-only maker-carry history telemetry
-(persist per-day portfolio membership + per-market markout). Non-frozen —
-adds one auditability column and changes no gate, threshold, share-model
-scope, or verdict — but it sits inside the maker-gate module, so the merge
-routes to the owner after a line-audit + red-team pass; the orchestrator does
-not self-merge it.** Work only what a bridge dispatch
+Codex is re-engaged. Current assignment: **WO-111 (rev.2, anchor-safe) —
+ISSUED to Codex 2026-07-19 (spec below; also in the Current queue for Codex).
+Forward-only maker-carry telemetry: persist per-day portfolio membership +
+per-market markout in a NEW anchor-safe sidecar `maker_carry_portfolio_members.csv`,
+leaving the append_only-anchored `maker_carry_history.csv` byte-identical.
+Changes no gate, threshold, share-model scope, or verdict, but it enrolls a new
+anchored ledger glob and sits in the maker-gate module, so the merge routes to
+the owner after a line-audit + red-team pass; the orchestrator does not
+self-merge it.** Work only what a bridge dispatch
 (a `[orchestrator-dispatch]` @codex post — see "Dispatch bridge" below) or the
 owner assigns from this file; a dispatch may assign any registered WO (frozen
 included), but frozen/registered surfaces stay owner-merge. WO-107
@@ -4469,13 +4471,22 @@ Do NOT: touch any gate (`maker_carry_study.py` gate logic, M-A/M-B/M-C),
 any order path. Do NOT build the realism consumer or change the study's reward
 estimate — that is a separate future WO that depends on this data existing.
 
-## WO-111 — Persist per-day portfolio membership + per-market markout in the maker-carry history ledger (ISSUED 2026-07-19; forward-only telemetry hardening)
+## WO-111 — Persist per-day portfolio membership + per-market markout in a NEW anchor-safe sidecar ledger (ISSUED 2026-07-19; rev.2 anchor-safe; forward-only telemetry hardening)
 
 Priority: MEDIUM — auditability / anti-regression, not funding-gating.
-Merge classification: NON-FROZEN (adds one telemetry column; changes no gate,
-threshold, share-model scope, verdict, or promotion control). Because it lives
-inside the maker-gate module, require a line-audit + red-team pass before merge
-and route the merge to the OWNER; the orchestrator does not self-merge it.
+Merge classification: registered/control-surface (adds a new anchor-enrolled
+ledger glob). Changes no gate, threshold, share-model scope, verdict, or
+promotion control. Require a line-audit + red-team pass before merge and route
+the merge to the OWNER; the orchestrator does not self-merge it.
+
+Rev.2 note (2026-07-19). The rev.1 spec proposed adding a `portfolio_members`
+COLUMN to `maker_carry_history.csv`. That is REJECTED: `maker_carry_history.csv`
+is enrolled `append_only` in `ledger_anchor.py` (DEFAULT_LEDGER_REGISTRY) and the
+config `ledger_globs`. `write_csv` rewrites the whole file each run, so adding a
+column changes bytes covered by every prior anchor and the next
+`verify-ledger-chain` fails `blocked_broken_chain` — the exact WO-110 /
+paper_fills.csv incident class. This revision instead writes a NEW sidecar file
+and leaves `maker_carry_history.csv` byte-identical.
 
 Problem. `maker_carry_history.csv` persists only portfolio-level aggregates plus
 the *top* market (`maker_carry_study.py` `history_fields`, ~L1998-2011). When
@@ -4492,72 +4503,116 @@ persisted). Any future tightening of a per-market condition will orphan the
 streak the same way.
 
 Goal. Persist, going forward, enough per-run detail that a future rule can
-recompute a per-market gate condition from history instead of failing closed:
-the full portfolio membership and each member's `markout_measured`.
+recompute a per-market gate condition from history instead of failing closed —
+the full portfolio membership and each member's `markout_measured` — WITHOUT
+disturbing the anchored `maker_carry_history.csv`.
 
 Files: `src/polymarket_predictive_engine/maker_carry_study.py`;
-`tests/polymarket_predictive_engine/test_maker_carry_study.py`.
+`src/polymarket_predictive_engine/ledger_anchor.py`;
+`polymarket_predictive_config.example.yaml`;
+`tests/polymarket_predictive_engine/test_maker_carry_study.py`;
+`tests/polymarket_predictive_engine/test_ledger_anchor.py` (or the existing
+ledger-anchor test module).
 
-Change (exact). In `run_maker_carry_study`, immediately after
-`portfolio_markout_measured` is computed (~L1854) and alongside the other
-portfolio summary assignments (~L1934), store a pre-serialized JSON string
-derived from the SAME `portfolio` list and the SAME per-entry `markout_measured`
-that feed the aggregate `portfolio_markout_measured` (L1855), so the column and
-the aggregate can never disagree:
+Change (exact).
+1. NEW sidecar ledger `maker_carry/maker_carry_portfolio_members.csv` with a
+   FIXED two-column schema, forever: `generated_at_utc`, `portfolio_members`.
+   `maker_carry_history.csv` is NOT modified (no new column, byte-identical —
+   its anchor prefix is preserved).
+2. In `run_maker_carry_study`, right after the existing history write
+   (`write_csv(history_path, prior_runs, ...)`, ~L2013), build the members JSON
+   from the SAME `portfolio` list and the SAME per-entry `markout_measured` that
+   feed the aggregate `portfolio_markout_measured` (L1855), so the sidecar and
+   the aggregate can never disagree, then append one row and rewrite the sidecar
+   with the same read-prior + append pattern the history file uses:
 
-```python
-summary["portfolio_members"] = json.dumps(
-    [
-        {"condition_id": str(entry.get("condition_id") or ""),
-         "markout_measured": bool(entry.get("markout_measured"))}
-        for entry in portfolio
-    ],
-    separators=(",", ":"),
-    sort_keys=True,
-)
-```
+   ```python
+   members_json = json.dumps(
+       [
+           {"condition_id": str(entry.get("condition_id") or ""),
+            "markout_measured": bool(entry.get("markout_measured"))}
+           for entry in portfolio
+       ],
+       separators=(",", ":"),
+       sort_keys=True,
+   )  # empty portfolio -> "[]"
+   members_path = out_root / "maker_carry_portfolio_members.csv"
+   prior_members = read_csv_rows(members_path)
+   prior_members.append(
+       {"generated_at_utc": summary["generated_at_utc"], "portfolio_members": members_json}
+   )
+   write_csv(members_path, prior_members,
+             fieldnames=["generated_at_utc", "portfolio_members"])
+   ```
 
-Empty portfolio -> `"[]"`. Store it as a JSON string (not a Python list) so
-`write_csv`/`serialize_value` never guesses the encoding; `csv.DictWriter` quotes
-the comma-bearing cell and `read_csv_rows` round-trips it back for `json.loads`.
-Append `"portfolio_members"` to the end of `history_fields` (preserve existing
-column order).
+   Store `portfolio_members` as a pre-serialized JSON STRING so
+   `write_csv`/`serialize_value` never guesses the encoding; `csv.DictWriter`
+   quotes the comma-bearing cell and `read_csv_rows` round-trips it for
+   `json.loads`.
+3. ENROLL the sidecar `append_only` in BOTH `ledger_anchor.py`
+   `DEFAULT_LEDGER_REGISTRY` and the config `ledger_globs`, placed with the other
+   `maker_carry/*` entries:
+   `{"glob": "maker_carry/maker_carry_portfolio_members.csv", "mode": "append_only"}`.
+   Enrolling a brand-new (initially empty) file is anchor-safe — there are no
+   prior anchored bytes to invalidate. The fixed two-column schema means the file
+   never needs a schema change, so it can never trigger the column-addition break;
+   any future per-member fields go INSIDE the JSON payload, not as new columns.
 
 Invariants / constraints:
-- FORWARD-ONLY. Do not synthesize values for pre-existing rows. The per-run
-  rewrite (`write_csv(history_path, prior_runs, ...)`, ~L2013) leaves old rows
-  blank (`""`) for the new column; that blank continues to fail closed under
-  every markout rule exactly as today.
-- GATE UNTOUCHED. `_distinct_days_at_target` (L1660-1711) must continue to key
-  only on `portfolio_net_carry_usd_per_day`, `share_model`, and
-  `portfolio_markout_measured`; it must NOT read `portfolio_members`. No gate
-  count changes as a result of this WO.
-- LIST-OF-OBJECTS encoding so a later WO can add per-member fields (Tier-0
-  coverage, resolution_risk) without breaking the parse; adding those fields is
-  explicitly OUT OF SCOPE here.
+- ANCHOR-SAFE. `maker_carry_history.csv` is untouched and byte-identical; its
+  anchor prefix is preserved. The sidecar has a frozen two-column schema.
+- FORWARD-ONLY. The sidecar starts empty and grows one row per run from now on;
+  no attempt is made to reconstruct pre-existing days. A future gate rule reads
+  the sidecar for days it covers and fails closed for days it does not.
+- GATE UNTOUCHED. `_distinct_days_at_target` (L1660-1711) is NOT modified and
+  does NOT read the sidecar; it still keys only on
+  `portfolio_net_carry_usd_per_day`, `share_model`, and
+  `portfolio_markout_measured` from `maker_carry_history.csv`. No gate count
+  changes as a result of this WO.
+- LIST-OF-OBJECTS JSON so a later WO can add per-member fields (Tier-0 coverage,
+  resolution_risk) inside the payload without a schema change; adding those
+  fields is explicitly OUT OF SCOPE here.
 
-Tests (all in `test_maker_carry_study.py`):
-1. Two measured members -> `portfolio_members` parses to 2 objects, both
-   `markout_measured=True`; aggregate `portfolio_markout_measured` stays True.
-2. Mixed (one member False) -> column reflects `[True, False]`; aggregate stays
-   False (unchanged behavior).
-3. Empty portfolio -> `portfolio_members == "[]"`; aggregate False; no exception.
-4. CSV round-trip -> write then `read_csv_rows`; `json.loads(row["portfolio_members"])`
-   equals the written membership (proves comma-quoting survives).
-5. Backward-compat + gate-invariance -> seed an existing history CSV whose rows
-   lack the column; run the study; assert (a) the rewritten file has the column
-   with old rows blank, and (b) `_distinct_days_at_target` returns the IDENTICAL
-   day set it returned before the column existed.
-6. Aggregate/column consistency -> for any generated portfolio,
-   `portfolio_markout_measured == all(m["markout_measured"] for m in
-   json.loads(portfolio_members))` (and False when empty).
+Tests:
+1. `test_maker_carry_study.py`: two measured members -> the sidecar's newest row
+   `portfolio_members` parses to 2 objects, both `markout_measured=True`;
+   aggregate `portfolio_markout_measured` stays True.
+2. Mixed (one member False) -> parses to `[True, False]`; aggregate stays False.
+3. Empty portfolio -> newest sidecar `portfolio_members == "[]"`; aggregate
+   False; no exception.
+4. CSV round-trip -> after the study run, `read_csv_rows(members_path)` +
+   `json.loads` on the newest row equals the written membership (comma-quoting
+   survives).
+5. `maker_carry_history.csv` UNCHANGED -> assert the history file's header and
+   every prior row are byte-identical before/after this WO (no `portfolio_members`
+   column anywhere in it), and `_distinct_days_at_target` returns the IDENTICAL
+   day set as before this WO.
+6. Aggregate/sidecar consistency -> `portfolio_markout_measured ==
+   all(m["markout_measured"] for m in json.loads(newest_members))` (False when
+   empty).
+7. `test_ledger_anchor.py`: the new glob is enrolled `append_only`; a first run
+   creates and anchors the empty->one-row sidecar, and a SECOND run appends a row
+   with the prior prefix bytes unchanged, so `verify_ledger_chain` stays clean
+   across both runs (proves the sidecar is anchor-compatible and the fixed schema
+   does not break the prefix).
+
+Day-after check: on the VPS one cycle after deploy, confirm
+`outputs/maker_carry/maker_carry_portfolio_members.csv` exists and its newest row
+`generated_at_utc` equals the newest `maker_carry_history.csv` row's, its
+`portfolio_members` JSON deserializes to the same condition_ids as the live
+`maker_carry_study.json` `portfolio`, and `verify-ledger-chain` returns ok for
+BOTH `maker_carry/maker_carry_history.csv` (still byte-identical prefix) AND the
+newly-enrolled `maker_carry/maker_carry_portfolio_members.csv`. Fallback if the
+sidecar anchor is flagged: the file is derived telemetry — de-enroll the glob and
+re-anchor while the persistence itself keeps running (no runtime data at risk).
 
 Fail-safe. This work order is forward-only telemetry persistence. It changes no
 gate, threshold, share-model scope, verdict, or promotion control; it adds one
-auditability column to `maker_carry_history.csv`. Historical rows written before
-it remain blank and continue to fail closed under every markout rule exactly as
-today. `paper_trading_invoked=false` and `live_trading_invoked=false`; no broker,
-signer, cancellation, credential-loading, or live-order path is added.
+new anchor-enrolled sidecar and leaves the anchored `maker_carry_history.csv`
+byte-identical. The sidecar starts empty and only grows; a future markout rule
+that has not yet been written continues to fail closed for uncovered days exactly
+as today. `paper_trading_invoked=false` and `live_trading_invoked=false`; no
+broker, signer, cancellation, credential-loading, or live-order path is added.
 
 ## WO-110 — Pin enrolled-ledger export projections; version taker-fee fills (DONE 2026-07-19; orchestrator-built)
 
@@ -5217,6 +5272,24 @@ frozen-surface change.
 7. **Review hygiene:** adjudicate every surviving review thread against current
    main; resolve only findings that are fixed or demonstrably superseded, and
    fix applicable findings in their own PRs first.
+8. **WO-111 (rev.2, anchor-safe):** persist per-day portfolio membership +
+   per-market markout forward-only in a NEW sidecar
+   `maker_carry/maker_carry_portfolio_members.csv` (fixed two-column schema:
+   `generated_at_utc`, `portfolio_members` JSON), enrolled `append_only`, leaving
+   the anchored `maker_carry_history.csv` byte-identical so no prior anchor
+   prefix changes (the WO-110 lesson). The current M-A gate is unchanged and does
+   not read the sidecar; a FUTURE per-market tightening can recompute from it
+   instead of failing closed and orphaning the at-target streak (the failure that
+   collapsed M-A 8/7 -> 1/7 when PR #290's markout-measured requirement landed
+   with no pre-existing per-market evidence). Changes no gate, threshold,
+   share-model scope, or verdict; enrolls one new anchored glob. Full spec in the
+   WO-111 section above. **Day-after check:** on the VPS one cycle after deploy,
+   `outputs/maker_carry/maker_carry_portfolio_members.csv` exists, its newest
+   `generated_at_utc` matches the newest `maker_carry_history.csv` row, its
+   `portfolio_members` deserializes to the live `maker_carry_study.json`
+   `portfolio` condition_ids, and `verify-ledger-chain` returns ok for BOTH that
+   sidecar and the still-byte-identical `maker_carry_history.csv`. Owner-merge
+   (enrolls an anchored ledger; sits in the maker-gate module).
 
 Completed context: WO-93–WO-110 are merged as recorded in their individual
 sections, except that WO-100 and WO-101 are intentionally being rebuilt from

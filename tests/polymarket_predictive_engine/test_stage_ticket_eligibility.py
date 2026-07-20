@@ -125,6 +125,8 @@ def test_each_registered_condition_fails_closed(tmp_path: Path) -> None:
         {"qual_study": "2026-07-17T09:00:00Z"},  # qualification bound to an older study version
         {"qual_replay": "2026-07-17T09:00:00Z"},  # qualification bound to an older replay version
         {"raw_imbalance": None},  # missing vpin_raw -> toxicity screen fails closed
+        {"raw_imbalance": float("-inf")},  # P3-4: non-finite raw-imbalance fails closed
+        {"toxicity": float("-inf")},  # P3-4: non-finite toxicity percentile fails closed
     ]
     for index, overrides in enumerate(cases):
         cfg = _cfg(tmp_path / f"case{index}")

@@ -310,6 +310,27 @@ def _cap_rows(rows: list[dict[str, Any]], cap: int) -> tuple[list[dict[str, Any]
     return rows, 0
 
 
+def _dedupe_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Order-preserving de-duplication by canonical row content.
+
+    The sidecar is persisted *before* the primary history is pruned, so a crash
+    (or full disk) between the two writes leaves the migrated frames in both files.
+    The next run re-partitions the primary and re-appends the same frames; collapsing
+    byte-identical rows here (keeping the earliest occurrence) keeps that
+    crash-recovery idempotent rather than accumulating duplicates.
+    """
+
+    seen: set[str] = set()
+    deduped: list[dict[str, Any]] = []
+    for row in rows:
+        key = json.dumps(row, sort_keys=True, separators=(",", ":"), ensure_ascii=False, default=str)
+        if key in seen:
+            continue
+        seen.add(key)
+        deduped.append(row)
+    return deduped
+
+
 def _resolution_event_row(captured_at_utc: str, event: dict[str, Any]) -> dict[str, Any] | None:
     market = str(event.get("market") or "").strip()
     winning_asset_id = str(event.get("winning_asset_id") or "").strip()
@@ -1869,6 +1890,31 @@ def collect_websocket(cfg: EngineConfig, websocket_seconds: int = 60) -> dict[st
     settings = cfg.raw.get("websocket_market_data", {})
     out_root = cfg.output_root / "polymarket_websocket"
     out_root.mkdir(parents=True, exist_ok=True)
+    output_file = out_root / "websocket_messages.json"
+    latest_output_file = out_root / "websocket_messages_latest.json"
+    best_bid_ask_output_file = out_root / "websocket_best_bid_ask.json"
+    max_messages = int(settings.get("max_messages", 0) or 0)
+    max_best_bid_ask_messages = _best_bid_ask_cap(settings, max_messages)
+    existing_rows = _existing_messages(output_file)
+    existing_best_bid_ask_rows = _read_best_bid_ask_sidecar(best_bid_ask_output_file)
+    # De-pollute existing history before ANY early return (dependency-missing skip,
+    # no-market-ids skip, or failed collection): best_bid_ask frames already mixed
+    # into the capped feature-replay file are migrated into the bounded sidecar so
+    # they cannot evict book/price-change replay substrate. The sidecar is written
+    # FIRST (durably) and the primary pruned only afterwards, so a crash or full disk
+    # between the two writes can never drop a migrated frame; _dedupe_rows keeps the
+    # re-migration on the next run idempotent.
+    retained_existing_rows, migrated_best_bid_ask_rows = _partition_best_bid_ask_rows(existing_rows)
+    sidecar_before_new_rows, _ = _cap_rows(
+        _dedupe_rows(existing_best_bid_ask_rows + migrated_best_bid_ask_rows),
+        max_best_bid_ask_messages,
+    )
+    cleaned_existing_rows, _ = _cap_rows(retained_existing_rows, max_messages)
+    # Only rewrite when a prior history exists: migration exists to de-pollute a
+    # pre-existing mixed file, so a fresh install has nothing to persist yet.
+    if existing_rows or existing_best_bid_ask_rows:
+        _write_best_bid_ask_sidecar(best_bid_ask_output_file, sidecar_before_new_rows)
+        write_json(output_file, cleaned_existing_rows)
     try:
         importlib.import_module("websockets")
     except Exception:
@@ -1929,24 +1975,6 @@ def collect_websocket(cfg: EngineConfig, websocket_seconds: int = 60) -> dict[st
         return summary
     url = str(settings.get("url", "wss://ws-subscriptions-clob.polymarket.com/ws/market"))
     variants = _subscription_variants(market_ids, settings, dynamic_ids=bool(dynamic_ids))
-    output_file = out_root / "websocket_messages.json"
-    latest_output_file = out_root / "websocket_messages_latest.json"
-    best_bid_ask_output_file = out_root / "websocket_best_bid_ask.json"
-    existing_rows = _existing_messages(output_file)
-    existing_best_bid_ask_rows = _read_best_bid_ask_sidecar(best_bid_ask_output_file)
-    max_messages = int(settings.get("max_messages", 0) or 0)
-    max_best_bid_ask_messages = _best_bid_ask_cap(settings, max_messages)
-    # Partition and persist the *existing* history before attempting collection so
-    # a failed collection still de-pollutes the capped feature-replay file: any
-    # best_bid_ask frames already mixed into websocket_messages.json are migrated
-    # into the bounded sidecar rather than left to evict book/price replay rows.
-    retained_existing_rows, migrated_best_bid_ask_rows = _partition_best_bid_ask_rows(existing_rows)
-    cleaned_existing_rows, _ = _cap_rows(retained_existing_rows, max_messages)
-    sidecar_before_new_rows, _ = _cap_rows(
-        existing_best_bid_ask_rows + migrated_best_bid_ask_rows, max_best_bid_ask_messages
-    )
-    write_json(output_file, cleaned_existing_rows)
-    _write_best_bid_ask_sidecar(best_bid_ask_output_file, sidecar_before_new_rows)
     connect_timeout = float(settings.get("connect_timeout_seconds", 8.0))
     new_rows, selected_subscription, variant_errors = _collect_with_variants(
         url=url,
@@ -1991,11 +2019,15 @@ def collect_websocket(cfg: EngineConfig, websocket_seconds: int = 60) -> dict[st
         retained_existing_rows + retained_new_rows, max_messages
     )
     combined_best_bid_ask_rows, dropped_best_bid_ask_messages = _cap_rows(
-        existing_best_bid_ask_rows + migrated_best_bid_ask_rows + new_best_bid_ask_rows,
+        _dedupe_rows(
+            existing_best_bid_ask_rows + migrated_best_bid_ask_rows + new_best_bid_ask_rows
+        ),
         max_best_bid_ask_messages,
     )
-    write_json(output_file, combined_rows)
+    # Sidecar first (durable), then prune the primary: a crash between the two writes
+    # must never drop migrated best_bid_ask frames from both files.
     _write_best_bid_ask_sidecar(best_bid_ask_output_file, combined_best_bid_ask_rows)
+    write_json(output_file, combined_rows)
     write_json(latest_output_file, new_rows)
     summary = {
         "status": "collected",

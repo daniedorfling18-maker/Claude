@@ -4804,11 +4804,12 @@ Medium items (reward config start/end + overlap; discovery bias vs active
 rewarded endpoint; keyword-only resolution risk; inventory bootstrap spec)
 are logged here and built after 1-8.
 
-## WO-102 — Toxicity screen: absolute raw-imbalance floor (owner-approved 2026-07-17; orchestrator-built)
+## WO-102 — Toxicity screen: absolute raw-imbalance floor (implemented 2026-07-17)
 
-Owner approved upgrading the toxicity instrument (chat, 2026-07-17), with the
-explicit condition that it must not become a funding accelerant or a rule-8
-loosening. Built by the orchestrator (Codex paused).
+This entry records implementation provenance only; it does not assert or grant
+owner authorization for funding, live execution, or any frozen/registered-
+surface change. Phase 1 was built by the orchestrator and reached `main` through
+PR #253. Funding remains CLOSED and WO-67 remains BLOCKED.
 
 MATERIAL LATENT-BUG FIX (phase 1, IMPLEMENTED): `toxicity_score` is a
 universe-relative percentile `index / (n-1)`. Standing rule 8 blocked on

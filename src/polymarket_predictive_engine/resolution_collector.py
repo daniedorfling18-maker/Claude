@@ -166,6 +166,9 @@ def infer_market_resolution_rows(
         })
     quality_rows = [{
         "market_slug": slug,
+        "condition_id": base["condition_id"],
+        "question": base["question"],
+        "resolution_source": base["resolution_source"],
         "closed": closed,
         "active": active,
         "resolution_quality": quality,

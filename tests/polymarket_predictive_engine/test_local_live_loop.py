@@ -666,6 +666,38 @@ def test_background_timeout_exit_is_recorded_before_hard_exit(tmp_path, monkeypa
     assert rows[0]["live_trading_invoked"] == "False"
 
 
+def test_background_timeout_incident_write_failure_cannot_prevent_hard_exit(
+    tmp_path,
+    monkeypatch,
+):
+    loop = _load_loop_module()
+    cfg = EngineConfig(
+        raw={"paths": {"output_root": str(tmp_path / "outputs")}},
+        path=tmp_path / "cfg.yaml",
+    )
+    summary = loop._stale_background_summary(
+        job_name="discovery",
+        started_at_utc="2026-07-12T10:00:00Z",
+        running_seconds=901.0,
+        max_runtime_seconds=900.0,
+    )
+    monkeypatch.setattr(
+        loop,
+        "_record_background_timeout_incident",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(OSError("disk full")),
+    )
+    monkeypatch.setattr(
+        loop.os,
+        "_exit",
+        lambda code: (_ for _ in ()).throw(SystemExit(code)),
+    )
+
+    with pytest.raises(SystemExit) as exc:
+        loop._exit_for_stale_background_job(cfg, summary, live_iteration=10)
+
+    assert exc.value.code == 75
+
+
 def test_degraded_discovery_refresh_pauses_without_reviving_frozen_updown(tmp_path, monkeypatch):
     loop = _load_loop_module()
     cfg = EngineConfig(

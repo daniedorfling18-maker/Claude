@@ -490,6 +490,19 @@ def certify_executor_replay(
                 notional = (safe_float(action.get("price")) or 0.0) * shares
                 if notional > cap + 1e-9:
                     violations.append(_violation("policy_caps", "place notional exceeds stage cap", scenario_id=scenario_id, cycle=cycle_number))
+        aggregate_place_notional = sum(
+            (safe_float(action.get("price")) or 0.0) * (safe_float(action.get("shares")) or 0.0)
+            for action in place_actions
+        )
+        if aggregate_place_notional > cap + 1e-9:
+            violations.append(
+                _violation(
+                    "policy_caps",
+                    "aggregate place notional exceeds stage cap",
+                    scenario_id=scenario_id,
+                    cycle=cycle_number,
+                )
+            )
         if not expected_flags.get("quoting_permitted") and place_actions:
             violations.append(_violation("quote_sheet_boundary", "quoting occurred while scenario prohibited quoting", scenario_id=scenario_id, cycle=cycle_number))
         capital_at_risk = safe_float(after.get("capital_at_risk_usd"))

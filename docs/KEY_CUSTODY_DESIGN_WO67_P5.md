@@ -57,8 +57,9 @@ exposure via the repository, telemetry, chat, or backups.
 
 ## Rejected alternatives (recorded so they are not re-litigated)
 
-- Operator's main account credentials on the VPS: rejected — couples
-  main funds to the automation blast radius.
+- The withdrawal-capable L1 private key on the VPS: rejected — couples
+  the full project balance to the automation blast radius. A1's narrow
+  L2 runtime-credential exception does not supersede this rejection.
 - Credentials in GitHub secrets or repo-adjacent config: rejected —
   repository and CI surfaces are the most-audited, most-shared surfaces
   we have; keys do not belong on them.
@@ -81,11 +82,20 @@ would be worse than any custody benefit); (3) the owner accepts
 abandon-and-restart as the compromise response.
 
 Decision: the future executor uses the EXISTING project account. The
-sub-account sections above are superseded for account structure;
-every credential-handling rule in this document still binds unchanged
-(offline L1 key, VPS-only runtime credentials mode 0600, no
-repo/telemetry/chat exposure, rotation and fail-flat drills,
-credential-guard test).
+sub-account sections above are superseded for account structure. A1
+also supersedes the pre-A1 sentence that the existing account may never
+have credentials on any machine, but only for scoped L2 CLOB
+key/secret/passphrase during an explicitly authorised executor window.
+Those runtime credentials remain VPS-only in `.env` mode 0600, with no
+repo/telemetry/chat exposure, and remain subject to rotation,
+revocation, fail-flat, and credential-guard drills.
+
+The withdrawal-capable L1 private key remains offline and is NOT
+approved for VPS storage by A1. If the eventual signing implementation
+cannot place orders without that L1 key at runtime, this design is not
+implementable as written: WO-67 stays blocked until the owner approves
+a separate least-privilege signer or another custody amendment. Nothing
+in A1 authorises funding or executor deployment.
 
 Compensating controls, binding on WO-67's build:
 1. SEQUENCING FOR ATTRIBUTION: the human $100 stage completes BEFORE

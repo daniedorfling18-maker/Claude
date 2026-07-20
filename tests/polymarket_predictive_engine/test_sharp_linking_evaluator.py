@@ -165,6 +165,7 @@ def test_happy_path_qualifies(tmp_path: Path) -> None:
         {"anchor_source": "", "bookmaker": ""},
         {"anchor_source": "sharp_odds", "bookmaker": "sharp_odds"},
         {"anchor_source": "manual_pinnacle_snapshot", "bookmaker": "manual_pinnacle_snapshot"},
+        {"anchor_source": "betfair", "bookmaker": "betfair"},
         {"anchor_source": "pinnacle", "bookmaker": "betfair_ex_eu"},
         {"anchor_source": "soft_book", "bookmaker": "soft_book"},
     ],
@@ -192,6 +193,9 @@ def test_unverified_or_conflicting_sharp_source_fails_closed(tmp_path: Path, anc
 
 
 def test_all_registered_sharp_books_are_accepted(tmp_path: Path) -> None:
+    assert mod.QUALIFYING_SHARP_SOURCES == frozenset(
+        {"pinnacle", "betfair_ex_eu", "betfair_ex_uk"}
+    )
     for source in sorted(mod.QUALIFYING_SHARP_SOURCES):
         cfg = _cfg(tmp_path / source)
         _setup(

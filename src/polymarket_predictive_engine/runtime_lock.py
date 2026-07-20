@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import time
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
@@ -72,12 +73,35 @@ def _same_pid_lock_predates_current_process(payload: dict[str, Any]) -> bool:
 
 
 def _try_acquire(path: Path, payload: dict[str, Any]) -> bool:
-    fd = os.open(str(path), os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+    # Publish the lock fully populated in a single atomic step: write the payload to a
+    # sibling temp file, then hard-link it into place. os.link raises FileExistsError if
+    # the lock already exists (preserving exclusive-create semantics), and once the lock
+    # path exists it ALWAYS already contains its payload -- there is no observable
+    # empty-lock window a crash or pause between create and write could leave behind for
+    # another process to misjudge as dead. (The prior O_CREAT|O_EXCL-then-write left
+    # exactly that window.)
+    body = (json.dumps(payload, sort_keys=True, indent=2) + "\n").encode("utf-8")
+    tmp = path.with_name(f".{path.name}.{os.getpid()}.{time.time_ns()}.tmp")
+    # The single outer try guarantees the temp file is removed on EVERY exit path --
+    # a short/failed write, a link conflict, or success -- so a repeated storage
+    # failure cannot accumulate orphan temp files. os.write may return a short count,
+    # so loop until the whole payload is on disk before linking; a truncated body must
+    # never become the published lock.
+    fd = os.open(str(tmp), os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o644)
     try:
-        os.write(fd, json.dumps(payload, sort_keys=True, indent=2).encode("utf-8"))
-        os.write(fd, b"\n")
+        try:
+            offset = 0
+            while offset < len(body):
+                offset += os.write(fd, body[offset:])
+            os.fsync(fd)
+        finally:
+            os.close(fd)
+        os.link(str(tmp), str(path))  # raises FileExistsError if the lock already exists
     finally:
-        os.close(fd)
+        try:
+            os.unlink(str(tmp))
+        except FileNotFoundError:
+            pass
     return True
 
 

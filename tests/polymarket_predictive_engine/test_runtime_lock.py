@@ -5,6 +5,8 @@ import os
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
+import pytest
+
 from polymarket_predictive_engine import runtime_lock
 from polymarket_predictive_engine.config import EngineConfig
 
@@ -82,3 +84,76 @@ def test_runtime_lock_keeps_same_process_lock_after_process_start(
 
     assert lock.acquired is False
     assert lock.stale_lock_replaced is False
+
+
+def test_acquired_lock_is_published_fully_populated(tmp_path: Path) -> None:
+    # #347 Codex P2: the lock is published atomically (temp write + os.link), so the lock
+    # file — once it exists — ALWAYS already contains its payload. There is no observable
+    # empty-lock window that a crash or a paused creator could leave behind (the window the
+    # old O_CREAT|O_EXCL-then-write path had, and that a mtime heuristic could misjudge).
+    cfg = _cfg(tmp_path)
+
+    lock = runtime_lock.acquire_runtime_lock(cfg, "prediction_cycle", stale_after_seconds=999999)
+
+    assert lock.acquired is True
+    payload = json.loads(
+        runtime_lock.runtime_lock_path(cfg, "prediction_cycle").read_text(encoding="utf-8")
+    )
+    assert payload["pid"] == os.getpid()
+    assert payload["name"] == "prediction_cycle"
+    assert payload["acquired_at_utc"]
+    runtime_lock.release_runtime_lock(lock)
+
+
+def test_preexisting_empty_lock_is_held_fail_closed_not_reclaimed(tmp_path: Path) -> None:
+    # An empty/malformed lock is ambiguous — a dead creator vs. one merely paused mid-write —
+    # so it must NOT be reclaimed by an unsound age/mtime heuristic (that could start a second
+    # holder on a live ledger lock). Fail closed. Atomic publishing means our own code never
+    # creates an empty lock; a stray one simply blocks until an operator clears it.
+    cfg = _cfg(tmp_path)
+    path = runtime_lock.runtime_lock_path(cfg, "prediction_cycle")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(b"")
+
+    lock = runtime_lock.acquire_runtime_lock(cfg, "prediction_cycle", stale_after_seconds=1)
+
+    assert lock.acquired is False
+    assert lock.stale_lock_replaced is False
+
+
+def test_short_writes_still_publish_the_complete_payload(tmp_path: Path, monkeypatch) -> None:
+    # #347 Codex P2: os.write may return a short count; the loop must persist the whole
+    # payload before linking, or a truncated (malformed) lock could be published.
+    cfg = _cfg(tmp_path)
+    real_write = os.write
+    monkeypatch.setattr(os, "write", lambda fd, data: real_write(fd, data[:1]))  # 1 byte/call
+
+    lock = runtime_lock.acquire_runtime_lock(cfg, "prediction_cycle", stale_after_seconds=999999)
+    monkeypatch.undo()
+
+    assert lock.acquired is True
+    payload = json.loads(
+        runtime_lock.runtime_lock_path(cfg, "prediction_cycle").read_text(encoding="utf-8")
+    )
+    assert payload["name"] == "prediction_cycle"
+    assert payload["pid"] == os.getpid()
+    runtime_lock.release_runtime_lock(lock)
+
+
+def test_write_failure_leaves_no_lock_and_no_orphan_temp(tmp_path: Path, monkeypatch) -> None:
+    # #347 Codex P2: a write failure after the temp file is created must not leave an
+    # orphan temp (which repeated attempts would accumulate) nor a partial lock.
+    cfg = _cfg(tmp_path)
+
+    def _boom(fd, data):
+        raise OSError("simulated storage failure")
+
+    monkeypatch.setattr(os, "write", _boom)
+    with pytest.raises(OSError):
+        runtime_lock.acquire_runtime_lock(cfg, "prediction_cycle", stale_after_seconds=999999)
+    monkeypatch.undo()
+
+    lock_path = runtime_lock.runtime_lock_path(cfg, "prediction_cycle")
+    assert not lock_path.exists()
+    leftovers = list(lock_path.parent.glob(".*.tmp")) if lock_path.parent.exists() else []
+    assert leftovers == []

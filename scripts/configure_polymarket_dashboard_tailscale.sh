@@ -140,8 +140,21 @@ PY
 # before private Serve is enabled. No collector, scheduler, broker, or model is
 # restarted by this setup action.
 docker_cmd compose -f "$COMPOSE_FILE" up -d --no-build --force-recreate polymarket-dashboard
-if ! curl -fsS --max-time 10 "http://127.0.0.1:${port}/" >/dev/null; then
-  printf '%s\n' "Dashboard backend did not answer on loopback; private Serve was not configured." >&2
+# The reporting container was just force-recreated; poll its loopback backend
+# until it accepts requests before enabling Serve, instead of racing a single
+# probe against a container that is still starting (WO-114).
+backend_ready=false
+probe=0
+while [ "$probe" -lt 30 ]; do
+  if curl -fsS --max-time 5 "http://127.0.0.1:${port}/" >/dev/null 2>&1; then
+    backend_ready=true
+    break
+  fi
+  probe=$((probe + 1))
+  sleep 2
+done
+if [ "$backend_ready" != true ]; then
+  printf '%s\n' "Dashboard backend did not answer on loopback within 60s; private Serve was not configured." >&2
   exit 4
 fi
 

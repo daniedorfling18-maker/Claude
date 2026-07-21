@@ -58,6 +58,13 @@ case "$SAFETY_POLL_SECONDS" in ''|*[!0-9]*) SAFETY_POLL_SECONDS=5 ;; esac
 GOVERNANCE_TIMEOUT="${OPS_GOVERNANCE_TIMEOUT_SECONDS:-1500}"
 CLV_TIMEOUT="${OPS_CLV_TIMEOUT_SECONDS:-900}"
 CARD_TIMEOUT="${OPS_CARD_TIMEOUT_SECONDS:-2400}"
+# WO-114 (2026-07-21): the SuperBru locked-card chain is a seasonal job. When
+# the tracked tournament ends the odds feed returns zero events and the chain
+# fails closed on every cycle. Set OPS_CARD_REFRESH_ENABLED=0 to quiesce it
+# cleanly - recorded as an intentional skip (exit 0), which refreshes the
+# job's success stamp and stays out of the overrun SLO - instead of accruing
+# exit-1 incidents and burning an odds preflight until the next tournament.
+CARD_REFRESH_ENABLED="${OPS_CARD_REFRESH_ENABLED:-1}"
 # Ledger-anchor cadence: 12h gives three chances inside deploy-acceptance's
 # 36h ledger_anchor_age SLO. Hashing the largest ledger (~17MB) is seconds;
 # 600s bounds a pathological filesystem stall.
@@ -69,9 +76,31 @@ export PYTHONPATH="${PYTHONPATH:-scripts:src}"
 mkdir -p "$OUT_DIR"
 LOG_FILE="$OUT_DIR/ops_scheduler.log"
 JOB_SCHEDULE_SKIP_KIND=""
+# WO-114 (2026-07-21): bound ops_scheduler.log growth. The degraded-state
+# watchdog serialises its full operating-state JSON every cycle, so an
+# unrotated log reaches millions of lines and threatens the VPS disk budget.
+# Rotate to a single .1 generation when the live log crosses the cap (50 MiB
+# by default); set OPS_LOG_MAX_BYTES=0 to disable rotation.
+LOG_MAX_BYTES="${OPS_LOG_MAX_BYTES:-52428800}"
+case "$LOG_MAX_BYTES" in ''|*[!0-9]*) LOG_MAX_BYTES=52428800 ;; esac
 
 log() {
   echo "$(date -u +%Y-%m-%dT%H:%M:%SZ) $*" | tee -a "$LOG_FILE"
+}
+
+rotate_log_if_needed() {
+  [ "$LOG_MAX_BYTES" -gt 0 ] 2>/dev/null || return 0
+  [ -f "$LOG_FILE" ] || return 0
+  SIZE="$(wc -c < "$LOG_FILE" 2>/dev/null | tr -d ' ')"
+  case "${SIZE:-0}" in ''|*[!0-9]*) SIZE=0 ;; esac
+  if [ "$SIZE" -ge "$LOG_MAX_BYTES" ]; then
+    # A single generation is retained. Rotation runs only at the top of the
+    # scheduler loop, when no job subshell holds the log open, so the rename
+    # and truncate cannot lose an in-flight write.
+    mv -f "$LOG_FILE" "$LOG_FILE.1" 2>/dev/null || return 0
+    : > "$LOG_FILE"
+    log "log rotated at ${SIZE} bytes (cap ${LOG_MAX_BYTES}); previous log moved to ${LOG_FILE}.1"
+  fi
 }
 
 stamp_status() {
@@ -326,6 +355,11 @@ run_clv_snapshot() {
 }
 
 run_locked_card_refresh() {
+  if [ "$CARD_REFRESH_ENABLED" = "0" ]; then
+    stamp_status locked_card_refresh 0 "skipped: locked-card refresh disabled (OPS_CARD_REFRESH_ENABLED=0)" "" intentional
+    log "locked_card_refresh: skipped (disabled)"
+    return
+  fi
   if ! odds_quota_available; then
     stamp_status locked_card_refresh 0 "skipped: odds quota exhausted" "" intentional
     log "locked_card_refresh: skipped (no odds credits)"
@@ -650,6 +684,8 @@ log "vps-ops-scheduler starting: governance=${GOVERNANCE_INTERVAL}s clv=${CLV_IN
 stamp_status scheduler 0 "started"
 
 while :; do
+  # Top-of-loop rotation: no job subshell holds the log open at this point.
+  rotate_log_if_needed
   if [ "$(seconds_since_stamp governance_refresh)" -ge "$GOVERNANCE_INTERVAL" ]; then
     JOB_SCHEDULE_SKIP_KIND="$(schedule_skip_kind governance_refresh "$GOVERNANCE_INTERVAL")"
     touch_stamp governance_refresh

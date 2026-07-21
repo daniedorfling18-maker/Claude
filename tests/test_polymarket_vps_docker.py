@@ -667,3 +667,168 @@ def test_vps_diagnostic_script_rides_telemetry_and_stays_capped():
     # report covers host, docker, container, and app layers
     for section in ("HOST:", "DOCKER:", "CONTAINER", "APP:"):
         assert section in script
+
+
+def test_ops_scheduler_seasonal_disable_and_log_rotation_are_wired():
+    # WO-114: the seasonal locked-card job gains a clean disable switch, and the
+    # unbounded ops log gains rotation. Both are opt-out defaults that leave the
+    # live behaviour unchanged until explicitly configured.
+    script = (ROOT / "scripts" / "run_vps_ops_scheduler.sh").read_text(encoding="utf-8")
+    assert 'CARD_REFRESH_ENABLED="${OPS_CARD_REFRESH_ENABLED:-1}"' in script
+    assert 'if [ "$CARD_REFRESH_ENABLED" = "0" ]; then' in script
+    assert "OPS_CARD_REFRESH_ENABLED=0" in script  # self-documenting skip detail
+    # The disable guard must sit ahead of the odds preflight so a quiesced job
+    # never even touches the odds endpoint.
+    body = script.split("run_locked_card_refresh() {", 1)[1].split("run_training_harvest() {", 1)[0]
+    assert body.index("CARD_REFRESH_ENABLED") < body.index("odds_quota_available")
+    # Bounded rotation, defaulting to 50 MiB, wired into the top of the loop
+    # where no job subshell holds the log open.
+    assert 'LOG_MAX_BYTES="${OPS_LOG_MAX_BYTES:-52428800}"' in script
+    assert "rotate_log_if_needed() {" in script
+    loop_head = script.split("while :; do", 1)[1].split("governance_refresh", 1)[0]
+    assert "rotate_log_if_needed" in loop_head
+
+
+def test_ops_scheduler_disabled_seasonal_card_records_intentional_skip(tmp_path):
+    out_dir = tmp_path / "ops"
+    out_dir.mkdir()
+    script = ROOT / "scripts" / "run_vps_ops_scheduler.sh"
+    env = {
+        **os.environ,
+        "OPS_SCHEDULER_LIBRARY_ONLY": "1",
+        "OPS_SCHEDULER_OUT_DIR": str(out_dir),
+        "OPS_CARD_REFRESH_ENABLED": "0",
+    }
+    env.pop("THE_ODDS_API_KEY", None)
+
+    result = subprocess.run(
+        ["sh", "-c", '. "$1"; run_locked_card_refresh', "sh", str(script)],
+        env=env,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+    job = json.loads((out_dir / "status.json").read_text(encoding="utf-8"))["jobs"]["locked_card_refresh"]
+    assert job["last_exit_code"] == 0
+    assert job["skip_kind"] == "intentional"
+    assert job["skipped_intentional"] is True
+    assert job["skipped_overrun"] is False
+    assert "disabled" in job["detail"]
+    # An intentional skip is a successful "nothing to do" cycle, so the success
+    # stamp refreshes and the quiesced job never trips the staleness SLO.
+    assert job["last_success_utc"]
+
+
+def test_ops_scheduler_card_refresh_enabled_by_default_preflights_odds(tmp_path):
+    out_dir = tmp_path / "ops"
+    out_dir.mkdir()
+    script = ROOT / "scripts" / "run_vps_ops_scheduler.sh"
+    env = {
+        **os.environ,
+        "OPS_SCHEDULER_LIBRARY_ONLY": "1",
+        "OPS_SCHEDULER_OUT_DIR": str(out_dir),
+    }
+    env.pop("OPS_CARD_REFRESH_ENABLED", None)  # default is enabled
+    env.pop("THE_ODDS_API_KEY", None)  # make the free-quota preflight decline
+
+    result = subprocess.run(
+        ["sh", "-c", '. "$1"; run_locked_card_refresh', "sh", str(script)],
+        env=env,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+    job = json.loads((out_dir / "status.json").read_text(encoding="utf-8"))["jobs"]["locked_card_refresh"]
+    assert job["skip_kind"] == "intentional"
+    # The default (enabled) path falls through the disable guard to the odds
+    # preflight, so the decline reason is quota exhaustion, not the switch.
+    assert "odds quota exhausted" in job["detail"]
+    assert "disabled" not in job["detail"]
+
+
+def test_ops_scheduler_rotates_oversized_log(tmp_path):
+    out_dir = tmp_path / "ops"
+    out_dir.mkdir()
+    log_file = out_dir / "ops_scheduler.log"
+    log_file.write_text("x" * 5000 + "\n", encoding="utf-8")
+    script = ROOT / "scripts" / "run_vps_ops_scheduler.sh"
+    env = {
+        **os.environ,
+        "OPS_SCHEDULER_LIBRARY_ONLY": "1",
+        "OPS_SCHEDULER_OUT_DIR": str(out_dir),
+        "OPS_LOG_MAX_BYTES": "1000",
+    }
+
+    result = subprocess.run(
+        ["sh", "-c", '. "$1"; rotate_log_if_needed', "sh", str(script)],
+        env=env,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+    rotated = out_dir / "ops_scheduler.log.1"
+    assert rotated.exists()
+    assert "x" * 5000 in rotated.read_text(encoding="utf-8")
+    live = log_file.read_text(encoding="utf-8")
+    assert "log rotated" in live  # fresh log carries only the rotation notice
+    assert "xxxx" not in live
+
+
+def test_ops_scheduler_log_rotation_is_noop_when_small_or_disabled(tmp_path):
+    out_dir = tmp_path / "ops"
+    out_dir.mkdir()
+    log_file = out_dir / "ops_scheduler.log"
+    script = ROOT / "scripts" / "run_vps_ops_scheduler.sh"
+
+    # (a) Below the cap: nothing rotates.
+    log_file.write_text("small\n", encoding="utf-8")
+    env = {
+        **os.environ,
+        "OPS_SCHEDULER_LIBRARY_ONLY": "1",
+        "OPS_SCHEDULER_OUT_DIR": str(out_dir),
+        "OPS_LOG_MAX_BYTES": "1000000",
+    }
+    subprocess.run(
+        ["sh", "-c", '. "$1"; rotate_log_if_needed', "sh", str(script)],
+        env=env,
+        text=True,
+        capture_output=True,
+        check=True,
+    )
+    assert not (out_dir / "ops_scheduler.log.1").exists()
+    assert log_file.read_text(encoding="utf-8") == "small\n"
+
+    # (b) Rotation disabled: never rotates, even far over any threshold.
+    log_file.write_text("y" * 5000, encoding="utf-8")
+    env["OPS_LOG_MAX_BYTES"] = "0"
+    subprocess.run(
+        ["sh", "-c", '. "$1"; rotate_log_if_needed', "sh", str(script)],
+        env=env,
+        text=True,
+        capture_output=True,
+        check=True,
+    )
+    assert not (out_dir / "ops_scheduler.log.1").exists()
+    assert log_file.read_text(encoding="utf-8") == "y" * 5000
+
+
+def test_private_dashboard_setup_waits_for_recreated_backend():
+    # WO-114: the loopback readiness check must be a bounded retry loop, not a
+    # single probe, so it does not race the just-force-recreated reporting
+    # container (which reset connections mid-startup in practice).
+    text = (ROOT / "scripts" / "configure_polymarket_dashboard_tailscale.sh").read_text(
+        encoding="utf-8"
+    )
+    assert "backend_ready=false" in text
+    assert 'while [ "$probe" -lt 30 ]; do' in text
+    assert "within 60s" in text
+    recreate = text.index("--force-recreate polymarket-dashboard")
+    retry_loop = text.index("backend_ready=false")
+    serve_enable = text.index("tailscale serve --bg --yes --https=443")
+    assert recreate < retry_loop < serve_enable

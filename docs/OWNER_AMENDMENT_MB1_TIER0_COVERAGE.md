@@ -1,6 +1,10 @@
 # Owner amendment — M-B.1: require the portfolio market's own Tier-0 coverage
 
-Status: **DRAFT — UNSIGNED (pending owner merge).**
+Status: **EFFECTIVE THROUGH OWNER MERGE OF PR #262 (2026-07-19).**
+
+The optional signature line below remains historically unfilled. The document
+itself defined the owner's merge of the landing pull request as the alternative
+signature event; no agent-authored text is being substituted for that event.
 
 This is a change to the FROZEN M-B maker gate. Per `AGENTS.md`, owner
 authorization is never agent-writable: this amendment is authorized ONLY by the

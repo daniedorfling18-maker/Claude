@@ -1,56 +1,26 @@
-# Docker monitor quick start
+# Retired Docker monitor stack
 
-> **Local dev? You don't need this.** The paper bot is local-first and Docker-free — run
-> `python scripts/run_polymarket_local_live_loop.py` instead (see `AGENTS.md` / `docs/RUNNING_LEAN.md`).
-> Use Docker only for unattended 24/7 on a VPS or live deployment, and run **one capped stack** at a
-> time (`PM_MEM_LIMIT`, default 512m/service) — never the 20-service `wide-raw` stack whole.
+This page is retained only to explain the legacy `docker-compose.monitor.yml`
+surface. It is not an operating runbook and its former activation examples have
+been removed.
 
-The monitor compose runs two services that share the `outputs/` volume:
+The monitor stack predated the canonical Oracle VPS deployment. It coupled a
+market scanner to a long/short intent generator and wrote shared files below
+`outputs/polymarket/`. It is not a supported production stack, is not an
+alternate deployment path and must not be started locally.
 
-- `polymarket-monitor` — the mispricing bot. Scans Polymarket continuously and writes
-  `outputs/polymarket/market_snapshot.csv` every few seconds.
-- `polymarket-long-short` — the long/short engine. Watches that snapshot and re-runs
-  **right after every bot scan**, writing `outputs/polymarket/long_short_intents.csv`.
+Current rules:
 
-```bash
-cp .env.example .env
-docker compose -f docker-compose.monitor.yml up -d --build
-docker compose -f docker-compose.monitor.yml logs -f          # both services
-docker compose -f docker-compose.monitor.yml logs -f polymarket-long-short
-```
+- all runtime and verification are VPS-only;
+- the single production project is `docker-compose.vps-paper.yml` with four
+  long-running services;
+- the dashboard is loopback-bound and available only through authenticated
+  Tailscale Serve;
+- funding is CLOSED, WO-67 is BLOCKED, and no autonomous live-order path is
+  approved;
+- legacy Compose files remain solely for history and regression coverage.
 
-The monitor compose forces dry-run on both services:
-
-```env
-PM_MODE=dry_run
-POLYMARKET_EXECUTE_LIVE=false
-```
-
-For directional long/short signals the bot needs your fair probabilities in
-`inputs/polymarket/model_probabilities.csv` (see `model_probabilities.example.csv`). With
-no model file the engine still emits market-making quotes around the mid. Review both
-`market_snapshot.csv` and `long_short_intents.csv` under `outputs/polymarket/`.
-
-Tuning (optional `.env` values):
-
-```env
-POLYMARKET_SCAN_INTERVAL_SECONDS=5     # how often the bot rescans / rewrites the snapshot
-LONG_SHORT_POLL_SECONDS=3              # how often the engine checks for a new snapshot
-LONG_SHORT_MAX_LIVE_ORDERS=3          # safety cap on live maker orders per engine run
-```
-
-## Going live with market-making
-
-The dry-run monitor never trades. To let the long/short engine place **passive maker bids**
-(market-making only; directional stays paper), the host must be in a non-geoblocked region
-(this rules out the US) and you must:
-
-1. Build with the Polymarket SDK and run the live agent image:
-   `INSTALL_POLYMARKET_SDK=true docker compose up -d --build` (uses `docker-compose.yml`).
-2. Set `PM_MODE=live`, `POLYMARKET_EXECUTE_LIVE=true`, and provide `POLYMARKET_PRIVATE_KEY`
-   (+ CLOB creds) in `.env`.
-3. Keep `POLYMARKET_MAX_ORDER_USD` small (default 5) and review the first fills against your
-   wallet before increasing size.
-
-If any guard fails (wrong region, missing key, geoblock), the engine reports `live_error`
-and places nothing. See `docs/POLYMARKET_MISPRICING_BOT.md` for the full long/short section.
+Read `AGENTS.md`, `docs/OPERATING_STATE.md` and
+`docs/POLYMARKET_VPS_DOCKER_RUNBOOK.md` for the current contract. The dated
+static audit and remaining implementation gaps are in
+`docs/REPOSITORY_LINE_AUDIT_2026-07-21.md`.

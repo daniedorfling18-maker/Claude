@@ -3,6 +3,7 @@
 This runbook records a human-run maker experiment. It is not trading
 authorisation. The generated page and CLI are read-only with respect to the
 venue: they cannot place, amend, cancel, sign, or authenticate an order.
+Run the reporting CLI only on the VPS under `AGENTS.md`; never run it locally.
 
 ## Start of each UTC stage day
 

@@ -1,5 +1,13 @@
 # Calibration record - current engine note, 2026-06-16
 
+> **Historical SuperBru calibration record.** The figures below describe the
+> June 2026 World Cup model study. They do not describe the current Polymarket
+> runtime, current VPS health, or a live-capital approval. Verification and any
+> rerun are VPS-only under `AGENTS.md`.
+> Hyperparameters/templates were selected while examining validation results,
+> so the comparisons, intervals and p-values below are selection-conditioned
+> exploratory evidence rather than an untouched confirmatory test.
+
 ## Revalidation status: COMPLETE — 2026-06-20
 
 Current-engine rerun complete. Train (2021/22–2023/24, 5 404 matches) and held-out

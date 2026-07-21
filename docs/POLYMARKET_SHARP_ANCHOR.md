@@ -1,5 +1,12 @@
 # Sharp-odds anchor (independent alpha signal)
 
+> **Diagnostic design note.** Commands in this page may be exercised only for
+> an approved work order in an isolated VPS environment; never run them on the
+> local workstation. Current qualification and funding state comes from fresh
+> generated evidence, not this document. The 2026-07-21 audit found timestamp,
+> point-in-time and proof-independence gaps that must be resolved before an
+> anchor is treated as promotion evidence.
+
 The mispricing-alpha overlay can only beat the Polymarket price if its "fundamental" probability
 comes from a **sharper** source than the market. De-vigged bookmaker *consensus* ≈ the Polymarket
 price, so it adds no edge. This pipeline brings a genuinely sharp book (Pinnacle / Betfair Exchange)

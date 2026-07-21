@@ -1,157 +1,30 @@
-# Superbru Backtesting
+# Backtesting: historical and diagnostic use only
 
-This documents the backtesting layer: how past picks are scored against results, and how
-pre-match signals are archived so they can be evaluated once results arrive.
+The repository contains SuperBru/World Cup and Polymarket backtest utilities
+for reproducibility. They are not production schedulers, promotion evidence or
+authority to run anything locally. Approved analysis runs only in an isolated
+VPS container under `AGENTS.md`.
 
-## Ultimate-ROI backtest (all WC 2026 results)
+## Evidence limits
 
-`scripts/wc_predictive_power_validation.py` scores the engine by **ultimate ROI** — the realised
-return on what gets staked — not by trading edge / closing-line value. It runs two venues:
+- SuperBru result joins and signal archives are historical World Cup research.
+  The tournament automation is seasonal and is currently disabled by the
+  committed example configuration.
+- Template selection and evaluation on the same result set are in-sample.
+  Comparisons, bootstrap intervals and p-values after selection are exploratory,
+  not independent confirmation.
+- Historical odds must be proven pre-kickoff. A latest or undated snapshot can
+  contain look-ahead information and must not be treated as point-in-time.
+- `src/polymarket_predictive_engine/backtest.py` is diagnostic. Its current
+  signal/label join has no as-of relationship, its stake-to-P&L arithmetic is
+  not an execution-faithful share calculation, and it omits venue depth/fees.
+  Its output cannot feed funding, promotion or gate decisions.
+- Reconstructed, modeled, shadow, paper and live evidence remain distinct.
 
-- **SuperBru pool (primary, all completed results).** The pool pays on finishing position, funded
-  by other players, so realised SuperBru points are the ROI currency. The harness scores the
-  model's realised points across every completed match and compares them to the naive fixed-template
-  strategies (`1-1`, `2-1`, `1-0`, `2-0`, `0-0`) a casual player would use. Beating the best of those
-  templates is the edge — no market edge required. A bootstrap gives a 95% CI on the model-minus-best-
-  template points delta (the best template is chosen in hindsight, so it is a conservative bar).
-- **Betting markets (secondary, price subset).** Realised flat-stake ROI of backing the model pick at
-  market prices, with bootstrap CIs. Because the model's probabilities are the de-vigged market
-  consensus, ROI against a liquid line at its own price tends to −vig; positive ROI here only comes
-  from genuinely soft prices, which `scripts/log_prediction_snapshots.py` captures via best-obtainable
-  odds vs a Pinnacle/Betfair sharp anchor.
+Historical scripts and outputs remain in the tree so results can be reproduced
+after their data dependencies and timestamps are independently verified. Do
+not infer freshness, scheduling or profitability from their presence.
 
-```bash
-python scripts/wc_predictive_power_validation.py
-```
-
-```text
-outputs/backtesting/wc_predictive_power/wc_predictive_power_summary.json   — pool ROI + market ROI
-outputs/backtesting/wc_predictive_power/wc_predictive_power_per_match.csv  — per market-scored match
-```
-
-The pool backtest uses every completed result; the betting-market venue grows as `prediction_log.csv`
-(logged twice daily by `refresh-locked-superbru-card.yml`) accrues prices for fixtures that complete.
-
-## How it works
-
-The backtest pipeline has two complementary parts:
-
-**Reactive scoring** (`build_superbru_backtest_from_results.py`) — joins completed match results
-to locked picks and scores them with Superbru-style points. This runs automatically as step 6 of
-the daily Oddspedia pipeline.
-
-**Signal archiving** (`build_oddspedia_signal_archive.py`) — snapshots each day's Oddspedia
-signals, EV recommendations, and independence classifications into a rolling CSV. When results
-arrive in later rounds, this archive can be joined against results to evaluate whether the
-pre-match signals (OU gap, independence class, EV ranking) predicted actual performance.
-
-## Key output files
-
-```text
-outputs/backtesting/superbru_pick_backtest.csv          — picks scored against completed results
-outputs/backtesting/backtest_summary.json               — summary metrics (hit rates, total points)
-outputs/backtesting/signal_archive_rolling.csv          — all signals archived by day (appended)
-outputs/backtesting/snapshots/signal_archive_YYYY-MM-DD.csv  — point-in-time snapshot per run
-```
-
-## Scoring rules
-
-```text
-Exact score:                         3.0 pts
-Correct result + correct goal diff:  1.5 pts
-Correct result only:                 1.0 pt
-Wrong result:                        0.0 pts
-```
-
-Configurable via `--exact-points`, `--margin-points`, `--result-points`.
-
-## Reactive scoring
-
-Runs automatically as step 6 of:
-
-```bash
-python scripts/run_oddspedia_pipeline.py
-```
-
-Or manually:
-
-```bash
-python scripts/build_superbru_backtest_from_results.py \
-  --results-csv outputs/superbru_pool/superbru_match_results_auto.csv \
-  --picks-csv outputs/final_locked_picks/superbru_final_card.csv \
-  --oddspedia-comparison-csv outputs/oddspedia_pick_validation/oddspedia_pick_comparison.csv
-```
-
-The script joins on `match_id` (slugified `home_team-away_team`). If results are from a different
-round than the locked picks, `completed_matches_with_picks` in the summary JSON will be 0 — this
-is expected and not an error. Results are sourced from `outputs/superbru_pool/superbru_match_results_auto.csv`.
-
-## Signal archiving
-
-Runs automatically as step 10 of the daily pipeline. Re-running on the same date is idempotent:
-today's rows are replaced, not duplicated.
-
-Or manually:
-
-```bash
-python scripts/build_oddspedia_signal_archive.py
-```
-
-The rolling archive accumulates one row per match per day. The columns include:
-
-| Column | What it captures |
-|--------|-----------------|
-| `archive_date` | Date of pipeline run |
-| `locked_pick` | Pick at archive time |
-| `locked_pick_ev` | Expected Superbru points for locked pick |
-| `best_ev_scoreline` | Highest-EV alternative from Oddspedia |
-| `ev_gap_vs_locked` | EV gap: positive means we could switch to a better score |
-| `oddspedia_top1_score` | Highest-probability CS score from grid |
-| `grid_over_2_5_pct` | Grid's over-2.5 probability (vs `market_p_over_2_5`) |
-| `grid_btts_pct` | Grid's BTTS probability (vs `market_p_btts_yes`) |
-| `ou25_diff_pct` | Market minus grid on OU2.5 |
-| `independence_class` | `market_aligned` / `mildly_independent` / `strongly_independent` |
-| `signal_consistency` | Whether OU and BTTS divergences point the same direction |
-| `pick_follows` | Whether locked pick follows grid or market when they disagree |
-| `actual_score` | Filled in retrospectively after match |
-| `backtest_points` | Filled in retrospectively after match |
-
-## Using the archive for retrospective analysis
-
-Once results arrive, join `signal_archive_rolling.csv` against results manually or via the
-backtest script to answer questions like:
-
-- Do `strongly_independent` matches produce better EV outcomes than `market_aligned` ones?
-- When the OU2.5 gap is large (grid underestimates goals vs market), do we lose points by
-  following the grid's preferred low-scoring scorelines?
-- Is the `best_ev_scoreline` systematically better than `locked_pick` over multiple rounds?
-
-## Evidence classes
-
-Treat archived signals by recency and method:
-
-- **Daily archive snapshot** — strongest, captured pre-match by the scheduled pipeline.
-- **Reactive results join** — scored only for matches where results overlap the picks CSV.
-- **Recovered historical grids** — weaker than live snapshots; useful for reference only.
-
-## Backtest summary fields
-
-The `backtest_summary.json` reports:
-
-```json
-{
-  "result_rows_available": 8,
-  "pick_rows_available": 40,
-  "completed_matches_with_picks": 0,
-  "total_points_estimate": ...,
-  "average_points_estimate": ...,
-  "exact_hit_rate": ...,
-  "outcome_hit_rate": ...,
-  "margin_hit_rate": ...,
-  "oddspedia_modal_total_points_estimate": ...,
-  "points_delta_vs_oddspedia_modal": ...
-}
-```
-
-`oddspedia_modal_total_points_estimate` shows how many points the Oddspedia top-probability
-pick would have scored — useful for comparing our locked picks against the "obvious" alternative.
+Current controls are documented in `AGENTS.md`, `docs/OPERATING_STATE.md`,
+`docs/EXPERIMENT_REGISTRY.md` and
+`docs/REPOSITORY_LINE_AUDIT_2026-07-21.md`.

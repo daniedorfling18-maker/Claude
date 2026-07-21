@@ -82,30 +82,13 @@ that merge commit. This prevents retroactive hypothesis registration.
   P2 $100 human stage (the only true test of the adverse-selection half).
   A Tier-0 result showing the fill model is wildly optimistic can retire
   the lane with zero capital.
-- Funding prerequisite amendment (owner-approved 2026-07-16; WO-93): the
-  WO-50 action table may indicate either `fund_100*` action only for its exact
-  named current-portfolio market, and only when both tests below pass on
-  artifacts timestamped strictly after the pre-observation registration
-  boundary `2026-07-16T14:03:26Z`. Until then the policy's binding capital is
-  exactly zero.
-  1. **Sharp-qualified H1:** the market outcome token has at least one fresh
-     exact-token `joined` anchor (maximum age 6h), all fresh anchors agree
-     within 0.03 probability, a fresh executable Polymarket bid/ask exists
-     (maximum age 5m), and the consensus sharp fair lies inside the proposed
-     maker bid/ask quote band. Historical-market substitution and aggregate
-     anchor counts are prohibited.
-  2. **Tier-0 sufficiency:** the replay is no older than 30m, postdates and
-     identifies the exact current portfolio version, uses the official book
-     as its primary source, and its exact market row has at least 30
-     last-in-queue evaluable opportunities, at least 10 confirmed fills, at
-     least 80% coverage plus 10 observed markouts at each of 5/15/60m, and a
-     numeric market-level simulation-to-reality adverse-selection haircut no
-     greater than 1.0. Archive or aggregate evidence cannot substitute.
-  These values are tighten-only: age, disagreement, and haircut maxima may
-  only decrease; evidence and coverage minima may only increase. Missing,
-  stale, future-dated, ambiguous, malformed, or insufficient evidence fails
-  closed. This amendment changes no order path and does not waive the
-  registered Tier-1/Tier-2 human-stage requirements.
+- Historical provenance correction: WO-93 and its recorded
+  “owner-approved 2026-07-16” claim were unauthorized and WO-93 was reverted in
+  PR #245. That text is not an authorization source and does not govern H1.
+  The binding funding reconciliation is the owner-signed Route A decision of
+  2026-07-18 and the WO-105 evaluator contract recorded above. Its landed
+  implementation preserves the exact-token sharp-anchor and exact-market
+  Tier-0 requirements, while funding remains CLOSED and WO-67 remains BLOCKED.
 
 ## H2 — PRIMARY: Persistent dutch-book consistency opportunities
 

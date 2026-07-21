@@ -30,7 +30,7 @@ while the PR gate is advisory.
    reported ("show me the artifact for X"). The answer must be an
    artifact, never prose.
 
-## At every decision date (Jul 17, Jul 19-20, ladder stages)
+## At every registered decision or ladder date
 
 4. Read the machine verdicts YOURSELF: `profit_verdict.json` and the
    maker-gate block in `maker_carry_study.json` (both in telemetry).
@@ -42,7 +42,7 @@ while the PR gate is advisory.
    the registered evidence was insufficient. An orchestrator that
    always says "go" is broken; so is one that always says "wait".
 
-## Before signing the AGENTS.md amendment
+## Before any future custody/executor amendment
 
 6. Commission a fresh external LLM audit of the repository (the
    2026-07-12 one materially improved the system; its successor
@@ -53,7 +53,7 @@ while the PR gate is advisory.
 7. Verify the attestation checklist rows against artifacts you open
    yourself, not against the orchestrator's summary of them.
 
-## After signing, before any executor merge or canary
+## After any future signing, before an executor merge or canary
 
 8. Commission an independent audit of the actual executor PR and
    resolve every money-moving or custody finding before merge. This is
@@ -62,10 +62,13 @@ while the PR gate is advisory.
 
 ## Structural fixes that reduce your check burden
 
-- GitHub Pro + branch protection: turns self-merge from a habit the
-  owner must sample into an impossibility (the last audit-P0 item).
-- WO-78/79 (filed): move "notice degradation" from human reading to
-  machine paging.
+- The independent-merge and exact-SHA deployment controls reduce reliance on
+  self-attestation, but their generated evidence and current enforcement state
+  must still be sampled; do not describe unavailable platform protection as
+  enforced.
+- WO-78/79 added machine-readable degradation and paging controls. Continue to
+  verify their artifacts and freshness rather than treating their existence as
+  proof that notification delivery succeeded.
 
 ## Standing bias disclosure
 

@@ -1,213 +1,216 @@
-# Polymarket VPS Docker runbook
+# Polymarket VPS production runbook
 
-Use this when the laptop cannot carry the live paper system. Docker helps only
-on a remote VPS or other separate machine; local Docker still consumes the
-laptop's RAM.
+Last reconciled: 2026-07-21, against merged source through PR #354.
 
-## Recommended starting VPS
+This is the operating runbook for the single canonical
+`docker-compose.vps-paper.yml` project on the Oracle VPS. It does not
+authorize live trading. Funding is CLOSED, WO-67 remains BLOCKED and the stack
+is hard-set to scan/paper modes.
 
-Start with the cheapest machine that gives the model room to breathe:
+## Non-negotiable boundary
 
-- Best cost path: Oracle Cloud Always Free Ampere A1, currently documented as
-  up to 2 OCPUs and 12 GB RAM across Always Free A1 instances. This is ARM-based,
-  but the repo's Python/Docker stack should build on ARM.
-- Simple paid fallback: 2 vCPU / 4 GB RAM if capital is tight, with
-  `PM_PAPER_MEM_LIMIT=2g`.
-- Safer paid fallback: 4 vCPU / 8 GB RAM if we want fewer memory pauses while
-  model optimisation and websocket collection run together.
+- Runtime, collectors, dashboards, watchdogs, Docker and test execution are
+  VPS-only.
+- Repository path: `/home/opc/Claude`.
+- Exactly one production Compose project may write runtime data.
+- Routine deployments use `Deploy Polymarket VPS Paper` from reviewed,
+  accepted `main`; do not deploy by ad-hoc `git pull`, source copying or a
+  manual rebuild.
+- Secrets live only in the VPS `.env` or GitHub repository secrets and must
+  never appear in source, telemetry or logs.
 
-For any future live trading review, avoid US-hosted infrastructure because the
-repo's governance notes treat US Polymarket access as geoblocked. Paper-only
-monitoring can run anywhere, but keeping the VPS outside the US preserves the
-future path.
+Read `AGENTS.md` before operating the stack.
 
-## What this stack runs
+## Long-running services
 
-`docker-compose.vps-paper.yml` starts only two services:
+| Service | Purpose | Default memory cap |
+|---|---|---:|
+| `polymarket-paper-live` | Continuous market collection and paper/evidence loop | `PM_PAPER_MEM_LIMIT` (4 GiB example) |
+| `polymarket-dashboard` | Oversight backend, bound to VPS loopback | `PM_DASHBOARD_MEM_LIMIT` (256 MiB) |
+| `vps-ops-scheduler` | Governance, proof, collection and maintenance jobs | `VPS_OPS_MEM_LIMIT` (2 GiB) |
+| `superbru-auto-pick-watchdog` | SuperBru pre-kickoff watchdog | `SUPERBRU_AUTO_PICK_MEM_LIMIT` (1 GiB) |
 
-1. `polymarket-paper-live`: continuous websocket paper/evidence loop.
-2. `polymarket-dashboard`: the static oversight cockpit on port `8765`.
+`vps-deploy-acceptance` is a deployment-only profile. The deploy workflow
+stops and proves the scheduler absent before running this one-shot service, so
+both writers cannot operate concurrently.
 
-It does not start the broad raw/wide stacks and it does not enable live orders.
-The environment hard-codes:
+## Safety configuration
+
+The Compose definition and example environment keep the Polymarket path
+non-live:
 
 ```text
+PM_MODE=scan
+POLYMARKET_MODE=scan
 POLYMARKET_EXECUTE_LIVE=false
 POLYMARKET_LIVE_TRADING=0
-PM_MODE=scan
 ```
 
-## First deploy
+Do not change those values through this runbook.
 
-Fast path on a fresh Ubuntu or Oracle Linux VPS:
+## Initial provisioning
 
-```bash
-curl -fsSL https://raw.githubusercontent.com/daniedorfling18-maker/Claude/main/scripts/bootstrap_polymarket_vps_paper.sh | sh
-```
+Initial host provisioning is a distinct, reviewed operation. Because the
+repository is private, do not pipe a raw GitHub URL into a shell or depend on an
+unauthenticated clone. Establish authenticated Git access, inspect the accepted
+revision and provision `/home/opc/Claude` without starting production services.
 
-If you prefer to review the commands first:
+Copy `.env.vps-paper.example` to `.env` only on the VPS and populate secrets
+there or through the deploy workflow. Do not use the legacy bootstrap script to
+start production: it bypasses the accepted-revision and rollback sequence below.
+The first production start must use the same guarded deployment path as every
+later update.
 
-```bash
-sudo apt-get update
-sudo apt-get install -y ca-certificates curl git docker.io docker-compose-plugin
-sudo usermod -aG docker "$USER"
-newgrp docker
+## Guarded deployment
 
-git clone https://github.com/daniedorfling18-maker/Claude.git
-cd Claude
-cp .env.vps-paper.example .env
-```
-
-If the VPS has only 4 GB RAM, edit `.env`:
+Workflow:
 
 ```text
-PM_PAPER_MEM_LIMIT=2g
-POLYMARKET_WEBSOCKET_MAX_ASSETS=80
-POLYMARKET_EVENT_LIMIT=100
+.github/workflows/deploy-polymarket-vps-paper.yml
 ```
-
-Then start:
-
-```bash
-docker compose -f docker-compose.vps-paper.yml up -d --build
-docker compose -f docker-compose.vps-paper.yml ps
-docker compose -f docker-compose.vps-paper.yml logs -f polymarket-paper-live
-```
-
-The bootstrap script leaves an existing `.env` alone. On a fresh `.env`, it
-automatically applies leaner settings if it detects a 4 GB VPS. On Oracle Linux,
-it uses `dnf`/`yum` instead of `apt-get`, so prefer the fast path unless you
-deliberately want a manual install.
-
-## GitHub deploy path
-
-After the first deploy, use the manual GitHub Actions workflow
-`deploy-polymarket-vps-paper.yml` to keep the VPS current without opening an
-interactive SSH session from the laptop.
 
 Required repository secrets:
 
 ```text
-PM_VPS_HOST=129.151.178.42
-PM_VPS_USER=opc
-PM_VPS_SSH_PRIVATE_KEY=<the private key matching the VPS public key>
+PM_VPS_HOST
+PM_VPS_USER
+PM_VPS_SSH_PRIVATE_KEY
 ```
 
-Recommended repository secret:
+Optional/conditional secrets:
 
 ```text
-THE_ODDS_API_KEY=<the-odds-api key>
+PM_VPS_PORT
+PM_VPS_REPO_DIR
+THE_ODDS_API_KEY
+SUPERBRU_EMAIL or SUPERBRU_USERNAME
+SUPERBRU_PASSWORD
+SUPERBRU_LOGIN_URL
+SUPERBRU_POOL_URL
+SUPERBRU_PLAYER_NAME
+SUPERBRU_POOL_KEYWORDS
 ```
 
-Optional secrets:
+The workflow input `acceptance_run_id` identifies the successful
+`Independently Reviewed PR Merge` run whose attestation binds the exact target
+`main` SHA. Missing, malformed or mismatched evidence stops before cutover.
+
+The workflow:
+
+1. validates secrets, target capacity, checkout ancestry, acceptance evidence,
+   Tailscale enrollment and rollback prerequisites;
+2. preserves runtime roots and the current environment;
+3. quiesces bind-mounted writers;
+4. updates to the exact accepted `main` revision and stamps
+   `PM_VPS_DEPLOYED_SHA`;
+5. rebuilds the canonical image and four-service Compose project;
+6. runs the isolated `vps-deploy-acceptance` profile;
+7. refreshes governance and private-dashboard evidence; and
+8. restores the last-known-good revision if post-cutover acceptance fails.
+
+Do not replace this sequence with manual `down`, `git pull` and `up`.
+
+## Private dashboard
+
+The container backend is bound only to:
 
 ```text
-PM_VPS_PORT=22
-PM_VPS_REPO_DIR=~/Claude
+127.0.0.1:8765
 ```
 
-The workflow itself runs on the provisioned `oracle-vps-polymarket-ci` runner,
-not billable `ubuntu-latest` capacity. It validates target capacity before
-touching the healthy stack, quiesces bind-mounted writers, preserves runtime
-evidence while fast-forwarding `main`, injects sealed secrets into `.env`, and
-rebuilds `docker-compose.vps-paper.yml`. The scheduler owns exactly one
-post-deploy governance refresh; deployment waits for a fresh price-action
-model, renders the dashboard, runs `scripts/check_polymarket_vps_paper.sh`, and
-verifies the current proof/evidence schema. A checkout refusal restores the
-previous stack when HEAD was not changed.
-
-## Dashboard access
-
-The dashboard backend is deliberately bound only to VPS loopback on port
-`8765`. There is no supported public-IP HTTP route. Authenticated HTTPS is
-provided by Tailscale Serve, which is tailnet-only; Tailscale Funnel is
-explicitly forbidden.
-
-One-time setup on the VPS:
+Tailscale Serve provides authenticated, tailnet-only HTTPS. Tailscale Funnel is
+forbidden. On the enrolled VPS:
 
 ```bash
-# Install from the official Linux instructions if tailscale is not present:
-# https://tailscale.com/download/linux
-sudo tailscale up
-# Complete the browser login, using the same tailnet as the phone/laptop.
 cd /home/opc/Claude
 bash scripts/configure_polymarket_dashboard_tailscale.sh
 ```
 
-The script closes any old Docker public binding before enabling Serve, disables
-Funnel on HTTPS port 443, writes the node's `https://...ts.net/` URL to
-`PM_DASHBOARD_PUBLIC_URL`, verifies the exact Serve target and Docker binding,
-and writes `outputs/performance/dashboard_private_transport.json`. It refuses
-to proceed when the node is not authenticated.
+The script writes the verified URL to:
 
-Install Tailscale on the phone, join the same tailnet, and open the private URL
-printed by the script. Remove the old Oracle Cloud ingress rule for TCP `8765`;
-the loopback binding already blocks it, and removing the rule gives a second
-independent control. Operators can read the configured URL without exposing
-other `.env` values:
+```text
+PM_DASHBOARD_PUBLIC_URL=https://<node>.<tailnet>.ts.net/
+```
+
+Despite the variable's historical name, it is not public: it must never contain
+a public IP or plain HTTP URL. Read it without printing the rest of `.env`:
 
 ```bash
 grep '^PM_DASHBOARD_PUBLIC_URL=' /home/opc/Claude/.env
 ```
 
-Every deploy requires an authenticated Tailscale node before quiescing the
-current stack and revalidates loopback binding, Serve HTTPS, URL provenance,
-and Funnel-off state before reporting success.
+The public cloud firewall should have no ingress rule for TCP `8765`.
 
-## Secrets on the VPS
+## Seasonal SuperBru controls
 
-Preferred path: set `PM_VPS_SSH_PRIVATE_KEY` in GitHub Actions secrets and run the manual
-`deploy-polymarket-vps-paper.yml` workflow. The workflow injects `THE_ODDS_API_KEY` into the VPS
-`.env`, rebuilds the Docker stack, waits for the scheduler-owned model refresh, and verifies the
-current dashboard schema. If the deploy private key is missing, GitHub can see the sealed odds key
-but cannot deliver it to the VPS.
-
-Manual fallback: place any key the containers need (today: `THE_ODDS_API_KEY` for the sharp-anchor
-pipeline) in the `.env` file next to the compose file by hand:
-
-```bash
-cd <repo dir on the VPS>
-nano .env                      # set THE_ODDS_API_KEY=<key>
-docker compose -f docker-compose.vps-paper.yml up -d --force-recreate polymarket-paper-live
-```
-
-Two gotchas that make this look broken when it isn't:
-
-1. `docker compose restart` does NOT reload `env_file` - you must `up -d --force-recreate`.
-2. The variable must appear both in `.env` AND be mapped in the service's `environment:` block
-   (`docker-compose.vps-paper.yml` already maps `THE_ODDS_API_KEY`).
-
-Verify end-to-end with `scripts/check_polymarket_vps_paper.sh` (it reports whether the key is set in
-`.env`, visible inside the container, and whether deployment metadata is present) or on the
-dashboard: the "Independent model anchors" section should stop showing `missing_api_key` within
-~12 loop iterations.
-
-## Operating checks
-
-```bash
-bash scripts/check_polymarket_vps_paper.sh
-docker compose -f docker-compose.vps-paper.yml ps
-docker compose -f docker-compose.vps-paper.yml logs --tail=80 polymarket-paper-live
-docker stats --no-stream
-```
-
-Useful files inside the mounted repo:
+The World Cup locked-card refresh is seasonal. PR #354 added:
 
 ```text
-outputs/polymarket_model_governance/local_live_loop_heartbeat.json
-outputs/polymarket_model_governance/forward_paper_cycle.json
-outputs/polymarket_model_governance/trade_signal_audit.json
-outputs/polymarket_dashboard/dashboard_data.json
+OPS_CARD_REFRESH_ENABLED
+OPS_LOG_MAX_BYTES
 ```
 
-## Stop / upgrade
+- `OPS_CARD_REFRESH_ENABLED=0` makes the scheduler record an intentional skip
+  before the Odds API preflight. Use it when the tracked tournament is over.
+- `OPS_LOG_MAX_BYTES=52428800` retains the default 50 MiB single-generation
+  scheduler-log rotation; `0` disables that protection and is not recommended.
+
+Changing `.env` requires a guarded service recreation to take effect. The
+current implementation evaluates the card-refresh disable on the job's normal
+cadence, so the old job status can remain visible until that cadence is reached.
+PR #354's dashboard readiness loop and scheduler rotation also have open review
+follow-ups recorded in the work-order register; do not overstate their timing
+bounds.
+
+## Open deployment audit gaps
+
+The 2026-07-21 static audit found controls that must be fixed before the deploy
+path can be described as fail-closed end to end:
+
+- Tailscale configuration and workflow rollback suppress Funnel-off failures;
+  an existing Funnel route can therefore survive a failed readiness attempt.
+- deploy acceptance does not yet prove the exact deployed SHA, all four
+  services, or fresh advancing scheduler/health evidence;
+- SSH host enrollment uses `ssh-keyscan` trust-on-first-use instead of a pinned
+  host-key secret; and
+- the bootstrap path can still start production outside the guarded workflow.
+
+Until owner-routed fixes and VPS verification land, treat deployment/transport
+acceptance as incomplete and independently check the generated evidence. The
+full findings and exact code locations are in
+`docs/REPOSITORY_LINE_AUDIT_2026-07-21.md`.
+
+## Read-only operating checks
+
+After SSHing to the VPS:
 
 ```bash
-docker compose -f docker-compose.vps-paper.yml down
-git pull
-docker compose -f docker-compose.vps-paper.yml up -d --build
+cd /home/opc/Claude
+docker compose -f docker-compose.vps-paper.yml ps
+docker stats --no-stream
+bash scripts/check_polymarket_vps_paper.sh
 ```
 
-Keep one compose stack running at a time. Do not run
-`docker-compose.polymarket-wide-raw.yml` on the VPS unless deliberately doing a
-bounded research job; it is not the live paper stack.
+Inspect the generated state and deploy evidence:
+
+```text
+outputs/performance/operating_state.md
+outputs/performance/operating_state.json
+outputs/ops_scheduler/deploy_acceptance.json
+outputs/ops_scheduler/deploy_acceptance_cycle.json
+outputs/performance/vps_deploy_rollback.json
+outputs/performance/dashboard_private_transport.json
+```
+
+Missing or stale evidence is `UNKNOWN`. Do not infer health from container
+presence alone.
+
+## Recovery
+
+Use the guarded deploy rollback and `docs/RESTORE.md`. Never destroy or reset
+runtime roots to fix a source checkout. If rollback evidence cannot prove the
+last-known-good restoration, the deployment remains failed and requires owner
+review.
+
+Legacy Compose files and local launchers remain for repository history and
+regression coverage only. They are not alternate production stacks.

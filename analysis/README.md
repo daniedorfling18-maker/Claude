@@ -1,5 +1,10 @@
 # Independent model & pool-differentiation analysis (2026-06-16)
 
+> **Historical research record.** The referenced standalone analysis script and
+> several generated outputs have since been retired from current `main`. Keep
+> the results below as dated evidence only; they are not part of the active VPS
+> runtime or a current trading claim.
+
 ## TL;DR
 - A free, **independent** (results-only) model **cannot beat the closing market** —
   tested rigorously on 84,198 club matches. So it was repurposed as a

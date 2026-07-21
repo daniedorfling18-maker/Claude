@@ -1,41 +1,14 @@
-# Polymarket Predictive Power Roadmap
+# Predictive-power roadmap: historical
 
-This roadmap extends the base Polymarket predictive engine with historical labels, point-in-time price histories, calibration, category fallback models, and paper-only edge simulation.
+This roadmap predates the VPS-only contract and current experiment freeze. Its
+local command sequence and implied build order have been removed.
 
-## Safety principles
+Current research priorities are exactly the registered H1-H3 hypotheses in
+`docs/EXPERIMENT_REGISTRY.md`. Historical labels, price histories, calibration
+and category models may support diagnostics only when their timestamps and
+data dependencies satisfy `docs/ENGINEERING_STANDARDS.md`. They cannot loosen a
+gate or become promotion evidence by being present in the repository.
 
-- Active market outcome prices are never used as targets.
-- Historical price snapshots do not include target, winner, winning, resolved, settlement, payout, or final-result fields.
-- Labels are created only by joining snapshot rows to clean closed-market resolution rows.
-- Live trading gates remain unchanged.
-- The edge simulator is paper-only and does not call live execution.
-
-## Required command order
-
-```powershell
-python -m pytest -q
-polymarket-engine backfill-resolved-markets --config polymarket_predictive_config.example.yaml --historical-limit 250
-polymarket-engine collect-price-history --config polymarket_predictive_config.example.yaml --historical-limit 500
-polymarket-engine build-labels --config polymarket_predictive_config.example.yaml
-polymarket-engine build-features-v2 --config polymarket_predictive_config.example.yaml
-polymarket-engine train-calibration --config polymarket_predictive_config.example.yaml
-polymarket-engine calibrate-categories --config polymarket_predictive_config.example.yaml
-polymarket-engine simulate-paper-edge --config polymarket_predictive_config.example.yaml
-polymarket-engine collect-websocket --config polymarket_predictive_config.example.yaml --websocket-seconds 60
-polymarket-engine collect-external-feeds --config polymarket_predictive_config.example.yaml
-```
-
-## Outputs
-
-- `outputs/polymarket_training/historical_resolutions.csv`
-- `outputs/polymarket_training/historical_price_snapshots.csv`
-- `outputs/polymarket_training/labels.csv`
-- `outputs/polymarket_training/features_v2.csv`
-- `outputs/polymarket_models/calibration_v2.json`
-- `outputs/polymarket_models/category_calibration_v2.json`
-- `outputs/polymarket_paper_edge/paper_edge_orders.csv`
-- `outputs/polymarket_paper_edge/paper_edge_rejections.csv`
-
-## Model gate logic
-
-Calibration refuses when there are insufficient joined labels. Category calibration falls back to the global calibration model when a category has too few rows. Paper edge simulation refuses until a calibration model exists.
+New work requires a scoped registered work order. Tests and approved analysis
+run only in the isolated ARM64/Python 3.11 VPS environment. See `AGENTS.md` and
+`docs/REPOSITORY_LINE_AUDIT_2026-07-21.md`.

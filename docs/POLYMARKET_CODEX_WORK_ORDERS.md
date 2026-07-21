@@ -1,27 +1,20 @@
 # Polymarket Codex Work Orders
 
-Last updated: 2026-07-20. Accepted `main` through PR #269 contains WO-104
-items 0–6, WO-105, WO-106, WO-107, WO-108, and WO-110. Funding remains
-operationally CLOSED and WO-67 remains BLOCKED behind every registered P1–P5
-precondition. The 2026-07-19 corrective request reopens WO-100 and WO-101 on
-current main and lists the narrowly scoped review remediations under "Current
-queue for Codex" below. Each scope requires its own PR; frozen-surface changes
-remain owner-merge. The unapproved dispatch/queue-driver protocol introduced
-in merged PR #263 was removed by PR #270 (merged 2026-07-19) without reverting
-#263's safety fixes; the residual dispatch-bridge authorization-basis claims
-were removed 2026-07-20, leaving the bridge operating only under the owner's
-direct instruction with its disclosure and merge-routing guardrails intact.
+Last updated: 2026-07-21. Accepted `main` is reconciled through PR #354 at
+`e98d398d8b5304221b17a482996ff24f43dd15cd`. This includes WO-111
+registration/implementation (PRs #301/#341), WO-113 (PR #352), WO-112
+(PR #353), and WO-114 (PR #354), in addition to the earlier recorded work.
+Funding remains operationally CLOSED and WO-67 remains BLOCKED behind every
+registered P1-P5 precondition. A merged source revision is not proof of VPS
+deployment or current health; read the generated operating state.
 
-Prior: 2026-07-16 (owner-authorized corrective batch opened with WO-93; WO-85, WO-87, WO-86, and WO-88 implemented; WO-80, WO-82, WO-81 landed; WO-83 implemented in
-PR #203; WO-84 implemented in PR #205; WO-89 through WO-92 implemented. WO-87 now relabels the unchanged legacy verdict metric honestly and
-reports non-binding true pre-event CLV on the same units. WO-93 was implemented
-in PR #236, WO-94 in PR #237, WO-95 in PR #238, and WO-96 in PR #239. WO-97 was
-implemented in PR #240. WO-98 is implemented and awaiting publication. WO-33 remains pending a
-registered leakage review, with
-WO-34/35 model wiring bound to that review and the three-hypothesis freeze.
-WO-48 and WO-67 are blocked; WO-70 and WO-72 are deferred; WO-76 is
-registration-only. Crypto up/down is frozen as a diagnostic — see
-`AGENTS.md`.)
+Provenance correction: the 2026-07-16 instruction was an audit, not build
+authority. WO-93 through WO-98 were originally filed/built without that
+authority and the false authorization records were corrected in PR #244.
+WO-93 was reverted in PR #245; later owner-attributable merge events and
+amendments govern the accepted implementations recorded in their individual
+sections. No historical “owner-authorized batch” wording is an authorization
+source.
 
 Mechanical, file-level implementation instructions for coding agents (Codex or any other code
 changer). The architecture and priorities live in `docs/POLYMARKET_QUANT_MODE_CHARTER.md`; this file
@@ -30,7 +23,9 @@ tells you exactly what to build, where, and how to prove it works. Read `AGENTS.
 ## Ground rules (apply to every work order)
 
 1. **One work order per branch/PR.** Do not combine work orders or drive-by refactor.
-2. **Run `pip install -e ".[dev]"` once, then `pytest` before pushing. All tests must pass.**
+2. **Run dependencies, target tests and the full unfiltered `pytest` suite
+   only in the bounded, isolated ARM64/Python 3.11 VPS environment. All tests
+   must pass before pushing. Never run the project test suite locally.**
 3. **Never touch gate logic**: no changes to `readiness.py` promotion gates, `risk_decision` check
    thresholds, `_paper_decision` blockers in the audit script, config gate defaults, or anything in
    `execution/live.py`. If a work order seems to require it, stop — the work order is wrong.
@@ -59,7 +54,8 @@ Answer every question. A single "no" means stop and re-read the work order.
 4. Do all your new artifact JSONs carry `"paper_trading_invoked": false` and
    `"live_trading_invoked": false`?
 5. Are your tests asserting exact values computed by hand in the test body — not just "no crash"?
-6. Does `pytest` pass in full, offline, from a clean checkout?
+6. Does the full unfiltered `pytest` suite pass offline from a clean checkout
+   of the exact commit in the bounded, isolated VPS environment?
 7. Did you flip the work-order status here AND the WP status in the charter, with a dated
    "Landed:" note saying what exists now and where?
 
@@ -77,8 +73,9 @@ Common failure modes seen or anticipated in this repo — do not repeat them:
   hides broken evidence and is worse than a crash.
 - **Loosening a check "because the test broke".** If an existing test fails, your change is wrong
   or the work order says to update that exact test. Never widen the assertion to make it pass.
-- **Forgetting Windows.** The scheduled cycle runs on Windows; paths through `Path`, no
-  POSIX-only calls in engine code (`os.open` with O_EXCL is fine; `fcntl` is not).
+- **Reintroducing local/legacy runtime assumptions.** Production and
+  verification are VPS-only. Legacy Windows launchers remain for history and
+  regression coverage, not as the scheduled production cycle.
 
 ---
 
@@ -4222,23 +4219,25 @@ M-gates, or the WO-50 action table. Scheduler wired:
 `maker_safety_refresh` immediately before the WO-99 step, so the qualification
 artifact is fresh when the gate reads it.
 
-## ACTIVE BATCH for Codex (opened 2026-07-18, re-engagement)
+## Historical active-batch record (opened 2026-07-18; superseded)
 
-Codex is re-engaged. Current assignment: **none authorized yet.** A rev.2
-anchor-safe **PROPOSAL** for WO-111 is recorded below (and in the Current queue)
-for review only — it is NOT issued and confers NO authorization to build.
+This paragraph records the authorization state before the later owner merge. A
+rev.2 anchor-safe proposal for WO-111 was recorded below and at that time was
+not issued and conferred no authorization to build.
 Because WO-111 enrolls a new anchored ledger glob and sits in the maker-gate
 module, it is a registered/control surface: per the repository rule, an agent
 may build it ONLY after owner authorization, and owner authorization for a
 registered surface exists ONLY through an owner-authored commit or the owner's
 merge of an authorizing PR — never through agent-written queue text or a chat
-message. This queue entry, and any orchestrator dispatch referencing it, is a
-proposal; it becomes an authorized, buildable assignment only when the owner
-merges its registration. Until then no agent builds WO-111. (Forward-only
+message. At that time this queue entry and any orchestrator dispatch referencing
+it remained a proposal; the required registration later merged in PR #301 and
+the implementation merged in PR #341. (Forward-only
 maker-carry telemetry: persist per-day portfolio membership + per-market markout
 in a NEW anchor-safe sidecar `maker_carry_portfolio_members.csv`, leaving the
 append_only-anchored `maker_carry_history.csv` byte-identical; changes no gate,
-threshold, share-model scope, or verdict.) Work only what a bridge dispatch
+threshold, share-model scope, or verdict.) The remainder of this subsection
+preserves the then-current dispatch record and is not the current queue. Work
+only what a bridge dispatch
 (a `[orchestrator-dispatch]` @codex post — see "Dispatch bridge" below) or the
 owner assigns from this file; a dispatch may assign any registered WO (frozen
 included), but frozen/registered surfaces stay owner-merge. WO-107
@@ -4482,20 +4481,16 @@ Do NOT: touch any gate (`maker_carry_study.py` gate logic, M-A/M-B/M-C),
 any order path. Do NOT build the realism consumer or change the study's reward
 estimate — that is a separate future WO that depends on this data existing.
 
-## WO-111 — Persist per-day portfolio membership + per-market markout in a NEW anchor-safe sidecar ledger (PROPOSAL; rev.2 anchor-safe; forward-only telemetry hardening)
+## WO-111 — Persist per-day portfolio membership + per-market markout in a NEW anchor-safe sidecar ledger (`done`; PRs #301/#341)
 
 Priority: MEDIUM — auditability / anti-regression, not funding-gating.
-Authorization status: **PROPOSAL — NOT authorized to build.** This is a
-registered/control surface (it enrolls a new anchor-enrolled ledger glob and
-sits in the maker-gate module). Per the repository rule, authorization for a
-registered surface exists ONLY through an owner-authored commit or the owner's
-merge of an authorizing PR — never through this queue text or a chat message. No
-agent may build WO-111 until that owner authorization exists; the owner's merge
-of the registration is what issues it.
-Merge classification: registered/control-surface. Changes no gate, threshold,
-share-model scope, verdict, or promotion control. Require a line-audit +
-red-team pass before merge and route the merge to the OWNER; the orchestrator
-does not self-merge it.
+Authorization/status: registration merged in PR #301 and implementation merged
+in PR #341. This remains a registered/control surface; the merge history, not
+this queue prose or a chat message, supplied the authority. The sidecar is
+forward-only and does not retroactively reconstruct missing member evidence.
+Merge classification was registered/control-surface. The accepted change was
+intended to alter no gate, threshold, share-model scope, verdict, or promotion
+control and was routed through the owner-merge path.
 
 Rev.2 note (2026-07-19). The rev.1 spec proposed adding a `portfolio_members`
 COLUMN to `maker_carry_history.csv`. That is REJECTED: `maker_carry_history.csv`
@@ -5171,7 +5166,32 @@ Verification required before publication: Ruff, the focused WO-101 and
 dependency tests, and the complete unfiltered repository suite must all pass
 in the isolated bounded VPS container on the exact proposed commit.
 
-## Current queue for Codex (reconciled 2026-07-19)
+## Reconciliation after the historical queue (2026-07-21)
+
+Accepted source now includes WO-111 registration/implementation (PRs #301 and
+#341), WO-113 (PR #352), WO-112 (PR #353) and WO-114 (PR #354). WO-100 and
+WO-101 also merged in PRs #282 and #285. A source merge is not proof of VPS
+deployment, artifact freshness or a successful day-after check.
+
+- **WO-112 — merged PR #353:** capital-normalized Kelly history was added, but
+  the 2026-07-21 audit found a zero/one-history fail-open on the frozen WO-50
+  sizing surface. Owner-routed correction required.
+- **WO-113 — merged PR #352:** maker-carry ranking/measurement controls landed;
+  duplicate timestamps, non-finite values, malformed days and the exact switch
+  boundary still need adversarial coverage.
+- **WO-114 — merged PR #354:** dashboard readiness, card-refresh disable and
+  scheduler log rotation landed. The stated readiness bound, rotation timing
+  and delayed disabled-status visibility remain open review follow-ups.
+- **Unregistered audit follow-up:** findings in
+  `docs/REPOSITORY_LINE_AUDIT_2026-07-21.md` are audit results only. They grant
+  no authority to build, change funding, relax a gate or touch a frozen surface.
+  File separately scoped work orders and route controlled changes through
+  `AGENTS.md`.
+
+Funding remains CLOSED and WO-67 remains BLOCKED. The generated operating state
+is the only current runtime authority.
+
+## Historical current-queue snapshot (reconciled 2026-07-19; superseded)
 
 Every WO below and every future WO must comply with
 `docs/ENGINEERING_STANDARDS.md` (S1-S7), including the mandatory
@@ -5294,7 +5314,7 @@ frozen-surface change.
 7. **Review hygiene:** adjudicate every surviving review thread against current
    main; resolve only findings that are fixed or demonstrably superseded, and
    fix applicable findings in their own PRs first.
-8. **WO-111 (rev.2, anchor-safe) — PROPOSAL, NOT authorized to build:**
+8. **WO-111 historical pre-registration status (superseded by PRs #301/#341):**
    because it enrolls a new anchored ledger glob and sits in the maker-gate
    module, an agent may build it only after owner authorization (an owner
    commit or the owner's merge of its registration); this queue entry is not
@@ -5317,9 +5337,10 @@ frozen-surface change.
    sidecar and the still-byte-identical `maker_carry_history.csv`. Owner-merge
    (enrolls an anchored ledger; sits in the maker-gate module).
 
-Completed context: WO-93–WO-110 are merged as recorded in their individual
-sections, except that WO-100 and WO-101 are intentionally being rebuilt from
-their closed historical PRs. WO-33/34/35 remain governed by WO-101's leakage
+Completed context as of 2026-07-21: WO-93–WO-114 are merged as recorded in their
+individual sections/provenance notes, including WO-100 and WO-101 rebuilds in
+PRs #282/#285 and WO-111 through WO-114 in PRs #341/#353/#352/#354.
+WO-33/34/35 remain governed by WO-101's leakage
 review and the H1–H3 freeze. WO-48, WO-67, WO-73 item 4, and WO-75 item 2 remain
 blocked. WO-70 and WO-72 remain deferred; WO-76 remains registration-only;
 WP13 still requires a separate owner decision.

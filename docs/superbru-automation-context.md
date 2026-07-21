@@ -1,189 +1,173 @@
-# SuperBru Automation Context
+# SuperBru automation context
 
-This document records the current production automation setup for the World Cup 2026 SuperBru engine.
+Last reconciled: 2026-07-21.
 
-## Current production split
+This document describes the stable production split after recurring GitHub
+Actions schedules moved to the VPS. It does not state that an active tournament
+exists or that any current submission is due. The World Cup card-refresh job is
+seasonal and should be quiesced when the competition is over.
 
-The automation is split into two separate responsibilities:
+The committed `.env.vps-paper.example` disables both seasonal automation
+switches. Actual VPS values are dynamic and must be read through generated
+operating evidence without exposing the environment.
 
-1. **Refresh Locked Superbru Card** keeps the committed card fresh.
-2. **Auto Pick (Scheduled)** submits the latest scoreline to SuperBru before kickoff.
+## Production ownership
 
-This separation is intentional. The refresh workflow prepares the card; the auto-pick workflow submits from the card or from a live one-match recompute.
+### VPS auto-pick watchdog
 
-## Source of truth and fallback
+```text
+service: superbru-auto-pick-watchdog
+entrypoint: scripts/run_superbru_auto_pick_watchdog.sh
+default interval: 900 seconds
+output root: outputs/pregame_checks/auto_pick_vps
+```
 
-The committed card is:
+The watchdog checks the configured SuperBru page for matches inside the
+pre-kickoff/revision window. Its active runner is
+`scripts/auto_pick_match_scoped_smart_odds.py`, which delegates to the
+match-scoped runner while applying alias-aware team matching and submission.
+
+The watchdog writes `latest_watchdog_status.json` and `watchdog.log`.
+`dry_run=false` in its status describes the SuperBru competition action; it
+does not enable or invoke Polymarket trading.
+
+### VPS locked-card refresh
+
+```text
+service: vps-ops-scheduler
+job: locked_card_refresh
+default interval: 43,200 seconds
+switch: OPS_CARD_REFRESH_ENABLED
+```
+
+The refresh chain prepares the historical committed card and associated
+analysis outputs. It does not own the pre-kickoff polling loop.
+
+PR #354 added an intentional seasonal skip. Set
+`OPS_CARD_REFRESH_ENABLED=0` in the VPS `.env` when the tracked competition
+has ended. The switch is evaluated when the normal job cadence is reached, so
+an older status can remain visible until then.
+
+## GitHub workflow posture
+
+The following workflows are manual-dispatch only:
+
+- `.github/workflows/auto_pick.yml`;
+- `.github/workflows/refresh-locked-superbru-card.yml`; and
+- `.github/workflows/superbru-clv-snapshot.yml`.
+
+`.github/workflows/check_superbru_fixtures.yml` is intentionally disabled and
+fails closed pending a future, separately authorized competition/schedule
+design. None of these workflows is the recurring production scheduler.
+
+## Pick and evidence sources
+
+The historical committed fallback card is:
 
 ```text
 outputs/final_locked_picks/superbru_final_card.csv
 ```
 
-Auto Pick uses this card as the fallback/source-of-truth row set. When match odds are enabled, Auto Pick fetches only the imminent match's odds and recomputes a fresh pick before submission. If the fresh recompute is unavailable, it falls back to the committed card pick.
-
-## Refresh Locked Superbru Card
-
-Workflow:
+Submission evidence and diagnostics are under:
 
 ```text
-.github/workflows/refresh-locked-superbru-card.yml
-```
-
-Purpose:
-
-- regenerate the locked-card outputs;
-- validate that `superbru_final_card.csv` exists and has rows;
-- upload refresh artifacts;
-- commit refreshed output files.
-
-Schedule:
-
-```text
-06:05 UTC / 08:05 SAST
-14:05 UTC / 16:05 SAST
-```
-
-Default quota posture:
-
-- skips market-odds refresh by default (runs with `--skip-market-odds-fetch`);
-- skips expensive final simulation by default (runs with `--skip-final-simulation`);
-- market odds are refreshed only by removing `--skip-market-odds-fetch` from the workflow command, or by running the pipeline locally.
-
-This workflow does not submit picks to SuperBru.
-
-## Auto Pick Scheduled Submitter
-
-Workflow:
-
-```text
-.github/workflows/auto_pick.yml
-```
-
-Active entrypoint:
-
-```text
-scripts/auto_pick_match_scoped_smart_odds.py
-```
-
-Important: despite the legacy filename, this entrypoint currently delegates to the full live runner in `scripts/auto_pick_match_scoped.py` after patching alias-aware team matching and alias-aware browser submission.
-
-Supporting alias files:
-
-```text
-scripts/team_name_aliases.py
-scripts/submit_superbru_pick_cdp_aliases.py
-```
-
-Schedule:
-
-- runs once per configured kickoff, roughly 25 minutes before kickoff;
-- uses a default `window_minutes` value of 40 to tolerate GitHub cron delay;
-- does not use the older 20/10 double-fire design.
-
-## Odds API spending
-
-The scheduled Auto Pick run uses a match-scoped odds pull, not a whole-tournament pull.
-
-Default behaviour:
-
-1. Log in to SuperBru.
-2. Scan match tabs and queue only matches inside the pre-kickoff window.
-3. Fetch a one-match odds snapshot for the queued match.
-4. Recompute a fresh pick from that one-match snapshot and the engine config.
-5. Apply pool-position intelligence if leaderboard scraping succeeds.
-6. Submit the recomputed pick; if recompute fails, submit the committed card fallback pick.
-
-Expected quota posture:
-
-```text
-Scheduled Auto Pick = about one match-scoped odds pull per kickoff.
-Refresh Locked Superbru Card = zero Odds API pulls (cached odds via --skip-market-odds-fetch).
-Local full pipeline without --skip-market-odds-fetch = intentionally spends refresh credits.
-Auto Pick with no odds / recompute failure = submit committed card fallback pick only.
-```
-
-The workflow comments estimate match odds cost from the configured region and market scope. The base runner resolves unset `odds_regions` / `odds_markets` from `config.yaml`, defaulting to `eu` and `h2h,totals` when no config value exists.
-
-## Team-name aliases
-
-Team-name matching is alias-aware across the card lookup, one-match Odds API event lookup, orientation checks, and in-browser SuperBru row/subtab matching.
-
-Examples that should match each other:
-
-```text
-United States / USA / US
-South Korea / Korea Republic / KOR
-Czechia / Czech Republic / CZE
-Iran / IR Iran / IRI / IRN
-DR Congo / Democratic Republic of the Congo / DRC / COD
-Bosnia and Herzegovina / Bosnia / BIH / BHI
-Curacao / Curaçao / CUR / CUW
-Ivory Coast / Côte d'Ivoire / CIV
-```
-
-Alias implementation:
-
-- `scripts/team_name_aliases.py` provides `canonical_team_key`.
-- `scripts/auto_pick_match_scoped_smart_odds.py` patches the base runner's `norm_team` to `canonical_team_key`.
-- `scripts/submit_superbru_pick_cdp_aliases.py` patches the browser JavaScript row and subtab matchers so SuperBru labels such as `USA` can match canonical card names such as `United States`.
-
-## Schedule-only operation
-
-Both workflows are schedule-only. CI forbids a `workflow_dispatch` trigger on the automated
-workflows (see the workflow-validation step in `ci.yml`), so there are no manual run-time inputs
-such as `fetch_match_odds` or `refresh_market_odds`. Each workflow's behaviour is fixed in its YAML:
-
-- **Auto Pick** always performs a match-scoped odds pull and live recompute for any match inside
-  the pre-kickoff window, and falls back to the committed card pick when the recompute is unavailable.
-- **Refresh Locked Superbru Card** always runs
-  `scripts/run_daily_robust_pipeline.py --skip-final-simulation --skip-market-odds-fetch`,
-  rebuilding the card from committed cached odds and spending no Odds API credits.
-
-To change posture, edit the workflow command or run the script locally — for example, drop
-`--skip-market-odds-fetch` to refresh market odds during a rebuild, drop `--skip-final-simulation`
-to run the final-leader simulation, or run `python scripts/run_daily_robust_pipeline.py` with no
-skip flags for the full pipeline.
-
-## Expected Auto Pick statuses
-
-```text
-submitted              Scoreline was submitted.
-dry_run                Run checked but did not submit.
-no_pick_available      Neither a live recompute nor committed-card fallback was available.
-pick_card_missing      Match was in the window but missing from the locked card.
-locked_skipped         SuperBru inputs were locked.
-no_inputs_skipped      Score inputs were not found.
-not_in_window          Match was not inside the submission window.
-submit_failed          Submit attempt failed after queueing.
-```
-
-## Important artifacts
-
-```text
+outputs/pregame_checks/auto_pick_vps/
 outputs/pregame_checks/auto_pick/
-outputs/pregame_checks/auto_pick/match_odds/
-outputs/pregame_checks/auto_pick/submit_diagnostics/
-outputs/daily_robust_card/
-outputs/final_locked_picks/
 ```
 
-The base Auto Pick summary mode remains:
-
-```json
-"mode": "match_scoped_locked_card_auto_pick"
-```
-
-The alias-aware entrypoint adds this marker to the printed result:
-
-```json
-"alias_aware_entrypoint": true
-```
-
-## Final operational rule
+Scheduler status is under:
 
 ```text
-Refresh Locked Superbru Card = prepares the card and normally spends zero Odds API credits.
-Auto Pick = submits from a live one-match recompute, with committed-card fallback.
-Odds API = one match-scoped pull per scheduled kickoff by default, not a whole tournament pull.
-Team aliases = canonical card names and SuperBru/Odds short labels resolve to the same team key.
+outputs/ops_scheduler/status.json
+outputs/ops_scheduler/status.csv
 ```
+
+The generated operating state determines freshness and status. A committed card
+or a running container is not evidence that a pick was submitted.
+
+## Match-scoped odds and fallback behavior
+
+When the configured odds credential and a matching imminent fixture are
+available, the match-scoped runner can obtain a narrow odds snapshot and
+recompute the pick. Its historical fallback is the committed card row.
+
+This behavior is competition-specific. Before any new competition is enabled,
+review:
+
+- the pool and login URLs;
+- team aliases and fixture identity;
+- page timezone and kickoff timestamps;
+- pre-kickoff and revision windows;
+- odds region/market scope and quota;
+- fallback-card validity; and
+- locked/absent input fail-closed behavior.
+
+Do not carry the World Cup defaults into another competition without that
+review.
+
+## Team aliases
+
+`scripts/team_name_aliases.py` supplies canonical team keys used across card,
+odds-event and browser matching. The alias-aware entrypoint and submission
+adapter prevent display labels such as `USA` from silently failing to match a
+canonical card name such as `United States`.
+
+Alias coverage is an identity control, not permission to submit an ambiguous
+fixture. A missing or conflicting match remains blocked.
+
+## Secrets
+
+Secrets are supplied by the guarded deploy workflow and stored only in the VPS
+`.env`, or are provided to a manual GitHub workflow:
+
+```text
+SUPERBRU_EMAIL or SUPERBRU_USERNAME
+SUPERBRU_PASSWORD
+SUPERBRU_LOGIN_URL
+SUPERBRU_POOL_URL
+SUPERBRU_PLAYER_NAME
+SUPERBRU_POOL_KEYWORDS
+THE_ODDS_API_KEY
+```
+
+Do not commit, log, display or copy their values into artifacts.
+
+## Status interpretation
+
+The match-scoped runner can report states including:
+
+```text
+submitted
+dry_run
+no_pick_available
+pick_card_missing
+locked_skipped
+no_inputs_skipped
+not_in_window
+submit_failed
+```
+
+Read the exact artifact and timestamp rather than inferring success from the
+latest log line. Missing or stale evidence is `UNKNOWN`.
+
+The current match-scoped runner can return success under
+`--require-submission` with zero queued fixtures, and scheduler preflight can
+misclassify auth/network failures as quota skips. Treat submission/job success
+as unproved unless fresh match-specific artifacts corroborate it. These and
+other ops findings are recorded in
+`docs/REPOSITORY_LINE_AUDIT_2026-07-21.md`.
+
+## Operations
+
+Deployment follows `docs/POLYMARKET_VPS_DOCKER_RUNBOOK.md`. Read-only checks
+run on the VPS:
+
+```bash
+cd /home/opc/Claude
+docker compose -f docker-compose.vps-paper.yml ps
+docker compose -f docker-compose.vps-paper.yml logs --tail=100 superbru-auto-pick-watchdog
+docker compose -f docker-compose.vps-paper.yml logs --tail=100 vps-ops-scheduler
+```
+
+Do not run the watchdog, refresh pipeline, browser submission or tests on the
+local workstation.

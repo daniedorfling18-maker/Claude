@@ -12,7 +12,9 @@ Canonical outputs:
   that the dashboard has a loopback-only Docker binding and an authenticated,
   tailnet-only Tailscale Serve HTTPS route with Funnel disabled.
 
-Generate or refresh them with:
+The VPS scheduler and guarded acceptance path generate or refresh them with the
+following engine command. It may be run manually only inside an isolated VPS
+container; never run it on the local workstation:
 
 ```bash
 python -m polymarket_predictive_engine.cli operating-state --config polymarket_predictive_config.example.yaml

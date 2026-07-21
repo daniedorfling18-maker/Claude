@@ -1,7 +1,12 @@
 # Owner amendment — sharp-linking funding evaluator (Route A reconciliation)
 
-Status: **FINAL — SIGNED.**
-(`FUNDING_GOVERNANCE_RECONCILED = False`).
+Status: **FINAL — SIGNED; EVALUATOR LANDED.**
+
+At signing, `FUNDING_GOVERNANCE_RECONCILED = False` pending the built,
+passing evaluator. WO-105 subsequently landed the evaluator and flipped the
+flag in the same commit as required; the current registered state is
+`FUNDING_GOVERNANCE_RECONCILED = True`. This reconciles governance only. It
+does not open funding.
 
 ## Purpose
 

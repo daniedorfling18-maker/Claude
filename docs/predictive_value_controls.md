@@ -1,5 +1,9 @@
 # Predictive Value Controls
 
+> Historical SuperBru command examples below may run only in an isolated VPS
+> environment. They are not the current scheduler. Selection-conditioned or
+> post-kickoff odds comparisons are exploratory, not confirmatory evidence.
+
 This repo is a Superbru decision engine. It should not claim live predictive edge unless the evidence is joined to trusted completed results and evaluated by signal source.
 
 ## WC 2026 validation status

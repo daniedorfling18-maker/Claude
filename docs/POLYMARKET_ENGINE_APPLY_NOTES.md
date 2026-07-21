@@ -1,38 +1,10 @@
-# Polymarket Predictive Engine Patch
+# Engine apply notes: retired
 
-Copy this file tree into the repository root.
+The original patch-copy/install note described repository assembly before the
+engine was integrated. It is no longer an installation or test procedure.
 
-Then update `pyproject.toml` by adding:
-
-```toml
-polymarket-engine = "polymarket_predictive_engine.cli:main"
-```
-
-under `[project.scripts]`.
-
-Also append the contents of `GITIGNORE_POLYMARKET_SNIPPET.txt` to `.gitignore`.
-
-The live approval file must never be committed. Only `config/polymarket_live_approval.example.yaml` is included.
-
-Recommended commands:
-
-```powershell
-pip install -e .
-pytest
-polymarket-engine config-check --config polymarket_predictive_config.example.yaml
-polymarket-engine pipeline-inventory --config polymarket_predictive_config.example.yaml
-polymarket-engine pipeline-health --config polymarket_predictive_config.example.yaml
-polymarket-engine inventory --config polymarket_predictive_config.example.yaml
-polymarket-engine data-quality --config polymarket_predictive_config.example.yaml --allow-data-quality-warnings
-polymarket-engine readiness --config polymarket_predictive_config.example.yaml
-polymarket-engine build-labels --config polymarket_predictive_config.example.yaml
-polymarket-engine build-features --config polymarket_predictive_config.example.yaml
-polymarket-engine predict --config polymarket_predictive_config.example.yaml
-polymarket-engine validate --config polymarket_predictive_config.example.yaml
-polymarket-engine generate-signals --config polymarket_predictive_config.example.yaml
-polymarket-engine backtest --config polymarket_predictive_config.example.yaml
-polymarket-engine paper-trade --config polymarket_predictive_config.example.yaml
-polymarket-engine live-trade --config polymarket_predictive_config.example.yaml
-```
-
-Expected first-run behaviour: if resolved labels are not present in `raw_market_snapshots.csv`, `build-labels`, `train`, `validate` and live trading fail closed. That is intentional.
+The package, CLI entry point, configuration example and ignore rules are now
+tracked in the repository. Do not copy an external tree over the checkout or
+run the project locally. Changes follow a scoped work order and PR; tests run in
+the isolated ARM64/Python 3.11 VPS gate, and production deploys through the
+guarded workflow in `docs/POLYMARKET_VPS_DOCKER_RUNBOOK.md`.

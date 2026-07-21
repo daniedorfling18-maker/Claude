@@ -1,6 +1,6 @@
 # Polymarket Quant Mode Charter
 
-Last updated: 2026-07-16
+Last updated: 2026-07-21
 
 This is the **orchestration charter** for turning the Polymarket predictive engine into a full quant
 trading system. It is written for every coding agent working on this repo — Claude, Codex, or any
@@ -22,16 +22,19 @@ hypothesis -> point-in-time data -> features -> model -> calibration scorecard
 The engine already implements most of this loop. Quant mode is about closing the remaining gaps and
 raising the evidence standard, **not** about loosening gates to force activity.
 
-## Non-negotiable invariants (verbatim from AGENTS.md — do not weaken)
+## Non-negotiable invariants (summary of `AGENTS.md` — do not weaken)
 
 1. Everything stays **shadow / dry-run / paper-gated by default**. There is no approved live order path.
-2. Live trading stays gated four independent ways (kill switch, `trading.mode: live`,
-   `POLYMARKET_LIVE_TRADING=1`, human approval file) plus the `LiveExecutor` gates.
+2. Funding remains CLOSED and WO-67 remains BLOCKED behind every registered
+   P1-P5 precondition. There is no approved autonomous live-order, signer,
+   credential-loading, cancellation, or execution path.
 3. No label leakage: point-in-time features only; chronological validation; train-only thresholds.
 4. Promotion requires **forward shadow evidence**, never in-sample backtest ROI.
 5. Do not loosen alpha thresholds, same-category gates, cohort-promotion gates, or family exclusions.
 6. New risk/sizing code may only ever make sizing **more** conservative by default.
-7. Local-first: plain Python + `pytest`; Docker is deploy-only.
+7. Runtime and verification are VPS-only. Local work is limited to inspection,
+   editing, Git/GitHub, and SSH administration; target/full tests run only in
+   the isolated ARM64/Python 3.11 VPS environment.
 
 Any work package below that appears to conflict with these invariants loses; the invariants win.
 
@@ -59,6 +62,16 @@ Any work package below that appears to conflict with these invariants loses; the
 The binding constraint is **not** infrastructure. It is *evidence*: no family has positive
 closed/settled forward evidence yet. Quant-mode work must therefore prioritise anything that
 increases the rate and quality of forward evidence per day of wall-clock time.
+
+## Current implementation boundary
+
+Merged source through PR #354 includes WO-111 portfolio-membership telemetry,
+WO-112's fail-closed Kelly fallback, WO-113's measurability-aware maker
+portfolio, and WO-114's seasonal-card/log/readiness operations changes. These
+merges do not prove that the same SHA is deployed or that runtime evidence is
+fresh; the generated operating state remains authoritative. PR #354 also
+retains open review follow-ups on readiness-loop timing, rotation timing during
+long jobs, and delayed visibility after disabling the seasonal card job.
 
 ## Work packages
 
@@ -789,12 +802,12 @@ trade/OI ledgers, and fail-soft per-market OI behavior are unchanged. This is
 collection-only and changes no hypothesis, signal, gate, threshold, sizing,
 capital, credential, broker, or order path.
 
-**2026-07-16 - WO-98 implemented by Codex.** H2 now has a frozen
+**2026-07-16 - WO-98 merged in PR #241.** H2 has a frozen
 prospective evaluator contract: exact complete-basket top-ask depth, canonical
 per-leg fees, a fixed adverse/slippage reserve, explicit clear scans,
 event-day episode independence, three-scan persistence, a deterministic
 event-clustered interval, concentration control, and the original 100-episode/
-60-day stop. The exact artifact will become the dashboard's H2 authority;
+60-day stop. The exact artifact is the dashboard's H2 authority;
 legacy gross scanner output remains diagnostic. The lane is shadow research
 only and cannot alter paper/live, gate, sizing, funding, signer, credential,
 broker, or order paths. Exact observations, frozen episodes, and the verdict
@@ -824,9 +837,12 @@ flag remains false. Funding remains closed and WO-67 remains blocked.
 3. **Determinism.** Seed every bootstrap/simulation; tests must not depend on network access.
 4. **Artifacts over prints.** New signals write JSON/CSV under `outputs/polymarket_model_governance/`
    or a dedicated output folder, and register a CLI command in `cli.py` `COMMANDS`.
-5. **Every WP ships with tests** under `tests/polymarket_predictive_engine/` and a short doc note
-   (this file's WP status line + `docs/POLYMARKET_CURRENT_STATE.md` if the operating state changes).
-6. **Run `pytest` before pushing.** Keep changes leakage-safe and dry-run/shadow-safe.
+5. **Every WP ships with tests** under `tests/polymarket_predictive_engine/`
+   and a short stable-contract note. Dynamic runtime state belongs only in the
+   generated operating-state artifacts.
+6. **Run target and full `pytest` only in the bounded, isolated
+   ARM64/Python 3.11 VPS environment before pushing.** Keep changes
+   leakage-safe and dry-run/shadow-safe.
 7. **Update this charter** when a WP lands: flip its status, date it, and note the artifact paths.
 
 ## Definition of done for "quant trader bot"

@@ -11,10 +11,15 @@ Point-in-time operating state is generated from runtime evidence, not maintained
 in README prose. Read the VPS dashboard or these files in `/home/opc/Claude`:
 
 ```text
-http://129.151.178.42:8765/
+PM_DASHBOARD_PUBLIC_URL from /home/opc/Claude/.env
 outputs/performance/operating_state.md
 outputs/performance/operating_state.json
 ```
+
+The dashboard URL must be the private Tailscale Serve address
+`https://<node>.<tailnet>.ts.net/`. Port `8765` is bound to VPS loopback only;
+there is no supported public-IP dashboard route and Tailscale Funnel must remain
+disabled.
 
 [`docs/OPERATING_STATE.md`](docs/OPERATING_STATE.md) defines the control, and
 [`AGENTS.md`](AGENTS.md) defines how agents operate the repository.
@@ -30,6 +35,13 @@ The production stack is deployed from reviewed `main` through
 `Deploy Polymarket VPS Paper` using `docker-compose.vps-paper.yml`. The guarded
 workflow preserves ledgers, records the deployed SHA, verifies current data
 contracts, and retains rollback state.
+
+The long-running stack contains four services:
+
+1. `polymarket-paper-live` — collection and paper/evidence loop;
+2. `polymarket-dashboard` — loopback-only reporting backend;
+3. `vps-ops-scheduler` — governance, proof, collection and maintenance jobs; and
+4. `superbru-auto-pick-watchdog` — the VPS SuperBru submission watchdog.
 
 ## Quant/research contract
 
@@ -75,8 +87,18 @@ evidence fails closed as `UNKNOWN`.
 | Edge reset | `docs/POLYMARKET_EDGE_STRATEGY_RESET.md` |
 | VPS setup | `docs/ORACLE_VPS_SETUP.md` |
 | Docker safety | `docs/POLYMARKET_DOCKER_SAFETY_AUDIT.md` |
+| 2026-07-21 whole-repository audit | `docs/REPOSITORY_LINE_AUDIT_2026-07-21.md` |
 | Polymarket CLI | `src/polymarket_predictive_engine/cli.py` |
 | SuperBru package | `src/superbru_score_engine` |
 
 Legacy local scripts remain for history and regression coverage only. Their
 presence is not an active run instruction.
+
+## Documentation status
+
+The documentation set was reconciled against merged history through PR #354 on
+2026-07-21. That date describes source documentation only; it is not evidence
+that the VPS is deployed at the same revision or currently healthy. Use the
+generated operating state and deployed-SHA evidence for those questions. The
+dated line audit records unresolved code/deployment findings; documentation
+reconciliation does not imply that those implementation gaps are fixed.

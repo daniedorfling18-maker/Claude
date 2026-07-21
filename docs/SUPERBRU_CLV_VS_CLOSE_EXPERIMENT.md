@@ -1,5 +1,9 @@
 # SuperBru CLV-vs-close experiment
 
+> **Historical experiment.** The local command below is provenance, not an
+> operating instruction. Any rerun is VPS-only under `AGENTS.md`, and the
+> result remains diagnostic unless pre-kickoff observation time is proven.
+
 Generated locally on 2026-07-03 using:
 
 ```powershell

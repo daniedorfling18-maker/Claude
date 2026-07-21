@@ -1,69 +1,106 @@
-# Required GitHub Actions Secrets
+# GitHub Actions secrets
 
-Configure these secrets in **Settings → Secrets and variables → Actions** on the repository.
+Last reconciled: 2026-07-21.
 
-The repository runs ten workflows. The sections below list secrets required for authenticated workflow paths.
+Configure secrets in **Settings → Secrets and variables → Actions**. Never
+place values in source, workflow logs, artifacts, telemetry or documentation.
 
-## `required-pr-gate.yml` (pull request)
+The repository currently contains eleven workflows:
 
-No secrets. The WO-69 gate runs only deterministic lint, config validation, and governance/invariant tests in a disposable container on the repository-scoped Linux ARM64 VPS runner. Its `GITHUB_TOKEN` permission is read-only and checkout credentials are not persisted.
+| Workflow | Trigger posture | Secrets |
+|---|---|---|
+| `required-pr-gate.yml` | Pull request | None |
+| `independent-pr-merge.yml` | Owner-authored issue comment plus independent review evidence | None beyond scoped `GITHUB_TOKEN`/OIDC |
+| `ci.yml` | Manual dispatch | None |
+| `repo-audit-bundle.yml` | Manual dispatch | None |
+| `deploy-polymarket-vps-paper.yml` | Manual dispatch | VPS, odds and optional SuperBru secrets below |
+| `polymarket-vps-governance-refresh.yml` | Manual dispatch fallback | VPS SSH secrets |
+| `polymarket-vps-proof-health.yml` | Manual dispatch fallback | VPS SSH secrets |
+| `auto_pick.yml` | Manual dispatch fallback | SuperBru plus odds secrets |
+| `refresh-locked-superbru-card.yml` | Manual dispatch fallback | Odds plus optional SuperBru context |
+| `superbru-clv-snapshot.yml` | Manual dispatch diagnostic | Odds API key |
+| `check_superbru_fixtures.yml` | Manual dispatch; intentionally disabled/fails closed | None while disabled |
 
-## `ci.yml` (manual comprehensive suite)
+Recurring production work runs inside the VPS
+`vps-ops-scheduler`/`superbru-auto-pick-watchdog`, not on workflow
+schedules.
 
-No secrets. The 1,000+ test suite and offline smoke prediction remain manual while GitHub-hosted minutes are unavailable; they are not the small mandatory PR gate.
+## VPS connection
 
-## `refresh-locked-superbru-card.yml` (scheduled, twice daily)
+Used by deployment and the manual VPS governance/proof workflows:
 
-| Secret | Required | Description |
-|--------|----------|-------------|
-| `THE_ODDS_API_KEY` | **Yes** | API key from [the-odds-api.com](https://the-odds-api.com). The scheduled refresh fetches and validates fresh market odds before rebuilding the locked SuperBru card. |
+| Secret | Required | Purpose |
+|---|---:|---|
+| `PM_VPS_HOST` | Yes | VPS SSH host or DNS name |
+| `PM_VPS_USER` | Yes | VPS SSH user; production convention is `opc` |
+| `PM_VPS_SSH_PRIVATE_KEY` | Yes | Private key matching the VPS authorized public key |
+| `PM_VPS_PORT` | No | SSH port; defaults to `22` |
+| `PM_VPS_REPO_DIR` | No | Repository path; production convention is `/home/opc/Claude` |
 
-> Commits are pushed with the automatic `GITHUB_TOKEN` (the workflow grants `contents: write`); no personal token is needed for the commit step.
+`deploy-polymarket-vps-paper.yml` also requires the
+`acceptance_run_id` workflow input. It must identify the successful
+independent-merge artifact for the exact `main` SHA; it is not a secret.
 
-## `superbru-clv-snapshot.yml` (scheduled, every 4 hours)
+## Odds provider
 
-| Secret | Required | Description |
-|--------|----------|-------------|
-| `THE_ODDS_API_KEY` | **Yes** | Used to snapshot de-vigged World Cup h2h odds for the SuperBru CLV-vs-close experiment. |
+| Secret | Required | Purpose |
+|---|---:|---|
+| `THE_ODDS_API_KEY` | Conditional | Sharp-anchor and SuperBru odds fetches |
 
-> This workflow is diagnostic only. It commits CLV evidence under `outputs/superbru_clv/` and does not submit picks or place trades.
+The deploy workflow can inject this value into the VPS `.env`. A missing key
+must remain visible as missing/disabled evidence; it must never be replaced by
+a placeholder value.
 
-## `auto_pick.yml` (scheduled, ~25 min before each kickoff)
+## SuperBru
 
-| Secret | Required | Description |
-|--------|----------|-------------|
-| `SUPERBRU_USERNAME` | **Yes** | Superbru account username / email (exposed to the script as `SUPERBRU_EMAIL`). |
-| `SUPERBRU_PASSWORD` | **Yes** | Superbru account password. |
-| `THE_ODDS_API_KEY` | **Yes** | Used for the live one-match odds recompute before submission. Without it the run falls back to the committed locked-card pick. |
-| `SUPERBRU_LOGIN_URL` | No | Login endpoint. Defaults to `https://www.superbru.com/login`. |
-| `SUPERBRU_POOL_URL` | No | Pool view URL. A World Cup 2026 pool default is hard-coded if unset. |
-| `SUPERBRU_PLAYER_NAME` | No | Leader/chaser player name for pool-position logic. Defaults to `Danie`. |
-| `SUPERBRU_POOL_KEYWORDS` | No | Comma-separated pool-name keywords for leaderboard matching. Has a built-in default. |
+Used by the deploy workflow to seed the VPS environment and by manual
+SuperBru workflow fallbacks:
 
-## `check_superbru_fixtures.yml` (scheduled, daily)
+| Secret | Required | Purpose |
+|---|---:|---|
+| `SUPERBRU_EMAIL` or `SUPERBRU_USERNAME` | Yes for authenticated paths | Login identity |
+| `SUPERBRU_PASSWORD` | Yes for authenticated paths | Login password |
+| `SUPERBRU_LOGIN_URL` | No | Login endpoint |
+| `SUPERBRU_POOL_URL` | Yes for authenticated production | Explicit allowlisted pool/matches URL; do not rely on a source default |
+| `SUPERBRU_PLAYER_NAME` | No | Player identity used by pool-position logic |
+| `SUPERBRU_POOL_KEYWORDS` | No | Comma-separated pool identity guard |
+| `SUPERBRU_PAGE_TIMEZONE` | No | Page/kickoff timezone for the manual auto-pick workflow |
 
-| Secret | Required | Description |
-|--------|----------|-------------|
-| `SUPERBRU_USERNAME` | **Yes** | Superbru account username / email. |
-| `SUPERBRU_PASSWORD` | **Yes** | Superbru account password. |
-| `WORKFLOW_PAT` | No | Personal access token with `repo` + `workflow` scope. Required only to open the auto-PR that adds missing `auto_pick.yml` cron entries (pushing a workflow file needs `workflow` scope). Without it the job still uploads the fixture report and suggested cron lines but cannot open the PR. |
+Competition-specific defaults in source are not authority to enable a new
+tournament. Review fixture identity, pool, aliases, timezone, odds scope and
+submission windows before enabling any successor competition.
 
+The current deploy workflow learns the SSH host key with `ssh-keyscan`. That is
+trust-on-first-use, not pinned identity. A future owner-routed remediation should
+store and verify an exact host-key fingerprint/known-hosts value; do not describe
+the present connection as cryptographically pinned.
 
-## `deploy-polymarket-vps-paper.yml` (manual VPS deployment)
+## Workflow-specific notes
 
-| Secret | Required | Description |
-|--------|----------|-------------|
-| `PM_VPS_HOST` | **Yes** | Public IPv4/DNS of the Oracle VPS, for example `129.151.178.42`. |
-| `PM_VPS_USER` | **Yes** | SSH user for the Ubuntu VPS, usually `ubuntu`. |
-| `PM_VPS_SSH_PRIVATE_KEY` | **Yes** | Private key matching the public key installed on the VPS. Store the full OpenSSH private key text. |
-| `PM_VPS_PORT` | No | SSH port. Defaults to `22`. |
-| `PM_VPS_REPO_DIR` | No | Repo directory on the VPS. Defaults to `~/Claude`. |
-| `THE_ODDS_API_KEY` | Recommended | Injected into the VPS `.env` so sharp-anchor odds fetching can run. Without it, deployment still works but the highest-priority independent anchor remains disabled. |
+### Required PR gate
 
-The workflow pulls `main`, rebuilds `docker-compose.vps-paper.yml`, forces a dashboard render, and verifies that the deployed dashboard contains the current proof-gate/evidence-funnel sections.
+The required gate uses the self-hosted ARM64/Python 3.11 runner with read-only
+repository permissions and no persisted checkout credential. It requires no
+project secret.
 
-## No secrets required
+### Independent merge
 
-- `required-pr-gate.yml` runs deterministic PR guards on the repository-scoped self-hosted runner.
-- `ci.yml` runs the comprehensive offline suite only when manually dispatched.
-- `repo-audit-bundle.yml` only archives and audits the tracked source tree.
+This workflow is driven by an exact owner-authored
+`/independent-merge <40-character-head-sha>` PR comment and validates a
+distinct current-head reviewer. Its scoped token/OIDC permissions are defined
+in the workflow; no PAT is documented or required.
+
+### Deployment
+
+The deployment workflow runs on the repository-scoped self-hosted ARM64 runner.
+It validates the exact acceptance artifact, preserves runtime data and
+environment state, updates to accepted `main`, rebuilds the canonical Compose
+project, runs isolated acceptance and retains rollback evidence.
+
+### Manual SuperBru workflows
+
+`auto_pick.yml`, `refresh-locked-superbru-card.yml` and
+`superbru-clv-snapshot.yml` are manual fallback/diagnostic workflows. Their
+historical names and comments may mention schedules, but their current triggers
+do not contain a schedule. `check_superbru_fixtures.yml` exits non-zero by
+design while disabled.

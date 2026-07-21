@@ -1,98 +1,153 @@
-# System Map — stocks, flows, feedback loops, and failure surfaces
+# System map
 
-Filed 2026-07-11 from the full-system sweep. This is the reference picture
-of what runs where, what feeds what, and which loops are actually flowing.
-Update it when structure changes, not when numbers change.
+Last structurally reconciled: 2026-07-21, against merged source through PR
+#354.
 
-## Actors and subsystems
+This document describes stable ownership and data flow. It deliberately does
+not state whether the VPS is healthy, which SHA is deployed, current gate
+values, evidence counts, portfolio values, quotas, or incident status. Those
+facts come only from the generated operating state:
+
+```text
+/home/opc/Claude/outputs/performance/operating_state.md
+/home/opc/Claude/outputs/performance/operating_state.json
+```
+
+The same report is available through the private Tailscale Serve URL stored as
+`PM_DASHBOARD_PUBLIC_URL` in `/home/opc/Claude/.env`.
+
+## Operating boundary
+
+- All Polymarket and SuperBru runtime work and all project test execution are
+  VPS-only.
+- The workstation is a control surface for inspection, editing, Git/GitHub and
+  SSH administration.
+- One production Compose project runs from
+  `docker-compose.vps-paper.yml`; duplicate writers are prohibited.
+- The system remains shadow/dry-run/paper-gated. Funding is CLOSED and WO-67 is
+  BLOCKED behind all registered P1-P5 preconditions.
+- No autonomous live-order, signer, cancellation or credential-loading path is
+  approved.
+- Missing, malformed or stale control evidence is `UNKNOWN` and fails closed.
+
+## Stable topology
 
 ```mermaid
 flowchart TD
     subgraph External
-        PM[Polymarket APIs<br/>Gamma / CLOB / data-api / websocket]
-        ODDS[The Odds API<br/>sharp anchors]
-        GH[GitHub<br/>repo + telemetry + archive]
-        SB[SuperBru]
-    end
-    subgraph VPS
-        LOOP[paper-live loop<br/>collector + models + governance<br/>~95% CPU, cpu_shares soft priority (host: 1 vCPU)]
-        SCHED[ops scheduler<br/>13 daily/15-min lanes]
-        DASH[dashboard :8765]
-        WATCH[superbru watchdog]
-        LEDGERS[(Ledgers<br/>features / prints / books /<br/>shadow / portfolio / histories)]
-    end
-    subgraph Decision layer
-        GATES[Verdict gates A/B/C<br/>Maker gates M-A/B/C<br/>amendments 1-7]
-        POLICY[decision_policy.json<br/>frozen WO-50 table]
-        THESIS[Venture thesis<br/>pivot triggers]
-    end
-    subgraph Humans_and_agents
-        USER[Operator - Danie]
-        ORCH[Orchestrator - quant lead]
-        CODEX[Builder - Codex]
+        PM["Polymarket APIs"]
+        ODDS["The Odds API"]
+        SB["SuperBru"]
+        GH["GitHub"]
     end
 
-    PM --> LOOP --> LEDGERS
-    PM --> SCHED --> LEDGERS
-    ODDS --> LOOP
+    subgraph VPS["Oracle VPS — one Compose project"]
+        PAPER["polymarket-paper-live"]
+        OPS["vps-ops-scheduler"]
+        WATCH["superbru-auto-pick-watchdog"]
+        DASH["polymarket-dashboard"]
+        DATA[("Runtime evidence and ledgers")]
+    end
+
+    PM --> PAPER
+    PM --> OPS
+    ODDS --> PAPER
+    ODDS --> OPS
     SB --> WATCH
-    LEDGERS --> GATES --> POLICY --> USER
-    LEDGERS --> DASH
-    LEDGERS -->|30-min telemetry push| GH --> ORCH
-    ORCH -->|work orders + audits| CODEX -->|PRs| GH -->|git pull| VPS
-    USER -->|deploys, decisions, $| VPS
-    POLICY -.->|indicates only,<br/>never executes| USER
+    PAPER --> DATA
+    OPS --> DATA
+    WATCH --> DATA
+    DATA --> DASH
+    GH -->|"guarded deploy of reviewed main"| VPS
 ```
 
-## Feedback loops (the heart of the audit)
+## Long-running services
 
-| Loop | Type | State | Notes |
-|---|---|---|---|
-| **B1 Honesty**: measurement attacks estimates → estimates shrink to truth | Balancing | **Flowing, proven** | Killed the $958 mirage, the 0.03 fee, the legacy share model, and the orchestrator's own gate loophole |
-| **B2 Ops detection**: telemetry/diagnostic → human fix | Balancing | Flowing, manual | Detection automated (disk, restarts, exit codes daily); correction is human. Acceptable at this scale |
-| **R1 Build**: questions → WOs → more system → more audit load → more questions | Reinforcing | **Ran hot this week** | Governor is normative only (thesis do-not list, trigger-based audits). Twice outran carrying capacity (disk, CPU) |
-| **R2 Value**: live results → credibility/content → audience/customers → resources → scale | Reinforcing | **ZERO FLOW** | Every node exists on paper; no live contact, no publishing, no conversations. The system currently runs only its cost loops |
-
-**The single most important line in this document:** the machine's only
-flowing reinforcing loop is the one that consumes resources (R1). The loop
-that creates value (R2) is fully built and fully parked, blocked at one
-node: first real-world contact (a deposit, a post, a conversation). Every
-prior audit said this in different words; the map shows it structurally.
-
-## Stocks and their guards
-
-| Stock | Growth | Guard |
+| Service | Stable responsibility | Important boundary |
 |---|---|---|
-| Websocket features | continuous | retention window (~59k rows) + archive roller |
-| Trade prints / official books | daily + backfill | per-market caps, completed-market stamps |
-| Evidence (graded finals, gate days) | ~daily, event-driven | append-only final history; published_v2-only M-A counting |
-| Disk | refills | telemetry disk%; manual prune (no auto-governor — accepted) |
-| Founder attention | **depletes** | trigger-based audits; do-not list; decision calendar |
+| `polymarket-paper-live` | Continuous market collection plus paper/evidence processing | No approved live-order path |
+| `polymarket-dashboard` | Renders and serves oversight evidence | Backend binds only to `127.0.0.1:8765` |
+| `vps-ops-scheduler` | Serial governance refresh, collectors, proof health, maintenance and seasonal card work | One scheduler/writer; job status is evidence, not authority |
+| `superbru-auto-pick-watchdog` | Checks the SuperBru pre-kickoff window and submits only under its configured controls | Separate from Polymarket funding and execution |
 
-## Delays (where the system waits)
+The one-shot `vps-deploy-acceptance` Compose profile is not a fifth
+long-running service. The deploy workflow isolates the scheduler before running
+that acceptance job.
 
-- Evidence gates: days-to-weeks by design (7 distinct days, 12 units).
-- Settlement grading: ≤48h after market close (Gamma backfill + price-history fallback).
-- Ops detection: ≤30 min (telemetry) / daily (diagnostic).
-- **Human actions: unbounded.** Machine nodes all have cadences; the three
-  human nodes (deposit, publish, converse) have prose dates only. This is
-  the longest, least-governed delay in the system and sits directly on R2.
+## Control and deployment flow
 
-## Single points of failure and their mitigations
+1. A scoped branch and pull request are reviewed against the registered work
+   order and engineering standards.
+2. The required PR gate verifies the proposed head in the isolated ARM64/Python
+   3.11 environment.
+3. Accepted `main` is tied to independent-merge evidence where that control is
+   required.
+4. `Deploy Polymarket VPS Paper` validates the exact acceptance artifact,
+   capacity, Tailscale state and rollback prerequisites before cutover.
+5. The workflow updates the VPS checkout without destroying runtime roots,
+   rebuilds the canonical Compose project, runs isolated acceptance, refreshes
+   governance, stamps the deployed SHA and retains rollback evidence.
+6. Operators read deployment acceptance and generated operating state. They do
+   not infer health from a successful merge or from this document.
 
-| SPOF | Blast radius | Mitigation |
-|---|---|---|
-| One VPS | all collection + runtime | Telemetry preserves decisions; WO-65 archives full ledgers; restore runbook |
-| Gamma as settlement-truth source | grading pipeline | Price-history fallback live; WO-47 adds websocket resolution events (second source) |
-| Collector-computer coupling (one process) | collection gaps on compute crash | Fail-closed restarts + cpu_shares soft priority (host is 1 vCPU; hard caps meaningless); revisit if restarts persist |
-| Orchestrator context | continuity of judgment | Charter + WO docs + this map are the durable memory; sessions are disposable |
-| Self-merge (author=reviewer=merger) | code defects reaching main | Acceptable at $0 live; **must add independent review before live capital** |
-| SA→Polymarket access assumption | the entire live branch | UNVERIFIED. The $10 deposit test resolves it |
+Ad-hoc `git pull`, manual source replacement, local Compose execution and a
+second production writer are outside the operating contract.
 
-## Sweep verdict
+## Evidence flow
 
-Structure: sound. Balancing loops: proven under fire. Guards: in place and
-recently tightened. The system's one structural pathology is not in any
-component — it is that **R2 has never carried a single unit of flow**, and
-every day R1 runs while R2 is parked, the ratio of cost to value worsens.
-No further code changes this sweep; the map IS the finding.
+The repository keeps forward evidence classes distinct:
+
+```text
+historical -> modeled -> reconstructed -> shadow -> paper -> live-real-money
+```
+
+An artifact may move right only through its registered prospective controls. A
+later class may not be backfilled or relabelled from an earlier one.
+
+Promotion-oriented research is frozen to:
+
+1. sharp-anchor maker carry;
+2. persistent dutch-book consistency opportunities; and
+3. structural-bias/smart-flow cohorts with positive executable CLV.
+
+Crypto up/down is an infrastructure/timing diagnostic and cannot consume
+promotion-oriented modelling or capital work.
+
+## Reporting transport
+
+`polymarket-dashboard` publishes no supported public-IP HTTP route. Tailscale
+Serve terminates authenticated tailnet-only HTTPS at:
+
+```text
+https://<node>.<tailnet>.ts.net/
+```
+
+The exact URL is written to `PM_DASHBOARD_PUBLIC_URL`. Tailscale Funnel is
+forbidden. Deploy and health controls verify the loopback Docker binding, Serve
+target, URL provenance and Funnel-off state.
+
+## Authorities
+
+| Question | Authority |
+|---|---|
+| What is running and healthy now? | Generated operating state and deployment evidence |
+| What may an agent do? | `AGENTS.md` |
+| What may be built? | `docs/POLYMARKET_CODEX_WORK_ORDERS.md` |
+| What engineering controls apply? | `docs/ENGINEERING_STANDARDS.md` |
+| Which research hypotheses are active? | `docs/EXPERIMENT_REGISTRY.md` |
+| How is the stack deployed? | `docs/POLYMARKET_VPS_DOCKER_RUNBOOK.md` |
+| How is the private dashboard exposed? | `docs/ORACLE_VPS_SETUP.md` and the Tailscale setup script |
+
+An audit instruction is not build authority. Frozen or registered changes are
+authorized only by the repository mechanism described in `AGENTS.md`; this
+map neither grants funding nor authorizes a merge.
+
+## Known audit boundary
+
+The topology above describes intended stable ownership, not proof that every
+control is fail-closed. The 2026-07-21 static audit found unresolved Funnel-off,
+deploy-acceptance, SSH host-key, scheduler, timestamp, sizing and evidence-
+independence gaps. In particular, do not infer private transport solely from a
+successful setup script or deployment, and do not infer health from service
+presence. See `docs/REPOSITORY_LINE_AUDIT_2026-07-21.md`; generated VPS evidence
+remains the only point-in-time state source.

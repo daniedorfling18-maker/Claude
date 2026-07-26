@@ -7,6 +7,7 @@ credential exfiltration path.
 
 from __future__ import annotations
 
+import collections
 import csv
 import hashlib
 import json
@@ -17,6 +18,10 @@ from typing import Any, Iterable, Mapping
 
 WORK_ORDER = "WO-73"
 ALLOWED_SUFFIXES = frozenset({".json", ".md", ".csv", ".log"})
+# Path fragments the telemetry push skips outright, mirrored from
+# push_vps_telemetry.sh's staging loop so the guard scans exactly the published
+# payload (WO-121). Pinned in both directions by test_credential_guard.
+PAYLOAD_EXCLUDED_FRAGMENTS = ("official_books", "ops_scheduler.log")
 ARCHIVE_MANIFESTS = (
     "outputs/performance/ledger_state_archive_manifest.json",
     "outputs/performance/disaster_recovery_status.json",
@@ -93,8 +98,50 @@ def telemetry_whitelist(repo_root: Path) -> tuple[str, ...]:
     return rows
 
 
-def _candidate_files(repo_root: Path) -> list[Path]:
+def _push_script_default(repo_root: Path, name: str, fallback: int) -> int:
+    """Read a publication limit from the push script's own declaration.
+
+    Parsed from the script (like ``telemetry_whitelist``) so the guard's notion
+    of what gets published cannot drift from what the push actually copies.
+    """
+    script = repo_root / "scripts" / "push_vps_telemetry.sh"
+    try:
+        text = script.read_text(encoding="utf-8")
+    except OSError:
+        return fallback
+    match = re.search(rf'{name}="\$\{{[A-Z_]+:-(\d+)\}}"', text)
+    if match is None:
+        raise ValueError(f"push_vps_telemetry.sh has no parseable {name} declaration")
+    return int(match.group(1))
+
+
+def published_max_file_kb(repo_root: Path) -> int:
+    return _push_script_default(repo_root, "MAX_FILE_KB", 300)
+
+
+def published_csv_tail_lines(repo_root: Path) -> int:
+    return _push_script_default(repo_root, "CSV_TAIL_LINES", 200)
+
+
+def _candidate_files(repo_root: Path) -> tuple[list[Path], list[Path]]:
+    """Files the telemetry push would actually publish.
+
+    WO-121: the guard used to scan the whole source tree, a strict SUPERSET of
+    the published payload. ``copy_capped`` SKIPS an oversized non-CSV file
+    entirely, so ``ops_scheduler.log`` (permanently past the cap, and full of
+    64-hex venue identifiers the text heuristic cannot classify) blocked the
+    publication of every other artifact over findings in a file that never
+    leaves the host. Scanning exactly what is published keeps the guard's
+    security property intact - anything actually leaving the VPS is still
+    scanned, and a credential in a published file still refuses the push -
+    while removing a class of false positives that can only grow with a log.
+
+    Returns (files_to_scan, oversized_csv_paths); oversized CSVs are published
+    as header + tail, so only that window is scanned.
+    """
+    max_bytes = max(0, published_max_file_kb(repo_root)) * 1024
     candidates: set[Path] = set()
+    tail_only: set[Path] = set()
     for relative in telemetry_whitelist(repo_root):
         root = repo_root / relative
         if not root.is_dir():
@@ -102,13 +149,25 @@ def _candidate_files(repo_root: Path) -> list[Path]:
         for path in root.rglob("*"):
             if not path.is_file() or path.is_symlink() or path.suffix.lower() not in ALLOWED_SUFFIXES:
                 continue
-            if len(path.relative_to(root).parts) <= 2 and "official_books" not in path.as_posix():
-                candidates.add(path)
+            posix = path.as_posix()
+            if len(path.relative_to(root).parts) > 2 or any(
+                fragment in posix for fragment in PAYLOAD_EXCLUDED_FRAGMENTS
+            ):
+                continue
+            try:
+                oversized = max_bytes > 0 and path.stat().st_size > max_bytes
+            except OSError:
+                continue
+            if oversized:
+                if path.suffix.lower() != ".csv":
+                    continue  # copy_capped skips oversized non-CSV files
+                tail_only.add(path)
+            candidates.add(path)
     for relative in ARCHIVE_MANIFESTS:
         path = repo_root / relative
         if path.is_file() and not path.is_symlink():
             candidates.add(path)
-    return sorted(candidates)
+    return sorted(candidates), sorted(tail_only)
 
 
 def _safe_value(value: Any) -> bool:
@@ -193,11 +252,16 @@ def _scan_json(path: Path, repo_root: Path) -> list[dict[str, str]]:
     return findings
 
 
-def _scan_csv(path: Path, repo_root: Path) -> list[dict[str, str]]:
+def _scan_csv(path: Path, repo_root: Path, *, tail_rows: int | None = None) -> list[dict[str, str]]:
     findings: list[dict[str, str]] = []
     try:
         with path.open("r", encoding="utf-8-sig", errors="replace", newline="") as handle:
-            for row_number, row in enumerate(csv.DictReader(handle), start=2):
+            rows: Iterable[tuple[int, dict[str, Any]]] = enumerate(csv.DictReader(handle), start=2)
+            if tail_rows is not None and tail_rows >= 0:
+                # An oversized CSV is published as header + tail, so only that
+                # window can carry a value off the host (WO-121).
+                rows = collections.deque(rows, maxlen=tail_rows)
+            for row_number, row in rows:
                 for key, value in row.items():
                     findings.extend(
                         _inspect_field(
@@ -241,13 +305,17 @@ def _scan_text(path: Path, repo_root: Path) -> list[dict[str, str]]:
 
 def scan_telemetry_credentials(repo_root: str | Path) -> dict[str, Any]:
     root = Path(repo_root).resolve()
-    files = _candidate_files(root)
+    files, tail_only = _candidate_files(root)
+    tail_rows = published_csv_tail_lines(root)
+    tail_set = set(tail_only)
     findings: list[dict[str, str]] = []
     for path in files:
         if path.suffix.lower() == ".json":
             findings.extend(_scan_json(path, root))
         elif path.suffix.lower() == ".csv":
-            findings.extend(_scan_csv(path, root))
+            findings.extend(
+                _scan_csv(path, root, tail_rows=tail_rows if path in tail_set else None)
+            )
         else:
             findings.extend(_scan_text(path, root))
     unique = sorted(
@@ -260,6 +328,12 @@ def scan_telemetry_credentials(repo_root: str | Path) -> dict[str, Any]:
         "telemetry_directories": list(telemetry_whitelist(root)),
         "archive_manifests": list(ARCHIVE_MANIFESTS),
         "files_scanned": len(files),
+        "published_payload_only": True,
+        "published_max_file_kb": published_max_file_kb(root),
+        "published_csv_tail_lines": tail_rows,
+        "oversized_csv_tail_scanned": [
+            path.relative_to(root).as_posix() for path in tail_only
+        ],
         "finding_count": len(unique),
         "findings": unique,
         "matched_values_redacted": True,

@@ -135,6 +135,14 @@ for dir in $TELEMETRY_DIRS; do
     2>/dev/null | while IFS= read -r abs; do
       case "$abs" in
         *official_books*) continue ;;
+        # WO-121: the scheduler's own append-only log is never usefully
+        # published - it is permanently past MAX_FILE_KB, so copy_capped
+        # already skipped it - and it is an unbounded source of 64-hex venue
+        # identifiers that the WO-73 guard's text heuristic cannot classify,
+        # which blocked every telemetry push for >22h. Purpose-built logs such
+        # as vps_diagnostic.log (trimmed to fit the cap) still publish.
+        # Mirrored by credential_guard.PAYLOAD_EXCLUDED_FRAGMENTS.
+        *ops_scheduler.log*) continue ;;
       esac
       copy_capped "${abs#"$REPO_DIR"/}"
     done

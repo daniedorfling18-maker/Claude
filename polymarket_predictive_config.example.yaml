@@ -174,6 +174,12 @@ maker_fill_replay:
   # max_official_book_rows / max_collection_window_rows below).
   max_markets: 25
   max_persistent_markets: 25
+  # WO-116: seed official-book collection for the best-ranked study candidates
+  # BEFORE they are selected, so fresh rewarded markets accumulate the WO-113
+  # book-history/snapshot depth while still ineligible and the portfolio stops
+  # starving to 0-1 eligible markets. Collection breadth only; no gate,
+  # threshold, or eligibility rule reads this value.
+  max_candidate_markets: 25
   replay_days: 7
   # 2026-07-14 WO-83: repeated point-in-time snapshots from the documented
   # official CLOB /book(s) API form the validation history. The archive is

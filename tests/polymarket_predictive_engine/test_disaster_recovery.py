@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from copy import deepcopy
+from datetime import datetime, timedelta, timezone
 import os
 from pathlib import Path
 import shutil
@@ -214,6 +215,98 @@ def test_config_overrides_cannot_widen_registered_size_or_rpo_caps(tmp_path: Pat
     assert result["size_cap_mb"] == 50
     assert result["rpo"]["paper_stage_max_rpo_hours"] == 168
     assert result["rpo"]["pre_live_max_rpo_hours"] == 24
+
+
+def test_wo122_oversized_expanded_ledger_set_still_fails_closed(tmp_path: Path):
+    # Production 2026-07-16..26: DR died because the WO-61 ledger set outgrew
+    # the 50MB cap, which is enforced on the COMPRESSED archive, on the
+    # UNCOMPRESSED source, AND on the EXPANDED content during the post-build
+    # restore verification (a decompression-bomb guard). The expanded guard is
+    # the binding one and is deliberately preserved: growing past the cap must
+    # keep refusing, loudly, rather than silently shipping an unrestorable
+    # archive. Restoring DR needs an owner decision on archive scope or cap,
+    # not a quiet relaxation here.
+    cfg = _config(tmp_path)
+    cap_bytes = int(float(cfg.raw["disaster_recovery"]["size_cap_mb"]) * 1024 * 1024)
+    core, _policy, _costs = _seed_two_day_chain(cfg)
+    with core.open("ab") as handle:
+        for _ in range(200_000):
+            handle.write(b"2026-07-11,00000000000000000000000000000000000000000000000000\n")
+    anchor_ledgers(cfg, anchor_date="2026-07-12")
+    assert core.stat().st_size > cap_bytes
+
+    with pytest.raises(DisasterRecoveryError, match="size cap"):
+        create_ledger_archive(cfg, force=True)
+
+    # The failure is stamped for telemetry rather than swallowed.
+    status = read_json(cfg.output_root / "performance" / "disaster_recovery_status.json")
+    assert status["status"] == "error"
+    assert "size cap" in status["error"]
+    # ...and the honest RPO fields make the dead-backup state visible.
+    assert status["rpo"]["compliant"] is False
+
+
+def test_wo122_source_ceiling_is_separate_from_the_registered_artifact_cap(tmp_path: Path):
+    # The runtime source ceiling bounds memory/runtime, not the published
+    # artifact, so it is separately configurable - and still fails closed.
+    cfg = _config(tmp_path)
+    cfg.raw["disaster_recovery"]["source_cap_mb"] = 1
+    core, _policy, _costs = _seed_two_day_chain(cfg)
+    with core.open("ab") as handle:
+        handle.write(b"2026-07-12," + b"x" * (2 * 1024 * 1024) + b"\n")
+    anchor_ledgers(cfg, anchor_date="2026-07-12")
+
+    with pytest.raises(DisasterRecoveryError, match="runtime ceiling"):
+        create_ledger_archive(cfg, force=True)
+
+
+def test_wo122_rpo_compliance_reflects_observed_archive_age(tmp_path: Path):
+    # `compliant` was hardcoded True, so the status file published
+    # rpo.compliant=true beside a 233-hour archive age against a 24h RPO while
+    # the builder had been failing for ten days.
+    cfg = _config(tmp_path)
+    _seed_two_day_chain(cfg)
+    status_path = cfg.output_root / "performance" / "disaster_recovery_status.json"
+
+    first = create_ledger_archive(cfg, force=True)
+    # Never-archived / unknown age fails closed rather than claiming compliance.
+    assert first["rpo"]["observed_within_rpo"] is False
+    assert first["rpo"]["compliant"] is False
+    assert first["rpo"]["configured_rpo_within_registered_ceiling"] is True
+
+    status = read_json(status_path)
+    status.update(
+        {
+            "remote_push_status": "ok",
+            "last_remote_success_at_utc": status["generated_at_utc"],
+            "last_remote_snapshot_date": status["snapshot_date"],
+        }
+    )
+    write_json(status_path, status)
+    fresh = create_ledger_archive(cfg)
+    assert fresh["rpo"]["compliant"] is True  # a genuinely fresh archive
+
+    stale_stamp = (datetime.now(timezone.utc) - timedelta(hours=233)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    status = read_json(status_path)
+    status["last_remote_success_at_utc"] = stale_stamp
+    write_json(status_path, status)
+    stale = create_ledger_archive(cfg, force=True)
+
+    assert stale["last_remote_archive_age_hours"] > 168
+    assert stale["rpo"]["observed_within_rpo"] is False
+    assert stale["rpo"]["compliant"] is False
+
+
+def test_wo122_archive_script_reports_unsupported_host_interpreter():
+    push = (ROOT / "scripts" / "push_vps_archive.sh").read_text(encoding="utf-8")
+    # The engine declares requires-python >=3.10; on a 3.9 host the CLI import
+    # dies with an opaque TypeError, which is what "local Python paths were
+    # exhausted" actually meant in production.
+    assert "sys.version_info >= (3, 10)" in push
+    assert "requires-python" in push
+    assert "no local fallback exists" in push
+    assert 'BUILDER_STATE" -eq 2' in push
+    assert ">=3.10" in (ROOT / "pyproject.toml").read_text(encoding="utf-8")
 
 
 def test_remote_success_controls_due_state_without_rebuilding(tmp_path: Path):

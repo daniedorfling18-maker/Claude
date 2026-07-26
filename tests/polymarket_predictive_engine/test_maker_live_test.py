@@ -173,6 +173,21 @@ def test_scoreboard_loses_when_inventory_swamps_rewards(tmp_path, monkeypatch):
     assert summary["scoreboard"] == "losing_so_far"
 
 
+def test_wo118_positive_net_still_reads_winning(tmp_path, monkeypatch):
+    # WO-118 boundary: strictly positive rewards+PnL keeps winning_so_far.
+    cfg = _config(tmp_path, wallet="0xabc")
+    _seed_study(cfg, crossings=100.0)
+    now = _epoch(RUN_AT)
+    rewards = [{"usdcSize": 1.0, "timestamp": now - 1000, "type": "REWARD"}]
+    trades = [{"size": 100, "price": 0.5, "timestamp": now - 2000, "type": "TRADE"}]
+    _fake_requests(monkeypatch, rewards=rewards, trades=trades, positions=[])
+
+    summary = run_maker_live_test(cfg)
+
+    assert summary["net_score_usd"] == 1.0
+    assert summary["scoreboard"] == "winning_so_far"
+
+
 def test_quiet_wallet_old_newest_activity_ages_out_against_wall_clock(tmp_path, monkeypatch):
     cfg = _config(tmp_path, wallet="0xabc")
     _seed_study(cfg, crossings=4.0)
@@ -335,7 +350,9 @@ def test_mixed_window_counts_only_unlogged_fill_as_maker_test(tmp_path, monkeypa
     assert summary["maker_test_fills_last_24h"] == 1
     assert summary["fills_last_24h"] == 1
     assert summary["fill_alert"] is False
-    assert summary["scoreboard"] == "winning_so_far"
+    # WO-118: an equal-price round trip nets exactly zero - not "held positive"
+    # under the stated scoring rule, so no longer reads winning_so_far.
+    assert summary["scoreboard"] == "flat_no_net_evidence"
 
 
 def test_logged_but_not_yet_anchored_drill_fill_remains_maker_test(tmp_path, monkeypatch):

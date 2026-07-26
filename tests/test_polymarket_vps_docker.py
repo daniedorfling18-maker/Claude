@@ -871,6 +871,16 @@ def test_wo117_window_tolerance_boundary_semantics(tmp_path):
     assert kind(interval + tolerance + tick + 60, interval + tolerance) == "overrun"
 
 
+def test_wo118_disabled_superbru_watchdog_cannot_reach_the_submitting_loop():
+    # WO-118: this is the only script that takes an external action (submitting
+    # picks). The disabled branch must terminate explicitly - if `tail` ever
+    # dies, control must not fall through into the `while true` submit loop.
+    script = (ROOT / "scripts" / "run_superbru_auto_pick_watchdog.sh").read_text(encoding="utf-8")
+    disabled_branch = script.split('SUPERBRU_AUTO_PICK_ENABLED:-true}" != "true"', 1)[1].split("fi", 1)[0]
+    assert "tail -f /dev/null" in disabled_branch
+    assert "exit 0" in disabled_branch.split("tail -f /dev/null", 1)[1]
+
+
 def test_private_dashboard_setup_waits_for_recreated_backend():
     # WO-114: the loopback readiness check must be a bounded retry loop, not a
     # single probe, so it does not race the just-force-recreated reporting

@@ -169,18 +169,29 @@ def _kill_scoreboard(cfg: EngineConfig) -> dict[str, Any]:
     rows = []
     for name, raw in sorted(criteria.items()):
         item = _mapping(raw)
+        # WO-118: the policy's criteria carry their observation under
+        # per-criterion keys (value / worst_day / days / age_seconds), never a
+        # literal "observed" field - the old lookup rendered every criterion as
+        # observed: null in the executor scoreboard.
+        observed = next(
+            (item[key] for key in ("observed", "value", "worst_day", "days", "age_seconds") if key in item),
+            None,
+        )
         rows.append(
             {
                 "criterion": name,
                 "triggered": bool(item.get("triggered")),
-                "observed": item.get("observed"),
+                "observed": observed,
                 "threshold": item.get("threshold", item.get("threshold_days")),
             }
         )
     triggered = [str(value) for value in kill.get("triggered", []) if str(value)]
     if not triggered:
         triggered = [str(row["criterion"]) for row in rows if row["triggered"]]
-    status = str(kill.get("status") or ("triggered" if triggered else ("clear" if policy else "unobserved")))
+    # WO-118 fail-closed default: "clear" requires an actual criteria
+    # evaluation. A policy file without kill_criteria_status used to read
+    # "clear" merely because the file existed.
+    status = str(kill.get("status") or ("triggered" if triggered else ("clear" if criteria else "unobserved")))
     return {
         "status": status,
         "triggered": triggered,

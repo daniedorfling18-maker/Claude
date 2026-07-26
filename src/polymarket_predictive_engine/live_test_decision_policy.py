@@ -596,14 +596,30 @@ def _observation_timestamp(row: dict[str, Any]) -> datetime | None:
     return None
 
 
+def _carries_kill_inputs(row: dict[str, Any]) -> bool:
+    # WO-118 tightening of the WO-86 freshness rule: an observation only
+    # qualifies if it PROVIDES the kill input. The producer's "disabled" and
+    # "awaiting_wallet_address" payloads stamp a fresh generated_at_utc with no
+    # net_score_usd at all, so a lost wallet address during an active live
+    # stage used to keep the guard reading "fresh" on data-free heartbeats
+    # forever. A provided-but-invalid value still qualifies: the kill criteria
+    # treat it as a fail-closed trigger, which must not be masked as missing.
+    value = row.get("net_score_usd")
+    return value is not None and str(value).strip() != ""
+
+
 def _latest_live_observation(
     live_test: dict[str, Any], live_history: list[dict[str, Any]]
 ) -> tuple[dict[str, Any], str, datetime | None]:
     ranked: list[tuple[datetime, int, dict[str, Any], str]] = []
-    if live_test and (stamp := _observation_timestamp(live_test)) is not None:
+    if (
+        live_test
+        and _carries_kill_inputs(live_test)
+        and (stamp := _observation_timestamp(live_test)) is not None
+    ):
         ranked.append((stamp, len(live_history) + 1, live_test, "maker_live_test"))
     for index, row in enumerate(live_history):
-        if (stamp := _observation_timestamp(row)) is not None:
+        if _carries_kill_inputs(row) and (stamp := _observation_timestamp(row)) is not None:
             ranked.append((stamp, index, row, "maker_live_test_history"))
     if ranked:
         stamp, _, row, source = max(ranked, key=lambda item: (item[0], item[1]))

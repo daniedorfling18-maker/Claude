@@ -209,10 +209,17 @@ def _wallet_score(
         scoreboard = "owner_activity_only"
     elif not rewards and not trades and not positions:
         scoreboard = "no_activity_yet"
-    elif net_score >= 0:
+    elif net_score > 0:
         scoreboard = "winning_so_far"
-    else:
+    elif net_score < 0:
         scoreboard = "losing_so_far"
+    else:
+        # WO-118: rewards + PnL of exactly zero is not "held positive" under
+        # the stated scoring rule. Dust positions or historical activity used
+        # to skip the no_activity branch and then read as winning on no net
+        # evidence - a vacuous verdict that also fed the scoreboard_stop kill
+        # criterion's informational value.
+        scoreboard = "flat_no_net_evidence"
     return {
         "status": "ok",
         "generated_at_utc": generated_at,

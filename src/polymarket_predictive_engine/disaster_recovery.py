@@ -28,6 +28,21 @@ class DisasterRecoveryError(RuntimeError):
     """Raised after a recovery failure has been stamped to disk."""
 
 
+# WO-123 (2026-07-26 owner decision, authorized by the owner's merge of this
+# change): the WO-61 enrolled set includes derived collection/training corpora
+# that dominate the archive and are regenerable by re-harvest - measured on the
+# VPS at 476.6MB of a 505.6MB set, one file at 467.1MB, 94% of the bytes. They
+# stay ANCHORED, so tamper evidence over them is unchanged; they are excluded
+# from the recovery ARCHIVE only, which brings the archive back under even the
+# old 50MB ceiling. Prefixes are paths.output_root relative and must end in "/"
+# so a prefix can never match a sibling file by accident.
+ARCHIVE_EXCLUDED_PREFIXES: tuple[str, ...] = ("polymarket_training/",)
+ARCHIVE_EXCLUSION_REASON = (
+    "excluded_by_registration: derived collection/training corpus, regenerable by "
+    "re-harvest, still covered by the WO-61 anchor chain"
+)
+
+
 def _settings(cfg: EngineConfig) -> dict[str, Any]:
     raw = cfg.raw.get("disaster_recovery", {}) if isinstance(cfg.raw.get("disaster_recovery"), dict) else {}
     merged: dict[str, Any] = {
@@ -42,6 +57,9 @@ def _settings(cfg: EngineConfig) -> dict[str, Any]:
         # the registered size_cap_mb, which still bounds the compressed archive
         # that leaves the host and remains tighten-only.
         "source_cap_mb": 2048,
+        # WO-123: unset keeps the registered exclusion set. An override may only
+        # SHRINK it (see _excluded_prefixes).
+        "excluded_path_prefixes": None,
         "active_rpo_hours": 168,
         "paper_stage_max_rpo_hours": 168,
         "pre_live_max_rpo_hours": 24,
@@ -69,6 +87,34 @@ def _enabled(value: Any) -> bool:
     return str(value).strip().lower() not in {"0", "false", "no", "off", "disabled"}
 
 
+def _excluded_prefixes(settings: dict[str, Any]) -> tuple[str, ...]:
+    """Resolve the archive exclusion set, which config may only SHRINK.
+
+    WO-123 tighten-only direction: dropping a prefix from the override puts that
+    corpus BACK into the archive (more recovery coverage), which is always
+    allowed. Adding a prefix the registration does not carry would silently
+    remove a ledger from disaster recovery, so unregistered entries are ignored
+    rather than honoured. Omitting the key entirely keeps the registered set.
+    """
+
+    raw = settings.get("excluded_path_prefixes")
+    if raw is None:
+        return ARCHIVE_EXCLUDED_PREFIXES
+    if isinstance(raw, str):
+        candidates: list[str] = [raw]
+    elif isinstance(raw, (list, tuple)):
+        candidates = [str(item) for item in raw]
+    else:
+        raise ValueError("disaster_recovery.excluded_path_prefixes must be a list of path prefixes")
+    normalised = set()
+    for item in candidates:
+        text = str(item).strip().replace("\\", "/").lstrip("/")
+        if not text:
+            continue
+        normalised.add(text if text.endswith("/") else f"{text}/")
+    return tuple(prefix for prefix in ARCHIVE_EXCLUDED_PREFIXES if prefix in normalised)
+
+
 def _output_path(cfg: EngineConfig, value: Any) -> Path:
     text = str(value or "").strip().replace("\\", "/")
     path = PurePosixPath(text)
@@ -87,6 +133,13 @@ def _base_payload(cfg: EngineConfig, settings: dict[str, Any], *, status: str) -
         "archive_path": str(_output_path(cfg, settings["archive_file"])),
         "archive_manifest_path": str(_output_path(cfg, settings["archive_manifest_file"])),
         "size_cap_mb": float(settings["size_cap_mb"]),
+        # WO-123: the registered archive scope is visible in every state, not
+        # only on a successful build, so an operator reading the status file
+        # always knows what recovery does and does not cover.
+        "archive_excluded_paths": list(_excluded_prefixes(settings)),
+        "archive_exclusion_reason": (
+            ARCHIVE_EXCLUSION_REASON if _excluded_prefixes(settings) else ""
+        ),
         "paper_trading_invoked": False,
         "live_trading_invoked": False,
     }
@@ -199,7 +252,13 @@ def _sha256_file(path: Path) -> tuple[str, int]:
     return digest.hexdigest(), size
 
 
-def _archive_source_payloads(cfg: EngineConfig, *, snapshot_date: str, source_cap_bytes: int) -> list[dict[str, Any]]:
+def _archive_source_payloads(
+    cfg: EngineConfig,
+    *,
+    snapshot_date: str,
+    source_cap_bytes: int,
+    excluded_prefixes: tuple[str, ...] = (),
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     """Describe (never materialize) the ledger set for one archive.
 
     WO-122: this used to read every ledger fully into memory and reject the run
@@ -211,9 +270,15 @@ def _archive_source_payloads(cfg: EngineConfig, *, snapshot_date: str, source_ca
     size, unchanged. The remaining source ceiling exists only to bound runtime
     against a runaway output tree, so it is separately configurable and much
     larger; digests are computed streaming.
+
+    WO-123: paths under ``excluded_prefixes`` are reported instead of archived.
+    They are neither hashed nor read, which is the point - the excluded corpus is
+    94% of the bytes. They remain enrolled in the WO-61 chain, so the tamper
+    lane still covers them.
     """
     root = cfg.output_root.resolve()
     payloads: list[dict[str, Any]] = []
+    excluded: list[dict[str, Any]] = []
     total = 0
     for path in ledger_paths_for_archive(cfg, as_of_date=snapshot_date):
         if path.is_symlink() or not path.is_file():
@@ -223,6 +288,9 @@ def _archive_source_payloads(cfg: EngineConfig, *, snapshot_date: str, source_ca
             relative = resolved.relative_to(root).as_posix()
         except ValueError as exc:
             raise ValueError(f"archive source escaped paths.output_root: {path}") from exc
+        if excluded_prefixes and relative.startswith(excluded_prefixes):
+            excluded.append({"path": f"outputs/{relative}", "size_bytes": resolved.stat().st_size})
+            continue
         sha256, size = _sha256_file(resolved)
         total += size
         if total > source_cap_bytes:
@@ -241,7 +309,7 @@ def _archive_source_payloads(cfg: EngineConfig, *, snapshot_date: str, source_ca
         )
     if not payloads:
         raise ValueError("WO-61 ledger archive set is empty")
-    return payloads
+    return payloads, excluded
 
 
 def _write_archive(
@@ -332,12 +400,16 @@ def create_ledger_archive(cfg: EngineConfig, *, force: bool = False) -> dict[str
             if size_cap_bytes <= 0:
                 raise ValueError("disaster_recovery.size_cap_mb must be positive")
             source_cap_bytes = int(float(settings["source_cap_mb"]) * 1024 * 1024)
-            sources = _archive_source_payloads(
-                cfg, snapshot_date=day, source_cap_bytes=source_cap_bytes
+            excluded_prefixes = _excluded_prefixes(settings)
+            sources, excluded = _archive_source_payloads(
+                cfg,
+                snapshot_date=day,
+                source_cap_bytes=source_cap_bytes,
+                excluded_prefixes=excluded_prefixes,
             )
             generated = now_utc()
             manifest = {
-                "schema_version": 1,
+                "schema_version": 2,
                 "work_order": "WO-65",
                 "snapshot_date": day,
                 "generated_at_utc": generated,
@@ -352,6 +424,15 @@ def create_ledger_archive(cfg: EngineConfig, *, force: bool = False) -> dict[str
                     {key: row[key] for key in ("path", "size_bytes", "sha256")}
                     for row in sources
                 ],
+                # WO-123: the archive states its own scope. Restore verification
+                # reads these prefixes back (intersected with the registered set,
+                # never trusting the archive to widen them) so excluded corpora
+                # read as excluded-by-design instead of a broken chain.
+                "excluded_path_prefixes": list(excluded_prefixes),
+                "excluded_reason": ARCHIVE_EXCLUSION_REASON if excluded_prefixes else "",
+                "excluded_file_count": len(excluded),
+                "excluded_bytes": sum(int(row["size_bytes"]) for row in excluded),
+                "excluded_files": excluded,
                 "paper_trading_invoked": False,
                 "live_trading_invoked": False,
             }
@@ -371,6 +452,9 @@ def create_ledger_archive(cfg: EngineConfig, *, force: bool = False) -> dict[str
                     "chain_head": chain_head,
                     "file_count": len(sources),
                     "uncompressed_bytes": manifest["uncompressed_bytes"],
+                    "archive_excluded_paths": list(excluded_prefixes),
+                    "archive_excluded_file_count": len(excluded),
+                    "archive_excluded_bytes": manifest["excluded_bytes"],
                     "archive_size_bytes": compressed_size,
                     "archive_sha256": archive_sha,
                     "post_build_restore_verification": {
@@ -505,6 +589,19 @@ def verify_and_restore_archive(
         size_cap_bytes = int(float(settings["size_cap_mb"]) * 1024 * 1024)
         manifest, files = _read_and_validate_archive(Path(archive_path), size_cap_bytes=size_cap_bytes)
         snapshot_date = str(manifest.get("snapshot_date") or "")
+        # WO-123: tolerate missing files ONLY for prefixes this archive declares
+        # excluded AND that the registration carries. The manifest is untrusted
+        # input, so the intersection is the ceiling: an archive cannot widen its
+        # own tolerance, and an archive declaring nothing (every archive built
+        # before WO-123) gets no tolerance at all. Tolerance covers absence only
+        # - a present file whose anchored digest changed still fails below.
+        declared = manifest.get("excluded_path_prefixes")
+        declared_prefixes = (
+            {str(item) for item in declared} if isinstance(declared, (list, tuple)) else set()
+        )
+        tolerated = tuple(
+            prefix for prefix in ARCHIVE_EXCLUDED_PREFIXES if prefix in declared_prefixes
+        )
         with tempfile.TemporaryDirectory(prefix="polymarket-ledger-restore-") as temp_dir:
             extracted_output = _materialise_files(files, Path(temp_dir))
             extracted_cfg = _config_for_output_root(cfg, extracted_output)
@@ -512,6 +609,7 @@ def verify_and_restore_archive(
                 extracted_cfg,
                 as_of_date=snapshot_date,
                 write_summary=False,
+                tolerated_missing_prefixes=tolerated,
             )
             if chain.get("status") != "ok" or chain.get("verified_through_date") != snapshot_date:
                 raise ValueError(
@@ -541,6 +639,8 @@ def verify_and_restore_archive(
                 "snapshot_date": snapshot_date,
                 "chain_head": manifest.get("chain_head"),
                 "ledger_chain_verification": chain,
+                "excluded_path_prefixes_tolerated": list(tolerated),
+                "excluded_missing_tolerated": int(chain.get("missing_excluded_tolerated") or 0),
                 "file_count": len(manifest.get("files") or []),
                 "archive_sha256": hashlib.sha256(Path(archive_path).read_bytes()).hexdigest(),
                 "restore_applied": not dry_run,

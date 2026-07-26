@@ -271,6 +271,7 @@ def _verification_base(*, chain_path: Path, as_of_date: str | None) -> dict[str,
         "links_checked": 0,
         "ledger_prefixes_checked": 0,
         "missing_at_anchor_tolerated": 0,
+        "missing_excluded_tolerated": 0,
         "first_broken_date": None,
         "issues": [],
         "paper_trading_invoked": False,
@@ -283,10 +284,21 @@ def verify_ledger_chain(
     *,
     as_of_date: str | None = None,
     write_summary: bool = True,
+    tolerated_missing_prefixes: tuple[str, ...] = (),
 ) -> dict[str, Any]:
-    """Verify chain linkage and every historical byte prefix in row order."""
+    """Verify chain linkage and every historical byte prefix in row order.
+
+    ``tolerated_missing_prefixes`` (WO-123) exists for ONE caller: the
+    disaster-recovery restore check, where a registered set of regenerable
+    corpora is deliberately excluded from the archive. Only ABSENCE of a
+    matching path is tolerated, and only when the caller opts in; a present
+    file whose anchored digest changed is still a broken chain, and any
+    missing path outside the prefixes is still a broken chain. Default is
+    empty, so every other caller's behaviour is byte-identical.
+    """
 
     settings = _settings(cfg)
+    tolerated = tuple(str(prefix) for prefix in tolerated_missing_prefixes if str(prefix))
     chain_path = _output_path(cfg, settings["chain_file"])
     verification_path = _output_path(cfg, settings["verification_file"])
     result = _verification_base(chain_path=chain_path, as_of_date=as_of_date)
@@ -333,6 +345,12 @@ def verify_ledger_chain(
                 byte_length = int(item.get("byte_length"))
                 expected_prefix = str(item.get("prefix_sha256") or "")
                 if not anchored_path.is_file():
+                    if tolerated and relative.startswith(tolerated):
+                        # WO-123: excluded from the DR archive by registration
+                        # and recoverable by re-harvest. Absence only - a
+                        # PRESENT file with a changed digest still breaks below.
+                        result["missing_excluded_tolerated"] += 1
+                        continue
                     issues.append(f"{item.get('path')}: anchored file is missing")
                     continue
                 actual_prefix = _sha256_prefix(anchored_path, byte_length)

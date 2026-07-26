@@ -19,15 +19,41 @@ durable `vps-anchor` timestamps.
 ## What the archive contains
 
 - Every file referenced by every WO-61 chain manifest through the snapshot
-  date, including immutable snapshots of rewritten state tables.
+  date, including immutable snapshots of rewritten state tables, except the
+  registered exclusions below.
 - The WO-61 chain, current head, summary, and verification artifact.
 - WO-63's append-only cost ledger when it exists.
-- An internal manifest with a SHA-256 digest and byte length for every file.
+- An internal manifest with a SHA-256 digest and byte length for every file,
+  plus the registered exclusion prefixes and the path/size of every file they
+  dropped.
 
 It excludes secrets, `.env`, wallet keys, databases, model/training corpora,
 websocket features, trade-print archives, and official-book archives. The
 compressed and expanded archive are both hard-capped at 240MB
 (2026-07-26 owner amendment; 50MB until the append-only ledger set outgrew it).
+
+### Registered archive exclusions (WO-123, 2026-07-26 owner decision)
+
+`polymarket_training/` is enrolled in the WO-61 chain but is **not** archived.
+It is a derived collection corpus — regenerable by re-harvest — and it was 94%
+of the archive bytes (476.6MB of a 505.6MB set on 2026-07-26, one file at
+467.1MB), which is what pushed the archive over the cap.
+
+The exclusion is scoped narrowly:
+
+- The corpus stays **anchored**, so WO-61 tamper evidence over it is unchanged.
+  Only the recovery archive is smaller.
+- `disaster_recovery.excluded_path_prefixes` may only **shrink** the registered
+  set. Removing a prefix puts that corpus back into the archive; adding an
+  unregistered prefix is ignored, so config can never quietly drop a ledger
+  from recovery.
+- Restore verification tolerates these paths being **absent**, and only when the
+  archive's own manifest declares them (intersected with the registered set — an
+  archive cannot widen its own tolerance). A file that is *present* with a
+  changed anchored digest, or any missing path outside these prefixes, is still
+  a broken chain.
+- After a restore, the excluded corpus is re-harvested by the normal collection
+  cadence. Recovery of the investor evidence ledgers does not wait on it.
 
 ## Fresh VPS to a verified recovery
 

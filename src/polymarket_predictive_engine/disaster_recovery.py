@@ -38,6 +38,10 @@ def _settings(cfg: EngineConfig) -> dict[str, Any]:
         "restore_status_file": "performance/restore_verification_status.json",
         "archive_branch": "vps-archive",
         "size_cap_mb": 50,
+        # WO-122: runtime ceiling on the UNCOMPRESSED source set. Distinct from
+        # the registered size_cap_mb, which still bounds the compressed archive
+        # that leaves the host and remains tighten-only.
+        "source_cap_mb": 2048,
         "active_rpo_hours": 168,
         "paper_stage_max_rpo_hours": 168,
         "pre_live_max_rpo_hours": 24,
@@ -47,6 +51,7 @@ def _settings(cfg: EngineConfig) -> dict[str, Any]:
     # 2026-07-11 WO-65 tighten-only registration: overrides may reduce the
     # archive size or RPO ceilings, never widen the filed 50MB/168h/24h caps.
     merged["size_cap_mb"] = min(50.0, float(merged["size_cap_mb"]))
+    merged["source_cap_mb"] = max(1.0, float(merged["source_cap_mb"]))
     merged["paper_stage_max_rpo_hours"] = min(168.0, float(merged["paper_stage_max_rpo_hours"]))
     merged["pre_live_max_rpo_hours"] = min(24.0, float(merged["pre_live_max_rpo_hours"]))
     return merged
@@ -89,7 +94,12 @@ def _live_capital_context(cfg: EngineConfig) -> bool:
     return cfg.trading_mode == "live" or bool(wallet)
 
 
-def _validated_rpo(cfg: EngineConfig, settings: dict[str, Any]) -> dict[str, Any]:
+def _validated_rpo(
+    cfg: EngineConfig,
+    settings: dict[str, Any],
+    *,
+    observed_age_hours: float | None = None,
+) -> dict[str, Any]:
     active = float(settings["active_rpo_hours"])
     paper_max = float(settings["paper_stage_max_rpo_hours"])
     pre_live_max = float(settings["pre_live_max_rpo_hours"])
@@ -103,13 +113,29 @@ def _validated_rpo(cfg: EngineConfig, settings: dict[str, Any]) -> dict[str, Any
             f"active RPO {active:g}h exceeds the {allowed:g}h maximum for {context}; "
             "tighten disaster_recovery.active_rpo_hours with a dated config change before proceeding"
         )
+    # WO-122: `compliant` used to be hardcoded True, asserting only that the
+    # CONFIGURED ceiling was respected. Published beside a 233-hour archive age
+    # against a 24-hour RPO, it read as "backups are fine" while the archive
+    # builder had been failing for ten days. It now also requires the OBSERVED
+    # archive age to be inside the active RPO, and fails closed when the age is
+    # unknown (never-archived is not compliance).
+    observed_within = observed_age_hours is not None and observed_age_hours <= active
     return {
         "active_rpo_hours": active,
         "maximum_rpo_hours_for_context": allowed,
         "paper_stage_max_rpo_hours": paper_max,
         "pre_live_max_rpo_hours": pre_live_max,
+        # True when a monitored wallet is configured OR trading_mode is live.
+        # This only ever TIGHTENS the ceiling (24h instead of 168h), so it is
+        # deliberately left conservative rather than renamed to match the
+        # paper-only posture.
         "live_capital_context": live_context,
-        "compliant": True,
+        "configured_rpo_within_registered_ceiling": True,
+        "observed_archive_age_hours": (
+            None if observed_age_hours is None else round(observed_age_hours, 4)
+        ),
+        "observed_within_rpo": observed_within,
+        "compliant": observed_within,
     }
 
 
@@ -155,7 +181,29 @@ def _snapshot_date(cfg: EngineConfig) -> tuple[str, str]:
     return day, head
 
 
-def _archive_source_payloads(cfg: EngineConfig, *, snapshot_date: str, size_cap_bytes: int) -> list[dict[str, Any]]:
+def _sha256_file(path: Path) -> tuple[str, int]:
+    digest = hashlib.sha256()
+    size = 0
+    with path.open("rb") as handle:
+        for block in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(block)
+            size += len(block)
+    return digest.hexdigest(), size
+
+
+def _archive_source_payloads(cfg: EngineConfig, *, snapshot_date: str, source_cap_bytes: int) -> list[dict[str, Any]]:
+    """Describe (never materialize) the ledger set for one archive.
+
+    WO-122: this used to read every ledger fully into memory and reject the run
+    when the UNCOMPRESSED total exceeded the registered 50MB archive cap. That
+    proxy was guaranteed to fail eventually - the WO-61 ledgers are append-only
+    and only grow - and it fired on 2026-07-16, leaving disaster recovery dead
+    for ten days. The registered guarantee bounds the ARCHIVE artifact that
+    leaves the host, which ``_write_archive`` still enforces on the COMPRESSED
+    size, unchanged. The remaining source ceiling exists only to bound runtime
+    against a runaway output tree, so it is separately configurable and much
+    larger; digests are computed streaming.
+    """
     root = cfg.output_root.resolve()
     payloads: list[dict[str, Any]] = []
     total = 0
@@ -167,18 +215,20 @@ def _archive_source_payloads(cfg: EngineConfig, *, snapshot_date: str, size_cap_
             relative = resolved.relative_to(root).as_posix()
         except ValueError as exc:
             raise ValueError(f"archive source escaped paths.output_root: {path}") from exc
-        data = resolved.read_bytes()
-        total += len(data)
-        if total > size_cap_bytes:
+        sha256, size = _sha256_file(resolved)
+        total += size
+        if total > source_cap_bytes:
             raise ValueError(
-                f"uncompressed WO-61 ledger set exceeds the {size_cap_bytes / 1024 / 1024:g}MB archive cap"
+                f"WO-61 ledger source set exceeds the {source_cap_bytes / 1024 / 1024:g}MB "
+                "runtime ceiling (disaster_recovery.source_cap_mb); the compressed archive "
+                "cap is enforced separately"
             )
         payloads.append(
             {
                 "path": f"outputs/{relative}",
-                "size_bytes": len(data),
-                "sha256": _sha256_bytes(data),
-                "data": data,
+                "size_bytes": size,
+                "sha256": sha256,
+                "source_path": resolved,
             }
         )
     if not payloads:
@@ -206,7 +256,10 @@ def _write_archive(
                 info = tarfile.TarInfo(str(row["path"]))
                 info.size = int(row["size_bytes"])
                 info.mode = 0o600
-                archive.addfile(info, io.BytesIO(row["data"]))
+                # WO-122: stream from disk; the payload rows no longer carry
+                # file bytes, so a large ledger set never has to fit in RAM.
+                with Path(row["source_path"]).open("rb") as handle:
+                    archive.addfile(info, handle)
         compressed_size = temp_path.stat().st_size
         if compressed_size > size_cap_bytes:
             raise ValueError(
@@ -237,8 +290,10 @@ def create_ledger_archive(cfg: EngineConfig, *, force: bool = False) -> dict[str
 
     try:
         rpo = _validated_rpo(cfg, settings)
-        payload["rpo"] = rpo
         due, next_due, age_hours = _snapshot_due(previous, rpo_hours=float(rpo["active_rpo_hours"]))
+        # Re-derive compliance now that the observed archive age is known.
+        rpo = _validated_rpo(cfg, settings, observed_age_hours=age_hours)
+        payload["rpo"] = rpo
         payload.update(
             {
                 "last_remote_archive_age_hours": None if age_hours is None else round(age_hours, 4),
@@ -268,7 +323,10 @@ def create_ledger_archive(cfg: EngineConfig, *, force: bool = False) -> dict[str
             size_cap_bytes = int(float(settings["size_cap_mb"]) * 1024 * 1024)
             if size_cap_bytes <= 0:
                 raise ValueError("disaster_recovery.size_cap_mb must be positive")
-            sources = _archive_source_payloads(cfg, snapshot_date=day, size_cap_bytes=size_cap_bytes)
+            source_cap_bytes = int(float(settings["source_cap_mb"]) * 1024 * 1024)
+            sources = _archive_source_payloads(
+                cfg, snapshot_date=day, source_cap_bytes=source_cap_bytes
+            )
             generated = now_utc()
             manifest = {
                 "schema_version": 1,
@@ -279,6 +337,7 @@ def create_ledger_archive(cfg: EngineConfig, *, force: bool = False) -> dict[str
                 "ledger_chain_verified_before_archive": True,
                 "rpo": rpo,
                 "size_cap_mb": float(settings["size_cap_mb"]),
+                "source_cap_mb": float(settings["source_cap_mb"]),
                 "file_count": len(sources),
                 "uncompressed_bytes": sum(int(row["size_bytes"]) for row in sources),
                 "files": [

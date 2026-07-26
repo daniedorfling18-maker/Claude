@@ -106,6 +106,17 @@ run_builder() {
       return 0
     fi
   fi
+  # WO-122: the engine declares requires-python >=3.10 (pyproject). This host
+  # runs 3.9, where importing the CLI dies on a runtime `X | None` type alias
+  # with an opaque TypeError - which is what "local Python paths were
+  # exhausted" was really reporting on 2026-07-16..26. Say so precisely
+  # instead of attempting an import that cannot succeed; the container path
+  # above is the supported builder.
+  if ! "$HOST_PYTHON" -c 'import sys; raise SystemExit(0 if sys.version_info >= (3, 10) else 1)'; then
+    HOST_PYTHON_VERSION="$("$HOST_PYTHON" -c 'import sys; print("%d.%d" % sys.version_info[:2])' 2>/dev/null || echo unknown)"
+    echo "host $HOST_PYTHON is ${HOST_PYTHON_VERSION}; the archive builder requires >=3.10 (see pyproject requires-python), so only the container path can build it" >&2
+    return 2
+  fi
   if PYTHONPATH="$REPO_DIR/src${PYTHONPATH:+:$PYTHONPATH}" "$HOST_PYTHON" -m polymarket_predictive_engine.cli \
     snapshot-ledger-archive --config "$CONFIG_PATH"; then
     return 0
@@ -113,8 +124,15 @@ run_builder() {
   return 1
 }
 
-if ! run_builder; then
-  stamp_remote "error" "" "archive builder failed; Docker and local Python paths were exhausted" || true
+run_builder
+BUILDER_STATE=$?
+if [ "$BUILDER_STATE" -ne 0 ]; then
+  if [ "$BUILDER_STATE" -eq 2 ]; then
+    BUILDER_REASON="archive builder failed: the container path did not build it and this host's python is older than the required 3.10, so no local fallback exists"
+  else
+    BUILDER_REASON="archive builder failed; Docker and local Python paths were exhausted"
+  fi
+  stamp_remote "error" "" "$BUILDER_REASON" || true
   echo "ledger archive build failed; status stamped for telemetry" >&2
   exit 1
 fi

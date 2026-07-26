@@ -5350,3 +5350,77 @@ income - completes the income picture without touching gates), **WO-49**
 (corpus-bound studies). **WO-47** anytime (independent). **WO-48** stays
 BLOCKED until the maker gates read evidence-supported. WO-33 remains last
 overall pending the leakage review.
+
+## WO-114 — VPS ops hygiene: seasonal-job disable switch, ops-log rotation, dashboard-setup readiness wait — `done` (2026-07-21, PR #354, owner merge)
+
+Orchestrator-built, owner-merged. Non-frozen ops scripts only; no gate,
+threshold, policy, registry, verdict, or order path.
+- `run_vps_ops_scheduler.sh`: `OPS_CARD_REFRESH_ENABLED` (default 1; 0 records
+  an intentional exit-0 skip BEFORE the odds preflight — used to quiesce the
+  seasonal SuperBru locked-card chain after the World Cup ended and its odds
+  feed returned zero events). `OPS_LOG_MAX_BYTES` rotation (default 50 MiB,
+  single `.1` generation, top-of-loop) after ops_scheduler.log reached 5.5M+
+  lines.
+- `configure_polymarket_dashboard_tailscale.sh`: bounded 60s loopback readiness
+  retry after `--force-recreate` (was a single racing probe).
+Deployed 2026-07-21; verified in production: locked_card_refresh flipped to
+`intentional 0`, both degraded incidents cleared; 190 MB log rotated to `.1`;
+configure script has passed first-try on both subsequent deploys.
+
+## WO-115 — Unbreak ledger anchoring: snapshot-enroll the rewritten carry history, fail loud on blocked chains — `done` (2026-07-26, PR #356 commit 6e04263, owner merge; registered WO-61 surface)
+
+Root cause of the chain freeze at 2026-07-16: `maker_carry/maker_carry_history.csv`
+was enrolled `append_only`, but its committer legitimately REWRITES the file
+(legacy-schema upgrade path in maker_carry_study.py), so an authorized header
+widening changed the 2026-07-12 anchored prefix and every anchor run since
+short-circuited `blocked_broken_chain` while the CLI exited 0 (fail-silent;
+only visible as the slow `ledger_anchor_age` SLO breach, ~10 days).
+- Reclassified `append_only` -> `snapshot` in DEFAULT_LEDGER_REGISTRY AND the
+  deployed config `ledger_globs` (lockstep, per the #269 superset pin);
+  precedent decision_policy.json / requote_alerts.json. WO-111 members sidecar
+  unchanged (stays append_only). Consistent with the 2026-07-19 Rev.2 note,
+  which barred ADDING a column under append_only enrollment and did not
+  consider the enrollment itself.
+- `anchor-ledgers` CLI: zero-exit allowlist {ok, already_anchored, disabled,
+  skipped_locked}; blocked/error/unknown statuses now exit 1 so the
+  scheduler_nonzero_exit watchdog fires within one cycle.
+- Chain re-genesis executed by the owner on the VPS 2026-07-26 (fresh genesis
+  approved 2026-07-26): broken chain + head archived to
+  `outputs/performance/ledger_anchor_retired/20260726T100457Z/` (historical
+  anchors 2026-07-12..16 preserved there, on the `vps-anchor` branch, and in
+  `ledger_anchor_snapshots/`). New chain verified:
+  anchor_date 2026-07-26, chain_head 9fc5ff0a..., previous_chain_head all-zeros.
+
+## WO-116 — Seed official-book collection for top-ranked candidates before selection — `done` (2026-07-26, PR #356 commit 31a3e95, owner merge)
+
+The WO-113 measurement-eligibility gate is correct, but collection was
+portfolio-only plus the WO-104 mtime tranche (re-polls only markets that
+already have a book file). The fast-churning rewarded universe starved the
+portfolio to 0-1 eligible markets (live 2026-07-21..25; carry $0 vs the
+$3.33/day target), stalling M-A at 3/7 against the 2026-08-19 terminal date.
+- `maker_fill_replay.py snapshot_official_books`: third watchlist tranche
+  `_candidate_seed_markets` — best-ranked candidates from the persisted
+  `maker_carry_candidates.csv` not already in the portfolio/persistent
+  tranches, sorted by net_carry_usd_per_day (tiebreak yield_rank), capped by
+  new `max_candidate_markets` (code default 20; deployed config 25, matching
+  the 2026-07-19 owner-approved breadth posture). Runs even with an empty
+  portfolio. Seeded files stay warm via the existing mtime tranche and season
+  toward eligibility.
+- Collection breadth ONLY: no gate, threshold, eligibility rule, sizing, or
+  order path reads the setting; the collection-window ledger stays
+  portfolio-only (coverage_ratio semantics unchanged); snapshot summary now
+  reports per-tranche counts.
+
+## WO-117 — Window-aware overrun classification for the harvest-gated maker study — `done` (2026-07-26, PR #356 commit 98f4033, owner merge)
+
+Telemetry 2026-07-25: the scheduler_overrun_cycles SLO breach (10 consecutive)
+came ENTIRELY from `maker_study_intraday` — every other job's consecutive
+counter was 0 and the job itself ran and exited 0. The job may only fire
+inside the registered 11-13h harvest-age window, whose daily recurrence drifts
+by more than TICK_SECONDS, so the bare 24h yardstick labeled every legitimate
+on-window run "overrun" by construction (mismeasurement, not starvation).
+- `run_vps_ops_scheduler.sh`: this one job's lateness is now judged against
+  interval + one window width (OFFSET_MAX - OFFSET_MIN, 2h at defaults); a run
+  later than that genuinely missed a window and still stamps overrun. SLO
+  target (0) and tighten-only rule untouched; run timing unchanged — label
+  only. All other jobs keep bare-interval classification.

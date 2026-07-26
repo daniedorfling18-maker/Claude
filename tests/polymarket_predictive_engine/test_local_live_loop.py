@@ -666,6 +666,43 @@ def test_background_timeout_exit_is_recorded_before_hard_exit(tmp_path, monkeypa
     assert rows[0]["live_trading_invoked"] == "False"
 
 
+def test_wo119_background_timeout_incidents_append_only(tmp_path, monkeypatch):
+    # WO-119: the incident ledger is append_only-enrolled; a second incident
+    # must extend the file with the first incident's bytes untouched (the old
+    # full rewrite ran in a crash path and could break the anchored prefix).
+    loop = _load_loop_module()
+    cfg = EngineConfig(
+        raw={"paths": {"output_root": str(tmp_path / "outputs")}},
+        path=tmp_path / "cfg.yaml",
+    )
+    monkeypatch.setattr(loop.os, "_exit", lambda code: (_ for _ in ()).throw(SystemExit(code)))
+    path = cfg.output_root / "performance" / "background_timeout_incidents.csv"
+
+    first_summary = loop._stale_background_summary(
+        job_name="governance",
+        started_at_utc="2026-07-12T10:00:00Z",
+        running_seconds=601.0,
+        max_runtime_seconds=600.0,
+    )
+    with pytest.raises(SystemExit):
+        loop._exit_for_stale_background_job(cfg, first_summary, live_iteration=9)
+    first_bytes = path.read_bytes()
+
+    second_summary = loop._stale_background_summary(
+        job_name="discovery",
+        started_at_utc="2026-07-12T11:00:00Z",
+        running_seconds=901.0,
+        max_runtime_seconds=900.0,
+    )
+    with pytest.raises(SystemExit):
+        loop._exit_for_stale_background_job(cfg, second_summary, live_iteration=10)
+    second_bytes = path.read_bytes()
+
+    assert second_bytes.startswith(first_bytes)
+    rows = read_csv_rows(path)
+    assert [row["job"] for row in rows] == ["governance", "discovery"]
+
+
 def test_background_timeout_incident_write_failure_cannot_prevent_hard_exit(
     tmp_path,
     monkeypatch,

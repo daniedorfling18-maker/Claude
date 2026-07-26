@@ -165,6 +165,28 @@ def test_longshot_bias_build_writes_artifacts_and_can_emit_shadow_position(tmp_p
     assert float(positions[0]["entry_price"]) <= 0.90
 
 
+def test_wo119_longshot_shadow_emit_skips_when_prediction_cycle_lock_held(tmp_path):
+    # WO-119: the shadow ledgers are shared read-modify-write state with the
+    # paper cycle (which writes under the prediction_cycle runtime lock). A
+    # standalone scan running alongside the live loop must skip the shadow
+    # emission rather than race it - the scan artifacts themselves still land.
+    from polymarket_predictive_engine import runtime_lock
+
+    cfg = _cfg(tmp_path, emit_shadow=True)
+    _write_watchlist(cfg, _yes_no_market("macro-longshot", yes_ask=0.08, no_ask=0.85, liquidity=1200))
+    held = runtime_lock.acquire_runtime_lock(cfg, "prediction_cycle", stale_after_seconds=999999)
+    try:
+        payload = build_longshot_bias_scan(cfg)
+    finally:
+        runtime_lock.release_runtime_lock(held)
+
+    assert payload["candidates"] == 1  # scan output unaffected
+    assert payload["shadow_update"]["status"] == "skipped_prediction_cycle_lock_held"
+    assert payload["shadow_update"]["opened_this_cycle"] == 0
+    assert not (cfg.output_root / "polymarket_shadow" / "shadow_positions.csv").exists()
+    assert not (cfg.output_root / "polymarket_shadow" / "shadow_fills.csv").exists()
+
+
 def test_longshot_bias_shadow_emit_refuses_no_side_outside_entry_band(tmp_path):
     cfg = _cfg(tmp_path, emit_shadow=True)
     _write_watchlist(cfg, _yes_no_market("expensive-no", yes_ask=0.08, no_ask=0.94, liquidity=1200))

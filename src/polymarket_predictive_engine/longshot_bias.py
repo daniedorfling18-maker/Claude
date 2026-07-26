@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import Any
 
 from .config import EngineConfig, load_config
+from .runtime_lock import runtime_lock
 from .shadow_cohort import update_shadow_cohort_evidence
 from .utils import git_commit_hash, now_utc, parse_timestamp, read_csv_rows, safe_float, write_csv, write_json
 from .worldcup_validation import classify_market_family
@@ -408,7 +409,27 @@ def build_longshot_bias_scan(
     )
     shadow_summary: dict[str, Any] | None = None
     if should_emit_shadow and candidates:
-        shadow_summary = update_shadow_cohort_evidence(cfg, candidates)
+        # WO-119: the shadow ledgers are read-modify-write state shared with
+        # the paper cycle, whose caller holds the prediction_cycle runtime
+        # lock. Running this standalone scan unlocked alongside the live loop
+        # could drop the other writer's fills or shrink the anchored
+        # shadow_fills prefix. Fail-safe: if the lock is held, skip the shadow
+        # emission (the scan output itself is still written) rather than race.
+        lock_settings = cfg.raw.get("runtime_resource_guard", {}) or {}
+        lock_stale_seconds = float(
+            lock_settings.get("prediction_cycle_lock_stale_seconds", 1800) or 1800
+        )
+        with runtime_lock(
+            cfg, "prediction_cycle", stale_after_seconds=lock_stale_seconds
+        ) as lock:
+            if lock.acquired:
+                shadow_summary = update_shadow_cohort_evidence(cfg, candidates)
+            else:
+                shadow_summary = {
+                    "status": "skipped_prediction_cycle_lock_held",
+                    "opened_this_cycle": 0,
+                    "runtime_lock": lock.as_dict(),
+                }
     summary = {
         **summary,
         "candidate_file": str(root / "longshot_bias_candidates.csv"),

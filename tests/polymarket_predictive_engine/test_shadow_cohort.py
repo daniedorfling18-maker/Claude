@@ -70,6 +70,73 @@ def test_shadow_pnl_csv_accrues_one_latest_row_per_cohort_day(tmp_path):
     assert rows[1]["generated_at_utc"] == "2026-07-11T08:00:00Z"
 
 
+def _wo119_candidate(market_id: str, token_id: str) -> dict:
+    return {
+        "market_id": market_id,
+        "market_slug": f"{market_id}-slug",
+        "token_id": token_id,
+        "outcome": "No",
+        "category": "crypto",
+        "signal_cohort": "crypto",
+        "near_miss_learning_candidate": True,
+        "near_miss_priority_score": "0.052",
+        "near_miss_learning_reason": "near_miss_eligible",
+        "shadow_trade_candidate": False,
+        "executable_price": "0.50",
+        "best_bid": "0.49",
+        "spread": "0.01",
+        "liquidity": "1000",
+        "edge_lower_bound": "0.009",
+        "alpha_raw_edge": "0.054",
+        "prediction_timestamp": "2026-06-27T04:00:00Z",
+    }
+
+
+def test_wo119_shadow_fills_are_appended_never_rewritten(tmp_path):
+    # WO-119: shadow_fills.csv is append_only-enrolled in the WO-61 anchor
+    # registry; a second cycle must extend the file, leaving every previously
+    # anchored byte untouched (the old write_csv full rewrite broke this
+    # whenever the schema drifted - the WO-115 chain-break class).
+    cfg = _cfg(tmp_path)
+    fills_path = cfg.output_root / "polymarket_shadow" / "shadow_fills.csv"
+
+    update_shadow_cohort_evidence(cfg, [_wo119_candidate("m-w1", "t-w1")])
+    first_bytes = fills_path.read_bytes()
+    update_shadow_cohort_evidence(cfg, [_wo119_candidate("m-w2", "t-w2")])
+    second_bytes = fills_path.read_bytes()
+
+    assert second_bytes.startswith(first_bytes)
+    rows = read_csv_rows(fills_path)
+    assert len(rows) == 2
+    assert {row["market_id"] for row in rows} == {"m-w1", "m-w2"}
+
+
+def test_wo119_shadow_fills_tolerate_legacy_narrow_header(tmp_path):
+    # A historical file with a narrower header must be appended UNDER that
+    # header (keys the legacy schema cannot hold are dropped), never rewritten
+    # to the current fieldnames - a rewrite would invalidate the anchors.
+    cfg = _cfg(tmp_path)
+    fills_path = cfg.output_root / "polymarket_shadow" / "shadow_fills.csv"
+    fills_path.parent.mkdir(parents=True, exist_ok=True)
+    legacy = (
+        "shadow_fill_id,shadow_position_id,created_at,side,market_id,price,quantity,gross_notional_usdc,reason\r\n"
+        "f-legacy,p-legacy,2026-07-01T00:00:00Z,BUY_SHADOW,m-old,0.5,20,10,legacy\r\n"
+    )
+    fills_path.write_bytes(legacy.encode("utf-8"))
+    before = fills_path.read_bytes()
+
+    update_shadow_cohort_evidence(cfg, [_wo119_candidate("m-w3", "t-w3")])
+    after = fills_path.read_bytes()
+
+    assert after.startswith(before)
+    rows = read_csv_rows(fills_path)
+    assert len(rows) == 2
+    assert rows[1]["market_id"] == "m-w3"
+    # The legacy header has no shadow_source column, so the new row simply
+    # does not persist that key - schema stays byte-stable.
+    assert "shadow_source" not in rows[1]
+
+
 def test_near_miss_candidates_open_distinct_shadow_evidence_cohort(tmp_path):
     cfg = _cfg(tmp_path)
 

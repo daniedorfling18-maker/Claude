@@ -7,7 +7,7 @@ from pathlib import Path
 
 import yaml
 
-from polymarket_predictive_engine.cli import COMMANDS
+from polymarket_predictive_engine.cli import COMMANDS, main as cli_main
 from polymarket_predictive_engine.config import load_config
 from polymarket_predictive_engine.ledger_anchor import (
     DEFAULT_LEDGER_REGISTRY,
@@ -212,6 +212,64 @@ def test_wo101_point_in_time_corpora_are_append_only_enrolled():
 def test_current_sharp_qualification_is_snapshot_enrolled():
     registry = {row["glob"]: row["mode"] for row in DEFAULT_LEDGER_REGISTRY}
     assert registry["maker_carry/sharp_linking_qualification.json"] == "snapshot"
+
+
+def test_wo115_maker_carry_history_is_snapshot_enrolled():
+    # WO-115: the study's committer legitimately REWRITES maker_carry_history.csv
+    # (legacy-schema upgrade path), so append_only enrollment broke the chain at
+    # the 2026-07-12 anchored prefix when the header widened. Snapshot mode
+    # anchors an immutable daily copy instead, like the other regenerated sources.
+    registry = {row["glob"]: row["mode"] for row in DEFAULT_LEDGER_REGISTRY}
+    assert registry["maker_carry/maker_carry_history.csv"] == "snapshot"
+
+
+def test_wo115_authorized_history_rewrite_keeps_chain_verifiable(tmp_path: Path):
+    # Regression for the 2026-07-12 break: a full rewrite that widens the header
+    # and re-serialises historical rows must no longer poison the chain.
+    cfg = _config(tmp_path, [{"glob": "maker_carry/maker_carry_history.csv", "mode": "snapshot"}])
+    ledger = cfg.output_root / "maker_carry" / "maker_carry_history.csv"
+    ledger.parent.mkdir(parents=True)
+    ledger.write_bytes(b"generated_at_utc,net_carry\r\n2026-07-11T00:00:00Z,1.0\r\n")
+    first = anchor_ledgers(cfg, anchor_date="2026-07-11")
+
+    # Legacy-schema upgrade: header widens, every prior row re-serialises.
+    ledger.write_bytes(
+        b"generated_at_utc,net_carry,portfolio_capital_usd\r\n"
+        b"2026-07-11T00:00:00Z,1.0,\r\n"
+        b"2026-07-12T00:00:00Z,2.0,55.0\r\n"
+    )
+    second = anchor_ledgers(cfg, anchor_date="2026-07-12")
+    verification = verify_ledger_chain(cfg)
+
+    assert first["status"] == "ok"
+    assert second["status"] == "ok"
+    assert verification["status"] == "ok"
+    snapshot_root = cfg.output_root / "performance" / "ledger_anchor_snapshots"
+    assert (snapshot_root / "2026-07-11" / "maker_carry" / "maker_carry_history.csv").is_file()
+    assert (snapshot_root / "2026-07-12" / "maker_carry" / "maker_carry_history.csv").is_file()
+
+
+def test_wo115_blocked_chain_anchor_run_exits_nonzero(tmp_path: Path):
+    # WO-115 fail-loud: blocked_broken_chain used to exit 0, so the scheduler
+    # recorded success while the head stayed frozen for days (2026-07-16..25).
+    cfg = _config(tmp_path, ["audit/core.csv"])
+    config_path = tmp_path / "config.yaml"
+    ledger = cfg.output_root / "audit" / "core.csv"
+    ledger.parent.mkdir(parents=True)
+    ledger.write_bytes(b"alpha\n")
+    assert cli_main(["anchor-ledgers", "--config", str(config_path)]) == 0
+
+    changed = bytearray(ledger.read_bytes())
+    changed[0] = ord("A")
+    ledger.write_bytes(changed)
+    head_path = cfg.output_root / "performance" / "ledger_anchor_head.json"
+    head_before = head_path.read_bytes()
+    assert cli_main(["anchor-ledgers", "--config", str(config_path)]) == 1
+    summary = read_json(cfg.output_root / "performance" / "ledger_anchor_summary.json")
+    assert summary["status"] == "blocked_broken_chain"
+    # The head is deliberately NOT rewritten on a blocked run; the nonzero exit
+    # is what surfaces the freeze to the scheduler_nonzero_exit watchdog.
+    assert head_path.read_bytes() == head_before
 
 
 def test_deployed_config_covers_every_default_ledger_enrollment():

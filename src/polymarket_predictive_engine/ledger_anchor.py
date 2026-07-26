@@ -51,7 +51,13 @@ DEFAULT_LEDGER_REGISTRY: list[dict[str, str]] = [
     {"glob": "polymarket_portfolio/settlements.csv", "mode": "append_only"},
     {"glob": "polymarket_shadow/shadow_positions.csv", "mode": "snapshot"},
     {"glob": "polymarket_shadow/shadow_fills.csv", "mode": "append_only"},
-    {"glob": "maker_carry/maker_carry_history.csv", "mode": "append_only"},
+    # WO-115 (2026-07-26): reclassified append_only -> snapshot. The study's
+    # committer legitimately REWRITES this file (legacy-schema upgrade path in
+    # maker_carry_study.py), so an authorized header widening re-serialised
+    # historical rows and broke the 2026-07-12 anchored prefix, blocking every
+    # subsequent anchor run. Snapshot mode anchors an immutable daily copy,
+    # exactly like the other regenerated sources below.
+    {"glob": "maker_carry/maker_carry_history.csv", "mode": "snapshot"},
     # WO-111: forward-only per-day portfolio membership + per-market markout sidecar.
     # Fixed two-column schema so it can never need a column-addition rewrite; a
     # brand-new (initially empty) append_only file is anchor-safe.

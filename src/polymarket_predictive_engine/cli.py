@@ -437,7 +437,19 @@ def main(argv: list[str] | None = None) -> int:
         elif args.command == "executor-ops-monitor":
             _print(build_executor_ops_status(cfg))
         elif args.command == "anchor-ledgers":
-            _print(anchor_ledgers(cfg))
+            anchor_summary = anchor_ledgers(cfg)
+            _print(anchor_summary)
+            # WO-115: a blocked or failed anchor run previously exited 0, so the
+            # scheduler recorded success while the chain head stayed frozen for
+            # days. Zero-exit allowlist; every other (or unknown) status fails
+            # loud so the scheduler_nonzero_exit watchdog fires within a cycle.
+            if anchor_summary.get("status") not in {
+                "ok",
+                "already_anchored",
+                "disabled",
+                "skipped_locked",
+            }:
+                return 1
         elif args.command == "verify-ledger-chain":
             _print(verify_ledger_chain(cfg, as_of_date=args.as_of_date))
         elif args.command == "render-ips":

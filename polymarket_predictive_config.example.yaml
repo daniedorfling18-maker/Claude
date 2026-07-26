@@ -351,7 +351,10 @@ ledger_anchor:
     - {glob: polymarket_portfolio/settlements.csv, mode: append_only}
     - {glob: polymarket_shadow/shadow_positions.csv, mode: snapshot}
     - {glob: polymarket_shadow/shadow_fills.csv, mode: append_only}
-    - {glob: maker_carry/maker_carry_history.csv, mode: append_only}
+    # WO-115: snapshot, not append_only - the study's committer legitimately
+    # rewrites this file (legacy-schema upgrade path), which broke the chain
+    # at the 2026-07-12 anchored prefix when the header widened.
+    - {glob: maker_carry/maker_carry_history.csv, mode: snapshot}
     # WO-111 forward-only portfolio-membership + per-market markout sidecar (fixed
     # two-column schema; anchor-safe new append_only file, history left untouched).
     - {glob: maker_carry/maker_carry_portfolio_members.csv, mode: append_only}

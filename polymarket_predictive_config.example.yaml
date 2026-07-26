@@ -427,7 +427,9 @@ disaster_recovery:
   status_file: performance/disaster_recovery_status.json
   restore_status_file: performance/restore_verification_status.json
   archive_branch: vps-archive
-  size_cap_mb: 50
+  # 2026-07-26 owner amendment: 50 -> 240. The append-only WO-61 ledger set
+  # outgrew 50MB on 2026-07-16 and disaster recovery was dead for ten days.
+  size_cap_mb: 240
   active_rpo_hours: 24
   paper_stage_max_rpo_hours: 168
   pre_live_max_rpo_hours: 24

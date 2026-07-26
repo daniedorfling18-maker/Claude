@@ -212,9 +212,36 @@ def test_config_overrides_cannot_widen_registered_size_or_rpo_caps(tmp_path: Pat
 
     cfg.raw["disaster_recovery"]["active_rpo_hours"] = 168
     result = create_ledger_archive(cfg, force=True)
-    assert result["size_cap_mb"] == 50
+    assert result["size_cap_mb"] == 240
     assert result["rpo"]["paper_stage_max_rpo_hours"] == 168
     assert result["rpo"]["pre_live_max_rpo_hours"] == 24
+
+
+def test_wo122b_registered_archive_ceiling_is_240mb_across_every_enforcement_point() -> None:
+    # 2026-07-26 owner amendment: 50MB -> 240MB, because the append-only WO-61
+    # ledger set outgrew 50MB on 2026-07-16 and killed disaster recovery for ten
+    # days. The cap is enforced in FOUR independent places; if they drift, one
+    # of them silently becomes the real limit.
+    from polymarket_predictive_engine.disaster_recovery import _settings
+
+    expected_mb = 240
+    expected_bytes = expected_mb * 1024 * 1024
+
+    # 1. code default / registered ceiling
+    default_cfg = load_config(ROOT / "polymarket_predictive_config.example.yaml")
+    assert _settings(default_cfg)["size_cap_mb"] == float(expected_mb)
+    # 2. still tighten-only: config cannot widen past the registered ceiling
+    default_cfg.raw["disaster_recovery"]["size_cap_mb"] = 10_000
+    assert _settings(default_cfg)["size_cap_mb"] == float(expected_mb)
+    # 3. deployed config
+    raw = yaml.safe_load((ROOT / "polymarket_predictive_config.example.yaml").read_text(encoding="utf-8"))
+    assert raw["disaster_recovery"]["size_cap_mb"] == expected_mb
+    # 4. the shell push's independent hard remote cap
+    push = (ROOT / "scripts" / "push_vps_archive.sh").read_text(encoding="utf-8")
+    assert f"MAX_ARCHIVE_BYTES={expected_bytes}" in push
+    assert f"{expected_mb}MB remote cap" in push
+    # operator documentation must not still promise the old ceiling
+    assert f"{expected_mb}MB" in (ROOT / "docs" / "RESTORE.md").read_text(encoding="utf-8")
 
 
 def test_wo122_oversized_expanded_ledger_set_still_fails_closed(tmp_path: Path):
@@ -338,7 +365,9 @@ def test_scripts_are_bounded_single_commit_and_telemetry_visible():
     telemetry = (ROOT / "scripts" / "push_vps_telemetry.sh").read_text(encoding="utf-8")
     restore = (ROOT / "scripts" / "restore_from_archive.sh").read_text(encoding="utf-8")
 
-    assert "MAX_ARCHIVE_BYTES=52428800" in push
+    # 2026-07-26 owner amendment: 50MB -> 240MB (see the dedicated
+    # four-enforcement-point drift test above).
+    assert "MAX_ARCHIVE_BYTES=251658240" in push
     assert 'commit-tree -m "VPS ledger archive' in push
     assert '"+$COMMIT:refs/heads/$BRANCH"' in push
     assert "commit-tree -p" not in push

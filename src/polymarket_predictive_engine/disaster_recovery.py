@@ -37,7 +37,7 @@ def _settings(cfg: EngineConfig) -> dict[str, Any]:
         "status_file": "performance/disaster_recovery_status.json",
         "restore_status_file": "performance/restore_verification_status.json",
         "archive_branch": "vps-archive",
-        "size_cap_mb": 50,
+        "size_cap_mb": 240,
         # WO-122: runtime ceiling on the UNCOMPRESSED source set. Distinct from
         # the registered size_cap_mb, which still bounds the compressed archive
         # that leaves the host and remains tighten-only.
@@ -49,8 +49,16 @@ def _settings(cfg: EngineConfig) -> dict[str, Any]:
     }
     merged.update({key: value for key, value in raw.items() if value is not None})
     # 2026-07-11 WO-65 tighten-only registration: overrides may reduce the
-    # archive size or RPO ceilings, never widen the filed 50MB/168h/24h caps.
-    merged["size_cap_mb"] = min(50.0, float(merged["size_cap_mb"]))
+    # archive size or RPO ceilings, never widen the filed caps.
+    # 2026-07-26 owner amendment (authorized by the owner's merge of this
+    # change): the archive ceiling is raised 50MB -> 240MB. The WO-61 enrolled
+    # ledger set is append-only and outgrew 50MB on 2026-07-16, which killed
+    # disaster recovery for ten days - the cap is enforced on the compressed
+    # archive, the uncompressed source, the expanded restore (a
+    # decompression-bomb guard), and the remote push. 240MB restores DR while
+    # keeping every one of those guards binding. Still tighten-only: config may
+    # reduce this, never widen it.
+    merged["size_cap_mb"] = min(240.0, float(merged["size_cap_mb"]))
     merged["source_cap_mb"] = max(1.0, float(merged["source_cap_mb"]))
     merged["paper_stage_max_rpo_hours"] = min(168.0, float(merged["paper_stage_max_rpo_hours"]))
     merged["pre_live_max_rpo_hours"] = min(24.0, float(merged["pre_live_max_rpo_hours"]))
@@ -195,7 +203,7 @@ def _archive_source_payloads(cfg: EngineConfig, *, snapshot_date: str, source_ca
     """Describe (never materialize) the ledger set for one archive.
 
     WO-122: this used to read every ledger fully into memory and reject the run
-    when the UNCOMPRESSED total exceeded the registered 50MB archive cap. That
+    when the UNCOMPRESSED total exceeded the registered archive cap. That
     proxy was guaranteed to fail eventually - the WO-61 ledgers are append-only
     and only grow - and it fired on 2026-07-16, leaving disaster recovery dead
     for ten days. The registered guarantee bounds the ARCHIVE artifact that

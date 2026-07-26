@@ -26,7 +26,8 @@ durable `vps-anchor` timestamps.
 
 It excludes secrets, `.env`, wallet keys, databases, model/training corpora,
 websocket features, trade-print archives, and official-book archives. The
-compressed and expanded archive are both hard-capped at 50MB.
+compressed and expanded archive are both hard-capped at 240MB
+(2026-07-26 owner amendment; 50MB until the append-only ledger set outgrew it).
 
 ## Fresh VPS to a verified recovery
 

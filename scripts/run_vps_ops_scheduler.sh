@@ -97,9 +97,14 @@ rotate_log_if_needed() {
     # A single generation is retained. Rotation runs only at the top of the
     # scheduler loop, when no job subshell holds the log open, so the rename
     # and truncate cannot lose an in-flight write.
-    mv -f "$LOG_FILE" "$LOG_FILE.1" 2>/dev/null || return 0
-    : > "$LOG_FILE"
-    log "log rotated at ${SIZE} bytes (cap ${LOG_MAX_BYTES}); previous log moved to ${LOG_FILE}.1"
+    # WO-120: a failed rotation must not be silent - the log would then grow
+    # without bound, the exact disk-budget failure WO-114 exists to prevent.
+    if mv -f "$LOG_FILE" "$LOG_FILE.1" 2>/dev/null; then
+      : > "$LOG_FILE"
+      log "log rotated at ${SIZE} bytes (cap ${LOG_MAX_BYTES}); previous log moved to ${LOG_FILE}.1"
+    else
+      log "log rotation FAILED at ${SIZE} bytes (cap ${LOG_MAX_BYTES}); ops_scheduler.log is growing unbounded"
+    fi
   fi
 }
 
@@ -171,7 +176,13 @@ payload["mode"] = "vps_ops_scheduler"
 payload["generated_at_utc"] = now.isoformat()
 payload["paper_trading_invoked"] = False
 payload["live_trading_invoked"] = False
-path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+# WO-120: status.json was the one stamp file written non-atomically (every
+# Python producer uses temp+fsync+replace). A torn write here wiped ALL job
+# history on the next read (the reader falls back to {}) and silently
+# disarmed both scheduler watchdog registrations.
+tmp_path = path.with_name(f".{path.name}.{os.getpid()}.tmp")
+tmp_path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+os.replace(tmp_path, path)
 PY
 }
 
@@ -183,6 +194,11 @@ seconds_since_stamp() {
   fi
   NOW=$(date -u +%s)
   THEN=$(cat "$STAMP_FILE" 2>/dev/null || echo 0)
+  # WO-120: a corrupt/empty stamp used to make $((NOW - THEN)) an arithmetic
+  # error, whose empty output then broke the caller's [ -ge ] test and the job
+  # was never scheduled again, silently. Treat unreadable stamps as epoch 0
+  # (immediately due) like the sibling readers already do.
+  case "${THEN:-}" in ''|*[!0-9]*) THEN=0 ;; esac
   echo $((NOW - THEN))
 }
 
@@ -309,13 +325,31 @@ schedule_skip_kind() {
 
 odds_quota_available() {
   # The /v4/sports endpoint is free and returns x-requests-remaining.
+  # WO-120: distinguish "quota is genuinely 0" from "the preflight itself
+  # failed" (DNS/TLS/401/timeout). Both used to collapse to an intentional
+  # skip that REFRESHED the job's success stamp, so a dead network or revoked
+  # key kept the odds lanes green forever. Return codes:
+  #   0 = quota available; 1 = quota exhausted (intentional skip);
+  #   2 = preflight error (callers stamp a loud failure).
+  # An UNSET key stays an intentional skip: it is a deliberate, already
+  # distinguishable configuration state, not a laundered failure.
   if [ -z "${THE_ODDS_API_KEY:-}" ]; then
     log "quota preflight: THE_ODDS_API_KEY unset"
     return 1
   fi
-  REMAINING=$(curl -fsS -D - -o /dev/null "https://api.the-odds-api.com/v4/sports/?apiKey=${THE_ODDS_API_KEY}" 2>/dev/null | tr -d '\r' | awk -F': ' 'tolower($1)=="x-requests-remaining" {print $2}')
+  HEADERS=$(curl -fsS -D - -o /dev/null "https://api.the-odds-api.com/v4/sports/?apiKey=${THE_ODDS_API_KEY}" 2>/dev/null) || {
+    log "quota preflight: request FAILED (network/TLS/credential)"
+    return 2
+  }
+  REMAINING=$(printf '%s' "$HEADERS" | tr -d '\r' | awk -F': ' 'tolower($1)=="x-requests-remaining" {print $2}')
   log "quota preflight: x-requests-remaining=${REMAINING:-unknown}"
-  awk "BEGIN{exit !((${REMAINING:-0}) > 0)}"
+  case "${REMAINING:-}" in
+    ''|*[!0-9.]*)
+      log "quota preflight: quota header missing/unparseable"
+      return 2
+      ;;
+  esac
+  awk "BEGIN{exit !((${REMAINING}) > 0)}"
 }
 
 run_governance_refresh() {
@@ -335,12 +369,22 @@ run_governance_refresh() {
 }
 
 run_clv_snapshot() {
-  if ! odds_quota_available; then
+  odds_quota_available
+  QUOTA_STATE=$?
+  if [ "$QUOTA_STATE" -eq 2 ]; then
+    # WO-120: a broken preflight is a FAILURE (nonzero, no success-stamp
+    # refresh), not an intentional skip - the lane must go loud, not green.
+    stamp_status clv_snapshot 1 "odds preflight failed (network/TLS/credential); see ops_scheduler.log"
+    log "clv_snapshot: odds preflight FAILED"
+    return
+  fi
+  if [ "$QUOTA_STATE" -ne 0 ]; then
     stamp_status clv_snapshot 0 "skipped: odds quota exhausted" "" intentional
     log "clv_snapshot: skipped (no odds credits)"
     return
   fi
   log "clv_snapshot: starting"
+  CLV_STARTED_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)
   (
     set -e
     timeout "$CLV_TIMEOUT" python scripts/superbru_clv_experiment.py snapshot
@@ -350,7 +394,7 @@ run_clv_snapshot() {
   JOB_PID=$!
   wait_with_safety_pulses "$JOB_PID" clv_snapshot
   CODE=$?
-  stamp_status clv_snapshot "$CODE" "snapshot + report (extract-picks best-effort: VPS-side card edits are uncommitted)"
+  stamp_status clv_snapshot "$CODE" "snapshot + report (extract-picks best-effort: VPS-side card edits are uncommitted)" "$CLV_STARTED_AT"
   log "clv_snapshot: exit $CODE"
 }
 
@@ -360,12 +404,20 @@ run_locked_card_refresh() {
     log "locked_card_refresh: skipped (disabled)"
     return
   fi
-  if ! odds_quota_available; then
+  odds_quota_available
+  QUOTA_STATE=$?
+  if [ "$QUOTA_STATE" -eq 2 ]; then
+    stamp_status locked_card_refresh 1 "odds preflight failed (network/TLS/credential); see ops_scheduler.log"
+    log "locked_card_refresh: odds preflight FAILED"
+    return
+  fi
+  if [ "$QUOTA_STATE" -ne 0 ]; then
     stamp_status locked_card_refresh 0 "skipped: odds quota exhausted" "" intentional
     log "locked_card_refresh: skipped (no odds credits)"
     return
   fi
   log "locked_card_refresh: starting"
+  CARD_STARTED_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)
   (
     set -e
     mkdir -p outputs/superbru_pool outputs/market_odds outputs/latest \
@@ -477,7 +529,7 @@ PY
   JOB_PID=$!
   wait_with_safety_pulses "$JOB_PID" locked_card_refresh
   CODE=$?
-  stamp_status locked_card_refresh "$CODE" "full locked-card chain (see ops_scheduler.log)"
+  stamp_status locked_card_refresh "$CODE" "full locked-card chain (see ops_scheduler.log)" "$CARD_STARTED_AT"
   log "locked_card_refresh: exit $CODE"
 }
 
@@ -542,6 +594,7 @@ run_trade_prints() {
   # for the markets the websocket collector already tracks. Signed flow is
   # training substrate; nothing here trades or gates.
   log "trade_prints: starting"
+  PRINTS_STARTED_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)
   (
     set -e
     timeout "$PRINTS_TIMEOUT" python -m polymarket_predictive_engine.cli collect-trade-prints --config "$CONFIG_PATH"
@@ -559,7 +612,7 @@ run_trade_prints() {
   JOB_PID=$!
   wait_with_safety_pulses "$JOB_PID" trade_prints
   CODE=$?
-  stamp_status trade_prints "$CODE" "data-api /trades + exact Tier-0 maker book/print coverage + fill replay + consistency scans"
+  stamp_status trade_prints "$CODE" "data-api /trades + exact Tier-0 maker book/print coverage + fill replay + consistency scans" "$PRINTS_STARTED_AT"
   log "trade_prints: exit $CODE"
 }
 
@@ -568,7 +621,9 @@ run_maker_safety_refresh() {
   # decision, and pull/STOP advice on their own short cadence. This lane is
   # reporting-only and remains live while collection/research jobs run.
   log "maker_safety_refresh: starting"
-  STARTED_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+  # WO-120: job-local start stamp - the shared STARTED_AT global was clobbered
+  # by concurrent safety pulses, mismeasuring durations.
+  MAKER_SAFETY_STARTED_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)
   (
     set -e
     timeout "$PRINTS_TIMEOUT" python -m polymarket_predictive_engine.cli maker-live-test --config "$CONFIG_PATH"
@@ -581,7 +636,7 @@ run_maker_safety_refresh() {
     timeout "$PRINTS_TIMEOUT" python -m polymarket_predictive_engine.cli stage-ticket-eligibility --config "$CONFIG_PATH"
   ) >> "$LOG_FILE" 2>&1
   CODE=$?
-  stamp_status maker_safety_refresh "$CODE" "read-only maker attribution + kill decision + requote advice" "$STARTED_AT"
+  stamp_status maker_safety_refresh "$CODE" "read-only maker attribution + kill decision + requote advice" "$MAKER_SAFETY_STARTED_AT"
   log "maker_safety_refresh: exit $CODE"
 }
 
@@ -593,10 +648,10 @@ run_degraded_state_watchdog() {
   # and the dashboard are refreshed regardless, so an alerting failure cannot
   # leave the oversight surface stale.
   log "executor_ops_monitor: starting"
-  STARTED_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+  PULSE_STARTED_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)
   timeout 120 python -m polymarket_predictive_engine.cli executor-ops-monitor --config "$CONFIG_PATH" >> "$LOG_FILE" 2>&1
   MONITOR_CODE=$?
-  stamp_status executor_ops_monitor "$MONITOR_CODE" "independent future-executor ledger/heartbeat monitor; read-only" "$STARTED_AT"
+  stamp_status executor_ops_monitor "$MONITOR_CODE" "independent future-executor ledger/heartbeat monitor; read-only" "$PULSE_STARTED_AT"
   log "executor_ops_monitor: exit $MONITOR_CODE"
 
   log "degraded_state_watchdog: starting"
@@ -616,7 +671,7 @@ run_degraded_state_watchdog() {
   if [ "$WATCHDOG_CODE" -ne 0 ]; then
     log "degraded_state_watchdog: watchdog exit $WATCHDOG_CODE"
   fi
-  stamp_status degraded_state_watchdog "$CODE" "executor monitor + semantic watchdog + operating state + dashboard; reporting only" "$STARTED_AT"
+  stamp_status degraded_state_watchdog "$CODE" "executor monitor + semantic watchdog + operating state + dashboard; reporting only" "$PULSE_STARTED_AT"
   log "degraded_state_watchdog: exit $CODE"
 }
 
@@ -629,7 +684,7 @@ run_ledger_anchor() {
   # container push_vps_anchor.sh exits 0 with a log line, so it is best-effort
   # here and functional when the scheduler runs on the host.
   log "ledger_anchor: starting"
-  STARTED_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+  LEDGER_ANCHOR_STARTED_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)
   (
     set -e
     timeout "$LEDGER_ANCHOR_TIMEOUT" python -m polymarket_predictive_engine.cli anchor-ledgers --config "$CONFIG_PATH"
@@ -638,7 +693,7 @@ run_ledger_anchor() {
   JOB_PID=$!
   wait_with_safety_pulses "$JOB_PID" ledger_anchor
   CODE=$?
-  stamp_status ledger_anchor "$CODE" "WO-61 ledger-chain head refresh; external vps-anchor push best-effort" "$STARTED_AT"
+  stamp_status ledger_anchor "$CODE" "WO-61 ledger-chain head refresh; external vps-anchor push best-effort" "$LEDGER_ANCHOR_STARTED_AT"
   log "ledger_anchor: exit $CODE"
 }
 

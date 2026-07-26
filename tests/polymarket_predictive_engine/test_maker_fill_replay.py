@@ -565,7 +565,10 @@ def test_recent_market_stays_on_snapshot_watchlist_but_stale_one_drops(tmp_path,
 
     cfg = _config(tmp_path)
     raw = yaml.safe_load((tmp_path / "config.yaml").read_text(encoding="utf-8"))
-    raw["maker_fill_replay"].update({"book_source": "official", "request_pause_seconds": 0, "regime_days": 7})
+    # max_candidate_markets=0 isolates the WO-104 persistent-tranche mechanics:
+    # with WO-116 seeding enabled, 0xstale (still a ranked candidate) would
+    # legitimately return to the watchlist via the candidate tranche instead.
+    raw["maker_fill_replay"].update({"book_source": "official", "request_pause_seconds": 0, "regime_days": 7, "max_candidate_markets": 0})
     (tmp_path / "config.yaml").write_text(yaml.safe_dump(raw), encoding="utf-8")
     cfg = load_config(tmp_path / "config.yaml")
 
@@ -701,6 +704,141 @@ def test_persistent_markets_reserved_when_portfolio_fills_max_markets(tmp_path, 
     # Portfolio is already at max_markets=1, yet the persistent market is still
     # polled thanks to its reserved budget (old code truncated it away).
     assert "tokP" in polled and "tokR" in polled
+
+
+def test_wo116_candidate_seeds_are_snapshotted_when_portfolio_empty(tmp_path, monkeypatch):
+    # WO-116: with an empty portfolio and NO existing book files (the cold-start
+    # starvation state), the top-ranked candidates must still be snapshotted so
+    # they season toward the WO-113 book-history requirement before selection.
+    cfg = _config(tmp_path)
+    raw = yaml.safe_load((tmp_path / "config.yaml").read_text(encoding="utf-8"))
+    raw["maker_fill_replay"].update({"book_source": "official", "request_pause_seconds": 0, "max_candidate_markets": 2})
+    (tmp_path / "config.yaml").write_text(yaml.safe_dump(raw), encoding="utf-8")
+    cfg = load_config(tmp_path / "config.yaml")
+
+    write_json(
+        cfg.output_root / "maker_carry" / "maker_carry_study.json",
+        {"portfolio": [], "paper_trading_invoked": False, "live_trading_invoked": False},
+    )
+    write_csv(
+        cfg.output_root / "maker_carry" / "maker_carry_candidates.csv",
+        [
+            {"condition_id": "0xa", "token_id": "tokA", "net_carry_usd_per_day": 3.0},
+            {"condition_id": "0xb", "token_id": "tokB", "net_carry_usd_per_day": 2.0},
+            {"condition_id": "0xc", "token_id": "tokC", "net_carry_usd_per_day": 1.0},
+        ],
+        fieldnames=["condition_id", "token_id", "net_carry_usd_per_day"],
+    )
+
+    monkeypatch.setattr(maker_fill_replay.time, "sleep", lambda _: None)
+    monkeypatch.setattr(maker_fill_replay, "now_utc", lambda: "1970-01-01T00:46:00Z")
+    polled: list[str] = []
+
+    def fake_post(url, json=None, timeout=None):
+        items = json or []
+        polled.extend(str(item["token_id"]) for item in items)
+        return _Response([{"asset_id": item["token_id"], "timestamp": 2000, "hash": "h1", "bids": [{"price": "0.48", "size": "20"}], "asks": [{"price": "0.52", "size": "20"}]} for item in items])
+
+    monkeypatch.setattr(maker_fill_replay.requests, "post", fake_post)
+    monkeypatch.setattr(maker_fill_replay.requests, "get", lambda *a, **k: _Response({}))
+
+    summary = maker_fill_replay.snapshot_official_books(cfg)
+
+    assert summary["status"] == "ok"
+    # Cap of 2 takes the two best-ranked candidates by net carry; 0xc stays off.
+    assert set(polled) == {"tokA", "tokB"}
+    assert summary["portfolio_markets"] == 0
+    assert summary["candidate_seed_markets"] == 2
+    assert (cfg.output_root / "maker_carry" / "official_books" / "0xa.csv.gz").is_file()
+    assert (cfg.output_root / "maker_carry" / "official_books" / "0xb.csv.gz").is_file()
+    assert not (cfg.output_root / "maker_carry" / "official_books" / "0xc.csv.gz").exists()
+
+
+def test_wo116_candidate_seeds_exclude_portfolio_and_persistent(tmp_path, monkeypatch):
+    # WO-116: the seed tranche must not duplicate markets already covered by the
+    # portfolio or the WO-104 persistent tranche.
+    cfg = _config(tmp_path)
+    raw = yaml.safe_load((tmp_path / "config.yaml").read_text(encoding="utf-8"))
+    raw["maker_fill_replay"].update({"book_source": "official", "request_pause_seconds": 0, "regime_days": 7, "max_candidate_markets": 5})
+    (tmp_path / "config.yaml").write_text(yaml.safe_dump(raw), encoding="utf-8")
+    cfg = load_config(tmp_path / "config.yaml")
+
+    write_json(
+        cfg.output_root / "maker_carry" / "maker_carry_study.json",
+        {"portfolio": [{"condition_id": "0xport", "token_id": "tokP", "quote_size_shares": 10, "quote_distance": 0.01}],
+         "paper_trading_invoked": False, "live_trading_invoked": False},
+    )
+    write_csv(
+        cfg.output_root / "maker_carry" / "maker_carry_candidates.csv",
+        [
+            {"condition_id": "0xport", "token_id": "tokP", "net_carry_usd_per_day": 3.0},
+            {"condition_id": "0xrecent", "token_id": "tokR", "net_carry_usd_per_day": 2.0},
+            {"condition_id": "0xnew", "token_id": "tokN", "net_carry_usd_per_day": 1.0},
+        ],
+        fieldnames=["condition_id", "token_id", "net_carry_usd_per_day"],
+    )
+    _recent_book_file(cfg, "0xrecent", "tokR")
+
+    monkeypatch.setattr(maker_fill_replay.time, "sleep", lambda _: None)
+    monkeypatch.setattr(maker_fill_replay, "now_utc", lambda: "1970-01-01T00:46:00Z")
+    polled: list[str] = []
+
+    def fake_post(url, json=None, timeout=None):
+        items = json or []
+        polled.extend(str(item["token_id"]) for item in items)
+        return _Response([{"asset_id": item["token_id"], "timestamp": 2000, "hash": "h1", "bids": [{"price": "0.48", "size": "20"}], "asks": [{"price": "0.52", "size": "20"}]} for item in items])
+
+    monkeypatch.setattr(maker_fill_replay.requests, "post", fake_post)
+    monkeypatch.setattr(maker_fill_replay.requests, "get", lambda *a, **k: _Response({}))
+
+    summary = maker_fill_replay.snapshot_official_books(cfg)
+
+    assert summary["status"] == "ok"
+    assert set(polled) == {"tokP", "tokR", "tokN"}  # each market exactly once
+    assert len(polled) == 3
+    assert summary["portfolio_markets"] == 1
+    assert summary["persistent_markets"] == 1
+    assert summary["candidate_seed_markets"] == 1  # only 0xnew; no duplicates
+
+
+def test_wo116_collection_window_ledger_stays_portfolio_only(tmp_path, monkeypatch):
+    # WO-116: seeding books for candidates must NOT add collection-window ledger
+    # rows - coverage_ratio semantics stay keyed to the portfolio alone.
+    cfg = _config(tmp_path)
+    raw = yaml.safe_load((tmp_path / "config.yaml").read_text(encoding="utf-8"))
+    raw["maker_fill_replay"].update({"book_source": "official", "request_pause_seconds": 0, "max_candidate_markets": 5})
+    (tmp_path / "config.yaml").write_text(yaml.safe_dump(raw), encoding="utf-8")
+    cfg = load_config(tmp_path / "config.yaml")
+
+    write_json(
+        cfg.output_root / "maker_carry" / "maker_carry_study.json",
+        {"portfolio": [], "paper_trading_invoked": False, "live_trading_invoked": False},
+    )
+    write_csv(
+        cfg.output_root / "maker_carry" / "maker_carry_candidates.csv",
+        [{"condition_id": "0xnew", "token_id": "tokN", "net_carry_usd_per_day": 1.0}],
+        fieldnames=["condition_id", "token_id", "net_carry_usd_per_day"],
+    )
+
+    monkeypatch.setattr(maker_fill_replay.time, "sleep", lambda _: None)
+    monkeypatch.setattr(maker_fill_replay, "now_utc", lambda: "1970-01-01T00:46:00Z")
+
+    def fake_get(url, params=None, timeout=None):
+        return _Response({"asset_id": params["token_id"], "timestamp": 2000, "hash": "h1", "bids": [{"price": "0.48", "size": "20"}], "asks": [{"price": "0.52", "size": "20"}]})
+
+    monkeypatch.setattr(maker_fill_replay.requests, "get", fake_get)
+
+    summary = maker_fill_replay.collect_maker_replay_data(cfg)
+
+    # The scheduled collector still reports no_portfolio for its ledger lane,
+    # but the seeded candidate's book was snapshotted for seasoning.
+    assert summary["status"] == "no_portfolio"
+    assert summary["persistent_snapshot_status"] == "ok"
+    assert (cfg.output_root / "maker_carry" / "official_books" / "0xnew.csv.gz").is_file()
+    windows_path = cfg.output_root / "maker_carry" / "maker_replay_collection_windows.csv"
+    if windows_path.exists():
+        window_rows = list(csv.DictReader(windows_path.open(encoding="utf-8")))
+        assert all(row.get("condition_id") != "0xnew" for row in window_rows)
 
 
 def test_wo113_coverage_window_alignment_excludes_unobservable_horizon(tmp_path):

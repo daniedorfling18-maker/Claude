@@ -78,6 +78,13 @@ def _settings(cfg: EngineConfig) -> dict[str, Any]:
         # so a churned-out recurring market keeps maturing Tier-0 coverage even
         # when the current portfolio already fills max_markets.
         "max_persistent_markets": 10,
+        # WO-116: reserved budget for top-ranked CANDIDATE markets that are not
+        # yet in the portfolio, so fresh rewarded markets accumulate the book
+        # history the WO-113 measurement-eligibility gate requires BEFORE they
+        # are selected. Without this, a fast-churning rewarded universe leaves
+        # the portfolio oscillating at 0-1 eligible markets. Collection-only:
+        # no gate, threshold, or eligibility rule reads this setting.
+        "max_candidate_markets": 20,
         "replay_days": 7,
         "book_source": "both",
         "clob_base_url": DEFAULT_CLOB_BASE_URL,
@@ -371,6 +378,49 @@ def _recent_book_markets(
     return watchlist
 
 
+def _candidate_seed_markets(
+    candidates: dict[str, dict[str, str]],
+    *,
+    exclude: set[str],
+    cap: int,
+) -> list[dict[str, Any]]:
+    """Top-ranked study candidates not already on the watchlist (WO-116).
+
+    Fresh rewarded markets carry no local book history, so the WO-113
+    measurement-eligibility gate (rightly) keeps them out of the portfolio -
+    but portfolio-only collection then never lets them season, and a
+    fast-churning rewarded universe starves the portfolio to 0-1 eligible
+    markets. Seeding collection for the best-ranked candidates lets them
+    accumulate the required history while still ineligible; the existing
+    mtime-based persistent tranche keeps them warm afterwards. Read-only
+    collection breadth: no gate, sizing, eligibility, or order path reads it.
+    """
+    if cap <= 0:
+        return []
+    ranked: list[tuple[float, float, str, str]] = []
+    for condition_id, row in candidates.items():
+        if condition_id in exclude:
+            continue
+        token_id = str(row.get("token_id") or "").strip()
+        if not token_id:
+            continue
+        carry = safe_float(row.get("net_carry_usd_per_day"))
+        yield_rank = safe_float(row.get("yield_rank"))
+        ranked.append(
+            (
+                -(carry if carry is not None else float("-inf")),
+                yield_rank if yield_rank is not None else float("inf"),
+                condition_id,
+                token_id,
+            )
+        )
+    ranked.sort()
+    return [
+        {"condition_id": condition_id, "token_id": token_id}
+        for _, _, condition_id, token_id in ranked[:cap]
+    ]
+
+
 def _payload_snapshots(payload: Any) -> list[dict[str, Any]]:
     if isinstance(payload, list):
         return [row for row in payload if isinstance(row, dict)]
@@ -465,7 +515,8 @@ def snapshot_official_books(cfg: EngineConfig) -> dict[str, Any]:
     maker_summary = read_json(out_root / "maker_carry_study.json", default={}) or {}
     if not isinstance(maker_summary, dict):
         maker_summary = {}
-    portfolio = _portfolio(maker_summary, _candidate_map(cfg), int(settings["max_markets"]))
+    candidate_rows = _candidate_map(cfg)
+    portfolio = _portfolio(maker_summary, candidate_rows, int(settings["max_markets"]))
     # WO-104: keep recently-active markets on the watchlist so a persistent or
     # recurring market accumulates continuous Tier-0 book coverage across
     # portfolio churn, bounded by max_markets.
@@ -476,7 +527,17 @@ def snapshot_official_books(cfg: EngineConfig) -> dict[str, Any]:
     # then reserve a separate budget for persistent markets so a full portfolio
     # can no longer crowd recently-active recurring markets off the watchlist.
     persistent_cap = max(0, int(settings.get("max_persistent_markets", settings["max_markets"])))
-    watchlist = portfolio + persistent[:persistent_cap]
+    persistent = persistent[:persistent_cap]
+    # WO-116: third tranche - seed collection for the best-ranked candidates so
+    # they season toward the WO-113 book-history requirement before selection.
+    # Runs even when the portfolio is empty (exactly the starved state it fixes).
+    seeds = _candidate_seed_markets(
+        candidate_rows,
+        exclude={str(entry["condition_id"]) for entry in portfolio}
+        | {str(entry["condition_id"]) for entry in persistent},
+        cap=max(0, int(settings.get("max_candidate_markets", 0))),
+    )
+    watchlist = portfolio + persistent + seeds
     if not watchlist:
         summary.update(
             {
@@ -485,10 +546,16 @@ def snapshot_official_books(cfg: EngineConfig) -> dict[str, Any]:
                 "rows_added": 0,
                 "market_polls": [],
                 "errors": [],
+                "portfolio_markets": 0,
+                "persistent_markets": 0,
+                "candidate_seed_markets": 0,
             }
         )
         write_json(summary_path, summary)
         return summary
+    summary["portfolio_markets"] = len(portfolio)
+    summary["persistent_markets"] = len(persistent)
+    summary["candidate_seed_markets"] = len(seeds)
 
     base = str(settings["clob_base_url"]).rstrip("/")
     timeout = float(settings["request_timeout_seconds"])

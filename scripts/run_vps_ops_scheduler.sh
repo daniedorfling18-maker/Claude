@@ -713,7 +713,18 @@ while :; do
   if [ "$(seconds_since_stamp maker_study_intraday)" -ge "$MAKER_STUDY_INTRADAY_INTERVAL" ]; then
     TRAINING_AGE="$(seconds_since_success_stamp training_harvest)"
     if [ "$TRAINING_AGE" -ge "$MAKER_STUDY_INTRADAY_OFFSET_MIN" ] && [ "$TRAINING_AGE" -le "$MAKER_STUDY_INTRADAY_OFFSET_MAX" ]; then
-      JOB_SCHEDULE_SKIP_KIND="$(schedule_skip_kind maker_study_intraday "$MAKER_STUDY_INTRADAY_INTERVAL")"
+      # WO-117 measurement correctness: this job may only FIRE inside the
+      # registered 11-13h harvest-age window, and that window's daily
+      # recurrence drifts by more than TICK_SECONDS (harvest runtime plus loop
+      # slack), so judging lateness against the bare 24h interval stamped
+      # every legitimate on-window run "overrun" (10 consecutive by
+      # 2026-07-25, the sole source of the scheduler_overrun_cycles breach).
+      # Allow one window width (OFFSET_MAX - OFFSET_MIN) of gate-induced
+      # drift before calling a run overrun; a run later than that genuinely
+      # missed a window and still stamps overrun. The SLO target itself is
+      # untouched and still fires on real starvation.
+      MAKER_STUDY_WINDOW_TOLERANCE=$((MAKER_STUDY_INTRADAY_OFFSET_MAX - MAKER_STUDY_INTRADAY_OFFSET_MIN))
+      JOB_SCHEDULE_SKIP_KIND="$(schedule_skip_kind maker_study_intraday $((MAKER_STUDY_INTRADAY_INTERVAL + MAKER_STUDY_WINDOW_TOLERANCE)))"
       touch_stamp maker_study_intraday
       run_maker_study_intraday
       JOB_SCHEDULE_SKIP_KIND=""

@@ -430,6 +430,12 @@ disaster_recovery:
   # 2026-07-26 owner amendment: 50 -> 240. The append-only WO-61 ledger set
   # outgrew 50MB on 2026-07-16 and disaster recovery was dead for ten days.
   size_cap_mb: 240
+  # 2026-07-26 WO-123: polymarket_training/ stays ANCHORED but is excluded from
+  # the recovery archive - it is a re-harvestable collection corpus and was 94%
+  # of the archive bytes. The exclusion set is registered in
+  # disaster_recovery.ARCHIVE_EXCLUDED_PREFIXES; an optional
+  # excluded_path_prefixes key here may only SHRINK it (put corpora back into
+  # the archive), never add exclusions. Left unset so the registered set applies.
   active_rpo_hours: 24
   paper_stage_max_rpo_hours: 168
   pre_live_max_rpo_hours: 24

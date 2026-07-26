@@ -3,6 +3,8 @@ from __future__ import annotations
 
 from copy import deepcopy
 from datetime import datetime, timedelta, timezone
+import io
+import json
 import os
 from pathlib import Path
 import shutil
@@ -334,6 +336,175 @@ def test_wo122_archive_script_reports_unsupported_host_interpreter():
     assert "no local fallback exists" in push
     assert 'BUILDER_STATE" -eq 2' in push
     assert ">=3.10" in (ROOT / "pyproject.toml").read_text(encoding="utf-8")
+
+
+def _enroll_training_corpus(cfg, *, size_bytes: int = 2 * 1024 * 1024) -> Path:
+    """Enroll a heavy training corpus in the WO-61 chain, as production does.
+
+    On 2026-07-26 this corpus was 476.6MB of a 505.6MB enrolled set - the reason
+    the archive could not be built at all.
+    """
+
+    cfg.raw["ledger_anchor"]["ledger_globs"].append(
+        {"glob": "polymarket_training/*.csv", "mode": "append_only"}
+    )
+    corpus = cfg.output_root / "polymarket_training" / "historical_bid_ask_v1.csv"
+    corpus.parent.mkdir(parents=True, exist_ok=True)
+    body = b"1784000000,0.41,0.59\n"
+    corpus.write_bytes(b"ts,bid,ask\n" + body * (size_bytes // len(body)))
+    return corpus
+
+
+def _rebuild_archive_with_manifest(
+    source: Path,
+    destination: Path,
+    *,
+    manifest_updates: dict,
+    drop_paths: tuple[str, ...] = (),
+) -> Path:
+    """Repack an archive with a mutated manifest, keeping it internally valid.
+
+    This is the tampered/legacy-archive attacker's position: the digests and file
+    set still agree with the manifest, only the declared scope differs.
+    """
+
+    members: dict[str, bytes] = {}
+    with tarfile.open(source, "r:gz") as archive:
+        for member in archive.getmembers():
+            handle = archive.extractfile(member)
+            assert handle is not None
+            members[member.name] = handle.read()
+    manifest = json.loads(members.pop("archive_manifest.json").decode("utf-8"))
+    manifest.update(manifest_updates)
+    if drop_paths:
+        manifest["files"] = [row for row in manifest["files"] if row["path"] not in drop_paths]
+        for name in drop_paths:
+            members.pop(name, None)
+    payload = (json.dumps(manifest, indent=2, sort_keys=True) + "\n").encode("utf-8")
+    with tarfile.open(destination, "w:gz", format=tarfile.PAX_FORMAT) as archive:
+        for name, data in (("archive_manifest.json", payload), *sorted(members.items())):
+            info = tarfile.TarInfo(name)
+            info.size = len(data)
+            info.mode = 0o600
+            archive.addfile(info, io.BytesIO(data))
+    return destination
+
+
+def test_wo123_anchored_corpus_is_excluded_from_the_archive_and_restore_still_verifies(
+    tmp_path: Path,
+):
+    # 2026-07-26 owner decision: exclude the re-harvestable corpora from the
+    # recovery archive, KEEP them in the anchor chain. Restore verification then
+    # has to report them as excluded-by-design rather than a broken chain.
+    cfg = _config(tmp_path)
+    corpus = _enroll_training_corpus(cfg)
+    _seed_two_day_chain(cfg)
+
+    built = create_ledger_archive(cfg, force=True)
+    archive_path = Path(built["archive_path"])
+    manifest = read_json(cfg.output_root / "performance" / "ledger_state_archive_manifest.json")
+    with tarfile.open(archive_path, "r:gz") as archive:
+        names = set(archive.getnames())
+
+    # The corpus stays ANCHORED: it is in the chain manifests and the live chain
+    # verifies it byte-for-byte, with no tolerance applied off the DR path.
+    chain_rows = (cfg.output_root / "performance" / "ledger_anchor_chain.csv").read_text(
+        encoding="utf-8"
+    )
+    assert "polymarket_training/historical_bid_ask_v1.csv" in chain_rows
+    live_chain = verify_ledger_chain(cfg, as_of_date="2026-07-11", write_summary=False)
+    assert live_chain["status"] == "ok"
+    assert live_chain["missing_excluded_tolerated"] == 0
+
+    # ...but it never enters the archive.
+    assert built["status"] == "ok"
+    assert not any("polymarket_training" in name for name in names)
+    assert built["archive_excluded_paths"] == ["polymarket_training/"]
+    assert built["archive_excluded_file_count"] == 1
+    assert built["archive_excluded_bytes"] == corpus.stat().st_size
+    assert manifest["excluded_path_prefixes"] == ["polymarket_training/"]
+    assert manifest["excluded_files"] == [
+        {
+            "path": "outputs/polymarket_training/historical_bid_ask_v1.csv",
+            "size_bytes": corpus.stat().st_size,
+        }
+    ]
+    assert "regenerable by re-harvest" in manifest["excluded_reason"]
+    assert manifest["uncompressed_bytes"] < corpus.stat().st_size
+
+    # Restore verification passes and says exactly what it tolerated.
+    dry_run = verify_and_restore_archive(cfg, archive_path, dry_run=True)
+    assert dry_run["status"] == "ok"
+    assert dry_run["excluded_path_prefixes_tolerated"] == ["polymarket_training/"]
+    assert dry_run["excluded_missing_tolerated"] >= 1
+    assert dry_run["ledger_chain_verification"]["verified_through_date"] == "2026-07-11"
+
+
+def test_wo123_without_the_exclusion_the_same_ledger_set_still_fails_closed(tmp_path: Path):
+    # Proves the exclusion is what unblocks DR, and that the size guards were
+    # never relaxed to get there: put the corpus back in and the build still
+    # refuses, loudly, exactly as it did for the ten dead days.
+    cfg = _config(tmp_path)
+    _enroll_training_corpus(cfg)
+    _seed_two_day_chain(cfg)
+    cfg.raw["disaster_recovery"]["excluded_path_prefixes"] = []
+
+    with pytest.raises(DisasterRecoveryError, match="size cap"):
+        create_ledger_archive(cfg, force=True)
+    status = read_json(cfg.output_root / "performance" / "disaster_recovery_status.json")
+    assert status["status"] == "error"
+    assert status["archive_excluded_paths"] == []
+
+
+def test_wo123_config_may_only_shrink_the_registered_exclusion_set() -> None:
+    from polymarket_predictive_engine.disaster_recovery import (
+        ARCHIVE_EXCLUDED_PREFIXES,
+        _excluded_prefixes,
+    )
+
+    assert ARCHIVE_EXCLUDED_PREFIXES == ("polymarket_training/",)
+    # Unset keeps the registration.
+    assert _excluded_prefixes({}) == ARCHIVE_EXCLUDED_PREFIXES
+    # Trailing-slash and leading-slash hygiene, so a prefix cannot match a sibling.
+    assert _excluded_prefixes({"excluded_path_prefixes": ["polymarket_training"]}) == (
+        "polymarket_training/",
+    )
+    # Shrinking is allowed: fewer exclusions means MORE recovery coverage.
+    assert _excluded_prefixes({"excluded_path_prefixes": []}) == ()
+    # Adding is not: config cannot quietly drop a ledger out of disaster recovery.
+    assert _excluded_prefixes(
+        {"excluded_path_prefixes": ["audit/", "performance/", "polymarket_training/"]}
+    ) == ("polymarket_training/",)
+    with pytest.raises(ValueError, match="list of path prefixes"):
+        _excluded_prefixes({"excluded_path_prefixes": 7})
+
+
+def test_wo123_archive_cannot_widen_its_own_restore_tolerance(tmp_path: Path):
+    # The manifest is untrusted input. An archive that declares an unregistered
+    # prefix and omits a real ledger must still fail the restore check, and a
+    # pre-WO-123 archive (no declaration) gets no tolerance at all.
+    cfg = _config(tmp_path)
+    _enroll_training_corpus(cfg)
+    _seed_two_day_chain(cfg)
+    built = create_ledger_archive(cfg, force=True)
+    source = Path(built["archive_path"])
+
+    widened = _rebuild_archive_with_manifest(
+        source,
+        tmp_path / "widened.tar.gz",
+        manifest_updates={"excluded_path_prefixes": ["polymarket_training/", "audit/"]},
+        drop_paths=("outputs/audit/core.csv",),
+    )
+    with pytest.raises(DisasterRecoveryError, match="did not verify through"):
+        verify_and_restore_archive(cfg, widened, dry_run=True)
+
+    legacy = _rebuild_archive_with_manifest(
+        source,
+        tmp_path / "legacy.tar.gz",
+        manifest_updates={"excluded_path_prefixes": []},
+    )
+    with pytest.raises(DisasterRecoveryError, match="did not verify through"):
+        verify_and_restore_archive(cfg, legacy, dry_run=True)
 
 
 def test_remote_success_controls_due_state_without_rebuilding(tmp_path: Path):

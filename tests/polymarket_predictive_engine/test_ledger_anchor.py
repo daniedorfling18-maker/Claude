@@ -272,6 +272,59 @@ def test_wo115_blocked_chain_anchor_run_exits_nonzero(tmp_path: Path):
     assert head_path.read_bytes() == head_before
 
 
+def test_wo123_tolerated_prefixes_cover_absence_only_and_are_opt_in(tmp_path: Path):
+    # WO-123: the DR restore check may declare a registered, re-harvestable
+    # corpus as excluded-by-design. That tolerance is narrow by construction:
+    # opt-in, absence-only, prefix-scoped.
+    cfg = _config(
+        tmp_path,
+        ["audit/core.csv", {"glob": "polymarket_training/*.csv", "mode": "append_only"}],
+    )
+    core = cfg.output_root / "audit" / "core.csv"
+    corpus = cfg.output_root / "polymarket_training" / "historical_bid_ask_v1.csv"
+    core.parent.mkdir(parents=True)
+    corpus.parent.mkdir(parents=True)
+    core.write_bytes(b"date,value\n2026-07-11,1\n")
+    corpus.write_bytes(b"ts,bid,ask\n1784000000,0.41,0.59\n")
+    assert anchor_ledgers(cfg, anchor_date="2026-07-11")["status"] == "ok"
+
+    baseline = verify_ledger_chain(cfg, write_summary=False)
+    assert baseline["status"] == "ok"
+    assert baseline["ledger_prefixes_checked"] == 2
+    assert baseline["missing_excluded_tolerated"] == 0
+
+    # 1. Absence inside the tolerated prefix verifies clean and is counted...
+    corpus.unlink()
+    tolerated = verify_ledger_chain(
+        cfg, write_summary=False, tolerated_missing_prefixes=("polymarket_training/",)
+    )
+    assert tolerated["status"] == "ok"
+    assert tolerated["missing_excluded_tolerated"] == 1
+    assert tolerated["ledger_prefixes_checked"] == 1
+
+    # 2. ...but only because the caller opted in. The default is unchanged.
+    default = verify_ledger_chain(cfg, write_summary=False)
+    assert default["status"] == "broken"
+    assert "anchored file is missing" in default["issues"][0]
+
+    # 3. A PRESENT file under a tolerated prefix is still byte-verified.
+    corpus.write_bytes(b"ts,bid,ask\n1784000000,0.99,0.01\n")
+    tampered = verify_ledger_chain(
+        cfg, write_summary=False, tolerated_missing_prefixes=("polymarket_training/",)
+    )
+    assert tampered["status"] == "broken"
+    assert "anchored prefix digest changed" in tampered["issues"][0]
+
+    # 4. Tolerance does not leak to paths outside the prefix.
+    corpus.write_bytes(b"ts,bid,ask\n1784000000,0.41,0.59\n")
+    core.unlink()
+    outside = verify_ledger_chain(
+        cfg, write_summary=False, tolerated_missing_prefixes=("polymarket_training/",)
+    )
+    assert outside["status"] == "broken"
+    assert "audit/core.csv: anchored file is missing" in outside["issues"][0]
+
+
 def test_deployed_config_covers_every_default_ledger_enrollment():
     # #269 Codex-review P1 (confirmed): the example config's explicit
     # ledger_globs list replaces DEFAULT_LEDGER_REGISTRY wholesale, so a

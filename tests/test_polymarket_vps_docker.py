@@ -818,6 +818,59 @@ def test_ops_scheduler_log_rotation_is_noop_when_small_or_disabled(tmp_path):
     assert log_file.read_text(encoding="utf-8") == "y" * 5000
 
 
+def test_wo117_maker_study_overrun_classification_is_window_aware():
+    # WO-117: maker_study_intraday may only fire inside the registered 11-13h
+    # harvest-age window, whose daily recurrence drifts by more than one tick,
+    # so lateness must be judged against interval + one window width - not the
+    # bare interval, which stamped every legitimate on-window run "overrun".
+    script = (ROOT / "scripts" / "run_vps_ops_scheduler.sh").read_text(encoding="utf-8")
+    assert (
+        "MAKER_STUDY_WINDOW_TOLERANCE=$((MAKER_STUDY_INTRADAY_OFFSET_MAX - MAKER_STUDY_INTRADAY_OFFSET_MIN))"
+        in script
+    )
+    assert (
+        'schedule_skip_kind maker_study_intraday $((MAKER_STUDY_INTRADAY_INTERVAL + MAKER_STUDY_WINDOW_TOLERANCE))'
+        in script
+    )
+    # The bare-interval form must be gone for this job only; other jobs keep it.
+    assert 'schedule_skip_kind maker_study_intraday "$MAKER_STUDY_INTRADAY_INTERVAL"' not in script
+    assert 'schedule_skip_kind trade_prints "$PRINTS_INTERVAL"' in script
+
+
+def test_wo117_window_tolerance_boundary_semantics(tmp_path):
+    # A run 25h after its stamp (inside interval + 2h window width) is
+    # on-schedule for the window-gated job; the same age judged against the
+    # bare interval would have been "overrun". Beyond interval + tolerance +
+    # tick, overrun still stamps - real starvation stays visible.
+    out_dir = tmp_path / "ops"
+    out_dir.mkdir()
+    script = ROOT / "scripts" / "run_vps_ops_scheduler.sh"
+    env = {
+        **os.environ,
+        "OPS_SCHEDULER_LIBRARY_ONLY": "1",
+        "OPS_SCHEDULER_OUT_DIR": str(out_dir),
+    }
+    stamp = out_dir / "last_maker_study_intraday"
+    now = int(__import__("time").time())
+
+    def kind(age_seconds: int, effective_interval: int) -> str:
+        stamp.write_text(f"{now - age_seconds}\n", encoding="utf-8")
+        result = subprocess.run(
+            ["sh", "-c", f'. "$1"; schedule_skip_kind maker_study_intraday {effective_interval}', "sh", str(script)],
+            env=env,
+            text=True,
+            capture_output=True,
+            check=True,
+        )
+        return result.stdout.strip()
+
+    interval, tolerance, tick = 86400, 7200, 300
+    age_25h = 90000
+    assert kind(age_25h, interval) == "overrun"  # bare interval: mislabeled
+    assert kind(age_25h, interval + tolerance) == ""  # window-aware: on-schedule
+    assert kind(interval + tolerance + tick + 60, interval + tolerance) == "overrun"
+
+
 def test_private_dashboard_setup_waits_for_recreated_backend():
     # WO-114: the loopback readiness check must be a bounded retry loop, not a
     # single probe, so it does not race the just-force-recreated reporting

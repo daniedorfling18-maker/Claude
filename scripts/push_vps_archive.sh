@@ -3,7 +3,7 @@
 #
 # The archive branch deliberately mirrors vps-telemetry's single parentless
 # commit pattern: every successful push force-replaces the prior snapshot, so
-# remote storage stays bounded.  The archive itself is capped at 50MB and is
+# remote storage stays bounded.  The archive itself is capped at 240MB and is
 # built from the WO-61 chain manifest; collection/training corpora never enter.
 set -u
 
@@ -16,7 +16,7 @@ ARCHIVE_FILE="${VPS_ARCHIVE_FILE:-$REPO_DIR/outputs/performance/ledger_state_arc
 MANIFEST_FILE="${VPS_ARCHIVE_MANIFEST_FILE:-$REPO_DIR/outputs/performance/ledger_state_archive_manifest.json}"
 STATUS_FILE="${VPS_ARCHIVE_STATUS_FILE:-$REPO_DIR/outputs/performance/disaster_recovery_status.json}"
 LOCK_DIR="${TMPDIR:-/tmp}/push_vps_archive.lock"
-MAX_ARCHIVE_BYTES=52428800
+MAX_ARCHIVE_BYTES=251658240  # 240MB (2026-07-26 owner amendment; was 50MB)
 GIT_DIR="$REPO_DIR/.git"
 HOST_PYTHON="${VPS_ARCHIVE_HOST_PYTHON:-}"
 if [ -z "$HOST_PYTHON" ]; then
@@ -168,8 +168,8 @@ if [ ! -s "$ARCHIVE_FILE" ] || [ ! -s "$MANIFEST_FILE" ]; then
 fi
 ARCHIVE_BYTES=$(wc -c < "$ARCHIVE_FILE" | tr -d ' ')
 if [ -z "$ARCHIVE_BYTES" ] || [ "$ARCHIVE_BYTES" -gt "$MAX_ARCHIVE_BYTES" ]; then
-  stamp_remote "error" "" "archive exceeds hard 50MB remote cap" || true
-  echo "archive exceeds hard 50MB cap" >&2
+  stamp_remote "error" "" "archive exceeds hard 240MB remote cap" || true
+  echo "archive exceeds hard 240MB cap" >&2
   exit 1
 fi
 

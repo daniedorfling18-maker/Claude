@@ -189,6 +189,48 @@ def test_healthy_canary_status_uses_executable_ledger_values(tmp_path: Path) -> 
     assert result["owner_alerts"] == []
 
 
+def test_wo118_kill_scoreboard_maps_observed_and_fails_closed_without_criteria(tmp_path: Path) -> None:
+    cfg = _cfg(tmp_path)
+    _seed_runtime(cfg)
+    # The policy's criteria carry their observation under per-criterion keys
+    # (value / worst_day / days / age_seconds), never a literal "observed" -
+    # the old lookup rendered every criterion as observed: null.
+    write_json(
+        cfg.output_root / "maker_carry" / "decision_policy.json",
+        {
+            "generated_at_utc": _stamp(30),
+            "sizing": {"binding_capital_usd": 100.0},
+            "kill_criteria_status": {
+                "status": "clear",
+                "triggered": [],
+                "criteria": {
+                    "cumulative_real_net_score": {"triggered": False, "value": -3.5, "threshold": -25.0},
+                    "single_day_net_score": {"triggered": False, "worst_day": -1.25, "threshold": -15.0},
+                    "fills_outrunning_model_two_days": {"triggered": False, "days": 1, "threshold_days": 2},
+                    "kill_data_stale": {"triggered": False, "age_seconds": 42.0},
+                },
+            },
+        },
+    )
+
+    result = build_executor_ops_status(cfg, as_of=AS_OF)
+    observed = {row["criterion"]: row["observed"] for row in result["kill_criteria_scoreboard"]["criteria"]}
+
+    assert observed["cumulative_real_net_score"] == -3.5
+    assert observed["single_day_net_score"] == -1.25
+    assert observed["fills_outrunning_model_two_days"] == 1
+    assert observed["kill_data_stale"] == 42.0
+
+    # WO-118 fail-closed default: a policy file WITHOUT any criteria evaluation
+    # must read unobserved, never clear.
+    write_json(
+        cfg.output_root / "maker_carry" / "decision_policy.json",
+        {"generated_at_utc": _stamp(30), "sizing": {"binding_capital_usd": 100.0}},
+    )
+    bare = build_executor_ops_status(cfg, as_of=AS_OF)
+    assert bare["kill_criteria_scoreboard"]["status"] == "unobserved"
+
+
 def test_registered_owner_alerts_emit_once_and_then_deduplicate(tmp_path: Path) -> None:
     cfg = _cfg(tmp_path)
     _seed_runtime(

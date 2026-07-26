@@ -373,21 +373,70 @@ def main(argv: list[str] | None = None) -> int:
         elif args.command == "build-leakage-safe-training":
             _print(build_leakage_safe_training(cfg))
         elif args.command == "collect-trade-prints":
-            _print(collect_trade_prints(cfg))
+            # WO-120: evidence producers previously exited 0 on status
+            # "failed", so the scheduler stamped success while collection was
+            # dead (the anchor-ledgers/WO-115 class). Zero-exit allowlists per
+            # command; "failed" and unknown statuses fail loud. "partial" and
+            # the registered benign states stay zero-exit - persistent partial
+            # degradation is the content watchdog's job (registered
+            # observation tolerances), not an immediate page per cycle.
+            prints_summary = collect_trade_prints(cfg)
+            _print(prints_summary)
+            if prints_summary.get("status") not in {
+                "ok",
+                "partial",
+                "skipped_all_completed",
+                "disabled",
+            }:
+                return 1
         elif args.command == "backfill-trade-prints":
             _print(backfill_trade_prints(cfg))
         elif args.command == "collect-wallet-intel":
             _print(collect_wallet_intelligence(cfg))
         elif args.command == "maker-carry-study":
-            _print(run_maker_carry_study(cfg))
+            study_summary = run_maker_carry_study(cfg)
+            _print(study_summary)
+            # WO-120: a "failed" study run still commits its history row (the
+            # owner-confirmed fail-closed M-A semantics); the nonzero exit is
+            # what makes the failure visible the same day instead of silently
+            # costing streak days.
+            if study_summary.get("status") not in {"ok", "no_candidates", "disabled"}:
+                return 1
         elif args.command == "reward-epoch-sample":
             _print(run_reward_epoch_sample(cfg))
         elif args.command == "collect-maker-replay-data":
-            _print(collect_maker_replay_data(cfg))
+            replay_collection_summary = collect_maker_replay_data(cfg)
+            _print(replay_collection_summary)
+            if replay_collection_summary.get("status") not in {
+                "ok",
+                "partial",
+                "no_portfolio",
+                "disabled",
+            }:
+                return 1
         elif args.command == "maker-fill-replay":
-            _print(run_maker_fill_replay(cfg))
+            replay_summary = run_maker_fill_replay(cfg)
+            _print(replay_summary)
+            # insufficient_coverage stays zero-exit: it has a dedicated
+            # watchdog registration with a registered observation tolerance.
+            if replay_summary.get("status") not in {
+                "ok",
+                "no_portfolio",
+                "no_replay_data",
+                "insufficient_coverage",
+                "disabled",
+            }:
+                return 1
         elif args.command == "snapshot-official-books":
-            _print(snapshot_official_books(cfg))
+            books_summary = snapshot_official_books(cfg)
+            _print(books_summary)
+            if books_summary.get("status") not in {
+                "ok",
+                "partial",
+                "no_portfolio",
+                "disabled",
+            }:
+                return 1
         elif args.command == "maker-live-test":
             _print(run_maker_live_test(cfg))
         elif args.command == "flow-toxicity":

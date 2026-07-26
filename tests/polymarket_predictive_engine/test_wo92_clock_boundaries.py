@@ -80,7 +80,9 @@ def test_maker_live_reward_and_fill_leave_the_24h_window_after_clock_advance(
 
 def test_decision_policy_kill_input_crosses_freshness_boundary() -> None:
     observed = datetime(2026, 7, 15, 12, tzinfo=timezone.utc)
-    live = {"generated_at_utc": _iso(observed)}
+    # WO-118: an observation only qualifies for freshness when it carries the
+    # kill input, so the boundary fixture provides one.
+    live = {"generated_at_utc": _iso(observed), "net_score_usd": 1.0}
     settings = {"kill_input_max_age_seconds": 1800}
     activation = {"active": True, "reasons": ["test_live_stage"]}
 

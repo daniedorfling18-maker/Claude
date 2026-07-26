@@ -48,7 +48,7 @@ from polymarket_predictive_engine.resolution_collector import fetch_gamma_market
 from polymarket_predictive_engine.runtime_lock import runtime_lock, runtime_lock_path  # noqa: E402
 from polymarket_predictive_engine.shadow_cohort import update_shadow_cohort_evidence  # noqa: E402
 from polymarket_predictive_engine.storage import connect_db  # noqa: E402
-from polymarket_predictive_engine.utils import now_utc, parse_timestamp, read_csv_rows, read_json, safe_float, write_csv, write_json  # noqa: E402
+from polymarket_predictive_engine.utils import append_csv_rows_matching_existing_header, now_utc, parse_timestamp, read_csv_rows, read_json, safe_float, write_csv, write_json  # noqa: E402
 from polymarket_predictive_engine.websocket_collector import collect_websocket  # noqa: E402
 from polymarket_predictive_engine.websocket_normaliser import normalize_websocket_file  # noqa: E402
 import polymarket_mispricing_bot as scanner  # noqa: E402
@@ -1231,21 +1231,24 @@ def _record_background_timeout_incident(cfg, summary: dict[str, Any], *, live_it
     rows = read_csv_rows(path)
     if any(str(row.get("incident_id") or "") == incident_id for row in rows):
         return path
-    rows.append(
-        {
-            "incident_id": incident_id,
-            "generated_at_utc": str(summary.get("generated_at_utc") or now_utc()),
-            "job": str(summary.get("job") or "unknown"),
-            "started_at_utc": str(summary.get("started_at_utc") or ""),
-            "running_seconds": summary.get("running_seconds", 0.0),
-            "max_runtime_seconds": summary.get("max_runtime_seconds", 0.0),
-            "live_iteration": int(live_iteration),
-            "exit_code": 75,
-            "paper_trading_invoked": False,
-            "live_trading_invoked": False,
-        }
+    incident_row = {
+        "incident_id": incident_id,
+        "generated_at_utc": str(summary.get("generated_at_utc") or now_utc()),
+        "job": str(summary.get("job") or "unknown"),
+        "started_at_utc": str(summary.get("started_at_utc") or ""),
+        "running_seconds": summary.get("running_seconds", 0.0),
+        "max_runtime_seconds": summary.get("max_runtime_seconds", 0.0),
+        "live_iteration": int(live_iteration),
+        "exit_code": 75,
+        "paper_trading_invoked": False,
+        "live_trading_invoked": False,
+    }
+    # WO-119: this ledger is append_only-enrolled in the WO-61 anchor registry
+    # and this writer runs in a crash path (just before os._exit(75)) - a full
+    # rewrite here re-serialised history and could break the anchored prefix.
+    append_csv_rows_matching_existing_header(
+        path, [incident_row], fieldnames=BACKGROUND_TIMEOUT_INCIDENT_FIELDS
     )
-    write_csv(path, rows, fieldnames=BACKGROUND_TIMEOUT_INCIDENT_FIELDS)
     return path
 
 

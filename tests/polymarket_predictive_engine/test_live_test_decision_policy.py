@@ -825,6 +825,65 @@ def test_live_stage_with_fresh_kill_inputs_preserves_existing_policy(tmp_path, m
     assert result["kill_criteria_status"]["kill_input_freshness"]["age_seconds"] == 600.0
 
 
+def test_wo118_data_free_live_payload_does_not_satisfy_kill_freshness(tmp_path, monkeypatch):
+    # Red-team RT-1 (executed scenario): an active live-stage guard with the
+    # producer stuck on awaiting_wallet_address - fresh timestamps, zero kill
+    # inputs. The freshness guard must go blind-stale and force STOP instead of
+    # counting the data-free heartbeat as an observation.
+    cfg = _config(tmp_path, live_configured=True)
+    _write_study(cfg, _study(top="0xm1"))
+    _write_carry_history(cfg, _history(["0xm1"] * 7))
+    write_json(
+        _out(cfg) / "maker_live_test.json",
+        {
+            "status": "awaiting_wallet_address",
+            "generated_at_utc": "2026-07-14T10:59:00Z",
+            "wallets_combined": False,
+        },
+    )
+    monkeypatch.setattr(policy, "now_utc", lambda: "2026-07-14T11:00:00Z")
+
+    result = run_decision_policy(cfg)
+    freshness = result["kill_criteria_status"]["kill_input_freshness"]
+
+    assert freshness["state"] == "stale_missing"
+    assert result["kill_data_stale"] is True
+    assert result["kill_criteria_status"]["criteria"]["kill_data_stale"]["triggered"] is True
+    assert result["indicated_action"] == "stop_quoting_review_before_resume"
+    assert result["action_reason"] == "kill_input_data_stale"
+    assert not result["indicated_action"].startswith(("fund_", "continue_"))
+
+
+def test_wo118_provided_invalid_kill_input_still_qualifies_and_triggers(tmp_path, monkeypatch):
+    # Guard against over-tightening: a PROVIDED-but-invalid net_score_usd is
+    # itself a fail-closed kill input (WO-86), so it must still qualify the
+    # observation for freshness - and trigger the cumulative criterion as an
+    # invalid input rather than masquerading as missing data.
+    cfg = _config(tmp_path, live_configured=True)
+    _write_study(cfg, _study(top="0xm1"))
+    _write_carry_history(cfg, _history(["0xm1"] * 7))
+    write_json(
+        _out(cfg) / "maker_live_test.json",
+        {
+            "status": "ok",
+            "generated_at_utc": "2026-07-14T10:59:00Z",
+            "net_score_usd": "not-a-number",
+            "scoreboard": "winning_so_far",
+        },
+    )
+    monkeypatch.setattr(policy, "now_utc", lambda: "2026-07-14T11:00:00Z")
+
+    result = run_decision_policy(cfg)
+    freshness = result["kill_criteria_status"]["kill_input_freshness"]
+
+    assert freshness["state"] == "fresh"
+    assert result["kill_data_stale"] is False
+    criterion = result["kill_criteria_status"]["criteria"]["cumulative_real_net_score"]
+    assert criterion["invalid_input"] is True
+    assert criterion["triggered"] is True
+    assert not result["indicated_action"].startswith(("fund_", "continue_"))
+
+
 def test_kill_input_freshness_override_can_only_tighten(tmp_path):
     cfg = _config(tmp_path)
     cfg.raw["decision_policy"]["kill_input_max_age_seconds"] = 99_999

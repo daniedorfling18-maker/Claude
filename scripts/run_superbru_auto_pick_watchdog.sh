@@ -125,6 +125,10 @@ if [ "${SUPERBRU_AUTO_PICK_ENABLED:-true}" != "true" ]; then
   write_watchdog_status "disabled" "SUPERBRU_AUTO_PICK_ENABLED is not true" 0
   echo "SuperBru auto-pick watchdog disabled."
   tail -f /dev/null
+  # WO-118: this is the only script that takes an external action (submitting
+  # picks). Without an explicit exit, tail dying would fall through into the
+  # submitting loop below while the operator believes the watchdog is disabled.
+  exit 0
 fi
 
 while true; do

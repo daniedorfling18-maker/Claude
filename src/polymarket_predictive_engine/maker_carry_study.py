@@ -95,6 +95,7 @@ import requests
 
 from .config import EngineConfig, load_config
 from .utils import (
+    append_csv_rows,
     ensure_dir,
     normalize_external_timestamp,
     now_utc,
@@ -2321,9 +2322,14 @@ def run_maker_carry_study(cfg: EngineConfig) -> dict[str, Any]:
     ledger_committed = False
     with _maker_carry_ledger_flock(out_root) as have_lock:
         if have_lock:
-            committed_members = read_csv_rows(members_path)
-            committed_members.append(members_row)
-            write_csv(members_path, committed_members, fieldnames=members_fields)
+            # WO-119: the members sidecar is append_only-enrolled (WO-111,
+            # fixed two-column schema by design), so it must be APPENDED, not
+            # read-and-rewritten - the old write_csv full rewrite re-serialised
+            # historical rows and could break the anchored prefix, the exact
+            # WO-115 class. maker_carry_history.csv below stays on write_csv
+            # deliberately: it is snapshot-enrolled (WO-115) and still carries
+            # the legacy-schema upgrade path.
+            append_csv_rows(members_path, [members_row], fieldnames=members_fields)
             committed_history = read_csv_rows(history_path)
             committed_history.append(history_row)
             write_csv(history_path, committed_history, fieldnames=history_fields)

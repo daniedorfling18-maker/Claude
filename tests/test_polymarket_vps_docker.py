@@ -746,6 +746,8 @@ def test_ops_scheduler_card_refresh_enabled_by_default_preflights_odds(tmp_path)
     assert job["skip_kind"] == "intentional"
     # The default (enabled) path falls through the disable guard to the odds
     # preflight, so the decline reason is quota exhaustion, not the switch.
+    # WO-120 keeps an UNSET key an intentional skip (a deliberate config
+    # state); only a present-but-failing preflight goes loud.
     assert "odds quota exhausted" in job["detail"]
     assert "disabled" not in job["detail"]
 
@@ -869,6 +871,94 @@ def test_wo117_window_tolerance_boundary_semantics(tmp_path):
     assert kind(age_25h, interval) == "overrun"  # bare interval: mislabeled
     assert kind(age_25h, interval + tolerance) == ""  # window-aware: on-schedule
     assert kind(interval + tolerance + tick + 60, interval + tolerance) == "overrun"
+
+
+def test_wo120_scheduler_fail_loud_plumbing_is_wired():
+    script = (ROOT / "scripts" / "run_vps_ops_scheduler.sh").read_text(encoding="utf-8")
+    # status.json is written atomically (it was the one non-atomic stamp file;
+    # a torn write wiped all job history and disarmed both scheduler
+    # watchdog registrations).
+    assert "os.replace(tmp_path, path)" in script
+    # Odds preflight taxonomy: 0 quota-ok / 1 quota-exhausted / 2 preflight
+    # error - and both odds callers stamp a LOUD failure on 2 instead of an
+    # intentional skip that refreshes the success stamp.
+    preflight = script.split("odds_quota_available() {", 1)[1].split("\n}", 1)[0]
+    assert "return 2" in preflight
+    assert script.count('stamp_status clv_snapshot 1 "odds preflight failed') == 1
+    assert script.count('stamp_status locked_card_refresh 1 "odds preflight failed') == 1
+    assert 'stamp_status clv_snapshot 0 "skipped: odds quota exhausted" "" intentional' in script
+    # Corrupt-stamp guard in the one reader that lacked it.
+    reader = script.split("seconds_since_stamp() {", 1)[1].split("\n}", 1)[0]
+    assert "*[!0-9]*" in reader
+    # Rotation failure is loud, not silent.
+    assert "log rotation FAILED" in script
+    # Job-local start stamps: the shared STARTED_AT global was clobbered by
+    # concurrent safety pulses (ledger_anchor's duration was the pulse's).
+    assert 'LEDGER_ANCHOR_STARTED_AT=$(date' in script
+    assert '"$LEDGER_ANCHOR_STARTED_AT"' in script
+    assert 'MAKER_SAFETY_STARTED_AT=$(date' in script
+    assert 'PULSE_STARTED_AT=$(date' in script
+
+
+def test_wo120_corrupt_stamp_keeps_job_schedulable(tmp_path):
+    out_dir = tmp_path / "ops"
+    out_dir.mkdir()
+    script = ROOT / "scripts" / "run_vps_ops_scheduler.sh"
+    env = {
+        **os.environ,
+        "OPS_SCHEDULER_LIBRARY_ONLY": "1",
+        "OPS_SCHEDULER_OUT_DIR": str(out_dir),
+    }
+    (out_dir / "last_governance_refresh").write_text("garbage\n", encoding="utf-8")
+
+    result = subprocess.run(
+        ["sh", "-c", '. "$1"; seconds_since_stamp governance_refresh', "sh", str(script)],
+        env=env,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+
+    # A corrupt stamp used to produce an arithmetic error (empty output) that
+    # broke the caller's [ -ge ] test - the job was never scheduled again.
+    assert result.returncode == 0, result.stderr
+    value = result.stdout.strip()
+    assert value.isdigit()
+    assert int(value) > 0  # treated as epoch 0: immediately due
+
+
+def test_wo120_stamp_status_leaves_no_temp_file_and_valid_json(tmp_path):
+    out_dir = tmp_path / "ops"
+    out_dir.mkdir()
+    script = ROOT / "scripts" / "run_vps_ops_scheduler.sh"
+    env = {
+        **os.environ,
+        "OPS_SCHEDULER_LIBRARY_ONLY": "1",
+        "OPS_SCHEDULER_OUT_DIR": str(out_dir),
+    }
+
+    result = subprocess.run(
+        ["sh", "-c", '. "$1"; stamp_status trade_prints 0 "detail" ""', "sh", str(script)],
+        env=env,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+    payload = json.loads((out_dir / "status.json").read_text(encoding="utf-8"))
+    assert payload["jobs"]["trade_prints"]["last_exit_code"] == 0
+    assert not [p for p in out_dir.iterdir() if p.name.endswith(".tmp")]
+
+
+def test_wo118_disabled_superbru_watchdog_cannot_reach_the_submitting_loop():
+    # WO-118: this is the only script that takes an external action (submitting
+    # picks). The disabled branch must terminate explicitly - if `tail` ever
+    # dies, control must not fall through into the `while true` submit loop.
+    script = (ROOT / "scripts" / "run_superbru_auto_pick_watchdog.sh").read_text(encoding="utf-8")
+    disabled_branch = script.split('SUPERBRU_AUTO_PICK_ENABLED:-true}" != "true"', 1)[1].split("fi", 1)[0]
+    assert "tail -f /dev/null" in disabled_branch
+    assert "exit 0" in disabled_branch.split("tail -f /dev/null", 1)[1]
 
 
 def test_private_dashboard_setup_waits_for_recreated_backend():

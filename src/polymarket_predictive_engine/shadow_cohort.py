@@ -19,8 +19,42 @@ from .crypto_updown_settlement import (
 )
 from .execution_costs import estimate_execution_cost
 from .resolution_collector import fetch_gamma_market, infer_market_resolution_rows
-from .utils import boolish, now_utc, parse_timestamp, read_csv_rows, read_json, safe_float, write_csv, write_json
+from .utils import (
+    append_csv_rows_matching_existing_header,
+    boolish,
+    now_utc,
+    parse_timestamp,
+    read_csv_rows,
+    read_json,
+    safe_float,
+    write_csv,
+    write_json,
+)
 from .worldcup_validation import normalised_correlation_key, signal_cohort
+
+
+# WO-119: shadow_fills.csv is enrolled append_only in the WO-61 anchor
+# registry, so its writer must never rewrite historical bytes. Canonical
+# fill schema (the _append_fill keys); a legacy narrower on-disk header is
+# tolerated by appending under it instead of rewriting.
+SHADOW_FILL_FIELDS = [
+    "shadow_fill_id",
+    "shadow_position_id",
+    "created_at",
+    "side",
+    "market_id",
+    "token_id",
+    "market_slug",
+    "question",
+    "category",
+    "correlation_key",
+    "signal_cohort",
+    "shadow_source",
+    "price",
+    "quantity",
+    "gross_notional_usdc",
+    "reason",
+]
 
 
 def _stable_id(prefix: str, value: str) -> str:
@@ -837,6 +871,9 @@ def update_shadow_cohort_evidence(cfg: EngineConfig, predictions: list[dict[str,
     for position in positions:
         _normalise_position_row(position)
     fills = read_csv_rows(_fills_path(cfg))
+    # WO-119: everything before this index is already on disk; only rows
+    # appended in this cycle may be written, and only by appending.
+    preexisting_fill_count = len(fills)
     predictions_by_key = _prediction_index(predictions)
     now = now_utc()
     take_profit = float(settings.get("take_profit_return", 0.25))
@@ -1059,7 +1096,15 @@ def update_shadow_cohort_evidence(cfg: EngineConfig, predictions: list[dict[str,
         }
     )
     write_csv(_positions_path(cfg), positions)
-    write_csv(_fills_path(cfg), fills)
+    # WO-119: shadow_positions.csv is snapshot-enrolled (rewrite is fine);
+    # shadow_fills.csv is append_only-enrolled, and the old full rewrite here
+    # re-serialised history whenever the fill schema widened - the exact
+    # WO-115 chain-break class.
+    append_csv_rows_matching_existing_header(
+        _fills_path(cfg),
+        fills[preexisting_fill_count:],
+        fieldnames=SHADOW_FILL_FIELDS,
+    )
     summary_file = str(settings.get("summary_file", "shadow_signal_cohort_pnl.json"))
     write_json(cfg.governance_root / summary_file, summary)
     _write_shadow_pnl_history(cfg, summary)

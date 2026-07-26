@@ -200,6 +200,33 @@ def append_csv_rows(
     return path
 
 
+def append_csv_rows_matching_existing_header(
+    path: str | Path,
+    rows: Iterable[Mapping[str, Any]],
+    *,
+    fieldnames: Sequence[str],
+) -> Path:
+    """Append-only write that tolerates a legacy on-disk header (WO-119).
+
+    For a WO-61 ``append_only`` ledger whose historical file may carry an
+    older, narrower header: appending under the CURRENT canonical fieldnames
+    would either raise (append_csv_rows) or force a full rewrite (write_csv,
+    which breaks every prior anchor prefix - the WO-115 incident class).
+    Instead, append under the header already on disk, dropping keys the
+    legacy schema cannot hold; a schema change still requires a new versioned
+    ledger path. Falls back to the canonical fieldnames for a new/empty file.
+    """
+
+    path = Path(path)
+    if path.exists() and path.stat().st_size > 0:
+        effective = csv_columns(path)
+        if not effective:
+            effective = [str(field) for field in fieldnames]
+    else:
+        effective = [str(field) for field in fieldnames]
+    return append_csv_rows(path, rows, fieldnames=effective)
+
+
 def serialize_value(value: Any) -> str:
     if value is None:
         return ""

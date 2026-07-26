@@ -816,6 +816,26 @@ def _expected_members(summary):
     ]
 
 
+def test_wo119_members_sidecar_appends_without_rewriting_prefix(tmp_path, monkeypatch):
+    # WO-119: the WO-111 sidecar is append_only-enrolled, so a second study
+    # run must extend the file byte-for-byte - the old read->append->write_csv
+    # full rewrite could re-serialise anchored history (the WO-115 class).
+    cfg = _config(tmp_path)
+    markets = [_market("deep calm market", "calm", 1000.0)]
+    books = {"calm": _deep_book()}
+    histories = {("calm", "1d"): _flat_history(200), ("calm", "1w"): _flat_history(200)}
+    _fake_requests(monkeypatch, markets=markets, books=books, histories=histories)
+    members_path = cfg.output_root / "maker_carry" / "maker_carry_portfolio_members.csv"
+
+    run_maker_carry_study(cfg)
+    first_bytes = members_path.read_bytes()
+    run_maker_carry_study(cfg)
+    second_bytes = members_path.read_bytes()
+
+    assert second_bytes.startswith(first_bytes)
+    assert len(_members_rows(cfg)) == 2
+
+
 def test_wo111_sidecar_mirrors_unmeasured_portfolio_and_leaves_history_untouched(tmp_path, monkeypatch):
     cfg = _config(tmp_path)
     markets = [_market("deep calm market", "calm", 1000.0)]

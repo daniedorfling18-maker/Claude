@@ -5608,12 +5608,35 @@ sourcing seam and add tests through it.
 that means new cohort fields are written as NOTHING, with no error and no
 telemetry — the append succeeds, the anchor stays intact, and the data is gone.
 Silent data loss is not an acceptable price for anchor safety.
-Fix: when the on-disk header lacks any field carrying a non-empty value in the
-rows being appended, REFUSE the append and raise, naming the dropped fields and
-directing the caller to a new versioned ledger path (which the docstring already
-says a schema change requires). Dropping a field whose value is empty for every
-appended row stays allowed — that is a no-op, not data loss. The only caller is
-`shadow_cohort.py:1103`.
+
+**Narrowed 2026-07-27, after the first build (PR #371) proved the original spec
+self-contradictory.** The registered fix said: REFUSE the append and raise, naming
+the dropped fields and directing the caller to a new versioned ledger path. Codex
+implemented that faithfully and it broke
+`test_wo119_shadow_fills_tolerate_legacy_narrow_header`, because WO-119
+deliberately made `shadow_fills.csv` **tolerate** a legacy narrow header and pinned
+that behaviour with a test. `shadow_cohort.py:1103` is the only caller, so "refuse"
+contradicts WO-119 by construction. The spec defect is the orchestrator's, not the
+build's: it named a versioned-path migration without specifying one, and a new
+versioned ledger path means a new anchored glob — an owner surface and its own work
+order, not a side effect of this one.
+
+The harm actually being targeted is **silence, not tolerance**. Therefore:
+
+Fix: KEEP the append and keep WO-119's tolerance. When the on-disk header cannot
+hold a field carrying a non-empty value in the rows being appended, make the loss
+**loud** — name the dropped fields in a warning and record them in the reported
+result, so a lost field is visible rather than invisible. Do not raise, do not
+migrate to a versioned path, and leave
+`test_wo119_shadow_fills_tolerate_legacy_narrow_header` passing unmodified.
+Dropping a field whose value is empty for every appended row reports nothing — that
+is a no-op, not data loss, and warning on it would train operators to ignore the
+warning that matters. The only caller is `shadow_cohort.py:1103`.
+
+Registered consequence, stated so it is not lost: a genuine schema widening on an
+`append_only`-enrolled ledger still needs a new versioned path. That remains
+unbuilt and unregistered; this work order does not authorize it, and the warning
+above is what makes the need for it observable instead of silent.
 
 **128.4 — the shadow-ledger write lock is a caller convention, not a contract.**
 Corrected 2026-07-27 after Codex review of #365 (P1) checked the tree: the earlier
@@ -5635,8 +5658,10 @@ a future unlocked caller fails CI. Do not change either existing caller's lockin
 **Fail-safe direction (S5).** 128.1: an interrupted copy leaves no snapshot at the
 canonical path, so the next run creates it — never a truncated one that wedges the
 lane. 128.2: an anchor-tail failure is reported nonzero and the harvest is not
-repeated; a harvest failure is reported nonzero on its own row. 128.3: a field
-that cannot be persisted raises instead of vanishing. 128.4: an unlocked
+repeated; a harvest failure is reported nonzero on its own row. 128.3: a field that cannot be
+persisted is dropped LOUDLY — named in a warning and in the reported result — rather
+than vanishing unrecorded; the append still succeeds, so anchor safety and WO-119's
+tolerance both survive. 128.4: an unlocked
 call site fails the test suite rather than shipping, and the existing callers'
 skip-when-held behaviour is unchanged, so a concurrent scan still declines to race.
 
@@ -5651,8 +5676,10 @@ by writing a short file — is detected as differing, and a run interrupted betw
 temp write and replace leaves NO canonical snapshot; (2) library-only sourcing
 test proving a failing anchor tail stamps its own nonzero row without a second
 harvest invocation, and a failing harvest still stamps nonzero; (3) appending a
-row whose new field is non-empty against a legacy header raises and names the
-field, while the same append with that field empty succeeds; (4) a structural test
+row whose new field is non-empty against a legacy header still succeeds but names
+the dropped field in the warning and in the reported result, while the same append
+with that field empty for every row reports nothing — and
+`test_wo119_shadow_fills_tolerate_legacy_narrow_header` passes unmodified; (4) a structural test
 asserting every `update_shadow_cohort_evidence` call site in `src/` sits inside a
 `prediction_cycle` `runtime_lock` block — include a deliberately unlocked snippet in
 the test's own fixture text to prove the test can fail — plus the existing behaviour

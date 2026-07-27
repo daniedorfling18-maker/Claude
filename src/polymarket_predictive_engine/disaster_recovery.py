@@ -472,23 +472,15 @@ def create_ledger_archive(cfg: EngineConfig, *, force: bool = False) -> dict[str
                 "paper_trading_invoked": False,
                 "live_trading_invoked": False,
             }
-            archive_path = _output_path(cfg, settings["archive_file"])
-            compressed_size, archive_sha = _write_archive(
-                archive_path,
-                payloads=sources,
-                manifest=manifest,
-                size_cap_bytes=size_cap_bytes,
-            )
-            write_json(_output_path(cfg, settings["archive_manifest_file"]), manifest)
-            # Codex review of #364 (P2): an operator who NARROWS the exclusion set on
-            # a restored host - the documented way to put a corpus back into recovery
-            # - gets an archive reporting no exclusions even when re-harvest has not
-            # recreated the corpus yet, because an absent file is simply invisible to
-            # the builder. The archive then claims coverage it does not have, which is
-            # the false-coverage class WO-122a/WO-123 exist to prevent. Report it: the
-            # declared exclusions stay exactly what configuration says (so restore
-            # tolerance is unchanged), and the STATUS artifact states plainly which
-            # anchored paths are absent and therefore uncovered.
+            # Codex review of #364 (P2, two findings). An operator who NARROWS the
+            # exclusion set on a restored host before re-harvest recreates the corpus
+            # produces an archive that omits it, because an absent file is invisible
+            # to the builder. Reporting that was not enough: push_vps_archive.sh gates
+            # only on `status`, so an incomplete archive would still force-replace the
+            # SOLE remote snapshot and stamp the RPO as met - a diagnostic no consumer
+            # reads is the same fail-silent class this batch exists to remove. So the
+            # build REFUSES, before the archive file is written, and the refusal is
+            # stamped where the recovery watchdog reads it.
             archived_relatives = {
                 str(row["path"])[len("outputs/") :]
                 for row in sources
@@ -506,6 +498,24 @@ def create_ledger_archive(cfg: EngineConfig, *, force: bool = False) -> dict[str
                 and relative not in archived_relatives
                 and relative not in declared_excluded
             )
+            payload["archive_pending_reharvest_paths"] = pending_reharvest
+            payload["archive_coverage_complete"] = not pending_reharvest
+            if pending_reharvest:
+                raise ValueError(
+                    "archive would claim coverage it does not have: "
+                    f"{len(pending_reharvest)} anchored path(s) under a registered prefix are "
+                    f"absent and not declared excluded (first: {pending_reharvest[0]}). Either "
+                    "wait for re-harvest to recreate them, or restore the prefix to "
+                    "disaster_recovery.excluded_path_prefixes so the archive states its real scope"
+                )
+            archive_path = _output_path(cfg, settings["archive_file"])
+            compressed_size, archive_sha = _write_archive(
+                archive_path,
+                payloads=sources,
+                manifest=manifest,
+                size_cap_bytes=size_cap_bytes,
+            )
+            write_json(_output_path(cfg, settings["archive_manifest_file"]), manifest)
             post_build = verify_and_restore_archive(cfg, archive_path, dry_run=True)
             payload.update(
                 {
@@ -515,8 +525,6 @@ def create_ledger_archive(cfg: EngineConfig, *, force: bool = False) -> dict[str
                     "file_count": len(sources),
                     "uncompressed_bytes": manifest["uncompressed_bytes"],
                     "archive_excluded_paths": list(excluded_prefixes),
-                    # Anchored under a registered prefix, not excluded by config, and
-                    # not present on disk: awaiting re-harvest, and NOT in the archive.
                     "archive_pending_reharvest_paths": pending_reharvest,
                     "archive_coverage_complete": not pending_reharvest,
                     "archive_excluded_file_count": len(excluded),

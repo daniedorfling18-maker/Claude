@@ -760,12 +760,15 @@ def test_wo127_narrowing_exclusions_on_a_restored_host_still_builds(tmp_path: Pa
     )["status"] == "ok"
 
 
-def test_wo127_narrowing_before_reharvest_reports_the_gap_not_full_coverage(tmp_path: Path):
-    # Codex review of #364 (P2): narrowing the exclusion set on a restored host
-    # before re-harvest recreates the corpus produced an archive reporting NO
-    # exclusions while not containing the corpus - an absent file is invisible to
-    # the builder, so the artifact claimed coverage it did not have. That is the
-    # false-coverage class WO-122a and WO-123 exist to prevent.
+def test_wo127_narrowing_before_reharvest_refuses_instead_of_publishing_a_gap(tmp_path: Path):
+    # Codex review of #364, two P2s with one root. Narrowing the exclusion set on a
+    # restored host before re-harvest recreates the corpus produced an archive
+    # reporting NO exclusions while not containing the corpus - an absent file is
+    # invisible to the builder. Reporting that was not enough: push_vps_archive.sh
+    # gates only on `status`, so the incomplete archive would still force-replace the
+    # SOLE remote snapshot and stamp the RPO as met. A diagnostic no consumer reads
+    # is the fail-silent class this batch exists to remove, so the build REFUSES -
+    # before the archive file is written, and stamped where the DR watchdog reads it.
     cfg = _config(tmp_path)
     _enroll_training_corpus(cfg, size_bytes=4096)
     _seed_two_day_chain(cfg)
@@ -775,19 +778,72 @@ def test_wo127_narrowing_before_reharvest_reports_the_gap_not_full_coverage(tmp_
         cfg, Path(built["archive_path"]), dry_run=False, destination_output_root=restored_root
     )
     restored_cfg = _restored_config(cfg, restored_root)
+    archive_path = restored_root / "performance" / "ledger_state_archive.tar.gz"
+    assert not archive_path.exists()
 
     # Narrow the exclusions WITHOUT re-harvesting: the corpus is still absent.
     restored_cfg.raw["disaster_recovery"]["excluded_path_prefixes"] = []
-    rebuilt = create_ledger_archive(restored_cfg, force=True)
+    with pytest.raises(DisasterRecoveryError, match="would claim coverage it does not have"):
+        create_ledger_archive(restored_cfg, force=True)
 
-    assert rebuilt["status"] == "ok"
-    assert rebuilt["archive_excluded_paths"] == []
-    assert rebuilt["archive_coverage_complete"] is False
-    assert rebuilt["archive_pending_reharvest_paths"] == [
+    status = read_json(restored_root / "performance" / "disaster_recovery_status.json")
+    assert status["status"] == "error"
+    assert status["failure_stamped"] is True
+    assert status["archive_coverage_complete"] is False
+    assert status["archive_pending_reharvest_paths"] == [
         "polymarket_training/historical_bid_ask_v1.csv"
     ]
-    with tarfile.open(Path(rebuilt["archive_path"]), "r:gz") as archive:
-        assert not any("polymarket_training" in name for name in archive.getnames())
+    # No incomplete archive exists for the publisher to force-push as the snapshot.
+    assert not archive_path.exists()
+
+    # Re-harvest, and the same narrowing succeeds with complete coverage.
+    reharvested = restored_root / "polymarket_training" / "historical_bid_ask_v1.csv"
+    reharvested.parent.mkdir(parents=True, exist_ok=True)
+    reharvested.write_bytes(b"ts,bid,ask\n1784999999,0.77,0.23\n")
+    assert anchor_ledgers(restored_cfg, anchor_date="2026-07-12")["status"] == "ok"
+    rebuilt = create_ledger_archive(restored_cfg, force=True)
+    assert rebuilt["status"] == "ok"
+    assert rebuilt["archive_coverage_complete"] is True
+
+
+def test_wo127_archive_omitting_an_undeclared_corpus_is_refused_on_restore(tmp_path: Path):
+    # Codex review of #364 (P2), the untrusted-input half: the inherited marker grants
+    # absence tolerance for the registered prefixes even when THIS archive declares no
+    # exclusions, so a self-consistent forged archive could omit the corpus, claim full
+    # scope, and restore ok. The waiver covers only what predates the restore.
+    cfg = _config(tmp_path)
+    corpus = _enroll_training_corpus(cfg, size_bytes=4096)
+    _seed_two_day_chain(cfg)
+    relative = corpus.relative_to(cfg.output_root).as_posix()
+    built = create_ledger_archive(cfg, force=True)
+    restored_root = tmp_path / "restored_outputs"
+    verify_and_restore_archive(
+        cfg, Path(built["archive_path"]), dry_run=False, destination_output_root=restored_root
+    )
+    restored_cfg = _restored_config(cfg, restored_root)
+
+    # Re-harvest and anchor a POST-boundary day, then build an honest archive.
+    reharvested = restored_root / relative
+    reharvested.parent.mkdir(parents=True, exist_ok=True)
+    reharvested.write_bytes(b"ts,bid,ask\n1784999999,0.77,0.23\n")
+    assert anchor_ledgers(restored_cfg, anchor_date="2026-07-12")["status"] == "ok"
+    restored_cfg.raw["disaster_recovery"]["excluded_path_prefixes"] = []
+    honest = create_ledger_archive(restored_cfg, force=True)
+    assert verify_and_restore_archive(cfg, Path(honest["archive_path"]), dry_run=True)["status"] == "ok"
+
+    # Forge it: drop the corpus while still declaring no exclusions. The waiver
+    # covers only rows at or before the honoured boundary, and the re-harvest above
+    # anchored a POST-boundary row recording this file as present - so the existing
+    # chain verification refuses it. No extra guard is needed on this path, and this
+    # test pins that, because the property is load-bearing rather than incidental.
+    forged = _rebuild_archive_with_manifest(
+        Path(honest["archive_path"]),
+        tmp_path / "forged.tar.gz",
+        manifest_updates={},
+        drop_paths=(f"outputs/{relative}",),
+    )
+    with pytest.raises(DisasterRecoveryError, match="anchored file is missing"):
+        verify_and_restore_archive(cfg, forged, dry_run=True)
 
 
 def test_wo127_malformed_exclusion_config_stamps_error_instead_of_raising(tmp_path: Path):

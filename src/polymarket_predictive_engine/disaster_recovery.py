@@ -19,7 +19,12 @@ import tempfile
 from typing import Any
 
 from .config import EngineConfig, load_config
-from .ledger_anchor import ledger_paths_for_archive, verify_ledger_chain
+from .ledger_anchor import (
+    ARCHIVE_EXCLUDED_PREFIXES,
+    RESTORE_PROVENANCE_FILE,
+    ledger_paths_for_archive,
+    verify_ledger_chain,
+)
 from .runtime_lock import runtime_lock
 from .utils import now_utc, parse_timestamp, read_csv_rows, read_json, write_json
 
@@ -36,7 +41,9 @@ class DisasterRecoveryError(RuntimeError):
 # from the recovery ARCHIVE only, which brings the archive back under even the
 # old 50MB ceiling. Prefixes are paths.output_root relative and must end in "/"
 # so a prefix can never match a sibling file by accident.
-ARCHIVE_EXCLUDED_PREFIXES: tuple[str, ...] = ("polymarket_training/",)
+# WO-127: ARCHIVE_EXCLUDED_PREFIXES moved to ledger_anchor so verification can
+# intersect against it (this module already imports ledger_anchor; the reverse
+# would be circular). Imported above and re-exported here for existing readers.
 ARCHIVE_EXCLUSION_REASON = (
     "excluded_by_registration: derived collection/training corpus, regenerable by "
     "re-harvest, still covered by the WO-61 anchor chain"
@@ -123,6 +130,25 @@ def _output_path(cfg: EngineConfig, value: Any) -> Path:
     return cfg.output_root.joinpath(*path.parts)
 
 
+def _excluded_prefixes_error(settings: dict[str, Any]) -> str:
+    """Return the exclusion-config parse error, or "" when the config is valid."""
+
+    try:
+        _excluded_prefixes(settings)
+    except ValueError as exc:
+        return str(exc)
+    return ""
+
+
+def _excluded_prefixes_or_default(settings: dict[str, Any]) -> tuple[str, ...]:
+    """Non-raising view for reporting paths; the builder still fails on error."""
+
+    try:
+        return _excluded_prefixes(settings)
+    except ValueError:
+        return ARCHIVE_EXCLUDED_PREFIXES
+
+
 def _base_payload(cfg: EngineConfig, settings: dict[str, Any], *, status: str) -> dict[str, Any]:
     return {
         "status": status,
@@ -136,10 +162,16 @@ def _base_payload(cfg: EngineConfig, settings: dict[str, Any], *, status: str) -
         # WO-123: the registered archive scope is visible in every state, not
         # only on a successful build, so an operator reading the status file
         # always knows what recovery does and does not cover.
-        "archive_excluded_paths": list(_excluded_prefixes(settings)),
+        # WO-127: this runs BEFORE create_ledger_archive's try block, so it must
+        # not raise — a malformed exclusion config used to escape with no status
+        # stamped at all, reintroducing exactly the blind-failure class WO-122a
+        # removed. The parse error is recorded here and re-raised inside the try,
+        # where it becomes a stamped `status: error`.
+        "archive_excluded_paths": list(_excluded_prefixes_or_default(settings)),
         "archive_exclusion_reason": (
-            ARCHIVE_EXCLUSION_REASON if _excluded_prefixes(settings) else ""
+            ARCHIVE_EXCLUSION_REASON if _excluded_prefixes_or_default(settings) else ""
         ),
+        "archive_exclusion_config_error": _excluded_prefixes_error(settings),
         "paper_trading_invoked": False,
         "live_trading_invoked": False,
     }
@@ -400,6 +432,8 @@ def create_ledger_archive(cfg: EngineConfig, *, force: bool = False) -> dict[str
             if size_cap_bytes <= 0:
                 raise ValueError("disaster_recovery.size_cap_mb must be positive")
             source_cap_bytes = int(float(settings["source_cap_mb"]) * 1024 * 1024)
+            # WO-127: inside the try, so a malformed config stamps status:error
+            # instead of raising past _base_payload with nothing recorded.
             excluded_prefixes = _excluded_prefixes(settings)
             sources, excluded = _archive_source_payloads(
                 cfg,
@@ -543,6 +577,51 @@ def _read_and_validate_archive(archive_path: Path, *, size_cap_bytes: int) -> tu
     return manifest, files
 
 
+def _write_restore_provenance(
+    output_root: Path,
+    *,
+    excluded_prefixes: tuple[str, ...],
+    boundary_date: str,
+    chain_head: str,
+    dry_run: bool,
+) -> Path | None:
+    """Record why a restored tree is missing registered, excluded paths.
+
+    WO-127. Without this, a restore verified clean and the next production
+    ``anchor_ledgers`` run froze the head on ``blocked_broken_chain``, because
+    verification there has no caller-supplied tolerance. The marker makes the
+    tolerance a property of the tree, so both callers agree.
+
+    ``restore_boundary_date`` is the archive's snapshot date: entries anchored at
+    or before it recorded digests for bytes that cannot be reproduced (a
+    re-harvest yields different content), so they are unverifiable by design.
+    Anything anchored after it is verified normally.
+    """
+
+    if not excluded_prefixes:
+        return None
+    path = output_root / PurePosixPath(RESTORE_PROVENANCE_FILE)
+    write_json(
+        path,
+        {
+            "work_order": "WO-127",
+            "generated_at_utc": now_utc(),
+            "restore_boundary_date": boundary_date,
+            "excluded_path_prefixes": list(excluded_prefixes),
+            "restored_from_chain_head": chain_head,
+            "dry_run": bool(dry_run),
+            "reason": (
+                "these registered prefixes are excluded from the recovery archive and are "
+                "regenerable by re-harvest; entries anchored at or before the boundary cannot "
+                "be byte-verified and are excused, entries after it are verified normally"
+            ),
+            "paper_trading_invoked": False,
+            "live_trading_invoked": False,
+        },
+    )
+    return path
+
+
 def _config_for_output_root(cfg: EngineConfig, output_root: Path) -> EngineConfig:
     raw = deepcopy(cfg.raw)
     raw.setdefault("paths", {})["output_root"] = str(output_root)
@@ -599,17 +678,32 @@ def verify_and_restore_archive(
         declared_prefixes = (
             {str(item) for item in declared} if isinstance(declared, (list, tuple)) else set()
         )
+        # WO-127: also intersect the CONFIG-EFFECTIVE set. A config that NARROWS
+        # exclusions means more was archived, so tolerating the full registered
+        # set would excuse the absence of something that should be present.
         tolerated = tuple(
-            prefix for prefix in ARCHIVE_EXCLUDED_PREFIXES if prefix in declared_prefixes
+            prefix
+            for prefix in ARCHIVE_EXCLUDED_PREFIXES
+            if prefix in declared_prefixes and prefix in set(_excluded_prefixes(settings))
         )
         with tempfile.TemporaryDirectory(prefix="polymarket-ledger-restore-") as temp_dir:
             extracted_output = _materialise_files(files, Path(temp_dir))
+            # WO-127: the restore check now reads the same provenance marker the
+            # production anchor lane reads, so the two cannot disagree. Writing it
+            # into the extracted tree BEFORE verification is what makes the
+            # verified tree and the handed-over tree the same tree.
+            _write_restore_provenance(
+                extracted_output,
+                excluded_prefixes=tolerated,
+                boundary_date=snapshot_date,
+                chain_head=str(manifest.get("chain_head") or ""),
+                dry_run=dry_run,
+            )
             extracted_cfg = _config_for_output_root(cfg, extracted_output)
             chain = verify_ledger_chain(
                 extracted_cfg,
                 as_of_date=snapshot_date,
                 write_summary=False,
-                tolerated_missing_prefixes=tolerated,
             )
             if chain.get("status") != "ok" or chain.get("verified_through_date") != snapshot_date:
                 raise ValueError(
@@ -640,7 +734,14 @@ def verify_and_restore_archive(
                 "chain_head": manifest.get("chain_head"),
                 "ledger_chain_verification": chain,
                 "excluded_path_prefixes_tolerated": list(tolerated),
-                "excluded_missing_tolerated": int(chain.get("missing_excluded_tolerated") or 0),
+                "restored_unverifiable_tolerated": int(
+                    chain.get("restored_unverifiable_tolerated") or 0
+                ),
+                # WO-127: make the narrowed recovery state explicit in the report.
+                # A restore that cannot bring these paths back is a successful
+                # restore of the evidence ledgers, not a complete tree.
+                "restored_without_prefixes": list(tolerated),
+                "restore_boundary_date": snapshot_date,
                 "file_count": len(manifest.get("files") or []),
                 "archive_sha256": hashlib.sha256(Path(archive_path).read_bytes()).hexdigest(),
                 "restore_applied": not dry_run,

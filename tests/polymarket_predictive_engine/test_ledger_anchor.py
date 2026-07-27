@@ -272,13 +272,32 @@ def test_wo115_blocked_chain_anchor_run_exits_nonzero(tmp_path: Path):
     assert head_path.read_bytes() == head_before
 
 
-def test_wo123_tolerated_prefixes_cover_absence_only_and_are_opt_in(tmp_path: Path):
-    # WO-123: the DR restore check may declare a registered, re-harvestable
-    # corpus as excluded-by-design. That tolerance is narrow by construction:
-    # opt-in, absence-only, prefix-scoped.
+def _write_provenance(cfg, *, prefixes, boundary):
+    from polymarket_predictive_engine.ledger_anchor import RESTORE_PROVENANCE_FILE
+    from polymarket_predictive_engine.utils import write_json
+
+    write_json(
+        cfg.output_root / "performance" / "ledger_restore_provenance.json",
+        {
+            "work_order": "WO-127",
+            "restore_boundary_date": boundary,
+            "excluded_path_prefixes": list(prefixes),
+        },
+    )
+    assert RESTORE_PROVENANCE_FILE == "performance/ledger_restore_provenance.json"
+
+
+def test_wo127_restore_provenance_excuses_only_registered_prefixes_before_the_boundary(
+    tmp_path: Path,
+):
+    # WO-127 replaces WO-123's caller-supplied tolerance. That parameter was
+    # opt-in, so only the DR restore check passed it: a restore verified clean and
+    # the next production anchor_ledgers run - which passes nothing - read the
+    # deliberately-excluded corpora as missing and froze the head. Tolerance is
+    # now a property of the TREE's recorded provenance, so every caller agrees.
     cfg = _config(
         tmp_path,
-        ["audit/core.csv", {"glob": "polymarket_training/*.csv", "mode": "append_only"}],
+        ["audit/core.csv", {"glob": "polymarket_training/historical_bid_ask_v1.csv", "mode": "append_only"}],
     )
     core = cfg.output_root / "audit" / "core.csv"
     corpus = cfg.output_root / "polymarket_training" / "historical_bid_ask_v1.csv"
@@ -291,38 +310,68 @@ def test_wo123_tolerated_prefixes_cover_absence_only_and_are_opt_in(tmp_path: Pa
     baseline = verify_ledger_chain(cfg, write_summary=False)
     assert baseline["status"] == "ok"
     assert baseline["ledger_prefixes_checked"] == 2
-    assert baseline["missing_excluded_tolerated"] == 0
+    assert baseline["restored_unverifiable_tolerated"] == 0
+    assert baseline["restore_boundary_date"] is None
 
-    # 1. Absence inside the tolerated prefix verifies clean and is counted...
+    # 1. Absence with NO provenance marker still breaks - the default verifies all.
     corpus.unlink()
-    tolerated = verify_ledger_chain(
-        cfg, write_summary=False, tolerated_missing_prefixes=("polymarket_training/",)
-    )
+    assert verify_ledger_chain(cfg, write_summary=False)["status"] == "broken"
+
+    # 2. With provenance, the pre-boundary entry is excused and counted.
+    _write_provenance(cfg, prefixes=["polymarket_training/"], boundary="2026-07-11")
+    tolerated = verify_ledger_chain(cfg, write_summary=False)
     assert tolerated["status"] == "ok"
-    assert tolerated["missing_excluded_tolerated"] == 1
-    assert tolerated["ledger_prefixes_checked"] == 1
+    assert tolerated["restored_unverifiable_tolerated"] == 1
+    assert tolerated["restore_boundary_date"] == "2026-07-11"
+    assert tolerated["restore_tolerated_prefixes"] == ["polymarket_training/"]
 
-    # 2. ...but only because the caller opted in. The default is unchanged.
-    default = verify_ledger_chain(cfg, write_summary=False)
-    assert default["status"] == "broken"
-    assert "anchored file is missing" in default["issues"][0]
-
-    # 3. A PRESENT file under a tolerated prefix is still byte-verified.
+    # 3. THE PERMANENT-WEDGE CASE the audit did not reach: a re-harvest brings the
+    # file back with DIFFERENT bytes. Under absence-only tolerance this flipped to
+    # "anchored prefix digest changed" and wedged the chain forever. Those bytes
+    # are unreproducible, so a pre-boundary entry is unverifiable by design.
     corpus.write_bytes(b"ts,bid,ask\n1784000000,0.99,0.01\n")
-    tampered = verify_ledger_chain(
-        cfg, write_summary=False, tolerated_missing_prefixes=("polymarket_training/",)
-    )
-    assert tampered["status"] == "broken"
-    assert "anchored prefix digest changed" in tampered["issues"][0]
+    reharvested = verify_ledger_chain(cfg, write_summary=False)
+    assert reharvested["status"] == "ok"
+    assert reharvested["restored_unverifiable_tolerated"] == 1
 
-    # 4. Tolerance does not leak to paths outside the prefix.
-    corpus.write_bytes(b"ts,bid,ask\n1784000000,0.41,0.59\n")
+    # 4. Tolerance never leaks outside the registered prefix.
     core.unlink()
-    outside = verify_ledger_chain(
-        cfg, write_summary=False, tolerated_missing_prefixes=("polymarket_training/",)
-    )
+    outside = verify_ledger_chain(cfg, write_summary=False)
     assert outside["status"] == "broken"
     assert "audit/core.csv: anchored file is missing" in outside["issues"][0]
+
+    # 5. A marker naming an UNREGISTERED prefix excuses nothing.
+    core.write_bytes(b"date,value\n2026-07-11,1\n")
+    _write_provenance(cfg, prefixes=["audit/"], boundary="2026-07-11")
+    forged = verify_ledger_chain(cfg, write_summary=False)
+    assert forged["status"] == "broken"
+    assert forged["restore_tolerated_prefixes"] == []
+
+
+def test_wo127_rows_anchored_after_the_boundary_are_verified_normally(tmp_path: Path):
+    # The excuse is scoped to bytes that predate the restore. Anything anchored
+    # afterwards records fresh digests that must verify, or the marker would be a
+    # standing licence to delete the corpus.
+    cfg = _config(
+        tmp_path,
+        [{"glob": "polymarket_training/historical_bid_ask_v1.csv", "mode": "append_only"}],
+    )
+    corpus = cfg.output_root / "polymarket_training" / "historical_bid_ask_v1.csv"
+    corpus.parent.mkdir(parents=True)
+    corpus.write_bytes(b"ts,bid,ask\n1784000000,0.41,0.59\n")
+    assert anchor_ledgers(cfg, anchor_date="2026-07-11")["status"] == "ok"
+    _write_provenance(cfg, prefixes=["polymarket_training/"], boundary="2026-07-11")
+
+    # A post-boundary anchor of re-harvested content.
+    corpus.write_bytes(b"ts,bid,ask\n1784000000,0.41,0.59\n1784000900,0.42,0.58\n")
+    assert anchor_ledgers(cfg, anchor_date="2026-07-12")["status"] == "ok"
+    assert verify_ledger_chain(cfg, write_summary=False)["status"] == "ok"
+
+    # Tamper with the post-boundary bytes: that row is NOT excused.
+    corpus.write_bytes(b"ts,bid,ask\n9999999999,0.01,0.99\n1784000900,0.42,0.58\n")
+    tampered = verify_ledger_chain(cfg, write_summary=False)
+    assert tampered["status"] == "broken"
+    assert tampered["first_broken_date"] == "2026-07-12"
 
 
 def test_deployed_config_covers_every_default_ledger_enrollment():

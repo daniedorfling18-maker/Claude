@@ -13,13 +13,13 @@ import csv
 import hashlib
 import json
 import os
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 import shutil
 from typing import Any
 
 from .config import EngineConfig, load_config
 from .runtime_lock import runtime_lock
-from .utils import ensure_dir, now_utc, read_csv_rows, write_json
+from .utils import ensure_dir, now_utc, read_csv_rows, read_json, write_json
 
 
 GENESIS_HEAD = "0" * 64
@@ -86,6 +86,52 @@ DEFAULT_LEDGER_REGISTRY: list[dict[str, str]] = [
     {"glob": "performance/wallet_reconciliation_wallet_history.csv", "mode": "append_only"},
     {"glob": "performance/cost_ledger_summary.json", "mode": "snapshot"},
 ]
+
+# WO-123 owner decision (2026-07-26), relocated here by WO-127: these enrolled
+# paths are deliberately EXCLUDED from the WO-65 recovery archive. They are
+# derived collection corpora — regenerable by re-harvest, and 94% of the archive
+# bytes (476.6MB of 505.6MB measured on the VPS). They stay ANCHORED, so tamper
+# evidence over them is unchanged; only recovery scope narrows.
+#
+# The set lives in this module, not in disaster_recovery, because verification
+# must intersect against it and disaster_recovery already imports this module —
+# the reverse would be circular.
+ARCHIVE_EXCLUDED_PREFIXES: tuple[str, ...] = ("polymarket_training/",)
+
+# Written by an applied restore; read by every verification caller.
+RESTORE_PROVENANCE_FILE = "performance/ledger_restore_provenance.json"
+
+
+def _restore_provenance(cfg: EngineConfig) -> tuple[tuple[str, ...], str]:
+    """Return (tolerated prefixes, restore boundary date) for this output tree.
+
+    WO-127. An applied restore records which registered prefixes it could not
+    restore and the snapshot date it restored to. Verification honours that
+    record so the production anchor lane and the DR restore check agree by
+    construction, instead of the restore check opting in and the anchor lane —
+    the one that actually freezes the head — not knowing.
+
+    Trust bound: the marker can only excuse prefixes that are in the REGISTERED
+    set above, so a forged or edited marker cannot excuse anything beyond the two
+    owner-approved re-harvestable corpora. Anything outside them still breaks the
+    chain on absence or on a digest change.
+    """
+
+    payload = read_json(_output_path_relative(cfg, RESTORE_PROVENANCE_FILE), default={}) or {}
+    if not isinstance(payload, dict):
+        return (), ""
+    declared = payload.get("excluded_path_prefixes")
+    declared_set = {str(item) for item in declared} if isinstance(declared, (list, tuple)) else set()
+    tolerated = tuple(prefix for prefix in ARCHIVE_EXCLUDED_PREFIXES if prefix in declared_set)
+    boundary = str(payload.get("restore_boundary_date") or "").strip()
+    if not tolerated or len(boundary) != 10:
+        # No usable provenance: verify everything, which is the safe default.
+        return (), ""
+    return tolerated, boundary
+
+
+def _output_path_relative(cfg: EngineConfig, relative: str) -> Path:
+    return cfg.output_root.joinpath(*PurePosixPath(relative).parts)
 
 
 def _settings(cfg: EngineConfig) -> dict[str, Any]:
@@ -271,7 +317,9 @@ def _verification_base(*, chain_path: Path, as_of_date: str | None) -> dict[str,
         "links_checked": 0,
         "ledger_prefixes_checked": 0,
         "missing_at_anchor_tolerated": 0,
-        "missing_excluded_tolerated": 0,
+        "restored_unverifiable_tolerated": 0,
+        "restore_boundary_date": None,
+        "restore_tolerated_prefixes": [],
         "first_broken_date": None,
         "issues": [],
         "paper_trading_invoked": False,
@@ -284,24 +332,30 @@ def verify_ledger_chain(
     *,
     as_of_date: str | None = None,
     write_summary: bool = True,
-    tolerated_missing_prefixes: tuple[str, ...] = (),
 ) -> dict[str, Any]:
     """Verify chain linkage and every historical byte prefix in row order.
 
-    ``tolerated_missing_prefixes`` (WO-123) exists for ONE caller: the
-    disaster-recovery restore check, where a registered set of regenerable
-    corpora is deliberately excluded from the archive. Only ABSENCE of a
-    matching path is tolerated, and only when the caller opts in; a present
-    file whose anchored digest changed is still a broken chain, and any
-    missing path outside the prefixes is still a broken chain. Default is
-    empty, so every other caller's behaviour is byte-identical.
+    WO-127 replaces WO-123's caller-supplied ``tolerated_missing_prefixes``.
+    That parameter was opt-in, so only the disaster-recovery restore check
+    passed it: a restore verified clean and then the very next production
+    ``anchor_ledgers`` run — which calls this with no opt-in — read the
+    deliberately-excluded corpora as "anchored file is missing" and froze the
+    head on ``blocked_broken_chain``. Recovery handed over a tree that wedged
+    the tamper lane.
+
+    Tolerance is therefore a property of the TREE's recorded provenance, not of
+    the caller: an applied restore writes a marker naming the prefixes it could
+    not restore and the snapshot date it restored to, and every caller here
+    honours the same thing. See ``_restore_provenance``.
     """
 
     settings = _settings(cfg)
-    tolerated = tuple(str(prefix) for prefix in tolerated_missing_prefixes if str(prefix))
+    tolerated, restore_boundary = _restore_provenance(cfg)
     chain_path = _output_path(cfg, settings["chain_file"])
     verification_path = _output_path(cfg, settings["verification_file"])
     result = _verification_base(chain_path=chain_path, as_of_date=as_of_date)
+    result["restore_boundary_date"] = restore_boundary or None
+    result["restore_tolerated_prefixes"] = list(tolerated)
     rows = read_csv_rows(chain_path)
     expected_previous = GENESIS_HEAD
     previous_date = ""
@@ -344,13 +398,26 @@ def verify_ledger_chain(
                 anchored_path = cfg.output_root / relative
                 byte_length = int(item.get("byte_length"))
                 expected_prefix = str(item.get("prefix_sha256") or "")
+                # WO-127: rows anchored at or before a restore boundary recorded
+                # digests for corpora the archive deliberately excluded. Those
+                # bytes are gone and CANNOT come back: a re-harvest produces
+                # different content, so the entry would flip from "missing" to
+                # "digest changed" and wedge the chain permanently. Such an entry
+                # is unverifiable BY DESIGN - neither absence nor divergence is
+                # evidence of tampering - so it is excused and counted, never
+                # silently skipped. Rows anchored AFTER the boundary are verified
+                # normally: they record missing_at_anchor until a re-harvest, then
+                # present with fresh digests that do verify.
+                if (
+                    tolerated
+                    and restore_boundary
+                    and anchor_date
+                    and anchor_date <= restore_boundary
+                    and relative.startswith(tolerated)
+                ):
+                    result["restored_unverifiable_tolerated"] += 1
+                    continue
                 if not anchored_path.is_file():
-                    if tolerated and relative.startswith(tolerated):
-                        # WO-123: excluded from the DR archive by registration
-                        # and recoverable by re-harvest. Absence only - a
-                        # PRESENT file with a changed digest still breaks below.
-                        result["missing_excluded_tolerated"] += 1
-                        continue
                     issues.append(f"{item.get('path')}: anchored file is missing")
                     continue
                 actual_prefix = _sha256_prefix(anchored_path, byte_length)

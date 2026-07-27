@@ -414,7 +414,10 @@ def test_wo123_anchored_corpus_is_excluded_from_the_archive_and_restore_still_ve
     assert "polymarket_training/historical_bid_ask_v1.csv" in chain_rows
     live_chain = verify_ledger_chain(cfg, as_of_date="2026-07-11", write_summary=False)
     assert live_chain["status"] == "ok"
-    assert live_chain["missing_excluded_tolerated"] == 0
+    # WO-127: with no restore-provenance marker in the live tree, nothing is
+    # excused - the corpus is present and byte-verified like any other ledger.
+    assert live_chain["restored_unverifiable_tolerated"] == 0
+    assert live_chain["restore_boundary_date"] is None
 
     # ...but it never enters the archive.
     assert built["status"] == "ok"
@@ -436,7 +439,9 @@ def test_wo123_anchored_corpus_is_excluded_from_the_archive_and_restore_still_ve
     dry_run = verify_and_restore_archive(cfg, archive_path, dry_run=True)
     assert dry_run["status"] == "ok"
     assert dry_run["excluded_path_prefixes_tolerated"] == ["polymarket_training/"]
-    assert dry_run["excluded_missing_tolerated"] >= 1
+    assert dry_run["restored_unverifiable_tolerated"] >= 1
+    assert dry_run["restored_without_prefixes"] == ["polymarket_training/"]
+    assert dry_run["restore_boundary_date"] == "2026-07-11"
     assert dry_run["ledger_chain_verification"]["verified_through_date"] == "2026-07-11"
 
 
@@ -597,3 +602,97 @@ def test_restore_shell_dry_run_passes_valid_and_exits_nonzero_on_corrupt_archive
     )
     assert result.returncode != 0
     assert "ERROR:" in result.stderr
+
+
+# --- WO-127: a restore must not wedge the anchor lane ---
+
+
+def test_wo127_restore_then_anchor_run_verifies_instead_of_wedging(tmp_path: Path):
+    # THE regression. On main, verify_and_restore_archive passed
+    # tolerated_missing_prefixes but anchor_ledgers called verify_ledger_chain with
+    # none, so a restore reported success and the very next production anchor run
+    # read the excluded corpora as "anchored file is missing" -> blocked_broken_chain
+    # -> head frozen, exit 1. Recovery handed over a tree that broke the tamper lane.
+    from polymarket_predictive_engine.ledger_anchor import RESTORE_PROVENANCE_FILE
+
+    cfg = _config(tmp_path)
+    _enroll_training_corpus(cfg)
+    _seed_two_day_chain(cfg)
+    built = create_ledger_archive(cfg, force=True)
+
+    restored_root = tmp_path / "restored_outputs"
+    applied = verify_and_restore_archive(
+        cfg, Path(built["archive_path"]), dry_run=False, destination_output_root=restored_root
+    )
+    assert applied["restore_applied"] is True
+    assert applied["restored_without_prefixes"] == ["polymarket_training/"]
+
+    restored_cfg = _restored_config(cfg, restored_root)
+    # The corpus is genuinely absent from the restored tree...
+    assert not (restored_root / "polymarket_training").exists()
+    # ...and the provenance marker travelled with it, so the PRODUCTION anchor
+    # lane - which passes no tolerance of its own - verifies clean.
+    assert (restored_root / "performance" / "ledger_restore_provenance.json").is_file()
+    assert RESTORE_PROVENANCE_FILE == "performance/ledger_restore_provenance.json"
+
+    verification = verify_ledger_chain(restored_cfg, write_summary=False)
+    assert verification["status"] == "ok"
+    assert verification["restored_unverifiable_tolerated"] >= 1
+    assert verification["restore_boundary_date"] == "2026-07-11"
+
+    anchored = anchor_ledgers(restored_cfg, anchor_date="2026-07-12")
+    assert anchored["status"] == "ok", anchored
+    assert verify_ledger_chain(restored_cfg, write_summary=False)["status"] == "ok"
+
+
+def test_wo127_reharvest_after_restore_does_not_wedge_the_chain(tmp_path: Path):
+    # The permanent-wedge case the audit did not reach: absence-only tolerance
+    # would excuse the missing corpus, but a re-harvest brings the file back with
+    # DIFFERENT bytes, flipping the same historical rows to "anchored prefix digest
+    # changed" - which absence tolerance cannot excuse. Those bytes are
+    # unreproducible, so pre-boundary entries are unverifiable by design.
+    cfg = _config(tmp_path)
+    _enroll_training_corpus(cfg)
+    _seed_two_day_chain(cfg)
+    built = create_ledger_archive(cfg, force=True)
+    restored_root = tmp_path / "restored_outputs"
+    verify_and_restore_archive(
+        cfg, Path(built["archive_path"]), dry_run=False, destination_output_root=restored_root
+    )
+    restored_cfg = _restored_config(cfg, restored_root)
+
+    reharvested = restored_root / "polymarket_training" / "historical_bid_ask_v1.csv"
+    reharvested.parent.mkdir(parents=True, exist_ok=True)
+    reharvested.write_bytes(b"ts,bid,ask\n1784999999,0.77,0.23\n")
+
+    verification = verify_ledger_chain(restored_cfg, write_summary=False)
+    assert verification["status"] == "ok", verification["issues"]
+    assert anchor_ledgers(restored_cfg, anchor_date="2026-07-12")["status"] == "ok"
+
+    # A non-excluded restored ledger is still byte-verified. Flip a byte in place
+    # so the failure is a DIGEST change rather than a short-file read error.
+    core = restored_root / "audit" / "core.csv"
+    tampered_bytes = bytearray(core.read_bytes())
+    tampered_bytes[0] = ord("X")
+    core.write_bytes(bytes(tampered_bytes))
+    broken = verify_ledger_chain(restored_cfg, write_summary=False)
+    assert broken["status"] == "broken"
+    assert "anchored prefix digest changed" in broken["issues"][0]
+
+
+def test_wo127_malformed_exclusion_config_stamps_error_instead_of_raising(tmp_path: Path):
+    # _base_payload runs BEFORE create_ledger_archive's try block, so a malformed
+    # exclusion config raised out of the builder with no status written at all -
+    # reintroducing exactly the blind-failure class WO-122a removed.
+    cfg = _config(tmp_path)
+    _seed_two_day_chain(cfg)
+    cfg.raw["disaster_recovery"]["excluded_path_prefixes"] = 7
+
+    status_path = cfg.output_root / "performance" / "disaster_recovery_status.json"
+    with pytest.raises(DisasterRecoveryError, match="list of path prefixes"):
+        create_ledger_archive(cfg, force=True)
+
+    status = read_json(status_path)
+    assert status["status"] == "error"
+    assert status["failure_stamped"] is True
+    assert "list of path prefixes" in status["archive_exclusion_config_error"]

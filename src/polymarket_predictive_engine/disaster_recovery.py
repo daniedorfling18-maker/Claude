@@ -22,6 +22,7 @@ from .config import EngineConfig, load_config
 from .ledger_anchor import (
     ARCHIVE_EXCLUDED_PREFIXES,
     RESTORE_PROVENANCE_FILE,
+    anchored_relative_paths,
     canonical_date,
     ledger_paths_for_archive,
     verify_ledger_chain,
@@ -479,6 +480,32 @@ def create_ledger_archive(cfg: EngineConfig, *, force: bool = False) -> dict[str
                 size_cap_bytes=size_cap_bytes,
             )
             write_json(_output_path(cfg, settings["archive_manifest_file"]), manifest)
+            # Codex review of #364 (P2): an operator who NARROWS the exclusion set on
+            # a restored host - the documented way to put a corpus back into recovery
+            # - gets an archive reporting no exclusions even when re-harvest has not
+            # recreated the corpus yet, because an absent file is simply invisible to
+            # the builder. The archive then claims coverage it does not have, which is
+            # the false-coverage class WO-122a/WO-123 exist to prevent. Report it: the
+            # declared exclusions stay exactly what configuration says (so restore
+            # tolerance is unchanged), and the STATUS artifact states plainly which
+            # anchored paths are absent and therefore uncovered.
+            archived_relatives = {
+                str(row["path"])[len("outputs/") :]
+                for row in sources
+                if str(row["path"]).startswith("outputs/")
+            }
+            declared_excluded = {
+                str(row["path"])[len("outputs/") :]
+                for row in excluded
+                if str(row["path"]).startswith("outputs/")
+            }
+            pending_reharvest = sorted(
+                relative
+                for relative in anchored_relative_paths(cfg, as_of_date=day)
+                if relative.startswith(ARCHIVE_EXCLUDED_PREFIXES)
+                and relative not in archived_relatives
+                and relative not in declared_excluded
+            )
             post_build = verify_and_restore_archive(cfg, archive_path, dry_run=True)
             payload.update(
                 {
@@ -488,6 +515,10 @@ def create_ledger_archive(cfg: EngineConfig, *, force: bool = False) -> dict[str
                     "file_count": len(sources),
                     "uncompressed_bytes": manifest["uncompressed_bytes"],
                     "archive_excluded_paths": list(excluded_prefixes),
+                    # Anchored under a registered prefix, not excluded by config, and
+                    # not present on disk: awaiting re-harvest, and NOT in the archive.
+                    "archive_pending_reharvest_paths": pending_reharvest,
+                    "archive_coverage_complete": not pending_reharvest,
                     "archive_excluded_file_count": len(excluded),
                     "archive_excluded_bytes": manifest["excluded_bytes"],
                     "archive_size_bytes": compressed_size,
@@ -849,6 +880,18 @@ def verify_and_restore_archive(
         )
     except Exception as exc:
         payload.update({"status": "error", "error": f"{type(exc).__name__}: {exc}", "failure_stamped": True})
+        # Codex review of #364 (P2): the failure path used to discard the chain
+        # diagnostics, so a restore that failed BECAUSE its inherited marker was
+        # malformed reported neither the rejection reason nor the verification
+        # result - the registered fail-safe reason existed and was thrown away at
+        # exactly the moment an operator needs it.
+        if isinstance(locals().get("chain"), dict):
+            diagnostics: dict[str, Any] = locals()["chain"]
+            payload.setdefault("ledger_chain_verification", diagnostics)
+            payload.setdefault(
+                "restore_provenance_rejected", diagnostics.get("restore_provenance_rejected")
+            )
+            payload.setdefault("restore_boundary_date", diagnostics.get("restore_boundary_date"))
         write_json(report_path, payload)
         raise DisasterRecoveryError(payload["error"]) from exc
     write_json(report_path, payload)

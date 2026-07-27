@@ -272,9 +272,28 @@ def _boundary_bound_to_chain(
 
     The marker already records the chain head it was restored from, so bind the
     two: the boundary must be the anchor_date of the row whose chain_head is that
-    head. Editing either field alone now breaks the pairing, and editing both
-    consistently is not possible without producing a head that hashes the
-    manifest chain - which is the property WO-61 exists to provide.
+    head. Editing either field alone now breaks the pairing.
+
+    WHAT THIS DOES NOT PROVE (Codex review of #364, second P1, and the honest
+    statement of the bound). This proves the pair names a real link in this chain.
+    It does NOT authenticate the restore EVENT: an attacker who can write
+    ``outputs/`` can also read ``ledger_anchor_chain.csv``, so they can copy the
+    date and head of any later genuine row and move the boundary forward that far.
+    The residual is bounded three ways - only registered prefixes can ever be
+    excused, only rows at or before the forged boundary, and the forgery requires
+    write access to the output tree - and it is not a new trust class: the same
+    write access can rewrite the whole chain self-consistently, because
+    verification recomputes heads from the manifests it is given. Local bytes are
+    not the root of trust for either; the externally pushed ``vps-anchor`` branch
+    is, and that is what makes a local rewrite - of a chain row or of this marker -
+    detectable.
+
+    Closing the residual properly means enrolling this marker in the chain and
+    requiring its bytes to match what was anchored at the boundary, so a forged
+    marker changes an anchored manifest and shows up against the external anchor
+    like any other tampering. That enrolls a new anchored glob, which is a
+    registered-surface change and therefore its own work order rather than a
+    widening of this one.
     """
 
     if not provenance.chain_head:
@@ -793,6 +812,27 @@ def ledger_paths_for_archive(cfg: EngineConfig, *, as_of_date: str | None = None
     if provenance.is_file():
         paths[RESTORE_PROVENANCE_FILE] = provenance
     return [paths[key] for key in sorted(paths)]
+
+
+def anchored_relative_paths(cfg: EngineConfig, *, as_of_date: str | None = None) -> set[str]:
+    """Every path the chain recorded as ``present``, whether or not it exists now.
+
+    ``ledger_paths_for_archive`` filters to files that exist, so an absent one is
+    invisible to the archive builder. A caller that needs to know what the chain
+    EXPECTS - to tell "not archived because excluded" apart from "not archived
+    because it is not there" - needs this instead.
+    """
+
+    settings = _settings(cfg)
+    expected: set[str] = set()
+    for row in read_csv_rows(_output_path(cfg, settings["chain_file"])):
+        if as_of_date and str(row.get("anchor_date") or "") > as_of_date:
+            continue
+        for item in _parse_manifest(row):
+            if item.get("status") != "present":
+                continue
+            expected.add(_safe_relative(item.get("verification_path") or item.get("path")))
+    return expected
 
 
 def main(config_path: str) -> dict[str, Any]:

@@ -725,6 +725,9 @@ def test_wo127_narrowing_exclusions_on_a_restored_host_still_builds(tmp_path: Pa
 
     assert rebuilt["status"] == "ok"
     assert rebuilt["archive_excluded_paths"] == []
+    # The corpus WAS re-harvested before this rebuild, so coverage is complete.
+    assert rebuilt["archive_coverage_complete"] is True
+    assert rebuilt["archive_pending_reharvest_paths"] == []
     assert rebuilt["post_build_restore_verification"]["status"] == "ok"
     # The marker travelled into the archive, so a restore of THIS archive also
     # knows the pre-boundary rows are unverifiable by design.
@@ -755,6 +758,36 @@ def test_wo127_narrowing_exclusions_on_a_restored_host_still_builds(tmp_path: Pa
     assert verify_ledger_chain(
         _restored_config(cfg, second_root), write_summary=False
     )["status"] == "ok"
+
+
+def test_wo127_narrowing_before_reharvest_reports_the_gap_not_full_coverage(tmp_path: Path):
+    # Codex review of #364 (P2): narrowing the exclusion set on a restored host
+    # before re-harvest recreates the corpus produced an archive reporting NO
+    # exclusions while not containing the corpus - an absent file is invisible to
+    # the builder, so the artifact claimed coverage it did not have. That is the
+    # false-coverage class WO-122a and WO-123 exist to prevent.
+    cfg = _config(tmp_path)
+    _enroll_training_corpus(cfg, size_bytes=4096)
+    _seed_two_day_chain(cfg)
+    built = create_ledger_archive(cfg, force=True)
+    restored_root = tmp_path / "restored_outputs"
+    verify_and_restore_archive(
+        cfg, Path(built["archive_path"]), dry_run=False, destination_output_root=restored_root
+    )
+    restored_cfg = _restored_config(cfg, restored_root)
+
+    # Narrow the exclusions WITHOUT re-harvesting: the corpus is still absent.
+    restored_cfg.raw["disaster_recovery"]["excluded_path_prefixes"] = []
+    rebuilt = create_ledger_archive(restored_cfg, force=True)
+
+    assert rebuilt["status"] == "ok"
+    assert rebuilt["archive_excluded_paths"] == []
+    assert rebuilt["archive_coverage_complete"] is False
+    assert rebuilt["archive_pending_reharvest_paths"] == [
+        "polymarket_training/historical_bid_ask_v1.csv"
+    ]
+    with tarfile.open(Path(rebuilt["archive_path"]), "r:gz") as archive:
+        assert not any("polymarket_training" in name for name in archive.getnames())
 
 
 def test_wo127_malformed_exclusion_config_stamps_error_instead_of_raising(tmp_path: Path):

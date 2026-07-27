@@ -93,9 +93,20 @@ For a restored tree, therefore:
   carries it does not.
 - The boundary is **bound to the chain**, not merely to the calendar. A marker
   records the chain head it was restored from, and the boundary must be the anchor
-  date of the row carrying that head. Moving the boundary forward to cover later
-  rows, or forging the head, breaks the pairing and refuses the marker — so the
-  waiver can only ever cover the real restore point.
+  date of the row carrying that head. Editing either field alone breaks the pairing
+  and refuses the marker.
+- **What that binding does not prove.** It proves the pair names a real link in
+  this chain; it does not authenticate the restore event. Anyone who can write
+  `outputs/` can also read the chain file and copy a later genuine row's date and
+  head, moving the waiver forward that far. The residual is bounded to the
+  registered prefixes, to rows at or before the forged boundary, and to an attacker
+  who already has write access to the output tree — the same access that can
+  rewrite the whole chain self-consistently, since verification recomputes heads
+  from the manifests it is handed. Local bytes are not the root of trust for
+  either: the externally pushed `vps-anchor` branch is, and it is what makes a
+  local rewrite of a chain row or of this marker detectable. Closing the residual
+  means enrolling the marker in the chain itself, which is a registered-surface
+  change tracked as its own work order.
 - The marker is **refused** — and the reason reported in
   `restore_provenance_rejected` — when it names no registered prefix, is
   unreadable or not a JSON object, carries a boundary that is not a canonical

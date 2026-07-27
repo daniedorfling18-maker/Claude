@@ -806,6 +806,54 @@ def test_wo127_narrowing_before_reharvest_refuses_instead_of_publishing_a_gap(tm
     assert rebuilt["archive_coverage_complete"] is True
 
 
+def test_wo127_present_but_unanchored_corpus_cannot_enter_the_archive(tmp_path: Path):
+    # Codex review of #364 (P1). The absent-corpus refusal is not the only way a
+    # narrowed archive can lie. When the restore and the re-harvest happen on the
+    # archive's own snapshot day, anchor_ledgers returns already_anchored and writes
+    # NO new row - so the corpus is present, passes the coverage check, and yet every
+    # chain row naming it predates the boundary and is waived by the marker. Those
+    # bytes would enter the recovery archive having never resumed tamper coverage:
+    # attacker-chosen content with a self-consistent manifest would be accepted.
+    cfg = _config(tmp_path)
+    corpus = _enroll_training_corpus(cfg, size_bytes=4096)
+    _seed_two_day_chain(cfg)
+    relative = corpus.relative_to(cfg.output_root).as_posix()
+    built = create_ledger_archive(cfg, force=True)
+    restored_root = tmp_path / "restored_outputs"
+    verify_and_restore_archive(
+        cfg, Path(built["archive_path"]), dry_run=False, destination_output_root=restored_root
+    )
+    restored_cfg = _restored_config(cfg, restored_root)
+    boundary = read_json(restored_root / "performance" / "ledger_restore_provenance.json")[
+        "restore_boundary_date"
+    ]
+
+    # Re-harvest on the SAME UTC day as the boundary: no new anchor row exists.
+    reharvested = restored_root / relative
+    reharvested.parent.mkdir(parents=True, exist_ok=True)
+    reharvested.write_bytes(b"ts,bid,ask\n1784999999,0.77,0.23\n")
+    same_day = anchor_ledgers(restored_cfg, anchor_date=boundary)
+    assert same_day["status"] == "already_anchored"
+
+    restored_cfg.raw["disaster_recovery"]["excluded_path_prefixes"] = []
+    with pytest.raises(DisasterRecoveryError, match="bytes no anchor attests"):
+        create_ledger_archive(restored_cfg, force=True)
+
+    status = read_json(restored_root / "performance" / "disaster_recovery_status.json")
+    assert status["status"] == "error"
+    assert status["archive_coverage_complete"] is False
+    assert status["archive_unanchored_since_restore_paths"] == [relative]
+    assert status["archive_pending_reharvest_paths"] == []
+
+    # Once the daily lane anchors those bytes on a later UTC day, the same narrowing
+    # is accepted - the corpus has resumed tamper coverage.
+    assert anchor_ledgers(restored_cfg, anchor_date="2026-07-12")["status"] == "ok"
+    rebuilt = create_ledger_archive(restored_cfg, force=True)
+    assert rebuilt["status"] == "ok"
+    assert rebuilt["archive_coverage_complete"] is True
+    assert rebuilt["archive_unanchored_since_restore_paths"] == []
+
+
 def test_wo127_archive_omitting_an_undeclared_corpus_is_refused_on_restore(tmp_path: Path):
     # Codex review of #364 (P2), the untrusted-input half: the inherited marker grants
     # absence tolerance for the registered prefixes even when THIS archive declares no

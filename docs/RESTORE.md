@@ -83,6 +83,18 @@ For a restored tree, therefore:
   do verify, so tamper evidence over the corpus resumes from the boundary
   forward. A present file with a changed anchored digest outside the waiver is
   still a broken chain.
+- A corpus may only be **put back into the archive once it has been re-anchored**.
+  Narrowing `excluded_path_prefixes` on a restored host is refused while any file
+  under that prefix is either absent (awaiting re-harvest) or present without a
+  `present` anchor recorded *after* the restore boundary. The second case is easy
+  to hit: a re-harvest on the boundary day itself produces no new chain row,
+  because same-day anchoring is idempotent, so the bytes would enter recovery with
+  no anchor attesting them. Wait for the daily anchor lane to record them on a
+  later UTC day. The refusal is stamped in `disaster_recovery_status.json`
+  (`archive_coverage_complete`, `archive_pending_reharvest_paths`,
+  `archive_unanchored_since_restore_paths`) and no archive file is written, so the
+  publisher — which gates on `status` — cannot force-replace the remote snapshot
+  with an incomplete or unattested one.
 - The marker **travels with the tree**. Every archive built on a restored host
   carries it, so a restore of that archive inherits the same boundary. Narrowing
   `excluded_path_prefixes` on a restored host (putting the corpus back into

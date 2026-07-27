@@ -814,20 +814,36 @@ def ledger_paths_for_archive(cfg: EngineConfig, *, as_of_date: str | None = None
     return [paths[key] for key in sorted(paths)]
 
 
-def anchored_relative_paths(cfg: EngineConfig, *, as_of_date: str | None = None) -> set[str]:
+def anchored_relative_paths(
+    cfg: EngineConfig,
+    *,
+    as_of_date: str | None = None,
+    after_date: str | None = None,
+) -> set[str]:
     """Every path the chain recorded as ``present``, whether or not it exists now.
 
     ``ledger_paths_for_archive`` filters to files that exist, so an absent one is
     invisible to the archive builder. A caller that needs to know what the chain
     EXPECTS - to tell "not archived because excluded" apart from "not archived
     because it is not there" - needs this instead.
+
+    ``after_date`` restricts the walk to rows anchored STRICTLY after that day, so
+    a caller can ask the different question "which paths have resumed tamper
+    coverage since the restore boundary" - a present file with no such row has
+    bytes no anchor has ever attested.
     """
 
     settings = _settings(cfg)
     expected: set[str] = set()
+    boundary = canonical_date(after_date or "")
     for row in read_csv_rows(_output_path(cfg, settings["chain_file"])):
         if as_of_date and str(row.get("anchor_date") or "") > as_of_date:
             continue
+        if boundary is not None:
+            row_day = canonical_date(str(row.get("anchor_date") or ""))
+            # Fail-safe: a row whose date will not parse cannot prove coverage.
+            if row_day is None or row_day <= boundary:
+                continue
         for item in _parse_manifest(row):
             if item.get("status") != "present":
                 continue

@@ -498,8 +498,39 @@ def create_ledger_archive(cfg: EngineConfig, *, force: bool = False) -> dict[str
                 and relative not in archived_relatives
                 and relative not in declared_excluded
             )
+            # Codex review of #364 (P1). The absent-corpus case above is not the only
+            # way a narrowed archive can lie. If the restore and the re-harvest happen
+            # on the archive's own snapshot day, `anchor_ledgers` returns
+            # already_anchored and writes NO new row - so the corpus is present, passes
+            # the coverage check, and yet every chain row naming it predates the
+            # boundary and is waived. Those bytes would enter the recovery archive
+            # having never resumed tamper coverage: attacker-chosen content with a
+            # self-consistent archive manifest would be accepted. Including a corpus
+            # therefore requires it to be anchored `present` AFTER the boundary.
+            inherited_boundary = str(verification.get("restore_boundary_date") or "")
+            unauthenticated: list[str] = []
+            if inherited_boundary:
+                covered_since_restore = anchored_relative_paths(
+                    cfg, as_of_date=day, after_date=inherited_boundary
+                )
+                unauthenticated = sorted(
+                    relative
+                    for relative in archived_relatives
+                    if relative.startswith(ARCHIVE_EXCLUDED_PREFIXES)
+                    and relative not in covered_since_restore
+                )
             payload["archive_pending_reharvest_paths"] = pending_reharvest
-            payload["archive_coverage_complete"] = not pending_reharvest
+            payload["archive_unanchored_since_restore_paths"] = unauthenticated
+            payload["archive_coverage_complete"] = not pending_reharvest and not unauthenticated
+            if unauthenticated:
+                raise ValueError(
+                    "archive would carry bytes no anchor attests: "
+                    f"{len(unauthenticated)} path(s) under a registered prefix are present but "
+                    f"have no `present` anchor after the restore boundary {inherited_boundary} "
+                    f"(first: {unauthenticated[0]}). The daily anchor lane must record them on a "
+                    "later UTC day before they can enter the recovery archive; until then keep the "
+                    "prefix in disaster_recovery.excluded_path_prefixes"
+                )
             if pending_reharvest:
                 raise ValueError(
                     "archive would claim coverage it does not have: "

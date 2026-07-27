@@ -864,3 +864,183 @@ def test_wo113_coverage_window_alignment_excludes_unobservable_horizon(tmp_path)
     assert by_horizon["60m"]["windows_simulated"] == 0  # beyond observed book span -> excluded
     assert summary["coverage"]["windows_simulated"] == 2
     assert summary["per_market_coverage"][0]["book_history_span_days"] > 0.0
+
+
+# --- WO-131: seeding-budget hygiene and the seasoning runway ---
+
+
+def _seed_cfg(tmp_path, **overrides):
+    cfg = _config(tmp_path)
+    raw = yaml.safe_load((tmp_path / "config.yaml").read_text(encoding="utf-8"))
+    raw["maker_fill_replay"].update(
+        {"book_source": "official", "request_pause_seconds": 0, "max_candidate_markets": 10, **overrides}
+    )
+    (tmp_path / "config.yaml").write_text(yaml.safe_dump(raw), encoding="utf-8")
+    return load_config(tmp_path / "config.yaml")
+
+
+def _seed_candidates(cfg, rows):
+    write_json(
+        cfg.output_root / "maker_carry" / "maker_carry_study.json",
+        {"portfolio": [], "paper_trading_invoked": False, "live_trading_invoked": False},
+    )
+    write_csv(
+        cfg.output_root / "maker_carry" / "maker_carry_candidates.csv",
+        rows,
+        fieldnames=["condition_id", "token_id", "net_carry_usd_per_day", "yield_rank"],
+    )
+
+
+def _poll_with(monkeypatch, dead_tokens, *, now):
+    """Stub the CLOB so listed tokens return a book and dead ones 404."""
+    polled: list[str] = []
+
+    def fake_post(url, json=None, timeout=None):
+        items = json or []
+        polled.extend(str(item["token_id"]) for item in items)
+        return _Response(
+            [
+                {
+                    "asset_id": item["token_id"],
+                    "timestamp": 2000,
+                    "hash": "h1",
+                    "bids": [{"price": "0.48", "size": "20"}],
+                    "asks": [{"price": "0.52", "size": "20"}],
+                }
+                for item in items
+                if str(item["token_id"]) not in dead_tokens
+            ]
+        )
+
+    def fake_get(url, params=None, timeout=None):
+        token = str((params or {}).get("token_id") or "")
+        polled.append(token)
+        if token in dead_tokens:
+            raise maker_fill_replay.requests.HTTPError(
+                "404 Client Error: Not Found for url: /book"
+            )
+        return _Response({"asset_id": token, "timestamp": 2000, "hash": "h1",
+                          "bids": [{"price": "0.48", "size": "20"}], "asks": [{"price": "0.52", "size": "20"}]})
+
+    monkeypatch.setattr(maker_fill_replay.time, "sleep", lambda _: None)
+    monkeypatch.setattr(maker_fill_replay, "now_utc", lambda: now)
+    monkeypatch.setattr(maker_fill_replay.requests, "post", fake_post)
+    monkeypatch.setattr(maker_fill_replay.requests, "get", fake_get)
+    return polled
+
+
+def test_wo131_delisted_token_is_skipped_only_after_the_registered_threshold(tmp_path, monkeypatch):
+    # Measured 2026-07-27: 7 of 50 polled markets returned HTTP 404 on delisted
+    # tokens, so ~14% of the seeding budget bought corpses while M-A had 23 days
+    # left. Two 404s are not yet evidence of a delisting; three are.
+    cfg = _seed_cfg(tmp_path)
+    _seed_candidates(cfg, [
+        {"condition_id": "0xdead", "token_id": "tokD", "net_carry_usd_per_day": "9.0", "yield_rank": "1"},
+        {"condition_id": "0xlive", "token_id": "tokL", "net_carry_usd_per_day": "1.0", "yield_rank": "2"},
+    ])
+
+    for cycle in range(2):
+        polled = _poll_with(monkeypatch, {"tokD"}, now=f"2026-07-27T0{cycle}:00:00Z")
+        maker_fill_replay.snapshot_official_books(cfg)
+        assert "tokD" in polled, cycle  # still polled after 1 and 2 failures
+
+    polled = _poll_with(monkeypatch, {"tokD"}, now="2026-07-27T02:00:00Z")
+    summary = maker_fill_replay.snapshot_official_books(cfg)
+    assert "tokD" in polled  # the third 404 is what establishes the marker
+
+    polled = _poll_with(monkeypatch, {"tokD"}, now="2026-07-27T03:00:00Z")
+    summary = maker_fill_replay.snapshot_official_books(cfg)
+    assert "tokD" not in polled  # now inside the cooldown
+    assert "tokL" in polled  # the live market keeps its slot
+    assert summary["delisted_tokens_skipped"] == ["tokD"]
+    assert summary["candidate_seed_exclusions"]["delisted_cooldown"] == 1
+
+
+def test_wo131_the_skip_is_a_cooldown_not_a_blacklist(tmp_path, monkeypatch):
+    # A skipped token has no official-book file, so it never enters the mtime
+    # persistent tranche either. Without a TTL nothing would ever request it
+    # again and it could never clear its own marker - a transient outage or a
+    # re-listing would become permanent exclusion.
+    cfg = _seed_cfg(tmp_path)
+    _seed_candidates(cfg, [
+        {"condition_id": "0xdead", "token_id": "tokD", "net_carry_usd_per_day": "9.0", "yield_rank": "1"},
+    ])
+    for hour in range(3):
+        _poll_with(monkeypatch, {"tokD"}, now=f"2026-07-27T0{hour}:00:00Z")
+        maker_fill_replay.snapshot_official_books(cfg)
+
+    polled = _poll_with(monkeypatch, {"tokD"}, now="2026-07-27T05:00:00Z")
+    maker_fill_replay.snapshot_official_books(cfg)
+    assert "tokD" not in polled  # inside the 24h cooldown
+
+    # Past the TTL it is re-probed, and a valid book clears the marker outright.
+    polled = _poll_with(monkeypatch, set(), now="2026-07-28T06:00:00Z")
+    summary = maker_fill_replay.snapshot_official_books(cfg)
+    assert "tokD" in polled
+    assert summary["delisted_tokens_skipped"] == []
+    assert summary["delisted_token_count"] == 0
+
+    marker = read_json(cfg.output_root / "maker_carry" / "delisted_token_markers.json")
+    assert marker["paper_trading_invoked"] is False
+    assert marker["live_trading_invoked"] is False
+
+
+def test_wo131_a_non_finite_carry_never_displaces_a_real_candidate(tmp_path, monkeypatch):
+    # A NaN carry participates in the sort with UNDEFINED ordering and can take a
+    # seeding slot ahead of a finite-carry market.
+    cfg = _seed_cfg(tmp_path, max_candidate_markets=1)
+    _seed_candidates(cfg, [
+        {"condition_id": "0xnan", "token_id": "tokN", "net_carry_usd_per_day": "nan", "yield_rank": "1"},
+        {"condition_id": "0xreal", "token_id": "tokR", "net_carry_usd_per_day": "4.0", "yield_rank": "2"},
+    ])
+    polled = _poll_with(monkeypatch, set(), now="2026-07-27T00:00:00Z")
+    summary = maker_fill_replay.snapshot_official_books(cfg)
+
+    assert "tokR" in polled
+    assert "tokN" not in polled
+    assert summary["candidate_seed_exclusions"]["non_finite_rank"] == 1
+
+
+def test_wo131_runway_matches_the_helper_the_eligibility_rule_uses(tmp_path, monkeypatch):
+    # The report must not re-derive depth: a second implementation would drift
+    # from the rule it describes. Bind them so drift fails this test.
+    from polymarket_predictive_engine.maker_carry_study import (
+        MAKER_POLICY_DEFAULTS,
+        _book_history_depth,
+    )
+
+    cfg = _seed_cfg(tmp_path)
+    _seed_candidates(cfg, [
+        {"condition_id": "0xseed", "token_id": "tokS", "net_carry_usd_per_day": "4.0", "yield_rank": "1"},
+    ])
+    _poll_with(monkeypatch, set(), now="2026-07-27T00:00:00Z")
+    summary = maker_fill_replay.snapshot_official_books(cfg)
+
+    out_root = cfg.output_root / "maker_carry"
+    hours, snapshots = _book_history_depth(out_root, "0xseed")
+    row = next(r for r in summary["seasoning_runway"] if r["condition_id"] == "0xseed")
+    assert row["book_history_hours"] == round(float(hours), 4)
+    assert row["book_snapshot_count"] == snapshots
+    assert row["snapshots_remaining"] == max(
+        0, int(MAKER_POLICY_DEFAULTS["maker_min_book_snapshots"]) - snapshots
+    )
+    assert summary["closest_to_eligibility"][0]["condition_id"] == "0xseed"
+
+
+def test_wo131_a_missing_marker_artifact_polls_every_candidate(tmp_path, monkeypatch):
+    # Fail-safe direction: for a collector the conservative action is to COLLECT,
+    # so an unreadable marker file must never suppress a poll.
+    cfg = _seed_cfg(tmp_path)
+    _seed_candidates(cfg, [
+        {"condition_id": "0xa", "token_id": "tokA", "net_carry_usd_per_day": "4.0", "yield_rank": "1"},
+        {"condition_id": "0xb", "token_id": "tokB", "net_carry_usd_per_day": "3.0", "yield_rank": "2"},
+    ])
+    marker_path = cfg.output_root / "maker_carry" / "delisted_token_markers.json"
+    marker_path.parent.mkdir(parents=True, exist_ok=True)
+    marker_path.write_text("{ this is not json", encoding="utf-8")
+
+    polled = _poll_with(monkeypatch, set(), now="2026-07-27T00:00:00Z")
+    summary = maker_fill_replay.snapshot_official_books(cfg)
+
+    assert {"tokA", "tokB"} <= set(polled)
+    assert summary["delisted_tokens_skipped"] == []

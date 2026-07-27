@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from copy import deepcopy
 from datetime import datetime, timedelta, timezone
+import hashlib
 import io
 import json
 import os
@@ -361,6 +362,7 @@ def _rebuild_archive_with_manifest(
     *,
     manifest_updates: dict,
     drop_paths: tuple[str, ...] = (),
+    add_paths: dict[str, bytes] | None = None,
 ) -> Path:
     """Repack an archive with a mutated manifest, keeping it internally valid.
 
@@ -380,6 +382,16 @@ def _rebuild_archive_with_manifest(
         manifest["files"] = [row for row in manifest["files"] if row["path"] not in drop_paths]
         for name in drop_paths:
             members.pop(name, None)
+    for name, data in (add_paths or {}).items():
+        members[name] = data
+        manifest["files"] = [
+            *[row for row in manifest["files"] if row["path"] != name],
+            {
+                "path": name,
+                "size_bytes": len(data),
+                "sha256": hashlib.sha256(data).hexdigest(),
+            },
+        ]
     payload = (json.dumps(manifest, indent=2, sort_keys=True) + "\n").encode("utf-8")
     with tarfile.open(destination, "w:gz", format=tarfile.PAX_FORMAT) as archive:
         for name, data in (("archive_manifest.json", payload), *sorted(members.items())):
@@ -414,7 +426,10 @@ def test_wo123_anchored_corpus_is_excluded_from_the_archive_and_restore_still_ve
     assert "polymarket_training/historical_bid_ask_v1.csv" in chain_rows
     live_chain = verify_ledger_chain(cfg, as_of_date="2026-07-11", write_summary=False)
     assert live_chain["status"] == "ok"
-    assert live_chain["missing_excluded_tolerated"] == 0
+    # WO-127: with no restore-provenance marker in the live tree, nothing is
+    # excused - the corpus is present and byte-verified like any other ledger.
+    assert live_chain["restored_unverifiable_tolerated"] == 0
+    assert live_chain["restore_boundary_date"] is None
 
     # ...but it never enters the archive.
     assert built["status"] == "ok"
@@ -436,7 +451,9 @@ def test_wo123_anchored_corpus_is_excluded_from_the_archive_and_restore_still_ve
     dry_run = verify_and_restore_archive(cfg, archive_path, dry_run=True)
     assert dry_run["status"] == "ok"
     assert dry_run["excluded_path_prefixes_tolerated"] == ["polymarket_training/"]
-    assert dry_run["excluded_missing_tolerated"] >= 1
+    assert dry_run["restored_unverifiable_tolerated"] >= 1
+    assert dry_run["restored_without_prefixes"] == ["polymarket_training/"]
+    assert dry_run["restore_boundary_date"] == "2026-07-11"
     assert dry_run["ledger_chain_verification"]["verified_through_date"] == "2026-07-11"
 
 
@@ -597,3 +614,560 @@ def test_restore_shell_dry_run_passes_valid_and_exits_nonzero_on_corrupt_archive
     )
     assert result.returncode != 0
     assert "ERROR:" in result.stderr
+
+
+# --- WO-127: a restore must not wedge the anchor lane ---
+
+
+def test_wo127_restore_then_anchor_run_verifies_instead_of_wedging(tmp_path: Path):
+    # THE regression. On main, verify_and_restore_archive passed
+    # tolerated_missing_prefixes but anchor_ledgers called verify_ledger_chain with
+    # none, so a restore reported success and the very next production anchor run
+    # read the excluded corpora as "anchored file is missing" -> blocked_broken_chain
+    # -> head frozen, exit 1. Recovery handed over a tree that broke the tamper lane.
+    from polymarket_predictive_engine.ledger_anchor import RESTORE_PROVENANCE_FILE
+
+    cfg = _config(tmp_path)
+    _enroll_training_corpus(cfg)
+    _seed_two_day_chain(cfg)
+    built = create_ledger_archive(cfg, force=True)
+
+    restored_root = tmp_path / "restored_outputs"
+    applied = verify_and_restore_archive(
+        cfg, Path(built["archive_path"]), dry_run=False, destination_output_root=restored_root
+    )
+    assert applied["restore_applied"] is True
+    assert applied["restored_without_prefixes"] == ["polymarket_training/"]
+
+    restored_cfg = _restored_config(cfg, restored_root)
+    # The corpus is genuinely absent from the restored tree...
+    assert not (restored_root / "polymarket_training").exists()
+    # ...and the provenance marker travelled with it, so the PRODUCTION anchor
+    # lane - which passes no tolerance of its own - verifies clean.
+    assert (restored_root / "performance" / "ledger_restore_provenance.json").is_file()
+    assert RESTORE_PROVENANCE_FILE == "performance/ledger_restore_provenance.json"
+
+    verification = verify_ledger_chain(restored_cfg, write_summary=False)
+    assert verification["status"] == "ok"
+    assert verification["restored_unverifiable_tolerated"] >= 1
+    assert verification["restore_boundary_date"] == "2026-07-11"
+
+    anchored = anchor_ledgers(restored_cfg, anchor_date="2026-07-12")
+    assert anchored["status"] == "ok", anchored
+    assert verify_ledger_chain(restored_cfg, write_summary=False)["status"] == "ok"
+
+
+def test_wo127_reharvest_after_restore_does_not_wedge_the_chain(tmp_path: Path):
+    # The permanent-wedge case the audit did not reach: absence-only tolerance
+    # would excuse the missing corpus, but a re-harvest brings the file back with
+    # DIFFERENT bytes, flipping the same historical rows to "anchored prefix digest
+    # changed" - which absence tolerance cannot excuse. Those bytes are
+    # unreproducible, so pre-boundary entries are unverifiable by design.
+    cfg = _config(tmp_path)
+    _enroll_training_corpus(cfg)
+    _seed_two_day_chain(cfg)
+    built = create_ledger_archive(cfg, force=True)
+    restored_root = tmp_path / "restored_outputs"
+    verify_and_restore_archive(
+        cfg, Path(built["archive_path"]), dry_run=False, destination_output_root=restored_root
+    )
+    restored_cfg = _restored_config(cfg, restored_root)
+
+    reharvested = restored_root / "polymarket_training" / "historical_bid_ask_v1.csv"
+    reharvested.parent.mkdir(parents=True, exist_ok=True)
+    reharvested.write_bytes(b"ts,bid,ask\n1784999999,0.77,0.23\n")
+
+    verification = verify_ledger_chain(restored_cfg, write_summary=False)
+    assert verification["status"] == "ok", verification["issues"]
+    assert anchor_ledgers(restored_cfg, anchor_date="2026-07-12")["status"] == "ok"
+
+    # A non-excluded restored ledger is still byte-verified. Flip a byte in place
+    # so the failure is a DIGEST change rather than a short-file read error.
+    core = restored_root / "audit" / "core.csv"
+    tampered_bytes = bytearray(core.read_bytes())
+    tampered_bytes[0] = ord("X")
+    core.write_bytes(bytes(tampered_bytes))
+    broken = verify_ledger_chain(restored_cfg, write_summary=False)
+    assert broken["status"] == "broken"
+    assert "anchored prefix digest changed" in broken["issues"][0]
+
+
+def test_wo127_narrowing_exclusions_on_a_restored_host_still_builds(tmp_path: Path):
+    # Codex review of #364 (P1). RESTORE.md documents narrowing
+    # excluded_path_prefixes as a tighten-only operation that puts the corpus back
+    # into recovery. On a RESTORED host that permanently broke archive creation:
+    # the new archive declared no exclusions, so the post-build restore check wrote
+    # no marker into the extracted tree, and the pre-restore rows were compared
+    # against re-harvested bytes and rejected - every build, forever. A restore
+    # boundary is a fact about the chain's history, so it must travel with the tree.
+    cfg = _config(tmp_path)
+    _enroll_training_corpus(cfg, size_bytes=4096)
+    _seed_two_day_chain(cfg)
+    built = create_ledger_archive(cfg, force=True)
+    restored_root = tmp_path / "restored_outputs"
+    verify_and_restore_archive(
+        cfg, Path(built["archive_path"]), dry_run=False, destination_output_root=restored_root
+    )
+    restored_cfg = _restored_config(cfg, restored_root)
+    marker = restored_root / "performance" / "ledger_restore_provenance.json"
+    assert marker.is_file(), "the applied restore must record its boundary"
+    inherited_boundary = read_json(marker)["restore_boundary_date"]
+
+    # Re-harvest with different bytes, exactly as normal collection would.
+    reharvested = restored_root / "polymarket_training" / "historical_bid_ask_v1.csv"
+    reharvested.parent.mkdir(parents=True, exist_ok=True)
+    reharvested.write_bytes(b"ts,bid,ask\n1784999999,0.77,0.23\n")
+    assert anchor_ledgers(restored_cfg, anchor_date="2026-07-12")["status"] == "ok"
+
+    # The documented tighten-only narrowing: put the corpus back into recovery.
+    restored_cfg.raw["disaster_recovery"]["excluded_path_prefixes"] = []
+    rebuilt = create_ledger_archive(restored_cfg, force=True)
+
+    assert rebuilt["status"] == "ok"
+    assert rebuilt["archive_excluded_paths"] == []
+    # The corpus WAS re-harvested before this rebuild, so coverage is complete.
+    assert rebuilt["archive_coverage_complete"] is True
+    assert rebuilt["archive_pending_reharvest_paths"] == []
+    assert rebuilt["post_build_restore_verification"]["status"] == "ok"
+    # The marker travelled into the archive, so a restore of THIS archive also
+    # knows the pre-boundary rows are unverifiable by design.
+    with tarfile.open(Path(rebuilt["archive_path"]), "r:gz") as archive:
+        names = set(archive.getnames())
+    assert "outputs/performance/ledger_restore_provenance.json" in names
+    assert "outputs/polymarket_training/historical_bid_ask_v1.csv" in names
+
+    second_root = tmp_path / "restored_twice"
+    applied = verify_and_restore_archive(
+        cfg,
+        Path(rebuilt["archive_path"]),
+        dry_run=False,
+        destination_output_root=second_root,
+    )
+    assert applied["status"] == "ok"
+    carried = read_json(second_root / "performance" / "ledger_restore_provenance.json")
+    assert carried["restore_boundary_date"] == inherited_boundary
+    # Codex review of #364 (P2): the report must name the boundary actually
+    # honoured, not this archive's snapshot date, or the operator is told the wrong
+    # waiver scope. The archive's own snapshot date is 2026-07-12 here.
+    assert applied["restore_boundary_date"] == inherited_boundary
+    assert applied["restore_boundary_date"] != rebuilt["snapshot_date"]
+    assert applied["restore_provenance_rejected"] is None
+    # The boundary and the head it names travel as a pair, so the inherited
+    # boundary keeps the inherited head - otherwise the marker would refuse itself.
+    assert carried["restored_from_chain_head"] == read_json(marker)["restored_from_chain_head"]
+    assert verify_ledger_chain(
+        _restored_config(cfg, second_root), write_summary=False
+    )["status"] == "ok"
+
+
+def test_wo127_narrowing_before_reharvest_refuses_instead_of_publishing_a_gap(tmp_path: Path):
+    # Codex review of #364, two P2s with one root. Narrowing the exclusion set on a
+    # restored host before re-harvest recreates the corpus produced an archive
+    # reporting NO exclusions while not containing the corpus - an absent file is
+    # invisible to the builder. Reporting that was not enough: push_vps_archive.sh
+    # gates only on `status`, so the incomplete archive would still force-replace the
+    # SOLE remote snapshot and stamp the RPO as met. A diagnostic no consumer reads
+    # is the fail-silent class this batch exists to remove, so the build REFUSES -
+    # before the archive file is written, and stamped where the DR watchdog reads it.
+    cfg = _config(tmp_path)
+    _enroll_training_corpus(cfg, size_bytes=4096)
+    _seed_two_day_chain(cfg)
+    built = create_ledger_archive(cfg, force=True)
+    restored_root = tmp_path / "restored_outputs"
+    verify_and_restore_archive(
+        cfg, Path(built["archive_path"]), dry_run=False, destination_output_root=restored_root
+    )
+    restored_cfg = _restored_config(cfg, restored_root)
+    archive_path = restored_root / "performance" / "ledger_state_archive.tar.gz"
+    assert not archive_path.exists()
+
+    # Narrow the exclusions WITHOUT re-harvesting: the corpus is still absent.
+    restored_cfg.raw["disaster_recovery"]["excluded_path_prefixes"] = []
+    with pytest.raises(DisasterRecoveryError, match="would claim coverage it does not have"):
+        create_ledger_archive(restored_cfg, force=True)
+
+    status = read_json(restored_root / "performance" / "disaster_recovery_status.json")
+    assert status["status"] == "error"
+    assert status["failure_stamped"] is True
+    assert status["archive_coverage_complete"] is False
+    assert status["archive_pending_reharvest_paths"] == [
+        "polymarket_training/historical_bid_ask_v1.csv"
+    ]
+    # No incomplete archive exists for the publisher to force-push as the snapshot.
+    assert not archive_path.exists()
+
+    # Re-harvest, and the same narrowing succeeds with complete coverage.
+    reharvested = restored_root / "polymarket_training" / "historical_bid_ask_v1.csv"
+    reharvested.parent.mkdir(parents=True, exist_ok=True)
+    reharvested.write_bytes(b"ts,bid,ask\n1784999999,0.77,0.23\n")
+    assert anchor_ledgers(restored_cfg, anchor_date="2026-07-12")["status"] == "ok"
+    rebuilt = create_ledger_archive(restored_cfg, force=True)
+    assert rebuilt["status"] == "ok"
+    assert rebuilt["archive_coverage_complete"] is True
+
+
+def test_wo127_the_archive_after_a_restore_still_builds(tmp_path: Path):
+    # THE regression this work order exists to prevent, one layer up. Codex review of
+    # #364 (P1) caught that the coverage refusal read "is this path excluded by scope"
+    # from the list of EXISTING files the builder skipped - a list an absent path can
+    # never appear in. Immediately after a restore every anchored corpus path is
+    # absent by design while the configured prefix still declares it excluded, so the
+    # very next scheduled archive was refused, wedging the recurring recovery lane
+    # until collection recreated the corpus. A restore must not wedge the lane that
+    # produced it, which is the whole point of WO-127.
+    cfg = _config(tmp_path)
+    _enroll_training_corpus(cfg, size_bytes=4096)
+    _seed_two_day_chain(cfg)
+    built = create_ledger_archive(cfg, force=True)
+    restored_root = tmp_path / "restored_outputs"
+    verify_and_restore_archive(
+        cfg, Path(built["archive_path"]), dry_run=False, destination_output_root=restored_root
+    )
+    restored_cfg = _restored_config(cfg, restored_root)
+    assert not (restored_root / "polymarket_training").exists()
+
+    # Default (registered) exclusions still in force: the absent corpus is excluded
+    # by scope, not a coverage gap.
+    rebuilt = create_ledger_archive(restored_cfg, force=True)
+
+    assert rebuilt["status"] == "ok"
+    assert rebuilt["archive_pending_reharvest_paths"] == []
+    assert rebuilt["archive_coverage_complete"] is True
+    assert rebuilt["archive_excluded_paths"] == ["polymarket_training/"]
+
+
+def test_wo127_relabelled_archive_cannot_borrow_an_inherited_waiver(tmp_path: Path):
+    # Codex review of #364 (P2), the shape my earlier test missed: an archive built
+    # while the prefix was EXCLUDED carries the inherited marker and no corpus, so
+    # relabelling its manifest to declare no exclusions is self-consistent - the file
+    # set already matches. The inherited prefix was then imported by the union,
+    # historical rows waived, later missing_at_anchor rows tolerated by design, and it
+    # restored ok while claiming full coverage. An archive that does not declare a
+    # prefix excluded is asserting coverage of it.
+    cfg = _config(tmp_path)
+    corpus = _enroll_training_corpus(cfg, size_bytes=4096)
+    _seed_two_day_chain(cfg)
+    relative = corpus.relative_to(cfg.output_root).as_posix()
+    built = create_ledger_archive(cfg, force=True)
+    restored_root = tmp_path / "restored_outputs"
+    verify_and_restore_archive(
+        cfg, Path(built["archive_path"]), dry_run=False, destination_output_root=restored_root
+    )
+    restored_cfg = _restored_config(cfg, restored_root)
+
+    # Honest archive on the restored host: prefix still excluded, corpus absent.
+    honest = create_ledger_archive(restored_cfg, force=True)
+    assert honest["archive_excluded_paths"] == ["polymarket_training/"]
+    with tarfile.open(Path(honest["archive_path"]), "r:gz") as archive:
+        assert f"outputs/{relative}" not in set(archive.getnames())
+    assert verify_and_restore_archive(cfg, Path(honest["archive_path"]), dry_run=True)["status"] == "ok"
+
+    # Relabel only the declaration. The file set is untouched and still self-consistent.
+    # Codex review of #364 (P2): [""] and whitespace are the interesting forgeries -
+    # every path satisfies startswith(""), so an unnormalised declaration became a
+    # wildcard that "declared" a prefix the archive never named, while the inherited
+    # marker still supplied the registered waiver. A prefix without its trailing slash
+    # normalises to a valid declaration and must still be honoured.
+    # ("audit/" is deliberately absent: that shape is refused earlier, by the
+    # declares-and-includes contradiction check, which is a different guard.)
+    for index, forged_declaration in enumerate(([], [""], ["   "], ["/"], ["../"])):
+        relabelled = _rebuild_archive_with_manifest(
+            Path(honest["archive_path"]),
+            tmp_path / f"relabelled-{index}.tar.gz",
+            manifest_updates={
+                "excluded_path_prefixes": forged_declaration,
+                "excluded_files": [],
+                "excluded_file_count": 0,
+            },
+        )
+        with pytest.raises(DisasterRecoveryError, match="does not declare excluded"):
+            verify_and_restore_archive(cfg, relabelled, dry_run=True)
+
+    # An honest declaration missing only its trailing slash still restores.
+    tolerant = _rebuild_archive_with_manifest(
+        Path(honest["archive_path"]),
+        tmp_path / "unslashed.tar.gz",
+        manifest_updates={"excluded_path_prefixes": ["polymarket_training"]},
+    )
+    assert verify_and_restore_archive(cfg, tolerant, dry_run=True)["status"] == "ok"
+
+
+def test_wo127_present_but_unanchored_corpus_cannot_enter_the_archive(tmp_path: Path):
+    # Codex review of #364 (P1). The absent-corpus refusal is not the only way a
+    # narrowed archive can lie. When the restore and the re-harvest happen on the
+    # archive's own snapshot day, anchor_ledgers returns already_anchored and writes
+    # NO new row - so the corpus is present, passes the coverage check, and yet every
+    # chain row naming it predates the boundary and is waived by the marker. Those
+    # bytes would enter the recovery archive having never resumed tamper coverage:
+    # attacker-chosen content with a self-consistent manifest would be accepted.
+    cfg = _config(tmp_path)
+    corpus = _enroll_training_corpus(cfg, size_bytes=4096)
+    _seed_two_day_chain(cfg)
+    relative = corpus.relative_to(cfg.output_root).as_posix()
+    built = create_ledger_archive(cfg, force=True)
+    restored_root = tmp_path / "restored_outputs"
+    verify_and_restore_archive(
+        cfg, Path(built["archive_path"]), dry_run=False, destination_output_root=restored_root
+    )
+    restored_cfg = _restored_config(cfg, restored_root)
+    boundary = read_json(restored_root / "performance" / "ledger_restore_provenance.json")[
+        "restore_boundary_date"
+    ]
+
+    # Re-harvest on the SAME UTC day as the boundary: no new anchor row exists.
+    reharvested = restored_root / relative
+    reharvested.parent.mkdir(parents=True, exist_ok=True)
+    reharvested.write_bytes(b"ts,bid,ask\n1784999999,0.77,0.23\n")
+    same_day = anchor_ledgers(restored_cfg, anchor_date=boundary)
+    assert same_day["status"] == "already_anchored"
+
+    restored_cfg.raw["disaster_recovery"]["excluded_path_prefixes"] = []
+    with pytest.raises(DisasterRecoveryError, match="bytes no anchor attests"):
+        create_ledger_archive(restored_cfg, force=True)
+
+    status = read_json(restored_root / "performance" / "disaster_recovery_status.json")
+    assert status["status"] == "error"
+    assert status["archive_coverage_complete"] is False
+    assert status["archive_unanchored_since_restore_paths"] == [relative]
+    assert status["archive_pending_reharvest_paths"] == []
+
+    # Once the daily lane anchors those bytes on a later UTC day, the same narrowing
+    # is accepted - the corpus has resumed tamper coverage.
+    assert anchor_ledgers(restored_cfg, anchor_date="2026-07-12")["status"] == "ok"
+    rebuilt = create_ledger_archive(restored_cfg, force=True)
+    assert rebuilt["status"] == "ok"
+    assert rebuilt["archive_coverage_complete"] is True
+    assert rebuilt["archive_unanchored_since_restore_paths"] == []
+
+
+def test_wo127_archive_omitting_an_undeclared_corpus_is_refused_on_restore(tmp_path: Path):
+    # Codex review of #364 (P2), the untrusted-input half: the inherited marker grants
+    # absence tolerance for the registered prefixes even when THIS archive declares no
+    # exclusions, so a self-consistent forged archive could omit the corpus, claim full
+    # scope, and restore ok. The waiver covers only what predates the restore.
+    cfg = _config(tmp_path)
+    corpus = _enroll_training_corpus(cfg, size_bytes=4096)
+    _seed_two_day_chain(cfg)
+    relative = corpus.relative_to(cfg.output_root).as_posix()
+    built = create_ledger_archive(cfg, force=True)
+    restored_root = tmp_path / "restored_outputs"
+    verify_and_restore_archive(
+        cfg, Path(built["archive_path"]), dry_run=False, destination_output_root=restored_root
+    )
+    restored_cfg = _restored_config(cfg, restored_root)
+
+    # Re-harvest and anchor a POST-boundary day, then build an honest archive.
+    reharvested = restored_root / relative
+    reharvested.parent.mkdir(parents=True, exist_ok=True)
+    reharvested.write_bytes(b"ts,bid,ask\n1784999999,0.77,0.23\n")
+    assert anchor_ledgers(restored_cfg, anchor_date="2026-07-12")["status"] == "ok"
+    restored_cfg.raw["disaster_recovery"]["excluded_path_prefixes"] = []
+    honest = create_ledger_archive(restored_cfg, force=True)
+    assert verify_and_restore_archive(cfg, Path(honest["archive_path"]), dry_run=True)["status"] == "ok"
+
+    # Forge it: drop the corpus while still declaring no exclusions. The waiver
+    # covers only rows at or before the honoured boundary, and the re-harvest above
+    # anchored a POST-boundary row recording this file as present - so the existing
+    # chain verification refuses it. No extra guard is needed on this path, and this
+    # test pins that, because the property is load-bearing rather than incidental.
+    forged = _rebuild_archive_with_manifest(
+        Path(honest["archive_path"]),
+        tmp_path / "forged.tar.gz",
+        manifest_updates={},
+        drop_paths=(f"outputs/{relative}",),
+    )
+    with pytest.raises(DisasterRecoveryError, match="anchored file is missing"):
+        verify_and_restore_archive(cfg, forged, dry_run=True)
+
+
+def test_wo127_leading_slash_declaration_cannot_evade_the_contradiction_check(tmp_path: Path):
+    # Codex review of #364 (P1): the contradiction check matched RAW declarations while
+    # the restore path matched normalised ones. "/polymarket_training/" therefore missed
+    # here and was normalised into the registered exclusion there, so the marker waived
+    # the included member's pre-boundary digest and arbitrary self-consistent bytes
+    # restored clean. Two readings of one untrusted field is a bypass by construction.
+    cfg = _config(tmp_path)
+    corpus = _enroll_training_corpus(cfg, size_bytes=4096)
+    _seed_two_day_chain(cfg)
+    relative = corpus.relative_to(cfg.output_root).as_posix()
+    built = create_ledger_archive(cfg, force=True)
+
+    for index, spelling in enumerate(
+        ("/polymarket_training/", "polymarket_training", "  polymarket_training/  ")
+    ):
+        forged = _rebuild_archive_with_manifest(
+            Path(built["archive_path"]),
+            tmp_path / f"slashed-{index}.tar.gz",
+            manifest_updates={"excluded_path_prefixes": [spelling]},
+            add_paths={f"outputs/{relative}": b"ts,bid,ask\n9999999999,0.01,0.99\n"},
+        )
+        with pytest.raises(DisasterRecoveryError, match="excluded while also including"):
+            verify_and_restore_archive(cfg, forged, dry_run=True)
+
+
+def test_wo127_an_invalid_inherited_boundary_never_displaces_the_current_one(tmp_path: Path):
+    # Codex review of #364 (P2), the second time: ranking candidates by date meant ANY
+    # later inherited boundary won, including an invalid one - a future date, or a head
+    # naming no row. Post-build restore then refused the marker, found the deliberately
+    # excluded corpus missing, and failed archive creation. The wedge class again,
+    # arriving through the ranking function. The current pair now simply wins.
+    cfg = _config(tmp_path)
+    _enroll_training_corpus(cfg, size_bytes=4096)
+    _seed_two_day_chain(cfg)
+
+    marker = cfg.output_root / "performance" / "ledger_restore_provenance.json"
+    for boundary, head in (
+        ("2099-01-01", "a" * 64),   # future
+        ("2026-07-11", "f" * 64),   # head names no row
+        ("2026-13-45", "a" * 64),   # not a date
+    ):
+        write_json(
+            marker,
+            {
+                "work_order": "WO-127",
+                "restore_boundary_date": boundary,
+                "excluded_path_prefixes": ["polymarket_training/"],
+                "restored_from_chain_head": head,
+            },
+        )
+        # The anti-wedge property: the build succeeds and its own post-build restore
+        # verifies, instead of the bogus inherited pair displacing the valid one and
+        # failing archive creation outright.
+        built = create_ledger_archive(cfg, force=True)
+        assert built["status"] == "ok", boundary
+        assert built["post_build_restore_verification"]["status"] == "ok", boundary
+
+    # And on an APPLIED restore the marker written into the destination carries this
+    # archive's own pair, never the bogus inherited one.
+    destination = tmp_path / "restored_outputs"
+    applied = verify_and_restore_archive(
+        cfg, Path(built["archive_path"]), dry_run=False, destination_output_root=destination
+    )
+    installed = read_json(destination / "performance" / "ledger_restore_provenance.json")
+    assert applied["status"] == "ok"
+    assert installed["restore_boundary_date"] == built["snapshot_date"]
+    assert installed["restored_from_chain_head"] == built["chain_head"]
+
+
+def test_wo127_a_narrowed_target_config_requires_the_corpus_on_restore(tmp_path: Path):
+    # Codex review of #364 (P2) corrected my reasoning, and the better argument won.
+    # I based the missing-path exception on whether the ARCHIVE validly declared the
+    # prefix. But whether a restore delivers the coverage REQUIRED is the restoring
+    # host's property: if this host's config says to archive the corpus, a restore
+    # lacking it does not satisfy this host, however the archive labelled itself.
+    cfg = _config(tmp_path)
+    _enroll_training_corpus(cfg, size_bytes=4096)
+    _seed_two_day_chain(cfg)
+    built = create_ledger_archive(cfg, force=True)
+    assert built["archive_excluded_paths"] == ["polymarket_training/"]
+
+    # Same archive, restored under a config that requires the corpus in recovery.
+    narrowed = _restored_config(cfg, cfg.output_root)
+    narrowed.raw["disaster_recovery"]["excluded_path_prefixes"] = []
+    with pytest.raises(DisasterRecoveryError) as refused:
+        verify_and_restore_archive(narrowed, Path(built["archive_path"]), dry_run=True)
+    # Refused either by the scope guard or by chain verification once the waiver is
+    # correctly withheld - both are the required outcome, and the corpus is named.
+    assert "polymarket_training/historical_bid_ask_v1.csv" in str(refused.value)
+
+    # Under the registered config the same archive restores, unchanged.
+    assert verify_and_restore_archive(cfg, Path(built["archive_path"]), dry_run=True)["status"] == "ok"
+
+
+def test_wo127_relabelled_archive_cannot_smuggle_unattested_corpus_bytes(tmp_path: Path):
+    # Codex review of #364 (P1). The undeclared-omission guard checked only that a
+    # path EXISTS, so an attacker could satisfy it by ADDING bytes. An archive built
+    # on a restored host while the prefix was excluded carries the inherited marker
+    # and only missing_at_anchor rows after that boundary; relabel it to declare no
+    # exclusions and add arbitrary self-consistent corpus bytes, and nothing ever
+    # digest-checks them - pre-boundary rows are waived by the inherited marker, and
+    # missing_at_anchor rows perform no byte check. The forged corpus restored as
+    # recovered evidence. Presence is not attestation.
+    cfg = _config(tmp_path)
+    corpus = _enroll_training_corpus(cfg, size_bytes=4096)
+    _seed_two_day_chain(cfg)
+    relative = corpus.relative_to(cfg.output_root).as_posix()
+    built = create_ledger_archive(cfg, force=True)
+    restored_root = tmp_path / "restored_outputs"
+    verify_and_restore_archive(
+        cfg, Path(built["archive_path"]), dry_run=False, destination_output_root=restored_root
+    )
+    restored_cfg = _restored_config(cfg, restored_root)
+
+    # A post-boundary anchor on the restored host, where the corpus is absent: the
+    # row records missing_at_anchor, which performs no byte check.
+    assert anchor_ledgers(restored_cfg, anchor_date="2026-07-12")["status"] == "ok"
+    honest = create_ledger_archive(restored_cfg, force=True)
+    assert honest["archive_excluded_paths"] == ["polymarket_training/"]
+    assert verify_and_restore_archive(cfg, Path(honest["archive_path"]), dry_run=True)["status"] == "ok"
+
+    forged = _rebuild_archive_with_manifest(
+        Path(honest["archive_path"]),
+        tmp_path / "smuggled.tar.gz",
+        manifest_updates={"excluded_path_prefixes": [], "excluded_files": [], "excluded_file_count": 0},
+        add_paths={f"outputs/{relative}": b"ts,bid,ask\n9999999999,0.01,0.99\n"},
+    )
+    with pytest.raises(DisasterRecoveryError, match="no anchor attests"):
+        verify_and_restore_archive(cfg, forged, dry_run=True)
+
+
+def test_wo127_malformed_exclusion_config_stamps_error_instead_of_raising(tmp_path: Path):
+    # _base_payload runs BEFORE create_ledger_archive's try block, so a malformed
+    # exclusion config raised out of the builder with no status written at all -
+    # reintroducing exactly the blind-failure class WO-122a removed.
+    cfg = _config(tmp_path)
+    _seed_two_day_chain(cfg)
+    cfg.raw["disaster_recovery"]["excluded_path_prefixes"] = 7
+
+    status_path = cfg.output_root / "performance" / "disaster_recovery_status.json"
+    with pytest.raises(DisasterRecoveryError, match="list of path prefixes"):
+        create_ledger_archive(cfg, force=True)
+
+    status = read_json(status_path)
+    assert status["status"] == "error"
+    assert status["failure_stamped"] is True
+    assert "list of path prefixes" in status["archive_exclusion_config_error"]
+
+
+def test_wo127_archive_declaring_and_including_a_prefix_is_refused(tmp_path: Path):
+    # Codex review of #364 (P1). WO-127 grants boundary-scoped verification
+    # tolerance from the manifest's exclusion declaration, and installs the marker
+    # BEFORE chain verification. So an archive that declares polymarket_training/
+    # excluded while ALSO shipping a member under it had that member's anchored
+    # digest skipped: attacker-chosen bytes with a self-consistent archive manifest
+    # would restore with status ok. No archive this code builds takes that shape
+    # (_archive_source_payloads reports excluded paths instead of adding them), so
+    # it is refused at the untrusted-input boundary.
+    cfg = _config(tmp_path)
+    # Small enough that both forged archives stay under the 1MB test cap, so the
+    # refusal below is provably the shape check and not the size guard.
+    corpus = _enroll_training_corpus(cfg, size_bytes=4096)
+    _seed_two_day_chain(cfg)
+    built = create_ledger_archive(cfg, force=True)
+    source = Path(built["archive_path"])
+    assert built["archive_excluded_paths"], "the fixture must exercise a real exclusion"
+    relative = corpus.relative_to(cfg.output_root).as_posix()
+
+    contradictory = _rebuild_archive_with_manifest(
+        source,
+        tmp_path / "contradictory.tar.gz",
+        manifest_updates={},
+        add_paths={f"outputs/{relative}": b"ts,bid,ask\n9999999999,0.01,0.99\n"},
+    )
+    with pytest.raises(DisasterRecoveryError, match="excluded while also including"):
+        verify_and_restore_archive(cfg, contradictory, dry_run=True)
+
+    # The rejection is on the archive SHAPE, so it does not depend on the bytes
+    # being wrong: even a byte-faithful copy of the live corpus is refused, because
+    # the declaration and the payload contradict each other either way.
+    faithful = _rebuild_archive_with_manifest(
+        source,
+        tmp_path / "faithful.tar.gz",
+        manifest_updates={},
+        add_paths={f"outputs/{relative}": corpus.read_bytes()},
+    )
+    with pytest.raises(DisasterRecoveryError, match="excluded while also including"):
+        verify_and_restore_archive(cfg, faithful, dry_run=True)
+
+    # And the honest archive built by this code still restores.
+    assert verify_and_restore_archive(cfg, source, dry_run=True)["status"] == "ok"

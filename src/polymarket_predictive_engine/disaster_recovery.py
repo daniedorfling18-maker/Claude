@@ -19,7 +19,14 @@ import tempfile
 from typing import Any
 
 from .config import EngineConfig, load_config
-from .ledger_anchor import ledger_paths_for_archive, verify_ledger_chain
+from .ledger_anchor import (
+    ARCHIVE_EXCLUDED_PREFIXES,
+    RESTORE_PROVENANCE_FILE,
+    anchored_relative_paths,
+    canonical_date,
+    ledger_paths_for_archive,
+    verify_ledger_chain,
+)
 from .runtime_lock import runtime_lock
 from .utils import now_utc, parse_timestamp, read_csv_rows, read_json, write_json
 
@@ -36,7 +43,9 @@ class DisasterRecoveryError(RuntimeError):
 # from the recovery ARCHIVE only, which brings the archive back under even the
 # old 50MB ceiling. Prefixes are paths.output_root relative and must end in "/"
 # so a prefix can never match a sibling file by accident.
-ARCHIVE_EXCLUDED_PREFIXES: tuple[str, ...] = ("polymarket_training/",)
+# WO-127: ARCHIVE_EXCLUDED_PREFIXES moved to ledger_anchor so verification can
+# intersect against it (this module already imports ledger_anchor; the reverse
+# would be circular). Imported above and re-exported here for existing readers.
 ARCHIVE_EXCLUSION_REASON = (
     "excluded_by_registration: derived collection/training corpus, regenerable by "
     "re-harvest, still covered by the WO-61 anchor chain"
@@ -123,6 +132,25 @@ def _output_path(cfg: EngineConfig, value: Any) -> Path:
     return cfg.output_root.joinpath(*path.parts)
 
 
+def _excluded_prefixes_error(settings: dict[str, Any]) -> str:
+    """Return the exclusion-config parse error, or "" when the config is valid."""
+
+    try:
+        _excluded_prefixes(settings)
+    except ValueError as exc:
+        return str(exc)
+    return ""
+
+
+def _excluded_prefixes_or_default(settings: dict[str, Any]) -> tuple[str, ...]:
+    """Non-raising view for reporting paths; the builder still fails on error."""
+
+    try:
+        return _excluded_prefixes(settings)
+    except ValueError:
+        return ARCHIVE_EXCLUDED_PREFIXES
+
+
 def _base_payload(cfg: EngineConfig, settings: dict[str, Any], *, status: str) -> dict[str, Any]:
     return {
         "status": status,
@@ -136,10 +164,16 @@ def _base_payload(cfg: EngineConfig, settings: dict[str, Any], *, status: str) -
         # WO-123: the registered archive scope is visible in every state, not
         # only on a successful build, so an operator reading the status file
         # always knows what recovery does and does not cover.
-        "archive_excluded_paths": list(_excluded_prefixes(settings)),
+        # WO-127: this runs BEFORE create_ledger_archive's try block, so it must
+        # not raise — a malformed exclusion config used to escape with no status
+        # stamped at all, reintroducing exactly the blind-failure class WO-122a
+        # removed. The parse error is recorded here and re-raised inside the try,
+        # where it becomes a stamped `status: error`.
+        "archive_excluded_paths": list(_excluded_prefixes_or_default(settings)),
         "archive_exclusion_reason": (
-            ARCHIVE_EXCLUSION_REASON if _excluded_prefixes(settings) else ""
+            ARCHIVE_EXCLUSION_REASON if _excluded_prefixes_or_default(settings) else ""
         ),
+        "archive_exclusion_config_error": _excluded_prefixes_error(settings),
         "paper_trading_invoked": False,
         "live_trading_invoked": False,
     }
@@ -400,6 +434,8 @@ def create_ledger_archive(cfg: EngineConfig, *, force: bool = False) -> dict[str
             if size_cap_bytes <= 0:
                 raise ValueError("disaster_recovery.size_cap_mb must be positive")
             source_cap_bytes = int(float(settings["source_cap_mb"]) * 1024 * 1024)
+            # WO-127: inside the try, so a malformed config stamps status:error
+            # instead of raising past _base_payload with nothing recorded.
             excluded_prefixes = _excluded_prefixes(settings)
             sources, excluded = _archive_source_payloads(
                 cfg,
@@ -436,6 +472,78 @@ def create_ledger_archive(cfg: EngineConfig, *, force: bool = False) -> dict[str
                 "paper_trading_invoked": False,
                 "live_trading_invoked": False,
             }
+            # Codex review of #364 (P2, two findings). An operator who NARROWS the
+            # exclusion set on a restored host before re-harvest recreates the corpus
+            # produces an archive that omits it, because an absent file is invisible
+            # to the builder. Reporting that was not enough: push_vps_archive.sh gates
+            # only on `status`, so an incomplete archive would still force-replace the
+            # SOLE remote snapshot and stamp the RPO as met - a diagnostic no consumer
+            # reads is the same fail-silent class this batch exists to remove. So the
+            # build REFUSES, before the archive file is written, and the refusal is
+            # stamped where the recovery watchdog reads it.
+            archived_relatives = {
+                str(row["path"])[len("outputs/") :]
+                for row in sources
+                if str(row["path"]).startswith("outputs/")
+            }
+            # Codex review of #364 (P1) - a regression introduced by the previous
+            # commit. Whether a missing path is excluded BY SCOPE must be read from
+            # the effective exclusion set, never from `excluded`: that list is built
+            # by walking files that exist, so an absent path can never appear in it.
+            # Immediately after a restore every anchored corpus path is absent by
+            # design while the configured prefix still declares it excluded, so
+            # deriving the answer from `excluded` classified them as coverage gaps and
+            # refused the next archive - wedging the recurring recovery lane after
+            # every restore until collection recreated the corpus. That is the exact
+            # class of failure WO-127 exists to remove, reintroduced one layer over.
+            pending_reharvest = sorted(
+                relative
+                for relative in anchored_relative_paths(cfg, as_of_date=day)
+                if relative.startswith(ARCHIVE_EXCLUDED_PREFIXES)
+                and not relative.startswith(tuple(excluded_prefixes))
+                and relative not in archived_relatives
+            )
+            # Codex review of #364 (P1). The absent-corpus case above is not the only
+            # way a narrowed archive can lie. If the restore and the re-harvest happen
+            # on the archive's own snapshot day, `anchor_ledgers` returns
+            # already_anchored and writes NO new row - so the corpus is present, passes
+            # the coverage check, and yet every chain row naming it predates the
+            # boundary and is waived. Those bytes would enter the recovery archive
+            # having never resumed tamper coverage: attacker-chosen content with a
+            # self-consistent archive manifest would be accepted. Including a corpus
+            # therefore requires it to be anchored `present` AFTER the boundary.
+            inherited_boundary = str(verification.get("restore_boundary_date") or "")
+            unauthenticated: list[str] = []
+            if inherited_boundary:
+                covered_since_restore = anchored_relative_paths(
+                    cfg, as_of_date=day, after_date=inherited_boundary
+                )
+                unauthenticated = sorted(
+                    relative
+                    for relative in archived_relatives
+                    if relative.startswith(ARCHIVE_EXCLUDED_PREFIXES)
+                    and relative not in covered_since_restore
+                )
+            payload["archive_pending_reharvest_paths"] = pending_reharvest
+            payload["archive_unanchored_since_restore_paths"] = unauthenticated
+            payload["archive_coverage_complete"] = not pending_reharvest and not unauthenticated
+            if unauthenticated:
+                raise ValueError(
+                    "archive would carry bytes no anchor attests: "
+                    f"{len(unauthenticated)} path(s) under a registered prefix are present but "
+                    f"have no `present` anchor after the restore boundary {inherited_boundary} "
+                    f"(first: {unauthenticated[0]}). The daily anchor lane must record them on a "
+                    "later UTC day before they can enter the recovery archive; until then keep the "
+                    "prefix in disaster_recovery.excluded_path_prefixes"
+                )
+            if pending_reharvest:
+                raise ValueError(
+                    "archive would claim coverage it does not have: "
+                    f"{len(pending_reharvest)} anchored path(s) under a registered prefix are "
+                    f"absent and not declared excluded (first: {pending_reharvest[0]}). Either "
+                    "wait for re-harvest to recreate them, or restore the prefix to "
+                    "disaster_recovery.excluded_path_prefixes so the archive states its real scope"
+                )
             archive_path = _output_path(cfg, settings["archive_file"])
             compressed_size, archive_sha = _write_archive(
                 archive_path,
@@ -453,6 +561,8 @@ def create_ledger_archive(cfg: EngineConfig, *, force: bool = False) -> dict[str
                     "file_count": len(sources),
                     "uncompressed_bytes": manifest["uncompressed_bytes"],
                     "archive_excluded_paths": list(excluded_prefixes),
+                    "archive_pending_reharvest_paths": pending_reharvest,
+                    "archive_coverage_complete": not pending_reharvest,
                     "archive_excluded_file_count": len(excluded),
                     "archive_excluded_bytes": manifest["excluded_bytes"],
                     "archive_size_bytes": compressed_size,
@@ -480,6 +590,24 @@ def create_ledger_archive(cfg: EngineConfig, *, force: bool = False) -> dict[str
         _write_status(cfg, settings, payload)
         raise DisasterRecoveryError(payload["error"]) from exc
     return _write_status(cfg, settings, payload)
+
+
+def _normalised_prefixes(value: Any) -> set[str]:
+    """Normalise an untrusted exclusion declaration to comparable prefixes.
+
+    Empty and whitespace-only entries are dropped - `startswith("")` is true for
+    every path, so honouring one would turn a declaration into a wildcard.
+    """
+
+    if not isinstance(value, (list, tuple)):
+        return set()
+    normalised: set[str] = set()
+    for item in value:
+        text = str(item).strip().replace("\\", "/").lstrip("/")
+        if not text:
+            continue
+        normalised.add(text if text.endswith("/") else f"{text}/")
+    return normalised
 
 
 def _safe_member_path(name: str) -> PurePosixPath:
@@ -540,7 +668,160 @@ def _read_and_validate_archive(archive_path: Path, *, size_cap_bytes: int) -> tu
             raise ValueError(f"archive size mismatch for {name}")
         if _sha256_bytes(data) != str(row.get("sha256") or ""):
             raise ValueError(f"archive digest mismatch for {name}")
+    _reject_contradictory_exclusions(manifest, actual_paths)
     return manifest, files
+
+
+def _reject_contradictory_exclusions(manifest: dict[str, Any], member_paths: set[str]) -> None:
+    """Refuse an archive that both declares a prefix excluded and ships it.
+
+    Codex review of #364 (P1). WO-127 grants boundary-scoped verification
+    tolerance from the manifest's exclusion declaration, and the marker is
+    installed BEFORE chain verification runs. So an archive that declares
+    ``polymarket_training/`` excluded while also carrying an
+    ``outputs/polymarket_training/...`` member gets that member's anchored digest
+    SKIPPED: arbitrary bytes with a self-consistent archive manifest would restore
+    with ``status: ok``. The declaration would be granting tolerance for a file
+    the archive itself supplies.
+
+    No archive this code builds can take that shape - ``_archive_source_payloads``
+    reports excluded paths instead of adding them - so the shape only arises from a
+    forged or corrupted archive, and it is rejected on the untrusted-input boundary
+    rather than reconciled later. Rejection is keyed on the DECLARED set, not the
+    registered/config intersection, so the archive is refused even when the
+    contradiction happens not to be exploitable under the current configuration.
+    """
+
+    # Codex review of #364 (P1): this matched RAW declarations while
+    # verify_and_restore_archive matched normalised ones, and a mismatch between two
+    # readings of the same untrusted field is a bypass by construction. A declaration
+    # of "/polymarket_training/" missed here, then normalised into the registered
+    # exclusion there - so the marker waived the included member's pre-boundary digest
+    # and arbitrary self-consistent bytes restored. One normalisation, used by both.
+    prefixes = tuple(sorted(_normalised_prefixes(manifest.get("excluded_path_prefixes"))))
+    if not prefixes:
+        return
+    contradictory = sorted(
+        name
+        for name in member_paths
+        if name.startswith("outputs/") and name[len("outputs/") :].startswith(prefixes)
+    )
+    if contradictory:
+        raise ValueError(
+            "archive declares "
+            + ", ".join(prefixes)
+            + " excluded while also including "
+            + f"{len(contradictory)} member(s) under those prefixes "
+            + f"(first: {contradictory[0]}); a declaration cannot excuse verification of a file "
+            "the archive supplies"
+        )
+
+
+def _write_restore_provenance(
+    output_root: Path,
+    *,
+    excluded_prefixes: tuple[str, ...],
+    boundary_date: str,
+    chain_head: str,
+    dry_run: bool,
+) -> Path | None:
+    """Record why a restored tree is missing registered, excluded paths.
+
+    WO-127. Without this, a restore verified clean and the next production
+    ``anchor_ledgers`` run froze the head on ``blocked_broken_chain``, because
+    verification there has no caller-supplied tolerance. The marker makes the
+    tolerance a property of the tree, so both callers agree.
+
+    ``restore_boundary_date`` is the archive's snapshot date: entries anchored at
+    or before it recorded digests for bytes that cannot be reproduced (a
+    re-harvest yields different content), so they are unverifiable by design.
+    Anything anchored after it is verified normally.
+
+    Codex review of #364 (P1): a boundary is a fact about the CHAIN's history, not
+    about one archive's exclusion set, so an INHERITED marker carried in the
+    archive is never discarded. Without this, an archive built on a restored host
+    with ``excluded_path_prefixes: []`` - the documented tighten-only option of
+    putting the corpus back into recovery - wrote no marker into the extracted
+    tree, so the pre-restore rows were compared against re-harvested bytes and
+    every such archive was rejected. Archive creation on a restored host would
+    have failed permanently. Boundaries therefore MERGE to the later date and the
+    prefix sets union: rows between the two boundaries are excused only when this
+    archive also drops the corpus, which is exactly when they are unverifiable.
+    """
+
+    path = output_root / PurePosixPath(RESTORE_PROVENANCE_FILE)
+    inherited = read_json(path, default={}) or {}
+    if not isinstance(inherited, dict):
+        inherited = {}
+    inherited_prefixes = inherited.get("excluded_path_prefixes")
+    prefixes = {str(item) for item in excluded_prefixes}
+    if isinstance(inherited_prefixes, (list, tuple)):
+        prefixes |= {str(item) for item in inherited_prefixes}
+    # The reader intersects against the REGISTERED set regardless, so an
+    # inherited prefix cannot widen the waiver beyond it.
+    prefixes &= set(ARCHIVE_EXCLUDED_PREFIXES)
+    inherited_boundary = str(inherited.get("restore_boundary_date") or "").strip()
+    # This archive's own snapshot date extends the waiver ONLY when this archive
+    # actually drops the corpus. When it carries the regenerated corpus instead,
+    # rows anchored since the inherited boundary recorded bytes the archive
+    # supplies, so they must verify normally - extending the boundary over them
+    # would excuse a tampered restored corpus.
+    new_boundary = str(boundary_date or "").strip() if excluded_prefixes else ""
+    # Compare as calendar dates, never as strings: both sides are untrusted input
+    # and a non-canonical spelling sorts wrongly (#364 P1). A side that does not
+    # parse loses to one that does, and if neither parses no marker is written -
+    # so verification refuses rather than honouring an unreadable boundary.
+    # The boundary and the chain head it names travel as a PAIR. Verification binds
+    # them (a boundary must be the anchor date of the row carrying that head), so
+    # keeping the inherited boundary while recording this archive's head would
+    # produce a marker that refuses itself.
+    inherited_head = str(inherited.get("restored_from_chain_head") or "").strip()
+    new_head = str(chain_head or "").strip()
+    # Codex review of #364 (P2), twice. Ranking by date was wrong in both directions:
+    # first an inherited pair sharing the date displaced the valid current pair, then
+    # ANY later-but-invalid inherited pair did - a future date or a head that names no
+    # row - so post-build restore refused the marker, found the deliberately excluded
+    # corpus missing, and failed archive creation. That is the wedge class this work
+    # order exists to remove, arriving through the ranking function.
+    #
+    # Ranking is not needed at all. When this archive excludes the corpus it supplies
+    # its own boundary, which is the snapshot date and therefore never earlier than an
+    # inherited boundary (a boundary must name a row at or before it). So: use the
+    # current pair whenever it exists, and fall back to the inherited pair only when
+    # this archive supplies none - which is exactly the case the inheritance exists
+    # for. An inherited pair is eligible only if it could actually be honoured: a
+    # canonical, non-future boundary and a non-empty head.
+    effective_boundary, effective_head = "", ""
+    if new_boundary and new_head:
+        effective_boundary, effective_head = new_boundary, new_head
+    elif inherited_boundary and inherited_head:
+        inherited_day = canonical_date(inherited_boundary)
+        today = canonical_date(now_utc()[:10])
+        if inherited_day is not None and today is not None and inherited_day <= today:
+            effective_boundary, effective_head = inherited_boundary, inherited_head
+    if not prefixes or not effective_boundary:
+        return None
+    write_json(
+        path,
+        {
+            "work_order": "WO-127",
+            "generated_at_utc": now_utc(),
+            "restore_boundary_date": effective_boundary,
+            "excluded_path_prefixes": sorted(prefixes),
+            "restored_from_chain_head": effective_head,
+            "inherited_restore_boundary_date": inherited_boundary or None,
+            "archive_snapshot_date": new_boundary or None,
+            "dry_run": bool(dry_run),
+            "reason": (
+                "these registered prefixes are excluded from the recovery archive and are "
+                "regenerable by re-harvest; entries anchored at or before the boundary cannot "
+                "be byte-verified and are excused, entries after it are verified normally"
+            ),
+            "paper_trading_invoked": False,
+            "live_trading_invoked": False,
+        },
+    )
+    return path
 
 
 def _config_for_output_root(cfg: EngineConfig, output_root: Path) -> EngineConfig:
@@ -596,20 +877,50 @@ def verify_and_restore_archive(
         # before WO-123) gets no tolerance at all. Tolerance covers absence only
         # - a present file whose anchored digest changed still fails below.
         declared = manifest.get("excluded_path_prefixes")
-        declared_prefixes = (
-            {str(item) for item in declared} if isinstance(declared, (list, tuple)) else set()
-        )
+        # Codex review of #364 (P2): NORMALISE before matching. A forged manifest can
+        # declare [""], and every path satisfies startswith("") - so an archive could
+        # claim to have "declared" a prefix it never named and slip past the
+        # undeclared-omission guard below while the inherited marker still supplied
+        # the registered waiver. Empty and whitespace entries are dropped, separators
+        # normalised, and a trailing slash enforced so a prefix cannot match a sibling
+        # file by accident.
+        declared_prefixes = _normalised_prefixes(declared)
+        # Codex review of #364 (P2) corrected my reasoning here, and it was the better
+        # argument. I based the missing-path exception on "did the archive validly
+        # declare this prefix", on the grounds that validity is a property of the
+        # archive rather than of the host. That conflated two questions. Whether the
+        # DECLARATION is well formed is indeed the archive's property - and it still
+        # gates the contradiction check. But whether a restore delivers the coverage
+        # REQUIRED is the restoring host's property: if this host's config says to
+        # archive the corpus, a restore lacking it does not satisfy this host, however
+        # the archive labelled itself. The exception is therefore based on `tolerated`,
+        # the manifest-declared / registered / config-effective intersection.
+        # WO-127: also intersect the CONFIG-EFFECTIVE set. A config that NARROWS
+        # exclusions means more was archived, so tolerating the full registered
+        # set would excuse the absence of something that should be present.
         tolerated = tuple(
-            prefix for prefix in ARCHIVE_EXCLUDED_PREFIXES if prefix in declared_prefixes
+            prefix
+            for prefix in ARCHIVE_EXCLUDED_PREFIXES
+            if prefix in declared_prefixes and prefix in set(_excluded_prefixes(settings))
         )
         with tempfile.TemporaryDirectory(prefix="polymarket-ledger-restore-") as temp_dir:
             extracted_output = _materialise_files(files, Path(temp_dir))
+            # WO-127: the restore check now reads the same provenance marker the
+            # production anchor lane reads, so the two cannot disagree. Writing it
+            # into the extracted tree BEFORE verification is what makes the
+            # verified tree and the handed-over tree the same tree.
+            _write_restore_provenance(
+                extracted_output,
+                excluded_prefixes=tolerated,
+                boundary_date=snapshot_date,
+                chain_head=str(manifest.get("chain_head") or ""),
+                dry_run=dry_run,
+            )
             extracted_cfg = _config_for_output_root(cfg, extracted_output)
             chain = verify_ledger_chain(
                 extracted_cfg,
                 as_of_date=snapshot_date,
                 write_summary=False,
-                tolerated_missing_prefixes=tolerated,
             )
             if chain.get("status") != "ok" or chain.get("verified_through_date") != snapshot_date:
                 raise ValueError(
@@ -618,6 +929,64 @@ def verify_and_restore_archive(
                 )
             if str(chain.get("verified_chain_head") or "") != str(manifest.get("chain_head") or ""):
                 raise ValueError("restored WO-61 chain head differs from the archive manifest")
+            # Codex review of #364 (P2). I removed this check once as redundant; it is
+            # redundant ONLY for an archive built after a re-harvest, where the corpus
+            # carries a post-boundary `present` row that chain verification already
+            # enforces. The still-excluded shape is not covered: an archive built while
+            # the prefix was excluded carries the inherited marker and no corpus, and
+            # relabelling its manifest to declare no exclusions is self-consistent -
+            # the file set already matches. The inherited prefix is then imported by
+            # the union, historical rows are waived, later missing_at_anchor rows are
+            # tolerated by design, and it restores ok while claiming full coverage.
+            # An archive that does not DECLARE a prefix excluded is asserting coverage
+            # of it, so every historically anchored path under it must be present -
+            # independent of any inherited provenance.
+            undeclared_missing = sorted(
+                relative
+                for relative in anchored_relative_paths(extracted_cfg, as_of_date=snapshot_date)
+                if relative.startswith(ARCHIVE_EXCLUDED_PREFIXES)
+                and not relative.startswith(tolerated)
+                and not (extracted_output / PurePosixPath(relative)).is_file()
+            )
+            # Codex review of #364 (P1): the guard above checks only that a path
+            # EXISTS, so adding bytes satisfied it. An archive built on a restored
+            # host while the prefix was excluded carries the inherited marker and
+            # only `missing_at_anchor` rows after that boundary; relabel it to
+            # declare no exclusions and add arbitrary self-consistent corpus bytes,
+            # and nothing ever digest-checks them - pre-boundary rows are waived by
+            # the inherited marker and post-boundary rows are missing_at_anchor,
+            # which performs no byte check. The forged corpus restored as recovered
+            # evidence. Presence is not attestation: bytes under a waived prefix are
+            # accepted only where an anchor recorded them `present` AFTER the
+            # boundary, mirroring the builder-side rule.
+            honoured_boundary = str(chain.get("restore_boundary_date") or "")
+            unattested: list[str] = []
+            if honoured_boundary:
+                attested_since_restore = anchored_relative_paths(
+                    extracted_cfg, as_of_date=snapshot_date, after_date=honoured_boundary
+                )
+                unattested = sorted(
+                    name[len("outputs/") :]
+                    for name in files
+                    if name.startswith("outputs/")
+                    and name[len("outputs/") :].startswith(ARCHIVE_EXCLUDED_PREFIXES)
+                    and name[len("outputs/") :] not in attested_since_restore
+                )
+            if unattested:
+                raise ValueError(
+                    "archive carries bytes under a waived prefix that no anchor attests: "
+                    f"{len(unattested)} path(s) have no `present` anchor after the inherited "
+                    f"restore boundary {honoured_boundary} (first: {unattested[0]}); a restore "
+                    "waiver excuses absence, it does not authenticate replacement bytes"
+                )
+            if undeclared_missing:
+                raise ValueError(
+                    "archive omits "
+                    f"{len(undeclared_missing)} anchored path(s) under a registered prefix it does "
+                    f"not declare excluded (first: {undeclared_missing[0]}); an inherited restore "
+                    "boundary excuses only what a declared exclusion accounts for, never an "
+                    "undeclared omission"
+                )
             if not dry_run:
                 if destination_output_root is None:
                     raise ValueError("destination_output_root is required unless --dry-run is used")
@@ -640,7 +1009,21 @@ def verify_and_restore_archive(
                 "chain_head": manifest.get("chain_head"),
                 "ledger_chain_verification": chain,
                 "excluded_path_prefixes_tolerated": list(tolerated),
-                "excluded_missing_tolerated": int(chain.get("missing_excluded_tolerated") or 0),
+                "restored_unverifiable_tolerated": int(
+                    chain.get("restored_unverifiable_tolerated") or 0
+                ),
+                # WO-127: make the narrowed recovery state explicit in the report.
+                # A restore that cannot bring these paths back is a successful
+                # restore of the evidence ledgers, not a complete tree.
+                "restored_without_prefixes": list(tolerated),
+                # Codex review of #364 (P2): report the boundary actually HONOURED,
+                # not this archive's snapshot date. On a restored host whose
+                # exclusions were narrowed, the installed marker deliberately keeps
+                # the older inherited boundary, and reporting the snapshot date here
+                # contradicted both the marker and the chain verification - handing
+                # the operator the wrong scope for the waiver.
+                "restore_boundary_date": chain.get("restore_boundary_date"),
+                "restore_provenance_rejected": chain.get("restore_provenance_rejected"),
                 "file_count": len(manifest.get("files") or []),
                 "archive_sha256": hashlib.sha256(Path(archive_path).read_bytes()).hexdigest(),
                 "restore_applied": not dry_run,
@@ -648,6 +1031,18 @@ def verify_and_restore_archive(
         )
     except Exception as exc:
         payload.update({"status": "error", "error": f"{type(exc).__name__}: {exc}", "failure_stamped": True})
+        # Codex review of #364 (P2): the failure path used to discard the chain
+        # diagnostics, so a restore that failed BECAUSE its inherited marker was
+        # malformed reported neither the rejection reason nor the verification
+        # result - the registered fail-safe reason existed and was thrown away at
+        # exactly the moment an operator needs it.
+        if isinstance(locals().get("chain"), dict):
+            diagnostics: dict[str, Any] = locals()["chain"]
+            payload.setdefault("ledger_chain_verification", diagnostics)
+            payload.setdefault(
+                "restore_provenance_rejected", diagnostics.get("restore_provenance_rejected")
+            )
+            payload.setdefault("restore_boundary_date", diagnostics.get("restore_boundary_date"))
         write_json(report_path, payload)
         raise DisasterRecoveryError(payload["error"]) from exc
     write_json(report_path, payload)

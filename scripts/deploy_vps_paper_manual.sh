@@ -29,6 +29,30 @@ DEPLOY_RECORD_RELATIVE="performance/vps_manual_deploy.json"
 ROLLBACK_IMAGE_TAG="polymarket-paper-vps:rollback-last-known-good"
 
 log() { printf '%s %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$*"; }
+
+# --- guard helpers come from the TARGET revision, not the old checkout ---------
+# The checkout being deployed FROM is by definition out of date - that is why a
+# deploy is running. Reading the guards out of it would run the previous
+# revision's preflight, transport proof, health gate and rollback against the new
+# code, silently skipping any hardening the target added. Path A avoids this by
+# extracting each helper from the target SHA; Path B does the same.
+STAGE_DIR=""
+stage_target_scripts() {
+  target_sha="$1"
+  STAGE_DIR="$(mktemp -d)"
+  chmod 0700 "$STAGE_DIR"
+  for helper in \
+    preflight_vps_capacity.py \
+    validate_dashboard_private_transport.py \
+    update_vps_checkout_preserving_runtime.py \
+    rollback_vps_paper_deploy.py \
+    check_polymarket_vps_paper.sh
+  do
+    git -C "$REPO_DIR" show "$target_sha:scripts/$helper" > "$STAGE_DIR/$helper" \
+      || fail "cannot stage scripts/$helper from $target_sha"
+  done
+  log "staged target-revision guards from $target_sha in $STAGE_DIR"
+}
 fail() { log "ERROR: $*" >&2; exit 1; }
 
 # --- guard 1: the target must be the reviewed, merged main tip -----------------
@@ -61,7 +85,7 @@ resolve the drift before deploying"
 
 # --- guard 3: capacity ---------------------------------------------------------
 run_capacity_preflight() {
-  python3 "$REPO_DIR/scripts/preflight_vps_capacity.py" --repo-dir "$REPO_DIR" \
+  python3 "$STAGE_DIR/preflight_vps_capacity.py" --repo-dir "$REPO_DIR" \
     || fail "capacity preflight refused the deploy"
 }
 
@@ -70,7 +94,7 @@ run_capacity_preflight() {
 # after quiescing would mean tearing down a healthy stack to discover the new one
 # must not be started. An uncapturable transport state fails closed.
 assert_private_transport() {
-  python3 "$REPO_DIR/scripts/validate_dashboard_private_transport.py" --repo-dir "$REPO_DIR" \
+  python3 "$STAGE_DIR/validate_dashboard_private_transport.py" --repo-dir "$REPO_DIR" \
     || fail "dashboard private-transport proof failed; refusing to deploy"
 }
 
@@ -95,7 +119,7 @@ rollback_if_armed() {
   status="$1"
   if [ "$status" -ne 0 ] && [ "${ROLLBACK_ARMED:-false}" = true ]; then
     log "deploy failed after the arming boundary; restoring $ORIGINAL_HEAD"
-    python3 "$REPO_DIR/scripts/rollback_vps_paper_deploy.py" \
+    python3 "$STAGE_DIR/rollback_vps_paper_deploy.py" \
       --repo "$REPO_DIR" \
       --rollback-ref "$ORIGINAL_HEAD" \
       --branch main \
@@ -110,7 +134,7 @@ rollback_if_armed() {
 # --- source update -------------------------------------------------------------
 update_checkout() {
   target_sha="$1"
-  python3 "$REPO_DIR/scripts/update_vps_checkout_preserving_runtime.py" \
+  python3 "$STAGE_DIR/update_vps_checkout_preserving_runtime.py" \
     --repo "$REPO_DIR" --target "$target_sha" \
     || fail "runtime-preserving checkout update refused"
 }
@@ -160,7 +184,7 @@ run_deploy_acceptance() {
 }
 
 run_health_gate() {
-  PM_VPS_REPO_DIR="$REPO_DIR" bash "$REPO_DIR/scripts/check_polymarket_vps_paper.sh" \
+  PM_VPS_REPO_DIR="$REPO_DIR" bash "$STAGE_DIR/check_polymarket_vps_paper.sh" \
     || fail "post-deploy health check failed"
 }
 
@@ -202,6 +226,7 @@ payload = {
     "authorised_by": "owner",
     "guard_order": [
         "assert_target_is_origin_main",
+        "stage_target_scripts",
         "assert_checkout_matches_marker",
         "run_capacity_preflight",
         "assert_private_transport",
@@ -225,6 +250,7 @@ PY
 main() {
   log "WO-133 manual deploy starting; Path A (Actions workflow) is preferred when available"
   target_sha="$(assert_target_is_origin_main)"
+  stage_target_scripts "$target_sha"
   assert_checkout_matches_marker
   run_capacity_preflight
   assert_private_transport

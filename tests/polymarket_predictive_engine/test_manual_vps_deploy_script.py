@@ -31,6 +31,7 @@ def _guard_order() -> list[str]:
         stripped = line.strip()
         for name in (
             "assert_target_is_origin_main",
+            "stage_target_scripts",
             "assert_checkout_matches_marker",
             "run_capacity_preflight",
             "assert_private_transport",
@@ -132,13 +133,18 @@ def test_wo133_refuses_when_the_checkout_and_marker_disagree(tmp_path: Path) -> 
 
 def test_wo133_a_failure_past_the_arming_boundary_invokes_rollback(tmp_path: Path) -> None:
     repo = tmp_path / "repo"
-    (repo / "scripts").mkdir(parents=True)
-    (repo / "scripts" / "rollback_vps_paper_deploy.py").write_text(
+    repo.mkdir()
+    stage = tmp_path / "stage"
+    stage.mkdir()
+    # Rollback must also come from the TARGET revision: rolling back with the old
+    # checkout's rollback utility is the one moment you cannot afford a stale tool.
+    (stage / "rollback_vps_paper_deploy.py").write_text(
         "import sys; print('ROLLBACK-INVOKED')\n", encoding="utf-8"
     )
     script = f"""
     PM_MANUAL_DEPLOY_LIBRARY_ONLY=1 . {SCRIPT}
     REPO_DIR={repo}
+    STAGE_DIR={stage}
     ROLLBACK_ARMED=true
     ORIGINAL_HEAD=abc123
     ROLLBACK_DIR={tmp_path}
@@ -183,6 +189,26 @@ def test_wo133_deploy_record_reports_the_unprovable_step_as_unproven(tmp_path: P
     assert record["live_trading_invoked"] is False
     # The recorded order is the order main() actually runs.
     assert record["guard_order"] == [name for name in _guard_order() if name != "write_deploy_record"]
+
+
+def test_wo133_guards_are_read_from_the_target_revision_not_the_old_checkout() -> None:
+    # The checkout being deployed FROM is by definition out of date - that is why
+    # a deploy is running. Reading the guards out of it would run the PREVIOUS
+    # revision's preflight, transport proof, health gate and rollback against the
+    # new code, silently skipping any hardening the target added.
+    body = _script()
+    order = _guard_order()
+    assert order.index("stage_target_scripts") < order.index("run_capacity_preflight")
+    assert order.index("stage_target_scripts") < order.index("assert_private_transport")
+    for helper in (
+        "preflight_vps_capacity.py",
+        "validate_dashboard_private_transport.py",
+        "update_vps_checkout_preserving_runtime.py",
+        "rollback_vps_paper_deploy.py",
+        "check_polymarket_vps_paper.sh",
+    ):
+        assert f'"$STAGE_DIR/{helper}"' in body, helper
+        assert f'"$REPO_DIR/scripts/{helper}"' not in body, helper
 
 
 def test_wo133_never_writes_an_attestation_or_claims_independent_review() -> None:

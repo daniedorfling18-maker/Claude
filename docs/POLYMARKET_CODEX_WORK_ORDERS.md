@@ -5478,29 +5478,36 @@ says a schema change requires). Dropping a field whose value is empty for every
 appended row stays allowed — that is a no-op, not data loss. The only caller is
 `shadow_cohort.py:1103`.
 
-**128.4 — the shadow-ledger appenders are not fully serialised.**
-`update_shadow_cohort_evidence` writes `shadow_positions.csv` (snapshot-enrolled)
-and appends `shadow_fills.csv` (append_only-enrolled) with no lock, and it is
-reachable from both the prediction cycle and an ad-hoc `longshot-bias-scan`
-(`longshot_bias.py:411`, outside the `prediction_cycle` lock). Two concurrent
-writers can interleave an append and lose fills or break the shadow anchor.
-Fix: serialise the whole evidence update under the existing `runtime_lock`
-(reuse the `prediction_cycle` lock name so a concurrent manual scan waits rather
-than racing); when the lock is unavailable the update is SKIPPED and reported,
-never performed unlocked.
+**128.4 — the shadow-ledger write lock is a caller convention, not a contract.**
+Corrected 2026-07-27 after Codex review of #365 (P1) checked the tree: the earlier
+claim that this path runs unlocked was WRONG. Both entry points already hold
+`prediction_cycle` — `paper_cycle.py:93` around the call at `:139`, and
+`longshot_bias.py:422-426` — and `runtime_lock` is NOT reentrant, so acquiring the
+same name inside `update_shadow_cohort_evidence` would make BOTH callers skip every
+shadow update. Do not add an inner lock.
+
+The real defect is that the requirement is a convention no code enforces: a new
+caller can invoke `update_shadow_cohort_evidence` unlocked and interleave an append
+with the live loop, losing fills or breaking the shadow anchor. Fix: make the
+precondition explicit and enforced by the suite rather than by memory. State it in
+the function's docstring ("callers MUST hold the `prediction_cycle` runtime lock;
+this function does not acquire it"), and add a structural test asserting every call
+site in `src/` sits inside a `runtime_lock(..., "prediction_cycle", ...)` block, so
+a future unlocked caller fails CI. Do not change either existing caller's locking.
 
 **Fail-safe direction (S5).** 128.1: an interrupted copy leaves no snapshot at the
 canonical path, so the next run creates it — never a truncated one that wedges the
 lane. 128.2: an anchor-tail failure is reported nonzero and the harvest is not
 repeated; a harvest failure is reported nonzero on its own row. 128.3: a field
-that cannot be persisted raises instead of vanishing. 128.4: when the lock cannot
-be acquired the evidence update does not run and says so.
+that cannot be persisted raises instead of vanishing. 128.4: an unlocked
+call site fails the test suite rather than shipping, and the existing callers'
+skip-when-held behaviour is unchanged, so a concurrent scan still declines to race.
 
 **Interleaving (S2).** 128.1 makes `performance/ledger_anchor_snapshots/**`
-crash-atomic (temp + `os.replace` in the same directory). 128.4 puts
-`polymarket_shadow/shadow_positions.csv` and
-`polymarket_shadow/shadow_fills.csv` under one lock: concurrent callers either
-serialise or the later one skips. No artifact gains or loses a field.
+crash-atomic (temp + `os.replace` in the same directory). 128.4 changes no runtime behaviour:
+`polymarket_shadow/shadow_positions.csv` and `polymarket_shadow/shadow_fills.csv`
+stay under the callers' existing `prediction_cycle` lock, where a concurrent caller
+already skips rather than races. No artifact gains or loses a field.
 
 Tests: (1) a truncated pre-existing snapshot from an interrupted copy — simulate
 by writing a short file — is detected as differing, and a run interrupted between
@@ -5508,14 +5515,22 @@ temp write and replace leaves NO canonical snapshot; (2) library-only sourcing
 test proving a failing anchor tail stamps its own nonzero row without a second
 harvest invocation, and a failing harvest still stamps nonzero; (3) appending a
 row whose new field is non-empty against a legacy header raises and names the
-field, while the same append with that field empty succeeds; (4) a concurrent
-second `update_shadow_cohort_evidence` under a held lock skips and reports rather
-than appending, and no fill is lost.
+field, while the same append with that field empty succeeds; (4) a structural test
+asserting every `update_shadow_cohort_evidence` call site in `src/` sits inside a
+`prediction_cycle` `runtime_lock` block — include a deliberately unlocked snippet in
+the test's own fixture text to prove the test can fail — plus the existing behaviour
+that a caller finding the lock held skips and reports.
 
 **Day-after check:** on the VPS one cycle after deploy,
 `outputs/performance/ledger_anchor_summary.json` `status` is `ok` and
-`outputs/performance/ledger_anchor_snapshots/<today>/` contains only files whose
-byte length equals the live source's, with no `.tmp` residue; the scheduler
+`verify-ledger-chain` returns `ok` — that is what proves every file under
+`outputs/performance/ledger_anchor_snapshots/<today>/` matches the byte length and
+digest recorded in THAT anchor's manifest. Do NOT compare a snapshot against the
+live source (corrected after Codex review of #365, P2): snapshot-mode sources such
+as `decision_policy.json` and `shadow_positions.csv` are legitimately regenerated
+after anchoring, so they are expected to differ from the immutable daily copy —
+that divergence is the reason snapshot mode exists. Also confirm no `.tmp` residue
+in that directory; the scheduler
 `status.json` shows separate `training_harvest` and anchor-tail rows with their
 own exit codes; and `outputs/polymarket_shadow/shadow_fills.csv` row count is
 monotonically non-decreasing across two cycles.
@@ -5524,6 +5539,15 @@ monotonically non-decreasing across two cycles.
 
 Five findings from the owner's 2026-07-27 audit plus one bounded-carry-forward
 follow-up. Every item makes an existing check STRICTER; none loosens anything.
+
+**Baseline correction, 2026-07-27.** The first draft of this section was written
+against an unmerged local branch rather than against `main`, so three items assumed
+machinery that does not exist on `main`: an ntfy sender for the watchdog, a
+carry-forward on the lock-held path, and a `maker_depth_gate_enabled` setting.
+Codex's review of #365 caught all three. Every item below is now specified against
+`main` as it stands, and each states what must be BUILT before it can be tightened.
+This is the same defect class as the register recording unmerged work as `done`:
+treating a local branch as if it were the tree.
 
 Files: `src/polymarket_predictive_engine/degraded_state_watchdog.py`,
 `src/polymarket_predictive_engine/maker_carry_study.py`,
@@ -5540,13 +5564,32 @@ alive, but its registered ceiling is 26h — long enough for the live loop to ha
 been dead for a day while the gate passes. Require the HEARTBEAT within its own
 ceiling whenever the loop is expected to be running; the forward-cycle fallback
 applies only inside a bounded post-start window (state the window in the script).
+`scripts/check_polymarket_vps_paper.sh` currently computes ages and compares
+nothing, so this item must ALSO add the comparison it is tightening: enforce the
+registered ceilings, reject a negative or non-numeric age as unmeasurable (which is
+a failure, not a pass), and exit nonzero on breach. Use the
+`PM_HEALTH_LIBRARY_ONLY=1` sourcing seam for the tests.
 
-**129.2 — a failed ntfy send is never retried.** The incident id is appended to
-the ledger BEFORE the push is attempted, so it is not `new` on the next cycle and
-the owner simply never hears about it. Track undelivered incident ids in the
-watchdog state and retry them until a send succeeds. An incident counts as
-undelivered only when a send was ATTEMPTED and FAILED — with no channel
-configured there is no delivery obligation, so ids must not accumulate forever.
+**129.2 — build the delivery transport, THEN make it retry.** Corrected after
+Codex review of #365 (P1): on `main` there is no sender at all. `_notification`
+writes a Markdown body and returns `notify: true`, and a repo-wide search finds no
+consumer that pushes it anywhere — so `notify: true` has never reached the owner,
+and there is no delivery outcome to retry. This item therefore has two ordered
+parts:
+
+(a) Add the sender, reusing the WO-99 `stage_ticket_eligibility` ntfy contract:
+topic URL from the VPS environment only (never config, repo, chat, or telemetry), a
+bounded message carrying registration ids only — no market, wallet, amount, or
+artifact contents leave the host — and a recorded outcome
+`{"attempted": bool, "delivered": bool, "channel_configured": bool, "error": str}`.
+Delivery is gated on the state CHANGE (a new incident id), not on every cycle.
+
+(b) Only then, retry. The incident id is appended to the ledger BEFORE the push is
+attempted, so a failed send is not `new` next cycle and the alert is lost forever.
+Track undelivered ids in the watchdog state and retry until a send succeeds. An id
+counts as undelivered only when a send was ATTEMPTED and FAILED — with no channel
+configured there is no delivery obligation and the artifact plus GitHub are the
+channel, so ids must never accumulate unboundedly.
 
 **129.3 — a wholly failed official-book collection reads healthy.**
 `_evaluate_official_books` degrades only on `status == "partial"`, so `failed`,
@@ -5562,32 +5605,56 @@ every 30 minutes, so 6 hours is generous and still catches a dead producer), and
 treat an artifact with no parseable `generated_at_utc` as an incident, never as
 fresh.
 
-**129.5 — `maker_depth_gate_enabled` is a config-reachable disable on a
-registered evidence gate.** The audit's critique is correct: the WO-113 depth
-gate can be turned off from configuration. Remove the key from the config
-surface — strip it in `_settings()` so `cfg.raw` can never set it — leaving the
-seam only for directly-passed settings dicts (all `_wo113_settings` ever used).
-Configuration must not be able to disable or lower the depth gate by any route.
-This is the one item touching a registered gate; it strictly tightens.
+**129.5 — clamp the depth-gate thresholds config can actually reach.** The
+audit's critique — that the WO-113 depth gate is disableable from configuration —
+is correct, but the mechanism named in the first draft was not: Codex's review of
+#365 (P1) established that no `maker_depth_gate_enabled` setting exists anywhere,
+so stripping that key would have changed nothing. The reachable disable is that
+`_settings` accepts raw `maker_min_book_history_hours` and
+`maker_min_book_snapshots` (registered defaults 48.0 and 100, `maker_carry_study.py:157-158`)
+with no clamp, and `_measurement_eligible` (`:1517-1519`) explicitly returns True
+when both are zero — so `maker_min_book_history_hours: 0` plus
+`maker_min_book_snapshots: 0` turns the gate off completely from config.
 
-**129.6 — bound the WO-121 carry-forward and fix the corrupt-lock wedge.** The
-lock-held path carries the previous evaluation forward rather than publishing
-empty incident lists (right), but unbounded it turns a wedged lock into a
+Fix: clamp both to their registered minima in `_settings`, exactly as the M-B.1
+siblings already are by `_mb_tighter_min`/`_mb_tighter_max` (`:1743-1762`) — config
+may only RAISE either threshold. Apply the same tighten-only clamp to
+`gate_min_runs_at_target` and `target_net_usd_per_day` (the RT-3 finding from the
+2026-07-26 sweep, same defect, same file, never fixed). Then delete the
+both-zero-disables-the-gate branch: with clamped thresholds it is unreachable, and
+leaving it in place documents a disable that must not exist. This is the one item
+touching a registered gate; it strictly tightens, and it changes no threshold
+VALUE — only what configuration is permitted to do to one.
+
+**129.6 — preserve the lock-held evaluation, THEN bound it, and fix the
+corrupt-lock wedge.** Corrected after Codex review of #365 (P1): on `main` the
+lock-held path does not carry anything forward — it OVERWRITES the published
+artifact with empty `evaluations`, `active_incidents`, and `new_incidents` at exit
+0, publishing "no incidents" over a live incident set. Ordered parts:
+
+(a) A skipped cycle observes nothing, so it must claim nothing: carry the previous
+evaluation and its episode state forward verbatim, label it stale with
+`carried_forward_from_utc` and a reason, and never publish empty-on-skip.
+
+(b) Bound that carry-forward, because unbounded it converts a wedged lock into a
 permanently reassuring watchdog republishing the same evaluation with a fresh
 timestamp. After 3 consecutive carried cycles emit a
-`degraded_state_watchdog_wedged` incident. Separately, in `runtime_lock.py` a
-corrupt/unparseable lock payload reads as `{}` → no `acquired_at` → never stale →
-never reclaimable: treat an unparseable payload as stale once the timeout has
-elapsed since the lock file's mtime.
+`degraded_state_watchdog_wedged` incident, and clear the episode key on the first
+successfully observed cycle so a later wedge starts its own episode.
+
+(c) In `runtime_lock.py` a corrupt/unparseable lock payload reads as `{}` → no
+`acquired_at` → never stale → never reclaimable. Treat an unparseable payload as
+stale once the timeout has elapsed since the lock file's mtime.
 
 **Fail-safe direction (S5).** For every item: a missing, stale, unparseable, or
 absent input produces an INCIDENT or a refusal, never a healthy verdict. A
 watchdog that cannot observe says so; it never reports the last thing it saw as
 current.
 
-**Interleaving (S2).** `performance/degraded_state_watchdog.json`,
-`degraded_state_watchdog_state.json`, and the append-only
-`performance/degraded_state_incidents.csv` keep their existing atomic writers and
+**Interleaving (S2).** `ops_scheduler/degraded_state_watchdog.json`,
+`ops_scheduler/degraded_state_watchdog_state.json`, and the append-only
+`performance/degraded_state_incidents.csv` (the module's `OUTPUT_FILE`,
+`STATE_FILE`, and `INCIDENT_LEDGER`) keep their existing atomic writers and
 single-writer-under-lock discipline; the new state keys
 (`undelivered_incident_ids`, `carry_forward_cycles`, `carry_forward_started_at`)
 are written by the same writer in the same atomic payload. Clear
@@ -5595,23 +5662,27 @@ are written by the same writer in the same atomic payload. Clear
 wedge episode starts its own episode key.
 
 Tests: one per item, each proving the OLD behaviour fails — a `failed`
-official-book artifact is an incident; a frozen DR artifact past the ceiling is
-an incident while a fresh one is not; a failed send leaves the id undelivered and
-the next cycle retries it, while no configured channel leaves the list empty; a
-26h-fresh forward cycle with a dead heartbeat fails the health gate; `cfg.raw`
-cannot set `maker_depth_gate_enabled` and the depth gate still applies; a 4th
-consecutive lock-held cycle emits the wedge incident; a corrupt lock payload is
-reclaimed after the timeout.
+official-book artifact is an incident; a frozen DR artifact past the ceiling is an
+incident while a fresh one is not; a stubbed sender that fails leaves the id
+undelivered and the next cycle retries it, a succeeding sender clears it, and no
+configured channel leaves the list empty and reports `channel_configured: false`
+rather than faking a send; a 26h-fresh forward cycle with a dead heartbeat fails the
+health gate, and a negative or non-numeric age fails rather than passing; a config
+setting `maker_min_book_history_hours: 0` and `maker_min_book_snapshots: 0` leaves
+the registered 48h/100-snapshot requirement in force, and a config RAISING either is
+honoured; a lock-held cycle republishes the previous incident set rather than an
+empty one, and the 4th consecutive one adds the wedge incident; a corrupt lock
+payload is reclaimed after the timeout.
 
 **Day-after check:** on the VPS one cycle after deploy,
-`outputs/performance/degraded_state_watchdog.json` lists evaluations for
+`outputs/ops_scheduler/degraded_state_watchdog.json` lists evaluations for
 `official_book_snapshot_partial` with `healthy_reachable_states` present,
 `disaster_recovery_not_recoverable` with a non-null
 `status_artifact_age_seconds` below its ceiling, `carry_forward_cycles: 0`, and
-`notification.undelivered_incident_ids: []`; `maker_carry_study.json` shows the
-depth gate applied with no `maker_depth_gate_enabled` key readable from config;
-and `sh scripts/check_polymarket_vps_paper.sh` exits 0 with the heartbeat age
-printed and enforced.
+`notification.undelivered_incident_ids: []`; `maker_carry_study.json` reports the depth
+thresholds in force as 48.0 hours and 100 snapshots regardless of what the deployed
+config carries; and `sh scripts/check_polymarket_vps_paper.sh` exits 0 with the
+heartbeat age printed AND enforced against its ceiling.
 
 ## WO-130 — Funding-evidence and kill-lane integrity — `queued` (ISSUED to Codex 2026-07-27; frozen/registered surfaces throughout → owner merge)
 
@@ -5632,8 +5703,16 @@ plus their existing test modules.
    assert that binding in a test.
 2. **Boolean and synthetic-zero kill scores pass as observations.** A
    `net_score_usd` of `0.0` produced by an artifact with no kill inputs, or a
-   boolean coerced to a number, satisfies "observed". Require a finite numeric
-   score from a producer whose status is `ok`; anything else is `no_data` and
+   boolean coerced to a number, satisfies "observed".
+   Corrected after Codex review of #365 (P1): requiring "a finite score from an
+   `ok` producer" is NOT sufficient, because `_wallet_score`
+   (`maker_live_test.py:205-224`) returns exactly that — `status: "ok"` with a
+   finite `net_score_usd: 0.0` — when rewards, trades, and positions are all
+   empty. That synthetic zero is the defect, and it would survive the fix.
+   Require positive evidence that at least one kill-score INPUT was observed
+   (a reward row, a trade, or a position — count them and record the counts on
+   the artifact), and bind that provenance to the same selected row item 1
+   pins. A score computed from zero inputs is `no_data`, never `0.0`, and
    `no_data` is NOT clear under an active live stage.
 3. **An unobserved kill scoreboard does not alert when an executor exists.** If
    an executor is present and the scoreboard is unobserved, that is an incident,
@@ -5693,9 +5772,18 @@ not the gate),
    with the first and last 404 timestamp and a consecutive-404 count.
    `_candidate_seed_markets` skips a token whose consecutive-404 count is at or
    above a registered threshold (default 3, config may only RAISE the bar for
-   skipping — i.e. config can make the system poll more, never blind it). A
-   token that later returns a valid book clears its marker, so a transient 404
-   or a re-listing recovers automatically.
+   skipping — i.e. config can make the system poll more, never blind it).
+   **A skip must be a cooldown, not a blacklist.** Corrected after Codex review
+   of #365 (P2): a newly seeded token that 404s three times has no official-book
+   file, so it never enters the mtime persistent tranche either — once skipped it
+   would never be requested again and could never clear its marker, making a
+   transient outage or a later re-listing a permanent exclusion. Give the marker
+   a registered TTL (default 24h since the last 404) after which the token is
+   re-probed exactly once per cycle; a valid book clears the marker outright, and
+   another 404 restarts the cooldown. State the TTL in the artifact so an
+   operator can see when each token is next due.
+   The marker artifact carries `paper_trading_invoked=false` and
+   `live_trading_invoked=false` (per AGENTS.md), asserted in its tests.
 2. **Drop non-finite carry rows before ranking.** In `_candidate_seed_markets`
    (`maker_fill_replay.py:400-421`) a NaN `net_carry_usd_per_day` participates in
    the sort with undefined ordering and can occupy a seeding slot ahead of a real
@@ -5773,7 +5861,7 @@ reviewer can check every `done` claim against the merge commit it names — and
 `AGENTS.md` states the unresolved-thread merge precondition in its
 work-order/Git discipline section.
 
-## WO-133 — Legitimise the manual VPS deploy path — `queued` (ISSUED to Codex 2026-07-27; non-frozen ops → orchestrator merge after line-audit; the `AGENTS.md` amendment routes to owner merge)
+## WO-133 — Legitimise the manual VPS deploy path — `queued` (ISSUED to Codex 2026-07-27; **the whole PR routes to owner merge**, because it contains an `AGENTS.md` amendment and a PR cannot be partially merged)
 
 A 2026-07-27 owner request to legitimise the manual deploy path is recorded here
 for owner review and becomes repository authorization only through the owner's
@@ -5842,6 +5930,19 @@ that continues to exist only at the owner's own merge of the change itself. This
 entry does not become repository authorization for anything except through the
 owner's merge of it.
 
+**Why these six registrations are one PR, while their builds are six PRs.** Codex's
+review of #365 read the one-work-order-per-branch-and-PR rule as also governing this
+registration. Recorded here rather than silently overridden, with the reasoning, and
+the owner decides at the merge: the rule exists so an implementation change stays
+independently reviewable and revertible, and every BUILD below is a separate branch
+and PR with that property intact. This document change is a single governance act —
+"issue this queue, in this order, with this routing" — whose parts are only
+meaningful together: the routing table, the build order, and the review-thread rule
+cannot be reviewed or reverted per-WO without leaving the queue self-contradictory
+between merges. Prior practice matches (the 2026-07-18 ACTIVE BATCH and the
+2026-07-19 queue were each registered as one change). If the owner prefers six
+registration PRs, say so on #365 and I will split it before anything is built.
+
 Build order — each item is ONE branch and ONE PR, no combining, no drive-by
 refactors:
 
@@ -5849,10 +5950,35 @@ refactors:
 |---|----|-------|-----------------|
 | 1 | **WO-131** | candidate-seeding budget + seasoning visibility (campaign-critical, 23 days to the M-A terminal date) | orchestrator, after line-audit |
 | 2 | **WO-128** | atomic snapshots, non-destructive anchor tail, no silent field loss, shadow-write serialisation | owner (the `ledger_anchor.py` writer) |
-| 3 | **WO-129** | watchdog false health, ntfy retry, depth-gate config removal, bounded carry-forward | owner (registered evidence gate) |
-| 4 | **WO-132** | register correction + unresolved-threads merge precondition | owner (governance documents) |
-| 5 | **WO-130** | kill-lane and funding-evidence integrity + the #355 P1s | owner (frozen surfaces) |
-| 6 | **WO-133** | guarded manual deploy path | orchestrator; the `AGENTS.md` amendment to the owner |
+| 3 | **WO-121** | watchdog coverage for the currently unmonitored producers (blocking prerequisite for WO-129 — see below) | orchestrator, after line-audit |
+| 4 | **WO-129** | watchdog false health, the ntfy sender + retry, depth-threshold clamps, carry-forward preservation and bound | owner (registered evidence gate) |
+| 5 | **WO-132** | register correction + unresolved-threads merge precondition | owner (governance documents) |
+| 6 | **WO-130** | kill-lane and funding-evidence integrity + the #355 P1s | owner (frozen surfaces) |
+| 7 | **WO-133** | guarded manual deploy path + its `AGENTS.md` amendment | **owner** (one PR carrying a governance amendment cannot be partially merged) |
+
+**WO-121 — watchdog coverage for unmonitored producers** (registered 2026-07-27 as
+WO-129's named blocking prerequisite, per ENGINEERING_STANDARDS S3). WO-129 tightens
+watchdog behaviour that must exist first. Scope, all in
+`degraded_state_watchdog.py`, `operating_state.py`, `push_vps_anchor.sh`,
+`push_vps_telemetry.sh` and their tests: scheduler freshness ceilings for the two
+uncovered jobs (`ledger_anchor` 26h and `maker_safety_refresh` 1h — the 15-minute
+safety lane that owns the decision-policy, requote, and kill artifacts, so if it
+stops being scheduled five safety artifacts freeze and nothing notices); new
+registrations for broken chain verification, disaster-recovery status, failed maker
+study runs, and partial official-book collection; consumption of the
+`operating_state` `slo` block, which nothing reads today, so an SLO breach becomes an
+incident instead of a dashboard row; fail-closed defaults where a missing
+`last_exit_code` currently reads as 0 and a missing artifact currently reads UNKNOWN
+rather than BREACH; and a status artifact for both publication-bridge push scripts,
+which today cannot fail and whose age nothing measures. Fail-safe direction: every
+new registration treats absent, stale, or unparseable input as an incident, never as
+health. Day-after check: `outputs/ops_scheduler/degraded_state_watchdog.json` lists
+every new registration with a non-null observation token or an explicit
+`unobserved`, `registered_job_maximum_seconds` covers all 11 scheduler jobs, and both
+push scripts have written a status artifact whose age is surfaced in
+`operating_state.json`. An implementation of this scope was drafted locally by the
+orchestrator and is NOT merged; treat this registered text as authoritative and
+build against `main`.
 
 WO-127 (restore-chain recoverability) is in review as PR #364 and stays with the
 orchestrator through owner merge; it is a prerequisite for deploying `main`, which

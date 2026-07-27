@@ -5773,9 +5773,12 @@ reviewer can check every `done` claim against the merge commit it names — and
 `AGENTS.md` states the unresolved-thread merge precondition in its
 work-order/Git discipline section.
 
-## WO-133 — Legitimise the manual VPS deploy path (owner-authorised 2026-07-27) — `queued` (ISSUED to Codex 2026-07-27; non-frozen ops → orchestrator merge after line-audit; the `AGENTS.md` amendment routes to owner merge)
+## WO-133 — Legitimise the manual VPS deploy path — `queued` (ISSUED to Codex 2026-07-27; non-frozen ops → orchestrator merge after line-audit; the `AGENTS.md` amendment routes to owner merge)
 
-The owner authorised legitimising the manual deploy path on 2026-07-27. Today the
+A 2026-07-27 owner request to legitimise the manual deploy path is recorded here
+for owner review and becomes repository authorization only through the owner's
+merge of this registration and of the `AGENTS.md` amendment below — not through
+this text. Today the
 runbook's manual route bypasses the workflow's guard order, and the workflow is
 unavailable when Actions is down — so the honest options are a guarded script or
 an undocumented ad-hoc `git pull`. Chosen model: **guarded script, attestation
@@ -5804,9 +5807,10 @@ tip, and writes `outputs/performance/vps_manual_deploy.json` recording
 `attestation_verified: false` with the owner as authoriser. The unprovable step is
 recorded as unproven; it is never silently treated as proven.
 
-`AGENTS.md` amendment (dated, owner-authorised 2026-07-27): Path A is the
-workflow and remains REQUIRED whenever Actions is available; Path B is this
-script, for when it is not; an ad-hoc pull/rebuild remains forbidden.
+`AGENTS.md` amendment, dated 2026-07-27 and effective only on the owner's own
+merge of it: Path A is the workflow and remains REQUIRED whenever Actions is
+available; Path B is this script, for when it is not; an ad-hoc pull/rebuild
+remains forbidden. The amendment must not describe itself as already authorized.
 
 **Fail-safe direction (S5).** Any guard failure before the arming boundary aborts
 with nothing changed; any failure after it triggers rollback to
@@ -5830,11 +5834,13 @@ simulated post-arming failure; and the deploy record's honesty fields
 
 ## Current queue for Codex — ISSUED 2026-07-27
 
-Standing instruction from the owner, 2026-07-27: **Claude orchestrates and
-reviews; Codex executes.** That instruction is what satisfies the dispatch
-bridge's "operates only under the owner's direct instruction" condition; it is not
-authorization for any frozen-surface merge, which continues to exist only at the
-owner's own merge.
+A 2026-07-27 owner instruction — **Claude orchestrates and reviews; Codex
+executes** — is recorded here for owner review. It is what satisfies the dispatch
+bridge's "operates only under the owner's direct instruction" condition for
+issuing this queue, and it is **not** authorization for any frozen-surface merge:
+that continues to exist only at the owner's own merge of the change itself. This
+entry does not become repository authorization for anything except through the
+owner's merge of it.
 
 Build order — each item is ONE branch and ONE PR, no combining, no drive-by
 refactors:

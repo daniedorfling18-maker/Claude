@@ -62,6 +62,21 @@ def test_wo135_sandbox_test_carve_out_stays_narrow() -> None:
     assert "neither substitutes for it nor licenses a merge" in agents
 
 
+def test_wo133_two_deploy_paths_are_named_and_path_a_stays_required() -> None:
+    # WO-133. Before this, the runbook's manual route bypassed the workflow's
+    # guard order, so "Actions is down" meant an undocumented ad-hoc pull. Both
+    # paths are now named - and Path B must never read as a peer of Path A,
+    # because only Path A binds the SHA to an independent review.
+    agents = _text("AGENTS.md")
+
+    assert "Two paths are permitted" in agents
+    assert "REQUIRED whenever" in agents
+    assert "scripts/deploy_vps_paper_manual.sh" in agents
+    assert "attestation_verified: false" in agents
+    assert "never writes an attestation" in agents
+    assert "ad-hoc pull/rebuild remains forbidden" in agents
+
+
 def test_legacy_local_runbooks_are_loudly_archived() -> None:
     expected_markers = {
         "docs/POLYMARKET_SHADOW_RESEARCH_RUNBOOK.md": "Retired local runbook",

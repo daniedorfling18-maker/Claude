@@ -79,10 +79,35 @@ documented in `docs/OPERATING_STATE.md`.
 - One production Compose stack only; never start a duplicate writer.
 - Secrets live only in the VPS `.env` or GitHub repository secrets. Never print,
   copy into source, commit, or place them in telemetry.
-- Deploy from a reviewed, merged `main` with the
-  `Deploy Polymarket VPS Paper` workflow. That path preserves runtime ledgers,
-  stamps `PM_VPS_DEPLOYED_SHA`, runs post-deploy acceptance, and retains a
-  rollback revision. Do not replace it with an ad-hoc pull/rebuild.
+- Deploy from a reviewed, merged `main`. **Two paths are permitted and no
+  others** (amendment dated 2026-07-27, effective on the owner's merge of it):
+
+  **Path A — the `Deploy Polymarket VPS Paper` workflow. REQUIRED whenever
+  GitHub Actions can run it.** It preserves runtime ledgers, stamps
+  `PM_VPS_DEPLOYED_SHA`, runs post-deploy acceptance, retains a rollback
+  revision, and — uniquely — binds the deployed SHA to an independently reviewed
+  acceptance run. Path B cannot do that, which is why Path A is not optional
+  when it is available.
+
+  **Path B — `scripts/deploy_vps_paper_manual.sh`, for when Path A is not
+  available.** It mirrors Path A's on-host guard order: origin/main-tip refusal,
+  checkout/marker agreement, capacity preflight, private-transport proof *before*
+  quiescing, `.env`/marker snapshot at mode 0600 and a rollback image tag (the
+  arming boundary), runtime-preserving checkout update, deploy markers written
+  *before* container recreation, acceptance with the scheduler stopped, the
+  health gate, and `rollback_vps_paper_deploy.py` on any failure past arming.
+
+  Path B's honesty contract: it **refuses** unless the target is exactly the
+  freshly fetched `origin/main` tip, so it can only ship reviewed, merged code —
+  and it records `attestation_verified: false` in
+  `outputs/performance/vps_manual_deploy.json`, naming the check it could not
+  perform, because `verify_independent_main_acceptance.py` needs a GitHub token
+  and the acceptance run's artifact and a VPS shell has neither. The unprovable
+  step is recorded as unproven. Path B never writes an attestation and never
+  implies an independent review occurred.
+
+  An ad-hoc pull/rebuild remains forbidden on both paths: it skips every guard
+  above.
 
 Read-only operator checks after SSHing to the VPS:
 

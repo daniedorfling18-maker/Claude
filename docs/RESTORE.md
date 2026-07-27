@@ -83,6 +83,14 @@ For a restored tree, therefore:
   do verify, so tamper evidence over the corpus resumes from the boundary
   forward. A present file with a changed anchored digest outside the waiver is
   still a broken chain.
+- The marker **travels with the tree**. Every archive built on a restored host
+  carries it, so a restore of that archive inherits the same boundary. Narrowing
+  `excluded_path_prefixes` on a restored host (putting the corpus back into
+  recovery) therefore still builds and still verifies: the inherited boundary
+  keeps the pre-restore rows excused, while the regenerated corpus the new archive
+  carries is byte-verified normally from the boundary forward. An archive that
+  drops the corpus again extends the boundary to its own snapshot date; one that
+  carries it does not.
 - The marker is **refused** — and the reason reported in
   `restore_provenance_rejected` — when it names no registered prefix, is
   unreadable or not a JSON object, or carries a boundary that is not a canonical

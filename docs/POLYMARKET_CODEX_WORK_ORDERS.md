@@ -5499,8 +5499,9 @@ Files: `src/polymarket_predictive_engine/ledger_anchor.py`,
 
 **Trust bound, stated deliberately.** A forged or hand-edited marker can only
 excuse prefixes in the **registered** set, so the worst case is exactly the
-owner-approved re-harvestable corpora and nothing else. Every other anchored path
-is verified regardless of what the marker says.
+re-harvestable corpora already in that set and nothing else. Every other anchored
+path is verified regardless of what the marker says. (Whether that set is right is
+settled by WO-123's registration and its merge record, not by this text.)
 
 **Fail-safe direction (S5).** When the marker is missing, unreadable, not a JSON
 object, declares no registered prefix, carries a non-canonical or invalid

@@ -22,6 +22,7 @@ from .config import EngineConfig, load_config
 from .ledger_anchor import (
     ARCHIVE_EXCLUDED_PREFIXES,
     RESTORE_PROVENANCE_FILE,
+    canonical_date,
     ledger_paths_for_archive,
     verify_ledger_chain,
 )
@@ -639,19 +640,59 @@ def _write_restore_provenance(
     or before it recorded digests for bytes that cannot be reproduced (a
     re-harvest yields different content), so they are unverifiable by design.
     Anything anchored after it is verified normally.
+
+    Codex review of #364 (P1): a boundary is a fact about the CHAIN's history, not
+    about one archive's exclusion set, so an INHERITED marker carried in the
+    archive is never discarded. Without this, an archive built on a restored host
+    with ``excluded_path_prefixes: []`` - the documented tighten-only option of
+    putting the corpus back into recovery - wrote no marker into the extracted
+    tree, so the pre-restore rows were compared against re-harvested bytes and
+    every such archive was rejected. Archive creation on a restored host would
+    have failed permanently. Boundaries therefore MERGE to the later date and the
+    prefix sets union: rows between the two boundaries are excused only when this
+    archive also drops the corpus, which is exactly when they are unverifiable.
     """
 
-    if not excluded_prefixes:
-        return None
     path = output_root / PurePosixPath(RESTORE_PROVENANCE_FILE)
+    inherited = read_json(path, default={}) or {}
+    if not isinstance(inherited, dict):
+        inherited = {}
+    inherited_prefixes = inherited.get("excluded_path_prefixes")
+    prefixes = {str(item) for item in excluded_prefixes}
+    if isinstance(inherited_prefixes, (list, tuple)):
+        prefixes |= {str(item) for item in inherited_prefixes}
+    # The reader intersects against the REGISTERED set regardless, so an
+    # inherited prefix cannot widen the waiver beyond it.
+    prefixes &= set(ARCHIVE_EXCLUDED_PREFIXES)
+    inherited_boundary = str(inherited.get("restore_boundary_date") or "").strip()
+    # This archive's own snapshot date extends the waiver ONLY when this archive
+    # actually drops the corpus. When it carries the regenerated corpus instead,
+    # rows anchored since the inherited boundary recorded bytes the archive
+    # supplies, so they must verify normally - extending the boundary over them
+    # would excuse a tampered restored corpus.
+    new_boundary = str(boundary_date or "").strip() if excluded_prefixes else ""
+    # Compare as calendar dates, never as strings: both sides are untrusted input
+    # and a non-canonical spelling sorts wrongly (#364 P1). A side that does not
+    # parse loses to one that does, and if neither parses no marker is written -
+    # so verification refuses rather than honouring an unreadable boundary.
+    candidates = [
+        (canonical_date(text), text) for text in (new_boundary, inherited_boundary) if text
+    ]
+    parsed = sorted(
+        ((day, text) for day, text in candidates if day is not None), key=lambda item: item[0]
+    )
+    effective_boundary = parsed[-1][1] if parsed else ""
+    if not prefixes or not effective_boundary:
+        return None
     write_json(
         path,
         {
             "work_order": "WO-127",
             "generated_at_utc": now_utc(),
-            "restore_boundary_date": boundary_date,
-            "excluded_path_prefixes": list(excluded_prefixes),
+            "restore_boundary_date": effective_boundary,
+            "excluded_path_prefixes": sorted(prefixes),
             "restored_from_chain_head": chain_head,
+            "inherited_restore_boundary_date": inherited_boundary or None,
             "dry_run": bool(dry_run),
             "reason": (
                 "these registered prefixes are excluded from the recovery archive and are "

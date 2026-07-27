@@ -88,7 +88,7 @@ DEFAULT_LEDGER_REGISTRY: list[dict[str, str]] = [
     {"glob": "performance/cost_ledger_summary.json", "mode": "snapshot"},
 ]
 
-# WO-123 owner decision (2026-07-26), relocated here by WO-127: these enrolled
+# Registered by WO-123 (2026-07-26), relocated here by WO-127: these enrolled
 # paths are deliberately EXCLUDED from the WO-65 recovery archive. They are
 # derived collection corpora — regenerable by re-harvest, and 94% of the archive
 # bytes (476.6MB of 505.6MB measured on the VPS). They stay ANCHORED, so tamper
@@ -115,8 +115,12 @@ class _RestoreProvenance(NamedTuple):
 _NO_RESTORE_PROVENANCE = _RestoreProvenance((), None, "", "")
 
 
-def _calendar_date(text: str) -> date | None:
-    """Parse a canonical ``YYYY-MM-DD`` day, or None for anything else."""
+def canonical_date(text: str) -> date | None:
+    """Parse a canonical ``YYYY-MM-DD`` day, or None for anything else.
+
+    Shared with ``disaster_recovery`` so both modules agree on what a date is; a
+    comparison that depends on spelling is the #364 P1 defect class.
+    """
 
     candidate = str(text or "").strip()
     try:
@@ -140,8 +144,8 @@ def _restore_provenance(cfg: EngineConfig) -> _RestoreProvenance:
     Trust bounds, all four necessary:
 
     1. Only prefixes in the REGISTERED set above can be excused, so a forged or
-       edited marker cannot reach anything beyond the owner-approved
-       re-harvestable corpora.
+       edited marker cannot reach anything beyond the re-harvestable corpora in
+       the registered exclusion set above.
     2. The boundary must be a STRICT calendar date, not merely ten characters.
        Codex review of #364 (P1): a length check accepted `9999-99-99`, and
        because the row comparison was lexical, that sorted every historical anchor
@@ -212,7 +216,7 @@ def _restore_provenance(cfg: EngineConfig) -> _RestoreProvenance:
                 "and every anchored path is verified"
             ),
         )
-    boundary_date = _calendar_date(raw_boundary)
+    boundary_date = canonical_date(raw_boundary)
     if boundary_date is None:
         return _RestoreProvenance(
             (),
@@ -223,7 +227,7 @@ def _restore_provenance(cfg: EngineConfig) -> _RestoreProvenance:
                 "date; the marker is refused and every anchored path is verified"
             ),
         )
-    today = _calendar_date(now_utc()[:10])
+    today = canonical_date(now_utc()[:10])
     if today is None:  # pragma: no cover - now_utc() is canonical by construction
         return _RestoreProvenance(
             (),
@@ -491,7 +495,7 @@ def verify_ledger_chain(
         # calendar DATES, never strings. A row whose anchor_date is not a
         # canonical date yields None and is therefore never excused - the
         # fail-safe direction is to verify its bytes.
-        row_day = _calendar_date(anchor_date)
+        row_day = canonical_date(anchor_date)
         issues: list[str] = []
         try:
             manifest = _parse_manifest(row)
@@ -718,6 +722,17 @@ def ledger_paths_for_archive(cfg: EngineConfig, *, as_of_date: str | None = None
         path = _output_path(cfg, settings[key])
         if path.is_file():
             paths[path.resolve().relative_to(cfg.output_root.resolve()).as_posix()] = path
+    # WO-127 (Codex #364 P1): the restore marker must travel WITH the tree. A
+    # restore boundary is a fact about the chain's history, not about one
+    # archive's exclusion set: once a restore has happened, the pre-boundary
+    # rows under the excluded prefixes can never be byte-verified again. Leaving
+    # the marker out meant an archive built on a restored host and then restored
+    # elsewhere lost that history and read those rows as tampered - which broke
+    # archive creation outright the moment an operator exercised the documented
+    # tighten-only option of putting the corpus back into recovery.
+    provenance = _output_path_relative(cfg, RESTORE_PROVENANCE_FILE)
+    if provenance.is_file():
+        paths[RESTORE_PROVENANCE_FILE] = provenance
     return [paths[key] for key in sorted(paths)]
 
 

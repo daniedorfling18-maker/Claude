@@ -692,6 +692,62 @@ def test_wo127_reharvest_after_restore_does_not_wedge_the_chain(tmp_path: Path):
     assert "anchored prefix digest changed" in broken["issues"][0]
 
 
+def test_wo127_narrowing_exclusions_on_a_restored_host_still_builds(tmp_path: Path):
+    # Codex review of #364 (P1). RESTORE.md documents narrowing
+    # excluded_path_prefixes as a tighten-only operation that puts the corpus back
+    # into recovery. On a RESTORED host that permanently broke archive creation:
+    # the new archive declared no exclusions, so the post-build restore check wrote
+    # no marker into the extracted tree, and the pre-restore rows were compared
+    # against re-harvested bytes and rejected - every build, forever. A restore
+    # boundary is a fact about the chain's history, so it must travel with the tree.
+    cfg = _config(tmp_path)
+    _enroll_training_corpus(cfg, size_bytes=4096)
+    _seed_two_day_chain(cfg)
+    built = create_ledger_archive(cfg, force=True)
+    restored_root = tmp_path / "restored_outputs"
+    verify_and_restore_archive(
+        cfg, Path(built["archive_path"]), dry_run=False, destination_output_root=restored_root
+    )
+    restored_cfg = _restored_config(cfg, restored_root)
+    marker = restored_root / "performance" / "ledger_restore_provenance.json"
+    assert marker.is_file(), "the applied restore must record its boundary"
+    inherited_boundary = read_json(marker)["restore_boundary_date"]
+
+    # Re-harvest with different bytes, exactly as normal collection would.
+    reharvested = restored_root / "polymarket_training" / "historical_bid_ask_v1.csv"
+    reharvested.parent.mkdir(parents=True, exist_ok=True)
+    reharvested.write_bytes(b"ts,bid,ask\n1784999999,0.77,0.23\n")
+    assert anchor_ledgers(restored_cfg, anchor_date="2026-07-12")["status"] == "ok"
+
+    # The documented tighten-only narrowing: put the corpus back into recovery.
+    restored_cfg.raw["disaster_recovery"]["excluded_path_prefixes"] = []
+    rebuilt = create_ledger_archive(restored_cfg, force=True)
+
+    assert rebuilt["status"] == "ok"
+    assert rebuilt["archive_excluded_paths"] == []
+    assert rebuilt["post_build_restore_verification"]["status"] == "ok"
+    # The marker travelled into the archive, so a restore of THIS archive also
+    # knows the pre-boundary rows are unverifiable by design.
+    with tarfile.open(Path(rebuilt["archive_path"]), "r:gz") as archive:
+        names = set(archive.getnames())
+    assert "outputs/performance/ledger_restore_provenance.json" in names
+    assert "outputs/polymarket_training/historical_bid_ask_v1.csv" in names
+
+    second_root = tmp_path / "restored_twice"
+    applied = verify_and_restore_archive(
+        cfg,
+        Path(rebuilt["archive_path"]),
+        dry_run=False,
+        destination_output_root=second_root,
+    )
+    assert applied["status"] == "ok"
+    carried = read_json(second_root / "performance" / "ledger_restore_provenance.json")
+    assert carried["restore_boundary_date"] == inherited_boundary
+    assert verify_ledger_chain(
+        _restored_config(cfg, second_root), write_summary=False
+    )["status"] == "ok"
+
+
 def test_wo127_malformed_exclusion_config_stamps_error_instead_of_raising(tmp_path: Path):
     # _base_payload runs BEFORE create_ledger_archive's try block, so a malformed
     # exclusion config raised out of the builder with no status written at all -

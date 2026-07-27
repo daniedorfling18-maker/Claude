@@ -692,10 +692,13 @@ def _reject_contradictory_exclusions(manifest: dict[str, Any], member_paths: set
     contradiction happens not to be exploitable under the current configuration.
     """
 
-    declared = manifest.get("excluded_path_prefixes")
-    if not isinstance(declared, (list, tuple)):
-        return
-    prefixes = tuple(sorted({str(item) for item in declared if str(item)}))
+    # Codex review of #364 (P1): this matched RAW declarations while
+    # verify_and_restore_archive matched normalised ones, and a mismatch between two
+    # readings of the same untrusted field is a bypass by construction. A declaration
+    # of "/polymarket_training/" missed here, then normalised into the registered
+    # exclusion there - so the marker waived the included member's pre-boundary digest
+    # and arbitrary self-consistent bytes restored. One normalisation, used by both.
+    prefixes = tuple(sorted(_normalised_prefixes(manifest.get("excluded_path_prefixes"))))
     if not prefixes:
         return
     contradictory = sorted(
@@ -773,27 +776,31 @@ def _write_restore_provenance(
     # keeping the inherited boundary while recording this archive's head would
     # produce a marker that refuses itself.
     inherited_head = str(inherited.get("restored_from_chain_head") or "").strip()
-    # Codex review of #364 (P2): the inherited candidate is listed FIRST so that a
-    # stable sort by date leaves the NEW pair last and therefore selected on a tie.
-    # Otherwise a rejected marker whose boundary happens to equal the latest anchor
-    # date displaced the valid pair this restore supplies, and the freshly built
-    # archive failed its own verification. An inherited pair with no head is dropped
-    # outright - it could never be honoured, so propagating it only loses the good one.
-    candidates = [
-        (canonical_date(text), text, head)
-        for text, head in (
-            (inherited_boundary, inherited_head),
-            (new_boundary, str(chain_head or "")),
-        )
-        if text and head
-    ]
-    parsed = sorted(
-        ((day, text, head) for day, text, head in candidates if day is not None),
-        key=lambda item: item[0],
-    )
-    if not prefixes or not parsed:
+    new_head = str(chain_head or "").strip()
+    # Codex review of #364 (P2), twice. Ranking by date was wrong in both directions:
+    # first an inherited pair sharing the date displaced the valid current pair, then
+    # ANY later-but-invalid inherited pair did - a future date or a head that names no
+    # row - so post-build restore refused the marker, found the deliberately excluded
+    # corpus missing, and failed archive creation. That is the wedge class this work
+    # order exists to remove, arriving through the ranking function.
+    #
+    # Ranking is not needed at all. When this archive excludes the corpus it supplies
+    # its own boundary, which is the snapshot date and therefore never earlier than an
+    # inherited boundary (a boundary must name a row at or before it). So: use the
+    # current pair whenever it exists, and fall back to the inherited pair only when
+    # this archive supplies none - which is exactly the case the inheritance exists
+    # for. An inherited pair is eligible only if it could actually be honoured: a
+    # canonical, non-future boundary and a non-empty head.
+    effective_boundary, effective_head = "", ""
+    if new_boundary and new_head:
+        effective_boundary, effective_head = new_boundary, new_head
+    elif inherited_boundary and inherited_head:
+        inherited_day = canonical_date(inherited_boundary)
+        today = canonical_date(now_utc()[:10])
+        if inherited_day is not None and today is not None and inherited_day <= today:
+            effective_boundary, effective_head = inherited_boundary, inherited_head
+    if not prefixes or not effective_boundary:
         return None
-    _, effective_boundary, effective_head = parsed[-1]
     write_json(
         path,
         {
@@ -878,13 +885,16 @@ def verify_and_restore_archive(
         # normalised, and a trailing slash enforced so a prefix cannot match a sibling
         # file by accident.
         declared_prefixes = _normalised_prefixes(declared)
-        # Only a declaration the REGISTRY carries counts as a valid exclusion. The
-        # config-effective narrowing is deliberately NOT part of this: whether the
-        # archive validly declared something is a property of the archive, not of the
-        # host restoring it.
-        declared_registered = tuple(
-            prefix for prefix in ARCHIVE_EXCLUDED_PREFIXES if prefix in declared_prefixes
-        )
+        # Codex review of #364 (P2) corrected my reasoning here, and it was the better
+        # argument. I based the missing-path exception on "did the archive validly
+        # declare this prefix", on the grounds that validity is a property of the
+        # archive rather than of the host. That conflated two questions. Whether the
+        # DECLARATION is well formed is indeed the archive's property - and it still
+        # gates the contradiction check. But whether a restore delivers the coverage
+        # REQUIRED is the restoring host's property: if this host's config says to
+        # archive the corpus, a restore lacking it does not satisfy this host, however
+        # the archive labelled itself. The exception is therefore based on `tolerated`,
+        # the manifest-declared / registered / config-effective intersection.
         # WO-127: also intersect the CONFIG-EFFECTIVE set. A config that NARROWS
         # exclusions means more was archived, so tolerating the full registered
         # set would excuse the absence of something that should be present.
@@ -935,7 +945,7 @@ def verify_and_restore_archive(
                 relative
                 for relative in anchored_relative_paths(extracted_cfg, as_of_date=snapshot_date)
                 if relative.startswith(ARCHIVE_EXCLUDED_PREFIXES)
-                and not relative.startswith(declared_registered)
+                and not relative.startswith(tolerated)
                 and not (extracted_output / PurePosixPath(relative)).is_file()
             )
             if undeclared_missing:

@@ -980,6 +980,100 @@ def test_wo127_archive_omitting_an_undeclared_corpus_is_refused_on_restore(tmp_p
         verify_and_restore_archive(cfg, forged, dry_run=True)
 
 
+def test_wo127_leading_slash_declaration_cannot_evade_the_contradiction_check(tmp_path: Path):
+    # Codex review of #364 (P1): the contradiction check matched RAW declarations while
+    # the restore path matched normalised ones. "/polymarket_training/" therefore missed
+    # here and was normalised into the registered exclusion there, so the marker waived
+    # the included member's pre-boundary digest and arbitrary self-consistent bytes
+    # restored clean. Two readings of one untrusted field is a bypass by construction.
+    cfg = _config(tmp_path)
+    corpus = _enroll_training_corpus(cfg, size_bytes=4096)
+    _seed_two_day_chain(cfg)
+    relative = corpus.relative_to(cfg.output_root).as_posix()
+    built = create_ledger_archive(cfg, force=True)
+
+    for index, spelling in enumerate(
+        ("/polymarket_training/", "polymarket_training", "  polymarket_training/  ")
+    ):
+        forged = _rebuild_archive_with_manifest(
+            Path(built["archive_path"]),
+            tmp_path / f"slashed-{index}.tar.gz",
+            manifest_updates={"excluded_path_prefixes": [spelling]},
+            add_paths={f"outputs/{relative}": b"ts,bid,ask\n9999999999,0.01,0.99\n"},
+        )
+        with pytest.raises(DisasterRecoveryError, match="excluded while also including"):
+            verify_and_restore_archive(cfg, forged, dry_run=True)
+
+
+def test_wo127_an_invalid_inherited_boundary_never_displaces_the_current_one(tmp_path: Path):
+    # Codex review of #364 (P2), the second time: ranking candidates by date meant ANY
+    # later inherited boundary won, including an invalid one - a future date, or a head
+    # naming no row. Post-build restore then refused the marker, found the deliberately
+    # excluded corpus missing, and failed archive creation. The wedge class again,
+    # arriving through the ranking function. The current pair now simply wins.
+    cfg = _config(tmp_path)
+    _enroll_training_corpus(cfg, size_bytes=4096)
+    _seed_two_day_chain(cfg)
+
+    marker = cfg.output_root / "performance" / "ledger_restore_provenance.json"
+    for boundary, head in (
+        ("2099-01-01", "a" * 64),   # future
+        ("2026-07-11", "f" * 64),   # head names no row
+        ("2026-13-45", "a" * 64),   # not a date
+    ):
+        write_json(
+            marker,
+            {
+                "work_order": "WO-127",
+                "restore_boundary_date": boundary,
+                "excluded_path_prefixes": ["polymarket_training/"],
+                "restored_from_chain_head": head,
+            },
+        )
+        # The anti-wedge property: the build succeeds and its own post-build restore
+        # verifies, instead of the bogus inherited pair displacing the valid one and
+        # failing archive creation outright.
+        built = create_ledger_archive(cfg, force=True)
+        assert built["status"] == "ok", boundary
+        assert built["post_build_restore_verification"]["status"] == "ok", boundary
+
+    # And on an APPLIED restore the marker written into the destination carries this
+    # archive's own pair, never the bogus inherited one.
+    destination = tmp_path / "restored_outputs"
+    applied = verify_and_restore_archive(
+        cfg, Path(built["archive_path"]), dry_run=False, destination_output_root=destination
+    )
+    installed = read_json(destination / "performance" / "ledger_restore_provenance.json")
+    assert applied["status"] == "ok"
+    assert installed["restore_boundary_date"] == built["snapshot_date"]
+    assert installed["restored_from_chain_head"] == built["chain_head"]
+
+
+def test_wo127_a_narrowed_target_config_requires_the_corpus_on_restore(tmp_path: Path):
+    # Codex review of #364 (P2) corrected my reasoning, and the better argument won.
+    # I based the missing-path exception on whether the ARCHIVE validly declared the
+    # prefix. But whether a restore delivers the coverage REQUIRED is the restoring
+    # host's property: if this host's config says to archive the corpus, a restore
+    # lacking it does not satisfy this host, however the archive labelled itself.
+    cfg = _config(tmp_path)
+    _enroll_training_corpus(cfg, size_bytes=4096)
+    _seed_two_day_chain(cfg)
+    built = create_ledger_archive(cfg, force=True)
+    assert built["archive_excluded_paths"] == ["polymarket_training/"]
+
+    # Same archive, restored under a config that requires the corpus in recovery.
+    narrowed = _restored_config(cfg, cfg.output_root)
+    narrowed.raw["disaster_recovery"]["excluded_path_prefixes"] = []
+    with pytest.raises(DisasterRecoveryError) as refused:
+        verify_and_restore_archive(narrowed, Path(built["archive_path"]), dry_run=True)
+    # Refused either by the scope guard or by chain verification once the waiver is
+    # correctly withheld - both are the required outcome, and the corpus is named.
+    assert "polymarket_training/historical_bid_ask_v1.csv" in str(refused.value)
+
+    # Under the registered config the same archive restores, unchanged.
+    assert verify_and_restore_archive(cfg, Path(built["archive_path"]), dry_run=True)["status"] == "ok"
+
+
 def test_wo127_malformed_exclusion_config_stamps_error_instead_of_raising(tmp_path: Path):
     # _base_payload runs BEFORE create_ledger_archive's try block, so a malformed
     # exclusion config raised out of the builder with no status written at all -

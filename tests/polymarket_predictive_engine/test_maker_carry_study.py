@@ -55,7 +55,9 @@ def _config(tmp_path: Path):
         "min_daily_payout_usd": 1.0,
         "gate_min_runs_at_target": 7,
         # WO-113 depth/stickiness gate off by default here; the dedicated
-        # WO-113 tests set live thresholds and stage a book archive.
+        # WO-113 tests set live thresholds and stage a book archive. WO-125:
+        # turning it off must be NAMED - zeroed thresholds no longer disable it.
+        "maker_depth_gate_enabled": False,
         "maker_min_book_history_hours": 0,
         "maker_min_book_snapshots": 0,
         "maker_switch_margin_frac": 0.25,
@@ -1504,7 +1506,7 @@ def test_wo113_measurement_eligible_gate():
     assert _measurement_eligible({"book_history_hours": 120.0, "book_snapshot_count": 300}, settings) is True
     assert _measurement_eligible({"book_history_hours": 5.0, "book_snapshot_count": 18}, settings) is False
     assert _measurement_eligible({}, settings) is False  # missing depth fails closed
-    disabled = _wo113_settings(maker_min_book_history_hours=0, maker_min_book_snapshots=0)
+    disabled = _wo113_settings(maker_depth_gate_enabled=False)
     assert _measurement_eligible({}, disabled) is True  # both thresholds zero -> gate off
 
 
@@ -1536,7 +1538,7 @@ def test_wo113_fresh_market_excluded_even_when_carry_is_highest():
 
 
 def test_wo113_stickiness_retains_incumbent_within_margin():
-    settings = _wo113_settings(maker_min_book_history_hours=0, maker_min_book_snapshots=0)  # isolate stickiness
+    settings = _wo113_settings(maker_depth_gate_enabled=False)  # isolate stickiness
     incumbent = _wo113_candidate("0xinc", carry=1.0, hours=0.0, snaps=0, capital_usd=300.0)
     challenger = _wo113_candidate("0xchal", carry=1.1, hours=0.0, snaps=0, capital_usd=300.0)  # +10% < 25%
     portfolio, _capital, _net = _size_portfolio(
@@ -1546,7 +1548,7 @@ def test_wo113_stickiness_retains_incumbent_within_margin():
 
 
 def test_wo113_stickiness_switches_when_challenger_clears_margin():
-    settings = _wo113_settings(maker_min_book_history_hours=0, maker_min_book_snapshots=0)
+    settings = _wo113_settings(maker_depth_gate_enabled=False)
     incumbent = _wo113_candidate("0xinc", carry=1.0, hours=0.0, snaps=0, capital_usd=300.0)
     challenger = _wo113_candidate("0xchal", carry=1.3, hours=0.0, snaps=0, capital_usd=300.0)  # +30% > 25%
     portfolio, _capital, _net = _size_portfolio(
@@ -1556,10 +1558,133 @@ def test_wo113_stickiness_switches_when_challenger_clears_margin():
 
 
 def test_wo113_stickiness_bonus_drops_after_max_hold():
-    settings = _wo113_settings(maker_min_book_history_hours=0, maker_min_book_snapshots=0, maker_max_hold_days=30)
+    settings = _wo113_settings(maker_depth_gate_enabled=False, maker_max_hold_days=30)
     incumbent = _wo113_candidate("0xinc", carry=1.0, hours=0.0, snaps=0, capital_usd=300.0)
     challenger = _wo113_candidate("0xchal", carry=1.1, hours=0.0, snaps=0, capital_usd=300.0)
     portfolio, _capital, _net = _size_portfolio(
         settings, [incumbent, challenger], 500.0, incumbents={"0xinc"}, incumbent_hold_days={"0xinc": 30}
     )
     assert [entry["condition_id"] for entry in portfolio] == ["0xchal"]  # held >= max -> bonus dropped
+
+
+# --- WO-125 (RT-3): registered maker thresholds are tighten-only in fact ---
+
+
+def _clamped(tmp_path: Path, **over: Any) -> dict[str, Any]:
+    from polymarket_predictive_engine.maker_carry_study import _settings
+
+    raw = yaml.safe_load(
+        Path("polymarket_predictive_config.example.yaml").read_text(encoding="utf-8")
+    )
+    raw["paths"]["output_root"] = str(tmp_path / "outputs")
+    raw.setdefault("maker_carry_study", {}).update(over)
+    path = tmp_path / "clamp-config.yaml"
+    path.write_text(yaml.safe_dump(raw), encoding="utf-8")
+    return _settings(load_config(path))
+
+
+def test_wo125_config_cannot_loosen_a_registered_maker_threshold(tmp_path: Path) -> None:
+    # RT-3, confirmed by execution: the M-B.1 Tier-0 siblings have been clamped
+    # tighten-only since WO-104, but these registered M-A / M-C / WO-113
+    # thresholds were applied straight from config with no clamp - the
+    # "Tighten-only knobs" comment was aspirational. A config edit could drop
+    # M-A from 7 days to 3, or the daily target from $3.33 to $0.50.
+    loosened = _clamped(
+        tmp_path,
+        gate_min_runs_at_target=3,
+        target_net_usd_per_day=0.5,
+        min_daily_payout_usd=0.0,
+        maker_min_book_history_hours=1.0,
+        maker_min_book_snapshots=5,
+        max_trusted_reward_share=0.9,
+        max_size_multiple=50,
+    )
+
+    assert loosened["gate_min_runs_at_target"] == 7
+    assert loosened["target_net_usd_per_day"] == 3.33
+    assert loosened["min_daily_payout_usd"] == 1.0
+    assert loosened["maker_min_book_history_hours"] == 48.0
+    assert loosened["maker_min_book_snapshots"] == 100
+    assert loosened["max_trusted_reward_share"] == 0.05
+    assert loosened["max_size_multiple"] == 5
+
+
+def test_wo125_config_may_still_tighten_and_keeps_types(tmp_path: Path) -> None:
+    tightened = _clamped(
+        tmp_path,
+        gate_min_runs_at_target=14,
+        target_net_usd_per_day=10.0,
+        min_daily_payout_usd=2.5,
+        maker_min_book_history_hours=72.0,
+        maker_min_book_snapshots=500,
+        max_trusted_reward_share=0.01,
+        max_size_multiple=2,
+    )
+
+    assert tightened["gate_min_runs_at_target"] == 14
+    assert tightened["target_net_usd_per_day"] == 10.0
+    assert tightened["min_daily_payout_usd"] == 2.5
+    assert tightened["maker_min_book_history_hours"] == 72.0
+    assert tightened["maker_min_book_snapshots"] == 500
+    assert tightened["max_trusted_reward_share"] == 0.01
+    assert tightened["max_size_multiple"] == 2
+    # Consumers index and compare these as ints.
+    assert isinstance(tightened["gate_min_runs_at_target"], int)
+    assert isinstance(tightened["maker_min_book_snapshots"], int)
+    assert isinstance(tightened["max_size_multiple"], int)
+
+
+def test_wo125_garbage_override_falls_back_to_the_registered_value(tmp_path: Path) -> None:
+    garbage = _clamped(
+        tmp_path,
+        gate_min_runs_at_target="soon",
+        target_net_usd_per_day=float("nan"),
+        maker_min_book_snapshots=-10,
+    )
+
+    assert garbage["gate_min_runs_at_target"] == 7
+    assert garbage["target_net_usd_per_day"] == 3.33
+    assert garbage["maker_min_book_snapshots"] == 100
+
+
+def test_wo125_depth_gate_can_only_be_disabled_by_naming_it(tmp_path: Path) -> None:
+    from polymarket_predictive_engine.maker_carry_study import _measurement_eligible
+
+    shallow = {"condition_id": "0xa", "book_history_hours": 1.0, "book_snapshot_count": 3}
+
+    # Zeroing both thresholds used to read as "gate disabled". It no longer does:
+    # the clamps restore the registered floors and the shallow market is refused.
+    zeroed = _clamped(tmp_path, maker_min_book_history_hours=0, maker_min_book_snapshots=0)
+    assert zeroed["maker_depth_gate_enabled"] is True
+    assert zeroed["maker_min_book_history_hours"] == 48.0
+    assert zeroed["maker_min_book_snapshots"] == 100
+    assert _measurement_eligible(shallow, zeroed) is False
+
+    # Turning it off is still possible, but it has to be said out loud - and the
+    # reported settings then show the gate off instead of a floor nothing applies.
+    named = _clamped(
+        tmp_path,
+        maker_depth_gate_enabled=False,
+        maker_min_book_history_hours=0,
+        maker_min_book_snapshots=0,
+    )
+    assert named["maker_depth_gate_enabled"] is False
+    assert _measurement_eligible(shallow, named) is True
+
+    # A deep market passes either way.
+    deep = {"condition_id": "0xb", "book_history_hours": 60.0, "book_snapshot_count": 200}
+    assert _measurement_eligible(deep, zeroed) is True
+
+
+def test_wo125_deployed_config_does_not_disable_the_depth_gate() -> None:
+    raw = yaml.safe_load(
+        Path("polymarket_predictive_config.example.yaml").read_text(encoding="utf-8")
+    )
+    study = raw.get("maker_carry_study") or {}
+
+    assert study.get("maker_depth_gate_enabled", True) is True
+    # And the deployed values may not sit below the registered floors.
+    assert float(study.get("maker_min_book_history_hours", 48.0)) >= 48.0
+    assert int(study.get("maker_min_book_snapshots", 100)) >= 100
+    assert int(study.get("gate_min_runs_at_target", 7)) >= 7
+    assert float(study.get("target_net_usd_per_day", 3.33)) >= 3.33

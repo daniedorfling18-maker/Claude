@@ -156,12 +156,91 @@ MAKER_POLICY_DEFAULTS: dict[str, Any] = {
     # actually accumulate M-B markout evidence. Tighten-only knobs.
     "maker_min_book_history_hours": 48.0,
     "maker_min_book_snapshots": 100,
+    # WO-125 (RT-3): disabling the depth gate must be NAMED, not inferred from
+    # two zeroed thresholds. Default on; only an explicit false turns it off, and
+    # the reported settings then say so.
+    "maker_depth_gate_enabled": True,
     "maker_switch_margin_frac": 0.25,
     "maker_max_hold_days": 30,
     "share_model_c": 3.0,
     "share_model_mid_band_min": 0.10,
     "share_model_mid_band_max": 0.90,
 }
+
+# WO-125 (RT-3, 2026-07-27): the M-B.1 Tier-0 siblings have been clamped
+# tighten-only since WO-104 (`_mb_tighter_min`/`_mb_tighter_max`), but the
+# registered M-A / M-C / WO-113 thresholds above were applied straight from
+# config with no clamp at all - the "Tighten-only knobs" comment was aspirational.
+# A config edit could set gate_min_runs_at_target to 3, target_net_usd_per_day to
+# 0.5, or zero BOTH depth thresholds (which the depth check explicitly reads as
+# "gate disabled"), loosening a registered gate without an amendment or a merge.
+# These clamps make the comment true: an override may only make each threshold
+# harder to satisfy, and an invalid value falls back to the registered default.
+#
+# Deliberately NOT clamped, with reasons:
+#   capital_cap_usd        - a real capital-deployment decision, not an evidence
+#                            threshold; raising it does not fake carry, and
+#                            clamping it would block a legitimate owner funding
+#                            change. The M-C floor and the funding gate are
+#                            enforced separately.
+#   maker_max_hold_days    - direction is genuinely ambiguous (longer holds aid
+#                            measurement continuity, shorter holds cut stale
+#                            exposure), so a one-sided clamp would be arbitrary.
+#   share_model_*          - model shape, not a pass/fail threshold.
+MAKER_TIGHTEN_ONLY_MINIMUMS: dict[str, float] = {
+    # M-A: distinct UTC days at target. More days is stricter.
+    "gate_min_runs_at_target": 7,
+    # M-A: the daily net the portfolio must reach. A higher bar is stricter.
+    "target_net_usd_per_day": 3.33,
+    # M-C: payout floor by construction. A higher floor is stricter.
+    "min_daily_payout_usd": 1.0,
+    # WO-113 measurability: deeper book history before a market may be the
+    # MEASURED pick is stricter (and zero would disable the gate entirely).
+    "maker_min_book_history_hours": 48.0,
+    "maker_min_book_snapshots": 100,
+}
+MAKER_TIGHTEN_ONLY_MAXIMUMS: dict[str, float] = {
+    # Above this raw share the band is nearly empty of resting competition and
+    # the estimate is untrusted. A lower ceiling trusts less, so it is stricter.
+    "max_trusted_reward_share": 0.05,
+    # Past this multiple of rewards_min_size the full-size-fill pick-off model
+    # stops being conservative. A lower multiple is stricter.
+    "max_size_multiple": 5,
+}
+
+
+MAKER_DEPTH_GATE_KEYS = ("maker_min_book_history_hours", "maker_min_book_snapshots")
+
+
+def _depth_gate_enabled(settings: dict[str, Any]) -> bool:
+    """The WO-113 depth gate is on unless it is explicitly turned off."""
+
+    value = settings.get("maker_depth_gate_enabled", True)
+    return str(value).strip().lower() not in {"0", "false", "no", "off", "disabled"}
+
+
+def _apply_tighten_only_clamps(merged: dict[str, Any]) -> dict[str, Any]:
+    """Clamp registered maker thresholds so config can only tighten them."""
+
+    depth_gate_on = _depth_gate_enabled(merged)
+    for key, registered in MAKER_TIGHTEN_ONLY_MINIMUMS.items():
+        if key in MAKER_DEPTH_GATE_KEYS and not depth_gate_on:
+            # The gate is off by an explicit, visible decision; leave the
+            # configured numbers alone rather than reporting a floor that is
+            # not being applied.
+            continue
+        value = _mb_finite(merged.get(key))
+        merged[key] = registered if value is None or value < 0 else max(registered, value)
+    for key, registered in MAKER_TIGHTEN_ONLY_MAXIMUMS.items():
+        value = _mb_finite(merged.get(key))
+        merged[key] = registered if value is None or value < 0 else min(registered, value)
+    # Integer-valued registrations must stay integers for their consumers.
+    for key in ("gate_min_runs_at_target", "maker_min_book_snapshots", "max_size_multiple"):
+        value = _mb_finite(merged.get(key))
+        merged[key] = int(value) if value is not None else int(MAKER_POLICY_DEFAULTS[key])
+    merged["maker_depth_gate_enabled"] = depth_gate_on
+    return merged
+
 
 MAKER_GATE_REGISTRATION: list[dict[str, Any]] = [
     {
@@ -444,7 +523,9 @@ def _settings(cfg: EngineConfig) -> dict[str, Any]:
     # IPS and the enforced study cannot drift apart.
     merged.update(MAKER_POLICY_DEFAULTS)
     merged.update({k: v for k, v in raw.items() if v is not None})
-    return merged
+    # WO-125 (RT-3): registered gate thresholds are tighten-only, enforced here
+    # rather than trusted to the config author.
+    return _apply_tighten_only_clamps(merged)
 
 
 def maker_policy_settings(cfg: EngineConfig) -> dict[str, Any]:
@@ -1512,10 +1593,16 @@ def _measurement_eligible(row: dict[str, Any], settings: dict[str, Any]) -> bool
     """WO-113: a candidate may only be the MEASURED portfolio pick once its
     official-book archive is deep enough to bracket a markout. Both thresholds
     are tighten-only (raising either can only shrink the eligible set)."""
+    # WO-125 (RT-3): the gate used to be considered disabled whenever BOTH
+    # thresholds were zero, so a config edit could silently switch off a
+    # registered measurability gate. Disabling it now requires naming
+    # maker_depth_gate_enabled: false, and with the gate on the thresholds are
+    # clamped tighten-only, so zeroing them no longer disables anything.
+    if not _depth_gate_enabled(settings):
+        return True
     min_hours = float(settings.get("maker_min_book_history_hours", 0.0) or 0.0)
     min_snaps = int(settings.get("maker_min_book_snapshots", 0) or 0)
     if min_hours <= 0.0 and min_snaps <= 0:
-        # Depth gate disabled (both thresholds zero) -> no depth requirement.
         return True
     hours = safe_float(row.get("book_history_hours"))
     snaps = safe_float(row.get("book_snapshot_count"))

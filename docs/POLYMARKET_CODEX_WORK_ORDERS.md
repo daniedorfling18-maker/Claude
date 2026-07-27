@@ -5622,3 +5622,43 @@ token source for NBA champion markets and spends paid odds-API and public-search
 calls), or accept the sharp/taker lane as dormant until a mappable season starts.
 The taker verdict lane is already CLOSED and the campaign is maker-first, so
 nothing is blocked by leaving it dormant.
+
+## WO-125 — Registered maker thresholds are tighten-only in fact, not only in comment — `done` (2026-07-27, PR #363, owner merge; registered M-A/M-C/WO-113 surface)
+
+Red-team RT-3, confirmed by execution. The M-B.1 Tier-0 siblings have been
+clamped tighten-only since WO-104 (`_mb_tighter_min`/`_mb_tighter_max`), but the
+registered M-A / M-C / WO-113 thresholds were applied straight from config with
+no clamp — `merged.update({k: v for k, v in raw.items() ...})` and nothing else.
+The "Tighten-only knobs" comment above them was aspirational: a config edit could
+drop M-A from 7 distinct days to 3, the daily target from $3.33 to $0.50, or the
+M-C payout floor to zero, with no amendment and no merge.
+- `MAKER_TIGHTEN_ONLY_MINIMUMS` (may only grow): `gate_min_runs_at_target` 7,
+  `target_net_usd_per_day` 3.33, `min_daily_payout_usd` 1.0,
+  `maker_min_book_history_hours` 48.0, `maker_min_book_snapshots` 100.
+  `MAKER_TIGHTEN_ONLY_MAXIMUMS` (may only shrink): `max_trusted_reward_share`
+  0.05, `max_size_multiple` 5. An invalid, negative or non-finite override falls
+  back to the registered default; integer registrations stay integers.
+- The depth gate used to be considered disabled whenever BOTH depth thresholds
+  were zero, so a config edit could silently switch off a registered
+  measurability gate. Disabling it now requires naming
+  `maker_depth_gate_enabled: false`, and the reported settings then say the gate
+  is off instead of publishing a floor nothing applies. With the gate on, zeroing
+  the thresholds no longer disables anything — the clamps restore the floors.
+  The study test suite's fixtures were updated to name the flag rather than
+  zeroing two numbers, which is also what they always meant.
+- Deliberately NOT clamped, recorded with reasons: `capital_cap_usd` (a real
+  capital-deployment decision, not an evidence threshold — raising it does not
+  fake carry, and clamping it would block a legitimate owner funding change,
+  while the M-C floor and the funding gate are enforced separately);
+  `maker_max_hold_days` (direction genuinely ambiguous — longer holds aid
+  measurement continuity, shorter holds cut stale exposure, so a one-sided clamp
+  would be arbitrary); `share_model_*` (model shape, not a pass/fail threshold).
+- Also closes the last red-team-unreached item: `_book_history_depth`
+  rows-vs-cycles semantics. Hypothesis was a possible ~2x inflation against the
+  100-snapshot floor. REFUTED by reading the writer: `snapshot_official_books`
+  appends ONE row per market per cycle, deduplicated on
+  `(observation_timestamp, hash)`, so `len(stamps)` is a count of distinct venue
+  observations — conservative rather than inflated (two polls returning the same
+  observation collapse to one). Retention is no factor either:
+  `max_official_book_rows` is 200000, about 5.7 years at the 15-minute cadence,
+  against a 48h/100-snapshot floor.

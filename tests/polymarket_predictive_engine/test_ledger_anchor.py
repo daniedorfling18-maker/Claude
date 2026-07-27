@@ -272,16 +272,32 @@ def test_wo115_blocked_chain_anchor_run_exits_nonzero(tmp_path: Path):
     assert head_path.read_bytes() == head_before
 
 
-def _write_provenance(cfg, *, prefixes, boundary):
+def _chain_head_at(cfg, anchor_date: str) -> str:
+    """The chain_head recorded for one anchor date, as a restore marker records it."""
+    from polymarket_predictive_engine.utils import read_csv_rows
+
+    for row in read_csv_rows(cfg.output_root / "performance" / "ledger_anchor_chain.csv"):
+        if str(row.get("anchor_date") or "") == anchor_date:
+            return str(row.get("chain_head") or "")
+    return ""
+
+
+def _write_provenance(cfg, *, prefixes, boundary, chain_head=None):
     from polymarket_predictive_engine.ledger_anchor import RESTORE_PROVENANCE_FILE
     from polymarket_predictive_engine.utils import write_json
 
+    # WO-127 (Codex #364 P1): a marker is only honoured when its boundary names a
+    # real link in this chain, so a genuine marker always carries the head it was
+    # restored from. Default to the honest pairing; tests that need a broken
+    # pairing pass chain_head explicitly.
+    head = _chain_head_at(cfg, boundary) if chain_head is None else chain_head
     write_json(
         cfg.output_root / "performance" / "ledger_restore_provenance.json",
         {
             "work_order": "WO-127",
             "restore_boundary_date": boundary,
             "excluded_path_prefixes": list(prefixes),
+            "restored_from_chain_head": head,
         },
     )
     assert RESTORE_PROVENANCE_FILE == "performance/ledger_restore_provenance.json"
@@ -470,6 +486,62 @@ def test_wo127_noncanonical_boundary_cannot_excuse_a_post_boundary_row(tmp_path:
     assert result["first_broken_date"] == "2026-07-12"
     assert result["restored_unverifiable_tolerated"] == 0
     assert "not a canonical YYYY-MM-DD" in (result["restore_provenance_rejected"] or "")
+
+
+def test_wo127_boundary_must_name_a_real_link_in_this_chain(tmp_path: Path):
+    # Codex review of #364 (P1): bounding the boundary by the wall clock alone let a
+    # hand-edited marker move it from the true restore point to any past date, so
+    # registered-prefix rows anchored AFTER the restore - whose digests describe
+    # bytes that are present - stopped being byte-verified. The waiver widened from
+    # "up to the restore" to "up to now". The boundary is now bound to the chain
+    # head the marker records, so editing either field alone breaks the pairing.
+    cfg = _config(
+        tmp_path,
+        [{"glob": "polymarket_training/historical_bid_ask_v1.csv", "mode": "append_only"}],
+    )
+    corpus = cfg.output_root / "polymarket_training" / "historical_bid_ask_v1.csv"
+    corpus.parent.mkdir(parents=True)
+    corpus.write_bytes(b"ts,bid,ask\n1784000000,0.41,0.59\n")
+    assert anchor_ledgers(cfg, anchor_date="2026-07-11")["status"] == "ok"
+    # A post-restore day, re-harvested and anchored against present bytes.
+    corpus.write_bytes(b"ts,bid,ask\n1784000000,0.41,0.59\n1784000900,0.42,0.58\n")
+    assert anchor_ledgers(cfg, anchor_date="2026-07-12")["status"] == "ok"
+
+    # The honest marker: boundary 2026-07-11 paired with that day's head.
+    _write_provenance(cfg, prefixes=["polymarket_training/"], boundary="2026-07-11")
+    assert verify_ledger_chain(cfg, write_summary=False)["status"] == "ok"
+
+    # Tamper with the post-boundary bytes. That row is not covered by the waiver.
+    corpus.write_bytes(b"ts,bid,ask\n9999999999,0.01,0.99\n1784000900,0.42,0.58\n")
+    assert verify_ledger_chain(cfg, write_summary=False)["status"] == "broken"
+
+    # The attack: move the boundary forward to cover the tampered row, keeping the
+    # old head. Past, canonical, not future - and now refused on the pairing.
+    _write_provenance(
+        cfg,
+        prefixes=["polymarket_training/"],
+        boundary="2026-07-12",
+        chain_head=_chain_head_at(cfg, "2026-07-11"),
+    )
+    forged = verify_ledger_chain(cfg, write_summary=False)
+    assert forged["status"] == "broken"
+    assert forged["restore_boundary_date"] is None
+    assert forged["restore_tolerated_prefixes"] == []
+    assert "does not match the anchor date" in (forged["restore_provenance_rejected"] or "")
+
+    # The mirror attack: keep the boundary, forge the head. Also refused.
+    _write_provenance(
+        cfg, prefixes=["polymarket_training/"], boundary="2026-07-11", chain_head="f" * 64
+    )
+    unknown_head = verify_ledger_chain(cfg, write_summary=False)
+    assert unknown_head["status"] == "broken"
+    assert "is not a link in this chain" in (unknown_head["restore_provenance_rejected"] or "")
+
+    # A marker with no head at all cannot be bound, so it excuses nothing.
+    _write_provenance(cfg, prefixes=["polymarket_training/"], boundary="2026-07-11", chain_head="")
+    headless = verify_ledger_chain(cfg, write_summary=False)
+    assert headless["status"] == "broken"
+    assert "no restored_from_chain_head" in (headless["restore_provenance_rejected"] or "")
 
 
 def test_wo127_unreadable_restore_marker_is_reported_not_read_as_absent(tmp_path: Path):

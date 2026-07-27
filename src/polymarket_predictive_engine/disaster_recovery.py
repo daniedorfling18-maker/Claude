@@ -675,15 +675,23 @@ def _write_restore_provenance(
     # and a non-canonical spelling sorts wrongly (#364 P1). A side that does not
     # parse loses to one that does, and if neither parses no marker is written -
     # so verification refuses rather than honouring an unreadable boundary.
+    # The boundary and the chain head it names travel as a PAIR. Verification binds
+    # them (a boundary must be the anchor date of the row carrying that head), so
+    # keeping the inherited boundary while recording this archive's head would
+    # produce a marker that refuses itself.
+    inherited_head = str(inherited.get("restored_from_chain_head") or "").strip()
     candidates = [
-        (canonical_date(text), text) for text in (new_boundary, inherited_boundary) if text
+        (canonical_date(text), text, head)
+        for text, head in ((new_boundary, str(chain_head or "")), (inherited_boundary, inherited_head))
+        if text
     ]
     parsed = sorted(
-        ((day, text) for day, text in candidates if day is not None), key=lambda item: item[0]
+        ((day, text, head) for day, text, head in candidates if day is not None),
+        key=lambda item: item[0],
     )
-    effective_boundary = parsed[-1][1] if parsed else ""
-    if not prefixes or not effective_boundary:
+    if not prefixes or not parsed:
         return None
+    _, effective_boundary, effective_head = parsed[-1]
     write_json(
         path,
         {
@@ -691,8 +699,9 @@ def _write_restore_provenance(
             "generated_at_utc": now_utc(),
             "restore_boundary_date": effective_boundary,
             "excluded_path_prefixes": sorted(prefixes),
-            "restored_from_chain_head": chain_head,
+            "restored_from_chain_head": effective_head,
             "inherited_restore_boundary_date": inherited_boundary or None,
+            "archive_snapshot_date": new_boundary or None,
             "dry_run": bool(dry_run),
             "reason": (
                 "these registered prefixes are excluded from the recovery archive and are "
@@ -825,7 +834,14 @@ def verify_and_restore_archive(
                 # A restore that cannot bring these paths back is a successful
                 # restore of the evidence ledgers, not a complete tree.
                 "restored_without_prefixes": list(tolerated),
-                "restore_boundary_date": snapshot_date,
+                # Codex review of #364 (P2): report the boundary actually HONOURED,
+                # not this archive's snapshot date. On a restored host whose
+                # exclusions were narrowed, the installed marker deliberately keeps
+                # the older inherited boundary, and reporting the snapshot date here
+                # contradicted both the marker and the chain verification - handing
+                # the operator the wrong scope for the waiver.
+                "restore_boundary_date": chain.get("restore_boundary_date"),
+                "restore_provenance_rejected": chain.get("restore_provenance_rejected"),
                 "file_count": len(manifest.get("files") or []),
                 "archive_sha256": hashlib.sha256(Path(archive_path).read_bytes()).hexdigest(),
                 "restore_applied": not dry_run,

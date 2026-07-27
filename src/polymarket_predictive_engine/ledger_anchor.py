@@ -110,6 +110,7 @@ class _RestoreProvenance(NamedTuple):
     boundary_date: date | None
     boundary_text: str
     rejected_reason: str
+    chain_head: str = ""
 
 
 _NO_RESTORE_PROVENANCE = _RestoreProvenance((), None, "", "")
@@ -248,7 +249,53 @@ def _restore_provenance(cfg: EngineConfig) -> _RestoreProvenance:
                 "the marker is refused and every anchored path is verified"
             ),
         )
-    return _RestoreProvenance(tolerated, boundary_date, raw_boundary, "")
+    return _RestoreProvenance(
+        tolerated,
+        boundary_date,
+        raw_boundary,
+        "",
+        str(payload.get("restored_from_chain_head") or "").strip(),
+    )
+
+
+def _boundary_bound_to_chain(
+    provenance: _RestoreProvenance, heads_by_date: dict[str, str]
+) -> str:
+    """Reject a boundary that does not name a real link in THIS chain.
+
+    Codex review of #364 (P1). Bounding the boundary by the wall clock alone was
+    not enough: a hand-edited marker could move it from the true restore point to
+    any date up to today, and every registered-prefix row in that window - rows
+    anchored AFTER the restore, whose digests describe bytes that are present -
+    would stop being byte-verified. The waiver would widen from "up to the
+    restore" to "up to now".
+
+    The marker already records the chain head it was restored from, so bind the
+    two: the boundary must be the anchor_date of the row whose chain_head is that
+    head. Editing either field alone now breaks the pairing, and editing both
+    consistently is not possible without producing a head that hashes the
+    manifest chain - which is the property WO-61 exists to provide.
+    """
+
+    if not provenance.chain_head:
+        return (
+            "restore provenance records no restored_from_chain_head, so its boundary cannot be "
+            "bound to a link in this chain; the marker is refused and every anchored path is "
+            "verified"
+        )
+    anchored_at = heads_by_date.get(provenance.chain_head)
+    if anchored_at is None:
+        return (
+            f"restore provenance names chain head {provenance.chain_head[:12]}... which is not a "
+            "link in this chain; the marker is refused and every anchored path is verified"
+        )
+    if anchored_at != provenance.boundary_text:
+        return (
+            f"restore_boundary_date {provenance.boundary_text} does not match the anchor date "
+            f"{anchored_at} of the recorded restored_from_chain_head; the marker is refused and "
+            "every anchored path is verified"
+        )
+    return ""
 
 
 def _output_path_relative(cfg: EngineConfig, relative: str) -> Path:
@@ -473,18 +520,30 @@ def verify_ledger_chain(
 
     settings = _settings(cfg)
     provenance = _restore_provenance(cfg)
-    tolerated = provenance.tolerated_prefixes
-    boundary_day = provenance.boundary_date
-    provenance_rejected = provenance.rejected_reason
     chain_path = _output_path(cfg, settings["chain_file"])
     verification_path = _output_path(cfg, settings["verification_file"])
     result = _verification_base(chain_path=chain_path, as_of_date=as_of_date)
-    result["restore_boundary_date"] = provenance.boundary_text or None
+    rows = read_csv_rows(chain_path)
+    provenance_rejected = provenance.rejected_reason
+    if provenance.boundary_date is not None and not provenance_rejected:
+        # The boundary must name a real link in THIS chain, not merely a past
+        # date. See _boundary_bound_to_chain.
+        provenance_rejected = _boundary_bound_to_chain(
+            provenance,
+            {
+                str(row.get("chain_head") or ""): str(row.get("anchor_date") or "")
+                for row in rows
+                if str(row.get("chain_head") or "")
+            },
+        )
+    honoured = provenance.boundary_date is not None and not provenance_rejected
+    tolerated = provenance.tolerated_prefixes if honoured else ()
+    boundary_day = provenance.boundary_date if honoured else None
+    result["restore_boundary_date"] = (provenance.boundary_text or None) if honoured else None
     result["restore_tolerated_prefixes"] = list(tolerated)
     # A refused marker is reported, never silently dropped: otherwise the
     # operator sees a broken chain with no hint that their marker was ignored.
     result["restore_provenance_rejected"] = provenance_rejected or None
-    rows = read_csv_rows(chain_path)
     expected_previous = GENESIS_HEAD
     previous_date = ""
     for row in rows:

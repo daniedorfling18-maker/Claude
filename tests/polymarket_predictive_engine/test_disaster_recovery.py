@@ -743,6 +743,15 @@ def test_wo127_narrowing_exclusions_on_a_restored_host_still_builds(tmp_path: Pa
     assert applied["status"] == "ok"
     carried = read_json(second_root / "performance" / "ledger_restore_provenance.json")
     assert carried["restore_boundary_date"] == inherited_boundary
+    # Codex review of #364 (P2): the report must name the boundary actually
+    # honoured, not this archive's snapshot date, or the operator is told the wrong
+    # waiver scope. The archive's own snapshot date is 2026-07-12 here.
+    assert applied["restore_boundary_date"] == inherited_boundary
+    assert applied["restore_boundary_date"] != rebuilt["snapshot_date"]
+    assert applied["restore_provenance_rejected"] is None
+    # The boundary and the head it names travel as a pair, so the inherited
+    # boundary keeps the inherited head - otherwise the marker would refuse itself.
+    assert carried["restored_from_chain_head"] == read_json(marker)["restored_from_chain_head"]
     assert verify_ledger_chain(
         _restored_config(cfg, second_root), write_summary=False
     )["status"] == "ok"

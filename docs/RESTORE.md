@@ -91,11 +91,17 @@ For a restored tree, therefore:
   carries is byte-verified normally from the boundary forward. An archive that
   drops the corpus again extends the boundary to its own snapshot date; one that
   carries it does not.
+- The boundary is **bound to the chain**, not merely to the calendar. A marker
+  records the chain head it was restored from, and the boundary must be the anchor
+  date of the row carrying that head. Moving the boundary forward to cover later
+  rows, or forging the head, breaks the pairing and refuses the marker — so the
+  waiver can only ever cover the real restore point.
 - The marker is **refused** — and the reason reported in
   `restore_provenance_rejected` — when it names no registered prefix, is
-  unreadable or not a JSON object, or carries a boundary that is not a canonical
-  `YYYY-MM-DD` date or is in the future. A refused marker excuses nothing: every
-  anchored path is verified.
+  unreadable or not a JSON object, carries a boundary that is not a canonical
+  `YYYY-MM-DD` date or is in the future, or carries a boundary that does not match
+  the anchor date of its recorded chain head. A refused marker excuses nothing:
+  every anchored path is verified.
 
 Operator reading: on a restored tree, `status: ok` means *the chain verified
 except for `restored_unverifiable_tolerated` boundary-scoped entries under the

@@ -10,6 +10,7 @@ sizing rule, policy, broker, or order path reads its outputs.
 from __future__ import annotations
 
 import csv
+from datetime import datetime
 import hashlib
 import json
 import os
@@ -102,8 +103,8 @@ ARCHIVE_EXCLUDED_PREFIXES: tuple[str, ...] = ("polymarket_training/",)
 RESTORE_PROVENANCE_FILE = "performance/ledger_restore_provenance.json"
 
 
-def _restore_provenance(cfg: EngineConfig) -> tuple[tuple[str, ...], str]:
-    """Return (tolerated prefixes, restore boundary date) for this output tree.
+def _restore_provenance(cfg: EngineConfig) -> tuple[tuple[str, ...], str, str]:
+    """Return (tolerated prefixes, restore boundary date, rejection reason).
 
     WO-127. An applied restore records which registered prefixes it could not
     restore and the snapshot date it restored to. Verification honours that
@@ -111,23 +112,52 @@ def _restore_provenance(cfg: EngineConfig) -> tuple[tuple[str, ...], str]:
     construction, instead of the restore check opting in and the anchor lane —
     the one that actually freezes the head — not knowing.
 
-    Trust bound: the marker can only excuse prefixes that are in the REGISTERED
-    set above, so a forged or edited marker cannot excuse anything beyond the two
-    owner-approved re-harvestable corpora. Anything outside them still breaks the
-    chain on absence or on a digest change.
+    Trust bounds, all three necessary:
+
+    1. Only prefixes in the REGISTERED set above can be excused, so a forged or
+       edited marker cannot reach anything beyond the two owner-approved
+       re-harvestable corpora.
+    2. The boundary must be a STRICT calendar date, not merely ten characters.
+       Codex review of #364 (P1): a length check accepted `9999-99-99`, and
+       because the row comparison is lexical, that sorted every historical anchor
+       as pre-boundary — turning a scoped excuse into a blanket one and voiding
+       the post-boundary tamper check entirely.
+    3. The boundary may not be in the future. A restore cannot come from an
+       archive that does not exist yet, and a future date would excuse rows that
+       have not been written, which is the same blanket excuse by another route.
+
+    A marker that fails any of these is REJECTED, not silently ignored: the
+    reason is surfaced in the verification result so an operator sees why their
+    marker did not apply instead of reading an unexplained broken chain.
     """
 
     payload = read_json(_output_path_relative(cfg, RESTORE_PROVENANCE_FILE), default={}) or {}
-    if not isinstance(payload, dict):
-        return (), ""
+    if not isinstance(payload, dict) or not payload:
+        return (), "", ""
     declared = payload.get("excluded_path_prefixes")
     declared_set = {str(item) for item in declared} if isinstance(declared, (list, tuple)) else set()
     tolerated = tuple(prefix for prefix in ARCHIVE_EXCLUDED_PREFIXES if prefix in declared_set)
-    boundary = str(payload.get("restore_boundary_date") or "").strip()
-    if not tolerated or len(boundary) != 10:
-        # No usable provenance: verify everything, which is the safe default.
-        return (), ""
-    return tolerated, boundary
+    raw_boundary = str(payload.get("restore_boundary_date") or "").strip()
+    if not tolerated:
+        return (), "", (
+            "restore provenance declares no registered excluded prefix; nothing is excused"
+            if raw_boundary
+            else ""
+        )
+    try:
+        boundary_date = datetime.strptime(raw_boundary, "%Y-%m-%d").date()
+    except ValueError:
+        return (), "", (
+            f"restore_boundary_date {raw_boundary!r} is not a valid YYYY-MM-DD calendar date; "
+            "the marker is refused and every anchored path is verified"
+        )
+    today = datetime.strptime(now_utc()[:10], "%Y-%m-%d").date()
+    if boundary_date > today:
+        return (), "", (
+            f"restore_boundary_date {raw_boundary} is in the future (today is {today}); "
+            "the marker is refused and every anchored path is verified"
+        )
+    return tolerated, raw_boundary, ""
 
 
 def _output_path_relative(cfg: EngineConfig, relative: str) -> Path:
@@ -320,6 +350,7 @@ def _verification_base(*, chain_path: Path, as_of_date: str | None) -> dict[str,
         "restored_unverifiable_tolerated": 0,
         "restore_boundary_date": None,
         "restore_tolerated_prefixes": [],
+        "restore_provenance_rejected": None,
         "first_broken_date": None,
         "issues": [],
         "paper_trading_invoked": False,
@@ -350,12 +381,15 @@ def verify_ledger_chain(
     """
 
     settings = _settings(cfg)
-    tolerated, restore_boundary = _restore_provenance(cfg)
+    tolerated, restore_boundary, provenance_rejected = _restore_provenance(cfg)
     chain_path = _output_path(cfg, settings["chain_file"])
     verification_path = _output_path(cfg, settings["verification_file"])
     result = _verification_base(chain_path=chain_path, as_of_date=as_of_date)
     result["restore_boundary_date"] = restore_boundary or None
     result["restore_tolerated_prefixes"] = list(tolerated)
+    # A refused marker is reported, never silently dropped: otherwise the
+    # operator sees a broken chain with no hint that their marker was ignored.
+    result["restore_provenance_rejected"] = provenance_rejected or None
     rows = read_csv_rows(chain_path)
     expected_previous = GENESIS_HEAD
     previous_date = ""

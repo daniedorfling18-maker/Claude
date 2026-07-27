@@ -389,3 +389,47 @@ def test_deployed_config_covers_every_default_ledger_enrollment():
     effective = {str(e["glob"]): str(e["mode"]) for e in settings["ledger_globs"]}
     for entry in mod.DEFAULT_LEDGER_REGISTRY:
         assert effective.get(str(entry["glob"])) == str(entry["mode"]), entry
+
+
+def test_wo127_invalid_or_future_restore_boundary_is_refused(tmp_path: Path):
+    # Codex review of #364 (P1): the boundary was accepted on LENGTH alone, so
+    # "9999-99-99" passed and — because the row comparison is lexical — sorted
+    # every historical anchor as pre-boundary. That converted a boundary-scoped
+    # excuse into a blanket one and voided the post-boundary tamper check, which
+    # is the whole safety property of WO-127.
+    cfg = _config(
+        tmp_path,
+        [{"glob": "polymarket_training/historical_bid_ask_v1.csv", "mode": "append_only"}],
+    )
+    corpus = cfg.output_root / "polymarket_training" / "historical_bid_ask_v1.csv"
+    corpus.parent.mkdir(parents=True)
+    corpus.write_bytes(b"ts,bid,ask\n1784000000,0.41,0.59\n")
+    assert anchor_ledgers(cfg, anchor_date="2026-07-11")["status"] == "ok"
+    corpus.unlink()
+
+    # A valid past boundary excuses the pre-boundary entry.
+    _write_provenance(cfg, prefixes=["polymarket_training/"], boundary="2026-07-11")
+    assert verify_ledger_chain(cfg, write_summary=False)["status"] == "ok"
+
+    # A ten-character non-date must be refused, not honoured.
+    for bogus in ("9999-99-99", "2026-13-01", "2026-02-30", "not-a-date", "20260711"):
+        _write_provenance(cfg, prefixes=["polymarket_training/"], boundary=bogus)
+        refused = verify_ledger_chain(cfg, write_summary=False)
+        assert refused["status"] == "broken", bogus
+        assert refused["restore_tolerated_prefixes"] == [], bogus
+        assert refused["restore_boundary_date"] is None, bogus
+        # Refused, not silently dropped: the operator is told why.
+        assert "not a valid YYYY-MM-DD" in (refused["restore_provenance_rejected"] or ""), bogus
+
+    # A syntactically valid FUTURE boundary is the same blanket excuse by another
+    # route — rows that do not exist yet would be pre-boundary forever.
+    _write_provenance(cfg, prefixes=["polymarket_training/"], boundary="2099-01-01")
+    future = verify_ledger_chain(cfg, write_summary=False)
+    assert future["status"] == "broken"
+    assert "is in the future" in (future["restore_provenance_rejected"] or "")
+
+    # A marker naming no registered prefix says so rather than failing silently.
+    _write_provenance(cfg, prefixes=["audit/"], boundary="2026-07-11")
+    unregistered = verify_ledger_chain(cfg, write_summary=False)
+    assert unregistered["status"] == "broken"
+    assert "no registered excluded prefix" in (unregistered["restore_provenance_rejected"] or "")
